@@ -184,9 +184,9 @@ impl DebugTracker {
         }
     }
 
-    /// Emit debug stats to the frontend if enough time has passed (~250ms)
+    /// Emit debug stats to the frontend at ~60 Hz
     pub fn maybe_emit(&mut self, app_handle: &AppHandle) {
-        if self.last_emit.elapsed().as_millis() < 250 {
+        if self.last_emit.elapsed().as_millis() < 16 {
             return;
         }
 
