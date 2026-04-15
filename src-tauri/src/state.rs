@@ -4,12 +4,12 @@
 use std::sync::Mutex;
 
 use crate::msp::FcInfo;
-use crate::transport::serial::SerialConnection;
+use crate::scheduler::SchedulerHandle;
 
 /// Global application state managed by Tauri
 pub struct AppState {
-    /// Active serial connection (None when disconnected)
-    pub connection: Mutex<Option<SerialConnection>>,
+    /// Active scheduler handle (None when disconnected)
+    pub scheduler: Mutex<Option<SchedulerHandle>>,
     /// Flight controller info from last successful handshake
     pub fc_info: Mutex<Option<FcInfo>>,
 }
@@ -17,7 +17,7 @@ pub struct AppState {
 impl AppState {
     pub fn new() -> Self {
         Self {
-            connection: Mutex::new(None),
+            scheduler: Mutex::new(None),
             fc_info: Mutex::new(None),
         }
     }

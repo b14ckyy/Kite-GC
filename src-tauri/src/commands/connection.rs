@@ -1,12 +1,14 @@
 // Connection Commands — serial port listing, connect, disconnect
 
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::msp::{
     FcInfo, FeatureSet, InavVersion, MSP_API_VERSION, MSP_BOARD_INFO, MSP_FC_VARIANT,
-    MSP_FC_VERSION,
+    MSP_FC_VERSION, MSPV2_INAV_MIXER,
 };
 use crate::msp::features::is_version_supported;
+use crate::scheduler;
+use crate::scheduler::TelemetryConfig;
 use crate::state::AppState;
 use crate::transport::serial::SerialConnection;
 use crate::transport::PortInfo;
@@ -19,23 +21,28 @@ pub fn list_serial_ports() -> Vec<PortInfo> {
 
 /// Connect to a flight controller on the given serial port.
 /// Performs the MSP handshake (API_VERSION, FC_VARIANT, FC_VERSION, BOARD_INFO)
-/// and returns the FC info on success.
+/// and then starts the telemetry scheduler.
 #[tauri::command]
 pub async fn connect(
     port: String,
     baud_rate: u32,
+    attitude_rate_hz: Option<f64>,
+    position_rate_hz: Option<f64>,
+    airspeed_enabled: Option<bool>,
     state: State<'_, AppState>,
+    app_handle: AppHandle,
 ) -> Result<FcInfo, String> {
     // Check if already connected
     {
-        let conn = state.connection.lock().map_err(|e| e.to_string())?;
-        if conn.is_some() {
+        let sched = state.scheduler.lock().map_err(|e| e.to_string())?;
+        if sched.is_some() {
             return Err("Already connected. Disconnect first.".into());
         }
     }
 
     // Open serial port
     let mut serial = SerialConnection::open(&port, baud_rate)?;
+
 
     // ── MSP Handshake ──────────────────────────────────────────────
     let mut fc_info = FcInfo::default();
@@ -102,20 +109,43 @@ pub async fn connect(
     );
     fc_info.features = Some(feature_set);
 
+    // 5) MSP2_INAV_MIXER → platform type and mixer preset
+    match serial.msp_request(MSPV2_INAV_MIXER, &[]) {
+        Ok(resp) => {
+            if resp.payload.len() >= 7 {
+                fc_info.platform_type = resp.payload[3];
+                fc_info.mixer_preset =
+                    (resp.payload[5] as i16) | ((resp.payload[6] as i16) << 8);
+            }
+        }
+        Err(e) => {
+            log::warn!("Failed to query mixer config: {}", e);
+        }
+    }
+
     log::info!(
-        "Connected to {} {} v{} on {} (board: {}, API: {})",
+        "Connected to {} {} v{} on {} (board: {}, API: {}, platform: {})",
         fc_info.fc_variant,
         fc_info.fc_version,
         fc_info.api_version,
         port,
         fc_info.board_id,
-        fc_info.api_version
+        fc_info.api_version,
+        fc_info.platform_type,
     );
 
-    // Store connection and FC info
+    // ── Start telemetry scheduler ────────────────────────────────────────
+    let config = TelemetryConfig {
+        attitude_rate_hz: attitude_rate_hz.unwrap_or(5.0),
+        position_rate_hz: position_rate_hz.unwrap_or(2.0),
+        airspeed_enabled: airspeed_enabled.unwrap_or(false),
+    };
+    let handle = scheduler::start(serial, config, app_handle);
+
+    // Store scheduler handle and FC info
     {
-        let mut conn = state.connection.lock().map_err(|e| e.to_string())?;
-        *conn = Some(serial);
+        let mut sched = state.scheduler.lock().map_err(|e| e.to_string())?;
+        *sched = Some(handle);
     }
     {
         let mut info = state.fc_info.lock().map_err(|e| e.to_string())?;
@@ -128,13 +158,15 @@ pub async fn connect(
 /// Disconnect from the flight controller
 #[tauri::command]
 pub async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
-    let mut conn = state.connection.lock().map_err(|e| e.to_string())?;
-    if conn.is_none() {
+    let mut sched = state.scheduler.lock().map_err(|e| e.to_string())?;
+    if sched.is_none() {
         return Err("Not connected".into());
     }
 
-    // Take the connection out and drop it (closes the port)
-    let _ = conn.take();
+    // Stop the scheduler (sends Stop command, joins thread, drops serial)
+    if let Some(handle) = sched.take() {
+        let _serial = handle.stop(); // serial connection dropped here
+    }
 
     // Clear FC info
     let mut info = state.fc_info.lock().map_err(|e| e.to_string())?;

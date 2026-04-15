@@ -3,6 +3,8 @@
   import { connection, availablePorts } from "$lib/stores/connection";
   import type { FcInfo, PortInfo, FeatureSet } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
+  import type { AppSettings } from "$lib/stores/settings";
+  import { telemetry, startTelemetryListeners, stopTelemetryListeners, resetTelemetry } from "$lib/stores/telemetry";
   import { get } from "svelte/store";
   import Map from "$lib/components/Map.svelte";
 
@@ -13,6 +15,47 @@
   let errorMsg = $state("");
   let navPanelOpen = $state(false);
   let activeTab = $state("uav-info");
+
+  // Dev-only debug panel (tree-shaken in production builds)
+  const DEV_MODE = import.meta.env.DEV;
+  let debugOpen = $state(false);
+  let DebugPanelCmp: any = $state(null);
+  if (DEV_MODE) {
+    import('$lib/components/DebugPanel.svelte').then(m => { DebugPanelCmp = m.default; });
+  }
+
+  // Reactive telemetry subscription
+  let telem = $state(get(telemetry));
+  telemetry.subscribe((t) => { telem = t; });
+
+  // Settings state for the settings panel
+  let attitudeRateHz = $state(5);
+  let positionRateHz = $state(2);
+  let airspeedEnabled = $state(false);
+
+  // INAV arming flags (bit positions from INAV source)
+  const ARMING_FLAG_ARMED = 2; // bit 2 = ARMED
+
+  function isArmed(): boolean {
+    return telem.lastUpdate > 0 && (telem.armingFlags & (1 << ARMING_FLAG_ARMED)) !== 0;
+  }
+
+  function getArmingLabel(): string {
+    if (!telem.lastUpdate) return "";
+    return isArmed() ? "ARMED" : "DISARMED";
+  }
+
+  function getGpsFixLabel(): string {
+    if (!telem.lastUpdate || telem.fixType === 0) return "NO FIX";
+    const types: Record<number, string> = { 1: "2D", 2: "3D", 3: "3D DGPS" };
+    return types[telem.fixType] || `FIX:${telem.fixType}`;
+  }
+
+  // Platform type names from flyingPlatformType_e
+  const platformTypes: Record<number, string> = {
+    0: "Multirotor", 1: "Airplane", 2: "Helicopter", 3: "Tricopter",
+    4: "Rover", 5: "Boat", 6: "Other",
+  };
 
   const baudRates = [115200, 57600, 38400, 19200, 9600, 230400, 460800, 921600];
 
@@ -41,6 +84,9 @@
   selectedBaud = saved.lastBaud;
   navPanelOpen = saved.navPanelOpen;
   activeTab = saved.activeTab;
+  attitudeRateHz = saved.attitudeRateHz;
+  positionRateHz = saved.positionRateHz;
+  airspeedEnabled = saved.airspeedEnabled;
 
   function toggleNavPanel() {
     navPanelOpen = !navPanelOpen;
@@ -84,6 +130,8 @@
   async function handleConnect() {
     if (connStatus === "connected") {
       try {
+        stopTelemetryListeners();
+        resetTelemetry();
         await invoke("disconnect");
         connection.set({
           status: "disconnected",
@@ -114,6 +162,9 @@
       const info = await invoke<FcInfo>("connect", {
         port: selectedPort,
         baudRate: selectedBaud,
+        attitudeRateHz: attitudeRateHz,
+        positionRateHz: positionRateHz,
+        airspeedEnabled: airspeedEnabled,
       });
       connection.set({
         status: "connected",
@@ -122,6 +173,7 @@
         errorMessage: "",
         fcInfo: info,
       });
+      await startTelemetryListeners();
     } catch (e: any) {
       errorMsg = e.toString();
       connection.set({
@@ -148,11 +200,11 @@
     </div>
     <div class="toolbar-center">
       <div class="sensor-bar">
-        <div class="sensor" title="Gyroscope">GYRO</div>
-        <div class="sensor" title="Accelerometer">ACC</div>
-        <div class="sensor" title="Magnetometer">MAG</div>
-        <div class="sensor" title="Barometer">BARO</div>
-        <div class="sensor" title="GPS">GPS</div>
+        <div class="sensor" class:active={telem.sensorGyro === 1} class:error={telem.sensorGyro === 3} title="Gyroscope">GYRO</div>
+        <div class="sensor" class:active={telem.sensorAcc === 1} class:error={telem.sensorAcc === 3} title="Accelerometer">ACC</div>
+        <div class="sensor" class:active={telem.sensorMag === 1} class:error={telem.sensorMag === 3} title="Magnetometer">MAG</div>
+        <div class="sensor" class:active={telem.sensorBaro === 1} class:error={telem.sensorBaro === 3} title="Barometer">BARO</div>
+        <div class="sensor" class:active={telem.sensorGps === 1 && telem.fixType >= 2} class:warning={telem.sensorGps === 1 && telem.fixType < 2} class:error={telem.sensorGps === 3} title="GPS: {getGpsFixLabel()} {telem.numSat}S">GPS</div>
       </div>
     </div>
     <div class="toolbar-right">
@@ -243,6 +295,8 @@
                 <span class="fc-value">{fcInfo.fc_version}</span>
                 <span class="fc-label">Board</span>
                 <span class="fc-value">{fcInfo.board_id}</span>
+                <span class="fc-label">Type</span>
+                <span class="fc-value">{platformTypes[fcInfo.platform_type] ?? `Unknown (${fcInfo.platform_type})`}</span>
                 <span class="fc-label">API</span>
                 <span class="fc-value">{fcInfo.api_version}</span>
                 {#if fcInfo.hardware_revision > 0}
@@ -273,10 +327,40 @@
 
         <!-- Settings Tab -->
         {:else if activeTab === "settings"}
-          <div class="panel-empty">
-            <span class="panel-empty-icon">⚙</span>
-            <span>Settings — coming soon</span>
-          </div>
+          <section class="panel-section">
+            <h4 class="section-heading">Telemetry Rates</h4>
+            <div class="setting-row">
+              <label class="setting-label" for="attitude-rate">Attitude</label>
+              <select id="attitude-rate" class="setting-select" bind:value={attitudeRateHz} onchange={() => settings.patch({ attitudeRateHz })}>
+                <option value={1}>1 Hz</option>
+                <option value={2}>2 Hz</option>
+                <option value={3}>3 Hz</option>
+                <option value={5}>5 Hz</option>
+              </select>
+            </div>
+            <div class="setting-row">
+              <label class="setting-label" for="position-rate">GPS Position</label>
+              <select id="position-rate" class="setting-select" bind:value={positionRateHz} onchange={() => settings.patch({ positionRateHz })}>
+                <option value={1}>1 Hz</option>
+                <option value={2}>2 Hz</option>
+                <option value={3}>3 Hz</option>
+                <option value={5}>5 Hz</option>
+              </select>
+            </div>
+          </section>
+          <section class="panel-section">
+            <h4 class="section-heading">Optional Modules</h4>
+            <div class="setting-row">
+              <label class="setting-label" for="airspeed-toggle">Airspeed</label>
+              <label class="toggle-switch">
+                <input type="checkbox" id="airspeed-toggle" bind:checked={airspeedEnabled} onchange={() => settings.patch({ airspeedEnabled })} />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </section>
+          <section class="panel-section">
+            <p class="setting-hint">Rate changes take effect on next connect.</p>
+          </section>
 
         <!-- Mission Tab -->
         {:else if activeTab === "mission"}
@@ -292,28 +376,39 @@
   <!-- ======= BOTTOM TELEMETRY OVERLAY ======= -->
   <div class="telemetry-overlay">
     <div class="telemetry-strip">
+      {#if telem.lastUpdate > 0 && isArmed()}
+        <div class="telem-widget armed-widget">
+          <span class="telem-label">STATUS</span>
+          <span class="telem-value armed-text">ARMED</span>
+        </div>
+      {/if}
       <div class="telem-widget">
         <span class="telem-label">ALT</span>
-        <span class="telem-value">— m</span>
+        <span class="telem-value">{telem.lastUpdate ? `${telem.altitude.toFixed(1)} m` : '— m'}</span>
       </div>
       <div class="telem-widget">
         <span class="telem-label">SPD</span>
-        <span class="telem-value">— km/h</span>
+        <span class="telem-value">{telem.lastUpdate ? `${(telem.groundSpeed * 3.6).toFixed(0)} km/h` : '— km/h'}</span>
       </div>
       <div class="telem-widget">
-        <span class="telem-label">DIST</span>
-        <span class="telem-value">— m</span>
+        <span class="telem-label">VARIO</span>
+        <span class="telem-value">{telem.lastUpdate ? `${telem.vario >= 0 ? '+' : ''}${telem.vario.toFixed(1)} m/s` : '— m/s'}</span>
       </div>
       <div class="telem-widget">
         <span class="telem-label">BAT</span>
-        <span class="telem-value">—V</span>
+        <span class="telem-value">{telem.lastUpdate ? `${telem.voltage.toFixed(1)}V ${telem.current.toFixed(1)}A` : '—V'}</span>
       </div>
       <div class="telem-widget">
         <span class="telem-label">SATS</span>
-        <span class="telem-value">—</span>
+        <span class="telem-value">{telem.lastUpdate ? `${telem.numSat} ${getGpsFixLabel()}` : '—'}</span>
       </div>
     </div>
   </div>
+
+  <!-- ======= DEBUG PANEL (dev only) ======= -->
+  {#if DEV_MODE && debugOpen && DebugPanelCmp}
+    <DebugPanelCmp onclose={() => debugOpen = false} />
+  {/if}
 
   <!-- ======= ERROR BAR ======= -->
   {#if errorMsg}
@@ -340,9 +435,20 @@
           Disconnected
         {/if}
       </span>
+      {#if DEV_MODE}
+        <button class="debug-btn" class:open={debugOpen} onclick={() => debugOpen = !debugOpen} title="MSP Debug Monitor">
+          🔧 Debug
+        </button>
+      {/if}
     </div>
     <div class="statusbar-right">
-      <span>INAV GCS — Ground Control Station</span>
+      {#if connStatus === "connected" && telem.lastUpdate > 0}
+        <span class="status-arming" class:armed={isArmed()} class:disarmed={!isArmed()}>
+          {getArmingLabel()}
+        </span>
+        <span class="status-sep">|</span>
+      {/if}
+      <span>INAV GCS</span>
     </div>
   </footer>
 </main>
@@ -438,10 +544,6 @@
 
   .sensor:last-child {
     border-right: none;
-  }
-
-  .sensor.active {
-    color: #818181;
   }
 
   /* --- Port Controls --- */
@@ -855,5 +957,162 @@
   .status-indicator.connected {
     background: #59aa29;
     box-shadow: 0 0 4px rgba(89, 170, 41, 0.5);
+  }
+
+  /* --- Sensor bar active state --- */
+  .sensor.active {
+    color: #59aa29;
+    text-shadow: 0 0 4px rgba(89, 170, 41, 0.3);
+  }
+
+  .sensor.warning {
+    color: #f5a623;
+    text-shadow: 0 0 4px rgba(245, 166, 35, 0.3);
+  }
+
+  .sensor.error {
+    color: #d40000;
+    text-shadow: 0 0 4px rgba(212, 0, 0, 0.3);
+  }
+
+  /* --- Armed widget in telemetry strip --- */
+  .armed-widget {
+    background: rgba(212, 0, 0, 0.25) !important;
+    border: 1px solid rgba(212, 0, 0, 0.5);
+  }
+
+  .armed-text {
+    color: #ff4444 !important;
+    animation: armed-pulse 1.5s ease-in-out infinite;
+  }
+
+  @keyframes armed-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+
+  /* --- Arming status in status bar --- */
+  .statusbar-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .status-arming {
+    font-weight: 700;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+  }
+
+  .status-arming.armed {
+    color: #ff4444;
+  }
+
+  .status-arming.disarmed {
+    color: #59aa29;
+  }
+
+  .status-sep {
+    color: #555;
+  }
+
+  /* --- Settings panel controls --- */
+  .setting-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+  }
+
+  .setting-label {
+    font-size: 12px;
+    color: #e0e0e0;
+  }
+
+  .setting-select {
+    padding: 3px 6px;
+    background: #434343;
+    border: 1px solid #555;
+    border-radius: 3px;
+    color: #e0e0e0;
+    font-size: 11px;
+    min-width: 70px;
+  }
+
+  .setting-hint {
+    font-size: 10px;
+    color: #666;
+    margin: 4px 0 0 0;
+    font-style: italic;
+  }
+
+  /* --- Toggle switch --- */
+  .toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 36px;
+    height: 20px;
+  }
+
+  .toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  .toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-color: #434343;
+    border: 1px solid #555;
+    border-radius: 20px;
+    transition: background-color 0.2s;
+  }
+
+  .toggle-slider::before {
+    content: "";
+    position: absolute;
+    height: 14px;
+    width: 14px;
+    left: 2px;
+    bottom: 2px;
+    background-color: #949494;
+    border-radius: 50%;
+    transition: transform 0.2s, background-color 0.2s;
+  }
+
+  .toggle-switch input:checked + .toggle-slider {
+    background-color: rgba(55, 168, 219, 0.3);
+    border-color: #37a8db;
+  }
+
+  .toggle-switch input:checked + .toggle-slider::before {
+    transform: translateX(16px);
+    background-color: #37a8db;
+  }
+
+  /* --- Dev Debug Button (status bar) --- */
+  .debug-btn {
+    background: none;
+    border: 1px solid transparent;
+    color: #666;
+    font-size: 11px;
+    cursor: pointer;
+    padding: 0 6px;
+    border-radius: 3px;
+    margin-left: 8px;
+    transition: color 0.2s, border-color 0.2s, background-color 0.2s;
+  }
+
+  .debug-btn:hover {
+    color: #f5a623;
+    border-color: rgba(245, 166, 35, 0.3);
+  }
+
+  .debug-btn.open {
+    color: #f5a623;
+    border-color: rgba(245, 166, 35, 0.4);
+    background: rgba(245, 166, 35, 0.1);
   }
 </style>

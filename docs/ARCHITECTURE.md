@@ -139,3 +139,79 @@ This document records key architecture decisions and their rationale.
 - No backend/database needed for simple preferences
 - `patch()` helper allows updating individual fields without replacing the whole object
 - Defaults are merged on load (`{ ...defaults, ...stored }`) to handle schema evolution
+
+---
+
+## ADR-007: MSP Scheduler with Dedicated Thread
+
+**Date**: 2026-04-15
+**Status**: Accepted
+
+**Context**: MSP is a strict request-response protocol — only one request can be outstanding at a time. The GCS needs to poll multiple telemetry groups at different rates while also supporting on-demand operations (waypoint upload/download, configuration reads). Over wireless links (SiK, Bluetooth, ELRS backpack) bandwidth is severely limited.
+
+**Considered**: async tasks with tokio, main-thread polling, dedicated thread
+
+**Decision**: Dedicated `std::thread` that owns the `SerialConnection` exclusively after the initial handshake. Communication with the rest of the app via `mpsc` channels.
+
+**Architecture**:
+```
+connect() handshake (blocking, main thread)
+    │
+    ▼
+SerialConnection moved → Scheduler Thread
+    │
+    ├── Telemetry Slots (time-based, configurable rates)
+    ├── Command Channel (mpsc, oneshot requests e.g. read config)
+    ├── Bulk Channel (mpsc, batch operations e.g. waypoints)
+    │
+    ▼
+Tauri Events → Frontend (telemetry-attitude, telemetry-gps, ...)
+```
+
+**Scheduling algorithm**:
+1. Find most overdue telemetry slot **(priority first, then overdue duration)** → poll it
+2. Nothing overdue → drain one command from command channel
+3. No commands → try one bulk item (waypoint upload fills gaps between polls)
+4. Nothing to do → sleep until next slot due
+
+**Adaptive degradation** (replaces static link profiles):
+- Each telemetry slot has a priority: Attitude (5) > Status (4) > Analog (3) > GPS (2) > Secondaries (1)
+- When multiple slots are overdue, the highest-priority slot is polled first
+- Lower-priority groups naturally lose bandwidth — GPS degrades before Attitude
+- No link type detection needed: USB-connected wireless devices (SiK, mLRS, ELRS backpack) are handled correctly
+- Next poll scheduled at `last_reply_time + interval` — if the link is too slow, all groups slow down proportionally, with priority determining who slows first
+
+**Optional modules**: Airspeed polling is toggleable (`airspeed_enabled`). Future optional modules follow the same pattern — disabled by default, enabled via settings.
+
+**Rationale**:
+- Thread ownership eliminates all concurrency issues on the serial port
+- No async runtime needed (serialport crate is blocking anyway)
+- Channel-based design cleanly separates telemetry polling from UI-triggered commands
+- Staggered secondary polls (ALT, AIRSPEED rotate) minimize per-cycle message count
+- The scheduler can be stopped cleanly by sending a Stop command and joining the thread
+
+---
+
+## ADR-008: Dev-Only Debug Module with Zero-Cost Release Build
+
+**Date**: 2026-04-15
+**Status**: Accepted
+
+**Context**: Debugging MSP communication (timing, throughput, throttling, timeouts) requires visibility into the scheduler's internal state. Shipping debug instrumentation in release builds adds overhead and attack surface.
+
+**Decision**: A `scheduler/debug.rs` module compiled only under `#[cfg(debug_assertions)]`. In release builds, a zero-sized no-op stub with `#[inline(always)]` methods is substituted — the compiler eliminates all tracking calls completely. The frontend uses `import.meta.env.DEV` to gate the debug UI — Vite tree-shakes the entire `DebugPanel.svelte` component from production bundles.
+
+**Debug Monitor features**:
+- Per-MSP-code LED indicators (yellow=request, green=response, red=timeout, gray=idle)
+- Target rate vs actual rate per code (throttle detection highlighted in orange)
+- MSG/s and bytes/s throughput counters (TX/RX, 1-second sliding window)
+- POLL/INIT status badges distinguishing active polling from handshake-only codes
+- Request, response, and timeout counters per code
+- Updates emitted via `debug-msp-stats` Tauri event at ~4 Hz (250ms interval)
+
+**Rationale**:
+- `#[cfg(debug_assertions)]` is the idiomatic Rust pattern for dev-only code
+- Zero-sized type with inline no-ops has zero runtime cost — verified by compiler optimization
+- Vite's `import.meta.env.DEV` is statically replaced at build time, enabling dead code elimination
+- Dynamic import (`import()`) ensures the component is not even bundled in production
+- No dev dependencies leak into release builds on either backend or frontend

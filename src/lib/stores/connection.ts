@@ -26,6 +26,8 @@ export interface FcInfo {
   fc_version: string;
   board_id: string;
   hardware_revision: number;
+  platform_type: number;
+  mixer_preset: number;
   features: FeatureSet | null;
 }
 

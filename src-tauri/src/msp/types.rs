@@ -60,6 +60,7 @@ pub const MSPV2_INAV_ANALOG: u16 = 0x2002;
 pub const MSPV2_INAV_MISC: u16 = 0x2003;
 pub const MSPV2_INAV_BATTERY_CONFIG: u16 = 0x2005;
 pub const MSPV2_INAV_AIR_SPEED: u16 = 0x2009;
+pub const MSPV2_INAV_MIXER: u16 = 0x2010;
 
 // ── Jumbo frame threshold ───────────────────────────────────────────
 pub const JUMBO_FRAME_MIN_SIZE: u8 = 255;
@@ -80,6 +81,10 @@ pub struct FcInfo {
     pub board_id: String,
     /// Hardware revision
     pub hardware_revision: u16,
+    /// Platform type from mixer config (0=Multirotor, 1=Airplane, 2=Helicopter, etc.)
+    pub platform_type: u8,
+    /// Applied mixer preset ID
+    pub mixer_preset: i16,
     /// Version-dependent feature availability
     pub features: Option<super::features::FeatureSet>,
 }

@@ -14,6 +14,10 @@ export interface AppSettings {
   map: MapState;
   navPanelOpen: boolean;
   activeTab: string;
+  // Telemetry poll rates
+  attitudeRateHz: number;
+  positionRateHz: number;
+  airspeedEnabled: boolean;
 }
 
 const STORAGE_KEY = 'inav-gcs-settings';
@@ -27,6 +31,9 @@ const defaults: AppSettings = {
   },
   navPanelOpen: false,
   activeTab: 'uav-info',
+  attitudeRateHz: 5,
+  positionRateHz: 2,
+  airspeedEnabled: false,
 };
 
 function load(): AppSettings {

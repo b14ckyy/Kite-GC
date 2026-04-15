@@ -3,6 +3,7 @@
 
 mod commands;
 mod msp;
+mod scheduler;
 mod state;
 mod transport;
 

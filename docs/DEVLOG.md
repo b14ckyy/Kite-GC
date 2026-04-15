@@ -42,7 +42,8 @@ INAV GCS/
 │   │   │   ├── telemetry.ts      # Telemetry data store (GPS, attitude, battery)
 │   │   │   └── settings.ts      # Session persistence (localStorage)
 │   │   ├── components/           # Reusable UI components
-│   │   │   └── Map.svelte        # Leaflet map with position persistence
+│   │   │   ├── Map.svelte        # Leaflet map with position persistence
+│   │   │   └── DebugPanel.svelte # MSP debug monitor (dev builds only)
 │   │   └── index.ts              # Library entry point
 │   └── app.html                  # HTML entry point
 │
@@ -55,6 +56,10 @@ INAV GCS/
 │   │   │   ├── mod.rs            # Command module registry
 │   │   │   ├── connection.rs     # Serial connect/disconnect + MSP handshake
 │   │   │   └── info.rs           # App version and metadata
+│   │   ├── scheduler/            # MSP scheduler (dedicated thread)
+│   │   │   ├── mod.rs            # Scheduler loop, slot management, adaptive polling
+│   │   │   ├── telemetry.rs      # Telemetry decoding and configuration
+│   │   │   └── debug.rs          # MSP debug stats tracker (dev builds only)
 │   │   ├── msp/                  # MSP Protocol implementation
 │   │   │   ├── mod.rs            # MSP module exports
 │   │   │   ├── types.rs          # Message types, constants, command codes
@@ -158,7 +163,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) ADR-005 for the full rationale.
 - Minimum supported version: **INAV 7.0.0**
 
 ### Handshake (`commands/connection.rs`)
-Sequence: `MSP_API_VERSION` → `MSP_FC_VARIANT` (must be "INAV") → `MSP_FC_VERSION` (must be ≥ 7.0) → `MSP_BOARD_INFO` → feature gate computation
+Sequence: `MSP_API_VERSION` → `MSP_FC_VARIANT` (must be "INAV") → `MSP_FC_VERSION` (must be ≥ 7.0) → `MSP_BOARD_INFO` → `MSP2_INAV_MIXER` (platform type, mixer preset) → feature gate computation
 
 ## Session Persistence
 
@@ -171,6 +176,62 @@ Implemented via custom Svelte store with auto-save on every mutation. Schema evo
 
 ## Testing
 
-- **16 Rust unit tests** covering MSP codec, parser, and feature gates
+- **24 Rust unit tests** covering MSP codec, parser, feature gates, and telemetry decoders
 - Run: `cd src-tauri && cargo test --target-dir "D:\cargo-target\inav-gcs"`
-- Frontend type-check: `npx svelte-check --threshold error`
+- Frontend type-check: `npx svelte-check --tsconfig ./tsconfig.json`
+
+## MSP Scheduler Architecture
+
+The scheduler owns the `SerialConnection` after the initial handshake and runs in a dedicated `std::thread`. It coordinates all MSP traffic to prevent collisions on the single request-response link.
+
+### Design Principles
+1. **Single outstanding request**: MSP is request-response — scheduler sends one request, waits for reply/timeout, then decides what's next
+2. **Priority-based adaptive degradation**: When overloaded, highest-priority slots are polled first — lower-priority groups naturally lose bandwidth
+3. **No link type detection**: Polls at configured rate as long as the link sustains it. Adaptive degradation handles slow links automatically
+4. **Non-blocking commands**: Waypoint uploads/downloads interleave between telemetry polls — bulk items fill gaps, not one-per-cycle
+
+### Scheduler Loop
+```
+loop {
+    1. Find most overdue telemetry slot (by priority, then overdue duration) → poll it
+    2. If no slot is due → check command channel (non-blocking)
+    3. If no command → try bulk channel (squeeze between polls)
+    4. If nothing to do → sleep until next slot is due
+}
+```
+
+### Telemetry Groups
+
+| Group | MSP Code(s) | Default Rate | Range | Priority | Notes |
+|---|---|---|---|---|---|
+| Attitude | `MSP_ATTITUDE` (108) | 5 Hz | 1–5 Hz | 5 (highest) | Roll, Pitch, Heading |
+| Status | `MSPV2_INAV_STATUS` (0x2000), `MSP_SENSOR_STATUS` (151) | 1 Hz | fixed | 4 | Arming, Flight modes, Sensor health |
+| Analog | `MSPV2_INAV_ANALOG` (0x2002) | 1 Hz | fixed | 3 | Voltage, Current, mAh, RSSI |
+| Position Primary | `MSP_RAW_GPS` (106) | 2 Hz | 1–5 Hz | 2 | Lat, Lon, Speed, COG, numSat |
+| Position Secondary | `MSP_ALTITUDE` (109), `MSPV2_INAV_AIR_SPEED`* (0x2009) | rotates | — | 1 (lowest) | *Airspeed optional |
+
+### Staggered Position Polling
+Position Secondary rotates through its codes (one per cycle):
+- Default (airspeed off): Only `MSP_ALTITUDE` every cycle
+- Airspeed enabled: Alternates ALT → AIRSPEED → ALT → ...
+- Future optional modules (wind, etc.) are appended to the rotation array.
+
+### Adaptive Degradation
+Instead of detecting link type (USB vs wireless), the scheduler uses **priority-based slot selection**. When multiple slots are overdue simultaneously (i.e. bandwidth is insufficient), the highest-priority slot always wins. This causes lower-priority groups to naturally degrade:
+
+1. **Full bandwidth**: All groups polled at configured rates — no degradation
+2. **Moderate overload**: GPS (priority 2) and secondaries (priority 1) lose cycles → effectively lower Hz
+3. **Severe overload**: Everything except Attitude degrades → Attitude keeps maximum achievable rate
+4. **Extreme overload (very slow link)**: Even Attitude can't sustain configured rate → natural slowdown
+
+This is simpler and more robust than explicit link type detection, since USB devices like SiK radios or STM32-based systems (mLRS) can be "USB-connected but wireless".
+
+### Data Flow
+```
+connect() → handshake (blocking)
+         → SerialConnection moved into scheduler thread
+         → scheduler starts telemetry polling
+         → Tauri events emitted to frontend (telemetry-attitude, telemetry-gps, ...)
+         → commands/bulk sent via mpsc channels
+disconnect() → SchedulerCommand::Stop → thread joins → cleanup
+```
