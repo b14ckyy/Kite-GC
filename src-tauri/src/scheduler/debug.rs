@@ -26,8 +26,8 @@ struct CodeStats {
     request_count: u64,
     response_count: u64,
     timeout_count: u64,
-    last_activity: Option<Instant>,
-    last_status: MspActivity,
+    /// Activity since last emit (reset after each snapshot)
+    cycle_status: MspActivity,
     // Actual rate measurement: count responses in a rolling 1s window
     rate_window_start: Instant,
     rate_window_count: u64,
@@ -45,8 +45,6 @@ pub struct MspCodeDebug {
     pub timeout_count: u64,
     /// "idle", "request", "response", "timeout"
     pub last_status: String,
-    /// Milliseconds since last activity (for LED fade)
-    pub ms_since_activity: u64,
     /// Configured target rate in Hz (0 for handshake/one-shot codes)
     pub target_rate_hz: f64,
     /// Measured actual rate in Hz over the last second
@@ -100,8 +98,7 @@ impl DebugTracker {
                     request_count: 0,
                     response_count: 0,
                     timeout_count: 0,
-                    last_activity: None,
-                    last_status: MspActivity::Idle,
+                    cycle_status: MspActivity::Idle,
                     rate_window_start: now,
                     rate_window_count: 0,
                     actual_rate_hz: 0.0,
@@ -121,8 +118,7 @@ impl DebugTracker {
                         request_count: 1,
                         response_count: 1,
                         timeout_count: 0,
-                        last_activity: None,
-                        last_status: MspActivity::Idle,
+                        cycle_status: MspActivity::Idle,
                         rate_window_start: now,
                         rate_window_count: 0,
                         actual_rate_hz: 0.0,
@@ -150,8 +146,10 @@ impl DebugTracker {
         self.ensure_code(code);
         if let Some(s) = self.stats.get_mut(&code) {
             s.request_count += 1;
-            s.last_activity = Some(Instant::now());
-            s.last_status = MspActivity::Request;
+            // Only upgrade to Request if not already Response/Timeout in this cycle
+            if matches!(s.cycle_status, MspActivity::Idle) {
+                s.cycle_status = MspActivity::Request;
+            }
         }
         self.window_bytes_tx += frame_bytes as u64;
         self.window_msg_tx += 1;
@@ -162,8 +160,7 @@ impl DebugTracker {
         self.ensure_code(code);
         if let Some(s) = self.stats.get_mut(&code) {
             s.response_count += 1;
-            s.last_activity = Some(Instant::now());
-            s.last_status = MspActivity::Response;
+            s.cycle_status = MspActivity::Response;
 
             // Per-code rate measurement: count in 1s window then roll over
             s.rate_window_count += 1;
@@ -183,8 +180,7 @@ impl DebugTracker {
         self.ensure_code(code);
         if let Some(s) = self.stats.get_mut(&code) {
             s.timeout_count += 1;
-            s.last_activity = Some(Instant::now());
-            s.last_status = MspActivity::Timeout;
+            s.cycle_status = MspActivity::Timeout;
         }
     }
 
@@ -208,42 +204,19 @@ impl DebugTracker {
             self.window_start = Instant::now();
         }
 
-        let now = Instant::now();
         let mut messages: Vec<MspCodeDebug> = self
             .stats
-            .iter()
+            .iter_mut()
             .map(|(&code, s)| {
-                let ms_since = s
-                    .last_activity
-                    .map(|t| now.duration_since(t).as_millis() as u64)
-                    .unwrap_or(u64::MAX);
-
-                let status_str = match s.last_status {
+                let status_str = match s.cycle_status {
                     MspActivity::Idle => "idle",
-                    MspActivity::Request => {
-                        if ms_since < 50 {
-                            "request"
-                        } else {
-                            "idle"
-                        }
-                    }
-                    MspActivity::Response => {
-                        if ms_since < 50 {
-                            "response"
-                        } else {
-                            "idle"
-                        }
-                    }
-                    MspActivity::Timeout => {
-                        if ms_since < 2000 {
-                            "timeout"
-                        } else {
-                            "idle"
-                        }
-                    }
+                    MspActivity::Request => "request",
+                    MspActivity::Response => "response",
+                    MspActivity::Timeout => "timeout",
                 };
 
-                MspCodeDebug {
+                // Reset cycle status after reading
+                let snapshot = MspCodeDebug {
                     code,
                     name: s.name.clone(),
                     is_polling: s.is_polling,
@@ -251,10 +224,11 @@ impl DebugTracker {
                     response_count: s.response_count,
                     timeout_count: s.timeout_count,
                     last_status: status_str.into(),
-                    ms_since_activity: ms_since.min(99999),
                     target_rate_hz: (s.target_rate_hz * 10.0).round() / 10.0,
                     actual_rate_hz: (s.actual_rate_hz * 10.0).round() / 10.0,
-                }
+                };
+                s.cycle_status = MspActivity::Idle;
+                snapshot
             })
             .collect();
 
@@ -286,8 +260,7 @@ impl DebugTracker {
             request_count: 0,
             response_count: 0,
             timeout_count: 0,
-            last_activity: None,
-            last_status: MspActivity::Idle,
+            cycle_status: MspActivity::Idle,
             rate_window_start: now,
             rate_window_count: 0,
             actual_rate_hz: 0.0,

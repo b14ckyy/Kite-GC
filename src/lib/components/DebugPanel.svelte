@@ -12,7 +12,6 @@
     response_count: number;
     timeout_count: number;
     last_status: string;
-    ms_since_activity: number;
     target_rate_hz: number;
     actual_rate_hz: number;
   }
