@@ -1,0 +1,6 @@
+# Cargo build configuration
+# NOTE: target-dir is set to avoid issues with OneDrive paths containing spaces.
+# Adjust this path if building on a different machine.
+# On Linux/macOS you can remove this or set to a local path.
+[build]
+target-dir = "D:\\cargo-target\\inav-gcs"
