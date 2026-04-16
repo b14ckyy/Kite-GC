@@ -27,6 +27,10 @@ export interface AppSettings {
   attitudeRateHz: number;
   positionRateHz: number;
   airspeedEnabled: boolean;
+  // Flight logging
+  flightLoggingEnabled: boolean;
+  flightLogDbPath: string;
+  flightLogRawEnabled: boolean;
   // Mission Control
   defaultWpAltitudeM: number;
   defaultPhTimeSec: number;
@@ -52,6 +56,9 @@ const defaults: AppSettings = {
   attitudeRateHz: 5,
   positionRateHz: 2,
   airspeedEnabled: false,
+  flightLoggingEnabled: false,
+  flightLogDbPath: '',
+  flightLogRawEnabled: false,
   defaultWpAltitudeM: 50,
   defaultPhTimeSec: 30,
   panels: {

@@ -95,4 +95,6 @@ pub struct FcInfo {
     pub mixer_preset: i16,
     /// Version-dependent feature availability
     pub features: Option<super::features::FeatureSet>,
+    /// Craft name configured in the FC (MSP_NAME)
+    pub craft_name: String,
 }

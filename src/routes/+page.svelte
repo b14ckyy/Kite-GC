@@ -1,5 +1,6 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
+  import { open } from "@tauri-apps/plugin-dialog";
   import { connection, availablePorts } from "$lib/stores/connection";
   import type { FcInfo, PortInfo, FeatureSet } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
@@ -17,6 +18,21 @@
   import { editMode } from "$lib/stores/mission";
   import { WIDGET_DEFS, LARGE_BASE_VMIN } from "$lib/config/widgetRegistry";
   import type { PanelConfig } from "$lib/stores/settings";
+  import {
+    listFlights,
+    getFlight,
+    getFlightTrack,
+    deleteFlight,
+    updateFlightNotes,
+    geocodeFlight,
+    fetchFlightWeather,
+    getDefaultFlightlogPath,
+    groupFlights,
+    formatDurationSec,
+    type Flight,
+    type FlightSummary,
+    type LogbookSortMode,
+  } from "$lib/stores/flightlog";
 
   // Reactive window dimensions for dynamic panel sizing
   let winW = $state(typeof window !== 'undefined' ? window.innerWidth : 1920);
@@ -58,10 +74,23 @@
   let attitudeRateHz = $state(5);
   let positionRateHz = $state(2);
   let airspeedEnabled = $state(false);
+  let flightLoggingEnabled = $state(false);
+  let flightLogDbPath = $state("");
+  let flightLogRawEnabled = $state(false);
+  let defaultFlightLogPath = $state("");
   let mapProvider = $state("osm");
   let mapCacheMaxMB = $state(200);
   let defaultWpAltitudeM = $state(50);
   let defaultPhTimeSec = $state(30);
+
+  // Logbook state
+  let logbookLoading = $state(false);
+  let flightSummaries = $state<FlightSummary[]>([]);
+  let selectedFlight: Flight | null = $state(null);
+  let selectedFlightTrackCount = $state(0);
+  let selectedFlightId: number | null = $state(null);
+  let selectedFlightNotes = $state("");
+  let logbookSortMode = $state<LogbookSortMode>("aircraft-location-date");
 
   // Widget panel state
   let panels = $state<PanelConfig>({
@@ -106,6 +135,7 @@
   const tabs = [
     { id: "uav-info", label: () => $t('nav.uavInfo'), icon: "✈" },
     { id: "settings", label: () => $t('nav.settings'), icon: "⚙" },
+    { id: "logbook", label: () => $t('nav.logbook'), icon: "📒" },
     { id: "mission", label: () => $t('nav.mission'), icon: "◎" },
   ];
 
@@ -131,6 +161,9 @@
   attitudeRateHz = saved.attitudeRateHz;
   positionRateHz = saved.positionRateHz;
   airspeedEnabled = saved.airspeedEnabled;
+  flightLoggingEnabled = saved.flightLoggingEnabled;
+  flightLogDbPath = saved.flightLogDbPath;
+  flightLogRawEnabled = saved.flightLogRawEnabled;
   mapProvider = saved.mapProvider;
   mapCacheMaxMB = saved.mapCacheMaxMB;
   defaultWpAltitudeM = saved.defaultWpAltitudeM;
@@ -149,11 +182,109 @@
     if (tabId !== 'mission') editMode.set(false);
     activeTab = tabId;
     settings.patch({ activeTab });
+    if (tabId === 'logbook') {
+      void loadLogbook();
+    }
     if (!navPanelOpen) {
       navPanelOpen = true;
       settings.patch({ navPanelOpen: true });
       setTimeout(() => window.dispatchEvent(new Event("resize")), 320);
     }
+  }
+
+  async function chooseFlightLogPath() {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        defaultPath: flightLogDbPath || defaultFlightLogPath || undefined,
+      });
+      if (typeof selected === 'string' && selected.length > 0) {
+        flightLogDbPath = selected;
+        settings.patch({ flightLogDbPath });
+      }
+    } catch (e) {
+      console.error('Failed to choose flight log path', e);
+    }
+  }
+
+  function resetFlightLogPath() {
+    flightLogDbPath = '';
+    settings.patch({ flightLogDbPath: '' });
+  }
+
+  async function loadLogbook() {
+    if (!flightLoggingEnabled) {
+      flightSummaries = [];
+      selectedFlight = null;
+      selectedFlightId = null;
+      selectedFlightTrackCount = 0;
+      return;
+    }
+
+    logbookLoading = true;
+    try {
+      flightSummaries = await listFlights(flightLogDbPath);
+      if (selectedFlightId != null) {
+        const found = flightSummaries.find((f) => f.id === selectedFlightId);
+        if (!found) {
+          selectedFlight = null;
+          selectedFlightId = null;
+          selectedFlightTrackCount = 0;
+        }
+      }
+    } catch (e: any) {
+      errorMsg = e?.toString?.() ?? String(e);
+    } finally {
+      logbookLoading = false;
+    }
+  }
+
+  async function selectFlight(flightId: number) {
+    selectedFlightId = flightId;
+    selectedFlight = await getFlight(flightId, flightLogDbPath);
+    selectedFlightNotes = selectedFlight?.notes ?? '';
+
+    const track = await getFlightTrack(flightId, flightLogDbPath);
+    selectedFlightTrackCount = track.length;
+
+    // Lazy enrich metadata if still missing
+    if (selectedFlight && !selectedFlight.location_name && selectedFlight.start_lat != null && selectedFlight.start_lon != null) {
+      const geocoded = await geocodeFlight(flightId, flightLogDbPath);
+      if (geocoded) {
+        selectedFlight = { ...selectedFlight, location_name: geocoded };
+      }
+    }
+    if (selectedFlight && selectedFlight.weather_temp_c == null && selectedFlight.start_lat != null && selectedFlight.start_lon != null) {
+      await fetchFlightWeather(flightId, flightLogDbPath);
+      selectedFlight = await getFlight(flightId, flightLogDbPath);
+    }
+
+    // Keep list in sync if metadata got enriched
+    await loadLogbook();
+  }
+
+  async function saveSelectedFlightNotes() {
+    if (!selectedFlightId) return;
+    await updateFlightNotes(selectedFlightId, selectedFlightNotes, flightLogDbPath);
+    selectedFlight = await getFlight(selectedFlightId, flightLogDbPath);
+    await loadLogbook();
+  }
+
+  async function removeSelectedFlight() {
+    if (!selectedFlightId) return;
+    const ok = await deleteFlight(selectedFlightId, flightLogDbPath);
+    if (!ok) return;
+    selectedFlight = null;
+    selectedFlightId = null;
+    selectedFlightTrackCount = 0;
+    selectedFlightNotes = '';
+    await loadLogbook();
+  }
+
+  function formatDateTime(value: string): string {
+    const d = new Date(value);
+    return d.toLocaleString();
   }
 
   async function loadInfo() {
@@ -207,7 +338,13 @@
     errorMsg = "";
     connection.update((c) => ({ ...c, status: "connecting" }));
 
-    settings.patch({ lastPort: selectedPort, lastBaud: selectedBaud });
+    settings.patch({
+      lastPort: selectedPort,
+      lastBaud: selectedBaud,
+      flightLoggingEnabled,
+      flightLogDbPath,
+      flightLogRawEnabled,
+    });
 
     try {
       const info = await invoke<FcInfo>("connect", {
@@ -216,6 +353,9 @@
         attitudeRateHz: attitudeRateHz,
         positionRateHz: positionRateHz,
         airspeedEnabled: airspeedEnabled,
+        flightLogEnabled: flightLoggingEnabled,
+        flightLogPath: flightLogDbPath,
+        flightLogRaw: flightLogRawEnabled,
       });
       connection.set({
         status: "connected",
@@ -239,7 +379,19 @@
     }
   }
 
-  loadInfo();
+  async function initPage() {
+    await loadInfo();
+    try {
+      defaultFlightLogPath = await getDefaultFlightlogPath();
+    } catch {
+      defaultFlightLogPath = '';
+    }
+    if (activeTab === 'logbook') {
+      await loadLogbook();
+    }
+  }
+
+  initPage();
 
   // Widget panel management
   function handleReorder(panelId: string, newIds: string[]) {
@@ -291,6 +443,8 @@
     if (panels.right.includes(widgetId)) return $t('widgets.right');
     return $t('widgets.off');
   }
+
+  const groupedFlights = $derived(groupFlights(flightSummaries, logbookSortMode));
 </script>
 
 <main class="app">
@@ -391,6 +545,8 @@
             <section class="panel-section">
               <h4 class="section-heading">{$t('uavInfo.flightController')}</h4>
               <div class="fc-info-grid">
+                <span class="fc-label">{$t('uavInfo.craftName')}</span>
+                <span class="fc-value">{fcInfo.craft_name || $t('uavInfo.craftNameUnset')}</span>
                 <span class="fc-label">{$t('uavInfo.variant')}</span>
                 <span class="fc-value">{fcInfo.fc_variant}</span>
                 <span class="fc-label">{$t('uavInfo.version')}</span>
@@ -510,6 +666,47 @@
             </div>
           </section>
           <section class="panel-section">
+            <h4 class="section-heading">{$t('settings.flightLogging')}</h4>
+            <div class="setting-row">
+              <label class="setting-label" for="flightlog-enabled">{$t('settings.enableFlightLogging')}</label>
+              <label class="toggle-switch">
+                <input
+                  type="checkbox"
+                  id="flightlog-enabled"
+                  bind:checked={flightLoggingEnabled}
+                  onchange={() => settings.patch({ flightLoggingEnabled })}
+                />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="setting-row">
+              <label class="setting-label" for="flightlog-raw">{$t('settings.rawFlightLogs')}</label>
+              <label class="toggle-switch">
+                <input
+                  type="checkbox"
+                  id="flightlog-raw"
+                  bind:checked={flightLogRawEnabled}
+                  onchange={() => settings.patch({ flightLogRawEnabled })}
+                />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="setting-row setting-row-stack">
+              <span class="setting-label">{$t('settings.flightLogDbPath')}</span>
+              <div class="path-picker-row">
+                <input
+                  class="setting-input path-input"
+                  type="text"
+                  readonly
+                  value={flightLogDbPath || defaultFlightLogPath || $t('settings.defaultPathUnknown')}
+                />
+                <button class="cache-clear-btn" onclick={chooseFlightLogPath}>{$t('settings.choose')}</button>
+                <button class="cache-clear-btn" onclick={resetFlightLogPath}>{$t('settings.useDefault')}</button>
+              </div>
+            </div>
+            <p class="setting-hint">{$t('settings.flightLogHint')}</p>
+          </section>
+          <section class="panel-section">
             <h4 class="section-heading">{$t('settings.missionControl')}</h4>
             <div class="setting-row">
               <label class="setting-label">{$t('settings.defaultWpAlt')}</label>
@@ -549,6 +746,121 @@
           </section>
           <section class="panel-section">
             <p class="setting-hint">{$t('settings.rateHint')}</p>
+          </section>
+
+        <!-- Logbook Tab -->
+        {:else if activeTab === "logbook"}
+          <section class="panel-section">
+            <h4 class="section-heading">{$t('logbook.title')}</h4>
+
+            {#if !flightLoggingEnabled}
+              <div class="panel-empty">
+                <span class="panel-empty-icon">⊘</span>
+                <span>{$t('logbook.disabled')}</span>
+              </div>
+            {:else}
+              <div class="setting-row">
+                <label class="setting-label" for="logbook-sort">{$t('logbook.sortMode')}</label>
+                <select id="logbook-sort" class="setting-select" bind:value={logbookSortMode}>
+                  <option value="aircraft-location-date">{$t('logbook.sortAircraftLocationDate')}</option>
+                  <option value="location-date-aircraft">{$t('logbook.sortLocationDateAircraft')}</option>
+                  <option value="date-location-aircraft">{$t('logbook.sortDateLocationAircraft')}</option>
+                  <option value="aircraft-date-location">{$t('logbook.sortAircraftDateLocation')}</option>
+                </select>
+              </div>
+
+              <div class="setting-row">
+                <button class="cache-clear-btn" onclick={loadLogbook} disabled={logbookLoading}>
+                  {#if logbookLoading}
+                    {$t('logbook.loading')}
+                  {:else}
+                    {$t('logbook.refresh')}
+                  {/if}
+                </button>
+              </div>
+
+              {#if flightSummaries.length === 0}
+                <div class="panel-empty">
+                  <span class="panel-empty-icon">🗂</span>
+                  <span>{$t('logbook.empty')}</span>
+                </div>
+              {:else}
+                <div class="logbook-layout">
+                  <div class="logbook-list">
+                    {#each groupedFlights as group}
+                      <div class="logbook-group">
+                        <div class="logbook-group-title">{group.key}</div>
+                        {#each group.flights as f}
+                          <button
+                            class="logbook-item"
+                            class:selected={selectedFlightId === f.id}
+                            onclick={() => selectFlight(f.id)}
+                          >
+                            <div class="logbook-item-title">{f.craft_name || $t('logbook.unnamedCraft')}</div>
+                            <div class="logbook-item-meta">
+                              <span>{formatDateTime(f.start_time)}</span>
+                              <span>{formatDurationSec(f.duration_sec)}</span>
+                            </div>
+                          </button>
+                        {/each}
+                      </div>
+                    {/each}
+                  </div>
+
+                  <div class="logbook-detail">
+                    {#if selectedFlight}
+                      <div class="fc-info-grid">
+                        <span class="fc-label">{$t('logbook.craft')}</span>
+                        <span class="fc-value">{selectedFlight.craft_name || $t('logbook.unnamedCraft')}</span>
+                        <span class="fc-label">{$t('logbook.started')}</span>
+                        <span class="fc-value">{formatDateTime(selectedFlight.start_time)}</span>
+                        <span class="fc-label">{$t('logbook.duration')}</span>
+                        <span class="fc-value">{formatDurationSec(selectedFlight.duration_sec)}</span>
+                        <span class="fc-label">{$t('logbook.location')}</span>
+                        <span class="fc-value">{selectedFlight.location_name || $t('logbook.unknownLocation')}</span>
+                        <span class="fc-label">{$t('logbook.maxAlt')}</span>
+                        <span class="fc-value">{selectedFlight.max_alt_m?.toFixed(1) ?? '0.0'} m</span>
+                        <span class="fc-label">{$t('logbook.maxSpeed')}</span>
+                        <span class="fc-value">{selectedFlight.max_speed_ms?.toFixed(1) ?? '0.0'} m/s</span>
+                        <span class="fc-label">{$t('logbook.distance')}</span>
+                        <span class="fc-value">{selectedFlight.total_distance_m?.toFixed(0) ?? '0'} m</span>
+                        <span class="fc-label">{$t('logbook.batteryUsed')}</span>
+                        <span class="fc-value">{selectedFlight.battery_used_mah ?? 0} mAh</span>
+                        <span class="fc-label">{$t('logbook.trackPoints')}</span>
+                        <span class="fc-value">{selectedFlightTrackCount}</span>
+                        <span class="fc-label">{$t('logbook.weather')}</span>
+                        <span class="fc-value">
+                          {#if selectedFlight.weather_temp_c != null}
+                            {selectedFlight.weather_temp_c.toFixed(1)} C, {selectedFlight.weather_wind_ms?.toFixed(1) ?? '0.0'} m/s, {selectedFlight.weather_desc || ''}
+                          {:else}
+                            {$t('logbook.weatherUnavailable')}
+                          {/if}
+                        </span>
+                      </div>
+
+                      <div class="setting-row setting-row-stack">
+                        <label class="setting-label" for="flight-notes">{$t('logbook.notes')}</label>
+                        <textarea
+                          id="flight-notes"
+                          class="setting-input notes-input"
+                          rows="4"
+                          bind:value={selectedFlightNotes}
+                        ></textarea>
+                      </div>
+                      <div class="setting-row">
+                        <button class="cache-clear-btn" onclick={saveSelectedFlightNotes}>{$t('logbook.saveNotes')}</button>
+                        <button class="cache-clear-btn logbook-danger" onclick={removeSelectedFlight}>{$t('logbook.deleteFlight')}</button>
+                      </div>
+                    {:else}
+                      <div class="panel-empty">
+                        <span class="panel-empty-icon">✈</span>
+                        <span>{$t('logbook.selectFlight')}</span>
+                      </div>
+                    {/if}
+                  </div>
+                </div>
+              {/if}
+            {/if}
           </section>
 
         <!-- Mission Tab -->
@@ -1275,6 +1587,38 @@
     min-width: 70px;
   }
 
+  .setting-input {
+    padding: 3px 6px;
+    background: #434343;
+    border: 1px solid #555;
+    border-radius: 3px;
+    color: #e0e0e0;
+    font-size: 11px;
+  }
+
+  .setting-row-stack {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+
+  .path-picker-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+
+  .path-input {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .notes-input {
+    width: 100%;
+    resize: vertical;
+    min-height: 70px;
+  }
+
   .setting-stepper {
     display: flex;
     align-items: stretch;
@@ -1382,6 +1726,98 @@
     background: #c0392b;
     border-color: #c0392b;
     color: #fff;
+  }
+
+  .cache-clear-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .cache-clear-btn:disabled:hover {
+    background: #434343;
+    border-color: #555;
+    color: #ccc;
+  }
+
+  .logbook-layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    min-height: 280px;
+  }
+
+  .logbook-list {
+    max-height: 360px;
+    overflow: auto;
+    border: 1px solid #555;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.12);
+    padding: 6px;
+  }
+
+  .logbook-group {
+    margin-bottom: 8px;
+  }
+
+  .logbook-group-title {
+    font-size: 10px;
+    color: #9cc6d9;
+    margin: 2px 0 4px 0;
+  }
+
+  .logbook-item {
+    width: 100%;
+    text-align: left;
+    border: 1px solid #555;
+    border-radius: 4px;
+    background: #383838;
+    color: #ddd;
+    margin-bottom: 4px;
+    padding: 6px;
+    cursor: pointer;
+  }
+
+  .logbook-item:hover {
+    border-color: #37a8db;
+  }
+
+  .logbook-item.selected {
+    border-color: #37a8db;
+    background: rgba(55, 168, 219, 0.18);
+  }
+
+  .logbook-item-title {
+    font-size: 12px;
+    color: #fff;
+    font-weight: 600;
+  }
+
+  .logbook-item-meta {
+    margin-top: 2px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: #aaa;
+  }
+
+  .logbook-detail {
+    border: 1px solid #555;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.12);
+    padding: 8px;
+    overflow: auto;
+    max-height: 360px;
+  }
+
+  .logbook-danger:hover {
+    background: #9b1f1f;
+    border-color: #9b1f1f;
+  }
+
+  @media (max-width: 980px) {
+    .logbook-layout {
+      grid-template-columns: 1fr;
+    }
   }
 
   /* --- Toggle switch --- */

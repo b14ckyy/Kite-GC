@@ -43,7 +43,8 @@ Kite Ground Control/
 │   │   │   ├── telemetry.ts      # Telemetry data store (GPS, attitude, battery)
 │   │   │   ├── settings.ts       # Session persistence (localStorage)
 │   │   │   ├── home.ts           # Home position store (set on arm + GPS fix)
-│   │   │   └── mission.ts        # Mission state: WP types, stores, invoke wrappers, XML I/O
+│   │   │   ├── mission.ts        # Mission state: WP types, stores, invoke wrappers, XML I/O
+│   │   │   └── flightlog.ts      # Flight log API wrappers, types, grouping/sort helpers
 │   │   ├── components/           # Reusable UI components
 │   │   │   ├── Map.svelte        # Leaflet map (trail, home marker, cached tiles, heading-up)
 │   │   │   ├── MissionLayer.svelte # Mission map layer (markers, polyline, editor popups)
@@ -83,8 +84,18 @@ Kite Ground Control/
 │   │   ├── commands/             # Tauri IPC commands (frontend-callable)
 │   │   │   ├── mod.rs            # Command module registry
 │   │   │   ├── connection.rs     # Serial connect/disconnect + MSP handshake
+│   │   │   ├── flightlog.rs      # Flight log commands (list/get/track/delete/notes/geocode/weather)
 │   │   │   ├── mission.rs        # Mission CRUD, FC transfer, XML/file I/O (13 commands)
 │   │   │   └── info.rs           # App version and metadata
+│   │   ├── flightlog/            # Flight recording + logbook backend
+│   │   │   ├── mod.rs            # Module exports
+│   │   │   ├── types.rs          # Flight/TelemetryRecord/summary/settings structs
+│   │   │   ├── db.rs             # SQLite schema, migrations, CRUD, tests
+│   │   │   ├── recorder.rs       # Arm/disarm-driven recording engine
+│   │   │   ├── raw_logger.rs     # Optional raw parsed text log writer
+│   │   │   ├── geocode.rs        # OSM Nominatim reverse geocoding
+│   │   │   ├── weather.rs        # Open-Meteo weather fetcher
+│   │   │   └── blackbox.rs       # Blackbox decode pipeline (planned)
 │   │   ├── mission/              # Mission planning module
 │   │   │   ├── mod.rs            # Module exports
 │   │   │   ├── types.rs          # WpAction enum (8 types), Waypoint, Mission, MissionInfo
@@ -118,7 +129,8 @@ Kite Ground Control/
 │   ├── DEVLOG.md                 # This file — project structure & dev notes
 │   ├── CHANGELOG.md              # Version changelog (Keep a Changelog format)
 │   ├── ARCHITECTURE.md           # Architecture Decision Records (ADRs)
-│   └── ROADMAP.md                # Feature roadmap by milestone
+│   ├── ROADMAP.md                # Feature roadmap by milestone
+│   └── M5_TEST_CHECKLIST.md      # Manual verification checklist for M5 implementation
 │
 ├── static/                       # Static assets (icons, etc.)
 ├── .gitignore                    # Git ignore rules
@@ -200,7 +212,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) ADR-005 for the full rationale.
 - Minimum supported version: **INAV 7.0.0**
 
 ### Handshake (`commands/connection.rs`)
-Sequence: `MSP_API_VERSION` → `MSP_FC_VARIANT` (must be "INAV") → `MSP_FC_VERSION` (must be ≥ 7.0) → `MSP_BOARD_INFO` → `MSP2_INAV_MIXER` (platform type, mixer preset) → feature gate computation
+Sequence: `MSP_API_VERSION` → `MSP_FC_VARIANT` (must be "INAV") → `MSP_FC_VERSION` (must be ≥ 7.0) → `MSP_BOARD_INFO` → `MSP2_INAV_MIXER` (platform type, mixer preset) → `MSP_NAME` (craft name) → feature gate computation
 
 ## Session Persistence
 
@@ -210,12 +222,18 @@ Settings stored in `localStorage` under key `kite-gc-settings`:
 - `mapProvider` / `mapCacheMaxMB` — tile provider + cache size
 - `navPanelOpen` / `activeTab` — floating panel state
 - `attitudeRateHz` / `positionRateHz` / `airspeedEnabled` — telemetry poll config
+- `flightLoggingEnabled` / `flightLogDbPath` / `flightLogRawEnabled` — flight logging config
 - `defaultWpAltitudeM` / `defaultPhTimeSec` — mission control defaults
 - `locale` — UI language (`'en'` or `'de'`)
 - `widgetAhi` / `widgetSpeed` / `widgetAltitude` / `widgetBattery` / `widgetGps` / `widgetCompass` / `widgetHome` — per-widget visibility toggles
 - `panels` — widget panel layout: `{ bottom: string[], right: string[], positions?: Record<string, 'bottom' | 'right'> }`
 
 Implemented via custom Svelte store with auto-save on every mutation. Schema evolution handled by merging defaults: `{ ...defaults, ...stored }`.
+
+## M5 Test Notes
+
+- Detailed manual test checklist for M5 is in `docs/M5_TEST_CHECKLIST.md`.
+- Backend DB tests are in `src-tauri/src/flightlog/db.rs` (`cargo test flightlog --lib`).
 
 ## HUD Widget Panel System
 
@@ -332,3 +350,88 @@ connect() → handshake (blocking)
          → commands/bulk sent via mpsc channels
 disconnect() → SchedulerCommand::Stop → thread joins → cleanup
 ```
+
+## Blackbox Integration (M5b — planned)
+
+Blackbox log files from INAV flight controllers contain high-resolution telemetry data in a binary format. Integration is limited to GPS/telemetry archival — **not** a full Blackbox analyzer (no PID/gyro/motor visualization).
+
+### External Binary Approach
+
+Blackbox logs are decoded using the official `blackbox_decode` binary from [iNavFlight/blackbox-tools](https://github.com/iNavFlight/blackbox-tools) (GPL-3.0). The binary is bundled alongside the application, **not** compiled into `kite-gc.exe`.
+
+**Binary discovery** (in order):
+1. Application folder (next to executable)
+2. System PATH fallback
+
+No settings UI for the path — if the binary is missing, import is disabled with a user-facing message.
+
+**Invocation**:
+```
+blackbox_decode --merge-gps --datetime --unit-height m --unit-gps-speed mps --stdout <file.TXT>
+```
+- `--merge-gps`: Interpolates GPS samples into main loop iterations
+- `--datetime`: Converts timestamps to absolute date/time using log header
+- `--stdout`: Outputs CSV to stdout (captured by Rust `Command`)
+- `--index N`: Selects specific log from multi-session .TXT files
+
+**Why external binary**: blackbox_decode is a C program (~50-160KB per platform) that handles the complex binary format with all INAV version variations. Reimplementing in Rust would be fragile and require constant maintenance as INAV evolves.
+
+### Data Pipeline
+
+```
+.TXT file (binary Blackbox log)
+    │
+    ▼
+blackbox_decode (child process, stdout capture)
+    │
+    ▼
+CSV text (dynamic columns, INAV-version-dependent)
+    │
+    ▼
+Rust CSV parser (column names from header line)
+    │
+    ▼
+JSON blob per row → blackbox_records table
+    │
+    ▼
+Original .TXT → blackbox_files table (BLOB archive)
+```
+
+### DB Schema Extension (migration v1 → v2)
+
+**New tables**:
+```sql
+CREATE TABLE blackbox_records (
+    id          INTEGER PRIMARY KEY,
+    flight_id   INTEGER NOT NULL REFERENCES flights(id) ON DELETE CASCADE,
+    timestamp_us INTEGER NOT NULL,
+    csv_data    TEXT NOT NULL  -- JSON object, one key per CSV column
+);
+
+CREATE TABLE blackbox_files (
+    id              INTEGER PRIMARY KEY,
+    flight_id       INTEGER NOT NULL REFERENCES flights(id) ON DELETE CASCADE,
+    original_filename TEXT NOT NULL,
+    log_index       INTEGER NOT NULL DEFAULT 0,
+    file_data       BLOB NOT NULL,
+    file_size       INTEGER NOT NULL,
+    imported_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+```
+
+**Modified columns**:
+- `flights.source` TEXT: `live` (default, MSP recording), `blackbox` (BB import only), `both` (live + BB attached)
+
+**Why JSON blob**: Blackbox CSV columns are dynamic — they depend on INAV firmware version and FC configuration (which sensors are active, which features are enabled). A fixed schema would break with every INAV update. JSON preserves all fields without schema changes.
+
+### Use Cases
+
+1. **Standalone import**: User has .TXT files → import creates new flight entry with `source: "blackbox"`, metadata extracted from Blackbox header (FW version, date, GPS start position).
+2. **Attach to flight**: User has a live-recorded flight + matching Blackbox → links BB data to existing flight, marks `source: "both"`. Logbook shows toggle between MSP telemetry and Blackbox data.
+3. **Multi-log files**: A single .TXT may contain multiple ARM/DISARM sessions. Import UI shows a picker for which `--index` to import.
+
+## Weather Fix (planned)
+
+Currently, weather and geocoding are fetched lazily when the user views a flight in the logbook. This means flights in areas without internet access at viewing time will have no weather data.
+
+**Planned fix**: `tokio::spawn` from the ARM event handler (`on_arm()`) to asynchronously fetch geocode + weather using the start GPS coordinates. This writes directly to the DB via a new connection, decoupled from the scheduler thread. The frontend logbook commands `flightlog_geocode` and `flightlog_fetch_weather` remain as manual fallbacks.

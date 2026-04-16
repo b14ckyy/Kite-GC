@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::msp::*;
 
+use crate::flightlog::recorder::FlightRecorder;
+
 /// Telemetry poll group identifiers
 #[derive(Debug, Clone, PartialEq)]
 pub enum TelemetryGroup {
@@ -270,6 +272,68 @@ fn decode_airspeed(payload: &[u8]) -> TelemetryPayload {
     TelemetryPayload::Airspeed(AirspeedData {
         airspeed: read_i32(payload, 0) as f64 / 100.0, // cm/s → m/s
     })
+}
+
+/// Feed decoded telemetry data to the flight recorder.
+/// Decodes the raw payload again (cheap) to pass typed data to the recorder.
+pub fn feed_recorder(code: u16, payload: &[u8], recorder: &mut FlightRecorder) {
+    match code {
+        MSP_ATTITUDE => {
+            let data = AttitudeData {
+                roll: read_i16(payload, 0) as f64 / 10.0,
+                pitch: read_i16(payload, 2) as f64 / 10.0,
+                yaw: read_i16(payload, 4),
+            };
+            recorder.on_attitude(&data);
+        }
+        MSP_RAW_GPS => {
+            let data = GpsData {
+                fix_type: if !payload.is_empty() { payload[0] } else { 0 },
+                num_sat: if payload.len() > 1 { payload[1] } else { 0 },
+                lat: read_i32(payload, 2) as f64 / 1e7,
+                lon: read_i32(payload, 6) as f64 / 1e7,
+                alt_msl: read_i16(payload, 10) as f64,
+                ground_speed: read_u16(payload, 12) as f64 / 100.0,
+                course: read_u16(payload, 14) as f64 / 10.0,
+            };
+            recorder.on_gps(&data);
+        }
+        MSP_ALTITUDE => {
+            let data = AltitudeData {
+                altitude: read_i32(payload, 0) as f64 / 100.0,
+                vario: read_i16(payload, 4) as f64 / 100.0,
+            };
+            recorder.on_altitude(&data);
+        }
+        MSPV2_INAV_ANALOG => {
+            let data = AnalogData {
+                voltage: read_u16(payload, 1) as f64 / 100.0,
+                current: read_i16(payload, 3) as f64 / 100.0,
+                power: read_u32(payload, 5) as f64 / 100.0,
+                mah_drawn: read_u32(payload, 9),
+                battery_percentage: if payload.len() > 21 { payload[21] } else { 0 },
+                rssi: read_u16(payload, 22),
+                cell_count: if !payload.is_empty() { (payload[0] >> 4) & 0x0F } else { 0 },
+            };
+            recorder.on_analog(&data);
+        }
+        MSPV2_INAV_STATUS => {
+            let data = StatusData {
+                arming_flags: read_u32(payload, 9),
+                flight_mode_flags: vec![],
+                cpu_load: read_u16(payload, 6),
+                sensor_status: read_u16(payload, 4),
+            };
+            recorder.on_status(&data);
+        }
+        MSPV2_INAV_AIR_SPEED => {
+            let data = AirspeedData {
+                airspeed: read_i32(payload, 0) as f64 / 100.0,
+            };
+            recorder.on_airspeed(&data);
+        }
+        _ => {}
+    }
 }
 
 #[cfg(test)]

@@ -427,3 +427,151 @@ settings.ts               # locale field persisted in localStorage
 - Custom solution would reinvent ICU message formatting, locale loading, and store integration
 - Early adoption (before M5) avoids a large "string extraction" refactor later
 
+---
+
+## ADR-014: Flight Recording Integrated Into Scheduler (M5)
+
+**Date**: 2026-04-16
+**Status**: Accepted
+
+**Context**: M5 required automatic flight recording (ARM to DISARM), flight metadata, optional raw logs, and a user-visible logbook. Recording must not interfere with MSP scheduling and must work with the existing single-primary-connection architecture.
+
+**Decision**: Integrate a `FlightRecorder` directly into the backend scheduler poll loop. The scheduler continues to emit telemetry events to frontend as before, and additionally forwards decoded samples to the recorder handle when enabled.
+
+**Architecture**:
+```
+connect() command
+    ├─ MSP handshake (+ MSP_NAME)
+    ├─ build FlightLogSettings (enabled/path/raw)
+    ├─ initialize FlightRecorder (optional)
+    └─ start scheduler(serial, telemetryConfig, appHandle, recorder)
+
+scheduler poll loop
+    ├─ poll MSP slot
+    ├─ decode payload
+    ├─ feed recorder (if enabled)
+    └─ emit telemetry event to frontend
+
+FlightRecorder
+    ├─ detect ARM/DISARM from MSPV2_INAV_STATUS arming_flags bit 2
+    ├─ start/finish flight session rows in SQLite
+    ├─ batch-write telemetry samples
+    └─ optional raw text log writer
+```
+
+**Data storage**:
+- SQLite via `rusqlite` with `bundled` feature (no external SQLite dependency)
+- Schema migration via `PRAGMA user_version` (v1 currently)
+- DB path policy:
+    - Custom folder selected by user -> `<folder>/flights.db`
+    - Portable mode -> `<exe>/data/flights.db`
+    - Default install -> `%APPDATA%/kite-gc/flights.db` (Windows)
+
+**Metadata enrichment**:
+- Reverse geocoding: OSM Nominatim (`flightlog_geocode`)
+- Weather: Open-Meteo (`flightlog_fetch_weather`)
+- Enrichment is currently lazy/on-demand from logbook UI to keep recorder path non-blocking
+
+**Rationale**:
+- Feeding recorder in scheduler avoids duplicate event parsing and keeps timing consistent with polling
+- ARM/DISARM transition logic in backend guarantees recording even if frontend is not focused
+- Bundled SQLite simplifies distribution and installer behavior
+- On-demand geocode/weather avoids network latency in real-time telemetry thread
+
+---
+
+## ADR-015: Blackbox Integration via External Binary + JSON Blob Storage
+
+**Date**: 2026-04-16
+**Status**: Planned (M5b)
+
+**Context**: INAV Blackbox logs contain high-resolution flight telemetry in a compact binary format. Users want to import these logs into the Kite GCS logbook for GPS track replay and telemetry archival. The Blackbox binary format is complex, version-dependent, and already decoded by the official `blackbox_decode` tool from iNavFlight/blackbox-tools.
+
+**Considered**:
+1. Reimplement Blackbox decoder in Rust
+2. Compile blackbox_decode C source into kite-gc via `cc` crate
+3. Bundle blackbox_decode as external binary, invoke as child process
+
+**Decision**: Option 3 — bundle `blackbox_decode` as an external binary, invoke via `std::process::Command`.
+
+**Binary discovery** (in order):
+1. Application folder (next to the kite-gc executable)
+2. System PATH fallback
+3. If not found → Blackbox import disabled with user-facing message
+
+No settings UI for the binary path — the discovery is automatic.
+
+**Invocation**:
+```
+blackbox_decode --merge-gps --datetime --unit-height m --unit-gps-speed mps --stdout <file>
+```
+- `--stdout`: CSV output captured via `Command::output()` (no temp files for CSV)
+- `--index N`: Selects a specific log from multi-session .TXT files
+- Output: CSV with dynamic columns (depend on INAV version + FC config)
+
+**Data storage**:
+- **Parsed data**: Each CSV row stored as a JSON TEXT blob in `blackbox_records.csv_data`. Column names come from the CSV header line — no fixed schema.
+- **Original file**: The raw .TXT file archived as BLOB in `blackbox_files.file_data` for re-download/re-processing.
+- **Intermediate CSV**: Not persisted — parsed in-memory from stdout, discarded after import.
+
+**DB schema extension** (migration v1 → v2):
+```sql
+-- New tables
+CREATE TABLE blackbox_records (
+    id           INTEGER PRIMARY KEY,
+    flight_id    INTEGER NOT NULL REFERENCES flights(id) ON DELETE CASCADE,
+    timestamp_us INTEGER NOT NULL,
+    csv_data     TEXT NOT NULL  -- JSON object per row
+);
+
+CREATE TABLE blackbox_files (
+    id                INTEGER PRIMARY KEY,
+    flight_id         INTEGER NOT NULL REFERENCES flights(id) ON DELETE CASCADE,
+    original_filename TEXT NOT NULL,
+    log_index         INTEGER NOT NULL DEFAULT 0,
+    file_data         BLOB NOT NULL,
+    file_size         INTEGER NOT NULL,
+    imported_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- New column on existing table
+ALTER TABLE flights ADD COLUMN source TEXT NOT NULL DEFAULT 'live';
+-- Values: 'live' (MSP recording), 'blackbox' (BB import), 'both' (live + BB attached)
+```
+
+**Use cases**:
+1. **Standalone import**: .TXT → new flight entry with `source: "blackbox"`, metadata from BB header
+2. **Attach to flight**: Link BB to existing live-recorded flight → `source: "both"`, UI toggle between MSP/BB data
+3. **Multi-log**: Single .TXT with multiple ARM/DISARM sessions → user picks `--index`
+
+**Rationale**:
+- External binary avoids maintaining a parallel Blackbox decoder as INAV evolves
+- GPL-3.0 license of blackbox-tools is compatible with Kite GCS (also GPL-3.0)
+- JSON blob handles dynamic CSV columns without schema changes per INAV version
+- BLOB archive preserves original data for future re-processing with newer decoder versions
+- ~50-160KB per platform — negligible size impact on distribution
+- Child process isolation: decoder crash cannot bring down the GCS
+
+---
+
+## ADR-016: Weather Fetch at ARM Time (Planned Fix)
+
+**Date**: 2026-04-16
+**Status**: Planned
+
+**Context**: Currently, weather and reverse geocoding are fetched lazily when the user opens a flight in the logbook UI. This fails for flights viewed offline or in areas without internet at viewing time. The data should be captured at recording time when GPS coordinates are first available.
+
+**Decision**: Move weather + geocode fetching into the ARM event handler. When a flight starts (ARM transition detected), `tokio::spawn` an async task that:
+1. Waits for a valid GPS fix (first telemetry sample with lat/lon ≠ 0)
+2. Calls OSM Nominatim for reverse geocoding
+3. Calls Open-Meteo for weather conditions
+4. Writes results to the flight record via a separate SQLite connection
+
+The existing `flightlog_geocode` and `flightlog_fetch_weather` Tauri commands remain as manual fallback for flights that were recorded before this fix or where the network request failed at ARM time.
+
+**Rationale**:
+- Captures weather conditions at the actual time of flight, not at viewing time (which could be days/weeks later)
+- Async spawn keeps the scheduler thread non-blocking
+- Separate DB connection avoids contention with the recorder's batch writes
+- Fallback commands preserve backward compatibility
+

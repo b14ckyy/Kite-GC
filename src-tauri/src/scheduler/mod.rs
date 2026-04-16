@@ -2,7 +2,7 @@
 // Dedicated thread that owns the serial connection and coordinates all MSP traffic.
 // Telemetry slots are time-based, commands and bulk transfers interleave between polls.
 
-mod telemetry;
+pub mod telemetry;
 
 #[cfg(debug_assertions)]
 mod debug;
@@ -31,6 +31,7 @@ use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter};
 
+use crate::flightlog::recorder::FlightRecorderHandle;
 use crate::transport::serial::SerialConnection;
 
 pub use telemetry::{TelemetryConfig, TelemetryGroup};
@@ -140,11 +141,12 @@ pub fn start(
     serial: SerialConnection,
     config: TelemetryConfig,
     app_handle: AppHandle,
+    recorder: Option<FlightRecorderHandle>,
 ) -> SchedulerHandle {
     let (cmd_tx, cmd_rx) = mpsc::channel::<SchedulerCommand>();
 
     let thread = thread::spawn(move || {
-        scheduler_loop(serial, config, app_handle, cmd_rx)
+        scheduler_loop(serial, config, app_handle, cmd_rx, recorder)
     });
 
     SchedulerHandle {
@@ -159,6 +161,7 @@ fn scheduler_loop(
     config: TelemetryConfig,
     app_handle: AppHandle,
     cmd_rx: mpsc::Receiver<SchedulerCommand>,
+    recorder: Option<FlightRecorderHandle>,
 ) -> Option<SerialConnection> {
     let mut slots = build_slots(&config);
 
@@ -195,6 +198,11 @@ fn scheduler_loop(
         match cmd_rx.try_recv() {
             Ok(SchedulerCommand::Stop) => {
                 log::info!("Scheduler stopping");
+                if let Some(ref rec) = recorder {
+                    if let Ok(mut r) = rec.lock() {
+                        r.shutdown();
+                    }
+                }
                 return Some(serial);
             }
             Ok(SchedulerCommand::MspRequest {
@@ -228,7 +236,7 @@ fn scheduler_loop(
             .map(|(i, _, _)| i);
 
         if let Some(idx) = most_overdue {
-            poll_slot(&mut serial, &mut slots[idx], &app_handle, &mut debug_tracker);
+            poll_slot(&mut serial, &mut slots[idx], &app_handle, &mut debug_tracker, &recorder);
             debug_tracker.maybe_emit(&app_handle);
             continue;
         }
@@ -245,6 +253,11 @@ fn scheduler_loop(
         match cmd_rx.recv_timeout(wait) {
             Ok(SchedulerCommand::Stop) => {
                 log::info!("Scheduler stopping");
+                if let Some(ref rec) = recorder {
+                    if let Ok(mut r) = rec.lock() {
+                        r.shutdown();
+                    }
+                }
                 return Some(serial);
             }
             Ok(SchedulerCommand::MspRequest {
@@ -322,6 +335,7 @@ fn poll_slot(
     slot: &mut TelemetrySlot,
     app_handle: &AppHandle,
     tracker: &mut debug::DebugTracker,
+    recorder: &Option<FlightRecorderHandle>,
 ) {
     let codes_to_poll: Vec<u16> = match slot.group {
         TelemetryGroup::PositionSecondary => {
@@ -340,6 +354,14 @@ fn poll_slot(
                 tracker.on_response(code, 9 + msg.payload.len());
                 let event_name = telemetry::event_name_for_code(code);
                 let payload = telemetry::decode_telemetry(code, &msg.payload);
+
+                // Feed to flight recorder if present
+                if let Some(ref rec) = recorder {
+                    if let Ok(mut r) = rec.lock() {
+                        telemetry::feed_recorder(code, &msg.payload, &mut r);
+                    }
+                }
+
                 if let Err(e) = app_handle.emit(&event_name, &payload) {
                     log::warn!("Failed to emit {}: {}", event_name, e);
                 }

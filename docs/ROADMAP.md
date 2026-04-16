@@ -246,31 +246,89 @@ This document tracks planned features, organized by milestone.
 ## Milestone 5: Flight Recording & Logbook (v0.5.x)
 
 ### Flight Recording Engine
-- [ ] SQLite database for flight storage (via `rusqlite` or `sqlx`)
-- [ ] User-configurable database storage path (respects portable mode)
-- [ ] Automatic flight session creation on arm event
-- [ ] Automatic session close on disarm event
-- [ ] Telemetry data recording at configured poll rate
-- [ ] Flight metadata: date, duration, max altitude, max speed, max distance, battery usage
-- [ ] GPS track recording (lat, lon, alt, timestamp)
+- [x] SQLite database via `rusqlite` (bundled, zero user dependencies)
+- [x] Schema migration system (`user_version` pragma, sequential migrations)
+- [x] User-configurable database storage path (respects portable mode)
+- [ ] Protocol-agnostic recording: works with any `TelemetrySource` that provides arming state
+- [x] Records ONLY from primary connection (no secondary telemetry sources)
+- [x] Automatic flight session creation on arm event
+- [x] Automatic session close on disarm event
+- [x] Telemetry data recording at configured poll rate (lat, lon, alt, speed, heading, vario, battery, RSSI, timestamp)
+
+### Flight Metadata
+- [~] Core: date/time, duration, max altitude, max speed, max distance from home, total distance, battery usage
+- [~] Location: start GPS coordinates + reverse-geocoded place name via OSM Nominatim API
+- [x] Aircraft: craft name (from FC, queried during handshake), craft type (platform type)
+- [~] Source: telemetry protocol (MSP/MAVLink/CRSF/LTM), firmware variant + version
+- [~] Weather: temperature, wind speed/direction, conditions at flight start (Open-Meteo, free API)
+- [ ] Weather + geocode fetched at ARM time (async spawn, non-blocking) instead of lazy on logbook view
+
+### Handshake Enhancement
+- [x] Query craft name from FC during handshake (`MSP_NAME` / `MSP2_COMMON_SETTING` or equivalent per protocol)
+- [x] Store craft name in FC info for UI display + flight metadata
 
 ### Flight Logbook UI
-- [ ] Logbook panel/tab with flight list (date, duration, stats)
-- [ ] Flight detail view with metadata summary
+- [x] Logbook panel/tab with flight list
+- [x] Groupable sort modes:
+  - Aircraft → Location → Date → Flights by time (model-centric pilots)
+  - Location → Date → Aircraft → Flights by time (location-centric pilots)
+  - Date → Location → Aircraft → Flights by time (chronological)
+  - Aircraft → Date → Location → Flights by time (per-model history)
+- [ ] Collapsible group headers with flight count + aggregate stats
+- [x] Flight detail view with metadata summary (location, weather, aircraft, source)
 - [ ] Flight path replay on map (animated marker playback)
 - [ ] Playback controls (play, pause, speed 1x/2x/4x, scrub timeline)
-- [ ] Delete flight records
+- [x] Delete flight records
+- [ ] Search/filter (by aircraft name, location, date range)
 
 ### Blackbox Integration
-- [ ] Blackbox log file import (.bbl/.bfl)
-- [ ] Attach Blackbox log to recorded flight session
-- [ ] Blackbox data viewer (gyro, acc, motor outputs, PID traces)
-- [ ] Flight statistics & analysis from high-res Blackbox data
+- [ ] External `blackbox_decode` binary discovery (app folder → PATH fallback)
+- [ ] Blackbox decode invocation: `blackbox_decode --merge-gps --datetime --unit-height m --stdout <file>`
+- [ ] CSV parsing in Rust → JSON blob per row (dynamic fields, INAV-version-independent)
+- [ ] Original .TXT file archived as BLOB in `blackbox_files` table (re-downloadable)
+- [ ] Standalone Blackbox import: creates new flight with `source: "blackbox"`, metadata from header
+- [ ] Attach Blackbox to existing live flight: `source: "both"`, playback toggle MSP vs Blackbox
+- [ ] `flights.source` field: `live` | `blackbox` | `both` — Blackbox-only flights marked with icon
+- [ ] Multi-log support: single .TXT may contain multiple ARM/DISARM sessions (`--index N`)
+- [ ] Blackbox-imported flights use header metadata (FW version, date, GPS start, duration)
+- [ ] NOT a full Blackbox analyzer — no PID/gyro/motor visualization (use dedicated tools)
 
 ### Export
 - [ ] Export flight path as KML (Google Earth)
 - [ ] Export flight path as GPX (universal GPS format)
 - [ ] Export telemetry as CSV
+
+## Milestone 5b: Blackbox Import (v0.5.x — current focus)
+
+### Blackbox Decode Pipeline
+- [ ] Settings: auto-detect `blackbox_decode` in app folder, fallback to PATH
+- [ ] Invoke `blackbox_decode --merge-gps --datetime --unit-height m --stdout <file>` as child process
+- [ ] Parse CSV stdout in Rust (dynamic columns from header line)
+- [ ] Store parsed rows as JSON blobs in `blackbox_records` table
+- [ ] Archive original .TXT as BLOB in `blackbox_files` table
+- [ ] Clean up intermediate CSV after import
+
+### Standalone Import
+- [ ] "Import Blackbox" button in Logbook tab
+- [ ] File picker for .TXT / .bbl / .bfl files
+- [ ] Extract metadata from Blackbox header: FW type/version, date/time, duration, GPS start
+- [ ] Create flight entry with `source: "blackbox"` marker
+- [ ] Logbook shows Blackbox-only flights with distinct icon
+- [ ] Multi-log .TXT: show picker for which log index to import
+
+### Attach to Existing Flight
+- [ ] "Attach Blackbox" button in flight detail view
+- [ ] Link Blackbox data to existing live-recorded flight
+- [ ] Flight marked as `source: "both"`
+- [ ] Playback UI toggle: MSP telemetry vs Blackbox data
+
+### DB Schema Extension (v2 migration)
+- [ ] `blackbox_records` table: `flight_id`, `timestamp_us`, `csv_data` (JSON TEXT)
+- [ ] `blackbox_files` table: `flight_id`, `original_filename`, `log_index`, `file_data` (BLOB), `file_size`, `imported_at`
+- [ ] `flights.source` column: `live` | `blackbox` | `both`
+- [ ] `PRAGMA user_version = 2` migration from v1
+
+---
 
 ## Milestone 6: Advanced Features (v0.6.x+)
 
@@ -302,4 +360,4 @@ This document tracks planned features, organized by milestone.
 
 ---
 
-*Last updated: 2026-04-16*
+*Last updated: 2026-07-06*

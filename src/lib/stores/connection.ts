@@ -24,6 +24,7 @@ export interface FcInfo {
   api_version: string;
   fc_variant: string;
   fc_version: string;
+  craft_name: string;
   board_id: string;
   hardware_revision: number;
   platform_type: number;

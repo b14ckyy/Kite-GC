@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned — Blackbox Import & Flight Metadata Enrichment
+- Blackbox import pipeline based on external `blackbox_decode` binary (application folder first, PATH fallback)
+- Parsed Blackbox CSV rows stored as JSON blobs for dynamic per-log columns
+- Original Blackbox `.TXT` archived as BLOB in SQLite for later re-processing/export
+- Standalone Blackbox import creates logbook entries with `source = "blackbox"`
+- Existing live-recorded flights can be enriched with attached Blackbox data via `source = "both"`
+- Multi-log `.TXT` support via decoder `--index N`
+- Planned DB migration v2: `blackbox_records`, `blackbox_files`, and `flights.source`
+- Weather and reverse geocoding planned to move from lazy logbook fetch to ARM-time async capture
+
+### Added — Flight Recording & Logbook (M5, core)
+- New Rust `flightlog` module: `db.rs`, `recorder.rs`, `raw_logger.rs`, `geocode.rs`, `weather.rs`, `types.rs`
+- SQLite storage via `rusqlite` with bundled SQLite (no external SQLite install required)
+- Migration system using `PRAGMA user_version` (schema v1)
+- New `flights` and `telemetry_records` tables with flight metadata + sampled telemetry points
+- Flight recorder integrated into scheduler loop (primary connection only), with ARM/DISARM transition detection from `MSPV2_INAV_STATUS` arming flags
+- Automatic flight session start on ARM and finalize on DISARM
+- Optional raw text log file output per flight (`raw_logs/*.txt`)
+- New handshake step: `MSP_NAME` query; craft name now available in `FcInfo`
+- New Tauri commands for logbook operations:
+	- `flightlog_list`, `flightlog_get`, `flightlog_get_track`, `flightlog_delete`, `flightlog_update_notes`
+	- `flightlog_geocode` (OSM Nominatim), `flightlog_fetch_weather` (Open-Meteo), `flightlog_default_db_path`
+- Frontend store `src/lib/stores/flightlog.ts` for typed logbook command wrappers
+- Settings integration:
+	- `flightLoggingEnabled` (default OFF)
+	- `flightLogDbPath` (custom folder or default AppData/portable path)
+	- `flightLogRawEnabled` (default OFF)
+- Settings UI enhancements:
+	- Flight logging enable/disable toggle
+	- Raw log toggle
+	- Database folder picker using native directory dialog
+- New Logbook tab with grouped sort modes:
+	- Aircraft -> Location -> Date
+	- Location -> Date -> Aircraft
+	- Date -> Location -> Aircraft
+	- Aircraft -> Date -> Location
+- Flight detail panel with metadata, notes editing, and delete action
+- English and German i18n keys for flight logging and logbook UI
+
+### Tested — Flight Recording & Logbook
+- Rust unit tests for DB schema + CRUD + telemetry batch + cascade delete (5 tests, all passing)
+- `cargo check` successful
+- `npm run check` successful (0 errors; existing warnings remain)
+
 ### Added — Mission Planning (M4)
 - Mission module: Rust backend with `mission/types.rs`, `mission/codec.rs`, `mission/store.rs`
 - Waypoint data model: all 8 INAV WP action types (Waypoint, PosholdUnlim, PosholdTime, RTH, SetPoi, Jump, SetHead, Land)

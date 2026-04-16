@@ -2,9 +2,11 @@
 
 use tauri::{AppHandle, State};
 
+use crate::flightlog::recorder::FlightRecorder;
+use crate::flightlog::types::FlightLogSettings;
 use crate::msp::{
     FcInfo, FeatureSet, InavVersion, MSP_API_VERSION, MSP_BOARD_INFO, MSP_FC_VARIANT,
-    MSP_FC_VERSION, MSPV2_INAV_MIXER,
+    MSP_FC_VERSION, MSP_NAME, MSPV2_INAV_MIXER,
 };
 use crate::msp::features::is_version_supported;
 use crate::scheduler;
@@ -29,6 +31,9 @@ pub async fn connect(
     attitude_rate_hz: Option<f64>,
     position_rate_hz: Option<f64>,
     airspeed_enabled: Option<bool>,
+    flight_log_enabled: Option<bool>,
+    flight_log_path: Option<String>,
+    flight_log_raw: Option<bool>,
     state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<FcInfo, String> {
@@ -123,6 +128,16 @@ pub async fn connect(
         }
     }
 
+    // 6) MSP_NAME → craft name configured in the FC
+    match serial.msp_request(MSP_NAME, &[]) {
+        Ok(resp) => {
+            fc_info.craft_name = String::from_utf8_lossy(&resp.payload).trim().to_string();
+        }
+        Err(e) => {
+            log::warn!("Failed to query craft name: {}", e);
+        }
+    }
+
     log::info!(
         "Connected to {} {} v{} on {} (board: {}, API: {}, platform: {})",
         fc_info.fc_variant,
@@ -140,7 +155,36 @@ pub async fn connect(
         position_rate_hz: position_rate_hz.unwrap_or(2.0),
         airspeed_enabled: airspeed_enabled.unwrap_or(false),
     };
-    let handle = scheduler::start(serial, config, app_handle);
+
+    // ── Flight recorder setup ────────────────────────────────────────────
+    let flight_log_settings = FlightLogSettings {
+        enabled: flight_log_enabled.unwrap_or(false),
+        db_path: flight_log_path.unwrap_or_default(),
+        raw_enabled: flight_log_raw.unwrap_or(false),
+    };
+
+    let recorder_handle = if flight_log_settings.enabled {
+        let portable = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.join(".portable").exists()))
+            .unwrap_or(false);
+
+        match FlightRecorder::new(flight_log_settings, fc_info.clone(), portable) {
+            Ok(rec) => {
+                let handle = std::sync::Arc::new(std::sync::Mutex::new(rec));
+                log::info!("Flight recorder initialized");
+                Some(handle)
+            }
+            Err(e) => {
+                log::error!("Failed to initialize flight recorder: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    let handle = scheduler::start(serial, config, app_handle, recorder_handle);
 
     // Store scheduler handle and FC info
     {
