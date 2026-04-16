@@ -84,13 +84,62 @@ This document tracks planned features, organized by milestone.
 - [x] Airspeed module toggle (on/off)
 - [x] Settings persisted in localStorage, passed to backend on connect
 
-## Milestone 3: Enhanced Monitoring (v0.3.x)
+## ✅ Milestone 3: Enhanced Monitoring (v0.3.x)
 
-- [ ] Flight path trail on map
-- [ ] Multiple map tile providers (OSM, Satellite, Terrain)
-- [ ] Compass / heading indicator widget
-- [ ] Altitude graph (real-time)
-- [ ] Home position marker
+### Map Providers
+- [x] Map provider configuration system (`mapProviders.ts`)
+- [x] OSM Standard (default)
+- [x] ESRI World Street Map
+- [x] ESRI World Imagery (Satellite)
+- [x] ESRI Hybrid (Satellite + Boundaries & Places + Transportation overlays)
+- [x] OpenTopoMap (contour lines)
+- [x] CartoDB Dark Matter (dark theme)
+- [x] Provider selection in Settings panel (persisted)
+- [x] Live provider switching without page reload
+
+### Tile Cache
+- [x] IndexedDB-backed tile cache (`tileCache.ts`)
+- [x] Custom Leaflet TileLayer with cache integration (`CachedTileLayer.ts`)
+- [x] Configurable cache size (No Cache / 100 / 200 / 500 / 1000 MB)
+- [x] LRU eviction strategy (oldest tiles removed first when limit reached)
+- [x] Cache fill indicator with progress bar in Settings
+- [x] Clear cache button
+
+### HUD Widget System
+- [x] Widget bar layout (grid: left–center–right, viewport-relative sizing)
+- [x] AHI — Artificial Horizon Indicator (SVG, pitch/roll animation, pitch ladder, roll scale)
+- [x] Speed widget (ground speed + optional airspeed)
+- [x] Altitude widget (altitude + vario with directional indicator)
+- [x] Battery widget (voltage bar, voltage, current, mAh drawn)
+- [x] GPS widget (satellite count + fix type with color coding)
+- [x] Compass widget (rotating compass rose with heading + cardinal label)
+- [x] Home widget (direction arrow, distance, bearing — set on arm + GPS fix)
+- [x] Per-widget ON/OFF toggle in Settings (persisted)
+- [x] All sizes viewport-relative (vmin units, no fixed pixels)
+
+### Map Features
+- [x] Flight path trail (polyline, INAV blue, 1m minimum distance filter)
+- [x] Home position marker (green "H" circle, set on arm transition)
+- [x] Home position store for cross-component access
+
+### Raw Telemetry Panel
+- [x] Right-side floating panel with all numeric telemetry values
+- [x] 12 data rows: ALT, SPD, VRT, HDG, ROL, PIT, BAT, CUR, MAH, SAT, RSSI, CPU
+
+### Customizable Widget Panels
+- [x] Drag-and-drop widget panel system (bottom + right panels)
+- [x] Large (AHI, Compass) and Small (all others) widget classes
+- [x] Dynamic panel sizing — adapts to content, shrinks only at screen edge
+- [x] Half-position insertion detection with visual insertion indicator
+- [x] Cross-panel drag (move widgets between bottom and right panels)
+- [x] Widget position memory — toggle OFF/ON restores last panel assignment
+- [x] Edit mode toggle button (✎) with visible panel outlines
+- [x] Per-widget ON/OFF toggle in Settings with panel label indicator
+
+### Map View Modes
+- [x] North-Up mode (default) — map oriented north
+- [x] Heading-Up mode — map rotates with UAV heading, auto-centers on UAV
+- [x] View mode toggle button on map (compass/heading indicator)
 
 ## Milestone 4: Flight Recording & Logbook (v0.4.x)
 
@@ -115,16 +164,24 @@ This document tracks planned features, organized by milestone.
 
 ## Milestone 6: Advanced Features (v0.6.x+)
 
-- [ ] LTM protocol support
-- [ ] MAVLink telemetry support
-- [ ] CRSF protocol support
+### Multi-Protocol Telemetry Architecture
+- [ ] `TelemetrySource` trait — protocol-agnostic abstraction (refactor `poll_slot`)
+- [ ] `MspSource` — existing MSP poll/decode extracted into trait impl
+- [ ] `LtmSource` — LTM (Lightweight Telemetry) protocol support
+- [ ] `MavlinkSource` — MAVLink v1/v2 telemetry + heartbeat (ArduPilot/PX4)
+- [ ] `CrsfSource` — CRSF/ELRS telemetry frames
+- [ ] `ReplaySource` — playback from recorded flights (Blackbox, OTX/ETX logs)
+- [ ] Multi-aircraft support (multiple TelemetrySource instances, per-UAV stores)
+
+### Additional Transports
 - [ ] Bluetooth (BLE) transport
 - [ ] TCP/UDP transport
+- [ ] Wi-Fi Direct transport
+
+### Advanced UI & Tools
 - [ ] OSD font/element preview
 - [ ] Safehome editor
-- [ ] Log replay (Blackbox, OTX/ETX)
 - [ ] HID controller input (gamepad/joystick)
-- [ ] Multi-aircraft monitoring (INAV Radar)
 - [ ] Audio status alerts (TTS)
 - [ ] Survey/area planner
 - [ ] Terrain analysis
@@ -135,4 +192,4 @@ This document tracks planned features, organized by milestone.
 
 ---
 
-*Last updated: 2026-04-15*
+*Last updated: 2026-04-16*

@@ -8,16 +8,27 @@ export interface MapState {
   zoom: number;
 }
 
+export interface PanelConfig {
+  bottom: string[]; // widget IDs in display order
+  right: string[];  // widget IDs in display order
+  /** Remembers last panel assignment per widget so toggle off/on restores position */
+  positions?: Record<string, 'bottom' | 'right'>;
+}
+
 export interface AppSettings {
   lastPort: string;
   lastBaud: number;
   map: MapState;
+  mapProvider: string;
+  mapCacheMaxMB: number;
   navPanelOpen: boolean;
   activeTab: string;
   // Telemetry poll rates
   attitudeRateHz: number;
   positionRateHz: number;
   airspeedEnabled: boolean;
+  // Widget panel layout
+  panels: PanelConfig;
 }
 
 const STORAGE_KEY = 'inav-gcs-settings';
@@ -29,11 +40,17 @@ const defaults: AppSettings = {
     center: [51.505, -0.09],
     zoom: 13,
   },
+  mapProvider: 'osm',
+  mapCacheMaxMB: 200,
   navPanelOpen: false,
   activeTab: 'uav-info',
   attitudeRateHz: 5,
   positionRateHz: 2,
   airspeedEnabled: false,
+  panels: {
+    bottom: ['home', 'battery', 'speed', 'ahi', 'altitude', 'gps', 'compass'],
+    right: ['rawTelemetry'],
+  },
 };
 
 function load(): AppSettings {

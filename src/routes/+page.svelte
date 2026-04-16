@@ -7,6 +7,28 @@
   import { telemetry, startTelemetryListeners, stopTelemetryListeners, resetTelemetry } from "$lib/stores/telemetry";
   import { get } from "svelte/store";
   import Map from "$lib/components/Map.svelte";
+  import { MAP_PROVIDERS } from "$lib/config/mapProviders";
+  import { tileCacheStats, setCacheMaxMB, clearCache } from "$lib/cache/tileCache";
+  import type { TileCacheStats } from "$lib/cache/tileCache";
+  import WidgetPanel from "$lib/components/WidgetPanel.svelte";
+  import { WIDGET_DEFS, LARGE_BASE_VMIN } from "$lib/config/widgetRegistry";
+  import type { PanelConfig } from "$lib/stores/settings";
+
+  // Reactive window dimensions for dynamic panel sizing
+  let winW = $state(typeof window !== 'undefined' ? window.innerWidth : 1920);
+  let winH = $state(typeof window !== 'undefined' ? window.innerHeight : 1080);
+  $effect(() => {
+    const onResize = () => { winW = window.innerWidth; winH = window.innerHeight; };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  });
+
+  // Available vmin for each panel (screen space minus reserved areas)
+  const vminPx = $derived(Math.min(winW, winH) / 100);
+  // Bottom: left margin (2vmin) + right reserved corner (22.5vmin + 3vmin)
+  const bottomAvailVmin = $derived(winW / vminPx - 2 - 22.5 - 3);
+  // Right: toolbar (~60px top) + statusbar (~30px) + bottom reserved (22.5vmin)
+  const rightAvailVmin = $derived((winH - 60 - 30) / vminPx - 22.5);
 
   let appVersion = $state("...");
   let selectedPort = $state("");
@@ -32,6 +54,19 @@
   let attitudeRateHz = $state(5);
   let positionRateHz = $state(2);
   let airspeedEnabled = $state(false);
+  let mapProvider = $state("osm");
+  let mapCacheMaxMB = $state(200);
+
+  // Widget panel state
+  let panels = $state<PanelConfig>({
+    bottom: ['home', 'battery', 'speed', 'ahi', 'altitude', 'gps', 'compass'],
+    right: ['rawTelemetry'],
+  });
+  let widgetEditMode = $state(false);
+
+  // Cache stats subscription
+  let cacheStats = $state<TileCacheStats>({ usedBytes: 0, maxBytes: 0, tileCount: 0 });
+  tileCacheStats.subscribe((s) => { cacheStats = s; });
 
   // INAV arming flags (bit positions from INAV source)
   const ARMING_FLAG_ARMED = 2; // bit 2 = ARMED
@@ -87,6 +122,9 @@
   attitudeRateHz = saved.attitudeRateHz;
   positionRateHz = saved.positionRateHz;
   airspeedEnabled = saved.airspeedEnabled;
+  mapProvider = saved.mapProvider;
+  mapCacheMaxMB = saved.mapCacheMaxMB;
+  panels = saved.panels ?? panels;
 
   function toggleNavPanel() {
     navPanelOpen = !navPanelOpen;
@@ -189,6 +227,57 @@
   }
 
   loadInfo();
+
+  // Widget panel management
+  function handleReorder(panelId: string, newIds: string[]) {
+    panels = { ...panels, [panelId]: newIds };
+    settings.patch({ panels });
+  }
+
+  function handleReceive(targetPanel: string, widgetId: string, index: number) {
+    // Remove from source panel
+    const newPanels = { ...panels };
+    for (const key of ['bottom', 'right'] as const) {
+      newPanels[key] = newPanels[key].filter(id => id !== widgetId);
+    }
+    // Insert into target
+    const targetList = [...newPanels[targetPanel as 'bottom' | 'right']];
+    targetList.splice(index, 0, widgetId);
+    newPanels[targetPanel as 'bottom' | 'right'] = targetList;
+    // Remember position
+    newPanels.positions = { ...newPanels.positions, [widgetId]: targetPanel as 'bottom' | 'right' };
+    panels = newPanels;
+    settings.patch({ panels });
+  }
+
+  function toggleWidget(widgetId: string) {
+    const allAssigned = [...panels.bottom, ...panels.right];
+    if (allAssigned.includes(widgetId)) {
+      // Remember current panel before removing
+      const currentPanel = panels.bottom.includes(widgetId) ? 'bottom' : 'right';
+      const newPositions = { ...panels.positions, [widgetId]: currentPanel as 'bottom' | 'right' };
+      panels = {
+        bottom: panels.bottom.filter(id => id !== widgetId),
+        right: panels.right.filter(id => id !== widgetId),
+        positions: newPositions,
+      };
+    } else {
+      // Restore to last known panel, default to bottom
+      const target = panels.positions?.[widgetId] ?? 'bottom';
+      panels = { ...panels, [target]: [...panels[target], widgetId] };
+    }
+    settings.patch({ panels });
+  }
+
+  function isWidgetActive(widgetId: string): boolean {
+    return panels.bottom.includes(widgetId) || panels.right.includes(widgetId);
+  }
+
+  function getWidgetPanelLabel(widgetId: string): string {
+    if (panels.bottom.includes(widgetId)) return 'Bottom';
+    if (panels.right.includes(widgetId)) return 'Right';
+    return 'Off';
+  }
 </script>
 
 <main class="app">
@@ -328,6 +417,42 @@
         <!-- Settings Tab -->
         {:else if activeTab === "settings"}
           <section class="panel-section">
+            <h4 class="section-heading">Map</h4>
+            <div class="setting-row">
+              <label class="setting-label" for="map-provider">Tile Provider</label>
+              <select id="map-provider" class="setting-select" bind:value={mapProvider} onchange={() => settings.patch({ mapProvider })}>
+                {#each MAP_PROVIDERS as p}
+                  <option value={p.id}>{p.label}</option>
+                {/each}
+              </select>
+            </div>
+            <div class="setting-row">
+              <label class="setting-label" for="map-cache">Tile Cache</label>
+              <select id="map-cache" class="setting-select" bind:value={mapCacheMaxMB} onchange={() => { settings.patch({ mapCacheMaxMB }); setCacheMaxMB(mapCacheMaxMB); }}>
+                <option value={0}>No Cache</option>
+                <option value={100}>100 MB</option>
+                <option value={200}>200 MB</option>
+                <option value={500}>500 MB</option>
+                <option value={1000}>1000 MB</option>
+              </select>
+            </div>
+            {#if mapCacheMaxMB > 0}
+              <div class="cache-bar-container">
+                <div class="cache-bar-track">
+                  <div
+                    class="cache-bar-fill"
+                    class:cache-bar-warning={cacheStats.maxBytes > 0 && cacheStats.usedBytes / cacheStats.maxBytes > 0.85}
+                    style="width: {cacheStats.maxBytes > 0 ? Math.min(100, cacheStats.usedBytes / cacheStats.maxBytes * 100).toFixed(1) : 0}%"
+                  ></div>
+                </div>
+                <span class="cache-bar-label">
+                  {(cacheStats.usedBytes / 1024 / 1024).toFixed(1)} / {mapCacheMaxMB} MB · {cacheStats.tileCount} tiles
+                </span>
+                <button class="cache-clear-btn" onclick={() => clearCache()} title="Clear tile cache">Clear</button>
+              </div>
+            {/if}
+          </section>
+          <section class="panel-section">
             <h4 class="section-heading">Telemetry Rates</h4>
             <div class="setting-row">
               <label class="setting-label" for="attitude-rate">Attitude</label>
@@ -359,6 +484,21 @@
             </div>
           </section>
           <section class="panel-section">
+            <h4 class="section-heading">HUD Widgets</h4>
+            {#each WIDGET_DEFS as wdef}
+              <div class="setting-row">
+                <label class="setting-label">{wdef.label}</label>
+                <div class="widget-toggle-group">
+                  <span class="widget-panel-indicator">{getWidgetPanelLabel(wdef.id)}</span>
+                  <label class="toggle-switch">
+                    <input type="checkbox" checked={isWidgetActive(wdef.id)} onchange={() => toggleWidget(wdef.id)} />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+              </div>
+            {/each}
+          </section>
+          <section class="panel-section">
             <p class="setting-hint">Rate changes take effect on next connect.</p>
           </section>
 
@@ -373,37 +513,48 @@
     </div>
   {/if}
 
-  <!-- ======= BOTTOM TELEMETRY OVERLAY ======= -->
-  <div class="telemetry-overlay">
-    <div class="telemetry-strip">
-      {#if telem.lastUpdate > 0 && isArmed()}
-        <div class="telem-widget armed-widget">
-          <span class="telem-label">STATUS</span>
-          <span class="telem-value armed-text">ARMED</span>
-        </div>
-      {/if}
-      <div class="telem-widget">
-        <span class="telem-label">ALT</span>
-        <span class="telem-value">{telem.lastUpdate ? `${telem.altitude.toFixed(1)} m` : '— m'}</span>
-      </div>
-      <div class="telem-widget">
-        <span class="telem-label">SPD</span>
-        <span class="telem-value">{telem.lastUpdate ? `${(telem.groundSpeed * 3.6).toFixed(0)} km/h` : '— km/h'}</span>
-      </div>
-      <div class="telem-widget">
-        <span class="telem-label">VARIO</span>
-        <span class="telem-value">{telem.lastUpdate ? `${telem.vario >= 0 ? '+' : ''}${telem.vario.toFixed(1)} m/s` : '— m/s'}</span>
-      </div>
-      <div class="telem-widget">
-        <span class="telem-label">BAT</span>
-        <span class="telem-value">{telem.lastUpdate ? `${telem.voltage.toFixed(1)}V ${telem.current.toFixed(1)}A` : '—V'}</span>
-      </div>
-      <div class="telem-widget">
-        <span class="telem-label">SATS</span>
-        <span class="telem-value">{telem.lastUpdate ? `${telem.numSat} ${getGpsFixLabel()}` : '—'}</span>
-      </div>
-    </div>
+  <!-- ======= BOTTOM WIDGET PANEL ======= -->
+  <div class="panel-bottom">
+    <WidgetPanel
+      widgetIds={panels.bottom}
+      orientation="horizontal"
+      availableVmin={bottomAvailVmin}
+      {telem}
+      editing={widgetEditMode}
+      onreorder={handleReorder}
+      onreceive={handleReceive}
+      panelId="bottom"
+    />
   </div>
+
+  <!-- ======= RIGHT WIDGET PANEL ======= -->
+  <div class="panel-right">
+    <WidgetPanel
+      widgetIds={panels.right}
+      orientation="vertical"
+      availableVmin={rightAvailVmin}
+      {telem}
+      editing={widgetEditMode}
+      onreorder={handleReorder}
+      onreceive={handleReceive}
+      panelId="right"
+    />
+  </div>
+
+  <!-- ======= BOTTOM-RIGHT RESERVED AREA (controls placeholder) ======= -->
+  <div class="reserved-corner">
+    <!-- reserved for future control buttons -->
+  </div>
+
+  <!-- ======= WIDGET EDIT TOGGLE ======= -->
+  <button
+    class="widget-edit-btn"
+    class:active={widgetEditMode}
+    onclick={() => widgetEditMode = !widgetEditMode}
+    title={widgetEditMode ? "Exit edit mode" : "Edit widget layout"}
+  >
+    ✎
+  </button>
 
   <!-- ======= DEBUG PANEL (dev only) ======= -->
   {#if DEV_MODE && debugOpen && DebugPanelCmp}
@@ -755,7 +906,7 @@
     background: rgba(46, 46, 46, 0.92);
     border: 1px solid rgba(55, 168, 219, 0.35);
     border-radius: 8px;
-    z-index: 90;
+    z-index: 150;
     overflow-y: auto;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
     backdrop-filter: blur(12px);
@@ -848,50 +999,98 @@
     text-decoration: line-through;
   }
 
-  /* --- Bottom Telemetry Overlay --- */
-  .telemetry-overlay {
+  /* --- Bottom Widget Panel --- */
+  .panel-bottom {
     position: absolute;
-    bottom: 30px; /* above statusbar */
-    left: 50%;
-    transform: translateX(-50%);
+    bottom: 30px;
+    left: 2vmin;
+    right: calc(22.5vmin + 3vmin); /* LARGE_BASE_VMIN + margin */
     z-index: 100;
+    display: flex;
+    justify-content: center;
+    pointer-events: none;
+  }
+
+  .panel-bottom > :global(*) {
     pointer-events: auto;
   }
 
-  .telemetry-strip {
+  /* --- Right Widget Panel --- */
+  .panel-right {
+    position: absolute;
+    top: 60px;
+    right: 0.5vmin;
+    bottom: calc(22.5vmin + 36px); /* LARGE_BASE_VMIN + statusbar + margin */
+    z-index: 100;
     display: flex;
-    gap: 2px;
-    background: rgba(46, 46, 46, 0.92);
-    border: 1px solid rgba(55, 168, 219, 0.3);
-    border-radius: 8px;
-    padding: 4px;
-    backdrop-filter: blur(12px);
-    box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.3);
-  }
-
-  .telem-widget {
-    display: flex;
-    flex-direction: column;
     align-items: center;
-    padding: 6px 14px;
-    min-width: 60px;
-    border-radius: 5px;
-    background: rgba(0, 0, 0, 0.2);
+    justify-content: flex-end;
+    pointer-events: none;
   }
 
-  .telem-label {
-    font-size: 9px;
-    font-weight: 600;
-    color: #37a8db;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+  .panel-right > :global(*) {
+    pointer-events: auto;
   }
 
-  .telem-value {
-    font-size: 14px;
-    font-weight: 700;
+  /* --- Bottom-right reserved corner --- */
+  .reserved-corner {
+    position: absolute;
+    bottom: 30px;
+    right: 0.5vmin;
+    width: 22.5vmin;
+    height: 22.5vmin;
+    z-index: 90;
+    pointer-events: none;
+    /* Visible only in debug — uncomment to see reserved area */
+    /* outline: 1px dashed rgba(255,0,0,0.3); */
+  }
+
+  /* --- Widget edit toggle button --- */
+  .widget-edit-btn {
+    position: absolute;
+    bottom: 32px;
+    right: calc(0.5vmin + 1vmin);
+    width: 3.5vmin;
+    height: 3.5vmin;
+    min-width: 28px;
+    min-height: 28px;
+    background: rgba(46, 46, 46, 0.85);
+    border: 1px solid rgba(55, 168, 219, 0.3);
+    border-radius: 6px;
+    color: #949494;
+    font-size: 1.5vmin;
+    cursor: pointer;
+    z-index: 110;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(8px);
+    transition: background-color 0.2s, border-color 0.2s, color 0.2s;
+  }
+
+  .widget-edit-btn:hover {
+    background: rgba(55, 168, 219, 0.2);
     color: #e0e0e0;
-    font-variant-numeric: tabular-nums;
+  }
+
+  .widget-edit-btn.active {
+    background: rgba(55, 168, 219, 0.25);
+    border-color: #37a8db;
+    color: #37a8db;
+  }
+
+  /* --- Widget toggle group in settings --- */
+  .widget-toggle-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .widget-panel-indicator {
+    font-size: 9px;
+    color: #888;
+    min-width: 38px;
+    text-align: right;
   }
 
   /* --- Error Bar --- */
@@ -975,22 +1174,6 @@
     text-shadow: 0 0 4px rgba(212, 0, 0, 0.3);
   }
 
-  /* --- Armed widget in telemetry strip --- */
-  .armed-widget {
-    background: rgba(212, 0, 0, 0.25) !important;
-    border: 1px solid rgba(212, 0, 0, 0.5);
-  }
-
-  .armed-text {
-    color: #ff4444 !important;
-    animation: armed-pulse 1.5s ease-in-out infinite;
-  }
-
-  @keyframes armed-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.6; }
-  }
-
   /* --- Arming status in status bar --- */
   .statusbar-right {
     display: flex;
@@ -1044,6 +1227,56 @@
     color: #666;
     margin: 4px 0 0 0;
     font-style: italic;
+  }
+
+  /* --- Tile cache bar --- */
+  .cache-bar-container {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 0 2px 0;
+  }
+
+  .cache-bar-track {
+    flex: 1;
+    height: 6px;
+    background: #333;
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .cache-bar-fill {
+    height: 100%;
+    background: #37a8db;
+    border-radius: 3px;
+    transition: width 0.3s ease;
+  }
+
+  .cache-bar-fill.cache-bar-warning {
+    background: #e8a317;
+  }
+
+  .cache-bar-label {
+    font-size: 9px;
+    color: #888;
+    white-space: nowrap;
+  }
+
+  .cache-clear-btn {
+    font-size: 9px;
+    padding: 1px 6px;
+    background: #434343;
+    border: 1px solid #555;
+    border-radius: 3px;
+    color: #ccc;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .cache-clear-btn:hover {
+    background: #c0392b;
+    border-color: #c0392b;
+    color: #fff;
   }
 
   /* --- Toggle switch --- */

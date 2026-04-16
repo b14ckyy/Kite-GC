@@ -215,3 +215,119 @@ Tauri Events → Frontend (telemetry-attitude, telemetry-gps, ...)
 - Vite's `import.meta.env.DEV` is statically replaced at build time, enabling dead code elimination
 - Dynamic import (`import()`) ensures the component is not even bundled in production
 - No dev dependencies leak into release builds on either backend or frontend
+
+---
+
+## ADR-009: Multi-Protocol Telemetry via TelemetrySource Trait (Planned)
+
+**Date**: 2026-04-16
+**Status**: Planned (M6)
+
+**Context**: The GCS will need to support multiple telemetry protocols (MSP, LTM, MAVLink/ArduPilot, CRSF) and multiple simultaneous aircraft. The current telemetry pipeline is already mostly protocol-agnostic — the payload structs (`AttitudeData`, `GpsData`, etc.) and Tauri event names (`telemetry-attitude`, etc.) describe domain concepts, not protocol specifics. The only coupling point is `poll_slot()` in `scheduler/mod.rs`, which directly calls `serial.msp_request()` and MSP-specific decode functions.
+
+**Decision**: Introduce a `TelemetrySource` trait when the second protocol is implemented. The trait abstracts protocol-specific polling and decoding behind a single interface:
+
+```rust
+trait TelemetrySource: Send {
+    /// Poll for new telemetry data. Returns (event_name, payload) pairs.
+    fn poll(&mut self) -> Vec<(String, TelemetryPayload)>;
+    /// Stop the source gracefully.
+    fn stop(&mut self);
+}
+```
+
+**Planned implementations**:
+- `MspSource` — extracted from current `poll_slot()` (MSP request/response + decode)
+- `LtmSource` — LTM frame parser (passive, no request needed)
+- `MavlinkSource` — MAVLink v1/v2 heartbeat + telemetry messages (ArduPilot, PX4)
+- `CrsfSource` — CRSF/ELRS telemetry frames
+- `ReplaySource` — playback from recorded flights at original timing
+
+**Key properties**:
+- All sources emit the **same** `TelemetryPayload` variants → frontend code is never changed
+- The scheduler thread owns a `Box<dyn TelemetrySource>` instead of calling MSP directly
+- Multi-aircraft: multiple `TelemetrySource` instances with per-UAV ID, routed to per-UAV stores
+- Protocol auto-detection possible: try MSP handshake → fall back to MAVLink heartbeat sniffing
+
+**What stays unchanged**: The frontend stores (`telemetry.ts`), all widgets, the Tauri event interface, the scheduler loop structure (priority slots, command/bulk channels).
+
+**Rationale**:
+- Current payload structs are already protocol-agnostic — no rework needed there
+- Single insertion point (`poll_slot`) means low refactoring risk
+- Defer until second protocol implementation to avoid premature abstraction
+- The trait boundary is a natural extension of the existing module structure
+
+---
+
+## ADR-010: Drag-and-Drop Widget Panel System
+
+**Date**: 2026-04-16
+**Status**: Accepted
+
+**Context**: The GCS needs a flexible HUD with multiple instrument widgets that users can arrange to their preference. Fixed layouts don't work well across different screen sizes and use cases (e.g. FPV flying prioritizes AHI, long-range prioritizes GPS/battery).
+
+**Decision**: Two drag-and-drop widget panels (bottom horizontal, right vertical) with edit-mode toggling. Widgets are classified as Large (22.5vmin) or Small (13.5vmin = 60% of large), all sized in `vmin` units.
+
+**Key design choices**:
+- **Snap positions only** — no free-form positioning. Widgets snap into ordered slots within panels.
+- **Half-position insertion** — drag cursor position relative to slot midpoint determines before/after placement. Visual insertion indicator (blue line) shows exact drop position.
+- **Dynamic sizing** — panels compute available space from window dimensions minus reserved areas. Widgets render at base size and shrink uniformly (min 50%) only when total exceeds available space.
+- **Edit mode overlay** — transparent overlay div captures drag events without interfering with widget rendering. Solves the SVG/canvas event interception problem.
+- **Tauri DnD disabled** — `dragDropEnabled: false` in tauri.conf.json prevents Tauri's native file-drop handler from intercepting HTML5 drag events.
+- **Position memory** — `PanelConfig.positions` records last panel per widget. Toggle OFF/ON restores to last panel, not always bottom.
+
+**Layout**:
+```
+┌─────────────────────────────────────────────┐
+│  Toolbar                                    │
+├─────────────────────────────────────────────┤
+│                                    │ Right  │
+│              MAP                   │ Panel  │
+│           (fullscreen)             │(vert)  │
+│                                    │        │
+│  ┌──────────────────────────┐  ┌───┤        │
+│  │    Bottom Panel (horiz)  │  │Rsv│        │
+├──┴──────────────────────────┴──┴───┴────────┤
+│  Status Bar                                 │
+└─────────────────────────────────────────────┘
+```
+
+**Rationale**:
+- Two panels cover the most common layouts (instruments at bottom, data sidebar on right)
+- Snap positions eliminate alignment/overlap issues — clean look without manual tweaking
+- vmin sizing ensures consistent proportions on any screen size or aspect ratio
+- Edit mode is explicit (toggle button) — no accidental drags during flight monitoring
+- Position memory reduces friction when temporarily hiding widgets
+
+---
+
+## ADR-011: Map Heading-Up Mode via CSS Transform
+
+**Date**: 2026-04-16
+**Status**: Accepted
+
+**Context**: Pilots prefer heading-up map orientation during flight — the direction of travel is always "up" on screen, matching the natural view from the cockpit. Leaflet does not natively support map rotation.
+
+**Considered**: leaflet-rotate plugin, custom Leaflet fork, CSS transform on container
+
+**Decision**: CSS `transform: rotate() scale(1.42)` on the Leaflet map container element, with `overflow: hidden` on a wrapper div.
+
+**How it works**:
+- `rotate(var(--map-rotation))` — CSS variable updated on each telemetry tick with `-yaw` degrees
+- `scale(1.42)` (√2) — ensures the rotated rectangle always fills the viewport corners
+- Wrapper div with `overflow: hidden` clips the extended corners
+- Leaflet controls (zoom, attribution) are counter-rotated and scaled back (0.707) to stay readable
+- UAV marker icon uses 0° rotation in heading-up mode since the map itself provides the rotation
+- Map auto-centers on UAV position in heading-up mode
+
+**Trade-offs**:
+- Map interaction (panning) works but direction feels rotated — acceptable for a monitoring view
+- 42% visual zoom increase from scale factor — tiles load for the larger visible area
+- No dependency on external plugins or Leaflet forks
+
+**Rationale**:
+- Zero dependencies — pure CSS, no additional JavaScript libraries
+- GPU-accelerated transforms — smooth rotation even at 5 Hz telemetry rate
+- Simple toggle — just add/remove CSS class + update CSS variable
+- Can be upgraded to leaflet-rotate or CesiumJS 3D in future milestones if needed
+

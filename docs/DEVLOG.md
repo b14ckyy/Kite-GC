@@ -40,10 +40,29 @@ INAV GCS/
 │   │   ├── stores/               # Svelte reactive state stores
 │   │   │   ├── connection.ts     # Connection state, FC info, feature set
 │   │   │   ├── telemetry.ts      # Telemetry data store (GPS, attitude, battery)
-│   │   │   └── settings.ts      # Session persistence (localStorage)
+│   │   │   ├── settings.ts       # Session persistence (localStorage)
+│   │   │   └── home.ts           # Home position store (set on arm + GPS fix)
 │   │   ├── components/           # Reusable UI components
-│   │   │   ├── Map.svelte        # Leaflet map with position persistence
-│   │   │   └── DebugPanel.svelte # MSP debug monitor (dev builds only)
+│   │   │   ├── Map.svelte        # Leaflet map (trail, home marker, cached tiles, heading-up)
+│   │   │   ├── WidgetPanel.svelte # Drag-and-drop widget panel container
+│   │   │   ├── DebugPanel.svelte # MSP debug monitor (dev builds only)
+│   │   │   └── widgets/          # HUD widget components
+│   │   │       ├── AHI.svelte        # Artificial Horizon Indicator
+│   │   │       ├── SpeedWidget.svelte # Ground speed + airspeed
+│   │   │       ├── AltWidget.svelte   # Altitude + vario
+│   │   │       ├── BatteryWidget.svelte # Voltage, current, mAh
+│   │   │       ├── GpsWidget.svelte   # Satellite count + fix type
+│   │   │       ├── CompassWidget.svelte # Compass rose + heading
+│   │   │       ├── HomeWidget.svelte  # Home direction, distance, bearing
+│   │   │       └── RawTelemetryWidget.svelte # Raw telemetry data panel
+│   │   ├── cache/                # Map tile cache
+│   │   │   ├── tileCache.ts      # IndexedDB backend, LRU eviction
+│   │   │   └── CachedTileLayer.ts # Custom Leaflet TileLayer with cache
+│   │   ├── config/               # Static configuration
+│   │   │   ├── mapProviders.ts   # Map tile provider definitions
+│   │   │   └── widgetRegistry.ts # Widget definitions, size constants, classes
+│   │   ├── utils/                # Utility functions
+│   │   │   └── geo.ts            # Haversine distance, bearing, formatting
 │   │   └── index.ts              # Library entry point
 │   └── app.html                  # HTML entry point
 │
@@ -133,10 +152,13 @@ The UI follows a **floating overlay** pattern — the map fills the entire viewp
 - **Hamburger Menu** (top-left over map): Opens the navigation rail + floating panel
 - **Navigation Rail**: Vertical icon buttons — UAV Info (✈), Settings (⚙), Mission (◎)
 - **Floating Panel**: Semi-transparent, backdrop-blur, slides in from left with animation
-- **Telemetry Strip** (bottom center): Horizontal widget bar overlay (ALT, SPD, DIST, BAT, SATS)
-- **Status Bar** (bottom): Connection status, app title
+- **HUD Widget Panels** (bottom + right): Drag-and-drop widget layout, viewport-relative sizing (vmin)
+- **Raw Telemetry Panel** (right side): Compact numeric readouts — implemented as a widget in the right panel
+- **Status Bar** (bottom): Connection status, arming state, app title
 
 All overlay elements use glassmorphism styling (backdrop-blur, semi-transparent backgrounds) with the INAV Configurator color scheme (#37a8db accent, #2e2e2e panels).
+
+Widget sizes use `vmin` units exclusively (no fixed pixels) to scale with viewport — this ensures consistent sizing on desktop and mobile in landscape mode.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) ADR-005 for the full rationale.
 
@@ -170,9 +192,44 @@ Sequence: `MSP_API_VERSION` → `MSP_FC_VARIANT` (must be "INAV") → `MSP_FC_VE
 Settings stored in `localStorage` under key `inav-gcs-settings`:
 - `lastPort` / `lastBaud` — last used serial connection
 - `map.center` / `map.zoom` — map viewport state
+- `mapProvider` / `mapCacheMaxMB` — tile provider + cache size
 - `navPanelOpen` / `activeTab` — floating panel state
+- `attitudeRateHz` / `positionRateHz` / `airspeedEnabled` — telemetry poll config
+- `widgetAhi` / `widgetSpeed` / `widgetAltitude` / `widgetBattery` / `widgetGps` / `widgetCompass` / `widgetHome` — per-widget visibility toggles
+- `panels` — widget panel layout: `{ bottom: string[], right: string[], positions?: Record<string, 'bottom' | 'right'> }`
 
 Implemented via custom Svelte store with auto-save on every mutation. Schema evolution handled by merging defaults: `{ ...defaults, ...stored }`.
+
+## HUD Widget Panel System
+
+The HUD uses a **two-panel drag-and-drop layout**:
+
+- **Bottom Panel**: Horizontal strip above the status bar, centered. Reserved corner (22.5vmin) at bottom-right for future controls.
+- **Right Panel**: Vertical strip on the right edge, centered vertically.
+
+### Widget Classes
+- **Large** (22.5vmin): AHI, Compass — circular, complex visualizations
+- **Small** (13.5vmin = 60% of large): All others — square, compact data display
+
+### Dynamic Sizing
+Panels compute available space from window dimensions minus reserved areas. Widgets render at base size and only shrink (down to 50% minimum) when the total exceeds available space. Window resize is tracked reactively.
+
+### Drag & Drop
+- **Half-position detection**: Cursor position relative to slot midpoint determines before/after insertion
+- **Insertion indicator**: Blue line shows exact drop position (vertical for horizontal panel, horizontal for vertical)
+- **Cross-panel moves**: Drag from bottom → right or vice versa, with capacity check
+- **Tauri interop**: `dragDropEnabled: false` in tauri.conf.json to prevent Tauri from intercepting HTML5 DnD events
+- **Edit mode overlay**: Transparent overlay div on each widget captures drag events without blocking widget rendering
+
+### Position Memory
+Widget panel assignments are stored in `PanelConfig.positions` (Record<string, 'bottom' | 'right'>). When a widget is toggled OFF, its current panel is saved. When toggled back ON, it restores to its last panel instead of always defaulting to bottom.
+
+## Map View Modes
+
+The map supports two view modes, toggled via a button below the zoom controls:
+
+- **North-Up** (default): Standard map orientation, north at top.
+- **Heading-Up**: Map rotates with UAV heading so the aircraft always faces up. CSS `transform: rotate() scale(1.42)` on the map container with `overflow: hidden` on the wrapper. Leaflet controls are counter-rotated. UAV marker icon uses fixed 0° rotation since the map itself rotates.
 
 ## Testing
 
