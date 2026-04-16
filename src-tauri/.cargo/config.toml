@@ -3,4 +3,4 @@
 # Adjust this path if building on a different machine.
 # On Linux/macOS you can remove this or set to a local path.
 [build]
-target-dir = "D:\\cargo-target\\inav-gcs"
+target-dir = "D:\\cargo-target\\kite-gc"

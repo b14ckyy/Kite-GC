@@ -1,6 +1,7 @@
 <script lang="ts">
   import { listen } from "@tauri-apps/api/event";
   import { onMount, onDestroy } from "svelte";
+  import { t } from 'svelte-i18n';
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -66,19 +67,19 @@
 
 <div class="debug-panel">
   <div class="debug-header">
-    <span class="debug-title">🔧 MSP Debug Monitor</span>
+    <span class="debug-title">{$t('debug.title')}</span>
     <button class="debug-close" onclick={onclose}>✕</button>
   </div>
 
   <div class="debug-stats">
     <div class="stat-group">
-      <span class="stat-label">MSG/s</span>
+      <span class="stat-label">{$t('debug.msgPerSec')}</span>
       <span class="stat-value">TX {snapshot.msg_per_sec_tx.toFixed(1)}</span>
       <span class="stat-sep">|</span>
       <span class="stat-value">RX {snapshot.msg_per_sec_rx.toFixed(1)}</span>
     </div>
     <div class="stat-group">
-      <span class="stat-label">Throughput</span>
+      <span class="stat-label">{$t('debug.throughput')}</span>
       <span class="stat-value">TX {formatBytes(snapshot.bytes_per_sec_tx)}</span>
       <span class="stat-sep">|</span>
       <span class="stat-value">RX {formatBytes(snapshot.bytes_per_sec_rx)}</span>
@@ -90,14 +91,14 @@
       <thead>
         <tr>
           <th class="col-led"></th>
-          <th class="col-code">Code</th>
-          <th class="col-name">Name</th>
-          <th class="col-status">Status</th>
-          <th class="col-num">Req</th>
-          <th class="col-num">Resp</th>
-          <th class="col-num">T/O</th>
-          <th class="col-rate">Target</th>
-          <th class="col-rate">Actual</th>
+          <th class="col-code">{$t('debug.colCode')}</th>
+          <th class="col-name">{$t('debug.colName')}</th>
+          <th class="col-status">{$t('debug.colStatus')}</th>
+          <th class="col-num">{$t('debug.colReq')}</th>
+          <th class="col-num">{$t('debug.colResp')}</th>
+          <th class="col-num">{$t('debug.colTimeout')}</th>
+          <th class="col-rate">{$t('debug.colTarget')}</th>
+          <th class="col-rate">{$t('debug.colActual')}</th>
         </tr>
       </thead>
       <tbody>

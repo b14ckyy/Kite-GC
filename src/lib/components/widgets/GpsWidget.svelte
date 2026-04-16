@@ -1,14 +1,15 @@
 <!-- GPS widget — satellite count + fix type -->
 <script lang="ts">
   import type { TelemetryData } from "$lib/stores/telemetry";
+  import { t } from 'svelte-i18n';
 
   let { telem, size = 9 }: { telem: TelemetryData; size?: number } = $props();
 
   let sats = $derived(telem.lastUpdate ? telem.numSat : '—');
 
   let fixLabel = $derived(() => {
-    if (!telem.lastUpdate || telem.fixType === 0) return 'NO FIX';
-    const types: Record<number, string> = { 1: '2D', 2: '3D', 3: '3D DGPS' };
+    if (!telem.lastUpdate || telem.fixType === 0) return $t('gps.noFix');
+    const types: Record<number, string> = { 1: $t('gps.fix2d'), 2: $t('gps.fix3d'), 3: $t('gps.fix3dDgps') };
     return types[telem.fixType] || `FIX ${telem.fixType}`;
   });
 
@@ -20,7 +21,7 @@
 </script>
 
 <div class="widget-card" style="--ws: {size}vmin">
-  <span class="w-label">GPS</span>
+  <span class="w-label">{$t('sensors.gps')}</span>
   <span class="w-value">{sats}</span>
   <span class="w-fix" style="color: {fixColor}">{fixLabel()}</span>
 </div>

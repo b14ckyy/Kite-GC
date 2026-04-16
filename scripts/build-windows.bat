@@ -1,13 +1,13 @@
 @echo off
 REM ============================================================
-REM INAV GCS — Windows Build Script
+REM Kite Ground Control — Windows Build Script
 REM Builds a standalone Windows executable (.exe / .msi)
 REM ============================================================
 REM Prerequisites: Node.js, Rust, WebView2 Runtime (included in Win10/11)
 REM ============================================================
 
 echo ============================================
-echo  INAV GCS — Windows Build
+echo  Kite Ground Control — Windows Build
 echo ============================================
 echo.
 

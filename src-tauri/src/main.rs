@@ -2,5 +2,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    inav_gcs_lib::run()
+    kite_gc_lib::setup_portable_mode();
+    kite_gc_lib::run()
 }

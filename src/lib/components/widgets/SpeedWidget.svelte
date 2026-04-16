@@ -1,21 +1,22 @@
 <!-- Speed widget — ground speed + optional airspeed -->
 <script lang="ts">
   import type { TelemetryData } from "$lib/stores/telemetry";
+  import { t } from 'svelte-i18n';
 
   let { telem, size = 9 }: { telem: TelemetryData; size?: number } = $props();
 
   let speed = $derived(telem.lastUpdate ? (telem.groundSpeed * 3.6).toFixed(0) : '—');
   let airspeed = $derived(
     telem.lastUpdate && telem.airspeed > 0
-      ? `AS ${(telem.airspeed * 3.6).toFixed(0)}`
+      ? $t('widgetLabels.airspeed', { values: { value: (telem.airspeed * 3.6).toFixed(0) } })
       : null
   );
 </script>
 
 <div class="widget-card" style="--ws: {size}vmin">
-  <span class="w-label">SPD</span>
+  <span class="w-label">{$t('widgetLabels.spd')}</span>
   <span class="w-value">{speed}</span>
-  <span class="w-unit">km/h</span>
+  <span class="w-unit">{$t('widgetLabels.kmh')}</span>
   {#if airspeed}
     <span class="w-secondary">{airspeed}</span>
   {/if}

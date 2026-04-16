@@ -1,4 +1,4 @@
-# INAV GCS
+# Kite Ground Control
 
 A cross-platform Ground Control Station for [INAV](https://github.com/iNavFlight/inav)-based flight controllers.
 

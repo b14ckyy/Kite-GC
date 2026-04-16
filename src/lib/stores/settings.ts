@@ -32,9 +32,11 @@ export interface AppSettings {
   defaultPhTimeSec: number;
   // Widget panel layout
   panels: PanelConfig;
+  // Locale / language
+  locale: string;
 }
 
-const STORAGE_KEY = 'inav-gcs-settings';
+const STORAGE_KEY = 'kite-gc-settings';
 
 const defaults: AppSettings = {
   lastPort: '',
@@ -56,6 +58,7 @@ const defaults: AppSettings = {
     bottom: ['home', 'battery', 'speed', 'ahi', 'altitude', 'gps', 'compass'],
     right: ['rawTelemetry'],
   },
+  locale: 'en',
 };
 
 function load(): AppSettings {

@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================
-# INAV GCS — Linux Build Script
+# Kite Ground Control — Linux Build Script
 # Builds standalone Linux packages (.deb, .AppImage, .rpm)
 # ============================================================
 # Prerequisites:
@@ -13,7 +13,7 @@
 set -e
 
 echo "============================================"
-echo " INAV GCS — Linux Build"
+echo " Kite Ground Control — Linux Build"
 echo "============================================"
 echo ""
 

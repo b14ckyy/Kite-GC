@@ -1,4 +1,4 @@
-// INAV GCS — Ground Control Station for INAV Flight Controllers
+// Kite Ground Control — Universal Ground Control Station
 // Licensed under GPL-3.0-only
 
 mod commands;
@@ -18,6 +18,42 @@ use commands::mission::{
 };
 use mission::store::MissionStore;
 use state::AppState;
+
+/// Detect portable mode: if a `.portable` marker file exists next to the
+/// executable, redirect all application data into a `data/` folder beside
+/// the exe.  Must be called **before** `run()` so the WebView picks up the
+/// environment variables.
+pub fn setup_portable_mode() {
+    let exe_dir = match std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+    {
+        Some(d) => d,
+        None => return,
+    };
+
+    if !exe_dir.join(".portable").exists() {
+        return;
+    }
+
+    let data_dir = exe_dir.join("data");
+    std::fs::create_dir_all(&data_dir).ok();
+
+    let data_str = data_dir.to_string_lossy().to_string();
+
+    // Windows: redirect WebView2 user-data folder
+    #[cfg(target_os = "windows")]
+    {
+        std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &data_str);
+    }
+
+    // Linux: redirect XDG directories so WebKitGTK stores data next to the binary
+    #[cfg(target_os = "linux")]
+    {
+        std::env::set_var("XDG_DATA_HOME", &data_str);
+        std::env::set_var("XDG_CONFIG_HOME", &data_str);
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -46,5 +82,5 @@ pub fn run() {
             mission_load_file,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running INAV GCS");
+        .expect("error while running Kite Ground Control");
 }

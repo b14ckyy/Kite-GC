@@ -1,6 +1,7 @@
 <!-- Altitude widget — altitude + vario indicator -->
 <script lang="ts">
   import type { TelemetryData } from "$lib/stores/telemetry";
+  import { t } from 'svelte-i18n';
 
   let { telem, size = 9 }: { telem: TelemetryData; size?: number } = $props();
 
@@ -16,9 +17,9 @@
 </script>
 
 <div class="widget-card" style="--ws: {size}vmin">
-  <span class="w-label">ALT</span>
+  <span class="w-label">{$t('widgetLabels.alt')}</span>
   <span class="w-value">{alt}</span>
-  <span class="w-unit">m</span>
+  <span class="w-unit">{$t('widgetLabels.mUnit')}</span>
   <span class="w-vario" class:vario-up={varioPositive} class:vario-down={varioNegative}>
     {varioText()}
   </span>

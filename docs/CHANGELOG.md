@@ -1,4 +1,4 @@
-# INAV GCS — Changelog
+# Kite Ground Control — Changelog
 
 All notable changes to this project will be documented in this file.
 
@@ -43,6 +43,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dark-themed scrollbars (custom WebKit styling + `color-scheme: dark`)
 - Dark-themed number inputs and selects in editor popup
 - Global `color-scheme: dark` on HTML root element
+
+### Added — Installer & Portable Mode
+- NSIS installer: install mode `both` — user chooses per-user (%LOCALAPPDATA%) or all-users (Program Files)
+- NSIS uninstall hook: asks whether to remove application data (settings, map cache) from AppData
+- Portable mode: place a `.portable` file next to the exe → all data stored in `data/` folder beside the binary
+- Portable mode works on both Windows (WEBVIEW2_USER_DATA_FOLDER) and Linux (XDG_DATA_HOME/XDG_CONFIG_HOME)
+
+### Added — Internationalization (i18n)
+- `svelte-i18n` library with ICU Message Format for interpolation and plurals
+- English locale file (`en.json`, ~200 translation keys across 18 namespaces)
+- German locale file (`de.json`, complete translation)
+- i18n initialization in `+layout.svelte` (blocks rendering until locale loaded)
+- All 14 frontend component files converted: `+page.svelte`, `MissionPanel.svelte`, `MissionLayer.svelte`, `Map.svelte`, `DebugPanel.svelte`, 7 widget components
+- Language picker in Settings panel (persists selection to localStorage)
+- `WP_ACTION_KEYS` map in `mission.ts` for i18n-compatible waypoint action labels
+- `labelKey` field in `widgetRegistry.ts` for translated widget names
+- `locale` field in `AppSettings` with default `'en'`
 
 ### Fixed — Mission Planning (M4)
 - Editor popup flicker on value edits: popup now on map (not layerGroup), direct DOM innerHTML update avoids Leaflet layout recalc

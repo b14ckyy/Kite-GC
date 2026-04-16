@@ -6,6 +6,8 @@
   import type { AppSettings } from "$lib/stores/settings";
   import { telemetry, startTelemetryListeners, stopTelemetryListeners, resetTelemetry } from "$lib/stores/telemetry";
   import { get } from "svelte/store";
+  import { t, locale } from 'svelte-i18n';
+  import { SUPPORTED_LOCALES } from '$lib/i18n';
   import Map from "$lib/components/Map.svelte";
   import { MAP_PROVIDERS } from "$lib/config/mapProviders";
   import { tileCacheStats, setCacheMaxMB, clearCache } from "$lib/cache/tileCache";
@@ -81,27 +83,30 @@
 
   function getArmingLabel(): string {
     if (!telem.lastUpdate) return "";
-    return isArmed() ? "ARMED" : "DISARMED";
+    return isArmed() ? $t('arming.armed') : $t('arming.disarmed');
   }
 
   function getGpsFixLabel(): string {
-    if (!telem.lastUpdate || telem.fixType === 0) return "NO FIX";
-    const types: Record<number, string> = { 1: "2D", 2: "3D", 3: "3D DGPS" };
+    if (!telem.lastUpdate || telem.fixType === 0) return $t('gps.noFix');
+    const types: Record<number, string> = { 1: $t('gps.fix2d'), 2: $t('gps.fix3d'), 3: $t('gps.fix3dDgps') };
     return types[telem.fixType] || `FIX:${telem.fixType}`;
   }
 
   // Platform type names from flyingPlatformType_e
-  const platformTypes: Record<number, string> = {
-    0: "Multirotor", 1: "Airplane", 2: "Helicopter", 3: "Tricopter",
-    4: "Rover", 5: "Boat", 6: "Other",
-  };
+  function getPlatformLabel(type: number): string {
+    const keys: Record<number, string> = {
+      0: 'platform.multirotor', 1: 'platform.airplane', 2: 'platform.helicopter',
+      3: 'platform.tricopter', 4: 'platform.rover', 5: 'platform.boat', 6: 'platform.other',
+    };
+    return keys[type] ? $t(keys[type]) : $t('platform.unknown', { values: { type } });
+  }
 
   const baudRates = [115200, 57600, 38400, 19200, 9600, 230400, 460800, 921600];
 
   const tabs = [
-    { id: "uav-info", label: "UAV Info", icon: "✈" },
-    { id: "settings", label: "Settings", icon: "⚙" },
-    { id: "mission", label: "Mission", icon: "◎" },
+    { id: "uav-info", label: () => $t('nav.uavInfo'), icon: "✈" },
+    { id: "settings", label: () => $t('nav.settings'), icon: "⚙" },
+    { id: "mission", label: () => $t('nav.mission'), icon: "◎" },
   ];
 
   let ports: PortInfo[] = $state([]);
@@ -194,7 +199,7 @@
     }
 
     if (!selectedPort) {
-      errorMsg = "No port selected";
+      errorMsg = $t('connection.noPortSelected');
       return;
     }
 
@@ -282,9 +287,9 @@
   }
 
   function getWidgetPanelLabel(widgetId: string): string {
-    if (panels.bottom.includes(widgetId)) return 'Bottom';
-    if (panels.right.includes(widgetId)) return 'Right';
-    return 'Off';
+    if (panels.bottom.includes(widgetId)) return $t('widgets.bottom');
+    if (panels.right.includes(widgetId)) return $t('widgets.right');
+    return $t('widgets.off');
   }
 </script>
 
@@ -292,16 +297,16 @@
   <!-- ======= TOOLBAR ======= -->
   <header class="toolbar">
     <div class="toolbar-left">
-      <div class="logo">INAV GCS</div>
+      <div class="logo">{$t('app.brand')}</div>
       <span class="version">v{appVersion}</span>
     </div>
     <div class="toolbar-center">
       <div class="sensor-bar">
-        <div class="sensor" class:active={telem.sensorGyro === 1} class:error={telem.sensorGyro === 3} title="Gyroscope">GYRO</div>
-        <div class="sensor" class:active={telem.sensorAcc === 1} class:error={telem.sensorAcc === 3} title="Accelerometer">ACC</div>
-        <div class="sensor" class:active={telem.sensorMag === 1} class:error={telem.sensorMag === 3} title="Magnetometer">MAG</div>
-        <div class="sensor" class:active={telem.sensorBaro === 1} class:error={telem.sensorBaro === 3} title="Barometer">BARO</div>
-        <div class="sensor" class:active={telem.sensorGps === 1 && telem.fixType >= 2} class:warning={telem.sensorGps === 1 && telem.fixType < 2} class:error={telem.sensorGps === 3} title="GPS: {getGpsFixLabel()} {telem.numSat}S">GPS</div>
+        <div class="sensor" class:active={telem.sensorGyro === 1} class:error={telem.sensorGyro === 3} title={$t('sensors.gyroTooltip')}>{$t('sensors.gyro')}</div>
+        <div class="sensor" class:active={telem.sensorAcc === 1} class:error={telem.sensorAcc === 3} title={$t('sensors.accTooltip')}>{$t('sensors.acc')}</div>
+        <div class="sensor" class:active={telem.sensorMag === 1} class:error={telem.sensorMag === 3} title={$t('sensors.magTooltip')}>{$t('sensors.mag')}</div>
+        <div class="sensor" class:active={telem.sensorBaro === 1} class:error={telem.sensorBaro === 3} title={$t('sensors.baroTooltip')}>{$t('sensors.baro')}</div>
+        <div class="sensor" class:active={telem.sensorGps === 1 && telem.fixType >= 2} class:warning={telem.sensorGps === 1 && telem.fixType < 2} class:error={telem.sensorGps === 3} title="GPS: {getGpsFixLabel()} {telem.numSat}S">{$t('sensors.gps')}</div>
       </div>
     </div>
     <div class="toolbar-right">
@@ -309,7 +314,7 @@
         {#if connStatus !== "connected"}
           <select class="port-select" bind:value={selectedPort}>
             {#if ports.length === 0}
-              <option value="">No ports found</option>
+              <option value="">{$t('connection.noPortsFound')}</option>
             {:else}
               {#each ports as port}
                 <option value={port.path}>{port.label}</option>
@@ -321,7 +326,7 @@
               <option value={baud}>{baud}</option>
             {/each}
           </select>
-          <button class="refresh-btn" onclick={refreshPorts} title="Refresh ports">⟳</button>
+          <button class="refresh-btn" onclick={refreshPorts} title={$t('connection.refreshPorts')}>⟳</button>
         {/if}
       </div>
       <button
@@ -332,11 +337,11 @@
         disabled={isConnecting}
       >
         {#if isConnecting}
-          Connecting...
+          {$t('connection.connecting')}
         {:else if connStatus === "connected"}
-          Disconnect
+          {$t('connection.disconnect')}
         {:else}
-          Connect
+          {$t('connection.connect')}
         {/if}
       </button>
     </div>
@@ -350,7 +355,7 @@
   <!-- ======= FLOATING NAV PANEL SYSTEM ======= -->
   <div class="nav-rail" class:open={navPanelOpen}>
     <!-- Hamburger button -->
-    <button class="hamburger-btn" onclick={toggleNavPanel} title={navPanelOpen ? "Close panel" : "Open panel"}>
+    <button class="hamburger-btn" onclick={toggleNavPanel} title={navPanelOpen ? $t('nav.closePanel') : $t('nav.openPanel')}>
       <span class="hamburger-icon" class:open={navPanelOpen}>
         <span></span>
         <span></span>
@@ -366,10 +371,10 @@
             class="tab-btn"
             class:active={activeTab === tab.id}
             onclick={() => selectTab(tab.id)}
-            title={tab.label}
+            title={tab.label()}
           >
             <span class="tab-icon">{tab.icon}</span>
-            <span class="tab-label">{tab.label}</span>
+            <span class="tab-label">{tab.label()}</span>
           </button>
         {/each}
       </div>
@@ -384,20 +389,20 @@
         {#if activeTab === "uav-info"}
           {#if connStatus === "connected" && fcInfo}
             <section class="panel-section">
-              <h4 class="section-heading">Flight Controller</h4>
+              <h4 class="section-heading">{$t('uavInfo.flightController')}</h4>
               <div class="fc-info-grid">
-                <span class="fc-label">Variant</span>
+                <span class="fc-label">{$t('uavInfo.variant')}</span>
                 <span class="fc-value">{fcInfo.fc_variant}</span>
-                <span class="fc-label">Version</span>
+                <span class="fc-label">{$t('uavInfo.version')}</span>
                 <span class="fc-value">{fcInfo.fc_version}</span>
-                <span class="fc-label">Board</span>
+                <span class="fc-label">{$t('uavInfo.board')}</span>
                 <span class="fc-value">{fcInfo.board_id}</span>
-                <span class="fc-label">Type</span>
-                <span class="fc-value">{platformTypes[fcInfo.platform_type] ?? `Unknown (${fcInfo.platform_type})`}</span>
-                <span class="fc-label">API</span>
+                <span class="fc-label">{$t('uavInfo.type')}</span>
+                <span class="fc-value">{getPlatformLabel(fcInfo.platform_type)}</span>
+                <span class="fc-label">{$t('uavInfo.api')}</span>
                 <span class="fc-value">{fcInfo.api_version}</span>
                 {#if fcInfo.hardware_revision > 0}
-                  <span class="fc-label">HW Rev</span>
+                  <span class="fc-label">{$t('uavInfo.hwRev')}</span>
                   <span class="fc-value">{fcInfo.hardware_revision}</span>
                 {/if}
               </div>
@@ -405,29 +410,42 @@
 
             {#if fcInfo.features}
               <section class="panel-section">
-                <h4 class="section-heading">Features</h4>
+                <h4 class="section-heading">{$t('uavInfo.features')}</h4>
                 <div class="feature-list">
-                  <span class="feature-badge available">Telemetry</span>
-                  <span class="feature-badge" class:available={fcInfo.features.autoland_config} class:unavailable={!fcInfo.features.autoland_config} title="INAV 7.1+">Autoland</span>
-                  <span class="feature-badge" class:available={fcInfo.features.geozones} class:unavailable={!fcInfo.features.geozones} title="INAV 8.0+">Geozones</span>
-                  <span class="feature-badge" class:available={fcInfo.features.msp_rc} class:unavailable={!fcInfo.features.msp_rc} title="INAV 8.0+">MSP-RC</span>
-                  <span class="feature-badge" class:available={fcInfo.features.aux_rc} class:unavailable={!fcInfo.features.aux_rc} title="INAV 9.1+">AUX-RC</span>
+                  <span class="feature-badge available">{$t('uavInfo.telemetry')}</span>
+                  <span class="feature-badge" class:available={fcInfo.features.autoland_config} class:unavailable={!fcInfo.features.autoland_config} title="INAV 7.1+">{$t('uavInfo.autoland')}</span>
+                  <span class="feature-badge" class:available={fcInfo.features.geozones} class:unavailable={!fcInfo.features.geozones} title="INAV 8.0+">{$t('uavInfo.geozones')}</span>
+                  <span class="feature-badge" class:available={fcInfo.features.msp_rc} class:unavailable={!fcInfo.features.msp_rc} title="INAV 8.0+">{$t('uavInfo.mspRc')}</span>
+                  <span class="feature-badge" class:available={fcInfo.features.aux_rc} class:unavailable={!fcInfo.features.aux_rc} title="INAV 9.1+">{$t('uavInfo.auxRc')}</span>
                 </div>
               </section>
             {/if}
           {:else}
             <div class="panel-empty">
               <span class="panel-empty-icon">⊘</span>
-              <span>Not connected</span>
+              <span>{$t('uavInfo.notConnected')}</span>
             </div>
           {/if}
 
         <!-- Settings Tab -->
         {:else if activeTab === "settings"}
           <section class="panel-section">
-            <h4 class="section-heading">Map</h4>
+            <h4 class="section-heading">{$t('settings.language')}</h4>
             <div class="setting-row">
-              <label class="setting-label" for="map-provider">Tile Provider</label>
+              <label class="setting-label" for="lang-select">{$t('settings.language')}</label>
+              <select id="lang-select" class="setting-select" value={$locale}
+                      onchange={(e) => { const v = (e.target as HTMLSelectElement).value; locale.set(v); settings.patch({ locale: v }); }}>
+                {#each SUPPORTED_LOCALES as loc}
+                  <option value={loc.code}>{loc.label}</option>
+                {/each}
+              </select>
+            </div>
+          </section>
+
+          <section class="panel-section">
+            <h4 class="section-heading">{$t('settings.map')}</h4>
+            <div class="setting-row">
+              <label class="setting-label" for="map-provider">{$t('settings.tileProvider')}</label>
               <select id="map-provider" class="setting-select" bind:value={mapProvider} onchange={() => settings.patch({ mapProvider })}>
                 {#each MAP_PROVIDERS as p}
                   <option value={p.id}>{p.label}</option>
@@ -435,9 +453,9 @@
               </select>
             </div>
             <div class="setting-row">
-              <label class="setting-label" for="map-cache">Tile Cache</label>
+              <label class="setting-label" for="map-cache">{$t('settings.tileCache')}</label>
               <select id="map-cache" class="setting-select" bind:value={mapCacheMaxMB} onchange={() => { settings.patch({ mapCacheMaxMB }); setCacheMaxMB(mapCacheMaxMB); }}>
-                <option value={0}>No Cache</option>
+                <option value={0}>{$t('settings.noCache')}</option>
                 <option value={100}>100 MB</option>
                 <option value={200}>200 MB</option>
                 <option value={500}>500 MB</option>
@@ -456,14 +474,14 @@
                 <span class="cache-bar-label">
                   {(cacheStats.usedBytes / 1024 / 1024).toFixed(1)} / {mapCacheMaxMB} MB · {cacheStats.tileCount} tiles
                 </span>
-                <button class="cache-clear-btn" onclick={() => clearCache()} title="Clear tile cache">Clear</button>
+                <button class="cache-clear-btn" onclick={() => clearCache()} title={$t('settings.clear')}>{$t('settings.clear')}</button>
               </div>
             {/if}
           </section>
           <section class="panel-section">
-            <h4 class="section-heading">Telemetry Rates</h4>
+            <h4 class="section-heading">{$t('settings.telemetryRates')}</h4>
             <div class="setting-row">
-              <label class="setting-label" for="attitude-rate">Attitude</label>
+              <label class="setting-label" for="attitude-rate">{$t('settings.attitude')}</label>
               <select id="attitude-rate" class="setting-select" bind:value={attitudeRateHz} onchange={() => settings.patch({ attitudeRateHz })}>
                 <option value={1}>1 Hz</option>
                 <option value={2}>2 Hz</option>
@@ -472,7 +490,7 @@
               </select>
             </div>
             <div class="setting-row">
-              <label class="setting-label" for="position-rate">GPS Position</label>
+              <label class="setting-label" for="position-rate">{$t('settings.gpsPosition')}</label>
               <select id="position-rate" class="setting-select" bind:value={positionRateHz} onchange={() => settings.patch({ positionRateHz })}>
                 <option value={1}>1 Hz</option>
                 <option value={2}>2 Hz</option>
@@ -482,9 +500,9 @@
             </div>
           </section>
           <section class="panel-section">
-            <h4 class="section-heading">Optional Modules</h4>
+            <h4 class="section-heading">{$t('settings.optionalModules')}</h4>
             <div class="setting-row">
-              <label class="setting-label" for="airspeed-toggle">Airspeed</label>
+              <label class="setting-label" for="airspeed-toggle">{$t('settings.airspeed')}</label>
               <label class="toggle-switch">
                 <input type="checkbox" id="airspeed-toggle" bind:checked={airspeedEnabled} onchange={() => settings.patch({ airspeedEnabled })} />
                 <span class="toggle-slider"></span>
@@ -492,9 +510,9 @@
             </div>
           </section>
           <section class="panel-section">
-            <h4 class="section-heading">Mission Control</h4>
+            <h4 class="section-heading">{$t('settings.missionControl')}</h4>
             <div class="setting-row">
-              <label class="setting-label">Default WP Altitude</label>
+              <label class="setting-label">{$t('settings.defaultWpAlt')}</label>
               <div class="setting-stepper">
                 <button class="stepper-btn" onclick={() => { defaultWpAltitudeM = Math.max(1, defaultWpAltitudeM - 1); settings.patch({ defaultWpAltitudeM }); }}>−</button>
                 <input type="number" class="stepper-input" min="1" max="1000" bind:value={defaultWpAltitudeM}
@@ -504,7 +522,7 @@
               </div>
             </div>
             <div class="setting-row">
-              <label class="setting-label">Default PH Time</label>
+              <label class="setting-label">{$t('settings.defaultPhTime')}</label>
               <div class="setting-stepper">
                 <button class="stepper-btn" onclick={() => { defaultPhTimeSec = Math.max(1, defaultPhTimeSec - 1); settings.patch({ defaultPhTimeSec }); }}>−</button>
                 <input type="number" class="stepper-input" min="1" max="600" bind:value={defaultPhTimeSec}
@@ -515,10 +533,10 @@
             </div>
           </section>
           <section class="panel-section">
-            <h4 class="section-heading">HUD Widgets</h4>
+            <h4 class="section-heading">{$t('settings.hudWidgets')}</h4>
             {#each WIDGET_DEFS as wdef}
               <div class="setting-row">
-                <label class="setting-label">{wdef.label}</label>
+                <label class="setting-label">{$t(wdef.labelKey)}</label>
                 <div class="widget-toggle-group">
                   <span class="widget-panel-indicator">{getWidgetPanelLabel(wdef.id)}</span>
                   <label class="toggle-switch">
@@ -530,7 +548,7 @@
             {/each}
           </section>
           <section class="panel-section">
-            <p class="setting-hint">Rate changes take effect on next connect.</p>
+            <p class="setting-hint">{$t('settings.rateHint')}</p>
           </section>
 
         <!-- Mission Tab -->
@@ -579,7 +597,7 @@
     class="widget-edit-btn"
     class:active={widgetEditMode}
     onclick={() => widgetEditMode = !widgetEditMode}
-    title={widgetEditMode ? "Exit edit mode" : "Edit widget layout"}
+    title={widgetEditMode ? $t('widgets.exitEdit') : $t('widgets.editLayout')}
   >
     ✎
   </button>
@@ -609,14 +627,14 @@
         {#if connStatus === "connected" && fcInfo}
           {fcInfo.fc_variant} {fcInfo.fc_version} on {$connection.port}
         {:else if connStatus === "connecting"}
-          Connecting...
+          {$t('connection.connecting')}
         {:else}
-          Disconnected
+          {$t('connection.disconnected')}
         {/if}
       </span>
       {#if DEV_MODE}
         <button class="debug-btn" class:open={debugOpen} onclick={() => debugOpen = !debugOpen} title="MSP Debug Monitor">
-          🔧 Debug
+          🔧 {$t('statusBar.debug')}
         </button>
       {/if}
     </div>
@@ -627,14 +645,14 @@
         </span>
         <span class="status-sep">|</span>
       {/if}
-      <span>INAV GCS</span>
+      <span>{$t('app.brand')}</span>
     </div>
   </footer>
 </main>
 
 <style>
   /* ============================================================
-     INAV GCS Theme — Floating Panel Layout
+     Kite Ground Control Theme — Floating Panel Layout
      Color palette derived from INAV Configurator
      https://github.com/iNavFlight/inav-configurator
      ============================================================ */

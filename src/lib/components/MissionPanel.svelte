@@ -17,13 +17,14 @@
     activeMissionIndex, missionCount,
     switchMission, addMission, removeMission, getTotalWpCount,
     MAX_MISSIONS, MAX_WAYPOINTS_TOTAL,
-    type Waypoint, type Mission, WpAction, WP_ACTION_LABELS,
+    type Waypoint, type Mission, WpAction, WP_ACTION_LABELS, WP_ACTION_KEYS,
     hasLocation, isModifier,
   } from '$lib/stores/mission';
   import { connection } from '$lib/stores/connection';
   import { telemetry, type TelemetryData } from '$lib/stores/telemetry';
   import { get } from 'svelte/store';
   import { save, open } from '@tauri-apps/plugin-dialog';
+  import { t } from 'svelte-i18n';
 
   // Local reactive state mirroring stores
   let currentMission = $state<Mission>(get(mission));
@@ -63,28 +64,28 @@
   // ── FC transfer ──────────────────────────────────────────────────
 
   async function handleDownload() {
-    if (!isConnected()) { statusMessage = 'Not connected'; return; }
+    if (!isConnected()) { statusMessage = $t('mission.notConnected'); return; }
     downloadLoading = true;
     statusMessage = '';
     try {
       const m = await missionDownload(false);
-      statusMessage = `Downloaded ${m.waypoints.length} WPs`;
+      statusMessage = $t('mission.downloaded', { values: { count: m.waypoints.length } });
     } catch (e: any) {
-      statusMessage = `Download failed: ${e}`;
+      statusMessage = $t('mission.downloadFailed', { values: { error: e } });
     } finally {
       downloadLoading = false;
     }
   }
 
   async function handleUpload() {
-    if (!isConnected()) { statusMessage = 'Not connected'; return; }
+    if (!isConnected()) { statusMessage = $t('mission.notConnected'); return; }
     uploadLoading = true;
     statusMessage = '';
     try {
       const m = await missionUpload(false);
-      statusMessage = `Uploaded ${m.waypoints.length} WPs`;
+      statusMessage = $t('mission.uploaded', { values: { count: m.waypoints.length } });
     } catch (e: any) {
-      statusMessage = `Upload failed: ${e}`;
+      statusMessage = $t('mission.uploadFailed', { values: { error: e } });
     } finally {
       uploadLoading = false;
     }
@@ -92,28 +93,28 @@
   // ── EEPROM Save/Load ────────────────────────────────────────────────
 
   async function handleEepromSave() {
-    if (!isConnected() || isArmed()) { statusMessage = isArmed() ? 'Cannot save EEPROM while armed' : 'Not connected'; return; }
+    if (!isConnected() || isArmed()) { statusMessage = isArmed() ? $t('mission.eepromSaveArmedMsg') : $t('mission.notConnected'); return; }
     eepromSaveLoading = true;
     statusMessage = '';
     try {
       const m = await missionUpload(true);
-      statusMessage = `Saved ${m.waypoints.length} WPs to EEPROM`;
+      statusMessage = $t('mission.eepromSaved', { values: { count: m.waypoints.length } });
     } catch (e: any) {
-      statusMessage = `EEPROM save failed: ${e}`;
+      statusMessage = $t('mission.eepromSaveFailed', { values: { error: e } });
     } finally {
       eepromSaveLoading = false;
     }
   }
 
   async function handleEepromLoad() {
-    if (!isConnected()) { statusMessage = 'Not connected'; return; }
+    if (!isConnected()) { statusMessage = $t('mission.notConnected'); return; }
     eepromLoadLoading = true;
     statusMessage = '';
     try {
       const m = await missionDownload(true);
-      statusMessage = `Loaded ${m.waypoints.length} WPs from EEPROM`;
+      statusMessage = $t('mission.eepromLoaded', { values: { count: m.waypoints.length } });
     } catch (e: any) {
-      statusMessage = `EEPROM load failed: ${e}`;
+      statusMessage = $t('mission.eepromLoadFailed', { values: { error: e } });
     } finally {
       eepromLoadLoading = false;
     }
@@ -123,31 +124,31 @@
   async function handleSaveFile() {
     try {
       const path = await save({
-        title: 'Save Mission',
+        title: $t('mission.saveMissionTitle'),
         defaultPath: 'mission.mission',
         filters: [{ name: 'Mission', extensions: ['mission'] }],
       });
       if (!path) return;
       await missionSaveFile(path);
-      statusMessage = 'Mission saved';
+      statusMessage = $t('mission.missionSaved');
     } catch (e: any) {
-      statusMessage = `Save failed: ${e}`;
+      statusMessage = $t('mission.saveFailed', { values: { error: e } });
     }
   }
 
   async function handleOpenFile() {
     try {
       const path = await open({
-        title: 'Open Mission',
+        title: $t('mission.openMissionTitle'),
         multiple: false,
         filters: [{ name: 'Mission', extensions: ['mission'] }],
       });
       if (!path) return;
       const filePath = typeof path === 'string' ? path : path;
       const m = await missionLoadFile(filePath);
-      statusMessage = `Loaded ${m.waypoints.length} WPs`;
+      statusMessage = $t('mission.loaded', { values: { count: m.waypoints.length } });
     } catch (e: any) {
-      statusMessage = `Open failed: ${e}`;
+      statusMessage = $t('mission.openFailed', { values: { error: e } });
     }
   }
 
@@ -166,19 +167,19 @@
     if (!files || files.length === 0) return;
     const file = files[0];
     if (!file.name.endsWith('.mission')) {
-      statusMessage = 'Only .mission files supported';
+      statusMessage = $t('mission.onlyMissionFiles');
       return;
     }
     try {
       const xml = await file.text();
       if (!xml.includes('<mission')) {
-        statusMessage = 'Invalid mission file';
+        statusMessage = $t('mission.invalidMissionFile');
         return;
       }
       const m = await missionImportXml(xml);
-      statusMessage = `Loaded ${m.waypoints.length} WPs from ${file.name}`;
+      statusMessage = $t('mission.loadedFromFile', { values: { count: m.waypoints.length, file: file.name } });
     } catch (e: any) {
-      statusMessage = `Import failed: ${e}`;
+      statusMessage = $t('mission.importFailed', { values: { error: e } });
     }
   }
 
@@ -186,7 +187,7 @@
 
   function handleClear() {
     removeMission(currentMissionIdx);
-    statusMessage = 'Mission cleared';
+    statusMessage = $t('mission.missionCleared');
   }
 
   function selectWp(index: number) {
@@ -280,15 +281,15 @@
       class="btn-edit"
       class:active={currentEditing}
       onclick={() => editMode.update(v => !v)}
-      title="Toggle edit mode"
+      title={$t('mission.toggleEdit')}
     >
-      ✏️ {currentEditing ? 'Editing' : 'Edit'}
+      ✏️ {currentEditing ? $t('mission.editing') : $t('mission.edit')}
     </button>
     <div class="toolbar-spacer"></div>
     {#if currentEditing && currentSelIdx >= 0}
-      <button class="btn-sm btn-danger" onclick={removeSelected} title="Remove selected WP">✕</button>
+      <button class="btn-sm btn-danger" onclick={removeSelected} title={$t('mission.removeWp')}>✕</button>
     {/if}
-    <button class="btn-sm" onclick={handleClear} title="Clear mission">🗑️</button>
+    <button class="btn-sm" onclick={handleClear} title={$t('mission.clearMission')}>🗑️</button>
   </div>
 
   <!-- Multi-Mission Tabs + Waypoint Table Frame -->
@@ -305,7 +306,7 @@
         <button
           class="mission-tab mission-tab-add"
           onclick={() => { const idx = addMission(); if (idx > 0) switchMission(idx); }}
-          title="Add mission"
+          title={$t('mission.addMission')}
         >+</button>
       {/if}
     </div>
@@ -315,19 +316,19 @@
     {#if currentMission.waypoints.length === 0}
       <div class="wp-empty">
         {#if currentEditing}
-          Click on the map to add waypoints
+          {$t('mission.emptyEdit')}
         {:else}
-          No waypoints — enable Edit mode or load mission
+          {$t('mission.emptyView')}
         {/if}
       </div>
     {:else}
       <table class="wp-table">
         <thead>
           <tr>
-            <th class="col-num">#</th>
-            <th class="col-type">Type</th>
-            <th class="col-alt">Alt</th>
-            <th class="col-param">Param</th>
+            <th class="col-num">{$t('mission.colNumber')}</th>
+            <th class="col-type">{$t('mission.colType')}</th>
+            <th class="col-alt">{$t('mission.colAlt')}</th>
+            <th class="col-param">{$t('mission.colParam')}</th>
           </tr>
         </thead>
         <tbody>
@@ -370,67 +371,67 @@
   {#if currentSelIdx >= 0 && currentSelIdx < currentMission.waypoints.length}
     {@const wp = currentMission.waypoints[currentSelIdx]}
     <div class="wp-detail">
-      <div class="detail-header">{isModifier(wp.action) ? '' : `WP ${displayNums.get(currentSelIdx) ?? ''} — `}{WP_ACTION_LABELS[wp.action]}</div>
+      <div class="detail-header">{isModifier(wp.action) ? '' : `WP ${displayNums.get(currentSelIdx) ?? ''} — `}{$t(WP_ACTION_KEYS[wp.action])}</div>
       {#if hasLocation(wp.action)}
         <div class="detail-row">
-          <span class="detail-label">Lat</span>
+          <span class="detail-label">{$t('mission.lat')}</span>
           <span class="detail-value">{formatCoord(wp.lat)}</span>
         </div>
         <div class="detail-row">
-          <span class="detail-label">Lon</span>
+          <span class="detail-label">{$t('mission.lon')}</span>
           <span class="detail-value">{formatCoord(wp.lon)}</span>
         </div>
       {/if}
       <div class="detail-row">
-        <span class="detail-label">Alt</span>
+        <span class="detail-label">{$t('mission.alt')}</span>
         <span class="detail-value">{formatAltShort(wp)}</span>
       </div>
       {#if wp.action === WpAction.Waypoint || wp.action === WpAction.Land}
         <div class="detail-row">
-          <span class="detail-label">Speed</span>
-          <span class="detail-value">{wp.p1 > 0 ? `${wp.p1} cm/s` : 'Default'}</span>
+          <span class="detail-label">{$t('mission.speed')}</span>
+          <span class="detail-value">{wp.p1 > 0 ? `${wp.p1} cm/s` : $t('mission.speedDefault')}</span>
         </div>
       {/if}
       {#if wp.action === WpAction.PosholdTime}
         <div class="detail-row">
-          <span class="detail-label">Hold</span>
+          <span class="detail-label">{$t('mission.hold')}</span>
           <span class="detail-value">{wp.p1}s</span>
         </div>
       {/if}
       {#if wp.action === WpAction.PosholdUnlim}
         <div class="detail-row">
-          <span class="detail-label">Hold</span>
-          <span class="detail-value">Unlimited</span>
+          <span class="detail-label">{$t('mission.hold')}</span>
+          <span class="detail-value">{$t('mission.holdUnlimited')}</span>
         </div>
       {/if}
       {#if wp.action === WpAction.Rth}
         <div class="detail-row">
-          <span class="detail-label">Land</span>
-          <span class="detail-value">{wp.p1 ? 'Yes' : 'No (hover)'}</span>
+          <span class="detail-label">{$t('mission.land')}</span>
+          <span class="detail-value">{wp.p1 ? $t('mission.landYes') : $t('mission.landNoHover')}</span>
         </div>
       {/if}
       {#if wp.action === WpAction.Jump}
         <div class="detail-row">
-          <span class="detail-label">Target</span>
+          <span class="detail-label">{$t('mission.target')}</span>
           <span class="detail-value">WP {wp.p1}</span>
         </div>
         <div class="detail-row">
-          <span class="detail-label">Repeat</span>
+          <span class="detail-label">{$t('mission.repeat')}</span>
           <span class="detail-value">{wp.p2 === -1 ? '∞' : wp.p2}</span>
         </div>
       {/if}
       {#if wp.action === WpAction.SetHead}
         <div class="detail-row">
-          <span class="detail-label">Heading</span>
-          <span class="detail-value">{wp.p1 === -1 ? 'Free' : `${wp.p1}°`}</span>
+          <span class="detail-label">{$t('mission.heading')}</span>
+          <span class="detail-value">{wp.p1 === -1 ? $t('mission.headingFree') : `${wp.p1}°`}</span>
         </div>
       {/if}
       <div class="detail-row">
-        <span class="detail-label">Flag</span>
-        <span class="detail-value">{wp.flag === 0xa5 ? 'LAST' : wp.flag === 0x48 ? 'FBH' : 'Normal'}</span>
+        <span class="detail-label">{$t('mission.flag')}</span>
+        <span class="detail-value">{wp.flag === 0xa5 ? $t('mission.flagLast') : wp.flag === 0x48 ? $t('mission.flagFbh') : $t('mission.flagNormal')}</span>
       </div>
       {#if currentEditing}
-        <div class="detail-hint">Click the marker on the map to edit parameters</div>
+        <div class="detail-hint">{$t('mission.clickMarkerHint')}</div>
       {/if}
     </div>
   {/if}
@@ -440,25 +441,25 @@
     <div class="mission-controls">
     <div class="ctrl-row">
       <button class="btn-ctrl" onclick={handleDownload} disabled={downloadLoading}>
-        {downloadLoading ? '⏳' : '⬇️'} FC Download
+        {downloadLoading ? '⏳' : '⬇️'} {$t('mission.fcDownload')}
       </button>
       <button class="btn-ctrl" onclick={handleUpload} disabled={uploadLoading}>
-        {uploadLoading ? '⏳' : '⬆️'} FC Upload
+        {uploadLoading ? '⏳' : '⬆️'} {$t('mission.fcUpload')}
       </button>
     </div>
     <div class="ctrl-row">
       <button class="btn-ctrl btn-eeprom" onclick={handleEepromLoad} disabled={eepromLoadLoading}>
-        {eepromLoadLoading ? '⏳' : '💾'} EEPROM Load
+        {eepromLoadLoading ? '⏳' : '💾'} {$t('mission.eepromLoad')}
       </button>
       <button class="btn-ctrl btn-eeprom" onclick={handleEepromSave}
         disabled={eepromSaveLoading || isArmed()}
-        title={isArmed() ? 'Cannot write EEPROM while armed' : 'Save mission to EEPROM'}>
-        {eepromSaveLoading ? '⏳' : '💾'} EEPROM Save
+        title={isArmed() ? $t('mission.eepromSaveArmed') : $t('mission.eepromSaveTooltip')}>
+        {eepromSaveLoading ? '⏳' : '💾'} {$t('mission.eepromSave')}
       </button>
     </div>
     <div class="ctrl-row">
-      <button class="btn-ctrl btn-file" onclick={handleOpenFile}>📂 Open</button>
-      <button class="btn-ctrl btn-file" onclick={handleSaveFile}>💾 Save</button>
+      <button class="btn-ctrl btn-file" onclick={handleOpenFile}>📂 {$t('mission.open')}</button>
+      <button class="btn-ctrl btn-file" onclick={handleSaveFile}>💾 {$t('mission.save')}</button>
     </div>
     </div>
   </div>
@@ -477,14 +478,14 @@
         {currentMission.waypoints.length}/{MAX_WAYPOINTS_TOTAL} WPs
       {/if}
       {#if currentMission.dirty}
-        <span class="dirty-badge">Modified</span>
+        <span class="dirty-badge">{$t('mission.modified')}</span>
       {/if}
     </div>
   {/if}
 
   <!-- Drop zone overlay -->
   {#if dragOver}
-    <div class="drop-overlay">Drop .mission file here</div>
+    <div class="drop-overlay">{$t('mission.dropHint')}</div>
   {/if}
 </div>
 

@@ -82,7 +82,7 @@ pub async fn connect(
     // ── Version check & feature detection ────────────────────────────
     if fc_info.fc_variant != "INAV" {
         return Err(format!(
-            "Unsupported firmware variant: '{}'. INAV GCS only supports INAV.",
+            "Unsupported firmware variant: '{}'. Only INAV is currently supported.",
             fc_info.fc_variant
         ));
     }

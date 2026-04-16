@@ -1,8 +1,8 @@
-# INAV GCS — Development Documentation
+# Kite Ground Control — Development Documentation
 
 ## Project Overview
 
-INAV GCS is a cross-platform Ground Control Station for [INAV](https://github.com/iNavFlight/inav)-based flight controllers. It communicates primarily via MSP (MultiWii Serial Protocol) and aims to provide mission planning, real-time telemetry monitoring, and flight control capabilities.
+Kite Ground Control is a cross-platform Ground Control Station supporting [INAV](https://github.com/iNavFlight/inav)-based flight controllers (ArduPilot planned). It communicates primarily via MSP (MultiWii Serial Protocol) and aims to provide mission planning, real-time telemetry monitoring, and flight control capabilities.
 
 **Long-term scope reference**: [MWPTools](https://stronnag.grebedoc.dev/mwptools/)
 
@@ -32,7 +32,7 @@ INAV GCS is a cross-platform Ground Control Station for [INAV](https://github.co
 ## Project Structure
 
 ```
-INAV GCS/
+Kite Ground Control/
 ├── src/                          # Svelte Frontend
 │   ├── routes/                   # SvelteKit pages/routes
 │   │   ├── +page.svelte          # Main application page (floating panel layout)
@@ -65,6 +65,11 @@ INAV GCS/
 │   │   ├── config/               # Static configuration
 │   │   │   ├── mapProviders.ts   # Map tile provider definitions
 │   │   │   └── widgetRegistry.ts # Widget definitions, size constants, classes
+│   │   ├── i18n/                 # Internationalization
+│   │   │   ├── index.ts          # i18n init, locale registration, SUPPORTED_LOCALES
+│   │   │   └── locales/          # Translation files
+│   │   │       ├── en.json       # English (default, ~200 keys)
+│   │   │       └── de.json       # German (complete)
 │   │   ├── utils/                # Utility functions
 │   │   │   └── geo.ts            # Haversine distance, bearing, formatting
 │   │   └── index.ts              # Library entry point
@@ -150,7 +155,7 @@ npm run tauri build      # Build release for current platform
 
 ### Platform Notes
 
-- **Cargo target-dir**: Set to `D:\cargo-target\inav-gcs` via `src-tauri/.cargo/config.toml` to avoid issues with OneDrive paths containing spaces.
+- **Cargo target-dir**: Set to `D:\cargo-target\kite-gc` via `src-tauri/.cargo/config.toml` to avoid issues with OneDrive paths containing spaces.
 - **Windows**: Requires Visual Studio Build Tools 2022 (MSVC linker). Node.js v24+ via winget (do NOT use NVM4W — causes PATH conflicts).
 - **PATH quirks**: New terminal sessions may need PATH reload: `$env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")`
 
@@ -199,13 +204,14 @@ Sequence: `MSP_API_VERSION` → `MSP_FC_VARIANT` (must be "INAV") → `MSP_FC_VE
 
 ## Session Persistence
 
-Settings stored in `localStorage` under key `inav-gcs-settings`:
+Settings stored in `localStorage` under key `kite-gc-settings`:
 - `lastPort` / `lastBaud` — last used serial connection
 - `map.center` / `map.zoom` — map viewport state
 - `mapProvider` / `mapCacheMaxMB` — tile provider + cache size
 - `navPanelOpen` / `activeTab` — floating panel state
 - `attitudeRateHz` / `positionRateHz` / `airspeedEnabled` — telemetry poll config
 - `defaultWpAltitudeM` / `defaultPhTimeSec` — mission control defaults
+- `locale` — UI language (`'en'` or `'de'`)
 - `widgetAhi` / `widgetSpeed` / `widgetAltitude` / `widgetBattery` / `widgetGps` / `widgetCompass` / `widgetHome` — per-widget visibility toggles
 - `panels` — widget panel layout: `{ bottom: string[], right: string[], positions?: Record<string, 'bottom' | 'right'> }`
 
@@ -242,10 +248,33 @@ The map supports two view modes, toggled via a button below the zoom controls:
 - **North-Up** (default): Standard map orientation, north at top.
 - **Heading-Up**: Map rotates with UAV heading so the aircraft always faces up. CSS `transform: rotate() scale(1.42)` on the map container with `overflow: hidden` on the wrapper. Leaflet controls are counter-rotated. UAV marker icon uses fixed 0° rotation since the map itself rotates.
 
+## Internationalization (i18n)
+
+The app uses `svelte-i18n` for multi-language support with ICU Message Format.
+
+### Architecture
+- **Library**: `svelte-i18n` — battle-tested, supports ICU interpolation (`{count}`, `{error}`), plurals, and `$store` auto-subscription in Svelte 5
+- **Locale files**: `src/lib/i18n/locales/en.json` (default) and `de.json` — flat namespace structure with ~200 keys across 18 namespaces
+- **Init**: `src/lib/i18n/index.ts` registers locales and exports `initI18n(locale?)` + `SUPPORTED_LOCALES`
+- **Layout**: `+layout.svelte` reads persisted locale from settings, calls `initI18n()`, and gates rendering on `$isLoading`
+
+### Key Decisions
+- **Rust backend errors stay English**: Technical strings with port names, byte counts etc. are not localized. The frontend wraps them in user-facing messages where needed.
+- **`$t()` in .svelte files**: Works via Svelte 5's auto-subscription to stores. No `get(t)` needed in template or reactive contexts.
+- **`WP_ACTION_KEYS`**: Static `Record<WpAction, string>` mapping action enum values to i18n keys (e.g., `'wpAction.waypoint'`). Used with `$t(WP_ACTION_KEYS[action])` at point of use.
+- **Widget labels**: `widgetRegistry.ts` has `labelKey` field alongside the English `label` fallback.
+- **MissionLayer HTML**: Uses `$t()` inside plain JS functions within `.svelte` files — Svelte 5 auto-subscribes stores in component scope.
+
+### Adding a New Language
+1. Copy `src/lib/i18n/locales/en.json` → `{code}.json`
+2. Translate all values
+3. Register in `src/lib/i18n/index.ts`: `register('{code}', () => import('./locales/{code}.json'))`
+4. Add to `SUPPORTED_LOCALES` array
+
 ## Testing
 
 - **37 Rust unit tests** covering MSP codec, parser, feature gates, telemetry decoders, and mission module
-- Run: `cd src-tauri && cargo test --target-dir "D:\cargo-target\inav-gcs"`
+- Run: `cd src-tauri && cargo test --target-dir "D:\cargo-target\kite-gc"`
 - Frontend type-check: `npx svelte-check --tsconfig ./tsconfig.json`
 
 ## MSP Scheduler Architecture

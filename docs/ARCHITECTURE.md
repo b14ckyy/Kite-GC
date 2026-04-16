@@ -1,4 +1,4 @@
-# INAV GCS — Architecture Decisions
+# Kite Ground Control — Architecture Decisions
 
 This document records key architecture decisions and their rationale.
 
@@ -130,7 +130,7 @@ This document records key architecture decisions and their rationale.
 
 **Context**: Users expect the app to remember their last-used serial port, baud rate, map position, and panel state between sessions.
 
-**Decision**: Use a Svelte writable store backed by `localStorage` under key `inav-gcs-settings`. The store auto-saves on every mutation via `set()`, `update()`, or `patch()`.
+**Decision**: Use a Svelte writable store backed by `localStorage` under key `kite-gc-settings`. The store auto-saves on every mutation via `set()`, `update()`, or `patch()`.
 
 **Persisted state**: `lastPort`, `lastBaud`, `map.center`, `map.zoom`, `navPanelOpen`, `activeTab`
 
@@ -386,4 +386,44 @@ Frontend (Svelte)                    Backend (Rust)
 - Backend state is always authoritative — no frontend-only state divergence possible
 - Invoke pattern is consistent with existing connection/telemetry architecture
 - MW XML format ensures file interoperability with the INAV ecosystem
+
+---
+
+## ADR-013: Internationalization via svelte-i18n
+
+**Date**: 2026-04-16
+**Status**: Accepted
+
+**Context**: The UI had ~200 hardcoded English strings across 14 component files. Multi-language support was needed before the codebase grew further. Needed a solution that works with Svelte 5's runes mode and `$store` auto-subscription.
+
+**Considered**: `svelte-i18n`, `paraglide-js` (Inlang), custom i18n solution
+
+**Decision**: `svelte-i18n` with JSON locale files and ICU Message Format
+
+**Architecture**:
+```
+src/lib/i18n/
+├── index.ts              # register() + initI18n() + SUPPORTED_LOCALES
+└── locales/
+    ├── en.json           # English (default, ~200 keys, 18 namespaces)
+    └── de.json           # German (complete translation)
+
++layout.svelte            # Reads saved locale, calls initI18n(), gates render on $isLoading
++page.svelte              # $t('key') in templates, $locale for current locale
+settings.ts               # locale field persisted in localStorage
+```
+
+**Key design choices**:
+- **JSON locale files**: Simple, toolable, easy for community contributors to translate
+- **ICU Message Format**: Supports interpolation (`{count} WPs`), plurals, and select — no custom template syntax
+- **Lazy loading**: Locales loaded via dynamic `import()` — only the active locale is bundled
+- **Rust stays English**: Backend errors are technical (port names, byte offsets, protocol errors). Frontend wraps in user-facing `$t()` messages where appropriate
+- **`WP_ACTION_KEYS` pattern**: Enum-to-i18n-key map in `mission.ts` enables localized labels without making the store reactive on locale changes
+- **`labelKey` in widget registry**: Parallel to existing `label` field, allows gradual migration
+
+**Rationale**:
+- `svelte-i18n` is battle-tested (900K+ weekly npm downloads), works with Svelte 5 `$store` syntax
+- `paraglide-js` was considered but is overkill for an SPA with 2 locales — adds build complexity
+- Custom solution would reinvent ICU message formatting, locale loading, and store integration
+- Early adoption (before M5) avoids a large "string extraction" refactor later
 

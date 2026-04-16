@@ -1,6 +1,7 @@
 <!-- Compass widget — rotating compass rose with heading display -->
 <script lang="ts">
   import type { TelemetryData } from "$lib/stores/telemetry";
+  import { t } from 'svelte-i18n';
 
   let { telem, size = 22.5 }: { telem: TelemetryData; size?: number } = $props();
 
@@ -36,13 +37,13 @@
 
       <!-- Cardinal labels -->
       <text x="100" y="50" text-anchor="middle" dominant-baseline="middle"
-            fill="#ff4444" font-size="25" font-weight="bold" font-family="sans-serif">N</text>
+            fill="#ff4444" font-size="25" font-weight="bold" font-family="sans-serif">{$t('compass.n')}</text>
       <text x="152" y="104" text-anchor="middle" dominant-baseline="middle"
-            fill="white" font-size="22" font-weight="600" opacity="0.8" font-family="sans-serif">E</text>
+            fill="white" font-size="22" font-weight="600" opacity="0.8" font-family="sans-serif">{$t('compass.e')}</text>
       <text x="100" y="155" text-anchor="middle" dominant-baseline="middle"
-            fill="white" font-size="22" font-weight="600" opacity="0.8" font-family="sans-serif">S</text>
+            fill="white" font-size="22" font-weight="600" opacity="0.8" font-family="sans-serif">{$t('compass.s')}</text>
       <text x="48" y="104" text-anchor="middle" dominant-baseline="middle"
-            fill="white" font-size="22" font-weight="600" opacity="0.8" font-family="sans-serif">W</text>
+            fill="white" font-size="22" font-weight="600" opacity="0.8" font-family="sans-serif">{$t('compass.w')}</text>
     </g>
 
     <!-- Fixed heading pointer (top) -->

@@ -1,11 +1,11 @@
 @echo off
 REM ============================================================
-REM INAV GCS — Development Server (Windows)
+REM Kite Ground Control — Development Server (Windows)
 REM Starts the app in development mode with hot-reload
 REM ============================================================
 
 echo ============================================
-echo  INAV GCS — Development Mode
+echo  Kite Ground Control — Development Mode
 echo ============================================
 echo.
 

@@ -1,12 +1,13 @@
 <!-- Raw Telemetry widget — compact numeric readouts -->
 <script lang="ts">
   import type { TelemetryData } from "$lib/stores/telemetry";
+  import { t } from 'svelte-i18n';
 
   let { telem, size = 9 }: { telem: TelemetryData; size?: number } = $props();
 
   function getGpsFixLabel(): string {
-    if (!telem.lastUpdate || telem.fixType === 0) return 'NO FIX';
-    const types: Record<number, string> = { 1: '2D', 2: '3D', 3: '3D DGPS' };
+    if (!telem.lastUpdate || telem.fixType === 0) return $t('gps.noFix');
+    const types: Record<number, string> = { 1: $t('gps.fix2d'), 2: $t('gps.fix3d'), 3: $t('gps.fix3dDgps') };
     return types[telem.fixType] || `FIX ${telem.fixType}`;
   }
 </script>
@@ -26,7 +27,7 @@
     <div class="rt-row"><span class="rtk">RSSI</span><span class="rtv">{telem.rssi}</span></div>
     <div class="rt-row"><span class="rtk">CPU</span><span class="rtv">{telem.cpuLoad}%</span></div>
   {:else}
-    <span class="rt-nodata">NO DATA</span>
+    <span class="rt-nodata">{$t('rawTelemetry.noData')}</span>
   {/if}
 </div>
 

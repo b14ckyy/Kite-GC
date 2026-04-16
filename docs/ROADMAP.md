@@ -1,4 +1,4 @@
-# INAV GCS — Feature Roadmap
+# Kite Ground Control — Feature Roadmap
 
 This document tracks planned features, organized by milestone.
 
@@ -223,21 +223,54 @@ This document tracks planned features, organized by milestone.
 ### UX
 - [x] Edit mode auto-disables when leaving Mission tab or closing panel
 
+### Internationalization (i18n)
+- [x] `svelte-i18n` library integration with ICU Message Format
+- [x] English locale (default, ~200 translation keys)
+- [x] German locale (complete translation)
+- [x] Locale initialization in app layout (waits for locale load before rendering)
+- [x] All UI strings extracted to locale files (14 component files converted)
+- [x] Language picker in Settings panel with persistence
+- [x] WP action labels via i18n keys (`WP_ACTION_KEYS` map)
+- [x] Widget registry with `labelKey` for translated widget names
+- [x] Rust backend errors remain English (technical strings)
+
+### Installer & Distribution
+- [x] NSIS installer: `installMode: both` — per-user or all-users choice
+- [x] NSIS uninstall hook: optional AppData cleanup dialog
+- [x] Portable mode: `.portable` marker → `data/` folder next to exe (Windows + Linux)
+
 ### Future: Mission Enhancements
 - [ ] Undo/redo for mission edits
 - [ ] Abstraction layer for protocol-specific mission systems (ArduPilot/PX4 MAVLink)
 
 ## Milestone 5: Flight Recording & Logbook (v0.5.x)
 
-- [ ] Flight recording engine (optional, toggled via settings)
-- [ ] User-configurable database storage path (portable)
-- [ ] Automatic per-flight telemetry recording (start on arm, stop on disarm)
-- [ ] Flight logbook UI — list all recorded flights with metadata
-- [ ] Individual flight telemetry replay on map
-- [ ] Blackbox log import and attachment to flights
-- [ ] Flight statistics & analysis (from Blackbox high-res data)
-- [ ] Cloud sync support (optional, mobile-first)
-- [ ] Export flight data (CSV, KML, GPX)
+### Flight Recording Engine
+- [ ] SQLite database for flight storage (via `rusqlite` or `sqlx`)
+- [ ] User-configurable database storage path (respects portable mode)
+- [ ] Automatic flight session creation on arm event
+- [ ] Automatic session close on disarm event
+- [ ] Telemetry data recording at configured poll rate
+- [ ] Flight metadata: date, duration, max altitude, max speed, max distance, battery usage
+- [ ] GPS track recording (lat, lon, alt, timestamp)
+
+### Flight Logbook UI
+- [ ] Logbook panel/tab with flight list (date, duration, stats)
+- [ ] Flight detail view with metadata summary
+- [ ] Flight path replay on map (animated marker playback)
+- [ ] Playback controls (play, pause, speed 1x/2x/4x, scrub timeline)
+- [ ] Delete flight records
+
+### Blackbox Integration
+- [ ] Blackbox log file import (.bbl/.bfl)
+- [ ] Attach Blackbox log to recorded flight session
+- [ ] Blackbox data viewer (gyro, acc, motor outputs, PID traces)
+- [ ] Flight statistics & analysis from high-res Blackbox data
+
+### Export
+- [ ] Export flight path as KML (Google Earth)
+- [ ] Export flight path as GPX (universal GPS format)
+- [ ] Export telemetry as CSV
 
 ## Milestone 6: Advanced Features (v0.6.x+)
 

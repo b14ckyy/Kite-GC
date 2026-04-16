@@ -9,7 +9,7 @@
 
 import { writable } from "svelte/store";
 
-const DB_NAME = "inav-gcs-tile-cache";
+const DB_NAME = "kite-gc-tile-cache";
 const DB_VERSION = 1;
 const STORE_NAME = "tiles";
 

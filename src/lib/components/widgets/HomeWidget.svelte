@@ -4,6 +4,7 @@
   import { homePosition, type HomePosition } from "$lib/stores/home";
   import { haversineDistance, bearing, formatDistance } from "$lib/utils/geo";
   import { get } from "svelte/store";
+  import { t } from 'svelte-i18n';
 
   let { telem, size = 9 }: { telem: TelemetryData; size?: number } = $props();
 
@@ -27,7 +28,7 @@
 </script>
 
 <div class="widget-card" style="--ws: {size}vmin">
-  <span class="w-label">HOME</span>
+  <span class="w-label">{$t('widgetLabels.home')}</span>
 
   {#if home.set && telem.lastUpdate}
     <!-- Direction arrow -->
@@ -39,7 +40,7 @@
     <span class="w-dist">{formatDistance(distance)}</span>
     <span class="w-bearing">{Math.round(homeBearing)}°</span>
   {:else}
-    <span class="w-nodata">N/A</span>
+    <span class="w-nodata">{$t('widgetLabels.na')}</span>
   {/if}
 </div>
 

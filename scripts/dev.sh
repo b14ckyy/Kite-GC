@@ -1,13 +1,13 @@
 #!/bin/bash
 # ============================================================
-# INAV GCS — Development Server
+# Kite Ground Control — Development Server
 # Starts the app in development mode with hot-reload
 # ============================================================
 
 set -e
 
 echo "============================================"
-echo " INAV GCS — Development Mode"
+echo " Kite Ground Control — Development Mode"
 echo "============================================"
 echo ""
 

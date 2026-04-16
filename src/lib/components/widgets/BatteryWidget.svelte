@@ -1,6 +1,7 @@
 <!-- Battery widget — voltage bar, voltage, current, mAh -->
 <script lang="ts">
   import type { TelemetryData } from "$lib/stores/telemetry";
+  import { t } from 'svelte-i18n';
 
   let { telem, size = 9 }: { telem: TelemetryData; size?: number } = $props();
 
@@ -12,7 +13,7 @@
 </script>
 
 <div class="widget-card" style="--ws: {size}vmin">
-  <span class="w-label">BAT</span>
+  <span class="w-label">{$t('widgetLabels.bat')}</span>
 
   <!-- Voltage bar -->
   <div class="bat-bar-track">

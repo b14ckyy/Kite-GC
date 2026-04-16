@@ -1,7 +1,7 @@
 {
-  "name": "inav-gcs",
+  "name": "kite-gc",
   "version": "0.3.0",
-  "description": "INAV Ground Control Station",
+  "description": "Kite Ground Control — Universal Ground Control Station",
   "type": "module",
   "scripts": {
     "dev": "vite dev",
@@ -16,7 +16,8 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.7.0",
     "@tauri-apps/plugin-opener": "^2",
-    "leaflet": "^1.9.4"
+    "leaflet": "^1.9.4",
+    "svelte-i18n": "^4.0.1"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.6",

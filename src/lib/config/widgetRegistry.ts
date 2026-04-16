@@ -5,18 +5,20 @@ export type WidgetClass = 'large' | 'small';
 export interface WidgetDef {
   id: string;
   label: string;
+  /** i18n key for the label — use with $t() in .svelte files */
+  labelKey: string;
   widgetClass: WidgetClass;
 }
 
 export const WIDGET_DEFS: WidgetDef[] = [
-  { id: 'ahi',          label: 'AHI',            widgetClass: 'large' },
-  { id: 'speed',        label: 'Speed',          widgetClass: 'small' },
-  { id: 'altitude',     label: 'Altitude',       widgetClass: 'small' },
-  { id: 'battery',      label: 'Battery',        widgetClass: 'small' },
-  { id: 'gps',          label: 'GPS',            widgetClass: 'small' },
-  { id: 'compass',      label: 'Compass',        widgetClass: 'large' },
-  { id: 'home',         label: 'Home',           widgetClass: 'small' },
-  { id: 'rawTelemetry', label: 'Raw Telemetry',  widgetClass: 'small' },
+  { id: 'ahi',          label: 'AHI',            labelKey: 'widgets.ahi',          widgetClass: 'large' },
+  { id: 'speed',        label: 'Speed',          labelKey: 'widgets.speed',        widgetClass: 'small' },
+  { id: 'altitude',     label: 'Altitude',       labelKey: 'widgets.altitude',     widgetClass: 'small' },
+  { id: 'battery',      label: 'Battery',        labelKey: 'widgets.battery',      widgetClass: 'small' },
+  { id: 'gps',          label: 'GPS',            labelKey: 'widgets.gps',          widgetClass: 'small' },
+  { id: 'compass',      label: 'Compass',        labelKey: 'widgets.compass',      widgetClass: 'large' },
+  { id: 'home',         label: 'Home',           labelKey: 'widgets.home',         widgetClass: 'small' },
+  { id: 'rawTelemetry', label: 'Raw Telemetry',  labelKey: 'widgets.rawTelemetry', widgetClass: 'small' },
 ];
 
 export const WIDGET_MAP = new Map(WIDGET_DEFS.map(w => [w.id, w]));

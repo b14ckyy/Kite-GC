@@ -19,10 +19,11 @@
     missionReorderWp,
     getTotalWpCount, MAX_WAYPOINTS_TOTAL,
     type Waypoint, type Mission, WpAction, hasLocation, isModifier, toDeg, fromDeg, altFromM,
-    WP_ACTION_LABELS,
+    WP_ACTION_LABELS, WP_ACTION_KEYS,
   } from '$lib/stores/mission';
   import { get } from 'svelte/store';
   import { settings } from '$lib/stores/settings';
+  import { t } from 'svelte-i18n';
 
   interface Props {
     map: L.Map;
@@ -225,7 +226,7 @@
 
   function paramLabelHtml(wp: Waypoint, modifiers: { wp: Waypoint; idx: number }[]): string {
     const altM = (wp.altitude / 100).toFixed(0);
-    const altType = (wp.p3 & 1) ? 'AMSL' : 'REL';
+    const altType = (wp.p3 & 1) ? $t('missionLayer.amsl') : $t('missionLayer.rel');
     let lines = [`${altM}m ${altType}`];
 
     switch (wp.action) {
@@ -234,10 +235,10 @@
         if (wp.p1 > 0) lines.push(`${wp.p1} cm/s`);
         break;
       case WpAction.PosholdTime:
-        lines.push(`Hold ${wp.p1}s`);
+        lines.push($t('missionLayer.holdTime', { values: { seconds: wp.p1 } }));
         break;
       case WpAction.PosholdUnlim:
-        lines.push('Hold ∞');
+        lines.push($t('missionLayer.holdUnlimited'));
         break;
     }
 
@@ -245,13 +246,13 @@
     for (const mod of modifiers) {
       switch (mod.wp.action) {
         case WpAction.Rth:
-          lines.push(`⮐ RTH ${mod.wp.p1 ? 'Land' : 'Hover'}`);
+          lines.push(mod.wp.p1 ? $t('missionLayer.rthLand') : $t('missionLayer.rthHover'));
           break;
         case WpAction.Jump:
-          lines.push(`⮐ Jump→WP${mod.wp.p1} ×${mod.wp.p2 === -1 ? '∞' : mod.wp.p2}`);
+          lines.push($t('missionLayer.jumpTo', { values: { target: mod.wp.p1, count: mod.wp.p2 === -1 ? '∞' : mod.wp.p2 } }));
           break;
         case WpAction.SetHead:
-          lines.push(`⮐ HDG ${mod.wp.p1 === -1 ? 'Free' : mod.wp.p1 + '°'}`);
+          lines.push(mod.wp.p1 === -1 ? $t('missionLayer.hdgFree') : $t('missionLayer.hdgValue', { values: { degrees: mod.wp.p1 } }));
           break;
       }
     }
@@ -317,19 +318,19 @@
       WpAction.SetPoi, WpAction.Land,
     ];
     const typeOptions = geoTypes
-      .map(v => `<option value="${v}" ${v === wp.action ? 'selected' : ''}>${WP_ACTION_LABELS[v]}</option>`)
+      .map(v => `<option value="${v}" ${v === wp.action ? 'selected' : ''}>${$t(WP_ACTION_KEYS[v])}</option>`)
       .join('');
 
     let html = `<div class="wp-editor-popup">`;
-    html += `<div class="wpe-header">WP ${displayNum} <span class="wpe-type-name">${WP_ACTION_LABELS[wp.action]}</span></div>`;
-    html += `<div class="wpe-row"><label>Type</label><select data-field="action">${typeOptions}</select></div>`;
-    html += `<div class="wpe-row"><label>Alt</label>${numInputHtml('altitude', Number(altM), 1)}<button data-field="altToggle" class="wpe-toggle">${altType}</button></div>`;
+    html += `<div class="wpe-header">${$t('missionLayer.wpHeader', { values: { number: displayNum } })} <span class="wpe-type-name">${$t(WP_ACTION_KEYS[wp.action])}</span></div>`;
+    html += `<div class="wpe-row"><label>${$t('missionLayer.type')}</label><select data-field="action">${typeOptions}</select></div>`;
+    html += `<div class="wpe-row"><label>${$t('missionLayer.alt')}</label>${numInputHtml('altitude', Number(altM), 1)}<button data-field="altToggle" class="wpe-toggle">${altType}</button></div>`;
 
     if (wp.action === WpAction.Waypoint || wp.action === WpAction.Land) {
-      html += `<div class="wpe-row"><label>Speed</label>${numInputHtml('p1', wp.p1, 10, 0)}<span class="wpe-unit">cm/s</span></div>`;
+      html += `<div class="wpe-row"><label>${$t('missionLayer.speed')}</label>${numInputHtml('p1', wp.p1, 10, 0)}<span class="wpe-unit">${$t('missionLayer.cmPerSec')}</span></div>`;
     }
     if (wp.action === WpAction.PosholdTime) {
-      html += `<div class="wpe-row"><label>Hold</label>${numInputHtml('p1', wp.p1, 1, 0)}<span class="wpe-unit">sec</span></div>`;
+      html += `<div class="wpe-row"><label>${$t('missionLayer.hold')}</label>${numInputHtml('p1', wp.p1, 1, 0)}<span class="wpe-unit">${$t('missionLayer.sec')}</span></div>`;
     }
 
     // ── User Actions (P3 bits 1-4) ── only for geo-WP types
@@ -339,7 +340,7 @@
       const ua2 = (wp.p3 >> 2) & 1;
       const ua3 = (wp.p3 >> 3) & 1;
       const ua4 = (wp.p3 >> 4) & 1;
-      html += `<div class="wpe-row wpe-ua-row"><label>Actions</label>`;
+      html += `<div class="wpe-row wpe-ua-row"><label>${$t('missionLayer.actions')}</label>`;
       html += `<button data-field="ua" data-ua-bit="1" class="wpe-ua-btn ${ua1 ? 'active' : ''}">UA1</button>`;
       html += `<button data-field="ua" data-ua-bit="2" class="wpe-ua-btn ${ua2 ? 'active' : ''}">UA2</button>`;
       html += `<button data-field="ua" data-ua-bit="3" class="wpe-ua-btn ${ua3 ? 'active' : ''}">UA3</button>`;
@@ -351,18 +352,18 @@
     for (const mod of modifiers) {
       const mi = mod.idx;
       html += `<div class="wpe-mod-section">`;
-      html += `<div class="wpe-mod-header">${WP_ACTION_LABELS[mod.wp.action]}`;
-      html += `<button data-action="removeMod" data-mod-idx="${mi}" class="wpe-mod-remove" title="Remove modifier">✕</button></div>`;
+      html += `<div class="wpe-mod-header">${$t(WP_ACTION_KEYS[mod.wp.action])}`;
+      html += `<button data-action="removeMod" data-mod-idx="${mi}" class="wpe-mod-remove" title="${$t('missionLayer.removeModifier')}">✕</button></div>`;
 
       if (mod.wp.action === WpAction.Rth) {
-        html += `<div class="wpe-row"><label>Land</label><button data-field="rthLand" data-mod-idx="${mi}" class="wpe-toggle">${mod.wp.p1 ? 'Yes' : 'No'}</button></div>`;
+        html += `<div class="wpe-row"><label>${$t('missionLayer.landField')}</label><button data-field="rthLand" data-mod-idx="${mi}" class="wpe-toggle">${mod.wp.p1 ? $t('missionLayer.yes') : $t('missionLayer.no')}</button></div>`;
       }
       if (mod.wp.action === WpAction.Jump) {
-        html += `<div class="wpe-row"><label>To WP</label>${numInputHtml('mod-p1', mod.wp.p1, 1, 1, undefined, mi)}</div>`;
-        html += `<div class="wpe-row"><label>Repeat</label>${numInputHtml('mod-p2', mod.wp.p2, 1, -1, undefined, mi)}<span class="wpe-unit">${mod.wp.p2 === -1 ? '∞' : ''}</span></div>`;
+        html += `<div class="wpe-row"><label>${$t('missionLayer.toWp')}</label>${numInputHtml('mod-p1', mod.wp.p1, 1, 1, undefined, mi)}</div>`;
+        html += `<div class="wpe-row"><label>${$t('mission.repeat')}</label>${numInputHtml('mod-p2', mod.wp.p2, 1, -1, undefined, mi)}<span class="wpe-unit">${mod.wp.p2 === -1 ? '∞' : ''}</span></div>`;
       }
       if (mod.wp.action === WpAction.SetHead) {
-        html += `<div class="wpe-row"><label>Heading</label>${numInputHtml('mod-p1', mod.wp.p1, 1, -1, 359, mi)}<span class="wpe-unit">${mod.wp.p1 === -1 ? 'Free' : '°'}</span></div>`;
+        html += `<div class="wpe-row"><label>${$t('missionLayer.headingField')}</label>${numInputHtml('mod-p1', mod.wp.p1, 1, -1, 359, mi)}<span class="wpe-unit">${mod.wp.p1 === -1 ? $t('missionLayer.free') : '°'}</span></div>`;
       }
       html += `</div>`;
     }
@@ -370,19 +371,19 @@
     // Add modifier dropdown
     const atLimit = getTotalWpCount() >= MAX_WAYPOINTS;
     html += `<div class="wpe-add-mod"><select data-field="addModType" ${atLimit ? 'disabled' : ''}>`;
-    html += `<option value="">${atLimit ? '⚠ Max 120 WPs reached' : '+ Add modifier…'}</option>`;
+    html += `<option value="">${atLimit ? $t('missionLayer.maxWpReached') : $t('missionLayer.addModifier')}</option>`;
     if (!atLimit) {
-      html += `<option value="${WpAction.SetHead}">Set Heading</option>`;
-      html += `<option value="${WpAction.Jump}">Jump</option>`;
-      html += `<option value="${WpAction.Rth}">RTH</option>`;
+      html += `<option value="${WpAction.SetHead}">${$t('missionLayer.modSetHead')}</option>`;
+      html += `<option value="${WpAction.Jump}">${$t('missionLayer.modJump')}</option>`;
+      html += `<option value="${WpAction.Rth}">${$t('missionLayer.modRth')}</option>`;
     }
     html += `</select></div>`;
 
     // Actions
     html += `<div class="wpe-actions">`;
-    html += `<button data-action="moveUp" ${idx <= 0 ? 'disabled' : ''} title="Move up">▲</button>`;
-    html += `<button data-action="moveDown" ${idx >= total - 1 ? 'disabled' : ''} title="Move down">▼</button>`;
-    html += `<button data-action="remove" class="wpe-remove" title="Remove WP">✕</button>`;
+    html += `<button data-action="moveUp" ${idx <= 0 ? 'disabled' : ''} title="${$t('missionLayer.moveUp')}">▲</button>`;
+    html += `<button data-action="moveDown" ${idx >= total - 1 ? 'disabled' : ''} title="${$t('missionLayer.moveDown')}">▼</button>`;
+    html += `<button data-action="remove" class="wpe-remove" title="${$t('missionLayer.removeWp')}">✕</button>`;
     html += `</div>`;
     html += `</div>`;
     return html;
@@ -556,7 +557,7 @@
           icon,
           draggable: editing && !greyed,
           opacity: greyed ? 0.35 : 1.0,
-          title: `WP${dn}: ${WP_ACTION_LABELS[wp.action] || 'Unknown'}`,
+          title: `WP${dn}: ${$t(WP_ACTION_KEYS[wp.action]) || 'Unknown'}`,
         }).addTo(missionGroup);
 
         marker.on('click', () => {
@@ -619,11 +620,11 @@
         // Non-edit: simple hover tooltip
         if (!editing) {
           const altM = (wp.altitude / 100).toFixed(1);
-          const altType = (wp.p3 & 1) ? 'AMSL' : 'REL';
+          const altType = (wp.p3 & 1) ? $t('missionLayer.amsl') : $t('missionLayer.rel');
           const modifiers = getModifiersForWp(m.waypoints, i);
-          let tip = `WP${dn} ${WP_ACTION_LABELS[wp.action]}<br>${altM}m ${altType}`;
+          let tip = `WP${dn} ${$t(WP_ACTION_KEYS[wp.action])}<br>${altM}m ${altType}`;
           for (const mod of modifiers) {
-            tip += `<br>${WP_ACTION_LABELS[mod.wp.action]}`;
+            tip += `<br>${$t(WP_ACTION_KEYS[mod.wp.action])}`;
           }
           marker.bindTooltip(tip, { direction: 'top', offset: L.point(0, -20) });
         }
@@ -645,7 +646,7 @@
             { color: '#8e44ad', weight: 2, dashArray: '8 4', opacity: 0.8 }
           ).addTo(missionGroup);
           const jLabel = wp.p2 === -1 ? '∞' : `×${wp.p2}`;
-          line.bindTooltip(`Jump → WP${wp.p1} ${jLabel}`, { sticky: true });
+          line.bindTooltip($t('missionLayer.jumpLineTooltip', { values: { target: wp.p1, label: jLabel } }), { sticky: true });
           modifierLines.push(line);
         }
       }
@@ -660,7 +661,7 @@
             ],
             { color: '#e67e22', weight: 2, dashArray: '8 4', opacity: 0.7 }
           ).addTo(missionGroup);
-          line.bindTooltip('RTH', { sticky: true });
+          line.bindTooltip($t('missionLayer.rthLineTooltip'), { sticky: true });
           modifierLines.push(line);
         }
       }

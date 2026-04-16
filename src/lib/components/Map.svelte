@@ -8,6 +8,7 @@
   import { MAP_PROVIDERS, getProviderById, type MapProvider } from "$lib/config/mapProviders";
   import { cachedTileLayer } from "$lib/cache/CachedTileLayer";
   import { initTileCache } from "$lib/cache/tileCache";
+  import { t } from 'svelte-i18n';
   import { homePosition } from "$lib/stores/home";
   import MissionLayer from "./MissionLayer.svelte";
 
@@ -282,7 +283,7 @@
   <button class="map-view-btn"
           class:active={viewMode === 'heading-up'}
           onclick={toggleViewMode}
-          title={viewMode === 'north-up' ? 'Switch to Heading-Up view' : 'Switch to North-Up view'}>
+          title={viewMode === 'north-up' ? $t('map.headingUp') : $t('map.northUp')}>
     <svg viewBox="0 0 24 24" width="18" height="18">
       {#if viewMode === 'north-up'}
         <!-- North arrow up -->

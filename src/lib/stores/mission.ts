@@ -29,6 +29,18 @@ export const WP_ACTION_LABELS: Record<WpAction, string> = {
   [WpAction.Land]: 'Land',
 };
 
+/** i18n translation keys for WP actions — use with $t() in .svelte files */
+export const WP_ACTION_KEYS: Record<WpAction, string> = {
+  [WpAction.Waypoint]: 'wpAction.waypoint',
+  [WpAction.PosholdUnlim]: 'wpAction.posholdUnlim',
+  [WpAction.PosholdTime]: 'wpAction.posholdTime',
+  [WpAction.Rth]: 'wpAction.rth',
+  [WpAction.SetPoi]: 'wpAction.setPoi',
+  [WpAction.Jump]: 'wpAction.jump',
+  [WpAction.SetHead]: 'wpAction.setHead',
+  [WpAction.Land]: 'wpAction.land',
+};
+
 export const WP_FLAG_NORMAL = 0x00;
 export const WP_FLAG_LAST = 0xa5;
 export const WP_FLAG_FBH = 0x48;
