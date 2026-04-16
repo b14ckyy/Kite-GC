@@ -9,12 +9,13 @@
   import { cachedTileLayer } from "$lib/cache/CachedTileLayer";
   import { initTileCache } from "$lib/cache/tileCache";
   import { homePosition } from "$lib/stores/home";
+  import MissionLayer from "./MissionLayer.svelte";
 
   const ARMING_FLAG_ARMED = 2;
   const MIN_TRAIL_DIST = 1; // meters — don't add trail point if moved less
 
   let mapContainer: HTMLDivElement;
-  let map: L.Map | undefined;
+  let map = $state<L.Map | undefined>(undefined);
   let uavMarker: L.Marker | undefined;
   let unsubTelemetry: (() => void) | undefined;
   let unsubSettings: (() => void) | undefined;
@@ -273,6 +274,10 @@
 
 <div class="map-wrapper">
   <div bind:this={mapContainer} class="map" style="--map-rotation: 0deg"></div>
+
+  {#if map}
+    <MissionLayer {map} />
+  {/if}
 
   <button class="map-view-btn"
           class:active={viewMode === 'heading-up'}

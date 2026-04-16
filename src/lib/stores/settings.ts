@@ -27,6 +27,9 @@ export interface AppSettings {
   attitudeRateHz: number;
   positionRateHz: number;
   airspeedEnabled: boolean;
+  // Mission Control
+  defaultWpAltitudeM: number;
+  defaultPhTimeSec: number;
   // Widget panel layout
   panels: PanelConfig;
 }
@@ -47,6 +50,8 @@ const defaults: AppSettings = {
   attitudeRateHz: 5,
   positionRateHz: 2,
   airspeedEnabled: false,
+  defaultWpAltitudeM: 50,
+  defaultPhTimeSec: 30,
   panels: {
     bottom: ['home', 'battery', 'speed', 'ahi', 'altitude', 'gps', 'compass'],
     right: ['rawTelemetry'],

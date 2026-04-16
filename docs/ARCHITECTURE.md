@@ -331,3 +331,59 @@ trait TelemetrySource: Send {
 - Simple toggle — just add/remove CSS class + update CSS variable
 - Can be upgraded to leaflet-rotate or CesiumJS 3D in future milestones if needed
 
+---
+
+## ADR-012: Mission Planning — Backend-Owned State with Frontend Mirror
+
+**Date**: 2026-04-16
+**Status**: Accepted
+
+**Context**: Mission planning requires persistent waypoint state that can be transferred to/from the flight controller via MSP. The mission state is modified from both the map (click-to-add, drag) and the sidebar panel (reorder, edit). All modifications must be consistently reflected in both views.
+
+**Decision**: The mission state lives in the Rust backend as `MissionStore` (a `Mutex<Mission>`) and is mirrored to the frontend via Tauri `invoke()` calls. Every mutation goes through the backend.
+
+**Architecture**:
+```
+Frontend (Svelte)                    Backend (Rust)
+┌──────────────┐                    ┌───────────────────┐
+│ mission.ts   │──invoke()──────────│ commands/mission.rs│
+│ (writable    │◄──return Mission──│   │                │
+│  store)      │                    │   ▼                │
+│              │                    │ mission/store.rs   │
+│ MissionLayer │                    │ (Mutex<Mission>)   │
+│ MissionPanel │                    │   │                │
+└──────────────┘                    │   ├── codec.rs     │
+                                    │   └── types.rs     │
+                                    │                    │
+                                    │ MSP Transfer:      │
+                                    │ download → FC→Store │
+                                    │ upload   → Store→FC │
+                                    └───────────────────┘
+```
+
+**Key design choices**:
+- **Backend-owned state**: All CRUD operations (`add_wp`, `update_wp`, `remove_wp`, `insert_wp`, `reorder_wp`) are Rust functions that return the updated `Mission`
+- **Frontend mirror**: `mission.ts` writable store is updated after each invoke call returns
+- **FC transfer via scheduler**: Upload/download use the existing scheduler bulk channel to avoid concurrent serial access
+- **XML serialization**: `mission_to_xml` / `mission_from_xml` in Rust for MW XML format (interoperable with INAV Configurator, mwp, ezgui)
+- **File I/O in Rust**: `mission_save_file` / `mission_load_file` use Rust's filesystem APIs — frontend passes file path from native dialog
+- **Dirty flag**: Tracks whether mission has been modified since last FC transfer
+- **Max 120 WPs**: INAV firmware limit enforced in frontend (map click, polyline insert, modifier add)
+
+**Modifier WP handling**:
+- Modifier WPs (Jump, RTH, SetHead) are stored in the flat waypoint array at their natural index
+- The frontend groups modifiers with their preceding geo-WP for display (editor popup, sidebar indent)
+- Display numbering skips modifiers — only geo-WPs get visible numbers on map markers
+- SET_POI has coordinates but craft does NOT fly to it — shown as standalone marker, excluded from flight path polyline
+
+**Mission termination**:
+- LAND and RTH are mission-terminating actions — the flight controller stops execution after them
+- All WPs after the first LAND/RTH are greyed out (35% opacity on markers, dashed grey polyline)
+- Greyed WPs are non-draggable and have no editor popups to prevent accidental editing of unreachable WPs
+
+**Rationale**:
+- Rust ownership prevents data races between concurrent map/panel edits
+- Backend state is always authoritative — no frontend-only state divergence possible
+- Invoke pattern is consistent with existing connection/telemetry architecture
+- MW XML format ensures file interoperability with the INAV ecosystem
+

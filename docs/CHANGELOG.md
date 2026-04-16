@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Mission Planning (M4)
+- Mission module: Rust backend with `mission/types.rs`, `mission/codec.rs`, `mission/store.rs`
+- Waypoint data model: all 8 INAV WP action types (Waypoint, PosholdUnlim, PosholdTime, RTH, SetPoi, Jump, SetHead, Land)
+- MSP WP codec: `MSP_WP` (118) decode, `MSP_SET_WP` (209) encode, `MSP_WP_GETINFO` (20)
+- MSP mission EEPROM: `MSP_WP_MISSION_SAVE` (18), `MSP_WP_MISSION_LOAD` (19)
+- 13 Tauri commands: `mission_get`, `mission_clear`, `mission_add_wp`, `mission_update_wp`, `mission_remove_wp`, `mission_insert_wp`, `mission_reorder_wp`, `mission_download`, `mission_upload`, `mission_export_xml`, `mission_import_xml`, `mission_save_file`, `mission_load_file`
+- 37 Rust unit tests covering codec, XML serialization, store operations
+- Frontend mission store (`mission.ts`): Svelte writable stores, derived stores (`geoWaypoints`, `selectedWpIndex`, `editMode`), invoke wrappers
+- MissionLayer.svelte: Leaflet map layer with SVG markers, polyline path, floating editor/labels
+- MissionPanel.svelte: sidebar panel with WP table, detail view, FC/EEPROM/file controls
+- Type-specific SVG marker icons: blue WP teardrop, orange PosHold circle with orbit ring, purple POI, orange Land teardrop with down-arrow, orange RTH house, grey generic fallback
+- Floating editor popup per selected WP: type selector, altitude with REL/AMSL toggle, speed, hold time
+- Floating parameter labels on non-selected WPs showing altitude and modifier summary
+- Modifier WPs (Jump, RTH, SetHead) grouped into parent geo-WP editor popup
+- Add/remove modifiers via dropdown in editor
+- Display numbering skips modifier WPs (map markers + sidebar)
+- Click-on-polyline to insert WP between existing waypoints
+- Map click with editor open deselects WP instead of adding new
+- Dashed lines for Jump (purple) and RTH (orange) modifiers on map
+- WPs after first LAND/RTH greyed out (35% opacity, dashed grey polyline, non-draggable)
+- Greyed WP rows in sidebar list (opacity + grayscale filter)
+- FC Download / FC Upload buttons (RAM transfer)
+- EEPROM Save / EEPROM Load buttons (save disabled when armed)
+- Armed state detection via telemetry `armingFlags` (bit 2)
+- File Open / Save via native OS file picker dialog (@tauri-apps/plugin-dialog)
+- Drag & drop .mission file import
+- MW XML format import/export (interoperable with INAV Configurator, mwp, ezgui)
+- Max 120 WP sanity check on map click, polyline insert, and modifier add
+- Warning text in modifier dropdown when WP limit reached
+- WP count display (n/120) with dirty state badge
+- Multi-mission support: dynamic tabs [1][+], up to 9 missions, 120 WP global limit across all missions
+- Mission Control settings: Default WP Altitude (1–1000 m, default 50), Default PH Time (1–600 s, default 30), stepper +/− buttons
+- Scrollable WP list with fixed (non-scrolling) control buttons at bottom
+- Dark-themed scrollbars (custom WebKit styling + `color-scheme: dark`)
+- Dark-themed number inputs and selects in editor popup
+- Global `color-scheme: dark` on HTML root element
+
+### Fixed — Mission Planning (M4)
+- Editor popup flicker on value edits: popup now on map (not layerGroup), direct DOM innerHTML update avoids Leaflet layout recalc
+- Edit mode auto-disables when switching away from Mission tab or closing navigation panel
+
 ## [0.2.0] — 2026-04-15
 
 ### Added

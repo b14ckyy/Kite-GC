@@ -54,6 +54,14 @@ pub const MSP_UID: u16 = 160;
 pub const MSP_GPS_SV_INFO: u16 = 164;
 pub const MSP_GPSSTATISTICS: u16 = 166;
 
+// ── Mission / Waypoint MSP v1 command codes ─────────────────────────
+pub const MSP_WP_MISSION_SAVE: u16 = 18;
+pub const MSP_WP_MISSION_LOAD: u16 = 19;
+pub const MSP_WP_GETINFO: u16 = 20;
+pub const MSP_WP: u16 = 118;
+pub const MSP_NAV_STATUS: u16 = 121;
+pub const MSP_SET_WP: u16 = 209;
+
 // ── INAV MSP v2 command codes ───────────────────────────────────────
 pub const MSPV2_INAV_STATUS: u16 = 0x2000;
 pub const MSPV2_INAV_ANALOG: u16 = 0x2002;

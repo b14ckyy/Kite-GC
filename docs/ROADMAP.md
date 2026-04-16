@@ -141,7 +141,93 @@ This document tracks planned features, organized by milestone.
 - [x] Heading-Up mode — map rotates with UAV heading, auto-centers on UAV
 - [x] View mode toggle button on map (compass/heading indicator)
 
-## Milestone 4: Flight Recording & Logbook (v0.4.x)
+## [~] Milestone 4: Mission Planning (v0.4.x)
+
+### INAV Mission System (MSP WP)
+- [x] MSP WP codec — `MSP_WP` (118), `MSP_SET_WP` (209), `MSP_WP_GETINFO` (20)
+- [x] MSP mission save/load to EEPROM — `MSP_WP_MISSION_SAVE` (18), `MSP_WP_MISSION_LOAD` (19)
+- [x] Waypoint data model — all 8 INAV action types (WAYPOINT, POSHOLD_UNLIM, POSHOLD_TIME, RTH, SET_POI, JUMP, SET_HEAD, LAND)
+- [x] Mission download from FC (sequential MSP_WP reads)
+- [x] Mission upload to FC (sequential MSP_SET_WP writes + verification)
+- [x] End-mission flag management (0xA5 on last WP)
+- [x] FlyBy Home waypoint support (flag 0x48)
+- [x] Mission clear / new mission
+
+### Map-Based Editing
+- [x] Waypoint placement on map (click-to-add)
+- [x] Waypoint drag to reposition
+- [x] Click-on-polyline to insert WP between existing waypoints
+- [x] Floating editor popup per selected WP (type, altitude, speed, hold time)
+- [x] Floating parameter labels on non-selected WPs (altitude, modifiers summary)
+- [x] P3 bitfield support (altitude mode toggle: REL/AMSL)
+- [x] Map click with editor open deselects WP (does not add new)
+- [x] Type-specific SVG marker icons:
+  - Waypoint: blue teardrop with number
+  - PosHold: orange circle with orbit ring, number + hold time
+  - POI: purple circle with eye icon + number
+  - Land: orange teardrop with down-arrow (no number)
+  - RTH: orange house icon
+  - Generic fallback: grey circle
+
+### Modifier WP Support
+- [x] Modifier WPs (JUMP, RTH, SET_HEAD) grouped into parent geo-WP editor
+- [x] Add/remove modifiers via dropdown in editor popup
+- [x] Display numbering skips modifier WPs
+- [x] Sidebar indents modifiers without numbers
+- [x] SET_POI: standalone marker on map, excluded from flight path polyline
+
+### Mission Path Visualization
+- [x] Flight path polyline connecting geo-WPs (excludes POI)
+- [x] Dashed lines for JUMP modifier (purple, target WP indication)
+- [x] Dashed lines for RTH modifier (orange, back to first WP)
+- [x] WPs after first LAND/RTH greyed out (35% opacity markers, dashed grey polyline)
+- [x] Greyed WPs are non-draggable and have no editor popups
+
+### Sidebar Panel (MissionPanel)
+- [x] WP list table (#, Type, Alt, Params) with scrollable body and sticky header
+- [x] Read-only detail view for selected WP
+- [x] Edit mode toggle
+- [x] Waypoint reorder (move up/down buttons in editor)
+- [x] FC Download / FC Upload buttons (RAM)
+- [x] EEPROM Save / EEPROM Load buttons (save disabled when armed)
+- [x] File Open / Save with native file picker dialog (.mission XML format)
+- [x] Drag & drop .mission file import
+- [x] WP count display (n/120)
+- [x] Dirty state indicator
+- [x] WPs after LAND/RTH shown greyed in list
+- [x] Scrollable WP list with fixed (non-scrolling) control buttons
+
+### Safety & Limits
+- [x] Max 120 WP sanity check (map click, polyline insert, modifier add all blocked)
+- [x] EEPROM save disabled when FC is armed
+- [x] Warning text in modifier dropdown when limit reached
+
+### UI / Theming
+- [x] Dark-themed scrollbars (custom WebKit + color-scheme: dark)
+- [x] Dark-themed number inputs and select dropdowns in editor popup
+- [x] Global `color-scheme: dark` on HTML root element
+- [x] Editor popup flicker fix (popup on map, direct DOM innerHTML update)
+
+### Multi-Mission
+- [x] Dynamic mission tabs [1][+] with up to 9 missions
+- [x] 120 WP global limit across all missions
+- [x] Per-mission + total WP count display
+- [x] Switch / add / remove missions via tab UI
+
+### Mission Control Settings
+- [x] Default WP Altitude (1–1000 m, default 50 m)
+- [x] Default PH Time (1–600 s, default 30 s)
+- [x] Settings used when placing new WPs and switching type to PosholdTime
+- [x] Stepper +/− buttons matching WP editor popup style
+
+### UX
+- [x] Edit mode auto-disables when leaving Mission tab or closing panel
+
+### Future: Mission Enhancements
+- [ ] Undo/redo for mission edits
+- [ ] Abstraction layer for protocol-specific mission systems (ArduPilot/PX4 MAVLink)
+
+## Milestone 5: Flight Recording & Logbook (v0.5.x)
 
 - [ ] Flight recording engine (optional, toggled via settings)
 - [ ] User-configurable database storage path (portable)
@@ -152,15 +238,6 @@ This document tracks planned features, organized by milestone.
 - [ ] Flight statistics & analysis (from Blackbox high-res data)
 - [ ] Cloud sync support (optional, mobile-first)
 - [ ] Export flight data (CSV, KML, GPX)
-
-## Milestone 5: Mission Planning (v0.5.x)
-
-- [ ] Waypoint placement on map
-- [ ] Mission upload to FC (MSP WP commands)
-- [ ] Mission download from FC
-- [ ] Mission save/load (file)
-- [ ] Waypoint editing (altitude, speed, actions)
-- [ ] INAV mission extensions (RTH, LAND, etc.)
 
 ## Milestone 6: Advanced Features (v0.6.x+)
 

@@ -11,6 +11,8 @@
   import { tileCacheStats, setCacheMaxMB, clearCache } from "$lib/cache/tileCache";
   import type { TileCacheStats } from "$lib/cache/tileCache";
   import WidgetPanel from "$lib/components/WidgetPanel.svelte";
+  import MissionPanel from "$lib/components/MissionPanel.svelte";
+  import { editMode } from "$lib/stores/mission";
   import { WIDGET_DEFS, LARGE_BASE_VMIN } from "$lib/config/widgetRegistry";
   import type { PanelConfig } from "$lib/stores/settings";
 
@@ -56,6 +58,8 @@
   let airspeedEnabled = $state(false);
   let mapProvider = $state("osm");
   let mapCacheMaxMB = $state(200);
+  let defaultWpAltitudeM = $state(50);
+  let defaultPhTimeSec = $state(30);
 
   // Widget panel state
   let panels = $state<PanelConfig>({
@@ -124,16 +128,20 @@
   airspeedEnabled = saved.airspeedEnabled;
   mapProvider = saved.mapProvider;
   mapCacheMaxMB = saved.mapCacheMaxMB;
+  defaultWpAltitudeM = saved.defaultWpAltitudeM;
+  defaultPhTimeSec = saved.defaultPhTimeSec;
   panels = saved.panels ?? panels;
 
   function toggleNavPanel() {
     navPanelOpen = !navPanelOpen;
+    if (!navPanelOpen) editMode.set(false);
     settings.patch({ navPanelOpen });
     // Let the map recalculate its size after panel animation
     setTimeout(() => window.dispatchEvent(new Event("resize")), 320);
   }
 
   function selectTab(tabId: string) {
+    if (tabId !== 'mission') editMode.set(false);
     activeTab = tabId;
     settings.patch({ activeTab });
     if (!navPanelOpen) {
@@ -484,6 +492,29 @@
             </div>
           </section>
           <section class="panel-section">
+            <h4 class="section-heading">Mission Control</h4>
+            <div class="setting-row">
+              <label class="setting-label">Default WP Altitude</label>
+              <div class="setting-stepper">
+                <button class="stepper-btn" onclick={() => { defaultWpAltitudeM = Math.max(1, defaultWpAltitudeM - 1); settings.patch({ defaultWpAltitudeM }); }}>−</button>
+                <input type="number" class="stepper-input" min="1" max="1000" bind:value={defaultWpAltitudeM}
+                       onchange={() => { defaultWpAltitudeM = Math.max(1, Math.min(1000, defaultWpAltitudeM)); settings.patch({ defaultWpAltitudeM }); }} />
+                <button class="stepper-btn" onclick={() => { defaultWpAltitudeM = Math.min(1000, defaultWpAltitudeM + 1); settings.patch({ defaultWpAltitudeM }); }}>+</button>
+                <span class="setting-unit">m</span>
+              </div>
+            </div>
+            <div class="setting-row">
+              <label class="setting-label">Default PH Time</label>
+              <div class="setting-stepper">
+                <button class="stepper-btn" onclick={() => { defaultPhTimeSec = Math.max(1, defaultPhTimeSec - 1); settings.patch({ defaultPhTimeSec }); }}>−</button>
+                <input type="number" class="stepper-input" min="1" max="600" bind:value={defaultPhTimeSec}
+                       onchange={() => { defaultPhTimeSec = Math.max(1, Math.min(600, defaultPhTimeSec)); settings.patch({ defaultPhTimeSec }); }} />
+                <button class="stepper-btn" onclick={() => { defaultPhTimeSec = Math.min(600, defaultPhTimeSec + 1); settings.patch({ defaultPhTimeSec }); }}>+</button>
+                <span class="setting-unit">s</span>
+              </div>
+            </div>
+          </section>
+          <section class="panel-section">
             <h4 class="section-heading">HUD Widgets</h4>
             {#each WIDGET_DEFS as wdef}
               <div class="setting-row">
@@ -504,10 +535,7 @@
 
         <!-- Mission Tab -->
         {:else if activeTab === "mission"}
-          <div class="panel-empty">
-            <span class="panel-empty-icon">◎</span>
-            <span>Mission Control — coming soon</span>
-          </div>
+          <MissionPanel />
         {/if}
       </div>
     </div>
@@ -901,13 +929,15 @@
     position: absolute;
     top: 65px;
     left: 62px; /* after the rail buttons */
-    width: 240px;
+    width: 300px;
     max-height: calc(100vh - 53px - 24px - 80px); /* toolbar - statusbar - margins */
     background: rgba(46, 46, 46, 0.92);
     border: 1px solid rgba(55, 168, 219, 0.35);
     border-radius: 8px;
     z-index: 150;
-    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
     backdrop-filter: blur(12px);
     animation: panel-slide-in 0.25s ease-out;
@@ -926,6 +956,11 @@
 
   .panel-content {
     padding: 14px;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
   }
 
   .panel-section {
@@ -1220,6 +1255,58 @@
     color: #e0e0e0;
     font-size: 11px;
     min-width: 70px;
+  }
+
+  .setting-stepper {
+    display: flex;
+    align-items: stretch;
+    gap: 4px;
+  }
+  .stepper-btn {
+    background: #333;
+    color: #aaa;
+    border: 1px solid #555;
+    border-radius: 3px;
+    width: 24px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: bold;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    user-select: none;
+  }
+  .stepper-btn:hover {
+    background: #37a8db;
+    color: #fff;
+  }
+  .stepper-btn:active {
+    background: #2d8ab8;
+  }
+  .stepper-input {
+    padding: 3px 4px;
+    background: #434343;
+    border: 1px solid #555;
+    border-radius: 3px;
+    color: #e0e0e0;
+    font-size: 11px;
+    width: 52px;
+    text-align: center;
+    color-scheme: dark;
+    -moz-appearance: textfield;
+  }
+  .stepper-input::-webkit-inner-spin-button,
+  .stepper-input::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  .setting-unit {
+    font-size: 11px;
+    color: #888;
+    margin-left: 2px;
+    align-self: center;
   }
 
   .setting-hint {

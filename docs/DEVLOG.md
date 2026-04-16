@@ -13,7 +13,8 @@ INAV GCS is a cross-platform Ground Control Station for [INAV](https://github.co
 | Application Framework | Tauri 2.0 | Cross-platform desktop + mobile shell |
 | Backend | Rust | MSP protocol, serial/BLE communication, state management |
 | Frontend | Svelte 5 + TypeScript | User interface, reactive data display |
-| Map Library | Leaflet | Interactive maps for GCS and mission planning |
+| Map Library | Leaflet 1.9.4 | Interactive maps for GCS and mission planning |
+| File Dialogs | @tauri-apps/plugin-dialog 2.7.0 | Native OS file picker (mission save/load) |
 | Build Tool | Vite | Frontend bundling and dev server |
 | License | GPL-3.0-only | Open source license |
 
@@ -41,9 +42,12 @@ INAV GCS/
 │   │   │   ├── connection.ts     # Connection state, FC info, feature set
 │   │   │   ├── telemetry.ts      # Telemetry data store (GPS, attitude, battery)
 │   │   │   ├── settings.ts       # Session persistence (localStorage)
-│   │   │   └── home.ts           # Home position store (set on arm + GPS fix)
+│   │   │   ├── home.ts           # Home position store (set on arm + GPS fix)
+│   │   │   └── mission.ts        # Mission state: WP types, stores, invoke wrappers, XML I/O
 │   │   ├── components/           # Reusable UI components
 │   │   │   ├── Map.svelte        # Leaflet map (trail, home marker, cached tiles, heading-up)
+│   │   │   ├── MissionLayer.svelte # Mission map layer (markers, polyline, editor popups)
+│   │   │   ├── MissionPanel.svelte # Mission sidebar (WP list, FC/EEPROM/file controls)
 │   │   │   ├── WidgetPanel.svelte # Drag-and-drop widget panel container
 │   │   │   ├── DebugPanel.svelte # MSP debug monitor (dev builds only)
 │   │   │   └── widgets/          # HUD widget components
@@ -74,7 +78,13 @@ INAV GCS/
 │   │   ├── commands/             # Tauri IPC commands (frontend-callable)
 │   │   │   ├── mod.rs            # Command module registry
 │   │   │   ├── connection.rs     # Serial connect/disconnect + MSP handshake
+│   │   │   ├── mission.rs        # Mission CRUD, FC transfer, XML/file I/O (13 commands)
 │   │   │   └── info.rs           # App version and metadata
+│   │   ├── mission/              # Mission planning module
+│   │   │   ├── mod.rs            # Module exports
+│   │   │   ├── types.rs          # WpAction enum (8 types), Waypoint, Mission, MissionInfo
+│   │   │   ├── codec.rs          # MSP_WP binary codec (encode/decode 21-byte payload)
+│   │   │   └── store.rs          # MissionStore (Mutex<Mission>), CRUD, XML serialization
 │   │   ├── scheduler/            # MSP scheduler (dedicated thread)
 │   │   │   ├── mod.rs            # Scheduler loop, slot management, adaptive polling
 │   │   │   ├── telemetry.rs      # Telemetry decoding and configuration
@@ -195,6 +205,7 @@ Settings stored in `localStorage` under key `inav-gcs-settings`:
 - `mapProvider` / `mapCacheMaxMB` — tile provider + cache size
 - `navPanelOpen` / `activeTab` — floating panel state
 - `attitudeRateHz` / `positionRateHz` / `airspeedEnabled` — telemetry poll config
+- `defaultWpAltitudeM` / `defaultPhTimeSec` — mission control defaults
 - `widgetAhi` / `widgetSpeed` / `widgetAltitude` / `widgetBattery` / `widgetGps` / `widgetCompass` / `widgetHome` — per-widget visibility toggles
 - `panels` — widget panel layout: `{ bottom: string[], right: string[], positions?: Record<string, 'bottom' | 'right'> }`
 
@@ -233,7 +244,7 @@ The map supports two view modes, toggled via a button below the zoom controls:
 
 ## Testing
 
-- **24 Rust unit tests** covering MSP codec, parser, feature gates, and telemetry decoders
+- **37 Rust unit tests** covering MSP codec, parser, feature gates, telemetry decoders, and mission module
 - Run: `cd src-tauri && cargo test --target-dir "D:\cargo-target\inav-gcs"`
 - Frontend type-check: `npx svelte-check --tsconfig ./tsconfig.json`
 
