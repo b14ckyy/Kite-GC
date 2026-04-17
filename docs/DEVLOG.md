@@ -45,12 +45,28 @@ Kite Ground Control/
 │   │   │   ├── home.ts           # Home position store (set on arm + GPS fix)
 │   │   │   ├── mission.ts        # Mission state: WP types, stores, invoke wrappers, XML I/O
 │   │   │   └── flightlog.ts      # Flight log API wrappers, types, grouping/sort helpers
+│   │   ├── controllers/          # Domain logic extracted from +page.svelte
+│   │   │   ├── connectionController.ts  # Serial port refresh, connect/disconnect, listener mgmt
+│   │   │   ├── logbookController.ts     # Flight CRUD, Blackbox import, geocode/weather
+│   │   │   ├── playbackController.ts    # Timer-based playback engine (100ms tick, 1×–10× speed)
+│   │   │   └── widgetController.ts      # DnD reorder/cross-panel move (pure functions)
+│   │   ├── adapters/             # Data format adapters
+│   │   │   └── telemetryAdapter.ts      # DB TelemetryRecord → TelemetryData for widgets
+│   │   ├── helpers/              # Pure utility functions
+│   │   │   └── telemetry.ts      # isArmed(), hasKnownLocation(), isValidGpsCoordinate()
 │   │   ├── components/           # Reusable UI components
 │   │   │   ├── Map.svelte        # Leaflet map (trail, home marker, cached tiles, heading-up)
 │   │   │   ├── MissionLayer.svelte # Mission map layer (markers, polyline, editor popups)
 │   │   │   ├── MissionPanel.svelte # Mission sidebar (WP list, FC/EEPROM/file controls)
 │   │   │   ├── WidgetPanel.svelte # Drag-and-drop widget panel container
 │   │   │   ├── DebugPanel.svelte # MSP debug monitor (dev builds only)
+│   │   │   ├── LogPlayer.svelte  # Playback controls (play/pause/reset, scrubber, speed)
+│   │   │   ├── LogbookPanel.svelte # Flight list, detail view, import/weather/notes
+│   │   │   ├── SettingsPanel.svelte # All settings sections
+│   │   │   ├── Toolbar.svelte    # Logo, sensor bar, port selector, connect button
+│   │   │   ├── UavInfoPanel.svelte # FC info, feature gates, craft name
+│   │   │   ├── StatusBar.svelte  # Connection status, arming indicator, app title
+│   │   │   ├── NavRail.svelte    # Hamburger menu + vertical tab rail
 │   │   │   └── widgets/          # HUD widget components
 │   │   │       ├── AHI.svelte        # Artificial Horizon Indicator
 │   │   │       ├── SpeedWidget.svelte # Ground speed + airspeed
@@ -131,6 +147,7 @@ Kite Ground Control/
 │   ├── ARCHITECTURE.md           # Architecture Decision Records (ADRs)
 │   ├── ROADMAP.md                # Feature roadmap by milestone
 │   ├── FLIGHTLOG_DATABASE.md     # Flight log database schema documentation
+│   ├── DATA_PIPELINE.md          # Data pipeline architecture (live + replay flows)
 │   └── M5_TEST_CHECKLIST.md      # Manual verification checklist for M5 implementation
 │
 ├── static/                       # Static assets (icons, etc.)
@@ -145,8 +162,9 @@ Kite Ground Control/
 Each feature is self-contained in its own module:
 
 - **Backend (Rust)**: New features get their own subfolder in `src-tauri/src/` with a `mod.rs` entry point. Commands are registered in `commands/mod.rs` and wired in `lib.rs`.
-- **Frontend (Svelte)**: State lives in `src/lib/stores/`, UI components in `src/lib/components/`, pages in `src/routes/`.
-- **Adding a new feature**: Create the Rust module → Add commands → Register in `lib.rs` → Create Svelte store → Create UI component → Wire into page.
+- **Frontend (Svelte)**: State lives in `src/lib/stores/`, domain logic in `src/lib/controllers/`, data adapters in `src/lib/adapters/`, utility functions in `src/lib/helpers/`, UI components in `src/lib/components/`, pages in `src/routes/`.
+- **+page.svelte**: Thin orchestrator — imports controllers/adapters/components, wires reactive derivations (`$derived`), routes events. No business logic inline.
+- **Adding a new feature**: Create the Rust module → Add commands → Register in `lib.rs` → Create Svelte store → Create controller (if complex logic) → Create UI component → Wire into page.
 
 ## Development Setup
 
@@ -434,14 +452,14 @@ The raw `.TXT` file is always archived in `blackbox_files` regardless of downsam
 | `alt_m` | `GPS_altitude` / `altitude` / `baroAlt_cm` | cm values auto-divided by 100 |
 | `speed_ms` | `GPS_speed` | in m/s with `--unit-gps-speed mps` |
 | `heading` | **`heading`** → `GPS_ground_course` | INAV attitude heading (decidegrees ÷10 auto-detected) |
-| `vario_ms` | `vario` | |
+| `vario_ms` | `gps_velned[2]` → `vario` | NED down cm/s: negated and ÷100 for climb m/s |
 | `voltage` | `vbat` | |
 | `current_a` | `amperage` | |
 | `mah_drawn` | `mahdrawn` | |
 | `rssi` | `rssi` | |
-| `roll` | `roll` | |
-| `pitch` | `pitch` | |
-| `yaw` | `yaw` | decidegrees auto-detected |
+| `roll` | `roll` / `attitude[0]` / `attitude_roll` | **always ÷10** (INAV decidegrees → degrees) |
+| `pitch` | `pitch` / `attitude[1]` / `attitude_pitch` | **always ÷10** (INAV decidegrees → degrees) |
+| `yaw` | `yaw` / `attitude[2]` / `attitude_yaw` | decidegrees auto-detected (>360 → ÷10) |
 | `num_sat` | `GPS_numSat` | |
 | `link_quality` | `lq` / `link_quality` / `rxlq` | ELRS/CRSF only; `None` if column absent |
 
@@ -496,9 +514,9 @@ This supersedes the current RSSI reading from `MSPV2_INAV_ANALOG` for CRSF/ELRS 
 | `current_a` | `amperage` | |
 | `mah_drawn` | `mahdrawn` | |
 | `rssi` | `rssi` | |
-| `roll` | `roll` | |
-| `pitch` | `pitch` | |
-| `yaw` | `yaw` | decidegrees auto-detected |
+| `roll` | `roll` / `attitude[0]` / `attitude_roll` | **always ÷10** (INAV decidegrees → degrees) |
+| `pitch` | `pitch` / `attitude[1]` / `attitude_pitch` | **always ÷10** (INAV decidegrees → degrees) |
+| `yaw` | `yaw` / `attitude[2]` / `attitude_yaw` | decidegrees auto-detected (>360 → ÷10) |
 | `num_sat` | `GPS_numSat` | |
 | `link_quality` | `lq` / `link_quality` / `rxlq` | ELRS/CRSF only; `None` if column absent |
 

@@ -122,8 +122,42 @@ Expected:
 ## Known Gaps (Not Yet Implemented)
 
 - Protocol-agnostic recorder abstraction (currently MSP-integrated)
-- Playback/replay controls on map
+- Animated flight path replay on map (marker moves along track — currently playback only feeds widgets)
 - Collapsible group headers with aggregates
 - Search/filter UI in logbook
 - Export (`KML`, `GPX`, `CSV`)
 - Blackbox import/archive workflow
+
+## I. Blackbox Import Tests
+
+1. Import a single-log .TXT Blackbox file.
+2. Import a multi-log .TXT and verify log selector appears.
+3. Open the imported flight in the logbook.
+
+Expected:
+- Flight appears with `source: blackbox` indicator.
+- Metadata (FW version, date, GPS start) extracted from header.
+- Re-importing same file triggers duplicate detection dialog.
+
+## J. Telemetry Replay Tests (Widgets)
+
+1. Select an imported Blackbox flight in the logbook.
+2. Press Play in the playback controls.
+3. Observe all HUD widgets during playback.
+
+Expected:
+- **AHI**: Roll/pitch move smoothly, values in plausible range (±30° gentle flight, ±60° acro).
+- **Compass**: Heading rotates, shows cardinal directions, matches GPS COG.
+- **Vario**: Shows climb/descent in m/s, positive = climbing, negative = descending.
+- **Speed**: Ground speed in m/s, matches GPS speed from log.
+- **Battery**: Voltage/current/mAh values from log.
+- **GPS**: Satellite count and fix type shown.
+- **Home Distance**: Distance and bearing from flight start position.
+- **Altitude**: Shows altitude values from log.
+
+4. Test playback controls: Pause, Resume, Reset, Scrubber seek, Speed 1×/2×/4×/10×.
+5. Close player and verify widgets return to live telemetry (or zero if disconnected).
+
+Expected:
+- Home position cleared on player close.
+- No stale replay data in widgets after closing.

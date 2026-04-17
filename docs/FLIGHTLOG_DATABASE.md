@@ -77,7 +77,7 @@ These are sampled replay records. New `v4` fields below are the current target s
 | `alt_m` | `REAL` | existing | GPS altitude | Replay altitude |
 | `speed_ms` | `REAL` | existing | GPS speed | Replay speed |
 | `heading` | `INTEGER` | existing | GPS course / heading | Replay orientation |
-| `vario_ms` | `REAL` | existing, newly populated in v4 plan | `GPS_velned[2]` | GPS vertical speed |
+| `vario_ms` | `REAL` | existing, newly populated in v4 plan | `gps_velned[2]` (negated ÷100) or `vario` (÷100) | GPS vertical speed (m/s, positive = climbing) |
 | `voltage` | `REAL` | existing | battery | Power analysis |
 | `current_a` | `REAL` | existing | current meter | Power analysis |
 | `mah_drawn` | `INTEGER` | existing | cumulative current | Power analysis |

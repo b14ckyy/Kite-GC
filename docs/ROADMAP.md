@@ -286,6 +286,8 @@ This document tracks planned features, organized by milestone.
 - [x] Delete flight button styled as danger (red)
 - [ ] Flight path replay on map (animated marker playback)
 - [ ] Playback controls (play, pause, speed 1x/2x/4x, scrub timeline)
+- [x] Flight path replay through HUD widgets (all widgets receive telemetry during playback)
+- [x] Playback controls (play, pause, reset, scrub, speed 1×/2×/4×/10×)
 - [x] Delete flight records
 - [ ] Search/filter (by aircraft name, location, date range)
 
@@ -317,6 +319,8 @@ This document tracks planned features, organized by milestone.
 - [x] Archive original .TXT as BLOB in `blackbox_files` table
 - [x] Heading in decidegrees auto-detected (> 360 → ÷ 10); priority: `heading` → `GPS_ground_course`
 - [x] Link Quality from `lq` / `link_quality` / `rxlq` column → `link_quality` in `TelemetryRecord`
+- [x] Roll/pitch column resolution: `roll`/`attitude[0]`/`attitude_roll` — unconditional ÷10 (INAV decidegrees)
+- [x] Vario from `gps_velned[2]`: NED down cm/s → negated ÷100 → climb m/s
 
 ### Standalone Import
 - [x] "Import Blackbox" button in Logbook tab
@@ -326,6 +330,20 @@ This document tracks planned features, organized by milestone.
 - [x] Logbook shows Blackbox-only flights with distinct icon (wider panel, new source column)
 - [x] Multi-log .TXT: probe all indices (0–31), show picker for which log to import
 - [x] Real-time progress events during import (`flightlog_import_progress` Tauri event)
+
+### Telemetry Replay Pipeline
+- [x] `telemetryAdapter.ts`: `toTelemetryData(TelemetryRecord → TelemetryData)` — DB rows → widget format
+- [x] Automatic live/replay switch via `$derived(telem)` in +page.svelte
+- [x] Home position set from `flight.start_lat/lon` during replay, cleared on close
+- [x] All widgets confirmed working: AHI, Compass, Vario, Speed, Battery, GPS, Home Distance
+- [x] Compass uses GPS COG (heading) for replay, fallback to attitude yaw
+
+### Frontend Modularization
+- [x] `+page.svelte` reduced from ~2846 to ~935 lines (thin orchestrator)
+- [x] 4 controllers: connection, logbook, playback, widget
+- [x] 1 adapter: telemetryAdapter (DB → widget data mapping)
+- [x] 1 helper: telemetry (isArmed, hasKnownLocation, isValidGpsCoordinate)
+- [x] 7 extracted components: LogPlayer, LogbookPanel, SettingsPanel, Toolbar, UavInfoPanel, StatusBar, NavRail
 
 ### Attach to Existing Flight
 - [ ] "Attach Blackbox" button in flight detail view
@@ -381,4 +399,4 @@ This document tracks planned features, organized by milestone.
 
 ---
 
-*Last updated: 2026-04-17*
+*Last updated: 2026-04-18*

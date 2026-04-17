@@ -218,7 +218,42 @@ Tauri Events → Frontend (telemetry-attitude, telemetry-gps, ...)
 
 ---
 
-## ADR-009: Multi-Protocol Telemetry via TelemetrySource Trait (Planned)
+## ADR-009: Frontend Modularization — Thin Orchestrator + Controllers/Adapters
+
+**Date**: 2026-04-18
+**Status**: Accepted
+
+**Context**: `+page.svelte` had grown to ~2846 lines — mixing connection logic, logbook operations, playback state, widget management, and UI rendering. This made the file difficult to navigate and modify.
+
+**Decision**: Extract domain logic into 4 controllers, 1 adapter, 1 helper module, and 7 extracted UI components. `+page.svelte` is reduced to a thin orchestrator (~935 lines) that imports and wires these modules.
+
+**Extracted modules**:
+
+| Module | Type | Responsibility |
+|---|---|---|
+| `controllers/connectionController.ts` | Controller | Serial port refresh, connect/disconnect, telemetry listener management |
+| `controllers/logbookController.ts` | Controller | Flight list/CRUD, Blackbox import, geocode/weather enrichment |
+| `controllers/playbackController.ts` | Controller | Timer-based playback engine (100ms tick, 1×/2×/4×/10× speed, seek) |
+| `controllers/widgetController.ts` | Controller | Drag-and-drop reorder/cross-panel move (pure functions) |
+| `adapters/telemetryAdapter.ts` | Adapter | `toTelemetryData()` — maps DB `TelemetryRecord` → widget-consumable `TelemetryData` |
+| `helpers/telemetry.ts` | Helper | `isArmed()`, `hasKnownLocation()`, `isValidGpsCoordinate()` |
+| `LogPlayer.svelte` | Component | Playback controls UI (play/pause/reset, scrubber, speed selector) |
+| `LogbookPanel.svelte` | Component | Flight list, detail view, import/weather/notes UI |
+| `SettingsPanel.svelte` | Component | All settings sections |
+| `Toolbar.svelte` | Component | Logo, sensor bar, port selector, connect button |
+| `UavInfoPanel.svelte` | Component | FC info, feature gates, craft name |
+| `StatusBar.svelte` | Component | Connection status, arming indicator, app title |
+| `NavRail.svelte` | Component | Hamburger menu + vertical tab rail |
+
+**Rationale**:
+- Controllers contain logic that was previously inline in `+page.svelte` — enables unit testing
+- Adapter pattern (`toTelemetryData`) cleanly separates DB format from widget expectations
+- Components are self-contained with `$props()` — no direct store access except where needed
+- `+page.svelte` is now a wiring layer: imports, reactive derivations, event routing
+
+---
+
+## ADR-010: Multi-Protocol Telemetry via TelemetrySource Trait (Planned)
 
 **Date**: 2026-04-16
 **Status**: Planned (M6)
@@ -259,7 +294,7 @@ trait TelemetrySource: Send {
 
 ---
 
-## ADR-010: Drag-and-Drop Widget Panel System
+## ADR-011: Drag-and-Drop Widget Panel System
 
 **Date**: 2026-04-16
 **Status**: Accepted
@@ -301,7 +336,7 @@ trait TelemetrySource: Send {
 
 ---
 
-## ADR-011: Map Heading-Up Mode via CSS Transform
+## ADR-012: Map Heading-Up Mode via CSS Transform
 
 **Date**: 2026-04-16
 **Status**: Accepted
@@ -333,7 +368,7 @@ trait TelemetrySource: Send {
 
 ---
 
-## ADR-012: Mission Planning — Backend-Owned State with Frontend Mirror
+## ADR-013: Mission Planning — Backend-Owned State with Frontend Mirror
 
 **Date**: 2026-04-16
 **Status**: Accepted
@@ -389,7 +424,7 @@ Frontend (Svelte)                    Backend (Rust)
 
 ---
 
-## ADR-013: Internationalization via svelte-i18n
+## ADR-014: Internationalization via svelte-i18n
 
 **Date**: 2026-04-16
 **Status**: Accepted
@@ -429,7 +464,7 @@ settings.ts               # locale field persisted in localStorage
 
 ---
 
-## ADR-014: Flight Recording Integrated Into Scheduler (M5)
+## ADR-015: Flight Recording Integrated Into Scheduler (M5)
 
 **Date**: 2026-04-16
 **Status**: Accepted
@@ -480,7 +515,7 @@ FlightRecorder
 
 ---
 
-## ADR-015: Blackbox Integration via External Binary + Raw CSV Storage
+## ADR-016: Blackbox Integration via External Binary + Raw CSV Storage
 
 **Date**: 2026-04-17
 **Status**: Accepted
@@ -550,7 +585,7 @@ ALTER TABLE telemetry_records ADD COLUMN link_quality INTEGER;
 
 ---
 
-## ADR-016: Weather Fetch at ARM Time (Planned Fix)
+## ADR-017: Weather Fetch at ARM Time (Planned Fix)
 
 **Date**: 2026-04-16
 **Status**: Planned
@@ -573,7 +608,7 @@ The existing `flightlog_geocode` and `flightlog_fetch_weather` Tauri commands re
 
 ---
 
-## ADR-017: MSP Link Quality — MSP2_INAV_GET_LINK_STATS (Planned, INAV 9.x)
+## ADR-018: MSP Link Quality — MSP2_INAV_GET_LINK_STATS (Planned, INAV 9.x)
 
 **Date**: 2026-04-17
 **Status**: Planned
