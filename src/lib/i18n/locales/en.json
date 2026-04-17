@@ -149,7 +149,16 @@
     "duplicateMessage": "Duplicate flight detected!\n\nAircraft: {craft}\nTime: {time}\n\nThis flight appears to match an existing entry.\nImport anyway?",
     "importProgress": "Blackbox import",
     "editWeather": "Edit weather",
-    "blackboxFileFilter": "Blackbox Logs"
+    "blackboxFileFilter": "Blackbox Logs",
+    "unknownCraft": "Unknown"
+  },
+  "player": {
+    "close": "Close player",
+    "play": "Play",
+    "pause": "Pause",
+    "toStart": "Back to start",
+    "speed": "Playback speed",
+    "bbxNotAvailable": "Blackbox source not available"
   },
   "widgets": {
     "ahi": "AHI",

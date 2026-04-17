@@ -149,7 +149,16 @@
     "duplicateMessage": "Doppelter Flug erkannt!\n\nFluggerät: {craft}\nZeit: {time}\n\nDieser Flug scheint bereits vorhanden zu sein.\nTrotzdem importieren?",
     "importProgress": "Blackbox-Import",
     "editWeather": "Wetter bearbeiten",
-    "blackboxFileFilter": "Blackbox-Logs"
+    "blackboxFileFilter": "Blackbox-Logs",
+    "unknownCraft": "Unbekannt"
+  },
+  "player": {
+    "close": "Player schließen",
+    "play": "Abspielen",
+    "pause": "Pause",
+    "toStart": "Zum Anfang",
+    "speed": "Wiedergabegeschwindigkeit",
+    "bbxNotAvailable": "Blackbox-Quelle nicht verfügbar"
   },
   "widgets": {
     "ahi": "AHI",
