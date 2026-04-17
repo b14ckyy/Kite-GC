@@ -407,9 +407,9 @@ impl ColumnIndices {
             current: resolve_col(m, &["amperage", "current"]),
             mah: resolve_col(m, &["energyCumulative", "mahdrawn", "mah_drawn"]),
             rssi: resolve_col(m, &["rssi"]),
-            roll: resolve_col(m, &["roll"]),
-            pitch: resolve_col(m, &["pitch"]),
-            yaw: resolve_col(m, &["yaw"]),
+            roll: resolve_col(m, &["roll", "attitude0", "attitude_roll"]),
+            pitch: resolve_col(m, &["pitch", "attitude1", "attitude_pitch"]),
+            yaw: resolve_col(m, &["yaw", "attitude2", "attitude_yaw"]),
             sats: resolve_col(m, &["gps_numsat", "gps_sats"]),
             lq: resolve_col(m, &["lq", "link_quality", "rxlq"]),
             gps_hdop: resolve_col(m, &["gps_hdop"]),
@@ -505,7 +505,10 @@ fn build_telemetry_record_indexed(
 
     let alt = read_f64(cols.alt, record).map(|v| if v > 10_000.0 { v / 100.0 } else { v });
 
-    let vario_ms = read_f64(cols.gps_vel_d, record).or_else(|| read_f64(cols.vario, record));
+    // gps_vel_d is NED "down" velocity in cm/s; negate (positive=climbing) and convert to m/s.
+    // The fallback "vario" column from blackbox_decode is also in cm/s.
+    let vario_ms = read_f64(cols.gps_vel_d, record).map(|v| -v / 100.0)
+        .or_else(|| read_f64(cols.vario, record).map(|v| v / 100.0));
 
     TelemetryRecord {
         id: 0,
@@ -521,8 +524,9 @@ fn build_telemetry_record_indexed(
         current_a: read_f64(cols.current, record),
         mah_drawn: read_f64(cols.mah, record).map(|v| v.round() as u32),
         rssi: read_f64(cols.rssi, record).map(|v| v.round() as u16),
-        roll: read_f64(cols.roll, record),
-        pitch: read_f64(cols.pitch, record),
+        // INAV blackbox attitude values are always in decidegrees — unconditionally /10
+        roll: read_f64(cols.roll, record).map(|v| v / 10.0),
+        pitch: read_f64(cols.pitch, record).map(|v| v / 10.0),
         yaw: read_f64(cols.yaw, record).map(|v| {
             if v > 360.0 { (v / 10.0).round() as i16 } else { v.round() as i16 }
         }),

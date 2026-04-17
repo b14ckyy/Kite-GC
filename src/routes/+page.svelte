@@ -22,6 +22,8 @@
   import * as logbookCtrl from '$lib/controllers/logbookController';
   import * as widgetCtrl from '$lib/controllers/widgetController';
   import { isValidGpsCoordinate } from '$lib/helpers/telemetry';
+  import { toTelemetryData } from '$lib/adapters/telemetryAdapter';
+  import { homePosition } from '$lib/stores/home';
   import { MAP_PROVIDERS } from "$lib/config/mapProviders";
   import { tileCacheStats, setCacheMaxMB, clearCache } from "$lib/cache/tileCache";
   import type { TileCacheStats } from "$lib/cache/tileCache";
@@ -70,8 +72,8 @@
   }
 
   // Reactive telemetry subscription
-  let telem = $state(get(telemetry));
-  telemetry.subscribe((t) => { telem = t; });
+  let liveTelem = $state(get(telemetry));
+  telemetry.subscribe((t) => { liveTelem = t; });
 
   // Settings state for the settings panel
   let attitudeRateHz = $state(5);
@@ -298,6 +300,7 @@
 
   function closePlayer() {
     resetPlayback();
+    homePosition.set({ lat: 0, lon: 0, alt: 0, set: false });
     selectedFlight = null;
     selectedFlightTrack = [];
     selectedFlightId = null;
@@ -386,6 +389,12 @@
     weatherEditing = false;
     resetPlayback();
     if (data.hasGpsData) playbackActive = true;
+
+    // Set home position for replay (used by HomeWidget)
+    if (data.flight?.start_lat != null && data.flight?.start_lon != null) {
+      homePosition.set({ lat: data.flight.start_lat, lon: data.flight.start_lon, alt: 0, set: true });
+    }
+
     await loadLogbook();
   }
 
@@ -529,6 +538,13 @@
   );
   const logbookDetailOpen = $derived(activeTab === 'logbook' && selectedFlight != null && !logbookMinimized);
   const logbookHasFlightOnMap = $derived(activeTab === 'logbook' && selectedFlight != null && !isPrimaryConnected);
+
+  // Unified telemetry: live data when connected, playback data when replaying
+  const telem = $derived(
+    playbackActive && !isPrimaryConnected && playbackPoint
+      ? toTelemetryData(playbackPoint)
+      : liveTelem,
+  );
 
   // When primary connection is established, clear playback
   $effect(() => {
