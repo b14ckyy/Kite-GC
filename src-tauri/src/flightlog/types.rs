@@ -32,6 +32,7 @@ pub struct Flight {
     pub start_time: DateTime<Utc>,
     pub end_time: Option<DateTime<Utc>>,
     pub duration_sec: Option<i64>,
+    pub source: String,
     pub craft_name: String,
     pub fc_variant: String,
     pub fc_version: String,
@@ -82,6 +83,31 @@ pub struct TelemetryRecord {
     pub fix_type: Option<u8>,
     pub num_sat: Option<u8>,
     pub cpu_load: Option<u16>,
+    /// Link Quality 0–100 % (ELRS/CRSF — from blackbox `lq` column; None for MSP)
+    pub link_quality: Option<u8>,
+    /// Barometric altitude in meters (`BaroAlt`)
+    pub baro_alt_m: Option<f64>,
+    /// GPS quality/accuracy metrics
+    pub gps_hdop: Option<f64>,
+    pub gps_eph: Option<f64>,
+    pub gps_epv: Option<f64>,
+    /// Mission/navigation context
+    pub active_wp_number: Option<i32>,
+    pub active_flight_mode_flags: Option<i64>,
+    pub state_flags: Option<i64>,
+    pub nav_state: Option<i32>,
+    pub nav_flags: Option<i64>,
+    /// RX / hardware health context
+    pub rx_signal_received: Option<u8>,
+    pub hw_health_status: Option<i64>,
+    pub baro_temperature: Option<f64>,
+    /// Wind estimator output (NED axes in m/s)
+    pub wind_n_ms: Option<f64>,
+    pub wind_e_ms: Option<f64>,
+    pub wind_d_ms: Option<f64>,
+    /// Raw/processed RC channel arrays encoded as JSON
+    pub rc_data_json: Option<String>,
+    pub rc_command_json: Option<String>,
 }
 
 /// Summary for the logbook list view
@@ -90,12 +116,44 @@ pub struct FlightSummary {
     pub id: i64,
     pub start_time: DateTime<Utc>,
     pub duration_sec: Option<i64>,
+    pub source: String,
     pub craft_name: String,
     pub location_name: Option<String>,
     pub max_alt_m: Option<f64>,
     pub max_speed_ms: Option<f64>,
     pub total_distance_m: Option<f64>,
     pub platform_type: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum BlackboxImportStatus {
+    /// Import successful
+    #[serde(rename = "success")]
+    Success {
+        flight_id: i64,
+        rows_imported: usize,
+    },
+    /// Duplicate flight detected — user must confirm override
+    #[serde(rename = "duplicate")]
+    DuplicateDetected {
+        existing_flight: Flight,
+        duplicate_craft_name: String,
+        duplicate_start_time: DateTime<Utc>,
+        duplicate_duration_sec: Option<i64>,
+        duplicate_lat: Option<f64>,
+        duplicate_lon: Option<f64>,
+    },
+}
+
+/// Kept for backwards compatibility
+pub type BlackboxImportResult = BlackboxImportStatus;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlackboxImportProgress {
+    pub stage: String,
+    pub progress: u8,
+    pub message: String,
 }
 
 /// Sort mode for the logbook

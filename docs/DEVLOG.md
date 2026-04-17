@@ -84,7 +84,7 @@ Kite Ground Control/
 │   │   ├── commands/             # Tauri IPC commands (frontend-callable)
 │   │   │   ├── mod.rs            # Command module registry
 │   │   │   ├── connection.rs     # Serial connect/disconnect + MSP handshake
-│   │   │   ├── flightlog.rs      # Flight log commands (list/get/track/delete/notes/geocode/weather)
+│   │   │   ├── flightlog.rs      # Flight log commands (list/get/track/delete/notes/geocode/weather/update_weather/import/probe)
 │   │   │   ├── mission.rs        # Mission CRUD, FC transfer, XML/file I/O (13 commands)
 │   │   │   └── info.rs           # App version and metadata
 │   │   ├── flightlog/            # Flight recording + logbook backend
@@ -95,7 +95,7 @@ Kite Ground Control/
 │   │   │   ├── raw_logger.rs     # Optional raw parsed text log writer
 │   │   │   ├── geocode.rs        # OSM Nominatim reverse geocoding
 │   │   │   ├── weather.rs        # Open-Meteo weather fetcher
-│   │   │   └── blackbox.rs       # Blackbox decode pipeline (planned)
+│   │   │   └── blackbox.rs       # Blackbox decode pipeline (discovery, invocation, CSV parsing, downsampling)
 │   │   ├── mission/              # Mission planning module
 │   │   │   ├── mod.rs            # Module exports
 │   │   │   ├── types.rs          # WpAction enum (8 types), Waypoint, Mission, MissionInfo
@@ -130,6 +130,7 @@ Kite Ground Control/
 │   ├── CHANGELOG.md              # Version changelog (Keep a Changelog format)
 │   ├── ARCHITECTURE.md           # Architecture Decision Records (ADRs)
 │   ├── ROADMAP.md                # Feature roadmap by milestone
+│   ├── FLIGHTLOG_DATABASE.md     # Flight log database schema documentation
 │   └── M5_TEST_CHECKLIST.md      # Manual verification checklist for M5 implementation
 │
 ├── static/                       # Static assets (icons, etc.)
@@ -351,7 +352,7 @@ connect() → handshake (blocking)
 disconnect() → SchedulerCommand::Stop → thread joins → cleanup
 ```
 
-## Blackbox Integration (M5b — planned)
+## Blackbox Integration (M5b)
 
 Blackbox log files from INAV flight controllers contain high-resolution telemetry data in a binary format. Integration is limited to GPS/telemetry archival — **not** a full Blackbox analyzer (no PID/gyro/motor visualization).
 
@@ -372,14 +373,27 @@ blackbox_decode --merge-gps --datetime --unit-height m --unit-gps-speed mps --st
 - `--merge-gps`: Interpolates GPS samples into main loop iterations
 - `--datetime`: Converts timestamps to absolute date/time using log header
 - `--stdout`: Outputs CSV to stdout (captured by Rust `Command`)
+- `--unit-height m`: Forces altitude output in metres
+- `--unit-gps-speed mps`: Forces speed output in m/s
 - `--index N`: Selects specific log from multi-session .TXT files
-
-**Why external binary**: blackbox_decode is a C program (~50-160KB per platform) that handles the complex binary format with all INAV version variations. Reimplementing in Rust would be fragile and require constant maintenance as INAV evolves.
 
 ### Data Pipeline
 
 ```
 .TXT file (binary Blackbox log)
+    │
+    ▼
+probe_blackbox_logs() — tries --index 0..31, exit-code check per index
+    │  returns Vec<BlackboxLogProbe> { index, label }
+    │
+    ▼
+User selects log index (if >1 found)
+    │
+    ▼
+import_blackbox_log_with_progress<F>()
+    │  reads H looptime + H P interval from raw header
+    │  computes effective log rate (e.g. looptime=500µs × interval=4 = 500 Hz)
+    │  computes keep_every = effective_Hz / 10 (downsample to 10 Hz)
     │
     ▼
 blackbox_decode (child process, stdout capture)
@@ -388,50 +402,151 @@ blackbox_decode (child process, stdout capture)
 CSV text (dynamic columns, INAV-version-dependent)
     │
     ▼
-Rust CSV parser (column names from header line)
+Rust CSV parser
+    ├── pre-builds HashMap<String, usize> header index map (once)
+    ├── resolves ColumnIndices from index map (once per file)
+    ├── skips (keep_every − 1) rows between kept rows (downsampling)
+    └── stores raw comma-joined CSV line (not JSON)
     │
     ▼
-JSON blob per row → blackbox_records table
-    │
-    ▼
-Original .TXT → blackbox_files table (BLOB archive)
+telemetry_records → sampled at ≤ 10 Hz (lat, lon, alt, speed, heading, lq, …)
+blackbox_records  → same sampled rows, raw CSV text (for future detail analysis)
+blackbox_files    → original .TXT archived as BLOB (for re-processing)
 ```
 
-### DB Schema Extension (migration v1 → v2)
+### Downsampling Design
 
-**New tables**:
+For a log with `H looptime:500` (500 µs loop) and `H P interval:1/4` (every 4th loop):
+- Raw log rate = 500 µs × 4 = 2000 µs = **500 Hz**
+- Target = 10 Hz = 100 000 µs interval
+- `keep_every` = 100 000 / 2000 = **50** — only 1 in 50 rows stored
+- 5-minute flight at 500 Hz: ~150 000 raw rows → ~3 000 DB rows
+
+The raw `.TXT` file is always archived in `blackbox_files` regardless of downsampling.
+
+### TelemetryRecord Fields from Blackbox
+
+| Field | CSV column(s) | Notes |
+|---|---|---|
+| `timestamp_ms` | `time (us)` ÷ 1000 | |
+| `lat` | `GPS_coord[0]` | requires `--merge-gps` |
+| `lon` | `GPS_coord[1]` | requires `--merge-gps` |
+| `alt_m` | `GPS_altitude` / `altitude` / `baroAlt_cm` | cm values auto-divided by 100 |
+| `speed_ms` | `GPS_speed` | in m/s with `--unit-gps-speed mps` |
+| `heading` | **`heading`** → `GPS_ground_course` | INAV attitude heading (decidegrees ÷10 auto-detected) |
+| `vario_ms` | `vario` | |
+| `voltage` | `vbat` | |
+| `current_a` | `amperage` | |
+| `mah_drawn` | `mahdrawn` | |
+| `rssi` | `rssi` | |
+| `roll` | `roll` | |
+| `pitch` | `pitch` | |
+| `yaw` | `yaw` | decidegrees auto-detected |
+| `num_sat` | `GPS_numSat` | |
+| `link_quality` | `lq` / `link_quality` / `rxlq` | ELRS/CRSF only; `None` if column absent |
+
+### DB Schema (v3)
+
+Current schema version is **3**. Migration path: v0→v1 (initial schema), v1→v2 (blackbox tables + `flights.source`), v2→v3 (link_quality column).
+
 ```sql
-CREATE TABLE blackbox_records (
-    id          INTEGER PRIMARY KEY,
-    flight_id   INTEGER NOT NULL REFERENCES flights(id) ON DELETE CASCADE,
-    timestamp_us INTEGER NOT NULL,
-    csv_data    TEXT NOT NULL  -- JSON object, one key per CSV column
-);
+-- v3 migration (2026-04-17):
+ALTER TABLE telemetry_records ADD COLUMN link_quality INTEGER;
 
-CREATE TABLE blackbox_files (
-    id              INTEGER PRIMARY KEY,
-    flight_id       INTEGER NOT NULL REFERENCES flights(id) ON DELETE CASCADE,
-    original_filename TEXT NOT NULL,
-    log_index       INTEGER NOT NULL DEFAULT 0,
-    file_data       BLOB NOT NULL,
-    file_size       INTEGER NOT NULL,
-    imported_at     TEXT NOT NULL DEFAULT (datetime('now'))
+-- v2 tables (unchanged):
+CREATE TABLE blackbox_records (
+    id            INTEGER PRIMARY KEY,
+    flight_id     INTEGER NOT NULL REFERENCES flights(id) ON DELETE CASCADE,
+    timestamp_us  INTEGER NOT NULL,
+    csv_data      TEXT NOT NULL  -- raw comma-joined CSV row (not JSON)
 );
+CREATE TABLE blackbox_files (
+    id                INTEGER PRIMARY KEY,
+    flight_id         INTEGER NOT NULL REFERENCES flights(id) ON DELETE CASCADE,
+    original_filename TEXT NOT NULL,
+    log_index         INTEGER NOT NULL DEFAULT 0,
+    file_data         BLOB NOT NULL,
+    file_size         INTEGER NOT NULL,
+    imported_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- flights.source: 'live' | 'blackbox' | 'both'
 ```
 
-**Modified columns**:
-- `flights.source` TEXT: `live` (default, MSP recording), `blackbox` (BB import only), `both` (live + BB attached)
+## MSP Link Quality — Future: MSP2_INAV_GET_LINK_STATS (INAV 9.x)
 
-**Why JSON blob**: Blackbox CSV columns are dynamic — they depend on INAV firmware version and FC configuration (which sensors are active, which features are enabled). A fixed schema would break with every INAV update. JSON preserves all fields without schema changes.
+INAV PR [#11496](https://github.com/iNavFlight/inav/pull/11496) (targeting `maintenance-9.x`) adds a new MSP2 message:
 
-### Use Cases
+**`MSP2_INAV_GET_LINK_STATS` — code `0x2103` (decimal 8451)**
 
-1. **Standalone import**: User has .TXT files → import creates new flight entry with `source: "blackbox"`, metadata extracted from Blackbox header (FW version, date, GPS start position).
-2. **Attach to flight**: User has a live-recorded flight + matching Blackbox → links BB data to existing flight, marks `source: "both"`. Logbook shows toggle between MSP telemetry and Blackbox data.
-3. **Multi-log files**: A single .TXT may contain multiple ARM/DISARM sessions. Import UI shows a picker for which `--index` to import.
+Request: none  
+Reply payload:
 
-## Weather Fix (planned)
+| Field | Type | Size | Unit | Description |
+|---|---|---|---|---|
+| `uplinkRSSI_dBm` | uint8_t | 1 | -dBm | Uplink RSSI as positive magnitude (70 = -70 dBm) |
+| `uplinkLQ` | uint8_t | 1 | % | Uplink Link Quality (`rxLinkStatistics.uplinkLQ`) |
+| `uplinkSNR` | int8_t | 1 | dB | Uplink Signal-to-Noise Ratio (`rxLinkStatistics.uplinkSNR`) |
 
-Currently, weather and geocoding are fetched lazily when the user views a flight in the logbook. This means flights in areas without internet access at viewing time will have no weather data.
+This supersedes the current RSSI reading from `MSPV2_INAV_ANALOG` for CRSF/ELRS setups. Implementation plan:
+- Add `LinkStats` feature gate: `InavVersion >= 9.1` (exact version TBD once merged)
+- Add `MSP2_INAV_GET_LINK_STATS` to the Analog telemetry group (or a dedicated Link slot)
+- Populate `link_quality` (already in `TelemetryRecord`) and add `uplink_snr_db` (future field) from the new message
+- `link_quality` field in DB already prepared in schema v3
+- Reference: [INAV PR #11496](https://github.com/iNavFlight/inav/pull/11496)
+| `current_a` | `amperage` | |
+| `mah_drawn` | `mahdrawn` | |
+| `rssi` | `rssi` | |
+| `roll` | `roll` | |
+| `pitch` | `pitch` | |
+| `yaw` | `yaw` | decidegrees auto-detected |
+| `num_sat` | `GPS_numSat` | |
+| `link_quality` | `lq` / `link_quality` / `rxlq` | ELRS/CRSF only; `None` if column absent |
 
-**Planned fix**: `tokio::spawn` from the ARM event handler (`on_arm()`) to asynchronously fetch geocode + weather using the start GPS coordinates. This writes directly to the DB via a new connection, decoupled from the scheduler thread. The frontend logbook commands `flightlog_geocode` and `flightlog_fetch_weather` remain as manual fallbacks.
+### DB Schema (v3)
+
+Current schema version is **3**. Migration path: v0→v1 (initial schema), v1→v2 (blackbox tables + `flights.source`), v2→v3 (link_quality column).
+
+```sql
+-- v3 migration (2026-04-17):
+ALTER TABLE telemetry_records ADD COLUMN link_quality INTEGER;
+
+-- v2 tables (unchanged):
+CREATE TABLE blackbox_records (
+    id            INTEGER PRIMARY KEY,
+    flight_id     INTEGER NOT NULL REFERENCES flights(id) ON DELETE CASCADE,
+    timestamp_us  INTEGER NOT NULL,
+    csv_data      TEXT NOT NULL  -- raw comma-joined CSV row (not JSON)
+);
+CREATE TABLE blackbox_files (
+    id                INTEGER PRIMARY KEY,
+    flight_id         INTEGER NOT NULL REFERENCES flights(id) ON DELETE CASCADE,
+    original_filename TEXT NOT NULL,
+    log_index         INTEGER NOT NULL DEFAULT 0,
+    file_data         BLOB NOT NULL,
+    file_size         INTEGER NOT NULL,
+    imported_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- flights.source: 'live' | 'blackbox' | 'both'
+```
+
+## MSP Link Quality — Future: MSP2_INAV_GET_LINK_STATS (INAV 9.x)
+
+INAV PR [#11496](https://github.com/iNavFlight/inav/pull/11496) (targeting `maintenance-9.x`) adds a new MSP2 message:
+
+**`MSP2_INAV_GET_LINK_STATS` — code `0x2103` (decimal 8451)**
+
+Request: none  
+Reply payload:
+
+| Field | Type | Size | Unit | Description |
+|---|---|---|---|---|
+| `uplinkRSSI_dBm` | uint8_t | 1 | -dBm | Uplink RSSI as positive magnitude (70 = -70 dBm) |
+| `uplinkLQ` | uint8_t | 1 | % | Uplink Link Quality (`rxLinkStatistics.uplinkLQ`) |
+| `uplinkSNR` | int8_t | 1 | dB | Uplink Signal-to-Noise Ratio (`rxLinkStatistics.uplinkSNR`) |
+
+This supersedes the current RSSI reading from `MSPV2_INAV_ANALOG` for CRSF/ELRS setups. Implementation plan:
+- Add `LinkStats` feature gate: `InavVersion >= 9.1` (exact version TBD once merged)
+- Add `MSP2_INAV_GET_LINK_STATS` to the Analog telemetry group (or a dedicated Link slot)
+- Populate `link_quality` (already in `TelemetryRecord`) and add `uplink_snr_db` (future field) from the new message
+- `link_quality` field in DB already prepared in schema v3
+- Reference: [INAV PR #11496](https://github.com/iNavFlight/inav/pull/11496)

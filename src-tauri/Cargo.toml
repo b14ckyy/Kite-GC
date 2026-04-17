@@ -30,4 +30,5 @@ log = "0.4"
 rusqlite = { version = "0.31", features = ["bundled"] }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 chrono = { version = "0.4", features = ["serde"] }
+csv = "1.3"
 

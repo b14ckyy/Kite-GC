@@ -480,10 +480,10 @@ FlightRecorder
 
 ---
 
-## ADR-015: Blackbox Integration via External Binary + JSON Blob Storage
+## ADR-015: Blackbox Integration via External Binary + Raw CSV Storage
 
-**Date**: 2026-04-16
-**Status**: Planned (M5b)
+**Date**: 2026-04-17
+**Status**: Accepted
 
 **Context**: INAV Blackbox logs contain high-resolution flight telemetry in a compact binary format. Users want to import these logs into the Kite GCS logbook for GPS track replay and telemetry archival. The Blackbox binary format is complex, version-dependent, and already decoded by the official `blackbox_decode` tool from iNavFlight/blackbox-tools.
 
@@ -505,49 +505,45 @@ No settings UI for the binary path — the discovery is automatic.
 ```
 blackbox_decode --merge-gps --datetime --unit-height m --unit-gps-speed mps --stdout <file>
 ```
-- `--stdout`: CSV output captured via `Command::output()` (no temp files for CSV)
+- `--stdout`: CSV output captured via `Command::output()` (no temp files)
 - `--index N`: Selects a specific log from multi-session .TXT files
-- Output: CSV with dynamic columns (depend on INAV version + FC config)
+
+**Performance design**:
+- **Pre-built header index map**: `HashMap<String, usize>` built once per CSV file; all column lookups are O(1) per row
+- **`ColumnIndices` struct**: All relevant column positions resolved once, before iterating rows
+- **Downsampling**: `H looptime` + `H P interval` headers read from raw file to compute effective log Hz; rows skipped to achieve ≤ 10 Hz in the DB (e.g. 500 Hz → keep 1 in 50 rows)
+- **Raw CSV line storage**: Comma-joined raw CSV stored in `blackbox_records.csv_data` — no JSON re-serialization overhead
+
+**Heading handling**: INAV blackbox `heading` column is in decidegrees (0–3600). Parser auto-detects: if value > 360 → divide by 10. Same for `yaw`.
 
 **Data storage**:
-- **Parsed data**: Each CSV row stored as a JSON TEXT blob in `blackbox_records.csv_data`. Column names come from the CSV header line — no fixed schema.
-- **Original file**: The raw .TXT file archived as BLOB in `blackbox_files.file_data` for re-download/re-processing.
-- **Intermediate CSV**: Not persisted — parsed in-memory from stdout, discarded after import.
+- **Parsed telemetry**: `telemetry_records` table — downsampled at ≤ 10 Hz, same schema as live MSP recordings
+- **Blackbox archive rows**: `blackbox_records` table — same downsampled rows, raw CSV text for future detail analysis
+- **Original file**: Raw .TXT archived as BLOB in `blackbox_files.file_data` for re-download/re-processing
+- **Intermediate CSV**: Not persisted — parsed in-memory from stdout, discarded after import
 
-**DB schema extension** (migration v1 → v2):
+Detailed replay-oriented DB field selection is documented in `docs/FLIGHTLOG_DATABASE.md`.
+
+**DB schema** (migrations v1→v2→v3):
 ```sql
--- New tables
-CREATE TABLE blackbox_records (
-    id           INTEGER PRIMARY KEY,
-    flight_id    INTEGER NOT NULL REFERENCES flights(id) ON DELETE CASCADE,
-    timestamp_us INTEGER NOT NULL,
-    csv_data     TEXT NOT NULL  -- JSON object per row
-);
-
-CREATE TABLE blackbox_files (
-    id                INTEGER PRIMARY KEY,
-    flight_id         INTEGER NOT NULL REFERENCES flights(id) ON DELETE CASCADE,
-    original_filename TEXT NOT NULL,
-    log_index         INTEGER NOT NULL DEFAULT 0,
-    file_data         BLOB NOT NULL,
-    file_size         INTEGER NOT NULL,
-    imported_at       TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- New column on existing table
+-- v2: blackbox tables + flights.source
 ALTER TABLE flights ADD COLUMN source TEXT NOT NULL DEFAULT 'live';
--- Values: 'live' (MSP recording), 'blackbox' (BB import), 'both' (live + BB attached)
+CREATE TABLE blackbox_records (flight_id, timestamp_us, csv_data TEXT);
+CREATE TABLE blackbox_files (flight_id, original_filename, log_index, file_data BLOB, ...);
+
+-- v3: link quality in telemetry
+ALTER TABLE telemetry_records ADD COLUMN link_quality INTEGER;
 ```
 
 **Use cases**:
 1. **Standalone import**: .TXT → new flight entry with `source: "blackbox"`, metadata from BB header
-2. **Attach to flight**: Link BB to existing live-recorded flight → `source: "both"`, UI toggle between MSP/BB data
-3. **Multi-log**: Single .TXT with multiple ARM/DISARM sessions → user picks `--index`
+2. **Multi-log**: Single .TXT with multiple ARM/DISARM sessions → probe first, user picks `--index`
+3. **Attach to flight** (planned): Link BB to existing live-recorded flight → `source: "both"`, UI toggle between MSP/BB data
 
 **Rationale**:
 - External binary avoids maintaining a parallel Blackbox decoder as INAV evolves
-- GPL-3.0 license of blackbox-tools is compatible with Kite GCS (also GPL-3.0)
-- JSON blob handles dynamic CSV columns without schema changes per INAV version
+- Pre-built index map + ColumnIndices struct gives O(1) per-row field access vs O(headers²) naive approach
+- Downsampling keeps DB size manageable (5-min 500 Hz flight: 150K raw rows → ~3K stored)
 - BLOB archive preserves original data for future re-processing with newer decoder versions
 - ~50-160KB per platform — negligible size impact on distribution
 - Child process isolation: decoder crash cannot bring down the GCS
@@ -574,4 +570,36 @@ The existing `flightlog_geocode` and `flightlog_fetch_weather` Tauri commands re
 - Async spawn keeps the scheduler thread non-blocking
 - Separate DB connection avoids contention with the recorder's batch writes
 - Fallback commands preserve backward compatibility
+
+---
+
+## ADR-017: MSP Link Quality — MSP2_INAV_GET_LINK_STATS (Planned, INAV 9.x)
+
+**Date**: 2026-04-17
+**Status**: Planned
+
+**Context**: Current RSSI data comes from `MSPV2_INAV_ANALOG`, which only provides a single RSSI value. For CRSF/ELRS setups, Link Quality (LQ) and SNR are more meaningful metrics. INAV PR [#11496](https://github.com/iNavFlight/inav/pull/11496) (targeting `maintenance-9.x`) introduces a new MSP2 message with dedicated link statistics.
+
+**New message**: `MSP2_INAV_GET_LINK_STATS` — code `0x2103` (decimal 8451)
+
+**Reply payload** (3 bytes):
+
+| Field | Type | Unit | Description |
+|---|---|---|---|
+| `uplinkRSSI_dBm` | uint8_t | -dBm | Uplink RSSI, positive magnitude (70 = -70 dBm) |
+| `uplinkLQ` | uint8_t | % | Uplink Link Quality (`rxLinkStatistics.uplinkLQ`) |
+| `uplinkSNR` | int8_t | dB | Uplink SNR (`rxLinkStatistics.uplinkSNR`) |
+
+**Decision**: Add `LinkStats` feature gate at `InavVersion >= 9.1` (exact version TBD once PR merges). When available:
+- Add `MSP2_INAV_GET_LINK_STATS` to the Analog telemetry group (or a dedicated Link slot)
+- Populate `link_quality` in `TelemetryRecord` (field already present since schema v3)
+- Store `uplinkRSSI_dBm` (already available via `rssi` field) and `uplinkSNR` (new field, future schema v4)
+- Fall back to `MSPV2_INAV_ANALOG` RSSI for firmware < 9.1
+
+**Current state**: `link_quality` field is `None` for all MSP live recordings. Populated from `lq` column in Blackbox imports (ELRS/CRSF setups log it via `blackbox_decode --merge-gps`).
+
+**Rationale**:
+- Feature-gated: no code executed on older firmware, zero overhead
+- `link_quality` column already in DB (schema v3) — no future migration needed for that field
+- Consistent with existing adaptive degradation design: the new slot gets a priority just like the current Analog slot
 

@@ -12,8 +12,8 @@ mod transport;
 use commands::connection::{connect, disconnect, list_serial_ports};
 use commands::flightlog::{
     flightlog_list, flightlog_get, flightlog_get_track, flightlog_delete,
-    flightlog_update_notes, flightlog_geocode, flightlog_fetch_weather,
-    flightlog_default_db_path,
+    flightlog_update_notes, flightlog_update_weather, flightlog_geocode, flightlog_fetch_weather,
+    flightlog_default_db_path, flightlog_import_blackbox,
 };
 use commands::info::get_app_version;
 use commands::mission::{
@@ -91,9 +91,11 @@ pub fn run() {
             flightlog_get_track,
             flightlog_delete,
             flightlog_update_notes,
+            flightlog_update_weather,
             flightlog_geocode,
             flightlog_fetch_weather,
             flightlog_default_db_path,
+            flightlog_import_blackbox,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Kite Ground Control");

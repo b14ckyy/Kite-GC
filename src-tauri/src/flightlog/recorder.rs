@@ -175,6 +175,7 @@ impl FlightRecorder {
             start_time: now,
             end_time: None,
             duration_sec: None,
+            source: "live".into(),
             craft_name: self.fc_info.craft_name.clone(),
             fc_variant: self.fc_info.fc_variant.clone(),
             fc_version: self.fc_info.fc_version.clone(),
@@ -328,6 +329,24 @@ impl FlightRecorder {
             fix_type: self.snapshot.fix_type,
             num_sat: self.snapshot.num_sat,
             cpu_load: self.snapshot.cpu_load,
+            link_quality: None, // MSP does not expose LQ; populated via Blackbox import
+            baro_alt_m: self.snapshot.alt_baro,
+            gps_hdop: None,
+            gps_eph: None,
+            gps_epv: None,
+            active_wp_number: None,
+            active_flight_mode_flags: None,
+            state_flags: None,
+            nav_state: None,
+            nav_flags: None,
+            rx_signal_received: None,
+            hw_health_status: None,
+            baro_temperature: None,
+            wind_n_ms: None,
+            wind_e_ms: None,
+            wind_d_ms: None,
+            rc_data_json: None,
+            rc_command_json: None,
         };
 
         // Write to raw logger if active

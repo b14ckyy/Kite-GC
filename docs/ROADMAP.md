@@ -256,11 +256,11 @@ This document tracks planned features, organized by milestone.
 - [x] Telemetry data recording at configured poll rate (lat, lon, alt, speed, heading, vario, battery, RSSI, timestamp)
 
 ### Flight Metadata
-- [~] Core: date/time, duration, max altitude, max speed, max distance from home, total distance, battery usage
-- [~] Location: start GPS coordinates + reverse-geocoded place name via OSM Nominatim API
+- [x] Core: date/time, duration, max altitude, max speed, max distance from home, total distance, battery usage
+- [x] Location: start GPS coordinates + reverse-geocoded place name via OSM Nominatim API
 - [x] Aircraft: craft name (from FC, queried during handshake), craft type (platform type)
-- [~] Source: telemetry protocol (MSP/MAVLink/CRSF/LTM), firmware variant + version
-- [~] Weather: temperature, wind speed/direction, conditions at flight start (Open-Meteo, free API)
+- [x] Source: telemetry protocol (MSP/MAVLink/CRSF/LTM), firmware variant + version
+- [x] Weather: temperature, wind speed/direction, conditions — user-editable via weather editor + auto-fetch from Open-Meteo
 - [ ] Weather + geocode fetched at ARM time (async spawn, non-blocking) instead of lazy on logbook view
 
 ### Handshake Enhancement
@@ -276,45 +276,56 @@ This document tracks planned features, organized by milestone.
   - Aircraft → Date → Location → Flights by time (per-model history)
 - [ ] Collapsible group headers with flight count + aggregate stats
 - [x] Flight detail view with metadata summary (location, weather, aircraft, source)
+- [x] Weather editor: compact read-only display + pencil icon → editor form with stepper buttons
+- [x] `flightlog_update_weather` command + `updateFlightWeather()` store function
+- [x] Logbook minimize/expand: click map → minimize (280px metadata), click panel → expand
+- [x] Notes auto-resize textarea (up to 140px, read-only in minimized mode)
+- [x] Batch import: multi-file selection in file picker
+- [x] Drag & drop import of Blackbox files into logbook tab
+- [x] Duplicate flight detection dialog on import
+- [x] Delete flight button styled as danger (red)
 - [ ] Flight path replay on map (animated marker playback)
 - [ ] Playback controls (play, pause, speed 1x/2x/4x, scrub timeline)
 - [x] Delete flight records
 - [ ] Search/filter (by aircraft name, location, date range)
 
 ### Blackbox Integration
-- [ ] External `blackbox_decode` binary discovery (app folder → PATH fallback)
-- [ ] Blackbox decode invocation: `blackbox_decode --merge-gps --datetime --unit-height m --stdout <file>`
-- [ ] CSV parsing in Rust → JSON blob per row (dynamic fields, INAV-version-independent)
-- [ ] Original .TXT file archived as BLOB in `blackbox_files` table (re-downloadable)
-- [ ] Standalone Blackbox import: creates new flight with `source: "blackbox"`, metadata from header
+- [x] External `blackbox_decode` binary discovery (app folder → PATH fallback)
+- [x] Blackbox decode invocation: `blackbox_decode --merge-gps --datetime --unit-height m --stdout <file>`
+- [x] CSV parsing in Rust → raw CSV storage per row (dynamic fields, INAV-version-independent)
+- [x] Original .TXT file archived as BLOB in `blackbox_files` table (re-downloadable)
+- [x] Standalone Blackbox import: creates new flight with `source: "blackbox"`, metadata from header
 - [ ] Attach Blackbox to existing live flight: `source: "both"`, playback toggle MSP vs Blackbox
-- [ ] `flights.source` field: `live` | `blackbox` | `both` — Blackbox-only flights marked with icon
-- [ ] Multi-log support: single .TXT may contain multiple ARM/DISARM sessions (`--index N`)
-- [ ] Blackbox-imported flights use header metadata (FW version, date, GPS start, duration)
-- [ ] NOT a full Blackbox analyzer — no PID/gyro/motor visualization (use dedicated tools)
+- [x] `flights.source` field: `live` | `blackbox` | `both` — Blackbox-only flights marked with icon
+- [x] Multi-log support: single .TXT may contain multiple ARM/DISARM sessions (`--index N`)
+- [x] Blackbox-imported flights use header metadata (FW version, date, GPS start, duration)
+- [x] NOT a full Blackbox analyzer — no PID/gyro/motor visualization (use dedicated tools)
 
 ### Export
 - [ ] Export flight path as KML (Google Earth)
 - [ ] Export flight path as GPX (universal GPS format)
 - [ ] Export telemetry as CSV
 
-## Milestone 5b: Blackbox Import (v0.5.x — current focus)
+## Milestone 5b: Blackbox Import (v0.5.x — COMPLETE)
 
 ### Blackbox Decode Pipeline
-- [ ] Settings: auto-detect `blackbox_decode` in app folder, fallback to PATH
-- [ ] Invoke `blackbox_decode --merge-gps --datetime --unit-height m --stdout <file>` as child process
-- [ ] Parse CSV stdout in Rust (dynamic columns from header line)
-- [ ] Store parsed rows as JSON blobs in `blackbox_records` table
-- [ ] Archive original .TXT as BLOB in `blackbox_files` table
-- [ ] Clean up intermediate CSV after import
+- [x] Settings: auto-detect `blackbox_decode` in app folder, fallback to PATH
+- [x] Invoke `blackbox_decode --merge-gps --datetime --unit-height m --unit-gps-speed mps --stdout <file>` as child process
+- [x] Parse CSV stdout in Rust — O(1) field access via pre-built `HashMap<String, usize>` index + `ColumnIndices` struct
+- [x] Downsample to ≤ 10 Hz using `H looptime:` + `H P interval:` from raw header (e.g. 500 Hz → 1 in 50 rows)
+- [x] Store parsed rows as raw comma-joined CSV in `blackbox_records` table (no JSON overhead)
+- [x] Archive original .TXT as BLOB in `blackbox_files` table
+- [x] Heading in decidegrees auto-detected (> 360 → ÷ 10); priority: `heading` → `GPS_ground_course`
+- [x] Link Quality from `lq` / `link_quality` / `rxlq` column → `link_quality` in `TelemetryRecord`
 
 ### Standalone Import
-- [ ] "Import Blackbox" button in Logbook tab
-- [ ] File picker for .TXT / .bbl / .bfl files
-- [ ] Extract metadata from Blackbox header: FW type/version, date/time, duration, GPS start
-- [ ] Create flight entry with `source: "blackbox"` marker
-- [ ] Logbook shows Blackbox-only flights with distinct icon
-- [ ] Multi-log .TXT: show picker for which log index to import
+- [x] "Import Blackbox" button in Logbook tab
+- [x] File picker for .TXT / .bbl / .bfl files
+- [x] Extract metadata from Blackbox header: FW type/version, date/time, duration, GPS start
+- [x] Create flight entry with `source: "blackbox"` marker
+- [x] Logbook shows Blackbox-only flights with distinct icon (wider panel, new source column)
+- [x] Multi-log .TXT: probe all indices (0–31), show picker for which log to import
+- [x] Real-time progress events during import (`flightlog_import_progress` Tauri event)
 
 ### Attach to Existing Flight
 - [ ] "Attach Blackbox" button in flight detail view
@@ -322,15 +333,25 @@ This document tracks planned features, organized by milestone.
 - [ ] Flight marked as `source: "both"`
 - [ ] Playback UI toggle: MSP telemetry vs Blackbox data
 
-### DB Schema Extension (v2 migration)
-- [ ] `blackbox_records` table: `flight_id`, `timestamp_us`, `csv_data` (JSON TEXT)
-- [ ] `blackbox_files` table: `flight_id`, `original_filename`, `log_index`, `file_data` (BLOB), `file_size`, `imported_at`
-- [ ] `flights.source` column: `live` | `blackbox` | `both`
-- [ ] `PRAGMA user_version = 2` migration from v1
+### DB Schema
+- [x] `blackbox_records` table: `flight_id`, `timestamp_us`, `csv_data` (raw CSV TEXT) — schema v2
+- [x] `blackbox_files` table: `flight_id`, `original_filename`, `log_index`, `file_data` (BLOB), `file_size`, `imported_at` — schema v2
+- [x] `flights.source` column: `live` | `blackbox` | `both` — schema v2
+- [x] `telemetry_records.link_quality` column: INTEGER (0–100%) — schema v3
+- [x] Migration v1 → v2, v2 → v3 (incremental, backward compatible)
+- [x] Schema v4: replay-focused telemetry fields (`baro_alt_m`, GPS quality, active flight modes, state flags, nav state, wind, RC arrays, sensor health)
+- [ ] Milestone 4: decode Blackbox header `features` into a human-readable feature decode
 
 ---
 
 ## Milestone 6: Advanced Features (v0.6.x+)
+
+### MSP Link Statistics (INAV 9.x+)
+- [ ] Feature gate: `InavVersion >= 9.1` (exact version TBD, INAV PR #11496 targeting `maintenance-9.x`)
+- [ ] `MSP2_INAV_GET_LINK_STATS` (`0x2103`): `uplinkRSSI_dBm` (u8), `uplinkLQ` (u8, %), `uplinkSNR` (i8, dB)
+- [ ] Populate `link_quality` from `uplinkLQ` (field already in DB schema v3)
+- [ ] Add `uplink_snr_db` to `TelemetryRecord` + schema v4 migration
+- [ ] Fall back to `MSPV2_INAV_ANALOG` RSSI for firmware < 9.1
 
 ### Multi-Protocol Telemetry Architecture
 - [ ] `TelemetrySource` trait — protocol-agnostic abstraction (refactor `poll_slot`)
@@ -360,4 +381,4 @@ This document tracks planned features, organized by milestone.
 
 ---
 
-*Last updated: 2026-07-06*
+*Last updated: 2026-04-17*

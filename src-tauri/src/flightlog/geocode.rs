@@ -25,8 +25,10 @@ struct NominatimAddress {
 
 /// Reverse geocode a lat/lon to a human-readable location name.
 /// Returns a short name like "Garching, Bayern, Germany".
+/// `lang` is a BCP 47 language tag (e.g. "en", "de") used for Nominatim's
+/// `accept-language` parameter so names are returned in the UI language.
 /// Returns None on error (network, parse, etc.) — never blocks the recorder.
-pub async fn reverse_geocode(lat: f64, lon: f64) -> Option<String> {
+pub async fn reverse_geocode(lat: f64, lon: f64, lang: &str) -> Option<String> {
     let client = reqwest::Client::builder()
         .user_agent(USER_AGENT)
         .build()
@@ -40,6 +42,7 @@ pub async fn reverse_geocode(lat: f64, lon: f64) -> Option<String> {
             ("format", "json".to_string()),
             ("zoom", "10".to_string()),
             ("addressdetails", "1".to_string()),
+            ("accept-language", lang.to_string()),
         ])
         .send()
         .await

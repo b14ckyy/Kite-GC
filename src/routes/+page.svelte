@@ -1,6 +1,8 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
-  import { open } from "@tauri-apps/plugin-dialog";
+  import { listen } from "@tauri-apps/api/event";
+  import { open, confirm } from "@tauri-apps/plugin-dialog";
   import { connection, availablePorts } from "$lib/stores/connection";
   import type { FcInfo, PortInfo, FeatureSet } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
@@ -24,14 +26,19 @@
     getFlightTrack,
     deleteFlight,
     updateFlightNotes,
+    updateFlightWeather,
     geocodeFlight,
     fetchFlightWeather,
     getDefaultFlightlogPath,
-    groupFlights,
+    importBlackboxLog,
+    buildFlightTree,
     formatDurationSec,
+    type BlackboxImportProgress,
     type Flight,
+    type FlightTree,
     type FlightSummary,
     type LogbookSortMode,
+    type TelemetryRecord,
   } from "$lib/stores/flightlog";
 
   // Reactive window dimensions for dynamic panel sizing
@@ -85,18 +92,35 @@
 
   // Logbook state
   let logbookLoading = $state(false);
+  let blackboxImporting = $state(false);
+  let blackboxImportProgress = $state<BlackboxImportProgress | null>(null);
   let flightSummaries = $state<FlightSummary[]>([]);
   let selectedFlight: Flight | null = $state(null);
+  let selectedFlightTrack = $state<TelemetryRecord[]>([]);
   let selectedFlightTrackCount = $state(0);
   let selectedFlightId: number | null = $state(null);
   let selectedFlightNotes = $state("");
+  let weatherTempC = $state("");
+  let weatherWindMs = $state("");
+  let weatherWindDir = $state("");
+  let weatherDesc = $state("");
+  let weatherEditing = $state(false);
   let logbookSortMode = $state<LogbookSortMode>("aircraft-location-date");
+  let logbookTreeOpenTop = $state<Set<string>>(new Set());
+  let logbookTreeOpenSecond = $state<Set<string>>(new Set());
+  let prevLogbookSortMode = $state<LogbookSortMode>("aircraft-location-date");
+  let playbackActive = $state(false);
+  let playbackPlaying = $state(false);
+  let playbackIndex = $state(0);
+  let playbackTimer: ReturnType<typeof window.setInterval> | null = null;
+  let logbookMinimized = $state(false);
 
   // Widget panel state
-  let panels = $state<PanelConfig>({
+  const defaultPanels: PanelConfig = {
     bottom: ['home', 'battery', 'speed', 'ahi', 'altitude', 'gps', 'compass'],
     right: ['rawTelemetry'],
-  });
+  };
+  let panels = $state<PanelConfig>(defaultPanels);
   let widgetEditMode = $state(false);
 
   // Cache stats subscription
@@ -168,7 +192,7 @@
   mapCacheMaxMB = saved.mapCacheMaxMB;
   defaultWpAltitudeM = saved.defaultWpAltitudeM;
   defaultPhTimeSec = saved.defaultPhTimeSec;
-  panels = saved.panels ?? panels;
+  panels = saved.panels ?? defaultPanels;
 
   function toggleNavPanel() {
     navPanelOpen = !navPanelOpen;
@@ -178,11 +202,36 @@
     setTimeout(() => window.dispatchEvent(new Event("resize")), 320);
   }
 
+  function minimizeLogbook() {
+    if (logbookHasFlightOnMap && !logbookMinimized) {
+      logbookMinimized = true;
+      setTimeout(() => window.dispatchEvent(new Event("resize")), 320);
+    }
+  }
+
+  function expandLogbook() {
+    if (logbookMinimized) {
+      logbookMinimized = false;
+      setTimeout(() => window.dispatchEvent(new Event("resize")), 320);
+    }
+  }
+
+  function autoResizeNotes(el: HTMLTextAreaElement) {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 140) + 'px';
+  }
+
+  function notesAutoSize(el: HTMLTextAreaElement) {
+    autoResizeNotes(el);
+    return { update() { autoResizeNotes(el); } };
+  }
+
   function selectTab(tabId: string) {
     if (tabId !== 'mission') editMode.set(false);
     activeTab = tabId;
     settings.patch({ activeTab });
     if (tabId === 'logbook') {
+      logbookMinimized = false;
       void loadLogbook();
     }
     if (!navPanelOpen) {
@@ -215,8 +264,10 @@
 
   async function loadLogbook() {
     if (!flightLoggingEnabled) {
+      resetPlayback();
       flightSummaries = [];
       selectedFlight = null;
+      selectedFlightTrack = [];
       selectedFlightId = null;
       selectedFlightTrackCount = 0;
       return;
@@ -240,22 +291,146 @@
     }
   }
 
+  function formatFlightSource(source: string): string {
+    if (source === 'blackbox') return $t('logbook.sourceBlackbox');
+    if (source === 'both') return $t('logbook.sourceBoth');
+    return $t('logbook.sourceLive');
+  }
+
+  function windDegToLabel(deg: number): string {
+    const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+    return dirs[Math.round(deg / 45) % 8];
+  }
+
+  function flightListMarker(source: string): string {
+    if (source === 'blackbox') return '◈ ';
+    if (source === 'both') return '◉ ';
+    return '';
+  }
+
+  function stopPlayback() {
+    playbackPlaying = false;
+    if (playbackTimer != null) {
+      window.clearInterval(playbackTimer);
+      playbackTimer = null;
+    }
+  }
+
+  function resetPlayback() {
+    stopPlayback();
+    playbackActive = false;
+    playbackIndex = 0;
+  }
+
+  function startPlayback() {
+    if (selectedTrackWithPosition.length <= 1) return;
+    playbackActive = true;
+    if (playbackIndex >= selectedTrackWithPosition.length - 1) {
+      playbackIndex = 0;
+    }
+    stopPlayback();
+    playbackPlaying = true;
+    playbackTimer = window.setInterval(() => {
+      if (playbackIndex >= selectedTrackWithPosition.length - 1) {
+        stopPlayback();
+        return;
+      }
+      playbackIndex += 1;
+    }, 120);
+  }
+
+  async function importBlackbox() {
+    try {
+      const selected = await open({
+        multiple: true,
+        filters: [{ name: $t('logbook.blackboxFileFilter'), extensions: ['bbl', 'bfl', 'csv', 'txt'] }],
+      });
+      if (!selected) return;
+      const files = Array.isArray(selected) ? selected : [selected];
+      if (files.length === 0) return;
+
+      blackboxImporting = true;
+      for (const filePath of files) {
+        await performImport(filePath, undefined, false);
+      }
+    } catch (e: any) {
+      errorMsg = e?.toString?.() ?? String(e);
+    } finally {
+      blackboxImporting = false;
+      blackboxImportProgress = null;
+    }
+  }
+
+  async function importDroppedFiles(paths: string[]) {
+    const bbFiles = paths.filter((p) => /\.(bbl|bfl|csv|txt)$/i.test(p));
+    if (bbFiles.length === 0) return;
+    try {
+      blackboxImporting = true;
+      for (const filePath of bbFiles) {
+        await performImport(filePath, undefined, false);
+      }
+    } catch (e: any) {
+      errorMsg = e?.toString?.() ?? String(e);
+    } finally {
+      blackboxImporting = false;
+      blackboxImportProgress = null;
+    }
+  }
+
+  async function performImport(filePath: string, logIndex: number | undefined, forceImport: boolean) {
+    const result = await importBlackboxLog(filePath, flightLogDbPath, logIndex, forceImport, $locale ?? 'en');
+    
+    if (result.type === 'duplicate') {
+      const confirmImport = await confirm(
+        $t('logbook.duplicateMessage', {
+          values: {
+            craft: result.duplicate_craft_name,
+            time: new Date(result.duplicate_start_time).toLocaleString(),
+          },
+        }),
+        { title: $t('logbook.duplicateTitle'), kind: 'warning' }
+      );
+      
+      if (confirmImport) {
+        // Retry import with force_import: true
+        await performImport(filePath, logIndex, true);
+      }
+    } else {
+      // Success case
+      await loadLogbook();
+      await selectFlight(result.flight_id);
+    }
+  }
+
   async function selectFlight(flightId: number) {
     selectedFlightId = flightId;
     selectedFlight = await getFlight(flightId, flightLogDbPath);
     selectedFlightNotes = selectedFlight?.notes ?? '';
+    weatherTempC = selectedFlight?.weather_temp_c != null ? String(selectedFlight.weather_temp_c) : '';
+    weatherWindMs = selectedFlight?.weather_wind_ms != null ? String(selectedFlight.weather_wind_ms) : '';
+    weatherWindDir = selectedFlight?.weather_wind_deg != null ? String(selectedFlight.weather_wind_deg) : '';
+    weatherDesc = selectedFlight?.weather_desc ?? '';
+    weatherEditing = false;
 
     const track = await getFlightTrack(flightId, flightLogDbPath);
+    selectedFlightTrack = track;
     selectedFlightTrackCount = track.length;
+    resetPlayback();
 
     // Lazy enrich metadata if still missing
-    if (selectedFlight && !selectedFlight.location_name && selectedFlight.start_lat != null && selectedFlight.start_lon != null) {
-      const geocoded = await geocodeFlight(flightId, flightLogDbPath);
+    if (selectedFlight && !hasKnownLocation(selectedFlight.location_name) && selectedFlight.start_lat != null && selectedFlight.start_lon != null) {
+      const geocoded = await geocodeFlight(flightId, flightLogDbPath, $locale ?? 'en');
       if (geocoded) {
         selectedFlight = { ...selectedFlight, location_name: geocoded };
       }
     }
-    if (selectedFlight && selectedFlight.weather_temp_c == null && selectedFlight.start_lat != null && selectedFlight.start_lon != null) {
+    if (
+      selectedFlight &&
+      selectedFlight.source !== 'blackbox' &&
+      selectedFlight.weather_temp_c == null &&
+      selectedFlight.start_lat != null &&
+      selectedFlight.start_lon != null
+    ) {
       await fetchFlightWeather(flightId, flightLogDbPath);
       selectedFlight = await getFlight(flightId, flightLogDbPath);
     }
@@ -271,20 +446,51 @@
     await loadLogbook();
   }
 
+  async function saveSelectedFlightWeather() {
+    if (!selectedFlightId) return;
+    const temp = weatherTempC !== '' && weatherTempC != null && !isNaN(Number(weatherTempC)) ? Number(weatherTempC) : null;
+    const wind = weatherWindMs !== '' && weatherWindMs != null && !isNaN(Number(weatherWindMs)) ? Number(weatherWindMs) : null;
+    const dir = weatherWindDir !== '' && weatherWindDir != null ? parseInt(String(weatherWindDir), 10) : null;
+    const desc = typeof weatherDesc === 'string' && weatherDesc.trim() ? weatherDesc.trim() : null;
+    await updateFlightWeather(selectedFlightId, temp, wind, dir, desc, flightLogDbPath);
+    selectedFlight = await getFlight(selectedFlightId, flightLogDbPath);
+    weatherEditing = false;
+  }
+
   async function removeSelectedFlight() {
     if (!selectedFlightId) return;
     const ok = await deleteFlight(selectedFlightId, flightLogDbPath);
     if (!ok) return;
+    resetPlayback();
     selectedFlight = null;
+    selectedFlightTrack = [];
     selectedFlightId = null;
     selectedFlightTrackCount = 0;
     selectedFlightNotes = '';
+    weatherTempC = '';
+    weatherWindMs = '';
+    weatherWindDir = '';
+    weatherDesc = '';
+    weatherEditing = false;
     await loadLogbook();
   }
 
   function formatDateTime(value: string): string {
     const d = new Date(value);
     return d.toLocaleString();
+  }
+
+  function hasKnownLocation(name: string | null | undefined): boolean {
+    const n = (name ?? '').trim();
+    if (!n) return false;
+    return n !== 'Unknown location' && n !== 'Unbekannter Ort';
+  }
+
+  function isValidGpsCoordinate(lat: number | null | undefined, lon: number | null | undefined): boolean {
+    if (lat == null || lon == null) return false;
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return false;
+    return !(lat === 0 && lon === 0);
   }
 
   async function loadInfo() {
@@ -444,7 +650,84 @@
     return $t('widgets.off');
   }
 
-  const groupedFlights = $derived(groupFlights(flightSummaries, logbookSortMode));
+  function treeTopId(topKey: string): string {
+    return `${logbookSortMode}::${topKey}`;
+  }
+
+  function treeSecondId(topKey: string, secondKey: string): string {
+    return `${treeTopId(topKey)}::${secondKey}`;
+  }
+
+  function isTopOpen(topKey: string): boolean {
+    return logbookTreeOpenTop.has(treeTopId(topKey));
+  }
+
+  function isSecondOpen(topKey: string, secondKey: string): boolean {
+    return logbookTreeOpenSecond.has(treeSecondId(topKey, secondKey));
+  }
+
+  function toggleTop(topKey: string) {
+    const id = treeTopId(topKey);
+    const nextTop = new Set(logbookTreeOpenTop);
+    const nextSecond = new Set(logbookTreeOpenSecond);
+    if (nextTop.has(id)) {
+      nextTop.delete(id);
+      for (const secondId of nextSecond) {
+        if (secondId.startsWith(`${id}::`)) {
+          nextSecond.delete(secondId);
+        }
+      }
+    } else {
+      nextTop.add(id);
+    }
+    logbookTreeOpenTop = nextTop;
+    logbookTreeOpenSecond = nextSecond;
+  }
+
+  function toggleSecond(topKey: string, secondKey: string) {
+    const id = treeSecondId(topKey, secondKey);
+    const next = new Set(logbookTreeOpenSecond);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    logbookTreeOpenSecond = next;
+  }
+
+  $effect(() => {
+    if (prevLogbookSortMode === logbookSortMode) return;
+    prevLogbookSortMode = logbookSortMode;
+    logbookTreeOpenTop = new Set();
+    logbookTreeOpenSecond = new Set();
+  });
+
+  const flightTree = $derived<FlightTree>(buildFlightTree(flightSummaries, logbookSortMode));
+  const selectedTrackWithPosition = $derived(
+    selectedFlightTrack.filter((point) => isValidGpsCoordinate(point.lat, point.lon))
+  );
+  const playbackPoint = $derived(
+    playbackActive && selectedTrackWithPosition.length > 0
+      ? selectedTrackWithPosition[Math.min(playbackIndex, selectedTrackWithPosition.length - 1)]
+      : null,
+  );
+  const logbookDetailOpen = $derived(activeTab === 'logbook' && selectedFlight != null && !logbookMinimized);
+  const logbookHasFlightOnMap = $derived(activeTab === 'logbook' && selectedFlight != null);
+
+  if (typeof window !== 'undefined') {
+    void listen<BlackboxImportProgress>('flightlog-import-progress', (event) => {
+      blackboxImportProgress = event.payload;
+    });
+    void listen<{ paths: string[] }>('tauri://drag-drop', (event) => {
+      if (activeTab === 'logbook' && event.payload.paths?.length) {
+        importDroppedFiles(event.payload.paths);
+      }
+    });
+  }
+
+  onDestroy(() => {
+    stopPlayback();
+  });
 </script>
 
 <main class="app">
@@ -502,8 +785,10 @@
   </header>
 
   <!-- ======= MAP (always fullscreen behind everything) ======= -->
-  <div class="map-fullscreen">
-    <Map />
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="map-fullscreen" onclick={minimizeLogbook}>
+    <Map playbackTrack={selectedTrackWithPosition} playbackPoint={playbackPoint} />
   </div>
 
   <!-- ======= FLOATING NAV PANEL SYSTEM ======= -->
@@ -537,7 +822,9 @@
 
   <!-- Floating panel content -->
   {#if navPanelOpen}
-    <div class="nav-panel">
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="nav-panel" class:nav-panel-wide={logbookDetailOpen} class:nav-panel-minimized={logbookMinimized && logbookHasFlightOnMap} onclick={() => { if (logbookMinimized) expandLogbook(); }}>
       <div class="panel-content">
         <!-- UAV Info Tab -->
         {#if activeTab === "uav-info"}
@@ -758,6 +1045,63 @@
                 <span class="panel-empty-icon">⊘</span>
                 <span>{$t('logbook.disabled')}</span>
               </div>
+            {:else if logbookMinimized && selectedFlight}
+              <!-- Minimized: metadata + notes only -->
+              <div class="logbook-detail logbook-detail-minimized">
+                <div class="fc-info-grid">
+                  <span class="fc-label">{$t('logbook.craft')}</span>
+                  <span class="fc-value">{selectedFlight.craft_name || $t('logbook.unnamedCraft')}</span>
+                  <span class="fc-label">{$t('logbook.firmware')}</span>
+                  <span class="fc-value">{selectedFlight.fc_version || `${selectedFlight.fc_variant || '—'}`}</span>
+                  <span class="fc-label">{$t('logbook.source')}</span>
+                  <span class="fc-value">{formatFlightSource(selectedFlight.source)}</span>
+                  <span class="fc-label">{$t('logbook.started')}</span>
+                  <span class="fc-value">{formatDateTime(selectedFlight.start_time)}</span>
+                  <span class="fc-label">{$t('logbook.duration')}</span>
+                  <span class="fc-value">{formatDurationSec(selectedFlight.duration_sec)}</span>
+                  <span class="fc-label">{$t('logbook.location')}</span>
+                  <span class="fc-value">{selectedFlight.location_name || $t('logbook.unknownLocation')}</span>
+                  <span class="fc-label">{$t('logbook.maxAlt')}</span>
+                  <span class="fc-value">{selectedFlight.max_alt_m?.toFixed(1) ?? '—'} m</span>
+                  <span class="fc-label">{$t('logbook.maxSpeed')}</span>
+                  <span class="fc-value">{selectedFlight.max_speed_ms?.toFixed(1) ?? '—'} m/s</span>
+                  <span class="fc-label">{$t('logbook.totalDistance')}</span>
+                  <span class="fc-value">{selectedFlight.total_distance_m?.toFixed(0) ?? '—'} m</span>
+                  <span class="fc-label">{$t('logbook.maxDistance')}</span>
+                  <span class="fc-value">{selectedFlight.max_distance_m?.toFixed(0) ?? '—'} m</span>
+                  <span class="fc-label">{$t('logbook.batteryUsed')}</span>
+                  <span class="fc-value">{selectedFlight.battery_used_mah ?? '—'} mAh</span>
+                  <span class="fc-label">{$t('logbook.trackPoints')}</span>
+                  <span class="fc-value">{selectedFlightTrackCount}</span>
+                  <span class="fc-label">{$t('logbook.weather')}</span>
+                  <span class="fc-value">
+                    {#if selectedFlight.weather_temp_c != null || selectedFlight.weather_desc}
+                      {selectedFlight.weather_temp_c != null ? selectedFlight.weather_temp_c.toFixed(1) + ' °C' : ''}
+                      {selectedFlight.weather_wind_ms != null ? ', ' + selectedFlight.weather_wind_ms.toFixed(1) + ' m/s' : ''}
+                      {selectedFlight.weather_wind_deg != null ? ' ' + windDegToLabel(selectedFlight.weather_wind_deg) : ''}
+                      {selectedFlight.weather_desc ? ', ' + selectedFlight.weather_desc : ''}
+                    {:else}
+                      {$t('logbook.weatherUnavailable')}
+                    {/if}
+                  </span>
+                </div>
+
+                <div class="setting-row setting-row-stack">
+                  <label class="setting-label" for="flight-notes-min">{$t('logbook.notes')}</label>
+                  <textarea
+                    id="flight-notes-min"
+                    class="setting-input notes-input notes-input-auto"
+                    rows="2"
+                    readonly
+                    bind:value={selectedFlightNotes}
+                    use:notesAutoSize
+                  ></textarea>
+                </div>
+                <div class="setting-row">
+                  <button class="cache-clear-btn" onclick={saveSelectedFlightNotes}>{$t('logbook.saveNotes')}</button>
+                  <button class="cache-clear-btn logbook-danger" onclick={removeSelectedFlight}>{$t('logbook.deleteFlight')}</button>
+                </div>
+              </div>
             {:else}
               <div class="setting-row">
                 <label class="setting-label" for="logbook-sort">{$t('logbook.sortMode')}</label>
@@ -777,7 +1121,27 @@
                     {$t('logbook.refresh')}
                   {/if}
                 </button>
+                <button class="cache-clear-btn" onclick={importBlackbox} disabled={blackboxImporting}>
+                  {#if blackboxImporting}
+                    {$t('logbook.importingBlackbox')}
+                  {:else}
+                    {$t('logbook.importBlackbox')}
+                  {/if}
+                </button>
               </div>
+
+              {#if blackboxImportProgress}
+                <div class="logbook-progress">
+                  <div class="logbook-progress-head">
+                    <span>{$t('logbook.importProgress')}</span>
+                    <span>{blackboxImportProgress.progress}%</span>
+                  </div>
+                  <div class="logbook-progress-bar">
+                    <div class="logbook-progress-fill" style={`width: ${blackboxImportProgress.progress}%`}></div>
+                  </div>
+                  <div class="logbook-progress-message">{blackboxImportProgress.message}</div>
+                </div>
+              {/if}
 
               {#if flightSummaries.length === 0}
                 <div class="panel-empty">
@@ -787,22 +1151,46 @@
               {:else}
                 <div class="logbook-layout">
                   <div class="logbook-list">
-                    {#each groupedFlights as group}
-                      <div class="logbook-group">
-                        <div class="logbook-group-title">{group.key}</div>
-                        {#each group.flights as f}
-                          <button
-                            class="logbook-item"
-                            class:selected={selectedFlightId === f.id}
-                            onclick={() => selectFlight(f.id)}
-                          >
-                            <div class="logbook-item-title">{f.craft_name || $t('logbook.unnamedCraft')}</div>
-                            <div class="logbook-item-meta">
-                              <span>{formatDateTime(f.start_time)}</span>
-                              <span>{formatDurationSec(f.duration_sec)}</span>
-                            </div>
-                          </button>
-                        {/each}
+                    {#each flightTree.groups as top}
+                      <div class="logbook-tree-node">
+                        <button class="logbook-tree-toggle logbook-tree-toggle-top" onclick={() => toggleTop(top.key)}>
+                          <span class="logbook-tree-caret">{isTopOpen(top.key) ? '▾' : '▸'}</span>
+                          <span class="logbook-tree-label">{top.key}</span>
+                          <span class="logbook-tree-count">{top.flight_count}</span>
+                        </button>
+
+                        {#if isTopOpen(top.key)}
+                          <div class="logbook-tree-children">
+                            {#each top.children as second}
+                              <div class="logbook-tree-node">
+                                <button class="logbook-tree-toggle logbook-tree-toggle-second" onclick={() => toggleSecond(top.key, second.key)}>
+                                  <span class="logbook-tree-caret">{isSecondOpen(top.key, second.key) ? '▾' : '▸'}</span>
+                                  <span class="logbook-tree-label">{second.key}</span>
+                                  <span class="logbook-tree-count">{second.flights.length}</span>
+                                </button>
+
+                                {#if isSecondOpen(top.key, second.key)}
+                                  <div class="logbook-tree-flights">
+                                    {#each second.flights as f}
+                                      <button
+                                        class="logbook-item"
+                                        class:selected={selectedFlightId === f.id}
+                                        onclick={() => selectFlight(f.id)}
+                                      >
+                                        <div class="logbook-item-title">{flightListMarker(f.source)}{formatDateTime(f.start_time)}</div>
+                                        <div class="logbook-item-meta">
+                                          <span>{f.craft_name || $t('logbook.unnamedCraft')}</span>
+                                          <span>{f.location_name || $t('logbook.unknownLocation')}</span>
+                                          <span>{formatDurationSec(f.duration_sec)}</span>
+                                        </div>
+                                      </button>
+                                    {/each}
+                                  </div>
+                                {/if}
+                              </div>
+                            {/each}
+                          </div>
+                        {/if}
                       </div>
                     {/each}
                   </div>
@@ -812,6 +1200,10 @@
                       <div class="fc-info-grid">
                         <span class="fc-label">{$t('logbook.craft')}</span>
                         <span class="fc-value">{selectedFlight.craft_name || $t('logbook.unnamedCraft')}</span>
+                        <span class="fc-label">{$t('logbook.firmware')}</span>
+                        <span class="fc-value">{selectedFlight.fc_version || `${selectedFlight.fc_variant || '—'}`}</span>
+                        <span class="fc-label">{$t('logbook.source')}</span>
+                        <span class="fc-value">{formatFlightSource(selectedFlight.source)}</span>
                         <span class="fc-label">{$t('logbook.started')}</span>
                         <span class="fc-value">{formatDateTime(selectedFlight.start_time)}</span>
                         <span class="fc-label">{$t('logbook.duration')}</span>
@@ -819,32 +1211,96 @@
                         <span class="fc-label">{$t('logbook.location')}</span>
                         <span class="fc-value">{selectedFlight.location_name || $t('logbook.unknownLocation')}</span>
                         <span class="fc-label">{$t('logbook.maxAlt')}</span>
-                        <span class="fc-value">{selectedFlight.max_alt_m?.toFixed(1) ?? '0.0'} m</span>
+                        <span class="fc-value">{selectedFlight.max_alt_m?.toFixed(1) ?? '—'} m</span>
                         <span class="fc-label">{$t('logbook.maxSpeed')}</span>
-                        <span class="fc-value">{selectedFlight.max_speed_ms?.toFixed(1) ?? '0.0'} m/s</span>
-                        <span class="fc-label">{$t('logbook.distance')}</span>
-                        <span class="fc-value">{selectedFlight.total_distance_m?.toFixed(0) ?? '0'} m</span>
+                        <span class="fc-value">{selectedFlight.max_speed_ms?.toFixed(1) ?? '—'} m/s</span>
+                        <span class="fc-label">{$t('logbook.totalDistance')}</span>
+                        <span class="fc-value">{selectedFlight.total_distance_m?.toFixed(0) ?? '—'} m</span>
+                        <span class="fc-label">{$t('logbook.maxDistance')}</span>
+                        <span class="fc-value">{selectedFlight.max_distance_m?.toFixed(0) ?? '—'} m</span>
                         <span class="fc-label">{$t('logbook.batteryUsed')}</span>
-                        <span class="fc-value">{selectedFlight.battery_used_mah ?? 0} mAh</span>
+                        <span class="fc-value">{selectedFlight.battery_used_mah ?? '—'} mAh</span>
                         <span class="fc-label">{$t('logbook.trackPoints')}</span>
                         <span class="fc-value">{selectedFlightTrackCount}</span>
                         <span class="fc-label">{$t('logbook.weather')}</span>
-                        <span class="fc-value">
-                          {#if selectedFlight.weather_temp_c != null}
-                            {selectedFlight.weather_temp_c.toFixed(1)} C, {selectedFlight.weather_wind_ms?.toFixed(1) ?? '0.0'} m/s, {selectedFlight.weather_desc || ''}
-                          {:else}
-                            {$t('logbook.weatherUnavailable')}
-                          {/if}
+                        <span class="fc-value weather-value-row">
+                          <span>
+                            {#if selectedFlight.weather_temp_c != null || selectedFlight.weather_desc}
+                              {selectedFlight.weather_temp_c != null ? selectedFlight.weather_temp_c.toFixed(1) + ' °C' : ''}
+                              {selectedFlight.weather_wind_ms != null ? ', ' + selectedFlight.weather_wind_ms.toFixed(1) + ' m/s' : ''}
+                              {selectedFlight.weather_wind_deg != null ? ' ' + windDegToLabel(selectedFlight.weather_wind_deg) : ''}
+                              {selectedFlight.weather_desc ? ', ' + selectedFlight.weather_desc : ''}
+                            {:else}
+                              {$t('logbook.weatherUnavailable')}
+                            {/if}
+                          </span>
+                          <button class="weather-edit-btn" onclick={() => { weatherEditing = !weatherEditing; }} title={$t('logbook.editWeather')}>✎</button>
                         </span>
                       </div>
+
+                      {#if weatherEditing}
+                        <div class="weather-editor">
+                          <div class="weather-fields">
+                            <label class="weather-field">
+                              <span class="weather-field-label">{$t('logbook.weatherTemp')}</span>
+                              <div class="setting-stepper">
+                                <button class="stepper-btn" onclick={() => { weatherTempC = String(Math.round((Number(weatherTempC || 0) - 0.5) * 10) / 10); }}>−</button>
+                                <input type="number" step="0.5" class="stepper-input" bind:value={weatherTempC} placeholder="—" />
+                                <button class="stepper-btn" onclick={() => { weatherTempC = String(Math.round((Number(weatherTempC || 0) + 0.5) * 10) / 10); }}>+</button>
+                                <span class="setting-unit">°C</span>
+                              </div>
+                            </label>
+                            <label class="weather-field">
+                              <span class="weather-field-label">{$t('logbook.weatherWind')}</span>
+                              <div class="setting-stepper">
+                                <button class="stepper-btn" onclick={() => { weatherWindMs = String(Math.max(0, Math.round((Number(weatherWindMs || 0) - 0.5) * 10) / 10)); }}>−</button>
+                                <input type="number" step="0.5" min="0" class="stepper-input" bind:value={weatherWindMs} placeholder="—" />
+                                <button class="stepper-btn" onclick={() => { weatherWindMs = String(Math.round((Number(weatherWindMs || 0) + 0.5) * 10) / 10); }}>+</button>
+                                <span class="setting-unit">m/s</span>
+                              </div>
+                            </label>
+                            <label class="weather-field">
+                              <span class="weather-field-label">{$t('logbook.weatherWindDir')}</span>
+                              <select class="setting-select weather-select" bind:value={weatherWindDir}>
+                                <option value="">—</option>
+                                <option value="0">N</option>
+                                <option value="45">NE</option>
+                                <option value="90">E</option>
+                                <option value="135">SE</option>
+                                <option value="180">S</option>
+                                <option value="225">SW</option>
+                                <option value="270">W</option>
+                                <option value="315">NW</option>
+                              </select>
+                            </label>
+                            <label class="weather-field">
+                              <span class="weather-field-label">{$t('logbook.weatherConditions')}</span>
+                              <select class="setting-select weather-select" bind:value={weatherDesc}>
+                                <option value="">—</option>
+                                <option value="Clear">{$t('logbook.weatherClear')}</option>
+                                <option value="Partly Cloudy">{$t('logbook.weatherPartlyCloudy')}</option>
+                                <option value="Overcast">{$t('logbook.weatherOvercast')}</option>
+                                <option value="Light Rain">{$t('logbook.weatherLightRain')}</option>
+                                <option value="Rain">{$t('logbook.weatherRain')}</option>
+                                <option value="Snow">{$t('logbook.weatherSnow')}</option>
+                                <option value="Fog">{$t('logbook.weatherFog')}</option>
+                                <option value="Stormy">{$t('logbook.weatherStormy')}</option>
+                              </select>
+                            </label>
+                          </div>
+                          <button class="cache-clear-btn weather-save-btn" onclick={saveSelectedFlightWeather}>{$t('logbook.saveWeather')}</button>
+                        </div>
+                      {/if}
 
                       <div class="setting-row setting-row-stack">
                         <label class="setting-label" for="flight-notes">{$t('logbook.notes')}</label>
                         <textarea
                           id="flight-notes"
-                          class="setting-input notes-input"
-                          rows="4"
+                          class="setting-input notes-input notes-input-auto"
+                          rows="2"
                           bind:value={selectedFlightNotes}
+                          oninput={(e: Event) => autoResizeNotes(e.target as HTMLTextAreaElement)}
+                          use:notesAutoSize
                         ></textarea>
                       </div>
                       <div class="setting-row">
@@ -937,7 +1393,7 @@
       ></span>
       <span>
         {#if connStatus === "connected" && fcInfo}
-          {fcInfo.fc_variant} {fcInfo.fc_version} on {$connection.port}
+          {$t('connection.connectedOn', { values: { variant: fcInfo.fc_variant, version: fcInfo.fc_version, port: $connection.port } })}
         {:else if connStatus === "connecting"}
           {$t('connection.connecting')}
         {:else}
@@ -1259,7 +1715,7 @@
     position: absolute;
     top: 65px;
     left: 62px; /* after the rail buttons */
-    width: 300px;
+    width: min(360px, calc(100vw - 86px));
     max-height: calc(100vh - 53px - 24px - 80px); /* toolbar - statusbar - margins */
     background: rgba(46, 46, 46, 0.92);
     border: 1px solid rgba(55, 168, 219, 0.35);
@@ -1271,6 +1727,22 @@
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
     backdrop-filter: blur(12px);
     animation: panel-slide-in 0.25s ease-out;
+    transition: width 0.25s ease;
+  }
+
+  .nav-panel.nav-panel-wide {
+    width: min(920px, calc(100vw - 86px));
+  }
+
+  .nav-panel.nav-panel-minimized {
+    width: min(280px, calc(100vw - 86px));
+    cursor: pointer;
+  }
+
+  .logbook-detail-minimized {
+    border: none;
+    background: none;
+    padding: 0;
   }
 
   @keyframes panel-slide-in {
@@ -1615,8 +2087,76 @@
 
   .notes-input {
     width: 100%;
+    box-sizing: border-box;
     resize: vertical;
-    min-height: 70px;
+    min-height: 44px;
+  }
+
+  .notes-input-auto {
+    overflow: hidden;
+    max-height: 140px;
+  }
+
+  .notes-input-auto[readonly] {
+    resize: none;
+    cursor: pointer;
+    opacity: 0.85;
+  }
+
+  .weather-value-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .weather-edit-btn {
+    background: none;
+    border: none;
+    color: #777;
+    cursor: pointer;
+    font-size: 13px;
+    padding: 0 2px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+
+  .weather-edit-btn:hover {
+    color: #37a8db;
+  }
+
+  .weather-editor {
+    margin-top: 8px;
+    padding: 10px;
+    border: 1px solid rgba(55, 168, 219, 0.25);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .weather-fields {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .weather-field {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .weather-field-label {
+    font-size: 10px;
+    color: #949494;
+  }
+
+  .weather-select {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .weather-save-btn {
+    margin-top: 8px;
+    width: 100%;
   }
 
   .setting-stepper {
@@ -1657,6 +2197,7 @@
     width: 52px;
     text-align: center;
     color-scheme: dark;
+    appearance: textfield;
     -moz-appearance: textfield;
   }
   .stepper-input::-webkit-inner-spin-button,
@@ -1741,13 +2282,13 @@
 
   .logbook-layout {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    min-height: 280px;
+    grid-template-columns: minmax(240px, 0.85fr) minmax(0, 1.35fr);
+    gap: 12px;
+    min-height: 420px;
   }
 
   .logbook-list {
-    max-height: 360px;
+    max-height: 560px;
     overflow: auto;
     border: 1px solid #555;
     border-radius: 4px;
@@ -1755,14 +2296,71 @@
     padding: 6px;
   }
 
-  .logbook-group {
-    margin-bottom: 8px;
+  .logbook-tree-node {
+    margin-bottom: 4px;
   }
 
-  .logbook-group-title {
-    font-size: 10px;
+  .logbook-tree-toggle {
+    width: 100%;
+    text-align: left;
+    border: 1px solid #555;
+    border-radius: 4px;
+    background: #353535;
+    color: #ddd;
+    cursor: pointer;
+    display: grid;
+    grid-template-columns: 14px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 7px;
+  }
+
+  .logbook-tree-toggle:hover {
+    border-color: #37a8db;
+  }
+
+  .logbook-tree-toggle-top {
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .logbook-tree-toggle-second {
+    margin-top: 4px;
+    margin-left: 12px;
+    width: calc(100% - 12px);
+    font-size: 11px;
+    background: #303030;
+  }
+
+  .logbook-tree-children {
+    margin-top: 3px;
+  }
+
+  .logbook-tree-flights {
+    margin-top: 4px;
+    margin-left: 24px;
+    width: calc(100% - 24px);
+  }
+
+  .logbook-tree-caret {
     color: #9cc6d9;
-    margin: 2px 0 4px 0;
+    font-size: 11px;
+    line-height: 1;
+  }
+
+  .logbook-tree-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .logbook-tree-count {
+    font-size: 10px;
+    color: #8fb4c5;
+    background: rgba(55, 168, 219, 0.12);
+    border: 1px solid rgba(55, 168, 219, 0.32);
+    border-radius: 999px;
+    padding: 1px 6px;
   }
 
   .logbook-item {
@@ -1795,7 +2393,8 @@
   .logbook-item-meta {
     margin-top: 2px;
     display: flex;
-    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 4px 10px;
     font-size: 10px;
     color: #aaa;
   }
@@ -1804,14 +2403,56 @@
     border: 1px solid #555;
     border-radius: 4px;
     background: rgba(0, 0, 0, 0.12);
-    padding: 8px;
+    padding: 10px;
     overflow: auto;
-    max-height: 360px;
+    max-height: 560px;
+  }
+
+  .logbook-progress {
+    border: 1px solid rgba(55, 168, 219, 0.35);
+    border-radius: 6px;
+    background: rgba(55, 168, 219, 0.08);
+    padding: 8px;
+    margin-bottom: 10px;
+  }
+
+  .logbook-progress-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .logbook-progress-bar {
+    margin-top: 6px;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
+    overflow: hidden;
+  }
+
+  .logbook-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #2d8ab8, #37a8db);
+    transition: width 0.2s ease;
+  }
+
+  .logbook-progress-message {
+    margin-top: 6px;
+    font-size: 11px;
+    color: #b8c7cf;
+  }
+
+  .logbook-danger {
+    background: #7a2020;
+    border-color: #8b2525;
+    color: #e8c0c0;
   }
 
   .logbook-danger:hover {
     background: #9b1f1f;
     border-color: #9b1f1f;
+    color: #fff;
   }
 
   @media (max-width: 980px) {

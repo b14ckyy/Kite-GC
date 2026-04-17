@@ -11,9 +11,28 @@
   import { t } from 'svelte-i18n';
   import { homePosition } from "$lib/stores/home";
   import MissionLayer from "./MissionLayer.svelte";
+  import type { TelemetryRecord } from "$lib/stores/flightlog";
+
+  let {
+    playbackTrack = [],
+    playbackPoint = null,
+  }: {
+    playbackTrack?: TelemetryRecord[];
+    playbackPoint?: TelemetryRecord | null;
+  } = $props();
 
   const ARMING_FLAG_ARMED = 2;
   const MIN_TRAIL_DIST = 1; // meters — don't add trail point if moved less
+
+  function isValidGpsCoordinate(lat: number, lon: number): boolean {
+    return Number.isFinite(lat)
+      && Number.isFinite(lon)
+      && lat >= -90
+      && lat <= 90
+      && lon >= -180
+      && lon <= 180
+      && !(lat === 0 && lon === 0);
+  }
 
   let mapContainer: HTMLDivElement;
   let map = $state<L.Map | undefined>(undefined);
@@ -28,13 +47,16 @@
   // Flight trail
   let trailPositions: L.LatLng[] = [];
   let trailLine: L.Polyline | undefined;
+  let playbackLine: L.Polyline | undefined;
+  let playbackMarker: L.Marker | undefined;
+  let lastPlaybackTrackKey = '';
 
   // Home position
   let homeMarker: L.Marker | undefined;
   let wasArmed = false;
 
   // Map view mode: north-up (default) or heading-up (rotates map with UAV heading)
-  let viewMode: 'north-up' | 'heading-up' = 'north-up';
+  let viewMode = $state<'north-up' | 'heading-up'>('north-up');
   let mapHeading = 0;
 
   // Simple arrow SVG icon for the UAV — rotated by heading
@@ -53,7 +75,7 @@
 
   function updateUavPosition(lat: number, lon: number, heading: number) {
     if (!map) return;
-    if (lat === 0 && lon === 0) return; // no valid GPS data yet
+    if (!isValidGpsCoordinate(lat, lon)) return; // no valid GPS data yet
 
     const pos: L.LatLngExpression = [lat, lon];
     // In heading-up mode the CSS rotates the container by -heading,
@@ -76,6 +98,15 @@
                          font-size: 12px; font-weight: bold; color: white; box-shadow: 0 0 6px rgba(0,0,0,0.4);">H</div>`,
       iconSize: [24, 24],
       iconAnchor: [12, 12],
+    });
+  }
+
+  function createPlaybackIcon(): L.DivIcon {
+    return L.divIcon({
+      className: "playback-icon",
+      html: `<div style="width: 18px; height: 18px; border-radius: 50%; background: #f5a623; border: 2px solid #1a1a1a; box-shadow: 0 0 10px rgba(245,166,35,0.65);"></div>`,
+      iconSize: [18, 18],
+      iconAnchor: [9, 9],
     });
   }
 
@@ -108,6 +139,59 @@
         weight: 2,
         opacity: 0.7,
       }).addTo(map);
+    }
+  }
+
+  function updatePlaybackTrack(track: TelemetryRecord[]) {
+    if (!map) return;
+
+    const positions = track
+      .filter((point) => point.lat != null && point.lon != null && isValidGpsCoordinate(point.lat, point.lon))
+      .map((point) => L.latLng(point.lat as number, point.lon as number));
+
+    if (positions.length === 0) {
+      if (playbackLine) {
+        map.removeLayer(playbackLine);
+        playbackLine = undefined;
+      }
+      lastPlaybackTrackKey = '';
+      return;
+    }
+
+    if (playbackLine) {
+      playbackLine.setLatLngs(positions);
+    } else {
+      playbackLine = L.polyline(positions, {
+        color: "#f5a623",
+        weight: 3,
+        opacity: 0.9,
+        dashArray: "6 5",
+      }).addTo(map);
+    }
+
+    const nextKey = `${positions[0].lat}:${positions[0].lng}:${positions.length}`;
+    if (nextKey !== lastPlaybackTrackKey) {
+      map.fitBounds(L.latLngBounds(positions), { padding: [36, 36] });
+      lastPlaybackTrackKey = nextKey;
+    }
+  }
+
+  function updatePlaybackMarker(point: TelemetryRecord | null) {
+    if (!map) return;
+
+    if (!point || point.lat == null || point.lon == null || !isValidGpsCoordinate(point.lat, point.lon)) {
+      if (playbackMarker) {
+        map.removeLayer(playbackMarker);
+        playbackMarker = undefined;
+      }
+      return;
+    }
+
+    const pos: L.LatLngExpression = [point.lat, point.lon];
+    if (playbackMarker) {
+      playbackMarker.setLatLng(pos);
+    } else {
+      playbackMarker = L.marker(pos, { icon: createPlaybackIcon(), zIndexOffset: 900 }).addTo(map);
     }
   }
 
@@ -184,14 +268,14 @@
         updateUavPosition(t.lat, t.lon, t.yaw);
 
         // Heading-up mode: center on UAV and rotate map
-        if (viewMode === 'heading-up' && t.lat !== 0 && t.lon !== 0) {
+        if (viewMode === 'heading-up' && isValidGpsCoordinate(t.lat, t.lon)) {
           map?.setView([t.lat, t.lon], map.getZoom(), { animate: false });
           mapHeading = t.yaw;
           mapContainer?.style.setProperty('--map-rotation', `${-mapHeading}deg`);
         }
 
         // Flight trail
-        if (t.lat !== 0 && t.lon !== 0) {
+        if (isValidGpsCoordinate(t.lat, t.lon)) {
           updateTrail(t.lat, t.lon);
         }
 
@@ -259,6 +343,16 @@
     applyHeadingUpSize(viewMode === 'heading-up');
   }
 
+  $effect(() => {
+    if (!map) return;
+    updatePlaybackTrack(playbackTrack);
+  });
+
+  $effect(() => {
+    if (!map) return;
+    updatePlaybackMarker(playbackPoint);
+  });
+
   onDestroy(() => {
     if (unsubTelemetry) unsubTelemetry();
     if (unsubSettings) unsubSettings();
@@ -267,6 +361,8 @@
       map.off("zoomend", saveMapState);
       if (uavMarker) map.removeLayer(uavMarker);
       if (trailLine) map.removeLayer(trailLine);
+      if (playbackLine) map.removeLayer(playbackLine);
+      if (playbackMarker) map.removeLayer(playbackMarker);
       if (homeMarker) map.removeLayer(homeMarker);
       map.remove();
     }

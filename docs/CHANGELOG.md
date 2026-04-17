@@ -7,15 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned — Blackbox Import & Flight Metadata Enrichment
-- Blackbox import pipeline based on external `blackbox_decode` binary (application folder first, PATH fallback)
-- Parsed Blackbox CSV rows stored as JSON blobs for dynamic per-log columns
-- Original Blackbox `.TXT` archived as BLOB in SQLite for later re-processing/export
-- Standalone Blackbox import creates logbook entries with `source = "blackbox"`
-- Existing live-recorded flights can be enriched with attached Blackbox data via `source = "both"`
-- Multi-log `.TXT` support via decoder `--index N`
-- Planned DB migration v2: `blackbox_records`, `blackbox_files`, and `flights.source`
-- Weather and reverse geocoding planned to move from lazy logbook fetch to ARM-time async capture
+### Added — Blackbox Import & Playback (M5b)
+- Blackbox import pipeline: `blackbox_decode` binary discovery (app folder first, PATH fallback), invoked with `--merge-gps --datetime --unit-height m --unit-gps-speed mps --stdout`
+- Multi-log probing: `flightlog_probe_blackbox_logs` command tries indices 0–31 and returns all found logs with labels
+- Import progress events: `flightlog-import-progress` Tauri event emitted at 9 stages (5–100%) during import
+- Progress bar UI in Logbook tab shown during active import
+- Multi-log selection: if the .TXT contains >1 session, user selects the desired log index before import starts
+- CSV parsing performance overhaul: pre-built `HashMap<String, usize>` header index map resolves all column positions once — O(1) access per field per row (vs O(headers²) before)
+- Downsampling to 10 Hz: reads `H looptime:` and `H P interval:` from the raw log header, computes effective sample rate, skips rows to keep ≤ 10 Hz in the DB (e.g. 500 Hz → keep 1 in 50 rows)
+- Raw CSV lines stored in `blackbox_records.csv_data` (comma-joined) instead of full JSON re-serialization — significantly reduces parsing overhead
+- Heading fix: INAV blackbox `heading` column is prioritised over `gps_ground_course`; auto-detects decidegrees (>360 → ÷10)
+- `link_quality` field added to `TelemetryRecord` (0–100 %, maps `lq` / `link_quality` / `rxlq` from blackbox CSV; `None` for MSP live recordings)
+- DB migration v3: `ALTER TABLE telemetry_records ADD COLUMN link_quality INTEGER`
+- Log replay: track loaded into `selectedFlightTrack` on flight selection; orange dashed polyline rendered on map via `playbackTrack` prop
+- Playback controls: Play/Pause/Reset buttons + scrubber timeline; timer-based at 120 ms/step
+- Playback position marker: amber circle marker moves on map during playback
+- `fitBounds` called once on new playback track load
+- Wider logbook panel when a flight is selected: CSS `min()` responsive width, `nav-panel-wide` class adds ~560px extra width
+- Improved logbook grid proportions (list/detail split)
+
+### Added — Logbook UX Improvements (M5)
+- Weather editor: compact read-only weather summary in flight detail + pencil edit icon that opens a weather editor form (temperature/wind steppers, wind direction/conditions dropdowns, save button)
+- `flightlog_update_weather` Tauri command + `updateFlightWeather()` frontend store function
+- Batch import: file picker allows multi-file selection for Blackbox logs (`.bbl`, `.bfl`, `.csv`, `.txt`)
+- Drag & drop import: drop Blackbox files onto the logbook to import (Tauri `dragDropEnabled` + `tauri://drag-drop` listener)
+- Logbook minimize/expand: click map → panel minimizes to 280px metadata-only view; click panel → expand back to full detail
+- Notes auto-resize: textarea grows with content up to 140px, read-only in minimized mode
+- Delete Flight button styled red for danger indication
+- Duplicate flight detection dialog on import with force-import option
+- Extended flight metadata: Firmware, Total Distance, Max Distance fields in detail panel
+- All hardcoded UI strings replaced with i18n keys (duplicate dialog, import progress, weather edit title, status bar connection info)
 
 ### Added — Flight Recording & Logbook (M5, core)
 - New Rust `flightlog` module: `db.rs`, `recorder.rs`, `raw_logger.rs`, `geocode.rs`, `weather.rs`, `types.rs`

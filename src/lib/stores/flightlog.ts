@@ -6,6 +6,7 @@ export interface FlightSummary {
   id: number;
   start_time: string;
   duration_sec: number | null;
+  source: string;
   craft_name: string;
   location_name: string | null;
   max_alt_m: number | null;
@@ -19,6 +20,7 @@ export interface Flight {
   start_time: string;
   end_time: string | null;
   duration_sec: number | null;
+  source: string;
   craft_name: string;
   fc_variant: string;
   fc_version: string;
@@ -60,6 +62,24 @@ export interface TelemetryRecord {
   fix_type: number | null;
   num_sat: number | null;
   cpu_load: number | null;
+  link_quality: number | null;
+  baro_alt_m: number | null;
+  gps_hdop: number | null;
+  gps_eph: number | null;
+  gps_epv: number | null;
+  active_wp_number: number | null;
+  active_flight_mode_flags: number | null;
+  state_flags: number | null;
+  nav_state: number | null;
+  nav_flags: number | null;
+  rx_signal_received: number | null;
+  hw_health_status: number | null;
+  baro_temperature: number | null;
+  wind_n_ms: number | null;
+  wind_e_ms: number | null;
+  wind_d_ms: number | null;
+  rc_data_json: string | null;
+  rc_command_json: string | null;
 }
 
 export type LogbookSortMode =
@@ -68,9 +88,46 @@ export type LogbookSortMode =
   | 'date-location-aircraft'
   | 'aircraft-date-location';
 
-export interface GroupedFlights {
+type LogbookSortDimension = 'aircraft' | 'location' | 'date';
+
+export interface FlightTreeSecondLevel {
   key: string;
   flights: FlightSummary[];
+}
+
+export interface FlightTreeTopLevel {
+  key: string;
+  children: FlightTreeSecondLevel[];
+  flight_count: number;
+}
+
+export interface FlightTree {
+  dimensions: [LogbookSortDimension, LogbookSortDimension, LogbookSortDimension];
+  groups: FlightTreeTopLevel[];
+}
+
+export interface BlackboxImportSuccess {
+  type: 'success';
+  flight_id: number;
+  rows_imported: number;
+}
+
+export interface BlackboxImportDuplicate {
+  type: 'duplicate';
+  existing_flight: Flight;
+  duplicate_craft_name: string;
+  duplicate_start_time: string;
+  duplicate_duration_sec: number | null;
+  duplicate_lat: number | null;
+  duplicate_lon: number | null;
+}
+
+export type BlackboxImportStatus = BlackboxImportSuccess | BlackboxImportDuplicate;
+
+export interface BlackboxImportProgress {
+  stage: string;
+  progress: number;
+  message: string;
 }
 
 export async function listFlights(dbPath: string): Promise<FlightSummary[]> {
@@ -108,10 +165,11 @@ export async function updateFlightNotes(id: number, notes: string, dbPath: strin
   });
 }
 
-export async function geocodeFlight(id: number, dbPath: string): Promise<string | null> {
+export async function geocodeFlight(id: number, dbPath: string, lang: string): Promise<string | null> {
   return invoke<string | null>('flightlog_geocode', {
     flightId: id,
     dbPath: dbPath || undefined,
+    lang,
   });
 }
 
@@ -122,8 +180,42 @@ export async function fetchFlightWeather(id: number, dbPath: string): Promise<vo
   });
 }
 
+export async function updateFlightWeather(
+  id: number,
+  tempC: number | null,
+  windMs: number | null,
+  windDeg: number | null,
+  description: string | null,
+  dbPath: string,
+): Promise<void> {
+  await invoke('flightlog_update_weather', {
+    flightId: id,
+    tempC,
+    windMs,
+    windDeg,
+    description: description || null,
+    dbPath: dbPath || undefined,
+  });
+}
+
 export async function getDefaultFlightlogPath(): Promise<string> {
   return invoke<string>('flightlog_default_db_path');
+}
+
+export async function importBlackboxLog(
+  filePath: string,
+  dbPath: string,
+  logIndex?: number,
+  forceImport: boolean = false,
+  lang?: string,
+): Promise<BlackboxImportStatus> {
+  return invoke<BlackboxImportStatus>('flightlog_import_blackbox', {
+    filePath,
+    dbPath: dbPath || undefined,
+    logIndex,
+    forceImport,
+    lang,
+  });
 }
 
 function dateKey(ts: string): string {
@@ -136,40 +228,78 @@ function primaryOrUnknown(v: string | null | undefined, unknown = 'Unknown'): st
   return s.length > 0 ? s : unknown;
 }
 
-export function groupFlights(
+function getModeDimensions(mode: LogbookSortMode): [LogbookSortDimension, LogbookSortDimension, LogbookSortDimension] {
+  if (mode === 'aircraft-location-date') return ['aircraft', 'location', 'date'];
+  if (mode === 'location-date-aircraft') return ['location', 'date', 'aircraft'];
+  if (mode === 'date-location-aircraft') return ['date', 'location', 'aircraft'];
+  return ['aircraft', 'date', 'location'];
+}
+
+function getDimensionValue(f: FlightSummary, dim: LogbookSortDimension): string {
+  if (dim === 'aircraft') return primaryOrUnknown(f.craft_name, 'Unnamed craft');
+  if (dim === 'location') return primaryOrUnknown(f.location_name, 'Unknown location');
+  return dateKey(f.start_time);
+}
+
+function compareDimensionValues(a: string, b: string, dim: LogbookSortDimension): number {
+  if (dim === 'date') return b.localeCompare(a);
+  return a.localeCompare(b, undefined, { sensitivity: 'base' });
+}
+
+function compareByThirdThenTime(
+  a: FlightSummary,
+  b: FlightSummary,
+  third: LogbookSortDimension,
+): number {
+  const thirdCmp = compareDimensionValues(getDimensionValue(a, third), getDimensionValue(b, third), third);
+  if (thirdCmp !== 0) return thirdCmp;
+  const aTime = new Date(a.start_time).getTime();
+  const bTime = new Date(b.start_time).getTime();
+  return bTime - aTime;
+}
+
+export function buildFlightTree(
   flights: FlightSummary[],
   mode: LogbookSortMode,
-): GroupedFlights[] {
-  const sorted = [...flights].sort((a, b) => {
-    const aTime = new Date(a.start_time).getTime();
-    const bTime = new Date(b.start_time).getTime();
-    return bTime - aTime;
-  });
+): FlightTree {
+  const dimensions = getModeDimensions(mode);
+  const [topDim, secondDim, thirdDim] = dimensions;
+  const topMap = new Map<string, Map<string, FlightSummary[]>>();
 
-  const groups = new Map<string, FlightSummary[]>();
-
-  for (const f of sorted) {
-    const craft = primaryOrUnknown(f.craft_name, 'Unnamed craft');
-    const location = primaryOrUnknown(f.location_name, 'Unknown location');
-    const day = dateKey(f.start_time);
-    let key = '';
-
-    if (mode === 'aircraft-location-date') key = `${craft} | ${location} | ${day}`;
-    if (mode === 'location-date-aircraft') key = `${location} | ${day} | ${craft}`;
-    if (mode === 'date-location-aircraft') key = `${day} | ${location} | ${craft}`;
-    if (mode === 'aircraft-date-location') key = `${craft} | ${day} | ${location}`;
-
-    const list = groups.get(key);
+  for (const flight of flights) {
+    const topKey = getDimensionValue(flight, topDim);
+    const secondKey = getDimensionValue(flight, secondDim);
+    let secondMap = topMap.get(topKey);
+    if (!secondMap) {
+      secondMap = new Map<string, FlightSummary[]>();
+      topMap.set(topKey, secondMap);
+    }
+    const list = secondMap.get(secondKey);
     if (list) {
-      list.push(f);
+      list.push(flight);
     } else {
-      groups.set(key, [f]);
+      secondMap.set(secondKey, [flight]);
     }
   }
 
-  return [...groups.entries()]
-    .map(([key, items]) => ({ key, flights: items }))
-    .sort((a, b) => a.key.localeCompare(b.key));
+  const groups: FlightTreeTopLevel[] = [...topMap.entries()]
+    .sort(([a], [b]) => compareDimensionValues(a, b, topDim))
+    .map(([topKey, secondMap]) => {
+      const children: FlightTreeSecondLevel[] = [...secondMap.entries()]
+        .sort(([a], [b]) => compareDimensionValues(a, b, secondDim))
+        .map(([secondKey, list]) => ({
+          key: secondKey,
+          flights: [...list].sort((a, b) => compareByThirdThenTime(a, b, thirdDim)),
+        }));
+
+      return {
+        key: topKey,
+        children,
+        flight_count: children.reduce((sum, child) => sum + child.flights.length, 0),
+      };
+    });
+
+  return { dimensions, groups };
 }
 
 export function formatDurationSec(durationSec: number | null): string {

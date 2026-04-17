@@ -3,6 +3,7 @@
 // Supports optional raw text logging, reverse geocoding, and weather metadata.
 
 pub mod db;
+pub mod blackbox;
 pub mod geocode;
 pub mod raw_logger;
 pub mod recorder;

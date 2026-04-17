@@ -9,7 +9,7 @@ use rusqlite::{params, Connection, Result as SqlResult};
 
 use super::types::{Flight, FlightSummary, TelemetryRecord};
 
-const CURRENT_SCHEMA_VERSION: u32 = 1;
+const CURRENT_SCHEMA_VERSION: u32 = 4;
 
 /// Open (or create) the flight log database at the given path.
 /// Runs migrations if needed.
@@ -89,9 +89,50 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
         migrate_v0_to_v1(conn)?;
     }
 
-    // Future migrations go here:
-    // if current < 2 { migrate_v1_to_v2(conn)?; }
+    if current < 2 {
+        migrate_v1_to_v2(conn)?;
+    }
 
+    if current < 3 {
+        migrate_v2_to_v3(conn)?;
+    }
+
+    if current < 4 {
+        migrate_v3_to_v4(conn)?;
+    }
+
+    Ok(())
+}
+
+fn migrate_v3_to_v4(conn: &Connection) -> SqlResult<()> {
+    conn.execute_batch(
+        "ALTER TABLE telemetry_records ADD COLUMN baro_alt_m REAL;
+         ALTER TABLE telemetry_records ADD COLUMN gps_hdop REAL;
+         ALTER TABLE telemetry_records ADD COLUMN gps_eph REAL;
+         ALTER TABLE telemetry_records ADD COLUMN gps_epv REAL;
+         ALTER TABLE telemetry_records ADD COLUMN active_wp_number INTEGER;
+         ALTER TABLE telemetry_records ADD COLUMN active_flight_mode_flags INTEGER;
+         ALTER TABLE telemetry_records ADD COLUMN state_flags INTEGER;
+         ALTER TABLE telemetry_records ADD COLUMN nav_state INTEGER;
+         ALTER TABLE telemetry_records ADD COLUMN nav_flags INTEGER;
+         ALTER TABLE telemetry_records ADD COLUMN rx_signal_received INTEGER;
+         ALTER TABLE telemetry_records ADD COLUMN hw_health_status INTEGER;
+         ALTER TABLE telemetry_records ADD COLUMN baro_temperature REAL;
+         ALTER TABLE telemetry_records ADD COLUMN wind_n_ms REAL;
+         ALTER TABLE telemetry_records ADD COLUMN wind_e_ms REAL;
+         ALTER TABLE telemetry_records ADD COLUMN wind_d_ms REAL;
+         ALTER TABLE telemetry_records ADD COLUMN rc_data_json TEXT;
+         ALTER TABLE telemetry_records ADD COLUMN rc_command_json TEXT;",
+    )?;
+    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    Ok(())
+}
+
+fn migrate_v2_to_v3(conn: &Connection) -> SqlResult<()> {
+    conn.execute_batch(
+        "ALTER TABLE telemetry_records ADD COLUMN link_quality INTEGER;",
+    )?;
+    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
     Ok(())
 }
 
@@ -153,13 +194,45 @@ fn migrate_v0_to_v1(conn: &Connection) -> SqlResult<()> {
     Ok(())
 }
 
+fn migrate_v1_to_v2(conn: &Connection) -> SqlResult<()> {
+    conn.execute_batch(
+        "ALTER TABLE flights ADD COLUMN source TEXT NOT NULL DEFAULT 'live';
+
+        CREATE TABLE IF NOT EXISTS blackbox_records (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            flight_id     INTEGER NOT NULL REFERENCES flights(id) ON DELETE CASCADE,
+            timestamp_us  INTEGER NOT NULL,
+            csv_data      TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS blackbox_files (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            flight_id         INTEGER NOT NULL REFERENCES flights(id) ON DELETE CASCADE,
+            original_filename TEXT NOT NULL,
+            log_index         INTEGER NOT NULL DEFAULT 0,
+            file_data         BLOB NOT NULL,
+            file_size         INTEGER NOT NULL,
+            imported_at       TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_blackbox_records_flight
+            ON blackbox_records(flight_id, timestamp_us);
+
+        CREATE INDEX IF NOT EXISTS idx_blackbox_files_flight
+            ON blackbox_files(flight_id);",
+    )?;
+
+    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    Ok(())
+}
+
 // ── CRUD operations ─────────────────────────────────────────────────
 
 /// Insert a new flight, returns the row ID.
 pub fn insert_flight(conn: &Connection, flight: &Flight) -> SqlResult<i64> {
     conn.execute(
         "INSERT INTO flights (
-            start_time, end_time, duration_sec,
+            start_time, end_time, duration_sec, source,
             craft_name, fc_variant, fc_version, board_id, platform_type, protocol,
             start_lat, start_lon, location_name,
             weather_temp_c, weather_wind_ms, weather_wind_deg, weather_desc,
@@ -167,12 +240,13 @@ pub fn insert_flight(conn: &Connection, flight: &Flight) -> SqlResult<i64> {
             battery_used_mah, notes
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-            ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22
+            ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23
         )",
         params![
             flight.start_time.to_rfc3339(),
             flight.end_time.map(|t| t.to_rfc3339()),
             flight.duration_sec,
+            flight.source,
             flight.craft_name,
             flight.fc_variant,
             flight.fc_version,
@@ -254,10 +328,20 @@ pub fn insert_telemetry_batch(
             "INSERT INTO telemetry_records (
                 flight_id, timestamp_ms, lat, lon, alt_m, speed_ms, heading,
                 vario_ms, voltage, current_a, mah_drawn, rssi,
-                roll, pitch, yaw, fix_type, num_sat, cpu_load
+                roll, pitch, yaw, fix_type, num_sat, cpu_load, link_quality,
+                baro_alt_m, gps_hdop, gps_eph, gps_epv,
+                active_wp_number, active_flight_mode_flags, state_flags, nav_state, nav_flags,
+                rx_signal_received, hw_health_status, baro_temperature,
+                wind_n_ms, wind_e_ms, wind_d_ms,
+                rc_data_json, rc_command_json
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                ?13, ?14, ?15, ?16, ?17, ?18
+                ?13, ?14, ?15, ?16, ?17, ?18, ?19,
+                ?20, ?21, ?22, ?23,
+                ?24, ?25, ?26, ?27, ?28,
+                ?29, ?30, ?31,
+                ?32, ?33, ?34,
+                ?35, ?36
             )",
         )?;
         for r in records {
@@ -280,6 +364,24 @@ pub fn insert_telemetry_batch(
                 r.fix_type,
                 r.num_sat,
                 r.cpu_load,
+                r.link_quality,
+                r.baro_alt_m,
+                r.gps_hdop,
+                r.gps_eph,
+                r.gps_epv,
+                r.active_wp_number,
+                r.active_flight_mode_flags,
+                r.state_flags,
+                r.nav_state,
+                r.nav_flags,
+                r.rx_signal_received,
+                r.hw_health_status,
+                r.baro_temperature,
+                r.wind_n_ms,
+                r.wind_e_ms,
+                r.wind_d_ms,
+                r.rc_data_json,
+                r.rc_command_json,
             ])?;
         }
     }
@@ -290,8 +392,8 @@ pub fn insert_telemetry_batch(
 /// List flight summaries ordered by start_time DESC.
 pub fn list_flights(conn: &Connection) -> SqlResult<Vec<FlightSummary>> {
     let mut stmt = conn.prepare(
-        "SELECT id, start_time, duration_sec, craft_name, location_name,
-                max_alt_m, max_speed_ms, total_distance_m, platform_type
+        "SELECT id, start_time, duration_sec, source, craft_name, location_name,
+            max_alt_m, max_speed_ms, total_distance_m, platform_type
          FROM flights ORDER BY start_time DESC",
     )?;
 
@@ -305,12 +407,13 @@ pub fn list_flights(conn: &Connection) -> SqlResult<Vec<FlightSummary>> {
             id: row.get(0)?,
             start_time,
             duration_sec: row.get(2)?,
-            craft_name: row.get(3)?,
-            location_name: row.get(4)?,
-            max_alt_m: row.get(5)?,
-            max_speed_ms: row.get(6)?,
-            total_distance_m: row.get(7)?,
-            platform_type: row.get(8)?,
+            source: row.get(3)?,
+            craft_name: row.get(4)?,
+            location_name: row.get(5)?,
+            max_alt_m: row.get(6)?,
+            max_speed_ms: row.get(7)?,
+            total_distance_m: row.get(8)?,
+            platform_type: row.get(9)?,
         })
     })?;
 
@@ -321,7 +424,7 @@ pub fn list_flights(conn: &Connection) -> SqlResult<Vec<FlightSummary>> {
 pub fn get_flight(conn: &Connection, flight_id: i64) -> SqlResult<Option<Flight>> {
     let mut stmt = conn.prepare(
         "SELECT id, start_time, end_time, duration_sec,
-                craft_name, fc_variant, fc_version, board_id, platform_type, protocol,
+            source, craft_name, fc_variant, fc_version, board_id, platform_type, protocol,
                 start_lat, start_lon, location_name,
                 weather_temp_c, weather_wind_ms, weather_wind_deg, weather_desc,
                 max_alt_m, max_speed_ms, max_distance_m, total_distance_m,
@@ -347,25 +450,26 @@ pub fn get_flight(conn: &Connection, flight_id: i64) -> SqlResult<Option<Flight>
             start_time,
             end_time,
             duration_sec: row.get(3)?,
-            craft_name: row.get(4)?,
-            fc_variant: row.get(5)?,
-            fc_version: row.get(6)?,
-            board_id: row.get(7)?,
-            platform_type: row.get(8)?,
-            protocol: row.get(9)?,
-            start_lat: row.get(10)?,
-            start_lon: row.get(11)?,
-            location_name: row.get(12)?,
-            weather_temp_c: row.get(13)?,
-            weather_wind_ms: row.get(14)?,
-            weather_wind_deg: row.get(15)?,
-            weather_desc: row.get(16)?,
-            max_alt_m: row.get(17)?,
-            max_speed_ms: row.get(18)?,
-            max_distance_m: row.get(19)?,
-            total_distance_m: row.get(20)?,
-            battery_used_mah: row.get(21)?,
-            notes: row.get(22)?,
+            source: row.get(4)?,
+            craft_name: row.get(5)?,
+            fc_variant: row.get(6)?,
+            fc_version: row.get(7)?,
+            board_id: row.get(8)?,
+            platform_type: row.get(9)?,
+            protocol: row.get(10)?,
+            start_lat: row.get(11)?,
+            start_lon: row.get(12)?,
+            location_name: row.get(13)?,
+            weather_temp_c: row.get(14)?,
+            weather_wind_ms: row.get(15)?,
+            weather_wind_deg: row.get(16)?,
+            weather_desc: row.get(17)?,
+            max_alt_m: row.get(18)?,
+            max_speed_ms: row.get(19)?,
+            max_distance_m: row.get(20)?,
+            total_distance_m: row.get(21)?,
+            battery_used_mah: row.get(22)?,
+            notes: row.get(23)?,
         })
     })?;
 
@@ -384,7 +488,12 @@ pub fn get_flight_track(
     let mut stmt = conn.prepare(
         "SELECT id, flight_id, timestamp_ms, lat, lon, alt_m, speed_ms,
                 heading, vario_ms, voltage, current_a, mah_drawn, rssi,
-                roll, pitch, yaw, fix_type, num_sat, cpu_load
+            roll, pitch, yaw, fix_type, num_sat, cpu_load, link_quality,
+            baro_alt_m, gps_hdop, gps_eph, gps_epv,
+            active_wp_number, active_flight_mode_flags, state_flags, nav_state, nav_flags,
+            rx_signal_received, hw_health_status, baro_temperature,
+            wind_n_ms, wind_e_ms, wind_d_ms,
+            rc_data_json, rc_command_json
          FROM telemetry_records
          WHERE flight_id = ?1
          ORDER BY timestamp_ms ASC",
@@ -411,15 +520,128 @@ pub fn get_flight_track(
             fix_type: row.get(16)?,
             num_sat: row.get(17)?,
             cpu_load: row.get(18)?,
+            link_quality: row.get(19)?,
+            baro_alt_m: row.get(20)?,
+            gps_hdop: row.get(21)?,
+            gps_eph: row.get(22)?,
+            gps_epv: row.get(23)?,
+            active_wp_number: row.get(24)?,
+            active_flight_mode_flags: row.get(25)?,
+            state_flags: row.get(26)?,
+            nav_state: row.get(27)?,
+            nav_flags: row.get(28)?,
+            rx_signal_received: row.get(29)?,
+            hw_health_status: row.get(30)?,
+            baro_temperature: row.get(31)?,
+            wind_n_ms: row.get(32)?,
+            wind_e_ms: row.get(33)?,
+            wind_d_ms: row.get(34)?,
+            rc_data_json: row.get(35)?,
+            rc_command_json: row.get(36)?,
         })
     })?;
 
     rows.collect()
 }
 
-/// Delete a flight and all its telemetry records (cascade).
+/// Check for duplicate flights based on craft_name and start_time (±10s).
+/// Returns the existing flight if found, or None.
+pub fn find_duplicate_flight(
+    conn: &Connection,
+    craft_name: &str,
+    start_time: DateTime<Utc>,
+) -> Result<Option<Flight>, String> {
+    let time_lower = (start_time - chrono::Duration::seconds(10)).to_rfc3339();
+    let time_upper = (start_time + chrono::Duration::seconds(10)).to_rfc3339();
+
+    eprintln!("[DUP-DB] Query: craft_name={:?}, time_lower={}, time_upper={}", craft_name, time_lower, time_upper);
+
+    // Step 1: Quick COUNT check — avoids full deserialization unless needed
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM flights
+             WHERE craft_name = ?1 AND start_time >= ?2 AND start_time <= ?3",
+            params![craft_name, time_lower, time_upper],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("Duplicate check COUNT failed: {}", e))?;
+
+    eprintln!("[DUP-DB] COUNT result: {}", count);
+
+    if count == 0 {
+        return Ok(None);
+    }
+
+    // Step 2: Fetch the first matching flight
+    let flight = conn
+        .query_row(
+            "SELECT id, start_time, end_time, duration_sec, source, craft_name, 
+                    fc_variant, fc_version, board_id, platform_type, protocol,
+                    start_lat, start_lon, location_name, weather_temp_c, weather_wind_ms,
+                    weather_wind_deg, weather_desc, max_alt_m, max_speed_ms, max_distance_m,
+                    total_distance_m, battery_used_mah, notes
+             FROM flights
+             WHERE craft_name = ?1 AND start_time >= ?2 AND start_time <= ?3
+             ORDER BY id ASC LIMIT 1",
+            params![craft_name, time_lower, time_upper],
+            |row| {
+                let start_str: String = row.get(1)?;
+                let end_str: Option<String> = row.get(2)?;
+                let start_time_found = DateTime::parse_from_rfc3339(&start_str)
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .unwrap_or_else(|_| Utc::now());
+                let end_time = end_str.and_then(|s| {
+                    DateTime::parse_from_rfc3339(&s)
+                        .map(|dt| dt.with_timezone(&Utc))
+                        .ok()
+                });
+                Ok(Flight {
+                    id: row.get(0)?,
+                    start_time: start_time_found,
+                    end_time,
+                    duration_sec: row.get(3)?,
+                    source: row.get(4)?,
+                    craft_name: row.get(5)?,
+                    fc_variant: row.get(6)?,
+                    fc_version: row.get(7)?,
+                    board_id: row.get(8)?,
+                    platform_type: row.get(9)?,
+                    protocol: row.get(10)?,
+                    start_lat: row.get(11)?,
+                    start_lon: row.get(12)?,
+                    location_name: row.get(13)?,
+                    weather_temp_c: row.get(14)?,
+                    weather_wind_ms: row.get(15)?,
+                    weather_wind_deg: row.get(16)?,
+                    weather_desc: row.get(17)?,
+                    max_alt_m: row.get(18)?,
+                    max_speed_ms: row.get(19)?,
+                    max_distance_m: row.get(20)?,
+                    total_distance_m: row.get(21)?,
+                    battery_used_mah: row.get(22)?,
+                    notes: row.get(23)?,
+                })
+            },
+        )
+        .map_err(|e| format!("Duplicate check flight fetch failed: {}", e))?;
+
+    Ok(Some(flight))
+}
+
+/// Delete a flight and all related data (telemetry, blackbox records, archived files).
+/// Explicitly deletes child rows first (in case foreign_keys is off), then VACUUMs.
 pub fn delete_flight(conn: &Connection, flight_id: i64) -> SqlResult<bool> {
+    // Explicitly delete child tables (don't rely solely on CASCADE)
+    conn.execute("DELETE FROM blackbox_files WHERE flight_id = ?1", params![flight_id])?;
+    conn.execute("DELETE FROM blackbox_records WHERE flight_id = ?1", params![flight_id])?;
+    conn.execute("DELETE FROM telemetry_records WHERE flight_id = ?1", params![flight_id])?;
     let affected = conn.execute("DELETE FROM flights WHERE id = ?1", params![flight_id])?;
+
+    // Reclaim disk space — blackbox_files stores large BLOBs
+    if affected > 0 {
+        conn.execute_batch("VACUUM;")?;
+    }
+
     Ok(affected > 0)
 }
 
@@ -432,6 +654,48 @@ pub fn update_flight_notes(
     conn.execute(
         "UPDATE flights SET notes = ?1 WHERE id = ?2",
         params![notes, flight_id],
+    )?;
+    Ok(())
+}
+
+pub fn insert_blackbox_records(
+    conn: &Connection,
+    flight_id: i64,
+    records: &[(i64, String)],
+) -> SqlResult<()> {
+    let tx = conn.unchecked_transaction()?;
+    {
+        let mut stmt = tx.prepare_cached(
+            "INSERT INTO blackbox_records (flight_id, timestamp_us, csv_data)
+             VALUES (?1, ?2, ?3)",
+        )?;
+
+        for (timestamp_us, csv_data) in records {
+            stmt.execute(params![flight_id, timestamp_us, csv_data])?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn insert_blackbox_file(
+    conn: &Connection,
+    flight_id: i64,
+    original_filename: &str,
+    log_index: u32,
+    file_data: &[u8],
+) -> SqlResult<()> {
+    conn.execute(
+        "INSERT INTO blackbox_files (
+            flight_id, original_filename, log_index, file_data, file_size
+         ) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            flight_id,
+            original_filename,
+            log_index,
+            file_data,
+            file_data.len() as i64,
+        ],
     )?;
     Ok(())
 }
@@ -468,6 +732,7 @@ mod tests {
             start_time: now,
             end_time: None,
             duration_sec: None,
+            source: "live".into(),
             craft_name: "TestCraft".into(),
             fc_variant: "INAV".into(),
             fc_version: "7.1.2".into(),
@@ -503,6 +768,7 @@ mod tests {
             start_time: now,
             end_time: None,
             duration_sec: None,
+            source: "live".into(),
             craft_name: "Wing".into(),
             fc_variant: "INAV".into(),
             fc_version: "8.0.0".into(),
@@ -545,6 +811,7 @@ mod tests {
         let list = list_flights(&conn).unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].craft_name, "Wing");
+        assert_eq!(list[0].source, "live");
         assert_eq!(list[0].max_alt_m, Some(50.0));
     }
 
@@ -556,6 +823,7 @@ mod tests {
             start_time: Utc::now(),
             end_time: None,
             duration_sec: None,
+            source: "live".into(),
             craft_name: "Quad".into(),
             fc_variant: "INAV".into(),
             fc_version: "7.1.2".into(),
@@ -599,6 +867,24 @@ mod tests {
                 fix_type: Some(3),
                 num_sat: Some(12),
                 cpu_load: Some(25),
+                link_quality: None,
+                baro_alt_m: None,
+                gps_hdop: None,
+                gps_eph: None,
+                gps_epv: None,
+                active_wp_number: None,
+                active_flight_mode_flags: None,
+                state_flags: None,
+                nav_state: None,
+                nav_flags: None,
+                rx_signal_received: None,
+                hw_health_status: None,
+                baro_temperature: None,
+                wind_n_ms: None,
+                wind_e_ms: None,
+                wind_d_ms: None,
+                rc_data_json: None,
+                rc_command_json: None,
             })
             .collect();
 
@@ -617,6 +903,7 @@ mod tests {
             start_time: Utc::now(),
             end_time: None,
             duration_sec: None,
+            source: "live".into(),
             craft_name: "Del".into(),
             fc_variant: "INAV".into(),
             fc_version: "7.0.0".into(),
@@ -658,6 +945,24 @@ mod tests {
             fix_type: None,
             num_sat: None,
             cpu_load: None,
+            link_quality: None,
+            baro_alt_m: None,
+            gps_hdop: None,
+            gps_eph: None,
+            gps_epv: None,
+            active_wp_number: None,
+            active_flight_mode_flags: None,
+            state_flags: None,
+            nav_state: None,
+            nav_flags: None,
+            rx_signal_received: None,
+            hw_health_status: None,
+            baro_temperature: None,
+            wind_n_ms: None,
+            wind_e_ms: None,
+            wind_d_ms: None,
+            rc_data_json: None,
+            rc_command_json: None,
         };
         insert_telemetry_batch(&conn, &[rec]).unwrap();
 
@@ -666,5 +971,49 @@ mod tests {
 
         let track = get_flight_track(&conn, fid).unwrap();
         assert!(track.is_empty());
+    }
+
+    #[test]
+    fn test_blackbox_tables_accept_rows() {
+        let conn = test_db();
+        let flight = Flight {
+            id: 0,
+            start_time: Utc::now(),
+            end_time: None,
+            duration_sec: None,
+            source: "blackbox".into(),
+            craft_name: "BB".into(),
+            fc_variant: "INAV".into(),
+            fc_version: "9.0.0".into(),
+            board_id: "TEST".into(),
+            platform_type: 0,
+            protocol: "BLACKBOX".into(),
+            start_lat: None,
+            start_lon: None,
+            location_name: None,
+            weather_temp_c: None,
+            weather_wind_ms: None,
+            weather_wind_deg: None,
+            weather_desc: None,
+            max_alt_m: None,
+            max_speed_ms: None,
+            max_distance_m: None,
+            total_distance_m: None,
+            battery_used_mah: None,
+            notes: None,
+        };
+        let flight_id = insert_flight(&conn, &flight).unwrap();
+        insert_blackbox_records(&conn, flight_id, &[(123_000, "{}".into())]).unwrap();
+        insert_blackbox_file(&conn, flight_id, "test.TXT", 0, b"abc").unwrap();
+
+        let blackbox_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM blackbox_records WHERE flight_id = ?1", params![flight_id], |row| row.get(0))
+            .unwrap();
+        let file_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM blackbox_files WHERE flight_id = ?1", params![flight_id], |row| row.get(0))
+            .unwrap();
+
+        assert_eq!(blackbox_count, 1);
+        assert_eq!(file_count, 1);
     }
 }
