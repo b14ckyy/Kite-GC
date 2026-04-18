@@ -7,11 +7,14 @@ Built with [Tauri 2.0](https://tauri.app/) (Rust backend) and [Svelte 5](https:/
 ## Features (Planned)
 
 - Real-time telemetry monitoring via MSP protocol
-- Interactive map with aircraft position (Leaflet)
+- Interactive 2D map with aircraft position (Leaflet)
+- CesiumJS 3D globe view with terrain, chase camera, and flight replay
 - Mission planning with waypoint editor
+- Flight recording & logbook with Blackbox import
+- Colored flight tracks (flight mode, altitude, speed, signal)
 - Multi-protocol support (MSP, LTM, MAVLink, CRSF)
 - Multi-transport support (Serial, BLE, TCP/UDP)
-- Log replay (Blackbox, OTX/ETX)
+- Log replay (Blackbox, OTX/ETX) in 2D and 3D
 - Cross-platform: Windows, Linux (x86/ARM), Android
 
 ## Quick Start
@@ -38,8 +41,10 @@ Or use the build scripts in `scripts/`.
 
 - [Development Log](docs/DEVLOG.md) — Project structure and setup
 - [Architecture Decisions](docs/ARCHITECTURE.md) — Why we chose what
+- [Data Pipeline](docs/DATA_PIPELINE.md) — Telemetry data flow (live + replay)
 - [Roadmap](docs/ROADMAP.md) — Feature planning
 - [Changelog](docs/CHANGELOG.md) — Version history
+- [Flight Modes Protocol](docs/PROTOCOL_FLIGHT_MODES.md) — INAV bitmask reference
 
 ## Recommended IDE Setup
 

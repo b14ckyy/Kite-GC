@@ -775,3 +775,68 @@ r.lat / r.lon ← raw GPS coordinates (always, no nav fallback)
 - Keeping nav columns in schema allows future use if a better conversion method is found
 - Douglas-Peucker + spike filter produce clean tracks without requiring fused position data
 
+---
+
+## ADR-021: CesiumJS 3D Globe View
+
+**Date**: 2026-04-18
+**Status**: Accepted
+
+**Context**: A 2D Leaflet map is insufficient for understanding 3D flight paths, terrain clearance, and altitude relationships. Users want a 3D "follower view" for monitoring and log replay — not a Google Earth replacement, but a functional UAV monitoring perspective.
+
+**Considered**: MapLibre GL (2.5D), Three.js + custom globe, CesiumJS, deck.gl
+
+**Decision**: CesiumJS (Apache 2.0 license) as an optional 3D view alongside the existing Leaflet 2D map.
+
+**Architecture**:
+```
++page.svelte
+├── mapViewMode: '2d' | '3d'   (toggle button)
+├── Map.svelte                   (Leaflet, existing)
+└── Map3D.svelte                 (CesiumJS, new)
+    ├── createCachedImageryProvider()   — shared tile cache
+    ├── updatePlaybackTrack3D()         — geoid-corrected track
+    ├── updateChaseCamera()             — lerp-smoothed follow cam
+    └── waitForTerrain()                — async terrain readiness
+```
+
+**Vite integration**: Custom `cesiumPlugin()` in `vite.config.js`:
+- **Dev**: sirv middleware serves `/cesium/*` from `node_modules/cesium/Build/Cesium/`
+- **Build**: `writeBundle` hook copies Cesium assets via `fs.cpSync`
+- Replaces `vite-plugin-static-copy` (assets "collected" but not served) and `vite-plugin-cesium` (URL-encoding bug with spaces in workspace path)
+
+**Tile caching**: Same `IndexedDB` cache shared with 2D Leaflet view:
+- `requestImage` overridden on `UrlTemplateImageryProvider`
+- Routes through `getCachedTile()` → `fetchAndCacheImage()` → `putCachedTile()`
+- `errorEvent.addEventListener(() => {})` silences tile errors — parent tiles remain visible
+- Per-provider `cesiumMaxZoom` limits (e.g. ESRI: 17) prevent "No tiles available" placeholder images
+
+**Altitude correction** (geoid undulation):
+- GPS `alt_m` is MSL (Mean Sea Level). CesiumJS expects WGS84 ellipsoid height.
+- Difference ≈ geoid undulation (e.g. ~40m in Central Europe, ~25m in Scandinavia).
+- Fix: `sampleTerrainMostDetailed()` at first track point → `geoidOffset = terrainHeight - groundMsl`
+- Applied to all positions (track, markers, live UAV).
+- Must wait for `Cesium.Terrain.fromWorldTerrain()` to finish loading (async) — `waitForTerrain()` listens for `terrainProviderChanged` event.
+
+**Chase camera smoothing**:
+- Direct `camera.lookAt()` from telemetry produces jerky 1° heading snaps.
+- Solution: `requestAnimationFrame` loop with exponential lerp (`CHASE_SMOOTHING = 0.07`).
+- Position: `lerp(current, target, 0.07)` per frame for lat, lon, alt.
+- Heading: `lerpAngle()` with shortest-path wrap (handles 359°→1° via `((diff + 540) % 360) - 180`).
+- First update snaps immediately (no lerp from 0,0).
+
+**Performance optimizations**:
+- `requestRenderMode: true` — only re-renders when scene changes (reduces idle GPU)
+- `scene3DOnly: true` — disables 2D/Columbus View mode switching overhead
+- `fog.density: 2.5e-4` — hides distant terrain, reduces tile loading
+- `tileCacheSize: 100` — limits RAM usage from terrain/imagery tiles
+- MSAA 2× — balanced quality vs performance
+
+**Rationale**:
+- CesiumJS is the only production-grade open-source 3D globe with terrain support
+- Apache 2.0 license is compatible with GPLv3
+- Cesium Ion free tier provides World Terrain (15m resolution) — sufficient for UAV monitoring
+- Shared tile cache means 3D view benefits from previously cached 2D tiles
+- Optional view: 2D map remains the primary interface; 3D is for visualization/monitoring
+- Custom Vite plugin avoids all dependency issues we hit with third-party plugins
+

@@ -7,8 +7,10 @@ export interface MapProvider {
   url: string;
   attribution: string;
   maxZoom: number;
+  /** Max zoom for CesiumJS 3D view — lower than maxZoom for providers with sparse high-zoom coverage */
+  cesiumMaxZoom?: number;
   /** Optional overlay layer URLs rendered on top of the base layer (e.g. labels on satellite) */
-  overlays?: { url: string; attribution: string; maxZoom: number }[];
+  overlays?: { url: string; attribution: string; maxZoom: number; cesiumMaxZoom?: number }[];
   /** True when the base imagery is dark (satellite, dark theme) — used for UI contrast */
   dark?: boolean;
 }
@@ -29,6 +31,7 @@ export const MAP_PROVIDERS: MapProvider[] = [
     attribution:
       '&copy; <a href="https://www.esri.com/">Esri</a> &mdash; Sources: Esri, DeLorme, NAVTEQ',
     maxZoom: 20,
+    cesiumMaxZoom: 17,
   },
   {
     id: "esri-satellite",
@@ -37,6 +40,7 @@ export const MAP_PROVIDERS: MapProvider[] = [
     attribution:
       '&copy; <a href="https://www.esri.com/">Esri</a> &mdash; Sources: Esri, Maxar, Earthstar Geographics',
     maxZoom: 20,
+    cesiumMaxZoom: 17,
     dark: true,
   },
   {
@@ -46,17 +50,20 @@ export const MAP_PROVIDERS: MapProvider[] = [
     attribution:
       '&copy; <a href="https://www.esri.com/">Esri</a> &mdash; Sources: Esri, Maxar, Earthstar Geographics',
     maxZoom: 20,
+    cesiumMaxZoom: 17,
     dark: true,
     overlays: [
       {
         url: "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
         attribution: "",
         maxZoom: 20,
+        cesiumMaxZoom: 17,
       },
       {
         url: "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}",
         attribution: "",
         maxZoom: 20,
+        cesiumMaxZoom: 17,
       },
     ],
   },

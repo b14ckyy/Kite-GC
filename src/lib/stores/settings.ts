@@ -40,6 +40,8 @@ export interface AppSettings {
   panels: PanelConfig;
   // Locale / language
   locale: string;
+  // 3D Map
+  cesiumIonToken: string;
 }
 
 const STORAGE_KEY = 'kite-gc-settings';
@@ -69,6 +71,7 @@ const defaults: AppSettings = {
     right: ['rawTelemetry'],
   },
   locale: 'en',
+  cesiumIonToken: '',
 };
 
 function load(): AppSettings {

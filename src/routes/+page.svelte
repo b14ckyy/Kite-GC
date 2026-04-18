@@ -10,6 +10,7 @@
   import { get } from "svelte/store";
   import { t, locale } from 'svelte-i18n';
   import Map from "$lib/components/Map.svelte";
+  import Map3D from "$lib/components/Map3D.svelte";
   import LogPlayer from "$lib/components/LogPlayer.svelte";
   import SettingsPanel from "$lib/components/SettingsPanel.svelte";
   import LogbookPanel from "$lib/components/LogbookPanel.svelte";
@@ -39,6 +40,9 @@
     type TelemetryRecord,
   } from "$lib/stores/flightlog";
   import type { TrackColorMode } from "$lib/helpers/trackColors";
+
+  // Map view mode: 2D (Leaflet) or 3D (CesiumJS)
+  let mapViewMode = $state<'2d' | '3d'>('2d');
 
   // Reactive window dimensions for dynamic panel sizing
   let winW = $state(typeof window !== 'undefined' ? window.innerWidth : 1920);
@@ -86,6 +90,7 @@
   let defaultFlightLogPath = $state("");
   let mapProvider = $state("osm");
   let mapCacheMaxMB = $state(200);
+  let cesiumIonToken = $state("");
   let defaultWpAltitudeM = $state(50);
   let defaultPhTimeSec = $state(30);
   let warnAltitudeM = $state(120);
@@ -161,6 +166,7 @@
   flightLogRawEnabled = saved.flightLogRawEnabled;
   mapProvider = saved.mapProvider;
   mapCacheMaxMB = saved.mapCacheMaxMB;
+  cesiumIonToken = saved.cesiumIonToken ?? '';
   defaultWpAltitudeM = saved.defaultWpAltitudeM;
   defaultPhTimeSec = saved.defaultPhTimeSec;
   warnAltitudeM = saved.warnAltitudeM;
@@ -724,8 +730,21 @@
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="map-fullscreen" onclick={minimizeLogbook}>
-    <Map playbackTrack={mapTrack} playbackPoint={playbackPoint} {trackColorMode} platformType={mapPlatformType} />
+    {#if mapViewMode === '2d'}
+      <Map playbackTrack={mapTrack} playbackPoint={playbackPoint} {trackColorMode} platformType={mapPlatformType} />
+    {:else}
+      <Map3D playbackTrack={mapTrack} playbackPoint={playbackPoint} {trackColorMode} platformType={mapPlatformType} />
+    {/if}
   </div>
+
+  <!-- ======= 2D / 3D TOGGLE ======= -->
+  <button
+    class="map-view-toggle"
+    onclick={() => mapViewMode = mapViewMode === '2d' ? '3d' : '2d'}
+    title={mapViewMode === '2d' ? '3D View' : '2D View'}
+  >
+    {mapViewMode === '2d' ? '3D' : '2D'}
+  </button>
 
   <LogPlayer
     {showPlayer}
@@ -776,6 +795,7 @@
             {mapProvider}
             {mapCacheMaxMB}
             {cacheStats}
+            {cesiumIonToken}
             {attitudeRateHz}
             {positionRateHz}
             {airspeedEnabled}
@@ -798,6 +818,7 @@
               if (patch.flightLogDbPath != null) flightLogDbPath = patch.flightLogDbPath;
               if (patch.mapProvider != null) mapProvider = patch.mapProvider;
               if (patch.mapCacheMaxMB != null) mapCacheMaxMB = patch.mapCacheMaxMB;
+              if (patch.cesiumIonToken != null) cesiumIonToken = patch.cesiumIonToken;
               if (patch.defaultWpAltitudeM != null) defaultWpAltitudeM = patch.defaultWpAltitudeM;
               if (patch.defaultPhTimeSec != null) defaultPhTimeSec = patch.defaultPhTimeSec;
               if (patch.warnAltitudeM != null) warnAltitudeM = patch.warnAltitudeM;
@@ -1078,6 +1099,34 @@
     background: rgba(55, 168, 219, 0.25);
     border-color: #37a8db;
     color: #37a8db;
+  }
+
+  /* --- 2D / 3D Map View Toggle --- */
+  .map-view-toggle {
+    position: absolute;
+    top: 63px;
+    right: 10px;
+    z-index: 110;
+    width: 38px;
+    height: 38px;
+    background: rgba(46, 46, 46, 0.9);
+    border: 2px solid rgba(55, 168, 219, 0.5);
+    border-radius: 6px;
+    color: #37a8db;
+    font-size: 13px;
+    font-weight: bold;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(8px);
+    transition: background 0.2s, border-color 0.2s;
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+  }
+
+  .map-view-toggle:hover {
+    background: rgba(55, 168, 219, 0.25);
+    border-color: #37a8db;
   }
 
   /* --- Error Bar --- */

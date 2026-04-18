@@ -418,7 +418,55 @@ This document tracks planned features, organized by milestone.
 - [ ] Embedded video stream
 - [ ] FW approach / autoland planner
 - [ ] Geozone editor
-- [ ] CesiumJS 3D map view (terrain, 3D flight paths, log replay in 3D)
+
+## [~] Milestone 7: CesiumJS 3D Map View (v0.7.x)
+
+### Core 3D Infrastructure
+- [x] CesiumJS integration (Apache 2.0) with custom Vite plugin
+- [x] Custom Vite plugin (`cesiumPlugin()`): sirv middleware (dev) + fs.cpSync (build) for Cesium assets
+- [x] 2D/3D view toggle button on map (persisted view mode)
+- [x] Cesium Ion token setting for World Terrain data
+- [x] Map provider sync: 3D view uses same tile provider as 2D (live switching)
+- [x] IndexedDB tile cache integration (shared cache between 2D and 3D views)
+- [x] Per-provider `cesiumMaxZoom` limits for 3D view (prevents gray placeholder tiles)
+- [x] Tile error handling: failed tile requests silently handled, parent tiles remain visible
+- [x] `requestRenderMode: true` for reduced GPU idle load
+
+### Terrain & Altitude
+- [x] Cesium World Terrain (requires Ion token, degrades to flat ellipsoid without)
+- [x] Geoid undulation correction: GPS MSL → WGS84 ellipsoid height via `sampleTerrainMostDetailed`
+- [x] Async terrain provider readiness: `waitForTerrain()` waits for World Terrain load via `terrainProviderChanged` event
+- [x] Depth testing against terrain (`depthTestAgainstTerrain: true`)
+
+### UAV Entity & Visualization
+- [x] UAV entity: colored point + SVG arrow billboard + label (colored by flight mode)
+- [x] Home position marker: green "H", `CLAMP_TO_GROUND` height reference
+- [x] Live trail: `CallbackProperty` polyline with 1m minimum distance filter
+- [x] Playback track: static polyline from `TelemetryRecord[]`
+- [x] Playback marker: point + arrow billboard following scrubber position
+
+### Chase Camera (Follow Mode)
+- [x] Toggle button: "🎥 Follow" / "👁 Free" (z-index 10000, always visible)
+- [x] Smooth camera interpolation via `requestAnimationFrame` lerp loop
+- [x] Exponential smoothing for position (lat, lon, alt) and heading
+- [x] Shortest-path angle interpolation (handles 359°→1° wrap correctly)
+- [x] Configurable range slider (50–2000 m) and pitch slider (-90° to -5°)
+- [x] Works with both live telemetry and playback marker
+- [x] Initial snap (no lerp from origin), smooth transitions thereafter
+
+### Performance
+- [x] Fog enabled (`density: 2.5e-4`) to hide distant terrain
+- [x] Tile cache size limit (`tileCacheSize: 100`)
+- [x] `scene3DOnly: true` (no 2D/Columbus mode overhead)
+- [x] MSAA 2× anti-aliasing
+
+### Planned (3D Map)
+- [ ] 3D GLTF UAV models with attitude representation (roll/pitch/yaw)
+- [ ] Flight mode coloring of 3D track segments
+- [ ] Smoothed flight track (polyline simplification or spline interpolation)
+- [ ] UI button refinements and responsive layout
+- [ ] Altitude exaggeration toggle for low-altitude flights
+- [ ] Auto-enable chase camera on live flight start
 
 ---
 

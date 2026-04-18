@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — CesiumJS 3D Map View (M7)
+- **CesiumJS integration**: Apache 2.0 licensed 3D globe renderer alongside existing Leaflet 2D map
+- **Custom Vite plugin** (`cesiumPlugin()`): sirv middleware serves Cesium Workers/Assets in dev mode; `fs.cpSync` copies assets for production builds — replaced `vite-plugin-static-copy` (404 issues) and `vite-plugin-cesium` (path encoding bug with spaces)
+- **2D/3D toggle button**: Switch between Leaflet and CesiumJS views (persisted preference)
+- **Cesium Ion token support**: Settings panel password input for World Terrain access (ion.cesium.com)
+- **Map provider sync**: 3D view uses same tile provider as 2D map with live switching support
+- **IndexedDB tile cache**: Shared cache between 2D and 3D — overridden `requestImage` routes through `getCachedTile`/`putCachedTile`
+- **Per-provider `cesiumMaxZoom`**: ESRI providers limited to zoom 17 in 3D to prevent "No tiles available" placeholders in sparse-coverage areas
+- **Tile error handling**: `errorEvent` listener prevents render crashes; parent tiles remain visible for failed child tiles
+- **World Terrain**: `Cesium.Terrain.fromWorldTerrain()` with vertex normals when Ion token is configured
+- **Geoid undulation correction**: `sampleTerrainMostDetailed` at first track point computes WGS84 ellipsoid offset from GPS MSL altitude — fixes ~40m altitude error in Europe
+- **Async terrain readiness**: `waitForTerrain()` awaits `terrainProviderChanged` event before sampling, avoids `"terrainProvider is required"` errors
+- **UAV entity**: Colored point + SVG arrow billboard + "UAV" label, colored by flight mode flags
+- **Home marker**: Green "H" point, `CLAMP_TO_GROUND` height reference
+- **Live trail**: `CallbackProperty` polyline with 1m minimum distance filter
+- **Playback track**: Static polyline from `TelemetryRecord[]` with geoid-corrected altitude
+- **Playback marker**: Point + arrow billboard follows scrubber position with heading rotation
+- **Chase camera**: Smooth follow mode with `requestAnimationFrame` lerp loop — exponential interpolation for position (lat/lon/alt) and heading (shortest-path angle wrap)
+- **Chase UI**: "🎥 Follow" / "👁 Free" toggle button + range slider (50–2000m) + pitch slider (-90° to -5°)
+- **Fog**: `density: 2.5e-4` hides distant terrain for performance
+- **Performance**: `requestRenderMode`, `scene3DOnly`, `tileCacheSize: 100`, MSAA 2×
+- `Map3D.svelte` component (~750 lines): full 3D view with all features above
+- `mapProviders.ts`: added `cesiumMaxZoom` optional field to `MapProvider` interface
+- `settings.ts`: added `cesiumIonToken` field to `AppSettings`
+- `SettingsPanel.svelte`: Cesium Ion Token password input with signup link
+
 ### Added — Colored Flight Tracks & Mode Visualization
 - **Track color modes**: Flight Mode, Altitude, Speed, Signal, None — selectable in LogPlayer dropdown
 - **Flight mode track coloring**: Priority-based INAV bitmask classification (11 levels: Failsafe RTH → Acro)

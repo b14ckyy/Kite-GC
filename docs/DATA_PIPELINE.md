@@ -55,6 +55,18 @@ This document describes how telemetry data flows through the application — fro
 │  difference                                                       │
 └──────────────────────────────────────────────────────────────────┘
 
+┌──────────────────────────────────────────────────────────────────┐
+│                     Map Views (Svelte)                            │
+│                                                                   │
+│  Map.svelte (2D, Leaflet)    ←── mapViewMode toggle ──→          │
+│  Map3D.svelte (3D, CesiumJS)                                     │
+│    ├── Terrain: Cesium World Terrain (Ion token)                  │
+│    ├── Tiles: Shared IndexedDB cache with 2D                     │
+│    ├── Altitude: geoid undulation correction                      │
+│    └── Chase cam: lerp-smoothed follow camera                     │
+│                                                                   │
+└──────────────────────────────────────────────────────────────────┘
+
                     ┌─────────────────────────────────────┐
                     │     Data Exchange (.kflight)         │
                     │                                     │
@@ -471,7 +483,77 @@ commands/flightlog.rs ─► db::get_blackbox_file()
 
 ---
 
-## 7. File Index
+## 7. 3D Globe View Pipeline (CesiumJS)
+
+### Path: TelemetryData / PlaybackTrack → Map3D.svelte → CesiumJS Scene
+
+```
++page.svelte
+    │
+    ├── mapViewMode: '2d' | '3d'  (user toggle)
+    │
+    ├── [2D] Map.svelte (Leaflet — existing)
+    │
+    └── [3D] Map3D.svelte (CesiumJS)
+         │
+         ├── Initialization:
+         │   ├── new Cesium.Viewer(container, { requestRenderMode, scene3DOnly, ... })
+         │   ├── Cesium.Terrain.fromWorldTerrain({ requestVertexNormals: true })
+         │   ├── waitForTerrain() — listen for terrainProviderChanged event (15s timeout)
+         │   └── createCachedImageryProvider() — shared IndexedDB tile cache
+         │
+         ├── Geoid Offset Calibration (once per track):
+         │   │  GPS alt_m = MSL.  CesiumJS expects WGS84 ellipsoid height.
+         │   │  Difference ≈ geoid undulation (~25-50m depending on region).
+         │   │
+         │   ├── First track point: { lat, lon, groundMsl = alt_m - baro_alt_m }
+         │   ├── sampleTerrainMostDetailed(terrainProvider, [Cartographic(lon, lat)])
+         │   ├── terrainEllipsoidHeight = result[0].height
+         │   └── geoidOffset = terrainEllipsoidHeight - groundMsl
+         │       (Applied to ALL positions: track, markers, live UAV)
+         │
+         ├── Track Rendering (playbackTrack prop):
+         │   ├── Polyline: lat/lon/alt + geoidOffset for each point
+         │   ├── Home marker: green pin at track[0] position
+         │   └── Color mode: solid yellow (speed/altitude coloring planned)
+         │
+         ├── Live / Playback Position (playbackPoint prop):
+         │   ├── UAV marker: blue point entity at current position + geoidOffset
+         │   └── Position updated reactively via Svelte $effect
+         │
+         └── Chase Camera:
+             ├── chaseTarget: { lat, lon, alt, heading } from telemetry
+             ├── chaseCurrent: smoothed interpolation via requestAnimationFrame loop
+             ├── lerp(current, target, 0.07) per frame (position)
+             ├── lerpAngle(current, target, 0.07) per frame (heading, shortest-path)
+             ├── First update: snap immediately (no lerp from origin)
+             └── camera.lookAt(targetPos, { heading, pitch: -25°, range: sliderValue })
+```
+
+### Tile Caching (Shared 2D/3D)
+
+```
+CesiumJS requestImage(x, y, level)
+    │
+    ▼
+getCachedTile(providerKey, z, x, y)  ← Same IndexedDB as Leaflet
+    │
+    ├── [HIT]  → return cached Blob → createImageBitmap()
+    │
+    └── [MISS] → fetchAndCacheImage(url)
+                    ├── fetch(url) → response.blob()
+                    ├── putCachedTile(key, z, x, y, blob) → IndexedDB
+                    └── return createImageBitmap(blob)
+
+Error handling:
+    ├── Tile fetch error → propagates naturally, parent tile stays visible
+    ├── errorEvent.addEventListener(() => {}) → prevents Cesium crash on tile errors
+    └── cesiumMaxZoom per provider → prevents requesting non-existent zoom levels
+```
+
+---
+
+## 8. File Index
 
 | File | Layer | Purpose |
 |---|---|---|
@@ -486,8 +568,11 @@ commands/flightlog.rs ─► db::get_blackbox_file()
 | `src/lib/controllers/playbackController.ts` | Frontend | Timer-based playback engine |
 | `src/lib/controllers/logbookController.ts` | Frontend | Logbook CRUD, export/import orchestration |
 | `src/lib/stores/home.ts` | Frontend | Home position (set on ARM or replay start) |
-| `src/routes/+page.svelte` | Frontend | Live/replay switch (`$derived(telem)`), widget wiring |
+| `src/routes/+page.svelte` | Frontend | Live/replay switch (`$derived(telem)`), widget wiring, 2D/3D toggle |
+| `src/lib/components/Map3D.svelte` | Frontend | CesiumJS 3D globe view, chase camera, geoid correction |
+| `src/lib/config/mapProviders.ts` | Frontend | Map provider registry (URLs, attribution, cesiumMaxZoom) |
+| `src/lib/stores/settings.ts` | Frontend | App settings (cesiumIonToken, locale, map provider, etc.) |
 
 ---
 
-*Last updated: 2026-04-18*
+*Last updated: 2026-04-19*

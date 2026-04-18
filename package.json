@@ -16,6 +16,7 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.7.0",
     "@tauri-apps/plugin-opener": "^2",
+    "cesium": "^1.140.0",
     "leaflet": "^1.9.4",
     "svelte-i18n": "^4.0.1"
   },

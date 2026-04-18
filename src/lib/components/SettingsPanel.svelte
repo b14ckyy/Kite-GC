@@ -11,6 +11,7 @@
     mapProvider = 'osm',
     mapCacheMaxMB = 200,
     cacheStats = { usedBytes: 0, maxBytes: 0, tileCount: 0 },
+    cesiumIonToken = '',
     attitudeRateHz = 5,
     positionRateHz = 2,
     airspeedEnabled = false,
@@ -34,6 +35,7 @@
     mapProvider?: string;
     mapCacheMaxMB?: number;
     cacheStats?: TileCacheStats;
+    cesiumIonToken?: string;
     attitudeRateHz?: number;
     positionRateHz?: number;
     airspeedEnabled?: boolean;
@@ -192,6 +194,20 @@
       <button class="cache-clear-btn" onclick={onClearCache} title={$t('settings.clear')}>{$t('settings.clear')}</button>
     </div>
   {/if}
+  <div class="setting-row">
+    <label class="setting-label" for="cesium-ion-token">Cesium Ion Token</label>
+    <input
+      id="cesium-ion-token"
+      class="setting-input"
+      type="password"
+      placeholder="(optional – enables 3D terrain)"
+      value={cesiumIonToken}
+      onchange={(e) => onPatch({ cesiumIonToken: (e.target as HTMLInputElement).value.trim() })}
+    />
+  </div>
+  <p class="setting-hint">
+    Free token from <a href="https://ion.cesium.com/signup" target="_blank" rel="noopener">ion.cesium.com</a> — enables 3D terrain in the map view. Restart 3D view after changing.
+  </p>
 </section>
 
 <section class="panel-section">
