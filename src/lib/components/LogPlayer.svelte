@@ -17,6 +17,8 @@
     onTogglePlayPause = () => {},
     onCycleSpeed = () => {},
     onScrub = (_index: number) => {},
+    onScrubStart = () => {},
+    onScrubEnd = () => {},
   }: {
     showPlayer?: boolean;
     selectedFlight?: Flight | null;
@@ -32,6 +34,8 @@
     onTogglePlayPause?: () => void;
     onCycleSpeed?: () => void;
     onScrub?: (index: number) => void;
+    onScrubStart?: () => void;
+    onScrubEnd?: () => void;
   } = $props();
 
   function formatPlaybackTime(ms: number): string {
@@ -52,8 +56,16 @@
   <div class="log-player">
     <div class="log-player-top">
       <div class="log-player-source">
-        <button class="log-player-source-btn active">REC</button>
-        <button class="log-player-source-btn" disabled title={$t('player.bbxNotAvailable')}>BBX</button>
+        {#if selectedFlight?.source === 'blackbox'}
+          <button class="log-player-source-btn" disabled>REC</button>
+          <button class="log-player-source-btn active">BBX</button>
+        {:else if selectedFlight?.source === 'both'}
+          <button class="log-player-source-btn active">REC</button>
+          <button class="log-player-source-btn active">BBX</button>
+        {:else}
+          <button class="log-player-source-btn active">REC</button>
+          <button class="log-player-source-btn" disabled title={$t('player.bbxNotAvailable')}>BBX</button>
+        {/if}
       </div>
       <div class="log-player-title">
         {selectedFlight.craft_name || $t('logbook.unknownCraft')}
@@ -92,6 +104,8 @@
         value={playbackIndex}
         class="log-player-slider"
         oninput={handleScrub}
+        onpointerdown={onScrubStart}
+        onpointerup={onScrubEnd}
       />
     </div>
   </div>

@@ -150,7 +150,20 @@
     "importProgress": "Blackbox import",
     "editWeather": "Edit weather",
     "blackboxFileFilter": "Blackbox Logs",
-    "unknownCraft": "Unknown"
+    "unknownCraft": "Unknown",
+    "searchPlaceholder": "Search flights...",
+    "searchClear": "Clear search",
+    "noResults": "No flights match your search.",
+    "exportKflight": "Export .kflight",
+    "exportBlackbox": "Export Blackbox",
+    "exportBlackboxTitle": "Blackbox Export Complete",
+    "exportBlackboxSuccess": "Blackbox file exported ({filename}).",
+    "importKflight": "Import .kflight",
+    "kflightFileFilter": "KiteGC Flight Files",
+    "exportTitle": "Export Complete",
+    "exportSuccess": "{count} flight(s) exported successfully.",
+    "importKflightTitle": "Import Complete",
+    "importKflightResult": "Imported: {imported}, Skipped (duplicates): {skipped}"
   },
   "player": {
     "close": "Close player",

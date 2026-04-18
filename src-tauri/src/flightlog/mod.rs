@@ -4,6 +4,7 @@
 
 pub mod db;
 pub mod blackbox;
+pub mod exchange;
 pub mod geocode;
 pub mod raw_logger;
 pub mod recorder;

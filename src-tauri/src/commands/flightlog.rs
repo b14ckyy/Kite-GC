@@ -3,6 +3,7 @@
 use tauri::{AppHandle, Emitter};
 
 use crate::flightlog::db;
+use crate::flightlog::exchange;
 use crate::flightlog::types::{
     BlackboxImportProgress, BlackboxImportStatus, Flight, FlightSummary,
     TelemetryRecord,
@@ -274,4 +275,67 @@ pub async fn flightlog_import_blackbox(
     }
 
     Ok(result)
+}
+
+// ── Export / Import / Offline replay ────────────────────────────────
+
+/// Export the raw blackbox binary file for a flight
+#[tauri::command]
+pub fn flightlog_export_blackbox(
+    flight_id: i64,
+    output_path: String,
+    db_path: Option<String>,
+) -> Result<String, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    let (filename, data) = db::get_blackbox_file(&conn, flight_id)
+        .map_err(|e| format!("DB error: {}", e))?
+        .ok_or_else(|| "No blackbox file attached to this flight".to_string())?;
+    std::fs::write(&output_path, &data)
+        .map_err(|e| format!("Failed to write file: {}", e))?;
+    Ok(filename)
+}
+
+/// Export selected flights to a .kflight file
+#[tauri::command]
+pub fn flightlog_export(
+    flight_ids: Vec<i64>,
+    output_path: String,
+    db_path: Option<String>,
+) -> Result<usize, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    exchange::export_flights(&conn, &flight_ids, std::path::Path::new(&output_path))
+}
+
+/// Import flights from a .kflight file into the main database
+#[tauri::command]
+pub fn flightlog_import_kflight(
+    file_path: String,
+    db_path: Option<String>,
+) -> Result<exchange::ImportResult, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    exchange::import_flights(&conn, std::path::Path::new(&file_path))
+}
+
+/// List flights contained in a .kflight file (for preview / offline replay)
+#[tauri::command]
+pub fn flightlog_kflight_list(file_path: String) -> Result<Vec<FlightSummary>, String> {
+    exchange::list_flights_in_file(std::path::Path::new(&file_path))
+}
+
+/// Get a single flight from a .kflight file (offline replay)
+#[tauri::command]
+pub fn flightlog_kflight_get(
+    file_path: String,
+    flight_id: i64,
+) -> Result<Option<Flight>, String> {
+    exchange::get_flight_from_file(std::path::Path::new(&file_path), flight_id)
+}
+
+/// Get telemetry track from a .kflight file (offline replay)
+#[tauri::command]
+pub fn flightlog_kflight_track(
+    file_path: String,
+    flight_id: i64,
+) -> Result<Vec<TelemetryRecord>, String> {
+    exchange::get_track_from_file(std::path::Path::new(&file_path), flight_id)
 }

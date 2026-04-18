@@ -261,7 +261,7 @@ This document tracks planned features, organized by milestone.
 - [x] Aircraft: craft name (from FC, queried during handshake), craft type (platform type)
 - [x] Source: telemetry protocol (MSP/MAVLink/CRSF/LTM), firmware variant + version
 - [x] Weather: temperature, wind speed/direction, conditions — user-editable via weather editor + auto-fetch from Open-Meteo
-- [ ] Weather + geocode fetched at ARM time (async spawn, non-blocking) instead of lazy on logbook view
+- [x] Weather + geocode fetched at ARM time (async spawn, non-blocking), with lazy fallback on logbook view
 
 ### Handshake Enhancement
 - [x] Query craft name from FC during handshake (`MSP_NAME` / `MSP2_COMMON_SETTING` or equivalent per protocol)
@@ -284,12 +284,13 @@ This document tracks planned features, organized by milestone.
 - [x] Drag & drop import of Blackbox files into logbook tab
 - [x] Duplicate flight detection dialog on import
 - [x] Delete flight button styled as danger (red)
-- [ ] Flight path replay on map (animated marker playback)
-- [ ] Playback controls (play, pause, speed 1x/2x/4x, scrub timeline)
-- [x] Flight path replay through HUD widgets (all widgets receive telemetry during playback)
+- [x] Flight path replay on map (animated marker playback)
 - [x] Playback controls (play, pause, reset, scrub, speed 1×/2×/4×/10×)
+- [ ] Type-specific UAV symbols on map during replay (per platform type)
+- [x] Flight path replay through HUD widgets (all widgets receive telemetry during playback)
 - [x] Delete flight records
-- [ ] Search/filter (by aircraft name, location, date range)
+- [x] Search/filter by aircraft name, location, date (frontend-only text filter)
+- [x] Ctrl+click multi-select for bulk operations
 
 ### Blackbox Integration
 - [x] External `blackbox_decode` binary discovery (app folder → PATH fallback)
@@ -303,7 +304,13 @@ This document tracks planned features, organized by milestone.
 - [x] Blackbox-imported flights use header metadata (FW version, date, GPS start, duration)
 - [x] NOT a full Blackbox analyzer — no PID/gyro/motor visualization (use dedicated tools)
 
-### Export
+### Export & Data Exchange
+- [x] `.kflight` export: self-contained SQLite file with flights + telemetry + blackbox data
+- [x] `.kflight` import: drag & drop or file picker, duplicate detection, bulk copy
+- [x] Multi-select (Ctrl+click) for multi-flight `.kflight` export
+- [x] Export raw Blackbox binary from `blackbox_files` BLOB (original .TXT / .bbl / .bfl)
+- [x] `_kflight_meta` table in export files: schema version, app ID, export timestamp, flight count
+- [x] Flight source indicators in logbook list: ◈ blackbox, ◉ both, no prefix = live
 - [ ] Export flight path as KML (Google Earth)
 - [ ] Export flight path as GPX (universal GPS format)
 - [ ] Export telemetry as CSV

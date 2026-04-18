@@ -198,6 +198,40 @@ These are intentionally not part of the replay-focused DB target at this time:
 - PID internals and tuning terms
 - gyro/filter/debug internals
 - most header-only tuning/config values beyond existing aircraft identity metadata
+
+## Data Exchange (.kflight)
+
+The `.kflight` file format is a self-contained SQLite database used for sharing flight records between KiteGC installations.
+
+### Schema
+
+Identical to the main database with the same four tables (`flights`, `telemetry_records`, `blackbox_records`, `blackbox_files`), plus a metadata table:
+
+| Table | Purpose |
+|---|---|
+| `_kflight_meta` | Export metadata: `schema_version`, `app_id`, `exported_at`, `flight_count` |
+
+### Export
+
+`exchange::export_flights(flight_ids, src_db, dest_path)`:
+1. Creates a fresh SQLite file at `dest_path`
+2. Creates all four data tables (same DDL as main DB)
+3. Copies each flight and its associated `telemetry_records`, `blackbox_records`, and `blackbox_files`
+4. Writes `_kflight_meta` row
+5. VACUUMs the file for minimal size
+
+### Import
+
+`exchange::import_flights(src_path, dest_db)`:
+1. Opens the `.kflight` file and validates `_kflight_meta`
+2. Lists all flights in the file
+3. Duplicate detection: skips flights matching `craft_name` + `start_time` within ±10 seconds
+4. Copies non-duplicate flights with all associated records into the main DB
+5. Returns `(imported_count, skipped_count)`
+
+### Raw Blackbox Export
+
+`db::get_blackbox_file(conn, flight_id)` retrieves the original binary file from `blackbox_files.file_data` BLOB. The Tauri command `flightlog_export_blackbox` writes it to a user-selected path. Only available when `flights.source` is `"blackbox"` or `"both"`.
 - Blackbox-only diagnostic data that is not easily auto-interpretable in a GCS
 
 ## Replay-Focused Analysis Enabled By This Schema

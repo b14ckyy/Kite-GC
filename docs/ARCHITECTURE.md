@@ -585,20 +585,21 @@ ALTER TABLE telemetry_records ADD COLUMN link_quality INTEGER;
 
 ---
 
-## ADR-017: Weather Fetch at ARM Time (Planned Fix)
+## ADR-017: Weather Fetch at ARM Time
 
 **Date**: 2026-04-16
-**Status**: Planned
+**Status**: Accepted
 
-**Context**: Currently, weather and reverse geocoding are fetched lazily when the user opens a flight in the logbook UI. This fails for flights viewed offline or in areas without internet at viewing time. The data should be captured at recording time when GPS coordinates are first available.
+**Context**: Weather and reverse geocoding were fetched lazily when the user opens a flight in the logbook UI. This fails for flights viewed offline or in areas without internet at viewing time. The data should be captured at recording time when GPS coordinates are first available.
 
-**Decision**: Move weather + geocode fetching into the ARM event handler. When a flight starts (ARM transition detected), `tokio::spawn` an async task that:
-1. Waits for a valid GPS fix (first telemetry sample with lat/lon ≠ 0)
-2. Calls OSM Nominatim for reverse geocoding
-3. Calls Open-Meteo for weather conditions
-4. Writes results to the flight record via a separate SQLite connection
+**Decision**: Weather + geocode fetching runs at ARM time. When a flight starts (ARM transition detected in `recorder.rs`), `tauri::async_runtime::spawn` fires an async task that:
+1. Opens a fresh SQLite connection (avoids contention with recorder's batch writes)
+2. Reads the flight's `start_lat`/`start_lon` (from the INSERT)
+3. Calls OSM Nominatim for reverse geocoding
+4. Calls Open-Meteo for weather conditions
+5. Writes results to the flight record
 
-The existing `flightlog_geocode` and `flightlog_fetch_weather` Tauri commands remain as manual fallback for flights that were recorded before this fix or where the network request failed at ARM time.
+The existing `flightlog_geocode` and `flightlog_fetch_weather` Tauri commands remain as manual fallback for flights recorded before this change or where the network request failed at ARM time.
 
 **Rationale**:
 - Captures weather conditions at the actual time of flight, not at viewing time (which could be days/weeks later)
@@ -637,4 +638,70 @@ The existing `flightlog_geocode` and `flightlog_fetch_weather` Tauri commands re
 - Feature-gated: no code executed on older firmware, zero overhead
 - `link_quality` column already in DB (schema v3) — no future migration needed for that field
 - Consistent with existing adaptive degradation design: the new slot gets a priority just like the current Analog slot
+
+---
+
+## ADR-019: .kflight Flight Data Exchange Format
+
+**Date**: 2026-04-18
+**Status**: Accepted
+
+**Context**: Users need to share flight records between KiteGC installations (e.g. club members, support requests). The internal SQLite database is not suitable for selective sharing — it contains all flights, is open/locked during use, and has no metadata envelope.
+
+**Decision**: A custom `.kflight` file format for flight data exchange. Each file is a self-contained SQLite database with the same schema as the main DB, plus a metadata table.
+
+**Format**:
+- File extension: `.kflight`
+- Internal format: SQLite database
+- Schema: identical `flights`, `telemetry_records`, `blackbox_records`, `blackbox_files` tables
+- Additional `_kflight_meta` table: `schema_version`, `app_id` ("KiteGC"), `exported_at`, `flight_count`
+- `VACUUM` applied after export for minimal file size
+
+**Export flow**:
+1. User selects one or more flights (Ctrl+click multi-select or single selection)
+2. Clicks "Export .kflight" → native Save dialog with `.kflight` filter
+3. `exchange::export_flights()` creates a fresh SQLite file, copies selected flights with all associated data:
+   - Flight metadata (`flights` row)
+   - All `telemetry_records` for each flight
+   - All `blackbox_records` for each flight
+   - All `blackbox_files` BLOBs (original raw Blackbox binary) for each flight
+4. `_kflight_meta` table written, database VACUUMed
+
+**Import flow**:
+1. User clicks "Import .kflight" → native Open dialog, or drag & drop `.kflight` file
+2. `exchange::import_flights()` opens the `.kflight` file, validates `_kflight_meta`
+3. Duplicate detection: matches `craft_name` + `start_time` within ±10 seconds
+4. Non-duplicate flights copied into main DB with all associated data
+5. Result dialog shows imported/skipped counts
+
+**Blackbox raw file export**:
+- Separate "Export Blackbox" button extracts the original raw binary file from `blackbox_files.file_data` BLOB
+- Only available when `flight.source` is `"blackbox"` or `"both"` (greyed out otherwise)
+- Writes to user-selected path via native Save dialog
+
+**Logbook flight source indicators**:
+- `◈` (open diamond) prefix = `source: "blackbox"` — imported from Blackbox file
+- `◉` (filled circle) prefix = `source: "both"` — live recording with attached Blackbox
+- No prefix = `source: "live"` — pure live MSP recording
+
+**Multi-select**:
+- Ctrl+click (or Cmd+click on macOS) toggles flights into a multi-selection set
+- Normal click clears multi-selection and selects a single flight
+- Export uses multi-selection if active, otherwise the currently selected flight
+
+**Offline replay** (planned):
+- `list_flights_in_file()`, `get_flight_from_file()`, `get_track_from_file()` — read directly from `.kflight` without importing into main DB
+- Enables opening `.kflight` files as standalone viewers
+
+**Key design choices**:
+- SQLite-based: no custom binary format to maintain, standard tooling can inspect files
+- Same schema: no format conversion needed during import/export
+- BLOBs included: raw Blackbox files travel with the flight for re-processing
+- Duplicate detection: prevents accidental double-imports
+
+**Rationale**:
+- Self-contained files are easy to share (email, USB, cloud)
+- SQLite is universally supported and can be inspected with standard DB tools
+- Including raw Blackbox BLOBs preserves the ability to re-decode with newer `blackbox_decode` versions
+- The metadata table enables future format versioning
 

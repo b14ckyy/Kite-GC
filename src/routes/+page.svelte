@@ -2,7 +2,7 @@
   import { onDestroy } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
-  import { open, confirm } from "@tauri-apps/plugin-dialog";
+  import { open, save, confirm } from "@tauri-apps/plugin-dialog";
   import { connection, availablePorts } from "$lib/stores/connection";
   import type { FcInfo, PortInfo } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
@@ -312,6 +312,17 @@
     playbackIndex = index;
   }
 
+  let wasPlayingBeforeScrub = false;
+
+  function scrubStart() {
+    wasPlayingBeforeScrub = playbackPlaying;
+    if (playbackPlaying) stopPlayback();
+  }
+
+  function scrubEnd() {
+    if (wasPlayingBeforeScrub) startPlayback();
+  }
+
   async function importBlackbox() {
     try {
       const selected = await open({
@@ -335,6 +346,25 @@
   }
 
   async function importDroppedFiles(paths: string[]) {
+    // Handle .kflight files
+    const kflightFiles = paths.filter((p) => /\.kflight$/i.test(p));
+    for (const filePath of kflightFiles) {
+      try {
+        const result = await logbookCtrl.importFromKflight(filePath, flightLogDbPath);
+        await loadLogbook();
+        let msg = $t('logbook.importKflightResult', {
+          values: { imported: result.imported, skipped: result.skipped },
+        });
+        if (result.errors.length > 0) {
+          msg += '\n' + result.errors.join('\n');
+        }
+        await confirm(msg, { title: $t('logbook.importKflightTitle'), kind: 'info' });
+      } catch (e: any) {
+        errorMsg = e?.toString?.() ?? String(e);
+      }
+    }
+
+    // Handle blackbox files
     const bbFiles = paths.filter((p) => /\.(bbl|bfl|csv|txt)$/i.test(p));
     if (bbFiles.length === 0) return;
     try {
@@ -347,6 +377,68 @@
     } finally {
       blackboxImporting = false;
       blackboxImportProgress = null;
+    }
+  }
+
+  async function exportFlightsToKflight(flightIds: number[]) {
+    if (flightIds.length === 0) return;
+    try {
+      const outputPath = await save({
+        filters: [{ name: $t('logbook.kflightFileFilter'), extensions: ['kflight'] }],
+        defaultPath: flightIds.length === 1 ? `flight_${flightIds[0]}.kflight` : `flights_export.kflight`,
+      });
+      if (!outputPath) return;
+      const count = await logbookCtrl.exportSelectedFlights(flightIds, outputPath, flightLogDbPath);
+      await confirm(
+        $t('logbook.exportSuccess', { values: { count } }),
+        { title: $t('logbook.exportTitle'), kind: 'info' },
+      );
+    } catch (e: any) {
+      errorMsg = e?.toString?.() ?? String(e);
+    }
+  }
+
+  async function exportBlackbox() {
+    if (!selectedFlightId || !selectedFlight) return;
+    const src = selectedFlight.source;
+    if (src !== 'blackbox' && src !== 'both') return;
+    try {
+      const defaultName = `blackbox_flight_${selectedFlightId}.TXT`;
+      const outputPath = await save({
+        filters: [{ name: $t('logbook.blackboxFileFilter'), extensions: ['TXT', 'BBL', 'BFL'] }],
+        defaultPath: defaultName,
+      });
+      if (!outputPath) return;
+      const originalFilename = await logbookCtrl.exportBlackbox(selectedFlightId, outputPath, flightLogDbPath);
+      await confirm(
+        $t('logbook.exportBlackboxSuccess', { values: { filename: originalFilename } }),
+        { title: $t('logbook.exportBlackboxTitle'), kind: 'info' },
+      );
+    } catch (e: any) {
+      errorMsg = e?.toString?.() ?? String(e);
+    }
+  }
+
+  async function importKflightFile() {
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [{ name: $t('logbook.kflightFileFilter'), extensions: ['kflight'] }],
+      });
+      if (!selected) return;
+      const filePath = Array.isArray(selected) ? selected[0] : selected;
+      if (!filePath) return;
+      const result = await logbookCtrl.importFromKflight(filePath, flightLogDbPath);
+      await loadLogbook();
+      let msg = $t('logbook.importKflightResult', {
+        values: { imported: result.imported, skipped: result.skipped },
+      });
+      if (result.errors.length > 0) {
+        msg += '\n' + result.errors.join('\n');
+      }
+      await confirm(msg, { title: $t('logbook.importKflightTitle'), kind: 'info' });
+    } catch (e: any) {
+      errorMsg = e?.toString?.() ?? String(e);
     }
   }
 
@@ -530,11 +622,18 @@
       : null,
   );
   const showPlayer = $derived(playbackActive && !isPrimaryConnected && selectedFlight != null);
+  const playbackBaseMs = $derived(
+    selectedTrackWithPosition.length > 0 ? selectedTrackWithPosition[0].timestamp_ms : 0,
+  );
   const playbackCurrentMs = $derived(
-    selectedTrackWithPosition.length > 0 ? selectedTrackWithPosition[Math.min(playbackIndex, selectedTrackWithPosition.length - 1)].timestamp_ms : 0,
+    selectedTrackWithPosition.length > 0
+      ? selectedTrackWithPosition[Math.min(playbackIndex, selectedTrackWithPosition.length - 1)].timestamp_ms - playbackBaseMs
+      : 0,
   );
   const playbackTotalMs = $derived(
-    selectedTrackWithPosition.length > 0 ? selectedTrackWithPosition[selectedTrackWithPosition.length - 1].timestamp_ms : 0,
+    selectedTrackWithPosition.length > 0
+      ? selectedTrackWithPosition[selectedTrackWithPosition.length - 1].timestamp_ms - playbackBaseMs
+      : 0,
   );
   const logbookDetailOpen = $derived(activeTab === 'logbook' && selectedFlight != null && !logbookMinimized);
   const logbookHasFlightOnMap = $derived(activeTab === 'logbook' && selectedFlight != null && !isPrimaryConnected);
@@ -606,6 +705,8 @@
     onTogglePlayPause={togglePlayPause}
     onCycleSpeed={cyclePlaybackSpeed}
     onScrub={scrubPlayback}
+    onScrubStart={scrubStart}
+    onScrubEnd={scrubEnd}
   />
 
   <!-- ======= FLOATING NAV PANEL SYSTEM ======= -->
@@ -677,6 +778,9 @@
             onSaveNotes={saveSelectedFlightNotes}
             onSaveWeather={saveSelectedFlightWeather}
             onDeleteFlight={removeSelectedFlight}
+            onExportFlights={exportFlightsToKflight}
+            onExportBlackbox={exportBlackbox}
+            onImportKflight={importKflightFile}
           />
 
         <!-- Mission Tab -->

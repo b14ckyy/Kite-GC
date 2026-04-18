@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — .kflight Data Exchange (M5)
+- `.kflight` file format: self-contained SQLite database for sharing flight records between KiteGC installations
+- Export: single or multi-flight export via Ctrl+click multi-select, includes all telemetry, blackbox records, and raw Blackbox BLOBs
+- Import: file picker or drag & drop `.kflight` files into logbook, with duplicate detection (craft_name + start_time ±10s)
+- `_kflight_meta` table in export files: schema version, app ID, export timestamp, flight count
+- Export Blackbox: extract original raw binary file (.TXT/.bbl/.bfl) from `blackbox_files` BLOB
+- `exchange.rs` module (~290 lines): `export_flights()`, `import_flights()`, `create_export_db()`, `copy_flight()`, `copy_blackbox_records()`, `copy_blackbox_files()`, `list_flights_in_file()`, `get_flight_from_file()`, `get_track_from_file()`
+- New Tauri commands: `flightlog_export_kflight`, `flightlog_import_kflight`, `flightlog_export_blackbox`
+- Frontend: `exportKflight()`, `importKflight()`, `exportBlackbox()` controller functions with native Save/Open dialogs
+- Button layout: right-aligned button groups in logbook (Blackbox group | .kflight group) with gap between groups
+
+### Added — Logbook Search & Multi-select (M5)
+- Text search/filter field in logbook: filters by aircraft name, location, date across all group modes
+- Ctrl+click multi-select for flights (multi-selection set, used by .kflight export)
+- Flight source indicators in flight list: ◈ (blackbox only), ◉ (both), no prefix (live)
+
+### Added — Weather at ARM Time (M5)
+- Weather + reverse geocoding fetched at ARM time via `tauri::async_runtime::spawn` (non-blocking)
+- Opens separate SQLite connection to avoid contention with recorder's batch writes
+- Lazy fallback retained: `flightlog_geocode` and `flightlog_fetch_weather` Tauri commands for manual refresh
+
 ### Added — Telemetry Replay Pipeline (M5b)
 - `telemetryAdapter.ts`: `toTelemetryData(TelemetryRecord → TelemetryData)` mapper for feeding DB records into live widgets during log replay
 - Automatic live/replay switch: `$derived(telem)` selects between live telemetry store (connected) and adapter output (replaying)

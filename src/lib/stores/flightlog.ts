@@ -218,6 +218,60 @@ export async function importBlackboxLog(
   });
 }
 
+// ── Export / Import / Offline replay ────────────────────────────────
+
+export interface KflightImportResult {
+  imported: number;
+  skipped: number;
+  errors: string[];
+}
+
+export async function exportFlights(
+  flightIds: number[],
+  outputPath: string,
+  dbPath: string,
+): Promise<number> {
+  return invoke<number>('flightlog_export', {
+    flightIds,
+    outputPath,
+    dbPath: dbPath || undefined,
+  });
+}
+
+export async function exportBlackboxFile(
+  flightId: number,
+  outputPath: string,
+  dbPath: string,
+): Promise<string> {
+  return invoke<string>('flightlog_export_blackbox', {
+    flightId,
+    outputPath,
+    dbPath: dbPath || undefined,
+  });
+}
+
+export async function importKflight(
+  filePath: string,
+  dbPath: string,
+): Promise<KflightImportResult> {
+  return invoke<KflightImportResult>('flightlog_import_kflight', {
+    filePath,
+    dbPath: dbPath || undefined,
+  });
+}
+
+export async function listKflightFlights(filePath: string): Promise<FlightSummary[]> {
+  return invoke<FlightSummary[]>('flightlog_kflight_list', { filePath });
+}
+
+export async function getKflightFlight(filePath: string, flightId: number): Promise<Flight | null> {
+  return invoke<Flight | null>('flightlog_kflight_get', { filePath, flightId });
+}
+
+export async function getKflightTrack(filePath: string, flightId: number): Promise<TelemetryRecord[]> {
+  return invoke<TelemetryRecord[]>('flightlog_kflight_track', { filePath, flightId });
+}
+
 function dateKey(ts: string): string {
   const d = new Date(ts);
   return d.toISOString().slice(0, 10);

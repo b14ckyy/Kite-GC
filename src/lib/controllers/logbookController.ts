@@ -8,9 +8,13 @@ import {
   geocodeFlight,
   fetchFlightWeather,
   importBlackboxLog,
+  exportFlights,
+  exportBlackboxFile,
+  importKflight,
   type Flight,
   type FlightSummary,
   type TelemetryRecord,
+  type KflightImportResult,
 } from '$lib/stores/flightlog';
 import { isValidGpsCoordinate, hasKnownLocation } from '$lib/helpers/telemetry';
 
@@ -128,4 +132,30 @@ export async function importBlackbox(
   locale: string,
 ) {
   return importBlackboxLog(filePath, dbPath, logIndex, forceImport, locale);
+}
+
+/** Export selected flights to a .kflight file. Returns the number exported. */
+export async function exportSelectedFlights(
+  flightIds: number[],
+  outputPath: string,
+  dbPath: string,
+): Promise<number> {
+  return exportFlights(flightIds, outputPath, dbPath);
+}
+
+/** Import flights from a .kflight file. Returns the import result. */
+export async function importFromKflight(
+  filePath: string,
+  dbPath: string,
+): Promise<KflightImportResult> {
+  return importKflight(filePath, dbPath);
+}
+
+/** Export the raw blackbox binary file. Returns the original filename. */
+export async function exportBlackbox(
+  flightId: number,
+  outputPath: string,
+  dbPath: string,
+): Promise<string> {
+  return exportBlackboxFile(flightId, outputPath, dbPath);
 }

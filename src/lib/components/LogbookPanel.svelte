@@ -32,6 +32,9 @@
     onSaveNotes,
     onSaveWeather,
     onDeleteFlight,
+    onExportFlights,
+    onExportBlackbox,
+    onImportKflight,
   }: {
     flightLoggingEnabled: boolean;
     logbookMinimized: boolean;
@@ -54,6 +57,9 @@
     onSaveNotes: () => void;
     onSaveWeather: () => void;
     onDeleteFlight: () => void;
+    onExportFlights: (ids: number[]) => void;
+    onExportBlackbox: () => void;
+    onImportKflight: () => void;
   } = $props();
 
   // Internal tree state
@@ -61,8 +67,56 @@
   let logbookTreeOpenTop = $state<Set<string>>(new Set());
   let logbookTreeOpenSecond = $state<Set<string>>(new Set());
   let prevLogbookSortMode = $state<LogbookSortMode>('aircraft-location-date');
+  let searchQuery = $state('');
+  let multiSelectedIds = $state<Set<number>>(new Set());
 
-  const flightTree = $derived<FlightTree>(buildFlightTree(flightSummaries, logbookSortMode));
+  // Multi-select: true if at least one flight is multi-selected
+  const hasMultiSelection = $derived(multiSelectedIds.size > 0);
+
+  function handleFlightClick(id: number, event: MouseEvent) {
+    if (event.ctrlKey || event.metaKey) {
+      // Toggle in multi-selection
+      const next = new Set(multiSelectedIds);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      multiSelectedIds = next;
+    } else {
+      // Normal click: clear multi-select, select single
+      multiSelectedIds = new Set();
+      onSelectFlight(id);
+    }
+  }
+
+  function isMultiSelected(id: number): boolean {
+    return multiSelectedIds.has(id);
+  }
+
+  function getExportIds(): number[] {
+    if (multiSelectedIds.size > 0) return [...multiSelectedIds];
+    if (selectedFlightId != null) return [selectedFlightId];
+    return [];
+  }
+
+  const hasBlackboxFile = $derived(
+    selectedFlight != null && !hasMultiSelection &&
+    (selectedFlight.source === 'blackbox' || selectedFlight.source === 'both')
+  );
+
+  const filteredSummaries = $derived.by<FlightSummary[]>(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return flightSummaries;
+    return flightSummaries.filter((f) => {
+      const craft = (f.craft_name || '').toLowerCase();
+      const location = (f.location_name || '').toLowerCase();
+      const date = (f.start_time || '').toLowerCase();
+      return craft.includes(q) || location.includes(q) || date.includes(q);
+    });
+  });
+
+  const flightTree = $derived<FlightTree>(buildFlightTree(filteredSummaries, logbookSortMode));
 
   // Reset tree open state when sort mode changes
   $effect(() => {
@@ -211,10 +265,6 @@
           use:notesAutoSize
         ></textarea>
       </div>
-      <div class="setting-row">
-        <button class="cache-clear-btn" onclick={onSaveNotes}>{$t('logbook.saveNotes')}</button>
-        <button class="cache-clear-btn logbook-danger" onclick={onDeleteFlight}>{$t('logbook.deleteFlight')}</button>
-      </div>
     </div>
   {:else}
     <div class="setting-row">
@@ -228,6 +278,18 @@
     </div>
 
     <div class="setting-row">
+      <input
+        type="text"
+        class="setting-input logbook-search-input"
+        placeholder={$t('logbook.searchPlaceholder')}
+        bind:value={searchQuery}
+      />
+      {#if searchQuery}
+        <button class="logbook-search-clear" onclick={() => searchQuery = ''} title={$t('logbook.searchClear')}>✕</button>
+      {/if}
+    </div>
+
+    <div class="setting-row">
       <button class="cache-clear-btn" onclick={onLoadLogbook} disabled={logbookLoading}>
         {#if logbookLoading}
           {$t('logbook.loading')}
@@ -235,13 +297,31 @@
           {$t('logbook.refresh')}
         {/if}
       </button>
-      <button class="cache-clear-btn" onclick={onImportBlackbox} disabled={blackboxImporting}>
-        {#if blackboxImporting}
-          {$t('logbook.importingBlackbox')}
-        {:else}
-          {$t('logbook.importBlackbox')}
-        {/if}
-      </button>
+      <div class="logbook-btn-group-right">
+        <div class="logbook-btn-group">
+          <button class="cache-clear-btn" onclick={onImportBlackbox} disabled={blackboxImporting}>
+            {#if blackboxImporting}
+              {$t('logbook.importingBlackbox')}
+            {:else}
+              {$t('logbook.importBlackbox')}
+            {/if}
+          </button>
+          <button class="cache-clear-btn" onclick={onExportBlackbox} disabled={!hasBlackboxFile}>
+            {$t('logbook.exportBlackbox')}
+          </button>
+        </div>
+        <div class="logbook-btn-group">
+          <button class="cache-clear-btn" onclick={onImportKflight}>
+            {$t('logbook.importKflight')}
+          </button>
+          <button class="cache-clear-btn" onclick={() => onExportFlights(getExportIds())} disabled={getExportIds().length === 0}>
+            {$t('logbook.exportKflight')}
+            {#if hasMultiSelection}
+              ({multiSelectedIds.size})
+            {/if}
+          </button>
+        </div>
+      </div>
     </div>
 
     {#if blackboxImportProgress}
@@ -261,6 +341,11 @@
       <div class="panel-empty">
         <span class="panel-empty-icon">🗂</span>
         <span>{$t('logbook.empty')}</span>
+      </div>
+    {:else if filteredSummaries.length === 0}
+      <div class="panel-empty">
+        <span class="panel-empty-icon">🔍</span>
+        <span>{$t('logbook.noResults')}</span>
       </div>
     {:else}
       <div class="logbook-layout">
@@ -288,8 +373,9 @@
                           {#each second.flights as f}
                             <button
                               class="logbook-item"
-                              class:selected={selectedFlightId === f.id}
-                              onclick={() => onSelectFlight(f.id)}
+                              class:selected={selectedFlightId === f.id && !hasMultiSelection}
+                              class:multi-selected={isMultiSelected(f.id)}
+                              onclick={(e) => handleFlightClick(f.id, e)}
                             >
                               <div class="logbook-item-title">{flightListMarker(f.source)}{formatDateTime(f.start_time)}</div>
                               <div class="logbook-item-meta">
@@ -482,6 +568,39 @@
     border: none;
     background: none;
     padding: 0;
+  }
+
+  .logbook-search-input {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .logbook-search-clear {
+    background: none;
+    border: none;
+    color: #777;
+    cursor: pointer;
+    font-size: 13px;
+    padding: 2px 4px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+
+  .logbook-search-clear:hover {
+    color: #e0e0e0;
+  }
+
+  .logbook-btn-group-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-left: auto;
+  }
+
+  .logbook-btn-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
   }
 
   .setting-row {
@@ -784,6 +903,13 @@
   .logbook-item.selected {
     border-color: #37a8db;
     background: rgba(55, 168, 219, 0.18);
+  }
+
+  .logbook-item.multi-selected {
+    border-color: #37a8db;
+    background: rgba(55, 168, 219, 0.12);
+    outline: 1px solid rgba(55, 168, 219, 0.4);
+    outline-offset: -1px;
   }
 
   .logbook-item-title {

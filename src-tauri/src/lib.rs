@@ -14,6 +14,8 @@ use commands::flightlog::{
     flightlog_list, flightlog_get, flightlog_get_track, flightlog_delete,
     flightlog_update_notes, flightlog_update_weather, flightlog_geocode, flightlog_fetch_weather,
     flightlog_default_db_path, flightlog_import_blackbox,
+    flightlog_export, flightlog_export_blackbox, flightlog_import_kflight,
+    flightlog_kflight_list, flightlog_kflight_get, flightlog_kflight_track,
 };
 use commands::info::get_app_version;
 use commands::mission::{
@@ -96,6 +98,12 @@ pub fn run() {
             flightlog_fetch_weather,
             flightlog_default_db_path,
             flightlog_import_blackbox,
+            flightlog_export,
+            flightlog_export_blackbox,
+            flightlog_import_kflight,
+            flightlog_kflight_list,
+            flightlog_kflight_get,
+            flightlog_kflight_track,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Kite Ground Control");

@@ -54,6 +54,14 @@ This document describes how telemetry data flows through the application — fro
 │  Same interface for live AND replay — widgets don't know the      │
 │  difference                                                       │
 └──────────────────────────────────────────────────────────────────┘
+
+                    ┌─────────────────────────────────────┐
+                    │     Data Exchange (.kflight)         │
+                    │                                     │
+                    │  Export: DB → .kflight SQLite file   │
+                    │  Import: .kflight → DB (dedup)      │
+                    │  Blackbox: BLOB → raw .TXT file     │
+                    └─────────────────────────────────────┘
 ```
 
 ---
@@ -380,7 +388,90 @@ See [FLIGHTLOG_DATABASE.md](FLIGHTLOG_DATABASE.md) for the complete schema. Key 
 
 ---
 
-## 6. File Index
+## 6. Data Exchange Pipeline (.kflight)
+
+The `.kflight` format enables sharing flight data between KiteGC installations.
+
+### Export Flow
+
+```
+User selects flights (single or Ctrl+click multi-select)
+         │
+         ▼
++page.svelte ─► logbookController.exportKflight()
+         │
+         ▼
+flightlog.ts ─► invoke("flightlog_export_kflight")
+         │
+         ▼
+commands/flightlog.rs ─► exchange::export_flights()
+         │
+         ├── create fresh SQLite (.kflight)
+         ├── CREATE TABLE flights/telemetry_records/blackbox_records/blackbox_files
+         ├── for each flight_id:
+         │     ├── copy_flight() (flights row)
+         │     ├── copy telemetry_records
+         │     ├── copy_blackbox_records()
+         │     └── copy_blackbox_files() (BLOBs)
+         ├── INSERT _kflight_meta
+         └── VACUUM
+```
+
+### Import Flow
+
+```
+User clicks "Import .kflight" or drag & drops file
+         │
+         ▼
++page.svelte ─► logbookController.importKflight()
+         │
+         ▼
+flightlog.ts ─► invoke("flightlog_import_kflight")
+         │
+         ▼
+commands/flightlog.rs ─► exchange::import_flights()
+         │
+         ├── ATTACH source .kflight as 'import_db'
+         ├── list_flights_in_file() → all flights
+         ├── for each flight:
+         │     ├── duplicate check (craft_name + start_time ±10s)
+         │     ├── skip if duplicate
+         │     └── copy flight + telemetry + blackbox into main DB
+         └── return (imported, skipped)
+```
+
+### Raw Blackbox Export
+
+```
+User clicks "Export Blackbox" (single flight, source = blackbox|both)
+         │
+         ▼
++page.svelte ─► logbookController.exportBlackbox()
+         │
+         ▼
+flightlog.ts ─► invoke("flightlog_export_blackbox")
+         │
+         ▼
+commands/flightlog.rs ─► db::get_blackbox_file()
+         │
+         ├── SELECT original_filename, file_data FROM blackbox_files
+         └── std::fs::write(output_path, blob_bytes)
+```
+
+### File Index (Exchange)
+
+| File | Layer | Purpose |
+|---|---|---|
+| `src-tauri/src/flightlog/exchange.rs` | Backend | .kflight export/import logic |
+| `src-tauri/src/flightlog/db.rs` | Backend | `get_blackbox_file()` BLOB retrieval |
+| `src-tauri/src/commands/flightlog.rs` | Backend | Tauri commands for export/import |
+| `src/lib/stores/flightlog.ts` | Frontend | TS invoke wrappers |
+| `src/lib/controllers/logbookController.ts` | Frontend | Export/import orchestration |
+| `src/lib/components/LogbookPanel.svelte` | Frontend | Button UI, multi-select, source indicators |
+
+---
+
+## 7. File Index
 
 | File | Layer | Purpose |
 |---|---|---|
@@ -389,9 +480,11 @@ See [FLIGHTLOG_DATABASE.md](FLIGHTLOG_DATABASE.md) for the complete schema. Key 
 | `src-tauri/src/flightlog/recorder.rs` | Backend | ARM/DISARM detection, DB batch writes |
 | `src-tauri/src/flightlog/blackbox.rs` | Backend | Blackbox CSV parsing, unit conversion, downsampling |
 | `src-tauri/src/flightlog/db.rs` | Backend | SQLite schema, migrations, CRUD operations |
+| `src-tauri/src/flightlog/exchange.rs` | Backend | .kflight export/import, flight copy logic |
 | `src/lib/stores/telemetry.ts` | Frontend | Tauri event listeners → reactive TelemetryData store |
 | `src/lib/adapters/telemetryAdapter.ts` | Frontend | DB TelemetryRecord → TelemetryData mapper |
 | `src/lib/controllers/playbackController.ts` | Frontend | Timer-based playback engine |
+| `src/lib/controllers/logbookController.ts` | Frontend | Logbook CRUD, export/import orchestration |
 | `src/lib/stores/home.ts` | Frontend | Home position (set on ARM or replay start) |
 | `src/routes/+page.svelte` | Frontend | Live/replay switch (`$derived(telem)`), widget wiring |
 

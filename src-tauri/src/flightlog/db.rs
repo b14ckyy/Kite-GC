@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
-use rusqlite::{params, Connection, Result as SqlResult};
+use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
 
 use super::types::{Flight, FlightSummary, TelemetryRecord};
 
@@ -676,6 +676,23 @@ pub fn insert_blackbox_records(
     }
     tx.commit()?;
     Ok(())
+}
+
+/// Retrieve the first blackbox file BLOB + original filename for a flight.
+/// Returns None if no blackbox file is attached.
+pub fn get_blackbox_file(
+    conn: &Connection,
+    flight_id: i64,
+) -> SqlResult<Option<(String, Vec<u8>)>> {
+    let mut stmt = conn.prepare(
+        "SELECT original_filename, file_data FROM blackbox_files WHERE flight_id = ?1 LIMIT 1",
+    )?;
+    let result = stmt
+        .query_row(params![flight_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+        })
+        .optional()?;
+    Ok(result)
 }
 
 pub fn insert_blackbox_file(

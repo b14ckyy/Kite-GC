@@ -18,6 +18,54 @@ use crate::scheduler::telemetry::{
 /// Bit 2 in arming_flags indicates ARMED state
 const ARMED_FLAG: u32 = 0x04; // bit 2
 
+#[inline]
+fn is_valid_gps_coord(lat: f64, lon: f64) -> bool {
+    lat.is_finite()
+        && lon.is_finite()
+        && (-90.0..=90.0).contains(&lat)
+        && (-180.0..=180.0).contains(&lon)
+        && !(lat == 0.0 && lon == 0.0)
+}
+
+/// Async enrichment: fetch weather + geocode for a newly armed flight.
+/// Runs in the background, never blocks the recorder thread.
+async fn enrich_flight_async(flight_id: i64, lat: f64, lon: f64, db_path: String) {
+    // Fetch weather and geocode (sequential — no tokio::join available)
+    let weather = super::weather::fetch_weather(lat, lon).await;
+    let location = super::geocode::reverse_geocode(lat, lon, "en").await;
+
+    // Open a fresh connection for the update (recorder's conn is on another thread)
+    let conn = match db::open_database(std::path::Path::new(&db_path)) {
+        Ok(c) => c,
+        Err(e) => {
+            log::warn!("Enrichment: failed to open DB: {}", e);
+            return;
+        }
+    };
+
+    if let Some(w) = weather {
+        if let Err(e) = conn.execute(
+            "UPDATE flights SET weather_temp_c = ?1, weather_wind_ms = ?2, weather_wind_deg = ?3, weather_desc = ?4 WHERE id = ?5",
+            rusqlite::params![w.temp_c, w.wind_ms, w.wind_deg, w.description, flight_id],
+        ) {
+            log::warn!("Enrichment: failed to write weather for flight {}: {}", flight_id, e);
+        } else {
+            log::info!("Enrichment: weather saved for flight {}", flight_id);
+        }
+    }
+
+    if let Some(name) = location {
+        if let Err(e) = conn.execute(
+            "UPDATE flights SET location_name = ?1 WHERE id = ?2",
+            rusqlite::params![name, flight_id],
+        ) {
+            log::warn!("Enrichment: failed to write location for flight {}: {}", flight_id, e);
+        } else {
+            log::info!("Enrichment: location '{}' saved for flight {}", name, flight_id);
+        }
+    }
+}
+
 /// Buffer size before flushing telemetry records to database
 const FLUSH_THRESHOLD: usize = 50;
 
@@ -215,6 +263,14 @@ impl FlightRecorder {
                 } else {
                     None
                 };
+
+                // Spawn async weather + geocode enrichment (non-blocking)
+                if let (Some(lat), Some(lon)) = (self.snapshot.lat, self.snapshot.lon) {
+                    if is_valid_gps_coord(lat, lon) {
+                        let db_path = self.db_file_path.to_string_lossy().to_string();
+                        tauri::async_runtime::spawn(enrich_flight_async(flight_id, lat, lon, db_path));
+                    }
+                }
 
                 self.raw_logger = raw_logger;
                 self.active_flight = Some(ActiveFlight {
