@@ -32,7 +32,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
 use crate::flightlog::recorder::FlightRecorderHandle;
-use crate::transport::serial::SerialConnection;
+use crate::transport::Transport;
 
 pub use telemetry::{TelemetryConfig, TelemetryGroup};
 
@@ -107,7 +107,7 @@ impl TelemetrySlot {
 /// Handle returned to the caller to interact with the running scheduler
 pub struct SchedulerHandle {
     cmd_tx: mpsc::Sender<SchedulerCommand>,
-    thread: Option<thread::JoinHandle<Option<SerialConnection>>>,
+    thread: Option<thread::JoinHandle<Option<Box<dyn Transport>>>>,
 }
 
 impl SchedulerHandle {
@@ -126,8 +126,8 @@ impl SchedulerHandle {
             .map_err(|_| "Scheduler request timeout".to_string())?
     }
 
-    /// Stop the scheduler and return the serial connection for cleanup
-    pub fn stop(mut self) -> Option<SerialConnection> {
+    /// Stop the scheduler and return the transport for cleanup
+    pub fn stop(mut self) -> Option<Box<dyn Transport>> {
         let _ = self.cmd_tx.send(SchedulerCommand::Stop);
         self.thread
             .take()
@@ -138,7 +138,7 @@ impl SchedulerHandle {
 
 /// Start the MSP scheduler on a dedicated thread
 pub fn start(
-    serial: SerialConnection,
+    transport: Box<dyn Transport>,
     config: TelemetryConfig,
     app_handle: AppHandle,
     recorder: Option<FlightRecorderHandle>,
@@ -146,7 +146,7 @@ pub fn start(
     let (cmd_tx, cmd_rx) = mpsc::channel::<SchedulerCommand>();
 
     let thread = thread::spawn(move || {
-        scheduler_loop(serial, config, app_handle, cmd_rx, recorder)
+        scheduler_loop(transport, config, app_handle, cmd_rx, recorder)
     });
 
     SchedulerHandle {
@@ -157,12 +157,12 @@ pub fn start(
 
 /// Main scheduler loop — runs until Stop command received
 fn scheduler_loop(
-    mut serial: SerialConnection,
+    mut transport: Box<dyn Transport>,
     config: TelemetryConfig,
     app_handle: AppHandle,
     cmd_rx: mpsc::Receiver<SchedulerCommand>,
     recorder: Option<FlightRecorderHandle>,
-) -> Option<SerialConnection> {
+) -> Option<Box<dyn Transport>> {
     let mut slots = build_slots(&config);
 
     // Debug tracker for MSP communication stats (no-op in release builds)
@@ -203,14 +203,14 @@ fn scheduler_loop(
                         r.shutdown();
                     }
                 }
-                return Some(serial);
+                return Some(transport);
             }
             Ok(SchedulerCommand::MspRequest {
                 code,
                 payload,
                 reply,
             }) => {
-                let result = serial
+                let result = transport
                     .msp_request(code, &payload)
                     .map(|msg| msg.payload);
                 let _ = reply.send(result);
@@ -219,7 +219,7 @@ fn scheduler_loop(
             Err(mpsc::TryRecvError::Empty) => {}
             Err(mpsc::TryRecvError::Disconnected) => {
                 log::warn!("Scheduler command channel disconnected");
-                return Some(serial);
+                return Some(transport);
             }
         }
 
@@ -236,7 +236,7 @@ fn scheduler_loop(
             .map(|(i, _, _)| i);
 
         if let Some(idx) = most_overdue {
-            poll_slot(&mut serial, &mut slots[idx], &app_handle, &mut debug_tracker, &recorder);
+            poll_slot(&mut *transport, &mut slots[idx], &app_handle, &mut debug_tracker, &recorder);
             debug_tracker.maybe_emit(&app_handle);
             continue;
         }
@@ -258,14 +258,14 @@ fn scheduler_loop(
                         r.shutdown();
                     }
                 }
-                return Some(serial);
+                return Some(transport);
             }
             Ok(SchedulerCommand::MspRequest {
                 code,
                 payload,
                 reply,
             }) => {
-                let result = serial
+                let result = transport
                     .msp_request(code, &payload)
                     .map(|msg| msg.payload);
                 let _ = reply.send(result);
@@ -273,7 +273,7 @@ fn scheduler_loop(
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 log::warn!("Scheduler command channel disconnected");
-                return Some(serial);
+                return Some(transport);
             }
         }
     }
@@ -331,7 +331,7 @@ fn build_slots(config: &TelemetryConfig) -> Vec<TelemetrySlot> {
 
 /// Poll a single telemetry slot and emit events
 fn poll_slot(
-    serial: &mut SerialConnection,
+    transport: &mut dyn Transport,
     slot: &mut TelemetrySlot,
     app_handle: &AppHandle,
     tracker: &mut debug::DebugTracker,
@@ -349,7 +349,7 @@ fn poll_slot(
 
     for code in codes_to_poll {
         tracker.on_request(code, 9); // MSP V2 request frame = 9 bytes (empty payload)
-        match serial.msp_request(code, &[]) {
+        match transport.msp_request(code, &[]) {
             Ok(msg) => {
                 tracker.on_response(code, 9 + msg.payload.len());
                 let event_name = telemetry::event_name_for_code(code);

@@ -5,6 +5,8 @@ import { writable } from 'svelte/store';
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
+export type TransportType = 'serial' | 'tcp' | 'udp' | 'ble';
+
 export interface InavVersion {
   major: number;
   minor: number;
@@ -38,8 +40,16 @@ export interface PortInfo {
   port_type: string;
 }
 
+export interface BleDeviceInfo {
+  id: string;
+  name: string;
+  profile: string;
+  rssi: number | null;
+}
+
 export interface ConnectionInfo {
   status: ConnectionStatus;
+  transportType: TransportType;
   port: string;
   baudRate: number;
   errorMessage: string;
@@ -48,6 +58,7 @@ export interface ConnectionInfo {
 
 export const connection = writable<ConnectionInfo>({
   status: 'disconnected',
+  transportType: 'serial',
   port: '',
   baudRate: 115200,
   errorMessage: '',
@@ -55,3 +66,5 @@ export const connection = writable<ConnectionInfo>({
 });
 
 export const availablePorts = writable<PortInfo[]>([]);
+
+export const bleDevices = writable<BleDeviceInfo[]>([]);

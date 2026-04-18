@@ -1,4 +1,4 @@
-// Connection Commands — serial port listing, connect, disconnect
+// Connection Commands — serial port listing, connect, disconnect, BLE scanning
 
 use tauri::{AppHandle, State};
 
@@ -12,8 +12,11 @@ use crate::msp::features::is_version_supported;
 use crate::scheduler;
 use crate::scheduler::TelemetryConfig;
 use crate::state::AppState;
+use crate::transport::{PortInfo, Transport, TransportType};
 use crate::transport::serial::SerialConnection;
-use crate::transport::PortInfo;
+use crate::transport::tcp::TcpTransport;
+use crate::transport::udp::UdpTransport;
+use crate::transport::ble::BleDeviceInfo;
 
 /// List available serial ports
 #[tauri::command]
@@ -21,16 +24,31 @@ pub fn list_serial_ports() -> Vec<PortInfo> {
     crate::transport::serial::list_ports()
 }
 
-/// Connect to a flight controller on the given serial port.
+/// Scan for BLE devices matching known serial profiles
+#[tauri::command]
+pub async fn scan_ble_devices() -> Result<Vec<BleDeviceInfo>, String> {
+    crate::transport::ble::scan_ble_devices().await
+}
+
+/// Connect to a flight controller on the given transport.
 /// Performs the MSP handshake (API_VERSION, FC_VARIANT, FC_VERSION, BOARD_INFO)
 /// and then starts the telemetry scheduler.
 #[tauri::command]
 pub async fn connect(
-    port: String,
-    baud_rate: u32,
+    transport_type: TransportType,
+    // Serial params
+    port: Option<String>,
+    baud_rate: Option<u32>,
+    // TCP/UDP params
+    host: Option<String>,
+    tcp_port: Option<u16>,
+    // BLE params
+    ble_device_id: Option<String>,
+    // Telemetry config
     attitude_rate_hz: Option<f64>,
     position_rate_hz: Option<f64>,
     airspeed_enabled: Option<bool>,
+    // Flight log config
     flight_log_enabled: Option<bool>,
     flight_log_path: Option<String>,
     flight_log_raw: Option<bool>,
@@ -45,26 +63,48 @@ pub async fn connect(
         }
     }
 
-    // Open serial port
-    let mut serial = SerialConnection::open(&port, baud_rate)?;
+    // Open transport based on type
+    let mut transport: Box<dyn Transport> = match transport_type {
+        TransportType::Serial => {
+            let port_name = port.ok_or("Serial port name required")?;
+            let baud = baud_rate.unwrap_or(115200);
+            Box::new(SerialConnection::open(&port_name, baud)?)
+        }
+        TransportType::Tcp => {
+            let h = host.ok_or("TCP host required")?;
+            let p = tcp_port.ok_or("TCP port required")?;
+            Box::new(TcpTransport::connect(&h, p)?)
+        }
+        TransportType::Udp => {
+            let h = host.ok_or("UDP host required")?;
+            let p = tcp_port.ok_or("UDP port required")?;
+            Box::new(UdpTransport::connect(&h, p)?)
+        }
+        TransportType::Ble => {
+            let dev_id = ble_device_id.ok_or("BLE device ID required")?;
+            Box::new(crate::transport::ble::connect_ble(&dev_id).await?)
+        }
+    };
+
+    log::info!("Transport opened: {}", transport.description());
 
 
     // ── MSP Handshake ──────────────────────────────────────────────
     let mut fc_info = FcInfo::default();
 
     // 1) MSP_API_VERSION → [mspProtocol, apiVersionMajor, apiVersionMinor]
-    let resp = serial.msp_request(MSP_API_VERSION, &[])?;
+    let resp = transport.msp_request(MSP_API_VERSION, &[])?;
     if resp.payload.len() >= 3 {
         fc_info.msp_protocol = resp.payload[0];
         fc_info.api_version = format!("{}.{}", resp.payload[1], resp.payload[2]);
     }
 
     // 2) MSP_FC_VARIANT → 4-byte identifier string (e.g. "INAV")
-    let resp = serial.msp_request(MSP_FC_VARIANT, &[])?;
+    let resp = transport.msp_request(MSP_FC_VARIANT, &[])?;
     fc_info.fc_variant = String::from_utf8_lossy(&resp.payload).trim().to_string();
 
     // 3) MSP_FC_VERSION → [major, minor, patch]
-    let resp = serial.msp_request(MSP_FC_VERSION, &[])?;
+    let resp = transport.msp_request(MSP_FC_VERSION, &[])?;
     if resp.payload.len() >= 3 {
         fc_info.fc_version = format!(
             "{}.{}.{}",
@@ -73,7 +113,7 @@ pub async fn connect(
     }
 
     // 4) MSP_BOARD_INFO → board identifier (4 bytes) + hw revision (u16 LE)
-    let resp = serial.msp_request(MSP_BOARD_INFO, &[])?;
+    let resp = transport.msp_request(MSP_BOARD_INFO, &[])?;
     if resp.payload.len() >= 4 {
         fc_info.board_id = String::from_utf8_lossy(&resp.payload[..4])
             .trim()
@@ -115,7 +155,7 @@ pub async fn connect(
     fc_info.features = Some(feature_set);
 
     // 5) MSP2_INAV_MIXER → platform type and mixer preset
-    match serial.msp_request(MSPV2_INAV_MIXER, &[]) {
+    match transport.msp_request(MSPV2_INAV_MIXER, &[]) {
         Ok(resp) => {
             if resp.payload.len() >= 7 {
                 fc_info.platform_type = resp.payload[3];
@@ -129,7 +169,7 @@ pub async fn connect(
     }
 
     // 6) MSP_NAME → craft name configured in the FC
-    match serial.msp_request(MSP_NAME, &[]) {
+    match transport.msp_request(MSP_NAME, &[]) {
         Ok(resp) => {
             fc_info.craft_name = String::from_utf8_lossy(&resp.payload).trim().to_string();
         }
@@ -138,12 +178,13 @@ pub async fn connect(
         }
     }
 
+    let transport_desc = transport.description();
     log::info!(
-        "Connected to {} {} v{} on {} (board: {}, API: {}, platform: {})",
+        "Connected to {} {} v{} via {} (board: {}, API: {}, platform: {})",
         fc_info.fc_variant,
         fc_info.fc_version,
         fc_info.api_version,
-        port,
+        transport_desc,
         fc_info.board_id,
         fc_info.api_version,
         fc_info.platform_type,
@@ -184,7 +225,7 @@ pub async fn connect(
         None
     };
 
-    let handle = scheduler::start(serial, config, app_handle, recorder_handle);
+    let handle = scheduler::start(transport, config, app_handle, recorder_handle);
 
     // Store scheduler handle and FC info
     {

@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use crate::msp::{MspCodec, MspMessage, MspParser};
 
-use super::PortInfo;
+use super::{PortInfo, Transport};
 
 /// Default read timeout for serial operations
 const READ_TIMEOUT_MS: u64 = 1000;
@@ -57,6 +57,7 @@ pub fn list_ports() -> Vec<PortInfo> {
 
 /// An active serial connection to a flight controller
 pub struct SerialConnection {
+    port_name: String,
     port: Box<dyn serialport::SerialPort>,
     parser: MspParser,
 }
@@ -73,13 +74,21 @@ impl SerialConnection {
             .map_err(|e| format!("Failed to open {}: {}", port_name, e))?;
 
         Ok(Self {
+            port_name: port_name.to_string(),
             port,
             parser: MspParser::new(),
         })
     }
 
-    /// Send an MSP v2 request and wait for the matching response
-    pub fn msp_request(&mut self, code: u16, payload: &[u8]) -> Result<MspMessage, String> {
+    /// Close the connection (port is closed on drop)
+    pub fn close(self) {
+        // Drop self, which drops the port
+        drop(self);
+    }
+}
+
+impl Transport for SerialConnection {
+    fn msp_request(&mut self, code: u16, payload: &[u8]) -> Result<MspMessage, String> {
         // Encode and send
         let frame = MspCodec::encode_v2(code, payload);
         self.port
@@ -105,7 +114,6 @@ impl SerialConnection {
                             if msg.code == code {
                                 return Ok(msg);
                             }
-                            // Ignore non-matching responses (could be stale)
                         }
                     }
                 }
@@ -116,9 +124,7 @@ impl SerialConnection {
         }
     }
 
-    /// Close the connection (port is closed on drop)
-    pub fn close(self) {
-        // Drop self, which drops the port
-        drop(self);
+    fn description(&self) -> String {
+        format!("Serial({})", self.port_name)
     }
 }

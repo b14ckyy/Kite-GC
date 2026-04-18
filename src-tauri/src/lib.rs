@@ -9,7 +9,7 @@ mod scheduler;
 mod state;
 mod transport;
 
-use commands::connection::{connect, disconnect, list_serial_ports};
+use commands::connection::{connect, disconnect, list_serial_ports, scan_ble_devices};
 use commands::flightlog::{
     flightlog_list, flightlog_get, flightlog_get_track, flightlog_delete,
     flightlog_update_notes, flightlog_update_weather, flightlog_geocode, flightlog_fetch_weather,
@@ -72,6 +72,7 @@ pub fn run() {
         .manage(MissionStore::new())
         .invoke_handler(tauri::generate_handler![
             list_serial_ports,
+            scan_ble_devices,
             connect,
             disconnect,
             get_app_version,

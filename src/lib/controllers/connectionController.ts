@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { FcInfo, PortInfo } from '$lib/stores/connection';
-import { connection, availablePorts } from '$lib/stores/connection';
+import type { FcInfo, PortInfo, BleDeviceInfo, TransportType } from '$lib/stores/connection';
+import { connection, availablePorts, bleDevices } from '$lib/stores/connection';
 import { startTelemetryListeners, stopTelemetryListeners, resetTelemetry } from '$lib/stores/telemetry';
 
 /**
@@ -16,9 +16,27 @@ export async function refreshSerialPorts(currentPort: string): Promise<string> {
   return currentPort;
 }
 
+/**
+ * Scan for BLE devices matching known serial profiles.
+ * Updates the bleDevices store and returns the list.
+ */
+export async function scanBleDevices(): Promise<BleDeviceInfo[]> {
+  const result = await invoke<BleDeviceInfo[]>("scan_ble_devices");
+  bleDevices.set(result);
+  return result;
+}
+
 export interface ConnectParams {
-  port: string;
-  baudRate: number;
+  transportType: TransportType;
+  // Serial
+  port?: string;
+  baudRate?: number;
+  // TCP/UDP
+  host?: string;
+  tcpPort?: number;
+  // BLE
+  bleDeviceId?: string;
+  // Telemetry config
   attitudeRateHz: number;
   positionRateHz: number;
   airspeedEnabled: boolean;
@@ -32,8 +50,12 @@ export interface ConnectParams {
  */
 export async function connectFC(params: ConnectParams): Promise<FcInfo> {
   const info = await invoke<FcInfo>("connect", {
-    port: params.port,
-    baudRate: params.baudRate,
+    transportType: params.transportType,
+    port: params.port ?? null,
+    baudRate: params.baudRate ?? null,
+    host: params.host ?? null,
+    tcpPort: params.tcpPort ?? null,
+    bleDeviceId: params.bleDeviceId ?? null,
     attitudeRateHz: params.attitudeRateHz,
     positionRateHz: params.positionRateHz,
     airspeedEnabled: params.airspeedEnabled,
@@ -43,8 +65,9 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
   });
   connection.set({
     status: "connected",
-    port: params.port,
-    baudRate: params.baudRate,
+    transportType: params.transportType,
+    port: params.port ?? params.host ?? params.bleDeviceId ?? '',
+    baudRate: params.baudRate ?? 0,
     errorMessage: "",
     fcInfo: info,
   });
@@ -61,6 +84,7 @@ export async function disconnectFC(baudRate: number): Promise<void> {
   await invoke("disconnect");
   connection.set({
     status: "disconnected",
+    transportType: 'serial',
     port: "",
     baudRate,
     errorMessage: "",

@@ -3,8 +3,8 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { open, save, confirm } from "@tauri-apps/plugin-dialog";
-  import { connection, availablePorts } from "$lib/stores/connection";
-  import type { FcInfo, PortInfo } from "$lib/stores/connection";
+  import { connection, availablePorts, bleDevices } from "$lib/stores/connection";
+  import type { FcInfo, PortInfo, BleDeviceInfo, TransportType } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
   import { telemetry } from "$lib/stores/telemetry";
   import { get } from "svelte/store";
@@ -19,7 +19,7 @@
   import StatusBar from "$lib/components/StatusBar.svelte";
   import NavRail from "$lib/components/NavRail.svelte";
   import { PlaybackController } from '$lib/controllers/playbackController';
-  import { refreshSerialPorts, connectFC, disconnectFC } from '$lib/controllers/connectionController';
+  import { refreshSerialPorts, connectFC, disconnectFC, scanBleDevices } from '$lib/controllers/connectionController';
   import * as logbookCtrl from '$lib/controllers/logbookController';
   import * as widgetCtrl from '$lib/controllers/widgetController';
   import { isValidGpsCoordinate } from '$lib/helpers/telemetry';
@@ -61,8 +61,14 @@
   const rightAvailVmin = $derived((winH - 60 - 30) / vminPx - 22.5);
 
   let appVersion = $state("...");
+  let selectedTransport = $state<TransportType>('serial');
   let selectedPort = $state("");
   let selectedBaud = $state(115200);
+  let tcpHost = $state("192.168.1.1");
+  let tcpPort = $state(5761);
+  let selectedBleDevice = $state("");
+  let bleDeviceList = $state<BleDeviceInfo[]>([]);
+  let isBleScanning = $state(false);
   let isConnecting = $state(false);
   let errorMsg = $state("");
   let navPanelOpen = $state(false);
@@ -79,6 +85,7 @@
   // Reactive telemetry subscription
   let liveTelem = $state(get(telemetry));
   telemetry.subscribe((t) => { liveTelem = t; });
+  bleDevices.subscribe((d) => { bleDeviceList = d; });
 
   // Settings state for the settings panel
   let attitudeRateHz = $state(5);
@@ -567,6 +574,20 @@
     selectedPort = await refreshSerialPorts(selectedPort);
   }
 
+  async function handleScanBle() {
+    isBleScanning = true;
+    try {
+      const devices = await scanBleDevices();
+      if (devices.length > 0 && !selectedBleDevice) {
+        selectedBleDevice = devices[0].id;
+      }
+    } catch (e: any) {
+      errorMsg = e.toString();
+    } finally {
+      isBleScanning = false;
+    }
+  }
+
   async function handleConnect() {
     if (connStatus === "connected") {
       try {
@@ -578,8 +599,17 @@
       return;
     }
 
-    if (!selectedPort) {
+    // Validate required fields per transport type
+    if (selectedTransport === 'serial' && !selectedPort) {
       errorMsg = $t('connection.noPortSelected');
+      return;
+    }
+    if ((selectedTransport === 'tcp' || selectedTransport === 'udp') && !tcpHost) {
+      errorMsg = $t('connection.noHostSpecified');
+      return;
+    }
+    if (selectedTransport === 'ble' && !selectedBleDevice) {
+      errorMsg = $t('connection.noBleDeviceSelected');
       return;
     }
 
@@ -590,8 +620,12 @@
 
     try {
       await connectFC({
-        port: selectedPort,
-        baudRate: selectedBaud,
+        transportType: selectedTransport,
+        port: selectedTransport === 'serial' ? selectedPort : undefined,
+        baudRate: selectedTransport === 'serial' ? selectedBaud : undefined,
+        host: (selectedTransport === 'tcp' || selectedTransport === 'udp') ? tcpHost : undefined,
+        tcpPort: (selectedTransport === 'tcp' || selectedTransport === 'udp') ? tcpPort : undefined,
+        bleDeviceId: selectedTransport === 'ble' ? selectedBleDevice : undefined,
         attitudeRateHz,
         positionRateHz,
         airspeedEnabled,
@@ -601,7 +635,7 @@
       });
     } catch (e: any) {
       errorMsg = e.toString();
-      connection.set({ status: "error", port: "", baudRate: selectedBaud, errorMessage: e.toString(), fcInfo: null });
+      connection.set({ status: "error", transportType: selectedTransport, port: "", baudRate: selectedBaud, errorMessage: e.toString(), fcInfo: null });
     } finally {
       isConnecting = false;
     }
@@ -717,12 +751,19 @@
     {appVersion}
     {telem}
     {ports}
+    {bleDeviceList}
+    {isBleScanning}
     {connStatus}
     {isConnecting}
+    bind:selectedTransport
     bind:selectedPort
     bind:selectedBaud
+    bind:tcpHost
+    bind:tcpPort
+    bind:selectedBleDevice
     {baudRates}
     onRefreshPorts={refreshPorts}
+    onScanBle={handleScanBle}
     onConnect={handleConnect}
   />
 

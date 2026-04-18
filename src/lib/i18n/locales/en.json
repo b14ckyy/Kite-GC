@@ -11,7 +11,12 @@
     "noPortSelected": "No port selected",
     "noPortsFound": "No ports found",
     "refreshPorts": "Refresh ports",
-    "connectedOn": "{variant} {version} on {port}"
+    "connectedOn": "{variant} {version} on {port}",
+    "noHostSpecified": "No host specified",
+    "noBleDeviceSelected": "No BLE device selected",
+    "noBleDevices": "No BLE devices found",
+    "bleScanning": "Scanning...",
+    "bleScan": "Scan for BLE devices"
   },
   "sensors": {
     "gyro": "GYRO",

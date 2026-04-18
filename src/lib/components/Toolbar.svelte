@@ -1,29 +1,43 @@
 <script lang="ts">
   import { t } from 'svelte-i18n';
-  import type { PortInfo } from '$lib/stores/connection';
+  import type { PortInfo, BleDeviceInfo, TransportType } from '$lib/stores/connection';
   import type { TelemetryData } from '$lib/stores/telemetry';
 
   let {
     appVersion,
     telem,
     ports,
+    bleDeviceList = [],
+    isBleScanning = false,
     connStatus,
     isConnecting,
+    selectedTransport = $bindable(),
     selectedPort = $bindable(),
     selectedBaud = $bindable(),
+    tcpHost = $bindable(),
+    tcpPort = $bindable(),
+    selectedBleDevice = $bindable(),
     baudRates,
     onRefreshPorts,
+    onScanBle,
     onConnect,
   }: {
     appVersion: string;
     telem: TelemetryData;
     ports: PortInfo[];
+    bleDeviceList: BleDeviceInfo[];
+    isBleScanning: boolean;
     connStatus: string;
     isConnecting: boolean;
+    selectedTransport: TransportType;
     selectedPort: string;
     selectedBaud: number;
+    tcpHost: string;
+    tcpPort: number;
+    selectedBleDevice: string;
     baudRates: number[];
     onRefreshPorts: () => void;
+    onScanBle: () => void;
     onConnect: () => void;
   } = $props();
 
@@ -51,21 +65,61 @@
   <div class="toolbar-right">
     <div class="port-controls">
       {#if connStatus !== "connected"}
-        <select class="port-select" bind:value={selectedPort}>
-          {#if ports.length === 0}
-            <option value="">{$t('connection.noPortsFound')}</option>
-          {:else}
-            {#each ports as port}
-              <option value={port.path}>{port.label}</option>
+        <!-- Transport type selector -->
+        <select class="transport-select" bind:value={selectedTransport}>
+          <option value="serial">Serial</option>
+          <option value="tcp">TCP</option>
+          <option value="udp">UDP</option>
+          <option value="ble">BLE</option>
+        </select>
+
+        {#if selectedTransport === 'serial'}
+          <select class="port-select" bind:value={selectedPort}>
+            {#if ports.length === 0}
+              <option value="">{$t('connection.noPortsFound')}</option>
+            {:else}
+              {#each ports as port}
+                <option value={port.path}>{port.label}</option>
+              {/each}
+            {/if}
+          </select>
+          <select class="baud-select" bind:value={selectedBaud}>
+            {#each baudRates as baud}
+              <option value={baud}>{baud}</option>
             {/each}
-          {/if}
-        </select>
-        <select class="baud-select" bind:value={selectedBaud}>
-          {#each baudRates as baud}
-            <option value={baud}>{baud}</option>
-          {/each}
-        </select>
-        <button class="refresh-btn" onclick={onRefreshPorts} title={$t('connection.refreshPorts')}>⟳</button>
+          </select>
+          <button class="refresh-btn" onclick={onRefreshPorts} title={$t('connection.refreshPorts')}>⟳</button>
+        {:else if selectedTransport === 'tcp' || selectedTransport === 'udp'}
+          <input
+            class="host-input"
+            type="text"
+            bind:value={tcpHost}
+            placeholder="Host (z.B. 192.168.1.1)"
+          />
+          <input
+            class="port-input"
+            type="number"
+            bind:value={tcpPort}
+            placeholder="Port"
+            min="1"
+            max="65535"
+          />
+        {:else if selectedTransport === 'ble'}
+          <select class="ble-select" bind:value={selectedBleDevice}>
+            {#if bleDeviceList.length === 0}
+              <option value="">{isBleScanning ? $t('connection.bleScanning') : $t('connection.noBleDevices')}</option>
+            {:else}
+              {#each bleDeviceList as device}
+                <option value={device.id}>
+                  {device.name} ({device.profile}{device.rssi != null ? `, ${device.rssi} dBm` : ''})
+                </option>
+              {/each}
+            {/if}
+          </select>
+          <button class="refresh-btn" onclick={onScanBle} disabled={isBleScanning} title={$t('connection.bleScan')}>
+            {isBleScanning ? '⏳' : '⟳'}
+          </button>
+        {/if}
       {/if}
     </div>
     <button
@@ -192,6 +246,50 @@
 
   .baud-select {
     min-width: 80px;
+  }
+
+  .transport-select {
+    padding: 4px 8px;
+    background: #37a8db;
+    border: 1px solid #339cc1;
+    border-radius: 3px;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    min-width: 65px;
+  }
+
+  .ble-select {
+    padding: 4px 8px;
+    background: #434343;
+    border: 1px solid #555;
+    border-radius: 3px;
+    color: #e0e0e0;
+    font-size: 12px;
+    min-width: 180px;
+  }
+
+  .host-input,
+  .port-input {
+    padding: 4px 8px;
+    background: #434343;
+    border: 1px solid #555;
+    border-radius: 3px;
+    color: #e0e0e0;
+    font-size: 12px;
+  }
+
+  .host-input {
+    min-width: 140px;
+  }
+
+  .port-input {
+    width: 70px;
+  }
+
+  .host-input::placeholder,
+  .port-input::placeholder {
+    color: #777;
   }
 
   .refresh-btn {
