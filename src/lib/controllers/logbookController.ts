@@ -10,6 +10,7 @@ import {
   importBlackboxLog,
   exportFlights,
   exportBlackboxFile,
+  exportTrackFile,
   importKflight,
   type Flight,
   type FlightSummary,
@@ -158,4 +159,13 @@ export async function exportBlackbox(
   dbPath: string,
 ): Promise<string> {
   return exportBlackboxFile(flightId, outputPath, dbPath);
+}
+
+/** Export a flight track as KMZ/KML/GPX/CSV (format from file extension). */
+export async function exportTrack(
+  flightId: number,
+  outputPath: string,
+  dbPath: string,
+): Promise<void> {
+  return exportTrackFile(flightId, outputPath, dbPath);
 }

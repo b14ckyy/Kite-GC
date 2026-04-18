@@ -34,6 +34,7 @@
     onDeleteFlight,
     onExportFlights,
     onExportBlackbox,
+    onExportTrack,
     onImportKflight,
   }: {
     flightLoggingEnabled: boolean;
@@ -59,6 +60,7 @@
     onDeleteFlight: () => void;
     onExportFlights: (ids: number[]) => void;
     onExportBlackbox: () => void;
+    onExportTrack: () => void;
     onImportKflight: () => void;
   } = $props();
 
@@ -173,14 +175,16 @@
   }
 
   // UI helpers
-  function autoResizeNotes(el: HTMLTextAreaElement) {
+  function autoResizeNotes(el: HTMLTextAreaElement, allowShrink = false) {
+    const current = el.offsetHeight;
     el.style.height = 'auto';
-    el.style.height = Math.min(el.scrollHeight, 140) + 'px';
+    const minH = allowShrink ? 44 : Math.max(44, current);
+    el.style.height = Math.max(minH, Math.min(el.scrollHeight, 140)) + 'px';
   }
 
   function notesAutoSize(el: HTMLTextAreaElement) {
-    autoResizeNotes(el);
-    return { update() { autoResizeNotes(el); } };
+    autoResizeNotes(el, true);
+    return { update() { autoResizeNotes(el, true); } };
   }
 
   function formatFlightSource(source: string): string {
@@ -348,7 +352,7 @@
         <span>{$t('logbook.noResults')}</span>
       </div>
     {:else}
-      <div class="logbook-layout">
+      <div class="logbook-layout" class:logbook-layout-detail={selectedFlight != null}>
         <div class="logbook-list">
           {#each flightTree.groups as top}
             <div class="logbook-tree-node">
@@ -395,8 +399,8 @@
           {/each}
         </div>
 
+        {#if selectedFlight}
         <div class="logbook-detail">
-          {#if selectedFlight}
             <div class="fc-info-grid">
               <span class="fc-label">{$t('logbook.craft')}</span>
               <span class="fc-value">{selectedFlight.craft_name || $t('logbook.unnamedCraft')}</span>
@@ -504,15 +508,11 @@
             </div>
             <div class="setting-row">
               <button class="cache-clear-btn" onclick={onSaveNotes}>{$t('logbook.saveNotes')}</button>
+              <button class="cache-clear-btn" onclick={onExportTrack}>{$t('logbook.exportTrack')}</button>
               <button class="cache-clear-btn logbook-danger" onclick={onDeleteFlight}>{$t('logbook.deleteFlight')}</button>
             </div>
-          {:else}
-            <div class="panel-empty">
-              <span class="panel-empty-icon">✈</span>
-              <span>{$t('logbook.selectFlight')}</span>
-            </div>
-          {/if}
         </div>
+        {/if}
       </div>
     {/if}
   {/if}
@@ -648,7 +648,7 @@
   }
 
   .notes-input-auto {
-    overflow: hidden;
+    overflow-y: auto;
     max-height: 140px;
   }
 
@@ -803,9 +803,13 @@
 
   .logbook-layout {
     display: grid;
-    grid-template-columns: minmax(240px, 0.85fr) minmax(0, 1.35fr);
+    grid-template-columns: 1fr;
     gap: 12px;
     min-height: 420px;
+  }
+
+  .logbook-layout.logbook-layout-detail {
+    grid-template-columns: 380px minmax(0, 1fr);
   }
 
   .logbook-list {

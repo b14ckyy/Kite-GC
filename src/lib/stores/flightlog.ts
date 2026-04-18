@@ -80,6 +80,9 @@ export interface TelemetryRecord {
   wind_d_ms: number | null;
   rc_data_json: string | null;
   rc_command_json: string | null;
+  nav_lat: number | null;
+  nav_lon: number | null;
+  nav_alt_m: number | null;
 }
 
 export type LogbookSortMode =
@@ -244,6 +247,18 @@ export async function exportBlackboxFile(
   dbPath: string,
 ): Promise<string> {
   return invoke<string>('flightlog_export_blackbox', {
+    flightId,
+    outputPath,
+    dbPath: dbPath || undefined,
+  });
+}
+
+export async function exportTrackFile(
+  flightId: number,
+  outputPath: string,
+  dbPath: string,
+): Promise<void> {
+  return invoke<void>('flightlog_export_track', {
     flightId,
     outputPath,
     dbPath: dbPath || undefined,

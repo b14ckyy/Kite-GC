@@ -134,6 +134,9 @@ where
     let mut blackbox_rows = Vec::with_capacity(rows.len());
 
     for row in rows {
+        // Use raw GPS for position, nav fused for altitude
+        let best_alt = row.telemetry.nav_alt_m.or(row.telemetry.baro_alt_m).or(row.telemetry.alt_m);
+
         if start_lat.is_none() || start_lon.is_none() {
             if let (Some(lat), Some(lon)) = (row.telemetry.lat, row.telemetry.lon) {
                 if is_valid_gps_coord(lat, lon) {
@@ -142,7 +145,7 @@ where
                 }
             }
         }
-        if let Some(alt) = row.telemetry.alt_m {
+        if let Some(alt) = best_alt {
             max_alt_m = Some(max_alt_m.map_or(alt, |current: f64| current.max(alt)));
         }
         if let Some(speed) = row.telemetry.speed_ms {
@@ -316,6 +319,7 @@ fn parse_csv_rows(csv_output: &str, file_data: &[u8]) -> Result<Vec<ParsedRow>, 
         let csv_data: String = record.iter().collect::<Vec<_>>().join(",");
 
         let telemetry = build_telemetry_record_indexed(&cols, &record, raw_row_count as i64);
+
         let timestamp_us = telemetry.timestamp_ms * 1000;
         rows.push(ParsedRow {
             timestamp_us,
@@ -384,6 +388,11 @@ struct ColumnIndices {
     wind_d: Option<usize>,
     rc_data: Vec<usize>,
     rc_command: Vec<usize>,
+    nav_pos_north: Option<usize>,
+    nav_pos_east: Option<usize>,
+    nav_pos_up: Option<usize>,
+    gps_home_lat: Option<usize>,
+    gps_home_lon: Option<usize>,
 }
 
 impl ColumnIndices {
@@ -428,6 +437,11 @@ impl ColumnIndices {
             wind_d: resolve_col(m, &["wind[2]", "wind2", "wind_d", "wind_d_ms"]),
             rc_data: resolve_indexed_channels(m, "rcdata"),
             rc_command: resolve_indexed_channels(m, "rccommand"),
+            nav_pos_north: resolve_col(m, &["navpos[0]", "navpos0"]),
+            nav_pos_east: resolve_col(m, &["navpos[1]", "navpos1"]),
+            nav_pos_up: resolve_col(m, &["navpos[2]", "navpos2"]),
+            gps_home_lat: resolve_col(m, &["gps_home_lat"]),
+            gps_home_lon: resolve_col(m, &["gps_home_lon"]),
         }
     }
 }
@@ -551,6 +565,12 @@ fn build_telemetry_record_indexed(
         wind_d_ms: read_f64(cols.wind_d, record),
         rc_data_json: read_json_array(&cols.rc_data, record),
         rc_command_json: read_json_array(&cols.rc_command, record),
+        // navPos[0,1] are local-frame NE offsets in cm — NOT useful as geographic coords.
+        // Only navPos[2] (fused altitude) is used; lat/lon come from raw GPS.
+        nav_lat: None,
+        nav_lon: None,
+        // navPos[2] = fused altitude in cm relative to home, always /100
+        nav_alt_m: read_f64(cols.nav_pos_up, record).map(|v| v / 100.0),
     }
 }
 

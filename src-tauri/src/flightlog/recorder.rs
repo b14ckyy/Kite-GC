@@ -403,6 +403,9 @@ impl FlightRecorder {
             wind_d_ms: None,
             rc_data_json: None,
             rc_command_json: None,
+            nav_lat: None,
+            nav_lon: None,
+            nav_alt_m: None,
         };
 
         // Write to raw logger if active

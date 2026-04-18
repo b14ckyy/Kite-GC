@@ -9,7 +9,7 @@ use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
 
 use super::types::{Flight, FlightSummary, TelemetryRecord};
 
-const CURRENT_SCHEMA_VERSION: u32 = 4;
+const CURRENT_SCHEMA_VERSION: u32 = 5;
 
 /// Open (or create) the flight log database at the given path.
 /// Runs migrations if needed.
@@ -101,6 +101,10 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
         migrate_v3_to_v4(conn)?;
     }
 
+    if current < 5 {
+        migrate_v4_to_v5(conn)?;
+    }
+
     Ok(())
 }
 
@@ -123,6 +127,16 @@ fn migrate_v3_to_v4(conn: &Connection) -> SqlResult<()> {
          ALTER TABLE telemetry_records ADD COLUMN wind_d_ms REAL;
          ALTER TABLE telemetry_records ADD COLUMN rc_data_json TEXT;
          ALTER TABLE telemetry_records ADD COLUMN rc_command_json TEXT;",
+    )?;
+    set_user_version(conn, 4)?;
+    Ok(())
+}
+
+fn migrate_v4_to_v5(conn: &Connection) -> SqlResult<()> {
+    conn.execute_batch(
+        "ALTER TABLE telemetry_records ADD COLUMN nav_lat REAL;
+         ALTER TABLE telemetry_records ADD COLUMN nav_lon REAL;
+         ALTER TABLE telemetry_records ADD COLUMN nav_alt_m REAL;",
     )?;
     set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
     Ok(())
@@ -333,7 +347,8 @@ pub fn insert_telemetry_batch(
                 active_wp_number, active_flight_mode_flags, state_flags, nav_state, nav_flags,
                 rx_signal_received, hw_health_status, baro_temperature,
                 wind_n_ms, wind_e_ms, wind_d_ms,
-                rc_data_json, rc_command_json
+                rc_data_json, rc_command_json,
+                nav_lat, nav_lon, nav_alt_m
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
                 ?13, ?14, ?15, ?16, ?17, ?18, ?19,
@@ -341,7 +356,8 @@ pub fn insert_telemetry_batch(
                 ?24, ?25, ?26, ?27, ?28,
                 ?29, ?30, ?31,
                 ?32, ?33, ?34,
-                ?35, ?36
+                ?35, ?36,
+                ?37, ?38, ?39
             )",
         )?;
         for r in records {
@@ -382,6 +398,9 @@ pub fn insert_telemetry_batch(
                 r.wind_d_ms,
                 r.rc_data_json,
                 r.rc_command_json,
+                r.nav_lat,
+                r.nav_lon,
+                r.nav_alt_m,
             ])?;
         }
     }
@@ -493,7 +512,8 @@ pub fn get_flight_track(
             active_wp_number, active_flight_mode_flags, state_flags, nav_state, nav_flags,
             rx_signal_received, hw_health_status, baro_temperature,
             wind_n_ms, wind_e_ms, wind_d_ms,
-            rc_data_json, rc_command_json
+            rc_data_json, rc_command_json,
+            nav_lat, nav_lon, nav_alt_m
          FROM telemetry_records
          WHERE flight_id = ?1
          ORDER BY timestamp_ms ASC",
@@ -538,6 +558,9 @@ pub fn get_flight_track(
             wind_d_ms: row.get(34)?,
             rc_data_json: row.get(35)?,
             rc_command_json: row.get(36)?,
+            nav_lat: row.get(37)?,
+            nav_lon: row.get(38)?,
+            nav_alt_m: row.get(39)?,
         })
     })?;
 
@@ -902,6 +925,9 @@ mod tests {
                 wind_d_ms: None,
                 rc_data_json: None,
                 rc_command_json: None,
+                nav_lat: None,
+                nav_lon: None,
+                nav_alt_m: None,
             })
             .collect();
 
@@ -980,6 +1006,9 @@ mod tests {
             wind_d_ms: None,
             rc_data_json: None,
             rc_command_json: None,
+            nav_lat: None,
+            nav_lon: None,
+            nav_alt_m: None,
         };
         insert_telemetry_batch(&conn, &[rec]).unwrap();
 

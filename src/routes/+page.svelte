@@ -419,6 +419,32 @@
     }
   }
 
+  async function exportTrack() {
+    if (!selectedFlightId || !selectedFlight) return;
+    try {
+      const craft = selectedFlight.craft_name || 'flight';
+      const date = selectedFlight.start_time ? new Date(selectedFlight.start_time).toISOString().slice(0, 10) : '';
+      const defaultName = `${craft}_${date}`.replace(/\s+/g, '_');
+      const outputPath = await save({
+        filters: [
+          { name: 'KMZ (Google Earth)', extensions: ['kmz'] },
+          { name: 'KML (Google Earth)', extensions: ['kml'] },
+          { name: 'GPX (GPS Exchange)', extensions: ['gpx'] },
+          { name: 'CSV (Spreadsheet)', extensions: ['csv'] },
+        ],
+        defaultPath: `${defaultName}.kmz`,
+      });
+      if (!outputPath) return;
+      await logbookCtrl.exportTrack(selectedFlightId, outputPath, flightLogDbPath);
+      await confirm(
+        $t('logbook.exportTrackSuccess'),
+        { title: $t('logbook.exportTrackTitle'), kind: 'info' },
+      );
+    } catch (e: any) {
+      errorMsg = e?.toString?.() ?? String(e);
+    }
+  }
+
   async function importKflightFile() {
     try {
       const selected = await open({
@@ -722,7 +748,7 @@
   {#if navPanelOpen}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="nav-panel" class:nav-panel-wide={logbookDetailOpen} class:nav-panel-minimized={logbookMinimized && logbookHasFlightOnMap} onclick={() => { if (logbookMinimized) expandLogbook(); }}>
+    <div class="nav-panel" class:nav-panel-logbook={activeTab === 'logbook' && !logbookDetailOpen} class:nav-panel-wide={logbookDetailOpen} class:nav-panel-minimized={logbookMinimized && logbookHasFlightOnMap} onclick={() => { if (logbookMinimized) expandLogbook(); }}>
       <div class="panel-content">
         <!-- UAV Info Tab -->
         {#if activeTab === "uav-info"}
@@ -780,6 +806,7 @@
             onDeleteFlight={removeSelectedFlight}
             onExportFlights={exportFlightsToKflight}
             onExportBlackbox={exportBlackbox}
+            onExportTrack={exportTrack}
             onImportKflight={importKflightFile}
           />
 
@@ -909,6 +936,10 @@
     backdrop-filter: blur(12px);
     animation: panel-slide-in 0.25s ease-out;
     transition: width 0.25s ease;
+  }
+
+  .nav-panel.nav-panel-logbook {
+    width: min(430px, calc(100vw - 86px));
   }
 
   .nav-panel.nav-panel-wide {

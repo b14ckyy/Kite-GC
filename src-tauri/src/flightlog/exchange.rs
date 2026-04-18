@@ -160,7 +160,10 @@ fn create_export_db(path: &Path) -> Result<Connection, String> {
             wind_e_ms    REAL,
             wind_d_ms    REAL,
             rc_data_json TEXT,
-            rc_command_json TEXT
+            rc_command_json TEXT,
+            nav_lat      REAL,
+            nav_lon      REAL,
+            nav_alt_m    REAL
         );
 
         CREATE TABLE IF NOT EXISTS blackbox_records (

@@ -12,7 +12,7 @@ import type { TelemetryRecord } from '$lib/stores/flightlog';
 /** Convert a DB telemetry row to the widget-consumable TelemetryData format. */
 export function toTelemetryData(r: TelemetryRecord): TelemetryData {
   return {
-    // GPS
+    // GPS — always use raw GPS for position (nav fused local offsets are inaccurate for geo coords)
     lat: r.lat ?? 0,
     lon: r.lon ?? 0,
     altMsl: r.alt_m ?? 0,
@@ -26,8 +26,8 @@ export function toTelemetryData(r: TelemetryRecord): TelemetryData {
     pitch: r.pitch ?? 0,
     yaw: r.heading ?? r.yaw ?? 0,
 
-    // Altitude (baro/nav)
-    altitude: r.baro_alt_m ?? r.alt_m ?? 0,
+    // Altitude — prefer nav filter fused altitude (smooth), fallback to baro, then GPS
+    altitude: r.nav_alt_m ?? r.baro_alt_m ?? r.alt_m ?? 0,
     vario: r.vario_ms ?? 0,
 
     // Airspeed — not in current DB schema, default 0

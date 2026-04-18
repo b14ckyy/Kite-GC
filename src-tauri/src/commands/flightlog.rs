@@ -279,6 +279,26 @@ pub async fn flightlog_import_blackbox(
 
 // ── Export / Import / Offline replay ────────────────────────────────
 
+/// Export a flight track as KMZ/KML/GPX/CSV (format detected from file extension)
+#[tauri::command]
+pub fn flightlog_export_track(
+    flight_id: i64,
+    output_path: String,
+    db_path: Option<String>,
+) -> Result<(), String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    let flight = db::get_flight(&conn, flight_id)
+        .map_err(|e| format!("DB error: {}", e))?
+        .ok_or_else(|| "Flight not found".to_string())?;
+    let track = db::get_flight_track(&conn, flight_id)
+        .map_err(|e| format!("DB error: {}", e))?;
+    crate::flightlog::track_export::export_track(
+        &flight,
+        &track,
+        std::path::Path::new(&output_path),
+    )
+}
+
 /// Export the raw blackbox binary file for a flight
 #[tauri::command]
 pub fn flightlog_export_blackbox(

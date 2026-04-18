@@ -108,6 +108,12 @@ pub struct TelemetryRecord {
     /// Raw/processed RC channel arrays encoded as JSON
     pub rc_data_json: Option<String>,
     pub rc_command_json: Option<String>,
+    /// INAV navigation filter fused position (navPos[0..2])
+    /// These provide sensor-fused lat/lon/alt from the EKF,
+    /// smoother than raw GPS, used for track display & export.
+    pub nav_lat: Option<f64>,
+    pub nav_lon: Option<f64>,
+    pub nav_alt_m: Option<f64>,
 }
 
 /// Summary for the logbook list view
