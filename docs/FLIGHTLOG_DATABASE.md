@@ -17,7 +17,7 @@ Excluded fields are typically Blackbox tuning data, PID internals, or low-level 
 
 ## Current Schema
 
-Current implemented schema version: `v4`
+Current implemented schema version: `v5`
 
 Migration history:
 
@@ -25,10 +25,11 @@ Migration history:
 - `v2`: `blackbox_records`, `blackbox_files`, `flights.source`
 - `v3`: `telemetry_records.link_quality`
 - `v4`: replay-focused telemetry fields (baro/GPS quality/nav/state/wind/RC arrays/sensor health)
+- `v5`: `nav_lat`, `nav_lon`, `nav_alt_m` columns for INAV navigation filter data
 
 ## Replay Schema Direction
 
-Current replay target schema: `v4` (implemented)
+Current replay target schema: `v5` (implemented)
 
 ### flights
 
@@ -106,6 +107,19 @@ These are sampled replay records. New `v4` fields below are the current target s
 | `wind_d_ms` | `REAL` | existing (`v4`) | `wind[2]` | Wind overlay / replay context |
 | `rc_data_json` | `TEXT` | existing (`v4`) | `rcData[]` | Raw pilot inputs |
 | `rc_command_json` | `TEXT` | existing (`v4`) | `rcCommand[]` | FC-processed inputs |
+| `nav_lat` | `REAL` | existing (`v5`) | — | Always NULL (see note below) |
+| `nav_lon` | `REAL` | existing (`v5`) | — | Always NULL (see note below) |
+| `nav_alt_m` | `REAL` | existing (`v5`) | `navPos[2]` / 100 | Fused altitude relative to home (m) |
+
+### nav_lat / nav_lon / nav_alt_m
+
+INAV's `navPos[0,1,2]` values from the Blackbox log represent **local-frame North-East-Up centimeter offsets** relative to the GPS home position. They are NOT geographic coordinates.
+
+- `nav_lat` and `nav_lon` are always `NULL`. An earlier attempt to convert `navPos[0,1]` to geographic coordinates using `home + offset / 111320` produced inaccurate tracks (verified by comparison with `flightlog2kml` reference tool in Google Earth). The local tangent plane approximation introduces systematic offset.
+- `nav_alt_m` stores `navPos[2] / 100` — the INAV EKF fused altitude in meters, relative to the home/launch point. This is actively used by the track export module and telemetry adapter for smooth altitude data (raw GPS altitude has 1m integer stepping).
+- The columns are retained in the schema for potential future use if a more accurate conversion method is found.
+
+**Track export and map display** always use raw GPS (`lat`/`lon`) for position and `nav_alt_m` for altitude.
 
 ## Field Semantics
 

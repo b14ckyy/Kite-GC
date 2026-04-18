@@ -559,7 +559,7 @@ blackbox_decode --merge-gps --datetime --unit-height m --unit-gps-speed mps --st
 
 Detailed replay-oriented DB field selection is documented in `docs/FLIGHTLOG_DATABASE.md`.
 
-**DB schema** (migrations v1→v2→v3):
+**DB schema** (migrations v1→v2→v3→v4→v5):
 ```sql
 -- v2: blackbox tables + flights.source
 ALTER TABLE flights ADD COLUMN source TEXT NOT NULL DEFAULT 'live';
@@ -568,6 +568,16 @@ CREATE TABLE blackbox_files (flight_id, original_filename, log_index, file_data 
 
 -- v3: link quality in telemetry
 ALTER TABLE telemetry_records ADD COLUMN link_quality INTEGER;
+
+-- v4: replay-focused telemetry fields
+ALTER TABLE telemetry_records ADD COLUMN baro_alt_m REAL;
+ALTER TABLE telemetry_records ADD COLUMN gps_hdop REAL;
+-- ... (18 columns total: nav state, flight modes, wind, RC arrays, sensor health)
+
+-- v5: INAV navigation filter data
+ALTER TABLE telemetry_records ADD COLUMN nav_lat REAL;   -- always NULL
+ALTER TABLE telemetry_records ADD COLUMN nav_lon REAL;   -- always NULL
+ALTER TABLE telemetry_records ADD COLUMN nav_alt_m REAL;  -- navPos[2]/100, fused altitude
 ```
 
 **Use cases**:
@@ -704,4 +714,64 @@ The existing `flightlog_geocode` and `flightlog_fetch_weather` Tauri commands re
 - SQLite is universally supported and can be inspected with standard DB tools
 - Including raw Blackbox BLOBs preserves the ability to re-decode with newer `blackbox_decode` versions
 - The metadata table enables future format versioning
+
+---
+
+## ADR-020: Track Export — Raw GPS Position + Fused Nav Altitude
+
+**Date**: 2026-04-18
+**Status**: Accepted
+
+**Context**: Users need to export flight tracks for visualization in Google Earth, planning tools, or post-flight analysis. INAV Blackbox logs contain both raw GPS coordinates (`GPS_coord[0/1]`) and navigation-fused position estimates (`navPos[0/1/2]`). Initial implementation tried to convert `navPos[0,1]` (local-frame NE offsets in cm relative to home) to geographic coordinates using the GPS home position. This conversion introduced visible track offset compared to reference tools like `flightlog2kml`.
+
+**Key finding**: `navPos[0,1]` are **local North-East-Up centimeter offsets**, not geographic coordinates. Converting them to lat/lon using `home + offset / 111320` produces inaccurate results due to the local tangent plane approximation and accumulated EKF drift. The reference tool `flightlog2kml` uses raw GPS for position and only `navPos[2]` for altitude.
+
+**Decision**: Always use raw GPS (`r.lat` / `r.lon`) for geographic position in all exports and map displays. Use `navPos[2] / 100` (fused altitude relative to home) for altitude only, with baro fallback.
+
+**Export module** (`track_export.rs`):
+
+| Format | Content |
+|---|---|
+| **KMZ** | Zipped KML (via `zip` crate v2, deflate compression) |
+| **KML** | `<LineString>` with `<altitudeMode>relativeToGround</altitudeMode>`, red track line |
+| **GPX** | Standard `<trk>/<trkseg>/<trkpt>` with `<ele>` and `<time>` |
+| **CSV** | All telemetry columns including raw nav fields for analysis |
+
+**Track processing pipeline**:
+1. **Filter valid GPS**: Remove records without lat/lon or with invalid (0,0) coordinates
+2. **Spike filter**: Remove points with impossible speed (> 150 m/s via haversine from previous point)
+3. **Douglas-Peucker 3D simplification**: ε = 0.5 m, reduces hover jitter while preserving path shape
+4. **Altitude selection**: `nav_alt_m` → `baro_alt_m` → `0.0` (fused preferred, baro fallback)
+
+**Altitude source hierarchy** (`best_alt_relative()`):
+```
+nav_alt_m     ← navPos[2] / 100  (INAV EKF fused, relative to home, smooth)
+baro_alt_m    ← BaroAlt           (barometric, relative to home)
+0.0           ← fallback
+```
+
+**Position source** (all exports and statistics):
+```
+r.lat / r.lon ← raw GPS coordinates (always, no nav fallback)
+```
+
+**UI integration**:
+- "Export Track" button in LogbookPanel detail view, visible for all flights with telemetry
+- Unified native Save dialog with format filter (KMZ/KML/GPX/CSV)
+- Format auto-detected from file extension
+
+**What nav_lat/nav_lon are NOT used for**:
+- Track export position (KML/KMZ/GPX/CSV coordinates)
+- Map polyline display (Map.svelte uses `point.lat` / `point.lon`)
+- Flight statistics (start position, total distance, max distance from home)
+- telemetryAdapter position output
+
+**DB columns**: `nav_lat` and `nav_lon` remain in schema v5 but are always `NULL` (the local→geographic conversion was removed). `nav_alt_m` is actively populated and used.
+
+**Rationale**:
+- Raw GPS matches reference tools (flightlog2kml) — proven correct on real flight data
+- navPos[0,1] local frame conversion introduces systematic offset (verified in Google Earth comparison)
+- navPos[2] altitude is genuinely useful — smoother than raw GPS altitude (which has 1m integer steps)
+- Keeping nav columns in schema allows future use if a better conversion method is found
+- Douglas-Peucker + spike filter produce clean tracks without requiring fused position data
 
