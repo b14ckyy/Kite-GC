@@ -35,19 +35,20 @@ export class PlaybackController {
     const startIdx = currentIndex >= track.length - 1 ? 0 : currentIndex;
     this.stop();
     let idx = startIdx;
+    let virtualTime = track[startIdx].timestamp_ms;
     this.timer = setInterval(() => {
       if (idx >= track.length - 1) {
         this.stop();
         onFinish();
         return;
       }
-      const currentTs = track[idx].timestamp_ms;
-      const targetTs = currentTs + TICK_MS * speed;
+      virtualTime += TICK_MS * speed;
       let newIdx = idx;
-      while (newIdx < track.length - 1 && track[newIdx + 1].timestamp_ms <= targetTs) newIdx++;
-      if (newIdx === idx) newIdx++;
-      idx = Math.min(newIdx, track.length - 1);
-      onTick(idx);
+      while (newIdx < track.length - 1 && track[newIdx + 1].timestamp_ms <= virtualTime) newIdx++;
+      if (newIdx !== idx) {
+        idx = newIdx;
+        onTick(idx);
+      }
     }, TICK_MS);
     return startIdx;
   }

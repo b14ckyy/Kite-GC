@@ -221,6 +221,20 @@ export async function importBlackboxLog(
   });
 }
 
+export async function importArdupilotLog(
+  filePath: string,
+  dbPath: string,
+  forceImport: boolean = false,
+  lang?: string,
+): Promise<BlackboxImportStatus> {
+  return invoke<BlackboxImportStatus>('flightlog_import_ardupilot', {
+    filePath,
+    dbPath: dbPath || undefined,
+    forceImport,
+    lang,
+  });
+}
+
 // ── Export / Import / Offline replay ────────────────────────────────
 
 export interface KflightImportResult {

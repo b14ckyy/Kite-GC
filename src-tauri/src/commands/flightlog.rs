@@ -359,3 +359,138 @@ pub fn flightlog_kflight_track(
 ) -> Result<Vec<TelemetryRecord>, String> {
     exchange::get_track_from_file(std::path::Path::new(&file_path), flight_id)
 }
+
+// ─── ArduPilot DataFlash commands ────────────────────────────────────────────
+
+use crate::flightlog::ardupilot;
+use serde::Serialize;
+
+/// Inventory the FMT records in an ArduPilot .bin file.
+/// Returns the list of registered message type names so the frontend can
+/// display what data is available before committing to a full import.
+#[tauri::command]
+pub fn flightlog_probe_ardupilot(file_path: String) -> Result<Vec<ArdupilotMsgTypeInfo>, String> {
+    let data = std::fs::read(&file_path)
+        .map_err(|e| format!("Failed to read file '{}': {}", file_path, e))?;
+
+    let defs = ardupilot::probe_message_types(&data);
+    let result = defs
+        .into_iter()
+        .map(|d| ArdupilotMsgTypeInfo {
+            type_id: d.type_id,
+            name: d.name,
+            format: d.format,
+            columns: d.columns,
+        })
+        .collect();
+    Ok(result)
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ArdupilotMsgTypeInfo {
+    pub type_id: u8,
+    pub name: String,
+    pub format: String,
+    pub columns: Vec<String>,
+}
+
+/// Decode an ArduPilot .bin file and write a normalized CSV to `out_csv_path`.
+/// Returns a summary of what was decoded for verification.
+#[tauri::command]
+pub fn flightlog_decode_ardupilot_csv(
+    file_path: String,
+    out_csv_path: String,
+) -> Result<ArdupilotDecodeStats, String> {
+    let data = std::fs::read(&file_path)
+        .map_err(|e| format!("Failed to read file '{}': {}", file_path, e))?;
+
+    let stats = ardupilot::decode_to_normalized_csv(&data, std::path::Path::new(&out_csv_path))?;
+
+    Ok(ArdupilotDecodeStats {
+        total_records: stats.total_records,
+        gps_rows: stats.gps_rows,
+        vehicle_type: stats.vehicle_type,
+        fw_version: stats.fw_version,
+        first_fix_time: stats.first_fix_time.map(|t| t.to_rfc3339()),
+        last_fix_time: stats.last_fix_time.map(|t| t.to_rfc3339()),
+        arm_count: stats.arm_count,
+        disarm_count: stats.disarm_count,
+        message_type_counts: stats.message_type_counts,
+    })
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ArdupilotDecodeStats {
+    pub total_records: usize,
+    pub gps_rows: usize,
+    pub vehicle_type: Option<String>,
+    pub fw_version: Option<String>,
+    pub first_fix_time: Option<String>,
+    pub last_fix_time: Option<String>,
+    pub arm_count: usize,
+    pub disarm_count: usize,
+    pub message_type_counts: std::collections::HashMap<String, usize>,
+}
+
+/// Import an ArduPilot DataFlash .bin file into the logbook database.
+/// Emits `flightlog-import-progress` events during processing.
+#[tauri::command]
+pub async fn flightlog_import_ardupilot(
+    file_path: String,
+    db_path: Option<String>,
+    force_import: bool,
+    lang: Option<String>,
+    app_handle: tauri::AppHandle,
+) -> Result<BlackboxImportStatus, String> {
+    let db_path = db_path.unwrap_or_default();
+    let db_path_for_import = db_path.clone();
+
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let emit_progress = |progress: u8, stage: &str, message: &str| {
+            let _ = app_handle.emit(
+                "flightlog-import-progress",
+                BlackboxImportProgress {
+                    stage: stage.to_string(),
+                    progress,
+                    message: message.to_string(),
+                },
+            );
+        };
+
+        emit_progress(0, "start", "Preparing ArduPilot import...");
+        let conn = open_db(&db_path_for_import)?;
+        ardupilot::import_ardupilot_log_with_progress(
+            &conn,
+            std::path::Path::new(&file_path),
+            force_import,
+            emit_progress,
+        )
+    })
+    .await
+    .map_err(|e| format!("ArduPilot import task failed: {}", e))??;
+
+    // Auto-geocode on successful import
+    if let BlackboxImportStatus::Success { flight_id, .. } = &result {
+        let conn = open_db(&db_path)?;
+        if let Some(flight) = db::get_flight(&conn, *flight_id)
+            .map_err(|e| format!("Query error: {}", e))?
+        {
+            if flight.location_name.as_deref().unwrap_or("").trim().is_empty() {
+                if let (Some(lat), Some(lon)) = (flight.start_lat, flight.start_lon) {
+                    if let Some(name) = crate::flightlog::geocode::reverse_geocode(
+                        lat, lon,
+                        lang.as_deref().unwrap_or("en"),
+                    ).await {
+                        conn.execute(
+                            "UPDATE flights SET location_name = ?1 WHERE id = ?2",
+                            rusqlite::params![name, flight_id],
+                        )
+                        .map_err(|e| format!("Update error: {}", e))?;
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(result)
+}

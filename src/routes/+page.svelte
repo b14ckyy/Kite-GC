@@ -344,7 +344,10 @@
     try {
       const selected = await open({
         multiple: true,
-        filters: [{ name: $t('logbook.blackboxFileFilter'), extensions: ['bbl', 'bfl', 'csv', 'txt'] }],
+        filters: [
+          { name: $t('logbook.blackboxFileFilter'), extensions: ['bbl', 'bfl', 'csv', 'txt'] },
+          { name: 'ArduPilot DataFlash', extensions: ['bin'] },
+        ],
       });
       if (!selected) return;
       const files = Array.isArray(selected) ? selected : [selected];
@@ -352,7 +355,11 @@
 
       blackboxImporting = true;
       for (const filePath of files) {
-        await performImport(filePath, undefined, false);
+        if (/\.bin$/i.test(filePath)) {
+          await performArdupilotImport(filePath, false);
+        } else {
+          await performImport(filePath, undefined, false);
+        }
       }
     } catch (e: any) {
       errorMsg = e?.toString?.() ?? String(e);
@@ -378,6 +385,22 @@
         await confirm(msg, { title: $t('logbook.importKflightTitle'), kind: 'info' });
       } catch (e: any) {
         errorMsg = e?.toString?.() ?? String(e);
+      }
+    }
+
+    // Handle ArduPilot .bin files
+    const binFiles = paths.filter((p) => /\.bin$/i.test(p));
+    if (binFiles.length > 0) {
+      try {
+        blackboxImporting = true;
+        for (const filePath of binFiles) {
+          await performArdupilotImport(filePath, false);
+        }
+      } catch (e: any) {
+        errorMsg = e?.toString?.() ?? String(e);
+      } finally {
+        blackboxImporting = false;
+        blackboxImportProgress = null;
       }
     }
 
@@ -505,6 +528,29 @@
       }
     } else {
       // Success case
+      await loadLogbook();
+      await selectFlight(result.flight_id);
+    }
+  }
+
+  async function performArdupilotImport(filePath: string, forceImport: boolean) {
+    const result = await logbookCtrl.importArdupilot(filePath, flightLogDbPath, forceImport, $locale ?? 'en');
+    
+    if (result.type === 'duplicate') {
+      const confirmImport = await confirm(
+        $t('logbook.duplicateMessage', {
+          values: {
+            craft: result.duplicate_craft_name,
+            time: new Date(result.duplicate_start_time).toLocaleString(),
+          },
+        }),
+        { title: $t('logbook.duplicateTitle'), kind: 'warning' }
+      );
+      
+      if (confirmImport) {
+        await performArdupilotImport(filePath, true);
+      }
+    } else {
       await loadLogbook();
       await selectFlight(result.flight_id);
     }
@@ -715,10 +761,13 @@
       ?? 0,
   );
 
+  // FC variant for the selected flight (used by mode widgets + map coloring)
+  const replayFcVariant = $derived((selectedFlight as Flight | null)?.fc_variant ?? 'INAV');
+
   // Unified telemetry: live data when connected, playback data when replaying
   const telem = $derived(
     playbackActive && !isPrimaryConnected && playbackPoint
-      ? toTelemetryData(playbackPoint)
+      ? toTelemetryData(playbackPoint, replayFcVariant)
       : liveTelem,
   );
 
@@ -772,9 +821,9 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="map-fullscreen" onclick={minimizeLogbook}>
     {#if mapViewMode === '2d'}
-      <Map playbackTrack={mapTrack} playbackPoint={playbackPoint} {trackColorMode} platformType={mapPlatformType} />
+      <Map playbackTrack={mapTrack} playbackPoint={playbackPoint} {trackColorMode} platformType={mapPlatformType} fcVariant={replayFcVariant} />
     {:else}
-      <Map3D playbackTrack={mapTrack} playbackPoint={playbackPoint} {trackColorMode} platformType={mapPlatformType} />
+      <Map3D playbackTrack={mapTrack} playbackPoint={playbackPoint} {trackColorMode} platformType={mapPlatformType} fcVariant={replayFcVariant} />
     {/if}
   </div>
 

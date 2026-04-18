@@ -8,6 +8,7 @@ import {
   geocodeFlight,
   fetchFlightWeather,
   importBlackboxLog,
+  importArdupilotLog,
   exportFlights,
   exportBlackboxFile,
   exportTrackFile,
@@ -133,6 +134,18 @@ export async function importBlackbox(
   locale: string,
 ) {
   return importBlackboxLog(filePath, dbPath, logIndex, forceImport, locale);
+}
+
+/**
+ * Import an ArduPilot DataFlash .bin file.
+ */
+export async function importArdupilot(
+  filePath: string,
+  dbPath: string,
+  forceImport: boolean,
+  locale: string,
+) {
+  return importArdupilotLog(filePath, dbPath, forceImport, locale);
 }
 
 /** Export selected flights to a .kflight file. Returns the number exported. */

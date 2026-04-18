@@ -111,6 +111,85 @@ export function classifyFlightMode(flags: number): FlightModeInfo {
   return ACRO_MODE;
 }
 
+// ── ArduPilot Flight Mode Tables ────────────────────────────────────
+// Mode numbers from ArduPilot mode.h — separate tables for Copter and Plane.
+
+const ARDU_COPTER_MODES: Record<number, FlightModeInfo> = {
+  0:  { id: 'stabilize',    label: 'Stabilize',    color: '#59aa29', i18nKey: 'flightmode.ardu.stabilize' },
+  1:  { id: 'acro',         label: 'Acro',         color: '#c0c0c0', i18nKey: 'flightmode.ardu.acro' },
+  2:  { id: 'althold',      label: 'AltHold',      color: '#e8c820', i18nKey: 'flightmode.ardu.althold' },
+  3:  { id: 'auto',         label: 'Auto',         color: '#37a8db', i18nKey: 'flightmode.ardu.auto' },
+  4:  { id: 'guided',       label: 'Guided',       color: '#2980b9', i18nKey: 'flightmode.ardu.guided' },
+  5:  { id: 'loiter',       label: 'Loiter',       color: '#00bcd4', i18nKey: 'flightmode.ardu.loiter' },
+  6:  { id: 'rtl',          label: 'RTL',          color: '#9b59b6', i18nKey: 'flightmode.ardu.rtl' },
+  7:  { id: 'circle',       label: 'Circle',       color: '#ff8c00', i18nKey: 'flightmode.ardu.circle' },
+  9:  { id: 'land',         label: 'Land',         color: '#e67e22', i18nKey: 'flightmode.ardu.land' },
+  11: { id: 'drift',        label: 'Drift',        color: '#808080', i18nKey: 'flightmode.ardu.drift' },
+  13: { id: 'sport',        label: 'Sport',        color: '#27ae60', i18nKey: 'flightmode.ardu.sport' },
+  14: { id: 'flip',         label: 'Flip',         color: '#e91e9c', i18nKey: 'flightmode.ardu.flip' },
+  15: { id: 'autotune',     label: 'AutoTune',     color: '#e8c820', i18nKey: 'flightmode.ardu.autotune' },
+  16: { id: 'poshold',      label: 'PosHold',      color: '#00bcd4', i18nKey: 'flightmode.ardu.poshold' },
+  17: { id: 'brake',        label: 'Brake',        color: '#e74c3c', i18nKey: 'flightmode.ardu.brake' },
+  18: { id: 'throw',        label: 'Throw',        color: '#e91e9c', i18nKey: 'flightmode.ardu.throw' },
+  19: { id: 'avoid_adsb',   label: 'Avoid ADSB',   color: '#e60000', i18nKey: 'flightmode.ardu.avoid_adsb' },
+  20: { id: 'guided_nogps', label: 'Guided NoGPS', color: '#2980b9', i18nKey: 'flightmode.ardu.guided_nogps' },
+  21: { id: 'smartrtl',     label: 'SmartRTL',     color: '#9b59b6', i18nKey: 'flightmode.ardu.smartrtl' },
+  22: { id: 'flowhold',     label: 'FlowHold',     color: '#00bcd4', i18nKey: 'flightmode.ardu.flowhold' },
+  23: { id: 'follow',       label: 'Follow',       color: '#3498db', i18nKey: 'flightmode.ardu.follow' },
+  24: { id: 'zigzag',       label: 'ZigZag',       color: '#f39c12', i18nKey: 'flightmode.ardu.zigzag' },
+  25: { id: 'systemid',     label: 'SystemID',     color: '#808080', i18nKey: 'flightmode.ardu.systemid' },
+  26: { id: 'autorotate',   label: 'Autorotate',   color: '#e60000', i18nKey: 'flightmode.ardu.autorotate' },
+  27: { id: 'autortl',      label: 'AutoRTL',      color: '#9b59b6', i18nKey: 'flightmode.ardu.autortl' },
+};
+
+const ARDU_PLANE_MODES: Record<number, FlightModeInfo> = {
+  0:  { id: 'manual',       label: 'Manual',       color: '#808080', i18nKey: 'flightmode.ardu.manual' },
+  1:  { id: 'circle',       label: 'Circle',       color: '#ff8c00', i18nKey: 'flightmode.ardu.circle' },
+  2:  { id: 'stabilize',    label: 'Stabilize',    color: '#59aa29', i18nKey: 'flightmode.ardu.stabilize' },
+  3:  { id: 'training',     label: 'Training',     color: '#808080', i18nKey: 'flightmode.ardu.training' },
+  4:  { id: 'acro',         label: 'Acro',         color: '#c0c0c0', i18nKey: 'flightmode.ardu.acro' },
+  5:  { id: 'fbwa',         label: 'FBW-A',        color: '#59aa29', i18nKey: 'flightmode.ardu.fbwa' },
+  6:  { id: 'fbwb',         label: 'FBW-B',        color: '#27ae60', i18nKey: 'flightmode.ardu.fbwb' },
+  7:  { id: 'cruise',       label: 'Cruise',       color: '#ff8c00', i18nKey: 'flightmode.ardu.cruise' },
+  8:  { id: 'autotune',     label: 'AutoTune',     color: '#e8c820', i18nKey: 'flightmode.ardu.autotune' },
+  10: { id: 'auto',         label: 'Auto',         color: '#37a8db', i18nKey: 'flightmode.ardu.auto' },
+  11: { id: 'rtl',          label: 'RTL',          color: '#9b59b6', i18nKey: 'flightmode.ardu.rtl' },
+  12: { id: 'loiter',       label: 'Loiter',       color: '#00bcd4', i18nKey: 'flightmode.ardu.loiter' },
+  13: { id: 'takeoff',      label: 'Takeoff',      color: '#e91e9c', i18nKey: 'flightmode.ardu.takeoff' },
+  14: { id: 'avoid_adsb',   label: 'Avoid ADSB',   color: '#e60000', i18nKey: 'flightmode.ardu.avoid_adsb' },
+  15: { id: 'guided',       label: 'Guided',       color: '#2980b9', i18nKey: 'flightmode.ardu.guided' },
+  17: { id: 'qstabilize',   label: 'QStabilize',   color: '#59aa29', i18nKey: 'flightmode.ardu.qstabilize' },
+  18: { id: 'qhover',       label: 'QHover',       color: '#00bcd4', i18nKey: 'flightmode.ardu.qhover' },
+  19: { id: 'qloiter',      label: 'QLoiter',      color: '#00bcd4', i18nKey: 'flightmode.ardu.qloiter' },
+  20: { id: 'qland',        label: 'QLand',        color: '#e67e22', i18nKey: 'flightmode.ardu.qland' },
+  21: { id: 'qrtl',         label: 'QRTL',         color: '#9b59b6', i18nKey: 'flightmode.ardu.qrtl' },
+  22: { id: 'qautotune',    label: 'QAutoTune',    color: '#e8c820', i18nKey: 'flightmode.ardu.qautotune' },
+  23: { id: 'qacro',        label: 'QAcro',        color: '#c0c0c0', i18nKey: 'flightmode.ardu.qacro' },
+  24: { id: 'thermal',      label: 'Thermal',      color: '#f39c12', i18nKey: 'flightmode.ardu.thermal' },
+  25: { id: 'loiter_qland', label: 'Loiter QLand', color: '#e67e22', i18nKey: 'flightmode.ardu.loiter_qland' },
+};
+
+const ARDU_UNKNOWN_MODE: FlightModeInfo = {
+  id: 'unknown', label: 'Unknown', color: '#808080', i18nKey: 'flightmode.ardu.unknown',
+};
+
+/** Check if an fc_variant string is ArduPilot. */
+export function isArduPilot(fcVariant: string): boolean {
+  return /^(Ardu|Copter|Plane|Rover|Sub|Blimp)/i.test(fcVariant);
+}
+
+/** Classify an ArduPilot mode number into a named mode with color. */
+export function classifyArduPilotMode(modeNumber: number, fcVariant: string): FlightModeInfo {
+  const table = /Plane/i.test(fcVariant) ? ARDU_PLANE_MODES : ARDU_COPTER_MODES;
+  return table[modeNumber] ?? { ...ARDU_UNKNOWN_MODE, label: `Mode ${modeNumber}` };
+}
+
+/** Unified mode classifier — dispatches to INAV or ArduPilot based on fcVariant. */
+export function classifyMode(flags: number, fcVariant: string): FlightModeInfo {
+  if (isArduPilot(fcVariant)) return classifyArduPilotMode(flags, fcVariant);
+  return classifyFlightMode(flags);
+}
+
 // ── Nav State → UAV Icon Color ──────────────────────────────────────
 // INAV MW_NAV_STATE values from navigation.h — used for UAV icon coloring.
 
@@ -189,7 +268,7 @@ function quantize(value: number, min: number, max: number, steps: number): numbe
 // ── Track Segmentation ──────────────────────────────────────────────
 
 /** Segment a track by flight mode. Consecutive points with same mode = one segment. */
-export function segmentTrackByFlightMode(track: TelemetryRecord[]): TrackSegment[] {
+export function segmentTrackByFlightMode(track: TelemetryRecord[], fcVariant = 'INAV'): TrackSegment[] {
   const segments: TrackSegment[] = [];
   let current: TrackSegment | null = null;
 
@@ -198,7 +277,7 @@ export function segmentTrackByFlightMode(track: TelemetryRecord[]): TrackSegment
     const lon = r.lon;
     if (lat == null || lon == null) continue;
 
-    const mode = classifyFlightMode(r.active_flight_mode_flags ?? 0);
+    const mode = classifyMode(r.active_flight_mode_flags ?? 0, fcVariant);
 
     if (!current || current.modeInfo!.id !== mode.id) {
       // Bridge: duplicate last point of previous segment as first of new
@@ -257,11 +336,11 @@ export function segmentTrackByGradient(
 }
 
 /** Collect the set of unique flight modes actually used in a track. */
-export function getUsedFlightModes(track: TelemetryRecord[]): FlightModeInfo[] {
+export function getUsedFlightModes(track: TelemetryRecord[], fcVariant = 'INAV'): FlightModeInfo[] {
   const seen = new Set<string>();
   const result: FlightModeInfo[] = [];
   for (const r of track) {
-    const mode = classifyFlightMode(r.active_flight_mode_flags ?? 0);
+    const mode = classifyMode(r.active_flight_mode_flags ?? 0, fcVariant);
     if (!seen.has(mode.id)) {
       seen.add(mode.id);
       result.push(mode);

@@ -14,7 +14,7 @@
   import type { MapProvider } from "$lib/config/mapProviders";
   import { getCachedTile, putCachedTile, initTileCache } from "$lib/cache/tileCache";
   import { isValidGpsCoordinate } from "$lib/helpers/telemetry";
-  import { getNavStateColor, classifyFlightMode } from "$lib/helpers/trackColors";
+  import { getNavStateColor, classifyMode } from "$lib/helpers/trackColors";
   import type { TrackColorMode } from "$lib/helpers/trackColors";
   import type { TelemetryRecord } from "$lib/stores/flightlog";
   import type { PlatformType } from "$lib/helpers/uavIcons";
@@ -25,11 +25,13 @@
     playbackPoint = null,
     trackColorMode = 'flightmode' as TrackColorMode,
     platformType = PLATFORM_MULTIROTOR as PlatformType,
+    fcVariant = 'INAV',
   }: {
     playbackTrack?: TelemetryRecord[];
     playbackPoint?: TelemetryRecord | null;
     trackColorMode?: TrackColorMode;
     platformType?: PlatformType;
+    fcVariant?: string;
   } = $props();
 
   // ── State ──────────────────────────────────────────────────────────
@@ -618,7 +620,7 @@
     const alt = (point.alt_m ?? 0) + geoidOffset;
     const heading = point.heading ?? 0;
     const flags = point.active_flight_mode_flags ?? 0;
-    const color = classifyFlightMode(flags).color;
+    const color = classifyMode(flags, fcVariant).color;
     const position = Cesium.Cartesian3.fromDegrees(lon, lat, alt);
 
     if (!playbackMarkerEntity) {

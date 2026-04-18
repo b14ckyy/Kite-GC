@@ -1,15 +1,18 @@
-<!-- Flight Mode widget — shows current INAV flight mode as colored badge -->
+<!-- Flight Mode widget — shows current flight mode as colored badge -->
 <script lang="ts">
   import type { TelemetryData } from "$lib/stores/telemetry";
-  import { classifyFlightMode, FLIGHT_MODE } from "$lib/helpers/trackColors";
+  import { classifyMode, isArduPilot, FLIGHT_MODE } from "$lib/helpers/trackColors";
 
   let { telem, size = 9 }: { telem: TelemetryData; size?: number } = $props();
 
   let flags = $derived(telem.activeFlightModeFlags);
-  let mode = $derived(classifyFlightMode(flags));
+  let fcVariant = $derived(telem.fcVariant ?? 'INAV');
+  let isArdu = $derived(isArduPilot(fcVariant));
+  let mode = $derived(classifyMode(flags, fcVariant));
 
-  // Show active modifier flags as small tags
+  // Show active modifier flags as small tags (INAV only — ArduPilot uses flat mode numbers)
   let modifiers = $derived(() => {
+    if (isArdu) return [];
     const mods: string[] = [];
     if (flags & FLIGHT_MODE.NAV_ALTHOLD)    mods.push('ALT');
     if (flags & FLIGHT_MODE.HEADING)        mods.push('HDG');

@@ -16,6 +16,8 @@ use commands::flightlog::{
     flightlog_default_db_path, flightlog_import_blackbox,
     flightlog_export, flightlog_export_blackbox, flightlog_export_track, flightlog_import_kflight,
     flightlog_kflight_list, flightlog_kflight_get, flightlog_kflight_track,
+    flightlog_probe_ardupilot, flightlog_decode_ardupilot_csv,
+    flightlog_import_ardupilot,
 };
 use commands::info::get_app_version;
 use commands::mission::{
@@ -106,6 +108,9 @@ pub fn run() {
             flightlog_kflight_list,
             flightlog_kflight_get,
             flightlog_kflight_track,
+            flightlog_probe_ardupilot,
+            flightlog_decode_ardupilot_csv,
+            flightlog_import_ardupilot,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Kite Ground Control");

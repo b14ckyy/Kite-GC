@@ -10,7 +10,7 @@ import type { TelemetryData } from '$lib/stores/telemetry';
 import type { TelemetryRecord } from '$lib/stores/flightlog';
 
 /** Convert a DB telemetry row to the widget-consumable TelemetryData format. */
-export function toTelemetryData(r: TelemetryRecord): TelemetryData {
+export function toTelemetryData(r: TelemetryRecord, fcVariant = 'INAV'): TelemetryData {
   return {
     // GPS — always use raw GPS for position (nav fused local offsets are inaccurate for geo coords)
     lat: r.lat ?? 0,
@@ -60,6 +60,9 @@ export function toTelemetryData(r: TelemetryRecord): TelemetryData {
     // Flight mode & navigation state
     activeFlightModeFlags: r.active_flight_mode_flags ?? 0,
     navState: r.nav_state ?? 0,
+
+    // FC type
+    fcVariant,
 
     // Timestamp
     lastUpdate: r.timestamp_ms,

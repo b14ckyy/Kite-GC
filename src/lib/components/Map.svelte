@@ -29,11 +29,13 @@
     playbackPoint = null,
     trackColorMode = 'flightmode' as TrackColorMode,
     platformType = PLATFORM_MULTIROTOR as PlatformType,
+    fcVariant = 'INAV',
   }: {
     playbackTrack?: TelemetryRecord[];
     playbackPoint?: TelemetryRecord | null;
     trackColorMode?: TrackColorMode;
     platformType?: PlatformType;
+    fcVariant?: string;
   } = $props();
 
   const ARMING_FLAG_ARMED = 2;
@@ -170,7 +172,7 @@
     playbackLayerGroup = L.layerGroup().addTo(map);
 
     if (colorMode === 'flightmode') {
-      const segments = segmentTrackByFlightMode(validTrack);
+      const segments = segmentTrackByFlightMode(validTrack, fcVariant);
       for (const seg of segments) {
         if (seg.points.length >= 2) {
           L.polyline(seg.points, { color: seg.color, weight: 3, opacity: 0.9 }).addTo(playbackLayerGroup);

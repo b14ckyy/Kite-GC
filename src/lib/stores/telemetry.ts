@@ -56,6 +56,9 @@ export interface TelemetryData {
   activeFlightModeFlags: number;
   navState: number;
 
+  // FC type (for mode classification)
+  fcVariant: string;
+
   // Timestamps
   lastUpdate: number;
 }
@@ -70,6 +73,7 @@ const defaultTelemetry: TelemetryData = {
   sensorGyro: 0, sensorAcc: 0, sensorMag: 0, sensorBaro: 0,
   sensorGps: 0, sensorRangefinder: 0, sensorPitot: 0, sensorOpflow: 0,
   activeFlightModeFlags: 0, navState: 0,
+  fcVariant: 'INAV',
   lastUpdate: 0,
 };
 
