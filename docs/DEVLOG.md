@@ -53,7 +53,8 @@ Kite Ground Control/
 │   │   ├── adapters/             # Data format adapters
 │   │   │   └── telemetryAdapter.ts      # DB TelemetryRecord → TelemetryData for widgets
 │   │   ├── helpers/              # Pure utility functions
-│   │   │   └── telemetry.ts      # isArmed(), hasKnownLocation(), isValidGpsCoordinate()
+│   │   │   ├── telemetry.ts      # isArmed(), hasKnownLocation(), isValidGpsCoordinate()
+│   │   │   └── trackColors.ts    # Track color modes, flight mode classification, gradient functions, nav state colors
 │   │   ├── components/           # Reusable UI components
 │   │   │   ├── Map.svelte        # Leaflet map (trail, home marker, cached tiles, heading-up)
 │   │   │   ├── MissionLayer.svelte # Mission map layer (markers, polyline, editor popups)

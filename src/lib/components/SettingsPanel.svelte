@@ -20,6 +20,7 @@
     defaultFlightLogPath = '',
     defaultWpAltitudeM = 50,
     defaultPhTimeSec = 30,
+    warnAltitudeM = 120,
     isWidgetActive = (_widgetId: string) => false,
     getWidgetPanelLabel = (_widgetId: string) => '',
     onPatch = (_patch: Partial<AppSettings>) => {},
@@ -42,6 +43,7 @@
     defaultFlightLogPath?: string;
     defaultWpAltitudeM?: number;
     defaultPhTimeSec?: number;
+    warnAltitudeM?: number;
     isWidgetActive?: (widgetId: string) => boolean;
     getWidgetPanelLabel?: (widgetId: string) => string;
     onPatch?: (patch: Partial<AppSettings>) => void;
@@ -124,6 +126,22 @@
     const value = Number((event.target as HTMLInputElement).value);
     const clamped = Math.max(1, Math.min(600, value));
     onPatch({ defaultPhTimeSec: clamped });
+  }
+
+  function decWarnAlt() {
+    const value = Math.max(0, warnAltitudeM - 10);
+    onPatch({ warnAltitudeM: value });
+  }
+
+  function incWarnAlt() {
+    const value = Math.min(5000, warnAltitudeM + 10);
+    onPatch({ warnAltitudeM: value });
+  }
+
+  function onWarnAltInput(event: Event) {
+    const value = Number((event.target as HTMLInputElement).value);
+    const clamped = Math.max(0, Math.min(5000, value));
+    onPatch({ warnAltitudeM: clamped });
   }
 </script>
 
@@ -256,6 +274,20 @@
       <span class="setting-unit">s</span>
     </div>
   </div>
+</section>
+
+<section class="panel-section">
+  <h4 class="section-heading">{$t('settings.alerts')}</h4>
+  <div class="setting-row">
+    <span class="setting-label">{$t('settings.altitude')}</span>
+    <div class="setting-stepper">
+      <button class="stepper-btn" onclick={decWarnAlt}>-</button>
+      <input type="number" class="stepper-input" min="0" max="5000" step="10" value={warnAltitudeM} onchange={onWarnAltInput} />
+      <button class="stepper-btn" onclick={incWarnAlt}>+</button>
+      <span class="setting-unit">m</span>
+    </div>
+  </div>
+  <p class="setting-hint">{$t('settings.alertThresholdsHint')}</p>
 </section>
 
 <section class="panel-section">

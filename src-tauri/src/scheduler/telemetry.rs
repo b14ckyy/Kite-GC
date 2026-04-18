@@ -78,7 +78,7 @@ pub struct AnalogData {
 #[derive(Debug, Clone, Serialize)]
 pub struct StatusData {
     pub arming_flags: u32,
-    pub flight_mode_flags: Vec<u32>,
+    pub flight_mode_flags: u32,
     pub cpu_load: u16,
     pub sensor_status: u16,
 }
@@ -234,6 +234,58 @@ fn decode_analog(payload: &[u8]) -> TelemetryPayload {
     })
 }
 
+/// Map INAV boxId_e values to our FLIGHT_MODE bitmask positions.
+/// Box IDs are from INAV `fc/rc_modes.h`, output bits match `trackColors.ts` FLIGHT_MODE.
+fn box_id_to_flight_mode_bit(box_id: usize) -> Option<u32> {
+    match box_id {
+        1  => Some(1 << 0),   // BOXANGLE → ANGLE_MODE
+        2  => Some(1 << 1),   // BOXHORIZON → HORIZON_MODE
+        5  => Some(1 << 2),   // BOXHEADINGHOLD → HEADING_MODE
+        3  => Some(1 << 3),   // BOXNAVALTHOLD → NAV_ALTHOLD_MODE
+        10 => Some(1 << 4),   // BOXNAVRETURN → NAV_RTH_MODE
+        11 => Some(1 << 5),   // BOXNAVPOSHOLD → NAV_POSHOLD_MODE
+        6  => Some(1 << 6),   // BOXHEADFREE → HEADFREE_MODE
+        36 => Some(1 << 7),   // BOXNAVLAUNCH → NAV_LAUNCH_MODE
+        12 => Some(1 << 8),   // BOXPASSTHRU → MANUAL_MODE
+        27 => Some(1 << 9),   // BOXFAILSAFE → FAILSAFE_MODE
+        49 => Some(1 << 10),  // BOXAUTOTUNE → AUTO_TUNE
+        28 => Some(1 << 11),  // BOXNAVWP → NAV_WP_MODE
+        45 => Some(1 << 12),  // BOXNAVCRUISE → NAV_COURSE_HOLD
+        40 => Some(1 << 13),  // BOXFLAPERON → FLAPERON
+        47 => Some(1 << 14),  // BOXTURNASSIST → TURN_ASSISTANT
+        57 => Some(1 << 15),  // BOXTURTLE → TURTLE_MODE
+        56 => Some(1 << 16),  // BOXSOARING → SOARING_MODE
+        59 => Some(1 << 17),  // BOXANGLEHOLD → ANGLEHOLD_MODE
+        63 => Some(1 << 18),  // BOXNAVFWLANDING → NAV_FW_AUTOLAND
+        _  => None,
+    }
+}
+
+/// Parse the activeModes packed bitmask from MSPV2_INAV_STATUS payload
+/// and convert INAV box IDs to our FLIGHT_MODE bitmask.
+/// Payload layout: [...13 bytes header...][activeModes bytes][mixerProfile:u8]
+fn parse_active_modes(payload: &[u8]) -> u32 {
+    if payload.len() < 15 {
+        return 0; // Payload too short to contain activeModes
+    }
+    let modes_start = 13;
+    let modes_end = payload.len() - 1; // last byte is mixerProfile
+    let modes_bytes = &payload[modes_start..modes_end];
+
+    let mut flags: u32 = 0;
+    for (byte_idx, &byte) in modes_bytes.iter().enumerate() {
+        for bit in 0..8usize {
+            if byte & (1 << bit) != 0 {
+                let box_id = byte_idx * 8 + bit;
+                if let Some(flag) = box_id_to_flight_mode_bit(box_id) {
+                    flags |= flag;
+                }
+            }
+        }
+    }
+    flags
+}
+
 /// MSPV2_INAV_STATUS (0x2000): comprehensive FC status
 /// Layout: [cycleTime:u16, i2cErrors:u16, sensorStatus:u16, cpuLoad:u16,
 ///          profileAndBattProfile:u8, armingFlags:u32, activeModes:..., mixerProfile:u8]
@@ -241,10 +293,11 @@ fn decode_status(payload: &[u8]) -> TelemetryPayload {
     let sensor_status = read_u16(payload, 4);
     let cpu_load = read_u16(payload, 6);
     let arming_flags = read_u32(payload, 9);
+    let flight_mode_flags = parse_active_modes(payload);
 
     TelemetryPayload::Status(StatusData {
         arming_flags,
-        flight_mode_flags: vec![], // TODO: parse full flight mode bitmask
+        flight_mode_flags,
         cpu_load,
         sensor_status,
     })
@@ -320,7 +373,7 @@ pub fn feed_recorder(code: u16, payload: &[u8], recorder: &mut FlightRecorder) {
         MSPV2_INAV_STATUS => {
             let data = StatusData {
                 arming_flags: read_u32(payload, 9),
-                flight_mode_flags: vec![],
+                flight_mode_flags: parse_active_modes(payload),
                 cpu_load: read_u16(payload, 6),
                 sensor_status: read_u16(payload, 4),
             };

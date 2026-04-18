@@ -1,6 +1,7 @@
 <script lang="ts">
   import { t } from 'svelte-i18n';
-  import type { Flight } from '$lib/stores/flightlog';
+  import type { Flight, TelemetryRecord } from '$lib/stores/flightlog';
+  import { getUsedFlightModes, segmentTrackByAltitude, segmentTrackBySpeed, segmentTrackBySignal, type TrackColorMode, type FlightModeInfo, type GradientResult } from '$lib/helpers/trackColors';
 
   let {
     showPlayer = false,
@@ -19,6 +20,10 @@
     onScrub = (_index: number) => {},
     onScrubStart = () => {},
     onScrubEnd = () => {},
+    trackColorMode = 'flightmode' as TrackColorMode,
+    onTrackColorModeChange = (_mode: TrackColorMode) => {},
+    playbackTrack = [] as TelemetryRecord[],
+    warnAltitudeM = 120,
   }: {
     showPlayer?: boolean;
     selectedFlight?: Flight | null;
@@ -36,7 +41,37 @@
     onScrub?: (index: number) => void;
     onScrubStart?: () => void;
     onScrubEnd?: () => void;
+    trackColorMode?: TrackColorMode;
+    onTrackColorModeChange?: (mode: TrackColorMode) => void;
+    playbackTrack?: TelemetryRecord[];
+    warnAltitudeM?: number;
   } = $props();
+
+  const COLOR_MODES: { value: TrackColorMode; labelKey: string }[] = [
+    { value: 'flightmode', labelKey: 'player.trackFlightMode' },
+    { value: 'altitude',   labelKey: 'player.trackAltitude' },
+    { value: 'speed',      labelKey: 'player.trackSpeed' },
+    { value: 'signal',     labelKey: 'player.trackSignal' },
+    { value: 'none',       labelKey: 'player.trackNone' },
+  ];
+
+  let usedModes = $derived(
+    trackColorMode === 'flightmode' ? getUsedFlightModes(playbackTrack ?? []) : []
+  );
+
+  let gradientMeta = $derived.by(() => {
+    const track = playbackTrack ?? [];
+    if (track.length === 0) return null;
+    if (trackColorMode === 'altitude') return segmentTrackByAltitude(track, warnAltitudeM);
+    if (trackColorMode === 'speed') return segmentTrackBySpeed(track);
+    if (trackColorMode === 'signal') return segmentTrackBySignal(track);
+    return null;
+  });
+
+  function handleColorModeChange(event: Event) {
+    const value = (event.target as HTMLSelectElement).value as TrackColorMode;
+    onTrackColorModeChange(value);
+  }
 
   function formatPlaybackTime(ms: number): string {
     const totalSec = Math.floor(ms / 1000);
@@ -107,6 +142,38 @@
         onpointerdown={onScrubStart}
         onpointerup={onScrubEnd}
       />
+    </div>
+
+    <div class="log-player-bottom">
+      <div class="track-color-select">
+        <select value={trackColorMode} onchange={handleColorModeChange}>
+          {#each COLOR_MODES as mode}
+            <option value={mode.value}>{$t(mode.labelKey)}</option>
+          {/each}
+        </select>
+      </div>
+      {#if trackColorMode === 'flightmode' && usedModes.length > 0}
+        <div class="track-legend">
+          {#each usedModes as mode}
+            <span class="legend-item">
+              <span class="legend-dot" style="background:{mode.color}"></span>
+              {mode.label}
+            </span>
+          {/each}
+        </div>
+      {:else if gradientMeta && (trackColorMode === 'altitude' || trackColorMode === 'speed')}
+        <div class="track-legend">
+          <span class="gradient-label">0{gradientMeta.unit}</span>
+          <span class="gradient-bar {trackColorMode === 'altitude' ? 'altitude-bar' : 'speed-bar'}"></span>
+          <span class="gradient-label">{Math.round(gradientMeta.max)}{gradientMeta.unit}</span>
+        </div>
+      {:else if gradientMeta && trackColorMode === 'signal'}
+        <div class="track-legend">
+          <span class="gradient-label">{gradientMeta.fieldLabel}</span>
+          <span class="gradient-bar signal-bar"></span>
+          <span class="gradient-label">{Math.round(gradientMeta.max)}</span>
+        </div>
+      {/if}
     </div>
   </div>
 {/if}
@@ -292,5 +359,77 @@
     background: #37a8db;
     border: 2px solid #e0e0e0;
     cursor: pointer;
+  }
+
+  .log-player-bottom {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 2px 0 0;
+    flex-wrap: wrap;
+  }
+
+  .track-color-select select {
+    background: #434343;
+    border: 1px solid #555;
+    color: #e0e0e0;
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    cursor: pointer;
+    outline: none;
+  }
+
+  .track-color-select select:hover {
+    border-color: #37a8db;
+  }
+
+  .track-legend {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    font-size: 11px;
+    color: #c0c0c0;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    white-space: nowrap;
+  }
+
+  .legend-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .gradient-bar {
+    display: inline-block;
+    width: 120px;
+    height: 8px;
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+
+  .altitude-bar {
+    background: linear-gradient(to right, hsl(240,80%,50%), hsl(120,80%,50%), hsl(60,80%,50%), hsl(0,80%,50%));
+  }
+
+  .speed-bar {
+    background: linear-gradient(to right, hsl(240,80%,50%), hsl(120,80%,50%), hsl(60,80%,50%), hsl(0,80%,50%));
+  }
+
+  .signal-bar {
+    background: linear-gradient(to right, hsl(0,80%,45%), hsl(60,80%,45%), hsl(120,80%,45%));
+  }
+
+  .gradient-label {
+    font-size: 10px;
+    color: #949494;
   }
 </style>

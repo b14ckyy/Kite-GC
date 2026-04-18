@@ -97,6 +97,7 @@ struct TelemetrySnapshot {
     // Status
     arming_flags: Option<u32>,
     cpu_load: Option<u16>,
+    active_flight_mode_flags: Option<u32>,
 }
 
 /// Active flight session
@@ -201,6 +202,7 @@ impl FlightRecorder {
     pub fn on_status(&mut self, data: &StatusData) {
         self.snapshot.arming_flags = Some(data.arming_flags);
         self.snapshot.cpu_load = Some(data.cpu_load);
+        self.snapshot.active_flight_mode_flags = Some(data.flight_mode_flags);
 
         let is_armed = (data.arming_flags & ARMED_FLAG) != 0;
 
@@ -391,7 +393,7 @@ impl FlightRecorder {
             gps_eph: None,
             gps_epv: None,
             active_wp_number: None,
-            active_flight_mode_flags: None,
+            active_flight_mode_flags: self.snapshot.active_flight_mode_flags.map(|f| f as i64),
             state_flags: None,
             nav_state: None,
             nav_flags: None,

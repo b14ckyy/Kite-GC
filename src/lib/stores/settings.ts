@@ -34,6 +34,8 @@ export interface AppSettings {
   // Mission Control
   defaultWpAltitudeM: number;
   defaultPhTimeSec: number;
+  // Alerts
+  warnAltitudeM: number;
   // Widget panel layout
   panels: PanelConfig;
   // Locale / language
@@ -61,6 +63,7 @@ const defaults: AppSettings = {
   flightLogRawEnabled: false,
   defaultWpAltitudeM: 50,
   defaultPhTimeSec: 30,
+  warnAltitudeM: 120,
   panels: {
     bottom: ['home', 'battery', 'speed', 'ahi', 'altitude', 'gps', 'compass'],
     right: ['rawTelemetry'],

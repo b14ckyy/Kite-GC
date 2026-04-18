@@ -57,6 +57,10 @@ export function toTelemetryData(r: TelemetryRecord): TelemetryData {
     sensorPitot: 0,
     sensorOpflow: 0,
 
+    // Flight mode & navigation state
+    activeFlightModeFlags: r.active_flight_mode_flags ?? 0,
+    navState: r.nav_state ?? 0,
+
     // Timestamp
     lastUpdate: r.timestamp_ms,
   };

@@ -92,6 +92,9 @@
     "missionControl": "Mission Control",
     "defaultWpAlt": "Default WP Altitude",
     "defaultPhTime": "Default PH Time",
+    "alerts": "Alerts",
+    "altitude": "Altitude",
+    "alertThresholdsHint": "Alert thresholds. 0 = disabled.",
     "hudWidgets": "HUD Widgets",
     "rateHint": "Rate changes take effect on next connect.",
     "language": "Language"
@@ -174,7 +177,18 @@
     "pause": "Pause",
     "toStart": "Back to start",
     "speed": "Playback speed",
-    "bbxNotAvailable": "Blackbox source not available"
+    "bbxNotAvailable": "Blackbox source not available",
+    "trackFlightMode": "Flight Mode",
+    "trackAltitude": "Altitude",
+    "trackSpeed": "Speed",
+    "trackSignal": "Signal",
+    "trackNone": "None",
+    "gradientLow": "Low",
+    "gradientHigh": "High",
+    "gradientSlow": "Slow",
+    "gradientFast": "Fast",
+    "gradientWeak": "Weak",
+    "gradientStrong": "Strong"
   },
   "widgets": {
     "ahi": "AHI",
@@ -184,6 +198,7 @@
     "gps": "GPS",
     "compass": "Compass",
     "home": "Home",
+    "flightMode": "Flight Mode",
     "rawTelemetry": "Raw Telemetry",
     "bottom": "Bottom",
     "right": "Right",

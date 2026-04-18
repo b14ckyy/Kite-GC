@@ -12,13 +12,28 @@
   import { homePosition } from "$lib/stores/home";
   import MissionLayer from "./MissionLayer.svelte";
   import type { TelemetryRecord } from "$lib/stores/flightlog";
+  import {
+    segmentTrackByFlightMode,
+    segmentTrackByAltitude,
+    segmentTrackBySpeed,
+    segmentTrackBySignal,
+    getNavStateColor,
+    classifyFlightMode,
+    type TrackColorMode,
+    type TrackSegment,
+  } from "$lib/helpers/trackColors";
+  import { createUavIcon, PLATFORM_MULTIROTOR, type PlatformType } from "$lib/helpers/uavIcons";
 
   let {
     playbackTrack = [],
     playbackPoint = null,
+    trackColorMode = 'flightmode' as TrackColorMode,
+    platformType = PLATFORM_MULTIROTOR as PlatformType,
   }: {
     playbackTrack?: TelemetryRecord[];
     playbackPoint?: TelemetryRecord | null;
+    trackColorMode?: TrackColorMode;
+    platformType?: PlatformType;
   } = $props();
 
   const ARMING_FLAG_ARMED = 2;
@@ -44,10 +59,12 @@
   let currentBase: L.TileLayer | undefined;
   let currentOverlays: L.TileLayer[] = [];
 
-  // Flight trail
-  let trailPositions: L.LatLng[] = [];
-  let trailLine: L.Polyline | undefined;
-  let playbackLine: L.Polyline | undefined;
+  // Flight trail (colored segments by flight mode)
+  let trailSegments: L.Polyline[] = [];
+  let trailCurrentColor = '';
+  let trailCurrentPositions: L.LatLng[] = [];
+  let activeTrailLine: L.Polyline | undefined;
+  let playbackLayerGroup: L.LayerGroup | undefined;
   let playbackMarker: L.Marker | undefined;
   let lastPlaybackTrackKey = '';
 
@@ -59,34 +76,19 @@
   let viewMode = $state<'north-up' | 'heading-up'>('north-up');
   let mapHeading = 0;
 
-  // Simple arrow SVG icon for the UAV — rotated by heading
-  function createUavIcon(heading: number): L.DivIcon {
-    return L.divIcon({
-      className: "uav-icon",
-      html: `<div style="transform: rotate(${heading}deg); width: 28px; height: 28px;">
-        <svg viewBox="0 0 24 24" width="28" height="28">
-          <path d="M12 2 L5 20 L12 16 L19 20 Z" fill="#37a8db" stroke="#1a1a1a" stroke-width="1.5" stroke-linejoin="round"/>
-        </svg>
-      </div>`,
-      iconSize: [28, 28],
-      iconAnchor: [14, 14],
-    });
-  }
-
-  function updateUavPosition(lat: number, lon: number, heading: number) {
+  function updateUavPosition(lat: number, lon: number, heading: number, navState = 0) {
     if (!map) return;
-    if (!isValidGpsCoordinate(lat, lon)) return; // no valid GPS data yet
+    if (!isValidGpsCoordinate(lat, lon)) return;
 
     const pos: L.LatLngExpression = [lat, lon];
-    // In heading-up mode the CSS rotates the container by -heading,
-    // so pass the actual heading — CSS rotation cancels it out → arrow points up.
-    // In north-up mode the heading rotates the arrow to match the UAV direction.
+    const color = getNavStateColor(navState);
+    const icon = createUavIcon({ heading, fillColor: color, platformType });
 
     if (!uavMarker) {
-      uavMarker = L.marker(pos, { icon: createUavIcon(heading), zIndexOffset: 1000 }).addTo(map);
+      uavMarker = L.marker(pos, { icon, zIndexOffset: 1000 }).addTo(map);
     } else {
       uavMarker.setLatLng(pos);
-      uavMarker.setIcon(createUavIcon(heading));
+      uavMarker.setIcon(icon);
     }
   }
 
@@ -101,15 +103,6 @@
     });
   }
 
-  function createPlaybackIcon(): L.DivIcon {
-    return L.divIcon({
-      className: "playback-icon",
-      html: `<div style="width: 18px; height: 18px; border-radius: 50%; background: #f5a623; border: 2px solid #1a1a1a; box-shadow: 0 0 10px rgba(245,166,35,0.65);"></div>`,
-      iconSize: [18, 18],
-      iconAnchor: [9, 9],
-    });
-  }
-
   function updateHomeMarker(lat: number, lon: number) {
     if (!map) return;
     const pos: L.LatLngExpression = [lat, lon];
@@ -120,56 +113,88 @@
     }
   }
 
-  function updateTrail(lat: number, lon: number) {
+  function updateTrail(lat: number, lon: number, flightModeFlags: number) {
     if (!map) return;
     const pos = L.latLng(lat, lon);
 
     // Only add if moved enough from last point
-    if (trailPositions.length > 0 &&
-        pos.distanceTo(trailPositions[trailPositions.length - 1]) < MIN_TRAIL_DIST) {
+    if (trailCurrentPositions.length > 0 &&
+        pos.distanceTo(trailCurrentPositions[trailCurrentPositions.length - 1]) < MIN_TRAIL_DIST) {
       return;
     }
 
-    trailPositions.push(pos);
-    if (trailLine) {
-      trailLine.setLatLngs(trailPositions);
-    } else {
-      trailLine = L.polyline(trailPositions, {
-        color: "#37a8db",
-        weight: 2,
-        opacity: 0.7,
-      }).addTo(map);
+    const color = classifyFlightMode(flightModeFlags).color;
+
+    // Color changed → finalize the active segment and start a new one
+    if (color !== trailCurrentColor && trailCurrentPositions.length >= 2) {
+      if (activeTrailLine) {
+        trailSegments.push(activeTrailLine);
+        activeTrailLine = undefined;
+      }
+      // Start new segment from last point for continuity
+      trailCurrentPositions = [trailCurrentPositions[trailCurrentPositions.length - 1]];
+    }
+
+    trailCurrentColor = color;
+    trailCurrentPositions.push(pos);
+
+    // Update or create the active (in-progress) polyline
+    if (trailCurrentPositions.length >= 2) {
+      if (activeTrailLine) {
+        activeTrailLine.setLatLngs(trailCurrentPositions);
+        activeTrailLine.setStyle({ color });
+      } else {
+        activeTrailLine = L.polyline(trailCurrentPositions, { color, weight: 2, opacity: 0.7 }).addTo(map);
+      }
     }
   }
 
-  function updatePlaybackTrack(track: TelemetryRecord[]) {
+  function updatePlaybackTrack(track: TelemetryRecord[], colorMode: TrackColorMode) {
     if (!map) return;
 
-    const positions = track
-      .filter((point) => point.lat != null && point.lon != null && isValidGpsCoordinate(point.lat, point.lon))
-      .map((point) => L.latLng(point.lat as number, point.lon as number));
+    // Remove old layer group
+    if (playbackLayerGroup) {
+      map.removeLayer(playbackLayerGroup);
+      playbackLayerGroup = undefined;
+    }
 
-    if (positions.length === 0) {
-      if (playbackLine) {
-        map.removeLayer(playbackLine);
-        playbackLine = undefined;
-      }
+    const validTrack = track.filter(
+      (point) => point.lat != null && point.lon != null && isValidGpsCoordinate(point.lat!, point.lon!)
+    );
+
+    if (validTrack.length === 0) {
       lastPlaybackTrackKey = '';
       return;
     }
 
-    if (playbackLine) {
-      playbackLine.setLatLngs(positions);
+    playbackLayerGroup = L.layerGroup().addTo(map);
+
+    if (colorMode === 'flightmode') {
+      const segments = segmentTrackByFlightMode(validTrack);
+      for (const seg of segments) {
+        if (seg.points.length >= 2) {
+          L.polyline(seg.points, { color: seg.color, weight: 3, opacity: 0.9 }).addTo(playbackLayerGroup);
+        }
+      }
+    } else if (colorMode === 'altitude' || colorMode === 'speed' || colorMode === 'signal') {
+      const warnAlt = get(settings).warnAltitudeM ?? 120;
+      const result =
+        colorMode === 'altitude' ? segmentTrackByAltitude(validTrack, warnAlt) :
+        colorMode === 'speed'    ? segmentTrackBySpeed(validTrack) :
+                                   segmentTrackBySignal(validTrack);
+      for (const seg of result.segments) {
+        if (seg.points.length >= 2) {
+          L.polyline(seg.points, { color: seg.color, weight: 3, opacity: 0.9 }).addTo(playbackLayerGroup);
+        }
+      }
     } else {
-      playbackLine = L.polyline(positions, {
-        color: "#f5a623",
-        weight: 3,
-        opacity: 0.9,
-        dashArray: "6 5",
-      }).addTo(map);
+      // 'none' or other modes — single orange line
+      const positions = validTrack.map((p) => L.latLng(p.lat!, p.lon!));
+      L.polyline(positions, { color: "#f5a623", weight: 3, opacity: 0.9, dashArray: "6 5" }).addTo(playbackLayerGroup);
     }
 
-    const nextKey = `${positions[0].lat}:${positions[0].lng}:${positions.length}`;
+    const positions = validTrack.map((p) => L.latLng(p.lat!, p.lon!));
+    const nextKey = `${positions[0].lat}:${positions[0].lng}:${positions.length}:${colorMode}`;
     if (nextKey !== lastPlaybackTrackKey) {
       map.fitBounds(L.latLngBounds(positions), { padding: [36, 36] });
       lastPlaybackTrackKey = nextKey;
@@ -188,10 +213,15 @@
     }
 
     const pos: L.LatLngExpression = [point.lat, point.lon];
+    const heading = point.heading ?? 0;
+    const color = getNavStateColor(point.nav_state ?? 0);
+    const icon = createUavIcon({ heading, fillColor: color, platformType });
+
     if (playbackMarker) {
       playbackMarker.setLatLng(pos);
+      playbackMarker.setIcon(icon);
     } else {
-      playbackMarker = L.marker(pos, { icon: createPlaybackIcon(), zIndexOffset: 900 }).addTo(map);
+      playbackMarker = L.marker(pos, { icon, zIndexOffset: 900 }).addTo(map);
     }
   }
 
@@ -265,7 +295,7 @@
     // Subscribe to telemetry for UAV position, flight trail, and home detection
     unsubTelemetry = telemetry.subscribe((t) => {
       if (t.lastUpdate > 0) {
-        updateUavPosition(t.lat, t.lon, t.yaw);
+        updateUavPosition(t.lat, t.lon, t.yaw, t.navState);
 
         // Heading-up mode: center on UAV and rotate map
         if (viewMode === 'heading-up' && isValidGpsCoordinate(t.lat, t.lon)) {
@@ -274,9 +304,9 @@
           mapContainer?.style.setProperty('--map-rotation', `${-mapHeading}deg`);
         }
 
-        // Flight trail
+        // Flight trail (colored by flight mode)
         if (isValidGpsCoordinate(t.lat, t.lon)) {
-          updateTrail(t.lat, t.lon);
+          updateTrail(t.lat, t.lon, t.activeFlightModeFlags);
         }
 
         // Home position: set on arm transition when GPS has fix
@@ -285,8 +315,11 @@
           homePosition.set({ lat: t.lat, lon: t.lon, alt: t.altitude, set: true });
           updateHomeMarker(t.lat, t.lon);
           // Clear trail for new flight
-          trailPositions = [];
-          if (trailLine) { map?.removeLayer(trailLine); trailLine = undefined; }
+          for (const seg of trailSegments) { map?.removeLayer(seg); }
+          trailSegments = [];
+          if (activeTrailLine) { map?.removeLayer(activeTrailLine); activeTrailLine = undefined; }
+          trailCurrentPositions = [];
+          trailCurrentColor = '';
         }
         wasArmed = armed;
       }
@@ -345,7 +378,7 @@
 
   $effect(() => {
     if (!map) return;
-    updatePlaybackTrack(playbackTrack);
+    updatePlaybackTrack(playbackTrack, trackColorMode);
   });
 
   $effect(() => {
@@ -360,8 +393,9 @@
       map.off("moveend", saveMapState);
       map.off("zoomend", saveMapState);
       if (uavMarker) map.removeLayer(uavMarker);
-      if (trailLine) map.removeLayer(trailLine);
-      if (playbackLine) map.removeLayer(playbackLine);
+      for (const seg of trailSegments) map.removeLayer(seg);
+      if (activeTrailLine) map.removeLayer(activeTrailLine);
+      if (playbackLayerGroup) map.removeLayer(playbackLayerGroup);
       if (playbackMarker) map.removeLayer(playbackMarker);
       if (homeMarker) map.removeLayer(homeMarker);
       map.remove();

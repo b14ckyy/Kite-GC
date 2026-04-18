@@ -358,6 +358,22 @@ This document tracks planned features, organized by milestone.
 - [ ] Flight marked as `source: "both"`
 - [ ] Playback UI toggle: MSP telemetry vs Blackbox data
 
+### Colored Flight Tracks & Mode Visualization
+- [x] `trackColors.ts` helper: `TrackColorMode`, `FlightModeInfo`, `classifyFlightMode()`, gradient functions
+- [x] Track color modes: Flight Mode, Altitude, Speed, Signal, None
+- [x] Multi-segment rendering: `L.layerGroup()` with merged polylines per color
+- [x] Flight mode classification: 11 priority levels (Failsafe RTH → Acro)
+- [x] Altitude gradient: blue→red, `warnAltitude` reference from alerts settings
+- [x] Speed gradient: blue→red, scaled to max ground speed
+- [x] Signal gradient: green→red inverted, prefers LQ over RSSI
+- [x] LogPlayer dropdown with 5 color modes + dynamic legend (badges or gradient bar)
+- [x] Legend shows only modes actually used in current flight
+- [x] UAV icon coloring by `nav_state` (INAV `MW_NAV_STATE_*` → color)
+- [x] Live trail colored by flight mode (multi-segment polylines)
+- [x] Alerts settings group with `warnAltitude` (default 120 m)
+- [x] Protocol reference doc: `PROTOCOL_FLIGHT_MODES.md` (INAV vs ArduPilot)
+- [ ] Live MSP: parse `flight_mode_flags` from `MSPV2_INAV_STATUS` payload (currently TODO)
+
 ### DB Schema
 - [x] `blackbox_records` table: `flight_id`, `timestamp_us`, `csv_data` (raw CSV TEXT) — schema v2
 - [x] `blackbox_files` table: `flight_id`, `original_filename`, `log_index`, `file_data` (BLOB), `file_size`, `imported_at` — schema v2

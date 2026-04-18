@@ -9,6 +9,7 @@
   import GpsWidget from "./widgets/GpsWidget.svelte";
   import CompassWidget from "./widgets/CompassWidget.svelte";
   import HomeWidget from "./widgets/HomeWidget.svelte";
+  import FlightModeWidget from "./widgets/FlightModeWidget.svelte";
   import RawTelemetryWidget from "./widgets/RawTelemetryWidget.svelte";
 
   let {
@@ -223,6 +224,8 @@
           <CompassWidget {telem} size={item.size} />
         {:else if item.id === 'home'}
           <HomeWidget {telem} size={item.size} />
+        {:else if item.id === 'flightMode'}
+          <FlightModeWidget {telem} size={item.size} />
         {:else if item.id === 'rawTelemetry'}
           <RawTelemetryWidget {telem} size={item.size} />
         {/if}

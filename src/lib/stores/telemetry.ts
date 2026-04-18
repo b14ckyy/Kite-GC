@@ -52,6 +52,10 @@ export interface TelemetryData {
   sensorPitot: number;
   sensorOpflow: number;
 
+  // Flight mode & navigation
+  activeFlightModeFlags: number;
+  navState: number;
+
   // Timestamps
   lastUpdate: number;
 }
@@ -65,6 +69,7 @@ const defaultTelemetry: TelemetryData = {
   armingFlags: 0, cpuLoad: 0, sensorStatus: 0,
   sensorGyro: 0, sensorAcc: 0, sensorMag: 0, sensorBaro: 0,
   sensorGps: 0, sensorRangefinder: 0, sensorPitot: 0, sensorOpflow: 0,
+  activeFlightModeFlags: 0, navState: 0,
   lastUpdate: 0,
 };
 
@@ -150,10 +155,11 @@ export async function startTelemetryListeners() {
   );
 
   unlisteners.push(
-    await listen<{ arming_flags: number; cpu_load: number; sensor_status: number }>('telemetry-status', (event) => {
+    await listen<{ arming_flags: number; flight_mode_flags: number; cpu_load: number; sensor_status: number }>('telemetry-status', (event) => {
       telemetry.update((t) => ({
         ...t,
         armingFlags: event.payload.arming_flags,
+        activeFlightModeFlags: event.payload.flight_mode_flags,
         cpuLoad: event.payload.cpu_load,
         sensorStatus: event.payload.sensor_status,
         lastUpdate: Date.now(),

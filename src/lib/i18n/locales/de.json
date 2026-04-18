@@ -92,6 +92,9 @@
     "missionControl": "Missionssteuerung",
     "defaultWpAlt": "Standard-WP-Höhe",
     "defaultPhTime": "Standard-PH-Zeit",
+    "alerts": "Warnungen",
+    "altitude": "Höhe",
+    "alertThresholdsHint": "Warnschwellen. 0 = deaktiviert.",
     "hudWidgets": "HUD Widgets",
     "rateHint": "Ratenänderungen gelten ab nächster Verbindung.",
     "language": "Sprache"
@@ -174,7 +177,18 @@
     "pause": "Pause",
     "toStart": "Zum Anfang",
     "speed": "Wiedergabegeschwindigkeit",
-    "bbxNotAvailable": "Blackbox-Quelle nicht verfügbar"
+    "bbxNotAvailable": "Blackbox-Quelle nicht verf\u00fcgbar",
+    "trackFlightMode": "Flugmodus",
+    "trackAltitude": "H\u00f6he",
+    "trackSpeed": "Geschwindigkeit",
+    "trackSignal": "Signal",
+    "trackNone": "Kein",
+    "gradientLow": "Niedrig",
+    "gradientHigh": "Hoch",
+    "gradientSlow": "Langsam",
+    "gradientFast": "Schnell",
+    "gradientWeak": "Schwach",
+    "gradientStrong": "Stark"
   },
   "widgets": {
     "ahi": "AHI",
@@ -184,6 +198,7 @@
     "gps": "GPS",
     "compass": "Kompass",
     "home": "Home",
+    "flightMode": "Flugmodus",
     "rawTelemetry": "Roh-Telemetrie",
     "bottom": "Unten",
     "right": "Rechts",

@@ -38,6 +38,7 @@
     type FlightSummary,
     type TelemetryRecord,
   } from "$lib/stores/flightlog";
+  import type { TrackColorMode } from "$lib/helpers/trackColors";
 
   // Reactive window dimensions for dynamic panel sizing
   let winW = $state(typeof window !== 'undefined' ? window.innerWidth : 1920);
@@ -87,6 +88,8 @@
   let mapCacheMaxMB = $state(200);
   let defaultWpAltitudeM = $state(50);
   let defaultPhTimeSec = $state(30);
+  let warnAltitudeM = $state(120);
+  let trackColorMode = $state<TrackColorMode>('flightmode');
 
   // Logbook state
   let logbookLoading = $state(false);
@@ -160,6 +163,7 @@
   mapCacheMaxMB = saved.mapCacheMaxMB;
   defaultWpAltitudeM = saved.defaultWpAltitudeM;
   defaultPhTimeSec = saved.defaultPhTimeSec;
+  warnAltitudeM = saved.warnAltitudeM;
   panels = saved.panels ?? defaultPanels;
 
   function toggleNavPanel() {
@@ -664,6 +668,13 @@
   const logbookDetailOpen = $derived(activeTab === 'logbook' && selectedFlight != null && !logbookMinimized);
   const logbookHasFlightOnMap = $derived(activeTab === 'logbook' && selectedFlight != null && !isPrimaryConnected);
 
+  // Platform type: from live connection or selected flight log
+  const mapPlatformType = $derived(
+    (fcInfo as FcInfo | null)?.platform_type
+      ?? (selectedFlight as Flight | null)?.platform_type
+      ?? 0,
+  );
+
   // Unified telemetry: live data when connected, playback data when replaying
   const telem = $derived(
     playbackActive && !isPrimaryConnected && playbackPoint
@@ -713,7 +724,7 @@
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="map-fullscreen" onclick={minimizeLogbook}>
-    <Map playbackTrack={mapTrack} playbackPoint={playbackPoint} />
+    <Map playbackTrack={mapTrack} playbackPoint={playbackPoint} {trackColorMode} platformType={mapPlatformType} />
   </div>
 
   <LogPlayer
@@ -733,6 +744,10 @@
     onScrub={scrubPlayback}
     onScrubStart={scrubStart}
     onScrubEnd={scrubEnd}
+    {trackColorMode}
+    onTrackColorModeChange={(mode) => { trackColorMode = mode; }}
+    playbackTrack={mapTrack}
+    {warnAltitudeM}
   />
 
   <!-- ======= FLOATING NAV PANEL SYSTEM ======= -->
@@ -770,9 +785,23 @@
             {defaultFlightLogPath}
             {defaultWpAltitudeM}
             {defaultPhTimeSec}
+            {warnAltitudeM}
             {isWidgetActive}
             {getWidgetPanelLabel}
-            onPatch={(patch) => settings.patch(patch)}
+            onPatch={(patch) => {
+              settings.patch(patch);
+              if (patch.attitudeRateHz != null) attitudeRateHz = patch.attitudeRateHz;
+              if (patch.positionRateHz != null) positionRateHz = patch.positionRateHz;
+              if (patch.airspeedEnabled != null) airspeedEnabled = patch.airspeedEnabled;
+              if (patch.flightLoggingEnabled != null) flightLoggingEnabled = patch.flightLoggingEnabled;
+              if (patch.flightLogRawEnabled != null) flightLogRawEnabled = patch.flightLogRawEnabled;
+              if (patch.flightLogDbPath != null) flightLogDbPath = patch.flightLogDbPath;
+              if (patch.mapProvider != null) mapProvider = patch.mapProvider;
+              if (patch.mapCacheMaxMB != null) mapCacheMaxMB = patch.mapCacheMaxMB;
+              if (patch.defaultWpAltitudeM != null) defaultWpAltitudeM = patch.defaultWpAltitudeM;
+              if (patch.defaultPhTimeSec != null) defaultPhTimeSec = patch.defaultPhTimeSec;
+              if (patch.warnAltitudeM != null) warnAltitudeM = patch.warnAltitudeM;
+            }}
             onSetCacheMaxMB={setCacheMaxMB}
             onClearCache={clearCache}
             onChooseFlightLogPath={chooseFlightLogPath}
