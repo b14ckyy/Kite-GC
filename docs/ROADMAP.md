@@ -374,14 +374,23 @@ This document tracks planned features, organized by milestone.
 - [x] Protocol reference doc: `PROTOCOL_FLIGHT_MODES.md` (INAV vs ArduPilot)
 - [ ] Live MSP: parse `flight_mode_flags` from `MSPV2_INAV_STATUS` payload (currently TODO)
 
-### DB Schema
+### DB Schema (current: v5)
 - [x] `blackbox_records` table: `flight_id`, `timestamp_us`, `csv_data` (raw CSV TEXT) — schema v2
 - [x] `blackbox_files` table: `flight_id`, `original_filename`, `log_index`, `file_data` (BLOB), `file_size`, `imported_at` — schema v2
 - [x] `flights.source` column: `live` | `blackbox` | `both` — schema v2
 - [x] `telemetry_records.link_quality` column: INTEGER (0–100%) — schema v3
 - [x] Migration v1 → v2, v2 → v3 (incremental, backward compatible)
 - [x] Schema v4: replay-focused telemetry fields (`baro_alt_m`, GPS quality, active flight modes, state flags, nav state, wind, RC arrays, sensor health)
+- [x] Schema v5: `flights.craft_name` column (user-editable, separate from FC-reported name)
 - [ ] Milestone 4: decode Blackbox header `features` into a human-readable feature decode
+
+### Settings & UI Enhancements
+- [x] Separate Flight Recording toggle (`flightRecordingEnabled`) from Flight Logbook toggle (`flightLoggingEnabled`) — see ADR-022
+- [x] Logbook tab hidden in NavRail when `flightLoggingEnabled` is false
+- [x] Craft name inline editing in LogbookPanel (✎ button, Enter/Escape/blur to confirm)
+- [x] `flightlog_update_craft_name` Tauri command for craft name persistence
+- [x] Blackbox import filter memory (last-used INAV/ArduPilot order persisted in localStorage)
+- [x] i18n: "Flight Logging" split into separate "Flight Logbook" + "Flight Recording" labels (de + en)
 
 ---
 
@@ -394,18 +403,46 @@ This document tracks planned features, organized by milestone.
 - [ ] Add `uplink_snr_db` to `TelemetryRecord` + schema v4 migration
 - [ ] Fall back to `MSPV2_INAV_ANALOG` RSSI for firmware < 9.1
 
-### Multi-Protocol Telemetry Architecture
-- [ ] `TelemetrySource` trait — protocol-agnostic abstraction (refactor `poll_slot`)
-- [ ] `MspSource` — existing MSP poll/decode extracted into trait impl
-- [ ] `LtmSource` — LTM (Lightweight Telemetry) protocol support
-- [ ] `MavlinkSource` — MAVLink v1/v2 telemetry + heartbeat (ArduPilot/PX4)
+### Multi-Protocol Architecture (see `docs/PROTOCOL_REFACTORING.md`)
+
+**Phase 1 — ByteTransport trait extraction**:
+- [ ] `ByteTransport` trait (protocol-agnostic byte-level I/O: read/write/close)
+- [ ] `SerialByteTransport` — existing serial refactored to ByteTransport
+- [ ] `TcpByteTransport` — TCP client/server transport
+- [ ] `UdpByteTransport` — UDP transport (connectionless)
+- [ ] `MspTransport` — MSP framing layer over ByteTransport (replaces current `Transport` trait)
+- [ ] Refactor existing `MspScheduler` to use `MspTransport<ByteTransport>`
+
+**Phase 2 — MAVLink integration**:
+- [ ] `mavlink` Rust crate with `common` + `ardupilotmega` dialects
+- [ ] `MavlinkHandler` — reader thread (continuous parse + dispatch) + heartbeat writer (1 Hz)
+- [ ] MAVLink → normalized payloads mapping (10 receive messages → same Tauri events)
+- [ ] GCS IDs: sysid=255, compid=190
+- [ ] ArduPilot + PX4 + INAV MAVLink firmware support
+
+**Phase 3 — Connection Manager & Protocol Selection**:
+- [ ] `ConnectionManager` — owns transport + protocol handler, manages lifecycle
+- [ ] Protocol selection: explicit UI dropdown (MSP / MAVLink), no auto-detect
+- [ ] Transport selection: Serial / TCP / UDP per protocol
+
+**Phase 4 — Raw Recording**:
+- [ ] MSP raw log: MWP v2 Binary Capture format (`.raw`)
+- [ ] MAVLink raw log: standard tlog format (`.tlog`)
+- [ ] Raw-first recording: start on ARM → DB import after DISARM
+- [ ] Crash-safe: raw file survives app crash during flight
+
+**Phase 5 — ArduPilot Log Import**:
+- [ ] `.bin` DataFlash log parser (ArduPilot native format)
+- [ ] ArduPilot `.tlog` MAVLink log import
+- [ ] ArduPilot mission import (MAVLink WP protocol)
+
+### Future Protocols
+- [ ] `LtmSource` — LTM (Lightweight Telemetry) passive frame parser
 - [ ] `CrsfSource` — CRSF/ELRS telemetry frames
-- [ ] `ReplaySource` — playback from recorded flights (Blackbox, OTX/ETX logs)
-- [ ] Multi-aircraft support (multiple TelemetrySource instances, per-UAV stores)
+- [ ] Multi-aircraft support (multiple protocol handler instances, per-UAV stores)
 
 ### Additional Transports
-- [ ] Bluetooth (BLE) transport
-- [ ] TCP/UDP transport
+- [ ] Bluetooth (BLE) transport via ByteTransport
 - [ ] Wi-Fi Direct transport
 
 ### Advanced UI & Tools
@@ -470,4 +507,4 @@ This document tracks planned features, organized by milestone.
 
 ---
 
-*Last updated: 2026-04-18*
+*Last updated: 2026-04-21*

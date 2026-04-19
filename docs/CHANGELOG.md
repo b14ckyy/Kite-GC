@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Settings & Logbook Enhancements
+- **Separate Flight Recording / Flight Logbook toggles**: Recording (raw stream capture) and Logbook (SQLite database) are now independent settings — users can enable either or both (ADR-022)
+- **Craft name inline editing**: Click ✎ button in LogbookPanel to edit craft name, confirm with Enter or blur, cancel with Escape
+- **`flightlog_update_craft_name` Tauri command**: Persists user-edited craft name to `flights.craft_name` column
+- **Blackbox import filter memory**: Last-used filter order (INAV vs ArduPilot) persisted in localStorage across sessions
+- **Logbook tab conditional visibility**: Logbook tab hidden in NavRail when Flight Logbook is disabled
+- **i18n updates**: "Flight Logging" split into "Flight Logbook" / "Flight Recording" labels (de + en)
+- **DB schema v5**: `flights.craft_name` column for user-editable craft names (migration v4→v5)
+
+### Added — Protocol Refactoring Plan
+- **`docs/PROTOCOL_REFACTORING.md`**: Comprehensive 5-phase MAVLink integration workstream document
+- Architecture: ByteTransport trait + separate MspScheduler/MavlinkHandler modules
+- Recording: MWP v2 Binary Capture (.raw) for MSP, standard tlog (.tlog) for MAVLink
+- Firmware scope: ArduPilot + PX4 + INAV MAVLink
+
 ### Added — CesiumJS 3D Map View (M7)
 - **CesiumJS integration**: Apache 2.0 licensed 3D globe renderer alongside existing Leaflet 2D map
 - **Custom Vite plugin** (`cesiumPlugin()`): sirv middleware serves Cesium Workers/Assets in dev mode; `fs.cpSync` copies assets for production builds — replaced `vite-plugin-static-copy` (404 issues) and `vite-plugin-cesium` (path encoding bug with spaces)

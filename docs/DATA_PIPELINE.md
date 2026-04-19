@@ -276,66 +276,62 @@ All widgets receive `telem` prop → identical interface for live and replay
 
 ## 4. Future: Multi-Protocol Architecture (Planned, M6)
 
-### Goal: Same pipeline for MSP, MAVLink, LTM, CRSF
+### Goal: Same pipeline for MSP and MAVLink (see `docs/PROTOCOL_REFACTORING.md`)
 
 ```
                     ┌──────────────┐
                     │ Serial Port  │
-                    │ TCP/UDP      │
+                    │ TCP / UDP    │
                     │ Bluetooth    │
                     └──────┬───────┘
                            │
-              ┌────────────┼────────────┐
-              │            │            │
-              ▼            ▼            ▼
-        ┌──────────┐ ┌──────────┐ ┌──────────┐
-        │MspSource │ │MavSource │ │LtmSource │  ... (impl TelemetrySource)
-        └─────┬────┘ └─────┬────┘ └─────┬────┘
-              │            │            │
-              ▼            ▼            ▼
-        Same normalized payloads (AttitudeData, GpsData, etc.)
-              │            │            │
-              └────────────┼────────────┘
+                    ByteTransport trait
+                    (read/write/close)
                            │
-                    ┌──────┴───────┐
-                    │  Scheduler   │
-                    │  Thread      │
-                    ├──────────────┤
-                    │ Tauri Events │
-                    │ DB Recording │
-                    └──────────────┘
+              ┌────────────┼────────────┐
+              │                         │
+              ▼                         ▼
+        ┌──────────────┐       ┌──────────────────┐
+        │ MspTransport │       │  MavlinkHandler   │
+        │ (framing)    │       │  (reader thread +  │
+        │      +       │       │   heartbeat writer) │
+        │ MspScheduler │       │                    │
+        │ (poll loop)  │       │  mavlink crate     │
+        └──────┬───────┘       └────────┬───────────┘
+               │                        │
+               ▼                        ▼
+        Same normalized payloads (AttitudeData, GpsData, etc.)
+               │                        │
+               └────────────┬───────────┘
+                            │
+                    ┌───────┴────────┐
+                    │  Tauri Events  │
+                    │  DB Recording  │
+                    │  Raw Logging   │
+                    └────────────────┘
 ```
 
-### TelemetrySource Trait (Planned)
+### Key Architecture Decisions
 
-```rust
-trait TelemetrySource: Send {
-    fn poll(&mut self) -> Vec<(String, TelemetryPayload)>;
-    fn stop(&mut self);
-}
-```
-
-- **MspSource**: Extracted from current `poll_slot()` — request/response, active polling
-- **LtmSource**: Passive listener — LTM frames arrive continuously, no requests needed
-- **MavlinkSource**: MAVLink v1/v2 heartbeat + telemetry stream (ArduPilot, PX4)
-- **CrsfSource**: CRSF/ELRS telemetry frames
-- **ReplaySource**: Timed playback from DB records at original rate
+- **ByteTransport trait** (Layer 1): Protocol-agnostic byte I/O — all transports (Serial, TCP, UDP, BLE) implement this once
+- **Protocol handlers** (Layer 2): MSP uses polling scheduler, MAVLink uses push-based reader thread — separate modules, not a unified trait
+- **Protocol selection**: Explicit UI dropdown (MSP / MAVLink), no auto-detection
+- **Raw recording**: MWP v2 Binary Capture (`.raw`) for MSP, standard tlog (`.tlog`) for MAVLink — crash-safe, raw-first pipeline
+- **DB import**: After DISARM/disconnect, raw log is post-processed into SQLite telemetry_records
 
 ### What Changes
 
 | Layer | Changes Needed | Scope |
 |---|---|---|
-| Scheduler | Owns `Box<dyn TelemetrySource>` instead of calling MSP directly | Medium |
+| Transport | New `ByteTransport` trait, existing serial refactored | Medium |
+| MSP Scheduler | Uses `MspTransport<ByteTransport>` instead of `Transport` | Medium |
+| MAVLink Handler | New module — reader thread + heartbeat + command channel | Large |
 | Payloads | Already protocol-agnostic — no change | None |
 | Tauri Events | Same event names — no change | None |
 | Frontend Stores | Same listeners — no change | None |
 | Widgets | Same `TelemetryData` prop — no change | None |
 | DB Schema | Unified — NULL where protocol doesn't provide a field | None |
 | Adapter | Same `toTelemetryData()` — no change | None |
-
-### Protocol Auto-Detection (Planned)
-
-On connect: try MSP handshake → if fails, listen for MAVLink heartbeat → if fails, try LTM frame detection. First successful detection selects the `TelemetrySource` implementation.
 
 ---
 

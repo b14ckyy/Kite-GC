@@ -68,6 +68,7 @@ Kite Ground Control/
 │   │   │   ├── UavInfoPanel.svelte # FC info, feature gates, craft name
 │   │   │   ├── StatusBar.svelte  # Connection status, arming indicator, app title
 │   │   │   ├── NavRail.svelte    # Hamburger menu + vertical tab rail
+│   │   │   ├── Map3D.svelte      # CesiumJS 3D globe view (optional, alongside Leaflet)
 │   │   │   └── widgets/          # HUD widget components
 │   │   │       ├── AHI.svelte        # Artificial Horizon Indicator
 │   │   │       ├── SpeedWidget.svelte # Ground speed + airspeed
@@ -107,12 +108,14 @@ Kite Ground Control/
 │   │   ├── flightlog/            # Flight recording + logbook backend
 │   │   │   ├── mod.rs            # Module exports
 │   │   │   ├── types.rs          # Flight/TelemetryRecord/summary/settings structs
-│   │   │   ├── db.rs             # SQLite schema, migrations, CRUD, tests
+│   │   │   ├── db.rs             # SQLite schema, migrations (v0→v5), CRUD, tests
 │   │   │   ├── recorder.rs       # Arm/disarm-driven recording engine
 │   │   │   ├── raw_logger.rs     # Optional raw parsed text log writer
 │   │   │   ├── geocode.rs        # OSM Nominatim reverse geocoding
 │   │   │   ├── weather.rs        # Open-Meteo weather fetcher
-│   │   │   └── blackbox.rs       # Blackbox decode pipeline (discovery, invocation, CSV parsing, downsampling)
+│   │   │   ├── blackbox.rs       # Blackbox decode pipeline (discovery, invocation, CSV parsing, downsampling)
+│   │   │   ├── ardupilot.rs      # ArduPilot Blackbox/DataFlash log import (planned)
+│   │   │   └── exchange.rs       # .kflight export/import (self-contained SQLite exchange format)
 │   │   ├── mission/              # Mission planning module
 │   │   │   ├── mod.rs            # Module exports
 │   │   │   ├── types.rs          # WpAction enum (8 types), Waypoint, Mission, MissionInfo
@@ -149,6 +152,10 @@ Kite Ground Control/
 │   ├── ROADMAP.md                # Feature roadmap by milestone
 │   ├── FLIGHTLOG_DATABASE.md     # Flight log database schema documentation
 │   ├── DATA_PIPELINE.md          # Data pipeline architecture (live + replay flows)
+│   ├── PROTOCOL_REFACTORING.md   # Multi-protocol (MAVLink) integration workstream plan
+│   ├── PROTOCOL_FLIGHT_MODES.md  # INAV/ArduPilot flight mode reference
+│   ├── COLORED_TRACK_PLAN.md     # Colored flight track design notes
+│   ├── ARDUPILOT_IMPORT_PLAN.md  # ArduPilot log import planning
 │   └── M5_TEST_CHECKLIST.md      # Manual verification checklist for M5 implementation
 │
 ├── static/                       # Static assets (icons, etc.)
@@ -242,7 +249,7 @@ Settings stored in `localStorage` under key `kite-gc-settings`:
 - `mapProvider` / `mapCacheMaxMB` — tile provider + cache size
 - `navPanelOpen` / `activeTab` — floating panel state
 - `attitudeRateHz` / `positionRateHz` / `airspeedEnabled` — telemetry poll config
-- `flightLoggingEnabled` / `flightLogDbPath` / `flightLogRawEnabled` — flight logging config
+- `flightLoggingEnabled` / `flightRecordingEnabled` / `flightLogDbPath` / `flightLogRawEnabled` — flight logging + recording config
 - `defaultWpAltitudeM` / `defaultPhTimeSec` — mission control defaults
 - `locale` — UI language (`'en'` or `'de'`)
 - `widgetAhi` / `widgetSpeed` / `widgetAltitude` / `widgetBattery` / `widgetGps` / `widgetCompass` / `widgetHome` — per-widget visibility toggles
@@ -464,11 +471,19 @@ The raw `.TXT` file is always archived in `blackbox_files` regardless of downsam
 | `num_sat` | `GPS_numSat` | |
 | `link_quality` | `lq` / `link_quality` / `rxlq` | ELRS/CRSF only; `None` if column absent |
 
-### DB Schema (v3)
+### DB Schema (v5)
 
-Current schema version is **3**. Migration path: v0→v1 (initial schema), v1→v2 (blackbox tables + `flights.source`), v2→v3 (link_quality column).
+Current schema version is **5**. Migration path: v0→v1 (initial schema), v1→v2 (blackbox tables + `flights.source`), v2→v3 (link_quality column), v3→v4 (replay telemetry fields), v4→v5 (craft_name column).
 
 ```sql
+-- v5 migration (2026-04-21):
+ALTER TABLE flights ADD COLUMN craft_name TEXT;
+
+-- v4 migration (replay-focused fields):
+-- Added baro_alt_m, gps_alt_m, fix_type, num_sat, gps_hdop, active_flight_modes,
+-- arming_flags, flight_mode_flags, cpu_load, nav_state, nav_wp_number, wind_speed_ms,
+-- wind_direction, rc_channels (JSON), sensors_health to telemetry_records
+
 -- v3 migration (2026-04-17):
 ALTER TABLE telemetry_records ADD COLUMN link_quality INTEGER;
 
@@ -490,82 +505,3 @@ CREATE TABLE blackbox_files (
 );
 -- flights.source: 'live' | 'blackbox' | 'both'
 ```
-
-## MSP Link Quality — Future: MSP2_INAV_GET_LINK_STATS (INAV 9.x)
-
-INAV PR [#11496](https://github.com/iNavFlight/inav/pull/11496) (targeting `maintenance-9.x`) adds a new MSP2 message:
-
-**`MSP2_INAV_GET_LINK_STATS` — code `0x2103` (decimal 8451)**
-
-Request: none  
-Reply payload:
-
-| Field | Type | Size | Unit | Description |
-|---|---|---|---|---|
-| `uplinkRSSI_dBm` | uint8_t | 1 | -dBm | Uplink RSSI as positive magnitude (70 = -70 dBm) |
-| `uplinkLQ` | uint8_t | 1 | % | Uplink Link Quality (`rxLinkStatistics.uplinkLQ`) |
-| `uplinkSNR` | int8_t | 1 | dB | Uplink Signal-to-Noise Ratio (`rxLinkStatistics.uplinkSNR`) |
-
-This supersedes the current RSSI reading from `MSPV2_INAV_ANALOG` for CRSF/ELRS setups. Implementation plan:
-- Add `LinkStats` feature gate: `InavVersion >= 9.1` (exact version TBD once merged)
-- Add `MSP2_INAV_GET_LINK_STATS` to the Analog telemetry group (or a dedicated Link slot)
-- Populate `link_quality` (already in `TelemetryRecord`) and add `uplink_snr_db` (future field) from the new message
-- `link_quality` field in DB already prepared in schema v3
-- Reference: [INAV PR #11496](https://github.com/iNavFlight/inav/pull/11496)
-| `current_a` | `amperage` | |
-| `mah_drawn` | `mahdrawn` | |
-| `rssi` | `rssi` | |
-| `roll` | `roll` / `attitude[0]` / `attitude_roll` | **always ÷10** (INAV decidegrees → degrees) |
-| `pitch` | `pitch` / `attitude[1]` / `attitude_pitch` | **always ÷10** (INAV decidegrees → degrees) |
-| `yaw` | `yaw` / `attitude[2]` / `attitude_yaw` | decidegrees auto-detected (>360 → ÷10) |
-| `num_sat` | `GPS_numSat` | |
-| `link_quality` | `lq` / `link_quality` / `rxlq` | ELRS/CRSF only; `None` if column absent |
-
-### DB Schema (v3)
-
-Current schema version is **3**. Migration path: v0→v1 (initial schema), v1→v2 (blackbox tables + `flights.source`), v2→v3 (link_quality column).
-
-```sql
--- v3 migration (2026-04-17):
-ALTER TABLE telemetry_records ADD COLUMN link_quality INTEGER;
-
--- v2 tables (unchanged):
-CREATE TABLE blackbox_records (
-    id            INTEGER PRIMARY KEY,
-    flight_id     INTEGER NOT NULL REFERENCES flights(id) ON DELETE CASCADE,
-    timestamp_us  INTEGER NOT NULL,
-    csv_data      TEXT NOT NULL  -- raw comma-joined CSV row (not JSON)
-);
-CREATE TABLE blackbox_files (
-    id                INTEGER PRIMARY KEY,
-    flight_id         INTEGER NOT NULL REFERENCES flights(id) ON DELETE CASCADE,
-    original_filename TEXT NOT NULL,
-    log_index         INTEGER NOT NULL DEFAULT 0,
-    file_data         BLOB NOT NULL,
-    file_size         INTEGER NOT NULL,
-    imported_at       TEXT NOT NULL DEFAULT (datetime('now'))
-);
--- flights.source: 'live' | 'blackbox' | 'both'
-```
-
-## MSP Link Quality — Future: MSP2_INAV_GET_LINK_STATS (INAV 9.x)
-
-INAV PR [#11496](https://github.com/iNavFlight/inav/pull/11496) (targeting `maintenance-9.x`) adds a new MSP2 message:
-
-**`MSP2_INAV_GET_LINK_STATS` — code `0x2103` (decimal 8451)**
-
-Request: none  
-Reply payload:
-
-| Field | Type | Size | Unit | Description |
-|---|---|---|---|---|
-| `uplinkRSSI_dBm` | uint8_t | 1 | -dBm | Uplink RSSI as positive magnitude (70 = -70 dBm) |
-| `uplinkLQ` | uint8_t | 1 | % | Uplink Link Quality (`rxLinkStatistics.uplinkLQ`) |
-| `uplinkSNR` | int8_t | 1 | dB | Uplink Signal-to-Noise Ratio (`rxLinkStatistics.uplinkSNR`) |
-
-This supersedes the current RSSI reading from `MSPV2_INAV_ANALOG` for CRSF/ELRS setups. Implementation plan:
-- Add `LinkStats` feature gate: `InavVersion >= 9.1` (exact version TBD once merged)
-- Add `MSP2_INAV_GET_LINK_STATS` to the Analog telemetry group (or a dedicated Link slot)
-- Populate `link_quality` (already in `TelemetryRecord`) and add `uplink_snr_db` (future field) from the new message
-- `link_quality` field in DB already prepared in schema v3
-- Reference: [INAV PR #11496](https://github.com/iNavFlight/inav/pull/11496)

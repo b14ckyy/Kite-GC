@@ -253,44 +253,55 @@ Tauri Events → Frontend (telemetry-attitude, telemetry-gps, ...)
 
 ---
 
-## ADR-010: Multi-Protocol Telemetry via TelemetrySource Trait (Planned)
+## ADR-010: Multi-Protocol Architecture — ByteTransport + Separate Schedulers
 
 **Date**: 2026-04-16
-**Status**: Planned (M6)
+**Status**: Accepted (implementation starting)
+**Supersedes**: Original TelemetrySource trait plan
 
-**Context**: The GCS will need to support multiple telemetry protocols (MSP, LTM, MAVLink/ArduPilot, CRSF) and multiple simultaneous aircraft. The current telemetry pipeline is already mostly protocol-agnostic — the payload structs (`AttitudeData`, `GpsData`, etc.) and Tauri event names (`telemetry-attitude`, etc.) describe domain concepts, not protocol specifics. The only coupling point is `poll_slot()` in `scheduler/mod.rs`, which directly calls `serial.msp_request()` and MSP-specific decode functions.
+**Context**: The GCS needs to support MSP (request/response polling) and MAVLink (push-based streams) — two fundamentally different communication models. A single `TelemetrySource::poll()` trait cannot cleanly represent both paradigms. The current `Transport` trait (`fn msp_request()`) is MSP-specific and cannot serve MAVLink's continuous byte-stream needs.
 
-**Decision**: Introduce a `TelemetrySource` trait when the second protocol is implemented. The trait abstracts protocol-specific polling and decoding behind a single interface:
+**Decision**: Two-layer architecture with protocol-specific schedulers sharing a common byte-level transport.
 
+**Layer 1 — ByteTransport trait** (protocol-agnostic):
 ```rust
-trait TelemetrySource: Send {
-    /// Poll for new telemetry data. Returns (event_name, payload) pairs.
-    fn poll(&mut self) -> Vec<(String, TelemetryPayload)>;
-    /// Stop the source gracefully.
-    fn stop(&mut self);
+pub trait ByteTransport: Send {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, TransportError>;
+    fn write(&mut self, data: &[u8]) -> Result<usize, TransportError>;
+    fn description(&self) -> String;
+    fn close(&mut self) -> Result<(), TransportError>;
 }
 ```
+All transports (Serial, TCP, UDP, BLE) implement `ByteTransport`. New transports automatically work with all protocols.
 
-**Planned implementations**:
-- `MspSource` — extracted from current `poll_slot()` (MSP request/response + decode)
-- `LtmSource` — LTM frame parser (passive, no request needed)
-- `MavlinkSource` — MAVLink v1/v2 heartbeat + telemetry messages (ArduPilot, PX4)
-- `CrsfSource` — CRSF/ELRS telemetry frames
-- `ReplaySource` — playback from recorded flights at original timing
+**Layer 2 — Protocol-specific handlers** (separate modules):
+- **MspScheduler**: Existing priority-based poll loop, uses `MspTransport` wrapper (MSP framing over `ByteTransport`)
+- **MavlinkHandler**: Reader thread (continuous parse + dispatch) + Heartbeat writer (1 Hz) + Command channel (COMMAND_LONG/ACK)
 
-**Key properties**:
-- All sources emit the **same** `TelemetryPayload` variants → frontend code is never changed
-- The scheduler thread owns a `Box<dyn TelemetrySource>` instead of calling MSP directly
-- Multi-aircraft: multiple `TelemetrySource` instances with per-UAV ID, routed to per-UAV stores
-- Protocol auto-detection possible: try MSP handshake → fall back to MAVLink heartbeat sniffing
+**Protocol selection**: Explicit UI dropdown (no auto-detect). User selects MSP or MAVLink before connecting. Simplifies handshake logic and avoids issues on slow wireless links.
 
-**What stays unchanged**: The frontend stores (`telemetry.ts`), all widgets, the Tauri event interface, the scheduler loop structure (priority slots, command/bulk channels).
+**Unified data output**: Both handlers emit the **same** Tauri events (`telemetry-attitude`, `telemetry-gps`, etc.) with identical payload shapes. Frontend never knows which protocol is active.
+
+**MAVLink specifics**:
+- Firmware scope: ArduPilot + PX4 + INAV MAVLink (common dialect)
+- MAVLink v1 + v2 (backwards-compatible)
+- `mavlink` Rust crate for generated message definitions
+- GCS IDs: sysid=255, compid=190 (industry standard)
+- 10 receive messages + HOME_POSITION covering all widget fields
+
+**Key differences from original TelemetrySource plan**:
+- No single trait for all protocols — MSP polling and MAVLink push are too different
+- ByteTransport extracted at a lower level — enables transport reuse across protocols
+- Protocol auto-detection deferred — explicit selection is safer and simpler
+- Each protocol handler is a self-contained module (`msp/`, `mavlink/`)
+
+Full implementation plan: `docs/PROTOCOL_REFACTORING.md`
 
 **Rationale**:
-- Current payload structs are already protocol-agnostic — no rework needed there
-- Single insertion point (`poll_slot`) means low refactoring risk
-- Defer until second protocol implementation to avoid premature abstraction
-- The trait boundary is a natural extension of the existing module structure
+- Separate handlers avoid forcing push-based protocols into a poll-based abstraction
+- ByteTransport reuse eliminates duplicate transport code across protocols
+- Modular structure: adding a new protocol means adding a new handler module, not modifying existing ones
+- Frontend stays completely unchanged — same events, same stores, same widgets
 
 ---
 
@@ -839,4 +850,46 @@ r.lat / r.lon ← raw GPS coordinates (always, no nav fallback)
 - Shared tile cache means 3D view benefits from previously cached 2D tiles
 - Optional view: 2D map remains the primary interface; 3D is for visualization/monitoring
 - Custom Vite plugin avoids all dependency issues we hit with third-party plugins
+
+---
+
+## ADR-022: Separate Flight Recording from Flight Logbook
+
+**Date**: 2026-04-21
+**Status**: Accepted
+
+**Context**: The original "Flight Logging" toggle (`flightLogEnabled`) conflated two distinct features:
+1. **Flight Recording** — raw telemetry stream capture to protocol-native files (future: MWP .raw for MSP, .tlog for MAVLink)
+2. **Flight Logbook** — structured SQLite database entries (flights table, telemetry_records, metadata) for logbook browsing, search, and replay
+
+Users may want recording without DB overhead, or DB logging without raw file capture. The upcoming multi-protocol architecture (ADR-010) requires protocol-native raw logs that are independent of the DB pipeline.
+
+**Decision**: Split into two independent toggles in Settings:
+
+| Setting | Store field | Rust field | Purpose |
+|---|---|---|---|
+| **Flight Recording** | `flightRecordingEnabled` | `raw_enabled` | Raw stream capture to protocol-native files |
+| **Flight Logbook** | `flightLoggingEnabled` | `db_enabled` | SQLite database entries for logbook |
+
+**Frontend changes**:
+- `SettingsPanel.svelte`: Two separate toggles with clear labels
+- `settings.ts` store: `flightRecordingEnabled` (default: true) + `flightLoggingEnabled` (default: true)
+- Logbook tab in NavRail hidden when `flightLoggingEnabled` is false
+- `+page.svelte`: Passes both flags independently to Tauri backend
+
+**Backend changes**:
+- `FlightLogSettings` struct: `db_enabled: bool` + `raw_enabled: bool` (future)
+- DB schema v4→v5: `flights.craft_name` column for user-editable craft names
+- Craft name editing: `flightlog_update_craft_name` Tauri command
+
+**Recording pipeline** (future, see `docs/PROTOCOL_REFACTORING.md`):
+- Raw-first: recording starts on ARM/connect, writes protocol-native bytes
+- DB import happens after DISARM/disconnect (post-processing)
+- Crash-safe: raw file survives even if app crashes during flight
+
+**Rationale**:
+- Clean separation of concerns: raw capture ≠ structured database
+- Enables raw-only mode for minimal overhead during flight
+- Aligns with multi-protocol architecture: each protocol has its own raw format
+- Logbook UI makes no sense when DB logging is disabled → hide the tab
 
