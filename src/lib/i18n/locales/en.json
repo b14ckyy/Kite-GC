@@ -90,6 +90,8 @@
     "enableFlightLogging": "Enable Flight Logbook",
     "enableFlightRecording": "Enable Flight Recording",
     "rawFlightLogs": "Save Raw Text Logs",
+    "continuousRawLogging": "Continuous Raw Logging",
+    "continuousRawHint": "Records raw data from connect. DB only captures armed segments.",
     "flightLogDbPath": "Database Folder",
     "defaultPathUnknown": "(default path unavailable)",
     "choose": "Choose",

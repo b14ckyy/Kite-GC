@@ -9,6 +9,7 @@ use rusqlite::Connection;
 
 use super::db;
 use super::raw_logger::RawLogger;
+use super::tlog_logger::TlogLogger;
 use super::types::{Flight, FlightLogSettings, TelemetryRecord};
 use crate::msp::FcInfo;
 use crate::scheduler::telemetry::{
@@ -122,12 +123,18 @@ struct ActiveFlight {
 pub struct FlightRecorder {
     settings: FlightLogSettings,
     fc_info: FcInfo,
+    protocol: String,
     db_file_path: std::path::PathBuf,
     db: Connection,
     raw_logger: Option<RawLogger>,
+    tlog_logger: Option<TlogLogger>,
     snapshot: TelemetrySnapshot,
     active_flight: Option<ActiveFlight>,
     was_armed: bool,
+    /// Continuous session log start time (for session file naming)
+    session_start: Option<chrono::DateTime<Utc>>,
+    /// Track continuous-mode session start Instant for raw sample timestamps
+    session_instant: Option<Instant>,
 }
 
 /// Thread-safe handle to the flight recorder
@@ -135,9 +142,11 @@ pub type FlightRecorderHandle = Arc<Mutex<FlightRecorder>>;
 
 impl FlightRecorder {
     /// Create a new recorder. Returns None if logging is disabled.
+    /// `protocol` should be "MSP" or "MAVLink".
     pub fn new(
         settings: FlightLogSettings,
         fc_info: FcInfo,
+        protocol: &str,
         portable: bool,
     ) -> Result<Self, String> {
         let db_path = db::resolve_db_path(&settings.db_path, portable);
@@ -150,13 +159,52 @@ impl FlightRecorder {
         Ok(Self {
             settings,
             fc_info,
+            protocol: protocol.to_string(),
             db_file_path: db_path,
             db,
             raw_logger: None,
+            tlog_logger: None,
             snapshot: TelemetrySnapshot::default(),
             active_flight: None,
             was_armed: false,
+            session_start: None,
+            session_instant: None,
         })
+    }
+
+    /// Start continuous raw logging immediately on connect.
+    /// Called when `raw_always` is enabled. Opens a session-level raw/tlog file
+    /// that records all data (including pre-arm) until disconnect.
+    pub fn start_continuous_log(&mut self) {
+        if !self.settings.raw_always {
+            return;
+        }
+        let now = Utc::now();
+        let log_dir = self
+            .db_file_path
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+
+        // Use session timestamp + "session" label, flight_id=0 (no DB flight yet)
+        if self.protocol == "MAVLink" {
+            match TlogLogger::new(log_dir, 0, &now) {
+                Ok(logger) => {
+                    log::info!("Continuous tlog session started");
+                    self.tlog_logger = Some(logger);
+                }
+                Err(e) => log::warn!("Failed to create continuous tlog: {}", e),
+            }
+        } else {
+            match RawLogger::new(log_dir, 0, &now) {
+                Ok(logger) => {
+                    log::info!("Continuous raw session started");
+                    self.raw_logger = Some(logger);
+                }
+                Err(e) => log::warn!("Failed to create continuous raw logger: {}", e),
+            }
+        }
+        self.session_start = Some(now);
+        self.session_instant = Some(Instant::now());
     }
 
     /// Feed attitude data from the scheduler
@@ -198,6 +246,13 @@ impl FlightRecorder {
         self.snapshot.airspeed = Some(data.airspeed);
     }
 
+    /// Write a raw MAVLink frame to the tlog file (if active)
+    pub fn write_raw_mavlink_frame(&mut self, raw_frame: &[u8]) {
+        if let Some(ref mut logger) = self.tlog_logger {
+            logger.write_frame(raw_frame);
+        }
+    }
+
     /// Feed status data — this is where arm/disarm transitions are detected
     pub fn on_status(&mut self, data: &StatusData) {
         self.snapshot.arming_flags = Some(data.arming_flags);
@@ -234,7 +289,7 @@ impl FlightRecorder {
                 fc_version: self.fc_info.fc_version.clone(),
                 board_id: self.fc_info.board_id.clone(),
                 platform_type: self.fc_info.platform_type,
-                protocol: "MSP".into(),
+                protocol: self.protocol.clone(),
                 start_lat: self.snapshot.lat,
                 start_lon: self.snapshot.lon,
                 location_name: None,
@@ -262,22 +317,39 @@ impl FlightRecorder {
             now.timestamp()
         };
 
-        // Start raw logger if enabled
-        let raw_logger = if self.settings.raw_enabled {
-            let log_dir = self
-                .db_file_path
-                .parent()
-                .unwrap_or(std::path::Path::new("."));
-            match RawLogger::new(log_dir, flight_id, &now) {
-                Ok(logger) => Some(logger),
-                Err(e) => {
-                    log::warn!("Failed to create raw logger: {}", e);
-                    None
+        // Start raw/tlog logger if enabled AND not already running (continuous mode)
+        let log_dir = self
+            .db_file_path
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+
+        if !self.settings.raw_always {
+            // Non-continuous: create per-flight raw/tlog logger
+            let (raw_logger, tlog_logger) = if self.settings.raw_enabled {
+                if self.protocol == "MAVLink" {
+                    match TlogLogger::new(log_dir, flight_id, &now) {
+                        Ok(logger) => (None, Some(logger)),
+                        Err(e) => {
+                            log::warn!("Failed to create tlog logger: {}", e);
+                            (None, None)
+                        }
+                    }
+                } else {
+                    match RawLogger::new(log_dir, flight_id, &now) {
+                        Ok(logger) => (Some(logger), None),
+                        Err(e) => {
+                            log::warn!("Failed to create raw logger: {}", e);
+                            (None, None)
+                        }
+                    }
                 }
-            }
-        } else {
-            None
-        };
+            } else {
+                (None, None)
+            };
+            self.raw_logger = raw_logger;
+            self.tlog_logger = tlog_logger;
+        }
+        // else: continuous mode — loggers already running from start_continuous_log()
 
         // Spawn async weather + geocode enrichment (non-blocking, DB-only)
         if self.settings.db_enabled {
@@ -289,7 +361,6 @@ impl FlightRecorder {
             }
         }
 
-        self.raw_logger = raw_logger;
         self.active_flight = Some(ActiveFlight {
             flight_id,
             start_instant: Instant::now(),
@@ -350,10 +421,16 @@ impl FlightRecorder {
                 }
             }
 
-            // Close raw logger
-            if let Some(mut logger) = self.raw_logger.take() {
-                logger.close();
+            // Close raw/tlog logger only in non-continuous mode
+            if !self.settings.raw_always {
+                if let Some(mut logger) = self.raw_logger.take() {
+                    logger.close();
+                }
+                if let Some(mut logger) = self.tlog_logger.take() {
+                    logger.close();
+                }
             }
+            // else: continuous mode — loggers stay open until disconnect
 
             let duration = flight.start_instant.elapsed().as_secs();
             log::info!(
@@ -368,9 +445,53 @@ impl FlightRecorder {
         }
     }
 
-    /// Record a telemetry sample if we have an active flight.
+    /// Record a telemetry sample if we have an active flight or continuous logging.
     /// Called after attitude or GPS updates (the highest-frequency data).
     fn maybe_record_sample(&mut self) {
+        // Continuous mode: write to raw logger even without an active flight
+        if self.active_flight.is_none() && self.settings.raw_always {
+            if let Some(session_instant) = &self.session_instant {
+                let elapsed_ms = session_instant.elapsed().as_millis() as i64;
+                let alt = self.snapshot.alt_baro.or(self.snapshot.alt_gps);
+                let record = TelemetryRecord {
+                    id: 0,
+                    flight_id: 0, // no DB flight
+                    timestamp_ms: elapsed_ms,
+                    lat: self.snapshot.lat,
+                    lon: self.snapshot.lon,
+                    alt_m: alt,
+                    speed_ms: self.snapshot.speed,
+                    heading: self.snapshot.heading,
+                    vario_ms: self.snapshot.vario,
+                    voltage: self.snapshot.voltage,
+                    current_a: self.snapshot.current,
+                    mah_drawn: self.snapshot.mah_drawn,
+                    rssi: self.snapshot.rssi,
+                    roll: self.snapshot.roll,
+                    pitch: self.snapshot.pitch,
+                    yaw: self.snapshot.yaw,
+                    fix_type: self.snapshot.fix_type,
+                    num_sat: self.snapshot.num_sat,
+                    cpu_load: self.snapshot.cpu_load,
+                    link_quality: None,
+                    baro_alt_m: self.snapshot.alt_baro,
+                    gps_hdop: None, gps_eph: None, gps_epv: None,
+                    active_wp_number: None,
+                    active_flight_mode_flags: self.snapshot.active_flight_mode_flags.map(|f| f as i64),
+                    state_flags: None, nav_state: None, nav_flags: None,
+                    rx_signal_received: None, hw_health_status: None, baro_temperature: None,
+                    wind_n_ms: None, wind_e_ms: None, wind_d_ms: None,
+                    rc_data_json: None, rc_command_json: None,
+                    nav_lat: None, nav_lon: None, nav_alt_m: None,
+                };
+                if let Some(ref mut logger) = self.raw_logger {
+                    logger.write_record(&record);
+                }
+                // tlog is written via write_raw_mavlink_frame(), not here
+            }
+            return;
+        }
+
         let flight = match &mut self.active_flight {
             Some(f) => f,
             None => return,
@@ -480,6 +601,15 @@ impl FlightRecorder {
         if self.active_flight.is_some() {
             log::info!("Recorder shutdown with active flight — forcing disarm");
             self.on_disarm();
+        }
+        // Always close continuous loggers on disconnect
+        if let Some(mut logger) = self.raw_logger.take() {
+            log::info!("Closing continuous raw log session");
+            logger.close();
+        }
+        if let Some(mut logger) = self.tlog_logger.take() {
+            log::info!("Closing continuous tlog session");
+            logger.close();
         }
     }
 }

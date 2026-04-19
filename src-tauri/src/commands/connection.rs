@@ -4,15 +4,16 @@ use tauri::{AppHandle, State};
 
 use crate::flightlog::recorder::FlightRecorder;
 use crate::flightlog::types::FlightLogSettings;
+use crate::mavlink_proto;
 use crate::msp::{
-    FcInfo, FeatureSet, InavVersion, MSP_API_VERSION, MSP_BOARD_INFO, MSP_FC_VARIANT,
+    FcInfo, FeatureSet, InavVersion, MspTransport, MSP_API_VERSION, MSP_BOARD_INFO, MSP_FC_VARIANT,
     MSP_FC_VERSION, MSP_NAME, MSPV2_INAV_MIXER,
 };
 use crate::msp::features::is_version_supported;
 use crate::scheduler;
 use crate::scheduler::TelemetryConfig;
-use crate::state::AppState;
-use crate::transport::{PortInfo, Transport, TransportType};
+use crate::state::{ActiveProtocol, AppState};
+use crate::transport::{ByteTransport, PortInfo, Transport, TransportType};
 use crate::transport::serial::SerialConnection;
 use crate::transport::tcp::TcpTransport;
 use crate::transport::udp::UdpTransport;
@@ -30,12 +31,14 @@ pub async fn scan_ble_devices() -> Result<Vec<BleDeviceInfo>, String> {
     crate::transport::ble::scan_ble_devices().await
 }
 
-/// Connect to a flight controller on the given transport.
-/// Performs the MSP handshake (API_VERSION, FC_VARIANT, FC_VERSION, BOARD_INFO)
-/// and then starts the telemetry scheduler.
+/// Connect to a flight controller on the given transport and protocol.
+/// MSP: Performs handshake + starts telemetry scheduler.
+/// MAVLink: Waits for HEARTBEAT + starts handler thread.
 #[tauri::command]
 pub async fn connect(
     transport_type: TransportType,
+    // Protocol selection ("msp" or "mavlink", defaults to "msp")
+    protocol: Option<String>,
     // Serial params
     port: Option<String>,
     baud_rate: Option<u32>,
@@ -53,19 +56,22 @@ pub async fn connect(
     flight_log_db_enabled: Option<bool>,
     flight_log_path: Option<String>,
     flight_log_raw: Option<bool>,
+    flight_log_raw_always: Option<bool>,
     state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<FcInfo, String> {
     // Check if already connected
     {
-        let sched = state.scheduler.lock().map_err(|e| e.to_string())?;
-        if sched.is_some() {
+        let proto = state.protocol.lock().map_err(|e| e.to_string())?;
+        if proto.is_some() {
             return Err("Already connected. Disconnect first.".into());
         }
     }
 
-    // Open transport based on type
-    let mut transport: Box<dyn Transport> = match transport_type {
+    let use_mavlink = protocol.as_deref() == Some("mavlink");
+
+    // Open byte-level transport based on type
+    let byte_transport: Box<dyn ByteTransport> = match transport_type {
         TransportType::Serial => {
             let port_name = port.ok_or("Serial port name required")?;
             let baud = baud_rate.unwrap_or(115200);
@@ -87,8 +93,56 @@ pub async fn connect(
         }
     };
 
-    log::info!("Transport opened: {}", transport.description());
+    log::info!("Transport opened, protocol={}", if use_mavlink { "MAVLink" } else { "MSP" });
 
+    let fc_info = if use_mavlink {
+        // ── MAVLink Path ─────────────────────────────────────────────
+        connect_mavlink(
+            byte_transport,
+            flight_log_enabled,
+            flight_log_db_enabled,
+            flight_log_path,
+            flight_log_raw,
+            flight_log_raw_always,
+            state,
+            app_handle,
+        )?
+    } else {
+        // ── MSP Path ────────────────────────────────────────────────
+        connect_msp(
+            byte_transport,
+            attitude_rate_hz,
+            position_rate_hz,
+            airspeed_enabled,
+            flight_log_enabled,
+            flight_log_db_enabled,
+            flight_log_path,
+            flight_log_raw,
+            flight_log_raw_always,
+            state,
+            app_handle,
+        )?
+    };
+
+    Ok(fc_info)
+}
+
+/// MSP connection path: handshake → scheduler
+fn connect_msp(
+    byte_transport: Box<dyn ByteTransport>,
+    attitude_rate_hz: Option<f64>,
+    position_rate_hz: Option<f64>,
+    airspeed_enabled: Option<bool>,
+    flight_log_enabled: Option<bool>,
+    flight_log_db_enabled: Option<bool>,
+    flight_log_path: Option<String>,
+    flight_log_raw: Option<bool>,
+    flight_log_raw_always: Option<bool>,
+    state: State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<FcInfo, String> {
+    // Wrap in MSP protocol layer (adds MSP v2 framing + response parser)
+    let mut transport = MspTransport::new(byte_transport);
 
     // ── MSP Handshake ──────────────────────────────────────────────
     let mut fc_info = FcInfo::default();
@@ -204,6 +258,7 @@ pub async fn connect(
         db_enabled: flight_log_db_enabled.unwrap_or(false),
         db_path: flight_log_path.unwrap_or_default(),
         raw_enabled: flight_log_raw.unwrap_or(false),
+        raw_always: flight_log_raw_always.unwrap_or(false),
     };
 
     let recorder_handle = if flight_log_settings.enabled {
@@ -212,8 +267,9 @@ pub async fn connect(
             .and_then(|p| p.parent().map(|p| p.join(".portable").exists()))
             .unwrap_or(false);
 
-        match FlightRecorder::new(flight_log_settings, fc_info.clone(), portable) {
-            Ok(rec) => {
+        match FlightRecorder::new(flight_log_settings, fc_info.clone(), "MSP", portable) {
+            Ok(mut rec) => {
+                rec.start_continuous_log();
                 let handle = std::sync::Arc::new(std::sync::Mutex::new(rec));
                 log::info!("Flight recorder initialized");
                 Some(handle)
@@ -227,12 +283,80 @@ pub async fn connect(
         None
     };
 
-    let handle = scheduler::start(transport, config, app_handle, recorder_handle);
+    let handle = scheduler::start(Box::new(transport), config, app_handle, recorder_handle);
 
-    // Store scheduler handle and FC info
+    // Store MSP scheduler handle and FC info
     {
-        let mut sched = state.scheduler.lock().map_err(|e| e.to_string())?;
-        *sched = Some(handle);
+        let mut proto = state.protocol.lock().map_err(|e| e.to_string())?;
+        *proto = Some(ActiveProtocol::Msp(handle));
+    }
+    {
+        let mut info = state.fc_info.lock().map_err(|e| e.to_string())?;
+        *info = Some(fc_info.clone());
+    }
+
+    Ok(fc_info)
+}
+
+/// MAVLink connection path: handshake → handler
+fn connect_mavlink(
+    mut byte_transport: Box<dyn ByteTransport>,
+    flight_log_enabled: Option<bool>,
+    flight_log_db_enabled: Option<bool>,
+    flight_log_path: Option<String>,
+    flight_log_raw: Option<bool>,
+    flight_log_raw_always: Option<bool>,
+    state: State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<FcInfo, String> {
+    // MAVLink handshake: wait for FC HEARTBEAT, send GCS HEARTBEAT back
+    let (fc_info, fc_sysid) = mavlink_proto::perform_handshake(&mut *byte_transport)?;
+
+    log::info!(
+        "MAVLink connected: {} (sysid={}) via {}",
+        fc_info.fc_variant,
+        fc_sysid,
+        byte_transport.description(),
+    );
+
+    // ── Flight recorder setup ────────────────────────────────────────────
+    let flight_log_settings = FlightLogSettings {
+        enabled: flight_log_enabled.unwrap_or(false),
+        db_enabled: flight_log_db_enabled.unwrap_or(false),
+        db_path: flight_log_path.unwrap_or_default(),
+        raw_enabled: flight_log_raw.unwrap_or(false),
+        raw_always: flight_log_raw_always.unwrap_or(false),
+    };
+
+    let recorder_handle = if flight_log_settings.enabled {
+        let portable = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.join(".portable").exists()))
+            .unwrap_or(false);
+
+        match FlightRecorder::new(flight_log_settings, fc_info.clone(), "MAVLink", portable) {
+            Ok(mut rec) => {
+                rec.start_continuous_log();
+                let handle = std::sync::Arc::new(std::sync::Mutex::new(rec));
+                log::info!("Flight recorder initialized (MAVLink)");
+                Some(handle)
+            }
+            Err(e) => {
+                log::error!("Failed to initialize flight recorder: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // Start the MAVLink handler thread
+    let handle = mavlink_proto::handler::start(byte_transport, fc_sysid, app_handle, recorder_handle);
+
+    // Store MAVLink handle and FC info
+    {
+        let mut proto = state.protocol.lock().map_err(|e| e.to_string())?;
+        *proto = Some(ActiveProtocol::Mavlink(handle));
     }
     {
         let mut info = state.fc_info.lock().map_err(|e| e.to_string())?;
@@ -245,14 +369,22 @@ pub async fn connect(
 /// Disconnect from the flight controller
 #[tauri::command]
 pub async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
-    let mut sched = state.scheduler.lock().map_err(|e| e.to_string())?;
-    if sched.is_none() {
+    let mut proto = state.protocol.lock().map_err(|e| e.to_string())?;
+    if proto.is_none() {
         return Err("Not connected".into());
     }
 
-    // Stop the scheduler (sends Stop command, joins thread, drops serial)
-    if let Some(handle) = sched.take() {
-        let _serial = handle.stop(); // serial connection dropped here
+    // Stop the active protocol handler
+    match proto.take() {
+        Some(ActiveProtocol::Msp(handle)) => {
+            let _transport = handle.stop(); // transport dropped here
+            log::info!("MSP scheduler stopped");
+        }
+        Some(ActiveProtocol::Mavlink(handle)) => {
+            let _transport = handle.stop(); // transport dropped here
+            log::info!("MAVLink handler stopped");
+        }
+        None => {}
     }
 
     // Clear FC info

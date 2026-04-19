@@ -337,6 +337,12 @@ fn poll_slot(
     tracker: &mut debug::DebugTracker,
     recorder: &Option<FlightRecorderHandle>,
 ) {
+    // Mark poll time BEFORE the request — the interval measures request-to-request,
+    // not reply-to-request. This prevents reply latency from artificially slowing
+    // the poll rate. If the reply takes longer than the interval, the slot becomes
+    // immediately overdue and gets polled again on the next loop iteration.
+    slot.last_poll = Some(Instant::now());
+
     let codes_to_poll: Vec<u16> = match slot.group {
         TelemetryGroup::PositionSecondary => {
             // Rotating: pick one secondary code per cycle
@@ -372,6 +378,4 @@ fn poll_slot(
             }
         }
     }
-
-    slot.last_poll = Some(Instant::now());
 }

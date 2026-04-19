@@ -6,7 +6,7 @@ use crate::mission::store::{MissionStore, mission_from_xml, mission_to_xml};
 use crate::mission::types::{Mission, Waypoint, WpAction};
 use crate::mission::codec;
 use crate::msp::types::{MSP_WP, MSP_WP_GETINFO, MSP_WP_MISSION_LOAD, MSP_WP_MISSION_SAVE, MSP_SET_WP};
-use crate::state::AppState;
+use crate::state::{ActiveProtocol, AppState};
 
 /// Get the current mission snapshot
 #[tauri::command]
@@ -114,8 +114,12 @@ pub fn mission_download(
     state: State<'_, AppState>,
     store: State<'_, MissionStore>,
 ) -> Result<Mission, String> {
-    let sched = state.scheduler.lock().map_err(|e| e.to_string())?;
-    let handle = sched.as_ref().ok_or("Not connected")?;
+    let proto = state.protocol.lock().map_err(|e| e.to_string())?;
+    let handle = match proto.as_ref() {
+        Some(ActiveProtocol::Msp(h)) => h,
+        Some(ActiveProtocol::Mavlink(_)) => return Err("Mission download not supported via MAVLink yet".into()),
+        None => return Err("Not connected".into()),
+    };
 
     // Optional: load from EEPROM first
     if from_eeprom {
@@ -153,8 +157,12 @@ pub fn mission_upload(
     state: State<'_, AppState>,
     store: State<'_, MissionStore>,
 ) -> Result<Mission, String> {
-    let sched = state.scheduler.lock().map_err(|e| e.to_string())?;
-    let handle = sched.as_ref().ok_or("Not connected")?;
+    let proto = state.protocol.lock().map_err(|e| e.to_string())?;
+    let handle = match proto.as_ref() {
+        Some(ActiveProtocol::Msp(h)) => h,
+        Some(ActiveProtocol::Mavlink(_)) => return Err("Mission upload not supported via MAVLink yet".into()),
+        None => return Err("Not connected".into()),
+    };
 
     let mission = store.snapshot();
     if mission.waypoints.is_empty() {

@@ -3,6 +3,7 @@
 
 mod commands;
 mod flightlog;
+mod mavlink_proto;
 mod mission;
 mod msp;
 mod scheduler;

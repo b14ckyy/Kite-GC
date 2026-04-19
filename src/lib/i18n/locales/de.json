@@ -90,6 +90,8 @@
     "enableFlightLogging": "Flugbuch aktivieren",
     "enableFlightRecording": "Flugaufzeichnung aktivieren",
     "rawFlightLogs": "Rohtext-Logs speichern",
+    "continuousRawLogging": "Durchgehend Raw-Loggen",
+    "continuousRawHint": "Zeichnet Rohdaten ab Verbindung auf. DB erfasst nur gearmte Segmente.",
     "flightLogDbPath": "Datenbank-Ordner",
     "defaultPathUnknown": "(Standardpfad nicht verfügbar)",
     "choose": "Wählen",

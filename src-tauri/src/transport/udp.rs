@@ -1,25 +1,20 @@
 // UDP Transport
 // Connects to a flight controller via UDP socket (e.g. MAVLink radios, Wi-Fi telemetry).
 // Note: UDP is connectionless — we bind locally and send/receive to/from a remote address.
-// For MSP, the remote must echo responses back. Suitable for SITL and some Wi-Fi bridges.
+// Implements ByteTransport for protocol-agnostic byte-level I/O.
 
 use std::net::UdpSocket;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use crate::msp::{MspCodec, MspMessage, MspParser};
-
-use super::Transport;
+use super::{ByteTransport, TransportError};
 
 /// Read timeout for individual recv calls
 const READ_TIMEOUT_MS: u64 = 1000;
-/// Timeout waiting for an MSP response
-const MSP_RESPONSE_TIMEOUT_MS: u64 = 2000;
 
 /// An active UDP transport to a flight controller
 pub struct UdpTransport {
     address: String,
     socket: UdpSocket,
-    parser: MspParser,
 }
 
 impl UdpTransport {
@@ -40,46 +35,29 @@ impl UdpTransport {
         Ok(Self {
             address: addr,
             socket,
-            parser: MspParser::new(),
         })
     }
 }
 
-impl Transport for UdpTransport {
-    fn msp_request(&mut self, code: u16, payload: &[u8]) -> Result<MspMessage, String> {
-        let frame = MspCodec::encode_v2(code, payload);
-        self.socket
-            .send(&frame)
-            .map_err(|e| format!("UDP send failed: {}", e))?;
-
-        let mut buf = [0u8; 1024];
-        let deadline = Instant::now() + Duration::from_millis(MSP_RESPONSE_TIMEOUT_MS);
-
-        loop {
-            if Instant::now() > deadline {
-                return Err(format!("MSP response timeout for command 0x{:04X}", code));
+impl ByteTransport for UdpTransport {
+    fn read_bytes(&mut self, buf: &mut [u8]) -> Result<usize, TransportError> {
+        match self.socket.recv(buf) {
+            Ok(n) => Ok(n),
+            Err(ref e)
+                if e.kind() == std::io::ErrorKind::TimedOut
+                    || e.kind() == std::io::ErrorKind::WouldBlock =>
+            {
+                Ok(0)
             }
-
-            match self.socket.recv(&mut buf) {
-                Ok(n) if n > 0 => {
-                    for &byte in &buf[..n] {
-                        if let Some(msg) = self.parser.push(byte) {
-                            if msg.code == code {
-                                return Ok(msg);
-                            }
-                        }
-                    }
-                }
-                Ok(_) => {}
-                Err(ref e)
-                    if e.kind() == std::io::ErrorKind::TimedOut
-                        || e.kind() == std::io::ErrorKind::WouldBlock =>
-                {
-                    // Recv timeout — retry until deadline
-                }
-                Err(e) => return Err(format!("UDP recv error: {}", e)),
-            }
+            Err(e) => Err(TransportError::from(e)),
         }
+    }
+
+    fn write_bytes(&mut self, data: &[u8]) -> Result<(), TransportError> {
+        self.socket
+            .send(data)
+            .map_err(|e| TransportError::Io(format!("UDP send failed: {}", e)))?;
+        Ok(())
     }
 
     fn description(&self) -> String {

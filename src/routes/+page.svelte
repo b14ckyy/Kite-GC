@@ -4,7 +4,7 @@
   import { listen } from "@tauri-apps/api/event";
   import { open, save, confirm } from "@tauri-apps/plugin-dialog";
   import { connection, availablePorts, bleDevices } from "$lib/stores/connection";
-  import type { FcInfo, PortInfo, BleDeviceInfo, TransportType } from "$lib/stores/connection";
+  import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
   import { telemetry } from "$lib/stores/telemetry";
   import { get } from "svelte/store";
@@ -62,6 +62,7 @@
 
   let appVersion = $state("...");
   let selectedTransport = $state<TransportType>('serial');
+  let selectedProtocol = $state<ProtocolType>('msp');
   let selectedPort = $state("");
   let selectedBaud = $state(115200);
   let tcpHost = $state("192.168.1.1");
@@ -85,6 +86,20 @@
   // Reactive telemetry subscription
   let liveTelem = $state(get(telemetry));
   telemetry.subscribe((t) => { liveTelem = t; });
+
+  // Switch default baud rate when protocol changes
+  // Track previous protocol to detect actual user-initiated changes
+  let prevProtocol = $state(selectedProtocol);
+  $effect(() => {
+    if (selectedProtocol !== prevProtocol) {
+      prevProtocol = selectedProtocol;
+      if (selectedProtocol === 'mavlink') {
+        selectedBaud = 57600;
+      } else {
+        selectedBaud = 115200;
+      }
+    }
+  });
   bleDevices.subscribe((d) => { bleDeviceList = d; });
 
   // Settings state for the settings panel
@@ -95,6 +110,7 @@
   let flightRecordingEnabled = $state(false);
   let flightLogDbPath = $state("");
   let flightLogRawEnabled = $state(false);
+  let flightLogRawAlways = $state(false);
   let defaultFlightLogPath = $state("");
   let mapProvider = $state("osm");
   let mapCacheMaxMB = $state(200);
@@ -172,6 +188,7 @@
   const saved = get(settings);
   selectedPort = saved.lastPort;
   selectedBaud = saved.lastBaud;
+  selectedProtocol = (saved.lastProtocol === 'mavlink' ? 'mavlink' : 'msp') as ProtocolType;
   navPanelOpen = saved.navPanelOpen;
   activeTab = saved.activeTab;
   attitudeRateHz = saved.attitudeRateHz;
@@ -181,6 +198,7 @@
   flightRecordingEnabled = saved.flightRecordingEnabled ?? false;
   flightLogDbPath = saved.flightLogDbPath;
   flightLogRawEnabled = saved.flightLogRawEnabled;
+  flightLogRawAlways = saved.flightLogRawAlways ?? false;
   mapProvider = saved.mapProvider;
   mapCacheMaxMB = saved.mapCacheMaxMB;
   cesiumIonToken = saved.cesiumIonToken ?? '';
@@ -688,10 +706,11 @@
     isConnecting = true;
     errorMsg = "";
     connection.update((c) => ({ ...c, status: "connecting" }));
-    settings.patch({ lastPort: selectedPort, lastBaud: selectedBaud, flightLoggingEnabled, flightRecordingEnabled, flightLogDbPath, flightLogRawEnabled });
+    settings.patch({ lastPort: selectedPort, lastBaud: selectedBaud, lastProtocol: selectedProtocol, flightLoggingEnabled, flightRecordingEnabled, flightLogDbPath, flightLogRawEnabled, flightLogRawAlways });
 
     try {
       await connectFC({
+        protocolType: selectedProtocol,
         transportType: selectedTransport,
         port: selectedTransport === 'serial' ? selectedPort : undefined,
         baudRate: selectedTransport === 'serial' ? selectedBaud : undefined,
@@ -705,10 +724,11 @@
         flightLogDbEnabled: flightLoggingEnabled && flightRecordingEnabled,
         flightLogPath: flightLogDbPath,
         flightLogRaw: flightRecordingEnabled && (!flightLoggingEnabled || flightLogRawEnabled),
+        flightLogRawAlways: flightRecordingEnabled && flightLogRawAlways,
       });
     } catch (e: any) {
       errorMsg = e.toString();
-      connection.set({ status: "error", transportType: selectedTransport, port: "", baudRate: selectedBaud, errorMessage: e.toString(), fcInfo: null });
+      connection.set({ status: "error", protocolType: selectedProtocol, transportType: selectedTransport, port: "", baudRate: selectedBaud, errorMessage: e.toString(), fcInfo: null });
     } finally {
       isConnecting = false;
     }
@@ -832,6 +852,7 @@
     {connStatus}
     {isConnecting}
     bind:selectedTransport
+    bind:selectedProtocol
     bind:selectedPort
     bind:selectedBaud
     bind:tcpHost
@@ -919,6 +940,7 @@
             {flightLoggingEnabled}
             {flightRecordingEnabled}
             {flightLogRawEnabled}
+            {flightLogRawAlways}
             {flightLogDbPath}
             {defaultFlightLogPath}
             {defaultWpAltitudeM}
@@ -934,6 +956,7 @@
               if (patch.flightLoggingEnabled != null) flightLoggingEnabled = patch.flightLoggingEnabled;
               if (patch.flightRecordingEnabled != null) flightRecordingEnabled = patch.flightRecordingEnabled;
               if (patch.flightLogRawEnabled != null) flightLogRawEnabled = patch.flightLogRawEnabled;
+              if (patch.flightLogRawAlways != null) flightLogRawAlways = patch.flightLogRawAlways;
               if (patch.flightLogDbPath != null) flightLogDbPath = patch.flightLogDbPath;
               if (patch.mapProvider != null) mapProvider = patch.mapProvider;
               if (patch.mapCacheMaxMB != null) mapCacheMaxMB = patch.mapCacheMaxMB;

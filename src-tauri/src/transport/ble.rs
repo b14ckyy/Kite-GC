@@ -1,13 +1,12 @@
 // BLE Transport
 // Connects to a flight controller via Bluetooth Low Energy (GATT Serial Profile).
 // Supports known BLE-to-serial adapters: CC2541, Nordic NRF (NUS), SpeedyBee Type 1/2.
+// Implements ByteTransport for protocol-agnostic byte-level I/O.
 
 use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use crate::msp::{MspCodec, MspMessage, MspParser};
-
-use super::Transport;
+use super::{ByteTransport, TransportError};
 
 /// BLE write MTU — standard BLE 4.x limit for GATT writes
 const BLE_WRITE_MTU: usize = 20;
@@ -93,7 +92,6 @@ pub struct BleTransport {
     read_rx: mpsc::Receiver<Vec<u8>>,
     /// Handle to stop the BLE runtime thread
     stop_tx: tokio::sync::mpsc::UnboundedSender<()>,
-    parser: MspParser,
     /// Buffered bytes from previous reads that haven't been fully consumed
     read_buffer: Vec<u8>,
     /// Write delay between BLE chunks (device-specific)
@@ -372,52 +370,41 @@ pub async fn connect_ble(device_id: &str) -> Result<BleTransport, String> {
         write_tx,
         read_rx,
         stop_tx,
-        parser: MspParser::new(),
         read_buffer: Vec::new(),
         write_delay,
     })
 }
 
-impl Transport for BleTransport {
-    fn msp_request(&mut self, code: u16, payload: &[u8]) -> Result<MspMessage, String> {
-        let frame = MspCodec::encode_v2(code, payload);
-
-        // Send frame via write channel (async task will chunk and write)
-        self.write_tx
-            .send(frame)
-            .map_err(|_| "BLE write channel closed".to_string())?;
-
-        // Read until we get the response or timeout
-        let deadline = Instant::now() + Duration::from_millis(MSP_RESPONSE_TIMEOUT_MS);
-
-        loop {
-            if Instant::now() > deadline {
-                return Err(format!("MSP response timeout for command 0x{:04X}", code));
-            }
-
-            // First, process any buffered bytes
-            while let Some(byte) = self.read_buffer.first().copied() {
-                self.read_buffer.remove(0);
-                if let Some(msg) = self.parser.push(byte) {
-                    if msg.code == code {
-                        return Ok(msg);
-                    }
-                }
-            }
-
-            // Wait for new data from BLE notifications
-            match self.read_rx.recv_timeout(Duration::from_millis(100)) {
-                Ok(data) => {
-                    self.read_buffer.extend_from_slice(&data);
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    // Retry until deadline
-                }
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    return Err("BLE connection lost".to_string());
-                }
-            }
+impl ByteTransport for BleTransport {
+    fn read_bytes(&mut self, buf: &mut [u8]) -> Result<usize, TransportError> {
+        // First, drain any buffered bytes from previous reads
+        if !self.read_buffer.is_empty() {
+            let n = std::cmp::min(buf.len(), self.read_buffer.len());
+            buf[..n].copy_from_slice(&self.read_buffer[..n]);
+            self.read_buffer.drain(..n);
+            return Ok(n);
         }
+
+        // Wait for new data from BLE notifications (100ms timeout to avoid blocking forever)
+        match self.read_rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(data) => {
+                let n = std::cmp::min(buf.len(), data.len());
+                buf[..n].copy_from_slice(&data[..n]);
+                if data.len() > n {
+                    self.read_buffer.extend_from_slice(&data[n..]);
+                }
+                Ok(n)
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => Ok(0),
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(TransportError::Disconnected),
+        }
+    }
+
+    fn write_bytes(&mut self, data: &[u8]) -> Result<(), TransportError> {
+        self.write_tx
+            .send(data.to_vec())
+            .map_err(|_| TransportError::Disconnected)?;
+        Ok(())
     }
 
     fn description(&self) -> String {

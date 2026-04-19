@@ -98,10 +98,10 @@ Kite Ground Control/
 │   ├── src/
 │   │   ├── main.rs               # Application entry point
 │   │   ├── lib.rs                # Tauri app builder and plugin registration
-│   │   ├── state.rs              # AppState (serial connection + FC info)
+│   │   ├── state.rs              # AppState (ActiveProtocol enum: MSP/MAVLink + FC info)
 │   │   ├── commands/             # Tauri IPC commands (frontend-callable)
 │   │   │   ├── mod.rs            # Command module registry
-│   │   │   ├── connection.rs     # Serial connect/disconnect + MSP handshake
+│   │   │   ├── connection.rs     # Multi-protocol connect/disconnect (MSP + MAVLink paths)
 │   │   │   ├── flightlog.rs      # Flight log commands (list/get/track/delete/notes/geocode/weather/update_weather/import/probe)
 │   │   │   ├── mission.rs        # Mission CRUD, FC transfer, XML/file I/O (13 commands)
 │   │   │   └── info.rs           # App version and metadata
@@ -109,13 +109,15 @@ Kite Ground Control/
 │   │   │   ├── mod.rs            # Module exports
 │   │   │   ├── types.rs          # Flight/TelemetryRecord/summary/settings structs
 │   │   │   ├── db.rs             # SQLite schema, migrations (v0→v5), CRUD, tests
-│   │   │   ├── recorder.rs       # Arm/disarm-driven recording engine
-│   │   │   ├── raw_logger.rs     # Optional raw parsed text log writer
+│   │   │   ├── recorder.rs       # Arm/disarm-driven recording engine (MSP + MAVLink, continuous mode)
+│   │   │   ├── raw_logger.rs     # MSP raw text log writer (CSV format)
+│   │   │   ├── tlog_logger.rs    # MAVLink tlog binary logger (Mission Planner/QGC compatible)
 │   │   │   ├── geocode.rs        # OSM Nominatim reverse geocoding
 │   │   │   ├── weather.rs        # Open-Meteo weather fetcher
 │   │   │   ├── blackbox.rs       # Blackbox decode pipeline (discovery, invocation, CSV parsing, downsampling)
-│   │   │   ├── ardupilot.rs      # ArduPilot Blackbox/DataFlash log import (planned)
-│   │   │   └── exchange.rs       # .kflight export/import (self-contained SQLite exchange format)
+│   │   │   ├── ardupilot.rs      # ArduPilot DataFlash .bin log import
+│   │   │   ├── exchange.rs       # .kflight export/import (self-contained SQLite exchange format)
+│   │   │   └── track_export.rs   # KMZ/KML/GPX/CSV track export with RDP simplification
 │   │   ├── mission/              # Mission planning module
 │   │   │   ├── mod.rs            # Module exports
 │   │   │   ├── types.rs          # WpAction enum (8 types), Waypoint, Mission, MissionInfo
@@ -130,10 +132,20 @@ Kite Ground Control/
 │   │   │   ├── types.rs          # Message types, constants, command codes
 │   │   │   ├── codec.rs          # MSP v1/v2 frame encode/decode
 │   │   │   ├── parser.rs         # Streaming byte-by-byte state machine
+│   │   │   ├── transport.rs      # MSP framing layer over ByteTransport
 │   │   │   └── features.rs       # Version-dependent feature gating
+│   │   ├── mavlink_proto/        # MAVLink Protocol implementation
+│   │   │   ├── mod.rs            # Module exports + re-exports
+│   │   │   ├── parser.rs         # MAVLink v1/v2 frame parser (byte-level state machine)
+│   │   │   ├── codec.rs          # MAVLink v2 frame serialization
+│   │   │   ├── handshake.rs      # Connection handshake (HEARTBEAT + AUTOPILOT_VERSION)
+│   │   │   └── handler.rs        # Dedicated handler thread (telemetry dispatch + recording)
 │   │   └── transport/            # Communication transports
-│   │       ├── mod.rs            # Transport abstractions
-│   │       └── serial.rs         # Serial port transport (serialport crate)
+│   │       ├── mod.rs            # ByteTransport trait + transport abstractions
+│   │       ├── serial.rs         # Serial port transport (serialport crate)
+│   │       ├── tcp.rs            # TCP client transport
+│   │       ├── udp.rs            # UDP transport
+│   │       └── ble.rs            # Bluetooth Low Energy transport
 │   ├── .cargo/config.toml        # Cargo config (target-dir override)
 │   ├── Cargo.toml                # Rust dependencies
 │   ├── Cargo.lock                # Dependency lock file

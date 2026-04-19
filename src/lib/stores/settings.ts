@@ -18,6 +18,7 @@ export interface PanelConfig {
 export interface AppSettings {
   lastPort: string;
   lastBaud: number;
+  lastProtocol: string;
   map: MapState;
   mapProvider: string;
   mapCacheMaxMB: number;
@@ -32,6 +33,7 @@ export interface AppSettings {
   flightRecordingEnabled: boolean;
   flightLogDbPath: string;
   flightLogRawEnabled: boolean;
+  flightLogRawAlways: boolean;
   // Mission Control
   defaultWpAltitudeM: number;
   defaultPhTimeSec: number;
@@ -50,6 +52,7 @@ const STORAGE_KEY = 'kite-gc-settings';
 const defaults: AppSettings = {
   lastPort: '',
   lastBaud: 115200,
+  lastProtocol: 'msp',
   map: {
     center: [51.505, -0.09],
     zoom: 13,
@@ -65,6 +68,7 @@ const defaults: AppSettings = {
   flightRecordingEnabled: false,
   flightLogDbPath: '',
   flightLogRawEnabled: false,
+  flightLogRawAlways: false,
   defaultWpAltitudeM: 50,
   defaultPhTimeSec: 30,
   warnAltitudeM: 120,

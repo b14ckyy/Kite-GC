@@ -1,17 +1,14 @@
 // Serial Transport
 // Handles USB/UART serial port communication with flight controllers.
+// Implements ByteTransport for protocol-agnostic byte-level I/O.
 
 use std::io::{Read, Write};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use crate::msp::{MspCodec, MspMessage, MspParser};
-
-use super::{PortInfo, Transport};
+use super::{ByteTransport, PortInfo, TransportError};
 
 /// Default read timeout for serial operations
 const READ_TIMEOUT_MS: u64 = 1000;
-/// Timeout waiting for an MSP response
-const MSP_RESPONSE_TIMEOUT_MS: u64 = 2000;
 
 /// List available serial ports on the system
 pub fn list_ports() -> Vec<PortInfo> {
@@ -59,7 +56,6 @@ pub fn list_ports() -> Vec<PortInfo> {
 pub struct SerialConnection {
     port_name: String,
     port: Box<dyn serialport::SerialPort>,
-    parser: MspParser,
 }
 
 // Safety: serialport::SerialPort requires Send, Box<dyn SerialPort> is Send
@@ -76,52 +72,32 @@ impl SerialConnection {
         Ok(Self {
             port_name: port_name.to_string(),
             port,
-            parser: MspParser::new(),
         })
     }
 
     /// Close the connection (port is closed on drop)
     pub fn close(self) {
-        // Drop self, which drops the port
         drop(self);
     }
 }
 
-impl Transport for SerialConnection {
-    fn msp_request(&mut self, code: u16, payload: &[u8]) -> Result<MspMessage, String> {
-        // Encode and send
-        let frame = MspCodec::encode_v2(code, payload);
+impl ByteTransport for SerialConnection {
+    fn read_bytes(&mut self, buf: &mut [u8]) -> Result<usize, TransportError> {
+        match self.port.read(buf) {
+            Ok(n) => Ok(n),
+            Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => Ok(0),
+            Err(e) => Err(TransportError::from(e)),
+        }
+    }
+
+    fn write_bytes(&mut self, data: &[u8]) -> Result<(), TransportError> {
         self.port
-            .write_all(&frame)
-            .map_err(|e| format!("Write failed: {}", e))?;
+            .write_all(data)
+            .map_err(|e| TransportError::Io(format!("Serial write failed: {}", e)))?;
         self.port
             .flush()
-            .map_err(|e| format!("Flush failed: {}", e))?;
-
-        // Read until we get the response or timeout
-        let mut buf = [0u8; 512];
-        let deadline = Instant::now() + Duration::from_millis(MSP_RESPONSE_TIMEOUT_MS);
-
-        loop {
-            if Instant::now() > deadline {
-                return Err(format!("MSP response timeout for command 0x{:04X}", code));
-            }
-
-            match self.port.read(&mut buf) {
-                Ok(n) if n > 0 => {
-                    for &byte in &buf[..n] {
-                        if let Some(msg) = self.parser.push(byte) {
-                            if msg.code == code {
-                                return Ok(msg);
-                            }
-                        }
-                    }
-                }
-                Ok(_) => {}
-                Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {}
-                Err(e) => return Err(format!("Read error: {}", e)),
-            }
-        }
+            .map_err(|e| TransportError::Io(format!("Serial flush failed: {}", e)))?;
+        Ok(())
     }
 
     fn description(&self) -> String {

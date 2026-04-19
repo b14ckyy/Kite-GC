@@ -406,33 +406,34 @@ This document tracks planned features, organized by milestone.
 ### Multi-Protocol Architecture (see `docs/PROTOCOL_REFACTORING.md`)
 
 **Phase 1 — ByteTransport trait extraction**:
-- [ ] `ByteTransport` trait (protocol-agnostic byte-level I/O: read/write/close)
-- [ ] `SerialByteTransport` — existing serial refactored to ByteTransport
-- [ ] `TcpByteTransport` — TCP client/server transport
-- [ ] `UdpByteTransport` — UDP transport (connectionless)
-- [ ] `MspTransport` — MSP framing layer over ByteTransport (replaces current `Transport` trait)
-- [ ] Refactor existing `MspScheduler` to use `MspTransport<ByteTransport>`
+- [x] `ByteTransport` trait (protocol-agnostic byte-level I/O: read/write/close)
+- [x] `SerialByteTransport` — existing serial refactored to ByteTransport
+- [x] `TcpByteTransport` — TCP client/server transport
+- [x] `UdpByteTransport` — UDP transport (connectionless)
+- [x] `MspTransport` — MSP framing layer over ByteTransport (replaces current `Transport` trait)
+- [x] Refactor existing `MspScheduler` to use `MspTransport<ByteTransport>`
 
 **Phase 2 — MAVLink integration**:
-- [ ] `mavlink` Rust crate with `common` + `ardupilotmega` dialects
-- [ ] `MavlinkHandler` — reader thread (continuous parse + dispatch) + heartbeat writer (1 Hz)
-- [ ] MAVLink → normalized payloads mapping (10 receive messages → same Tauri events)
-- [ ] GCS IDs: sysid=255, compid=190
-- [ ] ArduPilot + PX4 + INAV MAVLink firmware support
+- [x] `mavlink` Rust crate with `common` + `ardupilotmega` dialects
+- [x] `MavlinkHandler` — reader thread (continuous parse + dispatch) + heartbeat writer (1 Hz)
+- [x] MAVLink → normalized payloads mapping (10 receive messages → same Tauri events)
+- [x] GCS IDs: sysid=255, compid=190
+- [x] ArduPilot + PX4 + INAV MAVLink firmware support
 
 **Phase 3 — Connection Manager & Protocol Selection**:
-- [ ] `ConnectionManager` — owns transport + protocol handler, manages lifecycle
-- [ ] Protocol selection: explicit UI dropdown (MSP / MAVLink), no auto-detect
-- [ ] Transport selection: Serial / TCP / UDP per protocol
+- [x] `ConnectionManager` — owns transport + protocol handler, manages lifecycle
+- [x] Protocol selection: explicit UI dropdown (MSP / MAVLink), no auto-detect
+- [x] Transport selection: Serial / TCP / UDP per protocol
 
 **Phase 4 — Raw Recording**:
-- [ ] MSP raw log: MWP v2 Binary Capture format (`.raw`)
-- [ ] MAVLink raw log: standard tlog format (`.tlog`)
-- [ ] Raw-first recording: start on ARM → DB import after DISARM
-- [ ] Crash-safe: raw file survives app crash during flight
+- [x] MSP raw log: MWP v2 Binary Capture format (`.raw`)
+- [x] MAVLink raw log: standard tlog format (`.tlog`)
+- [x] Raw-first recording: start on ARM → DB import after DISARM
+- [x] Crash-safe: raw file survives app crash during flight
+- [x] Continuous raw logging: optional always-on recording from connect
 
 **Phase 5 — ArduPilot Log Import**:
-- [ ] `.bin` DataFlash log parser (ArduPilot native format)
+- [x] `.bin` DataFlash log parser (ArduPilot native format)
 - [ ] ArduPilot `.tlog` MAVLink log import
 - [ ] ArduPilot mission import (MAVLink WP protocol)
 

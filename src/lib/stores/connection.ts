@@ -7,6 +7,8 @@ export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'er
 
 export type TransportType = 'serial' | 'tcp' | 'udp' | 'ble';
 
+export type ProtocolType = 'msp' | 'mavlink';
+
 export interface InavVersion {
   major: number;
   minor: number;
@@ -49,6 +51,7 @@ export interface BleDeviceInfo {
 
 export interface ConnectionInfo {
   status: ConnectionStatus;
+  protocolType: ProtocolType;
   transportType: TransportType;
   port: string;
   baudRate: number;
@@ -58,6 +61,7 @@ export interface ConnectionInfo {
 
 export const connection = writable<ConnectionInfo>({
   status: 'disconnected',
+  protocolType: 'msp',
   transportType: 'serial',
   port: '',
   baudRate: 115200,

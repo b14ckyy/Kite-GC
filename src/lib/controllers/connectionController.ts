@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { FcInfo, PortInfo, BleDeviceInfo, TransportType } from '$lib/stores/connection';
+import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from '$lib/stores/connection';
 import { connection, availablePorts, bleDevices } from '$lib/stores/connection';
 import { startTelemetryListeners, stopTelemetryListeners, resetTelemetry } from '$lib/stores/telemetry';
 
@@ -27,6 +27,7 @@ export async function scanBleDevices(): Promise<BleDeviceInfo[]> {
 }
 
 export interface ConnectParams {
+  protocolType: ProtocolType;
   transportType: TransportType;
   // Serial
   port?: string;
@@ -44,6 +45,7 @@ export interface ConnectParams {
   flightLogDbEnabled: boolean;
   flightLogPath: string;
   flightLogRaw: boolean;
+  flightLogRawAlways: boolean;
 }
 
 /**
@@ -51,6 +53,7 @@ export interface ConnectParams {
  */
 export async function connectFC(params: ConnectParams): Promise<FcInfo> {
   const info = await invoke<FcInfo>("connect", {
+    protocol: params.protocolType,
     transportType: params.transportType,
     port: params.port ?? null,
     baudRate: params.baudRate ?? null,
@@ -64,9 +67,11 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
     flightLogDbEnabled: params.flightLogDbEnabled,
     flightLogPath: params.flightLogPath,
     flightLogRaw: params.flightLogRaw,
+    flightLogRawAlways: params.flightLogRawAlways,
   });
   connection.set({
     status: "connected",
+    protocolType: params.protocolType,
     transportType: params.transportType,
     port: params.port ?? params.host ?? params.bleDeviceId ?? '',
     baudRate: params.baudRate ?? 0,
@@ -86,6 +91,7 @@ export async function disconnectFC(baudRate: number): Promise<void> {
   await invoke("disconnect");
   connection.set({
     status: "disconnected",
+    protocolType: 'msp',
     transportType: 'serial',
     port: "",
     baudRate,

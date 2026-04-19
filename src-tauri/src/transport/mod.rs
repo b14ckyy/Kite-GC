@@ -1,5 +1,9 @@
 // Transport Module
 // Abstracts communication transports: Serial, TCP/UDP, BLE, etc.
+//
+// Two-layer architecture:
+// 1. ByteTransport — protocol-agnostic byte-level I/O (read/write/close)
+// 2. Protocol layers (MspTransport, MavlinkHandler) — built on top of ByteTransport
 
 pub mod serial;
 pub mod tcp;
@@ -10,8 +14,68 @@ use std::fmt;
 
 use crate::msp::MspMessage;
 
-/// Unified transport trait — all transports implement this
-/// so the scheduler and handshake code are transport-agnostic.
+// ── Transport Error ──────────────────────────────────────────────
+
+/// Error type for byte-level transport operations
+#[derive(Debug)]
+pub enum TransportError {
+    /// Read/recv timed out (no data available within timeout)
+    Timeout,
+    /// Connection was closed by remote or is no longer valid
+    Disconnected,
+    /// Generic I/O error with description
+    Io(String),
+}
+
+impl fmt::Display for TransportError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TransportError::Timeout => write!(f, "Transport timeout"),
+            TransportError::Disconnected => write!(f, "Transport disconnected"),
+            TransportError::Io(msg) => write!(f, "Transport I/O error: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for TransportError {}
+
+impl From<std::io::Error> for TransportError {
+    fn from(e: std::io::Error) -> Self {
+        match e.kind() {
+            std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock => {
+                TransportError::Timeout
+            }
+            std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::ConnectionAborted
+            | std::io::ErrorKind::BrokenPipe
+            | std::io::ErrorKind::UnexpectedEof => TransportError::Disconnected,
+            _ => TransportError::Io(e.to_string()),
+        }
+    }
+}
+
+// ── ByteTransport Trait ──────────────────────────────────────────
+
+/// Protocol-agnostic byte-level transport.
+///
+/// All communication hardware (Serial, TCP, UDP, BLE) implements this trait.
+/// Protocol layers (MSP, MAVLink) are built on top.
+pub trait ByteTransport: Send {
+    /// Read bytes into buffer. Returns number of bytes read.
+    /// May return 0 on timeout (non-fatal) or TransportError on failure.
+    fn read_bytes(&mut self, buf: &mut [u8]) -> Result<usize, TransportError>;
+
+    /// Write all bytes to the transport.
+    fn write_bytes(&mut self, data: &[u8]) -> Result<(), TransportError>;
+
+    /// Human-readable description (for logging)
+    fn description(&self) -> String;
+}
+
+// ── Legacy Transport Trait ───────────────────────────────────────
+
+/// MSP-level transport trait — used by scheduler and handshake code.
+/// Implemented by MspTransport (wraps ByteTransport + MspParser).
 pub trait Transport: Send {
     /// Send an MSP v2 request and wait for the matching response
     fn msp_request(&mut self, code: u16, payload: &[u8]) -> Result<MspMessage, String>;

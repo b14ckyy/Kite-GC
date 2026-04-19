@@ -9,6 +9,7 @@ pub mod exchange;
 pub mod geocode;
 pub mod raw_logger;
 pub mod recorder;
+pub mod tlog_logger;
 pub mod track_export;
 pub mod types;
 pub mod weather;

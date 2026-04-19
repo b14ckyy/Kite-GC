@@ -18,6 +18,7 @@
     flightLoggingEnabled = false,
     flightRecordingEnabled = false,
     flightLogRawEnabled = false,
+    flightLogRawAlways = false,
     flightLogDbPath = '',
     defaultFlightLogPath = '',
     defaultWpAltitudeM = 50,
@@ -43,6 +44,7 @@
     flightLoggingEnabled?: boolean;
     flightRecordingEnabled?: boolean;
     flightLogRawEnabled?: boolean;
+    flightLogRawAlways?: boolean;
     flightLogDbPath?: string;
     defaultFlightLogPath?: string;
     defaultWpAltitudeM?: number;
@@ -104,6 +106,11 @@
   function handleFlightRawToggle(event: Event) {
     const checked = (event.target as HTMLInputElement).checked;
     onPatch({ flightLogRawEnabled: checked });
+  }
+
+  function handleFlightRawAlwaysToggle(event: Event) {
+    const checked = (event.target as HTMLInputElement).checked;
+    onPatch({ flightLogRawAlways: checked });
   }
 
   function decWpAltitude() {
@@ -274,6 +281,14 @@
       <span class="toggle-slider"></span>
     </label>
   </div>
+  <div class="setting-row" class:setting-disabled={!flightRecordingEnabled}>
+    <label class="setting-label" for="flightlog-raw-always">{$t('settings.continuousRawLogging')}</label>
+    <label class="toggle-switch">
+      <input type="checkbox" id="flightlog-raw-always" checked={flightLogRawAlways} disabled={!flightRecordingEnabled} onchange={handleFlightRawAlwaysToggle} />
+      <span class="toggle-slider"></span>
+    </label>
+  </div>
+  <p class="setting-hint" class:setting-disabled={!flightRecordingEnabled}>{$t('settings.continuousRawHint')}</p>
   <div class="setting-row setting-row-stack">
     <span class="setting-label">{$t('settings.flightLogDbPath')}</span>
     <div class="path-picker-row">

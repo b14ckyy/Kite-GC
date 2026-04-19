@@ -15,6 +15,9 @@ pub struct FlightLogSettings {
     pub db_path: String,
     /// Whether to also write raw text log files
     pub raw_enabled: bool,
+    /// Continuous raw logging: start recording on connect, not just on arm.
+    /// Raw logs include pre-arm data; DB still only records armed segments.
+    pub raw_always: bool,
 }
 
 impl Default for FlightLogSettings {
@@ -24,6 +27,7 @@ impl Default for FlightLogSettings {
             db_enabled: false,
             db_path: String::new(),
             raw_enabled: false,
+            raw_always: false,
         }
     }
 }

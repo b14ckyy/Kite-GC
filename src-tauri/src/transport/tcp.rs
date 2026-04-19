@@ -1,26 +1,22 @@
 // TCP Transport
 // Connects to a flight controller via TCP socket (e.g. Wi-Fi bridges, SITL).
+// Implements ByteTransport for protocol-agnostic byte-level I/O.
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use crate::msp::{MspCodec, MspMessage, MspParser};
-
-use super::Transport;
+use super::{ByteTransport, TransportError};
 
 /// TCP connection timeout
 const CONNECT_TIMEOUT_MS: u64 = 5000;
 /// Read timeout for individual read calls
 const READ_TIMEOUT_MS: u64 = 1000;
-/// Timeout waiting for an MSP response
-const MSP_RESPONSE_TIMEOUT_MS: u64 = 2000;
 
 /// An active TCP connection to a flight controller
 pub struct TcpTransport {
     address: String,
     stream: TcpStream,
-    parser: MspParser,
 }
 
 impl TcpTransport {
@@ -43,49 +39,33 @@ impl TcpTransport {
         Ok(Self {
             address: addr,
             stream,
-            parser: MspParser::new(),
         })
     }
 }
 
-impl Transport for TcpTransport {
-    fn msp_request(&mut self, code: u16, payload: &[u8]) -> Result<MspMessage, String> {
-        let frame = MspCodec::encode_v2(code, payload);
+impl ByteTransport for TcpTransport {
+    fn read_bytes(&mut self, buf: &mut [u8]) -> Result<usize, TransportError> {
+        match self.stream.read(buf) {
+            Ok(0) => Err(TransportError::Disconnected),
+            Ok(n) => Ok(n),
+            Err(ref e)
+                if e.kind() == std::io::ErrorKind::TimedOut
+                    || e.kind() == std::io::ErrorKind::WouldBlock =>
+            {
+                Ok(0)
+            }
+            Err(e) => Err(TransportError::from(e)),
+        }
+    }
+
+    fn write_bytes(&mut self, data: &[u8]) -> Result<(), TransportError> {
         self.stream
-            .write_all(&frame)
-            .map_err(|e| format!("TCP write failed: {}", e))?;
+            .write_all(data)
+            .map_err(|e| TransportError::Io(format!("TCP write failed: {}", e)))?;
         self.stream
             .flush()
-            .map_err(|e| format!("TCP flush failed: {}", e))?;
-
-        let mut buf = [0u8; 512];
-        let deadline = Instant::now() + Duration::from_millis(MSP_RESPONSE_TIMEOUT_MS);
-
-        loop {
-            if Instant::now() > deadline {
-                return Err(format!("MSP response timeout for command 0x{:04X}", code));
-            }
-
-            match self.stream.read(&mut buf) {
-                Ok(0) => return Err("TCP connection closed by remote".to_string()),
-                Ok(n) => {
-                    for &byte in &buf[..n] {
-                        if let Some(msg) = self.parser.push(byte) {
-                            if msg.code == code {
-                                return Ok(msg);
-                            }
-                        }
-                    }
-                }
-                Err(ref e)
-                    if e.kind() == std::io::ErrorKind::TimedOut
-                        || e.kind() == std::io::ErrorKind::WouldBlock =>
-                {
-                    // Read timeout — retry until deadline
-                }
-                Err(e) => return Err(format!("TCP read error: {}", e)),
-            }
-        }
+            .map_err(|e| TransportError::Io(format!("TCP flush failed: {}", e)))?;
+        Ok(())
     }
 
     fn description(&self) -> String {

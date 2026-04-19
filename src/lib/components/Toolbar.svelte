@@ -1,6 +1,6 @@
 <script lang="ts">
   import { t } from 'svelte-i18n';
-  import type { PortInfo, BleDeviceInfo, TransportType } from '$lib/stores/connection';
+  import type { PortInfo, BleDeviceInfo, TransportType, ProtocolType } from '$lib/stores/connection';
   import type { TelemetryData } from '$lib/stores/telemetry';
 
   let {
@@ -12,6 +12,7 @@
     connStatus,
     isConnecting,
     selectedTransport = $bindable(),
+    selectedProtocol = $bindable(),
     selectedPort = $bindable(),
     selectedBaud = $bindable(),
     tcpHost = $bindable(),
@@ -30,6 +31,7 @@
     connStatus: string;
     isConnecting: boolean;
     selectedTransport: TransportType;
+    selectedProtocol: ProtocolType;
     selectedPort: string;
     selectedBaud: number;
     tcpHost: string;
@@ -65,6 +67,12 @@
   <div class="toolbar-right">
     <div class="port-controls">
       {#if connStatus !== "connected"}
+        <!-- Protocol selector -->
+        <select class="transport-select" bind:value={selectedProtocol}>
+          <option value="msp">MSP</option>
+          <option value="mavlink">MAVLink</option>
+        </select>
+
         <!-- Transport type selector -->
         <select class="transport-select" bind:value={selectedTransport}>
           <option value="serial">Serial</option>
