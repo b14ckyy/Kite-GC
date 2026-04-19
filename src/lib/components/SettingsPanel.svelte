@@ -3,7 +3,7 @@
   import { SUPPORTED_LOCALES } from '$lib/i18n';
   import { MAP_PROVIDERS } from '$lib/config/mapProviders';
   import { WIDGET_DEFS } from '$lib/config/widgetRegistry';
-  import type { AppSettings } from '$lib/stores/settings';
+  import type { AppSettings, InterfaceSettings } from '$lib/stores/settings';
   import type { TileCacheStats } from '$lib/cache/tileCache';
 
   let {
@@ -24,6 +24,7 @@
     defaultWpAltitudeM = 50,
     defaultPhTimeSec = 30,
     warnAltitudeM = 120,
+    interfaceSettings = { speedUnit: 'kmh', altitudeUnit: 'm', distanceUnit: 'metric', verticalSpeedUnit: 'ms', temperatureUnit: 'c' },
     isWidgetActive = (_widgetId: string) => false,
     getWidgetPanelLabel = (_widgetId: string) => '',
     onPatch = (_patch: Partial<AppSettings>) => {},
@@ -50,6 +51,7 @@
     defaultWpAltitudeM?: number;
     defaultPhTimeSec?: number;
     warnAltitudeM?: number;
+    interfaceSettings?: InterfaceSettings;
     isWidgetActive?: (widgetId: string) => boolean;
     getWidgetPanelLabel?: (widgetId: string) => string;
     onPatch?: (patch: Partial<AppSettings>) => void;
@@ -160,6 +162,56 @@
     const clamped = Math.max(0, Math.min(5000, value));
     onPatch({ warnAltitudeM: clamped });
   }
+
+  function handleSpeedUnitChange(event: Event) {
+    const speedUnit = (event.target as HTMLSelectElement).value as InterfaceSettings['speedUnit'];
+    onPatch({
+      interface: {
+        ...interfaceSettings,
+        speedUnit,
+      },
+    });
+  }
+
+  function handleAltitudeUnitChange(event: Event) {
+    const altitudeUnit = (event.target as HTMLSelectElement).value as InterfaceSettings['altitudeUnit'];
+    onPatch({
+      interface: {
+        ...interfaceSettings,
+        altitudeUnit,
+      },
+    });
+  }
+
+  function handleDistanceUnitChange(event: Event) {
+    const distanceUnit = (event.target as HTMLSelectElement).value as InterfaceSettings['distanceUnit'];
+    onPatch({
+      interface: {
+        ...interfaceSettings,
+        distanceUnit,
+      },
+    });
+  }
+
+  function handleVerticalSpeedUnitChange(event: Event) {
+    const verticalSpeedUnit = (event.target as HTMLSelectElement).value as InterfaceSettings['verticalSpeedUnit'];
+    onPatch({
+      interface: {
+        ...interfaceSettings,
+        verticalSpeedUnit,
+      },
+    });
+  }
+
+  function handleTemperatureUnitChange(event: Event) {
+    const temperatureUnit = (event.target as HTMLSelectElement).value as InterfaceSettings['temperatureUnit'];
+    onPatch({
+      interface: {
+        ...interfaceSettings,
+        temperatureUnit,
+      },
+    });
+  }
 </script>
 
 <section class="panel-section">
@@ -170,6 +222,48 @@
       {#each SUPPORTED_LOCALES as loc}
         <option value={loc.code}>{loc.label}</option>
       {/each}
+    </select>
+  </div>
+</section>
+
+<section class="panel-section">
+  <h4 class="section-heading">{$t('settings.interface')}</h4>
+  <div class="setting-row">
+    <label class="setting-label" for="speed-unit">{$t('settings.speedUnit')}</label>
+    <select id="speed-unit" class="setting-select" value={interfaceSettings.speedUnit} onchange={handleSpeedUnitChange}>
+      <option value="kmh">km/h</option>
+      <option value="mph">mi/h</option>
+      <option value="ms">m/s</option>
+      <option value="fts">ft/s</option>
+      <option value="kt">kt</option>
+    </select>
+  </div>
+  <div class="setting-row">
+    <label class="setting-label" for="altitude-unit">{$t('settings.altitudeUnit')}</label>
+    <select id="altitude-unit" class="setting-select" value={interfaceSettings.altitudeUnit} onchange={handleAltitudeUnitChange}>
+      <option value="m">m</option>
+      <option value="ft">ft</option>
+    </select>
+  </div>
+  <div class="setting-row">
+    <label class="setting-label" for="distance-unit">{$t('settings.distanceUnit')}</label>
+    <select id="distance-unit" class="setting-select" value={interfaceSettings.distanceUnit} onchange={handleDistanceUnitChange}>
+      <option value="metric">m / km</option>
+      <option value="imperial">ft / mi</option>
+    </select>
+  </div>
+  <div class="setting-row">
+    <label class="setting-label" for="vertical-speed-unit">{$t('settings.verticalSpeedUnit')}</label>
+    <select id="vertical-speed-unit" class="setting-select" value={interfaceSettings.verticalSpeedUnit} onchange={handleVerticalSpeedUnitChange}>
+      <option value="ms">m/s</option>
+      <option value="fts">ft/s</option>
+    </select>
+  </div>
+  <div class="setting-row">
+    <label class="setting-label" for="temperature-unit">{$t('settings.temperatureUnit')}</label>
+    <select id="temperature-unit" class="setting-select" value={interfaceSettings.temperatureUnit} onchange={handleTemperatureUnitChange}>
+      <option value="c">°C</option>
+      <option value="f">°F</option>
     </select>
   </div>
 </section>

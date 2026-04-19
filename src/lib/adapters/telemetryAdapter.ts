@@ -19,6 +19,7 @@ export function toTelemetryData(r: TelemetryRecord, fcVariant = 'INAV'): Telemet
     groundSpeed: r.speed_ms ?? 0,
     numSat: r.num_sat ?? 0,
     fixType: r.fix_type ?? 0,
+    gpsHdop: r.gps_hdop ?? 0,
     course: r.heading ?? 0,
 
     // Attitude — yaw: prefer GPS COG for replay (heading), fall back to attitude yaw
@@ -39,7 +40,7 @@ export function toTelemetryData(r: TelemetryRecord, fcVariant = 'INAV'): Telemet
     mAhDrawn: r.mah_drawn ?? 0,
     rssi: r.rssi ?? 0,
     power: (r.voltage ?? 0) * (r.current_a ?? 0),
-    batteryPercentage: 0, // not recorded in DB yet
+    batteryPercentage: r.battery_percentage ?? 0,
     cellCount: 0,         // not recorded in DB yet
 
     // Status

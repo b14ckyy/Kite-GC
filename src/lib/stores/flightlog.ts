@@ -59,6 +59,7 @@ export interface TelemetryRecord {
   current_a: number | null;
   mah_drawn: number | null;
   rssi: number | null;
+  battery_percentage: number | null;
   roll: number | null;
   pitch: number | null;
   yaw: number | null;

@@ -13,6 +13,7 @@ export interface TelemetryData {
   groundSpeed: number;
   numSat: number;
   fixType: number;
+  gpsHdop: number;
   course: number;
 
   // Attitude
@@ -64,7 +65,7 @@ export interface TelemetryData {
 }
 
 const defaultTelemetry: TelemetryData = {
-  lat: 0, lon: 0, altMsl: 0, groundSpeed: 0, numSat: 0, fixType: 0, course: 0,
+  lat: 0, lon: 0, altMsl: 0, groundSpeed: 0, numSat: 0, fixType: 0, gpsHdop: 0, course: 0,
   roll: 0, pitch: 0, yaw: 0,
   altitude: 0, vario: 0,
   airspeed: 0,
@@ -108,12 +109,15 @@ export async function startTelemetryListeners() {
       fix_type: number; num_sat: number;
       lat: number; lon: number; alt_msl: number;
       ground_speed: number; course: number;
+      gps_hdop?: number;
     }>('telemetry-gps', (event) => {
       const p = event.payload;
       telemetry.update((t) => ({
         ...t,
         fixType: p.fix_type,
         numSat: p.num_sat,
+        // Keep last valid HDOP when this packet omits it (or reports 0).
+        gpsHdop: typeof p.gps_hdop === 'number' && p.gps_hdop > 0 ? p.gps_hdop : t.gpsHdop,
         lat: p.lat,
         lon: p.lon,
         altMsl: p.alt_msl,
@@ -197,6 +201,17 @@ export async function startTelemetryListeners() {
       telemetry.update((t) => ({
         ...t,
         airspeed: event.payload.airspeed,
+        lastUpdate: Date.now(),
+      }));
+    })
+  );
+
+  unlisteners.push(
+    await listen<{ hdop: number }>('telemetry-gps-stats', (event) => {
+      telemetry.update((t) => ({
+        ...t,
+        // Ignore invalid values to avoid one-frame UI oscillation.
+        gpsHdop: event.payload.hdop > 0 ? event.payload.hdop : t.gpsHdop,
         lastUpdate: Date.now(),
       }));
     })

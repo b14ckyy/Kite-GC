@@ -100,6 +100,12 @@ pub struct AirspeedData {
     pub airspeed: f64, // cm/s → m/s
 }
 
+/// GPS quality statistics (from MSP_GPSSTATISTICS 166)
+#[derive(Debug, Clone, Serialize)]
+pub struct GpsStatsData {
+    pub hdop: f64,
+}
+
 /// Generic telemetry payload wrapper for Tauri events
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
@@ -111,6 +117,7 @@ pub enum TelemetryPayload {
     Status(StatusData),
     SensorStatus(SensorStatusData),
     Airspeed(AirspeedData),
+    GpsStats(GpsStatsData),
 }
 
 /// Map MSP code to Tauri event name
@@ -123,6 +130,7 @@ pub fn event_name_for_code(code: u16) -> String {
         MSPV2_INAV_STATUS => "telemetry-status".into(),
         MSP_SENSOR_STATUS => "telemetry-sensor-status".into(),
         MSPV2_INAV_AIR_SPEED => "telemetry-airspeed".into(),
+        MSP_GPSSTATISTICS => "telemetry-gps-stats".into(),
         _ => format!("telemetry-0x{:04X}", code),
     }
 }
@@ -137,6 +145,7 @@ pub fn decode_telemetry(code: u16, payload: &[u8], box_ids: &[u8]) -> TelemetryP
         MSPV2_INAV_STATUS => decode_status(payload, box_ids),
         MSP_SENSOR_STATUS => decode_sensor_status(payload),
         MSPV2_INAV_AIR_SPEED => decode_airspeed(payload),
+        MSP_GPSSTATISTICS => decode_gps_statistics(payload),
         _ => {
             log::warn!("No decoder for MSP 0x{:04X}", code);
             TelemetryPayload::Attitude(AttitudeData {
@@ -364,6 +373,16 @@ fn decode_airspeed(payload: &[u8]) -> TelemetryPayload {
     TelemetryPayload::Airspeed(AirspeedData {
         airspeed: read_i32(payload, 0) as f64 / 100.0, // cm/s → m/s
     })
+}
+
+/// MSP_GPSSTATISTICS (166): [lastDt:u32, errors:u32, timeouts:u32, packetCount:u32,
+///                            hdop:u16, eph:u16, epv:u16]
+/// HDOP is a raw u16, scaled * 100 by INAV (e.g. 100 = HDOP 1.00).
+fn decode_gps_statistics(payload: &[u8]) -> TelemetryPayload {
+    let hdop_raw = read_u16(payload, 16); // bytes 16–17
+    let hdop = hdop_raw as f64 / 100.0;
+    eprintln!("[GPS-STATS] hdop_raw={} hdop={:.2}", hdop_raw, hdop);
+    TelemetryPayload::GpsStats(GpsStatsData { hdop })
 }
 
 /// Feed decoded telemetry data to the flight recorder.

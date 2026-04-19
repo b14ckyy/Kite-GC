@@ -86,6 +86,9 @@ pub struct TelemetryRecord {
     pub current_a: Option<f64>,
     pub mah_drawn: Option<u32>,
     pub rssi: Option<u16>,
+    /// Battery state of charge in percent (from MSP_BATTERY_STATE byte 21).
+    /// None when not available (e.g. blackbox imports where the FC doesn't log it).
+    pub battery_percentage: Option<u8>,
     pub roll: Option<f64>,
     pub pitch: Option<f64>,
     pub yaw: Option<i16>,

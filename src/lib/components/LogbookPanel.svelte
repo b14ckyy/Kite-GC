@@ -1,5 +1,7 @@
 <script lang="ts">
   import { t } from 'svelte-i18n';
+  import type { InterfaceSettings } from '$lib/stores/settings';
+  import { convertAltitude, convertDistance, convertSpeed, convertTemperature, formatConverted } from '$lib/utils/units';
   import {
     buildFlightTree,
     formatDurationSec,
@@ -20,6 +22,7 @@
     selectedFlight,
     selectedFlightId,
     selectedFlightTrackCount,
+    interfaceSettings = { speedUnit: 'kmh', altitudeUnit: 'm', distanceUnit: 'metric', verticalSpeedUnit: 'ms', temperatureUnit: 'c' },
     selectedFlightNotes = $bindable(),
     weatherTempC = $bindable(),
     weatherWindMs = $bindable(),
@@ -47,6 +50,7 @@
     selectedFlight: Flight | null;
     selectedFlightId: number | null;
     selectedFlightTrackCount: number;
+    interfaceSettings?: InterfaceSettings;
     selectedFlightNotes: string;
     weatherTempC: string;
     weatherWindMs: string;
@@ -120,6 +124,37 @@
     return multiSelectedIds.has(id);
   }
 
+  function formatWeatherTemp(tempC: number | null | undefined): string {
+    if (tempC == null) return '';
+    const converted = convertTemperature(tempC, interfaceSettings.temperatureUnit);
+    return `${converted.value.toFixed(1)} ${converted.unit}`;
+  }
+
+  function formatAltitudeMeters(valueM: number | null | undefined): string {
+    if (valueM == null) return '—';
+    return formatConverted(convertAltitude(valueM, interfaceSettings.altitudeUnit), 1);
+  }
+
+  function formatSpeedMs(valueMs: number | null | undefined): string {
+    if (valueMs == null) return '—';
+    return formatConverted(convertSpeed(valueMs, interfaceSettings.speedUnit), 1);
+  }
+
+  function formatDistanceMeters(valueM: number | null | undefined): string {
+    if (valueM == null) return '—';
+    const converted = convertDistance(valueM, interfaceSettings.distanceUnit);
+    const digits = converted.unit === 'm' || converted.unit === 'ft' ? 0 : 1;
+    return formatConverted(converted, digits);
+  }
+
+  function formatWindSpeedMs(valueMs: number | null | undefined): string {
+    if (valueMs == null) return '';
+    return formatConverted(convertSpeed(valueMs, interfaceSettings.speedUnit), 1);
+  }
+
+  let weatherTempUnitLabel = $derived(interfaceSettings.temperatureUnit === 'f' ? '°F' : '°C');
+  let weatherWindUnitLabel = $derived(convertSpeed(1, interfaceSettings.speedUnit).unit);
+
   function getExportIds(): number[] {
     if (multiSelectedIds.size > 0) return [...multiSelectedIds];
     if (selectedFlightId != null) return [selectedFlightId];
@@ -155,6 +190,11 @@
     'Fog',
     'Stormy',
   ];
+
+  function hasStandardWeatherCondition(value: string): boolean {
+    const normalized = value.trim().toLowerCase();
+    return standardWeatherConditions.some((c) => c.toLowerCase() === normalized);
+  }
 
   const flightTree = $derived<FlightTree>(buildFlightTree(filteredSummaries, logbookSortMode));
 
@@ -289,13 +329,13 @@
         <span class="fc-label">{$t('logbook.location')}</span>
         <span class="fc-value">{selectedFlight.location_name || $t('logbook.unknownLocation')}</span>
         <span class="fc-label">{$t('logbook.maxAlt')}</span>
-        <span class="fc-value">{selectedFlight.max_alt_m?.toFixed(1) ?? '—'} m</span>
+        <span class="fc-value">{formatAltitudeMeters(selectedFlight.max_alt_m)}</span>
         <span class="fc-label">{$t('logbook.maxSpeed')}</span>
-        <span class="fc-value">{selectedFlight.max_speed_ms?.toFixed(1) ?? '—'} m/s</span>
+        <span class="fc-value">{formatSpeedMs(selectedFlight.max_speed_ms)}</span>
         <span class="fc-label">{$t('logbook.totalDistance')}</span>
-        <span class="fc-value">{selectedFlight.total_distance_m?.toFixed(0) ?? '—'} m</span>
+        <span class="fc-value">{formatDistanceMeters(selectedFlight.total_distance_m)}</span>
         <span class="fc-label">{$t('logbook.maxDistance')}</span>
-        <span class="fc-value">{selectedFlight.max_distance_m?.toFixed(0) ?? '—'} m</span>
+        <span class="fc-value">{formatDistanceMeters(selectedFlight.max_distance_m)}</span>
         <span class="fc-label">{$t('logbook.batteryUsed')}</span>
         <span class="fc-value">{selectedFlight.battery_used_mah ?? '—'} mAh</span>
         <span class="fc-label">{$t('logbook.trackPoints')}</span>
@@ -303,8 +343,8 @@
         <span class="fc-label">{$t('logbook.weather')}</span>
         <span class="fc-value">
           {#if selectedFlight.weather_temp_c != null || selectedFlight.weather_desc}
-            {selectedFlight.weather_temp_c != null ? selectedFlight.weather_temp_c.toFixed(1) + ' °C' : ''}
-            {selectedFlight.weather_wind_ms != null ? ', ' + selectedFlight.weather_wind_ms.toFixed(1) + ' m/s' : ''}
+            {formatWeatherTemp(selectedFlight.weather_temp_c)}
+            {selectedFlight.weather_wind_ms != null ? ', ' + formatWindSpeedMs(selectedFlight.weather_wind_ms) : ''}
             {selectedFlight.weather_wind_deg != null ? ' ' + windDegToLabel(selectedFlight.weather_wind_deg) : ''}
             {selectedFlight.weather_desc ? ', ' + selectedFlight.weather_desc : ''}
           {:else}
@@ -483,13 +523,13 @@
               <span class="fc-label">{$t('logbook.location')}</span>
               <span class="fc-value">{selectedFlight.location_name || $t('logbook.unknownLocation')}</span>
               <span class="fc-label">{$t('logbook.maxAlt')}</span>
-              <span class="fc-value">{selectedFlight.max_alt_m?.toFixed(1) ?? '—'} m</span>
+              <span class="fc-value">{formatAltitudeMeters(selectedFlight.max_alt_m)}</span>
               <span class="fc-label">{$t('logbook.maxSpeed')}</span>
-              <span class="fc-value">{selectedFlight.max_speed_ms?.toFixed(1) ?? '—'} m/s</span>
+              <span class="fc-value">{formatSpeedMs(selectedFlight.max_speed_ms)}</span>
               <span class="fc-label">{$t('logbook.totalDistance')}</span>
-              <span class="fc-value">{selectedFlight.total_distance_m?.toFixed(0) ?? '—'} m</span>
+              <span class="fc-value">{formatDistanceMeters(selectedFlight.total_distance_m)}</span>
               <span class="fc-label">{$t('logbook.maxDistance')}</span>
-              <span class="fc-value">{selectedFlight.max_distance_m?.toFixed(0) ?? '—'} m</span>
+              <span class="fc-value">{formatDistanceMeters(selectedFlight.max_distance_m)}</span>
               <span class="fc-label">{$t('logbook.batteryUsed')}</span>
               <span class="fc-value">{selectedFlight.battery_used_mah ?? '—'} mAh</span>
               <span class="fc-label">{$t('logbook.trackPoints')}</span>
@@ -498,8 +538,8 @@
               <span class="fc-value weather-value-row">
                 <span>
                   {#if selectedFlight.weather_temp_c != null || selectedFlight.weather_desc}
-                    {selectedFlight.weather_temp_c != null ? selectedFlight.weather_temp_c.toFixed(1) + ' °C' : ''}
-                    {selectedFlight.weather_wind_ms != null ? ', ' + selectedFlight.weather_wind_ms.toFixed(1) + ' m/s' : ''}
+                    {formatWeatherTemp(selectedFlight.weather_temp_c)}
+                    {selectedFlight.weather_wind_ms != null ? ', ' + formatWindSpeedMs(selectedFlight.weather_wind_ms) : ''}
                     {selectedFlight.weather_wind_deg != null ? ' ' + windDegToLabel(selectedFlight.weather_wind_deg) : ''}
                     {selectedFlight.weather_desc ? ', ' + selectedFlight.weather_desc : ''}
                   {:else}
@@ -519,7 +559,7 @@
                       <button class="stepper-btn" onclick={() => { weatherTempC = String(Math.round((Number(weatherTempC || 0) - 0.5) * 10) / 10); }}>−</button>
                       <input type="number" step="0.5" class="stepper-input" bind:value={weatherTempC} placeholder="—" />
                       <button class="stepper-btn" onclick={() => { weatherTempC = String(Math.round((Number(weatherTempC || 0) + 0.5) * 10) / 10); }}>+</button>
-                      <span class="setting-unit">°C</span>
+                      <span class="setting-unit">{weatherTempUnitLabel}</span>
                     </div>
                   </label>
                   <label class="weather-field">
@@ -528,7 +568,7 @@
                       <button class="stepper-btn" onclick={() => { weatherWindMs = String(Math.max(0, Math.round((Number(weatherWindMs || 0) - 0.5) * 10) / 10)); }}>−</button>
                       <input type="number" step="0.5" min="0" class="stepper-input" bind:value={weatherWindMs} placeholder="—" />
                       <button class="stepper-btn" onclick={() => { weatherWindMs = String(Math.round((Number(weatherWindMs || 0) + 0.5) * 10) / 10); }}>+</button>
-                      <span class="setting-unit">m/s</span>
+                      <span class="setting-unit">{weatherWindUnitLabel}</span>
                     </div>
                   </label>
                   <label class="weather-field">
@@ -552,7 +592,7 @@
                     <span class="weather-field-label">{$t('logbook.weatherConditions')}</span>
                     <select class="setting-select weather-select" bind:value={weatherDesc}>
                       <option value="">—</option>
-                      {#if weatherDesc && !standardWeatherConditions.includes(weatherDesc)}
+                      {#if weatherDesc && !hasStandardWeatherCondition(weatherDesc)}
                         <option value={weatherDesc}>{weatherDesc}</option>
                       {/if}
                       <option value="Clear">{$t('logbook.weatherClear')}</option>

@@ -9,7 +9,7 @@ use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
 
 use super::types::{Flight, FlightSummary, TelemetryRecord};
 
-const CURRENT_SCHEMA_VERSION: u32 = 6;
+const CURRENT_SCHEMA_VERSION: u32 = 7;
 
 /// Open (or create) the flight log database at the given path.
 /// Runs migrations if needed.
@@ -109,6 +109,18 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
         migrate_v5_to_v6(conn)?;
     }
 
+    if current < 7 {
+        migrate_v6_to_v7(conn)?;
+    }
+
+    Ok(())
+}
+
+fn migrate_v6_to_v7(conn: &Connection) -> SqlResult<()> {
+    conn.execute_batch(
+        "ALTER TABLE telemetry_records ADD COLUMN battery_percentage INTEGER;",
+    )?;
+    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
     Ok(())
 }
 
@@ -353,7 +365,7 @@ pub fn insert_telemetry_batch(
         let mut stmt = tx.prepare_cached(
             "INSERT INTO telemetry_records (
                 flight_id, timestamp_ms, lat, lon, alt_m, speed_ms, heading,
-                vario_ms, voltage, current_a, mah_drawn, rssi,
+                vario_ms, voltage, current_a, mah_drawn, rssi, battery_percentage,
                 roll, pitch, yaw, fix_type, num_sat, cpu_load, link_quality,
                 baro_alt_m, gps_hdop, gps_eph, gps_epv,
                 active_wp_number, active_flight_mode_flags, state_flags, nav_state, nav_flags,
@@ -362,14 +374,14 @@ pub fn insert_telemetry_batch(
                 rc_data_json, rc_command_json,
                 nav_lat, nav_lon, nav_alt_m
             ) VALUES (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                ?13, ?14, ?15, ?16, ?17, ?18, ?19,
-                ?20, ?21, ?22, ?23,
-                ?24, ?25, ?26, ?27, ?28,
-                ?29, ?30, ?31,
-                ?32, ?33, ?34,
-                ?35, ?36,
-                ?37, ?38, ?39
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+                ?14, ?15, ?16, ?17, ?18, ?19, ?20,
+                ?21, ?22, ?23, ?24,
+                ?25, ?26, ?27, ?28, ?29,
+                ?30, ?31, ?32,
+                ?33, ?34, ?35,
+                ?36, ?37,
+                ?38, ?39, ?40
             )",
         )?;
         for r in records {
@@ -386,6 +398,7 @@ pub fn insert_telemetry_batch(
                 r.current_a,
                 r.mah_drawn,
                 r.rssi,
+                r.battery_percentage,
                 r.roll,
                 r.pitch,
                 r.yaw,
@@ -521,7 +534,7 @@ pub fn get_flight_track(
 ) -> SqlResult<Vec<TelemetryRecord>> {
     let mut stmt = conn.prepare(
         "SELECT id, flight_id, timestamp_ms, lat, lon, alt_m, speed_ms,
-                heading, vario_ms, voltage, current_a, mah_drawn, rssi,
+                heading, vario_ms, voltage, current_a, mah_drawn, rssi, battery_percentage,
             roll, pitch, yaw, fix_type, num_sat, cpu_load, link_quality,
             baro_alt_m, gps_hdop, gps_eph, gps_epv,
             active_wp_number, active_flight_mode_flags, state_flags, nav_state, nav_flags,
@@ -549,33 +562,34 @@ pub fn get_flight_track(
             current_a: row.get(10)?,
             mah_drawn: row.get(11)?,
             rssi: row.get(12)?,
-            roll: row.get(13)?,
-            pitch: row.get(14)?,
-            yaw: row.get(15)?,
-            fix_type: row.get(16)?,
-            num_sat: row.get(17)?,
-            cpu_load: row.get(18)?,
-            link_quality: row.get(19)?,
-            baro_alt_m: row.get(20)?,
-            gps_hdop: row.get(21)?,
-            gps_eph: row.get(22)?,
-            gps_epv: row.get(23)?,
-            active_wp_number: row.get(24)?,
-            active_flight_mode_flags: row.get(25)?,
-            state_flags: row.get(26)?,
-            nav_state: row.get(27)?,
-            nav_flags: row.get(28)?,
-            rx_signal_received: row.get(29)?,
-            hw_health_status: row.get(30)?,
-            baro_temperature: row.get(31)?,
-            wind_n_ms: row.get(32)?,
-            wind_e_ms: row.get(33)?,
-            wind_d_ms: row.get(34)?,
-            rc_data_json: row.get(35)?,
-            rc_command_json: row.get(36)?,
-            nav_lat: row.get(37)?,
-            nav_lon: row.get(38)?,
-            nav_alt_m: row.get(39)?,
+            battery_percentage: row.get(13)?,
+            roll: row.get(14)?,
+            pitch: row.get(15)?,
+            yaw: row.get(16)?,
+            fix_type: row.get(17)?,
+            num_sat: row.get(18)?,
+            cpu_load: row.get(19)?,
+            link_quality: row.get(20)?,
+            baro_alt_m: row.get(21)?,
+            gps_hdop: row.get(22)?,
+            gps_eph: row.get(23)?,
+            gps_epv: row.get(24)?,
+            active_wp_number: row.get(25)?,
+            active_flight_mode_flags: row.get(26)?,
+            state_flags: row.get(27)?,
+            nav_state: row.get(28)?,
+            nav_flags: row.get(29)?,
+            rx_signal_received: row.get(30)?,
+            hw_health_status: row.get(31)?,
+            baro_temperature: row.get(32)?,
+            wind_n_ms: row.get(33)?,
+            wind_e_ms: row.get(34)?,
+            wind_d_ms: row.get(35)?,
+            rc_data_json: row.get(36)?,
+            rc_command_json: row.get(37)?,
+            nav_lat: row.get(38)?,
+            nav_lon: row.get(39)?,
+            nav_alt_m: row.get(40)?,
         })
     })?;
 
@@ -1079,6 +1093,7 @@ mod tests {
                 current_a: Some(15.0),
                 mah_drawn: Some(i as u32 * 5),
                 rssi: Some(95),
+                battery_percentage: None,
                 roll: Some(2.0),
                 pitch: Some(5.0),
                 yaw: Some(90),
@@ -1161,6 +1176,7 @@ mod tests {
             current_a: None,
             mah_drawn: None,
             rssi: None,
+            battery_percentage: None,
             roll: None,
             pitch: None,
             yaw: None,

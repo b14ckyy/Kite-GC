@@ -588,6 +588,7 @@ fn build_telemetry_record_indexed(
         current_a: read_f64(cols.current, record),
         mah_drawn: read_f64(cols.mah, record).map(|v| v.round() as u32),
         rssi: read_f64(cols.rssi, record).map(|v| v.round() as u16),
+        battery_percentage: None, // not present in INAV blackbox logs
         // INAV blackbox attitude values are always in decidegrees — unconditionally /10
         roll: read_f64(cols.roll, record).map(|v| v / 10.0),
         pitch: read_f64(cols.pitch, record).map(|v| v / 10.0),
@@ -599,7 +600,7 @@ fn build_telemetry_record_indexed(
         cpu_load: None,
         link_quality: read_f64(cols.lq, record).map(|v| v.clamp(0.0, 100.0).round() as u8),
         baro_alt_m: read_f64(cols.baro_alt, record),
-        gps_hdop: read_f64(cols.gps_hdop, record),
+        gps_hdop: read_f64(cols.gps_hdop, record).map(|v| v / 100.0), // INAV stores as integer*100
         gps_eph: read_f64(cols.gps_eph, record),
         gps_epv: read_f64(cols.gps_epv, record),
         active_wp_number: read_i32(cols.active_wp_number, record),

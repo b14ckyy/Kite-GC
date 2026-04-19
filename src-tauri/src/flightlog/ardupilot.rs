@@ -809,6 +809,7 @@ where
             current_a: r.current_a,
             mah_drawn: r.mah_drawn.map(|v| v as u32),
             rssi: None,
+            battery_percentage: None, // not present in ArduPilot blackbox logs
             roll: r.roll_deg,
             pitch: r.pitch_deg,
             yaw: r.yaw_deg.map(|v| v as i16),

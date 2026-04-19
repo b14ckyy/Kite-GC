@@ -15,6 +15,20 @@ export interface PanelConfig {
   positions?: Record<string, 'bottom' | 'right'>;
 }
 
+export type SpeedUnit = 'kmh' | 'mph' | 'ms' | 'fts' | 'kt';
+export type AltitudeUnit = 'm' | 'ft';
+export type DistanceUnit = 'metric' | 'imperial';
+export type VerticalSpeedUnit = 'ms' | 'fts';
+export type TemperatureUnit = 'c' | 'f';
+
+export interface InterfaceSettings {
+  speedUnit: SpeedUnit;
+  altitudeUnit: AltitudeUnit;
+  distanceUnit: DistanceUnit;
+  verticalSpeedUnit: VerticalSpeedUnit;
+  temperatureUnit: TemperatureUnit;
+}
+
 export interface AppSettings {
   lastPort: string;
   lastBaud: number;
@@ -39,6 +53,8 @@ export interface AppSettings {
   defaultPhTimeSec: number;
   // Alerts
   warnAltitudeM: number;
+  // Global UI options (display-only conversions)
+  interface: InterfaceSettings;
   // Widget panel layout
   panels: PanelConfig;
   // Locale / language
@@ -72,6 +88,13 @@ const defaults: AppSettings = {
   defaultWpAltitudeM: 50,
   defaultPhTimeSec: 30,
   warnAltitudeM: 120,
+  interface: {
+    speedUnit: 'kmh',
+    altitudeUnit: 'm',
+    distanceUnit: 'metric',
+    verticalSpeedUnit: 'ms',
+    temperatureUnit: 'c',
+  },
   panels: {
     bottom: ['home', 'battery', 'speed', 'ahi', 'altitude', 'gps', 'compass'],
     right: ['rawTelemetry'],
@@ -84,7 +107,15 @@ function load(): AppSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      return { ...defaults, ...JSON.parse(raw) };
+      const parsed = JSON.parse(raw) as Partial<AppSettings>;
+      return {
+        ...defaults,
+        ...parsed,
+        interface: {
+          ...defaults.interface,
+          ...(parsed.interface ?? {}),
+        },
+      };
     }
   } catch {
     // Ignore parse errors, use defaults

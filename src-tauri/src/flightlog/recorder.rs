@@ -93,6 +93,7 @@ struct TelemetrySnapshot {
     current: Option<f64>,
     mah_drawn: Option<u32>,
     rssi: Option<u16>,
+    battery_percentage: Option<u8>,
     // Airspeed
     airspeed: Option<f64>,
     // Status
@@ -239,6 +240,7 @@ impl FlightRecorder {
         self.snapshot.current = Some(data.current);
         self.snapshot.mah_drawn = Some(data.mah_drawn);
         self.snapshot.rssi = Some(data.rssi);
+        self.snapshot.battery_percentage = if data.battery_percentage > 0 { Some(data.battery_percentage) } else { None };
     }
 
     /// Feed airspeed data from the scheduler
@@ -468,6 +470,7 @@ impl FlightRecorder {
                     current_a: self.snapshot.current,
                     mah_drawn: self.snapshot.mah_drawn,
                     rssi: self.snapshot.rssi,
+                    battery_percentage: self.snapshot.battery_percentage,
                     roll: self.snapshot.roll,
                     pitch: self.snapshot.pitch,
                     yaw: self.snapshot.yaw,
@@ -517,6 +520,7 @@ impl FlightRecorder {
             current_a: self.snapshot.current,
             mah_drawn: self.snapshot.mah_drawn,
             rssi: self.snapshot.rssi,
+            battery_percentage: self.snapshot.battery_percentage,
             roll: self.snapshot.roll,
             pitch: self.snapshot.pitch,
             yaw: self.snapshot.yaw,

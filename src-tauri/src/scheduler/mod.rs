@@ -325,7 +325,7 @@ fn build_slots(config: &TelemetryConfig) -> Vec<TelemetrySlot> {
         ),
         TelemetrySlot::new(
             TelemetryGroup::PositionPrimary,
-            vec![MSP_RAW_GPS],
+            vec![MSP_RAW_GPS, MSP_GPSSTATISTICS],
             config.position_rate_hz,
             2,
         ),

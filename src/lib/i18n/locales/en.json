@@ -105,7 +105,13 @@
     "alertThresholdsHint": "Alert thresholds. 0 = disabled.",
     "hudWidgets": "HUD Widgets",
     "rateHint": "Rate changes take effect on next connect.",
-    "language": "Language"
+    "language": "Language",
+    "interface": "Interface",
+    "speedUnit": "Speed Unit",
+    "altitudeUnit": "Altitude Unit",
+    "distanceUnit": "Distance Unit",
+    "verticalSpeedUnit": "Vertical Speed Unit",
+    "temperatureUnit": "Temperature Unit"
   },
   "logbook": {
     "title": "Flight Logbook",

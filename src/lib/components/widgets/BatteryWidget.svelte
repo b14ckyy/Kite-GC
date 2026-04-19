@@ -15,10 +15,12 @@
 <div class="widget-card" style="--ws: {size}vmin">
   <span class="w-label">{$t('widgetLabels.bat')}</span>
 
-  <!-- Voltage bar -->
+  <!-- Voltage bar — only shown when battery % is available from FC -->
+  {#if pct > 0}
   <div class="bat-bar-track">
     <div class="bat-bar-fill" style="width: {pct}%; background: {barColor}"></div>
   </div>
+  {/if}
 
   <span class="w-value">{voltage}</span>
   <span class="w-secondary">{current}</span>
@@ -32,13 +34,14 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
     background: rgba(30, 30, 30, 0.75);
     backdrop-filter: blur(10px);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: calc(var(--ws) * 0.08);
     gap: calc(var(--ws) * 0.02);
     box-sizing: border-box;
+    padding: calc(var(--ws) * 0.05) calc(var(--ws) * 0.06) calc(var(--ws) * 0.04);
   }
   .w-label {
     font-size: calc(var(--ws) * 0.13);
@@ -53,6 +56,7 @@
     color: #e0e0e0;
     font-variant-numeric: tabular-nums;
     line-height: 1.1;
+    margin-top: calc(var(--ws) * 0.01);
   }
   .w-secondary {
     font-size: calc(var(--ws) * 0.13);
@@ -67,16 +71,16 @@
 
   /* Battery bar */
   .bat-bar-track {
-    width: 100%;
-    height: 0.5vmin;
+    width: 88%;
+    height: calc(var(--ws) * 0.055);
     background: rgba(255, 255, 255, 0.1);
-    border-radius: 0.25vmin;
+    border-radius: calc(var(--ws) * 0.03);
     overflow: hidden;
-    margin: 0.2vmin 0;
+    margin: calc(var(--ws) * 0.01) 0 calc(var(--ws) * 0.02);
   }
   .bat-bar-fill {
     height: 100%;
-    border-radius: 0.25vmin;
+    border-radius: calc(var(--ws) * 0.03);
     transition: width 0.5s ease;
   }
 </style>

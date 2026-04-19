@@ -29,11 +29,12 @@
   import { homePosition } from '$lib/stores/home';
   import { MAP_PROVIDERS } from "$lib/config/mapProviders";
   import { tileCacheStats, setCacheMaxMB, clearCache } from "$lib/cache/tileCache";
+  import { convertSpeed, convertTemperature, toSpeedMs, toTemperatureC } from "$lib/utils/units";
   import type { TileCacheStats } from "$lib/cache/tileCache";
   import WidgetPanel from "$lib/components/WidgetPanel.svelte";
   import MissionPanel from "$lib/components/MissionPanel.svelte";
   import { editMode } from "$lib/stores/mission";
-  import type { PanelConfig } from "$lib/stores/settings";
+  import type { InterfaceSettings, PanelConfig } from "$lib/stores/settings";
   import {
     getDefaultFlightlogPath,
     type BlackboxImportProgress,
@@ -57,8 +58,21 @@
 
   // Available vmin for each panel (screen space minus reserved areas)
   const vminPx = $derived(Math.min(winW, winH) / 100);
-  // Bottom: left margin (2vmin) + right reserved corner (22.5vmin + 3vmin)
-  const bottomAvailVmin = $derived(winW / vminPx - 2 - 22.5 - 3);
+  const MAP_CONTROL_BUTTON_PX = 38;
+  const MAP_CONTROL_EDGE_PX = 8;
+  const MAP_CONTROL_GAP_PX = 8;
+  const MAP_CONTROL_STACK_COUNT = 4;
+  const MAP_CONTROL_BOTTOM_BLOCKER_PX = MAP_CONTROL_EDGE_PX + MAP_CONTROL_BUTTON_PX + 8;
+  const MAP_CONTROL_STACK_HEIGHT_PX =
+    MAP_CONTROL_EDGE_PX
+    + MAP_CONTROL_STACK_COUNT * MAP_CONTROL_BUTTON_PX
+    + (MAP_CONTROL_STACK_COUNT - 1) * MAP_CONTROL_GAP_PX;
+  const SIDE_PANEL_BOTTOM_GUARD_PX = 24 + MAP_CONTROL_STACK_HEIGHT_PX + 8;
+
+  // Bottom: left margin (2vmin) + right map-control blocker (fixed pixel width)
+  const bottomAvailVmin = $derived(
+    winW / vminPx - 2 - (MAP_CONTROL_BOTTOM_BLOCKER_PX / vminPx)
+  );
   // Right: toolbar (~60px top) + statusbar (~30px) + bottom reserved (22.5vmin)
   const rightAvailVmin = $derived((winH - 60 - 30) / vminPx - 22.5);
 
@@ -120,6 +134,13 @@
   let defaultWpAltitudeM = $state(50);
   let defaultPhTimeSec = $state(30);
   let warnAltitudeM = $state(120);
+  let interfaceSettings = $state<InterfaceSettings>({
+    speedUnit: 'kmh',
+    altitudeUnit: 'm',
+    distanceUnit: 'metric',
+    verticalSpeedUnit: 'ms',
+    temperatureUnit: 'c',
+  });
   let trackColorMode = $state<TrackColorMode>('flightmode');
 
   // Logbook state
@@ -148,6 +169,48 @@
   let playbackSpeed = $state(1);
   const playbackCtrl = new PlaybackController();
   let logbookMinimized = $state(false);
+
+  function weatherTempDisplayFromC(tempC: string): string {
+    if (tempC === '' || isNaN(Number(tempC))) return '';
+    const v = convertTemperature(Number(tempC), interfaceSettings.temperatureUnit).value;
+    return String(Math.round(v * 10) / 10);
+  }
+
+  function weatherWindDisplayFromMs(windMs: string): string {
+    if (windMs === '' || isNaN(Number(windMs))) return '';
+    const v = convertSpeed(Number(windMs), interfaceSettings.speedUnit).value;
+    return String(Math.round(v * 10) / 10);
+  }
+
+  function weatherTempCFromDisplay(displayValue: string): string {
+    if (displayValue === '' || isNaN(Number(displayValue))) return '';
+    const v = toTemperatureC(Number(displayValue), interfaceSettings.temperatureUnit);
+    return String(Math.round(v * 10) / 10);
+  }
+
+  function weatherWindMsFromDisplay(displayValue: string): string {
+    if (displayValue === '' || isNaN(Number(displayValue))) return '';
+    const v = toSpeedMs(Number(displayValue), interfaceSettings.speedUnit);
+    return String(Math.round(v * 10) / 10);
+  }
+
+  function canonicalWeatherDescription(desc: string): string {
+    const trimmed = desc.trim();
+    if (!trimmed) return '';
+    const standard = [
+      'Clear',
+      'Partly Cloudy',
+      'Overcast',
+      'Light Rain',
+      'Moderate Rain',
+      'Rain',
+      'Snow',
+      'Fog',
+      'Stormy',
+    ];
+    const match = standard.find((v) => v.toLowerCase() === trimmed.toLowerCase());
+    return match ?? trimmed;
+  }
 
   // Replay source: 'live' or 'blackbox' — for linked flights, switches which track is shown
   let replaySource = $state<'live' | 'blackbox'>('live');
@@ -223,6 +286,13 @@
   defaultWpAltitudeM = saved.defaultWpAltitudeM;
   defaultPhTimeSec = saved.defaultPhTimeSec;
   warnAltitudeM = saved.warnAltitudeM;
+  interfaceSettings = saved.interface ?? {
+    speedUnit: 'kmh',
+    altitudeUnit: 'm',
+    distanceUnit: 'metric',
+    verticalSpeedUnit: 'ms',
+    temperatureUnit: 'c',
+  };
   panels = saved.panels ?? defaultPanels;
 
   function toggleNavPanel() {
@@ -648,10 +718,10 @@
     selectedFlightTrack = data.track;
     selectedFlightTrackCount = data.trackCount;
     selectedFlightNotes = data.notes;
-    weatherTempC = data.weatherTempC;
-    weatherWindMs = data.weatherWindMs;
+    weatherTempC = weatherTempDisplayFromC(data.weatherTempC);
+    weatherWindMs = weatherWindDisplayFromMs(data.weatherWindMs);
     weatherWindDir = data.weatherWindDir;
-    weatherDesc = data.weatherDesc;
+    weatherDesc = canonicalWeatherDescription(data.weatherDesc);
     weatherEditing = false;
     replaySource = 'live';
     linkedPartnerTrack = [];
@@ -688,8 +758,17 @@
   async function saveSelectedFlightWeather() {
     if (!selectedFlightId) return;
     selectedFlight = await logbookCtrl.saveWeather(
-      selectedFlightId, weatherTempC, weatherWindMs, weatherWindDir, weatherDesc, flightLogDbPath,
+      selectedFlightId,
+      weatherTempCFromDisplay(weatherTempC),
+      weatherWindMsFromDisplay(weatherWindMs),
+      weatherWindDir,
+      canonicalWeatherDescription(weatherDesc),
+      flightLogDbPath,
     );
+    // Keep editor/display values in selected UI units after save refresh
+    weatherTempC = weatherTempDisplayFromC(selectedFlight?.weather_temp_c != null ? String(selectedFlight.weather_temp_c) : '');
+    weatherWindMs = weatherWindDisplayFromMs(selectedFlight?.weather_wind_ms != null ? String(selectedFlight.weather_wind_ms) : '');
+    weatherDesc = canonicalWeatherDescription(selectedFlight?.weather_desc ?? '');
     weatherEditing = false;
   }
 
@@ -982,20 +1061,30 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="map-fullscreen" onclick={minimizeLogbook}>
     {#if mapViewMode === '2d'}
-      <Map playbackTrack={mapTrack} playbackPoint={playbackPoint} {trackColorMode} platformType={mapPlatformType} fcVariant={replayFcVariant} />
+      <Map
+        playbackTrack={mapTrack}
+        playbackPoint={playbackPoint}
+        {trackColorMode}
+        platformType={mapPlatformType}
+        fcVariant={replayFcVariant}
+        {mapViewMode}
+        onToggleMapView={() => mapViewMode = mapViewMode === '2d' ? '3d' : '2d'}
+      />
     {:else}
       <Map3D playbackTrack={mapTrack} playbackPoint={playbackPoint} {trackColorMode} platformType={mapPlatformType} fcVariant={replayFcVariant} />
     {/if}
   </div>
 
-  <!-- ======= 2D / 3D TOGGLE ======= -->
-  <button
-    class="map-view-toggle"
-    onclick={() => mapViewMode = mapViewMode === '2d' ? '3d' : '2d'}
-    title={mapViewMode === '2d' ? '3D View' : '2D View'}
-  >
-    {mapViewMode === '2d' ? '3D' : '2D'}
-  </button>
+  {#if mapViewMode === '3d'}
+    <button
+      class="map-view-toggle-3d"
+      onclick={() => mapViewMode = '2d'}
+      title="2D View"
+      aria-label="Switch to 2D view"
+    >
+      2D
+    </button>
+  {/if}
 
   <LogPlayer
     {showPlayer}
@@ -1062,6 +1151,7 @@
             {defaultWpAltitudeM}
             {defaultPhTimeSec}
             {warnAltitudeM}
+            {interfaceSettings}
             {isWidgetActive}
             {getWidgetPanelLabel}
             onPatch={(patch) => {
@@ -1080,6 +1170,20 @@
               if (patch.defaultWpAltitudeM != null) defaultWpAltitudeM = patch.defaultWpAltitudeM;
               if (patch.defaultPhTimeSec != null) defaultPhTimeSec = patch.defaultPhTimeSec;
               if (patch.warnAltitudeM != null) warnAltitudeM = patch.warnAltitudeM;
+              if (patch.interface != null) {
+                interfaceSettings = {
+                  ...interfaceSettings,
+                  ...patch.interface,
+                };
+                if (selectedFlight) {
+                  weatherTempC = weatherTempDisplayFromC(
+                    selectedFlight.weather_temp_c != null ? String(selectedFlight.weather_temp_c) : ''
+                  );
+                  weatherWindMs = weatherWindDisplayFromMs(
+                    selectedFlight.weather_wind_ms != null ? String(selectedFlight.weather_wind_ms) : ''
+                  );
+                }
+              }
             }}
             onSetCacheMaxMB={setCacheMaxMB}
             onClearCache={clearCache}
@@ -1100,6 +1204,7 @@
             {selectedFlight}
             {selectedFlightId}
             {selectedFlightTrackCount}
+            {interfaceSettings}
             bind:selectedFlightNotes
             bind:weatherTempC
             bind:weatherWindMs
@@ -1128,27 +1233,40 @@
   {/if}
 
   <!-- ======= BOTTOM WIDGET PANEL ======= -->
-  <div class="panel-bottom">
-    <WidgetPanel
-      widgetIds={panels.bottom}
-      orientation="horizontal"
-      availableVmin={bottomAvailVmin}
-      {telem}
-      editing={widgetEditMode}
-      onreorder={handleReorder}
-      onreceive={handleReceive}
-      panelId="bottom"
-    />
+  <div class="panel-bottom" class:panel-editing={widgetEditMode}>
+    <div class="panel-bottom-wrap">
+      <button
+        class="widget-edit-btn widget-edit-btn--panel"
+        class:active={widgetEditMode}
+        onclick={() => widgetEditMode = !widgetEditMode}
+        title={widgetEditMode ? $t('widgets.exitEdit') : $t('widgets.editLayout')}
+      >
+        ✎
+      </button>
+
+      <WidgetPanel
+        widgetIds={panels.bottom}
+        orientation="horizontal"
+        availableVmin={bottomAvailVmin}
+        {telem}
+        editing={widgetEditMode}
+        {interfaceSettings}
+        onreorder={handleReorder}
+        onreceive={handleReceive}
+        panelId="bottom"
+      />
+    </div>
   </div>
 
   <!-- ======= RIGHT WIDGET PANEL ======= -->
-  <div class="panel-right">
+  <div class="panel-right" class:panel-editing={widgetEditMode}>
     <WidgetPanel
       widgetIds={panels.right}
       orientation="vertical"
       availableVmin={rightAvailVmin}
       {telem}
       editing={widgetEditMode}
+      {interfaceSettings}
       onreorder={handleReorder}
       onreceive={handleReceive}
       panelId="right"
@@ -1159,16 +1277,6 @@
   <div class="reserved-corner">
     <!-- reserved for future control buttons -->
   </div>
-
-  <!-- ======= WIDGET EDIT TOGGLE ======= -->
-  <button
-    class="widget-edit-btn"
-    class:active={widgetEditMode}
-    onclick={() => widgetEditMode = !widgetEditMode}
-    title={widgetEditMode ? $t('widgets.exitEdit') : $t('widgets.editLayout')}
-  >
-    ✎
-  </button>
 
   <!-- ======= DEBUG PANEL (dev only) ======= -->
   {#if DEV_MODE && debugOpen && DebugPanelCmp}
@@ -1285,14 +1393,26 @@
     position: absolute;
     bottom: 30px;
     left: 2vmin;
-    right: calc(22.5vmin + 3vmin); /* LARGE_BASE_VMIN + margin */
+    right: 54px;
     z-index: 100;
     display: flex;
     justify-content: center;
+    align-items: center;
     pointer-events: none;
   }
 
-  .panel-bottom > :global(*) {
+  .panel-bottom.panel-editing {
+    pointer-events: auto;
+  }
+
+  .panel-bottom > * {
+    pointer-events: auto;
+  }
+
+  .panel-bottom-wrap {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.8vmin;
     pointer-events: auto;
   }
 
@@ -1301,12 +1421,16 @@
     position: absolute;
     top: 60px;
     right: 0.5vmin;
-    bottom: calc(22.5vmin + 36px); /* LARGE_BASE_VMIN + statusbar + margin */
+    bottom: 216px;
     z-index: 100;
     display: flex;
     align-items: center;
     justify-content: flex-end;
     pointer-events: none;
+  }
+
+  .panel-right.panel-editing {
+    pointer-events: auto;
   }
 
   .panel-right > :global(*) {
@@ -1317,9 +1441,9 @@
   .reserved-corner {
     position: absolute;
     bottom: 30px;
-    right: 0.5vmin;
-    width: 22.5vmin;
-    height: 22.5vmin;
+    right: 8px;
+    width: 54px;
+    height: 184px;
     z-index: 90;
     pointer-events: none;
     /* Visible only in debug — uncomment to see reserved area */
@@ -1328,9 +1452,6 @@
 
   /* --- Widget edit toggle button --- */
   .widget-edit-btn {
-    position: absolute;
-    bottom: 32px;
-    right: calc(0.5vmin + 1vmin);
     width: 3.5vmin;
     height: 3.5vmin;
     min-width: 28px;
@@ -1341,12 +1462,16 @@
     color: #949494;
     font-size: 1.5vmin;
     cursor: pointer;
-    z-index: 110;
     display: flex;
     align-items: center;
     justify-content: center;
     backdrop-filter: blur(8px);
     transition: background-color 0.2s, border-color 0.2s, color 0.2s;
+  }
+
+  .widget-edit-btn--panel {
+    flex: 0 0 auto;
+    z-index: 110;
   }
 
   .widget-edit-btn:hover {
@@ -1360,12 +1485,11 @@
     color: #37a8db;
   }
 
-  /* --- 2D / 3D Map View Toggle --- */
-  .map-view-toggle {
+  .map-view-toggle-3d {
     position: absolute;
-    top: 63px;
-    right: 10px;
-    z-index: 110;
+    right: 8px;
+    bottom: 32px;
+    z-index: 130;
     width: 38px;
     height: 38px;
     background: rgba(46, 46, 46, 0.9);
@@ -1373,17 +1497,18 @@
     border-radius: 6px;
     color: #37a8db;
     font-size: 13px;
-    font-weight: bold;
+    font-weight: 700;
+    letter-spacing: 0.03em;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     backdrop-filter: blur(8px);
-    transition: background 0.2s, border-color 0.2s;
-    font-family: 'Segoe UI', Tahoma, sans-serif;
+    transition: background 0.2s, border-color 0.2s, color 0.2s;
+    box-sizing: border-box;
   }
 
-  .map-view-toggle:hover {
+  .map-view-toggle-3d:hover {
     background: rgba(55, 168, 219, 0.25);
     border-color: #37a8db;
   }

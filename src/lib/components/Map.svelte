@@ -8,7 +8,6 @@
   import { MAP_PROVIDERS, getProviderById, type MapProvider } from "$lib/config/mapProviders";
   import { cachedTileLayer } from "$lib/cache/CachedTileLayer";
   import { initTileCache } from "$lib/cache/tileCache";
-  import { t } from 'svelte-i18n';
   import { homePosition } from "$lib/stores/home";
   import MissionLayer from "./MissionLayer.svelte";
   import type { TelemetryRecord } from "$lib/stores/flightlog";
@@ -30,12 +29,16 @@
     trackColorMode = 'flightmode' as TrackColorMode,
     platformType = PLATFORM_MULTIROTOR as PlatformType,
     fcVariant = 'INAV',
+    mapViewMode = '2d' as '2d' | '3d',
+    onToggleMapView,
   }: {
     playbackTrack?: TelemetryRecord[];
     playbackPoint?: TelemetryRecord | null;
     trackColorMode?: TrackColorMode;
     platformType?: PlatformType;
     fcVariant?: string;
+    mapViewMode?: '2d' | '3d';
+    onToggleMapView?: () => void;
   } = $props();
 
   const ARMING_FLAG_ARMED = 2;
@@ -74,9 +77,18 @@
   let homeMarker: L.Marker | undefined;
   let wasArmed = false;
 
-  // Map view mode: north-up (default) or heading-up (rotates map with UAV heading)
-  let viewMode = $state<'north-up' | 'heading-up'>('north-up');
+  // Follow mode:
+  // - free: manual map movement
+  // - follow: center on UAV, no rotation
+  // - heading-follow: center on UAV and rotate with heading
+  let viewMode = $state<'free' | 'follow' | 'heading-follow'>('free');
   let mapHeading = 0;
+
+  let followTitle = $derived.by(() => {
+    if (viewMode === 'free') return 'Follow mode: Free';
+    if (viewMode === 'follow') return 'Follow mode: Follow';
+    return 'Follow mode: Heading Follow';
+  });
 
   function updateUavPosition(lat: number, lon: number, heading: number, navState = 0) {
     if (!map) return;
@@ -272,9 +284,6 @@
       attributionControl: true,
     });
 
-    // Place zoom controls top-right so they don't collide with the nav panel
-    L.control.zoom({ position: "topright" }).addTo(map);
-
     // Initialize tile cache with persisted size limit
     initTileCache(s.mapCacheMaxMB);
 
@@ -286,7 +295,7 @@
 
     // Invalidate size when container resizes (e.g. side panel toggle)
     const onResize = () => {
-      if (viewMode === 'heading-up') applyHeadingUpSize(true);
+      if (viewMode === 'heading-follow') applyHeadingUpSize(true);
       map?.invalidateSize();
     };
     window.addEventListener("resize", onResize);
@@ -299,11 +308,14 @@
       if (t.lastUpdate > 0) {
         updateUavPosition(t.lat, t.lon, t.yaw, t.navState);
 
-        // Heading-up mode: center on UAV and rotate map
-        if (viewMode === 'heading-up' && isValidGpsCoordinate(t.lat, t.lon)) {
-          map?.setView([t.lat, t.lon], map.getZoom(), { animate: false });
-          mapHeading = t.yaw;
-          mapContainer?.style.setProperty('--map-rotation', `${-mapHeading}deg`);
+        if (isValidGpsCoordinate(t.lat, t.lon)) {
+          if (viewMode === 'follow') {
+            map?.setView([t.lat, t.lon], map.getZoom(), { animate: false });
+          } else if (viewMode === 'heading-follow') {
+            map?.setView([t.lat, t.lon], map.getZoom(), { animate: false });
+            mapHeading = t.yaw;
+            mapContainer?.style.setProperty('--map-rotation', `${-mapHeading}deg`);
+          }
         }
 
         // Flight trail (colored by flight mode)
@@ -370,12 +382,32 @@
   }
 
   function toggleViewMode() {
-    viewMode = viewMode === 'north-up' ? 'heading-up' : 'north-up';
-    if (viewMode === 'north-up') {
+    if (viewMode === 'free') {
+      viewMode = 'follow';
       mapHeading = 0;
       mapContainer?.style.setProperty('--map-rotation', '0deg');
+      applyHeadingUpSize(false);
+      return;
     }
-    applyHeadingUpSize(viewMode === 'heading-up');
+
+    if (viewMode === 'follow') {
+      viewMode = 'heading-follow';
+      applyHeadingUpSize(true);
+      return;
+    }
+
+    viewMode = 'free';
+    mapHeading = 0;
+    mapContainer?.style.setProperty('--map-rotation', '0deg');
+    applyHeadingUpSize(false);
+  }
+
+  function zoomIn() {
+    map?.zoomIn();
+  }
+
+  function zoomOut() {
+    map?.zoomOut();
   }
 
   $effect(() => {
@@ -408,26 +440,42 @@
 <div class="map-wrapper">
   <div bind:this={mapContainer} class="map" style="--map-rotation: 0deg"></div>
 
+  <div class="map-controls-corner">
+    <button class="map-control-btn map-mode-btn"
+            onclick={() => onToggleMapView?.()}
+            title={mapViewMode === '2d' ? '3D View' : '2D View'}
+            aria-label={mapViewMode === '2d' ? 'Switch to 3D view' : 'Switch to 2D view'}>
+      {mapViewMode === '2d' ? '3D' : '2D'}
+    </button>
+
+    <button class="map-control-btn map-heading-btn"
+            class:mode-free={viewMode === 'free'}
+            class:mode-follow={viewMode === 'follow'}
+            class:mode-heading={viewMode === 'heading-follow'}
+            onclick={toggleViewMode}
+            title={followTitle}
+            aria-label={followTitle}>
+      {#if viewMode === 'heading-follow'}
+        <svg class="heading-icon heading-icon-up" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <polygon class="uav-arrow" points="12,6 7.5,17.5 12,15.2 16.5,17.5" />
+        </svg>
+      {:else}
+        <svg class="heading-icon heading-icon-diag" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <polygon class="north-triangle" points="12,4.6 9.9,8.6 14.1,8.6" />
+          <g transform="translate(0 -1.5) rotate(-70 12 15)">
+            <polygon class="uav-arrow" points="12,8.6 7.7,19.6 12,17.4 16.3,19.6" />
+          </g>
+        </svg>
+      {/if}
+    </button>
+
+    <button class="map-control-btn map-zoom-btn map-zoom-in" onclick={zoomIn} title="Zoom in" aria-label="Zoom in">+</button>
+    <button class="map-control-btn map-zoom-btn map-zoom-out" onclick={zoomOut} title="Zoom out" aria-label="Zoom out">-</button>
+  </div>
+
   {#if map}
     <MissionLayer {map} />
   {/if}
-
-  <button class="map-view-btn"
-          class:active={viewMode === 'heading-up'}
-          onclick={toggleViewMode}
-          title={viewMode === 'north-up' ? $t('map.headingUp') : $t('map.northUp')}>
-    <svg viewBox="0 0 24 24" width="18" height="18">
-      {#if viewMode === 'north-up'}
-        <!-- North arrow up -->
-        <polygon points="12,3 8,15 12,12 16,15" fill="#ccc" />
-        <text x="12" y="21" text-anchor="middle" fill="#ccc" font-size="8" font-weight="bold">N</text>
-      {:else}
-        <!-- Heading arrow up, highlighted -->
-        <polygon points="12,3 8,15 12,12 16,15" fill="#37a8db" />
-        <text x="12" y="21" text-anchor="middle" fill="#37a8db" font-size="8" font-weight="bold">H</text>
-      {/if}
-    </svg>
-  </button>
 </div>
 
 <style>
@@ -457,31 +505,96 @@
     transform: rotate(calc(-1 * var(--map-rotation, 0deg)));
   }
 
-  /* Map view toggle button */
-  .map-view-btn {
+  .map-controls-corner {
     position: absolute;
-    top: 80px;
-    right: 10px;
+    bottom: 8px;
+    right: 8px;
     z-index: 1000;
-    width: 30px;
-    height: 30px;
-    background: #fff;
-    border: 2px solid rgba(0, 0, 0, 0.2);
-    border-radius: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .map-control-btn {
+    box-sizing: border-box;
+    width: 38px;
+    height: 38px;
+    background: rgba(46, 46, 46, 0.9);
+    border: 2px solid rgba(55, 168, 219, 0.5);
+    border-radius: 6px;
+    color: #37a8db;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 1px 5px rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(8px);
+    transition: background 0.2s, border-color 0.2s, color 0.2s;
+    padding: 0;
   }
 
-  .map-view-btn:hover {
-    background: #f4f4f4;
-  }
-
-  .map-view-btn.active {
-    background: #1a1a1a;
+  .map-control-btn:hover {
+    background: rgba(55, 168, 219, 0.25);
     border-color: #37a8db;
+  }
+
+  .map-zoom-btn {
+    font-size: 23px;
+    line-height: 1;
+    font-weight: 700;
+  }
+
+  .map-mode-btn {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+
+  .map-heading-btn.mode-free {
+    background: rgba(46, 46, 46, 0.45);
+    border-color: rgba(55, 168, 219, 0.45);
+    color: rgba(199, 223, 232, 0.95);
+    backdrop-filter: blur(4px);
+  }
+
+  .map-heading-btn.mode-follow,
+  .map-heading-btn.mode-heading {
+    background: rgba(46, 46, 46, 0.92);
+    border-color: rgba(55, 168, 219, 0.7);
+    color: #37a8db;
+    backdrop-filter: blur(8px);
+  }
+
+  .map-heading-btn.mode-free:hover {
+    background: rgba(55, 168, 219, 0.12);
+    border-color: rgba(55, 168, 219, 0.75);
+  }
+
+  .heading-icon {
+    width: 45px;
+    height: 45px;
+    overflow: visible;
+  }
+
+  .heading-icon .uav-arrow {
+    fill: currentColor;
+  }
+
+  .heading-icon .north-triangle {
+    fill: currentColor;
+    opacity: 0.9;
+  }
+
+  .map-heading-btn.mode-free .heading-icon {
+    opacity: 0.95;
+  }
+
+  .map-heading-btn.mode-follow .heading-icon,
+  .map-heading-btn.mode-heading .heading-icon {
+    opacity: 1;
+  }
+
+  .heading-icon-up .uav-arrow {
+    transform-origin: 12px 12px;
   }
 
   /* Fix Leaflet icon paths broken by bundlers */

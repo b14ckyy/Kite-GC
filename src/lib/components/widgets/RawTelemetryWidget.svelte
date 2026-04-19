@@ -1,9 +1,26 @@
 <!-- Raw Telemetry widget — compact numeric readouts -->
 <script lang="ts">
   import type { TelemetryData } from "$lib/stores/telemetry";
+  import type { InterfaceSettings } from "$lib/stores/settings";
+  import { convertAltitude, convertSpeed, convertVerticalSpeed, formatConverted } from "$lib/utils/units";
   import { t } from 'svelte-i18n';
 
-  let { telem, size = 9 }: { telem: TelemetryData; size?: number } = $props();
+  let {
+    telem,
+    size = 9,
+    interfaceSettings = { speedUnit: 'kmh', altitudeUnit: 'm', distanceUnit: 'metric', verticalSpeedUnit: 'ms', temperatureUnit: 'c' },
+  }: {
+    telem: TelemetryData;
+    size?: number;
+    interfaceSettings?: InterfaceSettings;
+  } = $props();
+
+  let altText = $derived(formatConverted(convertAltitude(telem.altitude, interfaceSettings.altitudeUnit), 1));
+  let speedText = $derived(formatConverted(convertSpeed(telem.groundSpeed, interfaceSettings.speedUnit), 0));
+  let varioText = $derived(() => {
+    const converted = convertVerticalSpeed(telem.vario, interfaceSettings.verticalSpeedUnit);
+    return `${telem.vario >= 0 ? '+' : ''}${converted.value.toFixed(1)} ${converted.unit}`;
+  });
 
   function getGpsFixLabel(): string {
     if (!telem.lastUpdate || telem.fixType === 0) return $t('gps.noFix');
@@ -14,9 +31,9 @@
 
 <div class="widget-card" style="--ws: {size}vmin">
   {#if telem.lastUpdate > 0}
-    <div class="rt-row"><span class="rtk">ALT</span><span class="rtv">{telem.altitude.toFixed(1)} m</span></div>
-    <div class="rt-row"><span class="rtk">SPD</span><span class="rtv">{(telem.groundSpeed * 3.6).toFixed(0)} km/h</span></div>
-    <div class="rt-row"><span class="rtk">VRT</span><span class="rtv">{telem.vario >= 0 ? '+' : ''}{telem.vario.toFixed(1)} m/s</span></div>
+    <div class="rt-row"><span class="rtk">ALT</span><span class="rtv">{altText}</span></div>
+    <div class="rt-row"><span class="rtk">SPD</span><span class="rtv">{speedText}</span></div>
+    <div class="rt-row"><span class="rtk">VRT</span><span class="rtv">{varioText()}</span></div>
     <div class="rt-row"><span class="rtk">HDG</span><span class="rtv">{Math.round(telem.yaw)}°</span></div>
     <div class="rt-row"><span class="rtk">ROL</span><span class="rtv">{telem.roll.toFixed(1)}°</span></div>
     <div class="rt-row"><span class="rtk">PIT</span><span class="rtv">{telem.pitch.toFixed(1)}°</span></div>

@@ -105,7 +105,13 @@
     "alertThresholdsHint": "Warnschwellen. 0 = deaktiviert.",
     "hudWidgets": "HUD Widgets",
     "rateHint": "Ratenänderungen gelten ab nächster Verbindung.",
-    "language": "Sprache"
+    "language": "Sprache",
+    "interface": "Interface",
+    "speedUnit": "Geschwindigkeitseinheit",
+    "altitudeUnit": "Höheneinheit",
+    "distanceUnit": "Distanz-Einheit",
+    "verticalSpeedUnit": "Vertikalgeschwindigkeit",
+    "temperatureUnit": "Temperatureinheit"
   },
   "logbook": {
     "title": "Flug-Logbuch",

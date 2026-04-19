@@ -1,5 +1,6 @@
 <!-- WidgetPanel — a panel strip (horizontal or vertical) that holds widgets with drag-and-drop reordering -->
 <script lang="ts">
+  import { t } from 'svelte-i18n';
   import type { TelemetryData } from "$lib/stores/telemetry";
   import { WIDGET_MAP, LARGE_BASE_VMIN, SMALL_BASE_VMIN, MIN_SCALE, type WidgetClass } from "$lib/config/widgetRegistry";
   import AHI from "./widgets/AHI.svelte";
@@ -11,12 +12,14 @@
   import HomeWidget from "./widgets/HomeWidget.svelte";
   import FlightModeWidget from "./widgets/FlightModeWidget.svelte";
   import RawTelemetryWidget from "./widgets/RawTelemetryWidget.svelte";
+  import type { InterfaceSettings } from "$lib/stores/settings";
 
   let {
     widgetIds = [],
     orientation = 'horizontal',
     availableVmin = 80,
     telem,
+    interfaceSettings = { speedUnit: 'kmh', altitudeUnit: 'm', distanceUnit: 'metric', verticalSpeedUnit: 'ms', temperatureUnit: 'c' },
     editing = false,
     onreorder,
     onreceive,
@@ -26,11 +29,189 @@
     orientation: 'horizontal' | 'vertical';
     availableVmin: number;
     telem: TelemetryData;
+    interfaceSettings?: InterfaceSettings;
     editing: boolean;
     onreorder: (panelId: string, widgetIds: string[]) => void;
     onreceive: (targetPanel: string, widgetId: string, index: number) => void;
     panelId: string;
   } = $props();
+
+  type DragPayload = { panelId: string; widgetId: string; sourceIdx: number };
+
+  let panelEl: HTMLDivElement | null = null;
+  let activeDragPayload: DragPayload | null = null;
+  const DND_DEBUG = import.meta.env.DEV;
+  let ghostX = $state(0);
+  let ghostY = $state(0);
+  let ghostW = $state(140);
+  let ghostH = $state(140);
+  let ghostWidgetId = $state<string | null>(null);
+  let ghostWidgetLabel = $derived.by(() => {
+    if (!ghostWidgetId) return '';
+    const def = WIDGET_MAP.get(ghostWidgetId);
+    return def ? $t(def.labelKey) : ghostWidgetId;
+  });
+
+  function setGlobalDragPayload(payload: DragPayload | null) {
+    (window as any).__KITE_WIDGET_DND_PAYLOAD = payload;
+  }
+
+  function getGlobalDragPayload(): DragPayload | null {
+    return ((window as any).__KITE_WIDGET_DND_PAYLOAD ?? null) as DragPayload | null;
+  }
+
+  function clearGhost() {
+    ghostWidgetId = null;
+  }
+
+  // WebView-safe DnD: capture dragover/drop on panel so drop targets stay valid (no 🚫 cursor).
+  $effect(() => {
+    if (!panelEl) return;
+    const onEnter = (e: DragEvent) => handlePanelDragOver(e);
+    const onOver = (e: DragEvent) => handlePanelDragOver(e);
+    const onDropCapture = (e: DragEvent) => handlePanelDrop(e);
+    panelEl.addEventListener('dragenter', onEnter, true);
+    panelEl.addEventListener('dragover', onOver, true);
+    panelEl.addEventListener('drop', onDropCapture, true);
+    return () => {
+      panelEl?.removeEventListener('dragenter', onEnter, true);
+      panelEl?.removeEventListener('dragover', onOver, true);
+      panelEl?.removeEventListener('drop', onDropCapture, true);
+    };
+  });
+
+  // Mouse-based fallback DnD (independent from HTML5 drag events).
+  $effect(() => {
+    const onWindowMouseMove = (e: MouseEvent) => {
+      if (!editing) return;
+      const payload = getGlobalDragPayload();
+      if (!payload) {
+        // Another panel may have consumed the drop; clear stale local drag visuals.
+        if (dragIdx !== -1 || insertIdx !== -1 || externalDragOver) {
+          dragIdx = -1;
+          insertIdx = -1;
+          externalDragOver = false;
+          activeDragPayload = null;
+          clearGhost();
+        }
+        return;
+      }
+
+      // Only source panel renders the visual drag ghost.
+      if (payload.panelId === panelId) {
+        ghostX = e.clientX + 14;
+        ghostY = e.clientY + 14;
+      }
+
+      const inside = isPointInsidePanel(e.clientX, e.clientY);
+      externalDragOver = inside;
+      insertIdx = inside ? computeInsertIdxFromPoint(e.clientX, e.clientY) : -1;
+      if (DND_DEBUG) console.log('[WIDGET-DND] mousemove', { panelId, inside, insertIdx, payload });
+    };
+
+    const onWindowMouseUp = (e: MouseEvent) => {
+      if (!editing) return;
+      const payload = getGlobalDragPayload();
+      if (!payload) return;
+      const inside = isPointInsidePanel(e.clientX, e.clientY);
+      if (inside) {
+        const dropAt = computeInsertIdxFromPoint(e.clientX, e.clientY);
+        if (DND_DEBUG) console.log('[WIDGET-DND] mouseup drop', { panelId, dropAt, payload });
+        executeDrop(payload, dropAt);
+        setGlobalDragPayload(null);
+        dragIdx = -1;
+        insertIdx = -1;
+        externalDragOver = false;
+        activeDragPayload = null;
+        clearGhost();
+        return;
+      }
+
+      // Important for cross-panel moves: if source panel sees mouseup first while cursor is
+      // over another widget panel, do NOT clear global payload yet.
+      if (payload.panelId === panelId) {
+        const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+        const overWidgetPanel = !!el?.closest('.widget-panel');
+        if (!overWidgetPanel) {
+          if (DND_DEBUG) console.log('[WIDGET-DND] mouseup cancel outside panels', { panelId, payload });
+          setGlobalDragPayload(null);
+          dragIdx = -1;
+          insertIdx = -1;
+          externalDragOver = false;
+          activeDragPayload = null;
+          clearGhost();
+        }
+      }
+    };
+
+    window.addEventListener('mousemove', onWindowMouseMove, true);
+    window.addEventListener('mouseup', onWindowMouseUp, true);
+    return () => {
+      window.removeEventListener('mousemove', onWindowMouseMove, true);
+      window.removeEventListener('mouseup', onWindowMouseUp, true);
+    };
+  });
+
+  function isPointInsidePanel(x: number, y: number): boolean {
+    if (!panelEl) return false;
+    const r = panelEl.getBoundingClientRect();
+    return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+  }
+
+  function computeInsertIdxFromPoint(x: number, y: number): number {
+    if (!panelEl) return widgetIds.length;
+    const el = document.elementFromPoint(x, y) as HTMLElement | null;
+    const slot = el?.closest('.widget-slot') as HTMLElement | null;
+    if (!slot || !panelEl.contains(slot)) {
+      return widgetIds.length;
+    }
+    const idxAttr = slot.getAttribute('data-slot-idx');
+    const idx = idxAttr != null ? Number(idxAttr) : widgetIds.length;
+    const rect = slot.getBoundingClientRect();
+    const pastMid = orientation === 'horizontal'
+      ? x > rect.left + rect.width / 2
+      : y > rect.top + rect.height / 2;
+    return pastMid ? idx + 1 : idx;
+  }
+
+  // Fallback path for WebView quirks where panel dragover/drop handlers are not dispatched.
+  $effect(() => {
+    const onWindowDragOver = (e: DragEvent) => {
+      if (!editing) return;
+      const payload = getGlobalDragPayload();
+      if (!payload) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+
+      const inside = isPointInsidePanel(e.clientX, e.clientY);
+      externalDragOver = inside;
+      insertIdx = inside ? computeInsertIdxFromPoint(e.clientX, e.clientY) : -1;
+      if (DND_DEBUG) console.log('[WIDGET-DND] window dragover', { panelId, inside, insertIdx, payload });
+    };
+
+    const onWindowDrop = (e: DragEvent) => {
+      if (!editing) return;
+      const payload = getGlobalDragPayload();
+      if (!payload) return;
+      if (!isPointInsidePanel(e.clientX, e.clientY)) return;
+      e.preventDefault();
+      const dropAt = computeInsertIdxFromPoint(e.clientX, e.clientY);
+      if (DND_DEBUG) console.log('[WIDGET-DND] window drop', { panelId, dropAt, payload });
+      executeDrop(payload, dropAt);
+      setGlobalDragPayload(null);
+      dragIdx = -1;
+      insertIdx = -1;
+      externalDragOver = false;
+      activeDragPayload = null;
+    };
+
+    window.addEventListener('dragover', onWindowDragOver, true);
+    window.addEventListener('drop', onWindowDrop, true);
+    return () => {
+      window.removeEventListener('dragover', onWindowDragOver, true);
+      window.removeEventListener('drop', onWindowDrop, true);
+    };
+  });
 
   // Compute widget sizes based on available space
   function computeSizes(): { id: string; size: number; wclass: WidgetClass }[] {
@@ -96,22 +277,56 @@
   function handleDragStart(e: DragEvent, idx: number) {
     if (!editing) { e.preventDefault(); return; }
     dragIdx = idx;
+    activeDragPayload = { panelId, widgetId: widgetIds[idx], sourceIdx: idx };
+    setGlobalDragPayload(activeDragPayload);
+    if (DND_DEBUG) console.log('[WIDGET-DND] dragstart', activeDragPayload);
     if (e.dataTransfer) {
       e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('application/widget-drag', JSON.stringify({
-        panelId,
-        widgetId: widgetIds[idx],
-        sourceIdx: idx,
-      }));
-      // Needed for Firefox
-      e.dataTransfer.setData('text/plain', widgetIds[idx]);
+      const payload = JSON.stringify(activeDragPayload);
+      // Some WebView/engine combos drop custom MIME types on drop; keep a plain-text JSON fallback.
+      e.dataTransfer.setData('application/widget-drag', payload);
+      e.dataTransfer.setData('text/plain', `widget-drag:${payload}`);
+    }
+  }
+
+  function handlePointerDown(e: MouseEvent, idx: number) {
+    if (!editing || e.button !== 0) return;
+    e.preventDefault();
+    dragIdx = idx;
+    activeDragPayload = { panelId, widgetId: widgetIds[idx], sourceIdx: idx };
+    setGlobalDragPayload(activeDragPayload);
+    ghostWidgetId = activeDragPayload.widgetId;
+    ghostX = e.clientX + 14;
+    ghostY = e.clientY + 14;
+    const el = e.currentTarget as HTMLElement;
+    const rect = el.getBoundingClientRect();
+    ghostW = Math.max(100, Math.round(rect.width));
+    ghostH = Math.max(100, Math.round(rect.height));
+    if (DND_DEBUG) console.log('[WIDGET-DND] mousedown start', activeDragPayload);
+  }
+
+  function parseDropPayload(e: DragEvent): DragPayload | null {
+    const custom = e.dataTransfer?.getData('application/widget-drag');
+    if (custom) {
+      try {
+        return JSON.parse(custom);
+      } catch {
+        // fall through to plain-text fallback
+      }
+    }
+
+    const plain = e.dataTransfer?.getData('text/plain') ?? '';
+    if (!plain.startsWith('widget-drag:')) return null;
+    try {
+      return JSON.parse(plain.slice('widget-drag:'.length));
+    } catch {
+      return activeDragPayload;
     }
   }
 
   function handleDragOver(e: DragEvent, idx: number) {
     if (!editing) return;
     e.preventDefault();
-    e.stopPropagation();
     if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
 
     // Determine insertion side based on cursor position vs slot midpoint
@@ -130,9 +345,13 @@
   }
 
   function handleDragEnd() {
+    if (DND_DEBUG) console.log('[WIDGET-DND] dragend', { panelId, dragIdx, insertIdx, activeDragPayload });
     dragIdx = -1;
     insertIdx = -1;
     externalDragOver = false;
+    setGlobalDragPayload(null);
+    activeDragPayload = null;
+    clearGhost();
   }
 
   // Panel-level handlers — fires on empty space + catches slot drops (bubbled)
@@ -141,6 +360,7 @@
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
     externalDragOver = true;
+    if (DND_DEBUG) console.log('[WIDGET-DND] dragover panel', { panelId, insertIdx, activeDragPayload });
   }
 
   function handlePanelDragLeave(e: DragEvent) {
@@ -151,18 +371,8 @@
     insertIdx = -1;
   }
 
-  function handlePanelDrop(e: DragEvent) {
-    if (!editing) return;
-    e.preventDefault();
-    const dropAt = insertIdx >= 0 ? insertIdx : widgetIds.length;
-    dragIdx = -1;
-    insertIdx = -1;
-    externalDragOver = false;
-
-    const raw = e.dataTransfer?.getData('application/widget-drag');
-    if (!raw) return;
+  function executeDrop(data: DragPayload, dropAt: number) {
     try {
-      const data = JSON.parse(raw);
       if (data.panelId === panelId) {
         // Same-panel reorder
         const srcIdx: number = data.sourceIdx;
@@ -177,33 +387,45 @@
           onreceive(panelId, data.widgetId, dropAt);
         }
       }
-    } catch { /* ignore */ }
+    } catch {
+      // ignore malformed drop attempts
+    }
+  }
+
+  function handlePanelDrop(e: DragEvent) {
+    if (!editing) return;
+    e.preventDefault();
+    const dropAt = insertIdx >= 0 ? insertIdx : widgetIds.length;
+    const data = parseDropPayload(e) ?? activeDragPayload ?? getGlobalDragPayload();
+    if (DND_DEBUG) console.log('[WIDGET-DND] drop', { panelId, dropAt, data, activeDragPayload });
+    if (data) executeDrop(data, dropAt);
+    dragIdx = -1;
+    insertIdx = -1;
+    externalDragOver = false;
+    setGlobalDragPayload(null);
+    activeDragPayload = null;
   }
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
+  bind:this={panelEl}
   class="widget-panel {orientation}"
   class:editing
   class:empty={widgetIds.length === 0}
   class:drag-hover={externalDragOver}
-  ondragover={handlePanelDragOver}
-  ondragleave={handlePanelDragLeave}
-  ondrop={handlePanelDrop}
 >
   {#each sizes as item, idx (item.id)}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="widget-slot"
+      data-slot-idx={idx}
       class:dragging={dragIdx === idx}
       class:editing
       class:insert-before={showInsert && insertIdx === idx}
       class:insert-after={showInsert && insertIdx === widgetIds.length && idx === widgetIds.length - 1}
-      draggable={editing ? 'true' : 'false'}
-      ondragstart={(e) => handleDragStart(e, idx)}
-      ondragover={(e) => handleDragOver(e, idx)}
-      ondragleave={(e) => handleDragLeave(e)}
-      ondragend={handleDragEnd}
+      draggable={false}
+      onmousedown={(e) => handlePointerDown(e, idx)}
     >
       {#if editing}
         <div class="drag-handle">⠿</div>
@@ -213,9 +435,9 @@
         {#if item.id === 'ahi'}
           <AHI {telem} size={item.size} />
         {:else if item.id === 'speed'}
-          <SpeedWidget {telem} size={item.size} />
+          <SpeedWidget {telem} size={item.size} {interfaceSettings} />
         {:else if item.id === 'altitude'}
-          <AltWidget {telem} size={item.size} />
+          <AltWidget {telem} size={item.size} {interfaceSettings} />
         {:else if item.id === 'battery'}
           <BatteryWidget {telem} size={item.size} />
         {:else if item.id === 'gps'}
@@ -223,15 +445,24 @@
         {:else if item.id === 'compass'}
           <CompassWidget {telem} size={item.size} />
         {:else if item.id === 'home'}
-          <HomeWidget {telem} size={item.size} />
+          <HomeWidget {telem} size={item.size} {interfaceSettings} />
         {:else if item.id === 'flightMode'}
           <FlightModeWidget {telem} size={item.size} />
         {:else if item.id === 'rawTelemetry'}
-          <RawTelemetryWidget {telem} size={item.size} />
+          <RawTelemetryWidget {telem} size={item.size} {interfaceSettings} />
         {/if}
       </div>
     </div>
   {/each}
+
+  {#if editing && ghostWidgetId && getGlobalDragPayload()?.panelId === panelId}
+    <div
+      class="drag-ghost"
+      style="left:{ghostX}px; top:{ghostY}px; width:{ghostW}px; height:{ghostH}px;"
+    >
+      <span>{ghostWidgetLabel}</span>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -291,13 +522,13 @@
     cursor: default;
   }
 
-  /* Transparent overlay captures pointer events in edit mode so
-     drag events reach the parent .widget-slot handlers. */
+  /* Overlay is visual-only; events must hit the slot directly for reliable DnD in WebView. */
   .drag-overlay {
     position: absolute;
     inset: 0;
     z-index: 5;
     cursor: grab;
+    pointer-events: none;
   }
 
   .drag-overlay:active {
@@ -351,10 +582,6 @@
     height: 3px;
   }
 
-  .widget-content {
-    /* pass-through, no layout interference */
-  }
-
   .drag-handle {
     position: absolute;
     top: -0.3vmin;
@@ -371,5 +598,23 @@
     top: 50%;
     left: -1.5vmin;
     transform: translateY(-50%) rotate(90deg);
+  }
+
+  .drag-ghost {
+    position: fixed;
+    pointer-events: none;
+    z-index: 1000;
+    border: 1px solid rgba(55, 168, 219, 0.75);
+    border-radius: 8px;
+    background: rgba(30, 30, 30, 0.48);
+    backdrop-filter: blur(4px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
   }
 </style>

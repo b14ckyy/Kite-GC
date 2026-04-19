@@ -47,14 +47,14 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
     background: rgba(30, 30, 30, 0.75);
     backdrop-filter: blur(10px);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: calc(var(--ws) * 0.08);
     gap: calc(var(--ws) * 0.03);
     box-sizing: border-box;
-    padding: calc(var(--ws) * 0.04);
+    padding: calc(var(--ws) * 0.05) calc(var(--ws) * 0.05) calc(var(--ws) * 0.04);
   }
   .w-label {
     font-size: calc(var(--ws) * 0.13);
@@ -71,6 +71,7 @@
     text-transform: uppercase;
     letter-spacing: 0.03em;
     white-space: nowrap;
+    margin-top: calc(var(--ws) * 0.015);
   }
   .w-mods {
     display: flex;
@@ -87,6 +88,7 @@
     border-radius: calc(var(--ws) * 0.02);
   }
   .w-flags {
+    margin-top: auto;
     font-size: calc(var(--ws) * 0.09);
     font-family: monospace;
     color: #666;
