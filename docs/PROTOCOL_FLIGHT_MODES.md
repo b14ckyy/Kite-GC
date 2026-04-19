@@ -34,11 +34,17 @@ How different autopilot stacks report flight modes via telemetry. This document 
 
 **Classification**: Priority-based — highest matching flag wins. See `classifyFlightMode()` in `trackColors.ts`.
 
-**Key property**: Flags combine — e.g. `ANGLE | NAV_ALTHOLD = 9` means "Level + AltHold". A single integer can mean multiple things simultaneously. This is fundamentally different from ArduPilot.
+**Key property**: Flags combine — e.g. `ANGLE | NAV_ALTHOLD = 9` means primary mode `ANGLE` with `ALT` as modifier. A single integer can mean multiple things simultaneously. This is fundamentally different from ArduPilot.
 
 **DB column**: `telemetry_records.active_flight_mode_flags` (INTEGER, nullable)
 
-**Live MSP**: `MSPV2_INAV_STATUS` payload contains the active mode bitmask, but parsing is currently **TODO** in `telemetry.rs` — only populated via Blackbox import.
+**Live MSP**: `MSPV2_INAV_STATUS` parsing is implemented in `scheduler/telemetry.rs`.
+
+Important details for correct live decoding:
+- INAV `activeModes` is **index-based**, not permanent box-ID based.
+- Index→box-id mapping is queried once on connect via `MSP_BOXIDS` (119).
+- During decode, bit index → permanent box ID → runtime mode flag mapping.
+- INAV implicit ANGLE behavior is mirrored: nav modes without explicit stabilization force ANGLE.
 
 ---
 

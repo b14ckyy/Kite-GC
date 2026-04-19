@@ -107,6 +107,7 @@ Color-coded flight tracks on the map based on flight mode, altitude, speed, or s
 - Track color dropdown in **LogPlayer** (replay control panel)
 - Options: Flight Mode | Altitude | Speed | Signal | None
 - Default: Flight Mode
+- For linked flights (`source: both`), replay source can switch between **REC** (live DB track) and **BBX** (linked blackbox track)
 
 ### Live Monitoring (MSP/MAVLink)
 - Trail always colored by **flight mode** (no selection)
@@ -132,7 +133,7 @@ Color-coded flight tracks on the map based on flight mode, altitude, speed, or s
 | **S6** | Gradient track modes (altitude, speed, signal) | S4, S5 | ✅ Done |
 | **S7** | UAV icon coloring by nav state | S2 | ✅ Done |
 | **S8** | LogPlayer dropdown + legend | S4, S6 | ✅ Done |
-| **S9** | i18n for all labels (mode names, UI elements) | S8 | ❌ Dropped (labels stay English) |
+| **S9** | i18n for all labels (mode names, UI elements) | S8 | ❌ Dropped for mode labels (mode names stay English) |
 | **S10** | Live trail in flight mode colors | S1, S4 | ✅ Done |
 
 ## 7. Performance Considerations

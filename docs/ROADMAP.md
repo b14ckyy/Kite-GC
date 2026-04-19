@@ -289,7 +289,7 @@ This document tracks planned features, organized by milestone.
 - [ ] Type-specific UAV symbols on map during replay (per platform type)
 - [x] Flight path replay through HUD widgets (all widgets receive telemetry during playback)
 - [x] Delete flight records
-- [x] Search/filter by aircraft name, location, date (frontend-only text filter)
+- [x] Search/filter by aircraft name, location, date, notes (frontend-only text filter)
 - [x] Ctrl+click multi-select for bulk operations
 
 ### Blackbox Integration
@@ -321,7 +321,7 @@ This document tracks planned features, organized by milestone.
 - [x] Settings: auto-detect `blackbox_decode` in app folder, fallback to PATH
 - [x] Invoke `blackbox_decode --merge-gps --datetime --unit-height m --unit-gps-speed mps --stdout <file>` as child process
 - [x] Parse CSV stdout in Rust — O(1) field access via pre-built `HashMap<String, usize>` index + `ColumnIndices` struct
-- [x] Downsample to ≤ 10 Hz using `H looptime:` + `H P interval:` from raw header (e.g. 500 Hz → 1 in 50 rows)
+- [x] Downsample to ≤ 10 Hz using time-based sampling (100ms interval)
 - [x] Store parsed rows as raw comma-joined CSV in `blackbox_records` table (no JSON overhead)
 - [x] Archive original .TXT as BLOB in `blackbox_files` table
 - [x] Heading in decidegrees auto-detected (> 360 → ÷ 10); priority: `heading` → `GPS_ground_course`
@@ -353,10 +353,11 @@ This document tracks planned features, organized by milestone.
 - [x] 7 extracted components: LogPlayer, LogbookPanel, SettingsPanel, Toolbar, UavInfoPanel, StatusBar, NavRail
 
 ### Attach to Existing Flight
-- [ ] "Attach Blackbox" button in flight detail view
-- [ ] Link Blackbox data to existing live-recorded flight
-- [ ] Flight marked as `source: "both"`
-- [ ] Playback UI toggle: MSP telemetry vs Blackbox data
+- [x] Link Blackbox import to matching live-recorded flight (link dialog)
+- [x] Flight marked as `source: "both"`
+- [x] Playback UI source toggle: REC telemetry vs linked BBX track
+- [x] `.kflight` export auto-includes linked partner flights
+- [x] `.kflight` import restores linked relationships (including mixed import/duplicate-skip cases)
 
 ### Colored Flight Tracks & Mode Visualization
 - [x] `trackColors.ts` helper: `TrackColorMode`, `FlightModeInfo`, `classifyFlightMode()`, gradient functions
@@ -372,9 +373,11 @@ This document tracks planned features, organized by milestone.
 - [x] Live trail colored by flight mode (multi-segment polylines)
 - [x] Alerts settings group with `warnAltitude` (default 120 m)
 - [x] Protocol reference doc: `PROTOCOL_FLIGHT_MODES.md` (INAV vs ArduPilot)
-- [ ] Live MSP: parse `flight_mode_flags` from `MSPV2_INAV_STATUS` payload (currently TODO)
+- [x] Live MSP: parse `flight_mode_flags` from `MSPV2_INAV_STATUS` payload
+- [x] Live MSP mode decode uses `MSP_BOXIDS` index→box-id mapping
+- [x] Live MSP mode decode mirrors INAV implicit ANGLE behavior for nav modes
 
-### DB Schema (current: v5)
+### DB Schema (current: v6)
 - [x] `blackbox_records` table: `flight_id`, `timestamp_us`, `csv_data` (raw CSV TEXT) — schema v2
 - [x] `blackbox_files` table: `flight_id`, `original_filename`, `log_index`, `file_data` (BLOB), `file_size`, `imported_at` — schema v2
 - [x] `flights.source` column: `live` | `blackbox` | `both` — schema v2
@@ -382,6 +385,7 @@ This document tracks planned features, organized by milestone.
 - [x] Migration v1 → v2, v2 → v3 (incremental, backward compatible)
 - [x] Schema v4: replay-focused telemetry fields (`baro_alt_m`, GPS quality, active flight modes, state flags, nav state, wind, RC arrays, sensor health)
 - [x] Schema v5: `flights.craft_name` column (user-editable, separate from FC-reported name)
+- [x] Schema v6: `flights.linked_flight_id` for live↔blackbox pairing
 - [ ] Milestone 4: decode Blackbox header `features` into a human-readable feature decode
 
 ### Settings & UI Enhancements
@@ -508,4 +512,4 @@ This document tracks planned features, organized by milestone.
 
 ---
 
-*Last updated: 2026-04-21*
+*Last updated: 2026-04-19*

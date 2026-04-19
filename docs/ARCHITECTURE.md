@@ -181,6 +181,11 @@ Tauri Events → Frontend (telemetry-attitude, telemetry-gps, ...)
 - No link type detection needed: USB-connected wireless devices (SiK, mLRS, ELRS backpack) are handled correctly
 - Next poll scheduled at `last_reply_time + interval` — if the link is too slow, all groups slow down proportionally, with priority determining who slows first
 
+**Mode decoding detail (INAV)**:
+- Scheduler queries `MSP_BOXIDS` (119) once at startup.
+- `MSPV2_INAV_STATUS.activeModes` bits are decoded with this index→box-id map.
+- This avoids false mode detection caused by treating activeModes bits as permanent box IDs.
+
 **Optional modules**: Airspeed polling is toggleable (`airspeed_enabled`). Future optional modules follow the same pattern — disabled by default, enabled via settings.
 
 **Rationale**:
@@ -225,7 +230,7 @@ Tauri Events → Frontend (telemetry-attitude, telemetry-gps, ...)
 
 **Context**: `+page.svelte` had grown to ~2846 lines — mixing connection logic, logbook operations, playback state, widget management, and UI rendering. This made the file difficult to navigate and modify.
 
-**Decision**: Extract domain logic into 4 controllers, 1 adapter, 1 helper module, and 7 extracted UI components. `+page.svelte` is reduced to a thin orchestrator (~935 lines) that imports and wires these modules.
+**Decision**: Extract domain logic into 4 controllers, 1 adapter, 1 helper module, and multiple extracted UI components (including shared dialog). `+page.svelte` is reduced to a thin orchestrator (~1100 lines) that imports and wires these modules.
 
 **Extracted modules**:
 
@@ -239,6 +244,7 @@ Tauri Events → Frontend (telemetry-attitude, telemetry-gps, ...)
 | `helpers/telemetry.ts` | Helper | `isArmed()`, `hasKnownLocation()`, `isValidGpsCoordinate()` |
 | `LogPlayer.svelte` | Component | Playback controls UI (play/pause/reset, scrubber, speed selector) |
 | `LogbookPanel.svelte` | Component | Flight list, detail view, import/weather/notes UI |
+| `ConfirmDialog.svelte` | Component | Promise-based in-app dialog used for confirm/info workflows |
 | `SettingsPanel.svelte` | Component | All settings sections |
 | `Toolbar.svelte` | Component | Logo, sensor bar, port selector, connect button |
 | `UavInfoPanel.svelte` | Component | FC info, feature gates, craft name |
