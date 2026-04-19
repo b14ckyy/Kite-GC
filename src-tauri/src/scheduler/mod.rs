@@ -165,6 +165,21 @@ fn scheduler_loop(
 ) -> Option<Box<dyn Transport>> {
     let mut slots = build_slots(&config);
 
+    // Query MSP_BOXIDS once at startup to get the index→permanent_id mapping.
+    // INAV's activeModes bitmask uses INDEX-based packing, not permanent box IDs.
+    // Without this mapping, we can't correctly decode which modes are active.
+    let box_ids: Vec<u8> = match transport.msp_request(crate::msp::MSP_BOXIDS, &[]) {
+        Ok(msg) => {
+            eprintln!("[MSP-BOXIDS] Received {} box IDs: {:?}", msg.payload.len(), msg.payload);
+            msg.payload
+        }
+        Err(e) => {
+            log::warn!("Failed to query MSP_BOXIDS: {} — flight mode detection may be inaccurate", e);
+            eprintln!("[MSP-BOXIDS] Query FAILED: {} — using empty mapping", e);
+            Vec::new()
+        }
+    };
+
     // Debug tracker for MSP communication stats (no-op in release builds)
     let mut debug_tracker = {
         let polling_codes: Vec<(u16, f64)> = slots.iter()
@@ -236,7 +251,7 @@ fn scheduler_loop(
             .map(|(i, _, _)| i);
 
         if let Some(idx) = most_overdue {
-            poll_slot(&mut *transport, &mut slots[idx], &app_handle, &mut debug_tracker, &recorder);
+            poll_slot(&mut *transport, &mut slots[idx], &app_handle, &mut debug_tracker, &recorder, &box_ids);
             debug_tracker.maybe_emit(&app_handle);
             continue;
         }
@@ -336,6 +351,7 @@ fn poll_slot(
     app_handle: &AppHandle,
     tracker: &mut debug::DebugTracker,
     recorder: &Option<FlightRecorderHandle>,
+    box_ids: &[u8],
 ) {
     // Mark poll time BEFORE the request — the interval measures request-to-request,
     // not reply-to-request. This prevents reply latency from artificially slowing
@@ -359,12 +375,12 @@ fn poll_slot(
             Ok(msg) => {
                 tracker.on_response(code, 9 + msg.payload.len());
                 let event_name = telemetry::event_name_for_code(code);
-                let payload = telemetry::decode_telemetry(code, &msg.payload);
+                let payload = telemetry::decode_telemetry(code, &msg.payload, box_ids);
 
                 // Feed to flight recorder if present
                 if let Some(ref rec) = recorder {
                     if let Ok(mut r) = rec.lock() {
-                        telemetry::feed_recorder(code, &msg.payload, &mut r);
+                        telemetry::feed_recorder(code, &msg.payload, &mut r, box_ids);
                     }
                 }
 

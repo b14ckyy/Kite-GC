@@ -85,13 +85,12 @@ const MODES: { test: (f: number) => boolean; info: FlightModeInfo }[] = [
     info: { id: 'cruise', label: 'Cruise', color: '#ff8c00', i18nKey: 'flightmode.cruise' },
   },
   {
-    test: (f) =>
-      !!(f & (FLIGHT_MODE.ANGLE | FLIGHT_MODE.HORIZON)) && !!(f & FLIGHT_MODE.NAV_ALTHOLD),
-    info: { id: 'level_althold', label: 'Level + AltHold', color: '#e8c820', i18nKey: 'flightmode.level_althold' },
+    test: (f) => !!(f & FLIGHT_MODE.ANGLE),
+    info: { id: 'angle', label: 'Angle', color: '#59aa29', i18nKey: 'flightmode.angle' },
   },
   {
-    test: (f) => !!(f & (FLIGHT_MODE.ANGLE | FLIGHT_MODE.HORIZON)),
-    info: { id: 'level', label: 'Level', color: '#59aa29', i18nKey: 'flightmode.level' },
+    test: (f) => !!(f & FLIGHT_MODE.HORIZON),
+    info: { id: 'horizon', label: 'Horizon', color: '#59aa29', i18nKey: 'flightmode.horizon' },
   },
   {
     test: (f) => !!(f & FLIGHT_MODE.MANUAL),

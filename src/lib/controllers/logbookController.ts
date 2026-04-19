@@ -10,6 +10,8 @@ import {
   fetchFlightWeather,
   importBlackboxLog,
   importArdupilotLog,
+  linkFlights as linkFlightsStore,
+  unlinkFlight as unlinkFlightStore,
   exportFlights,
   exportBlackboxFile,
   exportTrackFile,
@@ -133,6 +135,14 @@ export async function removeFlight(
   return deleteFlight(flightId, dbPath);
 }
 
+/** Load the track for a linked partner flight. */
+export async function getPartnerTrack(
+  flightId: number,
+  dbPath: string,
+): Promise<TelemetryRecord[]> {
+  return getFlightTrack(flightId, dbPath);
+}
+
 /**
  * Import a blackbox log file. Returns the raw result from the backend
  * (may be 'success' or 'duplicate' — caller handles the UI confirmation).
@@ -192,4 +202,21 @@ export async function exportTrack(
   dbPath: string,
 ): Promise<void> {
   return exportTrackFile(flightId, outputPath, dbPath);
+}
+
+/** Link two flights together (live ↔ blackbox). */
+export async function linkFlights(
+  flightA: number,
+  flightB: number,
+  dbPath: string,
+): Promise<void> {
+  return linkFlightsStore(flightA, flightB, dbPath);
+}
+
+/** Remove the link between a flight and its partner. */
+export async function unlinkFlight(
+  flightId: number,
+  dbPath: string,
+): Promise<void> {
+  return unlinkFlightStore(flightId, dbPath);
 }

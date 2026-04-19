@@ -266,7 +266,7 @@ pub async fn flightlog_import_blackbox(
     .map_err(|e| format!("Blackbox import task failed: {}", e))??;
 
     // Only enrich imported Blackbox flights immediately with location if import was successful
-    if let BlackboxImportStatus::Success { flight_id, .. } = &result {
+    if let BlackboxImportStatus::Success { flight_id, rows_imported } = &result {
         let conn = open_db(&db_path)?;
         if let Some(flight) = db::get_flight(&conn, *flight_id)
             .map_err(|e| format!("Query error: {}", e))?
@@ -281,6 +281,16 @@ pub async fn flightlog_import_blackbox(
                         .map_err(|e| format!("Update error: {}", e))?;
                     }
                 }
+            }
+
+            // Check if a linkable live flight exists (same craft, ±60s)
+            if let Ok(Some(linkable)) = db::find_linkable_live_flight(&conn, &flight.craft_name, flight.start_time) {
+                eprintln!("[LINK-AUTO] Found linkable live flight {} for blackbox import {}", linkable.id, flight_id);
+                return Ok(BlackboxImportStatus::SuccessLinkable {
+                    flight_id: *flight_id,
+                    rows_imported: *rows_imported,
+                    linkable_flight_id: linkable.id,
+                });
             }
         }
     }
@@ -481,7 +491,7 @@ pub async fn flightlog_import_ardupilot(
     .map_err(|e| format!("ArduPilot import task failed: {}", e))??;
 
     // Auto-geocode on successful import
-    if let BlackboxImportStatus::Success { flight_id, .. } = &result {
+    if let BlackboxImportStatus::Success { flight_id, rows_imported } = &result {
         let conn = open_db(&db_path)?;
         if let Some(flight) = db::get_flight(&conn, *flight_id)
             .map_err(|e| format!("Query error: {}", e))?
@@ -500,8 +510,57 @@ pub async fn flightlog_import_ardupilot(
                     }
                 }
             }
+
+            // Check if a linkable live flight exists (same craft, ±60s)
+            if let Ok(Some(linkable)) = db::find_linkable_live_flight(&conn, &flight.craft_name, flight.start_time) {
+                eprintln!("[LINK-AUTO] Found linkable live flight {} for ArduPilot import {}", linkable.id, flight_id);
+                return Ok(BlackboxImportStatus::SuccessLinkable {
+                    flight_id: *flight_id,
+                    rows_imported: *rows_imported,
+                    linkable_flight_id: linkable.id,
+                });
+            }
         }
     }
 
     Ok(result)
+}
+
+// --- Flight Linking Commands -------------------------------------------------
+
+/// Link two flights together (live recording ? blackbox import).
+/// Both flights get `linked_flight_id` pointing at each other, source becomes "both".
+#[tauri::command]
+pub fn flightlog_link_flights(
+    flight_a: i64,
+    flight_b: i64,
+    db_path: Option<String>,
+) -> Result<(), String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::link_flights(&conn, flight_a, flight_b).map_err(|e| format!("Link error: {}", e))
+}
+
+/// Remove the link between two flights. Resets source to "live" or "blackbox".
+#[tauri::command]
+pub fn flightlog_unlink_flight(
+    flight_id: i64,
+    db_path: Option<String>,
+) -> Result<(), String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::unlink_flight(&conn, flight_id).map_err(|e| format!("Unlink error: {}", e))
+}
+
+/// Find a live flight that could be auto-linked to a blackbox import.
+#[tauri::command]
+pub fn flightlog_find_linkable(
+    craft_name: String,
+    start_time: String,
+    db_path: Option<String>,
+) -> Result<Option<FlightSummary>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    let dt = chrono::DateTime::parse_from_rfc3339(&start_time)
+        .map(|t| t.with_timezone(&chrono::Utc))
+        .map_err(|e| format!("Invalid timestamp: {}", e))?;
+    db::find_linkable_live_flight(&conn, &craft_name, dt)
+        .map_err(|e| format!("Query error: {}", e))
 }

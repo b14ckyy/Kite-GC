@@ -3,6 +3,7 @@
 // main flights database, containing one or more flights with all their data:
 // metadata, telemetry records, blackbox records, and archived blackbox files.
 
+use std::fmt::Write;
 use std::path::Path;
 
 use rusqlite::{params, Connection};
@@ -11,7 +12,7 @@ use super::db;
 use super::types::{Flight, FlightSummary, TelemetryRecord};
 
 /// Schema version stored in exported .kflight files
-const KFLIGHT_SCHEMA_VERSION: u32 = 1;
+const KFLIGHT_SCHEMA_VERSION: u32 = 2;
 
 /// Application identifier stored in the export header
 const KFLIGHT_APP_ID: &str = "KiteGC";
@@ -38,13 +39,40 @@ pub fn export_flights(
     // Create the export database with full schema
     let out = create_export_db(output_path)?;
 
-    // Copy each flight
+    // Copy each flight, tracking old→new ID mapping for linked_flight_id remapping
     let mut exported = 0;
+    let mut id_map: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
+    let mut exported_flights: Vec<Flight> = Vec::new();
     for &flight_id in flight_ids {
         match copy_flight(source_conn, &out, flight_id) {
-            Ok(_) => exported += 1,
+            Ok(new_id) => {
+                id_map.insert(flight_id, new_id);
+                exported += 1;
+                if let Ok(Some(flight)) = db::get_flight(source_conn, flight_id) {
+                    exported_flights.push(flight);
+                }
+            }
             Err(e) => {
                 log::warn!("Failed to export flight {}: {}", flight_id, e);
+            }
+        }
+    }
+
+    // Remap linked_flight_id references using the old→new ID mapping
+    for (&old_id, &new_id) in &id_map {
+        let old_linked: Option<i64> = source_conn
+            .query_row(
+                "SELECT linked_flight_id FROM flights WHERE id = ?1",
+                params![old_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(None);
+        if let Some(old_linked_id) = old_linked {
+            if let Some(&new_linked_id) = id_map.get(&old_linked_id) {
+                out.execute(
+                    "UPDATE flights SET linked_flight_id = ?1 WHERE id = ?2",
+                    params![new_linked_id, new_id],
+                ).ok();
             }
         }
     }
@@ -71,12 +99,76 @@ pub fn export_flights(
     out.execute_batch("VACUUM;")
         .map_err(|e| format!("VACUUM failed: {}", e))?;
 
+    // Export a human-readable summary sidecar next to the .kflight file.
+    // Example: flights_export.kflight -> flights_export.txt
+    write_export_info_sidecar(output_path, &exported_flights)?;
+
     log::info!(
         "Exported {} flight(s) to {}",
         exported,
         output_path.display()
     );
     Ok(exported)
+}
+
+fn write_export_info_sidecar(output_path: &Path, flights: &[Flight]) -> Result<(), String> {
+    let txt_path = output_path.with_extension("txt");
+    let mut text = String::new();
+
+    writeln!(&mut text, "KiteGC Flight Export Info").ok();
+    writeln!(&mut text, "=======================").ok();
+    writeln!(&mut text, "Export file: {}", output_path.display()).ok();
+    writeln!(&mut text, "Exported at (UTC): {}", chrono::Utc::now().to_rfc3339()).ok();
+    writeln!(&mut text, "Flight count: {}", flights.len()).ok();
+    writeln!(&mut text).ok();
+
+    for (idx, f) in flights.iter().enumerate() {
+        writeln!(&mut text, "[Flight {}]", idx + 1).ok();
+        writeln!(&mut text, "ID: {}", f.id).ok();
+        writeln!(&mut text, "Start: {}", f.start_time.to_rfc3339()).ok();
+        writeln!(
+            &mut text,
+            "End: {}",
+            f.end_time
+                .map(|t| t.to_rfc3339())
+                .unwrap_or_else(|| "-".to_string())
+        )
+        .ok();
+        writeln!(&mut text, "Duration sec: {}", f.duration_sec.map(|v| v.to_string()).unwrap_or_else(|| "-".to_string())).ok();
+        writeln!(&mut text, "Source: {}", f.source).ok();
+        writeln!(&mut text, "Craft: {}", f.craft_name).ok();
+        writeln!(&mut text, "FC: {} {}", f.fc_variant, f.fc_version).ok();
+        writeln!(&mut text, "Board: {}", f.board_id).ok();
+        writeln!(&mut text, "Location: {}", f.location_name.clone().unwrap_or_else(|| "-".to_string())).ok();
+        writeln!(&mut text, "Max alt m: {}", f.max_alt_m.map(|v| format!("{:.2}", v)).unwrap_or_else(|| "-".to_string())).ok();
+        writeln!(&mut text, "Max speed m/s: {}", f.max_speed_ms.map(|v| format!("{:.2}", v)).unwrap_or_else(|| "-".to_string())).ok();
+        writeln!(&mut text, "Total distance m: {}", f.total_distance_m.map(|v| format!("{:.2}", v)).unwrap_or_else(|| "-".to_string())).ok();
+        writeln!(
+            &mut text,
+            "Weather: temp={} wind={} wind_deg={} desc={}",
+            f.weather_temp_c.map(|v| format!("{:.1}", v)).unwrap_or_else(|| "-".to_string()),
+            f.weather_wind_ms.map(|v| format!("{:.1}", v)).unwrap_or_else(|| "-".to_string()),
+            f.weather_wind_deg.map(|v| v.to_string()).unwrap_or_else(|| "-".to_string()),
+            f.weather_desc.clone().unwrap_or_else(|| "-".to_string())
+        )
+        .ok();
+        writeln!(&mut text, "Linked flight ID: {}", f.linked_flight_id.map(|v| v.to_string()).unwrap_or_else(|| "-".to_string())).ok();
+        writeln!(&mut text, "Notes:").ok();
+        writeln!(
+            &mut text,
+            "{}",
+            f.notes
+                .clone()
+                .filter(|n| !n.trim().is_empty())
+                .unwrap_or_else(|| "-".to_string())
+        )
+        .ok();
+        writeln!(&mut text).ok();
+    }
+
+    std::fs::write(&txt_path, text)
+        .map_err(|e| format!("Failed to write export info TXT '{}': {}", txt_path.display(), e))?;
+    Ok(())
 }
 
 /// Create a new SQLite database with the full flight log schema.
@@ -94,7 +186,7 @@ fn create_export_db(path: &Path) -> Result<Connection, String> {
     )
     .map_err(|e| format!("Pragma error: {}", e))?;
 
-    // Create all tables matching the main DB schema (v4)
+    // Create all tables matching the main DB schema (v6)
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS flights (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -120,7 +212,8 @@ fn create_export_db(path: &Path) -> Result<Connection, String> {
             max_distance_m  REAL,
             total_distance_m REAL,
             battery_used_mah INTEGER,
-            notes           TEXT
+            notes           TEXT,
+            linked_flight_id INTEGER REFERENCES flights(id)
         );
 
         CREATE TABLE IF NOT EXISTS telemetry_records (
@@ -352,7 +445,7 @@ pub fn import_flights(
         .map_err(|e| format!("Failed to open .kflight file: {}", e))?;
 
     // Verify it's a valid kflight file
-    let has_meta: bool = src
+    let _has_meta: bool = src
         .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='_kflight_meta'")
         .and_then(|mut s| s.exists([]))
         .unwrap_or(false);
@@ -370,6 +463,15 @@ pub fn import_flights(
     let src_flights = db::list_flights(&src)
         .map_err(|e| format!("Failed to list flights in .kflight: {}", e))?;
 
+    // Snapshot target flights BEFORE import starts.
+    // Duplicate detection must only compare against pre-existing flights,
+    // otherwise linked pairs inside the same .kflight will self-conflict.
+    let baseline_target_flights = db::list_flights(target_conn)
+        .map_err(|e| format!("Failed to list existing target flights: {}", e))?;
+
+    // old source ID -> target ID (newly imported OR matched existing duplicate)
+    let mut id_map: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
+
     let mut result = ImportResult {
         imported: 0,
         skipped: 0,
@@ -377,27 +479,60 @@ pub fn import_flights(
     };
 
     for summary in &src_flights {
-        // Check for duplicate
-        let is_dup = db::find_duplicate_flight(
-            target_conn,
-            &summary.craft_name,
-            summary.start_time,
-        )
-        .map_err(|e| format!("Duplicate check: {}", e))?
-        .is_some();
-
-        if is_dup {
+        // Check duplicate only against baseline target flights.
+        if let Some(existing_id) = find_duplicate_in_summaries(&baseline_target_flights, summary) {
             result.skipped += 1;
+            id_map.insert(summary.id, existing_id);
             log::info!("Import: skipping duplicate flight {} ({})", summary.id, summary.start_time);
             continue;
         }
 
         match copy_flight(&src, target_conn, summary.id) {
-            Ok(_) => result.imported += 1,
+            Ok(new_id) => {
+                result.imported += 1;
+                id_map.insert(summary.id, new_id);
+            }
             Err(e) => {
                 log::warn!("Import: failed to import flight {}: {}", summary.id, e);
                 result.errors.push(format!("Flight {}: {}", summary.id, e));
             }
+        }
+    }
+
+    // Restore linked relationships from source file using old->target ID mapping.
+    // This also supports mixed cases where one side was skipped as duplicate and
+    // mapped to an existing target flight.
+    let mut linked_pairs_done: std::collections::HashSet<(i64, i64)> = std::collections::HashSet::new();
+    for summary in &src_flights {
+        let Some(old_linked_id) = summary.linked_flight_id else {
+            continue;
+        };
+        let Some(&target_a) = id_map.get(&summary.id) else {
+            continue;
+        };
+        let Some(&target_b) = id_map.get(&old_linked_id) else {
+            continue;
+        };
+        if target_a == target_b {
+            continue;
+        }
+
+        let pair = if target_a < target_b {
+            (target_a, target_b)
+        } else {
+            (target_b, target_a)
+        };
+        if linked_pairs_done.contains(&pair) {
+            continue;
+        }
+
+        if let Err(e) = db::link_flights(target_conn, pair.0, pair.1) {
+            log::warn!("Import: failed to relink flights {} <-> {}: {}", pair.0, pair.1, e);
+            result
+                .errors
+                .push(format!("Relink {}<->{}: {}", pair.0, pair.1, e));
+        } else {
+            linked_pairs_done.insert(pair);
         }
     }
 
@@ -410,6 +545,25 @@ pub fn import_flights(
     );
 
     Ok(result)
+}
+
+fn find_duplicate_in_summaries(
+    baseline: &[FlightSummary],
+    incoming: &FlightSummary,
+) -> Option<i64> {
+    let lower = incoming.start_time - chrono::Duration::seconds(10);
+    let upper = incoming.start_time + chrono::Duration::seconds(10);
+
+    baseline
+        .iter()
+        // Keep behavior aligned with find_duplicate_flight(): only blackbox/both are duplicate sources.
+        .filter(|f| f.source == "blackbox" || f.source == "both")
+        .find(|f| {
+            f.craft_name == incoming.craft_name
+                && f.start_time >= lower
+                && f.start_time <= upper
+        })
+        .map(|f| f.id)
 }
 
 // ── Read from .kflight (for offline replay) ─────────────────────────

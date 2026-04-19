@@ -9,7 +9,7 @@ use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
 
 use super::types::{Flight, FlightSummary, TelemetryRecord};
 
-const CURRENT_SCHEMA_VERSION: u32 = 5;
+const CURRENT_SCHEMA_VERSION: u32 = 6;
 
 /// Open (or create) the flight log database at the given path.
 /// Runs migrations if needed.
@@ -105,6 +105,10 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
         migrate_v4_to_v5(conn)?;
     }
 
+    if current < 6 {
+        migrate_v5_to_v6(conn)?;
+    }
+
     Ok(())
 }
 
@@ -137,6 +141,14 @@ fn migrate_v4_to_v5(conn: &Connection) -> SqlResult<()> {
         "ALTER TABLE telemetry_records ADD COLUMN nav_lat REAL;
          ALTER TABLE telemetry_records ADD COLUMN nav_lon REAL;
          ALTER TABLE telemetry_records ADD COLUMN nav_alt_m REAL;",
+    )?;
+    set_user_version(conn, 5)?;
+    Ok(())
+}
+
+fn migrate_v5_to_v6(conn: &Connection) -> SqlResult<()> {
+    conn.execute_batch(
+        "ALTER TABLE flights ADD COLUMN linked_flight_id INTEGER REFERENCES flights(id);",
     )?;
     set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
     Ok(())
@@ -412,7 +424,7 @@ pub fn insert_telemetry_batch(
 pub fn list_flights(conn: &Connection) -> SqlResult<Vec<FlightSummary>> {
     let mut stmt = conn.prepare(
         "SELECT id, start_time, duration_sec, source, craft_name, location_name,
-            max_alt_m, max_speed_ms, total_distance_m, platform_type
+            max_alt_m, max_speed_ms, total_distance_m, platform_type, linked_flight_id, notes
          FROM flights ORDER BY start_time DESC",
     )?;
 
@@ -433,6 +445,8 @@ pub fn list_flights(conn: &Connection) -> SqlResult<Vec<FlightSummary>> {
             max_speed_ms: row.get(7)?,
             total_distance_m: row.get(8)?,
             platform_type: row.get(9)?,
+            linked_flight_id: row.get(10)?,
+            notes: row.get(11)?,
         })
     })?;
 
@@ -447,7 +461,7 @@ pub fn get_flight(conn: &Connection, flight_id: i64) -> SqlResult<Option<Flight>
                 start_lat, start_lon, location_name,
                 weather_temp_c, weather_wind_ms, weather_wind_deg, weather_desc,
                 max_alt_m, max_speed_ms, max_distance_m, total_distance_m,
-                battery_used_mah, notes
+                battery_used_mah, notes, linked_flight_id
          FROM flights WHERE id = ?1",
     )?;
 
@@ -489,6 +503,7 @@ pub fn get_flight(conn: &Connection, flight_id: i64) -> SqlResult<Option<Flight>
             total_distance_m: row.get(21)?,
             battery_used_mah: row.get(22)?,
             notes: row.get(23)?,
+            linked_flight_id: row.get(24)?,
         })
     })?;
 
@@ -580,10 +595,12 @@ pub fn find_duplicate_flight(
     eprintln!("[DUP-DB] Query: craft_name={:?}, time_lower={}, time_upper={}", craft_name, time_lower, time_upper);
 
     // Step 1: Quick COUNT check — avoids full deserialization unless needed
+    // Only count blackbox-source flights as duplicates — live flights are linkable, not duplicates
     let count: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM flights
-             WHERE craft_name = ?1 AND start_time >= ?2 AND start_time <= ?3",
+             WHERE craft_name = ?1 AND start_time >= ?2 AND start_time <= ?3
+               AND source IN ('blackbox', 'both')",
             params![craft_name, time_lower, time_upper],
             |row| row.get(0),
         )
@@ -595,16 +612,17 @@ pub fn find_duplicate_flight(
         return Ok(None);
     }
 
-    // Step 2: Fetch the first matching flight
+    // Step 2: Fetch the first matching blackbox flight
     let flight = conn
         .query_row(
             "SELECT id, start_time, end_time, duration_sec, source, craft_name, 
                     fc_variant, fc_version, board_id, platform_type, protocol,
                     start_lat, start_lon, location_name, weather_temp_c, weather_wind_ms,
                     weather_wind_deg, weather_desc, max_alt_m, max_speed_ms, max_distance_m,
-                    total_distance_m, battery_used_mah, notes
+                    total_distance_m, battery_used_mah, notes, linked_flight_id
              FROM flights
              WHERE craft_name = ?1 AND start_time >= ?2 AND start_time <= ?3
+               AND source IN ('blackbox', 'both')
              ORDER BY id ASC LIMIT 1",
             params![craft_name, time_lower, time_upper],
             |row| {
@@ -643,6 +661,7 @@ pub fn find_duplicate_flight(
                     total_distance_m: row.get(21)?,
                     battery_used_mah: row.get(22)?,
                     notes: row.get(23)?,
+                    linked_flight_id: row.get(24)?,
                 })
             },
         )
@@ -654,6 +673,16 @@ pub fn find_duplicate_flight(
 /// Delete a flight and all related data (telemetry, blackbox records, archived files).
 /// Explicitly deletes child rows first (in case foreign_keys is off), then VACUUMs.
 pub fn delete_flight(conn: &Connection, flight_id: i64) -> SqlResult<bool> {
+    // Clear any linked_flight_id references pointing to this flight
+    conn.execute(
+        "UPDATE flights SET linked_flight_id = NULL, source = CASE
+            WHEN (SELECT COUNT(*) FROM blackbox_records WHERE flight_id = flights.id) > 0 THEN 'blackbox'
+            ELSE 'live'
+         END
+         WHERE linked_flight_id = ?1",
+        params![flight_id],
+    )?;
+
     // Explicitly delete child tables (don't rely solely on CASCADE)
     conn.execute("DELETE FROM blackbox_files WHERE flight_id = ?1", params![flight_id])?;
     conn.execute("DELETE FROM blackbox_records WHERE flight_id = ?1", params![flight_id])?;
@@ -694,6 +723,111 @@ pub fn update_flight_craft_name(
     Ok(())
 }
 
+/// Link two flights together (bidirectional). Sets `linked_flight_id` on both
+/// and updates their `source` to "both".
+pub fn link_flights(conn: &Connection, flight_a: i64, flight_b: i64) -> SqlResult<()> {
+    eprintln!("[LINK] Linking flights {} <-> {}", flight_a, flight_b);
+    conn.execute(
+        "UPDATE flights SET linked_flight_id = ?1, source = 'both' WHERE id = ?2",
+        params![flight_b, flight_a],
+    )?;
+    conn.execute(
+        "UPDATE flights SET linked_flight_id = ?1, source = 'both' WHERE id = ?2",
+        params![flight_a, flight_b],
+    )?;
+    Ok(())
+}
+
+/// Remove the link from a flight and its partner. Resets source based on
+/// whether the flight has blackbox_records (→ "blackbox") or not (→ "live").
+pub fn unlink_flight(conn: &Connection, flight_id: i64) -> SqlResult<()> {
+    // Find the partner
+    let partner_id: Option<i64> = conn
+        .query_row(
+            "SELECT linked_flight_id FROM flights WHERE id = ?1",
+            params![flight_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten();
+
+    // Clear link on this flight and restore source
+    let has_bbx: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM blackbox_records WHERE flight_id = ?1",
+        params![flight_id],
+        |row| row.get(0),
+    )?;
+    let source = if has_bbx { "blackbox" } else { "live" };
+    conn.execute(
+        "UPDATE flights SET linked_flight_id = NULL, source = ?1 WHERE id = ?2",
+        params![source, flight_id],
+    )?;
+
+    // Clear link on partner (if exists)
+    if let Some(pid) = partner_id {
+        let partner_has_bbx: bool = conn.query_row(
+            "SELECT COUNT(*) > 0 FROM blackbox_records WHERE flight_id = ?1",
+            params![pid],
+            |row| row.get(0),
+        )?;
+        let partner_source = if partner_has_bbx { "blackbox" } else { "live" };
+        conn.execute(
+            "UPDATE flights SET linked_flight_id = NULL, source = ?1 WHERE id = ?2",
+            params![partner_source, pid],
+        )?;
+        eprintln!("[UNLINK] Unlinked flight {} (source={}) from {} (source={})", flight_id, source, pid, partner_source);
+    } else {
+        eprintln!("[UNLINK] Flight {} had no partner", flight_id);
+    }
+
+    Ok(())
+}
+
+/// Find a live flight that could be linked to a blackbox import.
+/// Matches on craft_name and overlapping time window (±60 seconds).
+pub fn find_linkable_live_flight(
+    conn: &Connection,
+    craft_name: &str,
+    start_time: DateTime<Utc>,
+) -> SqlResult<Option<FlightSummary>> {
+    let time_lower = (start_time - chrono::Duration::seconds(60)).to_rfc3339();
+    let time_upper = (start_time + chrono::Duration::seconds(60)).to_rfc3339();
+
+    let result = conn
+        .query_row(
+            "SELECT id, start_time, duration_sec, source, craft_name, location_name,
+                                        max_alt_m, max_speed_ms, total_distance_m, platform_type, linked_flight_id
+             FROM flights
+             WHERE source = 'live' AND linked_flight_id IS NULL
+               AND craft_name = ?1 AND start_time >= ?2 AND start_time <= ?3
+             ORDER BY id DESC LIMIT 1",
+            params![craft_name, time_lower, time_upper],
+            |row| {
+                let ts_str: String = row.get(1)?;
+                let st = DateTime::parse_from_rfc3339(&ts_str)
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .unwrap_or_else(|_| Utc::now());
+                Ok(FlightSummary {
+                    id: row.get(0)?,
+                    start_time: st,
+                    duration_sec: row.get(2)?,
+                    source: row.get(3)?,
+                    craft_name: row.get(4)?,
+                    location_name: row.get(5)?,
+                    max_alt_m: row.get(6)?,
+                    max_speed_ms: row.get(7)?,
+                    total_distance_m: row.get(8)?,
+                    platform_type: row.get(9)?,
+                    linked_flight_id: row.get(10)?,
+                    notes: None,
+                })
+            },
+        )
+        .optional()?;
+
+    Ok(result)
+}
+
 pub fn insert_blackbox_records(
     conn: &Connection,
     flight_id: i64,
@@ -715,6 +849,7 @@ pub fn insert_blackbox_records(
 }
 
 /// Retrieve the first blackbox file BLOB + original filename for a flight.
+/// Also checks the linked partner flight if no file is found directly.
 /// Returns None if no blackbox file is attached.
 pub fn get_blackbox_file(
     conn: &Connection,
@@ -728,7 +863,34 @@ pub fn get_blackbox_file(
             Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
         })
         .optional()?;
-    Ok(result)
+
+    if result.is_some() {
+        return Ok(result);
+    }
+
+    // Check linked partner flight
+    let linked_id: Option<i64> = conn
+        .query_row(
+            "SELECT linked_flight_id FROM flights WHERE id = ?1",
+            params![flight_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten();
+
+    if let Some(partner_id) = linked_id {
+        let partner_result = conn
+            .prepare(
+                "SELECT original_filename, file_data FROM blackbox_files WHERE flight_id = ?1 LIMIT 1",
+            )?
+            .query_row(params![partner_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+            })
+            .optional()?;
+        return Ok(partner_result);
+    }
+
+    Ok(None)
 }
 
 pub fn insert_blackbox_file(
@@ -805,6 +967,7 @@ mod tests {
             total_distance_m: None,
             battery_used_mah: None,
             notes: None,
+            linked_flight_id: None,
         };
         let id = insert_flight(&conn, &flight).unwrap();
         let loaded = get_flight(&conn, id).unwrap().unwrap();
@@ -841,6 +1004,7 @@ mod tests {
             total_distance_m: None,
             battery_used_mah: None,
             notes: None,
+            linked_flight_id: None,
         };
         let id = insert_flight(&conn, &flight).unwrap();
         finalize_flight(
@@ -896,6 +1060,7 @@ mod tests {
             total_distance_m: None,
             battery_used_mah: None,
             notes: None,
+            linked_flight_id: None,
         };
         let fid = insert_flight(&conn, &flight).unwrap();
 
@@ -979,6 +1144,7 @@ mod tests {
             total_distance_m: None,
             battery_used_mah: None,
             notes: None,
+            linked_flight_id: None,
         };
         let fid = insert_flight(&conn, &flight).unwrap();
         let rec = TelemetryRecord {
@@ -1060,6 +1226,7 @@ mod tests {
             total_distance_m: None,
             battery_used_mah: None,
             notes: None,
+            linked_flight_id: None,
         };
         let flight_id = insert_flight(&conn, &flight).unwrap();
         insert_blackbox_records(&conn, flight_id, &[(123_000, "{}".into())]).unwrap();

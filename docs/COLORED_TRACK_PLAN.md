@@ -39,14 +39,14 @@ Color-coded flight tracks on the map based on flight mode, altitude, speed, or s
 | 5 | `NAV_LAUNCH` | Launch | Magenta | `#e91e9c` |
 | 6 | `NAV_POSHOLD` | PosHold | Cyan | `#00bcd4` |
 | 7 | `NAV_COURSE_HOLD` (±`ALTHOLD`) | Cruise | Orange | `#ff8c00` |
-| 8 | (`ANGLE`\|`HORIZON`) + `ALTHOLD` | Level + AltHold | Yellow | `#e8c820` |
-| 9 | `ANGLE` \| `HORIZON` | Level | Green | `#59aa29` |
+| 8 | `ANGLE` | Angle | Green | `#59aa29` |
+| 9 | `HORIZON` | Horizon | Green | `#59aa29` |
 | 10 | `MANUAL` | Manual | Grey | `#808080` |
 | 11 | No relevant flags | Acro | Light grey | `#c0c0c0` |
 
-**Logic**: Highest matching priority wins. Cruise includes ALTHOLD intrinsically → ranked before Level+AltHold. PosHold also includes ALTHOLD → ranked before Cruise.
+**Logic**: Highest matching priority wins. Nav modes (PosHold, Cruise, RTH, WP, Launch) include ALTHOLD and ANGLE implicitly. PosHold ranked before Cruise because it also controls position.
 
-**Note**: NAV_ALTHOLD is only a modifier, never standalone. It's always combined with a leveling mode (Angle/Horizon) or included in nav modes (Cruise, PosHold, etc.).
+**Note**: NAV_ALTHOLD is only a modifier, never a standalone flight mode. It's shown as a modifier tag ("ALT") in the FlightModeWidget, not in the primary mode badge. ANGLE and HORIZON are separate stabilization modes but share the same track color (both are self-leveling).
 
 ## 3. Modules & Files
 

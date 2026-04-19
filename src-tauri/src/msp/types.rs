@@ -58,6 +58,7 @@ pub const MSP_GPSSTATISTICS: u16 = 166;
 pub const MSP_WP_MISSION_SAVE: u16 = 18;
 pub const MSP_WP_MISSION_LOAD: u16 = 19;
 pub const MSP_WP_GETINFO: u16 = 20;
+pub const MSP_BOXIDS: u16 = 119;
 pub const MSP_WP: u16 = 118;
 pub const MSP_NAV_STATUS: u16 = 121;
 pub const MSP_SET_WP: u16 = 209;

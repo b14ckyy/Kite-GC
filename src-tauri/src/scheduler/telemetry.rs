@@ -128,13 +128,13 @@ pub fn event_name_for_code(code: u16) -> String {
 }
 
 /// Decode a raw MSP payload into a structured telemetry event
-pub fn decode_telemetry(code: u16, payload: &[u8]) -> TelemetryPayload {
+pub fn decode_telemetry(code: u16, payload: &[u8], box_ids: &[u8]) -> TelemetryPayload {
     match code {
         MSP_ATTITUDE => decode_attitude(payload),
         MSP_RAW_GPS => decode_gps(payload),
         MSP_ALTITUDE => decode_altitude(payload),
         MSPV2_INAV_ANALOG => decode_analog(payload),
-        MSPV2_INAV_STATUS => decode_status(payload),
+        MSPV2_INAV_STATUS => decode_status(payload, box_ids),
         MSP_SENSOR_STATUS => decode_sensor_status(payload),
         MSPV2_INAV_AIR_SPEED => decode_airspeed(payload),
         _ => {
@@ -235,36 +235,43 @@ fn decode_analog(payload: &[u8]) -> TelemetryPayload {
 }
 
 /// Map INAV boxId_e values to our FLIGHT_MODE bitmask positions.
-/// Box IDs are from INAV `fc/rc_modes.h`, output bits match `trackColors.ts` FLIGHT_MODE.
+/// Box IDs are from INAV `fc/rc_modes.h` (master / 9.x),
+/// output bits match `runtime_config.h` flightModeFlags_e AND `trackColors.ts` FLIGHT_MODE.
 fn box_id_to_flight_mode_bit(box_id: usize) -> Option<u32> {
     match box_id {
-        1  => Some(1 << 0),   // BOXANGLE → ANGLE_MODE
-        2  => Some(1 << 1),   // BOXHORIZON → HORIZON_MODE
-        5  => Some(1 << 2),   // BOXHEADINGHOLD → HEADING_MODE
-        3  => Some(1 << 3),   // BOXNAVALTHOLD → NAV_ALTHOLD_MODE
-        10 => Some(1 << 4),   // BOXNAVRETURN → NAV_RTH_MODE
-        11 => Some(1 << 5),   // BOXNAVPOSHOLD → NAV_POSHOLD_MODE
-        6  => Some(1 << 6),   // BOXHEADFREE → HEADFREE_MODE
-        36 => Some(1 << 7),   // BOXNAVLAUNCH → NAV_LAUNCH_MODE
-        12 => Some(1 << 8),   // BOXPASSTHRU → MANUAL_MODE
-        27 => Some(1 << 9),   // BOXFAILSAFE → FAILSAFE_MODE
-        49 => Some(1 << 10),  // BOXAUTOTUNE → AUTO_TUNE
-        28 => Some(1 << 11),  // BOXNAVWP → NAV_WP_MODE
-        45 => Some(1 << 12),  // BOXNAVCRUISE → NAV_COURSE_HOLD
-        40 => Some(1 << 13),  // BOXFLAPERON → FLAPERON
-        47 => Some(1 << 14),  // BOXTURNASSIST → TURN_ASSISTANT
-        57 => Some(1 << 15),  // BOXTURTLE → TURTLE_MODE
-        56 => Some(1 << 16),  // BOXSOARING → SOARING_MODE
-        59 => Some(1 << 17),  // BOXANGLEHOLD → ANGLEHOLD_MODE
-        63 => Some(1 << 18),  // BOXNAVFWLANDING → NAV_FW_AUTOLAND
+        1  => Some(1 << 0),   // BOXANGLE       → ANGLE_MODE
+        2  => Some(1 << 1),   // BOXHORIZON     → HORIZON_MODE
+        4  => Some(1 << 2),   // BOXHEADINGHOLD → HEADING_MODE
+        3  => Some(1 << 3),   // BOXNAVALTHOLD  → NAV_ALTHOLD_MODE
+        8  => Some(1 << 4),   // BOXNAVRTH      → NAV_RTH_MODE
+        9  => Some(1 << 5),   // BOXNAVPOSHOLD  → NAV_POSHOLD_MODE
+        5  => Some(1 << 6),   // BOXHEADFREE    → HEADFREE_MODE
+        14 => Some(1 << 7),   // BOXNAVLAUNCH   → NAV_LAUNCH_MODE
+        10 => Some(1 << 8),   // BOXMANUAL      → MANUAL_MODE
+        18 => Some(1 << 9),   // BOXFAILSAFE    → FAILSAFE_MODE
+        28 => Some(1 << 10),  // BOXAUTOTUNE    → AUTO_TUNE
+        19 => Some(1 << 11),  // BOXNAVWP       → NAV_WP_MODE
+        35 => Some(1 << 12),  // BOXNAVCOURSEHOLD → NAV_COURSE_HOLD_MODE
+        25 => Some(1 << 13),  // BOXFLAPERON    → FLAPERON
+        26 => Some(1 << 14),  // BOXTURNASSIST  → TURN_ASSISTANT
+        43 => Some(1 << 15),  // BOXTURTLE      → TURTLE_MODE
+        47 => Some(1 << 16),  // BOXSOARING     → SOARING_MODE
+        55 => Some(1 << 17),  // BOXANGLEHOLD   → ANGLEHOLD_MODE
+        // BOXNAVCRUISE = 44 is cruise mode (speed+heading), maps to same bit as course hold for now
+        44 => Some(1 << 12),  // BOXNAVCRUISE   → NAV_COURSE_HOLD_MODE (shares display)
         _  => None,
     }
 }
 
 /// Parse the activeModes packed bitmask from MSPV2_INAV_STATUS payload
 /// and convert INAV box IDs to our FLIGHT_MODE bitmask.
+///
+/// IMPORTANT: INAV packs activeModes by INDEX into the configured box list,
+/// NOT by permanent box ID. We need the box_ids mapping from MSP_BOXIDS (119)
+/// to correctly translate bit positions → permanent IDs → flight mode flags.
+///
 /// Payload layout: [...13 bytes header...][activeModes bytes][mixerProfile:u8]
-fn parse_active_modes(payload: &[u8]) -> u32 {
+fn parse_active_modes(payload: &[u8], box_ids: &[u8]) -> u32 {
     if payload.len() < 15 {
         return 0; // Payload too short to contain activeModes
     }
@@ -273,27 +280,59 @@ fn parse_active_modes(payload: &[u8]) -> u32 {
     let modes_bytes = &payload[modes_start..modes_end];
 
     let mut flags: u32 = 0;
+    let mut active_box_ids: Vec<usize> = Vec::new();
     for (byte_idx, &byte) in modes_bytes.iter().enumerate() {
         for bit in 0..8usize {
             if byte & (1 << bit) != 0 {
-                let box_id = byte_idx * 8 + bit;
-                if let Some(flag) = box_id_to_flight_mode_bit(box_id) {
+                let bit_index = byte_idx * 8 + bit;
+                // Translate bit index → permanent box ID using the MSP_BOXIDS mapping
+                let permanent_id = if bit_index < box_ids.len() {
+                    box_ids[bit_index] as usize
+                } else {
+                    // Fallback: no mapping available, treat index as permanent ID
+                    bit_index
+                };
+                active_box_ids.push(permanent_id);
+                if let Some(flag) = box_id_to_flight_mode_bit(permanent_id) {
                     flags |= flag;
                 }
             }
         }
     }
+    eprintln!("[MSP-MODES] payload_len={}, modes_bytes={}, active_box_ids={:?}, flags=0x{:05X}",
+        payload.len(), modes_bytes.len(), active_box_ids, flags);
+
+    // Mirror INAV firmware logic from processRcModes():
+    // When a NAV mode (ALTHOLD, POSHOLD, RTH, WP, LAUNCH) is active but no explicit
+    // stabilization mode (ANGLE, HORIZON, MANUAL) was selected via RC switch,
+    // INAV implicitly enables ANGLE_MODE for safety.
+    const ANGLE: u32      = 1 << 0;
+    const HORIZON: u32    = 1 << 1;
+    const NAV_ALTHOLD: u32 = 1 << 3;
+    const NAV_RTH: u32    = 1 << 4;
+    const NAV_POSHOLD: u32 = 1 << 5;
+    const NAV_LAUNCH: u32 = 1 << 7;
+    const MANUAL: u32     = 1 << 8;
+    const NAV_WP: u32     = 1 << 11;
+
+    let has_nav = flags & (NAV_ALTHOLD | NAV_RTH | NAV_POSHOLD | NAV_LAUNCH | NAV_WP) != 0;
+    let has_stab = flags & (ANGLE | HORIZON | MANUAL) != 0;
+    if has_nav && !has_stab {
+        flags |= ANGLE;
+        eprintln!("[MSP-MODES] Implicit ANGLE from NAV mode, flags=0x{:05X}", flags);
+    }
+
     flags
 }
 
 /// MSPV2_INAV_STATUS (0x2000): comprehensive FC status
 /// Layout: [cycleTime:u16, i2cErrors:u16, sensorStatus:u16, cpuLoad:u16,
 ///          profileAndBattProfile:u8, armingFlags:u32, activeModes:..., mixerProfile:u8]
-fn decode_status(payload: &[u8]) -> TelemetryPayload {
+fn decode_status(payload: &[u8], box_ids: &[u8]) -> TelemetryPayload {
     let sensor_status = read_u16(payload, 4);
     let cpu_load = read_u16(payload, 6);
     let arming_flags = read_u32(payload, 9);
-    let flight_mode_flags = parse_active_modes(payload);
+    let flight_mode_flags = parse_active_modes(payload, box_ids);
 
     TelemetryPayload::Status(StatusData {
         arming_flags,
@@ -329,7 +368,7 @@ fn decode_airspeed(payload: &[u8]) -> TelemetryPayload {
 
 /// Feed decoded telemetry data to the flight recorder.
 /// Decodes the raw payload again (cheap) to pass typed data to the recorder.
-pub fn feed_recorder(code: u16, payload: &[u8], recorder: &mut FlightRecorder) {
+pub fn feed_recorder(code: u16, payload: &[u8], recorder: &mut FlightRecorder, box_ids: &[u8]) {
     match code {
         MSP_ATTITUDE => {
             let data = AttitudeData {
@@ -373,7 +412,7 @@ pub fn feed_recorder(code: u16, payload: &[u8], recorder: &mut FlightRecorder) {
         MSPV2_INAV_STATUS => {
             let data = StatusData {
                 arming_flags: read_u32(payload, 9),
-                flight_mode_flags: parse_active_modes(payload),
+                flight_mode_flags: parse_active_modes(payload, box_ids),
                 cpu_load: read_u16(payload, 6),
                 sensor_status: read_u16(payload, 4),
             };
@@ -401,7 +440,7 @@ mod tests {
             0x97, 0xFF, // -105 → -10.5°
             0x0E, 0x01, // 270
         ];
-        match decode_telemetry(MSP_ATTITUDE, &payload) {
+        match decode_telemetry(MSP_ATTITUDE, &payload, &[]) {
             TelemetryPayload::Attitude(a) => {
                 assert!((a.roll - 45.0).abs() < 0.01);
                 assert!((a.pitch - (-10.5)).abs() < 0.01);
@@ -421,7 +460,7 @@ mod tests {
         payload.extend_from_slice(&500u16.to_le_bytes());       // speed
         payload.extend_from_slice(&1800u16.to_le_bytes());      // cog
 
-        match decode_telemetry(MSP_RAW_GPS, &payload) {
+        match decode_telemetry(MSP_RAW_GPS, &payload, &[]) {
             TelemetryPayload::Gps(g) => {
                 assert_eq!(g.fix_type, 2);
                 assert_eq!(g.num_sat, 12);
@@ -442,7 +481,7 @@ mod tests {
         payload.extend_from_slice(&15000i32.to_le_bytes());
         payload.extend_from_slice(&250i16.to_le_bytes());
 
-        match decode_telemetry(MSP_ALTITUDE, &payload) {
+        match decode_telemetry(MSP_ALTITUDE, &payload, &[]) {
             TelemetryPayload::Altitude(a) => {
                 assert!((a.altitude - 150.0).abs() < 0.01);
                 assert!((a.vario - 2.5).abs() < 0.01);
@@ -484,7 +523,7 @@ mod tests {
         payload.push(90);                                       // percentageRemaining
         payload.extend_from_slice(&512u16.to_le_bytes());     // rssi
 
-        match decode_telemetry(MSPV2_INAV_ANALOG, &payload) {
+        match decode_telemetry(MSPV2_INAV_ANALOG, &payload, &[]) {
             TelemetryPayload::Analog(a) => {
                 assert!((a.voltage - 11.64).abs() < 0.01, "voltage: {}", a.voltage);
                 assert!((a.current - 19.94).abs() < 0.01, "current: {}", a.current);
@@ -509,7 +548,7 @@ mod tests {
         payload.push(0x00);                                    // profileAndBattProfile
         payload.extend_from_slice(&4u32.to_le_bytes());      // armingFlags (bit 2 = ARMED)
 
-        match decode_telemetry(MSPV2_INAV_STATUS, &payload) {
+        match decode_telemetry(MSPV2_INAV_STATUS, &payload, &[]) {
             TelemetryPayload::Status(s) => {
                 assert_eq!(s.cpu_load, 25);
                 assert_eq!(s.arming_flags, 4); // ARMED
@@ -533,7 +572,7 @@ mod tests {
             0, // pitot = NONE
             0, // opflow = NONE
         ];
-        match decode_telemetry(MSP_SENSOR_STATUS, &payload) {
+        match decode_telemetry(MSP_SENSOR_STATUS, &payload, &[]) {
             TelemetryPayload::SensorStatus(s) => {
                 assert_eq!(s.gyro, 1);
                 assert_eq!(s.acc, 1);

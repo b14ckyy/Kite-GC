@@ -144,6 +144,7 @@
     "weatherPartlyCloudy": "Partly Cloudy",
     "weatherOvercast": "Overcast",
     "weatherLightRain": "Light Rain",
+    "weatherModerateRain": "Moderate Rain",
     "weatherRain": "Rain",
     "weatherSnow": "Snow",
     "weatherFog": "Fog",
@@ -158,6 +159,8 @@
     "selectFlight": "Select a flight to view details",
     "duplicateTitle": "Duplicate Flight",
     "duplicateMessage": "Duplicate flight detected!\n\nAircraft: {craft}\nTime: {time}\n\nThis flight appears to match an existing entry.\nImport anyway?",
+    "linkableTitle": "Link Flights",
+    "linkableFound": "A matching live recording (Flight #{id}) was found.\n\nLink this blackbox import to the live recording?",
     "importProgress": "Blackbox import",
     "editWeather": "Edit weather",
     "editCraftName": "Edit craft name",
@@ -180,7 +183,17 @@
     "exportTitle": "Export Complete",
     "exportSuccess": "{count} flight(s) exported successfully.",
     "importKflightTitle": "Import Complete",
-    "importKflightResult": "Imported: {imported}, Skipped (duplicates): {skipped}"
+    "importKflightResult": "Imported: {imported}, Skipped (duplicates): {skipped}",
+    "deleteTitle": "Delete Flight",
+    "deleteWarning": "This action cannot be undone. Which data do you want to delete?",
+    "deleteLiveOnly": "Delete Live Record",
+    "deleteBlackboxOnly": "Delete Blackbox",
+    "deleteBoth": "Delete Both",
+    "importAnyway": "Import Anyway",
+    "linkYes": "Link"
+  },
+  "dialog": {
+    "cancel": "Cancel"
   },
   "player": {
     "close": "Close player",

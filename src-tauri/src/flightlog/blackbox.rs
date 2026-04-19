@@ -73,6 +73,7 @@ where
                 .to_string()
         });
     let start_time = resolve_start_time(&header, file_path);
+    eprintln!("[BBX-HEADER] craft={:?}, header_start_time={:?}, resolved_start_time={}", craft_name, header.start_time, start_time.to_rfc3339());
 
     // Early duplicate check based on header alone (before expensive decode)
     if !force_import {
@@ -111,13 +112,15 @@ where
     let csv_output = run_decoder_capture_stdout(&decoder, file_path, log_index)?;
 
     report(55, "parse", "Parsing decoded CSV...");
-    let rows = parse_csv_rows(&csv_output, &file_data)?;
+    let rows = parse_csv_rows(&csv_output)?;
     if rows.is_empty() {
         return Err("Blackbox import failed: decoder produced no rows".into());
     }
 
     let rows_imported = rows.len();
-    let duration_us = rows.last().map(|row| row.timestamp_us.max(0)).unwrap_or(0);
+    let first_us = rows.first().map(|row| row.timestamp_us).unwrap_or(0);
+    let last_us = rows.last().map(|row| row.timestamp_us).unwrap_or(0);
+    let duration_us = (last_us - first_us).max(0);
     let end_time = start_time + Duration::microseconds(duration_us);
     let duration_sec = Some((duration_us / 1_000_000).max(0));
 
@@ -176,6 +179,9 @@ where
         telemetry_rows.push(row.telemetry);
     }
 
+    eprintln!("[BBX-DISTANCE] total_distance_m={:.2}, max_distance_m={:.2}, start_lat={:?}, start_lon={:?}, prev_lat={:?}, prev_lon={:?}",
+        total_distance_m, max_distance_m, start_lat, start_lon, prev_lat, prev_lon);
+
     let flight = Flight {
         id: 0,
         start_time,
@@ -201,6 +207,7 @@ where
         total_distance_m: if total_distance_m > 0.0 { Some(total_distance_m) } else { None },
         battery_used_mah: max_mah,
         notes: Some(format!("Imported from {}", file_path.display())),
+        linked_flight_id: None,
     };
 
     report(72, "store-flight", "Creating logbook entry...");
@@ -278,18 +285,11 @@ fn build_decoder_command(decoder: &Path, file_path: &Path, log_index: Option<u32
     command
 }
 
-fn parse_csv_rows(csv_output: &str, file_data: &[u8]) -> Result<Vec<ParsedRow>, String> {
-    // --- determine target sample interval (10 Hz = 100 000 µs) ---
-    let target_interval_us: i64 = 100_000; // 10 Hz
-    let effective_interval_us = effective_log_interval_us(file_data);
-
-    // How many raw rows to skip between kept rows.
-    // If the log is already ≤ 10 Hz we keep every row (skip=1).
-    let keep_every: usize = if effective_interval_us > 0 {
-        ((target_interval_us / effective_interval_us).max(1)) as usize
-    } else {
-        1
-    };
+fn parse_csv_rows(csv_output: &str) -> Result<Vec<ParsedRow>, String> {
+    // Target 10 Hz output regardless of raw blackbox rate.
+    // Use time-based filtering (not row-count) because blackbox_decode --merge-gps
+    // may output at a different rate than the raw header suggests.
+    let target_interval_us: i64 = 100_000; // 10 Hz = 100ms
 
     let mut reader = csv::ReaderBuilder::new()
         .flexible(true)
@@ -303,22 +303,43 @@ fn parse_csv_rows(csv_output: &str, file_data: &[u8]) -> Result<Vec<ParsedRow>, 
     let index_map = build_index_map(&headers);
     let cols = ColumnIndices::from_map(&index_map);
 
+    // Debug: log resolved column indices for GPS
+    eprintln!("[BBX-COLS] lat={:?}, lon={:?}, alt={:?}, speed={:?}, time={:?}", cols.lat, cols.lon, cols.alt, cols.speed, cols.time);
+
     let mut rows = Vec::new();
     let mut raw_row_count: usize = 0;
+    let mut last_kept_us: i64 = i64::MIN;
+    let mut gps_debug_count: usize = 0;
 
     for record in reader.records() {
         let record = record.map_err(|e| format!("Failed to read Blackbox CSV row: {}", e))?;
         raw_row_count += 1;
 
-        // Downsample: keep first row always, then keep every Nth row.
-        if raw_row_count > 1 && (raw_row_count - 1) % keep_every != 0 {
+        // Extract timestamp cheaply for time-based downsampling decision
+        let timestamp_us = cols.time
+            .and_then(|i| record.get(i))
+            .and_then(|v| parse_loose_i64(v))
+            .unwrap_or(raw_row_count as i64);
+
+        // Keep first row always, then only if ≥ target_interval has elapsed
+        if !rows.is_empty() && (timestamp_us - last_kept_us) < target_interval_us {
             continue;
         }
+        last_kept_us = timestamp_us;
 
         // Store the raw CSV line (comma-joined) — cheap, no JSON serialization.
         let csv_data: String = record.iter().collect::<Vec<_>>().join(",");
 
         let telemetry = build_telemetry_record_indexed(&cols, &record, raw_row_count as i64);
+
+        // Debug: log first 5 GPS values to verify parsing
+        if gps_debug_count < 5 {
+            let raw_lat = cols.lat.and_then(|i| record.get(i)).unwrap_or("<none>");
+            let raw_lon = cols.lon.and_then(|i| record.get(i)).unwrap_or("<none>");
+            eprintln!("[BBX-GPS-DEBUG] row={} raw_lat={:?} raw_lon={:?} parsed_lat={:?} parsed_lon={:?}",
+                raw_row_count, raw_lat, raw_lon, telemetry.lat, telemetry.lon);
+            gps_debug_count += 1;
+        }
 
         let timestamp_us = telemetry.timestamp_ms * 1000;
         rows.push(ParsedRow {
@@ -326,6 +347,30 @@ fn parse_csv_rows(csv_output: &str, file_data: &[u8]) -> Result<Vec<ParsedRow>, 
             csv_data,
             telemetry,
         });
+    }
+
+    eprintln!("[BBX-DOWNSAMPLE] raw_rows={}, kept_rows={}", raw_row_count, rows.len());
+    if let (Some(first), Some(last)) = (rows.first(), rows.last()) {
+        let span_ms = (last.timestamp_us - first.timestamp_us) / 1000;
+        let rate_hz = if span_ms > 0 { rows.len() as f64 / (span_ms as f64 / 1000.0) } else { 0.0 };
+        eprintln!("[BBX-DOWNSAMPLE] time_span={}ms, effective_rate={:.1}Hz", span_ms, rate_hz);
+    }
+
+    // Count distinct GPS positions to diagnose distance=0
+    {
+        use std::collections::HashSet;
+        let mut distinct: HashSet<(i64, i64)> = HashSet::new();
+        let mut valid_gps_count = 0usize;
+        for r in &rows {
+            if let (Some(lat), Some(lon)) = (r.telemetry.lat, r.telemetry.lon) {
+                if is_valid_gps_coord(lat, lon) {
+                    valid_gps_count += 1;
+                    // Use integer representation (nanodegrees) for exact comparison
+                    distinct.insert(((lat * 1e9) as i64, (lon * 1e9) as i64));
+                }
+            }
+        }
+        eprintln!("[BBX-GPS-STATS] valid_gps_rows={}/{}, distinct_positions={}", valid_gps_count, rows.len(), distinct.len());
     }
 
     Ok(rows)
@@ -524,12 +569,17 @@ fn build_telemetry_record_indexed(
     let vario_ms = read_f64(cols.gps_vel_d, record).map(|v| -v / 100.0)
         .or_else(|| read_f64(cols.vario, record).map(|v| v / 100.0));
 
+    // INAV blackbox GPS coordinates are stored as degrees × 1e7 (e.g. 511234567 = 51.1234567°).
+    // Detect and convert: if |value| > 90 (lat) or > 180 (lon), it's raw integer format.
+    let lat = read_f64(cols.lat, record).map(|v| if v.abs() > 90.0 { v / 1e7 } else { v });
+    let lon = read_f64(cols.lon, record).map(|v| if v.abs() > 180.0 { v / 1e7 } else { v });
+
     TelemetryRecord {
         id: 0,
         flight_id: 0,
         timestamp_ms: timestamp_us / 1000,
-        lat: read_f64(cols.lat, record),
-        lon: read_f64(cols.lon, record),
+        lat,
+        lon,
         alt_m: alt,
         speed_ms: read_f64(cols.speed, record),
         heading,
@@ -577,39 +627,6 @@ fn build_telemetry_record_indexed(
 /// Parse `H looptime:<us>` and `H P interval:1/<N>` from the raw log file header,
 /// then compute the effective interval between logged samples in microseconds.
 ///
-/// Example: looptime=500µs, P interval=1/4  →  500 × 4 = 2000µs (500 Hz)
-fn effective_log_interval_us(file_data: &[u8]) -> i64 {
-    // Only inspect the first 8 KB — the header is always at the start
-    let header_slice = &file_data[..file_data.len().min(8192)];
-    let text = String::from_utf8_lossy(header_slice);
-
-    let looptime_us: i64 = text
-        .lines()
-        .find_map(|line| {
-            let line = line.trim();
-            line.strip_prefix("H looptime:")
-                .and_then(|v| v.trim().parse::<i64>().ok())
-        })
-        .unwrap_or(1000); // default 1 kHz
-
-    let p_denom: i64 = text
-        .lines()
-        .find_map(|line| {
-            let line = line.trim();
-            // "H P interval:1/4"  or  "H P interval:1"
-            let rest = line.strip_prefix("H P interval:")?;
-            if let Some(frac) = rest.trim().strip_prefix("1/") {
-                frac.trim().parse::<i64>().ok()
-            } else {
-                // "1" means log every loop
-                Some(1)
-            }
-        })
-        .unwrap_or(1);
-
-    looptime_us * p_denom
-}
-
 fn parse_loose_i64(raw: &str) -> Option<i64> {
     let cleaned: String = raw
         .chars()
@@ -711,7 +728,9 @@ fn find_header_datetime(text: &str) -> Option<DateTime<Utc>> {
     let candidates = ["Log start datetime", "Datetime", "Date"];
     for label in candidates {
         if let Some(value) = find_header_value(text, &[label]) {
+            eprintln!("[BBX-DATETIME] raw header '{}' = {:?}", label, value);
             if let Some(parsed) = parse_header_datetime(&value) {
+                eprintln!("[BBX-DATETIME] parsed = {}", parsed.to_rfc3339());
                 return Some(parsed);
             }
         }

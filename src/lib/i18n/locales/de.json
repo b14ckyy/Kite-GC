@@ -144,6 +144,7 @@
     "weatherPartlyCloudy": "Teilw. bewölkt",
     "weatherOvercast": "Bedeckt",
     "weatherLightRain": "Leichter Regen",
+    "weatherModerateRain": "M\u00e4\u00dfiger Regen",
     "weatherRain": "Regen",
     "weatherSnow": "Schnee",
     "weatherFog": "Nebel",
@@ -158,6 +159,8 @@
     "selectFlight": "Flug wählen, um Details zu sehen",
     "duplicateTitle": "Doppelter Flug",
     "duplicateMessage": "Doppelter Flug erkannt!\n\nFluggerät: {craft}\nZeit: {time}\n\nDieser Flug scheint bereits vorhanden zu sein.\nTrotzdem importieren?",
+    "linkableTitle": "Flüge verknüpfen",
+    "linkableFound": "Eine passende Live-Aufzeichnung (Flug #{id}) wurde gefunden.\n\nDiesen Blackbox-Import mit der Live-Aufzeichnung verknüpfen?",
     "importProgress": "Blackbox-Import",
     "editWeather": "Wetter bearbeiten",
     "editCraftName": "Craft-Name bearbeiten",
@@ -180,7 +183,17 @@
     "exportTitle": "Export abgeschlossen",
     "exportSuccess": "{count} Flug/Fl\u00fcge erfolgreich exportiert.",
     "importKflightTitle": "Import abgeschlossen",
-    "importKflightResult": "Importiert: {imported}, \u00dcbersprungen (Duplikate): {skipped}"
+    "importKflightResult": "Importiert: {imported}, \u00dcbersprungen (Duplikate): {skipped}",
+    "deleteTitle": "Flug l\u00f6schen",
+    "deleteWarning": "Diese Aktion kann nicht r\u00fcckg\u00e4ngig gemacht werden. Welche Daten m\u00f6chtest du l\u00f6schen?",
+    "deleteLiveOnly": "Nur Live-Aufnahme l\u00f6schen",
+    "deleteBlackboxOnly": "Nur Blackbox l\u00f6schen",
+    "deleteBoth": "Beide l\u00f6schen",
+    "importAnyway": "Trotzdem importieren",
+    "linkYes": "Verkn\u00fcpfen"
+  },
+  "dialog": {
+    "cancel": "Abbrechen"
   },
   "player": {
     "close": "Player schließen",

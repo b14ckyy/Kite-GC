@@ -303,6 +303,7 @@ impl FlightRecorder {
                 total_distance_m: None,
                 battery_used_mah: None,
                 notes: None,
+                linked_flight_id: None,
             };
 
             match db::insert_flight(&self.db, &flight) {

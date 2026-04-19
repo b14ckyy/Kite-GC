@@ -24,6 +24,9 @@
     onTrackColorModeChange = (_mode: TrackColorMode) => {},
     playbackTrack = [] as TelemetryRecord[],
     warnAltitudeM = 120,
+    replaySource = 'live' as 'live' | 'blackbox',
+    hasLinkedPartner = false,
+    onSwitchSource = (_source: 'live' | 'blackbox') => {},
   }: {
     showPlayer?: boolean;
     selectedFlight?: Flight | null;
@@ -45,6 +48,9 @@
     onTrackColorModeChange?: (mode: TrackColorMode) => void;
     playbackTrack?: TelemetryRecord[];
     warnAltitudeM?: number;
+    replaySource?: 'live' | 'blackbox';
+    hasLinkedPartner?: boolean;
+    onSwitchSource?: (source: 'live' | 'blackbox') => void;
   } = $props();
 
   const COLOR_MODES: { value: TrackColorMode; labelKey: string }[] = [
@@ -91,11 +97,11 @@
   <div class="log-player">
     <div class="log-player-top">
       <div class="log-player-source">
-        {#if selectedFlight?.source === 'blackbox'}
+        {#if hasLinkedPartner}
+          <button class="log-player-source-btn" class:active={replaySource === 'live'} onclick={() => onSwitchSource('live')}>REC</button>
+          <button class="log-player-source-btn" class:active={replaySource === 'blackbox'} onclick={() => onSwitchSource('blackbox')}>BBX</button>
+        {:else if selectedFlight?.source === 'blackbox'}
           <button class="log-player-source-btn" disabled>REC</button>
-          <button class="log-player-source-btn active">BBX</button>
-        {:else if selectedFlight?.source === 'both'}
-          <button class="log-player-source-btn active">REC</button>
           <button class="log-player-source-btn active">BBX</button>
         {:else}
           <button class="log-player-source-btn active">REC</button>

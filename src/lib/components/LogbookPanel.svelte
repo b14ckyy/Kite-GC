@@ -138,9 +138,23 @@
       const craft = (f.craft_name || '').toLowerCase();
       const location = (f.location_name || '').toLowerCase();
       const date = (f.start_time || '').toLowerCase();
-      return craft.includes(q) || location.includes(q) || date.includes(q);
+      const notes = (f.notes || '').toLowerCase();
+      return craft.includes(q) || location.includes(q) || date.includes(q) || notes.includes(q);
     });
   });
+
+  const standardWindDirValues = ['0', '45', '90', '135', '180', '225', '270', '315'];
+  const standardWeatherConditions = [
+    'Clear',
+    'Partly Cloudy',
+    'Overcast',
+    'Light Rain',
+    'Moderate Rain',
+    'Rain',
+    'Snow',
+    'Fog',
+    'Stormy',
+  ];
 
   const flightTree = $derived<FlightTree>(buildFlightTree(filteredSummaries, logbookSortMode));
 
@@ -222,10 +236,12 @@
     return dirs[Math.round(deg / 45) % 8];
   }
 
-  function flightListMarker(source: string): string {
-    if (source === 'blackbox') return '◈ ';
-    if (source === 'both') return '◉ ';
-    return '';
+  function flightListMarker(f: FlightSummary): string {
+    let marker = '';
+    if (f.source === 'blackbox') marker = '◈ ';
+    else if (f.source === 'both') marker = '◉ ';
+    if (f.linked_flight_id) marker += '🔗 ';
+    return marker;
   }
 
   function formatDateTime(value: string): string {
@@ -265,7 +281,7 @@
         <span class="fc-label">{$t('logbook.firmware')}</span>
         <span class="fc-value">{selectedFlight.fc_version || `${selectedFlight.fc_variant || '—'}`}</span>
         <span class="fc-label">{$t('logbook.source')}</span>
-        <span class="fc-value">{formatFlightSource(selectedFlight.source)}</span>
+        <span class="fc-value">{formatFlightSource(selectedFlight.source)}{#if selectedFlight.linked_flight_id} 🔗 #{selectedFlight.linked_flight_id}{/if}</span>
         <span class="fc-label">{$t('logbook.started')}</span>
         <span class="fc-value">{formatDateTime(selectedFlight.start_time)}</span>
         <span class="fc-label">{$t('logbook.duration')}</span>
@@ -419,7 +435,7 @@
                               class:multi-selected={isMultiSelected(f.id)}
                               onclick={(e) => handleFlightClick(f.id, e)}
                             >
-                              <div class="logbook-item-title">{flightListMarker(f.source)}{formatDateTime(f.start_time)}</div>
+                              <div class="logbook-item-title">{flightListMarker(f)}{formatDateTime(f.start_time)} <span class="logbook-item-id">#{f.id}</span></div>
                               <div class="logbook-item-meta">
                                 <span>{f.craft_name || $t('logbook.unnamedCraft')}</span>
                                 <span>{f.location_name || $t('logbook.unknownLocation')}</span>
@@ -459,7 +475,7 @@
               <span class="fc-label">{$t('logbook.firmware')}</span>
               <span class="fc-value">{selectedFlight.fc_version || `${selectedFlight.fc_variant || '—'}`}</span>
               <span class="fc-label">{$t('logbook.source')}</span>
-              <span class="fc-value">{formatFlightSource(selectedFlight.source)}</span>
+              <span class="fc-value">{formatFlightSource(selectedFlight.source)} <span class="flight-id-tag">#{selectedFlight.id}</span>{#if selectedFlight.linked_flight_id} 🔗 #{selectedFlight.linked_flight_id}{/if}</span>
               <span class="fc-label">{$t('logbook.started')}</span>
               <span class="fc-value">{formatDateTime(selectedFlight.start_time)}</span>
               <span class="fc-label">{$t('logbook.duration')}</span>
@@ -519,6 +535,9 @@
                     <span class="weather-field-label">{$t('logbook.weatherWindDir')}</span>
                     <select class="setting-select weather-select" bind:value={weatherWindDir}>
                       <option value="">—</option>
+                      {#if weatherWindDir && !standardWindDirValues.includes(weatherWindDir)}
+                        <option value={weatherWindDir}>{weatherWindDir}° ({windDegToLabel(Number(weatherWindDir))})</option>
+                      {/if}
                       <option value="0">N</option>
                       <option value="45">NE</option>
                       <option value="90">E</option>
@@ -533,10 +552,14 @@
                     <span class="weather-field-label">{$t('logbook.weatherConditions')}</span>
                     <select class="setting-select weather-select" bind:value={weatherDesc}>
                       <option value="">—</option>
+                      {#if weatherDesc && !standardWeatherConditions.includes(weatherDesc)}
+                        <option value={weatherDesc}>{weatherDesc}</option>
+                      {/if}
                       <option value="Clear">{$t('logbook.weatherClear')}</option>
                       <option value="Partly Cloudy">{$t('logbook.weatherPartlyCloudy')}</option>
                       <option value="Overcast">{$t('logbook.weatherOvercast')}</option>
                       <option value="Light Rain">{$t('logbook.weatherLightRain')}</option>
+                      <option value="Moderate Rain">{$t('logbook.weatherModerateRain')}</option>
                       <option value="Rain">{$t('logbook.weatherRain')}</option>
                       <option value="Snow">{$t('logbook.weatherSnow')}</option>
                       <option value="Fog">{$t('logbook.weatherFog')}</option>
@@ -994,6 +1017,19 @@
     font-size: 12px;
     color: #fff;
     font-weight: 600;
+  }
+
+  .logbook-item-id {
+    font-size: 10px;
+    font-weight: 400;
+    color: #777;
+    margin-left: 4px;
+  }
+
+  .flight-id-tag {
+    font-size: 10px;
+    color: #777;
+    margin-left: 2px;
   }
 
   .logbook-item-meta {

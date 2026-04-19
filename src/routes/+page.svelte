@@ -2,7 +2,7 @@
   import { onDestroy } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
-  import { open, save, confirm } from "@tauri-apps/plugin-dialog";
+  import { open, save } from "@tauri-apps/plugin-dialog";
   import { connection, availablePorts, bleDevices } from "$lib/stores/connection";
   import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
@@ -12,6 +12,8 @@
   import Map from "$lib/components/Map.svelte";
   import Map3D from "$lib/components/Map3D.svelte";
   import LogPlayer from "$lib/components/LogPlayer.svelte";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
+  import type { DialogButton, DialogOptions } from "$lib/components/ConfirmDialog.svelte";
   import SettingsPanel from "$lib/components/SettingsPanel.svelte";
   import LogbookPanel from "$lib/components/LogbookPanel.svelte";
   import Toolbar from "$lib/components/Toolbar.svelte";
@@ -146,6 +148,22 @@
   let playbackSpeed = $state(1);
   const playbackCtrl = new PlaybackController();
   let logbookMinimized = $state(false);
+
+  // Replay source: 'live' or 'blackbox' — for linked flights, switches which track is shown
+  let replaySource = $state<'live' | 'blackbox'>('live');
+  // Track for the linked partner (loaded on demand)
+  let linkedPartnerTrack = $state<TelemetryRecord[]>([]);
+
+  // Shared in-app dialog (replaces all native confirm/alert calls)
+  let confirmDialog: ReturnType<typeof ConfirmDialog>;
+
+  async function showDialog(opts: DialogOptions): Promise<string | null> {
+    return confirmDialog.show(opts);
+  }
+
+  async function showInfo(title: string, message: string): Promise<void> {
+    await confirmDialog.show({ title, message });
+  }
 
   // Widget panel state
   const defaultPanels: PanelConfig = {
@@ -333,14 +351,20 @@
 
   function seekPlayback(deltaMs: number) {
     if (selectedTrackWithPosition.length === 0) return;
+    const wasPlaying = playbackPlaying;
+    if (wasPlaying) stopPlayback();
     playbackActive = true;
     playbackIndex = PlaybackController.seek(selectedTrackWithPosition, playbackIndex, deltaMs);
+    if (wasPlaying) startPlayback();
   }
 
   function seekToStart() {
     if (selectedTrackWithPosition.length === 0) return;
+    const wasPlaying = playbackPlaying;
+    if (wasPlaying) stopPlayback();
     playbackActive = true;
     playbackIndex = 0;
+    if (wasPlaying) startPlayback();
   }
 
   function closePlayer() {
@@ -369,6 +393,7 @@
   }
 
   async function importBlackbox() {
+    if (blackboxImporting) return;
     try {
       const inavFilter = { name: $t('logbook.inavBlackboxFilter'), extensions: ['txt'] };
       const apFilter = { name: $t('logbook.ardupilotFilter'), extensions: ['bin'] };
@@ -408,6 +433,19 @@
   }
 
   async function importDroppedFiles(paths: string[]) {
+    // Guard against concurrent imports (drag-drop can fire multiple times on Windows)
+    if (blackboxImporting) {
+      console.warn('[IMPORT] Skipping — import already in progress');
+      return;
+    }
+
+    console.log('[IMPORT] importDroppedFiles called with', paths.length, 'files');
+
+    // Set guard early to prevent concurrent calls
+    const hasBbFiles = paths.some((p) => /\.(txt|bin)$/i.test(p));
+    if (hasBbFiles) blackboxImporting = true;
+
+    try {
     // Handle .kflight files
     const kflightFiles = paths.filter((p) => /\.kflight$/i.test(p));
     for (const filePath of kflightFiles) {
@@ -420,7 +458,7 @@
         if (result.errors.length > 0) {
           msg += '\n' + result.errors.join('\n');
         }
-        await confirm(msg, { title: $t('logbook.importKflightTitle'), kind: 'info' });
+        await showInfo($t('logbook.importKflightTitle'), msg);
       } catch (e: any) {
         errorMsg = e?.toString?.() ?? String(e);
       }
@@ -428,49 +466,44 @@
 
     // Handle ArduPilot .bin files
     const binFiles = paths.filter((p) => /\.bin$/i.test(p));
-    if (binFiles.length > 0) {
-      try {
-        blackboxImporting = true;
-        for (const filePath of binFiles) {
-          await performArdupilotImport(filePath, false);
-        }
-      } catch (e: any) {
-        errorMsg = e?.toString?.() ?? String(e);
-      } finally {
-        blackboxImporting = false;
-        blackboxImportProgress = null;
-      }
+    for (const filePath of binFiles) {
+      await performArdupilotImport(filePath, false);
     }
 
     // Handle blackbox files
     const bbFiles = paths.filter((p) => /\.txt$/i.test(p));
-    if (bbFiles.length === 0) return;
-    try {
-      blackboxImporting = true;
-      for (const filePath of bbFiles) {
-        await performImport(filePath, undefined, false);
-      }
+    for (const filePath of bbFiles) {
+      await performImport(filePath, undefined, false);
+    }
+
     } catch (e: any) {
       errorMsg = e?.toString?.() ?? String(e);
     } finally {
-      blackboxImporting = false;
-      blackboxImportProgress = null;
+      if (hasBbFiles) {
+        blackboxImporting = false;
+        blackboxImportProgress = null;
+      }
     }
   }
 
   async function exportFlightsToKflight(flightIds: number[]) {
     if (flightIds.length === 0) return;
     try {
+      // Auto-include linked partner flights
+      const allIds = new Set(flightIds);
+      for (const id of flightIds) {
+        const summary = flightSummaries.find((f) => f.id === id);
+        if (summary?.linked_flight_id) allIds.add(summary.linked_flight_id);
+      }
+      const exportIds = [...allIds];
+
       const outputPath = await save({
         filters: [{ name: $t('logbook.kflightFileFilter'), extensions: ['kflight'] }],
-        defaultPath: flightIds.length === 1 ? `flight_${flightIds[0]}.kflight` : `flights_export.kflight`,
+        defaultPath: exportIds.length === 1 ? `flight_${exportIds[0]}.kflight` : `flights_export.kflight`,
       });
       if (!outputPath) return;
-      const count = await logbookCtrl.exportSelectedFlights(flightIds, outputPath, flightLogDbPath);
-      await confirm(
-        $t('logbook.exportSuccess', { values: { count } }),
-        { title: $t('logbook.exportTitle'), kind: 'info' },
-      );
+      const count = await logbookCtrl.exportSelectedFlights(exportIds, outputPath, flightLogDbPath);
+      await showInfo($t('logbook.exportTitle'), $t('logbook.exportSuccess', { values: { count } }));
     } catch (e: any) {
       errorMsg = e?.toString?.() ?? String(e);
     }
@@ -488,10 +521,7 @@
       });
       if (!outputPath) return;
       const originalFilename = await logbookCtrl.exportBlackbox(selectedFlightId, outputPath, flightLogDbPath);
-      await confirm(
-        $t('logbook.exportBlackboxSuccess', { values: { filename: originalFilename } }),
-        { title: $t('logbook.exportBlackboxTitle'), kind: 'info' },
-      );
+      await showInfo($t('logbook.exportBlackboxTitle'), $t('logbook.exportBlackboxSuccess', { values: { filename: originalFilename } }));
     } catch (e: any) {
       errorMsg = e?.toString?.() ?? String(e);
     }
@@ -514,10 +544,7 @@
       });
       if (!outputPath) return;
       await logbookCtrl.exportTrack(selectedFlightId, outputPath, flightLogDbPath);
-      await confirm(
-        $t('logbook.exportTrackSuccess'),
-        { title: $t('logbook.exportTrackTitle'), kind: 'info' },
-      );
+      await showInfo($t('logbook.exportTrackTitle'), $t('logbook.exportTrackSuccess'));
     } catch (e: any) {
       errorMsg = e?.toString?.() ?? String(e);
     }
@@ -540,7 +567,7 @@
       if (result.errors.length > 0) {
         msg += '\n' + result.errors.join('\n');
       }
-      await confirm(msg, { title: $t('logbook.importKflightTitle'), kind: 'info' });
+      await showInfo($t('logbook.importKflightTitle'), msg);
     } catch (e: any) {
       errorMsg = e?.toString?.() ?? String(e);
     }
@@ -550,22 +577,31 @@
     const result = await logbookCtrl.importBlackbox(filePath, flightLogDbPath, logIndex, forceImport, $locale ?? 'en');
     
     if (result.type === 'duplicate') {
-      const confirmImport = await confirm(
-        $t('logbook.duplicateMessage', {
+      const answer = await showDialog({
+        title: $t('logbook.duplicateTitle'),
+        message: $t('logbook.duplicateMessage', {
           values: {
             craft: result.duplicate_craft_name,
             time: new Date(result.duplicate_start_time).toLocaleString(),
           },
         }),
-        { title: $t('logbook.duplicateTitle'), kind: 'warning' }
-      );
+        buttons: [{ label: $t('logbook.importAnyway'), value: 'force', danger: true }],
+      });
       
-      if (confirmImport) {
-        // Retry import with force_import: true
+      if (answer === 'force') {
         await performImport(filePath, logIndex, true);
       }
     } else {
-      // Success case
+      if (result.type === 'success_linkable') {
+        const answer = await showDialog({
+          title: $t('logbook.linkableTitle'),
+          message: $t('logbook.linkableFound', { values: { id: result.linkable_flight_id } }),
+          buttons: [{ label: $t('logbook.linkYes'), value: 'link', primary: true }],
+        });
+        if (answer === 'link') {
+          await logbookCtrl.linkFlights(result.flight_id, result.linkable_flight_id, flightLogDbPath);
+        }
+      }
       await loadLogbook();
       await selectFlight(result.flight_id);
     }
@@ -575,20 +611,31 @@
     const result = await logbookCtrl.importArdupilot(filePath, flightLogDbPath, forceImport, $locale ?? 'en');
     
     if (result.type === 'duplicate') {
-      const confirmImport = await confirm(
-        $t('logbook.duplicateMessage', {
+      const answer = await showDialog({
+        title: $t('logbook.duplicateTitle'),
+        message: $t('logbook.duplicateMessage', {
           values: {
             craft: result.duplicate_craft_name,
             time: new Date(result.duplicate_start_time).toLocaleString(),
           },
         }),
-        { title: $t('logbook.duplicateTitle'), kind: 'warning' }
-      );
+        buttons: [{ label: $t('logbook.importAnyway'), value: 'force', danger: true }],
+      });
       
-      if (confirmImport) {
+      if (answer === 'force') {
         await performArdupilotImport(filePath, true);
       }
     } else {
+      if (result.type === 'success_linkable') {
+        const answer = await showDialog({
+          title: $t('logbook.linkableTitle'),
+          message: $t('logbook.linkableFound', { values: { id: result.linkable_flight_id } }),
+          buttons: [{ label: $t('logbook.linkYes'), value: 'link', primary: true }],
+        });
+        if (answer === 'link') {
+          await logbookCtrl.linkFlights(result.flight_id, result.linkable_flight_id, flightLogDbPath);
+        }
+      }
       await loadLogbook();
       await selectFlight(result.flight_id);
     }
@@ -606,8 +653,16 @@
     weatherWindDir = data.weatherWindDir;
     weatherDesc = data.weatherDesc;
     weatherEditing = false;
+    replaySource = 'live';
+    linkedPartnerTrack = [];
     resetPlayback();
     if (data.hasGpsData) playbackActive = true;
+
+    // Pre-load linked partner track for source switching
+    if (data.flight?.linked_flight_id) {
+      const partnerTrack = await logbookCtrl.getPartnerTrack(data.flight.linked_flight_id, flightLogDbPath);
+      linkedPartnerTrack = partnerTrack;
+    }
 
     // Set home position for replay (used by HomeWidget)
     if (data.flight?.start_lat != null && data.flight?.start_lon != null) {
@@ -615,6 +670,13 @@
     }
 
     await loadLogbook();
+  }
+
+  function switchReplaySource(source: 'live' | 'blackbox') {
+    if (source === replaySource) return;
+    replaySource = source;
+    resetPlayback();
+    if (activeReplayTrack.length > 0) playbackActive = true;
   }
 
   async function saveSelectedFlightNotes() {
@@ -638,15 +700,56 @@
   }
 
   async function removeSelectedFlight() {
-    if (!selectedFlightId) return;
-    const ok = await logbookCtrl.removeFlight(selectedFlightId, flightLogDbPath);
-    if (!ok) return;
+    if (!selectedFlightId || !selectedFlight) return;
+
+    let buttons: DialogButton[];
+    if (selectedFlight.linked_flight_id) {
+      buttons = [
+        { label: $t('logbook.deleteLiveOnly'), value: 'live', danger: true },
+        { label: $t('logbook.deleteBlackboxOnly'), value: 'blackbox', danger: true },
+        { label: $t('logbook.deleteBoth'), value: 'both', danger: true },
+      ];
+    } else {
+      buttons = [
+        { label: $t('logbook.deleteFlight'), value: 'single', danger: true },
+      ];
+    }
+
+    const value = await showDialog({
+      title: $t('logbook.deleteTitle'),
+      message: $t('logbook.deleteWarning'),
+      buttons,
+    });
+    if (!value || !selectedFlightId || !selectedFlight) return;
+
+    const flightId = selectedFlightId;
+    const linkedId = selectedFlight.linked_flight_id;
+
+    let idsToDelete: number[] = [];
+    if (value === 'single' || value === 'both') {
+      idsToDelete.push(flightId);
+      if (linkedId) idsToDelete.push(linkedId);
+    } else if (value === 'live') {
+      // Delete the live flight (lower id = created first = live recording)
+      const liveId = linkedId && linkedId < flightId ? linkedId : flightId;
+      idsToDelete.push(liveId);
+    } else if (value === 'blackbox') {
+      // Delete the blackbox flight (higher id = imported after = blackbox)
+      const bbxId = linkedId && linkedId > flightId ? linkedId : flightId;
+      idsToDelete.push(bbxId);
+    }
+
+    for (const id of idsToDelete) {
+      await logbookCtrl.removeFlight(id, flightLogDbPath);
+    }
+
     resetPlayback();
     selectedFlight = null;
     selectedFlightTrack = [];
     selectedFlightId = null;
     selectedFlightTrackCount = 0;
     selectedFlightNotes = '';
+    linkedPartnerTrack = [];
     weatherTempC = '';
     weatherWindMs = '';
     weatherWindDir = '';
@@ -775,8 +878,16 @@
   }
 
   const isPrimaryConnected = $derived(connStatus === 'connected');
+
+  // Active replay track: switches between live telemetry and linked blackbox track
+  const activeReplayTrack = $derived(
+    replaySource === 'blackbox' && linkedPartnerTrack.length > 0
+      ? linkedPartnerTrack
+      : selectedFlightTrack,
+  );
+
   const selectedTrackWithPosition = $derived(
-    selectedFlightTrack.filter((point) => isValidGpsCoordinate(point.lat, point.lon))
+    activeReplayTrack.filter((point) => isValidGpsCoordinate(point.lat, point.lon))
   );
   const mapTrack = $derived(isPrimaryConnected ? [] : selectedTrackWithPosition);
   const playbackPoint = $derived(
@@ -840,6 +951,8 @@
     playbackCtrl.destroy();
   });
 </script>
+
+<ConfirmDialog bind:this={confirmDialog} />
 
 <main class="app">
   <!-- ======= TOOLBAR ======= -->
@@ -905,6 +1018,9 @@
     onTrackColorModeChange={(mode) => { trackColorMode = mode; }}
     playbackTrack={mapTrack}
     {warnAltitudeM}
+    {replaySource}
+    hasLinkedPartner={selectedFlight?.linked_flight_id != null && linkedPartnerTrack.length > 0}
+    onSwitchSource={switchReplaySource}
   />
 
   <!-- ======= FLOATING NAV PANEL SYSTEM ======= -->

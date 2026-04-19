@@ -13,6 +13,8 @@ export interface FlightSummary {
   max_speed_ms: number | null;
   total_distance_m: number | null;
   platform_type: number;
+  linked_flight_id: number | null;
+  notes: string | null;
 }
 
 export interface Flight {
@@ -40,6 +42,7 @@ export interface Flight {
   total_distance_m: number | null;
   battery_used_mah: number | null;
   notes: string | null;
+  linked_flight_id: number | null;
 }
 
 export interface TelemetryRecord {
@@ -115,6 +118,13 @@ export interface BlackboxImportSuccess {
   rows_imported: number;
 }
 
+export interface BlackboxImportSuccessLinkable {
+  type: 'success_linkable';
+  flight_id: number;
+  rows_imported: number;
+  linkable_flight_id: number;
+}
+
 export interface BlackboxImportDuplicate {
   type: 'duplicate';
   existing_flight: Flight;
@@ -125,7 +135,7 @@ export interface BlackboxImportDuplicate {
   duplicate_lon: number | null;
 }
 
-export type BlackboxImportStatus = BlackboxImportSuccess | BlackboxImportDuplicate;
+export type BlackboxImportStatus = BlackboxImportSuccess | BlackboxImportSuccessLinkable | BlackboxImportDuplicate;
 
 export interface BlackboxImportProgress {
   stage: string;
@@ -243,6 +253,35 @@ export async function importArdupilotLog(
   });
 }
 
+// ── Flight Linking ──────────────────────────────────────────────────
+
+export async function linkFlights(flightA: number, flightB: number, dbPath: string): Promise<void> {
+  await invoke('flightlog_link_flights', {
+    flightA,
+    flightB,
+    dbPath: dbPath || undefined,
+  });
+}
+
+export async function unlinkFlight(flightId: number, dbPath: string): Promise<void> {
+  await invoke('flightlog_unlink_flight', {
+    flightId,
+    dbPath: dbPath || undefined,
+  });
+}
+
+export async function findLinkableFlight(
+  craftName: string,
+  startTime: string,
+  dbPath: string,
+): Promise<FlightSummary | null> {
+  return invoke<FlightSummary | null>('flightlog_find_linkable', {
+    craftName,
+    startTime,
+    dbPath: dbPath || undefined,
+  });
+}
+
 // ── Export / Import / Offline replay ────────────────────────────────
 
 export interface KflightImportResult {
@@ -357,7 +396,13 @@ export function buildFlightTree(
   const [topDim, secondDim, thirdDim] = dimensions;
   const topMap = new Map<string, Map<string, FlightSummary[]>>();
 
-  for (const flight of flights) {
+  // Hide linked partner flights: the later-created flight (higher id) is the secondary one.
+  // If linked_flight_id < id, this flight was imported after its partner → hide it.
+  const visibleFlights = flights.filter(
+    (f) => !(f.linked_flight_id && f.linked_flight_id < f.id),
+  );
+
+  for (const flight of visibleFlights) {
     const topKey = getDimensionValue(flight, topDim);
     const secondKey = getDimensionValue(flight, secondDim);
     let secondMap = topMap.get(topKey);

@@ -65,6 +65,8 @@ pub struct Flight {
     pub battery_used_mah: Option<u32>,
     /// User notes
     pub notes: Option<String>,
+    /// ID of the linked flight (e.g. live ↔ blackbox association)
+    pub linked_flight_id: Option<i64>,
 }
 
 /// A single telemetry sample (row in `telemetry_records` table)
@@ -136,6 +138,8 @@ pub struct FlightSummary {
     pub max_speed_ms: Option<f64>,
     pub total_distance_m: Option<f64>,
     pub platform_type: u8,
+    pub linked_flight_id: Option<i64>,
+    pub notes: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -146,6 +150,13 @@ pub enum BlackboxImportStatus {
     Success {
         flight_id: i64,
         rows_imported: usize,
+    },
+    /// Import successful AND a linkable live flight was found
+    #[serde(rename = "success_linkable")]
+    SuccessLinkable {
+        flight_id: i64,
+        rows_imported: usize,
+        linkable_flight_id: i64,
     },
     /// Duplicate flight detected — user must confirm override
     #[serde(rename = "duplicate")]

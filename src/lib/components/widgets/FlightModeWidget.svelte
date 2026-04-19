@@ -27,7 +27,7 @@
 
 <div class="widget-card" style="--ws: {size}vmin">
   <span class="w-label">MODE</span>
-  <span class="w-mode" style="background: {mode.color}; color: {mode.color === '#e8c820' || mode.color === '#c0c0c0' ? '#1a1a1a' : '#fff'}">
+  <span class="w-mode" style="background: {mode.color}; color: {mode.color === '#c0c0c0' ? '#1a1a1a' : '#fff'}">
     {mode.label}
   </span>
   {#if modifiers().length > 0}

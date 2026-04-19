@@ -874,6 +874,7 @@ where
         total_distance_m: if total_distance_m > 0.0 { Some(total_distance_m) } else { None },
         battery_used_mah: max_mah,
         notes: Some(format!("Imported from {}", file_path.display())),
+        linked_flight_id: None,
     };
 
     let flight_id = db::insert_flight(conn, &flight)
