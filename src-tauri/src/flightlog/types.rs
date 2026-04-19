@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 pub struct FlightLogSettings {
     /// Whether flight recording is enabled
     pub enabled: bool,
+    /// Whether to write flights/telemetry to the database
+    pub db_enabled: bool,
     /// Custom database directory (empty string = default AppData)
     pub db_path: String,
     /// Whether to also write raw text log files
@@ -19,6 +21,7 @@ impl Default for FlightLogSettings {
     fn default() -> Self {
         Self {
             enabled: false,
+            db_enabled: false,
             db_path: String::new(),
             raw_enabled: false,
         }

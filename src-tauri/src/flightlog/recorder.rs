@@ -220,82 +220,92 @@ impl FlightRecorder {
         log::info!("ARM detected — starting flight recording");
 
         let now = Utc::now();
-        let flight = Flight {
-            id: 0,
-            start_time: now,
-            end_time: None,
-            duration_sec: None,
-            source: "live".into(),
-            craft_name: self.fc_info.craft_name.clone(),
-            fc_variant: self.fc_info.fc_variant.clone(),
-            fc_version: self.fc_info.fc_version.clone(),
-            board_id: self.fc_info.board_id.clone(),
-            platform_type: self.fc_info.platform_type,
-            protocol: "MSP".into(),
-            start_lat: self.snapshot.lat,
-            start_lon: self.snapshot.lon,
-            location_name: None,
-            weather_temp_c: None,
-            weather_wind_ms: None,
-            weather_wind_deg: None,
-            weather_desc: None,
-            max_alt_m: None,
-            max_speed_ms: None,
-            max_distance_m: None,
-            total_distance_m: None,
-            battery_used_mah: None,
-            notes: None,
+
+        // Determine flight_id: from DB if db_enabled, otherwise use timestamp
+        let flight_id = if self.settings.db_enabled {
+            let flight = Flight {
+                id: 0,
+                start_time: now,
+                end_time: None,
+                duration_sec: None,
+                source: "live".into(),
+                craft_name: self.fc_info.craft_name.clone(),
+                fc_variant: self.fc_info.fc_variant.clone(),
+                fc_version: self.fc_info.fc_version.clone(),
+                board_id: self.fc_info.board_id.clone(),
+                platform_type: self.fc_info.platform_type,
+                protocol: "MSP".into(),
+                start_lat: self.snapshot.lat,
+                start_lon: self.snapshot.lon,
+                location_name: None,
+                weather_temp_c: None,
+                weather_wind_ms: None,
+                weather_wind_deg: None,
+                weather_desc: None,
+                max_alt_m: None,
+                max_speed_ms: None,
+                max_distance_m: None,
+                total_distance_m: None,
+                battery_used_mah: None,
+                notes: None,
+            };
+
+            match db::insert_flight(&self.db, &flight) {
+                Ok(id) => id,
+                Err(e) => {
+                    log::error!("Failed to insert flight record: {}", e);
+                    return;
+                }
+            }
+        } else {
+            // Raw-only mode: use timestamp as pseudo flight_id
+            now.timestamp()
         };
 
-        match db::insert_flight(&self.db, &flight) {
-            Ok(flight_id) => {
-                // Start raw logger if enabled
-                let raw_logger = if self.settings.raw_enabled {
-                    let log_dir = self
-                        .db_file_path
-                        .parent()
-                        .unwrap_or(std::path::Path::new("."));
-                    match RawLogger::new(log_dir, flight_id, &now) {
-                        Ok(logger) => Some(logger),
-                        Err(e) => {
-                            log::warn!("Failed to create raw logger: {}", e);
-                            None
-                        }
-                    }
-                } else {
+        // Start raw logger if enabled
+        let raw_logger = if self.settings.raw_enabled {
+            let log_dir = self
+                .db_file_path
+                .parent()
+                .unwrap_or(std::path::Path::new("."));
+            match RawLogger::new(log_dir, flight_id, &now) {
+                Ok(logger) => Some(logger),
+                Err(e) => {
+                    log::warn!("Failed to create raw logger: {}", e);
                     None
-                };
-
-                // Spawn async weather + geocode enrichment (non-blocking)
-                if let (Some(lat), Some(lon)) = (self.snapshot.lat, self.snapshot.lon) {
-                    if is_valid_gps_coord(lat, lon) {
-                        let db_path = self.db_file_path.to_string_lossy().to_string();
-                        tauri::async_runtime::spawn(enrich_flight_async(flight_id, lat, lon, db_path));
-                    }
                 }
-
-                self.raw_logger = raw_logger;
-                self.active_flight = Some(ActiveFlight {
-                    flight_id,
-                    start_instant: Instant::now(),
-                    start_lat: self.snapshot.lat,
-                    start_lon: self.snapshot.lon,
-                    buffer: Vec::with_capacity(FLUSH_THRESHOLD),
-                    max_alt: 0.0,
-                    max_speed: 0.0,
-                    max_distance: 0.0,
-                    total_distance: 0.0,
-                    last_lat: None,
-                    last_lon: None,
-                    start_mah: self.snapshot.mah_drawn,
-                });
-
-                log::info!("Flight {} started in database", flight_id);
             }
-            Err(e) => {
-                log::error!("Failed to insert flight record: {}", e);
+        } else {
+            None
+        };
+
+        // Spawn async weather + geocode enrichment (non-blocking, DB-only)
+        if self.settings.db_enabled {
+            if let (Some(lat), Some(lon)) = (self.snapshot.lat, self.snapshot.lon) {
+                if is_valid_gps_coord(lat, lon) {
+                    let db_path = self.db_file_path.to_string_lossy().to_string();
+                    tauri::async_runtime::spawn(enrich_flight_async(flight_id, lat, lon, db_path));
+                }
             }
         }
+
+        self.raw_logger = raw_logger;
+        self.active_flight = Some(ActiveFlight {
+            flight_id,
+            start_instant: Instant::now(),
+            start_lat: self.snapshot.lat,
+            start_lon: self.snapshot.lon,
+            buffer: Vec::with_capacity(FLUSH_THRESHOLD),
+            max_alt: 0.0,
+            max_speed: 0.0,
+            max_distance: 0.0,
+            total_distance: 0.0,
+            last_lat: None,
+            last_lon: None,
+            start_mah: self.snapshot.mah_drawn,
+        });
+
+        log::info!("Flight {} started (db={})", flight_id, self.settings.db_enabled);
     }
 
     /// Called when disarm transition is detected
@@ -303,39 +313,41 @@ impl FlightRecorder {
         log::info!("DISARM detected — stopping flight recording");
 
         if let Some(flight) = self.active_flight.take() {
-            // Flush remaining buffer
-            if !flight.buffer.is_empty() {
-                if let Err(e) = db::insert_telemetry_batch(&self.db, &flight.buffer) {
-                    log::error!("Failed to flush final telemetry batch: {}", e);
+            if self.settings.db_enabled {
+                // Flush remaining buffer to DB
+                if !flight.buffer.is_empty() {
+                    if let Err(e) = db::insert_telemetry_batch(&self.db, &flight.buffer) {
+                        log::error!("Failed to flush final telemetry batch: {}", e);
+                    }
                 }
-            }
 
-            let end_time = Utc::now();
-            let duration = flight.start_instant.elapsed().as_secs() as i64;
+                let end_time = Utc::now();
+                let duration = flight.start_instant.elapsed().as_secs() as i64;
 
-            // Calculate battery used
-            let battery_used = match (flight.start_mah, self.snapshot.mah_drawn) {
-                (Some(start), Some(end)) if end >= start => Some(end - start),
-                _ => None,
-            };
+                // Calculate battery used
+                let battery_used = match (flight.start_mah, self.snapshot.mah_drawn) {
+                    (Some(start), Some(end)) if end >= start => Some(end - start),
+                    _ => None,
+                };
 
-            if let Err(e) = db::finalize_flight(
-                &self.db,
-                flight.flight_id,
-                end_time,
-                duration,
-                Some(flight.max_alt),
-                Some(flight.max_speed),
-                Some(flight.max_distance),
-                Some(flight.total_distance),
-                battery_used,
-                None, // location_name filled async
-                None,
-                None,
-                None,
-                None,
-            ) {
-                log::error!("Failed to finalize flight: {}", e);
+                if let Err(e) = db::finalize_flight(
+                    &self.db,
+                    flight.flight_id,
+                    end_time,
+                    duration,
+                    Some(flight.max_alt),
+                    Some(flight.max_speed),
+                    Some(flight.max_distance),
+                    Some(flight.total_distance),
+                    battery_used,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                ) {
+                    log::error!("Failed to finalize flight: {}", e);
+                }
             }
 
             // Close raw logger
@@ -343,13 +355,15 @@ impl FlightRecorder {
                 logger.close();
             }
 
+            let duration = flight.start_instant.elapsed().as_secs();
             log::info!(
-                "Flight {} ended: {}s, max_alt={:.1}m, max_speed={:.1}m/s, distance={:.0}m",
+                "Flight {} ended: {}s, max_alt={:.1}m, max_speed={:.1}m/s, distance={:.0}m (db={})",
                 flight.flight_id,
                 duration,
                 flight.max_alt,
                 flight.max_speed,
                 flight.total_distance,
+                self.settings.db_enabled,
             );
         }
     }
@@ -444,16 +458,19 @@ impl FlightRecorder {
             flight.last_lon = Some(lon);
         }
 
-        flight.buffer.push(record);
+        // Only buffer for DB when db is enabled
+        if self.settings.db_enabled {
+            flight.buffer.push(record);
 
-        // Flush buffer when threshold reached
-        if flight.buffer.len() >= FLUSH_THRESHOLD {
-            let records = std::mem::replace(
-                &mut flight.buffer,
-                Vec::with_capacity(FLUSH_THRESHOLD),
-            );
-            if let Err(e) = db::insert_telemetry_batch(&self.db, &records) {
-                log::error!("Failed to flush telemetry batch: {}", e);
+            // Flush buffer when threshold reached
+            if flight.buffer.len() >= FLUSH_THRESHOLD {
+                let records = std::mem::replace(
+                    &mut flight.buffer,
+                    Vec::with_capacity(FLUSH_THRESHOLD),
+                );
+                if let Err(e) = db::insert_telemetry_batch(&self.db, &records) {
+                    log::error!("Failed to flush telemetry batch: {}", e);
+                }
             }
         }
     }

@@ -4,6 +4,7 @@ import {
   getFlightTrack,
   deleteFlight,
   updateFlightNotes,
+  updateFlightCraftName,
   updateFlightWeather,
   geocodeFlight,
   fetchFlightWeather,
@@ -94,6 +95,16 @@ export async function saveNotes(
   dbPath: string,
 ): Promise<Flight | null> {
   await updateFlightNotes(flightId, notes, dbPath);
+  return getFlight(flightId, dbPath);
+}
+
+/** Save craft name and return the updated flight. */
+export async function saveCraftName(
+  flightId: number,
+  craftName: string,
+  dbPath: string,
+): Promise<Flight | null> {
+  await updateFlightCraftName(flightId, craftName.trim(), dbPath);
   return getFlight(flightId, dbPath);
 }
 

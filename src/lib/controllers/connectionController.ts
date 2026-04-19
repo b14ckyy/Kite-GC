@@ -41,6 +41,7 @@ export interface ConnectParams {
   positionRateHz: number;
   airspeedEnabled: boolean;
   flightLogEnabled: boolean;
+  flightLogDbEnabled: boolean;
   flightLogPath: string;
   flightLogRaw: boolean;
 }
@@ -60,6 +61,7 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
     positionRateHz: params.positionRateHz,
     airspeedEnabled: params.airspeedEnabled,
     flightLogEnabled: params.flightLogEnabled,
+    flightLogDbEnabled: params.flightLogDbEnabled,
     flightLogPath: params.flightLogPath,
     flightLogRaw: params.flightLogRaw,
   });

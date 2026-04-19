@@ -50,6 +50,7 @@ pub async fn connect(
     airspeed_enabled: Option<bool>,
     // Flight log config
     flight_log_enabled: Option<bool>,
+    flight_log_db_enabled: Option<bool>,
     flight_log_path: Option<String>,
     flight_log_raw: Option<bool>,
     state: State<'_, AppState>,
@@ -200,6 +201,7 @@ pub async fn connect(
     // ── Flight recorder setup ────────────────────────────────────────────
     let flight_log_settings = FlightLogSettings {
         enabled: flight_log_enabled.unwrap_or(false),
+        db_enabled: flight_log_db_enabled.unwrap_or(false),
         db_path: flight_log_path.unwrap_or_default(),
         raw_enabled: flight_log_raw.unwrap_or(false),
     };

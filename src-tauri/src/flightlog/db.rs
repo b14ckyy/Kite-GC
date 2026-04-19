@@ -681,6 +681,19 @@ pub fn update_flight_notes(
     Ok(())
 }
 
+/// Update the craft_name field of a flight.
+pub fn update_flight_craft_name(
+    conn: &Connection,
+    flight_id: i64,
+    craft_name: &str,
+) -> SqlResult<()> {
+    conn.execute(
+        "UPDATE flights SET craft_name = ?1 WHERE id = ?2",
+        params![craft_name, flight_id],
+    )?;
+    Ok(())
+}
+
 pub fn insert_blackbox_records(
     conn: &Connection,
     flight_id: i64,

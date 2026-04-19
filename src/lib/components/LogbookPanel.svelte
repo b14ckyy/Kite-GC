@@ -31,6 +31,7 @@
     onSelectFlight,
     onSaveNotes,
     onSaveWeather,
+    onSaveCraftName,
     onDeleteFlight,
     onExportFlights,
     onExportBlackbox,
@@ -57,6 +58,7 @@
     onSelectFlight: (id: number) => void;
     onSaveNotes: () => void;
     onSaveWeather: () => void;
+    onSaveCraftName: (name: string) => void;
     onDeleteFlight: () => void;
     onExportFlights: (ids: number[]) => void;
     onExportBlackbox: () => void;
@@ -71,6 +73,28 @@
   let prevLogbookSortMode = $state<LogbookSortMode>('aircraft-location-date');
   let searchQuery = $state('');
   let multiSelectedIds = $state<Set<number>>(new Set());
+
+  // Craft name inline editing
+  let craftNameEditing = $state(false);
+  let craftNameDraft = $state('');
+
+  function startCraftNameEdit() {
+    craftNameDraft = selectedFlight?.craft_name ?? '';
+    craftNameEditing = true;
+  }
+
+  function saveCraftName() {
+    craftNameEditing = false;
+    onSaveCraftName(craftNameDraft);
+  }
+
+  function cancelCraftNameEdit() {
+    craftNameEditing = false;
+  }
+
+  function focusOnMount(node: HTMLElement) {
+    node.focus();
+  }
 
   // Multi-select: true if at least one flight is multi-selected
   const hasMultiSelection = $derived(multiSelectedIds.size > 0);
@@ -223,7 +247,21 @@
     <div class="logbook-detail logbook-detail-minimized">
       <div class="fc-info-grid">
         <span class="fc-label">{$t('logbook.craft')}</span>
-        <span class="fc-value">{selectedFlight.craft_name || $t('logbook.unnamedCraft')}</span>
+        <span class="fc-value craft-value-row">
+          {#if craftNameEditing}
+            <input
+              class="craft-name-input"
+              type="text"
+              bind:value={craftNameDraft}
+              onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') saveCraftName(); if (e.key === 'Escape') cancelCraftNameEdit(); }}
+              onblur={saveCraftName}
+              use:focusOnMount
+            />
+          {:else}
+            <span>{selectedFlight.craft_name || $t('logbook.unnamedCraft')}</span>
+            <button class="weather-edit-btn" onclick={startCraftNameEdit} title={$t('logbook.editCraftName')}>✎</button>
+          {/if}
+        </span>
         <span class="fc-label">{$t('logbook.firmware')}</span>
         <span class="fc-value">{selectedFlight.fc_version || `${selectedFlight.fc_variant || '—'}`}</span>
         <span class="fc-label">{$t('logbook.source')}</span>
@@ -403,7 +441,21 @@
         <div class="logbook-detail">
             <div class="fc-info-grid">
               <span class="fc-label">{$t('logbook.craft')}</span>
-              <span class="fc-value">{selectedFlight.craft_name || $t('logbook.unnamedCraft')}</span>
+              <span class="fc-value craft-value-row">
+                {#if craftNameEditing}
+                  <input
+                    class="craft-name-input"
+                    type="text"
+                    bind:value={craftNameDraft}
+                    onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') saveCraftName(); if (e.key === 'Escape') cancelCraftNameEdit(); }}
+                    onblur={saveCraftName}
+                    use:focusOnMount
+                  />
+                {:else}
+                  <span>{selectedFlight.craft_name || $t('logbook.unnamedCraft')}</span>
+                  <button class="weather-edit-btn" onclick={startCraftNameEdit} title={$t('logbook.editCraftName')}>✎</button>
+                {/if}
+              </span>
               <span class="fc-label">{$t('logbook.firmware')}</span>
               <span class="fc-value">{selectedFlight.fc_version || `${selectedFlight.fc_variant || '—'}`}</span>
               <span class="fc-label">{$t('logbook.source')}</span>
@@ -662,6 +714,28 @@
     display: flex;
     align-items: center;
     gap: 6px;
+  }
+
+  .craft-value-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .craft-name-input {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(55, 168, 219, 0.4);
+    border-radius: 4px;
+    color: #ccc;
+    font-size: 12px;
+    padding: 1px 6px;
+    outline: none;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .craft-name-input:focus {
+    border-color: #37a8db;
   }
 
   .weather-edit-btn {

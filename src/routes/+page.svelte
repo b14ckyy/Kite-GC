@@ -92,6 +92,7 @@
   let positionRateHz = $state(2);
   let airspeedEnabled = $state(false);
   let flightLoggingEnabled = $state(false);
+  let flightRecordingEnabled = $state(false);
   let flightLogDbPath = $state("");
   let flightLogRawEnabled = $state(false);
   let defaultFlightLogPath = $state("");
@@ -113,6 +114,11 @@
   let selectedFlightTrackCount = $state(0);
   let selectedFlightId: number | null = $state(null);
   let selectedFlightNotes = $state("");
+
+  // Remember last selected blackbox filter type ('inav' or 'ardupilot')
+  let lastBlackboxFilter = $state<string>(
+    (typeof localStorage !== 'undefined' && localStorage.getItem('lastBlackboxFilter')) || 'inav'
+  );
   let weatherTempC = $state("");
   let weatherWindMs = $state("");
   let weatherWindDir = $state("");
@@ -139,12 +145,15 @@
 
   const baudRates = [115200, 57600, 38400, 19200, 9600, 230400, 460800, 921600];
 
-  const tabs = [
+  const allTabs = [
     { id: "uav-info", label: () => $t('nav.uavInfo'), icon: "✈" },
     { id: "settings", label: () => $t('nav.settings'), icon: "⚙" },
     { id: "logbook", label: () => $t('nav.logbook'), icon: "📒" },
     { id: "mission", label: () => $t('nav.mission'), icon: "◎" },
   ];
+  const tabs = $derived(
+    flightLoggingEnabled ? allTabs : allTabs.filter(t => t.id !== 'logbook')
+  );
 
   let ports: PortInfo[] = $state([]);
   let connStatus: string = $state("disconnected");
@@ -169,6 +178,7 @@
   positionRateHz = saved.positionRateHz;
   airspeedEnabled = saved.airspeedEnabled;
   flightLoggingEnabled = saved.flightLoggingEnabled;
+  flightRecordingEnabled = saved.flightRecordingEnabled ?? false;
   flightLogDbPath = saved.flightLogDbPath;
   flightLogRawEnabled = saved.flightLogRawEnabled;
   mapProvider = saved.mapProvider;
@@ -342,16 +352,26 @@
 
   async function importBlackbox() {
     try {
+      const inavFilter = { name: $t('logbook.inavBlackboxFilter'), extensions: ['txt'] };
+      const apFilter = { name: $t('logbook.ardupilotFilter'), extensions: ['bin'] };
+      const filters = lastBlackboxFilter === 'ardupilot' ? [apFilter, inavFilter] : [inavFilter, apFilter];
+
       const selected = await open({
         multiple: true,
-        filters: [
-          { name: $t('logbook.blackboxFileFilter'), extensions: ['bbl', 'bfl', 'csv', 'txt'] },
-          { name: 'ArduPilot DataFlash', extensions: ['bin'] },
-        ],
+        filters,
       });
       if (!selected) return;
       const files = Array.isArray(selected) ? selected : [selected];
       if (files.length === 0) return;
+
+      // Remember which format was picked based on file extension
+      const firstExt = files[0].split('.').pop()?.toLowerCase();
+      if (firstExt === 'bin') {
+        lastBlackboxFilter = 'ardupilot';
+      } else {
+        lastBlackboxFilter = 'inav';
+      }
+      localStorage.setItem('lastBlackboxFilter', lastBlackboxFilter);
 
       blackboxImporting = true;
       for (const filePath of files) {
@@ -405,7 +425,7 @@
     }
 
     // Handle blackbox files
-    const bbFiles = paths.filter((p) => /\.(bbl|bfl|csv|txt)$/i.test(p));
+    const bbFiles = paths.filter((p) => /\.txt$/i.test(p));
     if (bbFiles.length === 0) return;
     try {
       blackboxImporting = true;
@@ -593,6 +613,12 @@
     weatherEditing = false;
   }
 
+  async function saveSelectedFlightCraftName(name: string) {
+    if (!selectedFlightId) return;
+    selectedFlight = await logbookCtrl.saveCraftName(selectedFlightId, name, flightLogDbPath);
+    await loadLogbook();
+  }
+
   async function removeSelectedFlight() {
     if (!selectedFlightId) return;
     const ok = await logbookCtrl.removeFlight(selectedFlightId, flightLogDbPath);
@@ -662,7 +688,7 @@
     isConnecting = true;
     errorMsg = "";
     connection.update((c) => ({ ...c, status: "connecting" }));
-    settings.patch({ lastPort: selectedPort, lastBaud: selectedBaud, flightLoggingEnabled, flightLogDbPath, flightLogRawEnabled });
+    settings.patch({ lastPort: selectedPort, lastBaud: selectedBaud, flightLoggingEnabled, flightRecordingEnabled, flightLogDbPath, flightLogRawEnabled });
 
     try {
       await connectFC({
@@ -675,9 +701,10 @@
         attitudeRateHz,
         positionRateHz,
         airspeedEnabled,
-        flightLogEnabled: flightLoggingEnabled,
+        flightLogEnabled: flightRecordingEnabled,
+        flightLogDbEnabled: flightLoggingEnabled && flightRecordingEnabled,
         flightLogPath: flightLogDbPath,
-        flightLogRaw: flightLogRawEnabled,
+        flightLogRaw: flightRecordingEnabled && (!flightLoggingEnabled || flightLogRawEnabled),
       });
     } catch (e: any) {
       errorMsg = e.toString();
@@ -890,6 +917,7 @@
             {positionRateHz}
             {airspeedEnabled}
             {flightLoggingEnabled}
+            {flightRecordingEnabled}
             {flightLogRawEnabled}
             {flightLogDbPath}
             {defaultFlightLogPath}
@@ -904,6 +932,7 @@
               if (patch.positionRateHz != null) positionRateHz = patch.positionRateHz;
               if (patch.airspeedEnabled != null) airspeedEnabled = patch.airspeedEnabled;
               if (patch.flightLoggingEnabled != null) flightLoggingEnabled = patch.flightLoggingEnabled;
+              if (patch.flightRecordingEnabled != null) flightRecordingEnabled = patch.flightRecordingEnabled;
               if (patch.flightLogRawEnabled != null) flightLogRawEnabled = patch.flightLogRawEnabled;
               if (patch.flightLogDbPath != null) flightLogDbPath = patch.flightLogDbPath;
               if (patch.mapProvider != null) mapProvider = patch.mapProvider;
@@ -943,6 +972,7 @@
             onSelectFlight={selectFlight}
             onSaveNotes={saveSelectedFlightNotes}
             onSaveWeather={saveSelectedFlightWeather}
+            onSaveCraftName={saveSelectedFlightCraftName}
             onDeleteFlight={removeSelectedFlight}
             onExportFlights={exportFlightsToKflight}
             onExportBlackbox={exportBlackbox}

@@ -121,6 +121,17 @@ pub fn flightlog_update_notes(
     db::update_flight_notes(&conn, flight_id, &notes).map_err(|e| format!("Update error: {}", e))
 }
 
+/// Update craft name on a flight
+#[tauri::command]
+pub fn flightlog_update_craft_name(
+    flight_id: i64,
+    craft_name: String,
+    db_path: Option<String>,
+) -> Result<(), String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::update_flight_craft_name(&conn, flight_id, &craft_name).map_err(|e| format!("Update error: {}", e))
+}
+
 /// Manually update weather data for a flight
 #[tauri::command]
 pub fn flightlog_update_weather(

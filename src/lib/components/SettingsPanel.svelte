@@ -16,6 +16,7 @@
     positionRateHz = 2,
     airspeedEnabled = false,
     flightLoggingEnabled = false,
+    flightRecordingEnabled = false,
     flightLogRawEnabled = false,
     flightLogDbPath = '',
     defaultFlightLogPath = '',
@@ -40,6 +41,7 @@
     positionRateHz?: number;
     airspeedEnabled?: boolean;
     flightLoggingEnabled?: boolean;
+    flightRecordingEnabled?: boolean;
     flightLogRawEnabled?: boolean;
     flightLogDbPath?: string;
     defaultFlightLogPath?: string;
@@ -91,6 +93,12 @@
   function handleFlightLoggingToggle(event: Event) {
     const checked = (event.target as HTMLInputElement).checked;
     onPatch({ flightLoggingEnabled: checked });
+  }
+
+  function handleFlightRecordingToggle(event: Event) {
+    const checked = (event.target as HTMLInputElement).checked;
+    onPatch({ flightRecordingEnabled: checked });
+    if (!checked) onPatch({ flightLogRawEnabled: false });
   }
 
   function handleFlightRawToggle(event: Event) {
@@ -253,9 +261,16 @@
     </label>
   </div>
   <div class="setting-row">
+    <label class="setting-label" for="flightrecord-enabled">{$t('settings.enableFlightRecording')}</label>
+    <label class="toggle-switch">
+      <input type="checkbox" id="flightrecord-enabled" checked={flightRecordingEnabled} onchange={handleFlightRecordingToggle} />
+      <span class="toggle-slider"></span>
+    </label>
+  </div>
+  <div class="setting-row" class:setting-disabled={!flightRecordingEnabled || (!flightLoggingEnabled && flightRecordingEnabled)}>
     <label class="setting-label" for="flightlog-raw">{$t('settings.rawFlightLogs')}</label>
     <label class="toggle-switch">
-      <input type="checkbox" id="flightlog-raw" checked={flightLogRawEnabled} onchange={handleFlightRawToggle} />
+      <input type="checkbox" id="flightlog-raw" checked={flightLogRawEnabled || (!flightLoggingEnabled && flightRecordingEnabled)} disabled={!flightRecordingEnabled || (!flightLoggingEnabled && flightRecordingEnabled)} onchange={handleFlightRawToggle} />
       <span class="toggle-slider"></span>
     </label>
   </div>
@@ -347,6 +362,11 @@
     justify-content: space-between;
     align-items: center;
     padding: 6px 0;
+  }
+
+  .setting-disabled {
+    opacity: 0.4;
+    pointer-events: none;
   }
 
   .setting-label {
