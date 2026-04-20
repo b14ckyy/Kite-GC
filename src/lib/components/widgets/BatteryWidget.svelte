@@ -12,7 +12,7 @@
   let mah = $derived(telem.lastUpdate ? `${telem.mAhDrawn} mAh` : '—');
 </script>
 
-<div class="widget-card" style="--ws: {size}vmin">
+<div class="widget-card" style="--ws: {size}px">
   <span class="w-label">{$t('widgetLabels.bat')}</span>
 
   <!-- Voltage bar — only shown when battery % is available from FC -->

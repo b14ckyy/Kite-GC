@@ -82,11 +82,13 @@ This document records key architecture decisions and their rationale.
 ## ADR-005: Floating Panel UI Layout
 
 **Date**: 2026-06-15
-**Status**: Accepted
+**Status**: Superseded by ADR-023
 
 **Context**: A GCS needs maximum map visibility at all times. Traditional sidebar layouts waste horizontal space — especially on smaller screens or when information panels are not actively needed.
 
 **Decision**: All UI panels are floating overlays on top of a full-viewport map. Navigation uses a hamburger menu button that opens a side rail with tab buttons and a floating content panel.
+
+> **Note**: The original floating-panel concept is retained, but the overall layout is now governed by a CSS Grid zone system (ADR-023). Panels float within the Panel Zone rather than using hardcoded viewport-relative positioning.
 
 **Layout**:
 ```
@@ -314,11 +316,13 @@ Full implementation plan: `docs/PROTOCOL_REFACTORING.md`
 ## ADR-011: Drag-and-Drop Widget Panel System
 
 **Date**: 2026-04-16
-**Status**: Accepted
+**Status**: Accepted (sizing updated by ADR-023)
 
 **Context**: The GCS needs a flexible HUD with multiple instrument widgets that users can arrange to their preference. Fixed layouts don't work well across different screen sizes and use cases (e.g. FPV flying prioritizes AHI, long-range prioritizes GPS/battery).
 
-**Decision**: Two drag-and-drop widget panels (bottom horizontal, right vertical) with edit-mode toggling. Widgets are classified as Large (22.5vmin) or Small (13.5vmin = 60% of large), all sized in `vmin` units.
+**Decision**: Two drag-and-drop widget panels (bottom horizontal, right vertical) with edit-mode toggling. Widgets are classified as Large (22.5 units) or Small (13.5 units = 60% of large). Sizing is container-relative (px computed from cross-axis), not viewport-relative.
+
+> **Note**: Originally sized in `vmin` CSS units. ADR-023 replaced this with container-relative px sizing — each dock independently computes its own `pxPerUnit = crossAxisPx / LARGE_BASE_VMIN`, fully decoupling bottom and side dock scaling.
 
 **Key design choices**:
 - **Snap positions only** — no free-form positioning. Widgets snap into ordered slots within panels.
@@ -898,4 +902,113 @@ Users may want recording without DB overhead, or DB logging without raw file cap
 - Enables raw-only mode for minimal overhead during flight
 - Aligns with multi-protocol architecture: each protocol has its own raw format
 - Logbook UI makes no sense when DB logging is disabled → hide the tab
+
+---
+
+## ADR-023: CSS Grid Zone Layout System
+
+**Date**: 2026-04-20
+**Status**: Accepted
+**Supersedes**: ADR-005 (layout structure only; floating panel concept is retained)
+**Updates**: ADR-011 (widget sizing changed from `vmin` to container-relative `px`)
+
+**Context**: The original layout used `position: absolute` for all overlay elements (panels, widgets, status bar) with hardcoded viewport-based calculations. This caused several problems:
+1. Widget sizing used `vmin` (= `min(viewport-width, viewport-height)`) — both dock panels scaled together when either viewport dimension changed
+2. Bottom widgets shrank below dock height when viewport height decreased (because `vmin` tracked the shorter dimension)
+3. Panel width/height limits used hardcoded pixel offsets (`calc(100vw - 86px)`) that didn't account for dynamic dock sizes
+4. No formal zone boundaries — elements overlapped unpredictably at extreme aspect ratios
+
+**Decision**: Replace ad-hoc absolute positioning with a CSS Grid layout on the `.app` container. The grid defines 7 named zones with fixed and flexible sizing. Widget sizing is converted from viewport-relative `vmin` to container-relative `px`.
+
+**Grid structure** (4 columns × 4 rows):
+
+```
+┌───────────┬───────────────────────────┬───────────────┬──────────┐
+│           │                           │               │          │
+│  TOOLBAR  │         TOOLBAR           │   TOOLBAR     │ TOOLBAR  │
+│  (62px)   │         (1fr)             │  (clamp)      │  (54px)  │
+├───────────┼───────────────────────────┼───────────────┤──────────┤
+│           │                           │               │          │
+│ NAV RAIL  │      PANEL ZONE           │  SIDE DOCK    │SIDE DOCK │
+│  (62px)   │        (1fr)              │(150-250px)    │          │
+│           │                           │               │          │
+├───────────┼───────────────────────────┤───────────────┼──────────┤
+│           │                           │               │          │
+│ NAV RAIL  │     BOTTOM DOCK           │ BOTTOM DOCK   │MAP CTRL  │
+│  (62px)   │   (184-300px tall)        │               │  (54px)  │
+│           │                           │               │          │
+├───────────┼───────────────────────────┼───────────────┼──────────┤
+│           │                           │               │          │
+│STATUS BAR │      STATUS BAR           │  STATUS BAR   │STATUS BAR│
+│  (24px)   │                           │               │          │
+└───────────┴───────────────────────────┴───────────────┴──────────┘
+```
+
+**CSS Grid definition**:
+```css
+grid-template-rows:    53px 1fr var(--grid-bottom-height) 24px;
+grid-template-columns: 62px 1fr var(--grid-side-width)    54px;
+grid-template-areas:
+  "toolbar      toolbar      toolbar      toolbar"
+  "nav-rail     panel        side-dock    side-dock"
+  "nav-rail     bottom-dock  bottom-dock  map-controls"
+  "status-bar   status-bar   status-bar   status-bar";
+```
+
+**Zone descriptions**:
+
+| Zone | Grid Area | Size | Purpose |
+|------|-----------|------|---------|
+| **Toolbar** | Row 1, Col 1–4 | 53px fixed | Logo, sensor bar, port selector, connect button |
+| **Nav Rail** | Row 2–3, Col 1 | 62px fixed | Hamburger menu + vertical tab icons |
+| **Panel Zone** | Row 2, Col 2 | 1fr × 1fr | Floating panels (Settings, UAV Info, Logbook, Mission) |
+| **Side Dock** | Row 2, Col 3–4 | clamp(150px, 15vw, 250px) | Vertical widget strip |
+| **Bottom Dock** | Row 3, Col 2–3 | clamp(184px, 20vh, 300px) | Horizontal widget strip |
+| **Map Controls** | Row 3, Col 4 | 54px fixed | Zoom, 3D toggle, compass buttons |
+| **Status Bar** | Row 4, Col 1–4 | 24px fixed | Connection status, arming state |
+| **Map** | Row 2–3, Col 1–4 | Full area (z-index 0) | Leaflet/CesiumJS map behind all zones |
+
+**Layout store** (`src/lib/stores/layout.ts`):
+- `LayoutProfile` type: `'flight' | 'mission' | 'area-planner'`
+- `ZoneDock` interface: `{ visible: boolean; sizeOverride: string | null }`
+- `GRID_DEFAULTS` constants for default clamp values
+- Methods: `setProfile()`, `setBottomDockVisible()`, `setSideDockVisible()`, `setBottomDockHeight()`, `setSideDockWidth()`
+- CSS custom properties `--grid-bottom-height` and `--grid-side-width` driven by store
+
+**Widget sizing — container-relative px** (replaces `vmin`):
+
+The old `vmin` approach meant `1vmin = min(viewport-width, viewport-height) / 100`, which coupled both docks to the same dimension. The new approach:
+
+```
+Container cross-axis (bind:clientWidth/Height)
+    ÷ LARGE_BASE_VMIN (22.5)
+    = pxPerUnit (unique per dock)
+
+Widget size (abstract units from computeSizes())
+    × pxPerUnit
+    = sizePx (CSS: --ws: {sizePx}px)
+```
+
+- **Bottom dock**: `pxPerUnit = (dockHeight - padding) / 22.5` → large widget fills dock height exactly
+- **Side dock**: `pxPerUnit = (dockWidth - padding) / 22.5` → large widget fills dock width exactly
+- Docks scale independently — changing viewport width doesn't affect bottom dock widget sizes
+- Zone padding (6px per side) provides gap between widgets and edges
+
+**Floating panels constrained to Panel Zone**:
+
+Panels remain `position: absolute` (floating overlay pattern) but their `max-height` and `width` are now derived from grid zone variables:
+```css
+max-height: calc(100vh - 53px - var(--grid-bottom-height) - 24px - 12px);
+width: min(360px, calc(100vw - 62px - var(--grid-side-width) - 54px - 12px));
+```
+This ensures panels never overflow into the bottom dock, side dock, or map controls — regardless of dock size configuration.
+
+**Rationale**:
+- CSS Grid provides declarative, maintainable zone boundaries without manual pixel math
+- Named grid areas make the layout self-documenting and easy to reconfigure per profile
+- Container-relative widget sizing eliminates all viewport coupling between docks
+- `clamp()` on dock sizes provides responsive behavior with hard min/max limits
+- Zone padding gives widgets breathing room without additional wrapper elements
+- Layout store enables future profile switching (e.g. hide side dock in mission mode)
+- Map always fills the full content area behind all zones (z-index 0) — no wasted space
 

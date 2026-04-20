@@ -29,7 +29,7 @@
   }
 </script>
 
-<div class="widget-card" style="--ws: {size}vmin">
+<div class="widget-card" style="--ws: {size}px">
   {#if telem.lastUpdate > 0}
     <div class="rt-row"><span class="rtk">ALT</span><span class="rtv">{altText}</span></div>
     <div class="rt-row"><span class="rtk">SPD</span><span class="rtv">{speedText}</span></div>

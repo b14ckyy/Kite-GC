@@ -19,7 +19,7 @@
   }
 </script>
 
-<div class="compass-container" style="--ws: {size}vmin">
+<div class="compass-container" style="--ws: {size}px">
   <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
     <!-- Rotating compass card -->
     <g transform="rotate({rotation}, 100, 100)">
@@ -73,6 +73,6 @@
     height: var(--ws);
     border-radius: 50%;
     background: rgba(0, 0, 0, 0.5);
-    box-shadow: 0 0 1.5vmin rgba(0, 0, 0, 0.5);
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
   }
 </style>

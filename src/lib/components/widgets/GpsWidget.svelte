@@ -36,7 +36,7 @@
   );
 </script>
 
-<div class="widget-card" style="--ws: {size}vmin">
+<div class="widget-card" style="--ws: {size}px">
   <span class="w-label">{$t('sensors.gps')}</span>
   <span class="w-coord">{latText}</span>
   <span class="w-coord">{lonText}</span>

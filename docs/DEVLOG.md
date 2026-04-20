@@ -35,7 +35,7 @@ Kite Ground Control is a cross-platform Ground Control Station supporting [INAV]
 Kite Ground Control/
 ├── src/                          # Svelte Frontend
 │   ├── routes/                   # SvelteKit pages/routes
-│   │   ├── +page.svelte          # Main application page (floating panel layout)
+│   │   ├── +page.svelte          # Main application page (CSS Grid zone layout)
 │   │   └── +layout.ts            # SvelteKit layout config (SSR disabled)
 │   ├── lib/                      # Shared frontend modules
 │   │   ├── stores/               # Svelte reactive state stores
@@ -44,6 +44,7 @@ Kite Ground Control/
 │   │   │   ├── settings.ts       # Session persistence (localStorage)
 │   │   │   ├── home.ts           # Home position store (set on arm + GPS fix)
 │   │   │   ├── mission.ts        # Mission state: WP types, stores, invoke wrappers, XML I/O
+│   │   │   ├── layout.ts        # Layout zone system: profiles, dock visibility, CSS grid overrides
 │   │   │   └── flightlog.ts      # Flight log API wrappers, types, grouping/sort helpers
 │   │   ├── controllers/          # Domain logic extracted from +page.svelte
 │   │   │   ├── connectionController.ts  # Serial port refresh, connect/disconnect, listener mgmt
@@ -212,21 +213,42 @@ npm run tauri build      # Build release for current platform
 
 ## UI Architecture
 
-The UI follows a **floating overlay** pattern — the map fills the entire viewport and all panels float on top:
+The UI uses a **CSS Grid zone layout** — the map fills the entire viewport behind all zones, and UI elements are placed in named grid areas. Floating panels overlay the map within the Panel Zone.
 
-- **Toolbar** (top): Logo, sensor status bar, serial port controls, connect button
-- **Hamburger Menu** (top-left over map): Opens the navigation rail + floating panel
-- **Navigation Rail**: Vertical icon buttons — UAV Info (✈), Settings (⚙), Mission (◎)
-- **Floating Panel**: Semi-transparent, backdrop-blur, slides in from left with animation
-- **HUD Widget Panels** (bottom + right): Drag-and-drop widget layout, viewport-relative sizing (vmin)
-- **Raw Telemetry Panel** (right side): Compact numeric readouts — implemented as a widget in the right panel
-- **Status Bar** (bottom): Connection status, arming state, app title
+**Grid layout** (4 columns × 4 rows):
+```
+┌──────────┬──────────────────────┬────────────┬──────────┐
+│ TOOLBAR  │      TOOLBAR         │  TOOLBAR   │ TOOLBAR  │
+│  (62px)  │       (1fr)          │  (clamp)   │  (54px)  │
+├──────────┼──────────────────────┼────────────┼──────────┤
+│          │                      │            │          │
+│ NAV RAIL │    PANEL ZONE        │ SIDE DOCK  │SIDE DOCK │
+│  (62px)  │      (1fr)           │(150-250px) │          │
+├──────────┼──────────────────────┼────────────┼──────────┤
+│          │                      │            │          │
+│ NAV RAIL │   BOTTOM DOCK        │BOTTOM DOCK │ MAP CTRL │
+│  (62px)  │  (184-300px tall)    │            │  (54px)  │
+├──────────┼──────────────────────┼────────────┼──────────┤
+│STATUS BAR│    STATUS BAR        │ STATUS BAR │STATUS BAR│
+└──────────┴──────────────────────┴────────────┴──────────┘
+```
+
+- **Toolbar** (top, fixed 53px): Logo, sensor status bar, serial port controls, connect button
+- **Nav Rail** (left, fixed 62px): Hamburger menu + vertical tab icons
+- **Panel Zone** (center, 1fr × 1fr): Floating panels (Settings, UAV Info, Logbook, Mission) — `position: absolute` with grid-variable-derived size limits
+- **Bottom Dock** (bottom center, clamp 184–300px): Horizontal widget strip with container-relative sizing
+- **Side Dock** (right, clamp 150–250px): Vertical widget strip with container-relative sizing
+- **Map Controls** (bottom right, fixed 54px): Zoom, 3D toggle, compass buttons
+- **Status Bar** (bottom, fixed 24px): Connection status, arming state, app title
+- **Map** (rows 2–3, all columns, z-index 0): Leaflet/CesiumJS map behind all zones
+
+**Layout store** (`src/lib/stores/layout.ts`): Drives grid zone visibility and size overrides via CSS custom properties. Supports layout profiles (`flight`, `mission`, `area-planner`) for future mode switching.
+
+**Widget sizing**: Container-relative px, not viewport-relative vmin. Each dock computes its own `pxPerUnit = crossAxisPx / LARGE_BASE_VMIN` from measured container dimensions, fully decoupling bottom and side dock scaling.
 
 All overlay elements use glassmorphism styling (backdrop-blur, semi-transparent backgrounds) with the INAV Configurator color scheme (#37a8db accent, #2e2e2e panels).
 
-Widget sizes use `vmin` units exclusively (no fixed pixels) to scale with viewport — this ensures consistent sizing on desktop and mobile in landscape mode.
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) ADR-005 for the full rationale.
+See [ARCHITECTURE.md](ARCHITECTURE.md) ADR-023 for the full rationale.
 
 ## MSP Protocol Implementation
 
@@ -276,17 +298,17 @@ Implemented via custom Svelte store with auto-save on every mutation. Schema evo
 
 ## HUD Widget Panel System
 
-The HUD uses a **two-panel drag-and-drop layout**:
+The HUD uses a **two-panel drag-and-drop layout** within the CSS Grid zone system:
 
-- **Bottom Panel**: Horizontal strip above the status bar, centered. Reserved corner (22.5vmin) at bottom-right for future controls.
-- **Right Panel**: Vertical strip on the right edge, centered vertically.
+- **Bottom Dock**: Horizontal strip (grid row 3, col 2–3), height `clamp(184px, 20vh, 300px)`. Edit button + centered widget strip.
+- **Side Dock**: Vertical strip (grid row 2, col 3–4), width `clamp(150px, 15vw, 250px)`.
 
 ### Widget Classes
-- **Large** (22.5vmin): AHI, Compass — circular, complex visualizations
-- **Small** (13.5vmin = 60% of large): All others — square, compact data display
+- **Large** (22.5 units): AHI, Compass — circular, complex visualizations
+- **Small** (13.5 units = 60% of large): All others — square, compact data display
 
-### Dynamic Sizing
-Panels compute available space from window dimensions minus reserved areas. Widgets render at base size and only shrink (down to 50% minimum) when the total exceeds available space. Window resize is tracked reactively.
+### Container-Relative Sizing
+Each dock measures its own cross-axis dimension (`bind:clientWidth/Height`) and computes an independent `pxPerUnit = (crossAxis - padding) / LARGE_BASE_VMIN`. Widget sizes are computed in abstract units by `computeSizes()`, then multiplied by `pxPerUnit` to get CSS `px` values. This fully decouples bottom and side dock scaling — changing viewport width only affects the bottom dock's main axis, not the side dock's widget sizes.
 
 ### Drag & Drop
 - **Half-position detection**: Cursor position relative to slot midpoint determines before/after insertion

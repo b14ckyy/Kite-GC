@@ -32,9 +32,11 @@
   import { convertSpeed, convertTemperature, toSpeedMs, toTemperatureC } from "$lib/utils/units";
   import type { TileCacheStats } from "$lib/cache/tileCache";
   import WidgetPanel from "$lib/components/WidgetPanel.svelte";
+  import { LARGE_BASE_VMIN } from "$lib/config/widgetRegistry";
   import MissionPanel from "$lib/components/MissionPanel.svelte";
   import { editMode } from "$lib/stores/mission";
   import type { InterfaceSettings, PanelConfig } from "$lib/stores/settings";
+  import { layout, GRID_DEFAULTS } from '$lib/stores/layout';
   import {
     getDefaultFlightlogPath,
     type BlackboxImportProgress,
@@ -44,37 +46,35 @@
   } from "$lib/stores/flightlog";
   import type { TrackColorMode } from "$lib/helpers/trackColors";
 
+  // ── Layout zone CSS custom properties (driven by layout store) ──
+  const gridBottomHeight = $derived(
+    $layout.bottomDock.sizeOverride ?? GRID_DEFAULTS.bottomDockHeight
+  );
+  const gridSideWidth = $derived(
+    $layout.sideDock.sizeOverride ?? GRID_DEFAULTS.sideDockWidth
+  );
+
   // Map view mode: 2D (Leaflet) or 3D (CesiumJS)
   let mapViewMode = $state<'2d' | '3d'>('2d');
 
-  // Reactive window dimensions for dynamic panel sizing
-  let winW = $state(typeof window !== 'undefined' ? window.innerWidth : 1920);
-  let winH = $state(typeof window !== 'undefined' ? window.innerHeight : 1080);
-  $effect(() => {
-    const onResize = () => { winW = window.innerWidth; winH = window.innerHeight; };
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  });
+  // Measured container dimensions (bind:clientWidth/Height on grid zones)
+  let bottomDockW = $state(800);
+  let bottomDockH = $state(200);
+  let sideDockW = $state(200);
+  let sideDockH = $state(400);
 
-  // Available vmin for each panel (screen space minus reserved areas)
-  const vminPx = $derived(Math.min(winW, winH) / 100);
-  const MAP_CONTROL_BUTTON_PX = 38;
-  const MAP_CONTROL_EDGE_PX = 8;
-  const MAP_CONTROL_GAP_PX = 8;
-  const MAP_CONTROL_STACK_COUNT = 4;
-  const MAP_CONTROL_BOTTOM_BLOCKER_PX = MAP_CONTROL_EDGE_PX + MAP_CONTROL_BUTTON_PX + 8;
-  const MAP_CONTROL_STACK_HEIGHT_PX =
-    MAP_CONTROL_EDGE_PX
-    + MAP_CONTROL_STACK_COUNT * MAP_CONTROL_BUTTON_PX
-    + (MAP_CONTROL_STACK_COUNT - 1) * MAP_CONTROL_GAP_PX;
-  const SIDE_PANEL_BOTTOM_GUARD_PX = 24 + MAP_CONTROL_STACK_HEIGHT_PX + 8;
+  // Per-container px-per-unit: 1 unit = cross-axis fraction so that
+  // LARGE_BASE_VMIN units == cross-axis px (widget fills dock height/width).
+  // This fully decouples bottom dock and side dock scaling.
+  // Subtract zone padding (6px each side) from cross-axis measurement.
+  const DOCK_PAD = 6;
+  const bottomPxPerUnit = $derived((bottomDockH - 2 * DOCK_PAD) / LARGE_BASE_VMIN);
+  const sidePxPerUnit   = $derived((sideDockW  - 2 * DOCK_PAD) / LARGE_BASE_VMIN);
 
-  // Bottom: left margin (2vmin) + right map-control blocker (fixed pixel width)
-  const bottomAvailVmin = $derived(
-    winW / vminPx - 2 - (MAP_CONTROL_BOTTOM_BLOCKER_PX / vminPx)
-  );
-  // Right: toolbar (~60px top) + statusbar (~30px) + bottom reserved (22.5vmin)
-  const rightAvailVmin = $derived((winH - 60 - 30) / vminPx - 22.5);
+  // Available space expressed in abstract units (container px / pxPerUnit)
+  // Bottom: subtract edit button (28px) + wrapper gap (6px) + zone padding (12px)
+  const bottomAvailUnits = $derived(Math.max(0, (bottomDockW - 34 - 2 * DOCK_PAD) / bottomPxPerUnit));
+  const rightAvailUnits  = $derived(Math.max(0, (sideDockH - 2 * DOCK_PAD) / sidePxPerUnit));
 
   let appVersion = $state("...");
   let selectedTransport = $state<TransportType>('serial');
@@ -1033,9 +1033,14 @@
 
 <ConfirmDialog bind:this={confirmDialog} />
 
-<main class="app">
+<main
+  class="app"
+  style:--grid-bottom-height={gridBottomHeight}
+  style:--grid-side-width={gridSideWidth}
+>
   <!-- ======= TOOLBAR ======= -->
-  <Toolbar
+  <div class="zone-toolbar">
+    <Toolbar
     {appVersion}
     {telem}
     {ports}
@@ -1055,11 +1060,12 @@
     onScanBle={handleScanBle}
     onConnect={handleConnect}
   />
+  </div>
 
   <!-- ======= MAP (always fullscreen behind everything) ======= -->
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="map-fullscreen" onclick={minimizeLogbook}>
+  <div class="zone-map" onclick={minimizeLogbook}>
     {#if mapViewMode === '2d'}
       <Map
         playbackTrack={mapTrack}
@@ -1233,7 +1239,7 @@
   {/if}
 
   <!-- ======= BOTTOM WIDGET PANEL ======= -->
-  <div class="panel-bottom" class:panel-editing={widgetEditMode}>
+  <div class="zone-bottom-dock" class:zone-hidden={!$layout.bottomDock.visible} class:panel-editing={widgetEditMode} bind:clientWidth={bottomDockW} bind:clientHeight={bottomDockH}>
     <div class="panel-bottom-wrap">
       <button
         class="widget-edit-btn widget-edit-btn--panel"
@@ -1247,7 +1253,8 @@
       <WidgetPanel
         widgetIds={panels.bottom}
         orientation="horizontal"
-        availableVmin={bottomAvailVmin}
+        availableVmin={bottomAvailUnits}
+        pxPerVmin={bottomPxPerUnit}
         {telem}
         editing={widgetEditMode}
         {interfaceSettings}
@@ -1259,11 +1266,12 @@
   </div>
 
   <!-- ======= RIGHT WIDGET PANEL ======= -->
-  <div class="panel-right" class:panel-editing={widgetEditMode}>
+  <div class="zone-side-dock" class:zone-hidden={!$layout.sideDock.visible} class:panel-editing={widgetEditMode} bind:clientWidth={sideDockW} bind:clientHeight={sideDockH}>
     <WidgetPanel
       widgetIds={panels.right}
       orientation="vertical"
-      availableVmin={rightAvailVmin}
+      availableVmin={rightAvailUnits}
+      pxPerVmin={sidePxPerUnit}
       {telem}
       editing={widgetEditMode}
       {interfaceSettings}
@@ -1273,9 +1281,9 @@
     />
   </div>
 
-  <!-- ======= BOTTOM-RIGHT RESERVED AREA (controls placeholder) ======= -->
-  <div class="reserved-corner">
-    <!-- reserved for future control buttons -->
+  <!-- ======= MAP CONTROLS RESERVED AREA ======= -->
+  <div class="zone-map-controls">
+    <!-- reserved for map control buttons (zoom, 3D toggle etc.) -->
   </div>
 
   <!-- ======= DEBUG PANEL (dev only) ======= -->
@@ -1292,14 +1300,16 @@
   {/if}
 
   <!-- ======= STATUS BAR ======= -->
-  <StatusBar
-    {connStatus}
-    {fcInfo}
-    {telem}
-    connectionPort={$connection.port}
-    devMode={DEV_MODE}
-    bind:debugOpen
-  />
+  <div class="zone-status-bar">
+    <StatusBar
+      {connStatus}
+      {fcInfo}
+      {telem}
+      connectionPort={$connection.port}
+      devMode={DEV_MODE}
+      bind:debugOpen
+    />
+  </div>
 </main>
 
 <style>
@@ -1319,20 +1329,86 @@
   }
 
   .app {
-    display: flex;
-    flex-direction: column;
+    display: grid;
     height: 100vh;
     position: relative;
+    grid-template-rows: 53px 1fr var(--grid-bottom-height) 24px;
+    grid-template-columns: 62px 1fr var(--grid-side-width) 54px;
+    grid-template-areas:
+      "toolbar      toolbar      toolbar      toolbar"
+      "nav-rail     panel        side-dock    side-dock"
+      "nav-rail     bottom-dock  bottom-dock  map-controls"
+      "status-bar   status-bar   status-bar   status-bar";
   }
 
-  /* --- Full-screen Map --- */
-  .map-fullscreen {
-    position: absolute;
-    top: 53px; /* toolbar height + border */
-    left: 0;
-    right: 0;
-    bottom: 24px; /* statusbar height */
+  /* ── Grid zone wrappers ─────────────────────────────────── */
+  .zone-toolbar {
+    grid-area: toolbar;
+    z-index: 200;
+  }
+
+  .zone-map {
+    /* Map spans the full content area behind all other zones */
+    grid-row: 2 / 4;
+    grid-column: 1 / -1;
     z-index: 0;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .zone-bottom-dock {
+    grid-area: bottom-dock;
+    z-index: 100;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    pointer-events: none;
+    overflow: hidden;
+    padding: 6px 0;
+  }
+
+  .zone-bottom-dock.panel-editing {
+    pointer-events: auto;
+  }
+
+  .zone-bottom-dock > * {
+    pointer-events: auto;
+  }
+
+  .zone-side-dock {
+    grid-area: side-dock;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    pointer-events: none;
+    overflow: hidden;
+    padding: 0 6px;
+  }
+
+  .zone-side-dock.panel-editing {
+    pointer-events: auto;
+  }
+
+  .zone-side-dock > :global(*) {
+    pointer-events: auto;
+  }
+
+  .zone-map-controls {
+    grid-area: map-controls;
+    z-index: 90;
+    pointer-events: none;
+  }
+
+  .zone-status-bar {
+    grid-area: status-bar;
+    z-index: 200;
+  }
+
+  /* Zone hidden toggle — collapses zone content */
+  .zone-hidden {
+    visibility: hidden;
+    pointer-events: none !important;
   }
 
   /* --- Floating Nav Panel --- */
@@ -1340,8 +1416,8 @@
     position: absolute;
     top: 65px;
     left: 62px; /* after the rail buttons */
-    width: min(360px, calc(100vw - 86px));
-    max-height: calc(100vh - 53px - 24px - 80px); /* toolbar - statusbar - margins */
+    width: min(360px, calc(100vw - 62px - var(--grid-side-width) - 54px - 12px));
+    max-height: calc(100vh - 53px - var(--grid-bottom-height) - 24px - 12px);
     background: rgba(46, 46, 46, 0.92);
     border: 1px solid rgba(55, 168, 219, 0.35);
     border-radius: 8px;
@@ -1356,15 +1432,15 @@
   }
 
   .nav-panel.nav-panel-logbook {
-    width: min(430px, calc(100vw - 86px));
+    width: min(430px, calc(100vw - 62px - var(--grid-side-width) - 54px - 12px));
   }
 
   .nav-panel.nav-panel-wide {
-    width: min(920px, calc(100vw - 86px));
+    width: min(920px, calc(100vw - 62px - var(--grid-side-width) - 54px - 12px));
   }
 
   .nav-panel.nav-panel-minimized {
-    width: min(280px, calc(100vw - 86px));
+    width: min(280px, calc(100vw - 62px - var(--grid-side-width) - 54px - 12px));
     cursor: pointer;
   }
 
@@ -1388,79 +1464,24 @@
     overflow-y: auto;
   }
 
-  /* --- Bottom Widget Panel --- */
-  .panel-bottom {
-    position: absolute;
-    bottom: 30px;
-    left: 2vmin;
-    right: 54px;
-    z-index: 100;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    pointer-events: none;
-  }
-
-  .panel-bottom.panel-editing {
-    pointer-events: auto;
-  }
-
-  .panel-bottom > * {
-    pointer-events: auto;
-  }
+  /* --- Bottom Widget Panel (inside .zone-bottom-dock) --- */
 
   .panel-bottom-wrap {
     display: flex;
     align-items: flex-end;
-    gap: 0.8vmin;
+    gap: 6px;
     pointer-events: auto;
-  }
-
-  /* --- Right Widget Panel --- */
-  .panel-right {
-    position: absolute;
-    top: 60px;
-    right: 0.5vmin;
-    bottom: 216px;
-    z-index: 100;
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    pointer-events: none;
-  }
-
-  .panel-right.panel-editing {
-    pointer-events: auto;
-  }
-
-  .panel-right > :global(*) {
-    pointer-events: auto;
-  }
-
-  /* --- Bottom-right reserved corner --- */
-  .reserved-corner {
-    position: absolute;
-    bottom: 30px;
-    right: 8px;
-    width: 54px;
-    height: 184px;
-    z-index: 90;
-    pointer-events: none;
-    /* Visible only in debug — uncomment to see reserved area */
-    /* outline: 1px dashed rgba(255,0,0,0.3); */
   }
 
   /* --- Widget edit toggle button --- */
   .widget-edit-btn {
-    width: 3.5vmin;
-    height: 3.5vmin;
-    min-width: 28px;
-    min-height: 28px;
+    width: 28px;
+    height: 28px;
     background: rgba(46, 46, 46, 0.85);
     border: 1px solid rgba(55, 168, 219, 0.3);
     border-radius: 6px;
     color: #949494;
-    font-size: 1.5vmin;
+    font-size: 13px;
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -1537,4 +1558,5 @@
     cursor: pointer;
     padding: 0 4px;
   }
+
 </style>

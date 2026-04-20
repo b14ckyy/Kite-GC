@@ -18,6 +18,8 @@
     widgetIds = [],
     orientation = 'horizontal',
     availableVmin = 80,
+    maxWidgetVmin = Infinity,
+    pxPerVmin = 1,
     telem,
     interfaceSettings = { speedUnit: 'kmh', altitudeUnit: 'm', distanceUnit: 'metric', verticalSpeedUnit: 'ms', temperatureUnit: 'c' },
     editing = false,
@@ -28,6 +30,8 @@
     widgetIds: string[];
     orientation: 'horizontal' | 'vertical';
     availableVmin: number;
+    maxWidgetVmin?: number;
+    pxPerVmin?: number;
     telem: TelemetryData;
     interfaceSettings?: InterfaceSettings;
     editing: boolean;
@@ -217,12 +221,17 @@
   function computeSizes(): { id: string; size: number; wclass: WidgetClass }[] {
     if (widgetIds.length === 0) return [];
 
-    // Calculate total "units" needed (large=1, small=0.6)
+    // Cross-axis determines the target large widget size (fill dock height/width).
+    // Cap at LARGE_BASE_VMIN so widgets don't grow beyond their designed max.
+    const effectiveLargeBase = Math.min(maxWidgetVmin, LARGE_BASE_VMIN);
+    const smallRatio = SMALL_BASE_VMIN / LARGE_BASE_VMIN; // 0.6
+
+    // Calculate total "units" needed (large=1, small=smallRatio)
     let totalUnits = 0;
     const items = widgetIds.map(id => {
       const def = WIDGET_MAP.get(id);
       const wclass: WidgetClass = def?.widgetClass ?? 'small';
-      const units = wclass === 'large' ? 1 : 0.6;
+      const units = wclass === 'large' ? 1 : smallRatio;
       totalUnits += units;
       return { id, wclass, units };
     });
@@ -232,33 +241,36 @@
     const totalGaps = (widgetIds.length - 1) * gapVmin;
     const usableVmin = availableVmin - totalGaps;
 
-    // Base: large = LARGE_BASE_VMIN, small = SMALL_BASE_VMIN
-    // Check if they fit at base size
-    const baseTotal = totalUnits * LARGE_BASE_VMIN;
-    const scale = baseTotal <= usableVmin ? 1 : usableVmin / baseTotal;
+    // Check if widgets fit at their effective base size, scale down if not
+    const baseTotal = totalUnits * effectiveLargeBase;
+    const scale = baseTotal <= usableVmin ? 1 : Math.max(MIN_SCALE, usableVmin / baseTotal);
 
     return items.map(item => ({
       id: item.id,
       wclass: item.wclass,
-      size: (item.wclass === 'large' ? LARGE_BASE_VMIN : SMALL_BASE_VMIN) * scale,
+      size: (item.wclass === 'large' ? effectiveLargeBase : effectiveLargeBase * smallRatio) * scale,
     }));
   }
 
-  let sizes = $derived(computeSizes());
+  // Convert vmin sizes → px for container-relative rendering
+  let sizes = $derived(computeSizes().map(s => ({ ...s, sizePx: s.size * pxPerVmin })));
+  const gapPx = $derived(0.5 * pxPerVmin);
 
   // Check if panel can accept one more widget
   function canAcceptMore(): boolean {
     // Simulate adding a small widget
     const simIds = [...widgetIds, '_test'];
+    const effBase = Math.min(maxWidgetVmin, LARGE_BASE_VMIN);
+    const smallRatio = SMALL_BASE_VMIN / LARGE_BASE_VMIN;
     let totalUnits = 0;
     for (const id of simIds) {
       const def = WIDGET_MAP.get(id);
       const wclass = def?.widgetClass ?? 'small';
-      totalUnits += wclass === 'large' ? 1 : 0.6;
+      totalUnits += wclass === 'large' ? 1 : smallRatio;
     }
     const totalGaps = (simIds.length - 1) * 0.5;
     const usableVmin = availableVmin - totalGaps;
-    const baseTotal = totalUnits * LARGE_BASE_VMIN;
+    const baseTotal = totalUnits * effBase;
     const scale = baseTotal <= usableVmin ? 1 : usableVmin / baseTotal;
     return scale >= MIN_SCALE;
   }
@@ -414,6 +426,7 @@
   class:editing
   class:empty={widgetIds.length === 0}
   class:drag-hover={externalDragOver}
+  style="gap: {gapPx}px;"
 >
   {#each sizes as item, idx (item.id)}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -433,23 +446,23 @@
       {/if}
       <div class="widget-content">
         {#if item.id === 'ahi'}
-          <AHI {telem} size={item.size} />
+          <AHI {telem} size={item.sizePx} />
         {:else if item.id === 'speed'}
-          <SpeedWidget {telem} size={item.size} {interfaceSettings} />
+          <SpeedWidget {telem} size={item.sizePx} {interfaceSettings} />
         {:else if item.id === 'altitude'}
-          <AltWidget {telem} size={item.size} {interfaceSettings} />
+          <AltWidget {telem} size={item.sizePx} {interfaceSettings} />
         {:else if item.id === 'battery'}
-          <BatteryWidget {telem} size={item.size} />
+          <BatteryWidget {telem} size={item.sizePx} />
         {:else if item.id === 'gps'}
-          <GpsWidget {telem} size={item.size} />
+          <GpsWidget {telem} size={item.sizePx} />
         {:else if item.id === 'compass'}
-          <CompassWidget {telem} size={item.size} />
+          <CompassWidget {telem} size={item.sizePx} />
         {:else if item.id === 'home'}
-          <HomeWidget {telem} size={item.size} {interfaceSettings} />
+          <HomeWidget {telem} size={item.sizePx} {interfaceSettings} />
         {:else if item.id === 'flightMode'}
-          <FlightModeWidget {telem} size={item.size} />
+          <FlightModeWidget {telem} size={item.sizePx} />
         {:else if item.id === 'rawTelemetry'}
-          <RawTelemetryWidget {telem} size={item.size} {interfaceSettings} />
+          <RawTelemetryWidget {telem} size={item.sizePx} {interfaceSettings} />
         {/if}
       </div>
     </div>
@@ -468,7 +481,7 @@
 <style>
   .widget-panel {
     display: flex;
-    gap: 0.5vmin;
+    /* gap is set inline via style="gap: {gapPx}px" */
     transition: outline 0.2s;
   }
 
@@ -489,9 +502,9 @@
     outline: 2px dashed rgba(55, 168, 219, 0.7);
     outline-offset: 4px;
     border-radius: 8px;
-    min-width: 4vmin;
-    min-height: 4vmin;
-    padding: 0.5vmin;
+    min-width: 40px;
+    min-height: 40px;
+    padding: 4px;
     background: rgba(0, 0, 0, 0.25);
   }
 
@@ -501,13 +514,13 @@
   }
 
   .widget-panel.horizontal.editing.empty {
-    min-width: 13.5vmin;
-    min-height: 13.5vmin;
+    min-width: 100px;
+    min-height: 100px;
   }
 
   .widget-panel.vertical.editing.empty {
-    min-width: 13.5vmin;
-    min-height: 13.5vmin;
+    min-width: 100px;
+    min-height: 100px;
   }
 
   .widget-panel.drag-hover {
@@ -560,34 +573,34 @@
 
   /* Horizontal: vertical insertion lines */
   .widget-panel.horizontal .widget-slot.insert-before::before {
-    left: -0.4vmin;
+    left: -3px;
     top: 0; bottom: 0;
     width: 3px;
   }
   .widget-panel.horizontal .widget-slot.insert-after::after {
-    right: -0.4vmin;
+    right: -3px;
     top: 0; bottom: 0;
     width: 3px;
   }
 
   /* Vertical: horizontal insertion lines */
   .widget-panel.vertical .widget-slot.insert-before::before {
-    top: -0.4vmin;
+    top: -3px;
     left: 0; right: 0;
     height: 3px;
   }
   .widget-panel.vertical .widget-slot.insert-after::after {
-    bottom: -0.4vmin;
+    bottom: -3px;
     left: 0; right: 0;
     height: 3px;
   }
 
   .drag-handle {
     position: absolute;
-    top: -0.3vmin;
+    top: -3px;
     left: 50%;
     transform: translateX(-50%);
-    font-size: 1.8vmin;
+    font-size: 14px;
     color: rgba(55, 168, 219, 0.7);
     z-index: 10;
     pointer-events: none;
@@ -596,7 +609,7 @@
 
   .widget-panel.vertical .drag-handle {
     top: 50%;
-    left: -1.5vmin;
+    left: -14px;
     transform: translateY(-50%) rotate(90deg);
   }
 

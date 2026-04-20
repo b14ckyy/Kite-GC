@@ -115,8 +115,8 @@
 
 <style>
   .ahi-container {
-    width: calc(var(--ahi-size, 15) * 1vmin);
-    height: calc(var(--ahi-size, 15) * 1vmin);
+    width: calc(var(--ahi-size, 150) * 1px);
+    height: calc(var(--ahi-size, 150) * 1px);
   }
 
   svg {
@@ -124,6 +124,6 @@
     height: 100%;
     border-radius: 50%;
     background: rgba(0, 0, 0, 0.3);
-    box-shadow: 0 0 1.5vmin rgba(0, 0, 0, 0.5);
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
   }
 </style>

@@ -28,7 +28,7 @@
   let varioNegative = $derived(telem.vario < -0.1);
 </script>
 
-<div class="widget-card" style="--ws: {size}vmin">
+<div class="widget-card" style="--ws: {size}px">
   <span class="w-label">{$t('widgetLabels.alt')}</span>
   <span class="w-value">{alt}</span>
   <span class="w-unit">{altConv.unit}</span>

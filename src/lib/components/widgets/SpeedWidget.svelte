@@ -28,7 +28,7 @@
   );
 </script>
 
-<div class="widget-card" style="--ws: {size}vmin">
+<div class="widget-card" style="--ws: {size}px">
   <span class="w-label">{$t('widgetLabels.spd')}</span>
   <span class="w-value">{speed}</span>
   <span class="w-unit">{speedConv.unit}</span>

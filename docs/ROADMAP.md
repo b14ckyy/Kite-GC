@@ -447,8 +447,12 @@ This document tracks planned features, organized by milestone.
 - [ ] Multi-aircraft support (multiple protocol handler instances, per-UAV stores)
 
 ### Additional Transports
-- [ ] Bluetooth (BLE) transport via ByteTransport
+- [x] Bluetooth (BLE) transport via ByteTransport (CC2541, Nordic NRF/NUS, SpeedyBee Type 1/2)
 - [ ] Wi-Fi Direct transport
+
+### Map Overlays
+- [ ] Airspace zones (CTR, restricted, danger, TMA) — colored polygons with legend
+- [ ] Aviation charts (OpenAIP tile layer — airports, navaids, airspace symbology)
 
 ### Advanced UI & Tools
 - [ ] OSD font/element preview
@@ -460,6 +464,13 @@ This document tracks planned features, organized by milestone.
 - [ ] Embedded video stream
 - [ ] FW approach / autoland planner
 - [ ] Geozone editor
+- [ ] Widget layout profiles (save/load named panel arrangements)
+- [ ] MAVLink signing (passphrase-based packet authentication)
+- [ ] AI-assisted flight log analysis (potential third-party collaboration)
+
+### Code Health & Maintainability
+- [ ] Rust module reorganization when `flightlog/` exceeds 20 files (parsers/, exporters/, models/)
+- [ ] `tauri-specta` for auto-generated TypeScript types from Rust structs (Rust↔TS type safety)
 
 ## [~] Milestone 7: CesiumJS 3D Map View (v0.7.x)
 

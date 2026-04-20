@@ -42,7 +42,7 @@
   );
 </script>
 
-<div class="widget-card" style="--ws: {size}vmin">
+<div class="widget-card" style="--ws: {size}px">
   <span class="w-label">{$t('widgetLabels.home')}</span>
 
   {#if home.set && telem.lastUpdate}
