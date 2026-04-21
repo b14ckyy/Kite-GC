@@ -1,0 +1,373 @@
+<script lang="ts">
+  import { t } from 'svelte-i18n';
+  import { convertAltitude, convertDistance, convertSpeed, convertTemperature, formatConverted } from '$lib/utils/units';
+  import { formatDurationSec } from '$lib/stores/flightlog';
+  import type { Flight } from '$lib/stores/flightlogTypes';
+  import type { InterfaceSettings } from '$lib/stores/settings';
+  import WeatherEditor from './WeatherEditor.svelte';
+
+  let {
+    flight,
+    trackCount,
+    minimized = false,
+    interfaceSettings,
+    notes = $bindable(),
+    weatherEditing = $bindable(),
+    weatherTempC = $bindable(),
+    weatherWindMs = $bindable(),
+    weatherWindDir = $bindable(),
+    weatherDesc = $bindable(),
+    onSaveNotes,
+    onSaveWeather,
+    onSaveCraftName,
+    onDeleteFlight,
+    onExportTrack,
+  }: {
+    flight: Flight;
+    trackCount: number;
+    minimized?: boolean;
+    interfaceSettings: InterfaceSettings;
+    notes: string;
+    weatherEditing: boolean;
+    weatherTempC: string;
+    weatherWindMs: string;
+    weatherWindDir: string;
+    weatherDesc: string;
+    onSaveNotes: () => void;
+    onSaveWeather: () => void;
+    onSaveCraftName: (name: string) => void;
+    onDeleteFlight: () => void;
+    onExportTrack: () => void;
+  } = $props();
+
+  let craftNameEditing = $state(false);
+  let craftNameDraft = $state('');
+
+  function startCraftNameEdit() {
+    craftNameDraft = flight.craft_name ?? '';
+    craftNameEditing = true;
+  }
+
+  function saveCraftName() {
+    craftNameEditing = false;
+    onSaveCraftName(craftNameDraft);
+  }
+
+  function cancelCraftNameEdit() {
+    craftNameEditing = false;
+  }
+
+  function focusOnMount(node: HTMLElement) {
+    node.focus();
+  }
+
+  function formatWeatherTemp(tempC: number | null | undefined): string {
+    if (tempC == null) return '';
+    const converted = convertTemperature(tempC, interfaceSettings.temperatureUnit);
+    return `${converted.value.toFixed(1)} ${converted.unit}`;
+  }
+
+  function formatAltitudeMeters(valueM: number | null | undefined): string {
+    if (valueM == null) return '—';
+    return formatConverted(convertAltitude(valueM, interfaceSettings.altitudeUnit), 1);
+  }
+
+  function formatSpeedMs(valueMs: number | null | undefined): string {
+    if (valueMs == null) return '—';
+    return formatConverted(convertSpeed(valueMs, interfaceSettings.speedUnit), 1);
+  }
+
+  function formatDistanceMeters(valueM: number | null | undefined): string {
+    if (valueM == null) return '—';
+    const converted = convertDistance(valueM, interfaceSettings.distanceUnit);
+    const digits = converted.unit === 'm' || converted.unit === 'ft' ? 0 : 1;
+    return formatConverted(converted, digits);
+  }
+
+  function formatWindSpeedMs(valueMs: number | null | undefined): string {
+    if (valueMs == null) return '';
+    return formatConverted(convertSpeed(valueMs, interfaceSettings.speedUnit), 1);
+  }
+
+  function windDegToLabel(deg: number): string {
+    const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+    return dirs[Math.round(deg / 45) % 8];
+  }
+
+  function formatFlightSource(source: string): string {
+    if (source === 'blackbox') return $t('logbook.sourceBlackbox');
+    if (source === 'both') return $t('logbook.sourceBoth');
+    return $t('logbook.sourceLive');
+  }
+
+  function formatDateTime(value: string): string {
+    const d = new Date(value);
+    return d.toLocaleString();
+  }
+
+  let tempUnitLabel = $derived(interfaceSettings.temperatureUnit === 'f' ? '°F' : '°C');
+  let windUnitLabel = $derived(convertSpeed(1, interfaceSettings.speedUnit).unit);
+
+  function autoResizeNotes(el: HTMLTextAreaElement, allowShrink = false) {
+    const current = el.offsetHeight;
+    el.style.height = 'auto';
+    const minH = allowShrink ? 44 : Math.max(44, current);
+    el.style.height = Math.max(minH, Math.min(el.scrollHeight, 140)) + 'px';
+  }
+
+  function notesAutoSize(el: HTMLTextAreaElement) {
+    autoResizeNotes(el, true);
+    return { update() { autoResizeNotes(el, true); } };
+  }
+</script>
+
+<div class="logbook-detail" class:logbook-detail-minimized={minimized}>
+  <div class="fc-info-grid">
+    <span class="fc-label">{$t('logbook.craft')}</span>
+    <span class="fc-value craft-value-row">
+      {#if craftNameEditing}
+        <input
+          class="craft-name-input"
+          type="text"
+          bind:value={craftNameDraft}
+          onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') saveCraftName(); if (e.key === 'Escape') cancelCraftNameEdit(); }}
+          onblur={saveCraftName}
+          use:focusOnMount
+        />
+      {:else}
+        <span>{flight.craft_name || $t('logbook.unnamedCraft')}</span>
+        <button class="weather-edit-btn" onclick={startCraftNameEdit} title={$t('logbook.editCraftName')}>✎</button>
+      {/if}
+    </span>
+    <span class="fc-label">{$t('logbook.firmware')}</span>
+    <span class="fc-value">{flight.fc_version || `${flight.fc_variant || '—'}`}</span>
+    <span class="fc-label">{$t('logbook.source')}</span>
+    <span class="fc-value">
+      {formatFlightSource(flight.source)}
+      {#if !minimized}<span class="flight-id-tag">#{flight.id}</span>{/if}
+      {#if flight.linked_flight_id} 🔗 #{flight.linked_flight_id}{/if}
+    </span>
+    <span class="fc-label">{$t('logbook.started')}</span>
+    <span class="fc-value">{formatDateTime(flight.start_time)}</span>
+    <span class="fc-label">{$t('logbook.duration')}</span>
+    <span class="fc-value">{formatDurationSec(flight.duration_sec)}</span>
+    <span class="fc-label">{$t('logbook.location')}</span>
+    <span class="fc-value">{flight.location_name || $t('logbook.unknownLocation')}</span>
+    <span class="fc-label">{$t('logbook.maxAlt')}</span>
+    <span class="fc-value">{formatAltitudeMeters(flight.max_alt_m)}</span>
+    <span class="fc-label">{$t('logbook.maxSpeed')}</span>
+    <span class="fc-value">{formatSpeedMs(flight.max_speed_ms)}</span>
+    <span class="fc-label">{$t('logbook.totalDistance')}</span>
+    <span class="fc-value">{formatDistanceMeters(flight.total_distance_m)}</span>
+    <span class="fc-label">{$t('logbook.maxDistance')}</span>
+    <span class="fc-value">{formatDistanceMeters(flight.max_distance_m)}</span>
+    <span class="fc-label">{$t('logbook.batteryUsed')}</span>
+    <span class="fc-value">{flight.battery_used_mah ?? '—'} mAh</span>
+    <span class="fc-label">{$t('logbook.trackPoints')}</span>
+    <span class="fc-value">{trackCount}</span>
+    <span class="fc-label">{$t('logbook.weather')}</span>
+    <span class="fc-value" class:weather-value-row={!minimized}>
+      <span>
+        {#if flight.weather_temp_c != null || flight.weather_desc}
+          {formatWeatherTemp(flight.weather_temp_c)}
+          {flight.weather_wind_ms != null ? ', ' + formatWindSpeedMs(flight.weather_wind_ms) : ''}
+          {flight.weather_wind_deg != null ? ' ' + windDegToLabel(flight.weather_wind_deg) : ''}
+          {flight.weather_desc ? ', ' + flight.weather_desc : ''}
+        {:else}
+          {$t('logbook.weatherUnavailable')}
+        {/if}
+      </span>
+      {#if !minimized}
+        <button class="weather-edit-btn" onclick={() => { weatherEditing = !weatherEditing; }} title={$t('logbook.editWeather')}>✎</button>
+      {/if}
+    </span>
+  </div>
+
+  {#if !minimized && weatherEditing}
+    <WeatherEditor
+      bind:weatherTempC
+      bind:weatherWindMs
+      bind:weatherWindDir
+      bind:weatherDesc
+      {tempUnitLabel}
+      {windUnitLabel}
+      onSave={onSaveWeather}
+    />
+  {/if}
+
+  <div class="setting-row setting-row-stack">
+    <span class="setting-label">{$t('logbook.notes')}</span>
+    <textarea
+      class="setting-input notes-input notes-input-auto"
+      rows="2"
+      readonly={minimized}
+      bind:value={notes}
+      oninput={minimized ? undefined : (e: Event) => autoResizeNotes(e.target as HTMLTextAreaElement)}
+      use:notesAutoSize
+    ></textarea>
+  </div>
+
+  {#if !minimized}
+    <div class="setting-row">
+      <button class="cache-clear-btn" onclick={onSaveNotes}>{$t('logbook.saveNotes')}</button>
+      <button class="cache-clear-btn" onclick={onExportTrack}>{$t('logbook.exportTrack')}</button>
+      <button class="cache-clear-btn logbook-danger" onclick={onDeleteFlight}>{$t('logbook.deleteFlight')}</button>
+    </div>
+  {/if}
+</div>
+
+<style>
+  .logbook-detail {
+    border: 1px solid #555;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.12);
+    padding: 10px;
+    overflow: auto;
+    max-height: 560px;
+  }
+
+  .logbook-detail-minimized {
+    border: none;
+    background: none;
+    padding: 0;
+  }
+
+  .fc-info-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 6px 10px;
+    font-size: 12px;
+  }
+
+  .fc-label {
+    color: #949494;
+  }
+
+  .fc-value {
+    color: #e0e0e0;
+    font-weight: 600;
+  }
+
+  .weather-value-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .craft-value-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .craft-name-input {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(55, 168, 219, 0.4);
+    border-radius: 4px;
+    color: #ccc;
+    font-size: 12px;
+    padding: 1px 6px;
+    outline: none;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .craft-name-input:focus {
+    border-color: #37a8db;
+  }
+
+  .weather-edit-btn {
+    background: none;
+    border: none;
+    color: #777;
+    cursor: pointer;
+    font-size: 13px;
+    padding: 0 2px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+
+  .weather-edit-btn:hover {
+    color: #37a8db;
+  }
+
+  .flight-id-tag {
+    font-size: 10px;
+    color: #777;
+    margin-left: 2px;
+  }
+
+  .setting-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+  }
+
+  .setting-row-stack {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+
+  .setting-label {
+    font-size: 12px;
+    color: #e0e0e0;
+  }
+
+  .setting-input {
+    padding: 3px 6px;
+    background: #434343;
+    border: 1px solid #555;
+    border-radius: 3px;
+    color: #e0e0e0;
+    font-size: 11px;
+  }
+
+  .notes-input {
+    width: 100%;
+    box-sizing: border-box;
+    resize: vertical;
+    min-height: 44px;
+  }
+
+  .notes-input-auto {
+    overflow-y: auto;
+    max-height: 140px;
+  }
+
+  .notes-input-auto[readonly] {
+    resize: none;
+    cursor: pointer;
+    opacity: 0.85;
+  }
+
+  .cache-clear-btn {
+    font-size: 9px;
+    padding: 1px 6px;
+    background: #434343;
+    border: 1px solid #555;
+    border-radius: 3px;
+    color: #ccc;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .cache-clear-btn:hover {
+    background: #c0392b;
+    border-color: #c0392b;
+    color: #fff;
+  }
+
+  .logbook-danger {
+    background: #7a2020;
+    border-color: #8b2525;
+    color: #e8c0c0;
+  }
+
+  .logbook-danger:hover {
+    background: #9b1f1f;
+    border-color: #9b1f1f;
+    color: #fff;
+  }
+</style>

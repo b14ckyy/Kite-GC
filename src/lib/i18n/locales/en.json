@@ -377,7 +377,9 @@
     "moveDown": "Move down",
     "removeWp": "Remove WP",
     "jumpLineTooltip": "Jump → WP{target} {label}",
-    "rthLineTooltip": "RTH"
+    "rthLineTooltip": "RTH",
+    "lat": "Lat",
+    "lon": "Lon"
   },
   "debug": {
     "title": "🔧 MSP Debug Monitor",

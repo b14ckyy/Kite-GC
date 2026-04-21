@@ -9,7 +9,7 @@
   import { cachedTileLayer } from "$lib/cache/CachedTileLayer";
   import { initTileCache } from "$lib/cache/tileCache";
   import { homePosition } from "$lib/stores/home";
-  import MissionLayer from "./MissionLayer.svelte";
+  import MissionLayer from "./mission/MissionLayer.svelte";
   import type { TelemetryRecord } from "$lib/stores/flightlog";
   import {
     segmentTrackByFlightMode,

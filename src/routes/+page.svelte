@@ -11,11 +11,11 @@
   import { t, locale } from 'svelte-i18n';
   import Map from "$lib/components/Map.svelte";
   import Map3D from "$lib/components/Map3D.svelte";
-  import LogPlayer from "$lib/components/LogPlayer.svelte";
+  import LogPlayer from "$lib/components/logbook/LogPlayer.svelte";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import type { DialogButton, DialogOptions } from "$lib/components/ConfirmDialog.svelte";
   import SettingsPanel from "$lib/components/SettingsPanel.svelte";
-  import LogbookPanel from "$lib/components/LogbookPanel.svelte";
+  import LogbookPanel from "$lib/components/logbook/LogbookPanel.svelte";
   import Toolbar from "$lib/components/Toolbar.svelte";
   import UavInfoPanel from "$lib/components/UavInfoPanel.svelte";
   import StatusBar from "$lib/components/StatusBar.svelte";
@@ -29,11 +29,11 @@
   import { homePosition } from '$lib/stores/home';
   import { MAP_PROVIDERS } from "$lib/config/mapProviders";
   import { tileCacheStats, setCacheMaxMB, clearCache } from "$lib/cache/tileCache";
-  import { convertSpeed, convertTemperature, toSpeedMs, toTemperatureC } from "$lib/utils/units";
+  import { weatherTempDisplayFromC, weatherWindDisplayFromMs, weatherTempCFromDisplay, weatherWindMsFromDisplay, canonicalWeatherDescription } from "$lib/helpers/weather";
   import type { TileCacheStats } from "$lib/cache/tileCache";
   import WidgetPanel from "$lib/components/WidgetPanel.svelte";
   import { LARGE_BASE_VMIN } from "$lib/config/widgetRegistry";
-  import MissionPanel from "$lib/components/MissionPanel.svelte";
+  import MissionPanel from "$lib/components/mission/MissionPanel.svelte";
   import { editMode } from "$lib/stores/mission";
   import type { InterfaceSettings, PanelConfig } from "$lib/stores/settings";
   import { layout, GRID_DEFAULTS } from '$lib/stores/layout';
@@ -169,48 +169,6 @@
   let playbackSpeed = $state(1);
   const playbackCtrl = new PlaybackController();
   let logbookMinimized = $state(false);
-
-  function weatherTempDisplayFromC(tempC: string): string {
-    if (tempC === '' || isNaN(Number(tempC))) return '';
-    const v = convertTemperature(Number(tempC), interfaceSettings.temperatureUnit).value;
-    return String(Math.round(v * 10) / 10);
-  }
-
-  function weatherWindDisplayFromMs(windMs: string): string {
-    if (windMs === '' || isNaN(Number(windMs))) return '';
-    const v = convertSpeed(Number(windMs), interfaceSettings.speedUnit).value;
-    return String(Math.round(v * 10) / 10);
-  }
-
-  function weatherTempCFromDisplay(displayValue: string): string {
-    if (displayValue === '' || isNaN(Number(displayValue))) return '';
-    const v = toTemperatureC(Number(displayValue), interfaceSettings.temperatureUnit);
-    return String(Math.round(v * 10) / 10);
-  }
-
-  function weatherWindMsFromDisplay(displayValue: string): string {
-    if (displayValue === '' || isNaN(Number(displayValue))) return '';
-    const v = toSpeedMs(Number(displayValue), interfaceSettings.speedUnit);
-    return String(Math.round(v * 10) / 10);
-  }
-
-  function canonicalWeatherDescription(desc: string): string {
-    const trimmed = desc.trim();
-    if (!trimmed) return '';
-    const standard = [
-      'Clear',
-      'Partly Cloudy',
-      'Overcast',
-      'Light Rain',
-      'Moderate Rain',
-      'Rain',
-      'Snow',
-      'Fog',
-      'Stormy',
-    ];
-    const match = standard.find((v) => v.toLowerCase() === trimmed.toLowerCase());
-    return match ?? trimmed;
-  }
 
   // Replay source: 'live' or 'blackbox' — for linked flights, switches which track is shown
   let replaySource = $state<'live' | 'blackbox'>('live');
@@ -718,8 +676,8 @@
     selectedFlightTrack = data.track;
     selectedFlightTrackCount = data.trackCount;
     selectedFlightNotes = data.notes;
-    weatherTempC = weatherTempDisplayFromC(data.weatherTempC);
-    weatherWindMs = weatherWindDisplayFromMs(data.weatherWindMs);
+    weatherTempC = weatherTempDisplayFromC(data.weatherTempC, interfaceSettings);
+    weatherWindMs = weatherWindDisplayFromMs(data.weatherWindMs, interfaceSettings);
     weatherWindDir = data.weatherWindDir;
     weatherDesc = canonicalWeatherDescription(data.weatherDesc);
     weatherEditing = false;
@@ -759,15 +717,15 @@
     if (!selectedFlightId) return;
     selectedFlight = await logbookCtrl.saveWeather(
       selectedFlightId,
-      weatherTempCFromDisplay(weatherTempC),
-      weatherWindMsFromDisplay(weatherWindMs),
+      weatherTempCFromDisplay(weatherTempC, interfaceSettings),
+      weatherWindMsFromDisplay(weatherWindMs, interfaceSettings),
       weatherWindDir,
       canonicalWeatherDescription(weatherDesc),
       flightLogDbPath,
     );
     // Keep editor/display values in selected UI units after save refresh
-    weatherTempC = weatherTempDisplayFromC(selectedFlight?.weather_temp_c != null ? String(selectedFlight.weather_temp_c) : '');
-    weatherWindMs = weatherWindDisplayFromMs(selectedFlight?.weather_wind_ms != null ? String(selectedFlight.weather_wind_ms) : '');
+    weatherTempC = weatherTempDisplayFromC(selectedFlight?.weather_temp_c != null ? String(selectedFlight.weather_temp_c) : '', interfaceSettings);
+    weatherWindMs = weatherWindDisplayFromMs(selectedFlight?.weather_wind_ms != null ? String(selectedFlight.weather_wind_ms) : '', interfaceSettings);
     weatherDesc = canonicalWeatherDescription(selectedFlight?.weather_desc ?? '');
     weatherEditing = false;
   }
@@ -1183,10 +1141,12 @@
                 };
                 if (selectedFlight) {
                   weatherTempC = weatherTempDisplayFromC(
-                    selectedFlight.weather_temp_c != null ? String(selectedFlight.weather_temp_c) : ''
+                    selectedFlight.weather_temp_c != null ? String(selectedFlight.weather_temp_c) : '',
+                    { ...interfaceSettings, ...patch.interface },
                   );
                   weatherWindMs = weatherWindDisplayFromMs(
-                    selectedFlight.weather_wind_ms != null ? String(selectedFlight.weather_wind_ms) : ''
+                    selectedFlight.weather_wind_ms != null ? String(selectedFlight.weather_wind_ms) : '',
+                    { ...interfaceSettings, ...patch.interface },
                   );
                 }
               }
