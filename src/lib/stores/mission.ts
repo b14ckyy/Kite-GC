@@ -267,6 +267,11 @@ export function resetMultiMission(): void {
   activeMissionIndex.set(1);
 }
 
+/** Reset in-memory mission without touching the FC (used when switching autopilot systems) */
+export function missionResetMemory(): void {
+  mission.set(createEmptyMission());
+}
+
 // ── Backend Sync ────────────────────────────────────────────────────
 
 /** Fetch current mission from backend */

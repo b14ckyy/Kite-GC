@@ -27,6 +27,8 @@ use commands::mission::{
     mission_remove_wp, mission_update_wp, mission_reorder_wp,
     mission_download, mission_upload, mission_export_xml, mission_import_xml,
     mission_save_file, mission_load_file,
+    read_text_file, write_text_file,
+    ardu_mission_download, ardu_mission_upload,
 };
 use mission::store::MissionStore;
 use state::AppState;
@@ -93,6 +95,10 @@ pub fn run() {
             mission_import_xml,
             mission_save_file,
             mission_load_file,
+            read_text_file,
+            write_text_file,
+            ardu_mission_download,
+            ardu_mission_upload,
             flightlog_list,
             flightlog_get,
             flightlog_get_track,

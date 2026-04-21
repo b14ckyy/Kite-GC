@@ -2,6 +2,7 @@
 
 use tauri::State;
 
+use crate::mavlink_proto::{self, ArduWaypoint};
 use crate::mission::store::{MissionStore, mission_from_xml, mission_to_xml};
 use crate::mission::types::{Mission, Waypoint, WpAction};
 use crate::mission::codec;
@@ -223,4 +224,53 @@ pub fn mission_load_file(path: String, store: State<'_, MissionStore>) -> Result
     let mission = mission_from_xml(&xml)?;
     store.set(mission.clone());
     Ok(mission)
+}
+
+/// Download ArduPilot mission from FC via MAVLink mission microprotocol.
+/// Returns the mission as a flat Vec<ArduWaypoint> for the frontend store.
+#[tauri::command]
+pub fn ardu_mission_download(state: State<'_, AppState>) -> Result<Vec<ArduWaypoint>, String> {
+    // Clone the command sender + sysid while holding the mutex briefly.
+    // The actual protocol exchange runs after the lock is released.
+    let (cmd_tx, fc_sysid) = {
+        let proto = state.protocol.lock().map_err(|e| e.to_string())?;
+        match proto.as_ref() {
+            Some(ActiveProtocol::Mavlink(h)) => (h.cmd_tx_clone(), h.fc_sysid),
+            Some(ActiveProtocol::Msp(_)) => return Err("FC is not running MAVLink".into()),
+            None => return Err("Not connected".into()),
+        }
+    };
+    mavlink_proto::mission::download(&cmd_tx, fc_sysid)
+}
+
+/// Upload an ArduPilot mission to the FC via MAVLink mission microprotocol.
+#[tauri::command]
+pub fn ardu_mission_upload(
+    waypoints: Vec<ArduWaypoint>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    if waypoints.is_empty() {
+        return Err("No waypoints to upload".into());
+    }
+    let (cmd_tx, fc_sysid) = {
+        let proto = state.protocol.lock().map_err(|e| e.to_string())?;
+        match proto.as_ref() {
+            Some(ActiveProtocol::Mavlink(h)) => (h.cmd_tx_clone(), h.fc_sysid),
+            Some(ActiveProtocol::Msp(_)) => return Err("FC is not running MAVLink".into()),
+            None => return Err("Not connected".into()),
+        }
+    };
+    mavlink_proto::mission::upload(&cmd_tx, fc_sysid, &waypoints)
+}
+
+/// Read a text file from disk (used for .waypoints and similar formats)
+#[tauri::command]
+pub fn read_text_file(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {e}"))
+}
+
+/// Write text content to a file (used for .waypoints and similar formats)
+#[tauri::command]
+pub fn write_text_file(path: String, content: String) -> Result<(), String> {
+    std::fs::write(&path, content).map_err(|e| format!("Failed to write file: {e}"))
 }

@@ -33,12 +33,18 @@ pub enum MavlinkCommand {
         msg: MavMessage,
         reply: mpsc::Sender<Result<(), String>>,
     },
+    /// Register a channel to receive MISSION_* messages during an active operation
+    RegisterMissionReceiver(mpsc::Sender<MavMessage>),
+    /// Unregister the mission receiver — telemetry dispatch resumes for all messages
+    UnregisterMissionReceiver,
 }
 
 /// Handle for interacting with the running MAVLink handler
 pub struct MavlinkHandle {
     cmd_tx: mpsc::Sender<MavlinkCommand>,
     thread: Option<thread::JoinHandle<Option<Box<dyn ByteTransport>>>>,
+    /// System ID of the connected FC (from handshake)
+    pub fc_sysid: u8,
 }
 
 impl MavlinkHandle {
@@ -52,6 +58,12 @@ impl MavlinkHandle {
         reply_rx
             .recv_timeout(Duration::from_secs(5))
             .map_err(|_| "Handler send timeout".to_string())?
+    }
+
+    /// Clone the command sender — callers can use this to drive mission operations
+    /// without holding the AppState mutex for the duration of the operation.
+    pub fn cmd_tx_clone(&self) -> mpsc::Sender<MavlinkCommand> {
+        self.cmd_tx.clone()
     }
 
     /// Stop the handler and return the transport for cleanup
@@ -80,6 +92,7 @@ pub fn start(
     MavlinkHandle {
         cmd_tx,
         thread: Some(thread),
+        fc_sysid,
     }
 }
 
@@ -100,6 +113,10 @@ fn handler_loop(
     // Accumulated analog state — MAVLink splits battery data across multiple messages
     let mut analog = AnalogState::default();
 
+    // Active mission operation receiver — when set, MISSION_* messages are forwarded
+    // here instead of being dispatched as telemetry events.
+    let mut mission_fwd: Option<mpsc::Sender<MavMessage>> = None;
+
     let gcs_header = codec::gcs_header();
 
     log::info!("MAVLink handler started (FC sysid={})", fc_sysid);
@@ -109,7 +126,6 @@ fn handler_loop(
         match cmd_rx.try_recv() {
             Ok(MavlinkCommand::Stop) => {
                 log::info!("MAVLink handler stopping (processed {} messages)", msg_count);
-                // Shutdown recorder (flush active flight)
                 if let Some(ref rec) = recorder {
                     if let Ok(mut r) = rec.lock() { r.shutdown(); }
                 }
@@ -121,6 +137,16 @@ fn handler_loop(
                     .write_bytes(&frame)
                     .map_err(|e| format!("MAVLink send failed: {}", e));
                 let _ = reply.send(result);
+                continue;
+            }
+            Ok(MavlinkCommand::RegisterMissionReceiver(tx)) => {
+                log::debug!("MAVLink mission receiver registered");
+                mission_fwd = Some(tx);
+                continue;
+            }
+            Ok(MavlinkCommand::UnregisterMissionReceiver) => {
+                log::debug!("MAVLink mission receiver unregistered");
+                mission_fwd = None;
                 continue;
             }
             Err(mpsc::TryRecvError::Empty) => {}
@@ -145,20 +171,14 @@ fn handler_loop(
 
         // 3. Read incoming bytes and parse MAVLink frames
         match transport.read_bytes(&mut buf) {
-            Ok(0) => {
-                // No data — transport timeout, loop back
-            }
+            Ok(0) => {}
             Ok(n) => {
                 for frame in parser.parse_bytes(&buf[..n]) {
-                    // Filter: only accept messages from our FC
-                    if frame.header.system_id != fc_sysid {
-                        continue;
-                    }
+                    if frame.header.system_id != fc_sysid { continue; }
 
                     msg_count += 1;
-                    dispatch_message(&frame.header, &frame.message, &app_handle, &mut analog, &recorder);
 
-                    // Write raw frame to tlog if recording
+                    // Record raw frame to tlog before any forwarding
                     if !frame.raw_bytes.is_empty() {
                         if let Some(ref rec) = recorder {
                             if let Ok(mut r) = rec.lock() {
@@ -166,17 +186,28 @@ fn handler_loop(
                             }
                         }
                     }
+
+                    // Forward MISSION_* messages to any active mission operation.
+                    // This keeps mission protocol messages out of the telemetry stream.
+                    if is_mission_message(&frame.message) {
+                        if let Some(ref tx) = mission_fwd {
+                            if tx.send(frame.message).is_err() {
+                                // Receiver dropped — operation likely timed out
+                                mission_fwd = None;
+                            }
+                            continue;
+                        }
+                    }
+
+                    dispatch_message(&frame.header, &frame.message, &app_handle, &mut analog, &recorder);
                 }
             }
-            Err(crate::transport::TransportError::Timeout) => {
-                // Normal — no data available
-            }
+            Err(crate::transport::TransportError::Timeout) => {}
             Err(crate::transport::TransportError::Disconnected) => {
                 log::warn!("MAVLink transport disconnected");
                 if let Some(ref rec) = recorder {
                     if let Ok(mut r) = rec.lock() { r.shutdown(); }
                 }
-                // Emit disconnect event
                 let _ = app_handle.emit("mavlink-disconnected", ());
                 return Some(transport);
             }
@@ -185,6 +216,20 @@ fn handler_loop(
             }
         }
     }
+}
+
+/// Returns true for MAVLink messages that belong to the mission microprotocol.
+fn is_mission_message(msg: &MavMessage) -> bool {
+    matches!(msg,
+        MavMessage::MISSION_REQUEST_LIST(_)
+        | MavMessage::MISSION_COUNT(_)
+        | MavMessage::MISSION_CLEAR_ALL(_)
+        | MavMessage::MISSION_ACK(_)
+        | MavMessage::MISSION_REQUEST_INT(_)
+        | MavMessage::MISSION_REQUEST(_)
+        | MavMessage::MISSION_ITEM_INT(_)
+        | MavMessage::MISSION_ITEM(_)
+    )
 }
 
 /// Accumulated analog/battery state — MAVLink splits data across SYS_STATUS,

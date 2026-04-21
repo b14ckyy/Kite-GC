@@ -51,6 +51,7 @@ export interface AppSettings {
   // Mission Control
   defaultWpAltitudeM: number;
   defaultPhTimeSec: number;
+  lastAutopilotSystem: string;
   // Alerts
   warnAltitudeM: number;
   // Global UI options (display-only conversions)
@@ -87,6 +88,7 @@ const defaults: AppSettings = {
   flightLogRawAlways: false,
   defaultWpAltitudeM: 50,
   defaultPhTimeSec: 30,
+  lastAutopilotSystem: 'inav',
   warnAltitudeM: 120,
   interface: {
     speedUnit: 'kmh',
