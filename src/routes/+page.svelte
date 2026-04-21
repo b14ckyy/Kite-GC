@@ -1035,20 +1035,17 @@
         onToggleMapView={() => mapViewMode = mapViewMode === '2d' ? '3d' : '2d'}
       />
     {:else}
-      <Map3D playbackTrack={mapTrack} playbackPoint={playbackPoint} {trackColorMode} platformType={mapPlatformType} fcVariant={replayFcVariant} />
+      <Map3D
+        playbackTrack={mapTrack}
+        playbackPoint={playbackPoint}
+        {trackColorMode}
+        platformType={mapPlatformType}
+        fcVariant={replayFcVariant}
+        {mapViewMode}
+        onToggleMapView={() => mapViewMode = mapViewMode === '2d' ? '3d' : '2d'}
+      />
     {/if}
   </div>
-
-  {#if mapViewMode === '3d'}
-    <button
-      class="map-view-toggle-3d"
-      onclick={() => mapViewMode = '2d'}
-      title="2D View"
-      aria-label="Switch to 2D view"
-    >
-      2D
-    </button>
-  {/if}
 
   <LogPlayer
     {showPlayer}
@@ -1466,33 +1463,6 @@
     color: #37a8db;
   }
 
-  .map-view-toggle-3d {
-    position: absolute;
-    right: 8px;
-    bottom: 32px;
-    z-index: 130;
-    width: 38px;
-    height: 38px;
-    background: rgba(46, 46, 46, 0.9);
-    border: 2px solid rgba(55, 168, 219, 0.5);
-    border-radius: 6px;
-    color: #37a8db;
-    font-size: 13px;
-    font-weight: 700;
-    letter-spacing: 0.03em;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    backdrop-filter: blur(8px);
-    transition: background 0.2s, border-color 0.2s, color 0.2s;
-    box-sizing: border-box;
-  }
-
-  .map-view-toggle-3d:hover {
-    background: rgba(55, 168, 219, 0.25);
-    border-color: #37a8db;
-  }
 
   /* --- Error Bar --- */
   .error-bar {

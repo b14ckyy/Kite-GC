@@ -26,12 +26,16 @@
     trackColorMode = 'flightmode' as TrackColorMode,
     platformType = PLATFORM_MULTIROTOR as PlatformType,
     fcVariant = 'INAV',
+    mapViewMode = '3d' as '2d' | '3d',
+    onToggleMapView,
   }: {
     playbackTrack?: TelemetryRecord[];
     playbackPoint?: TelemetryRecord | null;
     trackColorMode?: TrackColorMode;
     platformType?: PlatformType;
     fcVariant?: string;
+    mapViewMode?: '2d' | '3d';
+    onToggleMapView?: () => void;
   } = $props();
 
   // ── State ──────────────────────────────────────────────────────────
@@ -52,9 +56,24 @@
   let lastTrailLat = 0;
   let lastTrailLon = 0;
 
-  // Chase camera state
-  let chaseModeActive = $state(false);
-  let cameraOffset = { heading: 0, pitch: -25, range: 200 };
+  // Camera mode: free (no lock) | follow (smooth chase) | orbit (locked target, free orbit)
+  type Camera3DMode = 'free' | 'follow' | 'orbit';
+  let cameraMode = $state<Camera3DMode>('free');
+
+  // Range (meters to target) for follow and orbit modes. Updated by zoom buttons and
+  // mouse-wheel zoom. Separate from free mode which uses Cesium's native zoom.
+  let lockRange = 200;
+
+  // Follow cam pitch: user-adjustable, clamped to 0 (horizon) … -π/2 (top-down).
+  // Mouse up/down drag changes camera.pitch which we read and clamp each frame.
+  let followPitch = -25 * (Math.PI / 180);
+
+  // Orbit cam: tracks the lerped point the camera orbits around
+  let orbitCenter = new Cesium.Cartesian3();
+  let orbitLerpActive = false;
+  let orbitInited = false;
+  let orbitCurrentPos = { lat: 0, lon: 0, alt: 0 };
+  let orbitTargetPos = { lat: 0, lon: 0, alt: 0 };
 
   // Smooth chase camera interpolation state
   let chaseLerpActive = false;
@@ -347,8 +366,10 @@
       updateUavPosition3D(telem.lat, telem.lon, alt, telem.yaw, telem.activeFlightModeFlags);
       trackFollowPosition(telem.lat, telem.lon, alt, telem.yaw);
 
-      if (chaseModeActive) {
+      if (cameraMode === 'follow') {
         updateChaseCamera(telem.lat, telem.lon, alt, telem.yaw);
+      } else if (cameraMode === 'orbit') {
+        updateOrbitCamera(telem.lat, telem.lon, alt);
       }
 
       viewer.scene.requestRender();
@@ -372,7 +393,8 @@
   });
 
   onDestroy(() => {
-    chaseLerpActive = false; // stop animation loop
+    chaseLerpActive = false;
+    orbitLerpActive = false;
     unsubTelemetry?.();
     unsubHome?.();
     unsubSettingsWatch?.();
@@ -658,10 +680,11 @@
       }
     }
 
-    // In chase mode, follow the playback marker
     trackFollowPosition(lat, lon, alt, heading);
-    if (chaseModeActive) {
+    if (cameraMode === 'follow') {
       updateChaseCamera(lat, lon, alt, heading);
+    } else if (cameraMode === 'orbit') {
+      updateOrbitCamera(lat, lon, alt);
     }
 
     viewer.scene.requestRender();
@@ -676,30 +699,41 @@
 
   /** Shortest-path angle lerp in degrees (handles 359→1 wrap). */
   function lerpAngle(a: number, b: number, t: number): number {
-    let diff = ((b - a + 540) % 360) - 180;
+    const diff = ((b - a + 540) % 360) - 180;
     return a + diff * t;
   }
 
-  /** Chase camera animation loop — runs via requestAnimationFrame while active. */
+  /** Chase/follow camera animation loop — yaw-locked behind UAV, pitch user-adjustable. */
   function chaseAnimationLoop() {
     if (!chaseLerpActive || !viewer) return;
 
-    // Interpolate current toward target
-    chaseCurrent.lat = lerp(chaseCurrent.lat, chaseTarget.lat, CHASE_SMOOTHING);
-    chaseCurrent.lon = lerp(chaseCurrent.lon, chaseTarget.lon, CHASE_SMOOTHING);
-    chaseCurrent.alt = lerp(chaseCurrent.alt, chaseTarget.alt, CHASE_SMOOTHING);
+    // Smooth-lerp position and heading toward the live UAV target
+    chaseCurrent.lat     = lerp(chaseCurrent.lat,     chaseTarget.lat,     CHASE_SMOOTHING);
+    chaseCurrent.lon     = lerp(chaseCurrent.lon,     chaseTarget.lon,     CHASE_SMOOTHING);
+    chaseCurrent.alt     = lerp(chaseCurrent.alt,     chaseTarget.alt,     CHASE_SMOOTHING);
     chaseCurrent.heading = lerpAngle(chaseCurrent.heading, chaseTarget.heading, CHASE_SMOOTHING);
 
     const target = Cesium.Cartesian3.fromDegrees(
       chaseCurrent.lon, chaseCurrent.lat, Math.max(chaseCurrent.alt, 1)
     );
-    const hpr = new Cesium.HeadingPitchRange(
-      Cesium.Math.toRadians(chaseCurrent.heading + cameraOffset.heading),
-      Cesium.Math.toRadians(cameraOffset.pitch),
-      cameraOffset.range
-    );
 
-    viewer.camera.lookAt(target, hpr);
+    // Pick up pitch changes from user mouse drag; clamp to 0 (horizon) … -π/2 (top-down).
+    // Heading is NOT read from camera — it is always locked to match the UAV.
+    const rawPitch = viewer.camera.pitch;
+    if (rawPitch >= -Math.PI / 2 && rawPitch <= 0.05) followPitch = rawPitch;
+
+    // Sync lockRange from the live camera distance so mouse-wheel zoom sticks
+    // (otherwise our lookAt below would snap the camera back every frame).
+    const currentRange = Cesium.Cartesian3.distance(viewer.camera.positionWC, target);
+    if (currentRange > 0.01) {
+      lockRange = Math.max(LOCK_ZOOM_MIN, Math.min(LOCK_ZOOM_MAX, currentRange));
+    }
+
+    // HPR.heading = the camera's LOOK direction. Setting it to UAV heading means
+    // the camera looks the same way as the UAV and is therefore positioned BEHIND it.
+    const behindHeading = chaseCurrent.heading * (Math.PI / 180);
+
+    viewer.camera.lookAt(target, new Cesium.HeadingPitchRange(behindHeading, followPitch, lockRange));
     viewer.scene.requestRender();
 
     requestAnimationFrame(chaseAnimationLoop);
@@ -744,50 +778,137 @@
     lastFollowHeading = heading;
   }
 
-  export function toggleChaseMode() {
-    chaseModeActive = !chaseModeActive;
-    if (chaseModeActive) {
-      // Snap to last known position, then start lerp loop
+  // ── Orbit Camera ───────────────────────────────────────────────────
+
+  /** Orbit camera animation loop — same CHASE_SMOOTHING as follow cam, free heading/pitch. */
+  function orbitAnimationLoop() {
+    if (!orbitLerpActive || !viewer) return;
+
+    orbitCurrentPos.lat = lerp(orbitCurrentPos.lat, orbitTargetPos.lat, CHASE_SMOOTHING);
+    orbitCurrentPos.lon = lerp(orbitCurrentPos.lon, orbitTargetPos.lon, CHASE_SMOOTHING);
+    orbitCurrentPos.alt = lerp(orbitCurrentPos.alt, orbitTargetPos.alt, CHASE_SMOOTHING);
+
+    const h = viewer.camera.heading;
+    const p = viewer.camera.pitch;
+
+    const newCenter = Cesium.Cartesian3.fromDegrees(
+      orbitCurrentPos.lon, orbitCurrentPos.lat, Math.max(orbitCurrentPos.alt, 1)
+    );
+    orbitCenter = newCenter;
+
+    // Sync lockRange from the live camera distance so mouse-wheel zoom sticks.
+    const currentRange = Cesium.Cartesian3.distance(viewer.camera.positionWC, newCenter);
+    if (currentRange > 0.01) {
+      lockRange = Math.max(LOCK_ZOOM_MIN, Math.min(LOCK_ZOOM_MAX, currentRange));
+    }
+
+    viewer.camera.lookAt(newCenter, new Cesium.HeadingPitchRange(h, p, lockRange));
+    viewer.scene.requestRender();
+
+    requestAnimationFrame(orbitAnimationLoop);
+  }
+
+  /** Feed a new UAV position into the orbit lerp loop. */
+  function updateOrbitCamera(lat: number, lon: number, alt: number) {
+    if (!viewer) return;
+    orbitTargetPos = { lat, lon, alt };
+    if (!orbitInited) {
+      orbitCurrentPos = { lat, lon, alt };
+      orbitCenter = Cesium.Cartesian3.fromDegrees(lon, lat, Math.max(alt, 1));
+      orbitInited = true;
+    }
+    if (!orbitLerpActive) {
+      orbitLerpActive = true;
+      requestAnimationFrame(orbitAnimationLoop);
+    }
+  }
+
+  // ── Camera Mode Cycling ────────────────────────────────────────────
+
+  function cycleCameraMode() {
+    if (cameraMode === 'free') {
+      cameraMode = 'follow';
+      lockRange = 200;
+      followPitch = -25 * (Math.PI / 180);
       chaseInited = false;
       if (lastFollowLat !== 0 || lastFollowLon !== 0) {
+        // Initial snap: HPR.heading = camera look direction = UAV heading → camera behind UAV
+        const initTarget = Cesium.Cartesian3.fromDegrees(
+          lastFollowLon, lastFollowLat, Math.max(lastFollowAlt, 1)
+        );
+        viewer?.camera.lookAt(initTarget, new Cesium.HeadingPitchRange(
+          lastFollowHeading * (Math.PI / 180),
+          followPitch,
+          lockRange
+        ));
         updateChaseCamera(lastFollowLat, lastFollowLon, lastFollowAlt, lastFollowHeading);
       }
-    } else {
-      // Stop lerp loop and release camera
+    } else if (cameraMode === 'follow') {
+      cameraMode = 'orbit';
       chaseLerpActive = false;
       chaseInited = false;
-      if (viewer) {
-        viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+      orbitInited = false;
+      lockRange = 200;
+      if (lastFollowLat !== 0 || lastFollowLon !== 0) {
+        // Initial snap, then let orbitAnimationLoop take over
+        orbitCenter = Cesium.Cartesian3.fromDegrees(
+          lastFollowLon, lastFollowLat, Math.max(lastFollowAlt, 1)
+        );
+        viewer?.camera.lookAt(orbitCenter, new Cesium.HeadingPitchRange(
+          0, -30 * (Math.PI / 180), lockRange
+        ));
+        orbitCurrentPos = { lat: lastFollowLat, lon: lastFollowLon, alt: lastFollowAlt };
+        orbitTargetPos  = { ...orbitCurrentPos };
+        orbitInited = true;
+        orbitLerpActive = true;
+        requestAnimationFrame(orbitAnimationLoop);
+        viewer?.scene.requestRender();
       }
-    }
-    return chaseModeActive;
-  }
-
-  export function setCameraRange(range: number) {
-    cameraOffset.range = Math.max(50, Math.min(5000, range));
-    if (chaseModeActive) {
-      updateChaseCamera(lastFollowLat, lastFollowLon, lastFollowAlt, lastFollowHeading);
-    }
-  }
-
-  export function setCameraPitch(pitch: number) {
-    cameraOffset.pitch = Math.max(-90, Math.min(-5, pitch));
-    if (chaseModeActive) {
-      updateChaseCamera(lastFollowLat, lastFollowLon, lastFollowAlt, lastFollowHeading);
+    } else {
+      cameraMode = 'free';
+      chaseLerpActive = false;
+      chaseInited = false;
+      orbitLerpActive = false;
+      orbitInited = false;
+      viewer?.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
     }
   }
 
-  // ── Public API (matching Map.svelte pattern) ───────────────────────
+  // ── Zoom ───────────────────────────────────────────────────────────
+
+  // Zoom limits for follow / orbit modes
+  const LOCK_ZOOM_MIN = 20;
+  const LOCK_ZOOM_MAX = 500;
+
+  function zoom3D(dir: 1 | -1) {
+    if (!viewer) return;
+    if (cameraMode === 'free') {
+      if (dir > 0) viewer.camera.zoomIn(80);
+      else viewer.camera.zoomOut(80);
+      viewer.scene.requestRender();
+      return;
+    }
+    lockRange = Math.max(LOCK_ZOOM_MIN, Math.min(LOCK_ZOOM_MAX, lockRange * (dir > 0 ? 0.75 : 1.35)));
+    // Apply directly so zoom works even when no telemetry is driving the animation loops.
+    const center = cameraMode === 'orbit'
+      ? orbitCenter
+      : Cesium.Cartesian3.fromDegrees(chaseCurrent.lon, chaseCurrent.lat, Math.max(chaseCurrent.alt, 1));
+    if (Cesium.Cartesian3.magnitudeSquared(center) > 1) {
+      viewer.camera.lookAt(
+        center,
+        new Cesium.HeadingPitchRange(viewer.camera.heading, viewer.camera.pitch, lockRange)
+      );
+      viewer.scene.requestRender();
+    }
+  }
+
+  // ── Public API ─────────────────────────────────────────────────────
 
   export function flyTo(lat: number, lon: number, alt = 500) {
     if (!viewer) return;
     viewer.camera.flyTo({
       destination: Cesium.Cartesian3.fromDegrees(lon, lat, alt + 300),
-      orientation: {
-        heading: 0,
-        pitch: Cesium.Math.toRadians(-45),
-        roll: 0,
-      },
+      orientation: { heading: 0, pitch: Cesium.Math.toRadians(-45), roll: 0 },
       duration: 1.5,
     });
   }
@@ -801,50 +922,61 @@
       trailEntity = undefined;
     }
   }
+
+  const camModeTitle = $derived(
+    cameraMode === 'free'   ? 'Camera: Free'        :
+    cameraMode === 'follow' ? 'Camera: Follow UAV'  :
+                              'Camera: Orbit UAV'
+  );
 </script>
 
 <div class="map3d-wrapper">
   <div class="cesium-container" bind:this={cesiumContainer}></div>
 
-  <!-- Chase-cam toggle button -->
-  <button
-    class="chase-btn"
-    class:active={chaseModeActive}
-    onclick={() => toggleChaseMode()}
-    title={chaseModeActive ? 'Free camera' : 'Chase camera (follow UAV)'}
-  >
-    {chaseModeActive ? '🎥 Follow' : '👁 Free'}
-  </button>
+  <div class="map-controls-corner">
+    <button
+      class="map-control-btn map-mode-btn"
+      onclick={() => onToggleMapView?.()}
+      title="2D View"
+      aria-label="Switch to 2D view"
+    >
+      2D
+    </button>
 
-  <!-- Camera controls (visible in chase mode) -->
-  {#if chaseModeActive}
-    <div class="chase-controls">
-      <label>
-        Range
-        <input
-          type="range"
-          min="50"
-          max="2000"
-          step="10"
-          value={cameraOffset.range}
-          oninput={(e) => setCameraRange(Number((e.target as HTMLInputElement).value))}
-        />
-        <span>{cameraOffset.range}m</span>
-      </label>
-      <label>
-        Pitch
-        <input
-          type="range"
-          min="-90"
-          max="-5"
-          step="1"
-          value={cameraOffset.pitch}
-          oninput={(e) => setCameraPitch(Number((e.target as HTMLInputElement).value))}
-        />
-        <span>{cameraOffset.pitch}°</span>
-      </label>
-    </div>
-  {/if}
+    <button
+      class="map-control-btn map-cam-btn"
+      class:mode-free={cameraMode === 'free'}
+      class:mode-follow={cameraMode === 'follow'}
+      class:mode-orbit={cameraMode === 'orbit'}
+      onclick={cycleCameraMode}
+      title={camModeTitle}
+      aria-label={camModeTitle}
+    >
+      {#if cameraMode === 'follow'}
+        <svg class="cam-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <polygon points="12,6 7.5,17.5 12,15.2 16.5,17.5" fill="currentColor"/>
+        </svg>
+      {:else if cameraMode === 'orbit'}
+        <svg class="cam-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <circle cx="12" cy="12" r="3" fill="currentColor"/>
+          <path d="M12 4 A8 8 0 0 1 20 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <polyline points="18,8 20,12 16,11" fill="currentColor"/>
+          <path d="M12 20 A8 8 0 0 1 4 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <polyline points="6,16 4,12 8,13" fill="currentColor"/>
+        </svg>
+      {:else}
+        <svg class="cam-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <polygon class="north-tri" points="12,4.6 9.9,8.6 14.1,8.6"/>
+          <g transform="translate(0 -1.5) rotate(-70 12 15)">
+            <polygon points="12,8.6 7.7,19.6 12,17.4 16.3,19.6" fill="currentColor"/>
+          </g>
+        </svg>
+      {/if}
+    </button>
+
+    <button class="map-control-btn map-zoom-btn" onclick={() => zoom3D(1)}  title="Zoom in"  aria-label="Zoom in">+</button>
+    <button class="map-control-btn map-zoom-btn" onclick={() => zoom3D(-1)} title="Zoom out" aria-label="Zoom out">-</button>
+  </div>
 </div>
 
 <style>
@@ -859,78 +991,83 @@
     height: 100%;
   }
 
-  /* Override Cesium default widget styling for dark theme */
-  .cesium-container :global(.cesium-viewer) {
+  :global(.cesium-viewer) {
     font-family: 'Segoe UI', Tahoma, sans-serif;
   }
 
-  .chase-btn {
+  /* ── Controls corner — identical layout to Map.svelte ── */
+  .map-controls-corner {
     position: absolute;
-    top: 10px;
-    right: 10px;
+    bottom: 8px;
+    right: 8px;
     z-index: 10000;
-    min-width: 44px;
-    height: 36px;
-    padding: 0 10px;
-    border: 2px solid rgba(55, 168, 219, 0.6);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: all;
+  }
+
+  .map-control-btn {
+    box-sizing: border-box;
+    width: 38px;
+    height: 38px;
+    background: rgba(46, 46, 46, 0.9);
+    border: 2px solid rgba(55, 168, 219, 0.5);
     border-radius: 6px;
-    background: rgba(46, 46, 46, 0.92);
-    color: #fff;
-    font-size: 13px;
+    color: #37a8db;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 5px;
     backdrop-filter: blur(8px);
-    transition: border-color 0.2s, background 0.2s;
-    pointer-events: all;
+    transition: background 0.2s, border-color 0.2s, color 0.2s;
+    padding: 0;
   }
 
-  .chase-btn:hover {
-    border-color: #37a8db;
+  .map-control-btn:hover {
     background: rgba(55, 168, 219, 0.25);
-  }
-
-  .chase-btn.active {
     border-color: #37a8db;
-    background: rgba(55, 168, 219, 0.35);
-    box-shadow: 0 0 8px rgba(55, 168, 219, 0.4);
   }
 
-  .chase-controls {
-    position: absolute;
-    top: 54px;
-    right: 10px;
-    z-index: 10000;
-    background: rgba(46, 46, 46, 0.9);
-    border: 1px solid rgba(55, 168, 219, 0.35);
-    border-radius: 6px;
-    padding: 10px 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    backdrop-filter: blur(8px);
+  .map-zoom-btn {
+    font-size: 23px;
+    line-height: 1;
+    font-weight: 700;
   }
 
-  .chase-controls label {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 11px;
-    color: #ccc;
-    white-space: nowrap;
+  .map-mode-btn {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
   }
 
-  .chase-controls input[type="range"] {
-    width: 100px;
-    accent-color: #37a8db;
+  /* Free = dimmed, no active lock */
+  .map-cam-btn.mode-free {
+    background: rgba(46, 46, 46, 0.45);
+    border-color: rgba(55, 168, 219, 0.45);
+    color: rgba(199, 223, 232, 0.95);
   }
 
-  .chase-controls span {
-    min-width: 45px;
-    text-align: right;
-    font-family: monospace;
+  /* Follow = full blue (smooth chase) */
+  .map-cam-btn.mode-follow {
+    background: rgba(46, 46, 46, 0.92);
+    border-color: rgba(55, 168, 219, 0.7);
     color: #37a8db;
   }
+
+  /* Orbit = cyan/teal tint */
+  .map-cam-btn.mode-orbit {
+    background: rgba(0, 188, 212, 0.2);
+    border-color: #00bcd4;
+    color: #00bcd4;
+  }
+
+  .map-cam-btn:hover {
+    background: rgba(55, 168, 219, 0.25) !important;
+    border-color: #37a8db !important;
+    color: #37a8db !important;
+  }
+
+  .cam-icon { overflow: visible; }
+  .north-tri { fill: currentColor; opacity: 0.9; }
 </style>
