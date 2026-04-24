@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Colored Flight Tracks in 3D Map View (Map3D.svelte)
+- **Playback track color segmentation**: `updatePlaybackTrack3D()` now respects `trackColorMode` prop — Flight Mode, Altitude, Speed, Signal, and None modes render as multi-segment colored polylines in CesiumJS
+- **Live trail flightmode coloring**: `updateTrail3D()` uses `classifyFlightMode()` for real-time trail color changes on flight mode transitions (matching Map.svelte behavior)
+- **Trail reset on re-arm**: 3D trail clears on arm transition with valid GPS fix, same as 2D map
+- Reuses existing `trackColors.ts` segmentation functions (`segmentTrackByFlightMode`, `segmentTrackByAltitude`, `segmentTrackBySpeed`, `segmentTrackBySignal`) — no duplication, no new abstraction needed
+- Geoid correction applied to all track segment positions
+
 ### Added — CSS Grid Zone Layout System (ADR-023)
 - **CSS Grid layout**: `.app` container uses a 4×4 named grid with 7 zones (Toolbar, Nav Rail, Panel Zone, Bottom Dock, Side Dock, Map Controls, Status Bar)
 - **Layout store** (`src/lib/stores/layout.ts`): Layout profiles (`flight`, `mission`, `area-planner`), zone visibility toggles, CSS custom property overrides for dock sizes

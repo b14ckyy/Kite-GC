@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
+  import { get } from "svelte/store";
   import * as Cesium from "cesium";
   import "cesium/Build/Cesium/Widgets/widgets.css";
 
@@ -7,15 +8,24 @@
   if (typeof window !== 'undefined') {
     (window as any).CESIUM_BASE_URL = '/cesium';
   }
-  import { telemetry } from "$lib/stores/telemetry";
+    import { telemetry } from "$lib/stores/telemetry";
   import { homePosition } from "$lib/stores/home";
   import { settings } from "$lib/stores/settings";
   import { getProviderById } from "$lib/config/mapProviders";
   import type { MapProvider } from "$lib/config/mapProviders";
   import { getCachedTile, putCachedTile, initTileCache } from "$lib/cache/tileCache";
   import { isValidGpsCoordinate } from "$lib/helpers/telemetry";
-  import { getNavStateColor, classifyMode } from "$lib/helpers/trackColors";
-  import type { TrackColorMode } from "$lib/helpers/trackColors";
+  import {
+    segmentTrackByFlightMode,
+    segmentTrackByAltitude,
+    segmentTrackBySpeed,
+    segmentTrackBySignal,
+    getNavStateColor,
+    classifyMode,
+    classifyFlightMode,
+    type TrackColorMode,
+    type TrackSegment,
+  } from "$lib/helpers/trackColors";
   import type { TelemetryRecord } from "$lib/stores/flightlog";
   import type { PlatformType } from "$lib/helpers/uavIcons";
   import { PLATFORM_MULTIROTOR } from "$lib/helpers/uavIcons";
@@ -42,19 +52,23 @@
 
   let cesiumContainer: HTMLDivElement;
   let viewer: Cesium.Viewer | undefined = $state(undefined);
-  let uavEntity: Cesium.Entity | undefined;
+    let uavEntity: Cesium.Entity | undefined;
   let homeEntity: Cesium.Entity | undefined;
-  let trailEntity: Cesium.Entity | undefined;
   let playbackTrackEntity: Cesium.Entity | undefined;
   let playbackMarkerEntity: Cesium.Entity | undefined;
   let unsubTelemetry: (() => void) | undefined;
   let unsubHome: (() => void) | undefined;
   let unsubSettingsWatch: (() => void) | undefined;
 
-  // Trail (live tracking)
+    // Trail (live tracking) — initialized in updateTrail3D
   let trailPositions: Cesium.Cartesian3[] = [];
   let lastTrailLat = 0;
   let lastTrailLon = 0;
+  let trailSegments3D: { entity: Cesium.Entity; color: string }[] = [];
+  let activeTrailEntity: Cesium.Entity | undefined;
+  let activeTrailPositions: Cesium.Cartesian3[] = [];
+  let trailCurrentColor3D = '';
+  const MIN_TRAIL_DIST_3D = 1; // meters
 
   // Camera mode: free (no lock) | follow (smooth chase) | orbit (locked target, free orbit)
   type Camera3DMode = 'free' | 'follow' | 'orbit';
@@ -85,6 +99,10 @@
   // Geoid undulation offset: MSL → WGS84 ellipsoid height
   // Computed once per track from terrain sample at first valid point.
   let geoidOffset = 0;
+
+    // Home arm tracking for trail reset on re-arm
+  let wasArmed = false;
+  const ARMING_FLAG_ARMED = 2;
 
   // 1×1 transparent canvas for tile fallback (avoids gray tiles on 404/error)
   // REMOVED: transparent tiles replace parent → gray globe visible underneath
@@ -354,7 +372,7 @@
       },
     });
 
-    // Subscribe to live telemetry
+        // Subscribe to live telemetry
     unsubTelemetry = telemetry.subscribe((telem) => {
       if (!viewer) return;
       if (!isValidGpsCoordinate(telem.lat, telem.lon)) return;
@@ -371,6 +389,13 @@
       } else if (cameraMode === 'orbit') {
         updateOrbitCamera(telem.lat, telem.lon, alt);
       }
+
+      // Trail reset on arm transition (same as Map.svelte)
+      const armed = (telem.armingFlags & (1 << ARMING_FLAG_ARMED)) !== 0;
+      if (armed && !wasArmed && telem.fixType >= 2 && telem.lat !== 0) {
+        resetTrail3D();
+      }
+      wasArmed = armed;
 
       viewer.scene.requestRender();
     });
@@ -392,13 +417,15 @@
     });
   });
 
-  onDestroy(() => {
+    onDestroy(() => {
     chaseLerpActive = false;
     orbitLerpActive = false;
     unsubTelemetry?.();
     unsubHome?.();
     unsubSettingsWatch?.();
     if (viewer && !viewer.isDestroyed()) {
+      // Clean up trail segments (they will be destroyed with viewer, but be explicit)
+      viewer.entities.removeAll();
       viewer.destroy();
     }
   });
@@ -517,31 +544,85 @@
     }
   }
 
-  // ── Live Trail ─────────────────────────────────────────────────────
+    // ── Live Trail (Flightmode-colored segments) ───────────────────────
 
   function updateTrail3D(lat: number, lon: number, alt: number) {
     if (!viewer) return;
 
+    const pos = Cesium.Cartesian3.fromDegrees(lon, lat, alt);
+
     // Skip if too close to last point
-    const dist = Math.sqrt((lat - lastTrailLat) ** 2 + (lon - lastTrailLon) ** 2) * 111000;
-    if (dist < 1) return;
+    if (lastTrailLat !== 0 || lastTrailLon !== 0) {
+      const prev = Cesium.Cartesian3.fromDegrees(lastTrailLon, lastTrailLat, alt);
+      const dist = Cesium.Cartesian3.distance(pos, prev);
+      if (dist < MIN_TRAIL_DIST_3D) return;
+    }
 
     lastTrailLat = lat;
     lastTrailLon = lon;
-    trailPositions.push(Cesium.Cartesian3.fromDegrees(lon, lat, alt));
+    trailPositions.push(pos);
 
-    if (!trailEntity && trailPositions.length >= 2) {
-      trailEntity = viewer.entities.add({
+    // We need flightModeFlags from telemetry — fall back to unknown
+    // (telemetry store is already providing data; we re-read inside updateUavPosition3D)
+    // Since this is called from updateUavPosition3D, we need flightModeFlags
+    // but we don't have them here. Instead, we get them from the telemetry store.
+
+    // Color by flight mode (same logic as Map.svelte updateTrail)
+    // Read active flight mode from the telemetry store directly
+    const telem = get(telemetry);
+    const color = classifyFlightMode(telem.activeFlightModeFlags ?? 0).color;
+
+    // Color changed → finalize the active segment and start a new one
+    if (color !== trailCurrentColor3D && activeTrailPositions.length >= 2) {
+      if (activeTrailEntity) {
+        trailSegments3D.push({ entity: activeTrailEntity, color: trailCurrentColor3D });
+        activeTrailEntity = undefined;
+      }
+      // Start new segment from last point for continuity
+      activeTrailPositions = [activeTrailPositions[activeTrailPositions.length - 1]];
+    }
+
+    trailCurrentColor3D = color;
+    activeTrailPositions.push(pos);
+
+    // Update or create the active (in-progress) polyline
+    if (activeTrailPositions.length >= 2) {
+      const cesiumColor = Cesium.Color.fromCssColorString(color).withAlpha(0.7);
+      // Use a shallow copy for the positions array so Cesium sees the updated array
+      const positionsCopy = [...activeTrailPositions];
+
+      if (activeTrailEntity) {
+        // For an already-created entity, update its polyline positions via CallbackProperty
+        // Since Cesium Entity polyline positions are not easily mutated, we remove and re-create
+        viewer.entities.remove(activeTrailEntity);
+      }
+      activeTrailEntity = viewer.entities.add({
         polyline: {
-          positions: new Cesium.CallbackProperty(() => trailPositions, false),
+          positions: positionsCopy,
           width: 2,
-          material: new Cesium.ColorMaterialProperty(
-            Cesium.Color.fromCssColorString('#37a8db').withAlpha(0.7)
-          ),
+          material: new Cesium.ColorMaterialProperty(cesiumColor),
           clampToGround: false,
         },
       });
     }
+  }
+
+  /** Reset the live trail (called when re-arming or clearing). */
+  function resetTrail3D() {
+    if (!viewer) return;
+    for (const seg of trailSegments3D) {
+      viewer.entities.remove(seg.entity);
+    }
+    trailSegments3D = [];
+    if (activeTrailEntity) {
+      viewer.entities.remove(activeTrailEntity);
+      activeTrailEntity = undefined;
+    }
+    activeTrailPositions = [];
+    trailCurrentColor3D = '';
+    trailPositions = [];
+    lastTrailLat = 0;
+    lastTrailLon = 0;
   }
 
   // ── Playback Track ─────────────────────────────────────────────────
@@ -551,10 +632,10 @@
     updatePlaybackTrack3D(playbackTrack, trackColorMode);
   });
 
-  async function updatePlaybackTrack3D(track: TelemetryRecord[], _colorMode: TrackColorMode) {
+    async function updatePlaybackTrack3D(track: TelemetryRecord[], colorMode: TrackColorMode) {
     if (!viewer) return;
 
-    // Remove old
+    // Remove old playback track segments
     if (playbackTrackEntity) {
       viewer.entities.remove(playbackTrackEntity);
       playbackTrackEntity = undefined;
@@ -589,32 +670,99 @@
       console.warn('[Map3D] No terrain provider available, geoidOffset=0');
     }
 
-    const positions: Cesium.Cartesian3[] = [];
-    for (const pt of track) {
-      if (pt.lat != null && pt.lon != null && isValidGpsCoordinate(pt.lat, pt.lon)) {
-        const ellipsoidAlt = (pt.alt_m ?? 0) + geoidOffset;
-        positions.push(Cesium.Cartesian3.fromDegrees(pt.lon, pt.lat, ellipsoidAlt));
-      }
+    // Filter to valid GPS points and convert to Cartesian3 with geoid correction
+    const validTrack = track.filter(
+      (p) => p.lat != null && p.lon != null && isValidGpsCoordinate(p.lat!, p.lon!)
+    );
+    if (validTrack.length < 2) return;
+
+        // Build a lookup map: lat,lng key → altitude_m for each valid track point
+    // This lets us resolve the correct altitude for each segment point.
+    const altLookup = new Map<string, number>();
+    for (const pt of validTrack) {
+      const key = `${pt.lat!.toFixed(6)},${pt.lon!.toFixed(6)}`;
+      altLookup.set(key, pt.alt_m ?? 0);
     }
 
-    if (positions.length < 2) return;
+    // Helper: convert [lat, lon] pairs to Cesium Cartesian3 using per-point altitudes
+    function segmentToPositions3D(points: [number, number][]): Cesium.Cartesian3[] {
+      return points.map(([lat, lon]) => {
+        const key = `${lat.toFixed(6)},${lon.toFixed(6)}`;
+        const altM = altLookup.get(key) ?? 0;
+        return Cesium.Cartesian3.fromDegrees(lon, lat, altM + geoidOffset);
+      });
+    }
 
-    playbackTrackEntity = viewer.entities.add({
-      polyline: {
-        positions,
-        width: 3,
-        material: new Cesium.ColorMaterialProperty(
-          Cesium.Color.fromCssColorString('#37a8db').withAlpha(0.8)
-        ),
-        clampToGround: false,
-      },
-    });
+    // Build color-segmented polylines
+    let segments: TrackSegment[] = [];
 
-    // Zoom to track on first load
-    viewer.flyTo(playbackTrackEntity, {
-      duration: 1.5,
-      offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-45), 0),
-    });
+    if (colorMode === 'flightmode') {
+      segments = segmentTrackByFlightMode(validTrack as TelemetryRecord[], fcVariant);
+    } else if (colorMode === 'altitude' || colorMode === 'speed' || colorMode === 'signal') {
+      const warnAlt = get(settings).warnAltitudeM ?? 120;
+      const result =
+        colorMode === 'altitude' ? segmentTrackByAltitude(validTrack as TelemetryRecord[], warnAlt) :
+        colorMode === 'speed'    ? segmentTrackBySpeed(validTrack as TelemetryRecord[]) :
+                                   segmentTrackBySignal(validTrack as TelemetryRecord[]);
+      segments = result.segments;
+    }
+
+    // Use a parent entity as a grouping container so we can flyTo() the whole track
+    // We add individual polyline entities as children for proper colored segments.
+    let firstPosition: Cesium.Cartesian3 | undefined;
+    let bounds: Cesium.Cartesian3[] = [];
+
+    if (segments.length > 0) {
+      for (const seg of segments) {
+        if (seg.points.length < 2) continue;
+        const positions = segmentToPositions3D(seg.points);
+        if (positions.length < 2) continue;
+        if (!firstPosition) firstPosition = positions[0];
+        bounds.push(...positions);
+
+        const cesiumColor = Cesium.Color.fromCssColorString(seg.color).withAlpha(0.8);
+        viewer.entities.add({
+          polyline: {
+            positions,
+            width: 3,
+            material: new Cesium.ColorMaterialProperty(cesiumColor),
+            clampToGround: false,
+          },
+        });
+      }
+    } else {
+      // Fallback: single-color line (e.g. 'none' mode)
+      const positions = segmentToPositions3D(
+        validTrack.map((p) => [p.lat!, p.lon!] as [number, number])
+      );
+      if (positions.length < 2) return;
+      firstPosition = positions[0];
+      bounds = positions;
+
+      viewer.entities.add({
+        polyline: {
+          positions,
+          width: 3,
+          material: new Cesium.ColorMaterialProperty(
+            Cesium.Color.fromCssColorString('#f5a623').withAlpha(0.8)
+          ),
+          clampToGround: false,
+        },
+      });
+    }
+
+    // Create a dummy entity at the first position to flyTo the track
+    if (firstPosition && bounds.length >= 2) {
+      playbackTrackEntity = viewer.entities.add({
+        position: firstPosition,
+        point: { pixelSize: 0 }, // invisible
+      });
+
+      viewer.flyTo(playbackTrackEntity, {
+        duration: 1.5,
+        offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-45), 0),
+      });
+    }
 
     viewer.scene.requestRender();
   }
@@ -913,14 +1061,8 @@
     });
   }
 
-  export function resetTrail() {
-    trailPositions = [];
-    lastTrailLat = 0;
-    lastTrailLon = 0;
-    if (trailEntity && viewer) {
-      viewer.entities.remove(trailEntity);
-      trailEntity = undefined;
-    }
+    export function resetTrail() {
+    resetTrail3D();
   }
 
   const camModeTitle = $derived(
