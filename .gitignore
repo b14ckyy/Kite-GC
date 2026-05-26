@@ -1,14 +1,64 @@
+# =============================================================================
+# Kite Ground Control - .gitignore
+# =============================================================================
+
+# OS
 .DS_Store
+Thumbs.db
+
+# Dependencies
 node_modules
+
+# Build output
 /build
 /.svelte-kit
 /package
+
+# Environment
 .env
 .env.*
 !.env.example
+
+# Vite
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
+# Tauri specific generated / cache
+.tauri/
+*.log
+
+# Android / Mobile specific Tauri configuration files
+# Currently not used (Android development is paused).
+# These can be un-ignored later when mobile support is resumed.
+tauri.android.conf.json
+src-tauri/tauri.android.conf.json
+
+# =============================================================================
 # Rust / Tauri
+# =============================================================================
 src-tauri/target/
-D:/cargo-target/
+
+# Tauri generated code (especially from Android / mobile development)
+# This folder can become very large and should never be committed.
+src-tauri/gen/
+
+# Custom cargo target directory (used on Windows to avoid OneDrive spaces)
+# See src-tauri/.cargo/config.toml
+cargo-target/
+target/
+
+# =============================================================================
+# IDE / Editor
+# =============================================================================
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# AI assistant local data (Claude Desktop, etc.)
+.claude/
+
+# =============================================================================
+# just task runner (if user installs it locally)
+# =============================================================================
+.just/

@@ -346,7 +346,7 @@ This document tracks planned features, organized by milestone.
 - [x] Compass uses GPS COG (heading) for replay, fallback to attitude yaw
 
 ### Frontend Modularization
-- [x] `+page.svelte` reduced from ~2846 to ~935 lines (thin orchestrator)
+- [x] Thin orchestrator pattern implemented (`+page.svelte` as wiring layer only)
 - [x] 4 controllers: connection, logbook, playback, widget
 - [x] 1 adapter: telemetryAdapter (DB → widget data mapping)
 - [x] 1 helper: telemetry (isArmed, hasKnownLocation, isValidGpsCoordinate)
@@ -424,10 +424,10 @@ This document tracks planned features, organized by milestone.
 - [x] GCS IDs: sysid=255, compid=190
 - [x] ArduPilot + PX4 + INAV MAVLink firmware support
 
-**Phase 3 — Connection Manager & Protocol Selection**:
-- [x] `ConnectionManager` — owns transport + protocol handler, manages lifecycle
+**Phase 3 — Protocol Selection & Connection Handling**:
 - [x] Protocol selection: explicit UI dropdown (MSP / MAVLink), no auto-detect
 - [x] Transport selection: Serial / TCP / UDP per protocol
+- [x] Dual-protocol connection lifecycle in `commands/connection.rs` + `ActiveProtocol` state (no separate ConnectionManager module)
 
 **Phase 4 — Raw Recording**:
 - [x] MSP raw log: MWP v2 Binary Capture format (`.raw`)
@@ -437,9 +437,9 @@ This document tracks planned features, organized by milestone.
 - [x] Continuous raw logging: optional always-on recording from connect
 
 **Phase 5 — ArduPilot Log Import**:
-- [x] `.bin` DataFlash log parser (ArduPilot native format)
+- [x] `.bin` DataFlash log parser (ArduPilot native format) — basic implementation exists (work in progress, not yet fully integrated)
 - [ ] ArduPilot `.tlog` MAVLink log import
-- [ ] ArduPilot mission import (MAVLink WP protocol)
+- [ ] ArduPilot mission import (MAVLink WP protocol) — open work item (temporary parallel implementation exists in frontend for ArduPilot missions)
 
 ### Future Protocols
 - [ ] `LtmSource` — LTM (Lightweight Telemetry) passive frame parser

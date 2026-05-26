@@ -152,11 +152,16 @@ Kite Ground Control/
 │   ├── Cargo.lock                # Dependency lock file
 │   └── tauri.conf.json           # Tauri configuration
 │
-├── scripts/                      # Build and development scripts
-│   ├── build-windows.bat         # Windows release build
-│   ├── build-linux.sh            # Linux release build
-│   ├── dev.bat                   # Windows dev server
-│   └── dev.sh                    # Linux dev server
+├── scripts/                      # Legacy build scripts (still functional)
+│   ├── build-windows.bat         # Windows release build (improved)
+│   ├── build-linux.sh            # Linux release build (improved)
+│   ├── dev.bat                   # Windows dev server (improved)
+│   └── dev.sh                    # Linux dev server (improved)
+│
+├── justfile                      # Primary task runner (recommended way)
+│                                 #   just dev / just build / just check
+│
+├── .github/workflows/ci.yml      # Minimal CI (cargo check + svelte-check)
 │
 ├── docs/                         # Development documentation
 │   ├── DEVLOG.md                 # This file — project structure & dev notes
@@ -192,18 +197,33 @@ Each feature is self-contained in its own module:
 ### Prerequisites
 - Node.js LTS (v24+)
 - Rust (via rustup, v1.94+)
-- Platform-specific: see build scripts for required system packages
+- [just](https://github.com/casey/just) (strongly recommended)
+- Platform-specific: see [Build Guide](docs/dev/BUILD.md) for details
 
-### Quick Start
+### Quick Start (recommended)
 ```bash
-npm install              # Install frontend dependencies
-npm run tauri dev        # Start development mode with hot-reload
+npm install
+just dev                 # Start development (uses just + Tauri)
 ```
 
-### Building
+Alternative (still works):
 ```bash
-npm run tauri build      # Build release for current platform
+npm run tauri dev
 ```
+
+### Building (recommended)
+```bash
+just build
+just build-windows
+just build-linux
+```
+
+Alternative (still works):
+```bash
+npm run tauri build
+```
+
+For the complete guide (troubleshooting, CI, common Windows issues, etc.), see **[docs/dev/BUILD.md](../dev/BUILD.md)**.
 
 ### Platform Notes
 

@@ -24,18 +24,42 @@ Built with [Tauri 2.0](https://tauri.app/) (Rust backend) and [Svelte 5](https:/
 - [Rust](https://rustup.rs/) (v1.94+)
 - Platform-specific dependencies (see [DEVLOG](docs/DEVLOG.md))
 
-### Development
+### Development (recommended)
+We use **[just](https://github.com/casey/just)** as the primary task runner.
+
 ```bash
+# One-time setup
 npm install
+
+# Start development (hot reload)
+just dev
+```
+
+Alternative (still works):
+```bash
 npm run tauri dev
 ```
 
-### Build
+### Build (recommended)
 ```bash
-npm run tauri build
+just build
 ```
 
-Or use the build scripts in `scripts/`.
+Platform-specific:
+```bash
+just build-windows
+just build-linux
+```
+
+Alternative (still works):
+```bash
+npm run tauri build
+# or
+./scripts/build-windows.bat
+./scripts/build-linux.sh
+```
+
+> **Tip**: Install `just` for the best developer experience (see `justfile` in the project root).
 
 ## Documentation
 
@@ -45,6 +69,11 @@ Or use the build scripts in `scripts/`.
 - [Roadmap](docs/ROADMAP.md) — Feature planning
 - [Changelog](docs/CHANGELOG.md) — Version history
 - [Flight Modes Protocol](docs/PROTOCOL_FLIGHT_MODES.md) — INAV bitmask reference
+- [Build & Development Guide](docs/dev/BUILD.md) — Setup, just commands, troubleshooting, CI
+
+**Build & Contribution**
+- Use `just` (see `justfile` in root) for development and builds
+- CI runs automatically on push/PR (cargo check + svelte-check)
 
 ## Recommended IDE Setup
 

@@ -132,7 +132,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Home Distance**: `homePosition` store now set during replay from flight start coordinates
 
 ### Refactored — Frontend Modularization
-- `+page.svelte` reduced from ~2846 lines to ~935 lines (thin orchestrator pattern)
+- Frontend modularization completed: `+page.svelte` refactored to thin orchestrator (4 controllers + 1 adapter + helpers extracted)
 - 4 controllers extracted: `connectionController.ts`, `logbookController.ts`, `playbackController.ts`, `widgetController.ts`
 - 1 adapter: `telemetryAdapter.ts` (DB → widget data mapping)
 - 1 helper: `helpers/telemetry.ts` (`isArmed()`, `hasKnownLocation()`, `isValidGpsCoordinate()`)

@@ -1,0 +1,70 @@
+# Kite Ground Control - Continuous Integration
+#
+# Runs on every push and pull request.
+# Goal: Catch problems early (especially important for an AI-heavy codebase).
+#
+# This is intentionally lightweight:
+# - No full Tauri bundle (expensive and slow)
+# - Focus on static checks + compilation
+
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # --- Frontend ---
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Run svelte-check + TypeScript
+        run: npm run check
+
+      # --- Backend ---
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Run cargo check
+        working-directory: src-tauri
+        run: cargo check --verbose
+
+      - name: Run clippy (warnings as errors on Linux)
+        working-directory: src-tauri
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo clippy -- -D warnings
+
+      - name: Run clippy (warnings only on Windows)
+        working-directory: src-tauri
+        if: matrix.os == 'windows-latest'
+        run: cargo clippy
