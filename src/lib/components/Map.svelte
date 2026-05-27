@@ -10,6 +10,7 @@
   import { initTileCache } from "$lib/cache/tileCache";
   import { homePosition } from "$lib/stores/home";
   import MissionLayer from "./mission/MissionLayer.svelte";
+  import SurveyPatternLayer from "./mission/SurveyPatternLayer.svelte";
   import type { TelemetryRecord } from "$lib/stores/flightlog";
   import {
     segmentTrackByFlightMode,
@@ -475,6 +476,7 @@
 
   {#if map}
     <MissionLayer {map} />
+    <SurveyPatternLayer {map} />
   {/if}
 </div>
 

@@ -92,6 +92,8 @@ just build-linux     # Explicit Linux release build
 just clean           # Clean build artifacts
 ```
 
+**Note for Windows users:** The `justfile` is configured to use PowerShell (`set windows-shell`). This avoids the need for Git Bash / `sh`. If you get errors about a missing `sh` shell, make sure you have the latest `justfile` from the repository.
+
 ---
 
 ## Alternative Commands (without just)
@@ -133,6 +135,8 @@ just check
 This runs:
 - `npm run check` (svelte-check + TypeScript)
 - `cargo check` (in `src-tauri/`)
+
+The `check` recipe prints status messages using PowerShell on Windows (the `justfile` is configured with `set windows-shell` for this reason).
 
 We also have a CI workflow that executes these checks on every push and pull request.
 

@@ -430,15 +430,18 @@ This document tracks planned features, organized by milestone.
 - [x] Dual-protocol connection lifecycle in `commands/connection.rs` + `ActiveProtocol` state (no separate ConnectionManager module)
 
 **Phase 4 — Raw Recording**:
-- [x] MSP raw log: MWP v2 Binary Capture format (`.raw`)
-- [x] MAVLink raw log: standard tlog format (`.tlog`)
-- [x] Raw-first recording: start on ARM → DB import after DISARM
-- [x] Crash-safe: raw file survives app crash during flight
-- [x] Continuous raw logging: optional always-on recording from connect
+- [x] MAVLink raw log: standard tlog format (`.tlog`) — full recording during flight + continuous mode
+- [x] MSP: Pre-parsed telemetry text log (current `RawLogger`) written in parallel to DB as backup. Not the originally planned MWP v2 binary format.
+- [x] Raw recording per protocol (different formats for MSP vs. MAVLink)
+- [x] Crash-safe: raw files survive app crash during flight
+- [x] Continuous raw logging: optional always-on recording from connect (pre-arm data included)
+- [ ] True raw byte-level serial logger (`SerialLogger` / `RAWLogger`) for link debugging and secondary devices (ADSB, radar, etc.) — planned for later
 
 **Phase 5 — ArduPilot Log Import**:
-- [x] `.bin` DataFlash log parser (ArduPilot native format) — basic implementation exists (work in progress, not yet fully integrated)
-- [ ] ArduPilot `.tlog` MAVLink log import
+- [x] Native ArduPilot DataFlash `.bin` parser (self-describing FMT records)
+- [x] Functional import of `.bin` files into the logbook (progress events, duplicate detection, armed segment logic, writes to `telemetry_records`)
+- [x] Imported ArduPilot flights can be replayed normally through widgets + map
+- [ ] ArduPilot `.tlog` MAVLink log import (recording works, import missing)
 - [ ] ArduPilot mission import (MAVLink WP protocol) — open work item (temporary parallel implementation exists in frontend for ArduPilot missions)
 
 ### Future Protocols

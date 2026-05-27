@@ -14,6 +14,11 @@ These rules are loaded automatically for every Copilot session in this workspace
 - Always wait for user confirmation before any git operation
 - Run `npm run -s check` (svelte-check) after significant frontend changes
 - Run `cargo check` after significant Rust changes
+- **Pre-delivery self-review**: before presenting changes, verify:
+  1. `npm run -s check` (or `cargo check`) passes with 0 errors
+  2. All new user-visible strings use `$t()` with keys in both en.json + de.json
+  3. No TypeScript `any` types were introduced (use `// @ts-expect-error` with rationale if unavoidable)
+  4. No hardcoded UI text remains in component templates
 
 ## Tech Stack (locked)
 - **App**: Tauri 2.0 (Rust backend + Svelte 5 frontend)
@@ -68,6 +73,12 @@ These rules are loaded automatically for every Copilot session in this workspace
 - Keys follow dot-notation: `section.subsection.label`
 - Both `en.json` and `de.json` must be updated together
 - Rust backend errors remain English (technical/log strings)
+- **i18n checklist before marking a feature complete:**
+  1. Identify all new user-visible strings in the component
+  2. Define keys in both `en.json` and `de.json` simultaneously
+  3. Reference via `$t('key')` in the template — never inline text
+  4. If `$t()` type-check fails on dynamic params, use `// @ts-expect-error` with a brief rationale instead of `as any`
+- Prefer simple keys without ICU parameters where possible; when parameters are needed, use named placeholders (`{name}`) and pass as object
 
 ## MSP Protocol
 - Strict request-response: one request at a time, wait for reply before next
@@ -103,4 +114,5 @@ These rules are loaded automatically for every Copilot session in this workspace
 - Don't add error handling for impossible scenarios
 - Don't create abstractions for one-time operations
 - Don't remove **general-purpose** debug logging (`eprintln!`, `console.log`) — temporary bug-hunting instrumentation may be removed after the issue is resolved
-- Don't use `any` type in TypeScript — use proper types or `unknown`
+- Don't use `any` type in TypeScript — use proper types or `unknown`; if `$t()` type-defs are too strict, use `// @ts-expect-error` instead
+- Don't deliver code changes without a final i18n + type-check pass — always run `npm run -s check` before presenting work

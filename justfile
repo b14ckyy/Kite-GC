@@ -1,14 +1,12 @@
 # Kite Ground Control - Task Runner (just)
 #
-# This is the recommended way to develop and build the project.
+# Recommended task runner for this project.
 # Install just: https://github.com/casey/just#installation
 #
-# Usage:
-#   just dev           → Development mode (hot reload)
-#   just build         → Build for current platform
-#   just check         → Run svelte-check + cargo check
-#   just build-windows
-#   just build-linux
+# On Windows this justfile is configured to use PowerShell.
+# Make sure Git Bash / sh is NOT required.
+
+set windows-shell := ["powershell.exe", "-NoProfile", "-Command"]
 
 # Default recipe → shows all available commands
 default:
@@ -30,23 +28,23 @@ dev:
 build:
     npm run tauri build
 
-# Explicit Windows release build (uses the improved script)
+# Explicit Windows release build
 build-windows:
     @powershell -ExecutionPolicy Bypass -File scripts/build-windows.bat
 
-# Explicit Linux release build
+# Explicit Linux release build (only works on Linux)
 build-linux:
     @bash scripts/build-linux.sh
 
 # =============================================================================
-# Quality Checks (important for this project)
+# Quality Checks
 # =============================================================================
 
-# Run frontend + backend checks
+# Run frontend + backend static checks
 check:
-    @echo "→ Running svelte-check..."
+    @powershell -Command "Write-Host '→ Running svelte-check...' -ForegroundColor Cyan"
     npm run check
-    @echo "→ Running cargo check..."
+    @powershell -Command "Write-Host '→ Running cargo check...' -ForegroundColor Cyan"
     cargo check --manifest-path src-tauri/Cargo.toml --quiet
 
 # Frontend check in watch mode
@@ -63,7 +61,7 @@ install:
 
 # Clean build artifacts
 clean:
-    @echo "Cleaning..."
+    @powershell -Command "Write-Host 'Cleaning...' -ForegroundColor Cyan"
     powershell -Command "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue 'build', '.svelte-kit'" 2>$null || true
     rm -rf build .svelte-kit 2>/dev/null || true
     cargo clean --manifest-path src-tauri/Cargo.toml

@@ -13,6 +13,7 @@
     type Waypoint, type Mission, WpAction, hasLocation, isModifier, toDeg, fromDeg, altFromM,
     WP_ACTION_LABELS, WP_ACTION_KEYS,
   } from '$lib/stores/mission';
+  import { activeSurveyPattern } from '$lib/stores/surveyPattern.svelte';
   import { iconForWp } from '$lib/helpers/missionIcons';
   import { get } from 'svelte/store';
   import { settings } from '$lib/stores/settings';
@@ -451,6 +452,8 @@
 
   function onMapClick(e: L.LeafletMouseEvent) {
     if (!currentEditing) return;
+    // Block waypoint placement while pattern mode is active
+    if (activeSurveyPattern.isActive) return;
     if (currentSelIdx >= 0) { selectedWpIndex.set(-1); return; }
     if (getTotalWpCount() >= MAX_WAYPOINTS) return;
     const lat = fromDeg(e.latlng.lat);

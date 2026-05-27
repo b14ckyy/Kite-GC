@@ -20,6 +20,10 @@
   import { get } from 'svelte/store';
   import { save, open } from '@tauri-apps/plugin-dialog';
   import { t } from 'svelte-i18n';
+  // Helper: untyped $t wrapper for dynamic params (svelte-i18n types are too strict)
+  function _t(id: string, params?: Record<string, string>): string {
+    return (get(t) as any)(id, { values: params });
+  }
 
   let currentMission = $state<Mission>(get(mission));
   let currentSelIdx = $state<number>(get(selectedWpIndex));
@@ -27,9 +31,18 @@
   let currentMissionIdx = $state<number>(get(activeMissionIndex));
   let currentMissionCount = $state<number>(get(missionCount));
 
+  // Lazy pattern panel state (to avoid loading heavy module on startup)
+  let showPatternPanel = $state(false);
+
   const unsubMission = mission.subscribe(m => { currentMission = m; });
   const unsubSelIdx = selectedWpIndex.subscribe(i => { currentSelIdx = i; });
-  const unsubEditMode = editMode.subscribe(e => { currentEditing = e; });
+  const unsubEditMode = editMode.subscribe(e => {
+    currentEditing = e;
+    if (!e && showPatternPanel) {
+      showPatternPanel = false;
+      import('$lib/stores/surveyPattern.svelte').then(m => m.exitPatternMode());
+    }
+  });
   const unsubMissionIdx = activeMissionIndex.subscribe(i => { currentMissionIdx = i; });
   const unsubMissionCount = missionCount.subscribe(c => { currentMissionCount = c; });
 
@@ -142,6 +155,10 @@
   function selectWp(index: number) { selectedWpIndex.set(index); }
   async function removeSelected() { if (currentSelIdx >= 0) { await missionRemoveWp(currentSelIdx); selectedWpIndex.set(-1); } }
 
+  async function handleGenerateAppend() {
+    // Button moved to SurveyPatternPanel; this is a no-op fallback
+  }
+
   function formatAltShort(wp: Waypoint): string {
     return `${(wp.altitude / 100).toFixed(0)}m ${(wp.p3 & 1) ? 'AMSL' : 'REL'}`;
   }
@@ -195,6 +212,7 @@
 
 <div
   class="mission-panel"
+  class:pattern-mode={showPatternPanel}
   ondragover={onDragOver}
   ondragleave={onDragLeave}
   ondrop={onDrop}
@@ -204,6 +222,31 @@
     <button class="btn-edit" class:active={currentEditing} onclick={() => editMode.update(v => !v)} title={$t('mission.toggleEdit')}>
       ✏️ {currentEditing ? $t('mission.editing') : $t('mission.edit')}
     </button>
+
+    {#if currentEditing}
+      <button
+        class="btn-pattern"
+        class:active={showPatternPanel}
+        onclick={() => {
+          if (showPatternPanel) {
+            // Toggle OFF: exit pattern mode
+            import('$lib/stores/surveyPattern.svelte').then(m => {
+              m.exitPatternMode();
+              showPatternPanel = false;
+            });
+          } else {
+            // Toggle ON: enter pattern mode
+            import('$lib/stores/surveyPattern.svelte').then(m => {
+              m.enterPatternMode('rectangle');
+              showPatternPanel = true;
+            });
+          }
+        }}
+      >
+        🗺️ {$t('survey.pattern')}
+      </button>
+    {/if}
+
     <div class="toolbar-spacer"></div>
     {#if currentEditing && currentSelIdx >= 0}
       <button class="btn-sm btn-danger" onclick={removeSelected} title={$t('mission.removeWp')}>✕</button>
@@ -221,41 +264,54 @@
       {/if}
     </div>
 
-    <div class="wp-table-wrap">
-      {#if currentMission.waypoints.length === 0}
-        <div class="wp-empty">{currentEditing ? $t('mission.emptyEdit') : $t('mission.emptyView')}</div>
-      {:else}
-        <table class="wp-table">
-          <thead>
-            <tr>
-              <th class="col-num">{$t('mission.colNumber')}</th>
-              <th class="col-type">{$t('mission.colType')}</th>
-              <th class="col-alt">{$t('mission.colAlt')}</th>
-              <th class="col-param">{$t('mission.colParam')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each currentMission.waypoints as wp, i}
-              {#if isModifier(wp.action)}
-                <tr class="wp-row modifier" class:selected={i === currentSelIdx} class:greyed={missionEndIdx >= 0 && i > missionEndIdx} onclick={() => selectWp(i)}>
-                  <td class="col-num"></td>
-                  <td class="col-type mod-indent">↳ {shortType(wp.action)}</td>
-                  <td class="col-alt">—</td>
-                  <td class="col-param">{formatParam(wp)}</td>
-                </tr>
-              {:else}
-                <tr class="wp-row" class:selected={i === currentSelIdx} class:greyed={missionEndIdx >= 0 && i > missionEndIdx} onclick={() => selectWp(i)}>
-                  <td class="col-num"><span class="wp-num-badge">{displayNums.get(i) ?? ''}</span></td>
-                  <td class="col-type">{shortType(wp.action)}</td>
-                  <td class="col-alt">{hasLocation(wp.action) ? formatAltShort(wp) : '—'}</td>
-                  <td class="col-param">{formatParam(wp)}</td>
-                </tr>
-              {/if}
-            {/each}
-          </tbody>
-        </table>
-      {/if}
-    </div>
+    {#if showPatternPanel}
+      {#await import('./SurveyPatternPanel.svelte')}
+        <div class="pattern-loading">{$t('survey.loading')}</div>
+      {:then { default: SurveyPatternPanel }}
+        <SurveyPatternPanel ongenerate={() => { showPatternPanel = false; }} />
+      {:catch error}
+        <div class="pattern-error">
+          {_t('survey.error', { error: String(error?.message || error) })}
+          <button onclick={() => showPatternPanel = false}>Schließen</button>
+        </div>
+      {/await}
+    {:else}
+      <div class="wp-table-wrap">
+        {#if currentMission.waypoints.length === 0}
+          <div class="wp-empty">{currentEditing ? $t('mission.emptyEdit') : $t('mission.emptyView')}</div>
+        {:else}
+          <table class="wp-table">
+            <thead>
+              <tr>
+                <th class="col-num">{$t('mission.colNumber')}</th>
+                <th class="col-type">{$t('mission.colType')}</th>
+                <th class="col-alt">{$t('mission.colAlt')}</th>
+                <th class="col-param">{$t('mission.colParam')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each currentMission.waypoints as wp, i}
+                {#if isModifier(wp.action)}
+                  <tr class="wp-row modifier" class:selected={i === currentSelIdx} class:greyed={missionEndIdx >= 0 && i > missionEndIdx} onclick={() => selectWp(i)}>
+                    <td class="col-num"></td>
+                    <td class="col-type mod-indent">↳ {shortType(wp.action)}</td>
+                    <td class="col-alt">—</td>
+                    <td class="col-param">{formatParam(wp)}</td>
+                  </tr>
+                {:else}
+                  <tr class="wp-row" class:selected={i === currentSelIdx} class:greyed={missionEndIdx >= 0 && i > missionEndIdx} onclick={() => selectWp(i)}>
+                    <td class="col-num"><span class="wp-num-badge">{displayNums.get(i) ?? ''}</span></td>
+                    <td class="col-type">{shortType(wp.action)}</td>
+                    <td class="col-alt">{hasLocation(wp.action) ? formatAltShort(wp) : '—'}</td>
+                    <td class="col-param">{formatParam(wp)}</td>
+                  </tr>
+                {/if}
+              {/each}
+            </tbody>
+          </table>
+        {/if}
+      </div>
+    {/if}
   </div>
 
   {#if currentSelIdx >= 0 && currentSelIdx < currentMission.waypoints.length}
@@ -292,20 +348,22 @@
   {/if}
 
   <div class="mission-bottom">
-    <div class="mission-controls">
-      <div class="ctrl-row">
-        <button class="btn-ctrl" onclick={handleDownload} disabled={downloadLoading}>{downloadLoading ? '⏳' : '⬇️'} {$t('mission.fcDownload')}</button>
-        <button class="btn-ctrl" onclick={handleUpload} disabled={uploadLoading}>{uploadLoading ? '⏳' : '⬆️'} {$t('mission.fcUpload')}</button>
+    {#if !showPatternPanel}
+      <div class="mission-controls">
+        <div class="ctrl-row">
+          <button class="btn-ctrl" onclick={handleDownload} disabled={downloadLoading}>{downloadLoading ? '⏳' : '⬇️'} {$t('mission.fcDownload')}</button>
+          <button class="btn-ctrl" onclick={handleUpload} disabled={uploadLoading}>{uploadLoading ? '⏳' : '⬆️'} {$t('mission.fcUpload')}</button>
+        </div>
+        <div class="ctrl-row">
+          <button class="btn-ctrl btn-eeprom" onclick={handleEepromLoad} disabled={eepromLoadLoading}>{eepromLoadLoading ? '⏳' : '💾'} {$t('mission.eepromLoad')}</button>
+          <button class="btn-ctrl btn-eeprom" onclick={handleEepromSave} disabled={eepromSaveLoading || isArmed()} title={isArmed() ? $t('mission.eepromSaveArmed') : $t('mission.eepromSaveTooltip')}>{eepromSaveLoading ? '⏳' : '💾'} {$t('mission.eepromSave')}</button>
+        </div>
+        <div class="ctrl-row">
+          <button class="btn-ctrl btn-file" onclick={handleOpenFile}>📂 {$t('mission.open')}</button>
+          <button class="btn-ctrl btn-file" onclick={handleSaveFile}>💾 {$t('mission.save')}</button>
+        </div>
       </div>
-      <div class="ctrl-row">
-        <button class="btn-ctrl btn-eeprom" onclick={handleEepromLoad} disabled={eepromLoadLoading}>{eepromLoadLoading ? '⏳' : '💾'} {$t('mission.eepromLoad')}</button>
-        <button class="btn-ctrl btn-eeprom" onclick={handleEepromSave} disabled={eepromSaveLoading || isArmed()} title={isArmed() ? $t('mission.eepromSaveArmed') : $t('mission.eepromSaveTooltip')}>{eepromSaveLoading ? '⏳' : '💾'} {$t('mission.eepromSave')}</button>
-      </div>
-      <div class="ctrl-row">
-        <button class="btn-ctrl btn-file" onclick={handleOpenFile}>📂 {$t('mission.open')}</button>
-        <button class="btn-ctrl btn-file" onclick={handleSaveFile}>💾 {$t('mission.save')}</button>
-      </div>
-    </div>
+    {/if}
   </div>
 
   {#if statusMessage}<div class="mission-status">{statusMessage}</div>{/if}
@@ -326,11 +384,53 @@
 
 <style>
   .mission-panel { display: flex; flex-direction: column; gap: 0; flex: 1; min-height: 0; padding: 4px; position: relative; overflow: hidden; color-scheme: dark; font-size: 13px; }
+  .mission-panel.pattern-mode { overflow-y: auto; }
   .mission-panel.drag-over { outline: 2px dashed #37a8db; outline-offset: -2px; }
   .mission-toolbar { display: flex; align-items: center; gap: 4px; padding: 2px 4px; flex-shrink: 0; margin-bottom: 4px; }
   .toolbar-spacer { flex: 1; }
   .btn-edit { padding: 4px 10px; border: 1px solid #555; border-radius: 4px; background: #2a2a2a; color: #ccc; cursor: pointer; font-size: 13px; }
   .btn-edit.active { background: #37a8db; color: #fff; border-color: #37a8db; }
+
+  .btn-pattern {
+    padding: 4px 10px;
+    border: 1px solid #555;
+    border-radius: 4px;
+    background: #3a3a3a;
+    color: #ccc;
+    cursor: pointer;
+    font-size: 13px;
+    margin-left: 6px;
+  }
+  .btn-pattern:hover {
+    background: #4a4a4a;
+  }
+  .btn-pattern.active {
+    background: #1a3a5c;
+    color: #37a8db;
+    border-color: #37a8db;
+  }
+
+  .pattern-loading {
+    padding: 12px;
+    color: #888;
+    font-size: 13px;
+  }
+
+  .pattern-error {
+    padding: 12px;
+    background: #3a1a1a;
+    color: #ffaaaa;
+    font-size: 13px;
+    border: 1px solid #5a2a2a;
+  }
+  .pattern-error button {
+    margin-top: 8px;
+    padding: 2px 8px;
+    background: #5a2a2a;
+    color: #fff;
+    border: none;
+    cursor: pointer;
+  }
   .btn-sm { padding: 3px 8px; border: 1px solid #555; border-radius: 4px; background: #2a2a2a; color: #ccc; cursor: pointer; font-size: 13px; }
   .btn-sm:hover { background: #3a3a3a; }
   .btn-sm.btn-danger { border-color: #c0392b; color: #e74c3c; }

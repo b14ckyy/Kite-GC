@@ -1,5 +1,6 @@
 <script lang="ts">
   import { t } from 'svelte-i18n';
+  import NumberStepper from '$lib/components/NumberStepper.svelte';
 
   let {
     weatherTempC = $bindable(),
@@ -34,27 +35,21 @@
     const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
     return dirs[Math.round(deg / 45) % 8];
   }
+
+  // Bridge between string bindable props and NumberStepper numbers
+  let weatherTempNum = $state(Number(weatherTempC || 0));
+  let weatherWindNum = $state(Number(weatherWindMs || 0));
 </script>
 
 <div class="weather-editor">
   <div class="weather-fields">
     <label class="weather-field">
       <span class="weather-field-label">{$t('logbook.weatherTemp')}</span>
-      <div class="setting-stepper">
-        <button class="stepper-btn" onclick={() => { weatherTempC = String(Math.round((Number(weatherTempC || 0) - 0.5) * 10) / 10); }}>−</button>
-        <input type="number" step="0.5" class="stepper-input" bind:value={weatherTempC} placeholder="—" />
-        <button class="stepper-btn" onclick={() => { weatherTempC = String(Math.round((Number(weatherTempC || 0) + 0.5) * 10) / 10); }}>+</button>
-        <span class="setting-unit">{tempUnitLabel}</span>
-      </div>
+      <NumberStepper bind:value={weatherTempNum} step={0.5} unit={tempUnitLabel} onchange={() => { weatherTempC = String(weatherTempNum); }} />
     </label>
     <label class="weather-field">
       <span class="weather-field-label">{$t('logbook.weatherWind')}</span>
-      <div class="setting-stepper">
-        <button class="stepper-btn" onclick={() => { weatherWindMs = String(Math.max(0, Math.round((Number(weatherWindMs || 0) - 0.5) * 10) / 10)); }}>−</button>
-        <input type="number" step="0.5" min="0" class="stepper-input" bind:value={weatherWindMs} placeholder="—" />
-        <button class="stepper-btn" onclick={() => { weatherWindMs = String(Math.round((Number(weatherWindMs || 0) + 0.5) * 10) / 10); }}>+</button>
-        <span class="setting-unit">{windUnitLabel}</span>
-      </div>
+      <NumberStepper bind:value={weatherWindNum} step={0.5} min={0} unit={windUnitLabel} onchange={() => { weatherWindMs = String(weatherWindNum); }} />
     </label>
     <label class="weather-field">
       <span class="weather-field-label">{$t('logbook.weatherWindDir')}</span>
@@ -139,65 +134,6 @@
   .weather-save-btn {
     margin-top: 8px;
     width: 100%;
-  }
-
-  .setting-stepper {
-    display: flex;
-    align-items: stretch;
-    gap: 4px;
-  }
-
-  .stepper-btn {
-    background: #333;
-    color: #aaa;
-    border: 1px solid #555;
-    border-radius: 3px;
-    width: 24px;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: bold;
-    line-height: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    user-select: none;
-  }
-
-  .stepper-btn:hover {
-    background: #37a8db;
-    color: #fff;
-  }
-
-  .stepper-btn:active {
-    background: #2d8ab8;
-  }
-
-  .stepper-input {
-    padding: 3px 4px;
-    background: #434343;
-    border: 1px solid #555;
-    border-radius: 3px;
-    color: #e0e0e0;
-    font-size: 11px;
-    width: 52px;
-    text-align: center;
-    color-scheme: dark;
-    appearance: textfield;
-    -moz-appearance: textfield;
-  }
-
-  .stepper-input::-webkit-inner-spin-button,
-  .stepper-input::-webkit-outer-spin-button {
-    -webkit-appearance: none;
-    margin: 0;
-  }
-
-  .setting-unit {
-    font-size: 11px;
-    color: #888;
-    margin-left: 2px;
-    align-self: center;
   }
 
   .cache-clear-btn {

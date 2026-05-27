@@ -1,0 +1,511 @@
+<script lang="ts">
+  import { t } from 'svelte-i18n';
+  import {
+    activeSurveyPattern,
+    exitPatternMode,
+    updateRectangleParams,
+    type RectanglePatternParams,
+  } from '$lib/stores/surveyPattern.svelte';
+  import { get } from 'svelte/store';
+  import { computeRectangleCorners, generateRectangleZigzag, type SurveyWaypoint } from '$lib/helpers/surveyPatterns';
+  import NumberStepper from '$lib/components/NumberStepper.svelte';
+  import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+
+  // Helper: untyped $t wrapper for dynamic params (svelte-i18n types are too strict)
+  function _t(id: string, params?: Record<string, string>): string {
+    return (get(t) as any)(id, { values: params });
+  }
+
+  let confirmDialog: ReturnType<typeof ConfirmDialog>;
+  async function showDialog(title: string, message: string, buttons?: import('$lib/components/ConfirmDialog.svelte').DialogButton[]): Promise<string | null> {
+    return confirmDialog.show({ title, message, buttons });
+  }
+
+  // Props
+  interface Props {
+    ongenerate?: () => void;
+  }
+  let { ongenerate }: Props = $props();
+
+  // Local reactive copy for the rectangle (we start with Rectangle only in Phase 1)
+  let params = $state<RectanglePatternParams>({
+    center: { lat: 0, lng: 0 },
+    length: 400,
+    width: 200,
+    shapeOrientation: 90,
+    baseAltitude: 50,
+    baseSpeed: 15,
+    targetLineSpacing: 50,
+    actualLineSpacing: 50,
+    turnDistance: 0,
+    reverse: false,
+    trackOrientationEnabled: false,
+    trackOrientation: 0,
+    altMode: 'relative',
+    userActionLineStartFlags: 0,
+    userActionLineEndFlags: 0,
+  });
+
+  // Full list of supported shapes (visualization for non-Rectangle comes progressively)
+  const availableShapes = [
+    { value: 'rectangle', label: $t('survey.shapeRectangle') },
+    { value: 'rectangle-lawnmower', label: $t('survey.shapeRectangleLawnmower') },
+    { value: 'polygon', label: $t('survey.shapePolygon') },
+    { value: 'polygon-lawnmower', label: $t('survey.shapePolygonLawnmower') },
+    { value: 'circle', label: $t('survey.shapeCircle') },
+    { value: 'spiral', label: $t('survey.shapeSpiral') },
+  ] as const;
+
+  function handleParamChange() {
+    if (activeSurveyPattern.config && ['rectangle', 'rectangle-lawnmower'].includes(activeSurveyPattern.config.shape)) {
+      updateRectangleParams(params);
+    }
+  }
+
+  async function handleGenerate() {
+    const cfg = activeSurveyPattern.config;
+    if (!cfg) {
+      exitPatternMode();
+      return;
+    }
+
+    let wps: SurveyWaypoint[] = [];
+
+    if (cfg.shape === 'rectangle' || cfg.shape === 'rectangle-lawnmower') {
+      const p = cfg.params as RectanglePatternParams;
+      const segments = generateRectangleZigzag(p);
+      // Only survey segments → extract start and end points in flight order
+      const surveyPoints: SurveyWaypoint[] = [];
+      for (const seg of segments) {
+        if (seg.kind === 'survey') {
+          // Push start (with lineStartFlags) and end (with lineEndFlags)
+          surveyPoints.push(seg.points[0]);
+          surveyPoints.push(seg.points[1]);
+        }
+      }
+      wps = surveyPoints;
+    } else {
+      // Other shapes: placeholder for now (will be implemented in later phases)
+      console.log('[Pattern] Generation for', cfg.shape, 'not yet implemented — using empty set');
+    }
+
+    if (wps.length === 0) {
+      exitPatternMode();
+      return;
+    }
+
+    // Check 120 WP limit
+    const { getTotalWpCount, MAX_WAYPOINTS_TOTAL } = await import('$lib/stores/mission');
+    const currentCount = getTotalWpCount();
+    const remaining = MAX_WAYPOINTS_TOTAL - currentCount;
+
+    if (wps.length > remaining) {
+      const result = await showDialog(
+        'Waypoint limit exceeded',
+        `Current mission has ${currentCount}/${MAX_WAYPOINTS_TOTAL} waypoints.\n` +
+        `This pattern would add ${wps.length} waypoints, exceeding the limit by ${wps.length - remaining}.\n\n` +
+        `Only the first ${remaining} waypoints will be added (truncated). Continue?`,
+        [{ label: 'Cancel', value: 'cancel' }, { label: 'Truncate & Add', value: 'proceed', primary: true }]
+      );
+      if (result !== 'proceed') return;
+      wps = wps.slice(0, remaining);
+    }
+
+    console.log(`[Pattern] Generating ${wps.length} waypoints for ${cfg.shape}`);
+
+    // Convert SurveyWaypoint[] → INAV Waypoint[] and append to active mission
+    try {
+      const { missionAddWp, WpAction, altFromM, fromDeg } = await import('$lib/stores/mission');
+      for (const swp of wps) {
+        const altCm = altFromM(swp.alt);
+        const speedCm = swp.speed ? Math.round(swp.speed * 100) : 0;
+        // p3 bit 0 = altMode (0 = REL, 1 = AMSL), bits 1-4 = userActionFlags (UA1=bit1, UA2=bit2, etc.)
+        let p3 = swp.altMode === 'amsl' ? 1 : 0;
+        if (swp.userActionFlags) {
+          p3 |= ((swp.userActionFlags & 0x0F) << 1);
+        }
+        await missionAddWp(WpAction.Waypoint, fromDeg(swp.lat), fromDeg(swp.lng), altCm, speedCm, 0, p3);
+      }
+      console.log(`[Pattern] Successfully added ${wps.length} waypoints`);
+    } catch (e) {
+      console.error('[Pattern] Failed to add waypoints:', e);
+    }
+    // Note: Mission planner auto-sets WP_FLAG_LAST on the last waypoint — no need to do it here
+
+    exitPatternMode();
+    ongenerate?.();
+  }
+
+  function handleCancel() {
+    exitPatternMode();
+  }
+
+  // Sync from store when it changes (e.g. when entering with defaults)
+  let _syncing = false;
+  $effect(() => {
+    if (activeSurveyPattern.config && ['rectangle', 'rectangle-lawnmower'].includes(activeSurveyPattern.config.shape)) {
+      const raw = activeSurveyPattern.config.params as RectanglePatternParams;
+      const rounded = {
+        ...raw,
+        length: Math.round(raw.length * 10) / 10,
+        width: Math.round(raw.width * 10) / 10,
+      };
+      params = rounded;
+      // Push rounded values back to store once so drag doesn't leave unrounded residue
+      if (!_syncing && (rounded.length !== raw.length || rounded.width !== raw.width)) {
+        _syncing = true;
+        updateRectangleParams({ length: rounded.length, width: rounded.width });
+        _syncing = false;
+      }
+    }
+  });
+
+  console.log('[DEBUG] SurveyPatternPanel mounted');
+</script>
+
+<div class="survey-panel">
+  <ConfirmDialog bind:this={confirmDialog} />
+
+  <div class="survey-header">
+    <div>
+      <h4>{$t('survey.title')}</h4>
+      <select 
+        value={activeSurveyPattern.config?.shape || 'rectangle'}
+        onchange={(e) => {
+          const newShape = (e.target as HTMLSelectElement).value as any;
+          if (activeSurveyPattern.config) {
+            // Reassign to ensure rune reactivity propagates to the map layer
+            activeSurveyPattern.config = {
+              ...activeSurveyPattern.config,
+              shape: newShape
+            } as any;
+          }
+        }}
+      >
+        {#each availableShapes as shapeOption}
+          <option value={shapeOption.value}>{shapeOption.label}</option>
+        {/each}
+      </select>
+    </div>
+  </div>
+
+  <div class="survey-params">
+    {#if activeSurveyPattern.config?.shape === 'rectangle' || activeSurveyPattern.config?.shape === 'rectangle-lawnmower'}
+      <!-- Row 1: Length + Width -->
+      <div class="param-row">
+        <NumberStepper label={$t('survey.length')} bind:value={params.length} min={10} step={10} decimals={1} onchange={handleParamChange} />
+        <NumberStepper label={$t('survey.width')} bind:value={params.width} min={10} step={10} decimals={1} onchange={handleParamChange} />
+      </div>
+
+      <!-- Row 2: Line Spacing + Turn Distance -->
+      <div class="param-row">
+        <div class="spacing-wrapper">
+          <NumberStepper label={$t('survey.lineSpacing')} bind:value={params.targetLineSpacing} min={5} step={5} decimals={0} onchange={handleParamChange} />
+          {#if params.targetLineSpacing > 0 && params.width > 0}
+            <span class="spacing-info">{_t('survey.tracksInfo', { spacing: String(params.actualLineSpacing.toFixed(1)), count: String(Math.ceil(params.width / params.targetLineSpacing)) })}</span>
+          {/if}
+        </div>
+        <NumberStepper label={$t('survey.turnDistance')} bind:value={params.turnDistance} min={0} step={5} decimals={0} onchange={handleParamChange} />
+      </div>
+
+      <!-- Shape Orientation (solo) -->
+      <NumberStepper label={$t('survey.areaOrientation')} bind:value={params.shapeOrientation} min={0} max={90} step={5} decimals={0} onchange={handleParamChange} />
+
+      <!-- Row 3: Track Orientation toggle + Reverse toggle -->
+      <div class="param-row">
+        <label class="toggle-row">
+          <input type="checkbox" bind:checked={params.trackOrientationEnabled} onchange={handleParamChange} />
+          <span>{$t('survey.trackOrientation')}</span>
+        </label>
+        <label class="toggle-row">
+          <input type="checkbox" bind:checked={params.reverse} onchange={handleParamChange} />
+          <span>{$t('survey.reverse')}</span>
+        </label>
+      </div>
+
+      <!-- Track Orientation value (only when enabled) -->
+      {#if params.trackOrientationEnabled}
+        <NumberStepper label={$t('survey.trackOrientationVal')} bind:value={params.trackOrientation} min={0} max={360} step={5} decimals={0} onchange={handleParamChange} />
+      {/if}
+
+      <!-- Row 4: Base Altitude + Base Speed -->
+      <div class="param-row">
+        <NumberStepper label={$t('survey.baseAlt')} bind:value={params.baseAltitude} min={0} step={5} decimals={0} onchange={handleParamChange} />
+        <NumberStepper label={$t('survey.baseSpeed')} bind:value={params.baseSpeed} min={1} step={1} decimals={0} onchange={handleParamChange} />
+      </div>
+
+      <!-- Altitude Type dropdown -->
+      <div class="param-row alt-type-row">
+        <label class="alt-type-label">{$t('survey.altMode')}</label>
+        <select class="alt-type-select" bind:value={params.altMode} onchange={handleParamChange}>
+          <option value="relative">{$t('survey.altModeRelative')}</option>
+          <option value="amsl">{$t('survey.altModeAmsl')}</option>
+          <option value="ground" disabled>{$t('survey.altModeGround')} — {$t('survey.comingSoon')}</option>
+        </select>
+      </div>
+
+      <!-- User Action Trigger -->
+      <div class="section-label">{$t('survey.userActionTrigger')}</div>
+      <div class="ua-grid">
+        <div class="ua-col">
+          <div class="ua-col-label">{$t('survey.lineStart')}</div>
+          <div class="ua-checks">
+            {#each [1,2,3,4] as n}
+              <label class="ua-check-item">
+                <input type="checkbox" checked={!!(params.userActionLineStartFlags & (1 << (n-1)))} onchange={() => { params.userActionLineStartFlags ^= (1 << (n-1)); handleParamChange(); }} />
+                <span>{n}</span>
+              </label>
+            {/each}
+          </div>
+        </div>
+        <div class="ua-col">
+          <div class="ua-col-label">{$t('survey.lineEnd')}</div>
+          <div class="ua-checks">
+            {#each [1,2,3,4] as n}
+              <label class="ua-check-item">
+                <input type="checkbox" checked={!!(params.userActionLineEndFlags & (1 << (n-1)))} onchange={() => { params.userActionLineEndFlags ^= (1 << (n-1)); handleParamChange(); }} />
+                <span>{n}</span>
+              </label>
+            {/each}
+          </div>
+        </div>
+      </div>
+    {:else}
+      <div class="not-implemented">
+        {@html _t('survey.notImplemented', { shape: activeSurveyPattern.config?.shape ?? '?' })}
+      </div>
+    {/if}
+  </div>
+
+  <!-- Generate & Append + Load/Save buttons -->
+  <div class="pattern-bottom-actions">
+    <button class="btn-primary" onclick={handleGenerate}>
+      ➕ {$t('survey.generateAppend')}
+    </button>
+    <div class="pattern-file-row">
+      <button class="btn-ctrl btn-file" onclick={() => {}} disabled title={$t('survey.loadPatternSoon')}>📂 {$t('survey.loadPattern')}</button>
+      <button class="btn-ctrl btn-file" onclick={() => {}} disabled title={$t('survey.savePatternSoon')}>💾 {$t('survey.savePattern')}</button>
+    </div>
+  </div>
+</div>
+
+<style>
+  .survey-panel {
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .survey-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .survey-params {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-start;
+    width: 100%;
+    flex-shrink: 0;
+  }
+
+  .param-row {
+    display: flex;
+    gap: 12px;
+    width: 100%;
+    align-items: flex-start;
+  }
+
+  .param-row > :global(*) {
+    flex: none;
+    min-width: 0;
+  }
+
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #ccc;
+    cursor: pointer;
+  }
+
+  .toggle-row input[type="checkbox"] {
+    accent-color: #37a8db;
+  }
+
+  .spacing-wrapper {
+    display: inline-flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+
+  .spacing-info {
+    font-size: 11px;
+    color: #888;
+    font-style: italic;
+    padding-left: 4px;
+  }
+
+  .section-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 4px;
+    width: 100%;
+    border-bottom: 1px solid #333;
+    padding-bottom: 2px;
+  }
+
+  .ua-grid {
+    display: flex;
+    gap: 20px;
+    width: 100%;
+  }
+
+  .ua-col {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+  }
+
+  .ua-col-label {
+    font-size: 11px;
+    color: #888;
+    font-weight: 600;
+    text-align: center;
+  }
+
+  .ua-checks {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+  }
+
+  .ua-check-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .ua-check-item input[type="checkbox"] {
+    accent-color: #37a8db;
+    margin: 0;
+  }
+
+  .ua-check-item span {
+    font-size: 10px;
+    color: #666;
+  }
+
+  .not-implemented {
+    padding: 8px;
+    color: #888;
+    font-size: 12px;
+    font-style: italic;
+  }
+
+  .alt-type-row {
+    align-items: center;
+    gap: 8px;
+  }
+
+  .alt-type-label {
+    font-size: 12px;
+    color: #aaa;
+    white-space: nowrap;
+  }
+
+  .alt-type-select {
+    padding: 3px 6px;
+    background: #434343;
+    border: 1px solid #555;
+    border-radius: 3px;
+    color: #e0e0e0;
+    font-size: 12px;
+    color-scheme: dark;
+    max-width: 120px;
+  }
+
+  .btn-sm { padding: 3px 8px; border: 1px solid #555; border-radius: 4px; background: #2a2a2a; color: #ccc; cursor: pointer; font-size: 13px; }
+  .btn-sm:hover { background: #3a3a3a; }
+
+  .survey-header select {
+    padding: 2px 6px;
+    background: #434343;
+    border: 1px solid #555;
+    border-radius: 3px;
+    color: #e0e0e0;
+    font-size: 12px;
+    color-scheme: dark;
+    margin-left: 6px;
+  }
+
+  .survey-header h4 {
+    margin: 0;
+    font-size: 14px;
+    color: #37a8db;
+    display: inline;
+  }
+
+  .pattern-bottom-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 4px 0;
+    flex-shrink: 0;
+  }
+
+  .pattern-file-row {
+    display: flex;
+    gap: 4px;
+  }
+
+  .pattern-file-row .btn-ctrl {
+    flex: 1;
+    font-size: 11px;
+    padding: 4px 4px;
+  }
+
+  .btn-primary {
+    width: 100%;
+    padding: 6px 12px;
+    background: #1a3a5c;
+    border: 1px solid #37a8db;
+    border-radius: 4px;
+    color: #37a8db;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .btn-primary:hover {
+    background: #37a8db;
+    color: #fff;
+  }
+
+  .btn-ctrl {
+    padding: 5px 6px;
+    border: 1px solid #37a8db;
+    border-radius: 4px;
+    background: #1a3a5c;
+    color: #37a8db;
+    cursor: pointer;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .btn-ctrl:hover:not(:disabled) { background: #37a8db; color: #fff; }
+  .btn-ctrl:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-ctrl.btn-file { border-color: #555; background: #2a2a2a; color: #ccc; }
+  .btn-ctrl.btn-file:hover { background: #3a3a3a; }
+</style>
