@@ -458,6 +458,25 @@ This document tracks planned features, organized by milestone.
 - [ ] Aviation charts (OpenAIP tile layer — airports, navaids, airspace symbology)
 
 ### Advanced UI & Tools
+- [x] Survey / area planner — Phase 1+2 complete:
+  - [x] Rectangle shape definition (center, length, width, orientation) via UI + draggable map markers
+  - [x] Map visualization of shape area (gray semi-transparent polygon)
+  - [x] Live path preview (survey legs + turn connections)
+  - [x] Interactive corner + center dragging on map (two-way parameter binding)
+  - [x] Parameter panel with NumberStepper controls, hidden when edit mode disabled
+  - [x] Turn Distance extension for fixed-wing turn zone
+  - [x] Reverse direction toggle
+  - [x] Track Orientation — independent track angle within shape (clipped to shape boundary)
+  - [x] Altitude Type selector (Relative / AMSL / Ground)
+  - [x] User Action Trigger flags per line (start + end, bits 1–4 in p3)
+  - [x] 120 WP limit check with truncation dialog
+  - [x] Deduplication of survey/turn boundary points
+  - [x] Altitude, speed, userActionFlags encoded in p3 bitfield per INAV spec
+  - [x] Pattern params persist between mode toggles (cleared on app close)
+  - [ ] Rectangle Lawnmower pattern generation
+  - [ ] Polygon shape + lawnmower
+  - [ ] Circle + Spiral patterns
+  - [ ] Load/save pattern templates
 - [ ] OSD font/element preview
 - [ ] Safehome editor
 - [ ] HID controller input (gamepad/joystick)

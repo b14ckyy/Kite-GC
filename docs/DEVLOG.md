@@ -45,7 +45,8 @@ Kite Ground Control/
 │   │   │   ├── home.ts           # Home position store (set on arm + GPS fix)
 │   │   │   ├── mission.ts        # Mission state: WP types, stores, invoke wrappers, XML I/O
 │   │   │   ├── layout.ts        # Layout zone system: profiles, dock visibility, CSS grid overrides
-│   │   │   └── flightlog.ts      # Flight log API wrappers, types, grouping/sort helpers
+│   │   │   ├── flightlog.ts      # Flight log API wrappers, types, grouping/sort helpers
+│   │   │   └── surveyPattern.svelte.ts # Survey Pattern rune store (config, params, mode mgmt)
 │   │   ├── controllers/          # Domain logic extracted from +page.svelte
 │   │   │   ├── connectionController.ts  # Serial port refresh, connect/disconnect, listener mgmt
 │   │   │   ├── logbookController.ts     # Flight CRUD, Blackbox import, geocode/weather
@@ -55,12 +56,18 @@ Kite Ground Control/
 │   │   │   └── telemetryAdapter.ts      # DB TelemetryRecord → TelemetryData for widgets
 │   │   ├── helpers/              # Pure utility functions
 │   │   │   ├── telemetry.ts      # isArmed(), hasKnownLocation(), isValidGpsCoordinate()
-│   │   │   └── trackColors.ts    # Track color modes, flight mode classification, gradient functions, nav state colors
+│   │   │   ├── trackColors.ts    # Track color modes, flight mode classification, gradient functions, nav state colors
+│   │   │   └── surveyPatterns.ts # Survey geometry (rectangle corners, zigzag generation, drag helpers)
 │   │   ├── components/           # Reusable UI components
 │   │   │   ├── Map.svelte        # Leaflet map (trail, home marker, cached tiles, heading-up)
+│   │   │   ├── Map3D.svelte      # CesiumJS 3D globe view (optional, alongside Leaflet)
+│   │   │   ├── NumberStepper.svelte # Reusable +/- stepper input (used by SurveyPatternPanel, WeatherEditor)
 │   │   │   ├── MissionLayer.svelte # Mission map layer (markers, polyline, editor popups)
-│   │   │   ├── MissionPanel.svelte # Mission sidebar (WP list, FC/EEPROM/file controls)
-│   │   │   ├── WidgetPanel.svelte # Drag-and-drop widget panel container
+│   │   │   ├── MissionPanel.svelte # Mission sidebar (WP list, FC/EEPROM/file controls) [LEGACY — replaced by InavMissionPanel]
+│   │   │   ├── InavMissionPanel.svelte # INAV mission panel (Pattern button, WP table, controls)
+│   │   │   ├── InavMissionLayer.svelte # INAV mission map layer (blocks WP placement in Pattern mode)
+│   │   │   ├── SurveyPatternPanel.svelte # Pattern parameter UI (shapes, altitude, user action flags)
+│   │   │   ├── SurveyPatternLayer.svelte # Pattern map layer (shape polygon, path preview, drag markers)
 │   │   │   ├── DebugPanel.svelte # MSP debug monitor (dev builds only)
 │   │   │   ├── LogPlayer.svelte  # Playback controls (play/pause/reset, scrubber, speed)
 │   │   │   ├── LogbookPanel.svelte # Flight list, detail view, import/weather/notes

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Survey Pattern Generator (Phase 1+2)
+- **Rectangle shape editing**: Center, length, width, orientation via NumberStepper UI + draggable map markers (corner + center)
+- **Map visualization**: Gray semi-transparent shape polygon + blue survey path preview with sawtooth turn extensions
+- **Turn Distance**: Extends outbound legs beyond shape boundary for fixed-wing turn zone
+- **Track Orientation**: Independent track angle within shape — tracks rotated and clipped to shape boundary
+- **Altitude Type**: Dropdown with Relative / AMSL / Ground (Ground disabled, "coming soon")
+- **User Action Trigger**: 4 checkbox pairs per line (start + end), encoded as bits 1–4 in p3 per INAV spec
+- **Waypoint generation**: `generateRectangleZigzag()` + `generateClassicZigzag()` algorithms, deduplication of survey/turn boundary points
+- **120 WP limit**: Check with ConfirmDialog + truncation option
+- **Persist params**: Pattern configuration survives mode toggles (reset on app close)
+- **FC buttons hidden**: Upload/Download/Save/Load hidden while in Pattern mode
+- **WP placement blocked**: InavMissionLayer blocks map click WP placement when Pattern mode is active
+- **Waypoint p3 encoding**: `altMode` (bit 0: 0=REL, 1=AMSL) + `userActionFlags` (bits 1–4, shifted from user mask)
+- **i18n**: ~25 new keys for survey panel (en.json + de.json)
+- **New files**: `surveyPattern.svelte.ts` (rune store), `surveyPatterns.ts` (geometry + generator), `SurveyPatternPanel.svelte` (UI), `SurveyPatternLayer.svelte` (map), `NumberStepper.svelte` (reusable component, replaces inline steppers in WeatherEditor)
+- **Documentation**: `PatternGenerator.md` with full workflow and phased plan
+
 ### Added — Colored Flight Tracks in 3D Map View (Map3D.svelte)
 - **Playback track color segmentation**: `updatePlaybackTrack3D()` now respects `trackColorMode` prop — Flight Mode, Altitude, Speed, Signal, and None modes render as multi-segment colored polylines in CesiumJS
 - **Live trail flightmode coloring**: `updateTrail3D()` uses `classifyFlightMode()` for real-time trail color changes on flight mode transitions (matching Map.svelte behavior)
