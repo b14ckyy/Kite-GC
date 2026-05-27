@@ -1012,3 +1012,65 @@ This ensures panels never overflow into the bottom dock, side dock, or map contr
 - Layout store enables future profile switching (e.g. hide side dock in mission mode)
 - Map always fills the full content area behind all zones (z-index 0) — no wasted space
 
+---
+
+## ADR-024: Survey Pattern Generator — Frontend-Only Pure Functions + Rune Store
+
+**Date**: 2026-04-22
+**Status**: Accepted
+
+**Context**: The survey pattern generator needs to let users define geometric patterns (rectangle, polygon, circle, etc.) on a map, generate waypoints from those patterns, and append them to the active mission. Unlike the existing mission system (which relies on the Rust backend for state management and MSP communication), the pattern generator is a pure frontend feature — no FC communication is needed during pattern editing.
+
+Key questions:
+1. Where should pattern state live? (Backend? Frontend? Both?)
+2. How should the pattern be rendered on the map?
+3. How should generated waypoints be added to the mission?
+
+**Options considered**:
+
+1. **Backend-owned state** (like mission module): Pattern params stored in Rust `Mutex`, frontend reads via Tauri events/commands. Adds IPC overhead for every parameter change (slider drag, marker drag). Real-time map preview would require state sync on every mouse move.
+
+2. **Frontend-only rune store**: Pattern state lives in a Svelte 5 `.svelte.ts` rune module. Geometry computation and waypoint generation are pure TypeScript functions. Only the final "append to mission" step uses the existing mission backend commands.
+
+3. **Both**: Backend stores the config for persistence, frontend has a working copy for interactive editing. Adds sync complexity.
+
+**Decision**: **Option 2 — Frontend-only rune store + pure functions.**
+
+**Rationale**:
+
+- **No IPC latency**: Parameter changes during map interaction (dragging a corner marker updates length/width/center 30–60 times/second) must be instantaneous. IPC round-trips would introduce visible lag.
+- **No backend logic needed**: Pattern geometry is pure math (trigonometry, coordinate transforms) — no MSP commands, no protocol dependency. Rust has no advantage here.
+- **Only two backend touchpoints**: (a) `missionAddWp()` via existing `mission.ts` store for appending generated WPs, (b) future `saveSurveyPattern()`/`loadSurveyPattern()` for persistence.
+- **PatternGenerator.md already defined this**: The phased plan always specified a frontend-only helper file.
+
+**Implementation**:
+
+1. **`surveyPattern.svelte.ts`** (rune store): `$state` for `activeSurveyPattern { config, isActive }`. Functions: `enterPatternMode()`, `exitPatternMode()`, `updateRectangleParams()`, `applyRectangleDragUpdate()`. Config persists between mode toggles (cleared on app close).
+
+2. **`surveyPatterns.ts`** (pure helpers): `LngLat`, `SurveyWaypoint`, `SurveyPathSegment`, `RectangleCorners`, `generateRectangleZigzag()`, `generateClassicZigzag()`, `computeRectangleCorners()`, `updateRectangleFromDraggedCorner()`, `updateRectangleFromDraggedCenter()`.
+
+3. **`SurveyPatternLayer.svelte`** (map component): Renders shape polygon (gray semi-transparent), path preview (blue survey lines + turn connections), draggable corner/center markers. Uses Leaflet `L.polygon`, `L.polyline`, `L.circleMarker`. Reads directly from `activeSurveyPattern` rune store for reactivity.
+
+4. **`SurveyPatternPanel.svelte`** (UI component): Parameter inputs using `NumberStepper`. Altitude type dropdown, user action trigger checkboxes. Shape selector dropdown (all 6 shapes listed, rectangle+rectangle-lawnmower functional, others placeholder). Generate button with 120 WP limit check via `ConfirmDialog`.
+
+5. **Deduplication**: Turn connections duplicate survey endpoints. During generation, consecutive identical lat/lng points are skipped. User action flags from the survey end point are preserved.
+
+6. **P3 encoding**: `altMode` → bit 0 (0=REL, 1=AMSL), `userActionFlags` → bits 1–4 (shifted: `(flags & 0x0F) << 1`), matching INAV's `P3_USER_ACTION_1..4` bit positions in `mission/types.rs`.
+
+**Key design choices**:
+
+- **SurveyPathSegment kind**: `'survey'` vs `'turn'` — survey segments are the actual flight lines (with start/end flags). Turn segments are visual-only connectors (no waypoints generated from them).
+- **Track orientation**: When enabled, tracks are rotated independently from the shape. Tracks are clipped to the shape boundary (intersection math). When disabled, tracks follow `shapeOrientation`.
+- **Reverse**: Swaps start/end of the flight path without changing the track direction.
+- **Turn Distance**: Extends the outbound leg beyond the shape boundary. Only affects generated waypoints, not the shape polygon.
+- **No re-editing after generation**: Once waypoints are appended, pattern config is preserved (for re-entry with same params) but there is no link back to the original pattern. Users can edit individual waypoints freely.
+
+**Map layer integration**:
+
+- `Map.svelte` includes `<SurveyPatternLayer {map} />` unconditionally (it clears itself when not active).
+- `InavMissionLayer` blocks new WP placement via `if (activeSurveyPattern.isActive) return;`.
+- `InavMissionPanel` conditionally renders `SurveyPatternPanel` instead of the WP table when `showPatternPanel` is true.
+- FC upload/download/save/load buttons are hidden while pattern mode is active (`{#if !showPatternPanel}`).
+
+*End of Architecture Decision Records*
+
