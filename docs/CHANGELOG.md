@@ -7,7 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — Survey Pattern Generator (Phase 1+2)
+### Added — Rectangle Lawnmower (Contour-Offset) Pattern
+- **`generateRectangleLawnmower()`** algorithm: concentric rectangles shrunk by `2×targetLineSpacing` per layer
+- **CW/CCW flight direction**: Checkbox toggles clockwise vs counter-clockwise traversal
+- **Start Corner** (1–4): Selectable corner index to position the pattern start point (replaces trackOrientation for lawnmower)
+- **Full 4 corners per layer**: No shortening of the last edge — all 4 corners are visited
+- **Diagonal layer transitions**: Short diagonal from E4 of one layer to E1 of the next inner layer, saves one waypoint per layer
+- **New User Action flags**: 3-zone system (Start / Track / End) replaces Line-Start/Line-End for lawnmower — each zone has independent 4-bit trigger mask, applied to first WP, interior WPs, and last WP
+- **Zigzag unchanged**: Rectangle pattern retains original Line Start / Line End UA system
+- **Live preview**: Map layer renders lawnmower path with correct coloring (survey=blue)
+- **Reactivity fix**: `clockwise` and `startCorner` parameters now trigger preview updates via `$effect`
+- **CW/CCW labels swapped**: UI checkbox labels inverted to match actual flight direction behavior
+- **Parameter store**: `startCorner`, `userActionStartFlags`, `userActionTrackFlags`, `userActionEndFlags` added to `BasePatternParams`
 - **Rectangle shape editing**: Center, length, width, orientation via NumberStepper UI + draggable map markers (corner + center)
 - **Map visualization**: Gray semi-transparent shape polygon + blue survey path preview with sawtooth turn extensions
 - **Turn Distance**: Extends outbound legs beyond shape boundary for fixed-wing turn zone
