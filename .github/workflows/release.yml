@@ -49,6 +49,7 @@ jobs:
             librsvg2-dev \
             libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev \
+            libudev-dev \
             patchelf
 
       # --- Frontend ---
