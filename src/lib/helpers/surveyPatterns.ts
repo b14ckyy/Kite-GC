@@ -348,6 +348,144 @@ function generateClassicZigzag(
 }
 
 // ──────────────────────────────────────────────────────
+//  RECTANGLE LAWNMOWER (CONTOUR-OFFSET)
+// ──────────────────────────────────────────────────────
+
+/**
+ * Generate a rectangle lawnmower (contour-offset) pattern.
+ *
+ * Flies concentric rectangles, each shrunk by lineSpacing from the previous.
+ *
+ *   CW (clockwise): A[front-right] → A[front-left] → A[rear-left] → A[rear-right]{short}
+ *                    → B[front-right] → B[front-left] → B[rear-left] → B[rear-right]{short}
+ *                    → C[front-right] → ...
+ *
+ *   CCW (counter-clockwise): A[front-left] → A[front-right] → A[rear-right] → A[rear-left]{short}
+ *                             → B[front-left] → B[front-right] → B[rear-right] → B[rear-left]{short}
+ *                             → C[front-left] → ...
+ *
+ * The 4th corner of each layer is shortened (moved toward the 3rd corner by lineSpacing),
+ * so the turn transitions cleanly to the next inner rectangle (slight diagonal across
+ * the short side). This saves one waypoint per layer with minimal area loss.
+ *
+ * When shape can no longer fit another full loop, a final single track
+ * is placed along whichever axis still exceeds lineSpacing.
+ *
+ * Returns a single survey segment containing all waypoints in flight order.
+ *
+ * reverse: flips the final waypoint order (outside→inside vs inside→outside).
+ * clockwise: determines CW vs CCW traversal direction.
+ */
+export function generateRectangleLawnmower(
+  params: RectanglePatternParams
+): SurveyPathSegment[] {
+    const {
+    center, length, width, shapeOrientation, baseAltitude, baseSpeed,
+    targetLineSpacing, reverse, clockwise = true,
+    altMode = 'relative',
+    userActionStartFlags = 0,
+    userActionTrackFlags = 0,
+    userActionEndFlags = 0,
+  } = params;
+
+  if (length <= 0 || width <= 0 || targetLineSpacing <= 0) return [];
+
+  const toWorld = (x: number, y: number): LngLat => {
+    const rad = toRad(shapeOrientation);
+    const east  = x * Math.cos(rad) + y * Math.sin(rad);
+    const north = -x * Math.sin(rad) + y * Math.cos(rad);
+    return localToLatLng({ x: east, y: north }, center);
+  };
+
+    const makeWp = (p: LngLat, flags: number): SurveyWaypoint => ({
+    ...p, alt: baseAltitude, speed: baseSpeed, altMode, userActionFlags: flags,
+  });
+
+  //   0=rear-left, 1=rear-right, 2=front-right, 3=front-left
+  // Flight order for each layer:
+  //   CW:  2(fr) → 3(fl) → 0(rl) → 1(rr)  — 4th corner shortened
+  //   CCW: 3(fl) → 2(fr) → 1(rr) → 0(rl)  — 4th corner shortened
+    const orderCW  = [2, 3, 0, 1]; // fr → fl → rl → rr
+  const orderCCW = [3, 2, 1, 0]; // fl → fr → rr → rl
+  let baseOrder = clockwise ? orderCW : orderCCW;
+
+  // Rotate so startCorner (1-4) is the first visited corner
+  const sc = Math.max(0, Math.min(3, (params.startCorner ?? 1) - 1));
+  const order = [...baseOrder.slice(sc), ...baseOrder.slice(0, sc)];
+
+  let curLen = length;
+  let curWid = width;
+  let layerIdx = 0;
+
+  // Build flat list of { pt, flags } in flight order
+  const allPts: Array<{ pt: LngLat; flags: number }> = [];
+
+  while (curLen > targetLineSpacing && curWid > targetLineSpacing) {
+    const halfLen = curLen / 2;
+    const halfWid = curWid / 2;
+
+    // 4 corners in local frame
+    const c = [
+      { x: -halfWid, y: -halfLen },  // 0: rear-left
+      { x:  halfWid, y: -halfLen },  // 1: rear-right
+      { x:  halfWid, y:  halfLen },  // 2: front-right
+      { x: -halfWid, y:  halfLen },  // 3: front-left
+    ];
+
+        // All 4 corners of this layer in flight order
+        for (let j = 0; j < 4; j++) {
+          const pt = toWorld(c[order[j]].x, c[order[j]].y);
+          // Flags assigned later in bulk (start/track/end)
+          allPts.push({ pt, flags: 0 });
+        }
+
+    // Shrink for next layer
+    curLen -= 2 * targetLineSpacing;
+    curWid -= 2 * targetLineSpacing;
+    layerIdx++;
+  }
+
+  // ── Final track ──
+  if (curLen > targetLineSpacing || curWid > targetLineSpacing) {
+    const halfLen = curLen / 2;
+    const halfWid = curWid / 2;
+
+    let sPt, ePt;
+    if (curLen > curWid) {
+      sPt = { x: 0, y: -halfLen };
+      ePt = { x: 0, y:  halfLen };
+    } else {
+      sPt = { x: -halfWid, y: 0 };
+      ePt = { x:  halfWid, y: 0 };
+    }
+    allPts.push({ pt: toWorld(sPt.x, sPt.y), flags: 0 });
+    allPts.push({ pt: toWorld(ePt.x, ePt.y), flags: 0 });
+  }
+
+      if (allPts.length < 2) return [];
+
+  // Apply user action flags: start → first WP, track → interior WPs, end → last WP
+  const totalWp = allPts.length;
+  if (totalWp >= 1) allPts[0].flags = userActionStartFlags;
+  if (totalWp >= 2) allPts[totalWp - 1].flags = userActionEndFlags;
+  for (let i = 1; i < totalWp - 1; i++) {
+    allPts[i].flags = userActionTrackFlags;
+  }
+
+  if (reverse) {
+    allPts.reverse();
+  }
+
+  const segments: SurveyPathSegment[] = [];
+  segments.push({
+    kind: 'survey',
+    points: allPts.map(p => makeWp(p.pt, p.flags)),
+  });
+
+  return segments;
+}
+
+// ──────────────────────────────────────────────────────
 //  INTERACTIVE EDITING HELPERS
 // ──────────────────────────────────────────────────────
 

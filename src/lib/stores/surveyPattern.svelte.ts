@@ -14,11 +14,16 @@ export interface BasePatternParams {
   actualLineSpacing: number;    // computed by algorithm, read-only feedback
   turnDistance: number;         // meters, extension beyond shape (default 0)
   reverse: boolean;             // reverse path direction
+  clockwise: boolean;           // true = CW, false = CCW (lawnmower patterns only)
+  startCorner: number;          // 1-based corner index where the path starts (lawnmower patterns only)
   trackOrientationEnabled: boolean; // use different orientation for tracks vs shape
   trackOrientation: number;     // degrees, only used when trackOrientationEnabled
   altMode: AltMode;             // 'relative' | 'amsl' | 'ground'
-  userActionLineStartFlags: number; // bitmask: bits 0-3 = UA trigger 1-4 on line start
-  userActionLineEndFlags: number;   // bitmask: bits 0-3 = UA trigger 1-4 on line end
+  userActionLineStartFlags: number; // bitmask: bits 0-3 = UA trigger 1-4 on line start (zigzag)
+  userActionLineEndFlags: number;   // bitmask: bits 0-3 = UA trigger 1-4 on line end (zigzag)
+  userActionStartFlags: number;     // bitmask for the very first waypoint (lawnmower)
+  userActionTrackFlags: number;     // bitmask for all interior waypoints (lawnmower)
+  userActionEndFlags: number;       // bitmask for the very last waypoint (lawnmower)
 }
 
 export interface RectanglePatternParams extends BasePatternParams {
@@ -84,11 +89,16 @@ export function enterPatternMode(initialShape: SurveyShape = 'rectangle', initia
       actualLineSpacing: 50,
       turnDistance: 0,
       reverse: false,
+      clockwise: true,
+      startCorner: 1,
       trackOrientationEnabled: false,
       trackOrientation: 0,
       altMode: 'relative' as AltMode,
       userActionLineStartFlags: 0,
       userActionLineEndFlags: 0,
+      userActionStartFlags: 0,
+      userActionTrackFlags: 0,
+      userActionEndFlags: 0,
     } as RectanglePatternParams,
   } as any;
 
@@ -125,3 +135,4 @@ export function applyRectangleDragUpdate(update: Partial<RectanglePatternParams>
     params: { ...current, ...update },
   } as any;
 }
+

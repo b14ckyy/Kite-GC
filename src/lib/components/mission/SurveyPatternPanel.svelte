@@ -7,7 +7,7 @@
     type RectanglePatternParams,
   } from '$lib/stores/surveyPattern.svelte';
   import { get } from 'svelte/store';
-  import { computeRectangleCorners, generateRectangleZigzag, type SurveyWaypoint } from '$lib/helpers/surveyPatterns';
+  import { computeRectangleCorners, generateRectangleZigzag, generateRectangleLawnmower, type SurveyWaypoint } from '$lib/helpers/surveyPatterns';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
@@ -35,15 +35,20 @@
     shapeOrientation: 90,
     baseAltitude: 50,
     baseSpeed: 15,
-    targetLineSpacing: 50,
+        targetLineSpacing: 50,
     actualLineSpacing: 50,
-    turnDistance: 0,
-    reverse: false,
-    trackOrientationEnabled: false,
-    trackOrientation: 0,
-    altMode: 'relative',
-    userActionLineStartFlags: 0,
-    userActionLineEndFlags: 0,
+        turnDistance: 0,
+        reverse: false,
+        clockwise: true,
+        startCorner: 1,
+        trackOrientationEnabled: false,
+        trackOrientation: 0,
+        altMode: 'relative',
+        userActionLineStartFlags: 0,
+        userActionLineEndFlags: 0,
+        userActionStartFlags: 0,
+        userActionTrackFlags: 0,
+        userActionEndFlags: 0,
   });
 
   // Full list of supported shapes (visualization for non-Rectangle comes progressively)
@@ -71,7 +76,7 @@
 
     let wps: SurveyWaypoint[] = [];
 
-    if (cfg.shape === 'rectangle' || cfg.shape === 'rectangle-lawnmower') {
+        if (cfg.shape === 'rectangle') {
       const p = cfg.params as RectanglePatternParams;
       const segments = generateRectangleZigzag(p);
       // Only survey segments → extract start and end points in flight order
@@ -81,6 +86,20 @@
           // Push start (with lineStartFlags) and end (with lineEndFlags)
           surveyPoints.push(seg.points[0]);
           surveyPoints.push(seg.points[1]);
+        }
+      }
+      wps = surveyPoints;
+        } else if (cfg.shape === 'rectangle-lawnmower') {
+      const p = cfg.params as RectanglePatternParams;
+      const segments = generateRectangleLawnmower(p);
+      // Survey segments contain all waypoints in flight order (no duplicates)
+      const surveyPoints: SurveyWaypoint[] = [];
+      for (const seg of segments) {
+        if (seg.kind === 'survey') {
+          // Each survey segment is a continuous path; take all points
+          for (const pt of seg.points) {
+            surveyPoints.push(pt);
+          }
         }
       }
       wps = surveyPoints;
@@ -211,22 +230,35 @@
       <!-- Shape Orientation (solo) -->
       <NumberStepper label={$t('survey.areaOrientation')} bind:value={params.shapeOrientation} min={0} max={90} step={5} decimals={0} onchange={handleParamChange} />
 
-      <!-- Row 3: Track Orientation toggle + Reverse toggle -->
-      <div class="param-row">
-        <label class="toggle-row">
-          <input type="checkbox" bind:checked={params.trackOrientationEnabled} onchange={handleParamChange} />
-          <span>{$t('survey.trackOrientation')}</span>
-        </label>
-        <label class="toggle-row">
-          <input type="checkbox" bind:checked={params.reverse} onchange={handleParamChange} />
-          <span>{$t('survey.reverse')}</span>
-        </label>
-      </div>
+            <!-- Row 3: Reverse toggle + Clockwise (lawnmower) + Track Orientation (zigzag) or Start Corner (lawnmower) -->
+            <div class="param-row">
+              <label class="toggle-row">
+                <input type="checkbox" bind:checked={params.reverse} onchange={handleParamChange} />
+                <span>{$t('survey.reverse')}</span>
+              </label>
+              {#if activeSurveyPattern.config?.shape === 'rectangle-lawnmower'}
+                <label class="toggle-row">
+                  <input type="checkbox" bind:checked={params.clockwise} onchange={handleParamChange} />
+                  <span>{params.clockwise ? $t('survey.counterClockwise') : $t('survey.clockwise')}</span>
+                </label>
+              {/if}
+              {#if activeSurveyPattern.config?.shape === 'rectangle'}
+                <label class="toggle-row">
+                  <input type="checkbox" bind:checked={params.trackOrientationEnabled} onchange={handleParamChange} />
+                  <span>{$t('survey.trackOrientation')}</span>
+                </label>
+              {/if}
+            </div>
 
-      <!-- Track Orientation value (only when enabled) -->
-      {#if params.trackOrientationEnabled}
-        <NumberStepper label={$t('survey.trackOrientationVal')} bind:value={params.trackOrientation} min={0} max={360} step={5} decimals={0} onchange={handleParamChange} />
-      {/if}
+            <!-- Track Orientation value for zigzag (only when enabled) -->
+            {#if activeSurveyPattern.config?.shape === 'rectangle' && params.trackOrientationEnabled}
+              <NumberStepper label={$t('survey.trackOrientationVal')} bind:value={params.trackOrientation} min={0} max={360} step={5} decimals={0} onchange={handleParamChange} />
+            {/if}
+
+            <!-- Start Corner for lawnmower -->
+            {#if activeSurveyPattern.config?.shape === 'rectangle-lawnmower'}
+              <NumberStepper label="Start Corner" bind:value={params.startCorner} min={1} max={4} step={1} decimals={0} onchange={handleParamChange} />
+            {/if}
 
       <!-- Row 4: Base Altitude + Base Speed -->
       <div class="param-row">
@@ -244,32 +276,73 @@
         </select>
       </div>
 
-      <!-- User Action Trigger -->
+            <!-- User Action Trigger -->
       <div class="section-label">{$t('survey.userActionTrigger')}</div>
-      <div class="ua-grid">
-        <div class="ua-col">
-          <div class="ua-col-label">{$t('survey.lineStart')}</div>
-          <div class="ua-checks">
-            {#each [1,2,3,4] as n}
-              <label class="ua-check-item">
-                <input type="checkbox" checked={!!(params.userActionLineStartFlags & (1 << (n-1)))} onchange={() => { params.userActionLineStartFlags ^= (1 << (n-1)); handleParamChange(); }} />
-                <span>{n}</span>
-              </label>
-            {/each}
+
+      {#if activeSurveyPattern.config?.shape === 'rectangle-lawnmower'}
+        <!-- Lawnmower: Start / Track / End -->
+        <div class="ua-grid">
+          <div class="ua-col">
+            <div class="ua-col-label">Start</div>
+            <div class="ua-checks">
+              {#each [1,2,3,4] as n}
+                <label class="ua-check-item">
+                  <input type="checkbox" checked={!!(params.userActionStartFlags & (1 << (n-1)))} onchange={() => { params.userActionStartFlags ^= (1 << (n-1)); handleParamChange(); }} />
+                  <span>{n}</span>
+                </label>
+              {/each}
+            </div>
+          </div>
+          <div class="ua-col">
+            <div class="ua-col-label">Track</div>
+            <div class="ua-checks">
+              {#each [1,2,3,4] as n}
+                <label class="ua-check-item">
+                  <input type="checkbox" checked={!!(params.userActionTrackFlags & (1 << (n-1)))} onchange={() => { params.userActionTrackFlags ^= (1 << (n-1)); handleParamChange(); }} />
+                  <span>{n}</span>
+                </label>
+              {/each}
+            </div>
+          </div>
+          <div class="ua-col">
+            <div class="ua-col-label">End</div>
+            <div class="ua-checks">
+              {#each [1,2,3,4] as n}
+                <label class="ua-check-item">
+                  <input type="checkbox" checked={!!(params.userActionEndFlags & (1 << (n-1)))} onchange={() => { params.userActionEndFlags ^= (1 << (n-1)); handleParamChange(); }} />
+                  <span>{n}</span>
+                </label>
+              {/each}
+            </div>
           </div>
         </div>
-        <div class="ua-col">
-          <div class="ua-col-label">{$t('survey.lineEnd')}</div>
-          <div class="ua-checks">
-            {#each [1,2,3,4] as n}
-              <label class="ua-check-item">
-                <input type="checkbox" checked={!!(params.userActionLineEndFlags & (1 << (n-1)))} onchange={() => { params.userActionLineEndFlags ^= (1 << (n-1)); handleParamChange(); }} />
-                <span>{n}</span>
-              </label>
-            {/each}
+      {:else}
+        <!-- Zigzag / default: Line Start + Line End -->
+        <div class="ua-grid">
+          <div class="ua-col">
+            <div class="ua-col-label">{$t('survey.lineStart')}</div>
+            <div class="ua-checks">
+              {#each [1,2,3,4] as n}
+                <label class="ua-check-item">
+                  <input type="checkbox" checked={!!(params.userActionLineStartFlags & (1 << (n-1)))} onchange={() => { params.userActionLineStartFlags ^= (1 << (n-1)); handleParamChange(); }} />
+                  <span>{n}</span>
+                </label>
+              {/each}
+            </div>
+          </div>
+          <div class="ua-col">
+            <div class="ua-col-label">{$t('survey.lineEnd')}</div>
+            <div class="ua-checks">
+              {#each [1,2,3,4] as n}
+                <label class="ua-check-item">
+                  <input type="checkbox" checked={!!(params.userActionLineEndFlags & (1 << (n-1)))} onchange={() => { params.userActionLineEndFlags ^= (1 << (n-1)); handleParamChange(); }} />
+                  <span>{n}</span>
+                </label>
+              {/each}
+            </div>
           </div>
         </div>
-      </div>
+      {/if}
     {:else}
       <div class="not-implemented">
         {@html _t('survey.notImplemented', { shape: activeSurveyPattern.config?.shape ?? '?' })}

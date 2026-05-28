@@ -346,6 +346,8 @@
     "trackOrientationVal": "Track Orientation (°)",
     "areaOrientation": "Area Orientation (°)",
     "reverse": "Reverse direction",
+    "clockwise": "CW",
+    "counterClockwise": "CCW",
         "baseAlt": "Base Altitude (m)",
     "baseSpeed": "Base Speed (m/s)",
     "altMode": "Altitude Type",

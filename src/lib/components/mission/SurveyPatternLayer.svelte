@@ -9,6 +9,7 @@
   import {
     computeRectangleCorners,
     generateRectangleZigzag,
+    generateRectangleLawnmower,
     updateRectangleFromDraggedCenter,
     updateRectangleFromDraggedCorner,
     type SurveyPathSegment,
@@ -21,8 +22,8 @@
 
   // ── Layers ──────────────────────────────────────────
   let shapeLayer: L.Polygon | undefined;
-  let pathPolyline: L.Polyline | undefined;     // the continuous preview path
-  let pathMarkers: L.Marker[] = [];             // all waypoint dots + start + end
+  let pathLines: L.Polyline[] = [];             // the continuous preview path lines
+  let pathMarkers: L.Marker[] = [];             // waypoint dot markers (start/end/wp)
 
   let hasAutoFitted = false;
 
@@ -121,7 +122,8 @@
   // ══════════════════════════════════════════════════════
 
   function clearPath() {
-    if (pathPolyline) { try { map.removeLayer(pathPolyline); } catch {} pathPolyline = undefined; }
+    pathLines.forEach(l => { try { map.removeLayer(l); } catch {} });
+    pathLines = [];
     pathMarkers.forEach(m => { try { map.removeLayer(m); } catch {} });
     pathMarkers = [];
   }
@@ -141,7 +143,7 @@
     clearPath();
     if (segments.length === 0) return;
 
-    // Collect all waypoints
+    // Collect all unique waypoints along the path
     const allPoints: { lat: number; lng: number }[] = [];
     for (const seg of segments) {
       for (const wp of seg.points) {
@@ -150,8 +152,7 @@
     }
     if (allPoints.length < 2) return;
 
-    // Continuous polyline with alternating colors per segment kind
-    // We draw one line per segment to get the color difference
+    // Draw one polyline per segment with kind-based coloring
     for (const seg of segments) {
       if (seg.points.length < 2) continue;
       const ll: [number, number][] = seg.points.map(p => [p.lat, p.lng]);
@@ -160,12 +161,10 @@
         color, weight: seg.kind === 'survey' ? 3 : 2,
         opacity: seg.kind === 'survey' ? 0.9 : 0.6,
       }).addTo(map);
-      // Store as pathMarkers for cleanup — we reuse that array
-      pathMarkers.push(line as any);
+      pathLines.push(line);
     }
 
-    // --- Waypoint dot markers (one per unique position) ---
-    // Skip duplicates for visual clarity
+    // --- Waypoint dot markers (skip consecutive duplicates) ---
     const uniqPoints: { lat: number; lng: number }[] = [];
     for (const p of allPoints) {
       if (uniqPoints.length === 0) {
@@ -185,7 +184,7 @@
       let anchor: [number, number];
 
       if (i === 0) {
-        // Start marker — green circle with arrow indicator
+        // Start marker — green circle with "S"
         html = '<div style="background:#2ecc71;width:14px;height:14px;border-radius:50%;border:3px solid white;box-shadow:0 0 5px rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;font-size:10px;color:white;font-weight:bold;">S</div>';
         size = [20, 20]; anchor = [10, 10];
       } else if (i === uniqPoints.length - 1) {
@@ -249,7 +248,9 @@
 
       // Generate and show preview path (only when not dragging to avoid jank)
       if (!isDragging) {
-        const segments = generateRectangleZigzag(p);
+        const segments = (shape === 'rectangle-lawnmower')
+          ? generateRectangleLawnmower(p)
+          : generateRectangleZigzag(p);
         buildPreviewPath(segments);
       }
 
@@ -305,8 +306,10 @@
       if (shapeLayer) shapeLayer.setLatLngs(shapeLL);
 
       // Rebuild path during drag
-      const dragParams = { ...p, center, length, width };
-      const segments = generateRectangleZigzag(dragParams);
+      const dragParams = { ...p, center: _dragTemp.center || p.center, length: _dragTemp.length ?? p.length ?? 400, width: _dragTemp.width ?? p.width ?? 200 };
+      const segments = (config.shape === 'rectangle-lawnmower')
+        ? generateRectangleLawnmower(dragParams)
+        : generateRectangleZigzag(dragParams);
       buildPreviewPath(segments);
     }
   }
@@ -342,7 +345,7 @@
 
     // Subscribe to params by reading them (triggers reactivity on any param change)
     const p = config.params as any;
-    const _trigger = p.length + p.width + p.shapeOrientation + p.targetLineSpacing + p.turnDistance + p.reverse + p.trackOrientationEnabled + p.trackOrientation;
+    const _trigger = p.length + p.width + p.shapeOrientation + p.targetLineSpacing + p.turnDistance + p.reverse + p.clockwise + p.startCorner + p.trackOrientationEnabled + p.trackOrientation + p.userActionStartFlags + p.userActionTrackFlags + p.userActionEndFlags + p.userActionLineStartFlags + p.userActionLineEndFlags;
 
     // Compute actualLineSpacing
     if ((config.shape === 'rectangle' || config.shape === 'rectangle-lawnmower') && p.targetLineSpacing > 0 && p.width > 0) {
