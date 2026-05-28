@@ -1,6 +1,8 @@
 # Cargo build configuration
-# NOTE: target-dir is set to avoid issues with OneDrive paths containing spaces.
-# Adjust this path if building on a different machine.
-# On Linux/macOS you can remove this or set to a local path.
+# NOTE: If you need a custom target-dir (e.g. to avoid OneDrive path issues on Windows),
+# set the environment variable CARGO_TARGET_DIR instead:
+#
+#   $env:CARGO_TARGET_DIR = "D:\cargo-target\kite-gc"
+#
+# This avoids CI breakage caused by platform-specific absolute paths in this file.
 [build]
-target-dir = "D:\\cargo-target\\kite-gc"

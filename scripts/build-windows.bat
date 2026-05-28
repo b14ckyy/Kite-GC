@@ -26,6 +26,16 @@ if %errorlevel% equ 0 (
 )
 
 REM === Prerequisite checks ===
+REM === Set CARGO_TARGET_DIR if running from OneDrive path (to avoid spaces) ===
+if "%CARGO_TARGET_DIR%"=="" (
+    for %%I in ("%~dp0..") do set "PROJECT_ROOT=%%~fI"
+    echo %PROJECT_ROOT% | findstr /I "OneDrive" >nul
+    if not errorlevel 1 (
+        echo [INFO] Project is in OneDrive path — setting CARGO_TARGET_DIR to D:\cargo-target\kite-gc
+        set "CARGO_TARGET_DIR=D:\cargo-target\kite-gc"
+    )
+)
+
 where node >nul 2>&1
 if %errorlevel% neq 0 (
     echo [ERROR] Node.js not found.
