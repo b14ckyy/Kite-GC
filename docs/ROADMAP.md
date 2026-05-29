@@ -495,8 +495,10 @@ This document tracks planned features, organized by milestone.
 
 Cross-cutting groundwork items. Each carries non-trivial architectural or design weight — major considerations noted inline.
 
-- [ ] **Improved terrain altitude system & source**
-  - _Major considerations_: current 3D path relies on Cesium World Terrain (requires Ion token) + geoid-undulation correction. Evaluate alternative/offline DEM sources (SRTM, AWS/Mapzen Terrarium RGB tiles), local caching, and accuracy for AGL / ground-clearance use (not just 3D display). Needs a clean abstraction so 2D (terrain-follow missions, clearance checks) and 3D share one elevation provider. Token-free fallback path.
+- [ ] **Local terrain elevation provider (2D map & planning)** — see dedicated subsection below
+  - _Decision_: **Copernicus DEM GLO-30** (free, no API key, AWS Open Data GeoTIFF). Chosen over SRTM/Terrarium: ~±4 m RMSE vs ~±9 m, global coverage incl. > 60°N (SRTM/Terrarium have none), and geoid-referenced (EGM2008 ≈ MSL) — matches our MSL waypoint/altitude pipeline with no geoid model needed. Terrarium PNG tiles were the elegant runner-up but are SRTM-grade globally.
+  - _Major considerations_: point-sampling pipeline (fetch tile → decode → bilinear interpolate), region download for offline use, shared elevation abstraction for all four use cases below. Used **locally only** — for visualization/validation, independent of any onboard FC terrain (INAV 10 will add onboard SRTM1, irrelevant to us).
+- [ ] **3D map (Cesium) stays as-is for now** — keep Cesium World Terrain; tile-resolution quirks and other 3D refinements tracked separately under Milestone 7.
 - [ ] **Better map tile handling**
   - _Major considerations_: current IndexedDB LRU cache works but is reactive only. Consider region prefetch / offline area download, smarter eviction, retry/backoff on tile errors, optional vector tiles, and unified handling shared between Leaflet (2D) and Cesium (3D). Attribution + provider rate-limit compliance.
 - [ ] **Global font-size multiplier setting**
@@ -507,6 +509,16 @@ Cross-cutting groundwork items. Each carries non-trivial architectural or design
   - _Major considerations_: drive the accent color (currently fixed `#37a8db`) as a variable parameter from the detected FC/protocol (INAV / ArduPilot / PX4 / …). Needs the accent fully tokenized as a CSS custom property across all components, a mapping table per firmware, and persistence. Ties into the existing protocol-detection on connect.
 - [ ] **Multi serial connections in background (aux devices)**
   - _Major considerations_: the MSP scheduler currently owns a single serial connection exclusively (ADR-007). An aux-device manager would run additional independent background connections (ADSB receiver, ESP-Radar, telemetry monitor, …) without disturbing the primary FC link — each with its own parser/handler, surfaced via an "Aux Devices" submenu. Data fusion onto the map (ADSB traffic, radar contacts). Builds on the ByteTransport abstraction (ADR-010) and the planned raw serial logger. Significant architecture item.
+
+### Terrain Elevation (local DEM — 2D map & planning)
+
+Source: **Copernicus DEM GLO-30** (geoid/EGM2008 ≈ MSL, no API key, offline-capable). Local use only — no dependency on onboard FC terrain. Shared elevation-sampling abstraction feeds all four features:
+
+- [ ] Elevation provider: tile fetch + decode + bilinear sampling, region download + cache for offline
+- [ ] **AGL waypoint planning** — edit waypoints as height-above-ground; transmitted to INAV as MSL (terrain elevation + AGL offset → MSL)
+- [ ] **Terrain clearance validation** — elevation profile along the planned mission with clearance check / warnings
+- [ ] **Live AGL widget** — in-flight above-ground-level from GPS MSL altitude minus terrain elevation at current position
+- [ ] **LOS (line-of-sight) analysis** for waypoint missions — terrain occlusion / radio horizon along the route, à la MWPTools
 
 ### Code Health & Maintainability
 - [ ] Rust module reorganization when `flightlog/` exceeds 20 files (parsers/, exporters/, models/) — _currently 12/20, not yet needed_
@@ -560,6 +572,9 @@ Cross-cutting groundwork items. Each carries non-trivial architectural or design
 - [ ] UI button refinements and responsive layout
 - [ ] Altitude exaggeration toggle for low-altitude flights
 - [ ] Auto-enable chase camera on live flight start
+- [ ] Imagery tile resolution / LOD quirks (blurry or low-detail tiles at certain zooms)
+- [ ] More reliable 3D rendering: robust geoid-undulation handling (currently a single-point sample per track), terrain-load race conditions, provider quality review
+- [ ] Evaluate whether Cesium World Terrain provider quality is sufficient or needs an alternative
 
 ---
 
