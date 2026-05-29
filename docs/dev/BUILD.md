@@ -114,7 +114,7 @@ npm run tauri build
 **Using the legacy scripts**
 ```powershell
 .\scripts\dev.bat
-.\scripts\build-windows.bat
+.\scripts\build-windows.ps1
 ```
 
 ```bash

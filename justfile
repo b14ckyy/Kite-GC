@@ -30,7 +30,7 @@ build:
 
 # Explicit Windows release build
 build-windows:
-    @powershell -ExecutionPolicy Bypass -File scripts/build-windows.bat
+    @powershell -ExecutionPolicy Bypass -File scripts/build-windows.ps1
 
 # Explicit Linux release build (only works on Linux)
 build-linux:

@@ -160,7 +160,7 @@ Kite Ground Control/
 │   └── tauri.conf.json           # Tauri configuration
 │
 ├── scripts/                      # Legacy build scripts (still functional)
-│   ├── build-windows.bat         # Windows release build (improved)
+│   ├── build-windows.ps1         # Windows release build (PowerShell)
 │   ├── build-linux.sh            # Linux release build (improved)
 │   ├── dev.bat                   # Windows dev server (improved)
 │   └── dev.sh                    # Linux dev server (improved)

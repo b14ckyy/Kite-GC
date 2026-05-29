@@ -55,8 +55,8 @@ Alternative (still works):
 ```bash
 npm run tauri build
 # or
-./scripts/build-windows.bat
-./scripts/build-linux.sh
+powershell -File scripts/build-windows.ps1   # Windows
+./scripts/build-linux.sh                     # Linux
 ```
 
 > **Tip**: Install `just` for the best developer experience (see `justfile` in the project root).
