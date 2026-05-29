@@ -237,16 +237,21 @@
 
     // Convert SurveyWaypoint[] → INAV Waypoint[] and append to active mission
     try {
-      const { missionAddWp, WpAction, altFromM, fromDeg } = await import('$lib/stores/mission');
+      const { missionAddWp, WpAction, altFromM, fromDeg, ALT_MODE_REL, ALT_MODE_AMSL, ALT_MODE_AGL } = await import('$lib/stores/mission');
       for (const swp of wps) {
         const altCm = altFromM(swp.alt);
         const speedCm = swp.speed ? Math.round(swp.speed * 100) : 0;
-        // p3 bit 0 = altMode (0 = REL, 1 = AMSL), bits 1-4 = userActionFlags (UA1=bit1, UA2=bit2, etc.)
-        let p3 = swp.altMode === 'amsl' ? 1 : 0;
+        // 'ground' = AGL (resolved to AMSL on export); 'amsl' = absolute; else relative.
+        const altModeNum = swp.altMode === 'amsl' ? ALT_MODE_AMSL
+          : swp.altMode === 'ground' ? ALT_MODE_AGL
+          : ALT_MODE_REL;
+        // p3 bit 0 = AMSL flag (AGL leaves it 0; backend sets it at export),
+        // bits 1-4 = userActionFlags (UA1=bit1, …)
+        let p3 = altModeNum === ALT_MODE_AMSL ? 1 : 0;
         if (swp.userActionFlags) {
           p3 |= ((swp.userActionFlags & 0x0F) << 1);
         }
-        await missionAddWp(WpAction.Waypoint, fromDeg(swp.lat), fromDeg(swp.lng), altCm, speedCm, 0, p3);
+        await missionAddWp(WpAction.Waypoint, fromDeg(swp.lat), fromDeg(swp.lng), altCm, speedCm, 0, p3, altModeNum);
       }
       console.log(`[Pattern] Successfully added ${wps.length} waypoints`);
     } catch (e) {
@@ -414,7 +419,7 @@
         <select class="alt-type-select" bind:value={rectangleParams.altMode} onchange={handleParamChange}>
           <option value="relative">{$t('survey.altModeRelative')}</option>
           <option value="amsl">{$t('survey.altModeAmsl')}</option>
-          <option value="ground" disabled>{$t('survey.altModeGround')} — {$t('survey.comingSoon')}</option>
+          <option value="ground">{$t('survey.altModeGround')}</option>
         </select>
       </div>
 
@@ -535,7 +540,7 @@
         <select class="alt-type-select" bind:value={circleParams.altMode} onchange={handleCircleParamChange}>
           <option value="relative">{$t('survey.altModeRelative')}</option>
           <option value="amsl">{$t('survey.altModeAmsl')}</option>
-          <option value="ground" disabled>{$t('survey.altModeGround')} — {$t('survey.comingSoon')}</option>
+          <option value="ground">{$t('survey.altModeGround')}</option>
         </select>
       </div>
 
@@ -622,7 +627,7 @@
         <select class="alt-type-select" bind:value={polygonParams.altMode} onchange={handlePolygonParamChange}>
           <option value="relative">{$t('survey.altModeRelative')}</option>
           <option value="amsl">{$t('survey.altModeAmsl')}</option>
-          <option value="ground" disabled>{$t('survey.altModeGround')} — {$t('survey.comingSoon')}</option>
+          <option value="ground">{$t('survey.altModeGround')}</option>
         </select>
       </div>
 

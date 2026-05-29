@@ -1,7 +1,7 @@
 // MSP Waypoint Codec
 // Encode/decode the 21-byte MSP_WP / MSP_SET_WP payload and MSP_WP_GETINFO response.
 
-use super::types::{MissionInfo, WpAction, Waypoint};
+use super::types::{MissionInfo, WpAction, Waypoint, ALT_MODE_AMSL, ALT_MODE_REL, P3_ALT_TYPE};
 
 /// Decode a MSP_WP (118) response payload into a Waypoint
 /// Payload layout (21 bytes, little-endian):
@@ -37,6 +37,8 @@ pub fn decode_wp(payload: &[u8]) -> Result<Waypoint, String> {
         p2,
         p3,
         flag,
+        // FC only stores REL/AMSL; derive the GCS mode from the p3 alt-type bit.
+        alt_mode: if (p3 as u16) & P3_ALT_TYPE != 0 { ALT_MODE_AMSL } else { ALT_MODE_REL },
     })
 }
 
@@ -119,6 +121,7 @@ mod tests {
             p2: 0,
             p3: 1, // absolute altitude
             flag: WP_FLAG_LAST,
+            alt_mode: ALT_MODE_AMSL,
         };
 
         let encoded = encode_wp(&wp);

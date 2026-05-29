@@ -6,14 +6,17 @@
   import { onDestroy } from 'svelte';
   import L from 'leaflet';
   import {
-    mission, geoWaypoints, selectedWpIndex, editMode,
+    mission, geoWaypoints, selectedWpIndex, editMode, launchPoint,
     missionAddWp, missionUpdateWp, missionRemoveWp, missionInsertWp,
     missionReorderWp,
     getTotalWpCount, MAX_WAYPOINTS_TOTAL,
-    type Waypoint, type Mission, WpAction, hasLocation, isModifier, toDeg, fromDeg, altFromM,
+    ALT_MODE_REL, ALT_MODE_AMSL, ALT_MODE_AGL,
+    type Waypoint, type Mission, type LaunchPoint, WpAction, hasLocation, isModifier, toDeg, fromDeg, altFromM,
     WP_ACTION_LABELS, WP_ACTION_KEYS,
   } from '$lib/stores/mission';
+  import { homePosition } from '$lib/stores/home';
   import { activeSurveyPattern } from '$lib/stores/surveyPattern.svelte';
+  import { invoke } from '@tauri-apps/api/core';
   import { iconForWp } from '$lib/helpers/missionIcons';
   import { get } from 'svelte/store';
   import { settings } from '$lib/stores/settings';
@@ -31,9 +34,98 @@
   let currentSelIdx = $state<number>(get(selectedWpIndex));
   let currentEditing = $state<boolean>(get(editMode));
 
+  // ── Launch / home reference marker (planning-time, for REL↔AGL + clearance) ──
+  // Declared before the store subscriptions below, which fire immediately on
+  // subscribe and call renderLaunchMarker() (avoids a temporal-dead-zone crash).
+  let launchMarker: L.Marker | undefined;
+  let currentLaunch = $state<LaunchPoint | null>(get(launchPoint));
+
   const unsubMission = mission.subscribe(m => { currentMission = m; });
   const unsubSelIdx = selectedWpIndex.subscribe(i => { currentSelIdx = i; });
-  const unsubEditMode = editMode.subscribe(e => { currentEditing = e; });
+  const unsubEditMode = editMode.subscribe(e => {
+    currentEditing = e;
+    if (e) autoPlaceLaunch();
+    renderLaunchMarker();
+  });
+
+  /** Auto-place the launch point when none is set: FC home → first geo-WP → map center. */
+  function autoPlaceLaunch() {
+    if (get(launchPoint)) return;
+    const home = get(homePosition);
+    if (home.set && (home.lat !== 0 || home.lon !== 0)) {
+      launchPoint.set({ lat: home.lat, lng: home.lon });
+      return;
+    }
+    const geo = get(geoWaypoints);
+    if (geo.length > 0) {
+      launchPoint.set({ lat: toDeg(geo[0].lat), lng: toDeg(geo[0].lon) });
+      return;
+    }
+    const c = map.getCenter();
+    launchPoint.set({ lat: c.lat, lng: c.lng });
+  }
+
+  /** Always-visible draggable launch marker (the mission's home reference). */
+  function renderLaunchMarker() {
+    const lp = get(launchPoint);
+    if (!lp) {
+      if (launchMarker) { try { map.removeLayer(launchMarker); } catch {} launchMarker = undefined; }
+      return;
+    }
+    if (!launchMarker) {
+      launchMarker = L.marker([lp.lat, lp.lng], {
+        draggable: true,
+        zIndexOffset: 500,
+        icon: L.divIcon({
+          className: 'launch-marker',
+          html: '<div style="background:#f39c12;width:18px;height:18px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid white;box-shadow:0 0 4px rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;"><span style="transform:rotate(45deg);color:#fff;font-size:11px;font-weight:bold;line-height:1;">L</span></div>',
+          iconSize: [22, 22], iconAnchor: [11, 22],
+        }),
+      }).addTo(map);
+      launchMarker.bindTooltip('Launch / home reference', { direction: 'top', offset: [0, -20] });
+      launchMarker.on('dragend', () => {
+        const p = launchMarker!.getLatLng();
+        launchPoint.set({ lat: p.lat, lng: p.lng });
+      });
+    } else {
+      launchMarker.setLatLng([lp.lat, lp.lng]);
+    }
+  }
+
+  const unsubLaunch = launchPoint.subscribe(lp => { currentLaunch = lp; renderLaunchMarker(); });
+
+  /** Terrain elevation (m, ≈ MSL) at lat/lon via backend, or null. */
+  async function terrainElev(lat: number, lon: number): Promise<number | null> {
+    try { return await invoke<number | null>('terrain_elevation', { lat, lon }); }
+    catch { return null; }
+  }
+
+  /** Convert a waypoint's altitude (cm) between REL/AMSL/AGL using terrain + the
+   *  launch point as the home reference. Returns the original value if a needed
+   *  terrain sample is unavailable (best-effort, no garbage). */
+  async function convertAltCm(wp: Waypoint, fromMode: number, toMode: number): Promise<number> {
+    if (fromMode === toMode) return wp.altitude;
+    const valM = wp.altitude / 100;
+    const lp = get(launchPoint);
+    const needWpGround = fromMode === ALT_MODE_AGL || toMode === ALT_MODE_AGL;
+    const needLaunch = fromMode === ALT_MODE_REL || toMode === ALT_MODE_REL;
+    const wpGround = needWpGround ? await terrainElev(toDeg(wp.lat), toDeg(wp.lon)) : 0;
+    const launchGround = needLaunch ? (lp ? await terrainElev(lp.lat, lp.lng) : null) : 0;
+    if ((needWpGround && wpGround == null) || (needLaunch && launchGround == null)) {
+      return wp.altitude; // can't convert safely → keep value
+    }
+    // to absolute MSL
+    let absM: number;
+    if (fromMode === ALT_MODE_REL) absM = (launchGround as number) + valM;
+    else if (fromMode === ALT_MODE_AGL) absM = (wpGround as number) + valM;
+    else absM = valM;
+    // to target mode
+    let outM: number;
+    if (toMode === ALT_MODE_REL) outM = absM - (launchGround as number);
+    else if (toMode === ALT_MODE_AGL) outM = absM - (wpGround as number);
+    else outM = absM;
+    return Math.round(outM * 100);
+  }
 
   const missionGroup = L.layerGroup().addTo(map);
   let wpMarkers: L.Marker[] = [];
@@ -72,9 +164,15 @@
     return -1;
   }
 
+  /** Altitude reference label REL/AMSL/AGL from a waypoint's alt_mode (falls back to p3 bit0). */
+  function altLabel(wp: Waypoint): string {
+    const m = wp.alt_mode ?? ((wp.p3 & 1) ? 1 : 0);
+    return m === 2 ? 'AGL' : m === 1 ? $t('missionLayer.amsl') : $t('missionLayer.rel');
+  }
+
   function paramLabelHtml(wp: Waypoint, modifiers: { wp: Waypoint; idx: number }[]): string {
     const altM = (wp.altitude / 100).toFixed(0);
-    const altType = (wp.p3 & 1) ? $t('missionLayer.amsl') : $t('missionLayer.rel');
+    const altType = altLabel(wp);
     let lines = [`${altM}m ${altType}`];
     switch (wp.action) {
       case WpAction.Waypoint:
@@ -146,7 +244,7 @@
   function buildEditorHtml(wp: Waypoint, idx: number, total: number, displayNum: number,
     modifiers: { wp: Waypoint; idx: number }[]): string {
     const altM = (wp.altitude / 100).toFixed(0);
-    const altType = (wp.p3 & 1) ? 'AMSL' : 'REL';
+    const altType = altLabel(wp);
     const geoTypes: WpAction[] = [WpAction.Waypoint, WpAction.PosholdUnlim, WpAction.PosholdTime, WpAction.SetPoi, WpAction.Land];
     const typeOptions = geoTypes.map(v => `<option value="${v}" ${v === wp.action ? 'selected' : ''}>${$t(WP_ACTION_KEYS[v])}</option>`).join('');
 
@@ -234,8 +332,13 @@
     });
 
     const altToggle = el.querySelector('button[data-field="altToggle"]') as HTMLButtonElement | null;
-    altToggle?.addEventListener('click', () => {
-      missionUpdateWp(idx, { ...wp, p3: (wp.p3 & 1) ? (wp.p3 & ~1) : (wp.p3 | 1) });
+    altToggle?.addEventListener('click', async () => {
+      // Cycle REL → AMSL → AGL → REL, converting the altitude so the waypoint
+      // stays at the same physical height (terrain + launch point as references).
+      const cur = wp.alt_mode ?? ((wp.p3 & 1) ? 1 : 0);
+      const next = (cur + 1) % 3;
+      const newAlt = await convertAltCm(wp, cur, next);
+      missionUpdateWp(idx, { ...wp, alt_mode: next, altitude: newAlt });
     });
 
     const p1Input = el.querySelector('input[data-field="p1"]') as HTMLInputElement | null;
@@ -316,6 +419,17 @@
     }
     if (m.waypoints.length === 0) return;
 
+    // Launch → first waypoint connector (orange dashed, matching pattern turn legs)
+    if (currentLaunch) {
+      const firstGeo = m.waypoints.find(w => hasLocation(w.action) && !(w.lat === 0 && w.lon === 0));
+      if (firstGeo) {
+        L.polyline(
+          [[currentLaunch.lat, currentLaunch.lng], [toDeg(firstGeo.lat), toDeg(firstGeo.lon)]],
+          { color: '#f39c12', weight: 2, opacity: 0.7, dashArray: '6 5' }
+        ).addTo(missionGroup);
+      }
+    }
+
     const displayNums = buildDisplayNumbers(m.waypoints);
     const missionEndIdx = findMissionEndIndex(m.waypoints);
     const fpPositions: L.LatLng[] = [];
@@ -370,7 +484,7 @@
 
         if (!editing) {
           const altM = (wp.altitude / 100).toFixed(1);
-          const altType = (wp.p3 & 1) ? $t('missionLayer.amsl') : $t('missionLayer.rel');
+          const altType = altLabel(wp);
           const mods = getModifiersForWp(m.waypoints, i);
           let tip = `WP${dn} ${$t(WP_ACTION_KEYS[wp.action])}<br>${altM}m ${altType}`;
           for (const mod of mods) tip += `<br>${$t(WP_ACTION_KEYS[mod.wp.action])}`;
@@ -464,10 +578,11 @@
 
   map.on('click', onMapClick);
 
-  $effect(() => { renderMission(currentMission, currentSelIdx, currentEditing); });
+  $effect(() => { void currentLaunch; renderMission(currentMission, currentSelIdx, currentEditing); });
 
   onDestroy(() => {
-    unsubMission(); unsubSelIdx(); unsubEditMode();
+    unsubMission(); unsubSelIdx(); unsubEditMode(); unsubLaunch();
+    if (launchMarker) { try { map.removeLayer(launchMarker); } catch {} launchMarker = undefined; }
     map.off('click', onMapClick);
     if (editorPopup) { map.removeLayer(editorPopup); editorPopup = undefined; }
     missionGroup.clearLayers();

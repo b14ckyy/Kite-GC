@@ -4,8 +4,23 @@ use tauri::State;
 
 use crate::mavlink_proto::{self, ArduWaypoint};
 use crate::mission::store::{MissionStore, mission_from_xml, mission_to_xml};
-use crate::mission::types::{Mission, Waypoint, WpAction};
+use crate::mission::types::{HomePt, Mission, Waypoint, WpAction, ALT_MODE_AGL, ALT_MODE_AMSL, ALT_MODE_REL, P3_ALT_TYPE};
 use crate::mission::codec;
+use crate::terrain::TerrainProvider;
+
+/// Apply the GCS altitude mode to a waypoint. When `alt_mode` is provided it is
+/// authoritative and the p3 alt-type bit is kept consistent for REL/AMSL (AGL
+/// leaves p3 untouched — it is resolved to AMSL on export). When absent (older
+/// callers), the mode is derived from the existing p3 bit so behaviour is
+/// unchanged.
+fn apply_alt_mode(wp: &mut Waypoint, alt_mode: Option<u8>) {
+    match alt_mode {
+        Some(ALT_MODE_AMSL) => { wp.alt_mode = ALT_MODE_AMSL; wp.p3 |= P3_ALT_TYPE as i16; }
+        Some(ALT_MODE_REL)  => { wp.alt_mode = ALT_MODE_REL;  wp.p3 &= !(P3_ALT_TYPE as i16); }
+        Some(m)             => { wp.alt_mode = m; } // AGL — p3 resolved at export
+        None                => { wp.alt_mode = wp.alt_mode_from_p3(); }
+    }
+}
 use crate::msp::types::{MSP_WP, MSP_WP_GETINFO, MSP_WP_MISSION_LOAD, MSP_WP_MISSION_SAVE, MSP_SET_WP};
 use crate::state::{ActiveProtocol, AppState};
 
@@ -31,6 +46,7 @@ pub fn mission_add_wp(
     p1: i16,
     p2: i16,
     p3: i16,
+    alt_mode: Option<u8>,
     store: State<'_, MissionStore>,
 ) -> Mission {
     let wp_action = WpAction::from_u8(action).unwrap_or(WpAction::Waypoint);
@@ -38,6 +54,7 @@ pub fn mission_add_wp(
     wp.p1 = p1;
     wp.p2 = p2;
     wp.p3 = p3;
+    apply_alt_mode(&mut wp, alt_mode);
     store.push(wp);
     store.snapshot()
 }
@@ -53,6 +70,7 @@ pub fn mission_insert_wp(
     p1: i16,
     p2: i16,
     p3: i16,
+    alt_mode: Option<u8>,
     store: State<'_, MissionStore>,
 ) -> Mission {
     let wp_action = WpAction::from_u8(action).unwrap_or(WpAction::Waypoint);
@@ -60,6 +78,7 @@ pub fn mission_insert_wp(
     wp.p1 = p1;
     wp.p2 = p2;
     wp.p3 = p3;
+    apply_alt_mode(&mut wp, alt_mode);
     store.insert(index, wp);
     store.snapshot()
 }
@@ -83,10 +102,11 @@ pub fn mission_update_wp(
     p2: i16,
     p3: i16,
     flag: u8,
+    alt_mode: Option<u8>,
     store: State<'_, MissionStore>,
 ) -> Mission {
     let wp_action = WpAction::from_u8(action).unwrap_or(WpAction::Waypoint);
-    let wp = Waypoint {
+    let mut wp = Waypoint {
         number: 0, // will be renumbered
         action: wp_action,
         lat,
@@ -96,7 +116,9 @@ pub fn mission_update_wp(
         p2,
         p3,
         flag,
+        alt_mode: ALT_MODE_REL,
     };
+    apply_alt_mode(&mut wp, alt_mode);
     store.update(index, wp);
     store.snapshot()
 }
@@ -151,13 +173,22 @@ pub fn mission_download(
     Ok(mission)
 }
 
-/// Upload mission to FC via MSP
+/// Upload mission to FC via MSP (AGL waypoints resolved to AMSL first)
 #[tauri::command]
-pub fn mission_upload(
+pub async fn mission_upload(
     save_eeprom: bool,
     state: State<'_, AppState>,
     store: State<'_, MissionStore>,
+    terrain: State<'_, TerrainProvider>,
 ) -> Result<Mission, String> {
+    let mission = store.snapshot();
+    if mission.waypoints.is_empty() {
+        return Err("No waypoints to upload".into());
+    }
+
+    // Resolve AGL → AMSL before touching the serial handle (async terrain lookup).
+    let resolved = resolve_agl(&mission, &terrain).await;
+
     let proto = state.protocol.lock().map_err(|e| e.to_string())?;
     let handle = match proto.as_ref() {
         Some(ActiveProtocol::Msp(h)) => h,
@@ -165,15 +196,10 @@ pub fn mission_upload(
         None => return Err("Not connected".into()),
     };
 
-    let mission = store.snapshot();
-    if mission.waypoints.is_empty() {
-        return Err("No waypoints to upload".into());
-    }
-
-    log::info!("Mission upload: {} waypoints", mission.waypoints.len());
+    log::info!("Mission upload: {} waypoints", resolved.waypoints.len());
 
     // Upload each waypoint
-    for wp in &mission.waypoints {
+    for wp in &resolved.waypoints {
         let payload = codec::encode_wp(wp);
         handle.msp_request(MSP_SET_WP, &payload)?;
     }
@@ -192,11 +218,40 @@ pub fn mission_upload(
     Ok(store.snapshot())
 }
 
-/// Export mission as MW XML string
+/// Resolve AGL waypoints to AMSL for export. INAV/.mission only understand
+/// REL/AMSL, so each AGL waypoint's above-ground value is turned into an
+/// absolute altitude: `AMSL = terrain_elevation(lat,lon) + AGL`. Non-AGL
+/// waypoints pass through unchanged. Best-effort: if terrain is unavailable for
+/// a point, the waypoint is left as-is.
+async fn resolve_agl(mission: &Mission, terrain: &TerrainProvider) -> Mission {
+    let mut out = mission.clone();
+    for wp in out.waypoints.iter_mut() {
+        if wp.alt_mode == ALT_MODE_AGL && wp.action.has_location() {
+            if let Some(ground) = terrain.elevation(wp.lat_deg(), wp.lon_deg()).await {
+                let amsl_m = ground as f64 + wp.altitude as f64 / 100.0;
+                wp.altitude = (amsl_m * 100.0).round() as i32;
+                wp.p3 |= P3_ALT_TYPE as i16; // mark AMSL
+                wp.alt_mode = ALT_MODE_AMSL;
+            }
+        }
+    }
+    out
+}
+
+/// Export mission as MW XML string (AGL waypoints resolved to AMSL).
+/// `home` is the planning-time launch point [lat, lon], written as <mwp> meta.
 #[tauri::command]
-pub fn mission_export_xml(store: State<'_, MissionStore>) -> String {
+pub async fn mission_export_xml(
+    home: Option<(f64, f64)>,
+    store: State<'_, MissionStore>,
+    terrain: State<'_, TerrainProvider>,
+) -> Result<String, String> {
     let mission = store.snapshot();
-    mission_to_xml(&mission)
+    let mut resolved = resolve_agl(&mission, &terrain).await;
+    if let Some((lat, lon)) = home {
+        resolved.home = Some(HomePt { lat, lon });
+    }
+    Ok(mission_to_xml(&resolved))
 }
 
 /// Import mission from MW XML string
@@ -207,11 +262,21 @@ pub fn mission_import_xml(xml: String, store: State<'_, MissionStore>) -> Result
     Ok(mission)
 }
 
-/// Save mission to a .mission file
+/// Save mission to a .mission file (AGL waypoints resolved to AMSL).
+/// `home` is the planning-time launch point [lat, lon], written as <mwp> meta.
 #[tauri::command]
-pub fn mission_save_file(path: String, store: State<'_, MissionStore>) -> Result<(), String> {
+pub async fn mission_save_file(
+    path: String,
+    home: Option<(f64, f64)>,
+    store: State<'_, MissionStore>,
+    terrain: State<'_, TerrainProvider>,
+) -> Result<(), String> {
     let mission = store.snapshot();
-    let xml = mission_to_xml(&mission);
+    let mut resolved = resolve_agl(&mission, &terrain).await;
+    if let Some((lat, lon)) = home {
+        resolved.home = Some(HomePt { lat, lon });
+    }
+    let xml = mission_to_xml(&resolved);
     std::fs::write(&path, xml).map_err(|e| format!("Failed to save: {e}"))?;
     store.mark_clean();
     Ok(())

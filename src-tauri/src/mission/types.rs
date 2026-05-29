@@ -87,6 +87,12 @@ pub const P3_USER_ACTION_2: u16 = 1 << 2;
 pub const P3_USER_ACTION_3: u16 = 1 << 3;
 pub const P3_USER_ACTION_4: u16 = 1 << 4;
 
+/// Altitude reference mode (GCS-side). INAV itself only knows REL (p3 bit0=0)
+/// and AMSL (p3 bit0=1); AGL is a planning-only mode resolved to AMSL on export.
+pub const ALT_MODE_REL: u8 = 0;
+pub const ALT_MODE_AMSL: u8 = 1;
+pub const ALT_MODE_AGL: u8 = 2;
+
 /// A single INAV waypoint
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Waypoint {
@@ -108,6 +114,12 @@ pub struct Waypoint {
     pub p3: i16,
     /// End-of-mission flag (0x00=normal, 0xA5=last, 0x48=FlyByHome)
     pub flag: u8,
+    /// GCS-side altitude reference: 0=REL, 1=AMSL, 2=AGL. Authoritative for the
+    /// editor; for REL/AMSL it mirrors p3 bit0. AGL holds an above-ground value
+    /// in `altitude` and is resolved to AMSL on export. Defaults to 0 for
+    /// payloads (e.g. older clients) that don't send it.
+    #[serde(default)]
+    pub alt_mode: u8,
 }
 
 impl Waypoint {
@@ -122,12 +134,19 @@ impl Waypoint {
             p2: 0,
             p3: 0,
             flag: WP_FLAG_NORMAL,
+            alt_mode: ALT_MODE_REL,
         }
     }
 
     /// Whether altitude is absolute (AMSL) vs relative to home
     pub fn is_alt_absolute(&self) -> bool {
         (self.p3 as u16) & P3_ALT_TYPE != 0
+    }
+
+    /// Derive `alt_mode` from the p3 alt-type bit (REL/AMSL). Used after decoding
+    /// from MSP/XML, where AGL never appears (FC only stores REL/AMSL).
+    pub fn alt_mode_from_p3(&self) -> u8 {
+        if self.is_alt_absolute() { ALT_MODE_AMSL } else { ALT_MODE_REL }
     }
 
     /// Whether this is a FlyBy Home waypoint
@@ -167,6 +186,13 @@ pub struct MissionInfo {
     pub wp_count: u8,
 }
 
+/// Planned home / launch reference (mwp-compatible `<mwp home-x/home-y>` meta).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct HomePt {
+    pub lat: f64,
+    pub lon: f64,
+}
+
 /// A complete mission (collection of waypoints)
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Mission {
@@ -176,6 +202,10 @@ pub struct Mission {
     pub info: MissionInfo,
     /// Whether the mission has been modified since last save/upload
     pub dirty: bool,
+    /// Planned home/launch point parsed from / written to the `.mission` file
+    /// `<mwp home-x/home-y>` meta (inter-app compatible with mwp). None if absent.
+    #[serde(default)]
+    pub home: Option<HomePt>,
 }
 
 impl Mission {

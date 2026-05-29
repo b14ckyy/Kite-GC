@@ -160,7 +160,9 @@
   }
 
   function formatAltShort(wp: Waypoint): string {
-    return `${(wp.altitude / 100).toFixed(0)}m ${(wp.p3 & 1) ? 'AMSL' : 'REL'}`;
+    const m = wp.alt_mode ?? ((wp.p3 & 1) ? 1 : 0);
+    const ref = m === 2 ? 'AGL' : m === 1 ? 'AMSL' : 'REL';
+    return `${(wp.altitude / 100).toFixed(0)}m ${ref}`;
   }
 
   function formatParam(wp: Waypoint): string {

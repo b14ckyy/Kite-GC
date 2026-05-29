@@ -77,6 +77,16 @@ pub fn mission_to_xml(mission: &Mission) -> String {
     let mut xml = String::from("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<mission>\n");
     xml.push_str("  <version value=\"2.3-pre8\"/>\n");
 
+    // Planned home/launch point — mwp-compatible <mwp> meta (x=lon, y=lat).
+    // Other tools (INAV Configurator) ignore this element and read only <missionitem>.
+    if let Some(h) = &mission.home {
+        xml.push_str(&format!(
+            "  <mwp save-date=\"{}\" zoom=\"14\" cx=\"{:.7}\" cy=\"{:.7}\" generator=\"Kite-GC\" home-x=\"{:.7}\" home-y=\"{:.7}\"/>\n",
+            chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S"),
+            h.lon, h.lat, h.lon, h.lat,
+        ));
+    }
+
     for wp in &mission.waypoints {
         xml.push_str(&format!(
             "  <missionitem no=\"{}\" action=\"{}\" lat=\"{:.7}\" lon=\"{:.7}\" alt=\"{}\" parameter1=\"{}\" parameter2=\"{}\" parameter3=\"{}\" flag=\"{}\"/>\n",
@@ -105,6 +115,21 @@ pub fn mission_from_xml(xml_str: &str) -> Result<Mission, String> {
     // Matches <missionitem ... /> elements and extracts attributes.
     for line in xml_str.lines() {
         let trimmed = line.trim();
+        // Planned home/launch point from the mwp-compatible <mwp home-x/home-y> meta
+        if trimmed.starts_with("<mwp ") {
+            let (mut hx, mut hy): (Option<f64>, Option<f64>) = (None, None);
+            for attr in parse_xml_attrs(trimmed) {
+                match attr.0.as_str() {
+                    "home-x" => hx = attr.1.parse().ok(),
+                    "home-y" => hy = attr.1.parse().ok(),
+                    _ => {}
+                }
+            }
+            if let (Some(x), Some(y)) = (hx, hy) {
+                mission.home = Some(super::types::HomePt { lat: y, lon: x });
+            }
+            continue;
+        }
         if !trimmed.starts_with("<missionitem ") {
             continue;
         }
@@ -156,6 +181,12 @@ pub fn mission_from_xml(xml_str: &str) -> Result<Mission, String> {
             p2,
             p3,
             flag,
+            // .mission only encodes REL/AMSL (p3 bit0); derive the GCS alt mode.
+            alt_mode: if (p3 as u16) & super::types::P3_ALT_TYPE != 0 {
+                super::types::ALT_MODE_AMSL
+            } else {
+                super::types::ALT_MODE_REL
+            },
         });
     }
 

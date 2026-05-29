@@ -45,6 +45,12 @@ export const WP_FLAG_NORMAL = 0x00;
 export const WP_FLAG_LAST = 0xa5;
 export const WP_FLAG_FBH = 0x48;
 
+/** Altitude reference mode (GCS-side). INAV only knows REL/AMSL; AGL is a
+ *  planning-only mode resolved to AMSL on export. */
+export const ALT_MODE_REL = 0;
+export const ALT_MODE_AMSL = 1;
+export const ALT_MODE_AGL = 2;
+
 export interface Waypoint {
   number: number;
   action: WpAction;
@@ -55,6 +61,8 @@ export interface Waypoint {
   p2: number;
   p3: number;
   flag: number;
+  /** 0=REL, 1=AMSL, 2=AGL. For REL/AMSL mirrors p3 bit0. */
+  alt_mode?: number;
 }
 
 export interface MissionInfo {
@@ -67,6 +75,8 @@ export interface Mission {
   waypoints: Waypoint[];
   info: MissionInfo;
   dirty: boolean;
+  /** Planned home/launch point from the .mission <mwp> meta (lat/lon degrees). */
+  home?: { lat: number; lon: number };
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -123,6 +133,12 @@ export const selectedWpIndex = writable<number>(-1);
 
 /** Edit mode toggle */
 export const editMode = writable<boolean>(false);
+
+/** Planning-time launch/home reference point (GCS-side). Used as the base
+ *  altitude for REL↔AGL conversions and terrain clearance of REL missions.
+ *  Auto-placed when entering edit mode; user-movable. null = not set. */
+export interface LaunchPoint { lat: number; lng: number; }
+export const launchPoint = writable<LaunchPoint | null>(null);
 
 // ── Multi-Mission Management ────────────────────────────────────────
 // INAV multi-mission: up to 9 missions stored as sequential WP list on FC,
@@ -295,10 +311,11 @@ export async function missionAddWp(
   altitude: number,
   p1 = 0,
   p2 = 0,
-  p3 = 0
+  p3 = 0,
+  altMode?: number
 ): Promise<Mission> {
   const m = await invoke<Mission>('mission_add_wp', {
-    action, lat, lon, altitude, p1, p2, p3,
+    action, lat, lon, altitude, p1, p2, p3, altMode,
   });
   mission.set(m);
   return m;
@@ -313,10 +330,11 @@ export async function missionInsertWp(
   altitude: number,
   p1 = 0,
   p2 = 0,
-  p3 = 0
+  p3 = 0,
+  altMode?: number
 ): Promise<Mission> {
   const m = await invoke<Mission>('mission_insert_wp', {
-    index, action, lat, lon, altitude, p1, p2, p3,
+    index, action, lat, lon, altitude, p1, p2, p3, altMode,
   });
   mission.set(m);
   return m;
@@ -344,6 +362,7 @@ export async function missionUpdateWp(
     p2: wp.p2,
     p3: wp.p3,
     flag: wp.flag,
+    altMode: wp.alt_mode,
   });
   mission.set(m);
   return m;
@@ -370,26 +389,39 @@ export async function missionUpload(saveEeprom = false): Promise<Mission> {
   return m;
 }
 
-/** Export mission as XML string */
+/** Current launch point as [lat, lon] for export, or undefined if unset. */
+function launchHomeArg(): [number, number] | undefined {
+  const lp = get(launchPoint);
+  return lp ? [lp.lat, lp.lng] : undefined;
+}
+
+/** Apply a loaded mission's <mwp> home to the launch-point store, if present. */
+function applyLoadedHome(m: Mission) {
+  if (m.home) launchPoint.set({ lat: m.home.lat, lng: m.home.lon });
+}
+
+/** Export mission as XML string (includes the launch point as <mwp> meta) */
 export async function missionExportXml(): Promise<string> {
-  return invoke<string>('mission_export_xml');
+  return invoke<string>('mission_export_xml', { home: launchHomeArg() });
 }
 
 /** Import mission from XML string */
 export async function missionImportXml(xml: string): Promise<Mission> {
   const m = await invoke<Mission>('mission_import_xml', { xml });
   mission.set(m);
+  applyLoadedHome(m);
   return m;
 }
 
-/** Save mission to a .mission file */
+/** Save mission to a .mission file (writes the launch point as <mwp> meta) */
 export async function missionSaveFile(path: string): Promise<void> {
-  await invoke<void>('mission_save_file', { path });
+  await invoke<void>('mission_save_file', { path, home: launchHomeArg() });
 }
 
 /** Load mission from a .mission file */
 export async function missionLoadFile(path: string): Promise<Mission> {
   const m = await invoke<Mission>('mission_load_file', { path });
   mission.set(m);
+  applyLoadedHome(m);
   return m;
 }
