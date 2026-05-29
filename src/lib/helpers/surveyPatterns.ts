@@ -678,17 +678,30 @@ export function generateSpiral(
   let θ = startAngle;    // current math angle
   let totalTurned = 0;   // cumulative angle (always positive, used for radius calc)
 
-  const STOP_ANGLE_DEG = 45;
+  // Stop when the UAV turn at the middle waypoint would exceed 60°
+  // (interior angle < 120° → turn = 180° − 120° = 60°)
+  const STOP_INTERIOR_DEG = 120;
   const MAX_PTS = 10000;
 
   for (let iter = 0; iter < MAX_PTS; iter++) {
     const r = radius - (totalTurned / (2 * Math.PI)) * targetLineSpacing;
     if (r <= 0) break;
 
-    allPts.push({ pt: toWorld(r, θ), flags: 0 });
+    const newPt = toWorld(r, θ);
 
-    // Stop condition: interior angle at the previous-to-last point < 45°
-    // i.e. the UAV would have to turn more than 135° — too sharp to be practical.
+    // Minimum distance guard: if the arc to this point is shorter than lineSpacing,
+    // discard it and stop — the spiral has wound tight enough.
+    if (allPts.length > 0) {
+      const prev = allPts[allPts.length - 1].pt;
+      const dLat = (newPt.lat - prev.lat) * scaleLat;
+      const dLng = (newPt.lng - prev.lng) * scaleLng;
+      if (Math.sqrt(dLat * dLat + dLng * dLng) < targetLineSpacing) break;
+    }
+
+    allPts.push({ pt: newPt, flags: 0 });
+
+    // Stop condition: interior angle at the middle of the last 3 points drops below
+    // STOP_INTERIOR_DEG — the UAV turn angle (180° − interior) would exceed 60°.
     if (allPts.length >= 3) {
       const n = allPts.length;
       const pa = allPts[n - 3].pt;
@@ -701,8 +714,8 @@ export function generateSpiral(
       const l1 = Math.sqrt(v1lat ** 2 + v1lng ** 2);
       const l2 = Math.sqrt(v2lat ** 2 + v2lng ** 2);
       if (l1 > 0 && l2 > 0) {
-        const angleAtPb = Math.acos(Math.max(-1, Math.min(1, dot / (l1 * l2)))) * 180 / Math.PI;
-        if (angleAtPb < STOP_ANGLE_DEG) break;
+        const interior = Math.acos(Math.max(-1, Math.min(1, dot / (l1 * l2)))) * 180 / Math.PI;
+        if (interior < STOP_INTERIOR_DEG) break;
       }
     }
 
