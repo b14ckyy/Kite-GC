@@ -138,6 +138,10 @@ Line-of-sight / radio-horizon analysis along the route (à la MWPTools): detect 
 4. **AGL widget** — mini profile, live
 5. **LOS analysis** — deferred, low priority
 
+## 5. Protocol scope (TBD)
+
+AGL is currently implemented for the **INAV mission path only** (MSP WP / MW XML). The **ArduPilot/PX4** mission path is still rudimentary (separate MAVLink WP implementation; no test hardware), so **AGL there is TBD**. ArduPilot/PX4 expose a native terrain-follow frame (`MAV_FRAME_GLOBAL_TERRAIN_ALT`); a future implementation would likely map AGL onto that frame rather than resolving to AMSL — decided once test hardware exists.
+
 ---
 
 *This is a living planning doc. Details in each "TBD" are resolved as we work through the features one at a time.*
