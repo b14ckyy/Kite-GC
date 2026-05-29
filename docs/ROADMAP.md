@@ -274,7 +274,8 @@ This document tracks planned features, organized by milestone.
   - Location → Date → Aircraft → Flights by time (location-centric pilots)
   - Date → Location → Aircraft → Flights by time (chronological)
   - Aircraft → Date → Location → Flights by time (per-model history)
-- [ ] Collapsible group headers with flight count + aggregate stats
+- [x] Collapsible group headers with flight count (two-level tree, ▾/▸ toggle)
+- [ ] Aggregate stats per group (total flight time, total distance, etc.)
 - [x] Flight detail view with metadata summary (location, weather, aircraft, source)
 - [x] Weather editor: compact read-only display + pencil icon → editor form with stepper buttons
 - [x] `flightlog_update_weather` command + `updateFlightWeather()` store function
@@ -298,7 +299,7 @@ This document tracks planned features, organized by milestone.
 - [x] CSV parsing in Rust → raw CSV storage per row (dynamic fields, INAV-version-independent)
 - [x] Original .TXT file archived as BLOB in `blackbox_files` table (re-downloadable)
 - [x] Standalone Blackbox import: creates new flight with `source: "blackbox"`, metadata from header
-- [ ] Attach Blackbox to existing live flight: `source: "both"`, playback toggle MSP vs Blackbox
+- [x] Attach Blackbox to existing live flight: `source: "both"`, playback toggle MSP vs Blackbox (see Milestone 5b)
 - [x] `flights.source` field: `live` | `blackbox` | `both` — Blackbox-only flights marked with icon
 - [x] Multi-log support: single .TXT may contain multiple ARM/DISARM sessions (`--index N`)
 - [x] Blackbox-imported flights use header metadata (FW version, date, GPS start, duration)
@@ -311,9 +312,9 @@ This document tracks planned features, organized by milestone.
 - [x] Export raw Blackbox binary from `blackbox_files` BLOB (original .TXT / .bbl / .bfl)
 - [x] `_kflight_meta` table in export files: schema version, app ID, export timestamp, flight count
 - [x] Flight source indicators in logbook list: ◈ blackbox, ◉ both, no prefix = live
-- [ ] Export flight path as KML (Google Earth)
-- [ ] Export flight path as GPX (universal GPS format)
-- [ ] Export telemetry as CSV
+- [x] Export flight path as KMZ/KML (Google Earth) — see ADR-020, `track_export.rs`
+- [x] Export flight path as GPX (universal GPS format)
+- [x] Export telemetry as CSV
 
 ## Milestone 5b: Blackbox Import (v0.5.x — COMPLETE)
 
@@ -482,17 +483,33 @@ This document tracks planned features, organized by milestone.
 - [ ] Safehome editor
 - [ ] HID controller input (gamepad/joystick)
 - [ ] Audio status alerts (TTS)
-- [ ] Survey/area planner
 - [ ] Terrain analysis
 - [ ] Embedded video stream
 - [ ] FW approach / autoland planner
 - [ ] Geozone editor
-- [ ] Widget layout profiles (save/load named panel arrangements)
 - [ ] MAVLink signing (passphrase-based packet authentication)
 - [ ] AI-assisted flight log analysis (potential third-party collaboration)
+- [ ] _(deferred)_ Widget layout profiles (save/load named panel arrangements) — not enough widgets to justify yet; revisit when the widget set grows
+
+### Platform & UX Foundations
+
+Cross-cutting groundwork items. Each carries non-trivial architectural or design weight — major considerations noted inline.
+
+- [ ] **Improved terrain altitude system & source**
+  - _Major considerations_: current 3D path relies on Cesium World Terrain (requires Ion token) + geoid-undulation correction. Evaluate alternative/offline DEM sources (SRTM, AWS/Mapzen Terrarium RGB tiles), local caching, and accuracy for AGL / ground-clearance use (not just 3D display). Needs a clean abstraction so 2D (terrain-follow missions, clearance checks) and 3D share one elevation provider. Token-free fallback path.
+- [ ] **Better map tile handling**
+  - _Major considerations_: current IndexedDB LRU cache works but is reactive only. Consider region prefetch / offline area download, smarter eviction, retry/backoff on tile errors, optional vector tiles, and unified handling shared between Leaflet (2D) and Cesium (3D). Attribution + provider rate-limit compliance.
+- [ ] **Global font-size multiplier setting**
+  - _Major considerations_: app-wide scale variable (root `rem`/CSS custom property). Requires a UI dynamics pass — audit fixed-px layouts, panel/dock sizing, widget text (docks already px/vmin-based), and the CSS Grid zones (ADR-023) for reflow at large scales. Accessibility win. Persist in settings.
+- [ ] **Improved in-app icons, graphics & app logo**
+  - _Major considerations_: replace ad-hoc emoji glyphs with a consistent SVG icon set; proper app/installer/taskbar icons; light/dark variants; coherent branding. Bundle-size and licensing of any icon set.
+- [ ] **Theming by connected UAV control system**
+  - _Major considerations_: drive the accent color (currently fixed `#37a8db`) as a variable parameter from the detected FC/protocol (INAV / ArduPilot / PX4 / …). Needs the accent fully tokenized as a CSS custom property across all components, a mapping table per firmware, and persistence. Ties into the existing protocol-detection on connect.
+- [ ] **Multi serial connections in background (aux devices)**
+  - _Major considerations_: the MSP scheduler currently owns a single serial connection exclusively (ADR-007). An aux-device manager would run additional independent background connections (ADSB receiver, ESP-Radar, telemetry monitor, …) without disturbing the primary FC link — each with its own parser/handler, surfaced via an "Aux Devices" submenu. Data fusion onto the map (ADSB traffic, radar contacts). Builds on the ByteTransport abstraction (ADR-010) and the planned raw serial logger. Significant architecture item.
 
 ### Code Health & Maintainability
-- [ ] Rust module reorganization when `flightlog/` exceeds 20 files (parsers/, exporters/, models/)
+- [ ] Rust module reorganization when `flightlog/` exceeds 20 files (parsers/, exporters/, models/) — _currently 12/20, not yet needed_
 - [ ] `tauri-specta` for auto-generated TypeScript types from Rust structs (Rust↔TS type safety)
 
 ## [~] Milestone 7: CesiumJS 3D Map View (v0.7.x)
@@ -538,7 +555,7 @@ This document tracks planned features, organized by milestone.
 
 ### Planned (3D Map)
 - [ ] 3D GLTF UAV models with attitude representation (roll/pitch/yaw)
-- [ ] Flight mode coloring of 3D track segments
+- [x] Flight mode coloring of 3D track segments (Map3D — see Milestone 5b colored tracks)
 - [ ] Smoothed flight track (polyline simplification or spline interpolation)
 - [ ] UI button refinements and responsive layout
 - [ ] Altitude exaggeration toggle for low-altitude flights
@@ -546,4 +563,4 @@ This document tracks planned features, organized by milestone.
 
 ---
 
-*Last updated: 2026-04-19*
+*Last updated: 2026-05-29*
