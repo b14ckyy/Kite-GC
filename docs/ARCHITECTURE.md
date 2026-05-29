@@ -1018,6 +1018,7 @@ This ensures panels never overflow into the bottom dock, side dock, or map contr
 
 **Date**: 2026-04-22
 **Status**: Accepted
+**Extended by**: ADR-025 (per-shape geometry algorithms — all six shapes now functional)
 
 **Context**: The survey pattern generator needs to let users define geometric patterns (rectangle, polygon, circle, etc.) on a map, generate waypoints from those patterns, and append them to the active mission. Unlike the existing mission system (which relies on the Rust backend for state management and MSP communication), the pattern generator is a pure frontend feature — no FC communication is needed during pattern editing.
 
@@ -1051,7 +1052,7 @@ Key questions:
 
 3. **`SurveyPatternLayer.svelte`** (map component): Renders shape polygon (gray semi-transparent), path preview (blue survey lines + turn connections), draggable corner/center markers. Uses Leaflet `L.polygon`, `L.polyline`, `L.circleMarker`. Reads directly from `activeSurveyPattern` rune store for reactivity.
 
-4. **`SurveyPatternPanel.svelte`** (UI component): Parameter inputs using `NumberStepper`. Altitude type dropdown, user action trigger checkboxes. Shape selector dropdown (all 6 shapes listed, rectangle+rectangle-lawnmower functional, others placeholder). Generate button with 120 WP limit check via `ConfirmDialog`.
+4. **`SurveyPatternPanel.svelte`** (UI component): Parameter inputs using `NumberStepper`. Altitude type dropdown, user action trigger checkboxes. Shape selector dropdown — all six shapes (rectangle, rectangle-lawnmower, polygon, polygon-lawnmower, circle, spiral) are functional (see ADR-025). Generate button with 120 WP limit check via `ConfirmDialog`.
 
 5. **Deduplication**: Turn connections duplicate survey endpoints. During generation, consecutive identical lat/lng points are skipped. User action flags from the survey end point are preserved.
 
@@ -1071,6 +1072,66 @@ Key questions:
 - `InavMissionLayer` blocks new WP placement via `if (activeSurveyPattern.isActive) return;`.
 - `InavMissionPanel` conditionally renders `SurveyPatternPanel` instead of the WP table when `showPatternPanel` is true.
 - FC upload/download/save/load buttons are hidden while pattern mode is active (`{#if !showPatternPanel}`).
+
+## ADR-025: Survey Pattern Generator — Per-Shape Geometry Algorithms
+
+**Date**: 2026-05-29
+**Status**: Accepted
+**Extends**: ADR-024
+
+**Context**: ADR-024 established the frontend-only architecture (rune store + pure functions) with rectangle + rectangle-lawnmower. The remaining four shapes (circle, spiral, polygon, polygon-lawnmower) each need a distinct generation algorithm. A first attempt that shared parameters and config-building logic across shape families caused state corruption on shape switching (e.g. a circle inheriting rectangle params with no `radius`). This ADR records the clean per-shape separation and the geometry algorithms.
+
+**Decision**: Strict separation by shape family, with one pure generator per shape and no cross-shape code reuse. All geometry runs in a local equirectangular metre frame around the shape centroid (so angles/distances aren't distorted by longitude compression), converting back to lat/lng only at the end.
+
+### Shape families & state
+
+| Family | Shapes | Params type | Generators |
+|---|---|---|---|
+| rect | `rectangle`, `rectangle-lawnmower` | `RectanglePatternParams` | `generateRectangleZigzag`, `generateClassicZigzag`, `generateRectangleLawnmower` |
+| circle | `circle`, `spiral` | `CirclePatternParams` | `generateCircleStepped`, `generateSpiral` |
+| polygon | `polygon`, `polygon-lawnmower` | `PolygonPatternParams` | `generatePolygonZigzag`, `generatePolygonLawnmower` |
+
+- **`switchShape()`** caches the current family's params before switching and restores the target family's cached params (or builds defaults). Same-family switches only rename `shape`, preserving all params.
+- **Panel state** is per-family: `rectangleParams` / `circleParams` / `polygonParams` are independent `$state` objects, each with its own sync `$effect` and change handler. No shared `Record<string, any>`.
+- **Layer reactivity** is a single `$effect` (avoids the double-render of two effects sharing a `$state` flag); `prevShape` is a plain `let`.
+
+### Circle (Stepped) — `generateCircleStepped`
+
+Concentric rings from `radius` inward, spaced by `targetLineSpacing`. Each ring uses up to `ringPoints` evenly-distributed waypoints, auto-reduced when the arc between points would fall below `targetLineSpacing`. When even the minimum (3 points) is too dense, a single centre point closes the path. `trackOrientation` = bearing of the first waypoint; `clockwise` = orbit direction; `reverse` = inside↔outside.
+
+### Spiral — `generateSpiral`
+
+Archimedean spiral: radius decreases linearly with total angle turned. **Outer phase** uses a fixed angular step (360°/`ringPoints`); **inner phase** widens the step so each arc stays ≥ `targetLineSpacing`. Two stop conditions: (a) the interior angle at the previous waypoint drops below 120° (UAV turn > 60° — impractical), (b) the next arc would be shorter than `targetLineSpacing`. Always terminates with a waypoint at the exact centre.
+
+### Polygon ZigZag — `generatePolygonZigzag`
+
+Scanline sweep perpendicular to `trackOrientation`. For each scan line, all polygon-edge intersections are found, sorted, and paired (entry, exit) by the even-odd rule — concave shapes naturally yield multiple segments per line. Two concave modes (`stayInsideArea`):
+- **false (cross-gap)**: serpentine — fly every segment of each scan line in order, crossing intra-polygon gaps. Turn-distance extension is applied only to the last segment of each scan line (the real turn to the next line), never to collinear cross-gap segments.
+- **true (connected-fill)**: DFS over segments connected across adjacent scan lines (Y-overlap), staying within connected sub-regions like 3D-printer infill (U-shape → left arm → bottom → right arm).
+
+Waypoint-frame note: track-frame coordinates `(perp, along)` are rotated back to ENU before lat/lng conversion, so `trackOrientation` rotates the *scan lines*, not the polygon.
+
+### Polygon Lawnmower — `generatePolygonLawnmower`
+
+Contour-offset coverage of an arbitrary (concave) polygon. The pinch-off/island problem is avoided by **convex pre-decomposition**:
+
+1. **`decomposeConvexXY`** — recursive reflex-cut: at each reflex vertex find a valid internal diagonal (no edge crossing, midpoint inside), preferring a diagonal to another reflex vertex; split and recurse until all pieces are convex. Convex pieces only ever shrink under offset — they never pinch off.
+2. **`mergeConvexPiecesXY`** — Hertel-Mehlhorn: merge adjacent pieces sharing an edge whenever their union stays convex (re-combines two triangles into a quad → fewer pieces, cleaner paths).
+3. **`offsetConvexInwardXY`** — inward offset by half-plane intersection (Sutherland-Hodgman clipping against each edge shifted inward). Robust by construction: clipping a convex polygon can never self-intersect, and collapsed edges drop out automatically. Returns `null` on collapse. This replaced an earlier miter-intersection offset that overshot on sharp vertices.
+4. **Per zone (= per convex piece)**: offset to collapse → concentric rings; `removeShortEdgesXY` drops waypoints that would create sub-`lineSpacing` tracks (tiny inner rings disappear); `spineOfConvexXY` adds a final medial-axis line for elongated remainders (via binary-search to near-collapse, then the two farthest residual points). Rings are flown **open** and each inner ring is entered one vertex past the nearest point → diagonal inward steps, no re-flown waypoints. A zone is one continuous survey segment; **turn (transfer) legs occur only between zones**.
+
+### Shared conventions
+
+- **User-action flags** are assigned in final flight order (after any `reverse`), so start/end flags land on the correct waypoints. Lawnmower/circle/spiral/polygon-lawnmower use Start/Track/End; zigzag (rectangle/polygon) uses Line-Start/Line-End.
+- **`SurveyPathSegment.kind`**: `'survey'` points become mission waypoints; `'turn'` points are visual-only connectors.
+- **120 WP limit** is checked at generation with a live, reactive count in the panel (red over limit).
+
+**Rationale**:
+- Per-shape generators keep each algorithm independent and debuggable — a change to one shape can't corrupt another.
+- Convex pre-decomposition sidesteps general polygon-offset topology handling (islands, holes) — each piece is a simple convex shrink, which is trivially robust.
+- Half-plane clipping is the minimal robust offset primitive; no external geometry library (e.g. Clipper) was needed for the supported scale (≤ 50 vertices).
+
+---
 
 *End of Architecture Decision Records*
 

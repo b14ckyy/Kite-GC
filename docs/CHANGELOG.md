@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Survey Pattern Generator: Polygon Lawnmower (Contour-Offset)
+- **`generatePolygonLawnmower()`**: contour-offset coverage for arbitrary (concave) polygons
+- **Convex decomposition** (`decomposeConvexXY`): recursive reflex-cut splits a concave polygon into convex pieces at reflex vertices, preferring diagonals between two reflex vertices
+- **Hertel-Mehlhorn merge** (`mergeConvexPiecesXY`): adjacent convex pieces are re-merged where their union stays convex — avoids unnecessary triangle splits (two triangles forming a quad re-merge into one piece)
+- **Robust inward offset** (`offsetConvexInwardXY`): Sutherland-Hodgman half-plane clipping — can never self-intersect, collapsed edges drop out automatically (replaces fragile miter-intersection offset)
+- **Per-piece coverage**: concentric rings offset inward until the piece collapses (fills the centre), then a final spine track (`spineOfConvexXY`) along the medial axis when an elongated remainder spans > lineSpacing
+- **One continuous path per zone**: all rings + spine of a convex piece form a single survey segment — transfer (turn) legs only occur between separate zones
+- **Diagonal ring transitions**: each inner ring is entered one vertex past the nearest point, so ring-to-ring steps run diagonally inward (no perpendicular hop, no re-flown waypoint) — matches rectangle lawnmower / stepped circle
+- **Short-edge cleanup** (`removeShortEdgesXY`): waypoints producing tracks shorter than lineSpacing are removed; tiny inner rings are dropped entirely
+
+### Added — Survey Pattern Generator: Polygon ZigZag
+- **`generatePolygonZigzag()`**: scanline sweep perpendicular to track orientation, even-odd intersection pairing handles concave polygons
+- **Two concave modes** via "Stay inside area" toggle: cross-gap serpentine (default — flies all segments per scan line, good for area photography / trigger zones) vs. connected-fill DFS (stays within connected sub-regions like 3D-printer infill)
+- **Interactive map editing**: independently draggable corner markers, midpoint insertion markers (click to add vertex, max 50), draggable centroid marker (moves whole polygon), right-click to delete vertex (min 3)
+- **Self-intersection protection**: live preview pauses while a drag would make the polygon self-intersecting; the vertex reverts to its last valid position on drop
+- **Touch-friendly delete zone**: overlay at the top of the map while dragging a vertex
+- **Default shape**: equilateral pentagon, 200 m circumradius, map-centered
+- **Track orientation** rotates the scan lines only, not the polygon shape
+
+### Added — Survey Pattern Generator: Circle (Stepped) + Spiral
+- **`generateCircleStepped()`**: concentric rings, `ringPoints` waypoints per ring (auto-reduced for small inner rings), center-point termination
+- **`generateSpiral()`**: Archimedean spiral — fixed angular step (360°/ringPoints) in the outer phase, widening to keep arc = lineSpacing in the inner phase; stops when the UAV turn would exceed 60° (interior angle < 120°) or a track would fall below lineSpacing; always terminates at the exact center
+- **Circle editing markers**: draggable center (blue) + radius handle (red)
+- **Shared circle UI** for both shapes: radius, ring points, line spacing, start angle, CW/CCW, reverse, altitude, speed, user-action triggers
+- **`ringPoints`** parameter (default 10) added to `CirclePatternParams`
+
+### Added — Survey Pattern Generator: shape switching & info display
+- **`switchShape()`**: clean shape switching with a per-family parameter cache — params survive switches between shape families within a session (e.g. rectangle → circle → rectangle restores the rectangle params); same-family switches (rectangle ↔ lawnmower, circle ↔ spiral) preserve all params
+- **Per-shape state separation** in the panel: `rectangleParams` / `circleParams` / `polygonParams` are independent `$state` — no cross-shape sharing
+- **Reactive waypoint count**: live "N WPs" readout per pattern, shown in red when the mission would exceed the 120 WP limit
+- **Computed info**: rectangle shows actual line spacing + WP count; circle shows rings; spiral shows rotations — all in a single info row
+
+### Fixed — Survey Pattern Generator
+- **Shape-switch corruption**: switching to Circle/Spiral previously kept rectangle params (no `radius`), breaking the dropdown/preview; `switchShape()` now builds shape-correct defaults
+- **Double-render**: merged the layer's two `$effect`s into one and made `prevShape` a plain `let`, eliminating a reschedule loop
+- **Circle → rectangle layer reuse**: `L.Circle` has no `setLatLngs`; added `instanceof` guards so the shape layer is recreated when the geometry type changes
+- **Reverse + user-action flags**: start/end flags now land on the correct waypoints after a reversed path (was applying flags in pre-reverse order) — fixed in all generators
+- **Turn distance on collinear gaps** (polygon zigzag, U-shapes): turn extension is applied only before a real turn to the next scan line, not on intermediate cross-gap segments — keeps the end-flag trigger at the true boundary crossing
+- **NumberStepper**: restored `bind:value` + `onchange` so keyboard entry and live preview work correctly
+
 ### Added — Rectangle Lawnmower (Contour-Offset) Pattern
 - **`generateRectangleLawnmower()`** algorithm: concentric rectangles shrunk by `2×targetLineSpacing` per layer
 - **CW/CCW flight direction**: Checkbox toggles clockwise vs counter-clockwise traversal

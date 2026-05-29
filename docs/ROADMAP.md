@@ -458,7 +458,7 @@ This document tracks planned features, organized by milestone.
 - [ ] Aviation charts (OpenAIP tile layer — airports, navaids, airspace symbology)
 
 ### Advanced UI & Tools
-- [x] Survey / area planner — Phase 1+2 complete:
+- [x] Survey / area planner — all six shapes complete:
   - [x] Rectangle shape definition (center, length, width, orientation) via UI + draggable map markers
   - [x] Map visualization of shape area (gray semi-transparent polygon)
   - [x] Live path preview (survey legs + turn connections)
@@ -473,9 +473,10 @@ This document tracks planned features, organized by milestone.
   - [x] Deduplication of survey/turn boundary points
   - [x] Altitude, speed, userActionFlags encoded in p3 bitfield per INAV spec
   - [x] Pattern params persist between mode toggles (cleared on app close)
-  - [ ] Rectangle Lawnmower pattern generation
-  - [ ] Polygon shape + lawnmower
-  - [ ] Circle + Spiral patterns
+  - [x] Rectangle Lawnmower pattern generation (concentric contour-offset)
+  - [x] Circle (Stepped) + Spiral (Archimedean) patterns
+  - [x] Polygon (ZigZag) — concave-capable scanline, cross-gap / connected-fill modes, interactive vertex editing
+  - [x] Polygon Lawnmower — convex decomposition + contour-offset, diagonal ring transitions
   - [ ] Load/save pattern templates
 - [ ] OSD font/element preview
 - [ ] Safehome editor

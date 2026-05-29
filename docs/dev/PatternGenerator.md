@@ -1,8 +1,8 @@
 # Survey Pattern Generator – Workflow & Implementation Plan
 
-**Status**: Phase 1+2+3 Complete — Rectangle + Rectangle Lawnmower  
-**Last Updated**: 2026  
-**Responsible**: Grok + User  
+**Status**: Complete — all six shapes (Rectangle, Rectangle Lawnmower, Polygon, Polygon Lawnmower, Circle, Spiral). See ARCHITECTURE.md ADR-024/ADR-025 for the implemented design.  
+**Last Updated**: 2026-05-29  
+**Responsible**: Grok + Claude + User  
 
 ---
 

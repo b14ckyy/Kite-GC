@@ -566,3 +566,47 @@ CREATE TABLE blackbox_files (
 );
 -- flights.source: 'live' | 'blackbox' | 'both'
 ```
+
+## Survey Pattern Generator
+
+Frontend-only feature (no Rust): users define a geometric area on the map and generate mission waypoints from it. See [ARCHITECTURE.md](ARCHITECTURE.md) ADR-024 (architecture) and ADR-025 (algorithms) for the rationale.
+
+### Files
+
+| File | Role |
+|---|---|
+| `stores/surveyPattern.svelte.ts` | Rune store: `activeSurveyPattern { config, isActive }`, `switchShape()`, per-family param cache, `update*Params` / `apply*DragUpdate` |
+| `helpers/surveyPatterns.ts` | Pure geometry + all six generators (no Svelte, fully unit-testable) |
+| `components/mission/SurveyPatternPanel.svelte` | Parameter UI per shape, generate flow, live WP count |
+| `components/mission/SurveyPatternLayer.svelte` | Leaflet preview: shape, path, editing markers, drag handling |
+| `components/NumberStepper.svelte` | Reusable +/- numeric input used throughout the panel |
+
+### Shape families
+
+Three families, each with its own params type, panel `$state`, and generators — no cross-family code reuse (a bug in one shape can't corrupt another):
+
+- **rect** (`rectangle`, `rectangle-lawnmower`) → `RectanglePatternParams`
+- **circle** (`circle`, `spiral`) → `CirclePatternParams` (adds `radius`, `ringPoints`)
+- **polygon** (`polygon`, `polygon-lawnmower`) → `PolygonPatternParams` (adds `points`, `stayInsideArea`)
+
+`switchShape()` caches the current family's params and restores the target's (or builds defaults); same-family switches just rename `shape`. The cache lives for the session (reset on app close).
+
+### Generators (`surveyPatterns.ts`)
+
+All geometry runs in a local equirectangular metre frame around the centroid, converting back to lat/lng at the end.
+
+- **`generateRectangleZigzag` / `generateClassicZigzag`** — boustrophedon; track-orientation mode rotates+clips tracks to the shape, otherwise tracks follow shape orientation.
+- **`generateRectangleLawnmower`** — concentric rectangles, diagonal layer transitions.
+- **`generateCircleStepped`** — concentric rings, `ringPoints`/ring (auto-reduced), centre-point finish.
+- **`generateSpiral`** — Archimedean; fixed angular step outer, arc-clamped inner; stops at UAV-turn > 60° or sub-spacing arc; centre finish.
+- **`generatePolygonZigzag`** — perpendicular scanline, even-odd pairing; `stayInsideArea` toggles cross-gap serpentine vs. connected-fill DFS; turn-distance only before real (next-line) turns.
+- **`generatePolygonLawnmower`** — convex decomposition (`decomposeConvexXY`) → Hertel-Mehlhorn merge (`mergeConvexPiecesXY`) → robust half-plane inward offset (`offsetConvexInwardXY`) → per-zone concentric rings + spine (`spineOfConvexXY`), short edges pruned (`removeShortEdgesXY`).
+
+### Path model
+
+Generators return `SurveyPathSegment[]`; `kind: 'survey'` points become waypoints, `kind: 'turn'` are visual-only connectors. Rings are flown open with diagonal inward steps (one vertex past nearest) to avoid re-flown points. User-action flags are applied in final flight order (after `reverse`). Generation checks the INAV 120 WP limit with a live count in the panel.
+
+### Interaction notes
+
+- Polygon editing: independently draggable corners, midpoint-click insertion (max 50 verts), centroid drag moves the whole shape, right-click / drag-to-delete-zone removes a vertex (min 3). Self-intersection is rejected on drop (vertex reverts); live preview pauses while invalid.
+- `Map.svelte` renders `<SurveyPatternLayer>` unconditionally (it self-clears when inactive); `InavMissionLayer` blocks map-click WP placement while pattern mode is active.
