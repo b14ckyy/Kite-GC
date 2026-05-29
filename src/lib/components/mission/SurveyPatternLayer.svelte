@@ -5,11 +5,12 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import L from 'leaflet';
-  import { activeSurveyPattern, applyRectangleDragUpdate, type LngLat } from '$lib/stores/surveyPattern.svelte';
+  import { activeSurveyPattern, applyRectangleDragUpdate, applyCircleDragUpdate, type LngLat, type CirclePatternParams } from '$lib/stores/surveyPattern.svelte';
   import {
     computeRectangleCorners,
     generateRectangleZigzag,
     generateRectangleLawnmower,
+    generateCircleStepped,
     updateRectangleFromDraggedCenter,
     updateRectangleFromDraggedCorner,
     type SurveyPathSegment,
@@ -21,7 +22,7 @@
   let { map }: Props = $props();
 
   // ── Layers ──────────────────────────────────────────
-  let shapeLayer: L.Polygon | undefined;
+  let shapeLayer: L.Polygon | L.Circle | undefined;
   let pathLines: L.Polyline[] = [];             // the continuous preview path lines
   let pathMarkers: L.Marker[] = [];             // waypoint dot markers (start/end/wp)
 
@@ -37,6 +38,15 @@
     center: null, length: null, width: null,
   };
 
+  // ── Circle editing markers ─────────────────────────
+  let centerMarkerCircle: L.Marker | undefined;
+  let radiusMarker: L.Marker | undefined;
+
+  // Temp values for circle drag preview
+  let _circleDragTemp: { center: LngLat | null; radius: number | null } = {
+    center: null, radius: null,
+  };
+
   // ══════════════════════════════════════════════════════
   //  MARKER MANAGEMENT
   // ══════════════════════════════════════════════════════
@@ -46,6 +56,12 @@
     if (centerMarker) { try { map.removeLayer(centerMarker); } catch {} centerMarker = undefined; }
     cornerMarkers.forEach(m => { try { map.removeLayer(m); } catch {} });
     cornerMarkers = [];
+  }
+
+  function removeCircleEditingMarkers() {
+    if (isDragging) return;
+    if (centerMarkerCircle) { try { map.removeLayer(centerMarkerCircle); } catch {} centerMarkerCircle = undefined; }
+    if (radiusMarker) { try { map.removeLayer(radiusMarker); } catch {} radiusMarker = undefined; }
   }
 
   function buildEditingMarkers(corners: LngLat[], center: LngLat) {
@@ -118,6 +134,72 @@
   }
 
   // ══════════════════════════════════════════════════════
+
+  function buildCircleEditingMarkers(center: LngLat, radius: number) {
+    const centerLL: L.LatLngExpression = [center.lat, center.lng];
+    // Place radius handle due North of center
+    const radiusLL: L.LatLngExpression = [center.lat + radius / 111320, center.lng];
+
+    if (!centerMarkerCircle) {
+      centerMarkerCircle = L.marker(centerLL, {
+        draggable: true,
+        icon: L.divIcon({
+          className: 'pattern-center-marker',
+          html: '<div style="background:#37a8db;width:12px;height:12px;border-radius:50%;border:2px solid white;box-shadow:0 0 4px rgba(0,0,0,0.5);"></div>',
+          iconSize: [16, 16], iconAnchor: [8, 8],
+        }),
+      }).addTo(map);
+
+      centerMarkerCircle.on('dragstart', () => { isDragging = true; });
+      centerMarkerCircle.on('drag', () => {
+        const pos = centerMarkerCircle!.getLatLng();
+        _circleDragTemp.center = { lat: pos.lat, lng: pos.lng };
+        syncDragPreview();
+      });
+      centerMarkerCircle.on('dragend', () => {
+        isDragging = false;
+        const pos = centerMarkerCircle!.getLatLng();
+        applyCircleDragUpdate({ center: { lat: pos.lat, lng: pos.lng } });
+        _circleDragTemp.center = null;
+      });
+    } else {
+      centerMarkerCircle.setLatLng(centerLL);
+    }
+
+    if (!radiusMarker) {
+      radiusMarker = L.marker(radiusLL, {
+        draggable: true,
+        icon: L.divIcon({
+          className: 'pattern-radius-marker',
+          html: '<div style="background:#e74c3c;width:10px;height:10px;border-radius:50%;border:2px solid white;box-shadow:0 0 3px rgba(0,0,0,0.6);"></div>',
+          iconSize: [14, 14], iconAnchor: [7, 7],
+        }),
+      }).addTo(map);
+
+      radiusMarker.on('dragstart', () => { isDragging = true; });
+      radiusMarker.on('drag', () => {
+        const cp = (activeSurveyPattern.config!.params as any).center;
+        const pos = radiusMarker!.getLatLng();
+        const dLat = (pos.lat - cp.lat) * 111320;
+        const dLng = (pos.lng - cp.lng) * 111320 * Math.cos((cp.lat * Math.PI) / 180);
+        _circleDragTemp.radius = Math.max(10, Math.round(Math.sqrt(dLat * dLat + dLng * dLng)));
+        syncDragPreview();
+      });
+      radiusMarker.on('dragend', () => {
+        isDragging = false;
+        const cp = (activeSurveyPattern.config!.params as any).center;
+        const pos = radiusMarker!.getLatLng();
+        const dLat = (pos.lat - cp.lat) * 111320;
+        const dLng = (pos.lng - cp.lng) * 111320 * Math.cos((cp.lat * Math.PI) / 180);
+        const newRadius = Math.max(10, Math.round(Math.sqrt(dLat * dLat + dLng * dLng)));
+        applyCircleDragUpdate({ radius: newRadius });
+        _circleDragTemp.radius = null;
+      });
+    } else {
+      radiusMarker.setLatLng(radiusLL);
+    }
+  }
+
   //  PATH VISUALISATION
   // ══════════════════════════════════════════════════════
 
@@ -135,7 +217,8 @@
 
   function clearAll() {
     clearShapeLines();
-    if (!isDragging) removeEditingMarkers();
+    removeEditingMarkers();
+    removeCircleEditingMarkers();
   }
 
   /** Build the continuous preview path from SurveyPathSegment[] */
@@ -216,31 +299,31 @@
     const shape = config.shape;
     const p: any = config.params;
 
-    if (shape !== 'rectangle' && shape !== 'rectangle-lawnmower') {
-      if (!isDragging) removeEditingMarkers();
-    }
-
-    // Snap dummy center
+    // Snap dummy center (default 48,11) to current map center on first render
     const isDummy = Math.abs(p.center?.lat - 48) < 0.5 && Math.abs(p.center?.lng - 11) < 0.5;
     if (isDummy || !p.center) {
       const mc = map.getCenter();
       p.center = { lat: mc.lat, lng: mc.lng };
     }
 
-    let shapeLatLngs: [number, number][] = [];
-    const centerLL: [number, number] = [p.center.lat, p.center.lng];
+    // Remove editing markers that don't belong to the current shape
+    if (!isDragging) {
+      if (shape !== 'rectangle' && shape !== 'rectangle-lawnmower') removeEditingMarkers();
+      if (shape !== 'circle' && shape !== 'spiral') removeCircleEditingMarkers();
+    }
+
+    const centerLL: L.LatLngExpression = [p.center.lat, p.center.lng];
 
     if (shape === 'rectangle' || shape === 'rectangle-lawnmower') {
       const { corners } = computeRectangleCorners(
         p.center, p.length ?? 400, p.width ?? 200, p.shapeOrientation ?? 0
-    );
-    shapeLatLngs = corners.map(c => [c.lat, c.lng] as [number, number]);
+      );
+      const shapeLatLngs = corners.map(c => [c.lat, c.lng] as [number, number]);
 
       buildEditingMarkers(corners, p.center);
 
-      // Gray shape — must be L.Polygon; if switching back from circle (L.Circle has no setLatLngs),
-      // remove the old layer first and create a fresh polygon.
-      if (shapeLayer && shapeLayer instanceof L.Polygon) {
+      // Gray shape — must be L.Polygon (L.Circle has no setLatLngs)
+      if (shapeLayer instanceof L.Polygon) {
         shapeLayer.setLatLngs(shapeLatLngs);
       } else {
         if (shapeLayer) { try { map.removeLayer(shapeLayer); } catch {} shapeLayer = undefined; }
@@ -249,7 +332,11 @@
         }).addTo(map);
       }
 
-      // Generate and show preview path (only when not dragging to avoid jank)
+      if (!hasAutoFitted) {
+        hasAutoFitted = true;
+        try { map.fitBounds(L.latLngBounds(shapeLatLngs), { padding: [80, 80], maxZoom: 18 }); } catch {}
+      }
+
       if (!isDragging) {
         const segments = (shape === 'rectangle-lawnmower')
           ? generateRectangleLawnmower(p)
@@ -257,15 +344,51 @@
         buildPreviewPath(segments);
       }
 
-    } else if (shape === 'circle' || shape === 'spiral') {
-      clearShapeLines();
+    } else if (shape === 'circle') {
       const radius = p.radius ?? 200;
-      shapeLayer = L.circle(centerLL, {
-        color: '#888888', weight: 2, fillColor: '#666666', fillOpacity: 0.25, radius
-      }).addTo(map) as any;
-      // TODO: circle preview path
+
+      // Ensure shapeLayer is an L.Circle
+      if (shapeLayer instanceof L.Circle) {
+        shapeLayer.setLatLng(centerLL);
+        shapeLayer.setRadius(radius);
+      } else {
+        if (shapeLayer) { try { map.removeLayer(shapeLayer); } catch {} shapeLayer = undefined; }
+        shapeLayer = L.circle(centerLL, {
+          color: '#888888', weight: 2, fillColor: '#666666', fillOpacity: 0.25, radius,
+        }).addTo(map);
+      }
+
+      buildCircleEditingMarkers(p.center, radius);
+
+      if (!hasAutoFitted) {
+        hasAutoFitted = true;
+        try { map.fitBounds((shapeLayer as L.Circle).getBounds(), { padding: [80, 80], maxZoom: 18 }); } catch {}
+      }
+
+      const segments = generateCircleStepped(p as CirclePatternParams);
+      buildPreviewPath(segments);
+
+    } else if (shape === 'spiral') {
+      // Spiral not yet implemented — show a dashed circle outline as placeholder
+      const radius = p.radius ?? 200;
+      if (shapeLayer instanceof L.Circle) {
+        shapeLayer.setLatLng(centerLL);
+        shapeLayer.setRadius(radius);
+      } else {
+        if (shapeLayer) { try { map.removeLayer(shapeLayer); } catch {} shapeLayer = undefined; }
+        shapeLayer = L.circle(centerLL, {
+          color: '#888888', weight: 1, fillColor: '#444', fillOpacity: 0.15,
+          radius, dashArray: '6 4',
+        }).addTo(map);
+      }
+
+      if (!hasAutoFitted) {
+        hasAutoFitted = true;
+        try { map.fitBounds((shapeLayer as L.Circle).getBounds(), { padding: [80, 80], maxZoom: 18 }); } catch {}
+      }
 
     } else {
+      // Polygon and others: pentagon placeholder
       clearShapeLines();
       const size = 0.002;
       const pts: [number, number][] = [];
@@ -273,21 +396,17 @@
         const a = (i / 5) * Math.PI * 2 - Math.PI / 2;
         pts.push([p.center.lat + size * Math.cos(a), p.center.lng + size * Math.sin(a) * 0.6]);
       }
-      shapeLatLngs = pts;
-      shapeLayer = L.polygon(shapeLatLngs, {
+      shapeLayer = L.polygon(pts, {
         color: '#888888', weight: 2, fillColor: '#666666', fillOpacity: 0.25, dashArray: '4 2'
       }).addTo(map);
-    }
 
-    if (!hasAutoFitted) {
-      hasAutoFitted = true;
-      if (shapeLatLngs.length >= 3) {
-        try { map.fitBounds(L.latLngBounds(shapeLatLngs), { padding: [80, 80], maxZoom: 18 }); } catch {}
-      } else { map.panTo(centerLL); if (map.getZoom() < 15) map.setZoom(15); }
+      if (!hasAutoFitted) {
+        hasAutoFitted = true;
+        map.panTo(centerLL); if (map.getZoom() < 15) map.setZoom(15);
+      }
     }
   }
 
-  /** Sync drag without reactivity — only marker + polygon positions, and path during drag */
   function syncDragPreview() {
     const config = activeSurveyPattern.config;
     if (!activeSurveyPattern.isActive || !config) return;
@@ -295,31 +414,40 @@
     if (!p.center) return;
 
     if (config.shape === 'rectangle' || config.shape === 'rectangle-lawnmower') {
-      // Use temp values if available (during drag), else store values
       const center = _dragTemp.center || p.center;
       const length = _dragTemp.length ?? p.length ?? 400;
-      const width = _dragTemp.width ?? p.width ?? 200;
+      const width  = _dragTemp.width  ?? p.width  ?? 200;
 
-      const { corners } = computeRectangleCorners(
-        center, length, width, p.shapeOrientation ?? 0
-      );
+      const { corners } = computeRectangleCorners(center, length, width, p.shapeOrientation ?? 0);
       const shapeLL = corners.map(c => [c.lat, c.lng] as [number, number]);
       if (centerMarker) centerMarker.setLatLng([center.lat, center.lng]);
       corners.forEach((c, i) => cornerMarkers[i]?.setLatLng([c.lat, c.lng]));
-      if (shapeLayer) shapeLayer.setLatLngs(shapeLL);
+      if (shapeLayer instanceof L.Polygon) shapeLayer.setLatLngs(shapeLL);
 
-      // Rebuild path during drag
-      const dragParams = { ...p, center: _dragTemp.center || p.center, length: _dragTemp.length ?? p.length ?? 400, width: _dragTemp.width ?? p.width ?? 200 };
+      const dragParams = { ...p, center, length, width };
       const segments = (config.shape === 'rectangle-lawnmower')
         ? generateRectangleLawnmower(dragParams)
         : generateRectangleZigzag(dragParams);
       buildPreviewPath(segments);
+
+    } else if (config.shape === 'circle') {
+      const center: LngLat = _circleDragTemp.center ?? p.center;
+      const radius = _circleDragTemp.radius ?? (p.radius ?? 200);
+      const centerLL: L.LatLngExpression = [center.lat, center.lng];
+
+      if (shapeLayer instanceof L.Circle) {
+        shapeLayer.setLatLng(centerLL);
+        shapeLayer.setRadius(radius);
+      }
+      if (centerMarkerCircle) centerMarkerCircle.setLatLng(centerLL);
+      const radiusLL: L.LatLngExpression = [center.lat + radius / 111320, center.lng];
+      if (radiusMarker) radiusMarker.setLatLng(radiusLL);
+
+      const dragParams: CirclePatternParams = { ...p, center, radius };
+      const segments = generateCircleStepped(dragParams);
+      buildPreviewPath(segments);
     }
   }
-
-  // ══════════════════════════════════════════════════════
-  //  REACTIVITY
-  // ══════════════════════════════════════════════════════
 
   // Plain let — not reactive itself; only used to detect shape transitions inside the effect.
   let prevShape: string | undefined;
@@ -341,7 +469,8 @@
 
     // Subscribe to all params so the effect re-runs on any param change.
     // Use ?? 0 for shape-specific props absent on other shapes (e.g. circle has no length/width).
-    const _trigger = (p.length ?? 0) + (p.width ?? 0) + p.shapeOrientation + p.targetLineSpacing
+    const _trigger = (p.length ?? 0) + (p.width ?? 0) + (p.radius ?? 0) + (p.ringPoints ?? 0)
+      + p.shapeOrientation + p.targetLineSpacing
       + p.turnDistance + (p.reverse ? 1 : 0) + (p.clockwise ? 1 : 0) + p.startCorner
       + (p.trackOrientationEnabled ? 1 : 0) + p.trackOrientation
       + p.userActionStartFlags + p.userActionTrackFlags + p.userActionEndFlags

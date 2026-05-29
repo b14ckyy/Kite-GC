@@ -370,8 +370,11 @@
     "shapeRectangleLawnmower": "Rectangle Lawnmower",
     "shapePolygon": "Polygon",
     "shapePolygonLawnmower": "Polygon Lawnmower",
-    "shapeCircle": "Circle",
+    "shapeCircle": "Circle (Stepped)",
     "shapeSpiral": "Spiral",
+    "radius": "Radius (m)",
+    "ringPoints": "Ring Points",
+    "ringStartAngle": "Start Angle (°)",
     "loading": "Loading Pattern Editor...",
     "error": "Error loading Pattern Editor: {error}"
   },

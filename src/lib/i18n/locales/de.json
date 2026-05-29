@@ -368,8 +368,11 @@
     "shapeRectangleLawnmower": "Rechteck-Mäher",
     "shapePolygon": "Polygon",
     "shapePolygonLawnmower": "Polygon-Mäher",
-    "shapeCircle": "Kreis",
+    "shapeCircle": "Kreis (Ringe)",
     "shapeSpiral": "Spirale",
+    "radius": "Radius (m)",
+    "ringPoints": "Ring-Punkte",
+    "ringStartAngle": "Startwinkel (°)",
     "loading": "Lade Pattern-Editor...",
     "error": "Fehler beim Laden des Pattern-Editors: {error}"
   },

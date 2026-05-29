@@ -35,6 +35,7 @@ export interface RectanglePatternParams extends BasePatternParams {
 export interface CirclePatternParams extends BasePatternParams {
   center: LngLat;
   radius: number;             // meters
+  ringPoints: number;         // max waypoints per ring (auto-reduced for small inner rings)
 }
 
 export interface PolygonPatternParams extends BasePatternParams {
@@ -58,6 +59,10 @@ export interface SavedSurveyPattern {
   version: number;
   config: SurveyPatternConfig;
 }
+
+// Preserved params per shape family — survives shape-family switches within a session.
+// Keyed by family: 'rect' (rectangle / rectangle-lawnmower) | 'circle' (circle / spiral)
+const _paramsCache: Partial<Record<'rect' | 'circle', any>> = {};
 
 // Current active pattern being edited (null when not in pattern mode)
 export const activeSurveyPattern = $state<{
@@ -114,54 +119,63 @@ export function switchShape(newShape: SurveyShape) {
   const current = activeSurveyPattern.config;
   if (!current) return;
 
-  const isRect = (s: SurveyShape) => s === 'rectangle' || s === 'rectangle-lawnmower';
+  const isRect   = (s: SurveyShape) => s === 'rectangle' || s === 'rectangle-lawnmower';
+  const isCircle = (s: SurveyShape) => s === 'circle'    || s === 'spiral';
+  const familyOf = (s: SurveyShape): 'rect' | 'circle' | null =>
+    isRect(s) ? 'rect' : isCircle(s) ? 'circle' : null;
 
-  if (isRect(current.shape) && isRect(newShape)) {
-    // Same param family — just rename
+  const currentFamily = familyOf(current.shape);
+  const newFamily     = familyOf(newShape);
+
+  if (currentFamily === newFamily && currentFamily !== null) {
+    // Same family (rect↔rect-lawnmower or circle↔spiral) — just rename
     activeSurveyPattern.config = { ...current, shape: newShape } as any;
     return;
   }
 
-  // Different family: preserve center + base params, apply shape-specific geometry defaults
+  // Save current params to cache before switching family
+  if (currentFamily) _paramsCache[currentFamily] = current.params;
+
   const base = current.params as any;
   const center: LngLat = 'center' in base ? base.center : { lat: 48.0, lng: 11.0 };
-  const commonBase = {
-    shapeOrientation:          base.shapeOrientation          ?? 90,
-    baseAltitude:              base.baseAltitude              ?? 50,
-    baseSpeed:                 base.baseSpeed                 ?? 15,
-    targetLineSpacing:         base.targetLineSpacing         ?? 50,
-    actualLineSpacing:         base.actualLineSpacing         ?? 50,
-    turnDistance:              base.turnDistance              ?? 0,
-    reverse:                   base.reverse                   ?? false,
-    clockwise:                 base.clockwise                 ?? true,
-    startCorner:               base.startCorner               ?? 1,
-    trackOrientationEnabled:   base.trackOrientationEnabled   ?? false,
-    trackOrientation:          base.trackOrientation          ?? 0,
-    altMode:                   base.altMode                   ?? 'relative' as AltMode,
-    userActionLineStartFlags:  base.userActionLineStartFlags  ?? 0,
-    userActionLineEndFlags:    base.userActionLineEndFlags    ?? 0,
-    userActionStartFlags:      base.userActionStartFlags      ?? 0,
-    userActionTrackFlags:      base.userActionTrackFlags      ?? 0,
-    userActionEndFlags:        base.userActionEndFlags        ?? 0,
-  };
 
   if (isRect(newShape)) {
+    // Restore cached rect params if available, else build defaults
+    const cached = _paramsCache['rect'];
     activeSurveyPattern.config = {
       shape: newShape,
-      params: {
-        ...commonBase,
-        center,
-        length: 400,
-        width:  200,
-        shapeOrientation: 90,
-      } as RectanglePatternParams,
+      params: cached
+        ? { ...cached, center }
+        : {
+            center, length: 400, width: 200, shapeOrientation: 90,
+            baseAltitude: 50, baseSpeed: 15, targetLineSpacing: 50, actualLineSpacing: 50,
+            turnDistance: 0, reverse: false, clockwise: true, startCorner: 1,
+            trackOrientationEnabled: false, trackOrientation: 0, altMode: 'relative' as AltMode,
+            userActionLineStartFlags: 0, userActionLineEndFlags: 0,
+            userActionStartFlags: 0, userActionTrackFlags: 0, userActionEndFlags: 0,
+          } as RectanglePatternParams,
+    } as any;
+  } else if (isCircle(newShape)) {
+    // Restore cached circle params if available, else build defaults
+    const cached = _paramsCache['circle'];
+    activeSurveyPattern.config = {
+      shape: newShape,
+      params: cached
+        ? { ...cached, center }
+        : {
+            center, radius: 200, ringPoints: 10, shapeOrientation: 0, trackOrientation: 0,
+            baseAltitude: 50, baseSpeed: 15, targetLineSpacing: 50, actualLineSpacing: 50,
+            turnDistance: 0, reverse: false, clockwise: true, startCorner: 1,
+            trackOrientationEnabled: false, altMode: 'relative' as AltMode,
+            userActionLineStartFlags: 0, userActionLineEndFlags: 0,
+            userActionStartFlags: 0, userActionTrackFlags: 0, userActionEndFlags: 0,
+          } as CirclePatternParams,
     } as any;
   } else {
-    // Not yet implemented (circle, spiral, polygon…) — store minimal valid params so
-    // the map layer can render the placeholder and the panel shows "not implemented".
+    // polygon, polygon-lawnmower, … — minimal params for placeholder rendering
     activeSurveyPattern.config = {
       shape: newShape,
-      params: { ...commonBase, center } as any,
+      params: { ...base, center } as any,
     } as any;
   }
 }
@@ -179,6 +193,30 @@ export function updateRectangleParams(updates: Partial<RectanglePatternParams>) 
   activeSurveyPattern.config = {
     ...activeSurveyPattern.config,
     params: { ...current, ...updates },
+  } as any;
+}
+
+export function updateCircleParams(updates: Partial<CirclePatternParams>) {
+  if (!activeSurveyPattern.config || !['circle', 'spiral'].includes(activeSurveyPattern.config.shape)) return;
+
+  const current = activeSurveyPattern.config.params as CirclePatternParams;
+  activeSurveyPattern.config = {
+    ...activeSurveyPattern.config,
+    params: { ...current, ...updates },
+  } as any;
+}
+
+/**
+ * Called from the map layer when the user drags the circle center or radius handle.
+ * Only affects circle / spiral shapes.
+ */
+export function applyCircleDragUpdate(update: Partial<CirclePatternParams>) {
+  if (!activeSurveyPattern.config || !['circle', 'spiral'].includes(activeSurveyPattern.config.shape)) return;
+
+  const current = activeSurveyPattern.config.params as CirclePatternParams;
+  activeSurveyPattern.config = {
+    ...activeSurveyPattern.config,
+    params: { ...current, ...update },
   } as any;
 }
 

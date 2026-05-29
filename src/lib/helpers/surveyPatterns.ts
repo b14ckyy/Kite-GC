@@ -1,4 +1,4 @@
-import type { RectanglePatternParams } from '$lib/stores/surveyPattern.svelte';
+import type { RectanglePatternParams, CirclePatternParams } from '$lib/stores/surveyPattern.svelte';
 
 /** Degrees, { lat, lng } pair */
 export interface LngLat {
@@ -203,6 +203,10 @@ export function generateRectangleZigzag(
   const scaleLng = 111320 * Math.cos((center.lat * Math.PI) / 180);
   const makeWp = (p: LngLat, flags: number): SurveyWaypoint => ({ ...p, alt: baseAltitude, speed: baseSpeed, altMode, userActionFlags: flags });
 
+  // Pre-compensate flags for reversal so they land on the correct waypoints after reverse()
+  const effLineStartFlags = reverse ? userActionLineEndFlags : userActionLineStartFlags;
+  const effLineEndFlags   = reverse ? userActionLineStartFlags : userActionLineEndFlags;
+
   for (let i = 0; i < trackNum; i++) {
     const offset = (trackNum === 1) ? 0 : startP + i * trackSpacing;
     const forward = (i % 2 === 0);
@@ -235,7 +239,7 @@ export function generateRectangleZigzag(
 
     segments.push({
       kind: 'survey',
-      points: [makeWp(clipped.start, userActionLineStartFlags), makeWp(extEnd, userActionLineEndFlags)],
+      points: [makeWp(clipped.start, effLineStartFlags), makeWp(extEnd, effLineEndFlags)],
     });
 
     // Turn track
@@ -295,6 +299,11 @@ function generateClassicZigzag(
     alt: baseAltitude, speed: baseSpeed, altMode, userActionFlags: flags,
   });
 
+  // When reversed, what will be the first point in flight order was originally the last —
+  // swap start/end flags so they end up on the correct waypoints after reversal.
+  const effStartFlags = rev ? lineEndFlags  : lineStartFlags;
+  const effEndFlags   = rev ? lineStartFlags : lineEndFlags;
+
   const segments: SurveyPathSegment[] = [];
 
   for (let i = 0; i < numTracks; i++) {
@@ -317,10 +326,9 @@ function generateClassicZigzag(
       y: innerEnd.y + (forward ? turnDist : -turnDist) * along.y,
     };
 
-    // Survey track: start gets lineStartFlags, end gets lineEndFlags
     segments.push({
       kind: 'survey',
-      points: [makeWp(innerStart.x, innerStart.y, lineStartFlags), makeWp(extEnd.x, extEnd.y, lineEndFlags)],
+      points: [makeWp(innerStart.x, innerStart.y, effStartFlags), makeWp(extEnd.x, extEnd.y, effEndFlags)],
     });
 
     if (i < numTracks - 1) {
@@ -464,17 +472,13 @@ export function generateRectangleLawnmower(
 
       if (allPts.length < 2) return [];
 
-  // Apply user action flags: start → first WP, track → interior WPs, end → last WP
-  const totalWp = allPts.length;
-  if (totalWp >= 1) allPts[0].flags = userActionStartFlags;
-  if (totalWp >= 2) allPts[totalWp - 1].flags = userActionEndFlags;
-  for (let i = 1; i < totalWp - 1; i++) {
-    allPts[i].flags = userActionTrackFlags;
-  }
+  if (reverse) allPts.reverse();
 
-  if (reverse) {
-    allPts.reverse();
-  }
+  // Apply user action flags in final flight order (after reverse)
+  const totalWp = allPts.length;
+  allPts[0].flags = userActionStartFlags;
+  allPts[totalWp - 1].flags = userActionEndFlags;
+  for (let i = 1; i < totalWp - 1; i++) allPts[i].flags = userActionTrackFlags;
 
   const segments: SurveyPathSegment[] = [];
   segments.push({
@@ -515,6 +519,103 @@ export function updateRectangleFromDraggedCenter(
 ): Partial<RectanglePatternParams> {
   return { center: { ...newCenter } };
 }
+
+// ──────────────────────────────────────────────────────
+//  CIRCLE STEPPED PATTERN
+// ──────────────────────────────────────────────────────
+
+/**
+ * Generate a stepped-circle (concentric rings) survey pattern.
+ *
+ * Rings are spaced by `targetLineSpacing` from the outermost ring (radius) inward.
+ * Each ring uses up to `ringPoints` waypoints distributed evenly around the circle.
+ * For small inner rings the point count is auto-reduced so no arc segment is shorter
+ * than `targetLineSpacing`.
+ *
+ * `trackOrientation` sets the compass bearing (0 = North, CW) of the first waypoint
+ * on every ring. `clockwise` controls the orbit direction. `reverse` flips
+ * outside→inside to inside→outside.
+ *
+ * User action flags: `userActionStartFlags` on the very first WP,
+ * `userActionEndFlags` on the very last WP, `userActionTrackFlags` on all others.
+ */
+export function generateCircleStepped(
+  params: CirclePatternParams
+): SurveyPathSegment[] {
+  const {
+    center, radius, baseAltitude, baseSpeed,
+    targetLineSpacing, reverse = false, clockwise = true,
+    altMode = 'relative',
+    trackOrientation = 0,
+    ringPoints = 10,
+    userActionStartFlags = 0,
+    userActionTrackFlags = 0,
+    userActionEndFlags = 0,
+  } = params;
+
+  if (radius <= 0 || targetLineSpacing <= 0) return [];
+
+  // Coordinate scale: 1 metre → lat/lng increment
+  const scaleLat = 111320;
+  const scaleLng = 111320 * Math.cos((center.lat * Math.PI) / 180);
+
+  // Place a point on a ring at a given mathematical angle (0 = East, CCW positive)
+  const toWorld = (r: number, angleRad: number): LngLat => ({
+    lat: center.lat + (r * Math.sin(angleRad)) / scaleLat,
+    lng: center.lng + (r * Math.cos(angleRad)) / scaleLng,
+  });
+
+  const makeWp = (p: LngLat, flags: number): SurveyWaypoint => ({
+    ...p, alt: baseAltitude, speed: baseSpeed, altMode, userActionFlags: flags,
+  });
+
+  // Convert compass bearing (0 = North, CW) → math angle (0 = East, CCW)
+  const startAngle = (Math.PI / 2) - (trackOrientation * Math.PI) / 180;
+  // CW flight = decreasing math angle; CCW = increasing
+  const direction = clockwise ? -1 : 1;
+
+  const numRings = Math.max(1, Math.ceil(radius / targetLineSpacing));
+  const allPts: Array<{ pt: LngLat; flags: number }> = [];
+
+  for (let ring = 0; ring < numRings; ring++) {
+    const ringRadius = radius - ring * targetLineSpacing;
+    if (ringRadius <= 0) break;
+
+    const circumference = 2 * Math.PI * ringRadius;
+    let numPts = ringPoints;
+    // Reduce until arc distance between consecutive points >= targetLineSpacing
+    while (numPts > 3 && circumference / numPts < targetLineSpacing) {
+      numPts--;
+    }
+
+    // If the minimum of 3 points still produces arcs shorter than the spacing,
+    // the circle is too small to continue — add a single center point and stop.
+    if (circumference / numPts < targetLineSpacing) {
+      allPts.push({ pt: center, flags: 0 });
+      break;
+    }
+
+    const angleStep = (2 * Math.PI) / numPts;
+    for (let i = 0; i < numPts; i++) {
+      const angle = startAngle + direction * i * angleStep;
+      allPts.push({ pt: toWorld(ringRadius, angle), flags: 0 });
+    }
+  }
+
+  if (allPts.length < 2) return [];
+
+  if (reverse) allPts.reverse();
+
+  // Assign user action flags in final flight order (after reverse)
+  const total = allPts.length;
+  allPts[0].flags = userActionStartFlags;
+  allPts[total - 1].flags = userActionEndFlags;
+  for (let i = 1; i < total - 1; i++) allPts[i].flags = userActionTrackFlags;
+
+  return [{ kind: 'survey', points: allPts.map(p => makeWp(p.pt, p.flags)) }];
+}
+
+// ──────────────────────────────────────────────────────
 
 /** Simple bounding box helper */
 export function getRectangleBounds(corners: LngLat[]) {

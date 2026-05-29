@@ -5,10 +5,18 @@
     exitPatternMode,
     switchShape,
     updateRectangleParams,
+    updateCircleParams,
     type RectanglePatternParams,
+    type CirclePatternParams,
   } from '$lib/stores/surveyPattern.svelte';
   import { get } from 'svelte/store';
-  import { computeRectangleCorners, generateRectangleZigzag, generateRectangleLawnmower, type SurveyWaypoint } from '$lib/helpers/surveyPatterns';
+  import {
+    computeRectangleCorners,
+    generateRectangleZigzag,
+    generateRectangleLawnmower,
+    generateCircleStepped,
+    type SurveyWaypoint,
+  } from '$lib/helpers/surveyPatterns';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
@@ -28,7 +36,7 @@
   }
   let { ongenerate }: Props = $props();
 
-  // Local reactive copy for rectangle shapes
+  // ── Rectangle state ───────────────────────────────────
   let rectangleParams = $state<RectanglePatternParams>({
     center: { lat: 0, lng: 0 },
     length: 400,
@@ -52,6 +60,30 @@
         userActionEndFlags: 0,
   });
 
+  // ── Circle state ──────────────────────────────────────
+  let circleParams = $state<CirclePatternParams>({
+    center: { lat: 0, lng: 0 },
+    radius: 200,
+    ringPoints: 10,
+    shapeOrientation: 0,
+    baseAltitude: 50,
+    baseSpeed: 15,
+    targetLineSpacing: 50,
+    actualLineSpacing: 50,
+    turnDistance: 0,
+    reverse: false,
+    clockwise: true,
+    startCorner: 1,
+    trackOrientationEnabled: false,
+    trackOrientation: 0,
+    altMode: 'relative',
+    userActionLineStartFlags: 0,
+    userActionLineEndFlags: 0,
+    userActionStartFlags: 0,
+    userActionTrackFlags: 0,
+    userActionEndFlags: 0,
+  });
+
   // Full list of supported shapes (visualization for non-Rectangle comes progressively)
   const availableShapes = [
     { value: 'rectangle', label: $t('survey.shapeRectangle') },
@@ -65,6 +97,12 @@
   function handleParamChange() {
     if (activeSurveyPattern.config && ['rectangle', 'rectangle-lawnmower'].includes(activeSurveyPattern.config.shape)) {
       updateRectangleParams(rectangleParams);
+    }
+  }
+
+  function handleCircleParamChange() {
+    if (activeSurveyPattern.config && ['circle', 'spiral'].includes(activeSurveyPattern.config.shape)) {
+      updateCircleParams(circleParams);
     }
   }
 
@@ -104,6 +142,14 @@
         }
       }
       wps = surveyPoints;
+    } else if (cfg.shape === 'circle') {
+      const p = cfg.params as CirclePatternParams;
+      const segments = generateCircleStepped(p);
+      for (const seg of segments) {
+        if (seg.kind === 'survey') {
+          for (const pt of seg.points) wps.push(pt);
+        }
+      }
     } else {
       // Other shapes: placeholder for now (will be implemented in later phases)
       console.log('[Pattern] Generation for', cfg.shape, 'not yet implemented — using empty set');
@@ -176,6 +222,24 @@
         _syncing = true;
         updateRectangleParams({ length: rounded.length, width: rounded.width });
         _syncing = false;
+      }
+    }
+  });
+
+  // Sync circle params from store → local state (e.g. on enter or after map drag)
+  let _syncingCircle = false;
+  $effect(() => {
+    if (activeSurveyPattern.config && ['circle', 'spiral'].includes(activeSurveyPattern.config.shape)) {
+      const raw = activeSurveyPattern.config.params as CirclePatternParams;
+      const rounded = {
+        ...raw,
+        radius: Math.round(raw.radius * 10) / 10,
+      };
+      circleParams = rounded;
+      if (!_syncingCircle && rounded.radius !== raw.radius) {
+        _syncingCircle = true;
+        updateCircleParams({ radius: rounded.radius });
+        _syncingCircle = false;
       }
     }
   });
@@ -337,6 +401,88 @@
           </div>
         </div>
       {/if}
+    {:else if activeSurveyPattern.config?.shape === 'circle'}
+
+      <!-- Radius + Ring Points -->
+      <div class="param-row">
+        <NumberStepper label={$t('survey.radius')} bind:value={circleParams.radius} min={10} step={10} decimals={1} onchange={handleCircleParamChange} />
+        <NumberStepper label={$t('survey.ringPoints')} bind:value={circleParams.ringPoints} min={4} max={100} step={1} decimals={0} onchange={handleCircleParamChange} />
+      </div>
+
+      <!-- Line Spacing + Ring Start Angle -->
+      <div class="param-row">
+        <div class="spacing-wrapper">
+          <NumberStepper label={$t('survey.lineSpacing')} bind:value={circleParams.targetLineSpacing} min={5} step={5} decimals={0} onchange={handleCircleParamChange} />
+        </div>
+        <NumberStepper label={$t('survey.ringStartAngle')} bind:value={circleParams.trackOrientation} min={0} max={359} step={5} decimals={0} onchange={handleCircleParamChange} />
+      </div>
+
+      <!-- Direction + Reverse -->
+      <div class="param-row">
+        <label class="toggle-row">
+          <input type="checkbox" bind:checked={circleParams.clockwise} onchange={handleCircleParamChange} />
+          <span>{circleParams.clockwise ? $t('survey.clockwise') : $t('survey.counterClockwise')}</span>
+        </label>
+        <label class="toggle-row">
+          <input type="checkbox" bind:checked={circleParams.reverse} onchange={handleCircleParamChange} />
+          <span>{$t('survey.reverse')}</span>
+        </label>
+      </div>
+
+      <!-- Base Altitude + Base Speed -->
+      <div class="param-row">
+        <NumberStepper label={$t('survey.baseAlt')} bind:value={circleParams.baseAltitude} min={0} step={5} decimals={0} onchange={handleCircleParamChange} />
+        <NumberStepper label={$t('survey.baseSpeed')} bind:value={circleParams.baseSpeed} min={1} step={1} decimals={0} onchange={handleCircleParamChange} />
+      </div>
+
+      <!-- Altitude Type -->
+      <div class="param-row alt-type-row">
+        <label class="alt-type-label">{$t('survey.altMode')}</label>
+        <select class="alt-type-select" bind:value={circleParams.altMode} onchange={handleCircleParamChange}>
+          <option value="relative">{$t('survey.altModeRelative')}</option>
+          <option value="amsl">{$t('survey.altModeAmsl')}</option>
+          <option value="ground" disabled>{$t('survey.altModeGround')} — {$t('survey.comingSoon')}</option>
+        </select>
+      </div>
+
+      <!-- User Action Triggers: Start / Track / End -->
+      <div class="section-label">{$t('survey.userActionTrigger')}</div>
+      <div class="ua-grid">
+        <div class="ua-col">
+          <div class="ua-col-label">Start</div>
+          <div class="ua-checks">
+            {#each [1,2,3,4] as n}
+              <label class="ua-check-item">
+                <input type="checkbox" checked={!!(circleParams.userActionStartFlags & (1 << (n-1)))} onchange={() => { circleParams.userActionStartFlags ^= (1 << (n-1)); handleCircleParamChange(); }} />
+                <span>{n}</span>
+              </label>
+            {/each}
+          </div>
+        </div>
+        <div class="ua-col">
+          <div class="ua-col-label">Track</div>
+          <div class="ua-checks">
+            {#each [1,2,3,4] as n}
+              <label class="ua-check-item">
+                <input type="checkbox" checked={!!(circleParams.userActionTrackFlags & (1 << (n-1)))} onchange={() => { circleParams.userActionTrackFlags ^= (1 << (n-1)); handleCircleParamChange(); }} />
+                <span>{n}</span>
+              </label>
+            {/each}
+          </div>
+        </div>
+        <div class="ua-col">
+          <div class="ua-col-label">End</div>
+          <div class="ua-checks">
+            {#each [1,2,3,4] as n}
+              <label class="ua-check-item">
+                <input type="checkbox" checked={!!(circleParams.userActionEndFlags & (1 << (n-1)))} onchange={() => { circleParams.userActionEndFlags ^= (1 << (n-1)); handleCircleParamChange(); }} />
+                <span>{n}</span>
+              </label>
+            {/each}
+          </div>
+        </div>
+      </div>
+
     {:else}
       <div class="not-implemented">
         {@html _t('survey.notImplemented', { shape: activeSurveyPattern.config?.shape ?? '?' })}
