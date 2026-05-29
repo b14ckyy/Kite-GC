@@ -132,9 +132,9 @@ Line-of-sight / radio-horizon analysis along the route (à la MWPTools): detect 
 
 ## 4. Implementation order (summary)
 
-1. **Shared elevation provider** (foundation)
-2. **AGL waypoints** — single WP altitude option + enable pattern `ground`/AGL placeholder
-3. **Terrain clearance validation** — profile popup
+1. ✅ **Shared elevation provider** (foundation) — Copernicus GLO-30, Rust backend, validated
+2. ✅ **AGL waypoints** — WP editor alt-mode (REL/AMSL/AGL) with terrain conversion, survey-pattern `ground`/AGL, export AGL→AMSL, launch point + `<mwp>` persistence. Validated against INAV Configurator terrain analysis.
+3. **Terrain clearance validation** — profile popup *(next)*
 4. **AGL widget** — mini profile, live
 5. **LOS analysis** — deferred, low priority
 

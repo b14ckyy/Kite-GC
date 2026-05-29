@@ -1133,5 +1133,44 @@ Contour-offset coverage of an arbitrary (concave) polygon. The pinch-off/island 
 
 ---
 
+## ADR-026: Terrain Elevation Provider & AGL Waypoints
+
+**Date**: 2026-05-30
+**Status**: Accepted
+
+**Context**: Mission planning needs terrain elevation for four features: AGL waypoint planning, terrain clearance validation, a live AGL widget, and LOS analysis. The 3D map already uses Cesium World Terrain, but that is ellipsoid-referenced (needs a geoid-undulation hack), online/token-gated, and visual-only. The 2D/planning path needs an accurate, offline-capable, MSL-referenced source and a clean sampling abstraction.
+
+### Part A — Elevation source & provider
+
+**Decision**: **Copernicus DEM GLO-30** via AWS Open Data (`copernicus-dem-30m`, Cloud Optimized GeoTIFF, 1°×1° tiles, no API key), sampled by a **Rust backend** module (`src-tauri/src/terrain/`).
+
+**Rationale**:
+- Chosen over SRTM / Mapzen-Terrarium: ~±4 m vs ~±9 m RMSE, global coverage **including > 60°N** (SRTM/Terrarium have none), and **geoid-referenced (EGM2008 ≈ MSL)**.
+- Geoid ≈ MSL means GLO-30 elevation, GPS altitude, and INAV AMSL waypoints are directly comparable — **no geoid conversion** (the key simplification vs Cesium's ellipsoid terrain).
+- Backend (not frontend): GeoTIFF parsing + tile cache fit Rust; one provider serves multiple frontend features without IPC duplication.
+
+**Implementation**: `tile_name(lat,lon)` → HTTPS fetch → disk cache (portable-aware) → `tiff`-crate decode (Float32, DEFLATE, floating-point predictor; geo-transform from `ModelPixelScale`/`ModelTiepoint`) → in-memory LRU (4 tiles) → bilinear sample. **CPU decode + 42 MB disk I/O run on `spawn_blocking`** so the async runtime is never stalled (critical on weak hardware); tile loads are serialized + cache-rechecked via an async lock to coalesce concurrent requests. Commands: `terrain_elevation`, `terrain_profile`.
+
+**Follow-up**: full-tile decode is multi-second on weak hardware. The planned optimization is **COG partial reads** — HTTP range requests + per-chunk decode of only the blocks covering the queried points — turning multi-second decodes into sub-100 ms.
+
+### Part B — AGL waypoints
+
+**Context**: INAV waypoints encode only REL (p3 bit0=0) or AMSL (p3 bit0=1) — there is **no AGL flag** (verified against INAV docs and mwp). AGL must therefore be a GCS-only authoring concept.
+
+**Decision**: Add `alt_mode` (0=REL, 1=AMSL, 2=AGL) to the backend `Waypoint`; **resolve AGL → AMSL at export** using the terrain provider.
+
+- `alt_mode` is authoritative for the GCS; for REL/AMSL it mirrors p3 bit0 (derived from p3 on MSP/XML decode). AGL holds an above-ground value in `altitude`.
+- **Export resolution** (`resolve_agl`, async): for each AGL waypoint, `AMSL = terrain(lat,lon) + AGL`, set p3 bit0=1. Applied in `mission_save_file` / `mission_export_xml` / `mission_upload` before serialization/upload. **Not round-trippable** — a loaded/downloaded mission returns as AMSL.
+- **Editor**: the alt-mode toggle cycles REL→AMSL→AGL and converts the value (via terrain + the launch point) so the physical height is preserved. Survey patterns expose AGL via the `ground` option.
+- **Why export-time, backend-side**: terrain is async and lives in the backend; keeping the conversion at the export boundary avoids per-edit terrain calls in the serializer and keeps the stored mission in the user's chosen mode.
+
+### Part C — Launch / home reference
+
+A planning-time launch point (frontend `launchPoint` store) is the home-altitude reference for REL↔AGL conversion and (future) REL-mission clearance. Auto-placed on entering edit mode (FC home → first geo-WP → map center), shown as an always-visible draggable marker with a connector to the first waypoint. **Persisted in the `.mission` file** via the mwp-compatible `<mwp home-x="lon" home-y="lat">` meta element (`Mission.home`): written on save/export, parsed on load/import (overriding the current launch point). Other tools (INAV Configurator) ignore the element and read only `<missionitem>`, so this stays inter-app compatible.
+
+**Validation**: an AGL survey pattern exported to `.mission`, loaded into INAV Configurator, showed consistent terrain-relative altitude across all waypoints in its terrain analysis.
+
+---
+
 *End of Architecture Decision Records*
 

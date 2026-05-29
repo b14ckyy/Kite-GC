@@ -495,7 +495,7 @@ This document tracks planned features, organized by milestone.
 
 Cross-cutting groundwork items. Each carries non-trivial architectural or design weight — major considerations noted inline.
 
-- [ ] **Local terrain elevation provider (2D map & planning)** — see dedicated subsection below
+- [x] **Local terrain elevation provider (2D map & planning)** — implemented; see dedicated subsection below
   - _Decision_: **Copernicus DEM GLO-30** (free, no API key, AWS Open Data GeoTIFF). Chosen over SRTM/Terrarium: ~±4 m RMSE vs ~±9 m, global coverage incl. > 60°N (SRTM/Terrarium have none), and geoid-referenced (EGM2008 ≈ MSL) — matches our MSL waypoint/altitude pipeline with no geoid model needed. Terrarium PNG tiles were the elegant runner-up but are SRTM-grade globally.
   - _Major considerations_: point-sampling pipeline (fetch tile → decode → bilinear interpolate), region download for offline use, shared elevation abstraction for all four use cases below. Used **locally only** — for visualization/validation, independent of any onboard FC terrain (INAV 10 will add onboard SRTM1, irrelevant to us).
 - [ ] **3D map (Cesium) stays as-is for now** — keep Cesium World Terrain; tile-resolution quirks and other 3D refinements tracked separately under Milestone 7.
@@ -514,9 +514,11 @@ Cross-cutting groundwork items. Each carries non-trivial architectural or design
 
 Source: **Copernicus DEM GLO-30** (geoid/EGM2008 ≈ MSL, no API key, offline-capable). Local use only — no dependency on onboard FC terrain. Shared elevation-sampling abstraction feeds all four features:
 
-- [ ] Elevation provider: tile fetch + decode + bilinear sampling, region download + cache for offline
-- [ ] **AGL waypoint planning** — edit waypoints as height-above-ground; transmitted to INAV as MSL (terrain elevation + AGL offset → MSL)
-- [ ] **Terrain clearance validation** — elevation profile along the planned mission with clearance check / warnings
+- [x] Elevation provider: Rust backend module, tile fetch → disk cache → GeoTIFF decode → bilinear sampling; `terrain_elevation` / `terrain_profile` commands (decode + I/O on `spawn_blocking`, loads coalesced)
+  - [ ] _follow-up:_ COG partial reads (HTTP range requests) + region pre-download for offline / weak-hardware latency
+- [x] **AGL waypoint planning** — `alt_mode` REL/AMSL/AGL on waypoints; editor toggle converts altitude via terrain + launch point; survey patterns support AGL; AGL resolved to AMSL on export (MSP/​.mission) — validated against INAV Configurator terrain analysis
+- [x] **Launch/home reference** — auto-placed, draggable map marker + connector to first WP; persisted in `.mission` via mwp-compatible `<mwp home-x/home-y>` meta (round-trips, inter-app compatible)
+- [ ] **Terrain clearance validation** — elevation profile along the planned mission with clearance check / warnings (next)
 - [ ] **Live AGL widget** — in-flight above-ground-level from GPS MSL altitude minus terrain elevation at current position
 - [ ] **LOS (line-of-sight) analysis** for waypoint missions — terrain occlusion / radio horizon along the route, à la MWPTools
 

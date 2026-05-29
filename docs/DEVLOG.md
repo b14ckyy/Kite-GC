@@ -610,3 +610,29 @@ Generators return `SurveyPathSegment[]`; `kind: 'survey'` points become waypoint
 
 - Polygon editing: independently draggable corners, midpoint-click insertion (max 50 verts), centroid drag moves the whole shape, right-click / drag-to-delete-zone removes a vertex (min 3). Self-intersection is rejected on drop (vertex reverts); live preview pauses while invalid.
 - `Map.svelte` renders `<SurveyPatternLayer>` unconditionally (it self-clears when inactive); `InavMissionLayer` blocks map-click WP placement while pattern mode is active.
+
+## Terrain Elevation & AGL Waypoints
+
+Local terrain elevation for mission planning. See [ARCHITECTURE.md](ARCHITECTURE.md) ADR-026 for the rationale; [TerrainFeatures.md](dev/TerrainFeatures.md) for the feature plan.
+
+### Elevation provider (`src-tauri/src/terrain/`)
+
+- **Source**: Copernicus DEM GLO-30 (AWS Open Data `copernicus-dem-30m`, Cloud Optimized GeoTIFF, 1°×1° tiles, Float32, EGM2008 geoid ≈ MSL, no API key).
+- **Flow**: `tile_name(lat,lon)` → HTTPS fetch → disk cache (portable-aware, `<data>/terrain/`) → `tiff`-crate decode (Float32, DEFLATE, floating-point predictor) → in-memory LRU (4 tiles) → bilinear sample. Geo-transform read from `ModelPixelScale`/`ModelTiepoint` tags.
+- **Runtime**: CPU decode + 42 MB disk I/O run on `spawn_blocking` (async workers never stalled); tile loads serialized + cache-rechecked via an async lock so concurrent requests coalesce.
+- **Commands**: `terrain_elevation(lat,lon) -> Option<f32>`, `terrain_profile(points, spacing_m) -> [{dist_m, lat, lon, elev_m}]`.
+- **Why geoid (≈MSL)**: GPS altitude, INAV AMSL waypoints, and GLO-30 are all ≈MSL → directly comparable, no geoid-undulation conversion (unlike Cesium's ellipsoid terrain).
+- **Follow-up**: COG partial reads (HTTP range requests + chunk decode) for weak-hardware latency — see TerrainFeatures.md.
+
+### AGL waypoints
+
+- INAV waypoints only encode REL (p3 bit0=0) or AMSL (p3 bit0=1) — there is **no AGL flag**. AGL is a GCS-only authoring mode.
+- `Waypoint.alt_mode` (0=REL, 1=AMSL, 2=AGL) added to the backend model; for REL/AMSL it mirrors p3 bit0, decoded from p3 on MSP/XML load.
+- **Editor**: the altitude toggle cycles REL→AMSL→AGL and converts the value via terrain + the launch point (so the physical height is preserved): value → absolute MSL → target mode.
+- **Survey patterns**: the `ground` altitude option = AGL; generated waypoints carry `alt_mode=AGL`.
+- **Export**: `resolve_agl()` converts AGL waypoints → AMSL (`AMSL = terrain(lat,lon) + AGL`, p3 bit0=1) in `mission_save_file` / `mission_export_xml` / `mission_upload` (async, before serialization/upload). Not round-trippable — a loaded/​downloaded mission returns as AMSL.
+
+### Launch / home reference
+
+- `launchPoint` store (`mission.ts`); auto-placed on entering edit mode (FC home → first geo-WP → map center), always-visible draggable map marker, orange dashed connector to the first waypoint.
+- Persisted in `.mission` via the mwp-compatible `<mwp home-x="lon" home-y="lat">` meta element (`Mission.home`): written on save/export, parsed on load/import (overrides the current launch point). Other tools (INAV Configurator) ignore the element and read only `<missionitem>`.
