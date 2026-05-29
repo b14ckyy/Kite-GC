@@ -15,6 +15,7 @@
     generateRectangleZigzag,
     generateRectangleLawnmower,
     generateCircleStepped,
+    generateSpiral,
     type SurveyWaypoint,
   } from '$lib/helpers/surveyPatterns';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
@@ -145,6 +146,14 @@
     } else if (cfg.shape === 'circle') {
       const p = cfg.params as CirclePatternParams;
       const segments = generateCircleStepped(p);
+      for (const seg of segments) {
+        if (seg.kind === 'survey') {
+          for (const pt of seg.points) wps.push(pt);
+        }
+      }
+    } else if (cfg.shape === 'spiral') {
+      const p = cfg.params as CirclePatternParams;
+      const segments = generateSpiral(p);
       for (const seg of segments) {
         if (seg.kind === 'survey') {
           for (const pt of seg.points) wps.push(pt);
@@ -401,7 +410,7 @@
           </div>
         </div>
       {/if}
-    {:else if activeSurveyPattern.config?.shape === 'circle'}
+    {:else if activeSurveyPattern.config?.shape === 'circle' || activeSurveyPattern.config?.shape === 'spiral'}
 
       <!-- Radius + Ring Points -->
       <div class="param-row">

@@ -616,6 +616,120 @@ export function generateCircleStepped(
 }
 
 // ──────────────────────────────────────────────────────
+//  SPIRAL PATTERN (Archimedean)
+// ──────────────────────────────────────────────────────
+
+/**
+ * Generate an Archimedean spiral survey pattern.
+ *
+ * The spiral winds inward from `radius` to the center. Radius decreases
+ * linearly with the total angle turned: r(θ) = radius - (θ/2π) × targetLineSpacing.
+ *
+ * **Outer phase** (arc ≥ targetLineSpacing): fixed angular step = 360°/ringPoints.
+ * Waypoints are evenly distributed on 360°, getting geometrically denser inward.
+ *
+ * **Inner phase** (arc < targetLineSpacing): angular step is widened to
+ * targetLineSpacing/r so every consecutive arc remains ≥ targetLineSpacing.
+ *
+ * **Stop condition**: the interior angle at the second-to-last waypoint
+ * (angle at P_{n-2} between vectors to P_{n-3} and P_{n-1}) drops below 45°,
+ * meaning the required turn exceeds 135° — impractical for fixed-wing UAVs.
+ *
+ * `trackOrientation` sets the compass bearing (0 = North, CW) of the first waypoint.
+ * `clockwise` controls inward winding direction. `reverse` flips to inside→out.
+ */
+export function generateSpiral(
+  params: CirclePatternParams
+): SurveyPathSegment[] {
+  const {
+    center, radius, baseAltitude, baseSpeed,
+    targetLineSpacing, reverse = false, clockwise = true,
+    altMode = 'relative',
+    trackOrientation = 0,
+    ringPoints = 10,
+    userActionStartFlags = 0,
+    userActionTrackFlags = 0,
+    userActionEndFlags = 0,
+  } = params;
+
+  if (radius <= 0 || targetLineSpacing <= 0) return [];
+
+  const scaleLat = 111320;
+  const scaleLng = 111320 * Math.cos((center.lat * Math.PI) / 180);
+
+  const toWorld = (r: number, angleRad: number): LngLat => ({
+    lat: center.lat + (r * Math.sin(angleRad)) / scaleLat,
+    lng: center.lng + (r * Math.cos(angleRad)) / scaleLng,
+  });
+
+  const makeWp = (p: LngLat, flags: number): SurveyWaypoint => ({
+    ...p, alt: baseAltitude, speed: baseSpeed, altMode, userActionFlags: flags,
+  });
+
+  // Convert compass bearing (0 = North, CW) → math angle (0 = East, CCW)
+  const startAngle = (Math.PI / 2) - (trackOrientation * Math.PI) / 180;
+  const direction = clockwise ? -1 : 1;  // CW = decreasing math angle
+
+  // Base angular step for the outer phase (e.g. 36° for ringPoints=10)
+  const baseAngleStep = (2 * Math.PI) / ringPoints;
+
+  const allPts: Array<{ pt: LngLat; flags: number }> = [];
+
+  let θ = startAngle;    // current math angle
+  let totalTurned = 0;   // cumulative angle (always positive, used for radius calc)
+
+  const STOP_ANGLE_DEG = 45;
+  const MAX_PTS = 10000;
+
+  for (let iter = 0; iter < MAX_PTS; iter++) {
+    const r = radius - (totalTurned / (2 * Math.PI)) * targetLineSpacing;
+    if (r <= 0) break;
+
+    allPts.push({ pt: toWorld(r, θ), flags: 0 });
+
+    // Stop condition: interior angle at the previous-to-last point < 45°
+    // i.e. the UAV would have to turn more than 135° — too sharp to be practical.
+    if (allPts.length >= 3) {
+      const n = allPts.length;
+      const pa = allPts[n - 3].pt;
+      const pb = allPts[n - 2].pt;
+      const pc = allPts[n - 1].pt;
+
+      const v1lat = pa.lat - pb.lat, v1lng = pa.lng - pb.lng;
+      const v2lat = pc.lat - pb.lat, v2lng = pc.lng - pb.lng;
+      const dot = v1lat * v2lat + v1lng * v2lng;
+      const l1 = Math.sqrt(v1lat ** 2 + v1lng ** 2);
+      const l2 = Math.sqrt(v2lat ** 2 + v2lng ** 2);
+      if (l1 > 0 && l2 > 0) {
+        const angleAtPb = Math.acos(Math.max(-1, Math.min(1, dot / (l1 * l2)))) * 180 / Math.PI;
+        if (angleAtPb < STOP_ANGLE_DEG) break;
+      }
+    }
+
+    // Compute next angular step
+    const arcAtBase = r * baseAngleStep;
+    const dθ = arcAtBase >= targetLineSpacing
+      ? baseAngleStep               // outer phase: fixed step
+      : targetLineSpacing / r;      // inner phase: widen step to maintain arc = lineSpacing
+
+    θ += direction * dθ;
+    totalTurned += dθ;
+  }
+
+  if (allPts.length < 2) return [];
+
+  if (reverse) allPts.reverse();
+
+  // Assign user action flags in final flight order (after reverse)
+  const total = allPts.length;
+  allPts[0].flags = userActionStartFlags;
+  allPts[total - 1].flags = userActionEndFlags;
+  for (let i = 1; i < total - 1; i++) allPts[i].flags = userActionTrackFlags;
+
+  return [{ kind: 'survey', points: allPts.map(p => makeWp(p.pt, p.flags)) }];
+}
+
+// ──────────────────────────────────────────────────────
 
 /** Simple bounding box helper */
 export function getRectangleBounds(corners: LngLat[]) {

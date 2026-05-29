@@ -11,6 +11,7 @@
     generateRectangleZigzag,
     generateRectangleLawnmower,
     generateCircleStepped,
+    generateSpiral,
     updateRectangleFromDraggedCenter,
     updateRectangleFromDraggedCorner,
     type SurveyPathSegment,
@@ -369,23 +370,27 @@
       buildPreviewPath(segments);
 
     } else if (shape === 'spiral') {
-      // Spiral not yet implemented — show a dashed circle outline as placeholder
       const radius = p.radius ?? 200;
+
       if (shapeLayer instanceof L.Circle) {
         shapeLayer.setLatLng(centerLL);
         shapeLayer.setRadius(radius);
       } else {
         if (shapeLayer) { try { map.removeLayer(shapeLayer); } catch {} shapeLayer = undefined; }
         shapeLayer = L.circle(centerLL, {
-          color: '#888888', weight: 1, fillColor: '#444', fillOpacity: 0.15,
-          radius, dashArray: '6 4',
+          color: '#888888', weight: 2, fillColor: '#666666', fillOpacity: 0.25, radius,
         }).addTo(map);
       }
+
+      buildCircleEditingMarkers(p.center, radius);
 
       if (!hasAutoFitted) {
         hasAutoFitted = true;
         try { map.fitBounds((shapeLayer as L.Circle).getBounds(), { padding: [80, 80], maxZoom: 18 }); } catch {}
       }
+
+      const segments = generateSpiral(p as CirclePatternParams);
+      buildPreviewPath(segments);
 
     } else {
       // Polygon and others: pentagon placeholder
@@ -430,7 +435,7 @@
         : generateRectangleZigzag(dragParams);
       buildPreviewPath(segments);
 
-    } else if (config.shape === 'circle') {
+    } else if (config.shape === 'circle' || config.shape === 'spiral') {
       const center: LngLat = _circleDragTemp.center ?? p.center;
       const radius = _circleDragTemp.radius ?? (p.radius ?? 200);
       const centerLL: L.LatLngExpression = [center.lat, center.lng];
@@ -444,7 +449,9 @@
       if (radiusMarker) radiusMarker.setLatLng(radiusLL);
 
       const dragParams: CirclePatternParams = { ...p, center, radius };
-      const segments = generateCircleStepped(dragParams);
+      const segments = config.shape === 'spiral'
+        ? generateSpiral(dragParams)
+        : generateCircleStepped(dragParams);
       buildPreviewPath(segments);
     }
   }
