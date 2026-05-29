@@ -1,4 +1,4 @@
-import type { RectanglePatternParams, CirclePatternParams } from '$lib/stores/surveyPattern.svelte';
+import type { RectanglePatternParams, CirclePatternParams, PolygonPatternParams } from '$lib/stores/surveyPattern.svelte';
 
 /** Degrees, { lat, lng } pair */
 export interface LngLat {
@@ -743,6 +743,260 @@ export function generateSpiral(
   for (let i = 1; i < total - 1; i++) allPts[i].flags = userActionTrackFlags;
 
   return [{ kind: 'survey', points: allPts.map(p => makeWp(p.pt, p.flags)) }];
+}
+
+// ──────────────────────────────────────────────────────
+
+// ──────────────────────────────────────────────────────
+//  POLYGON HELPERS
+// ──────────────────────────────────────────────────────
+
+/** Average of all vertex positions — used as centroid marker and coordinate origin. */
+export function polygonCentroid(points: LngLat[]): LngLat {
+  const n = points.length;
+  return {
+    lat: points.reduce((s, p) => s + p.lat, 0) / n,
+    lng: points.reduce((s, p) => s + p.lng, 0) / n,
+  };
+}
+
+/** True if any two non-adjacent polygon edges intersect (simple O(n²) check). */
+export function isPolygonSelfIntersecting(points: LngLat[]): boolean {
+  const n = points.length;
+  if (n < 4) return false; // triangle can't self-intersect
+
+  // Segment intersection test (excluding shared endpoints)
+  function cross2d(ax: number, ay: number, bx: number, by: number): number {
+    return ax * by - ay * bx;
+  }
+  function segsIntersect(p1: LngLat, p2: LngLat, p3: LngLat, p4: LngLat): boolean {
+    const d1x = p2.lng - p1.lng, d1y = p2.lat - p1.lat;
+    const d2x = p4.lng - p3.lng, d2y = p4.lat - p3.lat;
+    const denom = cross2d(d1x, d1y, d2x, d2y);
+    if (Math.abs(denom) < 1e-12) return false; // parallel
+    const dx = p3.lng - p1.lng, dy = p3.lat - p1.lat;
+    const t = cross2d(dx, dy, d2x, d2y) / denom;
+    const u = cross2d(dx, dy, d1x, d1y) / denom;
+    return t > 0 && t < 1 && u > 0 && u < 1; // strict interior — no endpoint coincidences
+  }
+
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 2; j < n; j++) {
+      if (i === 0 && j === n - 1) continue; // wrap-around adjacent edges
+      if (segsIntersect(points[i], points[(i + 1) % n], points[j], points[(j + 1) % n])) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// ──────────────────────────────────────────────────────
+//  POLYGON ZIGZAG PATTERN
+// ──────────────────────────────────────────────────────
+
+/**
+ * Generate a zigzag survey pattern for an arbitrary (possibly concave) polygon.
+ *
+ * Two concave-handling modes (params.stayInsideArea):
+ *
+ * false (cross gaps) — classic serpentine: flies all segments of each scan
+ *                line in order, crossing any gaps within the polygon (good for
+ *                area photography where UAV actions trigger at each crossing).
+ *
+ * true (stay inside / connected fill) — DFS-based connected sweep (like
+ *                3D-printer infill): traverses spatially adjacent segments
+ *                across scan lines, staying within connected sub-regions. For
+ *                a U-shape this produces: left arm → bottom → right arm with
+ *                only one cross-gap transition.
+ *
+ * `trackOrientation` rotates the SCAN LINES, not the polygon shape.
+ * Intersection counting uses a half-open interval (t ∈ (0, 1]).
+ */
+export function generatePolygonZigzag(
+  params: PolygonPatternParams
+): SurveyPathSegment[] {
+  const {
+    points, baseAltitude, baseSpeed,
+    targetLineSpacing, turnDistance = 0, reverse = false,
+    trackOrientation = 0,
+    altMode = 'relative',
+    stayInsideArea = false,
+    userActionLineStartFlags = 0,
+    userActionLineEndFlags = 0,
+  } = params;
+
+  if (points.length < 3 || targetLineSpacing <= 0) return [];
+
+  const centroid = polygonCentroid(points);
+  const { along, perp } = getOrientationVectors(trackOrientation);
+
+  // Local frame: x = perp to track (right), y = along track
+  const local = points.map(p => latLngToLocalMeters(p, centroid, trackOrientation));
+
+  const xs = local.map(p => p.x);
+  const xMin = Math.min(...xs);
+  const xMax = Math.max(...xs);
+  const perpSpan = xMax - xMin;
+  if (perpSpan <= 0) return [];
+
+  const numTracks = Math.max(1, Math.ceil(perpSpan / targetLineSpacing));
+  const totalSpan = (numTracks - 1) * targetLineSpacing;
+  const xStart = (xMin + xMax) / 2 - totalSpan / 2;
+
+  const n = local.length;
+  const edges = local.map((p, i) => ({
+    x0: p.x, y0: p.y,
+    x1: local[(i + 1) % n].x, y1: local[(i + 1) % n].y,
+  }));
+
+  // Convert track-frame (lx=perp, ly=along) back to lat/lng via ENU rotation.
+  // Bug fix: localToLatLng treats x=East, y=North — but lx/ly are in track frame,
+  // not ENU. We must unrotate first.
+  const makeWp = (lx: number, ly: number, flags: number): SurveyWaypoint => {
+    const east  = lx * perp.x + ly * along.x;
+    const north = lx * perp.y + ly * along.y;
+    return {
+      ...localToLatLng({ x: east, y: north }, centroid),
+      alt: baseAltitude, speed: baseSpeed, altMode, userActionFlags: flags,
+    };
+  };
+
+  const effStartFlags = reverse ? userActionLineEndFlags : userActionLineStartFlags;
+  const effEndFlags   = reverse ? userActionLineStartFlags : userActionLineEndFlags;
+
+  function scanIntersections(xScan: number): number[] {
+    const ys: number[] = [];
+    for (const { x0, y0, x1, y1 } of edges) {
+      const dx = x1 - x0;
+      if (Math.abs(dx) < 1e-10) continue;
+      const t = (xScan - x0) / dx;
+      if (t <= 0 || t > 1) continue; // half-open interval (0, 1]
+      ys.push(y0 + t * (y1 - y0));
+    }
+    return ys.sort((a, b) => a - b);
+  }
+
+  const allIntersections = Array.from({ length: numTracks }, (_, k) =>
+    scanIntersections(xStart + k * targetLineSpacing)
+  );
+
+  const segments: SurveyPathSegment[] = [];
+
+  if (!stayInsideArea) {
+    // ── Classic serpentine — cross any intra-line gaps ──────────────────────
+    for (let k = 0; k < numTracks; k++) {
+      const ys = allIntersections[k];
+      if (ys.length < 2) continue;
+
+      const xScan = xStart + k * targetLineSpacing;
+      const forward = k % 2 === 0;
+
+      const pairs: Array<[number, number]> = [];
+      for (let i = 0; i + 1 < ys.length; i += 2) pairs.push([ys[i], ys[i + 1]]);
+      const ordered = forward ? pairs : [...pairs].reverse().map(([a, b]) => [b, a] as [number, number]);
+
+      for (let s = 0; s < ordered.length; s++) {
+        const [yA, yB] = ordered[s];
+        const dir = yB > yA ? 1 : -1;
+        const yExt = yB + dir * turnDistance;
+
+        segments.push({
+          kind: 'survey',
+          points: [makeWp(xScan, yA, effStartFlags), makeWp(xScan, yExt, effEndFlags)],
+        });
+
+        if (s + 1 < ordered.length) {
+          segments.push({
+            kind: 'turn',
+            points: [makeWp(xScan, yExt, 0), makeWp(xScan, ordered[s + 1][0], 0)],
+          });
+        }
+      }
+
+      if (k + 1 < numTracks) {
+        const nextYs = allIntersections[k + 1];
+        if (nextYs.length >= 2) {
+          const nextForward = (k + 1) % 2 === 0;
+          const nextFirst = nextForward ? nextYs[0] : nextYs[nextYs.length - 1];
+          const lastPt = segments[segments.length - 1].points[segments[segments.length - 1].points.length - 1];
+          segments.push({ kind: 'turn', points: [lastPt, makeWp(xStart + (k + 1) * targetLineSpacing, nextFirst, 0)] });
+        }
+      }
+    }
+
+  } else {
+    // ── Connected fill — DFS with LIFO, stays within connected sub-regions ──
+    // Each segment is a node; adjacent segments on consecutive scan lines that
+    // overlap in Y are connected. DFS naturally traverses: left arm → bottom
+    // → right arm for U-shapes, with only one cross-gap jump per disconnection.
+
+    type Seg = { k: number; a: number; b: number; visited: boolean };
+    const allSegs: Seg[] = [];
+    for (let k = 0; k < numTracks; k++) {
+      const ys = allIntersections[k];
+      for (let i = 0; i + 1 < ys.length; i += 2) {
+        allSegs.push({ k, a: ys[i], b: ys[i + 1], visited: false });
+      }
+    }
+    if (allSegs.length === 0) return segments;
+
+    function yOverlap(s1: Seg, s2: Seg): boolean {
+      return Math.max(s1.a, s1.b) > Math.min(s2.a, s2.b) &&
+             Math.max(s2.a, s2.b) > Math.min(s1.a, s1.b);
+    }
+
+    let prevExit: SurveyWaypoint | null = null;
+
+    function visit(seg: Seg) {
+      if (seg.visited) return;
+      seg.visited = true;
+
+      const xScan = xStart + seg.k * targetLineSpacing;
+      const forward = seg.k % 2 === 0;
+      const [yA, yB] = forward ? [seg.a, seg.b] : [seg.b, seg.a];
+      const dir = yB > yA ? 1 : -1;
+      const yExt = yB + dir * turnDistance;
+
+      const entryWp = makeWp(xScan, yA, effStartFlags);
+      const exitWp  = makeWp(xScan, yExt, effEndFlags);
+
+      if (prevExit) {
+        segments.push({ kind: 'turn', points: [prevExit, entryWp] });
+      }
+      segments.push({ kind: 'survey', points: [entryWp, exitWp] });
+      prevExit = exitWp;
+
+      // Push k−1 adjacents FIRST (LIFO ⇒ processed after k+1), then k+1 last
+      const stack: Seg[] = [];
+      for (const s of allSegs) {
+        if (!s.visited && s.k === seg.k - 1 && yOverlap(seg, s)) stack.push(s);
+      }
+      for (const s of allSegs) {
+        if (!s.visited && s.k === seg.k + 1 && yOverlap(seg, s)) stack.push(s);
+      }
+      // Process stack (LIFO: last pushed = next processed)
+      while (stack.length > 0) {
+        const next = stack.pop()!;
+        if (!next.visited) {
+          // Recursion-safe: add k−1 and k+1 adjacents of `next` via the outer loop
+          visit(next);
+        }
+      }
+    }
+
+    // Process all segments, starting new DFS trees when disconnected components exist
+    for (const seg of [...allSegs].sort((a, b) => a.k !== b.k ? a.k - b.k : Math.min(a.a, a.b) - Math.min(b.a, b.b))) {
+      if (!seg.visited) visit(seg);
+    }
+  }
+
+  if (reverse) {
+    segments.reverse();
+    for (const seg of segments) seg.points.reverse();
+  }
+
+  return segments;
 }
 
 // ──────────────────────────────────────────────────────

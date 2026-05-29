@@ -378,6 +378,7 @@
     "wpCount": "{count} WPs",
     "ringInfo": "{count} rings",
     "rotationInfo": "{count} rotations",
+    "stayInsideArea": "Stay inside area",
     "loading": "Loading Pattern Editor...",
     "error": "Error loading Pattern Editor: {error}"
   },

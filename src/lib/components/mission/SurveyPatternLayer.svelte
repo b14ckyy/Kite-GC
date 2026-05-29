@@ -5,13 +5,16 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import L from 'leaflet';
-  import { activeSurveyPattern, applyRectangleDragUpdate, applyCircleDragUpdate, type LngLat, type CirclePatternParams } from '$lib/stores/surveyPattern.svelte';
+  import { activeSurveyPattern, applyRectangleDragUpdate, applyCircleDragUpdate, applyPolygonDragUpdate, type LngLat, type CirclePatternParams, type PolygonPatternParams } from '$lib/stores/surveyPattern.svelte';
   import {
     computeRectangleCorners,
     generateRectangleZigzag,
     generateRectangleLawnmower,
     generateCircleStepped,
     generateSpiral,
+    generatePolygonZigzag,
+    polygonCentroid,
+    isPolygonSelfIntersecting,
     updateRectangleFromDraggedCenter,
     updateRectangleFromDraggedCorner,
     type SurveyPathSegment,
@@ -201,6 +204,174 @@
     }
   }
 
+
+  // ── Polygon editing markers ────────────────────────
+  let polygonCornerMarkers: L.Marker[] = [];
+  let polygonMidpointMarkers: L.Marker[] = [];
+  let polygonCenterMarker: L.Marker | undefined;
+  let deleteZoneEl: HTMLDivElement | undefined;
+
+  // Temp polygon state during drag
+  let _polygonDragTempPoints: LngLat[] | null = null;
+  let _polygonLastValidPoints: LngLat[] | null = null;
+
+  const MAX_POLYGON_VERTICES = 50;
+  const MIN_POLYGON_VERTICES = 3;
+
+  // ── Delete zone (shown when dragging a corner vertex) ─
+  function createDeleteZone() {
+    deleteZoneEl = document.createElement('div');
+    deleteZoneEl.style.cssText =
+      'position:absolute;top:60px;left:50%;transform:translateX(-50%);' +
+      'background:rgba(212,0,0,0.88);color:white;padding:6px 14px;' +
+      'border-radius:6px;font-size:12px;display:none;align-items:center;' +
+      'gap:6px;z-index:1000;pointer-events:none;white-space:nowrap;' +
+      'box-shadow:0 2px 8px rgba(0,0,0,0.4);';
+    deleteZoneEl.innerHTML = '🗑 Drop here to delete vertex';
+    map.getContainer().appendChild(deleteZoneEl);
+  }
+  function showDeleteZone() { if (deleteZoneEl) deleteZoneEl.style.display = 'flex'; }
+  function hideDeleteZone() { if (deleteZoneEl) deleteZoneEl.style.display = 'none'; }
+  function isOverDeleteZone(ll: L.LatLng): boolean {
+    if (!deleteZoneEl) return false;
+    const pt = map.latLngToContainerPoint(ll);
+    const cRect = map.getContainer().getBoundingClientRect();
+    const zRect = deleteZoneEl.getBoundingClientRect();
+    const left = zRect.left - cRect.left;
+    const top  = zRect.top  - cRect.top;
+    return pt.x >= left && pt.x <= left + zRect.width && pt.y >= top && pt.y <= top + zRect.height;
+  }
+
+  function removePolygonEditingMarkers() {
+    if (isDragging) return;
+    polygonCornerMarkers.forEach(m => { try { map.removeLayer(m); } catch (_) {} });
+    polygonCornerMarkers = [];
+    polygonMidpointMarkers.forEach(m => { try { map.removeLayer(m); } catch (_) {} });
+    polygonMidpointMarkers = [];
+    if (polygonCenterMarker) { try { map.removeLayer(polygonCenterMarker); } catch (_) {} polygonCenterMarker = undefined; }
+  }
+
+  function buildPolygonEditingMarkers(pts: LngLat[]) {
+    const n = pts.length;
+
+    // Rebuild from scratch when vertex count changes; otherwise just reposition
+    if (polygonCornerMarkers.length !== n) {
+      polygonCornerMarkers.forEach(m => { try { map.removeLayer(m); } catch (_) {} });
+      polygonCornerMarkers = [];
+      polygonMidpointMarkers.forEach(m => { try { map.removeLayer(m); } catch (_) {} });
+      polygonMidpointMarkers = [];
+      if (polygonCenterMarker) { try { map.removeLayer(polygonCenterMarker); } catch (_) {} polygonCenterMarker = undefined; }
+
+      // Centroid marker — moves the whole polygon
+      const c = polygonCentroid(pts);
+      polygonCenterMarker = L.marker([c.lat, c.lng], {
+        draggable: true,
+        icon: L.divIcon({
+          className: 'pattern-center-marker',
+          html: '<div style="background:#37a8db;width:14px;height:14px;border-radius:50%;border:2px solid white;box-shadow:0 0 4px rgba(0,0,0,0.5);"></div>',
+          iconSize: [18, 18], iconAnchor: [9, 9],
+        }),
+      }).addTo(map);
+
+      polygonCenterMarker.on('dragstart', () => {
+        isDragging = true;
+        _polygonLastValidPoints = (activeSurveyPattern.config!.params as PolygonPatternParams).points.map(p => ({ ...p }));
+      });
+      polygonCenterMarker.on('drag', () => {
+        const pos = polygonCenterMarker!.getLatLng();
+        const current = (activeSurveyPattern.config!.params as PolygonPatternParams).points;
+        const orig = polygonCentroid(current);
+        _polygonDragTempPoints = current.map(p => ({ lat: p.lat + (pos.lat - orig.lat), lng: p.lng + (pos.lng - orig.lng) }));
+        syncDragPreview();
+      });
+      polygonCenterMarker.on('dragend', () => {
+        isDragging = false;
+        if (_polygonDragTempPoints) { applyPolygonDragUpdate({ points: _polygonDragTempPoints }); _polygonDragTempPoints = null; }
+      });
+
+      // Corner markers
+      for (let i = 0; i < n; i++) {
+        const m = L.marker([pts[i].lat, pts[i].lng], {
+          draggable: true,
+          icon: L.divIcon({
+            className: 'pattern-corner-marker',
+            html: '<div style="background:#f1c40f;width:11px;height:11px;border:2px solid white;box-shadow:0 0 3px rgba(0,0,0,0.6);"></div>',
+            iconSize: [15, 15], iconAnchor: [7, 7],
+          }),
+        }).addTo(map);
+
+        const idx = i;
+        m.on('dragstart', () => {
+          isDragging = true;
+          _polygonLastValidPoints = (activeSurveyPattern.config!.params as PolygonPatternParams).points.map(p => ({ ...p }));
+          showDeleteZone();
+        });
+        m.on('drag', () => {
+          const pos = m.getLatLng();
+          const current = (activeSurveyPattern.config!.params as PolygonPatternParams).points;
+          _polygonDragTempPoints = current.map((p, j) => j === idx ? { lat: pos.lat, lng: pos.lng } : { ...p });
+          syncDragPreview();
+        });
+        m.on('dragend', () => {
+          isDragging = false;
+          hideDeleteZone();
+          const current = (activeSurveyPattern.config!.params as PolygonPatternParams).points;
+          // Delete if dropped on delete zone (minimum vertex count enforced)
+          if (isOverDeleteZone(m.getLatLng()) && current.length > MIN_POLYGON_VERTICES) {
+            applyPolygonDragUpdate({ points: current.filter((_, j) => j !== idx) });
+            _polygonDragTempPoints = null;
+            return;
+          }
+          // Revert if self-intersecting
+          const pos = m.getLatLng();
+          const newPts = current.map((p, j) => j === idx ? { lat: pos.lat, lng: pos.lng } : { ...p });
+          if (isPolygonSelfIntersecting(newPts)) {
+            m.setLatLng([_polygonLastValidPoints![idx].lat, _polygonLastValidPoints![idx].lng]);
+            applyPolygonDragUpdate({ points: _polygonLastValidPoints! });
+          } else {
+            applyPolygonDragUpdate({ points: newPts });
+          }
+          _polygonDragTempPoints = null;
+        });
+        m.on('contextmenu', () => {
+          const current = (activeSurveyPattern.config!.params as PolygonPatternParams).points;
+          if (current.length > MIN_POLYGON_VERTICES) applyPolygonDragUpdate({ points: current.filter((_, j) => j !== idx) });
+        });
+        polygonCornerMarkers.push(m);
+      }
+
+      // Midpoint insertion markers
+      for (let i = 0; i < n; i++) {
+        const p0 = pts[i], p1 = pts[(i + 1) % n];
+        const m = L.marker([(p0.lat + p1.lat) / 2, (p0.lng + p1.lng) / 2], {
+          icon: L.divIcon({
+            className: 'polygon-midpoint-marker',
+            html: '<div style="background:#888;width:8px;height:8px;border-radius:50%;border:1.5px solid white;opacity:0.7;cursor:pointer;"></div>',
+            iconSize: [12, 12], iconAnchor: [6, 6],
+          }),
+        }).addTo(map);
+        const insIdx = i + 1;
+        m.on('click', () => {
+          const current = (activeSurveyPattern.config!.params as PolygonPatternParams).points;
+          if (current.length >= MAX_POLYGON_VERTICES) return;
+          const a = current[insIdx - 1], b = current[insIdx % current.length];
+          const mid: LngLat = { lat: (a.lat + b.lat) / 2, lng: (a.lng + b.lng) / 2 };
+          applyPolygonDragUpdate({ points: [...current.slice(0, insIdx), mid, ...current.slice(insIdx)] });
+        });
+        polygonMidpointMarkers.push(m);
+      }
+    } else {
+      // Count unchanged — just update positions
+      const c = polygonCentroid(pts);
+      polygonCenterMarker?.setLatLng([c.lat, c.lng]);
+      pts.forEach((p, i) => {
+        polygonCornerMarkers[i]?.setLatLng([p.lat, p.lng]);
+        const next = pts[(i + 1) % n];
+        polygonMidpointMarkers[i]?.setLatLng([(p.lat + next.lat) / 2, (p.lng + next.lng) / 2]);
+      });
+    }
+  }
+
   //  PATH VISUALISATION
   // ══════════════════════════════════════════════════════
 
@@ -220,6 +391,7 @@
     clearShapeLines();
     removeEditingMarkers();
     removeCircleEditingMarkers();
+    removePolygonEditingMarkers();
   }
 
   /** Build the continuous preview path from SurveyPathSegment[] */
@@ -311,6 +483,7 @@
     if (!isDragging) {
       if (shape !== 'rectangle' && shape !== 'rectangle-lawnmower') removeEditingMarkers();
       if (shape !== 'circle' && shape !== 'spiral') removeCircleEditingMarkers();
+      if (shape !== 'polygon') removePolygonEditingMarkers();
     }
 
     const centerLL: L.LatLngExpression = [p.center.lat, p.center.lng];
@@ -392,8 +565,36 @@
       const segments = generateSpiral(p as CirclePatternParams);
       buildPreviewPath(segments);
 
+    } else if (shape === 'polygon') {
+      const p_pts = (config.params as PolygonPatternParams).points;
+      if (p_pts && p_pts.length >= 3) {
+        const shapeLL = p_pts.map((pt: LngLat) => [pt.lat, pt.lng] as [number, number]);
+
+        if (shapeLayer instanceof L.Polygon) {
+          shapeLayer.setLatLngs(shapeLL);
+        } else {
+          if (shapeLayer) { try { map.removeLayer(shapeLayer); } catch (_) {} shapeLayer = undefined; }
+          shapeLayer = L.polygon(shapeLL, {
+            color: '#888888', weight: 2, fillColor: '#666666', fillOpacity: 0.25, dashArray: '4 2'
+          }).addTo(map);
+        }
+
+        buildPolygonEditingMarkers(p_pts);
+        if (!deleteZoneEl) createDeleteZone();
+
+        if (!hasAutoFitted) {
+          hasAutoFitted = true;
+          try { map.fitBounds(L.latLngBounds(shapeLL), { padding: [80, 80], maxZoom: 18 }); } catch (_) {}
+        }
+
+        if (!isPolygonSelfIntersecting(p_pts)) {
+          const segs = generatePolygonZigzag(config.params as PolygonPatternParams);
+          buildPreviewPath(segs);
+        }
+      }
+
     } else {
-      // Polygon and others: pentagon placeholder
+      // Unimplemented shapes: pentagon placeholder
       clearShapeLines();
       const size = 0.002;
       const pts: [number, number][] = [];
@@ -453,6 +654,16 @@
         ? generateSpiral(dragParams)
         : generateCircleStepped(dragParams);
       buildPreviewPath(segments);
+    } else if (config.shape === 'polygon' && _polygonDragTempPoints) {
+      const pts = _polygonDragTempPoints;
+      if (shapeLayer instanceof L.Polygon) shapeLayer.setLatLngs(pts.map((pt: LngLat) => [pt.lat, pt.lng] as [number, number]));
+      const c = polygonCentroid(pts);
+      polygonCenterMarker?.setLatLng([c.lat, c.lng]);
+      pts.forEach((pt: LngLat, i: number) => polygonCornerMarkers[i]?.setLatLng([pt.lat, pt.lng]));
+      if (!isPolygonSelfIntersecting(pts)) {
+        const segs = generatePolygonZigzag({ ...(config.params as PolygonPatternParams), points: pts });
+        buildPreviewPath(segs);
+      }
     }
   }
 
@@ -481,7 +692,7 @@
       + p.turnDistance + (p.reverse ? 1 : 0) + (p.clockwise ? 1 : 0) + p.startCorner
       + (p.trackOrientationEnabled ? 1 : 0) + p.trackOrientation
       + p.userActionStartFlags + p.userActionTrackFlags + p.userActionEndFlags
-      + p.userActionLineStartFlags + p.userActionLineEndFlags;
+      + p.userActionLineStartFlags + p.userActionLineEndFlags + (p.points?.length ?? 0);
     void _trigger;
 
     // Keep actualLineSpacing in sync for rectangle shapes.

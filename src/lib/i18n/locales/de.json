@@ -376,6 +376,7 @@
     "wpCount": "{count} WPs",
     "ringInfo": "{count} Ringe",
     "rotationInfo": "{count} Drehungen",
+    "stayInsideArea": "Innerhalb der Fläche bleiben",
     "loading": "Lade Pattern-Editor...",
     "error": "Fehler beim Laden des Pattern-Editors: {error}"
   },

@@ -40,6 +40,7 @@ export interface CirclePatternParams extends BasePatternParams {
 
 export interface PolygonPatternParams extends BasePatternParams {
   points: LngLat[];           // in order
+  stayInsideArea: boolean;    // false = cross gaps (area mode), true = connected fill (no-fly gaps)
 }
 
 export type SurveyPatternConfig =
@@ -61,8 +62,8 @@ export interface SavedSurveyPattern {
 }
 
 // Preserved params per shape family — survives shape-family switches within a session.
-// Keyed by family: 'rect' (rectangle / rectangle-lawnmower) | 'circle' (circle / spiral)
-const _paramsCache: Partial<Record<'rect' | 'circle', any>> = {};
+// Keyed by family: 'rect' | 'circle' | 'polygon'
+const _paramsCache: Partial<Record<'rect' | 'circle' | 'polygon', any>> = {};
 
 // Current active pattern being edited (null when not in pattern mode)
 export const activeSurveyPattern = $state<{
@@ -119,10 +120,11 @@ export function switchShape(newShape: SurveyShape) {
   const current = activeSurveyPattern.config;
   if (!current) return;
 
-  const isRect   = (s: SurveyShape) => s === 'rectangle' || s === 'rectangle-lawnmower';
-  const isCircle = (s: SurveyShape) => s === 'circle'    || s === 'spiral';
-  const familyOf = (s: SurveyShape): 'rect' | 'circle' | null =>
-    isRect(s) ? 'rect' : isCircle(s) ? 'circle' : null;
+  const isRect    = (s: SurveyShape) => s === 'rectangle' || s === 'rectangle-lawnmower';
+  const isCircle  = (s: SurveyShape) => s === 'circle'    || s === 'spiral';
+  const isPolygon = (s: SurveyShape) => s === 'polygon';
+  const familyOf  = (s: SurveyShape): 'rect' | 'circle' | 'polygon' | null =>
+    isRect(s) ? 'rect' : isCircle(s) ? 'circle' : isPolygon(s) ? 'polygon' : null;
 
   const currentFamily = familyOf(current.shape);
   const newFamily     = familyOf(newShape);
@@ -171,8 +173,42 @@ export function switchShape(newShape: SurveyShape) {
             userActionStartFlags: 0, userActionTrackFlags: 0, userActionEndFlags: 0,
           } as CirclePatternParams,
     } as any;
+  } else if (isPolygon(newShape)) {
+    const cached = _paramsCache['polygon'];
+    if (cached) {
+      activeSurveyPattern.config = { shape: newShape, params: { ...cached } } as any;
+    } else {
+      // Default: regular pentagon with circumradius 200 m centred on current map position
+      const scaleLat = 111320;
+      const scaleLng = 111320 * Math.cos((center.lat * Math.PI) / 180);
+      const r = 200;
+      const pts: LngLat[] = [];
+      for (let i = 0; i < 5; i++) {
+        const angle = Math.PI / 2 - (2 * Math.PI * i) / 5; // CW from North
+        pts.push({
+          lat: center.lat + (r * Math.sin(angle)) / scaleLat,
+          lng: center.lng + (r * Math.cos(angle)) / scaleLng,
+        });
+      }
+      activeSurveyPattern.config = {
+        shape: 'polygon',
+        params: {
+          points: pts,
+          stayInsideArea: false,
+          shapeOrientation: 0,
+          baseAltitude: 50, baseSpeed: 15,
+          targetLineSpacing: 50, actualLineSpacing: 50,
+          turnDistance: 0, reverse: false, clockwise: true, startCorner: 1,
+          trackOrientationEnabled: true,  // always on for polygon
+          trackOrientation: 0,
+          altMode: 'relative' as AltMode,
+          userActionLineStartFlags: 0, userActionLineEndFlags: 0,
+          userActionStartFlags: 0, userActionTrackFlags: 0, userActionEndFlags: 0,
+        } as PolygonPatternParams,
+      } as any;
+    }
   } else {
-    // polygon, polygon-lawnmower, … — minimal params for placeholder rendering
+    // polygon-lawnmower (future) and other unimplemented shapes — minimal placeholder params
     activeSurveyPattern.config = {
       shape: newShape,
       params: { ...base, center } as any,
@@ -214,6 +250,29 @@ export function applyCircleDragUpdate(update: Partial<CirclePatternParams>) {
   if (!activeSurveyPattern.config || !['circle', 'spiral'].includes(activeSurveyPattern.config.shape)) return;
 
   const current = activeSurveyPattern.config.params as CirclePatternParams;
+  activeSurveyPattern.config = {
+    ...activeSurveyPattern.config,
+    params: { ...current, ...update },
+  } as any;
+}
+
+export function updatePolygonParams(updates: Partial<PolygonPatternParams>) {
+  if (!activeSurveyPattern.config || activeSurveyPattern.config.shape !== 'polygon') return;
+
+  const current = activeSurveyPattern.config.params as PolygonPatternParams;
+  activeSurveyPattern.config = {
+    ...activeSurveyPattern.config,
+    params: { ...current, ...updates },
+  } as any;
+}
+
+/**
+ * Called from the map layer when polygon points or geometry change (drag / insert / delete vertex).
+ */
+export function applyPolygonDragUpdate(update: Partial<PolygonPatternParams>) {
+  if (!activeSurveyPattern.config || activeSurveyPattern.config.shape !== 'polygon') return;
+
+  const current = activeSurveyPattern.config.params as PolygonPatternParams;
   activeSurveyPattern.config = {
     ...activeSurveyPattern.config,
     params: { ...current, ...update },

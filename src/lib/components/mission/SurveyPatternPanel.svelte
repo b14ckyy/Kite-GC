@@ -6,8 +6,10 @@
     switchShape,
     updateRectangleParams,
     updateCircleParams,
+    updatePolygonParams,
     type RectanglePatternParams,
     type CirclePatternParams,
+    type PolygonPatternParams,
   } from '$lib/stores/surveyPattern.svelte';
   import { get } from 'svelte/store';
   import {
@@ -16,6 +18,7 @@
     generateRectangleLawnmower,
     generateCircleStepped,
     generateSpiral,
+    generatePolygonZigzag,
     type SurveyWaypoint,
   } from '$lib/helpers/surveyPatterns';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
@@ -62,6 +65,29 @@
         userActionEndFlags: 0,
   });
 
+  // ── Polygon state ─────────────────────────────────────
+  let polygonParams = $state<PolygonPatternParams>({
+    points: [],
+    stayInsideArea: false,
+    shapeOrientation: 0,
+    baseAltitude: 50,
+    baseSpeed: 15,
+    targetLineSpacing: 50,
+    actualLineSpacing: 50,
+    turnDistance: 0,
+    reverse: false,
+    clockwise: true,
+    startCorner: 1,
+    trackOrientationEnabled: true,
+    trackOrientation: 0,
+    altMode: 'relative',
+    userActionLineStartFlags: 0,
+    userActionLineEndFlags: 0,
+    userActionStartFlags: 0,
+    userActionTrackFlags: 0,
+    userActionEndFlags: 0,
+  });
+
   // ── Circle state ──────────────────────────────────────
   let circleParams = $state<CirclePatternParams>({
     center: { lat: 0, lng: 0 },
@@ -99,6 +125,12 @@
   function handleParamChange() {
     if (activeSurveyPattern.config && ['rectangle', 'rectangle-lawnmower'].includes(activeSurveyPattern.config.shape)) {
       updateRectangleParams(rectangleParams);
+    }
+  }
+
+  function handlePolygonParamChange() {
+    if (activeSurveyPattern.config?.shape === 'polygon') {
+      updatePolygonParams(polygonParams);
     }
   }
 
@@ -147,6 +179,14 @@
     } else if (cfg.shape === 'circle') {
       const p = cfg.params as CirclePatternParams;
       const segments = generateCircleStepped(p);
+      for (const seg of segments) {
+        if (seg.kind === 'survey') {
+          for (const pt of seg.points) wps.push(pt);
+        }
+      }
+    } else if (cfg.shape === 'polygon') {
+      const p = cfg.params as PolygonPatternParams;
+      const segments = generatePolygonZigzag(p);
       for (const seg of segments) {
         if (seg.kind === 'survey') {
           for (const pt of seg.points) wps.push(pt);
@@ -236,6 +276,13 @@
     }
   });
 
+  // Sync polygon params from store → local state (includes updated points from map drag)
+  $effect(() => {
+    if (activeSurveyPattern.config?.shape === 'polygon') {
+      polygonParams = { ...(activeSurveyPattern.config.params as PolygonPatternParams) };
+    }
+  });
+
   // Sync circle params from store → local state (e.g. on enter or after map drag)
   let _syncingCircle = false;
   $effect(() => {
@@ -266,6 +313,7 @@
       cfg.shape === 'rectangle-lawnmower'? generateRectangleLawnmower(rectangleParams) :
       cfg.shape === 'circle'             ? generateCircleStepped(circleParams) :
       cfg.shape === 'spiral'             ? generateSpiral(circleParams) :
+      cfg.shape === 'polygon' && polygonParams.points.length >= 3 ? generatePolygonZigzag(polygonParams) :
       [];
     return segs.reduce((s, seg) => seg.kind === 'survey' ? s + seg.points.length : s, 0);
   });
@@ -515,6 +563,79 @@
             {#each [1,2,3,4] as n}
               <label class="ua-check-item">
                 <input type="checkbox" checked={!!(circleParams.userActionEndFlags & (1 << (n-1)))} onchange={() => { circleParams.userActionEndFlags ^= (1 << (n-1)); handleCircleParamChange(); }} />
+                <span>{n}</span>
+              </label>
+            {/each}
+          </div>
+        </div>
+      </div>
+
+    {:else if activeSurveyPattern.config?.shape === 'polygon'}
+
+      <!-- Track Orientation (always on for polygon) -->
+      <NumberStepper label={$t('survey.trackOrientationVal')} bind:value={polygonParams.trackOrientation} min={0} max={360} step={5} decimals={0} onchange={handlePolygonParamChange} />
+
+      <!-- Stay inside area (connected fill) -->
+      <label class="toggle-row">
+        <input type="checkbox" bind:checked={polygonParams.stayInsideArea} onchange={handlePolygonParamChange} />
+        <span>{$t('survey.stayInsideArea')}</span>
+      </label>
+
+      <!-- Line Spacing + WP count -->
+      <div class="spacing-wrapper">
+        <NumberStepper label={$t('survey.lineSpacing')} bind:value={polygonParams.targetLineSpacing} min={5} step={5} decimals={0} onchange={handlePolygonParamChange} />
+        {#if polygonParams.targetLineSpacing > 0 && polygonParams.points.length >= 3}
+          <div class="info-row">
+            <span class="spacing-info" class:over-limit={missionWpCount + patternWpCount > MAX_WAYPOINTS_TOTAL}>{_t('survey.wpCount', { count: String(patternWpCount) })}</span>
+          </div>
+        {/if}
+      </div>
+
+      <!-- Turn Distance + Reverse -->
+      <div class="param-row">
+        <NumberStepper label={$t('survey.turnDistance')} bind:value={polygonParams.turnDistance} min={0} step={5} decimals={0} onchange={handlePolygonParamChange} />
+        <label class="toggle-row">
+          <input type="checkbox" bind:checked={polygonParams.reverse} onchange={handlePolygonParamChange} />
+          <span>{$t('survey.reverse')}</span>
+        </label>
+      </div>
+
+      <!-- Base Altitude + Base Speed -->
+      <div class="param-row">
+        <NumberStepper label={$t('survey.baseAlt')} bind:value={polygonParams.baseAltitude} min={0} step={5} decimals={0} onchange={handlePolygonParamChange} />
+        <NumberStepper label={$t('survey.baseSpeed')} bind:value={polygonParams.baseSpeed} min={1} step={1} decimals={0} onchange={handlePolygonParamChange} />
+      </div>
+
+      <!-- Altitude Type -->
+      <div class="param-row alt-type-row">
+        <label class="alt-type-label">{$t('survey.altMode')}</label>
+        <select class="alt-type-select" bind:value={polygonParams.altMode} onchange={handlePolygonParamChange}>
+          <option value="relative">{$t('survey.altModeRelative')}</option>
+          <option value="amsl">{$t('survey.altModeAmsl')}</option>
+          <option value="ground" disabled>{$t('survey.altModeGround')} — {$t('survey.comingSoon')}</option>
+        </select>
+      </div>
+
+      <!-- User Action Triggers: Line Start / Line End -->
+      <div class="section-label">{$t('survey.userActionTrigger')}</div>
+      <div class="ua-grid">
+        <div class="ua-col">
+          <div class="ua-col-label">{$t('survey.lineStart')}</div>
+          <div class="ua-checks">
+            {#each [1,2,3,4] as n}
+              <label class="ua-check-item">
+                <input type="checkbox" checked={!!(polygonParams.userActionLineStartFlags & (1 << (n-1)))} onchange={() => { polygonParams.userActionLineStartFlags ^= (1 << (n-1)); handlePolygonParamChange(); }} />
+                <span>{n}</span>
+              </label>
+            {/each}
+          </div>
+        </div>
+        <div class="ua-col">
+          <div class="ua-col-label">{$t('survey.lineEnd')}</div>
+          <div class="ua-checks">
+            {#each [1,2,3,4] as n}
+              <label class="ua-check-item">
+                <input type="checkbox" checked={!!(polygonParams.userActionLineEndFlags & (1 << (n-1)))} onchange={() => { polygonParams.userActionLineEndFlags ^= (1 << (n-1)); handlePolygonParamChange(); }} />
                 <span>{n}</span>
               </label>
             {/each}
