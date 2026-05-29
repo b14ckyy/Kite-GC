@@ -8,6 +8,7 @@ mod mission;
 mod msp;
 mod scheduler;
 mod state;
+mod terrain;
 mod transport;
 
 use commands::connection::{connect, disconnect, list_serial_ports, scan_ble_devices};
@@ -22,6 +23,8 @@ use commands::flightlog::{
     flightlog_link_flights, flightlog_unlink_flight, flightlog_find_linkable,
 };
 use commands::info::get_app_version;
+use commands::terrain::{terrain_elevation, terrain_profile};
+use terrain::TerrainProvider;
 use commands::mission::{
     mission_get, mission_clear, mission_add_wp, mission_insert_wp,
     mission_remove_wp, mission_update_wp, mission_reorder_wp,
@@ -76,6 +79,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::new())
         .manage(MissionStore::new())
+        .manage(TerrainProvider::new())
         .invoke_handler(tauri::generate_handler![
             list_serial_ports,
             scan_ble_devices,
@@ -123,6 +127,8 @@ pub fn run() {
             flightlog_link_flights,
             flightlog_unlink_flight,
             flightlog_find_linkable,
+            terrain_elevation,
+            terrain_profile,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Kite Ground Control");

@@ -43,11 +43,17 @@ All four features depend on one elevation-sampling abstraction. Build this first
 - `profile(points[], spacing) -> samples[]` — batch sample along a polyline at a fixed ground spacing (for the clearance graph)
 - Tile fetch + decode (GeoTIFF) + on-disk cache; region pre-download for offline use (respect portable mode, like `flights.db`)
 
+**Decided & implemented (Phase A):** Rust backend module `src-tauri/src/terrain/`. Source `copernicus-dem-30m` S3 (no key); tile `Copernicus_DSM_COG_10_{N|S}lat_00_{E|W}lon_00_DEM`; full-tile fetch → disk cache (portable-aware) → `tiff`-crate decode (Float32, DEFLATE, predictor 3 — verified, Zugspitze 2943.8 m) → in-memory LRU (4 tiles) → bilinear sample. CPU decode + disk I/O run on `spawn_blocking`; loads serialized/coalesced via async lock. Commands `terrain_elevation` / `terrain_profile`.
+
+**Performance follow-up (planned — important for weak hardware):**
+Full-tile decode is ~1 s on a fast CPU → ~5–10 s on a field laptop/tablet. `spawn_blocking` prevents runtime stalls (no freeze), but it's a latency cost on the first sample per tile.
+- **COG partial reads**: Copernicus tiles are internally tiled Cloud-Optimized GeoTIFFs. Use HTTP **range requests** to fetch only the internal blocks covering the needed points (a few hundred KB) and decode only those chunks (`tiff` `read_chunk`) instead of the whole 42 MB / 13 M-pixel image. Turns multi-second decodes into sub-100 ms and slashes bandwidth.
+- Optionally persist decoded/needed blocks; pre-fetch around a mission bounding box.
+
 **Open questions (TBD):**
-- **Backend vs frontend**: GeoTIFF parsing + tile cache fit Rust well (Tauri commands `terrain_elevation` / `terrain_profile`); the existing map-tile cache is frontend IndexedDB. _Lean: Rust backend_ for DEM (heavier parsing, reuse filesystem cache patterns). Confirm.
-- Cache layout & eviction; how much to pre-fetch around a mission bounding box.
-- Exact AWS endpoint / tile addressing for `copernicus-dem-30m` (verify at implementation).
-- Interpolation: bilinear vs nearest; void handling.
+- Cache eviction tuning; pre-fetch radius around a mission.
+- Void / nodata handling (GLO-30 ocean = 0).
+- DSM vs DTM (GLO-30 includes surface objects — conservative for clearance).
 
 ---
 

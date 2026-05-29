@@ -6,3 +6,4 @@ pub mod connection;
 pub mod flightlog;
 pub mod info;
 pub mod mission;
+pub mod terrain;

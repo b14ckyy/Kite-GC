@@ -18,6 +18,10 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[dev-dependencies]
+# Full tokio runtime for async integration tests (#[tokio::test]); not in the release build
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
@@ -37,4 +41,5 @@ uuid = { version = "1", features = ["serde"] }
 tokio = { version = "1", features = ["time", "sync", "macros"] }
 futures = "0.3"
 mavlink = { version = "0.17", default-features = false, features = ["std", "ardupilotmega", "emit-extensions"] }
+tiff = "0.9"  # decode Copernicus GLO-30 GeoTIFF DEM tiles (Float32, DEFLATE, predictor 3)
 
