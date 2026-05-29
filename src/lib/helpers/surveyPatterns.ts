@@ -899,7 +899,12 @@ export function generatePolygonZigzag(
       for (let s = 0; s < ordered.length; s++) {
         const [yA, yB] = ordered[s];
         const dir = yB > yA ? 1 : -1;
-        const yExt = yB + dir * turnDistance;
+        // Turn distance only applies before a real turn (the move to the next
+        // scan line). Intermediate segments continue collinearly across a gap on
+        // the same scan line — no turn there, so no extension (and the end-flag
+        // trigger stays at the true boundary crossing instead of being delayed).
+        const isLastOnLine = s === ordered.length - 1;
+        const yExt = isLastOnLine ? yB + dir * turnDistance : yB;
 
         segments.push({
           kind: 'survey',
@@ -994,6 +999,378 @@ export function generatePolygonZigzag(
   if (reverse) {
     segments.reverse();
     for (const seg of segments) seg.points.reverse();
+  }
+
+  return segments;
+}
+
+// ──────────────────────────────────────────────────────
+//  POLYGON LAWNMOWER (convex decomposition + contour offset)
+// ──────────────────────────────────────────────────────
+
+interface Pt { x: number; y: number; }
+
+function signedAreaXY(poly: Pt[]): number {
+  let a = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const j = (i + 1) % poly.length;
+    a += poly[i].x * poly[j].y - poly[j].x * poly[i].y;
+  }
+  return a / 2;
+}
+
+/** Strict (interior) segment intersection — shared endpoints don't count. */
+function segProperIntersectXY(p1: Pt, p2: Pt, p3: Pt, p4: Pt): boolean {
+  const d1x = p2.x - p1.x, d1y = p2.y - p1.y;
+  const d2x = p4.x - p3.x, d2y = p4.y - p3.y;
+  const denom = d1x * d2y - d1y * d2x;
+  if (Math.abs(denom) < 1e-12) return false;
+  const dx = p3.x - p1.x, dy = p3.y - p1.y;
+  const t = (dx * d2y - dy * d2x) / denom;
+  const u = (dx * d1y - dy * d1x) / denom;
+  return t > 1e-9 && t < 1 - 1e-9 && u > 1e-9 && u < 1 - 1e-9;
+}
+
+function pointInPolyXY(pt: Pt, poly: Pt[]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y;
+    const intersect = (yi > pt.y) !== (yj > pt.y) &&
+      pt.x < ((xj - xi) * (pt.y - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+/** CCW polygon — interior is left of each directed edge; reflex if right turn. */
+function isReflexAtXY(poly: Pt[], i: number): boolean {
+  const n = poly.length;
+  const prev = poly[(i - 1 + n) % n], cur = poly[i], next = poly[(i + 1) % n];
+  const cross = (cur.x - prev.x) * (next.y - cur.y) - (cur.y - prev.y) * (next.x - cur.x);
+  return cross < 0;
+}
+
+function isConvexPolyXY(poly: Pt[]): boolean {
+  for (let i = 0; i < poly.length; i++) if (isReflexAtXY(poly, i)) return false;
+  return true;
+}
+
+/** Is the diagonal (i,j) a valid internal diagonal of the simple polygon? */
+function validDiagonalXY(poly: Pt[], i: number, j: number): boolean {
+  const n = poly.length;
+  if (i === j || j === (i + 1) % n || j === (i - 1 + n) % n) return false;
+  const a = poly[i], b = poly[j];
+  // No proper intersection with any edge
+  for (let k = 0; k < n; k++) {
+    const k2 = (k + 1) % n;
+    if (k === i || k === j || k2 === i || k2 === j) continue;
+    if (segProperIntersectXY(a, b, poly[k], poly[k2])) return false;
+  }
+  // Midpoint must lie inside the polygon (rejects external diagonals across concavities)
+  const mid: Pt = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  return pointInPolyXY(mid, poly);
+}
+
+/** Recursively split a simple polygon into convex pieces at reflex vertices. */
+function decomposeConvexXY(input: Pt[]): Pt[][] {
+  if (input.length < 3) return [];
+  // Normalise to CCW
+  let poly = signedAreaXY(input) < 0 ? [...input].reverse() : input;
+  if (isConvexPolyXY(poly)) return [poly];
+
+  const n = poly.length;
+  for (let i = 0; i < n; i++) {
+    if (!isReflexAtXY(poly, i)) continue;
+    // Find the best diagonal from this reflex vertex — prefer connecting to another reflex
+    let best = -1, bestReflex = false;
+    for (let k = 0; k < n; k++) {
+      if (!validDiagonalXY(poly, i, k)) continue;
+      const rf = isReflexAtXY(poly, k);
+      if (best < 0 || (rf && !bestReflex)) { best = k; bestReflex = rf; }
+    }
+    if (best >= 0) {
+      const lo = Math.min(i, best), hi = Math.max(i, best);
+      const partA = poly.slice(lo, hi + 1);
+      const partB = [...poly.slice(hi), ...poly.slice(0, lo + 1)];
+      return [...decomposeConvexXY(partA), ...decomposeConvexXY(partB)];
+    }
+  }
+  return [poly]; // fallback — no valid diagonal found (shouldn't happen for simple polygons)
+}
+
+function centroidXY(poly: Pt[]): Pt {
+  let x = 0, y = 0;
+  for (const p of poly) { x += p.x; y += p.y; }
+  return { x: x / poly.length, y: y / poly.length };
+}
+
+function ptEqXY(p: Pt, q: Pt): boolean {
+  return Math.abs(p.x - q.x) < 1e-6 && Math.abs(p.y - q.y) < 1e-6;
+}
+
+function ensureCCW(poly: Pt[]): Pt[] {
+  return signedAreaXY(poly) < 0 ? [...poly].reverse() : poly;
+}
+
+/** If A and B share an edge and their union is convex, return the merged polygon. */
+function tryMergeXY(A: Pt[], B: Pt[]): Pt[] | null {
+  const nA = A.length, nB = B.length;
+  for (let i = 0; i < nA; i++) {
+    const a1 = A[i], a2 = A[(i + 1) % nA];
+    for (let j = 0; j < nB; j++) {
+      const b1 = B[j], b2 = B[(j + 1) % nB];
+      if (ptEqXY(a1, b2) && ptEqXY(a2, b1)) {
+        // Shared edge a1→a2 == b2→b1. Stitch A (from a2 around to a1) + B (b2 around to b1).
+        const Arot: Pt[] = [];
+        for (let k = 0; k < nA; k++) Arot.push(A[(i + 1 + k) % nA]); // a2 … a1
+        const Brot: Pt[] = [];
+        for (let k = 0; k < nB; k++) Brot.push(B[(j + 1 + k) % nB]); // b2 … b1
+        const merged = ensureCCW([...Arot, ...Brot.slice(1, nB - 1)]);
+        return isConvexPolyXY(merged) ? merged : null;
+      }
+    }
+  }
+  return null;
+}
+
+/** Hertel-Mehlhorn-style merge: combine adjacent convex pieces whose union stays convex. */
+function mergeConvexPiecesXY(pieces: Pt[][]): Pt[][] {
+  let list = pieces.slice();
+  let didMerge = true;
+  while (didMerge) {
+    didMerge = false;
+    outer:
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const m = tryMergeXY(list[i], list[j]);
+        if (m) {
+          list = [m, ...list.filter((_, k) => k !== i && k !== j)];
+          didMerge = true;
+          break outer;
+        }
+      }
+    }
+  }
+  return list;
+}
+
+/** Drop vertices that would create edges shorter than minLen (incl. the closing edge). */
+function removeShortEdgesXY(ring: Pt[], minLen: number): Pt[] {
+  if (ring.length < 3) return ring;
+  const out: Pt[] = [ring[0]];
+  for (let i = 1; i < ring.length; i++) {
+    const last = out[out.length - 1];
+    if (Math.hypot(ring[i].x - last.x, ring[i].y - last.y) >= minLen) out.push(ring[i]);
+  }
+  while (out.length >= 3 && Math.hypot(out[out.length - 1].x - out[0].x, out[out.length - 1].y - out[0].y) < minLen) {
+    out.pop();
+  }
+  return out;
+}
+
+/** Clip a convex polygon to the half-plane { P : (P - O)·N >= 0 } (Sutherland-Hodgman). */
+function clipHalfPlaneXY(poly: Pt[], ox: number, oy: number, nx: number, ny: number): Pt[] {
+  const res: Pt[] = [];
+  const m = poly.length;
+  for (let i = 0; i < m; i++) {
+    const P = poly[i], Q = poly[(i + 1) % m];
+    const dP = (P.x - ox) * nx + (P.y - oy) * ny;
+    const dQ = (Q.x - ox) * nx + (Q.y - oy) * ny;
+    if (dP >= 0) res.push(P);
+    if ((dP >= 0) !== (dQ >= 0)) {
+      const t = dP / (dP - dQ);
+      res.push({ x: P.x + t * (Q.x - P.x), y: P.y + t * (Q.y - P.y) });
+    }
+  }
+  return res;
+}
+
+/**
+ * Offset a convex CCW polygon inward by d via half-plane intersection.
+ * Robust by construction: clipping a convex polygon against half-planes can
+ * never self-intersect, and collapsed edges naturally disappear. Returns null
+ * when the polygon collapses (no area left).
+ */
+function offsetConvexInwardXY(poly: Pt[], d: number): Pt[] | null {
+  let out = poly;
+  const n = poly.length;
+  for (let i = 0; i < n; i++) {
+    const a = poly[i], b = poly[(i + 1) % n];
+    let dx = b.x - a.x, dy = b.y - a.y;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-9) continue;
+    dx /= len; dy /= len;
+    const nx = -dy, ny = dx;            // inward normal (left side for CCW)
+    const ox = a.x + nx * d, oy = a.y + ny * d; // edge line shifted inward by d
+    out = clipHalfPlaneXY(out, ox, oy, nx, ny);
+    if (out.length < 3) return null;
+  }
+  if (signedAreaXY(out) <= 1e-6) return null;
+  return out;
+}
+
+/**
+ * Approximate the medial spine of a convex polygon: offset it inward until it
+ * nearly collapses, then take the two farthest points of the residual sliver.
+ * Returns the spine endpoints, or null if the polygon collapses to ~a point.
+ */
+function spineOfConvexXY(ring: Pt[]): [Pt, Pt] | null {
+  const c = centroidXY(ring);
+  let maxR = 0;
+  for (const p of ring) maxR = Math.max(maxR, Math.hypot(p.x - c.x, p.y - c.y));
+  let lo = 0, hi = maxR;
+  let best: Pt[] | null = null;
+  for (let it = 0; it < 24; it++) {
+    const mid = (lo + hi) / 2;
+    const off = offsetConvexInwardXY(ring, mid);
+    if (off) { lo = mid; best = off; } else hi = mid;
+  }
+  if (!best || best.length < 2) return null;
+  let a = best[0], b = best[0], d2 = -1;
+  for (let i = 0; i < best.length; i++) {
+    for (let j = i + 1; j < best.length; j++) {
+      const dd = (best[i].x - best[j].x) ** 2 + (best[i].y - best[j].y) ** 2;
+      if (dd > d2) { d2 = dd; a = best[i]; b = best[j]; }
+    }
+  }
+  return [a, b];
+}
+
+/**
+ * Generate a polygon lawnmower (contour-offset) pattern.
+ *
+ * The (possibly concave) polygon is first split into convex pieces. Each convex
+ * piece is covered by concentric inward-offset rings (convex pieces only ever
+ * shrink — they never pinch off into islands). Rings are flown outer → inner,
+ * each as a closed loop, connected to the next inner ring with a short connector.
+ * Pieces are flown sequentially with travel legs between them.
+ *
+ * Stop criterion per piece: when an inner ring's shortest edge would fall below
+ * targetLineSpacing (same idea as the rectangle lawnmower).
+ *
+ * `reverse` flips the whole flight order.
+ */
+export function generatePolygonLawnmower(
+  params: PolygonPatternParams
+): SurveyPathSegment[] {
+  const {
+    points, baseAltitude, baseSpeed,
+    targetLineSpacing, reverse = false,
+    altMode = 'relative',
+    userActionStartFlags = 0,
+    userActionTrackFlags = 0,
+    userActionEndFlags = 0,
+  } = params;
+
+  if (points.length < 3 || targetLineSpacing <= 0) return [];
+
+  const centroid = polygonCentroid(points);
+  const sLat = 111320, sLng = 111320 * Math.cos((centroid.lat * Math.PI) / 180);
+  const toXY = (p: LngLat): Pt => ({ x: (p.lng - centroid.lng) * sLng, y: (p.lat - centroid.lat) * sLat });
+  const toLL = (q: Pt): LngLat => ({ lat: centroid.lat + q.y / sLat, lng: centroid.lng + q.x / sLng });
+
+  // Convex decomposition, then merge adjacent pieces back into larger convex
+  // polygons (fewer triangles — two triangles forming a convex quad re-merge).
+  const pieces = mergeConvexPiecesXY(decomposeConvexXY(points.map(toXY)));
+
+  // Collect rings per zone (one zone = one convex piece). Offset until the piece
+  // collapses, simplify away sub-spacing edges, and capture a final spine track.
+  interface Zone { rings: LngLat[][]; spine: [LngLat, LngLat] | null; }
+  const zones: Zone[] = [];
+  for (const piece of pieces) {
+    let cur: Pt[] = ensureCCW(piece);
+    const rawRings: Pt[][] = [];
+    let guard = 0;
+    while (cur.length >= 3 && guard++ < 500) {
+      rawRings.push(cur);
+      const next = offsetConvexInwardXY(cur, targetLineSpacing);
+      if (!next) break;
+      cur = next;
+    }
+    if (rawRings.length === 0) continue;
+
+    const rings: LngLat[][] = [];
+    for (const ring of rawRings) {
+      const cleaned = removeShortEdgesXY(ring, targetLineSpacing);
+      if (cleaned.length >= 3) rings.push(cleaned.map(toLL));
+    }
+    // Final centre track: a single line along the medial spine of the innermost
+    // ring — only if it still spans > lineSpacing. Round remainders collapse to
+    // ~a point → no extra waypoint.
+    let spine: [LngLat, LngLat] | null = null;
+    const sp = spineOfConvexXY(rawRings[rawRings.length - 1]);
+    if (sp) {
+      const len = Math.hypot(sp[0].x - sp[1].x, sp[0].y - sp[1].y);
+      if (len >= targetLineSpacing) spine = [toLL(sp[0]), toLL(sp[1])];
+    }
+    if (rings.length === 0 && !spine) continue;
+    zones.push({ rings, spine });
+  }
+  if (zones.length === 0) return [];
+
+  const makeWp = (p: LngLat, flags: number): SurveyWaypoint => ({
+    ...p, alt: baseAltitude, speed: baseSpeed, altMode, userActionFlags: flags,
+  });
+  const nearestIdx = (ring: LngLat[], ref: { lat: number; lng: number }): number => {
+    let best = Infinity, idx = 0;
+    for (let k = 0; k < ring.length; k++) {
+      const dl = ring[k].lat - ref.lat, dg = ring[k].lng - ref.lng;
+      const dd = dl * dl + dg * dg;
+      if (dd < best) { best = dd; idx = k; }
+    }
+    return idx;
+  };
+
+  const segments: SurveyPathSegment[] = [];
+  let prevEnd: SurveyWaypoint | null = null;
+
+  for (const zone of zones) {
+    // Each zone is ONE continuous survey path. Rings are flown open; the entry
+    // into each inner ring is offset by one vertex past the nearest one, so the
+    // ring-to-ring step is a diagonal (no perpendicular hop, no re-flown point).
+    const zonePts: SurveyWaypoint[] = [];
+    for (const ring of zone.rings) {
+      let startIdx = 0;
+      if (zonePts.length > 0) {
+        startIdx = (nearestIdx(ring, zonePts[zonePts.length - 1]) + 1) % ring.length;
+      } else if (prevEnd) {
+        startIdx = nearestIdx(ring, prevEnd); // first ring: short entry from previous zone
+      }
+      const ordered = [...ring.slice(startIdx), ...ring.slice(0, startIdx)];
+      for (const p of ordered) zonePts.push(makeWp(p, userActionTrackFlags));
+    }
+    if (zone.spine) {
+      let sp = zone.spine;
+      if (zonePts.length > 0) {
+        const last = zonePts[zonePts.length - 1];
+        const d0 = (sp[0].lat - last.lat) ** 2 + (sp[0].lng - last.lng) ** 2;
+        const d1 = (sp[1].lat - last.lat) ** 2 + (sp[1].lng - last.lng) ** 2;
+        if (d1 < d0) sp = [sp[1], sp[0]];
+      }
+      zonePts.push(makeWp(sp[0], userActionTrackFlags));
+      zonePts.push(makeWp(sp[1], userActionTrackFlags));
+    }
+    if (zonePts.length === 0) continue;
+
+    // Transfer leg between zones (only here — never inside a zone)
+    if (prevEnd) {
+      segments.push({ kind: 'turn', points: [{ ...prevEnd, userActionFlags: 0 }, { ...zonePts[0] }] });
+    }
+    segments.push({ kind: 'survey', points: zonePts });
+    prevEnd = zonePts[zonePts.length - 1];
+  }
+
+  if (reverse) {
+    segments.reverse();
+    for (const s of segments) s.points.reverse();
+  }
+
+  // Global start/end user-action flags on the very first / last survey waypoint
+  const surveySegs = segments.filter(s => s.kind === 'survey');
+  if (surveySegs.length > 0) {
+    surveySegs[0].points[0].userActionFlags = userActionStartFlags;
+    const last = surveySegs[surveySegs.length - 1];
+    last.points[last.points.length - 1].userActionFlags = userActionEndFlags;
   }
 
   return segments;

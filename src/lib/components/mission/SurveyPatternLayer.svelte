@@ -13,6 +13,7 @@
     generateCircleStepped,
     generateSpiral,
     generatePolygonZigzag,
+    generatePolygonLawnmower,
     polygonCentroid,
     isPolygonSelfIntersecting,
     updateRectangleFromDraggedCenter,
@@ -483,7 +484,7 @@
     if (!isDragging) {
       if (shape !== 'rectangle' && shape !== 'rectangle-lawnmower') removeEditingMarkers();
       if (shape !== 'circle' && shape !== 'spiral') removeCircleEditingMarkers();
-      if (shape !== 'polygon') removePolygonEditingMarkers();
+      if (shape !== 'polygon' && shape !== 'polygon-lawnmower') removePolygonEditingMarkers();
     }
 
     const centerLL: L.LatLngExpression = [p.center.lat, p.center.lng];
@@ -565,7 +566,7 @@
       const segments = generateSpiral(p as CirclePatternParams);
       buildPreviewPath(segments);
 
-    } else if (shape === 'polygon') {
+    } else if (shape === 'polygon' || shape === 'polygon-lawnmower') {
       const p_pts = (config.params as PolygonPatternParams).points;
       if (p_pts && p_pts.length >= 3) {
         const shapeLL = p_pts.map((pt: LngLat) => [pt.lat, pt.lng] as [number, number]);
@@ -588,7 +589,9 @@
         }
 
         if (!isPolygonSelfIntersecting(p_pts)) {
-          const segs = generatePolygonZigzag(config.params as PolygonPatternParams);
+          const segs = shape === 'polygon-lawnmower'
+            ? generatePolygonLawnmower(config.params as PolygonPatternParams)
+            : generatePolygonZigzag(config.params as PolygonPatternParams);
           buildPreviewPath(segs);
         }
       }
@@ -654,14 +657,16 @@
         ? generateSpiral(dragParams)
         : generateCircleStepped(dragParams);
       buildPreviewPath(segments);
-    } else if (config.shape === 'polygon' && _polygonDragTempPoints) {
+    } else if ((config.shape === 'polygon' || config.shape === 'polygon-lawnmower') && _polygonDragTempPoints) {
       const pts = _polygonDragTempPoints;
       if (shapeLayer instanceof L.Polygon) shapeLayer.setLatLngs(pts.map((pt: LngLat) => [pt.lat, pt.lng] as [number, number]));
       const c = polygonCentroid(pts);
       polygonCenterMarker?.setLatLng([c.lat, c.lng]);
       pts.forEach((pt: LngLat, i: number) => polygonCornerMarkers[i]?.setLatLng([pt.lat, pt.lng]));
       if (!isPolygonSelfIntersecting(pts)) {
-        const segs = generatePolygonZigzag({ ...(config.params as PolygonPatternParams), points: pts });
+        const segs = config.shape === 'polygon-lawnmower'
+          ? generatePolygonLawnmower({ ...(config.params as PolygonPatternParams), points: pts })
+          : generatePolygonZigzag({ ...(config.params as PolygonPatternParams), points: pts });
         buildPreviewPath(segs);
       }
     }

@@ -122,7 +122,7 @@ export function switchShape(newShape: SurveyShape) {
 
   const isRect    = (s: SurveyShape) => s === 'rectangle' || s === 'rectangle-lawnmower';
   const isCircle  = (s: SurveyShape) => s === 'circle'    || s === 'spiral';
-  const isPolygon = (s: SurveyShape) => s === 'polygon';
+  const isPolygon = (s: SurveyShape) => s === 'polygon' || s === 'polygon-lawnmower';
   const familyOf  = (s: SurveyShape): 'rect' | 'circle' | 'polygon' | null =>
     isRect(s) ? 'rect' : isCircle(s) ? 'circle' : isPolygon(s) ? 'polygon' : null;
 
@@ -191,7 +191,7 @@ export function switchShape(newShape: SurveyShape) {
         });
       }
       activeSurveyPattern.config = {
-        shape: 'polygon',
+        shape: newShape,
         params: {
           points: pts,
           stayInsideArea: false,
@@ -257,7 +257,7 @@ export function applyCircleDragUpdate(update: Partial<CirclePatternParams>) {
 }
 
 export function updatePolygonParams(updates: Partial<PolygonPatternParams>) {
-  if (!activeSurveyPattern.config || activeSurveyPattern.config.shape !== 'polygon') return;
+  if (!activeSurveyPattern.config || !['polygon', 'polygon-lawnmower'].includes(activeSurveyPattern.config.shape)) return;
 
   const current = activeSurveyPattern.config.params as PolygonPatternParams;
   activeSurveyPattern.config = {
@@ -270,7 +270,7 @@ export function updatePolygonParams(updates: Partial<PolygonPatternParams>) {
  * Called from the map layer when polygon points or geometry change (drag / insert / delete vertex).
  */
 export function applyPolygonDragUpdate(update: Partial<PolygonPatternParams>) {
-  if (!activeSurveyPattern.config || activeSurveyPattern.config.shape !== 'polygon') return;
+  if (!activeSurveyPattern.config || !['polygon', 'polygon-lawnmower'].includes(activeSurveyPattern.config.shape)) return;
 
   const current = activeSurveyPattern.config.params as PolygonPatternParams;
   activeSurveyPattern.config = {

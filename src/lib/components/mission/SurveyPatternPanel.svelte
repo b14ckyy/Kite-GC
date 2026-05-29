@@ -19,6 +19,7 @@
     generateCircleStepped,
     generateSpiral,
     generatePolygonZigzag,
+    generatePolygonLawnmower,
     type SurveyWaypoint,
   } from '$lib/helpers/surveyPatterns';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
@@ -129,7 +130,7 @@
   }
 
   function handlePolygonParamChange() {
-    if (activeSurveyPattern.config?.shape === 'polygon') {
+    if (activeSurveyPattern.config && ['polygon', 'polygon-lawnmower'].includes(activeSurveyPattern.config.shape)) {
       updatePolygonParams(polygonParams);
     }
   }
@@ -192,6 +193,14 @@
           for (const pt of seg.points) wps.push(pt);
         }
       }
+    } else if (cfg.shape === 'polygon-lawnmower') {
+      const p = cfg.params as PolygonPatternParams;
+      const segments = generatePolygonLawnmower(p);
+      for (const seg of segments) {
+        if (seg.kind === 'survey') {
+          for (const pt of seg.points) wps.push(pt);
+        }
+      }
     } else if (cfg.shape === 'spiral') {
       const p = cfg.params as CirclePatternParams;
       const segments = generateSpiral(p);
@@ -200,9 +209,6 @@
           for (const pt of seg.points) wps.push(pt);
         }
       }
-    } else {
-      // Other shapes: placeholder for now (will be implemented in later phases)
-      console.log('[Pattern] Generation for', cfg.shape, 'not yet implemented — using empty set');
     }
 
     if (wps.length === 0) {
@@ -278,7 +284,7 @@
 
   // Sync polygon params from store → local state (includes updated points from map drag)
   $effect(() => {
-    if (activeSurveyPattern.config?.shape === 'polygon') {
+    if (activeSurveyPattern.config && ['polygon', 'polygon-lawnmower'].includes(activeSurveyPattern.config.shape)) {
       polygonParams = { ...(activeSurveyPattern.config.params as PolygonPatternParams) };
     }
   });
@@ -314,6 +320,7 @@
       cfg.shape === 'circle'             ? generateCircleStepped(circleParams) :
       cfg.shape === 'spiral'             ? generateSpiral(circleParams) :
       cfg.shape === 'polygon' && polygonParams.points.length >= 3 ? generatePolygonZigzag(polygonParams) :
+      cfg.shape === 'polygon-lawnmower' && polygonParams.points.length >= 3 ? generatePolygonLawnmower(polygonParams) :
       [];
     return segs.reduce((s, seg) => seg.kind === 'survey' ? s + seg.points.length : s, 0);
   });
@@ -570,16 +577,17 @@
         </div>
       </div>
 
-    {:else if activeSurveyPattern.config?.shape === 'polygon'}
+    {:else if activeSurveyPattern.config?.shape === 'polygon' || activeSurveyPattern.config?.shape === 'polygon-lawnmower'}
 
-      <!-- Track Orientation (always on for polygon) -->
-      <NumberStepper label={$t('survey.trackOrientationVal')} bind:value={polygonParams.trackOrientation} min={0} max={360} step={5} decimals={0} onchange={handlePolygonParamChange} />
+      {#if activeSurveyPattern.config?.shape === 'polygon'}
+        <!-- ZigZag only: track orientation + stay-inside toggle -->
+        <NumberStepper label={$t('survey.trackOrientationVal')} bind:value={polygonParams.trackOrientation} min={0} max={360} step={5} decimals={0} onchange={handlePolygonParamChange} />
 
-      <!-- Stay inside area (connected fill) -->
-      <label class="toggle-row">
-        <input type="checkbox" bind:checked={polygonParams.stayInsideArea} onchange={handlePolygonParamChange} />
-        <span>{$t('survey.stayInsideArea')}</span>
-      </label>
+        <label class="toggle-row">
+          <input type="checkbox" bind:checked={polygonParams.stayInsideArea} onchange={handlePolygonParamChange} />
+          <span>{$t('survey.stayInsideArea')}</span>
+        </label>
+      {/if}
 
       <!-- Line Spacing + WP count -->
       <div class="spacing-wrapper">
@@ -591,9 +599,11 @@
         {/if}
       </div>
 
-      <!-- Turn Distance + Reverse -->
+      <!-- Turn Distance (zigzag only) + Reverse -->
       <div class="param-row">
-        <NumberStepper label={$t('survey.turnDistance')} bind:value={polygonParams.turnDistance} min={0} step={5} decimals={0} onchange={handlePolygonParamChange} />
+        {#if activeSurveyPattern.config?.shape === 'polygon'}
+          <NumberStepper label={$t('survey.turnDistance')} bind:value={polygonParams.turnDistance} min={0} step={5} decimals={0} onchange={handlePolygonParamChange} />
+        {/if}
         <label class="toggle-row">
           <input type="checkbox" bind:checked={polygonParams.reverse} onchange={handlePolygonParamChange} />
           <span>{$t('survey.reverse')}</span>
@@ -616,37 +626,73 @@
         </select>
       </div>
 
-      <!-- User Action Triggers: Line Start / Line End -->
+      <!-- User Action Triggers -->
       <div class="section-label">{$t('survey.userActionTrigger')}</div>
-      <div class="ua-grid">
-        <div class="ua-col">
-          <div class="ua-col-label">{$t('survey.lineStart')}</div>
-          <div class="ua-checks">
-            {#each [1,2,3,4] as n}
-              <label class="ua-check-item">
-                <input type="checkbox" checked={!!(polygonParams.userActionLineStartFlags & (1 << (n-1)))} onchange={() => { polygonParams.userActionLineStartFlags ^= (1 << (n-1)); handlePolygonParamChange(); }} />
-                <span>{n}</span>
-              </label>
-            {/each}
+      {#if activeSurveyPattern.config?.shape === 'polygon-lawnmower'}
+        <!-- Lawnmower: Start / Track / End -->
+        <div class="ua-grid">
+          <div class="ua-col">
+            <div class="ua-col-label">Start</div>
+            <div class="ua-checks">
+              {#each [1,2,3,4] as n}
+                <label class="ua-check-item">
+                  <input type="checkbox" checked={!!(polygonParams.userActionStartFlags & (1 << (n-1)))} onchange={() => { polygonParams.userActionStartFlags ^= (1 << (n-1)); handlePolygonParamChange(); }} />
+                  <span>{n}</span>
+                </label>
+              {/each}
+            </div>
+          </div>
+          <div class="ua-col">
+            <div class="ua-col-label">Track</div>
+            <div class="ua-checks">
+              {#each [1,2,3,4] as n}
+                <label class="ua-check-item">
+                  <input type="checkbox" checked={!!(polygonParams.userActionTrackFlags & (1 << (n-1)))} onchange={() => { polygonParams.userActionTrackFlags ^= (1 << (n-1)); handlePolygonParamChange(); }} />
+                  <span>{n}</span>
+                </label>
+              {/each}
+            </div>
+          </div>
+          <div class="ua-col">
+            <div class="ua-col-label">End</div>
+            <div class="ua-checks">
+              {#each [1,2,3,4] as n}
+                <label class="ua-check-item">
+                  <input type="checkbox" checked={!!(polygonParams.userActionEndFlags & (1 << (n-1)))} onchange={() => { polygonParams.userActionEndFlags ^= (1 << (n-1)); handlePolygonParamChange(); }} />
+                  <span>{n}</span>
+                </label>
+              {/each}
+            </div>
           </div>
         </div>
-        <div class="ua-col">
-          <div class="ua-col-label">{$t('survey.lineEnd')}</div>
-          <div class="ua-checks">
-            {#each [1,2,3,4] as n}
-              <label class="ua-check-item">
-                <input type="checkbox" checked={!!(polygonParams.userActionLineEndFlags & (1 << (n-1)))} onchange={() => { polygonParams.userActionLineEndFlags ^= (1 << (n-1)); handlePolygonParamChange(); }} />
-                <span>{n}</span>
-              </label>
-            {/each}
+      {:else}
+        <!-- ZigZag: Line Start / Line End -->
+        <div class="ua-grid">
+          <div class="ua-col">
+            <div class="ua-col-label">{$t('survey.lineStart')}</div>
+            <div class="ua-checks">
+              {#each [1,2,3,4] as n}
+                <label class="ua-check-item">
+                  <input type="checkbox" checked={!!(polygonParams.userActionLineStartFlags & (1 << (n-1)))} onchange={() => { polygonParams.userActionLineStartFlags ^= (1 << (n-1)); handlePolygonParamChange(); }} />
+                  <span>{n}</span>
+                </label>
+              {/each}
+            </div>
+          </div>
+          <div class="ua-col">
+            <div class="ua-col-label">{$t('survey.lineEnd')}</div>
+            <div class="ua-checks">
+              {#each [1,2,3,4] as n}
+                <label class="ua-check-item">
+                  <input type="checkbox" checked={!!(polygonParams.userActionLineEndFlags & (1 << (n-1)))} onchange={() => { polygonParams.userActionLineEndFlags ^= (1 << (n-1)); handlePolygonParamChange(); }} />
+                  <span>{n}</span>
+                </label>
+              {/each}
+            </div>
           </div>
         </div>
-      </div>
+      {/if}
 
-    {:else}
-      <div class="not-implemented">
-        {@html _t('survey.notImplemented', { shape: activeSurveyPattern.config?.shape ?? '?' })}
-      </div>
     {/if}
   </div>
 
@@ -794,13 +840,6 @@
   .ua-check-item span {
     font-size: 10px;
     color: #666;
-  }
-
-  .not-implemented {
-    padding: 8px;
-    color: #888;
-    font-size: 12px;
-    font-style: italic;
   }
 
   .alt-type-row {
