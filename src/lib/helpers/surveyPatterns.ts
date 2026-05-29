@@ -729,7 +729,10 @@ export function generateSpiral(
     totalTurned += dθ;
   }
 
-  if (allPts.length < 2) return [];
+  if (allPts.length < 1) return [];
+
+  // Always terminate at the exact center point
+  allPts.push({ pt: center, flags: 0 });
 
   if (reverse) allPts.reverse();
 

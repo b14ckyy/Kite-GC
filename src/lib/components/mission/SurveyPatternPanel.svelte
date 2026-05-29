@@ -20,6 +20,7 @@
   } from '$lib/helpers/surveyPatterns';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+  import { getTotalWpCount, MAX_WAYPOINTS_TOTAL } from '$lib/stores/mission';
 
   // Helper: untyped $t wrapper for dynamic params (svelte-i18n types are too strict)
   function _t(id: string, params?: Record<string, string>): string {
@@ -253,6 +254,22 @@
     }
   });
 
+  // Mission WP count at pattern-mode entry (static: mission can't change while editing)
+  const missionWpCount = getTotalWpCount();
+
+  // Reactive WP count for the current pattern — recomputes on any param change
+  let patternWpCount = $derived.by(() => {
+    const cfg = activeSurveyPattern.config;
+    if (!cfg) return 0;
+    const segs =
+      cfg.shape === 'rectangle'          ? generateRectangleZigzag(rectangleParams) :
+      cfg.shape === 'rectangle-lawnmower'? generateRectangleLawnmower(rectangleParams) :
+      cfg.shape === 'circle'             ? generateCircleStepped(circleParams) :
+      cfg.shape === 'spiral'             ? generateSpiral(circleParams) :
+      [];
+    return segs.reduce((s, seg) => seg.kind === 'survey' ? s + seg.points.length : s, 0);
+  });
+
   console.log('[DEBUG] SurveyPatternPanel mounted');
 </script>
 
@@ -288,7 +305,10 @@
         <div class="spacing-wrapper">
           <NumberStepper label={$t('survey.lineSpacing')} bind:value={rectangleParams.targetLineSpacing} min={5} step={5} decimals={0} onchange={handleParamChange} />
           {#if rectangleParams.targetLineSpacing > 0 && rectangleParams.width > 0}
-            <span class="spacing-info">{_t('survey.tracksInfo', { spacing: String(rectangleParams.actualLineSpacing.toFixed(1)), count: String(Math.ceil(rectangleParams.width / rectangleParams.targetLineSpacing)) })}</span>
+            <div class="info-row">
+              <span class="spacing-info">≈{rectangleParams.actualLineSpacing.toFixed(1)}m</span>
+              <span class="spacing-info" class:over-limit={missionWpCount + patternWpCount > MAX_WAYPOINTS_TOTAL}>{_t('survey.wpCount', { count: String(patternWpCount) })}</span>
+            </div>
           {/if}
         </div>
         <NumberStepper label={$t('survey.turnDistance')} bind:value={rectangleParams.turnDistance} min={0} step={5} decimals={0} onchange={handleParamChange} />
@@ -422,6 +442,16 @@
       <div class="param-row">
         <div class="spacing-wrapper">
           <NumberStepper label={$t('survey.lineSpacing')} bind:value={circleParams.targetLineSpacing} min={5} step={5} decimals={0} onchange={handleCircleParamChange} />
+          {#if circleParams.targetLineSpacing > 0 && circleParams.radius > 0}
+            <div class="info-row">
+              <span class="spacing-info" class:over-limit={missionWpCount + patternWpCount > MAX_WAYPOINTS_TOTAL}>{_t('survey.wpCount', { count: String(patternWpCount) })}</span>
+              {#if activeSurveyPattern.config?.shape === 'circle'}
+                <span class="spacing-info">{_t('survey.ringInfo', { count: String(Math.max(1, Math.ceil(circleParams.radius / circleParams.targetLineSpacing))) })}</span>
+              {:else}
+                <span class="spacing-info">{_t('survey.rotationInfo', { count: String(Math.max(1, Math.ceil(circleParams.radius / circleParams.targetLineSpacing))) })}</span>
+              {/if}
+            </div>
+          {/if}
         </div>
         <NumberStepper label={$t('survey.ringStartAngle')} bind:value={circleParams.trackOrientation} min={0} max={359} step={5} decimals={0} onchange={handleCircleParamChange} />
       </div>
@@ -573,6 +603,20 @@
     font-size: 11px;
     color: #888;
     font-style: italic;
+    padding-left: 4px;
+  }
+
+  .spacing-info.over-limit {
+    color: #d40000;
+    font-style: normal;
+    font-weight: 600;
+  }
+
+  .info-row {
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+    flex-wrap: wrap;
     padding-left: 4px;
   }
 

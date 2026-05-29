@@ -484,10 +484,13 @@
       + p.userActionLineStartFlags + p.userActionLineEndFlags;
     void _trigger;
 
-    // Keep actualLineSpacing in sync for rectangle shapes
+    // Keep actualLineSpacing in sync for rectangle shapes.
+    // Classic zigzag: tracks are fitted evenly across the width → spacing differs from target.
+    // Lawnmower and track-orientation zigzag: generator uses targetLineSpacing as-is → spacing = target.
     if ((shape === 'rectangle' || shape === 'rectangle-lawnmower') && p.targetLineSpacing > 0 && p.width > 0) {
-      const numTracks = Math.max(1, Math.ceil(p.width / p.targetLineSpacing));
-      const actualSpacing = p.width / Math.max(1, numTracks - 1);
+      const actualSpacing = (shape === 'rectangle-lawnmower' || p.trackOrientationEnabled)
+        ? p.targetLineSpacing
+        : p.width / Math.max(1, Math.ceil(p.width / p.targetLineSpacing) - 1);
       if (Math.abs(p.actualLineSpacing - actualSpacing) > 0.01) {
         p.actualLineSpacing = actualSpacing;
       }

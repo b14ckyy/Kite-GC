@@ -373,6 +373,9 @@
     "radius": "Radius (m)",
     "ringPoints": "Ring-Punkte",
     "ringStartAngle": "Startwinkel (°)",
+    "wpCount": "{count} WPs",
+    "ringInfo": "{count} Ringe",
+    "rotationInfo": "{count} Drehungen",
     "loading": "Lade Pattern-Editor...",
     "error": "Fehler beim Laden des Pattern-Editors: {error}"
   },
