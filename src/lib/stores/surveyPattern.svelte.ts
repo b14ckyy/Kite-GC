@@ -105,6 +105,67 @@ export function enterPatternMode(initialShape: SurveyShape = 'rectangle', initia
   activeSurveyPattern.isActive = true;
 }
 
+/**
+ * Switch to a different shape at runtime.
+ * - rectangle ↔ rectangle-lawnmower: preserves all params, only the shape name changes
+ * - any other transition: resets to shape-appropriate defaults, preserves center + common base params
+ */
+export function switchShape(newShape: SurveyShape) {
+  const current = activeSurveyPattern.config;
+  if (!current) return;
+
+  const isRect = (s: SurveyShape) => s === 'rectangle' || s === 'rectangle-lawnmower';
+
+  if (isRect(current.shape) && isRect(newShape)) {
+    // Same param family — just rename
+    activeSurveyPattern.config = { ...current, shape: newShape } as any;
+    return;
+  }
+
+  // Different family: preserve center + base params, apply shape-specific geometry defaults
+  const base = current.params as any;
+  const center: LngLat = 'center' in base ? base.center : { lat: 48.0, lng: 11.0 };
+  const commonBase = {
+    shapeOrientation:          base.shapeOrientation          ?? 90,
+    baseAltitude:              base.baseAltitude              ?? 50,
+    baseSpeed:                 base.baseSpeed                 ?? 15,
+    targetLineSpacing:         base.targetLineSpacing         ?? 50,
+    actualLineSpacing:         base.actualLineSpacing         ?? 50,
+    turnDistance:              base.turnDistance              ?? 0,
+    reverse:                   base.reverse                   ?? false,
+    clockwise:                 base.clockwise                 ?? true,
+    startCorner:               base.startCorner               ?? 1,
+    trackOrientationEnabled:   base.trackOrientationEnabled   ?? false,
+    trackOrientation:          base.trackOrientation          ?? 0,
+    altMode:                   base.altMode                   ?? 'relative' as AltMode,
+    userActionLineStartFlags:  base.userActionLineStartFlags  ?? 0,
+    userActionLineEndFlags:    base.userActionLineEndFlags    ?? 0,
+    userActionStartFlags:      base.userActionStartFlags      ?? 0,
+    userActionTrackFlags:      base.userActionTrackFlags      ?? 0,
+    userActionEndFlags:        base.userActionEndFlags        ?? 0,
+  };
+
+  if (isRect(newShape)) {
+    activeSurveyPattern.config = {
+      shape: newShape,
+      params: {
+        ...commonBase,
+        center,
+        length: 400,
+        width:  200,
+        shapeOrientation: 90,
+      } as RectanglePatternParams,
+    } as any;
+  } else {
+    // Not yet implemented (circle, spiral, polygon…) — store minimal valid params so
+    // the map layer can render the placeholder and the panel shows "not implemented".
+    activeSurveyPattern.config = {
+      shape: newShape,
+      params: { ...commonBase, center } as any,
+    } as any;
+  }
+}
+
 export function exitPatternMode() {
   activeSurveyPattern.isActive = false;
   // Keep config alive so params persist when re-entering pattern mode

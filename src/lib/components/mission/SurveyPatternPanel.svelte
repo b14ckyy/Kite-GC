@@ -3,6 +3,7 @@
   import {
     activeSurveyPattern,
     exitPatternMode,
+    switchShape,
     updateRectangleParams,
     type RectanglePatternParams,
   } from '$lib/stores/surveyPattern.svelte';
@@ -27,8 +28,8 @@
   }
   let { ongenerate }: Props = $props();
 
-  // Local reactive copy for the rectangle (we start with Rectangle only in Phase 1)
-  let params = $state<RectanglePatternParams>({
+  // Local reactive copy for rectangle shapes
+  let rectangleParams = $state<RectanglePatternParams>({
     center: { lat: 0, lng: 0 },
     length: 400,
     width: 200,
@@ -63,7 +64,7 @@
 
   function handleParamChange() {
     if (activeSurveyPattern.config && ['rectangle', 'rectangle-lawnmower'].includes(activeSurveyPattern.config.shape)) {
-      updateRectangleParams(params);
+      updateRectangleParams(rectangleParams);
     }
   }
 
@@ -159,7 +160,7 @@
     exitPatternMode();
   }
 
-  // Sync from store when it changes (e.g. when entering with defaults)
+  // Sync rectangle params from store → local state (e.g. on enter or after map drag)
   let _syncing = false;
   $effect(() => {
     if (activeSurveyPattern.config && ['rectangle', 'rectangle-lawnmower'].includes(activeSurveyPattern.config.shape)) {
@@ -167,9 +168,9 @@
       const rounded = {
         ...raw,
         length: Math.round(raw.length * 10) / 10,
-        width: Math.round(raw.width * 10) / 10,
+        width:  Math.round(raw.width  * 10) / 10,
       };
-      params = rounded;
+      rectangleParams = rounded;
       // Push rounded values back to store once so drag doesn't leave unrounded residue
       if (!_syncing && (rounded.length !== raw.length || rounded.width !== raw.width)) {
         _syncing = true;
@@ -191,14 +192,7 @@
       <select 
         value={activeSurveyPattern.config?.shape || 'rectangle'}
         onchange={(e) => {
-          const newShape = (e.target as HTMLSelectElement).value as any;
-          if (activeSurveyPattern.config) {
-            // Reassign to ensure rune reactivity propagates to the map layer
-            activeSurveyPattern.config = {
-              ...activeSurveyPattern.config,
-              shape: newShape
-            } as any;
-          }
+          switchShape((e.target as HTMLSelectElement).value as any);
         }}
       >
         {#each availableShapes as shapeOption}
@@ -212,64 +206,64 @@
     {#if activeSurveyPattern.config?.shape === 'rectangle' || activeSurveyPattern.config?.shape === 'rectangle-lawnmower'}
       <!-- Row 1: Length + Width -->
       <div class="param-row">
-        <NumberStepper label={$t('survey.length')} bind:value={params.length} min={10} step={10} decimals={1} onchange={handleParamChange} />
-        <NumberStepper label={$t('survey.width')} bind:value={params.width} min={10} step={10} decimals={1} onchange={handleParamChange} />
+        <NumberStepper label={$t('survey.length')} bind:value={rectangleParams.length} min={10} step={10} decimals={1} onchange={handleParamChange} />
+        <NumberStepper label={$t('survey.width')} bind:value={rectangleParams.width} min={10} step={10} decimals={1} onchange={handleParamChange} />
       </div>
 
       <!-- Row 2: Line Spacing + Turn Distance -->
       <div class="param-row">
         <div class="spacing-wrapper">
-          <NumberStepper label={$t('survey.lineSpacing')} bind:value={params.targetLineSpacing} min={5} step={5} decimals={0} onchange={handleParamChange} />
-          {#if params.targetLineSpacing > 0 && params.width > 0}
-            <span class="spacing-info">{_t('survey.tracksInfo', { spacing: String(params.actualLineSpacing.toFixed(1)), count: String(Math.ceil(params.width / params.targetLineSpacing)) })}</span>
+          <NumberStepper label={$t('survey.lineSpacing')} bind:value={rectangleParams.targetLineSpacing} min={5} step={5} decimals={0} onchange={handleParamChange} />
+          {#if rectangleParams.targetLineSpacing > 0 && rectangleParams.width > 0}
+            <span class="spacing-info">{_t('survey.tracksInfo', { spacing: String(rectangleParams.actualLineSpacing.toFixed(1)), count: String(Math.ceil(rectangleParams.width / rectangleParams.targetLineSpacing)) })}</span>
           {/if}
         </div>
-        <NumberStepper label={$t('survey.turnDistance')} bind:value={params.turnDistance} min={0} step={5} decimals={0} onchange={handleParamChange} />
+        <NumberStepper label={$t('survey.turnDistance')} bind:value={rectangleParams.turnDistance} min={0} step={5} decimals={0} onchange={handleParamChange} />
       </div>
 
       <!-- Shape Orientation (solo) -->
-      <NumberStepper label={$t('survey.areaOrientation')} bind:value={params.shapeOrientation} min={0} max={90} step={5} decimals={0} onchange={handleParamChange} />
+      <NumberStepper label={$t('survey.areaOrientation')} bind:value={rectangleParams.shapeOrientation} min={0} max={90} step={5} decimals={0} onchange={handleParamChange} />
 
             <!-- Row 3: Reverse toggle + Clockwise (lawnmower) + Track Orientation (zigzag) or Start Corner (lawnmower) -->
             <div class="param-row">
               <label class="toggle-row">
-                <input type="checkbox" bind:checked={params.reverse} onchange={handleParamChange} />
+                <input type="checkbox" bind:checked={rectangleParams.reverse} onchange={handleParamChange} />
                 <span>{$t('survey.reverse')}</span>
               </label>
               {#if activeSurveyPattern.config?.shape === 'rectangle-lawnmower'}
                 <label class="toggle-row">
-                  <input type="checkbox" bind:checked={params.clockwise} onchange={handleParamChange} />
-                  <span>{params.clockwise ? $t('survey.counterClockwise') : $t('survey.clockwise')}</span>
+                  <input type="checkbox" bind:checked={rectangleParams.clockwise} onchange={handleParamChange} />
+                  <span>{rectangleParams.clockwise ? $t('survey.counterClockwise') : $t('survey.clockwise')}</span>
                 </label>
               {/if}
               {#if activeSurveyPattern.config?.shape === 'rectangle'}
                 <label class="toggle-row">
-                  <input type="checkbox" bind:checked={params.trackOrientationEnabled} onchange={handleParamChange} />
+                  <input type="checkbox" bind:checked={rectangleParams.trackOrientationEnabled} onchange={handleParamChange} />
                   <span>{$t('survey.trackOrientation')}</span>
                 </label>
               {/if}
             </div>
 
             <!-- Track Orientation value for zigzag (only when enabled) -->
-            {#if activeSurveyPattern.config?.shape === 'rectangle' && params.trackOrientationEnabled}
-              <NumberStepper label={$t('survey.trackOrientationVal')} bind:value={params.trackOrientation} min={0} max={360} step={5} decimals={0} onchange={handleParamChange} />
+            {#if activeSurveyPattern.config?.shape === 'rectangle' && rectangleParams.trackOrientationEnabled}
+              <NumberStepper label={$t('survey.trackOrientationVal')} bind:value={rectangleParams.trackOrientation} min={0} max={360} step={5} decimals={0} onchange={handleParamChange} />
             {/if}
 
             <!-- Start Corner for lawnmower -->
             {#if activeSurveyPattern.config?.shape === 'rectangle-lawnmower'}
-              <NumberStepper label="Start Corner" bind:value={params.startCorner} min={1} max={4} step={1} decimals={0} onchange={handleParamChange} />
+              <NumberStepper label="Start Corner" bind:value={rectangleParams.startCorner} min={1} max={4} step={1} decimals={0} onchange={handleParamChange} />
             {/if}
 
       <!-- Row 4: Base Altitude + Base Speed -->
       <div class="param-row">
-        <NumberStepper label={$t('survey.baseAlt')} bind:value={params.baseAltitude} min={0} step={5} decimals={0} onchange={handleParamChange} />
-        <NumberStepper label={$t('survey.baseSpeed')} bind:value={params.baseSpeed} min={1} step={1} decimals={0} onchange={handleParamChange} />
+        <NumberStepper label={$t('survey.baseAlt')} bind:value={rectangleParams.baseAltitude} min={0} step={5} decimals={0} onchange={handleParamChange} />
+        <NumberStepper label={$t('survey.baseSpeed')} bind:value={rectangleParams.baseSpeed} min={1} step={1} decimals={0} onchange={handleParamChange} />
       </div>
 
       <!-- Altitude Type dropdown -->
       <div class="param-row alt-type-row">
         <label class="alt-type-label">{$t('survey.altMode')}</label>
-        <select class="alt-type-select" bind:value={params.altMode} onchange={handleParamChange}>
+        <select class="alt-type-select" bind:value={rectangleParams.altMode} onchange={handleParamChange}>
           <option value="relative">{$t('survey.altModeRelative')}</option>
           <option value="amsl">{$t('survey.altModeAmsl')}</option>
           <option value="ground" disabled>{$t('survey.altModeGround')} — {$t('survey.comingSoon')}</option>
@@ -287,7 +281,7 @@
             <div class="ua-checks">
               {#each [1,2,3,4] as n}
                 <label class="ua-check-item">
-                  <input type="checkbox" checked={!!(params.userActionStartFlags & (1 << (n-1)))} onchange={() => { params.userActionStartFlags ^= (1 << (n-1)); handleParamChange(); }} />
+                  <input type="checkbox" checked={!!(rectangleParams.userActionStartFlags & (1 << (n-1)))} onchange={() => { rectangleParams.userActionStartFlags ^= (1 << (n-1)); handleParamChange(); }} />
                   <span>{n}</span>
                 </label>
               {/each}
@@ -298,7 +292,7 @@
             <div class="ua-checks">
               {#each [1,2,3,4] as n}
                 <label class="ua-check-item">
-                  <input type="checkbox" checked={!!(params.userActionTrackFlags & (1 << (n-1)))} onchange={() => { params.userActionTrackFlags ^= (1 << (n-1)); handleParamChange(); }} />
+                  <input type="checkbox" checked={!!(rectangleParams.userActionTrackFlags & (1 << (n-1)))} onchange={() => { rectangleParams.userActionTrackFlags ^= (1 << (n-1)); handleParamChange(); }} />
                   <span>{n}</span>
                 </label>
               {/each}
@@ -309,7 +303,7 @@
             <div class="ua-checks">
               {#each [1,2,3,4] as n}
                 <label class="ua-check-item">
-                  <input type="checkbox" checked={!!(params.userActionEndFlags & (1 << (n-1)))} onchange={() => { params.userActionEndFlags ^= (1 << (n-1)); handleParamChange(); }} />
+                  <input type="checkbox" checked={!!(rectangleParams.userActionEndFlags & (1 << (n-1)))} onchange={() => { rectangleParams.userActionEndFlags ^= (1 << (n-1)); handleParamChange(); }} />
                   <span>{n}</span>
                 </label>
               {/each}
@@ -324,7 +318,7 @@
             <div class="ua-checks">
               {#each [1,2,3,4] as n}
                 <label class="ua-check-item">
-                  <input type="checkbox" checked={!!(params.userActionLineStartFlags & (1 << (n-1)))} onchange={() => { params.userActionLineStartFlags ^= (1 << (n-1)); handleParamChange(); }} />
+                  <input type="checkbox" checked={!!(rectangleParams.userActionLineStartFlags & (1 << (n-1)))} onchange={() => { rectangleParams.userActionLineStartFlags ^= (1 << (n-1)); handleParamChange(); }} />
                   <span>{n}</span>
                 </label>
               {/each}
@@ -335,7 +329,7 @@
             <div class="ua-checks">
               {#each [1,2,3,4] as n}
                 <label class="ua-check-item">
-                  <input type="checkbox" checked={!!(params.userActionLineEndFlags & (1 << (n-1)))} onchange={() => { params.userActionLineEndFlags ^= (1 << (n-1)); handleParamChange(); }} />
+                  <input type="checkbox" checked={!!(rectangleParams.userActionLineEndFlags & (1 << (n-1)))} onchange={() => { rectangleParams.userActionLineEndFlags ^= (1 << (n-1)); handleParamChange(); }} />
                   <span>{n}</span>
                 </label>
               {/each}

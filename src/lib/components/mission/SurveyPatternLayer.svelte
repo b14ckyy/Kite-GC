@@ -238,9 +238,12 @@
 
       buildEditingMarkers(corners, p.center);
 
-      // Gray shape
-      if (shapeLayer) { shapeLayer.setLatLngs(shapeLatLngs); }
-      else {
+      // Gray shape — must be L.Polygon; if switching back from circle (L.Circle has no setLatLngs),
+      // remove the old layer first and create a fresh polygon.
+      if (shapeLayer && shapeLayer instanceof L.Polygon) {
+        shapeLayer.setLatLngs(shapeLatLngs);
+      } else {
+        if (shapeLayer) { try { map.removeLayer(shapeLayer); } catch {} shapeLayer = undefined; }
         shapeLayer = L.polygon(shapeLatLngs, {
           color: '#888888', weight: 2, fillColor: '#666666', fillOpacity: 0.25, dashArray: '4 2'
         }).addTo(map);
@@ -318,37 +321,35 @@
   //  REACTIVITY
   // ══════════════════════════════════════════════════════
 
-  let prevShape = $state<string | undefined>();
+  // Plain let — not reactive itself; only used to detect shape transitions inside the effect.
+  let prevShape: string | undefined;
 
-  // Effect 1: shape changes → full render
+  // Single effect: fires on shape change AND on any param change.
+  // Using a single effect avoids the double-render that two separate effects caused
+  // (prevShape as $state would reschedule a second effect via reactivity).
   $effect(() => {
     const isActive = activeSurveyPattern.isActive;
-    const shape = activeSurveyPattern.config?.shape;
+    const config = activeSurveyPattern.config;
 
-    if (!isActive || !activeSurveyPattern.config) {
+    if (!isActive || !config) {
       clearAll(); hasAutoFitted = false; prevShape = undefined;
       return;
     }
 
-    if (prevShape !== shape) {
-      prevShape = shape;
-      updatePreview();
-    }
-  });
-
-  // Effect 2: param changes from sidebar → rebuild path (but not during drag)
-  $effect(() => {
-    const isActive = activeSurveyPattern.isActive;
-    const config = activeSurveyPattern.config;
-    if (!isActive || !config) return;
-    if (prevShape !== config.shape) return; // handled by effect 1
-
-    // Subscribe to params by reading them (triggers reactivity on any param change)
+    const shape = config.shape;
     const p = config.params as any;
-    const _trigger = p.length + p.width + p.shapeOrientation + p.targetLineSpacing + p.turnDistance + p.reverse + p.clockwise + p.startCorner + p.trackOrientationEnabled + p.trackOrientation + p.userActionStartFlags + p.userActionTrackFlags + p.userActionEndFlags + p.userActionLineStartFlags + p.userActionLineEndFlags;
 
-    // Compute actualLineSpacing
-    if ((config.shape === 'rectangle' || config.shape === 'rectangle-lawnmower') && p.targetLineSpacing > 0 && p.width > 0) {
+    // Subscribe to all params so the effect re-runs on any param change.
+    // Use ?? 0 for shape-specific props absent on other shapes (e.g. circle has no length/width).
+    const _trigger = (p.length ?? 0) + (p.width ?? 0) + p.shapeOrientation + p.targetLineSpacing
+      + p.turnDistance + (p.reverse ? 1 : 0) + (p.clockwise ? 1 : 0) + p.startCorner
+      + (p.trackOrientationEnabled ? 1 : 0) + p.trackOrientation
+      + p.userActionStartFlags + p.userActionTrackFlags + p.userActionEndFlags
+      + p.userActionLineStartFlags + p.userActionLineEndFlags;
+    void _trigger;
+
+    // Keep actualLineSpacing in sync for rectangle shapes
+    if ((shape === 'rectangle' || shape === 'rectangle-lawnmower') && p.targetLineSpacing > 0 && p.width > 0) {
       const numTracks = Math.max(1, Math.ceil(p.width / p.targetLineSpacing));
       const actualSpacing = p.width / Math.max(1, numTracks - 1);
       if (Math.abs(p.actualLineSpacing - actualSpacing) > 0.01) {
@@ -356,9 +357,9 @@
       }
     }
 
-    // Rebuild path (always � updatePreview handles drag vs non-drag internally)
+    prevShape = shape;
     updatePreview();
   });
 
-  onDestroy(() => { clearAll(); });
+    onDestroy(() => { clearAll(); });
 </script>
