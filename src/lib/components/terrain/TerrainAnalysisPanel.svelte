@@ -14,7 +14,20 @@
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import { onDestroy } from 'svelte';
-  import { mission, launchPoint } from '$lib/stores/mission';
+  import { get } from 'svelte/store';
+  import {
+    mission,
+    launchPoint,
+    missionUpdateWp,
+    missionInsertWp,
+    getTotalWpCount,
+    MAX_WAYPOINTS_TOTAL,
+    WpAction,
+    ALT_MODE_AGL,
+    ALT_MODE_AMSL,
+    altFromM,
+    fromDeg,
+  } from '$lib/stores/mission';
   import {
     terrainAnalysis,
     terrainCursor,
@@ -23,6 +36,7 @@
     setTerrainHover,
     toggleTerrainPlaced,
     clearTerrainHover,
+    clearTerrainPlaced,
   } from '$lib/stores/terrainAnalysis';
   import {
     buildWaypointProfile,
@@ -30,14 +44,19 @@
     type ProfileData,
     type TrackPoint,
   } from '$lib/helpers/terrainProfile';
+  import { computeCorrection, type CorrectionResult } from '$lib/helpers/terrainCorrection';
   import TerrainProfileChart, { type HoverInfo } from './TerrainProfileChart.svelte';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
+  import type { DialogOptions } from '$lib/components/ConfirmDialog.svelte';
 
   let {
     track = [],
+    confirm,
   }: {
     /** Flown track (live temp-log or loaded blackbox) for Track mode */
     track?: TrackPoint[];
+    /** In-app dialog (from +page) for the APPLY confirmation */
+    confirm?: (opts: DialogOptions) => Promise<string | null>;
   } = $props();
 
   let data = $state<ProfileData | null>(null);
@@ -177,9 +196,9 @@
     return { startDist: t[first].dist, endDist: t[last].dist, min };
   });
 
-  const belowClearance = $derived(
-    activeRange.min != null && activeRange.min < $terrainAnalysis.groundClearance,
-  );
+  // Warn/colour at 95% of the target (5% grace) so exact-clearance isn't already red
+  const warnThreshold = $derived($terrainAnalysis.groundClearance * 0.95);
+  const belowClearance = $derived(activeRange.min != null && activeRange.min < warnThreshold);
 
   // Distance of the pinned map marker along the current profile (nearest sample
   // by lat/lon), so the chart can show it too. Hidden if the pin isn't on the
@@ -202,6 +221,129 @@
     if (best == null || bd > 0.002 * 0.002) return null;
     return best;
   });
+
+  // ── Terrain Correction (Waypoint mode) ─────────────────────────────
+  const maxWpNumber = $derived(
+    data && data.markers.length ? Math.max(...data.markers.map((m) => m.number)) : 1,
+  );
+
+  const correction = $derived.by<CorrectionResult | null>(() => {
+    const st = $terrainAnalysis;
+    if (!st.correctionEnabled || st.viewMode !== 'waypoint' || !data) return null;
+    if (data.markers.length < 2) return null;
+    return computeCorrection(data, {
+      mode: st.correctionMode,
+      groundClearance: st.groundClearance,
+      rangeStart: st.rangeStart,
+      rangeEnd: st.rangeEnd,
+      fixedWing: st.fixedWing,
+      climbAngle: st.climbAngleLimit,
+      descentAngle: st.descentAngleLimit,
+    });
+  });
+
+  const previewPath = $derived(correction ? correction.previewPath : null);
+  const showCorrection = $derived($terrainAnalysis.viewMode === 'waypoint' && !$terrainAnalysis.compact);
+  const canAddWp = $derived($terrainCursor.placed != null && placedDist != null && data != null);
+
+  function toggleCorrection() {
+    const st = get(terrainAnalysis);
+    const enabling = !st.correctionEnabled;
+    if (enabling) {
+      patchTerrainAnalysis({
+        correctionEnabled: true,
+        rangeStart: st.rangeStart > 0 ? st.rangeStart : 1,
+        rangeEnd: st.rangeEnd > 0 ? st.rangeEnd : maxWpNumber,
+      });
+    } else {
+      patchTerrainAnalysis({ correctionEnabled: false });
+    }
+  }
+
+  let applying = $state(false);
+  async function applyCorrection() {
+    const c = correction;
+    if (!c || c.changedCount === 0) return;
+    if (confirm) {
+      const ans = await confirm({
+        title: $t('terrain.applyTitle'),
+        message: $t('terrain.applyConfirm', { values: { changed: c.changedCount } }),
+        buttons: [{ label: $t('terrain.apply'), value: 'apply', primary: true }],
+      });
+      if (ans !== 'apply') return;
+    }
+    applying = true;
+    try {
+      for (const ch of c.changes) {
+        const wp = get(mission).waypoints[ch.index];
+        if (!wp) continue;
+        await missionUpdateWp(ch.index, {
+          ...wp,
+          altitude: altFromM(ch.aglValue),
+          alt_mode: ALT_MODE_AGL,
+        });
+      }
+    } catch (e) {
+      console.error('[terrain] apply correction failed', e);
+    } finally {
+      applying = false;
+    }
+  }
+
+  function setCorrectionMode(m: 'follow' | 'check') {
+    patchTerrainAnalysis({ correctionMode: m });
+  }
+
+  /** Interpolated mission-path MSL altitude at a distance (to place a WP on the track). */
+  function pathAltAtDist(d: number): number | null {
+    if (!data || data.markers.length === 0) return null;
+    const m = data.markers;
+    if (d <= m[0].dist) return m[0].altMsl;
+    if (d >= m[m.length - 1].dist) return m[m.length - 1].altMsl;
+    for (let i = 1; i < m.length; i++) {
+      if (d <= m[i].dist) {
+        const a = m[i - 1];
+        const b = m[i];
+        const t = (d - a.dist) / (b.dist - a.dist || 1);
+        return a.altMsl + (b.altMsl - a.altMsl) * t;
+      }
+    }
+    return m[m.length - 1].altMsl;
+  }
+
+  // Manually add a waypoint at the pinned marker — exactly on the current track.
+  // Then the user re-runs Terrain Follow to adjust it.
+  async function addWaypointAtMarker() {
+    const p = get(terrainCursor).placed;
+    if (!p || !data || placedDist == null) return;
+    if (getTotalWpCount() >= MAX_WAYPOINTS_TOTAL) {
+      if (confirm) await confirm({ title: $t('terrain.addWp'), message: $t('terrain.warnWpLimit') });
+      return;
+    }
+    const m = data.markers;
+    let leftIdx = -1;
+    for (let i = 0; i < m.length - 1; i++) {
+      if (placedDist >= m[i].dist && placedDist <= m[i + 1].dist) {
+        leftIdx = i;
+        break;
+      }
+    }
+    if (leftIdx < 0) return;
+    const afterIndex = m[leftIdx].index;
+    const altMsl = pathAltAtDist(placedDist) ?? m[leftIdx].altMsl;
+    await missionInsertWp(
+      afterIndex + 1,
+      WpAction.Waypoint,
+      fromDeg(p.lat),
+      fromDeg(p.lon),
+      altFromM(altMsl),
+      0,
+      0,
+      0,
+      ALT_MODE_AMSL,
+    );
+    clearTerrainPlaced();
+  }
 
   // Terrain availability: any defined elevation sample?
   const terrainAvailable = $derived(
@@ -269,6 +411,83 @@
         <span class="lg"><i class="sw unsafe"></i>{$t('terrain.unsafe')}</span>
       </div>
 
+      {#if showCorrection}
+        <div class="correction">
+          <label class="corr-head">
+            <input
+              type="checkbox"
+              checked={$terrainAnalysis.correctionEnabled}
+              onchange={toggleCorrection}
+            />
+            {$t('terrain.correction')}
+          </label>
+
+          {#if $terrainAnalysis.correctionEnabled}
+            <div class="seg corr-mode">
+              <button
+                class:active={$terrainAnalysis.correctionMode === 'follow'}
+                onclick={() => setCorrectionMode('follow')}
+              >
+                {$t('terrain.terrainFollow')}
+              </button>
+              <button
+                class:active={$terrainAnalysis.correctionMode === 'check'}
+                onclick={() => setCorrectionMode('check')}
+              >
+                {$t('terrain.clearanceCheck')}
+              </button>
+            </div>
+
+            <div class="ctrl">
+              <span>{$t('terrain.range')}</span>
+              <div class="range-row">
+                <NumberStepper bind:value={$terrainAnalysis.rangeStart} min={1} max={maxWpNumber} step={1} decimals={0} />
+                <span class="dash">–</span>
+                <NumberStepper bind:value={$terrainAnalysis.rangeEnd} min={1} max={maxWpNumber} step={1} decimals={0} />
+              </div>
+            </div>
+
+            <label class="corr-check">
+              <input type="checkbox" bind:checked={$terrainAnalysis.fixedWing} />
+              {$t('terrain.fixedWing')}
+            </label>
+            {#if $terrainAnalysis.fixedWing}
+              <div class="ctrl">
+                <span>{$t('terrain.climbAngle')}</span>
+                <NumberStepper bind:value={$terrainAnalysis.climbAngleLimit} min={0} max={89} step={1} decimals={0} unit="°" />
+              </div>
+              <div class="ctrl">
+                <span>{$t('terrain.descentAngle')}</span>
+                <NumberStepper bind:value={$terrainAnalysis.descentAngleLimit} min={0} max={89} step={1} decimals={0} unit="°" />
+              </div>
+            {/if}
+
+            <div class="addwp-row">
+              <button class="addwp-btn" disabled={!canAddWp} onclick={addWaypointAtMarker}>
+                ＋ {$t('terrain.addWp')}
+              </button>
+              {#if !canAddWp}<span class="addwp-hint">{$t('terrain.addWpHint')}</span>{/if}
+            </div>
+
+            {#if correction}
+              <div class="corr-stats">
+                <span>{$t('terrain.changed')}: <b>{correction.changedCount}</b></span>
+                <span>{$t('terrain.minClearance')}: <b>{correction.minClearanceAfter != null ? `${Math.round(correction.minClearanceAfter)} m` : '—'}</b></span>
+              </div>
+              {#if correction.climbForcedAboveClearance}<p class="corr-warn">{$t('terrain.warnClimbForced')}</p>{/if}
+              {#if correction.unresolvableLeg}<p class="corr-warn">{$t('terrain.warnUnresolvable')}</p>{/if}
+              <button
+                class="apply-btn"
+                disabled={applying || correction.changedCount === 0}
+                onclick={applyCorrection}
+              >
+                {$t('terrain.apply')}
+              </button>
+            {/if}
+          {/if}
+        </div>
+      {/if}
+
       <p class="hint">{$t('terrain.zoomHint')}</p>
     </div>
 
@@ -281,9 +500,11 @@
           {data}
           datum={$terrainAnalysis.datum}
           groundClearance={$terrainAnalysis.groundClearance}
+          {warnThreshold}
           activeStartDist={activeRange.startDist}
           activeEndDist={activeRange.endDist}
           {placedDist}
+          {previewPath}
           bind:viewStart={$terrainAnalysis.viewStart}
           bind:viewEnd={$terrainAnalysis.viewEnd}
           onhover={onChartHover}
@@ -522,6 +743,102 @@
     font-size: 10px;
     color: #6e6e6e;
     line-height: 1.4;
+  }
+
+  /* Terrain Correction sub-panel */
+  .correction {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    padding-top: 11px;
+  }
+  .corr-head {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #cdd6db;
+    cursor: pointer;
+  }
+  .corr-check {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+    color: #b8b8b8;
+    cursor: pointer;
+  }
+  .range-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .range-row .dash {
+    color: #6e6e6e;
+  }
+  .corr-stats {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 11px;
+    color: #949494;
+  }
+  .corr-stats b {
+    color: #2ecc71;
+  }
+  .corr-warn {
+    margin: 0;
+    font-size: 11px;
+    color: #e0a030;
+    line-height: 1.35;
+  }
+  .addwp-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .addwp-btn {
+    background: rgba(55, 168, 219, 0.15);
+    border: 1px solid rgba(55, 168, 219, 0.5);
+    color: #37a8db;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background-color 0.15s;
+  }
+  .addwp-btn:hover:not(:disabled) {
+    background: rgba(55, 168, 219, 0.28);
+  }
+  .addwp-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  .addwp-hint {
+    font-size: 10px;
+    color: #6e6e6e;
+    line-height: 1.3;
+  }
+  .apply-btn {
+    margin-top: 2px;
+    background: rgba(46, 204, 113, 0.2);
+    border: 1px solid #2ecc71;
+    color: #2ecc71;
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.15s;
+  }
+  .apply-btn:hover:not(:disabled) {
+    background: rgba(46, 204, 113, 0.32);
+  }
+  .apply-btn:disabled {
+    opacity: 0.45;
+    cursor: default;
   }
 
   .chart-area {

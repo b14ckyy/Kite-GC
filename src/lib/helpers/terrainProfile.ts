@@ -28,6 +28,8 @@ export interface TerrainSample {
   elev: number | null;
   lat: number;
   lon: number;
+  /** A jump cut: a discontinuity in the route (path/terrain break here). */
+  cut?: boolean;
 }
 
 export interface PathPoint {
@@ -45,6 +47,12 @@ export interface ProfileMarker {
   altMsl: number;
   ground: number | null;
   altMode: number;
+  /** A revisit caused by a simulated jump loop (no map dot; same WP as `index`). */
+  repeat: boolean;
+  /** The resume point after a jump cut — shown with a dot to mark where the route continues. */
+  resume: boolean;
+  /** The endpoint of a jump-back leg (the jump target) — shown with a distinct marker. */
+  jumpTarget: boolean;
 }
 
 export interface ProfileData {
@@ -57,6 +65,10 @@ export interface ProfileData {
   /** clearance = pathAtTerrain − terrain.elev, aligned to `terrain` */
   clearance: (number | null)[];
   markers: ProfileMarker[];
+  /** Distances (m) where the route is cut by a simulated jump loop. */
+  cuts: number[];
+  /** Distance ranges of jump-back legs (coloured distinctly, like the map). */
+  jumpLegs: { start: number; end: number }[];
   totalDist: number;
   minClearance: number | null;
   minClearanceDist: number | null;
@@ -90,19 +102,19 @@ function cumulativeDistances(points: [number, number][]): number[] {
   return out;
 }
 
-/** Nearest terrain sample elevation at a given cumulative distance. */
-function groundAt(raw: RawSample[], dist: number): number | null {
-  if (raw.length === 0) return null;
-  let best = raw[0];
-  let bestDelta = Math.abs(raw[0].dist_m - dist);
-  for (const s of raw) {
-    const delta = Math.abs(s.dist_m - dist);
+/** Nearest terrain elevation at a given cumulative distance (skips jump cuts). */
+function groundAt(terrain: TerrainSample[], dist: number): number | null {
+  let best: TerrainSample | null = null;
+  let bestDelta = Infinity;
+  for (const s of terrain) {
+    if (s.cut) continue;
+    const delta = Math.abs(s.dist - dist);
     if (delta < bestDelta) {
       bestDelta = delta;
       best = s;
     }
   }
-  return best.elev_m;
+  return best ? best.elev : null;
 }
 
 /** Linear interpolation of the (sparse) path altitude at an arbitrary distance. */
@@ -134,13 +146,19 @@ function wpAltMode(wp: Waypoint): number {
  * jitter that spikes per-sample slopes toward 90°, so we low-pass the altitude
  * over a small window and only measure over segments of a minimum length.
  */
-function computeMaxClimbAngle(path: PathPoint[], source: 'waypoint' | 'track'): number | null {
+function computeMaxClimbAngle(
+  path: PathPoint[],
+  source: 'waypoint' | 'track',
+  cuts: number[],
+): number | null {
   if (path.length < 2) return null;
 
   if (source === 'waypoint') {
     let max: number | null = null;
     for (let i = 1; i < path.length; i++) {
       const dd = path[i].dist - path[i - 1].dist;
+      // skip legs that straddle a jump cut (not a real flight leg)
+      if (cuts.some((c) => c > path[i - 1].dist && c < path[i].dist)) continue;
       if (dd > 0) {
         const ang = (Math.atan2(Math.abs(path[i].altMsl - path[i - 1].altMsl), dd) * 180) / Math.PI;
         if (max == null || ang > max) max = ang;
@@ -209,18 +227,17 @@ function bridgeGaps(raw: RawSample[]): void {
 /** Fold terrain + path + markers into the final profile (clearance, ranges, climb). */
 function finishProfile(
   source: 'waypoint' | 'track',
-  raw: RawSample[],
+  terrain: TerrainSample[],
   path: PathPoint[],
   markers: ProfileMarker[],
   totalDist: number,
+  cuts: number[],
+  jumpLegs: { start: number; end: number }[],
 ): ProfileData {
-  bridgeGaps(raw);
-  const terrain: TerrainSample[] = raw.map((s) => ({ dist: s.dist_m, elev: s.elev_m, lat: s.lat, lon: s.lon }));
-
-  const pathAtTerrain = terrain.map((s) => pathAltAt(path, s.dist));
+  const pathAtTerrain = terrain.map((s) => (s.cut ? null : pathAltAt(path, s.dist)));
   const clearance = terrain.map((s, i) => {
     const pa = pathAtTerrain[i];
-    if (s.elev == null || pa == null) return null;
+    if (s.cut || s.elev == null || pa == null) return null;
     return pa - s.elev;
   });
 
@@ -234,7 +251,7 @@ function finishProfile(
     }
   }
 
-  const maxClimbAngle = computeMaxClimbAngle(path, source);
+  const maxClimbAngle = computeMaxClimbAngle(path, source, cuts);
 
   let minElev = Infinity;
   let maxElev = -Infinity;
@@ -260,6 +277,8 @@ function finishProfile(
     pathAtTerrain,
     clearance,
     markers,
+    cuts,
+    jumpLegs,
     totalDist,
     minClearance,
     minClearanceDist,
@@ -269,12 +288,59 @@ function finishProfile(
   };
 }
 
-/** Flight-path waypoints that define the profile route (geo WPs, excluding POI). */
-function flightPathWaypoints(waypoints: Waypoint[]): { wp: Waypoint; index: number }[] {
-  return waypoints
-    .map((wp, index) => ({ wp, index }))
-    .filter(({ wp }) => hasLocation(wp.action) && wp.action !== WpAction.SetPoi);
+/** Geo waypoints that define the profile route (have a position, excluding POI). */
+function isGeoAction(action: WpAction): boolean {
+  return hasLocation(action) && action !== WpAction.SetPoi;
 }
+
+interface RouteEntry {
+  wp: Waypoint;
+  index: number; // mission index
+  number: number; // display number (1-based, geo WPs)
+  repeat: boolean; // a jump revisit (no map dot; same WP)
+  cutBefore: boolean; // a jump cut precedes this entry
+  jumpTarget: boolean; // this entry is a jump-back branch target
+  resume: boolean; // this entry resumes the route after a cut
+}
+
+/**
+ * Expand the waypoint sequence into a route, simulating *one* loop per jump.
+ * `4J2` (WP4 then jump to WP2) plots 4→2 (branch), a cut, then resumes 4→5 —
+ * no duplicate WP dots, and the jump-back leg's terrain is covered.
+ */
+function expandRoute(waypoints: Waypoint[]): RouteEntry[] {
+  const numbers: number[] = new Array(waypoints.length).fill(0);
+  let dn = 0;
+  for (let i = 0; i < waypoints.length; i++) {
+    if (isGeoAction(waypoints[i].action)) numbers[i] = ++dn;
+  }
+
+  const route: RouteEntry[] = [];
+  const simulated = new Set<number>();
+  for (let i = 0; i < waypoints.length; i++) {
+    const wp = waypoints[i];
+    if (wp.action === WpAction.Jump) {
+      if (simulated.has(i)) continue;
+      simulated.add(i);
+      // Resolve target the same way the map does: p1 is the 1-based absolute
+      // waypoint number, so the array index is p1 − 1.
+      const tIdx = wp.p1 - 1;
+      const last = route.length ? route[route.length - 1] : null;
+      if (tIdx >= 0 && tIdx < waypoints.length && last && tIdx < last.index && isGeoAction(waypoints[tIdx].action)) {
+        // branch to the jump target, then resume at the WP before the jump
+        route.push({ wp: waypoints[tIdx], index: tIdx, number: numbers[tIdx], repeat: true, cutBefore: false, jumpTarget: true, resume: false });
+        route.push({ wp: waypoints[last.index], index: last.index, number: last.number, repeat: true, cutBefore: true, jumpTarget: false, resume: true });
+      }
+      continue;
+    }
+    if (isGeoAction(wp.action)) {
+      route.push({ wp, index: i, number: numbers[i], repeat: false, cutBefore: false, jumpTarget: false, resume: false });
+    }
+  }
+  return route;
+}
+
+const CUT_GAP_M = 60;
 
 /**
  * Build a profile for the planned waypoint mission.
@@ -285,43 +351,86 @@ export async function buildWaypointProfile(
   waypoints: Waypoint[],
   launch: { lat: number; lng: number } | null,
 ): Promise<ProfileData | null> {
-  const flight = flightPathWaypoints(waypoints);
-  if (flight.length < 2) return null;
+  const route = expandRoute(waypoints);
+  if (route.filter((e) => !e.repeat).length < 2) return null;
 
-  const points: [number, number][] = flight.map(({ wp }) => [toDeg(wp.lat), toDeg(wp.lon)]);
-  const wpDist = cumulativeDistances(points);
-  const totalDist = wpDist[wpDist.length - 1];
+  // Split into continuous segments at jump cuts
+  const segments: RouteEntry[][] = [];
+  let cur: RouteEntry[] = [];
+  for (const e of route) {
+    if (e.cutBefore && cur.length) {
+      segments.push(cur);
+      cur = [];
+    }
+    cur.push(e);
+  }
+  if (cur.length) segments.push(cur);
 
-  const raw = await invoke<RawSample[]>('terrain_profile', {
-    points,
-    spacingM: PROFILE_SPACING_M,
-  });
-
-  // Home/launch ground reference for REL altitudes (fallback: first WP ground).
   let launchGround: number | null = null;
   if (launch) {
-    launchGround = await invoke<number | null>('terrain_elevation', {
-      lat: launch.lat,
-      lon: launch.lng,
-    });
+    launchGround = await invoke<number | null>('terrain_elevation', { lat: launch.lat, lon: launch.lng });
   }
-  if (launchGround == null) launchGround = groundAt(raw, 0);
+
+  // Sample terrain per segment, stitching distances with a gap at each cut
+  const entryDist: number[] = new Array(route.length);
+  const terrain: TerrainSample[] = [];
+  const cuts: number[] = [];
+  let offset = 0;
+  let ri = 0;
+  for (let s = 0; s < segments.length; s++) {
+    const seg = segments[s];
+    const pts: [number, number][] = seg.map((e) => [toDeg(e.wp.lat), toDeg(e.wp.lon)]);
+    const local = cumulativeDistances(pts);
+    for (let j = 0; j < seg.length; j++) entryDist[ri++] = offset + local[j];
+
+    const raw = await invoke<RawSample[]>('terrain_profile', { points: pts, spacingM: PROFILE_SPACING_M });
+    bridgeGaps(raw);
+    for (const sm of raw) terrain.push({ dist: offset + sm.dist_m, elev: sm.elev_m, lat: sm.lat, lon: sm.lon });
+
+    const segLen = local[local.length - 1];
+    if (s < segments.length - 1) {
+      const cutDist = offset + segLen + CUT_GAP_M / 2;
+      cuts.push(cutDist);
+      const tail = pts[pts.length - 1];
+      terrain.push({ dist: cutDist, elev: null, lat: tail[0], lon: tail[1], cut: true });
+      offset += segLen + CUT_GAP_M;
+    } else {
+      offset += segLen;
+    }
+  }
+  const totalDist = offset;
+  if (launchGround == null) launchGround = groundAt(terrain, 0);
 
   const markers: ProfileMarker[] = [];
-  let displayNum = 1;
-  flight.forEach(({ wp, index }, i) => {
-    const altMode = wpAltMode(wp);
-    const ground = groundAt(raw, wpDist[i]);
-    const valM = wp.altitude / 100;
+  const path: PathPoint[] = [];
+  const jumpLegs: { start: number; end: number }[] = [];
+  for (let k = 0; k < route.length; k++) {
+    const e = route[k];
+    const altMode = wpAltMode(e.wp);
+    const ground = groundAt(terrain, entryDist[k]);
+    const valM = e.wp.altitude / 100;
     let altMsl: number;
     if (altMode === ALT_MODE_AMSL) altMsl = valM;
     else if (altMode === ALT_MODE_AGL) altMsl = (ground ?? launchGround ?? 0) + valM;
     else altMsl = (launchGround ?? 0) + valM; // REL
-    markers.push({ index, number: displayNum++, action: wp.action, dist: wpDist[i], altMsl, ground, altMode });
-  });
+    markers.push({
+      index: e.index,
+      number: e.number,
+      action: e.wp.action,
+      dist: entryDist[k],
+      altMsl,
+      ground,
+      altMode,
+      repeat: e.repeat,
+      resume: e.resume,
+      jumpTarget: e.jumpTarget,
+    });
+    path.push({ dist: entryDist[k], altMsl });
+    // the leg from the WP before the jump (k-1) to its branch target (k)
+    if (e.jumpTarget && k > 0) jumpLegs.push({ start: entryDist[k - 1], end: entryDist[k] });
+  }
 
-  const path: PathPoint[] = markers.map((m) => ({ dist: m.dist, altMsl: m.altMsl }));
-  return finishProfile('waypoint', raw, path, markers, totalDist);
+  return finishProfile('waypoint', terrain, path, markers, totalDist, cuts, jumpLegs);
 }
 
 /** A flown-track point (subset of TelemetryRecord). */
@@ -351,7 +460,9 @@ export async function buildTrackProfile(track: TrackPoint[]): Promise<ProfileDat
     points,
     spacingM: PROFILE_SPACING_M,
   });
+  bridgeGaps(raw);
+  const terrain: TerrainSample[] = raw.map((s) => ({ dist: s.dist_m, elev: s.elev_m, lat: s.lat, lon: s.lon }));
 
   const path: PathPoint[] = pts.map((p, i) => ({ dist: dist[i], altMsl: p.alt_m }));
-  return finishProfile('track', raw, path, [], totalDist);
+  return finishProfile('track', terrain, path, [], totalDist, [], []);
 }

@@ -1218,7 +1218,7 @@
 
   <!-- ======= TERRAIN ANALYSIS OVERLAY ======= -->
   {#if terrainOpen}
-    <TerrainAnalysisPanel track={selectedTrackWithPosition} />
+    <TerrainAnalysisPanel track={selectedTrackWithPosition} confirm={showDialog} />
   {/if}
 
   <!-- ======= BOTTOM WIDGET PANEL ======= -->

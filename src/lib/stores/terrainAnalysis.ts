@@ -25,9 +25,15 @@ export interface TerrainAnalysisState {
   datum: TerrainDatum;
   /** Ground clearance (m) — target AGL (Terrain Follow) / minimum (Clearance Check) */
   groundClearance: number;
-  /** Fixed-wing climb-angle limit (degrees) */
+  /** Terrain Correction sub-panel expanded (shows live preview) */
+  correctionEnabled: boolean;
+  /** Correction method */
+  correctionMode: 'follow' | 'check';
+  /** Fixed-wing climb-angle limit (degrees, 0 = off) */
   climbAngleLimit: number;
-  /** Apply the fixed-wing climb-angle limit */
+  /** Fixed-wing descent-angle limit (degrees, 0 = off) */
+  descentAngleLimit: number;
+  /** Apply the fixed-wing climb/descent-angle limits */
   fixedWing: boolean;
   /** Average airspeed (m/s); 0 = off (no climb-rate readout) */
   airspeed: number;
@@ -36,8 +42,6 @@ export interface TerrainAnalysisState {
   /** Correction range, by WP display number; 0 = auto (first / last) */
   rangeStart: number;
   rangeEnd: number;
-  /** Terrain Follow: insert one WP per offending leg */
-  addWaypoints: boolean;
   /** Visible distance window (m); null = full route */
   viewStart: number | null;
   viewEnd: number | null;
@@ -49,13 +53,15 @@ const INITIAL: TerrainAnalysisState = {
   viewMode: 'waypoint',
   datum: 'msl',
   groundClearance: 50,
+  correctionEnabled: false,
+  correctionMode: 'follow',
   climbAngleLimit: 12,
+  descentAngleLimit: 8,
   fixedWing: false,
   airspeed: 0,
   vExag: 1,
   rangeStart: 0,
   rangeEnd: 0,
-  addWaypoints: false,
   viewStart: null,
   viewEnd: null,
 };
@@ -92,4 +98,8 @@ export function toggleTerrainPlaced(p: LatLng): void {
 
 export function clearTerrainHover(): void {
   terrainCursor.update((s) => (s.hover ? { ...s, hover: null } : s));
+}
+
+export function clearTerrainPlaced(): void {
+  terrainCursor.update((s) => (s.placed ? { ...s, placed: null } : s));
 }

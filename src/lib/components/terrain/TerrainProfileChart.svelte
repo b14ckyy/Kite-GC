@@ -14,9 +14,11 @@
     data,
     datum = 'msl',
     groundClearance = 50,
+    warnThreshold = null,
     activeStartDist = -Infinity,
     activeEndDist = Infinity,
     placedDist = null,
+    previewPath = null,
     viewStart = $bindable(null),
     viewEnd = $bindable(null),
     onhover,
@@ -25,11 +27,15 @@
     data: ProfileData | null;
     datum?: 'msl' | 'agl';
     groundClearance?: number;
+    /** Clearance level below which the path is coloured unsafe (default = groundClearance) */
+    warnThreshold?: number | null;
     /** Distance window where clearance alerts apply (excludes take-off/landing) */
     activeStartDist?: number;
     activeEndDist?: number;
     /** Distance of the pinned map marker along this profile (null = none/off-path) */
     placedDist?: number | null;
+    /** Corrected altitude line (MSL) to preview over the current path */
+    previewPath?: { dist: number; altMsl: number }[] | null;
     viewStart?: number | null;
     viewEnd?: number | null;
     onhover?: (info: HoverInfo | null) => void;
@@ -66,11 +72,28 @@
           if (c > max) max = c;
         }
       }
+      // include the correction preview (clearance of the corrected line)
+      if (previewPath) {
+        for (const p of previewPath) {
+          const ter = terrainAtDist(p.dist);
+          if (ter == null) continue;
+          const c = p.altMsl - ter;
+          if (c < min) min = c;
+          if (c > max) max = c;
+        }
+      }
       const pad = Math.max(5, (max - min) * 0.1);
       return { min: min - pad, max: max + pad };
     }
-    const min = data.minElev;
-    const max = data.maxElev;
+    let min = data.minElev;
+    let max = data.maxElev;
+    // include the correction preview (raised line can exceed the current max)
+    if (previewPath) {
+      for (const p of previewPath) {
+        if (p.altMsl < min) min = p.altMsl;
+        if (p.altMsl > max) max = p.altMsl;
+      }
+    }
     const pad = Math.max(10, (max - min) * 0.1);
     return { min: min - pad, max: max + pad };
   });
@@ -215,7 +238,9 @@
 
   const pathRuns = $derived.by(() => {
     const d = display;
-    const runs: { unsafe: boolean; pts: { x: number; y: number }[] }[] = [];
+    const jumps = data ? data.jumpLegs : [];
+    const warnLevel = warnThreshold ?? groundClearance;
+    const runs: { kind: 'normal' | 'unsafe' | 'jump'; pts: { x: number; y: number }[] }[] = [];
     let prev: { x: number; y: number } | null = null;
     for (let i = 0; i < d.length; i++) {
       const defined = datum === 'agl' ? d[i].clearance != null : d[i].pathAlt != null;
@@ -224,13 +249,15 @@
         continue;
       }
       const v = datum === 'agl' ? (d[i].clearance as number) : (d[i].pathAlt as number);
-      const pt = { x: xS(d[i].dist), y: yS(v) };
+      const dist = d[i].dist;
+      const pt = { x: xS(dist), y: yS(v) };
       const c = d[i].clearance;
-      const unsafe =
-        c != null && c < groundClearance && d[i].dist >= activeStartDist && d[i].dist <= activeEndDist;
+      const isJump = jumps.some((l) => dist >= l.start && dist <= l.end);
+      const unsafe = c != null && c < warnLevel && dist >= activeStartDist && dist <= activeEndDist;
+      const kind: 'normal' | 'unsafe' | 'jump' = isJump ? 'jump' : unsafe ? 'unsafe' : 'normal';
       let run = runs[runs.length - 1];
-      if (!run || run.unsafe !== unsafe || prev == null) {
-        run = { unsafe, pts: [] };
+      if (!run || run.kind !== kind || prev == null) {
+        run = { kind, pts: [] };
         if (prev) run.pts.push(prev);
         runs.push(run);
       }
@@ -238,7 +265,7 @@
       prev = pt;
     }
     return runs.map((r) => ({
-      unsafe: r.unsafe,
+      kind: r.kind,
       points: r.pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' '),
     }));
   });
@@ -247,6 +274,23 @@
     if (!data || data.source !== 'waypoint') return [] as { x: number; y: number; number: number }[];
     const out: { x: number; y: number; number: number }[] = [];
     for (const m of data.markers) {
+      if (m.repeat && !m.resume) continue; // jump revisit — no dot (but the resume point is shown)
+      let v: number | null;
+      if (datum === 'agl') v = m.ground != null ? m.altMsl - m.ground : null;
+      else v = m.altMsl;
+      if (v == null) continue;
+      out.push({ x: xS(m.dist), y: yS(v), number: m.number });
+    }
+    return out;
+  });
+
+  const cutXs = $derived(data ? data.cuts.map((c) => xS(c)) : []);
+
+  const jumpTargetPts = $derived.by(() => {
+    if (!data || data.source !== 'waypoint') return [] as { x: number; y: number; number: number }[];
+    const out: { x: number; y: number; number: number }[] = [];
+    for (const m of data.markers) {
+      if (!m.jumpTarget) continue;
       let v: number | null;
       if (datum === 'agl') v = m.ground != null ? m.altMsl - m.ground : null;
       else v = m.altMsl;
@@ -412,6 +456,57 @@
     viewEnd = null;
   }
 
+  /** Terrain elevation interpolated at an arbitrary distance (for AGL preview). */
+  function terrainAtDist(d: number): number | null {
+    if (!data) return null;
+    const t = data.terrain;
+    const n = t.length;
+    if (n === 0) return null;
+    let i = lowerBound(t, d);
+    if (i <= 0) i = 1;
+    if (i >= n) i = n - 1;
+    const a = t[i - 1];
+    const b = t[i];
+    if (a.elev != null && b.elev != null) {
+      const span = b.dist - a.dist || 1;
+      return a.elev + ((b.elev - a.elev) * (d - a.dist)) / span;
+    }
+    return (b.elev ?? a.elev) ?? null;
+  }
+
+  const previewRuns = $derived.by(() => {
+    if (!previewPath || previewPath.length === 0 || !data) return [] as string[];
+    const cuts = data.cuts;
+    const runs: string[][] = [];
+    let cur: string[] = [];
+    let prevDist: number | null = null;
+    for (const p of previewPath) {
+      const pd = prevDist;
+      // break the line at a jump cut between consecutive points
+      if (pd != null && cuts.some((c) => c > pd && c < p.dist)) {
+        if (cur.length) runs.push(cur);
+        cur = [];
+      }
+      let y: number;
+      if (datum === 'agl') {
+        const ter = terrainAtDist(p.dist);
+        if (ter == null) {
+          if (cur.length) runs.push(cur);
+          cur = [];
+          prevDist = p.dist;
+          continue;
+        }
+        y = yS(p.altMsl - ter);
+      } else {
+        y = yS(p.altMsl);
+      }
+      cur.push(`${xS(p.dist).toFixed(1)},${y.toFixed(1)}`);
+      prevDist = p.dist;
+    }
+    if (cur.length) runs.push(cur);
+    return runs.map((r) => r.join(' '));
+  });
+
   const placedX = $derived(placedDist != null && data ? xS(placedDist) : null);
 
   const hoverX = $derived(
@@ -482,13 +577,40 @@
 
         <path class="floor-line" d={floorPath} />
 
+        <!-- Correction preview — behind the WP path so it never hides it -->
+        {#each previewRuns as pts}
+          <polyline class="preview-line" points={pts} />
+        {/each}
+
+        <!-- main path (non-jump), then jump legs drawn on top so they stay visible -->
         {#each pathRuns as run}
-          <polyline class="path-line" class:unsafe={run.unsafe} points={run.points} />
+          {#if run.kind !== 'jump'}
+            <polyline class="path-line" class:unsafe={run.kind === 'unsafe'} points={run.points} />
+          {/if}
+        {/each}
+        {#each pathRuns as run}
+          {#if run.kind === 'jump'}
+            <polyline class="path-line jump" points={run.points} />
+          {/if}
+        {/each}
+
+        <!-- Jump cut markers -->
+        {#each cutXs as cx}
+          <line class="cut-line" x1={cx} y1={PAD.t} x2={cx} y2={baselineY} />
         {/each}
 
         {#each markerPts as m}
           <circle class="wp-dot" cx={m.x} cy={m.y} r="4" />
           <text class="wp-num" x={m.x} y={m.y - 9} text-anchor="middle">{m.number}</text>
+        {/each}
+
+        <!-- Jump-target markers (end of each jump-back leg) -->
+        {#each jumpTargetPts as j}
+          <polygon
+            class="jump-target"
+            points="{j.x},{j.y - 5} {j.x + 5},{j.y} {j.x},{j.y + 5} {j.x - 5},{j.y}"
+          />
+          <text class="jump-target-num" x={j.x} y={j.y - 9} text-anchor="middle">↩{j.number}</text>
         {/each}
 
         {#if placedX != null}
@@ -567,6 +689,36 @@
   }
   .path-line.unsafe {
     stroke: #e74c3c;
+  }
+  .path-line.jump {
+    stroke: #b56be0;
+    stroke-width: 2.5;
+    stroke-dasharray: 10 5;
+    opacity: 1;
+  }
+  .jump-target {
+    fill: #b56be0;
+    stroke: #fff;
+    stroke-width: 1;
+  }
+  .jump-target-num {
+    fill: #d9b6ef;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .cut-line {
+    stroke: #c98a2b;
+    stroke-width: 1;
+    stroke-dasharray: 2 4;
+    opacity: 0.8;
+  }
+  .preview-line {
+    fill: none;
+    stroke: #2ecc71;
+    stroke-width: 2;
+    stroke-dasharray: 6 4;
+    stroke-linejoin: round;
+    stroke-linecap: round;
   }
   .wp-dot {
     fill: #37a8db;
