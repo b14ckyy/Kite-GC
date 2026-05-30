@@ -1185,7 +1185,9 @@ A planning-time launch point (frontend `launchPoint` store) is the home-altitude
 - **Chart ↔ map link** (Compact mode): a `terrainCursor` store + `TerrainCursorLayer` mirror the chart cursor onto the 2D map — a transient hover dot plus a click-pinned persistent marker that **persists when the panel is closed** (reference while editing in mission control). Visual-only; 2D Leaflet for now (3D follows the later Cesium rework).
 - **Why frontend/SVG**: the profile is presentation built on an existing backend command; an SVG component matches the widget stack, is themeable and natively interactive, and avoids any charting dependency.
 
-**Next (Phase 2)**: Terrain Correction (Terrain Follow / Clearance Check over a WP range, fixed-wing climb-angle limit, preview → APPLY) — a pure-function pass writing corrected waypoints back in AGL mode.
+**Terrain Correction (Phase 2)**: a pure-function engine (`helpers/terrainCorrection.ts`) over the same `ProfileData`. *Terrain Follow* sets correctable WPs (Waypoint + PosHold in the range) to a target AGL; *Clearance Check* only raises. A monotonic convergence loop raises WP/leg clearance and (optional fixed-wing) the lower endpoint of any too-steep climb/descent leg. Land/RTH/Jump/SetHead and out-of-range WPs are fixed anchors. Insertion is **manual** (*Add WP* at a pinned chart marker, on the track). A live green preview (drawn *behind* the path) precedes an APPLY confirm dialog; corrected WPs are written in **AGL** mode.
+
+**Jump simulation**: `expandRoute()` simulates one loop per jump (`4J2` → branch `4→2`, cut, resume `4→5`); revisits carry no extra WP dots. The cut is a break in terrain/path/clearance + a marker; the jump-back leg is coloured like the map and ends in a target marker. Correction keys altitude **per WP index** (one shared `Cell` across revisits), so the jump-back leg constrains the same WP as its first-pass legs; cut legs are skipped. Jump target resolves as `p1 − 1` (matching the map).
 
 ---
 

@@ -650,4 +650,16 @@ Full-width NavRail overlay (`TerrainAnalysisPanel.svelte`) — a side-view profi
 - **Compact mode** (*Show Map* toggle): collapses to a short top-docked strip (animated, like the panel transitions), stopping short of the side widget dock. The chart cursor is mirrored onto the 2D map via `TerrainCursorLayer` — a transient hover dot plus a click-pinned persistent marker (click again to clear). The pin is visual-only and lives in the `terrainCursor` store, so it stays on the map after the panel closes (reference while editing in mission control); it's also mirrored back into the chart as a vertical pin line.
 - **Datum advantage**: terrain plotted in MSL (Copernicus EGM2008), consistent with FC GPS MSL + AMSL waypoints — unlike INAV Configurator's WGS84/ellipsoid terrain labeling.
 
-Next (Phase 2): **Terrain Correction** — Terrain Follow / Clearance Check over a WP range, fixed-wing climb-angle limit, live preview → APPLY.
+### Terrain Correction (Phase 2)
+
+Pure-function engine (`helpers/terrainCorrection.ts`) over the same `ProfileData` — no new backend calls. Two modes, applied to a WP range (display numbers, default first/last); Land/RTH/Jump/SetHead and out-of-range WPs are **fixed anchors**.
+
+- **Terrain Follow**: set correctable WPs (Waypoint + PosHold) to `ground + Ground Clearance`, then lift legs. **Clearance Check**: raise-only from the original altitudes.
+- **Convergence loop** (monotonic raises): WP clearance → leg deficit (raise both endpoints by the max deficit; one anchor → raise only the correctable one to the exact requirement) → optional fixed-wing **climb/descent-angle** pass (raise the *lower* endpoint of any too-steep leg; 2 params, 0 = off). Bounded → converges; iteration cap as a safety net.
+- **No auto-insert** (it added too many, unreliably). Instead a **manual *Add WP***: pin a marker on the chart → inserts a waypoint at that lat/lon on the current track (interpolated AMSL), respecting the WP limit; re-run Follow.
+- **Clearance warning at 95%** of the target (5% grace) for the readout *and* the red colouring; the dashed floor stays at 100%.
+- **Live green preview** (drawn *behind* the path so it never hides it), recomputed as params change; y-scaling includes the preview so a raised line can't clip. **APPLY** updates changed WPs in place (→ **AGL** mode) behind a confirm dialog.
+
+### Jump-loop simulation
+
+`expandRoute()` (in `terrainProfile.ts`) simulates **one** loop per jump (`4J2` → branch `4→2`, cut, resume `4→5`; repeat count ignored), with no duplicate WP dots. Each continuous segment is terrain-sampled separately and stitched with a gap; the cut is a `cut` terrain sample that breaks terrain/path/clearance/preview + a dashed marker. The jump-back leg is coloured like the map (`#b56be0`) and ends in a `↩N` target marker; the resume point shows its WP dot. **Correction stays correct**: the engine keys altitude **per WP index** (one `Cell` shared by all revisits), so the jump-back leg constrains the same WP as its first-pass legs; cut legs are skipped. Jump target resolves as `p1 − 1` (absolute WP index, matching the map layer).

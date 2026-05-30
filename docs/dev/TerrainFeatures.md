@@ -127,14 +127,14 @@ A complex analysis tool opened as a **full-width, viewport-centered overlay** ov
 - **Climb-angle limit (°)** + **Fixed-Wing** toggle. Angle, *not* climb rate, is the edited parameter: a fixed wing's *vertical* climb rate is roughly constant, but the resulting *ground* climb angle varies with wind (headwind → steeper, tailwind → shallower) and airspeed — so the operator edits the geometric angle directly.
 - **Average airspeed** (optional, default **0 = off**): when set, show the *calculated required climb rate* = `airspeed × sin(angle)` as an informational readout (vertical component of the path velocity vector; wind ignored). Operator-supplied because INAV fixed-wing has no speed control yet (ArduPilot does). Future extension: refine with wind/weather data — needs a paid API (e.g. Windy), out of scope for now.
 - **Vertical exaggeration**.
-- **Terrain Correction** sub-panel (**Waypoint mode only**) — mode selector + WP range + Add-Waypoints toggle + APPLY; see below.
+- **Terrain Correction** sub-panel (**Waypoint mode only**) — mode selector + WP range + manual *Add WP* + APPLY; see below.
 - **Datum toggle** MSL / AGL:
   - **MSL view** — terrain filled to its elevation + the flight/track altitude line, both in MSL.
   - **AGL view** — plots the **clearance curve** (flight altitude − terrain) with the ground flattened to a 0 baseline; clearance violations read straight off the zero line. (Value-add over the reference tools, which only show the MSL side-view.)
 
 **Readouts (bottom):** min clearance (with warning icon), max climb angle, total distance, value under cursor.
 
-**State persistence:** all panel parameters (mode, Ground Clearance, climb-angle limit, Fixed-Wing toggle, airspeed, vertical exaggeration, WP range, Add-Waypoints toggle, zoom/pan, datum) are kept for the **whole app session** — closing and reopening the panel restores the last state. Reset only when the app itself closes (in-memory store, **not** written to disk).
+**State persistence:** all panel parameters (view mode, datum, compact, Ground Clearance, correction mode, climb/descent-angle limits, Fixed-Wing toggle, WP range, zoom/pan) are kept for the **whole app session** — closing and reopening the panel restores the last state. Reset only when the app itself closes (in-memory store, **not** written to disk).
 
 **Waypoint editing:** **no dragging.** Click a waypoint to select it → set its altitude via a numeric field, respecting its alt mode (REL/AMSL/AGL).
 
@@ -146,7 +146,7 @@ Two sub-features chosen by a mode selector. Both operate on a **WP range** (two 
   1. Set every WP in range to Ground-Clearance AGL.
   2. Check each track (leg) between WPs.
   3. Where a leg drops below clearance, raise **both** adjacent WPs until the leg is clear.
-  4. *(optional **Add Waypoints** toggle)* insert **one** WP at the leg's highest terrain point to lift that leg locally — at most **one extra WP per leg per analysis run**.
+  4. *(no automatic insertion — see manual "Add WP" below)* If a leg still can't follow terrain well enough, the user pins a marker on the chart and clicks **Add WP** to drop a waypoint exactly on the track there, then re-runs Terrain Follow. (Auto-insertion was dropped — it added too many WPs and wasn't reliable enough.)
 
 - **Clearance Check** — raise only, never lower:
   1. Check WPs, raise any below clearance.
@@ -155,14 +155,25 @@ Two sub-features chosen by a mode selector. Both operate on a **WP range** (two 
 
 **Climb-angle limit** (Fixed-Wing) applies on top of both modes: the ground climb/descent angle between consecutive WPs must stay ≤ limit; if a required raise would exceed it, **propagate the climb earlier** (raise preceding WPs *within the range*) so the climb starts sooner.
 
-Raising **iterates to convergence** (one raised WP affects both its neighbouring legs); only **waypoint insertion** is capped at one per leg per run.
+Raising **iterates to convergence** (one raised WP affects both its neighbouring legs). Waypoint insertion is **manual** (*Add WP*), not automatic — see the implementation notes below.
 
 **Datum advantage:** we plot terrain in MSL (Copernicus EGM2008), consistent with FC GPS MSL and AMSL waypoints — more correct than INAV Configurator, which labels its terrain as WGS84/ellipsoid (see §1).
 
 **Phasing:**
 1. ✅ **Read-only chart** (Waypoint + Track modes): terrain + path + clearance coloring + zoom/pan + readouts + hover. *(implemented — see notes below)*
-2. **Terrain Correction** — both modes (Terrain Follow / Clearance Check) + Ground Clearance + WP range + climb-angle limit + Add-Waypoints, live preview → APPLY; click-to-select + numeric WP altitude edit.
-3. Map-marker hover link; polish.
+2. ✅ **Terrain Correction** — both modes (Terrain Follow / Clearance Check) + Ground Clearance + WP range + climb/descent-angle limit + manual *Add WP*, live preview → APPLY. *(implemented — see notes below)*
+3. ✅ **Jump-loop simulation** — branch + cut, shared-altitude correction. *(implemented — see notes below)*
+4. Map-marker hover link; polish.
+
+**Phase 2 implementation notes (Terrain Correction):**
+- Pure-function engine `helpers/terrainCorrection.ts` over the existing `ProfileData` — no new backend calls. Correctable WPs = Waypoint + PosHold within the range; **Land/RTH/Jump/SetHead and out-of-range WPs are fixed anchors** (never edited, leg endpoints only).
+- **Terrain Follow**: set correctable WPs to `ground + clearance`, then lift legs to clear. **Clearance Check**: raise-only from the original altitudes.
+- **No automatic WP insertion.** Instead a **manual "Add WP"**: click the chart to pin a marker, press *Add WP* → inserts a waypoint at that lat/lon on the current track (interpolated AMSL, so it sits on the path), respecting the WP limit; the user then re-runs Terrain Follow. Removal is done by editing WPs on the map.
+- **Convergence loop** (monotonic raises): WP clearance → leg deficit (raise both endpoints by the max deficit; if one endpoint is an anchor, raise only the correctable one to the exact requirement) → climb/descent-angle pass (raise the *lower* endpoint of any too-steep leg; only-raise → never costs clearance). Climb/descent are two params, 0 = off, gated by Fixed-Wing.
+- **Clearance warning at 95%** of the target (5% grace) — exact-clearance is no longer flagged red; at 50 m clearance the warning/red trips below 47 m.
+- Output: changed WPs (→ **AGL mode**, value = `alt − ground`), a corrected **preview path** (green dashed, live as params change), min-clearance-after, and flags (climb forced above clearance / unresolvable anchor leg). **APPLY** updates the changed WPs in place via a confirm dialog.
+
+**Jump-loop simulation (Phase 2 step 3):** A jump is simulated as **one loop**, branch + cut, with no duplicate WP dots (per the agreed `4J2` example: plot `4→2`, a cut, then resume `4→5`). `expandRoute()` walks the sequence and, at each jump (once, ignoring the repeat count), appends a **branch** to the target and a **resume** at the WP before the jump (`cutBefore`); `expandRoute` runs in `terrainProfile.ts`. Each continuous segment is terrain-sampled separately and stitched with a small gap (`CUT_GAP_M`); the cut is a `cut:true` terrain sample that breaks the terrain fill, path line, clearance and preview, and is drawn as a dashed marker (`ProfileData.cuts`). Revisits are `repeat` markers (no map dot). **Correction stays correct:** the engine keys altitude **per WP index** (one `Cell` shared by all revisits), so the jump-back leg constrains the same WP as its first-pass legs; cut legs are skipped (`isCut`). `MAV_FRAME`/`JUMP` target is resolved by 1-based WP number (verify empirically with a real mission). 3D map cuts are not handled (Cesium rework later).
 
 **Phase 1 implementation notes (decided while building):**
 - **Full-width NavRail overlay**, mutually exclusive with the nav panel (only one panel open at a time). All params live in an in-memory session store (`stores/terrainAnalysis.ts`).

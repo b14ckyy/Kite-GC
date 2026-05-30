@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Terrain Correction & Jump Simulation (Terrain Analysis)
+- **Terrain Correction** (Waypoint mode): **Terrain Follow** (set WPs to a target AGL, then lift legs to clear) and **Clearance Check** (raise-only) over a WP range; corrected waypoints written in **AGL** mode
+- **Fixed-wing climb/descent-angle limits** (two params, 0 = off): too-steep legs are eased by raising the lower endpoint (never costs clearance), propagated to convergence
+- **Manual *Add WP***: pin a marker on the chart, add a waypoint there exactly on the track, then re-run (replaces unreliable auto-insertion)
+- **Live green preview** of the corrected track (drawn behind the path), with changed-count / min-clearance readout and warnings; **APPLY** behind a confirm dialog. Vertical scaling includes the preview so raised lines never clip
+- **Clearance warning at 95%** of the target (5% grace) for both the readout and the red path colouring
+- **Jump-loop simulation**: one loop per jump (`4J2` → branch `4→2`, **cut**, resume `4→5`) — no duplicate WP dots; the jump-back leg is coloured like the map with a `↩N` target marker, and the resume point shows its WP dot. Correction keys altitude per WP index so revisited WPs stay consistent
+
 ### Added — Terrain Analysis (elevation profile & clearance)
 - **Terrain Analysis panel**: full-width NavRail overlay showing a side-view elevation profile of the mission/track vs terrain — hand-rolled **SVG** chart, **no external runtime dependency**
 - **Two view modes**: *Waypoint* (planned mission, altitudes resolved to absolute MSL via terrain + launch point) and *Track* (flown live temp-log or loaded blackbox); profiles cached per mode → instant switching
