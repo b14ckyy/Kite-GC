@@ -35,6 +35,7 @@
   import WidgetPanel from "$lib/components/WidgetPanel.svelte";
   import { LARGE_BASE_VMIN } from "$lib/config/widgetRegistry";
   import MissionPanel from "$lib/components/mission/MissionPanel.svelte";
+  import VideoPanel from "$lib/components/video/VideoPanel.svelte";
   import TerrainAnalysisPanel from "$lib/components/terrain/TerrainAnalysisPanel.svelte";
   import { editMode } from "$lib/stores/mission";
   import { terrainAnalysis, patchTerrainAnalysis } from "$lib/stores/terrainAnalysis";
@@ -229,6 +230,7 @@
     { id: "logbook", label: () => $t('nav.logbook'), icon: "📒" },
     { id: "mission", label: () => $t('nav.mission'), icon: "◎" },
     { id: "terrain", label: () => $t('nav.terrain'), icon: "⛰" },
+    { id: "video", label: () => $t('nav.video'), icon: "🎥" },
   ];
   const tabs = $derived(
     flightLoggingEnabled ? allTabs : allTabs.filter(t => t.id !== 'logbook')
@@ -1228,6 +1230,10 @@
         <!-- Mission Tab -->
         {:else if activeTab === "mission"}
           <MissionPanel />
+
+        <!-- Video Tab -->
+        {:else if activeTab === "video"}
+          <VideoPanel />
         {/if}
       </div>
     </div>

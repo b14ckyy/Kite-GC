@@ -55,8 +55,23 @@
     "logbook": "Logbook",
     "mission": "Mission",
     "terrain": "Terrain",
+    "video": "Video",
     "closePanel": "Close panel",
     "openPanel": "Open panel"
+  },
+  "video": {
+    "title": "Video",
+    "start": "Start video",
+    "stop": "Stop video",
+    "starting": "Starting…",
+    "off": "Video off",
+    "device": "Video Device",
+    "defaultDevice": "Default device",
+    "resolution": "Resolution",
+    "auto": "Auto",
+    "mirror": "Mirror horizontally",
+    "codec": "Codec",
+    "noDevices": "No camera detected. Connect a camera or USB capture device."
   },
   "terrain": {
     "title": "Terrain Analysis",

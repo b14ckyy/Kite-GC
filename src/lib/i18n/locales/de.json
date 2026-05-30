@@ -55,8 +55,23 @@
     "logbook": "Logbuch",
     "mission": "Mission",
     "terrain": "Gelände",
+    "video": "Video",
     "closePanel": "Panel schließen",
     "openPanel": "Panel öffnen"
+  },
+  "video": {
+    "title": "Video",
+    "start": "Video starten",
+    "stop": "Video stoppen",
+    "starting": "Startet…",
+    "off": "Video aus",
+    "device": "Video-Gerät",
+    "defaultDevice": "Standardgerät",
+    "resolution": "Auflösung",
+    "auto": "Auto",
+    "mirror": "Horizontal spiegeln",
+    "codec": "Codec",
+    "noDevices": "Keine Kamera erkannt. Kamera oder USB-Capture-Gerät anschließen."
   },
   "terrain": {
     "title": "Geländeanalyse",
