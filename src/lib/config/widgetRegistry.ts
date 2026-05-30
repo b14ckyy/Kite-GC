@@ -22,6 +22,7 @@ export const WIDGET_DEFS: WidgetDef[] = [
   { id: 'rawTelemetry', label: 'Raw Telemetry',  labelKey: 'widgets.rawTelemetry', widgetClass: 'small' },
   { id: 'liveAgl',      label: 'Live AGL',       labelKey: 'widgets.liveAgl',      widgetClass: 'wide' },
   { id: 'terrainRadar', label: 'Terrain Radar',  labelKey: 'widgets.terrainRadar', widgetClass: 'large' },
+  { id: 'videoFeed',    label: 'Video',          labelKey: 'widgets.video',        widgetClass: 'wide' },
 ];
 
 export const WIDGET_MAP = new Map(WIDGET_DEFS.map(w => [w.id, w]));

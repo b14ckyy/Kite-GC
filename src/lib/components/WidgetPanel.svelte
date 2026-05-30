@@ -14,6 +14,7 @@
   import RawTelemetryWidget from "./widgets/RawTelemetryWidget.svelte";
   import LiveAglWidget from "./widgets/LiveAglWidget.svelte";
   import TerrainRadarWidget from "./widgets/TerrainRadarWidget.svelte";
+  import VideoWidget from "./widgets/VideoWidget.svelte";
   import type { InterfaceSettings } from "$lib/stores/settings";
 
   let {
@@ -479,6 +480,11 @@
           />
         {:else if item.id === 'terrainRadar'}
           <TerrainRadarWidget {telem} {interfaceSettings} size={item.sizePx} />
+        {:else if item.id === 'videoFeed'}
+          <VideoWidget
+            width={orientation === 'horizontal' ? item.sizePx * 2 : item.sizePx}
+            height={orientation === 'horizontal' ? item.sizePx : item.sizePx / 2}
+          />
         {/if}
       </div>
     </div>

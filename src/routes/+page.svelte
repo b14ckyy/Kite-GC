@@ -36,6 +36,7 @@
   import { LARGE_BASE_VMIN } from "$lib/config/widgetRegistry";
   import MissionPanel from "$lib/components/mission/MissionPanel.svelte";
   import VideoPanel from "$lib/components/video/VideoPanel.svelte";
+  import { initVideo } from "$lib/stores/video";
   import TerrainAnalysisPanel from "$lib/components/terrain/TerrainAnalysisPanel.svelte";
   import { editMode } from "$lib/stores/mission";
   import { terrainAnalysis, patchTerrainAnalysis } from "$lib/stores/terrainAnalysis";
@@ -280,6 +281,9 @@
     temperatureUnit: 'c',
   };
   panels = saved.panels ?? defaultPanels;
+
+  // Auto-start video with the last settings if it was running at last close.
+  if (typeof window !== 'undefined') void initVideo();
 
   function toggleNavPanel() {
     navPanelOpen = !navPanelOpen;

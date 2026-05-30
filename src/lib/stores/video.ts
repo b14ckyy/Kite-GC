@@ -40,13 +40,59 @@ export interface VideoState {
   error: string | null;
 }
 
+// ── Persistence ─────────────────────────────────────────────────────
+// Self-contained (own localStorage key, same mechanism as the app settings
+// store): we remember the device/resolution/mirror selection and whether video
+// was running, so it can auto-start with the last settings on the next launch.
+const STORAGE_KEY = 'kite-gc-video';
+
+interface VideoPrefs {
+  enabled: boolean;
+  deviceId: string | null;
+  resolution: VideoResolution;
+  mirror: boolean;
+}
+
+function loadPrefs(): VideoPrefs {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
+    if (raw) {
+      const p = JSON.parse(raw) as Partial<VideoPrefs>;
+      return {
+        enabled: !!p.enabled,
+        deviceId: p.deviceId ?? null,
+        resolution: p.resolution ?? 'auto',
+        mirror: !!p.mirror,
+      };
+    }
+  } catch {
+    /* ignore */
+  }
+  return { enabled: false, deviceId: null, resolution: 'auto', mirror: false };
+}
+
+function savePrefs(): void {
+  if (typeof localStorage === 'undefined') return;
+  const s = get(videoState);
+  try {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ enabled: s.enabled, deviceId: s.deviceId, resolution: s.resolution, mirror: s.mirror }),
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+const boot = loadPrefs();
+
 const INITIAL: VideoState = {
-  enabled: false,
+  enabled: false, // runtime flag — auto-start (below) decides whether to turn on
   status: 'off',
   devices: [],
-  deviceId: null,
-  resolution: 'auto',
-  mirror: false,
+  deviceId: boot.deviceId,
+  resolution: boot.resolution,
+  mirror: boot.mirror,
   aspect: 16 / 9,
   width: null,
   height: null,
@@ -115,11 +161,27 @@ export async function startVideo(): Promise<void> {
   }
   stopTracks();
   patch({ enabled: true, status: 'starting', error: null });
+  savePrefs(); // remember the intent immediately
   const st = get(videoState);
-  const video: MediaTrackConstraints = { ...RES_CONSTRAINTS[st.resolution] };
-  if (st.deviceId) video.deviceId = { exact: st.deviceId };
+  const base: MediaTrackConstraints = { ...RES_CONSTRAINTS[st.resolution] };
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
+    let stream: MediaStream;
+    try {
+      const video: MediaTrackConstraints = { ...base };
+      if (st.deviceId) video.deviceId = { exact: st.deviceId };
+      stream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
+    } catch (e) {
+      // Saved device gone / busy / over-constrained → fall back to the default
+      // device (e.g. the camera was unplugged or is on another machine).
+      const name = e instanceof Error ? e.name : '';
+      if (st.deviceId && ['OverconstrainedError', 'NotFoundError', 'NotReadableError'].includes(name)) {
+        patch({ deviceId: null });
+        savePrefs();
+        stream = await navigator.mediaDevices.getUserMedia({ video: { ...base }, audio: false });
+      } else {
+        throw e;
+      }
+    }
     videoStream.set(stream);
     const track = stream.getVideoTracks()[0];
     const s = track?.getSettings();
@@ -149,6 +211,7 @@ export async function startVideo(): Promise<void> {
 export function stopVideo(): void {
   stopTracks();
   patch({ enabled: false, status: 'off', error: null });
+  savePrefs();
 }
 
 export function toggleVideo(): void {
@@ -159,14 +222,28 @@ export function toggleVideo(): void {
 /** Switch device / resolution; restarts the stream if currently live. */
 export async function setVideoDevice(deviceId: string | null): Promise<void> {
   patch({ deviceId });
+  savePrefs();
   if (get(videoState).enabled) await startVideo();
 }
 
 export async function setVideoResolution(resolution: VideoResolution): Promise<void> {
   patch({ resolution });
+  savePrefs();
   if (get(videoState).enabled) await startVideo();
 }
 
 export function setVideoMirror(mirror: boolean): void {
   patch({ mirror });
+  savePrefs();
+}
+
+/**
+ * App-startup hook: enumerate devices and, if video was running at last close,
+ * auto-start it with the persisted settings (device falls back to default if the
+ * saved one is gone). Call once, client-side.
+ */
+export async function initVideo(): Promise<void> {
+  if (!mediaDevicesAvailable()) return;
+  await enumerateVideoDevices();
+  if (boot.enabled) await startVideo();
 }
