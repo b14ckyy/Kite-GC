@@ -39,10 +39,13 @@ What the Web API offers and nothing more: `getUserMedia` + constraints, `applyCo
 
 - **NavRail "Video" panel** (✅ control center): start/stop, device picker, resolution (auto / 720p / 1080p, all with the 60 fps hint), mirror, live preview, an info line (resolution · measured/set fps). Measured fps via `requestVideoFrameCallback`.
 - **Dock widget** (2×1 `wide`, ✅): a router sink in the standard widget card; **crop-to-fill** (`object-fit: cover`) so the 2:1 is full (too small to read OSD anyway); thin rounded border; **no settings** (panel owns control).
-- **Floating window** (planned): activated from the panel; **snaps bottom-left**, displacing the bottom widget dock from that corner (dock reflows to the remaining width); **drag** to float free (dock reclaims full width); re-snappable. **Resize** by corner drag, **relative to the home window**, aspect **fixed to the source**, height **10–30 % of the viewport height**. NavRail floating panels render **above** the video (z-order) so their height limits aren't affected.
-- **Double-click** swaps the main map view with video (video fills the map zone, map → PiP).
+- **Floating window** (✅): activated from the panel; **snaps bottom-left** (above the status bar), displacing the bottom widget dock from that corner (dock reflows to the remaining width); **drag** the header to float free (dock reclaims full width); re-snappable. **Resize** by corner drag, **relative to the home window**, aspect **fixed to the source**, height **10–30 % of the viewport height**. NavRail floating panels render **above** the window (z-order). Frame is frosted like the NavRail panels.
+- **Double-click swap** (✅): double-click the floating video → the **video fills the map zone** and the **map moves into the floating window's frame** (movable/resizable/snappable, not a fixed corner PiP); double-click the full-size video to swap back. After a swap a `resize` event re-fits Leaflet (`invalidateSize`) / Cesium.
+- **Native Picture-in-Picture** (✅): the "Video Window" button in the panel calls `requestPictureInPicture()` on a **persistently-mounted** hidden source element, popping the feed into a borderless OS window that can be placed **anywhere on screen** and **survives closing the panel** (the source isn't the panel preview, which would unmount).
 
-Detach is **in-app only** for v1 (same WebView context → MediaStream sharing is trivial). A true **separate OS window** (Tauri multi-window) is v2 and would force every source through a **shareable local endpoint** (a `MediaStream` can't cross window contexts, and a webcam is single-owner).
+**Layering (the key detail):** the floating frame is drawn as separate absolutely-positioned layers that share the page stacking context (the wrapper has *no* z-index, so it creates no stacking context). The map — rendered **top-level** in `+page` (so it isn't trapped in the map zone's z-index:0 context) — sits at **z 61**, between the frame's frosted background (**z 60**) and its header/resize chrome (**z 62**). So the map is fully interactive (pan/zoom) while the header/resize stay usable, with the frosted frame behind it. The map is never re-mounted (only its CSS rect changes), so Cesium state survives.
+
+Detach is **in-app** (floating window) plus **native PiP** (free OS-window placement) for v1. A Tauri multi-window detach remains a possible v2, but native PiP already covers free placement without it.
 
 ## 4. Persistence
 
@@ -59,8 +62,9 @@ start falls back to the default device instead of erroring.
 - ✅ NavRail "Video" panel + live preview + info line
 - ✅ Persistence + auto-start (last settings, device fallback)
 - ✅ Dock widget (2×1 wide, crop-to-fill)
-- ☐ Floating window (snap bottom-left / drag-free / dock-reflow / corner-resize)
-- ☐ Double-click map↔video swap (incl. 3D view)
+- ✅ Floating window (snap bottom-left / drag-free / dock-reflow / corner-resize, frosted frame)
+- ✅ Double-click map⇄video swap (map moves into the movable frame; no re-mount)
+- ✅ Native Picture-in-Picture detach (persistent source, survives panel close)
 - ☐ v2: network streams (RTSP/UDP), native `nokhwa` source, OS-window detach, snapshot/record
 
 ---

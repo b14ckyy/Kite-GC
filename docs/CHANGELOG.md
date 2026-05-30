@@ -14,7 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Frame-rate fix**: the browser camera API can't request MJPEG directly, so high-res modes could land on a slow uncompressed format (13 fps @720p / 6 fps @1080p). Requesting `frameRate: { ideal: 60 }` (FPV standard) nudges the browser to the camera's MJPEG mode → full 60 fps
 - **Video widget** (2×1 `wide`) — a router sink showing the shared feed in the standard widget card; crop-to-fill (`object-fit: cover`) for a full 2:1 tile, thin rounded frame, no settings (the panel owns control)
 - **Persistence + auto-start** — device/resolution/mirror and the running state are remembered (localStorage); video **auto-starts with the last settings** if it was running at last close, falling back to the default device if the saved one is gone
-- _Planning + design captured in `docs/dev/VideoFeature.md`. Floating window and map-swap follow; network streams (RTSP/UDP) + native capture are v2._
+- **Floating video window** — an in-app overlay sink: **snaps bottom-left** (the bottom dock reflows out of the way), **drag** the header to float free, **corner-resize** (aspect-locked, 10–30 % of viewport height); frosted frame matching the NavRail panels
+- **Double-click map⇄video swap** — double-click the floating video → the video fills the map view and the **map moves into the (movable) floating frame** (not a fixed corner); double-click the full-size video to swap back. The map is never re-mounted (Cesium state survives); a `resize` re-fits Leaflet/Cesium. Layered so the map stays fully interactive while the frame header/resize remain usable
+- **Native Picture-in-Picture** — a "Video Window" button detaches the feed into a borderless OS window (free placement anywhere on screen) via a persistently-mounted source, so it **survives closing the Video panel**
+- _Planning + design in `docs/dev/VideoFeature.md`. Network streams (RTSP/UDP) + native capture are v2._
 
 ### Added — Terrain Radar widget (top-down EGPWS-style)
 - **New `terrainRadar` widget** (1×1) — a top-down, **track-up** terrain-awareness display: a **120° forward fan** sampled as a polar grid and coloured by terrain clearance. Fixed pointing up; terrain is sampled relative to heading so it rotates with the craft. The fan fills the square (wide flanks clipped); the same **UAV ring marker** sits at the apex
