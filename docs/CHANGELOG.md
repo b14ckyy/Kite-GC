@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Terrain Radar widget (top-down EGPWS-style)
+- **New `terrainRadar` widget** (1×1) — a top-down, **track-up** terrain-awareness display: a **120° forward fan** sampled as a polar grid and coloured by terrain clearance. Fixed pointing up; terrain is sampled relative to heading so it rotates with the craft. The fan fills the square (wide flanks clipped); the same **UAV ring marker** sits at the apex
+- **Two ranges**: the *forward fan distance* is **speed-driven** (300/900/1800/3600 m, shared scale + hysteresis with the Live AGL widget) — shown as range arcs + distance labels; the *clearance colour scale* is a **separate setting** (left toggle **60/120/250 m**, default 120; coarse-rounded **200/400/800 ft** in imperial) — deliberately independent of the Terrain-Analysis `groundClearance`
+- **Colouring**: continuous **red→orange→yellow→green** ramp over `0…scale` (`< 0` red, `> scale` off), reference altitude toggles **REL** (current MSL) ↔ **PRED** (sink-angle predicted, averaged FC vario) — right button
+- **Heatmap look**: cells textured with an SVG `feTurbulence` + `feDisplacementMap` filter (+ a very light blur), clipped to the fan — keeps terrain detail instead of smearing it like a plain blur
+- **Backend**: new `terrain_fan` command — server-side polar sampling (one IPC call/refresh) over the existing tile cache; re-sampled only on meaningful change. Default **off**
+
 ### Added — Live AGL widget (forward-looking terrain HUD)
 - **New `liveAgl` widget** in a new **`wide` (2×1) widget class** — a side-view terrain HUD: left 1/3 = recently flown terrain + flight history, a neutral (airframe-agnostic) **UAV marker** at the "now" divider that tracks the current altitude, right 2/3 = **estimated terrain ahead along the current heading**
 - **Works live *and* in replay**: the flown history is accumulated **internally from the telemetry stream** (the shared `liveTrack` store only fills while armed on a live link, so it is empty during blackbox/flight-log playback). Resets on scrub-back / new flight

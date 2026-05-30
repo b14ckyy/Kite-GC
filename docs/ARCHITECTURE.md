@@ -1149,7 +1149,7 @@ Contour-offset coverage of an arbitrary (concave) polygon. The pinch-off/island 
 - Geoid ≈ MSL means GLO-30 elevation, GPS altitude, and INAV AMSL waypoints are directly comparable — **no geoid conversion** (the key simplification vs Cesium's ellipsoid terrain).
 - Backend (not frontend): GeoTIFF parsing + tile cache fit Rust; one provider serves multiple frontend features without IPC duplication.
 
-**Implementation**: `tile_name(lat,lon)` → HTTPS fetch → disk cache (portable-aware) → `tiff`-crate decode (Float32, DEFLATE, floating-point predictor; geo-transform from `ModelPixelScale`/`ModelTiepoint`) → in-memory LRU (4 tiles) → bilinear sample. **CPU decode + 42 MB disk I/O run on `spawn_blocking`** so the async runtime is never stalled (critical on weak hardware); tile loads are serialized + cache-rechecked via an async lock to coalesce concurrent requests. Commands: `terrain_elevation`, `terrain_profile`.
+**Implementation**: `tile_name(lat,lon)` → HTTPS fetch → disk cache (portable-aware) → `tiff`-crate decode (Float32, DEFLATE, floating-point predictor; geo-transform from `ModelPixelScale`/`ModelTiepoint`) → in-memory LRU (4 tiles) → bilinear sample. **CPU decode + 42 MB disk I/O run on `spawn_blocking`** so the async runtime is never stalled (critical on weak hardware); tile loads are serialized + cache-rechecked via an async lock to coalesce concurrent requests. Commands: `terrain_elevation`, `terrain_profile`, `terrain_fan` (polar grid — see Part E).
 
 **Follow-up**: full-tile decode is multi-second on weak hardware. The planned optimization is **COG partial reads** — HTTP range requests + per-chunk decode of only the blocks covering the queried points — turning multi-second decodes into sub-100 ms.
 
@@ -1188,6 +1188,15 @@ A planning-time launch point (frontend `launchPoint` store) is the home-altitude
 **Terrain Correction (Phase 2)**: a pure-function engine (`helpers/terrainCorrection.ts`) over the same `ProfileData`. *Terrain Follow* sets correctable WPs (Waypoint + PosHold in the range) to a target AGL; *Clearance Check* only raises. A monotonic convergence loop raises WP/leg clearance and (optional fixed-wing) the lower endpoint of any too-steep climb/descent leg. Land/RTH/Jump/SetHead and out-of-range WPs are fixed anchors. Insertion is **manual** (*Add WP* at a pinned chart marker, on the track). A live green preview (drawn *behind* the path) precedes an APPLY confirm dialog; corrected WPs are written in **AGL** mode.
 
 **Jump simulation**: `expandRoute()` simulates one loop per jump (`4J2` → branch `4→2`, cut, resume `4→5`); revisits carry no extra WP dots. The cut is a break in terrain/path/clearance + a marker; the jump-back leg is coloured like the map and ends in a target marker. Correction keys altitude **per WP index** (one shared `Cell` across revisits), so the jump-back leg constrains the same WP as its first-pass legs; cut legs are skipped. Jump target resolves as `p1 − 1` (matching the map).
+
+### Part E — Live terrain widgets (Live AGL + Terrain Radar)
+
+Two HUD widgets reuse the provider for in-flight terrain awareness. Both are **driven by the telemetry frame**, self-throttled (a frame is dropped while a backend sample is in flight), re-sample only on meaningful change, and share the speed-driven forward-distance scale (300/900/1800/3600 m with boundary hysteresis).
+
+- **Live AGL** (`liveAgl`, 2×1 `wide`): a side-view forward-looking HUD on the existing `terrain_profile` command. History is accumulated **internally from the telemetry stream** (not the armed-only `liveTrack` store) so it works on a live link **and** during replay. Forward terrain is one heading-projected `terrain_profile` segment; the dashed flight line uses the averaged FC vario.
+- **Terrain Radar** (`terrainRadar`, 1×1 `large`): a top-down, track-up EGPWS-style 120° fan. Needs 2-D coverage, so it adds **one new command — `terrain_fan(lat, lon, heading, half_angle, range, ang_cells, rad_cells)`** — server-side polar sampling over the tile cache (one IPC call per refresh, vs N radial `terrain_profile` calls). Clearance is coloured on a continuous ramp against either current MSL or a sink-angle prediction; an SVG turbulence/displacement filter gives the heatmap texture. Its clearance colour scale is a **dedicated setting** (60/120/250 m), intentionally separate from the planning `groundClearance`.
+
+**Why a new command for the radar but not the AGL widget**: the AGL widget samples a 1-D polyline (`terrain_profile` fits); the radar samples a 2-D fan, where doing it as N frontend ray-calls would be N× the IPC + redundant tile locking — one backend command that walks the polar grid against the already-resident tile is the clean fit.
 
 ---
 

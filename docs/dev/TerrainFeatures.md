@@ -217,6 +217,18 @@ A HUD widget (`widgets/LiveAglWidget.svelte`) in a new **`wide` (2×1) widget cl
 
 Visuals follow the Feature 2 panel (grid, ground gradient) inside a standard widget card (blur / semi-transparent / rounded). Update is driven by each telemetry frame, self-throttled (drops a frame while a backend sample is in flight). Default **off**.
 
+### Feature 3b — Terrain Radar widget (top-down EGPWS-style) — ✅ **DONE**
+
+A 1×1 (`large`) **top-down, track-up** terrain-awareness display (`widgets/TerrainRadarWidget.svelte`), a simplified take on a Honeywell EGPWS terrain display.
+
+- **120° forward fan**, fixed pointing up; terrain is sampled relative to the heading so the picture is **track-up** (turning rotates the terrain). The fan **fills the square** vertically — its wide ±60° flanks overflow the left/right edges and are clipped by the card (no dead space). The same **UAV ring+dot marker** sits at the apex (bottom-centre).
+- **Two independent ranges** (the easy thing to confuse):
+  1. *Horizontal fan distance* — how far ahead it looks: **speed-driven** 300/900/1800/3600 m with the same boundary hysteresis as the Live AGL widget. Drawn as range **arcs + distance labels** along the heading line.
+  2. *Clearance colour scale* — how terrain height vs the reference altitude maps to colour: a **dedicated setting** (`radarScale`, **left toggle 60/120/250 m**, default 120; coarse-rounded **200/400/800 ft** in imperial). This is deliberately **not** the Terrain-Analysis `groundClearance` (that's a planning value, not a radar scale).
+- **Colouring** = `clearance = referenceAlt(dist) − terrain`, on a **continuous red→orange→yellow→green ramp** over 0…scale (`< 0` clamps to red, `> scale` unpainted). Reference altitude toggles **REL/PRED** (right button): static current MSL, or sink-angle predicted (`MSL + slope·dist`, averaged FC vario) — both share one code path.
+- **Heatmap look** — cells (32×16 polar grid) are textured with an SVG **`feTurbulence` + `feDisplacementMap`** filter (dissolves the grid blocks organically) plus a very light `feGaussianBlur`, clipped to the fan sector. Chosen over a plain blur so terrain detail survives.
+- **Backend**: new `terrain_fan(lat, lon, heading, half_angle, range, ang_cells, rad_cells)` command — one IPC call per refresh, server-side polar sampling via the existing tile cache. Re-sampled only on meaningful change (movement > ½ radial cell / turn > 2° / scale change / > 1 s). Default **off**.
+
 ### Feature 4 — LOS (line-of-sight) analysis — **LAST, no priority**
 
 Line-of-sight / radio-horizon analysis along the route (à la MWPTools): detect where terrain occludes the line between the GCS/home and points along the mission.
@@ -231,7 +243,8 @@ Line-of-sight / radio-horizon analysis along the route (à la MWPTools): detect 
 2. ✅ **AGL waypoints** — WP editor alt-mode (REL/AMSL/AGL) with terrain conversion, survey-pattern `ground`/AGL, export AGL→AMSL, launch point + `<mwp>` persistence. Validated against INAV Configurator terrain analysis.
 3. **Terrain analysis** — full-width NavRail overlay; view modes Waypoint / Track; SVG profile chart with zoom/pan + clearance coloring; Terrain Correction (Terrain Follow / Clearance Check) over a WP range, preview → APPLY *(next)*
 4. ✅ **Live AGL widget** — 2×1 `wide` forward-looking terrain HUD; dedicated renderer, history from the telemetry stream (live + replay), heading-projected terrain ahead + vario flight line
-5. **LOS analysis** — deferred, low priority
+5. ✅ **Terrain Radar widget** — 1×1 top-down track-up EGPWS-style fan; `terrain_fan` backend, continuous clearance heatmap (REL/PRED), own 60/120/250 m colour scale
+6. **LOS analysis** — deferred, low priority
 
 ## 5. Protocol scope (TBD)
 

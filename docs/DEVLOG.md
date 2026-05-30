@@ -331,7 +331,7 @@ The HUD uses a **two-panel drag-and-drop layout** within the CSS Grid zone syste
 - **Side Dock**: Vertical strip (grid row 2, col 3–4), width `clamp(150px, 15vw, 250px)`.
 
 ### Widget Classes
-- **Large** (22.5 units): AHI, Compass — circular, complex visualizations
+- **Large** (22.5 units): AHI, Compass, Terrain Radar — circular / square complex visualizations
 - **Small** (13.5 units = 60% of large): most others — square, compact data display
 - **Wide** (2×1 = two large units wide, one tall): Live AGL — a horizontal forward-looking terrain HUD. In the bottom dock it renders `sizePx × 2` wide; in the side dock it falls back to a half-height landscape tile
 
