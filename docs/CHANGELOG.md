@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Terrain Analysis (elevation profile & clearance)
+- **Terrain Analysis panel**: full-width NavRail overlay showing a side-view elevation profile of the mission/track vs terrain — hand-rolled **SVG** chart, **no external runtime dependency**
+- **Two view modes**: *Waypoint* (planned mission, altitudes resolved to absolute MSL via terrain + launch point) and *Track* (flown live temp-log or loaded blackbox); profiles cached per mode → instant switching
+- **Clearance check**: dashed clearance floor (`terrain + Ground Clearance`) with red coloring where the path drops below it; min-clearance readout **ignores take-off/landing** (leading/trailing below-clearance runs trimmed; mid-route dips still alert)
+- **MSL ↔ AGL datum toggle**: MSL side-view or an AGL *clearance curve* on a flat 0 baseline
+- **Zoom/pan** (wheel / drag / double-click reset) with **resolution that scales to the zoom level** — only the visible slice is drawn, decimated to ~screen resolution (peaks + unsafe spots preserved); full-res data drives the readouts
+- **Max climb angle** readout; flown-track jitter low-pass filtered (~10-sample window per ≥20 m segment)
+- **Compact mode** (*Show Map*): collapses to a short, animated top-docked strip; the chart cursor is mirrored onto the 2D map (`TerrainCursorLayer`) as a transient hover dot + a click-pinned persistent marker that **stays on the map after the panel closes** (and is mirrored back into the chart)
+- **Void bridging**: interior null terrain samples (tile-edge / nodata) interpolated so the profile stays continuous
+- Session-persistent panel state (in-memory; reset on app close). Global text-selection blocker added (UI is app-like, inputs excepted)
+
+### Added — AGL Waypoint Planning & Launch Reference
+- **AGL altitude mode**: `alt_mode` (REL / AMSL / **AGL**) on waypoints; AGL is a GCS-only authoring concept (INAV has no AGL flag) resolved to AMSL on export (`AMSL = terrain(lat,lon) + AGL`, MSP upload + `.mission` save)
+- **Editor toggle** cycles REL→AMSL→AGL, converting the value via terrain + the launch point so the physical height is preserved; survey patterns support an AGL (`ground`) option
+- **Launch/home reference**: auto-placed, draggable map marker + dashed connector to the first WP; persisted in `.mission` via the mwp-compatible `<mwp home-x/home-y>` meta (round-trips, inter-app compatible)
+
+### Added — Terrain Elevation Provider (Copernicus GLO-30)
+- **Local terrain elevation** (`src-tauri/src/terrain/`): Copernicus DEM GLO-30 (AWS Open Data, Cloud Optimized GeoTIFF, no API key, EGM2008 geoid ≈ MSL) — fetch → portable-aware disk cache → `tiff`-crate decode (Float32/DEFLATE/predictor) → in-memory LRU → bilinear sample
+- **Commands** `terrain_elevation` / `terrain_profile`; CPU decode + disk I/O on `spawn_blocking` (runtime never stalls), concurrent loads coalesced via async lock
+- **≈MSL** throughout — GPS altitude, AMSL waypoints, and GLO-30 are directly comparable (no geoid-undulation hack, unlike Cesium's ellipsoid terrain)
+
 ### Added — Survey Pattern Generator: Polygon Lawnmower (Contour-Offset)
 - **`generatePolygonLawnmower()`**: contour-offset coverage for arbitrary (concave) polygons
 - **Convex decomposition** (`decomposeConvexXY`): recursive reflex-cut splits a concave polygon into convex pieces at reflex vertices, preferring diagonals between two reflex vertices

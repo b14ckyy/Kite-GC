@@ -1172,6 +1172,21 @@ A planning-time launch point (frontend `launchPoint` store) is the home-altitude
 
 **Validation**: an AGL survey pattern exported to `.mission`, loaded into INAV Configurator, showed consistent terrain-relative altitude across all waypoints in its terrain analysis.
 
+### Part D — Terrain Analysis panel (elevation profile)
+
+**Context**: Mission planners need to *see* terrain clearance, like INAV Configurator / mwp. mwp shells out to an external tool for the graph; we require **no external runtime dependency**.
+
+**Decision**: A **full-width, viewport-centered overlay** opened from the NavRail (not a narrow side panel — a profile is wide/short by nature), rendering a **hand-rolled SVG** side-view. Behaves like a floating panel (the nav rail stays open; mutually exclusive with the nav panel content; the X hides all). Built entirely on the existing `terrain_profile` command + the frontend altitude pipeline.
+
+- **Data** (`helpers/terrainProfile.ts`): one `terrain_profile` call per route at 30 m spacing; waypoint altitudes resolved to absolute MSL via terrain + the launch point. Two builders — Waypoint (planned mission) and Track (flown live temp-log / loaded blackbox). All MSL (Copernicus EGM2008), consistent with FC GPS + AMSL waypoints.
+- **State** (`stores/terrainAnalysis.ts`): in-memory session store (survives close/reopen, not persisted to disk). Profiles cached per mode by signature → instant Waypoints↔Track switching.
+- **Chart** (`TerrainProfileChart.svelte`): explicit pixel scales (no SVG `viewBox`) so axis labels stay crisp; wheel-zoom / drag-pan on the X domain. **Rendering scales with zoom** — only the visible distance slice is drawn, decimated to ~screen resolution via a per-bucket worst-clearance / peak-terrain envelope (peaks + unsafe spots survive); full-resolution data still drives the readouts.
+- **Analysis nuances**: min-clearance trims leading/trailing below-clearance runs (take-off/landing on the ground) so they don't false-alert; track climb angle is low-pass filtered against sensor jitter; interior void terrain samples are bridged by interpolation.
+- **Chart ↔ map link** (Compact mode): a `terrainCursor` store + `TerrainCursorLayer` mirror the chart cursor onto the 2D map — a transient hover dot plus a click-pinned persistent marker that **persists when the panel is closed** (reference while editing in mission control). Visual-only; 2D Leaflet for now (3D follows the later Cesium rework).
+- **Why frontend/SVG**: the profile is presentation built on an existing backend command; an SVG component matches the widget stack, is themeable and natively interactive, and avoids any charting dependency.
+
+**Next (Phase 2)**: Terrain Correction (Terrain Follow / Clearance Check over a WP range, fixed-wing climb-angle limit, preview → APPLY) — a pure-function pass writing corrected waypoints back in AGL mode.
+
 ---
 
 *End of Architecture Decision Records*

@@ -1,7 +1,7 @@
 # Terrain Features — Concept & Implementation Plan
 
 **Status**: Planning (temporary working doc — remove once implemented & documented in ARCHITECTURE.md/DEVLOG.md, like PatternGenerator.md was)
-**Last Updated**: 2026-05-29
+**Last Updated**: 2026-05-30
 
 This doc plans the four terrain-based features for the **2D map / mission planning** path. The 3D map (Cesium) is out of scope here — its quirks are tracked separately under Milestone 7.
 
@@ -105,22 +105,86 @@ Mixed-mode missions: INAV supports per-waypoint mode (P3 bit 0), so REL and AMSL
 - Behaviour when terrain data for a WP location isn't available (offline / void) — warn & block export, or fall back to REL/AMSL?
 - Whether to surface a per-mission "convert all to AMSL" preview before upload.
 
-### Feature 2 — Terrain clearance validation — **SECOND**
+### Feature 2 — Terrain analysis (clearance validation & correction) — **SECOND / NEXT**
 
-A popup window showing a **1-D side-view (profile)** of the planned waypoint mission:
-- **X-axis**: cumulative distance along the route
-- **Y-axis**: altitude
-- **Flight path line**: waypoint MSL altitudes connected, with waypoints marked
-- **Terrain graph** below: terrain elevation sampled along the route (via `profile()`)
-- **Clearance** = flight altitude − terrain; warn/highlight where below a configurable threshold
+A complex analysis tool opened as a **full-width, viewport-centered overlay** over the map, triggered from the **NavRail** (not a narrow side panel — the chart is wide/short by nature, and the tool has no relevant map representation, so overlaying the map is fine). A simplified live glance is the later 2×1 widget (Feature 3), not this.
 
-**Exact features TBD**: clearance threshold config, color-coding of unsafe segments, min-clearance readout, per-leg warnings, handling of RTH / LAND / loiter / jump legs, vertical exaggeration.
+**Two modes (toggle in the header):**
+- **Waypoint Analysis** — the planned mission: editable WP altitudes + auto-correction.
+- **Track Analysis** — a flown track, **read-only** (a flown track can't be corrected). Source is whichever track is on the map: the **live MSP temp-log** *or* a **loaded blackbox log**. These are mutually exclusive (log loading is blocked while an MSP connection exists), so **no source selector** is needed — same on-map data structure either way → one render pipeline.
+
+**Chart — hand-rolled SVG, no external runtime dependency** (matches our widget stack; themeable, crisp, natively interactive — unlike mwp which shells out to an external graph tool):
+- **X-axis**: cumulative ground distance along the route/track
+- **Y-axis**: altitude (MSL)
+- **Terrain fill** (orange): sampled via `terrain_profile()` at **30 m spacing** (= GLO-30 native resolution)
+- **Path line** (blue): waypoint/track MSL altitudes connected, with waypoints marked
+- **Clearance** = path altitude − terrain; segments below the safety margin highlighted red
+- **Hover crosshair** showing distance / altitude / clearance under the cursor (later: linked to a marker on the map)
+- **Horizontal zoom + pan** (essential — 120 INAV WPs, or hundreds on ArduPilot, get crowded otherwise): mouse-wheel zoom **stretches the X-axis only**, drag scrolls along the distance axis; touch = pinch + drag. Implemented via SVG `viewBox` on the X domain.
+
+**Controls (left column):**
+- **Ground Clearance** (m) — the *single* height parameter. Serves as **target AGL** in Terrain Follow and as **minimum AGL** in Clearance Check. (Not called "safety margin": the point is to not go *below* a height, so one clearance value is the natural concept.) Changing it live-updates the correction preview.
+- **Climb-angle limit (°)** + **Fixed-Wing** toggle. Angle, *not* climb rate, is the edited parameter: a fixed wing's *vertical* climb rate is roughly constant, but the resulting *ground* climb angle varies with wind (headwind → steeper, tailwind → shallower) and airspeed — so the operator edits the geometric angle directly.
+- **Average airspeed** (optional, default **0 = off**): when set, show the *calculated required climb rate* = `airspeed × sin(angle)` as an informational readout (vertical component of the path velocity vector; wind ignored). Operator-supplied because INAV fixed-wing has no speed control yet (ArduPilot does). Future extension: refine with wind/weather data — needs a paid API (e.g. Windy), out of scope for now.
+- **Vertical exaggeration**.
+- **Terrain Correction** sub-panel (**Waypoint mode only**) — mode selector + WP range + Add-Waypoints toggle + APPLY; see below.
+- **Datum toggle** MSL / AGL:
+  - **MSL view** — terrain filled to its elevation + the flight/track altitude line, both in MSL.
+  - **AGL view** — plots the **clearance curve** (flight altitude − terrain) with the ground flattened to a 0 baseline; clearance violations read straight off the zero line. (Value-add over the reference tools, which only show the MSL side-view.)
+
+**Readouts (bottom):** min clearance (with warning icon), max climb angle, total distance, value under cursor.
+
+**State persistence:** all panel parameters (mode, Ground Clearance, climb-angle limit, Fixed-Wing toggle, airspeed, vertical exaggeration, WP range, Add-Waypoints toggle, zoom/pan, datum) are kept for the **whole app session** — closing and reopening the panel restores the last state. Reset only when the app itself closes (in-memory store, **not** written to disk).
+
+**Waypoint editing:** **no dragging.** Click a waypoint to select it → set its altitude via a numeric field, respecting its alt mode (REL/AMSL/AGL).
+
+**Terrain Correction (Waypoint mode only — explicit, never automatic):**
+
+Two sub-features chosen by a mode selector. Both operate on a **WP range** (two fields *Start WP* / *End WP*, default first/last) so corrections target a **section only** — often just part of a mission must follow terrain while other legs stay at a safe travel altitude. Changing **Ground Clearance** (or any parameter) live-renders a **differently-colored preview** of the corrected track; nothing is written until **APPLY**, which updates the affected waypoints in **bulk**. All corrected waypoints are set to **AGL mode** afterwards (so the map shows the correct reference and the user sees the right datum).
+
+- **Terrain Follow** — adjust WPs *to* the target height where possible:
+  1. Set every WP in range to Ground-Clearance AGL.
+  2. Check each track (leg) between WPs.
+  3. Where a leg drops below clearance, raise **both** adjacent WPs until the leg is clear.
+  4. *(optional **Add Waypoints** toggle)* insert **one** WP at the leg's highest terrain point to lift that leg locally — at most **one extra WP per leg per analysis run**.
+
+- **Clearance Check** — raise only, never lower:
+  1. Check WPs, raise any below clearance.
+  2. Check legs, raise **both** endpoints of an offending leg simultaneously until clear.
+  3. No waypoint insertion.
+
+**Climb-angle limit** (Fixed-Wing) applies on top of both modes: the ground climb/descent angle between consecutive WPs must stay ≤ limit; if a required raise would exceed it, **propagate the climb earlier** (raise preceding WPs *within the range*) so the climb starts sooner.
+
+Raising **iterates to convergence** (one raised WP affects both its neighbouring legs); only **waypoint insertion** is capped at one per leg per run.
+
+**Datum advantage:** we plot terrain in MSL (Copernicus EGM2008), consistent with FC GPS MSL and AMSL waypoints — more correct than INAV Configurator, which labels its terrain as WGS84/ellipsoid (see §1).
+
+**Phasing:**
+1. ✅ **Read-only chart** (Waypoint + Track modes): terrain + path + clearance coloring + zoom/pan + readouts + hover. *(implemented — see notes below)*
+2. **Terrain Correction** — both modes (Terrain Follow / Clearance Check) + Ground Clearance + WP range + climb-angle limit + Add-Waypoints, live preview → APPLY; click-to-select + numeric WP altitude edit.
+3. Map-marker hover link; polish.
+
+**Phase 1 implementation notes (decided while building):**
+- **Full-width NavRail overlay**, mutually exclusive with the nav panel (only one panel open at a time). All params live in an in-memory session store (`stores/terrainAnalysis.ts`).
+- **Hand-rolled SVG** chart (`TerrainProfileChart.svelte`); profile data built in `helpers/terrainProfile.ts` from `terrain_profile` + per-WP MSL resolution.
+- **Clearance analysis ignores take-off & landing**: the leading/trailing runs that sit *below* clearance (we start/land on the ground) are trimmed, so only the en-route portion drives the min-clearance alert and red coloring. A *mid-route* dip below clearance still alerts.
+- **Climb angle is low-pass filtered for tracks**: flown-track altitude jitter spikes per-sample slopes toward 90°, so the track climb angle is computed over a ~10-sample smoothed altitude measured per ≥20 m segment. Waypoint vertices are used as-is.
+- **Rendering scales with zoom**: only the visible distance slice is drawn, decimated to ~screen resolution (per-bucket worst-clearance / peak-terrain sample, so peaks and unsafe spots survive). Full-resolution data still drives the readouts. Zooming in reveals more detail without rendering the whole route.
+- **Datum toggle** MSL ↔ AGL (clearance curve) as above.
+- **Per-mode RAM cache**: Waypoint and Track profiles are cached by signature, so toggling between them is instant (no re-sampling) until the route/track changes.
+
+**Compact mode (map-linked cursor)** — a *"Show Map"* toggle (first button in the header) collapses the analyzer to a short **top-docked strip** (≈20 vh, stops short of the side widget dock so widgets stay visible), leaving the map usable above. The chart cursor is mirrored onto the 2D map (`TerrainCursorLayer`), giving the spatial *where* that a side-view alone lacks:
+- a **transient hover dot** follows the mouse over the profile;
+- a **click pins a persistent marker** (click again to clear) that sits on the mission track / flight trail (per view mode), and is **mirrored back into the chart** as a vertical pin line (nearest-sample by lat/lon; hidden if the pin isn't on the current path).
+- The pinned marker is **visual-only** (not editable) and **persists in the session store even when the panel is closed**, so it stays as a reference on the map while editing in mission control. State lives in `terrainCursor`; the chart emits lat/lon per sample. (2D only for now; 3D follows the later Cesium rework.)
+
+**Still TBD:** handling of RTH / LAND / loiter / jump legs in the distance domain; void/nodata terrain segments; exact climb-angle propagation when constraints conflict.
 
 ### Feature 3 — AGL widget (live flight) — **THIRD**
 
-A **mini version of the clearance side-view** as a HUD widget: live AGL = `GPS MSL altitude − terrain_elevation(current lat, lon)`, shown with a small terrain profile.
+A **mini, informational version of the Track-Analysis chart** as a HUD widget in **2×1 full-size horizontal format**: live AGL = `GPS MSL altitude − terrain_elevation(current lat, lon)`, shown with a small terrain profile. Reuses the Feature 2 SVG chart component (compact instance, live track source).
 
-**Design TBD**: forward-looking window vs current point only, scale/axis, how it docks in the widget system, update rate.
+**Design TBD**: forward-looking window vs current point only, scale/axis, update rate (likely the same 30 m / 1–2 s cadence as the overlay's live mode).
 
 ### Feature 4 — LOS (line-of-sight) analysis — **LAST, no priority**
 
@@ -134,8 +198,8 @@ Line-of-sight / radio-horizon analysis along the route (à la MWPTools): detect 
 
 1. ✅ **Shared elevation provider** (foundation) — Copernicus GLO-30, Rust backend, validated
 2. ✅ **AGL waypoints** — WP editor alt-mode (REL/AMSL/AGL) with terrain conversion, survey-pattern `ground`/AGL, export AGL→AMSL, launch point + `<mwp>` persistence. Validated against INAV Configurator terrain analysis.
-3. **Terrain clearance validation** — profile popup *(next)*
-4. **AGL widget** — mini profile, live
+3. **Terrain analysis** — full-width NavRail overlay; view modes Waypoint / Track; SVG profile chart with zoom/pan + clearance coloring; Terrain Correction (Terrain Follow / Clearance Check) over a WP range, preview → APPLY *(next)*
+4. **AGL widget** — mini 2×1 profile, live (reuses the Feature 2 chart)
 5. **LOS analysis** — deferred, low priority
 
 ## 5. Protocol scope (TBD)

@@ -636,3 +636,18 @@ Local terrain elevation for mission planning. See [ARCHITECTURE.md](ARCHITECTURE
 
 - `launchPoint` store (`mission.ts`); auto-placed on entering edit mode (FC home → first geo-WP → map center), always-visible draggable map marker, orange dashed connector to the first waypoint.
 - Persisted in `.mission` via the mwp-compatible `<mwp home-x="lon" home-y="lat">` meta element (`Mission.home`): written on save/export, parsed on load/import (overrides the current launch point). Other tools (INAV Configurator) ignore the element and read only `<missionitem>`.
+
+### Terrain Analysis panel (elevation profile)
+
+Full-width NavRail overlay (`TerrainAnalysisPanel.svelte`) — a side-view profile of the mission/track vs terrain. No external runtime dependency: hand-rolled **SVG** chart (`TerrainProfileChart.svelte`); data built in `helpers/terrainProfile.ts` from `terrain_profile` + per-WP MSL resolution. Session state in `stores/terrainAnalysis.ts` (in-memory, survives close/reopen; not persisted to disk).
+
+- **Two view modes**: *Waypoint* (planned mission, WP altitudes → absolute MSL via terrain + launch point) and *Track* (flown live temp-log or loaded blackbox — source is whichever track is on the map; mutually exclusive so no selector). Profiles are cached per mode by signature → instant Waypoints↔Track switching.
+- **Chart**: terrain fill + flight/track line (MSL), waypoint markers, dashed clearance floor (`terrain + Ground Clearance`), red coloring where clearance < floor. Hover crosshair with readouts (distance / terrain / altitude / clearance). **MSL ↔ AGL** datum toggle (AGL view = clearance curve on a 0 baseline).
+- **Zoom/pan**: wheel zooms the X-axis, drag pans, double-click resets (explicit scales, no SVG `viewBox`). **Rendering scales with zoom** — only the visible distance slice is drawn, decimated to ~screen resolution (per-bucket worst-clearance / peak-terrain envelope so peaks + unsafe spots survive); full-res data still drives readouts.
+- **Min-clearance trimming**: leading/trailing runs below clearance (take-off climb-out / landing descent on the ground) are ignored — only the en-route portion alerts; a mid-route dip still alerts.
+- **Climb angle**: waypoint vertices used as-is; flown tracks low-pass the altitude (~10-sample window, measured per ≥20 m segment) to reject sensor jitter that otherwise spikes slopes toward 90°.
+- **Void bridging**: interior null terrain samples (tile-edge / nodata) are linearly interpolated so the line/clearance stay continuous; genuine out-of-coverage at the route ends stays null.
+- **Compact mode** (*Show Map* toggle): collapses to a short top-docked strip (animated, like the panel transitions), stopping short of the side widget dock. The chart cursor is mirrored onto the 2D map via `TerrainCursorLayer` — a transient hover dot plus a click-pinned persistent marker (click again to clear). The pin is visual-only and lives in the `terrainCursor` store, so it stays on the map after the panel closes (reference while editing in mission control); it's also mirrored back into the chart as a vertical pin line.
+- **Datum advantage**: terrain plotted in MSL (Copernicus EGM2008), consistent with FC GPS MSL + AMSL waypoints — unlike INAV Configurator's WGS84/ellipsoid terrain labeling.
+
+Next (Phase 2): **Terrain Correction** — Terrain Follow / Clearance Check over a WP range, fixed-wing climb-angle limit, live preview → APPLY.

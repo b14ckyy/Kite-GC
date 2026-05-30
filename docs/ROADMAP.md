@@ -483,7 +483,7 @@ This document tracks planned features, organized by milestone.
 - [ ] Safehome editor
 - [ ] HID controller input (gamepad/joystick)
 - [ ] Audio status alerts (TTS)
-- [ ] Terrain analysis
+- [ ] Terrain analysis — _elevation profile + clearance done (see Terrain Elevation section); auto-correction (Terrain Follow / Clearance Check) next_
 - [ ] Embedded video stream
 - [ ] FW approach / autoland planner
 - [ ] Geozone editor
@@ -518,7 +518,8 @@ Source: **Copernicus DEM GLO-30** (geoid/EGM2008 ≈ MSL, no API key, offline-ca
   - [ ] _follow-up:_ COG partial reads (HTTP range requests) + region pre-download for offline / weak-hardware latency
 - [x] **AGL waypoint planning** — `alt_mode` REL/AMSL/AGL on waypoints; editor toggle converts altitude via terrain + launch point; survey patterns support AGL; AGL resolved to AMSL on export (MSP/​.mission) — validated against INAV Configurator terrain analysis
 - [x] **Launch/home reference** — auto-placed, draggable map marker + connector to first WP; persisted in `.mission` via mwp-compatible `<mwp home-x/home-y>` meta (round-trips, inter-app compatible)
-- [ ] **Terrain clearance validation** — elevation profile along the planned mission with clearance check / warnings (next)
+- [x] **Terrain clearance validation (Terrain Analysis panel)** — full-width NavRail overlay, hand-rolled SVG side-view (no runtime dep); Waypoint + Track (live/blackbox) modes; terrain + flight-path with red below-clearance coloring; min-clearance (take-off/landing trimmed) + max-climb (track-jitter low-pass); zoom/pan with zoom-scaled resolution; MSL ↔ AGL view; Compact mode mirrors the chart cursor + a pinned marker onto the map
+  - [ ] _next (Phase 2):_ **Terrain Correction** — Terrain Follow / Clearance Check over a WP range, fixed-wing climb-angle limit, live preview → APPLY
 - [ ] **Live AGL widget** — in-flight above-ground-level from GPS MSL altitude minus terrain elevation at current position
 - [ ] **LOS (line-of-sight) analysis** for waypoint missions — terrain occlusion / radio horizon along the route, à la MWPTools
 
