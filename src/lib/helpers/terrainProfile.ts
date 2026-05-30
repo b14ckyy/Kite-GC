@@ -466,3 +466,75 @@ export async function buildTrackProfile(track: TrackPoint[]): Promise<ProfileDat
   const path: PathPoint[] = pts.map((p, i) => ({ dist: dist[i], altMsl: p.alt_m }));
   return finishProfile('track', terrain, path, [], totalDist, [], []);
 }
+
+/**
+ * Incremental profiler for the live flown track. Samples terrain only for the
+ * *new* points each update (with the last known point as the segment start for
+ * continuity), accumulating terrain + path; the cheap JS folding (clearance,
+ * min, climb) is recomputed over the whole accumulation each time.
+ */
+export class LiveTrackProfiler {
+  private terrain: TerrainSample[] = [];
+  private path: PathPoint[] = [];
+  private processed = 0;
+  private lastLat = NaN;
+  private lastLon = NaN;
+  private lastDist = 0;
+
+  reset(): void {
+    this.terrain = [];
+    this.path = [];
+    this.processed = 0;
+    this.lastLat = NaN;
+    this.lastLon = NaN;
+    this.lastDist = 0;
+  }
+
+  async update(track: { lat: number; lon: number; alt_m: number }[]): Promise<ProfileData | null> {
+    if (track.length < this.processed) this.reset(); // restarted (new arm)
+
+    const fresh = track.slice(this.processed);
+    this.processed = track.length;
+
+    if (fresh.length > 0) {
+      const havePrev = !Number.isNaN(this.lastLat);
+      const seg: [number, number][] = [];
+      if (havePrev) seg.push([this.lastLat, this.lastLon]);
+      for (const p of fresh) seg.push([p.lat, p.lon]);
+
+      if (seg.length >= 2) {
+        const raw = await invoke<RawSample[]>('terrain_profile', {
+          points: seg,
+          spacingM: PROFILE_SPACING_M,
+        });
+        bridgeGaps(raw);
+        // raw[0] (dist 0) == seg[0]; skip it only if it duplicates an existing sample.
+        const skipFirst = havePrev && this.terrain.length > 0;
+        for (let i = skipFirst ? 1 : 0; i < raw.length; i++) {
+          this.terrain.push({
+            dist: this.lastDist + raw[i].dist_m,
+            elev: raw[i].elev_m,
+            lat: raw[i].lat,
+            lon: raw[i].lon,
+          });
+        }
+      }
+
+      let cum = this.lastDist;
+      let prevLat = this.lastLat;
+      let prevLon = this.lastLon;
+      for (const p of fresh) {
+        if (!Number.isNaN(prevLat)) cum += haversine(prevLat, prevLon, p.lat, p.lon);
+        this.path.push({ dist: cum, altMsl: p.alt_m });
+        prevLat = p.lat;
+        prevLon = p.lon;
+      }
+      this.lastLat = prevLat;
+      this.lastLon = prevLon;
+      this.lastDist = cum;
+    }
+
+    if (this.path.length < 2) return null;
+    return finishProfile('track', this.terrain, this.path, [], this.lastDist, [], []);
+  }
+}

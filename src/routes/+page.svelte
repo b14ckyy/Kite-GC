@@ -24,7 +24,8 @@
   import { refreshSerialPorts, connectFC, disconnectFC, scanBleDevices } from '$lib/controllers/connectionController';
   import * as logbookCtrl from '$lib/controllers/logbookController';
   import * as widgetCtrl from '$lib/controllers/widgetController';
-  import { isValidGpsCoordinate } from '$lib/helpers/telemetry';
+  import { isValidGpsCoordinate, isArmed } from '$lib/helpers/telemetry';
+  import { liveTrack, appendLivePoint, clearLiveTrack } from '$lib/stores/liveTrack';
   import { toTelemetryData } from '$lib/adapters/telemetryAdapter';
   import { homePosition } from '$lib/stores/home';
   import { MAP_PROVIDERS } from "$lib/config/mapProviders";
@@ -107,7 +108,23 @@
 
   // Reactive telemetry subscription
   let liveTelem = $state(get(telemetry));
-  telemetry.subscribe((t) => { liveTelem = t; });
+  let prevArmed = false;
+  telemetry.subscribe((t) => {
+    liveTelem = t;
+    // Accumulate the live flown track (RAM) for the Terrain Analyzer
+    const armed = isArmed(t.armingFlags, t.lastUpdate);
+    if (armed && !prevArmed) {
+      clearLiveTrack();
+      // warm the Copernicus tile for the current area so it's ready
+      if (isValidGpsCoordinate(t.lat, t.lon)) {
+        void invoke('terrain_elevation', { lat: t.lat, lon: t.lon }).catch(() => {});
+      }
+    }
+    if (armed && isValidGpsCoordinate(t.lat, t.lon)) {
+      appendLivePoint(t.lat, t.lon, t.altMsl, t.lastUpdate || Date.now());
+    }
+    prevArmed = armed;
+  });
 
   // Switch default baud rate when protocol changes
   // Track previous protocol to detect actual user-initiated changes
@@ -1218,7 +1235,7 @@
 
   <!-- ======= TERRAIN ANALYSIS OVERLAY ======= -->
   {#if terrainOpen}
-    <TerrainAnalysisPanel track={selectedTrackWithPosition} {interfaceSettings} confirm={showDialog} />
+    <TerrainAnalysisPanel track={selectedTrackWithPosition} live={isPrimaryConnected} {interfaceSettings} confirm={showDialog} />
   {/if}
 
   <!-- ======= BOTTOM WIDGET PANEL ======= -->

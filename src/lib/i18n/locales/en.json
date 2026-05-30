@@ -62,6 +62,8 @@
     "title": "Terrain Analysis",
     "showMap": "Show Map",
     "showMapHint": "Compact mode — mirror the chart cursor onto the map",
+    "follow": "Follow",
+    "followHint": "Follow the newest live data (zoom only, no pan)",
     "waypointMode": "Waypoints",
     "trackMode": "Track",
     "datumMsl": "MSL",

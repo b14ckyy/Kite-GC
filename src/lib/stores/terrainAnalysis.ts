@@ -19,6 +19,8 @@ export interface TerrainAnalysisState {
   /** Compact mode: short top-docked strip so the map stays visible, with the
    *  chart cursor / placed marker mirrored onto the map */
   compact: boolean;
+  /** Live Track mode: view follows the newest data (right edge); else free pan */
+  follow: boolean;
   /** Waypoint (planned mission) vs Track (flown live/blackbox) view */
   viewMode: TerrainViewMode;
   /** Y-axis reference: absolute MSL vs above-ground clearance */
@@ -50,6 +52,7 @@ export interface TerrainAnalysisState {
 const INITIAL: TerrainAnalysisState = {
   open: false,
   compact: false,
+  follow: true,
   viewMode: 'waypoint',
   datum: 'msl',
   groundClearance: 50,

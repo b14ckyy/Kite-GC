@@ -62,6 +62,8 @@
     "title": "Geländeanalyse",
     "showMap": "Karte zeigen",
     "showMapHint": "Kompaktmodus — Chart-Cursor auf der Karte spiegeln",
+    "follow": "Folgen",
+    "followHint": "Den neuesten Live-Daten folgen (nur Zoom, kein Pan)",
     "waypointMode": "Wegpunkte",
     "trackMode": "Track",
     "datumMsl": "MSL",

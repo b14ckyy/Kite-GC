@@ -16,6 +16,8 @@
     data,
     datum = 'msl',
     settings,
+    live = false,
+    follow = false,
     groundClearance = 50,
     warnThreshold = null,
     activeStartDist = -Infinity,
@@ -30,6 +32,10 @@
     data: ProfileData | null;
     datum?: 'msl' | 'agl';
     settings: InterfaceSettings;
+    /** Live Track mode (FC connected) — min window 250 m */
+    live?: boolean;
+    /** Follow the newest data on the right (no pan, zoom-only) */
+    follow?: boolean;
     groundClearance?: number;
     /** Clearance level below which the path is coloured unsafe (default = groundClearance) */
     warnThreshold?: number | null;
@@ -387,6 +393,7 @@
 
     if (dragging) {
       if (Math.abs(e.clientX - dragClientX) > 4) dragMoved = true;
+      if (live && follow) return; // no panning while following the live track
       const range = dragB - dragA;
       const dDist = (-(e.clientX - dragClientX) / plotW) * range;
       let na = dragA + dDist;
@@ -454,9 +461,27 @@
     const px = e.clientX - rect.left;
     const cursorDist = distFromX(Math.min(Math.max(px, PAD.l), PAD.l + plotW));
     const range = xDomain.b - xDomain.a;
-    const minRange = Math.max(50, data.totalDist / 500);
+    const minRange = live ? 250 : 50; // smallest visible window (m)
     const factor = e.deltaY < 0 ? 0.85 : 1 / 0.85;
-    const newRange = Math.min(data.totalDist, Math.max(range * factor, minRange));
+    let newRange = Math.max(range * factor, minRange);
+
+    // Full zoom-out → auto-fit the whole (growing) range, regardless of follow
+    // (only once the track is longer than the minimum window)
+    if (newRange >= data.totalDist && data.totalDist > minRange) {
+      viewStart = null;
+      viewEnd = null;
+      return;
+    }
+    newRange = Math.min(newRange, Math.max(data.totalDist, minRange));
+
+    // While following, keep the right edge pinned (zoom adjusts the window only);
+    // before the track reaches the window width, keep [0, window].
+    if (live && follow) {
+      const ve = Math.max(newRange, data.totalDist);
+      viewEnd = ve;
+      viewStart = Math.max(0, ve - newRange);
+      return;
+    }
     const frac = (cursorDist - xDomain.a) / range;
     let na = cursorDist - frac * newRange;
     let nb = na + newRange;

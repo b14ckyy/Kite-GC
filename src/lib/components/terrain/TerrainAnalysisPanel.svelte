@@ -41,9 +41,11 @@
   import {
     buildWaypointProfile,
     buildTrackProfile,
+    LiveTrackProfiler,
     type ProfileData,
     type TrackPoint,
   } from '$lib/helpers/terrainProfile';
+  import { liveTrack } from '$lib/stores/liveTrack';
   import { computeCorrection, type CorrectionResult } from '$lib/helpers/terrainCorrection';
   import TerrainProfileChart, { type HoverInfo } from './TerrainProfileChart.svelte';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
@@ -54,11 +56,14 @@
 
   let {
     track = [],
+    live = false,
     interfaceSettings,
     confirm,
   }: {
-    /** Flown track (live temp-log or loaded blackbox) for Track mode */
+    /** Loaded blackbox track for Track mode (non-live) */
     track?: TrackPoint[];
+    /** A live FC connection is active → Track mode follows the live flown track */
+    live?: boolean;
     interfaceSettings: InterfaceSettings;
     /** In-app dialog (from +page) for the APPLY confirmation */
     confirm?: (opts: DialogOptions) => Promise<string | null>;
@@ -92,6 +97,7 @@
     const trk = track;
     if (!st.open) return;
     const mode = st.viewMode;
+    if (live && mode === 'track') return; // the live poll owns Track mode while connected
 
     const sig =
       mode === 'track'
@@ -138,6 +144,59 @@
     }, 250);
     return () => clearTimeout(timer);
   });
+
+  // ── Live Track mode (FC connected) ─────────────────────────────────
+  const liveActive = $derived(live && $terrainAnalysis.viewMode === 'track' && $terrainAnalysis.open);
+  const profiler = new LiveTrackProfiler();
+
+  const LIVE_MIN_WINDOW = 250; // m — default live window; track builds up then scrolls
+
+  /** Pin the view to the newest data (right edge), keeping the current window.
+   *  null/null = full-zoom-out → left untouched (auto-fits the growing range). */
+  function pinFollow(total: number) {
+    const st = get(terrainAnalysis);
+    if (!st.follow) return;
+    if (st.viewStart == null && st.viewEnd == null) return; // full-fit, grows on its own
+    const win = (st.viewEnd as number) - (st.viewStart as number);
+    const ve = Math.max(win, total); // before the track reaches `win`, keep [0, win]
+    patchTerrainAnalysis({ viewStart: Math.max(0, ve - win), viewEnd: ve });
+  }
+
+  $effect(() => {
+    if (!liveActive) return;
+    profiler.reset();
+    data = null;
+    loading = true;
+    // default live window: build up from the left within a fixed window
+    if (get(terrainAnalysis).follow) {
+      patchTerrainAnalysis({ viewStart: 0, viewEnd: LIVE_MIN_WINDOW });
+    }
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const result = await profiler.update(get(liveTrack));
+        if (cancelled) return;
+        data = result;
+        errorKind = result ? 'none' : 'noTrack';
+        loading = false;
+        if (result) pinFollow(result.totalDist);
+      } catch (e) {
+        console.error('[terrain] live profile failed', e);
+      }
+    };
+    void tick();
+    const id = setInterval(() => void tick(), 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  });
+
+  function toggleFollow() {
+    const f = !get(terrainAnalysis).follow;
+    patchTerrainAnalysis({ follow: f });
+    if (f && data) pinFollow(data.totalDist);
+  }
 
   function setMode(mode: 'waypoint' | 'track') {
     if ($terrainAnalysis.viewMode === mode) return;
@@ -395,6 +454,17 @@
       </button>
     </div>
 
+    {#if live}
+      <button
+        class="map-toggle"
+        class:active={$terrainAnalysis.follow}
+        onclick={toggleFollow}
+        title={$t('terrain.followHint')}
+      >
+        ⇥ {$t('terrain.follow')}
+      </button>
+    {/if}
+
     <button class="ghost-btn" onclick={resetTerrainView} title={$t('terrain.resetView')}>⟲</button>
 
     <div class="spacer"></div>
@@ -513,6 +583,8 @@
           {data}
           datum={$terrainAnalysis.datum}
           settings={interfaceSettings}
+          live={liveActive}
+          follow={$terrainAnalysis.follow}
           groundClearance={$terrainAnalysis.groundClearance}
           {warnThreshold}
           activeStartDist={activeRange.startDist}
