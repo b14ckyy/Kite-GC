@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Terrain Analysis: Live Track mode
+- **Track mode follows the live flown track** when an FC is connected (MSP/MAVLink): a shared in-RAM `liveTrack` store accumulates lat/lon + MSL altitude **while armed** (cleared each new arm), independent of the map trail and the flight-log DB
+- On arm, the Copernicus tile for the current area is **pre-fetched** so terrain is ready
+- **Incremental** profiler — every 5 s only the *new* points are terrain-sampled and appended (no full re-sample); cheap clearance/min/climb folding recomputed over the accumulation
+- **Follow** toggle (live only): on = pinned to the newest data (zoom-only, no pan); off = free pan + zoom over the growing range; default 250 m window builds up left→right then scrolls; full zoom-out auto-fits the whole growing range
+- **Zoom fix**: the chart's max zoom-in is now a flat 50 m window on any log length (was scaled to total distance, so long logs couldn't zoom past ~500 m)
+
 ### Changed — UI & unit consistency cleanup
 - **App-wide units honour the interface settings** in mission planning (previously hardcoded metric): altitude/distance/speed are stored internally in metric base (m, m/s; waypoint speed stays cm/s for the FC) and converted at the UI boundary for both display and input
 - Covered: **Terrain Analysis** (Ground Clearance, chart axes + readouts), **Survey Pattern** (line spacing / radius / turn distance / base altitude / base speed), **WP editor + mission panel** (altitude, and waypoint speed now in the speed unit instead of cm/s)

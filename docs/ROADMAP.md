@@ -521,7 +521,8 @@ Source: **Copernicus DEM GLO-30** (geoid/EGM2008 ≈ MSL, no API key, offline-ca
 - [x] **Terrain clearance validation (Terrain Analysis panel)** — full-width NavRail overlay, hand-rolled SVG side-view (no runtime dep); Waypoint + Track (live/blackbox) modes; terrain + flight-path with red below-clearance coloring; min-clearance (take-off/landing trimmed) + max-climb (track-jitter low-pass); zoom/pan with zoom-scaled resolution; MSL ↔ AGL view; Compact mode mirrors the chart cursor + a pinned marker onto the map
 - [x] **Terrain Correction** — Terrain Follow / Clearance Check over a WP range, fixed-wing climb/descent-angle limit, manual *Add WP*, live green preview → APPLY (writes corrected WPs in AGL); pure-function engine, shared-altitude per WP index
 - [x] **Jump-loop simulation** — one loop per jump: branch `→target` + cut + resume, distinct colour + target marker, no duplicate WP dots; correction stays correct across revisits
-- [ ] **Live AGL widget** — in-flight above-ground-level from GPS MSL altitude minus terrain elevation at current position
+- [x] **Live Track mode** — Track mode follows the live flown track when connected: shared in-RAM `liveTrack` store (accumulates while armed), terrain pre-fetch on arm, incremental 5 s sampling, Follow toggle (pin-right zoom-only / free pan), 250 m default window. _(built; field-test pending)_
+- [ ] **Live AGL widget** — in-flight above-ground-level from GPS MSL altitude minus terrain elevation at current position _(2×1 mini-widget reusing the chart component)_
 - [ ] **LOS (line-of-sight) analysis** for waypoint missions — terrain occlusion / radio horizon along the route, à la MWPTools
 
 ### Code Health & Maintainability
