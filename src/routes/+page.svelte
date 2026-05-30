@@ -36,7 +36,8 @@
   import { LARGE_BASE_VMIN } from "$lib/config/widgetRegistry";
   import MissionPanel from "$lib/components/mission/MissionPanel.svelte";
   import VideoPanel from "$lib/components/video/VideoPanel.svelte";
-  import { initVideo } from "$lib/stores/video";
+  import FloatingVideoWindow from "$lib/components/video/FloatingVideoWindow.svelte";
+  import { initVideo, videoState, videoStream, setVideoPrimary, registerPiPElement } from "$lib/stores/video";
   import TerrainAnalysisPanel from "$lib/components/terrain/TerrainAnalysisPanel.svelte";
   import { editMode } from "$lib/stores/mission";
   import { terrainAnalysis, patchTerrainAnalysis } from "$lib/stores/terrainAnalysis";
@@ -68,6 +69,45 @@
   let sideDockW = $state(200);
   let sideDockH = $state(400);
 
+  // Viewport size (for the snapped floating-video reserve)
+  let winW = $state(typeof window !== 'undefined' ? window.innerWidth : 1280);
+  let winH = $state(typeof window !== 'undefined' ? window.innerHeight : 720);
+  // Width the bottom dock must yield to the bottom-left snapped video window.
+  const videoReserve = $derived(
+    $videoState.floating && $videoState.floatSnapped
+      ? Math.min($videoState.floatHeightFrac * winH * ($videoState.aspect || 16 / 9), winW * 0.7) + 16
+      : 0,
+  );
+
+  // Map-swap: the full-size video sink shown in the map zone when videoPrimary.
+  let mapVideoEl = $state<HTMLVideoElement | null>(null);
+  $effect(() => {
+    if (mapVideoEl) mapVideoEl.srcObject = $videoStream;
+  });
+
+  // Persistent (always-mounted) source element for native Picture-in-Picture, so
+  // the PiP window survives closing the Video panel. Hidden but rendered/playing.
+  let pipVideoEl = $state<HTMLVideoElement | null>(null);
+  $effect(() => {
+    if (pipVideoEl) {
+      pipVideoEl.srcObject = $videoStream;
+      registerPiPElement(pipVideoEl);
+    }
+  });
+
+  // Floating-window rect (must match FloatingVideoWindow's own computation) — used
+  // to place the map inside the window's frame when the view is swapped.
+  const FLOAT_HDR = 20; // floating-window header height
+  const floatH = $derived(Math.round($videoState.floatHeightFrac * winH));
+  const floatW = $derived(Math.min(Math.round(floatH * ($videoState.aspect || 16 / 9)), Math.round(winW * 0.7)));
+  const floatLeft = $derived($videoState.floatSnapped ? 8 : $videoState.floatX);
+  const floatTop = $derived($videoState.floatSnapped ? winH - floatH - 30 : $videoState.floatY);
+  // When video is primary, the map occupies the window's body (below the header).
+  const mapInFrame = $derived($videoState.videoPrimary && $videoState.status === 'live');
+  const mapFrameStyle = $derived(
+    `left:${floatLeft}px; top:${floatTop + FLOAT_HDR}px; width:${floatW}px; height:${floatH - FLOAT_HDR}px;`,
+  );
+
   // Per-container px-per-unit: 1 unit = cross-axis fraction so that
   // LARGE_BASE_VMIN units == cross-axis px (widget fills dock height/width).
   // This fully decouples bottom dock and side dock scaling.
@@ -78,7 +118,7 @@
 
   // Available space expressed in abstract units (container px / pxPerUnit)
   // Bottom: subtract edit button (28px) + wrapper gap (6px) + zone padding (12px)
-  const bottomAvailUnits = $derived(Math.max(0, (bottomDockW - 34 - 2 * DOCK_PAD) / bottomPxPerUnit));
+  const bottomAvailUnits = $derived(Math.max(0, (bottomDockW - 34 - 2 * DOCK_PAD - videoReserve) / bottomPxPerUnit));
   const rightAvailUnits  = $derived(Math.max(0, (sideDockH - 2 * DOCK_PAD) / sidePxPerUnit));
 
   let appVersion = $state("...");
@@ -1033,6 +1073,8 @@
   });
 </script>
 
+<svelte:window bind:innerWidth={winW} bind:innerHeight={winH} />
+
 <ConfirmDialog bind:this={confirmDialog} />
 
 <main
@@ -1067,7 +1109,32 @@
   <!-- ======= MAP (always fullscreen behind everything) ======= -->
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="zone-map" onclick={minimizeLogbook}>
+  <!-- Full-size video shown in the map area when the view is swapped (videoPrimary).
+       Double-click to swap back. -->
+  {#if mapInFrame}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <!-- svelte-ignore a11y_media_has_caption -->
+    <video
+      class="map-video"
+      class:mirror={$videoState.mirror}
+      bind:this={mapVideoEl}
+      autoplay
+      muted
+      playsinline
+      ondblclick={() => setVideoPrimary(false)}
+    ></video>
+  {/if}
+
+  <!-- Map holder — top-level so it can sit inside the floating window's frame
+       (above the docks) when swapped, without re-mounting the map. -->
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="map-holder"
+    class:in-frame={mapInFrame}
+    style={mapInFrame ? mapFrameStyle : ''}
+    onclick={minimizeLogbook}
+  >
     {#if mapViewMode === '2d'}
       <Map
         playbackTrack={mapTrack}
@@ -1249,7 +1316,7 @@
   {/if}
 
   <!-- ======= BOTTOM WIDGET PANEL ======= -->
-  <div class="zone-bottom-dock" class:zone-hidden={!$layout.bottomDock.visible} class:panel-editing={widgetEditMode} bind:clientWidth={bottomDockW} bind:clientHeight={bottomDockH}>
+  <div class="zone-bottom-dock" class:zone-hidden={!$layout.bottomDock.visible} class:panel-editing={widgetEditMode} bind:clientWidth={bottomDockW} bind:clientHeight={bottomDockH} style:padding-left="{videoReserve}px">
     <div class="panel-bottom-wrap">
       <button
         class="widget-edit-btn widget-edit-btn--panel"
@@ -1274,6 +1341,13 @@
       />
     </div>
   </div>
+
+  <!-- Persistent hidden source for native Picture-in-Picture (survives panel close) -->
+  <!-- svelte-ignore a11y_media_has_caption -->
+  <video bind:this={pipVideoEl} class="pip-source" autoplay muted playsinline></video>
+
+  <!-- ======= FLOATING VIDEO WINDOW ======= -->
+  <FloatingVideoWindow />
 
   <!-- ======= RIGHT WIDGET PANEL ======= -->
   <div class="zone-side-dock" class:zone-hidden={!$layout.sideDock.visible} class:panel-editing={widgetEditMode} bind:clientWidth={sideDockW} bind:clientHeight={sideDockH}>
@@ -1368,13 +1442,50 @@
     z-index: 200;
   }
 
-  .zone-map {
-    /* Map spans the full content area behind all other zones */
-    grid-row: 2 / 4;
-    grid-column: 1 / -1;
+  /* Map holder — top-level overlay over the content area (toolbar 53px / status
+     bar 24px). Fills the area normally; sits inside the floating window's frame
+     (rect via inline style) when the view is swapped. */
+  .map-holder {
+    position: absolute;
+    top: 53px;
+    left: 0;
+    right: 0;
+    bottom: 24px;
     z-index: 0;
-    position: relative;
     overflow: hidden;
+  }
+  .map-holder.in-frame {
+    top: auto;
+    right: auto;
+    bottom: auto; /* left/top/width/height come from the inline rect */
+    z-index: 61; /* in the floating frame, above its body; the frame draws the border */
+    border-radius: 0 0 7px 7px;
+  }
+  /* Full-size video shown in the content area when swapped (videoPrimary) */
+  .map-video {
+    position: absolute;
+    top: 53px;
+    left: 0;
+    right: 0;
+    bottom: 24px;
+    object-fit: cover;
+    background: #000;
+    z-index: 0;
+  }
+  .map-video.mirror {
+    transform: scaleX(-1);
+  }
+  /* PiP source: rendered + playing but visually out of the way (must not be
+     display:none, or it produces no frames for Picture-in-Picture). */
+  .pip-source {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+    z-index: -1;
   }
 
   .zone-bottom-dock {

@@ -12,6 +12,9 @@
     setVideoDevice,
     setVideoResolution,
     setVideoMirror,
+    toggleFloating,
+    enterPiP,
+    pipSupported,
     type VideoResolution,
   } from '$lib/stores/video';
 
@@ -135,6 +138,17 @@
     <span class="label">{$t('video.mirror')}</span>
   </label>
 
+  <label class="field row">
+    <input type="checkbox" checked={$videoState.floating} onchange={toggleFloating} />
+    <span class="label">{$t('video.floatingWindow')}</span>
+  </label>
+
+  {#if pipSupported}
+    <button class="enable-btn" onclick={enterPiP} disabled={$videoState.status !== 'live'}>
+      {$t('video.videoWindow')}
+    </button>
+  {/if}
+
   {#if $videoState.devices.length === 0}
     <p class="hint">{$t('video.noDevices')}</p>
   {/if}
@@ -165,6 +179,10 @@
   }
   .enable-btn:hover {
     background: rgba(55, 168, 219, 0.22);
+  }
+  .enable-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
   }
   .enable-btn.on {
     background: rgba(231, 76, 60, 0.15);

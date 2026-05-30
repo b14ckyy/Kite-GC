@@ -71,6 +71,11 @@
     "auto": "Auto",
     "mirror": "Horizontal spiegeln",
     "codec": "Codec",
+    "floatingWindow": "Schwebendes Fenster",
+    "videoWindow": "Video-Fenster (ablösen)",
+    "snapCorner": "An Ecke andocken",
+    "pip": "Bild-im-Bild",
+    "close": "Schließen",
     "noDevices": "Keine Kamera erkannt. Kamera oder USB-Capture-Gerät anschließen."
   },
   "terrain": {

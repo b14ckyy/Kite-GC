@@ -38,6 +38,19 @@ export interface VideoState {
   /** Max frame rate the camera *reports* it can do at the chosen mode (diagnostic). */
   capFrameRate: number | null;
   error: string | null;
+
+  // ── Floating window ──────────────────────────────────────────────
+  /** Floating video window visible. */
+  floating: boolean;
+  /** Snapped to the bottom-left corner (displaces the dock) vs free-floating. */
+  floatSnapped: boolean;
+  /** Free position (px from top-left of the app window), used when not snapped. */
+  floatX: number;
+  floatY: number;
+  /** Window height as a fraction of the viewport height (0.1…0.3); width = height·aspect. */
+  floatHeightFrac: number;
+  /** Map-swap: video fills the map zone, map shrinks to a PiP (transient, not persisted). */
+  videoPrimary: boolean;
 }
 
 // ── Persistence ─────────────────────────────────────────────────────
@@ -51,7 +64,24 @@ interface VideoPrefs {
   deviceId: string | null;
   resolution: VideoResolution;
   mirror: boolean;
+  floating: boolean;
+  floatSnapped: boolean;
+  floatX: number;
+  floatY: number;
+  floatHeightFrac: number;
 }
+
+const PREF_DEFAULTS: VideoPrefs = {
+  enabled: false,
+  deviceId: null,
+  resolution: 'auto',
+  mirror: false,
+  floating: false,
+  floatSnapped: true,
+  floatX: 16,
+  floatY: 80,
+  floatHeightFrac: 0.2,
+};
 
 function loadPrefs(): VideoPrefs {
   try {
@@ -59,16 +89,16 @@ function loadPrefs(): VideoPrefs {
     if (raw) {
       const p = JSON.parse(raw) as Partial<VideoPrefs>;
       return {
-        enabled: !!p.enabled,
+        ...PREF_DEFAULTS,
+        ...p,
         deviceId: p.deviceId ?? null,
         resolution: p.resolution ?? 'auto',
-        mirror: !!p.mirror,
       };
     }
   } catch {
     /* ignore */
   }
-  return { enabled: false, deviceId: null, resolution: 'auto', mirror: false };
+  return { ...PREF_DEFAULTS };
 }
 
 function savePrefs(): void {
@@ -77,7 +107,17 @@ function savePrefs(): void {
   try {
     localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ enabled: s.enabled, deviceId: s.deviceId, resolution: s.resolution, mirror: s.mirror }),
+      JSON.stringify({
+        enabled: s.enabled,
+        deviceId: s.deviceId,
+        resolution: s.resolution,
+        mirror: s.mirror,
+        floating: s.floating,
+        floatSnapped: s.floatSnapped,
+        floatX: s.floatX,
+        floatY: s.floatY,
+        floatHeightFrac: s.floatHeightFrac,
+      }),
     );
   } catch {
     /* ignore */
@@ -99,6 +139,12 @@ const INITIAL: VideoState = {
   frameRate: null,
   capFrameRate: null,
   error: null,
+  floating: boot.floating,
+  floatSnapped: boot.floatSnapped,
+  floatX: boot.floatX,
+  floatY: boot.floatY,
+  floatHeightFrac: boot.floatHeightFrac,
+  videoPrimary: false,
 };
 
 export const videoState = writable<VideoState>({ ...INITIAL });
@@ -235,6 +281,73 @@ export async function setVideoResolution(resolution: VideoResolution): Promise<v
 export function setVideoMirror(mirror: boolean): void {
   patch({ mirror });
   savePrefs();
+}
+
+// ── Floating window ──────────────────────────────────────────────────
+export function toggleFloating(): void {
+  patch({ floating: !get(videoState).floating });
+  savePrefs();
+}
+
+export function setFloatSnapped(floatSnapped: boolean): void {
+  patch({ floatSnapped });
+  savePrefs();
+}
+
+/** Free position (px). Snapping is decided by the caller (drag near corner). */
+export function setFloatPos(floatX: number, floatY: number): void {
+  patch({ floatX, floatY });
+  savePrefs();
+}
+
+const FLOAT_MIN = 0.1;
+const FLOAT_MAX = 0.3;
+export function setFloatHeightFrac(frac: number): void {
+  patch({ floatHeightFrac: Math.min(FLOAT_MAX, Math.max(FLOAT_MIN, frac)) });
+  savePrefs();
+}
+
+// ── Map-swap (video ⇄ map) ───────────────────────────────────────────
+/** Swap the main map view with the video (video fills the zone, map → PiP).
+ *  Fires a resize so Leaflet/Cesium re-fit to their new container size. */
+export function setVideoPrimary(v: boolean): void {
+  patch({ videoPrimary: v });
+  if (typeof window !== 'undefined') {
+    setTimeout(() => window.dispatchEvent(new Event('resize')), 60);
+  }
+}
+
+export function toggleVideoPrimary(): void {
+  setVideoPrimary(!get(videoState).videoPrimary);
+}
+
+// ── Native Picture-in-Picture ────────────────────────────────────────
+// PiP is bound to its source <video> element, so the source must be a
+// persistently-mounted element (not the panel preview, which unmounts when the
+// panel closes — that would kill the PiP). The app root registers a hidden video
+// element here; `enterPiP()` pops it out into a free-floating OS window that
+// survives closing the panel.
+export const pipSupported = typeof document !== 'undefined' && !!document.pictureInPictureEnabled;
+
+let pipEl: HTMLVideoElement | null = null;
+export function registerPiPElement(el: HTMLVideoElement | null): void {
+  pipEl = el;
+}
+
+export async function enterPiP(): Promise<void> {
+  const el = pipEl as (HTMLVideoElement & { requestPictureInPicture?: () => Promise<unknown> }) | null;
+  try {
+    if (
+      el?.requestPictureInPicture &&
+      typeof document !== 'undefined' &&
+      document.pictureInPictureEnabled &&
+      document.pictureInPictureElement !== el
+    ) {
+      await el.requestPictureInPicture();
+    }
+  } catch (e) {
+    console.warn('[video] Picture-in-Picture failed', e);
+  }
 }
 
 /**

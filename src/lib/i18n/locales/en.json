@@ -71,6 +71,11 @@
     "auto": "Auto",
     "mirror": "Mirror horizontally",
     "codec": "Codec",
+    "floatingWindow": "Floating window",
+    "videoWindow": "Video window (detach)",
+    "snapCorner": "Snap to corner",
+    "pip": "Picture-in-Picture",
+    "close": "Close",
     "noDevices": "No camera detected. Connect a camera or USB capture device."
   },
   "terrain": {
