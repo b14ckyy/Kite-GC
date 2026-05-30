@@ -128,7 +128,7 @@ This document tracks planned features, organized by milestone.
 
 ### Customizable Widget Panels
 - [x] Drag-and-drop widget panel system (bottom + right panels)
-- [x] Large (AHI, Compass) and Small (all others) widget classes
+- [x] Large (AHI, Compass), Small (most), and Wide (2×1, Live AGL) widget classes
 - [x] Dynamic panel sizing — adapts to content, shrinks only at screen edge
 - [x] Half-position insertion detection with visual insertion indicator
 - [x] Cross-panel drag (move widgets between bottom and right panels)
@@ -522,7 +522,7 @@ Source: **Copernicus DEM GLO-30** (geoid/EGM2008 ≈ MSL, no API key, offline-ca
 - [x] **Terrain Correction** — Terrain Follow / Clearance Check over a WP range, fixed-wing climb/descent-angle limit, manual *Add WP*, live green preview → APPLY (writes corrected WPs in AGL); pure-function engine, shared-altitude per WP index
 - [x] **Jump-loop simulation** — one loop per jump: branch `→target` + cut + resume, distinct colour + target marker, no duplicate WP dots; correction stays correct across revisits
 - [x] **Live Track mode** — Track mode follows the live flown track when connected: shared in-RAM `liveTrack` store (accumulates while armed), terrain pre-fetch on arm, incremental 5 s sampling, Follow toggle (pin-right zoom-only / free pan), 250 m default window. _(built; field-test pending)_
-- [ ] **Live AGL widget** — in-flight above-ground-level from GPS MSL altitude minus terrain elevation at current position _(2×1 mini-widget reusing the chart component)_
+- [x] **Live AGL widget** — forward-looking terrain HUD (new 2×1 `wide` widget class): flown terrain/history left, UAV marker tracking altitude, **estimated terrain ahead along heading** right; history accumulated from the telemetry stream so it works live **and** in replay; projected flight line from (averaged) FC vario; speed-based scale (300/900/1800/3600 m) with boundary hysteresis; relative-altitude + distance axes. _(built; field-tested via blackbox replay)_
 - [ ] **LOS (line-of-sight) analysis** for waypoint missions — terrain occlusion / radio horizon along the route, à la MWPTools
 
 ### Code Health & Maintainability

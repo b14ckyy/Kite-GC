@@ -332,7 +332,8 @@ The HUD uses a **two-panel drag-and-drop layout** within the CSS Grid zone syste
 
 ### Widget Classes
 - **Large** (22.5 units): AHI, Compass — circular, complex visualizations
-- **Small** (13.5 units = 60% of large): All others — square, compact data display
+- **Small** (13.5 units = 60% of large): most others — square, compact data display
+- **Wide** (2×1 = two large units wide, one tall): Live AGL — a horizontal forward-looking terrain HUD. In the bottom dock it renders `sizePx × 2` wide; in the side dock it falls back to a half-height landscape tile
 
 ### Container-Relative Sizing
 Each dock measures its own cross-axis dimension (`bind:clientWidth/Height`) and computes an independent `pxPerUnit = (crossAxis - padding) / LARGE_BASE_VMIN`. Widget sizes are computed in abstract units by `computeSizes()`, then multiplied by `pxPerUnit` to get CSS `px` values. This fully decouples bottom and side dock scaling — changing viewport width only affects the bottom dock's main axis, not the side dock's widget sizes.

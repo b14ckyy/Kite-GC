@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Live AGL widget (forward-looking terrain HUD)
+- **New `liveAgl` widget** in a new **`wide` (2×1) widget class** — a side-view terrain HUD: left 1/3 = recently flown terrain + flight history, a neutral (airframe-agnostic) **UAV marker** at the "now" divider that tracks the current altitude, right 2/3 = **estimated terrain ahead along the current heading**
+- **Works live *and* in replay**: the flown history is accumulated **internally from the telemetry stream** (the shared `liveTrack` store only fills while armed on a live link, so it is empty during blackbox/flight-log playback). Resets on scrub-back / new flight
+- **Forward terrain** sampled along the heading via `terrain_profile` (30 m), re-queried only on meaningful change (>5 m / >2° / scale change / >1 s) to avoid hammering the backend on yaw jitter
+- **Heading source** mirrors the compass: filtered 5-point GPS track ≥ 2 m/s, compass `yaw` below
+- **Projected flight line** (dashed) from the FC's own vario (the smooth baro/nav-filtered source, 5-sample averaged) — shows the actual climb/descent angle, ground-intersect warning
+- **Speed-based horizontal scale** — total render distance steps 300 / 900 / 1800 / 3600 m (1:2 history:forward) with **boundary hysteresis** (step down only below 70 % of the lower step) so cruising on a scale boundary doesn't flap
+- **Auto-fit vertical scale** (expand fast / shrink slow); the steep projected line is *not* a scaling reference
+- **Axes**: left = altitude **relative to the UAV** (0 = current flight level, incl. negatives, like the Altitude widget); bottom = visible **distance** (0 under the UAV, positive both ways)
+- Visuals follow the **Terrain Analysis panel** (grid, ground gradient) inside a standard **widget card** (blur / semi-transparent / rounded); AGL + min-clearance-ahead readouts; **text scales with widget size**. Default **off** (enable in widget settings)
+
 ### Added — Terrain Analysis: Live Track mode
 - **Track mode follows the live flown track** when an FC is connected (MSP/MAVLink): a shared in-RAM `liveTrack` store accumulates lat/lon + MSL altitude **while armed** (cleared each new arm), independent of the map trail and the flight-log DB
 - On arm, the Copernicus tile for the current area is **pre-fetched** so terrain is ready

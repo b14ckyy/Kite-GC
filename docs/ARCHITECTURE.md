@@ -320,7 +320,7 @@ Full implementation plan: `docs/PROTOCOL_REFACTORING.md`
 
 **Context**: The GCS needs a flexible HUD with multiple instrument widgets that users can arrange to their preference. Fixed layouts don't work well across different screen sizes and use cases (e.g. FPV flying prioritizes AHI, long-range prioritizes GPS/battery).
 
-**Decision**: Two drag-and-drop widget panels (bottom horizontal, right vertical) with edit-mode toggling. Widgets are classified as Large (22.5 units) or Small (13.5 units = 60% of large). Sizing is container-relative (px computed from cross-axis), not viewport-relative.
+**Decision**: Two drag-and-drop widget panels (bottom horizontal, right vertical) with edit-mode toggling. Widgets are classified as Large (22.5 units), Small (13.5 units = 60% of large), or Wide (2:1 landscape — two large units wide in the horizontal dock, half-height in the side dock; used by the Live AGL HUD). Sizing is container-relative (px computed from cross-axis), not viewport-relative.
 
 > **Note**: Originally sized in `vmin` CSS units. ADR-023 replaced this with container-relative px sizing — each dock independently computes its own `pxPerUnit = crossAxisPx / LARGE_BASE_VMIN`, fully decoupling bottom and side dock scaling.
 

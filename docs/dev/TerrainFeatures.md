@@ -196,11 +196,26 @@ Raising **iterates to convergence** (one raised WP affects both its neighbouring
 
 **Still TBD:** handling of RTH / LAND / loiter / jump legs in the distance domain; void/nodata terrain segments; exact climb-angle propagation when constraints conflict.
 
-### Feature 3 — AGL widget (live flight) — **THIRD**
+### Feature 3 — Live AGL widget (forward-looking terrain HUD) — ✅ **DONE**
 
-A **mini, informational version of the Track-Analysis chart** as a HUD widget in **2×1 full-size horizontal format**: live AGL = `GPS MSL altitude − terrain_elevation(current lat, lon)`, shown with a small terrain profile. Reuses the Feature 2 SVG chart component (compact instance, live track source).
+A HUD widget (`widgets/LiveAglWidget.svelte`) in a new **`wide` (2×1) widget class** — *not* a reuse of the Feature 2 chart, but a **dedicated lightweight renderer** built for live update rates. Side-view terrain HUD:
 
-**Design TBD**: forward-looking window vs current point only, scale/axis, update rate (likely the same 30 m / 1–2 s cadence as the overlay's live mode).
+- **Left 1/3** = recently flown terrain + flight-history line; a neutral, **airframe-agnostic UAV marker** sits at the "now" divider (horizontal 1/3) and **tracks the current altitude** vertically.
+- **Right 2/3** = **estimated terrain ahead along the current heading**, with a dashed **projected flight line** so climb/descent and ground-intersection are visible at a glance.
+- **AGL** readout (centered over the UAV) = `GPS MSL altitude − terrain ahead at the UAV`; **min-clearance-ahead** readout (warns red < 0).
+
+**Data sources**
+- **History accumulated internally from the telemetry stream** (lat/lon/MSL/timestamp, 5 m dedup), *not* the shared `liveTrack` store — that store only fills while *armed* on a live link, so it is empty during blackbox/flight-log replay. The internal buffer resets when time runs backwards (scrub / new flight), so the widget works **live and in replay**. Terrain for the history is folded incrementally via `LiveTrackProfiler`.
+- **Forward terrain** sampled along the heading with a single `terrain_profile([uav, destPoint], 30 m)` call, re-queried only on meaningful change (> 5 m moved / > 2° heading / scale change / > 1 s) so a jittering yaw at standstill doesn't hammer the backend.
+- **Heading** mirrors the compass logic: filtered 5-point GPS track ≥ 2 m/s, compass `yaw` below.
+- **Vario** for the projected line uses the **FC's own vario** (smooth baro/nav-filtered source — same as the Vario widget), 5-sample averaged. (Differencing GPS-MSL over the sparse history points was too coarse and made the angle snap.)
+
+**Scaling**
+- **Horizontal**: total render distance steps **300 / 900 / 1800 / 3600 m** (≈ `speed · 120 s`), split **1:2** history:forward. **Boundary hysteresis**: step up immediately when the window is outgrown, step *down* only when `need < 0.7 × the step below` — cruising right on a boundary (e.g. ~54 km/h on the 1800↔3600 edge) no longer flaps.
+- **Vertical**: auto-fit over the visible window, expand-fast / shrink-slow; the steep projected line is **not** a scaling reference (only the UAV altitude + real terrain are).
+- **Axes**: left = altitude **relative to the UAV** (0 = current flight level, incl. negatives — like the Altitude widget); bottom = visible **distance** (0 under the UAV, positive both ways). Readout text scales with the widget size.
+
+Visuals follow the Feature 2 panel (grid, ground gradient) inside a standard widget card (blur / semi-transparent / rounded). Update is driven by each telemetry frame, self-throttled (drops a frame while a backend sample is in flight). Default **off**.
 
 ### Feature 4 — LOS (line-of-sight) analysis — **LAST, no priority**
 
@@ -215,7 +230,7 @@ Line-of-sight / radio-horizon analysis along the route (à la MWPTools): detect 
 1. ✅ **Shared elevation provider** (foundation) — Copernicus GLO-30, Rust backend, validated
 2. ✅ **AGL waypoints** — WP editor alt-mode (REL/AMSL/AGL) with terrain conversion, survey-pattern `ground`/AGL, export AGL→AMSL, launch point + `<mwp>` persistence. Validated against INAV Configurator terrain analysis.
 3. **Terrain analysis** — full-width NavRail overlay; view modes Waypoint / Track; SVG profile chart with zoom/pan + clearance coloring; Terrain Correction (Terrain Follow / Clearance Check) over a WP range, preview → APPLY *(next)*
-4. **AGL widget** — mini 2×1 profile, live (reuses the Feature 2 chart)
+4. ✅ **Live AGL widget** — 2×1 `wide` forward-looking terrain HUD; dedicated renderer, history from the telemetry stream (live + replay), heading-projected terrain ahead + vario flight line
 5. **LOS analysis** — deferred, low priority
 
 ## 5. Protocol scope (TBD)
