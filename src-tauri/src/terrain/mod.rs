@@ -66,6 +66,17 @@ pub struct ProfileSample {
     pub elev_m: Option<f32>,
 }
 
+/// Polar terrain sampling over a forward fan — for the terrain-radar widget.
+#[derive(Serialize, Clone)]
+pub struct TerrainFan {
+    pub ang_cells: usize,
+    pub rad_cells: usize,
+    pub range_m: f64,
+    /// cell-centre elevations (≈ MSL), row-major `[ang_cell * rad_cells + rad_cell]`;
+    /// `null` where the tile is missing (ocean / out of coverage)
+    pub elev: Vec<Option<f32>>,
+}
+
 struct CacheState {
     tiles: HashMap<String, Arc<TileData>>,
     missing: HashSet<String>, // tiles known to not exist (ocean)
@@ -202,6 +213,36 @@ impl TerrainProvider {
         out
     }
 
+    /// Sample terrain over a forward fan (polar grid) for the terrain-radar widget.
+    /// `heading_deg` is true bearing; the fan spans ±`half_angle_deg`. Each cell is
+    /// sampled at its angular + radial centre. Row-major `[ang_cell][rad_cell]`.
+    pub async fn fan(
+        &self,
+        lat: f64,
+        lon: f64,
+        heading_deg: f64,
+        half_angle_deg: f64,
+        range_m: f64,
+        ang_cells: usize,
+        rad_cells: usize,
+    ) -> TerrainFan {
+        let ang = ang_cells.max(1);
+        let rad = rad_cells.max(1);
+        let range = range_m.max(1.0);
+        let mut elev = Vec::with_capacity(ang * rad);
+        for a in 0..ang {
+            // angular centre of this cell, 0..1 across the fan (left → right)
+            let frac = (a as f64 + 0.5) / ang as f64;
+            let bearing = heading_deg - half_angle_deg + 2.0 * half_angle_deg * frac;
+            for b in 0..rad {
+                let dist = range * (b as f64 + 0.5) / rad as f64;
+                let (clat, clon) = dest_point(lat, lon, bearing, dist);
+                elev.push(self.elevation(clat, clon).await);
+            }
+        }
+        TerrainFan { ang_cells: ang, rad_cells: rad, range_m: range, elev }
+    }
+
     /// Fetch (disk-cached) + decode a tile. None if the tile doesn't exist.
     /// The CPU-bound decode runs on the blocking thread pool so it never stalls
     /// the async runtime's worker threads.
@@ -329,6 +370,19 @@ fn decode_tile(bytes: &[u8]) -> Result<TileData, String> {
         px_lon,
         px_lat,
     })
+}
+
+/// Destination point from (lat, lon) along `bearing_deg` (true) at `dist_m`,
+/// great-circle (matches the frontend's `destPoint`).
+fn dest_point(lat: f64, lon: f64, bearing_deg: f64, dist_m: f64) -> (f64, f64) {
+    const R: f64 = 6_371_000.0;
+    let br = bearing_deg.to_radians();
+    let p1 = lat.to_radians();
+    let l1 = lon.to_radians();
+    let dr = dist_m / R;
+    let p2 = (p1.sin() * dr.cos() + p1.cos() * dr.sin() * br.cos()).asin();
+    let l2 = l1 + (br.sin() * dr.sin() * p1.cos()).atan2(dr.cos() - p1.sin() * p2.sin());
+    (p2.to_degrees(), l2.to_degrees())
 }
 
 /// Great-circle distance in metres.

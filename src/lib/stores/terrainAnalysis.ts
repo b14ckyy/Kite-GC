@@ -47,6 +47,10 @@ export interface TerrainAnalysisState {
   /** Visible distance window (m); null = full route */
   viewStart: number | null;
   viewEnd: number | null;
+  /** Terrain-radar widget: colour by predicted altitude (sink-angle) vs flat current altitude */
+  radarPredictive: boolean;
+  /** Terrain-radar widget: total clearance colour scale in metres (red < 0 … green at scale, off above) */
+  radarScale: number;
 }
 
 const INITIAL: TerrainAnalysisState = {
@@ -67,6 +71,8 @@ const INITIAL: TerrainAnalysisState = {
   rangeEnd: 0,
   viewStart: null,
   viewEnd: null,
+  radarPredictive: false,
+  radarScale: 120,
 };
 
 export const terrainAnalysis = writable<TerrainAnalysisState>({ ...INITIAL });

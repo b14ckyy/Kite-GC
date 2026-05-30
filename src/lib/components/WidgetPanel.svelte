@@ -13,6 +13,7 @@
   import FlightModeWidget from "./widgets/FlightModeWidget.svelte";
   import RawTelemetryWidget from "./widgets/RawTelemetryWidget.svelte";
   import LiveAglWidget from "./widgets/LiveAglWidget.svelte";
+  import TerrainRadarWidget from "./widgets/TerrainRadarWidget.svelte";
   import type { InterfaceSettings } from "$lib/stores/settings";
 
   let {
@@ -476,6 +477,8 @@
             width={orientation === 'horizontal' ? item.sizePx * 2 : item.sizePx}
             height={orientation === 'horizontal' ? item.sizePx : item.sizePx / 2}
           />
+        {:else if item.id === 'terrainRadar'}
+          <TerrainRadarWidget {telem} {interfaceSettings} size={item.sizePx} />
         {/if}
       </div>
     </div>

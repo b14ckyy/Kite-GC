@@ -1,6 +1,6 @@
 // Terrain elevation Tauri commands (Copernicus GLO-30, ≈ MSL).
 
-use crate::terrain::{ProfileSample, TerrainProvider};
+use crate::terrain::{ProfileSample, TerrainFan, TerrainProvider};
 use tauri::State;
 
 /// Terrain elevation (metres ≈ MSL) at a single lat/lon. `null` if unavailable.
@@ -22,4 +22,23 @@ pub async fn terrain_profile(
     provider: State<'_, TerrainProvider>,
 ) -> Result<Vec<ProfileSample>, String> {
     Ok(provider.profile(&points, spacing_m).await)
+}
+
+/// Terrain sampled over a forward fan (polar grid) for the terrain-radar widget.
+/// `heading_deg` true bearing, fan spans ±`half_angle_deg`, out to `range_m`,
+/// `ang_cells` × `rad_cells` cells sampled at their centres.
+#[tauri::command]
+pub async fn terrain_fan(
+    lat: f64,
+    lon: f64,
+    heading_deg: f64,
+    half_angle_deg: f64,
+    range_m: f64,
+    ang_cells: usize,
+    rad_cells: usize,
+    provider: State<'_, TerrainProvider>,
+) -> Result<TerrainFan, String> {
+    Ok(provider
+        .fan(lat, lon, heading_deg, half_angle_deg, range_m, ang_cells, rad_cells)
+        .await)
 }

@@ -23,7 +23,7 @@ use commands::flightlog::{
     flightlog_link_flights, flightlog_unlink_flight, flightlog_find_linkable,
 };
 use commands::info::get_app_version;
-use commands::terrain::{terrain_elevation, terrain_profile};
+use commands::terrain::{terrain_elevation, terrain_fan, terrain_profile};
 use terrain::TerrainProvider;
 use commands::mission::{
     mission_get, mission_clear, mission_add_wp, mission_insert_wp,
@@ -129,6 +129,7 @@ pub fn run() {
             flightlog_find_linkable,
             terrain_elevation,
             terrain_profile,
+            terrain_fan,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Kite Ground Control");

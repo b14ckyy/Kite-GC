@@ -276,6 +276,7 @@
     "flightMode": "Flugmodus",
     "rawTelemetry": "Roh-Telemetrie",
     "liveAgl": "Live AGL",
+    "terrainRadar": "Terrain-Radar",
     "bottom": "Unten",
     "right": "Rechts",
     "off": "Aus",
