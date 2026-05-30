@@ -23,8 +23,22 @@
     type SurveyWaypoint,
   } from '$lib/helpers/surveyPatterns';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
+  import UnitStepper from '$lib/components/UnitStepper.svelte';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
   import { getTotalWpCount, MAX_WAYPOINTS_TOTAL } from '$lib/stores/mission';
+  import { settings } from '$lib/stores/settings';
+  import type { InterfaceSettings } from '$lib/stores/settings';
+  import { convertLength } from '$lib/utils/units';
+
+  const FALLBACK_INTERFACE: InterfaceSettings = {
+    speedUnit: 'kmh', altitudeUnit: 'm', distanceUnit: 'metric', verticalSpeedUnit: 'ms', temperatureUnit: 'c',
+  };
+  const interfaceSettings = $derived($settings.interface ?? FALLBACK_INTERFACE);
+  /** Length display in the user's distance unit (m/ft, no km/mi switch). */
+  function fmtLen(m: number): string {
+    const c = convertLength(m, interfaceSettings.distanceUnit);
+    return `${c.value.toFixed(1)} ${c.unit}`;
+  }
 
   // Helper: untyped $t wrapper for dynamic params (svelte-i18n types are too strict)
   function _t(id: string, params?: Record<string, string>): string {
@@ -356,22 +370,22 @@
     {#if activeSurveyPattern.config?.shape === 'rectangle' || activeSurveyPattern.config?.shape === 'rectangle-lawnmower'}
       <!-- Row 1: Length + Width -->
       <div class="param-row">
-        <NumberStepper label={$t('survey.length')} bind:value={rectangleParams.length} min={10} step={10} decimals={1} onchange={handleParamChange} />
-        <NumberStepper label={$t('survey.width')} bind:value={rectangleParams.width} min={10} step={10} decimals={1} onchange={handleParamChange} />
+        <UnitStepper kind="length" settings={interfaceSettings} label={$t('survey.length')} bind:value={rectangleParams.length} min={10} step={10} decimals={1} onchange={handleParamChange} />
+        <UnitStepper kind="length" settings={interfaceSettings} label={$t('survey.width')} bind:value={rectangleParams.width} min={10} step={10} decimals={1} onchange={handleParamChange} />
       </div>
 
       <!-- Row 2: Line Spacing + Turn Distance -->
       <div class="param-row">
         <div class="spacing-wrapper">
-          <NumberStepper label={$t('survey.lineSpacing')} bind:value={rectangleParams.targetLineSpacing} min={5} step={5} decimals={0} onchange={handleParamChange} />
+          <UnitStepper kind="length" settings={interfaceSettings} label={$t('survey.lineSpacing')} bind:value={rectangleParams.targetLineSpacing} min={5} step={5} decimals={0} onchange={handleParamChange} />
           {#if rectangleParams.targetLineSpacing > 0 && rectangleParams.width > 0}
             <div class="info-row">
-              <span class="spacing-info">≈{rectangleParams.actualLineSpacing.toFixed(1)}m</span>
+              <span class="spacing-info">≈{fmtLen(rectangleParams.actualLineSpacing)}</span>
               <span class="spacing-info" class:over-limit={missionWpCount + patternWpCount > MAX_WAYPOINTS_TOTAL}>{_t('survey.wpCount', { count: String(patternWpCount) })}</span>
             </div>
           {/if}
         </div>
-        <NumberStepper label={$t('survey.turnDistance')} bind:value={rectangleParams.turnDistance} min={0} step={5} decimals={0} onchange={handleParamChange} />
+        <UnitStepper kind="length" settings={interfaceSettings} label={$t('survey.turnDistance')} bind:value={rectangleParams.turnDistance} min={0} step={5} decimals={0} onchange={handleParamChange} />
       </div>
 
       <!-- Shape Orientation (solo) -->
@@ -409,8 +423,8 @@
 
       <!-- Row 4: Base Altitude + Base Speed -->
       <div class="param-row">
-        <NumberStepper label={$t('survey.baseAlt')} bind:value={rectangleParams.baseAltitude} min={0} step={5} decimals={0} onchange={handleParamChange} />
-        <NumberStepper label={$t('survey.baseSpeed')} bind:value={rectangleParams.baseSpeed} min={1} step={1} decimals={0} onchange={handleParamChange} />
+        <UnitStepper kind="altitude" settings={interfaceSettings} label={$t('survey.baseAlt')} bind:value={rectangleParams.baseAltitude} min={0} step={5} decimals={0} onchange={handleParamChange} />
+        <UnitStepper kind="speed" settings={interfaceSettings} label={$t('survey.baseSpeed')} bind:value={rectangleParams.baseSpeed} min={1} step={1} decimals={0} onchange={handleParamChange} />
       </div>
 
       <!-- Altitude Type dropdown -->
@@ -494,14 +508,14 @@
 
       <!-- Radius + Ring Points -->
       <div class="param-row">
-        <NumberStepper label={$t('survey.radius')} bind:value={circleParams.radius} min={10} step={10} decimals={1} onchange={handleCircleParamChange} />
+        <UnitStepper kind="length" settings={interfaceSettings} label={$t('survey.radius')} bind:value={circleParams.radius} min={10} step={10} decimals={1} onchange={handleCircleParamChange} />
         <NumberStepper label={$t('survey.ringPoints')} bind:value={circleParams.ringPoints} min={4} max={100} step={1} decimals={0} onchange={handleCircleParamChange} />
       </div>
 
       <!-- Line Spacing + Ring Start Angle -->
       <div class="param-row">
         <div class="spacing-wrapper">
-          <NumberStepper label={$t('survey.lineSpacing')} bind:value={circleParams.targetLineSpacing} min={5} step={5} decimals={0} onchange={handleCircleParamChange} />
+          <UnitStepper kind="length" settings={interfaceSettings} label={$t('survey.lineSpacing')} bind:value={circleParams.targetLineSpacing} min={5} step={5} decimals={0} onchange={handleCircleParamChange} />
           {#if circleParams.targetLineSpacing > 0 && circleParams.radius > 0}
             <div class="info-row">
               <span class="spacing-info" class:over-limit={missionWpCount + patternWpCount > MAX_WAYPOINTS_TOTAL}>{_t('survey.wpCount', { count: String(patternWpCount) })}</span>
@@ -530,8 +544,8 @@
 
       <!-- Base Altitude + Base Speed -->
       <div class="param-row">
-        <NumberStepper label={$t('survey.baseAlt')} bind:value={circleParams.baseAltitude} min={0} step={5} decimals={0} onchange={handleCircleParamChange} />
-        <NumberStepper label={$t('survey.baseSpeed')} bind:value={circleParams.baseSpeed} min={1} step={1} decimals={0} onchange={handleCircleParamChange} />
+        <UnitStepper kind="altitude" settings={interfaceSettings} label={$t('survey.baseAlt')} bind:value={circleParams.baseAltitude} min={0} step={5} decimals={0} onchange={handleCircleParamChange} />
+        <UnitStepper kind="speed" settings={interfaceSettings} label={$t('survey.baseSpeed')} bind:value={circleParams.baseSpeed} min={1} step={1} decimals={0} onchange={handleCircleParamChange} />
       </div>
 
       <!-- Altitude Type -->
@@ -596,7 +610,7 @@
 
       <!-- Line Spacing + WP count -->
       <div class="spacing-wrapper">
-        <NumberStepper label={$t('survey.lineSpacing')} bind:value={polygonParams.targetLineSpacing} min={5} step={5} decimals={0} onchange={handlePolygonParamChange} />
+        <UnitStepper kind="length" settings={interfaceSettings} label={$t('survey.lineSpacing')} bind:value={polygonParams.targetLineSpacing} min={5} step={5} decimals={0} onchange={handlePolygonParamChange} />
         {#if polygonParams.targetLineSpacing > 0 && polygonParams.points.length >= 3}
           <div class="info-row">
             <span class="spacing-info" class:over-limit={missionWpCount + patternWpCount > MAX_WAYPOINTS_TOTAL}>{_t('survey.wpCount', { count: String(patternWpCount) })}</span>
@@ -607,7 +621,7 @@
       <!-- Turn Distance (zigzag only) + Reverse -->
       <div class="param-row">
         {#if activeSurveyPattern.config?.shape === 'polygon'}
-          <NumberStepper label={$t('survey.turnDistance')} bind:value={polygonParams.turnDistance} min={0} step={5} decimals={0} onchange={handlePolygonParamChange} />
+          <UnitStepper kind="length" settings={interfaceSettings} label={$t('survey.turnDistance')} bind:value={polygonParams.turnDistance} min={0} step={5} decimals={0} onchange={handlePolygonParamChange} />
         {/if}
         <label class="toggle-row">
           <input type="checkbox" bind:checked={polygonParams.reverse} onchange={handlePolygonParamChange} />
@@ -617,8 +631,8 @@
 
       <!-- Base Altitude + Base Speed -->
       <div class="param-row">
-        <NumberStepper label={$t('survey.baseAlt')} bind:value={polygonParams.baseAltitude} min={0} step={5} decimals={0} onchange={handlePolygonParamChange} />
-        <NumberStepper label={$t('survey.baseSpeed')} bind:value={polygonParams.baseSpeed} min={1} step={1} decimals={0} onchange={handlePolygonParamChange} />
+        <UnitStepper kind="altitude" settings={interfaceSettings} label={$t('survey.baseAlt')} bind:value={polygonParams.baseAltitude} min={0} step={5} decimals={0} onchange={handlePolygonParamChange} />
+        <UnitStepper kind="speed" settings={interfaceSettings} label={$t('survey.baseSpeed')} bind:value={polygonParams.baseSpeed} min={1} step={1} decimals={0} onchange={handlePolygonParamChange} />
       </div>
 
       <!-- Altitude Type -->

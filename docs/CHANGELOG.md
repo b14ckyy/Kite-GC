@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — UI & unit consistency cleanup
+- **App-wide units honour the interface settings** in mission planning (previously hardcoded metric): altitude/distance/speed are stored internally in metric base (m, m/s; waypoint speed stays cm/s for the FC) and converted at the UI boundary for both display and input
+- Covered: **Terrain Analysis** (Ground Clearance, chart axes + readouts), **Survey Pattern** (line spacing / radius / turn distance / base altitude / base speed), **WP editor + mission panel** (altitude, and waypoint speed now in the speed unit instead of cm/s)
+- New **`UnitStepper`** wrapper around `NumberStepper` (metric value in, unit-aware display); inverse helpers `toAltitudeM` / `convertLength` / `toLengthM` in `utils/units.ts`
+- **`NumberStepper`**: value centered, unit right-aligned inside the field (was sitting outside the `+` button); the Settings panel's bespoke steppers now use the shared component
+
 ### Added — Terrain Correction & Jump Simulation (Terrain Analysis)
 - **Terrain Correction** (Waypoint mode): **Terrain Follow** (set WPs to a target AGL, then lift legs to clear) and **Clearance Check** (raise-only) over a WP range; corrected waypoints written in **AGL** mode
 - **Fixed-wing climb/descent-angle limits** (two params, 0 = off): too-steep legs are eased by raising the lower endpoint (never costs clearance), propagated to convergence

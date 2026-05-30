@@ -5,6 +5,8 @@
   import { WIDGET_DEFS } from '$lib/config/widgetRegistry';
   import type { AppSettings, InterfaceSettings } from '$lib/stores/settings';
   import type { TileCacheStats } from '$lib/cache/tileCache';
+  import NumberStepper from '$lib/components/NumberStepper.svelte';
+  import UnitStepper from '$lib/components/UnitStepper.svelte';
 
   let {
     localeValue = 'en',
@@ -115,52 +117,22 @@
     onPatch({ flightLogRawAlways: checked });
   }
 
-  function decWpAltitude() {
-    const value = Math.max(1, defaultWpAltitudeM - 1);
-    onPatch({ defaultWpAltitudeM: value });
+  // Stepper-backed mission/alert settings (metric internal, unit-aware display).
+  // Initialised from props (the panel remounts each time it's opened).
+  // svelte-ignore state_referenced_locally
+  let wpAlt = $state(defaultWpAltitudeM);
+  // svelte-ignore state_referenced_locally
+  let phTime = $state(defaultPhTimeSec);
+  // svelte-ignore state_referenced_locally
+  let warnAlt = $state(warnAltitudeM);
+  function onWpAltChange() {
+    onPatch({ defaultWpAltitudeM: Math.max(1, wpAlt) });
   }
-
-  function incWpAltitude() {
-    const value = Math.min(1000, defaultWpAltitudeM + 1);
-    onPatch({ defaultWpAltitudeM: value });
+  function onPhTimeChange() {
+    onPatch({ defaultPhTimeSec: Math.max(1, Math.round(phTime)) });
   }
-
-  function onWpAltitudeInput(event: Event) {
-    const value = Number((event.target as HTMLInputElement).value);
-    const clamped = Math.max(1, Math.min(1000, value));
-    onPatch({ defaultWpAltitudeM: clamped });
-  }
-
-  function decPhTime() {
-    const value = Math.max(1, defaultPhTimeSec - 1);
-    onPatch({ defaultPhTimeSec: value });
-  }
-
-  function incPhTime() {
-    const value = Math.min(600, defaultPhTimeSec + 1);
-    onPatch({ defaultPhTimeSec: value });
-  }
-
-  function onPhTimeInput(event: Event) {
-    const value = Number((event.target as HTMLInputElement).value);
-    const clamped = Math.max(1, Math.min(600, value));
-    onPatch({ defaultPhTimeSec: clamped });
-  }
-
-  function decWarnAlt() {
-    const value = Math.max(0, warnAltitudeM - 10);
-    onPatch({ warnAltitudeM: value });
-  }
-
-  function incWarnAlt() {
-    const value = Math.min(5000, warnAltitudeM + 10);
-    onPatch({ warnAltitudeM: value });
-  }
-
-  function onWarnAltInput(event: Event) {
-    const value = Number((event.target as HTMLInputElement).value);
-    const clamped = Math.max(0, Math.min(5000, value));
-    onPatch({ warnAltitudeM: clamped });
+  function onWarnAltChange() {
+    onPatch({ warnAltitudeM: Math.max(0, warnAlt) });
   }
 
   function handleSpeedUnitChange(event: Event) {
@@ -398,21 +370,11 @@
   <h4 class="section-heading">{$t('settings.missionControl')}</h4>
   <div class="setting-row">
     <span class="setting-label">{$t('settings.defaultWpAlt')}</span>
-    <div class="setting-stepper">
-      <button class="stepper-btn" onclick={decWpAltitude}>-</button>
-      <input type="number" class="stepper-input" min="1" max="1000" value={defaultWpAltitudeM} onchange={onWpAltitudeInput} />
-      <button class="stepper-btn" onclick={incWpAltitude}>+</button>
-      <span class="setting-unit">m</span>
-    </div>
+    <UnitStepper bind:value={wpAlt} kind="altitude" settings={interfaceSettings} min={1} max={1000} step={5} decimals={0} onchange={onWpAltChange} />
   </div>
   <div class="setting-row">
     <span class="setting-label">{$t('settings.defaultPhTime')}</span>
-    <div class="setting-stepper">
-      <button class="stepper-btn" onclick={decPhTime}>-</button>
-      <input type="number" class="stepper-input" min="1" max="600" value={defaultPhTimeSec} onchange={onPhTimeInput} />
-      <button class="stepper-btn" onclick={incPhTime}>+</button>
-      <span class="setting-unit">s</span>
-    </div>
+    <NumberStepper bind:value={phTime} min={1} max={600} step={1} decimals={0} unit="s" onchange={onPhTimeChange} />
   </div>
 </section>
 
@@ -420,12 +382,7 @@
   <h4 class="section-heading">{$t('settings.alerts')}</h4>
   <div class="setting-row">
     <span class="setting-label">{$t('settings.altitude')}</span>
-    <div class="setting-stepper">
-      <button class="stepper-btn" onclick={decWarnAlt}>-</button>
-      <input type="number" class="stepper-input" min="0" max="5000" step="10" value={warnAltitudeM} onchange={onWarnAltInput} />
-      <button class="stepper-btn" onclick={incWarnAlt}>+</button>
-      <span class="setting-unit">m</span>
-    </div>
+    <UnitStepper bind:value={warnAlt} kind="altitude" settings={interfaceSettings} min={0} max={5000} step={10} decimals={0} onchange={onWarnAltChange} />
   </div>
   <p class="setting-hint">{$t('settings.alertThresholdsHint')}</p>
 </section>
@@ -517,65 +474,6 @@
   .path-input {
     flex: 1;
     min-width: 0;
-  }
-
-  .setting-stepper {
-    display: flex;
-    align-items: stretch;
-    gap: 4px;
-  }
-
-  .stepper-btn {
-    background: #333;
-    color: #aaa;
-    border: 1px solid #555;
-    border-radius: 3px;
-    width: 24px;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: bold;
-    line-height: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    user-select: none;
-  }
-
-  .stepper-btn:hover {
-    background: #37a8db;
-    color: #fff;
-  }
-
-  .stepper-btn:active {
-    background: #2d8ab8;
-  }
-
-  .stepper-input {
-    padding: 3px 4px;
-    background: #434343;
-    border: 1px solid #555;
-    border-radius: 3px;
-    color: #e0e0e0;
-    font-size: 11px;
-    width: 52px;
-    text-align: center;
-    color-scheme: dark;
-    appearance: textfield;
-    -moz-appearance: textfield;
-  }
-
-  .stepper-input::-webkit-inner-spin-button,
-  .stepper-input::-webkit-outer-spin-button {
-    -webkit-appearance: none;
-    margin: 0;
-  }
-
-  .setting-unit {
-    font-size: 11px;
-    color: #888;
-    margin-left: 2px;
-    align-self: center;
   }
 
   .setting-hint {

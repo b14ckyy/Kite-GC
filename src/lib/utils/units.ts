@@ -49,6 +49,24 @@ export function convertDistance(meters: number, unit: DistanceUnit): ConvertedVa
   return { value: meters, unit: 'm' };
 }
 
+/**
+ * Length for *input* fields (line spacing, radius, …): a single fixed unit
+ * (m or ft), never auto-switching to km/mi mid-edit.
+ */
+export function convertLength(meters: number, unit: DistanceUnit): ConvertedValue {
+  return unit === 'imperial'
+    ? { value: meters * 3.280839895, unit: 'ft' }
+    : { value: meters, unit: 'm' };
+}
+
+export function toLengthM(value: number, unit: DistanceUnit): number {
+  return unit === 'imperial' ? value / 3.280839895 : value;
+}
+
+export function toAltitudeM(value: number, unit: AltitudeUnit): number {
+  return unit === 'ft' ? value / 3.280839895 : value;
+}
+
 export function convertVerticalSpeed(ms: number, unit: VerticalSpeedUnit): ConvertedValue {
   if (unit === 'fts') {
     return { value: ms * 3.280839895, unit: 'ft/s' };

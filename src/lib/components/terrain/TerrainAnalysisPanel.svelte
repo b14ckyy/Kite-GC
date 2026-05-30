@@ -47,17 +47,33 @@
   import { computeCorrection, type CorrectionResult } from '$lib/helpers/terrainCorrection';
   import TerrainProfileChart, { type HoverInfo } from './TerrainProfileChart.svelte';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
+  import UnitStepper from '$lib/components/UnitStepper.svelte';
+  import { convertAltitude, convertDistance } from '$lib/utils/units';
+  import type { InterfaceSettings } from '$lib/stores/settings';
   import type { DialogOptions } from '$lib/components/ConfirmDialog.svelte';
 
   let {
     track = [],
+    interfaceSettings,
     confirm,
   }: {
     /** Flown track (live temp-log or loaded blackbox) for Track mode */
     track?: TrackPoint[];
+    interfaceSettings: InterfaceSettings;
     /** In-app dialog (from +page) for the APPLY confirmation */
     confirm?: (opts: DialogOptions) => Promise<string | null>;
   } = $props();
+
+  // Unit-aware display formatters (internal values are metric)
+  function fmtAlt(m: number): string {
+    const c = convertAltitude(m, interfaceSettings.altitudeUnit);
+    return `${Math.round(c.value)} ${c.unit}`;
+  }
+  function fmtDist(m: number): string {
+    const c = convertDistance(m, interfaceSettings.distanceUnit);
+    const digits = c.unit === 'km' || c.unit === 'mi' ? 2 : 0;
+    return `${c.value.toFixed(digits)} ${c.unit}`;
+  }
 
   let data = $state<ProfileData | null>(null);
   let loading = $state(false);
@@ -153,11 +169,7 @@
   // Ground Clearance via the standard stepper (5 m steps, 1 m manual precision).
   let groundClearance = $state($terrainAnalysis.groundClearance);
   function onClearanceChange() {
-    patchTerrainAnalysis({ groundClearance: Math.max(0, Math.round(groundClearance)) });
-  }
-
-  function fmtDist(m: number): string {
-    return m > 2000 ? `${(m / 1000).toFixed(2)} km` : `${Math.round(m)} m`;
+    patchTerrainAnalysis({ groundClearance: Math.max(0, groundClearance) });
   }
 
   // Clearance analysis ignores the take-off climb-out and landing descent:
@@ -394,12 +406,13 @@
     <div class="controls">
       <div class="ctrl">
         <span>{$t('terrain.groundClearance')}</span>
-        <NumberStepper
+        <UnitStepper
           bind:value={groundClearance}
+          kind="altitude"
+          settings={interfaceSettings}
           min={0}
           step={5}
           decimals={0}
-          unit="m"
           onchange={onClearanceChange}
         />
       </div>
@@ -472,7 +485,7 @@
             {#if correction}
               <div class="corr-stats">
                 <span>{$t('terrain.changed')}: <b>{correction.changedCount}</b></span>
-                <span>{$t('terrain.minClearance')}: <b>{correction.minClearanceAfter != null ? `${Math.round(correction.minClearanceAfter)} m` : '—'}</b></span>
+                <span>{$t('terrain.minClearance')}: <b>{correction.minClearanceAfter != null ? fmtAlt(correction.minClearanceAfter) : '—'}</b></span>
               </div>
               {#if correction.climbForcedAboveClearance}<p class="corr-warn">{$t('terrain.warnClimbForced')}</p>{/if}
               {#if correction.unresolvableLeg}<p class="corr-warn">{$t('terrain.warnUnresolvable')}</p>{/if}
@@ -499,6 +512,7 @@
         <TerrainProfileChart
           {data}
           datum={$terrainAnalysis.datum}
+          settings={interfaceSettings}
           groundClearance={$terrainAnalysis.groundClearance}
           {warnThreshold}
           activeStartDist={activeRange.startDist}
@@ -526,7 +540,7 @@
       <span class="rk">{$t('terrain.minClearance')}</span>
       <span class="rv">
         {#if activeRange.min != null}
-          {Math.round(activeRange.min)} m{#if belowClearance}&nbsp;⚠{/if}
+          {fmtAlt(activeRange.min)}{#if belowClearance}&nbsp;⚠{/if}
         {:else}—{/if}
       </span>
     </div>
@@ -548,15 +562,15 @@
       </div>
       <div class="readout cursor">
         <span class="rk">{$t('terrain.terrain')}</span>
-        <span class="rv">{hover.terrainElev != null ? `${Math.round(hover.terrainElev)} m` : '—'}</span>
+        <span class="rv">{hover.terrainElev != null ? fmtAlt(hover.terrainElev) : '—'}</span>
       </div>
       <div class="readout cursor">
         <span class="rk">{$t('terrain.altitude')}</span>
-        <span class="rv">{hover.pathAlt != null ? `${Math.round(hover.pathAlt)} m` : '—'}</span>
+        <span class="rv">{hover.pathAlt != null ? fmtAlt(hover.pathAlt) : '—'}</span>
       </div>
       <div class="readout cursor">
         <span class="rk">{$t('terrain.clearance')}</span>
-        <span class="rv">{hover.clearance != null ? `${Math.round(hover.clearance)} m` : '—'}</span>
+        <span class="rv">{hover.clearance != null ? fmtAlt(hover.clearance) : '—'}</span>
       </div>
     {/if}
   </div>

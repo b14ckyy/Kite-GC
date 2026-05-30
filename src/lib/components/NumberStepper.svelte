@@ -60,21 +60,23 @@
 {/if}
 <div class="ns-stepper" class:ns-disabled={disabled}>
   <button class="ns-btn ns-btn-minus" onclick={() => handleBtnClick(-1)} disabled={disabled} aria-label="-">−</button>
-  <input
-    type="number"
-    class="ns-input"
-    bind:value={value}
-    {min}
-    {max}
-    {step}
-    {disabled}
-    aria-label={label || undefined}
-    onchange={(e) => { handleInput(e); onchange?.(e); }}
-  />
+  <div class="ns-field">
+    <input
+      type="number"
+      class="ns-input"
+      bind:value={value}
+      {min}
+      {max}
+      {step}
+      {disabled}
+      aria-label={label || undefined}
+      onchange={(e) => { handleInput(e); onchange?.(e); }}
+    />
+    {#if unit}
+      <span class="ns-unit">{unit}</span>
+    {/if}
+  </div>
   <button class="ns-btn ns-btn-plus" onclick={() => handleBtnClick(1)} disabled={disabled} aria-label="+">+</button>
-  {#if unit}
-    <span class="ns-unit">{unit}</span>
-  {/if}
 </div>
 </div>
 
@@ -143,25 +145,34 @@
     color: #aaa;
   }
 
-  .ns-input {
-    padding: 3px 4px;
+  /* Field wrapper: a single bordered cell. The number stays centered; the unit
+     is overlaid right-aligned inside the cell, independent of the number. */
+  .ns-field {
+    position: relative;
+    display: block;
     background: #434343;
-    border: none;
     border-left: 1px solid #555;
     border-right: 1px solid #555;
+  }
+
+  .ns-stepper:focus-within {
+    border-color: #37a8db;
+  }
+
+  .ns-input {
+    display: block;
+    padding: 3px 4px;
+    background: transparent;
+    border: none;
     color: #e0e0e0;
     font-size: 11px;
-    width: 52px;
+    width: 54px;
     text-align: center;
     color-scheme: dark;
     appearance: textfield;
     -moz-appearance: textfield;
     outline: none;
     min-height: 22px;
-  }
-
-  .ns-input:focus {
-    border-color: #37a8db;
   }
 
   .ns-input::-webkit-inner-spin-button,
@@ -171,10 +182,13 @@
   }
 
   .ns-unit {
+    position: absolute;
+    right: 5px;
+    top: 50%;
+    transform: translateY(-50%);
     font-size: 11px;
     color: #888;
-    margin-left: 4px;
-    align-self: center;
+    pointer-events: none;
     white-space: nowrap;
   }
 </style>

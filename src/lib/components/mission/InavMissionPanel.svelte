@@ -18,6 +18,9 @@
   import { connection } from '$lib/stores/connection';
   import { telemetry, type TelemetryData } from '$lib/stores/telemetry';
   import { get } from 'svelte/store';
+  import { settings } from '$lib/stores/settings';
+  import type { InterfaceSettings } from '$lib/stores/settings';
+  import { convertAltitude, convertSpeed } from '$lib/utils/units';
   import { save, open } from '@tauri-apps/plugin-dialog';
   import { t } from 'svelte-i18n';
   // Helper: untyped $t wrapper for dynamic params (svelte-i18n types are too strict)
@@ -159,10 +162,21 @@
     // Button moved to SurveyPatternPanel; this is a no-op fallback
   }
 
+  const IFACE_FALLBACK: InterfaceSettings = {
+    speedUnit: 'kmh', altitudeUnit: 'm', distanceUnit: 'metric', verticalSpeedUnit: 'ms', temperatureUnit: 'c',
+  };
+  const iface = $derived($settings.interface ?? IFACE_FALLBACK);
+  /** Waypoint speed (cm/s internal) in the user's speed unit. */
+  function fmtSpeed(cms: number): string {
+    const s = convertSpeed(cms / 100, iface.speedUnit);
+    return `${s.value.toFixed(1)} ${s.unit}`;
+  }
+
   function formatAltShort(wp: Waypoint): string {
     const m = wp.alt_mode ?? ((wp.p3 & 1) ? 1 : 0);
     const ref = m === 2 ? 'AGL' : m === 1 ? 'AMSL' : 'REL';
-    return `${(wp.altitude / 100).toFixed(0)}m ${ref}`;
+    const a = convertAltitude(wp.altitude / 100, iface.altitudeUnit);
+    return `${Math.round(a.value)}${a.unit} ${ref}`;
   }
 
   function formatParam(wp: Waypoint): string {
@@ -171,7 +185,7 @@
       case WpAction.Jump:        return `→${wp.p1} ×${wp.p2 === -1 ? '∞' : wp.p2}`;
       case WpAction.SetHead:     return wp.p1 === -1 ? 'Free' : `${wp.p1}°`;
       case WpAction.Waypoint:
-      case WpAction.Land:        return wp.p1 > 0 ? `${wp.p1}cm/s` : '';
+      case WpAction.Land:        return wp.p1 > 0 ? fmtSpeed(wp.p1) : '';
       default:                   return '';
     }
   }
@@ -326,7 +340,7 @@
       {/if}
       <div class="detail-row"><span class="detail-label">{$t('mission.alt')}</span><span class="detail-value">{formatAltShort(wp)}</span></div>
       {#if wp.action === WpAction.Waypoint || wp.action === WpAction.Land}
-        <div class="detail-row"><span class="detail-label">{$t('mission.speed')}</span><span class="detail-value">{wp.p1 > 0 ? `${wp.p1} cm/s` : $t('mission.speedDefault')}</span></div>
+        <div class="detail-row"><span class="detail-label">{$t('mission.speed')}</span><span class="detail-value">{wp.p1 > 0 ? fmtSpeed(wp.p1) : $t('mission.speedDefault')}</span></div>
       {/if}
       {#if wp.action === WpAction.PosholdTime}
         <div class="detail-row"><span class="detail-label">{$t('mission.hold')}</span><span class="detail-value">{wp.p1}s</span></div>

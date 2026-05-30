@@ -1,5 +1,7 @@
 <script lang="ts">
   import type { ProfileData } from '$lib/helpers/terrainProfile';
+  import { convertAltitude } from '$lib/utils/units';
+  import type { InterfaceSettings } from '$lib/stores/settings';
 
   export interface HoverInfo {
     dist: number;
@@ -13,6 +15,7 @@
   let {
     data,
     datum = 'msl',
+    settings,
     groundClearance = 50,
     warnThreshold = null,
     activeStartDist = -Infinity,
@@ -26,6 +29,7 @@
   }: {
     data: ProfileData | null;
     datum?: 'msl' | 'agl';
+    settings: InterfaceSettings;
     groundClearance?: number;
     /** Clearance level below which the path is coloured unsafe (default = groundClearance) */
     warnThreshold?: number | null;
@@ -321,9 +325,26 @@
 
   const xTicks = $derived(niceTicks(xDomain.a, xDomain.b, 6));
   const yTicks = $derived(niceTicks(yDomain.min, yDomain.max, 5));
-  const xUnitKm = $derived(xDomain.b - xDomain.a > 2000);
+
+  // X axis: distance in the user's distance unit (no auto-switch mid-pan)
+  const xConv = $derived.by(() => {
+    const range = xDomain.b - xDomain.a;
+    if (settings.distanceUnit === 'imperial') {
+      const ft = range * 3.280839895;
+      return ft >= 5280
+        ? { factor: 3.280839895 / 5280, unit: 'mi', digits: 1 }
+        : { factor: 3.280839895, unit: 'ft', digits: 0 };
+    }
+    return range > 2000 ? { factor: 0.001, unit: 'km', digits: 1 } : { factor: 1, unit: 'm', digits: 0 };
+  });
   function fmtX(v: number): string {
-    return xUnitKm ? (v / 1000).toFixed(1) : Math.round(v).toString();
+    return (v * xConv.factor).toFixed(xConv.digits);
+  }
+
+  // Y axis: altitude in the user's altitude unit
+  const altUnit = $derived(convertAltitude(0, settings.altitudeUnit).unit);
+  function fmtY(v: number): string {
+    return Math.round(convertAltitude(v, settings.altitudeUnit).value).toString();
   }
 
   // ── Interaction: hover, zoom, pan ──────────────────────────────────
@@ -550,9 +571,10 @@
     </defs>
 
     <!-- Y grid + labels -->
+    <text class="axis-unit" x={PAD.l - 6} y={PAD.t - 2} text-anchor="end">{altUnit}</text>
     {#each yTicks as ty}
       <line class="grid" x1={PAD.l} y1={yS(ty)} x2={PAD.l + plotW} y2={yS(ty)} />
-      <text class="axis-label" x={PAD.l - 6} y={yS(ty) + 4} text-anchor="end">{Math.round(ty)}</text>
+      <text class="axis-label" x={PAD.l - 6} y={yS(ty) + 4} text-anchor="end">{fmtY(ty)}</text>
     {/each}
 
     <!-- X grid + labels -->
@@ -563,7 +585,7 @@
       {/if}
     {/each}
     <text class="axis-unit" x={PAD.l + plotW} y={baselineY + 18} text-anchor="end">
-      {xUnitKm ? 'km' : 'm'}
+      {xConv.unit}
     </text>
 
     <g clip-path="url(#plotClip)">

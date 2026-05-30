@@ -20,7 +20,24 @@
   import { iconForWp } from '$lib/helpers/missionIcons';
   import { get } from 'svelte/store';
   import { settings } from '$lib/stores/settings';
+  import type { InterfaceSettings } from '$lib/stores/settings';
+  import { convertAltitude, toAltitudeM, convertSpeed, toSpeedMs } from '$lib/utils/units';
   import { t } from 'svelte-i18n';
+
+  const IFACE_FALLBACK: InterfaceSettings = {
+    speedUnit: 'kmh', altitudeUnit: 'm', distanceUnit: 'metric', verticalSpeedUnit: 'ms', temperatureUnit: 'c',
+  };
+  function iface(): InterfaceSettings {
+    return get(settings).interface ?? IFACE_FALLBACK;
+  }
+  /** Altitude (m internal) → display unit. */
+  function altDisp(m: number) {
+    return convertAltitude(m, iface().altitudeUnit);
+  }
+  /** Waypoint speed (cm/s internal) → display speed unit. */
+  function spdDisp(cms: number) {
+    return convertSpeed(cms / 100, iface().speedUnit);
+  }
 
   interface Props {
     map: L.Map;
@@ -171,13 +188,13 @@
   }
 
   function paramLabelHtml(wp: Waypoint, modifiers: { wp: Waypoint; idx: number }[]): string {
-    const altM = (wp.altitude / 100).toFixed(0);
+    const a = altDisp(wp.altitude / 100);
     const altType = altLabel(wp);
-    let lines = [`${altM}m ${altType}`];
+    let lines = [`${Math.round(a.value)}${a.unit} ${altType}`];
     switch (wp.action) {
       case WpAction.Waypoint:
       case WpAction.Land:
-        if (wp.p1 > 0) lines.push(`${wp.p1} cm/s`);
+        if (wp.p1 > 0) { const s = spdDisp(wp.p1); lines.push(`${s.value.toFixed(1)} ${s.unit}`); }
         break;
       case WpAction.PosholdTime:
         lines.push($t('missionLayer.holdTime', { values: { seconds: wp.p1 } }));
@@ -243,7 +260,8 @@
 
   function buildEditorHtml(wp: Waypoint, idx: number, total: number, displayNum: number,
     modifiers: { wp: Waypoint; idx: number }[]): string {
-    const altM = (wp.altitude / 100).toFixed(0);
+    const altC = altDisp(wp.altitude / 100);
+    const altVal = Math.round(altC.value);
     const altType = altLabel(wp);
     const geoTypes: WpAction[] = [WpAction.Waypoint, WpAction.PosholdUnlim, WpAction.PosholdTime, WpAction.SetPoi, WpAction.Land];
     const typeOptions = geoTypes.map(v => `<option value="${v}" ${v === wp.action ? 'selected' : ''}>${$t(WP_ACTION_KEYS[v])}</option>`).join('');
@@ -251,7 +269,7 @@
     let html = `<div class="wp-editor-popup">`;
     html += `<div class="wpe-header">${$t('missionLayer.wpHeader', { values: { number: displayNum } })} <span class="wpe-type-name">${$t(WP_ACTION_KEYS[wp.action])}</span></div>`;
     html += `<div class="wpe-row"><label>${$t('missionLayer.type')}</label><select data-field="action">${typeOptions}</select></div>`;
-    html += `<div class="wpe-row"><label>${$t('missionLayer.alt')}</label>${numInputHtml('altitude', Number(altM), 1)}<button data-field="altToggle" class="wpe-toggle">${altType}</button></div>`;
+    html += `<div class="wpe-row"><label>${$t('missionLayer.alt')}</label>${numInputHtml('altitude', altVal, 1)}<span class="wpe-unit">${altC.unit}</span><button data-field="altToggle" class="wpe-toggle">${altType}</button></div>`;
 
     const latDeg = toDeg(wp.lat).toFixed(7);
     const lonDeg = toDeg(wp.lon).toFixed(7);
@@ -259,7 +277,8 @@
     html += `<div class="wpe-row"><label>${$t('missionLayer.lon')}</label><input type="number" data-field="lon" value="${lonDeg}" step="0.0000001" min="-180" max="180" class="wpe-coord-input"/></div>`;
 
     if (wp.action === WpAction.Waypoint || wp.action === WpAction.Land) {
-      html += `<div class="wpe-row"><label>${$t('missionLayer.speed')}</label>${numInputHtml('p1', wp.p1, 10, 0)}<span class="wpe-unit">${$t('missionLayer.cmPerSec')}</span></div>`;
+      const spd = spdDisp(wp.p1);
+      html += `<div class="wpe-row"><label>${$t('missionLayer.speed')}</label>${numInputHtml('p1', Math.round(spd.value * 10) / 10, 1, 0)}<span class="wpe-unit">${spd.unit}</span></div>`;
     }
     if (wp.action === WpAction.PosholdTime) {
       html += `<div class="wpe-row"><label>${$t('missionLayer.hold')}</label>${numInputHtml('p1', wp.p1, 1, 0)}<span class="wpe-unit">${$t('missionLayer.sec')}</span></div>`;
@@ -328,7 +347,8 @@
 
     const altInput = el.querySelector('input[data-field="altitude"]') as HTMLInputElement | null;
     altInput?.addEventListener('change', () => {
-      missionUpdateWp(idx, { ...wp, altitude: altFromM(Number(altInput.value)) });
+      const m = toAltitudeM(Number(altInput.value), iface().altitudeUnit);
+      missionUpdateWp(idx, { ...wp, altitude: altFromM(m) });
     });
 
     const altToggle = el.querySelector('button[data-field="altToggle"]') as HTMLButtonElement | null;
@@ -343,7 +363,12 @@
 
     const p1Input = el.querySelector('input[data-field="p1"]') as HTMLInputElement | null;
     p1Input?.addEventListener('change', () => {
-      missionUpdateWp(idx, { ...wp, p1: Number(p1Input.value) });
+      // Waypoint/Land p1 is speed (display unit → cm/s); otherwise raw (e.g. hold seconds)
+      const isSpeed = wp.action === WpAction.Waypoint || wp.action === WpAction.Land;
+      const p1 = isSpeed
+        ? Math.round(toSpeedMs(Number(p1Input.value), iface().speedUnit) * 100)
+        : Number(p1Input.value);
+      missionUpdateWp(idx, { ...wp, p1 });
     });
 
     const latInput = el.querySelector('input[data-field="lat"]') as HTMLInputElement | null;
@@ -483,10 +508,10 @@
         }
 
         if (!editing) {
-          const altM = (wp.altitude / 100).toFixed(1);
+          const a = altDisp(wp.altitude / 100);
           const altType = altLabel(wp);
           const mods = getModifiersForWp(m.waypoints, i);
-          let tip = `WP${dn} ${$t(WP_ACTION_KEYS[wp.action])}<br>${altM}m ${altType}`;
+          let tip = `WP${dn} ${$t(WP_ACTION_KEYS[wp.action])}<br>${a.value.toFixed(1)}${a.unit} ${altType}`;
           for (const mod of mods) tip += `<br>${$t(WP_ACTION_KEYS[mod.wp.action])}`;
           marker.bindTooltip(tip, { direction: 'top', offset: L.point(0, -20) });
         }
