@@ -484,7 +484,7 @@ This document tracks planned features, organized by milestone.
 - [ ] HID controller input (gamepad/joystick)
 - [ ] Audio status alerts (TTS)
 - [x] Terrain analysis — _elevation profile + clearance + correction (Terrain Follow / Clearance Check) + jump simulation done; see Terrain Elevation section_
-- [ ] Embedded video stream
+- [~] Embedded video — _core done: source router + webcam/USB-capture (`getUserMedia`, cross-platform) + NavRail panel with live preview & 60 fps MJPEG fix. Widget / floating window / map-swap and network streams (RTSP/UDP) + native capture pending; see `docs/dev/VideoFeature.md`_
 - [ ] FW approach / autoland planner
 - [ ] Geozone editor
 - [ ] MAVLink signing (passphrase-based packet authentication)

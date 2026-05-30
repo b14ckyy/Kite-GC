@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Embedded video (core: router + webcam + panel)
+- **Video subsystem foundation** — a source **router** (`stores/video.ts`) opens a source once and shares it with multiple display sinks (one `MediaStream` binds to many `<video>` elements → one decode feeds panel/widget/floating/swap). Layered for webcam now and network streams later
+- **Webcam / USB-capture source** via `getUserMedia` — works in WebView2 (Windows) **and** WebKitGTK (Linux), no backend; device enumeration, device + resolution (auto/720p/1080p) selection, mirror
+- **NavRail "Video" panel** — start/stop, device picker, resolution, mirror, **live preview**, and an info line (resolution · measured/set fps; measured via `requestVideoFrameCallback`)
+- **Frame-rate fix**: the browser camera API can't request MJPEG directly, so high-res modes could land on a slow uncompressed format (13 fps @720p / 6 fps @1080p). Requesting `frameRate: { ideal: 60 }` (FPV standard) nudges the browser to the camera's MJPEG mode → full 60 fps
+- _Planning + design captured in `docs/dev/VideoFeature.md`. Widget, floating window and map-swap follow; network streams (RTSP/UDP) + native capture are v2._
+
 ### Added — Terrain Radar widget (top-down EGPWS-style)
 - **New `terrainRadar` widget** (1×1) — a top-down, **track-up** terrain-awareness display: a **120° forward fan** sampled as a polar grid and coloured by terrain clearance. Fixed pointing up; terrain is sampled relative to heading so it rotates with the craft. The fan fills the square (wide flanks clipped); the same **UAV ring marker** sits at the apex
 - **Two ranges**: the *forward fan distance* is **speed-driven** (300/900/1800/3600 m, shared scale + hysteresis with the Live AGL widget) — shown as range arcs + distance labels; the *clearance colour scale* is a **separate setting** (left toggle **60/120/250 m**, default 120; coarse-rounded **200/400/800 ft** in imperial) — deliberately independent of the Terrain-Analysis `groundClearance`
