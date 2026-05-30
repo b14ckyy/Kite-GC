@@ -34,7 +34,9 @@
   import WidgetPanel from "$lib/components/WidgetPanel.svelte";
   import { LARGE_BASE_VMIN } from "$lib/config/widgetRegistry";
   import MissionPanel from "$lib/components/mission/MissionPanel.svelte";
+  import TerrainAnalysisPanel from "$lib/components/terrain/TerrainAnalysisPanel.svelte";
   import { editMode } from "$lib/stores/mission";
+  import { terrainAnalysis, patchTerrainAnalysis } from "$lib/stores/terrainAnalysis";
   import type { InterfaceSettings, PanelConfig } from "$lib/stores/settings";
   import { layout, GRID_DEFAULTS } from '$lib/stores/layout';
   import {
@@ -90,6 +92,10 @@
   let errorMsg = $state("");
   let navPanelOpen = $state(false);
   let activeTab = $state("uav-info");
+
+  // Terrain Analysis overlay (NavRail-triggered, full-width over the map)
+  let terrainOpen = $state(false);
+  terrainAnalysis.subscribe((s) => { terrainOpen = s.open; });
 
   // Dev-only debug panel (tree-shaken in production builds)
   const DEV_MODE = import.meta.env.DEV;
@@ -205,10 +211,13 @@
     { id: "settings", label: () => $t('nav.settings'), icon: "⚙" },
     { id: "logbook", label: () => $t('nav.logbook'), icon: "📒" },
     { id: "mission", label: () => $t('nav.mission'), icon: "◎" },
+    { id: "terrain", label: () => $t('nav.terrain'), icon: "⛰" },
   ];
   const tabs = $derived(
     flightLoggingEnabled ? allTabs : allTabs.filter(t => t.id !== 'logbook')
   );
+  // Highlight the terrain rail button while its overlay is open
+  const railActiveTab = $derived(terrainOpen ? 'terrain' : activeTab);
 
   let ports: PortInfo[] = $state([]);
   let connStatus: string = $state("disconnected");
@@ -255,7 +264,11 @@
 
   function toggleNavPanel() {
     navPanelOpen = !navPanelOpen;
-    if (!navPanelOpen) editMode.set(false);
+    // The X hides all panels — including the terrain overlay
+    if (!navPanelOpen) {
+      editMode.set(false);
+      patchTerrainAnalysis({ open: false });
+    }
     settings.patch({ navPanelOpen });
     // Let the map recalculate its size after panel animation
     setTimeout(() => window.dispatchEvent(new Event("resize")), 320);
@@ -276,6 +289,14 @@
   }
 
   function selectTab(tabId: string) {
+    // Terrain Analysis is a full-width overlay that behaves like a floating
+    // panel: toggling its tab opens/closes it, the nav rail stays open.
+    if (tabId === 'terrain') {
+      patchTerrainAnalysis({ open: !get(terrainAnalysis).open });
+      return;
+    }
+    // Selecting another tab switches away from the terrain overlay
+    patchTerrainAnalysis({ open: false });
     if (tabId !== 'mission') editMode.set(false);
     activeTab = tabId;
     settings.patch({ activeTab });
@@ -1076,14 +1097,14 @@
   <!-- ======= FLOATING NAV PANEL SYSTEM ======= -->
   <NavRail
     open={navPanelOpen}
-    {activeTab}
+    activeTab={railActiveTab}
     {tabs}
     onToggle={toggleNavPanel}
     onSelectTab={selectTab}
   />
 
-  <!-- Floating panel content -->
-  {#if navPanelOpen}
+  <!-- Floating panel content (hidden while the terrain overlay is open) -->
+  {#if navPanelOpen && !terrainOpen}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="nav-panel" class:nav-panel-logbook={activeTab === 'logbook' && !logbookDetailOpen} class:nav-panel-wide={logbookDetailOpen} class:nav-panel-minimized={logbookMinimized && logbookHasFlightOnMap} onclick={() => { if (logbookMinimized) expandLogbook(); }}>
@@ -1195,6 +1216,11 @@
     </div>
   {/if}
 
+  <!-- ======= TERRAIN ANALYSIS OVERLAY ======= -->
+  {#if terrainOpen}
+    <TerrainAnalysisPanel track={selectedTrackWithPosition} />
+  {/if}
+
   <!-- ======= BOTTOM WIDGET PANEL ======= -->
   <div class="zone-bottom-dock" class:zone-hidden={!$layout.bottomDock.visible} class:panel-editing={widgetEditMode} bind:clientWidth={bottomDockW} bind:clientHeight={bottomDockH}>
     <div class="panel-bottom-wrap">
@@ -1283,6 +1309,17 @@
     background-color: #3d3f3e;
     color: #e0e0e0;
     overflow: hidden;
+    /* Block accidental text selection on drag everywhere (UI is app-like, not a document) */
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* …but keep text selectable in real text-entry controls */
+  :global(input),
+  :global(textarea),
+  :global([contenteditable="true"]) {
+    user-select: text;
+    -webkit-user-select: text;
   }
 
   .app {

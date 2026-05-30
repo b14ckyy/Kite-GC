@@ -11,6 +11,7 @@
   import { homePosition } from "$lib/stores/home";
   import MissionLayer from "./mission/MissionLayer.svelte";
   import SurveyPatternLayer from "./mission/SurveyPatternLayer.svelte";
+  import TerrainCursorLayer from "./terrain/TerrainCursorLayer.svelte";
   import type { TelemetryRecord } from "$lib/stores/flightlog";
   import {
     segmentTrackByFlightMode,
@@ -477,6 +478,7 @@
   {#if map}
     <MissionLayer {map} />
     <SurveyPatternLayer {map} />
+    <TerrainCursorLayer {map} />
   {/if}
 </div>
 
