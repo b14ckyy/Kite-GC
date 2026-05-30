@@ -275,6 +275,7 @@
     "home": "Home",
     "flightMode": "Flugmodus",
     "rawTelemetry": "Roh-Telemetrie",
+    "liveAgl": "Live AGL",
     "bottom": "Unten",
     "right": "Rechts",
     "off": "Aus",

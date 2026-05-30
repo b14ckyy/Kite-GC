@@ -12,6 +12,7 @@
   import HomeWidget from "./widgets/HomeWidget.svelte";
   import FlightModeWidget from "./widgets/FlightModeWidget.svelte";
   import RawTelemetryWidget from "./widgets/RawTelemetryWidget.svelte";
+  import LiveAglWidget from "./widgets/LiveAglWidget.svelte";
   import type { InterfaceSettings } from "$lib/stores/settings";
 
   let {
@@ -226,12 +227,14 @@
     const effectiveLargeBase = Math.min(maxWidgetVmin, LARGE_BASE_VMIN);
     const smallRatio = SMALL_BASE_VMIN / LARGE_BASE_VMIN; // 0.6
 
-    // Calculate total "units" needed (large=1, small=smallRatio)
+    // Calculate total "units" of main-axis space (large=1, small=smallRatio,
+    // wide=2:1 → 2 units in the horizontal dock, 0.5 units in the vertical dock).
+    const wideUnits = orientation === 'horizontal' ? 2 : 0.5;
     let totalUnits = 0;
     const items = widgetIds.map(id => {
       const def = WIDGET_MAP.get(id);
       const wclass: WidgetClass = def?.widgetClass ?? 'small';
-      const units = wclass === 'large' ? 1 : smallRatio;
+      const units = wclass === 'large' ? 1 : wclass === 'wide' ? wideUnits : smallRatio;
       totalUnits += units;
       return { id, wclass, units };
     });
@@ -245,10 +248,12 @@
     const baseTotal = totalUnits * effectiveLargeBase;
     const scale = baseTotal <= usableVmin ? 1 : Math.max(MIN_SCALE, usableVmin / baseTotal);
 
+    // `size` = the cross-axis fill (height in horizontal dock, width in vertical).
+    // large + wide fill the cross axis; small is 0.6×.
     return items.map(item => ({
       id: item.id,
       wclass: item.wclass,
-      size: (item.wclass === 'large' ? effectiveLargeBase : effectiveLargeBase * smallRatio) * scale,
+      size: (item.wclass === 'small' ? effectiveLargeBase * smallRatio : effectiveLargeBase) * scale,
     }));
   }
 
@@ -262,11 +267,12 @@
     const simIds = [...widgetIds, '_test'];
     const effBase = Math.min(maxWidgetVmin, LARGE_BASE_VMIN);
     const smallRatio = SMALL_BASE_VMIN / LARGE_BASE_VMIN;
+    const wideUnits = orientation === 'horizontal' ? 2 : 0.5;
     let totalUnits = 0;
     for (const id of simIds) {
       const def = WIDGET_MAP.get(id);
       const wclass = def?.widgetClass ?? 'small';
-      totalUnits += wclass === 'large' ? 1 : smallRatio;
+      totalUnits += wclass === 'large' ? 1 : wclass === 'wide' ? wideUnits : smallRatio;
     }
     const totalGaps = (simIds.length - 1) * 0.5;
     const usableVmin = availableVmin - totalGaps;
@@ -463,6 +469,13 @@
           <FlightModeWidget {telem} size={item.sizePx} />
         {:else if item.id === 'rawTelemetry'}
           <RawTelemetryWidget {telem} size={item.sizePx} {interfaceSettings} />
+        {:else if item.id === 'liveAgl'}
+          <LiveAglWidget
+            {telem}
+            {interfaceSettings}
+            width={orientation === 'horizontal' ? item.sizePx * 2 : item.sizePx}
+            height={orientation === 'horizontal' ? item.sizePx : item.sizePx / 2}
+          />
         {/if}
       </div>
     </div>

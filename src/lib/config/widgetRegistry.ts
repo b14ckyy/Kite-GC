@@ -1,6 +1,6 @@
 // Widget registry — defines all available widgets, their classes, and metadata
 
-export type WidgetClass = 'large' | 'small';
+export type WidgetClass = 'large' | 'small' | 'wide';
 
 export interface WidgetDef {
   id: string;
@@ -20,6 +20,7 @@ export const WIDGET_DEFS: WidgetDef[] = [
   { id: 'home',         label: 'Home',           labelKey: 'widgets.home',         widgetClass: 'small' },
   { id: 'flightMode',   label: 'Flight Mode',    labelKey: 'widgets.flightMode',   widgetClass: 'small' },
   { id: 'rawTelemetry', label: 'Raw Telemetry',  labelKey: 'widgets.rawTelemetry', widgetClass: 'small' },
+  { id: 'liveAgl',      label: 'Live AGL',       labelKey: 'widgets.liveAgl',      widgetClass: 'wide' },
 ];
 
 export const WIDGET_MAP = new Map(WIDGET_DEFS.map(w => [w.id, w]));
