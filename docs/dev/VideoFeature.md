@@ -38,19 +38,29 @@ What the Web API offers and nothing more: `getUserMedia` + constraints, `applyCo
 ## 3. UI integration
 
 - **NavRail "Video" panel** (✅ control center): start/stop, device picker, resolution (auto / 720p / 1080p, all with the 60 fps hint), mirror, live preview, an info line (resolution · measured/set fps). Measured fps via `requestVideoFrameCallback`.
-- **Dock widget** (2×1 `wide`, planned next): a router sink in the standard widget card; **crop-to-fill** (`object-fit: cover`) so the 2:1 is full (too small to read OSD anyway); thin rounded border; **no settings** (panel owns control).
+- **Dock widget** (2×1 `wide`, ✅): a router sink in the standard widget card; **crop-to-fill** (`object-fit: cover`) so the 2:1 is full (too small to read OSD anyway); thin rounded border; **no settings** (panel owns control).
 - **Floating window** (planned): activated from the panel; **snaps bottom-left**, displacing the bottom widget dock from that corner (dock reflows to the remaining width); **drag** to float free (dock reclaims full width); re-snappable. **Resize** by corner drag, **relative to the home window**, aspect **fixed to the source**, height **10–30 % of the viewport height**. NavRail floating panels render **above** the video (z-order) so their height limits aren't affected.
 - **Double-click** swaps the main map view with video (video fills the map zone, map → PiP).
 
 Detach is **in-app only** for v1 (same WebView context → MediaStream sharing is trivial). A true **separate OS window** (Tauri multi-window) is v2 and would force every source through a **shareable local endpoint** (a `MediaStream` can't cross window contexts, and a webcam is single-owner).
 
-## 4. Status
+## 4. Persistence
+
+Self-contained (own localStorage key `kite-gc-video`, same mechanism as the app
+settings store): `enabled` / `deviceId` / `resolution` / `mirror` are saved on
+change. `initVideo()` (called once at app start) enumerates devices and, if video
+was running at last close, **auto-starts it with the last settings**. If the saved
+device is gone/busy (`OverconstrainedError` / `NotFound` / `NotReadable`), the
+start falls back to the default device instead of erroring.
+
+## 5. Status
 
 - ✅ Router (`stores/video.ts`) + `WebcamSource` (device enumeration, start/stop, device/resolution switch, 60 fps hint, aspect from track)
 - ✅ NavRail "Video" panel + live preview + info line
-- ☐ Dock widget (2×1)
-- ☐ Floating window (snap / drag / dock-reflow / corner-resize)
-- ☐ Double-click map↔video swap
+- ✅ Persistence + auto-start (last settings, device fallback)
+- ✅ Dock widget (2×1 wide, crop-to-fill)
+- ☐ Floating window (snap bottom-left / drag-free / dock-reflow / corner-resize)
+- ☐ Double-click map↔video swap (incl. 3D view)
 - ☐ v2: network streams (RTSP/UDP), native `nokhwa` source, OS-window detach, snapshot/record
 
 ---

@@ -12,7 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Webcam / USB-capture source** via `getUserMedia` — works in WebView2 (Windows) **and** WebKitGTK (Linux), no backend; device enumeration, device + resolution (auto/720p/1080p) selection, mirror
 - **NavRail "Video" panel** — start/stop, device picker, resolution, mirror, **live preview**, and an info line (resolution · measured/set fps; measured via `requestVideoFrameCallback`)
 - **Frame-rate fix**: the browser camera API can't request MJPEG directly, so high-res modes could land on a slow uncompressed format (13 fps @720p / 6 fps @1080p). Requesting `frameRate: { ideal: 60 }` (FPV standard) nudges the browser to the camera's MJPEG mode → full 60 fps
-- _Planning + design captured in `docs/dev/VideoFeature.md`. Widget, floating window and map-swap follow; network streams (RTSP/UDP) + native capture are v2._
+- **Video widget** (2×1 `wide`) — a router sink showing the shared feed in the standard widget card; crop-to-fill (`object-fit: cover`) for a full 2:1 tile, thin rounded frame, no settings (the panel owns control)
+- **Persistence + auto-start** — device/resolution/mirror and the running state are remembered (localStorage); video **auto-starts with the last settings** if it was running at last close, falling back to the default device if the saved one is gone
+- _Planning + design captured in `docs/dev/VideoFeature.md`. Floating window and map-swap follow; network streams (RTSP/UDP) + native capture are v2._
 
 ### Added — Terrain Radar widget (top-down EGPWS-style)
 - **New `terrainRadar` widget** (1×1) — a top-down, **track-up** terrain-awareness display: a **120° forward fan** sampled as a polar grid and coloured by terrain clearance. Fixed pointing up; terrain is sampled relative to heading so it rotates with the craft. The fan fills the square (wide flanks clipped); the same **UAV ring marker** sits at the apex
