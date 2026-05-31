@@ -13,6 +13,9 @@ export interface MapProvider {
   overlays?: { url: string; attribution: string; maxZoom: number; cesiumMaxZoom?: number }[];
   /** True when the base imagery is dark (satellite, dark theme) — used for UI contrast */
   dark?: boolean;
+  /** Run over-zoom placeholder detection on this base layer (ESRI satellite
+   *  returns a fixed blank tile instead of a 404 above the available zoom). */
+  detectPlaceholders?: boolean;
 }
 
 export const MAP_PROVIDERS: MapProvider[] = [
@@ -40,8 +43,10 @@ export const MAP_PROVIDERS: MapProvider[] = [
     attribution:
       '&copy; <a href="https://www.esri.com/">Esri</a> &mdash; Sources: Esri, Maxar, Earthstar Geographics',
     maxZoom: 20,
-    cesiumMaxZoom: 17,
+    // Raised from 17 → 20 now that placeholder detection falls back per-region.
+    cesiumMaxZoom: 20,
     dark: true,
+    detectPlaceholders: true,
   },
   {
     id: "esri-hybrid",
@@ -50,8 +55,10 @@ export const MAP_PROVIDERS: MapProvider[] = [
     attribution:
       '&copy; <a href="https://www.esri.com/">Esri</a> &mdash; Sources: Esri, Maxar, Earthstar Geographics',
     maxZoom: 20,
-    cesiumMaxZoom: 17,
+    // Raised from 17 → 20 now that placeholder detection falls back per-region.
+    cesiumMaxZoom: 20,
     dark: true,
+    detectPlaceholders: true,
     overlays: [
       {
         url: "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",

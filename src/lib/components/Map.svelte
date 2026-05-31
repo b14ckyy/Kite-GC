@@ -253,6 +253,8 @@
     currentBase = cachedTileLayer(provider.url, {
       attribution: provider.attribution,
       maxZoom: provider.maxZoom,
+      // Enable over-zoom placeholder detection on flagged base layers (ESRI sat).
+      providerId: provider.detectPlaceholders ? provider.id : undefined,
     }).addTo(map);
 
     // Add overlay layers (e.g. labels for hybrid)

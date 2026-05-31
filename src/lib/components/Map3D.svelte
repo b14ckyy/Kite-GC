@@ -14,6 +14,7 @@
   import { getProviderById } from "$lib/config/mapProviders";
   import type { MapProvider } from "$lib/config/mapProviders";
   import { getCachedTile, putCachedTile, initTileCache } from "$lib/cache/tileCache";
+  import { isKnownUnavailable, isPlaceholderTile } from "$lib/cache/tileAvailability";
   import { isValidGpsCoordinate } from "$lib/helpers/telemetry";
   import {
     segmentTrackByFlightMode,
@@ -155,10 +156,13 @@
     return url;
   }
 
+  /** Tile coordinates + provider for over-zoom placeholder detection. */
+  type TileMeta = { providerId: string; z: number; x: number; y: number };
+
   /**
    * Load a tile image — checks IndexedDB cache first, then fetches from network.
    */
-  async function loadCachedImage(url: string): Promise<HTMLImageElement> {
+  async function loadCachedImage(url: string, meta?: TileMeta): Promise<HTMLImageElement> {
     // Check IndexedDB cache
     const cached = await getCachedTile(url);
     if (cached) {
@@ -169,23 +173,28 @@
         img.onerror = () => {
           URL.revokeObjectURL(cached);
           // Cache entry corrupted — fall back to network
-          fetchAndCacheImage(url).then(resolve, reject);
+          fetchAndCacheImage(url, meta).then(resolve, reject);
         };
         img.src = cached;
       });
     }
     // Cache miss — fetch from network
-    return fetchAndCacheImage(url);
+    return fetchAndCacheImage(url, meta);
   }
 
   /**
    * Fetch a tile from network, store in IndexedDB cache, return as Image.
    * Throws on error (404, CORS, network) — Cesium will keep the parent tile visible.
    */
-  async function fetchAndCacheImage(url: string): Promise<HTMLImageElement> {
+  async function fetchAndCacheImage(url: string, meta?: TileMeta): Promise<HTMLImageElement> {
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`Tile ${resp.status}`);
     const buf = await resp.arrayBuffer();
+    // Over-zoom placeholder? Reject (Cesium keeps the parent z-1 tile) and don't
+    // cache it; the region's max zoom is now learned so siblings short-circuit.
+    if (meta && isPlaceholderTile(meta.providerId, meta.z, meta.x, meta.y, buf, url)) {
+      throw new Error('placeholder tile (over-zoom)');
+    }
     putCachedTile(url, buf).catch(() => {}); // fire-and-forget
     return new Promise<HTMLImageElement>((resolve, reject) => {
       const blob = new Blob([buf]);
@@ -221,11 +230,18 @@
     // Override requestImage to route through our IndexedDB cache.
     // Errors (404, CORS) propagate as rejections → Cesium marks tile as FAILED
     // → parent tile remains visible (correct upsampling behavior).
+    const detectId = provider.detectPlaceholders ? provider.id : undefined;
     (imgProvider as any).requestImage = function (
       x: number, y: number, level: number, _request?: unknown
     ): Promise<HTMLImageElement> {
+      // Known over-zoom placeholder for this region → fail fast so Cesium keeps
+      // the parent (z-1) tile, no network round-trip.
+      if (detectId && isKnownUnavailable(detectId, level, x, y)) {
+        return Promise.reject(new Error('tile unavailable (over-zoom)'));
+      }
       const tileUrl = buildTileUrl(cesiumUrl, x, y, level, subdomains);
-      return loadCachedImage(tileUrl);
+      const meta = detectId ? { providerId: detectId, z: level, x, y } : undefined;
+      return loadCachedImage(tileUrl, meta);
     };
 
     // Silently handle tile errors — prevents "rendering has stopped" crash.
