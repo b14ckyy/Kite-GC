@@ -71,6 +71,10 @@
   let trailCurrentColor = '';
   let trailCurrentPositions: L.LatLng[] = [];
   let activeTrailLine: L.Polyline | undefined;
+  // Pre-arm trail: a thin plain black line of GPS movement while DISARMED
+  // (monitoring only). Cleared on arm; the colored flight trail takes over.
+  let preArmTrailLine: L.Polyline | undefined;
+  let preArmPositions: L.LatLng[] = [];
   let playbackLayerGroup: L.LayerGroup | undefined;
   let playbackMarker: L.Marker | undefined;
   let lastPlaybackTrackKey = '';
@@ -233,6 +237,29 @@
     }
   }
 
+  /** Thin plain black trail of GPS movement while disarmed (monitoring only). */
+  function updatePreArmTrail(lat: number, lon: number) {
+    if (!map) return;
+    const pos = L.latLng(lat, lon);
+    if (preArmPositions.length > 0 &&
+        pos.distanceTo(preArmPositions[preArmPositions.length - 1]) < MIN_TRAIL_DIST) {
+      return;
+    }
+    preArmPositions.push(pos);
+    if (preArmPositions.length >= 2) {
+      if (preArmTrailLine) {
+        preArmTrailLine.setLatLngs(preArmPositions);
+      } else {
+        preArmTrailLine = L.polyline(preArmPositions, { color: '#000000', weight: 1, opacity: 0.8 }).addTo(map);
+      }
+    }
+  }
+
+  function resetPreArmTrail() {
+    if (preArmTrailLine) { map?.removeLayer(preArmTrailLine); preArmTrailLine = undefined; }
+    preArmPositions = [];
+  }
+
   function updatePlaybackTrack(track: TelemetryRecord[], colorMode: TrackColorMode) {
     if (!map) return;
 
@@ -384,13 +411,15 @@
       if (t.lastUpdate > 0) {
         updateUavPosition(t.lat, t.lon, t.yaw, t.navState); // drives the smoother (marker + follow)
 
-        // Flight trail (colored by flight mode)
+        // Flight trail: colored by flight mode while armed; a thin black
+        // monitoring line while disarmed (pre-arm).
+        const armed = (t.armingFlags & (1 << ARMING_FLAG_ARMED)) !== 0;
         if (isValidGpsCoordinate(t.lat, t.lon)) {
-          updateTrail(t.lat, t.lon, t.activeFlightModeFlags);
+          if (armed) updateTrail(t.lat, t.lon, t.activeFlightModeFlags);
+          else updatePreArmTrail(t.lat, t.lon);
         }
 
         // Home position: set on arm transition when GPS has fix
-        const armed = (t.armingFlags & (1 << ARMING_FLAG_ARMED)) !== 0;
         if (armed && !wasArmed && t.fixType >= 2 && t.lat !== 0) {
           homePosition.set({ lat: t.lat, lon: t.lon, alt: t.altitude, set: true });
           updateHomeMarker(t.lat, t.lon);
@@ -400,6 +429,8 @@
           if (activeTrailLine) { map?.removeLayer(activeTrailLine); activeTrailLine = undefined; }
           trailCurrentPositions = [];
           trailCurrentColor = '';
+          // Drop the pre-arm line — the colored flight trail takes over.
+          resetPreArmTrail();
         }
         wasArmed = armed;
       }
@@ -519,6 +550,7 @@
       if (uavMarker) map.removeLayer(uavMarker);
       for (const seg of trailSegments) map.removeLayer(seg);
       if (activeTrailLine) map.removeLayer(activeTrailLine);
+      if (preArmTrailLine) map.removeLayer(preArmTrailLine);
       if (playbackLayerGroup) map.removeLayer(playbackLayerGroup);
       if (playbackMarker) map.removeLayer(playbackMarker);
       if (homeMarker) map.removeLayer(homeMarker);

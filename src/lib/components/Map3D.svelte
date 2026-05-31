@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { get } from "svelte/store";
+  import { invoke } from "@tauri-apps/api/core";
   import * as Cesium from "cesium";
   import "cesium/Build/Cesium/Widgets/widgets.css";
 
@@ -10,6 +11,7 @@
   }
     import { telemetry } from "$lib/stores/telemetry";
   import { homePosition } from "$lib/stores/home";
+  import { connection, type ConnectionStatus } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
   import { getProviderById } from "$lib/config/mapProviders";
   import type { MapProvider } from "$lib/config/mapProviders";
@@ -86,6 +88,7 @@
   let decoThrottleUntil = 0;
   let decoTrailingTimer: ReturnType<typeof setTimeout> | null = null;
   let decoRebuildTimer: ReturnType<typeof setTimeout> | null = null; // reverse-scrub debounce
+  let decoLoading = false;                           // suppress deco growth during an (async) track load
   let curtainEnabled = true;                         // settings.altitudeCurtain3D
   const DECO_CHUNK_MAX = 150;                        // finalize a chunk at this many points
 
@@ -114,6 +117,12 @@
   let activeTrailPositions: Cesium.Cartesian3[] = [];
   let trailCurrentColor3D = '';
   const MIN_TRAIL_DIST_3D = 1; // meters
+  // Pre-arm trail: a thin plain black, ground-clamped line of GPS movement while
+  // DISARMED (monitoring only). Cleared on arm; the colored flight trail takes over.
+  let preArmTrailEntity: Cesium.Entity | undefined;
+  let preArmPositions3D: Cesium.Cartesian3[] = [];
+  let lastPreArmLat = 0;
+  let lastPreArmLon = 0;
 
   // Camera mode: free (no lock) | follow (smooth chase) | orbit (locked target, free orbit)
   type Camera3DMode = 'free' | 'follow' | 'orbit';
@@ -124,8 +133,14 @@
   let lockRange = 200;
 
   // Follow cam pitch: user-adjustable, clamped to 0 (horizon) … -π/2 (top-down).
-  // Mouse up/down drag changes camera.pitch which we read and clamp each frame.
-  let followPitch = -25 * (Math.PI / 180);
+  // Driven by a custom vertical-drag handler (setFollowCameraControls) — Cesium's
+  // own rotate is disabled in follow so a sideways drag can't fight the heading lock.
+  let followPitch = -20 * (Math.PI / 180);
+  // Custom pitch-drag state for heading-locked follow.
+  let camDragHandler: Cesium.ScreenSpaceEventHandler | undefined;
+  let pitchDragActive = false;
+  let pitchDragLastY = 0;
+  const FOLLOW_PITCH_SENS = 0.005; // radians per pixel of vertical drag
 
   // Orbit cam: tracks the lerped point the camera orbits around
   let orbitCenter = new Cesium.Cartesian3();
@@ -141,9 +156,34 @@
   let chaseInited = false;
   const CHASE_SMOOTHING = 0.07; // 0..1 — lower = smoother (exponential lerp factor per frame)
 
-  // Geoid undulation offset: MSL → WGS84 ellipsoid height
-  // Computed once per track from terrain sample at first valid point.
+  // Geoid undulation N = ellipsoid − MSL, derived from terrain data
+  // (cesiumGround_ellipsoid − copernicusGround_MSL) at the first track point —
+  // GPS-independent, so a tower/rooftop start isn't snapped to ground.
   let geoidOffset = 0;
+  // GPS MSL at the first fix — the absolute anchor for the (relative, fused)
+  // track altitude. Track ellipsoid = startMslGps + geoidOffset + nav_alt_m.
+  let startMslGps = 0;
+
+  // Live session: geoidOffset is derived once per live connection from the
+  // terrain at the first live GPS fix (so the live UAV sits at the right height
+  // without needing a log loaded first).
+  let liveGeoidComputed = false;
+  let liveGeoidPending = false;
+  // Connection-edge detection for source-switch clearing.
+  let prevConnStatus: ConnectionStatus = get(connection).status;
+  // Set on a fresh connect; the next telemetry frame decides whether to clear
+  // (only if the UAV is DISARMED — armed = connection recovery, keep the track).
+  let pendingConnectArmCheck = false;
+  let unsubConnection: (() => void) | undefined;
+
+  // One-shot camera recenter after a (re)mount. The 2D↔3D toggle remounts this
+  // component, so this fires once on every switch to 3D.
+  let needsInitialRecenter = true;
+  // Debounced imagery refresh after over-zoom placeholders are NEWLY detected:
+  // re-requests the 1–3 tiles that slipped through before the placeholder hash
+  // was confirmed, so they get replaced by the parent tile without a manual zoom.
+  let imageryRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  let activeProviderId = 'osm';
 
     // Home arm tracking for trail reset on re-arm
   let wasArmed = false;
@@ -236,8 +276,14 @@
     const buf = await resp.arrayBuffer();
     // Over-zoom placeholder? Reject (Cesium keeps the parent z-1 tile) and don't
     // cache it; the region's max zoom is now learned so siblings short-circuit.
-    if (meta && isPlaceholderTile(meta.providerId, meta.z, meta.x, meta.y, buf, url)) {
-      throw new Error('placeholder tile (over-zoom)');
+    if (meta) {
+      const wasKnown = isKnownUnavailable(meta.providerId, meta.z, meta.x, meta.y);
+      if (isPlaceholderTile(meta.providerId, meta.z, meta.x, meta.y, buf, url)) {
+        // Newly learned region → re-request visible tiles so placeholders that
+        // already slipped through (before hash confirmation) get replaced.
+        if (!wasKnown) scheduleImageryRefresh();
+        throw new Error('placeholder tile (over-zoom)');
+      }
     }
     putCachedTile(url, buf).catch(() => {}); // fire-and-forget
     return new Promise<HTMLImageElement>((resolve, reject) => {
@@ -328,6 +374,45 @@
     viewer.scene.requestRender();
   }
 
+  /**
+   * Recenter the camera on the current content once, deferred until the canvas
+   * has a real size — the first 2D→3D switch can run this before layout, which
+   * made the old inline flyTo a no-op. Targets the UAV (replay marker / live
+   * UAV), falling back to the track-start anchor.
+   */
+  function recenter3D() {
+    if (!viewer) return;
+    const tryFly = (attempt: number) => {
+      if (!viewer) return;
+      const c = viewer.canvas;
+      if ((c.clientWidth < 2 || c.clientHeight < 2) && attempt < 30) {
+        requestAnimationFrame(() => tryFly(attempt + 1));
+        return;
+      }
+      const target = playbackMarkerEntity ?? uavEntity ?? playbackTrackEntity;
+      if (!target) return;
+      viewer.flyTo(target, {
+        duration: 1.2,
+        offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-45), 0),
+      });
+    };
+    requestAnimationFrame(() => tryFly(0));
+  }
+
+  /**
+   * Re-apply the active imagery provider (re-requests all visible tiles).
+   * Debounced — called when an over-zoom placeholder is NEWLY detected, so the
+   * tiles already rendered as placeholder are re-fetched; now-known over-zoom
+   * regions short-circuit to the parent tile instead of the blank.
+   */
+  function scheduleImageryRefresh() {
+    if (imageryRefreshTimer != null) return; // batch a burst of detections
+    imageryRefreshTimer = setTimeout(() => {
+      imageryRefreshTimer = null;
+      applyMapProvider(activeProviderId);
+    }, 500);
+  }
+
 
 
   // ── Initialization ─────────────────────────────────────────────────
@@ -344,6 +429,7 @@
       curtainEnabled = s.altitudeCurtain3D ?? true;
     });
     unsubSettings(); // read once, unsubscribe
+    activeProviderId = mapProviderId;
 
     // Init tile cache (shared with 2D map)
     await initTileCache(cacheMaxMB);
@@ -436,13 +522,34 @@
         // Subscribe to live telemetry
     unsubTelemetry = telemetry.subscribe((telem) => {
       if (!viewer) return;
+
+      const armed = (telem.armingFlags & (1 << ARMING_FLAG_ARMED)) !== 0;
+
+      // Decide clear-on-connect from the first telemetry frame after a connect:
+      // only wipe the map if the UAV is DISARMED. If it's armed we assume a
+      // connection recovery and keep the existing track.
+      if (pendingConnectArmCheck) {
+        pendingConnectArmCheck = false;
+        if (!armed) clearAllMapData();
+      }
+
       if (!isValidGpsCoordinate(telem.lat, telem.lon)) return;
+
+      // While a replay log is shown, ignore live telemetry for the map — the
+      // replay track/marker owns it (prevents the live UAV lingering over replay).
+      if (curReplayActive) { wasArmed = armed; return; }
+
+      // Derive the geoid undulation for the live location once per session.
+      ensureLiveGeoid(telem.lat, telem.lon);
 
       // Use MSL altitude + geoid offset for correct ellipsoid height.
       // Fall back to relative baro altitude + geoid offset.
       const altMsl = telem.altMsl ?? telem.altitude;
       const alt = Math.max(altMsl + geoidOffset, 0);
-      updateUavPosition3D(telem.lat, telem.lon, alt, telem.yaw, telem.activeFlightModeFlags);
+      updateUavPosition3D(telem.lat, telem.lon, alt, telem.yaw, telem.activeFlightModeFlags, armed);
+      if (!armed) updatePreArmTrail3D(telem.lat, telem.lon);
+      // Live: recenter once after the UAV exists (every 2D→3D switch remounts us).
+      if (needsInitialRecenter && uavEntity) { needsInitialRecenter = false; recenter3D(); }
       trackFollowPosition(telem.lat, telem.lon, alt, telem.yaw);
 
       if (cameraMode === 'follow') {
@@ -451,10 +558,11 @@
         updateOrbitCamera(telem.lat, telem.lon, alt);
       }
 
-      // Trail reset on arm transition (same as Map.svelte)
-      const armed = (telem.armingFlags & (1 << ARMING_FLAG_ARMED)) !== 0;
+      // Trail reset on arm transition (same as Map.svelte): drop the pre-arm
+      // black line and start the colored flight trail fresh.
       if (armed && !wasArmed && telem.fixType >= 2 && telem.lat !== 0) {
         resetTrail3D();
+        resetPreArmTrail3D();
       }
       wasArmed = armed;
 
@@ -473,6 +581,7 @@
     unsubSettingsWatch = settings.subscribe((next) => {
       if (next.mapProvider !== currentProviderId) {
         currentProviderId = next.mapProvider;
+        activeProviderId = currentProviderId;
         applyMapProvider(currentProviderId);
       }
       const curtain = next.altitudeCurtain3D ?? true;
@@ -485,8 +594,26 @@
     // Mission overlay — re-render on mission / visibility / launch changes.
     unsubMissionStore = mission.subscribe((m) => { curMission = m; scheduleMissionRender(); });
     unsubShowMissionStore = showMission.subscribe((v) => { curShowMission = v; scheduleMissionRender(); });
-    unsubReplayStore = replayActive.subscribe((v) => { curReplayActive = v; scheduleMissionRender(); });
+    unsubReplayStore = replayActive.subscribe((v) => {
+      // Leaving replay (replay → live/planning) is a source switch → always wipe.
+      const leavingReplay = curReplayActive && !v;
+      curReplayActive = v;
+      if (leavingReplay) clearAllMapData();
+      scheduleMissionRender();
+    });
     unsubLaunchStore = launchPoint.subscribe((v) => { curLaunch = v; scheduleMissionRender(); });
+
+    // Connection edge: on a fresh (re)connect, flag the next telemetry frame to
+    // decide clearing (only if DISARMED) and force a live-geoid recompute.
+    unsubConnection = connection.subscribe((c) => {
+      const was = prevConnStatus;
+      prevConnStatus = c.status;
+      if (c.status === 'connected' && was !== 'connected') {
+        pendingConnectArmCheck = true;
+        liveGeoidComputed = false;
+        liveGeoidPending = false;
+      }
+    });
   });
 
     onDestroy(() => {
@@ -494,6 +621,8 @@
     orbitLerpActive = false;
     if (decoTrailingTimer != null) clearTimeout(decoTrailingTimer);
     if (decoRebuildTimer != null) clearTimeout(decoRebuildTimer);
+    if (imageryRefreshTimer != null) clearTimeout(imageryRefreshTimer);
+    if (camDragHandler) { camDragHandler.destroy(); camDragHandler = undefined; }
     unsubTelemetry?.();
     unsubHome?.();
     unsubSettingsWatch?.();
@@ -501,6 +630,7 @@
     unsubShowMissionStore?.();
     unsubReplayStore?.();
     unsubLaunchStore?.();
+    unsubConnection?.();
     if (viewer && !viewer.isDestroyed()) {
       // Clean up trail segments (they will be destroyed with viewer, but be explicit)
       viewer.entities.removeAll();
@@ -510,7 +640,7 @@
 
   // ── UAV Entity ─────────────────────────────────────────────────────
 
-  function updateUavPosition3D(lat: number, lon: number, alt: number, heading: number, flightModeFlags = 0) {
+  function updateUavPosition3D(lat: number, lon: number, alt: number, heading: number, flightModeFlags = 0, armed = false) {
     if (!viewer) return;
 
     const position = Cesium.Cartesian3.fromDegrees(lon, lat, alt);
@@ -574,8 +704,8 @@
       }
     }
 
-    // Live trail
-    updateTrail3D(lat, lon, alt);
+    // Live trail — only while armed (no trail in the disarmed state)
+    if (armed) updateTrail3D(lat, lon, alt);
   }
 
   // ── UAV Arrow Data URI (simple SVG) ────────────────────────────────
@@ -685,6 +815,108 @@
     }
   }
 
+  /**
+   * Wipe all *source-specific* map data (playback track + progressive deco, live
+   * trail, live + replay UAV markers, home) and reset altitude/geoid + session
+   * state. The mission overlay is intentionally KEPT (it is source-independent)
+   * and re-placed at the reset geoid. Called on source switches:
+   *  - leaving replay (replay → live/planning),
+   *  - a fresh live connect while DISARMED.
+   * (log → log and live → replay are handled at the top of updatePlaybackTrack3D.)
+   */
+  function clearAllMapData() {
+    if (!viewer) return;
+    // Playback track + progressive shadow/curtain
+    for (const e of playbackTrackParts) viewer.entities.remove(e);
+    playbackTrackParts = [];
+    if (playbackTrackEntity) {
+      viewer.entities.remove(playbackTrackEntity);
+      playbackTrackEntity = undefined;
+    }
+    clearDeco();
+    decoValidTrack = [];
+    // Live + pre-arm trails
+    resetTrail3D();
+    resetPreArmTrail3D();
+    // Markers (live UAV, replay marker, home)
+    if (uavEntity) { viewer.entities.remove(uavEntity); uavEntity = undefined; }
+    if (playbackMarkerEntity) { viewer.entities.remove(playbackMarkerEntity); playbackMarkerEntity = undefined; }
+    if (homeEntity) { viewer.entities.remove(homeEntity); homeEntity = undefined; }
+    // Altitude / geoid / arm-session state
+    geoidOffset = 0;
+    startMslGps = 0;
+    wasArmed = false;
+    liveGeoidComputed = false;
+    liveGeoidPending = false;
+    // Camera follow state (so it re-anchors on the new source)
+    chaseInited = false;
+    orbitInited = false;
+    // Mission stays — re-place it at the reset geoid.
+    scheduleMissionRender();
+    viewer.scene.requestRender();
+  }
+
+  /**
+   * Derive the geoid undulation N = cesiumGround_ellipsoid − copernicusGround_MSL
+   * at the live location, once per live session. Live UAV ellipsoid height is
+   * `altMsl + geoidOffset`, so without this the craft sinks by the full local
+   * undulation (~tens of m). Guarded by `liveGeoidPending` (one sample in flight).
+   */
+  async function ensureLiveGeoid(lat: number, lon: number) {
+    if (!viewer || liveGeoidComputed || liveGeoidPending) return;
+    liveGeoidPending = true;
+    try {
+      const terrainProvider = await waitForTerrain(viewer);
+      if (terrainProvider) {
+        const refPos = Cesium.Cartographic.fromDegrees(lon, lat);
+        const sampled = await Cesium.sampleTerrainMostDetailed(terrainProvider, [refPos]);
+        const copernicusGround = await invoke<number | null>('terrain_elevation', { lat, lon });
+        if (sampled[0] && sampled[0].height != null && copernicusGround != null) {
+          geoidOffset = sampled[0].height - copernicusGround;
+          liveGeoidComputed = true;
+          console.log(`[Map3D] Live geoid N: ${geoidOffset.toFixed(1)}m (cesium=${sampled[0].height.toFixed(1)}, copernicusMSL=${copernicusGround.toFixed(1)})`);
+          scheduleMissionRender();
+          viewer.scene.requestRender();
+        }
+      }
+    } catch (e) {
+      console.warn('[Map3D] Live geoid sample failed', e);
+    } finally {
+      liveGeoidPending = false;
+    }
+  }
+
+  /** Thin plain black, ground-clamped trail of GPS movement while disarmed. */
+  function updatePreArmTrail3D(lat: number, lon: number) {
+    if (!viewer) return;
+    if (lastPreArmLat !== 0 || lastPreArmLon !== 0) {
+      const a = Cesium.Cartesian3.fromDegrees(lon, lat, 0);
+      const b = Cesium.Cartesian3.fromDegrees(lastPreArmLon, lastPreArmLat, 0);
+      if (Cesium.Cartesian3.distance(a, b) < MIN_TRAIL_DIST_3D) return;
+    }
+    lastPreArmLat = lat;
+    lastPreArmLon = lon;
+    preArmPositions3D.push(Cesium.Cartesian3.fromDegrees(lon, lat, 0));
+    if (preArmPositions3D.length >= 2) {
+      if (preArmTrailEntity) viewer.entities.remove(preArmTrailEntity);
+      preArmTrailEntity = viewer.entities.add({
+        polyline: {
+          positions: [...preArmPositions3D],
+          width: 1,
+          material: new Cesium.ColorMaterialProperty(Cesium.Color.BLACK.withAlpha(0.8)),
+          clampToGround: true,
+        },
+      });
+    }
+  }
+
+  function resetPreArmTrail3D() {
+    if (preArmTrailEntity && viewer) { viewer.entities.remove(preArmTrailEntity); preArmTrailEntity = undefined; }
+    preArmPositions3D = [];
+    lastPreArmLat = 0;
+    lastPreArmLon = 0;
+  }
+
   /** Reset the live trail (called when re-arming or clearing). */
   function resetTrail3D() {
     if (!viewer) return;
@@ -713,6 +945,13 @@
     async function updatePlaybackTrack3D(track: TelemetryRecord[], colorMode: TrackColorMode) {
     if (!viewer) return;
 
+    // Mark a load in progress and drop the previous track reference up front:
+    // this function is async (awaits terrain), and the playbackPoint effect may
+    // fire updateFlownDeco() during the await — the guard + empty track stop it
+    // from appending old (or mixing old+new) deco points.
+    decoLoading = true;
+    decoValidTrack = [];
+
     // Remove old line segments, progressive deco, and the flyTo anchor
     for (const e of playbackTrackParts) viewer.entities.remove(e);
     playbackTrackParts = [];
@@ -722,27 +961,47 @@
       playbackTrackEntity = undefined;
     }
 
-    if (track.length < 2) { decoValidTrack = []; return; }
+    // Loading a (new) replay track is a source switch: wipe any lingering live
+    // data — the persistent live UAV, its trail, and the home marker — so we
+    // don't stack markers / draw a line across continents. Reset the live-geoid
+    // flag so a later live reconnect re-derives it. (Mission is kept.)
+    if (track.length >= 2) {
+      resetTrail3D();
+      resetPreArmTrail3D();
+      if (uavEntity) { viewer.entities.remove(uavEntity); uavEntity = undefined; }
+      if (homeEntity) { viewer.entities.remove(homeEntity); homeEntity = undefined; }
+      liveGeoidComputed = false;
+      liveGeoidPending = false;
+    }
+
+    if (track.length < 2) { decoValidTrack = []; decoLoading = false; return; }
 
     // Find first valid GPS point to compute geoid undulation
     const firstPt = track.find(
       (p) => p.lat != null && p.lon != null && isValidGpsCoordinate(p.lat!, p.lon!) && p.alt_m != null
     );
 
-    // Compute geoid offset: sample terrain ellipsoid height at first point,
-    // compare with GPS MSL altitude → difference is the geoid undulation.
-    // Must wait for Cesium World Terrain to finish loading (async).
+    // Anchor: GPS MSL at the first fix (absolute reference for the relative,
+    // fused track altitude). Includes any real height-above-ground at the start
+    // (e.g. tower/rooftop) — we do NOT snap it to the ground.
+    startMslGps = firstPt?.alt_m ?? 0;
+
+    // Geoid undulation N = cesiumGround_ellipsoid − copernicusGround_MSL at the
+    // first point. Derived purely from terrain (NOT the UAV's GPS altitude), so
+    // the offset is the true MSL→ellipsoid conversion regardless of how high the
+    // craft is when armed. Must wait for Cesium World Terrain to finish loading.
     const terrainProvider = await waitForTerrain(viewer);
     if (firstPt && terrainProvider) {
       try {
         const refPos = Cesium.Cartographic.fromDegrees(firstPt.lon!, firstPt.lat!);
         const sampled = await Cesium.sampleTerrainMostDetailed(terrainProvider, [refPos]);
+        const copernicusGround = await invoke<number | null>('terrain_elevation', { lat: firstPt.lat, lon: firstPt.lon });
         if (sampled[0] && sampled[0].height != null) {
-          // Geoid undulation N = ellipsoid_height - MSL_height (of the ground)
-          // At arming, UAV is on the ground: alt_m = ground MSL, baro_alt_m ≈ 0
-          const groundMsl = firstPt.alt_m ?? 0;
+          // Prefer the Copernicus MSL ground (same source as terrain analysis /
+          // AGL waypoints); fall back to GPS MSL only if it's unavailable.
+          const groundMsl = copernicusGround ?? (firstPt.alt_m ?? 0);
           geoidOffset = sampled[0].height - groundMsl;
-          console.log(`[Map3D] Geoid offset: ${geoidOffset.toFixed(1)}m (terrain=${sampled[0].height.toFixed(1)}, GPS_MSL=${groundMsl.toFixed(1)})`);
+          console.log(`[Map3D] Geoid N: ${geoidOffset.toFixed(1)}m (cesium=${sampled[0].height.toFixed(1)}, copernicusMSL=${groundMsl.toFixed(1)}, startGPS=${startMslGps.toFixed(1)})`);
         }
       } catch (e) {
         console.warn('[Map3D] Terrain sample failed, geoidOffset=0', e);
@@ -757,20 +1016,23 @@
     );
     if (validTrack.length < 2) return;
 
-        // Build a lookup map: lat,lng key → altitude_m for each valid track point
-    // This lets us resolve the correct altitude for each segment point.
-    const altLookup = new Map<string, number>();
+    // Build a lookup map: lat,lng key → RELATIVE (fused, arming-relative) altitude
+    // for each valid track point. We use nav_alt_m (EKF, smooth, 0 at arm), with
+    // baro as a fallback — NOT raw GPS altitude (too erratic for the track shape).
+    const relLookup = new Map<string, number>();
     for (const pt of validTrack) {
       const key = `${pt.lat!.toFixed(6)},${pt.lon!.toFixed(6)}`;
-      altLookup.set(key, pt.alt_m ?? 0);
+      relLookup.set(key, pt.nav_alt_m ?? pt.baro_alt_m ?? 0);
     }
 
-    // Helper: convert [lat, lon] pairs to Cesium Cartesian3 using per-point altitudes
+    // Helper: [lat, lon] → Cesium Cartesian3. Ellipsoid height = the GPS-MSL start
+    // anchor + geoid undulation + the point's relative fused altitude. This keeps
+    // the start at its true height (tower preserved) and the track smooth.
     function segmentToPositions3D(points: [number, number][]): Cesium.Cartesian3[] {
       return points.map(([lat, lon]) => {
         const key = `${lat.toFixed(6)},${lon.toFixed(6)}`;
-        const altM = altLookup.get(key) ?? 0;
-        return Cesium.Cartesian3.fromDegrees(lon, lat, altM + geoidOffset);
+        const rel = relLookup.get(key) ?? 0;
+        return Cesium.Cartesian3.fromDegrees(lon, lat, startMslGps + geoidOffset + rel);
       });
     }
 
@@ -827,7 +1089,7 @@
       const positions = segmentToPositions3D(
         validTrack.map((p) => [p.lat!, p.lon!] as [number, number])
       );
-      if (positions.length < 2) return;
+      if (positions.length < 2) { decoLoading = false; return; }
       firstPosition = positions[0];
       bounds = positions;
       addTrackLine(positions, '#f5a623');
@@ -842,20 +1104,20 @@
     );
     decoThrottleUntil = 0; // clearDeco above reset the cursor
     decoLastFlown = 0;
+    decoLoading = false; // load complete — allow deco growth again
     updateFlownDeco();
     scheduleMissionRender(); // geoidOffset may have changed → re-place the mission
 
-    // Create a dummy entity at the first position to flyTo the track
+    // Create a dummy entity at the first position as a recenter fallback anchor.
     if (firstPosition && bounds.length >= 2) {
       playbackTrackEntity = viewer.entities.add({
         position: firstPosition,
         point: { pixelSize: 0 }, // invisible
       });
-
-      viewer.flyTo(playbackTrackEntity, {
-        duration: 1.5,
-        offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-45), 0),
-      });
+      // Recenter on load (covers a 2D→3D switch with a log + log→log switches),
+      // deferred until the canvas is laid out so the first switch isn't a no-op.
+      needsInitialRecenter = false;
+      recenter3D();
     }
 
     viewer.scene.requestRender();
@@ -870,7 +1132,8 @@
   // is shown.
 
   function posFromRecord(p: TelemetryRecord): Cesium.Cartesian3 {
-    return Cesium.Cartesian3.fromDegrees(p.lon!, p.lat!, (p.alt_m ?? 0) + geoidOffset);
+    const rel = p.nav_alt_m ?? p.baro_alt_m ?? 0; // relative fused altitude (matches the track line)
+    return Cesium.Cartesian3.fromDegrees(p.lon!, p.lat!, startMslGps + geoidOffset + rel);
   }
 
   /** Create the shadow (+ optional curtain) entities for one chunk. */
@@ -913,9 +1176,13 @@
     if (curtain) decoFinalized.push(curtain);
   }
 
-  /** Remove all deco (finalized + active) and reset the cursor. */
+  /** Remove all deco (finalized + active) and reset the cursor. Also cancels any
+   *  pending grow/rebuild timers so a stale timer can't repaint after a clear
+   *  (e.g. a log switch drawing a chunk across the old + new track). */
   function clearDeco() {
     if (!viewer) return;
+    if (decoRebuildTimer != null) { clearTimeout(decoRebuildTimer); decoRebuildTimer = null; }
+    if (decoTrailingTimer != null) { clearTimeout(decoTrailingTimer); decoTrailingTimer = null; }
     for (const e of decoFinalized) viewer.entities.remove(e);
     decoFinalized = [];
     reopenActiveChunk();
@@ -982,7 +1249,7 @@
   /** Grow (forward) the deco; on reverse scrub, hide it and rebuild after a
    *  short settle so rapid back-scrubbing doesn't flicker. */
   function updateFlownDeco() {
-    if (!viewer) return;
+    if (!viewer || decoLoading) return; // a track load is mid-flight (async) — don't grow yet
     const flownCount = computeFlownCount();
     const goingBack = flownCount < decoLastFlown;
     decoLastFlown = flownCount;
@@ -1178,7 +1445,7 @@
 
     const lat = point.lat;
     const lon = point.lon;
-    const alt = (point.alt_m ?? 0) + geoidOffset;
+    const alt = startMslGps + geoidOffset + (point.nav_alt_m ?? point.baro_alt_m ?? 0);
     const heading = point.heading ?? 0;
     const flags = point.active_flight_mode_flags ?? 0;
     const color = classifyMode(flags, fcVariant).color;
@@ -1242,6 +1509,46 @@
     return a + diff * t;
   }
 
+  /**
+   * Toggle the heading-locked follow input model. When enabled, Cesium's own
+   * rotate/tilt/look/pan are disabled (a sideways drag would otherwise rotate
+   * the heading that the chase loop forces back every frame → jitter); pitch is
+   * driven by a custom vertical-drag handler instead. Zoom (→ lockRange) stays.
+   */
+  function setFollowCameraControls(enabled: boolean) {
+    if (!viewer) return;
+    const ssc = viewer.scene.screenSpaceCameraController;
+    if (enabled) {
+      ssc.enableRotate = false;
+      ssc.enableTilt = false;
+      ssc.enableLook = false;
+      ssc.enableTranslate = false;
+      if (!camDragHandler) {
+        camDragHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+        camDragHandler.setInputAction((e: Cesium.ScreenSpaceEventHandler.PositionedEvent) => {
+          pitchDragActive = true;
+          pitchDragLastY = e.position.y;
+        }, Cesium.ScreenSpaceEventType.LEFT_DOWN);
+        camDragHandler.setInputAction((e: Cesium.ScreenSpaceEventHandler.MotionEvent) => {
+          if (!pitchDragActive) return;
+          const dy = e.endPosition.y - pitchDragLastY;
+          pitchDragLastY = e.endPosition.y;
+          // Drag down → look further down (more negative); up → toward horizon. 0 … −90°.
+          followPitch = Math.max(-Math.PI / 2, Math.min(0, followPitch - dy * FOLLOW_PITCH_SENS));
+          viewer?.scene.requestRender();
+        }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+        camDragHandler.setInputAction(() => { pitchDragActive = false; }, Cesium.ScreenSpaceEventType.LEFT_UP);
+      }
+    } else {
+      ssc.enableRotate = true;
+      ssc.enableTilt = true;
+      ssc.enableLook = true;
+      ssc.enableTranslate = true;
+      if (camDragHandler) { camDragHandler.destroy(); camDragHandler = undefined; }
+      pitchDragActive = false;
+    }
+  }
+
   /** Chase/follow camera animation loop — yaw-locked behind UAV, pitch user-adjustable. */
   function chaseAnimationLoop() {
     if (!chaseLerpActive || !viewer) return;
@@ -1256,10 +1563,9 @@
       chaseCurrent.lon, chaseCurrent.lat, Math.max(chaseCurrent.alt, 1)
     );
 
-    // Pick up pitch changes from user mouse drag; clamp to 0 (horizon) … -π/2 (top-down).
-    // Heading is NOT read from camera — it is always locked to match the UAV.
-    const rawPitch = viewer.camera.pitch;
-    if (rawPitch >= -Math.PI / 2 && rawPitch <= 0.05) followPitch = rawPitch;
+    // followPitch is driven by the custom vertical-drag handler (not read back
+    // from the camera), and heading is always locked to the UAV — so a sideways
+    // drag can't induce the heading fight that caused the jitter.
 
     // Sync lockRange from the live camera distance so mouse-wheel zoom sticks
     // (otherwise our lookAt below would snap the camera back every frame).
@@ -1368,8 +1674,9 @@
     if (cameraMode === 'free') {
       cameraMode = 'follow';
       lockRange = 200;
-      followPitch = -25 * (Math.PI / 180);
+      followPitch = -20 * (Math.PI / 180);
       chaseInited = false;
+      setFollowCameraControls(true);
       if (lastFollowLat !== 0 || lastFollowLon !== 0) {
         // Initial snap: HPR.heading = camera look direction = UAV heading → camera behind UAV
         const initTarget = Cesium.Cartesian3.fromDegrees(
@@ -1384,6 +1691,7 @@
       }
     } else if (cameraMode === 'follow') {
       cameraMode = 'orbit';
+      setFollowCameraControls(false); // restore Cesium's free rotate for orbit
       chaseLerpActive = false;
       chaseInited = false;
       orbitInited = false;
@@ -1405,6 +1713,7 @@
       }
     } else {
       cameraMode = 'free';
+      setFollowCameraControls(false); // ensure Cesium's controls are restored
       chaseLerpActive = false;
       chaseInited = false;
       orbitLerpActive = false;
