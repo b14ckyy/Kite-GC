@@ -189,6 +189,15 @@ export async function removeSelectedWps(): Promise<void> {
 /** Edit mode toggle */
 export const editMode = writable<boolean>(false);
 
+/** Whether the app is in blackbox-replay mode (mirrors +page `showPlayer`).
+ *  In replay the mission visibility follows `showMission`; outside replay
+ *  (planning / live) a loaded mission is always shown. */
+export const replayActive = writable<boolean>(false);
+
+/** Replay-only toggle for showing the loaded mission on the maps (2D + 3D).
+ *  Only consulted while `replayActive`; default on. */
+export const showMission = writable<boolean>(true);
+
 /** Planning-time launch/home reference point (GCS-side). Used as the base
  *  altitude for REL↔AGL conversions and terrain clearance of REL missions.
  *  Auto-placed when entering edit mode; user-movable. null = not set. */

@@ -62,6 +62,8 @@ export interface AppSettings {
   locale: string;
   // 3D Map
   cesiumIonToken: string;
+  /** Show the vertical altitude curtain (wall down to ground) under the 3D track. */
+  altitudeCurtain3D: boolean;
 }
 
 const STORAGE_KEY = 'kite-gc-settings';
@@ -103,6 +105,7 @@ const defaults: AppSettings = {
   },
   locale: 'en',
   cesiumIonToken: '',
+  altitudeCurtain3D: true,
 };
 
 function load(): AppSettings {

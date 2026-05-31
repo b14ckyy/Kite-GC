@@ -14,6 +14,7 @@
     mapCacheMaxMB = 200,
     cacheStats = { usedBytes: 0, maxBytes: 0, tileCount: 0 },
     cesiumIonToken = '',
+    altitudeCurtain3D = true,
     attitudeRateHz = 5,
     positionRateHz = 2,
     airspeedEnabled = false,
@@ -41,6 +42,7 @@
     mapCacheMaxMB?: number;
     cacheStats?: TileCacheStats;
     cesiumIonToken?: string;
+    altitudeCurtain3D?: boolean;
     attitudeRateHz?: number;
     positionRateHz?: number;
     airspeedEnabled?: boolean;
@@ -289,6 +291,13 @@
   <p class="setting-hint">
     Free token from <a href="https://ion.cesium.com/signup" target="_blank" rel="noopener">ion.cesium.com</a> — enables 3D terrain in the map view. Restart 3D view after changing.
   </p>
+  <div class="setting-row">
+    <label class="setting-label" for="altitude-curtain">{$t('settings.altitudeCurtain')}</label>
+    <label class="toggle-switch">
+      <input type="checkbox" id="altitude-curtain" checked={altitudeCurtain3D} onchange={(e) => onPatch({ altitudeCurtain3D: (e.target as HTMLInputElement).checked })} />
+      <span class="toggle-slider"></span>
+    </label>
+  </div>
 </section>
 
 <section class="panel-section">

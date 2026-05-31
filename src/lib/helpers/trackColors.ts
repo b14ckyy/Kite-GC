@@ -406,6 +406,41 @@ export function segmentTrackBySpeed(track: TelemetryRecord[]): GradientResult {
 }
 
 /**
+ * Build a per-point color function for a given color mode, calibrated against
+ * the whole track (so gradient ranges match the segmented line). Used by the 3D
+ * map's progressive curtain/shadow, which colors points incrementally rather
+ * than re-segmenting on every frame.
+ */
+export function trackPointColorizer(
+  track: TelemetryRecord[],
+  colorMode: TrackColorMode,
+  fcVariant = 'INAV',
+  warnAltitudeM = 0,
+): (r: TelemetryRecord) => string {
+  if (colorMode === 'flightmode') {
+    return (r) => classifyMode(r.active_flight_mode_flags ?? 0, fcVariant).color;
+  }
+  if (colorMode === 'altitude') {
+    const getV = (r: TelemetryRecord) => r.baro_alt_m ?? r.alt_m;
+    const [, trackMax] = fieldRange(track, getV);
+    const max = warnAltitudeM > 0 ? warnAltitudeM : trackMax;
+    return (r) => getGradientColor(getV(r) ?? 0, 0, max);
+  }
+  if (colorMode === 'speed') {
+    const getV = (r: TelemetryRecord) => r.speed_ms;
+    const [, trackMax] = fieldRange(track, getV);
+    return (r) => getGradientColor(getV(r) ?? 0, 0, trackMax);
+  }
+  if (colorMode === 'signal') {
+    const hasLQ = track.some((r) => r.link_quality != null && r.link_quality > 0);
+    const getV: (r: TelemetryRecord) => number | null = hasLQ ? (r) => r.link_quality : (r) => r.rssi;
+    const [lo, hi] = fieldRange(track, getV);
+    return (r) => getSignalGradientColor(getV(r) ?? lo, lo, hi);
+  }
+  return () => '#f5a623';
+}
+
+/**
  * Segment by signal quality gradient (red=low → green=high).
  * Prefers link_quality (0-300 scale); falls back to rssi (0-1023 raw).
  */

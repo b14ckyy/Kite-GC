@@ -140,6 +140,42 @@ function wpAltMode(wp: Waypoint): number {
   return wp.alt_mode ?? ((wp.p3 & 1) ? ALT_MODE_AMSL : 0);
 }
 
+/** Per-waypoint resolved MSL altitude + terrain ground (for the 3D mission). */
+export interface WpMsl { altMsl: number; ground: number | null; }
+
+/**
+ * Resolve each geo-waypoint's altitude to MSL (AMSL = value, AGL = terrain+value,
+ * REL = launch-ground+value) and sample the terrain ground beneath it (for the
+ * 3D drop-lines). Returns a map keyed by the waypoint's index in `waypoints`.
+ * Lightweight vs. buildWaypointProfile: one terrain sample per geo-WP, no jump
+ * expansion or dense profiling.
+ */
+export async function resolveMissionAltitudes(
+  waypoints: Waypoint[],
+  launch: { lat: number; lng: number } | null,
+): Promise<{ alts: Map<number, WpMsl>; launchGround: number | null }> {
+  const out = new Map<number, WpMsl>();
+  let launchGround: number | null = null;
+  if (launch) {
+    launchGround = await invoke<number | null>('terrain_elevation', { lat: launch.lat, lon: launch.lng });
+  }
+  for (let i = 0; i < waypoints.length; i++) {
+    const wp = waypoints[i];
+    if (!hasLocation(wp.action) || (wp.lat === 0 && wp.lon === 0)) continue;
+    const lat = toDeg(wp.lat);
+    const lon = toDeg(wp.lon);
+    const ground = await invoke<number | null>('terrain_elevation', { lat, lon });
+    const mode = wpAltMode(wp);
+    const valM = wp.altitude / 100;
+    let altMsl: number;
+    if (mode === ALT_MODE_AMSL) altMsl = valM;
+    else if (mode === ALT_MODE_AGL) altMsl = (ground ?? launchGround ?? 0) + valM;
+    else altMsl = (launchGround ?? 0) + valM; // REL
+    out.set(i, { altMsl, ground });
+  }
+  return { alts: out, launchGround };
+}
+
 /**
  * Max ground-relative climb angle (degrees) over a path.
  * Waypoint vertices are intentional → used as-is. Flown tracks carry altitude

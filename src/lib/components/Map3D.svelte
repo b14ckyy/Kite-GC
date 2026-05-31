@@ -21,6 +21,7 @@
     segmentTrackByAltitude,
     segmentTrackBySpeed,
     segmentTrackBySignal,
+    trackPointColorizer,
     getNavStateColor,
     classifyMode,
     classifyFlightMode,
@@ -30,6 +31,15 @@
   import type { TelemetryRecord } from "$lib/stores/flightlog";
   import type { PlatformType } from "$lib/helpers/uavIcons";
   import { PLATFORM_MULTIROTOR } from "$lib/helpers/uavIcons";
+  import {
+    mission, showMission, replayActive, launchPoint,
+    hasLocation, toDeg, WpAction, type Waypoint, type Mission,
+  } from "$lib/stores/mission";
+  import { wpIconSpec } from "$lib/helpers/missionIcons";
+  import {
+    buildDisplayNumbers, isFlightPathWp, findMissionEndIndex, findPreviousGeoWp,
+  } from "$lib/helpers/missionGeometry";
+  import { resolveMissionAltitudes, type WpMsl } from "$lib/helpers/terrainProfile";
 
   let {
     playbackTrack = [],
@@ -56,10 +66,44 @@
     let uavEntity: Cesium.Entity | undefined;
   let homeEntity: Cesium.Entity | undefined;
   let playbackTrackEntity: Cesium.Entity | undefined;
+  // Static full-track line segments — built once per track/color change.
+  let playbackTrackParts: Cesium.Entity[] = [];
+  // Progressive ground shadow + altitude curtain up to the current replay
+  // position — grows behind the UAV so you can read flown progress. Chunked into
+  // fixed-size colour runs: finalized chunks are created once and never touched
+  // (no flicker, bounded entity count); only the small in-progress chunk is
+  // recreated as it grows.
+  let decoFinalized: Cesium.Entity[] = [];          // completed chunks (shadow + curtain)
+  let decoActiveShadow: Cesium.Entity | undefined;
+  let decoActiveCurtain: Cesium.Entity | undefined;
+  let decoActivePos: Cesium.Cartesian3[] = [];      // in-progress chunk positions
+  let decoActiveColor = '';
+  let decoValidTrack: TelemetryRecord[] = [];        // valid points of the loaded track
+  let decoColorMode: TrackColorMode = 'flightmode';
+  let decoPointColor: (r: TelemetryRecord) => string = () => '#f5a623';
+  let decoRenderedCount = 0;                         // flown points drawn (append cursor)
+  let decoLastFlown = 0;                             // last observed flown count (direction)
+  let decoThrottleUntil = 0;
+  let decoTrailingTimer: ReturnType<typeof setTimeout> | null = null;
+  let decoRebuildTimer: ReturnType<typeof setTimeout> | null = null; // reverse-scrub debounce
+  let curtainEnabled = true;                         // settings.altitudeCurtain3D
+  const DECO_CHUNK_MAX = 150;                        // finalize a chunk at this many points
+
+  // ── Mission overlay (mirrors the 2D map: same markers/lines + drop-lines) ──
+  let missionEntities: Cesium.Entity[] = [];
+  let missionRenderToken = 0;                        // guards async terrain races
+  let curMission: Mission = get(mission);
+  let curShowMission = get(showMission);
+  let curReplayActive = get(replayActive);
+  let curLaunch = get(launchPoint);
   let playbackMarkerEntity: Cesium.Entity | undefined;
   let unsubTelemetry: (() => void) | undefined;
   let unsubHome: (() => void) | undefined;
   let unsubSettingsWatch: (() => void) | undefined;
+  let unsubMissionStore: (() => void) | undefined;
+  let unsubShowMissionStore: (() => void) | undefined;
+  let unsubReplayStore: (() => void) | undefined;
+  let unsubLaunchStore: (() => void) | undefined;
 
     // Trail (live tracking) — initialized in updateTrail3D
   let trailPositions: Cesium.Cartesian3[] = [];
@@ -297,6 +341,7 @@
       ionToken = s.cesiumIonToken || '';
       mapProviderId = s.mapProvider || 'osm';
       cacheMaxMB = s.mapCacheMaxMB || 0;
+      curtainEnabled = s.altitudeCurtain3D ?? true;
     });
     unsubSettings(); // read once, unsubscribe
 
@@ -423,22 +468,39 @@
       viewer.scene.requestRender();
     });
 
-    // Watch for map provider changes in settings (live switching)
+    // Watch for live setting changes (map provider, altitude curtain toggle)
     let currentProviderId = mapProviderId;
     unsubSettingsWatch = settings.subscribe((next) => {
       if (next.mapProvider !== currentProviderId) {
         currentProviderId = next.mapProvider;
         applyMapProvider(currentProviderId);
       }
+      const curtain = next.altitudeCurtain3D ?? true;
+      if (curtain !== curtainEnabled) {
+        curtainEnabled = curtain;
+        forceDecoRebuild(); // add/remove the curtain walls
+      }
     });
+
+    // Mission overlay — re-render on mission / visibility / launch changes.
+    unsubMissionStore = mission.subscribe((m) => { curMission = m; scheduleMissionRender(); });
+    unsubShowMissionStore = showMission.subscribe((v) => { curShowMission = v; scheduleMissionRender(); });
+    unsubReplayStore = replayActive.subscribe((v) => { curReplayActive = v; scheduleMissionRender(); });
+    unsubLaunchStore = launchPoint.subscribe((v) => { curLaunch = v; scheduleMissionRender(); });
   });
 
     onDestroy(() => {
     chaseLerpActive = false;
     orbitLerpActive = false;
+    if (decoTrailingTimer != null) clearTimeout(decoTrailingTimer);
+    if (decoRebuildTimer != null) clearTimeout(decoRebuildTimer);
     unsubTelemetry?.();
     unsubHome?.();
     unsubSettingsWatch?.();
+    unsubMissionStore?.();
+    unsubShowMissionStore?.();
+    unsubReplayStore?.();
+    unsubLaunchStore?.();
     if (viewer && !viewer.isDestroyed()) {
       // Clean up trail segments (they will be destroyed with viewer, but be explicit)
       viewer.entities.removeAll();
@@ -651,13 +713,16 @@
     async function updatePlaybackTrack3D(track: TelemetryRecord[], colorMode: TrackColorMode) {
     if (!viewer) return;
 
-    // Remove old playback track segments
+    // Remove old line segments, progressive deco, and the flyTo anchor
+    for (const e of playbackTrackParts) viewer.entities.remove(e);
+    playbackTrackParts = [];
+    clearDeco();
     if (playbackTrackEntity) {
       viewer.entities.remove(playbackTrackEntity);
       playbackTrackEntity = undefined;
     }
 
-    if (track.length < 2) return;
+    if (track.length < 2) { decoValidTrack = []; return; }
 
     // Find first valid GPS point to compute geoid undulation
     const firstPt = track.find(
@@ -709,6 +774,26 @@
       });
     }
 
+    // The static flight line for a segment: a coloured polyline with a black
+    // outline. The ground shadow + altitude curtain are drawn separately and
+    // progressively (see updateFlownDeco), so they can grow behind the UAV.
+    function addTrackLine(positions: Cesium.Cartesian3[], cssColor: string) {
+      if (!viewer || positions.length < 2) return;
+      const color = Cesium.Color.fromCssColorString(cssColor);
+      playbackTrackParts.push(viewer.entities.add({
+        polyline: {
+          positions,
+          width: 5,
+          material: new Cesium.PolylineOutlineMaterialProperty({
+            color: color.withAlpha(0.95),
+            outlineColor: Cesium.Color.BLACK.withAlpha(0.9),
+            outlineWidth: 2,
+          }),
+          clampToGround: false,
+        },
+      }));
+    }
+
     // Build color-segmented polylines
     let segments: TrackSegment[] = [];
 
@@ -735,16 +820,7 @@
         if (positions.length < 2) continue;
         if (!firstPosition) firstPosition = positions[0];
         bounds.push(...positions);
-
-        const cesiumColor = Cesium.Color.fromCssColorString(seg.color).withAlpha(0.8);
-        viewer.entities.add({
-          polyline: {
-            positions,
-            width: 3,
-            material: new Cesium.ColorMaterialProperty(cesiumColor),
-            clampToGround: false,
-          },
-        });
+        addTrackLine(positions, seg.color);
       }
     } else {
       // Fallback: single-color line (e.g. 'none' mode)
@@ -754,18 +830,20 @@
       if (positions.length < 2) return;
       firstPosition = positions[0];
       bounds = positions;
-
-      viewer.entities.add({
-        polyline: {
-          positions,
-          width: 3,
-          material: new Cesium.ColorMaterialProperty(
-            Cesium.Color.fromCssColorString('#f5a623').withAlpha(0.8)
-          ),
-          clampToGround: false,
-        },
-      });
+      addTrackLine(positions, '#f5a623');
     }
+
+    // Hand the track to the progressive shadow/curtain renderer and draw the
+    // portion flown so far (full track when not replaying).
+    decoValidTrack = validTrack as TelemetryRecord[];
+    decoColorMode = colorMode;
+    decoPointColor = trackPointColorizer(
+      decoValidTrack, colorMode, fcVariant, get(settings).warnAltitudeM ?? 120,
+    );
+    decoThrottleUntil = 0; // clearDeco above reset the cursor
+    decoLastFlown = 0;
+    updateFlownDeco();
+    scheduleMissionRender(); // geoidOffset may have changed → re-place the mission
 
     // Create a dummy entity at the first position to flyTo the track
     if (firstPosition && bounds.length >= 2) {
@@ -783,11 +861,308 @@
     viewer.scene.requestRender();
   }
 
+  // ── Progressive ground shadow + altitude curtain ───────────────────
+  // The flight LINE is static/full; the shadow + curtain are drawn only up to
+  // the current replay position so they build up behind the UAV (showing flown
+  // progress). Chunked into fixed-size colour runs so the entity count stays
+  // bounded and only the small in-progress chunk is redrawn (no flicker, scales
+  // to hour-long logs). When not replaying (playbackPoint null) the full track
+  // is shown.
+
+  function posFromRecord(p: TelemetryRecord): Cesium.Cartesian3 {
+    return Cesium.Cartesian3.fromDegrees(p.lon!, p.lat!, (p.alt_m ?? 0) + geoidOffset);
+  }
+
+  /** Create the shadow (+ optional curtain) entities for one chunk. */
+  function addShadowCurtain(positions: Cesium.Cartesian3[], cssColor: string): { shadow: Cesium.Entity; curtain?: Cesium.Entity } {
+    const color = Cesium.Color.fromCssColorString(cssColor);
+    const shadow = viewer!.entities.add({
+      polyline: {
+        positions,
+        width: 3,
+        material: new Cesium.ColorMaterialProperty(Cesium.Color.BLACK.withAlpha(0.3)),
+        clampToGround: true,
+      },
+    });
+    let curtain: Cesium.Entity | undefined;
+    if (curtainEnabled) {
+      curtain = viewer!.entities.add({
+        wall: {
+          positions,
+          minimumHeights: positions.map(() => 0),
+          material: new Cesium.ColorMaterialProperty(color.withAlpha(0.22)),
+          outline: false,
+        },
+      });
+    }
+    return { shadow, curtain };
+  }
+
+  /** Drop the in-progress chunk's entities (it gets recreated as it grows). */
+  function reopenActiveChunk() {
+    if (!viewer) return;
+    if (decoActiveShadow) { viewer.entities.remove(decoActiveShadow); decoActiveShadow = undefined; }
+    if (decoActiveCurtain) { viewer.entities.remove(decoActiveCurtain); decoActiveCurtain = undefined; }
+  }
+
+  /** Turn the current in-progress chunk positions into a permanent chunk. */
+  function finalizeActiveChunk() {
+    if (!viewer || decoActivePos.length < 2) return;
+    const { shadow, curtain } = addShadowCurtain([...decoActivePos], decoActiveColor);
+    decoFinalized.push(shadow);
+    if (curtain) decoFinalized.push(curtain);
+  }
+
+  /** Remove all deco (finalized + active) and reset the cursor. */
+  function clearDeco() {
+    if (!viewer) return;
+    for (const e of decoFinalized) viewer.entities.remove(e);
+    decoFinalized = [];
+    reopenActiveChunk();
+    decoActivePos = [];
+    decoActiveColor = '';
+    decoRenderedCount = 0;
+  }
+
+  /** Append valid-track points [fromIdx, toIdx) to the deco, finalizing chunks
+   *  on colour change or when they reach DECO_CHUNK_MAX, then redraw the small
+   *  in-progress chunk. Existing finalized chunks are never touched. */
+  function appendDeco(fromIdx: number, toIdx: number) {
+    if (!viewer) return;
+    reopenActiveChunk(); // we'll recreate the in-progress chunk at the end
+    for (let i = fromIdx; i < toIdx; i++) {
+      const p = decoValidTrack[i];
+      if (!p || p.lat == null || p.lon == null) continue;
+      const pos = posFromRecord(p);
+      const color = decoPointColor(p);
+      if (decoActivePos.length === 0) {
+        decoActiveColor = color;
+        decoActivePos = [pos];
+        continue;
+      }
+      if (color !== decoActiveColor || decoActivePos.length >= DECO_CHUNK_MAX) {
+        finalizeActiveChunk();
+        decoActivePos = [decoActivePos[decoActivePos.length - 1]]; // overlap for continuity
+        decoActiveColor = color;
+      }
+      decoActivePos.push(pos);
+    }
+    if (decoActivePos.length >= 2) {
+      const { shadow, curtain } = addShadowCurtain([...decoActivePos], decoActiveColor);
+      decoActiveShadow = shadow;
+      decoActiveCurtain = curtain;
+    }
+    viewer.scene.requestRender();
+  }
+
+  function computeFlownCount(): number {
+    const pt = playbackPoint;
+    if (!pt || pt.timestamp_ms == null) return decoValidTrack.length;
+    let n = 0;
+    for (const p of decoValidTrack) {
+      if (p.timestamp_ms != null && p.timestamp_ms <= pt.timestamp_ms) n++;
+      else break;
+    }
+    return n;
+  }
+
+  /** Debounced rebuild after reverse scrubbing — rebuild once, 1 s after the
+   *  last backward movement, to the settled position (no per-tick flicker). */
+  function armReverseRebuild() {
+    if (decoRebuildTimer != null) clearTimeout(decoRebuildTimer);
+    decoRebuildTimer = setTimeout(() => {
+      decoRebuildTimer = null;
+      clearDeco();
+      const target = computeFlownCount();
+      appendDeco(0, target);
+      decoRenderedCount = target;
+    }, 1000);
+  }
+
+  /** Grow (forward) the deco; on reverse scrub, hide it and rebuild after a
+   *  short settle so rapid back-scrubbing doesn't flicker. */
+  function updateFlownDeco() {
+    if (!viewer) return;
+    const flownCount = computeFlownCount();
+    const goingBack = flownCount < decoLastFlown;
+    decoLastFlown = flownCount;
+
+    if (goingBack) {
+      // Reverse → clear now, rebuild 1 s after the last backward movement.
+      clearDeco();
+      armReverseRebuild();
+      return;
+    }
+
+    // Forward (or no change). A forward move cancels a pending reverse rebuild
+    // and rebuilds immediately from the cleared state.
+    if (decoRebuildTimer != null) { clearTimeout(decoRebuildTimer); decoRebuildTimer = null; }
+    if (flownCount === decoRenderedCount) return;
+
+    // Throttle bursts; trailing call lands the exact extent on pause.
+    const now = performance.now();
+    if (now < decoThrottleUntil) {
+      if (decoTrailingTimer == null) {
+        decoTrailingTimer = setTimeout(() => { decoTrailingTimer = null; updateFlownDeco(); }, 90);
+      }
+      return;
+    }
+    decoThrottleUntil = now + 90;
+    appendDeco(decoRenderedCount, flownCount); // forward → continue the chunks
+    decoRenderedCount = flownCount;
+  }
+
+  /** Full deco rebuild at the current extent (curtain toggled on/off). */
+  function forceDecoRebuild() {
+    if (decoRebuildTimer != null) { clearTimeout(decoRebuildTimer); decoRebuildTimer = null; }
+    clearDeco();
+    decoThrottleUntil = 0;
+    decoLastFlown = 0;
+    updateFlownDeco();
+  }
+
+  // ── Mission overlay ────────────────────────────────────────────────
+  // Mirrors the 2D map: identical marker SVGs (as viewport-facing billboards)
+  // and identical line colours/styles, drawn as an always-visible overlay
+  // (depthFailMaterial / disableDepthTestDistance). The only 3D addition is a
+  // thin dashed drop-line from each waypoint down to the ground.
+
+  const LAUNCH_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 44" width="32" height="44">
+    <path d="M16 44 C16 44 2 24 2 16 A14 14 0 1 1 30 16 C30 24 16 44 16 44Z" fill="#f39c12" stroke="#fff" stroke-width="2"/>
+    <text x="16" y="20" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold" font-family="sans-serif">L</text></svg>`;
+
+  function missionBillboard(lon: number, lat: number, height: number, svg: string, w: number, h: number, ax: number, ay: number, alpha = 1) {
+    const ent = viewer!.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(lon, lat, height),
+      billboard: {
+        image: 'data:image/svg+xml,' + encodeURIComponent(svg),
+        width: w, height: h,
+        pixelOffset: new Cesium.Cartesian2(w / 2 - ax, h / 2 - ay),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY, // overlay, never occluded
+        color: alpha < 1 ? Cesium.Color.WHITE.withAlpha(alpha) : Cesium.Color.WHITE,
+      },
+    });
+    missionEntities.push(ent);
+  }
+
+  function missionLine(positions: Cesium.Cartesian3[], cssColor: string, alpha: number, width: number, dash: boolean) {
+    const color = Cesium.Color.fromCssColorString(cssColor).withAlpha(alpha);
+    const mat = () => dash
+      ? new Cesium.PolylineDashMaterialProperty({ color, dashLength: 10 })
+      : new Cesium.ColorMaterialProperty(color);
+    const ent = viewer!.entities.add({
+      polyline: { positions, width, material: mat(), depthFailMaterial: mat(), clampToGround: false },
+    });
+    missionEntities.push(ent);
+  }
+
+  function scheduleMissionRender() { void renderMission3D(); }
+
+  async function renderMission3D() {
+    if (!viewer) return;
+    const token = ++missionRenderToken;
+    for (const e of missionEntities) viewer.entities.remove(e);
+    missionEntities = [];
+
+    // Replay → follow the MISSION toggle; planning/live → always shown.
+    const visible = !curReplayActive || curShowMission;
+    const wps = curMission.waypoints;
+    const hasGeo = wps.some((w) => hasLocation(w.action) && !(w.lat === 0 && w.lon === 0));
+    if (!visible || !hasGeo) { viewer.scene.requestRender(); return; }
+
+    const { alts, launchGround } = await resolveMissionAltitudes(wps, curLaunch);
+    if (token !== missionRenderToken || !viewer) return; // superseded by a newer render
+
+    const wpPos = (i: number): Cesium.Cartesian3 | null => {
+      const a = alts.get(i);
+      if (!a) return null;
+      return Cesium.Cartesian3.fromDegrees(toDeg(wps[i].lon), toDeg(wps[i].lat), a.altMsl + geoidOffset);
+    };
+
+    const displayNums = buildDisplayNumbers(wps);
+    const endIdx = findMissionEndIndex(wps);
+
+    // Launch → first waypoint connector (orange dashed), + launch marker.
+    if (curLaunch) {
+      const firstGeo = wps.findIndex((w) => hasLocation(w.action) && !(w.lat === 0 && w.lon === 0));
+      const fp = firstGeo >= 0 ? wpPos(firstGeo) : null;
+      if (fp) {
+        // Anchor the launch marker on the terrain at the launch point.
+        const launchHeight = (launchGround ?? 0) + geoidOffset;
+        const lpos = Cesium.Cartesian3.fromDegrees(curLaunch.lng, curLaunch.lat, launchHeight);
+        missionLine([lpos, fp], '#f39c12', 0.7, 2, true);
+        missionBillboard(curLaunch.lng, curLaunch.lat, launchHeight, LAUNCH_SVG, 32, 44, 16, 44);
+      }
+    }
+
+    // Flight path (active blue + greyed-beyond-end grey dashed), markers, modifier lines, drop-lines.
+    const fpActive: Cesium.Cartesian3[] = [];
+    const fpGreyed: Cesium.Cartesian3[] = [];
+    let enteredGreyed = false;
+
+    for (let i = 0; i < wps.length; i++) {
+      const wp = wps[i];
+      if (!hasLocation(wp.action) || (wp.lat === 0 && wp.lon === 0)) {
+        // Jump / RTH connector lines (use the previous geo-WP as origin)
+        if (wp.action === WpAction.Jump && wp.p1 > 0) {
+          const src = findPreviousGeoWp(wps, i);
+          const tgtIdx = wp.p1 - 1;
+          const srcIdx = src ? wps.indexOf(src) : -1;
+          const a = srcIdx >= 0 ? wpPos(srcIdx) : null;
+          const b = hasLocation(wps[tgtIdx]?.action) ? wpPos(tgtIdx) : null;
+          if (a && b) missionLine([a, b], '#8e44ad', 0.8, 2, true);
+        }
+        if (wp.action === WpAction.Rth) {
+          const src = findPreviousGeoWp(wps, i);
+          const srcIdx = src ? wps.indexOf(src) : -1;
+          const firstGeo = wps.findIndex((w) => isFlightPathWp(w.action) && !(w.lat === 0 && w.lon === 0));
+          const a = srcIdx >= 0 ? wpPos(srcIdx) : null;
+          const b = firstGeo >= 0 ? wpPos(firstGeo) : null;
+          if (a && b) missionLine([a, b], '#e67e22', 0.7, 2, true);
+        }
+        continue;
+      }
+
+      const p = wpPos(i);
+      if (!p) continue;
+      const greyed = endIdx >= 0 && i > endIdx;
+      if (greyed) enteredGreyed = true;
+
+      if (isFlightPathWp(wp.action)) {
+        if (!greyed) fpActive.push(p);
+        else {
+          if (fpGreyed.length === 0 && fpActive.length > 0) fpGreyed.push(fpActive[fpActive.length - 1]);
+          fpGreyed.push(p);
+        }
+      }
+
+      // Drop-line to the ground (white dashed + black dashed outline behind it).
+      const a = alts.get(i);
+      if (a) {
+        const top = p;
+        const bottom = Cesium.Cartesian3.fromDegrees(toDeg(wp.lon), toDeg(wp.lat), (a.ground ?? 0) + geoidOffset);
+        missionLine([top, bottom], '#000000', 0.85, 3.5, true);  // outline
+        missionLine([top, bottom], '#ffffff', 0.95, 1.5, true);  // white dashed
+      }
+
+      // Waypoint marker — same SVG as 2D, as a viewport-facing billboard.
+      const spec = wpIconSpec(wp, displayNums.get(i) ?? 0, false);
+      missionBillboard(toDeg(wp.lon), toDeg(wp.lat), a ? a.altMsl + geoidOffset : 0, spec.svg, spec.width, spec.height, spec.anchorX, spec.anchorY, greyed ? 0.35 : 1);
+    }
+
+    if (fpActive.length > 1) missionLine(fpActive, '#37a8db', 0.8, 3, false);
+    if (fpGreyed.length > 1) missionLine(fpGreyed, '#666666', 0.4, 2, true);
+    void enteredGreyed;
+
+    viewer.scene.requestRender();
+  }
+
   // ── Playback Marker ────────────────────────────────────────────────
 
   $effect(() => {
     if (!viewer) return;
     updatePlaybackMarker3D(playbackPoint);
+    updateFlownDeco(); // grow shadow/curtain to the current replay position
   });
 
   function updatePlaybackMarker3D(point: TelemetryRecord | null) {

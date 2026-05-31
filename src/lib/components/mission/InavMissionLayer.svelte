@@ -7,7 +7,7 @@
   import L from 'leaflet';
   import {
     mission, geoWaypoints, selectedWpIndex, selectedWpIndices,
-    selectWpSingle, toggleWpSelection, clearWpSelection, editMode, launchPoint,
+    selectWpSingle, toggleWpSelection, clearWpSelection, editMode, showMission, replayActive, launchPoint,
     missionAddWp, missionUpdateWp, missionRemoveWp, missionInsertWp,
     missionReorderWp, beginUndoGroup, endUndoGroup,
     getTotalWpCount, MAX_WAYPOINTS_TOTAL,
@@ -55,6 +55,8 @@
   let currentSelIdx = $state<number>(get(selectedWpIndex));
   let currentSelSet = $state<Set<number>>(get(selectedWpIndices));
   let currentEditing = $state<boolean>(get(editMode));
+  let currentShowMission = $state<boolean>(get(showMission));
+  let currentReplayActive = $state<boolean>(get(replayActive));
 
   // ── Launch / home reference marker (planning-time, for REL↔AGL + clearance) ──
   // Declared before the store subscriptions below, which fire immediately on
@@ -70,6 +72,8 @@
     if (e) autoPlaceLaunch();
     renderLaunchMarker();
   });
+  const unsubShowMission = showMission.subscribe(v => { currentShowMission = v; });
+  const unsubReplayActive = replayActive.subscribe(v => { currentReplayActive = v; });
 
   /** Auto-place the launch point when none is set: FC home → first geo-WP → map center. */
   function autoPlaceLaunch() {
@@ -419,6 +423,9 @@
       if (editorPopup) map.removeLayer(editorPopup);
       editorPopup = undefined; editorPopupIdx = -1;
     }
+    // In replay the mission follows the "Show Mission" toggle; in planning/live
+    // a loaded mission is always shown.
+    if (currentReplayActive && !currentShowMission) return;
     if (m.waypoints.length === 0) return;
 
     // Launch → first waypoint connector (orange dashed, matching pattern turn legs)
@@ -588,10 +595,10 @@
   // svelte-ignore state_referenced_locally
   map.on('click', onMapClick);
 
-  $effect(() => { void currentLaunch; void currentSelSet; renderMission(currentMission, currentSelIdx, currentEditing); });
+  $effect(() => { void currentLaunch; void currentSelSet; void currentShowMission; void currentReplayActive; renderMission(currentMission, currentSelIdx, currentEditing); });
 
   onDestroy(() => {
-    unsubMission(); unsubSelIdx(); unsubSelSet(); unsubEditMode(); unsubLaunch();
+    unsubMission(); unsubSelIdx(); unsubSelSet(); unsubEditMode(); unsubShowMission(); unsubReplayActive(); unsubLaunch();
     if (launchMarker) { try { map.removeLayer(launchMarker); } catch {} launchMarker = undefined; }
     map.off('click', onMapClick);
     if (editorPopup) { map.removeLayer(editorPopup); editorPopup = undefined; }

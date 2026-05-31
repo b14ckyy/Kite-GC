@@ -2,6 +2,7 @@
   import { t } from 'svelte-i18n';
   import type { Flight, TelemetryRecord } from '$lib/stores/flightlog';
   import { getUsedFlightModes, segmentTrackByAltitude, segmentTrackBySpeed, segmentTrackBySignal, type TrackColorMode, type FlightModeInfo, type GradientResult } from '$lib/helpers/trackColors';
+  import { showMission, geoWaypoints } from '$lib/stores/mission';
 
   let {
     showPlayer = false,
@@ -106,6 +107,14 @@
         {:else}
           <button class="log-player-source-btn active">REC</button>
           <button class="log-player-source-btn" disabled title={$t('player.bbxNotAvailable')}>BBX</button>
+        {/if}
+        {#if $geoWaypoints.length > 0}
+          <button
+            class="log-player-source-btn log-player-mission-btn"
+            class:active={$showMission}
+            onclick={() => showMission.update((v) => !v)}
+            title={$t('player.toggleMission')}
+          >MISSION</button>
         {/if}
       </div>
       <div class="log-player-title">
@@ -239,6 +248,15 @@
   .log-player-source-btn:disabled {
     opacity: 0.35;
     cursor: not-allowed;
+  }
+
+  /* Mission visibility toggle — set apart from the REC/BBX source group. */
+  .log-player-mission-btn {
+    margin-left: 8px;
+  }
+  .log-player-mission-btn.active {
+    background: #16a34a;
+    border-color: #15803d;
   }
 
   .log-player-title {

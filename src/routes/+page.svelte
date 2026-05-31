@@ -41,7 +41,7 @@
   import FloatingVideoWindow from "$lib/components/video/FloatingVideoWindow.svelte";
   import { initVideo, videoState, videoStream, setVideoPrimary, registerPiPElement } from "$lib/stores/video";
   import TerrainAnalysisPanel from "$lib/components/terrain/TerrainAnalysisPanel.svelte";
-  import { editMode } from "$lib/stores/mission";
+  import { editMode, replayActive } from "$lib/stores/mission";
   import { terrainAnalysis, patchTerrainAnalysis } from "$lib/stores/terrainAnalysis";
   import type { InterfaceSettings, PanelConfig } from "$lib/stores/settings";
   import { layout, GRID_DEFAULTS } from '$lib/stores/layout';
@@ -199,6 +199,7 @@
   let mapProvider = $state("osm");
   let mapCacheMaxMB = $state(200);
   let cesiumIonToken = $state("");
+  let altitudeCurtain3D = $state(true);
   let defaultWpAltitudeM = $state(50);
   let defaultPhTimeSec = $state(30);
   let warnAltitudeM = $state(120);
@@ -313,6 +314,7 @@
   mapProvider = saved.mapProvider;
   mapCacheMaxMB = saved.mapCacheMaxMB;
   cesiumIonToken = saved.cesiumIonToken ?? '';
+  altitudeCurtain3D = saved.altitudeCurtain3D ?? true;
   defaultWpAltitudeM = saved.defaultWpAltitudeM;
   defaultPhTimeSec = saved.defaultPhTimeSec;
   warnAltitudeM = saved.warnAltitudeM;
@@ -1020,6 +1022,9 @@
       : null,
   );
   const showPlayer = $derived(playbackActive && !isPrimaryConnected && selectedFlight != null);
+  // Mirror replay-mode state to the store so the map layers can gate mission
+  // visibility (replay → follow the MISSION toggle; planning/live → always show).
+  $effect(() => { replayActive.set(showPlayer); });
   const playbackBaseMs = $derived(
     selectedTrackWithPosition.length > 0 ? selectedTrackWithPosition[0].timestamp_ms : 0,
   );
@@ -1216,6 +1221,7 @@
             {mapCacheMaxMB}
             {cacheStats}
             {cesiumIonToken}
+            {altitudeCurtain3D}
             {attitudeRateHz}
             {positionRateHz}
             {airspeedEnabled}
@@ -1244,6 +1250,7 @@
               if (patch.mapProvider != null) mapProvider = patch.mapProvider;
               if (patch.mapCacheMaxMB != null) mapCacheMaxMB = patch.mapCacheMaxMB;
               if (patch.cesiumIonToken != null) cesiumIonToken = patch.cesiumIonToken;
+              if (patch.altitudeCurtain3D != null) altitudeCurtain3D = patch.altitudeCurtain3D;
               if (patch.defaultWpAltitudeM != null) defaultWpAltitudeM = patch.defaultWpAltitudeM;
               if (patch.defaultPhTimeSec != null) defaultPhTimeSec = patch.defaultPhTimeSec;
               if (patch.warnAltitudeM != null) warnAltitudeM = patch.warnAltitudeM;
