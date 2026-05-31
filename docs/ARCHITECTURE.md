@@ -1200,5 +1200,44 @@ Two HUD widgets reuse the provider for in-flight terrain awareness. Both are **d
 
 ---
 
+## ADR-027: Mission Undo/Redo — Frontend Snapshot History
+
+**Date**: 2026-05-31
+**Status**: Accepted
+
+**Context**: The mission editor mutates state from many entry points — list/map single edits, marker drag, multi-select batch delete, the Batch Edit popup (N waypoint updates), *Move to mission* (cross-mission), survey-pattern append (N adds), terrain correction (N updates), and multi-mission add/remove. Users need undo/redo, and the batch features were deliberately built around a **single APPLY** (no live-apply) to make this tractable. Two questions drove the design: *what* to snapshot, and *where* the boundary of "one undo step" sits.
+
+**Decision**: A **frontend, snapshot-based history** (`stores/mission.ts`) over a **two-stack** model (`undoStack` / `redoStack`, limit 50). Mission state lives in the backend (ADR-013), but undo orchestration is a frontend concern, so the history lives with the frontend mirror.
+
+### What a snapshot covers — all missions
+
+A snapshot captures the **entire multi-mission state**: `activeMissionIndex`, `missionCount`, and a deep copy of **every** mission's waypoints (the active one read live from the `mission` store, the rest from the `missionSlots` cache). This is what makes **cross-mission *Move to mission* undoable** — a narrower "active mission only" snapshot couldn't restore waypoints that moved to another slot. The **launch point is excluded**: it's a planning reference, touched rarely, and not part of what gets uploaded to the FC (the guiding scope — "undo only what reaches the FC").
+
+### One step = one user action — the suspend-group pattern
+
+The granularity problem: a batch of N waypoint updates must be **one** undo step, not N. The mechanism:
+
+- The **primitive** store mutators (`missionAddWp` / `InsertWp` / `RemoveWp` / `UpdateWp` / `ReorderWp` / `missionClear`) call `pushUndo()` at entry, which snapshots the *pre-mutation* state and clears the redo stack.
+- A module-level **`undoSuspend` counter** gates `pushUndo()` — it's a no-op while `> 0`.
+- Multi-step actions wrap their primitives in **`beginUndoGroup()`** (records one snapshot, then `undoSuspend++`) and **`endUndoGroup()`** (`undoSuspend--`). All inner primitive `pushUndo()` calls are suppressed, so the whole action collapses to the single snapshot taken at group start.
+
+This keeps the recording logic in one place: a primitive called standalone records itself; the same primitive called inside a group doesn't. Grouped callers: batch delete, Batch Edit apply + alt-mode toggle, single/batch *Move to mission*, `removeMission`, survey-pattern append, terrain correction, and the map editor's "delete WP + its modifiers". (Function declarations are hoisted, so primitives defined above the undo block can call `pushUndo` defined below it.)
+
+### Restoring — one atomic backend command
+
+Undo/redo restore the active mission to the snapshot via a **new `mission_set(waypoints)` backend command** that replaces the whole WP list in **one** IPC call, **preserving every field including `alt_mode`**. This is chosen over the existing clear-then-re-add loop (used by `switchMission`), which costs N IPC calls **and drops `alt_mode`** (a pre-existing limitation of that path). Restore also rebuilds `missionSlots`, sets `missionCount` / `activeMissionIndex`, and runs under `undoSuspend++` so it can't record itself.
+
+### History lifecycle
+
+History is **cleared on load / download / import / reset** (`missionLoadFile`, `missionImportXml`, `missionDownload`, `resetMultiMission`, `missionResetMemory`) — a loaded mission is a fresh baseline, not an undoable edit. It **persists across edit-mode toggles** (the stack survives; only the UI affordances hide). Tab-switching is pure navigation and is **not** recorded (and doesn't clear history) — the all-missions snapshot already makes switches irrelevant to correctness.
+
+### UI
+
+Flat `↶` / `↷` buttons sit right of the Edit button, **edit-mode only** and hidden in Pattern mode (no undo target there; a pattern *append* is itself one undoable WP action afterwards). Keyboard **Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z**, suppressed while a text field is focused so native input-undo keeps working. `canUndo` / `canRedo` stores drive button enablement. Mission clear gained a **confirm dialog** (shared `ConfirmDialog`) so the now-undoable-but-destructive action isn't a one-tap accident.
+
+**Consequences**: O(total-WP) memory per step (deep copy of all missions) — negligible at the 120-WP cap × 50 steps. Selection is not part of the snapshot (cleared on restore). A grouped action that ends up changing nothing can still push a no-op step; the batch callers guard the common cases (`updates.size > 0`). The single-APPLY batch model (ADR — context-menu/batch work) is what keeps each batch a clean one-step boundary.
+
+---
+
 *End of Architecture Decision Records*
 

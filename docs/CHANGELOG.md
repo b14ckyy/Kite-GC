@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Mission undo/redo
+- **Undo/redo for mission edits** — snapshot-based history that covers **all** missions at once (active + cached multi-mission slots), so even cross-mission *Move to mission* is undoable. The launch point is intentionally excluded (it isn't part of the FC upload)
+- **One snapshot = one user action**: the primitive mutators (add / insert / remove / update / reorder / clear) auto-record a step; multi-step actions — **batch edit, batch delete, move-to-mission, pattern append, terrain correction, WP-with-modifiers delete, mission remove** — are grouped into a **single** undo step via `beginUndoGroup()` / `endUndoGroup()`
+- **Controls**: flat `↶` / `↷` toolbar buttons (right of the Edit button, **edit-mode only**, hidden in Pattern mode) + keyboard **Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z** (ignored while a text field is focused so native input-undo still works). History limit 50 steps; **cleared on load / download / import** (fresh baseline)
+- **Mission clear (🗑️) now asks for confirmation** (in-app dialog) before removing the mission
+- **Backend**: new `mission_set(waypoints)` command — replaces the whole active-mission WP list in **one** IPC call, preserving every field incl. `alt_mode` (used by undo restore; faster + atomic vs clear-then-re-add)
+- The Mission panel is **15 % wider** (414 px) so the full toolbar fits on one row and the WP list has room for richer entries
+- _See ADR-027._
+
 ### Added — Custom context menus + waypoint multi-select & batch edit
 - **Reusable custom context menu** — right-click **and** touch long-press open an in-app menu (store + `use:contextMenu` action + recursive `ContextMenu` with submenu fly-outs); the native WebView menu (print/save/inspect) is suppressed app-wide except in text inputs. Styled like the NavRail panels with a widget-style blurred background
 - **Waypoint context menu** (list rows + map markers): **Move to mission** (INAV multi-mission → submenu of the other missions, moves the whole selection) and **Batch Edit**
