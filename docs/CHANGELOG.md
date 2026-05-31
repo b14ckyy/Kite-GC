@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Custom context menus + waypoint multi-select & batch edit
+- **Reusable custom context menu** — right-click **and** touch long-press open an in-app menu (store + `use:contextMenu` action + recursive `ContextMenu` with submenu fly-outs); the native WebView menu (print/save/inspect) is suppressed app-wide except in text inputs. Styled like the NavRail panels with a widget-style blurred background
+- **Waypoint context menu** (list rows + map markers): **Move to mission** (INAV multi-mission → submenu of the other missions, moves the whole selection) and **Batch Edit**
+- **Multi-select waypoints** (edit mode): list — click = single, **Ctrl/⌘** = toggle, **Shift** = range, tap the **number circle** = toggle (touch); map — tap a marker toggles it (all selected red, editor bubble only for a single selection); tap empty map / leave edit mode clears
+- **Batch delete** — the ✕ button removes all selected waypoints
+- **Batch Edit popup** — edit **altitude** (absolute + a **relative-change** field that keeps the relative differences), **speed**, **hold time** and **user-action bits** across the selection. Fields show `---` when values differ and apply only to applicable WP types; **one APPLY** (no live-apply, undo/redo-friendly), unit-aware (shared `UnitStepper`/`NumberStepper`, now with an empty/`---` state + display-unit step). Mixed altitude modes block the absolute field with a warning; the mode toggle converts all selected to one mode (terrain/launch-aware, via the shared `convertAltCm` helper)
+- Single-WP editor popup restyled to match (blurred background, same accent border)
+- _Waypoint **disable/enable** designed (kept in the file's meta, never uploaded) — plan in `docs/dev/WaypointDisable.md`, not yet implemented_
+
 ### Added — Embedded video (core: router + webcam + panel)
 - **Video subsystem foundation** — a source **router** (`stores/video.ts`) opens a source once and shares it with multiple display sinks (one `MediaStream` binds to many `<video>` elements → one decode feeds panel/widget/floating/swap). Layered for webcam now and network streams later
 - **Webcam / USB-capture source** via `getUserMedia` — works in WebView2 (Windows) **and** WebKitGTK (Linux), no backend; device enumeration, device + resolution (auto/720p/1080p) selection, mirror

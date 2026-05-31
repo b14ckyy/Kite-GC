@@ -241,11 +241,13 @@ This document tracks planned features, organized by milestone.
 
 ### Mission Editor Advancements
 - [ ] **Mission stats — extend** (total distance, altitude change / climb+descent totals, est. flight time, …). Mission distance is already computed in Terrain Analysis; the backend `Mission::total_distance_m()` + `geo_waypoints()` exist but are unwired — reuse them.
-- [ ] **Multi-select waypoints + batch editing** (move / delete / set-parameter across a selection)
+- [x] **Custom context menus** — reusable in-app right-click / long-press menus (list + map markers; native WebView menu suppressed except text fields); waypoint menu offers *Move to mission* (multi-mission) + *Batch Edit*
+- [x] **Multi-select waypoints + batch editing** — list (Ctrl / Shift / number-circle tap) + map (tap-toggle), edit-mode only; batch **delete** (✕) and **Batch Edit popup**: altitude (absolute + relative-change), speed, hold time, user-action bits across the selection, one APPLY (undo/redo-friendly), unit-aware, `---` for differing values, alt-mode toggle + auto-convert when modes differ. _Pending: set-parameter beyond these fields if needed_
 - [ ] **Undo/redo** for mission edits — reorganise / group the existing edit actions for clarity
 - [ ] **Waypoint label editing** — rename/label in edit mode, shown on mouseover
 - [ ] **Waypoint parameter view** — refreshed per-WP parameter panel in the editor
 - [ ] **Active-waypoint marker on the map** — wire `MSP_NAV_STATUS` / `decode_nav_status` (backend decoder ready & tested, just not connected) to highlight the current target WP in flight
+- [ ] **Disable/enable waypoint** — deactivate a WP in a loaded mission without deleting it (frozen in place, excluded from path + FC upload, kept in the file's meta area, greyed on the map). Design captured in `docs/dev/WaypointDisable.md`
 - [ ] **Fly-by-Home waypoint handling** — wire `is_fly_by_home` / `WP_FLAG_FBH` (overlooked earlier; backend helper exists)
 - [ ] Abstraction layer for protocol-specific mission systems (ArduPilot/PX4 MAVLink)
 
