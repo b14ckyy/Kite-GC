@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — 2D map follow (replay + smoothing)
+- **Follow / Heading-Follow now work during blackbox replay** — the follow path was driven only by the live telemetry store (empty during playback), so the 2D map didn't track the replayed UAV. It now follows the playback position too (live behaviour unchanged)
+- **Smooth tracking** — map centre + UAV marker ease toward each new position via a rAF loop (~250 ms catch-up) instead of snapping on every (≈2 Hz) telemetry/playback update; heading interpolates the short way; large jumps (scrub / new flight / first fix) snap
+- **Panning disabled while following** (it only fought the locked view); zoom stays enabled but anchored to the map centre (= UAV) instead of the cursor
+- Track auto-framing (`fitBounds`) no longer yanks the view out of an active follow
+
 ### Added — Map: over-zoom placeholder detection & parent fallback
 - **Detect ESRI over-zoom blank tiles** — ESRI World Imagery advertises zoom 1–20, but many areas only have real satellite imagery up to z17–19. Above that the server returns a fixed *"Map data not yet available"* blank (HTTP 200, not a 404), which was acceptable on the 2D map but showed as a blank ground in the 3D follow camera when it descended to UAV altitude
 - **Self-calibrating detection** — a content hash (FNV-1a) of the tile bytes; the same hash from two different tile URLs is, with practical certainty, the placeholder (real imagery is never byte-identical). No hardcoded signature, so a provider changing its blank still works. Per coarse region we learn the lowest placeholder zoom + the verified real-imagery depth (in-memory, re-learned each session so newly added imagery isn't hidden). Only active at z≥19 → zero cost at normal zoom

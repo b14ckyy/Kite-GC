@@ -86,6 +86,75 @@
   let viewMode = $state<'free' | 'follow' | 'heading-follow'>('free');
   let mapHeading = 0;
 
+  // ── Position smoothing ──────────────────────────────────────────────
+  // Telemetry/playback arrives at ~2 Hz; applying it directly snaps the map +
+  // marker. A rAF loop eases the displayed position toward the latest target
+  // (exponential, ~250 ms catch-up), decoupled from the update rate. Large
+  // jumps (replay scrub, new flight, first fix) snap instead of gliding.
+  interface FollowPt { lat: number; lon: number; heading: number; }
+  let followTarget: FollowPt | null = null;
+  let followCurrent: FollowPt | null = null;
+  let activeFollowMarker: L.Marker | undefined;
+  let followRaf: number | null = null;
+  let followLastT = 0;
+  const FOLLOW_TAU_MS = 200; // exp. time constant (~250 ms to mostly catch up)
+  const FOLLOW_SNAP_M = 300; // jump farther than this → snap, don't glide
+
+  /** Set the latest position/heading target; the rAF loop eases toward it.
+   *  Drives the active marker always + the map when following. */
+  function setFollowTarget(lat: number, lon: number, heading: number, marker: L.Marker | undefined) {
+    if (!isValidGpsCoordinate(lat, lon)) return;
+    activeFollowMarker = marker;
+    followTarget = { lat, lon, heading };
+    if (!followCurrent) {
+      followCurrent = { lat, lon, heading };
+      applyFollowFrame();
+    } else if (L.latLng(followCurrent.lat, followCurrent.lon).distanceTo([lat, lon]) > FOLLOW_SNAP_M) {
+      followCurrent = { lat, lon, heading }; // big jump → snap
+      applyFollowFrame();
+    }
+    if (followRaf == null) {
+      followLastT = 0;
+      followRaf = requestAnimationFrame(followLoop);
+    }
+  }
+
+  function followLoop(t: number) {
+    if (!followTarget || !followCurrent) { followRaf = null; return; }
+    const dt = followLastT ? Math.min(120, t - followLastT) : 16;
+    followLastT = t;
+    const k = 1 - Math.exp(-dt / FOLLOW_TAU_MS); // framerate-normalized ease
+    followCurrent.lat += (followTarget.lat - followCurrent.lat) * k;
+    followCurrent.lon += (followTarget.lon - followCurrent.lon) * k;
+    const dh = ((followTarget.heading - followCurrent.heading + 540) % 360) - 180; // shortest path
+    followCurrent.heading = (followCurrent.heading + dh * k + 360) % 360;
+    applyFollowFrame();
+    const dist = L.latLng(followCurrent.lat, followCurrent.lon).distanceTo([followTarget.lat, followTarget.lon]);
+    if (dist < 0.5 && Math.abs(dh) < 0.3) {
+      followCurrent = { ...followTarget }; // settled — snap exactly + stop until next target
+      applyFollowFrame();
+      followRaf = null;
+      return;
+    }
+    followRaf = requestAnimationFrame(followLoop);
+  }
+
+  /** Apply the eased position: move the active marker always, recenter (+rotate)
+   *  the map only while following. */
+  function applyFollowFrame() {
+    if (!map || !followCurrent) return;
+    const ll: L.LatLngExpression = [followCurrent.lat, followCurrent.lon];
+    activeFollowMarker?.setLatLng(ll);
+    // Don't fight an in-progress zoom animation (would snap mid-zoom).
+    if (viewMode !== 'free' && !(map as unknown as { _animatingZoom?: boolean })._animatingZoom) {
+      map.setView(ll, map.getZoom(), { animate: false });
+      if (viewMode === 'heading-follow') {
+        mapHeading = followCurrent.heading;
+        mapContainer?.style.setProperty('--map-rotation', `${-mapHeading}deg`);
+      }
+    }
+  }
+
   let followTitle = $derived.by(() => {
     if (viewMode === 'free') return 'Follow mode: Free';
     if (viewMode === 'follow') return 'Follow mode: Follow';
@@ -96,16 +165,15 @@
     if (!map) return;
     if (!isValidGpsCoordinate(lat, lon)) return;
 
-    const pos: L.LatLngExpression = [lat, lon];
     const color = getNavStateColor(navState);
     const icon = createUavIcon({ heading, fillColor: color, platformType });
 
     if (!uavMarker) {
-      uavMarker = L.marker(pos, { icon, zIndexOffset: 1000 }).addTo(map);
+      uavMarker = L.marker([lat, lon], { icon, zIndexOffset: 1000 }).addTo(map);
     } else {
-      uavMarker.setLatLng(pos);
-      uavMarker.setIcon(icon);
+      uavMarker.setIcon(icon); // position handled by the smoother
     }
+    setFollowTarget(lat, lon, heading, uavMarker);
   }
 
   function createHomeIcon(): L.DivIcon {
@@ -212,7 +280,11 @@
     const positions = validTrack.map((p) => L.latLng(p.lat!, p.lon!));
     const nextKey = `${positions[0].lat}:${positions[0].lng}:${positions.length}:${colorMode}`;
     if (nextKey !== lastPlaybackTrackKey) {
-      map.fitBounds(L.latLngBounds(positions), { padding: [36, 36] });
+      // Frame the whole track only in free mode — don't yank the view away from
+      // an active follow (which centers on the UAV/playback marker).
+      if (viewMode === 'free') {
+        map.fitBounds(L.latLngBounds(positions), { padding: [36, 36] });
+      }
       lastPlaybackTrackKey = nextKey;
     }
   }
@@ -221,6 +293,7 @@
     if (!map) return;
 
     if (!point || point.lat == null || point.lon == null || !isValidGpsCoordinate(point.lat, point.lon)) {
+      if (activeFollowMarker === playbackMarker) activeFollowMarker = undefined;
       if (playbackMarker) {
         map.removeLayer(playbackMarker);
         playbackMarker = undefined;
@@ -228,17 +301,16 @@
       return;
     }
 
-    const pos: L.LatLngExpression = [point.lat, point.lon];
     const heading = point.heading ?? 0;
     const color = getNavStateColor(point.nav_state ?? 0);
     const icon = createUavIcon({ heading, fillColor: color, platformType });
 
     if (playbackMarker) {
-      playbackMarker.setLatLng(pos);
-      playbackMarker.setIcon(icon);
+      playbackMarker.setIcon(icon); // position handled by the smoother
     } else {
-      playbackMarker = L.marker(pos, { icon, zIndexOffset: 900 }).addTo(map);
+      playbackMarker = L.marker([point.lat, point.lon], { icon, zIndexOffset: 900 }).addTo(map);
     }
+    setFollowTarget(point.lat, point.lon, heading, playbackMarker);
   }
 
   function applyProvider(provider: MapProvider) {
@@ -310,17 +382,7 @@
     // Subscribe to telemetry for UAV position, flight trail, and home detection
     unsubTelemetry = telemetry.subscribe((t) => {
       if (t.lastUpdate > 0) {
-        updateUavPosition(t.lat, t.lon, t.yaw, t.navState);
-
-        if (isValidGpsCoordinate(t.lat, t.lon)) {
-          if (viewMode === 'follow') {
-            map?.setView([t.lat, t.lon], map.getZoom(), { animate: false });
-          } else if (viewMode === 'heading-follow') {
-            map?.setView([t.lat, t.lon], map.getZoom(), { animate: false });
-            mapHeading = t.yaw;
-            mapContainer?.style.setProperty('--map-rotation', `${-mapHeading}deg`);
-          }
-        }
+        updateUavPosition(t.lat, t.lon, t.yaw, t.navState); // drives the smoother (marker + follow)
 
         // Flight trail (colored by flight mode)
         if (isValidGpsCoordinate(t.lat, t.lon)) {
@@ -391,19 +453,39 @@
       mapHeading = 0;
       mapContainer?.style.setProperty('--map-rotation', '0deg');
       applyHeadingUpSize(false);
+      // Disable panning while following — the view is locked to the UAV, so a
+      // drag would only fight the follow. Zoom stays enabled, but anchored to
+      // the map centre (= UAV) instead of the cursor.
+      map?.dragging.disable();
+      setZoomAnchor('center');
+      applyFollowFrame(); // center on the current position immediately
       return;
     }
 
     if (viewMode === 'follow') {
       viewMode = 'heading-follow';
       applyHeadingUpSize(true);
-      return;
+      applyFollowFrame(); // apply rotation immediately
+      return; // dragging stays disabled
     }
 
     viewMode = 'free';
     mapHeading = 0;
     mapContainer?.style.setProperty('--map-rotation', '0deg');
     applyHeadingUpSize(false);
+    map?.dragging.enable();
+    setZoomAnchor('cursor');
+  }
+
+  /** Anchor wheel/dblclick/pinch zoom to the map centre (UAV in follow) or the
+   *  cursor (free). Leaflet reads these options at zoom time, so mutating them
+   *  live is enough — no handler re-init needed. */
+  function setZoomAnchor(mode: 'center' | 'cursor') {
+    if (!map) return;
+    const v = mode === 'center' ? 'center' : true;
+    map.options.scrollWheelZoom = v;
+    map.options.doubleClickZoom = v;
+    map.options.touchZoom = v;
   }
 
   function zoomIn() {
@@ -419,12 +501,16 @@
     updatePlaybackTrack(playbackTrack, trackColorMode);
   });
 
+  // Replay marker + follow: updatePlaybackMarker feeds the smoother, which moves
+  // the marker always and recenters the map when following. (Live: playbackPoint
+  // is null → no-op; the telemetry path drives the smoother instead.)
   $effect(() => {
     if (!map) return;
     updatePlaybackMarker(playbackPoint);
   });
 
   onDestroy(() => {
+    if (followRaf != null) cancelAnimationFrame(followRaf);
     if (unsubTelemetry) unsubTelemetry();
     if (unsubSettings) unsubSettings();
     if (map) {
