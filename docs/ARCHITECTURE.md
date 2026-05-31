@@ -1239,5 +1239,33 @@ Flat `↶` / `↷` buttons sit right of the Edit button, **edit-mode only** and 
 
 ---
 
+## ADR-028: Map Over-Zoom Placeholder Detection & Parent Fallback
+
+**Date**: 2026-05-31
+**Status**: Accepted
+
+**Context**: ESRI World Imagery advertises zoom 1–20, but many areas only carry real satellite tiles to z17–19. Above the available level the ArcGIS server does **not** return a 404 — it replies **HTTP 200 with a fixed "Map data not yet available" blank tile**. That is tolerable on the 2D map (the user zooms out), but unacceptable in the **3D follow camera**, which can descend to UAV altitude and demand z19/z20, leaving a blank ground. The previous mitigation was a blunt global `cesiumMaxZoom: 17` cap that sacrificed detail everywhere. We want the real detail where it exists and a graceful fallback where it doesn't — with no per-area coverage table (ESRI exposes only a single global max LOD, not regional availability).
+
+### Detection — self-calibrating content hash
+
+The blank is bit-for-bit identical everywhere, so a **content hash** (FNV-1a over the tile bytes, stride-sampled, length-folded) that recurs across **two different tile URLs** is, with practical certainty, the placeholder — real imagery tiles are never byte-identical. This is preferred over (a) a **byte-size** check (real JPEGs collide on length → false positives) and (b) a **hardcoded signature** (brittle if the provider changes its blank). No seed is shipped; the first session self-calibrates (one blank may flash before the second copy confirms the hash — accepted). Detection only runs at **z ≥ 19**, so normal browsing is zero-cost.
+
+Per coarse region (the z14 ancestor ≈ a town) we learn two facts: the **lowest zoom confirmed to be a placeholder** (what to skip) and the **highest zoom confirmed to hold real imagery** (what to fall back to). State is **in-memory per session** — ESRI adds imagery over time, so re-learning each run is safer than persisting a cap that could hide newly available detail; the cost is a few placeholder fetches per sparse region per session.
+
+### Fallback — single detector, engine-appropriate action
+
+Both maps fetch every tile as an ArrayBuffer through one choke point (2D `CachedTileLayer._fetchAndCache`, 3D `Map3D.fetchAndCacheImage`), so detection lives there once and is shared. Placeholders are **never cached**. The fallback differs by engine because their native behaviour differs:
+
+- **3D (Cesium)**: reject the tile request. Cesium's imagery LOD then marks it FAILED and **keeps the parent (z-1) tile visible** — native upsampling, exactly the desired effect. `cesiumMaxZoom` for ESRI satellite/hybrid was raised **17 → 20**; the detection covers the gaps.
+- **2D (Leaflet)**: Leaflet does **not** upsample errored tiles, so we build the fallback ourselves — a clipping `<div overflow:hidden>` holding a scaled, quadrant-offset child `<img>` of the real ancestor tile, resolved **through the IndexedDB cache first** (already-cached lower-zoom tiles are reused) then network. We separate "lowest placeholder zoom" from "verified real zoom" so the fallback **walks down** to the actual coverage level (the immediate parent may itself be a placeholder where coverage stops several zooms lower), then a coalesced `redraw()` repaints the layer at the verified level. CSS `background-image` on an `<img>` was tried first and rendered unreliably in WebView2 — the clipping-`<div>` is engine-robust.
+
+### Pan smoothness
+
+The clipped fallback tiles get their **own GPU layer** (`will-change: transform` on the div, `translateZ(0)` on the child img) so the tile pane's pan transform just composites a cached texture instead of re-rasterising the clip edge each frame (which caused a flickering seam grid + tearing). A **1px bleed** on the child img removes sub-pixel hairline gaps, and the learned-cap **redraw is deferred to gesture-idle** (`moveend`) so it never flashes the grid mid-pan.
+
+**Consequences**: cross-session re-learning means the first over-zoom into a sparse region costs a few placeholder fetches (and a one-tile blank flash before the hash confirms). The 2D fallback is visibly a touch different from native tiles (upscaled ancestor imagery) — accepted. The region cap is z14-granular, so a view spanning a coverage boundary uses one cap for the region; fine in practice. Overlay layers (boundaries/labels) are excluded from detection (they legitimately return sparse/transparent tiles).
+
+---
+
 *End of Architecture Decision Records*
 

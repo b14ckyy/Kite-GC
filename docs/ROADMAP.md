@@ -104,6 +104,7 @@ This document tracks planned features, organized by milestone.
 - [x] LRU eviction strategy (oldest tiles removed first when limit reached)
 - [x] Cache fill indicator with progress bar in Settings
 - [x] Clear cache button
+- [x] **Over-zoom placeholder detection** — ESRI returns a fixed blank tile (not a 404) above the available zoom; detected by content hash (self-calibrating) and the tile filled with the scaled real-ancestor imagery instead of a blank. 3D uses Cesium's native parent fallback; 2D uses a clipping-`<div>` ancestor tile. ESRI satellite `cesiumMaxZoom` raised 17 → 20. See ADR-028
 
 ### HUD Widget System
 - [x] Widget bar layout (grid: left–center–right, viewport-relative sizing)

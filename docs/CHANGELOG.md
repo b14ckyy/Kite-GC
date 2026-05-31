@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Map: over-zoom placeholder detection & parent fallback
+- **Detect ESRI over-zoom blank tiles** — ESRI World Imagery advertises zoom 1–20, but many areas only have real satellite imagery up to z17–19. Above that the server returns a fixed *"Map data not yet available"* blank (HTTP 200, not a 404), which was acceptable on the 2D map but showed as a blank ground in the 3D follow camera when it descended to UAV altitude
+- **Self-calibrating detection** — a content hash (FNV-1a) of the tile bytes; the same hash from two different tile URLs is, with practical certainty, the placeholder (real imagery is never byte-identical). No hardcoded signature, so a provider changing its blank still works. Per coarse region we learn the lowest placeholder zoom + the verified real-imagery depth (in-memory, re-learned each session so newly added imagery isn't hidden). Only active at z≥19 → zero cost at normal zoom
+- **Fallback to real parent imagery** instead of a blank: **3D** rejects the placeholder so Cesium keeps the parent (z-1) tile visible (native upsampling); **2D** fills the tile with the scaled real-ancestor tile (a clipping `<div>` + offset child `<img>` resolved through the IndexedDB cache, then network — so already-cached lower-zoom tiles are reused), walking down to the real level where coverage stops several zooms lower
+- **ESRI satellite/hybrid `cesiumMaxZoom` raised 17 → 20** — full detail where it exists, with the detection covering the gaps
+- Smoothness: fallback tiles get their own GPU layer (`will-change`/`translateZ`) + a 1px bleed, and the learned-cap redraw is deferred to gesture-idle, to avoid seam flicker during pan
+- _See ADR-028._
+
 ### Added — Mission undo/redo
 - **Undo/redo for mission edits** — snapshot-based history that covers **all** missions at once (active + cached multi-mission slots), so even cross-mission *Move to mission* is undoable. The launch point is intentionally excluded (it isn't part of the FC upload)
 - **One snapshot = one user action**: the primitive mutators (add / insert / remove / update / reorder / clear) auto-record a step; multi-step actions — **batch edit, batch delete, move-to-mission, pattern append, terrain correction, WP-with-modifiers delete, mission remove** — are grouped into a **single** undo step via `beginUndoGroup()` / `endUndoGroup()`
