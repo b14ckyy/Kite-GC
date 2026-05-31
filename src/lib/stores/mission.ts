@@ -128,8 +128,57 @@ export const geoWaypoints = derived(mission, ($m) =>
   $m.waypoints.filter((wp) => hasLocation(wp.action))
 );
 
-/** Currently selected waypoint index (-1 = none) */
+/** Primary selected waypoint index (-1 = none / multi-select). Drives the
+ *  single-WP editor (panel detail + map bubble). */
 export const selectedWpIndex = writable<number>(-1);
+
+/** Multi-selection of waypoint indices (edit-mode multi-select / batch ops).
+ *  The primary (`selectedWpIndex`) is the sole member when size === 1, else -1. */
+export const selectedWpIndices = writable<Set<number>>(new Set());
+
+function syncPrimary(s: Set<number>): void {
+  selectedWpIndex.set(s.size === 1 ? (s.values().next().value as number) : -1);
+}
+
+/** Replace the selection with a single WP (also the editor primary). */
+export function selectWpSingle(i: number): void {
+  selectedWpIndices.set(new Set([i]));
+  selectedWpIndex.set(i);
+}
+
+/** Toggle a WP in/out of the multi-selection (Ctrl-click / circle tap / map tap). */
+export function toggleWpSelection(i: number): void {
+  selectedWpIndices.update((s) => {
+    const n = new Set(s);
+    if (n.has(i)) n.delete(i);
+    else n.add(i);
+    syncPrimary(n);
+    return n;
+  });
+}
+
+/** Select an inclusive index range (Shift-click). */
+export function selectWpRange(a: number, b: number): void {
+  const lo = Math.min(a, b);
+  const hi = Math.max(a, b);
+  const n = new Set<number>();
+  for (let i = lo; i <= hi; i++) n.add(i);
+  selectedWpIndices.set(n);
+  syncPrimary(n);
+}
+
+/** Clear the entire selection. */
+export function clearWpSelection(): void {
+  selectedWpIndices.set(new Set());
+  selectedWpIndex.set(-1);
+}
+
+/** Batch-remove all selected waypoints (descending so indices stay valid). */
+export async function removeSelectedWps(): Promise<void> {
+  const ids = [...get(selectedWpIndices)].sort((a, b) => b - a);
+  for (const idx of ids) await missionRemoveWp(idx);
+  clearWpSelection();
+}
 
 /** Edit mode toggle */
 export const editMode = writable<boolean>(false);
@@ -196,7 +245,7 @@ export async function switchMission(newIdx: number): Promise<void> {
   const m = await invoke<Mission>('mission_get');
   mission.set(m);
   activeMissionIndex.set(newIdx);
-  selectedWpIndex.set(-1);
+  clearWpSelection();
 }
 
 /** Add a new mission tab. Returns new mission index, or -1 if at limit. */
@@ -260,7 +309,7 @@ export async function removeMission(idx: number): Promise<number> {
   const m = await invoke<Mission>('mission_get');
   mission.set(m);
   activeMissionIndex.set(newActive);
-  selectedWpIndex.set(-1);
+  clearWpSelection();
   return newActive;
 }
 
@@ -345,6 +394,48 @@ export async function missionRemoveWp(index: number): Promise<Mission> {
   const m = await invoke<Mission>('mission_remove_wp', { index });
   mission.set(m);
   return m;
+}
+
+/**
+ * Move a waypoint from the active mission to the END of another mission slot
+ * (INAV multi-mission). The target mission is held in the frontend slot cache;
+ * it loads into the backend when that tab is opened. No-op if the target is the
+ * active mission or out of range.
+ */
+export async function moveWaypointToMission(wpIndex: number, targetIdx: number): Promise<void> {
+  const activeIdx = get(activeMissionIndex);
+  if (targetIdx === activeIdx || targetIdx < 1 || targetIdx > get(missionCount)) return;
+  const wps = get(mission).waypoints;
+  if (wpIndex < 0 || wpIndex >= wps.length) return;
+
+  // Append a copy to the target slot, then remove from the active mission.
+  const target = missionSlots.get(targetIdx) ?? [];
+  target.push({ ...wps[wpIndex] });
+  missionSlots.set(targetIdx, target);
+
+  await missionRemoveWp(wpIndex);
+  clearWpSelection();
+}
+
+/** Move ALL selected waypoints to the end of another mission slot (preserving
+ *  their order). Used by the context menu so it works on a multi-selection. */
+export async function moveSelectedWpsToMission(targetIdx: number): Promise<void> {
+  const activeIdx = get(activeMissionIndex);
+  if (targetIdx === activeIdx || targetIdx < 1 || targetIdx > get(missionCount)) return;
+  const sel = [...get(selectedWpIndices)].sort((a, b) => a - b); // ascending = original order
+  if (sel.length === 0) return;
+
+  const wps = get(mission).waypoints;
+  const toMove = sel.filter((i) => i >= 0 && i < wps.length).map((i) => ({ ...wps[i] }));
+
+  // Append (in order) to the target slot, then remove from the active mission
+  // descending so the indices stay valid.
+  const target = missionSlots.get(targetIdx) ?? [];
+  for (const wp of toMove) target.push(wp);
+  missionSlots.set(targetIdx, target);
+
+  for (const i of [...sel].sort((a, b) => b - a)) await missionRemoveWp(i);
+  clearWpSelection();
 }
 
 /** Update a waypoint at index */

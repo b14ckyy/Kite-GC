@@ -28,8 +28,11 @@
     min,
     max,
     step = 1,
+    displayStep,
     decimals = 0,
     disabled = false,
+    placeholder = '',
+    allowEmpty = false,
     onchange,
   }: {
     /** Value in metric base units (m for altitude/length, m/s for speed) */
@@ -41,8 +44,12 @@
     min?: number;
     max?: number;
     step?: number;
+    /** Fixed step in DISPLAY units (e.g. 0.1 km/h) — overrides the converted `step`. */
+    displayStep?: number;
     decimals?: number;
     disabled?: boolean;
+    placeholder?: string;
+    allowEmpty?: boolean;
     onchange?: (e: Event) => void;
   } = $props();
 
@@ -65,7 +72,7 @@
   const unitLabel = $derived(toDisplay(0).unit);
   const dMin = $derived(min != null ? round(toDisplay(min).value, decimals) : undefined);
   const dMax = $derived(max != null ? round(toDisplay(max).value, decimals) : undefined);
-  const dStep = $derived(Math.max(1 / 10 ** decimals, round(toDisplay(step).value, decimals)));
+  const dStep = $derived(displayStep != null ? displayStep : Math.max(1 / 10 ** decimals, round(toDisplay(step).value, decimals)));
 
   // Display value mirrors the metric value (and the active unit). Resyncs on
   // external changes; our own onChange round-trips back to the same display.
@@ -76,7 +83,7 @@
   });
 
   function onChange(e: Event) {
-    value = toMetric(display);
+    value = Number.isNaN(display) ? NaN : toMetric(display);
     onchange?.(e);
   }
 </script>
@@ -90,5 +97,7 @@
   {decimals}
   unit={unitLabel}
   {disabled}
+  {placeholder}
+  {allowEmpty}
   onchange={onChange}
 />

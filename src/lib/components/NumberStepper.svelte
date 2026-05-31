@@ -19,6 +19,8 @@
     unit = '',
     disabled = false,
     decimals,
+    placeholder = '',
+    allowEmpty = false,
     onchange,
   }: {
     value?: number;
@@ -29,12 +31,17 @@
     unit?: string;
     disabled?: boolean;
     decimals?: number;
+    /** Shown when the field is empty (value is NaN, requires allowEmpty). */
+    placeholder?: string;
+    /** Allow an empty field → value becomes NaN (e.g. "mixed" in batch edit). */
+    allowEmpty?: boolean;
     onchange?: (e: Event) => void;
   } = $props();
 
   function handleBtnClick(dir: 1 | -1) {
     if (disabled) return;
-    let newVal = value + dir * step;
+    const base = Number.isNaN(value) ? (Number.isFinite(min) ? min : 0) : value;
+    let newVal = base + dir * step;
     newVal = Math.max(min, Math.min(max, newVal));
     // Round to sensible decimal precision
     if (decimals !== undefined) {
@@ -47,6 +54,10 @@
 
   function handleInput(e: Event) {
     const target = e.target as HTMLInputElement;
+    if (allowEmpty && target.value.trim() === '') {
+      value = NaN;
+      return;
+    }
     const raw = Number(target.value);
     if (!isNaN(raw)) {
       value = Math.max(min, Math.min(max, raw));
@@ -69,6 +80,7 @@
       {max}
       {step}
       {disabled}
+      {placeholder}
       aria-label={label || undefined}
       onchange={(e) => { handleInput(e); onchange?.(e); }}
     />

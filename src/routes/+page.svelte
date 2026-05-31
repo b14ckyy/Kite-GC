@@ -13,6 +13,8 @@
   import Map3D from "$lib/components/Map3D.svelte";
   import LogPlayer from "$lib/components/logbook/LogPlayer.svelte";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
+  import ContextMenu from "$lib/components/ContextMenu.svelte";
+  import BatchEditPopup from "$lib/components/mission/BatchEditPopup.svelte";
   import type { DialogButton, DialogOptions } from "$lib/components/ConfirmDialog.svelte";
   import SettingsPanel from "$lib/components/SettingsPanel.svelte";
   import LogbookPanel from "$lib/components/logbook/LogbookPanel.svelte";
@@ -1077,6 +1079,8 @@
 <svelte:window bind:innerWidth={winW} bind:innerHeight={winH} />
 
 <ConfirmDialog bind:this={confirmDialog} />
+<ContextMenu />
+<BatchEditPopup {interfaceSettings} />
 
 <main
   class="app"

@@ -4,8 +4,9 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import {
-    mission, selectedWpIndex, editMode,
-    missionClear, missionRemoveWp,
+    mission, selectedWpIndex, selectedWpIndices, editMode,
+    selectWpSingle, toggleWpSelection, selectWpRange, clearWpSelection, removeSelectedWps,
+    missionClear,
     missionDownload, missionUpload,
     missionExportXml, missionImportXml,
     missionSaveFile, missionLoadFile,
@@ -15,6 +16,8 @@
     type Waypoint, type Mission, WpAction, WP_ACTION_LABELS, WP_ACTION_KEYS,
     hasLocation, isModifier,
   } from '$lib/stores/mission';
+  import { contextMenu } from '$lib/actions/contextMenu';
+  import { buildWaypointMenu } from '$lib/helpers/waypointMenu';
   import { connection } from '$lib/stores/connection';
   import { telemetry, type TelemetryData } from '$lib/stores/telemetry';
   import { get } from 'svelte/store';
@@ -30,6 +33,8 @@
 
   let currentMission = $state<Mission>(get(mission));
   let currentSelIdx = $state<number>(get(selectedWpIndex));
+  let currentSel = $state<Set<number>>(get(selectedWpIndices));
+  let selAnchor = -1;
   let currentEditing = $state<boolean>(get(editMode));
   let currentMissionIdx = $state<number>(get(activeMissionIndex));
   let currentMissionCount = $state<number>(get(missionCount));
@@ -39,17 +44,21 @@
 
   const unsubMission = mission.subscribe(m => { currentMission = m; });
   const unsubSelIdx = selectedWpIndex.subscribe(i => { currentSelIdx = i; });
+  const unsubSel = selectedWpIndices.subscribe(s => { currentSel = s; });
   const unsubEditMode = editMode.subscribe(e => {
     currentEditing = e;
-    if (!e && showPatternPanel) {
-      showPatternPanel = false;
-      import('$lib/stores/surveyPattern.svelte').then(m => m.exitPatternMode());
+    if (!e) {
+      clearWpSelection(); // multi-select is edit-mode only
+      if (showPatternPanel) {
+        showPatternPanel = false;
+        import('$lib/stores/surveyPattern.svelte').then(m => m.exitPatternMode());
+      }
     }
   });
   const unsubMissionIdx = activeMissionIndex.subscribe(i => { currentMissionIdx = i; });
   const unsubMissionCount = missionCount.subscribe(c => { currentMissionCount = c; });
 
-  onDestroy(() => { unsubMission(); unsubSelIdx(); unsubEditMode(); unsubTelem(); unsubMissionIdx(); unsubMissionCount(); });
+  onDestroy(() => { unsubMission(); unsubSelIdx(); unsubSel(); unsubEditMode(); unsubTelem(); unsubMissionIdx(); unsubMissionCount(); });
 
   let downloadLoading = $state(false);
   let uploadLoading = $state(false);
@@ -155,8 +164,33 @@
   }
 
   function handleClear() { removeMission(currentMissionIdx); statusMessage = $t('mission.missionCleared'); }
-  function selectWp(index: number) { selectedWpIndex.set(index); }
-  async function removeSelected() { if (currentSelIdx >= 0) { await missionRemoveWp(currentSelIdx); selectedWpIndex.set(-1); } }
+  // List selection. Plain click = single; Ctrl/⌘ = toggle; Shift = range; a tap
+  // on the number badge toggles too (touch-friendly). Multi-select gestures are
+  // edit-mode only.
+  function onRowClick(e: MouseEvent, i: number) {
+    if (currentEditing && e.shiftKey && selAnchor >= 0) {
+      selectWpRange(selAnchor, i);
+    } else if (currentEditing && (e.ctrlKey || e.metaKey)) {
+      toggleWpSelection(i);
+      selAnchor = i;
+    } else {
+      selectWpSingle(i);
+      selAnchor = i;
+    }
+  }
+  function onBadgeClick(e: MouseEvent, i: number) {
+    e.stopPropagation();
+    if (currentEditing) toggleWpSelection(i);
+    else selectWpSingle(i);
+    selAnchor = i;
+  }
+  // Right-click a row: if it isn't part of the selection, select it alone; then
+  // build the menu over the current selection (so it acts on all selected).
+  function wpMenuFor(i: number) {
+    if (!currentSel.has(i)) selectWpSingle(i);
+    return buildWaypointMenu();
+  }
+  async function removeSelected() { if (currentSel.size > 0) await removeSelectedWps(); }
 
   async function handleGenerateAppend() {
     // Button moved to SurveyPatternPanel; this is a no-op fallback
@@ -265,7 +299,7 @@
     {/if}
 
     <div class="toolbar-spacer"></div>
-    {#if currentEditing && currentSelIdx >= 0}
+    {#if currentEditing && currentSel.size > 0}
       <button class="btn-sm btn-danger" onclick={removeSelected} title={$t('mission.removeWp')}>✕</button>
     {/if}
     <button class="btn-sm" onclick={handleClear} title={$t('mission.clearMission')}>🗑️</button>
@@ -309,15 +343,17 @@
             <tbody>
               {#each currentMission.waypoints as wp, i}
                 {#if isModifier(wp.action)}
-                  <tr class="wp-row modifier" class:selected={i === currentSelIdx} class:greyed={missionEndIdx >= 0 && i > missionEndIdx} onclick={() => selectWp(i)}>
+                  <tr class="wp-row modifier" class:selected={currentSel.has(i)} class:greyed={missionEndIdx >= 0 && i > missionEndIdx} onclick={(e) => onRowClick(e, i)} use:contextMenu={() => wpMenuFor(i)}>
                     <td class="col-num"></td>
                     <td class="col-type mod-indent">↳ {shortType(wp.action)}</td>
                     <td class="col-alt">—</td>
                     <td class="col-param">{formatParam(wp)}</td>
                   </tr>
                 {:else}
-                  <tr class="wp-row" class:selected={i === currentSelIdx} class:greyed={missionEndIdx >= 0 && i > missionEndIdx} onclick={() => selectWp(i)}>
-                    <td class="col-num"><span class="wp-num-badge">{displayNums.get(i) ?? ''}</span></td>
+                  <tr class="wp-row" class:selected={currentSel.has(i)} class:greyed={missionEndIdx >= 0 && i > missionEndIdx} onclick={(e) => onRowClick(e, i)} use:contextMenu={() => wpMenuFor(i)}>
+                    <!-- svelte-ignore a11y_click_events_have_key_events -->
+                    <!-- svelte-ignore a11y_no_static_element_interactions -->
+                    <td class="col-num"><span class="wp-num-badge" onclick={(e) => onBadgeClick(e, i)}>{displayNums.get(i) ?? ''}</span></td>
                     <td class="col-type">{shortType(wp.action)}</td>
                     <td class="col-alt">{hasLocation(wp.action) ? formatAltShort(wp) : '—'}</td>
                     <td class="col-param">{formatParam(wp)}</td>

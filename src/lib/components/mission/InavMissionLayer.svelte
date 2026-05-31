@@ -6,7 +6,8 @@
   import { onDestroy } from 'svelte';
   import L from 'leaflet';
   import {
-    mission, geoWaypoints, selectedWpIndex, editMode, launchPoint,
+    mission, geoWaypoints, selectedWpIndex, selectedWpIndices,
+    selectWpSingle, toggleWpSelection, clearWpSelection, editMode, launchPoint,
     missionAddWp, missionUpdateWp, missionRemoveWp, missionInsertWp,
     missionReorderWp,
     getTotalWpCount, MAX_WAYPOINTS_TOTAL,
@@ -18,6 +19,9 @@
   import { activeSurveyPattern } from '$lib/stores/surveyPattern.svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { iconForWp } from '$lib/helpers/missionIcons';
+  import { openContextMenu } from '$lib/stores/contextMenu';
+  import { buildWaypointMenu } from '$lib/helpers/waypointMenu';
+  import { convertAltCm } from '$lib/helpers/altConvert';
   import { get } from 'svelte/store';
   import { settings } from '$lib/stores/settings';
   import type { InterfaceSettings } from '$lib/stores/settings';
@@ -49,6 +53,7 @@
 
   let currentMission = $state<Mission>(get(mission));
   let currentSelIdx = $state<number>(get(selectedWpIndex));
+  let currentSelSet = $state<Set<number>>(get(selectedWpIndices));
   let currentEditing = $state<boolean>(get(editMode));
 
   // ── Launch / home reference marker (planning-time, for REL↔AGL + clearance) ──
@@ -59,6 +64,7 @@
 
   const unsubMission = mission.subscribe(m => { currentMission = m; });
   const unsubSelIdx = selectedWpIndex.subscribe(i => { currentSelIdx = i; });
+  const unsubSelSet = selectedWpIndices.subscribe(s => { currentSelSet = s; });
   const unsubEditMode = editMode.subscribe(e => {
     currentEditing = e;
     if (e) autoPlaceLaunch();
@@ -110,39 +116,6 @@
   }
 
   const unsubLaunch = launchPoint.subscribe(lp => { currentLaunch = lp; renderLaunchMarker(); });
-
-  /** Terrain elevation (m, ≈ MSL) at lat/lon via backend, or null. */
-  async function terrainElev(lat: number, lon: number): Promise<number | null> {
-    try { return await invoke<number | null>('terrain_elevation', { lat, lon }); }
-    catch { return null; }
-  }
-
-  /** Convert a waypoint's altitude (cm) between REL/AMSL/AGL using terrain + the
-   *  launch point as the home reference. Returns the original value if a needed
-   *  terrain sample is unavailable (best-effort, no garbage). */
-  async function convertAltCm(wp: Waypoint, fromMode: number, toMode: number): Promise<number> {
-    if (fromMode === toMode) return wp.altitude;
-    const valM = wp.altitude / 100;
-    const lp = get(launchPoint);
-    const needWpGround = fromMode === ALT_MODE_AGL || toMode === ALT_MODE_AGL;
-    const needLaunch = fromMode === ALT_MODE_REL || toMode === ALT_MODE_REL;
-    const wpGround = needWpGround ? await terrainElev(toDeg(wp.lat), toDeg(wp.lon)) : 0;
-    const launchGround = needLaunch ? (lp ? await terrainElev(lp.lat, lp.lng) : null) : 0;
-    if ((needWpGround && wpGround == null) || (needLaunch && launchGround == null)) {
-      return wp.altitude; // can't convert safely → keep value
-    }
-    // to absolute MSL
-    let absM: number;
-    if (fromMode === ALT_MODE_REL) absM = (launchGround as number) + valM;
-    else if (fromMode === ALT_MODE_AGL) absM = (wpGround as number) + valM;
-    else absM = valM;
-    // to target mode
-    let outM: number;
-    if (toMode === ALT_MODE_REL) outM = absM - (launchGround as number);
-    else if (toMode === ALT_MODE_AGL) outM = absM - (wpGround as number);
-    else outM = absM;
-    return Math.round(outM * 100);
-  }
 
   // svelte-ignore state_referenced_locally
   const missionGroup = L.layerGroup().addTo(map);
@@ -418,10 +391,10 @@
     });
 
     el.querySelector('button[data-action="moveUp"]')?.addEventListener('click', () => {
-      if (idx > 0) { missionReorderWp(idx, idx - 1); selectedWpIndex.set(idx - 1); }
+      if (idx > 0) { missionReorderWp(idx, idx - 1); selectWpSingle(idx - 1); }
     });
     el.querySelector('button[data-action="moveDown"]')?.addEventListener('click', () => {
-      if (idx < currentMission.waypoints.length - 1) { missionReorderWp(idx, idx + 1); selectedWpIndex.set(idx + 1); }
+      if (idx < currentMission.waypoints.length - 1) { missionReorderWp(idx, idx + 1); selectWpSingle(idx + 1); }
     });
     el.querySelector('button[data-action="remove"]')?.addEventListener('click', () => {
       for (let k = modifiers.length - 1; k >= 0; k--) missionRemoveWp(modifiers[k].idx);
@@ -464,7 +437,8 @@
 
     for (let i = 0; i < m.waypoints.length; i++) {
       const wp = m.waypoints[i];
-      const selected = i === selIdx;
+      const inSel = currentSelSet.has(i); // any selected → red icon
+      const isPrimary = i === selIdx; // sole selection → editor popup
       const dn = displayNums.get(i) ?? 0;
       const greyed = missionEndIdx >= 0 && i > missionEndIdx;
 
@@ -472,13 +446,19 @@
         const latLng = L.latLng(toDeg(wp.lat), toDeg(wp.lon));
         if (isFlightPathWp(wp.action)) { fpPositions.push(latLng); fpIndices.push(i); fpGreyed.push(greyed); }
 
-        const icon = iconForWp(wp, dn, selected);
+        const icon = iconForWp(wp, dn, inSel);
         const marker = L.marker(latLng, {
           icon, draggable: editing && !greyed, opacity: greyed ? 0.35 : 1.0,
           title: `WP${dn}: ${$t(WP_ACTION_KEYS[wp.action]) || 'Unknown'}`,
         }).addTo(missionGroup);
 
-        marker.on('click', () => { selectedWpIndex.set(i); });
+        marker.on('click', () => { if (editing) toggleWpSelection(i); else selectWpSingle(i); });
+        marker.on('contextmenu', (e: L.LeafletMouseEvent) => {
+          // Right-click on an unselected marker selects it; on a selected one
+          // keeps the (multi-)selection so the menu can act on all of it.
+          if (!currentSelSet.has(i)) selectWpSingle(i);
+          openContextMenu(e.originalEvent.clientX, e.originalEvent.clientY, buildWaypointMenu());
+        });
         if (editing) {
           marker.on('dragend', () => {
             const pos = marker.getLatLng();
@@ -487,11 +467,11 @@
         }
 
         const modifiers = getModifiersForWp(m.waypoints, i);
-        if (editing && !selected && !greyed) {
+        if (editing && !isPrimary && !greyed) {
           createParamLabel(wp, modifiers, latLng).addTo(missionGroup);
         }
 
-        if (editing && selected && !greyed) {
+        if (editing && isPrimary && !greyed) {
           const htmlContent = buildEditorHtml(wp, i, m.waypoints.length, dn, modifiers);
           if (keepPopup && editorPopup) {
             editorPopup.setLatLng(latLng);
@@ -594,7 +574,7 @@
     if (!currentEditing) return;
     // Block waypoint placement while pattern mode is active
     if (activeSurveyPattern.isActive) return;
-    if (currentSelIdx >= 0) { selectedWpIndex.set(-1); return; }
+    if (currentSelSet.size > 0) { clearWpSelection(); return; }
     if (getTotalWpCount() >= MAX_WAYPOINTS) return;
     const lat = fromDeg(e.latlng.lat);
     const lon = fromDeg(e.latlng.lng);
@@ -605,10 +585,10 @@
   // svelte-ignore state_referenced_locally
   map.on('click', onMapClick);
 
-  $effect(() => { void currentLaunch; renderMission(currentMission, currentSelIdx, currentEditing); });
+  $effect(() => { void currentLaunch; void currentSelSet; renderMission(currentMission, currentSelIdx, currentEditing); });
 
   onDestroy(() => {
-    unsubMission(); unsubSelIdx(); unsubEditMode(); unsubLaunch();
+    unsubMission(); unsubSelIdx(); unsubSelSet(); unsubEditMode(); unsubLaunch();
     if (launchMarker) { try { map.removeLayer(launchMarker); } catch {} launchMarker = undefined; }
     map.off('click', onMapClick);
     if (editorPopup) { map.removeLayer(editorPopup); editorPopup = undefined; }
@@ -621,9 +601,9 @@
   :global(.mission-wp-icon) { background: none !important; border: none !important; }
   :global(.wp-param-label-wrapper) { background: none !important; border: none !important; overflow: visible !important; width: auto !important; height: auto !important; }
   :global(.wp-param-label) { background: rgba(30,30,30,0.88); color: #ccc; padding: 3px 8px; border-radius: 4px; font-size: 12px; line-height: 1.4; white-space: nowrap; border: 1px solid rgba(55,168,219,0.35); pointer-events: none; }
-  :global(.wp-editor-popup-container .leaflet-popup-content-wrapper) { background: rgba(30,30,30,0.95); color: #ccc; border: 1px solid rgba(55,168,219,0.5); border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,0.5); padding: 0; }
+  :global(.wp-editor-popup-container .leaflet-popup-content-wrapper) { background: rgba(30,30,30,0.82); backdrop-filter: blur(10px); color: #ccc; border: 1px solid rgba(55,168,219,0.35); border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,0.5); padding: 0; }
   :global(.wp-editor-popup-container .leaflet-popup-content) { margin: 0; width: auto !important; }
-  :global(.wp-editor-popup-container .leaflet-popup-tip) { background: rgba(30,30,30,0.95); border: 1px solid rgba(55,168,219,0.5); }
+  :global(.wp-editor-popup-container .leaflet-popup-tip) { background: rgba(30,30,30,0.82); backdrop-filter: blur(10px); border: 1px solid rgba(55,168,219,0.35); }
   :global(.wp-editor-popup) { padding: 10px; font-size: 13px; min-width: 190px; }
   :global(.wpe-header) { display: flex; align-items: center; gap: 6px; font-weight: bold; font-size: 14px; color: #37a8db; margin-bottom: 6px; border-bottom: 1px solid #444; padding-bottom: 4px; }
   :global(.wpe-num) { flex-shrink: 0; }
