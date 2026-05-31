@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use ::mavlink::ardupilotmega::{
     MavAutopilot, MavCmd, MavMessage, MavType,
-    COMMAND_LONG_DATA, AUTOPILOT_VERSION_DATA,
+    COMMAND_LONG_DATA,
 };
 use ::mavlink::Message;
 

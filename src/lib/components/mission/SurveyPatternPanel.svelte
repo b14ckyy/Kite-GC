@@ -429,7 +429,7 @@
 
       <!-- Altitude Type dropdown -->
       <div class="param-row alt-type-row">
-        <label class="alt-type-label">{$t('survey.altMode')}</label>
+        <span class="alt-type-label">{$t('survey.altMode')}</span>
         <select class="alt-type-select" bind:value={rectangleParams.altMode} onchange={handleParamChange}>
           <option value="relative">{$t('survey.altModeRelative')}</option>
           <option value="amsl">{$t('survey.altModeAmsl')}</option>
@@ -550,7 +550,7 @@
 
       <!-- Altitude Type -->
       <div class="param-row alt-type-row">
-        <label class="alt-type-label">{$t('survey.altMode')}</label>
+        <span class="alt-type-label">{$t('survey.altMode')}</span>
         <select class="alt-type-select" bind:value={circleParams.altMode} onchange={handleCircleParamChange}>
           <option value="relative">{$t('survey.altModeRelative')}</option>
           <option value="amsl">{$t('survey.altModeAmsl')}</option>
@@ -637,7 +637,7 @@
 
       <!-- Altitude Type -->
       <div class="param-row alt-type-row">
-        <label class="alt-type-label">{$t('survey.altMode')}</label>
+        <span class="alt-type-label">{$t('survey.altMode')}</span>
         <select class="alt-type-select" bind:value={polygonParams.altMode} onchange={handlePolygonParamChange}>
           <option value="relative">{$t('survey.altModeRelative')}</option>
           <option value="amsl">{$t('survey.altModeAmsl')}</option>
@@ -882,9 +882,6 @@
     color-scheme: dark;
     max-width: 120px;
   }
-
-  .btn-sm { padding: 3px 8px; border: 1px solid #555; border-radius: 4px; background: #2a2a2a; color: #ccc; cursor: pointer; font-size: 13px; }
-  .btn-sm:hover { background: #3a3a3a; }
 
   .survey-header select {
     padding: 2px 6px;

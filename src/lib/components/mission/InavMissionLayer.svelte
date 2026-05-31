@@ -144,6 +144,7 @@
     return Math.round(outM * 100);
   }
 
+  // svelte-ignore state_referenced_locally
   const missionGroup = L.layerGroup().addTo(map);
   let wpMarkers: L.Marker[] = [];
   let flightPath: L.Polyline | undefined;
@@ -601,6 +602,7 @@
     missionAddWp(WpAction.Waypoint, lat, lon, altitude);
   }
 
+  // svelte-ignore state_referenced_locally
   map.on('click', onMapClick);
 
   $effect(() => { void currentLaunch; renderMission(currentMission, currentSelIdx, currentEditing); });
@@ -630,7 +632,7 @@
   :global(.wpe-type-name) { color: #888; font-weight: normal; font-size: 12px; margin-left: 4px; }
   :global(.wpe-row) { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
   :global(.wpe-row label) { width: 52px; color: #888; font-size: 12px; flex-shrink: 0; }
-  :global(.wpe-row input) { background: #2a2a2a; color: #ccc; border: 1px solid #555; border-radius: 0; padding: 3px 4px; font-size: 13px; width: 52px; text-align: center; -moz-appearance: textfield; }
+  :global(.wpe-row input) { background: #2a2a2a; color: #ccc; border: 1px solid #555; border-radius: 0; padding: 3px 4px; font-size: 13px; width: 52px; text-align: center; appearance: textfield; -moz-appearance: textfield; }
   :global(.wpe-row input::-webkit-inner-spin-button), :global(.wpe-row input::-webkit-outer-spin-button) { -webkit-appearance: none; margin: 0; }
   :global(.wpe-row input:focus) { border-color: #37a8db; outline: none; }
   :global(.wpe-coord-input) { width: 110px !important; text-align: right !important; }

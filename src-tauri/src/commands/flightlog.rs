@@ -1,6 +1,6 @@
 // Flight Log Commands — Tauri commands for logbook CRUD operations
 
-use tauri::{AppHandle, Emitter};
+use tauri::Emitter;
 
 use crate::flightlog::db;
 use crate::flightlog::exchange;

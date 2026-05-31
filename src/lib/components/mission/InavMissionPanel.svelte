@@ -226,6 +226,7 @@
   const missionEndIdx = $derived(findMissionEndIndex(currentMission.waypoints));
 </script>
 
+<!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   class="mission-panel"
   class:pattern-mode={showPatternPanel}

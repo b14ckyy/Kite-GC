@@ -4,7 +4,6 @@
 use std::sync::Mutex;
 
 use super::types::{Mission, MissionInfo, Waypoint, WpAction, WP_FLAG_LAST, WP_FLAG_NORMAL};
-use super::codec;
 
 /// Thread-safe mission store managed by Tauri
 pub struct MissionStore {

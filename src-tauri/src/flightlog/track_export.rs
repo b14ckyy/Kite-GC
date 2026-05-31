@@ -3,7 +3,7 @@
 use std::io::Write;
 use std::path::Path;
 
-use chrono::{Duration, Utc};
+use chrono::Duration;
 
 use super::types::{Flight, TelemetryRecord};
 

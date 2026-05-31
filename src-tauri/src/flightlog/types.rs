@@ -173,9 +173,6 @@ pub enum BlackboxImportStatus {
     },
 }
 
-/// Kept for backwards compatibility
-pub type BlackboxImportResult = BlackboxImportStatus;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlackboxImportProgress {
     pub stage: String,

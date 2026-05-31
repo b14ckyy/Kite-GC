@@ -8,6 +8,6 @@ pub mod handshake;
 pub mod mission;
 pub mod parser;
 
-pub use handler::{MavlinkHandle, MavlinkCommand};
+pub use handler::MavlinkHandle;
 pub use handshake::perform_handshake;
 pub use mission::ArduWaypoint;

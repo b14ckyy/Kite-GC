@@ -239,8 +239,14 @@ This document tracks planned features, organized by milestone.
 - [x] NSIS uninstall hook: optional AppData cleanup dialog
 - [x] Portable mode: `.portable` marker → `data/` folder next to exe (Windows + Linux)
 
-### Future: Mission Enhancements
-- [ ] Undo/redo for mission edits
+### Mission Editor Advancements
+- [ ] **Mission stats — extend** (total distance, altitude change / climb+descent totals, est. flight time, …). Mission distance is already computed in Terrain Analysis; the backend `Mission::total_distance_m()` + `geo_waypoints()` exist but are unwired — reuse them.
+- [ ] **Multi-select waypoints + batch editing** (move / delete / set-parameter across a selection)
+- [ ] **Undo/redo** for mission edits — reorganise / group the existing edit actions for clarity
+- [ ] **Waypoint label editing** — rename/label in edit mode, shown on mouseover
+- [ ] **Waypoint parameter view** — refreshed per-WP parameter panel in the editor
+- [ ] **Active-waypoint marker on the map** — wire `MSP_NAV_STATUS` / `decode_nav_status` (backend decoder ready & tested, just not connected) to highlight the current target WP in flight
+- [ ] **Fly-by-Home waypoint handling** — wire `is_fly_by_home` / `WP_FLAG_FBH` (overlooked earlier; backend helper exists)
 - [ ] Abstraction layer for protocol-specific mission systems (ArduPilot/PX4 MAVLink)
 
 ## Milestone 5: Flight Recording & Logbook (v0.5.x)

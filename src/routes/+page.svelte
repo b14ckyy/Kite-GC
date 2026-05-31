@@ -170,6 +170,7 @@
 
   // Switch default baud rate when protocol changes
   // Track previous protocol to detect actual user-initiated changes
+  // svelte-ignore state_referenced_locally
   let prevProtocol = $state(selectedProtocol);
   $effect(() => {
     if (selectedProtocol !== prevProtocol) {

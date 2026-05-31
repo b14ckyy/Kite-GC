@@ -33,6 +33,7 @@
   const unsubSelIdx   = arduSelectedWpIndex.subscribe(i => { currentSelIdx = i; });
   const unsubEditMode = arduEditMode.subscribe(e => { currentEditing = e; });
 
+  // svelte-ignore state_referenced_locally
   const missionGroup = L.layerGroup().addTo(map);
   let wpMarkers: L.Marker[] = [];
   let loiterCircles: L.Circle[] = [];
@@ -397,6 +398,7 @@
     });
   }
 
+  // svelte-ignore state_referenced_locally
   map.on('click', onMapClick);
 
   $effect(() => { renderMission(currentWps, currentSelIdx, currentEditing); });
