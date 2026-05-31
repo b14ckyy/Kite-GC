@@ -573,6 +573,7 @@ Source: **Copernicus DEM GLO-30** (geoid/EGM2008 ≈ MSL, no API key, offline-ca
 - [x] Configurable range slider (50–2000 m) and pitch slider (-90° to -5°)
 - [x] Works with both live telemetry and playback marker
 - [x] Initial snap (no lerp from origin), smooth transitions thereafter
+- [x] **Heading-follow jitter fixed** — Cesium's own rotate disabled in follow (it fought the per-frame heading lock); pitch driven by a custom vertical-drag handler; start pitch lowered to 20° (view from behind, horizon visible)
 
 ### Performance
 - [x] Fog enabled (`density: 2.5e-4`) to hide distant terrain
@@ -586,7 +587,12 @@ Source: **Copernicus DEM GLO-30** (geoid/EGM2008 ≈ MSL, no API key, offline-ca
 - [x] **Altitude curtain + ground shadow** under the 3D track (vertical wall to ground + terrain-draped shadow; flight-mode coloured; Settings→Map toggle; in replay built progressively behind the UAV, chunked for scale + reverse-scrub debounce). See `docs/dev/Map3DRework.md`
 - [x] **Mission overlay in 3D** — mirrors the 2D map (same marker SVGs as billboards + same line styles, always-visible overlay) + per-WP drop-lines; "Show Mission" replay toggle (2D + 3D); planning/live always shown
 - [ ] **Live-trail curtain** (same treatment as the replay track; deferred to simulator long-flight tests)
-- [ ] **Clean terrain-derived geoid offset** — replace the single-point GPS-snap (mis-places tower starts + planning-only views) with `cesiumGround − copernicusGround` undulation; track keeps fused relative altitude anchored at the first GPS fix
+- [x] **Clean terrain-derived geoid offset** — `cesiumGround_ellipsoid − Copernicus MSL` undulation (GPS-independent), replacing the single-point GPS-snap that mis-placed tower starts; track uses the fused arming-relative altitude (`nav_alt_m`) anchored at the first GPS fix → also smooths the stair-stepped vertical track. Live UAV derives its own geoid at the first live fix
+- [x] **Source-switch map clearing** — log↔log / replay→live wipe track+trail+markers; live connect clears only when disarmed (armed reconnect keeps track); disconnect never clears; mission kept + re-placed
+- [x] **Live trail armed-only + black pre-arm trail** (disarmed GPS movement, 2D + 3D)
+- [x] **Recenter camera on every 2D→3D switch** (deferred until the canvas is laid out)
+- [x] **Over-zoom placeholders replaced without a manual zoom** — re-request visible tiles when a new blank region is detected
+- [x] **Progressive shadow/curtain no longer spans a log switch** (clearDeco cancels pending timers + async-load guard)
 - [ ] Smoothed flight track (polyline simplification or spline interpolation)
 - [ ] UI button refinements and responsive layout
 - [ ] Altitude exaggeration toggle for low-altitude flights

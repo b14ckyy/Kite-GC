@@ -67,11 +67,11 @@ a **drop-line** from each waypoint to the ground (thin **white dashed + black ou
 
 ## Phase 3 — Camera
 
-- [ ] **Heading-follow jitter fix**: when heading is locked (heading-follow), only **pitch**
-  should be mouse-adjustable. Sideways drag jitters today because the chase loop forces
-  heading back to `behindHeading` every frame while Cesium's default rotate also turns the
-  heading → they fight. Fix: disable Cesium's horizontal rotate in this mode and drive pitch
-  from a custom vertical-drag handler.
+- [x] **Heading-follow jitter fix** (done): Cesium's own rotate/tilt/look/pan are disabled in
+  follow (`setFollowCameraControls`), so a sideways drag can't fight the per-frame heading
+  lock; `followPitch` is driven by a custom vertical-drag `ScreenSpaceEventHandler` (clamped
+  0…−90°) instead of being read back from `camera.pitch` each frame (that read-back was also
+  why the start angle jumped to the leftover free-cam −45°). **Start pitch lowered to −20°.**
 - [ ] **FPV cockpit** view: camera **at** the UAV looking along the flight direction, **no
   visible UAV model**. Must be **stabilized** (smoothed heading/pitch/position) — tune.
 - [ ] **Follow tuning**: orientation detail, smoother/tunable defaults (distance/pitch),
@@ -92,6 +92,54 @@ The user's main visual gripe is a **stair-stepped / jagged** track. Investigate 
 Likely fix: **Catmull-Rom / Hermite spline resample** of the polyline (horizontal smoothing)
 + a smoother altitude source (vertical). Verify point spacing and compare the three altitude
 columns on a real log first.
+
+### DONE — clean geoid + altitude rework (replay track)
+
+Validated against a decoded blackbox (and `flightlog/blackbox.rs:623`): **`nav_alt_m` =
+`navPos[2]/100` = fused EKF altitude, relative to home, 0 at arm** — smooth (the GCS already
+uses it for the Altitude widget). `BaroAlt` carries an arm offset (~1.4 m); GPS `alt_m` is
+erratic. Implemented in `Map3D`:
+
+- **Geoid `N` is now terrain-derived**: `N = cesiumGround_ellipsoid(firstPt) −
+  copernicus terrain_elevation(firstPt)` (was `cesiumGround − GPS_MSL(firstPt)`, which snapped
+  the arm point to the ground and shifted a tower/rooftop start — and the whole track — down).
+- **Track altitude is now the relative fused source anchored absolutely**:
+  `ellipsoid = startMslGps + N + nav_alt_m` where `startMslGps = alt_m` of the first GPS fix.
+  Tower/rooftop starts keep their height; track shape stays smooth (nav, not GPS) — this also
+  addresses the Phase-4 vertical jaggedness. Applied to the track line, the progressive
+  shadow/curtain (`posFromRecord`), and the playback marker. Mission stays `altMsl + N`
+  (Copernicus MSL) → consistent with the track (both = trueMSL + N).
+- Live path (telemetry) unchanged for now — revisit with the live-trail curtain (1b) during
+  simulator testing.
+- Caveat seen in a launch-phase snippet: `nav_alt_m` (EKF) lags fast launch transients
+  (heavily damped) — fine for a smooth track; verify visually in replay.
+
+### DONE — source-switch clearing, trails, recenter, tile refresh (this session)
+
+Fixes that emerged while testing the above on real logs + a live link:
+
+- **Source-switch clearing** (`clearAllMapData`): switching replay log↔log and replay→live
+  wipes the playback track, progressive deco, live trail, live + replay markers and home, and
+  resets the geoid/anchor state. A fresh **live connect clears only when DISARMED** (an armed
+  reconnect keeps the track — connection recovery); a **disconnect never clears**. The mission
+  overlay is intentionally kept and re-placed at the new geoid.
+- **Cross-log deco fix**: `clearDeco()` now cancels its pending grow/rebuild timers, and a
+  `decoLoading` guard (set across the async track load, with `decoValidTrack` cleared up front)
+  stops the `playbackPoint` effect from appending stale/mixed points → no more shadow/curtain
+  spanning the old + new track.
+- **Live trail armed-only** + a thin plain **black, ground-clamped pre-arm trail** while
+  disarmed (2D `Map.svelte` + 3D), cleared on arm.
+- **Recenter on 2D→3D switch** (`recenter3D`): the `{#if}{:else}` toggle remounts Map3D, and
+  the old inline `flyTo` ran before the canvas had a size → no-op on the first switch. Now
+  deferred via rAF until the canvas is laid out; targets the UAV (replay marker / live UAV)
+  with the track-start anchor as fallback.
+- **Over-zoom placeholder auto-refresh**: when `fetchAndCacheImage` detects a *newly*
+  unavailable region, a debounced `scheduleImageryRefresh()` re-applies the provider so the
+  1–3 placeholder tiles that slipped through before the hash was confirmed are re-requested
+  and replaced by the parent tile — no manual zoom needed.
+- **Tile-distance/LOD experiments reverted**: tried `tileCacheSize`, `preloadSiblings`, a
+  view-distance cap and higher `maximumScreenSpaceError` to curb the thousands of tiles loaded
+  at grazing angles — all either ineffective or too muddy/limiting; left at Cesium defaults.
 
 ## Notes
 

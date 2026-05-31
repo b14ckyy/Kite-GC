@@ -7,11 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — 3D map: altitude/geoid, camera, source switching & trails
+- **Track altitude reworked** — the 3D track now uses the **fused, arming-relative altitude** (`nav_alt_m`, smooth — validated against decoded blackbox logs as far cleaner than GPS/baro) anchored at the first GPS fix, instead of raw GPS MSL. Fixes the stair-stepped vertical track
+- **Clean terrain-derived geoid offset** — `N = cesiumGround_ellipsoid − Copernicus MSL` at the reference point (GPS-independent), replacing the single-point GPS-snap that mis-placed tower/rooftop starts and shifted the whole track. Applied to track, ground shadow/curtain and the playback marker; the mission stays `altMsl + N` (consistent)
+- **Live UAV derives its own geoid** at the first live GPS fix, so on a fresh start the craft sits at the right height instead of ~tens of metres below ground (previously the offset was only computed when a log was loaded)
+- **Map data clears on source switches** — replay log ↔ log and replay → live wipe the old track / trail / markers; a fresh live connect clears **only when disarmed** (an armed reconnect keeps the track for connection recovery); a disconnect never clears. Stops tracks/markers bleeding across locations and the slowdown from stacking continents. The mission overlay is kept and re-placed at the new geoid
+- **Progressive shadow/curtain no longer spans a log switch** — `clearDeco()` cancels its pending grow/rebuild timers and a load guard stops the async track load from appending stale points (the old behaviour drew a wall/shadow between the two locations)
+- **Camera follow (heading-lock)** — start pitch lowered to **20°** (view from behind with the horizon visible) and the **sideways-drag jitter fixed**: Cesium's own rotate is disabled in follow so it can't fight the per-frame heading lock; pitch is driven by a dedicated vertical-drag handler
+- **Recenter on every 2D→3D switch** — reliably frames the UAV/track again (the old inline `flyTo` ran before the canvas was laid out on the first switch and did nothing)
+- **Over-zoom placeholder tiles replaced immediately** — when a new blank-tile region is detected, the visible tiles are re-requested so the 1–3 placeholders that slipped through before hash confirmation are swapped for the parent tile, without a manual zoom
+- **Live trail only while armed**; a thin plain **black pre-arm trail** shows GPS movement while disarmed (2D + 3D), cleared on arm
+
 ### Added — 3D map: altitude curtain + mission overlay
 - **3D flight track**: black outline, a terrain-draped grey ground shadow, and a faint vertical **altitude curtain** (wall down to the ground, flight-mode coloured, ~22 % opacity). **Settings → Map → "Altitude Curtain (3D Map)"** toggle (global, default on). In replay the shadow + curtain **build progressively behind the UAV** to show flown progress — chunked growing build (scales to hour-long logs, no per-frame flicker) with a reverse-scrub debounce
 - **3D mission overlay mirroring the 2D map**: the **same waypoint marker SVGs** as viewport-facing billboards + the **same line colours/styles** (flight path, greyed-beyond-end, launch connector, jump, RTH), drawn as an always-visible overlay; plus per-WP **drop-lines** (white dashed + black outline) to the ground. Shared `wpIconSpec` (missionIcons), shared geometry helpers (`missionGeometry`), and `resolveMissionAltitudes` (REL/AMSL/AGL → MSL)
 - **"Show Mission" toggle** in the replay player (MISSION button after REC/BBX): in replay it shows/hides the loaded mission on **2D + 3D**; in planning/live a loaded mission is **always shown** (`showMission` + `replayActive` stores)
-- _Planning + remaining work in `docs/dev/Map3DRework.md`: live-trail curtain (deferred to simulator tests) and a clean terrain-derived geoid offset (to replace the single-point GPS-snap that mis-places towers / planning-only views) are next._
+- _Planning + remaining work in `docs/dev/Map3DRework.md`: the live-trail curtain is deferred to simulator long-flight tests; the FPV cockpit view + follow tuning are the remaining Phase-3 items. (The clean terrain-derived geoid offset is now done — see the Fixed entry above.)_
 
 ### Fixed — 2D map follow (replay + smoothing)
 - **Follow / Heading-Follow now work during blackbox replay** — the follow path was driven only by the live telemetry store (empty during playback), so the 2D map didn't track the replayed UAV. It now follows the playback position too (live behaviour unchanged)
