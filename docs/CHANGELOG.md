@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — 3D map: altitude curtain + mission overlay
+- **3D flight track**: black outline, a terrain-draped grey ground shadow, and a faint vertical **altitude curtain** (wall down to the ground, flight-mode coloured, ~22 % opacity). **Settings → Map → "Altitude Curtain (3D Map)"** toggle (global, default on). In replay the shadow + curtain **build progressively behind the UAV** to show flown progress — chunked growing build (scales to hour-long logs, no per-frame flicker) with a reverse-scrub debounce
+- **3D mission overlay mirroring the 2D map**: the **same waypoint marker SVGs** as viewport-facing billboards + the **same line colours/styles** (flight path, greyed-beyond-end, launch connector, jump, RTH), drawn as an always-visible overlay; plus per-WP **drop-lines** (white dashed + black outline) to the ground. Shared `wpIconSpec` (missionIcons), shared geometry helpers (`missionGeometry`), and `resolveMissionAltitudes` (REL/AMSL/AGL → MSL)
+- **"Show Mission" toggle** in the replay player (MISSION button after REC/BBX): in replay it shows/hides the loaded mission on **2D + 3D**; in planning/live a loaded mission is **always shown** (`showMission` + `replayActive` stores)
+- _Planning + remaining work in `docs/dev/Map3DRework.md`: live-trail curtain (deferred to simulator tests) and a clean terrain-derived geoid offset (to replace the single-point GPS-snap that mis-places towers / planning-only views) are next._
+
 ### Fixed — 2D map follow (replay + smoothing)
 - **Follow / Heading-Follow now work during blackbox replay** — the follow path was driven only by the live telemetry store (empty during playback), so the 2D map didn't track the replayed UAV. It now follows the playback position too (live behaviour unchanged)
 - **Smooth tracking** — map centre + UAV marker ease toward each new position via a rAF loop (~250 ms catch-up) instead of snapping on every (≈2 Hz) telemetry/playback update; heading interpolates the short way; large jumps (scrub / new flight / first fix) snap

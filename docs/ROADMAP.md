@@ -583,6 +583,10 @@ Source: **Copernicus DEM GLO-30** (geoid/EGM2008 ≈ MSL, no API key, offline-ca
 ### Planned (3D Map)
 - [ ] 3D GLTF UAV models with attitude representation (roll/pitch/yaw)
 - [x] Flight mode coloring of 3D track segments (Map3D — see Milestone 5b colored tracks)
+- [x] **Altitude curtain + ground shadow** under the 3D track (vertical wall to ground + terrain-draped shadow; flight-mode coloured; Settings→Map toggle; in replay built progressively behind the UAV, chunked for scale + reverse-scrub debounce). See `docs/dev/Map3DRework.md`
+- [x] **Mission overlay in 3D** — mirrors the 2D map (same marker SVGs as billboards + same line styles, always-visible overlay) + per-WP drop-lines; "Show Mission" replay toggle (2D + 3D); planning/live always shown
+- [ ] **Live-trail curtain** (same treatment as the replay track; deferred to simulator long-flight tests)
+- [ ] **Clean terrain-derived geoid offset** — replace the single-point GPS-snap (mis-places tower starts + planning-only views) with `cesiumGround − copernicusGround` undulation; track keeps fused relative altitude anchored at the first GPS fix
 - [ ] Smoothed flight track (polyline simplification or spline interpolation)
 - [ ] UI button refinements and responsive layout
 - [ ] Altitude exaggeration toggle for low-altitude flights
