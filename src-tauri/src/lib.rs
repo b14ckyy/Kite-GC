@@ -26,7 +26,7 @@ use commands::info::get_app_version;
 use commands::terrain::{terrain_elevation, terrain_fan, terrain_profile};
 use terrain::TerrainProvider;
 use commands::mission::{
-    mission_get, mission_clear, mission_add_wp, mission_insert_wp,
+    mission_get, mission_clear, mission_set, mission_add_wp, mission_insert_wp,
     mission_remove_wp, mission_update_wp, mission_reorder_wp,
     mission_download, mission_upload, mission_export_xml, mission_import_xml,
     mission_save_file, mission_load_file,
@@ -88,6 +88,7 @@ pub fn run() {
             get_app_version,
             mission_get,
             mission_clear,
+            mission_set,
             mission_add_wp,
             mission_insert_wp,
             mission_remove_wp,

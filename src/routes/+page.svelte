@@ -1202,7 +1202,7 @@
   {#if navPanelOpen && !terrainOpen}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="nav-panel" class:nav-panel-logbook={activeTab === 'logbook' && !logbookDetailOpen} class:nav-panel-wide={logbookDetailOpen} class:nav-panel-minimized={logbookMinimized && logbookHasFlightOnMap} onclick={() => { if (logbookMinimized) expandLogbook(); }}>
+    <div class="nav-panel" class:nav-panel-mission={activeTab === 'mission'} class:nav-panel-logbook={activeTab === 'logbook' && !logbookDetailOpen} class:nav-panel-wide={logbookDetailOpen} class:nav-panel-minimized={logbookMinimized && logbookHasFlightOnMap} onclick={() => { if (logbookMinimized) expandLogbook(); }}>
       <div class="panel-content">
         <!-- UAV Info Tab -->
         {#if activeTab === "uav-info"}
@@ -1566,6 +1566,12 @@
     backdrop-filter: blur(12px);
     animation: panel-slide-in 0.25s ease-out;
     transition: width 0.25s ease;
+  }
+
+  .nav-panel.nav-panel-mission {
+    /* +15% over the 360px base — fits all toolbar buttons on one row and
+       leaves headroom for richer WP-list entries. */
+    width: min(414px, calc(100vw - 62px - var(--grid-side-width) - 54px - 12px));
   }
 
   .nav-panel.nav-panel-logbook {

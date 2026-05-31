@@ -12,10 +12,12 @@
     missionSaveFile, missionLoadFile,
     activeMissionIndex, missionCount,
     switchMission, addMission, removeMission, getTotalWpCount,
+    canUndo, canRedo, undo, redo,
     MAX_MISSIONS, MAX_WAYPOINTS_TOTAL,
     type Waypoint, type Mission, WpAction, WP_ACTION_LABELS, WP_ACTION_KEYS,
     hasLocation, isModifier,
   } from '$lib/stores/mission';
+  import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
   import { contextMenu } from '$lib/actions/contextMenu';
   import { buildWaypointMenu } from '$lib/helpers/waypointMenu';
   import { connection } from '$lib/stores/connection';
@@ -38,6 +40,8 @@
   let currentEditing = $state<boolean>(get(editMode));
   let currentMissionIdx = $state<number>(get(activeMissionIndex));
   let currentMissionCount = $state<number>(get(missionCount));
+  let canUndoNow = $state<boolean>(get(canUndo));
+  let canRedoNow = $state<boolean>(get(canRedo));
 
   // Lazy pattern panel state (to avoid loading heavy module on startup)
   let showPatternPanel = $state(false);
@@ -57,8 +61,25 @@
   });
   const unsubMissionIdx = activeMissionIndex.subscribe(i => { currentMissionIdx = i; });
   const unsubMissionCount = missionCount.subscribe(c => { currentMissionCount = c; });
+  const unsubCanUndo = canUndo.subscribe(v => { canUndoNow = v; });
+  const unsubCanRedo = canRedo.subscribe(v => { canRedoNow = v; });
 
-  onDestroy(() => { unsubMission(); unsubSelIdx(); unsubSel(); unsubEditMode(); unsubTelem(); unsubMissionIdx(); unsubMissionCount(); });
+  onDestroy(() => { unsubMission(); unsubSelIdx(); unsubSel(); unsubEditMode(); unsubTelem(); unsubMissionIdx(); unsubMissionCount(); unsubCanUndo(); unsubCanRedo(); });
+
+  // Keyboard: Ctrl+Z = undo, Ctrl+Y / Ctrl+Shift+Z = redo. Edit-mode only and
+  // not while a text field is focused (so native input undo keeps working).
+  function onKeydown(e: KeyboardEvent) {
+    if (!currentEditing || showPatternPanel) return;
+    if (!(e.ctrlKey || e.metaKey)) return;
+    const tgt = e.target as HTMLElement | null;
+    const tag = tgt?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tgt?.isContentEditable) return;
+    const k = e.key.toLowerCase();
+    if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+    else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); redo(); }
+  }
+
+  let confirmDialog: ReturnType<typeof ConfirmDialog>;
 
   let downloadLoading = $state(false);
   let uploadLoading = $state(false);
@@ -163,7 +184,18 @@
     }
   }
 
-  function handleClear() { removeMission(currentMissionIdx); statusMessage = $t('mission.missionCleared'); }
+  async function handleClear() {
+    if (currentMission.waypoints.length > 0) {
+      const ans = await confirmDialog.show({
+        title: $t('mission.clearConfirmTitle'),
+        message: $t('mission.clearConfirmMsg'),
+        buttons: [{ label: $t('mission.clearConfirmYes'), value: 'clear', danger: true }],
+      });
+      if (ans !== 'clear') return;
+    }
+    await removeMission(currentMissionIdx);
+    statusMessage = $t('mission.missionCleared');
+  }
   // List selection. Plain click = single; Ctrl/⌘ = toggle; Shift = range; a tap
   // on the number badge toggles too (touch-friendly). Multi-select gestures are
   // edit-mode only.
@@ -260,6 +292,8 @@
   const missionEndIdx = $derived(findMissionEndIndex(currentMission.waypoints));
 </script>
 
+<svelte:window onkeydown={onKeydown} />
+
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   class="mission-panel"
@@ -273,6 +307,11 @@
     <button class="btn-edit" class:active={currentEditing} onclick={() => editMode.update(v => !v)} title={$t('mission.toggleEdit')}>
       ✏️ {currentEditing ? $t('mission.editing') : $t('mission.edit')}
     </button>
+
+    {#if currentEditing && !showPatternPanel}
+      <button class="btn-icon" onclick={() => undo()} disabled={!canUndoNow} title={$t('mission.undo')} aria-label={$t('mission.undo')}>↶</button>
+      <button class="btn-icon" onclick={() => redo()} disabled={!canRedoNow} title={$t('mission.redo')} aria-label={$t('mission.redo')}>↷</button>
+    {/if}
 
     {#if currentEditing}
       <button
@@ -435,6 +474,8 @@
   {#if dragOver}<div class="drop-overlay">{$t('mission.dropHint')}</div>{/if}
 </div>
 
+<ConfirmDialog bind:this={confirmDialog} />
+
 <style>
   .mission-panel { display: flex; flex-direction: column; gap: 0; flex: 1; min-height: 0; padding: 4px; position: relative; overflow: hidden; color-scheme: dark; font-size: 13px; }
   .mission-panel.pattern-mode { overflow-y: auto; }
@@ -484,6 +525,9 @@
     border: none;
     cursor: pointer;
   }
+  .btn-icon { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: 1px solid #555; border-radius: 4px; background: #2a2a2a; color: #ccc; cursor: pointer; font-size: 15px; line-height: 1; margin-left: 4px; }
+  .btn-icon:hover:not(:disabled) { background: #3a3a3a; color: #fff; }
+  .btn-icon:disabled { opacity: 0.35; cursor: default; }
   .btn-sm { padding: 3px 8px; border: 1px solid #555; border-radius: 4px; background: #2a2a2a; color: #ccc; cursor: pointer; font-size: 13px; }
   .btn-sm:hover { background: #3a3a3a; }
   .btn-sm.btn-danger { border-color: #c0392b; color: #e74c3c; }

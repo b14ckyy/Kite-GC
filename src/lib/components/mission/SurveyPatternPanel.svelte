@@ -251,21 +251,27 @@
 
     // Convert SurveyWaypoint[] → INAV Waypoint[] and append to active mission
     try {
-      const { missionAddWp, WpAction, altFromM, fromDeg, ALT_MODE_REL, ALT_MODE_AMSL, ALT_MODE_AGL } = await import('$lib/stores/mission');
-      for (const swp of wps) {
-        const altCm = altFromM(swp.alt);
-        const speedCm = swp.speed ? Math.round(swp.speed * 100) : 0;
-        // 'ground' = AGL (resolved to AMSL on export); 'amsl' = absolute; else relative.
-        const altModeNum = swp.altMode === 'amsl' ? ALT_MODE_AMSL
-          : swp.altMode === 'ground' ? ALT_MODE_AGL
-          : ALT_MODE_REL;
-        // p3 bit 0 = AMSL flag (AGL leaves it 0; backend sets it at export),
-        // bits 1-4 = userActionFlags (UA1=bit1, …)
-        let p3 = altModeNum === ALT_MODE_AMSL ? 1 : 0;
-        if (swp.userActionFlags) {
-          p3 |= ((swp.userActionFlags & 0x0F) << 1);
+      const { missionAddWp, WpAction, altFromM, fromDeg, ALT_MODE_REL, ALT_MODE_AMSL, ALT_MODE_AGL, beginUndoGroup, endUndoGroup } = await import('$lib/stores/mission');
+      // Whole pattern append = a single undo step.
+      beginUndoGroup();
+      try {
+        for (const swp of wps) {
+          const altCm = altFromM(swp.alt);
+          const speedCm = swp.speed ? Math.round(swp.speed * 100) : 0;
+          // 'ground' = AGL (resolved to AMSL on export); 'amsl' = absolute; else relative.
+          const altModeNum = swp.altMode === 'amsl' ? ALT_MODE_AMSL
+            : swp.altMode === 'ground' ? ALT_MODE_AGL
+            : ALT_MODE_REL;
+          // p3 bit 0 = AMSL flag (AGL leaves it 0; backend sets it at export),
+          // bits 1-4 = userActionFlags (UA1=bit1, …)
+          let p3 = altModeNum === ALT_MODE_AMSL ? 1 : 0;
+          if (swp.userActionFlags) {
+            p3 |= ((swp.userActionFlags & 0x0F) << 1);
+          }
+          await missionAddWp(WpAction.Waypoint, fromDeg(swp.lat), fromDeg(swp.lng), altCm, speedCm, 0, p3, altModeNum);
         }
-        await missionAddWp(WpAction.Waypoint, fromDeg(swp.lat), fromDeg(swp.lng), altCm, speedCm, 0, p3, altModeNum);
+      } finally {
+        endUndoGroup();
       }
       console.log(`[Pattern] Successfully added ${wps.length} waypoints`);
     } catch (e) {

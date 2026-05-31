@@ -36,6 +36,15 @@ pub fn mission_clear(store: State<'_, MissionStore>) {
     store.clear();
 }
 
+/// Replace the entire active-mission waypoint list in one call. Preserves
+/// every field (including `alt_mode`). Used by undo/redo restore, where the
+/// snapshot is already a valid, numbered mission.
+#[tauri::command]
+pub fn mission_set(waypoints: Vec<Waypoint>, store: State<'_, MissionStore>) -> Mission {
+    store.set_waypoints(waypoints);
+    store.snapshot()
+}
+
 /// Add a waypoint to the mission
 #[tauri::command]
 pub fn mission_add_wp(

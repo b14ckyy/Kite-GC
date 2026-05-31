@@ -176,7 +176,13 @@ export function clearWpSelection(): void {
 /** Batch-remove all selected waypoints (descending so indices stay valid). */
 export async function removeSelectedWps(): Promise<void> {
   const ids = [...get(selectedWpIndices)].sort((a, b) => b - a);
-  for (const idx of ids) await missionRemoveWp(idx);
+  if (ids.length === 0) return;
+  beginUndoGroup();
+  try {
+    for (const idx of ids) await missionRemoveWp(idx);
+  } finally {
+    endUndoGroup();
+  }
   clearWpSelection();
 }
 
@@ -252,6 +258,7 @@ export async function switchMission(newIdx: number): Promise<void> {
 export function addMission(): number {
   const count = get(missionCount);
   if (count >= MAX_MISSIONS) return -1;
+  pushUndo();
   const newIdx = count + 1;
   missionSlots.set(newIdx, []);
   missionCount.set(newIdx);
@@ -261,6 +268,8 @@ export function addMission(): number {
 /** Remove a mission tab and its data. Returns the new active index. */
 export async function removeMission(idx: number): Promise<number> {
   const count = get(missionCount);
+  beginUndoGroup();
+  try {
   if (count <= 1) {
     // Last mission — just clear it
     await missionClear();
@@ -311,6 +320,9 @@ export async function removeMission(idx: number): Promise<number> {
   activeMissionIndex.set(newActive);
   clearWpSelection();
   return newActive;
+  } finally {
+    endUndoGroup();
+  }
 }
 
 /** Get total WP count across all missions (synchronous) */
@@ -330,11 +342,125 @@ export function resetMultiMission(): void {
   missionSlots.clear();
   missionCount.set(1);
   activeMissionIndex.set(1);
+  clearUndoHistory();
 }
 
 /** Reset in-memory mission without touching the FC (used when switching autopilot systems) */
 export function missionResetMemory(): void {
   mission.set(createEmptyMission());
+  clearUndoHistory();
+}
+
+// ── Undo / Redo ─────────────────────────────────────────────────────
+// Snapshot-based history covering ALL missions (active + cached slots) so
+// cross-mission edits like "Move to Mission N" are undoable. The launch point
+// is intentionally excluded — it is not part of what gets uploaded to the FC.
+//
+// One snapshot = one user action. The primitive mutators (add/insert/remove/
+// update/reorder/clear) record a step automatically via pushUndo(). Multi-step
+// actions (batch edit/delete, move, pattern append, terrain correction) wrap
+// their primitives in beginUndoGroup()/endUndoGroup() so the whole action
+// collapses into a single undo step.
+
+interface MissionSnapshot {
+  activeIdx: number;
+  count: number;
+  /** 1-based mission index → deep-copied waypoints, for every slot in use */
+  missions: Map<number, Waypoint[]>;
+}
+
+const UNDO_LIMIT = 50;
+let undoStack: MissionSnapshot[] = [];
+let redoStack: MissionSnapshot[] = [];
+/** >0 while a group/restore is running — suppresses primitive auto-recording. */
+let undoSuspend = 0;
+
+/** Reactive flags for the toolbar buttons / shortcut availability. */
+export const canUndo = writable<boolean>(false);
+export const canRedo = writable<boolean>(false);
+function refreshUndoFlags(): void {
+  canUndo.set(undoStack.length > 0);
+  canRedo.set(redoStack.length > 0);
+}
+
+function cloneWps(wps: Waypoint[]): Waypoint[] {
+  return wps.map((w) => ({ ...w }));
+}
+
+/** Capture the full multi-mission state. The active mission is read live from
+ *  the `mission` store; the rest come from the slot cache. */
+function captureState(): MissionSnapshot {
+  const activeIdx = get(activeMissionIndex);
+  const count = get(missionCount);
+  const missions = new Map<number, Waypoint[]>();
+  for (let i = 1; i <= count; i++) {
+    const wps = i === activeIdx ? get(mission).waypoints : (missionSlots.get(i) ?? []);
+    missions.set(i, cloneWps(wps));
+  }
+  return { activeIdx, count, missions };
+}
+
+/** Restore a captured state to the slot cache + backend (active mission). */
+async function restoreState(snap: MissionSnapshot): Promise<void> {
+  undoSuspend++; // restoring must not record further steps
+  try {
+    missionSlots.clear();
+    for (const [i, wps] of snap.missions) missionSlots.set(i, cloneWps(wps));
+    missionCount.set(snap.count);
+    activeMissionIndex.set(snap.activeIdx);
+    const activeWps = snap.missions.get(snap.activeIdx) ?? [];
+    await missionSetWaypoints(cloneWps(activeWps));
+    clearWpSelection();
+  } finally {
+    undoSuspend--;
+  }
+}
+
+/** Push the CURRENT state onto the undo stack (call BEFORE a mutation). No-op
+ *  while a group/restore is in progress. Clears the redo stack. */
+export function pushUndo(): void {
+  if (undoSuspend > 0) return;
+  undoStack.push(captureState());
+  if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+  redoStack = [];
+  refreshUndoFlags();
+}
+
+/** Begin a grouped action: records one snapshot, then suspends primitive
+ *  auto-recording so all inner mutations collapse into that single step. */
+export function beginUndoGroup(): void {
+  pushUndo();
+  undoSuspend++;
+}
+/** End a grouped action (must be paired with beginUndoGroup). */
+export function endUndoGroup(): void {
+  if (undoSuspend > 0) undoSuspend--;
+}
+
+/** Undo the last recorded action. */
+export async function undo(): Promise<void> {
+  if (undoStack.length === 0) return;
+  redoStack.push(captureState());
+  const snap = undoStack.pop() as MissionSnapshot;
+  await restoreState(snap);
+  refreshUndoFlags();
+}
+
+/** Redo the last undone action. */
+export async function redo(): Promise<void> {
+  if (redoStack.length === 0) return;
+  undoStack.push(captureState());
+  const snap = redoStack.pop() as MissionSnapshot;
+  await restoreState(snap);
+  refreshUndoFlags();
+}
+
+/** Wipe the history (fresh baseline after a load/download/import). */
+export function clearUndoHistory(): void {
+  undoStack = [];
+  redoStack = [];
+  undoSuspend = 0;
+  refreshUndoFlags();
 }
 
 // ── Backend Sync ────────────────────────────────────────────────────
@@ -346,9 +472,18 @@ export async function missionGet(): Promise<Mission> {
   return m;
 }
 
+/** Replace ALL waypoints of the active mission in one backend call, preserving
+ *  every field (including alt_mode). Used by undo/redo restore. */
+export async function missionSetWaypoints(waypoints: Waypoint[]): Promise<Mission> {
+  const m = await invoke<Mission>('mission_set', { waypoints });
+  mission.set(m);
+  return m;
+}
+
 /** Clear mission */
 export async function missionClear(): Promise<void> {
-  const m = await invoke<Mission>('mission_clear');
+  pushUndo();
+  await invoke<Mission>('mission_clear');
   mission.set(createEmptyMission());
 }
 
@@ -363,6 +498,7 @@ export async function missionAddWp(
   p3 = 0,
   altMode?: number
 ): Promise<Mission> {
+  pushUndo();
   const m = await invoke<Mission>('mission_add_wp', {
     action, lat, lon, altitude, p1, p2, p3, altMode,
   });
@@ -382,6 +518,7 @@ export async function missionInsertWp(
   p3 = 0,
   altMode?: number
 ): Promise<Mission> {
+  pushUndo();
   const m = await invoke<Mission>('mission_insert_wp', {
     index, action, lat, lon, altitude, p1, p2, p3, altMode,
   });
@@ -391,6 +528,7 @@ export async function missionInsertWp(
 
 /** Remove a waypoint by index */
 export async function missionRemoveWp(index: number): Promise<Mission> {
+  pushUndo();
   const m = await invoke<Mission>('mission_remove_wp', { index });
   mission.set(m);
   return m;
@@ -408,12 +546,17 @@ export async function moveWaypointToMission(wpIndex: number, targetIdx: number):
   const wps = get(mission).waypoints;
   if (wpIndex < 0 || wpIndex >= wps.length) return;
 
-  // Append a copy to the target slot, then remove from the active mission.
-  const target = missionSlots.get(targetIdx) ?? [];
-  target.push({ ...wps[wpIndex] });
-  missionSlots.set(targetIdx, target);
+  beginUndoGroup();
+  try {
+    // Append a copy to the target slot, then remove from the active mission.
+    const target = missionSlots.get(targetIdx) ?? [];
+    target.push({ ...wps[wpIndex] });
+    missionSlots.set(targetIdx, target);
 
-  await missionRemoveWp(wpIndex);
+    await missionRemoveWp(wpIndex);
+  } finally {
+    endUndoGroup();
+  }
   clearWpSelection();
 }
 
@@ -428,13 +571,18 @@ export async function moveSelectedWpsToMission(targetIdx: number): Promise<void>
   const wps = get(mission).waypoints;
   const toMove = sel.filter((i) => i >= 0 && i < wps.length).map((i) => ({ ...wps[i] }));
 
-  // Append (in order) to the target slot, then remove from the active mission
-  // descending so the indices stay valid.
-  const target = missionSlots.get(targetIdx) ?? [];
-  for (const wp of toMove) target.push(wp);
-  missionSlots.set(targetIdx, target);
+  beginUndoGroup();
+  try {
+    // Append (in order) to the target slot, then remove from the active mission
+    // descending so the indices stay valid.
+    const target = missionSlots.get(targetIdx) ?? [];
+    for (const wp of toMove) target.push(wp);
+    missionSlots.set(targetIdx, target);
 
-  for (const i of [...sel].sort((a, b) => b - a)) await missionRemoveWp(i);
+    for (const i of [...sel].sort((a, b) => b - a)) await missionRemoveWp(i);
+  } finally {
+    endUndoGroup();
+  }
   clearWpSelection();
 }
 
@@ -443,6 +591,7 @@ export async function missionUpdateWp(
   index: number,
   wp: Waypoint
 ): Promise<Mission> {
+  pushUndo();
   const m = await invoke<Mission>('mission_update_wp', {
     index,
     action: wp.action,
@@ -461,6 +610,7 @@ export async function missionUpdateWp(
 
 /** Reorder a waypoint */
 export async function missionReorderWp(from: number, to: number): Promise<Mission> {
+  pushUndo();
   const m = await invoke<Mission>('mission_reorder_wp', { from, to });
   mission.set(m);
   return m;
@@ -470,6 +620,7 @@ export async function missionReorderWp(from: number, to: number): Promise<Missio
 export async function missionDownload(fromEeprom = false): Promise<Mission> {
   const m = await invoke<Mission>('mission_download', { fromEeprom });
   mission.set(m);
+  clearUndoHistory();
   return m;
 }
 
@@ -501,6 +652,7 @@ export async function missionImportXml(xml: string): Promise<Mission> {
   const m = await invoke<Mission>('mission_import_xml', { xml });
   mission.set(m);
   applyLoadedHome(m);
+  clearUndoHistory();
   return m;
 }
 
@@ -514,5 +666,6 @@ export async function missionLoadFile(path: string): Promise<Mission> {
   const m = await invoke<Mission>('mission_load_file', { path });
   mission.set(m);
   applyLoadedHome(m);
+  clearUndoHistory();
   return m;
 }

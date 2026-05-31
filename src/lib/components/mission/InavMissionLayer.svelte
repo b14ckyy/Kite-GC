@@ -9,7 +9,7 @@
     mission, geoWaypoints, selectedWpIndex, selectedWpIndices,
     selectWpSingle, toggleWpSelection, clearWpSelection, editMode, launchPoint,
     missionAddWp, missionUpdateWp, missionRemoveWp, missionInsertWp,
-    missionReorderWp,
+    missionReorderWp, beginUndoGroup, endUndoGroup,
     getTotalWpCount, MAX_WAYPOINTS_TOTAL,
     ALT_MODE_REL, ALT_MODE_AMSL, ALT_MODE_AGL,
     type Waypoint, type Mission, type LaunchPoint, WpAction, hasLocation, isModifier, toDeg, fromDeg, altFromM,
@@ -397,8 +397,11 @@
       if (idx < currentMission.waypoints.length - 1) { missionReorderWp(idx, idx + 1); selectWpSingle(idx + 1); }
     });
     el.querySelector('button[data-action="remove"]')?.addEventListener('click', () => {
+      // WP + its attached modifiers = a single undo step.
+      beginUndoGroup();
       for (let k = modifiers.length - 1; k >= 0; k--) missionRemoveWp(modifiers[k].idx);
       missionRemoveWp(idx);
+      endUndoGroup();
       selectedWpIndex.set(-1);
     });
 

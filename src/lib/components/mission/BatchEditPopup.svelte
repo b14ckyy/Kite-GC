@@ -12,7 +12,7 @@
   import { t } from 'svelte-i18n';
   import {
     mission, selectedWpIndices, missionUpdateWp, WpAction, hasLocation,
-    ALT_MODE_REL, ALT_MODE_AMSL, type Waypoint,
+    ALT_MODE_REL, ALT_MODE_AMSL, beginUndoGroup, endUndoGroup, type Waypoint,
   } from '$lib/stores/mission';
   import { batchEdit, closeBatchEdit } from '$lib/stores/batchEdit';
   import { convertAltCm } from '$lib/helpers/altConvert';
@@ -96,6 +96,7 @@
   async function cycleAltMode() {
     if (busy || altWps.length === 0) return;
     busy = true;
+    beginUndoGroup(); // batch alt-mode change = one undo step
     try {
       const target = ((altModeCommon ?? ALT_MODE_REL) + 1) % 3;
       for (const { i, wp } of altWps) {
@@ -105,6 +106,7 @@
       }
       load();
     } finally {
+      endUndoGroup();
       busy = false;
     }
   }
@@ -150,7 +152,14 @@
         }
       }
 
-      for (const [i, wp] of updates) await missionUpdateWp(i, wp);
+      if (updates.size > 0) {
+        beginUndoGroup(); // whole batch apply = one undo step
+        try {
+          for (const [i, wp] of updates) await missionUpdateWp(i, wp);
+        } finally {
+          endUndoGroup();
+        }
+      }
       load(); // refresh diff state + reset relative change
     } finally {
       busy = false;

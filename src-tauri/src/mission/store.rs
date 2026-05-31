@@ -32,6 +32,15 @@ impl MissionStore {
         self.inner.lock().unwrap().clear();
     }
 
+    /// Replace the entire waypoint list, preserving every field as-is
+    /// (numbers/flags/alt_mode). Used by undo/redo restore, where the snapshot
+    /// is already a valid, numbered mission. Keeps the existing FC info.
+    pub fn set_waypoints(&self, waypoints: Vec<Waypoint>) {
+        let mut m = self.inner.lock().unwrap();
+        m.waypoints = waypoints;
+        m.dirty = true;
+    }
+
     /// Add a waypoint
     pub fn push(&self, wp: Waypoint) {
         self.inner.lock().unwrap().push(wp);

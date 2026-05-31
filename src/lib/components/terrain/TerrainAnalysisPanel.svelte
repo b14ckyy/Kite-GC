@@ -20,6 +20,8 @@
     launchPoint,
     missionUpdateWp,
     missionInsertWp,
+    beginUndoGroup,
+    endUndoGroup,
     getTotalWpCount,
     MAX_WAYPOINTS_TOTAL,
     WpAction,
@@ -344,6 +346,7 @@
       if (ans !== 'apply') return;
     }
     applying = true;
+    beginUndoGroup(); // whole terrain correction = one undo step
     try {
       for (const ch of c.changes) {
         const wp = get(mission).waypoints[ch.index];
@@ -357,6 +360,7 @@
     } catch (e) {
       console.error('[terrain] apply correction failed', e);
     } finally {
+      endUndoGroup();
       applying = false;
     }
   }
