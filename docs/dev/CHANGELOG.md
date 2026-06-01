@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Mission: Fly-by-Home (FBH) waypoints
+- **Fly-by-Home support** — FBH is INAV's `NAV_WP_FLAG_HOME` (0x48) flag on a real, numbered WAYPOINT/POSHOLD_TIME/LAND that executes at the arming home location (not a separate waypoint type, and not shown in the stock INAV Configurator UI). It is added as a **modifier** in the waypoint editor: pick "Fly By Home", and a real WP is created at the home/launch point with the flag set
+- **Nested editor section** — the FBH is edited under its parent WP in the same popup (like Set Heading, but richer): a sub-type dropdown (Waypoint / PosHold Time / Land), altitude (+ REL/AMSL/AGL), and the type's params (speed / hold time / user-action bits) — no coordinates
+- **Map** — an orange house marker (with the WP number) sits on the inbound leg; dashed inbound + outbound legs in the flight-path blue route through a thin blue **ring around the home/launch marker** (so the legs stop at the ring instead of overdrawing it). The solid flight path breaks cleanly at the FBH instead of cutting straight across. Also fixes FBH waypoints (lat/lon 0) previously drawing a line to "Null Island"
+- **Waypoint list** — FBH shows as an orange, numbered `↳ FBH` row (number kept for OSD/other-app consistency) with its altitude and "→ Home"
+- **Backend** — `Mission::renumber()` no longer overwrites a Fly-by-Home flag (0x48) with the last-waypoint flag (0xA5) on the final WP; the flag round-trips through MSP upload/download and `.mission` XML
+- _3D map overlay for FBH is a separate follow-up._
+
 ### Fixed — 3D map: altitude/geoid, camera, source switching & trails
 - **Track altitude reworked** — the 3D track now uses the **fused, arming-relative altitude** (`nav_alt_m`, smooth — validated against decoded blackbox logs as far cleaner than GPS/baro) anchored at the first GPS fix, instead of raw GPS MSL. Fixes the stair-stepped vertical track
 - **Clean terrain-derived geoid offset** — `N = cesiumGround_ellipsoid − Copernicus MSL` at the reference point (GPS-independent), replacing the single-point GPS-snap that mis-placed tower/rooftop starts and shifted the whole track. Applied to track, ground shadow/curtain and the playback marker; the mission stays `altMsl + N` (consistent)

@@ -249,7 +249,7 @@ This document tracks planned features, organized by milestone.
 - [ ] **Waypoint parameter view** — refreshed per-WP parameter panel in the editor
 - [ ] **Active-waypoint marker on the map** — wire `MSP_NAV_STATUS` / `decode_nav_status` (backend decoder ready & tested, just not connected) to highlight the current target WP in flight
 - [ ] **Disable/enable waypoint** — deactivate a WP in a loaded mission without deleting it (frozen in place, excluded from path + FC upload, kept in the file's meta area, greyed on the map). Design captured in `docs/dev/WaypointDisable.md`
-- [ ] **Fly-by-Home waypoint handling** — wire `is_fly_by_home` / `WP_FLAG_FBH` (overlooked earlier; backend helper exists)
+- [x] **Fly-by-Home waypoint handling** — FBH is INAV's `NAV_WP_FLAG_HOME` (0x48) flag on a real numbered WAYPOINT/POSHOLD_TIME/LAND (executes at the arming home), not a separate type. Added as a **modifier** in the WP editor (creates the FBH WP at the home/launch point) with a nested sub-type + altitude/params section; map shows an orange house on the inbound leg with dashed inbound/outbound legs through a protective home ring; orange numbered row in the WP list. `renumber()` now preserves 0x48 on a last WP. 2D done; 3D overlay pending
 - [ ] Abstraction layer for protocol-specific mission systems (ArduPilot/PX4 MAVLink)
 
 ## Milestone 5: Flight Recording & Logbook (v0.5.x)
