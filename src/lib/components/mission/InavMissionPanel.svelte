@@ -18,6 +18,7 @@
     hasLocation, isModifier,
   } from '$lib/stores/mission';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+  import { isFlyByHome } from '$lib/helpers/missionGeometry';
   import { contextMenu } from '$lib/actions/contextMenu';
   import { buildWaypointMenu } from '$lib/helpers/waypointMenu';
   import { connection } from '$lib/stores/connection';
@@ -381,7 +382,16 @@
             </thead>
             <tbody>
               {#each currentMission.waypoints as wp, i}
-                {#if isModifier(wp.action)}
+                {#if isFlyByHome(wp)}
+                  <tr class="wp-row modifier fbh" class:selected={currentSel.has(i)} class:greyed={missionEndIdx >= 0 && i > missionEndIdx} onclick={(e) => onRowClick(e, i)} use:contextMenu={() => wpMenuFor(i)}>
+                    <!-- svelte-ignore a11y_click_events_have_key_events -->
+                    <!-- svelte-ignore a11y_no_static_element_interactions -->
+                    <td class="col-num"><span class="wp-num-badge fbh-num" onclick={(e) => onBadgeClick(e, i)}>{displayNums.get(i) ?? ''}</span></td>
+                    <td class="col-type mod-indent">↳ {$t('mission.flagFbh')}</td>
+                    <td class="col-alt">{formatAltShort(wp)}</td>
+                    <td class="col-param">→ {$t('mission.home')}</td>
+                  </tr>
+                {:else if isModifier(wp.action)}
                   <tr class="wp-row modifier" class:selected={currentSel.has(i)} class:greyed={missionEndIdx >= 0 && i > missionEndIdx} onclick={(e) => onRowClick(e, i)} use:contextMenu={() => wpMenuFor(i)}>
                     <td class="col-num"></td>
                     <td class="col-type mod-indent">↳ {shortType(wp.action)}</td>
@@ -409,8 +419,8 @@
   {#if currentSelIdx >= 0 && currentSelIdx < currentMission.waypoints.length}
     {@const wp = currentMission.waypoints[currentSelIdx]}
     <div class="wp-detail">
-      <div class="detail-header">{isModifier(wp.action) ? '' : `WP ${displayNums.get(currentSelIdx) ?? ''} — `}{$t(WP_ACTION_KEYS[wp.action])}</div>
-      {#if hasLocation(wp.action)}
+      <div class="detail-header">{isModifier(wp.action) ? '' : `WP ${displayNums.get(currentSelIdx) ?? ''} — `}{isFlyByHome(wp) ? $t('mission.flagFbh') : $t(WP_ACTION_KEYS[wp.action])}</div>
+      {#if hasLocation(wp.action) && !isFlyByHome(wp)}
         <div class="detail-row"><span class="detail-label">{$t('mission.lat')}</span><span class="detail-value">{formatCoord(wp.lat)}</span></div>
         <div class="detail-row"><span class="detail-label">{$t('mission.lon')}</span><span class="detail-value">{formatCoord(wp.lon)}</span></div>
       {/if}
@@ -561,6 +571,7 @@
   .col-alt { width: 72px; color: #8bc34a; }
   .col-param { color: #aaa; }
   .wp-num-badge { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: #37a8db; color: #fff; font-size: 10px; font-weight: bold; }
+  .wp-num-badge.fbh-num { background: #e67e22; }
   .mod-indent { padding-left: 8px; color: #e67e22; font-style: italic; }
   .wp-detail { padding: 6px 8px; border: 1px solid #333; border-radius: 4px; background: #1e1e1e; flex-shrink: 0; margin-bottom: 4px; max-height: 180px; overflow-y: auto; }
   .detail-header { font-weight: bold; font-size: 13px; color: #37a8db; margin-bottom: 4px; padding-bottom: 3px; border-bottom: 1px solid #333; }

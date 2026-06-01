@@ -2,7 +2,18 @@
 // (display numbering, flight-path filtering, mission-end detection, modifiers).
 // Keeping these in one place avoids divergent copies between the renderers.
 
-import { WpAction, hasLocation, isModifier, type Waypoint } from '$lib/stores/mission';
+import { WpAction, hasLocation, isModifier, WP_FLAG_FBH, type Waypoint } from '$lib/stores/mission';
+
+/** Waypoint actions that INAV allows the Fly-by-Home flag on (since INAV 4.0). */
+export const FBH_ACTIONS: WpAction[] = [WpAction.Waypoint, WpAction.PosholdTime, WpAction.Land];
+
+/** Fly-by-Home waypoint: a WAYPOINT/POSHOLD_TIME/LAND that has no own coordinates and
+ *  executes at the home/launch point at its altitude. Mirrors the backend
+ *  `Waypoint::is_fly_by_home` (flag 0x48, or lat/lon both zero), restricted to the
+ *  actions INAV supports FBH on. */
+export function isFlyByHome(wp: Waypoint): boolean {
+  return FBH_ACTIONS.includes(wp.action) && (wp.flag === WP_FLAG_FBH || (wp.lat === 0 && wp.lon === 0));
+}
 
 /** Map waypoint index → displayed WP number (modifiers don't get a number). */
 export function buildDisplayNumbers(waypoints: Waypoint[]): Map<number, number> {

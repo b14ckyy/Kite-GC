@@ -279,9 +279,12 @@ impl Mission {
                 wp.flag = WP_FLAG_NORMAL;
             }
         }
-        // Set last-flag on final WP
+        // Set last-flag on final WP — unless it's a Fly-by-Home WP, which keeps its
+        // 0x48 flag (FBH and LAST share the single flag byte; FBH takes precedence).
         if let Some(last) = self.waypoints.last_mut() {
-            last.flag = WP_FLAG_LAST;
+            if last.flag != WP_FLAG_FBH {
+                last.flag = WP_FLAG_LAST;
+            }
         }
     }
 
@@ -347,6 +350,21 @@ mod tests {
         assert_eq!(m.waypoints[0].flag, WP_FLAG_NORMAL);
         assert_eq!(m.waypoints[1].number, 2);
         assert_eq!(m.waypoints[1].flag, WP_FLAG_LAST);
+    }
+
+    #[test]
+    fn renumber_preserves_fbh_on_last_wp() {
+        // A Fly-by-Home WP (flag 0x48) as the final waypoint must keep its flag —
+        // renumber() must not stamp WP_FLAG_LAST (0xA5) over it.
+        let mut m = Mission::new();
+        m.push(Waypoint::new(0, WpAction::Waypoint, 540000000, -40000000, 5000));
+        m.push(Waypoint::new(0, WpAction::Waypoint, 0, 0, 6000));
+        let last = m.waypoints.len() - 1;
+        let mut fbh = Waypoint::new(0, WpAction::Waypoint, 0, 0, 6000);
+        fbh.flag = WP_FLAG_FBH;
+        m.update(last, fbh); // update() triggers renumber()
+        assert_eq!(m.waypoints[last].flag, WP_FLAG_FBH);
+        assert_eq!(m.waypoints[0].flag, WP_FLAG_NORMAL);
     }
 
     #[test]

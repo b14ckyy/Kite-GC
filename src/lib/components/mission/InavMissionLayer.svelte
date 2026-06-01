@@ -13,12 +13,13 @@
     getTotalWpCount, MAX_WAYPOINTS_TOTAL,
     ALT_MODE_REL, ALT_MODE_AMSL, ALT_MODE_AGL,
     type Waypoint, type Mission, type LaunchPoint, WpAction, hasLocation, isModifier, toDeg, fromDeg, altFromM,
-    WP_ACTION_LABELS, WP_ACTION_KEYS,
+    WP_ACTION_LABELS, WP_ACTION_KEYS, WP_FLAG_FBH,
   } from '$lib/stores/mission';
   import { homePosition } from '$lib/stores/home';
   import { activeSurveyPattern } from '$lib/stores/surveyPattern.svelte';
   import { invoke } from '@tauri-apps/api/core';
-  import { iconForWp } from '$lib/helpers/missionIcons';
+  import { iconForWp, fbhDivIcon } from '$lib/helpers/missionIcons';
+  import { isFlyByHome } from '$lib/helpers/missionGeometry';
   import { openContextMenu } from '$lib/stores/contextMenu';
   import { buildWaypointMenu } from '$lib/helpers/waypointMenu';
   import { convertAltCm } from '$lib/helpers/altConvert';
@@ -50,6 +51,11 @@
   let { map }: Props = $props();
 
   const MAX_WAYPOINTS = MAX_WAYPOINTS_TOTAL;
+
+  // Fly-by-Home rendering: dashed legs in the WP-line blue, a protective ring around
+  // the home/launch marker (so the legs stop at the ring instead of overdrawing it).
+  const FBH_LINE_COLOR = '#37a8db';
+  const FBH_RING_RADIUS_PX = 18; // encircles the 22px launch marker without overlap
 
   let currentMission = $state<Mission>(get(mission));
   let currentSelIdx = $state<number>(get(selectedWpIndex));
@@ -237,7 +243,7 @@
   }
 
   function buildEditorHtml(wp: Waypoint, idx: number, total: number, displayNum: number,
-    modifiers: { wp: Waypoint; idx: number }[]): string {
+    modifiers: { wp: Waypoint; idx: number }[], fbhChild: { wp: Waypoint; idx: number; num: number } | null = null): string {
     const altC = altDisp(wp.altitude / 100);
     const altVal = Math.round(altC.value);
     const altType = altLabel(wp);
@@ -291,6 +297,36 @@
       html += `</div>`;
     }
 
+    // Fly-by-Home child section: edited nested under its parent (a real, numbered WP
+    // with flag 0x48 routed via home — sub-type + altitude + the type's params, no coords).
+    if (fbhChild) {
+      const f = fbhChild.wp;
+      const fAltC = altDisp(f.altitude / 100);
+      const fAltVal = Math.round(fAltC.value);
+      const fAltType = altLabel(f);
+      const fbhTypes: WpAction[] = [WpAction.Waypoint, WpAction.PosholdTime, WpAction.Land];
+      const fbhTypeOptions = fbhTypes.map(v => `<option value="${v}" ${v === f.action ? 'selected' : ''}>${$t(WP_ACTION_KEYS[v])}</option>`).join('');
+      html += `<div class="wpe-mod-section wpe-fbh-section">`;
+      html += `<div class="wpe-mod-header">${$t('mission.flagFbh')} (${$t('missionLayer.wpHeader', { values: { number: fbhChild.num } })})<button data-action="removeFbh" class="wpe-mod-remove" title="${$t('missionLayer.removeWp')}">✕</button></div>`;
+      html += `<div class="wpe-row"><label>${$t('missionLayer.type')}</label><select data-field="fbh-action">${fbhTypeOptions}</select></div>`;
+      html += `<div class="wpe-row"><label>${$t('missionLayer.alt')}</label>${numInputHtml('fbh-altitude', fAltVal, 1)}<span class="wpe-unit">${fAltC.unit}</span><button data-field="fbh-altToggle" class="wpe-toggle">${fAltType}</button></div>`;
+      if (f.action === WpAction.Waypoint || f.action === WpAction.Land) {
+        const fSpd = spdDisp(f.p1);
+        html += `<div class="wpe-row"><label>${$t('missionLayer.speed')}</label>${numInputHtml('fbh-p1', Math.round(fSpd.value * 10) / 10, 1, 0)}<span class="wpe-unit">${fSpd.unit}</span></div>`;
+      }
+      if (f.action === WpAction.PosholdTime) {
+        html += `<div class="wpe-row"><label>${$t('missionLayer.hold')}</label>${numInputHtml('fbh-p1', f.p1, 1, 0)}<span class="wpe-unit">${$t('missionLayer.sec')}</span></div>`;
+      }
+      const fua1 = (f.p3 >> 1) & 1; const fua2 = (f.p3 >> 2) & 1;
+      const fua3 = (f.p3 >> 3) & 1; const fua4 = (f.p3 >> 4) & 1;
+      html += `<div class="wpe-row wpe-ua-row"><label>${$t('missionLayer.actions')}</label>`;
+      html += `<button data-field="fbh-ua" data-ua-bit="1" class="wpe-ua-btn ${fua1 ? 'active' : ''}">UA1</button>`;
+      html += `<button data-field="fbh-ua" data-ua-bit="2" class="wpe-ua-btn ${fua2 ? 'active' : ''}">UA2</button>`;
+      html += `<button data-field="fbh-ua" data-ua-bit="3" class="wpe-ua-btn ${fua3 ? 'active' : ''}">UA3</button>`;
+      html += `<button data-field="fbh-ua" data-ua-bit="4" class="wpe-ua-btn ${fua4 ? 'active' : ''}">UA4</button>`;
+      html += `</div></div>`;
+    }
+
     const atLimit = getTotalWpCount() >= MAX_WAYPOINTS;
     html += `<div class="wpe-add-mod"><select data-field="addModType" ${atLimit ? 'disabled' : ''}>`;
     html += `<option value="">${atLimit ? $t('missionLayer.maxWpReached') : $t('missionLayer.addModifier')}</option>`;
@@ -298,6 +334,10 @@
       html += `<option value="${WpAction.SetHead}">${$t('missionLayer.modSetHead')}</option>`;
       html += `<option value="${WpAction.Jump}">${$t('missionLayer.modJump')}</option>`;
       html += `<option value="${WpAction.Rth}">${$t('missionLayer.modRth')}</option>`;
+      // FBH only on flight-path WP types, and only one per parent.
+      if (!fbhChild && isFlightPathWp(wp.action) && !isFlyByHome(wp)) {
+        html += `<option value="fbh">${$t('missionLayer.modFbh')}</option>`;
+      }
     }
     html += `</select></div>`;
 
@@ -310,7 +350,8 @@
   }
 
   function attachEditorEvents(popup: L.Popup, wp: Waypoint, idx: number,
-    modifiers: { wp: Waypoint; idx: number }[]) {
+    modifiers: { wp: Waypoint; idx: number }[],
+    fbhChild: { wp: Waypoint; idx: number; num: number } | null = null) {
     const el = popup.getElement();
     if (!el) return;
 
@@ -382,12 +423,72 @@
       rmBtn?.addEventListener('click', () => { missionRemoveWp(mi); });
     }
 
+    // FBH child section wiring (sub-type / altitude / params / remove).
+    if (fbhChild) {
+      const fi = fbhChild.idx;
+      const fwp = fbhChild.wp;
+      const fActionSel = el.querySelector('select[data-field="fbh-action"]') as HTMLSelectElement | null;
+      fActionSel?.addEventListener('change', () => {
+        const newAction = Number(fActionSel.value) as WpAction;
+        const updated = { ...fwp, action: newAction };
+        if (newAction === WpAction.PosholdTime) { updated.p1 = get(settings).defaultPhTimeSec; updated.p2 = 0; }
+        else { updated.p1 = 0; updated.p2 = 0; }
+        missionUpdateWp(fi, updated);
+      });
+      const fAltInput = el.querySelector('input[data-field="fbh-altitude"]') as HTMLInputElement | null;
+      fAltInput?.addEventListener('change', () => {
+        const m = toAltitudeM(Number(fAltInput.value), iface().altitudeUnit);
+        missionUpdateWp(fi, { ...fwp, altitude: altFromM(m) });
+      });
+      const fAltToggle = el.querySelector('button[data-field="fbh-altToggle"]') as HTMLButtonElement | null;
+      fAltToggle?.addEventListener('click', async () => {
+        const cur = fwp.alt_mode ?? ((fwp.p3 & 1) ? 1 : 0);
+        const next = (cur + 1) % 3;
+        const newAlt = await convertAltCm(fwp, cur, next);
+        missionUpdateWp(fi, { ...fwp, alt_mode: next, altitude: newAlt });
+      });
+      const fP1Input = el.querySelector('input[data-field="fbh-p1"]') as HTMLInputElement | null;
+      fP1Input?.addEventListener('change', () => {
+        const isSpeed = fwp.action === WpAction.Waypoint || fwp.action === WpAction.Land;
+        const p1 = isSpeed
+          ? Math.round(toSpeedMs(Number(fP1Input.value), iface().speedUnit) * 100)
+          : Number(fP1Input.value);
+        missionUpdateWp(fi, { ...fwp, p1 });
+      });
+      el.querySelectorAll('button[data-field="fbh-ua"]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const bit = Number((btn as HTMLElement).dataset.uaBit);
+          missionUpdateWp(fi, { ...fwp, p3: fwp.p3 ^ (1 << bit) });
+        });
+      });
+      const fRemove = el.querySelector('button[data-action="removeFbh"]') as HTMLButtonElement | null;
+      fRemove?.addEventListener('click', () => { missionRemoveWp(fi); });
+    }
+
     const addModSelect = el.querySelector('select[data-field="addModType"]') as HTMLSelectElement | null;
     addModSelect?.addEventListener('change', () => {
-      const modAction = Number(addModSelect.value) as WpAction;
-      if (!modAction) return;
       if (getTotalWpCount() >= MAX_WAYPOINTS) { addModSelect.value = ''; return; }
       const insertIdx = modifiers.length > 0 ? modifiers[modifiers.length - 1].idx + 1 : idx + 1;
+
+      // Fly-by-Home: insert a real WAYPOINT at the home/launch point with flag 0x48.
+      if (addModSelect.value === 'fbh') {
+        const lp = get(launchPoint);
+        const lat = lp ? fromDeg(lp.lat) : 0;
+        const lon = lp ? fromDeg(lp.lng) : 0;
+        const alt = altFromM(get(settings).defaultWpAltitudeM);
+        beginUndoGroup();
+        (async () => {
+          const m2 = await missionInsertWp(insertIdx, WpAction.Waypoint, lat, lon, alt);
+          const cur = m2.waypoints[insertIdx];
+          if (cur) await missionUpdateWp(insertIdx, { ...cur, flag: WP_FLAG_FBH });
+          endUndoGroup();
+          selectWpSingle(idx); // keep the parent selected so its popup (with the FBH section) stays open
+        })();
+        return;
+      }
+
+      const modAction = Number(addModSelect.value) as WpAction;
+      if (!modAction) return;
       let p1 = 0, p2 = 0;
       if (modAction === WpAction.SetHead) p1 = -1;
       else if (modAction === WpAction.Jump) { p1 = 1; p2 = 1; }
@@ -428,8 +529,12 @@
     if (currentReplayActive && !currentShowMission) return;
     if (m.waypoints.length === 0) return;
 
-    // Launch → first waypoint connector (orange dashed, matching pattern turn legs)
-    if (currentLaunch) {
+    // Launch → first waypoint connector (orange dashed, matching pattern turn legs).
+    // Skipped when the first flight-path WP is Fly-by-Home — that first leg routes via
+    // home anyway and is drawn as the FBH outbound leg below.
+    const firstFp = m.waypoints.find(w => isFlightPathWp(w.action));
+    const firstFpIsFbh = firstFp ? isFlyByHome(firstFp) : false;
+    if (currentLaunch && !firstFpIsFbh) {
       const firstGeo = m.waypoints.find(w => hasLocation(w.action) && !(w.lat === 0 && w.lon === 0));
       if (firstGeo) {
         L.polyline(
@@ -444,6 +549,11 @@
     const fpPositions: L.LatLng[] = [];
     const fpIndices: number[] = [];
     const fpGreyed: boolean[] = [];
+    // Fly-by-Home waypoints are pulled out of the solid path; each one breaks the path
+    // (fpBreakAfter = the fpPositions index after which a home detour sits) and is drawn
+    // separately (dashed inbound/outbound legs through the home ring + a house marker).
+    const fpBreakAfter = new Set<number>();
+    const fbhEntries: { idx: number; dn: number; inSel: boolean; isPrimary: boolean; greyed: boolean; prevLatLng: L.LatLng | null }[] = [];
 
     for (let i = 0; i < m.waypoints.length; i++) {
       const wp = m.waypoints[i];
@@ -452,7 +562,14 @@
       const dn = displayNums.get(i) ?? 0;
       const greyed = missionEndIdx >= 0 && i > missionEndIdx;
 
-      if (hasLocation(wp.action)) {
+      if (hasLocation(wp.action) && isFlyByHome(wp)) {
+        // Defer to the post-loop FBH pass; break the solid path here.
+        if (fpPositions.length > 0) fpBreakAfter.add(fpPositions.length - 1);
+        fbhEntries.push({
+          idx: i, dn, inSel, isPrimary, greyed,
+          prevLatLng: fpPositions.length > 0 ? fpPositions[fpPositions.length - 1] : null,
+        });
+      } else if (hasLocation(wp.action)) {
         const latLng = L.latLng(toDeg(wp.lat), toDeg(wp.lon));
         if (isFlightPathWp(wp.action)) { fpPositions.push(latLng); fpIndices.push(i); fpGreyed.push(greyed); }
 
@@ -477,12 +594,21 @@
         }
 
         const modifiers = getModifiersForWp(m.waypoints, i);
-        if (editing && !isPrimary && !greyed) {
+        // A Fly-by-Home child sits right after this WP's modifiers; it is edited as a
+        // nested section in THIS WP's popup, so selecting either the parent or the FBH
+        // (its house) opens this popup.
+        const fbhIdx = i + 1 + modifiers.length;
+        const fbhChild = (fbhIdx < m.waypoints.length && isFlyByHome(m.waypoints[fbhIdx]))
+          ? { wp: m.waypoints[fbhIdx], idx: fbhIdx, num: displayNums.get(fbhIdx) ?? 0 }
+          : null;
+        const primaryForPopup = isPrimary || (fbhChild !== null && fbhChild.idx === selIdx);
+
+        if (editing && !primaryForPopup && !greyed) {
           createParamLabel(wp, modifiers, latLng).addTo(missionGroup);
         }
 
-        if (editing && isPrimary && !greyed) {
-          const htmlContent = buildEditorHtml(wp, i, m.waypoints.length, dn, modifiers);
+        if (editing && primaryForPopup && !greyed) {
+          const htmlContent = buildEditorHtml(wp, i, m.waypoints.length, dn, modifiers, fbhChild);
           if (keepPopup && editorPopup) {
             editorPopup.setLatLng(latLng);
             const contentEl = editorPopup.getElement()?.querySelector('.leaflet-popup-content');
@@ -494,8 +620,8 @@
               className: 'wp-editor-popup-container', offset: L.point(0, -30), maxWidth: 240, minWidth: 190,
             }).setLatLng(latLng).setContent(htmlContent).addTo(map);
           }
-          editorPopupIdx = i;
-          setTimeout(() => { if (editorPopup) attachEditorEvents(editorPopup, wp, i, modifiers); }, 50);
+          editorPopupIdx = selIdx;
+          setTimeout(() => { if (editorPopup) attachEditorEvents(editorPopup, wp, i, modifiers, fbhChild); }, 50);
         }
 
         if (!editing) {
@@ -537,38 +663,101 @@
     }
 
     if (fpPositions.length > 1) {
-      const activePositions: L.LatLng[] = [];
-      const greyedPositions: L.LatLng[] = [];
+      // Split the path into runs at greyed-state changes AND at FBH breaks (home
+      // detours), so each contiguous run is one polyline. Active→greyed transitions
+      // without a break are bridged (seeded with the previous point) for visual
+      // continuity; a break is not bridged (the dashed FBH legs cover the gap).
+      const runs: { pts: L.LatLng[]; greyed: boolean }[] = [];
+      let cur: { pts: L.LatLng[]; greyed: boolean } | null = null;
       for (let s = 0; s < fpPositions.length; s++) {
-        if (!fpGreyed[s]) {
-          activePositions.push(fpPositions[s]);
+        const g = fpGreyed[s];
+        const breakBefore = s > 0 && fpBreakAfter.has(s - 1);
+        if (!cur || cur.greyed !== g || breakBefore) {
+          const seed: L.LatLng[] = cur && !breakBefore ? [cur.pts[cur.pts.length - 1]] : [];
+          cur = { pts: [...seed], greyed: g };
+          runs.push(cur);
+        }
+        cur.pts.push(fpPositions[s]);
+      }
+
+      const insertHandler = (e: L.LeafletMouseEvent) => {
+        L.DomEvent.stopPropagation(e);
+        const clickLatLng = e.latlng;
+        let bestInsertIdx = fpIndices.length;
+        let bestDist = Infinity;
+        for (let s = 0; s < fpPositions.length - 1; s++) {
+          if (fpGreyed[s] || fpGreyed[s + 1] || fpBreakAfter.has(s)) continue;
+          const mid = L.latLng((fpPositions[s].lat + fpPositions[s + 1].lat) / 2, (fpPositions[s].lng + fpPositions[s + 1].lng) / 2);
+          const d = clickLatLng.distanceTo(mid);
+          if (d < bestDist) { bestDist = d; bestInsertIdx = fpIndices[s + 1]; }
+        }
+        if (getTotalWpCount() < MAX_WAYPOINTS) {
+          missionInsertWp(bestInsertIdx, WpAction.Waypoint, fromDeg(clickLatLng.lat), fromDeg(clickLatLng.lng), altFromM(get(settings).defaultWpAltitudeM));
+        }
+      };
+
+      for (const run of runs) {
+        if (run.pts.length < 2) continue;
+        if (run.greyed) {
+          L.polyline(run.pts, { color: '#666', weight: editing ? 4 : 2, opacity: 0.4, dashArray: '6 4' }).addTo(missionGroup);
         } else {
-          if (greyedPositions.length === 0 && activePositions.length > 0) greyedPositions.push(activePositions[activePositions.length - 1]);
-          greyedPositions.push(fpPositions[s]);
+          flightPath = L.polyline(run.pts, { color: '#37a8db', weight: editing ? 6 : 3, opacity: 0.7 }).addTo(missionGroup);
+          if (editing) flightPath.on('click', insertHandler);
         }
       }
-      if (activePositions.length > 1) {
-        flightPath = L.polyline(activePositions, { color: '#37a8db', weight: editing ? 6 : 3, opacity: 0.7 }).addTo(missionGroup);
-        if (editing) {
-          flightPath.on('click', (e: L.LeafletMouseEvent) => {
-            L.DomEvent.stopPropagation(e);
-            const clickLatLng = e.latlng;
-            let bestInsertIdx = fpIndices.length;
-            let bestDist = Infinity;
-            for (let s = 0; s < fpPositions.length - 1; s++) {
-              if (fpGreyed[s] || fpGreyed[s + 1]) continue;
-              const mid = L.latLng((fpPositions[s].lat + fpPositions[s + 1].lat) / 2, (fpPositions[s].lng + fpPositions[s + 1].lng) / 2);
-              const d = clickLatLng.distanceTo(mid);
-              if (d < bestDist) { bestDist = d; bestInsertIdx = fpIndices[s + 1]; }
-            }
-            if (getTotalWpCount() < MAX_WAYPOINTS) {
-              missionInsertWp(bestInsertIdx, WpAction.Waypoint, fromDeg(clickLatLng.lat), fromDeg(clickLatLng.lng), altFromM(get(settings).defaultWpAltitudeM));
-            }
-          });
+    }
+
+    // ── Fly-by-Home: ring around home + dashed inbound/outbound legs + house marker ──
+    if (fbhEntries.length > 0 && currentLaunch) {
+      const home = L.latLng(currentLaunch.lat, currentLaunch.lng);
+      // Protective ring (screen-space radius → hugs the launch marker at any zoom) so
+      // the FBH legs end at the ring instead of drawing over/behind the home marker.
+      L.circleMarker(home, {
+        radius: FBH_RING_RADIUS_PX, color: FBH_LINE_COLOR, weight: 2, opacity: 0.7,
+        fill: false, interactive: false,
+      }).addTo(missionGroup);
+
+      for (const fe of fbhEntries) {
+        const wp = m.waypoints[fe.idx];
+        const nextLatLng = findNextFlightPathLatLng(m.waypoints, fe.idx);
+        const lineOpacity = fe.greyed ? 0.3 : 0.8;
+
+        // Outbound: home ring edge → next waypoint.
+        if (nextLatLng) {
+          const edgeOut = ringEdgeLatLng(home, nextLatLng, FBH_RING_RADIUS_PX);
+          L.polyline([edgeOut, nextLatLng], { color: FBH_LINE_COLOR, weight: 2, dashArray: '6 5', opacity: lineOpacity }).addTo(missionGroup);
         }
-      }
-      if (greyedPositions.length > 1) {
-        L.polyline(greyedPositions, { color: '#666', weight: editing ? 4 : 2, opacity: 0.4, dashArray: '6 4' }).addTo(missionGroup);
+
+        // Inbound: previous waypoint → home ring edge, with the house marker on its
+        // midpoint. Skipped when there is no previous WP (FBH is the first leg) — then
+        // only the dashed outbound shows, without a house (per design).
+        if (!fe.prevLatLng) continue;
+        const edgeIn = ringEdgeLatLng(home, fe.prevLatLng, FBH_RING_RADIUS_PX);
+        L.polyline([fe.prevLatLng, edgeIn], { color: FBH_LINE_COLOR, weight: 2, dashArray: '6 5', opacity: lineOpacity }).addTo(missionGroup);
+
+        const mid = L.latLng((fe.prevLatLng.lat + edgeIn.lat) / 2, (fe.prevLatLng.lng + edgeIn.lng) / 2);
+        const house = L.marker(mid, {
+          icon: fbhDivIcon(fe.dn, fe.inSel), opacity: fe.greyed ? 0.35 : 1.0,
+          title: `WP${fe.dn}: ${$t('mission.flagFbh')}`,
+        }).addTo(missionGroup);
+
+        // The FBH is edited as a nested section in its parent's popup; selecting it (here
+        // or in the list) opens that popup (the parent loop detects its selected child).
+        house.on('click', () => { if (editing) toggleWpSelection(fe.idx); else selectWpSingle(fe.idx); });
+        house.on('contextmenu', (e: L.LeafletMouseEvent) => {
+          if (!currentSelSet.has(fe.idx)) selectWpSingle(fe.idx);
+          openContextMenu(e.originalEvent.clientX, e.originalEvent.clientY, buildWaypointMenu());
+        });
+
+        if (editing && !fe.isPrimary && !fe.greyed) {
+          createParamLabel(wp, [], mid).addTo(missionGroup);
+        }
+
+        if (!editing) {
+          const a = altDisp(wp.altitude / 100);
+          house.bindTooltip(`WP${fe.dn} ${$t('mission.flagFbh')}<br>${a.value.toFixed(1)}${a.unit} ${altLabel(wp)}`, { direction: 'top', offset: L.point(0, -20) });
+        }
+        wpMarkers.push(house);
       }
     }
   }
@@ -578,6 +767,26 @@
       if (hasLocation(waypoints[i].action)) return waypoints[i];
     }
     return null;
+  }
+
+  /** Next positioned flight-path waypoint after `fromIndex` (excludes FBH / POI). */
+  function findNextFlightPathLatLng(waypoints: Waypoint[], fromIndex: number): L.LatLng | null {
+    for (let i = fromIndex + 1; i < waypoints.length; i++) {
+      const w = waypoints[i];
+      if (isFlightPathWp(w.action) && !isFlyByHome(w)) return L.latLng(toDeg(w.lat), toDeg(w.lon));
+    }
+    return null;
+  }
+
+  /** Point on the home ring's edge, `radiusPx` from `home` toward `toward` (screen-space,
+   *  so the ring hugs the marker at every zoom). Returns `home` if degenerate. */
+  function ringEdgeLatLng(home: L.LatLng, toward: L.LatLng, radiusPx: number): L.LatLng {
+    const hp = map.latLngToLayerPoint(home);
+    const tp = map.latLngToLayerPoint(toward);
+    const dx = tp.x - hp.x, dy = tp.y - hp.y;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-6) return home;
+    return map.layerPointToLatLng(L.point(hp.x + (dx * radiusPx) / len, hp.y + (dy * radiusPx) / len));
   }
 
   function onMapClick(e: L.LeafletMouseEvent) {
@@ -592,8 +801,18 @@
     missionAddWp(WpAction.Waypoint, lat, lon, altitude);
   }
 
+  // FBH legs/ring use screen-space (pixel) geometry, so the latlng endpoints must be
+  // recomputed when the zoom changes (pan is pixel-invariant for point offsets).
+  function onMapZoomRerender() {
+    if (currentMission.waypoints.some(isFlyByHome)) {
+      renderMission(currentMission, currentSelIdx, currentEditing);
+    }
+  }
+
   // svelte-ignore state_referenced_locally
   map.on('click', onMapClick);
+  // svelte-ignore state_referenced_locally
+  map.on('zoomend', onMapZoomRerender);
 
   $effect(() => { void currentLaunch; void currentSelSet; void currentShowMission; void currentReplayActive; renderMission(currentMission, currentSelIdx, currentEditing); });
 
@@ -601,6 +820,7 @@
     unsubMission(); unsubSelIdx(); unsubSelSet(); unsubEditMode(); unsubShowMission(); unsubReplayActive(); unsubLaunch();
     if (launchMarker) { try { map.removeLayer(launchMarker); } catch {} launchMarker = undefined; }
     map.off('click', onMapClick);
+    map.off('zoomend', onMapZoomRerender);
     if (editorPopup) { map.removeLayer(editorPopup); editorPopup = undefined; }
     missionGroup.clearLayers();
     map.removeLayer(missionGroup);
@@ -609,6 +829,7 @@
 
 <style>
   :global(.mission-wp-icon) { background: none !important; border: none !important; }
+  :global(.mission-fbh-icon) { background: none !important; border: none !important; }
   :global(.wp-param-label-wrapper) { background: none !important; border: none !important; overflow: visible !important; width: auto !important; height: auto !important; }
   :global(.wp-param-label) { background: rgba(30,30,30,0.88); color: #ccc; padding: 3px 8px; border-radius: 4px; font-size: 12px; line-height: 1.4; white-space: nowrap; border: 1px solid rgba(55,168,219,0.35); pointer-events: none; }
   :global(.wp-editor-popup-container .leaflet-popup-content-wrapper) { background: rgba(30,30,30,0.82); backdrop-filter: blur(10px); color: #ccc; border: 1px solid rgba(55,168,219,0.35); border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,0.5); padding: 0; }
