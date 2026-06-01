@@ -1,7 +1,7 @@
 # Terrain Features — Concept & Implementation Plan
 
-**Status**: Planning (temporary working doc — remove once implemented & documented in ARCHITECTURE.md/DEVLOG.md, like PatternGenerator.md was)
-**Last Updated**: 2026-05-30
+**Status**: Implemented (features 1–5 done: elevation provider, AGL waypoints, terrain analysis + correction, Live AGL widget, Terrain Radar widget). **Only Feature 4 — LOS analysis — remains (deferred, low priority).** COG performance follow-up cancelled.
+**Last Updated**: 2026-06-01
 
 This doc plans the four terrain-based features for the **2D map / mission planning** path. The 3D map (Cesium) is out of scope here — its quirks are tracked separately under Milestone 7.
 
@@ -45,10 +45,15 @@ All four features depend on one elevation-sampling abstraction. Build this first
 
 **Decided & implemented (Phase A):** Rust backend module `src-tauri/src/terrain/`. Source `copernicus-dem-30m` S3 (no key); tile `Copernicus_DSM_COG_10_{N|S}lat_00_{E|W}lon_00_DEM`; full-tile fetch → disk cache (portable-aware) → `tiff`-crate decode (Float32, DEFLATE, predictor 3 — verified, Zugspitze 2943.8 m) → in-memory LRU (4 tiles) → bilinear sample. CPU decode + disk I/O run on `spawn_blocking`; loads serialized/coalesced via async lock. Commands `terrain_elevation` / `terrain_profile`.
 
-**Performance follow-up (planned — important for weak hardware):**
-Full-tile decode is ~1 s on a fast CPU → ~5–10 s on a field laptop/tablet. `spawn_blocking` prevents runtime stalls (no freeze), but it's a latency cost on the first sample per tile.
-- **COG partial reads**: Copernicus tiles are internally tiled Cloud-Optimized GeoTIFFs. Use HTTP **range requests** to fetch only the internal blocks covering the needed points (a few hundred KB) and decode only those chunks (`tiff` `read_chunk`) instead of the whole 42 MB / 13 M-pixel image. Turns multi-second decodes into sub-100 ms and slashes bandwidth.
-- Optionally persist decoded/needed blocks; pre-fetch around a mission bounding box.
+**Performance follow-up — CANCELLED (not pursued):**
+Full-tile decode is ~1 s on a fast CPU → ~5–10 s on a field laptop/tablet, but it runs on
+`spawn_blocking` (no UI freeze) and decoded tiles stay in the in-memory LRU, so the latency is
+a **one-time, first-sample-per-tile** cost that never recurs while flying/planning the same
+area. In practice this is a non-issue, so the COG-partial-read optimisation below was dropped.
+Kept for reference; revisit **only** if dedicated offline area pre-download becomes a goal.
+- ~~**COG partial reads**: HTTP range requests to fetch + decode only the internal blocks
+  covering the needed points instead of the whole 42 MB image.~~
+- ~~Optionally persist decoded blocks; pre-fetch around a mission bounding box.~~
 
 **Open questions (TBD):**
 - Cache eviction tuning; pre-fetch radius around a mission.
@@ -241,7 +246,7 @@ Line-of-sight / radio-horizon analysis along the route (à la MWPTools): detect 
 
 1. ✅ **Shared elevation provider** (foundation) — Copernicus GLO-30, Rust backend, validated
 2. ✅ **AGL waypoints** — WP editor alt-mode (REL/AMSL/AGL) with terrain conversion, survey-pattern `ground`/AGL, export AGL→AMSL, launch point + `<mwp>` persistence. Validated against INAV Configurator terrain analysis.
-3. **Terrain analysis** — full-width NavRail overlay; view modes Waypoint / Track; SVG profile chart with zoom/pan + clearance coloring; Terrain Correction (Terrain Follow / Clearance Check) over a WP range, preview → APPLY *(next)*
+3. ✅ **Terrain analysis** — full-width NavRail overlay; view modes Waypoint / Track; SVG profile chart with zoom/pan + clearance coloring; Terrain Correction (Terrain Follow / Clearance Check) over a WP range, preview → APPLY, manual Add WP, jump-loop simulation — all done
 4. ✅ **Live AGL widget** — 2×1 `wide` forward-looking terrain HUD; dedicated renderer, history from the telemetry stream (live + replay), heading-projected terrain ahead + vario flight line
 5. ✅ **Terrain Radar widget** — 1×1 top-down track-up EGPWS-style fan; `terrain_fan` backend, continuous clearance heatmap (REL/PRED), own 60/120/250 m colour scale
 6. **LOS analysis** — deferred, low priority

@@ -74,13 +74,20 @@ a **drop-line** from each waypoint to the ground (thin **white dashed + black ou
   why the start angle jumped to the leftover free-cam −45°). **Start pitch lowered to −20°.**
 - [ ] **FPV cockpit** view: camera **at** the UAV looking along the flight direction, **no
   visible UAV model**. Must be **stabilized** (smoothed heading/pitch/position) — tune.
-- [ ] **Follow tuning**: orientation detail, smoother/tunable defaults (distance/pitch),
-  possibly exposed in settings later.
+- [x] ~~**Follow tuning**~~ — done. The new defaults (start pitch −20°, custom vertical-drag
+  pitch, disabled Cesium rotate, range/pitch sliders) feel right; no further tuning planned.
+  Settings exposure can wait until there is demand.
 
-## Phase 4 — Jagged-track smoothing (after inspecting a decoded log)
+## Phase 4 — Jagged-track smoothing  ✅ (resolved without resampling)
 
-The user's main visual gripe is a **stair-stepped / jagged** track. Investigate against a
-**decoded log** before fixing. Hypotheses:
+**Resolved.** The stair-stepping was a **vertical** problem (raw GPS/quantized baro altitude).
+Switching the 3D track to INAV's **fused EKF altitude** (`nav_alt_m`, see the "clean geoid +
+altitude rework" section below) made the track smooth — no Catmull-Rom / spline resample was
+needed. Horizontal GPS spacing is fine at the colored-segment resolution. The original
+analysis is kept below for reference.
+
+The user's main visual gripe was a **stair-stepped / jagged** track. Investigated against a
+**decoded log** before fixing. Hypotheses (historical):
 
 - **Horizontal**: GPS is ~**2 Hz** → sparse points → straight segments / sharp corners.
 - **Vertical**: the 3D track uses **raw `alt_m` (GPS MSL)**, which is noisy/quantized.

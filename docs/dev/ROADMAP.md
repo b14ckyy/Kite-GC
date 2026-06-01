@@ -452,7 +452,7 @@ This document tracks planned features, organized by milestone.
 - [x] Functional import of `.bin` files into the logbook (progress events, duplicate detection, armed segment logic, writes to `telemetry_records`)
 - [x] Imported ArduPilot flights can be replayed normally through widgets + map
 - [ ] ArduPilot `.tlog` MAVLink log import (recording works, import missing)
-- [ ] ArduPilot mission import (MAVLink WP protocol) — open work item (temporary parallel implementation exists in frontend for ArduPilot missions)
+- [x] ArduPilot mission system (MAVLink WP protocol) — complete: `mavlink_proto/mission.rs` upload/download/clear microprotocol + `ardu_mission_download`/`ardu_mission_upload`, wired to the ArduPilot mission panel/layer; `.waypoints` (QGC WPL) file save/load/drop + INAV↔ArduPilot WP conversion. See `docs/dev/MISSION_MULTIAUTOPILOT_PLAN.md`
 
 ### Future Protocols
 - [ ] `LtmSource` — LTM (Lightweight Telemetry) passive frame parser
@@ -493,7 +493,7 @@ This document tracks planned features, organized by milestone.
 - [ ] HID controller input (gamepad/joystick)
 - [ ] Audio status alerts (TTS)
 - [x] Terrain analysis — _elevation profile + clearance + correction (Terrain Follow / Clearance Check) + jump simulation done; see Terrain Elevation section_
-- [~] Embedded video — _core done: source router + webcam/USB-capture (`getUserMedia`, cross-platform) + NavRail panel with live preview & 60 fps MJPEG fix. Widget / floating window / map-swap and network streams (RTSP/UDP) + native capture pending; see `docs/dev/VideoFeature.md`_
+- [~] Embedded video — _built: source router + webcam/USB-capture (`getUserMedia`, cross-platform), NavRail panel (live preview, 60 fps MJPEG fix), 2×1 dock widget, snap/drag floating window, double-click map⇄video swap, native Picture-in-Picture, persistence + auto-start. **Pending (v2):** network streams (RTSP/UDP), native `nokhwa` capture, snapshot/record; see `docs/dev/VideoFeature.md`_
 - [ ] FW approach / autoland planner
 - [ ] Geozone editor
 - [ ] MAVLink signing (passphrase-based packet authentication)
@@ -524,7 +524,7 @@ Cross-cutting groundwork items. Each carries non-trivial architectural or design
 Source: **Copernicus DEM GLO-30** (geoid/EGM2008 ≈ MSL, no API key, offline-capable). Local use only — no dependency on onboard FC terrain. Shared elevation-sampling abstraction feeds all four features:
 
 - [x] Elevation provider: Rust backend module, tile fetch → disk cache → GeoTIFF decode → bilinear sampling; `terrain_elevation` / `terrain_profile` commands (decode + I/O on `spawn_blocking`, loads coalesced)
-  - [ ] _follow-up:_ COG partial reads (HTTP range requests) + region pre-download for offline / weak-hardware latency
+  - [x] _follow-up cancelled:_ COG partial reads / region pre-download — not pursued; decoded tiles stay cached in RAM, so sampling latency is a non-issue in practice. Revisit only if offline area download becomes a goal.
 - [x] **AGL waypoint planning** — `alt_mode` REL/AMSL/AGL on waypoints; editor toggle converts altitude via terrain + launch point; survey patterns support AGL; AGL resolved to AMSL on export (MSP/​.mission) — validated against INAV Configurator terrain analysis
 - [x] **Launch/home reference** — auto-placed, draggable map marker + connector to first WP; persisted in `.mission` via mwp-compatible `<mwp home-x/home-y>` meta (round-trips, inter-app compatible)
 - [x] **Terrain clearance validation (Terrain Analysis panel)** — full-width NavRail overlay, hand-rolled SVG side-view (no runtime dep); Waypoint + Track (live/blackbox) modes; terrain + flight-path with red below-clearance coloring; min-clearance (take-off/landing trimmed) + max-climb (track-jitter low-pass); zoom/pan with zoom-scaled resolution; MSL ↔ AGL view; Compact mode mirrors the chart cursor + a pinned marker onto the map
@@ -593,12 +593,12 @@ Source: **Copernicus DEM GLO-30** (geoid/EGM2008 ≈ MSL, no API key, offline-ca
 - [x] **Recenter camera on every 2D→3D switch** (deferred until the canvas is laid out)
 - [x] **Over-zoom placeholders replaced without a manual zoom** — re-request visible tiles when a new blank region is detected
 - [x] **Progressive shadow/curtain no longer spans a log switch** (clearDeco cancels pending timers + async-load guard)
-- [ ] Smoothed flight track (polyline simplification or spline interpolation)
+- [x] ~~Smoothed flight track (polyline simplification / spline interpolation)~~ — obviated: the track now uses INAV's fused EKF altitude (`nav_alt_m`), which is already smooth; horizontal GPS spacing is fine at the colored-segment resolution. No resample needed.
 - [ ] UI button refinements and responsive layout
 - [ ] Altitude exaggeration toggle for low-altitude flights
 - [ ] Auto-enable chase camera on live flight start
 - [ ] Imagery tile resolution / LOD quirks (blurry or low-detail tiles at certain zooms)
-- [ ] More reliable 3D rendering: robust geoid-undulation handling (currently a single-point sample per track), terrain-load race conditions, provider quality review
+- [ ] _(low priority follow-up)_ Geoid-undulation robustness — N is sampled at a **single point** (track start / first live fix) and applied flight-wide; negligible for local flights, only matters over very large areas. Bundle with terrain-load race hardening + provider-quality review.
 - [ ] Evaluate whether Cesium World Terrain provider quality is sufficient or needs an alternative
 
 ---

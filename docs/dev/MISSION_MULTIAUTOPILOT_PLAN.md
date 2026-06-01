@@ -1,7 +1,10 @@
 # Multi-Autopilot Mission Planning — Architecture Plan
 
-**Status:** Phase 1 in progress  
-**Created:** 2026-04-21
+**Status:** Phases 1–4 complete for the **ArduPilot/PX4** path (autopilot context + locking,
+ArduPilot WP types/UI/conversion, MAVLink mission microprotocol, survey planner). **Deferred:**
+INAV-over-MAVLink (see Open Questions). PX4 rides on the ArduPilot foundation (~80%), untested
+for lack of hardware.  
+**Created:** 2026-04-21 · **Last Updated:** 2026-06-01
 
 ---
 
@@ -15,17 +18,18 @@
 
 ---
 
-## Current State (Pre-Implementation)
+## State (updated 2026-06-01 — implemented)
 
 | Component | State |
 |---|---|
 | INAV mission (MSP) | Complete — types, codec, store, UI, file I/O |
 | MAVLink telemetry | Complete — HEARTBEAT, attitude, GPS, battery, etc. |
-| MAVLink mission protocol | **Not implemented** — explicit `Err("not supported")` stub |
+| MAVLink **ArduPilot** mission protocol | ✅ Implemented — `mavlink_proto/mission.rs` upload/download/clear + `ardu_mission_download`/`ardu_mission_upload` commands |
+| MAVLink **INAV** mission protocol | ❌ Still `Err("not supported via MAVLink yet")` — deferred (INAV uses MSP WP) |
 | `connection.fcInfo.fc_variant` | Reliable: `"INAV"` / `"ArduPilot"` / `"PX4"` / `"Generic"` |
-| `telemetry.fcVariant` | Dead stub — always `"INAV"`, never updated |
-| Autopilot context store | **Does not exist** |
-| ArduPilot WP types | **Does not exist** |
+| Autopilot context store | ✅ `stores/autopilotContext.ts` — active system, auto-detect, locking, switch dialog |
+| ArduPilot WP types + store | ✅ `stores/missionArdupilot.ts`, converter `helpers/missionConverter.ts`, icons `missionIconsArdupilot.ts` |
+| ArduPilot mission UI | ✅ `ArduMissionPanel`/`ArduMissionLayer`, `.waypoints` (QGC WPL) save/load/drop, FC up/download buttons |
 
 ---
 
@@ -79,7 +83,7 @@ src/lib/
 
 ---
 
-## Phase 2 — ArduPilot Type System + UI
+## Phase 2 — ArduPilot Type System + UI  ✅
 
 ### ArduPilot WP Types (`missionArdupilot.ts`)
 
@@ -151,7 +155,7 @@ Columns: index, current, frame, command, param1-4, lat, lon, alt, autocontinue
 
 ---
 
-## Phase 3 — Backend MAVLink Mission Microprotocol (Rust)
+## Phase 3 — Backend MAVLink Mission Microprotocol (Rust)  ✅
 
 ### New: `src-tauri/src/mavlink_proto/mission.rs`
 
@@ -181,13 +185,12 @@ FC  → GCS: MISSION_ACK
 
 ---
 
-## Phase 4 — Survey Planner (Future, FC-agnostic)
+## Phase 4 — Survey Planner (FC-agnostic)  ✅
 
-- Separate panel `SurveyPlanner.svelte` in `components/mission/`
-- Generates grid/lawnmower/perimeter patterns from a drawn polygon
-- Output: `SurveyPoint[]` = `{ lat, lon, alt, speed? }`
-- "Send to Mission" button → converts via `missionConverter` to active system format
-- No FC protocol dependency; works offline with any active autopilot system
+Done — implemented as `SurveyPatternPanel.svelte` / `SurveyPatternLayer.svelte` with all six
+shapes (Rectangle/Circle/Spiral/Polygon ZigZag + Lawnmower), AGL support and the 120-WP limit
+check (see ROADMAP → Advanced UI & Tools → Survey / area planner). Pattern geometry is pure
+math, no FC protocol dependency; output feeds the active autopilot mission.
 
 ---
 

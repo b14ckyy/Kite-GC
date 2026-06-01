@@ -44,19 +44,21 @@ File: `src-tauri/src/flightlog/ardupilot.rs`
 - `probe_message_types()` — inventory of FMT records in the file (debug aid)
 - Tauri commands: `flightlog_probe_ardupilot`, `flightlog_decode_ardupilot_csv`
 
-### Phase 2 — Normalized data → DB  (next step)
+### Phase 2 — Normalized data → DB  ✅
 
-- Map `NormalizedRecord` → `TelemetryRecord` + `Flight`
-- Follow identical pattern to `blackbox.rs::import_blackbox_log_with_progress()`
-- Add DB migration v6 for new ArduPilot-specific columns
-- Add `flightlog_import_ardupilot` Tauri command
+- `NormalizedRecord` → `TelemetryRecord` + `Flight` (same pattern as `blackbox.rs`)
+- `import_ardupilot_log_with_progress()` — progress events, duplicate detection, armed-segment logic
+- `flightlog_import_ardupilot` Tauri command
 
-### Phase 3 — Frontend integration  (after Phase 2 verified)
+### Phase 3 — Frontend integration  ✅
 
-- Add ArduPilot import button in LogbookPanel
-- `importArduPilot()` controller method
-- i18n keys (en/de)
-- No widget changes needed — all widgets consume the same `TelemetryData`
+- `.bin` file picker + routing in `+page.svelte`; `importArdupilot()` controller method;
+  `flightlog_import_ardupilot` invoke in `stores/flightlog.ts`; i18n keys (en/de).
+- No widget changes needed — all widgets consume the same `TelemetryData`. Imported ArduPilot
+  flights replay normally through widgets + map.
+
+**Done — the whole `.bin` import + replay path is complete.** Remaining ArduPilot log work is
+`.tlog` import (separate, see ROADMAP Milestone 6 / PROTOCOL_REFACTORING).
 
 ---
 
