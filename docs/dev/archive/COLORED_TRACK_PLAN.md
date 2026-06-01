@@ -1,5 +1,8 @@
 # Colored Track & Flight Mode System — Implementation Plan
 
+> **ARCHIVED (2026-06-01) — completed.** All steps S1–S10 shipped (S9 mode-label i18n
+> intentionally dropped). Kept for the detailed design rationale. Active docs are in `../`.
+
 ## Overview
 
 Color-coded flight tracks on the map based on flight mode, altitude, speed, or signal quality. Includes a Flight Mode widget and UAV icon coloring by nav state.

@@ -170,18 +170,27 @@ Kite Ground Control/
 │
 ├── .github/workflows/ci.yml      # Minimal CI (cargo check + svelte-check)
 │
-├── docs/                         # Development documentation
+├── docs/dev/                     # Development documentation (all dev-facing for now)
 │   ├── DEVLOG.md                 # This file — project structure & dev notes
 │   ├── CHANGELOG.md              # Version changelog (Keep a Changelog format)
 │   ├── ARCHITECTURE.md           # Architecture Decision Records (ADRs)
 │   ├── ROADMAP.md                # Feature roadmap by milestone
+│   ├── BUILD.md                  # Build / CI / release notes
 │   ├── FLIGHTLOG_DATABASE.md     # Flight log database schema documentation
 │   ├── DATA_PIPELINE.md          # Data pipeline architecture (live + replay flows)
 │   ├── PROTOCOL_REFACTORING.md   # Multi-protocol (MAVLink) integration workstream plan
 │   ├── PROTOCOL_FLIGHT_MODES.md  # INAV/ArduPilot flight mode reference
-│   ├── COLORED_TRACK_PLAN.md     # Colored flight track design notes
-│   ├── ARDUPILOT_IMPORT_PLAN.md  # ArduPilot log import planning
-│   └── M5_TEST_CHECKLIST.md      # Manual verification checklist for M5 implementation
+│   ├── MISSION_MULTIAUTOPILOT_PLAN.md # Multi-autopilot (INAV/ArduPilot/PX4) mission plan
+│   ├── TerrainFeatures.md        # Terrain elevation / AGL / analysis / radar plan
+│   ├── Map3DRework.md            # CesiumJS 3D map rework plan
+│   ├── VideoFeature.md           # Embedded video subsystem plan
+│   ├── WaypointDisable.md        # Waypoint disable/enable feature plan (not yet built)
+│   ├── M5_TEST_CHECKLIST.md      # Manual verification checklist for M5 implementation
+│   └── archive/                  # Completed feature plans (kept for design rationale)
+│       ├── README.md
+│       ├── PatternGenerator.md       # Survey pattern generator (recovered from history)
+│       ├── COLORED_TRACK_PLAN.md     # Colored flight tracks (shipped)
+│       └── ARDUPILOT_IMPORT_PLAN.md  # ArduPilot .bin import (shipped)
 │
 ├── static/                       # Static assets (icons, etc.)
 ├── .gitignore                    # Git ignore rules

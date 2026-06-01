@@ -82,6 +82,9 @@ Project instructions for Claude Code. Loaded automatically every session.
   `docs/dev/ROADMAP.md` and `docs/dev/CHANGELOG.md` current; ADRs in `docs/dev/ARCHITECTURE.md`.
 - New docs: **propose first** with rationale and wait for OK; keep developer docs under
   `docs/dev/` and create `docs/user/` only once genuinely user-facing docs appear.
+- **Never delete a completed feature plan** — when a plan doc's scope is fully shipped, **move
+  it to `docs/dev/archive/`** (add a one-line `> ARCHIVED (date) — ...` banner). ADRs capture
+  architecture; archived plans preserve the detailed feature-level reasoning for later reuse.
 
 ## What NOT to do
 - No unrelated changes mid-flow — propose a beneficial refactor as a **separate step** and

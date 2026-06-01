@@ -1,5 +1,8 @@
 # ArduPilot DataFlash Import — Architecture Plan
 
+> **ARCHIVED (2026-06-01) — completed.** Phases 1–3 shipped (`.bin` decode → DB → replay).
+> `.tlog` import is separate (see ROADMAP / PROTOCOL_REFACTORING). Active docs are in `../`.
+
 This document describes the native Rust-based ArduPilot `.bin` import pipeline
 for Kite Ground Control.  No external binaries, no Python dependency.
 
