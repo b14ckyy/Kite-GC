@@ -453,6 +453,7 @@ This document tracks planned features, organized by milestone.
 - [x] Imported ArduPilot flights can be replayed normally through widgets + map
 - [ ] ArduPilot `.tlog` MAVLink log import (recording works, import missing)
 - [x] ArduPilot mission system (MAVLink WP protocol) — complete: `mavlink_proto/mission.rs` upload/download/clear microprotocol + `ardu_mission_download`/`ardu_mission_upload`, wired to the ArduPilot mission panel/layer; `.waypoints` (QGC WPL) file save/load/drop + INAV↔ArduPilot WP conversion. See `docs/dev/MISSION_MULTIAUTOPILOT_PLAN.md`
+- [ ] **ArduPilot WP types per vehicle class** — the valid mission commands differ a lot by vehicle (Copter / Plane / Rover / Sub), so the ArduPilot WP-type palette + validation should adapt to the detected/selected vehicle type rather than offering one flat list. _Major consideration_: **QuadPlane/VTOL** auto-switches between fixed-wing and multirotor modes mid-mission (`VTOL_TAKEOFF` / `VTOL_LAND` / transition commands), which changes the legal WP types per phase — the planner needs a vehicle-class model and ideally a visual cue for transition points. Builds on the multi-autopilot foundation; gated on test hardware.
 
 ### Future Protocols
 - [ ] `LtmSource` — LTM (Lightweight Telemetry) passive frame parser
@@ -466,6 +467,13 @@ This document tracks planned features, organized by milestone.
 ### Map Overlays
 - [ ] Airspace zones (CTR, restricted, danger, TMA) — colored polygons with legend
 - [ ] Aviation charts (OpenAIP tile layer — airports, navaids, airspace symbology)
+
+### Battery Management
+- [ ] **Battery logbook** — track individual physical packs as DB entities (label/ID, chemistry, cell count, rated capacity, optional purchase date). Associate each recorded flight with a battery (manual pick, remembered default, later maybe auto-match). **Sortable** battery list with **cumulative stats** per pack: charge/flight cycles, total flight time, total mAh drawn, avg/peak current, last-used date, and a simple health/aging trend (e.g. capacity drift, resting-voltage). _Major considerations_: new `batteries` table + `flight.battery_id` (DB migration, ADR); how cumulative figures are derived from the existing per-flight telemetry; UI as a logbook sibling panel.
+- [ ] **Battery estimation (remaining capacity / time)** — protocol-specific source:
+  - **INAV**: derive from the FC's battery configuration (capacity, cell count, voltage thresholds — the battery-estimation-relevant settings) read at connect, combined with live consumed-mAh / voltage telemetry.
+  - **ArduPilot**: the firmware lacks INAV's built-in estimation, so compute it **locally** in the GCS from telemetry (consumed mAh, current draw, voltage sag) against the pack's rated capacity (ties into the battery logbook).
+  - Surface as a widget: remaining %, estimated time/distance, and a return-home-feasibility hint. Single protocol-agnostic widget, two estimators behind it.
 
 ### Advanced UI & Tools
 - [x] Survey / area planner — all six shapes complete:
@@ -487,10 +495,12 @@ This document tracks planned features, organized by milestone.
   - [x] Circle (Stepped) + Spiral (Archimedean) patterns
   - [x] Polygon (ZigZag) — concave-capable scanline, cross-gap / connected-fill modes, interactive vertex editing
   - [x] Polygon Lawnmower — convex decomposition + contour-offset, diagonal ring transitions
+  - [ ] **Keep legs inside concave boundaries (don't cross gaps)** — on concave polygons the scan/connector legs can currently bridge straight across a concavity, sending the aircraft outside the intended area. Route connectors along the boundary or split the area into separate scan regions so no leg leaves the polygon.
   - [ ] Load/save pattern templates
 - [ ] OSD font/element preview
 - [ ] Safehome editor
 - [ ] HID controller input (gamepad/joystick)
+- [ ] **Stick / gimbal overlay** — animated RC transmitter sticks (two gimbals) driven by recorded RC-channel data, à la Blackbox Explorer. **Replay only for now** (from `RC_CHANNELS` / blackbox `rcCommand`); live later. Configurable channel map (AETR/TAER) + stick mode 1–4. As a widget or a corner overlay on the map/replay.
 - [ ] Audio status alerts (TTS)
 - [x] Terrain analysis — _elevation profile + clearance + correction (Terrain Follow / Clearance Check) + jump simulation done; see Terrain Elevation section_
 - [~] Embedded video — _built: source router + webcam/USB-capture (`getUserMedia`, cross-platform), NavRail panel (live preview, 60 fps MJPEG fix), 2×1 dock widget, snap/drag floating window, double-click map⇄video swap, native Picture-in-Picture, persistence + auto-start. **Pending (v2):** network streams (RTSP/UDP), native `nokhwa` capture, snapshot/record; see `docs/dev/VideoFeature.md`_
