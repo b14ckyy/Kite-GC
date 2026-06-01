@@ -14,7 +14,7 @@ Project instructions for Claude Code. Loaded automatically every session.
 - **Dual-commit**: commit docs **before** code, as **two separate commits** (docs commit
   first, then the code commit).
 - End every commit message with:
-  `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`
+  `Co-Authored-By: Claude Opus 4.8`
 - Commit directly on the default branch (`master`) — no feature branch unless asked.
 - Multi-line commit messages: pipe a **bash heredoc** to `git commit -F -`. (The PowerShell
   `@'...'@` here-string does **not** work in the Bash tool — it injects stray `@` lines.)
@@ -78,10 +78,10 @@ Project instructions for Claude Code. Loaded automatically every session.
 - Feature gating via `InavVersion` + `Feature` (`msp/features.rs`); min firmware **INAV 7.0.0**
 
 ## Documentation
-- Keep `docs/ROADMAP.md` and `docs/CHANGELOG.md` current; ADRs in `docs/ARCHITECTURE.md`
-- New docs: **propose first** with rationale and wait for OK; organize under `docs/dev/`,
-  `docs/user/` (separate developer vs user-facing docs)
-- **Never modify `docs/dev/AGENT_RULES.md`.**
+- All docs currently live under `docs/dev/` (everything is dev-facing for now). Keep
+  `docs/dev/ROADMAP.md` and `docs/dev/CHANGELOG.md` current; ADRs in `docs/dev/ARCHITECTURE.md`.
+- New docs: **propose first** with rationale and wait for OK; keep developer docs under
+  `docs/dev/` and create `docs/user/` only once genuinely user-facing docs appear.
 
 ## What NOT to do
 - No unrelated changes mid-flow — propose a beneficial refactor as a **separate step** and
