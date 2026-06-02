@@ -2,9 +2,10 @@
 
 **Status:** Implemented for **INAV** (2026-06-02): the 3-flag model, content-snapshot
 validity, the highlight trust gates, both "track?" popups, the connect prompt, and the flag
-labels in the mission panel. **Pending:** DB-flag integrate flow (needs the mission-in-log DB
-schema), the ArduPilot mission layer (same model, protocol-agnostic), "upload all" multi-mission
-format, and the active-WP readout in the Flight-Mode widget.
+labels in the mission panel, and the active-WP readout (`WP N/X`) in the Flight-Mode widget.
+**Pending:** DB-flag integrate flow (needs the mission-in-log DB schema — see
+[`MISSION_LIBRARY_AND_DB.md`](MISSION_LIBRARY_AND_DB.md)), the ArduPilot mission layer (same
+model, protocol-agnostic), and "upload all" multi-mission format.
 
 The active-waypoint highlight (a pulsing green glow on the FC's current target WP) is only
 meaningful when the mission shown on the map is *actually the one being flown/recorded*. This
@@ -70,7 +71,8 @@ mission is changed or edited.
   labels in the **bottom-right**, after the existing **"Modified"** label. _(reminder)_
 - **Active WP in the Flight Mode widget** — when the FC is in **MISSION/WP mode**, show the
   current target WP number in the Flight Mode widget — **always**, independent of whether the
-  mission is being tracked/highlighted on the map. _(reminder)_
+  mission is being tracked/highlighted on the map. _(done — shows `WP N/X`, or `WP-RTH` when
+  there is no active WP; `X` follows the resolution order in `MISSION_LIBRARY_AND_DB.md`.)_
 
 ---
 
@@ -107,5 +109,6 @@ mission is changed or edited.
   (`mission_fc_info` MSP query) offers Download / Upload / Nothing.
 - **Flag labels:** FC / FILE / DB badges in the mission panel after "Modified".
 
-**Pending:** DB-flag integrate flow (mission-in-log schema), the ArduPilot mission layer (same
-model), "upload all" multi-mission, and the active-WP readout in the Flight-Mode widget.
+**Pending:** DB-flag integrate flow (mission-in-log schema — see
+[`MISSION_LIBRARY_AND_DB.md`](MISSION_LIBRARY_AND_DB.md)), the ArduPilot mission layer (same
+model), and "upload all" multi-mission.
