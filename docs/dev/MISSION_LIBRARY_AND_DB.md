@@ -1,6 +1,8 @@
 # Mission Library & DB — reusable missions linked to the flight log
 
-**Status:** Phase 1 in progress (2026-06-02). Complements
+**Status:** Phase 1 implemented (2026-06-02) — backend + logic complete, **awaiting hardware/
+simulator testing**; UI phase (planner save dialog, import flow, mission browser) not started.
+Complements
 [`MISSION_TRACKING_AND_PROVENANCE.md`](MISSION_TRACKING_AND_PROVENANCE.md) — that doc
 defines *when* the active-WP highlight is trusted (the FC/FILE/DB provenance flags); **this**
 doc defines the **persistence layer**: missions as first-class, reusable database entities
@@ -38,6 +40,7 @@ mission is stored only once (dedup).
 | `alt_diff_m` REAL | highest − lowest waypoint altitude |
 | `max_alt_m`, `min_alt_m` REAL | absolute bounds (kept separate from the diff) |
 | `bndbox_min_lat`, `bndbox_min_lon`, `bndbox_max_lat`, `bndbox_max_lon` REAL | bounding box — map centering / region grouping in the Phase 2 browser (`bndbox` not `bbox`: "bbox" means *Blackbox* in the FC community) |
+| `location_name` TEXT | reverse-geocoded location (bounding-box centroid) via the same Nominatim helper as the flight log; drives the Phase 2 browser's location grouping |
 | `created_at` TEXT, `notes` TEXT | |
 
 ### `flights` additions
@@ -57,6 +60,9 @@ deferred to Phase 2 and needs no preparation now.
 - **Mission metadata is also computed in TS** (the planner already has the geo utils, and every
   mission — planned, imported, or FC-downloaded — flows through the TS `mission` store). Rust's
   `mission_save` is a dumb **upsert by `content_hash`**; it does not recompute geometry.
+- **`location_name` is the one exception** — it is filled by `mission_db_geocode` (Rust, async,
+  after save) from the bounding-box centroid, reusing the flight log's Nominatim helper. Skipped
+  if already set (dedup → geocoded once). Fire-and-forget, like the flight log's geocoding.
 - `total_distance_m` covers mission legs (WP→WP); the launch→WP1 leg is **not** included.
 
 ---
@@ -135,8 +141,9 @@ save dialog (name/notes) · NEW/OVERWRITE/CANCEL · import flow (replaces "open"
 update-prompt.
 
 **Phase 2 — management UI:**
-Mission browser (list + metadata, rename/delete with reference guard, "load into planner") ·
-"flights flown with this mission" list.
+Mission browser modeled on the flight-log UI — a collapsible list on the left grouped by
+**location → name/id**, with the selected mission's metadata on the right · rename/delete with
+reference guard · "load into planner" · "flights flown with this mission" list.
 
 ---
 
@@ -148,3 +155,66 @@ Mission browser (list + metadata, rename/delete with reference guard, "load into
   protocol-tagged (ties to `ARDUPILOT_WAYPOINT_ARCHITECTURE.md`).
 - **Blackbox `waypoints:N,M`:** `N` = count; the second field's exact meaning (valid / version)
   is to be verified — only `N` is used.
+
+---
+
+## Functional behaviour & manual test checklist (Phase 1 — implemented)
+
+Plain-language description of what Phase 1 *does*, so it can be verified against intent. The
+**planner save dialog, the import flow, and the mission browser are NOT part of Phase 1** (UI
+phase — see Phasing above); this list covers only the logic/backend that is in place now.
+
+### 1. Active-waypoint readout in the Flight-Mode widget (testable now, no FC)
+- While the FC is in **WP/Mission mode**, the Flight-Mode widget shows **`WP N/X`** below the
+  mode badge (replaces the old hex flags dump).
+  - `N` = the FC's current target waypoint (live `MSP_NAV_STATUS`; in replay, from the log).
+  - `X` (replay) resolves in order: **linked library mission's WP count → Blackbox header
+    `waypoints:` count → nothing** (then just `WP N`).
+  - `X` (live) = the loaded planner mission's waypoint count.
+- In mission mode with **no active waypoint** (FC falls back to RTH) it shows **`WP-RTH`**.
+- Outside mission mode: no WP line.
+- **To test now:** (re)import a Blackbox log that has an `H waypoints:N` header *with the new
+  build*, then replay it — the widget should count `WP 1/N`, `WP 2/N`, … A log imported by an
+  older build has no stored count; re-import it.
+
+### 2. Mission auto-save + link on a recorded flight (needs FC / simulator)
+- **Preconditions:** flight-log **DB recording enabled**, connected to the FC, and the displayed
+  mission is **in sync with the FC** (the **FC** flag in the mission panel — i.e. it was up- or
+  downloaded and not edited since).
+- **On ARM:** the displayed mission is saved into the library (deduplicated by content) and
+  **linked to the new flight**.
+- **On DISARM:** the flight's telemetry is written to the DB (as before) and the mission link
+  is in place. Replaying that flight afterwards shows `WP N/X` from the **linked** mission.
+- **Deliberately NOT linked:** if at arm the mission is empty, or **not FC-synced** (a stale
+  plan, or edited-but-not-reuploaded), nothing is linked — because that is not what the FC
+  flies. (This also keeps the feature INAV-only for now.)
+- **In-flight mission change:** if a *different* mission is uploaded during the flight, **on
+  disarm a dialog asks** whether to update the recording's linked mission to the current
+  version ("Mission changed" / "Mission geändert").
+- A **disconnect while armed** ends the recording the same way (end-of-flight handling runs).
+
+### 3. Mission library in the DB (backend in place; no browser UI yet)
+- A mission is stored **once per unique content** (content hash) and shared across any number of
+  flights/UAVs. Re-saving the same mission reuses the existing row.
+- Stored per mission: waypoint count, total distance (leg sum), altitude difference
+  (max−min) + max/min altitude, bounding box, and a **reverse-geocoded location name**
+  (bounding-box centroid, same Nominatim service as the flight log; fetched once per mission).
+- **Self-healing schema:** an existing flight-log DB gets the new `missions` table and the
+  `flights.mission_id` / `flights.logged_wp_count` columns added automatically on next open —
+  **no data loss**, no manual migration.
+
+### What is intentionally still missing (UI phase, after we design the UI)
+- Planner **"Save to library"** dialog (name + notes) and **NEW / OVERWRITE / CANCEL** on save.
+- **Import** replacing "Open" for `.mission` / `.waypoints` (load + dedup-match → sets the
+  in-memory mission identity).
+- **Mission browser** (flight-log-style, location-grouped list + metadata, load into planner,
+  "flights flown with this mission").
+
+### Test matrix
+| Test | Needs | Expected |
+|---|---|---|
+| Replay `WP N/X` | a re-imported Blackbox log w/ mission | counts up `WP n/N`; `WP-RTH` when no active WP |
+| Arm → mission saved + linked | simulator + FC-synced mission + DB recording | after disarm, replaying that flight shows `WP N/X` from the linked mission |
+| Stale/edited plan at arm | simulator, mission **not** FC-synced | nothing linked (replay falls back to header count or `WP N`) |
+| In-flight upload | simulator, upload a different mission while armed | "Mission changed" dialog on disarm; on *Update*, link points to the new mission |
+| Existing DB upgrade | any pre-existing flights.db | opens fine; new schema present; old flights intact |

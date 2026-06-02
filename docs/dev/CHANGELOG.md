@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Mission library & flight↔mission linking (Phase 1)
+- **First-class mission library in the flight-log DB** — a new `missions` table stores each
+  mission once, keyed by a **content hash** (SHA-256 of the same serialization the provenance
+  system uses → deduplicated, shared across any number of flights/UAVs). Per-mission metadata:
+  waypoint count, total distance, altitude diff (max−min) + max/min altitude, bounding box, and
+  a **reverse-geocoded location name** (bbox centroid, same Nominatim service as the flight log)
+- **Recorded flights link the flown mission** — on **arm** (with DB recording, mission FC-synced)
+  the displayed mission is saved + linked to the new flight; on **disarm** the link is finalized.
+  Only the FC-synced mission is linked (a stale/edited-not-reuploaded plan is not what the FC
+  flies). If a different mission is uploaded mid-flight, a prompt on disarm offers to update the
+  link. The recorder emits `flight-recording-started/-ended` events for this
+- **Replay `WP N/X` source** — the Blackbox `H waypoints:N` header is parsed into
+  `flights.logged_wp_count`; the replay readout uses the linked mission's count first, then this
+  header fallback
+- **Self-healing schema (v8)** — existing flight-log DBs gain the `missions` table and the
+  `flights.mission_id` / `logged_wp_count` columns automatically on next open (idempotent, no
+  data loss)
+- _UI pending (planner Save-to-library dialog + NEW/OVERWRITE, import flow, mission browser);
+  see `docs/dev/MISSION_LIBRARY_AND_DB.md` for the functional spec + manual test checklist._
+
+### Added — Mission provenance flags + active-waypoint readout
+- **3-flag provenance model (FC / FILE / DB)** — per mission slot, each flag is valid only while
+  the mission's content still matches the snapshot captured at its sync event (content-hash based,
+  so an edit invalidates it and Undo restores it). Gates when the active-waypoint highlight is
+  trustworthy; one-time "track?" prompts (replay / flight), a connect prompt (Download / Upload /
+  Nothing), and FC/FILE/DB labels in the mission panel. See
+  `docs/dev/MISSION_TRACKING_AND_PROVENANCE.md`
+- **Active waypoint in the Flight-Mode widget** — in MISSION (NAV_WP) mode the widget shows
+  **`WP N/X`** (N = active waypoint, X = mission waypoint count) or **`WP-RTH`** when there is no
+  active WP; replaces the raw flight-mode-flags hex dump
+
+### Fixed — Terrain widgets could freeze the whole UI
+- The **Terrain Radar** and **Live AGL** widgets ran their telemetry update inside a tracked
+  `$effect` that both read and wrote the same `$state` (`range`/`step = nextStep(speed, …)`).
+  Under some replay values this tripped Svelte's `effect_update_depth_exceeded` guard and
+  hard-froze the JS main thread (CSS hover/animations kept playing, but no click or panel switch
+  reacted — only an app restart helped). The update now runs `untrack`ed, so the self-reads are
+  not effect dependencies
+
 ### Added — Mission: Fly-by-Home (FBH) waypoints
 - **Fly-by-Home support** — FBH is INAV's `NAV_WP_FLAG_HOME` (0x48) flag on a real, numbered WAYPOINT/POSHOLD_TIME/LAND that executes at the arming home location (not a separate waypoint type, and not shown in the stock INAV Configurator UI). It is added as a **modifier** in the waypoint editor: pick "Fly By Home", and a real WP is created at the home/launch point with the flag set
 - **Nested editor section** — the FBH is edited under its parent WP in the same popup (like Set Heading, but richer): a sub-type dropdown (Waypoint / PosHold Time / Land), altitude (+ REL/AMSL/AGL), and the type's params (speed / hold time / user-action bits) — no coordinates
