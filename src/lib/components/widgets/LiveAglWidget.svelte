@@ -12,6 +12,7 @@
   // Horizontal scale steps with UAV speed (300/900/1800/3600 m total, 1:2
   // history:forward), with hysteresis. Visual language follows the Terrain
   // Analysis panel (grid, ground gradient) inside a standard widget card.
+  import { untrack } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import type { TelemetryData } from '$lib/stores/telemetry';
   import type { InterfaceSettings } from '$lib/stores/settings';
@@ -231,13 +232,18 @@
 
   // Re-run on every telemetry frame (self-throttled by `sampling`)
   $effect(() => {
+    // Track only telemetry changes — these reads register the dependencies.
     void telem.lat;
     void telem.lon;
     void telem.yaw;
     void telem.groundSpeed;
     void telem.altMsl;
     void telem.lastUpdate;
-    void runUpdate();
+    // runUpdate writes state it also reads (e.g. `step = nextStep(speed, step)`).
+    // Run it untracked so those self-reads don't become effect dependencies —
+    // otherwise the read+write loop trips Svelte's effect_update_depth_exceeded
+    // guard and hard-freezes the main thread.
+    untrack(() => void runUpdate());
   });
 
   // ── Render geometry ────────────────────────────────────────────────

@@ -8,6 +8,7 @@
   // Range scaling (300/900/1800/3600 m) + hysteresis are shared with the Live
   // AGL widget. The fan is fixed pointing up; terrain is sampled relative to the
   // heading, so it appears track-up. UAV marker (ring+dot) sits at the apex.
+  import { untrack } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import type { TelemetryData } from '$lib/stores/telemetry';
   import type { InterfaceSettings } from '$lib/stores/settings';
@@ -156,6 +157,7 @@
   }
 
   $effect(() => {
+    // Track only telemetry changes — these reads register the dependencies.
     void telem.lat;
     void telem.lon;
     void telem.yaw;
@@ -163,7 +165,11 @@
     void telem.groundSpeed;
     void telem.altMsl;
     void telem.lastUpdate;
-    void runUpdate();
+    // runUpdate writes state it also reads (e.g. `range = nextStep(speed, range)`).
+    // Run it untracked so those self-reads don't become effect dependencies —
+    // otherwise the read+write loop trips Svelte's effect_update_depth_exceeded
+    // guard and hard-freezes the main thread.
+    untrack(() => void runUpdate());
   });
 
   // ── Geometry (track-up fan, apex = UAV at bottom centre) ───────────
