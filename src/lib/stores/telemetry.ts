@@ -56,6 +56,8 @@ export interface TelemetryData {
   // Flight mode & navigation
   activeFlightModeFlags: number;
   navState: number;
+  /** FC's current target waypoint (MSP_NAV_STATUS live / blackbox in replay). 0 = none. */
+  activeWpNumber: number;
 
   // FC type (for mode classification)
   fcVariant: string;
@@ -73,7 +75,7 @@ const defaultTelemetry: TelemetryData = {
   armingFlags: 0, cpuLoad: 0, sensorStatus: 0,
   sensorGyro: 0, sensorAcc: 0, sensorMag: 0, sensorBaro: 0,
   sensorGps: 0, sensorRangefinder: 0, sensorPitot: 0, sensorOpflow: 0,
-  activeFlightModeFlags: 0, navState: 0,
+  activeFlightModeFlags: 0, navState: 0, activeWpNumber: 0,
   fcVariant: 'INAV',
   lastUpdate: 0,
 };
@@ -191,6 +193,17 @@ export async function startTelemetryListeners() {
         sensorRangefinder: p.rangefinder,
         sensorPitot: p.pitot,
         sensorOpflow: p.opflow,
+        lastUpdate: Date.now(),
+      }));
+    })
+  );
+
+  unlisteners.push(
+    await listen<{ active_wp_number: number; nav_state: number }>('telemetry-nav-status', (event) => {
+      telemetry.update((t) => ({
+        ...t,
+        activeWpNumber: event.payload.active_wp_number,
+        navState: event.payload.nav_state,
         lastUpdate: Date.now(),
       }));
     })

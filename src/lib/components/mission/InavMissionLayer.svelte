@@ -20,6 +20,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { iconForWp, fbhDivIcon } from '$lib/helpers/missionIcons';
   import { isFlyByHome } from '$lib/helpers/missionGeometry';
+  import { activeWpNumber } from '$lib/stores/navStatus';
   import { openContextMenu } from '$lib/stores/contextMenu';
   import { buildWaypointMenu } from '$lib/helpers/waypointMenu';
   import { convertAltCm } from '$lib/helpers/altConvert';
@@ -126,6 +127,11 @@
   }
 
   const unsubLaunch = launchPoint.subscribe(lp => { currentLaunch = lp; renderLaunchMarker(); });
+
+  // Active target waypoint (live MSP_NAV_STATUS / replay record) → the WP icon itself
+  // pulses (brightness + green glow) via the `mission-wp-active` class on its divIcon.
+  let currentActiveWp = $state<number>(get(activeWpNumber));
+  const unsubActiveWp = activeWpNumber.subscribe(v => { currentActiveWp = v; });
 
   // svelte-ignore state_referenced_locally
   const missionGroup = L.layerGroup().addTo(map);
@@ -573,7 +579,8 @@
         const latLng = L.latLng(toDeg(wp.lat), toDeg(wp.lon));
         if (isFlightPathWp(wp.action)) { fpPositions.push(latLng); fpIndices.push(i); fpGreyed.push(greyed); }
 
-        const icon = iconForWp(wp, dn, inSel);
+        const isActiveWp = currentActiveWp > 0 && wp.number === currentActiveWp;
+        const icon = iconForWp(wp, dn, inSel, isActiveWp);
         const marker = L.marker(latLng, {
           icon, draggable: editing && !greyed, opacity: greyed ? 0.35 : 1.0,
           title: `WP${dn}: ${$t(WP_ACTION_KEYS[wp.action]) || 'Unknown'}`,
@@ -736,8 +743,9 @@
         L.polyline([fe.prevLatLng, edgeIn], { color: FBH_LINE_COLOR, weight: 2, dashArray: '6 5', opacity: lineOpacity }).addTo(missionGroup);
 
         const mid = L.latLng((fe.prevLatLng.lat + edgeIn.lat) / 2, (fe.prevLatLng.lng + edgeIn.lng) / 2);
+        const fbhActive = currentActiveWp > 0 && wp.number === currentActiveWp;
         const house = L.marker(mid, {
-          icon: fbhDivIcon(fe.dn, fe.inSel), opacity: fe.greyed ? 0.35 : 1.0,
+          icon: fbhDivIcon(fe.dn, fe.inSel, fbhActive), opacity: fe.greyed ? 0.35 : 1.0,
           title: `WP${fe.dn}: ${$t('mission.flagFbh')}`,
         }).addTo(missionGroup);
 
@@ -814,10 +822,10 @@
   // svelte-ignore state_referenced_locally
   map.on('zoomend', onMapZoomRerender);
 
-  $effect(() => { void currentLaunch; void currentSelSet; void currentShowMission; void currentReplayActive; renderMission(currentMission, currentSelIdx, currentEditing); });
+  $effect(() => { void currentLaunch; void currentSelSet; void currentShowMission; void currentReplayActive; void currentActiveWp; renderMission(currentMission, currentSelIdx, currentEditing); });
 
   onDestroy(() => {
-    unsubMission(); unsubSelIdx(); unsubSelSet(); unsubEditMode(); unsubShowMission(); unsubReplayActive(); unsubLaunch();
+    unsubMission(); unsubSelIdx(); unsubSelSet(); unsubEditMode(); unsubShowMission(); unsubReplayActive(); unsubLaunch(); unsubActiveWp();
     if (launchMarker) { try { map.removeLayer(launchMarker); } catch {} launchMarker = undefined; }
     map.off('click', onMapClick);
     map.off('zoomend', onMapZoomRerender);
@@ -830,6 +838,17 @@
 <style>
   :global(.mission-wp-icon) { background: none !important; border: none !important; }
   :global(.mission-fbh-icon) { background: none !important; border: none !important; }
+  /* Active target waypoint: the icon itself pulses in brightness + a green glow, at
+     0.5 Hz (2 s period). Only `filter` is animated, so it never fights Leaflet's
+     positioning transform on the marker element. */
+  :global(.mission-wp-active) {
+    animation: wpActiveGlow 2s ease-in-out infinite;
+    will-change: filter;
+  }
+  @keyframes wpActiveGlow {
+    0%, 100% { filter: brightness(1)   drop-shadow(0 0 2px rgba(89,170,41,0.55)); }
+    50%      { filter: brightness(1.6) drop-shadow(0 0 9px rgba(89,170,41,0.95)); }
+  }
   :global(.wp-param-label-wrapper) { background: none !important; border: none !important; overflow: visible !important; width: auto !important; height: auto !important; }
   :global(.wp-param-label) { background: rgba(30,30,30,0.88); color: #ccc; padding: 3px 8px; border-radius: 4px; font-size: 12px; line-height: 1.4; white-space: nowrap; border: 1px solid rgba(55,168,219,0.35); pointer-events: none; }
   :global(.wp-editor-popup-container .leaflet-popup-content-wrapper) { background: rgba(30,30,30,0.82); backdrop-filter: blur(10px); color: #ccc; border: 1px solid rgba(55,168,219,0.35); border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,0.5); padding: 0; }

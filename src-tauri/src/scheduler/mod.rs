@@ -337,7 +337,7 @@ fn build_slots(config: &TelemetryConfig) -> Vec<TelemetrySlot> {
         ),
         TelemetrySlot::new(
             TelemetryGroup::Status,
-            vec![MSPV2_INAV_STATUS, MSP_SENSOR_STATUS],
+            vec![MSPV2_INAV_STATUS, MSP_SENSOR_STATUS, MSP_NAV_STATUS],
             1.0,
             4,
         ),

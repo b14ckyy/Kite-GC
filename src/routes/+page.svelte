@@ -29,6 +29,7 @@
   import { isValidGpsCoordinate, isArmed } from '$lib/helpers/telemetry';
   import { liveTrack, appendLivePoint, clearLiveTrack } from '$lib/stores/liveTrack';
   import { toTelemetryData } from '$lib/adapters/telemetryAdapter';
+  import { activeWpNumber } from '$lib/stores/navStatus';
   import { homePosition } from '$lib/stores/home';
   import { MAP_PROVIDERS } from "$lib/config/mapProviders";
   import { tileCacheStats, setCacheMaxMB, clearCache } from "$lib/cache/tileCache";
@@ -53,6 +54,7 @@
     type TelemetryRecord,
   } from "$lib/stores/flightlog";
   import type { TrackColorMode } from "$lib/helpers/trackColors";
+  import { FLIGHT_MODE } from "$lib/helpers/trackColors";
 
   // ── Layout zone CSS custom properties (driven by layout store) ──
   const gridBottomHeight = $derived(
@@ -1057,6 +1059,14 @@
       ? toTelemetryData(playbackPoint, replayFcVariant)
       : liveTelem,
   );
+
+  // Surface the active target waypoint (live MSP_NAV_STATUS or replay record) to the
+  // mission layer for the active-WP highlight — only while the FC is in WP/Mission mode
+  // (otherwise the FC may report a stale WP index).
+  $effect(() => {
+    const inWpMode = (telem.activeFlightModeFlags & FLIGHT_MODE.NAV_WP) !== 0;
+    activeWpNumber.set(inWpMode ? (telem.activeWpNumber ?? 0) : 0);
+  });
 
   // When primary connection is established, clear playback
   $effect(() => {

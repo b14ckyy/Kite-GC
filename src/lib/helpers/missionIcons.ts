@@ -137,11 +137,12 @@ export function wpIconSpec(wp: Waypoint, displayNum: number, selected: boolean):
   }
 }
 
-/** 2D Leaflet divIcon for a waypoint (built from the shared spec). */
-export function iconForWp(wp: Waypoint, displayNum: number, selected: boolean): L.DivIcon {
+/** 2D Leaflet divIcon for a waypoint (built from the shared spec). `active` adds the
+ *  pulsing-glow class for the FC's current target waypoint. */
+export function iconForWp(wp: Waypoint, displayNum: number, selected: boolean, active = false): L.DivIcon {
   const s = wpIconSpec(wp, displayNum, selected);
   return L.divIcon({
-    className: 'mission-wp-icon',
+    className: `mission-wp-icon${active ? ' mission-wp-active' : ''}`,
     html: s.svg,
     iconSize: [s.width, s.height],
     iconAnchor: [s.anchorX, s.anchorY],
@@ -149,10 +150,10 @@ export function iconForWp(wp: Waypoint, displayNum: number, selected: boolean): 
 }
 
 /** 2D Leaflet divIcon for a Fly-by-Home waypoint's house marker. */
-export function fbhDivIcon(displayNum: number, selected: boolean): L.DivIcon {
+export function fbhDivIcon(displayNum: number, selected: boolean, active = false): L.DivIcon {
   const s = fbhIconSpec(displayNum, selected);
   return L.divIcon({
-    className: 'mission-fbh-icon',
+    className: `mission-fbh-icon${active ? ' mission-wp-active' : ''}`,
     html: s.svg,
     iconSize: [s.width, s.height],
     iconAnchor: [s.anchorX, s.anchorY],

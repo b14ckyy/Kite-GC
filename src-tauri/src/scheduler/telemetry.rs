@@ -106,6 +106,13 @@ pub struct GpsStatsData {
     pub hdop: f64,
 }
 
+/// Navigation status (from MSP_NAV_STATUS 121) — the currently targeted waypoint.
+#[derive(Debug, Clone, Serialize)]
+pub struct NavStatusData {
+    pub active_wp_number: u8, // FC's current target WP (0 = not navigating a mission)
+    pub nav_state: u8,
+}
+
 /// Generic telemetry payload wrapper for Tauri events
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
@@ -118,6 +125,7 @@ pub enum TelemetryPayload {
     SensorStatus(SensorStatusData),
     Airspeed(AirspeedData),
     GpsStats(GpsStatsData),
+    NavStatus(NavStatusData),
 }
 
 /// Map MSP code to Tauri event name
@@ -131,6 +139,7 @@ pub fn event_name_for_code(code: u16) -> String {
         MSP_SENSOR_STATUS => "telemetry-sensor-status".into(),
         MSPV2_INAV_AIR_SPEED => "telemetry-airspeed".into(),
         MSP_GPSSTATISTICS => "telemetry-gps-stats".into(),
+        MSP_NAV_STATUS => "telemetry-nav-status".into(),
         _ => format!("telemetry-0x{:04X}", code),
     }
 }
@@ -146,6 +155,7 @@ pub fn decode_telemetry(code: u16, payload: &[u8], box_ids: &[u8]) -> TelemetryP
         MSP_SENSOR_STATUS => decode_sensor_status(payload),
         MSPV2_INAV_AIR_SPEED => decode_airspeed(payload),
         MSP_GPSSTATISTICS => decode_gps_statistics(payload),
+        MSP_NAV_STATUS => decode_nav_status_event(payload),
         _ => {
             log::warn!("No decoder for MSP 0x{:04X}", code);
             TelemetryPayload::Attitude(AttitudeData {
@@ -158,6 +168,18 @@ pub fn decode_telemetry(code: u16, payload: &[u8], box_ids: &[u8]) -> TelemetryP
 }
 
 // ── Decoders ─────────────────────────────────────────────────────────
+
+/// MSP_NAV_STATUS (121): the FC's current navigation/target-waypoint state. Reuses the
+/// mission codec's decoder; on a malformed payload, reports "not navigating" (0).
+fn decode_nav_status_event(payload: &[u8]) -> TelemetryPayload {
+    match crate::mission::codec::decode_nav_status(payload) {
+        Ok(s) => TelemetryPayload::NavStatus(NavStatusData {
+            active_wp_number: s.active_wp_number,
+            nav_state: s.nav_state,
+        }),
+        Err(_) => TelemetryPayload::NavStatus(NavStatusData { active_wp_number: 0, nav_state: 0 }),
+    }
+}
 
 fn read_i16(buf: &[u8], offset: usize) -> i16 {
     if offset + 1 < buf.len() {
