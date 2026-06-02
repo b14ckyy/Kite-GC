@@ -15,7 +15,7 @@
     canUndo, canRedo, undo, redo,
     MAX_MISSIONS, MAX_WAYPOINTS_TOTAL,
     type Waypoint, type Mission, WpAction, WP_ACTION_LABELS, WP_ACTION_KEYS,
-    hasLocation, isModifier,
+    hasLocation, isModifier, missionFlags, missionModified,
   } from '$lib/stores/mission';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
   import { isFlyByHome } from '$lib/helpers/missionGeometry';
@@ -477,7 +477,10 @@
       {:else}
         {currentMission.waypoints.length}/{MAX_WAYPOINTS_TOTAL} WPs
       {/if}
-      {#if currentMission.dirty}<span class="dirty-badge">{$t('mission.modified')}</span>{/if}
+      {#if $missionModified}<span class="dirty-badge">{$t('mission.modified')}</span>{/if}
+      {#if $missionFlags.fc}<span class="prov-badge prov-fc" title={$t('mission.provFcTip')}>{$t('mission.provFc')}</span>{/if}
+      {#if $missionFlags.file}<span class="prov-badge prov-file" title={$t('mission.provFileTip')}>{$t('mission.provFile')}</span>{/if}
+      {#if $missionFlags.db}<span class="prov-badge prov-db" title={$t('mission.provDbTip')}>{$t('mission.provDb')}</span>{/if}
     </div>
   {/if}
 
@@ -592,5 +595,9 @@
   .mission-status { padding: 3px 6px; font-size: 11px; color: #f39c12; text-align: center; flex-shrink: 0; }
   .mission-summary { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 3px; font-size: 12px; color: #888; flex-shrink: 0; }
   .dirty-badge { background: #f39c12; color: #1a1a1a; padding: 1px 6px; border-radius: 8px; font-size: 11px; font-weight: bold; }
+  .prov-badge { color: #fff; padding: 1px 6px; border-radius: 8px; font-size: 11px; font-weight: bold; margin-left: 4px; }
+  .prov-fc { background: #37a8db; }
+  .prov-file { background: #6c7a89; }
+  .prov-db { background: #59aa29; }
   .drop-overlay { position: absolute; inset: 0; background: rgba(55,168,219,0.15); border: 2px dashed #37a8db; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #37a8db; font-size: 13px; font-weight: bold; z-index: 10; pointer-events: none; }
 </style>

@@ -4,6 +4,7 @@
 
 import { writable, derived, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
+import { connection } from './connection';
 
 // ── Types (mirror Rust mission::types) ──────────────────────────────
 
@@ -219,6 +220,73 @@ export const missionCount = writable<number>(1);
 
 /** Cached WP arrays for non-active mission slots (1-based index → waypoints) */
 const missionSlots: Map<number, Waypoint[]> = new Map();
+
+// ── Mission provenance flags (FC / FILE / DB) ───────────────────────
+// A flag is "valid" while the active mission's content still matches the snapshot
+// captured at its sync event — so any edit invalidates the flags and Undo back to a
+// synced state restores them, with no per-mutation bookkeeping.
+// See docs/dev/MISSION_TRACKING_AND_PROVENANCE.md.
+
+export type MissionFlag = 'fc' | 'file' | 'db';
+
+/** Stable content hash of a waypoint list (the WP `number` is positional → excluded). */
+function hashWaypoints(wps: Waypoint[]): string {
+  return JSON.stringify(
+    wps.map((w) => [w.action, w.lat, w.lon, w.altitude, w.p1, w.p2, w.p3, w.flag, w.alt_mode ?? 0]),
+  );
+}
+
+/** Per-slot sync snapshots: slot index → { flag → content hash at sync time }. */
+const syncRefs: Map<number, Partial<Record<MissionFlag, string>>> = new Map();
+const provVersion = writable(0);
+const bumpProv = () => provVersion.update((n) => n + 1);
+
+/** Record the active mission as synced via `flag` (captures current content). For FC it
+ *  also clears FC on every other slot — the FC then holds only this mission. */
+export function markMissionSynced(flag: MissionFlag): void {
+  const idx = get(activeMissionIndex);
+  const h = hashWaypoints(get(mission).waypoints);
+  if (flag === 'fc') {
+    for (const [slot, refs] of syncRefs) if (slot !== idx) delete refs.fc;
+  }
+  const refs = syncRefs.get(idx) ?? {};
+  refs[flag] = h;
+  syncRefs.set(idx, refs);
+  bumpProv();
+}
+
+/** Drop the FC flag from all slots (FC link gone). */
+export function clearFcFlags(): void {
+  for (const refs of syncRefs.values()) delete refs.fc;
+  bumpProv();
+}
+
+export interface MissionFlags { fc: boolean; file: boolean; db: boolean; }
+
+/** Live provenance flags for the *active* mission (content-compared to the snapshots). */
+export const missionFlags = derived(
+  [mission, activeMissionIndex, provVersion],
+  ([$m, $idx]): MissionFlags => {
+    const refs = syncRefs.get($idx);
+    if (!refs || $m.waypoints.length === 0) return { fc: false, file: false, db: false };
+    const h = hashWaypoints($m.waypoints);
+    return { fc: refs.fc === h, file: refs.file === h, db: refs.db === h };
+  },
+);
+
+/** "Modified" = the mission has content but matches none of its sync snapshots (unsaved
+ *  relative to FC/FILE/DB). Content-based, so it clears again on Undo — unlike the old
+ *  backend `dirty` flag, which stayed set after an edit+undo. */
+export const missionModified = derived([mission, missionFlags], ([$m, $f]) =>
+  $m.waypoints.length > 0 && !$f.fc && !$f.file && !$f.db,
+);
+
+// The FC flag is only valid while connected — drop it on any disconnect.
+let prevConnStatus = 'disconnected';
+connection.subscribe((c) => {
+  if (prevConnStatus === 'connected' && c.status !== 'connected') clearFcFlags();
+  prevConnStatus = c.status;
+});
 
 /** Total WP count across all missions */
 export const totalWpCount = derived([mission, missionCount], ([$m, $count]) => {
@@ -630,13 +698,20 @@ export async function missionDownload(fromEeprom = false): Promise<Mission> {
   const m = await invoke<Mission>('mission_download', { fromEeprom });
   mission.set(m);
   clearUndoHistory();
+  markMissionSynced('fc');
   return m;
+}
+
+/** Query the FC's mission info (wp_count) without downloading — for the connect prompt. */
+export async function missionFcInfo(): Promise<MissionInfo> {
+  return invoke<MissionInfo>('mission_fc_info');
 }
 
 /** Upload mission to FC */
 export async function missionUpload(saveEeprom = false): Promise<Mission> {
   const m = await invoke<Mission>('mission_upload', { saveEeprom });
   mission.set(m);
+  markMissionSynced('fc');
   return m;
 }
 
@@ -662,12 +737,14 @@ export async function missionImportXml(xml: string): Promise<Mission> {
   mission.set(m);
   applyLoadedHome(m);
   clearUndoHistory();
+  markMissionSynced('file');
   return m;
 }
 
 /** Save mission to a .mission file (writes the launch point as <mwp> meta) */
 export async function missionSaveFile(path: string): Promise<void> {
   await invoke<void>('mission_save_file', { path, home: launchHomeArg() });
+  markMissionSynced('file');
 }
 
 /** Load mission from a .mission file */
@@ -676,5 +753,6 @@ export async function missionLoadFile(path: string): Promise<Mission> {
   mission.set(m);
   applyLoadedHome(m);
   clearUndoHistory();
+  markMissionSynced('file');
   return m;
 }

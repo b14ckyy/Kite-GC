@@ -42,7 +42,7 @@
   import FloatingVideoWindow from "$lib/components/video/FloatingVideoWindow.svelte";
   import { initVideo, videoState, videoStream, setVideoPrimary, registerPiPElement } from "$lib/stores/video";
   import TerrainAnalysisPanel from "$lib/components/terrain/TerrainAnalysisPanel.svelte";
-  import { editMode, replayActive } from "$lib/stores/mission";
+  import { editMode, replayActive, mission, missionFlags, missionDownload, missionUpload, missionFcInfo } from "$lib/stores/mission";
   import { terrainAnalysis, patchTerrainAnalysis } from "$lib/stores/terrainAnalysis";
   import type { InterfaceSettings, PanelConfig } from "$lib/stores/settings";
   import { layout, GRID_DEFAULTS } from '$lib/stores/layout';
@@ -1060,13 +1060,106 @@
       : liveTelem,
   );
 
-  // Surface the active target waypoint (live MSP_NAV_STATUS or replay record) to the
-  // mission layer for the active-WP highlight — only while the FC is in WP/Mission mode
-  // (otherwise the FC may report a stale WP index).
+  // ── Active-WP highlight trust gating (see MISSION_TRACKING_AND_PROVENANCE.md) ──
+  // The highlight only shows when the loaded mission is trusted for the active context:
+  //  - replay: the mission has the DB flag (or the user confirmed once for this log/file)
+  //  - live:   the mission has the FC flag and the UAV is armed (or the user confirmed at arm)
+  let replayTrackConfirmed = $state(false);
+  let liveTrackConfirmed = $state(false);
+  let replayAskedFlightId: number | null = null;
+  let prevArmedForTrack = false;
+  let prevFileFlagForTrack = false;
+
+  async function promptTrackMission(kind: 'replay' | 'flight'): Promise<boolean> {
+    const ans = await showDialog({
+      title: $t('mission.trackTitle'),
+      message: kind === 'replay' ? $t('mission.trackReplayMsg') : $t('mission.trackFlightMsg'),
+      buttons: [{ label: $t('mission.trackYes'), value: 'track', primary: true }],
+    });
+    return ans === 'track';
+  }
+
+  // Gate: surface the active target WP only when in NAV_WP mode AND the mission is trusted.
   $effect(() => {
+    const wp = telem.activeWpNumber ?? 0;
     const inWpMode = (telem.activeFlightModeFlags & FLIGHT_MODE.NAV_WP) !== 0;
-    activeWpNumber.set(inWpMode ? (telem.activeWpNumber ?? 0) : 0);
+    const isReplay = playbackActive && !isPrimaryConnected;
+    const armed = isArmed(telem.armingFlags, telem.lastUpdate);
+    const f = $missionFlags;
+    let trusted = false;
+    if (isReplay) trusted = f.db || replayTrackConfirmed;
+    else if (isPrimaryConnected) trusted = armed && (f.fc || liveTrackConfirmed);
+    activeWpNumber.set(inWpMode && trusted ? wp : 0);
   });
+
+  // Replay prompt: once per loaded log, if a mission is on the map but not DB-linked.
+  $effect(() => {
+    const id = selectedFlightId;
+    if (id == null) { replayAskedFlightId = null; replayTrackConfirmed = false; return; }
+    if (playbackActive && id !== replayAskedFlightId) {
+      replayAskedFlightId = id;
+      replayTrackConfirmed = false;
+      if (get(mission).waypoints.length > 0 && !get(missionFlags).db) {
+        void promptTrackMission('replay').then((ok) => { replayTrackConfirmed = ok; });
+      }
+    }
+  });
+
+  // Replay prompt: also when a mission file is loaded during a replay (FILE flag rising edge).
+  $effect(() => {
+    const fileFlag = $missionFlags.file;
+    if (fileFlag && !prevFileFlagForTrack && playbackActive && !isPrimaryConnected && !$missionFlags.db) {
+      replayTrackConfirmed = false;
+      void promptTrackMission('replay').then((ok) => { replayTrackConfirmed = ok; });
+    }
+    prevFileFlagForTrack = fileFlag;
+  });
+
+  // Live prompt: once at arm, if connected and the mission isn't FC-synced.
+  $effect(() => {
+    const armed = isArmed(telem.armingFlags, telem.lastUpdate);
+    if (isPrimaryConnected && armed && !prevArmedForTrack) {
+      liveTrackConfirmed = false;
+      if (get(mission).waypoints.length > 0 && !get(missionFlags).fc) {
+        void promptTrackMission('flight').then((ok) => { liveTrackConfirmed = ok; });
+      }
+    }
+    if (!armed) liveTrackConfirmed = false;
+    prevArmedForTrack = armed;
+  });
+
+  // ── Connect prompt: offer to sync the mission with the FC on a fresh connection ──
+  let prevConnForPrompt = false;
+  $effect(() => {
+    const connected = isPrimaryConnected;
+    if (connected && !prevConnForPrompt) void onConnectMissionPrompt();
+    prevConnForPrompt = connected;
+  });
+
+  async function onConnectMissionPrompt() {
+    // INAV/MSP only for now (ArduPilot/MAVLink mission sync is a separate path).
+    if (get(connection).protocolType !== 'msp') return;
+    let fcWpCount = 0;
+    try { fcWpCount = (await missionFcInfo()).wp_count; } catch { /* FC may not answer — treat as none */ }
+    const mapHasMission = get(mission).waypoints.length > 0;
+    if (fcWpCount === 0 && !mapHasMission) return; // nothing to offer
+
+    const buttons: DialogButton[] = [];
+    if (fcWpCount > 0) buttons.push({ label: $t('mission.connDownload'), value: 'download', primary: true });
+    if (mapHasMission) buttons.push({ label: $t('mission.connUpload'), value: 'upload' });
+
+    const msg = fcWpCount > 0
+      ? $t('mission.connMsgFcHas', { values: { count: fcWpCount } })
+      : $t('mission.connMsgUploadOnly');
+    const ans = await showDialog({ title: $t('mission.connTitle'), message: msg, buttons });
+
+    try {
+      if (ans === 'download') await missionDownload();
+      else if (ans === 'upload') await missionUpload();
+    } catch (e) {
+      await showInfo($t('mission.connTitle'), String(e));
+    }
+  }
 
   // When primary connection is established, clear playback
   $effect(() => {

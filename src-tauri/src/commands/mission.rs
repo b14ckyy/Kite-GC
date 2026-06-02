@@ -4,7 +4,7 @@ use tauri::State;
 
 use crate::mavlink_proto::{self, ArduWaypoint};
 use crate::mission::store::{MissionStore, mission_from_xml, mission_to_xml};
-use crate::mission::types::{HomePt, Mission, Waypoint, WpAction, ALT_MODE_AGL, ALT_MODE_AMSL, ALT_MODE_REL, P3_ALT_TYPE};
+use crate::mission::types::{HomePt, Mission, MissionInfo, Waypoint, WpAction, ALT_MODE_AGL, ALT_MODE_AMSL, ALT_MODE_REL, P3_ALT_TYPE};
 use crate::mission::codec;
 use crate::terrain::TerrainProvider;
 
@@ -180,6 +180,20 @@ pub fn mission_download(
 
     store.set(mission.clone());
     Ok(mission)
+}
+
+/// Query the FC's mission info (MSP_WP_GETINFO) without downloading the waypoints.
+/// Used on connect to decide whether to offer downloading the FC's mission.
+#[tauri::command]
+pub fn mission_fc_info(state: State<'_, AppState>) -> Result<MissionInfo, String> {
+    let proto = state.protocol.lock().map_err(|e| e.to_string())?;
+    let handle = match proto.as_ref() {
+        Some(ActiveProtocol::Msp(h)) => h,
+        Some(ActiveProtocol::Mavlink(_)) => return Err("Mission info not supported via MAVLink yet".into()),
+        None => return Err("Not connected".into()),
+    };
+    let info_payload = handle.msp_request(MSP_WP_GETINFO, &[])?;
+    codec::decode_wp_getinfo(&info_payload)
 }
 
 /// Upload mission to FC via MSP (AGL waypoints resolved to AMSL first)
