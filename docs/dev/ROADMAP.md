@@ -248,6 +248,11 @@ This document tracks planned features, organized by milestone.
 - [ ] **Waypoint label editing** — rename/label in edit mode, shown on mouseover
 - [ ] **Waypoint parameter view** — refreshed per-WP parameter panel in the editor
 - [ ] **Active-waypoint marker on the map** — wire `MSP_NAV_STATUS` / `decode_nav_status` (backend decoder ready & tested, just not connected) to highlight the current target WP in flight
+- [ ] **Mission provenance + flown-vs-loaded validation** _(future workstream — depends on the active-WP marker; flag model + gating spec'd in `docs/dev/MISSION_TRACKING_AND_PROVENANCE.md`)_:
+  - **Record the active mission with the flight** — extend the DB so a recorded flight stores the mission that was actually loaded during it (downloaded from / uploaded to the UAV, or a loaded INAV `.mission` XML / ArduPilot `.waypoints`/`.bin`). Lets replay show + validate the real mission instead of whatever happens to be loaded in the editor.
+  - **Validate flown vs. loaded** — compare the loaded mission against the flown track / the FC's active-WP sequence and flag divergence.
+  - **Live connect prompt** — on connecting to a UAV that already holds a WP mission, ask whether to download it; downloading enables live mission tracking, declining disables it (no mission = nothing to track).
+  - **Verify mission-in-log support** — ArduPilot `.bin` embeds the mission (CMD messages); INAV blackbox only in later FW versions — confirm exact version + parse it on import.
 - [ ] **Disable/enable waypoint** — deactivate a WP in a loaded mission without deleting it (frozen in place, excluded from path + FC upload, kept in the file's meta area, greyed on the map). Design captured in `docs/dev/WaypointDisable.md`
 - [x] **Fly-by-Home waypoint handling** — FBH is INAV's `NAV_WP_FLAG_HOME` (0x48) flag on a real numbered WAYPOINT/POSHOLD_TIME/LAND (executes at the arming home), not a separate type. Added as a **modifier** in the WP editor (creates the FBH WP at the home/launch point) with a nested sub-type + altitude/params section; map shows an orange house on the inbound leg with dashed inbound/outbound legs through a protective home ring; orange numbered row in the WP list. `renumber()` now preserves 0x48 on a last WP. 2D done; 3D overlay pending
 - [ ] Abstraction layer for protocol-specific mission systems (ArduPilot/PX4 MAVLink)
