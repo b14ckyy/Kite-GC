@@ -2,6 +2,7 @@
 <script lang="ts">
   import type { TelemetryData } from "$lib/stores/telemetry";
   import { classifyMode, isArduPilot, FLIGHT_MODE } from "$lib/helpers/trackColors";
+  import { mission } from "$lib/stores/mission";
 
   let { telem, size = 9 }: { telem: TelemetryData; size?: number } = $props();
 
@@ -9,6 +10,18 @@
   let fcVariant = $derived(telem.fcVariant ?? 'INAV');
   let isArdu = $derived(isArduPilot(fcVariant));
   let mode = $derived(classifyMode(flags, fcVariant));
+
+  // In MISSION (NAV_WP) mode, show the FC's current target waypoint as "WP N/X"
+  // (N = active waypoint number, X = total waypoints). With no mission / no active
+  // WP, INAV falls back to RTH — show "WP-RTH" instead of a number. INAV only.
+  let inMission = $derived(!isArdu && (flags & FLIGHT_MODE.NAV_WP) !== 0);
+  let wpText = $derived.by(() => {
+    if (!inMission) return null;
+    const n = telem.activeWpNumber;
+    if (n <= 0) return 'WP-RTH';
+    const total = $mission.waypoints.length;
+    return total > 0 ? `WP ${n}/${total}` : `WP ${n}`;
+  });
 
   // Show active modifier flags as small tags (INAV only — ArduPilot uses flat mode numbers)
   let modifiers = $derived(() => {
@@ -37,7 +50,9 @@
       {/each}
     </div>
   {/if}
-  <span class="w-flags">0x{flags.toString(16).toUpperCase().padStart(5, '0')}</span>
+  {#if wpText}
+    <span class="w-wp">{wpText}</span>
+  {/if}
 </div>
 
 <style>
@@ -87,10 +102,14 @@
     padding: calc(var(--ws) * 0.01) calc(var(--ws) * 0.03);
     border-radius: calc(var(--ws) * 0.02);
   }
-  .w-flags {
+  .w-wp {
     margin-top: auto;
-    font-size: calc(var(--ws) * 0.09);
-    font-family: monospace;
-    color: #666;
+    margin-bottom: calc(var(--ws) * 0.02);
+    font-size: calc(var(--ws) * 0.15);
+    font-weight: 700;
+    color: #37a8db;
+    letter-spacing: 0.04em;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
 </style>
