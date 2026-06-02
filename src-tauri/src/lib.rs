@@ -21,6 +21,8 @@ use commands::flightlog::{
     flightlog_probe_ardupilot, flightlog_decode_ardupilot_csv,
     flightlog_import_ardupilot,
     flightlog_link_flights, flightlog_unlink_flight, flightlog_find_linkable,
+    mission_db_save, mission_db_get, mission_db_for_flight, flight_link_mission,
+    flight_logged_wp_count, mission_db_geocode, mission_db_find_by_hash, mission_db_update,
 };
 use commands::info::get_app_version;
 use commands::terrain::{terrain_elevation, terrain_fan, terrain_profile};
@@ -109,6 +111,14 @@ pub fn run() {
             flightlog_get,
             flightlog_get_track,
             flightlog_delete,
+            mission_db_save,
+            mission_db_get,
+            mission_db_for_flight,
+            flight_link_mission,
+            flight_logged_wp_count,
+            mission_db_geocode,
+            mission_db_find_by_hash,
+            mission_db_update,
             flightlog_update_notes,
             flightlog_update_craft_name,
             flightlog_update_weather,

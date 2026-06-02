@@ -6,6 +6,7 @@ use std::time::Instant;
 
 use chrono::Utc;
 use rusqlite::Connection;
+use tauri::{AppHandle, Emitter};
 
 use super::db;
 use super::raw_logger::RawLogger;
@@ -18,6 +19,14 @@ use crate::scheduler::telemetry::{
 
 /// Bit 2 in arming_flags indicates ARMED state
 const ARMED_FLAG: u32 = 0x04; // bit 2
+
+/// Payload for the `flight-recording-started` / `flight-recording-ended` events. The frontend
+/// uses `flight_id` to save + link the flown mission to this DB flight (see
+/// docs/dev/MISSION_LIBRARY_AND_DB.md).
+#[derive(serde::Serialize, Clone)]
+struct FlightRecordingEvent {
+    flight_id: i64,
+}
 
 #[inline]
 fn is_valid_gps_coord(lat: f64, lon: f64) -> bool {
@@ -136,6 +145,8 @@ pub struct FlightRecorder {
     session_start: Option<chrono::DateTime<Utc>>,
     /// Track continuous-mode session start Instant for raw sample timestamps
     session_instant: Option<Instant>,
+    /// For emitting flight-recording lifecycle events to the frontend.
+    app_handle: AppHandle,
 }
 
 /// Thread-safe handle to the flight recorder
@@ -149,6 +160,7 @@ impl FlightRecorder {
         fc_info: FcInfo,
         protocol: &str,
         portable: bool,
+        app_handle: AppHandle,
     ) -> Result<Self, String> {
         let db_path = db::resolve_db_path(&settings.db_path, portable);
         log::info!("Flight log database: {}", db_path.display());
@@ -170,6 +182,7 @@ impl FlightRecorder {
             was_armed: false,
             session_start: None,
             session_instant: None,
+            app_handle,
         })
     }
 
@@ -380,6 +393,17 @@ impl FlightRecorder {
         });
 
         log::info!("Flight {} started (db={})", flight_id, self.settings.db_enabled);
+
+        // Notify the frontend so it can save + link the flown mission (DB flights only — a
+        // raw-only pseudo flight_id has no DB row to link).
+        if self.settings.db_enabled {
+            if let Err(e) = self
+                .app_handle
+                .emit("flight-recording-started", FlightRecordingEvent { flight_id })
+            {
+                log::warn!("Failed to emit flight-recording-started: {}", e);
+            }
+        }
     }
 
     /// Called when disarm transition is detected
@@ -445,6 +469,17 @@ impl FlightRecorder {
                 flight.total_distance,
                 self.settings.db_enabled,
             );
+
+            // Notify the frontend: link the flown mission now that the DB flight exists, and
+            // (if a new mission was uploaded in-flight) prompt to update the link.
+            if self.settings.db_enabled {
+                if let Err(e) = self.app_handle.emit(
+                    "flight-recording-ended",
+                    FlightRecordingEvent { flight_id: flight.flight_id },
+                ) {
+                    log::warn!("Failed to emit flight-recording-ended: {}", e);
+                }
+            }
         }
     }
 

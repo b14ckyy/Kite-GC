@@ -2,7 +2,8 @@
 <script lang="ts">
   import type { TelemetryData } from "$lib/stores/telemetry";
   import { classifyMode, isArduPilot, FLIGHT_MODE } from "$lib/helpers/trackColors";
-  import { mission } from "$lib/stores/mission";
+  import { mission, replayActive } from "$lib/stores/mission";
+  import { replayWpTotal } from "$lib/stores/navStatus";
 
   let { telem, size = 9 }: { telem: TelemetryData; size?: number } = $props();
 
@@ -15,12 +16,14 @@
   // (N = active waypoint number, X = total waypoints). With no mission / no active
   // WP, INAV falls back to RTH — show "WP-RTH" instead of a number. INAV only.
   let inMission = $derived(!isArdu && (flags & FLIGHT_MODE.NAV_WP) !== 0);
+  // X (total): in replay use the flown mission's count (linked library mission or Blackbox
+  // header); live uses the loaded planner mission's length.
+  let wpTotal = $derived($replayActive ? ($replayWpTotal ?? 0) : $mission.waypoints.length);
   let wpText = $derived.by(() => {
     if (!inMission) return null;
     const n = telem.activeWpNumber;
     if (n <= 0) return 'WP-RTH';
-    const total = $mission.waypoints.length;
-    return total > 0 ? `WP ${n}/${total}` : `WP ${n}`;
+    return wpTotal > 0 ? `WP ${n}/${wpTotal}` : `WP ${n}`;
   });
 
   // Show active modifier flags as small tags (INAV only — ArduPilot uses flat mode numbers)

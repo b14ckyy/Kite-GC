@@ -124,6 +124,12 @@ function createEmptyMission(): Mission {
 
 export const mission = writable<Mission>(createEmptyMission());
 
+/** DB id of the currently loaded/imported library mission (null = fresh / never saved).
+ *  Set on DB-load, and on import when the content hash matches an existing row; drives the
+ *  NEW vs OVERWRITE decision on save, and is the link target for arm-time recording saves.
+ *  See docs/dev/MISSION_LIBRARY_AND_DB.md. */
+export const loadedMissionId = writable<number | null>(null);
+
 /** Geo-waypoints only (for map markers) */
 export const geoWaypoints = derived(mission, ($m) =>
   $m.waypoints.filter((wp) => hasLocation(wp.action))
@@ -229,8 +235,10 @@ const missionSlots: Map<number, Waypoint[]> = new Map();
 
 export type MissionFlag = 'fc' | 'file' | 'db';
 
-/** Stable content hash of a waypoint list (the WP `number` is positional → excluded). */
-function hashWaypoints(wps: Waypoint[]): string {
+/** Stable content hash of a waypoint list (the WP `number` is positional → excluded).
+ *  Exported so the mission library can derive the same identity (SHA-256 of this) — keeping
+ *  the DB's `content_hash` consistent with provenance. See helpers/missionLibrary.ts. */
+export function hashWaypoints(wps: Waypoint[]): string {
   return JSON.stringify(
     wps.map((w) => [w.action, w.lat, w.lon, w.altitude, w.p1, w.p2, w.p3, w.flag, w.alt_mode ?? 0]),
   );
@@ -419,12 +427,14 @@ export function resetMultiMission(): void {
   missionSlots.clear();
   missionCount.set(1);
   activeMissionIndex.set(1);
+  loadedMissionId.set(null);
   clearUndoHistory();
 }
 
 /** Reset in-memory mission without touching the FC (used when switching autopilot systems) */
 export function missionResetMemory(): void {
   mission.set(createEmptyMission());
+  loadedMissionId.set(null);
   clearUndoHistory();
 }
 
@@ -562,6 +572,7 @@ export async function missionClear(): Promise<void> {
   pushUndo();
   await invoke<Mission>('mission_clear');
   mission.set(createEmptyMission());
+  loadedMissionId.set(null);
 }
 
 /** Add a waypoint */
@@ -699,6 +710,7 @@ export async function missionDownload(fromEeprom = false): Promise<Mission> {
   mission.set(m);
   clearUndoHistory();
   markMissionSynced('fc');
+  loadedMissionId.set(null);
   return m;
 }
 
@@ -738,6 +750,7 @@ export async function missionImportXml(xml: string): Promise<Mission> {
   applyLoadedHome(m);
   clearUndoHistory();
   markMissionSynced('file');
+  loadedMissionId.set(null);
   return m;
 }
 
@@ -754,5 +767,6 @@ export async function missionLoadFile(path: string): Promise<Mission> {
   applyLoadedHome(m);
   clearUndoHistory();
   markMissionSynced('file');
+  loadedMissionId.set(null);
   return m;
 }

@@ -25,7 +25,66 @@ export { buildFlightTree, formatDurationSec } from '../helpers/flightlogHelpers'
 
 // ── Tauri command wrappers ───────────────────────────────────────────
 
-import type { FlightSummary, Flight, TelemetryRecord, BlackboxImportStatus, KflightImportResult } from './flightlogTypes';
+import type { FlightSummary, Flight, TelemetryRecord, BlackboxImportStatus, KflightImportResult, LibraryMission, LibraryMissionInput } from './flightlogTypes';
+
+/** Save a mission to the library (dedup by content hash). Returns the mission id. */
+export async function missionDbSave(mission: LibraryMissionInput, dbPath: string): Promise<number> {
+  return invoke<number>('mission_db_save', {
+    mission,
+    dbPath: dbPath || undefined,
+  });
+}
+
+/** Link a recorded flight to a library mission. */
+export async function flightLinkMission(flightId: number, missionId: number, dbPath: string): Promise<void> {
+  return invoke<void>('flight_link_mission', {
+    flightId,
+    missionId,
+    dbPath: dbPath || undefined,
+  });
+}
+
+/** Find a library mission by content hash (import dedup-match / save NEW-vs-OVERWRITE check). */
+export async function missionDbFindByHash(contentHash: string, dbPath: string): Promise<LibraryMission | null> {
+  return invoke<LibraryMission | null>('mission_db_find_by_hash', {
+    contentHash,
+    dbPath: dbPath || undefined,
+  });
+}
+
+/** Overwrite an existing library mission in place (OVERWRITE on save). */
+export async function missionDbUpdate(id: number, mission: LibraryMissionInput, dbPath: string): Promise<void> {
+  return invoke<void>('mission_db_update', {
+    id,
+    mission,
+    dbPath: dbPath || undefined,
+  });
+}
+
+/** Reverse-geocode a mission (bbox centroid) and store its location_name. Fire-and-forget. */
+export async function missionDbGeocode(id: number, lang: string, dbPath: string): Promise<string | null> {
+  return invoke<string | null>('mission_db_geocode', {
+    id,
+    lang: lang || undefined,
+    dbPath: dbPath || undefined,
+  });
+}
+
+/** The mission linked to a recorded flight (replay `WP N/X` source), or null. */
+export async function missionDbForFlight(flightId: number, dbPath: string): Promise<LibraryMission | null> {
+  return invoke<LibraryMission | null>('mission_db_for_flight', {
+    flightId,
+    dbPath: dbPath || undefined,
+  });
+}
+
+/** Blackbox-header waypoint count for a flight (replay `WP N/X` fallback), or null. */
+export async function flightLoggedWpCount(flightId: number, dbPath: string): Promise<number | null> {
+  return invoke<number | null>('flight_logged_wp_count', {
+    flightId,
+    dbPath: dbPath || undefined,
+  });
+}
 
 export async function listFlights(dbPath: string): Promise<FlightSummary[]> {
   return invoke<FlightSummary[]>('flightlog_list', {

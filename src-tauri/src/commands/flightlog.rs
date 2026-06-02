@@ -6,7 +6,7 @@ use crate::flightlog::db;
 use crate::flightlog::exchange;
 use crate::flightlog::types::{
     BlackboxImportProgress, BlackboxImportStatus, Flight, FlightSummary,
-    TelemetryRecord,
+    Mission, MissionInput, TelemetryRecord,
 };
 
 /// Resolve the database path and open a connection.
@@ -101,6 +101,119 @@ pub fn flightlog_get_track(
 ) -> Result<Vec<TelemetryRecord>, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
     db::get_flight_track(&conn, flight_id).map_err(|e| format!("Query error: {}", e))
+}
+
+// ── Mission library ─────────────────────────────────────────────────
+
+/// Save a mission to the library (dedup by content hash). Returns the mission id.
+#[tauri::command]
+pub fn mission_db_save(mission: MissionInput, db_path: Option<String>) -> Result<i64, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::upsert_mission(&conn, &mission).map_err(|e| format!("Save error: {}", e))
+}
+
+/// Fetch a library mission by id.
+#[tauri::command]
+pub fn mission_db_get(id: i64, db_path: Option<String>) -> Result<Option<Mission>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::get_mission(&conn, id).map_err(|e| format!("Query error: {}", e))
+}
+
+/// Find a library mission by content hash (import dedup-match / save NEW-vs-OVERWRITE check).
+#[tauri::command]
+pub fn mission_db_find_by_hash(
+    content_hash: String,
+    db_path: Option<String>,
+) -> Result<Option<Mission>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::find_mission_by_hash(&conn, &content_hash).map_err(|e| format!("Query error: {}", e))
+}
+
+/// Overwrite an existing library mission in place (OVERWRITE on save).
+#[tauri::command]
+pub fn mission_db_update(
+    id: i64,
+    mission: MissionInput,
+    db_path: Option<String>,
+) -> Result<(), String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::update_mission(&conn, id, &mission).map_err(|e| format!("Update error: {}", e))
+}
+
+/// Fetch the mission linked to a flight (if any).
+#[tauri::command]
+pub fn mission_db_for_flight(
+    flight_id: i64,
+    db_path: Option<String>,
+) -> Result<Option<Mission>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::get_mission_for_flight(&conn, flight_id).map_err(|e| format!("Query error: {}", e))
+}
+
+/// Link a recorded flight to a library mission.
+#[tauri::command]
+pub fn flight_link_mission(
+    flight_id: i64,
+    mission_id: i64,
+    db_path: Option<String>,
+) -> Result<(), String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::link_flight_mission(&conn, flight_id, mission_id)
+        .map_err(|e| format!("Link error: {}", e))
+}
+
+/// Read the Blackbox-header waypoint count for a flight (replay `WP N/X` fallback).
+#[tauri::command]
+pub fn flight_logged_wp_count(
+    flight_id: i64,
+    db_path: Option<String>,
+) -> Result<Option<i64>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::get_flight_logged_wp_count(&conn, flight_id).map_err(|e| format!("Query error: {}", e))
+}
+
+/// Reverse-geocode a mission's location (bounding-box centroid) and store it, reusing the
+/// same Nominatim helper as the flight log. Skips the network call if the mission already has
+/// a location name (dedup means each mission is geocoded once). Returns the location name.
+#[tauri::command]
+pub async fn mission_db_geocode(
+    id: i64,
+    lang: Option<String>,
+    db_path: Option<String>,
+) -> Result<Option<String>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    let mission = db::get_mission(&conn, id)
+        .map_err(|e| format!("Query error: {}", e))?
+        .ok_or("Mission not found")?;
+
+    if mission.location_name.is_some() {
+        return Ok(mission.location_name);
+    }
+
+    let (lat, lon) = match (
+        mission.bndbox_min_lat,
+        mission.bndbox_min_lon,
+        mission.bndbox_max_lat,
+        mission.bndbox_max_lon,
+    ) {
+        (Some(min_lat), Some(min_lon), Some(max_lat), Some(max_lon)) => {
+            ((min_lat + max_lat) / 2.0, (min_lon + max_lon) / 2.0)
+        }
+        _ => return Ok(None), // no geo waypoints → nothing to geocode
+    };
+
+    let lang_str = lang.as_deref().unwrap_or("en");
+    let location = crate::flightlog::geocode::reverse_geocode(lat, lon, lang_str).await;
+
+    if let Some(ref name) = location {
+        conn.execute(
+            "UPDATE missions SET location_name = ?1 WHERE id = ?2",
+            rusqlite::params![name, id],
+        )
+        .map_err(|e| format!("Update error: {}", e))?;
+    }
+
+    Ok(location)
 }
 
 /// Delete a flight and its telemetry data

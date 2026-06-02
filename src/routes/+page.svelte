@@ -29,7 +29,9 @@
   import { isValidGpsCoordinate, isArmed } from '$lib/helpers/telemetry';
   import { liveTrack, appendLivePoint, clearLiveTrack } from '$lib/stores/liveTrack';
   import { toTelemetryData } from '$lib/adapters/telemetryAdapter';
-  import { activeWpNumber } from '$lib/stores/navStatus';
+  import { activeWpNumber, replayWpTotal } from '$lib/stores/navStatus';
+  import { missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode } from '$lib/stores/flightlog';
+  import { buildMissionInput, missionContentHash } from '$lib/helpers/missionLibrary';
   import { homePosition } from '$lib/stores/home';
   import { MAP_PROVIDERS } from "$lib/config/mapProviders";
   import { tileCacheStats, setCacheMaxMB, clearCache } from "$lib/cache/tileCache";
@@ -42,7 +44,7 @@
   import FloatingVideoWindow from "$lib/components/video/FloatingVideoWindow.svelte";
   import { initVideo, videoState, videoStream, setVideoPrimary, registerPiPElement } from "$lib/stores/video";
   import TerrainAnalysisPanel from "$lib/components/terrain/TerrainAnalysisPanel.svelte";
-  import { editMode, replayActive, mission, missionFlags, missionDownload, missionUpload, missionFcInfo } from "$lib/stores/mission";
+  import { editMode, replayActive, mission, missionFlags, missionDownload, missionUpload, missionFcInfo, markMissionSynced, loadedMissionId } from "$lib/stores/mission";
   import { terrainAnalysis, patchTerrainAnalysis } from "$lib/stores/terrainAnalysis";
   import type { InterfaceSettings, PanelConfig } from "$lib/stores/settings";
   import { layout, GRID_DEFAULTS } from '$lib/stores/layout';
@@ -777,6 +779,16 @@
     resetPlayback();
     if (data.hasGpsData) playbackActive = true;
 
+    // Resolve the replay WP total (X for the WP N/X readout): the linked library mission's
+    // count, else the Blackbox-header count, else null (→ "WP N").
+    replayWpTotal.set(null);
+    try {
+      const linked = await missionDbForFlight(flightId, flightLogDbPath);
+      replayWpTotal.set(linked ? linked.wp_count : await flightLoggedWpCount(flightId, flightLogDbPath));
+    } catch {
+      replayWpTotal.set(null);
+    }
+
     // Pre-load linked partner track for source switching
     if (data.flight?.linked_flight_id) {
       const partnerTrack = await logbookCtrl.getPartnerTrack(data.flight.linked_flight_id, flightLogDbPath);
@@ -1168,7 +1180,67 @@
     }
   });
 
+  // ── Mission recording link (arm-save / disarm-link) ──────────────────
+  // On arm (with DB recording), save the displayed mission to the library and link it to the
+  // just-created flight. On disarm, if the mission changed during the flight (e.g. a new
+  // mission uploaded), offer to update the link. See docs/dev/MISSION_LIBRARY_AND_DB.md.
+  let flightMissionHash: string | null = null;
+
+  async function linkMissionToFlight(flightId: number, wps = get(mission).waypoints): Promise<void> {
+    const input = await buildMissionInput(wps);
+    const id = await missionDbSave(input, flightLogDbPath);
+    await flightLinkMission(flightId, id, flightLogDbPath);
+    markMissionSynced('db');
+    loadedMissionId.set(id);
+    flightMissionHash = input.content_hash;
+    void missionDbGeocode(id, $locale ?? 'en', flightLogDbPath).catch(() => {});
+  }
+
+  async function onRecordingStarted(flightId: number): Promise<void> {
+    flightMissionHash = null;
+    const wps = get(mission).waypoints;
+    // Only link the mission that is actually being flown: it must be in sync with the FC
+    // (FC flag). A stale plan, or an edited-but-not-reuploaded mission, is NOT what the FC
+    // flies, so we don't link it. (This also keeps arm-save INAV-only — ArduPilot uses a
+    // separate mission path without this flag.)
+    if (wps.length === 0 || !get(missionFlags).fc) return;
+    try {
+      await linkMissionToFlight(flightId, wps);
+    } catch (e) {
+      console.warn('[mission-link] arm-save failed', e);
+    }
+  }
+
+  async function onRecordingEnded(flightId: number): Promise<void> {
+    try {
+      const wps = get(mission).waypoints;
+      // Only consider the FC-synced mission (what was actually flown). If it isn't FC-synced
+      // now, leave any arm-time link untouched.
+      if (wps.length === 0 || !get(missionFlags).fc) return;
+      const curHash = await missionContentHash(wps);
+      if (curHash === flightMissionHash) return; // unchanged since arm → keep the link
+      // Changed since arm (e.g. a new mission uploaded in-flight) or never linked at arm →
+      // offer to (re)link to the current version.
+      const ans = await showDialog({
+        title: $t('mission.linkUpdateTitle'),
+        message: $t('mission.linkUpdateMsg'),
+        buttons: [{ label: $t('mission.linkUpdateYes'), value: 'update', primary: true }],
+      });
+      if (ans === 'update') await linkMissionToFlight(flightId, wps);
+    } catch (e) {
+      console.warn('[mission-link] disarm-link failed', e);
+    } finally {
+      flightMissionHash = null;
+    }
+  }
+
   if (typeof window !== 'undefined') {
+    void listen<{ flight_id: number }>('flight-recording-started', (event) => {
+      void onRecordingStarted(event.payload.flight_id);
+    });
+    void listen<{ flight_id: number }>('flight-recording-ended', (event) => {
+      void onRecordingEnded(event.payload.flight_id);
+    });
     void listen<BlackboxImportProgress>('flightlog-import-progress', (event) => {
       blackboxImportProgress = event.payload;
     });

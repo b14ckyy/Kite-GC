@@ -1,6 +1,47 @@
 // All shared types and interfaces for the flight logbook system.
 // Imported by flightlog.ts (store), logbookController.ts, and UI components.
 
+/** A reusable mission in the DB library (mirrors Rust flightlog::types::Mission). */
+export interface LibraryMission {
+  id: number;
+  content_hash: string;
+  name: string;
+  format: string;
+  waypoints_json: string;
+  source_xml: string | null;
+  wp_count: number;
+  total_distance_m: number | null;
+  alt_diff_m: number | null;
+  max_alt_m: number | null;
+  min_alt_m: number | null;
+  bndbox_min_lat: number | null;
+  bndbox_min_lon: number | null;
+  bndbox_max_lat: number | null;
+  bndbox_max_lon: number | null;
+  location_name: string | null;
+  created_at: string;
+  notes: string | null;
+}
+
+/** Payload for saving a mission to the library (mirrors Rust flightlog::types::MissionInput). */
+export interface LibraryMissionInput {
+  content_hash: string;
+  name: string;
+  format: string;
+  waypoints_json: string;
+  source_xml: string | null;
+  wp_count: number;
+  total_distance_m: number | null;
+  alt_diff_m: number | null;
+  max_alt_m: number | null;
+  min_alt_m: number | null;
+  bndbox_min_lat: number | null;
+  bndbox_min_lon: number | null;
+  bndbox_max_lat: number | null;
+  bndbox_max_lon: number | null;
+  notes: string | null;
+}
+
 export interface FlightSummary {
   id: number;
   start_time: string;

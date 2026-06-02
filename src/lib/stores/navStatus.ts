@@ -23,3 +23,9 @@ function createActiveWp() {
 }
 
 export const activeWpNumber = createActiveWp();
+
+/** Total waypoint count of the mission flown in the *current replay* — the `X` in the
+ *  `WP N/X` readout. Resolved on flight load (`+page.selectFlight`): the linked library
+ *  mission's `wp_count`, else the Blackbox-header `logged_wp_count`, else null (→ `WP N`).
+ *  Only consulted in replay; live mode uses the loaded planner mission's length. */
+export const replayWpTotal = writable<number | null>(null);

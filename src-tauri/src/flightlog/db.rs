@@ -7,9 +7,9 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
 
-use super::types::{Flight, FlightSummary, TelemetryRecord};
+use super::types::{Flight, FlightSummary, Mission, MissionInput, TelemetryRecord};
 
-const CURRENT_SCHEMA_VERSION: u32 = 7;
+const CURRENT_SCHEMA_VERSION: u32 = 8;
 
 /// Open (or create) the flight log database at the given path.
 /// Runs migrations if needed.
@@ -113,6 +113,74 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
         migrate_v6_to_v7(conn)?;
     }
 
+    if current < 8 {
+        migrate_v7_to_v8(conn)?;
+    }
+
+    // Self-heal: ensure the v8 schema actually exists even if a prior version bump left it
+    // incomplete. Legacy migrations call set_user_version(CURRENT), so a CURRENT bump can
+    // mark the DB as v8 without v7_to_v8 ever creating its objects. Idempotent, so a healthy
+    // DB is unaffected.
+    ensure_v8_schema(conn)?;
+
+    Ok(())
+}
+
+/// Whether `table` has a column named `column` (via PRAGMA table_info).
+fn column_exists(conn: &Connection, table: &str, column: &str) -> SqlResult<bool> {
+    // `table` is always a hardcoded literal here, so the format! is injection-safe.
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", table))?;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        let name: String = row.get(1)?;
+        if name == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Idempotently create the v8 mission-library objects (missions table + the two `flights`
+/// columns). Safe to call on every open; only adds what's missing.
+fn ensure_v8_schema(conn: &Connection) -> SqlResult<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS missions (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            content_hash     TEXT NOT NULL UNIQUE,
+            name             TEXT NOT NULL DEFAULT '',
+            format           TEXT NOT NULL DEFAULT 'inav',
+            waypoints_json   TEXT NOT NULL,
+            source_xml       TEXT,
+            wp_count         INTEGER NOT NULL DEFAULT 0,
+            total_distance_m REAL,
+            alt_diff_m       REAL,
+            max_alt_m        REAL,
+            min_alt_m        REAL,
+            bndbox_min_lat   REAL,
+            bndbox_min_lon   REAL,
+            bndbox_max_lat   REAL,
+            bndbox_max_lon   REAL,
+            location_name    TEXT,
+            created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+            notes            TEXT
+        );",
+    )?;
+    // A `missions` table created by an interim build may predate the location_name column.
+    if !column_exists(conn, "missions", "location_name")? {
+        conn.execute_batch("ALTER TABLE missions ADD COLUMN location_name TEXT;")?;
+    }
+    if !column_exists(conn, "flights", "mission_id")? {
+        conn.execute_batch("ALTER TABLE flights ADD COLUMN mission_id INTEGER REFERENCES missions(id);")?;
+    }
+    if !column_exists(conn, "flights", "logged_wp_count")? {
+        conn.execute_batch("ALTER TABLE flights ADD COLUMN logged_wp_count INTEGER;")?;
+    }
+    Ok(())
+}
+
+fn migrate_v7_to_v8(conn: &Connection) -> SqlResult<()> {
+    ensure_v8_schema(conn)?;
+    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
     Ok(())
 }
 
@@ -523,6 +591,182 @@ pub fn get_flight(conn: &Connection, flight_id: i64) -> SqlResult<Option<Flight>
     match rows.next() {
         Some(Ok(f)) => Ok(Some(f)),
         Some(Err(e)) => Err(e),
+        None => Ok(None),
+    }
+}
+
+// ── Mission library ─────────────────────────────────────────────────
+
+const MISSION_COLS: &str = "id, content_hash, name, format, waypoints_json, source_xml, \
+    wp_count, total_distance_m, alt_diff_m, max_alt_m, min_alt_m, \
+    bndbox_min_lat, bndbox_min_lon, bndbox_max_lat, bndbox_max_lon, location_name, \
+    created_at, notes";
+
+fn row_to_mission(row: &rusqlite::Row) -> SqlResult<Mission> {
+    Ok(Mission {
+        id: row.get(0)?,
+        content_hash: row.get(1)?,
+        name: row.get(2)?,
+        format: row.get(3)?,
+        waypoints_json: row.get(4)?,
+        source_xml: row.get(5)?,
+        wp_count: row.get(6)?,
+        total_distance_m: row.get(7)?,
+        alt_diff_m: row.get(8)?,
+        max_alt_m: row.get(9)?,
+        min_alt_m: row.get(10)?,
+        bndbox_min_lat: row.get(11)?,
+        bndbox_min_lon: row.get(12)?,
+        bndbox_max_lat: row.get(13)?,
+        bndbox_max_lon: row.get(14)?,
+        location_name: row.get(15)?,
+        created_at: row.get(16)?,
+        notes: row.get(17)?,
+    })
+}
+
+/// Insert a mission, or return the id of an existing one with the same content hash
+/// (dedup — the same mission is stored once and shared across flights).
+pub fn upsert_mission(conn: &Connection, m: &MissionInput) -> SqlResult<i64> {
+    if let Some(id) = conn
+        .query_row(
+            "SELECT id FROM missions WHERE content_hash = ?1",
+            params![m.content_hash],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?
+    {
+        return Ok(id);
+    }
+    conn.execute(
+        "INSERT INTO missions (
+            content_hash, name, format, waypoints_json, source_xml, wp_count,
+            total_distance_m, alt_diff_m, max_alt_m, min_alt_m,
+            bndbox_min_lat, bndbox_min_lon, bndbox_max_lat, bndbox_max_lon, notes
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+        params![
+            m.content_hash,
+            m.name,
+            m.format,
+            m.waypoints_json,
+            m.source_xml,
+            m.wp_count,
+            m.total_distance_m,
+            m.alt_diff_m,
+            m.max_alt_m,
+            m.min_alt_m,
+            m.bndbox_min_lat,
+            m.bndbox_min_lon,
+            m.bndbox_max_lat,
+            m.bndbox_max_lon,
+            m.notes,
+        ],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Fetch a mission by id.
+pub fn get_mission(conn: &Connection, id: i64) -> SqlResult<Option<Mission>> {
+    conn.query_row(
+        &format!("SELECT {} FROM missions WHERE id = ?1", MISSION_COLS),
+        params![id],
+        row_to_mission,
+    )
+    .optional()
+}
+
+/// Find a mission by its content hash (import dedup-match / save NEW-vs-OVERWRITE check).
+pub fn find_mission_by_hash(conn: &Connection, content_hash: &str) -> SqlResult<Option<Mission>> {
+    conn.query_row(
+        &format!("SELECT {} FROM missions WHERE content_hash = ?1", MISSION_COLS),
+        params![content_hash],
+        row_to_mission,
+    )
+    .optional()
+}
+
+/// Overwrite an existing library mission in place (OVERWRITE on save). Updates content + all
+/// computed metadata; `created_at` and `location_name` are preserved. The caller should
+/// pre-check `find_mission_by_hash` so it does not collide with a *different* existing row.
+pub fn update_mission(conn: &Connection, id: i64, m: &MissionInput) -> SqlResult<()> {
+    conn.execute(
+        "UPDATE missions SET
+            content_hash = ?1, name = ?2, format = ?3, waypoints_json = ?4, source_xml = ?5,
+            wp_count = ?6, total_distance_m = ?7, alt_diff_m = ?8, max_alt_m = ?9, min_alt_m = ?10,
+            bndbox_min_lat = ?11, bndbox_min_lon = ?12, bndbox_max_lat = ?13, bndbox_max_lon = ?14,
+            notes = ?15
+         WHERE id = ?16",
+        params![
+            m.content_hash,
+            m.name,
+            m.format,
+            m.waypoints_json,
+            m.source_xml,
+            m.wp_count,
+            m.total_distance_m,
+            m.alt_diff_m,
+            m.max_alt_m,
+            m.min_alt_m,
+            m.bndbox_min_lat,
+            m.bndbox_min_lon,
+            m.bndbox_max_lat,
+            m.bndbox_max_lon,
+            m.notes,
+            id,
+        ],
+    )?;
+    Ok(())
+}
+
+/// Fetch the mission linked to a flight (if any).
+pub fn get_mission_for_flight(conn: &Connection, flight_id: i64) -> SqlResult<Option<Mission>> {
+    let mission_id: Option<i64> = match conn
+        .query_row(
+            "SELECT mission_id FROM flights WHERE id = ?1",
+            params![flight_id],
+            |row| row.get::<_, Option<i64>>(0),
+        )
+        .optional()?
+    {
+        Some(inner) => inner,
+        None => None,
+    };
+    match mission_id {
+        Some(id) => get_mission(conn, id),
+        None => Ok(None),
+    }
+}
+
+/// Link a recorded flight to a library mission.
+pub fn link_flight_mission(conn: &Connection, flight_id: i64, mission_id: i64) -> SqlResult<()> {
+    conn.execute(
+        "UPDATE flights SET mission_id = ?1 WHERE id = ?2",
+        params![mission_id, flight_id],
+    )?;
+    Ok(())
+}
+
+/// Store the waypoint count parsed from a Blackbox header (fallback `X` for replay when no
+/// mission is linked).
+pub fn set_flight_logged_wp_count(conn: &Connection, flight_id: i64, count: i64) -> SqlResult<()> {
+    conn.execute(
+        "UPDATE flights SET logged_wp_count = ?1 WHERE id = ?2",
+        params![count, flight_id],
+    )?;
+    Ok(())
+}
+
+/// Read the Blackbox-header waypoint count for a flight (fallback `X` for replay).
+pub fn get_flight_logged_wp_count(conn: &Connection, flight_id: i64) -> SqlResult<Option<i64>> {
+    match conn
+        .query_row(
+            "SELECT logged_wp_count FROM flights WHERE id = ?1",
+            params![flight_id],
+            |row| row.get::<_, Option<i64>>(0),
+        )
+        .optional()?
+    {
+        Some(inner) => Ok(inner),
         None => Ok(None),
     }
 }

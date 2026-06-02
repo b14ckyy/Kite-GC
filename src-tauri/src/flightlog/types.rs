@@ -69,6 +69,57 @@ pub struct Flight {
     pub linked_flight_id: Option<i64>,
 }
 
+/// A reusable mission stored in the library (row in `missions` table).
+/// Identity is `content_hash` (the same hash the frontend provenance uses), so the
+/// same mission is stored once and shared across any number of flights.
+/// All geometry metadata is computed by the frontend at save time.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Mission {
+    pub id: i64,
+    pub content_hash: String,
+    pub name: String,
+    /// `inav` | `ardupilot` (forward-looking)
+    pub format: String,
+    /// Canonical waypoints as JSON (the planner's `Waypoint[]`).
+    pub waypoints_json: String,
+    /// Optional original `.mission` XML, for round-trip fidelity.
+    pub source_xml: Option<String>,
+    pub wp_count: i64,
+    pub total_distance_m: Option<f64>,
+    /// Highest − lowest waypoint altitude.
+    pub alt_diff_m: Option<f64>,
+    pub max_alt_m: Option<f64>,
+    pub min_alt_m: Option<f64>,
+    pub bndbox_min_lat: Option<f64>,
+    pub bndbox_min_lon: Option<f64>,
+    pub bndbox_max_lat: Option<f64>,
+    pub bndbox_max_lon: Option<f64>,
+    /// Reverse-geocoded location (centroid of the bounding box), like the flight log.
+    pub location_name: Option<String>,
+    pub created_at: String,
+    pub notes: Option<String>,
+}
+
+/// Payload for saving a mission to the library (no `id` / `created_at` — assigned by the DB).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MissionInput {
+    pub content_hash: String,
+    pub name: String,
+    pub format: String,
+    pub waypoints_json: String,
+    pub source_xml: Option<String>,
+    pub wp_count: i64,
+    pub total_distance_m: Option<f64>,
+    pub alt_diff_m: Option<f64>,
+    pub max_alt_m: Option<f64>,
+    pub min_alt_m: Option<f64>,
+    pub bndbox_min_lat: Option<f64>,
+    pub bndbox_min_lon: Option<f64>,
+    pub bndbox_max_lat: Option<f64>,
+    pub bndbox_max_lon: Option<f64>,
+    pub notes: Option<String>,
+}
+
 /// A single telemetry sample (row in `telemetry_records` table)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TelemetryRecord {

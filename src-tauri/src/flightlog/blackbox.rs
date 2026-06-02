@@ -24,6 +24,8 @@ struct HeaderMetadata {
     craft_name: Option<String>,
     fc_version: Option<String>,
     board_id: Option<String>,
+    /// Waypoint count from `H waypoints:<count>,<flag>` (only the count is used).
+    logged_wp_count: Option<i64>,
     start_time: Option<DateTime<Utc>>,
 }
 
@@ -182,6 +184,9 @@ where
     eprintln!("[BBX-DISTANCE] total_distance_m={:.2}, max_distance_m={:.2}, start_lat={:?}, start_lon={:?}, prev_lat={:?}, prev_lon={:?}",
         total_distance_m, max_distance_m, start_lat, start_lon, prev_lat, prev_lon);
 
+    // Capture before constructing Flight (which moves other header fields out).
+    let logged_wp_count = header.logged_wp_count;
+
     let flight = Flight {
         id: 0,
         start_time,
@@ -213,6 +218,17 @@ where
     report(72, "store-flight", "Creating logbook entry...");
     let flight_id = db::insert_flight(conn, &flight)
         .map_err(|e| format!("Failed to create imported Blackbox flight: {}", e))?;
+
+    // Replay `WP N/X` fallback when no mission is linked: persist the header's WP count.
+    match logged_wp_count {
+        Some(wp_count) => {
+            eprintln!("[BBX-HEADER] waypoints count = {} (flight {})", wp_count, flight_id);
+            if let Err(e) = db::set_flight_logged_wp_count(conn, flight_id, wp_count) {
+                eprintln!("[BBX-HEADER] failed to store logged_wp_count: {}", e);
+            }
+        }
+        None => eprintln!("[BBX-HEADER] no 'waypoints' header found in log"),
+    }
 
     for row in &mut telemetry_rows {
         row.flight_id = flight_id;
@@ -706,8 +722,16 @@ fn extract_header_metadata_for_log(file_data: &[u8], log_index: Option<u32>) -> 
         craft_name: find_header_value(&header_text, &["Craft name", "Pilot name", "Name"]),
         fc_version: find_header_value(&header_text, &["Firmware revision", "Firmware version"]),
         board_id: find_header_value(&header_text, &["Board information", "Board"]),
+        logged_wp_count: parse_waypoint_count(&header_text),
         start_time: find_header_datetime(&header_text),
     }
+}
+
+/// Parse `H waypoints:<count>,<flag>` — INAV logs the number of mission waypoints (and a
+/// second field, valid/version). Only the count is used (replay `WP N/X` fallback).
+fn parse_waypoint_count(text: &str) -> Option<i64> {
+    let raw = find_header_value(text, &["waypoints"])?;
+    raw.split(',').next()?.trim().parse::<i64>().ok()
 }
 
 fn find_header_value(text: &str, labels: &[&str]) -> Option<String> {
