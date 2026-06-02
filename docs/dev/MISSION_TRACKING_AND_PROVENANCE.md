@@ -1,8 +1,10 @@
 # Mission Tracking & Provenance — flag model + active-WP highlight gating
 
-**Status:** Spec frozen (2026-06-02). Active-WP **highlight** rendering is built; the **flag
-model + gating** below is the next implementation step. Protocol-agnostic (INAV first,
-ArduPilot layer follows).
+**Status:** Implemented for **INAV** (2026-06-02): the 3-flag model, content-snapshot
+validity, the highlight trust gates, both "track?" popups, the connect prompt, and the flag
+labels in the mission panel. **Pending:** DB-flag integrate flow (needs the mission-in-log DB
+schema), the ArduPilot mission layer (same model, protocol-agnostic), "upload all" multi-mission
+format, and the active-WP readout in the Flight-Mode widget.
 
 The active-waypoint highlight (a pulsing green glow on the FC's current target WP) is only
 meaningful when the mission shown on the map is *actually the one being flown/recorded*. This
@@ -90,13 +92,20 @@ mission is changed or edited.
 
 ---
 
-## Current state (already implemented, gated only on `inWpMode` for now)
+## Implementation (INAV)
 
-- `MSP_NAV_STATUS` (121) polled live → `telemetry-nav-status` event → `telemetry.activeWpNumber`.
-- Replay: `active_wp_number` parsed from blackbox / ArduPilot logs → adapter → same field.
-- `stores/navStatus.ts` (`activeWpNumber`), set in `+page` from the unified `telem` **only when in
-  NAV_WP mode**.
-- `InavMissionLayer` highlights the WP whose `number === activeWpNumber` with a pulsing green
-  brightness+glow on the icon itself (0.5 Hz). FBH house included.
+- **Active WP source:** `MSP_NAV_STATUS` (121) polled live → `telemetry-nav-status` →
+  `telemetry.activeWpNumber`; replay parses `active_wp_number` from blackbox / ArduPilot logs.
+  `stores/navStatus.ts` (de-duping store) is set in `+page` only when in NAV_WP mode **and** the
+  mission is trusted for the active context.
+- **Flags:** in `stores/mission.ts` — `markMissionSynced(flag)` (called by upload/download →
+  `fc`, save/load/import → `file`; `db` reserved for the integrate flow), `clearFcFlags()` on
+  disconnect, `missionFlags` derived (content-hash vs. per-slot snapshot → auto edit/undo), and
+  `missionModified` (content-based, replaces the sticky `dirty` badge).
+- **Gates + popups:** in `+page` — trust = replay→`db` (or one-time "track for replay?" on
+  log/file load), live→`fc`+armed (or one-time "track for flight?" at arm). Connect prompt
+  (`mission_fc_info` MSP query) offers Download / Upload / Nothing.
+- **Flag labels:** FC / FILE / DB badges in the mission panel after "Modified".
 
-**Next:** add the flag model + the trust gates above, then surface the planned UI.
+**Pending:** DB-flag integrate flow (mission-in-log schema), the ArduPilot mission layer (same
+model), "upload all" multi-mission, and the active-WP readout in the Flight-Mode widget.
