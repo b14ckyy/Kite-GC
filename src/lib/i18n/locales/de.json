@@ -630,6 +630,16 @@
       "damaged": "Beschädigt"
     }
   },
+  "endFlight": {
+    "title": "Flug beendet",
+    "battery": "Akku-Seriennummer",
+    "batteryHint": "Seriennummer des geflogenen Akkus",
+    "linkMission": "Geladene Mission mit diesem Flug verknüpfen",
+    "save": "Speichern",
+    "skip": "Überspringen",
+    "close": "Schließen",
+    "notRecordedHint": "Aufzeichnung war aus — nur eine Zusammenfassung."
+  },
   "survey": {
     "title": "Vermessungs-Pattern",
     "shape": "Form",

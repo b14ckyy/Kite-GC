@@ -630,6 +630,16 @@
       "damaged": "Damaged"
     }
   },
+  "endFlight": {
+    "title": "Flight ended",
+    "battery": "Battery serial",
+    "batteryHint": "Serial of the battery you flew",
+    "linkMission": "Link the loaded mission to this flight",
+    "save": "Save",
+    "skip": "Skip",
+    "close": "Close",
+    "notRecordedHint": "Recording was off — this is a summary only."
+  },
   "survey": {
     "title": "Survey Pattern",
     "shape": "Shape",

@@ -32,7 +32,10 @@
   import { activeWpNumber, replayWpTotal } from '$lib/stores/navStatus';
   import { missionManagerOpen, missionManagerSelectedId, requestOpenFlightId, requestOpenMissionId } from '$lib/stores/missionManager';
   import { batteryManagerOpen, batteryManagerSelectedId } from '$lib/stores/batteryManager';
-  import { missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode } from '$lib/stores/flightlog';
+  import { missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode, flightSetBatterySerial, updateFlightNotes, getFlight } from '$lib/stores/flightlog';
+  import EndFlightDialog from "$lib/components/logbook/EndFlightDialog.svelte";
+  import type { EndFlightStats } from "$lib/components/logbook/EndFlightDialog.svelte";
+  import { haversineDistance } from '$lib/utils/geo';
   import { buildMissionInput, missionContentHash } from '$lib/helpers/missionLibrary';
   import { homePosition } from '$lib/stores/home';
   import { MAP_PROVIDERS } from "$lib/config/mapProviders";
@@ -159,22 +162,69 @@
   // Reactive telemetry subscription
   let liveTelem = $state(get(telemetry));
   let prevArmed = false;
+  // Live flight-stats accumulator (armed period) — drives the End-Flight summary when there is
+  // no DB recording (the recorded case reads the finalized stats from the flight row instead).
+  let armStartMs = 0;
+  let accMaxAlt = 0, accMaxSpeed = 0, accMaxDist = 0, accMah = 0;
+  let accStartLat: number | null = null, accStartLon: number | null = null;
   telemetry.subscribe((t) => {
     liveTelem = t;
     // Accumulate the live flown track (RAM) for the Terrain Analyzer
     const armed = isArmed(t.armingFlags, t.lastUpdate);
     if (armed && !prevArmed) {
       clearLiveTrack();
+      // reset the flight-stats accumulator for the new flight
+      armStartMs = t.lastUpdate || Date.now();
+      accMaxAlt = 0; accMaxSpeed = 0; accMaxDist = 0; accMah = 0;
+      accStartLat = null; accStartLon = null;
+      endFlightDialog?.close(); // re-arming dismisses a lingering End-Flight dialog
       // warm the Copernicus tile for the current area so it's ready
       if (isValidGpsCoordinate(t.lat, t.lon)) {
         void invoke('terrain_elevation', { lat: t.lat, lon: t.lon }).catch(() => {});
       }
     }
+    if (armed) {
+      if (t.altitude > accMaxAlt) accMaxAlt = t.altitude;
+      if (t.groundSpeed > accMaxSpeed) accMaxSpeed = t.groundSpeed;
+      if (t.mAhDrawn > accMah) accMah = t.mAhDrawn;
+      if (isValidGpsCoordinate(t.lat, t.lon)) {
+        if (accStartLat == null) { accStartLat = t.lat; accStartLon = t.lon; }
+        else {
+          const d = haversineDistance(accStartLat, accStartLon as number, t.lat, t.lon);
+          if (d > accMaxDist) accMaxDist = d;
+        }
+      }
+    }
     if (armed && isValidGpsCoordinate(t.lat, t.lon)) {
       appendLivePoint(t.lat, t.lon, t.altMsl, t.lastUpdate || Date.now());
     }
+    if (!armed && prevArmed) {
+      void handleDisarm(t.lastUpdate || Date.now());
+    }
     prevArmed = armed;
   });
+
+  // On disarm: show the End-Flight summary. When DB recording is on, the
+  // flight-recording-ended listener shows the full (editable) dialog instead.
+  async function handleDisarm(disarmMs: number): Promise<void> {
+    const durationSec = armStartMs ? Math.round((disarmMs - armStartMs) / 1000) : 0;
+    if (durationSec < 5) return; // ignore trivial bench arm/disarm
+    if (flightLoggingEnabled && flightRecordingEnabled) return; // recorded → handled on -ended
+    try {
+      await endFlightDialog.show({
+        stats: {
+          durationSec,
+          maxAltM: accMaxAlt || null,
+          maxSpeedMs: accMaxSpeed || null,
+          maxDistM: accMaxDist || null,
+          batteryUsedMah: accMah || null,
+        },
+        recorded: false,
+      });
+    } catch (e) {
+      console.warn('[end-flight] summary dialog failed', e);
+    }
+  }
 
   // Switch default baud rate when protocol changes
   // Track previous protocol to detect actual user-initiated changes
@@ -252,6 +302,7 @@
 
   // Shared in-app dialog (replaces all native confirm/alert calls)
   let confirmDialog: ReturnType<typeof ConfirmDialog>;
+  let endFlightDialog: ReturnType<typeof EndFlightDialog>;
 
   async function showDialog(opts: DialogOptions): Promise<string | null> {
     return confirmDialog.show(opts);
@@ -1245,21 +1296,37 @@
   async function onRecordingEnded(flightId: number): Promise<void> {
     try {
       const wps = get(mission).waypoints;
-      // Only consider the FC-synced mission (what was actually flown). If it isn't FC-synced
-      // now, leave any arm-time link untouched.
-      if (wps.length === 0 || !get(missionFlags).fc) return;
-      const curHash = await missionContentHash(wps);
-      if (curHash === flightMissionHash) return; // unchanged since arm → keep the link
-      // Changed since arm (e.g. a new mission uploaded in-flight) or never linked at arm →
-      // offer to (re)link to the current version.
-      const ans = await showDialog({
-        title: $t('mission.linkUpdateTitle'),
-        message: $t('mission.linkUpdateMsg'),
-        buttons: [{ label: $t('mission.linkUpdateYes'), value: 'update', primary: true }],
-      });
-      if (ans === 'update') await linkMissionToFlight(flightId, wps);
+      const fc = get(missionFlags).fc;
+      // FC-synced mission is trusted (it's what the FC flew) → link it silently. Covers a
+      // mid-flight re-upload (relink to the new one); unchanged since arm is already linked.
+      if (wps.length > 0 && fc) {
+        const curHash = await missionContentHash(wps);
+        if (curHash !== flightMissionHash) {
+          try { await linkMissionToFlight(flightId, wps); } catch (e) { console.warn('[end-flight] fc relink failed', e); }
+        }
+      }
+      // A non-FC-synced mission is uncertain (may not be what was flown) → offer to link it
+      // with explicit confirmation. linkMissionToFlight upserts (saves if not in the DB) + links.
+      const missionConfirm = wps.length > 0 && !fc;
+
+      // Summary from the finalized flight row.
+      const flight = await getFlight(flightId, flightLogDbPath);
+      const stats: EndFlightStats = {
+        durationSec: flight?.duration_sec ?? null,
+        maxAltM: flight?.max_alt_m ?? null,
+        maxSpeedMs: flight?.max_speed_ms ?? null,
+        maxDistM: flight?.max_distance_m ?? null,
+        batteryUsedMah: flight?.battery_used_mah ?? null,
+        locationName: flight?.location_name ?? null,
+      };
+      const res = await endFlightDialog.show({ stats, recorded: true, missionConfirm });
+      if (res) {
+        if (res.batterySerial) await flightSetBatterySerial(flightId, res.batterySerial, flightLogDbPath);
+        if (res.notes) await updateFlightNotes(flightId, res.notes, flightLogDbPath);
+        if (res.linkMission) await linkMissionToFlight(flightId, wps);
+      }
     } catch (e) {
-      console.warn('[mission-link] disarm-link failed', e);
+      console.warn('[end-flight] disarm dialog failed', e);
     } finally {
       flightMissionHash = null;
     }
@@ -1290,9 +1357,9 @@
     void listen<{ flight_id: number }>('flight-recording-started', (event) => {
       void onRecordingStarted(event.payload.flight_id);
     });
-    void listen<{ flight_id: number }>('flight-recording-ended', (event) => {
-      void onRecordingEnded(event.payload.flight_id);
-      void loadLogbook(); // auto-refresh the list with the just-recorded flight (replaces Refresh)
+    void listen<{ flight_id: number }>('flight-recording-ended', async (event) => {
+      await onRecordingEnded(event.payload.flight_id); // End-Flight dialog (summary + battery/notes/mission)
+      void loadLogbook(); // refresh the list with the just-recorded (and linked) flight
     });
     void listen<BlackboxImportProgress>('flightlog-import-progress', (event) => {
       blackboxImportProgress = event.payload;
@@ -1312,6 +1379,7 @@
 <svelte:window bind:innerWidth={winW} bind:innerHeight={winH} />
 
 <ConfirmDialog bind:this={confirmDialog} />
+<EndFlightDialog bind:this={endFlightDialog} {interfaceSettings} />
 <ContextMenu />
 <BatchEditPopup {interfaceSettings} />
 
