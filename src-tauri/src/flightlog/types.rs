@@ -177,6 +177,25 @@ pub struct BatteryPackInput {
     pub notes: Option<String>,
 }
 
+/// A single battery pack exported to a `.kbatt` file (one pack per file). Carries the identity/spec
+/// plus a baseline snapshot (post-consolidation if the user chose to fold in the linked flights).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatteryFile {
+    /// Always "kbatt" (validated on import).
+    pub format: String,
+    pub version: u32,
+    pub exported_at: String,
+    /// Whether the linked flights' usage was folded into the baseline at export.
+    pub consolidated: bool,
+    /// How many flights were folded in (informational; 0 for a base export).
+    pub flight_count: i64,
+    pub pack: BatteryPackInput,
+    pub base_flight_seconds: i64,
+    pub base_mah: i64,
+    pub base_cycles: f64,
+    pub base_charges: i64,
+}
+
 /// Aggregated contribution of the flights linked to a pack (by serial). Combined with the pack's
 /// `base_*` baseline on the frontend to produce the displayed lifetime figures.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

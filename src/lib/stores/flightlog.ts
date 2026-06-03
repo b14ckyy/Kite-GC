@@ -25,7 +25,7 @@ export { buildFlightTree, formatDurationSec } from '../helpers/flightlogHelpers'
 
 // ── Tauri command wrappers ───────────────────────────────────────────
 
-import type { FlightSummary, Flight, TelemetryRecord, BlackboxImportStatus, KflightImportResult, LibraryMission, LibraryMissionInput, BatteryPack, BatteryPackInput, BatteryAggregate } from './flightlogTypes';
+import type { FlightSummary, Flight, TelemetryRecord, BlackboxImportStatus, KflightImportResult, LibraryMission, LibraryMissionInput, BatteryPack, BatteryPackInput, BatteryAggregate, BatteryFile } from './flightlogTypes';
 
 /** Save a mission to the library (dedup by content hash). Returns the mission id. */
 export async function missionDbSave(mission: LibraryMissionInput, dbPath: string): Promise<number> {
@@ -202,6 +202,30 @@ export async function batteryDbFlights(serial: string, dbPath: string): Promise<
 /** Set (or clear, with an empty string) the soft battery-serial link on a flight. */
 export async function flightSetBatterySerial(flightId: number, serial: string, dbPath: string): Promise<void> {
   return invoke<void>('flight_set_battery_serial', { flightId, serial, dbPath: dbPath || undefined });
+}
+
+/** Set a pack's baseline to absolute values (import new / overwrite). */
+export async function batteryDbSetBaseline(
+  id: number,
+  flightSeconds: number,
+  mah: number,
+  cycles: number,
+  charges: number,
+  dbPath: string,
+): Promise<void> {
+  return invoke<void>('battery_db_set_baseline', {
+    id, flightSeconds, mah, cycles, charges, dbPath: dbPath || undefined,
+  });
+}
+
+/** Write a battery pack to a `.kbatt` file. */
+export async function batteryFileWrite(path: string, file: BatteryFile): Promise<void> {
+  return invoke<void>('battery_file_write', { path, file });
+}
+
+/** Read + validate a `.kbatt` file (import preview). */
+export async function batteryFileRead(path: string): Promise<BatteryFile> {
+  return invoke<BatteryFile>('battery_file_read', { path });
 }
 
 export async function listFlights(dbPath: string): Promise<FlightSummary[]> {

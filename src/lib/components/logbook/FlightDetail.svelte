@@ -6,6 +6,8 @@
   import type { InterfaceSettings } from '$lib/stores/settings';
   import { settings } from '$lib/stores/settings';
   import { mission, missionFlags, loadedMissionId, markMissionSynced } from '$lib/stores/mission';
+  import { batteryManagerOpen, batteryManagerSelectedId } from '$lib/stores/batteryManager';
+  import { requestOpenMissionId } from '$lib/stores/missionManager';
   import { replayWpTotal } from '$lib/stores/navStatus';
   import { buildMissionInput } from '$lib/helpers/missionLibrary';
   import { get } from 'svelte/store';
@@ -181,6 +183,20 @@
     }
   }
 
+  // Jump to this pack in the Battery Manager (reverse of the battery's linked-flights jump) —
+  // handy when a voltage issue in replay should lead straight to the pack's history.
+  function openBattery() {
+    if (!batteryPack) return;
+    batteryManagerSelectedId.set(batteryPack.id);
+    batteryManagerOpen.set(true);
+  }
+
+  // Jump to the linked mission in the Mission Manager (mission tab).
+  function openMission() {
+    if (!linkedMission) return;
+    requestOpenMissionId.set(linkedMission.id);
+  }
+
   async function unlinkBattery() {
     if (batteryBusy) return;
     batteryBusy = true;
@@ -348,7 +364,11 @@
     </span>
     <span class="fc-label">{$t('logbook.mission')}</span>
     <span class="fc-value craft-value-row">
-      <span>{linkedMission ? (linkedMission.name || $t('logbook.unnamedMission')) : $t('logbook.missionNone')}</span>
+      {#if linkedMission}
+        <button class="detail-link-btn" onclick={openMission} title={$t('logbook.openMission')}>{linkedMission.name || $t('logbook.unnamedMission')}</button>
+      {:else}
+        <span>{$t('logbook.missionNone')}</span>
+      {/if}
       {#if !minimized}
         {#if linkedMission}
           <button class="weather-edit-btn" onclick={unlinkMission} disabled={linkBusy} title={$t('logbook.unlinkMission')}>✕</button>
@@ -374,8 +394,12 @@
         />
         <button class="weather-edit-btn" onclick={linkBattery} disabled={batteryBusy} title={$t('logbook.batteryLinkSave')}>✓</button>
       {:else if batterySerial}
-        <span>{batteryPack ? (batteryPack.label || batteryPack.serial) : batterySerial}</span>
-        {#if !batteryPack}<span class="battery-missing">{$t('logbook.batteryNotInLibrary')}</span>{/if}
+        {#if batteryPack}
+          <button class="detail-link-btn" onclick={openBattery} title={$t('logbook.openBattery')}>{batteryPack.label || batteryPack.serial}</button>
+        {:else}
+          <span>{batterySerial}</span>
+          <span class="battery-missing">{$t('logbook.batteryNotInLibrary')}</span>
+        {/if}
         {#if !minimized}<button class="weather-edit-btn" onclick={unlinkBattery} disabled={batteryBusy} title={$t('logbook.batteryUnlink')}>✕</button>{/if}
       {:else}
         <span>{$t('logbook.missionNone')}</span>
@@ -547,6 +571,29 @@
     font-size: 10px;
     color: #e0b050;
     font-weight: 400;
+  }
+
+  /* Slim chip button for jumping to a linked entity (mission / battery). */
+  .detail-link-btn {
+    background: rgba(55, 168, 219, 0.12);
+    border: 1px solid rgba(55, 168, 219, 0.35);
+    border-radius: 4px;
+    color: #9fd4ee;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.3;
+    padding: 1px 8px;
+    cursor: pointer;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+  }
+  .detail-link-btn:hover {
+    background: rgba(55, 168, 219, 0.25);
+    border-color: #37a8db;
+    color: #fff;
   }
 
   .setting-row {

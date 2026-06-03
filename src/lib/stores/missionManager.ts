@@ -16,3 +16,8 @@ export const missionManagerSelectedId = writable<number | null>(null);
  *  "flights with this mission" list). `+page` watches this, switches to the logbook tab,
  *  selects the flight, and resets it to null. */
 export const requestOpenFlightId = writable<number | null>(null);
+
+/** Set to a library-mission id to request jumping to it in the Mission Manager (e.g. from a
+ *  flight's linked-mission chip). `+page` switches to the mission tab, opens the Manager,
+ *  selects the mission, and resets it to null. */
+export const requestOpenMissionId = writable<number | null>(null);

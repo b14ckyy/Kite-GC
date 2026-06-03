@@ -83,6 +83,20 @@ export interface BatteryPackInput {
   notes: string | null;
 }
 
+/** A `.kbatt` export file (one pack + a baseline snapshot). */
+export interface BatteryFile {
+  format: string; // "kbatt"
+  version: number;
+  exported_at: string;
+  consolidated: boolean;
+  flight_count: number;
+  pack: BatteryPackInput;
+  base_flight_seconds: number;
+  base_mah: number;
+  base_cycles: number;
+  base_charges: number;
+}
+
 /** Aggregated contribution of the flights linked to a pack (combined with baseline on display). */
 export interface BatteryAggregate {
   flight_count: number;

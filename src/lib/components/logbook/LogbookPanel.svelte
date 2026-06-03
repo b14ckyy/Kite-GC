@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { t } from 'svelte-i18n';
   import type { InterfaceSettings } from '$lib/stores/settings';
   import {
@@ -127,9 +128,41 @@
 
   const flightTree = $derived<FlightTree>(buildFlightTree(filteredSummaries, logbookSortMode));
 
-  // Full (split) toolbar only for the flight view with a selected flight; the battery view uses
-  // the compact toolbar (its per-entry actions live inside the Battery Manager detail).
-  const fullFlightView = $derived(!$batteryManagerOpen && selectedFlight != null);
+  // Full (split) toolbar when a detail is open — a selected flight (flight view) or a selected
+  // pack (battery view). The split aligns Import over the list and Export over the data view.
+  const fullView = $derived($batteryManagerOpen ? $batteryManagerSelectedId != null : selectedFlight != null);
+  let batteryRef = $state<ReturnType<typeof BatteryManager> | undefined>(undefined);
+
+  // When a flight becomes selected (e.g. jumped to from a battery's linked-flights list), expand
+  // the tree groups that contain it so the highlighted row is actually visible. Reads the open
+  // sets untracked so it only fires on selection/tree changes, not when the user toggles a group.
+  $effect(() => {
+    const fid = selectedFlightId;
+    const tree = flightTree;
+    if (fid == null) return;
+    let topId: string | null = null;
+    let secondId: string | null = null;
+    for (const top of tree.groups) {
+      for (const second of top.children) {
+        if (second.flights.some((f) => f.id === fid)) {
+          topId = treeTopId(top.key);
+          secondId = treeSecondId(top.key, second.key);
+          break;
+        }
+      }
+      if (topId) break;
+    }
+    if (!topId || !secondId) return;
+    const tId = topId, sId = secondId;
+    untrack(() => {
+      if (!logbookTreeOpenTop.has(tId)) {
+        const n = new Set(logbookTreeOpenTop); n.add(tId); logbookTreeOpenTop = n;
+      }
+      if (!logbookTreeOpenSecond.has(sId)) {
+        const n = new Set(logbookTreeOpenSecond); n.add(sId); logbookTreeOpenSecond = n;
+      }
+    });
+  });
 
   $effect(() => {
     if (prevLogbookSortMode === logbookSortMode) return;
@@ -181,6 +214,13 @@
       next.add(id);
     }
     logbookTreeOpenSecond = next;
+  }
+
+  // Scroll the selected flight row into view (e.g. after jumping from a battery / its group was
+  // just auto-expanded). `block: 'nearest'` is a no-op when it's already visible.
+  function revealSelected(node: HTMLElement, isSel: boolean) {
+    if (isSel) node.scrollIntoView({ block: 'nearest' });
+    return { update(s: boolean) { if (s) node.scrollIntoView({ block: 'nearest' }); } };
   }
 
   function formatDateTime(value: string): string {
@@ -283,36 +323,44 @@
 
     {#snippet importGroup()}
       <div class="tb-right">
-        <button class="cache-clear-btn" onclick={onImportBlackbox} disabled={blackboxImporting}>
-          {blackboxImporting ? $t('logbook.importingBlackbox') : $t('logbook.importBlackbox')}
-        </button>
-        <button class="cache-clear-btn" onclick={onImportKflight}>{$t('logbook.importKflight')}</button>
+        {#if $batteryManagerOpen}
+          <button class="cache-clear-btn" onclick={() => batteryRef?.triggerImport()}>📥 {$t('batteryMgr.import')}</button>
+        {:else}
+          <button class="cache-clear-btn" onclick={onImportBlackbox} disabled={blackboxImporting}>
+            {blackboxImporting ? $t('logbook.importingBlackbox') : $t('logbook.importBlackbox')}
+          </button>
+          <button class="cache-clear-btn" onclick={onImportKflight}>{$t('logbook.importKflight')}</button>
+        {/if}
       </div>
     {/snippet}
 
     {#snippet exportGroup()}
       <div class="tb-right">
-        <button class="cache-clear-btn" onclick={onExportBlackbox} disabled={!hasBlackboxFile}>
-          {$t('logbook.exportBlackbox')}
-        </button>
-        <button class="cache-clear-btn" onclick={() => onExportFlights(getExportIds())} disabled={getExportIds().length === 0}>
-          {$t('logbook.exportKflight')}{#if hasMultiSelection} ({multiSelectedIds.size}){/if}
-        </button>
+        {#if $batteryManagerOpen}
+          <button class="cache-clear-btn" onclick={() => batteryRef?.triggerExport()}>📤 {$t('batteryMgr.export')}</button>
+        {:else}
+          <button class="cache-clear-btn" onclick={onExportBlackbox} disabled={!hasBlackboxFile}>
+            {$t('logbook.exportBlackbox')}
+          </button>
+          <button class="cache-clear-btn" onclick={() => onExportFlights(getExportIds())} disabled={getExportIds().length === 0}>
+            {$t('logbook.exportKflight')}{#if hasMultiSelection} ({multiSelectedIds.size}){/if}
+          </button>
+        {/if}
       </div>
     {/snippet}
 
-    {#if fullFlightView}
-      <!-- Full flight view: align the toolbar to the 380px | 1fr content grid — import over
-           the list (left cell, right-aligned), export over the info (right cell). -->
-      <div class="logbook-toolbar-split">
+    {#if fullView}
+      <!-- Full view: align the toolbar to the content grid — import over the list (left cell,
+           right-aligned), export over the data view (right cell). -->
+      <div class="logbook-toolbar-split" class:tb-split-battery={$batteryManagerOpen}>
         <div class="toolbar-cell">{@render leftGroup()}{@render importGroup()}</div>
         <div class="toolbar-cell toolbar-cell-right">{@render exportGroup()}</div>
       </div>
     {:else}
-      <!-- Compact (list only): left group; flight view also shows the import group (right). -->
+      <!-- Compact (list only): left group + the import group (right). -->
       <div class="setting-row logbook-toolbar-compact">
         {@render leftGroup()}
-        {#if !$batteryManagerOpen}{@render importGroup()}{/if}
+        {@render importGroup()}
       </div>
     {/if}
 
@@ -330,7 +378,7 @@
     {/if}
 
     {#if $batteryManagerOpen}
-      <BatteryManager />
+      <BatteryManager bind:this={batteryRef} />
     {:else if flightSummaries.length === 0}
       <div class="panel-empty">
         <span class="panel-empty-icon">🗂</span>
@@ -370,6 +418,7 @@
                               class:selected={selectedFlightId === f.id && !hasMultiSelection}
                               class:multi-selected={isMultiSelected(f.id)}
                               onclick={(e) => handleFlightClick(f.id, e)}
+                              use:revealSelected={selectedFlightId === f.id && !hasMultiSelection}
                             >
                               <div class="logbook-item-title">{flightListMarker(f)}{formatDateTime(f.start_time)} <span class="logbook-item-id">#{f.id}</span></div>
                               <div class="logbook-item-meta">
@@ -478,6 +527,10 @@
     gap: 6px 12px;
     padding: 6px 0;
     align-items: start;
+  }
+  /* Battery list is 300px wide → align the split there so battery Import sits over the list. */
+  .logbook-toolbar-split.tb-split-battery {
+    grid-template-columns: 300px minmax(0, 1fr);
   }
   .toolbar-cell {
     display: flex;

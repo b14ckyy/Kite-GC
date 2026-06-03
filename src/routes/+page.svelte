@@ -30,7 +30,7 @@
   import { liveTrack, appendLivePoint, clearLiveTrack } from '$lib/stores/liveTrack';
   import { toTelemetryData } from '$lib/adapters/telemetryAdapter';
   import { activeWpNumber, replayWpTotal } from '$lib/stores/navStatus';
-  import { missionManagerOpen, missionManagerSelectedId, requestOpenFlightId } from '$lib/stores/missionManager';
+  import { missionManagerOpen, missionManagerSelectedId, requestOpenFlightId, requestOpenMissionId } from '$lib/stores/missionManager';
   import { batteryManagerOpen, batteryManagerSelectedId } from '$lib/stores/batteryManager';
   import { missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode } from '$lib/stores/flightlog';
   import { buildMissionInput, missionContentHash } from '$lib/helpers/missionLibrary';
@@ -1272,7 +1272,18 @@
     if (id == null) return;
     requestOpenFlightId.set(null);
     activeTab = 'logbook';
+    batteryManagerOpen.set(false); // leave the Battery Manager so the flight detail is shown
     void selectFlight(id);
+  });
+
+  // Jump to a library mission in the Mission Manager (from a flight's linked-mission chip).
+  $effect(() => {
+    const id = $requestOpenMissionId;
+    if (id == null) return;
+    requestOpenMissionId.set(null);
+    activeTab = 'mission';
+    missionManagerOpen.set(true);
+    missionManagerSelectedId.set(id);
   });
 
   if (typeof window !== 'undefined') {

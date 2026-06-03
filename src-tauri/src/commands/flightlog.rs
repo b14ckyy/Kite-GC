@@ -5,8 +5,8 @@ use tauri::Emitter;
 use crate::flightlog::db;
 use crate::flightlog::exchange;
 use crate::flightlog::types::{
-    BatteryAggregate, BatteryPack, BatteryPackInput, BlackboxImportProgress, BlackboxImportStatus,
-    Flight, FlightSummary, Mission, MissionInput, TelemetryRecord,
+    BatteryAggregate, BatteryFile, BatteryPack, BatteryPackInput, BlackboxImportProgress,
+    BlackboxImportStatus, Flight, FlightSummary, Mission, MissionInput, TelemetryRecord,
 };
 
 /// Resolve the database path and open a connection.
@@ -313,6 +313,40 @@ pub fn flight_set_battery_serial(
     let s = serial.trim();
     db::set_flight_battery_serial(&conn, flight_id, if s.is_empty() { None } else { Some(s) })
         .map_err(|e| format!("Link error: {}", e))
+}
+
+/// Set a pack's baseline to absolute values (import "new" / "overwrite").
+#[tauri::command]
+pub fn battery_db_set_baseline(
+    id: i64,
+    flight_seconds: i64,
+    mah: i64,
+    cycles: f64,
+    charges: i64,
+    db_path: Option<String>,
+) -> Result<(), String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::set_battery_baseline(&conn, id, flight_seconds, mah, cycles, charges)
+        .map_err(|e| format!("Update error: {}", e))
+}
+
+/// Write a battery pack to a `.kbatt` file (one pack per file).
+#[tauri::command]
+pub fn battery_file_write(path: String, file: BatteryFile) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(&file).map_err(|e| format!("Serialize error: {}", e))?;
+    std::fs::write(&path, json).map_err(|e| format!("Write error: {}", e))
+}
+
+/// Read + validate a `.kbatt` file (for the import preview).
+#[tauri::command]
+pub fn battery_file_read(path: String) -> Result<BatteryFile, String> {
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("Read error: {}", e))?;
+    let file: BatteryFile =
+        serde_json::from_str(&text).map_err(|e| format!("Parse error: {}", e))?;
+    if file.format != "kbatt" {
+        return Err(format!("Not a battery file (format: {})", file.format));
+    }
+    Ok(file)
 }
 
 /// Reverse-geocode a mission's location (bounding-box centroid) and store it, reusing the

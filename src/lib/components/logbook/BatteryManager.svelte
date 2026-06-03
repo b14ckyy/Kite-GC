@@ -7,13 +7,15 @@
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import { get } from 'svelte/store';
+  import { save, open as openFileDialog } from '@tauri-apps/plugin-dialog';
   import { settings } from '$lib/stores/settings';
   import {
     batteryDbList, batteryDbCreate, batteryDbUpdate, batteryDbDelete,
     batteryDbFindBySerial, batteryDbAddUsage, batteryDbAggregate, batteryDbFlights,
+    batteryDbSetBaseline, batteryFileWrite, batteryFileRead,
     formatDurationSec,
   } from '$lib/stores/flightlog';
-  import type { BatteryPack, BatteryPackInput, BatteryAggregate, FlightSummary } from '$lib/stores/flightlogTypes';
+  import type { BatteryPack, BatteryPackInput, BatteryAggregate, BatteryFile, FlightSummary } from '$lib/stores/flightlogTypes';
   import {
     batteryManagerSelectedId, batteryGroupMode, batteryLeafAsc, batterySearchQuery, batterySortField,
   } from '$lib/stores/batteryManager';
@@ -46,6 +48,12 @@
   let usage = $state<{ cycles: number; hours: number; mah: number; charges: number }>(
     { cycles: NaN, hours: NaN, mah: NaN, charges: NaN }
   );
+
+  // Import preview (.kbatt). The serial is editable ONLY when the file's serial collided at load.
+  let importFile = $state<BatteryFile | null>(null);
+  let importSerial = $state('');
+  let importSerialEditable = $state(false);
+  let importBusy = $state(false);
 
   const CHEMISTRIES = ['lipo', 'liion', 'life', 'lihv'];
   const STATUSES = ['active', 'storage', 'retired', 'damaged'];
@@ -318,6 +326,122 @@
 
   function openFlight(id: number) { requestOpenFlightId.set(id); }
 
+  // Exposed to the LogbookPanel toolbar (Import over the list, Export over the data view) so the
+  // battery actions sit in the same place as the flight Import/Export.
+  export function triggerImport() { void handleImport(); }
+  export function triggerExport() { void exportBattery(); }
+
+  // ── Export (.kbatt) ─────────────────────────────────────────────────
+  function sanitize(s: string): string { return s.replace(/[^\w\-]+/g, '_').replace(/^_+|_+$/g, ''); }
+
+  async function exportBattery() {
+    if (!selected) return;
+    const b = selected;
+    // Consolidate (fold linked flights into the file's baseline) or base-only export.
+    const ans = await confirmDialog.show({
+      title: $t('batteryMgr.exportTitle'),
+      message: $t('batteryMgr.exportMsg'),
+      buttons: [
+        { label: $t('batteryMgr.exportConsolidate'), value: 'consolidate', primary: true },
+        { label: $t('batteryMgr.exportBase'), value: 'base' },
+      ],
+    });
+    if (ans !== 'consolidate' && ans !== 'base') return;
+    const consolidate = ans === 'consolidate';
+    const agg = aggregate ?? { flight_count: 0, sum_duration_sec: 0, sum_mah: 0, first_used: null, last_used: null };
+    const flightCycles = consolidate && b.capacity_mah && b.capacity_mah > 0 ? agg.sum_mah / b.capacity_mah : 0;
+
+    const file: BatteryFile = {
+      format: 'kbatt',
+      version: 1,
+      exported_at: new Date().toISOString(),
+      consolidated: consolidate,
+      flight_count: consolidate ? agg.flight_count : 0,
+      pack: {
+        serial: b.serial, label: b.label, manufacturer: b.manufacturer, model: b.model,
+        chemistry: b.chemistry, cell_count: b.cell_count, capacity_mah: b.capacity_mah,
+        c_rating_discharge: b.c_rating_discharge, c_rating_charge: b.c_rating_charge,
+        connector: b.connector, in_service_date: b.in_service_date, status: b.status, notes: b.notes,
+      },
+      base_flight_seconds: b.base_flight_seconds + (consolidate ? agg.sum_duration_sec : 0),
+      base_mah: b.base_mah + (consolidate ? agg.sum_mah : 0),
+      base_cycles: b.base_cycles + flightCycles,
+      base_charges: b.base_charges,
+    };
+
+    const labelPart = b.label ? `_${sanitize(b.label)}` : '';
+    try {
+      const path = await save({
+        title: $t('batteryMgr.exportTitle'),
+        defaultPath: `battery_${sanitize(b.serial)}${labelPart}.kbatt`,
+        filters: [{ name: 'Battery', extensions: ['kbatt'] }],
+      });
+      if (!path) return;
+      await batteryFileWrite(path, file);
+      statusMessage = $t('batteryMgr.exported');
+    } catch (e) {
+      statusMessage = $t('batteryMgr.exportFailed', { values: { error: String(e) } });
+    }
+  }
+
+  // ── Import (.kbatt) ─────────────────────────────────────────────────
+  async function handleImport() {
+    try {
+      const path = await openFileDialog({ title: $t('batteryMgr.importTitle'), multiple: false, filters: [{ name: 'Battery', extensions: ['kbatt'] }] });
+      if (!path || typeof path !== 'string') return;
+      const file = await batteryFileRead(path);
+      importFile = file;
+      importSerial = file.pack.serial;
+      // Serial is editable only if it collides with an existing pack (conflict resolution).
+      importSerialEditable = batteries.some((b) => b.serial === file.pack.serial);
+      editing = false;
+      showUsage = false;
+    } catch (e) {
+      statusMessage = $t('batteryMgr.importFailed', { values: { error: String(e) } });
+    }
+  }
+
+  function cancelImport() { importFile = null; }
+
+  /** Does the current import serial collide with an existing pack? (drives the action buttons) */
+  let importConflict = $derived(importFile != null && batteries.some((b) => b.serial === importSerial.trim()));
+
+  async function applyImport(mode: 'new' | 'consolidate' | 'overwrite') {
+    if (!importFile || importBusy) return;
+    const f = importFile;
+    const serial = importSerial.trim();
+    if (!serial) { statusMessage = $t('batteryMgr.serialRequired'); return; }
+    importBusy = true;
+    try {
+      let targetId: number;
+      if (mode === 'new') {
+        const id = await batteryDbCreate({ ...f.pack, serial }, dbPath());
+        await batteryDbSetBaseline(id, f.base_flight_seconds, f.base_mah, f.base_cycles, f.base_charges, dbPath());
+        targetId = id;
+      } else {
+        const existing = batteries.find((b) => b.serial === serial);
+        if (!existing) { statusMessage = $t('batteryMgr.serialRequired'); importBusy = false; return; }
+        if (mode === 'consolidate') {
+          await batteryDbAddUsage(existing.id, f.base_flight_seconds, f.base_mah, f.base_cycles, f.base_charges, dbPath());
+        } else {
+          await batteryDbUpdate(existing.id, { ...f.pack, serial: existing.serial }, dbPath());
+          await batteryDbSetBaseline(existing.id, f.base_flight_seconds, f.base_mah, f.base_cycles, f.base_charges, dbPath());
+        }
+        targetId = existing.id;
+      }
+      importFile = null;
+      await reload();
+      batteryManagerSelectedId.set(targetId);
+      const b = batteries.find((x) => x.id === targetId);
+      if (b) await loadDetails(b);
+      statusMessage = $t('batteryMgr.imported');
+    } catch (e) {
+      statusMessage = $t('batteryMgr.importFailed', { values: { error: String(e) } });
+    } finally {
+      importBusy = false;
+    }
+  }
+
   // ── Lifetime (baseline + Σ linked flights) ──────────────────────────
   let lifetime = $derived.by(() => {
     const b = selected;
@@ -532,6 +656,58 @@
   </div>
 {/if}
 
+<!-- Import preview modal. -->
+{#if importFile}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="modal-backdrop" onclick={cancelImport}>
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="modal-card" onclick={(e) => e.stopPropagation()}>
+      <div class="section-heading">{$t('batteryMgr.importTitle')}</div>
+      {#if importFile.consolidated}
+        <div class="usage-hint">{$t('batteryMgr.importConsolidatedInfo', { values: { count: String(importFile.flight_count) } })}</div>
+      {:else}
+        <div class="usage-hint">{$t('batteryMgr.importBaseInfo')}</div>
+      {/if}
+
+      <div class="fld">
+        <span class="fld-label">{$t('batteryMgr.serial')}{importSerialEditable ? ' *' : ''}</span>
+        <input class="fld-input" type="text" bind:value={importSerial} readonly={!importSerialEditable} />
+      </div>
+      {#if importSerialEditable}
+        <div class="usage-hint">
+          {importConflict ? $t('batteryMgr.importSerialExists') : $t('batteryMgr.importSerialFree')}
+        </div>
+      {/if}
+
+      <div class="fc-info-grid">
+        <span class="fc-label">{$t('batteryMgr.label')}</span><span class="fc-value">{importFile.pack.label || '—'}</span>
+        <span class="fc-label">{$t('batteryMgr.chemistry')}</span><span class="fc-value">{chemLabel(importFile.pack.chemistry)}</span>
+        <span class="fc-label">{$t('batteryMgr.cells')}</span><span class="fc-value">{importFile.pack.cell_count != null ? `${importFile.pack.cell_count}S` : '—'}</span>
+        <span class="fc-label">{$t('batteryMgr.capacity')}</span><span class="fc-value">{importFile.pack.capacity_mah != null ? `${importFile.pack.capacity_mah} mAh` : '—'}</span>
+        <span class="fc-label">{$t('batteryMgr.manufacturer')}</span><span class="fc-value">{[importFile.pack.manufacturer, importFile.pack.model].filter(Boolean).join(' ') || '—'}</span>
+        <span class="fc-label">{$t('batteryMgr.connector')}</span><span class="fc-value">{importFile.pack.connector || '—'}</span>
+        <span class="fc-label">{$t('batteryMgr.status')}</span><span class="fc-value">{statusLabel(importFile.pack.status)}</span>
+        <span class="fc-label">{$t('batteryMgr.cycles')}</span><span class="fc-value">{importFile.base_cycles.toFixed(1)}</span>
+        <span class="fc-label">{$t('batteryMgr.flightTime')}</span><span class="fc-value">{formatDurationSec(importFile.base_flight_seconds)}</span>
+        <span class="fc-label">{$t('batteryMgr.totalMah')}</span><span class="fc-value">{importFile.base_mah} mAh</span>
+        <span class="fc-label">{$t('batteryMgr.charges')}</span><span class="fc-value">{importFile.base_charges}</span>
+      </div>
+
+      <div class="form-actions">
+        {#if importSerialEditable && importConflict}
+          <button class="cache-clear-btn" onclick={() => applyImport('consolidate')} disabled={importBusy}>{$t('batteryMgr.importConsolidate')}</button>
+          <button class="cache-clear-btn logbook-danger" onclick={() => applyImport('overwrite')} disabled={importBusy}>{$t('batteryMgr.importOverwrite')}</button>
+        {:else}
+          <button class="cache-clear-btn" onclick={() => applyImport('new')} disabled={importBusy || !importSerial.trim()}>{$t('batteryMgr.importDo')}</button>
+        {/if}
+        <button class="cache-clear-btn" onclick={cancelImport}>{$t('batteryMgr.cancel')}</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 {#if statusMessage}<div class="bat-status">{statusMessage}</div>{/if}
 
 <ConfirmDialog bind:this={confirmDialog} />
@@ -638,7 +814,7 @@
   .bat-layout.bat-layout-detail { grid-template-columns: 300px minmax(0, 1fr); }
 
   .bat-list { box-sizing: border-box; max-height: 560px; overflow: auto; border: 1px solid #555; border-radius: 4px; background: rgba(0, 0, 0, 0.12); padding: 6px; }
-  .bat-list-head { display: flex; gap: 6px; margin-bottom: 6px; align-items: center; justify-content: space-between; }
+  .bat-list-head { display: flex; gap: 6px; margin-bottom: 6px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
   .bat-head-right { display: flex; gap: 6px; align-items: center; }
   .bat-asc { padding: 4px 8px; }
   .bat-sort-select { padding: 4px 6px; background: #434343; border: 1px solid #555; border-radius: 3px; color: #e0e0e0; font-size: 11px; }

@@ -1026,6 +1026,24 @@ pub fn add_battery_usage(
     Ok(())
 }
 
+/// Set the persistent baseline to absolute values (import "new" / "overwrite"; not additive).
+pub fn set_battery_baseline(
+    conn: &Connection,
+    id: i64,
+    flight_seconds: i64,
+    mah: i64,
+    cycles: f64,
+    charges: i64,
+) -> SqlResult<()> {
+    conn.execute(
+        "UPDATE battery_packs SET
+            base_flight_seconds = ?1, base_mah = ?2, base_cycles = ?3, base_charges = ?4
+         WHERE id = ?5",
+        params![flight_seconds, mah, cycles, charges, id],
+    )?;
+    Ok(())
+}
+
 /// Aggregate the flights linked to a serial (the dynamic part of the lifetime; combined with the
 /// pack's `base_*` baseline on the frontend).
 pub fn battery_aggregate(conn: &Connection, serial: &str) -> SqlResult<BatteryAggregate> {
