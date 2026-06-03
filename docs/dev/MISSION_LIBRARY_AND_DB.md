@@ -105,7 +105,13 @@ the two are decoupled:
 3. **In-flight upload of a new mission:** the upload yields a new id/hash → set a session flag
    "flown mission changed".
 4. **On disarm:** the recorder writes the flight → link `flights.mission_id = flightMissionId`.
-   If (3) happened → **prompt at disarm**: update the linked mission to the new version?
+
+> **As built (2026-06-03):** the disarm handling now lives in the **End-Flight dialog**
+> (`EndFlightDialog`, see `BATTERY_MANAGEMENT.md`). The standalone "mission changed?" prompt was
+> folded in. The rule simplified to **FC-sync** rather than "changed since arm": an **FC-synced**
+> mission is trusted and (re)linked automatically (covers a mid-flight re-upload); a **non-FC**
+> mission is offered with an **opt-in checkbox** (FILE flag ignored). `linkMissionToFlight` upserts
+> (saves if not in the DB) + links in one step.
 
 **Integration point (logic now):** the arm-save is triggered from the **frontend** (it owns the
 mission + dedup hash). The Rust recorder must expose the **new `flight_id`** at disarm (event or

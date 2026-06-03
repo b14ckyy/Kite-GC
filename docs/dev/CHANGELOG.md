@@ -40,6 +40,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Cross-jump navigation:** a flight's linked **mission** and **battery** are slim chip buttons that
     jump to the respective Manager (selected); the Battery Manager's linked-flights jump back to the
     Logbook, auto-expanding the flight tree and scrolling to the highlighted flight.
+  - **End-Flight dialog** on **disarm:** a read-only flight summary (duration, max alt/speed/distance,
+    mAh, location); when DB-recorded it also captures the **battery serial** (no autofill), a **note**,
+    and a **mission link** confirmation (FC-synced missions link automatically; a non-FC mission is an
+    opt-in checkbox — the old standalone "mission changed?" prompt folded in). Without recording it is
+    summary-only (live arm→disarm stats). Re-arming dismisses it; sub-5 s arms are ignored.
 
 ### Added — Mission Manager (mission library UI)
 - **Mission Manager** — an alternate view of the mission planner panel (button next to Edit;

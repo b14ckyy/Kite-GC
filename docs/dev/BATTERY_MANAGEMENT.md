@@ -6,8 +6,8 @@ first-class DB entities, flights link the pack that was flown (soft link by seri
 data is derived from the linked flight logs + a persistent baseline. The Battery Manager is a
 view-toggle inside the Flight Logbook panel. Dedicated `.kbatt` export/import and cross-jump
 navigation are implemented too. See **Implementation notes** at the end for the deltas agreed during
-the build. Deferred to later slices: a proper disarm end-flight dialog (with the battery serial
-capture inside it) and the Phase C per-flight telemetry metrics.
+the build. Deferred to later slices: the flight-deletion "transfer to baseline" dialog and the Phase C
+per-flight telemetry metrics.
 
 The goal is a complete battery-management system so (especially commercial) operators can track
 how their packs perform and wear over their lifetime.
@@ -310,9 +310,15 @@ Refinements agreed during the build, on top of the design above:
 - **Cross-jump navigation:** a flight's linked **mission** and **battery** are slim chip buttons that
   jump to the Mission Manager / Battery Manager (selected); the Battery Manager's linked-flights jump to
   the Logbook (and the flight tree auto-expands + scrolls to the highlighted row).
+- **End-Flight dialog (battery capture):** on **disarm** an `EndFlightDialog` shows a read-only flight
+  summary (duration, max alt/speed/distance, mAh, location). When the flight was **DB-recorded** it also
+  captures the **battery serial** (no autofill — packs are swapped between flights), a **note**, and a
+  **mission link** confirmation. Mission rule: an **FC-synced** mission is trusted → linked automatically
+  (relinked on a mid-flight re-upload); a **non-FC** mission is offered with an opt-in checkbox (the old
+  standalone "mission changed?" prompt folded in here). Without DB recording the dialog is **summary-only**
+  (informational, from a live arm→disarm stats accumulator). **Re-arming dismisses** it; a <5 s arm is
+  ignored. Log-import linking stays **manual** (the flight-detail battery chip).
 
-**Still deferred (next slices):** a proper **disarm end-flight dialog** (does not exist yet) — the
-battery serial-entry capture for recordings goes **into that dialog** once it exists (no autofill: packs
-are swapped between flights). Log-import stays **manual** (link in the flight detail). **Phase C**
-per-flight telemetry metrics (Wh, sag, internal resistance) and the flight-deletion "transfer to
-baseline" dialog.
+**Still deferred (next slices):** the flight-deletion **"transfer to baseline"** dialog (deleting a
+linked flight currently just drops its contribution from the live sum) and **Phase C** per-flight
+telemetry metrics (Wh, sag, internal resistance, SoH trends).
