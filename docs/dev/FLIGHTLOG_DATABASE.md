@@ -61,6 +61,13 @@ These are flight-level metadata values, stored once per flight.
 | `total_distance_m` | `REAL` | existing | derived | Total travelled distance |
 | `battery_used_mah` | `INTEGER` | existing | derived | Flight consumption |
 | `notes` | `TEXT` | existing | user | User notes |
+| `pilot_name` | `TEXT` | `v9` | user | Pilot / operator name (manually editable) |
+| `pilot_id` | `TEXT` | `v9` | user | Pilot / operator ID (manually editable) |
+
+`pilot_name` / `pilot_id` (schema `v9`) are manually editable in the flight detail panel.
+A future operator/login system can prefill them on new recordings; the columns are the
+forward-looking anchor for that. Added idempotently (`ensure_v9_schema`, self-healing like the
+mission-library `v8` columns) — existing DBs gain them automatically on next open, no data loss.
 
 No additional flight-level columns are currently planned for replay.
 
