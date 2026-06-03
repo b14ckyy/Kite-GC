@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Battery Management (battery library, Phase A + B)
+- **Pilot fields** (DB schema **v9**): per-flight **Pilot name** + **Pilot ID**, manually editable
+  in the flight detail (inline edit, saved together). Forward-looking anchor for a future
+  operator/login system. Self-healing migration (existing DBs gain the columns on next open).
+- **Flight Logbook design unification:** the logbook control buttons now match the app style
+  (11px, accent-blue hover; destructive = red), the sort select / search input align in height,
+  and the toolbar wraps when needed.
+- **Battery Manager** — a **view-toggle inside the Flight Logbook** (🔋 button → battery list;
+  ← Back returns to flights), styled like the logbook (wide list, widest when a pack is selected).
+  - **DB schema v10:** `battery_packs` (identity = serial) + a **soft `flights.battery_serial`
+    link** resolved at read time (no FK; a serial with no pack shows "not in library"; deleting a
+    pack just leaves flights pointing at a missing serial; re-importing re-resolves them).
+  - **Pack detail:** editable identity (label, maker/model, chemistry, cells, capacity, C-ratings,
+    connector dropdown, in-service date, status, notes), **computed** nominal voltage / voltage
+    range / energy (Wh) from chemistry + cells + capacity, and **lifetime = persistent baseline +
+    Σ(linked flights)** (cycles, flights, flight time, mAh, charges). **Linked flights** list jumps
+    to the flight in the logbook.
+  - **Create / edit / add-usage** as modal popups; the **additive usage editor** only ever adds to
+    the persistent baseline (cycles / hours / mAh / charges). **Delete** warns how many flights
+    reference the serial.
+  - **List:** grouped (Cell→Capacity / Capacity→Cell, ▲/▼ orders the groups) or **Flat** (sort by
+    serial / cell count / capacity); leaf packs always serial-ascending in grouped mode. **Storage**
+    and **Retired & Damaged** packs form trailing collapsible groups in every mode. Groups start
+    collapsed. Search by serial / label / maker / model / notes.
+  - **Logbook:** the flight detail has a **Battery** row — link/unlink by serial (unknown serials
+    allowed); the manual **Refresh** button was removed (the list auto-reloads on disarm/disconnect).
+
 ### Added — Mission Manager (mission library UI)
 - **Mission Manager** — an alternate view of the mission planner panel (button next to Edit;
   Back returns to the editor), styled in the **Flight-Logbook design language** and sized like

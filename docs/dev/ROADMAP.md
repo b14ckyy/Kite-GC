@@ -392,7 +392,7 @@ This document tracks planned features, organized by milestone.
 - [x] Live MSP mode decode uses `MSP_BOXIDS` index→box-id mapping
 - [x] Live MSP mode decode mirrors INAV implicit ANGLE behavior for nav modes
 
-### DB Schema (current: v6)
+### DB Schema (current: v10)
 - [x] `blackbox_records` table: `flight_id`, `timestamp_us`, `csv_data` (raw CSV TEXT) — schema v2
 - [x] `blackbox_files` table: `flight_id`, `original_filename`, `log_index`, `file_data` (BLOB), `file_size`, `imported_at` — schema v2
 - [x] `flights.source` column: `live` | `blackbox` | `both` — schema v2
@@ -401,6 +401,9 @@ This document tracks planned features, organized by milestone.
 - [x] Schema v4: replay-focused telemetry fields (`baro_alt_m`, GPS quality, active flight modes, state flags, nav state, wind, RC arrays, sensor health)
 - [x] Schema v5: `flights.craft_name` column (user-editable, separate from FC-reported name)
 - [x] Schema v6: `flights.linked_flight_id` for live↔blackbox pairing
+- [x] Schema v7/v8: mission library (`missions` table + `flights.mission_id` + `flights.logged_wp_count`)
+- [x] Schema v9: `flights.pilot_name` + `flights.pilot_id` (manually editable)
+- [x] Schema v10: `battery_packs` table + soft `flights.battery_serial` link (serial-resolved)
 - [ ] Milestone 4: decode Blackbox header `features` into a human-readable feature decode
 
 ### Settings & UI Enhancements
@@ -474,7 +477,14 @@ This document tracks planned features, organized by milestone.
 - [ ] Aviation charts (OpenAIP tile layer — airports, navaids, airspace symbology)
 
 ### Battery Management
-- [ ] **Battery logbook** — track individual physical packs as DB entities (label/ID, chemistry, cell count, rated capacity, optional purchase date). Associate each recorded flight with a battery (manual pick, remembered default, later maybe auto-match). **Sortable** battery list with **cumulative stats** per pack: charge/flight cycles, total flight time, total mAh drawn, avg/peak current, last-used date, and a simple health/aging trend (e.g. capacity drift, resting-voltage). _Major considerations_: new `batteries` table + `flight.battery_id` (DB migration, ADR); how cumulative figures are derived from the existing per-flight telemetry; UI as a logbook sibling panel.
+- [x] **Battery library + manager** (Phase A + B) — see `docs/dev/BATTERY_MANAGEMENT.md`. `battery_packs`
+  DB (identity = serial), soft `flights.battery_serial` link, a **Battery Manager** view-toggle in the
+  Flight Logbook (grouped/flat list, status special groups), editable pack identity with computed
+  voltage/energy, **lifetime = persistent baseline + Σ(linked flights)**, additive manual usage editor,
+  serial link/unlink in the flight detail. Pilot name/ID fields shipped alongside (schema v9).
+- [ ] **Battery management — remaining slices:** dedicated battery file export/import (consolidate +
+  duplicate-serial prompt); disarm flight-summary & log-import serial capture; **Phase C** per-flight
+  telemetry metrics (Wh, sag, internal resistance, SoH trend) + flight-deletion "transfer to baseline".
 - [ ] **Battery estimation (remaining capacity / time)** — protocol-specific source:
   - **INAV**: derive from the FC's battery configuration (capacity, cell count, voltage thresholds — the battery-estimation-relevant settings) read at connect, combined with live consumed-mAh / voltage telemetry.
   - **ArduPilot**: the firmware lacks INAV's built-in estimation, so compute it **locally** in the GCS from telemetry (consumed mAh, current draw, voltage sag) against the pack's rated capacity (ties into the battery logbook).

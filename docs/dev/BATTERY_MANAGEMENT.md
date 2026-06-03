@@ -1,9 +1,12 @@
 # Battery Management — reusable battery packs linked to the flight log
 
-**Status:** Planned (2026-06-03) — full design agreed; not yet implemented. Mirrors the mission
-library pattern ([`MISSION_LIBRARY_AND_DB.md`](MISSION_LIBRARY_AND_DB.md)): packs are first-class
-DB entities, flights link the pack that was flown, and most wear data is derived from the linked
-flight logs. A separate **manual usage interface** comes last.
+**Status:** Phase A + B implemented (2026-06-03) — **awaiting hardware/simulator testing**. Mirrors
+the mission library pattern ([`MISSION_LIBRARY_AND_DB.md`](MISSION_LIBRARY_AND_DB.md)): packs are
+first-class DB entities, flights link the pack that was flown (soft link by serial), and the wear
+data is derived from the linked flight logs + a persistent baseline. The Battery Manager is a
+view-toggle inside the Flight Logbook panel. See **Implementation notes** at the end for the deltas
+agreed during the build. Deferred to later slices: dedicated battery file export/import,
+disarm/import serial-entry capture, and the Phase C per-flight telemetry metrics.
 
 The goal is a complete battery-management system so (especially commercial) operators can track
 how their packs perform and wear over their lifetime.
@@ -62,7 +65,7 @@ battery has a real-world identifier.)
 | `status` TEXT NOT NULL DEFAULT `'active'` | `active` \| `storage` \| `retired` \| `damaged` |
 | `notes` TEXT | |
 | `created_at` TEXT NOT NULL DEFAULT `(datetime('now'))` | |
-| `base_flight_seconds`, `base_mah`, `base_wh`, `base_cycles`, `base_charges` | **persistent consumption baseline** — never auto-updated; only ever *added to* by the manual additive editor (and optionally by the flight-deletion "transfer" option). Lifetime = baseline + Σ(linked flights). |
+| `base_flight_seconds`, `base_mah`, `base_cycles`, `base_charges` | **persistent consumption baseline** — never auto-updated; only ever *added to* by the manual additive editor (and optionally by the flight-deletion "transfer" option). Lifetime = baseline + Σ(linked flights). (No `base_wh`: Wh-used was dropped — see Implementation notes.) |
 
 The first block (serial … notes) is **mutable identity/spec** (overwritten on edit). The `base_*`
 block is the **consumption baseline** with different write semantics (additive only) — see below.
@@ -266,3 +269,35 @@ A creation form (Manager "New" button, and the unknown-serial popup during linki
 - **MSP prefill** of cell count / capacity at connect when creating a pack → nice-to-have.
 - **Barcode / RFID** serial capture at disarm → future input method.
 - **ArduPilot** packs: the model is firmware-agnostic; `chemistry` + serial identity carry over.
+
+---
+
+## Implementation notes (Phase A + B, as built)
+
+Refinements agreed during the build, on top of the design above:
+
+- **No Wh-used metric.** Wh-used per pack is linear to mAh and unreliable from telemetry, so it was
+  dropped from the lifetime (no `base_wh`). Instead **energy is a computed spec**: nominal V × cells ×
+  (mAh ÷ 1000), shown informationally (e.g. LiPo 6S 5000 mAh → 111 Wh).
+- **Chemistry voltages (per cell), internal table** → drive the computed **nominal voltage**, **voltage
+  range**, and **energy**: LiPo 3.7 / 3.2 / 4.2 · Li-Ion 3.6 / 2.5 / 4.2 · LiFe 3.3 / 2.5 / 3.65 ·
+  LiHV 3.8 / 3.2 / 4.35 (nominal / min / max).
+- **Connector** is a dropdown (XT30/60/90, XT60H, EC3/5/8, AS150/AS150U, MR30/60, MT60, Deans (T),
+  Other) to avoid spelling drift.
+- **Charges** is a **manual-only** lifecycle figure (added via the additive usage editor; no automatic
+  source — a flight is not a charge).
+- **Create / edit / add-usage are modal popups**; numeric fields use the shared `NumberStepper`.
+- **List ordering:** the ▲/▼ button sets the **group ordering** (both levels) in the grouped views; the
+  **leaf packs are always serial-ascending**. The **flat** view instead exposes a sort-field dropdown
+  (serial / cell count / capacity) + the ▲/▼ direction.
+- **Status special groups:** **Storage** (second-to-last) and **Retired & Damaged** (last) are pulled
+  out of the normal grouping into trailing collapsible groups in every mode (incl. flat). All groups
+  start **collapsed** (consistent with the Flight Logbook tree).
+- **List row** shows the serial first, then the label (both white).
+- **No manual Refresh button:** the list auto-reloads on **disarm** (`flight-recording-ended`) and on
+  **disconnect** (covers a just-recorded live flight); otherwise it loads on open / import.
+
+**Still deferred (next slices):** dedicated battery file **export** (consolidate-into-baseline +
+confirm) and **import** (duplicate-serial prompt); **disarm flight-summary** & **log-import**
+serial-entry capture; **Phase C** per-flight telemetry metrics (Wh, sag, internal resistance) and the
+flight-deletion "transfer to baseline" dialog.

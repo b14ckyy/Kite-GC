@@ -63,11 +63,17 @@ These are flight-level metadata values, stored once per flight.
 | `notes` | `TEXT` | existing | user | User notes |
 | `pilot_name` | `TEXT` | `v9` | user | Pilot / operator name (manually editable) |
 | `pilot_id` | `TEXT` | `v9` | user | Pilot / operator ID (manually editable) |
+| `battery_serial` | `TEXT` | `v10` | user | Serial of the battery pack flown — **soft link** to `battery_packs.serial`, resolved at read time (no FK) |
 
 `pilot_name` / `pilot_id` (schema `v9`) are manually editable in the flight detail panel.
 A future operator/login system can prefill them on new recordings; the columns are the
 forward-looking anchor for that. Added idempotently (`ensure_v9_schema`, self-healing like the
 mission-library `v8` columns) — existing DBs gain them automatically on next open, no data loss.
+
+`battery_serial` (schema `v10`) links the flight to a battery pack **by serial** (a soft link,
+resolved against `battery_packs.serial` at read time — there is no foreign key). See
+[`BATTERY_MANAGEMENT.md`](BATTERY_MANAGEMENT.md) for the `battery_packs` table and the Battery
+Manager. Added idempotently (`ensure_v10_schema`).
 
 No additional flight-level columns are currently planned for replay.
 
