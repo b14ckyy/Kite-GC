@@ -482,9 +482,12 @@ This document tracks planned features, organized by milestone.
   Flight Logbook (grouped/flat list, status special groups), editable pack identity with computed
   voltage/energy, **lifetime = persistent baseline + Σ(linked flights)**, additive manual usage editor,
   serial link/unlink in the flight detail. Pilot name/ID fields shipped alongside (schema v9).
-- [ ] **Battery management — remaining slices:** dedicated battery file export/import (consolidate +
-  duplicate-serial prompt); disarm flight-summary & log-import serial capture; **Phase C** per-flight
+- [x] **Battery export/import** (`.kbatt`, consolidate/base + import preview with serial-conflict
+  resolution) and **cross-jump navigation** (flight ↔ linked mission/battery chips).
+- [ ] **Battery management — remaining slices:** a proper **disarm end-flight dialog** (with the battery
+  serial capture inside it — no autofill, packs are swapped between flights); **Phase C** per-flight
   telemetry metrics (Wh, sag, internal resistance, SoH trend) + flight-deletion "transfer to baseline".
+  (Log-import linking stays manual via the flight detail.)
 - [ ] **Battery estimation (remaining capacity / time)** — protocol-specific source:
   - **INAV**: derive from the FC's battery configuration (capacity, cell count, voltage thresholds — the battery-estimation-relevant settings) read at connect, combined with live consumed-mAh / voltage telemetry.
   - **ArduPilot**: the firmware lacks INAV's built-in estimation, so compute it **locally** in the GCS from telemetry (consumed mAh, current draw, voltage sag) against the pack's rated capacity (ties into the battery logbook).

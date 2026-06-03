@@ -33,6 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     collapsed. Search by serial / label / maker / model / notes.
   - **Logbook:** the flight detail has a **Battery** row — link/unlink by serial (unknown serials
     allowed); the manual **Refresh** button was removed (the list auto-reloads on disarm/disconnect).
+  - **`.kbatt` export/import:** per-pack export (**Consolidate** folds linked-flight usage into the
+    file's baseline / **Base** = baseline only; non-destructive to the source) and an import **preview**
+    with serial-conflict resolution (Consolidate / Overwrite existing, or edit the serial to import as
+    new). Import/Export live in the logbook toolbar (Import over the list, Export over the data view).
+  - **Cross-jump navigation:** a flight's linked **mission** and **battery** are slim chip buttons that
+    jump to the respective Manager (selected); the Battery Manager's linked-flights jump back to the
+    Logbook, auto-expanding the flight tree and scrolling to the highlighted flight.
 
 ### Added — Mission Manager (mission library UI)
 - **Mission Manager** — an alternate view of the mission planner panel (button next to Edit;

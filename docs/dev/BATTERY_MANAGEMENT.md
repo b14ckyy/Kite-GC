@@ -4,9 +4,10 @@
 the mission library pattern ([`MISSION_LIBRARY_AND_DB.md`](MISSION_LIBRARY_AND_DB.md)): packs are
 first-class DB entities, flights link the pack that was flown (soft link by serial), and the wear
 data is derived from the linked flight logs + a persistent baseline. The Battery Manager is a
-view-toggle inside the Flight Logbook panel. See **Implementation notes** at the end for the deltas
-agreed during the build. Deferred to later slices: dedicated battery file export/import,
-disarm/import serial-entry capture, and the Phase C per-flight telemetry metrics.
+view-toggle inside the Flight Logbook panel. Dedicated `.kbatt` export/import and cross-jump
+navigation are implemented too. See **Implementation notes** at the end for the deltas agreed during
+the build. Deferred to later slices: a proper disarm end-flight dialog (with the battery serial
+capture inside it) and the Phase C per-flight telemetry metrics.
 
 The goal is a complete battery-management system so (especially commercial) operators can track
 how their packs perform and wear over their lifetime.
@@ -296,8 +297,22 @@ Refinements agreed during the build, on top of the design above:
 - **List row** shows the serial first, then the label (both white).
 - **No manual Refresh button:** the list auto-reloads on **disarm** (`flight-recording-ended`) and on
   **disconnect** (covers a just-recorded live flight); otherwise it loads on open / import.
+- **Dedicated `.kbatt` export/import** (one pack per file, JSON with `format`/`version`):
+  - **Export** (per pack) asks **Consolidate / Base / Abort**. *Consolidate* folds the linked flights'
+    usage into the file's baseline (archival, **non-destructive to the source**); *Base* exports the
+    baseline only. Filename `battery_<serial>_<label>.kbatt` (sanitized). Import/Export sit in the
+    logbook toolbar (Import over the list, Export over the data view) like the flight buttons.
+  - **Import** shows a **preview** (pack fields + baseline + consolidated/flight-count). The **serial is
+    read-only unless it collides** with an existing pack; on collision the actions are
+    **Consolidate existing** (add the file baseline) / **Overwrite existing** (replace identity +
+    baseline) / Abort — editing the serial to a free one flips to **Import** (new). Backend:
+    `battery_db_set_baseline` (absolute) for new/overwrite; additive `add_usage` for consolidate.
+- **Cross-jump navigation:** a flight's linked **mission** and **battery** are slim chip buttons that
+  jump to the Mission Manager / Battery Manager (selected); the Battery Manager's linked-flights jump to
+  the Logbook (and the flight tree auto-expands + scrolls to the highlighted row).
 
-**Still deferred (next slices):** dedicated battery file **export** (consolidate-into-baseline +
-confirm) and **import** (duplicate-serial prompt); **disarm flight-summary** & **log-import**
-serial-entry capture; **Phase C** per-flight telemetry metrics (Wh, sag, internal resistance) and the
-flight-deletion "transfer to baseline" dialog.
+**Still deferred (next slices):** a proper **disarm end-flight dialog** (does not exist yet) — the
+battery serial-entry capture for recordings goes **into that dialog** once it exists (no autofill: packs
+are swapped between flights). Log-import stays **manual** (link in the flight detail). **Phase C**
+per-flight telemetry metrics (Wh, sag, internal resistance) and the flight-deletion "transfer to
+baseline" dialog.
