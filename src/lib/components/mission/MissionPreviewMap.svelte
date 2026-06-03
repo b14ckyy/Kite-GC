@@ -18,7 +18,9 @@
   let container: HTMLDivElement;
   let map: L.Map | undefined;
   let overlay: L.LayerGroup | undefined;
+  let bounds: L.LatLngBounds | undefined;
   let ro: ResizeObserver | undefined;
+  let refitTimer: ReturnType<typeof setTimeout> | undefined;
 
   function geoLatLngs(json: string): [number, number][] {
     let wps: Waypoint[];
@@ -40,7 +42,25 @@
     g.addTo(map);
     overlay = g;
     const b = pl.getBounds();
-    if (b.isValid()) map.fitBounds(b, { padding: [6, 6], maxZoom: 18 });
+    bounds = b.isValid() ? b : undefined;
+    if (bounds) map.fitBounds(bounds, { padding: [6, 6], maxZoom: 18 });
+  }
+
+  // Resize handler: the panel animates its width (transition) the first time a mission is
+  // selected, so the container grows after the map was first fit. invalidateSize alone keeps
+  // the old zoom → the mission looks too small; refit to the bounds so it fills the new size.
+  function refit() {
+    if (!map) return;
+    map.invalidateSize();
+    if (bounds) map.fitBounds(bounds, { padding: [6, 6], maxZoom: 18 });
+  }
+
+  // Debounce: the width transition fires the ResizeObserver many times with intermediate
+  // sizes; fitting on a half-animated size yields a bad zoom that sticks. Wait until the
+  // size settles, then do one clean refit at the final dimensions (also covers window resize).
+  function scheduleRefit() {
+    if (refitTimer) clearTimeout(refitTimer);
+    refitTimer = setTimeout(() => refit(), 80);
   }
 
   onMount(() => {
@@ -58,10 +78,11 @@
       providerId: provider.detectPlaceholders ? provider.id : undefined,
     }).addTo(map);
     draw(waypointsJson);
-    // The detail box lays out after mount → fix the size + refit.
-    ro = new ResizeObserver(() => map?.invalidateSize());
+    // The detail box lays out after mount (and the panel may still be animating its width
+    // wider on the first selection) → fix the size + refit on every resize.
+    ro = new ResizeObserver(() => scheduleRefit());
     ro.observe(container);
-    setTimeout(() => { map?.invalidateSize(); draw(waypointsJson); }, 60);
+    scheduleRefit();
   });
 
   // Redraw when the mission changes (draw() only mutates Leaflet layers → no reactive loop).
@@ -71,6 +92,7 @@
   });
 
   onDestroy(() => {
+    if (refitTimer) clearTimeout(refitTimer);
     ro?.disconnect();
     if (map) { map.remove(); map = undefined; }
   });
