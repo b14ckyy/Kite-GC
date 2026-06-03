@@ -505,21 +505,29 @@
     opacity: 0.85;
   }
 
+  /* Unified app button style (matches the Mission Manager): accent-blue hover for
+     regular actions; destructive actions use .logbook-danger (red). */
   .cache-clear-btn {
-    font-size: 9px;
-    padding: 1px 6px;
+    font-size: 11px;
+    padding: 4px 10px;
     background: #434343;
     border: 1px solid #555;
     border-radius: 3px;
     color: #ccc;
     cursor: pointer;
     transition: background 0.15s;
+    white-space: nowrap;
   }
 
-  .cache-clear-btn:hover {
-    background: #c0392b;
-    border-color: #c0392b;
+  .cache-clear-btn:hover:not(:disabled) {
+    background: #37a8db;
+    border-color: #37a8db;
     color: #fff;
+  }
+
+  .cache-clear-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 
   .logbook-danger {
@@ -528,7 +536,9 @@
     color: #e8c0c0;
   }
 
-  .logbook-danger:hover {
+  /* Specificity bumped (.cache-clear-btn.logbook-danger) so the danger hover wins over the
+     generic .cache-clear-btn:hover:not(:disabled) accent-blue rule. */
+  .cache-clear-btn.logbook-danger:hover:not(:disabled) {
     background: #9b1f1f;
     border-color: #9b1f1f;
     color: #fff;

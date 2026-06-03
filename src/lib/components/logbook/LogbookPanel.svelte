@@ -424,20 +424,26 @@
   .logbook-btn-group-right {
     display: flex;
     align-items: center;
-    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px 12px;
     margin-left: auto;
   }
 
   .logbook-btn-group {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
   }
 
+  /* The bigger (unified) buttons no longer all fit on one row at the 430px panel width,
+     so the toolbar wraps gracefully instead of overflowing. */
   .setting-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
     padding: 6px 0;
   }
 
@@ -447,7 +453,7 @@
   }
 
   .setting-select {
-    padding: 3px 6px;
+    padding: 4px 7px;
     background: #434343;
     border: 1px solid #555;
     border-radius: 3px;
@@ -457,7 +463,7 @@
   }
 
   .setting-input {
-    padding: 3px 6px;
+    padding: 4px 7px;
     background: #434343;
     border: 1px solid #555;
     border-radius: 3px;
@@ -465,32 +471,29 @@
     font-size: 11px;
   }
 
+  /* Unified app button style (matches the Mission Manager): accent-blue hover for
+     regular actions; destructive actions use .logbook-danger (red). */
   .cache-clear-btn {
-    font-size: 9px;
-    padding: 1px 6px;
+    font-size: 11px;
+    padding: 4px 10px;
     background: #434343;
     border: 1px solid #555;
     border-radius: 3px;
     color: #ccc;
     cursor: pointer;
     transition: background 0.15s;
+    white-space: nowrap;
   }
 
-  .cache-clear-btn:hover {
-    background: #c0392b;
-    border-color: #c0392b;
+  .cache-clear-btn:hover:not(:disabled) {
+    background: #37a8db;
+    border-color: #37a8db;
     color: #fff;
   }
 
   .cache-clear-btn:disabled {
     opacity: 0.5;
     cursor: default;
-  }
-
-  .cache-clear-btn:disabled:hover {
-    background: #434343;
-    border-color: #555;
-    color: #ccc;
   }
 
   .logbook-layout {
