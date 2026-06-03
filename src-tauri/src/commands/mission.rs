@@ -277,6 +277,23 @@ pub async fn mission_export_xml(
     Ok(mission_to_xml(&resolved))
 }
 
+/// Export a *library* mission (given its canonical waypoints JSON) to a `.mission` file, without
+/// touching the loaded map mission. AGL waypoints are resolved to AMSL, like `mission_save_file`.
+#[tauri::command]
+pub async fn mission_save_file_from_json(
+    path: String,
+    waypoints_json: String,
+    terrain: State<'_, TerrainProvider>,
+) -> Result<(), String> {
+    let waypoints: Vec<Waypoint> = serde_json::from_str(&waypoints_json)
+        .map_err(|e| format!("Invalid mission JSON: {e}"))?;
+    let mission = Mission { waypoints, info: MissionInfo::default(), dirty: false, home: None };
+    let resolved = resolve_agl(&mission, &terrain).await;
+    let xml = mission_to_xml(&resolved);
+    std::fs::write(&path, xml).map_err(|e| format!("Failed to save: {e}"))?;
+    Ok(())
+}
+
 /// Import mission from MW XML string
 #[tauri::command]
 pub fn mission_import_xml(xml: String, store: State<'_, MissionStore>) -> Result<Mission, String> {

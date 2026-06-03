@@ -1,9 +1,15 @@
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import { convertAltitude, convertDistance, convertSpeed, convertTemperature, formatConverted } from '$lib/utils/units';
-  import { formatDurationSec } from '$lib/stores/flightlog';
-  import type { Flight } from '$lib/stores/flightlogTypes';
+  import { formatDurationSec, missionDbForFlight, flightLoggedWpCount, flightLinkMission, flightUnlinkMission, missionDbSave, missionDbGeocode } from '$lib/stores/flightlog';
+  import type { Flight, LibraryMission } from '$lib/stores/flightlogTypes';
   import type { InterfaceSettings } from '$lib/stores/settings';
+  import { settings } from '$lib/stores/settings';
+  import { mission, missionFlags, loadedMissionId, markMissionSynced } from '$lib/stores/mission';
+  import { replayWpTotal } from '$lib/stores/navStatus';
+  import { buildMissionInput } from '$lib/helpers/missionLibrary';
+  import { get } from 'svelte/store';
+  import { locale } from 'svelte-i18n';
   import WeatherEditor from './WeatherEditor.svelte';
 
   let {
@@ -42,6 +48,85 @@
 
   let craftNameEditing = $state(false);
   let craftNameDraft = $state('');
+
+  // ── Linked mission (Phase 1b) ──────────────────────────────────────
+  let linkedMission = $state<LibraryMission | null>(null);
+  let loggedWpCount = $state<number | null>(null);
+  let linkBusy = $state(false);
+
+  // The map mission can be linked only if it is a "real" mission (has a provenance flag);
+  // a pure unsaved scratch mission can't. DB → link directly; FILE/FC → save-to-DB-then-link.
+  let canLink = $derived(
+    $mission.waypoints.length > 0 && ($missionFlags.db || $missionFlags.file || $missionFlags.fc)
+  );
+
+  /** WP count for display: the linked mission's, else the Blackbox-header fallback. */
+  let missionWpCount = $derived(linkedMission?.wp_count ?? loggedWpCount);
+
+  async function refreshLink(flightId: number) {
+    const dbPath = get(settings).flightLogDbPath;
+    try {
+      linkedMission = await missionDbForFlight(flightId, dbPath);
+      loggedWpCount = await flightLoggedWpCount(flightId, dbPath);
+    } catch {
+      linkedMission = null;
+      loggedWpCount = null;
+    }
+  }
+
+  // Refresh on flight change (the async writes happen after the await, so they are not
+  // dependencies of this effect → no read/write loop).
+  $effect(() => {
+    void refreshLink(flight.id);
+  });
+
+  function defaultMissionName(): string {
+    const d = new Date();
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `New Mission - ${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+
+  /** Link the currently map-loaded mission to this flight. DB mission → link directly;
+   *  FILE/FC mission not yet in the library → save it first, then link. */
+  async function linkMission() {
+    if (linkBusy || !canLink) return;
+    linkBusy = true;
+    const dbPath = get(settings).flightLogDbPath;
+    const lang = get(locale) ?? 'en';
+    try {
+      const flags = get(missionFlags);
+      let missionId = get(loadedMissionId);
+      if (!(flags.db && missionId != null)) {
+        const input = await buildMissionInput(get(mission).waypoints, { name: defaultMissionName() });
+        missionId = await missionDbSave(input, dbPath);
+        loadedMissionId.set(missionId);
+        markMissionSynced('db');
+        void missionDbGeocode(missionId, lang, dbPath).catch(() => {});
+      }
+      await flightLinkMission(flight.id, missionId, dbPath);
+      await refreshLink(flight.id);
+      replayWpTotal.set(linkedMission?.wp_count ?? loggedWpCount ?? null);
+    } catch (e) {
+      console.warn('[flight-detail] link mission failed', e);
+    } finally {
+      linkBusy = false;
+    }
+  }
+
+  async function unlinkMission() {
+    if (linkBusy) return;
+    linkBusy = true;
+    const dbPath = get(settings).flightLogDbPath;
+    try {
+      await flightUnlinkMission(flight.id, dbPath);
+      await refreshLink(flight.id);
+      replayWpTotal.set(loggedWpCount ?? null);
+    } catch (e) {
+      console.warn('[flight-detail] unlink mission failed', e);
+    } finally {
+      linkBusy = false;
+    }
+  }
 
   function startCraftNameEdit() {
     craftNameDraft = flight.craft_name ?? '';
@@ -147,6 +232,21 @@
       {#if !minimized}<span class="flight-id-tag">#{flight.id}</span>{/if}
       {#if flight.linked_flight_id} 🔗 #{flight.linked_flight_id}{/if}
     </span>
+    <span class="fc-label">{$t('logbook.mission')}</span>
+    <span class="fc-value craft-value-row">
+      <span>{linkedMission ? (linkedMission.name || $t('logbook.unnamedMission')) : $t('logbook.missionNone')}</span>
+      {#if !minimized}
+        {#if linkedMission}
+          <button class="weather-edit-btn" onclick={unlinkMission} disabled={linkBusy} title={$t('logbook.unlinkMission')}>✕</button>
+        {:else}
+          <button class="weather-edit-btn link-mission-btn" onclick={linkMission} disabled={linkBusy || !canLink} title={canLink ? $t('logbook.linkMissionTip') : $t('logbook.linkMissionDisabledTip')}>🔗 {$t('logbook.linkMission')}</button>
+        {/if}
+      {/if}
+    </span>
+    {#if missionWpCount != null}
+      <span class="fc-label">{$t('logbook.missionWps')}</span>
+      <span class="fc-value">{missionWpCount}</span>
+    {/if}
     <span class="fc-label">{$t('logbook.started')}</span>
     <span class="fc-value">{formatDateTime(flight.start_time)}</span>
     <span class="fc-label">{$t('logbook.duration')}</span>
@@ -289,6 +389,17 @@
 
   .weather-edit-btn:hover {
     color: #37a8db;
+  }
+
+  .link-mission-btn {
+    font-size: 11px;
+    color: #37a8db;
+    white-space: nowrap;
+  }
+
+  .link-mission-btn:disabled {
+    color: #555;
+    cursor: not-allowed;
   }
 
   .flight-id-tag {

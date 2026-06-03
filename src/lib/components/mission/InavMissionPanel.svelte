@@ -16,8 +16,15 @@
     MAX_MISSIONS, MAX_WAYPOINTS_TOTAL,
     type Waypoint, type Mission, WpAction, WP_ACTION_LABELS, WP_ACTION_KEYS,
     hasLocation, isModifier, missionFlags, missionModified,
+    loadedMissionId, markMissionSynced,
   } from '$lib/stores/mission';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+  import MissionSaveDialog from '$lib/components/mission/MissionSaveDialog.svelte';
+  import MissionManager from '$lib/components/mission/MissionManager.svelte';
+  import { missionManagerOpen } from '$lib/stores/missionManager';
+  import { buildMissionInput } from '$lib/helpers/missionLibrary';
+  import { missionDbSave, missionDbUpdate, missionDbGet, missionDbFindByHash, missionDbGeocode } from '$lib/stores/flightlog';
+  import { locale } from 'svelte-i18n';
   import { isFlyByHome } from '$lib/helpers/missionGeometry';
   import { contextMenu } from '$lib/actions/contextMenu';
   import { buildWaypointMenu } from '$lib/helpers/waypointMenu';
@@ -46,6 +53,8 @@
 
   // Lazy pattern panel state (to avoid loading heavy module on startup)
   let showPatternPanel = $state(false);
+  // Mission Manager view (alternate view of this panel — DB mission library).
+  // State lives in a store so it survives close/reopen and lets +page size the panel.
 
   const unsubMission = mission.subscribe(m => { currentMission = m; });
   const unsubSelIdx = selectedWpIndex.subscribe(i => { currentSelIdx = i; });
@@ -81,6 +90,7 @@
   }
 
   let confirmDialog: ReturnType<typeof ConfirmDialog>;
+  let missionSaveDialog: ReturnType<typeof MissionSaveDialog>;
 
   let downloadLoading = $state(false);
   let uploadLoading = $state(false);
@@ -156,6 +166,73 @@
     }
   }
 
+  /** Auto-name for fresh missions: "New Mission - YYYY-MM-DD HH:MM". */
+  function autoMissionName(): string {
+    const d = new Date();
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `New Mission - ${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+
+  /** Save the current map mission to the DB library (dedup by content hash). Branches on the
+   *  in-memory identity: fresh → NEW (name/notes dialog); loaded+modified → NEW/OVERWRITE/CANCEL;
+   *  loaded+unchanged → already saved. See docs/dev/MISSION_LIBRARY_AND_DB.md. */
+  async function handleSaveToLibrary() {
+    const wps = currentMission.waypoints;
+    if (wps.length === 0) return;
+    const dbPath = get(settings).flightLogDbPath;
+    const lang = get(locale) ?? 'en';
+    const id = get(loadedMissionId);
+    const flags = get(missionFlags);
+    try {
+      // Loaded library mission, unchanged → nothing to do.
+      if (id != null && flags.db) { statusMessage = $t('mission.saveLibAlready'); return; }
+
+      // Loaded library mission, modified → NEW / OVERWRITE / CANCEL.
+      if (id != null && !flags.db) {
+        const ans = await confirmDialog.show({
+          title: $t('mission.saveLibUpdateTitle'),
+          message: $t('mission.saveLibUpdateMsg'),
+          buttons: [
+            { label: $t('mission.saveLibNew'), value: 'new' },
+            { label: $t('mission.saveLibOverwrite'), value: 'overwrite', primary: true },
+          ],
+        });
+        if (ans == null) return;
+        if (ans === 'overwrite') {
+          const existing = await missionDbGet(id, dbPath);
+          const input = await buildMissionInput(wps, { name: existing?.name ?? autoMissionName(), notes: existing?.notes ?? '' });
+          // If the edited content now equals a *different* stored mission, adopt that row.
+          const collide = await missionDbFindByHash(input.content_hash, dbPath);
+          if (collide && collide.id !== id) {
+            loadedMissionId.set(collide.id);
+            markMissionSynced('db');
+            statusMessage = $t('mission.saveLibDuplicate');
+            return;
+          }
+          await missionDbUpdate(id, input, dbPath);
+          loadedMissionId.set(id);
+          markMissionSynced('db');
+          void missionDbGeocode(id, lang, dbPath).catch(() => {});
+          statusMessage = $t('mission.saveLibUpdated');
+          return;
+        }
+        // 'new' → fall through to the name dialog
+      }
+
+      // Fresh (or chose NEW) → ask name + notes, insert.
+      const res = await missionSaveDialog.show({ defaultName: autoMissionName() });
+      if (!res) return;
+      const input = await buildMissionInput(wps, { name: res.name || autoMissionName(), notes: res.notes });
+      const newId = await missionDbSave(input, dbPath);
+      loadedMissionId.set(newId);
+      markMissionSynced('db');
+      void missionDbGeocode(newId, lang, dbPath).catch(() => {});
+      statusMessage = $t('mission.saveLibSaved');
+    } catch (e: any) {
+      statusMessage = $t('mission.saveLibFailed', { values: { error: e } });
+    }
+  }
+
   async function handleOpenFile() {
     try {
       const path = await open({ title: $t('mission.openMissionTitle'), multiple: false, filters: [{ name: 'Mission', extensions: ['mission'] }] });
@@ -167,9 +244,10 @@
     }
   }
 
-  function onDragOver(e: DragEvent) { e.preventDefault(); dragOver = true; }
+  function onDragOver(e: DragEvent) { if (get(missionManagerOpen)) return; e.preventDefault(); dragOver = true; }
   function onDragLeave() { dragOver = false; }
   async function onDrop(e: DragEvent) {
+    if (get(missionManagerOpen)) return;
     e.preventDefault(); dragOver = false;
     const files = e.dataTransfer?.files;
     if (!files || files.length === 0) return;
@@ -304,10 +382,18 @@
   ondrop={onDrop}
   class:drag-over={dragOver}
 >
+  {#if $missionManagerOpen}
+    <MissionManager onBack={() => missionManagerOpen.set(false)} />
+  {:else}
   <div class="mission-toolbar">
     <button class="btn-edit" class:active={currentEditing} onclick={() => editMode.update(v => !v)} title={$t('mission.toggleEdit')}>
       ✏️ {currentEditing ? $t('mission.editing') : $t('mission.edit')}
     </button>
+    {#if !currentEditing}
+      <button class="btn-edit" onclick={() => missionManagerOpen.set(true)} title={$t('mission.missionManager')}>
+        📚 {$t('mission.missionManager')}
+      </button>
+    {/if}
 
     {#if currentEditing && !showPatternPanel}
       <button class="btn-icon" onclick={() => undo()} disabled={!canUndoNow} title={$t('mission.undo')} aria-label={$t('mission.undo')}>↶</button>
@@ -461,6 +547,9 @@
           <button class="btn-ctrl btn-eeprom" onclick={handleEepromSave} disabled={eepromSaveLoading || isArmed()} title={isArmed() ? $t('mission.eepromSaveArmed') : $t('mission.eepromSaveTooltip')}>{eepromSaveLoading ? '⏳' : '💾'} {$t('mission.eepromSave')}</button>
         </div>
         <div class="ctrl-row">
+          <button class="btn-ctrl" onclick={handleSaveToLibrary} disabled={currentMission.waypoints.length === 0}>📚 {$t('mission.saveToLibrary')}</button>
+        </div>
+        <div class="ctrl-row">
           <button class="btn-ctrl btn-file" onclick={handleOpenFile}>📂 {$t('mission.open')}</button>
           <button class="btn-ctrl btn-file" onclick={handleSaveFile}>💾 {$t('mission.save')}</button>
         </div>
@@ -485,9 +574,11 @@
   {/if}
 
   {#if dragOver}<div class="drop-overlay">{$t('mission.dropHint')}</div>{/if}
+  {/if}
 </div>
 
 <ConfirmDialog bind:this={confirmDialog} />
+<MissionSaveDialog bind:this={missionSaveDialog} />
 
 <style>
   .mission-panel { display: flex; flex-direction: column; gap: 0; flex: 1; min-height: 0; padding: 4px; position: relative; overflow: hidden; color-scheme: dark; font-size: 13px; }

@@ -30,6 +30,7 @@
   import { liveTrack, appendLivePoint, clearLiveTrack } from '$lib/stores/liveTrack';
   import { toTelemetryData } from '$lib/adapters/telemetryAdapter';
   import { activeWpNumber, replayWpTotal } from '$lib/stores/navStatus';
+  import { missionManagerOpen, missionManagerSelectedId, requestOpenFlightId } from '$lib/stores/missionManager';
   import { missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode } from '$lib/stores/flightlog';
   import { buildMissionInput, missionContentHash } from '$lib/helpers/missionLibrary';
   import { homePosition } from '$lib/stores/home';
@@ -44,7 +45,7 @@
   import FloatingVideoWindow from "$lib/components/video/FloatingVideoWindow.svelte";
   import { initVideo, videoState, videoStream, setVideoPrimary, registerPiPElement } from "$lib/stores/video";
   import TerrainAnalysisPanel from "$lib/components/terrain/TerrainAnalysisPanel.svelte";
-  import { editMode, replayActive, mission, missionFlags, missionDownload, missionUpload, missionFcInfo, markMissionSynced, loadedMissionId } from "$lib/stores/mission";
+  import { editMode, replayActive, mission, missionFlags, missionDownload, missionUpload, missionFcInfo, markMissionSynced, loadedMissionId, missionSetWaypoints } from "$lib/stores/mission";
   import { terrainAnalysis, patchTerrainAnalysis } from "$lib/stores/terrainAnalysis";
   import type { InterfaceSettings, PanelConfig } from "$lib/stores/settings";
   import { layout, GRID_DEFAULTS } from '$lib/stores/layout';
@@ -779,12 +780,25 @@
     resetPlayback();
     if (data.hasGpsData) playbackActive = true;
 
-    // Resolve the replay WP total (X for the WP N/X readout): the linked library mission's
-    // count, else the Blackbox-header count, else null (→ "WP N").
+    // Resolve the replay WP total (X for the WP N/X readout) and load the flown mission.
+    // If the flight has a linked library mission, load it onto the map (so the mission overlay
+    // + active-WP highlight show what was actually flown — hideable via the player MISSION
+    // toggle). X = linked mission's WP count, else the Blackbox-header count, else null.
     replayWpTotal.set(null);
     try {
       const linked = await missionDbForFlight(flightId, flightLogDbPath);
-      replayWpTotal.set(linked ? linked.wp_count : await flightLoggedWpCount(flightId, flightLogDbPath));
+      if (linked) {
+        try {
+          await missionSetWaypoints(JSON.parse(linked.waypoints_json));
+          loadedMissionId.set(linked.id);
+          markMissionSynced('db'); // it's the library mission → trusted for the highlight
+        } catch (e) {
+          console.warn('[replay] failed to load linked mission', e);
+        }
+        replayWpTotal.set(linked.wp_count);
+      } else {
+        replayWpTotal.set(await flightLoggedWpCount(flightId, flightLogDbPath));
+      }
     } catch {
       replayWpTotal.set(null);
     }
@@ -1234,6 +1248,16 @@
     }
   }
 
+  // Jump to a flight in the Logbook when requested (e.g. from the Mission Manager's
+  // "flights with this mission" list).
+  $effect(() => {
+    const id = $requestOpenFlightId;
+    if (id == null) return;
+    requestOpenFlightId.set(null);
+    activeTab = 'logbook';
+    void selectFlight(id);
+  });
+
   if (typeof window !== 'undefined') {
     void listen<{ flight_id: number }>('flight-recording-started', (event) => {
       void onRecordingStarted(event.payload.flight_id);
@@ -1382,7 +1406,7 @@
   {#if navPanelOpen && !terrainOpen}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="nav-panel" class:nav-panel-mission={activeTab === 'mission'} class:nav-panel-logbook={activeTab === 'logbook' && !logbookDetailOpen} class:nav-panel-wide={logbookDetailOpen} class:nav-panel-minimized={logbookMinimized && logbookHasFlightOnMap} onclick={() => { if (logbookMinimized) expandLogbook(); }}>
+    <div class="nav-panel" class:nav-panel-mission={activeTab === 'mission' && !$missionManagerOpen} class:nav-panel-logbook={(activeTab === 'logbook' && !logbookDetailOpen) || (activeTab === 'mission' && $missionManagerOpen && $missionManagerSelectedId == null)} class:nav-panel-wide={logbookDetailOpen || (activeTab === 'mission' && $missionManagerOpen && $missionManagerSelectedId != null)} class:nav-panel-minimized={logbookMinimized && logbookHasFlightOnMap} onclick={() => { if (logbookMinimized) expandLogbook(); }}>
       <div class="panel-content">
         <!-- UAV Info Tab -->
         {#if activeTab === "uav-info"}

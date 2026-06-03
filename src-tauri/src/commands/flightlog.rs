@@ -119,6 +119,26 @@ pub fn mission_db_get(id: i64, db_path: Option<String>) -> Result<Option<Mission
     db::get_mission(&conn, id).map_err(|e| format!("Query error: {}", e))
 }
 
+/// List all library missions (newest first) — for the Mission Manager.
+#[tauri::command]
+pub fn mission_db_list(db_path: Option<String>) -> Result<Vec<Mission>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::list_missions(&conn).map_err(|e| format!("Query error: {}", e))
+}
+
+/// Update a mission's name + notes (Manager rename / notes edit).
+#[tauri::command]
+pub fn mission_db_set_meta(
+    id: i64,
+    name: String,
+    notes: Option<String>,
+    db_path: Option<String>,
+) -> Result<(), String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::update_mission_meta(&conn, id, &name, notes.as_deref())
+        .map_err(|e| format!("Update error: {}", e))
+}
+
 /// Find a library mission by content hash (import dedup-match / save NEW-vs-OVERWRITE check).
 #[tauri::command]
 pub fn mission_db_find_by_hash(
@@ -160,6 +180,30 @@ pub fn flight_link_mission(
     let conn = open_db(&db_path.unwrap_or_default())?;
     db::link_flight_mission(&conn, flight_id, mission_id)
         .map_err(|e| format!("Link error: {}", e))
+}
+
+/// Unlink a flight from its mission (Logbook unlink).
+#[tauri::command]
+pub fn flight_unlink_mission(flight_id: i64, db_path: Option<String>) -> Result<(), String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::unlink_flight_mission(&conn, flight_id).map_err(|e| format!("Unlink error: {}", e))
+}
+
+/// Delete a library mission (unlinks referencing flights first).
+#[tauri::command]
+pub fn mission_db_delete(id: i64, db_path: Option<String>) -> Result<(), String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::delete_mission(&conn, id).map_err(|e| format!("Delete error: {}", e))
+}
+
+/// List the flights that link a given mission (reverse lookup + delete warning).
+#[tauri::command]
+pub fn mission_db_flights(
+    mission_id: i64,
+    db_path: Option<String>,
+) -> Result<Vec<FlightSummary>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::list_flights_for_mission(&conn, mission_id).map_err(|e| format!("Query error: {}", e))
 }
 
 /// Read the Blackbox-header waypoint count for a flight (replay `WP N/X` fallback).

@@ -665,6 +665,14 @@ pub fn upsert_mission(conn: &Connection, m: &MissionInput) -> SqlResult<i64> {
     Ok(conn.last_insert_rowid())
 }
 
+/// List all library missions (newest first).
+pub fn list_missions(conn: &Connection) -> SqlResult<Vec<Mission>> {
+    let mut stmt =
+        conn.prepare(&format!("SELECT {} FROM missions ORDER BY created_at DESC", MISSION_COLS))?;
+    let rows = stmt.query_map([], row_to_mission)?;
+    rows.collect()
+}
+
 /// Fetch a mission by id.
 pub fn get_mission(conn: &Connection, id: i64) -> SqlResult<Option<Mission>> {
     conn.query_row(
@@ -718,6 +726,20 @@ pub fn update_mission(conn: &Connection, id: i64, m: &MissionInput) -> SqlResult
     Ok(())
 }
 
+/// Update only a mission's name + notes (rename / notes edit in the Manager; content unchanged).
+pub fn update_mission_meta(
+    conn: &Connection,
+    id: i64,
+    name: &str,
+    notes: Option<&str>,
+) -> SqlResult<()> {
+    conn.execute(
+        "UPDATE missions SET name = ?1, notes = ?2 WHERE id = ?3",
+        params![name, notes, id],
+    )?;
+    Ok(())
+}
+
 /// Fetch the mission linked to a flight (if any).
 pub fn get_mission_for_flight(conn: &Connection, flight_id: i64) -> SqlResult<Option<Mission>> {
     let mission_id: Option<i64> = match conn
@@ -754,6 +776,58 @@ pub fn set_flight_logged_wp_count(conn: &Connection, flight_id: i64, count: i64)
         params![count, flight_id],
     )?;
     Ok(())
+}
+
+/// Unlink a flight from its mission (Logbook unlink). The flight + telemetry are kept.
+pub fn unlink_flight_mission(conn: &Connection, flight_id: i64) -> SqlResult<()> {
+    conn.execute(
+        "UPDATE flights SET mission_id = NULL WHERE id = ?1",
+        params![flight_id],
+    )?;
+    Ok(())
+}
+
+/// Delete a library mission, first unlinking any flights that reference it (those flights keep
+/// their telemetry and the Blackbox-header WP fallback). The FK has no ON DELETE, so a bare
+/// delete of a referenced mission would fail — hence the explicit unlink.
+pub fn delete_mission(conn: &Connection, id: i64) -> SqlResult<()> {
+    conn.execute(
+        "UPDATE flights SET mission_id = NULL WHERE mission_id = ?1",
+        params![id],
+    )?;
+    conn.execute("DELETE FROM missions WHERE id = ?1", params![id])?;
+    Ok(())
+}
+
+/// List flight summaries that link a given mission (reverse lookup for the Manager + the delete
+/// reference warning).
+pub fn list_flights_for_mission(conn: &Connection, mission_id: i64) -> SqlResult<Vec<FlightSummary>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, start_time, duration_sec, source, craft_name, location_name,
+            max_alt_m, max_speed_ms, total_distance_m, platform_type, linked_flight_id, notes
+         FROM flights WHERE mission_id = ?1 ORDER BY start_time DESC",
+    )?;
+    let rows = stmt.query_map(params![mission_id], |row| {
+        let ts_str: String = row.get(1)?;
+        let start_time = DateTime::parse_from_rfc3339(&ts_str)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now());
+        Ok(FlightSummary {
+            id: row.get(0)?,
+            start_time,
+            duration_sec: row.get(2)?,
+            source: row.get(3)?,
+            craft_name: row.get(4)?,
+            location_name: row.get(5)?,
+            max_alt_m: row.get(6)?,
+            max_speed_ms: row.get(7)?,
+            total_distance_m: row.get(8)?,
+            platform_type: row.get(9)?,
+            linked_flight_id: row.get(10)?,
+            notes: row.get(11)?,
+        })
+    })?;
+    rows.collect()
 }
 
 /// Read the Blackbox-header waypoint count for a flight (fallback `X` for replay).

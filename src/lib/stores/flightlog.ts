@@ -44,6 +44,63 @@ export async function flightLinkMission(flightId: number, missionId: number, dbP
   });
 }
 
+/** Unlink a flight from its mission (Logbook unlink). */
+export async function flightUnlinkMission(flightId: number, dbPath: string): Promise<void> {
+  return invoke<void>('flight_unlink_mission', {
+    flightId,
+    dbPath: dbPath || undefined,
+  });
+}
+
+/** Delete a library mission (unlinks referencing flights first). */
+export async function missionDbDelete(id: number, dbPath: string): Promise<void> {
+  return invoke<void>('mission_db_delete', {
+    id,
+    dbPath: dbPath || undefined,
+  });
+}
+
+/** List the flights that link a given mission (reverse lookup + delete warning). */
+export async function missionDbFlights(missionId: number, dbPath: string): Promise<FlightSummary[]> {
+  return invoke<FlightSummary[]>('mission_db_flights', {
+    missionId,
+    dbPath: dbPath || undefined,
+  });
+}
+
+/** List all library missions (newest first). */
+export async function missionDbList(dbPath: string): Promise<LibraryMission[]> {
+  return invoke<LibraryMission[]>('mission_db_list', {
+    dbPath: dbPath || undefined,
+  });
+}
+
+/** Update a mission's name + notes (Manager rename / notes edit). */
+export async function missionDbSetMeta(id: number, name: string, notes: string | null, dbPath: string): Promise<void> {
+  return invoke<void>('mission_db_set_meta', {
+    id,
+    name,
+    notes,
+    dbPath: dbPath || undefined,
+  });
+}
+
+/** Export a library mission (its waypoints JSON) to a .mission file (INAV). */
+export async function missionExportFileFromJson(path: string, waypointsJson: string): Promise<void> {
+  return invoke<void>('mission_save_file_from_json', {
+    path,
+    waypointsJson,
+  });
+}
+
+/** Fetch a library mission by id. */
+export async function missionDbGet(id: number, dbPath: string): Promise<LibraryMission | null> {
+  return invoke<LibraryMission | null>('mission_db_get', {
+    id,
+    dbPath: dbPath || undefined,
+  });
+}
+
 /** Find a library mission by content hash (import dedup-match / save NEW-vs-OVERWRITE check). */
 export async function missionDbFindByHash(contentHash: string, dbPath: string): Promise<LibraryMission | null> {
   return invoke<LibraryMission | null>('mission_db_find_by_hash', {

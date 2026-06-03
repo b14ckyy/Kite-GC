@@ -23,6 +23,8 @@ use commands::flightlog::{
     flightlog_link_flights, flightlog_unlink_flight, flightlog_find_linkable,
     mission_db_save, mission_db_get, mission_db_for_flight, flight_link_mission,
     flight_logged_wp_count, mission_db_geocode, mission_db_find_by_hash, mission_db_update,
+    flight_unlink_mission, mission_db_delete, mission_db_flights, mission_db_list,
+    mission_db_set_meta,
 };
 use commands::info::get_app_version;
 use commands::terrain::{terrain_elevation, terrain_fan, terrain_profile};
@@ -31,7 +33,7 @@ use commands::mission::{
     mission_get, mission_clear, mission_set, mission_add_wp, mission_insert_wp,
     mission_remove_wp, mission_update_wp, mission_reorder_wp,
     mission_download, mission_upload, mission_fc_info, mission_export_xml, mission_import_xml,
-    mission_save_file, mission_load_file,
+    mission_save_file, mission_save_file_from_json, mission_load_file,
     read_text_file, write_text_file,
     ardu_mission_download, ardu_mission_upload,
 };
@@ -102,6 +104,7 @@ pub fn run() {
             mission_export_xml,
             mission_import_xml,
             mission_save_file,
+            mission_save_file_from_json,
             mission_load_file,
             read_text_file,
             write_text_file,
@@ -119,6 +122,11 @@ pub fn run() {
             mission_db_geocode,
             mission_db_find_by_hash,
             mission_db_update,
+            flight_unlink_mission,
+            mission_db_delete,
+            mission_db_flights,
+            mission_db_list,
+            mission_db_set_meta,
             flightlog_update_notes,
             flightlog_update_craft_name,
             flightlog_update_weather,
