@@ -586,7 +586,11 @@
           title: `WP${dn}: ${$t(WP_ACTION_KEYS[wp.action]) || 'Unknown'}`,
         }).addTo(missionGroup);
 
-        marker.on('click', () => { if (editing) toggleWpSelection(i); else selectWpSingle(i); });
+        marker.on('click', () => {
+          if (editing) toggleWpSelection(i);
+          else if (currentSelIdx === i) clearWpSelection(); // tap the selected WP again to deselect
+          else selectWpSingle(i);
+        });
         marker.on('contextmenu', (e: L.LeafletMouseEvent) => {
           // Right-click on an unselected marker selects it; on a selected one
           // keeps the (multi-)selection so the menu can act on all of it.
@@ -622,10 +626,21 @@
             if (contentEl) contentEl.innerHTML = htmlContent;
           } else {
             if (editorPopup) map.removeLayer(editorPopup);
+            // autoPan off: Leaflet's default only fits the popup into the map *container*,
+            // ignoring the panels/widgets overlapping the edges — which dumps the WP at the
+            // edge (worse at higher UI scale). We pan it into the visible area ourselves.
             editorPopup = L.popup({
-              closeButton: false, autoClose: false, closeOnClick: false,
+              closeButton: false, autoClose: false, closeOnClick: false, autoPan: false,
               className: 'wp-editor-popup-container', offset: L.point(0, -30), maxWidth: 240, minWidth: 190,
             }).setLatLng(latLng).setContent(htmlContent).addTo(map);
+            // Center the freshly selected WP in the visible area: biased right (clears the
+            // mission panel on the left) and below centre (the editor popup opens upward, so
+            // this leaves it roughly centred, above the player/widgets at the bottom). The
+            // map is unzoomed, so this pixel math is independent of the global UI scale.
+            const size = map.getSize();
+            const wpPt = map.latLngToContainerPoint(latLng);
+            const targetPt = L.point(size.x * 0.55, size.y * 0.6);
+            map.panBy(wpPt.subtract(targetPt), { animate: true });
           }
           editorPopupIdx = selIdx;
           setTimeout(() => { if (editorPopup) attachEditorEvents(editorPopup, wp, i, modifiers, fbhChild); }, 50);
@@ -751,7 +766,11 @@
 
         // The FBH is edited as a nested section in its parent's popup; selecting it (here
         // or in the list) opens that popup (the parent loop detects its selected child).
-        house.on('click', () => { if (editing) toggleWpSelection(fe.idx); else selectWpSingle(fe.idx); });
+        house.on('click', () => {
+          if (editing) toggleWpSelection(fe.idx);
+          else if (currentSelIdx === fe.idx) clearWpSelection(); // tap again to deselect
+          else selectWpSingle(fe.idx);
+        });
         house.on('contextmenu', (e: L.LeafletMouseEvent) => {
           if (!currentSelSet.has(fe.idx)) selectWpSingle(fe.idx);
           openContextMenu(e.originalEvent.clientX, e.originalEvent.clientY, buildWaypointMenu());
@@ -798,7 +817,11 @@
   }
 
   function onMapClick(e: L.LeafletMouseEvent) {
-    if (!currentEditing) return;
+    if (!currentEditing) {
+      // Outside edit mode a tap on empty map deselects the current waypoint.
+      if (currentSelIdx >= 0 || currentSelSet.size > 0) clearWpSelection();
+      return;
+    }
     // Block waypoint placement while pattern mode is active
     if (activeSurveyPattern.isActive) return;
     if (currentSelSet.size > 0) { clearWpSelection(); return; }
@@ -838,6 +861,13 @@
 <style>
   :global(.mission-wp-icon) { background: none !important; border: none !important; }
   :global(.mission-fbh-icon) { background: none !important; border: none !important; }
+  /* Scale the marker SVG with the global UI scale (--ui-scale inherits from .ui-root).
+     The transform is on the SVG child, not on the Leaflet-positioned `.leaflet-marker-icon`,
+     so Leaflet's positioning transform is untouched. transform-origin keeps the on-coordinate
+     anchor fixed (teardrops anchor bottom-centre, circles centre). */
+  :global(.mission-wp-icon > svg),
+  :global(.mission-fbh-icon > svg) { transform: scale(var(--ui-scale, 1)); transform-origin: 50% 50%; }
+  :global(.mission-wp-icon.wp-anchor-bottom > svg) { transform-origin: 50% 100%; }
   /* Active target waypoint: the icon itself pulses in brightness + a green glow, at
      0.5 Hz (2 s period). Only `filter` is animated, so it never fights Leaflet's
      positioning transform on the marker element. */
@@ -850,8 +880,11 @@
     50%      { filter: brightness(1.6) drop-shadow(0 0 9px rgba(89,170,41,0.95)); }
   }
   :global(.wp-param-label-wrapper) { background: none !important; border: none !important; overflow: visible !important; width: auto !important; height: auto !important; }
-  :global(.wp-param-label) { background: rgba(30,30,30,0.88); color: #ccc; padding: 3px 8px; border-radius: 4px; font-size: 12px; line-height: 1.4; white-space: nowrap; border: 1px solid rgba(55,168,219,0.35); pointer-events: none; }
-  :global(.wp-editor-popup-container .leaflet-popup-content-wrapper) { background: rgba(30,30,30,0.82); backdrop-filter: blur(10px); color: #ccc; border: 1px solid rgba(55,168,219,0.35); border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,0.5); padding: 0; }
+  :global(.wp-param-label) { background: rgba(30,30,30,0.88); color: #ccc; padding: 3px 8px; border-radius: 4px; font-size: 12px; line-height: 1.4; white-space: nowrap; border: 1px solid rgba(55,168,219,0.35); pointer-events: none; transform: scale(var(--ui-scale, 1)); transform-origin: top left; }
+  /* The map (and thus this Leaflet popup) is unzoomed, so scale the editor box to match
+     the global UI scale. Origin bottom-centre keeps the popup anchored over the WP (tip
+     stays put, box grows upward). --ui-scale is inherited from .ui-root. */
+  :global(.wp-editor-popup-container .leaflet-popup-content-wrapper) { background: rgba(30,30,30,0.82); backdrop-filter: blur(10px); color: #ccc; border: 1px solid rgba(55,168,219,0.35); border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,0.5); padding: 0; transform: scale(var(--ui-scale, 1)); transform-origin: bottom center; }
   :global(.wp-editor-popup-container .leaflet-popup-content) { margin: 0; width: auto !important; }
   :global(.wp-editor-popup-container .leaflet-popup-tip) { background: rgba(30,30,30,0.82); backdrop-filter: blur(10px); border: 1px solid rgba(55,168,219,0.35); }
   :global(.wp-editor-popup) { padding: 10px; font-size: 13px; min-width: 190px; }

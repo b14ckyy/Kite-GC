@@ -172,6 +172,7 @@
     "hudWidgets": "HUD Widgets",
     "rateHint": "Rate changes take effect on next connect.",
     "language": "Language",
+    "uiScale": "UI Scale",
     "interface": "Interface",
     "speedUnit": "Speed Unit",
     "altitudeUnit": "Altitude Unit",

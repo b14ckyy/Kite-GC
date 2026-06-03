@@ -85,6 +85,12 @@
   .cm-menu {
     position: fixed;
     z-index: 2000;
+    /* The menu lives outside the zoomed `.ui-scale` (so its clientX/clientY position stays
+       correct), so scale it here. Origin top-left keeps the cursor-anchored corner fixed;
+       the viewport-clamp effect measures the scaled size via getBoundingClientRect.
+       --ui-scale inherits from `.ui-root`. */
+    transform: scale(var(--ui-scale, 1));
+    transform-origin: top left;
     min-width: 168px;
     padding: 4px;
     background: rgba(30, 30, 30, 0.75);

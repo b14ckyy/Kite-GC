@@ -141,8 +141,12 @@ export function wpIconSpec(wp: Waypoint, displayNum: number, selected: boolean):
  *  pulsing-glow class for the FC's current target waypoint. */
 export function iconForWp(wp: Waypoint, displayNum: number, selected: boolean, active = false): L.DivIcon {
   const s = wpIconSpec(wp, displayNum, selected);
+  // Anchor class drives the CSS transform-origin so the marker scales (--ui-scale)
+  // around the point that sits on the coordinate: bottom-centre for teardrops, centre
+  // for circular icons.
+  const anchorCls = s.anchorY >= s.height ? 'wp-anchor-bottom' : 'wp-anchor-center';
   return L.divIcon({
-    className: `mission-wp-icon${active ? ' mission-wp-active' : ''}`,
+    className: `mission-wp-icon ${anchorCls}${active ? ' mission-wp-active' : ''}`,
     html: s.svg,
     iconSize: [s.width, s.height],
     iconAnchor: [s.anchorX, s.anchorY],

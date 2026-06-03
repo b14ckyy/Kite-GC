@@ -10,6 +10,7 @@
 
   let {
     localeValue = 'en',
+    uiScale = 1,
     mapProvider = 'osm',
     mapCacheMaxMB = 200,
     cacheStats = { usedBytes: 0, maxBytes: 0, tileCount: 0 },
@@ -38,6 +39,7 @@
     onToggleWidget = (_widgetId: string) => {},
   }: {
     localeValue?: string;
+    uiScale?: number;
     mapProvider?: string;
     mapCacheMaxMB?: number;
     cacheStats?: TileCacheStats;
@@ -70,6 +72,11 @@
     const value = (event.target as HTMLSelectElement).value;
     locale.set(value);
     onPatch({ locale: value });
+  }
+
+  function handleUiScaleChange(event: Event) {
+    const value = Number((event.target as HTMLSelectElement).value);
+    onPatch({ uiScale: value });
   }
 
   function handleMapProviderChange(event: Event) {
@@ -196,6 +203,14 @@
       {#each SUPPORTED_LOCALES as loc}
         <option value={loc.code}>{loc.label}</option>
       {/each}
+    </select>
+  </div>
+  <div class="setting-row">
+    <label class="setting-label" for="ui-scale">{$t('settings.uiScale')}</label>
+    <select id="ui-scale" class="setting-select" value={uiScale} onchange={handleUiScaleChange}>
+      <option value={1}>100%</option>
+      <option value={1.25}>125%</option>
+      <option value={1.5}>150%</option>
     </select>
   </div>
 </section>

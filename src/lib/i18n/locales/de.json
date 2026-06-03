@@ -172,6 +172,7 @@
     "hudWidgets": "HUD Widgets",
     "rateHint": "Ratenänderungen gelten ab nächster Verbindung.",
     "language": "Sprache",
+    "uiScale": "UI-Skalierung",
     "interface": "Interface",
     "speedUnit": "Geschwindigkeitseinheit",
     "altitudeUnit": "Höheneinheit",

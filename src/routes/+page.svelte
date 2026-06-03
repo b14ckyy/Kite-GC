@@ -106,8 +106,14 @@
     }
   });
 
+  // Global UI scale (1 = 100%, up to 2). Zooms the chrome via `.ui-scale`; the map
+  // (`.layer-map`) stays unzoomed/native. See docs/dev/UI_SCALING.md.
+  let uiScale = $state(1);
+
   // Floating-window rect (must match FloatingVideoWindow's own computation) — used
-  // to place the map inside the window's frame when the view is swapped.
+  // to place the map inside the window's frame when the view is swapped. The window
+  // lives in the zoomed `.ui-scale` layer but the map is unzoomed, so the visual rect
+  // is the window's logical rect * uiScale.
   const FLOAT_HDR = 20; // floating-window header height
   const floatH = $derived(Math.round($videoState.floatHeightFrac * winH));
   const floatW = $derived(Math.min(Math.round(floatH * ($videoState.aspect || 16 / 9)), Math.round(winW * 0.7)));
@@ -116,7 +122,7 @@
   // When video is primary, the map occupies the window's body (below the header).
   const mapInFrame = $derived($videoState.videoPrimary && $videoState.status === 'live');
   const mapFrameStyle = $derived(
-    `left:${floatLeft}px; top:${floatTop + FLOAT_HDR}px; width:${floatW}px; height:${floatH - FLOAT_HDR}px;`,
+    `left:${floatLeft * uiScale}px; top:${(floatTop + FLOAT_HDR) * uiScale}px; width:${floatW * uiScale}px; height:${(floatH - FLOAT_HDR) * uiScale}px;`,
   );
 
   // Per-container px-per-unit: 1 unit = cross-axis fraction so that
@@ -379,6 +385,7 @@
   defaultWpAltitudeM = saved.defaultWpAltitudeM;
   defaultPhTimeSec = saved.defaultPhTimeSec;
   warnAltitudeM = saved.warnAltitudeM;
+  uiScale = saved.uiScale ?? 1;
   interfaceSettings = saved.interface ?? {
     speedUnit: 'kmh',
     altitudeUnit: 'm',
@@ -1401,10 +1408,47 @@
 
 <svelte:window bind:innerWidth={winW} bind:innerHeight={winH} />
 
+<div class="ui-root" style:--ui-scale={uiScale}>
+  <!-- ======= MAP LAYER — unzoomed / native resolution (see docs/dev/UI_SCALING.md) =======
+       The map must stay crisp, so it lives OUTSIDE the zoomed `.ui-scale` layer. It is the
+       same single Map/Map3D instance (no re-mount). Normally it sits behind the chrome; when
+       video is primary it flips above the chrome into the floating window's body (.in-frame). -->
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="layer-map"
+    class:in-frame={mapInFrame}
+    style={mapInFrame ? mapFrameStyle : ''}
+    onclick={minimizeLogbook}
+  >
+    {#if mapViewMode === '2d'}
+      <Map
+        playbackTrack={mapTrack}
+        playbackPoint={playbackPoint}
+        {trackColorMode}
+        platformType={mapPlatformType}
+        fcVariant={replayFcVariant}
+        {mapViewMode}
+        onToggleMapView={() => mapViewMode = mapViewMode === '2d' ? '3d' : '2d'}
+      />
+    {:else}
+      <Map3D
+        playbackTrack={mapTrack}
+        playbackPoint={playbackPoint}
+        {trackColorMode}
+        platformType={mapPlatformType}
+        fcVariant={replayFcVariant}
+        {mapViewMode}
+        onToggleMapView={() => mapViewMode = mapViewMode === '2d' ? '3d' : '2d'}
+      />
+    {/if}
+  </div>
+
+  <!-- ======= UI CHROME LAYER — zoomed by --ui-scale ======= -->
+  <div class="ui-scale">
+
 <ConfirmDialog bind:this={confirmDialog} />
 <EndFlightDialog bind:this={endFlightDialog} {interfaceSettings} />
-<ContextMenu />
-<BatchEditPopup {interfaceSettings} />
 
 <main
   class="app"
@@ -1454,38 +1498,7 @@
     ></video>
   {/if}
 
-  <!-- Map holder — top-level so it can sit inside the floating window's frame
-       (above the docks) when swapped, without re-mounting the map. -->
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div
-    class="map-holder"
-    class:in-frame={mapInFrame}
-    style={mapInFrame ? mapFrameStyle : ''}
-    onclick={minimizeLogbook}
-  >
-    {#if mapViewMode === '2d'}
-      <Map
-        playbackTrack={mapTrack}
-        playbackPoint={playbackPoint}
-        {trackColorMode}
-        platformType={mapPlatformType}
-        fcVariant={replayFcVariant}
-        {mapViewMode}
-        onToggleMapView={() => mapViewMode = mapViewMode === '2d' ? '3d' : '2d'}
-      />
-    {:else}
-      <Map3D
-        playbackTrack={mapTrack}
-        playbackPoint={playbackPoint}
-        {trackColorMode}
-        platformType={mapPlatformType}
-        fcVariant={replayFcVariant}
-        {mapViewMode}
-        onToggleMapView={() => mapViewMode = mapViewMode === '2d' ? '3d' : '2d'}
-      />
-    {/if}
-  </div>
+  <!-- Map lives in the unzoomed `.layer-map` above (see docs/dev/UI_SCALING.md). -->
 
   <LogPlayer
     {showPlayer}
@@ -1536,6 +1549,7 @@
         {:else if activeTab === "settings"}
           <SettingsPanel
             localeValue={$locale ?? 'en'}
+            {uiScale}
             {mapProvider}
             {mapCacheMaxMB}
             {cacheStats}
@@ -1573,6 +1587,7 @@
               if (patch.defaultWpAltitudeM != null) defaultWpAltitudeM = patch.defaultWpAltitudeM;
               if (patch.defaultPhTimeSec != null) defaultPhTimeSec = patch.defaultPhTimeSec;
               if (patch.warnAltitudeM != null) warnAltitudeM = patch.warnAltitudeM;
+              if (patch.uiScale != null) uiScale = patch.uiScale;
               if (patch.interface != null) {
                 interfaceSettings = {
                   ...interfaceSettings,
@@ -1727,6 +1742,14 @@
     />
   </div>
 </main>
+  </div><!-- .ui-scale -->
+
+  <!-- Cursor-positioned overlays stay OUTSIDE the zoom so their fixed clientX/clientY
+       coordinates are not multiplied by --ui-scale (they render unscaled but in the
+       correct place; see docs/dev/UI_SCALING.md). -->
+  <ContextMenu />
+  <BatchEditPopup {interfaceSettings} />
+</div><!-- .ui-root -->
 
 <style>
   /* ============================================================
@@ -1755,9 +1778,38 @@
     -webkit-user-select: text;
   }
 
+  /* Leaflet map tooltips (hover hints / "toasts") live in the unzoomed map. Scale them
+     with the global UI scale via font-size + padding (Leaflet sets an inline transform
+     for positioning, so a CSS transform would be overridden — em/px scaling reflows the
+     box instead). --ui-scale inherits from `.ui-root`. Base values match Leaflet defaults. */
+  :global(.leaflet-tooltip) {
+    font-size: calc(12px * var(--ui-scale, 1));
+    padding: calc(6px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
+  }
+
+  /* ── Global UI scaling (see docs/dev/UI_SCALING.md) ──────────
+     `.ui-root` fills the viewport. `.ui-scale` holds all chrome and is zoomed by
+     --ui-scale (sized /scale so it fills exactly the viewport after the zoom).
+     `.layer-map` holds the single Map/Map3D instance UNZOOMED so it stays crisp. */
+  .ui-root {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+  }
+  .ui-scale {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: calc(100vw / var(--ui-scale, 1));
+    height: calc(100vh / var(--ui-scale, 1));
+    zoom: var(--ui-scale, 1);
+    z-index: 1;
+  }
+
   .app {
     display: grid;
-    height: 100vh;
+    height: 100%;
     position: relative;
     grid-template-rows: 53px 1fr var(--grid-bottom-height) 24px;
     grid-template-columns: 62px 1fr var(--grid-side-width) 54px;
@@ -1768,29 +1820,55 @@
       "status-bar   status-bar   status-bar   status-bar";
   }
 
+  /* The chrome layer sits ABOVE the unzoomed map, so its empty centre must let pointer
+     events fall through to the map (pan/zoom/Leaflet controls + the WP editor popup,
+     which is part of the map). BOTH `.ui-scale` (the parent covering the viewport) and
+     `.app` must be click-through, or the parent eats events the moment `.app` passes them
+     on. Solid children re-capture; the widget docks + map-controls stay click-through so
+     the map is draggable under/around them. See docs/dev/UI_SCALING.md. */
+  .ui-scale {
+    pointer-events: none;
+  }
+  .ui-scale > :global(*) {
+    pointer-events: auto; /* dialogs (and .app, immediately overridden below) */
+  }
+  .app {
+    pointer-events: none;
+  }
+  .app > :global(*) {
+    pointer-events: auto;
+  }
+  .app > :global(.zone-bottom-dock),
+  .app > :global(.zone-side-dock),
+  .app > :global(.zone-map-controls) {
+    pointer-events: none;
+  }
+
   /* ── Grid zone wrappers ─────────────────────────────────── */
   .zone-toolbar {
     grid-area: toolbar;
     z-index: 200;
   }
 
-  /* Map holder — top-level overlay over the content area (toolbar 53px / status
-     bar 24px). Fills the area normally; sits inside the floating window's frame
-     (rect via inline style) when the view is swapped. */
-  .map-holder {
+  /* Map layer — UNZOOMED overlay over the content area. The toolbar (53px) and status
+     bar (24px) live in the zoomed `.ui-scale`, so their visual heights are *--ui-scale;
+     the map offsets track that. z-index 0 keeps it behind the chrome normally. When the
+     view is swapped into the floating window it flips above the chrome (.in-frame) and
+     uses the inline rect (already *--ui-scale in mapFrameStyle). */
+  .layer-map {
     position: absolute;
-    top: 53px;
+    top: calc(53px * var(--ui-scale, 1));
     left: 0;
     right: 0;
-    bottom: 24px;
+    bottom: calc(24px * var(--ui-scale, 1));
     z-index: 0;
     overflow: hidden;
   }
-  .map-holder.in-frame {
+  .layer-map.in-frame {
     top: auto;
     right: auto;
     bottom: auto; /* left/top/width/height come from the inline rect */
-    z-index: 61; /* in the floating frame, above its body; the frame draws the border */
+    z-index: 2; /* above .ui-scale (z:1): into the floating frame body; frame draws the border */
     border-radius: 0 0 7px 7px;
   }
   /* Full-size video shown in the content area when swapped (videoPrimary) */
@@ -1880,8 +1958,8 @@
     position: absolute;
     top: 65px;
     left: 62px; /* after the rail buttons */
-    width: min(360px, calc(100vw - 62px - var(--grid-side-width) - 54px - 12px));
-    max-height: calc(100vh - 53px - var(--grid-bottom-height) - 24px - 12px);
+    width: min(360px, calc(100% - 62px - var(--grid-side-width) - 54px - 12px));
+    max-height: calc(100% - 53px - var(--grid-bottom-height) - 24px - 12px);
     background: rgba(46, 46, 46, 0.92);
     border: 1px solid rgba(55, 168, 219, 0.35);
     border-radius: 8px;
@@ -1898,19 +1976,19 @@
   .nav-panel.nav-panel-mission {
     /* +15% over the 360px base — fits all toolbar buttons on one row and
        leaves headroom for richer WP-list entries. */
-    width: min(414px, calc(100vw - 62px - var(--grid-side-width) - 54px - 12px));
+    width: min(414px, calc(100% - 62px - var(--grid-side-width) - 54px - 12px));
   }
 
   .nav-panel.nav-panel-logbook {
-    width: min(430px, calc(100vw - 62px - var(--grid-side-width) - 54px - 12px));
+    width: min(430px, calc(100% - 62px - var(--grid-side-width) - 54px - 12px));
   }
 
   .nav-panel.nav-panel-wide {
-    width: min(920px, calc(100vw - 62px - var(--grid-side-width) - 54px - 12px));
+    width: min(920px, calc(100% - 62px - var(--grid-side-width) - 54px - 12px));
   }
 
   .nav-panel.nav-panel-minimized {
-    width: min(280px, calc(100vw - 62px - var(--grid-side-width) - 54px - 12px));
+    width: min(280px, calc(100% - 62px - var(--grid-side-width) - 54px - 12px));
     cursor: pointer;
   }
 

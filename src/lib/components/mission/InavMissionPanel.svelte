@@ -284,6 +284,8 @@
     } else if (currentEditing && (e.ctrlKey || e.metaKey)) {
       toggleWpSelection(i);
       selAnchor = i;
+    } else if (!currentEditing && currentSelIdx === i) {
+      clearWpSelection(); // tap the selected WP again to deselect (non-edit)
     } else {
       selectWpSingle(i);
       selAnchor = i;
@@ -292,6 +294,7 @@
   function onBadgeClick(e: MouseEvent, i: number) {
     e.stopPropagation();
     if (currentEditing) toggleWpSelection(i);
+    else if (currentSelIdx === i) clearWpSelection(); // tap again to deselect
     else selectWpSingle(i);
     selAnchor = i;
   }
@@ -581,7 +584,7 @@
 <MissionSaveDialog bind:this={missionSaveDialog} />
 
 <style>
-  .mission-panel { display: flex; flex-direction: column; gap: 0; flex: 1; min-height: 0; padding: 4px; position: relative; overflow: hidden; color-scheme: dark; font-size: 13px; }
+  .mission-panel { display: flex; flex-direction: column; gap: 0; flex: 1; min-height: 0; padding: 4px; position: relative; overflow: hidden auto; color-scheme: dark; font-size: 13px; }
   .mission-panel.pattern-mode { overflow-y: auto; }
   .mission-panel.drag-over { outline: 2px dashed #37a8db; outline-offset: -2px; }
   .mission-toolbar { display: flex; align-items: center; gap: 4px; padding: 2px 4px; flex-shrink: 0; margin-bottom: 4px; }
@@ -636,7 +639,10 @@
   .btn-sm:hover { background: #3a3a3a; }
   .btn-sm.btn-danger { border-color: #c0392b; color: #e74c3c; }
   .btn-sm.btn-danger:hover { background: #c0392b; color: #fff; }
-  .wp-frame { flex: 1; min-height: 0; display: flex; flex-direction: column; border: 1px solid #333; border-radius: 4px; overflow: hidden; margin-bottom: 4px; }
+  /* Keep the scrollable WP list at least ~5 rows tall; when the detail card + action
+     buttons can't also fit (esp. at higher UI scale), the whole panel scrolls instead
+     of squeezing the list to nothing. */
+  .wp-frame { flex: 1; min-height: 170px; display: flex; flex-direction: column; border: 1px solid #333; border-radius: 4px; overflow: hidden; margin-bottom: 4px; }
   .mission-tabs { display: flex; flex-shrink: 0; border-bottom: 1px solid #444; background: #1a1a1a; }
   .mission-tab { flex: 1; padding: 4px 0; border: none; background: transparent; color: #666; cursor: pointer; font-size: 11px; font-weight: 600; text-align: center; transition: all 0.15s; border-right: 1px solid #333; }
   .mission-tab:last-child { border-right: none; }

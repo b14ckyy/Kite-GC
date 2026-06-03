@@ -60,6 +60,8 @@ export interface AppSettings {
   panels: PanelConfig;
   // Locale / language
   locale: string;
+  /** Global UI scale factor (1 = 100%, up to 2 = 200%); zooms the chrome, not the map. */
+  uiScale: number;
   // 3D Map
   cesiumIonToken: string;
   /** Show the vertical altitude curtain (wall down to ground) under the 3D track. */
@@ -104,6 +106,7 @@ const defaults: AppSettings = {
     right: ['rawTelemetry'],
   },
   locale: 'en',
+  uiScale: 1,
   cesiumIonToken: '',
   altitudeCurtain3D: true,
 };
