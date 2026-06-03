@@ -544,8 +544,16 @@ Cross-cutting groundwork items. Each carries non-trivial architectural or design
 - [ ] **3D map (Cesium) stays as-is for now** — keep Cesium World Terrain; tile-resolution quirks and other 3D refinements tracked separately under Milestone 7.
 - [ ] **Better map tile handling**
   - _Major considerations_: current IndexedDB LRU cache works but is reactive only. Consider region prefetch / offline area download, smarter eviction, retry/backoff on tile errors, optional vector tiles, and unified handling shared between Leaflet (2D) and Cesium (3D). Attribution + provider rate-limit compliance.
-- [ ] **Global font-size multiplier setting**
-  - _Major considerations_: app-wide scale variable (root `rem`/CSS custom property). Requires a UI dynamics pass — audit fixed-px layouts, panel/dock sizing, widget text (docks already px/vmin-based), and the CSS Grid zones (ADR-023) for reflow at large scales. Accessibility win. Persist in settings.
+- [x] **Global UI scale setting** — shipped; see `docs/dev/UI_SCALING.md`. CSS `zoom` on the chrome
+  layer (toolbar / panels / docks / widgets / dialogs) at **100 / 125 / 150 %** (Settings → Language),
+  persisted as `uiScale`. The **map stays at native resolution** (hoisted into an unzoomed `.layer-map`);
+  map overlays are scaled individually — WP markers, param labels, the WP editor popup, Leaflet tooltips,
+  and the right-click context menu. Chosen over a `rem` refactor (258 px font-sizes, 0 rem → too invasive).
+- [ ] **Custom tooltip / in-app assistance system** — native `title=` tooltips are rendered by
+  WebView2 *outside the DOM*, so they can't be themed or UI-scaled. Replace them with a `use:tooltip`
+  action + a themed singleton overlay that scales with the global UI scale (same pattern as the context
+  menu). Doubles as an **assistance layer**: short descriptions explaining controls/features for easier
+  use, **toggleable in Settings**. ~58 `title=` sites across 17 files to convert.
 - [ ] **Improved in-app icons, graphics & app logo**
   - _Major considerations_: replace ad-hoc emoji glyphs with a consistent SVG icon set; proper app/installer/taskbar icons; light/dark variants; coherent branding. Bundle-size and licensing of any icon set.
 - [ ] **Theming by connected UAV control system**
@@ -637,4 +645,4 @@ Source: **Copernicus DEM GLO-30** (geoid/EGM2008 ≈ MSL, no API key, offline-ca
 
 ---
 
-*Last updated: 2026-05-29*
+*Last updated: 2026-06-03*

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Global UI Scaling
+- **UI scale setting (100 / 125 / 150 %)** in Settings → Language, persisted as `uiScale`. Scales
+  the whole chrome — toolbar, nav rail, panels, widget docks, dialogs, status bar — via CSS `zoom`
+  on a `.ui-scale` wrapper (sized `/scale` so it still fills the viewport). See `docs/dev/UI_SCALING.md`.
+- **The map stays at native resolution:** the single Leaflet/Cesium instance is hoisted into an
+  unzoomed `.layer-map` (no re-mount), so tiles stay crisp and pointer/clicks stay pixel-accurate.
+  Map overlays are scaled individually instead — **WP markers, parameter labels, the WP editor popup,
+  Leaflet hover tooltips, and the right-click context menu** all follow `--ui-scale`.
+- **Side panels** now bound to the scaled container (vertical overflow scrolls instead of being clipped);
+  the **mission WP list** keeps a ≥5-row minimum height (panel scrolls when the detail + buttons don't fit).
+- Chosen over a `rem` refactor (258 px font-sizes, 0 rem) — `zoom` reflows everything together, no
+  per-component rework. Native `title=` panel tooltips are **not** scalable (rendered outside the DOM by
+  WebView2) → a custom tooltip/assistance system is on the roadmap.
+
+### Changed — Mission editing
+- Outside edit mode, a waypoint can now be **deselected**: tap empty map, or tap the already-selected WP
+  again (marker or list row). Previously a selection was sticky until another WP was picked.
+- Selecting a WP in edit mode now **centres it in the visible area** (biased clear of the mission panel /
+  player) instead of letting Leaflet's popup auto-pan dump it at the edge.
+
 ### Added — Battery Management (battery library, Phase A + B)
 - **Pilot fields** (DB schema **v9**): per-flight **Pilot name** + **Pilot ID**, manually editable
   in the flight detail (inline edit, saved together). Forward-looking anchor for a future
