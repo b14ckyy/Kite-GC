@@ -289,6 +289,26 @@ pub fn flightlog_update_craft_name(
     db::update_flight_craft_name(&conn, flight_id, &craft_name).map_err(|e| format!("Update error: {}", e))
 }
 
+/// Update pilot metadata (name + id) on a flight. Empty strings → NULL.
+#[tauri::command]
+pub fn flightlog_update_pilot(
+    flight_id: i64,
+    pilot_name: String,
+    pilot_id: String,
+    db_path: Option<String>,
+) -> Result<(), String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    let name = pilot_name.trim();
+    let pid = pilot_id.trim();
+    db::update_flight_pilot(
+        &conn,
+        flight_id,
+        if name.is_empty() { None } else { Some(name) },
+        if pid.is_empty() { None } else { Some(pid) },
+    )
+    .map_err(|e| format!("Update error: {}", e))
+}
+
 /// Manually update weather data for a flight
 #[tauri::command]
 pub fn flightlog_update_weather(

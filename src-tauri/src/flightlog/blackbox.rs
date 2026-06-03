@@ -213,6 +213,8 @@ where
         battery_used_mah: max_mah,
         notes: Some(format!("Imported from {}", file_path.display())),
         linked_flight_id: None,
+        pilot_name: None,
+        pilot_id: None,
     };
 
     report(72, "store-flight", "Creating logbook entry...");

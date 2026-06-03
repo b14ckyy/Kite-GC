@@ -35,6 +35,7 @@
     onSaveNotes,
     onSaveWeather,
     onSaveCraftName,
+    onSavePilot,
     onDeleteFlight,
     onExportFlights,
     onExportBlackbox,
@@ -63,6 +64,7 @@
     onSaveNotes: () => void;
     onSaveWeather: () => void;
     onSaveCraftName: (name: string) => void;
+    onSavePilot: (pilotName: string, pilotId: string) => void;
     onDeleteFlight: () => void;
     onExportFlights: (ids: number[]) => void;
     onExportBlackbox: () => void;
@@ -212,6 +214,7 @@
       {onSaveNotes}
       {onSaveWeather}
       {onSaveCraftName}
+      {onSavePilot}
       {onDeleteFlight}
       {onExportTrack}
     />
@@ -358,6 +361,7 @@
             {onSaveNotes}
             {onSaveWeather}
             {onSaveCraftName}
+            {onSavePilot}
             {onDeleteFlight}
             {onExportTrack}
           />

@@ -83,6 +83,8 @@ export interface Flight {
   battery_used_mah: number | null;
   notes: string | null;
   linked_flight_id: number | null;
+  pilot_name: string | null;
+  pilot_id: string | null;
 }
 
 export interface TelemetryRecord {

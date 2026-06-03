@@ -186,6 +186,15 @@ export async function updateFlightCraftName(id: number, craftName: string, dbPat
   });
 }
 
+export async function updateFlightPilot(id: number, pilotName: string, pilotId: string, dbPath: string): Promise<void> {
+  return invoke('flightlog_update_pilot', {
+    flightId: id,
+    pilotName,
+    pilotId,
+    dbPath: dbPath || undefined,
+  });
+}
+
 export async function geocodeFlight(id: number, dbPath: string, lang: string): Promise<string | null> {
   return invoke<string | null>('flightlog_geocode', {
     flightId: id,

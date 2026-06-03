@@ -9,7 +9,7 @@ use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
 
 use super::types::{Flight, FlightSummary, Mission, MissionInput, TelemetryRecord};
 
-const CURRENT_SCHEMA_VERSION: u32 = 8;
+const CURRENT_SCHEMA_VERSION: u32 = 9;
 
 /// Open (or create) the flight log database at the given path.
 /// Runs migrations if needed.
@@ -117,11 +117,16 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
         migrate_v7_to_v8(conn)?;
     }
 
-    // Self-heal: ensure the v8 schema actually exists even if a prior version bump left it
+    if current < 9 {
+        migrate_v8_to_v9(conn)?;
+    }
+
+    // Self-heal: ensure the latest schema actually exists even if a prior version bump left it
     // incomplete. Legacy migrations call set_user_version(CURRENT), so a CURRENT bump can
-    // mark the DB as v8 without v7_to_v8 ever creating its objects. Idempotent, so a healthy
-    // DB is unaffected.
+    // mark the DB as the newest version without the matching migration ever creating its
+    // objects. Idempotent, so a healthy DB is unaffected.
     ensure_v8_schema(conn)?;
+    ensure_v9_schema(conn)?;
 
     Ok(())
 }
@@ -180,6 +185,24 @@ fn ensure_v8_schema(conn: &Connection) -> SqlResult<()> {
 
 fn migrate_v7_to_v8(conn: &Connection) -> SqlResult<()> {
     ensure_v8_schema(conn)?;
+    set_user_version(conn, 8)?;
+    Ok(())
+}
+
+/// Idempotently add the pilot metadata columns (manually editable; a future operator/login
+/// system can prefill them). Safe to call on every open; only adds what's missing.
+fn ensure_v9_schema(conn: &Connection) -> SqlResult<()> {
+    if !column_exists(conn, "flights", "pilot_name")? {
+        conn.execute_batch("ALTER TABLE flights ADD COLUMN pilot_name TEXT;")?;
+    }
+    if !column_exists(conn, "flights", "pilot_id")? {
+        conn.execute_batch("ALTER TABLE flights ADD COLUMN pilot_id TEXT;")?;
+    }
+    Ok(())
+}
+
+fn migrate_v8_to_v9(conn: &Connection) -> SqlResult<()> {
+    ensure_v9_schema(conn)?;
     set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
     Ok(())
 }
@@ -343,10 +366,10 @@ pub fn insert_flight(conn: &Connection, flight: &Flight) -> SqlResult<i64> {
             start_lat, start_lon, location_name,
             weather_temp_c, weather_wind_ms, weather_wind_deg, weather_desc,
             max_alt_m, max_speed_ms, max_distance_m, total_distance_m,
-            battery_used_mah, notes
+            battery_used_mah, notes, pilot_name, pilot_id
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-            ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23
+            ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25
         )",
         params![
             flight.start_time.to_rfc3339(),
@@ -372,6 +395,8 @@ pub fn insert_flight(conn: &Connection, flight: &Flight) -> SqlResult<i64> {
             flight.total_distance_m,
             flight.battery_used_mah,
             flight.notes,
+            flight.pilot_name,
+            flight.pilot_id,
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -542,7 +567,7 @@ pub fn get_flight(conn: &Connection, flight_id: i64) -> SqlResult<Option<Flight>
                 start_lat, start_lon, location_name,
                 weather_temp_c, weather_wind_ms, weather_wind_deg, weather_desc,
                 max_alt_m, max_speed_ms, max_distance_m, total_distance_m,
-                battery_used_mah, notes, linked_flight_id
+                battery_used_mah, notes, linked_flight_id, pilot_name, pilot_id
          FROM flights WHERE id = ?1",
     )?;
 
@@ -585,6 +610,8 @@ pub fn get_flight(conn: &Connection, flight_id: i64) -> SqlResult<Option<Flight>
             battery_used_mah: row.get(22)?,
             notes: row.get(23)?,
             linked_flight_id: row.get(24)?,
+            pilot_name: row.get(25)?,
+            pilot_id: row.get(26)?,
         })
     })?;
 
@@ -994,6 +1021,9 @@ pub fn find_duplicate_flight(
                     battery_used_mah: row.get(22)?,
                     notes: row.get(23)?,
                     linked_flight_id: row.get(24)?,
+                    // Not selected here (duplicate-detection lookup only).
+                    pilot_name: None,
+                    pilot_id: None,
                 })
             },
         )
@@ -1051,6 +1081,20 @@ pub fn update_flight_craft_name(
     conn.execute(
         "UPDATE flights SET craft_name = ?1 WHERE id = ?2",
         params![craft_name, flight_id],
+    )?;
+    Ok(())
+}
+
+/// Update the pilot metadata (name + id) of a flight. Empty strings are stored as NULL.
+pub fn update_flight_pilot(
+    conn: &Connection,
+    flight_id: i64,
+    pilot_name: Option<&str>,
+    pilot_id: Option<&str>,
+) -> SqlResult<()> {
+    conn.execute(
+        "UPDATE flights SET pilot_name = ?1, pilot_id = ?2 WHERE id = ?3",
+        params![pilot_name, pilot_id, flight_id],
     )?;
     Ok(())
 }
@@ -1300,6 +1344,8 @@ mod tests {
             battery_used_mah: None,
             notes: None,
             linked_flight_id: None,
+            pilot_name: None,
+            pilot_id: None,
         };
         let id = insert_flight(&conn, &flight).unwrap();
         let loaded = get_flight(&conn, id).unwrap().unwrap();
@@ -1337,6 +1383,8 @@ mod tests {
             battery_used_mah: None,
             notes: None,
             linked_flight_id: None,
+            pilot_name: None,
+            pilot_id: None,
         };
         let id = insert_flight(&conn, &flight).unwrap();
         finalize_flight(
@@ -1393,6 +1441,8 @@ mod tests {
             battery_used_mah: None,
             notes: None,
             linked_flight_id: None,
+            pilot_name: None,
+            pilot_id: None,
         };
         let fid = insert_flight(&conn, &flight).unwrap();
 
@@ -1478,6 +1528,8 @@ mod tests {
             battery_used_mah: None,
             notes: None,
             linked_flight_id: None,
+            pilot_name: None,
+            pilot_id: None,
         };
         let fid = insert_flight(&conn, &flight).unwrap();
         let rec = TelemetryRecord {
@@ -1561,6 +1613,8 @@ mod tests {
             battery_used_mah: None,
             notes: None,
             linked_flight_id: None,
+            pilot_name: None,
+            pilot_id: None,
         };
         let flight_id = insert_flight(&conn, &flight).unwrap();
         insert_blackbox_records(&conn, flight_id, &[(123_000, "{}".into())]).unwrap();

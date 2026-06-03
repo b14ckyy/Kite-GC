@@ -67,6 +67,10 @@ pub struct Flight {
     pub notes: Option<String>,
     /// ID of the linked flight (e.g. live ↔ blackbox association)
     pub linked_flight_id: Option<i64>,
+    /// Pilot / operator name (manually editable; future login system can prefill)
+    pub pilot_name: Option<String>,
+    /// Pilot / operator ID (manually editable; future login system can prefill)
+    pub pilot_id: Option<String>,
 }
 
 /// A reusable mission stored in the library (row in `missions` table).

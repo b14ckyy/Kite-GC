@@ -853,6 +853,11 @@
     await loadLogbook();
   }
 
+  async function saveSelectedFlightPilot(pilotName: string, pilotId: string) {
+    if (!selectedFlightId) return;
+    selectedFlight = await logbookCtrl.savePilot(selectedFlightId, pilotName, pilotId, flightLogDbPath);
+  }
+
   async function removeSelectedFlight() {
     if (!selectedFlightId || !selectedFlight) return;
 
@@ -1502,6 +1507,7 @@
             onSaveNotes={saveSelectedFlightNotes}
             onSaveWeather={saveSelectedFlightWeather}
             onSaveCraftName={saveSelectedFlightCraftName}
+            onSavePilot={saveSelectedFlightPilot}
             onDeleteFlight={removeSelectedFlight}
             onExportFlights={exportFlightsToKflight}
             onExportBlackbox={exportBlackbox}

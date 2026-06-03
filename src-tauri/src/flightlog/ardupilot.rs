@@ -876,6 +876,8 @@ where
         battery_used_mah: max_mah,
         notes: Some(format!("Imported from {}", file_path.display())),
         linked_flight_id: None,
+        pilot_name: None,
+        pilot_id: None,
     };
 
     let flight_id = db::insert_flight(conn, &flight)

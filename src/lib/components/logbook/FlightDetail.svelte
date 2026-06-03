@@ -26,6 +26,7 @@
     onSaveNotes,
     onSaveWeather,
     onSaveCraftName,
+    onSavePilot,
     onDeleteFlight,
     onExportTrack,
   }: {
@@ -42,12 +43,17 @@
     onSaveNotes: () => void;
     onSaveWeather: () => void;
     onSaveCraftName: (name: string) => void;
+    onSavePilot: (pilotName: string, pilotId: string) => void;
     onDeleteFlight: () => void;
     onExportTrack: () => void;
   } = $props();
 
   let craftNameEditing = $state(false);
   let craftNameDraft = $state('');
+
+  let pilotEditing = $state(false);
+  let pilotNameDraft = $state('');
+  let pilotIdDraft = $state('');
 
   // ── Linked mission (Phase 1b) ──────────────────────────────────────
   let linkedMission = $state<LibraryMission | null>(null);
@@ -142,6 +148,21 @@
     craftNameEditing = false;
   }
 
+  function startPilotEdit() {
+    pilotNameDraft = flight.pilot_name ?? '';
+    pilotIdDraft = flight.pilot_id ?? '';
+    pilotEditing = true;
+  }
+
+  function savePilot() {
+    pilotEditing = false;
+    onSavePilot(pilotNameDraft, pilotIdDraft);
+  }
+
+  function cancelPilotEdit() {
+    pilotEditing = false;
+  }
+
   function focusOnMount(node: HTMLElement) {
     node.focus();
   }
@@ -222,6 +243,37 @@
       {:else}
         <span>{flight.craft_name || $t('logbook.unnamedCraft')}</span>
         <button class="weather-edit-btn" onclick={startCraftNameEdit} title={$t('logbook.editCraftName')}>✎</button>
+      {/if}
+    </span>
+    <span class="fc-label">{$t('logbook.pilot')}</span>
+    <span class="fc-value craft-value-row">
+      {#if pilotEditing}
+        <input
+          class="craft-name-input"
+          type="text"
+          placeholder={$t('logbook.pilotNamePlaceholder')}
+          bind:value={pilotNameDraft}
+          onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') savePilot(); if (e.key === 'Escape') cancelPilotEdit(); }}
+          use:focusOnMount
+        />
+      {:else}
+        <span>{flight.pilot_name || $t('logbook.pilotNone')}</span>
+        {#if !minimized}<button class="weather-edit-btn" onclick={startPilotEdit} title={$t('logbook.editPilot')}>✎</button>{/if}
+      {/if}
+    </span>
+    <span class="fc-label">{$t('logbook.pilotId')}</span>
+    <span class="fc-value craft-value-row">
+      {#if pilotEditing}
+        <input
+          class="craft-name-input"
+          type="text"
+          placeholder={$t('logbook.pilotIdPlaceholder')}
+          bind:value={pilotIdDraft}
+          onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') savePilot(); if (e.key === 'Escape') cancelPilotEdit(); }}
+        />
+        <button class="weather-edit-btn" onclick={savePilot} title={$t('logbook.savePilot')}>✓</button>
+      {:else}
+        <span>{flight.pilot_id || '—'}</span>
       {/if}
     </span>
     <span class="fc-label">{$t('logbook.firmware')}</span>

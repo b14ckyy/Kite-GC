@@ -319,6 +319,8 @@ impl FlightRecorder {
                 battery_used_mah: None,
                 notes: None,
                 linked_flight_id: None,
+                pilot_name: None,
+                pilot_id: None,
             };
 
             match db::insert_flight(&self.db, &flight) {
