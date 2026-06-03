@@ -7,9 +7,12 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
 
-use super::types::{Flight, FlightSummary, Mission, MissionInput, TelemetryRecord};
+use super::types::{
+    BatteryAggregate, BatteryPack, BatteryPackInput, Flight, FlightSummary, Mission, MissionInput,
+    TelemetryRecord,
+};
 
-const CURRENT_SCHEMA_VERSION: u32 = 9;
+const CURRENT_SCHEMA_VERSION: u32 = 10;
 
 /// Open (or create) the flight log database at the given path.
 /// Runs migrations if needed.
@@ -121,12 +124,17 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
         migrate_v8_to_v9(conn)?;
     }
 
+    if current < 10 {
+        migrate_v9_to_v10(conn)?;
+    }
+
     // Self-heal: ensure the latest schema actually exists even if a prior version bump left it
     // incomplete. Legacy migrations call set_user_version(CURRENT), so a CURRENT bump can
     // mark the DB as the newest version without the matching migration ever creating its
     // objects. Idempotent, so a healthy DB is unaffected.
     ensure_v8_schema(conn)?;
     ensure_v9_schema(conn)?;
+    ensure_v10_schema(conn)?;
 
     Ok(())
 }
@@ -203,6 +211,44 @@ fn ensure_v9_schema(conn: &Connection) -> SqlResult<()> {
 
 fn migrate_v8_to_v9(conn: &Connection) -> SqlResult<()> {
     ensure_v9_schema(conn)?;
+    set_user_version(conn, 9)?;
+    Ok(())
+}
+
+/// Idempotently create the v10 battery objects: the `battery_packs` table + the soft-link
+/// `flights.battery_serial` column. Safe to call on every open; only adds what's missing.
+fn ensure_v10_schema(conn: &Connection) -> SqlResult<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS battery_packs (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            serial              TEXT NOT NULL UNIQUE,
+            label               TEXT,
+            manufacturer        TEXT,
+            model               TEXT,
+            chemistry           TEXT,
+            cell_count          INTEGER,
+            capacity_mah        INTEGER,
+            c_rating_discharge  INTEGER,
+            c_rating_charge     INTEGER,
+            connector           TEXT,
+            in_service_date     TEXT,
+            status              TEXT NOT NULL DEFAULT 'active',
+            notes               TEXT,
+            created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+            base_flight_seconds INTEGER NOT NULL DEFAULT 0,
+            base_mah            INTEGER NOT NULL DEFAULT 0,
+            base_cycles         REAL NOT NULL DEFAULT 0,
+            base_charges        INTEGER NOT NULL DEFAULT 0
+        );",
+    )?;
+    if !column_exists(conn, "flights", "battery_serial")? {
+        conn.execute_batch("ALTER TABLE flights ADD COLUMN battery_serial TEXT;")?;
+    }
+    Ok(())
+}
+
+fn migrate_v9_to_v10(conn: &Connection) -> SqlResult<()> {
+    ensure_v10_schema(conn)?;
     set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
     Ok(())
 }
@@ -366,10 +412,10 @@ pub fn insert_flight(conn: &Connection, flight: &Flight) -> SqlResult<i64> {
             start_lat, start_lon, location_name,
             weather_temp_c, weather_wind_ms, weather_wind_deg, weather_desc,
             max_alt_m, max_speed_ms, max_distance_m, total_distance_m,
-            battery_used_mah, notes, pilot_name, pilot_id
+            battery_used_mah, notes, pilot_name, pilot_id, battery_serial
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-            ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25
+            ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26
         )",
         params![
             flight.start_time.to_rfc3339(),
@@ -397,6 +443,7 @@ pub fn insert_flight(conn: &Connection, flight: &Flight) -> SqlResult<i64> {
             flight.notes,
             flight.pilot_name,
             flight.pilot_id,
+            flight.battery_serial,
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -567,7 +614,7 @@ pub fn get_flight(conn: &Connection, flight_id: i64) -> SqlResult<Option<Flight>
                 start_lat, start_lon, location_name,
                 weather_temp_c, weather_wind_ms, weather_wind_deg, weather_desc,
                 max_alt_m, max_speed_ms, max_distance_m, total_distance_m,
-                battery_used_mah, notes, linked_flight_id, pilot_name, pilot_id
+                battery_used_mah, notes, linked_flight_id, pilot_name, pilot_id, battery_serial
          FROM flights WHERE id = ?1",
     )?;
 
@@ -612,6 +659,7 @@ pub fn get_flight(conn: &Connection, flight_id: i64) -> SqlResult<Option<Flight>
             linked_flight_id: row.get(24)?,
             pilot_name: row.get(25)?,
             pilot_id: row.get(26)?,
+            battery_serial: row.get(27)?,
         })
     })?;
 
@@ -857,6 +905,190 @@ pub fn list_flights_for_mission(conn: &Connection, mission_id: i64) -> SqlResult
     rows.collect()
 }
 
+// ── Battery library ─────────────────────────────────────────────────
+
+const BATTERY_COLS: &str = "id, serial, label, manufacturer, model, chemistry, cell_count, \
+    capacity_mah, c_rating_discharge, c_rating_charge, connector, in_service_date, status, \
+    notes, created_at, base_flight_seconds, base_mah, base_cycles, base_charges";
+
+fn row_to_battery(row: &rusqlite::Row) -> SqlResult<BatteryPack> {
+    Ok(BatteryPack {
+        id: row.get(0)?,
+        serial: row.get(1)?,
+        label: row.get(2)?,
+        manufacturer: row.get(3)?,
+        model: row.get(4)?,
+        chemistry: row.get(5)?,
+        cell_count: row.get(6)?,
+        capacity_mah: row.get(7)?,
+        c_rating_discharge: row.get(8)?,
+        c_rating_charge: row.get(9)?,
+        connector: row.get(10)?,
+        in_service_date: row.get(11)?,
+        status: row.get(12)?,
+        notes: row.get(13)?,
+        created_at: row.get(14)?,
+        base_flight_seconds: row.get(15)?,
+        base_mah: row.get(16)?,
+        base_cycles: row.get(17)?,
+        base_charges: row.get(18)?,
+    })
+}
+
+/// Create a new battery pack. The `serial` is UNIQUE → a duplicate surfaces as an error
+/// (the caller should pre-check `find_battery_by_serial`). The `base_*` baseline starts at 0.
+pub fn create_battery(conn: &Connection, b: &BatteryPackInput) -> SqlResult<i64> {
+    conn.execute(
+        "INSERT INTO battery_packs (
+            serial, label, manufacturer, model, chemistry, cell_count, capacity_mah,
+            c_rating_discharge, c_rating_charge, connector, in_service_date, status, notes
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+        params![
+            b.serial, b.label, b.manufacturer, b.model, b.chemistry, b.cell_count, b.capacity_mah,
+            b.c_rating_discharge, b.c_rating_charge, b.connector, b.in_service_date, b.status, b.notes,
+        ],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Update a pack's identity/spec fields. **Does not touch `serial`** (the soft-link key — kept
+/// stable so existing flight links don't break) **nor the `base_*` baseline** (additive only).
+pub fn update_battery(conn: &Connection, id: i64, b: &BatteryPackInput) -> SqlResult<()> {
+    conn.execute(
+        "UPDATE battery_packs SET
+            label = ?1, manufacturer = ?2, model = ?3, chemistry = ?4, cell_count = ?5,
+            capacity_mah = ?6, c_rating_discharge = ?7, c_rating_charge = ?8, connector = ?9,
+            in_service_date = ?10, status = ?11, notes = ?12
+         WHERE id = ?13",
+        params![
+            b.label, b.manufacturer, b.model, b.chemistry, b.cell_count, b.capacity_mah,
+            b.c_rating_discharge, b.c_rating_charge, b.connector, b.in_service_date, b.status,
+            b.notes, id,
+        ],
+    )?;
+    Ok(())
+}
+
+/// List all battery packs (newest first).
+pub fn list_batteries(conn: &Connection) -> SqlResult<Vec<BatteryPack>> {
+    let mut stmt = conn
+        .prepare(&format!("SELECT {} FROM battery_packs ORDER BY created_at DESC", BATTERY_COLS))?;
+    let rows = stmt.query_map([], row_to_battery)?;
+    rows.collect()
+}
+
+/// Fetch a pack by id.
+pub fn get_battery(conn: &Connection, id: i64) -> SqlResult<Option<BatteryPack>> {
+    conn.query_row(
+        &format!("SELECT {} FROM battery_packs WHERE id = ?1", BATTERY_COLS),
+        params![id],
+        row_to_battery,
+    )
+    .optional()
+}
+
+/// Find a pack by serial (link resolution / unknown-serial dedup check).
+pub fn find_battery_by_serial(conn: &Connection, serial: &str) -> SqlResult<Option<BatteryPack>> {
+    conn.query_row(
+        &format!("SELECT {} FROM battery_packs WHERE serial = ?1", BATTERY_COLS),
+        params![serial],
+        row_to_battery,
+    )
+    .optional()
+}
+
+/// Delete a pack. Flights keep their `battery_serial` and fall back to "not in library" (the
+/// link is by serial, not an FK) — no NULLing needed.
+pub fn delete_battery(conn: &Connection, id: i64) -> SqlResult<()> {
+    conn.execute("DELETE FROM battery_packs WHERE id = ?1", params![id])?;
+    Ok(())
+}
+
+/// Add consumption to the persistent baseline (additive only — manual usage editor and the
+/// flight-deletion "transfer to baseline" path). Never sets absolutes.
+pub fn add_battery_usage(
+    conn: &Connection,
+    id: i64,
+    d_flight_seconds: i64,
+    d_mah: i64,
+    d_cycles: f64,
+    d_charges: i64,
+) -> SqlResult<()> {
+    conn.execute(
+        "UPDATE battery_packs SET
+            base_flight_seconds = base_flight_seconds + ?1,
+            base_mah            = base_mah + ?2,
+            base_cycles         = base_cycles + ?3,
+            base_charges        = base_charges + ?4
+         WHERE id = ?5",
+        params![d_flight_seconds, d_mah, d_cycles, d_charges, id],
+    )?;
+    Ok(())
+}
+
+/// Aggregate the flights linked to a serial (the dynamic part of the lifetime; combined with the
+/// pack's `base_*` baseline on the frontend).
+pub fn battery_aggregate(conn: &Connection, serial: &str) -> SqlResult<BatteryAggregate> {
+    conn.query_row(
+        "SELECT COUNT(*), COALESCE(SUM(duration_sec), 0), COALESCE(SUM(battery_used_mah), 0),
+                MIN(start_time), MAX(start_time)
+         FROM flights WHERE battery_serial = ?1",
+        params![serial],
+        |row| {
+            Ok(BatteryAggregate {
+                flight_count: row.get(0)?,
+                sum_duration_sec: row.get(1)?,
+                sum_mah: row.get(2)?,
+                first_used: row.get(3)?,
+                last_used: row.get(4)?,
+            })
+        },
+    )
+}
+
+/// List flight summaries linked to a serial (Manager detail + the delete reference warning).
+pub fn list_flights_for_serial(conn: &Connection, serial: &str) -> SqlResult<Vec<FlightSummary>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, start_time, duration_sec, source, craft_name, location_name,
+            max_alt_m, max_speed_ms, total_distance_m, platform_type, linked_flight_id, notes
+         FROM flights WHERE battery_serial = ?1 ORDER BY start_time DESC",
+    )?;
+    let rows = stmt.query_map(params![serial], |row| {
+        let ts_str: String = row.get(1)?;
+        let start_time = DateTime::parse_from_rfc3339(&ts_str)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now());
+        Ok(FlightSummary {
+            id: row.get(0)?,
+            start_time,
+            duration_sec: row.get(2)?,
+            source: row.get(3)?,
+            craft_name: row.get(4)?,
+            location_name: row.get(5)?,
+            max_alt_m: row.get(6)?,
+            max_speed_ms: row.get(7)?,
+            total_distance_m: row.get(8)?,
+            platform_type: row.get(9)?,
+            linked_flight_id: row.get(10)?,
+            notes: row.get(11)?,
+        })
+    })?;
+    rows.collect()
+}
+
+/// Set (or clear, with `None`) the soft battery-serial link on a flight.
+pub fn set_flight_battery_serial(
+    conn: &Connection,
+    flight_id: i64,
+    serial: Option<&str>,
+) -> SqlResult<()> {
+    conn.execute(
+        "UPDATE flights SET battery_serial = ?1 WHERE id = ?2",
+        params![serial, flight_id],
+    )?;
+    Ok(())
+}
+
 /// Read the Blackbox-header waypoint count for a flight (fallback `X` for replay).
 pub fn get_flight_logged_wp_count(conn: &Connection, flight_id: i64) -> SqlResult<Option<i64>> {
     match conn
@@ -1024,6 +1256,7 @@ pub fn find_duplicate_flight(
                     // Not selected here (duplicate-detection lookup only).
                     pilot_name: None,
                     pilot_id: None,
+                    battery_serial: None,
                 })
             },
         )
@@ -1346,6 +1579,7 @@ mod tests {
             linked_flight_id: None,
             pilot_name: None,
             pilot_id: None,
+            battery_serial: None,
         };
         let id = insert_flight(&conn, &flight).unwrap();
         let loaded = get_flight(&conn, id).unwrap().unwrap();
@@ -1385,6 +1619,7 @@ mod tests {
             linked_flight_id: None,
             pilot_name: None,
             pilot_id: None,
+            battery_serial: None,
         };
         let id = insert_flight(&conn, &flight).unwrap();
         finalize_flight(
@@ -1443,6 +1678,7 @@ mod tests {
             linked_flight_id: None,
             pilot_name: None,
             pilot_id: None,
+            battery_serial: None,
         };
         let fid = insert_flight(&conn, &flight).unwrap();
 
@@ -1530,6 +1766,7 @@ mod tests {
             linked_flight_id: None,
             pilot_name: None,
             pilot_id: None,
+            battery_serial: None,
         };
         let fid = insert_flight(&conn, &flight).unwrap();
         let rec = TelemetryRecord {
@@ -1615,6 +1852,7 @@ mod tests {
             linked_flight_id: None,
             pilot_name: None,
             pilot_id: None,
+            battery_serial: None,
         };
         let flight_id = insert_flight(&conn, &flight).unwrap();
         insert_blackbox_records(&conn, flight_id, &[(123_000, "{}".into())]).unwrap();

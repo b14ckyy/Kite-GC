@@ -31,6 +31,7 @@
   import { toTelemetryData } from '$lib/adapters/telemetryAdapter';
   import { activeWpNumber, replayWpTotal } from '$lib/stores/navStatus';
   import { missionManagerOpen, missionManagerSelectedId, requestOpenFlightId } from '$lib/stores/missionManager';
+  import { batteryManagerOpen, batteryManagerSelectedId } from '$lib/stores/batteryManager';
   import { missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode } from '$lib/stores/flightlog';
   import { buildMissionInput, missionContentHash } from '$lib/helpers/missionLibrary';
   import { homePosition } from '$lib/stores/home';
@@ -294,8 +295,12 @@
 
   // Subscribe to stores
   connection.subscribe((c) => {
+    const wasConnected = connStatus === 'connected';
     connStatus = c.status;
     fcInfo = c.fcInfo;
+    // Auto-refresh the logbook on disconnect (picks up a just-recorded live flight) — replaces
+    // the manual Refresh button. Disarm is covered by the flight-recording-ended listener.
+    if (wasConnected && c.status !== 'connected') void loadLogbook();
   });
   availablePorts.subscribe((p) => {
     ports = p;
@@ -1072,6 +1077,13 @@
       : 0,
   );
   const logbookDetailOpen = $derived(activeTab === 'logbook' && selectedFlight != null && !logbookMinimized);
+  // The logbook panel goes wide for a selected detail entry. In the Battery Manager view the
+  // width depends ONLY on the battery selection (a still-selected flight must not keep it wide);
+  // in the flight view it depends on the selected flight.
+  const logbookWide = $derived(
+    activeTab === 'logbook' &&
+    ($batteryManagerOpen ? $batteryManagerSelectedId != null : (selectedFlight != null && !logbookMinimized))
+  );
   const logbookHasFlightOnMap = $derived(activeTab === 'logbook' && selectedFlight != null && !isPrimaryConnected);
 
   // Platform type: from live connection or selected flight log
@@ -1269,6 +1281,7 @@
     });
     void listen<{ flight_id: number }>('flight-recording-ended', (event) => {
       void onRecordingEnded(event.payload.flight_id);
+      void loadLogbook(); // auto-refresh the list with the just-recorded flight (replaces Refresh)
     });
     void listen<BlackboxImportProgress>('flightlog-import-progress', (event) => {
       blackboxImportProgress = event.payload;
@@ -1411,7 +1424,7 @@
   {#if navPanelOpen && !terrainOpen}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="nav-panel" class:nav-panel-mission={activeTab === 'mission' && !$missionManagerOpen} class:nav-panel-logbook={(activeTab === 'logbook' && !logbookDetailOpen) || (activeTab === 'mission' && $missionManagerOpen && $missionManagerSelectedId == null)} class:nav-panel-wide={logbookDetailOpen || (activeTab === 'mission' && $missionManagerOpen && $missionManagerSelectedId != null)} class:nav-panel-minimized={logbookMinimized && logbookHasFlightOnMap} onclick={() => { if (logbookMinimized) expandLogbook(); }}>
+    <div class="nav-panel" class:nav-panel-mission={activeTab === 'mission' && !$missionManagerOpen} class:nav-panel-logbook={(activeTab === 'logbook' && !logbookWide) || (activeTab === 'mission' && $missionManagerOpen && $missionManagerSelectedId == null)} class:nav-panel-wide={logbookWide || (activeTab === 'mission' && $missionManagerOpen && $missionManagerSelectedId != null)} class:nav-panel-minimized={logbookMinimized && logbookHasFlightOnMap} onclick={() => { if (logbookMinimized) expandLogbook(); }}>
       <div class="panel-content">
         <!-- UAV Info Tab -->
         {#if activeTab === "uav-info"}

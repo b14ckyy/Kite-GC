@@ -25,7 +25,7 @@ export { buildFlightTree, formatDurationSec } from '../helpers/flightlogHelpers'
 
 // ── Tauri command wrappers ───────────────────────────────────────────
 
-import type { FlightSummary, Flight, TelemetryRecord, BlackboxImportStatus, KflightImportResult, LibraryMission, LibraryMissionInput } from './flightlogTypes';
+import type { FlightSummary, Flight, TelemetryRecord, BlackboxImportStatus, KflightImportResult, LibraryMission, LibraryMissionInput, BatteryPack, BatteryPackInput, BatteryAggregate } from './flightlogTypes';
 
 /** Save a mission to the library (dedup by content hash). Returns the mission id. */
 export async function missionDbSave(mission: LibraryMissionInput, dbPath: string): Promise<number> {
@@ -141,6 +141,67 @@ export async function flightLoggedWpCount(flightId: number, dbPath: string): Pro
     flightId,
     dbPath: dbPath || undefined,
   });
+}
+
+// ── Battery library ─────────────────────────────────────────────────
+
+/** Create a new battery pack (serial UNIQUE → duplicate rejects). Returns the new id. */
+export async function batteryDbCreate(battery: BatteryPackInput, dbPath: string): Promise<number> {
+  return invoke<number>('battery_db_create', { battery, dbPath: dbPath || undefined });
+}
+
+/** Update a pack's identity/spec fields (not serial, not baseline). */
+export async function batteryDbUpdate(id: number, battery: BatteryPackInput, dbPath: string): Promise<void> {
+  return invoke<void>('battery_db_update', { id, battery, dbPath: dbPath || undefined });
+}
+
+/** List all battery packs (newest first). */
+export async function batteryDbList(dbPath: string): Promise<BatteryPack[]> {
+  return invoke<BatteryPack[]>('battery_db_list', { dbPath: dbPath || undefined });
+}
+
+/** Fetch a pack by id. */
+export async function batteryDbGet(id: number, dbPath: string): Promise<BatteryPack | null> {
+  return invoke<BatteryPack | null>('battery_db_get', { id, dbPath: dbPath || undefined });
+}
+
+/** Find a pack by serial (link resolution / unknown-serial check), or null. */
+export async function batteryDbFindBySerial(serial: string, dbPath: string): Promise<BatteryPack | null> {
+  return invoke<BatteryPack | null>('battery_db_find_by_serial', { serial, dbPath: dbPath || undefined });
+}
+
+/** Delete a pack (flights keep their serial → "not in library"). */
+export async function batteryDbDelete(id: number, dbPath: string): Promise<void> {
+  return invoke<void>('battery_db_delete', { id, dbPath: dbPath || undefined });
+}
+
+/** Add consumption to a pack's persistent baseline (additive only). */
+export async function batteryDbAddUsage(
+  id: number,
+  flightSeconds: number,
+  mah: number,
+  cycles: number,
+  charges: number,
+  dbPath: string,
+): Promise<void> {
+  return invoke<void>('battery_db_add_usage', {
+    id, flightSeconds, mah, cycles, charges, dbPath: dbPath || undefined,
+  });
+}
+
+/** Aggregate the flights linked to a serial (dynamic part of the lifetime). */
+export async function batteryDbAggregate(serial: string, dbPath: string): Promise<BatteryAggregate> {
+  return invoke<BatteryAggregate>('battery_db_aggregate', { serial, dbPath: dbPath || undefined });
+}
+
+/** List the flights linked to a serial (Manager detail + delete warning). */
+export async function batteryDbFlights(serial: string, dbPath: string): Promise<FlightSummary[]> {
+  return invoke<FlightSummary[]>('battery_db_flights', { serial, dbPath: dbPath || undefined });
+}
+
+/** Set (or clear, with an empty string) the soft battery-serial link on a flight. */
+export async function flightSetBatterySerial(flightId: number, serial: string, dbPath: string): Promise<void> {
+  return invoke<void>('flight_set_battery_serial', { flightId, serial, dbPath: dbPath || undefined });
 }
 
 export async function listFlights(dbPath: string): Promise<FlightSummary[]> {

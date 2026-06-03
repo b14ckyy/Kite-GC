@@ -71,6 +71,9 @@ pub struct Flight {
     pub pilot_name: Option<String>,
     /// Pilot / operator ID (manually editable; future login system can prefill)
     pub pilot_id: Option<String>,
+    /// Serial of the battery pack flown (soft link — resolved to a `battery_packs` row by
+    /// serial match at read time; may reference a serial with no pack row → "not in library")
+    pub battery_serial: Option<String>,
 }
 
 /// A reusable mission stored in the library (row in `missions` table).
@@ -122,6 +125,67 @@ pub struct MissionInput {
     pub bndbox_max_lat: Option<f64>,
     pub bndbox_max_lon: Option<f64>,
     pub notes: Option<String>,
+}
+
+/// A reusable battery pack stored in the library (row in `battery_packs` table).
+/// Identity is the user-defined `serial`. Flights soft-link by serial (no FK).
+/// The `base_*` fields are a persistent consumption baseline that is never auto-updated —
+/// only ever *added to* (manual usage editor / flight-deletion transfer). The displayed
+/// lifetime = baseline + Σ(linked flights), computed on read (see BATTERY_MANAGEMENT.md).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatteryPack {
+    pub id: i64,
+    pub serial: String,
+    pub label: Option<String>,
+    pub manufacturer: Option<String>,
+    pub model: Option<String>,
+    /// `lipo` | `liion` | `life` | `lihv`
+    pub chemistry: Option<String>,
+    pub cell_count: Option<i64>,
+    pub capacity_mah: Option<i64>,
+    pub c_rating_discharge: Option<i64>,
+    pub c_rating_charge: Option<i64>,
+    pub connector: Option<String>,
+    pub in_service_date: Option<String>,
+    /// `active` | `storage` | `retired` | `damaged`
+    pub status: String,
+    pub notes: Option<String>,
+    pub created_at: String,
+    // Persistent consumption baseline (additive only).
+    pub base_flight_seconds: i64,
+    pub base_mah: i64,
+    pub base_cycles: f64,
+    pub base_charges: i64,
+}
+
+/// Payload for creating/updating a pack's identity/spec fields (no `id` / `created_at` and no
+/// `base_*` — the baseline is mutated only via the additive usage path).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatteryPackInput {
+    pub serial: String,
+    pub label: Option<String>,
+    pub manufacturer: Option<String>,
+    pub model: Option<String>,
+    pub chemistry: Option<String>,
+    pub cell_count: Option<i64>,
+    pub capacity_mah: Option<i64>,
+    pub c_rating_discharge: Option<i64>,
+    pub c_rating_charge: Option<i64>,
+    pub connector: Option<String>,
+    pub in_service_date: Option<String>,
+    pub status: String,
+    pub notes: Option<String>,
+}
+
+/// Aggregated contribution of the flights linked to a pack (by serial). Combined with the pack's
+/// `base_*` baseline on the frontend to produce the displayed lifetime figures.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BatteryAggregate {
+    pub flight_count: i64,
+    pub sum_duration_sec: i64,
+    pub sum_mah: i64,
+    pub first_used: Option<String>,
+    pub last_used: Option<String>,
 }
 
 /// A single telemetry sample (row in `telemetry_records` table)

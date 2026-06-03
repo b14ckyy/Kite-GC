@@ -25,6 +25,9 @@ use commands::flightlog::{
     flight_logged_wp_count, mission_db_geocode, mission_db_find_by_hash, mission_db_update,
     flight_unlink_mission, mission_db_delete, mission_db_flights, mission_db_list,
     mission_db_set_meta,
+    battery_db_create, battery_db_update, battery_db_list, battery_db_get,
+    battery_db_find_by_serial, battery_db_delete, battery_db_add_usage, battery_db_aggregate,
+    battery_db_flights, flight_set_battery_serial,
 };
 use commands::info::get_app_version;
 use commands::terrain::{terrain_elevation, terrain_fan, terrain_profile};
@@ -127,6 +130,16 @@ pub fn run() {
             mission_db_flights,
             mission_db_list,
             mission_db_set_meta,
+            battery_db_create,
+            battery_db_update,
+            battery_db_list,
+            battery_db_get,
+            battery_db_find_by_serial,
+            battery_db_delete,
+            battery_db_add_usage,
+            battery_db_aggregate,
+            battery_db_flights,
+            flight_set_battery_serial,
             flightlog_update_notes,
             flightlog_update_craft_name,
             flightlog_update_pilot,

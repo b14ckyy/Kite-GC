@@ -215,6 +215,7 @@ where
         linked_flight_id: None,
         pilot_name: None,
         pilot_id: None,
+        battery_serial: None,
     };
 
     report(72, "store-flight", "Creating logbook entry...");

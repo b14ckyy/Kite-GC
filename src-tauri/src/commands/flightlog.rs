@@ -5,8 +5,8 @@ use tauri::Emitter;
 use crate::flightlog::db;
 use crate::flightlog::exchange;
 use crate::flightlog::types::{
-    BlackboxImportProgress, BlackboxImportStatus, Flight, FlightSummary,
-    Mission, MissionInput, TelemetryRecord,
+    BatteryAggregate, BatteryPack, BatteryPackInput, BlackboxImportProgress, BlackboxImportStatus,
+    Flight, FlightSummary, Mission, MissionInput, TelemetryRecord,
 };
 
 /// Resolve the database path and open a connection.
@@ -214,6 +214,105 @@ pub fn flight_logged_wp_count(
 ) -> Result<Option<i64>, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
     db::get_flight_logged_wp_count(&conn, flight_id).map_err(|e| format!("Query error: {}", e))
+}
+
+// ── Battery library ─────────────────────────────────────────────────
+
+/// Create a new battery pack (serial is UNIQUE; a duplicate surfaces as an error). Returns the id.
+#[tauri::command]
+pub fn battery_db_create(battery: BatteryPackInput, db_path: Option<String>) -> Result<i64, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::create_battery(&conn, &battery).map_err(|e| format!("Create error: {}", e))
+}
+
+/// Update a pack's identity/spec fields (not serial, not the baseline).
+#[tauri::command]
+pub fn battery_db_update(
+    id: i64,
+    battery: BatteryPackInput,
+    db_path: Option<String>,
+) -> Result<(), String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::update_battery(&conn, id, &battery).map_err(|e| format!("Update error: {}", e))
+}
+
+/// List all battery packs (newest first) — for the Battery Manager.
+#[tauri::command]
+pub fn battery_db_list(db_path: Option<String>) -> Result<Vec<BatteryPack>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::list_batteries(&conn).map_err(|e| format!("Query error: {}", e))
+}
+
+/// Fetch a pack by id.
+#[tauri::command]
+pub fn battery_db_get(id: i64, db_path: Option<String>) -> Result<Option<BatteryPack>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::get_battery(&conn, id).map_err(|e| format!("Query error: {}", e))
+}
+
+/// Find a pack by serial (link resolution / unknown-serial check).
+#[tauri::command]
+pub fn battery_db_find_by_serial(
+    serial: String,
+    db_path: Option<String>,
+) -> Result<Option<BatteryPack>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::find_battery_by_serial(&conn, &serial).map_err(|e| format!("Query error: {}", e))
+}
+
+/// Delete a pack (flights keep their serial → "not in library").
+#[tauri::command]
+pub fn battery_db_delete(id: i64, db_path: Option<String>) -> Result<(), String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::delete_battery(&conn, id).map_err(|e| format!("Delete error: {}", e))
+}
+
+/// Add consumption to a pack's persistent baseline (additive only).
+#[tauri::command]
+pub fn battery_db_add_usage(
+    id: i64,
+    flight_seconds: i64,
+    mah: i64,
+    cycles: f64,
+    charges: i64,
+    db_path: Option<String>,
+) -> Result<(), String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::add_battery_usage(&conn, id, flight_seconds, mah, cycles, charges)
+        .map_err(|e| format!("Update error: {}", e))
+}
+
+/// Aggregate the flights linked to a serial (dynamic part of the lifetime).
+#[tauri::command]
+pub fn battery_db_aggregate(
+    serial: String,
+    db_path: Option<String>,
+) -> Result<BatteryAggregate, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::battery_aggregate(&conn, &serial).map_err(|e| format!("Query error: {}", e))
+}
+
+/// List the flights linked to a serial (Manager detail + delete warning).
+#[tauri::command]
+pub fn battery_db_flights(
+    serial: String,
+    db_path: Option<String>,
+) -> Result<Vec<FlightSummary>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::list_flights_for_serial(&conn, &serial).map_err(|e| format!("Query error: {}", e))
+}
+
+/// Set (or clear, with an empty string) the soft battery-serial link on a flight.
+#[tauri::command]
+pub fn flight_set_battery_serial(
+    flight_id: i64,
+    serial: String,
+    db_path: Option<String>,
+) -> Result<(), String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    let s = serial.trim();
+    db::set_flight_battery_serial(&conn, flight_id, if s.is_empty() { None } else { Some(s) })
+        .map_err(|e| format!("Link error: {}", e))
 }
 
 /// Reverse-geocode a mission's location (bounding-box centroid) and store it, reusing the

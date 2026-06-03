@@ -11,6 +11,8 @@
     type LogbookSortMode,
   } from '$lib/stores/flightlog';
   import FlightDetail from './FlightDetail.svelte';
+  import BatteryManager from './BatteryManager.svelte';
+  import { batteryManagerOpen, batteryManagerSelectedId, batteryGroupMode, batterySearchQuery } from '$lib/stores/batteryManager';
 
   let {
     flightLoggingEnabled,
@@ -125,6 +127,10 @@
 
   const flightTree = $derived<FlightTree>(buildFlightTree(filteredSummaries, logbookSortMode));
 
+  // Full (split) toolbar only for the flight view with a selected flight; the battery view uses
+  // the compact toolbar (its per-entry actions live inside the Battery Manager detail).
+  const fullFlightView = $derived(!$batteryManagerOpen && selectedFlight != null);
+
   $effect(() => {
     if (prevLogbookSortMode === logbookSortMode) return;
     prevLogbookSortMode = logbookSortMode;
@@ -220,61 +226,95 @@
     />
   {:else}
     <div class="setting-row">
-      <span class="setting-label">{$t('logbook.sortMode')}</span>
-      <select class="setting-select" bind:value={logbookSortMode}>
-        <option value="aircraft-location-date">{$t('logbook.sortAircraftLocationDate')}</option>
-        <option value="location-date-aircraft">{$t('logbook.sortLocationDateAircraft')}</option>
-        <option value="date-location-aircraft">{$t('logbook.sortDateLocationAircraft')}</option>
-        <option value="aircraft-date-location">{$t('logbook.sortAircraftDateLocation')}</option>
-      </select>
-    </div>
-
-    <div class="setting-row">
-      <input
-        type="text"
-        class="setting-input logbook-search-input"
-        placeholder={$t('logbook.searchPlaceholder')}
-        bind:value={searchQuery}
-      />
-      {#if searchQuery}
-        <button class="logbook-search-clear" onclick={() => searchQuery = ''} title={$t('logbook.searchClear')}>✕</button>
+      {#if $batteryManagerOpen}
+        <span class="setting-label">{$t('batteryMgr.groupMode')}</span>
+        <select class="setting-select" bind:value={$batteryGroupMode}>
+          <option value="cell-capacity">{$t('batteryMgr.groupCellCap')}</option>
+          <option value="capacity-cell">{$t('batteryMgr.groupCapCell')}</option>
+          <option value="flat">{$t('batteryMgr.groupFlat')}</option>
+        </select>
+      {:else}
+        <span class="setting-label">{$t('logbook.sortMode')}</span>
+        <select class="setting-select" bind:value={logbookSortMode}>
+          <option value="aircraft-location-date">{$t('logbook.sortAircraftLocationDate')}</option>
+          <option value="location-date-aircraft">{$t('logbook.sortLocationDateAircraft')}</option>
+          <option value="date-location-aircraft">{$t('logbook.sortDateLocationAircraft')}</option>
+          <option value="aircraft-date-location">{$t('logbook.sortAircraftDateLocation')}</option>
+        </select>
       {/if}
     </div>
 
+    <!-- Search row — same position for both views so toggling causes no UI jump. -->
     <div class="setting-row">
-      <button class="cache-clear-btn" onclick={onLoadLogbook} disabled={logbookLoading}>
-        {#if logbookLoading}
-          {$t('logbook.loading')}
-        {:else}
-          {$t('logbook.refresh')}
+      {#if $batteryManagerOpen}
+        <input
+          type="text"
+          class="setting-input logbook-search-input"
+          placeholder={$t('batteryMgr.searchPlaceholder')}
+          bind:value={$batterySearchQuery}
+        />
+        {#if $batterySearchQuery}
+          <button class="logbook-search-clear" onclick={() => batterySearchQuery.set('')} title={$t('logbook.searchClear')}>✕</button>
         {/if}
-      </button>
-      <div class="logbook-btn-group-right">
-        <div class="logbook-btn-group">
-          <button class="cache-clear-btn" onclick={onImportBlackbox} disabled={blackboxImporting}>
-            {#if blackboxImporting}
-              {$t('logbook.importingBlackbox')}
-            {:else}
-              {$t('logbook.importBlackbox')}
-            {/if}
-          </button>
-          <button class="cache-clear-btn" onclick={onExportBlackbox} disabled={!hasBlackboxFile}>
-            {$t('logbook.exportBlackbox')}
-          </button>
-        </div>
-        <div class="logbook-btn-group">
-          <button class="cache-clear-btn" onclick={onImportKflight}>
-            {$t('logbook.importKflight')}
-          </button>
-          <button class="cache-clear-btn" onclick={() => onExportFlights(getExportIds())} disabled={getExportIds().length === 0}>
-            {$t('logbook.exportKflight')}
-            {#if hasMultiSelection}
-              ({multiSelectedIds.size})
-            {/if}
-          </button>
-        </div>
-      </div>
+      {:else}
+        <input
+          type="text"
+          class="setting-input logbook-search-input"
+          placeholder={$t('logbook.searchPlaceholder')}
+          bind:value={searchQuery}
+        />
+        {#if searchQuery}
+          <button class="logbook-search-clear" onclick={() => searchQuery = ''} title={$t('logbook.searchClear')}>✕</button>
+        {/if}
+      {/if}
     </div>
+
+    {#snippet leftGroup()}
+      <div class="tb-left">
+        {#if $batteryManagerOpen}
+          <!-- Battery Manager is a sub-view → Back (not a co-equal panel toggle). -->
+          <button class="cache-clear-btn" onclick={() => batteryManagerOpen.set(false)}>← {$t('batteryMgr.back')}</button>
+        {:else}
+          <!-- No manual Refresh: the list reloads on open, import, and auto on disarm/disconnect. -->
+          <button class="cache-clear-btn" onclick={() => batteryManagerOpen.set(true)}>🔋 {$t('batteryMgr.toBatteries')}</button>
+        {/if}
+      </div>
+    {/snippet}
+
+    {#snippet importGroup()}
+      <div class="tb-right">
+        <button class="cache-clear-btn" onclick={onImportBlackbox} disabled={blackboxImporting}>
+          {blackboxImporting ? $t('logbook.importingBlackbox') : $t('logbook.importBlackbox')}
+        </button>
+        <button class="cache-clear-btn" onclick={onImportKflight}>{$t('logbook.importKflight')}</button>
+      </div>
+    {/snippet}
+
+    {#snippet exportGroup()}
+      <div class="tb-right">
+        <button class="cache-clear-btn" onclick={onExportBlackbox} disabled={!hasBlackboxFile}>
+          {$t('logbook.exportBlackbox')}
+        </button>
+        <button class="cache-clear-btn" onclick={() => onExportFlights(getExportIds())} disabled={getExportIds().length === 0}>
+          {$t('logbook.exportKflight')}{#if hasMultiSelection} ({multiSelectedIds.size}){/if}
+        </button>
+      </div>
+    {/snippet}
+
+    {#if fullFlightView}
+      <!-- Full flight view: align the toolbar to the 380px | 1fr content grid — import over
+           the list (left cell, right-aligned), export over the info (right cell). -->
+      <div class="logbook-toolbar-split">
+        <div class="toolbar-cell">{@render leftGroup()}{@render importGroup()}</div>
+        <div class="toolbar-cell toolbar-cell-right">{@render exportGroup()}</div>
+      </div>
+    {:else}
+      <!-- Compact (list only): left group; flight view also shows the import group (right). -->
+      <div class="setting-row logbook-toolbar-compact">
+        {@render leftGroup()}
+        {#if !$batteryManagerOpen}{@render importGroup()}{/if}
+      </div>
+    {/if}
 
     {#if blackboxImportProgress}
       <div class="logbook-progress">
@@ -289,7 +329,9 @@
       </div>
     {/if}
 
-    {#if flightSummaries.length === 0}
+    {#if $batteryManagerOpen}
+      <BatteryManager />
+    {:else if flightSummaries.length === 0}
       <div class="panel-empty">
         <span class="panel-empty-icon">🗂</span>
         <span>{$t('logbook.empty')}</span>
@@ -421,20 +463,30 @@
     color: #e0e0e0;
   }
 
-  .logbook-btn-group-right {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: 6px 12px;
-    margin-left: auto;
-  }
 
-  .logbook-btn-group {
+  /* Toolbar: left group (Refresh + Batteries/Flights, always left) and right groups
+     (import / export). Compact = one row; full flight view = a grid aligned to the
+     380px | 1fr content layout so import sits over the list and export over the info. */
+  .tb-left { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .tb-right { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+
+  .logbook-toolbar-compact { justify-content: space-between; }
+
+  .logbook-toolbar-split {
+    display: grid;
+    grid-template-columns: 380px minmax(0, 1fr);
+    gap: 6px 12px;
+    padding: 6px 0;
+    align-items: start;
+  }
+  .toolbar-cell {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 6px;
+    flex-wrap: wrap;
   }
+  .toolbar-cell-right { justify-content: flex-end; }
 
   /* The bigger (unified) buttons no longer all fit on one row at the 430px panel width,
      so the toolbar wraps gracefully instead of overflowing. */
@@ -670,6 +722,9 @@
 
   @media (max-width: 980px) {
     .logbook-layout {
+      grid-template-columns: 1fr;
+    }
+    .logbook-toolbar-split {
       grid-template-columns: 1fr;
     }
   }

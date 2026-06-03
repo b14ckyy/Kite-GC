@@ -1,8 +1,8 @@
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import { convertAltitude, convertDistance, convertSpeed, convertTemperature, formatConverted } from '$lib/utils/units';
-  import { formatDurationSec, missionDbForFlight, flightLoggedWpCount, flightLinkMission, flightUnlinkMission, missionDbSave, missionDbGeocode } from '$lib/stores/flightlog';
-  import type { Flight, LibraryMission } from '$lib/stores/flightlogTypes';
+  import { formatDurationSec, missionDbForFlight, flightLoggedWpCount, flightLinkMission, flightUnlinkMission, missionDbSave, missionDbGeocode, flightSetBatterySerial, batteryDbFindBySerial } from '$lib/stores/flightlog';
+  import type { Flight, LibraryMission, BatteryPack } from '$lib/stores/flightlogTypes';
   import type { InterfaceSettings } from '$lib/stores/settings';
   import { settings } from '$lib/stores/settings';
   import { mission, missionFlags, loadedMissionId, markMissionSynced } from '$lib/stores/mission';
@@ -59,6 +59,13 @@
   let linkedMission = $state<LibraryMission | null>(null);
   let loggedWpCount = $state<number | null>(null);
   let linkBusy = $state(false);
+
+  // ── Linked battery (soft link by serial) ───────────────────────────
+  let batterySerial = $state('');           // the flight's serial (local copy, survives link/unlink)
+  let batteryPack = $state<BatteryPack | null>(null); // resolved pack, or null = "not in library"
+  let batteryEditing = $state(false);
+  let batterySerialDraft = $state('');
+  let batteryBusy = $state(false);
 
   // The map mission can be linked only if it is a "real" mission (has a provenance flag);
   // a pure unsaved scratch mission can't. DB → link directly; FILE/FC → save-to-DB-then-link.
@@ -131,6 +138,61 @@
       console.warn('[flight-detail] unlink mission failed', e);
     } finally {
       linkBusy = false;
+    }
+  }
+
+  // Resolve the flight's battery serial to a library pack (null = not in library).
+  async function refreshBattery(serial: string) {
+    if (!serial) { batteryPack = null; return; }
+    const dbPath = get(settings).flightLogDbPath;
+    try {
+      batteryPack = await batteryDbFindBySerial(serial, dbPath);
+    } catch {
+      batteryPack = null;
+    }
+  }
+
+  // On flight change: take the serial from the flight and resolve the pack.
+  $effect(() => {
+    batterySerial = flight.battery_serial ?? '';
+    batteryEditing = false;
+    void refreshBattery(flight.battery_serial ?? '');
+  });
+
+  function startBatteryEdit() {
+    batterySerialDraft = batterySerial;
+    batteryEditing = true;
+  }
+
+  async function linkBattery() {
+    if (batteryBusy) return;
+    const serial = batterySerialDraft.trim();
+    batteryBusy = true;
+    const dbPath = get(settings).flightLogDbPath;
+    try {
+      await flightSetBatterySerial(flight.id, serial, dbPath);
+      batterySerial = serial;
+      batteryEditing = false;
+      await refreshBattery(serial);
+    } catch (e) {
+      console.warn('[flight-detail] link battery failed', e);
+    } finally {
+      batteryBusy = false;
+    }
+  }
+
+  async function unlinkBattery() {
+    if (batteryBusy) return;
+    batteryBusy = true;
+    const dbPath = get(settings).flightLogDbPath;
+    try {
+      await flightSetBatterySerial(flight.id, '', dbPath);
+      batterySerial = '';
+      batteryPack = null;
+    } catch (e) {
+      console.warn('[flight-detail] unlink battery failed', e);
+    } finally {
+      batteryBusy = false;
     }
   }
 
@@ -299,6 +361,27 @@
       <span class="fc-label">{$t('logbook.missionWps')}</span>
       <span class="fc-value">{missionWpCount}</span>
     {/if}
+    <span class="fc-label">{$t('logbook.battery')}</span>
+    <span class="fc-value craft-value-row">
+      {#if batteryEditing}
+        <input
+          class="craft-name-input"
+          type="text"
+          placeholder={$t('logbook.batterySerialPlaceholder')}
+          bind:value={batterySerialDraft}
+          onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') linkBattery(); if (e.key === 'Escape') batteryEditing = false; }}
+          use:focusOnMount
+        />
+        <button class="weather-edit-btn" onclick={linkBattery} disabled={batteryBusy} title={$t('logbook.batteryLinkSave')}>✓</button>
+      {:else if batterySerial}
+        <span>{batteryPack ? (batteryPack.label || batteryPack.serial) : batterySerial}</span>
+        {#if !batteryPack}<span class="battery-missing">{$t('logbook.batteryNotInLibrary')}</span>{/if}
+        {#if !minimized}<button class="weather-edit-btn" onclick={unlinkBattery} disabled={batteryBusy} title={$t('logbook.batteryUnlink')}>✕</button>{/if}
+      {:else}
+        <span>{$t('logbook.missionNone')}</span>
+        {#if !minimized}<button class="weather-edit-btn link-mission-btn" onclick={startBatteryEdit} title={$t('logbook.linkBatteryTip')}>🔋 {$t('logbook.linkBattery')}</button>{/if}
+      {/if}
+    </span>
     <span class="fc-label">{$t('logbook.started')}</span>
     <span class="fc-value">{formatDateTime(flight.start_time)}</span>
     <span class="fc-label">{$t('logbook.duration')}</span>
@@ -458,6 +541,12 @@
     font-size: 10px;
     color: #777;
     margin-left: 2px;
+  }
+
+  .battery-missing {
+    font-size: 10px;
+    color: #e0b050;
+    font-weight: 400;
   }
 
   .setting-row {

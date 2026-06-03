@@ -878,6 +878,7 @@ where
         linked_flight_id: None,
         pilot_name: None,
         pilot_id: None,
+        battery_serial: None,
     };
 
     let flight_id = db::insert_flight(conn, &flight)

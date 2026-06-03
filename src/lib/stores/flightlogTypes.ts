@@ -42,6 +42,56 @@ export interface LibraryMissionInput {
   notes: string | null;
 }
 
+/** A battery pack in the library (mirrors the Rust BatteryPack). Identity = serial. */
+export interface BatteryPack {
+  id: number;
+  serial: string;
+  label: string | null;
+  manufacturer: string | null;
+  model: string | null;
+  chemistry: string | null; // lipo | liion | life | lihv
+  cell_count: number | null;
+  capacity_mah: number | null;
+  c_rating_discharge: number | null;
+  c_rating_charge: number | null;
+  connector: string | null;
+  in_service_date: string | null;
+  status: string; // active | storage | retired | damaged
+  notes: string | null;
+  created_at: string;
+  // Persistent consumption baseline (additive only).
+  base_flight_seconds: number;
+  base_mah: number;
+  base_cycles: number;
+  base_charges: number;
+}
+
+/** Create/update payload for a pack's identity/spec fields (no id/created_at, no baseline). */
+export interface BatteryPackInput {
+  serial: string;
+  label: string | null;
+  manufacturer: string | null;
+  model: string | null;
+  chemistry: string | null;
+  cell_count: number | null;
+  capacity_mah: number | null;
+  c_rating_discharge: number | null;
+  c_rating_charge: number | null;
+  connector: string | null;
+  in_service_date: string | null;
+  status: string;
+  notes: string | null;
+}
+
+/** Aggregated contribution of the flights linked to a pack (combined with baseline on display). */
+export interface BatteryAggregate {
+  flight_count: number;
+  sum_duration_sec: number;
+  sum_mah: number;
+  first_used: string | null;
+  last_used: string | null;
+}
+
 export interface FlightSummary {
   id: number;
   start_time: string;
@@ -85,6 +135,7 @@ export interface Flight {
   linked_flight_id: number | null;
   pilot_name: string | null;
   pilot_id: string | null;
+  battery_serial: string | null;
 }
 
 export interface TelemetryRecord {
