@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Mission Manager (mission library UI)
+- **Mission Manager** — an alternate view of the mission planner panel (button next to Edit;
+  Back returns to the editor), styled in the **Flight-Logbook design language** and sized like
+  it (wide list, widest when a mission is selected). A **location-grouped, collapsible list**
+  (geocoded; an "Unknown location" group for the rest); selecting a mission opens a detail with
+  **editable name/notes**, computed metadata (WP count, distance, altitude diff/range, location,
+  created), a **non-interactive mini-map preview** of the mission on the current map provider
+  (fixed aspect-ratio = bounding box, portrait capped to a square), and the **flights that link
+  this mission** — each row **jumps to that flight in the Logbook**
+- **Actions:** **Load to Map** (with a replace-confirm if the map mission is unsaved), **Export**
+  (INAV `.mission`), **Import** via button or **drag & drop** (popup: into the library + map, or
+  map only — both dedup-match), **Delete** (unlinks referencing flights, with a warning)
+- **Editor:** a **"Save to library"** button (name + notes dialog; NEW / OVERWRITE / CANCEL when
+  a loaded library mission was modified). The file **"Save"** / **"Open"** buttons stay (files
+  vs. library is the user's choice)
+- **Logbook:** the flight detail shows the **linked mission name + waypoint count** and a
+  **Link / Unlink** control (DB mission → link directly; a FILE/FC mission → "save & link");
+  loading a flight also loads its linked mission onto the map (hideable via the player MISSION
+  toggle)
+- **State persistence:** the Manager keeps its open state + selected mission across close/reopen
+  (`stores/missionManager.ts`)
+
 ### Added — Mission library & flight↔mission linking (Phase 1)
 - **First-class mission library in the flight-log DB** — a new `missions` table stores each
   mission once, keyed by a **content hash** (SHA-256 of the same serialization the provenance

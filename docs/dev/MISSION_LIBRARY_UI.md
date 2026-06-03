@@ -1,9 +1,19 @@
 # Mission Library — UI design (Phase 1b + 2)
 
-**Status:** Planned (2026-06-02). Builds on the Phase 1 backend/logic in
-[`MISSION_LIBRARY_AND_DB.md`](MISSION_LIBRARY_AND_DB.md). This doc defines the user-facing
-surface: the **Mission Manager** (an alternate view of the Mission Planner panel), the
-**Mission Editor** save/export actions, and the **Logbook** linking controls.
+**Status:** Implemented (2026-06-03), **awaiting hardware/simulator testing**. Builds on the
+Phase 1 backend/logic in [`MISSION_LIBRARY_AND_DB.md`](MISSION_LIBRARY_AND_DB.md). This doc
+defines the user-facing surface: the **Mission Manager** (an alternate view of the Mission
+Planner panel), the **Mission Editor** save/export actions, and the **Logbook** linking
+controls.
+
+> Built to match the Flight-Logbook design language (same panel chrome + width: ~430 px list,
+> ~920 px when a mission is selected, via `+page`'s `.nav-panel` classes). Manager view state
+> (open + selected mission) lives in `stores/missionManager.ts` so it survives close/reopen and
+> drives the panel width. The detail's mission preview is a non-interactive Leaflet mini-map
+> (`MissionPreviewMap.svelte`) on the current provider, fixed aspect-ratio = bbox (portrait
+> capped to a square height). Linked-flight rows jump to the flight in the Logbook
+> (`requestOpenFlightId`). **Deferred:** list search/filter; ArduPilot export (with the
+> ArduPilot mission layer).
 
 ---
 
@@ -115,12 +125,21 @@ Extend the flight metadata panel:
 - (Have already: upsert, get, get-for-flight, find-by-hash, update, link, geocode,
   logged-wp-count.)
 
-## Build order (proposed)
-1. Backend: `delete_mission`, `flight_unlink_mission`, INAV export-from-waypoints (+ commands,
-   wrappers).
-2. Mission Editor: **Save to library** dialog + NEW/OVERWRITE/CANCEL; rename "Save File" →
-   "Export".
-3. Logbook: mission name + WP count + **Link/Unlink** (with the "Save & link" prompt).
-4. Mission Manager: list + grouping + metadata/notes + linked-flights + Load to Map / Export /
-   Import (popup + drag&drop) / Delete + empty state.
-5. Mini-map preview (last).
+## Build order — all done ✅
+1. ✅ Backend: `delete_mission`, `flight_unlink_mission`, `list_missions`, `update_mission`,
+   `find_mission_by_hash`, `update_mission_meta`, `list_flights_for_mission`, INAV
+   export-from-waypoints (+ commands + frontend wrappers).
+2. ✅ Mission Editor: **Save to library** dialog (`MissionSaveDialog.svelte`) + NEW/OVERWRITE/
+   CANCEL. (Kept the file button labelled "Save" and the "Open" button — files vs. library is
+   the user's choice.)
+3. ✅ Logbook: mission name + WP count + **Link/Unlink** (with the "Save & link" prompt for
+   FILE/FC missions). Loading a flight also loads its linked mission onto the map.
+4. ✅ Mission Manager (`MissionManager.svelte`): grouped list, metadata + editable name/notes,
+   linked-flights (clickable → jump to flight), Load to Map / Export / Import (popup +
+   drag&drop) / Delete (unlink+warn) + empty state. Logbook design language + panel width +
+   state persistence.
+5. ✅ Mini-map preview (`MissionPreviewMap.svelte`) — Leaflet on the current provider.
+
+**Deferred (not part of this feature):** list search/filter; ArduPilot export (with the
+ArduPilot mission layer); flown-vs-loaded validation (separate roadmap item); persisting view
+state for the other panels (Logbook/Settings/UAV-info).

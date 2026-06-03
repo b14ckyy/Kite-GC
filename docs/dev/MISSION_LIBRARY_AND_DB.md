@@ -1,8 +1,9 @@
 # Mission Library & DB — reusable missions linked to the flight log
 
-**Status:** Phase 1 implemented (2026-06-02) — backend + logic complete, **awaiting hardware/
-simulator testing**; UI phase (planner save dialog, import flow, mission browser) not started.
-Complements
+**Status:** Phase 1 + the UI implemented (2026-06-03) — backend, logic, **and** the UI (Mission
+Manager, editor Save-to-library, logbook link/unlink) are complete; **awaiting hardware/
+simulator testing**. UI surface is documented in
+[`MISSION_LIBRARY_UI.md`](MISSION_LIBRARY_UI.md). Complements
 [`MISSION_TRACKING_AND_PROVENANCE.md`](MISSION_TRACKING_AND_PROVENANCE.md) — that doc
 defines *when* the active-WP highlight is trusted (the FC/FILE/DB provenance flags); **this**
 doc defines the **persistence layer**: missions as first-class, reusable database entities
