@@ -45,6 +45,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     and a **mission link** confirmation (FC-synced missions link automatically; a non-FC mission is an
     opt-in checkbox — the old standalone "mission changed?" prompt folded in). Without recording it is
     summary-only (live arm→disarm stats). Re-arming dismisses it; sub-5 s arms are ignored.
+  - **Flight-deletion consolidation:** deleting a flight with a linked battery shows an opt-in checkbox
+    in the delete dialog to **consolidate its usage into the battery's lifetime totals** before deletion
+    (otherwise the contribution drops from the live sum). `ConfirmDialog` gained an optional checkbox.
 
 ### Added — Mission Manager (mission library UI)
 - **Mission Manager** — an alternate view of the mission planner panel (button next to Edit;

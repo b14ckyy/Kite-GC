@@ -6,8 +6,8 @@ first-class DB entities, flights link the pack that was flown (soft link by seri
 data is derived from the linked flight logs + a persistent baseline. The Battery Manager is a
 view-toggle inside the Flight Logbook panel. Dedicated `.kbatt` export/import and cross-jump
 navigation are implemented too. See **Implementation notes** at the end for the deltas agreed during
-the build. Deferred to later slices: the flight-deletion "transfer to baseline" dialog and the Phase C
-per-flight telemetry metrics.
+the build. Deferred to a later slice: the Phase C per-flight telemetry metrics (Wh, voltage sag, internal
+resistance) and SoH trends.
 
 The goal is a complete battery-management system so (especially commercial) operators can track
 how their packs perform and wear over their lifetime.
@@ -319,6 +319,13 @@ Refinements agreed during the build, on top of the design above:
   (informational, from a live arm→disarm stats accumulator). **Re-arming dismisses** it; a <5 s arm is
   ignored. Log-import linking stays **manual** (the flight-detail battery chip).
 
-**Still deferred (next slices):** the flight-deletion **"transfer to baseline"** dialog (deleting a
-linked flight currently just drops its contribution from the live sum) and **Phase C** per-flight
-telemetry metrics (Wh, sag, internal resistance, SoH trends).
+- **Flight-deletion consolidation:** deleting a flight that has a linked battery shows an **opt-in
+  checkbox** in the existing delete-confirmation dialog ("Consolidate this flight's battery usage into
+  the battery's lifetime totals"). When ticked, the flight's contribution (duration + mAh + equivalent
+  cycles) is added to the pack's persistent baseline **before** deletion, so the lifetime total is
+  preserved; otherwise the contribution simply drops from the live sum (default). Covers the
+  live↔blackbox pair (each deleted flight with a battery link is consolidated). `ConfirmDialog` gained a
+  generic optional checkbox for this.
+
+**Still deferred (next slice):** **Phase C** per-flight telemetry metrics (Wh, voltage sag, internal
+resistance) and the SoH / capacity-fade trends derived from them.

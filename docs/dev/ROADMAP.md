@@ -487,8 +487,10 @@ This document tracks planned features, organized by milestone.
 - [x] **End-Flight dialog** on disarm — read-only summary always; when DB-recorded also captures the
   battery serial (no autofill), a note, and a mission-link confirmation (FC-synced auto-links; non-FC is
   opt-in). Log-import linking stays manual via the flight detail.
-- [ ] **Battery management — remaining slices:** flight-deletion **"transfer to baseline"** dialog;
-  **Phase C** per-flight telemetry metrics (Wh, sag, internal resistance, SoH trend).
+- [x] **Flight-deletion consolidation** — opt-in checkbox in the delete dialog to fold a linked flight's
+  battery usage into the pack's lifetime totals before deletion.
+- [ ] **Battery management — Phase C:** per-flight telemetry metrics (Wh, voltage sag, internal
+  resistance) + SoH / capacity-fade trends derived from them.
 - [ ] **Battery estimation (remaining capacity / time)** — protocol-specific source:
   - **INAV**: derive from the FC's battery configuration (capacity, cell count, voltage thresholds — the battery-estimation-relevant settings) read at connect, combined with live consumed-mAh / voltage telemetry.
   - **ArduPilot**: the firmware lacks INAV's built-in estimation, so compute it **locally** in the GCS from telemetry (consumed mAh, current draw, voltage sag) against the pack's rated capacity (ties into the battery logbook).
