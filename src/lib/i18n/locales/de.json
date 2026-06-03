@@ -282,6 +282,7 @@
     "importKflightResult": "Importiert: {imported}, \u00dcbersprungen (Duplikate): {skipped}",
     "deleteTitle": "Flug l\u00f6schen",
     "deleteWarning": "Diese Aktion kann nicht r\u00fcckg\u00e4ngig gemacht werden. Welche Daten m\u00f6chtest du l\u00f6schen?",
+    "deleteConsolidateBattery": "Akku-Nutzung dieses Flugs in die Lebensdauer-Summen des Akkus \u00fcbernehmen",
     "deleteLiveOnly": "Nur Live-Aufnahme l\u00f6schen",
     "deleteBlackboxOnly": "Nur Blackbox l\u00f6schen",
     "deleteBoth": "Beide l\u00f6schen",

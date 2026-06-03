@@ -12,6 +12,8 @@
     title: string;
     message: string;
     buttons?: DialogButton[];
+    /** Optional opt-in checkbox shown above the buttons; read via `checkboxResult()`. */
+    checkbox?: { label: string; checked?: boolean };
   }
 </script>
 
@@ -22,7 +24,12 @@
   let title = $state('');
   let message = $state('');
   let buttons = $state<DialogButton[]>([]);
+  let checkboxLabel = $state<string | null>(null);
+  let checkboxChecked = $state(false);
   let resolver: ((value: string | null) => void) | null = null;
+
+  /** State of the optional checkbox at the time the dialog was dismissed. */
+  export function checkboxResult(): boolean { return checkboxChecked; }
 
   /**
    * Show the dialog and return a promise that resolves to the selected button value
@@ -33,6 +40,8 @@
     title = opts.title;
     message = opts.message;
     buttons = opts.buttons ?? [];
+    checkboxLabel = opts.checkbox?.label ?? null;
+    checkboxChecked = opts.checkbox?.checked ?? false;
     open = true;
     return new Promise<string | null>((resolve) => {
       resolver = resolve;
@@ -62,6 +71,12 @@
         <div class="dialog-title">{title}</div>
       {/if}
       <div class="dialog-message">{message}</div>
+      {#if checkboxLabel}
+        <label class="dialog-check">
+          <input type="checkbox" bind:checked={checkboxChecked} />
+          <span>{checkboxLabel}</span>
+        </label>
+      {/if}
       <div class="dialog-buttons">
         {#if buttons.length === 0}
           <!-- Info-only: just an OK button -->
@@ -117,6 +132,17 @@
     white-space: pre-line;
     margin-bottom: 16px;
   }
+
+  .dialog-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: #e0e0e0;
+    margin: -6px 0 14px;
+    cursor: pointer;
+  }
+  .dialog-check input { accent-color: #37a8db; }
 
   .dialog-buttons {
     display: flex;

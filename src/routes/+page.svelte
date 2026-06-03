@@ -32,7 +32,7 @@
   import { activeWpNumber, replayWpTotal } from '$lib/stores/navStatus';
   import { missionManagerOpen, missionManagerSelectedId, requestOpenFlightId, requestOpenMissionId } from '$lib/stores/missionManager';
   import { batteryManagerOpen, batteryManagerSelectedId } from '$lib/stores/batteryManager';
-  import { missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode, flightSetBatterySerial, updateFlightNotes, getFlight } from '$lib/stores/flightlog';
+  import { missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode, flightSetBatterySerial, updateFlightNotes, getFlight, batteryDbFindBySerial, batteryDbAddUsage } from '$lib/stores/flightlog';
   import EndFlightDialog from "$lib/components/logbook/EndFlightDialog.svelte";
   import type { EndFlightStats } from "$lib/components/logbook/EndFlightDialog.svelte";
   import { haversineDistance } from '$lib/utils/geo';
@@ -930,12 +930,20 @@
       ];
     }
 
+    // If a battery is linked, offer to consolidate this flight's usage into the pack's
+    // persistent totals before deleting (opt-in — otherwise its contribution just drops).
+    const linkedPack = selectedFlight.battery_serial
+      ? await batteryDbFindBySerial(selectedFlight.battery_serial, flightLogDbPath).catch(() => null)
+      : null;
+
     const value = await showDialog({
       title: $t('logbook.deleteTitle'),
       message: $t('logbook.deleteWarning'),
       buttons,
+      checkbox: linkedPack ? { label: $t('logbook.deleteConsolidateBattery') } : undefined,
     });
     if (!value || !selectedFlightId || !selectedFlight) return;
+    const consolidateBattery = linkedPack != null && confirmDialog.checkboxResult();
 
     const flightId = selectedFlightId;
     const linkedId = selectedFlight.linked_flight_id;
@@ -952,6 +960,21 @@
       // Delete the blackbox flight (higher id = imported after = blackbox)
       const bbxId = linkedId && linkedId > flightId ? linkedId : flightId;
       idsToDelete.push(bbxId);
+    }
+
+    // Consolidate the deleted flights' battery usage into their packs first (opt-in).
+    if (consolidateBattery) {
+      for (const id of idsToDelete) {
+        const f = id === flightId ? selectedFlight : await getFlight(id, flightLogDbPath).catch(() => null);
+        if (!f?.battery_serial) continue;
+        const pack = f.battery_serial === linkedPack?.serial
+          ? linkedPack
+          : await batteryDbFindBySerial(f.battery_serial, flightLogDbPath).catch(() => null);
+        if (!pack) continue;
+        const mah = f.battery_used_mah ?? 0;
+        const cycles = pack.capacity_mah ? mah / pack.capacity_mah : 0;
+        await batteryDbAddUsage(pack.id, f.duration_sec ?? 0, mah, cycles, 0, flightLogDbPath);
+      }
     }
 
     for (const id of idsToDelete) {
