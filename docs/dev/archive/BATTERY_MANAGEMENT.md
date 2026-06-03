@@ -1,13 +1,19 @@
 # Battery Management — reusable battery packs linked to the flight log
 
-**Status:** Phase A + B implemented (2026-06-03) — **awaiting hardware/simulator testing**. Mirrors
-the mission library pattern ([`MISSION_LIBRARY_AND_DB.md`](MISSION_LIBRARY_AND_DB.md)): packs are
+> ARCHIVED (2026-06-03) — Phase A + B shipped; the feature is considered complete for the initial
+> release. **Phase C (telemetry-derived wear metrics) is cut from scope** — FC telemetry is too slow,
+> and Blackbox-derived values are too hardware-dependent (cabling, connectors, wire gauge) for
+> reliable health figures; precise log analysis may be revisited in the future. **Multi-battery per
+> flight** stays a future item (ArduPilot-only; needs telemetry/DataFlash research). Kept for the
+> detailed feature-level reasoning.
+
+**Status:** Shipped (Phase A + B, 2026-06-03) — feature complete for the initial release. Mirrors
+the mission library pattern ([`../MISSION_LIBRARY_AND_DB.md`](../MISSION_LIBRARY_AND_DB.md)): packs are
 first-class DB entities, flights link the pack that was flown (soft link by serial), and the wear
 data is derived from the linked flight logs + a persistent baseline. The Battery Manager is a
 view-toggle inside the Flight Logbook panel. Dedicated `.kbatt` export/import and cross-jump
 navigation are implemented too. See **Implementation notes** at the end for the deltas agreed during
-the build. Deferred to a later slice: the Phase C per-flight telemetry metrics (Wh, voltage sag, internal
-resistance) and SoH trends.
+the build.
 
 The goal is a complete battery-management system so (especially commercial) operators can track
 how their packs perform and wear over their lifetime.
@@ -327,5 +333,8 @@ Refinements agreed during the build, on top of the design above:
   live↔blackbox pair (each deleted flight with a battery link is consolidated). `ConfirmDialog` gained a
   generic optional checkbox for this.
 
-**Still deferred (next slice):** **Phase C** per-flight telemetry metrics (Wh, voltage sag, internal
-resistance) and the SoH / capacity-fade trends derived from them.
+**Cut from scope (possible future):** **Phase C** per-flight telemetry metrics (Wh, voltage sag,
+internal resistance) and SoH / capacity-fade trends — FC telemetry is too slow/laggy and
+Blackbox-derived voltages are too hardware-dependent (cabling, connectors, wire gauge) to yield
+reliable health figures. May be revisited if precise log analysis is tackled later. **Multi-battery
+per flight** also stays future (ArduPilot-only; needs telemetry/DataFlash research) — see Open points.

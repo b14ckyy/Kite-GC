@@ -477,7 +477,7 @@ This document tracks planned features, organized by milestone.
 - [ ] Aviation charts (OpenAIP tile layer — airports, navaids, airspace symbology)
 
 ### Battery Management
-- [x] **Battery library + manager** (Phase A + B) — see `docs/dev/BATTERY_MANAGEMENT.md`. `battery_packs`
+- [x] **Battery library + manager** (Phase A + B) — **complete**; see `docs/dev/archive/BATTERY_MANAGEMENT.md`. `battery_packs`
   DB (identity = serial), soft `flights.battery_serial` link, a **Battery Manager** view-toggle in the
   Flight Logbook (grouped/flat list, status special groups), editable pack identity with computed
   voltage/energy, **lifetime = persistent baseline + Σ(linked flights)**, additive manual usage editor,
@@ -489,8 +489,11 @@ This document tracks planned features, organized by milestone.
   opt-in). Log-import linking stays manual via the flight detail.
 - [x] **Flight-deletion consolidation** — opt-in checkbox in the delete dialog to fold a linked flight's
   battery usage into the pack's lifetime totals before deletion.
-- [ ] **Battery management — Phase C:** per-flight telemetry metrics (Wh, voltage sag, internal
-  resistance) + SoH / capacity-fade trends derived from them.
+- ~~Battery management — Phase C: per-flight telemetry wear metrics (Wh, sag, internal resistance, SoH)~~
+  — **cut from scope:** FC telemetry too slow/laggy, Blackbox voltages too hardware-dependent (cabling,
+  connectors, wire gauge) for reliable health figures. Possible future if precise log analysis is tackled.
+- [ ] **Multi-battery per flight** (future) — ArduPilot-only; needs telemetry / DataFlash research into
+  how multiple packs are reported. A `flight_batteries` join table when tackled.
 - [ ] **Battery estimation (remaining capacity / time)** — protocol-specific source:
   - **INAV**: derive from the FC's battery configuration (capacity, cell count, voltage thresholds — the battery-estimation-relevant settings) read at connect, combined with live consumed-mAh / voltage telemetry.
   - **ArduPilot**: the firmware lacks INAV's built-in estimation, so compute it **locally** in the GCS from telemetry (consumed mAh, current draw, voltage sag) against the pack's rated capacity (ties into the battery logbook).

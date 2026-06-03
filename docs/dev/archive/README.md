@@ -16,3 +16,6 @@ stay in `../` (the active `docs/dev/` folder).
   All steps S1–S10 shipped (S9 mode-label i18n intentionally dropped — mode names stay English).
 - **ARDUPILOT_IMPORT_PLAN.md** — ArduPilot DataFlash `.bin` import (decode → DB → replay).
   Phases 1–3 shipped. (`.tlog` import is separate, tracked in ROADMAP / PROTOCOL_REFACTORING.)
+- **BATTERY_MANAGEMENT.md** — Battery library + manager (schema v10, serial soft-link, `.kbatt`
+  export/import, End-Flight capture, lifetime baseline + consolidation). Phase A + B shipped.
+  Phase C (telemetry wear metrics) cut from scope; multi-battery per flight stays a future item.

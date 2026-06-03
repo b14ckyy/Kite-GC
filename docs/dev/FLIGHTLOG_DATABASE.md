@@ -72,7 +72,7 @@ mission-library `v8` columns) — existing DBs gain them automatically on next o
 
 `battery_serial` (schema `v10`) links the flight to a battery pack **by serial** (a soft link,
 resolved against `battery_packs.serial` at read time — there is no foreign key). See
-[`BATTERY_MANAGEMENT.md`](BATTERY_MANAGEMENT.md) for the `battery_packs` table and the Battery
+[`archive/BATTERY_MANAGEMENT.md`](archive/BATTERY_MANAGEMENT.md) for the `battery_packs` table and the Battery
 Manager. Added idempotently (`ensure_v10_schema`).
 
 No additional flight-level columns are currently planned for replay.

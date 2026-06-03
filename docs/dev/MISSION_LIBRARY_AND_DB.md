@@ -107,7 +107,7 @@ the two are decoupled:
 4. **On disarm:** the recorder writes the flight → link `flights.mission_id = flightMissionId`.
 
 > **As built (2026-06-03):** the disarm handling now lives in the **End-Flight dialog**
-> (`EndFlightDialog`, see `BATTERY_MANAGEMENT.md`). The standalone "mission changed?" prompt was
+> (`EndFlightDialog`, see `archive/BATTERY_MANAGEMENT.md`). The standalone "mission changed?" prompt was
 > folded in. The rule simplified to **FC-sync** rather than "changed since arm": an **FC-synced**
 > mission is trusted and (re)linked automatically (covers a mid-flight re-upload); a **non-FC**
 > mission is offered with an **opt-in checkbox** (FILE flag ignored). `linkMissionToFlight` upserts
