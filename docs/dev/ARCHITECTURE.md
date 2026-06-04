@@ -1267,5 +1267,49 @@ The clipped fallback tiles get their **own GPU layer** (`will-change: transform`
 
 ---
 
+## ADR-029: Reusable Panel Framework + Control Library
+
+**Context**: The app grew to 6 nav-rail panels in a handful of recurring formats, but each
+panel rolled its own markup, sizing and buttons — no single source of truth. Symptoms: ~116
+button usages across 25 files each re-defining its own `.btn-*` classes; `.nav-panel` widths
+hard-coded per panel (360 / 414 / 430 / 920 / 280 px); every layout edit hand-replicated, and
+panels still drifted apart despite being the "same type". Full plan: `docs/dev/PANEL_FRAMEWORK.md`.
+
+**Decision**: Build a reusable **`PanelShell`** plus a small **control library**, and migrate
+panels onto them.
+
+- **`PanelShell`** — one component, a `variant` prop with **5 formats**: `info` (content-sized,
+  capped), `compact` (fixed width, fills the panel area: header / thin-framed scrolling field /
+  footer), `advanced` (1:2 split, right region with its own header/toolbar/field/footer),
+  `wide-compact` and `fullscreen` (floating overlays, terrain-analyzer style — *almost*
+  full-screen, not edge-to-edge). Content goes into snippet slots
+  (`headerActions`/`toolbar`/`body`/`footer`/`detail*`/`params`). The shell owns the frame,
+  positioning, the scroll/vertical-bounding, and the transitions. **All variants are
+  left-anchored and sized by width/height/top** (no `right`) so the shell morphs between any
+  two; the **instance persists across rail switches** (no `{#key}` remount) so switching panels
+  animates; `info`'s intrinsic size animates via `interpolate-size: allow-keywords`.
+- **Control library** (`src/lib/components/panel/`): `Button` (6 variants: standard / mode /
+  data / danger / warning / compact; fixed height, dynamic width, `full`; a flat-SVG icon
+  registry via `currentColor`, shared through its `module` script), `SegmentedToggle`
+  (one-element multi-position slide switch) and `Toggle` (on/off, centralised from the settings
+  markup).
+- **Lives in `.ui-scale`** (the UI-scaling layer), so everything scales with the global
+  UI-scale for free.
+- **Migration = strangler / parallel run**: a duplicate (bottom) nav-rail group opens the new
+  framework panels next to the still-working old panels; build empty shells first, then rebuild
+  each panel on the shell (reusing the existing controllers/stores), cut over panel-by-panel,
+  then delete the old panel + its rail button. Pre-release + single developer, so the
+  scaffolding is not hidden behind a flag.
+
+**Consequences**: panels become "content placed onto the shell" — consistent by construction,
+drift-proof, edited in one place; the control set guarantees identical buttons everywhere. Cost:
+Svelte's one-component-per-file rule means each control is its own small file (the `panel/`
+folder is the de-facto control library); the migration carries temporary duplication (old +
+new panels) until each cutover; throwaway scaffolding (`PanelPlayground`) is removed at the end.
+Cross-variant morphing relies on `interpolate-size` (Chromium 129+ / WebView2) for the `info`
+case and degrades gracefully on older engines (info snaps, the rest still animates).
+
+---
+
 *End of Architecture Decision Records*
 

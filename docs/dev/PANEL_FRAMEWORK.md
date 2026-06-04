@@ -1,10 +1,9 @@
 # Panel Framework
 
-> Status: **Phase 0 done** (2026-06-04). `PanelShell` + the **5** empty variant layouts
-> (info / compact / advanced / wide-compact / fullscreen) are built, reviewed and approved via
-> the duplicate (bottom) rail group; all variant + panel-switch transitions animate. Next: the
-> **Button system** (documented below), then per-panel migration (Phase 1+). No real panel
-> wiring yet.
+> Status: **Phase 0 done** (2026-06-04). `PanelShell` (5 variants) **and the control library**
+> (`Button`, `SegmentedToggle`, `Toggle` + the flat-SVG icon registry) are built, reviewed and
+> approved via the duplicate (bottom) rail group; all variant + panel-switch transitions
+> animate. Next: per-panel migration (Phase 1+). No real panel wiring yet.
 
 ## Problem
 The app has 6 nav-rail panels in 4 recurring formats, but **every panel rolls its own
@@ -84,18 +83,27 @@ Battery / Mission Manager: compact ↔ advanced). The shell must animate these t
 - Slots are **optional** — `info` typically uses only `body`; `advanced` adds `detail`.
 - No "panel DSL" / over-abstraction: one shell + variant + snippets covers all four.
 
-### Button system — **deferred until the panel shell stands**
-Defined separately *after* the framework, reduced to a few basic types (rough guideline,
-to be detailed then):
-- **Mode switch** — toggles a view within a panel (e.g. Logbook ↔ Battery Manager).
-- **Compact / inline** — small auto-generated inline links (e.g. the mission-link chips in
-  the Logbook flight detail).
-- **Standard** — usual actions.
-- **Danger** — destructive (delete).
-- **Warning** — cautionary actions.
-- **Data transfer** — FC Upload / Download, EEPROM, import/export.
+### Control library (`src/lib/components/panel/`)
+Shared, self-contained controls — one definition each, so every panel looks identical. They
+live in `.ui-scale`, so all px sizes scale with `--ui-scale`. (Svelte = one component per file;
+non-component code like the icon registry is shared via a component's `module` script.)
 
-One shared definition per type → all panels identical. (Sizes/variants finalised later.)
+**`Button.svelte`** — `<Button variant size icon active disabled full title onclick>`:
+- variants: **standard** (neutral), **mode** (view toggle, `active` = current), **data** (FC
+  up/download, EEPROM, im/export — blue fill), **danger** (destructive), **warning**
+  (cautionary), **compact** (slim inline / auto-generated link chip).
+- sizes `sm` / `md` with **fixed height** (md 28 / sm 24 / compact 20 px) so buttons align;
+  **width stays dynamic** (content / translations); `full` stretches to fill the row.
+- **Flat-SVG icon registry** lives here (`ICONS` + `iconSvg()` + `ButtonIcon` type), monochrome
+  via `currentColor`. Icons are optional (no reserved space when absent) and on by default.
+  Reused by other controls (e.g. `SegmentedToggle`). Add icons to the one `ICONS` map.
+
+**`SegmentedToggle.svelte`** — `<SegmentedToggle options value onchange size>`: a small
+multi-position slide switch placed as ONE element with a sliding highlight (e.g. Replay:
+Recording ↔ Blackbox track). Options may carry a registry icon.
+
+**`Toggle.svelte`** — `<Toggle checked onchange disabled id title>`: the on/off slide switch,
+centralised from the settings panel's repeated `.toggle-switch` markup; `checked` is bindable.
 
 ### Design tokens
 Promote the theme constants (currently inline per component) to CSS custom properties on

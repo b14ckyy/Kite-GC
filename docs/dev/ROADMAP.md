@@ -549,6 +549,12 @@ Cross-cutting groundwork items. Each carries non-trivial architectural or design
   persisted as `uiScale`. The **map stays at native resolution** (hoisted into an unzoomed `.layer-map`);
   map overlays are scaled individually — WP markers, param labels, the WP editor popup, Leaflet tooltips,
   and the right-click context menu. Chosen over a `rem` refactor (258 px font-sizes, 0 rem → too invasive).
+- [~] **Reusable panel framework + control library** — `PanelShell` (5 variants: info / compact
+  / advanced / wide-compact / fullscreen) + shared controls (`Button` 6 types with a flat-SVG
+  icon registry, `SegmentedToggle`, `Toggle`) so panels are consistent by construction instead of
+  each rolling its own markup/sizing/buttons. Phase 0 (shell + controls, empty-shell review) done;
+  panels migrate one at a time via a parallel duplicate rail group (strangler). See ADR-029 +
+  `docs/dev/PANEL_FRAMEWORK.md`.
 - [ ] **Custom tooltip / in-app assistance system** — native `title=` tooltips are rendered by
   WebView2 *outside the DOM*, so they can't be themed or UI-scaled. Replace them with a `use:tooltip`
   action + a themed singleton overlay that scales with the global UI scale (same pattern as the context
