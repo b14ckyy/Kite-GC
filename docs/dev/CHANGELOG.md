@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — NavRail (consistent behaviour + flat icons)
+- **Consistent button behaviour:** the Terrain Analysis button no longer toggles its overlay
+  closed on re-click — like every other nav-rail button it only opens/selects. Closing is done
+  by closing the whole rail (the hamburger ✕) or selecting another tab.
+- **Flat, high-contrast SVG icons** replacing the mixed glyph/emoji set: UAV Info = microchip
+  (FC; neutral across UAV types), Settings = 6-tooth gear (sharp teeth), Logbook = solid spiral
+  notebook (knocked-out text lines), Mission = filled map marker, Terrain = two solid peaks,
+  Video = solid movie camera. Icons use `currentColor` (follow inactive/hover/active states) and
+  fill ~90 % of the button.
+- **Active state** uses a dark translucent fill (`rgba(0,0,0,0.5)` + blur) so the accent border +
+  icon stay readable over bright maps; inactive icons nudged a touch brighter.
+
 ### Added — Global UI Scaling
 - **UI scale setting (100 / 125 / 150 %)** in Settings → Language, persisted as `uiScale`. Scales
   the whole chrome — toolbar, nav rail, panels, widget docks, dialogs, status bar — via CSS `zoom`
