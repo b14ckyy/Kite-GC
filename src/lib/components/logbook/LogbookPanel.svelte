@@ -20,6 +20,7 @@
   } from '$lib/stores/flightlog';
   import PanelShell, { type PanelVariant } from '$lib/components/panel/PanelShell.svelte';
   import Button from '$lib/components/panel/Button.svelte';
+  import { convertDistance, formatConverted } from '$lib/utils/units';
   import FlightDetail from './FlightDetail.svelte';
   import BatteryManager from './BatteryManager.svelte';
   import { batteryManagerOpen } from '$lib/stores/batteryManager';
@@ -251,6 +252,12 @@
     if (f.linked_flight_id) marker += '🔗 ';
     return marker;
   }
+
+  // Per-group aggregate distance (unit-aware), for the tree-header stats.
+  function fmtGroupDist(m: number): string {
+    const c = convertDistance(m, interfaceSettings.distanceUnit);
+    return formatConverted(c, c.unit === 'm' || c.unit === 'ft' ? 0 : 1);
+  }
 </script>
 
 <!-- Toolbar button groups, on the shared control library (docs/dev/PANEL_FRAMEWORK.md):
@@ -356,6 +363,7 @@
             <button class="logbook-tree-toggle logbook-tree-toggle-top" onclick={() => toggleTop(top.key)}>
               <span class="logbook-tree-caret">{isTopOpen(top.key) ? '▾' : '▸'}</span>
               <span class="logbook-tree-label">{top.key}</span>
+              <span class="logbook-tree-stats">{formatDurationSec(top.sum_duration_sec)}{#if top.sum_distance_m > 0} · {fmtGroupDist(top.sum_distance_m)}{/if}</span>
               <span class="logbook-tree-count">{top.flight_count}</span>
             </button>
 
@@ -366,6 +374,7 @@
                     <button class="logbook-tree-toggle logbook-tree-toggle-second" onclick={() => toggleSecond(top.key, second.key)}>
                       <span class="logbook-tree-caret">{isSecondOpen(top.key, second.key) ? '▾' : '▸'}</span>
                       <span class="logbook-tree-label">{second.key}</span>
+                      <span class="logbook-tree-stats">{formatDurationSec(second.sum_duration_sec)}{#if second.sum_distance_m > 0} · {fmtGroupDist(second.sum_distance_m)}{/if}</span>
                       <span class="logbook-tree-count">{second.flights.length}</span>
                     </button>
 
@@ -605,7 +614,7 @@
     color: #ddd;
     cursor: pointer;
     display: grid;
-    grid-template-columns: 14px minmax(0, 1fr) auto;
+    grid-template-columns: 14px minmax(0, 1fr) auto auto;
     align-items: center;
     gap: 6px;
     padding: 5px 7px;
@@ -648,6 +657,13 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .logbook-tree-stats {
+    font-size: 10px;
+    color: #8a9aa3;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
   }
 
   .logbook-tree-count {

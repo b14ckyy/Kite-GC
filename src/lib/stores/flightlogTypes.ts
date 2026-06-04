@@ -207,12 +207,18 @@ export type LogbookSortDimension = 'aircraft' | 'location' | 'date';
 export interface FlightTreeSecondLevel {
   key: string;
   flights: FlightSummary[];
+  /** Σ of the group's flight durations (seconds) and distances (metres) — for the header stats. */
+  sum_duration_sec: number;
+  sum_distance_m: number;
 }
 
 export interface FlightTreeTopLevel {
   key: string;
   children: FlightTreeSecondLevel[];
   flight_count: number;
+  /** Σ over all child flights — for the header stats. */
+  sum_duration_sec: number;
+  sum_distance_m: number;
 }
 
 export interface FlightTree {

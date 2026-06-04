@@ -83,15 +83,22 @@ export function buildFlightTree(flights: FlightSummary[], mode: LogbookSortMode)
     .map(([topKey, secondMap]) => {
       const children: FlightTreeSecondLevel[] = [...secondMap.entries()]
         .sort(([a], [b]) => compareDimensionValues(a, b, secondDim))
-        .map(([secondKey, list]) => ({
-          key: secondKey,
-          flights: [...list].sort((a, b) => compareByThirdThenTime(a, b, thirdDim)),
-        }));
+        .map(([secondKey, list]) => {
+          const flights = [...list].sort((a, b) => compareByThirdThenTime(a, b, thirdDim));
+          return {
+            key: secondKey,
+            flights,
+            sum_duration_sec: flights.reduce((s, f) => s + (f.duration_sec ?? 0), 0),
+            sum_distance_m: flights.reduce((s, f) => s + (f.total_distance_m ?? 0), 0),
+          };
+        });
 
       return {
         key: topKey,
         children,
         flight_count: children.reduce((sum, child) => sum + child.flights.length, 0),
+        sum_duration_sec: children.reduce((sum, child) => sum + child.sum_duration_sec, 0),
+        sum_distance_m: children.reduce((sum, child) => sum + child.sum_distance_m, 0),
       };
     });
 
