@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix: a restored **Flight Logbook** tab now loads its entries on app start (no tab-switch needed).
 
 ### Changed — NavRail (consistent behaviour + flat icons)
+- **Reordered** the rail to match the typical workflow: UAV Info · Mission · Terrain · Logbook ·
+  Camera · Settings (the dev-only DEV playground stays last).
 - **Consistent button behaviour:** the Terrain Analysis button no longer toggles its overlay
   closed on re-click — like every other nav-rail button it only opens/selects. Closing is done
   by closing the whole rail (the hamburger ✕) or selecting another tab.
