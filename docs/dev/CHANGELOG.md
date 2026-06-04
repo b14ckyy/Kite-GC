@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Reusable panel framework + per-panel migration
+- **`PanelShell` + control library** (`Button`, `Toggle`, `SegmentedToggle`, flat-SVG icon
+  registry) now back every nav-rail panel — one shell with `info` / `compact` / `advanced` /
+  `fullscreen` / `wide-compact` variants, standardised field widths (380 px main / 500 px detail),
+  a 200 px content-field minimum (whole panel scrolls when too short), no in-panel close button
+  (closed via the rail ✕). See `docs/dev/PANEL_FRAMEWORK.md`.
+- **All panels migrated** onto the framework (built in parallel behind duplicate "v2" rail
+  buttons for side-by-side review): UAV Info (`info`), Flight Logbook (`info`/`compact`/`advanced`)
+  + Battery Manager (own shell, 1:2), Mission planner (INAV/ArduPilot) + Mission Manager, Terrain
+  Analyzer (`fullscreen`/`wide-compact`, converted in place), Video, and Settings (reorganised into
+  Interface / Data tabs via a slide toggle, grouped subsections, tiny hints dropped except Cesium).
+- Battery delete dialog now also offers **Retire / Mark Damaged**; mission/terrain/video adopt the
+  shared `Button`/`Toggle`/`SegmentedToggle` controls; transient status lines auto-clear after 10 s.
+- Fix: a restored **Flight Logbook** tab now loads its entries on app start (no tab-switch needed).
+
 ### Changed — NavRail (consistent behaviour + flat icons)
 - **Consistent button behaviour:** the Terrain Analysis button no longer toggles its overlay
   closed on re-click — like every other nav-rail button it only opens/selects. Closing is done

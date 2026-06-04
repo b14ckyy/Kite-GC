@@ -1,9 +1,60 @@
 # Panel Framework
 
-> Status: **Phase 0 done** (2026-06-04). `PanelShell` (5 variants) **and the control library**
-> (`Button`, `SegmentedToggle`, `Toggle` + the flat-SVG icon registry) are built, reviewed and
-> approved via the duplicate (bottom) rail group; all variant + panel-switch transitions
-> animate. Next: per-panel migration (Phase 1+). No real panel wiring yet.
+> Status: **Phase 1 in progress** (2026-06-04). Phase 0 (shell + control library) is signed off.
+> Real panels migrated onto `PanelShell` and wired behind their **v2 rail buttons** for
+> side-by-side review (no cutover yet — the legacy panels keep running):
+> - **UAV Info** → `info` variant (content-sized, unframed).
+> - **Flight Logbook** → live `info` (minimized card) / `compact` (list) / `advanced` (list +
+>   FlightDetail 1:2). All chrome + FlightDetail footer buttons use the `<Button>` library.
+> - **Battery Manager** → its **own** framework panel (`BatteryManagerV2`, own `PanelShell`,
+>   `compact ↔ advanced` 1:2 split): pack list in the main field, pack detail in the detail
+>   field; toolbar = Back · New · Import, pack actions above the linked-flights list, Export in
+>   the detail toolbar; delete dialog doubles as Retire / Mark-Damaged. Built **parallel** to the
+>   legacy `BatteryManager` (still used by the old logbook) — both deleted at the logbook cutover.
+> - **Mission system** → `MissionPanelV2` (thin switcher) → `InavMissionPanelV2` /
+>   `ArduMissionPanelV2` (each `compact`, own `PanelShell`; header = title + shared
+>   `AutopilotSelect`; toolbar = edit/manager/undo/redo/pattern/clear; field = multi-mission tabs
+>   (INAV only) + WP table; footer = selected-WP detail + FC/EEPROM/file controls). The library
+>   view is **`MissionManagerV2`** (own shell, `compact ↔ advanced` 1:2, like the Battery Manager),
+>   rendered by the INAV editor when opened. Built **parallel** to the legacy mission components.
+> - **Terrain Analyzer** → `fullscreen ↔ wide-compact` PanelShell, converted **in place** (the
+>   panel is standalone — no shared leaf — so duplicating ~980 lines wasn't worth it; reachable via
+>   the existing `terrain` rail button, the redundant `terrain-v2` button was dropped). MSL/AGL +
+>   Waypoints/Track + correction mode are `SegmentedToggle`s, Show Map uses the flat `map` icon, and
+>   the readouts + hover info moved into the new **fullscreen footer slot** (`ps-fs-foot`). Header
+>   actions are left-aligned (fullscreen title is content-width).
+> - **Video** → `VideoPanelV2` (`compact`): header = Start/Stop; content = preview + source /
+>   resolution / mirror settings; footer = Floating Window (`mode` button, active = on, left) +
+>   Video Window detach (plain button, right — the PiP can't be closed from inside the app).
+>   Parallel build.
+>
+ - **Settings** → `SettingsPanelV2` (`compact`), reorganised into **two tabs via a `SegmentedToggle`**
+>   (Interface / Data), each grouped into labelled subsections:
+>   - *Interface*: UI (language, scale) · Map (provider, altitude curtain) · Units (all unit
+>     selects) · Widgets (all HUD widget toggles).
+>   - *Data*: Map (tile cache + Cesium token) · Telemetry (attitude/GPS rate, airspeed) · Flight
+>     Logbook (all logging settings + DB path) · Mission Control (default WP alt, PH time) ·
+>     Alerts (altitude).
+>   All on/off switches use the shared `Toggle`, selects match the 28px control height, and **all
+>   tiny italic hints were dropped except the Cesium-token one** (bumped to a readable size). No
+>   footer. The `+page` settings-patch handler was extracted to `applySettingsPatch` (shared by
+>   the legacy + V2 panels). Parallel build.
+>
+> **All main panels are now on the framework (parallel, behind their v2 rail buttons).**
+> Remaining: cross-link rewiring + the cutover (delete legacy panels + the v2 rail group).
+>
+> One small, additive PanelShell behaviour landed: the `advanced` **detail column renders only
+> when detail content exists** (`detail`/`detailToolbar`/… or `detailTitle`); with none, the
+> main column fills the full width (graceful single-column degrade).
+>
+> Next: finish FlightDetail's remaining inline affordances (link chips), review at 100/125/150 %,
+> then cut the migrated panels over (legacy panel + top-group rail button removed). **Settings is
+> deferred to last** (a data/structure reorg lands there first, to avoid touching it twice).
+>
+> **Known follow-up — cross-link rewiring:** the click jumps (FlightDetail → linked mission /
+> battery; BatteryManagerV2 → linked flight) still target the **V1** panels (they switch
+> `activeTab` to `'logbook'` / `'mission'`). Rewire them once the **Mission Manager** is migrated
+> and the panels are cut over, so the target tabs are unambiguous. Tackle together at that point.
 
 ## Problem
 The app has 6 nav-rail panels in 4 recurring formats, but **every panel rolls its own
@@ -47,7 +98,8 @@ reference dimensions = the current Mission Editor panel.*
 **`fullscreen`** — Terrain Analyzer (current implementation is the baseline). *"Fullscreen" =
 **almost** full-screen floating overlay*, not edge-to-edge: an even ~62 px inset on all sides
 (map + widgets stay visible around it), standard panel top offset. Header top, **parameter
-area on the left**, the rest is one large content field.
+area on the left**, one large content field, and an optional **bottom footer bar** (`footer`
+snippet → `ps-fs-foot`, e.g. the terrain readouts + hover info).
 
 **`wide-compact`** — an alternative mode of `fullscreen` (toggle). A short, wide strip docked
 below the toolbar that stops before the side widget dock, so the **map stays visible** to
@@ -66,9 +118,8 @@ Battery / Mission Manager: compact ↔ advanced). The shell must animate these t
 ## Component API (Svelte 5 runes + snippets)
 ```svelte
 <PanelShell
-  variant="compact"            {/* 'info' | 'compact' | 'advanced' | 'fullscreen' */}
+  variant="compact"            {/* 'info' | 'compact' | 'advanced' | 'fullscreen' | 'wide-compact' */}
   title="Settings"             {/* optional header title */}
-  onClose={...}                {/* optional; shows a header close affordance */}
 >
   {#snippet toolbar()} … {/snippet}   {/* optional action row under the header */}
   {#snippet body()} … {/snippet}      {/* main scrollable content (or default children) */}
@@ -82,6 +133,8 @@ Battery / Mission Manager: compact ↔ advanced). The shell must animate these t
   lives in `.ui-scale`).
 - Slots are **optional** — `info` typically uses only `body`; `advanced` adds `detail`.
 - No "panel DSL" / over-abstraction: one shell + variant + snippets covers all four.
+- **No in-panel close button.** Every panel is closed via the nav rail's ✕ (the same control
+  that opens it) — the shell renders no close affordance, so there's nothing to pass.
 
 ### Control library (`src/lib/components/panel/`)
 Shared, self-contained controls — one definition each, so every panel looks identical. They
@@ -104,6 +157,11 @@ Recording ↔ Blackbox track). Options may carry a registry icon.
 
 **`Toggle.svelte`** — `<Toggle checked onchange disabled id title>`: the on/off slide switch,
 centralised from the settings panel's repeated `.toggle-switch` markup; `checked` is bindable.
+
+**Form controls** (`<select>`, text inputs) — match the **md button height (28px)**, font 12px,
+4px radius, so a toolbar row of selects + buttons aligns with no vertical jog. (Not yet a shared
+component; standardised via the panels' `.setting-select` / `.setting-input` until a `Field`
+primitive is extracted.)
 
 ### Design tokens
 Promote the theme constants (currently inline per component) to CSS custom properties on
@@ -149,9 +207,15 @@ panel-by-panel. (Pre-release, single developer → no need to DEV-gate or hide t
 when the second panel needs them — not speculatively.
 
 ## Decided (from the spec)
-- `advanced` = true two-column split, **1 : 2** (left : right, right wider); right region has
-  its own framed header + toolbar + content + footer (kept vertically aligned with the left).
-- Footer is a **pinned** button area (header + footer fixed, only the framed field scrolls).
+- `advanced` = true two-column split with **fixed field widths**: left field **380px**, right
+  field **500px** (panel ≈ 914px). Right region has its own framed header + toolbar + content +
+  footer (kept vertically aligned with the left). **No vertical divider line** between the
+  columns — separation is by spacing only (cleaner). With no detail content the main column
+  fills the full width (graceful single-column degrade).
+- Footer is a **pinned** button area (header + footer fixed, only the framed field scrolls) —
+  *until* the panel gets too short: the field keeps a **200px minimum height**, and when
+  header + field + footer no longer fit the available height the **whole column scrolls**
+  (header/footer included). `info` is content-sized and exempt from the minimum.
 - Header is **always present** (its content is panel-defined and may be minimal).
 
 ## Transitions
@@ -163,9 +227,10 @@ when the second panel needs them — not speculatively.
   (Chromium 129+ / WebView2). On an older engine it degrades gracefully (info snaps; everything
   else still animates).
 
-## Open (tune during Phase 0)
-- Exact standardised px widths per variant (`info` cap = Settings width; `compact` ≈ Mission
-  Editor; `advanced` ≈ Logbook wide ~920).
+## Standardised widths (tuned against the legacy layouts)
+- **Driven by the field** (the thin-framed working box), not the panel: `compact` main field
+  **380px** (panel 398px); `advanced` left field **380px** + right field **500px** (panel 914px).
+  `info` is content-sized, capped at 360px (≈ Settings width).
 
 ## Out of scope
 Functional behaviour changes — this is a pure structural/visual refactor; panels must behave
