@@ -379,8 +379,17 @@
     "uav-info-v2": "info", "settings-v2": "compact", "logbook-v2": "advanced",
     "mission-v2": "compact", "terrain-v2": "fullscreen", "video-v2": "compact",
   };
-  const railTabs = $derived([...tabs, { id: "__sep__", label: () => "", icon: "" }, ...v2Tabs]);
-  const isV2 = $derived(activeTab.endsWith('-v2'));
+  // Permanent DEV-only reference panel (empty framework playground) at the end of the rail —
+  // a "DEV" text button instead of an icon; only present in dev builds (kept after migration).
+  const devTab = { id: "dev-playground", label: () => "DEV Playground", icon: '<span style="font-size:11px;font-weight:700;letter-spacing:0.5px">DEV</span>' };
+  const railTabs = $derived([
+    ...tabs,
+    { id: "__sep__", label: () => "", icon: "" },
+    ...v2Tabs,
+    ...(DEV_MODE ? [{ id: "__sep__", label: () => "", icon: "" }, devTab] : []),
+  ]);
+  // Framework (PanelShell) panels: the temporary v2 migration set + the permanent DEV playground.
+  const isFrameworkPanel = $derived(activeTab.endsWith('-v2') || activeTab === 'dev-playground');
 
   // Highlight the terrain rail button while its overlay is open
   const railActiveTab = $derived(terrainOpen ? 'terrain' : activeTab);
@@ -1577,13 +1586,13 @@
   />
 
   <!-- New framework panels (Phase 0: placeholder shells; docs/dev/PANEL_FRAMEWORK.md) -->
-  {#if navPanelOpen && isV2}
-    {@const v2 = v2Tabs.find(t => t.id === activeTab)}
-    <PanelPlayground initial={V2_VARIANT[activeTab] ?? 'compact'} label={v2 ? v2.label() : activeTab} onClose={toggleNavPanel} />
+  {#if navPanelOpen && isFrameworkPanel}
+    {@const fp = [...v2Tabs, devTab].find(t => t.id === activeTab)}
+    <PanelPlayground initial={V2_VARIANT[activeTab] ?? 'compact'} label={fp ? fp.label() : activeTab} onClose={toggleNavPanel} />
   {/if}
 
   <!-- Floating panel content (hidden while the terrain overlay is open) -->
-  {#if navPanelOpen && !terrainOpen && !isV2}
+  {#if navPanelOpen && !terrainOpen && !isFrameworkPanel}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="nav-panel" class:nav-panel-mission={activeTab === 'mission' && !$missionManagerOpen} class:nav-panel-logbook={(activeTab === 'logbook' && !logbookWide) || (activeTab === 'mission' && $missionManagerOpen && $missionManagerSelectedId == null)} class:nav-panel-wide={logbookWide || (activeTab === 'mission' && $missionManagerOpen && $missionManagerSelectedId != null)} class:nav-panel-minimized={logbookMinimized && logbookHasFlightOnMap} onclick={() => { if (logbookMinimized) expandLogbook(); }}>
