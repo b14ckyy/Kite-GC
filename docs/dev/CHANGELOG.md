@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-04
+
 ### Fixed
 - **Window size/position now persists** across launches (`tauri-plugin-window-state`) — the app
   no longer always reopens at the default 1280×800. Saves on close, restores on next launch.
