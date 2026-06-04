@@ -36,16 +36,20 @@
   {#if open}
     <div class="tab-buttons">
       {#each tabs as tab}
-        <button
-          class="tab-btn"
-          class:active={activeTab === tab.id}
-          onclick={() => onSelectTab(tab.id)}
-          title={tab.label()}
-        >
-          <!-- icon is a glyph or an inline SVG string (trusted, app-defined) -->
-          <span class="tab-icon">{@html tab.icon}</span>
-          <span class="tab-label">{tab.label()}</span>
-        </button>
+        {#if tab.id === '__sep__'}
+          <div class="tab-sep"></div>
+        {:else}
+          <button
+            class="tab-btn"
+            class:active={activeTab === tab.id}
+            onclick={() => onSelectTab(tab.id)}
+            title={tab.label()}
+          >
+            <!-- icon is a glyph or an inline SVG string (trusted, app-defined) -->
+            <span class="tab-icon">{@html tab.icon}</span>
+            <span class="tab-label">{tab.label()}</span>
+          </button>
+        {/if}
       {/each}
     </div>
   {/if}
@@ -118,6 +122,13 @@
     flex-direction: column;
     gap: 2px;
     margin-top: 4px;
+  }
+
+  /* Divider between the old panels (top) and the new framework panels (bottom). */
+  .tab-sep {
+    height: 1px;
+    margin: 4px 6px;
+    background: rgba(55, 168, 219, 0.4);
   }
 
   .tab-btn {

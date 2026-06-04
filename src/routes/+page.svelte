@@ -22,6 +22,8 @@
   import UavInfoPanel from "$lib/components/UavInfoPanel.svelte";
   import StatusBar from "$lib/components/StatusBar.svelte";
   import NavRail from "$lib/components/NavRail.svelte";
+  import PanelPlayground from "$lib/components/panel/PanelPlayground.svelte";
+  import type { PanelVariant } from "$lib/components/panel/PanelShell.svelte";
   import { PlaybackController } from '$lib/controllers/playbackController';
   import { refreshSerialPorts, connectFC, disconnectFC, scanBleDevices } from '$lib/controllers/connectionController';
   import * as logbookCtrl from '$lib/controllers/logbookController';
@@ -362,6 +364,24 @@
   const tabs = $derived(
     flightLoggingEnabled ? allTabs : allTabs.filter(t => t.id !== 'logbook')
   );
+
+  // Panel-framework migration scaffolding (docs/dev/PANEL_FRAMEWORK.md): a duplicate set of
+  // rail buttons (bottom group) opens the new framework panels. Throwaway until migrated.
+  const v2Tabs = [
+    { id: "uav-info-v2", label: () => $t('nav.uavInfo'), icon: ICON_UAV_INFO },
+    { id: "settings-v2", label: () => $t('nav.settings'), icon: ICON_SETTINGS },
+    { id: "logbook-v2", label: () => $t('nav.logbook'), icon: ICON_LOGBOOK },
+    { id: "mission-v2", label: () => $t('nav.mission'), icon: ICON_MISSION },
+    { id: "terrain-v2", label: () => $t('nav.terrain'), icon: ICON_TERRAIN },
+    { id: "video-v2", label: () => $t('nav.video'), icon: ICON_VIDEO },
+  ];
+  const V2_VARIANT: Record<string, PanelVariant> = {
+    "uav-info-v2": "info", "settings-v2": "compact", "logbook-v2": "advanced",
+    "mission-v2": "compact", "terrain-v2": "fullscreen", "video-v2": "compact",
+  };
+  const railTabs = $derived([...tabs, { id: "__sep__", label: () => "", icon: "" }, ...v2Tabs]);
+  const isV2 = $derived(activeTab.endsWith('-v2'));
+
   // Highlight the terrain rail button while its overlay is open
   const railActiveTab = $derived(terrainOpen ? 'terrain' : activeTab);
 
@@ -1551,13 +1571,19 @@
   <NavRail
     open={navPanelOpen}
     activeTab={railActiveTab}
-    {tabs}
+    tabs={railTabs}
     onToggle={toggleNavPanel}
     onSelectTab={selectTab}
   />
 
+  <!-- New framework panels (Phase 0: placeholder shells; docs/dev/PANEL_FRAMEWORK.md) -->
+  {#if navPanelOpen && isV2}
+    {@const v2 = v2Tabs.find(t => t.id === activeTab)}
+    <PanelPlayground initial={V2_VARIANT[activeTab] ?? 'compact'} label={v2 ? v2.label() : activeTab} onClose={toggleNavPanel} />
+  {/if}
+
   <!-- Floating panel content (hidden while the terrain overlay is open) -->
-  {#if navPanelOpen && !terrainOpen}
+  {#if navPanelOpen && !terrainOpen && !isV2}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="nav-panel" class:nav-panel-mission={activeTab === 'mission' && !$missionManagerOpen} class:nav-panel-logbook={(activeTab === 'logbook' && !logbookWide) || (activeTab === 'mission' && $missionManagerOpen && $missionManagerSelectedId == null)} class:nav-panel-wide={logbookWide || (activeTab === 'mission' && $missionManagerOpen && $missionManagerSelectedId != null)} class:nav-panel-minimized={logbookMinimized && logbookHasFlightOnMap} onclick={() => { if (logbookMinimized) expandLogbook(); }}>
