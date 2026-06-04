@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Experimental French locale (`fr`)** — selectable in Settings → Language (Français). Full key
+  parity with `en` (UAV/FPV terms kept English). _Not on the mandatory dual-update list_ — new
+  `en` keys fall back to English via `fallbackLocale` until `fr` is updated.
+
 ### Fixed
 - German locale: added the missing `survey.clockwise` / `survey.counterClockwise` (CW/CCW) keys
   (they previously fell back to the key/English).
