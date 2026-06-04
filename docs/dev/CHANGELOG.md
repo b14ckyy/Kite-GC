@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **FlightDetail** mission/battery link affordances migrated to the shared `Button` `compact`
   variant (jump chips + link/unlink/save controls; new `link` chain icon in the registry),
   replacing the ad-hoc inline chips for a consistent panel-framework look.
+- **Logbook group aggregate stats** — each tree-group header (both levels) now shows the group's
+  total flight time + distance next to the flight count (unit-aware), computed in `buildFlightTree()`.
 
 ### Added — Reusable panel framework + per-panel migration
 - **`PanelShell` + control library** (`Button`, `Toggle`, `SegmentedToggle`, flat-SVG icon

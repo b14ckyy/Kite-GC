@@ -289,7 +289,7 @@ This document tracks planned features, organized by milestone.
   - Date → Location → Aircraft → Flights by time (chronological)
   - Aircraft → Date → Location → Flights by time (per-model history)
 - [x] Collapsible group headers with flight count (two-level tree, ▾/▸ toggle)
-- [ ] Aggregate stats per group (total flight time, total distance, etc.)
+- [x] Aggregate stats per group (Σ flight time + distance shown in both tree-header levels, unit-aware) — computed in `buildFlightTree()`
 - [x] Flight detail view with metadata summary (location, weather, aircraft, source)
 - [x] Weather editor: compact read-only display + pencil icon → editor form with stepper buttons
 - [x] `flightlog_update_weather` command + `updateFlightWeather()` store function
