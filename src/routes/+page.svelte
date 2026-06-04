@@ -23,6 +23,11 @@
   import StatusBar from "$lib/components/StatusBar.svelte";
   import NavRail from "$lib/components/NavRail.svelte";
   import PanelPlayground from "$lib/components/panel/PanelPlayground.svelte";
+  import UavInfoPanelV2 from "$lib/components/UavInfoPanelV2.svelte";
+  import LogbookPanelV2 from "$lib/components/logbook/LogbookPanelV2.svelte";
+  import MissionPanelV2 from "$lib/components/mission/MissionPanelV2.svelte";
+  import VideoPanelV2 from "$lib/components/video/VideoPanelV2.svelte";
+  import SettingsPanelV2 from "$lib/components/SettingsPanelV2.svelte";
   import type { PanelVariant } from "$lib/components/panel/PanelShell.svelte";
   import { PlaybackController } from '$lib/controllers/playbackController';
   import { refreshSerialPorts, connectFC, disconnectFC, scanBleDevices } from '$lib/controllers/connectionController';
@@ -53,7 +58,7 @@
   import TerrainAnalysisPanel from "$lib/components/terrain/TerrainAnalysisPanel.svelte";
   import { editMode, replayActive, mission, missionFlags, missionDownload, missionUpload, missionFcInfo, markMissionSynced, loadedMissionId, missionSetWaypoints } from "$lib/stores/mission";
   import { terrainAnalysis, patchTerrainAnalysis } from "$lib/stores/terrainAnalysis";
-  import type { InterfaceSettings, PanelConfig } from "$lib/stores/settings";
+  import type { AppSettings, InterfaceSettings, PanelConfig } from "$lib/stores/settings";
   import { layout, GRID_DEFAULTS } from '$lib/stores/layout';
   import {
     getDefaultFlightlogPath,
@@ -372,12 +377,11 @@
     { id: "settings-v2", label: () => $t('nav.settings'), icon: ICON_SETTINGS },
     { id: "logbook-v2", label: () => $t('nav.logbook'), icon: ICON_LOGBOOK },
     { id: "mission-v2", label: () => $t('nav.mission'), icon: ICON_MISSION },
-    { id: "terrain-v2", label: () => $t('nav.terrain'), icon: ICON_TERRAIN },
     { id: "video-v2", label: () => $t('nav.video'), icon: ICON_VIDEO },
   ];
   const V2_VARIANT: Record<string, PanelVariant> = {
     "uav-info-v2": "info", "settings-v2": "compact", "logbook-v2": "advanced",
-    "mission-v2": "compact", "terrain-v2": "fullscreen", "video-v2": "compact",
+    "mission-v2": "compact", "video-v2": "compact",
   };
   // Permanent DEV-only reference panel (empty framework playground) at the end of the rail —
   // a "DEV" text button instead of an icon; only present in dev builds (kept after migration).
@@ -472,6 +476,41 @@
     }
   }
 
+  // Persist a settings patch + mirror it into the local reactive vars the page binds. Shared by
+  // the legacy SettingsPanel and the new SettingsPanelV2.
+  function applySettingsPatch(patch: Partial<AppSettings>) {
+    settings.patch(patch);
+    if (patch.attitudeRateHz != null) attitudeRateHz = patch.attitudeRateHz;
+    if (patch.positionRateHz != null) positionRateHz = patch.positionRateHz;
+    if (patch.airspeedEnabled != null) airspeedEnabled = patch.airspeedEnabled;
+    if (patch.flightLoggingEnabled != null) flightLoggingEnabled = patch.flightLoggingEnabled;
+    if (patch.flightRecordingEnabled != null) flightRecordingEnabled = patch.flightRecordingEnabled;
+    if (patch.flightLogRawEnabled != null) flightLogRawEnabled = patch.flightLogRawEnabled;
+    if (patch.flightLogRawAlways != null) flightLogRawAlways = patch.flightLogRawAlways;
+    if (patch.flightLogDbPath != null) flightLogDbPath = patch.flightLogDbPath;
+    if (patch.mapProvider != null) mapProvider = patch.mapProvider;
+    if (patch.mapCacheMaxMB != null) mapCacheMaxMB = patch.mapCacheMaxMB;
+    if (patch.cesiumIonToken != null) cesiumIonToken = patch.cesiumIonToken;
+    if (patch.altitudeCurtain3D != null) altitudeCurtain3D = patch.altitudeCurtain3D;
+    if (patch.defaultWpAltitudeM != null) defaultWpAltitudeM = patch.defaultWpAltitudeM;
+    if (patch.defaultPhTimeSec != null) defaultPhTimeSec = patch.defaultPhTimeSec;
+    if (patch.warnAltitudeM != null) warnAltitudeM = patch.warnAltitudeM;
+    if (patch.uiScale != null) uiScale = patch.uiScale;
+    if (patch.interface != null) {
+      interfaceSettings = { ...interfaceSettings, ...patch.interface };
+      if (selectedFlight) {
+        weatherTempC = weatherTempDisplayFromC(
+          selectedFlight.weather_temp_c != null ? String(selectedFlight.weather_temp_c) : '',
+          { ...interfaceSettings, ...patch.interface },
+        );
+        weatherWindMs = weatherWindDisplayFromMs(
+          selectedFlight.weather_wind_ms != null ? String(selectedFlight.weather_wind_ms) : '',
+          { ...interfaceSettings, ...patch.interface },
+        );
+      }
+    }
+  }
+
   function selectTab(tabId: string) {
     // Terrain Analysis is a full-width overlay shown in place of the panel content.
     // Like every other nav-rail button it only ever OPENS/selects (re-clicking the active
@@ -486,7 +525,7 @@
     if (tabId !== 'mission') editMode.set(false);
     activeTab = tabId;
     settings.patch({ activeTab });
-    if (tabId === 'logbook') {
+    if (tabId === 'logbook' || tabId === 'logbook-v2') {
       logbookMinimized = false;
       void loadLogbook();
     }
@@ -1139,7 +1178,7 @@
     } catch {
       defaultFlightLogPath = '';
     }
-    if (activeTab === 'logbook') {
+    if (activeTab === 'logbook' || activeTab === 'logbook-v2') {
       await loadLogbook();
     }
   }
@@ -1585,10 +1624,83 @@
     onSelectTab={selectTab}
   />
 
-  <!-- New framework panels (Phase 0: placeholder shells; docs/dev/PANEL_FRAMEWORK.md) -->
+  <!-- New framework panels (migration in progress; docs/dev/PANEL_FRAMEWORK.md). Migrated panels
+       render their real (PanelShell) component behind the v2 rail button for side-by-side review;
+       the rest still show the empty playground. -->
   {#if navPanelOpen && isFrameworkPanel}
-    {@const fp = [...v2Tabs, devTab].find(t => t.id === activeTab)}
-    <PanelPlayground initial={V2_VARIANT[activeTab] ?? 'compact'} label={fp ? fp.label() : activeTab} onClose={toggleNavPanel} />
+    {#if activeTab === 'uav-info-v2'}
+      <UavInfoPanelV2 {connStatus} {fcInfo} />
+    {:else if activeTab === 'logbook-v2'}
+      <LogbookPanelV2
+        {flightLoggingEnabled}
+        {logbookMinimized}
+        {logbookLoading}
+        {blackboxImporting}
+        {blackboxImportProgress}
+        {flightSummaries}
+        {selectedFlight}
+        {selectedFlightId}
+        {selectedFlightTrackCount}
+        {interfaceSettings}
+        bind:selectedFlightNotes
+        bind:weatherTempC
+        bind:weatherWindMs
+        bind:weatherWindDir
+        bind:weatherDesc
+        bind:weatherEditing
+        onExpand={expandLogbook}
+        onLoadLogbook={loadLogbook}
+        onImportBlackbox={importBlackbox}
+        onSelectFlight={selectFlight}
+        onSaveNotes={saveSelectedFlightNotes}
+        onSaveWeather={saveSelectedFlightWeather}
+        onSaveCraftName={saveSelectedFlightCraftName}
+        onSavePilot={saveSelectedFlightPilot}
+        onDeleteFlight={removeSelectedFlight}
+        onExportFlights={exportFlightsToKflight}
+        onExportBlackbox={exportBlackbox}
+        onExportTrack={exportTrack}
+        onImportKflight={importKflightFile}
+      />
+    {:else if activeTab === 'mission-v2'}
+      <MissionPanelV2 />
+    {:else if activeTab === 'video-v2'}
+      <VideoPanelV2 />
+    {:else if activeTab === 'settings-v2'}
+      <SettingsPanelV2
+        localeValue={$locale ?? 'en'}
+        {uiScale}
+        {mapProvider}
+        {mapCacheMaxMB}
+        {cacheStats}
+        {cesiumIonToken}
+        {altitudeCurtain3D}
+        {attitudeRateHz}
+        {positionRateHz}
+        {airspeedEnabled}
+        {flightLoggingEnabled}
+        {flightRecordingEnabled}
+        {flightLogRawEnabled}
+        {flightLogRawAlways}
+        {flightLogDbPath}
+        {defaultFlightLogPath}
+        {defaultWpAltitudeM}
+        {defaultPhTimeSec}
+        {warnAltitudeM}
+        {interfaceSettings}
+        {isWidgetActive}
+        {getWidgetPanelLabel}
+        onPatch={applySettingsPatch}
+        onSetCacheMaxMB={setCacheMaxMB}
+        onClearCache={clearCache}
+        onChooseFlightLogPath={chooseFlightLogPath}
+        onResetFlightLogPath={resetFlightLogPath}
+        onToggleWidget={toggleWidget}
+      />
+    {:else}
+      {@const fp = [...v2Tabs, devTab].find(t => t.id === activeTab)}
+      <PanelPlayground initial={V2_VARIANT[activeTab] ?? 'compact'} label={fp ? fp.label() : activeTab} />
+    {/if}
   {/if}
 
   <!-- Floating panel content (hidden while the terrain overlay is open) -->
@@ -1626,41 +1738,7 @@
             {interfaceSettings}
             {isWidgetActive}
             {getWidgetPanelLabel}
-            onPatch={(patch) => {
-              settings.patch(patch);
-              if (patch.attitudeRateHz != null) attitudeRateHz = patch.attitudeRateHz;
-              if (patch.positionRateHz != null) positionRateHz = patch.positionRateHz;
-              if (patch.airspeedEnabled != null) airspeedEnabled = patch.airspeedEnabled;
-              if (patch.flightLoggingEnabled != null) flightLoggingEnabled = patch.flightLoggingEnabled;
-              if (patch.flightRecordingEnabled != null) flightRecordingEnabled = patch.flightRecordingEnabled;
-              if (patch.flightLogRawEnabled != null) flightLogRawEnabled = patch.flightLogRawEnabled;
-              if (patch.flightLogRawAlways != null) flightLogRawAlways = patch.flightLogRawAlways;
-              if (patch.flightLogDbPath != null) flightLogDbPath = patch.flightLogDbPath;
-              if (patch.mapProvider != null) mapProvider = patch.mapProvider;
-              if (patch.mapCacheMaxMB != null) mapCacheMaxMB = patch.mapCacheMaxMB;
-              if (patch.cesiumIonToken != null) cesiumIonToken = patch.cesiumIonToken;
-              if (patch.altitudeCurtain3D != null) altitudeCurtain3D = patch.altitudeCurtain3D;
-              if (patch.defaultWpAltitudeM != null) defaultWpAltitudeM = patch.defaultWpAltitudeM;
-              if (patch.defaultPhTimeSec != null) defaultPhTimeSec = patch.defaultPhTimeSec;
-              if (patch.warnAltitudeM != null) warnAltitudeM = patch.warnAltitudeM;
-              if (patch.uiScale != null) uiScale = patch.uiScale;
-              if (patch.interface != null) {
-                interfaceSettings = {
-                  ...interfaceSettings,
-                  ...patch.interface,
-                };
-                if (selectedFlight) {
-                  weatherTempC = weatherTempDisplayFromC(
-                    selectedFlight.weather_temp_c != null ? String(selectedFlight.weather_temp_c) : '',
-                    { ...interfaceSettings, ...patch.interface },
-                  );
-                  weatherWindMs = weatherWindDisplayFromMs(
-                    selectedFlight.weather_wind_ms != null ? String(selectedFlight.weather_wind_ms) : '',
-                    { ...interfaceSettings, ...patch.interface },
-                  );
-                }
-              }
-            }}
+            onPatch={applySettingsPatch}
             onSetCacheMaxMB={setCacheMaxMB}
             onClearCache={clearCache}
             onChooseFlightLogPath={chooseFlightLogPath}

@@ -7,8 +7,8 @@
   import SegmentedToggle from './SegmentedToggle.svelte';
   import Toggle from './Toggle.svelte';
 
-  let { initial = 'compact', label = 'Panel', onClose = () => {} }:
-    { initial?: PanelVariant; label?: string; onClose?: () => void } = $props();
+  let { initial = 'compact', label = 'Panel' }:
+    { initial?: PanelVariant; label?: string } = $props();
 
   // svelte-ignore state_referenced_locally
   let variant = $state<PanelVariant>(initial);
@@ -30,7 +30,7 @@
   {/each}
 </div>
 
-<PanelShell {variant} title={label} {onClose} detailTitle="Detail region">
+<PanelShell {variant} title={label} detailTitle="Detail region">
   {#snippet toolbar()}
     {#if variant !== 'info'}<div class="pg-ph pg-ph-row">toolbar — title · buttons · search</div>{/if}
   {/snippet}

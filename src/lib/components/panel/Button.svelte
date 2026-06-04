@@ -18,6 +18,12 @@
     check: '<path d="M5 13l4 4L19 6"/>',
     refresh: '<path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v5h-5"/>',
     warning: '<path d="M12 3.5 21.5 20H2.5L12 3.5Z"/><path d="M12 10v4.5"/><path d="M12 17.5h.01"/>',
+    battery: '<g fill="currentColor" stroke="none"><rect x="9.5" y="2.5" width="5" height="2.2" rx="0.6"/><rect x="6.5" y="4.5" width="11" height="17" rx="2.2"/></g>',
+    undo: '<path d="M3 8h12a5 5 0 0 1 0 10h-5"/><path d="M7 4 3 8l4 4"/>',
+    redo: '<path d="M21 8H9a5 5 0 0 0 0 10h5"/><path d="M17 4l4 4-4 4"/>',
+    library: '<rect x="4" y="4" width="14" height="16" rx="1.5"/><path d="M8 4v16"/><path d="M11 8.5h4M11 12h4"/>',
+    map: '<path d="M9 4 3.5 6v14L9 18l6 2 5.5-2V4L15 6 9 4Z"/><path d="M9 4v14M15 6v14"/>',
+    folder: '<path d="M4 6h5l2 2h9v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6Z"/>',
   };
   export type ButtonIcon = keyof typeof ICONS;
 

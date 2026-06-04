@@ -13,6 +13,7 @@
   import { get } from 'svelte/store';
   import { locale } from 'svelte-i18n';
   import WeatherEditor from './WeatherEditor.svelte';
+  import Button from '$lib/components/panel/Button.svelte';
 
   let {
     flight,
@@ -468,9 +469,9 @@
 
   {#if !minimized}
     <div class="setting-row">
-      <button class="cache-clear-btn" onclick={onSaveNotes}>{$t('logbook.saveNotes')}</button>
-      <button class="cache-clear-btn" onclick={onExportTrack}>{$t('logbook.exportTrack')}</button>
-      <button class="cache-clear-btn logbook-danger" onclick={onDeleteFlight}>{$t('logbook.deleteFlight')}</button>
+      <Button variant="standard" icon="save" onclick={onSaveNotes}>{$t('logbook.saveNotes')}</Button>
+      <Button variant="data" icon="export" onclick={onExportTrack}>{$t('logbook.exportTrack')}</Button>
+      <Button variant="danger" icon="delete" onclick={onDeleteFlight}>{$t('logbook.deleteFlight')}</Button>
     </div>
   {/if}
 </div>
@@ -641,42 +642,4 @@
     opacity: 0.85;
   }
 
-  /* Unified app button style (matches the Mission Manager): accent-blue hover for
-     regular actions; destructive actions use .logbook-danger (red). */
-  .cache-clear-btn {
-    font-size: 11px;
-    padding: 4px 10px;
-    background: #434343;
-    border: 1px solid #555;
-    border-radius: 3px;
-    color: #ccc;
-    cursor: pointer;
-    transition: background 0.15s;
-    white-space: nowrap;
-  }
-
-  .cache-clear-btn:hover:not(:disabled) {
-    background: #37a8db;
-    border-color: #37a8db;
-    color: #fff;
-  }
-
-  .cache-clear-btn:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
-
-  .logbook-danger {
-    background: #7a2020;
-    border-color: #8b2525;
-    color: #e8c0c0;
-  }
-
-  /* Specificity bumped (.cache-clear-btn.logbook-danger) so the danger hover wins over the
-     generic .cache-clear-btn:hover:not(:disabled) accent-blue rule. */
-  .cache-clear-btn.logbook-danger:hover:not(:disabled) {
-    background: #9b1f1f;
-    border-color: #9b1f1f;
-    color: #fff;
-  }
 </style>

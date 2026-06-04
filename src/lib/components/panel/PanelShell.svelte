@@ -12,7 +12,6 @@
   let {
     variant = 'compact',
     title = '',
-    onClose = undefined,
     headerActions = undefined,
     toolbar = undefined,
     body = undefined,
@@ -27,7 +26,6 @@
   }: {
     variant?: PanelVariant;
     title?: string;
-    onClose?: () => void;
     /** Extra controls in the (left/main) header, right of the title. */
     headerActions?: Snippet;
     /** Optional action row under the header. */
@@ -57,7 +55,6 @@
     <header class="ps-head">
       <span class="ps-title">{title}</span>
       {#if headerActions}<div class="ps-head-actions">{@render headerActions()}</div>{/if}
-      {#if onClose}<button class="ps-close" onclick={onClose} aria-label="Close">✕</button>{/if}
     </header>
     <div class="ps-fs-row">
       {#if params}<aside class="ps-params">{@render params()}</aside>{/if}
@@ -65,12 +62,12 @@
         {#if body}{@render body()}{:else if children}{@render children()}{/if}
       </div>
     </div>
+    {#if footer}<footer class="ps-fs-foot">{@render footer()}</footer>{/if}
   {:else}
     <section class="ps-col ps-col-main">
       <header class="ps-head">
         <span class="ps-title">{title}</span>
         {#if headerActions}<div class="ps-head-actions">{@render headerActions()}</div>{/if}
-        {#if onClose}<button class="ps-close" onclick={onClose} aria-label="Close">✕</button>{/if}
       </header>
       {#if toolbar}<div class="ps-toolbar">{@render toolbar()}</div>{/if}
       <div class="ps-field">
@@ -79,7 +76,7 @@
       {#if footer}<footer class="ps-foot">{@render footer()}</footer>{/if}
     </section>
 
-    {#if variant === 'advanced'}
+    {#if variant === 'advanced' && (detail || detailToolbar || detailActions || detailFooter || detailTitle)}
       <section class="ps-col ps-col-detail">
         <header class="ps-head">
           <span class="ps-title">{detailTitle}</span>
@@ -138,12 +135,15 @@
     height: auto;
     max-height: calc(100% - 53px - var(--grid-bottom-height) - 24px - 12px);
   }
+  /* Widths are driven by the *field* size (the thin-framed working box), which the panel layouts
+     were tuned against: 380px main field, 500px detail field. Panel width = field + the column's
+     8px padding each side (+ the 1px shell border): 380 + 16 = 396, 500 + 16 = 516. */
   .ps-compact {
-    width: 420px;
+    width: 398px;
   }
   .ps-advanced {
     flex-direction: row;
-    width: 920px;
+    width: 914px;
     max-width: calc(100% - 62px - var(--grid-side-width) - 54px - 12px);
   }
 
@@ -180,18 +180,27 @@
     min-height: 0;
     padding: 8px;
     gap: 6px;
+    /* When the field can't shrink below its 200px minimum and header+field+footer no longer fit
+       the available height, the whole column scrolls (header/footer included). With room to
+       spare the field flexes to fill and only it scrolls (footer stays pinned). */
+    overflow-y: auto;
   }
   .ps-compact .ps-col-main,
   .ps-info .ps-col-main {
     flex: 1;
     width: 100%;
   }
+  /* Advanced: fixed-width main column (380px field + 16px padding); the detail column fills the
+     rest → a 500px field. Separation is by spacing only — no vertical divider line. */
   .ps-advanced .ps-col-main {
+    flex: 0 0 396px;
+  }
+  /* Sole column (no detail content, e.g. the wide Battery Manager subview) → fill the width. */
+  .ps-advanced .ps-col-main:last-child {
     flex: 1;
-    border-right: 1px solid rgba(255, 255, 255, 0.08);
   }
   .ps-advanced .ps-col-detail {
-    flex: 2;
+    flex: 1;
   }
 
   /* ── Header / toolbar / framed field / footer ────────────── */
@@ -211,26 +220,17 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  /* Fullscreen/wide-compact: title is content-width so the header actions sit left, right after
+     it (like the original terrain layout) — the free space stays on the right. */
+  .ps-fullscreen .ps-title,
+  .ps-wide-compact .ps-title {
+    flex: 0 1 auto;
+  }
   .ps-head-actions {
     display: flex;
     align-items: center;
     gap: 4px;
     flex-shrink: 0;
-  }
-  .ps-close {
-    flex-shrink: 0;
-    width: 22px;
-    height: 22px;
-    border: 1px solid #555;
-    border-radius: 4px;
-    background: #2a2a2a;
-    color: #ccc;
-    cursor: pointer;
-    line-height: 1;
-  }
-  .ps-close:hover {
-    background: rgba(55, 168, 219, 0.18);
-    color: #e0e0e0;
   }
 
   .ps-toolbar {
@@ -241,19 +241,21 @@
     flex-shrink: 0;
   }
 
-  /* The thin-line framed working field (matches the Flight Logbook list frame). */
+  /* The thin-line framed working field (matches the Flight Logbook list frame). Keeps a minimum
+     usable height; below that the column (not the field) scrolls — see .ps-col. */
   .ps-field {
     flex: 1;
-    min-height: 0;
+    min-height: 200px;
     overflow: auto;
     border: 1px solid #555;
     border-radius: 4px;
     background: rgba(0, 0, 0, 0.12);
     padding: 6px;
   }
-  /* Info panels are unframed and content-sized. */
+  /* Info panels are unframed and content-sized (no minimum height). */
   .ps-info .ps-field {
     flex: 0 0 auto;
+    min-height: 0;
     border: none;
     background: none;
     padding: 0;
@@ -291,6 +293,11 @@
     min-width: 0;
     overflow: auto;
     padding: 10px;
+  }
+  /* Fullscreen / Wide-Compact bottom bar (e.g. terrain readouts + hover info). */
+  .ps-fs-foot {
+    flex: 0 0 auto;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
   }
 
   /* Enter animation on first open (horizontal slide + fade). */

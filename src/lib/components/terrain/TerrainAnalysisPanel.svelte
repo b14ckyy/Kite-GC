@@ -52,6 +52,9 @@
   import TerrainProfileChart, { type HoverInfo } from './TerrainProfileChart.svelte';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import UnitStepper from '$lib/components/UnitStepper.svelte';
+  import PanelShell from '$lib/components/panel/PanelShell.svelte';
+  import Button from '$lib/components/panel/Button.svelte';
+  import SegmentedToggle from '$lib/components/panel/SegmentedToggle.svelte';
   import { convertAltitude, convertDistance } from '$lib/utils/units';
   import type { InterfaceSettings } from '$lib/stores/settings';
   import type { DialogOptions } from '$lib/components/ConfirmDialog.svelte';
@@ -426,59 +429,31 @@
   );
 </script>
 
-<div class="overlay" class:compact={$terrainAnalysis.compact}>
-  <!-- Header -->
-  <div class="header">
-    <div class="title">⛰ {$t('terrain.title')}</div>
+{#snippet headerActions()}
+  <Button variant="mode" active={$terrainAnalysis.compact} icon="map" onclick={toggleCompact} title={$t('terrain.showMapHint')}>
+    {$t('terrain.showMap')}
+  </Button>
+  <SegmentedToggle
+    options={[{ value: 'waypoint', label: $t('terrain.waypointMode') }, { value: 'track', label: $t('terrain.trackMode') }]}
+    value={$terrainAnalysis.viewMode}
+    onchange={(v) => setMode(v as 'waypoint' | 'track')}
+  />
+  <SegmentedToggle
+    options={[{ value: 'msl', label: $t('terrain.datumMsl') }, { value: 'agl', label: $t('terrain.datumAgl') }]}
+    value={$terrainAnalysis.datum}
+    onchange={(v) => setDatum(v as 'msl' | 'agl')}
+  />
+  {#if live}
+    <Button variant="mode" active={$terrainAnalysis.follow} onclick={toggleFollow} title={$t('terrain.followHint')}>
+      {$t('terrain.follow')}
+    </Button>
+  {/if}
+  <Button variant="standard" icon="refresh" onclick={resetTerrainView} title={$t('terrain.resetView')} />
+{/snippet}
 
-    <button
-      class="map-toggle"
-      class:active={$terrainAnalysis.compact}
-      onclick={toggleCompact}
-      title={$t('terrain.showMapHint')}
-    >
-      🗺 {$t('terrain.showMap')}
-    </button>
-
-    <div class="seg">
-      <button class:active={$terrainAnalysis.viewMode === 'waypoint'} onclick={() => setMode('waypoint')}>
-        {$t('terrain.waypointMode')}
-      </button>
-      <button class:active={$terrainAnalysis.viewMode === 'track'} onclick={() => setMode('track')}>
-        {$t('terrain.trackMode')}
-      </button>
-    </div>
-
-    <div class="seg">
-      <button class:active={$terrainAnalysis.datum === 'msl'} onclick={() => setDatum('msl')}>
-        {$t('terrain.datumMsl')}
-      </button>
-      <button class:active={$terrainAnalysis.datum === 'agl'} onclick={() => setDatum('agl')}>
-        {$t('terrain.datumAgl')}
-      </button>
-    </div>
-
-    {#if live}
-      <button
-        class="map-toggle"
-        class:active={$terrainAnalysis.follow}
-        onclick={toggleFollow}
-        title={$t('terrain.followHint')}
-      >
-        ⇥ {$t('terrain.follow')}
-      </button>
-    {/if}
-
-    <button class="ghost-btn" onclick={resetTerrainView} title={$t('terrain.resetView')}>⟲</button>
-
-    <div class="spacer"></div>
-  </div>
-
-  <!-- Body -->
-  <div class="body">
-    <!-- Controls -->
-    <div class="controls">
-      <div class="ctrl">
+{#snippet params()}
+  <div class="controls">
+    <div class="ctrl" class:ctrl-row={$terrainAnalysis.compact}>
         <span>{$t('terrain.groundClearance')}</span>
         <UnitStepper
           bind:value={groundClearance}
@@ -510,20 +485,11 @@
           </label>
 
           {#if $terrainAnalysis.correctionEnabled}
-            <div class="seg corr-mode">
-              <button
-                class:active={$terrainAnalysis.correctionMode === 'follow'}
-                onclick={() => setCorrectionMode('follow')}
-              >
-                {$t('terrain.terrainFollow')}
-              </button>
-              <button
-                class:active={$terrainAnalysis.correctionMode === 'check'}
-                onclick={() => setCorrectionMode('check')}
-              >
-                {$t('terrain.clearanceCheck')}
-              </button>
-            </div>
+            <SegmentedToggle
+              options={[{ value: 'follow', label: $t('terrain.terrainFollow') }, { value: 'check', label: $t('terrain.clearanceCheck') }]}
+              value={$terrainAnalysis.correctionMode}
+              onchange={(v) => setCorrectionMode(v as 'follow' | 'check')}
+            />
 
             <div class="ctrl">
               <span>{$t('terrain.range')}</span>
@@ -539,13 +505,15 @@
               {$t('terrain.fixedWing')}
             </label>
             {#if $terrainAnalysis.fixedWing}
-              <div class="ctrl">
-                <span>{$t('terrain.climbAngle')}</span>
-                <NumberStepper bind:value={$terrainAnalysis.climbAngleLimit} min={0} max={89} step={1} decimals={0} unit="°" />
-              </div>
-              <div class="ctrl">
-                <span>{$t('terrain.descentAngle')}</span>
-                <NumberStepper bind:value={$terrainAnalysis.descentAngleLimit} min={0} max={89} step={1} decimals={0} unit="°" />
+              <div class="ctrl-2col">
+                <div class="ctrl">
+                  <span>{$t('terrain.climbAngle')}</span>
+                  <NumberStepper bind:value={$terrainAnalysis.climbAngleLimit} min={0} max={89} step={1} decimals={0} unit="°" />
+                </div>
+                <div class="ctrl">
+                  <span>{$t('terrain.descentAngle')}</span>
+                  <NumberStepper bind:value={$terrainAnalysis.descentAngleLimit} min={0} max={89} step={1} decimals={0} unit="°" />
+                </div>
               </div>
             {/if}
 
@@ -561,8 +529,8 @@
                 <span>{$t('terrain.changed')}: <b>{correction.changedCount}</b></span>
                 <span>{$t('terrain.minClearance')}: <b>{correction.minClearanceAfter != null ? fmtAlt(correction.minClearanceAfter) : '—'}</b></span>
               </div>
-              {#if correction.climbForcedAboveClearance}<p class="corr-warn">{$t('terrain.warnClimbForced')}</p>{/if}
-              {#if correction.unresolvableLeg}<p class="corr-warn">{$t('terrain.warnUnresolvable')}</p>{/if}
+              {#if correction.changedCount > 0 && correction.climbForcedAboveClearance}<p class="corr-warn">{$t('terrain.warnClimbForced')}</p>{/if}
+              {#if correction.changedCount > 0 && correction.unresolvableLeg}<p class="corr-warn">{$t('terrain.warnUnresolvable')}</p>{/if}
               <button
                 class="apply-btn"
                 disabled={applying || correction.changedCount === 0}
@@ -575,10 +543,11 @@
         </div>
       {/if}
 
-      <p class="hint">{$t('terrain.zoomHint')}</p>
+      {#if !$terrainAnalysis.compact}<p class="hint">{$t('terrain.zoomHint')}</p>{/if}
     </div>
+  {/snippet}
 
-    <!-- Chart -->
+  {#snippet body()}
     <div class="chart-area">
       {#if loading}
         <div class="state">{$t('terrain.loading')}</div>
@@ -608,9 +577,9 @@
         <div class="state">{$t('terrain.insufficientWps')}</div>
       {/if}
     </div>
-  </div>
+  {/snippet}
 
-  <!-- Readouts -->
+  {#snippet footer()}
   <div class="readouts">
     <div class="readout" class:warn={belowClearance}>
       <span class="rk">{$t('terrain.minClearance')}</span>
@@ -650,143 +619,27 @@
       </div>
     {/if}
   </div>
-</div>
+  {/snippet}
+
+  <PanelShell
+    variant={$terrainAnalysis.compact ? 'wide-compact' : 'fullscreen'}
+    title={$t('terrain.title')}
+    {headerActions}
+    {params}
+    {body}
+    {footer}
+  />
 
 <style>
-  .overlay {
-    position: absolute;
-    /* Symmetric inset: leave the same free margin on the right/bottom as the
-       nav rail occupies on the left, so the map + widgets stay visible around it.
-       Driven by height/right (not bottom) so full↔compact can animate. */
-    top: 62px;
-    left: 62px;
-    right: 62px;
-    height: calc(100% - 124px);
-    z-index: 160;
-    transition: height 0.25s ease, right 0.25s ease;
-    display: flex;
-    flex-direction: column;
-    background: rgba(40, 40, 40, 0.96);
-    border: 1px solid rgba(55, 168, 219, 0.4);
-    border-radius: 10px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.55);
-    backdrop-filter: blur(14px);
-    overflow: hidden;
-    animation: overlay-in 0.18s ease-out;
-  }
-  /* Compact: short top-docked strip; map stays visible above & to the right
-     (right edge stops before the side widget dock so widgets aren't covered) */
-  .overlay.compact {
-    height: max(20vh, 160px);
-    right: calc(var(--grid-side-width) + 54px + 6px);
-  }
-  .overlay.compact .hint {
-    display: none;
-  }
-
-  @keyframes overlay-in {
-    from {
-      opacity: 0;
-      transform: scale(0.99);
-    }
-    to {
-      opacity: 1;
-      transform: scale(1);
-    }
-  }
-
-  .map-toggle {
-    background: rgba(46, 46, 46, 0.6);
-    border: 1px solid rgba(55, 168, 219, 0.3);
-    border-radius: 6px;
-    color: #b8b8b8;
-    font-size: 12px;
-    padding: 5px 10px;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: background-color 0.15s, color 0.15s, border-color 0.15s;
-  }
-  .map-toggle:hover {
-    background: rgba(55, 168, 219, 0.15);
-    color: #e0e0e0;
-  }
-  .map-toggle.active {
-    background: rgba(55, 168, 219, 0.28);
-    color: #37a8db;
-    border-color: #37a8db;
-  }
-
-  .header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 8px 12px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    flex: 0 0 auto;
-  }
-  .title {
-    font-size: 14px;
-    font-weight: 600;
-    color: #37a8db;
-  }
   .spacer {
     flex: 1;
   }
 
-  .seg {
-    display: flex;
-    border: 1px solid rgba(55, 168, 219, 0.3);
-    border-radius: 6px;
-    overflow: hidden;
-  }
-  .seg button {
-    background: rgba(46, 46, 46, 0.6);
-    border: none;
-    color: #949494;
-    font-size: 12px;
-    padding: 5px 12px;
-    cursor: pointer;
-    transition: background-color 0.15s, color 0.15s;
-  }
-  .seg button:hover {
-    color: #e0e0e0;
-    background: rgba(55, 168, 219, 0.15);
-  }
-  .seg button.active {
-    background: rgba(55, 168, 219, 0.28);
-    color: #37a8db;
-  }
-
-  .ghost-btn {
-    width: 30px;
-    height: 28px;
-    background: rgba(46, 46, 46, 0.6);
-    border: 1px solid rgba(55, 168, 219, 0.3);
-    border-radius: 6px;
-    color: #b8b8b8;
-    cursor: pointer;
-    font-size: 14px;
-    transition: background-color 0.15s, color 0.15s;
-  }
-  .ghost-btn:hover {
-    background: rgba(55, 168, 219, 0.2);
-    color: #e0e0e0;
-  }
-
-  .body {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-  }
-
+  /* Params slot content (PanelShell .ps-params provides width/padding/border/scroll). */
   .controls {
-    flex: 0 0 200px;
-    padding: 12px;
-    border-right: 1px solid rgba(255, 255, 255, 0.08);
     display: flex;
     flex-direction: column;
     gap: 16px;
-    overflow-y: auto;
   }
   .ctrl {
     display: flex;
@@ -794,6 +647,23 @@
     gap: 6px;
     font-size: 12px;
     color: #b8b8b8;
+  }
+  /* Compact (wide) mode: label + stepper on one row to save vertical space so the params
+     column needs no scrollbar (correction + hint are hidden in compact). */
+  .ctrl.ctrl-row {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  /* Climb + Descent angle side by side (there's room in the params column). */
+  .ctrl-2col {
+    display: flex;
+    gap: 10px;
+  }
+  .ctrl-2col > .ctrl {
+    flex: 1;
+    min-width: 0;
   }
 
   .legend {
@@ -932,10 +802,8 @@
   }
 
   .chart-area {
-    flex: 1;
-    min-width: 0;
     position: relative;
-    padding: 6px;
+    height: 100%;
   }
   .state {
     position: absolute;
@@ -950,13 +818,12 @@
     color: #e0a030;
   }
 
+  /* Footer slot content (PanelShell .ps-fs-foot provides the top border). */
   .readouts {
     display: flex;
     align-items: center;
     gap: 18px;
     padding: 7px 14px;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    flex: 0 0 auto;
     font-size: 12px;
   }
   .readout {
