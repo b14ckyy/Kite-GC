@@ -3,6 +3,9 @@
   // placeholder content so the empty framework layouts + live variant transitions can be
   // validated before any real wiring. Removed once panels are migrated.
   import PanelShell, { type PanelVariant } from './PanelShell.svelte';
+  import Button from './Button.svelte';
+  import SegmentedToggle from './SegmentedToggle.svelte';
+  import Toggle from './Toggle.svelte';
 
   let { initial = 'compact', label = 'Panel', onClose = () => {} }:
     { initial?: PanelVariant; label?: string; onClose?: () => void } = $props();
@@ -15,6 +18,9 @@
   $effect(() => { variant = initial; });
 
   const variants: PanelVariant[] = ['info', 'compact', 'advanced', 'wide-compact', 'fullscreen'];
+
+  let segVal = $state('rec'); // segmented-toggle demo
+  let togVal = $state(true); // toggle demo
 </script>
 
 <!-- Floating test switcher (outside the panel so it doesn't affect the panel's width). -->
@@ -38,15 +44,33 @@
         <div class="pg-irow"><span>Type</span><span>Airplane</span></div>
       </div>
     {:else}
-      <div class="pg-ph pg-fill">
-        <div class="pg-note">{variant} · framed working field (lists / waypoints / content)</div>
-        {#each Array(12) as _, i}<div class="pg-line">placeholder row {i + 1}</div>{/each}
+      <div class="pg-note">Button types</div>
+      <div class="pg-gallery">
+        <Button variant="standard" icon="edit">Standard</Button>
+        <Button variant="mode" active>Mode A</Button>
+        <Button variant="mode">Mode B</Button>
+        <SegmentedToggle options={[{ value: 'rec', label: 'Recording' }, { value: 'bbx', label: 'Blackbox' }]} value={segVal} onchange={(v) => (segVal = v)} />
+        <Button variant="data" icon="download">FC Download</Button>
+        <Button variant="data" icon="upload">FC Upload</Button>
+        <Button variant="warning" icon="warning">Warning</Button>
+        <Button variant="danger" icon="delete">Delete</Button>
+        <Button variant="standard" size="sm">small</Button>
+        <Button variant="compact">inline chip</Button>
+        <Button variant="standard" disabled>Disabled</Button>
+        <Toggle checked={togVal} onchange={(c) => (togVal = c)} title="Toggle" />
+        <Toggle checked={true} disabled title="Toggle (disabled)" />
       </div>
+      <div class="pg-note" style="margin-top:10px">Placeholder content</div>
+      {#each Array(8) as _, i}<div class="pg-line">placeholder row {i + 1}</div>{/each}
     {/if}
   {/snippet}
 
   {#snippet footer()}
-    {#if variant !== 'info'}<div class="pg-ph pg-ph-row">footer — action buttons</div>{/if}
+    {#if variant !== 'info'}
+      <Button variant="standard">Cancel</Button>
+      <Button variant="data" icon="upload" full>FC Upload</Button>
+      <Button variant="danger" icon="delete">Delete</Button>
+    {/if}
   {/snippet}
 
   {#snippet detailActions()}
@@ -104,6 +128,7 @@
     background: #353535; border: 1px solid #444; border-radius: 4px;
   }
   .pg-tag { font-size: 10px; color: #8aa; }
+  .pg-gallery { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 
   /* Info: short label : value rows (no-wrap → the panel sizes to content, capped at 360). */
   .pg-info { display: flex; flex-direction: column; gap: 6px; }
