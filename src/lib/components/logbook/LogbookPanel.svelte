@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Flight Logbook on the new panel framework (docs/dev/PANEL_FRAMEWORK.md). Three live formats:
+  // Flight Logbook on the new panel framework (docs/active/PANEL_FRAMEWORK.md). Three live formats:
   //   • info     — minimized flight card (click to expand)
   //   • compact  — the (flight or battery) list only
   //   • advanced — flight list + FlightDetail (1:2 split); the Battery Manager subview uses
@@ -260,7 +260,7 @@
   }
 </script>
 
-<!-- Toolbar button groups, on the shared control library (docs/dev/PANEL_FRAMEWORK.md):
+<!-- Toolbar button groups, on the shared control library (docs/active/PANEL_FRAMEWORK.md):
      import/export are data-transfer actions (`data` variant); the Batteries toggle is `standard`. -->
 {#snippet leftGroup()}
   <div class="tb-left">

@@ -1,5 +1,5 @@
 <script lang="ts">
-  // UAV Info on the panel framework (docs/dev/PANEL_FRAMEWORK.md): the `info` variant —
+  // UAV Info on the panel framework (docs/active/PANEL_FRAMEWORK.md): the `info` variant —
   // content-sized, unframed.
   import { t } from 'svelte-i18n';
   import type { FcInfo } from '$lib/stores/connection';

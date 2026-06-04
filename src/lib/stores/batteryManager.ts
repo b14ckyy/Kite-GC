@@ -1,6 +1,6 @@
 // Battery Manager view state — a view toggle inside the Flight Logbook panel (like the
 // Mission Manager is to the Mission Planner). Lifted into a store so the view + selection +
-// grouping survive the logbook close/reopen. See docs/dev/BATTERY_MANAGEMENT.md.
+// grouping survive the logbook close/reopen. See docs/active/BATTERY_MANAGEMENT.md.
 
 import { writable } from 'svelte/store';
 

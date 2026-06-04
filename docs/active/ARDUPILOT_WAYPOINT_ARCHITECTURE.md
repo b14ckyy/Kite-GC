@@ -21,7 +21,7 @@ autopilot context, ArduPilot WP types/UI/conversion, MAVLink mission microprotoc
 | 1 | First-class vehicle scope | **Copter + Plane + QuadPlane** (Rover / Boat / Sub later) |
 | 2 | Validation strictness | **Soft-warning** — flag invalid commands, never hard-block |
 | 3 | Command scope, step 1 | **NAV_* commands first**, per class; DO_* / CONDITION_* later |
-| 4 | This planning doc | new `docs/dev/ARDUPILOT_WAYPOINT_ARCHITECTURE.md` |
+| 4 | This planning doc | new `docs/active/ARDUPILOT_WAYPOINT_ARCHITECTURE.md` |
 | 5 | Catalog design | **Model it after QGroundControl** — a layered, "collapsing" command tree (a common base + per-firmware-type and per-vehicle-type overrides), not flat per-vehicle duplicates |
 | 6 | Firmware-family axis | Keep a `firmwareType` axis (`ardupilot` now, `px4` later) in the structure even though only ArduPilot is implemented — so PX4 slots in without a redesign (QGC covers both this way) |
 | 7 | Firmware **version** gating | **Not a core axis.** Neither QGC nor Mission Planner gate command availability by firmware version — only by firmware/vehicle *type*. Version stays an **optional soft-hint** for a few documented behaviour cases (e.g. VTOL-land pre/post-4.1) |

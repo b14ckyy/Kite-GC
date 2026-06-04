@@ -1277,7 +1277,7 @@ The clipped fallback tiles get their **own GPU layer** (`will-change: transform`
 panel rolled its own markup, sizing and buttons — no single source of truth. Symptoms: ~116
 button usages across 25 files each re-defining its own `.btn-*` classes; `.nav-panel` widths
 hard-coded per panel (360 / 414 / 430 / 920 / 280 px); every layout edit hand-replicated, and
-panels still drifted apart despite being the "same type". Full plan: `docs/dev/PANEL_FRAMEWORK.md`.
+panels still drifted apart despite being the "same type". Full plan: `docs/active/PANEL_FRAMEWORK.md`.
 
 **Decision**: Build a reusable **`PanelShell`** plus a small **control library**, and migrate
 panels onto them.

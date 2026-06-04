@@ -42,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   registry) now back every nav-rail panel — one shell with `info` / `compact` / `advanced` /
   `fullscreen` / `wide-compact` variants, standardised field widths (380 px main / 500 px detail),
   a 200 px content-field minimum (whole panel scrolls when too short), no in-panel close button
-  (closed via the rail ✕). See `docs/dev/PANEL_FRAMEWORK.md`.
+  (closed via the rail ✕). See `docs/active/PANEL_FRAMEWORK.md`.
 - **All panels migrated** onto the framework (built in parallel behind duplicate "v2" rail
   buttons for side-by-side review): UAV Info (`info`), Flight Logbook (`info`/`compact`/`advanced`)
   + Battery Manager (own shell, 1:2), Mission planner (INAV/ArduPilot) + Mission Manager, Terrain
@@ -69,7 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added — Global UI Scaling
 - **UI scale setting (100 / 125 / 150 %)** in Settings → Language, persisted as `uiScale`. Scales
   the whole chrome — toolbar, nav rail, panels, widget docks, dialogs, status bar — via CSS `zoom`
-  on a `.ui-scale` wrapper (sized `/scale` so it still fills the viewport). See `docs/dev/UI_SCALING.md`.
+  on a `.ui-scale` wrapper (sized `/scale` so it still fills the viewport). See `docs/active/UI_SCALING.md`.
 - **The map stays at native resolution:** the single Leaflet/Cesium instance is hoisted into an
   unzoomed `.layer-map` (no re-mount), so tiles stay crisp and pointer/clicks stay pixel-accurate.
   Map overlays are scaled individually instead — **WP markers, parameter labels, the WP editor popup,
@@ -168,7 +168,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `flights.mission_id` / `logged_wp_count` columns automatically on next open (idempotent, no
   data loss)
 - _UI pending (planner Save-to-library dialog + NEW/OVERWRITE, import flow, mission browser);
-  see `docs/dev/MISSION_LIBRARY_AND_DB.md` for the functional spec + manual test checklist._
+  see `docs/active/MISSION_LIBRARY_AND_DB.md` for the functional spec + manual test checklist._
 
 ### Added — Mission provenance flags + active-waypoint readout
 - **3-flag provenance model (FC / FILE / DB)** — per mission slot, each flag is valid only while
@@ -176,7 +176,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so an edit invalidates it and Undo restores it). Gates when the active-waypoint highlight is
   trustworthy; one-time "track?" prompts (replay / flight), a connect prompt (Download / Upload /
   Nothing), and FC/FILE/DB labels in the mission panel. See
-  `docs/dev/MISSION_TRACKING_AND_PROVENANCE.md`
+  `docs/active/MISSION_TRACKING_AND_PROVENANCE.md`
 - **Active waypoint in the Flight-Mode widget** — in MISSION (NAV_WP) mode the widget shows
   **`WP N/X`** (N = active waypoint, X = mission waypoint count) or **`WP-RTH`** when there is no
   active WP; replaces the raw flight-mode-flags hex dump
@@ -212,7 +212,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **3D flight track**: black outline, a terrain-draped grey ground shadow, and a faint vertical **altitude curtain** (wall down to the ground, flight-mode coloured, ~22 % opacity). **Settings → Map → "Altitude Curtain (3D Map)"** toggle (global, default on). In replay the shadow + curtain **build progressively behind the UAV** to show flown progress — chunked growing build (scales to hour-long logs, no per-frame flicker) with a reverse-scrub debounce
 - **3D mission overlay mirroring the 2D map**: the **same waypoint marker SVGs** as viewport-facing billboards + the **same line colours/styles** (flight path, greyed-beyond-end, launch connector, jump, RTH), drawn as an always-visible overlay; plus per-WP **drop-lines** (white dashed + black outline) to the ground. Shared `wpIconSpec` (missionIcons), shared geometry helpers (`missionGeometry`), and `resolveMissionAltitudes` (REL/AMSL/AGL → MSL)
 - **"Show Mission" toggle** in the replay player (MISSION button after REC/BBX): in replay it shows/hides the loaded mission on **2D + 3D**; in planning/live a loaded mission is **always shown** (`showMission` + `replayActive` stores)
-- _Planning + remaining work in `docs/dev/Map3DRework.md`: the live-trail curtain is deferred to simulator long-flight tests; the FPV cockpit view + follow tuning are the remaining Phase-3 items. (The clean terrain-derived geoid offset is now done — see the Fixed entry above.)_
+- _Planning + remaining work in `docs/active/Map3DRework.md`: the live-trail curtain is deferred to simulator long-flight tests; the FPV cockpit view + follow tuning are the remaining Phase-3 items. (The clean terrain-derived geoid offset is now done — see the Fixed entry above.)_
 
 ### Fixed — 2D map follow (replay + smoothing)
 - **Follow / Heading-Follow now work during blackbox replay** — the follow path was driven only by the live telemetry store (empty during playback), so the 2D map didn't track the replayed UAV. It now follows the playback position too (live behaviour unchanged)
@@ -244,7 +244,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Batch delete** — the ✕ button removes all selected waypoints
 - **Batch Edit popup** — edit **altitude** (absolute + a **relative-change** field that keeps the relative differences), **speed**, **hold time** and **user-action bits** across the selection. Fields show `---` when values differ and apply only to applicable WP types; **one APPLY** (no live-apply, undo/redo-friendly), unit-aware (shared `UnitStepper`/`NumberStepper`, now with an empty/`---` state + display-unit step). Mixed altitude modes block the absolute field with a warning; the mode toggle converts all selected to one mode (terrain/launch-aware, via the shared `convertAltCm` helper)
 - Single-WP editor popup restyled to match (blurred background, same accent border)
-- _Waypoint **disable/enable** designed (kept in the file's meta, never uploaded) — plan in `docs/dev/WaypointDisable.md`, not yet implemented_
+- _Waypoint **disable/enable** designed (kept in the file's meta, never uploaded) — plan in `docs/active/WaypointDisable.md`, not yet implemented_
 
 ### Added — Embedded video (core: router + webcam + panel)
 - **Video subsystem foundation** — a source **router** (`stores/video.ts`) opens a source once and shares it with multiple display sinks (one `MediaStream` binds to many `<video>` elements → one decode feeds panel/widget/floating/swap). Layered for webcam now and network streams later
@@ -256,7 +256,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Floating video window** — an in-app overlay sink: **snaps bottom-left** (the bottom dock reflows out of the way), **drag** the header to float free, **corner-resize** (aspect-locked, 10–30 % of viewport height); frosted frame matching the NavRail panels
 - **Double-click map⇄video swap** — double-click the floating video → the video fills the map view and the **map moves into the (movable) floating frame** (not a fixed corner); double-click the full-size video to swap back. The map is never re-mounted (Cesium state survives); a `resize` re-fits Leaflet/Cesium. Layered so the map stays fully interactive while the frame header/resize remain usable
 - **Native Picture-in-Picture** — a "Video Window" button detaches the feed into a borderless OS window (free placement anywhere on screen) via a persistently-mounted source, so it **survives closing the Video panel**
-- _Planning + design in `docs/dev/VideoFeature.md`. Network streams (RTSP/UDP) + native capture are v2._
+- _Planning + design in `docs/active/VideoFeature.md`. Network streams (RTSP/UDP) + native capture are v2._
 
 ### Added — Terrain Radar widget (top-down EGPWS-style)
 - **New `terrainRadar` widget** (1×1) — a top-down, **track-up** terrain-awareness display: a **120° forward fan** sampled as a polar grid and coloured by terrain clearance. Fixed pointing up; terrain is sampled relative to heading so it rotates with the craft. The fan fills the square (wide flanks clipped); the same **UAV ring marker** sits at the apex

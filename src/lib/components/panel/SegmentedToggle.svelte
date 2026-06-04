@@ -5,7 +5,7 @@
 
 <script lang="ts">
   // Small multi-position slide switch placed as ONE element (e.g. Replay: Recording ↔ Blackbox
-  // track). A sliding highlight marks the active segment. See docs/dev/PANEL_FRAMEWORK.md.
+  // track). A sliding highlight marks the active segment. See docs/active/PANEL_FRAMEWORK.md.
   import { iconSvg } from './Button.svelte';
 
   let { options, value, onchange = undefined, size = 'md' }: {

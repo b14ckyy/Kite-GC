@@ -5,7 +5,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
 
-  // Reusable panel frame for the whole app (see docs/dev/PANEL_FRAMEWORK.md). The shell owns
+  // Reusable panel frame for the whole app (see docs/active/PANEL_FRAMEWORK.md). The shell owns
   // the frame, positioning, sizing per variant, the scroll/bounding of the framed field, and
   // the live variant transition. Callers only place content into the snippet slots. It lives
   // inside `.ui-scale`, so it scales with --ui-scale for free.

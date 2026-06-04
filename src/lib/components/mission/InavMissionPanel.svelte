@@ -1,5 +1,5 @@
 <!-- InavMissionPanel.svelte
-     INAV MSP mission planner on the panel framework (docs/dev/PANEL_FRAMEWORK.md): a `compact`
+     INAV MSP mission planner on the panel framework (docs/active/PANEL_FRAMEWORK.md): a `compact`
      PanelShell. Header = title + autopilot select; toolbar = edit/manager/undo/redo/pattern/clear;
      content field = multi-mission tabs + WP table; footer = selected-WP detail + FC/EEPROM/file
      controls. Renders MissionManager when the library view is open.

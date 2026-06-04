@@ -105,8 +105,9 @@ These rules are loaded automatically for every Copilot session in this workspace
 - Keep `docs/CHANGELOG.md` updated for notable changes
 - ADR format in `docs/ARCHITECTURE.md` for significant decisions
 - New docs: **propose first** with rationale, wait for user OK before creating
-- Organize docs in subfolders by topic (e.g. `docs/dev/`, `docs/user/`)
-- Separate user-facing docs from developer docs for future use
+- Docs layout: core in `docs/` (ARCHITECTURE/ROADMAP/CHANGELOG/DEVLOG/BUILD), active feature
+  plans in `docs/active/`, exploratory not-planned notes in `docs/future/`, completed plans in
+  `docs/archive/`. No `docs/user/` yet (everything is dev-facing for now)
 
 ## What NOT to do
 - Don't make unrelated changes in the current flow — if a refactor or improvement is clearly beneficial, **propose it as a separate step** and wait for approval

@@ -1,5 +1,5 @@
 <!-- MissionManager.svelte
-     Mission library on the panel framework (docs/dev/PANEL_FRAMEWORK.md): its own PanelShell
+     Mission library on the panel framework (docs/active/PANEL_FRAMEWORK.md): its own PanelShell
      (compact ↔ advanced 1:2) — grouped mission list in the main field, mission detail (preview
      map · name/notes · stats · linked flights) in the detail field. Opened from the mission
      planner's "Mission Manager" toggle.

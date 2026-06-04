@@ -1,8 +1,8 @@
 <!-- BatteryManager.svelte
-     Battery library on the panel framework (docs/dev/PANEL_FRAMEWORK.md) — its own PanelShell
+     Battery library on the panel framework (docs/active/PANEL_FRAMEWORK.md) — its own PanelShell
      (compact ↔ advanced, true 1:2 split): grouped pack list in the 380px main field, pack detail
      in the 500px detail field. Opened from the Flight Logbook's "Batteries" toggle.
-     See docs/dev/BATTERY_MANAGEMENT.md.
+     See docs/active/BATTERY_MANAGEMENT.md.
 -->
 <script lang="ts">
   import { t } from 'svelte-i18n';

@@ -127,7 +127,7 @@ export const mission = writable<Mission>(createEmptyMission());
 /** DB id of the currently loaded/imported library mission (null = fresh / never saved).
  *  Set on DB-load, and on import when the content hash matches an existing row; drives the
  *  NEW vs OVERWRITE decision on save, and is the link target for arm-time recording saves.
- *  See docs/dev/MISSION_LIBRARY_AND_DB.md. */
+ *  See docs/active/MISSION_LIBRARY_AND_DB.md. */
 export const loadedMissionId = writable<number | null>(null);
 
 /** Geo-waypoints only (for map markers) */
@@ -231,7 +231,7 @@ const missionSlots: Map<number, Waypoint[]> = new Map();
 // A flag is "valid" while the active mission's content still matches the snapshot
 // captured at its sync event — so any edit invalidates the flags and Undo back to a
 // synced state restores them, with no per-mutation bookkeeping.
-// See docs/dev/MISSION_TRACKING_AND_PROVENANCE.md.
+// See docs/active/MISSION_TRACKING_AND_PROVENANCE.md.
 
 export type MissionFlag = 'fc' | 'file' | 'db';
 

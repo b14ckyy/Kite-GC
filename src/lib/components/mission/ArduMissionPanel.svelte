@@ -1,5 +1,5 @@
 <!-- ArduMissionPanel.svelte
-     ArduPilot / PX4 mission planner on the panel framework (docs/dev/PANEL_FRAMEWORK.md): a
+     ArduPilot / PX4 mission planner on the panel framework (docs/active/PANEL_FRAMEWORK.md): a
      `compact` PanelShell. Single mission (no multi-mission tabs).
 -->
 <script lang="ts">

@@ -78,12 +78,16 @@ Project instructions for Claude Code. Loaded automatically every session.
 - Feature gating via `InavVersion` + `Feature` (`msp/features.rs`); min firmware **INAV 7.0.0**
 
 ## Documentation
-- All docs currently live under `docs/dev/` (everything is dev-facing for now). Keep
-  `docs/dev/ROADMAP.md` and `docs/dev/CHANGELOG.md` current; ADRs in `docs/dev/ARCHITECTURE.md`.
-- New docs: **propose first** with rationale and wait for OK; keep developer docs under
-  `docs/dev/` and create `docs/user/` only once genuinely user-facing docs appear.
+- Docs layout (all dev-facing for now; no `docs/user/` yet):
+  - **`docs/`** — core docs only: `ARCHITECTURE.md` (ADRs), `ROADMAP.md`, `CHANGELOG.md`,
+    `DEVLOG.md`, `BUILD.md`. Keep `ROADMAP.md` + `CHANGELOG.md` current; ADRs in `ARCHITECTURE.md`.
+  - **`docs/active/`** — active feature-plan / reference docs (the ones with open work).
+  - **`docs/future/`** — exploratory, **not-planned** thought-pieces (gated on something external).
+  - **`docs/archive/`** — completed feature plans.
+- New docs: **propose first** with rationale and wait for OK; new feature plans go in `docs/active/`,
+  and create `docs/user/` only once genuinely user-facing docs appear.
 - **Never delete a completed feature plan** — when a plan doc's scope is fully shipped, **move
-  it to `docs/dev/archive/`** (add a one-line `> ARCHIVED (date) — ...` banner). ADRs capture
+  it to `docs/archive/`** (add a one-line `> ARCHIVED (date) — ...` banner). ADRs capture
   architecture; archived plans preserve the detailed feature-level reasoning for later reuse.
 
 ## What NOT to do

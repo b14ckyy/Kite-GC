@@ -6,7 +6,7 @@ Completed feature/implementation plans live here instead of being deleted. ADRs
 build order — that is useful when revisiting or extending a feature later.
 
 A plan is moved here once its planned scope is fully shipped. Docs with open/deferred items
-stay in `../` (the active `docs/dev/` folder).
+stay in `../` (the active `docs/active/` folder).
 
 ## Contents
 

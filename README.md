@@ -65,11 +65,11 @@ powershell -File scripts/build-windows.ps1   # Windows
 
 - [Development Log](docs/DEVLOG.md) — Project structure and setup
 - [Architecture Decisions](docs/ARCHITECTURE.md) — Why we chose what
-- [Data Pipeline](docs/DATA_PIPELINE.md) — Telemetry data flow (live + replay)
+- [Data Pipeline](docs/active/DATA_PIPELINE.md) — Telemetry data flow (live + replay)
 - [Roadmap](docs/ROADMAP.md) — Feature planning
 - [Changelog](docs/CHANGELOG.md) — Version history
-- [Flight Modes Protocol](docs/PROTOCOL_FLIGHT_MODES.md) — INAV bitmask reference
-- [Build & Development Guide](docs/dev/BUILD.md) — Setup, just commands, troubleshooting, CI
+- [Flight Modes Protocol](docs/active/PROTOCOL_FLIGHT_MODES.md) — INAV bitmask reference
+- [Build & Development Guide](docs/BUILD.md) — Setup, just commands, troubleshooting, CI
 
 **Build & Contribution**
 - Use `just` (see `justfile` in root) for development and builds

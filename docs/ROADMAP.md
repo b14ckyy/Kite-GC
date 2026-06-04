@@ -248,12 +248,12 @@ This document tracks planned features, organized by milestone.
 - [ ] **Waypoint label editing** — rename/label in edit mode, shown on mouseover
 - [ ] **Waypoint parameter view** — refreshed per-WP parameter panel in the editor
 - [x] **Active-waypoint marker on the map** — `MSP_NAV_STATUS` (live) + blackbox/ArduPilot `active_wp_number` (replay) highlight the current target WP with a pulsing green glow on the icon (0.5 Hz, FBH included), gated on NAV_WP mode **and** mission trust (see provenance below). INAV done; **Flight-Mode-widget readout (`WP N/X`, `WP-RTH`) done**; ArduPilot layer pending
-- [~] **Mission provenance + flown-vs-loaded validation** _(flag model + gating in `docs/dev/MISSION_TRACKING_AND_PROVENANCE.md`)_:
+- [~] **Mission provenance + flown-vs-loaded validation** _(flag model + gating in `docs/active/MISSION_TRACKING_AND_PROVENANCE.md`)_:
   - [x] **3-flag model (FC/FILE/DB) + trust gating** — per-slot content-snapshot flags (auto edit/undo), highlight trust gates, one-time "track?" popups (replay/flight), connect prompt (Download/Upload/Nothing), flag labels in the panel. INAV done.
-  - [x] **Mission library + record the active mission with the flight** — _done (see `docs/dev/MISSION_LIBRARY_AND_DB.md` + `MISSION_LIBRARY_UI.md`); awaiting simulator testing_: first-class **mission library** (`missions` table, content-hash dedup, geometry + reverse-geocoded-location metadata, self-healing schema); recorded flights link the flown mission (**arm-save / disarm-link**, FC-synced only, in-flight-upload update prompt); Blackbox `H waypoints:N` → `flights.logged_wp_count` replay `WP N/X` fallback. **UI:** **Mission Manager** (logbook-style grouped browser — metadata/notes, preview mini-map, linked flights → jump to flight, Load-to-Map / Export / Import + drag&drop / Delete), editor **Save-to-library** (NEW/OVERWRITE), logbook **Link/Unlink**. _Deferred:_ list search/filter, ArduPilot export.
+  - [x] **Mission library + record the active mission with the flight** — _done (see `docs/active/MISSION_LIBRARY_AND_DB.md` + `MISSION_LIBRARY_UI.md`); awaiting simulator testing_: first-class **mission library** (`missions` table, content-hash dedup, geometry + reverse-geocoded-location metadata, self-healing schema); recorded flights link the flown mission (**arm-save / disarm-link**, FC-synced only, in-flight-upload update prompt); Blackbox `H waypoints:N` → `flights.logged_wp_count` replay `WP N/X` fallback. **UI:** **Mission Manager** (logbook-style grouped browser — metadata/notes, preview mini-map, linked flights → jump to flight, Load-to-Map / Export / Import + drag&drop / Delete), editor **Save-to-library** (NEW/OVERWRITE), logbook **Link/Unlink**. _Deferred:_ list search/filter, ArduPilot export.
   - [ ] **Validate flown vs. loaded** — compare the loaded mission against the flown track / the FC's active-WP sequence and flag divergence.
   - [ ] **Verify mission-in-log support** — ArduPilot `.bin` embeds the mission (CMD messages); INAV blackbox only in later FW versions — confirm exact version + parse it on import.
-- [ ] **Disable/enable waypoint** — deactivate a WP in a loaded mission without deleting it (frozen in place, excluded from path + FC upload, kept in the file's meta area, greyed on the map). Design captured in `docs/dev/WaypointDisable.md`
+- [ ] **Disable/enable waypoint** — deactivate a WP in a loaded mission without deleting it (frozen in place, excluded from path + FC upload, kept in the file's meta area, greyed on the map). Design captured in `docs/active/WaypointDisable.md`
 - [x] **Fly-by-Home waypoint handling** — FBH is INAV's `NAV_WP_FLAG_HOME` (0x48) flag on a real numbered WAYPOINT/POSHOLD_TIME/LAND (executes at the arming home), not a separate type. Added as a **modifier** in the WP editor (creates the FBH WP at the home/launch point) with a nested sub-type + altitude/params section; map shows an orange house on the inbound leg with dashed inbound/outbound legs through a protective home ring; orange numbered row in the WP list. `renumber()` now preserves 0x48 on a last WP. 2D done; 3D overlay pending
 - [ ] Abstraction layer for protocol-specific mission systems (ArduPilot/PX4 MAVLink)
 
@@ -460,8 +460,8 @@ This document tracks planned features, organized by milestone.
 - [x] Functional import of `.bin` files into the logbook (progress events, duplicate detection, armed segment logic, writes to `telemetry_records`)
 - [x] Imported ArduPilot flights can be replayed normally through widgets + map
 - [ ] ArduPilot `.tlog` MAVLink log import (recording works, import missing)
-- [x] ArduPilot mission system (MAVLink WP protocol) — complete: `mavlink_proto/mission.rs` upload/download/clear microprotocol + `ardu_mission_download`/`ardu_mission_upload`, wired to the ArduPilot mission panel/layer; `.waypoints` (QGC WPL) file save/load/drop + INAV↔ArduPilot WP conversion. See `docs/dev/MISSION_MULTIAUTOPILOT_PLAN.md`
-- [ ] **ArduPilot WP types per vehicle class** — the valid mission commands differ a lot by vehicle (Copter / Plane / Rover / Sub), so the ArduPilot WP-type palette + validation should adapt to the detected/selected vehicle type rather than offering one flat list. _Major consideration_: **QuadPlane/VTOL** auto-switches between fixed-wing and multirotor modes mid-mission (`VTOL_TAKEOFF` / `VTOL_LAND` / transition commands), which changes the legal WP types per phase — the planner needs a vehicle-class model and ideally a visual cue for transition points. Builds on the multi-autopilot foundation; gated on test hardware. Full plan in `docs/dev/ARDUPILOT_WAYPOINT_ARCHITECTURE.md`.
+- [x] ArduPilot mission system (MAVLink WP protocol) — complete: `mavlink_proto/mission.rs` upload/download/clear microprotocol + `ardu_mission_download`/`ardu_mission_upload`, wired to the ArduPilot mission panel/layer; `.waypoints` (QGC WPL) file save/load/drop + INAV↔ArduPilot WP conversion. See `docs/active/MISSION_MULTIAUTOPILOT_PLAN.md`
+- [ ] **ArduPilot WP types per vehicle class** — the valid mission commands differ a lot by vehicle (Copter / Plane / Rover / Sub), so the ArduPilot WP-type palette + validation should adapt to the detected/selected vehicle type rather than offering one flat list. _Major consideration_: **QuadPlane/VTOL** auto-switches between fixed-wing and multirotor modes mid-mission (`VTOL_TAKEOFF` / `VTOL_LAND` / transition commands), which changes the legal WP types per phase — the planner needs a vehicle-class model and ideally a visual cue for transition points. Builds on the multi-autopilot foundation; gated on test hardware. Full plan in `docs/active/ARDUPILOT_WAYPOINT_ARCHITECTURE.md`.
 
 ### Future Protocols
 - [ ] `LtmSource` — LTM (Lightweight Telemetry) passive frame parser
@@ -477,7 +477,7 @@ This document tracks planned features, organized by milestone.
 - [ ] Aviation charts (OpenAIP tile layer — airports, navaids, airspace symbology)
 
 ### Battery Management
-- [x] **Battery library + manager** (Phase A + B) — **complete**; see `docs/dev/archive/BATTERY_MANAGEMENT.md`. `battery_packs`
+- [x] **Battery library + manager** (Phase A + B) — **complete**; see `docs/archive/BATTERY_MANAGEMENT.md`. `battery_packs`
   DB (identity = serial), soft `flights.battery_serial` link, a **Battery Manager** view-toggle in the
   Flight Logbook (grouped/flat list, status special groups), editable pack identity with computed
   voltage/energy, **lifetime = persistent baseline + Σ(linked flights)**, additive manual usage editor,
@@ -527,7 +527,7 @@ This document tracks planned features, organized by milestone.
 - [ ] **Stick / gimbal overlay** — animated RC transmitter sticks (two gimbals) driven by recorded RC-channel data, à la Blackbox Explorer. **Replay only for now** (from `RC_CHANNELS` / blackbox `rcCommand`); live later. Configurable channel map (AETR/TAER) + stick mode 1–4. As a widget or a corner overlay on the map/replay.
 - [ ] Audio status alerts (TTS)
 - [x] Terrain analysis — _elevation profile + clearance + correction (Terrain Follow / Clearance Check) + jump simulation done; see Terrain Elevation section_
-- [~] Embedded video — _built: source router + webcam/USB-capture (`getUserMedia`, cross-platform), NavRail panel (live preview, 60 fps MJPEG fix), 2×1 dock widget, snap/drag floating window, double-click map⇄video swap, native Picture-in-Picture, persistence + auto-start. **Pending (v2):** network streams (RTSP/UDP), native `nokhwa` capture, snapshot/record; see `docs/dev/VideoFeature.md`_
+- [~] Embedded video — _built: source router + webcam/USB-capture (`getUserMedia`, cross-platform), NavRail panel (live preview, 60 fps MJPEG fix), 2×1 dock widget, snap/drag floating window, double-click map⇄video swap, native Picture-in-Picture, persistence + auto-start. **Pending (v2):** network streams (RTSP/UDP), native `nokhwa` capture, snapshot/record; see `docs/active/VideoFeature.md`_
 - [ ] FW approach / autoland planner
 - [ ] Geozone editor
 - [ ] MAVLink signing (passphrase-based packet authentication)
@@ -544,7 +544,7 @@ Cross-cutting groundwork items. Each carries non-trivial architectural or design
 - [ ] **3D map (Cesium) stays as-is for now** — keep Cesium World Terrain; tile-resolution quirks and other 3D refinements tracked separately under Milestone 7.
 - [ ] **Better map tile handling**
   - _Major considerations_: current IndexedDB LRU cache works but is reactive only. Consider region prefetch / offline area download, smarter eviction, retry/backoff on tile errors, optional vector tiles, and unified handling shared between Leaflet (2D) and Cesium (3D). Attribution + provider rate-limit compliance.
-- [x] **Global UI scale setting** — shipped; see `docs/dev/UI_SCALING.md`. CSS `zoom` on the chrome
+- [x] **Global UI scale setting** — shipped; see `docs/active/UI_SCALING.md`. CSS `zoom` on the chrome
   layer (toolbar / panels / docks / widgets / dialogs) at **100 / 125 / 150 %** (Settings → Language),
   persisted as `uiScale`. The **map stays at native resolution** (hoisted into an unzoomed `.layer-map`);
   map overlays are scaled individually — WP markers, param labels, the WP editor popup, Leaflet tooltips,
@@ -554,7 +554,7 @@ Cross-cutting groundwork items. Each carries non-trivial architectural or design
   icon registry, `SegmentedToggle`, `Toggle`) so panels are consistent by construction instead of
   each rolling its own markup/sizing/buttons. Phase 0 (shell + controls, empty-shell review) done;
   panels migrate one at a time via a parallel duplicate rail group (strangler). See ADR-029 +
-  `docs/dev/PANEL_FRAMEWORK.md`.
+  `docs/active/PANEL_FRAMEWORK.md`.
 - [ ] **Custom tooltip / in-app assistance system** — native `title=` tooltips are rendered by
   WebView2 *outside the DOM*, so they can't be themed or UI-scaled. Replace them with a `use:tooltip`
   action + a themed singleton overlay that scales with the global UI scale (same pattern as the context
@@ -632,7 +632,7 @@ Source: **Copernicus DEM GLO-30** (geoid/EGM2008 ≈ MSL, no API key, offline-ca
 ### Planned (3D Map)
 - [ ] 3D GLTF UAV models with attitude representation (roll/pitch/yaw)
 - [x] Flight mode coloring of 3D track segments (Map3D — see Milestone 5b colored tracks)
-- [x] **Altitude curtain + ground shadow** under the 3D track (vertical wall to ground + terrain-draped shadow; flight-mode coloured; Settings→Map toggle; in replay built progressively behind the UAV, chunked for scale + reverse-scrub debounce). See `docs/dev/Map3DRework.md`
+- [x] **Altitude curtain + ground shadow** under the 3D track (vertical wall to ground + terrain-draped shadow; flight-mode coloured; Settings→Map toggle; in replay built progressively behind the UAV, chunked for scale + reverse-scrub debounce). See `docs/active/Map3DRework.md`
 - [x] **Mission overlay in 3D** — mirrors the 2D map (same marker SVGs as billboards + same line styles, always-visible overlay) + per-WP drop-lines; "Show Mission" replay toggle (2D + 3D); planning/live always shown
 - [ ] **Live-trail curtain** (same treatment as the replay track; deferred to simulator long-flight tests)
 - [x] **Clean terrain-derived geoid offset** — `cesiumGround_ellipsoid − Copernicus MSL` undulation (GPS-independent), replacing the single-point GPS-snap that mis-placed tower starts; track uses the fused arming-relative altitude (`nav_alt_m`) anchored at the first GPS fix → also smooths the stair-stepped vertical track. Live UAV derives its own geoid at the first live fix

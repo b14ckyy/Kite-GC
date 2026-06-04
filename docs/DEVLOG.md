@@ -170,7 +170,7 @@ Kite Ground Control/
 │
 ├── .github/workflows/ci.yml      # Minimal CI (cargo check + svelte-check)
 │
-├── docs/dev/                     # Development documentation (all dev-facing for now)
+├── docs/active/                     # Development documentation (all dev-facing for now)
 │   ├── DEVLOG.md                 # This file — project structure & dev notes
 │   ├── CHANGELOG.md              # Version changelog (Keep a Changelog format)
 │   ├── ARCHITECTURE.md           # Architecture Decision Records (ADRs)
@@ -214,7 +214,7 @@ Each feature is self-contained in its own module:
 - Node.js LTS (v24+)
 - Rust (via rustup, v1.94+)
 - [just](https://github.com/casey/just) (strongly recommended)
-- Platform-specific: see [Build Guide](docs/dev/BUILD.md) for details
+- Platform-specific: see [Build Guide](docs/BUILD.md) for details
 
 ### Quick Start (recommended)
 ```bash
@@ -239,7 +239,7 @@ Alternative (still works):
 npm run tauri build
 ```
 
-For the complete guide (troubleshooting, CI, common Windows issues, etc.), see **[docs/dev/BUILD.md](../dev/BUILD.md)**.
+For the complete guide (troubleshooting, CI, common Windows issues, etc.), see **[docs/BUILD.md](../dev/BUILD.md)**.
 
 ### Platform Notes
 

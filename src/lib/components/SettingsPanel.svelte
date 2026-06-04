@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Settings on the panel framework (docs/dev/PANEL_FRAMEWORK.md): a `compact` PanelShell with
+  // Settings on the panel framework (docs/active/PANEL_FRAMEWORK.md): a `compact` PanelShell with
   // a SegmentedToggle tab switcher (Interface / Data) in the toolbar; each tab is grouped into
   // labelled subsections. On/off switches use the shared <Toggle>, actions use <Button>, selects
   // match the framework height. All tiny italic hints are dropped except the Cesium-token one.

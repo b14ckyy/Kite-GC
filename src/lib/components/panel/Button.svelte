@@ -38,7 +38,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
 
-  // Shared button for the whole app (see docs/dev/PANEL_FRAMEWORK.md). One definition per type
+  // Shared button for the whole app (see docs/active/PANEL_FRAMEWORK.md). One definition per type
   // so every panel looks identical. `icon` may be a glyph or an inline SVG string.
   let {
     variant = 'standard',

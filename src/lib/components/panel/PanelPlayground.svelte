@@ -1,5 +1,5 @@
 <script lang="ts">
-  // THROWAWAY Phase-0 scaffolding (see docs/dev/PANEL_FRAMEWORK.md): renders PanelShell with
+  // THROWAWAY Phase-0 scaffolding (see docs/active/PANEL_FRAMEWORK.md): renders PanelShell with
   // placeholder content so the empty framework layouts + live variant transitions can be
   // validated before any real wiring. Removed once panels are migrated.
   import PanelShell, { type PanelVariant } from './PanelShell.svelte';

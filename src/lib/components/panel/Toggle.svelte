@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Reusable on/off slide switch (see docs/dev/PANEL_FRAMEWORK.md), centralised from the
+  // Reusable on/off slide switch (see docs/active/PANEL_FRAMEWORK.md), centralised from the
   // settings panel's repeated `.toggle-switch` markup. `checked` is bindable; `onchange` gets
   // the new boolean.
   let {
