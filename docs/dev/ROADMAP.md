@@ -25,7 +25,7 @@ This document tracks planned features, organized by milestone.
 - [x] Leaflet map integration with OSM tile layer
 - [x] Build scripts (Windows, Linux)
 - [x] Development documentation
-- [x] Session persistence (port, baud rate, map position/zoom, panel state)
+- [x] Session persistence (port, baud rate, map position/zoom, panel state, window size/position via `tauri-plugin-window-state`)
 - [x] Floating navigation panel with hamburger menu
 - [x] Tab-based panel system (UAV Info, Settings, Mission Control)
 - [x] Bottom telemetry overlay strip (placeholder widgets)
@@ -241,7 +241,7 @@ This document tracks planned features, organized by milestone.
 - [x] Portable mode: `.portable` marker → `data/` folder next to exe (Windows + Linux)
 
 ### Mission Editor Advancements
-- [ ] **Mission stats — extend** (total distance, altitude change / climb+descent totals, est. flight time, …). Mission distance is already computed in Terrain Analysis; the backend `Mission::total_distance_m()` + `geo_waypoints()` exist but are unwired — reuse them.
+- [x] **Mission stats — extend** (INAV editor footer): total leg distance, climb/descent totals and an estimated flight time (`computeMissionStats()` in `missionLibrary.ts` — carry-forward per-WP cruise speed + hold times, counts only the active part up to the first Land/RTH; `~` when an assumed cruise speed is used, `≥` when a PosHold-∞ makes it unbounded). _ArduPilot panel (different WP struct) still pending._
 - [x] **Custom context menus** — reusable in-app right-click / long-press menus (list + map markers; native WebView menu suppressed except text fields); waypoint menu offers *Move to mission* (multi-mission) + *Batch Edit*
 - [x] **Multi-select waypoints + batch editing** — list (Ctrl / Shift / number-circle tap) + map (tap-toggle), edit-mode only; batch **delete** (✕) and **Batch Edit popup**: altitude (absolute + relative-change), speed, hold time, user-action bits across the selection, one APPLY (undo/redo-friendly), unit-aware, `---` for differing values, alt-mode toggle + auto-convert when modes differ. _Pending: set-parameter beyond these fields if needed_
 - [x] **Undo/redo** for mission edits — snapshot-based history covering **all** missions (so cross-mission *Move to mission* is undoable); one snapshot = one user action, with multi-step actions (batch edit/delete, move, pattern append, terrain correction, WP+modifiers delete) grouped into a single step. Toolbar buttons (edit-mode only) + Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z; history cleared on load/download/import. Launch point excluded (not part of the FC upload). See ADR-027
@@ -301,7 +301,7 @@ This document tracks planned features, organized by milestone.
 - [x] Delete flight button styled as danger (red)
 - [x] Flight path replay on map (animated marker playback)
 - [x] Playback controls (play, pause, reset, scrub, speed 1×/2×/4×/10×)
-- [ ] Type-specific UAV symbols on map during replay (per platform type)
+- [x] Type-specific UAV symbols on map during replay (per platform type) — per-platform silhouettes (`uavShapeForPlatform()`: multirotor/airplane/helicopter) on the **2D** map (live + playback); replay uses the flight's `platform_type`. 3D keeps the coloured position point (a 3D model will replace it later). Platform type is **editable in the flight detail** (dropdown under Craft Name, persisted via `flightlog_update_platform_type`) — fixes existing entries in place. Import sets a best-effort default: ArduPilot from the MSG vehicle banner; INAV Blackbox heuristically from the logged motor/servo field set (no explicit header).
 - [x] Flight path replay through HUD widgets (all widgets receive telemetry during playback)
 - [x] Delete flight records
 - [x] Search/filter by aircraft name, location, date, notes (frontend-only text filter)
@@ -651,4 +651,4 @@ Source: **Copernicus DEM GLO-30** (geoid/EGM2008 ≈ MSL, no API key, offline-ca
 
 ---
 
-*Last updated: 2026-06-03*
+*Last updated: 2026-06-04*

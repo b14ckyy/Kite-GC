@@ -50,8 +50,11 @@
 > when detail content exists** (`detail`/`detailToolbar`/… or `detailTitle`); with none, the
 > main column fills the full width (graceful single-column degrade).
 >
-> Possible follow-ups (not blocking): FlightDetail's remaining inline affordances (link chips →
-> `compact` buttons); a shared `Field`/`Select` primitive; theming-by-FC.
+> FlightDetail's inline link affordances were migrated to the shared `Button` `compact` variant
+> (mission/battery jump chips + their link/unlink/save controls; new `link` registry icon). The
+> ✎ edit pencils (craft name / pilot / weather) stay as-is (a different affordance, not link chips).
+>
+> Possible follow-ups (not blocking): a shared `Field`/`Select` primitive; theming-by-FC.
 
 ## Problem
 The app has 6 nav-rail panels in 4 recurring formats, but **every panel rolls its own

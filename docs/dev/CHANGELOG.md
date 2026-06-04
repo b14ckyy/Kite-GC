@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Window size/position now persists** across launches (`tauri-plugin-window-state`) — the app
+  no longer always reopens at the default 1280×800. Saves on close, restores on next launch.
+  See ADR-030.
+
+### Added — Mission stats, type-specific UAV symbols, FlightDetail polish
+- **Mission stats** in the INAV editor footer: total leg distance, total climb/descent and an
+  estimated flight time (`computeMissionStats()` — carry-forward per-WP cruise speed + hold times,
+  counting only the active part up to the first Land/RTH). The time shows `~` when an assumed cruise
+  speed is used (WPs at default speed) and `≥` when a PosHold-∞ makes it unbounded; unit-aware.
+- **Type-specific UAV symbols on the 2D map** (multirotor / airplane / helicopter via
+  `uavShapeForPlatform()`), for both live and replay markers; the replay marker uses the flight's
+  `platform_type` (live FC type only while connected). Icons enlarged for visibility. **3D** keeps
+  the plain coloured position point for now — a proper 3D model will replace it later.
+- **Platform type is now editable** in the flight detail (dropdown under Craft Name, INAV mixer
+  enum) and persisted (`flightlog_update_platform_type`) — the reliable way to set the replay
+  symbol regardless of import guesses, and it fixes existing entries in place.
+- **Import also parses the platform type** as a best-effort default (was hardcoded to multirotor):
+  ArduPilot `.bin` maps the MSG vehicle banner (Plane → airplane, Copter → multirotor, Rover →
+  rover, Sub/Blimp → other); INAV Blackbox has no explicit platform header, so it's inferred
+  heuristically from the logged field set (single `motor[0]` + `servo[...]` → fixed-wing, ≥3 motors
+  → multirotor). The import value is just a default — correct it via the dropdown if wrong.
+- **FlightDetail** mission/battery link affordances migrated to the shared `Button` `compact`
+  variant (jump chips + link/unlink/save controls; new `link` chain icon in the registry),
+  replacing the ad-hoc inline chips for a consistent panel-framework look.
+
 ### Added — Reusable panel framework + per-panel migration
 - **`PanelShell` + control library** (`Button`, `Toggle`, `SegmentedToggle`, flat-SVG icon
   registry) now back every nav-rail panel — one shell with `info` / `compact` / `advanced` /

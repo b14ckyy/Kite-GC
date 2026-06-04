@@ -136,6 +136,10 @@ This document records key architecture decisions and their rationale.
 
 **Persisted state**: `lastPort`, `lastBaud`, `map.center`, `map.zoom`, `navPanelOpen`, `activeTab`
 
+> **Note**: Native *window geometry* (size / position / maximized) is **not** stored here — it
+> is persisted separately by `tauri-plugin-window-state` (see ADR-030), since it's owned by the
+> OS window rather than the WebView.
+
 **Rationale**:
 - localStorage is synchronous and available in all Tauri WebView contexts
 - No backend/database needed for simple preferences
@@ -1308,6 +1312,40 @@ folder is the de-facto control library); the migration carries temporary duplica
 new panels) until each cutover; throwaway scaffolding (`PanelPlayground`) is removed at the end.
 Cross-variant morphing relies on `interpolate-size` (Chromium 129+ / WebView2) for the `info`
 case and degrades gracefully on older engines (info snaps, the rest still animates).
+
+---
+
+## ADR-030: Window Geometry Persistence via tauri-plugin-window-state
+
+**Date**: 2026-06-04
+**Status**: Accepted
+**Related**: ADR-006 (session persistence via localStorage — for *app* preferences)
+
+**Context**: The app always reopened at the configured default size (1280×800); the window's
+size, position and maximized state were never remembered between launches. ADR-006's
+localStorage store handles app-level preferences, but the **native window geometry** is owned by
+the OS window, not the WebView, so it can't be set cleanly from frontend JS without a visible
+resize/reposition flash after the window is already shown, and JS has no robust multi-monitor /
+maximized / off-screen-clamping logic.
+
+**Decision**: Use the official **`tauri-plugin-window-state`** (Rust side). Registered in
+`lib.rs` as `.plugin(tauri_plugin_window_state::Builder::default().build())`. The plugin saves
+the window state on close and restores it on the next launch, before the window is presented —
+so there is no flash. No frontend code, JS package, or capability permission is needed (it runs
+through the Rust window lifecycle, not via IPC commands).
+
+**Rationale**:
+- Native, flash-free restore (applied at window creation, not after show).
+- Handles position/size/maximized + off-screen clamping and multi-monitor out of the box.
+- Keeps *window geometry* (a native concern) separate from *app preferences* (ADR-006's
+  localStorage store), each persisted by the mechanism that owns it.
+- The state file lands in the app config dir, so it follows portable mode (`data/`) like the
+  rest of the app's storage.
+
+**Consequences**: one more Tauri plugin dependency; the persisted geometry lives in a plugin
+JSON file (not the `kite-gc-settings` localStorage blob), so the two persistence layers must be
+kept conceptually distinct. First launch after adoption still uses the config default until a
+state file exists.
 
 ---
 
