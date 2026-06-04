@@ -16,10 +16,7 @@
   import ContextMenu from "$lib/components/ContextMenu.svelte";
   import BatchEditPopup from "$lib/components/mission/BatchEditPopup.svelte";
   import type { DialogButton, DialogOptions } from "$lib/components/ConfirmDialog.svelte";
-  import SettingsPanel from "$lib/components/SettingsPanel.svelte";
-  import LogbookPanel from "$lib/components/logbook/LogbookPanel.svelte";
   import Toolbar from "$lib/components/Toolbar.svelte";
-  import UavInfoPanel from "$lib/components/UavInfoPanel.svelte";
   import StatusBar from "$lib/components/StatusBar.svelte";
   import NavRail from "$lib/components/NavRail.svelte";
   import PanelPlayground from "$lib/components/panel/PanelPlayground.svelte";
@@ -28,7 +25,6 @@
   import MissionPanelV2 from "$lib/components/mission/MissionPanelV2.svelte";
   import VideoPanelV2 from "$lib/components/video/VideoPanelV2.svelte";
   import SettingsPanelV2 from "$lib/components/SettingsPanelV2.svelte";
-  import type { PanelVariant } from "$lib/components/panel/PanelShell.svelte";
   import { PlaybackController } from '$lib/controllers/playbackController';
   import { refreshSerialPorts, connectFC, disconnectFC, scanBleDevices } from '$lib/controllers/connectionController';
   import * as logbookCtrl from '$lib/controllers/logbookController';
@@ -38,7 +34,7 @@
   import { toTelemetryData } from '$lib/adapters/telemetryAdapter';
   import { activeWpNumber, replayWpTotal } from '$lib/stores/navStatus';
   import { missionManagerOpen, missionManagerSelectedId, requestOpenFlightId, requestOpenMissionId } from '$lib/stores/missionManager';
-  import { batteryManagerOpen, batteryManagerSelectedId } from '$lib/stores/batteryManager';
+  import { batteryManagerOpen } from '$lib/stores/batteryManager';
   import { missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode, flightSetBatterySerial, updateFlightNotes, getFlight, batteryDbFindBySerial, batteryDbAddUsage } from '$lib/stores/flightlog';
   import EndFlightDialog from "$lib/components/logbook/EndFlightDialog.svelte";
   import type { EndFlightStats } from "$lib/components/logbook/EndFlightDialog.svelte";
@@ -51,8 +47,6 @@
   import type { TileCacheStats } from "$lib/cache/tileCache";
   import WidgetPanel from "$lib/components/WidgetPanel.svelte";
   import { LARGE_BASE_VMIN } from "$lib/config/widgetRegistry";
-  import MissionPanel from "$lib/components/mission/MissionPanel.svelte";
-  import VideoPanel from "$lib/components/video/VideoPanel.svelte";
   import FloatingVideoWindow from "$lib/components/video/FloatingVideoWindow.svelte";
   import { initVideo, videoState, videoStream, setVideoPrimary, registerPiPElement } from "$lib/stores/video";
   import TerrainAnalysisPanel from "$lib/components/terrain/TerrainAnalysisPanel.svelte";
@@ -370,30 +364,13 @@
     flightLoggingEnabled ? allTabs : allTabs.filter(t => t.id !== 'logbook')
   );
 
-  // Panel-framework migration scaffolding (docs/dev/PANEL_FRAMEWORK.md): a duplicate set of
-  // rail buttons (bottom group) opens the new framework panels. Throwaway until migrated.
-  const v2Tabs = [
-    { id: "uav-info-v2", label: () => $t('nav.uavInfo'), icon: ICON_UAV_INFO },
-    { id: "settings-v2", label: () => $t('nav.settings'), icon: ICON_SETTINGS },
-    { id: "logbook-v2", label: () => $t('nav.logbook'), icon: ICON_LOGBOOK },
-    { id: "mission-v2", label: () => $t('nav.mission'), icon: ICON_MISSION },
-    { id: "video-v2", label: () => $t('nav.video'), icon: ICON_VIDEO },
-  ];
-  const V2_VARIANT: Record<string, PanelVariant> = {
-    "uav-info-v2": "info", "settings-v2": "compact", "logbook-v2": "advanced",
-    "mission-v2": "compact", "video-v2": "compact",
-  };
   // Permanent DEV-only reference panel (empty framework playground) at the end of the rail —
-  // a "DEV" text button instead of an icon; only present in dev builds (kept after migration).
+  // a "DEV" text button instead of an icon; only present in dev builds.
   const devTab = { id: "dev-playground", label: () => "DEV Playground", icon: '<span style="font-size:11px;font-weight:700;letter-spacing:0.5px">DEV</span>' };
   const railTabs = $derived([
     ...tabs,
-    { id: "__sep__", label: () => "", icon: "" },
-    ...v2Tabs,
     ...(DEV_MODE ? [{ id: "__sep__", label: () => "", icon: "" }, devTab] : []),
   ]);
-  // Framework (PanelShell) panels: the temporary v2 migration set + the permanent DEV playground.
-  const isFrameworkPanel = $derived(activeTab.endsWith('-v2') || activeTab === 'dev-playground');
 
   // Highlight the terrain rail button while its overlay is open
   const railActiveTab = $derived(terrainOpen ? 'terrain' : activeTab);
@@ -421,7 +398,8 @@
   selectedBaud = saved.lastBaud;
   selectedProtocol = (saved.lastProtocol === 'mavlink' ? 'mavlink' : 'msp') as ProtocolType;
   navPanelOpen = saved.navPanelOpen;
-  activeTab = saved.activeTab;
+  // Drop any legacy "-v2" suffix from a persisted tab (the migration scaffolding is gone now).
+  activeTab = (saved.activeTab ?? 'uav-info').replace(/-v2$/, '');
   attitudeRateHz = saved.attitudeRateHz;
   positionRateHz = saved.positionRateHz;
   airspeedEnabled = saved.airspeedEnabled;
@@ -525,7 +503,7 @@
     if (tabId !== 'mission') editMode.set(false);
     activeTab = tabId;
     settings.patch({ activeTab });
-    if (tabId === 'logbook' || tabId === 'logbook-v2') {
+    if (tabId === 'logbook') {
       logbookMinimized = false;
       void loadLogbook();
     }
@@ -1178,7 +1156,7 @@
     } catch {
       defaultFlightLogPath = '';
     }
-    if (activeTab === 'logbook' || activeTab === 'logbook-v2') {
+    if (activeTab === 'logbook') {
       await loadLogbook();
     }
   }
@@ -1245,14 +1223,6 @@
     selectedTrackWithPosition.length > 0
       ? selectedTrackWithPosition[selectedTrackWithPosition.length - 1].timestamp_ms - playbackBaseMs
       : 0,
-  );
-  const logbookDetailOpen = $derived(activeTab === 'logbook' && selectedFlight != null && !logbookMinimized);
-  // The logbook panel goes wide for a selected detail entry. In the Battery Manager view the
-  // width depends ONLY on the battery selection (a still-selected flight must not keep it wide);
-  // in the flight view it depends on the selected flight.
-  const logbookWide = $derived(
-    activeTab === 'logbook' &&
-    ($batteryManagerOpen ? $batteryManagerSelectedId != null : (selectedFlight != null && !logbookMinimized))
   );
   const logbookHasFlightOnMap = $derived(activeTab === 'logbook' && selectedFlight != null && !isPrimaryConnected);
 
@@ -1624,13 +1594,43 @@
     onSelectTab={selectTab}
   />
 
-  <!-- New framework panels (migration in progress; docs/dev/PANEL_FRAMEWORK.md). Migrated panels
-       render their real (PanelShell) component behind the v2 rail button for side-by-side review;
-       the rest still show the empty playground. -->
-  {#if navPanelOpen && isFrameworkPanel}
-    {#if activeTab === 'uav-info-v2'}
+  <!-- Floating panels — all on the panel framework (docs/dev/PANEL_FRAMEWORK.md). Each is a
+       self-positioned PanelShell; terrain is its own overlay below. -->
+  {#if navPanelOpen && !terrainOpen}
+    {#if activeTab === 'uav-info'}
       <UavInfoPanelV2 {connStatus} {fcInfo} />
-    {:else if activeTab === 'logbook-v2'}
+    {:else if activeTab === 'settings'}
+      <SettingsPanelV2
+        localeValue={$locale ?? 'en'}
+        {uiScale}
+        {mapProvider}
+        {mapCacheMaxMB}
+        {cacheStats}
+        {cesiumIonToken}
+        {altitudeCurtain3D}
+        {attitudeRateHz}
+        {positionRateHz}
+        {airspeedEnabled}
+        {flightLoggingEnabled}
+        {flightRecordingEnabled}
+        {flightLogRawEnabled}
+        {flightLogRawAlways}
+        {flightLogDbPath}
+        {defaultFlightLogPath}
+        {defaultWpAltitudeM}
+        {defaultPhTimeSec}
+        {warnAltitudeM}
+        {interfaceSettings}
+        {isWidgetActive}
+        {getWidgetPanelLabel}
+        onPatch={applySettingsPatch}
+        onSetCacheMaxMB={setCacheMaxMB}
+        onClearCache={clearCache}
+        onChooseFlightLogPath={chooseFlightLogPath}
+        onResetFlightLogPath={resetFlightLogPath}
+        onToggleWidget={toggleWidget}
+      />
+    {:else if activeTab === 'logbook'}
       <LogbookPanelV2
         {flightLoggingEnabled}
         {logbookMinimized}
@@ -1662,133 +1662,13 @@
         onExportTrack={exportTrack}
         onImportKflight={importKflightFile}
       />
-    {:else if activeTab === 'mission-v2'}
+    {:else if activeTab === 'mission'}
       <MissionPanelV2 />
-    {:else if activeTab === 'video-v2'}
+    {:else if activeTab === 'video'}
       <VideoPanelV2 />
-    {:else if activeTab === 'settings-v2'}
-      <SettingsPanelV2
-        localeValue={$locale ?? 'en'}
-        {uiScale}
-        {mapProvider}
-        {mapCacheMaxMB}
-        {cacheStats}
-        {cesiumIonToken}
-        {altitudeCurtain3D}
-        {attitudeRateHz}
-        {positionRateHz}
-        {airspeedEnabled}
-        {flightLoggingEnabled}
-        {flightRecordingEnabled}
-        {flightLogRawEnabled}
-        {flightLogRawAlways}
-        {flightLogDbPath}
-        {defaultFlightLogPath}
-        {defaultWpAltitudeM}
-        {defaultPhTimeSec}
-        {warnAltitudeM}
-        {interfaceSettings}
-        {isWidgetActive}
-        {getWidgetPanelLabel}
-        onPatch={applySettingsPatch}
-        onSetCacheMaxMB={setCacheMaxMB}
-        onClearCache={clearCache}
-        onChooseFlightLogPath={chooseFlightLogPath}
-        onResetFlightLogPath={resetFlightLogPath}
-        onToggleWidget={toggleWidget}
-      />
-    {:else}
-      {@const fp = [...v2Tabs, devTab].find(t => t.id === activeTab)}
-      <PanelPlayground initial={V2_VARIANT[activeTab] ?? 'compact'} label={fp ? fp.label() : activeTab} />
+    {:else if DEV_MODE && activeTab === 'dev-playground'}
+      <PanelPlayground initial="compact" label="DEV Playground" />
     {/if}
-  {/if}
-
-  <!-- Floating panel content (hidden while the terrain overlay is open) -->
-  {#if navPanelOpen && !terrainOpen && !isFrameworkPanel}
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="nav-panel" class:nav-panel-mission={activeTab === 'mission' && !$missionManagerOpen} class:nav-panel-logbook={(activeTab === 'logbook' && !logbookWide) || (activeTab === 'mission' && $missionManagerOpen && $missionManagerSelectedId == null)} class:nav-panel-wide={logbookWide || (activeTab === 'mission' && $missionManagerOpen && $missionManagerSelectedId != null)} class:nav-panel-minimized={logbookMinimized && logbookHasFlightOnMap} onclick={() => { if (logbookMinimized) expandLogbook(); }}>
-      <div class="panel-content">
-        <!-- UAV Info Tab -->
-        {#if activeTab === "uav-info"}
-          <UavInfoPanel {connStatus} {fcInfo} />
-
-        <!-- Settings Tab -->
-        {:else if activeTab === "settings"}
-          <SettingsPanel
-            localeValue={$locale ?? 'en'}
-            {uiScale}
-            {mapProvider}
-            {mapCacheMaxMB}
-            {cacheStats}
-            {cesiumIonToken}
-            {altitudeCurtain3D}
-            {attitudeRateHz}
-            {positionRateHz}
-            {airspeedEnabled}
-            {flightLoggingEnabled}
-            {flightRecordingEnabled}
-            {flightLogRawEnabled}
-            {flightLogRawAlways}
-            {flightLogDbPath}
-            {defaultFlightLogPath}
-            {defaultWpAltitudeM}
-            {defaultPhTimeSec}
-            {warnAltitudeM}
-            {interfaceSettings}
-            {isWidgetActive}
-            {getWidgetPanelLabel}
-            onPatch={applySettingsPatch}
-            onSetCacheMaxMB={setCacheMaxMB}
-            onClearCache={clearCache}
-            onChooseFlightLogPath={chooseFlightLogPath}
-            onResetFlightLogPath={resetFlightLogPath}
-            onToggleWidget={toggleWidget}
-          />
-
-        <!-- Logbook Tab -->
-        {:else if activeTab === "logbook"}
-          <LogbookPanel
-            {flightLoggingEnabled}
-            {logbookMinimized}
-            {logbookLoading}
-            {blackboxImporting}
-            {blackboxImportProgress}
-            {flightSummaries}
-            {selectedFlight}
-            {selectedFlightId}
-            {selectedFlightTrackCount}
-            {interfaceSettings}
-            bind:selectedFlightNotes
-            bind:weatherTempC
-            bind:weatherWindMs
-            bind:weatherWindDir
-            bind:weatherDesc
-            bind:weatherEditing
-            onLoadLogbook={loadLogbook}
-            onImportBlackbox={importBlackbox}
-            onSelectFlight={selectFlight}
-            onSaveNotes={saveSelectedFlightNotes}
-            onSaveWeather={saveSelectedFlightWeather}
-            onSaveCraftName={saveSelectedFlightCraftName}
-            onSavePilot={saveSelectedFlightPilot}
-            onDeleteFlight={removeSelectedFlight}
-            onExportFlights={exportFlightsToKflight}
-            onExportBlackbox={exportBlackbox}
-            onExportTrack={exportTrack}
-            onImportKflight={importKflightFile}
-          />
-
-        <!-- Mission Tab -->
-        {:else if activeTab === "mission"}
-          <MissionPanel />
-
-        <!-- Video Tab -->
-        {:else if activeTab === "video"}
-          <VideoPanel />
-        {/if}
-      </div>
-    </div>
   {/if}
 
   <!-- ======= TERRAIN ANALYSIS OVERLAY ======= -->
@@ -2085,65 +1965,6 @@
   .zone-hidden {
     visibility: hidden;
     pointer-events: none !important;
-  }
-
-  /* --- Floating Nav Panel --- */
-  .nav-panel {
-    position: absolute;
-    top: 65px;
-    left: 62px; /* after the rail buttons */
-    width: min(360px, calc(100% - 62px - var(--grid-side-width) - 54px - 12px));
-    max-height: calc(100% - 53px - var(--grid-bottom-height) - 24px - 12px);
-    background: rgba(46, 46, 46, 0.92);
-    border: 1px solid rgba(55, 168, 219, 0.35);
-    border-radius: 8px;
-    z-index: 150;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
-    backdrop-filter: blur(12px);
-    animation: panel-slide-in 0.25s ease-out;
-    transition: width 0.25s ease;
-  }
-
-  .nav-panel.nav-panel-mission {
-    /* +15% over the 360px base — fits all toolbar buttons on one row and
-       leaves headroom for richer WP-list entries. */
-    width: min(414px, calc(100% - 62px - var(--grid-side-width) - 54px - 12px));
-  }
-
-  .nav-panel.nav-panel-logbook {
-    width: min(430px, calc(100% - 62px - var(--grid-side-width) - 54px - 12px));
-  }
-
-  .nav-panel.nav-panel-wide {
-    width: min(920px, calc(100% - 62px - var(--grid-side-width) - 54px - 12px));
-  }
-
-  .nav-panel.nav-panel-minimized {
-    width: min(280px, calc(100% - 62px - var(--grid-side-width) - 54px - 12px));
-    cursor: pointer;
-  }
-
-  @keyframes panel-slide-in {
-    from {
-      opacity: 0;
-      transform: translateX(-16px);
-    }
-    to {
-      opacity: 1;
-      transform: translateX(0);
-    }
-  }
-
-  .panel-content {
-    padding: 14px;
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    overflow-y: auto;
   }
 
   /* --- Bottom Widget Panel (inside .zone-bottom-dock) --- */
