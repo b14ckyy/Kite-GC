@@ -6,16 +6,16 @@
 > - **UAV Info** → `info` variant (content-sized, unframed).
 > - **Flight Logbook** → live `info` (minimized card) / `compact` (list) / `advanced` (list +
 >   FlightDetail 1:2). All chrome + FlightDetail footer buttons use the `<Button>` library.
-> - **Battery Manager** → its **own** framework panel (`BatteryManagerV2`, own `PanelShell`,
+> - **Battery Manager** → its **own** framework panel (`BatteryManager`, own `PanelShell`,
 >   `compact ↔ advanced` 1:2 split): pack list in the main field, pack detail in the detail
 >   field; toolbar = Back · New · Import, pack actions above the linked-flights list, Export in
 >   the detail toolbar; delete dialog doubles as Retire / Mark-Damaged. Built **parallel** to the
 >   legacy `BatteryManager` (still used by the old logbook) — both deleted at the logbook cutover.
-> - **Mission system** → `MissionPanelV2` (thin switcher) → `InavMissionPanelV2` /
->   `ArduMissionPanelV2` (each `compact`, own `PanelShell`; header = title + shared
+> - **Mission system** → `MissionPanel` (thin switcher) → `InavMissionPanel` /
+>   `ArduMissionPanel` (each `compact`, own `PanelShell`; header = title + shared
 >   `AutopilotSelect`; toolbar = edit/manager/undo/redo/pattern/clear; field = multi-mission tabs
 >   (INAV only) + WP table; footer = selected-WP detail + FC/EEPROM/file controls). The library
->   view is **`MissionManagerV2`** (own shell, `compact ↔ advanced` 1:2, like the Battery Manager),
+>   view is **`MissionManager`** (own shell, `compact ↔ advanced` 1:2, like the Battery Manager),
 >   rendered by the INAV editor when opened. Built **parallel** to the legacy mission components.
 > - **Terrain Analyzer** → `fullscreen ↔ wide-compact` PanelShell, converted **in place** (the
 >   panel is standalone — no shared leaf — so duplicating ~980 lines wasn't worth it; reachable via
@@ -23,12 +23,12 @@
 >   Waypoints/Track + correction mode are `SegmentedToggle`s, Show Map uses the flat `map` icon, and
 >   the readouts + hover info moved into the new **fullscreen footer slot** (`ps-fs-foot`). Header
 >   actions are left-aligned (fullscreen title is content-width).
-> - **Video** → `VideoPanelV2` (`compact`): header = Start/Stop; content = preview + source /
+> - **Video** → `VideoPanel` (`compact`): header = Start/Stop; content = preview + source /
 >   resolution / mirror settings; footer = Floating Window (`mode` button, active = on, left) +
 >   Video Window detach (plain button, right — the PiP can't be closed from inside the app).
 >   Parallel build.
 >
- - **Settings** → `SettingsPanelV2` (`compact`), reorganised into **two tabs via a `SegmentedToggle`**
+ - **Settings** → `SettingsPanel` (`compact`), reorganised into **two tabs via a `SegmentedToggle`**
 >   (Interface / Data), each grouped into labelled subsections:
 >   - *Interface*: UI (language, scale) · Map (provider, altitude curtain) · Units (all unit
 >     selects) · Widgets (all HUD widget toggles).
@@ -37,28 +37,21 @@
 >     Alerts (altitude).
 >   All on/off switches use the shared `Toggle`, selects match the 28px control height, and **all
 >   tiny italic hints were dropped except the Cesium-token one** (bumped to a readable size). No
->   footer. The `+page` settings-patch handler was extracted to `applySettingsPatch` (shared by
->   the legacy + V2 panels). Parallel build.
+>   footer. The `+page` settings-patch handler is extracted to `applySettingsPatch`.
 >
-> **Cutover done.** The regular rail tabs now render the framework panels directly; the legacy
-> panels (9 components) and the duplicate "v2" rail group were deleted, and a persisted `*-v2`
-> tab id is normalised back to its base on load. Cross-links needed no rewiring — the
-> requestOpenFlight/Mission handlers set `activeTab` to `logbook`/`mission`, which now resolve to
-> the framework panels. The DEV playground stays (dev-only). **Remaining:** rename the `*V2`
-> component files to their canonical names (mechanical follow-up).
+> **Cutover done + finalised.** The regular rail tabs render the framework panels directly; the
+> legacy panels (9 components) and the duplicate "v2" rail group were deleted, a persisted `*-v2`
+> tab id is normalised back to its base on load, and the components were renamed from `*V2` to
+> their canonical names. Cross-links needed no rewiring — the requestOpenFlight/Mission handlers
+> set `activeTab` to `logbook`/`mission`, which now resolve to the framework panels. The DEV
+> playground stays (dev-only). **The framework migration is complete.**
 >
 > One small, additive PanelShell behaviour landed: the `advanced` **detail column renders only
 > when detail content exists** (`detail`/`detailToolbar`/… or `detailTitle`); with none, the
 > main column fills the full width (graceful single-column degrade).
 >
-> Next: finish FlightDetail's remaining inline affordances (link chips), review at 100/125/150 %,
-> then cut the migrated panels over (legacy panel + top-group rail button removed). **Settings is
-> deferred to last** (a data/structure reorg lands there first, to avoid touching it twice).
->
-> **Known follow-up — cross-link rewiring:** the click jumps (FlightDetail → linked mission /
-> battery; BatteryManagerV2 → linked flight) still target the **V1** panels (they switch
-> `activeTab` to `'logbook'` / `'mission'`). Rewire them once the **Mission Manager** is migrated
-> and the panels are cut over, so the target tabs are unambiguous. Tackle together at that point.
+> Possible follow-ups (not blocking): FlightDetail's remaining inline affordances (link chips →
+> `compact` buttons); a shared `Field`/`Select` primitive; theming-by-FC.
 
 ## Problem
 The app has 6 nav-rail panels in 4 recurring formats, but **every panel rolls its own
