@@ -307,7 +307,7 @@ All transports (Serial, TCP, UDP, BLE) implement `ByteTransport`. New transports
 - Protocol auto-detection deferred — explicit selection is safer and simpler
 - Each protocol handler is a self-contained module (`msp/`, `mavlink/`)
 
-Full implementation plan: `docs/PROTOCOL_REFACTORING.md`
+Full implementation plan: `docs/archive/PROTOCOL_REFACTORING.md`
 
 **Rationale**:
 - Separate handlers avoid forcing push-based protocols into a poll-based abstraction
@@ -896,7 +896,7 @@ Users may want recording without DB overhead, or DB logging without raw file cap
 - DB schema v4→v5: `flights.craft_name` column for user-editable craft names
 - Craft name editing: `flightlog_update_craft_name` Tauri command
 
-**Recording pipeline** (future, see `docs/PROTOCOL_REFACTORING.md`):
+**Recording pipeline** (future, see `docs/archive/PROTOCOL_REFACTORING.md`):
 - Raw-first: recording starts on ARM/connect, writes protocol-native bytes
 - DB import happens after DISARM/disconnect (post-processing)
 - Crash-safe: raw file survives even if app crashes during flight

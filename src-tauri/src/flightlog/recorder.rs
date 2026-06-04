@@ -22,7 +22,7 @@ const ARMED_FLAG: u32 = 0x04; // bit 2
 
 /// Payload for the `flight-recording-started` / `flight-recording-ended` events. The frontend
 /// uses `flight_id` to save + link the flown mission to this DB flight (see
-/// docs/active/MISSION_LIBRARY_AND_DB.md).
+/// docs/archive/MISSION_LIBRARY_AND_DB.md).
 #[derive(serde::Serialize, Clone)]
 struct FlightRecordingEvent {
     flight_id: i64,

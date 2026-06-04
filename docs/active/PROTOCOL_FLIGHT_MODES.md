@@ -48,7 +48,12 @@ Important details for correct live decoding:
 
 ---
 
-## ArduPilot / MAVLink (planned, NOT yet implemented)
+## ArduPilot / MAVLink (implemented)
+
+> Classification shipped: `ARDU_COPTER_MODES` / `ARDU_PLANE_MODES` lookup tables in
+> `trackColors.ts`, dispatched per `fc_variant`. ArduPilot `.bin` import stores the vehicle
+> `custom_mode` in `telemetry_records.active_flight_mode_flags` (the column is reused, not a new
+> one — see the storage note below).
 
 ### HEARTBEAT (msg #0) — Legacy Mode Reporting
 
@@ -174,19 +179,17 @@ Lists all available modes with `standard_mode`, `custom_mode`, and `mode_name` (
 
 ---
 
-## Planned DB Changes for ArduPilot Support
+## DB Storage for ArduPilot (implemented)
 
-Two new columns in `telemetry_records`:
+The originally-planned separate `custom_mode` / `base_mode` columns were **not** added. Instead the
+ArduPilot vehicle `custom_mode` is stored in the existing `telemetry_records.active_flight_mode_flags`
+column (reused), and `flights.fc_variant` + `flights.platform_type` identify the autopilot/vehicle so
+the frontend dispatches to the correct classifier:
 
-| Column | Type | Source | Description |
-|--------|------|--------|-------------|
-| `custom_mode` | INTEGER | HEARTBEAT.custom_mode | ArduPilot vehicle-specific mode enum |
-| `base_mode` | INTEGER | HEARTBEAT.base_mode | MAV_MODE_FLAG bitmask (ARMED, STABILIZE, etc.) |
+- INAV → bitmask logic on `active_flight_mode_flags`
+- ArduPilot → `ARDU_COPTER_MODES` / `ARDU_PLANE_MODES` lookup (per vehicle) on the same field
 
-Plus metadata on the `flights` table to identify autopilot type + vehicle type, so the frontend can dispatch to the correct classifier:
-
-- INAV → `classifyFlightMode(active_flight_mode_flags)` (existing bitmask logic)
-- ArduPilot → `classifyArduMode(custom_mode, vehicleType)` (new lookup table)
+Classification lives in `trackColors.ts` (`classifyMode(flags, fcVariant)`).
 
 ---
 

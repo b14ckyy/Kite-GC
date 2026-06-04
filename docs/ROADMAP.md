@@ -250,7 +250,7 @@ This document tracks planned features, organized by milestone.
 - [x] **Active-waypoint marker on the map** — `MSP_NAV_STATUS` (live) + blackbox/ArduPilot `active_wp_number` (replay) highlight the current target WP with a pulsing green glow on the icon (0.5 Hz, FBH included), gated on NAV_WP mode **and** mission trust (see provenance below). INAV done; **Flight-Mode-widget readout (`WP N/X`, `WP-RTH`) done**; ArduPilot layer pending
 - [~] **Mission provenance + flown-vs-loaded validation** _(flag model + gating in `docs/active/MISSION_TRACKING_AND_PROVENANCE.md`)_:
   - [x] **3-flag model (FC/FILE/DB) + trust gating** — per-slot content-snapshot flags (auto edit/undo), highlight trust gates, one-time "track?" popups (replay/flight), connect prompt (Download/Upload/Nothing), flag labels in the panel. INAV done.
-  - [x] **Mission library + record the active mission with the flight** — _done (see `docs/active/MISSION_LIBRARY_AND_DB.md` + `MISSION_LIBRARY_UI.md`); awaiting simulator testing_: first-class **mission library** (`missions` table, content-hash dedup, geometry + reverse-geocoded-location metadata, self-healing schema); recorded flights link the flown mission (**arm-save / disarm-link**, FC-synced only, in-flight-upload update prompt); Blackbox `H waypoints:N` → `flights.logged_wp_count` replay `WP N/X` fallback. **UI:** **Mission Manager** (logbook-style grouped browser — metadata/notes, preview mini-map, linked flights → jump to flight, Load-to-Map / Export / Import + drag&drop / Delete), editor **Save-to-library** (NEW/OVERWRITE), logbook **Link/Unlink**. _Deferred:_ list search/filter, ArduPilot export.
+  - [x] **Mission library + record the active mission with the flight** — _done (see `docs/archive/MISSION_LIBRARY_AND_DB.md` + `MISSION_LIBRARY_UI.md`); awaiting simulator testing_: first-class **mission library** (`missions` table, content-hash dedup, geometry + reverse-geocoded-location metadata, self-healing schema); recorded flights link the flown mission (**arm-save / disarm-link**, FC-synced only, in-flight-upload update prompt); Blackbox `H waypoints:N` → `flights.logged_wp_count` replay `WP N/X` fallback. **UI:** **Mission Manager** (logbook-style grouped browser — metadata/notes, preview mini-map, linked flights → jump to flight, Load-to-Map / Export / Import + drag&drop / Delete), editor **Save-to-library** (NEW/OVERWRITE), logbook **Link/Unlink**. _Deferred:_ list search/filter, ArduPilot export.
   - [ ] **Validate flown vs. loaded** — compare the loaded mission against the flown track / the FC's active-WP sequence and flag divergence.
   - [ ] **Verify mission-in-log support** — ArduPilot `.bin` embeds the mission (CMD messages); INAV blackbox only in later FW versions — confirm exact version + parse it on import.
 - [ ] **Disable/enable waypoint** — deactivate a WP in a loaded mission without deleting it (frozen in place, excluded from path + FC upload, kept in the file's meta area, greyed on the map). Design captured in `docs/active/WaypointDisable.md`
@@ -425,7 +425,7 @@ This document tracks planned features, organized by milestone.
 - [ ] Add `uplink_snr_db` to `TelemetryRecord` + schema v4 migration
 - [ ] Fall back to `MSPV2_INAV_ANALOG` RSSI for firmware < 9.1
 
-### Multi-Protocol Architecture (see `docs/PROTOCOL_REFACTORING.md`)
+### Multi-Protocol Architecture (see `docs/archive/PROTOCOL_REFACTORING.md`)
 
 **Phase 1 — ByteTransport trait extraction**:
 - [x] `ByteTransport` trait (protocol-agnostic byte-level I/O: read/write/close)
@@ -544,7 +544,7 @@ Cross-cutting groundwork items. Each carries non-trivial architectural or design
 - [ ] **3D map (Cesium) stays as-is for now** — keep Cesium World Terrain; tile-resolution quirks and other 3D refinements tracked separately under Milestone 7.
 - [ ] **Better map tile handling**
   - _Major considerations_: current IndexedDB LRU cache works but is reactive only. Consider region prefetch / offline area download, smarter eviction, retry/backoff on tile errors, optional vector tiles, and unified handling shared between Leaflet (2D) and Cesium (3D). Attribution + provider rate-limit compliance.
-- [x] **Global UI scale setting** — shipped; see `docs/active/UI_SCALING.md`. CSS `zoom` on the chrome
+- [x] **Global UI scale setting** — shipped; see `docs/archive/UI_SCALING.md`. CSS `zoom` on the chrome
   layer (toolbar / panels / docks / widgets / dialogs) at **100 / 125 / 150 %** (Settings → Language),
   persisted as `uiScale`. The **map stays at native resolution** (hoisted into an unzoomed `.layer-map`);
   map overlays are scaled individually — WP markers, param labels, the WP editor popup, Leaflet tooltips,

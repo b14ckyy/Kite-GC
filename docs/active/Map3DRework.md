@@ -19,7 +19,9 @@ Agreed 2026-05-31. Built in phases; tick items as they land.
   growing). `flyTo` on track load.
 - **Camera**: `free` / `follow` (chase behind UAV, `lockRange` zoom, `followPitch`
   user-adjustable, exponential `CHASE_SMOOTHING` lerp) / `orbit` (locked target, free orbit).
-  `cycleCameraMode` cycles the three. UAV = SVG arrow billboard.
+  `cycleCameraMode` cycles the three. UAV = coloured position **point** (the SVG arrow billboard
+  was removed 2026-06-04 — its rotation didn't read well in 3D and a proper 3D GLTF model is
+  planned to replace it; see ROADMAP M7).
 
 ## Phase 1 — Track line: outline + ground shadow + vertical wall
 

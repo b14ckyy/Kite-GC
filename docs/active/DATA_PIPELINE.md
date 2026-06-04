@@ -11,7 +11,7 @@ This document describes how telemetry data flows through the application — fro
 │                        DATA SOURCES                              │
 ├──────────────┬──────────────┬──────────────┬─────────────────────┤
 │  Serial/MSP  │  MAVLink     │  LTM / CRSF  │  Blackbox .TXT     │
-│  (live)      │  (planned)   │  (planned)    │  (import)          │
+│  (live)      │  (live)      │  (planned)    │  (import)          │
 └──────┬───────┴──────┬───────┴──────┬────────┴────────┬──────────┘
        │              │              │                 │
        ▼              ▼              ▼                 ▼
@@ -58,13 +58,12 @@ This document describes how telemetry data flows through the application — fro
 ┌──────────────────────────────────────────────────────────────────┐
 │                     Map Views (Svelte)                            │
 │                                                                   │
-│  Map.svelte (2D, Leaflet)    ←── mapViewMode toggle ──→          │
+│  Map.svelte (2D, Leaflet)  ←── mapViewMode toggle ──→            │
 │  Map3D.svelte (3D, CesiumJS)                                     │
-│    ├── Terrain: Cesium World Terrain (Ion token)                  │
-│    ├── Tiles: Shared IndexedDB cache with 2D                     │
-│    ├── Altitude: geoid undulation correction                      │
-│    └── Chase cam: lerp-smoothed follow camera                     │
 │                                                                   │
+│  Both consume the SAME live TelemetryData + playback track as     │
+│  the widgets — no separate data path. (Rendering specifics live   │
+│  in Map3DRework.md / TerrainFeatures.md, not here.)               │
 └──────────────────────────────────────────────────────────────────┘
 
                     ┌─────────────────────────────────────┐
@@ -274,9 +273,9 @@ All widgets receive `telem` prop → identical interface for live and replay
 
 ---
 
-## 4. Future: Multi-Protocol Architecture (Planned, M6)
+## 4. Multi-Protocol Architecture (MSP + MAVLink, M6 — shipped)
 
-### Goal: Same pipeline for MSP and MAVLink (see `docs/PROTOCOL_REFACTORING.md`)
+### Same pipeline for MSP and MAVLink (see [PROTOCOL_REFACTORING.md](../archive/PROTOCOL_REFACTORING.md))
 
 ```
                     ┌──────────────┐
@@ -316,12 +315,12 @@ All widgets receive `telem` prop → identical interface for live and replay
 - **ByteTransport trait** (Layer 1): Protocol-agnostic byte I/O — all transports (Serial, TCP, UDP, BLE) implement this once
 - **Protocol handlers** (Layer 2): MSP uses polling scheduler, MAVLink uses push-based reader thread — separate modules, not a unified trait
 - **Protocol selection**: Explicit UI dropdown (MSP / MAVLink), no auto-detection
-- **Raw recording**: MWP v2 Binary Capture (`.raw`) for MSP, standard tlog (`.tlog`) for MAVLink — crash-safe, raw-first pipeline
-- **DB import**: After DISARM/disconnect, raw log is post-processed into SQLite telemetry_records
+- **Raw recording**: a pre-parsed telemetry text log for MSP (written in parallel to the DB as a backup), standard tlog (`.tlog`) for MAVLink — crash-safe, optional continuous (pre-arm) capture
+- **DB recording**: live telemetry is written to SQLite `telemetry_records` during the flight (the raw logs are a parallel backup, not the primary DB path)
 
-### What Changes
+### Layer impact (this refactor — shipped)
 
-| Layer | Changes Needed | Scope |
+| Layer | Change | Scope |
 |---|---|---|
 | Transport | New `ByteTransport` trait, existing serial refactored | Medium |
 | MSP Scheduler | Uses `MspTransport<ByteTransport>` instead of `Transport` | Medium |
@@ -475,77 +474,23 @@ commands/flightlog.rs ─► db::get_blackbox_file()
 | `src-tauri/src/commands/flightlog.rs` | Backend | Tauri commands for export/import |
 | `src/lib/stores/flightlog.ts` | Frontend | TS invoke wrappers |
 | `src/lib/controllers/logbookController.ts` | Frontend | Export/import orchestration |
-| `src/lib/components/LogbookPanel.svelte` | Frontend | Button UI, multi-select, source indicators |
+| `src/lib/components/logbook/LogbookPanel.svelte` | Frontend | Button UI, multi-select, source indicators |
 
 ---
 
-## 7. 3D Globe View Pipeline (CesiumJS)
+## 7. Map Views (2D / 3D)
 
-### Path: TelemetryData / PlaybackTrack → Map3D.svelte → CesiumJS Scene
+The 2D (Leaflet) and 3D (Cesium) map views are **consumers of the same pipeline** — they have
+no separate data path:
 
-```
-+page.svelte
-    │
-    ├── mapViewMode: '2d' | '3d'  (user toggle)
-    │
-    ├── [2D] Map.svelte (Leaflet — existing)
-    │
-    └── [3D] Map3D.svelte (CesiumJS)
-         │
-         ├── Initialization:
-         │   ├── new Cesium.Viewer(container, { requestRenderMode, scene3DOnly, ... })
-         │   ├── Cesium.Terrain.fromWorldTerrain({ requestVertexNormals: true })
-         │   ├── waitForTerrain() — listen for terrainProviderChanged event (15s timeout)
-         │   └── createCachedImageryProvider() — shared IndexedDB tile cache
-         │
-         ├── Geoid Offset Calibration (once per track):
-         │   │  GPS alt_m = MSL.  CesiumJS expects WGS84 ellipsoid height.
-         │   │  Difference ≈ geoid undulation (~25-50m depending on region).
-         │   │
-         │   ├── First track point: { lat, lon, groundMsl = alt_m - baro_alt_m }
-         │   ├── sampleTerrainMostDetailed(terrainProvider, [Cartographic(lon, lat)])
-         │   ├── terrainEllipsoidHeight = result[0].height
-         │   └── geoidOffset = terrainEllipsoidHeight - groundMsl
-         │       (Applied to ALL positions: track, markers, live UAV)
-         │
-         ├── Track Rendering (playbackTrack prop):
-         │   ├── Polyline: lat/lon/alt + geoidOffset for each point
-         │   ├── Home marker: green pin at track[0] position
-         │   └── Color mode: solid yellow (speed/altitude coloring planned)
-         │
-         ├── Live / Playback Position (playbackPoint prop):
-         │   ├── UAV marker: blue point entity at current position + geoidOffset
-         │   └── Position updated reactively via Svelte $effect
-         │
-         └── Chase Camera:
-             ├── chaseTarget: { lat, lon, alt, heading } from telemetry
-             ├── chaseCurrent: smoothed interpolation via requestAnimationFrame loop
-             ├── lerp(current, target, 0.07) per frame (position)
-             ├── lerpAngle(current, target, 0.07) per frame (heading, shortest-path)
-             ├── First update: snap immediately (no lerp from origin)
-             └── camera.lookAt(targetPos, { heading, pitch: -25°, range: sliderValue })
-```
+- **Live**: the GPS/attitude fields of the `TelemetryData` store (position, heading, altitude).
+- **Replay**: the `playbackTrack` (`TelemetryRecord[]`) for the track polyline plus the current
+  `playbackPoint` for the moving marker — driven by the same `$derived(telem)` live/replay switch
+  as the widgets (see §3).
 
-### Tile Caching (Shared 2D/3D)
-
-```
-CesiumJS requestImage(x, y, level)
-    │
-    ▼
-getCachedTile(providerKey, z, x, y)  ← Same IndexedDB as Leaflet
-    │
-    ├── [HIT]  → return cached Blob → createImageBitmap()
-    │
-    └── [MISS] → fetchAndCacheImage(url)
-                    ├── fetch(url) → response.blob()
-                    ├── putCachedTile(key, z, x, y, blob) → IndexedDB
-                    └── return createImageBitmap(blob)
-
-Error handling:
-    ├── Tile fetch error → propagates naturally, parent tile stays visible
-    ├── errorEvent.addEventListener(() => {}) → prevents Cesium crash on tile errors
-    └── cesiumMaxZoom per provider → prevents requesting non-existent zoom levels
-```
+Everything beyond *what data goes in* is a **rendering concern and out of scope for this
+document**: terrain + geoid correction, track colouring, UAV symbols, the chase camera, and the
+shared map-tile cache. Those are documented in `Map3DRework.md` and `TerrainFeatures.md`.
 
 ---
 
@@ -571,4 +516,4 @@ Error handling:
 
 ---
 
-*Last updated: 2026-04-19*
+*Last updated: 2026-06-04*

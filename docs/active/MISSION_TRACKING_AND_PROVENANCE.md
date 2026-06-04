@@ -4,7 +4,7 @@
 validity, the highlight trust gates, both "track?" popups, the connect prompt, and the flag
 labels in the mission panel, and the active-WP readout (`WP N/X`) in the Flight-Mode widget.
 **Pending:** DB-flag integrate flow (needs the mission-in-log DB schema — see
-[`MISSION_LIBRARY_AND_DB.md`](MISSION_LIBRARY_AND_DB.md)), the ArduPilot mission layer (same
+[`MISSION_LIBRARY_AND_DB.md`](../archive/MISSION_LIBRARY_AND_DB.md)), the ArduPilot mission layer (same
 model, protocol-agnostic), and "upload all" multi-mission format.
 
 The active-waypoint highlight (a pulsing green glow on the FC's current target WP) is only
@@ -110,5 +110,5 @@ mission is changed or edited.
 - **Flag labels:** FC / FILE / DB badges in the mission panel after "Modified".
 
 **Pending:** DB-flag integrate flow (mission-in-log schema — see
-[`MISSION_LIBRARY_AND_DB.md`](MISSION_LIBRARY_AND_DB.md)), the ArduPilot mission layer (same
+[`MISSION_LIBRARY_AND_DB.md`](../archive/MISSION_LIBRARY_AND_DB.md)), the ArduPilot mission layer (same
 model), and "upload all" multi-mission.

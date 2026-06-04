@@ -1,10 +1,13 @@
 # Mission Library & DB — reusable missions linked to the flight log
 
+> **ARCHIVED (2026-06-04)** — implemented (backend + logic + UI); awaiting simulator/field testing. See ROADMAP M4.
+> _Archived = out of active focus (we don't look here for what's left to build), **not** frozen — later references and tweaks are still fine._
+
 **Status:** Phase 1 + the UI implemented (2026-06-03) — backend, logic, **and** the UI (Mission
 Manager, editor Save-to-library, logbook link/unlink) are complete; **awaiting hardware/
 simulator testing**. UI surface is documented in
 [`MISSION_LIBRARY_UI.md`](MISSION_LIBRARY_UI.md). Complements
-[`MISSION_TRACKING_AND_PROVENANCE.md`](MISSION_TRACKING_AND_PROVENANCE.md) — that doc
+[`MISSION_TRACKING_AND_PROVENANCE.md`](../active/MISSION_TRACKING_AND_PROVENANCE.md) — that doc
 defines *when* the active-WP highlight is trusted (the FC/FILE/DB provenance flags); **this**
 doc defines the **persistence layer**: missions as first-class, reusable database entities
 that recorded flights link to. Wiring the `DB` provenance flag is part of this work.

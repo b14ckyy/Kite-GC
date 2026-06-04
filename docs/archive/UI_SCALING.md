@@ -1,7 +1,12 @@
 # UI Scaling (Global Font / UI Scaler)
 
-> Status: **In progress** (first iteration, 2026-06-03). Experimental — we have a
-> clean commit snapshot, so we can iterate freely.
+> **ARCHIVED (2026-06-04)** — shipped — global UI scale 100/125/150 % (see ROADMAP, Platform & UX Foundations).
+> _Archived = out of active focus (we don't look here for what's left to build), **not** frozen — later references and tweaks are still fine._
+
+> Status: **Shipped** (2026-06-03). Global UI scale **100 / 125 / 150 %** on the chrome layer
+> (toolbar / panels / docks / widgets / dialogs) via CSS `zoom`; the map stays at native
+> resolution with overlays scaled individually. Persisted as `uiScale` (Settings → Language).
+> See ROADMAP (Platform & UX Foundations). **Archive candidate.**
 
 ## Goal
 The UI fonts are fine on a desktop monitor but too small on a laptop in the field

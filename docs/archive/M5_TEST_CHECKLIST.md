@@ -1,5 +1,8 @@
 # M5 Test Checklist — Flight Recording & Logbook
 
+> **ARCHIVED (2026-06-04)** — M5 (flight recording + logbook) shipped; checklist kept for reference.
+> _Archived = out of active focus (we don't look here for what's left to build), **not** frozen — later references and tweaks are still fine._
+
 This checklist covers the current M5 implementation state.
 
 ## Scope (Current Implementation)

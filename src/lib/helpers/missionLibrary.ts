@@ -2,7 +2,7 @@
 // Builds the `LibraryMissionInput` payload for the DB: a content hash (identity, for dedup)
 // plus computed geometry metadata. The hash is a SHA-256 of the SAME canonical serialization
 // the provenance system uses (hashWaypoints), so DB identity and provenance stay consistent.
-// See docs/active/MISSION_LIBRARY_AND_DB.md.
+// See docs/archive/MISSION_LIBRARY_AND_DB.md.
 
 import { hashWaypoints, hasLocation, toDeg, altToM, WpAction, type Waypoint } from '$lib/stores/mission';
 import type { LibraryMissionInput } from '$lib/stores/flightlogTypes';

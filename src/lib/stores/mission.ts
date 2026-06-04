@@ -127,7 +127,7 @@ export const mission = writable<Mission>(createEmptyMission());
 /** DB id of the currently loaded/imported library mission (null = fresh / never saved).
  *  Set on DB-load, and on import when the content hash matches an existing row; drives the
  *  NEW vs OVERWRITE decision on save, and is the link target for arm-time recording saves.
- *  See docs/active/MISSION_LIBRARY_AND_DB.md. */
+ *  See docs/archive/MISSION_LIBRARY_AND_DB.md. */
 export const loadedMissionId = writable<number | null>(null);
 
 /** Geo-waypoints only (for map markers) */

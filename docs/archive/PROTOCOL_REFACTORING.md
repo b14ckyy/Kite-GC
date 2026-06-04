@@ -1,6 +1,24 @@
 # Protocol Refactoring & MAVLink Integration — Workstream Plan
 
+> **ARCHIVED (2026-06-04)** — multi-protocol workstream shipped (architecture in ADR-010, progress in ROADMAP M6); Phase 5 generic commands not pursued. See the STATUS note below.
+> _Archived = out of active focus (we don't look here for what's left to build), **not** frozen — later references and tweaks are still fine._
+
 *Created: 2026-04-19*
+
+> **STATUS (2026-06-04): largely shipped** — architecture captured in ADR-010, progress in ROADMAP
+> M6. Phases 1–4 are live (ByteTransport trait + Serial/TCP/UDP/BLE, MAVLink basis, MAVLink
+> telemetry, crash-safe raw logging). Deviations from this plan as written:
+> - The MAVLink module shipped as **`mavlink_proto/`** (codec / handler / handshake / parser /
+>   mission), not the `mavlink/` layout sketched here, and without a standalone `decoder.rs` /
+>   `streams.rs`.
+> - The **MSP raw log is a pre-parsed telemetry text log, not the MWP-v2 binary `.raw`** of
+>   Decision #10 (`raw_logger.rs`); the MAVLink **tlog** (`tlog_logger.rs`) is as planned.
+> - **Phase 5 (generic two-way MAVLink commands — arm/disarm/mode/param) was not pursued** —
+>   Kite GC is receive-only for live telemetry.
+> - The MAVLink **mission protocol** (the "Future" section) shipped separately — see
+>   [MISSION_MULTIAUTOPILOT_PLAN.md](../active/MISSION_MULTIAUTOPILOT_PLAN.md).
+>
+> **Archive candidate** (workstream done; remaining ideas tracked in ROADMAP).
 
 This document defines the complete architecture plan for multi-protocol support (MSP + MAVLink) including transport layer refactoring, crash-safe raw logging, and unified data pipeline.
 

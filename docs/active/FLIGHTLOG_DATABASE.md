@@ -17,7 +17,8 @@ Excluded fields are typically Blackbox tuning data, PID internals, or low-level 
 
 ## Current Schema
 
-Current implemented schema version: `v5`
+Current implemented schema version: `v10`. The replay-focused telemetry field set was complete at
+`v5`; `v6`–`v10` add flight-level mission/pilot/battery links, not new replay telemetry.
 
 Migration history:
 
@@ -26,10 +27,15 @@ Migration history:
 - `v3`: `telemetry_records.link_quality`
 - `v4`: replay-focused telemetry fields (baro/GPS quality/nav/state/wind/RC arrays/sensor health)
 - `v5`: `nav_lat`, `nav_lon`, `nav_alt_m` columns for INAV navigation filter data
+- `v6`: `flights.linked_flight_id` (live↔blackbox pairing)
+- `v7`/`v8`: mission library (`missions` table + `flights.mission_id` + `flights.logged_wp_count`)
+- `v9`: `flights.pilot_name` + `flights.pilot_id`
+- `v10`: `battery_packs` table + soft `flights.battery_serial` link
 
 ## Replay Schema Direction
 
-Current replay target schema: `v5` (implemented)
+Replay-focused telemetry fields are complete as of `v5`; later migrations (`v6`–`v10`) are
+non-replay flight-level metadata (see migration history above).
 
 ### flights
 

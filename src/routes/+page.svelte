@@ -108,7 +108,7 @@
   });
 
   // Global UI scale (1 = 100%, up to 2). Zooms the chrome via `.ui-scale`; the map
-  // (`.layer-map`) stays unzoomed/native. See docs/active/UI_SCALING.md.
+  // (`.layer-map`) stays unzoomed/native. See docs/archive/UI_SCALING.md.
   let uiScale = $state(1);
 
   // Floating-window rect (must match FloatingVideoWindow's own computation) — used
@@ -1364,7 +1364,7 @@
   // ── Mission recording link (arm-save / disarm-link) ──────────────────
   // On arm (with DB recording), save the displayed mission to the library and link it to the
   // just-created flight. On disarm, if the mission changed during the flight (e.g. a new
-  // mission uploaded), offer to update the link. See docs/active/MISSION_LIBRARY_AND_DB.md.
+  // mission uploaded), offer to update the link. See docs/archive/MISSION_LIBRARY_AND_DB.md.
   let flightMissionHash: string | null = null;
 
   async function linkMissionToFlight(flightId: number, wps = get(mission).waypoints): Promise<void> {
@@ -1478,7 +1478,7 @@
 <svelte:window bind:innerWidth={winW} bind:innerHeight={winH} />
 
 <div class="ui-root" style:--ui-scale={uiScale}>
-  <!-- ======= MAP LAYER — unzoomed / native resolution (see docs/active/UI_SCALING.md) =======
+  <!-- ======= MAP LAYER — unzoomed / native resolution (see docs/archive/UI_SCALING.md) =======
        The map must stay crisp, so it lives OUTSIDE the zoomed `.ui-scale` layer. It is the
        same single Map/Map3D instance (no re-mount). Normally it sits behind the chrome; when
        video is primary it flips above the chrome into the floating window's body (.in-frame). -->
@@ -1567,7 +1567,7 @@
     ></video>
   {/if}
 
-  <!-- Map lives in the unzoomed `.layer-map` above (see docs/active/UI_SCALING.md). -->
+  <!-- Map lives in the unzoomed `.layer-map` above (see docs/archive/UI_SCALING.md). -->
 
   <LogPlayer
     {showPlayer}
@@ -1771,7 +1771,7 @@
 
   <!-- Cursor-positioned overlays stay OUTSIDE the zoom so their fixed clientX/clientY
        coordinates are not multiplied by --ui-scale (they render unscaled but in the
-       correct place; see docs/active/UI_SCALING.md). -->
+       correct place; see docs/archive/UI_SCALING.md). -->
   <ContextMenu />
   <BatchEditPopup {interfaceSettings} />
 </div><!-- .ui-root -->
@@ -1812,7 +1812,7 @@
     padding: calc(6px * var(--ui-scale, 1)) calc(8px * var(--ui-scale, 1));
   }
 
-  /* ── Global UI scaling (see docs/active/UI_SCALING.md) ──────────
+  /* ── Global UI scaling (see docs/archive/UI_SCALING.md) ──────────
      `.ui-root` fills the viewport. `.ui-scale` holds all chrome and is zoomed by
      --ui-scale (sized /scale so it fills exactly the viewport after the zoom).
      `.layer-map` holds the single Map/Map3D instance UNZOOMED so it stays crisp. */
@@ -1850,7 +1850,7 @@
      which is part of the map). BOTH `.ui-scale` (the parent covering the viewport) and
      `.app` must be click-through, or the parent eats events the moment `.app` passes them
      on. Solid children re-capture; the widget docks + map-controls stay click-through so
-     the map is draggable under/around them. See docs/active/UI_SCALING.md. */
+     the map is draggable under/around them. See docs/archive/UI_SCALING.md. */
   .ui-scale {
     pointer-events: none;
   }

@@ -69,7 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added — Global UI Scaling
 - **UI scale setting (100 / 125 / 150 %)** in Settings → Language, persisted as `uiScale`. Scales
   the whole chrome — toolbar, nav rail, panels, widget docks, dialogs, status bar — via CSS `zoom`
-  on a `.ui-scale` wrapper (sized `/scale` so it still fills the viewport). See `docs/active/UI_SCALING.md`.
+  on a `.ui-scale` wrapper (sized `/scale` so it still fills the viewport). See `docs/archive/UI_SCALING.md`.
 - **The map stays at native resolution:** the single Leaflet/Cesium instance is hoisted into an
   unzoomed `.layer-map` (no re-mount), so tiles stay crisp and pointer/clicks stay pixel-accurate.
   Map overlays are scaled individually instead — **WP markers, parameter labels, the WP editor popup,
@@ -168,7 +168,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `flights.mission_id` / `logged_wp_count` columns automatically on next open (idempotent, no
   data loss)
 - _UI pending (planner Save-to-library dialog + NEW/OVERWRITE, import flow, mission browser);
-  see `docs/active/MISSION_LIBRARY_AND_DB.md` for the functional spec + manual test checklist._
+  see `docs/archive/MISSION_LIBRARY_AND_DB.md` for the functional spec + manual test checklist._
 
 ### Added — Mission provenance flags + active-waypoint readout
 - **3-flag provenance model (FC / FILE / DB)** — per mission slot, each flag is valid only while
@@ -428,7 +428,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **DB schema v5**: `flights.craft_name` column for user-editable craft names (migration v4→v5)
 
 ### Added — Protocol Refactoring Plan
-- **`docs/PROTOCOL_REFACTORING.md`**: Comprehensive 5-phase MAVLink integration workstream document
+- **`docs/archive/PROTOCOL_REFACTORING.md`**: Comprehensive 5-phase MAVLink integration workstream document
 - Architecture: ByteTransport trait + separate MspScheduler/MavlinkHandler modules
 - Recording: MWP v2 Binary Capture (.raw) for MSP, standard tlog (.tlog) for MAVLink
 - Firmware scope: ArduPilot + PX4 + INAV MAVLink

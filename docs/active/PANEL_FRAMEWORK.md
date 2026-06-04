@@ -1,8 +1,10 @@
 # Panel Framework
 
-> Status: **Phase 1 in progress** (2026-06-04). Phase 0 (shell + control library) is signed off.
-> Real panels migrated onto `PanelShell` and wired behind their **v2 rail buttons** for
-> side-by-side review (no cutover yet — the legacy panels keep running):
+> Status: **Complete** (2026-06-04). Phase 0 (shell + control library) signed off; **all** nav-rail
+> panels migrated onto `PanelShell`, cut over, the legacy panels deleted, and the components renamed
+> to their canonical names (see "Cutover done + finalised" below). This doc now serves as the
+> **living reference** for the framework + control library (architecture in ADR-029). Per-panel
+> migration record:
 > - **UAV Info** → `info` variant (content-sized, unframed).
 > - **Flight Logbook** → live `info` (minimized card) / `compact` (list) / `advanced` (list +
 >   FlightDetail 1:2). All chrome + FlightDetail footer buttons use the `<Button>` library.
@@ -28,7 +30,7 @@
 >   Video Window detach (plain button, right — the PiP can't be closed from inside the app).
 >   Parallel build.
 >
- - **Settings** → `SettingsPanel` (`compact`), reorganised into **two tabs via a `SegmentedToggle`**
+> - **Settings** → `SettingsPanel` (`compact`), reorganised into **two tabs via a `SegmentedToggle`**
 >   (Interface / Data), each grouped into labelled subsections:
 >   - *Interface*: UI (language, scale) · Map (provider, altitude curtain) · Units (all unit
 >     selects) · Widgets (all HUD widget toggles).

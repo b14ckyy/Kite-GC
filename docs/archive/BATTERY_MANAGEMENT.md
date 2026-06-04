@@ -8,7 +8,7 @@
 > detailed feature-level reasoning.
 
 **Status:** Shipped (Phase A + B, 2026-06-03) — feature complete for the initial release. Mirrors
-the mission library pattern ([`../MISSION_LIBRARY_AND_DB.md`](../MISSION_LIBRARY_AND_DB.md)): packs are
+the mission library pattern ([`MISSION_LIBRARY_AND_DB.md`](MISSION_LIBRARY_AND_DB.md)): packs are
 first-class DB entities, flights link the pack that was flown (soft link by serial), and the wear
 data is derived from the linked flight logs + a persistent baseline. The Battery Manager is a
 view-toggle inside the Flight Logbook panel. Dedicated `.kbatt` export/import and cross-jump

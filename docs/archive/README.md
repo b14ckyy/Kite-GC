@@ -6,7 +6,11 @@ Completed feature/implementation plans live here instead of being deleted. ADRs
 build order — that is useful when revisiting or extending a feature later.
 
 A plan is moved here once its planned scope is fully shipped. Docs with open/deferred items
-stay in `../` (the active `docs/active/` folder).
+stay in `../active/`.
+
+**Archived ≠ frozen.** Moving a doc here just means it's **out of the active focus** — we don't
+look here for "what's left to build". Later references, fixes and tweaks to an archived feature
+are still perfectly fine; the doc simply isn't on the active work surface anymore.
 
 ## Contents
 
@@ -19,3 +23,12 @@ stay in `../` (the active `docs/active/` folder).
 - **BATTERY_MANAGEMENT.md** — Battery library + manager (schema v10, serial soft-link, `.kbatt`
   export/import, End-Flight capture, lifetime baseline + consolidation). Phase A + B shipped.
   Phase C (telemetry wear metrics) cut from scope; multi-battery per flight stays a future item.
+- **PROTOCOL_REFACTORING.md** — Multi-protocol (MSP + MAVLink) workstream. Phases 1–4 shipped
+  (architecture in ADR-010); Phase 5 generic two-way MAVLink commands not pursued (receive-only).
+- **UI_SCALING.md** — Global UI scale 100/125/150 % on the chrome layer. Shipped (archived 2026-06-04).
+- **MISSION_LIBRARY_AND_DB.md** — Reusable mission library + DB + flight linking. Backend + logic +
+  UI shipped; awaiting simulator/field testing.
+- **MISSION_LIBRARY_UI.md** — UI surface for the mission library (Manager / editor save / logbook
+  link). Shipped; awaiting simulator/field testing.
+- **M5_TEST_CHECKLIST.md** — Manual verification checklist for M5 (recording + logbook). Kept for
+  reference (M5 shipped).

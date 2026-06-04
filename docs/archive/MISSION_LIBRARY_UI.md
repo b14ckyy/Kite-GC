@@ -1,5 +1,8 @@
 # Mission Library — UI design (Phase 1b + 2)
 
+> **ARCHIVED (2026-06-04)** — implemented; awaiting simulator/field testing. See ROADMAP M4.
+> _Archived = out of active focus (we don't look here for what's left to build), **not** frozen — later references and tweaks are still fine._
+
 **Status:** Implemented (2026-06-03), **awaiting hardware/simulator testing**. Builds on the
 Phase 1 backend/logic in [`MISSION_LIBRARY_AND_DB.md`](MISSION_LIBRARY_AND_DB.md). This doc
 defines the user-facing surface: the **Mission Manager** (an alternate view of the Mission

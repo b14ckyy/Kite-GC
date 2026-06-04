@@ -329,7 +329,7 @@ Implemented via custom Svelte store with auto-save on every mutation. Schema evo
 
 ## M5 Test Notes
 
-- Detailed manual test checklist for M5 is in `docs/M5_TEST_CHECKLIST.md`.
+- Detailed manual test checklist for M5 is in `docs/archive/M5_TEST_CHECKLIST.md`.
 - Backend DB tests are in `src-tauri/src/flightlog/db.rs` (`cargo test flightlog --lib`).
 
 ## HUD Widget Panel System
