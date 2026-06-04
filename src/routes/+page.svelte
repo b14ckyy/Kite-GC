@@ -354,11 +354,11 @@
 
   const allTabs = [
     { id: "uav-info", label: () => $t('nav.uavInfo'), icon: ICON_UAV_INFO },
-    { id: "settings", label: () => $t('nav.settings'), icon: ICON_SETTINGS },
-    { id: "logbook", label: () => $t('nav.logbook'), icon: ICON_LOGBOOK },
     { id: "mission", label: () => $t('nav.mission'), icon: ICON_MISSION },
     { id: "terrain", label: () => $t('nav.terrain'), icon: ICON_TERRAIN },
+    { id: "logbook", label: () => $t('nav.logbook'), icon: ICON_LOGBOOK },
     { id: "video", label: () => $t('nav.video'), icon: ICON_VIDEO },
+    { id: "settings", label: () => $t('nav.settings'), icon: ICON_SETTINGS },
   ];
   const tabs = $derived(
     flightLoggingEnabled ? allTabs : allTabs.filter(t => t.id !== 'logbook')
