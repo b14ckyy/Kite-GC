@@ -40,8 +40,12 @@
 >   footer. The `+page` settings-patch handler was extracted to `applySettingsPatch` (shared by
 >   the legacy + V2 panels). Parallel build.
 >
-> **All main panels are now on the framework (parallel, behind their v2 rail buttons).**
-> Remaining: cross-link rewiring + the cutover (delete legacy panels + the v2 rail group).
+> **Cutover done.** The regular rail tabs now render the framework panels directly; the legacy
+> panels (9 components) and the duplicate "v2" rail group were deleted, and a persisted `*-v2`
+> tab id is normalised back to its base on load. Cross-links needed no rewiring — the
+> requestOpenFlight/Mission handlers set `activeTab` to `logbook`/`mission`, which now resolve to
+> the framework panels. The DEV playground stays (dev-only). **Remaining:** rename the `*V2`
+> component files to their canonical names (mechanical follow-up).
 >
 > One small, additive PanelShell behaviour landed: the `advanced` **detail column renders only
 > when detail content exists** (`detail`/`detailToolbar`/… or `detailTitle`); with none, the
