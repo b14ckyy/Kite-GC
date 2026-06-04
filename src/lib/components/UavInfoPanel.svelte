@@ -1,6 +1,6 @@
 <script lang="ts">
-  // UAV Info on the new panel framework (docs/dev/PANEL_FRAMEWORK.md): the `info` variant —
-  // content-sized, unframed. Pure presentation port of UavInfoPanel; same props/strings.
+  // UAV Info on the panel framework (docs/dev/PANEL_FRAMEWORK.md): the `info` variant —
+  // content-sized, unframed.
   import { t } from 'svelte-i18n';
   import type { FcInfo } from '$lib/stores/connection';
   import PanelShell from './panel/PanelShell.svelte';

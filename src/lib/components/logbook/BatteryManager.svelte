@@ -1,9 +1,7 @@
-<!-- BatteryManagerV2.svelte
-     Battery library on the new panel framework (docs/dev/PANEL_FRAMEWORK.md) — its own PanelShell
+<!-- BatteryManager.svelte
+     Battery library on the panel framework (docs/dev/PANEL_FRAMEWORK.md) — its own PanelShell
      (compact ↔ advanced, true 1:2 split): grouped pack list in the 380px main field, pack detail
-     in the 500px detail field. Parallel build alongside the legacy BatteryManager (which the old
-     Flight Logbook still embeds); both are deleted together at the logbook cutover.
-     Logic is identical to BatteryManager — only the chrome moves onto PanelShell + <Button>.
+     in the 500px detail field. Opened from the Flight Logbook's "Batteries" toggle.
      See docs/dev/BATTERY_MANAGEMENT.md.
 -->
 <script lang="ts">

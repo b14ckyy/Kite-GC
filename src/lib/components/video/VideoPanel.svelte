@@ -1,8 +1,7 @@
 <script lang="ts">
   // Video control panel on the panel framework (docs/dev/PANEL_FRAMEWORK.md): a `compact`
   // PanelShell. Header = Start/Stop; content = preview + source/resolution/mirror settings;
-  // footer = Floating Window (on/off Toggle) + Video Window/detach (button). Parallel build
-  // alongside the legacy VideoPanel; logic identical — only the chrome moves onto PanelShell.
+  // footer = Floating Window (mode button) + Video Window/detach (button).
   // Kept deliberately simple but extensible (more sinks/sources can slot into the content field).
   import { t } from 'svelte-i18n';
   import {

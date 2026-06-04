@@ -1,5 +1,5 @@
-<!-- MissionPanelV2.svelte — thin switcher (panel-framework version)
-     Delegates to the INAV or ArduPilot V2 sub-panel (each owns its own PanelShell + the autopilot
+<!-- MissionPanel.svelte — thin switcher (panel framework)
+     Delegates to the INAV or ArduPilot sub-panel (each owns its own PanelShell + the autopilot
      select in its header) and renders the system-switch confirmation dialog as a shared overlay.
 -->
 <script lang="ts">
@@ -13,8 +13,8 @@
   } from '$lib/stores/autopilotContext';
   import { connection } from '$lib/stores/connection';
   import { disconnectFC } from '$lib/controllers/connectionController';
-  import InavMissionPanelV2 from './InavMissionPanelV2.svelte';
-  import ArduMissionPanelV2 from './ArduMissionPanelV2.svelte';
+  import InavMissionPanel from './InavMissionPanel.svelte';
+  import ArduMissionPanel from './ArduMissionPanel.svelte';
 
   let currentSystem = $state<AutopilotSystem>(get(autopilotSystem));
   let currentSwitchReq = $state<SystemSwitchRequest | null>(get(pendingSystemSwitch));
@@ -40,9 +40,9 @@
 </script>
 
 {#if currentSystem === 'inav'}
-  <InavMissionPanelV2 />
+  <InavMissionPanel />
 {:else}
-  <ArduMissionPanelV2 />
+  <ArduMissionPanel />
 {/if}
 
 {#if currentSwitchReq}

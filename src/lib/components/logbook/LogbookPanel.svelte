@@ -21,7 +21,7 @@
   import PanelShell, { type PanelVariant } from '$lib/components/panel/PanelShell.svelte';
   import Button from '$lib/components/panel/Button.svelte';
   import FlightDetail from './FlightDetail.svelte';
-  import BatteryManagerV2 from './BatteryManagerV2.svelte';
+  import BatteryManager from './BatteryManager.svelte';
   import { batteryManagerOpen } from '$lib/stores/batteryManager';
 
   let {
@@ -139,7 +139,7 @@
 
   const flightTree = $derived<FlightTree>(buildFlightTree(filteredSummaries, logbookSortMode));
 
-  // Shell variant for the flight view (the battery library is its own panel — BatteryManagerV2).
+  // Shell variant for the flight view (the battery library is its own panel — BatteryManager).
   const fullView = $derived(selectedFlight != null);
   const minimizedInfo = $derived(flightLoggingEnabled && logbookMinimized && selectedFlight != null);
   const flightDetailColumn = $derived(selectedFlight != null);
@@ -452,7 +452,7 @@
 {/snippet}
 
 {#if $batteryManagerOpen}
-  <BatteryManagerV2 onBack={() => batteryManagerOpen.set(false)} />
+  <BatteryManager onBack={() => batteryManagerOpen.set(false)} />
 {:else}
   <div class="lbv2">
     <PanelShell

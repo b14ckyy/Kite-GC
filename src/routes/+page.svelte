@@ -20,11 +20,11 @@
   import StatusBar from "$lib/components/StatusBar.svelte";
   import NavRail from "$lib/components/NavRail.svelte";
   import PanelPlayground from "$lib/components/panel/PanelPlayground.svelte";
-  import UavInfoPanelV2 from "$lib/components/UavInfoPanelV2.svelte";
-  import LogbookPanelV2 from "$lib/components/logbook/LogbookPanelV2.svelte";
-  import MissionPanelV2 from "$lib/components/mission/MissionPanelV2.svelte";
-  import VideoPanelV2 from "$lib/components/video/VideoPanelV2.svelte";
-  import SettingsPanelV2 from "$lib/components/SettingsPanelV2.svelte";
+  import UavInfoPanel from "$lib/components/UavInfoPanel.svelte";
+  import LogbookPanel from "$lib/components/logbook/LogbookPanel.svelte";
+  import MissionPanel from "$lib/components/mission/MissionPanel.svelte";
+  import VideoPanel from "$lib/components/video/VideoPanel.svelte";
+  import SettingsPanel from "$lib/components/SettingsPanel.svelte";
   import { PlaybackController } from '$lib/controllers/playbackController';
   import { refreshSerialPorts, connectFC, disconnectFC, scanBleDevices } from '$lib/controllers/connectionController';
   import * as logbookCtrl from '$lib/controllers/logbookController';
@@ -455,7 +455,7 @@
   }
 
   // Persist a settings patch + mirror it into the local reactive vars the page binds. Shared by
-  // the legacy SettingsPanel and the new SettingsPanelV2.
+  // the legacy SettingsPanel and the new SettingsPanel.
   function applySettingsPatch(patch: Partial<AppSettings>) {
     settings.patch(patch);
     if (patch.attitudeRateHz != null) attitudeRateHz = patch.attitudeRateHz;
@@ -1598,9 +1598,9 @@
        self-positioned PanelShell; terrain is its own overlay below. -->
   {#if navPanelOpen && !terrainOpen}
     {#if activeTab === 'uav-info'}
-      <UavInfoPanelV2 {connStatus} {fcInfo} />
+      <UavInfoPanel {connStatus} {fcInfo} />
     {:else if activeTab === 'settings'}
-      <SettingsPanelV2
+      <SettingsPanel
         localeValue={$locale ?? 'en'}
         {uiScale}
         {mapProvider}
@@ -1631,7 +1631,7 @@
         onToggleWidget={toggleWidget}
       />
     {:else if activeTab === 'logbook'}
-      <LogbookPanelV2
+      <LogbookPanel
         {flightLoggingEnabled}
         {logbookMinimized}
         {logbookLoading}
@@ -1663,9 +1663,9 @@
         onImportKflight={importKflightFile}
       />
     {:else if activeTab === 'mission'}
-      <MissionPanelV2 />
+      <MissionPanel />
     {:else if activeTab === 'video'}
-      <VideoPanelV2 />
+      <VideoPanel />
     {:else if DEV_MODE && activeTab === 'dev-playground'}
       <PanelPlayground initial="compact" label="DEV Playground" />
     {/if}

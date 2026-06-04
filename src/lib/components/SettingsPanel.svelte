@@ -1,9 +1,8 @@
 <script lang="ts">
-  // Settings on the new panel framework (docs/dev/PANEL_FRAMEWORK.md): a `compact` PanelShell with
+  // Settings on the panel framework (docs/dev/PANEL_FRAMEWORK.md): a `compact` PanelShell with
   // a SegmentedToggle tab switcher (Interface / Data) in the toolbar; each tab is grouped into
   // labelled subsections. On/off switches use the shared <Toggle>, actions use <Button>, selects
   // match the framework height. All tiny italic hints are dropped except the Cesium-token one.
-  // Parallel build alongside the legacy SettingsPanel; same props/handlers.
   import { t, locale } from 'svelte-i18n';
   import { SUPPORTED_LOCALES } from '$lib/i18n';
   import { MAP_PROVIDERS } from '$lib/config/mapProviders';

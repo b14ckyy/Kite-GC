@@ -1,9 +1,8 @@
-<!-- MissionManagerV2.svelte
-     Mission library on the new panel framework (docs/dev/PANEL_FRAMEWORK.md): its own PanelShell
+<!-- MissionManager.svelte
+     Mission library on the panel framework (docs/dev/PANEL_FRAMEWORK.md): its own PanelShell
      (compact ↔ advanced 1:2) — grouped mission list in the main field, mission detail (preview
-     map · name/notes · stats · linked flights) in the detail field. Parallel build alongside the
-     legacy MissionManager (still used by the old mission planner); both removed at cutover.
-     Logic identical to MissionManager — only the chrome moves onto PanelShell + <Button>.
+     map · name/notes · stats · linked flights) in the detail field. Opened from the mission
+     planner's "Mission Manager" toggle.
 -->
 <script lang="ts">
   import { t, locale } from 'svelte-i18n';

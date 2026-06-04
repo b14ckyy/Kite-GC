@@ -1,7 +1,6 @@
-<!-- ArduMissionPanelV2.svelte
+<!-- ArduMissionPanel.svelte
      ArduPilot / PX4 mission planner on the panel framework (docs/dev/PANEL_FRAMEWORK.md): a
-     `compact` PanelShell. Single mission (no multi-mission tabs). Parallel build alongside the
-     legacy ArduMissionPanel; logic identical — only the chrome moves onto PanelShell + <Button>.
+     `compact` PanelShell. Single mission (no multi-mission tabs).
 -->
 <script lang="ts">
   import { onDestroy } from 'svelte';

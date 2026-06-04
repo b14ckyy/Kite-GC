@@ -1,6 +1,6 @@
 <script lang="ts">
   // Autopilot-system picker for the mission panel headers (INAV / ArduPilot / PX4). Shared by
-  // both V2 mission editors so the control lives in one place. Locked while connected.
+  // both mission editors so the control lives in one place. Locked while connected.
   import { t } from 'svelte-i18n';
   import { get } from 'svelte/store';
   import { autopilotSystem, autopilotLocked, setAutopilotSystem, type AutopilotSystem } from '$lib/stores/autopilotContext';

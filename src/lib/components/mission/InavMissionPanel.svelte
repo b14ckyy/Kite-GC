@@ -1,9 +1,8 @@
-<!-- InavMissionPanelV2.svelte
-     INAV MSP mission planner on the new panel framework (docs/dev/PANEL_FRAMEWORK.md): a `compact`
+<!-- InavMissionPanel.svelte
+     INAV MSP mission planner on the panel framework (docs/dev/PANEL_FRAMEWORK.md): a `compact`
      PanelShell. Header = title + autopilot select; toolbar = edit/manager/undo/redo/pattern/clear;
      content field = multi-mission tabs + WP table; footer = selected-WP detail + FC/EEPROM/file
-     controls. Renders MissionManagerV2 when the library view is open. Parallel build alongside the
-     legacy InavMissionPanel; logic identical — only the chrome moves onto PanelShell + <Button>.
+     controls. Renders MissionManager when the library view is open.
 -->
 <script lang="ts">
   import { onDestroy } from 'svelte';
@@ -23,7 +22,7 @@
   } from '$lib/stores/mission';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
   import MissionSaveDialog from '$lib/components/mission/MissionSaveDialog.svelte';
-  import MissionManagerV2 from '$lib/components/mission/MissionManagerV2.svelte';
+  import MissionManager from '$lib/components/mission/MissionManager.svelte';
   import PanelShell from '$lib/components/panel/PanelShell.svelte';
   import Button from '$lib/components/panel/Button.svelte';
   import AutopilotSelect from '$lib/components/mission/AutopilotSelect.svelte';
@@ -550,7 +549,7 @@
 {/snippet}
 
 {#if $missionManagerOpen}
-  <MissionManagerV2 onBack={() => missionManagerOpen.set(false)} />
+  <MissionManager onBack={() => missionManagerOpen.set(false)} />
 {:else}
   <div class="imv2">
     <PanelShell variant="compact" title={$t('nav.mission')} {toolbar} {body} {footer}>
