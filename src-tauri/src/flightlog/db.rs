@@ -1336,6 +1336,20 @@ pub fn update_flight_craft_name(
     Ok(())
 }
 
+/// Update the UAV platform type of a flight (INAV mixer enum: 0=multirotor … 6=other).
+/// Manually editable in the flight detail (also drives the map replay symbol).
+pub fn update_flight_platform_type(
+    conn: &Connection,
+    flight_id: i64,
+    platform_type: u8,
+) -> SqlResult<()> {
+    conn.execute(
+        "UPDATE flights SET platform_type = ?1 WHERE id = ?2",
+        params![platform_type, flight_id],
+    )?;
+    Ok(())
+}
+
 /// Update the pilot metadata (name + id) of a flight. Empty strings are stored as NULL.
 pub fn update_flight_pilot(
     conn: &Connection,

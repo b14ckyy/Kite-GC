@@ -27,6 +27,8 @@ struct HeaderMetadata {
     /// Waypoint count from `H waypoints:<count>,<flag>` (only the count is used).
     logged_wp_count: Option<i64>,
     start_time: Option<DateTime<Utc>>,
+    /// Heuristic platform type (0=multirotor, 1=airplane) derived from the logged field set.
+    platform_type: u8,
 }
 
 #[inline]
@@ -197,7 +199,7 @@ where
         fc_variant: "INAV".into(),
         fc_version: header.fc_version.unwrap_or_default(),
         board_id: header.board_id.unwrap_or_default(),
-        platform_type: 0,
+        platform_type: header.platform_type,
         protocol: "BLACKBOX".into(),
         start_lat,
         start_lon,
@@ -727,6 +729,45 @@ fn extract_header_metadata_for_log(file_data: &[u8], log_index: Option<u32>) -> 
         board_id: find_header_value(&header_text, &["Board information", "Board"]),
         logged_wp_count: parse_waypoint_count(&header_text),
         start_time: find_header_datetime(&header_text),
+        platform_type: parse_platform_type(&header_text),
+    }
+}
+
+/// Heuristic platform type for INAV blackbox: there is no explicit platform header, but the
+/// logged field set differs by airframe — fixed-wing logs a single `motor[0]` plus `servo[...]`
+/// control surfaces, while multirotors log several `motor[N]`. We read the highest motor index
+/// (and servo presence) from the `H Field ... name:` definition lines.
+/// Returns 0 = multirotor (default / unknown), 1 = airplane. Display-only; no functional impact.
+fn parse_platform_type(text: &str) -> u8 {
+    let mut max_motor: i32 = -1;
+    let mut has_servo = false;
+    for line in text.lines() {
+        let l = line.trim();
+        if !l.starts_with("H Field") {
+            continue;
+        }
+        if l.contains("servo[") {
+            has_servo = true;
+        }
+        let mut rest = l;
+        while let Some(pos) = rest.find("motor[") {
+            let after = &rest[pos + 6..];
+            let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if let Ok(n) = digits.parse::<i32>() {
+                if n > max_motor {
+                    max_motor = n;
+                }
+            }
+            rest = &after[digits.len()..];
+        }
+    }
+    // >=3 motors → multirotor; a single motor with servos → fixed-wing; otherwise default.
+    if max_motor >= 2 {
+        0
+    } else if max_motor == 0 && has_servo {
+        1
+    } else {
+        0
     }
 }
 

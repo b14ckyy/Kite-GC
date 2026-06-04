@@ -473,6 +473,19 @@ pub struct DecodeStats {
     pub message_type_counts: HashMap<String, usize>,
 }
 
+/// Map an ArduPilot vehicle string (from the MSG firmware banner) to the INAV mixer platform
+/// enum (0=multirotor, 1=airplane, 4=rover, 5=boat, 6=other). Traditional helicopters report
+/// as "ArduCopter" too, so they read as multirotor here. Display-only (drives the map symbol).
+fn platform_type_from_vehicle(vehicle: Option<&str>) -> u8 {
+    match vehicle {
+        Some(v) if v.contains("Plane") => 1,  // airplane
+        Some(v) if v.contains("Copter") => 0, // multirotor
+        Some(v) if v.contains("Rover") => 4,  // rover
+        Some(v) if v.contains("Sub") || v.contains("Blimp") => 6, // other
+        _ => 0,
+    }
+}
+
 // ─── Internal decoder state ───────────────────────────────────────────────────
 
 #[derive(Default)]
@@ -695,6 +708,7 @@ where
 
     let fc_variant = state.vehicle_type.clone().unwrap_or_else(|| "ArduPilot".into());
     let fc_version = state.fw_version.clone().unwrap_or_default();
+    let platform_type = platform_type_from_vehicle(state.vehicle_type.as_deref());
 
     // Use UTC time from GPS for start_time
     let start_time = all_rows
@@ -860,7 +874,7 @@ where
         fc_variant,
         fc_version,
         board_id: String::new(),
-        platform_type: 0,
+        platform_type,
         protocol: "DATAFLASH".into(),
         start_lat,
         start_lon,

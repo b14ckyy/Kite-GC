@@ -14,7 +14,7 @@ mod transport;
 use commands::connection::{connect, disconnect, list_serial_ports, scan_ble_devices};
 use commands::flightlog::{
     flightlog_list, flightlog_get, flightlog_get_track, flightlog_delete,
-    flightlog_update_notes, flightlog_update_craft_name, flightlog_update_pilot, flightlog_update_weather, flightlog_geocode, flightlog_fetch_weather,
+    flightlog_update_notes, flightlog_update_craft_name, flightlog_update_platform_type, flightlog_update_pilot, flightlog_update_weather, flightlog_geocode, flightlog_fetch_weather,
     flightlog_default_db_path, flightlog_import_blackbox,
     flightlog_export, flightlog_export_blackbox, flightlog_export_track, flightlog_import_kflight,
     flightlog_kflight_list, flightlog_kflight_get, flightlog_kflight_track,
@@ -85,6 +85,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        // Persist + restore the main window's size/position/maximized state across launches.
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(AppState::new())
         .manage(MissionStore::new())
         .manage(TerrainProvider::new())
@@ -146,6 +148,7 @@ pub fn run() {
             battery_file_read,
             flightlog_update_notes,
             flightlog_update_craft_name,
+            flightlog_update_platform_type,
             flightlog_update_pilot,
             flightlog_update_weather,
             flightlog_geocode,

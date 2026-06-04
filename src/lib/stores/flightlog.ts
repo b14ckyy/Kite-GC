@@ -271,6 +271,14 @@ export async function updateFlightCraftName(id: number, craftName: string, dbPat
   });
 }
 
+export async function updateFlightPlatformType(id: number, platformType: number, dbPath: string): Promise<void> {
+  return invoke('flightlog_update_platform_type', {
+    flightId: id,
+    platformType,
+    dbPath: dbPath || undefined,
+  });
+}
+
 export async function updateFlightPilot(id: number, pilotName: string, pilotId: string, dbPath: string): Promise<void> {
   return invoke('flightlog_update_pilot', {
     flightId: id,

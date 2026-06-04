@@ -5,6 +5,7 @@ import {
   deleteFlight,
   updateFlightNotes,
   updateFlightCraftName,
+  updateFlightPlatformType,
   updateFlightPilot,
   updateFlightWeather,
   geocodeFlight,
@@ -108,6 +109,16 @@ export async function saveCraftName(
   dbPath: string,
 ): Promise<Flight | null> {
   await updateFlightCraftName(flightId, craftName.trim(), dbPath);
+  return getFlight(flightId, dbPath);
+}
+
+/** Save the UAV platform type and return the updated flight. */
+export async function savePlatformType(
+  flightId: number,
+  platformType: number,
+  dbPath: string,
+): Promise<Flight | null> {
+  await updateFlightPlatformType(flightId, platformType, dbPath);
   return getFlight(flightId, dbPath);
 }
 

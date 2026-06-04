@@ -679,17 +679,7 @@
           pixelOffset: new Cesium.Cartesian2(0, -18),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
-        // Direction arrow billboard
-        billboard: {
-          image: buildUavArrowDataUri(color),
-          width: 32,
-          height: 32,
-          rotation: -Cesium.Math.toRadians(heading),
-          verticalOrigin: Cesium.VerticalOrigin.CENTER,
-          horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
-          heightReference: Cesium.HeightReference.NONE,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        },
+        // Direction symbol omitted in 3D for now — a proper 3D model will replace it later.
       });
     } else {
       (uavEntity.position as Cesium.ConstantPositionProperty).setValue(position);
@@ -698,23 +688,10 @@
       if (uavEntity.point) {
         uavEntity.point.color = new Cesium.ConstantProperty(cesiumColor);
       }
-      if (uavEntity.billboard) {
-        uavEntity.billboard.image = new Cesium.ConstantProperty(buildUavArrowDataUri(color));
-        uavEntity.billboard.rotation = new Cesium.ConstantProperty(-Cesium.Math.toRadians(heading));
-      }
     }
 
     // Live trail — only while armed (no trail in the disarmed state)
     if (armed) updateTrail3D(lat, lon, alt);
-  }
-
-  // ── UAV Arrow Data URI (simple SVG) ────────────────────────────────
-
-  function buildUavArrowDataUri(fillColor: string): string {
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24">
-      <path d="M12 2 L5 20 L12 16 L19 20 Z" fill="${fillColor}" stroke="white" stroke-width="1"/>
-    </svg>`;
-    return `data:image/svg+xml;base64,${btoa(svg)}`;
   }
 
   // ── Home Position ──────────────────────────────────────────────────
@@ -1462,16 +1439,7 @@
           heightReference: Cesium.HeightReference.NONE,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
-        billboard: {
-          image: buildUavArrowDataUri(color),
-          width: 28,
-          height: 28,
-          rotation: -Cesium.Math.toRadians(heading),
-          verticalOrigin: Cesium.VerticalOrigin.CENTER,
-          horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
-          heightReference: Cesium.HeightReference.NONE,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        },
+        // Direction symbol omitted in 3D for now — a proper 3D model will replace it later.
       });
     } else {
       (playbackMarkerEntity.position as Cesium.ConstantPositionProperty).setValue(position);
@@ -1479,10 +1447,6 @@
         playbackMarkerEntity.point.color = new Cesium.ConstantProperty(
           Cesium.Color.fromCssColorString(color)
         );
-      }
-      if (playbackMarkerEntity.billboard) {
-        playbackMarkerEntity.billboard.image = new Cesium.ConstantProperty(buildUavArrowDataUri(color));
-        playbackMarkerEntity.billboard.rotation = new Cesium.ConstantProperty(-Cesium.Math.toRadians(heading));
       }
     }
 

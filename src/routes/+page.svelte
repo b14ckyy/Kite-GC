@@ -988,6 +988,12 @@
     selectedFlight = await logbookCtrl.savePilot(selectedFlightId, pilotName, pilotId, flightLogDbPath);
   }
 
+  async function saveSelectedFlightPlatformType(platformType: number) {
+    if (!selectedFlightId) return;
+    selectedFlight = await logbookCtrl.savePlatformType(selectedFlightId, platformType, flightLogDbPath);
+    await loadLogbook();
+  }
+
   async function removeSelectedFlight() {
     if (!selectedFlightId || !selectedFlight) return;
 
@@ -1226,11 +1232,15 @@
   );
   const logbookHasFlightOnMap = $derived(activeTab === 'logbook' && selectedFlight != null && !isPrimaryConnected);
 
-  // Platform type: from live connection or selected flight log
+  // Platform type for the UAV map symbol. Live and replay are mutually exclusive on the map
+  // (mapTrack/playbackPoint gate on !isPrimaryConnected), so: connected → live FC type;
+  // otherwise → the replayed flight's type (even if stale fcInfo still lingers after disconnect).
   const mapPlatformType = $derived(
-    (fcInfo as FcInfo | null)?.platform_type
-      ?? (selectedFlight as Flight | null)?.platform_type
-      ?? 0,
+    isPrimaryConnected
+      ? ((fcInfo as FcInfo | null)?.platform_type ?? 0)
+      : ((selectedFlight as Flight | null)?.platform_type
+          ?? (fcInfo as FcInfo | null)?.platform_type
+          ?? 0),
   );
 
   // FC variant for the selected flight (used by mode widgets + map coloring)
@@ -1655,6 +1665,7 @@
         onSaveNotes={saveSelectedFlightNotes}
         onSaveWeather={saveSelectedFlightWeather}
         onSaveCraftName={saveSelectedFlightCraftName}
+        onSavePlatformType={saveSelectedFlightPlatformType}
         onSavePilot={saveSelectedFlightPilot}
         onDeleteFlight={removeSelectedFlight}
         onExportFlights={exportFlightsToKflight}

@@ -17,8 +17,8 @@ export type PlatformType = number;
 // ── SVG shape definitions ───────────────────────────────────────────
 // Each shape is a viewBox-24 SVG path string.  Stroke is applied externally.
 
-interface UavShape {
-  /** SVG path d-attribute, drawn inside a 24×24 viewBox */
+export interface UavShape {
+  /** SVG path d-attribute, drawn inside a 24×24 viewBox (nose pointing north / up) */
   path: string;
   /** Icon pixel size (width=height) */
   size: number;
@@ -27,25 +27,27 @@ interface UavShape {
 const SHAPE_MULTIROTOR: UavShape = {
   // Arrow / quad silhouette — current default
   path: 'M12 2 L5 20 L12 16 L19 20 Z',
-  size: 28,
+  size: 56,
 };
 
 const SHAPE_AIRPLANE: UavShape = {
   // Fixed-wing top-down silhouette
   path: 'M12 2 L11 8 L3 13 L3 14.5 L11 12 L11 19 L8 21 L8 22.5 L12 21 L16 22.5 L16 21 L13 19 L13 12 L21 14.5 L21 13 L13 8 Z',
-  size: 32,
+  size: 64,
 };
 
 const SHAPE_HELICOPTER: UavShape = {
   // Simple helicopter top-down — body + tail boom
   path: 'M12 3 L10 7 L6 8 L4 10 L6 11 L10 10 L11 18 L9 21 L10 22 L12 20 L14 22 L15 21 L13 18 L14 10 L18 11 L20 10 L18 8 L14 7 Z',
-  size: 30,
+  size: 60,
 };
 
 // Fallback for unknown types (same as multirotor)
 const SHAPE_DEFAULT: UavShape = SHAPE_MULTIROTOR;
 
-function shapeForPlatform(platformType: PlatformType): UavShape {
+/** The 24×24 UAV silhouette (path + size) for a platform type, shared by the 2D DivIcon
+ *  and the 3D Cesium billboard so both maps use the same per-platform shapes. */
+export function uavShapeForPlatform(platformType: PlatformType): UavShape {
   switch (platformType) {
     case PLATFORM_AIRPLANE:   return SHAPE_AIRPLANE;
     case PLATFORM_HELICOPTER: return SHAPE_HELICOPTER;
@@ -83,7 +85,7 @@ export function createUavIcon(opts: UavIconOptions = {}): L.DivIcon {
     platformType = PLATFORM_MULTIROTOR,
   } = opts;
 
-  const shape = shapeForPlatform(platformType);
+  const shape = uavShapeForPlatform(platformType);
   const half = shape.size / 2;
 
   return L.divIcon({

@@ -27,7 +27,7 @@
   import Button from '$lib/components/panel/Button.svelte';
   import AutopilotSelect from '$lib/components/mission/AutopilotSelect.svelte';
   import { missionManagerOpen } from '$lib/stores/missionManager';
-  import { buildMissionInput } from '$lib/helpers/missionLibrary';
+  import { buildMissionInput, computeMissionStats } from '$lib/helpers/missionLibrary';
   import { missionDbSave, missionDbUpdate, missionDbGet, missionDbFindByHash, missionDbGeocode } from '$lib/stores/flightlog';
   import { locale } from 'svelte-i18n';
   import { isFlyByHome } from '$lib/helpers/missionGeometry';
@@ -38,7 +38,7 @@
   import { get } from 'svelte/store';
   import { settings } from '$lib/stores/settings';
   import type { InterfaceSettings } from '$lib/stores/settings';
-  import { convertAltitude, convertSpeed } from '$lib/utils/units';
+  import { convertAltitude, convertSpeed, convertDistance, formatConverted } from '$lib/utils/units';
   import { save, open } from '@tauri-apps/plugin-dialog';
   import { t } from 'svelte-i18n';
   // Helper: untyped $t wrapper for dynamic params (svelte-i18n types are too strict)
@@ -376,6 +376,31 @@
 
   const displayNums = $derived(buildDisplayNumbers(currentMission.waypoints));
   const missionEndIdx = $derived(findMissionEndIndex(currentMission.waypoints));
+
+  // Mission stats (distance / climb+descent / estimated flight time) for the footer summary.
+  const stats = $derived(computeMissionStats(currentMission.waypoints));
+  function fmtDist(m: number): string {
+    return formatConverted(convertDistance(m, iface.distanceUnit), m >= 1000 ? 2 : 0);
+  }
+  function fmtAltDelta(m: number): string {
+    const a = convertAltitude(m, iface.altitudeUnit);
+    return `${Math.round(a.value)}${a.unit}`;
+  }
+  function fmtDuration(s: number): string {
+    const total = Math.round(s);
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const sec = total % 60;
+    if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m`;
+    if (m > 0) return `${m}m ${String(sec).padStart(2, '0')}s`;
+    return `${sec}s`;
+  }
+  const estTimeText = $derived.by(() => {
+    if (stats.estTimeS === null) return null;
+    const base = fmtDuration(stats.estTimeS);
+    const prefix = stats.hasUnlimitedHold ? '≥ ' : stats.estTimeApprox ? '~' : '';
+    return `${prefix}${base}`;
+  });
 </script>
 
 <svelte:window onkeydown={onKeydown} />
@@ -532,6 +557,16 @@
 
     {#if statusMessage}<div class="mission-status">{statusMessage}</div>{/if}
 
+    {#if !showPatternPanel && stats.geoCount >= 2}
+      <div class="mission-stats">
+        <span class="stat" title={$t('mission.statDistance')}>⤢ {fmtDist(stats.legDistanceM)}</span>
+        <span class="stat" title={$t('mission.statClimbDescent')}>↑{fmtAltDelta(stats.climbM)} ↓{fmtAltDelta(stats.descentM)}</span>
+        {#if estTimeText}
+          <span class="stat" title={stats.estTimeApprox || stats.hasUnlimitedHold ? _t('mission.statTimeTip', { speed: formatConverted(convertSpeed(stats.assumedCruiseMs, iface.speedUnit), 0) }) : $t('mission.statTime')}>⏱ {estTimeText}</span>
+        {/if}
+      </div>
+    {/if}
+
     {#if currentMission.waypoints.length > 0}
       <div class="mission-summary">
         {#if currentMissionCount > 1}
@@ -609,6 +644,8 @@
   .ctrl-row { display: flex; gap: 4px; }
   .mission-status { padding: 3px 6px; font-size: 11px; color: #f39c12; text-align: center; }
   .mission-summary { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 3px; font-size: 12px; color: #888; flex-wrap: wrap; }
+  .mission-stats { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 4px 3px 0; font-size: 12px; color: #9ad0e8; flex-wrap: wrap; font-variant-numeric: tabular-nums; }
+  .mission-stats .stat { white-space: nowrap; cursor: default; }
   .dirty-badge { background: #f39c12; color: #1a1a1a; padding: 1px 6px; border-radius: 8px; font-size: 11px; font-weight: bold; }
   .prov-badge { color: #fff; padding: 1px 6px; border-radius: 8px; font-size: 11px; font-weight: bold; margin-left: 4px; }
   .prov-fc { background: #37a8db; }

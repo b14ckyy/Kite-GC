@@ -29,6 +29,7 @@
     onSaveNotes,
     onSaveWeather,
     onSaveCraftName,
+    onSavePlatformType,
     onSavePilot,
     onDeleteFlight,
     onExportTrack,
@@ -46,6 +47,7 @@
     onSaveNotes: () => void;
     onSaveWeather: () => void;
     onSaveCraftName: (name: string) => void;
+    onSavePlatformType: (platformType: number) => void;
     onSavePilot: (pilotName: string, pilotId: string) => void;
     onDeleteFlight: () => void;
     onExportTrack: () => void;
@@ -227,6 +229,24 @@
     craftNameEditing = false;
   }
 
+  // ── Platform type (INAV mixer enum; manually editable, drives the map replay symbol) ──
+  let platformEditing = $state(false);
+  const PLATFORM_KEYS: Record<number, string> = {
+    0: 'platform.multirotor', 1: 'platform.airplane', 2: 'platform.helicopter',
+    3: 'platform.tricopter', 4: 'platform.rover', 5: 'platform.boat', 6: 'platform.other',
+  };
+  const PLATFORM_OPTIONS = [0, 1, 2, 3, 4, 5, 6];
+  function platformLabel(type: number): string {
+    return PLATFORM_KEYS[type] ? $t(PLATFORM_KEYS[type]) : $t('platform.unknown', { values: { type } });
+  }
+  function changePlatformType(e: Event) {
+    const value = Number((e.currentTarget as HTMLSelectElement).value);
+    platformEditing = false;
+    if (value !== flight.platform_type) onSavePlatformType(value);
+  }
+  // Reset the editor when switching flights.
+  $effect(() => { void flight.id; platformEditing = false; });
+
   function startPilotEdit() {
     pilotNameDraft = flight.pilot_name ?? '';
     pilotIdDraft = flight.pilot_id ?? '';
@@ -324,6 +344,19 @@
         <button class="weather-edit-btn" onclick={startCraftNameEdit} title={$t('logbook.editCraftName')}>✎</button>
       {/if}
     </span>
+    <span class="fc-label">{$t('logbook.type')}</span>
+    <span class="fc-value craft-value-row">
+      {#if platformEditing}
+        <select class="platform-select" onchange={changePlatformType} use:focusOnMount>
+          {#each PLATFORM_OPTIONS as pt}
+            <option value={pt} selected={pt === flight.platform_type}>{platformLabel(pt)}</option>
+          {/each}
+        </select>
+      {:else}
+        <span>{platformLabel(flight.platform_type)}</span>
+        {#if !minimized}<button class="weather-edit-btn" onclick={() => (platformEditing = true)} title={$t('logbook.editType')}>✎</button>{/if}
+      {/if}
+    </span>
     <span class="fc-label">{$t('logbook.pilot')}</span>
     <span class="fc-value craft-value-row">
       {#if pilotEditing}
@@ -366,15 +399,15 @@
     <span class="fc-label">{$t('logbook.mission')}</span>
     <span class="fc-value craft-value-row">
       {#if linkedMission}
-        <button class="detail-link-btn" onclick={openMission} title={$t('logbook.openMission')}>{linkedMission.name || $t('logbook.unnamedMission')}</button>
+        <Button variant="compact" onclick={openMission} title={$t('logbook.openMission')}>{linkedMission.name || $t('logbook.unnamedMission')}</Button>
       {:else}
         <span>{$t('logbook.missionNone')}</span>
       {/if}
       {#if !minimized}
         {#if linkedMission}
-          <button class="weather-edit-btn" onclick={unlinkMission} disabled={linkBusy} title={$t('logbook.unlinkMission')}>✕</button>
+          <Button variant="compact" icon="close" onclick={unlinkMission} disabled={linkBusy} title={$t('logbook.unlinkMission')} />
         {:else}
-          <button class="weather-edit-btn link-mission-btn" onclick={linkMission} disabled={linkBusy || !canLink} title={canLink ? $t('logbook.linkMissionTip') : $t('logbook.linkMissionDisabledTip')}>🔗 {$t('logbook.linkMission')}</button>
+          <Button variant="compact" icon="link" onclick={linkMission} disabled={linkBusy || !canLink} title={canLink ? $t('logbook.linkMissionTip') : $t('logbook.linkMissionDisabledTip')}>{$t('logbook.linkMission')}</Button>
         {/if}
       {/if}
     </span>
@@ -393,18 +426,18 @@
           onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') linkBattery(); if (e.key === 'Escape') batteryEditing = false; }}
           use:focusOnMount
         />
-        <button class="weather-edit-btn" onclick={linkBattery} disabled={batteryBusy} title={$t('logbook.batteryLinkSave')}>✓</button>
+        <Button variant="compact" icon="check" onclick={linkBattery} disabled={batteryBusy} title={$t('logbook.batteryLinkSave')} />
       {:else if batterySerial}
         {#if batteryPack}
-          <button class="detail-link-btn" onclick={openBattery} title={$t('logbook.openBattery')}>{batteryPack.label || batteryPack.serial}</button>
+          <Button variant="compact" onclick={openBattery} title={$t('logbook.openBattery')}>{batteryPack.label || batteryPack.serial}</Button>
         {:else}
           <span>{batterySerial}</span>
           <span class="battery-missing">{$t('logbook.batteryNotInLibrary')}</span>
         {/if}
-        {#if !minimized}<button class="weather-edit-btn" onclick={unlinkBattery} disabled={batteryBusy} title={$t('logbook.batteryUnlink')}>✕</button>{/if}
+        {#if !minimized}<Button variant="compact" icon="close" onclick={unlinkBattery} disabled={batteryBusy} title={$t('logbook.batteryUnlink')} />{/if}
       {:else}
         <span>{$t('logbook.missionNone')}</span>
-        {#if !minimized}<button class="weather-edit-btn link-mission-btn" onclick={startBatteryEdit} title={$t('logbook.linkBatteryTip')}>🔋 {$t('logbook.linkBattery')}</button>{/if}
+        {#if !minimized}<Button variant="compact" icon="battery" onclick={startBatteryEdit} title={$t('logbook.linkBatteryTip')}>{$t('logbook.linkBattery')}</Button>{/if}
       {/if}
     </span>
     <span class="fc-label">{$t('logbook.started')}</span>
@@ -536,6 +569,28 @@
     border-color: #37a8db;
   }
 
+  /* Matches the app's dark form-control convention; color-scheme:dark keeps the native
+     option popup dark too (it's rendered by the WebView outside the DOM). */
+  .platform-select {
+    height: 24px;
+    padding: 0 6px;
+    background: #434343;
+    border: 1px solid #555;
+    border-radius: 4px;
+    color: #e0e0e0;
+    font-size: 12px;
+    font-family: inherit;
+    outline: none;
+    max-width: 100%;
+    color-scheme: dark;
+  }
+  .platform-select:hover {
+    border-color: rgba(55, 168, 219, 0.6);
+  }
+  .platform-select:focus {
+    border-color: #37a8db;
+  }
+
   .weather-edit-btn {
     background: none;
     border: none;
@@ -551,17 +606,6 @@
     color: #37a8db;
   }
 
-  .link-mission-btn {
-    font-size: 11px;
-    color: #37a8db;
-    white-space: nowrap;
-  }
-
-  .link-mission-btn:disabled {
-    color: #555;
-    cursor: not-allowed;
-  }
-
   .flight-id-tag {
     font-size: 10px;
     color: #777;
@@ -572,29 +616,6 @@
     font-size: 10px;
     color: #e0b050;
     font-weight: 400;
-  }
-
-  /* Slim chip button for jumping to a linked entity (mission / battery). */
-  .detail-link-btn {
-    background: rgba(55, 168, 219, 0.12);
-    border: 1px solid rgba(55, 168, 219, 0.35);
-    border-radius: 4px;
-    color: #9fd4ee;
-    font-size: 11px;
-    font-weight: 600;
-    line-height: 1.3;
-    padding: 1px 8px;
-    cursor: pointer;
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    transition: background 0.15s, border-color 0.15s, color 0.15s;
-  }
-  .detail-link-btn:hover {
-    background: rgba(55, 168, 219, 0.25);
-    border-color: #37a8db;
-    color: #fff;
   }
 
   .setting-row {

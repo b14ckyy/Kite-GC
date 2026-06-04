@@ -422,6 +422,18 @@ pub fn flightlog_update_craft_name(
     db::update_flight_craft_name(&conn, flight_id, &craft_name).map_err(|e| format!("Update error: {}", e))
 }
 
+/// Update the UAV platform type on a flight (manual override; drives the map replay symbol).
+#[tauri::command]
+pub fn flightlog_update_platform_type(
+    flight_id: i64,
+    platform_type: u8,
+    db_path: Option<String>,
+) -> Result<(), String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::update_flight_platform_type(&conn, flight_id, platform_type)
+        .map_err(|e| format!("Update error: {}", e))
+}
+
 /// Update pilot metadata (name + id) on a flight. Empty strings → NULL.
 #[tauri::command]
 pub fn flightlog_update_pilot(
