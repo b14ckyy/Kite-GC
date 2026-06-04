@@ -42,7 +42,8 @@
           onclick={() => onSelectTab(tab.id)}
           title={tab.label()}
         >
-          <span class="tab-icon">{tab.icon}</span>
+          <!-- icon is a glyph or an inline SVG string (trusted, app-defined) -->
+          <span class="tab-icon">{@html tab.icon}</span>
           <span class="tab-label">{tab.label()}</span>
         </button>
       {/each}
@@ -128,7 +129,7 @@
     background: rgba(46, 46, 46, 0.92);
     border: 1px solid rgba(55, 168, 219, 0.3);
     border-radius: 6px;
-    color: #949494;
+    color: #a8a8a8;
     font-size: 11px;
     cursor: pointer;
     padding: 0;
@@ -144,8 +145,10 @@
     color: #e0e0e0;
   }
 
+  /* Darker active fill (black 50% + the inherited blur) so the accent border + icon stay
+     readable over bright maps; the blue border/icon remain the active indicator. */
   .tab-btn.active {
-    background: rgba(55, 168, 219, 0.25);
+    background: rgba(0, 0, 0, 0.5);
     border-color: #37a8db;
     color: #37a8db;
   }
@@ -153,6 +156,16 @@
   .tab-icon {
     font-size: 16px;
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Inline-SVG icons fill the button (≤ ~10% margin to the frame); glyphs keep font-size. */
+  .tab-icon :global(svg) {
+    width: 32px;
+    height: 32px;
+    display: block;
   }
 
   .tab-label {

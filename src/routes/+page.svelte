@@ -332,13 +332,32 @@
 
   const baudRates = [115200, 57600, 38400, 19200, 9600, 230400, 460800, 921600];
 
+  // NavRail icons — migrating from glyphs to flat, high-contrast inline SVG (monochrome,
+  // `currentColor` so they follow the rail's inactive/hover/active colours). UAV Info uses a
+  // flight-controller (microchip) icon: neutral across UAV types, matches the panel content
+  // (FC variant/version/board/sensors). Remaining tabs stay glyphs until converted.
+  const ICON_UAV_INFO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6.5" y="6.5" width="11" height="11" rx="1.5"/><rect x="9.7" y="9.7" width="4.6" height="4.6" rx="0.6"/><path d="M9 6.5V3.8M12 6.5V3.8M15 6.5V3.8M9 17.5v2.7M12 17.5v2.7M15 17.5v2.7M6.5 9H3.8M6.5 12H3.8M6.5 15H3.8M17.5 9h2.7M17.5 12h2.7M17.5 15h2.7"/></svg>';
+
+  // 6-tooth gear (Settings) — original-style proportions (chunky body, modest teeth) but
+  // with sharp (non-rounded) tooth corners; solid + punched centre hole (evenodd).
+  const ICON_SETTINGS = '<svg viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" clip-rule="evenodd" d="M19.52 9.26 22.31 10 22.31 14 19.52 14.74 18.13 17.14 18.89 19.92 15.42 21.93 13.39 19.88 10.61 19.88 8.58 21.93 5.11 19.92 5.87 17.14 4.48 14.74 1.69 14 1.69 10 4.48 9.26 5.87 6.86 5.11 4.08 8.58 2.07 10.61 4.12 13.39 4.12 15.42 2.07 18.89 4.08 18.13 6.86ZM12 8.5A3.5 3.5 0 1 0 12 15.5 3.5 3.5 0 0 0 12 8.5Z"/></svg>';
+  // Solid spiral notebook (Logbook): filled cover with knocked-out (transparent) 2px text
+  // lines + spiral binding holes on the left (mask = white keeps, black cuts out).
+  const ICON_LOGBOOK = '<svg viewBox="0 0 24 24"><defs><mask id="kg-nb"><rect x="4" y="3" width="16" height="18" rx="2" fill="#fff"/><circle cx="7" cy="6.5" r="1"/><circle cx="7" cy="9.7" r="1"/><circle cx="7" cy="12.9" r="1"/><circle cx="7" cy="16.1" r="1"/><rect x="9.8" y="6.5" width="7" height="2" rx="1"/><rect x="9.8" y="11" width="7" height="2" rx="1"/><rect x="9.8" y="15.5" width="5" height="2" rx="1"/></mask></defs><rect x="4" y="3" width="16" height="18" rx="2" fill="currentColor" mask="url(#kg-nb)"/></svg>';
+  // Classic filled map marker with a punched-out (transparent) centre dot (Mission).
+  const ICON_MISSION = '<svg viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2.5C8.4 2.5 5.5 5.4 5.5 9c0 4.8 6.5 12.5 6.5 12.5S18.5 13.8 18.5 9c0-3.6-2.9-6.5-6.5-6.5Zm0 4.1A2.4 2.4 0 1 0 12 11.4 2.4 2.4 0 0 0 12 6.6Z"/></svg>';
+  // Two solid peaks, slightly raised (Terrain).
+  const ICON_TERRAIN = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M1.5 20 8.5 5 13 14 16.5 8.5 22.5 20Z"/></svg>';
+  // Solid flat movie camera (Video): two reels + body + lens funnel.
+  const ICON_VIDEO = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="7" cy="7" r="2.9"/><circle cx="12.6" cy="7" r="2.9"/><rect x="2.5" y="9.5" width="13" height="9" rx="1.6"/><path d="M15.5 12 21.5 9.5V18.5L15.5 16Z"/></svg>';
+
   const allTabs = [
-    { id: "uav-info", label: () => $t('nav.uavInfo'), icon: "✈" },
-    { id: "settings", label: () => $t('nav.settings'), icon: "⚙" },
-    { id: "logbook", label: () => $t('nav.logbook'), icon: "📒" },
-    { id: "mission", label: () => $t('nav.mission'), icon: "◎" },
-    { id: "terrain", label: () => $t('nav.terrain'), icon: "⛰" },
-    { id: "video", label: () => $t('nav.video'), icon: "🎥" },
+    { id: "uav-info", label: () => $t('nav.uavInfo'), icon: ICON_UAV_INFO },
+    { id: "settings", label: () => $t('nav.settings'), icon: ICON_SETTINGS },
+    { id: "logbook", label: () => $t('nav.logbook'), icon: ICON_LOGBOOK },
+    { id: "mission", label: () => $t('nav.mission'), icon: ICON_MISSION },
+    { id: "terrain", label: () => $t('nav.terrain'), icon: ICON_TERRAIN },
+    { id: "video", label: () => $t('nav.video'), icon: ICON_VIDEO },
   ];
   const tabs = $derived(
     flightLoggingEnabled ? allTabs : allTabs.filter(t => t.id !== 'logbook')
@@ -425,10 +444,12 @@
   }
 
   function selectTab(tabId: string) {
-    // Terrain Analysis is a full-width overlay that behaves like a floating
-    // panel: toggling its tab opens/closes it, the nav rail stays open.
+    // Terrain Analysis is a full-width overlay shown in place of the panel content.
+    // Like every other nav-rail button it only ever OPENS/selects (re-clicking the active
+    // button does not close it) — closing happens by closing the whole nav rail (the
+    // hamburger X) or by selecting another tab.
     if (tabId === 'terrain') {
-      patchTerrainAnalysis({ open: !get(terrainAnalysis).open });
+      patchTerrainAnalysis({ open: true });
       return;
     }
     // Selecting another tab switches away from the terrain overlay
