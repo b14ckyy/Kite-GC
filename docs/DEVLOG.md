@@ -31,172 +31,50 @@ Kite Ground Control is a cross-platform Ground Control Station supporting [INAV]
 
 ## Project Structure
 
+> Folder-level overview — per-file detail is intentionally omitted here so it does not rot.
+> See the module-concept notes below and the per-feature docs in `active/` for specifics.
+
 ```
 Kite Ground Control/
-├── src/                          # Svelte Frontend
-│   ├── routes/                   # SvelteKit pages/routes
-│   │   ├── +page.svelte          # Main application page (CSS Grid zone layout)
-│   │   └── +layout.ts            # SvelteKit layout config (SSR disabled)
-│   ├── lib/                      # Shared frontend modules
-│   │   ├── stores/               # Svelte reactive state stores
-│   │   │   ├── connection.ts     # Connection state, FC info, feature set
-│   │   │   ├── telemetry.ts      # Telemetry data store (GPS, attitude, battery)
-│   │   │   ├── settings.ts       # Session persistence (localStorage)
-│   │   │   ├── home.ts           # Home position store (set on arm + GPS fix)
-│   │   │   ├── mission.ts        # Mission state: WP types, stores, invoke wrappers, XML I/O
-│   │   │   ├── layout.ts        # Layout zone system: profiles, dock visibility, CSS grid overrides
-│   │   │   ├── flightlog.ts      # Flight log API wrappers, types, grouping/sort helpers
-│   │   │   └── surveyPattern.svelte.ts # Survey Pattern rune store (config, params, mode mgmt)
-│   │   ├── controllers/          # Domain logic extracted from +page.svelte
-│   │   │   ├── connectionController.ts  # Serial port refresh, connect/disconnect, listener mgmt
-│   │   │   ├── logbookController.ts     # Flight CRUD, Blackbox import, geocode/weather
-│   │   │   ├── playbackController.ts    # Timer-based playback engine (100ms tick, 1×–10× speed)
-│   │   │   └── widgetController.ts      # DnD reorder/cross-panel move (pure functions)
-│   │   ├── adapters/             # Data format adapters
-│   │   │   └── telemetryAdapter.ts      # DB TelemetryRecord → TelemetryData for widgets
-│   │   ├── helpers/              # Pure utility functions
-│   │   │   ├── telemetry.ts      # isArmed(), hasKnownLocation(), isValidGpsCoordinate()
-│   │   │   ├── trackColors.ts    # Track color modes, flight mode classification, gradient functions, nav state colors
-│   │   │   └── surveyPatterns.ts # Survey geometry (rectangle corners, zigzag generation, drag helpers)
-│   │   ├── components/           # Reusable UI components
-│   │   │   ├── Map.svelte        # Leaflet map (trail, home marker, cached tiles, heading-up)
-│   │   │   ├── Map3D.svelte      # CesiumJS 3D globe view (optional, alongside Leaflet)
-│   │   │   ├── NumberStepper.svelte # Reusable +/- stepper input (used by SurveyPatternPanel, WeatherEditor)
-│   │   │   ├── MissionLayer.svelte # Mission map layer (markers, polyline, editor popups)
-│   │   │   ├── MissionPanel.svelte # Mission sidebar (WP list, FC/EEPROM/file controls) [LEGACY — replaced by InavMissionPanel]
-│   │   │   ├── InavMissionPanel.svelte # INAV mission panel (Pattern button, WP table, controls)
-│   │   │   ├── InavMissionLayer.svelte # INAV mission map layer (blocks WP placement in Pattern mode)
-│   │   │   ├── SurveyPatternPanel.svelte # Pattern parameter UI (shapes, altitude, user action flags)
-│   │   │   ├── SurveyPatternLayer.svelte # Pattern map layer (shape polygon, path preview, drag markers)
-│   │   │   ├── DebugPanel.svelte # MSP debug monitor (dev builds only)
-│   │   │   ├── LogPlayer.svelte  # Playback controls (play/pause/reset, scrubber, speed)
-│   │   │   ├── LogbookPanel.svelte # Flight list, detail view, import/weather/notes
-│   │   │   ├── SettingsPanel.svelte # All settings sections
-│   │   │   ├── Toolbar.svelte    # Logo, sensor bar, port selector, connect button
-│   │   │   ├── UavInfoPanel.svelte # FC info, feature gates, craft name
-│   │   │   ├── StatusBar.svelte  # Connection status, arming indicator, app title
-│   │   │   ├── NavRail.svelte    # Hamburger menu + vertical tab rail
-│   │   │   ├── Map3D.svelte      # CesiumJS 3D globe view (optional, alongside Leaflet)
-│   │   │   └── widgets/          # HUD widget components
-│   │   │       ├── AHI.svelte        # Artificial Horizon Indicator
-│   │   │       ├── SpeedWidget.svelte # Ground speed + airspeed
-│   │   │       ├── AltWidget.svelte   # Altitude + vario
-│   │   │       ├── BatteryWidget.svelte # Voltage, current, mAh
-│   │   │       ├── GpsWidget.svelte   # Satellite count + fix type
-│   │   │       ├── CompassWidget.svelte # Compass rose + heading
-│   │   │       ├── HomeWidget.svelte  # Home direction, distance, bearing
-│   │   │       └── RawTelemetryWidget.svelte # Raw telemetry data panel
-│   │   ├── cache/                # Map tile cache
-│   │   │   ├── tileCache.ts      # IndexedDB backend, LRU eviction
-│   │   │   └── CachedTileLayer.ts # Custom Leaflet TileLayer with cache
-│   │   ├── config/               # Static configuration
-│   │   │   ├── mapProviders.ts   # Map tile provider definitions
-│   │   │   └── widgetRegistry.ts # Widget definitions, size constants, classes
-│   │   ├── i18n/                 # Internationalization
-│   │   │   ├── index.ts          # i18n init, locale registration, SUPPORTED_LOCALES
-│   │   │   └── locales/          # Translation files
-│   │   │       ├── en.json       # English (default, ~200 keys)
-│   │   │       └── de.json       # German (complete)
-│   │   ├── utils/                # Utility functions
-│   │   │   └── geo.ts            # Haversine distance, bearing, formatting
-│   │   └── index.ts              # Library entry point
-│   └── app.html                  # HTML entry point
+├── src/                              # Svelte 5 / SvelteKit frontend
+│   ├── routes/+page.svelte           # Thin orchestrator (ADR-009): wires stores/controllers + map + widgets
+│   └── lib/
+│       ├── stores/                   # Reactive state (connection, telemetry, mission, settings, flightlog, video, …)
+│       ├── controllers/              # Domain logic extracted from +page (connection, logbook, playback, widget)
+│       ├── adapters/                 # DB record → widget data (telemetryAdapter)
+│       ├── helpers/                  # Pure utils (trackColors, surveyPatterns, missionIcons/Geometry, missionLibrary, …)
+│       ├── components/
+│       │   ├── panel/                # Reusable panel framework: PanelShell + Button/Toggle/SegmentedToggle (ADR-029)
+│       │   ├── logbook/              # LogbookPanel, FlightDetail, BatteryManager, LogPlayer, WeatherEditor
+│       │   ├── mission/              # INAV/Ardu mission panels + layers, MissionManager, survey pattern UI, AutopilotSelect
+│       │   ├── terrain/              # Terrain analysis panel + cursor layer
+│       │   ├── video/               # Video panel + floating window
+│       │   ├── widgets/              # HUD widgets (AHI, Compass, Speed, Alt, Battery, GPS, Home, Terrain, …)
+│       │   └── Map.svelte · Map3D.svelte · UavInfoPanel · SettingsPanel · Toolbar · StatusBar · NavRail · dialogs …
+│       ├── cache/                    # IndexedDB tile cache (+ CachedTileLayer)
+│       ├── config/                   # mapProviders, widgetRegistry
+│       ├── i18n/                     # svelte-i18n setup + locales/{en,de}.json
+│       └── utils/                    # geo, units
 │
-├── src-tauri/                    # Rust Backend (Tauri)
-│   ├── src/
-│   │   ├── main.rs               # Application entry point
-│   │   ├── lib.rs                # Tauri app builder and plugin registration
-│   │   ├── state.rs              # AppState (ActiveProtocol enum: MSP/MAVLink + FC info)
-│   │   ├── commands/             # Tauri IPC commands (frontend-callable)
-│   │   │   ├── mod.rs            # Command module registry
-│   │   │   ├── connection.rs     # Multi-protocol connect/disconnect (MSP + MAVLink paths)
-│   │   │   ├── flightlog.rs      # Flight log commands (list/get/track/delete/notes/geocode/weather/update_weather/import/probe)
-│   │   │   ├── mission.rs        # Mission CRUD, FC transfer, XML/file I/O (13 commands)
-│   │   │   └── info.rs           # App version and metadata
-│   │   ├── flightlog/            # Flight recording + logbook backend
-│   │   │   ├── mod.rs            # Module exports
-│   │   │   ├── types.rs          # Flight/TelemetryRecord/summary/settings structs
-│   │   │   ├── db.rs             # SQLite schema, migrations (v0→v5), CRUD, tests
-│   │   │   ├── recorder.rs       # Arm/disarm-driven recording engine (MSP + MAVLink, continuous mode)
-│   │   │   ├── raw_logger.rs     # MSP raw text log writer (CSV format)
-│   │   │   ├── tlog_logger.rs    # MAVLink tlog binary logger (Mission Planner/QGC compatible)
-│   │   │   ├── geocode.rs        # OSM Nominatim reverse geocoding
-│   │   │   ├── weather.rs        # Open-Meteo weather fetcher
-│   │   │   ├── blackbox.rs       # Blackbox decode pipeline (discovery, invocation, CSV parsing, downsampling)
-│   │   │   ├── ardupilot.rs      # ArduPilot DataFlash .bin log import
-│   │   │   ├── exchange.rs       # .kflight export/import (self-contained SQLite exchange format)
-│   │   │   └── track_export.rs   # KMZ/KML/GPX/CSV track export with RDP simplification
-│   │   ├── mission/              # Mission planning module
-│   │   │   ├── mod.rs            # Module exports
-│   │   │   ├── types.rs          # WpAction enum (8 types), Waypoint, Mission, MissionInfo
-│   │   │   ├── codec.rs          # MSP_WP binary codec (encode/decode 21-byte payload)
-│   │   │   └── store.rs          # MissionStore (Mutex<Mission>), CRUD, XML serialization
-│   │   ├── scheduler/            # MSP scheduler (dedicated thread)
-│   │   │   ├── mod.rs            # Scheduler loop, slot management, adaptive polling
-│   │   │   ├── telemetry.rs      # Telemetry decoding and configuration
-│   │   │   └── debug.rs          # MSP debug stats tracker (dev builds only)
-│   │   ├── msp/                  # MSP Protocol implementation
-│   │   │   ├── mod.rs            # MSP module exports
-│   │   │   ├── types.rs          # Message types, constants, command codes
-│   │   │   ├── codec.rs          # MSP v1/v2 frame encode/decode
-│   │   │   ├── parser.rs         # Streaming byte-by-byte state machine
-│   │   │   ├── transport.rs      # MSP framing layer over ByteTransport
-│   │   │   └── features.rs       # Version-dependent feature gating
-│   │   ├── mavlink_proto/        # MAVLink Protocol implementation
-│   │   │   ├── mod.rs            # Module exports + re-exports
-│   │   │   ├── parser.rs         # MAVLink v1/v2 frame parser (byte-level state machine)
-│   │   │   ├── codec.rs          # MAVLink v2 frame serialization
-│   │   │   ├── handshake.rs      # Connection handshake (HEARTBEAT + AUTOPILOT_VERSION)
-│   │   │   └── handler.rs        # Dedicated handler thread (telemetry dispatch + recording)
-│   │   └── transport/            # Communication transports
-│   │       ├── mod.rs            # ByteTransport trait + transport abstractions
-│   │       ├── serial.rs         # Serial port transport (serialport crate)
-│   │       ├── tcp.rs            # TCP client transport
-│   │       ├── udp.rs            # UDP transport
-│   │       └── ble.rs            # Bluetooth Low Energy transport
-│   ├── .cargo/config.toml        # Cargo config (target-dir override)
-│   ├── Cargo.toml                # Rust dependencies
-│   ├── Cargo.lock                # Dependency lock file
-│   └── tauri.conf.json           # Tauri configuration
+├── src-tauri/src/                    # Rust backend (Tauri 2)
+│   ├── lib.rs · main.rs · state.rs   # App builder + plugin registration + AppState (ActiveProtocol: MSP/MAVLink)
+│   ├── commands/                     # Tauri IPC (connection, flightlog, mission, info)
+│   ├── flightlog/                    # Recording + logbook + SQLite (schema v10) + blackbox/ardupilot import + exchange/exports
+│   ├── mission/                      # INAV mission model + MSP_WP codec + store
+│   ├── scheduler/                    # MSP scheduler (dedicated thread) + telemetry decode + dev debug
+│   ├── msp/                          # MSP v1/v2 codec, parser, transport framing, feature gating
+│   ├── mavlink_proto/               # MAVLink parser/codec/handshake/handler + mission microprotocol
+│   ├── terrain/                      # Copernicus DEM elevation provider (fetch/decode/cache/sample)
+│   └── transport/                    # ByteTransport trait + serial / tcp / udp / ble
 │
-├── scripts/                      # Legacy build scripts (still functional)
-│   ├── build-windows.ps1         # Windows release build (PowerShell)
-│   ├── build-linux.sh            # Linux release build (improved)
-│   ├── dev.bat                   # Windows dev server (improved)
-│   └── dev.sh                    # Linux dev server (improved)
+├── docs/                             # Core dev docs: ARCHITECTURE (ADRs) · ROADMAP · CHANGELOG · DEVLOG · BUILD
+│   ├── active/                       # Active feature-plan / reference docs (open work)
+│   ├── future/                       # Exploratory, not-planned notes
+│   └── archive/                      # Completed feature plans (kept for design rationale)
 │
-├── justfile                      # Primary task runner (recommended way)
-│                                 #   just dev / just build / just check
-│
-├── .github/workflows/ci.yml      # Minimal CI (cargo check + svelte-check)
-│
-├── docs/active/                     # Development documentation (all dev-facing for now)
-│   ├── DEVLOG.md                 # This file — project structure & dev notes
-│   ├── CHANGELOG.md              # Version changelog (Keep a Changelog format)
-│   ├── ARCHITECTURE.md           # Architecture Decision Records (ADRs)
-│   ├── ROADMAP.md                # Feature roadmap by milestone
-│   ├── BUILD.md                  # Build / CI / release notes
-│   ├── FLIGHTLOG_DATABASE.md     # Flight log database schema documentation
-│   ├── DATA_PIPELINE.md          # Data pipeline architecture (live + replay flows)
-│   ├── PROTOCOL_REFACTORING.md   # Multi-protocol (MAVLink) integration workstream plan
-│   ├── PROTOCOL_FLIGHT_MODES.md  # INAV/ArduPilot flight mode reference
-│   ├── MISSION_MULTIAUTOPILOT_PLAN.md # Multi-autopilot (INAV/ArduPilot/PX4) mission plan
-│   ├── TerrainFeatures.md        # Terrain elevation / AGL / analysis / radar plan
-│   ├── Map3DRework.md            # CesiumJS 3D map rework plan
-│   ├── VideoFeature.md           # Embedded video subsystem plan
-│   ├── WaypointDisable.md        # Waypoint disable/enable feature plan (not yet built)
-│   ├── M5_TEST_CHECKLIST.md      # Manual verification checklist for M5 implementation
-│   └── archive/                  # Completed feature plans (kept for design rationale)
-│       ├── README.md
-│       ├── PatternGenerator.md       # Survey pattern generator (recovered from history)
-│       ├── COLORED_TRACK_PLAN.md     # Colored flight tracks (shipped)
-│       └── ARDUPILOT_IMPORT_PLAN.md  # ArduPilot .bin import (shipped)
-│
-├── static/                       # Static assets (icons, etc.)
-├── .gitignore                    # Git ignore rules
-├── LICENSE                       # GPL-3.0 license
-├── package.json                  # Node.js project config
-└── README.md                     # Project readme
+├── justfile · scripts/              # Task runner (just dev/build/check) + legacy build scripts
+├── .github/workflows/ci.yml          # CI (cargo check + svelte-check)
+└── package.json · README.md · LICENSE (GPL-3.0) · static/
 ```
 
 ## Module Concept

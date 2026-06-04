@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- German locale: added the missing `survey.clockwise` / `survey.counterClockwise` (CW/CCW) keys
+  (they previously fell back to the key/English).
+
+### Changed (internal cleanup)
+- Modernized `catch (e: any)` → `catch (e)` (unknown) across the mission panels + `+page` (no more
+  `any` in catch clauses).
+- Silenced the intentional MAVLink deprecation warnings with `#[allow(deprecated)]` + rationale
+  (we deliberately still route legacy `MISSION_REQUEST`/`MISSION_ITEM` for FC compatibility, and
+  wire command 201 = `MAV_CMD_DO_SET_ROI`).
+- Refreshed the DEVLOG project tree to a maintenance-friendly folder-level overview (the old
+  per-file tree had gone stale after the component-subfolder + panel-framework reorg).
+
 ## [0.5.0] - 2026-06-04
 
 ### Fixed
