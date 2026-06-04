@@ -130,8 +130,10 @@ panel-by-panel. (Pre-release, single developer → no need to DEV-gate or hide t
    transfer **after** the framework is signed off.
 4. **Cutover per panel.** When a new panel matches/exceeds the old one, delete the old panel
    + its (top-group) rail button. Don't let duplicates linger.
-5. **Finish.** When all are migrated, remove the duplicate-rail scaffolding; new panels take
-   the original rail positions.
+5. **Finish.** When all are migrated, remove the duplicate (v2) rail group; new panels take
+   the original rail positions. **Kept permanently (dev-only):** a `DEV` text button at the end
+   of the rail opens `PanelPlayground` (the empty framework reference), gated on
+   `import.meta.env.DEV` so it never ships in release builds.
 
 ### Suggested order (simple → complex, to harden the API early)
 1. UAV Info (`info`) — simplest, exercises the minimal shell.
