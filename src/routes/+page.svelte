@@ -557,8 +557,8 @@
           selectedFlightTrackCount = 0;
         }
       }
-    } catch (e: any) {
-      errorMsg = e?.toString?.() ?? String(e);
+    } catch (e) {
+      errorMsg = String(e);
     } finally {
       logbookLoading = false;
     }
@@ -676,8 +676,8 @@
           await performImport(filePath, undefined, false);
         }
       }
-    } catch (e: any) {
-      errorMsg = e?.toString?.() ?? String(e);
+    } catch (e) {
+      errorMsg = String(e);
     } finally {
       blackboxImporting = false;
       blackboxImportProgress = null;
@@ -711,8 +711,8 @@
           msg += '\n' + result.errors.join('\n');
         }
         await showInfo($t('logbook.importKflightTitle'), msg);
-      } catch (e: any) {
-        errorMsg = e?.toString?.() ?? String(e);
+      } catch (e) {
+        errorMsg = String(e);
       }
     }
 
@@ -728,8 +728,8 @@
       await performImport(filePath, undefined, false);
     }
 
-    } catch (e: any) {
-      errorMsg = e?.toString?.() ?? String(e);
+    } catch (e) {
+      errorMsg = String(e);
     } finally {
       if (hasBbFiles) {
         blackboxImporting = false;
@@ -756,8 +756,8 @@
       if (!outputPath) return;
       const count = await logbookCtrl.exportSelectedFlights(exportIds, outputPath, flightLogDbPath);
       await showInfo($t('logbook.exportTitle'), $t('logbook.exportSuccess', { values: { count } }));
-    } catch (e: any) {
-      errorMsg = e?.toString?.() ?? String(e);
+    } catch (e) {
+      errorMsg = String(e);
     }
   }
 
@@ -774,8 +774,8 @@
       if (!outputPath) return;
       const originalFilename = await logbookCtrl.exportBlackbox(selectedFlightId, outputPath, flightLogDbPath);
       await showInfo($t('logbook.exportBlackboxTitle'), $t('logbook.exportBlackboxSuccess', { values: { filename: originalFilename } }));
-    } catch (e: any) {
-      errorMsg = e?.toString?.() ?? String(e);
+    } catch (e) {
+      errorMsg = String(e);
     }
   }
 
@@ -797,8 +797,8 @@
       if (!outputPath) return;
       await logbookCtrl.exportTrack(selectedFlightId, outputPath, flightLogDbPath);
       await showInfo($t('logbook.exportTrackTitle'), $t('logbook.exportTrackSuccess'));
-    } catch (e: any) {
-      errorMsg = e?.toString?.() ?? String(e);
+    } catch (e) {
+      errorMsg = String(e);
     }
   }
 
@@ -820,8 +820,8 @@
         msg += '\n' + result.errors.join('\n');
       }
       await showInfo($t('logbook.importKflightTitle'), msg);
-    } catch (e: any) {
-      errorMsg = e?.toString?.() ?? String(e);
+    } catch (e) {
+      errorMsg = String(e);
     }
   }
 
@@ -1092,8 +1092,8 @@
       if (devices.length > 0 && !selectedBleDevice) {
         selectedBleDevice = devices[0].id;
       }
-    } catch (e: any) {
-      errorMsg = e.toString();
+    } catch (e) {
+      errorMsg = String(e);
     } finally {
       isBleScanning = false;
     }
@@ -1104,8 +1104,8 @@
       try {
         await disconnectFC(selectedBaud);
         errorMsg = "";
-      } catch (e: any) {
-        errorMsg = e.toString();
+      } catch (e) {
+        errorMsg = String(e);
       }
       return;
     }
@@ -1147,9 +1147,9 @@
         flightLogRaw: flightRecordingEnabled && (!flightLoggingEnabled || flightLogRawEnabled),
         flightLogRawAlways: flightRecordingEnabled && flightLogRawAlways,
       });
-    } catch (e: any) {
-      errorMsg = e.toString();
-      connection.set({ status: "error", protocolType: selectedProtocol, transportType: selectedTransport, port: "", baudRate: selectedBaud, errorMessage: e.toString(), fcInfo: null });
+    } catch (e) {
+      errorMsg = String(e);
+      connection.set({ status: "error", protocolType: selectedProtocol, transportType: selectedTransport, port: "", baudRate: selectedBaud, errorMessage: String(e), fcInfo: null });
     } finally {
       isConnecting = false;
     }

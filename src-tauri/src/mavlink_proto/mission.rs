@@ -316,6 +316,10 @@ fn u8_to_frame(v: u8) -> MavFrame {
     }
 }
 
+// Wire command 201 maps to `MAV_CMD_DO_SET_ROI` — that enum variant *is* value 201; the
+// newer `*_ROI_LOCATION`/`*_ROI_NONE` commands have different IDs, so for parsing a mission
+// item carrying cmd 201 this deprecated variant is the correct (only) match.
+#[allow(deprecated)]
 fn u16_to_cmd(v: u16) -> MavCmd {
     match v {
         16  => MavCmd::MAV_CMD_NAV_WAYPOINT,

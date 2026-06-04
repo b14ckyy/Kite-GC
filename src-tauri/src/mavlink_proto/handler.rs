@@ -219,6 +219,10 @@ fn handler_loop(
 }
 
 /// Returns true for MAVLink messages that belong to the mission microprotocol.
+// We intentionally still recognise the deprecated non-`_INT` MISSION_REQUEST / MISSION_ITEM:
+// older/legacy flight controllers may emit them, and routing them is harmless (we author with
+// the `_INT` variants). Hence `#[allow(deprecated)]` rather than dropping the legacy arms.
+#[allow(deprecated)]
 fn is_mission_message(msg: &MavMessage) -> bool {
     matches!(msg,
         MavMessage::MISSION_REQUEST_LIST(_)

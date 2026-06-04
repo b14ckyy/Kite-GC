@@ -126,8 +126,8 @@
     try {
       const m = await missionDownload(false);
       statusMessage = $t('mission.downloaded', { values: { count: m.waypoints.length } });
-    } catch (e: any) {
-      statusMessage = $t('mission.downloadFailed', { values: { error: e } });
+    } catch (e) {
+      statusMessage = $t('mission.downloadFailed', { values: { error: String(e) } });
     } finally { downloadLoading = false; }
   }
 
@@ -137,8 +137,8 @@
     try {
       const m = await missionUpload(false);
       statusMessage = $t('mission.uploaded', { values: { count: m.waypoints.length } });
-    } catch (e: any) {
-      statusMessage = $t('mission.uploadFailed', { values: { error: e } });
+    } catch (e) {
+      statusMessage = $t('mission.uploadFailed', { values: { error: String(e) } });
     } finally { uploadLoading = false; }
   }
 
@@ -148,8 +148,8 @@
     try {
       const m = await missionUpload(true);
       statusMessage = $t('mission.eepromSaved', { values: { count: m.waypoints.length } });
-    } catch (e: any) {
-      statusMessage = $t('mission.eepromSaveFailed', { values: { error: e } });
+    } catch (e) {
+      statusMessage = $t('mission.eepromSaveFailed', { values: { error: String(e) } });
     } finally { eepromSaveLoading = false; }
   }
 
@@ -159,8 +159,8 @@
     try {
       const m = await missionDownload(true);
       statusMessage = $t('mission.eepromLoaded', { values: { count: m.waypoints.length } });
-    } catch (e: any) {
-      statusMessage = $t('mission.eepromLoadFailed', { values: { error: e } });
+    } catch (e) {
+      statusMessage = $t('mission.eepromLoadFailed', { values: { error: String(e) } });
     } finally { eepromLoadLoading = false; }
   }
 
@@ -170,8 +170,8 @@
       if (!path) return;
       await missionSaveFile(path);
       statusMessage = $t('mission.missionSaved');
-    } catch (e: any) {
-      statusMessage = $t('mission.saveFailed', { values: { error: e } });
+    } catch (e) {
+      statusMessage = $t('mission.saveFailed', { values: { error: String(e) } });
     }
   }
 
@@ -230,8 +230,8 @@
       markMissionSynced('db');
       void missionDbGeocode(newId, lang, dbPath).catch(() => {});
       statusMessage = $t('mission.saveLibSaved');
-    } catch (e: any) {
-      statusMessage = $t('mission.saveLibFailed', { values: { error: e } });
+    } catch (e) {
+      statusMessage = $t('mission.saveLibFailed', { values: { error: String(e) } });
     }
   }
 
@@ -241,8 +241,8 @@
       if (!path) return;
       const m = await missionLoadFile(typeof path === 'string' ? path : path);
       statusMessage = $t('mission.loaded', { values: { count: m.waypoints.length } });
-    } catch (e: any) {
-      statusMessage = $t('mission.openFailed', { values: { error: e } });
+    } catch (e) {
+      statusMessage = $t('mission.openFailed', { values: { error: String(e) } });
     }
   }
 
@@ -260,8 +260,8 @@
       if (!xml.includes('<mission')) { statusMessage = $t('mission.invalidMissionFile'); return; }
       const m = await missionImportXml(xml);
       statusMessage = $t('mission.loadedFromFile', { values: { count: m.waypoints.length, file: file.name } });
-    } catch (e: any) {
-      statusMessage = $t('mission.importFailed', { values: { error: e } });
+    } catch (e) {
+      statusMessage = $t('mission.importFailed', { values: { error: String(e) } });
     }
   }
 

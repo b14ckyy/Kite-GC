@@ -668,6 +668,8 @@
     "trackOrientationVal": "Bahnorientierung (°)",
     "areaOrientation": "Flächenorientierung (°)",
     "reverse": "Rückwärtsrichtung",
+    "clockwise": "CW",
+    "counterClockwise": "CCW",
         "baseAlt": "Basis-Höhe (m)",
     "baseSpeed": "Basis-Geschw. (m/s)",
     "altMode": "Höhentyp",

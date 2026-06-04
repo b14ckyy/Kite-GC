@@ -58,8 +58,8 @@
       if (!path) return;
       await invoke<void>('write_text_file', { path, content: serializeWaypoints(get(arduMission)) });
       statusMessage = $t('mission.missionSaved');
-    } catch (e: any) {
-      statusMessage = $t('mission.saveFailed', { values: { error: e } });
+    } catch (e) {
+      statusMessage = $t('mission.saveFailed', { values: { error: String(e) } });
     }
   }
 
@@ -76,8 +76,8 @@
       arduMission.set(wps);
       arduSelectedWpIndex.set(-1);
       statusMessage = $t('mission.loaded', { values: { count: wps.length } });
-    } catch (e: any) {
-      statusMessage = $t('mission.openFailed', { values: { error: e } });
+    } catch (e) {
+      statusMessage = $t('mission.openFailed', { values: { error: String(e) } });
     }
   }
 
@@ -96,8 +96,8 @@
       arduMission.set(wps);
       arduSelectedWpIndex.set(-1);
       statusMessage = $t('mission.loadedFromFile', { values: { count: wps.length, file: file.name } });
-    } catch (e: any) {
-      statusMessage = $t('mission.importFailed', { values: { error: e } });
+    } catch (e) {
+      statusMessage = $t('mission.importFailed', { values: { error: String(e) } });
     }
   }
 
@@ -111,7 +111,7 @@
       arduMission.set(wps);
       arduSelectedWpIndex.set(-1);
       statusMessage = $t('mission.downloaded', { values: { count: wps.length } });
-    } catch (e: any) {
+    } catch (e) {
       statusMessage = $t('mission.downloadFailed', { values: { error: String(e) } });
     }
   }
@@ -123,7 +123,7 @@
     try {
       await invoke<void>('ardu_mission_upload', { waypoints: wps });
       statusMessage = $t('mission.uploaded', { values: { count: wps.length } });
-    } catch (e: any) {
+    } catch (e) {
       statusMessage = $t('mission.uploadFailed', { values: { error: String(e) } });
     }
   }
