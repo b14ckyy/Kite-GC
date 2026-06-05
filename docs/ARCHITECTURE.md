@@ -1386,5 +1386,56 @@ intended trade); state that must survive a 2D remount has to be module-scoped or
 
 ---
 
+## ADR-032: Live Terrain-Sampling Widgets — Discontinuity Reset + Bounded History
+
+**Date**: 2026-06-06
+**Status**: Accepted
+**Related**: ADR-026 (Terrain Elevation Provider & AGL Waypoints)
+
+**Context**: Telemetry-driven terrain HUDs (the **Live-AGL** forward profile, the Terrain Radar fan)
+accumulate the flown path from the unified `telem` stream so they work live AND during replay. Two
+non-obvious hazards surfaced — both invisible in normal single-flight use, both catastrophic for
+replay:
+
+1. **Cross-site bridging.** The Live-AGL profiler appends each new fix and samples the terrain of the
+   *segment from the previous fix to the new one* (`terrain_profile`, 30 m spacing). Loading a
+   **different log while the player stays open** feeds a fix thousands of km away — so the next
+   segment spans two continents and asks the backend for a profile at 30 m over that distance
+   (hundreds of thousands of samples → thousands of 42 MB DEM tiles). The backend thread parks on the
+   serialized tile loads (low CPU, no extra load — it is *waiting*), the IPC responses dry up, and the
+   webview's main thread — starved of the tile-load callbacks it interleaves with — stutters and stops
+   painting map imagery (which Cesium/Leaflet load over native `fetch`, NOT through Rust). Terrain
+   kept meshing because that decodes in worker threads; imagery froze because its callbacks are on the
+   main thread. The tell: stutter ONLY while the replay plays (positions advancing), gone on pause.
+
+2. **Unbounded accumulation.** Even within ONE flight, the retained terrain/path arrays grow for the
+   whole replay, and `finishProfile` re-folds them O(n) every tick → the per-tick cost climbs with
+   replay length (a slow, progressive version of the same stall).
+
+**Decision**:
+- **Reset on a discontinuity.** A telemetry-fed accumulator resets (history + derived buffers +
+  profiler) when time runs backwards (scrub / new flight) OR the position jumps more than a sane
+  per-fix maximum (**> 1000 m** in Live-AGL) — i.e. a log switch or a large seek. This is the primary
+  fix: it stops the cross-site bridge before it can issue a continent-spanning terrain request.
+- **Bound the retained history to a sliding window.** The HUD only shows a recent window, so the
+  profiler keeps just that: accumulate to a wide trigger (5 km) then trim back to the keep window
+  (1.5 km). The wide trigger→keep gap makes the O(n) compaction run only every few km of travel
+  (≈ once per several minutes), so the per-tick fold cost stays flat with **near-zero** amortised cost
+  and the arrays never grow without bound. The full-track Terrain-Analysis panel leaves it unbounded.
+- **Bound every backend DEM fetch** with a connect/total timeout, so a stalled tile download can never
+  hang indefinitely while holding the terrain provider's `load_lock` (which serializes all loads).
+
+**Rationale**: the reset is the correct, minimal fix (an earlier attempt that only window-trimmed the
+arrays was both insufficient — it didn't stop the continent-spanning request — and buggy, since a
+huge cross-region jump trimmed every point and left `path < 2`). The window is best-practice insurance
+against long single replays. The timeout is defence-in-depth for the backend.
+
+**Consequences**: any FUTURE widget/overlay that samples backend terrain (or any per-distance data)
+from the live/replay telemetry stream MUST reset on the same discontinuities and bound its retained
+data — otherwise a log switch will re-introduce the continent-spanning request. This is a property of
+the *shared telemetry stream* (live ↔ replay ↔ source-switch), not of any one widget.
+
+---
+
 *End of Architecture Decision Records*
 

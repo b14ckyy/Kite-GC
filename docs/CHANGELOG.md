@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — replay performance: terrain-HUD freeze on log switch (ADR-032)
+- **The whole app no longer stutters / stops loading map tiles during replay after switching logs
+  with the player open.** Root cause: the **Live-AGL** terrain HUD accumulates the flown path and
+  samples the terrain of each new segment; loading a *different* log while the player stays open made
+  the next segment span the two sites — a single `terrain_profile` request across thousands of km
+  (hundreds of thousands of DEM samples) that parked the backend and starved the main thread's map-tile
+  callbacks (terrain kept meshing in worker threads; imagery, loaded on the main thread, froze). Fix:
+  the HUD now **resets on a discontinuity** — time running backwards (scrub / new flight) OR a
+  position jump > 1000 m (log switch / big seek).
+- **Live-AGL history is now bounded** — it accumulates to 5 km then trims to the most recent 1.5 km,
+  so the per-tick profile fold stays flat instead of growing for the whole replay (the compaction runs
+  only once every few km of travel). The full-track Terrain-Analysis panel is unaffected.
+- **DEM tile fetches now time out** (connect 8 s / total 25 s) so a stalled download can't hang the
+  terrain provider's load lock indefinitely.
+
+### Fixed — 3D map: no more dark-blue full-tile reload at the over-zoom threshold
+- Crossing into a sparse over-zoom region (ESRI) no longer blanks the **entire** globe to dark blue for
+  1–2 s. The placeholder-detection refresh used to re-apply the imagery provider (`layers.removeAll()`
+  — a full-globe teardown), which on a moving 3D replay could storm into a stutter. The 1–2 blank tiles
+  that slip through before the hash is confirmed are self-correcting on the next camera move instead.
+
 ### Added — 2D↔3D view continuity (ADR-031)
 - **The 3D map is kept in RAM** after the first open — toggling 2D↔3D is now instant (no Cesium
   viewer / terrain re-init). While hidden its render loop is paused (no GPU cost); entities keep
