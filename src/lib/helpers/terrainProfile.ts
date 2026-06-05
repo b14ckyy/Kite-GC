@@ -516,6 +516,22 @@ export class LiveTrackProfiler {
   private lastLat = NaN;
   private lastLon = NaN;
   private lastDist = 0;
+  private keepM = 0; // 0 = unbounded
+  private triggerM = 0; // compact only once the retained span exceeds this
+
+  /**
+   * Bound the retained history: once more than `triggerM` metres have accumulated, trim back
+   * to the most recent `keepM` metres. The wide trigger→keep gap means the O(n) compaction runs
+   * only every (triggerM − keepM) metres of travel — roughly once every few minutes — so the
+   * per-tick cost stays flat and the arrays never grow without bound, no matter how long the
+   * replay runs. Only consumers that display a recent window (the Live-AGL HUD) set this; the
+   * full-track Terrain-Analysis panel leaves it unbounded. The `processed` cursor counts the
+   * input array, so trimming the internal arrays doesn't disturb the incremental sampling.
+   */
+  setWindow(keepM: number, triggerM: number): void {
+    this.keepM = keepM;
+    this.triggerM = triggerM;
+  }
 
   reset(): void {
     this.terrain = [];
@@ -568,6 +584,18 @@ export class LiveTrackProfiler {
       this.lastLat = prevLat;
       this.lastLon = prevLon;
       this.lastDist = cum;
+
+      // Compact only once the retained span passes `triggerM`, then drop back to `keepM` — so
+      // the O(n) splice runs once every few km of travel, not every tick (near-zero impact).
+      if (this.keepM > 0 && this.path.length > 0 && this.lastDist - this.path[0].dist > this.triggerM) {
+        const minDist = this.lastDist - this.keepM;
+        let ti = 0;
+        while (ti < this.terrain.length && this.terrain[ti].dist < minDist) ti++;
+        this.terrain.splice(0, ti);
+        let pi = 0;
+        while (pi < this.path.length && this.path[pi].dist < minDist) pi++;
+        this.path.splice(0, pi);
+      }
     }
 
     if (this.path.length < 2) return null;

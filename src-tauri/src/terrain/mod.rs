@@ -11,6 +11,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Cursor;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use serde::Serialize;
 use tiff::decoder::{Decoder, DecodingResult};
@@ -99,6 +100,11 @@ impl TerrainProvider {
         TerrainProvider {
             client: reqwest::Client::builder()
                 .user_agent("KiteGC/terrain")
+                // Bound every DEM fetch: a stalled connection must NOT hang forever while
+                // holding `load_lock` (which serializes all tile loads) — that would freeze
+                // every terrain call (both HUD widgets + mission + geoid) for the whole replay.
+                .connect_timeout(Duration::from_secs(8))
+                .timeout(Duration::from_secs(25))
                 .build()
                 .unwrap_or_default(),
             cache_dir,

@@ -39,6 +39,7 @@
   const SPACING = 30; // forward terrain sampling resolution (m)
   const SPEED_FILTER = 2; // m/s — below this use compass yaw, above use GPS heading
   const HIST_MIN_DIST = 5; // m between accumulated history points (matches map trail)
+  const HIST_RESET_DIST = 1000; // m — a jump farther than this between fixes = a new site (log switch / big seek) → reset
   const EARTH_R = 6371000;
   const D2R = Math.PI / 180;
 
@@ -116,6 +117,10 @@
 
   // ── State ──────────────────────────────────────────────────────────
   const profiler = new LiveTrackProfiler();
+  // Safety bound (the HUD shows ≤1200 m of history): let it accumulate to 5 km, then trim back
+  // to the most recent 1500 m. The wide gap means the trim runs only once every few minutes, so
+  // the per-tick fold cost stays flat and the widget never holds unbounded data on long replays.
+  profiler.setWindow(1500, 5000);
   const histBuf: HistPoint[] = []; // flown history, accumulated from telem (plain, non-reactive)
   let lastTs = -Infinity; // last accumulated timestamp (detect scrub/new flight)
 
@@ -136,8 +141,14 @@
   /** Append the current fix to the internal history, resetting on scrub-back/new flight. */
   function accumulate(t: TelemetryData): void {
     const ts = t.lastUpdate || 0;
-    if (ts < lastTs) {
-      // time went backwards → replay scrubbed or a new flight loaded: start over
+    const prev = histBuf[histBuf.length - 1];
+    // Reset on a discontinuity: time going backwards (scrub-back / new flight) OR a large
+    // position jump (loading a DIFFERENT log while the player stays open, or a big seek).
+    // Without the jump check the profiler would bridge the two sites — the next terrain
+    // sample would span thousands of km at 30 m spacing, flooding the backend and freezing
+    // the app until the next log change.
+    const jumped = !!prev && haversineM(prev.lat, prev.lon, t.lat, t.lon) > HIST_RESET_DIST;
+    if (ts < lastTs || jumped) {
       histBuf.length = 0;
       varioBuf.length = 0;
       profiler.reset();

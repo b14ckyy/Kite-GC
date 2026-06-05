@@ -192,11 +192,6 @@
   // One-shot camera recenter after a (re)mount. The 2D↔3D toggle remounts this
   // component, so this fires once on every switch to 3D.
   let needsInitialRecenter = true;
-  // Debounced imagery refresh after over-zoom placeholders are NEWLY detected:
-  // re-requests the 1–3 tiles that slipped through before the placeholder hash
-  // was confirmed, so they get replaced by the parent tile without a manual zoom.
-  let imageryRefreshTimer: ReturnType<typeof setTimeout> | null = null;
-  let activeProviderId = 'osm';
 
     // Home arm tracking for trail reset on re-arm
   let wasArmed = false;
@@ -289,14 +284,14 @@
     const buf = await resp.arrayBuffer();
     // Over-zoom placeholder? Reject (Cesium keeps the parent z-1 tile) and don't
     // cache it; the region's max zoom is now learned so siblings short-circuit.
-    if (meta) {
-      const wasKnown = isKnownUnavailable(meta.providerId, meta.z, meta.x, meta.y);
-      if (isPlaceholderTile(meta.providerId, meta.z, meta.x, meta.y, buf, url)) {
-        // Newly learned region → re-request visible tiles so placeholders that
-        // already slipped through (before hash confirmation) get replaced.
-        if (!wasKnown) scheduleImageryRefresh();
-        throw new Error('placeholder tile (over-zoom)');
-      }
+    // NOTE: we deliberately do NOT trigger a full imagery refresh here. Re-applying
+    // the provider does layers.removeAll() — a full-globe teardown that blanks every
+    // tile to dark blue and, when it fires per newly-crossed region during a 3D replay
+    // over a sparse area, storms into a stutter/permanent-blue collapse. The 1–2 blank
+    // tiles that slipped through before the hash was confirmed are self-correcting:
+    // any camera move re-requests them (now known → parent shown).
+    if (meta && isPlaceholderTile(meta.providerId, meta.z, meta.x, meta.y, buf, url)) {
+      throw new Error('placeholder tile (over-zoom)');
     }
     putCachedTile(url, buf).catch(() => {}); // fire-and-forget
     return new Promise<HTMLImageElement>((resolve, reject) => {
@@ -549,22 +544,6 @@
     }
   });
 
-  /**
-   * Re-apply the active imagery provider (re-requests all visible tiles).
-   * Debounced — called when an over-zoom placeholder is NEWLY detected, so the
-   * tiles already rendered as placeholder are re-fetched; now-known over-zoom
-   * regions short-circuit to the parent tile instead of the blank.
-   */
-  function scheduleImageryRefresh() {
-    if (imageryRefreshTimer != null) return; // batch a burst of detections
-    imageryRefreshTimer = setTimeout(() => {
-      imageryRefreshTimer = null;
-      applyMapProvider(activeProviderId);
-    }, 500);
-  }
-
-
-
   // ── Initialization ─────────────────────────────────────────────────
 
   onMount(async () => {
@@ -579,7 +558,6 @@
       curtainEnabled = s.altitudeCurtain3D ?? true;
     });
     unsubSettings(); // read once, unsubscribe
-    activeProviderId = mapProviderId;
 
     // Init tile cache (shared with 2D map)
     await initTileCache(cacheMaxMB);
@@ -719,7 +697,6 @@
     unsubSettingsWatch = settings.subscribe((next) => {
       if (next.mapProvider !== currentProviderId) {
         currentProviderId = next.mapProvider;
-        activeProviderId = currentProviderId;
         applyMapProvider(currentProviderId);
       }
       const curtain = next.altitudeCurtain3D ?? true;
@@ -760,7 +737,6 @@
     if (smRaf) cancelAnimationFrame(smRaf);
     if (decoTrailingTimer != null) clearTimeout(decoTrailingTimer);
     if (decoRebuildTimer != null) clearTimeout(decoRebuildTimer);
-    if (imageryRefreshTimer != null) clearTimeout(imageryRefreshTimer);
     if (camDragHandler) { camDragHandler.destroy(); camDragHandler = undefined; }
     unsubTelemetry?.();
     unsubHome?.();
