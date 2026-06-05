@@ -1349,5 +1349,42 @@ state file exists.
 
 ---
 
+## ADR-031: 2D↔3D View Continuity — Cesium Viewer Kept in RAM + Camera Hand-off
+
+**Date**: 2026-06-05
+**Status**: Accepted
+**Related**: ADR-021 (CesiumJS 3D globe), ADR-003 (Leaflet 2D)
+
+**Context**: The 2D (Leaflet) and 3D (Cesium) maps were mounted via `{#if mapViewMode === '2d'}…
+{:else}…`, so each toggle **destroyed and recreated** the Cesium viewer (full terrain/imagery
+re-init, ~seconds) and started it at a hardcoded camera far from the content, then a 1.2 s fly-to
+swept to it. Switching also lost the user's place: the 3D camera reset every time, and the 3D view
+did not hand its location back to 2D. Separately, the 2D map re-`fitBounds`-ed the replay trail on
+every (re)mount because its "already framed" flag was instance state.
+
+**Decision**:
+- **Keep the Cesium viewer in RAM** once 3D is first opened: lazily mount `Map3D`, then keep it
+  mounted but hidden (`visibility:hidden`, so the canvas keeps a real size) while 2D is shown. An
+  `active` prop pauses its render loop (`useDefaultRenderLoop = false`) when hidden — zero GPU cost,
+  but entities/telemetry keep updating from the stores, so re-show is instant and current.
+- **Geographic hand-off, independent zoom.** On 3D→2D the 2D map re-centres on the ground point the
+  3D camera looks at (`getCamFocus` picks the globe at screen centre). On 2D→3D the camera targets
+  the 2D centre. **Zoom is never transferred** (each view keeps its own — cross-mapping zoom over
+  mountainous terrain was unreliable): the 3D camera re-uses its **own** saved range/heading/pitch.
+- **Drift-free restore.** A free-mode camera **snapshot** (full matrix + target + range) is captured
+  when leaving 3D. If the 2D map wasn't panned, the exact matrix is replayed (`setView`); re-deriving
+  it from a ground pick drifted the zoom one step per round-trip (pick hits terrain height > 0, a
+  `lookAt` targets the ellipsoid at 0). Follow/orbit re-anchor onto the UAV instead.
+- Module-scope the 2D map's "already framed this track" key so `fitBounds` only runs on the first DB
+  load, not on every remount.
+
+**Rationale**: instant, deterministic switching that preserves each view's own state; no fly-to
+sweep (camera is correct synchronously on show); the snapshot replay makes round-trips loss-less.
+
+**Consequences**: both map components live in the DOM after the first 3D open (more memory, the
+intended trade); state that must survive a 2D remount has to be module-scoped or in a store.
+
+---
+
 *End of Architecture Decision Records*
 

@@ -59,7 +59,7 @@ Kite Ground Control/
 ├── src-tauri/src/                    # Rust backend (Tauri 2)
 │   ├── lib.rs · main.rs · state.rs   # App builder + plugin registration + AppState (ActiveProtocol: MSP/MAVLink)
 │   ├── commands/                     # Tauri IPC (connection, flightlog, mission, info)
-│   ├── flightlog/                    # Recording + logbook + SQLite (schema v10) + blackbox/ardupilot import + exchange/exports
+│   ├── flightlog/                    # Recording + logbook + SQLite (schema v11) + blackbox/ardupilot import + exchange/exports
 │   ├── mission/                      # INAV mission model + MSP_WP codec + store
 │   ├── scheduler/                    # MSP scheduler (dedicated thread) + telemetry decode + dev debug
 │   ├── msp/                          # MSP v1/v2 codec, parser, transport framing, feature gating

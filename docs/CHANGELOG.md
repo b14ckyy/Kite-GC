@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — 2D↔3D view continuity (ADR-031)
+- **The 3D map is kept in RAM** after the first open — toggling 2D↔3D is now instant (no Cesium
+  viewer / terrain re-init). While hidden its render loop is paused (no GPU cost); entities keep
+  updating from the stores, so re-show is current.
+- **The view follows you across the switch.** 3D→2D re-centres the 2D map on the spot the 3D camera
+  looks at; 2D→3D points the camera at the 2D centre — applied **synchronously, no fly-to sweep**.
+  Each view keeps its **own zoom** (zoom is not transferred). Switching back to 3D restores the
+  exact camera you left (drift-free) unless you moved the 2D map; follow/orbit re-anchor on the UAV.
+
+### Added — mission launch/home stored in the library (DB schema v11)
+- **The mission's launch/home point is now persisted to the DB** (`missions.home_lat/home_lon`,
+  migration v10→v11) — previously it was only written to the `.mission` file export (`<mwp>` meta),
+  so a library mission lost its launch reference and **REL-altitude waypoints rendered at the wrong
+  height** in the 3D preview. Saved on every library save; restored to the launch point when a
+  mission is loaded in the planner.
+- **Replay derives the launch reference** from the actual flown **start point** (fallback: the
+  mission's saved home, then its first waypoint) — so a flight log with a linked REL mission shows
+  the waypoints at the correct elevation immediately, even for missions saved before this change.
+
+### Fixed — 3D elevation offset + camera
+- **3D mission preview now gets the geoid offset without a live link or replay.** The MSL→ellipsoid
+  geoid offset was only derived when a UAV (live/replay) was drawn; a mission-only preview placed
+  every waypoint off by the local undulation (tens of m). It's now derived from the first drawn
+  feature (UAV fix **or** waypoint) via a single-flight, awaitable computation — so a flight log
+  with a **linked mission** no longer races: the track and the mission share the one offset instead
+  of the mission drawing at 0.
+- **3D camera zoom no longer creeps in** one step per 2D↔3D round-trip (terrain-vs-ellipsoid range
+  mismatch) — the exact camera matrix is replayed when the 2D map wasn't moved.
+- **2D map no longer re-centres on the replay trail on every switch** — `fitBounds` now runs only on
+  the first load of a track from the DB (the "already framed" key is module-scoped, surviving the
+  2D map's remount).
+
 ### Added — 3D UAV models + attitude + motion smoothing
 - **3D UAV models on the Cesium map** — procedural low-poly glTF models replace the flat position
   point during live + replay and show the craft's full attitude. Per platform: **quad** (multirotor),
