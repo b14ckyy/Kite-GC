@@ -649,6 +649,7 @@ Source: **Copernicus DEM GLO-30** (geoid/EGM2008 ≈ MSL, no API key, offline-ca
 - [x] **Progressive shadow/curtain no longer spans a log switch** (clearDeco cancels pending timers + async-load guard)
 - [x] ~~Smoothed flight track (polyline simplification / spline interpolation)~~ — obviated: the track now uses INAV's fused EKF altitude (`nav_alt_m`), which is already smooth; horizontal GPS spacing is fine at the colored-segment resolution. No resample needed.
 - [ ] UI button refinements and responsive layout
+- [ ] _(polish)_ **2D map: stepless zoom scaling for the UAV model marker** — the canvas marker is fixed-pixel, so at very close zoom its size only updates at zoom-end (Leaflet repositions/resets markers there). Migrate the model from an `L.Marker` to a geographically-anchored, zoom-animated canvas layer so it scales continuously with the map (like the tiles / WP vectors). Only noticeable at the closest zoom range.
 - [ ] Altitude exaggeration toggle for low-altitude flights
 - [ ] Auto-enable chase camera on live flight start
 - [ ] Imagery tile resolution / LOD quirks (blurry or low-detail tiles at certain zooms)

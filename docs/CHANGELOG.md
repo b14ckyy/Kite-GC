@@ -24,7 +24,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (2–10 Hz GPS vs 10 Hz attitude), rejects single aliased/dropped samples, and holds (no
   extrapolation) across gaps/packet loss. The follow/orbit camera is driven from the smoothed state.
 - **New "VTOL" platform type** (manual override in the flight-detail dropdown — INAV does not parse
-  it) with its own quadplane 3D model, a 2D plane silhouette, and en/de/fr labels.
+  it) with its own quadplane 3D model and en/de/fr labels.
+
+### Added — replay model override + the 2D map renders the same 3D models
+- **Replay model override** — a dropdown in the replay control (bottom-right, opposite the track
+  colouring) forces a specific model (Quad / Tricopter / Plane / VTOL / Generic) or **Auto** (from
+  the flight's platform type). Live-switchable; the marker model swaps instantly.
+- **The 2D map now renders the same glTF models top-down**, replacing the flat SVG silhouettes — a
+  dependency-free canvas renderer with a per-pixel **z-buffer** (correct occlusion for
+  interpenetrating parts, e.g. a tilted multirotor's arms vs the body), flat shading from a side
+  light, a soft drop shadow, and full **attitude** (heading/pitch/roll → roll/bank read on 2D too).
+  Size scales with zoom **and the UI-scaling setting**; orientation is smoothed at 60 fps in the
+  follow loop. Single source of truth: the **same `.glb` assets** as 3D — loaded by a small parser
+  (`uavMesh`), selected via a shared helper (`uavModels`, also used by 3D + the dropdown), drawn by
+  `uavTopDown`. The old `createUavIcon` / SVG silhouette path was removed.
+- Models given a **near-white base** so the marker tint reads clearly on both maps.
 
 ### Added
 - **Experimental French locale (`fr`)** — selectable in Settings → Language (Français). Full key
@@ -35,6 +49,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **3D follow/orbit camera zoom drift** — the camera slowly zoomed in/out depending on the craft's
   flight direction (its radial motion was baked into the auto-zoom). `lockRange` is now measured
   against the previous frame's target, not the moved one — mouse-wheel zoom still sticks.
+- **Marker colour = nav state, consistently** (2D + 3D, live + replay) — restored the deliberate
+  split (the **track** shows flight mode, the **marker** the navigation state: Idle/RTH/PosHold/
+  Landing/Emergency/Landed — see `COLORED_TRACK_PLAN`). 3D-live previously fed flight-mode flags into
+  the nav-state lookup and 3D-replay used the flight-mode colour; both now use `nav_state`.
 - German locale: added the missing `survey.clockwise` / `survey.counterClockwise` (CW/CCW) keys
   (they previously fell back to the key/English).
 
