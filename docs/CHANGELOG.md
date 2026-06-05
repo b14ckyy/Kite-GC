@@ -7,12 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — 3D UAV models + attitude + motion smoothing
+- **3D UAV models on the Cesium map** — procedural low-poly glTF models replace the flat position
+  point during live + replay and show the craft's full attitude. Per platform: **quad** (multirotor),
+  **tricopter** (Y-frame), **fixed-wing** (airplane), **VTOL** quadplane, and a generic extruded
+  **arrow** for the rest (helicopter/rover/boat/other). Aviation nav-light colours (port red /
+  starboard green) on the rotor rings / wing details make an inverted or banked attitude readable;
+  cyan nose arrow. Hand-written `.glb` generators in `scripts/gen-uav-*.mjs` (no build deps); assets
+  in `static/models/`. Lightly tinted by flight-mode colour (MIX) so the mode still reads.
+- **Full 3D attitude** (heading + pitch + roll) on the model, taken from the same unified
+  `TelemetryData` the AHI widget uses (consistent across INAV/ArduPilot, live + replay). Built from
+  explicit body axes in the local ENU frame, so it stays correct at all attitudes (inverted, high
+  bank) — not a small-angle Euler approximation.
+- **Adaptive 3D motion smoothing** — interpolates position and attitude *separately*, re-basing only
+  on real data changes with a median-of-recent-intervals transition time. Tracks the true data rate
+  (2–10 Hz GPS vs 10 Hz attitude), rejects single aliased/dropped samples, and holds (no
+  extrapolation) across gaps/packet loss. The follow/orbit camera is driven from the smoothed state.
+- **New "VTOL" platform type** (manual override in the flight-detail dropdown — INAV does not parse
+  it) with its own quadplane 3D model, a 2D plane silhouette, and en/de/fr labels.
+
 ### Added
 - **Experimental French locale (`fr`)** — selectable in Settings → Language (Français). Full key
   parity with `en` (UAV/FPV terms kept English). _Not on the mandatory dual-update list_ — new
   `en` keys fall back to English via `fallbackLocale` until `fr` is updated.
 
 ### Fixed
+- **3D follow/orbit camera zoom drift** — the camera slowly zoomed in/out depending on the craft's
+  flight direction (its radial motion was baked into the auto-zoom). `lockRange` is now measured
+  against the previous frame's target, not the moved one — mouse-wheel zoom still sticks.
 - German locale: added the missing `survey.clockwise` / `survey.counterClockwise` (CW/CCW) keys
   (they previously fell back to the key/English).
 

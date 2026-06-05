@@ -301,7 +301,7 @@ This document tracks planned features, organized by milestone.
 - [x] Delete flight button styled as danger (red)
 - [x] Flight path replay on map (animated marker playback)
 - [x] Playback controls (play, pause, reset, scrub, speed 1×/2×/4×/10×)
-- [x] Type-specific UAV symbols on map during replay (per platform type) — per-platform silhouettes (`uavShapeForPlatform()`: multirotor/airplane/helicopter) on the **2D** map (live + playback); replay uses the flight's `platform_type`. 3D keeps the coloured position point (a 3D model will replace it later). Platform type is **editable in the flight detail** (dropdown under Craft Name, persisted via `flightlog_update_platform_type`) — fixes existing entries in place. Import sets a best-effort default: ArduPilot from the MSG vehicle banner; INAV Blackbox heuristically from the logged motor/servo field set (no explicit header).
+- [x] Type-specific UAV symbols on map during replay (per platform type) — per-platform silhouettes (`uavShapeForPlatform()`: multirotor/airplane/helicopter) on the **2D** map (live + playback); replay uses the flight's `platform_type`. 3D now uses per-platform glTF models with full attitude (see Milestone 7). Platform type is **editable in the flight detail** (dropdown under Craft Name, persisted via `flightlog_update_platform_type`) — fixes existing entries in place. Import sets a best-effort default: ArduPilot from the MSG vehicle banner; INAV Blackbox heuristically from the logged motor/servo field set (no explicit header).
 - [x] Flight path replay through HUD widgets (all widgets receive telemetry during playback)
 - [x] Delete flight records
 - [x] Search/filter by aircraft name, location, date, notes (frontend-only text filter)
@@ -630,7 +630,13 @@ Source: **Copernicus DEM GLO-30** (geoid/EGM2008 ≈ MSL, no API key, offline-ca
 - [x] MSAA 2× anti-aliasing
 
 ### Planned (3D Map)
-- [ ] 3D GLTF UAV models with attitude representation (roll/pitch/yaw)
+- [x] **3D glTF UAV models with full attitude** (heading/pitch/roll) — per-platform procedural
+  low-poly models (quad / tricopter Y-frame / fixed-wing / VTOL quadplane + generic arrow) replace
+  the position point in live + replay. Attitude from the unified AHI `TelemetryData` source, built
+  from explicit body axes (correct at all attitudes incl. inverted/high-bank). Adaptive position +
+  attitude motion smoothing (median-interval, gap-aware) drives the model + follow/orbit camera;
+  camera zoom-drift fixed. New manual **VTOL** platform type. Generators in `scripts/gen-uav-*.mjs`,
+  assets in `static/models/`
 - [x] Flight mode coloring of 3D track segments (Map3D — see Milestone 5b colored tracks)
 - [x] **Altitude curtain + ground shadow** under the 3D track (vertical wall to ground + terrain-draped shadow; flight-mode coloured; Settings→Map toggle; in replay built progressively behind the UAV, chunked for scale + reverse-scrub debounce). See `docs/active/Map3DRework.md`
 - [x] **Mission overlay in 3D** — mirrors the 2D map (same marker SVGs as billboards + same line styles, always-visible overlay) + per-WP drop-lines; "Show Mission" replay toggle (2D + 3D); planning/live always shown
