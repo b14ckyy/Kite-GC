@@ -61,8 +61,8 @@ const map = (sx, sy) => [(12 - sy) * S, (sx - 12) * S];
 const poly = [map(12, 2), map(5, 20), map(12, 16), map(19, 20)]; // nose, bottom-left, mid-notch, bottom-right
 const tris = [[0, 1, 2], [0, 2, 3]];
 materials.push({
-  pbrMetallicRoughness: { baseColorFactor: [0.22, 0.66, 0.86, 1], metallicFactor: 0.1, roughnessFactor: 0.7 },
-  emissiveFactor: [0.10, 0.32, 0.42], doubleSided: true,
+  pbrMetallicRoughness: { baseColorFactor: [0.84, 0.86, 0.88, 1], metallicFactor: 0.1, roughnessFactor: 0.7 },
+  emissiveFactor: [0, 0, 0], doubleSided: true, // near-white base so the flight-mode tint reads
 });
 addPrim(rotateY(extrudeY(poly, tris, 0.09), ROOT_YAW_Y), 0);
 

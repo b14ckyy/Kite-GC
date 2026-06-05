@@ -81,9 +81,9 @@ function addPrim(geo, material) {
 }
 
 const C = {
-  light: mat([0.60, 0.62, 0.64]),
+  light: mat([0.86, 0.87, 0.89]), // near-white base so the flight-mode tint reads
   dark: mat([0.06, 0.06, 0.07]),
-  boom: mat([0.20, 0.21, 0.23]),
+  boom: mat([0.42, 0.43, 0.45]),
   red: mat([0.80, 0.10, 0.10], [0.34, 0.04, 0.04]),
   green: mat([0.12, 0.70, 0.18], [0.05, 0.30, 0.08]),
 };

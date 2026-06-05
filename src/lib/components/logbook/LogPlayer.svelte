@@ -2,6 +2,7 @@
   import { t } from 'svelte-i18n';
   import type { Flight, TelemetryRecord } from '$lib/stores/flightlog';
   import { getUsedFlightModes, segmentTrackByAltitude, segmentTrackBySpeed, segmentTrackBySignal, type TrackColorMode, type FlightModeInfo, type GradientResult } from '$lib/helpers/trackColors';
+  import type { UavModelOverride } from '$lib/helpers/uavIcons';
   import { showMission, geoWaypoints } from '$lib/stores/mission';
 
   let {
@@ -23,6 +24,8 @@
     onScrubEnd = () => {},
     trackColorMode = 'flightmode' as TrackColorMode,
     onTrackColorModeChange = (_mode: TrackColorMode) => {},
+    modelOverride = 'auto' as UavModelOverride,
+    onModelOverrideChange = (_v: UavModelOverride) => {},
     playbackTrack = [] as TelemetryRecord[],
     warnAltitudeM = 120,
     replaySource = 'live' as 'live' | 'blackbox',
@@ -47,6 +50,8 @@
     onScrubEnd?: () => void;
     trackColorMode?: TrackColorMode;
     onTrackColorModeChange?: (mode: TrackColorMode) => void;
+    modelOverride?: UavModelOverride;
+    onModelOverrideChange?: (v: UavModelOverride) => void;
     playbackTrack?: TelemetryRecord[];
     warnAltitudeM?: number;
     replaySource?: 'live' | 'blackbox';
@@ -61,6 +66,19 @@
     { value: 'signal',     labelKey: 'player.trackSignal' },
     { value: 'none',       labelKey: 'player.trackNone' },
   ];
+
+  const MODEL_OPTIONS: { value: UavModelOverride; labelKey: string }[] = [
+    { value: 'auto',      labelKey: 'player.modelAuto' },
+    { value: 'quad',      labelKey: 'player.modelQuad' },
+    { value: 'tricopter', labelKey: 'player.modelTricopter' },
+    { value: 'plane',     labelKey: 'player.modelPlane' },
+    { value: 'vtol',      labelKey: 'player.modelVtol' },
+    { value: 'generic',   labelKey: 'player.modelGeneric' },
+  ];
+
+  function handleModelChange(event: Event) {
+    onModelOverrideChange((event.target as HTMLSelectElement).value as UavModelOverride);
+  }
 
   let usedModes = $derived(
     trackColorMode === 'flightmode' ? getUsedFlightModes(playbackTrack ?? [], selectedFlight?.fc_variant ?? 'INAV') : []
@@ -189,6 +207,13 @@
           <span class="gradient-label">{Math.round(gradientMeta.max)}</span>
         </div>
       {/if}
+      <div class="model-select">
+        <select value={modelOverride} onchange={handleModelChange} title={$t('player.modelTitle')}>
+          {#each MODEL_OPTIONS as m}
+            <option value={m.value}>{$t(m.labelKey)}</option>
+          {/each}
+        </select>
+      </div>
     </div>
   </div>
 {/if}
@@ -405,6 +430,26 @@
   }
 
   .track-color-select select:hover {
+    border-color: #37a8db;
+  }
+
+  .model-select {
+    margin-left: auto; /* push to the opposite (right) corner of the bottom row */
+  }
+
+  .model-select select {
+    background: #434343;
+    border: 1px solid #555;
+    color: #e0e0e0;
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    cursor: pointer;
+    outline: none;
+    color-scheme: dark;
+  }
+
+  .model-select select:hover {
     border-color: #37a8db;
   }
 

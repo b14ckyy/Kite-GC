@@ -119,8 +119,8 @@ function addPrim(geo, material) {
 
 // ── the quad ──
 const C = {
-  body: mat([0.13, 0.14, 0.16]),
-  arm: mat([0.22, 0.23, 0.25]),
+  body: mat([0.86, 0.87, 0.89]), // near-white base so the flight-mode tint reads
+  arm: mat([0.55, 0.56, 0.58]),
   green: mat([0.12, 0.70, 0.18], [0.05, 0.30, 0.08]),
   red: mat([0.80, 0.10, 0.10], [0.34, 0.04, 0.04]),
   arrow: mat([0.22, 0.66, 0.86], [0.10, 0.32, 0.42]),

@@ -25,15 +25,15 @@
     segmentTrackBySignal,
     trackPointColorizer,
     getNavStateColor,
-    classifyMode,
     classifyFlightMode,
     type TrackColorMode,
     type TrackSegment,
   } from "$lib/helpers/trackColors";
   import type { TelemetryRecord } from "$lib/stores/flightlog";
   import { toTelemetryData } from "$lib/adapters/telemetryAdapter";
-  import type { PlatformType } from "$lib/helpers/uavIcons";
-  import { PLATFORM_MULTIROTOR, PLATFORM_TRICOPTER, PLATFORM_AIRPLANE, PLATFORM_VTOL } from "$lib/helpers/uavIcons";
+  import type { PlatformType, UavModelOverride } from "$lib/helpers/uavIcons";
+  import { PLATFORM_MULTIROTOR } from "$lib/helpers/uavIcons";
+  import { modelUriForPlatform } from "$lib/helpers/uavModels";
   import {
     mission, showMission, replayActive, launchPoint,
     hasLocation, toDeg, WpAction, type Waypoint, type Mission,
@@ -49,6 +49,7 @@
     playbackPoint = null,
     trackColorMode = 'flightmode' as TrackColorMode,
     platformType = PLATFORM_MULTIROTOR as PlatformType,
+    modelOverride = 'auto' as UavModelOverride,
     fcVariant = 'INAV',
     mapViewMode = '3d' as '2d' | '3d',
     onToggleMapView,
@@ -57,6 +58,7 @@
     playbackPoint?: TelemetryRecord | null;
     trackColorMode?: TrackColorMode;
     platformType?: PlatformType;
+    modelOverride?: UavModelOverride;
     fcVariant?: string;
     mapViewMode?: '2d' | '3d';
     onToggleMapView?: () => void;
@@ -547,7 +549,7 @@
       // Fall back to relative baro altitude + geoid offset.
       const altMsl = telem.altMsl ?? telem.altitude;
       const alt = Math.max(altMsl + geoidOffset, 0);
-      updateUavPosition3D(telem.lat, telem.lon, alt, telem.yaw, telem.activeFlightModeFlags, armed, telem.roll, telem.pitch);
+      updateUavPosition3D(telem.lat, telem.lon, alt, telem.yaw, telem.navState, armed, telem.roll, telem.pitch);
       if (!armed) updatePreArmTrail3D(telem.lat, telem.lon);
       // Live: recenter once after the UAV exists (every 2D→3D switch remounts us).
       if (needsInitialRecenter && uavEntity) { needsInitialRecenter = false; recenter3D(); }
@@ -641,18 +643,18 @@
   // Arrow = generic flat marker for non-multirotor / unknown craft (until plane/heli models exist).
   // Tinted lightly by flight-mode colour (MIX) so the mode still reads; minimumPixelSize keeps it
   // visible far out.
-  const UAV_QUAD_URI = '/models/uav-quad.glb';
-  const UAV_TRICOPTER_URI = '/models/uav-tricopter.glb';
-  const UAV_PLANE_URI = '/models/uav-plane.glb';
-  const UAV_VTOL_URI = '/models/uav-vtol.glb';
-  const UAV_ARROW_URI = '/models/uav-arrow.glb';
-  function modelUriForPlatform(pt: PlatformType): string {
-    if (pt === PLATFORM_MULTIROTOR) return UAV_QUAD_URI;
-    if (pt === PLATFORM_TRICOPTER) return UAV_TRICOPTER_URI;
-    if (pt === PLATFORM_AIRPLANE) return UAV_PLANE_URI;
-    if (pt === PLATFORM_VTOL) return UAV_VTOL_URI;
-    return UAV_ARROW_URI;
+  // Model selection (override > platform) lives in the shared uavModels helper (also used by 2D map).
+  function currentModelUri(): string {
+    return modelUriForPlatform(platformType, modelOverride);
   }
+  // Live-swap the marker model when the override (or platform type) changes mid-session.
+  $effect(() => {
+    const uri = currentModelUri(); // tracks modelOverride + platformType
+    for (const e of [uavEntity, playbackMarkerEntity]) {
+      if (e?.model) e.model.uri = new Cesium.ConstantProperty(uri);
+    }
+    viewer?.scene.requestRender();
+  });
   // Heading offset stays 0 — the model's own frame is yaw-corrected in the .glb generators
   // (ROOT_YAW_Y) so the explicit body-axis construction below needs no runtime fudge.
   const MODEL_HEADING_OFFSET_DEG = 0;
@@ -788,11 +790,11 @@
     else if (cameraMode === 'orbit') updateOrbitCamera(lat, lon, alt);
   }
 
-  function updateUavPosition3D(lat: number, lon: number, alt: number, heading: number, flightModeFlags = 0, armed = false, roll = 0, pitch = 0) {
+  function updateUavPosition3D(lat: number, lon: number, alt: number, heading: number, navState = 0, armed = false, roll = 0, pitch = 0) {
     if (!viewer) return;
 
     const position = Cesium.Cartesian3.fromDegrees(lon, lat, alt);
-    const color = getNavStateColor(flightModeFlags);
+    const color = getNavStateColor(navState); // marker = nav state (the track shows flight mode)
     const cesiumColor = Cesium.Color.fromCssColorString(color);
 
     // Full attitude: heading (INAV 0=N CW = Cesium) + pitch + roll (signs via the constants above).
@@ -802,7 +804,7 @@
       uavEntity = viewer.entities.add({
         position,
         orientation: orientation as any,
-        model: uavModelGraphics(cesiumColor, modelUriForPlatform(platformType)),
+        model: uavModelGraphics(cesiumColor, currentModelUri()),
         label: {
           text: 'UAV',
           font: '11px monospace',
@@ -1558,8 +1560,7 @@
     const lon = point.lon;
     const alt = startMslGps + geoidOffset + (point.nav_alt_m ?? point.baro_alt_m ?? 0);
     const heading = point.heading ?? 0;
-    const flags = point.active_flight_mode_flags ?? 0;
-    const color = classifyMode(flags, fcVariant).color;
+    const color = getNavStateColor(point.nav_state ?? 0); // marker = nav state
     const cesiumColor = Cesium.Color.fromCssColorString(color);
     const position = Cesium.Cartesian3.fromDegrees(lon, lat, alt);
     // Attitude from the SAME unified adapter the AHI widget uses (consistent across
@@ -1571,7 +1572,7 @@
       playbackMarkerEntity = viewer.entities.add({
         position,
         orientation: orientation as any,
-        model: uavModelGraphics(cesiumColor, modelUriForPlatform(platformType)),
+        model: uavModelGraphics(cesiumColor, currentModelUri()),
       });
     } else if (playbackMarkerEntity.model) {
       playbackMarkerEntity.model.color = new Cesium.ConstantProperty(cesiumColor);

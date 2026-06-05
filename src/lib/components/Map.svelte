@@ -23,13 +23,19 @@
     type TrackColorMode,
     type TrackSegment,
   } from "$lib/helpers/trackColors";
-  import { createUavIcon, PLATFORM_MULTIROTOR, type PlatformType } from "$lib/helpers/uavIcons";
+  import { PLATFORM_MULTIROTOR, type PlatformType, type UavModelOverride } from "$lib/helpers/uavIcons";
+  import { resolveModelKind, modelUri } from "$lib/helpers/uavModels";
+  import { loadUavMesh, type UavMesh } from "$lib/helpers/uavMesh";
+  import { renderUavTopDown } from "$lib/helpers/uavTopDown";
+  import { toTelemetryData } from "$lib/adapters/telemetryAdapter";
 
   let {
     playbackTrack = [],
     playbackPoint = null,
     trackColorMode = 'flightmode' as TrackColorMode,
     platformType = PLATFORM_MULTIROTOR as PlatformType,
+    modelOverride = 'auto' as UavModelOverride,
+    uiScale = 1,
     fcVariant = 'INAV',
     mapViewMode = '2d' as '2d' | '3d',
     onToggleMapView,
@@ -38,10 +44,72 @@
     playbackPoint?: TelemetryRecord | null;
     trackColorMode?: TrackColorMode;
     platformType?: PlatformType;
+    modelOverride?: UavModelOverride;
+    uiScale?: number;
     fcVariant?: string;
     mapViewMode?: '2d' | '3d';
     onToggleMapView?: () => void;
   } = $props();
+
+  // ── UAV model marker (top-down canvas render of the same .glb used in 3D) ──
+  // The marker icon is a persistent <canvas>; the follow rAF loop redraws it every frame with the
+  // SMOOTHED position + attitude (same easing as the position smoother), so the orientation updates
+  // at 60 fps instead of stepping at the 2–10 Hz data rate — no per-frame toDataURL/setIcon churn.
+  let uavMesh: UavMesh | null = null;       // geometry for the current model kind
+  let uavMeshToken = 0;                       // guards out-of-order async loads
+  const MODEL_REAL_SPAN_M = 14;              // real-world span the model represents (zoom-scaled)
+  const MODEL_MIN_PX = 100, MODEL_MAX_PX = 200;
+  const MODEL_TINT = 0.28;                    // flight-mode colour mix (a bit stronger on the white base)
+
+  // (Re)load the mesh whenever the resolved model kind changes (platform type or override).
+  $effect(() => {
+    const kind = resolveModelKind(platformType, modelOverride);
+    const token = ++uavMeshToken;
+    loadUavMesh(modelUri(kind)).then((m) => {
+      if (token !== uavMeshToken) return; // a newer load superseded us
+      uavMesh = m;
+      applyFollowFrame(); // redraw with the new model
+    }).catch(() => { /* keep the previous mesh / fallback dot */ });
+  });
+
+  function hexToRgb01(hex: string): [number, number, number] {
+    const h = hex.replace('#', '');
+    return [parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255, parseInt(h.slice(4, 6), 16) / 255];
+  }
+  /** Model pixel size at the current zoom (clamped), then scaled by the UI scaling setting. */
+  function modelSizePx(lat: number): number {
+    if (!map) return MODEL_MIN_PX;
+    const mpp = 156543.03392 * Math.cos(lat * Math.PI / 180) / Math.pow(2, map.getZoom());
+    return Math.round(Math.max(MODEL_MIN_PX, Math.min(MODEL_MAX_PX, MODEL_REAL_SPAN_M / mpp)) * (uiScale || 1));
+  }
+  // Resize the model when the UI scaling setting changes.
+  $effect(() => { uiScale; if (map) onZoomEnd(); });
+  /** A DivIcon whose content is a blank canvas of `size`px (drawn into by drawModel). */
+  function makeModelIcon(size: number): L.DivIcon {
+    return L.divIcon({
+      className: 'uav-model-icon',
+      html: `<canvas class="uav-model-canvas" width="${size}" height="${size}" style="display:block"></canvas>`,
+      iconSize: [size, size], iconAnchor: [size / 2, size / 2],
+    });
+  }
+  /** Draw the model into a marker's persistent canvas (cheap — no DOM churn). */
+  function drawModel(marker: L.Marker | undefined, heading: number, pitch: number, roll: number, color: string) {
+    const cv = marker?.getElement()?.querySelector('canvas') as HTMLCanvasElement | null;
+    const ctx = cv?.getContext('2d');
+    if (!cv || !ctx) return;
+    if (!uavMesh) { // fallback dot until the mesh loads
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      ctx.fillStyle = color; ctx.beginPath(); ctx.arc(cv.width / 2, cv.height / 2, 6, 0, 2 * Math.PI); ctx.fill();
+      return;
+    }
+    renderUavTopDown(ctx, uavMesh, cv.width, heading, pitch, roll, hexToRgb01(color), MODEL_TINT);
+  }
+  /** Zoom changed → resize the marker canvases to the new pixel size, then redraw. */
+  function onZoomEnd() {
+    const lat = followCurrent?.lat ?? 0;
+    for (const mk of [uavMarker, playbackMarker]) mk?.setIcon(makeModelIcon(modelSizePx(lat)));
+    applyFollowFrame();
+  }
 
   const ARMING_FLAG_ARMED = 2;
   const MIN_TRAIL_DIST = 1; // meters — don't add trail point if moved less
@@ -95,26 +163,28 @@
   // marker. A rAF loop eases the displayed position toward the latest target
   // (exponential, ~250 ms catch-up), decoupled from the update rate. Large
   // jumps (replay scrub, new flight, first fix) snap instead of gliding.
-  interface FollowPt { lat: number; lon: number; heading: number; }
+  interface FollowPt { lat: number; lon: number; heading: number; pitch: number; roll: number; }
   let followTarget: FollowPt | null = null;
   let followCurrent: FollowPt | null = null;
   let activeFollowMarker: L.Marker | undefined;
+  let activeColor = '#37a8db';
   let followRaf: number | null = null;
   let followLastT = 0;
   const FOLLOW_TAU_MS = 200; // exp. time constant (~250 ms to mostly catch up)
   const FOLLOW_SNAP_M = 300; // jump farther than this → snap, don't glide
 
-  /** Set the latest position/heading target; the rAF loop eases toward it.
-   *  Drives the active marker always + the map when following. */
-  function setFollowTarget(lat: number, lon: number, heading: number, marker: L.Marker | undefined) {
+  /** Set the latest position + attitude target; the rAF loop eases toward it and redraws the model
+   *  marker every frame (so the orientation is smooth, not stepped at the data rate). */
+  function setFollowTarget(lat: number, lon: number, heading: number, pitch: number, roll: number, color: string, marker: L.Marker | undefined) {
     if (!isValidGpsCoordinate(lat, lon)) return;
     activeFollowMarker = marker;
-    followTarget = { lat, lon, heading };
+    activeColor = color;
+    followTarget = { lat, lon, heading, pitch, roll };
     if (!followCurrent) {
-      followCurrent = { lat, lon, heading };
+      followCurrent = { ...followTarget };
       applyFollowFrame();
     } else if (L.latLng(followCurrent.lat, followCurrent.lon).distanceTo([lat, lon]) > FOLLOW_SNAP_M) {
-      followCurrent = { lat, lon, heading }; // big jump → snap
+      followCurrent = { ...followTarget }; // big jump → snap
       applyFollowFrame();
     }
     if (followRaf == null) {
@@ -132,9 +202,12 @@
     followCurrent.lon += (followTarget.lon - followCurrent.lon) * k;
     const dh = ((followTarget.heading - followCurrent.heading + 540) % 360) - 180; // shortest path
     followCurrent.heading = (followCurrent.heading + dh * k + 360) % 360;
+    followCurrent.pitch += (followTarget.pitch - followCurrent.pitch) * k;
+    const dr = ((followTarget.roll - followCurrent.roll + 540) % 360) - 180; // shortest path (handles ±180 inversion)
+    followCurrent.roll += dr * k;
     applyFollowFrame();
     const dist = L.latLng(followCurrent.lat, followCurrent.lon).distanceTo([followTarget.lat, followTarget.lon]);
-    if (dist < 0.5 && Math.abs(dh) < 0.3) {
+    if (dist < 0.5 && Math.abs(dh) < 0.3 && Math.abs(followTarget.pitch - followCurrent.pitch) < 0.3 && Math.abs(dr) < 0.3) {
       followCurrent = { ...followTarget }; // settled — snap exactly + stop until next target
       applyFollowFrame();
       followRaf = null;
@@ -143,12 +216,15 @@
     followRaf = requestAnimationFrame(followLoop);
   }
 
-  /** Apply the eased position: move the active marker always, recenter (+rotate)
-   *  the map only while following. */
+  /** Apply the eased frame: move + redraw the active marker always, recenter (+rotate) the map
+   *  only while following. */
   function applyFollowFrame() {
     if (!map || !followCurrent) return;
     const ll: L.LatLngExpression = [followCurrent.lat, followCurrent.lon];
-    activeFollowMarker?.setLatLng(ll);
+    if (activeFollowMarker) {
+      activeFollowMarker.setLatLng(ll);
+      drawModel(activeFollowMarker, followCurrent.heading, followCurrent.pitch, followCurrent.roll, activeColor);
+    }
     // Don't fight an in-progress zoom animation (would snap mid-zoom).
     if (viewMode !== 'free' && !(map as unknown as { _animatingZoom?: boolean })._animatingZoom) {
       map.setView(ll, map.getZoom(), { animate: false });
@@ -165,19 +241,15 @@
     return 'Follow mode: Heading Follow';
   });
 
-  function updateUavPosition(lat: number, lon: number, heading: number, navState = 0) {
+  function updateUavPosition(lat: number, lon: number, heading: number, navState = 0, roll = 0, pitch = 0) {
     if (!map) return;
     if (!isValidGpsCoordinate(lat, lon)) return;
 
-    const color = getNavStateColor(navState);
-    const icon = createUavIcon({ heading, fillColor: color, platformType });
-
+    const color = getNavStateColor(navState); // marker = nav state (the track shows flight mode) — see COLORED_TRACK_PLAN
     if (!uavMarker) {
-      uavMarker = L.marker([lat, lon], { icon, zIndexOffset: 1000 }).addTo(map);
-    } else {
-      uavMarker.setIcon(icon); // position handled by the smoother
+      uavMarker = L.marker([lat, lon], { icon: makeModelIcon(modelSizePx(lat)), zIndexOffset: 1000 }).addTo(map);
     }
-    setFollowTarget(lat, lon, heading, uavMarker);
+    setFollowTarget(lat, lon, heading, pitch, roll, color, uavMarker); // eases + redraws the model
   }
 
   function createHomeIcon(): L.DivIcon {
@@ -329,15 +401,13 @@
     }
 
     const heading = point.heading ?? 0;
-    const color = getNavStateColor(point.nav_state ?? 0);
-    const icon = createUavIcon({ heading, fillColor: color, platformType });
-
-    if (playbackMarker) {
-      playbackMarker.setIcon(icon); // position handled by the smoother
-    } else {
-      playbackMarker = L.marker([point.lat, point.lon], { icon, zIndexOffset: 900 }).addTo(map);
+    const color = getNavStateColor(point.nav_state ?? 0); // marker = nav state
+    // Attitude from the same unified adapter the AHI / 3D model use.
+    const td = toTelemetryData(point, fcVariant);
+    if (!playbackMarker) {
+      playbackMarker = L.marker([point.lat, point.lon], { icon: makeModelIcon(modelSizePx(point.lat)), zIndexOffset: 900 }).addTo(map);
     }
-    setFollowTarget(point.lat, point.lon, heading, playbackMarker);
+    setFollowTarget(point.lat, point.lon, heading, td.pitch, td.roll, color, playbackMarker); // eases + redraws
   }
 
   function applyProvider(provider: MapProvider) {
@@ -395,6 +465,7 @@
 
     map.on("moveend", saveMapState);
     map.on("zoomend", saveMapState);
+    map.on("zoomend", onZoomEnd);   // resize the model canvas to the new zoom
 
     // Invalidate size when container resizes (e.g. side panel toggle)
     const onResize = () => {
@@ -409,7 +480,7 @@
     // Subscribe to telemetry for UAV position, flight trail, and home detection
     unsubTelemetry = telemetry.subscribe((t) => {
       if (t.lastUpdate > 0) {
-        updateUavPosition(t.lat, t.lon, t.yaw, t.navState); // drives the smoother (marker + follow)
+        updateUavPosition(t.lat, t.lon, t.yaw, t.navState, t.roll, t.pitch); // drives the smoother (marker + follow)
 
         // Flight trail: colored by flight mode while armed; a thin black
         // monitoring line while disarmed (pre-arm).
@@ -547,6 +618,7 @@
     if (map) {
       map.off("moveend", saveMapState);
       map.off("zoomend", saveMapState);
+      map.off("zoomend", onZoomEnd);
       if (uavMarker) map.removeLayer(uavMarker);
       for (const seg of trailSegments) map.removeLayer(seg);
       if (activeTrailLine) map.removeLayer(activeTrailLine);

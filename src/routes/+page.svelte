@@ -62,6 +62,7 @@
     type TelemetryRecord,
   } from "$lib/stores/flightlog";
   import type { TrackColorMode } from "$lib/helpers/trackColors";
+  import type { UavModelOverride } from "$lib/helpers/uavIcons";
   import { FLIGHT_MODE } from "$lib/helpers/trackColors";
 
   // ── Layout zone CSS custom properties (driven by layout store) ──
@@ -274,6 +275,7 @@
     temperatureUnit: 'c',
   });
   let trackColorMode = $state<TrackColorMode>('flightmode');
+  let modelOverride = $state<UavModelOverride>('auto'); // 3D UAV-model override (Replay control)
 
   // Logbook state
   let logbookLoading = $state(false);
@@ -1496,6 +1498,8 @@
         playbackPoint={playbackPoint}
         {trackColorMode}
         platformType={mapPlatformType}
+        {modelOverride}
+        {uiScale}
         fcVariant={replayFcVariant}
         {mapViewMode}
         onToggleMapView={() => mapViewMode = mapViewMode === '2d' ? '3d' : '2d'}
@@ -1506,6 +1510,7 @@
         playbackPoint={playbackPoint}
         {trackColorMode}
         platformType={mapPlatformType}
+        {modelOverride}
         fcVariant={replayFcVariant}
         {mapViewMode}
         onToggleMapView={() => mapViewMode = mapViewMode === '2d' ? '3d' : '2d'}
@@ -1588,6 +1593,8 @@
     onScrubEnd={scrubEnd}
     {trackColorMode}
     onTrackColorModeChange={(mode) => { trackColorMode = mode; }}
+    {modelOverride}
+    onModelOverrideChange={(v) => { modelOverride = v; }}
     playbackTrack={mapTrack}
     {warnAltitudeM}
     {replaySource}

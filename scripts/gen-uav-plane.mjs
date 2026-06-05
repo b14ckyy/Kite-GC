@@ -68,7 +68,7 @@ function addPrim(geo, material) {
 
 // ── materials ──
 const C = {
-  light: mat([0.60, 0.62, 0.64]),                 // upper surfaces (Cesium-lit, shaded like the quad)
+  light: mat([0.86, 0.87, 0.89]),                 // upper surfaces — near-white base so the flight-mode tint reads
   dark: mat([0.06, 0.06, 0.07]),                  // undersides — near-black
   red: mat([0.80, 0.10, 0.10], [0.34, 0.04, 0.04]),   // left/port wing-tip
   green: mat([0.12, 0.70, 0.18], [0.05, 0.30, 0.08]), // right/starboard wing-tip
