@@ -45,6 +45,7 @@
   import { resolveMissionAltitudes, type WpMsl } from "$lib/helpers/terrainProfile";
 
   let {
+    active = true,
     playbackTrack = [],
     playbackPoint = null,
     trackColorMode = 'flightmode' as TrackColorMode,
@@ -54,6 +55,7 @@
     mapViewMode = '3d' as '2d' | '3d',
     onToggleMapView,
   }: {
+    active?: boolean;
     playbackTrack?: TelemetryRecord[];
     playbackPoint?: TelemetryRecord | null;
     trackColorMode?: TrackColorMode;
@@ -167,11 +169,19 @@
   // track altitude. Track ellipsoid = startMslGps + geoidOffset + nav_alt_m.
   let startMslGps = 0;
 
-  // Live session: geoidOffset is derived once per live connection from the
-  // terrain at the first live GPS fix (so the live UAV sits at the right height
-  // without needing a log loaded first).
-  let liveGeoidComputed = false;
-  let liveGeoidPending = false;
+  // geoidOffset is derived ONCE per scene from the terrain at the first thing that
+  // gets drawn — live GPS fix, replay track, OR a mission/launch waypoint. Deriving
+  // it from a waypoint (not just a UAV) means the 3D mission preview is height-correct
+  // without a live link or a loaded log. Generalises to future ADS-B / followers
+  // (compute from their first position).
+  //
+  // A SINGLE-FLIGHT awaitable promise (computeGeoidOnce) backs it: when a flight log
+  // with a linked mission loads, the track and the mission both kick a computation
+  // almost simultaneously — they share the one in-flight promise, so the mission waits
+  // for the SAME offset instead of drawing at 0 and racing a re-render.
+  let geoidComputed = false;
+  let geoidPromise: Promise<boolean> | null = null; // the in-flight single-flight computation
+  let geoidGen = 0; // bumped on a source switch so an in-flight sample can't apply a stale offset
   // Connection-edge detection for source-switch clearing.
   let prevConnStatus: ConnectionStatus = get(connection).status;
   // Set on a fresh connect; the next telemetry frame decides whether to clear
@@ -385,6 +395,11 @@
    */
   function recenter3D() {
     if (!viewer) return;
+    // Suppressed right after a 2D→3D switch: the camera was just synced to the 2D
+    // viewport (setCameraFromMapView) and must not be yanked away by a content
+    // fly-to triggered by the mount's track effect. A genuine later log-load (well
+    // after the switch) is past the window and still frames the new track.
+    if (performance.now() < recenterSuppressUntil) return;
     const tryFly = (attempt: number) => {
       if (!viewer) return;
       const c = viewer.canvas;
@@ -401,6 +416,138 @@
     };
     requestAnimationFrame(() => tryFly(0));
   }
+
+  // Suppress content fly-to until this timestamp (set by a 2D→3D camera sync).
+  let recenterSuppressUntil = 0;
+  // Pitch used when framing the 2D viewport in free mode (steep-ish, near top-down 2D).
+  const SYNC_PITCH = Cesium.Math.toRadians(-55);
+
+  /**
+   * Point the 3D camera at the spot the 2D (Leaflet) map currently shows (its
+   * persisted `settings.map.center`). Only the GROUND TARGET is taken from 2D — the
+   * camera keeps its OWN zoom/heading/pitch, so a switch never resets the 3D zoom
+   * (2D↔3D zooms are independent; transferring zoom across was unreliable over
+   * mountainous terrain anyway).
+   *
+   * If the 2D map wasn't panned since we left 3D, the EXACT captured camera matrix is
+   * replayed (setView) — re-deriving it via a ground pick would drift the zoom every
+   * round-trip, because the pick hits TERRAIN (height > 0) while a lookAt targets the
+   * ellipsoid (height 0). If the 2D map WAS panned, the camera re-targets the new
+   * centre keeping its zoom/angle. First-ever open (no snapshot) derives a starting
+   * range from the 2D zoom. Applied synchronously (no fly-to).
+   */
+  function setCameraFromMapView(attempt = 0) {
+    if (!viewer) return;
+    const m = get(settings).map;
+    if (!m?.center) { recenter3D(); return; }
+    const [lat, lon] = m.center;
+    const snap = cam3dSnapshot;
+    if (snap) {
+      const panned = Cesium.Cartesian3.distance(
+        Cesium.Cartesian3.fromDegrees(lon, lat),
+        Cesium.Cartesian3.fromDegrees(snap.targetLon, snap.targetLat),
+      ) > 8; // metres → user moved the 2D map
+      if (!panned) {
+        // Exact restore — replay the captured matrix so the zoom can't drift.
+        viewer.camera.setView({ destination: snap.position, orientation: { heading: snap.heading, pitch: snap.pitch, roll: snap.roll } });
+      } else {
+        // Re-target the new 2D centre, keeping 3D's own zoom/angle.
+        viewer.camera.lookAt(Cesium.Cartesian3.fromDegrees(lon, lat, 0), new Cesium.HeadingPitchRange(snap.heading, snap.pitch, snap.range));
+        viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+      }
+      recenterSuppressUntil = performance.now() + 1500;
+      viewer.scene.requestRender();
+      return;
+    }
+    // First-ever open: derive a starting range from the 2D zoom (needs canvas + FOV).
+    const c = viewer.canvas;
+    if ((c.clientWidth < 2 || c.clientHeight < 2) && attempt < 30) {
+      requestAnimationFrame(() => setCameraFromMapView(attempt + 1));
+      return;
+    }
+    const hPx = c.clientHeight || 600;
+    const mpp = 156543.03392 * Math.cos(lat * Math.PI / 180) / Math.pow(2, m.zoom ?? 14);
+    let fovy = Cesium.Math.toRadians(45);
+    try { const f = (viewer.camera.frustum as Cesium.PerspectiveFrustum).fovy; if (f && isFinite(f)) fovy = f; } catch { /* aspectRatio not ready yet */ }
+    const range = Math.max(50, (mpp * hPx) / (2 * Math.tan(fovy / 2)));
+    viewer.camera.lookAt(Cesium.Cartesian3.fromDegrees(lon, lat, 0), new Cesium.HeadingPitchRange(0, SYNC_PITCH, range));
+    viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY); // release the frame so manual controls work
+    recenterSuppressUntil = performance.now() + 1500;
+    viewer.scene.requestRender();
+  }
+
+  /** Re-anchor a locked (follow/orbit) camera onto the UAV after a 2D→3D switch. */
+  function reanchorLockCamera() {
+    if (!pHas) { setCameraFromMapView(); return; }
+    chaseInited = false;
+    orbitInited = false;
+    if (cameraMode === 'follow') updateChaseCamera(pToLat, pToLon, pToAlt, aToHead);
+    else if (cameraMode === 'orbit') updateOrbitCamera(pToLat, pToLon, pToAlt);
+    viewer?.scene.requestRender();
+  }
+
+  // The free-mode 3D camera captured when switching away to 2D: the full matrix (for an
+  // exact, drift-free restore when the 2D map wasn't panned) + the ground target & range
+  // (to re-target if it was). Re-applied on every return to 3D so the zoom/heading/pitch
+  // the user set survives a 2D round-trip.
+  type Cam3DSnapshot = {
+    position: Cesium.Cartesian3; heading: number; pitch: number; roll: number;
+    targetLat: number; targetLon: number; range: number;
+  };
+  let cam3dSnapshot: Cam3DSnapshot | null = null;
+
+  /**
+   * Ground point + spherical offset the 3D camera currently looks at (screen centre).
+   * Exposed (instance method) so +page can read it on a 3D→2D switch and re-centre the
+   * 2D map on the same spot.
+   */
+  export function getCamFocus(): { lat: number; lon: number; range: number; heading: number; pitch: number } | null {
+    if (!viewer) return null;
+    const scene = viewer.scene, canvas = viewer.canvas;
+    const screenCentre = new Cesium.Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2);
+    let ground: Cesium.Cartesian3 | undefined;
+    const ray = viewer.camera.getPickRay(screenCentre);
+    if (ray) ground = scene.globe.pick(ray, scene);
+    if (!ground) ground = viewer.camera.pickEllipsoid(screenCentre) ?? undefined;
+    if (!ground) return null;
+    const carto = Cesium.Cartographic.fromCartesian(ground);
+    return {
+      lat: Cesium.Math.toDegrees(carto.latitude),
+      lon: Cesium.Math.toDegrees(carto.longitude),
+      range: Cesium.Cartesian3.distance(viewer.camera.positionWC, ground),
+      heading: viewer.camera.heading,
+      pitch: viewer.camera.pitch,
+    };
+  }
+
+  // Activate/deactivate when the 2D↔3D toggle flips `active`. Inactive → snapshot the
+  // free-mode camera's own zoom/angle and pause the render loop (viewer stays in RAM,
+  // entities keep updating from the stores). Active → resume, resize, and frame the view:
+  //  • locked (follow/orbit) → re-anchor onto the UAV;
+  //  • free → target the 2D spot, keeping 3D's own zoom/angle (no zoom reset).
+  $effect(() => {
+    const on = active; // tracked
+    if (!viewer) return;
+    if (on) {
+      viewer.useDefaultRenderLoop = true;
+      viewer.resize();
+      if (cameraMode !== 'free' && pHas) reanchorLockCamera();
+      else setCameraFromMapView();
+      viewer.scene.requestRender();
+    } else {
+      // Remember 3D's own camera (only in free mode; a locked excursion keeps the last
+      // free snapshot so returning to free still has it).
+      if (cameraMode === 'free') {
+        const f = getCamFocus();
+        if (f) cam3dSnapshot = {
+          position: viewer.camera.positionWC.clone(),
+          heading: viewer.camera.heading, pitch: viewer.camera.pitch, roll: viewer.camera.roll,
+          targetLat: f.lat, targetLon: f.lon, range: f.range,
+        };
+      }
+      viewer.useDefaultRenderLoop = false;
+    }
+  });
 
   /**
    * Re-apply the active imagery provider (re-requests all visible tiles).
@@ -512,15 +659,9 @@
     // Lighting
     viewer.scene.globe.enableLighting = false;
 
-    // Set initial camera to a reasonable default
-    viewer.camera.setView({
-      destination: Cesium.Cartesian3.fromDegrees(11.0, 48.0, 5000),
-      orientation: {
-        heading: 0,
-        pitch: Cesium.Math.toRadians(-45),
-        roll: 0,
-      },
-    });
+    // Initial camera: frame the SAME spot the 2D map currently shows (center + zoom),
+    // positioned immediately — no fly-to sweep. Mirrors every later 2D→3D switch.
+    setCameraFromMapView();
 
         // Subscribe to live telemetry
     unsubTelemetry = telemetry.subscribe((telem) => {
@@ -543,7 +684,7 @@
       if (curReplayActive) { wasArmed = armed; return; }
 
       // Derive the geoid undulation for the live location once per session.
-      ensureLiveGeoid(telem.lat, telem.lon);
+      ensureGeoid(telem.lat, telem.lon);
 
       // Use MSL altitude + geoid offset for correct ellipsoid height.
       // Fall back to relative baro altitude + geoid offset.
@@ -607,8 +748,8 @@
       prevConnStatus = c.status;
       if (c.status === 'connected' && was !== 'connected') {
         pendingConnectArmCheck = true;
-        liveGeoidComputed = false;
-        liveGeoidPending = false;
+        geoidGen++; geoidPromise = null;
+        geoidComputed = false;
       }
     });
   });
@@ -957,8 +1098,8 @@
     geoidOffset = 0;
     startMslGps = 0;
     wasArmed = false;
-    liveGeoidComputed = false;
-    liveGeoidPending = false;
+    geoidGen++; geoidPromise = null;
+    geoidComputed = false;
     // Camera follow state (so it re-anchors on the new source)
     chaseInited = false;
     orbitInited = false;
@@ -968,33 +1109,49 @@
   }
 
   /**
-   * Derive the geoid undulation N = cesiumGround_ellipsoid − copernicusGround_MSL
-   * at the live location, once per live session. Live UAV ellipsoid height is
-   * `altMsl + geoidOffset`, so without this the craft sinks by the full local
-   * undulation (~tens of m). Guarded by `liveGeoidPending` (one sample in flight).
+   * Derive the geoid undulation N = cesiumGround_ellipsoid − copernicusGround_MSL at
+   * `lat`/`lon`, ONCE per scene. Heights placed as `MSL + geoidOffset` (live UAV, track,
+   * mission waypoints, …) would otherwise sink by the full local undulation (~tens of m).
+   * Single-flight + awaitable: concurrent callers (a loading track + its linked mission)
+   * share the one promise and all see the same offset. Resolves to whether it succeeded;
+   * on failure (no terrain / no Copernicus ground) callers draw at offset 0 (best effort).
+   * `fallbackGroundMsl` (the replay's first-fix GPS MSL) substitutes for a missing
+   * Copernicus ground so the replay still gets an offset.
    */
-  async function ensureLiveGeoid(lat: number, lon: number) {
-    if (!viewer || liveGeoidComputed || liveGeoidPending) return;
-    liveGeoidPending = true;
-    try {
-      const terrainProvider = await waitForTerrain(viewer);
-      if (terrainProvider) {
+  function computeGeoidOnce(lat: number, lon: number, fallbackGroundMsl?: number): Promise<boolean> {
+    if (geoidComputed) return Promise.resolve(true);
+    if (geoidPromise) return geoidPromise; // join the in-flight computation
+    if (!viewer) return Promise.resolve(false);
+    const v = viewer, gen = geoidGen;
+    geoidPromise = (async () => {
+      try {
+        const terrainProvider = await waitForTerrain(v);
+        if (!terrainProvider) { console.warn('[Map3D] No terrain provider available, geoidOffset=0'); return false; }
         const refPos = Cesium.Cartographic.fromDegrees(lon, lat);
         const sampled = await Cesium.sampleTerrainMostDetailed(terrainProvider, [refPos]);
+        if (!sampled[0] || sampled[0].height == null) return false;
         const copernicusGround = await invoke<number | null>('terrain_elevation', { lat, lon });
-        if (sampled[0] && sampled[0].height != null && copernicusGround != null) {
-          geoidOffset = sampled[0].height - copernicusGround;
-          liveGeoidComputed = true;
-          console.log(`[Map3D] Live geoid N: ${geoidOffset.toFixed(1)}m (cesium=${sampled[0].height.toFixed(1)}, copernicusMSL=${copernicusGround.toFixed(1)})`);
-          scheduleMissionRender();
-          viewer.scene.requestRender();
-        }
+        const groundMsl = copernicusGround ?? fallbackGroundMsl;
+        if (groundMsl == null) { console.warn('[Map3D] No ground MSL for geoid, geoidOffset=0'); return false; }
+        if (gen !== geoidGen) return false; // a source switch happened mid-sample → discard
+        geoidOffset = sampled[0].height - groundMsl;
+        geoidComputed = true;
+        console.log(`[Map3D] Geoid N: ${geoidOffset.toFixed(1)}m (cesium=${sampled[0].height.toFixed(1)}, groundMSL=${groundMsl.toFixed(1)})`);
+        return true;
+      } catch (e) {
+        console.warn('[Map3D] Geoid sample failed', e);
+        return false;
+      } finally {
+        geoidPromise = null;
       }
-    } catch (e) {
-      console.warn('[Map3D] Live geoid sample failed', e);
-    } finally {
-      liveGeoidPending = false;
-    }
+    })();
+    return geoidPromise;
+  }
+
+  /** Compute the geoid offset (if not yet done) and re-place the mission at the new height. */
+  async function ensureGeoid(lat: number, lon: number) {
+    const ok = await computeGeoidOnce(lat, lon);
+    if (ok) { scheduleMissionRender(); viewer?.scene.requestRender(); }
   }
 
   /** Thin plain black, ground-clamped trail of GPS movement while disarmed. */
@@ -1082,8 +1239,8 @@
       resetUavSmoothing();
       if (uavEntity) { viewer.entities.remove(uavEntity); uavEntity = undefined; }
       if (homeEntity) { viewer.entities.remove(homeEntity); homeEntity = undefined; }
-      liveGeoidComputed = false;
-      liveGeoidPending = false;
+      geoidGen++; geoidPromise = null;
+      geoidComputed = false;
     }
 
     if (track.length < 2) { decoValidTrack = []; decoLoading = false; return; }
@@ -1102,25 +1259,11 @@
     // first point. Derived purely from terrain (NOT the UAV's GPS altitude), so
     // the offset is the true MSL→ellipsoid conversion regardless of how high the
     // craft is when armed. Must wait for Cesium World Terrain to finish loading.
-    const terrainProvider = await waitForTerrain(viewer);
-    if (firstPt && terrainProvider) {
-      try {
-        const refPos = Cesium.Cartographic.fromDegrees(firstPt.lon!, firstPt.lat!);
-        const sampled = await Cesium.sampleTerrainMostDetailed(terrainProvider, [refPos]);
-        const copernicusGround = await invoke<number | null>('terrain_elevation', { lat: firstPt.lat, lon: firstPt.lon });
-        if (sampled[0] && sampled[0].height != null) {
-          // Prefer the Copernicus MSL ground (same source as terrain analysis /
-          // AGL waypoints); fall back to GPS MSL only if it's unavailable.
-          const groundMsl = copernicusGround ?? (firstPt.alt_m ?? 0);
-          geoidOffset = sampled[0].height - groundMsl;
-          console.log(`[Map3D] Geoid N: ${geoidOffset.toFixed(1)}m (cesium=${sampled[0].height.toFixed(1)}, copernicusMSL=${groundMsl.toFixed(1)}, startGPS=${startMslGps.toFixed(1)})`);
-        }
-      } catch (e) {
-        console.warn('[Map3D] Terrain sample failed, geoidOffset=0', e);
-      }
-    } else {
-      console.warn('[Map3D] No terrain provider available, geoidOffset=0');
-    }
+    // Geoid offset for the track ellipsoid heights. Uses the SAME single-flight path as
+    // the mission, so a linked mission loading moments later (see +page) shares this exact
+    // computation and draws at the same height instead of racing it. Copernicus MSL is
+    // preferred; the first-fix GPS MSL is the fallback ground.
+    if (firstPt) await computeGeoidOnce(firstPt.lat!, firstPt.lon!, firstPt.alt_m ?? undefined);
 
     // Filter to valid GPS points and convert to Cartesian3 with geoid correction
     const validTrack = track.filter(
@@ -1448,6 +1591,18 @@
     const wps = curMission.waypoints;
     const hasGeo = wps.some((w) => hasLocation(w.action) && !(w.lat === 0 && w.lon === 0));
     if (!visible || !hasGeo) { viewer.scene.requestRender(); return; }
+
+    // The mission sits at `altMsl + geoidOffset`, so it must WAIT for the geoid offset.
+    // computeGeoidOnce is single-flight: if a track/live fix is already computing it, we
+    // join that promise (same offset); otherwise we derive it from the first waypoint
+    // (mission preview with no live/replay). On failure (no terrain) we draw at offset 0.
+    if (!geoidComputed) {
+      const g = wps.find((w) => hasLocation(w.action) && !(w.lat === 0 && w.lon === 0));
+      if (g) {
+        await computeGeoidOnce(toDeg(g.lat), toDeg(g.lon));
+        if (token !== missionRenderToken || !viewer) return; // superseded while awaiting
+      }
+    }
 
     const { alts, launchGround } = await resolveMissionAltitudes(wps, curLaunch);
     if (token !== missionRenderToken || !viewer) return; // superseded by a newer render

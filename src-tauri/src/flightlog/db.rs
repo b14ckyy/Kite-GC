@@ -12,7 +12,7 @@ use super::types::{
     TelemetryRecord,
 };
 
-const CURRENT_SCHEMA_VERSION: u32 = 10;
+const CURRENT_SCHEMA_VERSION: u32 = 11;
 
 /// Open (or create) the flight log database at the given path.
 /// Runs migrations if needed.
@@ -128,6 +128,10 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
         migrate_v9_to_v10(conn)?;
     }
 
+    if current < 11 {
+        migrate_v10_to_v11(conn)?;
+    }
+
     // Self-heal: ensure the latest schema actually exists even if a prior version bump left it
     // incomplete. Legacy migrations call set_user_version(CURRENT), so a CURRENT bump can
     // mark the DB as the newest version without the matching migration ever creating its
@@ -135,6 +139,7 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
     ensure_v8_schema(conn)?;
     ensure_v9_schema(conn)?;
     ensure_v10_schema(conn)?;
+    ensure_v11_schema(conn)?;
 
     Ok(())
 }
@@ -249,6 +254,25 @@ fn ensure_v10_schema(conn: &Connection) -> SqlResult<()> {
 
 fn migrate_v9_to_v10(conn: &Connection) -> SqlResult<()> {
     ensure_v10_schema(conn)?;
+    set_user_version(conn, 10)?;
+    Ok(())
+}
+
+/// Idempotently add the mission launch/home columns (the planned takeoff reference — the
+/// base for REL waypoint altitudes + the 3D mission preview's height). Safe to call on every
+/// open; only adds what's missing.
+fn ensure_v11_schema(conn: &Connection) -> SqlResult<()> {
+    if !column_exists(conn, "missions", "home_lat")? {
+        conn.execute_batch("ALTER TABLE missions ADD COLUMN home_lat REAL;")?;
+    }
+    if !column_exists(conn, "missions", "home_lon")? {
+        conn.execute_batch("ALTER TABLE missions ADD COLUMN home_lon REAL;")?;
+    }
+    Ok(())
+}
+
+fn migrate_v10_to_v11(conn: &Connection) -> SqlResult<()> {
+    ensure_v11_schema(conn)?;
     set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
     Ok(())
 }
@@ -675,7 +699,7 @@ pub fn get_flight(conn: &Connection, flight_id: i64) -> SqlResult<Option<Flight>
 const MISSION_COLS: &str = "id, content_hash, name, format, waypoints_json, source_xml, \
     wp_count, total_distance_m, alt_diff_m, max_alt_m, min_alt_m, \
     bndbox_min_lat, bndbox_min_lon, bndbox_max_lat, bndbox_max_lon, location_name, \
-    created_at, notes";
+    created_at, notes, home_lat, home_lon";
 
 fn row_to_mission(row: &rusqlite::Row) -> SqlResult<Mission> {
     Ok(Mission {
@@ -697,6 +721,8 @@ fn row_to_mission(row: &rusqlite::Row) -> SqlResult<Mission> {
         location_name: row.get(15)?,
         created_at: row.get(16)?,
         notes: row.get(17)?,
+        home_lat: row.get(18)?,
+        home_lon: row.get(19)?,
     })
 }
 
@@ -717,8 +743,9 @@ pub fn upsert_mission(conn: &Connection, m: &MissionInput) -> SqlResult<i64> {
         "INSERT INTO missions (
             content_hash, name, format, waypoints_json, source_xml, wp_count,
             total_distance_m, alt_diff_m, max_alt_m, min_alt_m,
-            bndbox_min_lat, bndbox_min_lon, bndbox_max_lat, bndbox_max_lon, notes
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+            bndbox_min_lat, bndbox_min_lon, bndbox_max_lat, bndbox_max_lon, notes,
+            home_lat, home_lon
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
         params![
             m.content_hash,
             m.name,
@@ -735,6 +762,8 @@ pub fn upsert_mission(conn: &Connection, m: &MissionInput) -> SqlResult<i64> {
             m.bndbox_max_lat,
             m.bndbox_max_lon,
             m.notes,
+            m.home_lat,
+            m.home_lon,
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -777,8 +806,8 @@ pub fn update_mission(conn: &Connection, id: i64, m: &MissionInput) -> SqlResult
             content_hash = ?1, name = ?2, format = ?3, waypoints_json = ?4, source_xml = ?5,
             wp_count = ?6, total_distance_m = ?7, alt_diff_m = ?8, max_alt_m = ?9, min_alt_m = ?10,
             bndbox_min_lat = ?11, bndbox_min_lon = ?12, bndbox_max_lat = ?13, bndbox_max_lon = ?14,
-            notes = ?15
-         WHERE id = ?16",
+            notes = ?15, home_lat = ?16, home_lon = ?17
+         WHERE id = ?18",
         params![
             m.content_hash,
             m.name,
@@ -795,6 +824,8 @@ pub fn update_mission(conn: &Connection, id: i64, m: &MissionInput) -> SqlResult
             m.bndbox_max_lat,
             m.bndbox_max_lon,
             m.notes,
+            m.home_lat,
+            m.home_lon,
             id,
         ],
     )?;

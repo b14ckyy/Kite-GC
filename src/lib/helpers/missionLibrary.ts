@@ -4,7 +4,8 @@
 // the provenance system uses (hashWaypoints), so DB identity and provenance stay consistent.
 // See docs/archive/MISSION_LIBRARY_AND_DB.md.
 
-import { hashWaypoints, hasLocation, toDeg, altToM, WpAction, type Waypoint } from '$lib/stores/mission';
+import { get } from 'svelte/store';
+import { hashWaypoints, hasLocation, toDeg, altToM, WpAction, launchPoint, type Waypoint } from '$lib/stores/mission';
 import type { LibraryMissionInput } from '$lib/stores/flightlogTypes';
 import { missionDbFindByHash } from '$lib/stores/flightlog';
 
@@ -186,6 +187,8 @@ export interface BuildMissionOpts {
   notes?: string | null;
   sourceXml?: string | null;
   format?: string;
+  /** Launch/home point to store; defaults to the current `launchPoint` store. `null` = none. */
+  home?: { lat: number; lng: number } | null;
 }
 
 /** Build the DB save payload (identity hash + canonical waypoints + computed metadata). */
@@ -194,6 +197,9 @@ export async function buildMissionInput(
   opts: BuildMissionOpts = {},
 ): Promise<LibraryMissionInput> {
   const m = computeMissionMetadata(wps);
+  // Persist the planned launch/home point (the REL-altitude + 3D-preview reference) — the
+  // same point the .mission file export writes as <mwp> meta. opts.home overrides the store.
+  const home = opts.home !== undefined ? opts.home : get(launchPoint);
   return {
     content_hash: await missionContentHash(wps),
     name: opts.name ?? '',
@@ -210,5 +216,7 @@ export async function buildMissionInput(
     bndbox_max_lat: m.bndbox.maxLat,
     bndbox_max_lon: m.bndbox.maxLon,
     notes: opts.notes ?? null,
+    home_lat: home?.lat ?? null,
+    home_lon: home?.lng ?? null,
   };
 }

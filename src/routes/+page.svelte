@@ -50,7 +50,7 @@
   import FloatingVideoWindow from "$lib/components/video/FloatingVideoWindow.svelte";
   import { initVideo, videoState, videoStream, setVideoPrimary, registerPiPElement } from "$lib/stores/video";
   import TerrainAnalysisPanel from "$lib/components/terrain/TerrainAnalysisPanel.svelte";
-  import { editMode, replayActive, mission, missionFlags, missionDownload, missionUpload, missionFcInfo, markMissionSynced, loadedMissionId, missionSetWaypoints } from "$lib/stores/mission";
+  import { editMode, replayActive, mission, missionFlags, missionDownload, missionUpload, missionFcInfo, markMissionSynced, loadedMissionId, missionSetWaypoints, launchPoint, hasLocation, toDeg } from "$lib/stores/mission";
   import { terrainAnalysis, patchTerrainAnalysis } from "$lib/stores/terrainAnalysis";
   import type { AppSettings, InterfaceSettings, PanelConfig } from "$lib/stores/settings";
   import { layout, GRID_DEFAULTS } from '$lib/stores/layout';
@@ -75,6 +75,30 @@
 
   // Map view mode: 2D (Leaflet) or 3D (CesiumJS)
   let mapViewMode = $state<'2d' | '3d'>('2d');
+  // 3D is expensive to spin up (Cesium viewer + terrain). Mount it lazily on the
+  // first switch to 3D, then KEEP it mounted (hidden behind the 2D map) so further
+  // toggles are instant — no viewer re-init. The Map3D `active` prop pauses its
+  // render loop while hidden.
+  let map3dEverOpened = $state(false);
+  $effect(() => { if (mapViewMode === '3d') map3dEverOpened = true; });
+  // Map3D instance handle — used to read the 3D camera focus on a 3D→2D switch so
+  // the 2D map can re-centre on the same spot (keeping its own zoom).
+  let map3dRef: { getCamFocus?: () => { lat: number; lon: number } | null } | undefined = $state();
+
+  function toggleMapView() {
+    if (mapViewMode === '3d') {
+      // 3D → 2D: hand the spot the 3D camera looks at to the 2D map (its zoom stays).
+      const f = map3dRef?.getCamFocus?.();
+      if (f) {
+        const s = get(settings);
+        settings.patch({ map: { center: [f.lat, f.lon], zoom: s.map.zoom } });
+      }
+      mapViewMode = '2d';
+    } else {
+      map3dEverOpened = true;
+      mapViewMode = '3d';
+    }
+  }
 
   // Measured container dimensions (bind:clientWidth/Height on grid zones)
   let bottomDockW = $state(800);
@@ -924,6 +948,17 @@
           await missionSetWaypoints(JSON.parse(linked.waypoints_json));
           loadedMissionId.set(linked.id);
           markMissionSynced('db'); // it's the library mission → trusted for the highlight
+          // Launch/home reference for the replay mission (REL waypoint altitudes + 3D height):
+          // the real flown start if known, else the mission's saved home, else its first waypoint.
+          const fl = data.flight;
+          if (fl?.start_lat != null && fl?.start_lon != null) {
+            launchPoint.set({ lat: fl.start_lat, lng: fl.start_lon });
+          } else if (linked.home_lat != null && linked.home_lon != null) {
+            launchPoint.set({ lat: linked.home_lat, lng: linked.home_lon });
+          } else {
+            const fw = get(mission).waypoints.find((w) => hasLocation(w.action) && !(w.lat === 0 && w.lon === 0));
+            if (fw) launchPoint.set({ lat: toDeg(fw.lat), lng: toDeg(fw.lon) });
+          }
         } catch (e) {
           console.warn('[replay] failed to load linked mission', e);
         }
@@ -1502,19 +1537,25 @@
         {uiScale}
         fcVariant={replayFcVariant}
         {mapViewMode}
-        onToggleMapView={() => mapViewMode = mapViewMode === '2d' ? '3d' : '2d'}
+        onToggleMapView={toggleMapView}
       />
-    {:else}
-      <Map3D
-        playbackTrack={mapTrack}
-        playbackPoint={playbackPoint}
-        {trackColorMode}
-        platformType={mapPlatformType}
-        {modelOverride}
-        fcVariant={replayFcVariant}
-        {mapViewMode}
-        onToggleMapView={() => mapViewMode = mapViewMode === '2d' ? '3d' : '2d'}
-      />
+    {/if}
+    <!-- 3D stays mounted (hidden) once opened, so toggling back is instant. -->
+    {#if map3dEverOpened}
+      <div class="map3d-layer" class:active={mapViewMode === '3d'}>
+        <Map3D
+          bind:this={map3dRef}
+          active={mapViewMode === '3d'}
+          playbackTrack={mapTrack}
+          playbackPoint={playbackPoint}
+          {trackColorMode}
+          platformType={mapPlatformType}
+          {modelOverride}
+          fcVariant={replayFcVariant}
+          {mapViewMode}
+          onToggleMapView={toggleMapView}
+        />
+      </div>
     {/if}
   </div>
 
@@ -1895,6 +1936,16 @@
     bottom: calc(24px * var(--ui-scale, 1));
     z-index: 0;
     overflow: hidden;
+  }
+  /* 3D map overlay — kept mounted but hidden (visibility, not display, so Cesium
+     keeps a sized canvas) while 2D is shown. */
+  .map3d-layer {
+    position: absolute;
+    inset: 0;
+  }
+  .map3d-layer:not(.active) {
+    visibility: hidden;
+    pointer-events: none;
   }
   .layer-map.in-frame {
     top: auto;

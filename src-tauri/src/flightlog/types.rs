@@ -105,6 +105,10 @@ pub struct Mission {
     pub location_name: Option<String>,
     pub created_at: String,
     pub notes: Option<String>,
+    /// Planned launch/home reference (degrees) — the base for REL waypoint altitudes and the
+    /// 3D mission preview's height. Mirrors the `.mission` `<mwp>` meta written on file export.
+    pub home_lat: Option<f64>,
+    pub home_lon: Option<f64>,
 }
 
 /// Payload for saving a mission to the library (no `id` / `created_at` — assigned by the DB).
@@ -125,6 +129,8 @@ pub struct MissionInput {
     pub bndbox_max_lat: Option<f64>,
     pub bndbox_max_lon: Option<f64>,
     pub notes: Option<String>,
+    pub home_lat: Option<f64>,
+    pub home_lon: Option<f64>,
 }
 
 /// A reusable battery pack stored in the library (row in `battery_packs` table).

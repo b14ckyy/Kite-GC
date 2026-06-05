@@ -17,7 +17,7 @@
   import type { LibraryMission, FlightSummary } from '$lib/stores/flightlogTypes';
   import {
     mission, missionModified, missionSetWaypoints, loadedMissionId, markMissionSynced,
-    missionImportXml, missionLoadFile, type Waypoint,
+    missionImportXml, missionLoadFile, launchPoint, type Waypoint,
   } from '$lib/stores/mission';
   import { missionManagerSelectedId, requestOpenFlightId } from '$lib/stores/missionManager';
   import { buildMissionInput, findLibraryMissionId } from '$lib/helpers/missionLibrary';
@@ -135,6 +135,10 @@
       await missionSetWaypoints(JSON.parse(m.waypoints_json));
       loadedMissionId.set(m.id);
       markMissionSynced('db');
+      // Restore the saved launch/home point (REL altitude + 3D-preview reference).
+      if (m.home_lat != null && m.home_lon != null) {
+        launchPoint.set({ lat: m.home_lat, lng: m.home_lon });
+      }
       onBack();
     } catch (e) {
       statusMessage = $t('missionMgr.loadToMapFailed', { values: { error: String(e) } });

@@ -1,3 +1,11 @@
+<script module lang="ts">
+  // Persisted ACROSS remounts (the 2D map remounts on every 2D↔3D toggle): which
+  // playback track we last auto-framed (fitBounds). Without module scope this resets
+  // on each remount, so switching back to 2D re-centres on the replay trail every time
+  // — it must only frame once, on the first load from the DB.
+  let lastPlaybackTrackKey = '';
+</script>
+
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import L from "leaflet";
@@ -145,7 +153,6 @@
   let preArmPositions: L.LatLng[] = [];
   let playbackLayerGroup: L.LayerGroup | undefined;
   let playbackMarker: L.Marker | undefined;
-  let lastPlaybackTrackKey = '';
 
   // Home position
   let homeMarker: L.Marker | undefined;

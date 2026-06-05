@@ -21,6 +21,9 @@ export interface LibraryMission {
   location_name: string | null;
   created_at: string;
   notes: string | null;
+  /** Planned launch/home reference (degrees) — base for REL altitudes + 3D preview height. */
+  home_lat: number | null;
+  home_lon: number | null;
 }
 
 /** Payload for saving a mission to the library (mirrors Rust flightlog::types::MissionInput). */
@@ -40,6 +43,8 @@ export interface LibraryMissionInput {
   bndbox_max_lat: number | null;
   bndbox_max_lon: number | null;
   notes: string | null;
+  home_lat: number | null;
+  home_lon: number | null;
 }
 
 /** A battery pack in the library (mirrors the Rust BatteryPack). Identity = serial. */
