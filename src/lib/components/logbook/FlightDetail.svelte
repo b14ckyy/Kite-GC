@@ -234,8 +234,9 @@
   const PLATFORM_KEYS: Record<number, string> = {
     0: 'platform.multirotor', 1: 'platform.airplane', 2: 'platform.helicopter',
     3: 'platform.tricopter', 4: 'platform.rover', 5: 'platform.boat', 6: 'platform.other',
+    7: 'platform.vtol',
   };
-  const PLATFORM_OPTIONS = [0, 1, 2, 3, 4, 5, 6];
+  const PLATFORM_OPTIONS = [0, 1, 2, 3, 4, 5, 6, 7];
   function platformLabel(type: number): string {
     return PLATFORM_KEYS[type] ? $t(PLATFORM_KEYS[type]) : $t('platform.unknown', { values: { type } });
   }

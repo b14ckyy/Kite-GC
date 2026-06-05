@@ -31,8 +31,9 @@
     type TrackSegment,
   } from "$lib/helpers/trackColors";
   import type { TelemetryRecord } from "$lib/stores/flightlog";
+  import { toTelemetryData } from "$lib/adapters/telemetryAdapter";
   import type { PlatformType } from "$lib/helpers/uavIcons";
-  import { PLATFORM_MULTIROTOR } from "$lib/helpers/uavIcons";
+  import { PLATFORM_MULTIROTOR, PLATFORM_TRICOPTER, PLATFORM_AIRPLANE, PLATFORM_VTOL } from "$lib/helpers/uavIcons";
   import {
     mission, showMission, replayActive, launchPoint,
     hasLocation, toDeg, WpAction, type Waypoint, type Mission,
@@ -546,17 +547,11 @@
       // Fall back to relative baro altitude + geoid offset.
       const altMsl = telem.altMsl ?? telem.altitude;
       const alt = Math.max(altMsl + geoidOffset, 0);
-      updateUavPosition3D(telem.lat, telem.lon, alt, telem.yaw, telem.activeFlightModeFlags, armed);
+      updateUavPosition3D(telem.lat, telem.lon, alt, telem.yaw, telem.activeFlightModeFlags, armed, telem.roll, telem.pitch);
       if (!armed) updatePreArmTrail3D(telem.lat, telem.lon);
       // Live: recenter once after the UAV exists (every 2D→3D switch remounts us).
       if (needsInitialRecenter && uavEntity) { needsInitialRecenter = false; recenter3D(); }
-      trackFollowPosition(telem.lat, telem.lon, alt, telem.yaw);
-
-      if (cameraMode === 'follow') {
-        updateChaseCamera(telem.lat, telem.lon, alt, telem.yaw);
-      } else if (cameraMode === 'orbit') {
-        updateOrbitCamera(telem.lat, telem.lon, alt);
-      }
+      // Follow/orbit camera is driven from the smoothed state inside the motion smoother.
 
       // Trail reset on arm transition (same as Map.svelte): drop the pre-arm
       // black line and start the colored flight trail fresh.
@@ -619,6 +614,7 @@
     onDestroy(() => {
     chaseLerpActive = false;
     orbitLerpActive = false;
+    if (smRaf) cancelAnimationFrame(smRaf);
     if (decoTrailingTimer != null) clearTimeout(decoTrailingTimer);
     if (decoRebuildTimer != null) clearTimeout(decoRebuildTimer);
     if (imageryRefreshTimer != null) clearTimeout(imageryRefreshTimer);
@@ -640,34 +636,173 @@
 
   // ── UAV Entity ─────────────────────────────────────────────────────
 
-  function updateUavPosition3D(lat: number, lon: number, alt: number, heading: number, flightModeFlags = 0, armed = false) {
+  // Low-poly UAV models (static/models/): +X = nose, Y-up. Quad = aviation nav-light rotor rings
+  // (left/port = red, right/starboard = green → an inverted attitude is readable) + cyan nose arrow.
+  // Arrow = generic flat marker for non-multirotor / unknown craft (until plane/heli models exist).
+  // Tinted lightly by flight-mode colour (MIX) so the mode still reads; minimumPixelSize keeps it
+  // visible far out.
+  const UAV_QUAD_URI = '/models/uav-quad.glb';
+  const UAV_TRICOPTER_URI = '/models/uav-tricopter.glb';
+  const UAV_PLANE_URI = '/models/uav-plane.glb';
+  const UAV_VTOL_URI = '/models/uav-vtol.glb';
+  const UAV_ARROW_URI = '/models/uav-arrow.glb';
+  function modelUriForPlatform(pt: PlatformType): string {
+    if (pt === PLATFORM_MULTIROTOR) return UAV_QUAD_URI;
+    if (pt === PLATFORM_TRICOPTER) return UAV_TRICOPTER_URI;
+    if (pt === PLATFORM_AIRPLANE) return UAV_PLANE_URI;
+    if (pt === PLATFORM_VTOL) return UAV_VTOL_URI;
+    return UAV_ARROW_URI;
+  }
+  // Heading offset stays 0 — the model's own frame is yaw-corrected in the .glb generators
+  // (ROOT_YAW_Y) so the explicit body-axis construction below needs no runtime fudge.
+  const MODEL_HEADING_OFFSET_DEG = 0;
+  // Attitude → orientation, built from EXPLICIT aircraft body axes in the local ENU frame (not by
+  // permuting Cesium-HPR's pitch/roll slots — that only worked near level and broke at high bank /
+  // inverted). Sequence: yaw about Up, pitch about the right axis (nose up/down), roll about the
+  // nose axis (bank) — correct at ALL attitudes. Signs match the AHI widget: INAV pitch is negative
+  // = nose up (→ −1), roll is positive = right-wing-down (→ +1). The model's LOCAL frame after the
+  // glTF Y-up→Z-up load is nose=+X, up=+Z, left=+Y, so we map (nose, left, up) → world.
+  const MODEL_PITCH_SIGN = -1;
+  const MODEL_ROLL_SIGN = 1;
+  function uavOrientation(position: Cesium.Cartesian3, headingDeg: number, pitchDeg = 0, rollDeg = 0) {
+    const h = Cesium.Math.toRadians(headingDeg + MODEL_HEADING_OFFSET_DEG);
+    const th = Cesium.Math.toRadians(MODEL_PITCH_SIGN * pitchDeg);
+    const ph = Cesium.Math.toRadians(MODEL_ROLL_SIGN * rollDeg);
+    const ch = Math.cos(h), sh = Math.sin(h), ct = Math.cos(th), st = Math.sin(th), cp = Math.cos(ph), sp = Math.sin(ph);
+    const enu = Cesium.Transforms.eastNorthUpToFixedFrame(position);
+    const c = new Cesium.Cartesian4();
+    const E = Cesium.Matrix4.getColumn(enu, 0, c); const ex = E.x, ey = E.y, ez = E.z;
+    const N = Cesium.Matrix4.getColumn(enu, 1, c); const nx = N.x, ny = N.y, nz = N.z;
+    const U = Cesium.Matrix4.getColumn(enu, 2, c); const ux = U.x, uy = U.y, uz = U.z;
+    // a·E + b·N + d·U → ECEF
+    const comb = (a: number, b: number, d: number) => new Cesium.Cartesian3(a * ex + b * nx + d * ux, a * ey + b * ny + d * uy, a * ez + b * nz + d * uz);
+    // body axes (ENU coefficients): yaw → pitch(about right) → roll(about nose)
+    const nose = comb(ct * sh, ct * ch, st);
+    const right = comb(cp * ch + sp * st * sh, -cp * sh + sp * st * ch, -sp * ct);
+    const up = comb(sp * ch - cp * st * sh, -sp * sh - cp * st * ch, cp * ct);
+    const left = Cesium.Cartesian3.negate(right, new Cesium.Cartesian3());
+    const m = new Cesium.Matrix3(
+      nose.x, left.x, up.x,
+      nose.y, left.y, up.y,
+      nose.z, left.z, up.z,
+    );
+    return Cesium.Quaternion.fromRotationMatrix(m, new Cesium.Quaternion());
+  }
+  function uavModelGraphics(tint: Cesium.Color, uri: string) {
+    return {
+      uri,
+      minimumPixelSize: 73,
+      maximumScale: 4000,
+      scale: 5.2,
+      color: tint,
+      colorBlendMode: Cesium.ColorBlendMode.MIX,
+      colorBlendAmount: 0.2,
+      heightReference: Cesium.HeightReference.NONE,
+    };
+  }
+
+  // ── UAV motion smoothing (adaptive interpolation, separate for position + attitude) ──
+  // The replay player ticks at a fixed rate, but the underlying GPS/attitude samples change at
+  // their own (often lower) rate. We re-base an interpolation ONLY when a value actually CHANGES,
+  // and the transition time is the MEDIAN of recent real-change intervals — a median (not an
+  // average) means a single aliased/missed update can't corrupt the timing and cause a stutter.
+  // Each re-base starts from the CURRENTLY DISPLAYED state (not the last target), so a slightly-off
+  // interval only changes velocity — never a jump or a mid-glide pause. Position and attitude are
+  // tracked independently (e.g. 5 Hz GPS + 10 Hz attitude). A far jump (scrub / source switch /
+  // first sample) snaps. The smoothed state also drives the follow/orbit camera.
+  let smEntity: Cesium.Entity | undefined;
+  let smRaf = 0;
+  // position channel: interpolate from→to over pInt (started at pT0); lat/lon/alt held as scalars
+  let pFromLat = 0, pFromLon = 0, pFromAlt = 0, pToLat = 0, pToLon = 0, pToAlt = 0;
+  let pT0 = 0, pInt = 0.2, pHas = false;
+  // attitude channel
+  let aFrom: Cesium.Quaternion | null = null, aTo: Cesium.Quaternion | null = null;
+  let aFromHead = 0, aToHead = 0, aT0 = 0, aInt = 0.1;
+  const pBuf: number[] = [], aBuf: number[] = [];
+  const SM_MIN = 0.05, SM_MAX = 1.5, SM_SNAP_M = 25, SM_POS_EPS = 0.05, SM_LEAD = 1.12, SM_BUF = 8;
+  const lerpN = (a: number, b: number, t: number) => a + (b - a) * t;
+  const median = (a: number[]) => { const s = [...a].sort((x, y) => x - y); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+  const pushInterval = (buf: number[], dt: number) => {
+    buf.push(dt); if (buf.length > SM_BUF) buf.shift();
+    return Math.min(SM_MAX, Math.max(SM_MIN, median(buf) * SM_LEAD));
+  };
+  const cart = (lat: number, lon: number, alt: number) => Cesium.Cartesian3.fromDegrees(lon, lat, alt);
+
+  function resetUavSmoothing() {
+    if (smRaf) cancelAnimationFrame(smRaf);
+    smRaf = 0; smEntity = undefined; pHas = false; aFrom = aTo = null;
+    pInt = 0.2; aInt = 0.1; pBuf.length = 0; aBuf.length = 0;
+  }
+
+  function pushUavSample(entity: Cesium.Entity, lat: number, lon: number, alt: number, heading: number, quat: Cesium.Quaternion) {
+    const now = performance.now();
+    const farJump = pHas && Cesium.Cartesian3.distance(cart(pToLat, pToLon, pToAlt), cart(lat, lon, alt)) > SM_SNAP_M;
+    if (smEntity !== entity || !pHas || !aTo || farJump) {
+      // Snap: first sample, source/entity switch, or a teleport (scrub).
+      if (smRaf) { cancelAnimationFrame(smRaf); smRaf = 0; }
+      smEntity = entity;
+      pFromLat = pToLat = lat; pFromLon = pToLon = lon; pFromAlt = pToAlt = alt; pT0 = now; pHas = true; pBuf.length = 0;
+      aFrom = quat; aTo = quat; aFromHead = aToHead = heading; aT0 = now; aBuf.length = 0;
+      applySmoothed(cart(lat, lon, alt), quat, lat, lon, alt, heading);
+      return;
+    }
+    // Position: re-base only on a real move, continuing from the current displayed point.
+    if (Cesium.Cartesian3.distance(cart(pToLat, pToLon, pToAlt), cart(lat, lon, alt)) > SM_POS_EPS) {
+      const pf = Math.min(1, ((now - pT0) / 1000) / pInt);
+      pFromLat = lerpN(pFromLat, pToLat, pf); pFromLon = lerpN(pFromLon, pToLon, pf); pFromAlt = lerpN(pFromAlt, pToAlt, pf);
+      pToLat = lat; pToLon = lon; pToAlt = alt;
+      pInt = pushInterval(pBuf, (now - pT0) / 1000); pT0 = now;
+    }
+    // Attitude: re-base only on a real change, from the current displayed orientation.
+    if (!Cesium.Quaternion.equalsEpsilon(aTo!, quat, 1e-5)) {
+      const af = Math.min(1, ((now - aT0) / 1000) / aInt);
+      aFrom = Cesium.Quaternion.slerp(aFrom!, aTo!, af, new Cesium.Quaternion());
+      aFromHead = lerpAngle(aFromHead, aToHead, af);
+      aTo = quat; aToHead = heading;
+      aInt = pushInterval(aBuf, (now - aT0) / 1000); aT0 = now;
+    }
+    if (!smRaf) smRaf = requestAnimationFrame(smTick);
+  }
+
+  function smTick() {
+    smRaf = 0;
+    if (!viewer || !smEntity || !pHas || !aFrom || !aTo) return;
+    const now = performance.now();
+    const pf = Math.min(1, ((now - pT0) / 1000) / pInt);
+    const af = Math.min(1, ((now - aT0) / 1000) / aInt);
+    const lat = lerpN(pFromLat, pToLat, pf), lon = lerpN(pFromLon, pToLon, pf), alt = lerpN(pFromAlt, pToAlt, pf);
+    const quat = Cesium.Quaternion.slerp(aFrom!, aTo!, af, new Cesium.Quaternion());
+    const heading = lerpAngle(aFromHead, aToHead, af);
+    applySmoothed(cart(lat, lon, alt), quat, lat, lon, alt, heading);
+    viewer.scene.requestRender();
+    if (pf < 1 || af < 1) smRaf = requestAnimationFrame(smTick);
+  }
+
+  function applySmoothed(pos: Cesium.Cartesian3, quat: Cesium.Quaternion, lat: number, lon: number, alt: number, heading: number) {
+    if (!smEntity) return;
+    (smEntity.position as Cesium.ConstantPositionProperty).setValue(pos);
+    (smEntity.orientation as Cesium.ConstantProperty).setValue(quat);
+    // Drive the camera from the smoothed state (the camera fns are cheap target-setters).
+    trackFollowPosition(lat, lon, alt, heading);
+    if (cameraMode === 'follow') updateChaseCamera(lat, lon, alt, heading);
+    else if (cameraMode === 'orbit') updateOrbitCamera(lat, lon, alt);
+  }
+
+  function updateUavPosition3D(lat: number, lon: number, alt: number, heading: number, flightModeFlags = 0, armed = false, roll = 0, pitch = 0) {
     if (!viewer) return;
 
     const position = Cesium.Cartesian3.fromDegrees(lon, lat, alt);
     const color = getNavStateColor(flightModeFlags);
     const cesiumColor = Cesium.Color.fromCssColorString(color);
 
-    // HPR: heading from INAV is 0=North CW, Cesium heading is from North CW — same convention
-    const hpr = new Cesium.HeadingPitchRoll(
-      Cesium.Math.toRadians(heading),
-      0,
-      0
-    );
-    const orientation = Cesium.Transforms.headingPitchRollQuaternion(position, hpr);
+    // Full attitude: heading (INAV 0=N CW = Cesium) + pitch + roll (signs via the constants above).
+    const orientation = uavOrientation(position, heading, pitch, roll);
 
     if (!uavEntity) {
       uavEntity = viewer.entities.add({
         position,
         orientation: orientation as any,
-        // 3D model placeholder — uses a colored point + label for now
-        point: {
-          pixelSize: 14,
-          color: cesiumColor,
-          outlineColor: Cesium.Color.WHITE,
-          outlineWidth: 2,
-          heightReference: Cesium.HeightReference.NONE,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        },
+        model: uavModelGraphics(cesiumColor, modelUriForPlatform(platformType)),
         label: {
           text: 'UAV',
           font: '11px monospace',
@@ -679,16 +814,12 @@
           pixelOffset: new Cesium.Cartesian2(0, -18),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
-        // Direction symbol omitted in 3D for now — a proper 3D model will replace it later.
       });
-    } else {
-      (uavEntity.position as Cesium.ConstantPositionProperty).setValue(position);
-      (uavEntity.orientation as Cesium.ConstantProperty).setValue(orientation);
-
-      if (uavEntity.point) {
-        uavEntity.point.color = new Cesium.ConstantProperty(cesiumColor);
-      }
+    } else if (uavEntity.model) {
+      uavEntity.model.color = new Cesium.ConstantProperty(cesiumColor);
     }
+    // Position + attitude go through the adaptive smoother (also drives the camera).
+    pushUavSample(uavEntity, lat, lon, alt, heading, orientation);
 
     // Live trail — only while armed (no trail in the disarmed state)
     if (armed) updateTrail3D(lat, lon, alt);
@@ -815,6 +946,7 @@
     // Live + pre-arm trails
     resetTrail3D();
     resetPreArmTrail3D();
+    resetUavSmoothing();
     // Markers (live UAV, replay marker, home)
     if (uavEntity) { viewer.entities.remove(uavEntity); uavEntity = undefined; }
     if (playbackMarkerEntity) { viewer.entities.remove(playbackMarkerEntity); playbackMarkerEntity = undefined; }
@@ -945,6 +1077,7 @@
     if (track.length >= 2) {
       resetTrail3D();
       resetPreArmTrail3D();
+      resetUavSmoothing();
       if (uavEntity) { viewer.entities.remove(uavEntity); uavEntity = undefined; }
       if (homeEntity) { viewer.entities.remove(homeEntity); homeEntity = undefined; }
       liveGeoidComputed = false;
@@ -1414,6 +1547,7 @@
 
     if (!point || point.lat == null || point.lon == null || !isValidGpsCoordinate(point.lat, point.lon)) {
       if (playbackMarkerEntity) {
+        resetUavSmoothing();
         viewer.entities.remove(playbackMarkerEntity);
         playbackMarkerEntity = undefined;
       }
@@ -1426,36 +1560,24 @@
     const heading = point.heading ?? 0;
     const flags = point.active_flight_mode_flags ?? 0;
     const color = classifyMode(flags, fcVariant).color;
+    const cesiumColor = Cesium.Color.fromCssColorString(color);
     const position = Cesium.Cartesian3.fromDegrees(lon, lat, alt);
+    // Attitude from the SAME unified adapter the AHI widget uses (consistent across
+    // INAV / ArduPilot / live / replay) rather than the raw record.
+    const td = toTelemetryData(point, fcVariant);
+    const orientation = uavOrientation(position, heading, td.pitch, td.roll);
 
     if (!playbackMarkerEntity) {
       playbackMarkerEntity = viewer.entities.add({
         position,
-        point: {
-          pixelSize: 12,
-          color: Cesium.Color.fromCssColorString(color),
-          outlineColor: Cesium.Color.WHITE,
-          outlineWidth: 2,
-          heightReference: Cesium.HeightReference.NONE,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        },
-        // Direction symbol omitted in 3D for now — a proper 3D model will replace it later.
+        orientation: orientation as any,
+        model: uavModelGraphics(cesiumColor, modelUriForPlatform(platformType)),
       });
-    } else {
-      (playbackMarkerEntity.position as Cesium.ConstantPositionProperty).setValue(position);
-      if (playbackMarkerEntity.point) {
-        playbackMarkerEntity.point.color = new Cesium.ConstantProperty(
-          Cesium.Color.fromCssColorString(color)
-        );
-      }
+    } else if (playbackMarkerEntity.model) {
+      playbackMarkerEntity.model.color = new Cesium.ConstantProperty(cesiumColor);
     }
-
-    trackFollowPosition(lat, lon, alt, heading);
-    if (cameraMode === 'follow') {
-      updateChaseCamera(lat, lon, alt, heading);
-    } else if (cameraMode === 'orbit') {
-      updateOrbitCamera(lat, lon, alt);
-    }
+    // Position + attitude (and the follow/orbit camera) go through the adaptive smoother.
+    pushUavSample(playbackMarkerEntity, lat, lon, alt, heading, orientation);
 
     viewer.scene.requestRender();
   }
@@ -1513,6 +1635,11 @@
     }
   }
 
+  // Previous frame's look target — lockRange (mouse-wheel zoom) is measured against THIS, not the
+  // newly-moved target, so the UAV's own radial motion isn't baked into the zoom (zoom-drift bug).
+  let chaseLastTarget: Cesium.Cartesian3 | undefined;
+  let orbitLastCenter: Cesium.Cartesian3 | undefined;
+
   /** Chase/follow camera animation loop — yaw-locked behind UAV, pitch user-adjustable. */
   function chaseAnimationLoop() {
     if (!chaseLerpActive || !viewer) return;
@@ -1531,11 +1658,12 @@
     // from the camera), and heading is always locked to the UAV — so a sideways
     // drag can't induce the heading fight that caused the jitter.
 
-    // Sync lockRange from the live camera distance so mouse-wheel zoom sticks
-    // (otherwise our lookAt below would snap the camera back every frame).
-    const currentRange = Cesium.Cartesian3.distance(viewer.camera.positionWC, target);
-    if (currentRange > 0.01) {
-      lockRange = Math.max(LOCK_ZOOM_MIN, Math.min(LOCK_ZOOM_MAX, currentRange));
+    // Sync lockRange from mouse-wheel zoom only — measure the camera distance against the PREVIOUS
+    // frame's target (where the camera was framed), not the new moved one, so the UAV's own radial
+    // motion can't drift the zoom in/out.
+    if (chaseLastTarget) {
+      const userRange = Cesium.Cartesian3.distance(viewer.camera.positionWC, chaseLastTarget);
+      if (userRange > 0.01) lockRange = Math.max(LOCK_ZOOM_MIN, Math.min(LOCK_ZOOM_MAX, userRange));
     }
 
     // HPR.heading = the camera's LOOK direction. Setting it to UAV heading means
@@ -1543,6 +1671,7 @@
     const behindHeading = chaseCurrent.heading * (Math.PI / 180);
 
     viewer.camera.lookAt(target, new Cesium.HeadingPitchRange(behindHeading, followPitch, lockRange));
+    chaseLastTarget = Cesium.Cartesian3.clone(target, chaseLastTarget);
     viewer.scene.requestRender();
 
     requestAnimationFrame(chaseAnimationLoop);
@@ -1605,13 +1734,14 @@
     );
     orbitCenter = newCenter;
 
-    // Sync lockRange from the live camera distance so mouse-wheel zoom sticks.
-    const currentRange = Cesium.Cartesian3.distance(viewer.camera.positionWC, newCenter);
-    if (currentRange > 0.01) {
-      lockRange = Math.max(LOCK_ZOOM_MIN, Math.min(LOCK_ZOOM_MAX, currentRange));
+    // Mouse-wheel zoom only — measure against the previous center, not the new (moved) one.
+    if (orbitLastCenter) {
+      const userRange = Cesium.Cartesian3.distance(viewer.camera.positionWC, orbitLastCenter);
+      if (userRange > 0.01) lockRange = Math.max(LOCK_ZOOM_MIN, Math.min(LOCK_ZOOM_MAX, userRange));
     }
 
     viewer.camera.lookAt(newCenter, new Cesium.HeadingPitchRange(h, p, lockRange));
+    orbitLastCenter = Cesium.Cartesian3.clone(newCenter, orbitLastCenter);
     viewer.scene.requestRender();
 
     requestAnimationFrame(orbitAnimationLoop);
@@ -1640,6 +1770,7 @@
       lockRange = 200;
       followPitch = -20 * (Math.PI / 180);
       chaseInited = false;
+      chaseLastTarget = undefined;
       setFollowCameraControls(true);
       if (lastFollowLat !== 0 || lastFollowLon !== 0) {
         // Initial snap: HPR.heading = camera look direction = UAV heading → camera behind UAV
@@ -1659,6 +1790,7 @@
       chaseLerpActive = false;
       chaseInited = false;
       orbitInited = false;
+      orbitLastCenter = undefined;
       lockRange = 200;
       if (lastFollowLat !== 0 || lastFollowLon !== 0) {
         // Initial snap, then let orbitAnimationLoop take over

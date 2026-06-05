@@ -11,6 +11,7 @@ export const PLATFORM_HELICOPTER = 2;
 export const PLATFORM_TRICOPTER  = 3;
 export const PLATFORM_BOAT       = 4;
 export const PLATFORM_OTHER      = 5;
+export const PLATFORM_VTOL       = 7; // not an INAV-parsed type — manual override only (quadplane)
 
 export type PlatformType = number;
 
@@ -50,6 +51,7 @@ const SHAPE_DEFAULT: UavShape = SHAPE_MULTIROTOR;
 export function uavShapeForPlatform(platformType: PlatformType): UavShape {
   switch (platformType) {
     case PLATFORM_AIRPLANE:   return SHAPE_AIRPLANE;
+    case PLATFORM_VTOL:       return SHAPE_AIRPLANE; // quadplane — plane silhouette in 2D
     case PLATFORM_HELICOPTER: return SHAPE_HELICOPTER;
     case PLATFORM_TRICOPTER:  return SHAPE_MULTIROTOR; // same arrow for now
     case PLATFORM_MULTIROTOR: return SHAPE_MULTIROTOR;

@@ -47,6 +47,7 @@
     "rover": "Rover",
     "boat": "Bateau",
     "other": "Autre",
+    "vtol": "VTOL",
     "unknown": "Inconnu ({type})"
   },
   "nav": {
