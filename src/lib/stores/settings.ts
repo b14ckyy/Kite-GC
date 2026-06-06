@@ -39,6 +39,19 @@ export interface AdsbOnlineProvider {
   enabled: boolean;
 }
 
+/** A local hardware ADS-B receiver (MAVLink ADSB_VEHICLE). Phase 2: serial; TCP later. */
+export interface AdsbLocalSource {
+  name: string;
+  transport: 'serial' | 'tcp';
+  /** serial */
+  port: string;
+  baud: number;
+  /** tcp (later) */
+  host?: string;
+  tcpPort?: number;
+  enabled: boolean;
+}
+
 /** Fixed, always-present ADS-B providers (URL defined in code, not editable/deletable). Only their
  *  on/off state is persisted (in `radar.adsb.builtins`). */
 export const BUILTIN_ADSB_PROVIDERS: { name: string; url: string }[] = [
@@ -57,6 +70,8 @@ export interface RadarSettings {
     builtins: Record<string, boolean>;
     /** User-editable custom providers (e.g. adsb.fi example). Merged with the built-ins by ICAO. */
     online: AdsbOnlineProvider[];
+    /** Local hardware receivers (serial MAVLink; TCP later). */
+    local: AdsbLocalSource[];
     /** Query radius in km — dropdown 10/25/50/75/100, capped at 100. */
     radiusKm: number;
     /** Poll interval in seconds (provider limit ≈ 1 req/s, so ≥2 s). */
@@ -77,6 +92,7 @@ export const DEFAULT_RADAR: RadarSettings = {
     online: [
       { name: 'adsb.fi', url: 'https://opendata.adsb.fi/api/v3/lat/{lat}/lon/{lon}/dist/{dist}', enabled: false },
     ],
+    local: [],
     radiusKm: 25,
     pollSec: 5,
   },
@@ -209,6 +225,7 @@ function load(): AppSettings {
               // Strip any built-in-named entries from the custom list (migration from the old flat
               // `online` array, where adsb.lol/.one lived as custom rows).
               online: (pa.online ?? dr.adsb.online).filter((p) => !builtinNames.has(p.name)),
+              local: pa.local ?? dr.adsb.local,
             },
             formationFlight: { ...dr.formationFlight, ...(pr.formationFlight ?? {}) },
             radio: { ...dr.radio, ...(pr.radio ?? {}) },

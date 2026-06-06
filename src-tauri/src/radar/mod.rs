@@ -72,6 +72,9 @@ pub struct AdsbConfig {
     /// Online REST providers (polled in parallel; merged by ICAO).
     #[serde(default)]
     pub online: Vec<AdsbOnlineProvider>,
+    /// Local hardware receivers (MAVLink ADSB_VEHICLE over serial; TCP later).
+    #[serde(default)]
+    pub local: Vec<AdsbLocalSource>,
     /// Query radius in km (dropdown 10/25/50/75/100; capped at 100). 0 ⇒ default 25.
     #[serde(default)]
     pub radius_km: f64,
@@ -93,6 +96,22 @@ pub struct AdsbOnlineProvider {
     pub url: String,
     #[serde(default)]
     pub api_key: Option<String>,
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+/// A local hardware ADS-B receiver. Phase 2: `transport = "serial"` (MAVLink ADSB_VEHICLE);
+/// TCP/WiFi (same decode) follows once the device's TCP API is confirmed.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdsbLocalSource {
+    pub name: String,
+    #[serde(default)]
+    pub transport: String,
+    #[serde(default)]
+    pub port: String,
+    #[serde(default)]
+    pub baud: u32,
     #[serde(default)]
     pub enabled: bool,
 }
@@ -196,6 +215,21 @@ impl RadarManager {
                     providers, self.query_center.clone(), radius_km, poll_sec, app.clone(),
                 ));
                 sources.push(src.start(tx.clone()));
+            }
+
+            // Local hardware receivers (Phase 2: serial MAVLink). Independent of online providers.
+            for ls in config.adsb.local.iter().filter(|l| l.enabled) {
+                let transport = if ls.transport.is_empty() { "serial" } else { ls.transport.as_str() };
+                match transport {
+                    "serial" if !ls.port.is_empty() => {
+                        let baud = if ls.baud > 0 { ls.baud } else { 57600 };
+                        let src = Box::new(sources::adsb_mavlink::AdsbMavlinkSource::new(
+                            ls.name.clone(), ls.port.clone(), baud, app.clone(),
+                        ));
+                        sources.push(src.start(tx.clone()));
+                    }
+                    other => eprintln!("[radar][adsb] local source '{}' transport '{}' not supported yet", ls.name, other),
+                }
             }
         }
 

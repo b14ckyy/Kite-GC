@@ -7,7 +7,7 @@
   import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
   import { telemetry } from "$lib/stores/telemetry";
-  import { startRadarListeners, configureRadar, setRadarCenter } from "$lib/stores/radarTracking";
+  import { startRadarListeners, configureRadar, setRadarCenter, resetRadarStatus } from "$lib/stores/radarTracking";
   import { get } from "svelte/store";
   import { t, locale } from 'svelte-i18n';
   import Map from "$lib/components/Map.svelte";
@@ -502,6 +502,7 @@
   function pushRadarConfig() {
     const [lat, lon] = computeRadarCenter();
     lastRadarCenterKey = `${lat.toFixed(3)},${lon.toFixed(3)}`;
+    resetRadarStatus(); // sources restart on configure — drop stale per-provider status
     void configureRadar({
       enabled: radarSettings.enabled,
       sim: radarSettings.sim,
@@ -513,6 +514,7 @@
           ...BUILTIN_ADSB_PROVIDERS.map((b) => ({ name: b.name, url: b.url, enabled: radarSettings.adsb.builtins[b.name] ?? true })),
           ...radarSettings.adsb.online,
         ],
+        local: radarSettings.adsb.local,
         radiusKm: radarSettings.adsb.radiusKm,
         pollSec: radarSettings.adsb.pollSec,
         center: [lat, lon],

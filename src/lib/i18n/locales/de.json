@@ -81,7 +81,13 @@
     "addSource": "Quelle hinzufügen",
     "removeSource": "Quelle entfernen",
     "contacts": "Kontakte",
-    "sourceError": "Quellen-Fehler"
+    "sourceError": "Quellen-Fehler",
+    "localSources": "Lokale Quellen",
+    "selectPort": "Port wählen…",
+    "portMissing": "nicht gefunden",
+    "inUse": "belegt",
+    "refreshPorts": "Ports aktualisieren",
+    "addLocalSource": "Empfänger hinzufügen"
   },
   "video": {
     "title": "Video",

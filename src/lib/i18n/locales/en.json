@@ -81,7 +81,13 @@
     "addSource": "Add source",
     "removeSource": "Remove source",
     "contacts": "Contacts",
-    "sourceError": "Source error"
+    "sourceError": "Source error",
+    "localSources": "Local sources",
+    "selectPort": "Select port…",
+    "portMissing": "not found",
+    "inUse": "in use",
+    "refreshPorts": "Refresh ports",
+    "addLocalSource": "Add receiver"
   },
   "video": {
     "title": "Video",

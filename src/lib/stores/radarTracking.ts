@@ -66,6 +66,11 @@ export function resetRadar() {
   radarAdsbStatus.set({});
 }
 
+/** Clear per-provider status (call on a config change so stale entries don't linger). */
+export function resetRadarStatus() {
+  radarAdsbStatus.set({});
+}
+
 // ── Event listeners ─────────────────────────────────────────────────
 
 let unlisten: UnlistenFn | undefined;
@@ -77,9 +82,12 @@ export async function startRadarListeners() {
     radarVehicles.set(event.payload);
   });
   unlistenStatus = await listen<AdsbProviderStatus[]>('radar-adsb-status', (event) => {
-    const map: Record<string, AdsbProviderStatus> = {};
-    for (const s of event.payload) map[s.name] = s;
-    radarAdsbStatus.set(map);
+    // Merge by name — online + local receivers each emit their own entries independently.
+    radarAdsbStatus.update((cur) => {
+      const next = { ...cur };
+      for (const s of event.payload) next[s.name] = s;
+      return next;
+    });
   });
 }
 
@@ -101,6 +109,7 @@ export interface RadarBackendConfig {
   adsb: {
     enabled: boolean;
     online: { name: string; url: string; apiKey?: string; enabled: boolean }[];
+    local: { name: string; transport: string; port: string; baud: number; host?: string; tcpPort?: number; enabled: boolean }[];
     radiusKm: number;
     pollSec: number;
     /** `[lat, lon]` query centre (resolved user location), or null. */

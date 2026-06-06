@@ -79,6 +79,19 @@ impl SerialConnection {
     pub fn close(self) {
         drop(self);
     }
+
+    /// Assert/deassert the DTR + RTS control lines. Some USB-serial devices (e.g. ADS-B receivers)
+    /// only stream data once the host raises DTR/RTS — terminals do this by default, a bare
+    /// `open()` may not. Best-effort: a failure is logged, not fatal.
+    pub fn set_control_signals(&mut self, dtr: bool, rts: bool) -> Result<(), String> {
+        self.port
+            .write_data_terminal_ready(dtr)
+            .map_err(|e| format!("DTR: {e}"))?;
+        self.port
+            .write_request_to_send(rts)
+            .map_err(|e| format!("RTS: {e}"))?;
+        Ok(())
+    }
 }
 
 impl ByteTransport for SerialConnection {

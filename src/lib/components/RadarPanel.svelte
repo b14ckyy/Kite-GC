@@ -4,6 +4,8 @@
   // grouped vehicle list on the right. A Compact button collapses the panel to the `info` variant
   // (list only). See docs/active/RADAR_TRACKING_PANEL_AND_MAP.md.
   import { t } from 'svelte-i18n';
+  import { onMount } from 'svelte';
+  import { invoke } from '@tauri-apps/api/core';
   import PanelShell from '$lib/components/panel/PanelShell.svelte';
   import Button from '$lib/components/panel/Button.svelte';
   import Toggle from '$lib/components/panel/Toggle.svelte';
@@ -11,6 +13,7 @@
   import { radarVehicles, radarAdsbStatus, enrichList, type EnrichedVehicle } from '$lib/stores/radarTracking';
   import { BUILTIN_ADSB_PROVIDERS } from '$lib/stores/settings';
   import type { AppSettings, RadarSettings, InterfaceSettings } from '$lib/stores/settings';
+  import type { PortInfo } from '$lib/stores/connection';
   import { convertSpeed, convertAltitude, convertDistance, formatConverted } from '$lib/utils/units';
 
   let { radar, interfaceSettings, userLocation = null, onPatch = (_p: Partial<AppSettings>) => {} }: {
@@ -33,8 +36,36 @@
   const removeProvider = (i: number) =>
     patchAdsb({ online: radar.adsb.online.filter((_, j) => j !== i) });
   const addProvider = () =>
-    patchAdsb({ online: [...radar.adsb.online, { name: '', url: 'https://api.adsb.lol/v2/point/{lat}/{lon}/{dist}', enabled: true }] });
+    patchAdsb({ online: [...radar.adsb.online, { name: '', url: 'https://api.adsb.lol/v2/point/{lat}/{lon}/{dist}', enabled: false }] });
   const inputVal = (e: Event) => (e.target as HTMLInputElement).value;
+
+  // Local hardware receivers (Phase 2: serial MAVLink).
+  const BAUD_STEPS = [57600, 115200, 9600, 38400, 230400, 921600];
+  const updateLocal = (i: number, patch: Partial<RadarSettings['adsb']['local'][number]>) =>
+    patchAdsb({ local: radar.adsb.local.map((l, j) => (j === i ? { ...l, ...patch } : l)) });
+  const removeLocal = (i: number) =>
+    patchAdsb({ local: radar.adsb.local.filter((_, j) => j !== i) });
+  const addLocal = () => {
+    void refreshPorts();
+    patchAdsb({ local: [...radar.adsb.local, { name: 'Receiver', transport: 'serial', port: '', baud: 57600, enabled: false }] });
+  };
+  /** If another local source already uses `path`, return its name (for a disabled "(in use)" option). */
+  const portConflict = (i: number, path: string): string | null => {
+    if (!path) return null;
+    const other = radar.adsb.local.find((l, j) => j !== i && l.port === path);
+    return other ? (other.name || '—') : null;
+  };
+
+  // Available serial ports for the local-source picker (refreshed on mount + on demand).
+  let serialPorts = $state<PortInfo[]>([]);
+  async function refreshPorts() {
+    try {
+      serialPorts = await invoke<PortInfo[]>('list_serial_ports');
+    } catch (e) {
+      console.warn('list_serial_ports failed:', e);
+    }
+  }
+  onMount(refreshPorts);
 
   let compact = $state(false);
 
@@ -164,34 +195,83 @@
         {@const st = $radarAdsbStatus[p.name]}
         <div class="src-card">
           <div class="src-card-head">
-            <button class="src-del" title={$t('radar.removeSource')} onclick={() => removeProvider(i)} aria-label={$t('radar.removeSource')}>✕</button>
-            <input
-              class="src-input src-input-name"
-              placeholder={$t('radar.providerName')}
-              value={p.name}
-              onchange={(e) => updateProvider(i, { name: inputVal(e) })}
-            />
-            {#if p.enabled && st}
-              {#if st.ok}<span class="src-stat ok" title={$t('radar.contacts')}>{st.count}</span>
-              {:else}<span class="src-stat err" title={$t('radar.sourceError')}>✕</span>{/if}
+            {#if !p.enabled}
+              <button class="src-del" title={$t('radar.removeSource')} onclick={() => removeProvider(i)} aria-label={$t('radar.removeSource')}>✕</button>
+              <input
+                class="src-input src-input-name"
+                placeholder={$t('radar.providerName')}
+                value={p.name}
+                onchange={(e) => updateProvider(i, { name: inputVal(e) })}
+              />
+            {:else}
+              <span class="src-name" title={p.url}>{p.name || '—'}</span>
+              {#if st}
+                {#if st.ok}<span class="src-stat ok" title={$t('radar.contacts')}>{st.count}</span>
+                {:else}<span class="src-stat err" title={$t('radar.sourceError')}>✕</span>{/if}
+              {/if}
             {/if}
             <Toggle checked={p.enabled} onchange={(c) => updateProvider(i, { enabled: c })} />
           </div>
-          <input
-            class="src-input"
-            placeholder={$t('radar.providerUrl')}
-            value={p.url}
-            onchange={(e) => updateProvider(i, { url: inputVal(e) })}
-          />
-          <input
-            class="src-input"
-            placeholder={$t('radar.providerKey')}
-            value={p.apiKey ?? ''}
-            onchange={(e) => updateProvider(i, { apiKey: inputVal(e) || undefined })}
-          />
+          {#if !p.enabled}
+            <input
+              class="src-input"
+              placeholder={$t('radar.providerUrl')}
+              value={p.url}
+              onchange={(e) => updateProvider(i, { url: inputVal(e) })}
+            />
+            <input
+              class="src-input"
+              placeholder={$t('radar.providerKey')}
+              value={p.apiKey ?? ''}
+              onchange={(e) => updateProvider(i, { apiKey: inputVal(e) || undefined })}
+            />
+          {/if}
         </div>
       {/each}
       <Button variant="standard" size="sm" full icon="add" onclick={addProvider}>{$t('radar.addSource')}</Button>
+
+      <!-- Local hardware receivers (serial MAVLink; TCP later). -->
+      <p class="src-head">{$t('radar.localSources')}</p>
+      {#each radar.adsb.local as l, i (i)}
+        {@const st = $radarAdsbStatus[l.name]}
+        <div class="src-card">
+          <div class="src-card-head">
+            {#if !l.enabled}
+              <button class="src-del" title={$t('radar.removeSource')} onclick={() => removeLocal(i)} aria-label={$t('radar.removeSource')}>✕</button>
+              <input
+                class="src-input src-input-name"
+                placeholder={$t('radar.providerName')}
+                value={l.name}
+                onchange={(e) => updateLocal(i, { name: inputVal(e) })}
+              />
+            {:else}
+              <span class="src-name">{l.name || '—'}{#if l.port}<span class="src-sub"> · {l.port}</span>{/if}</span>
+              {#if st}
+                {#if st.ok}<span class="src-stat ok" title={$t('radar.contacts')}>{st.count}</span>
+                {:else}<span class="src-stat err" title={$t('radar.sourceError')}>✕</span>{/if}
+              {/if}
+            {/if}
+            <Toggle checked={l.enabled} onchange={(c) => updateLocal(i, { enabled: c })} />
+          </div>
+          {#if !l.enabled}
+            <div class="src-row2">
+              <select class="src-select src-input-port" value={l.port} onchange={(e) => updateLocal(i, { port: (e.target as HTMLSelectElement).value })}>
+                <option value="">{$t('radar.selectPort')}</option>
+                {#each serialPorts as sp}
+                  {@const conflict = portConflict(i, sp.path)}
+                  <option value={sp.path} disabled={!!conflict}>{sp.label || sp.path}{conflict ? ` (${$t('radar.inUse')}: ${conflict})` : ''}</option>
+                {/each}
+                {#if l.port && !serialPorts.some((sp) => sp.path === l.port)}<option value={l.port}>{l.port} ({$t('radar.portMissing')})</option>{/if}
+              </select>
+              <button class="src-refresh" title={$t('radar.refreshPorts')} onclick={refreshPorts} aria-label={$t('radar.refreshPorts')}>⟳</button>
+              <select class="src-select" value={l.baud} onchange={(e) => updateLocal(i, { baud: Number((e.target as HTMLSelectElement).value) })}>
+                {#each BAUD_STEPS as b}<option value={b}>{b}</option>{/each}
+              </select>
+            </div>
+          {/if}
+        </div>
+      {/each}
+      <Button variant="standard" size="sm" full icon="add" onclick={addLocal}>{$t('radar.addLocalSource')}</Button>
     </div>
   {:else}
     <p class="radar-hint">{$t('radar.sourcesPlaceholder')}</p>
@@ -292,6 +372,22 @@
     font-family: 'Segoe UI', Tahoma, sans-serif;
   }
   .src-input-name { flex: 1; font-weight: 600; }
+  .src-sub { color: #949494; font-weight: 400; }
+  .src-row2 { display: flex; gap: 6px; align-items: center; }
+  .src-input-port { flex: 1; min-width: 0; }
+  .src-refresh {
+    flex-shrink: 0;
+    width: 26px;
+    height: 26px;
+    border: 1px solid #555;
+    border-radius: 4px;
+    background: #434343;
+    color: #cdd6da;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+  }
+  .src-refresh:hover { background: #4d4d4d; color: #fff; }
   .src-del {
     flex-shrink: 0;
     width: 24px;
