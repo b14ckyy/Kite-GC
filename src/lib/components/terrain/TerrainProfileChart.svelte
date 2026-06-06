@@ -294,6 +294,30 @@
     return out;
   });
 
+  // Waypoint number labels: lifted into a band at the TOP of the plot (inside the area) with
+  // a thin dashed connector down to the dot — like the 3D-map markers. Greedily staggered over
+  // a few rows so dense patterns (survey grids) don't overlap; any that still can't fit without
+  // overlapping are dropped (the dot stays). Avoids the old overlap when many WPs sit close in X.
+  const WP_LABEL_ROWS = 3;
+  const WP_LABEL_GAP = 20; // min px between two labels in the same row
+  const WP_LABEL_TOP = PAD.t + 9;
+  const WP_LABEL_ROW_H = 13;
+  const wpLabels = $derived.by(() => {
+    const pts = [...markerPts].sort((a, b) => a.x - b.x);
+    const lastX = new Array(WP_LABEL_ROWS).fill(-Infinity);
+    const out: { x: number; dotY: number; labelY: number; number: number }[] = [];
+    for (const m of pts) {
+      for (let row = 0; row < WP_LABEL_ROWS; row++) {
+        if (m.x - lastX[row] >= WP_LABEL_GAP) {
+          lastX[row] = m.x;
+          out.push({ x: m.x, dotY: m.y, labelY: WP_LABEL_TOP + row * WP_LABEL_ROW_H, number: m.number });
+          break;
+        }
+      }
+    }
+    return out;
+  });
+
   const cutXs = $derived(data ? data.cuts.map((c) => xS(c)) : []);
 
   const jumpTargetPts = $derived.by(() => {
@@ -329,8 +353,12 @@
     return ticks;
   }
 
-  const xTicks = $derived(niceTicks(xDomain.a, xDomain.b, 6));
-  const yTicks = $derived(niceTicks(yDomain.min, yDomain.max, 5));
+  // Tick counts scale with the available plot size so the labels never overlap in compact
+  // layouts / on small screens (each Y label needs roughly its font-height of vertical room).
+  const xTickCount = $derived(Math.max(2, Math.min(6, Math.round(plotW / 120))));
+  const yTickCount = $derived(Math.max(2, Math.min(6, Math.round(plotH / 36))));
+  const xTicks = $derived(niceTicks(xDomain.a, xDomain.b, xTickCount));
+  const yTicks = $derived(niceTicks(yDomain.min, yDomain.max, yTickCount));
 
   // X axis: distance in the user's distance unit (no auto-switch mid-pan)
   const xConv = $derived.by(() => {
@@ -648,7 +676,13 @@
 
         {#each markerPts as m}
           <circle class="wp-dot" cx={m.x} cy={m.y} r="4" />
-          <text class="wp-num" x={m.x} y={m.y - 9} text-anchor="middle">{m.number}</text>
+        {/each}
+        <!-- WP numbers in a staggered top band, with a dashed connector down to the dot -->
+        {#each wpLabels as l}
+          {#if l.dotY - l.labelY > 14}
+            <line class="wp-connector" x1={l.x} y1={l.labelY + 3} x2={l.x} y2={l.dotY - 5} />
+          {/if}
+          <text class="wp-num" x={l.x} y={l.labelY} text-anchor="middle">{l.number}</text>
         {/each}
 
         <!-- Jump-target markers (end of each jump-back leg) -->
@@ -776,6 +810,11 @@
     fill: #cfe8f5;
     font-size: 13px;
     font-weight: 600;
+  }
+  .wp-connector {
+    stroke: rgba(207, 232, 245, 0.35);
+    stroke-width: 1;
+    stroke-dasharray: 2 3;
   }
   .placed-line {
     stroke: #37a8db;

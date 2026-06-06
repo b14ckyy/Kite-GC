@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Terrain profile chart — readable labels in compact layouts.** The altitude (Y) axis labels could
+  overlap on big elevation ranges in the compact-wide view / on small screens; the axis tick counts now
+  scale with the available plot size. Waypoint numbers (dense survey patterns especially) are lifted
+  into a staggered band at the top of the plot with a thin dashed connector down to each dot (like the
+  3D-map markers); labels that still can't fit without overlap are dropped (the dot stays).
 - **3D replay model now sits at the correct height from the first frame.** On loading a Blackbox
   replay the model was placed a few metres above/below ground until the first position update — the
   `playbackPoint` effect positioned it before the (async) geoid offset finished computing. It is now
