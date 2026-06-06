@@ -30,6 +30,18 @@ export interface InterfaceSettings {
   temperatureUnit: TemperatureUnit;
 }
 
+/** Radar (foreign-vehicle tracking) settings. Phase 0 carries the master switch + per-system
+ *  enables; per-source config (online/hard source lists) arrives in later phases. */
+export interface RadarSettings {
+  /** Master switch — off hides the whole Radar panel/feature. */
+  enabled: boolean;
+  adsb: { enabled: boolean };
+  formationFlight: { enabled: boolean };
+  radio: { enabled: boolean };
+  /** Dev-only synthetic source (ignored by release backend). */
+  sim: boolean;
+}
+
 export interface AppSettings {
   lastPort: string;
   lastBaud: number;
@@ -75,6 +87,8 @@ export interface AppSettings {
   nightMode2D: NightMode;
   /** Last known physical user location (for Night-Mode auto sunset timing); persisted across sessions. */
   userLocation: { lat: number; lon: number } | null;
+  /** Radar (foreign-vehicle tracking) subsystem settings. */
+  radar: RadarSettings;
 }
 
 const STORAGE_KEY = 'kite-gc-settings';
@@ -122,6 +136,13 @@ const defaults: AppSettings = {
   logReplayTime: false,
   nightMode2D: 'off',
   userLocation: null,
+  radar: {
+    enabled: false,
+    adsb: { enabled: false },
+    formationFlight: { enabled: false },
+    radio: { enabled: false },
+    sim: false,
+  },
 };
 
 function load(): AppSettings {
@@ -135,6 +156,13 @@ function load(): AppSettings {
         interface: {
           ...defaults.interface,
           ...(parsed.interface ?? {}),
+        },
+        radar: {
+          ...defaults.radar,
+          ...(parsed.radar ?? {}),
+          adsb: { ...defaults.radar.adsb, ...(parsed.radar?.adsb ?? {}) },
+          formationFlight: { ...defaults.radar.formationFlight, ...(parsed.radar?.formationFlight ?? {}) },
+          radio: { ...defaults.radar.radio, ...(parsed.radar?.radio ?? {}) },
         },
       };
     }

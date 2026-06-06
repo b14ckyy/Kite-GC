@@ -7,6 +7,7 @@
   import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
   import { telemetry } from "$lib/stores/telemetry";
+  import { startRadarListeners, configureRadar } from "$lib/stores/radarTracking";
   import { get } from "svelte/store";
   import { t, locale } from 'svelte-i18n';
   import Map from "$lib/components/Map.svelte";
@@ -24,8 +25,9 @@
   import LogbookPanel from "$lib/components/logbook/LogbookPanel.svelte";
   import MissionPanel from "$lib/components/mission/MissionPanel.svelte";
   import VideoPanel from "$lib/components/video/VideoPanel.svelte";
+  import RadarPanel from "$lib/components/RadarPanel.svelte";
   import SettingsPanel from "$lib/components/SettingsPanel.svelte";
-  import { ensureUserLocation, requestUserLocation, userGeoLocation } from "$lib/helpers/userLocation";
+  import { ensureUserLocation, requestUserLocation, userGeoLocation, resolveUserLocation } from "$lib/helpers/userLocation";
   import { PlaybackController } from '$lib/controllers/playbackController';
   import { refreshSerialPorts, connectFC, disconnectFC, scanBleDevices } from '$lib/controllers/connectionController';
   import * as logbookCtrl from '$lib/controllers/logbookController';
@@ -53,7 +55,7 @@
   import TerrainAnalysisPanel from "$lib/components/terrain/TerrainAnalysisPanel.svelte";
   import { editMode, replayActive, mission, missionFlags, missionDownload, missionUpload, missionFcInfo, markMissionSynced, loadedMissionId, missionSetWaypoints, launchPoint, hasLocation, toDeg } from "$lib/stores/mission";
   import { terrainAnalysis, patchTerrainAnalysis } from "$lib/stores/terrainAnalysis";
-  import type { AppSettings, InterfaceSettings, PanelConfig } from "$lib/stores/settings";
+  import type { AppSettings, InterfaceSettings, PanelConfig, RadarSettings } from "$lib/stores/settings";
   import { layout, GRID_DEFAULTS } from '$lib/stores/layout';
   import {
     getDefaultFlightlogPath,
@@ -295,6 +297,13 @@
   let realLighting3D = $state(false);
   let logReplayTime = $state(false);
   let nightMode2D = $state<'off' | 'auto' | 'on'>('off');
+  let radarSettings = $state<RadarSettings>({
+    enabled: false,
+    adsb: { enabled: false },
+    formationFlight: { enabled: false },
+    radio: { enabled: false },
+    sim: false,
+  });
   let defaultWpAltitudeM = $state(50);
   let defaultPhTimeSec = $state(30);
   let warnAltitudeM = $state(120);
@@ -384,17 +393,23 @@
   const ICON_TERRAIN = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M1.5 20 8.5 5 13 14 16.5 8.5 22.5 20Z"/></svg>';
   // Solid flat movie camera (Video): two reels + body + lens funnel.
   const ICON_VIDEO = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="7" cy="7" r="2.9"/><circle cx="12.6" cy="7" r="2.9"/><rect x="2.5" y="9.5" width="13" height="9" rx="1.6"/><path d="M15.5 12 21.5 9.5V18.5L15.5 16Z"/></svg>';
+  // Radar dish on a mast with two sweep arcs (Radar / foreign-vehicle tracking).
+  const ICON_RADAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 20.5h6"/><path d="M6.5 20.5 8.4 13.6"/><path d="M3.8 12.2a6 6 0 0 1 8.6-2.2L8.5 13.6a1.6 1.6 0 0 1-2.3-.4Z"/><circle cx="8.3" cy="11.7" r="1" fill="currentColor"/><path d="M14 5.5a7 7 0 0 1 4.8 4.8"/><path d="M13 9a3.5 3.5 0 0 1 2.2 2.2"/></svg>';
 
   const allTabs = [
     { id: "uav-info", label: () => $t('nav.uavInfo'), icon: ICON_UAV_INFO },
     { id: "mission", label: () => $t('nav.mission'), icon: ICON_MISSION },
     { id: "terrain", label: () => $t('nav.terrain'), icon: ICON_TERRAIN },
     { id: "logbook", label: () => $t('nav.logbook'), icon: ICON_LOGBOOK },
+    { id: "radar", label: () => $t('nav.radar'), icon: ICON_RADAR },
     { id: "video", label: () => $t('nav.video'), icon: ICON_VIDEO },
     { id: "settings", label: () => $t('nav.settings'), icon: ICON_SETTINGS },
   ];
   const tabs = $derived(
-    flightLoggingEnabled ? allTabs : allTabs.filter(t => t.id !== 'logbook')
+    allTabs.filter(t =>
+      (t.id !== 'logbook' || flightLoggingEnabled) &&
+      (t.id !== 'radar' || radarSettings.enabled) // radar tab only when the master switch is on
+    )
   );
 
   // Permanent DEV-only reference panel (empty framework playground) at the end of the rail —
@@ -451,6 +466,7 @@
   realLighting3D = saved.realLighting3D ?? false;
   logReplayTime = saved.logReplayTime ?? false;
   nightMode2D = saved.nightMode2D ?? 'off';
+  if (saved.radar) radarSettings = saved.radar;
   defaultWpAltitudeM = saved.defaultWpAltitudeM;
   defaultPhTimeSec = saved.defaultPhTimeSec;
   warnAltitudeM = saved.warnAltitudeM;
@@ -463,6 +479,21 @@
     temperatureUnit: 'c',
   };
   panels = saved.panels ?? defaultPanels;
+
+  // ── Radar (foreign-vehicle tracking) — independent of the main connection ──
+  /** Build the backend radar config from settings + resolved user location (dev sim centre). */
+  function pushRadarConfig() {
+    const loc = resolveUserLocation();
+    void configureRadar({
+      enabled: radarSettings.enabled,
+      sim: radarSettings.sim,
+      simCenter: loc ? [loc.lat, loc.lon] : null,
+    });
+  }
+  if (typeof window !== 'undefined') {
+    void startRadarListeners();
+    pushRadarConfig();
+  }
 
   // Auto-start video with the last settings if it was running at last close.
   if (typeof window !== 'undefined') void initVideo();
@@ -512,6 +543,10 @@
     if (patch.realLighting3D != null) realLighting3D = patch.realLighting3D;
     if (patch.logReplayTime != null) logReplayTime = patch.logReplayTime;
     if (patch.nightMode2D != null) nightMode2D = patch.nightMode2D;
+    if (patch.radar != null) {
+      radarSettings = patch.radar;
+      pushRadarConfig(); // start/stop the backend pipeline on any radar settings change
+    }
     if (patch.defaultWpAltitudeM != null) defaultWpAltitudeM = patch.defaultWpAltitudeM;
     if (patch.defaultPhTimeSec != null) defaultPhTimeSec = patch.defaultPhTimeSec;
     if (patch.warnAltitudeM != null) warnAltitudeM = patch.warnAltitudeM;
@@ -1712,6 +1747,7 @@
         {defaultPhTimeSec}
         {warnAltitudeM}
         {interfaceSettings}
+        radar={radarSettings}
         {isWidgetActive}
         {getWidgetPanelLabel}
         onPatch={applySettingsPatch}
@@ -1756,6 +1792,8 @@
       />
     {:else if activeTab === 'mission'}
       <MissionPanel />
+    {:else if activeTab === 'radar'}
+      <RadarPanel radar={radarSettings} {interfaceSettings} userLocation={$userGeoLocation} />
     {:else if activeTab === 'video'}
       <VideoPanel />
     {:else if DEV_MODE && activeTab === 'dev-playground'}

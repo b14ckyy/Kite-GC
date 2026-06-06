@@ -7,7 +7,7 @@
   import { SUPPORTED_LOCALES } from '$lib/i18n';
   import { MAP_PROVIDERS } from '$lib/config/mapProviders';
   import { WIDGET_DEFS } from '$lib/config/widgetRegistry';
-  import type { AppSettings, InterfaceSettings } from '$lib/stores/settings';
+  import type { AppSettings, InterfaceSettings, RadarSettings } from '$lib/stores/settings';
   import type { TileCacheStats } from '$lib/cache/tileCache';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import UnitStepper from '$lib/components/UnitStepper.svelte';
@@ -41,6 +41,7 @@
     defaultPhTimeSec = 30,
     warnAltitudeM = 120,
     interfaceSettings = { speedUnit: 'kmh', altitudeUnit: 'm', distanceUnit: 'metric', verticalSpeedUnit: 'ms', temperatureUnit: 'c' },
+    radar = { enabled: false, adsb: { enabled: false }, formationFlight: { enabled: false }, radio: { enabled: false }, sim: false },
     isWidgetActive = (_widgetId: string) => false,
     getWidgetPanelLabel = (_widgetId: string) => '',
     onPatch = (_patch: Partial<AppSettings>) => {},
@@ -75,6 +76,7 @@
     defaultPhTimeSec?: number;
     warnAltitudeM?: number;
     interfaceSettings?: InterfaceSettings;
+    radar?: RadarSettings;
     isWidgetActive?: (widgetId: string) => boolean;
     getWidgetPanelLabel?: (widgetId: string) => string;
     onPatch?: (patch: Partial<AppSettings>) => void;
@@ -87,6 +89,12 @@
   } = $props();
 
   let tab = $state<'interface' | 'data'>('interface');
+
+  const DEV = import.meta.env.DEV;
+  /** Patch the nested radar settings (onPatch merges shallowly, so pass the whole radar object). */
+  function patchRadar(partial: Partial<RadarSettings>) {
+    onPatch({ radar: { ...radar, ...partial } });
+  }
 
   function handleLocaleChange(event: Event) {
     const value = (event.target as HTMLSelectElement).value;
@@ -305,7 +313,7 @@
 
     <!-- ── Telemetry ─────────────────────────────────── -->
     <div class="s-group">
-      <h4 class="s-head">{$t('settings.telemetryRates')}</h4>
+      <h4 class="s-head">{$t('settings.telemetry')}</h4>
       <div class="s-row">
         <label class="s-label" for="attitude-rate">{$t('settings.attitude')}</label>
         <select id="attitude-rate" class="s-select" value={attitudeRateHz} onchange={handleAttitudeRateChange}>
@@ -328,6 +336,30 @@
         <label class="s-label" for="airspeed-toggle">{$t('settings.airspeed')}</label>
         <Toggle checked={airspeedEnabled} id="airspeed-toggle" onchange={(c) => onPatch({ airspeedEnabled: c })} />
       </div>
+
+      <!-- Radar (foreign-vehicle tracking) — master + per-system enables. -->
+      <div class="s-row">
+        <label class="s-label" for="radar-enabled">{$t('settings.radarTracking')}</label>
+        <Toggle checked={radar.enabled} id="radar-enabled" onchange={(c) => patchRadar({ enabled: c })} />
+      </div>
+      <div class="s-row s-indent" class:s-disabled={!radar.enabled}>
+        <label class="s-label" for="radar-adsb">{$t('settings.radarAdsb')}</label>
+        <Toggle checked={radar.adsb.enabled} id="radar-adsb" disabled={!radar.enabled} onchange={(c) => patchRadar({ adsb: { enabled: c } })} />
+      </div>
+      <div class="s-row s-indent" class:s-disabled={!radar.enabled}>
+        <label class="s-label" for="radar-ff">{$t('settings.radarFormationFlight')}</label>
+        <Toggle checked={radar.formationFlight.enabled} id="radar-ff" disabled={!radar.enabled} onchange={(c) => patchRadar({ formationFlight: { enabled: c } })} />
+      </div>
+      <div class="s-row s-indent" class:s-disabled={!radar.enabled}>
+        <label class="s-label" for="radar-radio">{$t('settings.radarRadio')}</label>
+        <Toggle checked={radar.radio.enabled} id="radar-radio" disabled={!radar.enabled} onchange={(c) => patchRadar({ radio: { enabled: c } })} />
+      </div>
+      {#if DEV}
+        <div class="s-row s-indent" class:s-disabled={!radar.enabled}>
+          <label class="s-label" for="radar-sim">{$t('settings.radarSimDev')}</label>
+          <Toggle checked={radar.sim} id="radar-sim" disabled={!radar.enabled} onchange={(c) => patchRadar({ sim: c })} />
+        </div>
+      {/if}
     </div>
 
     <!-- ── Flight Logbook ────────────────────────────── -->
@@ -412,6 +444,7 @@
   }
   .s-row-stack { flex-direction: column; align-items: stretch; gap: 6px; }
   .s-disabled { opacity: 0.4; pointer-events: none; }
+  .s-indent { padding-left: 16px; }
 
   .s-label { font-size: 12px; color: #e0e0e0; }
   .s-label-disabled { opacity: 0.45; }
