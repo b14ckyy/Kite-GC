@@ -448,10 +448,9 @@
     font-variant-numeric: tabular-nums;
   }
   .radar-row:nth-child(even) { background: rgba(255, 255, 255, 0.03); }
-  /* Info view: call · dist · brg · alt — altitude a touch wider so the unit never wraps (>10 000 m). */
-  .radar-row.compact { grid-template-columns: 1.4fr 0.9fr 0.7fr 1.1fr; }
+  /* Info view: call · dist · brg · alt — dist + alt wide enough for 4-digit km / >10 000 m (no wrap). */
+  .radar-row.compact { grid-template-columns: 1.15fr 1.1fr 0.55fr 1.1fr; }
   .r-call { color: #e8e8e8; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .r-type { color: #8fb4c5; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .r-dist, .r-brg, .r-alt, .r-spd, .r-age { color: #b8b8b8; text-align: right; }
-  .r-alt { white-space: nowrap; }
+  .r-dist, .r-brg, .r-alt, .r-spd, .r-age { color: #b8b8b8; text-align: right; white-space: nowrap; }
 </style>
