@@ -201,8 +201,10 @@ copied**. Exact message codes/endpoints are confirmed during implementation.
       `https://api.adsb.one/v2/point/{lat}/{lon}/{rangeNM}`.
     - adsb.fi: `https://opendata.adsb.fi/api/v2/lat/{lat}/lon/{lon}/dist/{rangeNM}` (slightly different
       path — so the source config needs a per-provider URL/path template, not just a host).
-  - **Params:** range in **NM** (provider cap ≈ 250 NM), poll interval in ms (provider minimum ≈ 1000 ms);
-    both configurable per source. Backoff on errors / rate-limits.
+  - **Params:** range as a **km radius**, capped at **100 km max** — a dropdown with steps **10 / 25 /
+    50 / 75 / 100 km, default 25 km** (lives in the ADS-B-specific settings; converted to the provider's
+    NM internally). Poll interval in ms (provider minimum ≈ 1000 ms), configurable per source. Backoff
+    on errors / rate-limits.
   - **Response → `TrackedVehicle`:** v2 JSON returns an `ac[]` array; map `hex`→`id`, `flight`→callsign,
     `lat`/`lon`, `alt_baro`/`alt_geom`→alt, `gs`→ground speed, `track`→heading, `baro_rate`→vertical
     speed, `squawk`, `category`, `t`/`r`→type/registration (→ `extra`).
@@ -277,7 +279,8 @@ radar: {
     online: { name: string; url: string; apiKey?: string; enabled?: boolean }[];  // panel-edited rows
     hard:   { transport: 'serial'|'network'|'bluetooth'; params: {...}; enabled?: boolean }[];
     mspFromFc: boolean;                      // ADS-B list via the scheduler radar slot
-    radiusKm: number; pollSec: number; ttlSec: number;
+    radiusKm: 10 | 25 | 50 | 75 | 100;       // dropdown, default 25, hard cap 100 km
+    pollSec: number; ttlSec: number;
   };
   formationFlight: {                               // UI label "FormationFlight"
     enabled: boolean;

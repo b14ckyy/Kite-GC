@@ -89,9 +89,12 @@ radar master switch is on.
   **no control-framework change is needed** — we pass a `$derived` options array. Panel-side logic
   keeps the selected tab valid when a system is toggled off (fall back to the first available) and
   shows a hint if the master is on but no system is enabled.
-- **Compact button** (top-right, over the vehicle list) collapses the whole panel to the framework's
-  **`info` variant** showing *only* the vehicle list with reduced per-row data (exact reduced layout
-  defined later).
+- **Compact button** sits on the **detail (vehicle-list) toolbar row, right-aligned** (same level as
+  the tab switcher on the left), with a `←` prefix (standard Button, like the Mission/Battery manager
+  *Back*). It collapses the whole panel to the framework's **`info` variant** showing *only* the
+  vehicle list with reduced per-row data (exact reduced layout defined later). In `info` mode there is
+  **no button** — clicking the list re-expands it (like the logbook), but it does **not** auto-collapse
+  (we may want full-panel map interactions later).
 
 ### 3.2 Left field — per-system source configuration
 The selected tab swaps the left content. Composition per system:
