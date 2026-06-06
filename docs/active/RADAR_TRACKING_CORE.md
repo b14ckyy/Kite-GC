@@ -1,7 +1,8 @@
 # Radar Tracking — Core & Sources (Plan A)
 
-> Status: **In progress** (2026-06-06). **Phase 0 (core) + Phase 1 (ADS-B online) shipped**; Phase 2
-> (MAVLink ADS-B receiver) next. Concrete plan for the *foreign-vehicle tracking* subsystem ("Radar").
+> Status: **In progress** (2026-06-06). **Phase 0 (core) + Phase 1 (ADS-B online) + Phase 2 (ADS-B
+> serial MAVLink receiver) shipped**; next: ADS-B TCP transport, then Phase 3 (FormationFlight).
+> Concrete plan for the *foreign-vehicle tracking* subsystem ("Radar").
 > This doc covers the **backend subsystem + data sources** (Phases 0–3). The user-facing **Advanced
 > Panel + map visualization** is a separate plan — see `RADAR_TRACKING_PANEL_AND_MAP.md` (Plan B). An
 > ADR will be written once the core architecture is locked.
@@ -216,12 +217,19 @@ copied**. Exact message codes/endpoints are confirmed during implementation.
     `gs` kt→m/s, `track`→heading, `baro_rate` fpm→m/s, `squawk`, `category` (defensive — `alt_baro`
     may be `"ground"`).
   - **Other providers** (OpenSky bbox + auth; airplanes.live) can be added as custom rows.
-- **Dedicated receiver (MAVLink-ADSB) — hardware on hand, build early.** The user has a receiver that
-  works **both over Serial USB and over WiFi/network**, and **both transports speak the same protocol:
-  MAVLink `ADSB_VEHICLE` (#246)** — already in the `mavlink` ardupilotmega dialect the project uses. So
-  this is **one source with a transport choice** (serial *or* TCP/UDP), a single MAVLink read loop that
-  decodes #246 only. (One of the user's units also speaks other ADS-B protocols; we add those only if
-  needed — decide later.) Manager-owned transport.
+- **Dedicated receiver (MAVLink-ADSB) — Phase 2, SHIPPED (serial).** ([sources/adsb_mavlink.rs](../../src-tauri/src/radar/sources/adsb_mavlink.rs))
+  A dedicated thread opens the serial port, parses frames with the project's `MavParser` (v1+v2),
+  decodes `ADSB_VEHICLE` (#246) → TrackedVehicle, pushes the working set every 1 s (merged with the
+  online feeds by ICAO), reconnects on error, and emits the same per-provider `radar-adsb-status`.
+  - **DTR/RTS gotcha (important):** many USB-serial ADS-B receivers (ADSBee, PicoADSB) only stream
+    once the host **raises DTR + RTS** — terminals do this, a bare `serialport::open()` does not, so
+    the port opened green but read **0 bytes**. Fixed via `SerialConnection::set_control_signals(true,
+    true)`, called only by the radar receiver (the FC path is unchanged).
+  - **TCP/WiFi (same MAVLink decode) — pending.** Confirmed: the **ADSBee** exposes a USB/UART/**TCP**
+    sink (RP2040 + ESP32-S3, MAVLink1/2 #246); PicoADSB is serial. TCP transport added next.
+  - Verified live: ~9 frames/s, contacts match Flightradar.
+  - (Possible future: selectable per-source protocol parser — MAVLink / Beast / raw / GDL90 — if a
+    device can't do MAVLink. Not needed so far.)
 - **MSP from FC (later):** the connected INAV UAV's onboard ADS-B receiver list, via the scheduler
   radar slot (§6). Confirm the INAV MSP code for the ADS-B vehicle list.
 - **Network feeder (optional, low priority):** a local dump1090 over TCP — JSON `aircraft.json` or
@@ -318,9 +326,9 @@ ADS-B needs none; radio telemetry is last because it depends on the shared telem
 - **Phase 1 — ADS-B online. ✅ SHIPPED.** Async pollers, multi-provider merge by ICAO, radius +
   poll-interval dropdowns, live query centre (viewport / UAV), built-in vs custom providers,
   per-provider status badges. adsb.lol / adsb.one / adsb.fi verified.
-- **Phase 2 — ADS-B MAVLink receiver.** Single source, transport = Serial **or** WiFi/network (TCP/UDP),
-  one `ADSB_VEHICLE` (#246) read loop. Hardware on hand → verify real reception over both transports.
-  Merges into the ADS-B list with the online feeds by ICAO.
+- **Phase 2 — ADS-B MAVLink receiver. ✅ SHIPPED (serial; TCP next).** Serial `ADSB_VEHICLE` (#246)
+  reader, merged with online by ICAO, DTR/RTS fix, port-dropdown + per-source status in the panel.
+  TCP/WiFi (same decode) is the remaining transport (ADSBee has it).
 - **Phase 3 — FormationFlight.** Own serial; decode the peer table. Hardware on hand and well
   documented → bench test (module on a craft + USB to PC, no flight needed) confirms we read peers
   correctly.

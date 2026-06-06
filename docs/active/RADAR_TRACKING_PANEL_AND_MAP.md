@@ -99,11 +99,20 @@ radar master switch is on.
 ### 3.2 Left field — per-system source configuration
 The selected tab swaps the left content. Composition per system:
 
-- **ADS-B:** two stacked tables.
-  - **Online sources** — rows of `Name · API-URI · API-Key`, each ending in a **delete ✕** (with
-    confirm). A full-width **`+ add`** button after the last row.
-  - **Hard sources** — rows with a **transport selector (Serial / Network / Bluetooth)** + that
-    transport's params (details later), delete ✕ per row, full-width `+ add` after the last.
+- **ADS-B (SHIPPED):** **Online sources** then **Local sources**, both under one heading group.
+  - **Online sources** — two *built-in* rows (adsb.lol / adsb.one: fixed URL, toggle-only, not
+    removable) + *custom* rows (e.g. adsb.fi: `Name · URL · API-Key`, removable). Plus **Radius**
+    (10/25/50/75/100 km) and **Poll interval** (2/5/10/30 s) dropdowns.
+  - **Local sources** — hardware receivers; Phase 2 = **serial MAVLink** (a **serial-port dropdown**
+    from `list_serial_ports` + a ⟳ refresh + baud select). `+ Add receiver`.
+  - **Collapse-on-enable:** an enabled source row collapses to a single line (name + status + toggle);
+    disabled rows expand to show their config fields + delete. New rows start disabled (expanded) for
+    editing.
+  - **Serial-port conflict:** a port already used by another local source appears **disabled** in
+    other pickers, labelled *(in use: \<name\>)* — cross-platform (string match). (The active FC
+    connection's port should also be excluded — TODO via a store.)
+  - Per-source **status badge**: green contact-count / red ✕ on error (event `radar-adsb-status`,
+    merged by name).
 - **FormationFlight:** *Hard sources only*, transport restricted to **Serial** (AFAIK only serial). Same
   row/delete/`+ add` pattern.
 - **Radio Telemetry:** *Hard sources only*, transports **Serial / Bluetooth**. Same pattern. (Built
