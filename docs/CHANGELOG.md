@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **3D replay model now sits at the correct height from the first frame.** On loading a Blackbox
+  replay the model was placed a few metres above/below ground until the first position update — the
+  `playbackPoint` effect positioned it before the (async) geoid offset finished computing. It is now
+  re-snapped onto the first track point once the offset is ready (INAV + ArduPilot).
+
 ### Fixed — replay performance: terrain-HUD freeze on log switch (ADR-032)
 - **The whole app no longer stutters / stops loading map tiles during replay after switching logs
   with the player open.** Root cause: the **Live-AGL** terrain HUD accumulates the flown path and
