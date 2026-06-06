@@ -50,6 +50,7 @@
     fcVariant = 'INAV',
     mapViewMode = '2d' as '2d' | '3d',
     onToggleMapView,
+    viewMode = $bindable<'free' | 'follow' | 'heading-follow'>('free'),
   }: {
     playbackTrack?: TelemetryRecord[];
     playbackPoint?: TelemetryRecord | null;
@@ -62,6 +63,8 @@
     fcVariant?: string;
     mapViewMode?: '2d' | '3d';
     onToggleMapView?: () => void;
+    /** 2D follow state, lifted so it persists across 2D↔3D remounts (bound by the parent). */
+    viewMode?: 'free' | 'follow' | 'heading-follow';
   } = $props();
 
   // ── UAV model marker (top-down canvas render of the same .glb used in 3D) ──
@@ -170,11 +173,10 @@
   let homeMarker: L.Marker | undefined;
   let wasArmed = false;
 
-  // Follow mode:
+  // Follow mode (bindable prop, see $props above):
   // - free: manual map movement
   // - follow: center on UAV, no rotation
   // - heading-follow: center on UAV and rotate with heading
-  let viewMode = $state<'free' | 'follow' | 'heading-follow'>('free');
   let mapHeading = 0;
 
   // ── Position smoothing ──────────────────────────────────────────────
@@ -545,6 +547,14 @@
 
     // Fix tile rendering on initial load
     setTimeout(() => map?.invalidateSize(), 100);
+
+    // Restore a persisted follow mode (the parent keeps `viewMode` across 2D↔3D remounts).
+    if (viewMode !== 'free') {
+      map.dragging.disable();
+      setZoomAnchor('center');
+      if (viewMode === 'heading-follow') applyHeadingUpSize(true);
+      applyFollowFrame();
+    }
 
     // Subscribe to telemetry for UAV position, flight trail, and home detection
     unsubTelemetry = telemetry.subscribe((t) => {

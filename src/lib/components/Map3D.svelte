@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
+  import { onMount, onDestroy, untrack } from "svelte";
   import { get } from "svelte/store";
   import { invoke } from "@tauri-apps/api/core";
   import * as Cesium from "cesium";
@@ -45,6 +45,9 @@
   import { resolveMissionAltitudes, type WpMsl } from "$lib/helpers/terrainProfile";
   import { sunAltitudeDeg, cesiumLikeBrightness } from "$lib/utils/sun";
   import { ensureUserLocation, resolveUserLocation, userGeoLocation } from "$lib/helpers/userLocation";
+  import FpvHud from "$lib/components/FpvHud.svelte";
+  import { convertSpeed, convertAltitude } from "$lib/utils/units";
+  import type { SpeedUnit, AltitudeUnit } from "$lib/stores/settings";
 
   let {
     active = true,
@@ -150,8 +153,24 @@
   let lastPreArmLon = 0;
 
   // Camera mode: free (no lock) | follow (smooth chase) | orbit (locked target, free orbit)
-  type Camera3DMode = 'free' | 'follow' | 'orbit';
+  //            | fpv (first-person: camera replaces the model, follows all axes)
+  type Camera3DMode = 'free' | 'follow' | 'orbit' | 'fpv';
   let cameraMode = $state<Camera3DMode>('free');
+
+  // ── FPV (first-person view) ─────────────────────────────────────────
+  const FPV_FOV_MIN = 30;            // narrowest "lens" (deg, horizontal)
+  const FPV_FOV_MAX = 120;           // widest "lens"
+  const FPV_EYE_HEIGHT_M = 0.5;      // raise the eye slightly above the track to avoid trail clipping
+  const FPV_TRACK_ALPHA = 0.4;       // flight track is dimmed so it doesn't fill the view
+  let fpvFov = $state(60);           // horizontal field of view (deg), the FPV "zoom"
+  let fpvWheelHandler: Cesium.ScreenSpaceEventHandler | undefined;
+  // Live HUD data (raw SI) for the FPV overlay — updated from the active source (replay/live).
+  let hud = $state({ heading: 0, pitch: 0, roll: 0, altM: 0, speedMs: 0 });
+  let hudSpeedUnit = $state<SpeedUnit>('kmh');
+  let hudAltUnit = $state<AltitudeUnit>('m');
+  const fpvScratchM3 = new Cesium.Matrix3();
+  const fpvScratchDir = new Cesium.Cartesian3();
+  const fpvScratchUp = new Cesium.Cartesian3();
 
   // Range (meters to target) for follow and orbit modes. Updated by zoom buttons and
   // mouse-wheel zoom. Separate from free mode which uses Cesium's native zoom.
@@ -500,7 +519,10 @@
     if (!pHas) { setCameraFromMapView(); return; }
     chaseInited = false;
     orbitInited = false;
-    if (cameraMode === 'follow') updateChaseCamera(pToLat, pToLon, pToAlt, aToHead);
+    if (cameraMode === 'fpv') {
+      const q = smEntity && (smEntity.orientation as Cesium.ConstantProperty).getValue(viewer!.clock.currentTime) as Cesium.Quaternion | undefined;
+      if (q) updateFpvCamera(q, pToLat, pToLon, pToAlt);
+    } else if (cameraMode === 'follow') updateChaseCamera(pToLat, pToLon, pToAlt, aToHead);
     else if (cameraMode === 'orbit') updateOrbitCamera(pToLat, pToLon, pToAlt);
     viewer?.scene.requestRender();
   }
@@ -545,27 +567,38 @@
   //  • locked (follow/orbit) → re-anchor onto the UAV;
   //  • free → target the 2D spot, keeping 3D's own zoom/angle (no zoom reset).
   $effect(() => {
-    const on = active; // tracked
-    if (!viewer) return;
-    if (on) {
-      viewer.useDefaultRenderLoop = true;
-      viewer.resize();
-      if (cameraMode !== 'free' && pHas) reanchorLockCamera();
-      else setCameraFromMapView();
-      viewer.scene.requestRender();
-    } else {
-      // Remember 3D's own camera (only in free mode; a locked excursion keeps the last
-      // free snapshot so returning to free still has it).
-      if (cameraMode === 'free') {
-        const f = getCamFocus();
-        if (f) cam3dSnapshot = {
-          position: viewer.camera.positionWC.clone(),
-          heading: viewer.camera.heading, pitch: viewer.camera.pitch, roll: viewer.camera.roll,
-          targetLat: f.lat, targetLon: f.lon, range: f.range,
-        };
+    const on = active; // the only tracked dependency — this effect reacts to the 2D/3D toggle
+    const v = viewer;
+    if (!v) return;
+    // Everything below is imperative viewer state; keep it untracked so cycling the camera
+    // mode (incl. exitFpv writing `cameraMode`) doesn't re-run or self-trigger this effect.
+    untrack(() => {
+      if (on) {
+        v.useDefaultRenderLoop = true;
+        v.resize();
+        // Restore the remembered camera mode for this 3D session.
+        if (cameraMode === 'fpv') enterFpv();
+        else if (cameraMode !== 'free' && pHas) reanchorLockCamera();
+        else setCameraFromMapView();
+        v.scene.requestRender();
+      } else {
+        // Leaving 3D while in FPV: undo FPV's viewer changes (camera inputs, model/track,
+        // wheel handler) so nothing carries over and blocks the map — but keep cameraMode
+        // 'fpv' so the next activate re-enters FPV.
+        if (cameraMode === 'fpv') restoreFromFpv();
+        // Remember 3D's own camera (only in free mode; a locked excursion keeps the last
+        // free snapshot so returning to free still has it).
+        if (cameraMode === 'free') {
+          const f = getCamFocus();
+          if (f) cam3dSnapshot = {
+            position: v.camera.positionWC.clone(),
+            heading: v.camera.heading, pitch: v.camera.pitch, roll: v.camera.roll,
+            targetLat: f.lat, targetLon: f.lon, range: f.range,
+          };
+        }
+        v.useDefaultRenderLoop = false;
       }
-      viewer.useDefaultRenderLoop = false;
-    }
+    });
   });
 
   // ── Initialization ─────────────────────────────────────────────────
@@ -583,6 +616,8 @@
       lightingEnabled = s.realLighting3D ?? false;
       replayTimeEnabled = s.logReplayTime ?? false;
       nightModeSetting = s.nightMode2D ?? 'off';
+      hudSpeedUnit = s.interface?.speedUnit ?? 'kmh';
+      hudAltUnit = s.interface?.altitudeUnit ?? 'm';
     });
     unsubSettings(); // read once, unsubscribe
 
@@ -707,6 +742,10 @@
       const altMsl = telem.altMsl ?? telem.altitude;
       const alt = Math.max(altMsl + geoidOffset, 0);
       updateUavPosition3D(telem.lat, telem.lon, alt, telem.yaw, telem.navState, armed, telem.roll, telem.pitch);
+
+      // FPV HUD data (live source).
+      hud.heading = telem.yaw; hud.pitch = telem.pitch; hud.roll = telem.roll;
+      hud.altM = telem.altitude; hud.speedMs = telem.groundSpeed;
       if (!armed) updatePreArmTrail3D(telem.lat, telem.lon);
       // Live: recenter once after the UAV exists (every 2D→3D switch remounts us).
       if (needsInitialRecenter && uavEntity) { needsInitialRecenter = false; recenter3D(); }
@@ -757,6 +796,8 @@
         nightModeSetting = nightMode;
         updateNightDim3D();
       }
+      hudSpeedUnit = next.interface?.speedUnit ?? 'kmh';
+      hudAltUnit = next.interface?.altitudeUnit ?? 'm';
     });
 
     // Mission overlay — re-render on mission / visibility / launch changes.
@@ -794,6 +835,7 @@
     if (decoTrailingTimer != null) clearTimeout(decoTrailingTimer);
     if (decoRebuildTimer != null) clearTimeout(decoRebuildTimer);
     if (camDragHandler) { camDragHandler.destroy(); camDragHandler = undefined; }
+    uninstallFpvWheel();
     unsubTelemetry?.();
     unsubHome?.();
     unsubSettingsWatch?.();
@@ -1055,7 +1097,8 @@
     (smEntity.orientation as Cesium.ConstantProperty).setValue(quat);
     // Drive the camera from the smoothed state (the camera fns are cheap target-setters).
     trackFollowPosition(lat, lon, alt, heading);
-    if (cameraMode === 'follow') updateChaseCamera(lat, lon, alt, heading);
+    if (cameraMode === 'fpv') updateFpvCamera(quat, lat, lon, alt);
+    else if (cameraMode === 'follow') updateChaseCamera(lat, lon, alt, heading);
     else if (cameraMode === 'orbit') updateOrbitCamera(lat, lon, alt);
   }
 
@@ -1174,7 +1217,7 @@
 
     // Update or create the active (in-progress) polyline
     if (activeTrailPositions.length >= 2) {
-      const cesiumColor = Cesium.Color.fromCssColorString(color).withAlpha(0.7);
+      const cesiumColor = Cesium.Color.fromCssColorString(color).withAlpha(fpvAlpha(0.7));
       // Use a shallow copy for the positions array so Cesium sees the updated array
       const positionsCopy = [...activeTrailPositions];
 
@@ -1430,8 +1473,8 @@
           positions,
           width: 5,
           material: new Cesium.PolylineOutlineMaterialProperty({
-            color: color.withAlpha(0.95),
-            outlineColor: Cesium.Color.BLACK.withAlpha(0.9),
+            color: color.withAlpha(fpvAlpha(0.95)),
+            outlineColor: Cesium.Color.BLACK.withAlpha(fpvAlpha(0.9)),
             outlineWidth: 2,
           }),
           clampToGround: false,
@@ -1863,6 +1906,11 @@
     const td = toTelemetryData(point, fcVariant);
     const orientation = uavOrientation(position, heading, td.pitch, td.roll);
 
+    // FPV HUD data (replay source).
+    hud.heading = heading; hud.pitch = td.pitch; hud.roll = td.roll;
+    hud.altM = point.nav_alt_m ?? point.baro_alt_m ?? 0;
+    hud.speedMs = point.speed_ms ?? 0;
+
     if (!playbackMarkerEntity) {
       playbackMarkerEntity = viewer.entities.add({
         position,
@@ -2060,7 +2108,121 @@
 
   // ── Camera Mode Cycling ────────────────────────────────────────────
 
+  // ── FPV (first-person view) ────────────────────────────────────────
+
+  /** Track-line alpha for the current mode (FPV dims the flight track so it doesn't fill the view). */
+  function fpvAlpha(base: number): number {
+    return cameraMode === 'fpv' ? FPV_TRACK_ALPHA : base;
+  }
+
+  /** Re-alpha the already-built track entities when entering/leaving FPV. */
+  function setTrackOpacity(fpv: boolean) {
+    if (!viewer) return;
+    const time = viewer.clock.currentTime;
+    const setA = (prop: Cesium.Property | undefined, a: number) => {
+      if (!prop) return;
+      const col = (prop as Cesium.ConstantProperty).getValue(time) as Cesium.Color | undefined;
+      if (col) (prop as Cesium.ConstantProperty).setValue(col.withAlpha(a));
+    };
+    for (const e of playbackTrackParts) {
+      const m = e.polyline?.material as Cesium.PolylineOutlineMaterialProperty | undefined;
+      if (m) { setA(m.color, fpv ? FPV_TRACK_ALPHA : 0.95); setA(m.outlineColor, fpv ? FPV_TRACK_ALPHA : 0.9); }
+    }
+    const setTrail = (ent?: Cesium.Entity) => {
+      const m = ent?.polyline?.material as Cesium.ColorMaterialProperty | undefined;
+      if (m) setA(m.color, fpv ? FPV_TRACK_ALPHA : 0.7);
+    };
+    for (const s of trailSegments3D) setTrail(s.entity);
+    setTrail(activeTrailEntity);
+    viewer.scene.requestRender();
+  }
+
+  /** Hide/show the UAV model(s) — in FPV the camera sits where the model would be. */
+  function setModelHiddenForFpv(hide: boolean) {
+    if (uavEntity) uavEntity.show = !hide;
+    if (playbackMarkerEntity) playbackMarkerEntity.show = !hide;
+  }
+
+  /** Place the camera at the model (raised slightly) and orient it exactly like the model. */
+  function updateFpvCamera(quat: Cesium.Quaternion, lat: number, lon: number, alt: number) {
+    if (!viewer) return;
+    if (smEntity) smEntity.show = false; // model is replaced by the camera in FPV
+    const rot = Cesium.Matrix3.fromQuaternion(quat, fpvScratchM3);
+    const dir = Cesium.Matrix3.getColumn(rot, 0, fpvScratchDir); // nose / forward axis
+    const up = Cesium.Matrix3.getColumn(rot, 2, fpvScratchUp);   // body up (so bank tilts the view)
+    const dest = Cesium.Cartesian3.fromDegrees(lon, lat, alt + FPV_EYE_HEIGHT_M);
+    viewer.camera.setView({ destination: dest, orientation: { direction: dir, up } });
+  }
+
+  /** Apply the FPV "lens" — horizontal field of view, 30°…120°. */
+  function applyFpvFov() {
+    if (!viewer) return;
+    const frustum = viewer.camera.frustum as Cesium.PerspectiveFrustum;
+    if (frustum && frustum.fov !== undefined) {
+      frustum.fov = Cesium.Math.toRadians(fpvFov);
+      viewer.scene.requestRender();
+    }
+  }
+  /** Restore Cesium's default 60° frustum on leaving FPV. */
+  function restoreFov() {
+    if (!viewer) return;
+    const frustum = viewer.camera.frustum as Cesium.PerspectiveFrustum;
+    if (frustum && frustum.fov !== undefined) {
+      frustum.fov = Cesium.Math.toRadians(60);
+      viewer.scene.requestRender();
+    }
+  }
+
+  function installFpvWheel() {
+    if (fpvWheelHandler || !viewer) return;
+    fpvWheelHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+    // Wheel up = zoom in = narrower lens; wheel down = wider.
+    fpvWheelHandler.setInputAction((delta: number) => zoom3D(delta > 0 ? 1 : -1), Cesium.ScreenSpaceEventType.WHEEL);
+  }
+  function uninstallFpvWheel() {
+    if (fpvWheelHandler) { fpvWheelHandler.destroy(); fpvWheelHandler = undefined; }
+  }
+
+  function enterFpv() {
+    if (!viewer) return;
+    cameraMode = 'fpv';
+    setFollowCameraControls(false);
+    chaseLerpActive = false; orbitLerpActive = false; chaseInited = false; orbitInited = false;
+    viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+    viewer.scene.screenSpaceCameraController.enableInputs = false; // FPV fully drives the camera
+    applyFpvFov();
+    setModelHiddenForFpv(true);
+    setTrackOpacity(true);
+    installFpvWheel();
+    // Initial snap from the current smoothed attitude (works even when paused at a point).
+    if (smEntity && pHas) {
+      const q = (smEntity.orientation as Cesium.ConstantProperty).getValue(viewer.clock.currentTime) as Cesium.Quaternion | undefined;
+      if (q) updateFpvCamera(q, pToLat, pToLon, pToAlt);
+    }
+    viewer.scene.requestRender();
+  }
+
+  /** Undo FPV's viewer changes (inputs, lens, model/track, wheel) WITHOUT touching the mode —
+   *  used both to leave FPV (exitFpv) and to suspend it while the 3D view is hidden. */
+  function restoreFromFpv() {
+    if (!viewer) return;
+    viewer.scene.screenSpaceCameraController.enableInputs = true;
+    restoreFov();
+    setModelHiddenForFpv(false);
+    setTrackOpacity(false);
+    uninstallFpvWheel();
+    viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+    viewer.scene.requestRender();
+  }
+
+  function exitFpv() {
+    restoreFromFpv();
+    cameraMode = 'free';
+  }
+
   function cycleCameraMode() {
+    if (cameraMode === 'orbit') { enterFpv(); return; }
+    if (cameraMode === 'fpv') { exitFpv(); return; }
     if (cameraMode === 'free') {
       cameraMode = 'follow';
       lockRange = 200;
@@ -2103,15 +2265,8 @@
         requestAnimationFrame(orbitAnimationLoop);
         viewer?.scene.requestRender();
       }
-    } else {
-      cameraMode = 'free';
-      setFollowCameraControls(false); // ensure Cesium's controls are restored
-      chaseLerpActive = false;
-      chaseInited = false;
-      orbitLerpActive = false;
-      orbitInited = false;
-      viewer?.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
     }
+    // orbit → fpv and fpv → free are handled by the early returns above.
   }
 
   // ── Zoom ───────────────────────────────────────────────────────────
@@ -2122,6 +2277,12 @@
 
   function zoom3D(dir: 1 | -1) {
     if (!viewer) return;
+    if (cameraMode === 'fpv') {
+      // FPV "zoom" = the lens FOV (narrower = zoom in), 30°…120°.
+      fpvFov = Math.max(FPV_FOV_MIN, Math.min(FPV_FOV_MAX, fpvFov + (dir > 0 ? -10 : 10)));
+      applyFpvFov();
+      return;
+    }
     if (cameraMode === 'free') {
       if (dir > 0) viewer.camera.zoomIn(80);
       else viewer.camera.zoomOut(80);
@@ -2160,12 +2321,28 @@
   const camModeTitle = $derived(
     cameraMode === 'free'   ? 'Camera: Free'        :
     cameraMode === 'follow' ? 'Camera: Follow UAV'  :
-                              'Camera: Orbit UAV'
+    cameraMode === 'orbit'  ? 'Camera: Orbit UAV'   :
+                              'Camera: FPV (first-person)'
   );
 </script>
 
 <div class="map3d-wrapper">
   <div class="cesium-container" bind:this={cesiumContainer}></div>
+
+  {#if cameraMode === 'fpv'}
+    {@const sp = convertSpeed(hud.speedMs, hudSpeedUnit)}
+    {@const al = convertAltitude(hud.altM, hudAltUnit)}
+    <FpvHud
+      heading={hud.heading}
+      pitch={hud.pitch}
+      roll={hud.roll}
+      speed={sp.value}
+      speedUnit={sp.unit}
+      altitude={al.value}
+      altitudeUnit={al.unit}
+      fov={fpvFov}
+    />
+  {/if}
 
   <div class="map-controls-corner">
     <button
@@ -2182,6 +2359,7 @@
       class:mode-free={cameraMode === 'free'}
       class:mode-follow={cameraMode === 'follow'}
       class:mode-orbit={cameraMode === 'orbit'}
+      class:mode-fpv={cameraMode === 'fpv'}
       onclick={cycleCameraMode}
       title={camModeTitle}
       aria-label={camModeTitle}
@@ -2197,6 +2375,11 @@
           <polyline points="18,8 20,12 16,11" fill="currentColor"/>
           <path d="M12 20 A8 8 0 0 1 4 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
           <polyline points="6,16 4,12 8,13" fill="currentColor"/>
+        </svg>
+      {:else if cameraMode === 'fpv'}
+        <svg class="cam-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path d="M2 12 C5 6 19 6 22 12 C19 18 5 18 2 12 Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+          <circle cx="12" cy="12" r="3.2" fill="currentColor"/>
         </svg>
       {:else}
         <svg class="cam-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
@@ -2367,6 +2550,13 @@
     background: rgba(0, 188, 212, 0.2);
     border-color: #00bcd4;
     color: #00bcd4;
+  }
+
+  /* FPV = amber tint (first-person) */
+  .map-cam-btn.mode-fpv {
+    background: rgba(245, 166, 35, 0.2);
+    border-color: #f5a623;
+    color: #f5a623;
   }
 
   .map-cam-btn:hover {

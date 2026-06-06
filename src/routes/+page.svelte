@@ -85,6 +85,9 @@
   // Map3D instance handle — used to read the 3D camera focus on a 3D→2D switch so
   // the 2D map can re-centre on the same spot (keeping its own zoom).
   let map3dRef: { getCamFocus?: () => { lat: number; lon: number } | null } | undefined = $state();
+  // 2D follow state, lifted here so it survives the 2D map's remount on each 2D↔3D toggle
+  // (the 3D camera mode persists on its own since Map3D stays mounted).
+  let map2dViewMode = $state<'free' | 'follow' | 'heading-follow'>('free');
 
   function toggleMapView() {
     if (mapViewMode === '3d') {
@@ -1561,6 +1564,7 @@
         fcVariant={replayFcVariant}
         {mapViewMode}
         onToggleMapView={toggleMapView}
+        bind:viewMode={map2dViewMode}
       />
     {/if}
     <!-- 3D stays mounted (hidden) once opened, so toggling back is instant. -->
