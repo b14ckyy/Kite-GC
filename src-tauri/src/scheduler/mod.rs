@@ -238,10 +238,9 @@ fn scheduler_loop(
                 payload,
                 reply,
             }) => {
-                let result = transport
-                    .msp_request(code, &payload)
-                    .map(|msg| msg.payload);
+                let result = do_msp_request(&mut *transport, code, &payload, &mut debug_tracker);
                 let _ = reply.send(result);
+                debug_tracker.maybe_emit(&app_handle);
                 continue; // re-check commands before polling
             }
             Err(mpsc::TryRecvError::Empty) => {}
@@ -254,7 +253,8 @@ fn scheduler_loop(
         // 1b. ADS-B from the FC via MSP (opt-in, lowest cadence) → radar pipeline.
         if radar_msp_enabled.load(Ordering::Relaxed) && radar_last.elapsed() >= RADAR_MSP_INTERVAL {
             radar_last = Instant::now();
-            poll_radar_adsb(&mut *transport, &radar_ingest, &app_handle);
+            poll_radar_adsb(&mut *transport, &radar_ingest, &app_handle, &mut debug_tracker);
+            debug_tracker.maybe_emit(&app_handle);
             continue;
         }
 
@@ -300,10 +300,9 @@ fn scheduler_loop(
                 payload,
                 reply,
             }) => {
-                let result = transport
-                    .msp_request(code, &payload)
-                    .map(|msg| msg.payload);
+                let result = do_msp_request(&mut *transport, code, &payload, &mut debug_tracker);
                 let _ = reply.send(result);
+                debug_tracker.maybe_emit(&app_handle);
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -416,10 +415,34 @@ fn poll_slot(
     }
 }
 
+/// Run a one-shot MSP request, recording it in the debug tracker so all MSP traffic shows up there.
+fn do_msp_request(
+    transport: &mut dyn Transport,
+    code: u16,
+    payload: &[u8],
+    tracker: &mut debug::DebugTracker,
+) -> Result<Vec<u8>, String> {
+    tracker.on_request(code, 9 + payload.len());
+    let resp = transport.msp_request(code, payload);
+    match &resp {
+        Ok(msg) => tracker.on_response(code, 9 + msg.payload.len()),
+        Err(_) => tracker.on_timeout(code),
+    }
+    resp.map(|msg| msg.payload)
+}
+
 /// Poll the FC's ADS-B vehicle list (MSP2_ADSB_VEHICLE_LIST) and push it into the radar pipeline.
-fn poll_radar_adsb(transport: &mut dyn Transport, radar_ingest: &RadarIngest, app: &AppHandle) {
-    match transport.msp_request(crate::msp::MSP2_ADSB_VEHICLE_LIST, &[]) {
+fn poll_radar_adsb(
+    transport: &mut dyn Transport,
+    radar_ingest: &RadarIngest,
+    app: &AppHandle,
+    tracker: &mut debug::DebugTracker,
+) {
+    let code = crate::msp::MSP2_ADSB_VEHICLE_LIST;
+    tracker.on_request(code, 9);
+    match transport.msp_request(code, &[]) {
         Ok(msg) => {
+            tracker.on_response(code, 9 + msg.payload.len());
             let vehicles = radar::sources::adsb_msp::decode(&msg.payload, radar::now_ms());
             let count = vehicles.len();
             if let Ok(guard) = radar_ingest.lock() {
@@ -436,6 +459,7 @@ fn poll_radar_adsb(transport: &mut dyn Transport, radar_ingest: &RadarIngest, ap
             );
         }
         Err(e) => {
+            tracker.on_timeout(code);
             log::debug!("Radar ADS-B (MSP) poll failed: {}", e);
             let _ = app.emit(
                 radar::ADSB_STATUS_EVENT,
