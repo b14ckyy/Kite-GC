@@ -1351,6 +1351,15 @@
       recenter3D();
     }
 
+    // Re-place the replay model at the corrected height. The playbackPoint effect places
+    // it as soon as the track loads — but that can run BEFORE this function's (async) geoid
+    // computation finishes, leaving the model a few metres off the ground until the first
+    // position update. Now that the geoid offset is ready, snap it onto the first point.
+    if (playbackPoint) {
+      resetUavSmoothing();
+      updatePlaybackMarker3D(playbackPoint);
+    }
+
     viewer.scene.requestRender();
   }
 
