@@ -52,24 +52,42 @@ const EMPTY: RadarSnapshot = { adsb: [], formationFlight: [], radio: [], lastUpd
 
 export const radarVehicles = writable<RadarSnapshot>({ ...EMPTY });
 
+/** Per-provider ADS-B status (contact counts + error flags), keyed by provider name. Replaced wholesale
+ *  on each `radar-adsb-status` event (providers not in the event = currently not polled). */
+export interface AdsbProviderStatus {
+  name: string;
+  count: number;
+  ok: boolean;
+}
+export const radarAdsbStatus = writable<Record<string, AdsbProviderStatus>>({});
+
 export function resetRadar() {
   radarVehicles.set({ ...EMPTY });
+  radarAdsbStatus.set({});
 }
 
-// ── Event listener ──────────────────────────────────────────────────
+// ── Event listeners ─────────────────────────────────────────────────
 
 let unlisten: UnlistenFn | undefined;
+let unlistenStatus: UnlistenFn | undefined;
 
 export async function startRadarListeners() {
   stopRadarListeners();
   unlisten = await listen<RadarSnapshot>('radar-vehicles', (event) => {
     radarVehicles.set(event.payload);
   });
+  unlistenStatus = await listen<AdsbProviderStatus[]>('radar-adsb-status', (event) => {
+    const map: Record<string, AdsbProviderStatus> = {};
+    for (const s of event.payload) map[s.name] = s;
+    radarAdsbStatus.set(map);
+  });
 }
 
 export function stopRadarListeners() {
   unlisten?.();
   unlisten = undefined;
+  unlistenStatus?.();
+  unlistenStatus = undefined;
 }
 
 // ── Backend config push ─────────────────────────────────────────────
@@ -80,6 +98,14 @@ export interface RadarBackendConfig {
   sim: boolean;
   /** `[lat, lon]` centre for the dev sim, or null. */
   simCenter: [number, number] | null;
+  adsb: {
+    enabled: boolean;
+    online: { name: string; url: string; apiKey?: string; enabled: boolean }[];
+    radiusKm: number;
+    pollSec: number;
+    /** `[lat, lon]` query centre (resolved user location), or null. */
+    center: [number, number] | null;
+  };
 }
 
 /** Push the radar config to the backend (starts/stops the pipeline). Idempotent. */
@@ -88,6 +114,15 @@ export async function configureRadar(config: RadarBackendConfig): Promise<void> 
     await invoke('radar_configure', { config });
   } catch (e) {
     console.warn('radar_configure failed:', e);
+  }
+}
+
+/** Update the live ADS-B query centre (map viewport / UAV). Cheap — no pipeline restart. */
+export async function setRadarCenter(lat: number, lon: number): Promise<void> {
+  try {
+    await invoke('radar_set_center', { lat, lon });
+  } catch (e) {
+    console.warn('radar_set_center failed:', e);
   }
 }
 

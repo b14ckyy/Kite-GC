@@ -18,6 +18,14 @@ pub fn radar_configure(
     Ok(())
 }
 
+/// Update the live ADS-B query centre (map viewport / UAV position). Cheap — no pipeline restart.
+#[tauri::command]
+pub fn radar_set_center(lat: f64, lon: f64, state: State<'_, AppState>) -> Result<(), String> {
+    let mgr = state.radar.lock().map_err(|e| e.to_string())?;
+    mgr.set_center(lat, lon);
+    Ok(())
+}
+
 /// Current consolidated radar state (used on panel open before the next event arrives).
 #[tauri::command]
 pub fn radar_snapshot(state: State<'_, AppState>) -> Result<RadarSnapshot, String> {

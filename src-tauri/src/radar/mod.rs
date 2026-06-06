@@ -25,6 +25,9 @@ use vehicle::{TrackedVehicle, VehicleSystem};
 /// Consolidated snapshot event name — same regardless of which sources are active.
 pub const RADAR_EVENT: &str = "radar-vehicles";
 
+/// Per-provider ADS-B status event (contact counts + error flags) — drives the panel's per-source dots.
+pub const ADSB_STATUS_EVENT: &str = "radar-adsb-status";
+
 /// Aggregator emit throttle + idle tick.
 const EMIT_THROTTLE: Duration = Duration::from_millis(200);
 const AGG_TICK: Duration = Duration::from_millis(250);
@@ -45,8 +48,8 @@ fn ttl_ms(system: VehicleSystem) -> i64 {
     }
 }
 
-/// Config pushed from the frontend (`settings.radar`). Phase 0 carries the master switch + the
-/// dev-only sim; per-source params arrive in later phases.
+/// Config pushed from the frontend (`settings.radar`). Carries the master switch, the dev-only sim,
+/// and the per-system source configs (ADS-B online from Phase 1; more added per phase).
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct RadarConfig {
@@ -57,6 +60,41 @@ pub struct RadarConfig {
     /// Optional `[lat, lon]` centre for the dev sim (defaults applied if absent).
     #[serde(default)]
     pub sim_center: Option<[f64; 2]>,
+    #[serde(default)]
+    pub adsb: AdsbConfig,
+}
+
+/// ADS-B system config (Phase 1: online providers).
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AdsbConfig {
+    pub enabled: bool,
+    /// Online REST providers (polled in parallel; merged by ICAO).
+    #[serde(default)]
+    pub online: Vec<AdsbOnlineProvider>,
+    /// Query radius in km (dropdown 10/25/50/75/100; capped at 100). 0 ⇒ default 25.
+    #[serde(default)]
+    pub radius_km: f64,
+    /// Poll interval in seconds. 0 ⇒ default 5.
+    #[serde(default)]
+    pub poll_sec: f64,
+    /// `[lat, lon]` query centre — the resolved user location.
+    #[serde(default)]
+    pub center: Option<[f64; 2]>,
+}
+
+/// One online ADS-B provider. `url` is a template with `{lat}` / `{lon}` / `{dist}` placeholders
+/// (`dist` is filled in NM); this covers both the `/v2/point/{lat}/{lon}/{dist}` (adsb.lol/.one) and
+/// the `/api/v2/lat/{lat}/lon/{lon}/dist/{dist}` (adsb.fi) shapes without special-casing.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdsbOnlineProvider {
+    pub name: String,
+    pub url: String,
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub enabled: bool,
 }
 
 /// The consolidated state delivered to the frontend (three separate, never-merged lists).
@@ -81,6 +119,9 @@ struct Running {
 /// `Mutex`, completely separate from `AppState.protocol`.
 pub struct RadarManager {
     running: Option<Running>,
+    /// Live ADS-B query centre (`[lat, lon]`), shared with the online source so it can follow the
+    /// map viewport / UAV without restarting the pipeline. Updated via `set_center`.
+    query_center: Arc<Mutex<Option<(f64, f64)>>>,
 }
 
 impl Default for RadarManager {
@@ -91,7 +132,17 @@ impl Default for RadarManager {
 
 impl RadarManager {
     pub fn new() -> Self {
-        Self { running: None }
+        Self {
+            running: None,
+            query_center: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// Update the live ADS-B query centre (cheap; no pipeline restart).
+    pub fn set_center(&self, lat: f64, lon: f64) {
+        if let Ok(mut c) = self.query_center.lock() {
+            *c = Some((lat, lon));
+        }
     }
 
     /// Current consolidated state (for `radar_snapshot` on panel open).
@@ -126,6 +177,26 @@ impl RadarManager {
                 .unwrap_or((48.0, 11.0));
             let src = Box::new(sources::sim::SimSource::new(center));
             sources.push(src.start(tx.clone()));
+        }
+
+        // ADS-B online (Phase 1): a shared, live query centre (map viewport / UAV) + ≥1 provider.
+        if config.adsb.enabled {
+            // Seed the shared centre from the config (the frontend keeps it live via radar_set_center).
+            if let Some(c) = config.adsb.center {
+                *self.query_center.lock().unwrap() = Some((c[0], c[1]));
+            }
+            let providers: Vec<AdsbOnlineProvider> =
+                config.adsb.online.iter().filter(|p| p.enabled).cloned().collect();
+            if providers.is_empty() {
+                eprintln!("[radar][adsb] enabled but no online providers");
+            } else {
+                let radius_km = if config.adsb.radius_km > 0.0 { config.adsb.radius_km.min(100.0) } else { 25.0 };
+                let poll_sec = if config.adsb.poll_sec > 0.0 { config.adsb.poll_sec } else { 5.0 };
+                let src = Box::new(sources::adsb_online::AdsbOnlineSource::new(
+                    providers, self.query_center.clone(), radius_km, poll_sec, app.clone(),
+                ));
+                sources.push(src.start(tx.clone()));
+            }
         }
 
         eprintln!("[radar] configured: enabled, {} source(s)", sources.len());

@@ -7,6 +7,7 @@
   import { SUPPORTED_LOCALES } from '$lib/i18n';
   import { MAP_PROVIDERS } from '$lib/config/mapProviders';
   import { WIDGET_DEFS } from '$lib/config/widgetRegistry';
+  import { DEFAULT_RADAR } from '$lib/stores/settings';
   import type { AppSettings, InterfaceSettings, RadarSettings } from '$lib/stores/settings';
   import type { TileCacheStats } from '$lib/cache/tileCache';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
@@ -41,7 +42,7 @@
     defaultPhTimeSec = 30,
     warnAltitudeM = 120,
     interfaceSettings = { speedUnit: 'kmh', altitudeUnit: 'm', distanceUnit: 'metric', verticalSpeedUnit: 'ms', temperatureUnit: 'c' },
-    radar = { enabled: false, adsb: { enabled: false }, formationFlight: { enabled: false }, radio: { enabled: false }, sim: false },
+    radar = DEFAULT_RADAR,
     isWidgetActive = (_widgetId: string) => false,
     getWidgetPanelLabel = (_widgetId: string) => '',
     onPatch = (_patch: Partial<AppSettings>) => {},
@@ -344,7 +345,7 @@
       </div>
       <div class="s-row s-indent" class:s-disabled={!radar.enabled}>
         <label class="s-label" for="radar-adsb">{$t('settings.radarAdsb')}</label>
-        <Toggle checked={radar.adsb.enabled} id="radar-adsb" disabled={!radar.enabled} onchange={(c) => patchRadar({ adsb: { enabled: c } })} />
+        <Toggle checked={radar.adsb.enabled} id="radar-adsb" disabled={!radar.enabled} onchange={(c) => patchRadar({ adsb: { ...radar.adsb, enabled: c } })} />
       </div>
       <div class="s-row s-indent" class:s-disabled={!radar.enabled}>
         <label class="s-label" for="radar-ff">{$t('settings.radarFormationFlight')}</label>

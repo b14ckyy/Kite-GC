@@ -71,7 +71,17 @@
     "noSystems": "No radar systems enabled. Enable one in Settings → Data → Telemetry.",
     "sourcesPlaceholder": "Source configuration arrives in a later phase.",
     "noContacts": "No contacts.",
-    "expand": "Click to expand"
+    "expand": "Click to expand",
+    "radius": "Radius",
+    "pollInterval": "Poll interval",
+    "onlineSources": "Online sources",
+    "providerName": "Name",
+    "providerUrl": "URL template (lat / lon / dist)",
+    "providerKey": "API key (optional)",
+    "addSource": "Add source",
+    "removeSource": "Remove source",
+    "contacts": "Contacts",
+    "sourceError": "Source error"
   },
   "video": {
     "title": "Video",

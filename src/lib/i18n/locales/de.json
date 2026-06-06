@@ -71,7 +71,17 @@
     "noSystems": "Keine Radar-Systeme aktiviert. Aktiviere eines unter Einstellungen → Daten → Telemetrie.",
     "sourcesPlaceholder": "Quellen-Konfiguration folgt in einer späteren Phase.",
     "noContacts": "Keine Kontakte.",
-    "expand": "Zum Ausklappen klicken"
+    "expand": "Zum Ausklappen klicken",
+    "radius": "Radius",
+    "pollInterval": "Abfrage-Intervall",
+    "onlineSources": "Online-Quellen",
+    "providerName": "Name",
+    "providerUrl": "URL-Vorlage (lat / lon / dist)",
+    "providerKey": "API-Key (optional)",
+    "addSource": "Quelle hinzufügen",
+    "removeSource": "Quelle entfernen",
+    "contacts": "Kontakte",
+    "sourceError": "Quellen-Fehler"
   },
   "video": {
     "title": "Video",

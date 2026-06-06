@@ -6,16 +6,35 @@
   import { t } from 'svelte-i18n';
   import PanelShell from '$lib/components/panel/PanelShell.svelte';
   import Button from '$lib/components/panel/Button.svelte';
+  import Toggle from '$lib/components/panel/Toggle.svelte';
   import SegmentedToggle, { type SegOption } from '$lib/components/panel/SegmentedToggle.svelte';
-  import { radarVehicles, enrichList, type EnrichedVehicle } from '$lib/stores/radarTracking';
-  import type { RadarSettings, InterfaceSettings } from '$lib/stores/settings';
+  import { radarVehicles, radarAdsbStatus, enrichList, type EnrichedVehicle } from '$lib/stores/radarTracking';
+  import { BUILTIN_ADSB_PROVIDERS } from '$lib/stores/settings';
+  import type { AppSettings, RadarSettings, InterfaceSettings } from '$lib/stores/settings';
   import { convertSpeed, convertAltitude, convertDistance, formatConverted } from '$lib/utils/units';
 
-  let { radar, interfaceSettings, userLocation = null }: {
+  let { radar, interfaceSettings, userLocation = null, onPatch = (_p: Partial<AppSettings>) => {} }: {
     radar: RadarSettings;
     interfaceSettings: InterfaceSettings;
     userLocation?: { lat: number; lon: number } | null;
+    onPatch?: (patch: Partial<AppSettings>) => void;
   } = $props();
+
+  const RADIUS_STEPS = [10, 25, 50, 75, 100];
+  const POLL_STEPS = [2, 5, 10, 30]; // provider limit ≈ 1 req/s, so ≥2 s
+
+  // Patch helpers — edit the nested radar settings (onPatch merges shallowly at the top level).
+  const patchRadar = (partial: Partial<RadarSettings>) => onPatch({ radar: { ...radar, ...partial } });
+  const patchAdsb = (partial: Partial<RadarSettings['adsb']>) => patchRadar({ adsb: { ...radar.adsb, ...partial } });
+  const setBuiltinEnabled = (name: string, on: boolean) =>
+    patchAdsb({ builtins: { ...radar.adsb.builtins, [name]: on } });
+  const updateProvider = (i: number, patch: Partial<RadarSettings['adsb']['online'][number]>) =>
+    patchAdsb({ online: radar.adsb.online.map((p, j) => (j === i ? { ...p, ...patch } : p)) });
+  const removeProvider = (i: number) =>
+    patchAdsb({ online: radar.adsb.online.filter((_, j) => j !== i) });
+  const addProvider = () =>
+    patchAdsb({ online: [...radar.adsb.online, { name: '', url: 'https://api.adsb.lol/v2/point/{lat}/{lon}/{dist}', enabled: true }] });
+  const inputVal = (e: Event) => (e.target as HTMLInputElement).value;
 
   let compact = $state(false);
 
@@ -42,21 +61,16 @@
   const variant = $derived(compact ? 'info' : 'advanced');
 
   // ── Formatting helpers (display units) ────────────────────────────
+  // formatConverted() already appends the unit — don't add it again.
   const fmtDist = (m: number | null) => {
     if (m == null) return '—';
     const d = convertDistance(m, interfaceSettings.distanceUnit);
-    return `${formatConverted(d, d.value < 10 ? 1 : 0)} ${d.unit}`;
+    return formatConverted(d, d.value < 10 ? 1 : 0);
   };
-  const fmtSpeed = (ms: number | null) => {
-    if (ms == null) return '—';
-    const s = convertSpeed(ms, interfaceSettings.speedUnit);
-    return `${formatConverted(s, 0)} ${s.unit}`;
-  };
-  const fmtAlt = (m: number | null) => {
-    if (m == null) return '—';
-    const a = convertAltitude(m, interfaceSettings.altitudeUnit);
-    return `${formatConverted(a, 0)} ${a.unit}`;
-  };
+  const fmtSpeed = (ms: number | null) =>
+    ms == null ? '—' : formatConverted(convertSpeed(ms, interfaceSettings.speedUnit), 0);
+  const fmtAlt = (m: number | null) =>
+    m == null ? '—' : formatConverted(convertAltitude(m, interfaceSettings.altitudeUnit), 0);
   const fmtBrg = (b: number | null) => (b == null ? '—' : `${Math.round(b)}°`);
   const fmtAge = (lastSeenMs: number) => `${Math.max(0, Math.round((Date.now() - lastSeenMs) / 1000))}s`;
   const label = (v: EnrichedVehicle) => v.callsign?.trim() || v.id;
@@ -102,10 +116,83 @@
 {/snippet}
 
 {#snippet sourcesPane()}
-  <!-- Source configuration (per selected system). Phase 0: placeholder — the source tables
-       (online + hard sources) arrive in a later phase. -->
+  <!-- Source configuration for the selected system. ADS-B: online providers + radius (Phase 1).
+       FormationFlight / Radio: source tables arrive in a later phase. -->
   {#if tabOptions.length === 0}
     <p class="radar-hint">{$t('radar.noSystems')}</p>
+  {:else if activeSys === 'adsb'}
+    <div class="src-block">
+      <div class="src-row">
+        <span class="src-label">{$t('radar.radius')}</span>
+        <select
+          class="src-select"
+          value={radar.adsb.radiusKm}
+          onchange={(e) => patchAdsb({ radiusKm: Number((e.target as HTMLSelectElement).value) })}
+        >
+          {#each RADIUS_STEPS as km}<option value={km}>{km} km</option>{/each}
+        </select>
+      </div>
+      <div class="src-row">
+        <span class="src-label">{$t('radar.pollInterval')}</span>
+        <select
+          class="src-select"
+          value={radar.adsb.pollSec}
+          onchange={(e) => patchAdsb({ pollSec: Number((e.target as HTMLSelectElement).value) })}
+        >
+          {#each POLL_STEPS as s}<option value={s}>{s} s</option>{/each}
+        </select>
+      </div>
+
+      <!-- Built-in providers: toggle only (fixed URL, no key, not removable). -->
+      <p class="src-head">{$t('radar.onlineSources')}</p>
+      {#each BUILTIN_ADSB_PROVIDERS as b (b.name)}
+        {@const st = $radarAdsbStatus[b.name]}
+        {@const on = radar.adsb.builtins[b.name] ?? true}
+        <div class="src-row">
+          <span class="src-name" title={b.url}>{b.name}</span>
+          {#if on && st}
+            {#if st.ok}<span class="src-stat ok" title={$t('radar.contacts')}>{st.count}</span>
+            {:else}<span class="src-stat err" title={$t('radar.sourceError')}>✕</span>{/if}
+          {/if}
+          <Toggle checked={on} onchange={(c) => setBuiltinEnabled(b.name, c)} />
+        </div>
+      {/each}
+
+      <!-- Custom providers: editable + removable (same heading — all are online sources). Delete on
+           the left, toggle on the right to match the built-in rows. -->
+      {#each radar.adsb.online as p, i (i)}
+        {@const st = $radarAdsbStatus[p.name]}
+        <div class="src-card">
+          <div class="src-card-head">
+            <button class="src-del" title={$t('radar.removeSource')} onclick={() => removeProvider(i)} aria-label={$t('radar.removeSource')}>✕</button>
+            <input
+              class="src-input src-input-name"
+              placeholder={$t('radar.providerName')}
+              value={p.name}
+              onchange={(e) => updateProvider(i, { name: inputVal(e) })}
+            />
+            {#if p.enabled && st}
+              {#if st.ok}<span class="src-stat ok" title={$t('radar.contacts')}>{st.count}</span>
+              {:else}<span class="src-stat err" title={$t('radar.sourceError')}>✕</span>{/if}
+            {/if}
+            <Toggle checked={p.enabled} onchange={(c) => updateProvider(i, { enabled: c })} />
+          </div>
+          <input
+            class="src-input"
+            placeholder={$t('radar.providerUrl')}
+            value={p.url}
+            onchange={(e) => updateProvider(i, { url: inputVal(e) })}
+          />
+          <input
+            class="src-input"
+            placeholder={$t('radar.providerKey')}
+            value={p.apiKey ?? ''}
+            onchange={(e) => updateProvider(i, { apiKey: inputVal(e) || undefined })}
+          />
+        </div>
+      {/each}
+      <Button variant="standard" size="sm" full icon="add" onclick={addProvider}>{$t('radar.addSource')}</Button>
+    </div>
   {:else}
     <p class="radar-hint">{$t('radar.sourcesPlaceholder')}</p>
   {/if}
@@ -150,6 +237,74 @@
   .rt-right { margin-left: auto; display: flex; }
   /* Info variant: the whole list is clickable to re-expand. */
   .rt-compact { cursor: pointer; }
+
+  /* ── ADS-B sources pane ── */
+  .src-block { display: flex; flex-direction: column; gap: 4px; }
+  .src-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 2px; }
+  .src-head { color: #949494; font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; margin: 8px 2px 2px; }
+  .src-label { color: #cdd6da; font-size: 12px; }
+  .src-name { flex: 1; color: #e0e0e0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .src-stat {
+    flex-shrink: 0;
+    min-width: 22px;
+    height: 18px;
+    padding: 0 6px;
+    border-radius: 9px;
+    font-size: 11px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .src-stat.ok { background: rgba(89, 170, 41, 0.2); color: #7ed957; border: 1px solid #59aa29; }
+  .src-stat.err { background: rgba(212, 0, 0, 0.2); color: #ff6b6b; border: 1px solid #d40000; }
+  .src-select {
+    height: 28px;
+    padding: 0 8px;
+    background: #434343;
+    border: 1px solid #555;
+    border-radius: 4px;
+    color: #e0e0e0;
+    font-size: 12px;
+  }
+  .src-card {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px;
+    margin-bottom: 6px;
+    border: 1px solid #444;
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.03);
+  }
+  .src-card-head { display: flex; align-items: center; gap: 6px; }
+  .src-input {
+    box-sizing: border-box;
+    width: 100%;
+    height: 26px;
+    padding: 0 7px;
+    background: #1f1f1f;
+    border: 1px solid #444;
+    border-radius: 4px;
+    color: #e0e0e0;
+    font-size: 11px;
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+  }
+  .src-input-name { flex: 1; font-weight: 600; }
+  .src-del {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    border: 1px solid #6a3030;
+    border-radius: 4px;
+    background: rgba(212, 0, 0, 0.12);
+    color: #e88;
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1;
+  }
+  .src-del:hover { background: rgba(212, 0, 0, 0.25); color: #fff; }
 
   .radar-list { display: flex; flex-direction: column; gap: 10px; }
   .radar-group { display: flex; flex-direction: column; gap: 2px; }

@@ -71,7 +71,17 @@
     "noSystems": "Aucun système radar activé. Activez-en un dans Paramètres → Données → Télémétrie.",
     "sourcesPlaceholder": "La configuration des sources arrivera dans une phase ultérieure.",
     "noContacts": "Aucun contact.",
-    "expand": "Cliquer pour développer"
+    "expand": "Cliquer pour développer",
+    "radius": "Rayon",
+    "pollInterval": "Intervalle d'interrogation",
+    "onlineSources": "Sources en ligne",
+    "providerName": "Nom",
+    "providerUrl": "Modèle d'URL (lat / lon / dist)",
+    "providerKey": "Clé API (optionnel)",
+    "addSource": "Ajouter une source",
+    "removeSource": "Supprimer la source",
+    "contacts": "Contacts",
+    "sourceError": "Erreur de source"
   },
   "video": {
     "title": "Vidéo",

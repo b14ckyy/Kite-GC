@@ -30,17 +30,60 @@ export interface InterfaceSettings {
   temperatureUnit: TemperatureUnit;
 }
 
-/** Radar (foreign-vehicle tracking) settings. Phase 0 carries the master switch + per-system
- *  enables; per-source config (online/hard source lists) arrives in later phases. */
+/** One online ADS-B provider. `url` is a template with `{lat}`/`{lon}`/`{dist}` placeholders
+ *  (`dist` filled in NM by the backend). */
+export interface AdsbOnlineProvider {
+  name: string;
+  url: string;
+  apiKey?: string;
+  enabled: boolean;
+}
+
+/** Fixed, always-present ADS-B providers (URL defined in code, not editable/deletable). Only their
+ *  on/off state is persisted (in `radar.adsb.builtins`). */
+export const BUILTIN_ADSB_PROVIDERS: { name: string; url: string }[] = [
+  { name: 'adsb.lol', url: 'https://api.adsb.lol/v2/point/{lat}/{lon}/{dist}' },
+  { name: 'adsb.one', url: 'https://api.adsb.one/v2/point/{lat}/{lon}/{dist}' },
+];
+
+/** Radar (foreign-vehicle tracking) settings: master switch + per-system enables + per-system
+ *  source config (ADS-B online from Phase 1; more added per phase). */
 export interface RadarSettings {
   /** Master switch — off hides the whole Radar panel/feature. */
   enabled: boolean;
-  adsb: { enabled: boolean };
+  adsb: {
+    enabled: boolean;
+    /** On/off state for the fixed built-in providers, keyed by name (URL lives in code). */
+    builtins: Record<string, boolean>;
+    /** User-editable custom providers (e.g. adsb.fi example). Merged with the built-ins by ICAO. */
+    online: AdsbOnlineProvider[];
+    /** Query radius in km — dropdown 10/25/50/75/100, capped at 100. */
+    radiusKm: number;
+    /** Poll interval in seconds (provider limit ≈ 1 req/s, so ≥2 s). */
+    pollSec: number;
+  };
   formationFlight: { enabled: boolean };
   radio: { enabled: boolean };
   /** Dev-only synthetic source (ignored by release backend). */
   sim: boolean;
 }
+
+/** Default radar settings — built-ins (adsb.lol/.one) on; adsb.fi as a custom example (off). */
+export const DEFAULT_RADAR: RadarSettings = {
+  enabled: false,
+  adsb: {
+    enabled: false,
+    builtins: { 'adsb.lol': true, 'adsb.one': true },
+    online: [
+      { name: 'adsb.fi', url: 'https://opendata.adsb.fi/api/v3/lat/{lat}/lon/{lon}/dist/{dist}', enabled: false },
+    ],
+    radiusKm: 25,
+    pollSec: 5,
+  },
+  formationFlight: { enabled: false },
+  radio: { enabled: false },
+  sim: false,
+};
 
 export interface AppSettings {
   lastPort: string;
@@ -136,13 +179,7 @@ const defaults: AppSettings = {
   logReplayTime: false,
   nightMode2D: 'off',
   userLocation: null,
-  radar: {
-    enabled: false,
-    adsb: { enabled: false },
-    formationFlight: { enabled: false },
-    radio: { enabled: false },
-    sim: false,
-  },
+  radar: DEFAULT_RADAR,
 };
 
 function load(): AppSettings {
@@ -157,13 +194,26 @@ function load(): AppSettings {
           ...defaults.interface,
           ...(parsed.interface ?? {}),
         },
-        radar: {
-          ...defaults.radar,
-          ...(parsed.radar ?? {}),
-          adsb: { ...defaults.radar.adsb, ...(parsed.radar?.adsb ?? {}) },
-          formationFlight: { ...defaults.radar.formationFlight, ...(parsed.radar?.formationFlight ?? {}) },
-          radio: { ...defaults.radar.radio, ...(parsed.radar?.radio ?? {}) },
-        },
+        radar: (() => {
+          const dr = defaults.radar;
+          const pr = (parsed.radar ?? {}) as Partial<RadarSettings>;
+          const pa = (pr.adsb ?? {}) as Partial<RadarSettings['adsb']>;
+          const builtinNames = new Set(BUILTIN_ADSB_PROVIDERS.map((p) => p.name));
+          return {
+            ...dr,
+            ...pr,
+            adsb: {
+              ...dr.adsb,
+              ...pa,
+              builtins: { ...dr.adsb.builtins, ...(pa.builtins ?? {}) },
+              // Strip any built-in-named entries from the custom list (migration from the old flat
+              // `online` array, where adsb.lol/.one lived as custom rows).
+              online: (pa.online ?? dr.adsb.online).filter((p) => !builtinNames.has(p.name)),
+            },
+            formationFlight: { ...dr.formationFlight, ...(pr.formationFlight ?? {}) },
+            radio: { ...dr.radio, ...(pr.radio ?? {}) },
+          };
+        })(),
       };
     }
   } catch {

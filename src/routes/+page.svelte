@@ -7,7 +7,7 @@
   import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
   import { telemetry } from "$lib/stores/telemetry";
-  import { startRadarListeners, configureRadar } from "$lib/stores/radarTracking";
+  import { startRadarListeners, configureRadar, setRadarCenter } from "$lib/stores/radarTracking";
   import { get } from "svelte/store";
   import { t, locale } from 'svelte-i18n';
   import Map from "$lib/components/Map.svelte";
@@ -27,7 +27,7 @@
   import VideoPanel from "$lib/components/video/VideoPanel.svelte";
   import RadarPanel from "$lib/components/RadarPanel.svelte";
   import SettingsPanel from "$lib/components/SettingsPanel.svelte";
-  import { ensureUserLocation, requestUserLocation, userGeoLocation, resolveUserLocation } from "$lib/helpers/userLocation";
+  import { ensureUserLocation, requestUserLocation, userGeoLocation } from "$lib/helpers/userLocation";
   import { PlaybackController } from '$lib/controllers/playbackController';
   import { refreshSerialPorts, connectFC, disconnectFC, scanBleDevices } from '$lib/controllers/connectionController';
   import * as logbookCtrl from '$lib/controllers/logbookController';
@@ -55,6 +55,7 @@
   import TerrainAnalysisPanel from "$lib/components/terrain/TerrainAnalysisPanel.svelte";
   import { editMode, replayActive, mission, missionFlags, missionDownload, missionUpload, missionFcInfo, markMissionSynced, loadedMissionId, missionSetWaypoints, launchPoint, hasLocation, toDeg } from "$lib/stores/mission";
   import { terrainAnalysis, patchTerrainAnalysis } from "$lib/stores/terrainAnalysis";
+  import { DEFAULT_RADAR, BUILTIN_ADSB_PROVIDERS } from "$lib/stores/settings";
   import type { AppSettings, InterfaceSettings, PanelConfig, RadarSettings } from "$lib/stores/settings";
   import { layout, GRID_DEFAULTS } from '$lib/stores/layout';
   import {
@@ -297,13 +298,7 @@
   let realLighting3D = $state(false);
   let logReplayTime = $state(false);
   let nightMode2D = $state<'off' | 'auto' | 'on'>('off');
-  let radarSettings = $state<RadarSettings>({
-    enabled: false,
-    adsb: { enabled: false },
-    formationFlight: { enabled: false },
-    radio: { enabled: false },
-    sim: false,
-  });
+  let radarSettings = $state<RadarSettings>({ ...DEFAULT_RADAR });
   let defaultWpAltitudeM = $state(50);
   let defaultPhTimeSec = $state(30);
   let warnAltitudeM = $state(120);
@@ -435,6 +430,8 @@
     // Auto-refresh the logbook on disconnect (picks up a just-recorded live flight) — replaces
     // the manual Refresh button. Disarm is covered by the flight-recording-ended listener.
     if (wasConnected && c.status !== 'connected') void loadLogbook();
+    // Connection state flips the ADS-B centre source (UAV ↔ map viewport).
+    updateRadarCenter();
   });
   availablePorts.subscribe((p) => {
     ports = p;
@@ -481,18 +478,54 @@
   panels = saved.panels ?? defaultPanels;
 
   // ── Radar (foreign-vehicle tracking) — independent of the main connection ──
-  /** Build the backend radar config from settings + resolved user location (dev sim centre). */
+  /** ADS-B query centre: the connected UAV's position (if a valid fix) else the map viewport centre,
+   *  so the user can scan anywhere by panning when no UAV is connected. */
+  function computeRadarCenter(): [number, number] {
+    const t = get(telemetry);
+    if (connStatus === 'connected' && isValidGpsCoordinate(t.lat, t.lon) && t.fixType >= 2) {
+      return [t.lat, t.lon];
+    }
+    const c = get(settings).map.center;
+    return [c[0], c[1]];
+  }
+  let lastRadarCenterKey = '';
+  /** Push the live centre when it moved meaningfully (~100 m). Cheap; no pipeline restart. */
+  function updateRadarCenter() {
+    if (!radarSettings.enabled || !radarSettings.adsb.enabled) return;
+    const [lat, lon] = computeRadarCenter();
+    const key = `${lat.toFixed(3)},${lon.toFixed(3)}`;
+    if (key === lastRadarCenterKey) return;
+    lastRadarCenterKey = key;
+    void setRadarCenter(lat, lon);
+  }
+  /** Build + push the backend radar config (starts/stops the pipeline). */
   function pushRadarConfig() {
-    const loc = resolveUserLocation();
+    const [lat, lon] = computeRadarCenter();
+    lastRadarCenterKey = `${lat.toFixed(3)},${lon.toFixed(3)}`;
     void configureRadar({
       enabled: radarSettings.enabled,
       sim: radarSettings.sim,
-      simCenter: loc ? [loc.lat, loc.lon] : null,
+      simCenter: [lat, lon],
+      adsb: {
+        enabled: radarSettings.adsb.enabled,
+        // Built-ins (url from code + persisted on/off) + the custom providers.
+        online: [
+          ...BUILTIN_ADSB_PROVIDERS.map((b) => ({ name: b.name, url: b.url, enabled: radarSettings.adsb.builtins[b.name] ?? true })),
+          ...radarSettings.adsb.online,
+        ],
+        radiusKm: radarSettings.adsb.radiusKm,
+        pollSec: radarSettings.adsb.pollSec,
+        center: [lat, lon],
+      },
     });
   }
   if (typeof window !== 'undefined') {
     void startRadarListeners();
     pushRadarConfig();
+    // Keep the centre live: UAV telemetry (when connected) and map pans (settings.map.center) both
+    // feed updateRadarCenter; the ~100 m change-gate keeps the call count low.
+    telemetry.subscribe(() => updateRadarCenter());
+    settings.subscribe(() => updateRadarCenter());
   }
 
   // Auto-start video with the last settings if it was running at last close.
@@ -1793,7 +1826,7 @@
     {:else if activeTab === 'mission'}
       <MissionPanel />
     {:else if activeTab === 'radar'}
-      <RadarPanel radar={radarSettings} {interfaceSettings} userLocation={$userGeoLocation} />
+      <RadarPanel radar={radarSettings} {interfaceSettings} userLocation={$userGeoLocation} onPatch={applySettingsPatch} />
     {:else if activeTab === 'video'}
       <VideoPanel />
     {:else if DEV_MODE && activeTab === 'dev-playground'}
