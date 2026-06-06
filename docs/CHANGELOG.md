@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **3D FPV (cockpit) camera view + conformal HUD (ADR-034).** A fourth 3D camera mode (Free → Follow →
+  Orbit → **FPV**) drops the eye onto the aircraft: the model is hidden and the camera takes its exact
+  position (raised 0.5 m) and attitude. The flight track dims to 40% so it doesn't fill the view, and
+  the scroll wheel changes the **lens FOV** (30–120°) rather than dollying. A minimal projected-style
+  **HUD** overlays a *conformal* artificial horizon (pitch ladder + horizon that stay aligned with the
+  real terrain horizon as you zoom), plus a compact bank scale, heading tape, and speed/altitude
+  readouts in your display units.
+- **Camera mode is remembered across 2D↔3D switches.** The 2D follow mode and the 3D camera mode
+  (including FPV) are each restored when you toggle back to that view.
 - **3D real-time lighting + day/night dimming (ADR-033).** New *Real Daytime and Lighting (3D)* setting
   lights the Cesium globe with the real sun position. *Log Replay Time (3D)* (gated on the former) drives
   the sky clock from the replayed flight's actual date/time, reconstructed from the flight start time +

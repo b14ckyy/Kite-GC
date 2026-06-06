@@ -1490,5 +1490,54 @@ correct as-is) and tracked as a TODO.
 
 ---
 
+## ADR-034: 3D FPV (Cockpit) Camera View + Conformal HUD
+
+**Date**: 2026-06-06
+**Status**: Accepted
+**Related**: ADR-031 (2D↔3D View Continuity), ADR-033 (Real-Time Lighting)
+
+**Context**: The 3D map had Free / Follow / Orbit camera modes — all *external* views of the UAV model.
+With real lighting in place a cockpit / first-person view became compelling. We wanted a fourth camera
+mode that puts the eye on the aircraft, plus a minimal projected-style HUD.
+
+**Decision**:
+- **FPV is a fourth mode in the cycle** (Free → Follow → Orbit → **FPV** → Free). In FPV the model is
+  hidden and the Cesium camera is placed at the track point (raised `FPV_EYE_HEIGHT_M` = 0.5 m),
+  oriented from the **same body quaternion that drives the model**: nose = rotation matrix column 0
+  (camera direction), body-up = column 2 (so bank tilts the view). Cesium input is disabled
+  (`enableInputs = false`); the camera is fully data-driven, no extra smoothing. The flight track is
+  dimmed to 40% alpha so it doesn't fill the view. "Zoom" maps to the **lens FOV** (30–120°, default
+  60°) via a wheel handler, not a dolly.
+- **Camera-mode persistence across 2D↔3D.** 3D keeps its mode naturally (viewer kept in RAM, ADR-031)
+  for Free/Follow/Orbit. **FPV needs explicit suspend/resume**: leaving 3D must undo FPV's viewer
+  changes (input, lens, model/track, wheel) or the hidden viewer's frozen input blocks the map. On
+  deactivate we `restoreFromFpv()` but keep `cameraMode = 'fpv'`; on reactivate we `enterFpv()`. The
+  **2D map remounts** on every toggle, so its follow state is lifted to the page (`bind:viewMode`) and
+  re-applied on mount.
+- The activate/deactivate `$effect` reads `cameraMode` (which `enterFpv`/`exitFpv` write); its body is
+  wrapped in **`untrack()`** so a mode write can't self-trigger the effect (the read-then-write freeze
+  class from the telemetry-widget work). It now depends only on `active`.
+- **HUD = two SVG layers.** A **conformal** artificial horizon (horizon line + pitch ladder) spanning
+  the full viewport, plus a compact (≤50%) instrument cluster (boresight, bank scale, heading tape,
+  speed, altitude). The AHI is true perspective: `y = CY − f·tan(θ)`, with focal length `f` derived
+  from the **vertical FOV** (from the horizontal FOV at the viewBox aspect). This keeps the artificial
+  horizon aligned with the real terrain horizon **as the FOV/zoom changes**. The conformal mapping
+  needs the full vertical FOV ↔ full height, so the AHI fills the viewport (a ≤50% box would clip the
+  ladder to ±9° at 60° FOV); only the instrument cluster stays compact. Readouts use the user's display
+  units; everything carries a dark drop-shadow for legibility against a bright sky.
+
+**Rationale**: reusing the model's quaternion guarantees the cockpit view matches the rendered attitude
+exactly. Conformal (tan-based, FOV-aware) scaling is the only way the AHI lines up with the real horizon
+at every zoom — a fixed px/deg would drift. Splitting the AHI (full-screen, conformal) from the
+instruments (compact) resolves the tension between "the HUD must be small" and "the AHI must match
+reality".
+
+**Consequences**: FPV is intentionally raw (no smoothing) — jittery on noisy logs, accepted for now.
+The conformal AHI assumes the map panel is ≥16:9 wide (so `meet` height-fills); a taller panel scales
+the AHI slightly small. Suspend/resume of FPV (rather than a hard exit on hide) is required by the
+kept-in-RAM viewer model.
+
+---
+
 *End of Architecture Decision Records*
 
