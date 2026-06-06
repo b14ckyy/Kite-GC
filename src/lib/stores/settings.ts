@@ -81,8 +81,23 @@ export interface RadarSettings {
   };
   formationFlight: { enabled: boolean };
   radio: { enabled: boolean };
+  /** Map rendering of foreign contacts (2D + 3D). */
+  map: RadarMapSettings;
   /** Dev-only synthetic source (ignored by release backend). */
   sim: boolean;
+}
+
+/** Map-rendering controls for radar contacts (panel "Map" tab). See RADAR_TRACKING_PANEL_AND_MAP §4. */
+export interface RadarMapSettings {
+  /** Soft-dim radius (km): contacts beyond render dimmed + smaller, never hidden. */
+  radiusKm: number;
+  /** Absolute altitude ceiling (m): ADS-B contacts above are hidden from the map (always kept in the
+   *  panel list). Overridden for any contact within +2000 m relative to the reference. */
+  maxAltM: number;
+  /** Show everything — disables the radius dim + the absolute altitude cutoff. */
+  showAll: boolean;
+  /** Per-system map visibility, independent of the data-enable in Settings. */
+  visible: { adsb: boolean; formationFlight: boolean; radio: boolean };
 }
 
 /** Default radar settings — built-ins (adsb.lol/.one) on; adsb.fi as a custom example (off). */
@@ -101,6 +116,12 @@ export const DEFAULT_RADAR: RadarSettings = {
   },
   formationFlight: { enabled: false },
   radio: { enabled: false },
+  map: {
+    radiusKm: 50,
+    maxAltM: 10000,
+    showAll: false,
+    visible: { adsb: true, formationFlight: true, radio: true },
+  },
   sim: false,
 };
 
@@ -232,6 +253,11 @@ function load(): AppSettings {
             },
             formationFlight: { ...dr.formationFlight, ...(pr.formationFlight ?? {}) },
             radio: { ...dr.radio, ...(pr.radio ?? {}) },
+            map: {
+              ...dr.map,
+              ...(pr.map ?? {}),
+              visible: { ...dr.map.visible, ...(pr.map?.visible ?? {}) },
+            },
           };
         })(),
       };

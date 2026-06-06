@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
 use source::{RadarSource, SourceHandle, SourceUpdate};
-use vehicle::{TrackedVehicle, VehicleSystem};
+use vehicle::{TrackedVehicle, VehicleSource, VehicleSystem};
 
 /// Consolidated snapshot event name — same regardless of which sources are active.
 pub const RADAR_EVENT: &str = "radar-vehicles";
@@ -31,6 +31,12 @@ pub const ADSB_STATUS_EVENT: &str = "radar-adsb-status";
 /// Aggregator emit throttle + idle tick.
 const EMIT_THROTTLE: Duration = Duration::from_millis(200);
 const AGG_TICK: Duration = Duration::from_millis(250);
+
+/// Cross-source debounce: once a contact's position is updated by one source, positional updates from a
+/// DIFFERENT source are ignored for this long. Online services poll ≤ every 2 s and lag real time, so a
+/// faster realtime feed (hardware ≈ 1 s) keeps ownership and online only fills gaps — no marker jitter
+/// from mixing delayed/leading feeds. Same-source refreshes are always accepted.
+const SOURCE_DEBOUNCE_MS: i64 = 2000;
 
 pub fn now_ms() -> i64 {
     SystemTime::now()
@@ -297,6 +303,8 @@ fn spawn_aggregator(
     thread::spawn(move || {
         // One map per system, keyed by vehicle id.
         let mut maps: HashMap<VehicleSystem, HashMap<String, TrackedVehicle>> = HashMap::new();
+        // Per (system,id): the source that last set the position + when (ms), for the cross-source debounce.
+        let mut owners: HashMap<VehicleSystem, HashMap<String, (VehicleSource, i64)>> = HashMap::new();
         let mut last_emit = Instant::now() - EMIT_THROTTLE;
         let mut dirty = true;
 
@@ -304,28 +312,54 @@ fn spawn_aggregator(
             match rx.recv_timeout(AGG_TICK) {
                 Ok(update) => {
                     for v in update.vehicles {
+                        let its_source = v.sources.first().copied();
                         let m = maps.entry(v.system).or_default();
+                        let ow = owners.entry(v.system).or_default();
                         match m.get_mut(&v.id) {
-                            // Per-system merge by id: latest dynamic fields win; keep stable identity
-                            // fields (callsign/category/squawk) if the newer source lacks them, and
-                            // accumulate the source set.
                             Some(existing) => {
-                                let mut srcs = existing.sources.clone();
-                                for s in &v.sources {
-                                    if !srcs.contains(s) {
-                                        srcs.push(*s);
+                                // Cross-source debounce: accept same-source refreshes always; accept a
+                                // different source only after SOURCE_DEBOUNCE_MS without an update. This
+                                // gives the fastest realtime feed ownership and avoids position jitter
+                                // from mixing leading/lagging feeds.
+                                let accept = match (its_source, ow.get(&v.id)) {
+                                    (Some(s), Some((last_src, last_t))) => {
+                                        s == *last_src || v.last_seen_ms - *last_t >= SOURCE_DEBOUNCE_MS
+                                    }
+                                    _ => true,
+                                };
+                                if accept {
+                                    // Latest dynamic fields win; keep stable identity fields
+                                    // (callsign/category/squawk) when the newer source lacks them, and
+                                    // accumulate the source set.
+                                    let mut srcs = existing.sources.clone();
+                                    for s in &v.sources {
+                                        if !srcs.contains(s) {
+                                            srcs.push(*s);
+                                        }
+                                    }
+                                    let prev_callsign = existing.callsign.take();
+                                    let prev_category = existing.category.take();
+                                    let prev_squawk = existing.squawk.take();
+                                    let stamp = v.last_seen_ms;
+                                    *existing = v;
+                                    existing.sources = srcs;
+                                    existing.callsign = existing.callsign.take().or(prev_callsign);
+                                    existing.category = existing.category.take().or(prev_category);
+                                    existing.squawk = existing.squawk.take().or(prev_squawk);
+                                    if let Some(s) = its_source {
+                                        ow.insert(existing.id.clone(), (s, stamp));
+                                    }
+                                } else if let Some(s) = its_source {
+                                    // Rejected positional update — still note the feed saw this contact.
+                                    if !existing.sources.contains(&s) {
+                                        existing.sources.push(s);
                                     }
                                 }
-                                let prev_callsign = existing.callsign.take();
-                                let prev_category = existing.category.take();
-                                let prev_squawk = existing.squawk.take();
-                                *existing = v;
-                                existing.sources = srcs;
-                                existing.callsign = existing.callsign.take().or(prev_callsign);
-                                existing.category = existing.category.take().or(prev_category);
-                                existing.squawk = existing.squawk.take().or(prev_squawk);
                             }
                             None => {
+                                if let Some(s) = its_source {
+                                    ow.insert(v.id.clone(), (s, v.last_seen_ms));
+                                }
                                 m.insert(v.id.clone(), v);
                             }
                         }
@@ -336,13 +370,16 @@ fn spawn_aggregator(
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
 
-            // TTL prune.
+            // TTL prune (drop owner entries alongside their vehicles).
             let now = now_ms();
             for (sys, m) in maps.iter_mut() {
                 let ttl = ttl_ms(*sys);
                 let before = m.len();
                 m.retain(|_, v| now - v.last_seen_ms <= ttl);
                 if m.len() != before {
+                    if let Some(ow) = owners.get_mut(sys) {
+                        ow.retain(|id, _| m.contains_key(id));
+                    }
                     dirty = true;
                 }
             }

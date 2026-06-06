@@ -496,6 +496,27 @@
     }
     return $userGeoLocation;
   });
+  /** GCS ground level (m MSL) from terrain data at the user location — used as the colour-scale
+   *  reference altitude when no UAV is connected (the geolocation API carries no altitude). */
+  let gcsGroundAltM = $state<number | null>(null);
+  $effect(() => {
+    const g = $userGeoLocation;
+    if (connStatus === 'connected' || !g) { gcsGroundAltM = null; return; }
+    let cancelled = false;
+    invoke<number | null>('terrain_elevation', { lat: g.lat, lon: g.lon })
+      .then((e) => { if (!cancelled) gcsGroundAltM = e; })
+      .catch(() => { if (!cancelled) gcsGroundAltM = null; });
+    return () => { cancelled = true; };
+  });
+  /** Reference altitude (m MSL) for the relative-altitude colour scale: the UAV's GPS MSL altitude when
+   *  connected with a fix, else the GCS terrain ground level (else null → absolute colour fallback). */
+  const radarRefAltM = $derived.by<number | null>(() => {
+    const t = $telemetry;
+    if (connStatus === 'connected' && isValidGpsCoordinate(t.lat, t.lon) && t.fixType >= 2) {
+      return t.altMsl;
+    }
+    return gcsGroundAltM;
+  });
   /** ADS-B-via-MSP available: connected + the FC reports the feature (INAV 8.0+; MAVLink has no features). */
   const mspAdsbSupported = $derived(
     connStatus === 'connected' && fcInfo != null && fcInfo.features != null && fcInfo.features.adsb_msp,
@@ -1660,6 +1681,10 @@
         {mapViewMode}
         onToggleMapView={toggleMapView}
         bind:viewMode={map2dViewMode}
+        radarActive={radarSettings.enabled}
+        radarMapSettings={radarSettings.map}
+        {radarReference}
+        {radarRefAltM}
       />
     {/if}
     <!-- 3D stays mounted (hidden) once opened, so toggling back is instant. -->

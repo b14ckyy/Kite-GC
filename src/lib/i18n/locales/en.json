@@ -88,7 +88,16 @@
     "portMissing": "not found",
     "inUse": "in use",
     "refreshPorts": "Refresh ports",
-    "addLocalSource": "Add receiver"
+    "addLocalSource": "Add receiver",
+    "mapTab": "Map",
+    "webRadius": "Web download radius",
+    "maxAltitude": "Max altitude",
+    "showAll": "Show all",
+    "mapVisibility": "Map visibility",
+    "legendTitle": "Altitude Scale (Rel. to UAV/GCS)",
+    "legendAbove": "≥ +2 km",
+    "legendLevel": "level",
+    "legendBelow": "≤ −0.5 km"
   },
   "video": {
     "title": "Video",

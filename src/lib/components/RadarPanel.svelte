@@ -10,11 +10,12 @@
   import Button from '$lib/components/panel/Button.svelte';
   import Toggle from '$lib/components/panel/Toggle.svelte';
   import SegmentedToggle, { type SegOption } from '$lib/components/panel/SegmentedToggle.svelte';
-  import { radarVehicles, radarAdsbStatus, enrichList, type EnrichedVehicle } from '$lib/stores/radarTracking';
+  import { radarVehicles, radarAdsbStatus, radarSelection, enrichList, type EnrichedVehicle } from '$lib/stores/radarTracking';
   import { BUILTIN_ADSB_PROVIDERS } from '$lib/stores/settings';
   import type { AppSettings, RadarSettings, InterfaceSettings } from '$lib/stores/settings';
   import type { PortInfo } from '$lib/stores/connection';
   import { convertSpeed, convertAltitude, convertDistance, formatConverted } from '$lib/utils/units';
+  import { RELATIVE_LEGEND_STOPS, LEGEND_LEVEL_PCT } from '$lib/helpers/radarMap';
 
   let { radar, interfaceSettings, referencePoint = null, mspSupported = false, onPatch = (_p: Partial<AppSettings>) => {} }: {
     radar: RadarSettings;
@@ -28,11 +29,16 @@
 
   const RADIUS_STEPS = [10, 25, 50, 75, 100];
   const POLL_STEPS = [2, 5, 10, 30]; // provider limit ≈ 1 req/s, so ≥2 s
+  const MAXALT_STEPS = [3000, 5000, 8000, 10000, 12000]; // absolute map ceiling (m)
   const COMPACT_ADSB_MAX = 10; // info view shows only the nearest N ADS-B contacts
+  const LEGEND_GRADIENT = `linear-gradient(to right, ${RELATIVE_LEGEND_STOPS.map((s) => `${s.color} ${s.pct}%`).join(', ')})`;
 
   // Patch helpers — edit the nested radar settings (onPatch merges shallowly at the top level).
   const patchRadar = (partial: Partial<RadarSettings>) => onPatch({ radar: { ...radar, ...partial } });
   const patchAdsb = (partial: Partial<RadarSettings['adsb']>) => patchRadar({ adsb: { ...radar.adsb, ...partial } });
+  const patchMap = (partial: Partial<RadarSettings['map']>) => patchRadar({ map: { ...radar.map, ...partial } });
+  const setMapVisible = (key: 'adsb' | 'formationFlight' | 'radio', on: boolean) =>
+    patchMap({ visible: { ...radar.map.visible, [key]: on } });
   const setBuiltinEnabled = (name: string, on: boolean) =>
     patchAdsb({ builtins: { ...radar.adsb.builtins, [name]: on } });
   const updateProvider = (i: number, patch: Partial<RadarSettings['adsb']['online'][number]>) =>
@@ -84,7 +90,10 @@
 
   // Dynamic tabs derived from the enabled systems (SegmentedToggle takes `options` directly — no
   // framework change needed).
-  const tabOptions = $derived<SegOption[]>(groups.map((g) => ({ value: g.key, label: g.label })));
+  const tabOptions = $derived<SegOption[]>([
+    ...groups.map((g) => ({ value: g.key, label: g.label })),
+    { value: 'map', label: $t('radar.mapTab') },
+  ]);
   let activeSys = $state('adsb');
   // Keep the selected tab valid when systems are toggled on/off.
   $effect(() => {
@@ -166,7 +175,7 @@
   {:else if activeSys === 'adsb'}
     <div class="src-block">
       <div class="src-row">
-        <span class="src-label">{$t('radar.radius')}</span>
+        <span class="src-label">{$t('radar.webRadius')}</span>
         <select
           class="src-select"
           value={radar.adsb.radiusKm}
@@ -300,6 +309,49 @@
       {/each}
       <Button variant="standard" size="sm" full icon="add" onclick={addLocal}>{$t('radar.addLocalSource')}</Button>
     </div>
+  {:else if activeSys === 'map'}
+    <!-- Map rendering controls + altitude colour legend. -->
+    <div class="src-block">
+      <p class="src-head">{$t('radar.mapVisibility')}</p>
+      <!-- Show all on top: when on, radius + max-altitude have no effect, so they're disabled. -->
+      <div class="src-row">
+        <span class="src-label">{$t('radar.showAll')}</span>
+        <Toggle checked={radar.map.showAll} onchange={(c) => patchMap({ showAll: c })} />
+      </div>
+      <div class="src-row" class:disabled={radar.map.showAll}>
+        <span class="src-label">{$t('radar.radius')}</span>
+        <select class="src-select" disabled={radar.map.showAll} value={radar.map.radiusKm} onchange={(e) => patchMap({ radiusKm: Number((e.target as HTMLSelectElement).value) })}>
+          {#each RADIUS_STEPS as km}<option value={km}>{km} km</option>{/each}
+        </select>
+      </div>
+      <div class="src-row" class:disabled={radar.map.showAll}>
+        <span class="src-label">{$t('radar.maxAltitude')}</span>
+        <select class="src-select" disabled={radar.map.showAll} value={radar.map.maxAltM} onchange={(e) => patchMap({ maxAltM: Number((e.target as HTMLSelectElement).value) })}>
+          {#each MAXALT_STEPS as m}<option value={m}>{fmtAlt(m)}</option>{/each}
+        </select>
+      </div>
+      {#each groups as g (g.key)}
+        <div class="src-row">
+          <span class="src-label">{g.label}</span>
+          <Toggle
+            checked={radar.map.visible[g.key as 'adsb' | 'formationFlight' | 'radio']}
+            onchange={(c) => setMapVisible(g.key as 'adsb' | 'formationFlight' | 'radio', c)}
+          />
+        </div>
+      {/each}
+
+      <p class="src-head">{$t('radar.legendTitle')}</p>
+      <div class="rt-legend">
+        <div class="rt-legend-bar" style="background:{LEGEND_GRADIENT}">
+          <span class="rt-legend-tick" style="left:{LEGEND_LEVEL_PCT}%"></span>
+        </div>
+        <div class="rt-legend-labels">
+          <span class="rt-l-left">{$t('radar.legendBelow')}</span>
+          <span class="rt-l-level" style="left:{LEGEND_LEVEL_PCT}%">{$t('radar.legendLevel')}</span>
+          <span class="rt-l-right">{$t('radar.legendAbove')}</span>
+        </div>
+      </div>
+    </div>
   {:else}
     <p class="radar-hint">{$t('radar.sourcesPlaceholder')}</p>
   {/if}
@@ -322,7 +374,15 @@
             <!-- Info view caps ADS-B to the nearest COMPACT_ADSB_MAX (sorted by distance). -->
             {@const rows = compact && g.key === 'adsb' ? g.list.slice(0, COMPACT_ADSB_MAX) : g.list}
             {#each rows as v (v.id)}
-              <div class="radar-row" class:compact>
+              <div
+                class="radar-row"
+                class:compact
+                class:selected={$radarSelection === v.id}
+                role="button"
+                tabindex="0"
+                onclick={() => radarSelection.update((cur) => (cur === v.id ? null : v.id))}
+                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); radarSelection.update((cur) => (cur === v.id ? null : v.id)); } }}
+              >
                 <span class="r-call">{label(v)}</span>
                 {#if !compact}<span class="r-type" title={v.category ?? ''}>{categoryAbbrev(v.category)}</span>{/if}
                 <span class="r-dist">{fmtDist(v.distanceM)}</span>
@@ -466,9 +526,25 @@
     font-variant-numeric: tabular-nums;
   }
   .radar-row:nth-child(even) { background: rgba(255, 255, 255, 0.03); }
+  .radar-row { cursor: pointer; text-align: left; }
+  .radar-row:hover { background: rgba(55, 168, 219, 0.12); }
+  .radar-row.selected { background: rgba(55, 168, 219, 0.22); box-shadow: inset 0 0 0 1px #37a8db; }
   /* Info view: call · dist · brg · alt — dist + alt wide enough for 4-digit km / >10 000 m (no wrap). */
   .radar-row.compact { grid-template-columns: 1.15fr 1.1fr 0.55fr 1.1fr; }
   .r-call { color: #e8e8e8; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .r-type { color: #8fb4c5; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .r-dist, .r-brg, .r-alt, .r-spd, .r-age { color: #b8b8b8; text-align: right; white-space: nowrap; }
+
+  .src-row.disabled .src-label { opacity: 0.45; }
+
+  /* ── Map tab: altitude colour legend (horizontal) ── */
+  .rt-legend { padding: 4px 2px 2px; }
+  .rt-legend-bar { position: relative; height: 14px; border-radius: 3px; border: 1px solid #272727; }
+  /* UAV-altitude marker (Δ = 0) tick at 20% of the bar. */
+  .rt-legend-tick { position: absolute; top: -2px; bottom: -2px; width: 2px; background: #fff; box-shadow: 0 0 2px #000; transform: translateX(-50%); }
+  .rt-legend-labels { position: relative; height: 14px; margin-top: 2px; color: #b8b8b8; font-size: 11px; }
+  .rt-legend-labels span { position: absolute; white-space: nowrap; }
+  .rt-l-left { left: 0; }
+  .rt-l-right { right: 0; }
+  .rt-l-level { transform: translateX(-50%); color: #d98fe0; font-weight: 600; }
 </style>

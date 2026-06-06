@@ -61,9 +61,13 @@ export interface AdsbProviderStatus {
 }
 export const radarAdsbStatus = writable<Record<string, AdsbProviderStatus>>({});
 
+/** Shared selection: id of the currently selected contact (panel list ↔ 2D ↔ 3D), or null. */
+export const radarSelection = writable<string | null>(null);
+
 export function resetRadar() {
   radarVehicles.set({ ...EMPTY });
   radarAdsbStatus.set({});
+  radarSelection.set(null);
 }
 
 /** Clear per-provider status (call on a config change so stale entries don't linger). */

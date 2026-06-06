@@ -183,12 +183,13 @@ fn parse_into(root: &Value, now: i64, out: &mut Vec<TrackedVehicle>) {
         ) else {
             continue;
         };
+        // Uppercase so the id matches the MAVLink/MSP receivers' `{:06X}` form → cross-source merge.
         let hex = a
             .get("hex")
             .and_then(Value::as_str)
             .unwrap_or("")
             .trim()
-            .to_string();
+            .to_uppercase();
         if hex.is_empty() {
             continue;
         }

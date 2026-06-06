@@ -88,7 +88,16 @@
     "portMissing": "nicht gefunden",
     "inUse": "belegt",
     "refreshPorts": "Ports aktualisieren",
-    "addLocalSource": "Empfänger hinzufügen"
+    "addLocalSource": "Empfänger hinzufügen",
+    "mapTab": "Karte",
+    "webRadius": "Web-Download-Radius",
+    "maxAltitude": "Max. Höhe",
+    "showAll": "Alle anzeigen",
+    "mapVisibility": "Karten-Sichtbarkeit",
+    "legendTitle": "Höhenskala (rel. zu UAV/GCS)",
+    "legendAbove": "≥ +2 km",
+    "legendLevel": "Niveau",
+    "legendBelow": "≤ −0,5 km"
   },
   "video": {
     "title": "Video",

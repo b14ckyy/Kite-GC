@@ -38,6 +38,11 @@
   import { toTelemetryData } from "$lib/adapters/telemetryAdapter";
   import { sunAltitudeDeg, cesiumLikeBrightness } from "$lib/utils/sun";
   import { ensureUserLocation, resolveUserLocation, userGeoLocation } from "$lib/helpers/userLocation";
+  import { radarVehicles, radarSelection, enrichList, type RadarSnapshot, type EnrichedVehicle } from "$lib/stores/radarTracking";
+  import type { RadarMapSettings } from "$lib/stores/settings";
+  import { contactColor, contactVisibleOnMap, relevanceFactor } from "$lib/helpers/radarMap";
+  import { pickShape, buildContactIconHtml } from "$lib/helpers/radarIcons";
+  import { convertAltitude, convertSpeed, convertDistance, convertVerticalSpeed, formatConverted } from "$lib/utils/units";
 
   let {
     playbackTrack = [],
@@ -51,6 +56,10 @@
     mapViewMode = '2d' as '2d' | '3d',
     onToggleMapView,
     viewMode = $bindable<'free' | 'follow' | 'heading-follow'>('free'),
+    radarActive = false,
+    radarMapSettings = null,
+    radarReference = null,
+    radarRefAltM = null,
   }: {
     playbackTrack?: TelemetryRecord[];
     playbackPoint?: TelemetryRecord | null;
@@ -65,6 +74,14 @@
     onToggleMapView?: () => void;
     /** 2D follow state, lifted so it persists across 2D↔3D remounts (bound by the parent). */
     viewMode?: 'free' | 'follow' | 'heading-follow';
+    /** Radar master enable (renders nothing when off). */
+    radarActive?: boolean;
+    /** Map rendering controls for radar contacts, or null to render none. */
+    radarMapSettings?: RadarMapSettings | null;
+    /** Distance/bearing reference (UAV valid-fix else GCS), for enrichment. */
+    radarReference?: { lat: number; lon: number } | null;
+    /** Reference altitude (m) for the relative-altitude colour scale, or null (→ absolute fallback). */
+    radarRefAltM?: number | null;
   } = $props();
 
   // ── UAV model marker (top-down canvas render of the same .glb used in 3D) ──
@@ -168,6 +185,86 @@
   let preArmPositions: L.LatLng[] = [];
   let playbackLayerGroup: L.LayerGroup | undefined;
   let playbackMarker: L.Marker | undefined;
+
+  // ── Foreign-vehicle (radar) contacts — isolated layer, diffed by id ──
+  let radarLayer: L.LayerGroup | undefined;
+  const radarMarkers = new Map<string, L.Marker>();
+  let radarSnap: RadarSnapshot = { adsb: [], formationFlight: [], radio: [], lastUpdate: 0 };
+  let radarSelectedId: string | null = null;
+  let unsubRadar: (() => void) | undefined;
+  let unsubRadarSel: (() => void) | undefined;
+  const RADAR_BASE_PX = 42;
+  const RADAR_MIN_PX = 24;
+
+  /** Full hover/select readout for a contact (units honour the interface settings, like the panel). */
+  function radarTooltip(v: EnrichedVehicle): string {
+    const ui = get(settings).interface;
+    const name = v.callsign?.trim() || v.id;
+    const alt = v.altM == null ? '—' : formatConverted(convertAltitude(v.altM, ui.altitudeUnit), 0);
+    const spd = v.groundSpeedMs == null ? '—' : formatConverted(convertSpeed(v.groundSpeedMs, ui.speedUnit), 0);
+    const dist = v.distanceM == null
+      ? '—'
+      : formatConverted(convertDistance(v.distanceM, ui.distanceUnit), v.distanceM < 10000 ? 1 : 0);
+    const brg = v.bearingDeg == null ? '—' : `${Math.round(v.bearingDeg)}°`;
+    let vs = '';
+    if (v.verticalSpeedMs != null && Math.abs(v.verticalSpeedMs) >= 0.5) {
+      const a = formatConverted(convertVerticalSpeed(Math.abs(v.verticalSpeedMs), ui.verticalSpeedUnit), 1);
+      vs = ` ${v.verticalSpeedMs > 0 ? '▲' : '▼'}${a}`;
+    }
+    return `${name} · ${alt}${vs} · ${spd} · ${dist} · ${brg}`;
+  }
+
+  /** Rebuild/diff the radar contact markers from the latest snapshot + map controls. */
+  function updateRadar() {
+    if (!map) return;
+    if (!radarLayer) radarLayer = L.layerGroup().addTo(map);
+    const ms = radarMapSettings;
+    if (!radarActive || !ms) {
+      if (radarMarkers.size) { radarLayer.clearLayers(); radarMarkers.clear(); }
+      return;
+    }
+    const all = [...radarSnap.adsb, ...radarSnap.formationFlight, ...radarSnap.radio];
+    const enriched = enrichList(all, radarReference ?? null);
+    const seen = new Set<string>();
+    for (const v of enriched) {
+      if (!contactVisibleOnMap(v, radarRefAltM, ms)) continue;
+      seen.add(v.id);
+      const rel = relevanceFactor(v.distanceM, ms.radiusKm, ms.showAll);
+      const size = Math.max(RADAR_MIN_PX, Math.round(RADAR_BASE_PX * (uiScale || 1) * (0.6 + 0.4 * rel)));
+      const html = buildContactIconHtml({
+        shape: pickShape(v.system, v.category, v.headingDeg != null),
+        heading: v.headingDeg,
+        color: contactColor(v.altM, radarRefAltM),
+        sizePx: size,
+        opacity: rel,
+        selected: v.id === radarSelectedId,
+        label: v.callsign?.trim() || undefined,
+      });
+      const icon = L.divIcon({ className: 'radar-divicon', html, iconSize: [size, size], iconAnchor: [size / 2, size / 2] });
+      const existing = radarMarkers.get(v.id);
+      if (existing) {
+        existing.setLatLng([v.lat, v.lon]);
+        existing.setIcon(icon);
+        existing.setTooltipContent(radarTooltip(v));
+      } else {
+        const id = v.id;
+        const m = L.marker([v.lat, v.lon], { icon, zIndexOffset: 400 });
+        m.bindTooltip(radarTooltip(v), { direction: 'top', offset: [0, -size / 2], opacity: 0.95 });
+        m.on('click', () => radarSelection.update((cur) => (cur === id ? null : id)));
+        m.addTo(radarLayer);
+        radarMarkers.set(id, m);
+      }
+    }
+    for (const [id, m] of radarMarkers) {
+      if (!seen.has(id)) { radarLayer.removeLayer(m); radarMarkers.delete(id); }
+    }
+  }
+
+  // Rebuild when any radar control prop changes (snapshot/selection are handled by their subscriptions).
+  $effect(() => {
+    radarActive; radarMapSettings; radarReference; radarRefAltM; uiScale;
+    if (map) updateRadar();
+  });
 
   // Home position
   let homeMarker: L.Marker | undefined;
@@ -595,6 +692,10 @@
       }
     });
 
+    // Foreign-vehicle contacts: rebuild the radar layer on every snapshot / selection change.
+    unsubRadar = radarVehicles.subscribe((s) => { radarSnap = s; updateRadar(); });
+    unsubRadarSel = radarSelection.subscribe((id) => { radarSelectedId = id; updateRadar(); });
+
     return () => window.removeEventListener("resize", onResize);
   });
 
@@ -694,6 +795,8 @@
     if (followRaf != null) cancelAnimationFrame(followRaf);
     if (nightTimer) clearInterval(nightTimer);
     unsubUserGeo?.();
+    unsubRadar?.();
+    unsubRadarSel?.();
     if (unsubTelemetry) unsubTelemetry();
     if (unsubSettings) unsubSettings();
     if (map) {
@@ -708,6 +811,7 @@
       if (playbackLayerGroup) map.removeLayer(playbackLayerGroup);
       if (playbackMarker) map.removeLayer(playbackMarker);
       if (homeMarker) map.removeLayer(homeMarker);
+      if (radarLayer) map.removeLayer(radarLayer);
       map.remove();
     }
   });
@@ -878,5 +982,30 @@
   /* Fix Leaflet icon paths broken by bundlers */
   :global(.leaflet-default-icon-path) {
     background-image: url("leaflet/dist/images/marker-icon.png");
+  }
+
+  /* Foreign-vehicle (radar) contact icons */
+  :global(.radar-divicon) {
+    background: none;
+    border: none;
+  }
+  :global(.radar-divicon .radar-icon) {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  :global(.radar-divicon .radar-icon-label) {
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translate(-50%, 1px);
+    font: 600 9px 'Segoe UI', Tahoma, sans-serif;
+    color: #fff;
+    text-shadow: 0 0 2px #000, 0 0 2px #000, 0 1px 1px #000;
+    white-space: nowrap;
+    pointer-events: none;
   }
 </style>
