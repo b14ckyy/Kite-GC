@@ -151,29 +151,100 @@ All strings via `$t()` with keys in **en / de / fr**.
 ## 4. Map visualization (final phase)
 
 Foreign vehicles render on the **same** Map/Map3D instances, in dedicated, isolated layers so the
-existing UAV/track/mission rendering is untouched.
+existing UAV/track/mission rendering is untouched. Design decided 2026-06-06 (see §6).
 
-### 2D (Leaflet, [Map.svelte](../../src/lib/components/Map.svelte))
-- A dedicated `L.LayerGroup` per system (or one group with per-system styling), rebuilt from the
-  enriched store on update.
-- **Icons by system + category**: ADS-B aircraft (directional, rotated to heading, FL label),
-  FormationFlight peers (UAV glyph + callsign), Radio Telemetry (generic). Reuse the icon approach in
-  [uavIcons.ts](../../src/lib/helpers/uavIcons.ts) / [uavTopDown.ts](../../src/lib/helpers/uavTopDown.ts).
-- Label shows callsign + relative alt; declutter at low zoom (collapse to dots, label on
-  hover/select). Color/opacity encode age (fade toward TTL).
-- Click → select (syncs the panel list). Optional leader line / distance ring to the user.
+### 4.0 Relevance model — proximity focus, adjustable, "show all"
+- Default = **proximity focus**, fully operator-adjustable, with a **"Show all"** override.
+- Live-adjustable params: max **radius** (km), **altitude band** ± relative to the reference, per-system
+  **map visibility**, and **Show all** (disables radius+band relevance weighting).
+- **Distance relevance is soft only** (decided): the radius filter **never hides** a contact — contacts
+  outside the radius render **dimmed + smaller**. Only a **per-system visibility** toggle (or the master
+  map toggle) actually hides contacts. **Colour depends on altitude only, never on distance.**
+- **Altitude is a hard map cutoff** (decided): ADS-B contacts above a **configurable ABSOLUTE ceiling
+  (default 10 000 m)** are **hidden from the map** — high airliners are pure clutter for a low UAV.
+  - They **always remain in the Radar panel list** — the cutoff only affects map rendering.
+  - **Relative-altitude override:** any contact within **Δ ≤ +2000 m** relative to the reference (i.e. it
+    has entered the top of the colour scale, §4.2) is **always shown on the map regardless of the
+    absolute ceiling** — a high cruiser descending toward us must never disappear.
+  - Net rule: *hidden from map ⟺ (absolute alt > ceiling) AND (Δ > +2000 m)*. Disabled by "Show all".
+- A separate **performance safety cap** (render budget, e.g. nearest-N by distance) bounds entity count
+  in dense airspace independently of the relevance dimming; updates **diff** the entity set rather than
+  full-rebuilding once counts grow.
+- **Reference** for distance / altitude-band = same as the lists: connected UAV (valid fix) else GCS
+  location ([userLocation.ts](../../src/lib/helpers/userLocation.ts)). (Distinct from the ADS-B online
+  *query centre*, which is the map view — Plan A §7.1.)
 
-### 3D (Cesium, [Map3D.svelte](../../src/lib/components/Map3D.svelte))
-- A dedicated set of entities (billboards + optional 3D models) positioned by lat/lon/alt, kept in a
-  separate collection so 2D↔3D continuity (ADR-031) and the FPV/HUD work (ADR-034) are unaffected.
-- Altitude handling consistent with the existing geoid/terrain offset logic; vehicles with unknown
-  alt clamp to a configurable plane or draw a drop-line.
-- Same selection sync; optional billboards always face the camera.
+### 4.1 Controls — Radar panel "Map" section
+- A **"Map" tab** appended to the panel's dynamic `SegmentedToggle` (after the per-system tabs). Its
+  left pane hosts the map controls; the right vehicle list stays as-is.
+- Controls: master **"Show radar on map"** toggle · **Radius** (soft dim) · **Max altitude** (hard
+  absolute ADS-B map ceiling, default 10 km, adjustable) · **Show all** toggle · **per-system map
+  visibility** toggles (ADS-B / FormationFlight / Radio) — independent of the data-enable in Settings
+  (track a system but hide it on the map). Plus the **altitude colour legend** (§4.2). The +2000 m
+  relative override (§4.0) is fixed (tied to the top of the colour scale), not a user control.
+- State persists under `settings.radar.map.*` (`showOnMap`, `radiusKm`, `maxAltM`, `showAll`, per-system
+  `visible`), reactive to both 2D and 3D.
 
-### Cross-cutting
-- A map toggle (and/or per-system visibility) to show/hide radar contacts without disabling the feeds.
-- Performance: cap rendered contacts (nearest-N / within-radius); diff updates rather than full
-  rebuilds if counts get large (decide after measuring Plan A Phase 1).
+### 4.2 Icons — category silhouettes, colour = altitude  ⚠️ representation still brainstorming
+- **Top-down silhouettes per ADS-B emitter category**, rotated to heading: light/GA, small, large,
+  heavy/airliner, **helicopter** (rotor glyph), glider, **UAV/drone**, generic/unknown fallback. Built
+  ourselves (inspired by MWPTools' per-category SVG set — A0–A7/B2/C0–C3 — **not copied**).
+- **Recolourable two-element SVG** (MWP-inspired): a **fill** element tinted at runtime by the
+  **altitude colour** + a **contrast outline** (white/black by brightness). This frees colour from
+  encoding the *system*.
+- **System encoded by glyph family** instead of colour: ADS-B uses the category silhouettes,
+  FormationFlight peers the UAV/drone glyph + callsign, Radio Telemetry a generic glyph.
+- **Colour encodes ALTITUDE — relative-to-reference, fixed danger-centred scale (decided):** based purely
+  on the **altitude difference** `Δ = contact.alt − reference.alt` (reference = UAV valid-fix else GCS).
+  **Distance never affects colour.** Violet at our level = highest danger and grabs the eye; it cools off
+  steeply going up and goes hard blue going down (legally nothing should be below us):
+
+  | Δ relative altitude | colour |
+  |---|---|
+  | ≤ −500 m | strong **blue** (constant, contrast outline) |
+  | −500 → 0 m | blue → violet |
+  | **0 m (our level)** | **violet** — max danger |
+  | 0 → +500 m | violet → red |
+  | +500 m | red |
+  | +500 → +1500 m | red → yellow → green |
+  | +1500 m | green |
+  | +1500 → +2000 m | green → white |
+  | +2000 m | white |
+  | > +2000 m | **semi-transparent white + black outline** (fading out — irrelevant) |
+
+  - **Black/contrast outline** throughout for legibility (essential for the blue and the translucent
+    white). Above +2000 m is effectively faded out (and subject to the absolute map cutoff, §4.0).
+  - **No reference at all** ⇒ fall back to the **absolute** MWP-style HSV ramp (red→green→violet, 0–12 km).
+  - **Legend** in the panel Map tab: vertical bar mirroring the scale (blue ↓ / violet centre / green →
+    white ↑). Exact colour stops tuned during B3.
+- **Age → opacity** (fade toward TTL); **out-of-relevance → dim + scale-down**. No-heading contacts use
+  a non-directional dot variant.
+
+### 4.3 Labels — minimal, full on hover/select
+- Default label = **callsign only** (glyph alone when callsign unknown).
+- **Hover / select** reveals the full readout: callsign · category · alt/FL · ground speed · vertical
+  trend (▲/▼) · distance · bearing.
+- Declutter at low zoom: collapse to dots, label on hover/select.
+
+### 4.4 2D (Leaflet, [Map.svelte](../../src/lib/components/Map.svelte)) — B3
+- Dedicated `L.LayerGroup`(s) per system, **diffed** from the enriched store on update.
+- Directional category `divIcon` SVG markers (rotated to heading), callsign label; dim/scale by
+  relevance, opacity by age.
+- Click → **select** (syncs the panel list via the `radarSelection` store). Optional leader line /
+  range ring to the reference.
+
+### 4.5 3D (Cesium, [Map3D.svelte](../../src/lib/components/Map3D.svelte)) — B4
+- Dedicated entity collection: **billboard (silhouette) + label**, positioned at lat/lon and **real
+  altitude** (`alt_m` as MSL via the existing geoid/terrain offset logic, consistent with the UAV track).
+- **Drop-line** (polyline) from each contact straight down to terrain/ground at its lat/lon — so the
+  altitude AND the ground position read at a glance (decided).
+- Unknown-alt contacts: draw at a configurable plane or a ground marker with a stub drop indicator.
+- Billboards face the camera; selection sync; relevance dim via colour alpha + scale. Kept isolated so
+  2D↔3D continuity (ADR-031) and the FPV/HUD work (ADR-034) are unaffected.
+
+### 4.6 Selection
+- Small new `radarSelection` store (selected vehicle id) shared by the panel list ↔ 2D ↔ 3D. Selecting a
+  contact in any view highlights it in all.
 
 ---
 
@@ -188,8 +259,12 @@ existing UAV/track/mission rendering is untouched.
   selection store, the reduced `info`-compact row layout.
 - **B2 — Source tables complete**: online add/remove (Name/URI/Key) + hard-source transport rows
   (Serial/Network/Bluetooth) wired to `radar_configure` / `radar_set_source_enabled`.
-- **B3 — Map 2D**: Leaflet layer, icons, declutter, selection sync.
-- **B4 — Map 3D**: Cesium entities, altitude handling, selection sync.
+- **B3 — Map 2D**: `radarSelection` store + `settings.radar.map.*` + the panel **"Map" tab** controls
+  (show-on-map, radius, alt-band, show-all, per-system visibility); category silhouette icon set;
+  Leaflet layer with diffed directional markers, relevance dim + age fade, minimal label / hover-select,
+  selection sync.
+- **B4 — Map 3D**: Cesium entity collection (billboard + label) at real altitude with **drop-lines**,
+  unknown-alt handling, relevance dim, selection sync — reusing the B3 icon set + map controls.
 
 B0–B2 can proceed in parallel with Plan A Phases 1–4 (real sources); B3–B4 are the final phase.
 
@@ -201,9 +276,17 @@ B0–B2 can proceed in parallel with Plan A Phases 1–4 (real sources); B3–B4
 systems are hidden from the right list · third system UI label = **Radio Telemetry** (internal `radio`) ·
 ESP32 mesh-radar system = **FormationFlight** (formerly INAV-Radar; repos in Plan A §7.2).
 
-- **Icon language** — how visually distinct should ADS-B vs FormationFlight vs Radio Telemetry be on the map?
-  (decide with a quick mock in B3.)
-- **Declutter strategy** in dense ADS-B airspace (nearest-N, radius, zoom-based) — measure first.
-- **Selection model** — reuse an existing selection store or add a small `radarSelection` store.
+**Map decided (2026-06-06):** **distance** relevance is **soft (dim + scale-down) only — never hidden**;
+**altitude** is a **hard absolute map cutoff** (default 10 km, adjustable) with a **+2000 m relative
+override** (always show what's within the colour scale) — hidden-from-map contacts **stay in the list** ·
+filter/visibility controls live in a **panel "Map" tab** (state in `settings.radar.map.*`) · **3D = real
+altitude + drop-line to ground** · icons = **category silhouettes** rotated to heading, **system encoded
+by glyph family** (colour is free for altitude) · **colour = relative altitude, fixed danger-centred
+scale** (§4.2: violet at level → red/yellow/green/white going up, blue going down) — **never distance** ·
+labels = **minimal (callsign), full on hover/select** · **selection** = new small `radarSelection` store
+(panel ↔ 2D ↔ 3D) · **performance** = render-budget cap (nearest-N) + diff updates.
+
+- **Silhouette asset granularity** — final category→glyph set (how many distinct silhouettes) — settle
+  while building the B3 icon set. (MWP ships A0–A7, B2, C0–C3 as a reference grouping.)
 - **Units** — bearing relative vs true; altitude as FL vs display units for ADS-B (likely: ADS-B in FL,
   others in display units) — confirm in B1.
