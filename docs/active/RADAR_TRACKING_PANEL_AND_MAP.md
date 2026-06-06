@@ -132,7 +132,15 @@ Telemetry** (in that order) with a small group header + count. **Disabled system
 system-specific columns — ADS-B: altitude/FL, ground speed, vertical trend (▲/▼), squawk/category;
 FormationFlight: relative altitude, LoRa signal; Radio Telemetry: whatever the link gives. Distance / bearing
 / relative-alt are the frontend-derived fields. Stale rows fade toward TTL. Selecting a row selects the
-vehicle (→ map highlight once Phase 4 lands).
+vehicle (→ map highlight once the map phase lands).
+
+**Shipped layout:** advanced row = `callsign · type · dist · bearing · alt · speed · age` — the **type**
+is a short abbreviation from the ADS-B emitter category (A1…C7 → LGT/SML/LRG/HVY/HELI/GLD/UAV/…; the
+MAVLink receiver maps `emitter_type` to the same code; the aggregator preserves callsign/category/squawk
+across sources). The **info (compact)** view shows `callsign · dist · bearing · alt` (alt column widened
+so the unit never wraps >10 000 m) and caps **ADS-B to the nearest 10** (distance-sorted); the advanced
+view shows all. Distance/bearing reference = connected UAV (valid fix) else GCS; the **online query
+centre** = the map view (2D centre / 3D camera focus), distinct from the reference (Plan A §7.1).
 
 All strings via `$t()` with keys in **en / de / fr**.
 

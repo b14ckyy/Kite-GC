@@ -197,9 +197,15 @@ copied**. Exact message codes/endpoints are confirmed during implementation.
 - **Online (Phase 1 — SHIPPED):** an async `reqwest` poller ([sources/adsb_online.rs](../../src-tauri/src/radar/sources/adsb_online.rs))
   polls all enabled providers each cycle (sequentially) within a **radius** (point query) of a **live
   query centre** and merges them by ICAO.
-  - **Query centre = the connected UAV's position (valid fix) else the map viewport centre** — so the
-    user can scan anywhere by panning when no UAV is connected. Updated live via `radar_set_center`
-    (no pipeline restart); the frontend pushes it on telemetry / map-pan / connection change.
+  - **Two distinct reference points (don't conflate):**
+    1. **Online query centre** (where to *fetch* online ADS-B) = the **map view**: the 2D map centre,
+       or the **3D camera focus over the globe**. *Always the view, never the UAV* — you fetch traffic
+       where you're looking. Updated live via `radar_set_center` (no restart): 2D pan → map centre, 3D
+       camera move-end → `onCamFocus`, plus the 2D/3D mode flip.
+    2. **Distance/bearing reference** (for the list, *all* systems incl. local + MSP) = the **connected
+       UAV** (valid fix) **else the GCS location** (localization API at start). Computed frontend-side
+       (`radarReference`) and applied in `enrichList`. (MSP is implicitly the UAV; online/local inherit
+       this rule.)
   - **Providers (verified):** **adsb.lol**, **adsb.one** (both *built-in* — fixed URL, toggle-only,
     not editable/removable), **adsb.fi** (a *custom* example row, editable/removable). Endpoints (the
     "re-api" / readsb family, `ac[]` JSON):
