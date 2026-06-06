@@ -15,6 +15,8 @@ mod debug {
     impl DebugTracker {
         pub fn new(_polling: &[(u16, f64)], _handshake: &[u16]) -> Self { Self }
         #[inline(always)]
+        pub fn mark_polling(&mut self, _: u16, _: f64) {}
+        #[inline(always)]
         pub fn on_request(&mut self, _: u16, _: usize) {}
         #[inline(always)]
         pub fn on_response(&mut self, _: u16, _: usize) {}
@@ -439,6 +441,7 @@ fn poll_radar_adsb(
     tracker: &mut debug::DebugTracker,
 ) {
     let code = crate::msp::MSP2_ADSB_VEHICLE_LIST;
+    tracker.mark_polling(code, 1.0 / RADAR_MSP_INTERVAL.as_secs_f64());
     tracker.on_request(code, 9);
     match transport.msp_request(code, &[]) {
         Ok(msg) => {

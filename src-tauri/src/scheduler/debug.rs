@@ -141,6 +141,16 @@ impl DebugTracker {
         }
     }
 
+    /// Mark a (possibly dynamically-added) code as an active poll with a target rate, so it shows as
+    /// POLL rather than INIT. Used for conditionally-polled messages like the radar ADS-B list.
+    pub fn mark_polling(&mut self, code: u16, target_rate_hz: f64) {
+        self.ensure_code(code);
+        if let Some(s) = self.stats.get_mut(&code) {
+            s.is_polling = true;
+            s.target_rate_hz = target_rate_hz;
+        }
+    }
+
     /// Record that an MSP request was sent
     pub fn on_request(&mut self, code: u16, frame_bytes: usize) {
         self.ensure_code(code);
