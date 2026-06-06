@@ -73,7 +73,7 @@
     "noContacts": "Keine Kontakte.",
     "expand": "Zum Ausklappen klicken",
     "radius": "Radius",
-    "pollInterval": "Abfrage-Intervall",
+    "pollInterval": "Online-Abfrage-Intervall",
     "onlineSources": "Online-Quellen",
     "providerName": "Name",
     "providerUrl": "URL-Vorlage (lat / lon / dist)",

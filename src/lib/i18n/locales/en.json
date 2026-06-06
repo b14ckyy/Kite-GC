@@ -73,7 +73,7 @@
     "noContacts": "No contacts.",
     "expand": "Click to expand",
     "radius": "Radius",
-    "pollInterval": "Poll interval",
+    "pollInterval": "Online poll interval",
     "onlineSources": "Online sources",
     "providerName": "Name",
     "providerUrl": "URL template (lat / lon / dist)",

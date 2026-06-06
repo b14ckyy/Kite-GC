@@ -60,6 +60,7 @@
     fcVariant = 'INAV',
     mapViewMode = '3d' as '2d' | '3d',
     onToggleMapView,
+    onCamFocus,
   }: {
     active?: boolean;
     playbackTrack?: TelemetryRecord[];
@@ -72,6 +73,8 @@
     fcVariant?: string;
     mapViewMode?: '2d' | '3d';
     onToggleMapView?: () => void;
+    /** Fired on camera move-end with the focus point over the globe — drives the radar query centre. */
+    onCamFocus?: (lat: number, lon: number) => void;
   } = $props();
 
   // ── State ──────────────────────────────────────────────────────────
@@ -713,6 +716,12 @@
     updateNightDim3D();
     nightTimer3D = setInterval(updateNightDim3D, 60_000);
     viewer.camera.moveEnd.addEventListener(updateNightDim3D); // location may cross the terminator
+    // Report the camera focus over the globe so the radar online-query centre can follow the 3D view.
+    viewer.camera.moveEnd.addEventListener(() => {
+      if (!active) return;
+      const f = getCamFocus();
+      if (f) onCamFocus?.(f.lat, f.lon);
+    });
 
         // Subscribe to live telemetry
     unsubTelemetry = telemetry.subscribe((telem) => {

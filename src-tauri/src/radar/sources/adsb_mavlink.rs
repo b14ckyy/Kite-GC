@@ -191,5 +191,47 @@ fn map_adsb_vehicle(av: &mavlink::ardupilotmega::ADSB_VEHICLE_DATA, now: i64) ->
     v.ground_speed_ms = Some(av.hor_velocity as f64 / 100.0); // cm/s → m/s
     v.vertical_speed_ms = Some(av.ver_velocity as f64 / 100.0); // cm/s → m/s
     v.squawk = Some(av.squawk);
+    v.category = emitter_category(&av.emitter_type);
     Some(v)
+}
+
+/// Map MAVLink `ADSB_EMITTER_TYPE` to the same ADS-B category code the online feeds use (A1…C7), so
+/// the frontend's type abbreviation works uniformly. Matches on the Debug name to stay robust across
+/// `mavlink` crate versions; order matters (specific substrings first).
+fn emitter_category(emitter: &mavlink::ardupilotmega::AdsbEmitterType) -> Option<String> {
+    let n = format!("{emitter:?}").to_uppercase();
+    let code = if n.contains("ROTOCRAFT") || n.contains("ROTORCRAFT") {
+        "A7"
+    } else if n.contains("GLIDER") {
+        "B1"
+    } else if n.contains("LIGHTER") {
+        "B2"
+    } else if n.contains("PARACHUTE") {
+        "B3"
+    } else if n.contains("ULTRA") {
+        "B4"
+    } else if n.contains("UAV") {
+        "B6"
+    } else if n.contains("SPACE") {
+        "B7"
+    } else if n.contains("HIGH_VORTEX") {
+        "A4"
+    } else if n.contains("HEAVY") {
+        "A5"
+    } else if n.contains("HIGHLY") {
+        "A6"
+    } else if n.contains("SMALL") {
+        "A2"
+    } else if n.contains("LARGE") {
+        "A3"
+    } else if n.contains("LIGHT") {
+        "A1"
+    } else if n.contains("POINT_OBSTACLE") {
+        "C3"
+    } else if n.contains("SURFACE") {
+        "C1"
+    } else {
+        return None;
+    };
+    Some(code.to_string())
 }

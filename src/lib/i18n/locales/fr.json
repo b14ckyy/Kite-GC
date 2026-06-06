@@ -73,7 +73,7 @@
     "noContacts": "Aucun contact.",
     "expand": "Cliquer pour développer",
     "radius": "Rayon",
-    "pollInterval": "Intervalle d'interrogation",
+    "pollInterval": "Intervalle d'interrogation en ligne",
     "onlineSources": "Sources en ligne",
     "providerName": "Nom",
     "providerUrl": "Modèle d'URL (lat / lon / dist)",

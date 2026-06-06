@@ -281,7 +281,9 @@ fn spawn_aggregator(
                     for v in update.vehicles {
                         let m = maps.entry(v.system).or_default();
                         match m.get_mut(&v.id) {
-                            // Per-system merge by id: latest fields win, accumulate the source set.
+                            // Per-system merge by id: latest dynamic fields win; keep stable identity
+                            // fields (callsign/category/squawk) if the newer source lacks them, and
+                            // accumulate the source set.
                             Some(existing) => {
                                 let mut srcs = existing.sources.clone();
                                 for s in &v.sources {
@@ -289,8 +291,14 @@ fn spawn_aggregator(
                                         srcs.push(*s);
                                     }
                                 }
+                                let prev_callsign = existing.callsign.take();
+                                let prev_category = existing.category.take();
+                                let prev_squawk = existing.squawk.take();
                                 *existing = v;
                                 existing.sources = srcs;
+                                existing.callsign = existing.callsign.take().or(prev_callsign);
+                                existing.category = existing.category.take().or(prev_category);
+                                existing.squawk = existing.squawk.take().or(prev_squawk);
                             }
                             None => {
                                 m.insert(v.id.clone(), v);

@@ -430,8 +430,6 @@
     // Auto-refresh the logbook on disconnect (picks up a just-recorded live flight) — replaces
     // the manual Refresh button. Disarm is covered by the flight-recording-ended listener.
     if (wasConnected && c.status !== 'connected') void loadLogbook();
-    // Connection state flips the ADS-B centre source (UAV ↔ map viewport).
-    updateRadarCenter();
   });
   availablePorts.subscribe((p) => {
     ports = p;
@@ -478,21 +476,32 @@
   panels = saved.panels ?? defaultPanels;
 
   // ── Radar (foreign-vehicle tracking) — independent of the main connection ──
-  /** ADS-B query centre: the connected UAV's position (if a valid fix) else the map viewport centre,
-   *  so the user can scan anywhere by panning when no UAV is connected. */
-  function computeRadarCenter(): [number, number] {
-    const t = get(telemetry);
-    if (connStatus === 'connected' && isValidGpsCoordinate(t.lat, t.lon) && t.fixType >= 2) {
-      return [t.lat, t.lon];
+  /** ONLINE ADS-B query centre = the map *view*: the 2D map centre, or the 3D camera focus over the
+   *  globe. Always the view — NOT the UAV — so the user fetches traffic where they're looking.
+   *  (Distance/bearing is referenced separately, see `radarReference`.) */
+  function radarQueryCenter(): [number, number] {
+    if (mapViewMode === '3d') {
+      const f = map3dRef?.getCamFocus?.();
+      if (f) return [f.lat, f.lon];
     }
     const c = get(settings).map.center;
     return [c[0], c[1]];
   }
+  /** Distance/bearing reference for ALL tracked vehicles: the connected UAV (valid fix), else the
+   *  GCS location from the localization API. (MSP is implicitly the UAV; local/online inherit this.) */
+  const radarReference = $derived.by<{ lat: number; lon: number } | null>(() => {
+    const t = $telemetry;
+    if (connStatus === 'connected' && isValidGpsCoordinate(t.lat, t.lon) && t.fixType >= 2) {
+      return { lat: t.lat, lon: t.lon };
+    }
+    return $userGeoLocation;
+  });
+
   let lastRadarCenterKey = '';
-  /** Push the live centre when it moved meaningfully (~100 m). Cheap; no pipeline restart. */
+  /** Push the live query centre when it moved meaningfully (~100 m). Cheap; no pipeline restart. */
   function updateRadarCenter() {
     if (!radarSettings.enabled || !radarSettings.adsb.enabled) return;
-    const [lat, lon] = computeRadarCenter();
+    const [lat, lon] = radarQueryCenter();
     const key = `${lat.toFixed(3)},${lon.toFixed(3)}`;
     if (key === lastRadarCenterKey) return;
     lastRadarCenterKey = key;
@@ -500,7 +509,7 @@
   }
   /** Build + push the backend radar config (starts/stops the pipeline). */
   function pushRadarConfig() {
-    const [lat, lon] = computeRadarCenter();
+    const [lat, lon] = radarQueryCenter();
     lastRadarCenterKey = `${lat.toFixed(3)},${lon.toFixed(3)}`;
     resetRadarStatus(); // sources restart on configure — drop stale per-provider status
     void configureRadar({
@@ -524,11 +533,12 @@
   if (typeof window !== 'undefined') {
     void startRadarListeners();
     pushRadarConfig();
-    // Keep the centre live: UAV telemetry (when connected) and map pans (settings.map.center) both
-    // feed updateRadarCenter; the ~100 m change-gate keeps the call count low.
-    telemetry.subscribe(() => updateRadarCenter());
+    // Query centre follows the map view: 2D pans update settings.map.center (broad subscribe, gated by
+    // the ~100 m key); 3D camera moves come via Map3D's onCamFocus; the mode flip via the effect below.
     settings.subscribe(() => updateRadarCenter());
   }
+  // Re-aim the online query centre when the 2D/3D view mode flips.
+  $effect(() => { void mapViewMode; updateRadarCenter(); });
 
   // Auto-start video with the last settings if it was running at last close.
   if (typeof window !== 'undefined') void initVideo();
@@ -1652,6 +1662,7 @@
           fcVariant={replayFcVariant}
           {mapViewMode}
           onToggleMapView={toggleMapView}
+          onCamFocus={() => updateRadarCenter()}
         />
       </div>
     {/if}
@@ -1828,7 +1839,7 @@
     {:else if activeTab === 'mission'}
       <MissionPanel />
     {:else if activeTab === 'radar'}
-      <RadarPanel radar={radarSettings} {interfaceSettings} userLocation={$userGeoLocation} onPatch={applySettingsPatch} />
+      <RadarPanel radar={radarSettings} {interfaceSettings} referencePoint={radarReference} onPatch={applySettingsPatch} />
     {:else if activeTab === 'video'}
       <VideoPanel />
     {:else if DEV_MODE && activeTab === 'dev-playground'}

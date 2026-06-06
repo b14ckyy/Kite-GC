@@ -16,15 +16,17 @@
   import type { PortInfo } from '$lib/stores/connection';
   import { convertSpeed, convertAltitude, convertDistance, formatConverted } from '$lib/utils/units';
 
-  let { radar, interfaceSettings, userLocation = null, onPatch = (_p: Partial<AppSettings>) => {} }: {
+  let { radar, interfaceSettings, referencePoint = null, onPatch = (_p: Partial<AppSettings>) => {} }: {
     radar: RadarSettings;
     interfaceSettings: InterfaceSettings;
-    userLocation?: { lat: number; lon: number } | null;
+    /** Distance/bearing reference: connected UAV (valid fix) else the GCS location. */
+    referencePoint?: { lat: number; lon: number } | null;
     onPatch?: (patch: Partial<AppSettings>) => void;
   } = $props();
 
   const RADIUS_STEPS = [10, 25, 50, 75, 100];
   const POLL_STEPS = [2, 5, 10, 30]; // provider limit ≈ 1 req/s, so ≥2 s
+  const COMPACT_ADSB_MAX = 10; // info view shows only the nearest N ADS-B contacts
 
   // Patch helpers — edit the nested radar settings (onPatch merges shallowly at the top level).
   const patchRadar = (partial: Partial<RadarSettings>) => onPatch({ radar: { ...radar, ...partial } });
@@ -72,9 +74,9 @@
   // Enabled systems → groups (label + enriched, distance-sorted list). Disabled systems are hidden.
   const groups = $derived(
     [
-      { key: 'adsb', enabled: radar.adsb.enabled, label: $t('radar.adsb'), list: enrichList($radarVehicles.adsb, userLocation) },
-      { key: 'formationFlight', enabled: radar.formationFlight.enabled, label: $t('radar.formationFlight'), list: enrichList($radarVehicles.formationFlight, userLocation) },
-      { key: 'radio', enabled: radar.radio.enabled, label: $t('radar.radio'), list: enrichList($radarVehicles.radio, userLocation) },
+      { key: 'adsb', enabled: radar.adsb.enabled, label: $t('radar.adsb'), list: enrichList($radarVehicles.adsb, referencePoint) },
+      { key: 'formationFlight', enabled: radar.formationFlight.enabled, label: $t('radar.formationFlight'), list: enrichList($radarVehicles.formationFlight, referencePoint) },
+      { key: 'radio', enabled: radar.radio.enabled, label: $t('radar.radio'), list: enrichList($radarVehicles.radio, referencePoint) },
     ].filter((g) => g.enabled),
   );
 
@@ -105,6 +107,14 @@
   const fmtBrg = (b: number | null) => (b == null ? '—' : `${Math.round(b)}°`);
   const fmtAge = (lastSeenMs: number) => `${Math.max(0, Math.round((Date.now() - lastSeenMs) / 1000))}s`;
   const label = (v: EnrichedVehicle) => v.callsign?.trim() || v.id;
+
+  // ADS-B emitter category code (A1…C7) → short type abbreviation (weight class / heli / glider / …).
+  const CATEGORY_ABBREV: Record<string, string> = {
+    A1: 'LGT', A2: 'SML', A3: 'LRG', A4: 'LRG+', A5: 'HVY', A6: 'HPF', A7: 'HELI',
+    B1: 'GLD', B2: 'LTA', B3: 'PARA', B4: 'ULT', B6: 'UAV', B7: 'SPC',
+    C1: 'SURF', C2: 'SURF', C3: 'OBST', C4: 'OBST', C5: 'OBST', C6: 'OBST', C7: 'OBST',
+  };
+  const categoryAbbrev = (cat: string | null | undefined) => (cat ? (CATEGORY_ABBREV[cat] ?? '') : '');
 </script>
 
 <PanelShell
@@ -292,9 +302,12 @@
           {#if g.list.length === 0}
             <p class="radar-empty">{$t('radar.noContacts')}</p>
           {:else}
-            {#each g.list as v (v.id)}
+            <!-- Info view caps ADS-B to the nearest COMPACT_ADSB_MAX (sorted by distance). -->
+            {@const rows = compact && g.key === 'adsb' ? g.list.slice(0, COMPACT_ADSB_MAX) : g.list}
+            {#each rows as v (v.id)}
               <div class="radar-row" class:compact>
                 <span class="r-call">{label(v)}</span>
+                {#if !compact}<span class="r-type" title={v.category ?? ''}>{categoryAbbrev(v.category)}</span>{/if}
                 <span class="r-dist">{fmtDist(v.distanceM)}</span>
                 <span class="r-brg">{fmtBrg(v.bearingDeg)}</span>
                 <span class="r-alt">{fmtAlt(v.altM)}</span>
@@ -425,7 +438,8 @@
 
   .radar-row {
     display: grid;
-    grid-template-columns: 1.4fr 0.9fr 0.7fr 0.9fr 0.9fr 0.6fr;
+    /* call · type · dist · brg · alt · spd · age — age is narrow (secs are ≤2 digits). */
+    grid-template-columns: 1.25fr 0.55fr 0.85fr 0.6fr 0.95fr 0.9fr 0.42fr;
     gap: 6px;
     align-items: center;
     padding: 4px 4px;
@@ -434,7 +448,10 @@
     font-variant-numeric: tabular-nums;
   }
   .radar-row:nth-child(even) { background: rgba(255, 255, 255, 0.03); }
-  .radar-row.compact { grid-template-columns: 1.4fr 0.9fr 0.7fr 0.9fr; }
+  /* Info view: call · dist · brg · alt — altitude a touch wider so the unit never wraps (>10 000 m). */
+  .radar-row.compact { grid-template-columns: 1.4fr 0.9fr 0.7fr 1.1fr; }
   .r-call { color: #e8e8e8; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .r-type { color: #8fb4c5; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .r-dist, .r-brg, .r-alt, .r-spd, .r-age { color: #b8b8b8; text-align: right; }
+  .r-alt { white-space: nowrap; }
 </style>
