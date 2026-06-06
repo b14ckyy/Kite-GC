@@ -157,9 +157,15 @@ pub struct SourceUpdate { pub source: VehicleSource, pub vehicles: Vec<TrackedVe
 - Each source runs **independently** (HTTP pollers on a thread with their own interval; serial
   receivers in a read loop; the scheduler-fed ones push from the scheduler thread — see §6).
 - The `RadarManager` runs a single **aggregator** loop: drains `SourceUpdate`s, applies **per-system
-  dedup** (`dedup.rs`: group by `system`, key by `id`, last-write-wins per field with the freshest
-  `last_seen_ms`; `sources` accumulates which feeds reported it), prunes entries older than the
-  per-system TTL, and emits a consolidated snapshot.
+  dedup** (group by `system`, key by `id`; latest dynamic fields win, stable identity fields
+  callsign/category/squawk are kept when a newer source lacks them; `sources` accumulates which feeds
+  reported it), prunes entries older than the per-system TTL, and emits a consolidated snapshot.
+  - **ID normalization:** ADS-B ids are upper-case ICAO hex across all sources (online uppercases its
+    `hex`; the MAVLink/MSP receivers use `{:06X}`) so the same aircraft from different feeds merges.
+  - **Cross-source debounce (SHIPPED):** once a contact's position is set by one source, positional
+    updates from a *different* source are ignored for **2 s** (`SOURCE_DEBOUNCE_MS`); same-source
+    refreshes always apply. The fastest realtime feed (hardware ≈1 s) keeps ownership; lagging online
+    feeds (≤ every 2 s) only fill gaps → no marker jitter from mixing leading/lagging sources.
 - **Event:** `radar-vehicles` — a snapshot `{ adsb: [...], formationFlight: [...], radio: [...], stats }`.
   Emitted on change, throttled (e.g. ≤5 Hz) to avoid flooding the WebView. Same event name
   regardless of which sources are active (mirrors the project's protocol-agnostic event rule).

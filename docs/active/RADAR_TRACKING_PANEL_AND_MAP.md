@@ -177,13 +177,14 @@ existing UAV/track/mission rendering is untouched. Design decided 2026-06-06 (se
 ### 4.1 Controls — Radar panel "Map" section
 - A **"Map" tab** appended to the panel's dynamic `SegmentedToggle` (after the per-system tabs). Its
   left pane hosts the map controls; the right vehicle list stays as-is.
-- Controls: master **"Show radar on map"** toggle · **Radius** (soft dim) · **Max altitude** (hard
-  absolute ADS-B map ceiling, default 10 km, adjustable) · **Show all** toggle · **per-system map
-  visibility** toggles (ADS-B / FormationFlight / Radio) — independent of the data-enable in Settings
-  (track a system but hide it on the map). Plus the **altitude colour legend** (§4.2). The +2000 m
-  relative override (§4.0) is fixed (tied to the top of the colour scale), not a user control.
-- State persists under `settings.radar.map.*` (`showOnMap`, `radiusKm`, `maxAltM`, `showAll`, per-system
-  `visible`), reactive to both 2D and 3D.
+- One **"Map visibility"** group: **Show all** (top — when on, radius + max-altitude are disabled since
+  they have no effect) · **Radius** (soft dim) · **Max altitude** (hard absolute ADS-B map ceiling,
+  default 10 km, adjustable) · **per-system map visibility** toggles (ADS-B / FormationFlight / Radio,
+  independent of the data-enable in Settings — track a system but hide it on the map). Below it the
+  **altitude colour legend** (§4.2). No separate "show on map" master — per-system visibility (all off)
+  covers it. The +2000 m relative override (§4.0) is fixed (tied to the top of the colour scale).
+- State persists under `settings.radar.map.*` (`radiusKm`, `maxAltM`, `showAll`, per-system `visible`),
+  reactive to both 2D and 3D.
 
 ### 4.2 Icons — category silhouettes, colour = altitude  ⚠️ representation still brainstorming
 - **Top-down silhouettes per ADS-B emitter category**, rotated to heading: light/GA, small, large,
@@ -195,7 +196,9 @@ existing UAV/track/mission rendering is untouched. Design decided 2026-06-06 (se
 - **System encoded by glyph family** instead of colour: ADS-B uses the category silhouettes,
   FormationFlight peers the UAV/drone glyph + callsign, Radio Telemetry a generic glyph.
 - **Colour encodes ALTITUDE — relative-to-reference, fixed danger-centred scale (decided):** based purely
-  on the **altitude difference** `Δ = contact.alt − reference.alt` (reference = UAV valid-fix else GCS).
+  on the **altitude difference** `Δ = contact.alt − reference.alt`. **Reference altitude** = the UAV's
+  **GPS MSL** altitude when connected with a fix, else the **GCS terrain ground level** from
+  `terrain_elevation(lat,lon)` (so the scale works without a UAV), else null → absolute fallback.
   **Distance never affects colour.** Violet at our level = highest danger and grabs the eye; it cools off
   steeply going up and goes hard blue going down (legally nothing should be below us):
 
@@ -215,8 +218,9 @@ existing UAV/track/mission rendering is untouched. Design decided 2026-06-06 (se
   - **Black/contrast outline** throughout for legibility (essential for the blue and the translucent
     white). Above +2000 m is effectively faded out (and subject to the absolute map cutoff, §4.0).
   - **No reference at all** ⇒ fall back to the **absolute** MWP-style HSV ramp (red→green→violet, 0–12 km).
-  - **Legend** in the panel Map tab: vertical bar mirroring the scale (blue ↓ / violet centre / green →
-    white ↑). Exact colour stops tuned during B3.
+  - **Legend** in the panel Map tab (title *"Altitude Scale (Rel. to UAV/GCS)"*): a **horizontal** bar
+    linear over Δ −500…+2000 m (blue → violet → red → yellow → green → white), with a tick at the
+    **20 %** mark = our level (Δ = 0, violet); labels below / level / above.
 - **Age → opacity** (fade toward TTL); **out-of-relevance → dim + scale-down**. No-heading contacts use
   a non-directional dot variant.
 
@@ -259,10 +263,10 @@ existing UAV/track/mission rendering is untouched. Design decided 2026-06-06 (se
   selection store, the reduced `info`-compact row layout.
 - **B2 — Source tables complete**: online add/remove (Name/URI/Key) + hard-source transport rows
   (Serial/Network/Bluetooth) wired to `radar_configure` / `radar_set_source_enabled`.
-- **B3 — Map 2D**: `radarSelection` store + `settings.radar.map.*` + the panel **"Map" tab** controls
-  (show-on-map, radius, alt-band, show-all, per-system visibility); category silhouette icon set;
-  Leaflet layer with diffed directional markers, relevance dim + age fade, minimal label / hover-select,
-  selection sync.
+- **B3 — Map 2D. ✅ SHIPPED.** `radarSelection` store + `settings.radar.map.*` + the panel **"Map" tab**
+  controls (show-all, radius, max-altitude, per-system visibility) + horizontal altitude legend;
+  category silhouette icon set + relative-altitude colormap helper; Leaflet layer with diffed directional
+  markers, distance dim+scale, altitude cutoff/override, callsign label / hover tooltip, selection sync.
 - **B4 — Map 3D**: Cesium entity collection (billboard + label) at real altitude with **drop-lines**,
   unknown-alt handling, relevance dim, selection sync — reusing the B3 icon set + map controls.
 
