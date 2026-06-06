@@ -1437,5 +1437,58 @@ the *shared telemetry stream* (live ↔ replay ↔ source-switch), not of any on
 
 ---
 
+## ADR-033: Real-Time Lighting + Day/Night Dimming (2D & 3D)
+
+**Date**: 2026-06-06
+**Status**: Accepted
+**Related**: ADR-031 (2D↔3D View Continuity)
+
+**Context**: Cesium already renders a physically-correct sun/moon (`Simon1994PlanetaryPositions`) and
+a globe day/night terminator (`globe.enableLighting`), but nothing drove the clock or surfaced it.
+We wanted (a) real lighting on the 3D globe optionally tied to the replayed flight's time, and (b) a
+"Night Mode" that darkens the **map imagery** (2D Leaflet + 3D globe) like Cesium's night side — for
+readability and as a nice touch (it also makes the app correct for a future space-vehicle use).
+
+**Decision**:
+- **Sky clock source priority** (3D): a DEV-only time-of-day slider → the replay log's timestamp
+  (when *Log Replay Time* is on) → real wall-clock `now`. Telemetry `timestamp_ms` is **flight-relative**,
+  so the absolute instant for the sun is `flight.start_time` (RFC3339, DB) `+ timestamp_ms`. *Log
+  Replay Time* is gated on *Real Daytime and Lighting* (no effect without it). The LogPlayer shows the
+  reconstructed wall-clock time-of-day, formatted in **UTC** (the DB stores the log's reported time
+  verbatim in the UTC fields — INAV's local clock round-trips correctly; ArduPilot TZ is a known TODO).
+- **Night dimming = the darker of two continuous brightness curves, never stacked.** Both 2D and 3D
+  share `cesiumLikeBrightness(α) = clamp(max(sin α,0)·0.9 + 0.3, 0.3, 1.0)` — a re-derivation of the
+  GlobeFS night floor (`vertexShadowDarkness 0.3`, `lambertDiffuseMultiplier 0.9` → night = ×0.3).
+  - **3D imagery** is dimmed via `ImageryLayer.brightness` (NOT a CSS/canvas filter), so entities,
+    sky and sun stay bright — exactly like the real-lighting night side. Night Mode **OFF** → 1.0;
+    **ON** → forces `enableLighting = false` (uniform flat 0.3 ground; sky/sun still real) + imagery
+    0.3; **AUTO** → `imageryBrightness = min(cesiumFactor, nightFactor) / cesiumFactor`, where
+    `cesiumFactor` is the viewed location at the clock time (1.0 if lighting off) and `nightFactor` is
+    the **user's physical location** at system time. The ratio means the extra dim engages *only*
+    where Night Mode is darker than Cesium's own shading — no double-dark, and the soft terminator is
+    preserved across the day↔night transition (the earlier binary test produced a "too dark, then pops
+    to 0.3" artefact in the twilight band).
+  - **2D Leaflet** has no lighting, so it applies the same `nightFactor` directly as a `brightness()`
+    filter on the imagery tile-layer containers only (telemetry/markers untouched), with a CSS fade.
+- **User location (Night-Mode AUTO)** is decoupled from the camera/view entirely (orbiting the globe
+  must not flip night). It is persisted (`settings.userLocation`) and refreshed from, in priority: an
+  OS geolocation check (app start + a manual button) → the first valid UAV GPS fix per connection
+  (`fixType ≥ 3`, HDOP < 10 — coarse is fine). `resolveUserLocation()` falls back stored → home →
+  persisted map centre, never the live camera.
+
+**Rationale**: imagery-brightness (vs a canvas filter) is the only way to keep entities/sky bright in
+3D and matches the 2D "dim imagery only" behaviour. The min-of-curves ratio is what makes "Night Mode
+only takes over when Cesium is brighter than it" literally true and removes the twilight artefact.
+Persisting the location + UAV-GPS refresh means AUTO works offline in the field without a per-frame
+location lookup.
+
+**Consequences**: a render bug class to remember — with `requestRenderMode: true`, any state change
+that affects appearance but not geometry (e.g. toggling `enableLighting`) MUST call
+`scene.requestRender()` or it only shows on the next camera move. The sun is tied to the clock, not
+the flight date unless *Log Replay Time* is on. ArduPilot log timezone handling is unverified (INAV is
+correct as-is) and tracked as a TODO.
+
+---
+
 *End of Architecture Decision Records*
 

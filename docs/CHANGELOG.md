@@ -7,7 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **3D real-time lighting + day/night dimming (ADR-033).** New *Real Daytime and Lighting (3D)* setting
+  lights the Cesium globe with the real sun position. *Log Replay Time (3D)* (gated on the former) drives
+  the sky clock from the replayed flight's actual date/time, reconstructed from the flight start time +
+  the relative telemetry timestamp — so the sun matches the real flight conditions and moves with the
+  scrubber. A DEV-only time-of-day slider (top-right) lets you preview the lighting across 00:00–23:59.
+- **Night Mode (2D & 3D)** — Off / Auto / On. Darkens only the map imagery (telemetry, markers, sky and
+  sun stay bright) to Cesium's night brightness (×0.3). *Auto* fades smoothly at sunset based on your
+  physical location + system time; combined with real lighting it always takes the *darker* of the two
+  (never stacked, soft terminator preserved). *On* forces a flat night ground while keeping the real sky.
+- **Your Location** setting (under Night Mode) with a one-click *Detect* button. The location is found via
+  OS geolocation (on start + on demand) or the first valid UAV GPS fix per connection, persisted across
+  sessions, and used only for Night-Mode *Auto* — never tied to the camera/view.
+- **Log player shows the time-of-day** (flight start + elapsed) at the current playback position.
+
 ### Fixed
+- **3D lighting toggle now refreshes immediately.** Turning *Real Daytime and Lighting* on/off updated
+  the globe only on the next camera move (`requestRenderMode` needs an explicit `requestRender()` after
+  an appearance-only state change).
 - **Terrain profile chart — readable labels in compact layouts.** The altitude (Y) axis labels could
   overlap on big elevation ranges in the compact-wide view / on small screens; the axis tick counts now
   scale with the available plot size. Waypoint numbers (dense survey patterns especially) are lifted
