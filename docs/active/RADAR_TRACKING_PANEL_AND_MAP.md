@@ -102,7 +102,9 @@ The selected tab swaps the left content. Composition per system:
 - **ADS-B (SHIPPED):** **Online sources** then **Local sources**, both under one heading group.
   - **Online sources** — two *built-in* rows (adsb.lol / adsb.one: fixed URL, toggle-only, not
     removable) + *custom* rows (e.g. adsb.fi: `Name · URL · API-Key`, removable). Plus **Radius**
-    (10/25/50/75/100 km) and **Poll interval** (2/5/10/30 s) dropdowns.
+    (10/25/50/75/100 km) and **Online poll interval** (2/5/10/30 s) dropdowns, and a **"UAV Source"**
+    toggle (ADS-B from the FC via MSP, with a contact counter) — shown only on **INAV 8.0+**
+    (`Feature::AdsbMsp`), hidden + polling off otherwise.
   - **Local sources** — hardware receivers; Phase 2 = **serial MAVLink** (a **serial-port dropdown**
     from `list_serial_ports` + a ⟳ refresh + baud select). `+ Add receiver`.
   - **Collapse-on-enable:** an enabled source row collapses to a single line (name + status + toggle);

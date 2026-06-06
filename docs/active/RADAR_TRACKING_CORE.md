@@ -1,8 +1,8 @@
 # Radar Tracking — Core & Sources (Plan A)
 
-> Status: **In progress** (2026-06-06). **Phase 0 (core) + Phase 1 (ADS-B online) + Phase 2 (ADS-B
-> serial MAVLink receiver) shipped**; next: ADS-B TCP transport, then Phase 3 (FormationFlight).
-> Concrete plan for the *foreign-vehicle tracking* subsystem ("Radar").
+> Status: **In progress** (2026-06-06). **Shipped: Phase 0 (core), Phase 1 (ADS-B online), Phase 2
+> (ADS-B serial MAVLink receiver), Phase 4 (ADS-B from UAV via MSP, INAV 8.0+)**; next: ADS-B TCP
+> transport, Phase 3 (FormationFlight). Concrete plan for the *foreign-vehicle tracking* subsystem.
 > This doc covers the **backend subsystem + data sources** (Phases 0–3). The user-facing **Advanced
 > Panel + map visualization** is a separate plan — see `RADAR_TRACKING_PANEL_AND_MAP.md` (Plan B). An
 > ADR will be written once the core architecture is locked.
@@ -236,8 +236,18 @@ copied**. Exact message codes/endpoints are confirmed during implementation.
   - Verified live: ~9 frames/s, contacts match Flightradar.
   - (Possible future: selectable per-source protocol parser — MAVLink / Beast / raw / GDL90 — if a
     device can't do MAVLink. Not needed so far.)
-- **MSP from FC (later):** the connected INAV UAV's onboard ADS-B receiver list, via the scheduler
-  radar slot (§6). Confirm the INAV MSP code for the ADS-B vehicle list.
+- **ADS-B from the UAV via MSP — Phase 4, SHIPPED (INAV 8.0+).** ([sources/adsb_msp.rs](../../src-tauri/src/radar/sources/adsb_msp.rs))
+  The MSP scheduler polls `MSP2_ADSB_VEHICLE_LIST` (**0x2090**) at 1 Hz **only when enabled** (opt-in;
+  bandwidth-heavy) and pushes decoded contacts (source `AdsbMsp`) into the radar aggregator via a
+  bridge: `AppState.radar_ingest` (the aggregator's `Sender`, `Some` while radar runs) + an
+  `AtomicBool` flag the scheduler reads each loop (runtime-toggle, no reconnect). Payload: header
+  (max_vehicles, callsign_len=9, two u32 totals) then per slot callsign[9] · u32 icao · i32 lat/lon
+  (degE7) · i32 alt (cm) · u16 heading (deg) · u8 tslc · u8 emitterType · u8 ttl (slot empty when
+  ttl/icao 0). Emits the per-source status as **"UAV (MSP)"**.
+  - **Feature-gated**: a new `Feature::AdsbMsp` (INAV ≥ 8.0.0) → `FeatureSet.adsb_msp`, shown in the
+    UAV-Info feature list. The frontend hides the **"UAV Source"** toggle and forces the poll off when
+    the FC doesn't support it (older INAV, or MAVLink which has no FeatureSet).
+  - Distance reference is automatically the UAV (an MSP link is connected).
 - **Network feeder (optional, low priority):** a local dump1090 over TCP — JSON `aircraft.json` or
   SBS/BaseStation port 30003. Only if a non-MAVLink feeder is actually wanted; the user's hardware is
   MAVLink, so this is deferred/optional.
@@ -338,8 +348,9 @@ ADS-B needs none; radio telemetry is last because it depends on the shared telem
 - **Phase 3 — FormationFlight.** Own serial; decode the peer table. Hardware on hand and well
   documented → bench test (module on a craft + USB to PC, no flight needed) confirms we read peers
   correctly.
-- **Phase 4 — ADS-B from FC (MSP).** Scheduler radar slot (§6); INAV ADS-B list decode; INAV/version
-  gate. Optional non-MAVLink network feeder (dump1090) only if wanted.
+- **Phase 4 — ADS-B from the UAV via MSP. ✅ SHIPPED.** Scheduler 1 Hz poll of MSP2_ADSB_VEHICLE_LIST
+  (0x2090) → radar pipeline via the `radar_ingest` bridge + an enable flag; `Feature::AdsbMsp` gate
+  (INAV 8.0+), "UAV Source" toggle. Optional non-MAVLink network feeder (dump1090) only if wanted.
 - **Phase 5 — Radio telemetry.** After the shared telemetry parser lands: wire its second (radar) sink;
   CRSF / MAVLink-#33 / FrSkyX.
 
