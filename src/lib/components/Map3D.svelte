@@ -43,11 +43,14 @@
     buildDisplayNumbers, isFlightPathWp, findMissionEndIndex, findPreviousGeoWp,
   } from "$lib/helpers/missionGeometry";
   import { resolveMissionAltitudes, type WpMsl } from "$lib/helpers/terrainProfile";
+  import { sunAltitudeDeg, cesiumLikeBrightness } from "$lib/utils/sun";
+  import { ensureUserLocation, resolveUserLocation, userGeoLocation } from "$lib/helpers/userLocation";
 
   let {
     active = true,
     playbackTrack = [],
     playbackPoint = null,
+    replayStartEpochMs = null,
     trackColorMode = 'flightmode' as TrackColorMode,
     platformType = PLATFORM_MULTIROTOR as PlatformType,
     modelOverride = 'auto' as UavModelOverride,
@@ -58,6 +61,8 @@
     active?: boolean;
     playbackTrack?: TelemetryRecord[];
     playbackPoint?: TelemetryRecord | null;
+    /** Absolute flight-start epoch (ms); playbackPoint.timestamp_ms is relative to this. */
+    replayStartEpochMs?: number | null;
     trackColorMode?: TrackColorMode;
     platformType?: PlatformType;
     modelOverride?: UavModelOverride;
@@ -96,6 +101,21 @@
   let decoLoading = false;                           // suppress deco growth during an (async) track load
   let curtainEnabled = true;                         // settings.altitudeCurtain3D
   const DECO_CHUNK_MAX = 150;                        // finalize a chunk at this many points
+
+  // ── Sun / lighting ────────────────────────────────────────────────
+  let lightingEnabled = false;                       // settings.realLighting3D → globe sun-shading
+  let replayTimeEnabled = false;                     // settings.logReplayTime → clock from log timestamp
+  let nightModeSetting: 'off' | 'auto' | 'on' = 'off'; // settings.nightMode2D (also applies to 3D)
+  // Dev tool: override the sky clock with a manual time-of-day to preview lighting.
+  let devTimeActive = $state(false);                 // slider overrides clock when on
+  let devTimeMin = $state(12 * 60);                  // minutes since midnight (local solar at view lon)
+  // Night dimming: Cesium's own night side is ×0.3; we darken ONLY the imagery layers to
+  // match (entities/sky stay bright, like the 2D map). Applied as the *darker of the two*
+  // sources — never stacked on top of the real-lighting night shading.
+  const NIGHT_BRIGHTNESS_3D = 0.3;
+  let appliedImageryBrightness = 1.0;                // last value pushed to imagery layers
+  let nightTimer3D: ReturnType<typeof setInterval> | undefined; // auto re-check (system-time drift)
+  let unsubUserGeo: (() => void) | undefined;        // recompute when OS geolocation resolves
 
   // ── Mission overlay (mirrors the 2D map: same markers/lines + drop-lines) ──
   let missionEntities: Cesium.Entity[] = [];
@@ -379,6 +399,10 @@
       }
     }
 
+    // Fresh layers default to brightness 1.0 → reset our cache and re-apply night dim.
+    appliedImageryBrightness = 1.0;
+    updateNightDim3D();
+
     viewer.scene.requestRender();
   }
 
@@ -556,6 +580,9 @@
       mapProviderId = s.mapProvider || 'osm';
       cacheMaxMB = s.mapCacheMaxMB || 0;
       curtainEnabled = s.altitudeCurtain3D ?? true;
+      lightingEnabled = s.realLighting3D ?? false;
+      replayTimeEnabled = s.logReplayTime ?? false;
+      nightModeSetting = s.nightMode2D ?? 'off';
     });
     unsubSettings(); // read once, unsubscribe
 
@@ -634,12 +661,23 @@
     // Limit tile cache to reduce RAM usage
     viewer.scene.globe.tileCacheSize = 100;   // default 100 tiles
 
-    // Lighting
-    viewer.scene.globe.enableLighting = false;
+    // Lighting — real sun shading on the globe (opt-in). The sky Sun/Moon billboards
+    // always render; this only toggles the day/night terminator on the terrain.
+    // (Night Mode ON forces this off for a flat ground — handled in updateNightDim3D.)
+    viewer.scene.globe.enableLighting = lightingEnabled && nightModeSetting !== 'on';
 
     // Initial camera: frame the SAME spot the 2D map currently shows (center + zoom),
     // positioned immediately — no fly-to sweep. Mirrors every later 2D→3D switch.
     setCameraFromMapView();
+
+    // Seed the sky clock (wall-clock now, or per the time-source priority).
+    applyClockTime();
+    // Seed night dimming + keep it fresh as the real system time drifts (auto mode).
+    ensureUserLocation(); // OS geolocation for Night-Mode auto (resolves async)
+    unsubUserGeo = userGeoLocation.subscribe(() => updateNightDim3D()); // recompute once it resolves
+    updateNightDim3D();
+    nightTimer3D = setInterval(updateNightDim3D, 60_000);
+    viewer.camera.moveEnd.addEventListener(updateNightDim3D); // location may cross the terminator
 
         // Subscribe to live telemetry
     unsubTelemetry = telemetry.subscribe((telem) => {
@@ -704,6 +742,21 @@
         curtainEnabled = curtain;
         forceDecoRebuild(); // add/remove the curtain walls
       }
+      const lighting = next.realLighting3D ?? false;
+      if (lighting !== lightingEnabled) {
+        lightingEnabled = lighting;
+        updateNightDim3D(); // owns enableLighting + re-evaluates the night dim
+      }
+      const replayTime = next.logReplayTime ?? false;
+      if (replayTime !== replayTimeEnabled) {
+        replayTimeEnabled = replayTime;
+        applyClockTime();
+      }
+      const nightMode = next.nightMode2D ?? 'off';
+      if (nightMode !== nightModeSetting) {
+        nightModeSetting = nightMode;
+        updateNightDim3D();
+      }
     });
 
     // Mission overlay — re-render on mission / visibility / launch changes.
@@ -735,6 +788,9 @@
     chaseLerpActive = false;
     orbitLerpActive = false;
     if (smRaf) cancelAnimationFrame(smRaf);
+    if (nightTimer3D) clearInterval(nightTimer3D);
+    unsubUserGeo?.();
+    if (viewer && !viewer.isDestroyed()) viewer.camera.moveEnd.removeEventListener(updateNightDim3D);
     if (decoTrailingTimer != null) clearTimeout(decoTrailingTimer);
     if (decoRebuildTimer != null) clearTimeout(decoRebuildTimer);
     if (camDragHandler) { camDragHandler.destroy(); camDragHandler = undefined; }
@@ -752,6 +808,102 @@
       viewer.destroy();
     }
   });
+
+  // ── Sky clock (sun/moon position) ──────────────────────────────────
+  // Cesium positions the Sun/Moon from real ephemeris at viewer.clock.currentTime.
+  // We drive that clock from one of three sources (priority): the dev time slider,
+  // the replay log's timestamp (if enabled), else real wall-clock now.
+
+  /** Build a JulianDate for a local-solar time-of-day at the currently viewed longitude. */
+  function julianFromLocalTimeOfDay(minutes: number): Cesium.JulianDate {
+    // Longitude of what the camera looks at → local solar noon ≈ 12:00 on the slider.
+    let lonDeg = 0;
+    if (viewer) {
+      try { lonDeg = Cesium.Math.toDegrees(viewer.camera.positionCartographic.longitude); } catch { lonDeg = 0; }
+    }
+    const utcHours = minutes / 60 - lonDeg / 15; // UTC = localSolar − lon/15
+    const now = new Date();
+    const baseUtcMidnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    return Cesium.JulianDate.fromDate(new Date(baseUtcMidnight + utcHours * 3_600_000));
+  }
+
+  /** Apply the active time source to the Cesium clock and re-render. */
+  function applyClockTime() {
+    if (!viewer) return;
+    let jd: Cesium.JulianDate;
+    if (devTimeActive) {
+      jd = julianFromLocalTimeOfDay(devTimeMin);
+    } else if (replayTimeEnabled && curReplayActive && replayStartEpochMs != null && playbackPoint?.timestamp_ms != null) {
+      // timestamp_ms is flight-relative → add the absolute flight-start epoch.
+      jd = Cesium.JulianDate.fromDate(new Date(replayStartEpochMs + playbackPoint.timestamp_ms));
+    } else {
+      jd = Cesium.JulianDate.now();
+    }
+    viewer.clock.currentTime = jd;
+    viewer.scene.requestRender();
+    // Clock moved → real-lighting day/night may have flipped; re-evaluate the dim.
+    updateNightDim3D();
+  }
+
+  // ── Night dimming (imagery only) ───────────────────────────────────
+
+  /** Camera target longitude/latitude in degrees (for the local sun calc). */
+  function cameraLonLat(): { lat: number; lon: number } {
+    if (!viewer) return { lat: 0, lon: 0 };
+    try {
+      const c = viewer.camera.positionCartographic;
+      return { lat: Cesium.Math.toDegrees(c.latitude), lon: Cesium.Math.toDegrees(c.longitude) };
+    } catch {
+      return { lat: 0, lon: 0 };
+    }
+  }
+
+  /** Set brightness on all imagery layers (1 = normal, 0.3 = night), only if it changed. */
+  function applyImageryBrightness(factor: number) {
+    if (!viewer || Math.abs(factor - appliedImageryBrightness) < 0.005) return;
+    appliedImageryBrightness = factor;
+    const layers = viewer.imageryLayers;
+    for (let i = 0; i < layers.length; i++) layers.get(i).brightness = factor;
+    viewer.scene.requestRender();
+  }
+
+  /**
+   * Night dimming as the *darker of two continuous brightness curves*, never stacked:
+   *  - cesiumFactor: the real-lighting day/night shading at the VIEWED location & clock time
+   *    (smooth 1.0→0.3 across the terminator; 1.0 if real lighting is off).
+   *  - nightFactor:  the Night-Mode auto curve at the USER's physical location & system time.
+   * We push the imagery to min(cesium, night) WITHOUT double-darkening: since Cesium's lighting
+   * already multiplies the globe by cesiumFactor, the extra imagery dim is the ratio
+   * min(c,n)/c — i.e. 1.0 when Cesium is already as dark (terminator preserved), <1 only where
+   * Night Mode wants it darker than Cesium. Special cases:
+   *  - Night Mode ON  → flat 0.3: force lighting off (uniform ground) + imagery 0.3; sky/sun stay real.
+   *  - Night Mode OFF → imagery 1.0; lighting follows the real-lighting setting.
+   */
+  function updateNightDim3D() {
+    if (!viewer) return;
+
+    // Night Mode ON overrides the ground lighting so the whole globe is a flat 0.3 (sky/sun still real).
+    const lightingActive = lightingEnabled && nightModeSetting !== 'on';
+    if (viewer.scene.globe.enableLighting !== lightingActive) {
+      viewer.scene.globe.enableLighting = lightingActive;
+      viewer.scene.requestRender(); // requestRenderMode: redraw now, not on the next camera move
+    }
+
+    let factor = 1.0;
+    if (nightModeSetting === 'on') {
+      factor = NIGHT_BRIGHTNESS_3D;
+    } else if (nightModeSetting === 'auto') {
+      const view = cameraLonLat();
+      const clockDate = Cesium.JulianDate.toDate(viewer.clock.currentTime);
+      const cesiumFactor = lightingActive
+        ? cesiumLikeBrightness(sunAltitudeDeg(clockDate, view.lat, view.lon))
+        : 1.0;
+      const u = resolveUserLocation(); // OS geo → UAV GPS → home → persisted map centre (NOT camera)
+      const nightFactor = cesiumLikeBrightness(sunAltitudeDeg(new Date(), u.lat, u.lon));
+      factor = Math.min(cesiumFactor, nightFactor) / cesiumFactor;
+    }
+    applyImageryBrightness(factor);
+  }
 
   // ── UAV Entity ─────────────────────────────────────────────────────
 
@@ -1682,6 +1834,9 @@
     if (!viewer) return;
     updatePlaybackMarker3D(playbackPoint);
     updateFlownDeco(); // grow shadow/curtain to the current replay position
+    // Move the sky clock along the flight time when "Log Replay Time" is on
+    // (dev slider, if active, wins).
+    if (replayTimeEnabled && !devTimeActive) applyClockTime();
   });
 
   function updatePlaybackMarker3D(point: TelemetryRecord | null) {
@@ -2056,6 +2211,33 @@
     <button class="map-control-btn map-zoom-btn" onclick={() => zoom3D(1)}  title="Zoom in"  aria-label="Zoom in">+</button>
     <button class="map-control-btn map-zoom-btn" onclick={() => zoom3D(-1)} title="Zoom out" aria-label="Zoom out">-</button>
   </div>
+
+  {#if import.meta.env.DEV}
+    <!-- DEV-only sun/time previewer: drag to scrub the time-of-day and watch the lighting. -->
+    <div class="dev-time-tool">
+      <label class="dev-time-row">
+        <input
+          type="checkbox"
+          bind:checked={devTimeActive}
+          onchange={() => applyClockTime()}
+        />
+        <span class="dev-time-label">Time override</span>
+        <span class="dev-time-clock">
+          {Math.floor(devTimeMin / 60).toString().padStart(2, '0')}:{(devTimeMin % 60).toString().padStart(2, '0')}
+        </span>
+      </label>
+      <input
+        class="dev-time-slider"
+        type="range"
+        min="0"
+        max="1439"
+        step="1"
+        bind:value={devTimeMin}
+        disabled={!devTimeActive}
+        oninput={() => applyClockTime()}
+      />
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -2072,6 +2254,52 @@
 
   :global(.cesium-viewer) {
     font-family: 'Segoe UI', Tahoma, sans-serif;
+  }
+
+  /* ── DEV-only time-of-day previewer (top-right) ── */
+  .dev-time-tool {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 200px;
+    padding: 8px 10px;
+    background: rgba(46, 46, 46, 0.9);
+    border: 1px solid rgba(55, 168, 219, 0.5);
+    border-radius: 6px;
+    backdrop-filter: blur(8px);
+    pointer-events: all;
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+  }
+  .dev-time-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .dev-time-label {
+    color: #c7dfe8;
+    font-size: 12px;
+  }
+  .dev-time-clock {
+    margin-left: auto;
+    color: #37a8db;
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    font-size: 13px;
+  }
+  .dev-time-slider {
+    width: 100%;
+    accent-color: #37a8db;
+    cursor: pointer;
+  }
+  .dev-time-slider:disabled {
+    cursor: default;
+    opacity: 0.45;
   }
 
   /* ── Controls corner — identical layout to Map.svelte ── */

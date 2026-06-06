@@ -20,6 +20,7 @@ export type AltitudeUnit = 'm' | 'ft';
 export type DistanceUnit = 'metric' | 'imperial';
 export type VerticalSpeedUnit = 'ms' | 'fts';
 export type TemperatureUnit = 'c' | 'f';
+export type NightMode = 'off' | 'auto' | 'on';
 
 export interface InterfaceSettings {
   speedUnit: SpeedUnit;
@@ -66,6 +67,14 @@ export interface AppSettings {
   cesiumIonToken: string;
   /** Show the vertical altitude curtain (wall down to ground) under the 3D track. */
   altitudeCurtain3D: boolean;
+  /** Light the 3D globe with the real sun position (day/night terminator + shading). */
+  realLighting3D: boolean;
+  /** During replay, drive the 3D sun clock from the log's recorded timestamp (not wall-clock now). */
+  logReplayTime: boolean;
+  /** Dim the 2D Leaflet imagery for night: off / auto (sun below horizon) / on. */
+  nightMode2D: NightMode;
+  /** Last known physical user location (for Night-Mode auto sunset timing); persisted across sessions. */
+  userLocation: { lat: number; lon: number } | null;
 }
 
 const STORAGE_KEY = 'kite-gc-settings';
@@ -109,6 +118,10 @@ const defaults: AppSettings = {
   uiScale: 1,
   cesiumIonToken: '',
   altitudeCurtain3D: true,
+  realLighting3D: false,
+  logReplayTime: false,
+  nightMode2D: 'off',
+  userLocation: null,
 };
 
 function load(): AppSettings {

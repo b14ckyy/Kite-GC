@@ -24,6 +24,10 @@
     cacheStats = { usedBytes: 0, maxBytes: 0, tileCount: 0 },
     cesiumIonToken = '',
     altitudeCurtain3D = true,
+    realLighting3D = false,
+    logReplayTime = false,
+    nightMode2D = 'off',
+    userLocation = null,
     attitudeRateHz = 5,
     positionRateHz = 2,
     airspeedEnabled = false,
@@ -45,6 +49,7 @@
     onChooseFlightLogPath = () => {},
     onResetFlightLogPath = () => {},
     onToggleWidget = (_widgetId: string) => {},
+    onGeoCheck = () => {},
   }: {
     localeValue?: string;
     uiScale?: number;
@@ -53,6 +58,10 @@
     cacheStats?: TileCacheStats;
     cesiumIonToken?: string;
     altitudeCurtain3D?: boolean;
+    realLighting3D?: boolean;
+    logReplayTime?: boolean;
+    nightMode2D?: 'off' | 'auto' | 'on';
+    userLocation?: { lat: number; lon: number } | null;
     attitudeRateHz?: number;
     positionRateHz?: number;
     airspeedEnabled?: boolean;
@@ -74,6 +83,7 @@
     onChooseFlightLogPath?: () => void;
     onResetFlightLogPath?: () => void;
     onToggleWidget?: (widgetId: string) => void;
+    onGeoCheck?: () => void;
   } = $props();
 
   let tab = $state<'interface' | 'data'>('interface');
@@ -164,6 +174,31 @@
       <div class="s-row">
         <label class="s-label" for="altitude-curtain">{$t('settings.altitudeCurtain')}</label>
         <Toggle checked={altitudeCurtain3D} id="altitude-curtain" onchange={(c) => onPatch({ altitudeCurtain3D: c })} />
+      </div>
+      <div class="s-row">
+        <label class="s-label" for="real-lighting">{$t('settings.realLighting')}</label>
+        <Toggle checked={realLighting3D} id="real-lighting" onchange={(c) => onPatch({ realLighting3D: c })} />
+      </div>
+      <div class="s-row">
+        <label class="s-label" for="log-replay-time" class:s-label-disabled={!realLighting3D}>{$t('settings.logReplayTime')}</label>
+        <Toggle checked={realLighting3D && logReplayTime} disabled={!realLighting3D} id="log-replay-time" onchange={(c) => onPatch({ logReplayTime: c })} />
+      </div>
+      <div class="s-row">
+        <label class="s-label" for="night-mode">{$t('settings.nightMode')}</label>
+        <select id="night-mode" class="s-select" value={nightMode2D} onchange={(e) => onPatch({ nightMode2D: (e.target as HTMLSelectElement).value as 'off' | 'auto' | 'on' })}>
+          <option value="off">{$t('settings.nightModeOff')}</option>
+          <option value="auto">{$t('settings.nightModeAuto')}</option>
+          <option value="on">{$t('settings.nightModeOn')}</option>
+        </select>
+      </div>
+      <div class="s-row">
+        <span class="s-label">{$t('settings.userLocation')}</span>
+        <div class="s-loc">
+          <span class="s-loc-coords">
+            {userLocation ? `${userLocation.lat.toFixed(2)}°, ${userLocation.lon.toFixed(2)}°` : $t('settings.locationNone')}
+          </span>
+          <Button variant="standard" size="sm" icon="refresh" onclick={onGeoCheck} title={$t('settings.detectLocationHint')}>{$t('settings.detectLocation')}</Button>
+        </div>
       </div>
     </div>
 
@@ -379,6 +414,9 @@
   .s-disabled { opacity: 0.4; pointer-events: none; }
 
   .s-label { font-size: 12px; color: #e0e0e0; }
+  .s-label-disabled { opacity: 0.45; }
+  .s-loc { display: flex; align-items: center; gap: 8px; }
+  .s-loc-coords { font-size: 11px; color: #949494; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
   /* Form controls match the md button height (28px) — consistent with the rest of the framework. */
   .s-select,

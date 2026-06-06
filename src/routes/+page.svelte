@@ -25,6 +25,7 @@
   import MissionPanel from "$lib/components/mission/MissionPanel.svelte";
   import VideoPanel from "$lib/components/video/VideoPanel.svelte";
   import SettingsPanel from "$lib/components/SettingsPanel.svelte";
+  import { ensureUserLocation, requestUserLocation, userGeoLocation } from "$lib/helpers/userLocation";
   import { PlaybackController } from '$lib/controllers/playbackController';
   import { refreshSerialPorts, connectFC, disconnectFC, scanBleDevices } from '$lib/controllers/connectionController';
   import * as logbookCtrl from '$lib/controllers/logbookController';
@@ -288,6 +289,9 @@
   let mapCacheMaxMB = $state(200);
   let cesiumIonToken = $state("");
   let altitudeCurtain3D = $state(true);
+  let realLighting3D = $state(false);
+  let logReplayTime = $state(false);
+  let nightMode2D = $state<'off' | 'auto' | 'on'>('off');
   let defaultWpAltitudeM = $state(50);
   let defaultPhTimeSec = $state(30);
   let warnAltitudeM = $state(120);
@@ -418,6 +422,9 @@
     ports = p;
   });
 
+  // One geolocation check at app start (refreshes the persisted user location for Night-Mode auto).
+  ensureUserLocation();
+
   // Restore persisted settings
   const saved = get(settings);
   selectedPort = saved.lastPort;
@@ -438,6 +445,9 @@
   mapCacheMaxMB = saved.mapCacheMaxMB;
   cesiumIonToken = saved.cesiumIonToken ?? '';
   altitudeCurtain3D = saved.altitudeCurtain3D ?? true;
+  realLighting3D = saved.realLighting3D ?? false;
+  logReplayTime = saved.logReplayTime ?? false;
+  nightMode2D = saved.nightMode2D ?? 'off';
   defaultWpAltitudeM = saved.defaultWpAltitudeM;
   defaultPhTimeSec = saved.defaultPhTimeSec;
   warnAltitudeM = saved.warnAltitudeM;
@@ -496,6 +506,9 @@
     if (patch.mapCacheMaxMB != null) mapCacheMaxMB = patch.mapCacheMaxMB;
     if (patch.cesiumIonToken != null) cesiumIonToken = patch.cesiumIonToken;
     if (patch.altitudeCurtain3D != null) altitudeCurtain3D = patch.altitudeCurtain3D;
+    if (patch.realLighting3D != null) realLighting3D = patch.realLighting3D;
+    if (patch.logReplayTime != null) logReplayTime = patch.logReplayTime;
+    if (patch.nightMode2D != null) nightMode2D = patch.nightMode2D;
     if (patch.defaultWpAltitudeM != null) defaultWpAltitudeM = patch.defaultWpAltitudeM;
     if (patch.defaultPhTimeSec != null) defaultPhTimeSec = patch.defaultPhTimeSec;
     if (patch.warnAltitudeM != null) warnAltitudeM = patch.warnAltitudeM;
@@ -1283,6 +1296,15 @@
   // FC variant for the selected flight (used by mode widgets + map coloring)
   const replayFcVariant = $derived((selectedFlight as Flight | null)?.fc_variant ?? 'INAV');
 
+  // Absolute flight-start epoch (ms) — telemetry timestamp_ms is flight-relative, so the
+  // 3D sky clock needs this origin to reconstruct the real instant for sun positioning.
+  const replayStartEpochMs = $derived.by(() => {
+    const s = (selectedFlight as Flight | null)?.start_time;
+    if (!s) return null;
+    const t = new Date(s).getTime();
+    return Number.isFinite(t) ? t : null;
+  });
+
   // Unified telemetry: live data when connected, playback data when replaying
   const telem = $derived(
     playbackActive && !isPrimaryConnected && playbackPoint
@@ -1531,6 +1553,7 @@
       <Map
         playbackTrack={mapTrack}
         playbackPoint={playbackPoint}
+        {nightMode2D}
         {trackColorMode}
         platformType={mapPlatformType}
         {modelOverride}
@@ -1548,6 +1571,7 @@
           active={mapViewMode === '3d'}
           playbackTrack={mapTrack}
           playbackPoint={playbackPoint}
+          {replayStartEpochMs}
           {trackColorMode}
           platformType={mapPlatformType}
           {modelOverride}
@@ -1666,6 +1690,11 @@
         {cacheStats}
         {cesiumIonToken}
         {altitudeCurtain3D}
+        {realLighting3D}
+        {logReplayTime}
+        {nightMode2D}
+        userLocation={$userGeoLocation}
+        onGeoCheck={requestUserLocation}
         {attitudeRateHz}
         {positionRateHz}
         {airspeedEnabled}

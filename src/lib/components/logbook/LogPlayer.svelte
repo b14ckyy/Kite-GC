@@ -106,6 +106,20 @@
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   }
 
+  // Wall-clock time-of-day at the current playback position = flight start + elapsed.
+  // The DB stores the log's reported time verbatim in the UTC fields (no TZ conversion),
+  // so format in UTC to recover the original on-aircraft clock. NOTE: INAV writes the
+  // pilot's local time → correct as-is. ArduPilot TZ handling still TBD (may need offset).
+  const logClock = $derived.by(() => {
+    const s = selectedFlight?.start_time;
+    if (!s) return null;
+    const base = new Date(s).getTime();
+    if (!Number.isFinite(base)) return null;
+    const d = new Date(base + playbackCurrentMs);
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
+  });
+
   function handleScrub(event: Event) {
     const target = event.currentTarget as HTMLInputElement;
     onScrub(Number(target.value));
@@ -141,6 +155,9 @@
           <span class="log-player-firmware">- {selectedFlight.fc_variant} {selectedFlight.fc_version}</span>
         {/if}
       </div>
+      {#if logClock}
+        <span class="log-player-clock" title={$t('player.logTimeOfDay')}>{logClock}</span>
+      {/if}
       <button class="log-player-close" onclick={onClose} title={$t('player.close')}>X</button>
     </div>
 
@@ -299,6 +316,16 @@
     font-weight: 400;
     color: #949494;
     font-size: 12px;
+  }
+
+  .log-player-clock {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: #37a8db;
+    flex-shrink: 0;
+    letter-spacing: 0.02em;
+    font-variant-numeric: tabular-nums;
   }
 
   .log-player-close {

@@ -36,10 +36,13 @@
   import { loadUavMesh, type UavMesh } from "$lib/helpers/uavMesh";
   import { renderUavTopDown } from "$lib/helpers/uavTopDown";
   import { toTelemetryData } from "$lib/adapters/telemetryAdapter";
+  import { sunAltitudeDeg, cesiumLikeBrightness } from "$lib/utils/sun";
+  import { ensureUserLocation, resolveUserLocation, userGeoLocation } from "$lib/helpers/userLocation";
 
   let {
     playbackTrack = [],
     playbackPoint = null,
+    nightMode2D = 'off',
     trackColorMode = 'flightmode' as TrackColorMode,
     platformType = PLATFORM_MULTIROTOR as PlatformType,
     modelOverride = 'auto' as UavModelOverride,
@@ -50,6 +53,8 @@
   }: {
     playbackTrack?: TelemetryRecord[];
     playbackPoint?: TelemetryRecord | null;
+    /** 2D imagery night dimming: off / auto (sun below horizon) / on. */
+    nightMode2D?: 'off' | 'auto' | 'on';
     trackColorMode?: TrackColorMode;
     platformType?: PlatformType;
     modelOverride?: UavModelOverride;
@@ -141,6 +146,13 @@
   // Active tile layers (base + overlays)
   let currentBase: L.TileLayer | undefined;
   let currentOverlays: L.TileLayer[] = [];
+
+  // ── Night dimming (2D imagery) ──────────────────────────────────────
+  // Cesium darkens its globe's night side to ×0.3 brightness (GlobeFS: lambert*0.9 +
+  // vertexShadowDarkness 0.3 → floor 0.3). We mirror that on the Leaflet imagery only.
+  let nightDimFactor = 1.0;                    // current applied imagery brightness (1 = none)
+  let nightTimer: ReturnType<typeof setInterval> | undefined; // auto re-check (live time drift)
+  let unsubUserGeo: (() => void) | undefined;  // recompute when OS geolocation resolves
 
   // Flight trail (colored segments by flight mode)
   let trailSegments: L.Polyline[] = [];
@@ -444,7 +456,50 @@
         currentOverlays.push(layer);
       }
     }
+
+    // Re-apply the current night dim to the freshly built layers.
+    applyNightDim(nightDimFactor, true);
   }
+
+  // ── Night dimming ───────────────────────────────────────────────────
+
+  /**
+   * Darken ONLY the imagery tile layers (telemetry/markers stay full bright) by a continuous
+   * brightness factor (1 = none, 0.3 = full night). `force` re-applies to freshly built layers.
+   */
+  function applyNightDim(factor: number, force = false) {
+    if (!force && Math.abs(factor - nightDimFactor) < 0.005) return;
+    nightDimFactor = factor;
+    const filter = factor < 0.999 ? `brightness(${factor.toFixed(3)})` : '';
+    const setF = (layer?: L.TileLayer) => {
+      const el = layer?.getContainer?.();
+      if (el) {
+        el.style.transition = 'filter 0.6s ease';
+        el.style.filter = filter;
+      }
+    };
+    setF(currentBase);
+    for (const ol of currentOverlays) setF(ol);
+  }
+
+  /** Compute the imagery brightness for the current night setting and apply it. */
+  function recomputeNight() {
+    let factor = 1.0;
+    if (nightMode2D === 'on') {
+      factor = 0.3;
+    } else if (nightMode2D === 'auto') {
+      // Auto = user system-time + PHYSICAL location (sunset based), smooth — NOT log/camera.
+      const u = resolveUserLocation(); // OS geo → UAV GPS → home → persisted map centre
+      factor = cesiumLikeBrightness(sunAltitudeDeg(new Date(), u.lat, u.lon));
+    }
+    applyNightDim(factor);
+  }
+
+  // Re-check when the setting changes (auto also re-checks on map move + a timer).
+  $effect(() => {
+    void nightMode2D; // reactive dep
+    recomputeNight();
+  });
 
   function saveMapState() {
     if (!map) return;
@@ -473,6 +528,13 @@
     map.on("moveend", saveMapState);
     map.on("zoomend", saveMapState);
     map.on("zoomend", onZoomEnd);   // resize the model canvas to the new zoom
+    map.on("moveend", recomputeNight); // auto night: re-check after panning to a new region
+
+    // Auto night mode: physical location + re-check every minute so wall-clock drift fades day↔night.
+    ensureUserLocation(); // OS geolocation (resolves async)
+    unsubUserGeo = userGeoLocation.subscribe(() => recomputeNight()); // recompute once it resolves
+    nightTimer = setInterval(recomputeNight, 60_000);
+    recomputeNight();
 
     // Invalidate size when container resizes (e.g. side panel toggle)
     const onResize = () => {
@@ -620,12 +682,15 @@
 
   onDestroy(() => {
     if (followRaf != null) cancelAnimationFrame(followRaf);
+    if (nightTimer) clearInterval(nightTimer);
+    unsubUserGeo?.();
     if (unsubTelemetry) unsubTelemetry();
     if (unsubSettings) unsubSettings();
     if (map) {
       map.off("moveend", saveMapState);
       map.off("zoomend", saveMapState);
       map.off("zoomend", onZoomEnd);
+      map.off("moveend", recomputeNight);
       if (uavMarker) map.removeLayer(uavMarker);
       for (const seg of trailSegments) map.removeLayer(seg);
       if (activeTrailLine) map.removeLayer(activeTrailLine);
