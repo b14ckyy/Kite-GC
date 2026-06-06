@@ -1,5 +1,7 @@
 // Radar Commands — configure the foreign-vehicle tracking subsystem and pull the current snapshot.
 
+use std::sync::atomic::Ordering;
+
 use tauri::{AppHandle, State};
 
 use crate::radar::{RadarConfig, RadarSnapshot};
@@ -13,6 +15,11 @@ pub fn radar_configure(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
+    // Runtime flag the MSP scheduler polls for ADS-B-via-MSP (the frontend already gates this on
+    // INAV-8.0 support + an active MSP link).
+    let msp_on = config.enabled && config.adsb.enabled && config.adsb.msp_from_fc;
+    state.radar_msp_enabled.store(msp_on, Ordering::Relaxed);
+
     let mut mgr = state.radar.lock().map_err(|e| e.to_string())?;
     mgr.configure(&config, &app);
     Ok(())

@@ -75,6 +75,9 @@ pub struct AdsbConfig {
     /// Local hardware receivers (MAVLink ADSB_VEHICLE over serial; TCP later).
     #[serde(default)]
     pub local: Vec<AdsbLocalSource>,
+    /// Pull the ADS-B list from the connected UAV via MSP (INAV 8.0+). Bandwidth-heavy → opt-in.
+    #[serde(default)]
+    pub msp_from_fc: bool,
     /// Query radius in km (dropdown 10/25/50/75/100; capped at 100). 0 ⇒ default 25.
     #[serde(default)]
     pub radius_km: f64,
@@ -126,6 +129,15 @@ pub struct RadarSnapshot {
     pub last_update: i64,
 }
 
+/// Per-source status entry (emitted as `radar-adsb-status`, keyed by `name`, merged in the frontend).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdsbStatus {
+    pub name: String,
+    pub count: usize,
+    pub ok: bool,
+}
+
 struct Running {
     update_tx: mpsc::Sender<SourceUpdate>,
     stop: Arc<AtomicBool>,
@@ -141,6 +153,9 @@ pub struct RadarManager {
     /// Live ADS-B query centre (`[lat, lon]`), shared with the online source so it can follow the
     /// map viewport / UAV without restarting the pipeline. Updated via `set_center`.
     query_center: Arc<Mutex<Option<(f64, f64)>>>,
+    /// Aggregator ingest channel, exposed so scheduler-fed sources (ADS-B via MSP) can push into the
+    /// same pipeline. `Some` while running, `None` when idle.
+    ingest: Arc<Mutex<Option<mpsc::Sender<SourceUpdate>>>>,
 }
 
 impl Default for RadarManager {
@@ -154,7 +169,14 @@ impl RadarManager {
         Self {
             running: None,
             query_center: Arc::new(Mutex::new(None)),
+            ingest: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Handle to the aggregator ingest channel — handed to the scheduler so ADS-B-via-MSP can push
+    /// into the radar pipeline (merged by ICAO like every other ADS-B source).
+    pub fn ingest_handle(&self) -> Arc<Mutex<Option<mpsc::Sender<SourceUpdate>>>> {
+        self.ingest.clone()
     }
 
     /// Update the live ADS-B query centre (cheap; no pipeline restart).
@@ -184,6 +206,8 @@ impl RadarManager {
         let stop = Arc::new(AtomicBool::new(false));
         let snapshot = Arc::new(Mutex::new(RadarSnapshot::default()));
         let agg = spawn_aggregator(rx, stop.clone(), snapshot.clone(), app.clone());
+        // Expose the ingest channel so scheduler-fed sources (ADS-B via MSP) push into this pipeline.
+        *self.ingest.lock().unwrap() = Some(tx.clone());
 
         let mut sources: Vec<SourceHandle> = Vec::new();
 
@@ -246,6 +270,7 @@ impl RadarManager {
     /// Tear down all sources + the aggregator and clear the UI with an empty snapshot.
     pub fn stop(&mut self, app: &AppHandle) {
         if let Some(mut r) = self.running.take() {
+            *self.ingest.lock().unwrap() = None; // scheduler-fed sources stop pushing
             r.sources.clear(); // each SourceHandle's Drop signals its worker to stop
             r.stop.store(true, Ordering::Relaxed);
             drop(r.update_tx);

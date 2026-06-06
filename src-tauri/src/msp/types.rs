@@ -70,6 +70,8 @@ pub const MSPV2_INAV_MISC: u16 = 0x2003;
 pub const MSPV2_INAV_BATTERY_CONFIG: u16 = 0x2005;
 pub const MSPV2_INAV_AIR_SPEED: u16 = 0x2009;
 pub const MSPV2_INAV_MIXER: u16 = 0x2010;
+/// INAV ADS-B vehicle list (onboard receiver) — fed into the radar pipeline.
+pub const MSP2_ADSB_VEHICLE_LIST: u16 = 0x2090;
 
 // ── Jumbo frame threshold ───────────────────────────────────────────
 pub const JUMBO_FRAME_MIN_SIZE: u8 = 255;

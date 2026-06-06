@@ -16,11 +16,13 @@
   import type { PortInfo } from '$lib/stores/connection';
   import { convertSpeed, convertAltitude, convertDistance, formatConverted } from '$lib/utils/units';
 
-  let { radar, interfaceSettings, referencePoint = null, onPatch = (_p: Partial<AppSettings>) => {} }: {
+  let { radar, interfaceSettings, referencePoint = null, mspSupported = false, onPatch = (_p: Partial<AppSettings>) => {} }: {
     radar: RadarSettings;
     interfaceSettings: InterfaceSettings;
     /** Distance/bearing reference: connected UAV (valid fix) else the GCS location. */
     referencePoint?: { lat: number; lon: number } | null;
+    /** ADS-B-via-MSP available (INAV 8.0+ on an active MSP link) — gates the "UAV Source" toggle. */
+    mspSupported?: boolean;
     onPatch?: (patch: Partial<AppSettings>) => void;
   } = $props();
 
@@ -184,6 +186,21 @@
         </select>
       </div>
 
+      <!-- ADS-B from the connected UAV via MSP (INAV 8.0+). Hidden when unsupported. -->
+      {#if mspSupported}
+        {@const mst = $radarAdsbStatus['UAV (MSP)']}
+        <div class="src-row">
+          <span class="src-label">{$t('radar.uavSource')}</span>
+          <div class="src-row-right">
+            {#if radar.adsb.mspFromFc && mst}
+              {#if mst.ok}<span class="src-stat ok" title={$t('radar.contacts')}>{mst.count}</span>
+              {:else}<span class="src-stat err" title={$t('radar.sourceError')}>✕</span>{/if}
+            {/if}
+            <Toggle checked={radar.adsb.mspFromFc} onchange={(c) => patchAdsb({ mspFromFc: c })} />
+          </div>
+        </div>
+      {/if}
+
       <!-- Built-in providers: toggle only (fixed URL, no key, not removable). -->
       <p class="src-head">{$t('radar.onlineSources')}</p>
       {#each BUILTIN_ADSB_PROVIDERS as b (b.name)}
@@ -336,6 +353,7 @@
   .src-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 2px; }
   .src-head { color: #949494; font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; margin: 8px 2px 2px; }
   .src-label { color: #cdd6da; font-size: 12px; }
+  .src-row-right { display: flex; align-items: center; gap: 8px; }
   .src-name { flex: 1; color: #e0e0e0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .src-stat {
     flex-shrink: 0;

@@ -25,14 +25,22 @@ mod debug {
     }
 }
 
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter};
 
 use crate::flightlog::recorder::FlightRecorderHandle;
+use crate::radar;
+use crate::radar::source::SourceUpdate;
 use crate::transport::Transport;
+
+/// How often to poll ADS-B from the FC via MSP when enabled (bandwidth-heavy; lowest cadence).
+const RADAR_MSP_INTERVAL: Duration = Duration::from_millis(1000);
+/// Shared ingest channel + on/off flag for the scheduler-fed ADS-B-via-MSP source.
+type RadarIngest = Arc<Mutex<Option<mpsc::Sender<SourceUpdate>>>>;
 
 pub use telemetry::{TelemetryConfig, TelemetryGroup};
 
@@ -142,11 +150,13 @@ pub fn start(
     config: TelemetryConfig,
     app_handle: AppHandle,
     recorder: Option<FlightRecorderHandle>,
+    radar_ingest: RadarIngest,
+    radar_msp_enabled: Arc<AtomicBool>,
 ) -> SchedulerHandle {
     let (cmd_tx, cmd_rx) = mpsc::channel::<SchedulerCommand>();
 
     let thread = thread::spawn(move || {
-        scheduler_loop(transport, config, app_handle, cmd_rx, recorder)
+        scheduler_loop(transport, config, app_handle, cmd_rx, recorder, radar_ingest, radar_msp_enabled)
     });
 
     SchedulerHandle {
@@ -162,8 +172,11 @@ fn scheduler_loop(
     app_handle: AppHandle,
     cmd_rx: mpsc::Receiver<SchedulerCommand>,
     recorder: Option<FlightRecorderHandle>,
+    radar_ingest: RadarIngest,
+    radar_msp_enabled: Arc<AtomicBool>,
 ) -> Option<Box<dyn Transport>> {
     let mut slots = build_slots(&config);
+    let mut radar_last = Instant::now() - RADAR_MSP_INTERVAL;
 
     // Query MSP_BOXIDS once at startup to get the index→permanent_id mapping.
     // INAV's activeModes bitmask uses INDEX-based packing, not permanent box IDs.
@@ -236,6 +249,13 @@ fn scheduler_loop(
                 log::warn!("Scheduler command channel disconnected");
                 return Some(transport);
             }
+        }
+
+        // 1b. ADS-B from the FC via MSP (opt-in, lowest cadence) → radar pipeline.
+        if radar_msp_enabled.load(Ordering::Relaxed) && radar_last.elapsed() >= RADAR_MSP_INTERVAL {
+            radar_last = Instant::now();
+            poll_radar_adsb(&mut *transport, &radar_ingest, &app_handle);
+            continue;
         }
 
         // 2. Find most overdue telemetry slot (priority-based adaptive degradation:
@@ -392,6 +412,35 @@ fn poll_slot(
                 tracker.on_timeout(code);
                 log::debug!("Telemetry poll 0x{:04X} failed: {}", code, e);
             }
+        }
+    }
+}
+
+/// Poll the FC's ADS-B vehicle list (MSP2_ADSB_VEHICLE_LIST) and push it into the radar pipeline.
+fn poll_radar_adsb(transport: &mut dyn Transport, radar_ingest: &RadarIngest, app: &AppHandle) {
+    match transport.msp_request(crate::msp::MSP2_ADSB_VEHICLE_LIST, &[]) {
+        Ok(msg) => {
+            let vehicles = radar::sources::adsb_msp::decode(&msg.payload, radar::now_ms());
+            let count = vehicles.len();
+            if let Ok(guard) = radar_ingest.lock() {
+                if let Some(tx) = guard.as_ref() {
+                    let _ = tx.send(SourceUpdate {
+                        source: radar::vehicle::VehicleSource::AdsbMsp,
+                        vehicles,
+                    });
+                }
+            }
+            let _ = app.emit(
+                radar::ADSB_STATUS_EVENT,
+                &[radar::AdsbStatus { name: "UAV (MSP)".into(), count, ok: true }],
+            );
+        }
+        Err(e) => {
+            log::debug!("Radar ADS-B (MSP) poll failed: {}", e);
+            let _ = app.emit(
+                radar::ADSB_STATUS_EVENT,
+                &[radar::AdsbStatus { name: "UAV (MSP)".into(), count: 0, ok: false }],
+            );
         }
     }
 }

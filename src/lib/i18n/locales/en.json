@@ -74,6 +74,7 @@
     "expand": "Click to expand",
     "radius": "Radius",
     "pollInterval": "Online poll interval",
+    "uavSource": "UAV Source",
     "onlineSources": "Online sources",
     "providerName": "Name",
     "providerUrl": "URL template (lat / lon / dist)",
@@ -168,6 +169,7 @@
     "geozones": "Geozones",
     "mspRc": "MSP-RC",
     "auxRc": "AUX-RC",
+    "adsb": "ADS-B",
     "notConnected": "Not connected"
   },
   "settings": {

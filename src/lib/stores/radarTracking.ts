@@ -110,6 +110,7 @@ export interface RadarBackendConfig {
     enabled: boolean;
     online: { name: string; url: string; apiKey?: string; enabled: boolean }[];
     local: { name: string; transport: string; port: string; baud: number; host?: string; tcpPort?: number; enabled: boolean }[];
+    mspFromFc: boolean;
     radiusKm: number;
     pollSec: number;
     /** `[lat, lon]` query centre (resolved user location), or null. */

@@ -74,6 +74,7 @@
     "expand": "Cliquer pour développer",
     "radius": "Rayon",
     "pollInterval": "Intervalle d'interrogation en ligne",
+    "uavSource": "Source UAV",
     "onlineSources": "Sources en ligne",
     "providerName": "Nom",
     "providerUrl": "Modèle d'URL (lat / lon / dist)",
@@ -168,6 +169,7 @@
     "geozones": "Géozones",
     "mspRc": "MSP-RC",
     "auxRc": "AUX-RC",
+    "adsb": "ADS-B",
     "notConnected": "Non connecté"
   },
   "settings": {

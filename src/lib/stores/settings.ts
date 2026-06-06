@@ -72,6 +72,8 @@ export interface RadarSettings {
     online: AdsbOnlineProvider[];
     /** Local hardware receivers (serial MAVLink; TCP later). */
     local: AdsbLocalSource[];
+    /** Pull the ADS-B list from the connected UAV via MSP (INAV 8.0+). Bandwidth-heavy → opt-in. */
+    mspFromFc: boolean;
     /** Query radius in km — dropdown 10/25/50/75/100, capped at 100. */
     radiusKm: number;
     /** Poll interval in seconds (provider limit ≈ 1 req/s, so ≥2 s). */
@@ -93,6 +95,7 @@ export const DEFAULT_RADAR: RadarSettings = {
       { name: 'adsb.fi', url: 'https://opendata.adsb.fi/api/v3/lat/{lat}/lon/{lon}/dist/{dist}', enabled: false },
     ],
     local: [],
+    mspFromFc: false,
     radiusKm: 25,
     pollSec: 5,
   },

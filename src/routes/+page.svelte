@@ -420,7 +420,7 @@
 
   let ports: PortInfo[] = $state([]);
   let connStatus: string = $state("disconnected");
-  let fcInfo: FcInfo | null = $state(null);
+  let fcInfo = $state<FcInfo | null>(null);
 
   // Subscribe to stores
   connection.subscribe((c) => {
@@ -496,6 +496,10 @@
     }
     return $userGeoLocation;
   });
+  /** ADS-B-via-MSP available: connected + the FC reports the feature (INAV 8.0+; MAVLink has no features). */
+  const mspAdsbSupported = $derived(
+    connStatus === 'connected' && fcInfo != null && fcInfo.features != null && fcInfo.features.adsb_msp,
+  );
 
   let lastRadarCenterKey = '';
   /** Push the live query centre when it moved meaningfully (~100 m). Cheap; no pipeline restart. */
@@ -524,6 +528,8 @@
           ...radarSettings.adsb.online,
         ],
         local: radarSettings.adsb.local,
+        // Only request the FC's ADS-B list when the connected INAV (8.0+) actually supports it.
+        mspFromFc: radarSettings.adsb.mspFromFc && mspAdsbSupported,
         radiusKm: radarSettings.adsb.radiusKm,
         pollSec: radarSettings.adsb.pollSec,
         center: [lat, lon],
@@ -539,6 +545,15 @@
   }
   // Re-aim the online query centre when the 2D/3D view mode flips.
   $effect(() => { void mapViewMode; updateRadarCenter(); });
+  // Re-push the radar config when ADS-B-via-MSP support changes (connect/disconnect an INAV 8.0+ FC),
+  // so the scheduler's MSP-ADSB polling flag tracks it. Guarded against the initial duplicate.
+  let lastMspSupported = false;
+  $effect(() => {
+    const s = mspAdsbSupported;
+    if (s === lastMspSupported) return;
+    lastMspSupported = s;
+    if (radarSettings.enabled && radarSettings.adsb.enabled) pushRadarConfig();
+  });
 
   // Auto-start video with the last settings if it was running at last close.
   if (typeof window !== 'undefined') void initVideo();
@@ -1839,7 +1854,7 @@
     {:else if activeTab === 'mission'}
       <MissionPanel />
     {:else if activeTab === 'radar'}
-      <RadarPanel radar={radarSettings} {interfaceSettings} referencePoint={radarReference} onPatch={applySettingsPatch} />
+      <RadarPanel radar={radarSettings} {interfaceSettings} referencePoint={radarReference} mspSupported={mspAdsbSupported} onPatch={applySettingsPatch} />
     {:else if activeTab === 'video'}
       <VideoPanel />
     {:else if DEV_MODE && activeTab === 'dev-playground'}

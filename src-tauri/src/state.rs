@@ -1,10 +1,12 @@
 // Application State
 // Holds the shared state for the Tauri application, including the active connection.
 
-use std::sync::Mutex;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
 
 use crate::mavlink_proto::MavlinkHandle;
 use crate::msp::FcInfo;
+use crate::radar::source::SourceUpdate;
 use crate::radar::RadarManager;
 use crate::scheduler::SchedulerHandle;
 
@@ -22,14 +24,22 @@ pub struct AppState {
     pub fc_info: Mutex<Option<FcInfo>>,
     /// Radar (foreign-vehicle tracking) subsystem — fully independent of `protocol`.
     pub radar: Mutex<RadarManager>,
+    /// Bridge for scheduler-fed radar sources (ADS-B via MSP): the radar aggregator's ingest channel
+    /// (Some while radar runs) and a runtime on/off flag the MSP scheduler polls.
+    pub radar_ingest: Arc<Mutex<Option<std::sync::mpsc::Sender<SourceUpdate>>>>,
+    pub radar_msp_enabled: Arc<AtomicBool>,
 }
 
 impl AppState {
     pub fn new() -> Self {
+        let radar = RadarManager::new();
+        let radar_ingest = radar.ingest_handle();
         Self {
             protocol: Mutex::new(None),
             fc_info: Mutex::new(None),
-            radar: Mutex::new(RadarManager::new()),
+            radar: Mutex::new(radar),
+            radar_ingest,
+            radar_msp_enabled: Arc::new(AtomicBool::new(false)),
         }
     }
 }

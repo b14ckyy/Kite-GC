@@ -283,7 +283,14 @@ fn connect_msp(
         None
     };
 
-    let handle = scheduler::start(Box::new(transport), config, app_handle, recorder_handle);
+    let handle = scheduler::start(
+        Box::new(transport),
+        config,
+        app_handle,
+        recorder_handle,
+        state.radar_ingest.clone(),
+        state.radar_msp_enabled.clone(),
+    );
 
     // Store MSP scheduler handle and FC info
     {

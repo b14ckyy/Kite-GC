@@ -21,6 +21,7 @@ export interface FeatureSet {
   geozones: boolean;
   msp_rc: boolean;
   aux_rc: boolean;
+  adsb_msp: boolean;
 }
 
 export interface FcInfo {

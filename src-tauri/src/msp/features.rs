@@ -73,6 +73,8 @@ pub enum Feature {
     MspRc,
     /// AUX channel control via MSP (INAV 9.1+)
     AuxRc,
+    /// ADS-B vehicle list over MSP — MSP2_ADSB_VEHICLE_LIST (INAV 8.0+)
+    AdsbMsp,
 }
 
 impl Feature {
@@ -84,6 +86,7 @@ impl Feature {
             Feature::Geozones => InavVersion::new(8, 0, 0),
             Feature::MspRc => InavVersion::new(8, 0, 0),
             Feature::AuxRc => InavVersion::new(9, 1, 0),
+            Feature::AdsbMsp => InavVersion::new(8, 0, 0),
         }
     }
 
@@ -94,6 +97,7 @@ impl Feature {
         Feature::Geozones,
         Feature::MspRc,
         Feature::AuxRc,
+        Feature::AdsbMsp,
     ];
 }
 
@@ -108,6 +112,7 @@ pub struct FeatureSet {
     pub geozones: bool,
     pub msp_rc: bool,
     pub aux_rc: bool,
+    pub adsb_msp: bool,
 }
 
 impl FeatureSet {
@@ -119,6 +124,7 @@ impl FeatureSet {
             geozones: version.is_at_least(Feature::Geozones.min_version()),
             msp_rc: version.is_at_least(Feature::MspRc.min_version()),
             aux_rc: version.is_at_least(Feature::AuxRc.min_version()),
+            adsb_msp: version.is_at_least(Feature::AdsbMsp.min_version()),
         }
     }
 
@@ -130,6 +136,7 @@ impl FeatureSet {
             Feature::Geozones => self.geozones,
             Feature::MspRc => self.msp_rc,
             Feature::AuxRc => self.aux_rc,
+            Feature::AdsbMsp => self.adsb_msp,
         }
     }
 }
