@@ -1,9 +1,10 @@
 # Radar Tracking — Core & Sources (Plan A)
 
-> Status: **Planned** (2026-06-06). Concrete plan for the *foreign-vehicle tracking* subsystem
-> ("Radar"). This doc covers the **backend subsystem + data sources** (Phases 0–3). The user-facing
-> **Advanced Panel + map visualization** is a separate plan — see `RADAR_TRACKING_PANEL_AND_MAP.md`
-> (Plan B). An ADR will be written once the core architecture is locked (after Phase 0).
+> Status: **In progress** (2026-06-06). **Phase 0 (core) + Phase 1 (ADS-B online) shipped**; Phase 2
+> (MAVLink ADS-B receiver) next. Concrete plan for the *foreign-vehicle tracking* subsystem ("Radar").
+> This doc covers the **backend subsystem + data sources** (Phases 0–3). The user-facing **Advanced
+> Panel + map visualization** is a separate plan — see `RADAR_TRACKING_PANEL_AND_MAP.md` (Plan B). An
+> ADR will be written once the core architecture is locked.
 >
 > **Agreed framing decisions (2026-06-06):**
 > - **Name:** *Radar* (internal module `radar/`, NavRail tab `radar`) — even though it isn't a real
@@ -192,24 +193,29 @@ Protocol details are taken as **reference** from INAV firmware source and **MWPT
 copied**. Exact message codes/endpoints are confirmed during implementation.
 
 ### 7.1 ADS-B (system `Adsb`)
-- **Online (Phase 1, first):** HTTP pollers, one worker per enabled provider, bounded by a **radius**
-  (point query) around the user location.
-  - **Default providers (free, no API key — shipped pre-populated on first setup):** **adsb.lol**,
-    **adsb.one**, **adsb.fi**. (These are the mwp defaults — see the MWP reference below.)
-  - **Endpoint shape** (the "re-api" / readsb v2 family):
-    - adsb.lol / adsb.one: `https://api.adsb.lol/v2/point/{lat}/{lon}/{rangeNM}` and
-      `https://api.adsb.one/v2/point/{lat}/{lon}/{rangeNM}`.
-    - adsb.fi: `https://opendata.adsb.fi/api/v2/lat/{lat}/lon/{lon}/dist/{rangeNM}` (slightly different
-      path — so the source config needs a per-provider URL/path template, not just a host).
-  - **Params:** range as a **km radius**, capped at **100 km max** — a dropdown with steps **10 / 25 /
-    50 / 75 / 100 km, default 25 km** (lives in the ADS-B-specific settings; converted to the provider's
-    NM internally). Poll interval in ms (provider minimum ≈ 1000 ms), configurable per source. Backoff
-    on errors / rate-limits.
-  - **Response → `TrackedVehicle`:** v2 JSON returns an `ac[]` array; map `hex`→`id`, `flight`→callsign,
-    `lat`/`lon`, `alt_baro`/`alt_geom`→alt, `gs`→ground speed, `track`→heading, `baro_rate`→vertical
-    speed, `squawk`, `category`, `t`/`r`→type/registration (→ `extra`).
-  - **Other providers** (OpenSky `/api/states/all?lamin&lomin&lamax&lomax` bbox + auth/limits;
-    airplanes.live) can be added later as extra rows — the per-source URL/key/format fields cover them.
+- **Online (Phase 1 — SHIPPED):** an async `reqwest` poller ([sources/adsb_online.rs](../../src-tauri/src/radar/sources/adsb_online.rs))
+  polls all enabled providers each cycle (sequentially) within a **radius** (point query) of a **live
+  query centre** and merges them by ICAO.
+  - **Query centre = the connected UAV's position (valid fix) else the map viewport centre** — so the
+    user can scan anywhere by panning when no UAV is connected. Updated live via `radar_set_center`
+    (no pipeline restart); the frontend pushes it on telemetry / map-pan / connection change.
+  - **Providers (verified):** **adsb.lol**, **adsb.one** (both *built-in* — fixed URL, toggle-only,
+    not editable/removable), **adsb.fi** (a *custom* example row, editable/removable). Endpoints (the
+    "re-api" / readsb family, `ac[]` JSON):
+    - adsb.lol / adsb.one: `https://api.adsb.{lol,one}/v2/point/{lat}/{lon}/{dist}` (dist = NM).
+    - adsb.fi: `https://opendata.adsb.fi/api/v3/lat/{lat}/lon/{lon}/dist/{dist}`.
+    - **Rate limit ≈ 1 req/s per provider** — bursts (e.g. dev config-restarts) can get the IP
+      temporarily blocked.
+  - **URL template** with `{lat}`/`{lon}`/`{dist}` placeholders covers any provider path (built-in or
+    custom), `{dist}` filled in NM.
+  - **Params:** **radius** km dropdown (10/25/50/75/100, default 25, cap 100) + **poll interval**
+    dropdown (2/5/10/30 s, default 5; ≥2 s for the 1 req/s limit).
+  - **Per-provider status:** after each cycle the source emits `radar-adsb-status` (`[{name, count,
+    ok}]`); the panel shows a green contact-count badge or a red ✕ on error per enabled provider.
+  - **Response → `TrackedVehicle`:** `hex`→`id`, `flight`→callsign, `lat`/`lon`, `alt_baro` ft→m,
+    `gs` kt→m/s, `track`→heading, `baro_rate` fpm→m/s, `squawk`, `category` (defensive — `alt_baro`
+    may be `"ground"`).
+  - **Other providers** (OpenSky bbox + auth; airplanes.live) can be added as custom rows.
 - **Dedicated receiver (MAVLink-ADSB) — hardware on hand, build early.** The user has a receiver that
   works **both over Serial USB and over WiFi/network**, and **both transports speak the same protocol:
   MAVLink `ADSB_VEHICLE` (#246)** — already in the `mavlink` ardupilotmega dialect the project uses. So
@@ -309,8 +315,9 @@ ADS-B needs none; radio telemetry is last because it depends on the shared telem
   `AppState.radar`, commands, `radar-vehicles` event, frontend store. The first real source (ADS-B
   online, Phase 1) is the pipeline driver — **no required sim source**; a trivial `sim` may exist as a
   dev-only toggle but isn't a deliverable. → write the ADR at the end of this phase.
-- **Phase 1 — ADS-B online.** HTTP pollers (one provider first, then multi-provider merge by ICAO),
-  bbox/radius from user location, settings + persistence. Testable immediately, no hardware.
+- **Phase 1 — ADS-B online. ✅ SHIPPED.** Async pollers, multi-provider merge by ICAO, radius +
+  poll-interval dropdowns, live query centre (viewport / UAV), built-in vs custom providers,
+  per-provider status badges. adsb.lol / adsb.one / adsb.fi verified.
 - **Phase 2 — ADS-B MAVLink receiver.** Single source, transport = Serial **or** WiFi/network (TCP/UDP),
   one `ADSB_VEHICLE` (#246) read loop. Hardware on hand → verify real reception over both transports.
   Merges into the ADS-B list with the online feeds by ICAO.

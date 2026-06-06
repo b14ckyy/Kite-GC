@@ -1,0 +1,1 @@
+> better "new waypoint" action for usability instead of hard default values in settings only.
