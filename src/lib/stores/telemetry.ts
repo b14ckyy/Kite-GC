@@ -82,8 +82,44 @@ const defaultTelemetry: TelemetryData = {
 
 export const telemetry = writable<TelemetryData>({ ...defaultTelemetry });
 
+// ── Dev GPS injection (debug only) ──────────────────────────────────
+// Force the UAV position/altitude (+ a valid fix) regardless of the real telemetry, so conflict alerts
+// and the map can be tested over busy airspace from the desk. Driven from the dev Debug Monitor.
+export interface GpsInject {
+  active: boolean;
+  lat: number;
+  lon: number;
+  altMsl: number;
+}
+
+export const gpsInject = writable<GpsInject>({ active: false, lat: 0, lon: 0, altMsl: 0 });
+
+/** Module-level mirror of the override so the live telemetry listeners can honour it (kept in sync by
+ *  the subscription below). null = no injection. */
+let gpsOverride: GpsInject | null = null;
+
+gpsInject.subscribe((g) => {
+  gpsOverride = g.active ? g : null;
+  if (g.active) {
+    telemetry.update((t) => ({
+      ...t,
+      lat: g.lat, lon: g.lon, altMsl: g.altMsl,
+      fixType: 3, numSat: t.numSat || 12,
+      lastUpdate: Date.now(),
+    }));
+  } else {
+    // Drop the fake fix so alerts deactivate; a real connection re-fills on its next GPS packet.
+    telemetry.update((t) => ({ ...t, fixType: 0, lastUpdate: Date.now() }));
+  }
+});
+
 export function resetTelemetry() {
   telemetry.set({ ...defaultTelemetry });
+  // Keep an active injection alive across a telemetry reset (e.g. disconnect while testing).
+  if (gpsOverride) {
+    const o = gpsOverride;
+    telemetry.update((t) => ({ ...t, lat: o.lat, lon: o.lon, altMsl: o.altMsl, fixType: 3, numSat: 12 }));
+  }
 }
 
 // ── Event listeners for scheduler telemetry ─────────────────────────
@@ -114,15 +150,16 @@ export async function startTelemetryListeners() {
       gps_hdop?: number;
     }>('telemetry-gps', (event) => {
       const p = event.payload;
+      const o = gpsOverride; // dev injection wins over real position/altitude when active
       telemetry.update((t) => ({
         ...t,
-        fixType: p.fix_type,
+        fixType: o ? 3 : p.fix_type,
         numSat: p.num_sat,
         // Keep last valid HDOP when this packet omits it (or reports 0).
         gpsHdop: typeof p.gps_hdop === 'number' && p.gps_hdop > 0 ? p.gps_hdop : t.gpsHdop,
-        lat: p.lat,
-        lon: p.lon,
-        altMsl: p.alt_msl,
+        lat: o ? o.lat : p.lat,
+        lon: o ? o.lon : p.lon,
+        altMsl: o ? o.altMsl : p.alt_msl,
         groundSpeed: p.ground_speed,
         course: p.course,
         lastUpdate: Date.now(),

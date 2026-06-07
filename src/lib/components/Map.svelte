@@ -39,6 +39,7 @@
   import { sunAltitudeDeg, cesiumLikeBrightness } from "$lib/utils/sun";
   import { ensureUserLocation, resolveUserLocation, userGeoLocation } from "$lib/helpers/userLocation";
   import { radarVehicles, radarSelection, enrichList, type RadarSnapshot, type EnrichedVehicle } from "$lib/stores/radarTracking";
+  import { radarAlertLevels, type AlertLevel } from "$lib/controllers/radarAlerts";
   import type { RadarMapSettings } from "$lib/stores/settings";
   import { contactColor, contactVisibleOnMap, relevanceFactor } from "$lib/helpers/radarMap";
   import { pickShape, buildContactIconHtml } from "$lib/helpers/radarIcons";
@@ -191,8 +192,10 @@
   const radarMarkers = new Map<string, L.Marker>();
   let radarSnap: RadarSnapshot = { adsb: [], formationFlight: [], radio: [], lastUpdate: 0 };
   let radarSelectedId: string | null = null;
+  let radarAlertMap: Map<string, AlertLevel> = new Map();
   let unsubRadar: (() => void) | undefined;
   let unsubRadarSel: (() => void) | undefined;
+  let unsubRadarAlerts: (() => void) | undefined;
   const RADAR_BASE_PX = 42;
   const RADAR_MIN_PX = 24;
 
@@ -239,6 +242,7 @@
         opacity: rel,
         selected: v.id === radarSelectedId,
         label: v.callsign?.trim() || undefined,
+        alertLevel: radarAlertMap.get(v.id) ?? null,
       });
       const icon = L.divIcon({ className: 'radar-divicon', html, iconSize: [size, size], iconAnchor: [size / 2, size / 2] });
       const existing = radarMarkers.get(v.id);
@@ -695,6 +699,7 @@
     // Foreign-vehicle contacts: rebuild the radar layer on every snapshot / selection change.
     unsubRadar = radarVehicles.subscribe((s) => { radarSnap = s; updateRadar(); });
     unsubRadarSel = radarSelection.subscribe((id) => { radarSelectedId = id; updateRadar(); });
+    unsubRadarAlerts = radarAlertLevels.subscribe((m) => { radarAlertMap = m; updateRadar(); });
 
     return () => window.removeEventListener("resize", onResize);
   });
@@ -797,6 +802,7 @@
     unsubUserGeo?.();
     unsubRadar?.();
     unsubRadarSel?.();
+    unsubRadarAlerts?.();
     if (unsubTelemetry) unsubTelemetry();
     if (unsubSettings) unsubSettings();
     if (map) {
@@ -1007,5 +1013,38 @@
     text-shadow: 0 0 2px #000, 0 0 2px #000, 0 1px 1px #000;
     white-space: nowrap;
     pointer-events: none;
+  }
+  /* Conflict-alert ring around a contact icon — pulsing glow (yellow caution / red warning). */
+  :global(.radar-divicon .radar-alert-ring) {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 150%;
+    height: 150%;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    box-sizing: border-box;
+    pointer-events: none;
+  }
+  :global(.radar-divicon .radar-alert-ring.caution) {
+    border: 2px solid #f4c020;
+    box-shadow: 0 0 7px 1px #f4c020, inset 0 0 4px #f4c020;
+    animation: radar-alert-caution 1s ease-in-out infinite;
+  }
+  :global(.radar-divicon .radar-alert-ring.warning) {
+    border: 3px solid #ff2a2a;
+    box-shadow: 0 0 12px 3px #ff2a2a, inset 0 0 7px #ff2a2a;
+    animation: radar-alert-warning 1s ease-in-out infinite;
+  }
+  @keyframes radar-alert-caution {
+    0%, 100% { opacity: 0.45; transform: translate(-50%, -50%) scale(0.9); }
+    50% { opacity: 1; transform: translate(-50%, -50%) scale(1.1); }
+  }
+  @keyframes radar-alert-warning {
+    0%, 100% { opacity: 0.55; transform: translate(-50%, -50%) scale(0.85); }
+    50% { opacity: 1; transform: translate(-50%, -50%) scale(1.15); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    :global(.radar-divicon .radar-alert-ring) { animation: none !important; }
   }
 </style>

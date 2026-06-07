@@ -8,6 +8,8 @@
   import { settings } from "$lib/stores/settings";
   import { telemetry } from "$lib/stores/telemetry";
   import { startRadarListeners, configureRadar, setRadarCenter, resetRadarStatus } from "$lib/stores/radarTracking";
+  import { startRadarAlerts } from "$lib/controllers/radarAlerts";
+  import { startAlertAudio } from "$lib/controllers/alertAudio";
   import { get } from "svelte/store";
   import { t, locale } from 'svelte-i18n';
   import Map from "$lib/components/Map.svelte";
@@ -26,6 +28,7 @@
   import MissionPanel from "$lib/components/mission/MissionPanel.svelte";
   import VideoPanel from "$lib/components/video/VideoPanel.svelte";
   import RadarPanel from "$lib/components/RadarPanel.svelte";
+  import RadarAlertBanner from "$lib/components/RadarAlertBanner.svelte";
   import SettingsPanel from "$lib/components/SettingsPanel.svelte";
   import { ensureUserLocation, requestUserLocation, userGeoLocation } from "$lib/helpers/userLocation";
   import { PlaybackController } from '$lib/controllers/playbackController';
@@ -572,6 +575,8 @@
   }
   if (typeof window !== 'undefined') {
     void startRadarListeners();
+    startRadarAlerts();
+    startAlertAudio();
     pushRadarConfig();
     // Query centre follows the map view: 2D pans update settings.map.center (broad subscribe, gated by
     // the ~100 m key); 3D camera moves come via Map3D's onCamFocus; the mode flip via the effect below.
@@ -1723,6 +1728,9 @@
         />
       </div>
     {/if}
+
+    <!-- Conflict-alert banner — pinned to the top of the map, above 2D/3D (renders nothing when idle). -->
+    <RadarAlertBanner {interfaceSettings} />
   </div>
 
   <!-- ======= UI CHROME LAYER — zoomed by --ui-scale ======= -->

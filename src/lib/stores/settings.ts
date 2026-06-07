@@ -83,8 +83,23 @@ export interface RadarSettings {
   radio: { enabled: boolean };
   /** Map rendering of foreign contacts (2D + 3D). */
   map: RadarMapSettings;
+  /** Conflict-alert stage switches (see RADAR_ALERTS.md). Numeric thresholds live in code for now. */
+  alerts: RadarAlertSettings;
   /** Dev-only synthetic source (ignored by release backend). */
   sim: boolean;
+}
+
+/** Conflict-alert toggles. Only the two stage switches are user-facing for now; the numeric parameters
+ *  stay in `ALERT_CONFIG` (controllers/radarAlerts.ts) until per-user tuning is added (RADAR_ALERTS §5). */
+export interface RadarAlertSettings {
+  /** Stage 1 — proximity warn-zone (caution). */
+  stage1Enabled: boolean;
+  /** Stage 2 — predicted closest-approach (warning). */
+  stage2Enabled: boolean;
+  /** Synthesised tone cue on alert. */
+  soundEnabled: boolean;
+  /** Spoken callout ("Traffic" / "Collision") on alert. */
+  voiceEnabled: boolean;
 }
 
 /** Map-rendering controls for radar contacts (panel "Map" tab). See RADAR_TRACKING_PANEL_AND_MAP §4. */
@@ -121,6 +136,12 @@ export const DEFAULT_RADAR: RadarSettings = {
     maxAltM: 10000,
     showAll: false,
     visible: { adsb: true, formationFlight: true, radio: true },
+  },
+  alerts: {
+    stage1Enabled: true,
+    stage2Enabled: true,
+    soundEnabled: true,
+    voiceEnabled: true,
   },
   sim: false,
 };
@@ -258,6 +279,7 @@ function load(): AppSettings {
               ...(pr.map ?? {}),
               visible: { ...dr.map.visible, ...(pr.map?.visible ?? {}) },
             },
+            alerts: { ...dr.alerts, ...(pr.alerts ?? {}) },
           };
         })(),
       };

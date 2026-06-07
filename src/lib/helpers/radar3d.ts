@@ -60,7 +60,22 @@ export function contactModelClass(
   }
 }
 
+/** i18n key for the spelled-out contact type word (alert banner / labels). Heading-independent — a
+ *  contact without a heading is still e.g. an airliner. */
+export function contactTypeKey(system: VehicleSystem, category: string | null): string {
+  if (system === 'formationFlight') return 'radar.acType.formation';
+  if (system === 'radio') return 'radar.acType.radio';
+  const cls = contactModelClass(system, category, true);
+  return `radar.acType.${cls}`;
+}
+
 /** Direction arrow drawn inside the ground circle (local units, nose = +north), heading-rotated. */
 export const ARROW_POLY: [number, number][] = [
   [0, 0.5], [0.22, -0.05], [0.09, -0.05], [0.09, -0.5], [-0.09, -0.5], [-0.09, -0.05], [-0.22, -0.05],
 ];
+
+/** Closed unit circle (radius 1) for the clamped alert ring — scaled to the alert radius in Map3D. */
+export const CIRCLE_POLY: [number, number][] = Array.from({ length: 65 }, (_, i) => {
+  const a = (i / 64) * Math.PI * 2;
+  return [Math.cos(a), Math.sin(a)] as [number, number];
+});

@@ -51,7 +51,8 @@
   import type { SpeedUnit, AltitudeUnit, RadarMapSettings } from "$lib/stores/settings";
   import { radarVehicles, radarSelection, type RadarSnapshot } from "$lib/stores/radarTracking";
   import { contactColor, contactVisibleOnMap, REL_OVERRIDE_M } from "$lib/helpers/radarMap";
-  import { ARROW_POLY, GROUND_CIRCLE_RADIUS_M, contactModelClass, radarModelUri, type RadarModelClass } from "$lib/helpers/radar3d";
+  import { ARROW_POLY, contactModelClass, radarModelUri, type RadarModelClass } from "$lib/helpers/radar3d";
+  import { radarAlertLevels, ALERT_CONFIG, type AlertLevel } from "$lib/controllers/radarAlerts";
 
   let {
     active = true,
@@ -269,6 +270,7 @@
     // replacing the material each poll — replacing rebuilds the material (the colour-coded "blink").
     dropColorCP?: Cesium.ConstantProperty;
     dropColor?: Cesium.Color;
+    alertLevel: AlertLevel | null; // conflict-alert highlight (pulsing red/yellow), or null
     groundSig?: string;        // last-synced ground signature — skip the whole ground update if unchanged
     entities: Cesium.Entity[];
   };
@@ -280,8 +282,10 @@
   let radar3dCreateRaf = 0;
   let radar3dSnap: RadarSnapshot = { adsb: [], formationFlight: [], radio: [], lastUpdate: 0 };
   let radar3dSelectedId: string | null = null;
+  let radar3dAlertLevels: Map<string, AlertLevel> = new Map();
   let unsubRadar3d: (() => void) | undefined;
   let unsubRadarSel3d: (() => void) | undefined;
+  let unsubRadarAlerts3d: (() => void) | undefined;
   // Click/hover picking: map each contact entity back to its id; handler set up in onMount.
   const radar3dEntityIds = new WeakMap<Cesium.Entity, string>();
   let radar3dPickHandler: Cesium.ScreenSpaceEventHandler | undefined;
@@ -901,6 +905,8 @@
       for (const rec of radar3dRecs.values()) { rec.selected = rec.id === id; syncRec(rec); }
       viewer?.scene.requestRender();
     });
+    // Conflict-alert highlight: re-evaluate whenever the alert set changes (drives the pulse-render mode).
+    unsubRadarAlerts3d = radarAlertLevels.subscribe((m) => { radar3dAlertLevels = m; if (viewer) updateRadar3D(); });
 
     // Connection edge: on a fresh (re)connect, flag the next telemetry frame to
     // decide clearing (only if DISARMED) and force a live-geoid recompute.
@@ -930,6 +936,7 @@
     unsubTelemetry?.();
     unsubRadar3d?.();
     unsubRadarSel3d?.();
+    unsubRadarAlerts3d?.();
     radar3dPickHandler?.destroy();
     unsubHome?.();
     unsubSettingsWatch?.();
@@ -947,6 +954,15 @@
 
   // ── Radar (foreign-vehicle) 3D rendering ─────────────────────────────
   const RADAR_CYAN = Cesium.Color.CYAN;
+  const RADAR_ALERT_RED = Cesium.Color.fromCssColorString('#ff2a2a');
+  const RADAR_ALERT_YELLOW = Cesium.Color.fromCssColorString('#f4c020');
+  // Ground circle = exactly the Stage-2 collision miss radius (R_cpa) — the "never enter" blob — so the
+  // visual and the alert threshold stay deckungsgleich if R_cpa later becomes user-tunable.
+  const CIRCLE_RADIUS_M = ALERT_CONFIG.rCpa;
+  /** 0→1→0 once per second, for the alert pulse (evaluated per frame while continuous-rendering). */
+  function alertPulse01(): number {
+    return 0.5 + 0.5 * Math.sin((Date.now() / 1000) * Math.PI * 2);
+  }
 
   /** Build ECEF positions for a local (east/north, unit) polygon scaled by `sizeM` + heading-rotated. */
   function radarLocalPositions(
@@ -965,9 +981,10 @@
   function clearRadar3D() {
     radar3dCreateQueue.length = 0;
     if (radar3dCreateRaf) { cancelAnimationFrame(radar3dCreateRaf); radar3dCreateRaf = 0; }
-    if (!viewer || !radar3dRecs.size) return;
+    if (!viewer || !radar3dRecs.size) { if (viewer) viewer.scene.requestRenderMode = true; return; }
     for (const rec of radar3dRecs.values()) for (const e of rec.entities) viewer.entities.remove(e);
     radar3dRecs.clear();
+    viewer.scene.requestRenderMode = true; // no contacts → back to on-demand rendering
     viewer.scene.requestRender();
   }
 
@@ -1034,7 +1051,7 @@
     });
     const circle = viewer.entities.add({
       ellipse: {
-        semiMajorAxis: GROUND_CIRCLE_RADIUS_M, semiMinorAxis: GROUND_CIRCLE_RADIUS_M,
+        semiMajorAxis: CIRCLE_RADIUS_M, semiMinorAxis: CIRCLE_RADIUS_M,
         heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
         classificationType: Cesium.ClassificationType.TERRAIN,
         outlineColor: RADAR_CYAN, outlineWidth: 2,
@@ -1102,7 +1119,7 @@
   function syncRadarGround(rec: Radar3dRec) {
     // Skip entirely when nothing relevant changed: the snapshot fires at the (1 Hz) receiver poll rate,
     // and re-touching a contact's ground geometry every snapshot — even unchanged — flashes the line.
-    const sig = `${rec.lat.toFixed(6)},${rec.lon.toFixed(6)},${Math.round(rec.contactEll)},${rec.headingDeg ?? 'x'},${rec.showGround},${rec.selected},${rec.color.toCssColorString()},${rec.hideRadiusM}`;
+    const sig = `${rec.lat.toFixed(6)},${rec.lon.toFixed(6)},${Math.round(rec.contactEll)},${rec.headingDeg ?? 'x'},${rec.showGround},${rec.selected},${rec.color.toCssColorString()},${rec.hideRadiusM},${rec.alertLevel ?? 'n'}`;
     if (sig === rec.groundSig) return;
     rec.groundSig = sig;
     const [, dropBg, drop, circle, arrow] = rec.entities;
@@ -1129,13 +1146,23 @@
     drop.show = rec.showGround;
     circle.position = new Cesium.ConstantPositionProperty(Cesium.Cartesian3.fromDegrees(rec.lon, rec.lat));
     if (circle.ellipse) {
-      circle.ellipse.material = new Cesium.ColorMaterialProperty(rec.color.brighten(0.45, new Cesium.Color()).withAlpha(0.5));
-      circle.ellipse.outline = new Cesium.ConstantProperty(rec.selected);
+      if (rec.alertLevel) {
+        // Alerting: the whole 1 km collision blob pulses — red (warning) / yellow (caution). The blob is
+        // exactly R_cpa, so it reads as the "never enter" zone, unmissable from afar.
+        const base = rec.alertLevel === 'warning' ? RADAR_ALERT_RED : RADAR_ALERT_YELLOW;
+        circle.ellipse.material = new Cesium.ColorMaterialProperty(
+          new Cesium.CallbackProperty(() => base.withAlpha(0.3 + 0.45 * alertPulse01()), false),
+        );
+        circle.ellipse.outline = new Cesium.ConstantProperty(false);
+      } else {
+        circle.ellipse.material = new Cesium.ColorMaterialProperty(rec.color.brighten(0.45, new Cesium.Color()).withAlpha(0.5));
+        circle.ellipse.outline = new Cesium.ConstantProperty(rec.selected);
+      }
       circle.ellipse.distanceDisplayCondition = ddc;
     }
-    circle.show = rec.showGround;
+    circle.show = rec.showGround || rec.alertLevel != null;
     if (arrow.polyline) {
-      const a = radarLocalPositions(rec.lon, rec.lat, ARROW_POLY, GROUND_CIRCLE_RADIUS_M * 0.9, rec.headingDeg);
+      const a = radarLocalPositions(rec.lon, rec.lat, ARROW_POLY, CIRCLE_RADIUS_M * 0.9, rec.headingDeg);
       a.push(a[0]); // close the outline
       arrow.polyline.positions = new Cesium.ConstantProperty(a);
       arrow.polyline.material = new Cesium.ColorMaterialProperty((rec.selected ? RADAR_CYAN : Cesium.Color.BLACK).withAlpha(0.9));
@@ -1178,6 +1205,7 @@
           id: v.id, lat: v.lat, lon: v.lon, headingDeg: v.headingDeg, modelClass, callsign, altM: v.altM,
           groundSpeedMs: v.groundSpeedMs, verticalSpeedMs: v.verticalSpeedMs,
           contactEll, color: cesColor, showGround, selected: v.id === radar3dSelectedId,
+          alertLevel: radar3dAlertLevels.get(v.id) ?? null,
           hideRadiusM: hideR, entities: [],
         };
         radar3dRecs.set(v.id, rec);
@@ -1188,6 +1216,7 @@
         rec.groundSpeedMs = v.groundSpeedMs; rec.verticalSpeedMs = v.verticalSpeedMs;
         rec.contactEll = contactEll; rec.color = cesColor;
         rec.showGround = showGround; rec.selected = v.id === radar3dSelectedId; rec.hideRadiusM = hideR;
+        rec.alertLevel = radar3dAlertLevels.get(v.id) ?? null;
         syncRec(rec);
       }
     }
@@ -1195,6 +1224,11 @@
       if (!seen.has(id)) { for (const e of rec.entities) viewer.entities.remove(e); radar3dRecs.delete(id); }
     }
     if (radar3dCreateQueue.length && !radar3dCreateRaf) radar3dCreateRaf = requestAnimationFrame(drainRadarCreateQueue);
+    // Any active alert → render continuously so the pulse animates (CallbackProperty materials); otherwise
+    // back to on-demand (requestRenderMode) to save the GPU. The alert geometry itself stays static.
+    let anyAlert = false;
+    for (const rec of radar3dRecs.values()) if (rec.alertLevel) { anyAlert = true; break; }
+    viewer.scene.requestRenderMode = !anyAlert;
     viewer.scene.requestRender();
   }
 

@@ -37,6 +37,7 @@
   const patchRadar = (partial: Partial<RadarSettings>) => onPatch({ radar: { ...radar, ...partial } });
   const patchAdsb = (partial: Partial<RadarSettings['adsb']>) => patchRadar({ adsb: { ...radar.adsb, ...partial } });
   const patchMap = (partial: Partial<RadarSettings['map']>) => patchRadar({ map: { ...radar.map, ...partial } });
+  const patchAlerts = (partial: Partial<RadarSettings['alerts']>) => patchRadar({ alerts: { ...radar.alerts, ...partial } });
   const setMapVisible = (key: 'adsb' | 'formationFlight' | 'radio', on: boolean) =>
     patchMap({ visible: { ...radar.map.visible, [key]: on } });
   const setBuiltinEnabled = (name: string, on: boolean) =>
@@ -174,6 +175,27 @@
     <p class="radar-hint">{$t('radar.noSystems')}</p>
   {:else if activeSys === 'adsb'}
     <div class="src-block">
+      <!-- Conflict alerts (ADS-B only for now). Numeric thresholds are fixed in code (RADAR_ALERTS.md);
+           the stage descriptions live in the ⓘ tooltips. -->
+      <p class="src-head">{$t('radar.alertsGroup')}</p>
+      <div class="src-row">
+        <span class="src-label">{$t('radar.alertStage1')}<span class="src-info" title={$t('radar.alertStage1Desc')}>ⓘ</span></span>
+        <Toggle checked={radar.alerts.stage1Enabled} onchange={(c) => patchAlerts({ stage1Enabled: c })} />
+      </div>
+      <div class="src-row">
+        <span class="src-label">{$t('radar.alertStage2')}<span class="src-info" title={$t('radar.alertStage2Desc')}>ⓘ</span></span>
+        <Toggle checked={radar.alerts.stage2Enabled} onchange={(c) => patchAlerts({ stage2Enabled: c })} />
+      </div>
+      <div class="src-row">
+        <span class="src-label">{$t('radar.alertSound')}</span>
+        <Toggle checked={radar.alerts.soundEnabled} onchange={(c) => patchAlerts({ soundEnabled: c })} />
+      </div>
+      <div class="src-row">
+        <span class="src-label">{$t('radar.alertVoice')}</span>
+        <Toggle checked={radar.alerts.voiceEnabled} onchange={(c) => patchAlerts({ voiceEnabled: c })} />
+      </div>
+
+      <p class="src-head">{$t('radar.onlineService')}</p>
       <div class="src-row">
         <span class="src-label">{$t('radar.webRadius')}</span>
         <select
@@ -413,6 +435,8 @@
   .src-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 2px; }
   .src-head { color: #949494; font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; margin: 8px 2px 2px; }
   .src-label { color: #cdd6da; font-size: 12px; }
+  .src-info { margin-left: 5px; color: #6f96a6; cursor: help; font-size: 11px; }
+  .src-info:hover { color: #37a8db; }
   .src-row-right { display: flex; align-items: center; gap: 8px; }
   .src-name { flex: 1; color: #e0e0e0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .src-stat {

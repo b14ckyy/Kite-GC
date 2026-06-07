@@ -97,7 +97,39 @@
     "legendTitle": "Échelle d'altitude (rel. à UAV/GCS)",
     "legendAbove": "≥ +2 km",
     "legendLevel": "niveau",
-    "legendBelow": "≤ −0,5 km"
+    "legendBelow": "≤ −0,5 km",
+    "alertsGroup": "Alertes",
+    "onlineService": "Service en ligne",
+    "alertStage1": "Niveau 1 — Prudence",
+    "alertStage1Desc": "Alerte lorsqu'un contact est dans le rayon d'alerte (5 km, ±2000 m) et que la distance diminue.",
+    "alertStage2": "Niveau 2 — Alerte collision",
+    "alertStage2Desc": "Prédit le point de rapprochement le plus proche à partir des deux trajectoires 3D (cap + montée/descente) ; alerte d'un conflit probable (écart < 1000 m / 250 m sous 45 s).",
+    "alertSound": "Son d'alerte",
+    "alertVoice": "Annonce vocale",
+    "acType": {
+      "light": "Avion léger",
+      "small": "Avion",
+      "heavy": "Avion de ligne",
+      "jet": "Jet",
+      "heli": "Hélicoptère",
+      "glider": "Planeur",
+      "balloon": "Ballon",
+      "arrow": "Aéronef",
+      "ground": "Véhicule au sol",
+      "formation": "Formation",
+      "radio": "Contact radio"
+    },
+    "alert": {
+      "level": "niveau",
+      "cpaShort": "CPA",
+      "cautionTitle": "Trafic en approche",
+      "cautionHint": "Maintenir la position ou augmenter la distance",
+      "warningTitle": "ALERTE COLLISION",
+      "warningAction": "Descendez ou évitez {dir} ({deg}°)",
+      "warningActionNoDir": "Descendez ou évitez immédiatement",
+      "voiceCaution": "Trafic",
+      "voiceWarning": "Collision"
+    }
   },
   "video": {
     "title": "Vidéo",
@@ -862,7 +894,9 @@
     "lon": "Lon"
   },
   "debug": {
-    "title": "🔧 Moniteur de débogage MSP",
+    "title": "🔧 Moniteur de débogage",
+    "tabMsp": "MSP",
+    "tabAlerts": "Alertes",
     "msgPerSec": "MSG/s",
     "tx": "TX",
     "rx": "RX",
@@ -876,7 +910,30 @@
     "colTarget": "Cible",
     "colActual": "Réel",
     "poll": "POLL",
-    "init": "INIT"
+    "init": "INIT",
+    "alNoFix": "Pas de fix UAV — alertes de conflit inactives",
+    "alCourse": "Cap",
+    "alSpeed": "Vitesse",
+    "alVario": "Vario",
+    "alStable": "stable",
+    "alUnstable": "instable",
+    "alWorst": "Max",
+    "alEval": "Contacts",
+    "alColContact": "Contact",
+    "alColDh": "dH",
+    "alColDv": "dV",
+    "alColRate": "ḋ",
+    "alColTcpa": "t_cpa",
+    "alColMissH": "miss H",
+    "alColMissV": "miss V",
+    "alColS1": "S1",
+    "alColS2": "S2",
+    "alNone": "Aucun contact à portée",
+    "injGps": "Injection GPS",
+    "injLat": "Lat",
+    "injLon": "Lon",
+    "injAlt": "Alt m",
+    "injFromView": "Depuis le centre de la carte"
   },
   "statusBar": {
     "debug": "Débogage"

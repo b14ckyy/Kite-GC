@@ -97,7 +97,39 @@
     "legendTitle": "Altitude Scale (Rel. to UAV/GCS)",
     "legendAbove": "≥ +2 km",
     "legendLevel": "level",
-    "legendBelow": "≤ −0.5 km"
+    "legendBelow": "≤ −0.5 km",
+    "alertsGroup": "Alerts",
+    "onlineService": "Online service",
+    "alertStage1": "Stage 1 — Caution",
+    "alertStage1Desc": "Caution when a contact is inside the warn radius (5 km, ±2000 m) and the distance is decreasing.",
+    "alertStage2": "Stage 2 — Collision warning",
+    "alertStage2Desc": "Predicts the closest point of approach from both 3D tracks (course + climb/sink); warns on a likely conflict (miss < 1000 m / 250 m within 45 s).",
+    "alertSound": "Alert sound",
+    "alertVoice": "Alert voice",
+    "acType": {
+      "light": "Light aircraft",
+      "small": "Aircraft",
+      "heavy": "Airliner",
+      "jet": "Jet",
+      "heli": "Helicopter",
+      "glider": "Glider",
+      "balloon": "Balloon",
+      "arrow": "Aircraft",
+      "ground": "Ground vehicle",
+      "formation": "Formation",
+      "radio": "Radio contact"
+    },
+    "alert": {
+      "level": "level",
+      "cpaShort": "CPA",
+      "cautionTitle": "Traffic approaching",
+      "cautionHint": "Hold position or increase distance",
+      "warningTitle": "COLLISION ALERT",
+      "warningAction": "Dive now or evade {dir} ({deg}°)",
+      "warningActionNoDir": "Dive now or evade immediately",
+      "voiceCaution": "Traffic",
+      "voiceWarning": "Collision"
+    }
   },
   "video": {
     "title": "Video",
@@ -862,7 +894,9 @@
     "lon": "Lon"
   },
   "debug": {
-    "title": "🔧 MSP Debug Monitor",
+    "title": "🔧 Debug Monitor",
+    "tabMsp": "MSP",
+    "tabAlerts": "Alerts",
     "msgPerSec": "MSG/s",
     "tx": "TX",
     "rx": "RX",
@@ -876,7 +910,30 @@
     "colTarget": "Target",
     "colActual": "Actual",
     "poll": "POLL",
-    "init": "INIT"
+    "init": "INIT",
+    "alNoFix": "No UAV fix — conflict alerts inactive",
+    "alCourse": "Course",
+    "alSpeed": "Speed",
+    "alVario": "Vario",
+    "alStable": "stable",
+    "alUnstable": "unstable",
+    "alWorst": "Worst",
+    "alEval": "Contacts",
+    "alColContact": "Contact",
+    "alColDh": "dH",
+    "alColDv": "dV",
+    "alColRate": "ḋ",
+    "alColTcpa": "t_cpa",
+    "alColMissH": "miss H",
+    "alColMissV": "miss V",
+    "alColS1": "S1",
+    "alColS2": "S2",
+    "alNone": "No contacts in range",
+    "injGps": "GPS inject",
+    "injLat": "Lat",
+    "injLon": "Lon",
+    "injAlt": "Alt m",
+    "injFromView": "Fill from map centre"
   },
   "statusBar": {
     "debug": "Debug"

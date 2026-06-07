@@ -56,6 +56,8 @@ export interface ContactIconOpts {
   selected: boolean;
   /** Optional callsign label under the icon. */
   label?: string;
+  /** Conflict-alert highlight: a pulsing ring around the icon (yellow caution / red warning). */
+  alertLevel?: 'caution' | 'warning' | null;
 }
 
 /** Build the inner HTML for a Leaflet `divIcon` (SVG silhouette + optional callsign label). */
@@ -69,5 +71,10 @@ export function buildContactIconHtml(o: ContactIconOpts): string {
   const label = o.label
     ? `<span class="radar-icon-label">${o.label}</span>`
     : '';
-  return `<div class="radar-icon" style="opacity:${o.opacity}">${svg}${label}</div>`;
+  // Conflict-alert ring around the icon, pulsing via CSS (alerting contacts are always near, so the
+  // icon's distance-dim is ~1 anyway).
+  const alertRing = o.alertLevel
+    ? `<span class="radar-alert-ring ${o.alertLevel}"></span>`
+    : '';
+  return `<div class="radar-icon" style="opacity:${o.opacity}">${alertRing}${svg}${label}</div>`;
 }

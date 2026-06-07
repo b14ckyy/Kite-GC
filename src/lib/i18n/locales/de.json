@@ -97,7 +97,39 @@
     "legendTitle": "Höhenskala (rel. zu UAV/GCS)",
     "legendAbove": "≥ +2 km",
     "legendLevel": "Niveau",
-    "legendBelow": "≤ −0,5 km"
+    "legendBelow": "≤ −0,5 km",
+    "alertsGroup": "Alarme",
+    "onlineService": "Online-Dienst",
+    "alertStage1": "Stufe 1 — Caution",
+    "alertStage1Desc": "Warnung, wenn ein Kontakt im Warnradius (5 km, ±2000 m) ist und sich die Distanz verringert.",
+    "alertStage2": "Stufe 2 — Kollisionswarnung",
+    "alertStage2Desc": "Berechnet die dichteste Annäherung aus beiden 3D-Kursen (Kurs + Steig-/Sinkrate); warnt bei wahrscheinlichem Konflikt (Miss < 1000 m / 250 m innerhalb 45 s).",
+    "alertSound": "Alarm-Ton",
+    "alertVoice": "Alarm-Ansage",
+    "acType": {
+      "light": "Leichtflugzeug",
+      "small": "Flugzeug",
+      "heavy": "Verkehrsflugzeug",
+      "jet": "Jet",
+      "heli": "Hubschrauber",
+      "glider": "Segelflugzeug",
+      "balloon": "Ballon",
+      "arrow": "Luftfahrzeug",
+      "ground": "Bodenfahrzeug",
+      "formation": "Formation",
+      "radio": "Funk-Kontakt"
+    },
+    "alert": {
+      "level": "gleichauf",
+      "cpaShort": "CPA",
+      "cautionTitle": "Verkehr nähert sich",
+      "cautionHint": "Position halten oder Abstand vergrößern",
+      "warningTitle": "KOLLISIONSALARM",
+      "warningAction": "Sofort sinken oder ausweichen {dir} ({deg}°)",
+      "warningActionNoDir": "Sofort sinken oder sofort ausweichen",
+      "voiceCaution": "Verkehr",
+      "voiceWarning": "Kollision"
+    }
   },
   "video": {
     "title": "Video",
@@ -862,7 +894,9 @@
     "lon": "Lon"
   },
   "debug": {
-    "title": "🔧 MSP Debug Monitor",
+    "title": "🔧 Debug-Monitor",
+    "tabMsp": "MSP",
+    "tabAlerts": "Alerts",
     "msgPerSec": "MSG/s",
     "tx": "TX",
     "rx": "RX",
@@ -876,7 +910,30 @@
     "colTarget": "Ziel",
     "colActual": "Ist",
     "poll": "POLL",
-    "init": "INIT"
+    "init": "INIT",
+    "alNoFix": "Kein UAV-Fix — Konfliktwarnungen inaktiv",
+    "alCourse": "Kurs",
+    "alSpeed": "Geschw.",
+    "alVario": "Vario",
+    "alStable": "stabil",
+    "alUnstable": "instabil",
+    "alWorst": "Höchste",
+    "alEval": "Kontakte",
+    "alColContact": "Kontakt",
+    "alColDh": "dH",
+    "alColDv": "dV",
+    "alColRate": "ḋ",
+    "alColTcpa": "t_cpa",
+    "alColMissH": "Miss H",
+    "alColMissV": "Miss V",
+    "alColS1": "S1",
+    "alColS2": "S2",
+    "alNone": "Keine Kontakte in Reichweite",
+    "injGps": "GPS-Inject",
+    "injLat": "Lat",
+    "injLon": "Lon",
+    "injAlt": "Höhe m",
+    "injFromView": "Aus Kartenmitte übernehmen"
   },
   "statusBar": {
     "debug": "Debug"
