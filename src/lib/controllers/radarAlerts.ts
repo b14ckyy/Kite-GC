@@ -284,7 +284,9 @@ function evaluate() {
     : { e: 0, n: 0, u: t.vario };
 
   const snap = get(radarVehicles);
-  const contacts: TrackedVehicle[] = [...snap.adsb, ...snap.formationFlight, ...snap.radio];
+  // ADS-B only: FormationFlight / Radio contacts are for monitoring / pilot-to-pilot awareness and never
+  // raise a conflict alert (they share the map + TrackedVehicle model, but not the alert pipeline).
+  const contacts: TrackedVehicle[] = snap.adsb;
 
   const cosLat = Math.cos(t.lat * DEG2RAD);
   const alerts: ContactAlert[] = [];

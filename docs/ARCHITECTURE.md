@@ -1553,6 +1553,8 @@ had to stay simple (the user is not a mathematician) yet account for both aircra
 
 **Decision**:
 - **Protected point = the connected UAV only** (valid GPS fix). No fix ⇒ no alerts (no GCS/area alerting).
+- **ADS-B traffic only.** FormationFlight / Radio-telemetry contacts are monitoring / pilot-to-pilot
+  awareness and never enter the alert pipeline (they share the map + `TrackedVehicle` model, not alerts).
 - **Two stages**, both computed in a local **ENU frame centred on the UAV** (plain arithmetic, one
   quadratic minimum — no matrices):
   - **Stage 1 — caution (proximity):** contact inside `R_warn` (5 km) and the ±`H_warn` (2000 m) band
@@ -1594,8 +1596,8 @@ Toggling `requestRenderMode` only during alerts buys smooth pulsing without payi
 the rest of the time. Keeping every numeric threshold in one `AlertConfig` object leaves a clean path to
 user-tunable parameters without touching the logic.
 
-**Consequences**: alerts are airborne-only and ADS-B-driven for now (FormationFlight/Radio inherit once
-they feed `TrackedVehicle`s). The spoken callout depends on an installed system voice — on Linux WebKitGTK
+**Consequences**: alerts are **ADS-B-only by design** — FormationFlight/Radio stay monitoring-only and
+never alert. The spoken callout depends on an installed system voice — on Linux WebKitGTK
 it may be silent and degrades to tone-only (pre-recorded audio is a later option). The CPA is a linear
 (constant-velocity) extrapolation — correct for a 45 s window, not a turning/accelerating predictor.
 Numeric thresholds are code-fixed until C3 exposes them; the override merge is already in place.

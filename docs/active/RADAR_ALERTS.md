@@ -1,14 +1,15 @@
 # Radar — Conflict Alerts (Plan C)
 
 > Status: **C0 + C1 shipped** (2026-06-07) — core logic, banner, audio, map highlight, settings. See
-> **ADR-035**. Smart proximity/conflict alerts for foreign vehicles vs the connected UAV, on top of the
-> [radar subsystem](RADAR_TRACKING_CORE.md) + [map](RADAR_TRACKING_PANEL_AND_MAP.md). ADS-B-first (the only
-> system with reliable position+velocity today); FormationFlight/Radio inherit it automatically once they
-> feed the same `TrackedVehicle`s.
+> **ADR-035**. Smart proximity/conflict alerts for ADS-B vehicles vs the connected UAV, on top of the
+> [radar subsystem](RADAR_TRACKING_CORE.md) + [map](RADAR_TRACKING_PANEL_AND_MAP.md). **ADS-B only** —
+> FormationFlight / Radio-telemetry contacts are for monitoring / pilot-to-pilot awareness and never alert.
 
 ## 1. Scope & decisions (2026-06-07)
 - **Protected point = the connected UAV only** (valid GPS fix). No UAV/fix ⇒ alerts off (no GCS/area
   alerting in this plan).
+- **ADS-B traffic only.** FormationFlight and Radio-telemetry contacts never raise alerts — they are for
+  monitoring / pilot-to-pilot awareness (they share the map + `TrackedVehicle` model, not the alert pipeline).
 - **Two alert stages:**
   - **Stage 1 — Warn zone (caution):** a contact is **inside a horizontal warn radius** (+ within the
     vertical relevance band) **AND the distance is decreasing** (range-rate beyond a small deadband).
@@ -148,11 +149,10 @@ Pure frontend — all inputs are already in the browser; outputs are UI/audio (A
   tone + localised voice callouts, 3D pulsing collision circle + 2D rings, the four settings switches,
   i18n (en/de/fr). (Audio landed here alongside the banner rather than as a separate C2.)
 - **C3 — Tuning (open):** finalise thresholds from real flights; expose numeric params as user settings
-  (the `AlertConfig` override path is already there); GPS-inject movement sim (course/speed/vario) for
-  vertical/Stage-2 testing; optional FPV-HUD cue.
+  (the `AlertConfig` override path is already there); optional FPV-HUD cue. Vertical/Stage-2 validation is
+  done with the **firmware sim** (not a GPS-inject movement emulator).
 
 ## 7. Open / later
-- **GPS-inject movement sim** (course/speed/vario) — static injection can't exercise the vertical CPA well.
 - **No-velocity contacts:** Stage 1 only (CPA needs a velocity) — confirmed acceptable.
-- **Later:** full multi-contact prioritisation; protect GCS/area too; FormationFlight/Radio once feeding;
+- **Later (after the core features land):** full multi-contact prioritisation; protect GCS/area too;
   user-tunable numeric parameters (C3); pre-recorded callout audio for engines without TTS (Linux WebKitGTK).
