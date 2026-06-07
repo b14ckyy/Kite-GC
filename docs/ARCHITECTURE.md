@@ -1539,5 +1539,68 @@ kept-in-RAM viewer model.
 
 ---
 
+## ADR-035: ADS-B Conflict Alerts — Two-Stage Proximity + 3D CPA
+
+**Date**: 2026-06-07
+**Status**: Accepted
+**Related**: ADR-009 (frontend architecture — controllers/stores), ADR-031 (2D↔3D continuity), the radar
+plan docs (`docs/active/RADAR_TRACKING_*`, `RADAR_ALERTS.md`)
+
+**Context**: The radar subsystem surfaces foreign vehicles (ADS-B first; FormationFlight / Radio later) on
+the 2D + 3D maps. Beyond "there is traffic", we wanted *smart* conflict alerts for the connected UAV —
+distinguishing a genuine threat from a distant airliner — with map, audio and banner outputs. The math
+had to stay simple (the user is not a mathematician) yet account for both aircraft moving in 3D.
+
+**Decision**:
+- **Protected point = the connected UAV only** (valid GPS fix). No fix ⇒ no alerts (no GCS/area alerting).
+- **Two stages**, both computed in a local **ENU frame centred on the UAV** (plain arithmetic, one
+  quadratic minimum — no matrices):
+  - **Stage 1 — caution (proximity):** contact inside `R_warn` (5 km) and the ±`H_warn` (2000 m) band
+    **and closing** (horizontal range-rate `ḋ < −ḋ_min`). `ḋ` is recomputed only on a *new* contact
+    position (`lastSeenMs`) and **held** between bursty ADS-B updates (else it reads "not closing" every
+    other frame and flickers). Stage 1 **stays only while still approaching** — once it recedes past
+    `recedeDeadband` it clears, even inside the radius.
+  - **Stage 2 — collision warning (CPA):** `t_cpa = −(r·v_rel)/(v_rel·v_rel)` over both tracks' full 3D
+    velocity (course + climb/sink of contact *and* UAV vario); a cylinder test (`R_cpa` 1000 m / `H_cpa`
+    250 m) at the clamped CPA time within a 45 s look-ahead. Banner shows an **evade heading** ⟂ to the
+    contact's track, on the side away from the CPA point.
+- **UAV course-stability gate:** the UAV's horizontal course is trusted in the CPA only if it stayed
+  within ±20° over the last 10 s (steady cruise) and ground speed ≥ 5 m/s; otherwise the UAV is a
+  non-translating point (vario still used). Avoids phantom CPAs while loitering/manoeuvring.
+- **Jitter control = persistence + hysteresis, not bigger thresholds:** Stage 2 confirms over ~3 s before
+  raising and clears at ×1.3 separation + a hold. `H_warn` doubles as the global vertical relevance
+  cutoff (one number gates both stages). Threshold rationale (250 kt < 10 000 ft ⇒ 45 s ≈ 5.7 km max
+  closure) lives in `RADAR_ALERTS.md §4`.
+- **Pure frontend (ADR-009):** `controllers/radarAlerts.ts` (the evaluator + `AlertConfig` single source
+  of truth, override-ready for future user tuning) produces a `radarAlerts` store + a derived
+  `radarAlertLevels` map. `controllers/alertAudio.ts` drives the audio. No Rust involved — all inputs are
+  already in the browser.
+- **Outputs:** a top-of-map **banner** (stacked warning/caution, all affected contacts); **audio** (Web
+  Audio tone + Web Speech callout, localised with English fallback; Stage 1 once-per-entry, Stage 2 looped
+  and suppressing Stage 1); **map highlight** — the 3D **ground circle is coupled to `R_cpa`** and pulses
+  red/yellow via a `CallbackProperty` material, with `requestRenderMode` flipped to continuous **only
+  while an alert is active**; 2D uses a pulsing CSS ring. The alert level is part of the 3D `groundSig`
+  so geometry/material rebuild only on a real state change (the flicker-safe pattern from the radar 3D
+  work).
+- **Dev tooling:** the in-app `DebugPanel` became **multi-tab** (MSP | Alerts) with a per-contact maths
+  readout, plus a global **GPS-inject** row (override the UAV position from the map centre) so alerts can
+  be exercised over busy airspace from the desk.
+
+**Rationale**: computing CPA in 3D (vertical rates included) but testing a horizontal/vertical *cylinder*
+matches how a pilot thinks ("how close, how high") and keeps the threshold tunable per axis. Holding the
+range-rate across bursty ADS-B updates was the key to Stage 1 not flickering. Coupling the ground circle
+to `R_cpa` makes the existing 1 km projection *mean* something — it is literally the collision zone.
+Toggling `requestRenderMode` only during alerts buys smooth pulsing without paying continuous-render cost
+the rest of the time. Keeping every numeric threshold in one `AlertConfig` object leaves a clean path to
+user-tunable parameters without touching the logic.
+
+**Consequences**: alerts are airborne-only and ADS-B-driven for now (FormationFlight/Radio inherit once
+they feed `TrackedVehicle`s). The spoken callout depends on an installed system voice — on Linux WebKitGTK
+it may be silent and degrades to tone-only (pre-recorded audio is a later option). The CPA is a linear
+(constant-velocity) extrapolation — correct for a 45 s window, not a turning/accelerating predictor.
+Numeric thresholds are code-fixed until C3 exposes them; the override merge is already in place.
+
+---
+
 *End of Architecture Decision Records*
 

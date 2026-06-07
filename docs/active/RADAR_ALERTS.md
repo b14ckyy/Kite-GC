@@ -1,9 +1,10 @@
 # Radar — Conflict Alerts (Plan C)
 
-> Status: **Approved — ready to implement** (2026-06-07). Smart proximity/conflict alerts for foreign
-> vehicles vs the connected UAV, on top of the [radar subsystem](RADAR_TRACKING_CORE.md) +
-> [map](RADAR_TRACKING_PANEL_AND_MAP.md). ADS-B-first (the only system with reliable position+velocity
-> today); FormationFlight/Radio inherit it automatically once they feed the same `TrackedVehicle`s.
+> Status: **C0 + C1 shipped** (2026-06-07) — core logic, banner, audio, map highlight, settings. See
+> **ADR-035**. Smart proximity/conflict alerts for foreign vehicles vs the connected UAV, on top of the
+> [radar subsystem](RADAR_TRACKING_CORE.md) + [map](RADAR_TRACKING_PANEL_AND_MAP.md). ADS-B-first (the only
+> system with reliable position+velocity today); FormationFlight/Radio inherit it automatically once they
+> feed the same `TrackedVehicle`s.
 
 ## 1. Scope & decisions (2026-06-07)
 - **Protected point = the connected UAV only** (valid GPS fix). No UAV/fix ⇒ alerts off (no GCS/area
@@ -65,7 +66,13 @@ cylinder:
 - **Exit margin:** the warning is held until the miss distance exceeds the threshold by **×1.3**
   (> 1300 m / > 325 m) and stays out for a few seconds — no chattering at the edge.
 
-This applies to Stage 1 too (small enter/exit margin on `R_warn` + hold) so the banner/audio don't flap.
+This applies to Stage 1 too (widened `R_warn` + hold). **Stage 1 additionally requires the contact to
+still be *approaching* to stay latched** — once `ḋ` turns positive past `recedeDeadband` (it has flown
+past / is leaving), the caution clears after the hold even if still inside the radius.
+
+**Range-rate sampling:** `ḋ` is recomputed only when the contact reports a *new* position (`lastSeenMs`
+changes) and **held between** those bursty updates — otherwise the unchanged distance between ADS-B
+samples reads as "not closing" and Stage 1 flickers off every other frame.
 
 ## 3. Stability gate (UAV course)
 - Keep a short ring buffer of `(t, heading)` for the UAV (last ~10 s).
@@ -83,6 +90,7 @@ Single source of truth: an `AlertConfig` object in the controller (§5). Default
 | Warn radius (horizontal) | `R_warn` | **5000 m** | Stage 1 caution if a contact is inside this and closing. |
 | Warn vertical band | `H_warn` | **2000 m** | Stage 1 vertical limit; also the global relevance cutoff (contacts further off in altitude never alert). |
 | Closing-rate deadband | `ḋ_min` | **10 m/s** | Stage 1 only fires if the contact closes faster than this (noise floor / ignores parallel & slow-drift traffic). |
+| Recede deadband | `recedeDeadband` | **1 m/s** | Stage 1 *clears* once the contact recedes faster than this — a contact that has flown past stops alerting even while still inside the radius. |
 | CPA miss radius (horizontal) | `R_cpa` | **1000 m** | Stage 2 warning if the predicted closest horizontal pass is under this. |
 | CPA miss height (vertical) | `H_cpa` | **250 m** | Stage 2 vertical miss limit at CPA. |
 | Look-ahead | `T_la` | **45 s** | How far ahead the CPA is predicted. |
@@ -110,34 +118,41 @@ Pure frontend — all inputs are already in the browser; outputs are UI/audio (A
 - **`AlertConfig`** — one exported constant holding every numeric parameter from §4 (the single source of
   truth). The controller reads its thresholds **only** from this object, merged with optional overrides, so
   adding user-tunable parameters later = feed overrides from settings into the merge (no logic change).
-- **Settings (now):** `RadarAlertSettings { stage1Enabled: boolean; stage2Enabled: boolean }` (default both
-  on). Only these two switches are wired to UI; the numeric params stay in `AlertConfig`.
-- Consumers:
-  - **Banner** — `RadarAlertBanner.svelte` pinned to the top of the map (worst level: colour + count +
-    nearest contact callsign/bearing/distance; click → select that contact).
-  - **Map** — escalate the contact's existing highlight (pulse / alert colour) in 2D + 3D via the shared
-    `radarSelection` / a new alert set; optionally draw the warn-radius ring around the UAV.
-  - **Audio** — staged cue on level-enter (and re-arm after clear); throttled. Exact sound in §7.
-  - **Debug Monitor (dev only)** — the in-app dev `DebugPanel` (currently MSP-only) gets an **"Alerts"
-    tab**: per-contact live readout of the computed values (`d_h`, `d_v`, `ḋ`, `t_cpa`, miss `d_h_cpa` /
-    `d_v_cpa`, stage + persistence state, UAV course-gate status). This is the C0 validation surface —
-    inspect the maths against live traffic before any user-facing UI exists.
+- **Settings (now):** `RadarAlertSettings { stage1Enabled, stage2Enabled, soundEnabled, voiceEnabled }`
+  (default all on) — four switches in the ADS-B tab's "Alerts" group; the numeric params stay in
+  `AlertConfig`. A derived `radarAlertLevels` store (vehicleId → level) feeds the map highlights.
+- Consumers (shipped):
+  - **Banner** — `RadarAlertBanner.svelte`, top of the map. Two stacked banners list **all** affected
+    contacts: **warning** (red, white text + black outline, pulsing) with an **evade heading** ⟂ to the
+    contact's track away from the CPA + the minimal list (callsign · speed · CPA dist); **caution**
+    (yellow, black text) with the detailed list (callsign · bearing · type word · speed · rel-alt) +
+    "hold position / increase distance". Click a row → selects the contact.
+  - **Map** — the contact's **ground circle = `R_cpa`** (coupled, so visual ≡ the "never enter" zone)
+    pulses red (warning) / yellow (caution) in 3D via a `CallbackProperty` material; `requestRenderMode`
+    is switched to continuous **only while an alert is active**, then back to on-demand. 2D draws a pulsing
+    CSS ring around the contact icon. Both read `radarAlertLevels`; the alert level is part of the 3D
+    `groundSig` so the material is rebuilt only on a real state change (flicker-safe).
+  - **Audio** — `controllers/alertAudio.ts`: a synthesised tone (Web Audio) + a spoken callout (Web Speech,
+    localised to the UI language with an English fallback when no voice is installed). **Stage 1 chimes
+    once per contact entering the zone** (no loop); **Stage 2 repeats** every 8 s while active and
+    **suppresses Stage-1 sounds**. Separate sound / voice switches.
+  - **Debug Monitor (dev only)** — the in-app `DebugPanel` is now multi-tab (MSP | **Alerts**). The Alerts
+    tab is the per-contact live readout (`d_h`, `d_v`, `ḋ`, `t_cpa`, miss, stage flags, course-gate). A
+    global **GPS-inject** row (checkbox + lat/lon/MSL, ⌖ = fill from map centre) overrides the UAV position
+    so alerts can be tested over busy airspace from the desk.
 
 ## 6. Phasing
-- **C0 — Core logic:** `radarAlerts` controller + `AlertConfig` + alerts store; Stage 1 + Stage 2 math;
-  stability gate; persistence/hysteresis. **No user-facing UI** — validate via the Debug Monitor's new
-  "Alerts" tab (the computed values per contact) + `console` against live traffic.
-- **C1 — Banner + map:** `RadarAlertBanner` (top-of-map) + map highlight escalation; the two settings
-  toggles; i18n (en/de/fr).
-- **C2 — Audio:** staged cues, throttle/re-arm; mute control in Settings.
-- **C3 — Tuning:** finalise thresholds from real flights; optional warn-radius ring; optional FPV-HUD cue;
-  expose numeric params as user settings (the `AlertConfig` override path is already there).
+- **C0 — Core logic ✅ (shipped):** `radarAlerts` controller + `AlertConfig` + alerts store; Stage 1 +
+  Stage 2 math; stability gate; persistence/hysteresis; Debug Monitor "Alerts" tab + GPS-inject.
+- **C1 — Banner + audio + map highlight ✅ (shipped):** `RadarAlertBanner` (stacked warning/caution),
+  tone + localised voice callouts, 3D pulsing collision circle + 2D rings, the four settings switches,
+  i18n (en/de/fr). (Audio landed here alongside the banner rather than as a separate C2.)
+- **C3 — Tuning (open):** finalise thresholds from real flights; expose numeric params as user settings
+  (the `AlertConfig` override path is already there); GPS-inject movement sim (course/speed/vario) for
+  vertical/Stage-2 testing; optional FPV-HUD cue.
 
-## 7. Open questions / to decide
-- **Audio:** simple staged tones vs. spoken "traffic" (+ clock bearing)? Volume/mute control + where it
-  lives (Settings). *(Decide at C2.)*
-- **Banner content/behaviour:** single worst alert vs. a small stack; auto-dismiss vs. sticky until clear.
-  *(Decide at C1.)*
+## 7. Open / later
+- **GPS-inject movement sim** (course/speed/vario) — static injection can't exercise the vertical CPA well.
 - **No-velocity contacts:** Stage 1 only (CPA needs a velocity) — confirmed acceptable.
 - **Later:** full multi-contact prioritisation; protect GCS/area too; FormationFlight/Radio once feeding;
-  user-tunable numeric parameters (C3).
+  user-tunable numeric parameters (C3); pre-recorded callout audio for engines without TTS (Linux WebKitGTK).

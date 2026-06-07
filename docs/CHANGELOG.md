@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **ADS-B conflict alerts (ADR-035).** Smart two-stage collision avoidance for the connected UAV against
+  foreign traffic. **Stage 1 — Caution:** a yellow advisory when a contact is inside a 5 km / ±2000 m
+  zone and closing (it clears again once the contact has flown past). **Stage 2 — Collision warning:** a
+  red alarm from the predicted 3D closest point of approach (course + climb/sink of *both* aircraft),
+  with an **evade heading** at right angles to the intruder's track. Outputs: a **banner** at the top of
+  the map listing every affected contact; **audio** (a tone plus a spoken "Traffic" / "Collision" callout
+  in your language, English fallback); and a **map highlight** — the contact's 1 km ground circle (= the
+  collision radius) pulses red/yellow in 3D, with pulsing rings around the 2D icons. New **Alerts** group
+  in the Radar panel's ADS-B tab: Stage 1, Stage 2, sound and voice switches.
+- **Debug Monitor is now multi-tab (MSP · Alerts) with GPS injection (dev).** The in-app dev monitor gained
+  an *Alerts* tab showing the live conflict maths per contact, and a global *GPS inject* row (set the UAV
+  position from the map centre) for testing alerts over busy airspace without flying.
 - **3D FPV (cockpit) camera view + conformal HUD (ADR-034).** A fourth 3D camera mode (Free → Follow →
   Orbit → **FPV**) drops the eye onto the aircraft: the model is hidden and the camera takes its exact
   position (raised 0.5 m) and attitude. The flight track dims to 40% so it doesn't fill the view, and
