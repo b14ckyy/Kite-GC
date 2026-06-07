@@ -1,6 +1,6 @@
 # Radar Tracking — Panel & Map Visualization (Plan B)
 
-> Status: **Planned** (2026-06-06). The user-facing half of the foreign-vehicle tracking feature
+> Status: **B0–B4 shipped** (2026-06-07). The user-facing half of the foreign-vehicle tracking feature
 > ("Radar"). Covers the **Advanced Radar Panel** (settings + tracked-vehicle lists) and the **map
 > visualization** (2D + 3D). The backend subsystem, data model, sources and the `radar-vehicles`
 > event are specified in `RADAR_TRACKING_CORE.md` (Plan A) — this plan consumes them.
@@ -237,14 +237,26 @@ existing UAV/track/mission rendering is untouched. Design decided 2026-06-06 (se
 - Click → **select** (syncs the panel list via the `radarSelection` store). Optional leader line /
   range ring to the reference.
 
-### 4.5 3D (Cesium, [Map3D.svelte](../../src/lib/components/Map3D.svelte)) — B4
-- Dedicated entity collection: **billboard (silhouette) + label**, positioned at lat/lon and **real
-  altitude** (`alt_m` as MSL via the existing geoid/terrain offset logic, consistent with the UAV track).
-- **Drop-line** (polyline) from each contact straight down to terrain/ground at its lat/lon — so the
-  altitude AND the ground position read at a glance (decided).
-- Unknown-alt contacts: draw at a configurable plane or a ground marker with a stub drop indicator.
-- Billboards face the camera; selection sync; relevance dim via colour alpha + scale. Kept isolated so
-  2D↔3D continuity (ADR-031) and the FPV/HUD work (ADR-034) are unaffected.
+### 4.5 3D (Cesium, [Map3D.svelte](../../src/lib/components/Map3D.svelte)) — ✅ SHIPPED
+- Each contact is a real **glb model** (rendered like the UAV model — `minimumPixelSize` floor +
+  `colorBlendMode=MIX` altitude tint), **oriented to heading** via the shared `uavOrientation()`, at real
+  altitude (`alt_m` as MSL + geoid). Per-class models live in **their own folder** `static/models/radar/`
+  (`contactModelClass()` → `radarModelUri()`; currently placeholder copies, see the folder README). We
+  tried flat extruded silhouettes and camera-facing billboards first — both fought Cesium
+  (`requestRenderMode` geometry rebuilds / no heading) — glb models are flicker-free and show direction.
+- **Floating label** under each model: callsign + altitude; the **full readout** (alt/vs/speed/dist/brg,
+  like the 2D hover) when the contact is **selected**.
+- **Ground projection** (only within the colour-scale zone, Δ ≤ +2000 m; debug+show-all = always): a
+  thin **dashed drop-line** (height-coloured over a black backing) + a filled **CLAMP_TO_GROUND circle**
+  (1 km radius, brightened, translucent, unlit) + a **heading arrow** in it.
+- Unknown-alt contacts are **hidden in 3D** (can't be placed). Show-all keeps far stationary local
+  contacts (hide radius 1000 km vs the size curve's 100 km).
+- **Selection / picking:** click a contact (or its ground projection) to (de)select — synced to list/2D;
+  hover → pointer cursor; selected → cyan model silhouette + cyan drop-line/ring.
+- **No-blink rule (learned):** never re-touch an unchanged contact's ground geometry per snapshot — a
+  per-contact change *signature* gates `syncRadarGround`, and the drop-line colour updates in place via a
+  `ConstantProperty` (no material rebuild). Kept isolated so 2D↔3D continuity (ADR-031) and the FPV/HUD
+  work (ADR-034) are unaffected.
 
 ### 4.6 Selection
 - Small new `radarSelection` store (selected vehicle id) shared by the panel list ↔ 2D ↔ 3D. Selecting a
@@ -267,8 +279,16 @@ existing UAV/track/mission rendering is untouched. Design decided 2026-06-06 (se
   controls (show-all, radius, max-altitude, per-system visibility) + horizontal altitude legend;
   category silhouette icon set + relative-altitude colormap helper; Leaflet layer with diffed directional
   markers, distance dim+scale, altitude cutoff/override, callsign label / hover tooltip, selection sync.
-- **B4 — Map 3D**: Cesium entity collection (billboard + label) at real altitude with **drop-lines**,
-  unknown-alt handling, relevance dim, selection sync — reusing the B3 icon set + map controls.
+- **B4 — Map 3D. ✅ SHIPPED.** Per-contact glb models (own `static/models/radar/` folder) oriented to
+  heading + altitude-tinted; floating callsign/alt label (full readout on select); dashed drop-line +
+  filled 1 km ground circle + heading arrow (gated to the colour zone); click/hover picking; incremental
+  entity creation + change-signature guard (no stutter / no blink); 3D online query = "auto from view".
+
+**Hidden everywhere (decided):** ADS-B ground obstacles/reserved (C‑, C3–C7) + the all-reserved D‑ set
+are dropped from the list and both maps (`isHiddenCategory()`); surface vehicles C1/C2 are kept.
+
+**3D online query (decided):** centre = camera ground-focus (else nadir); radius = camera→focus distance,
+floored at the manual web radius, capped ~250 NM (provider limit) — sized to what the camera sees.
 
 B0–B2 can proceed in parallel with Plan A Phases 1–4 (real sources); B3–B4 are the final phase.
 
