@@ -17,12 +17,17 @@ Resolved in `src/lib/helpers/radar3d.ts` (`contactModelClass()` → `radarModelU
 | `adsb-heli.glb`     | heli     | A7 (rotorcraft)                                            | `uav-quad.glb`      |
 | `adsb-glider.glb`   | glider   | B1 (glider / sailplane)                                    | `uav-plane.glb`     |
 | `adsb-balloon.glb`  | balloon  | B2 (lighter-than-air)                                      | `uav-arrow.glb`     |
-| `adsb-arrow.glb`    | arrow    | B‑, B3, B4, B6 (UAV), B7 · FormationFlight · Radio · no category received | `uav-arrow.glb` |
+| `adsb-arrow.glb`    | arrow    | B‑, B3, B4, B6 (UAV), B7 · Radio · no category received     | `uav-arrow.glb`     |
 | `adsb-ground.glb`   | ground   | C1 (emergency vehicle), C2 (service vehicle)               | `uav-arrow.glb`     |
 | `adsb-dot.glb`      | dot      | **any contact with no heading** (non-directional)         | `uav-quad.glb`      |
+| `ff-uav.glb`        | ff       | **FormationFlight peers** (INAV-Radar / ESP32) — a paper-plane | `uav-plane.glb`  |
 
-**Resolution order:** no heading → `dot`; FormationFlight / Radio → `arrow`; otherwise by ADS-B emitter
-category (above). Unmapped powered/unpowered (B‑/B3/B4/B6/B7, B5 reserved) falls through to `arrow`.
+**Resolution order:** FormationFlight → `ff`; no heading → `dot`; Radio → `arrow`; otherwise by ADS-B
+emitter category (above). Unmapped powered/unpowered (B‑/B3/B4/B6/B7, B5 reserved) falls through to `arrow`.
+
+> **FormationFlight colour:** unlike ADS-B (altitude scale), FF peers are tinted by **state** — armed =
+> dark blue, disarmed = grey, lost = grey with a red outline (2D) / red tint (3D). `ff-uav.glb` is a
+> placeholder copy of `uav-plane.glb`; replace it with a proper paper-plane model (same name).
 
 **Hidden entirely — not on the map, not in the list** (`isHiddenCategory()` in `radar3d.ts`): obstacles
 and reserved/unspecified ground — **C‑** (unspecified ground), **C3** (fixed/tethered obstruction),

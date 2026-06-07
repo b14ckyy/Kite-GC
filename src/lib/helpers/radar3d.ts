@@ -9,7 +9,7 @@ export const GROUND_CIRCLE_RADIUS_M = 1000;
 
 /** Radar/ADS-B 3D model classes — one glb per class (own files under /models/radar/, see its README). */
 export type RadarModelClass =
-  | 'light' | 'small' | 'heavy' | 'jet' | 'heli' | 'glider' | 'balloon' | 'arrow' | 'ground' | 'dot';
+  | 'light' | 'small' | 'heavy' | 'jet' | 'heli' | 'glider' | 'balloon' | 'arrow' | 'ground' | 'dot' | 'ff';
 
 const RADAR_MODEL_FILE: Record<RadarModelClass, string> = {
   light: 'adsb-light',
@@ -22,6 +22,7 @@ const RADAR_MODEL_FILE: Record<RadarModelClass, string> = {
   arrow: 'adsb-arrow',
   ground: 'adsb-ground',
   dot: 'adsb-dot',
+  ff: 'ff-uav', // FormationFlight peers (paper-plane)
 };
 
 /** Whether a contact is irrelevant traffic hidden everywhere (list + map): ADS-B obstacles / reserved
@@ -44,8 +45,9 @@ export function contactModelClass(
   category: string | null,
   hasHeading: boolean,
 ): RadarModelClass {
+  if (system === 'formationFlight') return 'ff'; // always the paper-plane model
   if (!hasHeading) return 'dot'; // non-directional — heading unknown
-  if (system === 'formationFlight' || system === 'radio') return 'arrow';
+  if (system === 'radio') return 'arrow';
   switch (category) {
     case 'A0': case 'A1': return 'light'; // unspecified powered / light
     case 'A2': return 'small';

@@ -5,7 +5,7 @@
 import type { VehicleSystem } from '$lib/stores/radarTracking';
 import type { ContactColor } from '$lib/helpers/radarMap';
 
-export type Shape = 'jet' | 'prop' | 'heli' | 'glider' | 'drone' | 'generic' | 'dot';
+export type Shape = 'jet' | 'prop' | 'heli' | 'glider' | 'drone' | 'generic' | 'dot' | 'paperplane';
 
 // All shapes drawn on a 24×24 viewBox, centred at (12,12), nose pointing up (north).
 const SHAPES: Record<Shape, string> = {
@@ -21,6 +21,8 @@ const SHAPES: Record<Shape, string> = {
   drone: '<path d="M5 5 L7 5 L12 10 L17 5 L19 5 L19 7 L14 12 L19 17 L19 19 L17 19 L12 14 L7 19 L5 19 L5 17 L10 12 L5 7 Z"/><circle cx="6" cy="6" r="2.3"/><circle cx="18" cy="6" r="2.3"/><circle cx="6" cy="18" r="2.3"/><circle cx="18" cy="18" r="2.3"/>',
   // Generic directional delta (category unknown but heading available).
   generic: '<path d="M12 3 L20 20 L12 16 L4 20 Z"/>',
+  // FormationFlight: an elongated paper-plane / flying-wing dart (wide rear) with a centre crease.
+  paperplane: '<path d="M12 2 L17.4 20.6 L12 18 L6.6 20.6 Z"/><path d="M12 4 L12 18" fill="none" stroke-width="0.7"/>',
   // Non-directional dot (no heading).
   dot: '<circle cx="12" cy="12" r="6"/>',
 };
@@ -37,8 +39,8 @@ export function pickShape(
   category: string | null,
   hasHeading: boolean,
 ): Shape {
+  if (system === 'formationFlight') return 'paperplane'; // slim paper-plane, even without a heading
   if (!hasHeading) return 'dot';
-  if (system === 'formationFlight') return 'drone';
   if (system === 'radio') return 'generic';
   return (category && CATEGORY_SHAPE[category]) || 'generic';
 }
@@ -58,6 +60,8 @@ export interface ContactIconOpts {
   label?: string;
   /** Conflict-alert highlight: a pulsing ring around the icon (yellow caution / red warning). */
   alertLevel?: 'caution' | 'warning' | null;
+  /** Render the label as a bigger badge with a translucent background (FormationFlight single-letter id). */
+  badgeLabel?: boolean;
 }
 
 /** Build the inner HTML for a Leaflet `divIcon` (SVG silhouette + optional callsign label). */
@@ -69,7 +73,7 @@ export function buildContactIconHtml(o: ContactIconOpts): string {
   const body = `<g fill="${o.color.fill}" fill-opacity="${o.color.fillOpacity}" stroke="${o.color.outline}" stroke-width="0.8" stroke-linejoin="round" transform="rotate(${rot} 12 12)">${SHAPES[o.shape]}</g>`;
   const svg = `<svg width="${o.sizePx}" height="${o.sizePx}" viewBox="0 0 24 24" style="overflow:visible">${ring}${body}</svg>`;
   const label = o.label
-    ? `<span class="radar-icon-label">${o.label}</span>`
+    ? `<span class="radar-icon-label${o.badgeLabel ? ' badge' : ''}">${o.label}</span>`
     : '';
   // Conflict-alert ring around the icon, pulsing via CSS (alerting contacts are always near, so the
   // icon's distance-dim is ~1 anyway).

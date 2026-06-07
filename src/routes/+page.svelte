@@ -7,7 +7,7 @@
   import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
   import { telemetry } from "$lib/stores/telemetry";
-  import { startRadarListeners, configureRadar, setRadarCenter } from "$lib/stores/radarTracking";
+  import { startRadarListeners, configureRadar, setRadarCenter, setRadarNode } from "$lib/stores/radarTracking";
   import { startRadarAlerts } from "$lib/controllers/radarAlerts";
   import { startAlertAudio } from "$lib/controllers/alertAudio";
   import { get } from "svelte/store";
@@ -573,6 +573,12 @@
         pollSec: radarSettings.adsb.pollSec,
         center: [lat, lon],
       },
+      formationFlight: {
+        enabled: radarSettings.formationFlight.enabled,
+        port: radarSettings.formationFlight.port,
+        baud: radarSettings.formationFlight.baud,
+        nodeName: radarSettings.formationFlight.nodeName,
+      },
     });
   }
   if (typeof window !== 'undefined') {
@@ -594,6 +600,14 @@
     if (s === lastMspSupported) return;
     lastMspSupported = s;
     if (radarSettings.enabled && radarSettings.adsb.enabled) pushRadarConfig();
+  });
+  // FormationFlight: push the GCS node position we advertise as the emulated FC — the resolved
+  // geolocation (+ terrain ground altitude). Live; the running source reads it when answering MSP_RAW_GPS.
+  $effect(() => {
+    if (!radarSettings.enabled || !radarSettings.formationFlight.enabled) return;
+    const g = $userGeoLocation;
+    if (!g) return;
+    void setRadarNode(g.lat, g.lon, gcsGroundAltM ?? 0);
   });
 
   // Auto-start video with the last settings if it was running at last close.

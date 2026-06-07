@@ -38,6 +38,7 @@
   const patchAdsb = (partial: Partial<RadarSettings['adsb']>) => patchRadar({ adsb: { ...radar.adsb, ...partial } });
   const patchMap = (partial: Partial<RadarSettings['map']>) => patchRadar({ map: { ...radar.map, ...partial } });
   const patchAlerts = (partial: Partial<RadarSettings['alerts']>) => patchRadar({ alerts: { ...radar.alerts, ...partial } });
+  const patchFf = (partial: Partial<RadarSettings['formationFlight']>) => patchRadar({ formationFlight: { ...radar.formationFlight, ...partial } });
   const setMapVisible = (key: 'adsb' | 'formationFlight' | 'radio', on: boolean) =>
     patchMap({ visible: { ...radar.map.visible, [key]: on } });
   const setBuiltinEnabled = (name: string, on: boolean) =>
@@ -127,6 +128,13 @@
     C1: 'SURF', C2: 'SURF', C3: 'OBST', C4: 'OBST', C5: 'OBST', C6: 'OBST', C7: 'OBST',
   };
   const categoryAbbrev = (cat: string | null | undefined) => (cat ? (CATEGORY_ABBREV[cat] ?? '') : '');
+
+  // FormationFlight link quality (0–4) → filled/empty pips (the only freshness/signal cue we get).
+  const ffLq = (signal: number | null) => {
+    if (signal == null) return '—';
+    const n = Math.max(0, Math.min(4, Math.round(signal)));
+    return '▰'.repeat(n) + '▱'.repeat(4 - n);
+  };
 </script>
 
 <PanelShell
@@ -374,6 +382,34 @@
         </div>
       </div>
     </div>
+  {:else if activeSys === 'formationFlight'}
+    <!-- FormationFlight (INAV-Radar / ESP32): the serial module Kite talks MSP to as an emulated FC. -->
+    <div class="src-block">
+      <p class="src-head">{$t('radar.ffModule')}</p>
+      <div class="src-row2">
+        <select class="src-select src-input-port" value={radar.formationFlight.port} onchange={(e) => patchFf({ port: (e.target as HTMLSelectElement).value })}>
+          <option value="">{$t('radar.selectPort')}</option>
+          {#each serialPorts as sp}
+            <option value={sp.path}>{sp.label || sp.path}</option>
+          {/each}
+          {#if radar.formationFlight.port && !serialPorts.some((sp) => sp.path === radar.formationFlight.port)}
+            <option value={radar.formationFlight.port}>{radar.formationFlight.port} ({$t('radar.portMissing')})</option>
+          {/if}
+        </select>
+        <button class="src-refresh" title={$t('radar.refreshPorts')} onclick={refreshPorts} aria-label={$t('radar.refreshPorts')}>⟳</button>
+        <select class="src-select" value={radar.formationFlight.baud} onchange={(e) => patchFf({ baud: Number((e.target as HTMLSelectElement).value) })}>
+          {#each BAUD_STEPS as b}<option value={b}>{b}</option>{/each}
+        </select>
+      </div>
+      <p class="src-head">{$t('radar.ffNodeName')}</p>
+      <input
+        class="src-input"
+        placeholder={$t('radar.ffNodeNamePlaceholder')}
+        value={radar.formationFlight.nodeName}
+        onchange={(e) => patchFf({ nodeName: inputVal(e) })}
+      />
+      <p class="radar-hint">{$t('radar.ffHint')}</p>
+    </div>
   {:else}
     <p class="radar-hint">{$t('radar.sourcesPlaceholder')}</p>
   {/if}
@@ -406,7 +442,11 @@
                 onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); radarSelection.update((cur) => (cur === v.id ? null : v.id)); } }}
               >
                 <span class="r-call">{label(v)}</span>
-                {#if !compact}<span class="r-type" title={v.category ?? ''}>{categoryAbbrev(v.category)}</span>{/if}
+                {#if !compact}
+                  <span class="r-type" title={v.system === 'formationFlight' ? $t('radar.linkQuality') : (v.category ?? '')}>
+                    {v.system === 'formationFlight' ? ffLq(v.signal) : categoryAbbrev(v.category)}
+                  </span>
+                {/if}
                 <span class="r-dist">{fmtDist(v.distanceM)}</span>
                 <span class="r-brg">{fmtBrg(v.bearingDeg)}</span>
                 <span class="r-alt">{fmtAlt(v.altM)}</span>

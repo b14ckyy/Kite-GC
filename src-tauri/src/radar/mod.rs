@@ -68,6 +68,25 @@ pub struct RadarConfig {
     pub sim_center: Option<[f64; 2]>,
     #[serde(default)]
     pub adsb: AdsbConfig,
+    #[serde(default)]
+    pub formation_flight: FormationFlightConfig,
+}
+
+/// FormationFlight (INAV-Radar / ESP32) system config — a single serial module Kite speaks MSP to as an
+/// emulated FC. See docs/active/RADAR_FORMATION_FLIGHT.md.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct FormationFlightConfig {
+    pub enabled: bool,
+    /// Serial port the ESP32 module is on.
+    #[serde(default)]
+    pub port: String,
+    /// Baud (0 ⇒ default 115200).
+    #[serde(default)]
+    pub baud: u32,
+    /// Name we advertise via MSP_NAME (our node's broadcast name). Empty ⇒ a default is used.
+    #[serde(default)]
+    pub node_name: String,
 }
 
 /// ADS-B system config (Phase 1: online providers).
@@ -148,8 +167,20 @@ struct Running {
     update_tx: mpsc::Sender<SourceUpdate>,
     stop: Arc<AtomicBool>,
     agg: Option<JoinHandle<()>>,
+    /// Data sources rebuilt on every reconfigure (ADS-B online/local). Cheap to recycle.
     sources: Vec<SourceHandle>,
+    /// FormationFlight source kept separate: it holds a serial port to a resettable ESP32, so we restart
+    /// it ONLY when its port/baud change (reopening the port resets the board).
+    ff: Option<FfRunning>,
     snapshot: Arc<Mutex<RadarSnapshot>>,
+}
+
+/// The running FormationFlight source + the port/baud it was opened with (for the restart-on-change check).
+struct FfRunning {
+    #[allow(dead_code)]
+    handle: SourceHandle,
+    port: String,
+    baud: u32,
 }
 
 /// Owns the running radar pipeline. Idle (no threads) until enabled. Lives in `AppState`, behind a
@@ -161,6 +192,12 @@ pub struct RadarManager {
     query_center: Arc<Mutex<Option<(f64, f64)>>>,
     /// Live ADS-B query radius (km), shared so the 3D view can size the query to the visible area.
     query_radius: Arc<Mutex<Option<f64>>>,
+    /// Live GCS node position `(lat, lon, alt_m)` advertised to a FormationFlight module (we emulate an
+    /// FC at this spot). Shared so it follows the resolved GCS location without restarting the source.
+    node_pos: Arc<Mutex<Option<(f64, f64, f64)>>>,
+    /// Live craft name advertised via MSP_NAME. Shared so a name change never restarts the FF source
+    /// (which would reopen the serial port and reset the ESP32).
+    node_name: Arc<Mutex<String>>,
     /// Aggregator ingest channel, exposed so scheduler-fed sources (ADS-B via MSP) can push into the
     /// same pipeline. `Some` while running, `None` when idle.
     ingest: Arc<Mutex<Option<mpsc::Sender<SourceUpdate>>>>,
@@ -178,7 +215,17 @@ impl RadarManager {
             running: None,
             query_center: Arc::new(Mutex::new(None)),
             query_radius: Arc::new(Mutex::new(None)),
+            node_pos: Arc::new(Mutex::new(None)),
+            node_name: Arc::new(Mutex::new(String::new())),
             ingest: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// Update the GCS node position `(lat, lon, alt_m)` advertised to a FormationFlight module (cheap;
+    /// no restart — the running source reads it live when answering MSP_RAW_GPS).
+    pub fn set_node_pos(&self, lat: f64, lon: f64, alt_m: f64) {
+        if let Ok(mut p) = self.node_pos.lock() {
+            *p = Some((lat, lon, alt_m));
         }
     }
 
@@ -220,13 +267,27 @@ impl RadarManager {
         // Cheap Arc clones so we can build sources while `running` is mutably borrowed below.
         let query_center = self.query_center.clone();
         let query_radius = self.query_radius.clone();
+        let node_pos = self.node_pos.clone();
+        let node_name = self.node_name.clone();
+        // Seed the live node name from config (also pushed live via radar_set_node_name) — updating it
+        // here never restarts the FF source, so the ESP32 isn't reset.
+        if !config.formation_flight.node_name.trim().is_empty() {
+            if let Ok(mut n) = node_name.lock() {
+                *n = config.formation_flight.node_name.clone();
+            }
+        }
 
-        // Already running → swap the source workers only; keep the aggregator + its merged snapshot.
+        // Already running → swap the data workers, but reconcile the FF source by port/baud only (keep its
+        // serial port open across unrelated reconfigures so the ESP32 isn't reset).
         if let Some(r) = self.running.as_mut() {
             r.sources.clear(); // drop old workers (each SourceHandle's Drop stops its thread)
-            let new_sources = build_sources(config, &r.update_tx, app, &query_center, &query_radius);
-            r.sources = new_sources;
-            eprintln!("[radar] reconfigured in place: {} source(s)", r.sources.len());
+            r.sources = build_sources(config, &r.update_tx, app, &query_center, &query_radius);
+            reconcile_ff(&mut r.ff, config, &r.update_tx, app, &node_pos, &node_name);
+            eprintln!(
+                "[radar] reconfigured in place: {} source(s){}",
+                r.sources.len(),
+                if r.ff.is_some() { " + FF" } else { "" }
+            );
             return;
         }
 
@@ -238,12 +299,18 @@ impl RadarManager {
         // Expose the ingest channel so scheduler-fed sources (ADS-B via MSP) push into this pipeline.
         *self.ingest.lock().unwrap() = Some(tx.clone());
         let sources = build_sources(config, &tx, app, &query_center, &query_radius);
-        eprintln!("[radar] configured: enabled, {} source(s)", sources.len());
+        let ff = make_ff(config, &tx, app, &node_pos, &node_name);
+        eprintln!(
+            "[radar] configured: enabled, {} source(s){}",
+            sources.len(),
+            if ff.is_some() { " + FF" } else { "" }
+        );
         self.running = Some(Running {
             update_tx: tx,
             stop,
             agg: Some(agg),
             sources,
+            ff,
             snapshot,
         });
     }
@@ -325,6 +392,63 @@ fn build_sources(
     }
 
     sources
+}
+
+/// Effective baud for the FormationFlight module (0 ⇒ 115200).
+fn ff_baud(config: &RadarConfig) -> u32 {
+    if config.formation_flight.baud > 0 { config.formation_flight.baud } else { 115200 }
+}
+
+/// Start the FormationFlight source (INAV-Radar / ESP32) if configured, returning its handle + port/baud.
+fn make_ff(
+    config: &RadarConfig,
+    tx: &mpsc::Sender<SourceUpdate>,
+    app: &AppHandle,
+    node_pos: &Arc<Mutex<Option<(f64, f64, f64)>>>,
+    node_name: &Arc<Mutex<String>>,
+) -> Option<FfRunning> {
+    let ff = &config.formation_flight;
+    if !ff.enabled || ff.port.is_empty() {
+        return None;
+    }
+    let baud = ff_baud(config);
+    let src = Box::new(sources::formation_flight::FormationFlightSource::new(
+        "FormationFlight".to_string(),
+        ff.port.clone(),
+        baud,
+        node_name.clone(),
+        node_pos.clone(),
+        app.clone(),
+    ));
+    let handle = src.start(tx.clone());
+    eprintln!("[radar][ff] started on {} @ {}", ff.port, baud);
+    Some(FfRunning { handle, port: ff.port.clone(), baud })
+}
+
+/// Reconcile the FormationFlight source against a new config WITHOUT reopening its serial port unless the
+/// port/baud actually change — so an unrelated reconfigure (or a name change) doesn't reset the ESP32.
+fn reconcile_ff(
+    cur: &mut Option<FfRunning>,
+    config: &RadarConfig,
+    tx: &mpsc::Sender<SourceUpdate>,
+    app: &AppHandle,
+    node_pos: &Arc<Mutex<Option<(f64, f64, f64)>>>,
+    node_name: &Arc<Mutex<String>>,
+) {
+    let ff = &config.formation_flight;
+    if !ff.enabled || ff.port.is_empty() {
+        if cur.take().is_some() {
+            eprintln!("[radar][ff] stopped");
+        }
+        return;
+    }
+    let same = cur
+        .as_ref()
+        .is_some_and(|f| f.port == ff.port && f.baud == ff_baud(config));
+    if same {
+        return; // keep the port open — no ESP reset
+    }
+    *cur = make_ff(config, tx, app, node_pos, node_name); // port/baud changed → (re)open
 }
 
 /// Aggregator thread: drain source updates, per-system merge by id, TTL-prune, throttled emit.

@@ -23,6 +23,41 @@ impl MspCodec {
         frame
     }
 
+    /// Encode an MSP v1 **response** frame (direction `>`) — for emulating an FC (e.g. FormationFlight).
+    pub fn encode_v1_response(code: u16, payload: &[u8]) -> Vec<u8> {
+        let mut frame = Vec::with_capacity(6 + payload.len());
+        frame.push(b'$');
+        frame.push(b'M');
+        frame.push(b'>');
+        frame.push(payload.len() as u8);
+        frame.push(code as u8);
+        let mut checksum: u8 = payload.len() as u8 ^ code as u8;
+        for &byte in payload {
+            frame.push(byte);
+            checksum ^= byte;
+        }
+        frame.push(checksum);
+        frame
+    }
+
+    /// Encode an MSP v2 **response** frame (direction `>`).
+    pub fn encode_v2_response(code: u16, payload: &[u8]) -> Vec<u8> {
+        let payload_len = payload.len() as u16;
+        let mut frame = Vec::with_capacity(9 + payload.len());
+        frame.push(b'$');
+        frame.push(b'X');
+        frame.push(b'>');
+        frame.push(0); // flag
+        frame.push((code & 0xFF) as u8);
+        frame.push((code >> 8) as u8);
+        frame.push((payload_len & 0xFF) as u8);
+        frame.push((payload_len >> 8) as u8);
+        frame.extend_from_slice(payload);
+        let crc = Self::crc8_dvb_s2(&frame[3..]);
+        frame.push(crc);
+        frame
+    }
+
     /// Encode an MSP v2 request frame
     pub fn encode_v2(code: u16, payload: &[u8]) -> Vec<u8> {
         let payload_len = payload.len() as u16;

@@ -39,6 +39,20 @@ pub fn radar_set_center(
     Ok(())
 }
 
+/// Update the GCS node position `(lat, lon, alt_m)` advertised to a FormationFlight module (we emulate an
+/// FC at this spot). Cheap — no pipeline restart.
+#[tauri::command]
+pub fn radar_set_node_pos(
+    lat: f64,
+    lon: f64,
+    alt_m: f64,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mgr = state.radar.lock().map_err(|e| e.to_string())?;
+    mgr.set_node_pos(lat, lon, alt_m);
+    Ok(())
+}
+
 /// Current consolidated radar state (used on panel open before the next event arrives).
 #[tauri::command]
 pub fn radar_snapshot(state: State<'_, AppState>) -> Result<RadarSnapshot, String> {

@@ -349,7 +349,7 @@
       </div>
       <div class="s-row s-indent" class:s-disabled={!radar.enabled}>
         <label class="s-label" for="radar-ff">{$t('settings.radarFormationFlight')}</label>
-        <Toggle checked={radar.formationFlight.enabled} id="radar-ff" disabled={!radar.enabled} onchange={(c) => patchRadar({ formationFlight: { enabled: c } })} />
+        <Toggle checked={radar.formationFlight.enabled} id="radar-ff" disabled={!radar.enabled} onchange={(c) => patchRadar({ formationFlight: { ...radar.formationFlight, enabled: c } })} />
       </div>
       <div class="s-row s-indent" class:s-disabled={!radar.enabled}>
         <label class="s-label" for="radar-radio">{$t('settings.radarRadio')}</label>

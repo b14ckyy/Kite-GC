@@ -32,7 +32,7 @@ use commands::flightlog::{
     battery_file_write, battery_file_read,
 };
 use commands::info::get_app_version;
-use commands::radar::{radar_configure, radar_set_center, radar_snapshot};
+use commands::radar::{radar_configure, radar_set_center, radar_set_node_pos, radar_snapshot};
 use commands::terrain::{terrain_elevation, terrain_fan, terrain_profile};
 use terrain::TerrainProvider;
 use commands::mission::{
@@ -175,6 +175,7 @@ pub fn run() {
             terrain_fan,
             radar_configure,
             radar_set_center,
+            radar_set_node_pos,
             radar_snapshot,
         ])
         .run(tauri::generate_context!())

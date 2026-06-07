@@ -79,7 +79,7 @@ export interface RadarSettings {
     /** Poll interval in seconds (provider limit ≈ 1 req/s, so ≥2 s). */
     pollSec: number;
   };
-  formationFlight: { enabled: boolean };
+  formationFlight: RadarFormationFlightSettings;
   radio: { enabled: boolean };
   /** Map rendering of foreign contacts (2D + 3D). */
   map: RadarMapSettings;
@@ -87,6 +87,18 @@ export interface RadarSettings {
   alerts: RadarAlertSettings;
   /** Dev-only synthetic source (ignored by release backend). */
   sim: boolean;
+}
+
+/** FormationFlight (INAV-Radar / ESP32): one serial module Kite speaks MSP to as an emulated FC.
+ *  See docs/active/RADAR_FORMATION_FLIGHT.md. */
+export interface RadarFormationFlightSettings {
+  enabled: boolean;
+  /** Serial port the ESP32 module is on. */
+  port: string;
+  /** Baud (default 115200). */
+  baud: number;
+  /** Name we advertise via MSP_NAME (our node's broadcast name). Empty ⇒ a default is used. */
+  nodeName: string;
 }
 
 /** Conflict-alert toggles. Only the two stage switches are user-facing for now; the numeric parameters
@@ -129,7 +141,7 @@ export const DEFAULT_RADAR: RadarSettings = {
     radiusKm: 25,
     pollSec: 5,
   },
-  formationFlight: { enabled: false },
+  formationFlight: { enabled: false, port: '', baud: 115200, nodeName: '' },
   radio: { enabled: false },
   map: {
     radiusKm: 50,

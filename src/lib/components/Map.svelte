@@ -41,7 +41,7 @@
   import { radarVehicles, radarSelection, enrichList, type RadarSnapshot, type EnrichedVehicle } from "$lib/stores/radarTracking";
   import { radarAlertLevels, type AlertLevel } from "$lib/controllers/radarAlerts";
   import type { RadarMapSettings } from "$lib/stores/settings";
-  import { contactColor, contactVisibleOnMap, relevanceFactor } from "$lib/helpers/radarMap";
+  import { contactColor, ffContactColor, contactVisibleOnMap, relevanceFactor } from "$lib/helpers/radarMap";
   import { pickShape, buildContactIconHtml } from "$lib/helpers/radarIcons";
   import { convertAltitude, convertSpeed, convertDistance, convertVerticalSpeed, formatConverted } from "$lib/utils/units";
 
@@ -233,15 +233,21 @@
       if (!contactVisibleOnMap(v, radarRefAltM, ms)) continue;
       seen.add(v.id);
       const rel = relevanceFactor(v.distanceM, ms.radiusKm, ms.showAll);
-      const size = Math.max(RADAR_MIN_PX, Math.round(RADAR_BASE_PX * (uiScale || 1) * (0.6 + 0.4 * rel)));
+      // FormationFlight icons render 20% larger than ADS-B.
+      const sizeMul = v.system === 'formationFlight' ? 1.2 : 1;
+      const size = Math.max(RADAR_MIN_PX, Math.round(RADAR_BASE_PX * (uiScale || 1) * (0.6 + 0.4 * rel) * sizeMul));
       const html = buildContactIconHtml({
         shape: pickShape(v.system, v.category, v.headingDeg != null),
         heading: v.headingDeg,
-        color: contactColor(v.altM, radarRefAltM),
+        // FormationFlight uses a state colour (armed/disarmed/lost); ADS-B uses the altitude scale.
+        color: v.system === 'formationFlight'
+          ? ffContactColor(v.extra?.ffState)
+          : contactColor(v.altM, radarRefAltM),
         sizePx: size,
         opacity: rel,
         selected: v.id === radarSelectedId,
         label: v.callsign?.trim() || undefined,
+        badgeLabel: v.system === 'formationFlight', // big single-letter id badge
         alertLevel: radarAlertMap.get(v.id) ?? null,
       });
       const icon = L.divIcon({ className: 'radar-divicon', html, iconSize: [size, size], iconAnchor: [size / 2, size / 2] });
@@ -1013,6 +1019,15 @@
     text-shadow: 0 0 2px #000, 0 0 2px #000, 0 1px 1px #000;
     white-space: nowrap;
     pointer-events: none;
+  }
+  /* FormationFlight single-letter id: a bigger badge with a translucent grey background. */
+  :global(.radar-divicon .radar-icon-label.badge) {
+    font-size: 15px;
+    font-weight: 700;
+    background: rgba(40, 40, 40, 0.55);
+    padding: 0 5px;
+    border-radius: 4px;
+    transform: translate(-50%, 3px);
   }
   /* Conflict-alert ring around a contact icon — pulsing glow (yellow caution / red warning). */
   :global(.radar-divicon .radar-alert-ring) {

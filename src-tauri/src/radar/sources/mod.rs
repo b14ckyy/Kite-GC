@@ -4,4 +4,5 @@
 pub mod adsb_mavlink;
 pub mod adsb_msp;
 pub mod adsb_online;
+pub mod formation_flight;
 pub mod sim;

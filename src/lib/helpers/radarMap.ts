@@ -96,6 +96,19 @@ export function absoluteAltColor(altM: number): ContactColor {
   return { fill: rgbCss(hsvToRgb(h, 0.8, 1)), fillOpacity: 1, outline: OUTLINE };
 }
 
+/** FormationFlight contact colour by state (NOT altitude-based): armed = dark blue + white outline,
+ *  disarmed = grey + white outline, lost = grey dimmed + red outline. State from `extra.ffState`. */
+export function ffContactColor(state: string | undefined): ContactColor {
+  switch (state) {
+    case 'lost':
+      return { fill: '#6b7280', fillOpacity: 0.6, outline: '#ff2a2a' };
+    case 'disarmed':
+      return { fill: '#6b7280', fillOpacity: 0.92, outline: '#ffffff' };
+    default: // armed (or unknown)
+      return { fill: '#1e40af', fillOpacity: 0.95, outline: '#ffffff' };
+  }
+}
+
 /** Colour for a contact: relative when a reference altitude exists, else absolute fallback. */
 export function contactColor(altM: number | null, refAltM: number | null): ContactColor {
   if (altM == null) return { fill: NO_ALT, fillOpacity: 1, outline: OUTLINE };

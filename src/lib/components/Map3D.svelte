@@ -50,7 +50,7 @@
   import { haversineDistance, bearing } from "$lib/utils/geo";
   import type { SpeedUnit, AltitudeUnit, RadarMapSettings } from "$lib/stores/settings";
   import { radarVehicles, radarSelection, type RadarSnapshot } from "$lib/stores/radarTracking";
-  import { contactColor, contactVisibleOnMap, REL_OVERRIDE_M } from "$lib/helpers/radarMap";
+  import { contactColor, ffContactColor, contactVisibleOnMap, REL_OVERRIDE_M } from "$lib/helpers/radarMap";
   import { ARROW_POLY, contactModelClass, radarModelUri, type RadarModelClass } from "$lib/helpers/radar3d";
   import { radarAlertLevels, ALERT_CONFIG, type AlertLevel } from "$lib/controllers/radarAlerts";
 
@@ -1123,6 +1123,9 @@
     if (sig === rec.groundSig) return;
     rec.groundSig = sig;
     const [, dropBg, drop, circle, arrow] = rec.entities;
+    // FormationFlight: just the model + a thin SOLID drop-line in the state colour (no dashed backing,
+    // no ground circle, no heading arrow) — visually distinct from ADS-B.
+    const isFf = rec.modelClass === 'ff';
     const ddc = new Cesium.ConstantProperty(new Cesium.DistanceDisplayCondition(0, rec.hideRadiusM));
     const top = Cesium.Cartesian3.fromDegrees(rec.lon, rec.lat, rec.contactEll);
     // Drop straight down well below the surface; the terrain depth test clips it at the ground — so we
@@ -1132,20 +1135,27 @@
       dropBg.polyline.positions = new Cesium.ConstantProperty([top, bot]);
       dropBg.polyline.distanceDisplayCondition = ddc;
     }
-    dropBg.show = rec.showGround;
+    dropBg.show = rec.showGround && !isFf;
     if (drop.polyline) {
       drop.polyline.positions = new Cesium.ConstantProperty([top, bot]);
-      // Update the colour IN PLACE (no material replace → no blink), and only when it actually changed.
-      const desired = (rec.selected ? RADAR_CYAN : rec.color).withAlpha(0.95);
-      if (rec.dropColorCP && (!rec.dropColor || !Cesium.Color.equals(rec.dropColor, desired))) {
-        rec.dropColor = desired;
-        rec.dropColorCP.setValue(desired);
+      if (isFf) {
+        // Thin solid line in the state colour (no dashes); reassigning a SOLID material doesn't blink.
+        drop.polyline.material = new Cesium.ColorMaterialProperty((rec.selected ? RADAR_CYAN : rec.color).withAlpha(0.95));
+        drop.polyline.width = new Cesium.ConstantProperty(1.6);
+      } else {
+        // ADS-B: dashed, colour updated IN PLACE (no material replace → no blink), only when it changed.
+        const desired = (rec.selected ? RADAR_CYAN : rec.color).withAlpha(0.95);
+        if (rec.dropColorCP && (!rec.dropColor || !Cesium.Color.equals(rec.dropColor, desired))) {
+          rec.dropColor = desired;
+          rec.dropColorCP.setValue(desired);
+        }
+        drop.polyline.width = new Cesium.ConstantProperty(2);
       }
       drop.polyline.distanceDisplayCondition = ddc;
     }
     drop.show = rec.showGround;
     circle.position = new Cesium.ConstantPositionProperty(Cesium.Cartesian3.fromDegrees(rec.lon, rec.lat));
-    if (circle.ellipse) {
+    if (circle.ellipse && !isFf) {
       if (rec.alertLevel) {
         // Alerting: the whole 1 km collision blob pulses — red (warning) / yellow (caution). The blob is
         // exactly R_cpa, so it reads as the "never enter" zone, unmissable from afar.
@@ -1160,15 +1170,15 @@
       }
       circle.ellipse.distanceDisplayCondition = ddc;
     }
-    circle.show = rec.showGround || rec.alertLevel != null;
-    if (arrow.polyline) {
+    circle.show = !isFf && (rec.showGround || rec.alertLevel != null);
+    if (arrow.polyline && !isFf) {
       const a = radarLocalPositions(rec.lon, rec.lat, ARROW_POLY, CIRCLE_RADIUS_M * 0.9, rec.headingDeg);
       a.push(a[0]); // close the outline
       arrow.polyline.positions = new Cesium.ConstantProperty(a);
       arrow.polyline.material = new Cesium.ColorMaterialProperty((rec.selected ? RADAR_CYAN : Cesium.Color.BLACK).withAlpha(0.9));
       arrow.polyline.distanceDisplayCondition = ddc;
     }
-    arrow.show = rec.showGround && rec.headingDeg != null;
+    arrow.show = !isFf && rec.showGround && rec.headingDeg != null;
   }
 
   function syncRec(rec: Radar3dRec) {
@@ -1194,7 +1204,10 @@
       const delta = radarRefAltM != null ? v.altM - radarRefAltM : null;
       const withinZone = delta != null && delta <= REL_OVERRIDE_M;
       const showGround = withinZone || (import.meta.env.DEV && ms.showAll);
-      const col = contactColor(v.altM, radarRefAltM);
+      // FormationFlight uses a state colour (armed/disarmed/lost); ADS-B uses the altitude scale.
+      const col = v.system === 'formationFlight'
+        ? ffContactColor(v.extra?.ffState)
+        : contactColor(v.altM, radarRefAltM);
       const cesColor = Cesium.Color.fromCssColorString(col.fill).withAlpha(col.fillOpacity);
       const contactEll = v.altM + geoidOffset;
       const modelClass = contactModelClass(v.system, v.category, v.headingDeg != null);
@@ -1236,6 +1249,16 @@
   $effect(() => {
     radarActive; radarMapSettings; radarRefAltM;
     if (viewer) updateRadar3D();
+  });
+
+  // In a radar-only scene (no connected UAV/track) the geoid offset is never computed, so contacts
+  // (placed at MSL + geoidOffset) sink under the terrain by the local undulation (~tens of m). Compute it
+  // once at the GCS reference, then re-place the contacts at the corrected height.
+  $effect(() => {
+    if (!viewer || !radarActive) return;
+    const ref = radarReference;
+    if (!ref) return;
+    void computeGeoidOnce(ref.lat, ref.lon).then((ok) => { if (ok) updateRadar3D(); });
   });
 
   // ── Sky clock (sun/moon position) ──────────────────────────────────

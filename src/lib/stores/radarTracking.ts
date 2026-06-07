@@ -127,6 +127,7 @@ export interface RadarBackendConfig {
     /** `[lat, lon]` query centre (resolved user location), or null. */
     center: [number, number] | null;
   };
+  formationFlight: { enabled: boolean; port: string; baud: number; nodeName: string };
 }
 
 /** Push the radar config to the backend (starts/stops the pipeline). Idempotent. */
@@ -145,6 +146,16 @@ export async function setRadarCenter(lat: number, lon: number, radiusKm?: number
     await invoke('radar_set_center', { lat, lon, radiusKm });
   } catch (e) {
     console.warn('radar_set_center failed:', e);
+  }
+}
+
+/** Update the GCS node position advertised to a FormationFlight module (we emulate an FC at this spot).
+ *  Cheap — no pipeline restart. */
+export async function setRadarNode(lat: number, lon: number, altM: number): Promise<void> {
+  try {
+    await invoke('radar_set_node_pos', { lat, lon, altM });
+  } catch (e) {
+    console.warn('radar_set_node_pos failed:', e);
   }
 }
 
