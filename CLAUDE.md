@@ -64,6 +64,10 @@ Project instructions for Claude Code. Loaded automatically every session.
 ## Frontend debug logging
 - `console.log()` / `console.warn()` liberally during dev; keep it in code; gate dev-only UI
   with `import.meta.env.DEV` (Vite tree-shakes it out of production)
+- **In-app Debug Monitor** (`DebugPanel.svelte`, dev-only, toggled from the status bar): a multi-tab
+  diagnostics surface — not just MSP. When a feature has internal numbers worth inspecting live
+  (computed geometry, alert math, scheduler timing, derived state), **add a tab** there instead of
+  relying only on `console`. Prefer it for anything you (or the user) need to watch against live data.
 
 ## i18n
 - Every user-visible string via `$t('section.subsection.label')` — never inline text
