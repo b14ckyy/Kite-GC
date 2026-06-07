@@ -1,10 +1,11 @@
 # Radar — FormationFlight (INAV-Radar / ESP32) integration
 
-> Status: **Plan / proposed** (2026-06-07). Adds the `formationFlight` radar system: peers shared by an
-> ESP32 INAV-Radar module (LoRa / ESP-NOW) over a serial MSP link. Monitoring / pilot-to-pilot only —
-> **never raises conflict alerts** (ADR-035). Builds on the [radar subsystem](RADAR_TRACKING_CORE.md) +
-> [map](RADAR_TRACKING_PANEL_AND_MAP.md); contacts use the existing `TrackedVehicle` model
-> (`system='formationFlight'`) and flow through the same aggregator.
+> Status: **F1 shipped** (2026-06-07) — link + FC emulation + peer parse + 2D/3D rendering, bench-validated
+> with two ESP32-C3 over ESP-NOW. See **ADR-036**. Adds the `formationFlight` radar system: peers shared by
+> an ESP32 INAV-Radar/FormationFlight module (LoRa / ESP-NOW) over a serial MSP link. Monitoring /
+> pilot-to-pilot only — **never raises conflict alerts** (ADR-035). Builds on the
+> [radar subsystem](RADAR_TRACKING_CORE.md) + [map](RADAR_TRACKING_PANEL_AND_MAP.md); contacts use the
+> existing `TrackedVehicle` model (`system='formationFlight'`) and flow through the same aggregator.
 
 ## 1. What it is
 INAV-Radar (a.k.a. ESP32-Radar / FormationFlight: OlivierC-FR/ESP32-INAV-Radar, mistyk/inavradar-ESP32):
@@ -44,25 +45,45 @@ implementation:
 | `MSP_ANALOG` | 110 | dummy battery (so the module's display/LQ logic is happy) |
 | status / boxids | (per lib) | report **armed** (the module's `getActiveModes()` source) |
 
-**Peers pushed to us** — `MSP2_COMMON_SET_RADAR_POS` (**0x100B**), 19 bytes packed:
-```
-id:u8 · state:u8 · lat:i32(°·1e7) · lon:i32 · alt:i32(cm) · heading:u16(°) · speed:u16(cm/s) · lq:u8(0–4)
-```
-`state`: 0 undefined · 1 armed · 2 lost. Also optional `MSP2_COMMON_SET_RADAR_ITD` (0x100C, display
-extras) and `MSP2_COMMON_GET_RADAR_GPS` (0x100F). Kite **ACKs** every command (empty reply, same code) so
-the module's request/response loop doesn't stall.
+> Verified against the FormationFlight firmware (`src/lib/MSP`): it requests `MSP_NAME / MSP_FC_VARIANT /
+> MSP_FC_VERSION / MSP_ANALOG / MSP_RAW_GPS / active-modes`. Kite answers those; everything else (incl. the
+> sets below) gets an **empty ACK** (MSP requires a reply unless a no-reply flag is set, which the module
+> does not). Kite answers `MSP_API_VERSION / MSP_ATTITUDE` too if asked. **TX is gated on the host type
+> (FC_VARIANT), not on armed** — so reporting `"INAV"` is what makes the module transmit.
+
+**Pushed to us (fire-and-forget commands):**
+- `MSP2_COMMON_SET_RADAR_POS` (**0x100B**), 19 bytes packed — the peer data:
+  ```
+  id:u8 · state:u8 · lat:i32(°·1e7) · lon:i32 · alt:i32(cm) · heading:u16(°) · speed:u16(cm/s) · lq:u8(0–4)
+  ```
+  `state`: **disarmed(0) · armed(1)** (the firmware's `msp_radar_pos_t` only documents these). **No peer
+  name/callsign is ever sent over MSP.**
+- `MSP2_COMMON_SET_RADAR_ITD` (0x100C) — `{ type:u8, char msg[20] }`: a **module status / RSSI string**
+  (e.g. "booting…"), *not* a peer name. We ACK it (display in FF settings is a later nicety).
+- `MSP2_SENSOR_GPS` — the module can act as a GPS source for the FC; irrelevant to Kite, ACKed + ignored.
 
 ## 4. Position source = GCS location
-Reuse the existing resolved GCS location (`userGeoLocation` — OS geolocation, **arming-location fallback**
-on a live connection). Kite advertises that as a **stationary ground node** with a synthetic 3D fix +
-armed so the module always transmits — even on the bench with no UAV. (No UAV-position option for now:
-the on-board aircraft carries its own radar node, so advertising the UAV here would duplicate it.)
+Reuse the resolved GCS location (`userGeoLocation` — OS geolocation; the arming-location fallback is a
+later refinement). Kite advertises it as a **stationary ground node** with a synthetic 3D fix, pushed live
+to the backend (`radar_set_node_pos`) so it follows without restarting the source. The module then
+transmits — even on the bench with no UAV. (No UAV-position option: the on-board aircraft carries its own
+radar node, so advertising the UAV here would duplicate it.)
 
-## 5. Data model (→ `TrackedVehicle`, `system='formationFlight'`)
+## 5. Data model + rendering (→ `TrackedVehicle`, `system='formationFlight'`)
 Per peer from `SET_RADAR_POS`: `lat/lon` (°), `altM = alt/100`, `headingDeg`, `groundSpeedMs = speed/100`,
-`signal = lq` (0–4), `validPos` from `state` (drop `lost`). Id = the slot (`ff-<id>`); `callsign` from
-`SET_RADAR_ITD`/`NAME` when available. Flows through the existing aggregator (per-system merge + TTL) and
-the existing panel/map rendering — FormationFlight already has its own list group + map visibility toggle.
+`signal = lq` (0–4). **Id → letter A..F** (`id 0→A`, matching the FF OSD) in `callsign` — there is no name
+over MSP. Armed/disarmed → `extra.ffState`; **`lost` is a TIMEOUT we apply ourselves** (no
+`SET_RADAR_POS` for >12 s → red, kept 5 min at the last position), *not* a firmware state. Flows through
+the existing aggregator + the same panel/map; FF has its own list group + map visibility toggle.
+
+**Rendering (FF-specific, not the ADS-B altitude scale):**
+- **State colour:** armed = dark blue, disarmed = grey, lost = grey + red outline (2D) / red tint (3D).
+- **2D:** a slim **paper-plane** silhouette (own SVG), 20 % larger than ADS-B, heading-rotated, with the
+  letter as a bigger badge label (translucent grey background).
+- **3D:** `ff-uav.glb` (placeholder paper-plane), tinted by state, **just the model + a thin SOLID
+  drop-line** in the state colour — no ground circle / heading arrow (those stay ADS-B-only; the solid vs
+  dashed line distinguishes the two).
+- **List:** link quality as 0–4 pips (the only signal/freshness cue we get).
 
 ## 6. Architecture (Rust, isolated)
 - New source `radar/sources/formation_flight.rs` implementing `RadarSource` (serial, like the local ADS-B
@@ -80,14 +101,22 @@ and the advertised **node name**. Panel: a source row under the FormationFlight 
 mirroring the local ADS-B receiver UI.
 
 ## 8. Phasing
-- **F1 — Link + FC emulation + peer parse:** serial source, MSP slave answering the request set as an
-  armed INAV FC at the GCS location, parse `SET_RADAR_POS` → contacts. Validate on the bench with two
-  **ESP32-C3** nodes over ESP-NOW (no LoRa hardware needed).
-- **F2 — Polish:** `SET_RADAR_ITD` name/extras, node-name setting, panel source row, status/LQ display.
-- **F3 — later:** optional `"GCS"` listen-only mode (no phantom node) once the FC-emulation path is solid;
-  dedup if a peer also appears via ADS-B.
+- **F1 — Link + FC emulation + peer parse + rendering ✅ (shipped):** serial MSP-slave source, FC
+  emulation, live GCS node position + node name, `SET_RADAR_POS` parse, full 2D/3D state-coloured
+  rendering, LQ list, lost-timeout retention, geoid fix. Bench-validated with two ESP32-C3 over ESP-NOW.
+- **F3 — later:** `SET_RADAR_ITD` status string shown in FF settings; optional `"GCS"` listen-only mode
+  (no phantom node) once the FC-emulation path is solid; dedup if a peer also appears via ADS-B; a real
+  paper-plane `ff-uav.glb` (placeholder copies `uav-plane.glb`).
 
-## 9. Open / to confirm at implementation
-- Exact `getActiveModes()` query set (MSP_STATUS / MSP_BOXIDS / MSP2_INAV_STATUS) the module's MSP lib uses.
-- Whether the module gates TX on armed-only vs fix-only (we report both to be safe).
-- `MSP_NAME` length / encoding the module expects.
+## 9. Gotchas / lessons (F1)
+- **Reopening the serial port resets the ESP32** (USB auto-reset DTR/RTS). So the FF source is kept open
+  across radar reconfigures and only restarted on a **port/baud** change (`reconcile_ff`); the node name +
+  GCS position are **live** (shared `Arc`s) so changing them never cycles the port. The source also does
+  **not** assert DTR/RTS.
+- **`MSP_NAME` is clamped to ≤15 printable-ASCII bytes** — the module stores it in `char name[16]` and uses
+  it as a C-string; a name filling all 16 bytes (no NUL) overflows it and crashes the firmware.
+- **No peer name over MSP** ⇒ letters A..F (matches the OSD). Confirm the letter matches the OSD; offset if
+  the firmware's slot ids start at 1.
+- **`lost` is our timeout, not a firmware state.** The state byte only gives armed/disarmed.
+- **Geoid:** a radar-only scene (no UAV/track) never computed the geoid offset, so contacts sank under the
+  terrain — now computed at the GCS reference (`computeGeoidOnce`).

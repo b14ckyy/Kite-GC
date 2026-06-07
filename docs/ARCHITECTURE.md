@@ -1604,5 +1604,53 @@ Numeric thresholds are code-fixed until C3 exposes them; the override merge is a
 
 ---
 
+## ADR-036: FormationFlight (INAV-Radar / ESP32) — Kite as an MSP-Slave FC Emulator
+
+**Date**: 2026-06-07
+**Status**: Accepted
+**Related**: ADR-035 (conflict alerts — FF never alerts), the radar plan docs
+(`docs/active/RADAR_FORMATION_FLIGHT.md`, `RADAR_TRACKING_*`)
+
+**Context**: INAV-Radar / FormationFlight is an ESP32 + radio (LoRa / ESP-NOW) that shares aircraft
+positions within a formation. Each module talks **MSP to a flight controller**: it polls the FC for its
+own telemetry, broadcasts it, and relays received peers back into the FC (for the OSD) via
+`MSP2_COMMON_SET_RADAR_POS`. We wanted Kite to join the formation as a **ground node** and show the peers,
+for monitoring / pilot-to-pilot awareness (never as a conflict alert — that's ADS-B only, ADR-035).
+
+**Decision**:
+- **Kite emulates an INAV FC (MSP slave).** The module is the MSP *master*; Kite answers its requests on a
+  dedicated serial port (`radar/sources/formation_flight.rs`), reporting `FC_VARIANT="INAV"` + a synthetic
+  3D GPS fix at the **GCS location** + a name. Reporting `"INAV"` (not `"GCS"`) is what makes the module
+  **transmit** (its TX is gated on the host type, not on armed) — and sidesteps the historically-buggy
+  `"GCS"` listen-only path. The low-level MSP v1/v2 frame codec is reused (`msp/codec.rs`, with new
+  `encode_*_response` helpers); the slave loop is written fresh (the main pipeline is master-role).
+- **Fully isolated** from the main scheduler/FC link — a FormationFlight fault must never disturb the
+  safety-critical connection. It's just another `RadarSource` feeding the shared aggregator with
+  `system='formationFlight'`.
+- **The serial source is persistent.** Reopening the port toggles DTR/RTS and **resets the ESP32**, so the
+  FF source is kept open across radar reconfigures and restarted ONLY on a port/baud change
+  (`reconcile_ff`); the node name + GCS position are **live** (shared `Arc`s, `radar_set_node_pos`) so
+  changing them never cycles the port. The source never asserts DTR/RTS.
+- **Data model:** peers carry only position / altitude / heading / speed / link-quality / armed state — **no
+  name over MSP**, so the slot id maps to a **letter A..F** (matches the OSD). `lost` is a **timeout we
+  apply** (no update for >12 s → red, retained 5 min at the last position), not a firmware state.
+- **Rendering is state-based, not altitude-based** (FF opts out of the ADS-B altitude scale): armed = dark
+  blue, disarmed = grey, lost = red; a slim paper-plane SVG (2D) / `ff-uav.glb` (3D) with just the model +
+  a thin solid drop-line; link quality as pips in the list.
+
+**Rationale**: a real INAV FC is exactly what the module expects to talk to, so emulating one (rather than
+the buggy GCS mode) is the robust path and needs no firmware change. Keeping the port open is essential
+because the ESP's USB auto-reset makes any reopen a reboot. Deriving `lost` from our own timeout (instead
+of trusting the state byte) keeps the display correct regardless of how the firmware uses `state`.
+
+**Consequences**: the `MSP_NAME` we report is clamped to ≤15 printable-ASCII bytes — the module stores it
+in a `char name[16]` C-string and a 16-byte name (no NUL) overflows and crashes it. Peers are identified
+only by letter (no real name available). FormationFlight requires the contact altitudes to be geoid-
+corrected even with no UAV connected, which surfaced (and fixed) the radar-only geoid-offset gap.
+`SET_RADAR_ITD` (a module status string) is received but not yet surfaced; the `"GCS"` listen-only mode and
+a proper paper-plane model are later work.
+
+---
+
 *End of Architecture Decision Records*
 

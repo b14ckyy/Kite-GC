@@ -567,6 +567,12 @@ Cross-cutting groundwork items. Each carries non-trivial architectural or design
 - [ ] **Multi serial connections in background (aux devices)**
   - _Major considerations_: the MSP scheduler currently owns a single serial connection exclusively (ADR-007). An aux-device manager would run additional independent background connections (ADSB receiver, ESP-Radar, telemetry monitor, …) without disturbing the primary FC link — each with its own parser/handler, surfaced via an "Aux Devices" submenu. Data fusion onto the map (ADSB traffic, radar contacts). Builds on the ByteTransport abstraction (ADR-010) and the planned raw serial logger. Significant architecture item.
 
+### Radar / foreign-vehicle tracking
+Subsystem detailed in `docs/active/RADAR_TRACKING_*`, `RADAR_ALERTS.md`, `RADAR_FORMATION_FLIGHT.md` (ADR-033/035/036). Largely shipped (ADS-B online + receivers + via-MSP, conflict alerts, FormationFlight). Open items:
+- [ ] **Show the GCS location on the map** — a marker for the resolved ground-station position (the FormationFlight node position + radar distance reference), so the operator sees where "home / GCS" is even with no UAV connected.
+- [ ] **FormationFlight follow-ups (F3)** — `SET_RADAR_ITD` status string in FF settings; optional `"GCS"` listen-only mode; ADS-B↔FF dedup; a proper paper-plane `ff-uav.glb`.
+- [ ] **Conflict-alert tuning (C3)** — expose the numeric thresholds as user settings; pre-recorded callout audio for engines without TTS (Linux WebKitGTK).
+
 ### Terrain Elevation (local DEM — 2D map & planning)
 
 Source: **Copernicus DEM GLO-30** (geoid/EGM2008 ≈ MSL, no API key, offline-capable). Local use only — no dependency on onboard FC terrain. Shared elevation-sampling abstraction feeds all four features:

@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **FormationFlight / INAV-Radar support (ADR-036).** Kite joins an ESP32 INAV-Radar / FormationFlight
+  formation as a **ground node**: connect the module over USB-serial (Radar panel → FormationFlight tab →
+  port + baud + node name) and Kite emulates an INAV flight controller at your GCS location so the module
+  shares it and relays the other aircraft. Peers appear as **paper-plane** contacts, coloured by state
+  (armed = blue, disarmed = grey, lost = red, kept 5 min at the last position), labelled by letter (A–F,
+  matching the OSD), with a link-quality readout in the list. Monitoring only — never raises a conflict
+  alert. 2D + 3D.
+- **3D contacts no longer sink under the terrain in radar-only scenes.** The geoid offset is now computed
+  at the GCS location even with no UAV connected, so ADS-B / FormationFlight contacts sit at the right
+  height.
 - **ADS-B conflict alerts (ADR-035).** Smart two-stage collision avoidance for the connected UAV against
   foreign traffic. **Stage 1 — Caution:** a yellow advisory when a contact is inside a 5 km / ±2000 m
   zone and closing (it clears again once the contact has flown past). **Stage 2 — Collision warning:** a
