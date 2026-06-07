@@ -25,11 +25,17 @@ pub fn radar_configure(
     Ok(())
 }
 
-/// Update the live ADS-B query centre (map viewport / UAV position). Cheap — no pipeline restart.
+/// Update the live ADS-B query centre (map viewport / UAV) + optional radius (km; the 3D view sizes the
+/// query to the visible area). Cheap — no pipeline restart.
 #[tauri::command]
-pub fn radar_set_center(lat: f64, lon: f64, state: State<'_, AppState>) -> Result<(), String> {
+pub fn radar_set_center(
+    lat: f64,
+    lon: f64,
+    radius_km: Option<f64>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     let mgr = state.radar.lock().map_err(|e| e.to_string())?;
-    mgr.set_center(lat, lon);
+    mgr.set_center(lat, lon, radius_km);
     Ok(())
 }
 

@@ -7,6 +7,7 @@ import { writable } from 'svelte/store';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { haversineDistance, bearing } from '$lib/utils/geo';
+import { isHiddenCategory } from '$lib/helpers/radar3d';
 
 // ── Types (mirror the Rust serde output) ────────────────────────────
 
@@ -80,10 +81,16 @@ export function resetRadarStatus() {
 let unlisten: UnlistenFn | undefined;
 let unlistenStatus: UnlistenFn | undefined;
 
+/** Drop ground/obstacle/reserved ADS-B traffic (emitter category C‑ / D‑) — irrelevant for airborne
+ *  awareness, hidden from both the list and the map. */
+function filterSnapshot(s: RadarSnapshot): RadarSnapshot {
+  return { ...s, adsb: s.adsb.filter((v) => !isHiddenCategory(v.category)) };
+}
+
 export async function startRadarListeners() {
   stopRadarListeners();
   unlisten = await listen<RadarSnapshot>('radar-vehicles', (event) => {
-    radarVehicles.set(event.payload);
+    radarVehicles.set(filterSnapshot(event.payload));
   });
   unlistenStatus = await listen<AdsbProviderStatus[]>('radar-adsb-status', (event) => {
     // Merge by name — online + local receivers each emit their own entries independently.
@@ -131,10 +138,11 @@ export async function configureRadar(config: RadarBackendConfig): Promise<void> 
   }
 }
 
-/** Update the live ADS-B query centre (map viewport / UAV). Cheap — no pipeline restart. */
-export async function setRadarCenter(lat: number, lon: number): Promise<void> {
+/** Update the live ADS-B query centre (map viewport / UAV) + optional radius (km; the 3D view sizes the
+ *  query to the visible area). Cheap — no pipeline restart. */
+export async function setRadarCenter(lat: number, lon: number, radiusKm?: number): Promise<void> {
   try {
-    await invoke('radar_set_center', { lat, lon });
+    await invoke('radar_set_center', { lat, lon, radiusKm });
   } catch (e) {
     console.warn('radar_set_center failed:', e);
   }

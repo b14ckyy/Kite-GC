@@ -39,6 +39,9 @@ pub struct AdsbOnlineSource {
     providers: Vec<AdsbOnlineProvider>,
     /// Live query centre (`[lat, lon]`), shared with the manager so it follows the viewport/UAV.
     center: Arc<Mutex<Option<(f64, f64)>>>,
+    /// Live query radius (km), shared so the 3D view can size the query to what's visible. `None` ⇒
+    /// fall back to the configured `radius_km`.
+    radius: Arc<Mutex<Option<f64>>>,
     radius_km: f64,
     poll: Duration,
     app: AppHandle,
@@ -48,6 +51,7 @@ impl AdsbOnlineSource {
     pub fn new(
         providers: Vec<AdsbOnlineProvider>,
         center: Arc<Mutex<Option<(f64, f64)>>>,
+        radius: Arc<Mutex<Option<f64>>>,
         radius_km: f64,
         poll_sec: f64,
         app: AppHandle,
@@ -55,6 +59,7 @@ impl AdsbOnlineSource {
         Self {
             providers,
             center,
+            radius,
             radius_km,
             poll: Duration::from_secs_f64(poll_sec.max(1.0)),
             app,
@@ -80,12 +85,13 @@ impl RadarSource for AdsbOnlineSource {
                 .build()
                 .unwrap_or_else(|_| reqwest::Client::new());
 
-            let dist_nm = (self.radius_km / KM_PER_NM).clamp(1.0, 250.0).round() as i64;
-
             loop {
                 if stop_task.load(Ordering::Relaxed) {
                     break;
                 }
+                // Live radius each cycle (3D sizes the query to the visible area); fall back to config.
+                let radius_km = self.radius.lock().ok().and_then(|r| *r).unwrap_or(self.radius_km);
+                let dist_nm = (radius_km / KM_PER_NM).clamp(1.0, 250.0).round() as i64;
                 // Read the live centre each cycle (follows the map viewport / UAV). Skip if unset.
                 let center = self.center.lock().ok().and_then(|c| *c);
                 let (clat, clon) = match center {

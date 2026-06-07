@@ -46,8 +46,12 @@
   import { sunAltitudeDeg, cesiumLikeBrightness } from "$lib/utils/sun";
   import { ensureUserLocation, resolveUserLocation, userGeoLocation } from "$lib/helpers/userLocation";
   import FpvHud from "$lib/components/FpvHud.svelte";
-  import { convertSpeed, convertAltitude } from "$lib/utils/units";
-  import type { SpeedUnit, AltitudeUnit } from "$lib/stores/settings";
+  import { convertSpeed, convertAltitude, convertDistance, convertVerticalSpeed, formatConverted } from "$lib/utils/units";
+  import { haversineDistance, bearing } from "$lib/utils/geo";
+  import type { SpeedUnit, AltitudeUnit, RadarMapSettings } from "$lib/stores/settings";
+  import { radarVehicles, radarSelection, type RadarSnapshot } from "$lib/stores/radarTracking";
+  import { contactColor, contactVisibleOnMap, REL_OVERRIDE_M } from "$lib/helpers/radarMap";
+  import { ARROW_POLY, GROUND_CIRCLE_RADIUS_M, contactModelClass, radarModelUri, type RadarModelClass } from "$lib/helpers/radar3d";
 
   let {
     active = true,
@@ -61,6 +65,10 @@
     mapViewMode = '3d' as '2d' | '3d',
     onToggleMapView,
     onCamFocus,
+    radarActive = false,
+    radarMapSettings = null,
+    radarRefAltM = null,
+    radarReference = null,
   }: {
     active?: boolean;
     playbackTrack?: TelemetryRecord[];
@@ -75,6 +83,14 @@
     onToggleMapView?: () => void;
     /** Fired on camera move-end with the focus point over the globe — drives the radar query centre. */
     onCamFocus?: (lat: number, lon: number) => void;
+    /** Radar master enable (renders no contacts when off). */
+    radarActive?: boolean;
+    /** Map rendering controls for radar contacts, or null. */
+    radarMapSettings?: RadarMapSettings | null;
+    /** Reference altitude (m MSL) for the relative-altitude colour scale / ground gating, or null. */
+    radarRefAltM?: number | null;
+    /** Distance/bearing reference (UAV valid-fix else GCS) for the selected-contact label, or null. */
+    radarReference?: { lat: number; lon: number } | null;
   } = $props();
 
   // ── State ──────────────────────────────────────────────────────────
@@ -230,6 +246,45 @@
   // (only if the UAV is DISARMED — armed = connection recovery, keep the track).
   let pendingConnectArmCheck = false;
   let unsubConnection: (() => void) | undefined;
+
+  // ── Foreign-vehicle (radar) 3D contacts ──────────────────────────────
+  // One record per contact id, holding the live data + Cesium entities; CallbackProperties read from
+  // the record so we diff (update fields) rather than recreate entities each snapshot. Flat extruded
+  // silhouette sized in px by camera distance, drop-line + ground circle gated to the colour-scale zone.
+  type Radar3dRec = {
+    id: string;
+    lat: number; lon: number;
+    headingDeg: number | null;
+    modelClass: RadarModelClass; // which radar glb to render (mapped from system + ADS-B category)
+    callsign: string;          // label text (callsign or id)
+    altM: number;              // altitude (m) for the label
+    groundSpeedMs: number | null;
+    verticalSpeedMs: number | null;
+    contactEll: number;        // contact ellipsoid height (MSL + geoid)
+    color: Cesium.Color;       // altitude-coded tint
+    showGround: boolean;       // drop-line + circle visible (Δ ≤ +2000 m, or debug+show-all)
+    selected: boolean;
+    hideRadiusM: number;       // radius beyond which the contact is hidden (showAll → 1000 km)
+    // Drop-line colour held in a single ConstantProperty so we update it IN PLACE (setValue) instead of
+    // replacing the material each poll — replacing rebuilds the material (the colour-coded "blink").
+    dropColorCP?: Cesium.ConstantProperty;
+    dropColor?: Cesium.Color;
+    groundSig?: string;        // last-synced ground signature — skip the whole ground update if unchanged
+    entities: Cesium.Entity[];
+  };
+  const radar3dRecs = new Map<string, Radar3dRec>();
+  // New contacts are created a few per frame (a dense area can add ~100 at once — building all their
+  // models + ground geometry in one frame stutters). The rec is in `radar3dRecs` immediately (with no
+  // entities yet) and queued here; `drainRadarCreateQueue` builds them incrementally.
+  const radar3dCreateQueue: Radar3dRec[] = [];
+  let radar3dCreateRaf = 0;
+  let radar3dSnap: RadarSnapshot = { adsb: [], formationFlight: [], radio: [], lastUpdate: 0 };
+  let radar3dSelectedId: string | null = null;
+  let unsubRadar3d: (() => void) | undefined;
+  let unsubRadarSel3d: (() => void) | undefined;
+  // Click/hover picking: map each contact entity back to its id; handler set up in onMount.
+  const radar3dEntityIds = new WeakMap<Cesium.Entity, string>();
+  let radar3dPickHandler: Cesium.ScreenSpaceEventHandler | undefined;
 
   // One-shot camera recenter after a (re)mount. The 2D↔3D toggle remounts this
   // component, so this fires once on every switch to 3D.
@@ -564,6 +619,14 @@
     };
   }
 
+  /** Geographic point directly under the camera (nadir) — used as the radar query centre when the view
+   *  hits no ground (looking at the horizon/sky). Always defined while the viewer is alive. */
+  export function getCamSubpoint(): { lat: number; lon: number } | null {
+    if (!viewer) return null;
+    const c = viewer.camera.positionCartographic;
+    return { lat: Cesium.Math.toDegrees(c.latitude), lon: Cesium.Math.toDegrees(c.longitude) };
+  }
+
   // Activate/deactivate when the 2D↔3D toggle flips `active`. Inactive → snapshot the
   // free-mode camera's own zoom/angle and pause the render loop (viewer stays in RAM,
   // entities keep updating from the stores). Active → resume, resize, and frame the view:
@@ -821,6 +884,24 @@
     });
     unsubLaunchStore = launchPoint.subscribe((v) => { curLaunch = v; scheduleMissionRender(); });
 
+    // Foreign-vehicle contacts: click to select (sync with list/2D), hover → pointer cursor.
+    radar3dPickHandler = new Cesium.ScreenSpaceEventHandler(viewer.canvas);
+    radar3dPickHandler.setInputAction((e: Cesium.ScreenSpaceEventHandler.PositionedEvent) => {
+      const id = radarPickId(e.position);
+      if (id != null) radarSelection.update((cur) => (cur === id ? null : id));
+    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+    radar3dPickHandler.setInputAction((e: Cesium.ScreenSpaceEventHandler.MotionEvent) => {
+      if (viewer) viewer.canvas.style.cursor = radarPickId(e.endPosition) != null ? 'pointer' : '';
+    }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+
+    // Foreign-vehicle contacts: rebuild the 3D radar entities on snapshot / selection change.
+    unsubRadar3d = radarVehicles.subscribe((s) => { radar3dSnap = s; updateRadar3D(); });
+    unsubRadarSel3d = radarSelection.subscribe((id) => {
+      radar3dSelectedId = id;
+      for (const rec of radar3dRecs.values()) { rec.selected = rec.id === id; syncRec(rec); }
+      viewer?.scene.requestRender();
+    });
+
     // Connection edge: on a fresh (re)connect, flag the next telemetry frame to
     // decide clearing (only if DISARMED) and force a live-geoid recompute.
     unsubConnection = connection.subscribe((c) => {
@@ -838,6 +919,7 @@
     chaseLerpActive = false;
     orbitLerpActive = false;
     if (smRaf) cancelAnimationFrame(smRaf);
+    if (radar3dCreateRaf) cancelAnimationFrame(radar3dCreateRaf);
     if (nightTimer3D) clearInterval(nightTimer3D);
     unsubUserGeo?.();
     if (viewer && !viewer.isDestroyed()) viewer.camera.moveEnd.removeEventListener(updateNightDim3D);
@@ -846,6 +928,9 @@
     if (camDragHandler) { camDragHandler.destroy(); camDragHandler = undefined; }
     uninstallFpvWheel();
     unsubTelemetry?.();
+    unsubRadar3d?.();
+    unsubRadarSel3d?.();
+    radar3dPickHandler?.destroy();
     unsubHome?.();
     unsubSettingsWatch?.();
     unsubMissionStore?.();
@@ -858,6 +943,264 @@
       viewer.entities.removeAll();
       viewer.destroy();
     }
+  });
+
+  // ── Radar (foreign-vehicle) 3D rendering ─────────────────────────────
+  const RADAR_CYAN = Cesium.Color.CYAN;
+
+  /** Build ECEF positions for a local (east/north, unit) polygon scaled by `sizeM` + heading-rotated. */
+  function radarLocalPositions(
+    lon: number, lat: number, pts: [number, number][], sizeM: number, headingDeg: number | null,
+  ): Cesium.Cartesian3[] {
+    const enu = Cesium.Transforms.eastNorthUpToFixedFrame(Cesium.Cartesian3.fromDegrees(lon, lat, 0));
+    const h = (headingDeg ?? 0) * Math.PI / 180;
+    const ch = Math.cos(h), sh = Math.sin(h);
+    return pts.map(([x, y]) => {
+      const e = (x * ch + y * sh) * sizeM;
+      const n = (-x * sh + y * ch) * sizeM;
+      return Cesium.Matrix4.multiplyByPoint(enu, new Cesium.Cartesian3(e, n, 0), new Cesium.Cartesian3());
+    });
+  }
+
+  function clearRadar3D() {
+    radar3dCreateQueue.length = 0;
+    if (radar3dCreateRaf) { cancelAnimationFrame(radar3dCreateRaf); radar3dCreateRaf = 0; }
+    if (!viewer || !radar3dRecs.size) return;
+    for (const rec of radar3dRecs.values()) for (const e of rec.entities) viewer.entities.remove(e);
+    radar3dRecs.clear();
+    viewer.scene.requestRender();
+  }
+
+  /** Build queued contacts a few per frame so a dense area doesn't stutter the main thread. */
+  function drainRadarCreateQueue() {
+    radar3dCreateRaf = 0;
+    if (!viewer) { radar3dCreateQueue.length = 0; return; }
+    const BATCH = 8;
+    let n = 0;
+    while (radar3dCreateQueue.length && n < BATCH) {
+      const rec = radar3dCreateQueue.shift()!;
+      if (radar3dRecs.get(rec.id) === rec) { createRadarEntities(rec); n++; } // still wanted (not removed)
+    }
+    viewer.scene.requestRender();
+    if (radar3dCreateQueue.length) radar3dCreateRaf = requestAnimationFrame(drainRadarCreateQueue);
+  }
+
+  // Contacts render like the UAV: a real glb MODEL (oriented to heading, altitude-tinted, minimumPixelSize
+  // for a screen-size floor) — no flicker and the heading reads from the 3D shape. The ground projection
+  // is a filled CLAMP_TO_GROUND ellipse + a filled heading arrow (drop-line is a polyline).
+  const RADAR_MODEL_MIN_PX = 48;
+  const DROP_DEPTH_M = 12000; // drop-line length below the contact (terrain depth test clips it at ground)
+
+  /** Create the per-contact entities once (filled in by syncRec). */
+  function createRadarEntities(rec: Radar3dRec) {
+    if (!viewer) return;
+    const model = viewer.entities.add({
+      model: {
+        uri: radarModelUri(rec.modelClass),
+        minimumPixelSize: RADAR_MODEL_MIN_PX,
+        maximumScale: 4000,
+        scale: 5.2,
+        colorBlendMode: Cesium.ColorBlendMode.MIX,
+        colorBlendAmount: 0.6,
+        heightReference: Cesium.HeightReference.NONE,
+      },
+      // Floating info label under the model: callsign + altitude, slightly transparent.
+      label: {
+        font: '600 14px "Segoe UI", Tahoma, sans-serif',
+        fillColor: Cesium.Color.WHITE.withAlpha(0.9),
+        outlineColor: Cesium.Color.BLACK.withAlpha(0.85),
+        outlineWidth: 2,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        verticalOrigin: Cesium.VerticalOrigin.TOP,
+        pixelOffset: new Cesium.Cartesian2(0, 26),
+        showBackground: true,
+        backgroundColor: Cesium.Color.BLACK.withAlpha(0.35),
+        backgroundPadding: new Cesium.Cartesian2(5, 3),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
+    // Drop-line: a thin dashed colour-coded line over a black dashed backing (contrast). The colour lives
+    // in a ConstantProperty we update in place (setValue) — building a NEW material object each poll makes
+    // Cesium rebuild the line (a black flash); updating the uniform in place doesn't. The ground-sync
+    // guard also means an unchanged contact is never touched at all.
+    rec.dropColor = (rec.selected ? RADAR_CYAN : rec.color).withAlpha(0.95);
+    rec.dropColorCP = new Cesium.ConstantProperty(rec.dropColor);
+    const dropBg = viewer.entities.add({
+      polyline: { width: 4, material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.BLACK.withAlpha(0.7), dashLength: 16 }) },
+    });
+    const drop = viewer.entities.add({
+      polyline: { width: 2, material: new Cesium.PolylineDashMaterialProperty({ color: rec.dropColorCP, dashLength: 16 }) },
+    });
+    const circle = viewer.entities.add({
+      ellipse: {
+        semiMajorAxis: GROUND_CIRCLE_RADIUS_M, semiMinorAxis: GROUND_CIRCLE_RADIUS_M,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        classificationType: Cesium.ClassificationType.TERRAIN,
+        outlineColor: RADAR_CYAN, outlineWidth: 2,
+      },
+    });
+    // Arrow as a clampToGround POLYLINE (not a polygon): polylines update smoothly.
+    const arrow = viewer.entities.add({ polyline: { width: 4, clampToGround: true } });
+    rec.entities = [model, dropBg, drop, circle, arrow];
+    for (const e of rec.entities) radar3dEntityIds.set(e, rec.id); // for click/hover picking
+    syncRec(rec);
+  }
+
+  /** Contact id under a window position (click/hover), or null. */
+  function radarPickId(windowPos: Cesium.Cartesian2): string | null {
+    if (!viewer) return null;
+    const picked = viewer.scene.pick(windowPos);
+    const ent = picked?.id;
+    return ent instanceof Cesium.Entity ? (radar3dEntityIds.get(ent) ?? null) : null;
+  }
+
+  /** Update the contact model (position/orientation/colour/size) — cheap, no geometry rebuild. */
+  function syncRadarModel(rec: Radar3dRec) {
+    const e = rec.entities[0];
+    if (!e.model) return;
+    const pos = Cesium.Cartesian3.fromDegrees(rec.lon, rec.lat, rec.contactEll);
+    e.position = new Cesium.ConstantPositionProperty(pos);
+    e.orientation = new Cesium.ConstantProperty(uavOrientation(pos, rec.headingDeg ?? 0, 0, 0));
+    e.model.color = new Cesium.ConstantProperty(rec.color);
+    e.model.minimumPixelSize = new Cesium.ConstantProperty(rec.selected ? RADAR_MODEL_MIN_PX * 1.3 : RADAR_MODEL_MIN_PX);
+    e.model.silhouetteColor = new Cesium.ConstantProperty(RADAR_CYAN);
+    e.model.silhouetteSize = new Cesium.ConstantProperty(rec.selected ? 2 : 0);
+    const ddc = new Cesium.ConstantProperty(new Cesium.DistanceDisplayCondition(0, rec.hideRadiusM));
+    e.model.distanceDisplayCondition = ddc;
+    if (e.label) {
+      e.label.text = new Cesium.ConstantProperty(radarLabelText(rec));
+      e.label.distanceDisplayCondition = ddc;
+    }
+  }
+
+  /** Label text: callsign + altitude normally; the full ADS-B readout (like the 2D hover) when selected. */
+  function radarLabelText(rec: Radar3dRec): string {
+    if (!rec.selected) {
+      return `${rec.callsign}\n${formatConverted(convertAltitude(rec.altM, hudAltUnit), 0)}`;
+    }
+    const ui = get(settings).interface;
+    const alt = formatConverted(convertAltitude(rec.altM, ui.altitudeUnit), 0);
+    const spd = rec.groundSpeedMs == null ? '—' : formatConverted(convertSpeed(rec.groundSpeedMs, ui.speedUnit), 0);
+    let vs = '';
+    if (rec.verticalSpeedMs != null && Math.abs(rec.verticalSpeedMs) >= 0.5) {
+      const a = formatConverted(convertVerticalSpeed(Math.abs(rec.verticalSpeedMs), ui.verticalSpeedUnit), 1);
+      vs = ` ${rec.verticalSpeedMs > 0 ? '▲' : '▼'}${a}`;
+    }
+    let dist = '—';
+    let brg = '—';
+    if (radarReference) {
+      const d = haversineDistance(radarReference.lat, radarReference.lon, rec.lat, rec.lon);
+      dist = formatConverted(convertDistance(d, ui.distanceUnit), d < 10000 ? 1 : 0);
+      brg = `${Math.round(bearing(radarReference.lat, radarReference.lon, rec.lat, rec.lon))}°`;
+    }
+    return `${rec.callsign}\n${alt}${vs}\n${spd} · ${dist} · ${brg}`;
+  }
+
+  /** Update the ground projection (drop-line + filled circle + heading arrow). Solid materials reassigned
+   *  per poll do NOT blink (only the dash material did). */
+  function syncRadarGround(rec: Radar3dRec) {
+    // Skip entirely when nothing relevant changed: the snapshot fires at the (1 Hz) receiver poll rate,
+    // and re-touching a contact's ground geometry every snapshot — even unchanged — flashes the line.
+    const sig = `${rec.lat.toFixed(6)},${rec.lon.toFixed(6)},${Math.round(rec.contactEll)},${rec.headingDeg ?? 'x'},${rec.showGround},${rec.selected},${rec.color.toCssColorString()},${rec.hideRadiusM}`;
+    if (sig === rec.groundSig) return;
+    rec.groundSig = sig;
+    const [, dropBg, drop, circle, arrow] = rec.entities;
+    const ddc = new Cesium.ConstantProperty(new Cesium.DistanceDisplayCondition(0, rec.hideRadiusM));
+    const top = Cesium.Cartesian3.fromDegrees(rec.lon, rec.lat, rec.contactEll);
+    // Drop straight down well below the surface; the terrain depth test clips it at the ground — so we
+    // never need a (synchronous, slow) terrain-height sample per contact.
+    const bot = Cesium.Cartesian3.fromDegrees(rec.lon, rec.lat, rec.contactEll - DROP_DEPTH_M);
+    if (dropBg.polyline) {
+      dropBg.polyline.positions = new Cesium.ConstantProperty([top, bot]);
+      dropBg.polyline.distanceDisplayCondition = ddc;
+    }
+    dropBg.show = rec.showGround;
+    if (drop.polyline) {
+      drop.polyline.positions = new Cesium.ConstantProperty([top, bot]);
+      // Update the colour IN PLACE (no material replace → no blink), and only when it actually changed.
+      const desired = (rec.selected ? RADAR_CYAN : rec.color).withAlpha(0.95);
+      if (rec.dropColorCP && (!rec.dropColor || !Cesium.Color.equals(rec.dropColor, desired))) {
+        rec.dropColor = desired;
+        rec.dropColorCP.setValue(desired);
+      }
+      drop.polyline.distanceDisplayCondition = ddc;
+    }
+    drop.show = rec.showGround;
+    circle.position = new Cesium.ConstantPositionProperty(Cesium.Cartesian3.fromDegrees(rec.lon, rec.lat));
+    if (circle.ellipse) {
+      circle.ellipse.material = new Cesium.ColorMaterialProperty(rec.color.brighten(0.45, new Cesium.Color()).withAlpha(0.5));
+      circle.ellipse.outline = new Cesium.ConstantProperty(rec.selected);
+      circle.ellipse.distanceDisplayCondition = ddc;
+    }
+    circle.show = rec.showGround;
+    if (arrow.polyline) {
+      const a = radarLocalPositions(rec.lon, rec.lat, ARROW_POLY, GROUND_CIRCLE_RADIUS_M * 0.9, rec.headingDeg);
+      a.push(a[0]); // close the outline
+      arrow.polyline.positions = new Cesium.ConstantProperty(a);
+      arrow.polyline.material = new Cesium.ColorMaterialProperty((rec.selected ? RADAR_CYAN : Cesium.Color.BLACK).withAlpha(0.9));
+      arrow.polyline.distanceDisplayCondition = ddc;
+    }
+    arrow.show = rec.showGround && rec.headingDeg != null;
+  }
+
+  function syncRec(rec: Radar3dRec) {
+    if (rec.entities.length === 0) return; // still queued for creation — will sync on create
+    syncRadarModel(rec);
+    syncRadarGround(rec);
+  }
+
+  /** Diff the 3D radar entities from the latest snapshot + map controls. */
+  function updateRadar3D() {
+    if (!viewer) return;
+    const ms = radarMapSettings;
+    if (!radarActive || !ms) { clearRadar3D(); return; }
+    // Local contacts are world-anchored, so under showAll the hide radius is large (1000 km) — don't cull
+    // a stationary receiver's traffic just because the camera panned far away.
+    const hideR = ms.showAll ? 1_000_000 : ms.radiusKm * 1000;
+    const all = [...radar3dSnap.adsb, ...radar3dSnap.formationFlight, ...radar3dSnap.radio];
+    const seen = new Set<string>();
+    for (const v of all) {
+      if (v.altM == null) continue;                          // no altitude → can't place in 3D
+      if (!contactVisibleOnMap(v, radarRefAltM, ms)) continue;
+      seen.add(v.id);
+      const delta = radarRefAltM != null ? v.altM - radarRefAltM : null;
+      const withinZone = delta != null && delta <= REL_OVERRIDE_M;
+      const showGround = withinZone || (import.meta.env.DEV && ms.showAll);
+      const col = contactColor(v.altM, radarRefAltM);
+      const cesColor = Cesium.Color.fromCssColorString(col.fill).withAlpha(col.fillOpacity);
+      const contactEll = v.altM + geoidOffset;
+      const modelClass = contactModelClass(v.system, v.category, v.headingDeg != null);
+      const callsign = v.callsign?.trim() || v.id;
+      let rec = radar3dRecs.get(v.id);
+      if (!rec) {
+        rec = {
+          id: v.id, lat: v.lat, lon: v.lon, headingDeg: v.headingDeg, modelClass, callsign, altM: v.altM,
+          groundSpeedMs: v.groundSpeedMs, verticalSpeedMs: v.verticalSpeedMs,
+          contactEll, color: cesColor, showGround, selected: v.id === radar3dSelectedId,
+          hideRadiusM: hideR, entities: [],
+        };
+        radar3dRecs.set(v.id, rec);
+        radar3dCreateQueue.push(rec);          // build incrementally (see drainRadarCreateQueue)
+      } else {
+        rec.lat = v.lat; rec.lon = v.lon; rec.headingDeg = v.headingDeg; rec.modelClass = modelClass;
+        rec.callsign = callsign; rec.altM = v.altM;
+        rec.groundSpeedMs = v.groundSpeedMs; rec.verticalSpeedMs = v.verticalSpeedMs;
+        rec.contactEll = contactEll; rec.color = cesColor;
+        rec.showGround = showGround; rec.selected = v.id === radar3dSelectedId; rec.hideRadiusM = hideR;
+        syncRec(rec);
+      }
+    }
+    for (const [id, rec] of radar3dRecs) {
+      if (!seen.has(id)) { for (const e of rec.entities) viewer.entities.remove(e); radar3dRecs.delete(id); }
+    }
+    if (radar3dCreateQueue.length && !radar3dCreateRaf) radar3dCreateRaf = requestAnimationFrame(drainRadarCreateQueue);
+    viewer.scene.requestRender();
+  }
+
+  // Rebuild when any radar control prop changes (snapshot/selection handled by subscriptions).
+  $effect(() => {
+    radarActive; radarMapSettings; radarRefAltM;
+    if (viewer) updateRadar3D();
   });
 
   // ── Sky clock (sun/moon position) ──────────────────────────────────

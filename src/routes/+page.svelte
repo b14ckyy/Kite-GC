@@ -87,7 +87,10 @@
   $effect(() => { if (mapViewMode === '3d') map3dEverOpened = true; });
   // Map3D instance handle — used to read the 3D camera focus on a 3D→2D switch so
   // the 2D map can re-centre on the same spot (keeping its own zoom).
-  let map3dRef: { getCamFocus?: () => { lat: number; lon: number } | null } | undefined = $state();
+  let map3dRef: {
+    getCamFocus?: () => { lat: number; lon: number; range: number } | null;
+    getCamSubpoint?: () => { lat: number; lon: number } | null;
+  } | undefined = $state();
   // 2D follow state, lifted here so it survives the 2D map's remount on each 2D↔3D toggle
   // (the 3D camera mode persists on its own since Map3D stays mounted).
   let map2dViewMode = $state<'free' | 'follow' | 'heading-follow'>('free');
@@ -479,13 +482,23 @@
   /** ONLINE ADS-B query centre = the map *view*: the 2D map centre, or the 3D camera focus over the
    *  globe. Always the view — NOT the UAV — so the user fetches traffic where they're looking.
    *  (Distance/bearing is referenced separately, see `radarReference`.) */
-  function radarQueryCenter(): [number, number] {
+  /** Online query view: centre + (3D only) an auto radius sized to what the camera sees. In 2D the
+   *  radius stays the configured "web download radius" (radiusKm = undefined → backend keeps config). */
+  function radarQueryView(): { lat: number; lon: number; radiusKm: number | undefined } {
     if (mapViewMode === '3d') {
       const f = map3dRef?.getCamFocus?.();
-      if (f) return [f.lat, f.lon];
+      if (f) {
+        // Cover ~the camera→focus distance, floored at the manual radius, capped at the provider
+        // limit (~250 NM ≈ 463 km). Self-adjusts to zoom/tilt.
+        const rKm = Math.min(463, Math.max(radarSettings.adsb.radiusKm, f.range / 1000));
+        return { lat: f.lat, lon: f.lon, radiusKm: rKm };
+      }
+      // No ground hit (horizon/sky): centre under the camera, query the cap.
+      const sub = map3dRef?.getCamSubpoint?.();
+      if (sub) return { lat: sub.lat, lon: sub.lon, radiusKm: 463 };
     }
     const c = get(settings).map.center;
-    return [c[0], c[1]];
+    return { lat: c[0], lon: c[1], radiusKm: undefined };
   }
   /** Distance/bearing reference for ALL tracked vehicles: the connected UAV (valid fix), else the
    *  GCS location from the localization API. (MSP is implicitly the UAV; local/online inherit this.) */
@@ -523,19 +536,19 @@
   );
 
   let lastRadarCenterKey = '';
-  /** Push the live query centre when it moved meaningfully (~100 m). Cheap; no pipeline restart. */
+  /** Push the live query centre (+3D auto radius) when it moved meaningfully. Cheap; no pipeline restart. */
   function updateRadarCenter() {
     if (!radarSettings.enabled || !radarSettings.adsb.enabled) return;
-    const [lat, lon] = radarQueryCenter();
-    const key = `${lat.toFixed(3)},${lon.toFixed(3)}`;
+    const v = radarQueryView();
+    const key = `${v.lat.toFixed(3)},${v.lon.toFixed(3)},${v.radiusKm?.toFixed(0) ?? ''}`;
     if (key === lastRadarCenterKey) return;
     lastRadarCenterKey = key;
-    void setRadarCenter(lat, lon);
+    void setRadarCenter(v.lat, v.lon, v.radiusKm);
   }
   /** Build + push the backend radar config (starts/stops the pipeline). */
   function pushRadarConfig() {
-    const [lat, lon] = radarQueryCenter();
-    lastRadarCenterKey = `${lat.toFixed(3)},${lon.toFixed(3)}`;
+    const { lat, lon } = radarQueryView();
+    lastRadarCenterKey = '';
     resetRadarStatus(); // sources restart on configure — drop stale per-provider status
     void configureRadar({
       enabled: radarSettings.enabled,
@@ -1703,6 +1716,10 @@
           {mapViewMode}
           onToggleMapView={toggleMapView}
           onCamFocus={() => updateRadarCenter()}
+          radarActive={radarSettings.enabled}
+          radarMapSettings={radarSettings.map}
+          {radarRefAltM}
+          {radarReference}
         />
       </div>
     {/if}

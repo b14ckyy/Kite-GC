@@ -159,6 +159,8 @@ pub struct RadarManager {
     /// Live ADS-B query centre (`[lat, lon]`), shared with the online source so it can follow the
     /// map viewport / UAV without restarting the pipeline. Updated via `set_center`.
     query_center: Arc<Mutex<Option<(f64, f64)>>>,
+    /// Live ADS-B query radius (km), shared so the 3D view can size the query to the visible area.
+    query_radius: Arc<Mutex<Option<f64>>>,
     /// Aggregator ingest channel, exposed so scheduler-fed sources (ADS-B via MSP) can push into the
     /// same pipeline. `Some` while running, `None` when idle.
     ingest: Arc<Mutex<Option<mpsc::Sender<SourceUpdate>>>>,
@@ -175,6 +177,7 @@ impl RadarManager {
         Self {
             running: None,
             query_center: Arc::new(Mutex::new(None)),
+            query_radius: Arc::new(Mutex::new(None)),
             ingest: Arc::new(Mutex::new(None)),
         }
     }
@@ -185,10 +188,15 @@ impl RadarManager {
         self.ingest.clone()
     }
 
-    /// Update the live ADS-B query centre (cheap; no pipeline restart).
-    pub fn set_center(&self, lat: f64, lon: f64) {
+    /// Update the live ADS-B query centre + optional radius (km) (cheap; no pipeline restart).
+    pub fn set_center(&self, lat: f64, lon: f64, radius_km: Option<f64>) {
         if let Ok(mut c) = self.query_center.lock() {
             *c = Some((lat, lon));
+        }
+        if let Some(r) = radius_km {
+            if let Ok(mut rr) = self.query_radius.lock() {
+                *rr = Some(r);
+            }
         }
     }
 
@@ -240,9 +248,11 @@ impl RadarManager {
                 eprintln!("[radar][adsb] enabled but no online providers");
             } else {
                 let radius_km = if config.adsb.radius_km > 0.0 { config.adsb.radius_km.min(100.0) } else { 25.0 };
+                // Seed the live radius from the config; the 3D view overrides it via set_center.
+                *self.query_radius.lock().unwrap() = Some(radius_km);
                 let poll_sec = if config.adsb.poll_sec > 0.0 { config.adsb.poll_sec } else { 5.0 };
                 let src = Box::new(sources::adsb_online::AdsbOnlineSource::new(
-                    providers, self.query_center.clone(), radius_km, poll_sec, app.clone(),
+                    providers, self.query_center.clone(), self.query_radius.clone(), radius_km, poll_sec, app.clone(),
                 ));
                 sources.push(src.start(tx.clone()));
             }

@@ -2,7 +2,7 @@
 // See docs/active/RADAR_TRACKING_PANEL_AND_MAP.md §4. Colour depends on altitude only, never distance.
 
 import type { RadarMapSettings } from '$lib/stores/settings';
-import type { EnrichedVehicle } from '$lib/stores/radarTracking';
+import type { TrackedVehicle } from '$lib/stores/radarTracking';
 
 export interface ContactColor {
   /** CSS `rgb()` fill for the silhouette body. */
@@ -124,7 +124,7 @@ export const RELATIVE_LEGEND_STOPS: { color: string; pct: number }[] = [
  *  - Distance never hides (only dims, see {@link relevanceFactor}).
  */
 export function contactVisibleOnMap(
-  v: EnrichedVehicle,
+  v: TrackedVehicle,
   refAltM: number | null,
   map: RadarMapSettings,
 ): boolean {
