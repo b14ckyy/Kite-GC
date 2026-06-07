@@ -7,7 +7,7 @@
   import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
   import { telemetry } from "$lib/stores/telemetry";
-  import { startRadarListeners, configureRadar, setRadarCenter, resetRadarStatus } from "$lib/stores/radarTracking";
+  import { startRadarListeners, configureRadar, setRadarCenter } from "$lib/stores/radarTracking";
   import { startRadarAlerts } from "$lib/controllers/radarAlerts";
   import { startAlertAudio } from "$lib/controllers/alertAudio";
   import { get } from "svelte/store";
@@ -552,7 +552,9 @@
   function pushRadarConfig() {
     const { lat, lon } = radarQueryView();
     lastRadarCenterKey = '';
-    resetRadarStatus(); // sources restart on configure — drop stale per-provider status
+    // Don't clear per-provider status here: the backend now reconfigures in place (keeps the aggregator),
+    // so the live provider counts shouldn't blink on an unrelated source toggle. Disabled providers stop
+    // emitting and aren't shown anyway.
     void configureRadar({
       enabled: radarSettings.enabled,
       sim: radarSettings.sim,

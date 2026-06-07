@@ -208,71 +208,36 @@ impl RadarManager {
             .unwrap_or_default()
     }
 
-    /// Apply a config: start/stop the pipeline and (Phase 0) the dev sim source. For simplicity and
-    /// correctness this restarts cleanly on every change; per-source diffing comes in later phases.
+    /// Apply a config: start/stop the pipeline. When already running, reconfigure **in place** — keep the
+    /// aggregator thread (and its accumulated, merged contacts) + the ingest channel alive and only swap
+    /// the source threads. So toggling one source no longer wipes the others' contacts (they persist via
+    /// TTL; the restarted sources just re-poll, invisibly). A full teardown only happens on disable.
     pub fn configure(&mut self, config: &RadarConfig, app: &AppHandle) {
-        self.stop(app);
         if !config.enabled {
+            self.stop(app);
+            return;
+        }
+        // Cheap Arc clones so we can build sources while `running` is mutably borrowed below.
+        let query_center = self.query_center.clone();
+        let query_radius = self.query_radius.clone();
+
+        // Already running → swap the source workers only; keep the aggregator + its merged snapshot.
+        if let Some(r) = self.running.as_mut() {
+            r.sources.clear(); // drop old workers (each SourceHandle's Drop stops its thread)
+            let new_sources = build_sources(config, &r.update_tx, app, &query_center, &query_radius);
+            r.sources = new_sources;
+            eprintln!("[radar] reconfigured in place: {} source(s)", r.sources.len());
             return;
         }
 
+        // Cold start → build the aggregator + the initial sources.
         let (tx, rx) = mpsc::channel::<SourceUpdate>();
         let stop = Arc::new(AtomicBool::new(false));
         let snapshot = Arc::new(Mutex::new(RadarSnapshot::default()));
         let agg = spawn_aggregator(rx, stop.clone(), snapshot.clone(), app.clone());
         // Expose the ingest channel so scheduler-fed sources (ADS-B via MSP) push into this pipeline.
         *self.ingest.lock().unwrap() = Some(tx.clone());
-
-        let mut sources: Vec<SourceHandle> = Vec::new();
-
-        // Dev-only synthetic source — present only in debug builds.
-        #[cfg(debug_assertions)]
-        if config.sim {
-            let center = config
-                .sim_center
-                .map(|c| (c[0], c[1]))
-                .unwrap_or((48.0, 11.0));
-            let src = Box::new(sources::sim::SimSource::new(center));
-            sources.push(src.start(tx.clone()));
-        }
-
-        // ADS-B online (Phase 1): a shared, live query centre (map viewport / UAV) + ≥1 provider.
-        if config.adsb.enabled {
-            // Seed the shared centre from the config (the frontend keeps it live via radar_set_center).
-            if let Some(c) = config.adsb.center {
-                *self.query_center.lock().unwrap() = Some((c[0], c[1]));
-            }
-            let providers: Vec<AdsbOnlineProvider> =
-                config.adsb.online.iter().filter(|p| p.enabled).cloned().collect();
-            if providers.is_empty() {
-                eprintln!("[radar][adsb] enabled but no online providers");
-            } else {
-                let radius_km = if config.adsb.radius_km > 0.0 { config.adsb.radius_km.min(100.0) } else { 25.0 };
-                // Seed the live radius from the config; the 3D view overrides it via set_center.
-                *self.query_radius.lock().unwrap() = Some(radius_km);
-                let poll_sec = if config.adsb.poll_sec > 0.0 { config.adsb.poll_sec } else { 5.0 };
-                let src = Box::new(sources::adsb_online::AdsbOnlineSource::new(
-                    providers, self.query_center.clone(), self.query_radius.clone(), radius_km, poll_sec, app.clone(),
-                ));
-                sources.push(src.start(tx.clone()));
-            }
-
-            // Local hardware receivers (Phase 2: serial MAVLink). Independent of online providers.
-            for ls in config.adsb.local.iter().filter(|l| l.enabled) {
-                let transport = if ls.transport.is_empty() { "serial" } else { ls.transport.as_str() };
-                match transport {
-                    "serial" if !ls.port.is_empty() => {
-                        let baud = if ls.baud > 0 { ls.baud } else { 57600 };
-                        let src = Box::new(sources::adsb_mavlink::AdsbMavlinkSource::new(
-                            ls.name.clone(), ls.port.clone(), baud, app.clone(),
-                        ));
-                        sources.push(src.start(tx.clone()));
-                    }
-                    other => eprintln!("[radar][adsb] local source '{}' transport '{}' not supported yet", ls.name, other),
-                }
-            }
-        }
-
+        let sources = build_sources(config, &tx, app, &query_center, &query_radius);
         eprintln!("[radar] configured: enabled, {} source(s)", sources.len());
         self.running = Some(Running {
             update_tx: tx,
@@ -301,6 +266,65 @@ impl RadarManager {
             eprintln!("[radar] stopped");
         }
     }
+}
+
+/// Build the configured source workers, all pushing into `tx`. Shared by the cold start and the in-place
+/// reconfigure path so toggling one source doesn't disturb the aggregator's accumulated contacts.
+fn build_sources(
+    config: &RadarConfig,
+    tx: &mpsc::Sender<SourceUpdate>,
+    app: &AppHandle,
+    query_center: &Arc<Mutex<Option<(f64, f64)>>>,
+    query_radius: &Arc<Mutex<Option<f64>>>,
+) -> Vec<SourceHandle> {
+    let mut sources: Vec<SourceHandle> = Vec::new();
+
+    // Dev-only synthetic source — present only in debug builds.
+    #[cfg(debug_assertions)]
+    if config.sim {
+        let center = config.sim_center.map(|c| (c[0], c[1])).unwrap_or((48.0, 11.0));
+        let src = Box::new(sources::sim::SimSource::new(center));
+        sources.push(src.start(tx.clone()));
+    }
+
+    // ADS-B online (Phase 1): a shared, live query centre (map viewport / UAV) + ≥1 provider.
+    if config.adsb.enabled {
+        // Seed the shared centre from the config (the frontend keeps it live via radar_set_center).
+        if let Some(c) = config.adsb.center {
+            *query_center.lock().unwrap() = Some((c[0], c[1]));
+        }
+        let providers: Vec<AdsbOnlineProvider> =
+            config.adsb.online.iter().filter(|p| p.enabled).cloned().collect();
+        if providers.is_empty() {
+            eprintln!("[radar][adsb] enabled but no online providers");
+        } else {
+            let radius_km = if config.adsb.radius_km > 0.0 { config.adsb.radius_km.min(100.0) } else { 25.0 };
+            // Seed the live radius from the config; the 3D view overrides it via set_center.
+            *query_radius.lock().unwrap() = Some(radius_km);
+            let poll_sec = if config.adsb.poll_sec > 0.0 { config.adsb.poll_sec } else { 5.0 };
+            let src = Box::new(sources::adsb_online::AdsbOnlineSource::new(
+                providers, query_center.clone(), query_radius.clone(), radius_km, poll_sec, app.clone(),
+            ));
+            sources.push(src.start(tx.clone()));
+        }
+
+        // Local hardware receivers (Phase 2: serial MAVLink). Independent of online providers.
+        for ls in config.adsb.local.iter().filter(|l| l.enabled) {
+            let transport = if ls.transport.is_empty() { "serial" } else { ls.transport.as_str() };
+            match transport {
+                "serial" if !ls.port.is_empty() => {
+                    let baud = if ls.baud > 0 { ls.baud } else { 57600 };
+                    let src = Box::new(sources::adsb_mavlink::AdsbMavlinkSource::new(
+                        ls.name.clone(), ls.port.clone(), baud, app.clone(),
+                    ));
+                    sources.push(src.start(tx.clone()));
+                }
+                other => eprintln!("[radar][adsb] local source '{}' transport '{}' not supported yet", ls.name, other),
+            }
+        }
+    }
+
+    sources
 }
 
 /// Aggregator thread: drain source updates, per-system merge by id, TTL-prune, throttled emit.
