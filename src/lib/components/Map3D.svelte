@@ -1000,8 +1000,9 @@
         minimumPixelSize: RADAR_MODEL_MIN_PX,
         maximumScale: 4000,
         scale: 5.2,
-        colorBlendMode: Cesium.ColorBlendMode.MIX,
-        colorBlendAmount: 0.6,
+        // REPLACE (not MIX): the contact takes the EXACT altitude colour regardless of the glb's own
+        // colours — so any model (even white) shows the true height-scale colour without washing it out.
+        colorBlendMode: Cesium.ColorBlendMode.REPLACE,
         heightReference: Cesium.HeightReference.NONE,
       },
       // Floating info label under the model: callsign + altitude, slightly transparent.

@@ -33,8 +33,9 @@ set. Surface **vehicles** C1 (emergency) / C2 (service) are kept → `ground`.
 - glTF **Y-up**; after Cesium's Y-up→Z-up load the local frame is **nose = +X, up = +Z, left = +Y**.
 - Modelled at a small real-world size; on the map `minimumPixelSize` gives a screen-size floor and
   `scale` controls the world size (see `Map3D.svelte`, `createRadarEntities`).
-- A neutral / light base colour works best — contacts are tinted by relative altitude via
-  `colorBlendMode = MIX`.
+- **Model colour doesn't matter** — contacts are rendered with `colorBlendMode = REPLACE`, so the glb's
+  own colours/textures are fully replaced by the exact relative-altitude colour. Grab any model; only
+  the shape/orientation matters.
 
 ## To replace with proper models
 Drop a new `.glb` with the **same filename** here (keeping the conventions above). To split a class
