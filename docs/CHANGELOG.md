@@ -83,6 +83,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Log player shows the time-of-day** (flight start + elapsed) at the current playback position.
 
 ### Fixed
+- **3D radar no longer stutters when many contacts load.** Contact entities (the glb model + ground
+  geometry) are now pooled and reused as aircraft enter/leave the view instead of being destroyed and
+  rebuilt — building a Cesium model per contact was a main-thread "Scripting" stall (160–250 ms) that
+  recurred whenever fresh aircraft appeared (e.g. panning the free-look camera). The pool pays the model
+  setup once (per model class) and then reuses it, so only the very first fill of a dense area has any
+  cost. Also added a skip-guard so an unchanged contact's model isn't re-touched every poll.
 - **Portable mode no longer writes anything to system paths (Windows).** The window-state plugin saved
   its `.window-state.json` into `%APPDATA%\com.kitegc.app\` — the one thing that escaped the portable
   `data/` folder (it cannot be redirected on Windows). It is now disabled when a `.portable` marker is
