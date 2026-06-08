@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Connection bar reworked onto the control framework.** Protocol pick is now a segmented toggle
+  (MSP | MAVLink), Connect is the shared `<Button>` (blue → orange while connecting → red to
+  disconnect), and all fields share one 28 px style so they align. The serial/BLE device dropdowns
+  have a fixed width with ellipsis, so a long device name no longer stretches the bar across the
+  window. The `SegmentedToggle` now content-sizes its segments (long labels like "MAVLink" are never
+  truncated) and gained a `full` mode that fills a tab bar's width evenly (used by the Settings tabs).
 - **Live connection discovery (ADR-037).** The connection bar now discovers devices on its own — no more
   manual refresh. **Serial:** ports are polled every second; a freshly plugged adapter is auto-selected and
   an unplugged one disappears (the last-used port is still restored on launch). **BLE:** selecting the BLE

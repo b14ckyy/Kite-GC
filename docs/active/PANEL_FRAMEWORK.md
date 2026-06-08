@@ -153,9 +153,13 @@ non-component code like the icon registry is shared via a component's `module` s
   via `currentColor`. Icons are optional (no reserved space when absent) and on by default.
   Reused by other controls (e.g. `SegmentedToggle`). Add icons to the one `ICONS` map.
 
-**`SegmentedToggle.svelte`** — `<SegmentedToggle options value onchange size>`: a small
+**`SegmentedToggle.svelte`** — `<SegmentedToggle options value onchange size full>`: a small
 multi-position slide switch placed as ONE element with a sliding highlight (e.g. Replay:
-Recording ↔ Blackbox track). Options may carry a registry icon.
+Recording ↔ Blackbox track). Options may carry a registry icon. **Segments are content-sized**
+(each fits its label — no truncation of longer labels like "MAVLink"), and the highlight tracks
+the active segment's measured offset/width (so it slides across unequal widths). **`full`** stretches
+the toggle to the parent's width and distributes segments evenly (`flex: 1`, with a graceful
+ellipsis fallback) — for short-label, fixed-width tab bars (e.g. the Settings Interface/Data tabs).
 
 **`Toggle.svelte`** — `<Toggle checked onchange disabled id title>`: the on/off slide switch,
 centralised from the settings panel's repeated `.toggle-switch` markup; `checked` is bindable.
