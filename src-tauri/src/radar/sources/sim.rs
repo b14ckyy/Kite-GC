@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Radar — dev-only synthetic source.
 //
 // Emits a handful of moving contacts across ALL three systems (a single source may report vehicles

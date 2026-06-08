@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Radar — foreign-vehicle tracking subsystem.
 //
 // A standalone background subsystem that tracks vehicles OTHER than the main MSP/MAVLink-connected

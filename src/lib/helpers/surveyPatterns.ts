@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 import type { RectanglePatternParams, CirclePatternParams, PolygonPatternParams } from '$lib/stores/surveyPattern.svelte';
 
 /** Degrees, { lat, lng } pair */

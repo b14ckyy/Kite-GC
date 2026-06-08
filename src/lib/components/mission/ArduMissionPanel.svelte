@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+-->
+
 <!-- ArduMissionPanel.svelte
      ArduPilot / PX4 mission planner on the panel framework (docs/active/PANEL_FRAMEWORK.md): a
      `compact` PanelShell. Single mission (no multi-mission tabs).

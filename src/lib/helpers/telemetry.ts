@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // INAV arming flags (bit positions from INAV source)
 export const ARMING_FLAG_ARMED = 2; // bit 2 = ARMED
 

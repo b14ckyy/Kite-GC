@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Shared waypoint context-menu items, used by both the mission list (panel) and
 // the map markers (layer). Operates on the current selection (single or multi),
 // so callers must ensure the right-clicked WP is selected before opening.

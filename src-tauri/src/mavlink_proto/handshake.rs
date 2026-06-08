@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // MAVLink Handshake
 // Waits for the first HEARTBEAT from the FC, extracts system info,
 // sends a GCS HEARTBEAT back, and returns FcInfo.

@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+-->
+
 <script lang="ts">
   // Flight Logbook on the new panel framework (docs/active/PANEL_FRAMEWORK.md). Three live formats:
   //   • info     — minimized flight card (click to expand)

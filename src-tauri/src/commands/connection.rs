@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Connection Commands — serial port listing, connect, disconnect, BLE scanning
 
 use tauri::{AppHandle, State};

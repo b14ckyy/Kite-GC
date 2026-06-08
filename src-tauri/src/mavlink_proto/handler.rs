@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // MAVLink Handler
 // Dedicated thread that owns the ByteTransport and handles MAVLink communication.
 // Unlike MSP (poll-based), MAVLink is push-based: the FC streams telemetry,

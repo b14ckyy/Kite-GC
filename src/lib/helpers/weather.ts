@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 import { convertTemperature, convertSpeed, toTemperatureC, toSpeedMs } from '$lib/utils/units';
 import type { InterfaceSettings } from '$lib/stores/settings';
 

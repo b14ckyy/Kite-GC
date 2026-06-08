@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+-->
+
 <script lang="ts">
   // Terrain Radar widget (1×1) — a simple top-down, track-up terrain-awareness
   // display (EGPWS-style). A 120° forward fan is sampled as a polar grid and

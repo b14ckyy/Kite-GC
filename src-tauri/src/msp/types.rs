@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // MSP Message Types and Constants
 // Reference: INAV Configurator MSPCodes.js
 

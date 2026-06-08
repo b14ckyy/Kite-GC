@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Mission Waypoint Types
 // Data model matching the INAV waypoint system (21-byte MSP_WP struct)
 

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Flight Recorder — detects arm/disarm transitions and records telemetry.
 // Designed to be called from the scheduler thread with each decoded telemetry payload.
 

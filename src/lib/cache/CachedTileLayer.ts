@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Custom Leaflet TileLayer that checks IndexedDB cache before fetching from network.
 // Falls back to normal network fetch on cache miss and stores the result.
 //

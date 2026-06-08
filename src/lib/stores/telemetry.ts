@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Telemetry state store
 // Holds real-time telemetry data received from the flight controller.
 // Listens to Tauri events emitted by the MSP scheduler thread.

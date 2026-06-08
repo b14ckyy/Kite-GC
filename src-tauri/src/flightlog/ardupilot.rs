@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // ArduPilot DataFlash .bin decoder
 //
 // Native implementation — no external binary, no Python dependency.

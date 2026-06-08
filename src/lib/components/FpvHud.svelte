@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+-->
+
 <script lang="ts">
   // Projected-style FPV HUD, in two layers:
   //  • the artificial horizon (horizon line + pitch ladder) is CONFORMAL — its scaling is derived

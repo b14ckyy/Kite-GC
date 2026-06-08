@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Batch-edit popup state. Opened from the waypoint context menu (>1 selected),
 // rendered by BatchEditPopup at (x, y). The popup itself reads the selection
 // (selectedWpIndices) + mission store; this just carries open + position.

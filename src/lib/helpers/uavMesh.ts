@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Minimal binary glTF (.glb) loader for the procedural UAV models — just enough to feed the 2D
 // top-down canvas renderer (positions + normals + indices + flat material colours). The same .glb
 // assets are used by Cesium in 3D, so there is a single source of truth for the geometry.

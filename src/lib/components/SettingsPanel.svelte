@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+-->
+
 <script lang="ts">
   // Settings on the panel framework (docs/active/PANEL_FRAMEWORK.md): a `compact` PanelShell with
   // a SegmentedToggle tab switcher (Interface / Data) in the toolbar; each tab is grouped into

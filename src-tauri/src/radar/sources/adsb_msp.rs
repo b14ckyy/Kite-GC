@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Radar — ADS-B from the connected UAV via MSP (Phase 4).
 //
 // The INAV FC (8.0+) exposes its onboard ADS-B receiver's vehicle list via `MSP2_ADSB_VEHICLE_LIST`

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // INAV Version Model & Feature Gates
 // Enables/disables GCS features based on connected FC firmware version.
 // Minimum supported version: INAV 7.0.0

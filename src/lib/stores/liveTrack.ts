@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Live flown track — accumulated in RAM while armed, for the Terrain Analyzer
 // (and future live widgets). lat/lon + MSL altitude over time; cleared on each
 // new arm. Independent of the map trail (which keeps lat/lon only) and of the

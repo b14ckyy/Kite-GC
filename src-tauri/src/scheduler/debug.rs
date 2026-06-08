@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // MSP Debug Statistics Tracker
 // Only compiled in debug builds via #[cfg(debug_assertions)] in mod.rs.
 // Tracks per-message request/response/timeout stats and emits periodic

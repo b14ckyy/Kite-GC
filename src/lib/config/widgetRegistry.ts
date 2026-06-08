@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Widget registry — defines all available widgets, their classes, and metadata
 
 export type WidgetClass = 'large' | 'small' | 'wide';

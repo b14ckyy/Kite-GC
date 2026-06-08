@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // BLE Transport
 // Connects to a flight controller via Bluetooth Low Energy (GATT Serial Profile).
 // Supports known BLE-to-serial adapters: CC2541, Nordic NRF (NUS), SpeedyBee Type 1/2.

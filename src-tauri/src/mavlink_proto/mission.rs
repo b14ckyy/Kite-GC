@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // MAVLink Mission Microprotocol
 // Implements the MAVLink mission upload/download/clear handshake.
 // Ref: https://mavlink.io/en/services/mission.html

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Terrain profile builder for the Terrain Analysis panel.
 //
 // Turns the planned mission (or a flown track) + Copernicus terrain samples

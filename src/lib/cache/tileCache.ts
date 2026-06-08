@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // IndexedDB-backed map tile cache with configurable size limit and LRU eviction.
 // Stores fetched tile images as ArrayBuffers keyed by URL.
 //

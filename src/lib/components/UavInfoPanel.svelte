@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+-->
+
 <script lang="ts">
   // UAV Info on the panel framework (docs/active/PANEL_FRAMEWORK.md): the `info` variant —
   // content-sized, unframed.

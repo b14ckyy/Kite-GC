@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // MSP Protocol Module
 // Handles MSP (MultiWii Serial Protocol) encoding, decoding, and message definitions.
 

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Convert a waypoint's altitude (cm) between REL / AMSL / AGL using terrain +
 // the launch point as the home reference. Shared by the single-WP editor and
 // the batch-edit popup. Best-effort: returns the original value if a needed

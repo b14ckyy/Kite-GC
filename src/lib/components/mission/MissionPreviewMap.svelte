@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+-->
+
 <!-- MissionPreviewMap.svelte
      A small, non-interactive Leaflet preview of a library mission on the current map provider:
      the mission path as a theme-accent polyline, fit to its bounds. Used in the Mission Manager

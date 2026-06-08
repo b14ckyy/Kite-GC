@@ -1,5 +1,5 @@
-// Kite Ground Control — Universal Ground Control Station
-// Licensed under GPL-3.0-only
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
 mod commands;
 mod flightlog;

@@ -81,4 +81,4 @@ powershell -File scripts/build-windows.ps1   # Windows
 
 ## License
 
-GPL-3.0-only — See [LICENSE](LICENSE)
+GPL-3.0-or-later — Copyright (C) 2026 Marc Hoffmann (b14ckyy). See [LICENSE](LICENSE).

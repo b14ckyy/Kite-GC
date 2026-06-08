@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+-->
+
 <script lang="ts">
   // Live AGL widget (2×1 wide) — a forward-looking terrain profile HUD.
   //  • left 1/3 = recently flown terrain + flight history (scrolls out left)

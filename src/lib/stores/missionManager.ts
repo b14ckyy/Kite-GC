@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Mission Manager view state — lifted out of the panel component so it survives the
 // open/close (the same mission stays selected on reopen) and so +page can size the
 // nav-panel like the logbook (wide list, widest when a mission is selected).

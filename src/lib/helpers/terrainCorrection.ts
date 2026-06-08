@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Terrain Correction engine for the Terrain Analysis panel (Waypoint mode).
 //
 // Pure functions over the already-sampled ProfileData. Two modes:

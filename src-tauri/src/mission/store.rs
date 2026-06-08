@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Mission Store — in-memory mission state, exposed as Tauri managed state.
 // Handles mission download/upload via the scheduler, and XML file I/O.
 

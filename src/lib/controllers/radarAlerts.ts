@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Radar conflict-alert controller (Plan C — docs/active/RADAR_ALERTS.md)
 //
 // Pure frontend. Protected point = the connected UAV (valid fix). Evaluates two stages against every

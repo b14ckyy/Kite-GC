@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Terrain Analysis panel — session state.
 //
 // In-memory only: a module-level writable survives panel close/reopen but is

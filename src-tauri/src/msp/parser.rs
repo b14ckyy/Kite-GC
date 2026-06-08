@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // MSP Streaming Parser — byte-by-byte state machine
 // Mirrors the INAV Configurator's msp.js decoder states
 

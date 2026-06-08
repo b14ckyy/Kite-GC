@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // TCP Transport
 // Connects to a flight controller via TCP socket (e.g. Wi-Fi bridges, SITL).
 // Implements ByteTransport for protocol-agnostic byte-level I/O.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Pure mission-geometry helpers shared by the 2D and 3D map mission rendering
 // (display numbering, flight-path filtering, mission-end detection, modifiers).
 // Keeping these in one place avoids divergent copies between the renderers.

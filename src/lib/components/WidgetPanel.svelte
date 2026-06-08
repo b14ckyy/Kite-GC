@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+-->
+
 <!-- WidgetPanel — a panel strip (horizontal or vertical) that holds widgets with drag-and-drop reordering -->
 <script lang="ts">
   import { t } from 'svelte-i18n';

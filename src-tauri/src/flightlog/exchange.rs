@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Flight data exchange — export/import complete flight records as .kflight files.
 // A .kflight file is a self-contained SQLite database with the same schema as the
 // main flights database, containing one or more flights with all their data:

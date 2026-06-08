@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Weather data fetching via Open-Meteo (free, no API key required)
 // Fetches current weather conditions at a given GPS position.
 

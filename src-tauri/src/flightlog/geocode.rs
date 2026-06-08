@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Reverse geocoding via OSM Nominatim
 // Respects Nominatim usage policy: max 1 request per second, custom User-Agent.
 

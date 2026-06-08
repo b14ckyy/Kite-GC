@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 import { writable, get } from 'svelte/store';
 
 // ── MAV_CMD constants ─────────────────────────────────────────────────

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // i18n initialization — svelte-i18n setup
 // Default locale: English. Translations loaded synchronously at startup.
 

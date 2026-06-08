@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // MSP Waypoint Codec
 // Encode/decode the 21-byte MSP_WP / MSP_SET_WP payload and MSP_WP_GETINFO response.
 

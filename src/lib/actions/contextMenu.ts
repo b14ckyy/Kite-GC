@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Svelte action: attach a custom context menu to any element.
 //   <div use:contextMenu={() => [ {label, action}, ... ]}>
 // Opens on right-click (desktop) and long-press (touch), suppressing the native

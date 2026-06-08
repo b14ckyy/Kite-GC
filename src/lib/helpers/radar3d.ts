@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // 3D radar helpers — pick a glb model per contact (rendered like the UAV model: oriented to heading,
 // altitude-tinted, no flicker) and the ground-projection arrow outline. See
 // docs/active/RADAR_TRACKING_PANEL_AND_MAP.md §4.5. Pure data — no Cesium here.

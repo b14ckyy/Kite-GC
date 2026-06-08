@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+-->
+
 <script module lang="ts">
   // Persisted ACROSS remounts (the 2D map remounts on every 2D↔3D toggle): which
   // playback track we last auto-framed (fitBounds). Without module scope this resets

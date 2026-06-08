@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+-->
+
 <script lang="ts">
   // Autopilot-system picker for the mission panel headers (INAV / ArduPilot / PX4). Shared by
   // both mission editors so the control lives in one place. Locked while connected.

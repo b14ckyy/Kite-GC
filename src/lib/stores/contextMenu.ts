@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Global custom context-menu state. A single <ContextMenu> mounted at the app
 // root renders whatever the active opener requested; `use:contextMenu` (action)
 // or openContextMenu() drives it. Replaces the native WebView menu.

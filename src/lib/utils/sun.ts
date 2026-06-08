@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Low-precision solar position (NOAA-style approximation, ±~0.5°). Enough to decide
 // day vs. night for the 2D map's auto night dimming and to mirror Cesium's terminator.
 

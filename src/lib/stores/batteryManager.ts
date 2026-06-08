@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Battery Manager view state — a view toggle inside the Flight Logbook panel (like the
 // Mission Manager is to the Mission Planner). Lifted into a store so the view + selection +
 // grouping survive the logbook close/reopen. See docs/active/BATTERY_MANAGEMENT.md.

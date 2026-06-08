@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Physical location of the user (for Night-Mode "auto" sunset timing). It does NOT need to be
 // precise — city-level is plenty. Sources, in order: a persisted last-known value (restored on
 // launch), an OS/browser geo check (on start + a manual button), and a connected UAV's GPS fix.

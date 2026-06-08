@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Navigation status store — the FC's current target waypoint, unified across live
 // telemetry (MSP_NAV_STATUS) and replay (blackbox / ArduPilot `active_wp_number`).
 // `+page` writes it from the unified `telem`; the mission layer reads it to highlight

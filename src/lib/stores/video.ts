@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Embedded video — source router (v1: local webcam / USB capture).
 //
 // The router opens a source once and exposes its MediaStream; multiple sinks

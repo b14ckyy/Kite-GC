@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+-->
+
 <script lang="ts">
   // App-root context-menu host. Mount once. Suppresses the native WebView menu
   // app-wide (except inside real text inputs, to keep copy/paste), and renders

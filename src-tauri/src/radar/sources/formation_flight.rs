@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Radar — FormationFlight (INAV-Radar / ESP32) over serial MSP (Phase F1).
 //
 // An ESP32 INAV-Radar module (LoRa / ESP-NOW) talks MSP to a flight controller: it polls the FC for its

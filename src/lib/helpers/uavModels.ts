@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Shared UAV 3D-model resolution — used by the 3D map (Cesium glTF), the 2D map (canvas top-down
 // renderer) and the replay model-override dropdown, so model selection lives in one place.
 

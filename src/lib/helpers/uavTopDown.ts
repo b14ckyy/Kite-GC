@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Top-down flat-shaded software renderer for the UAV models on the 2D (Leaflet) map.
 // Draws a UavMesh into a 2D canvas: orthographic view looking straight down, back-face culling +
 // painter's depth sort, flat Lambert shading from an overhead light, and a soft silhouette drop

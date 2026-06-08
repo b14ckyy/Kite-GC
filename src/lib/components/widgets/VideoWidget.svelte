@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+-->
+
 <script lang="ts">
   // Video widget (2×1 wide) — a router sink showing the shared video feed.
   // Crop-to-fill (object-fit: cover) so the 2:1 tile is always full (too small

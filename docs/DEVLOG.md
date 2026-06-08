@@ -16,7 +16,7 @@ Kite Ground Control is a cross-platform Ground Control Station supporting [INAV]
 | Map Library | Leaflet 1.9.4 | Interactive maps for GCS and mission planning |
 | File Dialogs | @tauri-apps/plugin-dialog 2.7.0 | Native OS file picker (mission save/load) |
 | Build Tool | Vite | Frontend bundling and dev server |
-| License | GPL-3.0-only | Open source license |
+| License | GPL-3.0-or-later | Open source license |
 
 ## Target Platforms
 

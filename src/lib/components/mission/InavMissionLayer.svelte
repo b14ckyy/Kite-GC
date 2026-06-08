@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+-->
+
 <!-- InavMissionLayer.svelte
      Renders INAV mission waypoints on the Leaflet map.
      Usage: <InavMissionLayer {map} />

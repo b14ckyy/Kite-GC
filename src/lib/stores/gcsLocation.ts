@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Ground-station (GCS) location — the marker on the map + the radar / FormationFlight reference point.
 //
 // It is NOT a second location detector: the OS detection lives in `userGeoLocation` ("Your Location",

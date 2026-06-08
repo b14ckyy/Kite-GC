@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Radar Commands — configure the foreign-vehicle tracking subsystem and pull the current snapshot.
 
 use std::sync::atomic::Ordering;

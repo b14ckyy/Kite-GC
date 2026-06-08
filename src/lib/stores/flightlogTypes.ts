@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // All shared types and interfaces for the flight logbook system.
 // Imported by flightlog.ts (store), logbookController.ts, and UI components.
 

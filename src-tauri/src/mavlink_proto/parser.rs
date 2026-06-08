@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // MAVLink Frame Parser
 // State machine that accepts raw bytes and emits parsed MAVLink messages.
 // Supports both MAVLink v1 (0xFE) and v2 (0xFD) frames.

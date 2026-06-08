@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Radar tracking store
 // Mirrors the consolidated `radar-vehicles` snapshot emitted by the Rust radar subsystem (foreign
 // vehicles: ADS-B / FormationFlight / radio telemetry). Independent of the main telemetry store.

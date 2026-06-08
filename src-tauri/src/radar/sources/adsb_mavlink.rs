@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Radar — ADS-B receiver over serial MAVLink (Phase 2).
 //
 // A dedicated hardware ADS-B receiver (e.g. ADSBee, PicoADSB) connected over Serial USB streams

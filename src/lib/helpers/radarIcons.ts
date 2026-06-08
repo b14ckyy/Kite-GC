@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Foreign-vehicle silhouette icons — top-down, pointing north (heading 0), recoloured by altitude.
 // Inspired by MWPTools' per-category SVG set (A0–C3) but drawn ourselves, not copied.
 // See docs/active/RADAR_TRACKING_PANEL_AND_MAP.md §4.2.

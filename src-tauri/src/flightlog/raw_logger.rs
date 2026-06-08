@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Raw text logger — writes parsed telemetry data as human-readable text files.
 // One file per flight, named by timestamp and flight ID.
 

@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+-->
+
 <!-- SurveyPatternLayer.svelte
      Renders the live preview of the survey pattern shape on the map.
      Only active while the user is in Pattern mode.

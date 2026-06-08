@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Flight log types — data structures for flight recording and logbook
 
 use chrono::{DateTime, Utc};

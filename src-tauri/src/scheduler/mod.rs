@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // MSP Scheduler Module
 // Dedicated thread that owns the serial connection and coordinates all MSP traffic.
 // Telemetry slots are time-based, commands and bulk transfers interleave between polls.

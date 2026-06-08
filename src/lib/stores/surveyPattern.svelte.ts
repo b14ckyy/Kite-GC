@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // This is a Svelte 5 rune module (.svelte.ts)
 // Top-level runes like $state are allowed here.
 

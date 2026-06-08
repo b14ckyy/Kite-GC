@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+-->
+
 <script lang="ts">
   // Batch-edit popup for a multi-selection of waypoints. One APPLY button (no
   // live-apply → undo/redo-friendly). Fields use the shared UnitStepper/

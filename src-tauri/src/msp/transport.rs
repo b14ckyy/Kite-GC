@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // MSP Transport
 // Wraps a ByteTransport with MSP v2 framing and response parsing.
 // This is the bridge between protocol-agnostic byte I/O and MSP request/response.

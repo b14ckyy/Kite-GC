@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+-->
+
 <script lang="ts">
   // Radar panel (foreign-vehicle tracking) on the panel framework. Phase 0: dynamic per-system tabs
   // on the left (settings field — source config tables land in a later phase) and the consolidated,

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // MAVLink Protocol Module
 // Handles MAVLink v1/v2 frame parsing, serialization, handshake, and handler thread.
 // Uses the `mavlink` crate for message definitions (ardupilotmega dialect).

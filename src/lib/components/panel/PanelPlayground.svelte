@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+-->
+
 <script lang="ts">
   // THROWAWAY Phase-0 scaffolding (see docs/active/PANEL_FRAMEWORK.md): renders PanelShell with
   // placeholder content so the empty framework layouts + live variant transitions can be

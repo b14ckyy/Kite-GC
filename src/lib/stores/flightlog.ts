@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Flight log Tauri command wrappers.
 // Types live in ./flightlogTypes, helpers in ../helpers/flightlogHelpers.
 // Both are re-exported here so existing imports continue to work unchanged.

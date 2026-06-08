@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Terrain elevation provider — Copernicus DEM GLO-30.
 //
 // Source: AWS Open Data `copernicus-dem-30m` (Cloud Optimized GeoTIFF, 1°×1°

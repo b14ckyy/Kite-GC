@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+-->
+
 <!-- Battery widget — voltage bar, voltage, current, mAh -->
 <script lang="ts">
   import type { TelemetryData } from "$lib/stores/telemetry";

@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+-->
+
 <!-- MissionPanel.svelte — thin switcher (panel framework)
      Delegates to the INAV or ArduPilot sub-panel (each owns its own PanelShell + the autopilot
      select in its header) and renders the system-switch confirmation dialog as a shared overlay.

@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+-->
+
 <!-- MissionManager.svelte
      Mission library on the panel framework (docs/active/PANEL_FRAMEWORK.md): its own PanelShell
      (compact ↔ advanced 1:2) — grouped mission list in the main field, mission detail (preview

@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+-->
+
 <script lang="ts">
   // Conflict-alert banner pinned to the top of the map (Plan C / C1). Two stacked banners:
   //   • Warning (red, white text + black outline): collision alarm + evade action; minimal vehicle list.

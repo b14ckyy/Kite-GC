@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 import { writable, derived, get, type Readable } from 'svelte/store';
 import { connection } from './connection';
 import { settings } from './settings';

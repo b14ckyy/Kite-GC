@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // SQLite database for flight logging
 // Uses rusqlite with bundled SQLite — no external dependencies required.
 // Schema evolution via PRAGMA user_version + sequential migrations.

@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+-->
+
 <!-- MissionLayer.svelte — thin switcher
      Delegates to INAV or ArduPilot map layer based on active autopilot system.
      Usage: <MissionLayer {map} />

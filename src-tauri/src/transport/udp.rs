@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // UDP Transport
 // Connects to a flight controller via UDP socket (e.g. MAVLink radios, Wi-Fi telemetry).
 // Note: UDP is connectionless — we bind locally and send/receive to/from a remote address.

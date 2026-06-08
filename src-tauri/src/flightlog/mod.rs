@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Flight Recording & Logbook Module
 // Records telemetry data during flights (arm→disarm) into a SQLite database.
 // Supports optional raw text logging, reverse geocoding, and weather metadata.

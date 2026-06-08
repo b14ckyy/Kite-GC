@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+-->
+
 <!-- BatteryManager.svelte
      Battery library on the panel framework (docs/active/PANEL_FRAMEWORK.md) — its own PanelShell
      (compact ↔ advanced, true 1:2 split): grouped pack list in the 380px main field, pack detail

@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+-->
+
 <script module lang="ts">
   import type { ProfileData as _ProfileData } from '$lib/helpers/terrainProfile';
 

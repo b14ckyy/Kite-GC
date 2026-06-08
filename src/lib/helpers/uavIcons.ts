@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // UAV platform types + 3D-model override types.
 //
 // The old 2D Leaflet SVG DivIcon factory (createUavIcon / uavShapeForPlatform / SHAPE_*) was

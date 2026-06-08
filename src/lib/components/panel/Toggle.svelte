@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+-->
+
 <script lang="ts">
   // Reusable on/off slide switch (see docs/active/PANEL_FRAMEWORK.md), centralised from the
   // settings panel's repeated `.toggle-switch` markup. `checked` is bindable; `onchange` gets

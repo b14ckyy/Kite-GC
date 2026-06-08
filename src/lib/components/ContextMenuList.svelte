@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+-->
+
 <script lang="ts">
   // Recursive menu list — renders items at (x, y), clamped to the viewport, and
   // opens submenus as side flyouts (self-recursion). Used by ContextMenu.svelte.

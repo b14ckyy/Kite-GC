@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Serial Transport
 // Handles USB/UART serial port communication with flight controllers.
 // Implements ByteTransport for protocol-agnostic byte-level I/O.

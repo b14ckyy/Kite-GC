@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Mission-library helpers (frontend side).
 // Builds the `LibraryMissionInput` payload for the DB: a content hash (identity, for dedup)
 // plus computed geometry metadata. The hash is a SHA-256 of the SAME canonical serialization

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Placeholder-tile detection for over-zoomed satellite imagery.
 //
 // Problem: ESRI World Imagery advertises zoom 1–20, but many areas only have

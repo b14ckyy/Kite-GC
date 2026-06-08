@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Radar map rendering helpers — relative-altitude colour scale + map visibility / distance relevance.
 // See docs/active/RADAR_TRACKING_PANEL_AND_MAP.md §4. Colour depends on altitude only, never distance.
 

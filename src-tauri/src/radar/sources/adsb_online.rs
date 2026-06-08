@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Radar — ADS-B online source (Phase 1).
 //
 // Polls one or more free REST providers (adsb.lol / adsb.one / adsb.fi by default) for aircraft

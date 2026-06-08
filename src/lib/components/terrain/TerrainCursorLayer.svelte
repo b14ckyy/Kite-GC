@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+-->
+
 <!-- TerrainCursorLayer.svelte
      Mirrors the Terrain Analysis chart cursor onto the 2D map:
      • a persistent pin where the user clicked (survives panel close)

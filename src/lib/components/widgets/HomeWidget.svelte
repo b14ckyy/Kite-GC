@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+-->
+
 <!-- Home widget — direction arrow, distance, bearing to home position -->
 <script lang="ts">
   import type { TelemetryData } from "$lib/stores/telemetry";

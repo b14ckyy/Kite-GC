@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
 // Conflict-alert audio (Plan C / C1). Plays a synthesised tone + a short spoken callout when the worst
 // alert level escalates, re-announces a sustained warning, and re-arms once clear. Standard aviation
 // phraseology ("Traffic" / "Collision") is kept in English regardless of UI locale.

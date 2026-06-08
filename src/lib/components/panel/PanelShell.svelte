@@ -1,3 +1,8 @@
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+-->
+
 <script lang="ts" module>
   export type PanelVariant = 'info' | 'compact' | 'advanced' | 'fullscreen' | 'wide-compact';
 </script>
