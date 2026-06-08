@@ -772,6 +772,26 @@
     // Limit tile cache to reduce RAM usage
     viewer.scene.globe.tileCacheSize = 100;   // default 100 tiles
 
+    // ── Camera input model ──────────────────────────────────────────────
+    // Default Cesium binds TILT to the middle button (+ Ctrl+Left) and ZOOM to the right button —
+    // awkward on touchpads / touchscreens that have no middle button. Remap to a middle-button-free
+    // scheme: LEFT = rotate, RIGHT-drag = tilt, WHEEL/PINCH = zoom (middle + Ctrl+Left kept as
+    // extras for mouse users; PINCH stays on zoom+tilt for native touch gestures). Set once here;
+    // it persists across camera modes (follow/fpv just toggle the enable* flags on top).
+    const ssc = viewer.scene.screenSpaceCameraController;
+    ssc.rotateEventTypes = [Cesium.CameraEventType.LEFT_DRAG];
+    ssc.tiltEventTypes = [
+      Cesium.CameraEventType.RIGHT_DRAG,
+      Cesium.CameraEventType.MIDDLE_DRAG,
+      Cesium.CameraEventType.PINCH,
+      { eventType: Cesium.CameraEventType.LEFT_DRAG, modifier: Cesium.KeyboardEventModifier.CTRL },
+    ];
+    ssc.zoomEventTypes = [Cesium.CameraEventType.WHEEL, Cesium.CameraEventType.PINCH];
+    // Cap zoom-out so the camera can't drift into the full-globe / "space" regime, where Cesium's
+    // control behaviour changes and widgets can cover the globe. ~8000 km stays near-surface and
+    // consistent while still allowing a generous wide view.
+    ssc.maximumZoomDistance = 8_000_000;
+
     // Lighting — real sun shading on the globe (opt-in). The sky Sun/Moon billboards
     // always render; this only toggles the day/night terminator on the terrain.
     // (Night Mode ON forces this off for a flat ground — handled in updateNightDim3D.)
@@ -2734,7 +2754,7 @@
 
   // Zoom limits for follow / orbit modes
   const LOCK_ZOOM_MIN = 20;
-  const LOCK_ZOOM_MAX = 500;
+  const LOCK_ZOOM_MAX = 1500; // max zoom-out distance to the UAV (m)
 
   function zoom3D(dir: 1 | -1) {
     if (!viewer) return;
