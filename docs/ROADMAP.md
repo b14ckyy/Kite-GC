@@ -569,7 +569,7 @@ Cross-cutting groundwork items. Each carries non-trivial architectural or design
 
 ### Radar / foreign-vehicle tracking
 Subsystem detailed in `docs/active/RADAR_TRACKING_*`, `RADAR_ALERTS.md`, `RADAR_FORMATION_FLIGHT.md` (ADR-033/035/036). Largely shipped (ADS-B online + receivers + via-MSP, conflict alerts, FormationFlight). Open items:
-- [ ] **Show the GCS location on the map** — a marker for the resolved ground-station position (the FormationFlight node position + radar distance reference), so the operator sees where "home / GCS" is even with no UAV connected.
+- [x] **GCS location marker (2D + 3D)** — a satellite-dish marker for the ground-station position (also the FormationFlight node + radar distance reference). Settings dropdown **Off / Manual / Continuous**: Manual places it once via OS geolocation and lets you drag it / right-click "Set GCS here" (Reset snaps back); Continuous follows the OS location live (>20 m anti-jitter). It's a *view* of "Your Location" (no second detector); an on-select accuracy circle. **Open:** in manual it follows the UAV's first fix on connect (snaps to launch) — decouple if it proves annoying; arming-location fallback.
 - [ ] **FormationFlight follow-ups (F3)** — `SET_RADAR_ITD` status string in FF settings; optional `"GCS"` listen-only mode; ADS-B↔FF dedup; a proper paper-plane `ff-uav.glb`.
 - [ ] **Conflict-alert tuning (C3)** — expose the numeric thresholds as user settings; pre-recorded callout audio for engines without TTS (Linux WebKitGTK).
 

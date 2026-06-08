@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **GCS location marker on the map (2D + 3D).** A satellite-dish marker shows where your ground station
+  is — also used as the radar distance reference and the FormationFlight node position. A new *GCS marker*
+  setting (**Off / Manual / Continuous**): *Manual* places it once via OS geolocation and lets you drag it
+  or right-click **"Set GCS here"** (a **Reset** button snaps it back); *Continuous* follows the OS location
+  live (ignoring sub-20 m jitter). Click the marker to check its GPS accuracy circle. It reuses *Your
+  Location* (no second detector), so in Manual it snaps to the UAV's launch position when you connect.
 - **FormationFlight / INAV-Radar support (ADR-036).** Kite joins an ESP32 INAV-Radar / FormationFlight
   formation as a **ground node**: connect the module over USB-serial (Radar panel → FormationFlight tab →
   port + baud + node name) and Kite emulates an INAV flight controller at your GCS location so the module
