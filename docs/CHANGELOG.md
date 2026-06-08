@@ -60,6 +60,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Log player shows the time-of-day** (flight start + elapsed) at the current playback position.
 
 ### Fixed
+- **Portable mode no longer writes anything to system paths (Windows).** The window-state plugin saved
+  its `.window-state.json` into `%APPDATA%\com.kitegc.app\` — the one thing that escaped the portable
+  `data/` folder (it cannot be redirected on Windows). It is now disabled when a `.portable` marker is
+  present, so a portable build keeps **all** state (settings, IndexedDB tile cache, SQLite DBs, raw logs,
+  terrain cache) under `data/`. Trade-off: portable builds don't persist window geometry (ADR-030).
 - **3D lighting toggle now refreshes immediately.** Turning *Real Daytime and Lighting* on/off updated
   the globe only on the next camera move (`requestRenderMode` needs an explicit `requestRender()` after
   an appearance-only state change).

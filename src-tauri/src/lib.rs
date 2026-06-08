@@ -46,6 +46,16 @@ use commands::mission::{
 use mission::store::MissionStore;
 use state::AppState;
 
+/// True when a `.portable` marker file sits next to the executable. Used both to
+/// redirect data (`setup_portable_mode`) and to gate plugins whose storage path we
+/// cannot redirect in portable mode (e.g. window-state on Windows).
+pub fn is_portable() -> bool {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.join(".portable").exists()))
+        .unwrap_or(false)
+}
+
 /// Detect portable mode: if a `.portable` marker file exists next to the
 /// executable, redirect all application data into a `data/` folder beside
 /// the exe.  Must be called **before** `run()` so the WebView picks up the
@@ -84,11 +94,19 @@ pub fn setup_portable_mode() {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init())
-        // Persist + restore the main window's size/position/maximized state across launches.
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(tauri_plugin_dialog::init());
+
+    // Persist + restore the main window's size/position/maximized state across launches.
+    // The plugin saves to the OS app-config dir, which portable mode cannot redirect on
+    // Windows (Known-Folder API, not env-driven) — so only enable it in installed mode.
+    // Portable builds trade window-geometry persistence for a clean, system-path-free runtime.
+    if !is_portable() {
+        builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
+    }
+
+    builder
         .manage(AppState::new())
         .manage(MissionStore::new())
         .manage(TerrainProvider::new())

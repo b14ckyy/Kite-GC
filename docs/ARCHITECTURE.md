@@ -1339,13 +1339,20 @@ through the Rust window lifecycle, not via IPC commands).
 - Handles position/size/maximized + off-screen clamping and multi-monitor out of the box.
 - Keeps *window geometry* (a native concern) separate from *app preferences* (ADR-006's
   localStorage store), each persisted by the mechanism that owns it.
-- The state file lands in the app config dir, so it follows portable mode (`data/`) like the
-  rest of the app's storage.
+
+**Portable-mode caveat (2026-06-08)**: the plugin writes its `.window-state.json` to Tauri's
+**app-config dir**. On **Linux** that follows portable mode because `setup_portable_mode()` sets
+`XDG_CONFIG_HOME` → `data/`. On **Windows** the app-config dir comes from the Known-Folder API
+(`%APPDATA%\com.kitegc.app\`) and is **not** redirectable by env vars — so it would leak outside
+the `data/` folder, breaking the portable guarantee ("nothing on system paths"). Therefore the
+plugin is **only registered when `!is_portable()`** (`lib.rs`). Portable builds intentionally do
+**not** persist window geometry; everything else (localStorage/IndexedDB via the WebView2 data
+folder, SQLite DBs, raw logs, terrain cache) already lives under `data/`.
 
 **Consequences**: one more Tauri plugin dependency; the persisted geometry lives in a plugin
 JSON file (not the `kite-gc-settings` localStorage blob), so the two persistence layers must be
 kept conceptually distinct. First launch after adoption still uses the config default until a
-state file exists.
+state file exists. Portable builds skip the plugin (no geometry persistence — by design).
 
 ---
 
