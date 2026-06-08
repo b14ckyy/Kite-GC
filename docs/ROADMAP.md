@@ -474,12 +474,12 @@ This document tracks planned features, organized by milestone.
 
 ### Map Overlays
 - [~] **Airspace Manager** — a dedicated nav-rail panel (under Radar) + aeronautical-data subsystem over
-  **OpenAIP's full catalog**: **obstacles** (wind turbines/masts — critical for low flight), **airspaces**
-  (2D polygons + 3D volumes), **RC/model airfields**, **airports** (P1); navaids / hotspots / reporting
-  points (P2). Single **pluggable provider** (OpenAIP first via a user-supplied key; FAA / open-data future)
-  chosen in Data settings; per-layer toggles + OFF/2D/3D/BOTH in the panel; ~500 km region cached in RAM
-  (usage readout + clear). The static counterpart to the Radar subsystem. See ADR-038 +
-  `docs/active/AIRSPACE_MANAGER.md`
+  **OpenAIP**: **obstacles** (wind turbines/masts), **airspaces**, **RC/model airfields**, **airports**.
+  Single **pluggable provider** (OpenAIP first via a user-supplied key; FAA / open-data future) chosen in
+  Data settings; per-layer 2D/3D visibility + cache + grouped nearby list in the panel; region cached in RAM.
+  Zoom-density management. **P1 shipped (2D + panel + density)**; **P2 open:** 3D rendering (volumes/columns),
+  centre fallback (GCS/map without UAV), density tuning, legend, alerts. The static counterpart to the Radar
+  subsystem. See ADR-038 + `docs/active/AIRSPACE_MANAGER.md`
 - [ ] Aviation charts (OpenAIP tile layer — airports, navaids, airspace symbology)
 
 ### Battery Management

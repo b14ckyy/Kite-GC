@@ -1,9 +1,23 @@
 # Airspace Manager — Feature Plan
 
-> Status: **Planned** (2026-06-08). A dedicated nav-rail panel (**directly under Radar**) + a backend
-> aeronautical-data subsystem over **OpenAIP**: airspaces, obstacles, RC/model airfields and airports as
-> toggleable map (2D) and globe (3D) layers. The **static counterpart to the Radar subsystem**.
-> Architecture in ADR-038. Roadmap: *Map Overlays → Airspace Manager*.
+> A dedicated nav-rail panel (**directly under Radar**) + a backend aeronautical-data subsystem over
+> **OpenAIP**: airspaces, obstacles, RC/model airfields and airports as toggleable map (2D) and globe (3D)
+> layers. The **static counterpart to the Radar subsystem**. Architecture in ADR-038.
+>
+> **Status — P1 shipped (2026-06-08):** backend `aero/` (verified OpenAIP schema, per-layer radii, RAM
+> region cache, 3 commands) · Data settings (toggle + provider + key) · the Airspace Manager panel
+> (`advanced`: per-layer 2D/3D visibility + cache readout/clear; grouped nearby list with click-to-centre)
+> · **2D rendering** (class-coloured polygons + typed markers incl. the wind-turbine icon) · **zoom-density
+> management**.
+>
+> **Open (P2, next):**
+> - **Centre fallback bug** — the fetch only follows the UAV position; it does **not** fall back to the GCS
+>   marker / map centre when no UAV is connected. Fix the `radarReference ?? map.centre` path in `+page`.
+> - **3D rendering** — the per-layer **3D toggles exist but don't render yet**: airspace extruded volumes
+>   (with the relevance filter), obstacle columns, RC/airport ground projection.
+> - **Density fine-tuning** — calibrate the min-zoom thresholds (`helpers/airspaceStyle.ts`) against the
+>   OpenAIP map; possibly tie the obstacle/airport fetch radius to zoom too.
+> - **Polish** — a class/type legend; nearby-list search + the `info` minimized panel variant.
 
 ## Mental model: the static counterpart to Radar
 Same shape as the Radar subsystem, but for **static aeronautical features** instead of moving vehicles:
@@ -28,6 +42,27 @@ _Navaids, hotspots, reporting points: **out of scope** (not needed)._
 - the UAV is **inside** it.
 
 Everything else is hidden in 3D as irrelevant. (Reference = the UAV; falls back to the GCS/camera when no UAV.)
+
+## Density management (zoom-based)
+
+Without filtering, a region holds far too many features to draw at once (thousands of obstacles, every
+small airfield + every gliding sector). Like the OpenAIP map, each feature has a **minimum 2D zoom** at
+which it appears — by **importance/size** — so zoomed out you see only the big/important things and detail
+fills in as you zoom in. Re-evaluated on every zoom/pan (`moveend`). The thresholds are tunable
+(`helpers/airspaceStyle.ts`) and meant to be calibrated against the OpenAIP map's behaviour.
+
+Leaflet zoom reference: ~2 world · 6 country · 8 region · **11 area** · 13 local · 15 street.
+
+| Layer | Min-zoom rule |
+|---|---|
+| **Airspaces** | by OpenAIP `type` tier: FIR/UIR ≥6 · **Tier A ≥7** (Prohibited/Restricted/Danger/CTR/TMA/CTA/ADIZ/MCTR) · **Tier B ≥9** (RMZ/TMZ/ATZ/MATZ/Alert/Warning/Protected/TIZ/TIA/MTA) · **Tier C ≥11** (gliding/sporting/VFR-FIS sectors/airways/…) |
+| **Airports** | by type/size: International ≥6 · Airport/IFR/Mil-aerodrome ≥8 · Airfield/Heliport ≥9 · glider/ultralight/water/strips/altiport/closed ≥11 |
+| **RC / model airfields** | ≥12 (close only) |
+| **Obstacles** | ≥12 (tall ≥150 m → ≥10, shown a bit earlier) |
+
+Point layers are additionally **clipped to the visible bounds** and capped (1500/redraw) as a safety net.
+The panel's nearby list is **not** zoom-filtered (it's a browser of the nearest features). **3D** will use
+the equivalent camera-altitude thresholds (P2).
 
 ## Panel — "Airspace Manager" (nav rail, under Radar, `PanelShell` **`advanced`** variant, two-column)
 The `advanced` (left controls + right data) variant is chosen specifically because the right column is a
@@ -97,9 +132,14 @@ openFlightMaps, national open-data are future impls behind the same trait. One a
 - **P3 — alerts + polish.** Per-type alerts (airspace-level, obstacle proximity), more filters, more
   providers (FAA / open-data), OpenAIP raster chart as an optional tile overlay.
 
-## Open (resolve in P1, against a live key)
-- OpenAIP endpoint set + per-layer params (pagination `page`/`limit`, `pos+dist` vs `bbox`) and the enum
-  encodings (airspace `type`/`icaoClass`, limit `unit`/`referenceDatum`, obstacle/airport `type`).
-- Obstacle height vs. elevation fields + datum; airspace FL/STD precision (start = MSL).
-- Icon set: reuse OpenAIP's open icons (licence) vs. own SVG set.
-- Naming: backend module `aero/`; user-facing panel "Airspace Manager" (kept though it covers more).
+## Verified OpenAIP schema (resolved in P1 against a live key)
+- Endpoints `/api/{airspaces,obstacles,airports,rc-airfields}`; auth `?apiKey=`; spatial `pos=lat,lon&dist=m`;
+  pagination `page`/`limit` (envelope `{limit,totalCount,totalPages,nextPage,page,items}`).
+- **Units** 0=m · 1=ft · 6=FL · **referenceDatum** 0=GND · 1=MSL · 2=STD (`to_meters`/`alt_label` in `aero/mod.rs`).
+- **Airspace** `type` 0–36 (4=CTR, 7=TMA, 1/2/3=Restricted/Danger/Prohibited…), `icaoClass` 0–6=A–G / 8=SUA,
+  geometry Polygon/MultiPolygon, `lowerLimit`/`upperLimit {value,unit,referenceDatum}`.
+- **Obstacle** Point + `type` 0=Obstacle/1=Chimney/2=Building/**3=Wind Turbine**/4=Tower, `elevation` (MSL),
+  **`height` (AGL → 3D column)**.
+- **Airport** `type` 0–13 (1=Glider, 3=Intl, 6=Ultralight, 7=Heliport…). **RC-airfield**: no type, has
+  `permittedAltitude`/`operator`/propulsion flags.
+- FL/STD altitudes treated pragmatically as MSL for display (P1).

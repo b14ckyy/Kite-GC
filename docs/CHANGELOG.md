@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Airspace Manager — aeronautical data overlay (P1, ADR-038).** A new nav-rail panel (under Radar) +
+  backend subsystem over **OpenAIP**: **airspaces** (class-coloured polygons), **obstacles** (wind turbines,
+  masts, towers — with a wind-turbine icon), **airports** (by type) and **RC/model airfields** on the 2D
+  map. Enabled in Settings → Data (provider + your free OpenAIP API key). The panel (advanced two-column)
+  has per-layer 2D/3D visibility toggles + a cache readout/clear on the left and a grouped, distance-sorted
+  **nearby list** (Obstacles · Airspaces · Airfields, click to centre) on the right. **Zoom-density
+  management** shows only big/important features when zoomed out and fills in detail (obstacles, RC fields,
+  small airfields, minor airspaces) as you zoom in. _3D rendering + alerts are P2._
 - **ADS-B online query bounded to what the free-look camera looks at.** In the 3D free-look camera the
   online ADS-B fetch now centres on the screen-centre ground point, with that point's offset from the
   camera nadir (and the query radius) capped at 150 km — projected 150 km along the look direction when
