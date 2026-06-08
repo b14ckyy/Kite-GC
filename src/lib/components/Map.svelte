@@ -40,7 +40,10 @@
   import { ensureUserLocation, resolveUserLocation, userGeoLocation } from "$lib/helpers/userLocation";
   import { radarVehicles, radarSelection, enrichList, type RadarSnapshot, type EnrichedVehicle } from "$lib/stores/radarTracking";
   import { radarAlertLevels, type AlertLevel } from "$lib/controllers/radarAlerts";
-  import type { RadarMapSettings } from "$lib/stores/settings";
+  import { gcsLocation, gcsAccuracyM, setGcsManual } from "$lib/stores/gcsLocation";
+  import { type RadarMapSettings, type GcsMode } from "$lib/stores/settings";
+  import { openContextMenu } from "$lib/stores/contextMenu";
+  import { t } from "svelte-i18n";
   import { contactColor, ffContactColor, contactVisibleOnMap, relevanceFactor } from "$lib/helpers/radarMap";
   import { pickShape, buildContactIconHtml } from "$lib/helpers/radarIcons";
   import { convertAltitude, convertSpeed, convertDistance, convertVerticalSpeed, formatConverted } from "$lib/utils/units";
@@ -279,6 +282,93 @@
   // Home position
   let homeMarker: L.Marker | undefined;
   let wasArmed = false;
+
+  // ── GCS (ground-station) marker ──
+  let gcsMarker: L.Marker | undefined;
+  let gcsAccuracyCircle: L.Circle | undefined;
+  let gcsSelected = false; // show the accuracy circle only while selected
+  let unsubGcs: (() => void) | undefined;
+  let unsubGcsAcc: (() => void) | undefined;
+  const gcsMode = $derived<GcsMode>($settings.gcsMode);
+
+  /** Satellite-dish marker on a dark translucent disc; mode tweaks the affordance (drag ring / live dot). */
+  function createGcsIcon(mode: GcsMode): L.DivIcon {
+    return L.divIcon({
+      className: "gcs-icon",
+      html: `<div class="gcs-dot gcs-${mode}">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#37a8db" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 10a7.31 7.31 0 0 0 10 10Z"/><path d="m9 15 3-3"/>
+          <path d="M17 13a6 6 0 0 0-6-6"/><path d="M21 13A10 10 0 0 0 11 3"/>
+        </svg>
+        ${mode === "continuous" ? '<span class="gcs-live"></span>' : ""}
+      </div>`,
+      iconSize: [30, 30],
+      iconAnchor: [15, 15],
+    });
+  }
+
+  function updateGcsAccuracyCircle() {
+    if (!map) return;
+    const loc = get(gcsLocation);
+    const acc = get(gcsAccuracyM);
+    if (gcsSelected && loc && acc != null && acc > 0) {
+      const ll: L.LatLngExpression = [loc.lat, loc.lon];
+      if (gcsAccuracyCircle) {
+        gcsAccuracyCircle.setLatLng(ll).setRadius(acc);
+      } else {
+        gcsAccuracyCircle = L.circle(ll, {
+          radius: acc, color: "#37a8db", weight: 1, fillColor: "#37a8db", fillOpacity: 0.08, interactive: false,
+        }).addTo(map);
+      }
+    } else if (gcsAccuracyCircle) {
+      map.removeLayer(gcsAccuracyCircle);
+      gcsAccuracyCircle = undefined;
+    }
+  }
+
+  function updateGcsMarker() {
+    if (!map) return;
+    const loc = get(gcsLocation);
+    if (gcsMode === "off" || !loc) {
+      if (gcsMarker) { map.removeLayer(gcsMarker); gcsMarker = undefined; }
+      gcsSelected = false;
+      updateGcsAccuracyCircle();
+      return;
+    }
+    const ll: L.LatLngExpression = [loc.lat, loc.lon];
+    const draggable = gcsMode === "manual";
+    if (!gcsMarker) {
+      gcsMarker = L.marker(ll, { icon: createGcsIcon(gcsMode), draggable, zIndexOffset: 450 }).addTo(map);
+      gcsMarker.bindTooltip(get(t)("settings.gcsMarker"), { direction: "top", offset: [0, -16], opacity: 0.95 });
+      gcsMarker.on("dragend", () => {
+        const p = gcsMarker!.getLatLng();
+        setGcsManual(p.lat, p.lng); // pins it
+      });
+      gcsMarker.on("click", (e) => {
+        L.DomEvent.stopPropagation(e);
+        gcsSelected = !gcsSelected;
+        updateGcsAccuracyCircle();
+      });
+    } else {
+      gcsMarker.setLatLng(ll);
+      gcsMarker.setIcon(createGcsIcon(gcsMode));
+      if (gcsMarker.dragging) draggable ? gcsMarker.dragging.enable() : gcsMarker.dragging.disable();
+    }
+    updateGcsAccuracyCircle();
+  }
+
+  // Rebuild the GCS marker when the mode changes (location/accuracy handled by their subscriptions).
+  $effect(() => { gcsMode; if (map) updateGcsMarker(); });
+
+  /** Right-click on the empty map → "Set GCS here" (manual mode only). */
+  function onMapContextMenu(e: L.LeafletMouseEvent) {
+    if (gcsMode !== "manual") return;
+    const { lat, lng } = e.latlng;
+    openContextMenu(e.originalEvent.clientX, e.originalEvent.clientY, [
+      { label: get(t)("settings.gcsSetHere"), icon: "📡", action: () => setGcsManual(lat, lng) },
+    ]);
+  }
 
   // Follow mode (bindable prop, see $props above):
   // - free: manual map movement
@@ -638,6 +728,12 @@
     map.on("zoomend", saveMapState);
     map.on("zoomend", onZoomEnd);   // resize the model canvas to the new zoom
     map.on("moveend", recomputeNight); // auto night: re-check after panning to a new region
+    map.on("contextmenu", onMapContextMenu); // right-click → "Set GCS here" (manual)
+    map.on("click", () => { if (gcsSelected) { gcsSelected = false; updateGcsAccuracyCircle(); } }); // deselect GCS
+
+    // GCS marker follows its store; accuracy circle follows the accuracy + selection.
+    unsubGcs = gcsLocation.subscribe(() => updateGcsMarker());
+    unsubGcsAcc = gcsAccuracyM.subscribe(() => updateGcsAccuracyCircle());
 
     // Auto night mode: physical location + re-check every minute so wall-clock drift fades day↔night.
     ensureUserLocation(); // OS geolocation (resolves async)
@@ -809,6 +905,8 @@
     unsubRadar?.();
     unsubRadarSel?.();
     unsubRadarAlerts?.();
+    unsubGcs?.();
+    unsubGcsAcc?.();
     if (unsubTelemetry) unsubTelemetry();
     if (unsubSettings) unsubSettings();
     if (map) {
@@ -1061,5 +1159,45 @@
   }
   @media (prefers-reduced-motion: reduce) {
     :global(.radar-divicon .radar-alert-ring) { animation: none !important; }
+  }
+
+  /* ── GCS (ground-station) marker ── */
+  :global(.gcs-icon) { background: none; border: none; }
+  :global(.gcs-icon .gcs-dot) {
+    position: relative;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: rgba(40, 42, 44, 0.62);
+    border: 2px solid rgba(55, 168, 219, 0.85);
+    box-shadow: 0 0 6px rgba(0, 0, 0, 0.45);
+  }
+  /* Manual: signal that it's draggable. */
+  :global(.gcs-icon .gcs-dot.gcs-manual) {
+    cursor: move;
+    border-style: dashed;
+  }
+  /* Continuous: a small green "live" dot, top-right. */
+  :global(.gcs-icon .gcs-dot .gcs-live) {
+    position: absolute;
+    top: -1px;
+    right: -1px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #59aa29;
+    border: 1px solid #fff;
+    box-shadow: 0 0 4px #59aa29;
+    animation: gcs-live-pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes gcs-live-pulse {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 1; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    :global(.gcs-icon .gcs-dot .gcs-live) { animation: none; }
   }
 </style>

@@ -13,6 +13,7 @@
   import { homePosition } from "$lib/stores/home";
   import { connection, type ConnectionStatus } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
+  import { gcsLocation } from "$lib/stores/gcsLocation";
   import { getProviderById } from "$lib/config/mapProviders";
   import type { MapProvider } from "$lib/config/mapProviders";
   import { getCachedTile, putCachedTile, initTileCache } from "$lib/cache/tileCache";
@@ -48,7 +49,7 @@
   import FpvHud from "$lib/components/FpvHud.svelte";
   import { convertSpeed, convertAltitude, convertDistance, convertVerticalSpeed, formatConverted } from "$lib/utils/units";
   import { haversineDistance, bearing } from "$lib/utils/geo";
-  import type { SpeedUnit, AltitudeUnit, RadarMapSettings } from "$lib/stores/settings";
+  import type { SpeedUnit, AltitudeUnit, RadarMapSettings, GcsMode } from "$lib/stores/settings";
   import { radarVehicles, radarSelection, type RadarSnapshot } from "$lib/stores/radarTracking";
   import { contactColor, ffContactColor, contactVisibleOnMap, REL_OVERRIDE_M } from "$lib/helpers/radarMap";
   import { ARROW_POLY, contactModelClass, radarModelUri, type RadarModelClass } from "$lib/helpers/radar3d";
@@ -907,6 +908,7 @@
     });
     // Conflict-alert highlight: re-evaluate whenever the alert set changes (drives the pulse-render mode).
     unsubRadarAlerts3d = radarAlertLevels.subscribe((m) => { radar3dAlertLevels = m; if (viewer) updateRadar3D(); });
+    unsubGcs3d = gcsLocation.subscribe(() => updateGcs3d());
 
     // Connection edge: on a fresh (re)connect, flag the next telemetry frame to
     // decide clearing (only if DISARMED) and force a live-geoid recompute.
@@ -937,6 +939,7 @@
     unsubRadar3d?.();
     unsubRadarSel3d?.();
     unsubRadarAlerts3d?.();
+    unsubGcs3d?.();
     radar3dPickHandler?.destroy();
     unsubHome?.();
     unsubSettingsWatch?.();
@@ -1260,6 +1263,49 @@
     if (!ref) return;
     void computeGeoidOnce(ref.lat, ref.lon).then((ok) => { if (ok) updateRadar3D(); });
   });
+
+  // ── GCS (ground-station) billboard ──────────────────────────────────
+  let gcsEntity: Cesium.Entity | undefined;
+  let unsubGcs3d: (() => void) | undefined;
+  const gcsMode3d = $derived<GcsMode>($settings.gcsMode);
+
+  /** Satellite-dish-on-disc as an SVG data URI for the billboard. */
+  const GCS_BILLBOARD_IMG = (() => {
+    const svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">' +
+      '<circle cx="20" cy="20" r="15" fill="rgba(40,42,44,0.72)" stroke="#37a8db" stroke-width="2.5"/>' +
+      '<g transform="translate(8,8)" fill="none" stroke="#37a8db" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M4 10a7.31 7.31 0 0 0 10 10Z"/><path d="m9 15 3-3"/>' +
+      '<path d="M17 13a6 6 0 0 0-6-6"/><path d="M21 13A10 10 0 0 0 11 3"/></g></svg>';
+    return "data:image/svg+xml;base64," + btoa(svg);
+  })();
+
+  function updateGcs3d() {
+    if (!viewer) return;
+    const loc = get(gcsLocation);
+    if (gcsMode3d === "off" || !loc) {
+      if (gcsEntity) { viewer.entities.remove(gcsEntity); gcsEntity = undefined; viewer.scene.requestRender(); }
+      return;
+    }
+    const pos = Cesium.Cartesian3.fromDegrees(loc.lon, loc.lat);
+    if (!gcsEntity) {
+      gcsEntity = viewer.entities.add({
+        position: new Cesium.ConstantPositionProperty(pos),
+        billboard: {
+          image: GCS_BILLBOARD_IMG,
+          scale: 0.9,
+          verticalOrigin: Cesium.VerticalOrigin.CENTER,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      });
+    } else {
+      gcsEntity.position = new Cesium.ConstantPositionProperty(pos);
+    }
+    viewer.scene.requestRender();
+  }
+
+  $effect(() => { gcsMode3d; if (viewer) updateGcs3d(); });
 
   // ── Sky clock (sun/moon position) ──────────────────────────────────
   // Cesium positions the Sun/Moon from real ephemeris at viewer.clock.currentTime.

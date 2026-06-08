@@ -31,6 +31,7 @@
   import RadarAlertBanner from "$lib/components/RadarAlertBanner.svelte";
   import SettingsPanel from "$lib/components/SettingsPanel.svelte";
   import { ensureUserLocation, requestUserLocation, userGeoLocation } from "$lib/helpers/userLocation";
+  import { gcsLocation } from "$lib/stores/gcsLocation";
   import { PlaybackController } from '$lib/controllers/playbackController';
   import { refreshSerialPorts, connectFC, disconnectFC, scanBleDevices } from '$lib/controllers/connectionController';
   import * as logbookCtrl from '$lib/controllers/logbookController';
@@ -59,7 +60,7 @@
   import { editMode, replayActive, mission, missionFlags, missionDownload, missionUpload, missionFcInfo, markMissionSynced, loadedMissionId, missionSetWaypoints, launchPoint, hasLocation, toDeg } from "$lib/stores/mission";
   import { terrainAnalysis, patchTerrainAnalysis } from "$lib/stores/terrainAnalysis";
   import { DEFAULT_RADAR, BUILTIN_ADSB_PROVIDERS } from "$lib/stores/settings";
-  import type { AppSettings, InterfaceSettings, PanelConfig, RadarSettings } from "$lib/stores/settings";
+  import type { AppSettings, InterfaceSettings, PanelConfig, RadarSettings, GcsMode } from "$lib/stores/settings";
   import { layout, GRID_DEFAULTS } from '$lib/stores/layout';
   import {
     getDefaultFlightlogPath,
@@ -304,6 +305,7 @@
   let realLighting3D = $state(false);
   let logReplayTime = $state(false);
   let nightMode2D = $state<'off' | 'auto' | 'on'>('off');
+  let gcsMode = $state<GcsMode>('manual');
   let radarSettings = $state<RadarSettings>({ ...DEFAULT_RADAR });
   let defaultWpAltitudeM = $state(50);
   let defaultPhTimeSec = $state(30);
@@ -467,6 +469,7 @@
   realLighting3D = saved.realLighting3D ?? false;
   logReplayTime = saved.logReplayTime ?? false;
   nightMode2D = saved.nightMode2D ?? 'off';
+  gcsMode = saved.gcsMode ?? 'manual';
   if (saved.radar) radarSettings = saved.radar;
   defaultWpAltitudeM = saved.defaultWpAltitudeM;
   defaultPhTimeSec = saved.defaultPhTimeSec;
@@ -504,19 +507,19 @@
     return { lat: c[0], lon: c[1], radiusKm: undefined };
   }
   /** Distance/bearing reference for ALL tracked vehicles: the connected UAV (valid fix), else the
-   *  GCS location from the localization API. (MSP is implicitly the UAV; local/online inherit this.) */
+   *  GCS marker location (null when the GCS marker is OFF). (MSP is implicitly the UAV; others inherit.) */
   const radarReference = $derived.by<{ lat: number; lon: number } | null>(() => {
     const t = $telemetry;
     if (connStatus === 'connected' && isValidGpsCoordinate(t.lat, t.lon) && t.fixType >= 2) {
       return { lat: t.lat, lon: t.lon };
     }
-    return $userGeoLocation;
+    return $gcsLocation;
   });
-  /** GCS ground level (m MSL) from terrain data at the user location — used as the colour-scale
+  /** GCS ground level (m MSL) from terrain data at the GCS location — used as the colour-scale
    *  reference altitude when no UAV is connected (the geolocation API carries no altitude). */
   let gcsGroundAltM = $state<number | null>(null);
   $effect(() => {
-    const g = $userGeoLocation;
+    const g = $gcsLocation;
     if (connStatus === 'connected' || !g) { gcsGroundAltM = null; return; }
     let cancelled = false;
     invoke<number | null>('terrain_elevation', { lat: g.lat, lon: g.lon })
@@ -601,11 +604,11 @@
     lastMspSupported = s;
     if (radarSettings.enabled && radarSettings.adsb.enabled) pushRadarConfig();
   });
-  // FormationFlight: push the GCS node position we advertise as the emulated FC — the resolved
-  // geolocation (+ terrain ground altitude). Live; the running source reads it when answering MSP_RAW_GPS.
+  // FormationFlight: push the GCS node position we advertise as the emulated FC — the GCS marker
+  // location (+ terrain ground altitude). Live; the running source reads it when answering MSP_RAW_GPS.
   $effect(() => {
     if (!radarSettings.enabled || !radarSettings.formationFlight.enabled) return;
-    const g = $userGeoLocation;
+    const g = $gcsLocation;
     if (!g) return;
     void setRadarNode(g.lat, g.lon, gcsGroundAltM ?? 0);
   });
@@ -658,6 +661,7 @@
     if (patch.realLighting3D != null) realLighting3D = patch.realLighting3D;
     if (patch.logReplayTime != null) logReplayTime = patch.logReplayTime;
     if (patch.nightMode2D != null) nightMode2D = patch.nightMode2D;
+    if (patch.gcsMode != null) gcsMode = patch.gcsMode;
     if (patch.radar != null) {
       radarSettings = patch.radar;
       pushRadarConfig(); // start/stop the backend pipeline on any radar settings change
@@ -1859,6 +1863,7 @@
         {realLighting3D}
         {logReplayTime}
         {nightMode2D}
+        {gcsMode}
         userLocation={$userGeoLocation}
         onGeoCheck={requestUserLocation}
         {attitudeRateHz}

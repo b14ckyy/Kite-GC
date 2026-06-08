@@ -8,7 +8,8 @@
   import { MAP_PROVIDERS } from '$lib/config/mapProviders';
   import { WIDGET_DEFS } from '$lib/config/widgetRegistry';
   import { DEFAULT_RADAR } from '$lib/stores/settings';
-  import type { AppSettings, InterfaceSettings, RadarSettings } from '$lib/stores/settings';
+  import { resetGcsManual, gcsManuallySet } from '$lib/stores/gcsLocation';
+  import type { AppSettings, InterfaceSettings, RadarSettings, GcsMode } from '$lib/stores/settings';
   import type { TileCacheStats } from '$lib/cache/tileCache';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import UnitStepper from '$lib/components/UnitStepper.svelte';
@@ -28,6 +29,7 @@
     realLighting3D = false,
     logReplayTime = false,
     nightMode2D = 'off',
+    gcsMode = 'manual',
     userLocation = null,
     attitudeRateHz = 5,
     positionRateHz = 2,
@@ -63,6 +65,7 @@
     realLighting3D?: boolean;
     logReplayTime?: boolean;
     nightMode2D?: 'off' | 'auto' | 'on';
+    gcsMode?: GcsMode;
     userLocation?: { lat: number; lon: number } | null;
     attitudeRateHz?: number;
     positionRateHz?: number;
@@ -207,6 +210,19 @@
             {userLocation ? `${userLocation.lat.toFixed(2)}°, ${userLocation.lon.toFixed(2)}°` : $t('settings.locationNone')}
           </span>
           <Button variant="standard" size="sm" icon="refresh" onclick={onGeoCheck} title={$t('settings.detectLocationHint')}>{$t('settings.detectLocation')}</Button>
+        </div>
+      </div>
+      <div class="s-row">
+        <label class="s-label" for="gcs-mode">{$t('settings.gcsLocation')}</label>
+        <div class="s-loc">
+          {#if gcsMode === 'manual'}
+            <Button variant="standard" size="sm" icon="refresh" disabled={!$gcsManuallySet} onclick={resetGcsManual} title={$t('settings.gcsResetHint')}>{$t('settings.gcsReset')}</Button>
+          {/if}
+          <select id="gcs-mode" class="s-select" value={gcsMode} onchange={(e) => onPatch({ gcsMode: (e.target as HTMLSelectElement).value as GcsMode })}>
+            <option value="off">{$t('settings.gcsOff')}</option>
+            <option value="manual">{$t('settings.gcsManual')}</option>
+            <option value="continuous">{$t('settings.gcsContinuous')}</option>
+          </select>
         </div>
       </div>
     </div>

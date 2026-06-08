@@ -21,6 +21,8 @@ export type DistanceUnit = 'metric' | 'imperial';
 export type VerticalSpeedUnit = 'ms' | 'fts';
 export type TemperatureUnit = 'c' | 'f';
 export type NightMode = 'off' | 'auto' | 'on';
+/** GCS marker behaviour: hidden / placed once + draggable / live OS tracking. */
+export type GcsMode = 'off' | 'manual' | 'continuous';
 
 export interface InterfaceSettings {
   speedUnit: SpeedUnit;
@@ -201,6 +203,8 @@ export interface AppSettings {
   logReplayTime: boolean;
   /** Dim the 2D Leaflet imagery for night: off / auto (sun below horizon) / on. */
   nightMode2D: NightMode;
+  /** GCS marker mode: off / manual (drag) / continuous (live OS location). */
+  gcsMode: GcsMode;
   /** Last known physical user location (for Night-Mode auto sunset timing); persisted across sessions. */
   userLocation: { lat: number; lon: number } | null;
   /** Radar (foreign-vehicle tracking) subsystem settings. */
@@ -251,6 +255,7 @@ const defaults: AppSettings = {
   realLighting3D: false,
   logReplayTime: false,
   nightMode2D: 'off',
+  gcsMode: 'manual',
   userLocation: null,
   radar: DEFAULT_RADAR,
 };

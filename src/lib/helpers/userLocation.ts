@@ -15,13 +15,17 @@ export interface LatLon { lat: number; lon: number; }
 // Seed from the persisted value so Night-Mode auto is correct immediately on launch,
 // before any fresh geo/UAV fix arrives.
 export const userGeoLocation = writable<LatLon | null>(get(settings).userLocation ?? null);
+/** Accuracy radius (m) of the last OS fix, or null (persisted/UAV sources carry none). Used by the GCS
+ *  marker's on-select accuracy circle. */
+export const userGeoAccuracyM = writable<number | null>(null);
 
 const GPS_HDOP_MAX = 10; // coarse location only — any usable fix qualifies
 const GEO_OPTS: PositionOptions = { enableHighAccuracy: false, timeout: 8000, maximumAge: 3_600_000 };
 
 /** Update the live store and persist for the next session. */
-export function setUserLocation(lat: number, lon: number, source: string): void {
+export function setUserLocation(lat: number, lon: number, source: string, accuracyM: number | null = null): void {
   userGeoLocation.set({ lat, lon });
+  userGeoAccuracyM.set(accuracyM);
   settings.patch({ userLocation: { lat, lon } });
   console.log(`[geo] user location set via ${source}: ${lat.toFixed(3)}, ${lon.toFixed(3)}`);
 }
@@ -32,7 +36,10 @@ function runGeoCheck(): void {
     return;
   }
   navigator.geolocation.getCurrentPosition(
-    (pos) => setUserLocation(pos.coords.latitude, pos.coords.longitude, 'os-geolocation'),
+    (pos) => setUserLocation(
+      pos.coords.latitude, pos.coords.longitude, 'os-geolocation',
+      Number.isFinite(pos.coords.accuracy) ? pos.coords.accuracy : null,
+    ),
     (err) => console.warn('[geo] geolocation failed, keeping last known:', err.message),
     GEO_OPTS,
   );
