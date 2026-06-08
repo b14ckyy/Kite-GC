@@ -1,6 +1,6 @@
 # Kite Ground Control
 
-A cross-platform Ground Control Station for [INAV](https://github.com/iNavFlight/inav)-based flight controllers.
+A cross-platform Ground Control Station for [INAV](https://github.com/iNavFlight/inav) and ArduPilot flight controllers (MSP & MAVLink).
 
 Built with [Tauri 2.0](https://tauri.app/) (Rust backend) and [Svelte 5](https://svelte.dev/) (TypeScript frontend).
 
@@ -15,14 +15,15 @@ Built with [Tauri 2.0](https://tauri.app/) (Rust backend) and [Svelte 5](https:/
 - Multi-protocol support (MSP, LTM, MAVLink, CRSF)
 - Multi-transport support (Serial, BLE, TCP/UDP)
 - Log replay (Blackbox, OTX/ETX) in 2D and 3D
-- Cross-platform: Windows, Linux (x86/ARM), Android
+- Cross-platform: Windows (primary), Linux (x86/ARM); Android on hold
 
 ## Quick Start
 
 ### Prerequisites
-- [Node.js](https://nodejs.org/) LTS (v24+)
-- [Rust](https://rustup.rs/) (v1.94+)
-- Platform-specific dependencies (see [DEVLOG](docs/DEVLOG.md))
+- [Node.js](https://nodejs.org/) LTS (v20 or v24)
+- [Rust](https://rustup.rs/) (via rustup)
+- [just](https://github.com/casey/just) — primary task runner
+- Platform-specific toolchain & system dependencies (see [Build Guide](docs/BUILD.md))
 
 ### Development (recommended)
 We use **[just](https://github.com/casey/just)** as the primary task runner.
