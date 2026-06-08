@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **3D camera controls — touchpad-friendlier.** Tilt is now on **right-drag** (instead of the middle
+  button), with the wheel/pinch for zoom and left-drag to rotate (middle + Ctrl+Left kept as extras);
+  tilt no longer needs a middle mouse button. Zoom-out in the free camera is capped (~8000 km) so the
+  view can't drift into the full-globe "space" regime where the controls change and widgets cover the
+  globe. The follow/orbit chase cameras can now zoom out 3× further (up to 1500 m from the UAV).
 - **Connection bar reworked onto the control framework.** Protocol pick is now a segmented toggle
   (MSP | MAVLink), Connect is the shared `<Button>` (blue → orange while connecting → red to
   disconnect), and all fields share one 28 px style so they align. The serial/BLE device dropdowns
