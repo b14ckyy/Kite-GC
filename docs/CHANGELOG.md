@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **ADS-B online query bounded to what the free-look camera looks at.** In the 3D free-look camera the
+  online ADS-B fetch now centres on the screen-centre ground point, with that point's offset from the
+  camera nadir (and the query radius) capped at 150 km — projected 150 km along the look direction when
+  the view is above the horizon. The configured download radius is the floor (straight-down → exactly
+  that). UAV-locked cameras (follow/orbit/fpv) and 2D keep the UAV/reference centre + configured radius.
+  Cuts dense-area contact counts from ~600 to ~150 and stops loading aircraft 1000+ km away.
 - **3D camera controls — touchpad-friendlier.** Tilt is now on **right-drag** (instead of the middle
   button), with the wheel/pinch for zoom and left-drag to rotate (middle + Ctrl+Left kept as extras);
   tilt no longer needs a middle mouse button. Zoom-out in the free camera is capped (~8000 km) so the
