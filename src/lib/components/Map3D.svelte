@@ -278,12 +278,22 @@
     dropColor?: Cesium.Color;
     alertLevel: AlertLevel | null; // conflict-alert highlight (pulsing red/yellow), or null
     groundSig?: string;        // last-synced ground signature — skip the whole ground update if unchanged
+    modelSig?: string;         // last-synced model signature — skip the model update if unchanged
     entities: Cesium.Entity[];
+    bundleClass?: RadarModelClass; // model class of the currently-assigned bundle (for pool return)
   };
+  // A reusable 5-entity bundle (model + ground geometry). Creating a Cesium `Model` per contact is the
+  // expensive part (per-instance node graph + shader pipeline → main-thread "Scripting" stall), so we
+  // POOL bundles instead of destroying/recreating them as contacts enter/leave the view: a contact that
+  // leaves hides its bundle and returns it; an arriving contact reuses a free one (just re-positioned/
+  // -coloured). The model glb is class-specific, so free bundles are keyed by model class (reusing across
+  // classes would need a uri swap → re-pays the setup we're avoiding).
+  type Radar3dBundle = { entities: Cesium.Entity[]; dropColorCP: Cesium.ConstantProperty; dropColor: Cesium.Color; modelClass: RadarModelClass };
   const radar3dRecs = new Map<string, Radar3dRec>();
-  // New contacts are created a few per frame (a dense area can add ~100 at once — building all their
-  // models + ground geometry in one frame stutters). The rec is in `radar3dRecs` immediately (with no
-  // entities yet) and queued here; `drainRadarCreateQueue` builds them incrementally.
+  const radar3dFree = new Map<RadarModelClass, Radar3dBundle[]>();
+  // When no free bundle of the needed class exists, the rec is queued here and `drainRadarCreateQueue`
+  // builds new bundles a few per frame (a dense first load can need ~150 at once — building all their
+  // models in one frame stutters). The rec is in `radar3dRecs` immediately (with no entities yet).
   const radar3dCreateQueue: Radar3dRec[] = [];
   let radar3dCreateRaf = 0;
   let radar3dSnap: RadarSnapshot = { adsb: [], formationFlight: [], radio: [], lastUpdate: 0 };
@@ -1028,22 +1038,26 @@
   function clearRadar3D() {
     radar3dCreateQueue.length = 0;
     if (radar3dCreateRaf) { cancelAnimationFrame(radar3dCreateRaf); radar3dCreateRaf = 0; }
-    if (!viewer || !radar3dRecs.size) { if (viewer) viewer.scene.requestRenderMode = true; return; }
+    if (!viewer) return;
     for (const rec of radar3dRecs.values()) for (const e of rec.entities) viewer.entities.remove(e);
     radar3dRecs.clear();
+    // Destroy the pooled (hidden) bundles too — a clear means the scene is going away.
+    for (const list of radar3dFree.values()) for (const b of list) for (const e of b.entities) viewer.entities.remove(e);
+    radar3dFree.clear();
     viewer.scene.requestRenderMode = true; // no contacts → back to on-demand rendering
     viewer.scene.requestRender();
   }
 
-  /** Build queued contacts a few per frame so a dense area doesn't stutter the main thread. */
+  /** Create new bundles a few per frame (reuse is free) so a dense first load doesn't stutter. */
   function drainRadarCreateQueue() {
     radar3dCreateRaf = 0;
     if (!viewer) { radar3dCreateQueue.length = 0; return; }
-    const BATCH = 8;
-    let n = 0;
-    while (radar3dCreateQueue.length && n < BATCH) {
+    const BATCH = 8; // new-bundle CREATIONS per frame (the expensive part); pool reuse doesn't count
+    let created = 0;
+    while (radar3dCreateQueue.length && created < BATCH) {
       const rec = radar3dCreateQueue.shift()!;
-      if (radar3dRecs.get(rec.id) === rec) { createRadarEntities(rec); n++; } // still wanted (not removed)
+      if (radar3dRecs.get(rec.id) !== rec || rec.entities.length) continue; // gone, or already got a bundle
+      if (!acquireBundleFor(rec)) { assignBundle(rec, createBundle(rec.modelClass)); created++; }
     }
     viewer.scene.requestRender();
     if (radar3dCreateQueue.length) radar3dCreateRaf = requestAnimationFrame(drainRadarCreateQueue);
@@ -1055,12 +1069,12 @@
   const RADAR_MODEL_MIN_PX = 48;
   const DROP_DEPTH_M = 12000; // drop-line length below the contact (terrain depth test clips it at ground)
 
-  /** Create the per-contact entities once (filled in by syncRec). */
-  function createRadarEntities(rec: Radar3dRec) {
-    if (!viewer) return;
-    const model = viewer.entities.add({
+  /** Build a fresh, reusable 5-entity bundle for the given model class (the expensive part — one Cesium
+   *  `Model` instance). The contact-specific values are filled in later by syncRec via `assignBundle`. */
+  function createBundle(modelClass: RadarModelClass): Radar3dBundle {
+    const model = viewer!.entities.add({
       model: {
-        uri: radarModelUri(rec.modelClass),
+        uri: radarModelUri(modelClass),
         minimumPixelSize: RADAR_MODEL_MIN_PX,
         maximumScale: 4000,
         scale: 5.2,
@@ -1088,15 +1102,15 @@
     // in a ConstantProperty we update in place (setValue) — building a NEW material object each poll makes
     // Cesium rebuild the line (a black flash); updating the uniform in place doesn't. The ground-sync
     // guard also means an unchanged contact is never touched at all.
-    rec.dropColor = (rec.selected ? RADAR_CYAN : rec.color).withAlpha(0.95);
-    rec.dropColorCP = new Cesium.ConstantProperty(rec.dropColor);
-    const dropBg = viewer.entities.add({
+    const dropColor = Cesium.Color.WHITE.withAlpha(0.95);
+    const dropColorCP = new Cesium.ConstantProperty(dropColor);
+    const dropBg = viewer!.entities.add({
       polyline: { width: 4, material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.BLACK.withAlpha(0.7), dashLength: 16 }) },
     });
-    const drop = viewer.entities.add({
-      polyline: { width: 2, material: new Cesium.PolylineDashMaterialProperty({ color: rec.dropColorCP, dashLength: 16 }) },
+    const drop = viewer!.entities.add({
+      polyline: { width: 2, material: new Cesium.PolylineDashMaterialProperty({ color: dropColorCP, dashLength: 16 }) },
     });
-    const circle = viewer.entities.add({
+    const circle = viewer!.entities.add({
       ellipse: {
         semiMajorAxis: CIRCLE_RADIUS_M, semiMinorAxis: CIRCLE_RADIUS_M,
         heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
@@ -1105,10 +1119,40 @@
       },
     });
     // Arrow as a clampToGround POLYLINE (not a polygon): polylines update smoothly.
-    const arrow = viewer.entities.add({ polyline: { width: 4, clampToGround: true } });
-    rec.entities = [model, dropBg, drop, circle, arrow];
-    for (const e of rec.entities) radar3dEntityIds.set(e, rec.id); // for click/hover picking
+    const arrow = viewer!.entities.add({ polyline: { width: 4, clampToGround: true } });
+    return { entities: [model, dropBg, drop, circle, arrow], dropColorCP, dropColor, modelClass };
+  }
+
+  /** Attach a bundle to a contact: re-point picking, force a full re-sync, show, and sync. */
+  function assignBundle(rec: Radar3dRec, bundle: Radar3dBundle) {
+    rec.entities = bundle.entities;
+    rec.dropColorCP = bundle.dropColorCP;
+    rec.dropColor = bundle.dropColor;
+    rec.bundleClass = bundle.modelClass;
+    rec.groundSig = undefined; // new contact → force a full ground + model re-sync
+    rec.modelSig = undefined;
+    for (const e of rec.entities) radar3dEntityIds.set(e, rec.id); // re-point click/hover picking
+    rec.entities[0].show = true; // model always visible while active (ground entities gated in syncRadarGround)
     syncRec(rec);
+  }
+
+  /** Reuse a free bundle of the contact's model class, if one is available. */
+  function acquireBundleFor(rec: Radar3dRec): boolean {
+    const b = radar3dFree.get(rec.modelClass)?.pop();
+    if (!b) return false;
+    assignBundle(rec, b);
+    return true;
+  }
+
+  /** Contact left the view: hide its bundle and return it to the pool (keep in RAM for reuse). */
+  function releaseBundle(rec: Radar3dRec) {
+    if (!rec.entities.length) return;
+    for (const e of rec.entities) e.show = false;
+    const cls = rec.bundleClass ?? rec.modelClass;
+    const list = radar3dFree.get(cls) ?? [];
+    list.push({ entities: rec.entities, dropColorCP: rec.dropColorCP!, dropColor: rec.dropColor!, modelClass: cls });
+    radar3dFree.set(cls, list);
+    rec.entities = [];
   }
 
   /** Contact id under a window position (click/hover), or null. */
@@ -1119,10 +1163,14 @@
     return ent instanceof Cesium.Entity ? (radar3dEntityIds.get(ent) ?? null) : null;
   }
 
-  /** Update the contact model (position/orientation/colour/size) — cheap, no geometry rebuild. */
+  /** Update the contact model (position/orientation/colour/size) — cheap, no geometry rebuild. Skipped
+   *  entirely when nothing relevant changed (the snapshot fires up to 5 Hz; most contacts are unchanged). */
   function syncRadarModel(rec: Radar3dRec) {
     const e = rec.entities[0];
     if (!e.model) return;
+    const sig = `${rec.lat.toFixed(6)},${rec.lon.toFixed(6)},${rec.contactEll.toFixed(1)},${rec.headingDeg ?? 'x'},${rec.color.toCssColorString()},${rec.selected},${rec.hideRadiusM},${rec.altM},${rec.callsign}`;
+    if (sig === rec.modelSig && !rec.selected) return; // selected re-syncs every poll for the live distance/bearing label
+    rec.modelSig = sig;
     const pos = Cesium.Cartesian3.fromDegrees(rec.lon, rec.lat, rec.contactEll);
     e.position = new Cesium.ConstantPositionProperty(pos);
     e.orientation = new Cesium.ConstantProperty(uavOrientation(pos, rec.headingDeg ?? 0, 0, 0));
@@ -1269,7 +1317,8 @@
           hideRadiusM: hideR, entities: [],
         };
         radar3dRecs.set(v.id, rec);
-        radar3dCreateQueue.push(rec);          // build incrementally (see drainRadarCreateQueue)
+        // Reuse a free bundle of this class instantly; only queue a NEW build when the pool is empty.
+        if (!acquireBundleFor(rec)) radar3dCreateQueue.push(rec);
       } else {
         rec.lat = v.lat; rec.lon = v.lon; rec.headingDeg = v.headingDeg; rec.modelClass = modelClass;
         rec.callsign = callsign; rec.altM = v.altM;
@@ -1281,7 +1330,7 @@
       }
     }
     for (const [id, rec] of radar3dRecs) {
-      if (!seen.has(id)) { for (const e of rec.entities) viewer.entities.remove(e); radar3dRecs.delete(id); }
+      if (!seen.has(id)) { releaseBundle(rec); radar3dRecs.delete(id); } // pool the bundle, don't destroy
     }
     if (radar3dCreateQueue.length && !radar3dCreateRaf) radar3dCreateRaf = requestAnimationFrame(drainRadarCreateQueue);
     // Any active alert → render continuously so the pulse animates (CallbackProperty materials); otherwise
