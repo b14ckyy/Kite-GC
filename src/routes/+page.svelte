@@ -33,10 +33,12 @@
   import MissionPanel from "$lib/components/mission/MissionPanel.svelte";
   import VideoPanel from "$lib/components/video/VideoPanel.svelte";
   import RadarPanel from "$lib/components/RadarPanel.svelte";
+  import AirspaceManagerPanel from "$lib/components/AirspaceManagerPanel.svelte";
   import RadarAlertBanner from "$lib/components/RadarAlertBanner.svelte";
   import SettingsPanel from "$lib/components/SettingsPanel.svelte";
   import { ensureUserLocation, requestUserLocation, userGeoLocation } from "$lib/helpers/userLocation";
   import { gcsLocation } from "$lib/stores/gcsLocation";
+  import { fetchAero } from "$lib/stores/airspace";
   import { PlaybackController } from '$lib/controllers/playbackController';
   import { refreshSerialPorts, connectFC, disconnectFC, startBleScan, stopBleScan, startBleDeviceListener, stopBleDeviceListener, clearBleDevices } from '$lib/controllers/connectionController';
   import * as logbookCtrl from '$lib/controllers/logbookController';
@@ -64,8 +66,8 @@
   import TerrainAnalysisPanel from "$lib/components/terrain/TerrainAnalysisPanel.svelte";
   import { editMode, replayActive, mission, missionFlags, missionDownload, missionUpload, missionFcInfo, markMissionSynced, loadedMissionId, missionSetWaypoints, launchPoint, hasLocation, toDeg } from "$lib/stores/mission";
   import { terrainAnalysis, patchTerrainAnalysis } from "$lib/stores/terrainAnalysis";
-  import { DEFAULT_RADAR, BUILTIN_ADSB_PROVIDERS } from "$lib/stores/settings";
-  import type { AppSettings, InterfaceSettings, PanelConfig, RadarSettings, GcsMode } from "$lib/stores/settings";
+  import { DEFAULT_RADAR, DEFAULT_AIRSPACE, BUILTIN_ADSB_PROVIDERS } from "$lib/stores/settings";
+  import type { AppSettings, InterfaceSettings, PanelConfig, RadarSettings, GcsMode, AirspaceSettings } from "$lib/stores/settings";
   import { layout, GRID_DEFAULTS } from '$lib/stores/layout';
   import {
     getDefaultFlightlogPath,
@@ -318,6 +320,7 @@
   let nightMode2D = $state<'off' | 'auto' | 'on'>('off');
   let gcsMode = $state<GcsMode>('manual');
   let radarSettings = $state<RadarSettings>({ ...DEFAULT_RADAR });
+  let airspaceSettings = $state<AirspaceSettings>({ ...DEFAULT_AIRSPACE });
   let defaultWpAltitudeM = $state(50);
   let defaultPhTimeSec = $state(30);
   let warnAltitudeM = $state(120);
@@ -410,19 +413,24 @@
   // Radar dish on a mast with two sweep arcs (Radar / foreign-vehicle tracking).
   const ICON_RADAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 20.5h6"/><path d="M6.5 20.5 8.4 13.6"/><path d="M3.8 12.2a6 6 0 0 1 8.6-2.2L8.5 13.6a1.6 1.6 0 0 1-2.3-.4Z"/><circle cx="8.3" cy="11.7" r="1" fill="currentColor"/><path d="M14 5.5a7 7 0 0 1 4.8 4.8"/><path d="M13 9a3.5 3.5 0 0 1 2.2 2.2"/></svg>';
 
+  // Stacked layers (Airspace Manager / aeronautical data).
+  const ICON_AIRSPACE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3 21 7.5 12 12 3 7.5Z"/><path d="M3 12 12 16.5 21 12"/><path d="M3 16.5 12 21 21 16.5"/></svg>';
+
   const allTabs = [
     { id: "uav-info", label: () => $t('nav.uavInfo'), icon: ICON_UAV_INFO },
     { id: "mission", label: () => $t('nav.mission'), icon: ICON_MISSION },
     { id: "terrain", label: () => $t('nav.terrain'), icon: ICON_TERRAIN },
     { id: "logbook", label: () => $t('nav.logbook'), icon: ICON_LOGBOOK },
     { id: "radar", label: () => $t('nav.radar'), icon: ICON_RADAR },
+    { id: "airspace", label: () => $t('nav.airspace'), icon: ICON_AIRSPACE },
     { id: "video", label: () => $t('nav.video'), icon: ICON_VIDEO },
     { id: "settings", label: () => $t('nav.settings'), icon: ICON_SETTINGS },
   ];
   const tabs = $derived(
     allTabs.filter(t =>
       (t.id !== 'logbook' || flightLoggingEnabled) &&
-      (t.id !== 'radar' || radarSettings.enabled) // radar tab only when the master switch is on
+      (t.id !== 'radar' || radarSettings.enabled) && // radar tab only when the master switch is on
+      (t.id !== 'airspace' || airspaceSettings.enabled) // airspace tab only when its master switch is on
     )
   );
 
@@ -482,6 +490,7 @@
   nightMode2D = saved.nightMode2D ?? 'off';
   gcsMode = saved.gcsMode ?? 'manual';
   if (saved.radar) radarSettings = saved.radar;
+  if (saved.airspace) airspaceSettings = saved.airspace;
   defaultWpAltitudeM = saved.defaultWpAltitudeM;
   defaultPhTimeSec = saved.defaultPhTimeSec;
   warnAltitudeM = saved.warnAltitudeM;
@@ -631,6 +640,22 @@
   }
   // Re-aim the online query centre when the 2D/3D view mode flips.
   $effect(() => { void mapViewMode; updateRadarCenter(); });
+
+  // Airspace Manager: fetch the aero layers for a 500 km region around the reference (UAV/GCS, else the
+  // map centre) while enabled. The backend caches the region; we only re-request when the rounded centre,
+  // provider or key changes.
+  let lastAeroFetchKey = '';
+  $effect(() => {
+    const a = airspaceSettings;
+    const ref = radarReference; // re-fetch when the UAV/GCS reference moves
+    if (!a.enabled || a.provider === 'none' || (a.provider === 'openaip' && !a.apiKey)) { lastAeroFetchKey = ''; return; }
+    const c = ref ?? { lat: get(settings).map.center[0], lon: get(settings).map.center[1] };
+    const key = `${a.provider}|${a.apiKey}|${c.lat.toFixed(1)},${c.lon.toFixed(1)}`;
+    if (key === lastAeroFetchKey) return;
+    lastAeroFetchKey = key;
+    // 200 km airspace radius (few polygons); obstacles/airports/RC are capped to a short range backend-side.
+    void fetchAero(a.provider, a.apiKey, c.lat, c.lon, 200, ['airspaces', 'obstacles', 'airports', 'rc']);
+  });
   // Re-push the radar config when ADS-B-via-MSP support changes (connect/disconnect an INAV 8.0+ FC),
   // so the scheduler's MSP-ADSB polling flag tracks it. Guarded against the initial duplicate.
   let lastMspSupported = false;
@@ -702,6 +727,7 @@
       radarSettings = patch.radar;
       pushRadarConfig(); // start/stop the backend pipeline on any radar settings change
     }
+    if (patch.airspace != null) airspaceSettings = patch.airspace;
     if (patch.defaultWpAltitudeM != null) defaultWpAltitudeM = patch.defaultWpAltitudeM;
     if (patch.defaultPhTimeSec != null) defaultPhTimeSec = patch.defaultPhTimeSec;
     if (patch.warnAltitudeM != null) warnAltitudeM = patch.warnAltitudeM;
@@ -1933,6 +1959,7 @@
         {warnAltitudeM}
         {interfaceSettings}
         radar={radarSettings}
+        airspace={airspaceSettings}
         {isWidgetActive}
         {getWidgetPanelLabel}
         onPatch={applySettingsPatch}
@@ -1979,6 +2006,8 @@
       <MissionPanel />
     {:else if activeTab === 'radar'}
       <RadarPanel radar={radarSettings} {interfaceSettings} referencePoint={radarReference} mspSupported={mspAdsbSupported} onPatch={applySettingsPatch} />
+    {:else if activeTab === 'airspace'}
+      <AirspaceManagerPanel reference={radarReference} distanceUnit={interfaceSettings.distanceUnit} />
     {:else if activeTab === 'video'}
       <VideoPanel />
     {:else if DEV_MODE && activeTab === 'dev-playground'}

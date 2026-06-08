@@ -12,9 +12,9 @@
   import { SUPPORTED_LOCALES } from '$lib/i18n';
   import { MAP_PROVIDERS } from '$lib/config/mapProviders';
   import { WIDGET_DEFS } from '$lib/config/widgetRegistry';
-  import { DEFAULT_RADAR } from '$lib/stores/settings';
+  import { DEFAULT_RADAR, DEFAULT_AIRSPACE } from '$lib/stores/settings';
   import { resetGcsManual, gcsManuallySet } from '$lib/stores/gcsLocation';
-  import type { AppSettings, InterfaceSettings, RadarSettings, GcsMode } from '$lib/stores/settings';
+  import type { AppSettings, InterfaceSettings, RadarSettings, GcsMode, AirspaceSettings, AirspaceProvider } from '$lib/stores/settings';
   import type { TileCacheStats } from '$lib/cache/tileCache';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import UnitStepper from '$lib/components/UnitStepper.svelte';
@@ -50,6 +50,7 @@
     warnAltitudeM = 120,
     interfaceSettings = { speedUnit: 'kmh', altitudeUnit: 'm', distanceUnit: 'metric', verticalSpeedUnit: 'ms', temperatureUnit: 'c' },
     radar = DEFAULT_RADAR,
+    airspace = DEFAULT_AIRSPACE,
     isWidgetActive = (_widgetId: string) => false,
     getWidgetPanelLabel = (_widgetId: string) => '',
     onPatch = (_patch: Partial<AppSettings>) => {},
@@ -86,6 +87,7 @@
     warnAltitudeM?: number;
     interfaceSettings?: InterfaceSettings;
     radar?: RadarSettings;
+    airspace?: AirspaceSettings;
     isWidgetActive?: (widgetId: string) => boolean;
     getWidgetPanelLabel?: (widgetId: string) => string;
     onPatch?: (patch: Partial<AppSettings>) => void;
@@ -103,6 +105,9 @@
   /** Patch the nested radar settings (onPatch merges shallowly, so pass the whole radar object). */
   function patchRadar(partial: Partial<RadarSettings>) {
     onPatch({ radar: { ...radar, ...partial } });
+  }
+  function patchAirspace(partial: Partial<AirspaceSettings>) {
+    onPatch({ airspace: { ...airspace, ...partial } });
   }
 
   function handleLocaleChange(event: Event) {
@@ -332,6 +337,36 @@
       <p class="cesium-hint">
         {$t('settings.cesiumHintPre')} <a href="https://ion.cesium.com/signup" target="_blank" rel="noopener">ion.cesium.com</a> {$t('settings.cesiumHintPost')}
       </p>
+      <!-- Airspace Manager (aeronautical data) — global toggle + provider + key; rest lives in the panel. -->
+      <div class="s-row">
+        <span class="s-label">{$t('settings.airspaceManager')}</span>
+        <Toggle checked={airspace.enabled} id="airspace-enabled" onchange={(c) => patchAirspace({ enabled: c })} />
+      </div>
+      {#if airspace.enabled}
+        <div class="s-row">
+          <label class="s-label" for="airspace-provider">{$t('settings.airspaceProvider')}</label>
+          <select id="airspace-provider" class="s-select" value={airspace.provider} onchange={(e) => patchAirspace({ provider: (e.target as HTMLSelectElement).value as AirspaceProvider })}>
+            <option value="none">{$t('settings.airspaceProviderNone')}</option>
+            <option value="openaip">OpenAIP</option>
+          </select>
+        </div>
+        {#if airspace.provider === 'openaip'}
+          <div class="s-row">
+            <label class="s-label" for="airspace-key">{$t('settings.airspaceApiKey')}</label>
+            <input
+              id="airspace-key"
+              class="s-input"
+              type="password"
+              placeholder="(OpenAIP API key)"
+              value={airspace.apiKey}
+              onchange={(e) => patchAirspace({ apiKey: (e.target as HTMLInputElement).value.trim() })}
+            />
+          </div>
+          <p class="cesium-hint">
+            {$t('settings.airspaceHintPre')} <a href="https://www.openaip.net/" target="_blank" rel="noopener">openaip.net</a> {$t('settings.airspaceHintPost')}
+          </p>
+        {/if}
+      {/if}
     </div>
 
     <!-- ── Telemetry ─────────────────────────────────── -->

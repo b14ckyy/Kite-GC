@@ -57,9 +57,20 @@
     "mission": "Mission",
     "terrain": "Gelände",
     "radar": "Radar",
+    "airspace": "Luftraum",
     "video": "Video",
     "closePanel": "Panel schließen",
     "openPanel": "Panel öffnen"
+  },
+  "airspace": {
+    "title": "Airspace Manager",
+    "nearby": "In der Nähe",
+    "cache": "Cache",
+    "layerAirspaces": "Lufträume",
+    "layerObstacles": "Hindernisse",
+    "layerAirports": "Flugplätze",
+    "layerRc": "RC-Plätze",
+    "layerAirfields": "Plätze"
   },
   "radar": {
     "title": "Radar",
@@ -241,6 +252,12 @@
     "gcsResetHint": "Manuelle Platzierung verwerfen und zu „Your Location“ zurückspringen",
     "gcsMarker": "Bodenstation (GCS)",
     "gcsSetHere": "GCS hier setzen",
+    "airspaceManager": "Airspace Manager",
+    "airspaceProvider": "Datenanbieter",
+    "airspaceProviderNone": "Keiner",
+    "airspaceApiKey": "API-Key",
+    "airspaceHintPre": "Kostenlosen API-Key holen bei",
+    "airspaceHintPost": "(nicht-kommerziell).",
     "noCache": "Kein Cache",
     "clear": "Leeren",
     "telemetryRates": "Telemetrie-Raten",

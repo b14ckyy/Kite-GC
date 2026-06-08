@@ -57,9 +57,20 @@
     "mission": "Mission",
     "terrain": "Terrain",
     "radar": "Radar",
+    "airspace": "Espace aérien",
     "video": "Vidéo",
     "closePanel": "Fermer le panneau",
     "openPanel": "Ouvrir le panneau"
+  },
+  "airspace": {
+    "title": "Gestionnaire d'espace aérien",
+    "nearby": "À proximité",
+    "cache": "Cache",
+    "layerAirspaces": "Espaces aériens",
+    "layerObstacles": "Obstacles",
+    "layerAirports": "Aérodromes",
+    "layerRc": "Sites RC",
+    "layerAirfields": "Terrains"
   },
   "radar": {
     "title": "Radar",
@@ -241,6 +252,12 @@
     "gcsResetHint": "Annuler le placement manuel et revenir à votre position",
     "gcsMarker": "Station au sol (GCS)",
     "gcsSetHere": "Définir la GCS ici",
+    "airspaceManager": "Gestionnaire d'espace aérien",
+    "airspaceProvider": "Fournisseur de données",
+    "airspaceProviderNone": "Aucun",
+    "airspaceApiKey": "Clé API",
+    "airspaceHintPre": "Obtenez une clé API gratuite sur",
+    "airspaceHintPost": "(non commercial).",
     "noCache": "Aucun cache",
     "clear": "Vider",
     "telemetryRates": "Fréquences de télémétrie",

@@ -163,6 +163,24 @@ export const DEFAULT_RADAR: RadarSettings = {
   sim: false,
 };
 
+/** Airspace Manager — aeronautical-data provider (one active at a time). See docs/active/AIRSPACE_MANAGER.md. */
+export type AirspaceProvider = 'none' | 'openaip';
+/** Airspace Manager global settings (Data tab). Per-layer 2D/3D visibility + filters live in the panel. */
+export interface AirspaceSettings {
+  /** Global feature toggle — enables the subsystem + shows the panel in the nav rail. */
+  enabled: boolean;
+  /** Active aeronautical-data provider. */
+  provider: AirspaceProvider;
+  /** Provider API key (user-supplied; persisted). */
+  apiKey: string;
+}
+
+export const DEFAULT_AIRSPACE: AirspaceSettings = {
+  enabled: false,
+  provider: 'none',
+  apiKey: '',
+};
+
 export interface AppSettings {
   lastPort: string;
   lastBaud: number;
@@ -212,6 +230,8 @@ export interface AppSettings {
   userLocation: { lat: number; lon: number } | null;
   /** Radar (foreign-vehicle tracking) subsystem settings. */
   radar: RadarSettings;
+  /** Airspace Manager (aeronautical data) global settings. */
+  airspace: AirspaceSettings;
 }
 
 const STORAGE_KEY = 'kite-gc-settings';
@@ -261,6 +281,7 @@ const defaults: AppSettings = {
   gcsMode: 'manual',
   userLocation: null,
   radar: DEFAULT_RADAR,
+  airspace: DEFAULT_AIRSPACE,
 };
 
 function load(): AppSettings {
@@ -302,6 +323,7 @@ function load(): AppSettings {
             alerts: { ...dr.alerts, ...(pr.alerts ?? {}) },
           };
         })(),
+        airspace: { ...defaults.airspace, ...(parsed.airspace ?? {}) },
       };
     }
   } catch {

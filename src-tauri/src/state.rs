@@ -7,6 +7,7 @@
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
+use crate::aero::AeroCache;
 use crate::mavlink_proto::MavlinkHandle;
 use crate::msp::FcInfo;
 use crate::radar::source::SourceUpdate;
@@ -34,6 +35,8 @@ pub struct AppState {
     /// Stop handle for the live BLE scan session (Some while scanning). Dropping/replacing the
     /// sender ends the session — see `commands::connection::ble_scan_start` / `ble_scan_stop`.
     pub ble_scan_stop: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    /// Airspace Manager (aeronautical data) — last fetched region cached in RAM, or None.
+    pub aero: Mutex<Option<AeroCache>>,
 }
 
 impl AppState {
@@ -47,6 +50,7 @@ impl AppState {
             radar_ingest,
             radar_msp_enabled: Arc::new(AtomicBool::new(false)),
             ble_scan_stop: Mutex::new(None),
+            aero: Mutex::new(None),
         }
     }
 }

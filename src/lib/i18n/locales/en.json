@@ -57,9 +57,20 @@
     "mission": "Mission",
     "terrain": "Terrain",
     "radar": "Radar",
+    "airspace": "Airspace",
     "video": "Video",
     "closePanel": "Close panel",
     "openPanel": "Open panel"
+  },
+  "airspace": {
+    "title": "Airspace Manager",
+    "nearby": "Nearby",
+    "cache": "Cache",
+    "layerAirspaces": "Airspaces",
+    "layerObstacles": "Obstacles",
+    "layerAirports": "Airports",
+    "layerRc": "RC fields",
+    "layerAirfields": "Airfields"
   },
   "radar": {
     "title": "Radar",
@@ -241,6 +252,12 @@
     "gcsResetHint": "Clear the manual placement and snap back to Your Location",
     "gcsMarker": "Ground station (GCS)",
     "gcsSetHere": "Set GCS here",
+    "airspaceManager": "Airspace Manager",
+    "airspaceProvider": "Data provider",
+    "airspaceProviderNone": "None",
+    "airspaceApiKey": "API key",
+    "airspaceHintPre": "Get a free API key at",
+    "airspaceHintPost": "(non-commercial use).",
     "noCache": "No Cache",
     "clear": "Clear",
     "telemetryRates": "Telemetry Rates",

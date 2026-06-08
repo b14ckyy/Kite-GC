@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
+mod aero;
 mod commands;
 mod flightlog;
 mod mavlink_proto;
@@ -31,6 +32,7 @@ use commands::flightlog::{
     battery_db_flights, flight_set_battery_serial, battery_db_set_baseline,
     battery_file_write, battery_file_read,
 };
+use commands::aero::{aero_fetch, aero_cache_stats, aero_cache_clear};
 use commands::info::get_app_version;
 use commands::radar::{radar_configure, radar_set_center, radar_set_node_pos, radar_snapshot};
 use commands::terrain::{terrain_elevation, terrain_fan, terrain_profile};
@@ -197,6 +199,9 @@ pub fn run() {
             radar_set_center,
             radar_set_node_pos,
             radar_snapshot,
+            aero_fetch,
+            aero_cache_stats,
+            aero_cache_clear,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Kite Ground Control");

@@ -46,6 +46,8 @@
   import { radarVehicles, radarSelection, enrichList, type RadarSnapshot, type EnrichedVehicle } from "$lib/stores/radarTracking";
   import { radarAlertLevels, type AlertLevel } from "$lib/controllers/radarAlerts";
   import { gcsLocation, gcsAccuracyM, setGcsManual } from "$lib/stores/gcsLocation";
+  import { aeroData, aeroLayers, aeroFocus, type AeroPoint } from "$lib/stores/airspace";
+  import { airspaceStyle, aeroPointIconHtml, aeroPointInfo, airspaceMinZoom, airportMinZoom, obstacleMinZoom, RC_MIN_ZOOM } from "$lib/helpers/airspaceStyle";
   import { type RadarMapSettings, type GcsMode } from "$lib/stores/settings";
   import { openContextMenu } from "$lib/stores/contextMenu";
   import { t } from "svelte-i18n";
@@ -374,6 +376,69 @@
       { label: get(t)("settings.gcsSetHere"), icon: "📡", action: () => setGcsManual(lat, lng) },
     ]);
   }
+
+  // ── Airspace Manager (aeronautical data) 2D layer ──
+  let airspaceLayer: L.LayerGroup | undefined;
+  let unsubAero: (() => void) | undefined;
+  let unsubAeroLayers: (() => void) | undefined;
+  let unsubAeroFocus: (() => void) | undefined;
+  const MAX_AERO_MARKERS = 1500; // cap rendered point markers per redraw (dense regions)
+
+  /** Rebuild the airspace overlay: all airspaces (few), point features clipped to the current view. */
+  function updateAirspace() {
+    if (!map) return;
+    if (!airspaceLayer) airspaceLayer = L.layerGroup().addTo(map);
+    const group = airspaceLayer;
+    group.clearLayers();
+    if (!$settings.airspace.enabled) return; // OFF → nothing drawn
+    const data = get(aeroData);
+    const vis = get(aeroLayers);
+    const z = map.getZoom(); // zoom-density: each feature has a min-zoom by importance/size
+
+    if (vis.airspaces.d2) {
+      for (const a of data.airspaces) {
+        if (z < airspaceMinZoom(a)) continue;
+        const st = airspaceStyle(a);
+        for (const ring of a.outlines) {
+          const latlngs = ring.map(([lon, lat]) => [lat, lon] as [number, number]);
+          const poly = L.polygon(latlngs, {
+            color: st.color, weight: st.weight, fillColor: st.fillColor, fillOpacity: st.fillOpacity,
+            dashArray: st.dashArray,
+          });
+          poly.bindPopup(
+            `<b>${a.name}</b><br>${a.typeName}${a.icaoClassName !== "?" ? ` · Class ${a.icaoClassName}` : ""}` +
+            `<br>${a.lower.label} – ${a.upper.label}`,
+          );
+          group.addLayer(poly);
+        }
+      }
+    }
+
+    // Point layers — clipped to the visible bounds (a 500 km cache can hold thousands of obstacles).
+    const bounds = map.getBounds();
+    let count = 0;
+    const addPoints = (pts: AeroPoint[], on: boolean, minZoom: (p: AeroPoint) => number) => {
+      if (!on) return;
+      for (const p of pts) {
+        if (count >= MAX_AERO_MARKERS) break;
+        if (z < minZoom(p)) continue;                 // zoom-density filter
+        if (!bounds.contains([p.lat, p.lon])) continue; // clip to view
+        const m = L.marker([p.lat, p.lon], {
+          icon: L.divIcon({ className: "aero-divicon", html: aeroPointIconHtml(p), iconSize: [20, 20], iconAnchor: [10, 10] }),
+        });
+        const info = aeroPointInfo(p);
+        m.bindPopup(`<b>${p.name || p.subtype || p.kind}</b>${info ? `<br>${info}` : ""}`);
+        group.addLayer(m);
+        count++;
+      }
+    };
+    addPoints(data.obstacles, vis.obstacles.d2, obstacleMinZoom);
+    addPoints(data.airports, vis.airports.d2, airportMinZoom);
+    addPoints(data.rcAirfields, vis.rc.d2, () => RC_MIN_ZOOM);
+  }
+
+  // Redraw on enable-toggle, new data, or visibility change (data/visibility via subscriptions below).
+  $effect(() => { void $settings.airspace.enabled; if (map) updateAirspace(); });
 
   // Follow mode (bindable prop, see $props above):
   // - free: manual map movement
@@ -740,6 +805,12 @@
     unsubGcs = gcsLocation.subscribe(() => updateGcsMarker());
     unsubGcsAcc = gcsAccuracyM.subscribe(() => updateGcsAccuracyCircle());
 
+    // Airspace overlay: redraw on new data / visibility changes; re-clip points to the view on pan.
+    unsubAero = aeroData.subscribe(() => updateAirspace());
+    unsubAeroLayers = aeroLayers.subscribe(() => updateAirspace());
+    unsubAeroFocus = aeroFocus.subscribe((f) => { if (f && map) map.setView([f.lat, f.lon], Math.max(map.getZoom(), 11)); });
+    map.on("moveend", updateAirspace);
+
     // Auto night mode: physical location + re-check every minute so wall-clock drift fades day↔night.
     ensureUserLocation(); // OS geolocation (resolves async)
     unsubUserGeo = userGeoLocation.subscribe(() => recomputeNight()); // recompute once it resolves
@@ -912,6 +983,9 @@
     unsubRadarAlerts?.();
     unsubGcs?.();
     unsubGcsAcc?.();
+    unsubAero?.();
+    unsubAeroLayers?.();
+    unsubAeroFocus?.();
     if (unsubTelemetry) unsubTelemetry();
     if (unsubSettings) unsubSettings();
     if (map) {
