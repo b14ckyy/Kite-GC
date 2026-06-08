@@ -151,6 +151,7 @@
 {#snippet toolbar()}
   <div class="settabs">
     <SegmentedToggle
+      full
       options={[{ value: 'interface', label: $t('settings.interface') }, { value: 'data', label: $t('settings.tabData') }]}
       value={tab}
       onchange={(v) => (tab = v as 'interface' | 'data')}

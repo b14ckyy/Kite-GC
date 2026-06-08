@@ -5,6 +5,8 @@
 
 <script lang="ts">
   import { t } from 'svelte-i18n';
+  import Button from '$lib/components/panel/Button.svelte';
+  import SegmentedToggle from '$lib/components/panel/SegmentedToggle.svelte';
   import type { PortInfo, BleDeviceInfo, TransportType, ProtocolType } from '$lib/stores/connection';
   import type { TelemetryData } from '$lib/stores/telemetry';
 
@@ -68,14 +70,15 @@
   <div class="toolbar-right">
     <div class="port-controls">
       {#if connStatus !== "connected"}
-        <!-- Protocol selector -->
-        <select class="transport-select" bind:value={selectedProtocol}>
-          <option value="msp">MSP</option>
-          <option value="mavlink">MAVLink</option>
-        </select>
+        <!-- Protocol selector (2 options → segmented toggle) -->
+        <SegmentedToggle
+          options={[{ value: 'msp', label: 'MSP' }, { value: 'mavlink', label: 'MAVLink' }]}
+          value={selectedProtocol}
+          onchange={(v) => (selectedProtocol = v as ProtocolType)}
+        />
 
         <!-- Transport type selector -->
-        <select class="transport-select" bind:value={selectedTransport}>
+        <select class="tb-select transport-select" bind:value={selectedTransport}>
           <option value="serial">Serial</option>
           <option value="tcp">TCP</option>
           <option value="udp">UDP</option>
@@ -83,7 +86,7 @@
         </select>
 
         {#if selectedTransport === 'serial'}
-          <select class="port-select" bind:value={selectedPort}>
+          <select class="tb-select port-select" bind:value={selectedPort}>
             {#if ports.length === 0}
               <option value="">{$t('connection.noPortsFound')}</option>
             {:else}
@@ -92,20 +95,20 @@
               {/each}
             {/if}
           </select>
-          <select class="baud-select" bind:value={selectedBaud}>
+          <select class="tb-select baud-select" bind:value={selectedBaud}>
             {#each baudRates as baud}
               <option value={baud}>{baud}</option>
             {/each}
           </select>
         {:else if selectedTransport === 'tcp' || selectedTransport === 'udp'}
           <input
-            class="host-input"
+            class="tb-input host-input"
             type="text"
             bind:value={tcpHost}
             placeholder="Host (z.B. 192.168.1.1)"
           />
           <input
-            class="port-input"
+            class="tb-input port-input"
             type="number"
             bind:value={tcpPort}
             placeholder="Port"
@@ -113,7 +116,7 @@
             max="65535"
           />
         {:else if selectedTransport === 'ble'}
-          <select class="ble-select" bind:value={selectedBleDevice}>
+          <select class="tb-select ble-select" bind:value={selectedBleDevice}>
             {#if bleDeviceList.length === 0}
               <option value="">{isBleScanning ? $t('connection.bleScanning') : $t('connection.noBleDevices')}</option>
             {:else}
@@ -126,22 +129,14 @@
           </select>
         {/if}
       {/if}
-    </div>
-    <button
-      class="connect-btn"
-      class:connected={connStatus === "connected"}
-      class:connecting={isConnecting}
-      onclick={onConnect}
-      disabled={isConnecting}
-    >
       {#if isConnecting}
-        {$t('connection.connecting')}
+        <Button variant="warning" disabled>{$t('connection.connecting')}</Button>
       {:else if connStatus === "connected"}
-        {$t('connection.disconnect')}
+        <Button variant="danger" onclick={onConnect}>{$t('connection.disconnect')}</Button>
       {:else}
-        {$t('connection.connect')}
+        <Button variant="data" onclick={onConnect}>{$t('connection.connect')}</Button>
       {/if}
-    </button>
+    </div>
   </div>
 </header>
 
@@ -235,102 +230,35 @@
     gap: 4px;
   }
 
-  .port-select,
-  .baud-select {
-    padding: 4px 8px;
+  /* Unified toolbar form controls — match the control-library height (28px), so selects, inputs,
+     the SegmentedToggle and the <Button> all align on one line (see docs/active/PANEL_FRAMEWORK.md). */
+  .tb-select,
+  .tb-input {
+    height: 28px;
+    box-sizing: border-box;
+    padding: 0 8px;
     background: #434343;
     border: 1px solid #555;
-    border-radius: 3px;
+    border-radius: 4px;
     color: #e0e0e0;
     font-size: 12px;
   }
 
+  /* Fixed widths + ellipsis so long device names never stretch the bar. */
+  .transport-select { width: 90px; }
+  .baud-select { width: 92px; }
   .port-select {
-    min-width: 160px;
+    width: 180px;
+    text-overflow: ellipsis;
   }
-
-  .baud-select {
-    min-width: 80px;
-  }
-
-  .transport-select {
-    padding: 4px 8px;
-    background: #37a8db;
-    border: 1px solid #339cc1;
-    border-radius: 3px;
-    color: #fff;
-    font-size: 11px;
-    font-weight: 600;
-    min-width: 65px;
-  }
-
   .ble-select {
-    padding: 4px 8px;
-    background: #434343;
-    border: 1px solid #555;
-    border-radius: 3px;
-    color: #e0e0e0;
-    font-size: 12px;
-    min-width: 180px;
+    width: 220px;
+    text-overflow: ellipsis;
   }
+  .host-input { width: 150px; }
+  .port-input { width: 72px; }
 
-  .host-input,
-  .port-input {
-    padding: 4px 8px;
-    background: #434343;
-    border: 1px solid #555;
-    border-radius: 3px;
-    color: #e0e0e0;
-    font-size: 12px;
-  }
-
-  .host-input {
-    min-width: 140px;
-  }
-
-  .port-input {
-    width: 70px;
-  }
-
-  .host-input::placeholder,
-  .port-input::placeholder {
+  .tb-input::placeholder {
     color: #777;
-  }
-
-  .connect-btn {
-    padding: 6px 16px;
-    background: #37a8db;
-    border: 1px solid #339cc1;
-    border-radius: 3px;
-    color: #fff;
-    font-size: 12px;
-    font-weight: 600;
-    text-shadow: 0 1px rgba(0, 0, 0, 0.25);
-    cursor: pointer;
-    transition: background-color 0.2s ease;
-    min-width: 90px;
-  }
-
-  .connect-btn:hover:not(:disabled) {
-    background: #45bce5;
-  }
-
-  .connect-btn:disabled {
-    opacity: 0.7;
-    cursor: wait;
-  }
-
-  .connect-btn.connected {
-    background: #e60000;
-    border-color: #fe0000;
-  }
-
-  .connect-btn.connected:hover {
-    background: #f21212;
-  }
-
-  .connect-btn.connecting {
-    background: #f5a623;
-    border-color: #e09a1e;
   }
 </style>
