@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Live connection discovery (ADR-037).** The connection bar now discovers devices on its own — no more
+  manual refresh. **Serial:** ports are polled every second; a freshly plugged adapter is auto-selected and
+  an unplugged one disappears (the last-used port is still restored on launch). **BLE:** selecting the BLE
+  transport starts a continuous scan that fills the device list in real time (live RSSI), via a streamed
+  backend scan session. Both pause while connecting/connected; the now-obsolete refresh buttons were removed.
+  Radar / FormationFlight port pickers stay on manual refresh on purpose.
 - **GCS location marker on the map (2D + 3D).** A satellite-dish marker shows where your ground station
   is — also used as the radar distance reference and the FormationFlight node position. A new *GCS marker*
   setting (**Off / Manual / Continuous**): *Manual* places it once via OS geolocation and lets you drag it

@@ -1659,5 +1659,42 @@ a proper paper-plane model are later work.
 
 ---
 
+## ADR-037: Live Connection Discovery — Polled Serial + Event-Streamed BLE
+
+**Date**: 2026-06-08
+**Status**: Accepted
+**Related**: ADR-006 (settings/localStorage — `lastPort` restore)
+
+**Context**: The connection toolbar required a manual ⟳ to refresh the serial-port list and to scan for
+BLE devices. Desktop configurators (e.g. INAV Configurator) discover devices live — a freshly plugged
+adapter appears and is selected on its own, and BLE devices populate in real time during a scan. We route
+serial through the Rust `serialport` crate and BLE through `btleplug`, **not** the WebView's Web Serial /
+Web Bluetooth APIs, so we get no OS hotplug/scan events for free.
+
+**Decision**: Auto-discover while disconnected, with a mechanism matched to each transport:
+- **Serial — polling.** `serialport` only enumerates on demand (no hotplug events), but enumeration is
+  cheap, so a 1 s `setInterval` (in `+page`, only while serial is selected and not connecting/connected)
+  re-lists ports. `refreshSerialPorts` diffs against the previous list: a newly appeared port is
+  auto-selected, a vanished selected port is deselected, and the first population keeps the restored
+  `lastPort` (no hijack on launch).
+- **BLE — event streaming.** A backend scan session (`ble_scan_start`/`ble_scan_stop`, `run_scan_session`
+  in `ble.rs`) consumes btleplug's `adapter.events()` and emits a `ble-device` Tauri event per
+  discovered/updated device; the frontend upserts them into a store, so the list (and live RSSI) populate
+  in real time. The scan is stopped before connecting (an adapter can't scan and open a GATT link at once).
+- True OS device-change events (Windows `WM_DEVICECHANGE` / Linux udev / macOS IOKit) were considered but
+  rejected for now: per-platform Rust code, more complexity, and 1 s polling already feels instant.
+
+The manual ⟳ buttons were removed (obsolete). **Other COM-port pickers (Radar / FormationFlight) stay on
+manual refresh on purpose** — reopening the FF port resets the ESP32 (ADR-036), and the radar port is a
+deliberate configuration, not a hot-swap pick.
+
+**Consequences**: a 1 s serial poll runs whenever the toolbar shows a disconnected serial transport
+(negligible cost); a continuous BLE scan runs while BLE is selected and disconnected (radio on, by design).
+The BLE list is still a native `<select>` that re-renders on live RSSI updates — acceptable until the
+connection bar is reworked into the panel/control framework. The old one-shot `scan_ble_devices` command
+remains registered but unused.
+
+---
+
 *End of Architecture Decision Records*
 
