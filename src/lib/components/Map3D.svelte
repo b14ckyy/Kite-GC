@@ -637,6 +637,25 @@
     return { lat: Cesium.Math.toDegrees(c.latitude), lon: Cesium.Math.toDegrees(c.longitude) };
   }
 
+  /** Ground-projected camera geometry for the free-look ADS-B query (see +page `radarQueryView`):
+   *  the nadir subpoint, the screen-centre ground hit (`null` when looking above the horizon), and
+   *  the camera heading (deg). All over-ground — the query is a circle on the surface. */
+  export function getCamGeo(): { sub: { lat: number; lon: number }; focus: { lat: number; lon: number } | null; headingDeg: number } | null {
+    if (!viewer) return null;
+    const c = viewer.camera.positionCartographic;
+    const f = getCamFocus();
+    return {
+      sub: { lat: Cesium.Math.toDegrees(c.latitude), lon: Cesium.Math.toDegrees(c.longitude) },
+      focus: f ? { lat: f.lat, lon: f.lon } : null,
+      headingDeg: Cesium.Math.toDegrees(viewer.camera.heading),
+    };
+  }
+
+  /** True when the 3D camera is in free-look (not locked to the UAV in follow/orbit/fpv). */
+  export function isFreeLook(): boolean {
+    return cameraMode === 'free';
+  }
+
   // Activate/deactivate when the 2D↔3D toggle flips `active`. Inactive → snapshot the
   // free-mode camera's own zoom/angle and pause the render loop (viewer stays in RAM,
   // entities keep updating from the stores). Active → resume, resize, and frame the view:

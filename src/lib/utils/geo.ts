@@ -33,6 +33,26 @@ export function bearing(
   return ((Math.atan2(y, x) / DEG2RAD) + 360) % 360;
 }
 
+/** Destination point reached from (lat, lon) by travelling `distanceM` along `bearingDeg`
+ *  (great-circle). Returns [lat, lon] in degrees. */
+export function destinationPoint(
+  lat: number, lon: number,
+  bearingDeg: number, distanceM: number,
+): { lat: number; lon: number } {
+  const d = distanceM / R_EARTH;
+  const brg = bearingDeg * DEG2RAD;
+  const lat1 = lat * DEG2RAD;
+  const lon1 = lon * DEG2RAD;
+  const lat2 = Math.asin(
+    Math.sin(lat1) * Math.cos(d) + Math.cos(lat1) * Math.sin(d) * Math.cos(brg),
+  );
+  const lon2 = lon1 + Math.atan2(
+    Math.sin(brg) * Math.sin(d) * Math.cos(lat1),
+    Math.cos(d) - Math.sin(lat1) * Math.sin(lat2),
+  );
+  return { lat: lat2 / DEG2RAD, lon: (((lon2 / DEG2RAD) + 540) % 360) - 180 };
+}
+
 /** Format distance: meters if <1000, km otherwise */
 export function formatDistance(m: number): string {
   if (m < 1000) return `${Math.round(m)} m`;

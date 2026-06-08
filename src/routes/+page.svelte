@@ -50,7 +50,7 @@
   import { missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode, flightSetBatterySerial, updateFlightNotes, getFlight, batteryDbFindBySerial, batteryDbAddUsage } from '$lib/stores/flightlog';
   import EndFlightDialog from "$lib/components/logbook/EndFlightDialog.svelte";
   import type { EndFlightStats } from "$lib/components/logbook/EndFlightDialog.svelte";
-  import { haversineDistance } from '$lib/utils/geo';
+  import { haversineDistance, bearing, destinationPoint } from '$lib/utils/geo';
   import { buildMissionInput, missionContentHash } from '$lib/helpers/missionLibrary';
   import { homePosition } from '$lib/stores/home';
   import { MAP_PROVIDERS } from "$lib/config/mapProviders";
@@ -99,6 +99,8 @@
   let map3dRef: {
     getCamFocus?: () => { lat: number; lon: number; range: number } | null;
     getCamSubpoint?: () => { lat: number; lon: number } | null;
+    getCamGeo?: () => { sub: { lat: number; lon: number }; focus: { lat: number; lon: number } | null; headingDeg: number } | null;
+    isFreeLook?: () => boolean;
   } | undefined = $state();
   // 2D follow state, lifted here so it survives the 2D map's remount on each 2D↔3D toggle
   // (the 3D camera mode persists on its own since Map3D stays mounted).
@@ -494,26 +496,51 @@
   panels = saved.panels ?? defaultPanels;
 
   // ── Radar (foreign-vehicle tracking) — independent of the main connection ──
-  /** ONLINE ADS-B query centre = the map *view*: the 2D map centre, or the 3D camera focus over the
-   *  globe. Always the view — NOT the UAV — so the user fetches traffic where they're looking.
-   *  (Distance/bearing is referenced separately, see `radarReference`.) */
-  /** Online query view: centre + (3D only) an auto radius sized to what the camera sees. In 2D the
-   *  radius stays the configured "web download radius" (radiusKm = undefined → backend keeps config). */
-  function radarQueryView(): { lat: number; lon: number; radiusKm: number | undefined } {
-    if (mapViewMode === '3d') {
-      const f = map3dRef?.getCamFocus?.();
-      if (f) {
-        // Cover ~the camera→focus distance, floored at the manual radius, capped at the provider
-        // limit (~250 NM ≈ 463 km). Self-adjusts to zoom/tilt.
-        const rKm = Math.min(463, Math.max(radarSettings.adsb.radiusKm, f.range / 1000));
-        return { lat: f.lat, lon: f.lon, radiusKm: rKm };
+  /** Free-look: cap the query centre's offset from the camera nadir (and the radius) at 150 km. */
+  const FREE_LOOK_MAX_OFFSET_KM = 150;
+  /** ONLINE ADS-B query centre + radius — all measured over the ground (the query is a surface circle).
+   *  - **Free-look 3D:** centre = the screen-centre ground point, but its offset from the camera nadir
+   *    (subpoint) is capped at 150 km; if the view runs past that — or hits no ground (looking above the
+   *    horizon) — the centre is projected 150 km along the look direction. The radius = that horizontal
+   *    offset, floored at the configured download radius. So the camera sits at the circle's near edge
+   *    and looks into it; straight-down collapses the offset → the configured radius.
+   *  - **UAV-locked 3D (follow/orbit/fpv) and 2D:** the UAV/reference (or 2D map centre) + the configured
+   *    radius — unchanged from before.
+   *  (Distance/bearing labels use `radarReference` separately.) */
+  function radarQueryView(): { lat: number; lon: number; radiusKm: number } {
+    const cfgKm = radarSettings.adsb.radiusKm > 0 ? radarSettings.adsb.radiusKm : 25;
+
+    if (mapViewMode === '3d' && map3dRef?.isFreeLook?.()) {
+      const g = map3dRef.getCamGeo?.();
+      if (g) {
+        const maxM = FREE_LOOK_MAX_OFFSET_KM * 1000;
+        let center: { lat: number; lon: number };
+        let offsetM: number;
+        if (g.focus) {
+          const d = haversineDistance(g.sub.lat, g.sub.lon, g.focus.lat, g.focus.lon);
+          if (d <= maxM) {
+            center = g.focus;
+            offsetM = d;
+          } else {
+            const brg = bearing(g.sub.lat, g.sub.lon, g.focus.lat, g.focus.lon);
+            center = destinationPoint(g.sub.lat, g.sub.lon, brg, maxM);
+            offsetM = maxM;
+          }
+        } else {
+          // Above the horizon: project 150 km along the camera heading.
+          center = destinationPoint(g.sub.lat, g.sub.lon, g.headingDeg, maxM);
+          offsetM = maxM;
+        }
+        return { lat: center.lat, lon: center.lon, radiusKm: Math.max(cfgKm, offsetM / 1000) };
       }
-      // No ground hit (horizon/sky): centre under the camera, query the cap.
-      const sub = map3dRef?.getCamSubpoint?.();
-      if (sub) return { lat: sub.lat, lon: sub.lon, radiusKm: 463 };
+    }
+
+    // UAV-locked 3D → centre on the UAV/reference; 2D → the map centre. Both at the configured radius.
+    if (mapViewMode === '3d' && radarReference) {
+      return { lat: radarReference.lat, lon: radarReference.lon, radiusKm: cfgKm };
     }
     const c = get(settings).map.center;
-    return { lat: c[0], lon: c[1], radiusKm: undefined };
+    return { lat: c[0], lon: c[1], radiusKm: cfgKm };
   }
   /** Distance/bearing reference for ALL tracked vehicles: the connected UAV (valid fix), else the
    *  GCS marker location (null when the GCS marker is OFF). (MSP is implicitly the UAV; others inherit.) */
