@@ -31,6 +31,9 @@ pub struct AppState {
     /// (Some while radar runs) and a runtime on/off flag the MSP scheduler polls.
     pub radar_ingest: Arc<Mutex<Option<std::sync::mpsc::Sender<SourceUpdate>>>>,
     pub radar_msp_enabled: Arc<AtomicBool>,
+    /// Stop handle for the live BLE scan session (Some while scanning). Dropping/replacing the
+    /// sender ends the session — see `commands::connection::ble_scan_start` / `ble_scan_stop`.
+    pub ble_scan_stop: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
 }
 
 impl AppState {
@@ -43,6 +46,7 @@ impl AppState {
             radar: Mutex::new(radar),
             radar_ingest,
             radar_msp_enabled: Arc::new(AtomicBool::new(false)),
+            ble_scan_stop: Mutex::new(None),
         }
     }
 }

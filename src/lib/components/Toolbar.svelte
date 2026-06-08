@@ -24,8 +24,6 @@
     tcpPort = $bindable(),
     selectedBleDevice = $bindable(),
     baudRates,
-    onRefreshPorts,
-    onScanBle,
     onConnect,
   }: {
     appVersion: string;
@@ -43,8 +41,6 @@
     tcpPort: number;
     selectedBleDevice: string;
     baudRates: number[];
-    onRefreshPorts: () => void;
-    onScanBle: () => void;
     onConnect: () => void;
   } = $props();
 
@@ -101,7 +97,6 @@
               <option value={baud}>{baud}</option>
             {/each}
           </select>
-          <button class="refresh-btn" onclick={onRefreshPorts} title={$t('connection.refreshPorts')}>⟳</button>
         {:else if selectedTransport === 'tcp' || selectedTransport === 'udp'}
           <input
             class="host-input"
@@ -129,9 +124,6 @@
               {/each}
             {/if}
           </select>
-          <button class="refresh-btn" onclick={onScanBle} disabled={isBleScanning} title={$t('connection.bleScan')}>
-            {isBleScanning ? '⏳' : '⟳'}
-          </button>
         {/if}
       {/if}
     </div>
@@ -303,21 +295,6 @@
   .host-input::placeholder,
   .port-input::placeholder {
     color: #777;
-  }
-
-  .refresh-btn {
-    padding: 4px 8px;
-    background: #434343;
-    border: 1px solid #555;
-    border-radius: 3px;
-    color: #e0e0e0;
-    font-size: 14px;
-    cursor: pointer;
-    transition: background-color 0.2s;
-  }
-
-  .refresh-btn:hover {
-    background: #555;
   }
 
   .connect-btn {

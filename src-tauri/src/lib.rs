@@ -12,7 +12,7 @@ mod state;
 mod terrain;
 mod transport;
 
-use commands::connection::{connect, disconnect, list_serial_ports, scan_ble_devices};
+use commands::connection::{connect, disconnect, list_serial_ports, scan_ble_devices, ble_scan_start, ble_scan_stop};
 use commands::flightlog::{
     flightlog_list, flightlog_get, flightlog_get_track, flightlog_delete,
     flightlog_update_notes, flightlog_update_craft_name, flightlog_update_platform_type, flightlog_update_pilot, flightlog_update_weather, flightlog_geocode, flightlog_fetch_weather,
@@ -113,6 +113,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_serial_ports,
             scan_ble_devices,
+            ble_scan_start,
+            ble_scan_stop,
             connect,
             disconnect,
             get_app_version,

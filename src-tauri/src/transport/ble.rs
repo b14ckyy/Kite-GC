@@ -200,6 +200,69 @@ pub async fn scan_ble_devices() -> Result<Vec<BleDeviceInfo>, String> {
     Ok(devices)
 }
 
+/// Run a continuous BLE scan session, emitting a `ble-device` Tauri event for each discovered or
+/// updated device (named devices only) so the frontend can populate its list in real time. Runs
+/// until `stop_rx` resolves (the sender is dropped or signalled), then stops the scan.
+pub async fn run_scan_session(
+    app: tauri::AppHandle,
+    mut stop_rx: tokio::sync::oneshot::Receiver<()>,
+) -> Result<(), String> {
+    use btleplug::api::{Central, CentralEvent, Manager as _, Peripheral as _, ScanFilter};
+    use btleplug::platform::Manager;
+    use futures::StreamExt;
+    use tauri::Emitter;
+
+    let manager = Manager::new()
+        .await
+        .map_err(|e| format!("BLE manager init failed: {}", e))?;
+    let adapter = manager
+        .adapters()
+        .await
+        .map_err(|e| format!("No BLE adapters found: {}", e))?
+        .into_iter()
+        .next()
+        .ok_or_else(|| "No BLE adapter available".to_string())?;
+
+    let profiles = known_profiles();
+    let mut events = adapter
+        .events()
+        .await
+        .map_err(|e| format!("BLE events stream failed: {}", e))?;
+    adapter
+        .start_scan(ScanFilter { services: vec![] })
+        .await
+        .map_err(|e| format!("BLE scan failed: {}", e))?;
+
+    loop {
+        tokio::select! {
+            _ = &mut stop_rx => break, // stop signalled or sender dropped
+            ev = events.next() => {
+                match ev {
+                    Some(CentralEvent::DeviceDiscovered(id)) | Some(CentralEvent::DeviceUpdated(id)) => {
+                        let Ok(peripheral) = adapter.peripheral(&id).await else { continue };
+                        let Ok(Some(props)) = peripheral.properties().await else { continue };
+                        let Some(name) = props.local_name.clone().filter(|n| !n.is_empty()) else { continue };
+                        let matched = profiles
+                            .iter()
+                            .find(|pr| props.services.iter().any(|s| *s == pr.service_uuid));
+                        let _ = app.emit("ble-device", BleDeviceInfo {
+                            id: peripheral.id().to_string(),
+                            name,
+                            profile: matched.map(|p| p.name.to_string()).unwrap_or_else(|| "Unknown".to_string()),
+                            rssi: props.rssi,
+                        });
+                    }
+                    None => break, // event stream ended
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    let _ = adapter.stop_scan().await;
+    Ok(())
+}
+
 /// Connect to a BLE device by its peripheral ID.
 /// Spawns a background thread that bridges async btleplug to sync channels.
 pub async fn connect_ble(device_id: &str) -> Result<BleTransport, String> {

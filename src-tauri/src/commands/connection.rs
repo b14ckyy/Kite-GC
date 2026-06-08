@@ -34,6 +34,32 @@ pub async fn scan_ble_devices() -> Result<Vec<BleDeviceInfo>, String> {
     crate::transport::ble::scan_ble_devices().await
 }
 
+/// Start a live BLE scan session. Discovered/updated devices are emitted as `ble-device` events
+/// for the frontend to populate in real time. Restarts any previous session.
+#[tauri::command]
+pub async fn ble_scan_start(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+    {
+        // Replace any existing sender — dropping the old one ends the previous session.
+        let mut guard = state.ble_scan_stop.lock().map_err(|e| e.to_string())?;
+        *guard = Some(tx);
+    }
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = crate::transport::ble::run_scan_session(app, rx).await {
+            log::warn!("BLE scan session ended: {}", e);
+        }
+    });
+    Ok(())
+}
+
+/// Stop the live BLE scan session (if any).
+#[tauri::command]
+pub fn ble_scan_stop(state: State<'_, AppState>) -> Result<(), String> {
+    let mut guard = state.ble_scan_stop.lock().map_err(|e| e.to_string())?;
+    *guard = None; // drop the sender → the session's stop future resolves
+    Ok(())
+}
+
 /// Connect to a flight controller on the given transport and protocol.
 /// MSP: Performs handshake + starts telemetry scheduler.
 /// MAVLink: Waits for HEARTBEAT + starts handler thread.

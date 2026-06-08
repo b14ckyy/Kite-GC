@@ -4,7 +4,7 @@
 -->
 
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { open, save } from "@tauri-apps/plugin-dialog";
@@ -38,7 +38,7 @@
   import { ensureUserLocation, requestUserLocation, userGeoLocation } from "$lib/helpers/userLocation";
   import { gcsLocation } from "$lib/stores/gcsLocation";
   import { PlaybackController } from '$lib/controllers/playbackController';
-  import { refreshSerialPorts, connectFC, disconnectFC, scanBleDevices } from '$lib/controllers/connectionController';
+  import { refreshSerialPorts, connectFC, disconnectFC, startBleScan, stopBleScan, startBleDeviceListener, stopBleDeviceListener, clearBleDevices } from '$lib/controllers/connectionController';
   import * as logbookCtrl from '$lib/controllers/logbookController';
   import * as widgetCtrl from '$lib/controllers/widgetController';
   import { isValidGpsCoordinate, isArmed } from '$lib/helpers/telemetry';
@@ -291,7 +291,11 @@
       }
     }
   });
-  bleDevices.subscribe((d) => { bleDeviceList = d; });
+  bleDevices.subscribe((d) => {
+    bleDeviceList = d;
+    // Auto-select the first discovered device while scanning (no manual pick yet).
+    if (d.length > 0 && !selectedBleDevice) selectedBleDevice = d[0].id;
+  });
 
   // Settings state for the settings panel
   let attitudeRateHz = $state(5);
@@ -1297,19 +1301,32 @@
     selectedPort = await refreshSerialPorts(selectedPort);
   }
 
-  async function handleScanBle() {
+  // ── Auto-discovery while disconnected (Quick Note: auto-discover changed COM ports + auto-scan BLE) ──
+  // Only runs while a connection is neither active nor being established. The kickoff is wrapped in
+  // `untrack` so the effect tracks only the transport/status it gates on — never the port/scan state it
+  // writes (which would self-trigger).
+  //
+  // Serial: cheap port enumeration polled every 1 s; newly plugged adapters are auto-selected and
+  // unplugged ones disappear (diff logic in refreshSerialPorts) — no manual ⟳ needed.
+  $effect(() => {
+    if (selectedTransport !== 'serial' || connStatus === 'connected' || connStatus === 'connecting') return;
+    const id = setInterval(() => { void refreshPorts(); }, 1000);
+    untrack(() => { void refreshPorts(); }); // immediate, then poll
+    return () => clearInterval(id);
+  });
+
+  // BLE: a continuous backend scan streams discovered/updated devices via the `ble-device` event
+  // (listener set up in initPage), so the list populates in real time. Start it on entering BLE,
+  // stop it on leaving / connecting.
+  $effect(() => {
+    if (selectedTransport !== 'ble' || connStatus === 'connected' || connStatus === 'connecting') return;
     isBleScanning = true;
-    try {
-      const devices = await scanBleDevices();
-      if (devices.length > 0 && !selectedBleDevice) {
-        selectedBleDevice = devices[0].id;
-      }
-    } catch (e) {
-      errorMsg = String(e);
-    } finally {
+    untrack(() => { clearBleDevices(); void startBleScan(); });
+    return () => {
       isBleScanning = false;
-    }
-  }
+      void stopBleScan();
+    };
+  });
 
   async function handleConnect() {
     if (connStatus === "connected") {
@@ -1335,6 +1352,9 @@
       errorMsg = $t('connection.noBleDeviceSelected');
       return;
     }
+
+    // Stop the live BLE scan before connecting — the adapter can't scan and open a GATT link at once.
+    if (selectedTransport === 'ble') await stopBleScan();
 
     isConnecting = true;
     errorMsg = "";
@@ -1368,6 +1388,7 @@
   }
 
   async function initPage() {
+    await startBleDeviceListener(); // live BLE discovery → bleDevices store
     await loadInfo();
     try {
       defaultFlightLogPath = await getDefaultFlightlogPath();
@@ -1693,6 +1714,8 @@
 
   onDestroy(() => {
     playbackCtrl.destroy();
+    stopBleDeviceListener();
+    void stopBleScan();
   });
 </script>
 
@@ -1787,8 +1810,6 @@
     bind:tcpPort
     bind:selectedBleDevice
     {baudRates}
-    onRefreshPorts={refreshPorts}
-    onScanBle={handleScanBle}
     onConnect={handleConnect}
   />
   </div>
