@@ -1696,5 +1696,64 @@ remains registered but unused.
 
 ---
 
+## ADR-038: Airspace Manager — Aeronautical Data Subsystem (Single Pluggable Provider, OpenAIP-First, User Key)
+
+**Date**: 2026-06-08
+**Status**: Accepted
+**Related**: ADR-028 (tile cache), ADR-033 (Radar subsystem — the moving-vehicle analogue), the Cesium Ion
+token setting (user-supplied key pattern)
+**Plan**: `docs/active/AIRSPACE_MANAGER.md`
+
+**Context**: OpenAIP is a full aeronautical database, not just airspace — it also has **obstacles** (wind
+turbines, masts, towers), **airports**, **RC/model airfields**, **navaids**, hotspots and reporting points.
+That is hugely valuable for a UAV GCS (obstacles for low flight, airspace to avoid, RC fields), so the
+feature is scoped as an **Airspace Manager**: a dedicated nav-rail panel (under Radar) + a backend
+aeronautical-data subsystem with toggleable map (2D) and globe (3D) layers — the **static counterpart to the
+Radar subsystem**. There is no single free, global, commercial-use-clean source: **OpenAIP** has the best
+global community coverage but its free tier is non-commercial; **FAA** is public domain but US-only; others
+are fragmented or paid. We also offer Kite under a commercial-support model (GPLv3 + paid support), so the
+data licence matters.
+
+**Decision**:
+- **Dedicated "Airspace Manager" panel** (nav rail, under Radar, `PanelShell` **`advanced`** variant): left =
+  controls (per-layer **2D/3D visibility** toggles + filters + cache readout/reset), right = a **per-layer
+  grouped nearby-feature list** (Obstacles · Airspaces · Airfields, distance-sorted, count-capped, click →
+  centre + info). The `advanced` variant is chosen precisely for that grouped right column — the same shape
+  as the Radar panel's three system groups (multi-format: can later also present as an `info` card).
+  **Four layers, scope-locked:** airspaces, obstacles, RC/model airfields, airports (navaids / hotspots /
+  reporting points are out of scope). Airspaces render **all** in 2D but only the **UAV-relevant** ones in 3D
+  (boundary ≤ 500 m above / ≤ 5000 m lateral, or inside) to avoid clutter + cost.
+- **One active provider at a time**, behind a backend `AeroProvider` trait, **selected in the Data
+  settings**. No multi-provider compositing — it keeps the UI lean and avoids overlapping-geometry display
+  problems. Start with **OpenAIP** (`api.core.openaip.net`, one endpoint per data type); FAA / openFlightMaps
+  / national open-data are future impls behind the same trait.
+- **User-supplied API key** (Data settings, persisted, shown only when the provider needs one) — same model
+  as the Cesium Ion token and map-tile providers. The data-licence obligation sits with the end user, who
+  obtains and accepts the provider's key; Kite is a client. This keeps the commercial-support model clean
+  and leaves a path to commercial-clean sources via the pluggable trait.
+- **Settings split:** the **main Data settings** keep only the **global feature toggle** (enables the
+  subsystem + shows the panel, like `radar.enabled` / `flightLoggingEnabled`), the **provider dropdown**, and
+  the **API key**. Everything else — **per-layer 2D/3D visibility**, filters, cache readout/reset, and (later)
+  per-type **alerts** — lives **in the panel**. Disabling the feature (or all layers) stops the API download,
+  not just the rendering.
+- Backend fetches a large region (~500 km radius around the reference) and **caches it in RAM** (aero data
+  is static → long TTL; far less than tiles, so no size cap — just a usage readout + clear button). Normalize
+  each provider's response into shared models (`Airspace` polygon + `PointFeature` for obstacles/airports/…,
+  altitude units/datum → metres) so the 2D and 3D renderers + legend agree. 2D = Leaflet polygons + category
+  markers; 3D = extruded airspace volumes + obstacle columns + billboards.
+
+**Rationale**: A single-provider trait is the smallest design that covers global airspace now (OpenAIP) and
+stays open to commercial-clean sources later, without the UI/visual complexity of compositing multiple
+overlapping datasets. The user-key model mirrors what we already do for Cesium and shifts the licence
+obligation to the user. Normalizing in the backend keeps the two renderers and the legend in agreement.
+
+**Consequences**: provider switching requires a re-fetch + cache clear (cheap). OpenAIP's free tier is
+non-commercial — documented as the user's responsibility via their key. Altitude datum (GND/MSL/FL-STD) is
+normalized pragmatically (FL treated as MSL for display) until precise pressure-altitude handling is needed.
+The exact OpenAIP pagination + enum encoding is confirmed in Phase 1 against a live key (the schema is 403
+without one).
+
+---
+
 *End of Architecture Decision Records*
 

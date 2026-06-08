@@ -473,7 +473,13 @@ This document tracks planned features, organized by milestone.
 - [ ] Wi-Fi Direct transport
 
 ### Map Overlays
-- [ ] Airspace zones (CTR, restricted, danger, TMA) — colored polygons with legend
+- [~] **Airspace Manager** — a dedicated nav-rail panel (under Radar) + aeronautical-data subsystem over
+  **OpenAIP's full catalog**: **obstacles** (wind turbines/masts — critical for low flight), **airspaces**
+  (2D polygons + 3D volumes), **RC/model airfields**, **airports** (P1); navaids / hotspots / reporting
+  points (P2). Single **pluggable provider** (OpenAIP first via a user-supplied key; FAA / open-data future)
+  chosen in Data settings; per-layer toggles + OFF/2D/3D/BOTH in the panel; ~500 km region cached in RAM
+  (usage readout + clear). The static counterpart to the Radar subsystem. See ADR-038 +
+  `docs/active/AIRSPACE_MANAGER.md`
 - [ ] Aviation charts (OpenAIP tile layer — airports, navaids, airspace symbology)
 
 ### Battery Management
@@ -570,7 +576,7 @@ Cross-cutting groundwork items. Each carries non-trivial architectural or design
 ### Radar / foreign-vehicle tracking
 Subsystem detailed in `docs/active/RADAR_TRACKING_*`, `RADAR_ALERTS.md`, `RADAR_FORMATION_FLIGHT.md` (ADR-033/035/036). Largely shipped (ADS-B online + receivers + via-MSP, conflict alerts, FormationFlight). Open items:
 - [x] **GCS location marker (2D + 3D)** — a satellite-dish marker for the ground-station position (also the FormationFlight node + radar distance reference). Settings dropdown **Off / Manual / Continuous**: Manual places it once via OS geolocation and lets you drag it / right-click "Set GCS here" (Reset snaps back); Continuous follows the OS location live (>20 m anti-jitter). It's a *view* of "Your Location" (no second detector); an on-select accuracy circle. **Open:** in manual it follows the UAV's first fix on connect (snaps to launch) — decouple if it proves annoying; arming-location fallback.
-- [ ] **FormationFlight follow-ups (F3)** — `SET_RADAR_ITD` status string in FF settings; optional `"GCS"` listen-only mode; ADS-B↔FF dedup; a proper paper-plane `ff-uav.glb`.
+- ~~**FormationFlight follow-ups (F3)**~~ — _dropped: the upstream FormationFlight project is stalled (the GCS-mode bug is unfixed with no timeline); revisit only if FF revives, possibly as its own project. Was: `SET_RADAR_ITD` status string, `"GCS"` listen-only mode, ADS-B↔FF dedup, a proper paper-plane `ff-uav.glb`._
 - [ ] **Conflict-alert tuning (C3)** — expose the numeric thresholds as user settings; pre-recorded callout audio for engines without TTS (Linux WebKitGTK).
 
 ### Terrain Elevation (local DEM — 2D map & planning)
