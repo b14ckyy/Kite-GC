@@ -76,6 +76,14 @@
     "layerRc": "Sites RC",
     "layerAirfields": "Terrains"
   },
+  "about": {
+    "button": "À propos",
+    "license": "Licence",
+    "source": "Code source",
+    "thirdParty": "Licences tierces",
+    "thirdPartyNote": "Composants intégrés et leurs licences. Les dépendances transitives sont sous licences permissives compatibles.",
+    "close": "Fermer"
+  },
   "radar": {
     "title": "Radar",
     "vehicles": "Véhicules suivis",

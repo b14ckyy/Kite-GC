@@ -3,11 +3,31 @@ import { sveltekit } from "@sveltejs/kit/vite";
 import path from "path";
 import fs from "fs";
 import { createRequire } from "module";
+import { execSync } from "child_process";
 import sirv from "sirv";
 
 const require = createRequire(import.meta.url);
 
 const host = process.env.TAURI_DEV_HOST;
+
+// ── Build stamp (injected via `define`, surfaced in the About dialog) ──
+// Short commit id (+ "-dirty" if the tree has uncommitted changes) so a bug report can be tied to an exact
+// build — no manual version bump per build. Falls back to "unknown" when git isn't available (e.g. tarball).
+const pkg = require("./package.json");
+function gitCommit() {
+  try {
+    const hash = execSync("git rev-parse --short HEAD", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+    const dirty = execSync("git status --porcelain", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim().length > 0;
+    return hash + (dirty ? "-dirty" : "");
+  } catch {
+    return "unknown";
+  }
+}
+const BUILD_STAMP = {
+  __APP_VERSION__: JSON.stringify(pkg.version),
+  __GIT_COMMIT__: JSON.stringify(gitCommit()),
+  __BUILD_DATE__: JSON.stringify(new Date().toISOString().slice(0, 10)),
+};
 
 // Cesium asset source directory (use require.resolve to avoid URL-encoding issues)
 const cesiumSource = path.join(
@@ -52,6 +72,7 @@ export default defineConfig(async () => ({
 
   define: {
     CESIUM_BASE_URL: JSON.stringify('/cesium'),
+    ...BUILD_STAMP,
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`

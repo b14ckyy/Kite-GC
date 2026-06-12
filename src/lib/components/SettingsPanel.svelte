@@ -22,6 +22,9 @@
   import Button from '$lib/components/panel/Button.svelte';
   import Toggle from '$lib/components/panel/Toggle.svelte';
   import SegmentedToggle from '$lib/components/panel/SegmentedToggle.svelte';
+  import AboutDialog from '$lib/components/AboutDialog.svelte';
+
+  let aboutOpen = $state(false);
 
   let {
     localeValue = 'en',
@@ -473,9 +476,15 @@
   {/if}
 {/snippet}
 
+{#snippet headerActions()}
+  <Button variant="standard" size="sm" icon="info" onclick={() => (aboutOpen = true)}>{$t('about.button')}</Button>
+{/snippet}
+
 <div class="spv2">
-  <PanelShell variant="compact" title={$t('nav.settings')} {toolbar} {body} />
+  <PanelShell variant="compact" title={$t('nav.settings')} {toolbar} {body} {headerActions} />
 </div>
+
+<AboutDialog bind:open={aboutOpen} />
 
 <style>
   .settabs { width: 100%; }

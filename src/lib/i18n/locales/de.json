@@ -76,6 +76,14 @@
     "layerRc": "RC-Plätze",
     "layerAirfields": "Plätze"
   },
+  "about": {
+    "button": "Über",
+    "license": "Lizenz",
+    "source": "Quellcode",
+    "thirdParty": "Drittanbieter-Lizenzen",
+    "thirdPartyNote": "Eingebundene Komponenten und ihre Lizenzen. Transitive Abhängigkeiten stehen unter kompatiblen permissiven Lizenzen.",
+    "close": "Schließen"
+  },
   "radar": {
     "title": "Radar",
     "vehicles": "Getrackte Fahrzeuge",

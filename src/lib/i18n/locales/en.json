@@ -76,6 +76,14 @@
     "layerRc": "RC fields",
     "layerAirfields": "Airfields"
   },
+  "about": {
+    "button": "About",
+    "license": "License",
+    "source": "Source",
+    "thirdParty": "Third-party licenses",
+    "thirdPartyNote": "Bundled components and their licenses. Transitive dependencies carry compatible permissive licenses.",
+    "close": "Close"
+  },
   "radar": {
     "title": "Radar",
     "vehicles": "Tracked Vehicles",

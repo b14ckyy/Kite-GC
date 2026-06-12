@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96" role="img" aria-label="Kite Ground Control logo placeholder">
+  <!-- Placeholder logo — replace static/logo.svg (or point the About dialog at a PNG). -->
+  <rect x="4" y="4" width="88" height="88" rx="18" fill="#2e2e2e" stroke="#37a8db" stroke-width="2"/>
+  <g transform="translate(48 46)" stroke="#37a8db" stroke-width="3" stroke-linejoin="round" fill="none">
+    <path d="M0 -26 L20 0 L0 26 L-20 0 Z" fill="#37a8db" fill-opacity="0.18"/>
+    <path d="M0 -26 L0 26 M-20 0 L20 0"/>
+  </g>
+  <path d="M48 72 q10 8 22 10" stroke="#949494" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <text x="48" y="90" font-family="Segoe UI, Tahoma, sans-serif" font-size="9" font-weight="700" fill="#949494" text-anchor="middle">KITE GC</text>
+</svg>
