@@ -46,8 +46,8 @@
   import { radarVehicles, radarSelection, enrichList, type RadarSnapshot, type EnrichedVehicle } from "$lib/stores/radarTracking";
   import { radarAlertLevels, type AlertLevel } from "$lib/controllers/radarAlerts";
   import { gcsLocation, gcsAccuracyM, setGcsManual } from "$lib/stores/gcsLocation";
-  import { aeroData, aeroLayers, aeroFocus, type AeroPoint } from "$lib/stores/airspace";
-  import { airspaceStyle, aeroPointIconHtml, aeroPointInfo, airspaceMinZoom, airportMinZoom, obstacleMinZoom, RC_MIN_ZOOM } from "$lib/helpers/airspaceStyle";
+  import { aeroData, aeroLayers, aeroFocus, type AeroPoint, type Airspace } from "$lib/stores/airspace";
+  import { airspaceStyle, aeroPointIconHtml, aeroPointInfo, airspaceMinZoom, airportMinZoom, obstacleMinZoom, RC_MIN_ZOOM, airspaceContainsPoint, airspaceIsRelevant } from "$lib/helpers/airspaceStyle";
   import { type RadarMapSettings, type GcsMode } from "$lib/stores/settings";
   import { openContextMenu } from "$lib/stores/contextMenu";
   import { t } from "svelte-i18n";
@@ -383,6 +383,10 @@
   let unsubAeroLayers: (() => void) | undefined;
   let unsubAeroFocus: (() => void) | undefined;
   const MAX_AERO_MARKERS = 1500; // cap rendered point markers per redraw (dense regions)
+  // Airspaces currently drawn (passed the zoom filter) — the click handler tests these for
+  // point-in-polygon so a single click lists *every* airspace stacked at that spot, not just the top one.
+  let drawnAirspaces: Airspace[] = [];
+  let aeroPopup: L.Popup | undefined; // the airspace-list popup; a second map click toggles it off
 
   /** Rebuild the airspace overlay: all airspaces (few), point features clipped to the current view. */
   function updateAirspace() {
@@ -395,20 +399,20 @@
     const vis = get(aeroLayers);
     const z = map.getZoom(); // zoom-density: each feature has a min-zoom by importance/size
 
+    drawnAirspaces = [];
     if (vis.airspaces.d2) {
       for (const a of data.airspaces) {
         if (z < airspaceMinZoom(a)) continue;
+        drawnAirspaces.push(a);
         const st = airspaceStyle(a);
         for (const ring of a.outlines) {
           const latlngs = ring.map(([lon, lat]) => [lat, lon] as [number, number]);
+          // Non-interactive: clicks fall through to the map handler, which lists *all* airspaces
+          // stacked at the click point (overlapping airspaces would otherwise hide one another).
           const poly = L.polygon(latlngs, {
             color: st.color, weight: st.weight, fillColor: st.fillColor, fillOpacity: st.fillOpacity,
-            dashArray: st.dashArray,
+            dashArray: st.dashArray, interactive: false,
           });
-          poly.bindPopup(
-            `<b>${a.name}</b><br>${a.typeName}${a.icaoClassName !== "?" ? ` · Class ${a.icaoClassName}` : ""}` +
-            `<br>${a.lower.label} – ${a.upper.label}`,
-          );
           group.addLayer(poly);
         }
       }
@@ -425,6 +429,7 @@
         if (!bounds.contains([p.lat, p.lon])) continue; // clip to view
         const m = L.marker([p.lat, p.lon], {
           icon: L.divIcon({ className: "aero-divicon", html: aeroPointIconHtml(p), iconSize: [20, 20], iconAnchor: [10, 10] }),
+          bubblingMouseEvents: false, // keep marker clicks out of the airspace-list map handler
         });
         const info = aeroPointInfo(p);
         m.bindPopup(`<b>${p.name || p.subtype || p.kind}</b>${info ? `<br>${info}` : ""}`);
@@ -435,6 +440,42 @@
     addPoints(data.obstacles, vis.obstacles.d2, obstacleMinZoom);
     addPoints(data.airports, vis.airports.d2, airportMinZoom);
     addPoints(data.rcAirfields, vis.rc.d2, () => RC_MIN_ZOOM);
+  }
+
+  /**
+   * Map click → list *all* airspaces stacked at that point (overlapping airspaces hide one another
+   * with per-polygon popups). Unclassified airspaces (no ICAO class) are skipped to cut clutter.
+   * Sorted by lower limit so the lowest/most-relevant airspace is on top.
+   */
+  function onAirspaceClick(e: L.LeafletMouseEvent) {
+    if (!map || !$settings.airspace.enabled) return;
+    // Toggle: if the list popup is already open, a second map click just dismisses it.
+    if (aeroPopup && aeroPopup.isOpen()) {
+      map.closePopup(aeroPopup);
+      aeroPopup = undefined;
+      return;
+    }
+    const { lat, lng } = e.latlng;
+    const all = drawnAirspaces.filter((a) => airspaceContainsPoint(a, lat, lng));
+    // Drop unclassified "free" airspace when a classified/critical one covers the same point; if there
+    // are only unclassified ones here, still show them (better than an empty popup).
+    const relevant = all.filter(airspaceIsRelevant);
+    const hits = (relevant.length ? relevant : all).sort((a, b) => a.lower.valueM - b.lower.valueM);
+    if (hits.length === 0) return;
+    const rows = hits
+      .map(
+        (a) =>
+          `<div style="margin:3px 0;padding-left:7px;border-left:3px solid ${airspaceStyle(a).color};">` +
+          `<b>${a.name}</b><br><span style="opacity:.8">${a.typeName}` +
+          `${a.icaoClassName !== "?" ? ` · Class ${a.icaoClassName}` : ""} · ` +
+          `${a.lower.label} – ${a.upper.label}</span></div>`,
+      )
+      .join("");
+    // closeOnClick:false → the map click is handled here (toggle), not by Leaflet's auto-close.
+    aeroPopup = L.popup({ maxWidth: 280, closeOnClick: false })
+      .setLatLng(e.latlng)
+      .setContent(`<div style="max-height:240px;overflow:auto;">${rows}</div>`)
+      .openOn(map);
   }
 
   // Redraw on enable-toggle, new data, or visibility change (data/visibility via subscriptions below).
@@ -810,6 +851,7 @@
     unsubAeroLayers = aeroLayers.subscribe(() => updateAirspace());
     unsubAeroFocus = aeroFocus.subscribe((f) => { if (f && map) map.setView([f.lat, f.lon], Math.max(map.getZoom(), 11)); });
     map.on("moveend", updateAirspace);
+    map.on("click", onAirspaceClick); // click empty map / airspace fill → list all airspaces there
 
     // Auto night mode: physical location + re-check every minute so wall-clock drift fades day↔night.
     ensureUserLocation(); // OS geolocation (resolves async)
