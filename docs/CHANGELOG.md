@@ -29,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     boundary section **facing the UAV** is given a pattern as an **approach reference** (perpendicular
     "zone" test + outward-sidedness so only the truly-facing wall lights up). Volumes are non-pickable
     (raw primitives) so they never block clicks or the camera.
+  - **Airport markers (3D).** Each airport in the airfield range gets the **same type-coloured badge as
+    2D** (disc + star, "H" for heliports) as a ground-clamped billboard + name label. _Runway geometry
+    was evaluated but dropped — OpenAIP has no runway threshold coordinates, so a projected runway just
+    cuts through the airport point (wrong for multi-runway fields)._
   - **2D click → all airspaces here.** Clicking the map lists **every** airspace stacked at the point
     (overlap-aware), dropping unclassified "free" airspace as clutter when a classified/critical one
     covers the same spot; a second click toggles the popup shut. FIR/UIR are no longer drawn.

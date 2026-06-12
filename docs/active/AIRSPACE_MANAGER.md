@@ -18,6 +18,10 @@
 >   country-sized upper-air skipped); the **UAV-facing** boundary section is patterned as an approach
 >   reference (perpendicular-zone + outward-sidedness test). Non-pickable raw primitives (no click/camera
 >   interference). Altitudes via the app's geoid offset (GND→terrain).
+> - **3D airport markers** — the same type-coloured badge as 2D (disc + star, "H" for heliports), as a
+>   ground-clamped billboard + name label, within the airfield range. _Real runway geometry was evaluated
+>   and dropped: OpenAIP carries no runway threshold coordinates, so a projected runway just cuts through
+>   the airport point (wrong for multi-runway fields) — markers only._
 > - **2D refinements** — overlap-aware click list (all airspaces at the point, unclassified dropped when a
 >   classified one overlaps, toggle on re-click); FIR/UIR no longer drawn; subtle obstacle silhouettes +
 >   type-coloured airport icons (intl/airport/airfield/heliport).
@@ -29,8 +33,9 @@
 > - **Centre fallback** — the 2D fetch still follows the UAV; fall back to the GCS marker / map centre when
 >   no UAV. (3D culling already uses the camera focus.)
 > - **Alerts** — airspace-level / obstacle-proximity warnings.
-> - **3D polish** — RC/airport ground projection; per-vertex GND-floor terrain clamp (currently centroid);
->   pattern style tuning; the systemic dynamic geoid (per-region recompute, also relevant to UAV/track).
+> - **RC airfields in 3D** — a ground marker (no runway data, like airports).
+> - **3D polish** — per-vertex GND-floor terrain clamp (currently centroid); airspace pattern style tuning;
+>   the systemic dynamic geoid (per-region recompute, also relevant to UAV/track).
 > - **Density fine-tuning** + a class/type legend + nearby-list search / `info` minimized variant.
 
 ## Mental model: the static counterpart to Radar
