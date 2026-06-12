@@ -57,7 +57,7 @@
   import type { SpeedUnit, AltitudeUnit, RadarMapSettings, GcsMode } from "$lib/stores/settings";
   import { radarVehicles, radarSelection, type RadarSnapshot } from "$lib/stores/radarTracking";
   import { aeroData, type Airspace, type AltLimit } from "$lib/stores/airspace";
-  import { airspaceStyle, airspaceContainsPoint, airspaceIsRelevant, isAirspaceHidden } from "$lib/helpers/airspaceStyle";
+  import { airspaceStyle, airspaceContainsPoint, airspaceIsRelevant, isAirspaceHidden, airportBillboard } from "$lib/helpers/airspaceStyle";
   import { contactColor, ffContactColor, contactVisibleOnMap, REL_OVERRIDE_M } from "$lib/helpers/radarMap";
   import { ARROW_POLY, contactModelClass, radarModelUri, type RadarModelClass } from "$lib/helpers/radar3d";
   import { radarAlertLevels, ALERT_CONFIG, type AlertLevel } from "$lib/controllers/radarAlerts";
@@ -332,6 +332,14 @@
   const AIRSPACE_3D_LATERAL_M = 5000;   // render airspaces with a boundary within this lateral distance
   const AIRSPACE_3D_MAX_EXTENT_KM = 80; // "inside" only renders airspaces up to this size (skip CTAs/upper air)
   const AIRSPACE_3D_MAX = 60;           // cap rendered volumes
+
+  // ── Airspace Manager: airports (3D) ──────────────────────────────────
+  // Real runways (OpenAIP carries heading + length/width) drawn as terrain-draped rectangles, oriented
+  // by trueHeading and centred on the airport reference point + a type-coloured marker/label. Airports
+  // without runways (heliports / small fields) get the marker only.
+  const airport3dEntities: Cesium.Entity[] = [];
+  let airportD3 = false;   // tracks the airport 3D toggle (settings-watch rebuild trigger)
+  let airportDistKm = 15;  // tracks the airfield range (settings-watch rebuild trigger)
   const OBSTACLE_3D_RADIUS_M = 8;   // slim footprint (no diameter from the API) — tunable
   // OpenAIP often omits the AGL height (and offers no derivable top). When missing we render a typed
   // *estimated* column — tall for identified wind turbines, modest otherwise — drawn visibly distinct
@@ -722,6 +730,7 @@
         v.scene.requestRender();
         updateObstacles3D();  // (re)build obstacle columns for the now-visible 3D view
         updateAirspaces3D();  // (re)build airspace volumes for the now-visible 3D view
+        updateAirports3D();   // (re)build airports/runways for the now-visible 3D view
       } else {
         // Leaving 3D while in FPV: undo FPV's viewer changes (camera inputs, model/track,
         // wheel handler) so nothing carries over and blocks the map — but keep cameraMode
@@ -882,7 +891,7 @@
     });
     // Obstacle/airspace range windows follow the camera: re-cull (debounced) once the ground focus moves.
     viewer.camera.moveEnd.addEventListener(() => {
-      if (!active || !airspaceEnabled || (!obstacleD3 && !airspaceD3)) return;
+      if (!active || !airspaceEnabled || (!obstacleD3 && !airspaceD3 && !airportD3)) return;
       if (obstacleMoveTimer) clearTimeout(obstacleMoveTimer);
       obstacleMoveTimer = setTimeout(() => {
         const f = getCamFocus();
@@ -893,6 +902,7 @@
         if (moved > 500) { // only when the focus shifted > 500 m
           if (obstacleD3) updateObstacles3D();
           if (airspaceD3) updateAirspaces3D();
+          if (airportD3) updateAirports3D();
         }
       }, 400);
     });
@@ -994,6 +1004,12 @@
         airspaceD3 = next.airspace.layers.airspaces.d3;
         updateAirspaces3D(); // master toggle / airspace 3D-visibility change → rebuild the volumes
       }
+      if (aspEnabledChg || next.airspace.layers.airports.d3 !== airportD3 || next.airspace.airfieldDistanceKm !== airportDistKm) {
+        airspaceEnabled = next.airspace.enabled;
+        airportD3 = next.airspace.layers.airports.d3;
+        airportDistKm = next.airspace.airfieldDistanceKm;
+        updateAirports3D(); // master toggle / airport 3D-visibility / range change → rebuild airports
+      }
     });
 
     // Mission overlay — re-render on mission / visibility / launch changes.
@@ -1032,7 +1048,7 @@
     // Obstacle columns + airspace volumes: rebuild on new aero data (toggle / range changes ride the
     // settings-watch below; camera-pan re-culls via the debounced moveEnd handler — the window follows
     // the camera).
-    unsubAero3d = aeroData.subscribe(() => { updateObstacles3D(); updateAirspaces3D(); });
+    unsubAero3d = aeroData.subscribe(() => { updateObstacles3D(); updateAirspaces3D(); updateAirports3D(); });
 
     // Connection edge: on a fresh (re)connect, flag the next telemetry frame to
     // decide clearing (only if DISARMED) and force a live-geoid recompute.
@@ -1625,6 +1641,56 @@
         }));
       }
       } // if (uavRef)
+    }
+    viewer.scene.requestRender();
+  }
+
+  /**
+   * Render airports within the configured airfield range of the reference (camera ground, else UAV/GCS)
+   * as a type-coloured, ground-clamped marker + name label. (OpenAIP has no runway threshold coordinates,
+   * so a projected runway would just cut through the airport point — not usable; markers only.)
+   */
+  function updateAirports3D() {
+    if (!viewer) return;
+    for (const e of airport3dEntities) viewer.entities.remove(e);
+    airport3dEntities.length = 0;
+
+    const air = get(settings).airspace;
+    if (!active || !air.enabled || !air.layers.airports.d3) { viewer.scene.requestRender(); return; }
+
+    const camGround = getCamFocus();
+    const ref = (camGround ? { lat: camGround.lat, lon: camGround.lon } : null) ?? radarReference ?? uavLatLon;
+    if (ref) aeroRefGround = ref;
+    let airports = get(aeroData).airports;
+    if (ref) {
+      const maxM = air.airfieldDistanceKm * 1000;
+      airports = airports.filter((p) => haversineDistance(ref.lat, ref.lon, p.lat, p.lon) <= maxM);
+    }
+    if (airports.length === 0) { viewer.scene.requestRender(); return; }
+
+    for (const p of airports) {
+      // Same badge as the 2D map (disc + star / "H"), constant ~24 px screen size like a map marker.
+      airport3dEntities.push(viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(p.lon, p.lat),
+        billboard: {
+          image: airportBillboard(p.typeId),
+          width: 24, height: 24,
+          verticalOrigin: Cesium.VerticalOrigin.CENTER,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY, // stay visible like a 2D marker
+        },
+        label: {
+          text: p.name || p.subtype,
+          font: '600 12px "Segoe UI", sans-serif',
+          fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK.withAlpha(0.85), outlineWidth: 2,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          pixelOffset: new Cesium.Cartesian2(0, -17),
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          scaleByDistance: new Cesium.NearFarScalar(2000, 1.0, 30000, 0.6),
+          translucencyByDistance: new Cesium.NearFarScalar(25000, 1.0, 32000, 0.0),
+        },
+      }));
     }
     viewer.scene.requestRender();
   }

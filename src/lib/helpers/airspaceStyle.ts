@@ -46,7 +46,8 @@ const TOWER_SVG =
   `<svg viewBox="0 0 16 16" width="15" height="15" fill="#161616" style="${OUTLINE}">` +
   '<path d="M8 1.5 L11 14 L5 14 Z"/></svg>';
 
-const STAR = '<path d="M12 2l2 7 7 3-7 1-2 8-2-8-7-1 7-3z"/>'; // OpenAIP-style airport star glyph
+const STAR_PATH = 'M12 2l2 7 7 3-7 1-2 8-2-8-7-1 7-3z'; // OpenAIP-style airport star glyph
+const STAR = `<path d="${STAR_PATH}"/>`;
 /** A small round badge: coloured fill, white border, the given inner content style. */
 function badge(bg: string, inner: string, content: string): string {
   return (
@@ -56,17 +57,34 @@ function badge(bg: string, inner: string, content: string): string {
   );
 }
 
+/** Airport category colour by OpenAIP `type`: intl=red, airport=blue, airfield=green, heliport=slate, closed=grey. */
+export function airportColor(typeId: number | null): string {
+  if (typeId === 4 || typeId === 7) return '#5b6b7a'; // heliport (mil) / heliport
+  if (typeId === 3) return '#d40000'; // international
+  if (typeId === 0 || typeId === 5 || typeId === 9) return '#2e6fdb'; // airport / military aerodrome / IFR
+  if (typeId === 8) return '#7a7a7a'; // closed
+  return '#59aa29'; // small airfields / glider / ultralight / strips / water / altiport
+}
+
+/** Airport marker as an SVG data-URI for the 3D billboard — same badge as 2D (disc + star, or "H" for
+ *  heliports), so the 2D map and the globe markers look identical. */
+export function airportBillboard(typeId: number | null): string {
+  const heli = typeId === 4 || typeId === 7;
+  const inner = heli
+    ? '<text x="20" y="28" font-family="Segoe UI,Tahoma,sans-serif" font-size="22" font-weight="800" fill="#fff" text-anchor="middle">H</text>'
+    : `<g transform="translate(8 8)" fill="#fff"><path d="${STAR_PATH}"/></g>`;
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">' +
+    `<circle cx="20" cy="20" r="15" fill="${airportColor(typeId)}" stroke="#fff" stroke-width="3"/>${inner}</svg>`;
+  return 'data:image/svg+xml;base64,' + btoa(svg);
+}
+
 /** Airport badge colour-coded by OpenAIP `type`: intl=red, airport=blue, airfield=green, heliport="H". */
 function airportIconHtml(p: AeroPoint): string {
-  const t = p.typeId;
-  if (t === 4 || t === 7) // Heliport (mil) / Heliport → white "H"
+  if (p.typeId === 4 || p.typeId === 7) // Heliport → white "H"
     return badge('#5b6b7a', 'font-size:12px;font-weight:800;color:#fff;line-height:1;', 'H');
-  let bg = '#59aa29'; // small airfields / glider / ultralight / strips / water / altiport → green
-  if (t === 3) bg = '#d40000'; // International Airport → red
-  else if (t === 0 || t === 5 || t === 9) bg = '#2e6fdb'; // Airport / Military Aerodrome / Airfield IFR → blue
-  else if (t === 8) bg = '#7a7a7a'; // Aerodrome (closed) → grey
   const star = `<svg viewBox="0 0 24 24" width="12" height="12" fill="#fff">${STAR}</svg>`;
-  return badge(bg, 'color:#fff;', star);
+  return badge(airportColor(p.typeId), 'color:#fff;', star);
 }
 
 /** divIcon HTML for an aero point feature. */
