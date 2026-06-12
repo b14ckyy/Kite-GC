@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **About dialog + automatic build stamp.** An **About** button in the Settings panel header opens a
+  dialog with the logo (placeholder), name, **version + short git commit + build date**, the GPL-3.0-or-later
+  licence/copyright, a source-repo link, and a curated third-party-licence list. The commit id (with a
+  `-dirty` marker when the tree has uncommitted changes) is injected at build time via Vite `define` — no
+  manual version bump per build, so a tester's bug report can be tied to an exact commit.
 - **Airspace Manager — aeronautical data overlay (P1, ADR-038).** A new nav-rail panel (under Radar) +
   backend subsystem over **OpenAIP**: **airspaces** (class-coloured polygons), **obstacles** (wind turbines,
   masts, towers — with a wind-turbine icon), **airports** (by type) and **RC/model airfields** on the 2D
