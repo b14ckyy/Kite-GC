@@ -56,6 +56,8 @@
   import { haversineDistance, bearing } from "$lib/utils/geo";
   import type { SpeedUnit, AltitudeUnit, RadarMapSettings, GcsMode } from "$lib/stores/settings";
   import { radarVehicles, radarSelection, type RadarSnapshot } from "$lib/stores/radarTracking";
+  import { aeroData, type Airspace, type AltLimit } from "$lib/stores/airspace";
+  import { airspaceStyle, airspaceContainsPoint, airspaceIsRelevant, isAirspaceHidden } from "$lib/helpers/airspaceStyle";
   import { contactColor, ffContactColor, contactVisibleOnMap, REL_OVERRIDE_M } from "$lib/helpers/radarMap";
   import { ARROW_POLY, contactModelClass, radarModelUri, type RadarModelClass } from "$lib/helpers/radar3d";
   import { radarAlertLevels, ALERT_CONFIG, type AlertLevel } from "$lib/controllers/radarAlerts";
@@ -305,6 +307,38 @@
   // Click/hover picking: map each contact entity back to its id; handler set up in onMount.
   const radar3dEntityIds = new WeakMap<Cesium.Entity, string>();
   let radar3dPickHandler: Cesium.ScreenSpaceEventHandler | undefined;
+
+  // ── Airspace Manager: obstacle columns (3D) ──────────────────────────
+  // Static hazards (masts, turbines, towers) as slim vertical columns. OpenAIP gives height (AGL) but
+  // no diameter → a fixed slim footprint, real-world-sized so it scales perspectively with distance
+  // (not a fixed-size sprite). Terrain-relative extrusion keeps the column on correct AGL height.
+  const obstacle3dEntities: Cesium.Entity[] = [];
+  let unsubAero3d: (() => void) | undefined;
+  let uavLatLon: { lat: number; lon: number } | undefined; // last good UAV fix → fallback reference
+  let airspaceEnabled = false;     // tracks the master toggle so the settings-watch can add/remove columns
+  let obstacleD3 = false;          // tracks the obstacle 3D toggle (settings-watch rebuild trigger)
+  let obstacleDistKm = 5;          // tracks the obstacle range (settings-watch rebuild trigger)
+  let obstacle3dGen = 0;           // bumped per rebuild so an in-flight terrain sample can't apply a stale set
+  let aeroRefGround: { lat: number; lon: number } | undefined; // camera ground of the last build
+  let obstacleMoveTimer: ReturnType<typeof setTimeout> | undefined; // debounce camera-move rebuilds
+
+  // ── Airspace Manager: airspace volumes (3D) ──────────────────────────
+  // Extruded polygons (floor → ceiling) for the airspaces relevant to the reference (inside / ≤5 km
+  // laterally) — the relevance filter keeps clutter + GPU cost down. Altitudes: MSL/FL → value + the
+  // app's geoid offset (locally correct since we only draw nearby airspaces); GND → terrain.
+  const airspace3dPrimitives: Cesium.Primitive[] = [];
+  let airspaceD3 = false;          // tracks the airspace 3D toggle (settings-watch rebuild trigger)
+  let airspace3dGen = 0;           // race guard for the async terrain sample
+  const AIRSPACE_3D_LATERAL_M = 5000;   // render airspaces with a boundary within this lateral distance
+  const AIRSPACE_3D_MAX_EXTENT_KM = 80; // "inside" only renders airspaces up to this size (skip CTAs/upper air)
+  const AIRSPACE_3D_MAX = 60;           // cap rendered volumes
+  const OBSTACLE_3D_RADIUS_M = 8;   // slim footprint (no diameter from the API) — tunable
+  // OpenAIP often omits the AGL height (and offers no derivable top). When missing we render a typed
+  // *estimated* column — tall for identified wind turbines, modest otherwise — drawn visibly distinct
+  // (translucent + yellow outline) so an estimated height never masquerades as surveyed data.
+  const OBSTACLE_3D_TURBINE_H = 120; // estimated height for a height-less wind turbine
+  const OBSTACLE_3D_DEFAULT_H = 40;  // estimated height for a height-less generic obstacle
+  const OBSTACLE_3D_MAX = 1200;      // cap rendered columns (dense regions → nearest-N to the reference)
 
   // One-shot camera recenter after a (re)mount. The 2D↔3D toggle remounts this
   // component, so this fires once on every switch to 3D.
@@ -686,6 +720,8 @@
         else if (cameraMode !== 'free' && pHas) reanchorLockCamera();
         else setCameraFromMapView();
         v.scene.requestRender();
+        updateObstacles3D();  // (re)build obstacle columns for the now-visible 3D view
+        updateAirspaces3D();  // (re)build airspace volumes for the now-visible 3D view
       } else {
         // Leaving 3D while in FPV: undo FPV's viewer changes (camera inputs, model/track,
         // wheel handler) so nothing carries over and blocks the map — but keep cameraMode
@@ -844,6 +880,22 @@
       const f = getCamFocus();
       if (f) onCamFocus?.(f.lat, f.lon);
     });
+    // Obstacle/airspace range windows follow the camera: re-cull (debounced) once the ground focus moves.
+    viewer.camera.moveEnd.addEventListener(() => {
+      if (!active || !airspaceEnabled || (!obstacleD3 && !airspaceD3)) return;
+      if (obstacleMoveTimer) clearTimeout(obstacleMoveTimer);
+      obstacleMoveTimer = setTimeout(() => {
+        const f = getCamFocus();
+        if (!f) return;
+        const moved = aeroRefGround
+          ? haversineDistance(aeroRefGround.lat, aeroRefGround.lon, f.lat, f.lon)
+          : Infinity;
+        if (moved > 500) { // only when the focus shifted > 500 m
+          if (obstacleD3) updateObstacles3D();
+          if (airspaceD3) updateAirspaces3D();
+        }
+      }, 400);
+    });
 
         // Subscribe to live telemetry
     unsubTelemetry = telemetry.subscribe((telem) => {
@@ -860,6 +912,7 @@
       }
 
       if (!isValidGpsCoordinate(telem.lat, telem.lon)) return;
+      uavLatLon = { lat: telem.lat, lon: telem.lon }; // reference for nearest-N obstacle culling
 
       // While a replay log is shown, ignore live telemetry for the map — the
       // replay track/marker owns it (prevents the live UAV lingering over replay).
@@ -929,6 +982,18 @@
       }
       hudSpeedUnit = next.interface?.speedUnit ?? 'kmh';
       hudAltUnit = next.interface?.altitudeUnit ?? 'm';
+      const aspEnabledChg = next.airspace.enabled !== airspaceEnabled;
+      if (aspEnabledChg || next.airspace.layers.obstacles.d3 !== obstacleD3 || next.airspace.obstacleDistanceKm !== obstacleDistKm) {
+        airspaceEnabled = next.airspace.enabled;
+        obstacleD3 = next.airspace.layers.obstacles.d3;
+        obstacleDistKm = next.airspace.obstacleDistanceKm;
+        updateObstacles3D(); // master toggle / 3D-visibility / range change → rebuild the columns
+      }
+      if (aspEnabledChg || next.airspace.layers.airspaces.d3 !== airspaceD3) {
+        airspaceEnabled = next.airspace.enabled;
+        airspaceD3 = next.airspace.layers.airspaces.d3;
+        updateAirspaces3D(); // master toggle / airspace 3D-visibility change → rebuild the volumes
+      }
     });
 
     // Mission overlay — re-render on mission / visibility / launch changes.
@@ -964,6 +1029,11 @@
     unsubRadarAlerts3d = radarAlertLevels.subscribe((m) => { radar3dAlertLevels = m; if (viewer) updateRadar3D(); });
     unsubGcs3d = gcsLocation.subscribe(() => updateGcs3d());
 
+    // Obstacle columns + airspace volumes: rebuild on new aero data (toggle / range changes ride the
+    // settings-watch below; camera-pan re-culls via the debounced moveEnd handler — the window follows
+    // the camera).
+    unsubAero3d = aeroData.subscribe(() => { updateObstacles3D(); updateAirspaces3D(); });
+
     // Connection edge: on a fresh (re)connect, flag the next telemetry frame to
     // decide clearing (only if DISARMED) and force a live-geoid recompute.
     unsubConnection = connection.subscribe((c) => {
@@ -994,6 +1064,8 @@
     unsubRadarSel3d?.();
     unsubRadarAlerts3d?.();
     unsubGcs3d?.();
+    unsubAero3d?.();
+    if (obstacleMoveTimer) clearTimeout(obstacleMoveTimer);
     radar3dPickHandler?.destroy();
     unsubHome?.();
     unsubSettingsWatch?.();
@@ -1280,6 +1352,281 @@
     if (rec.entities.length === 0) return; // still queued for creation — will sync on create
     syncRadarModel(rec);
     syncRadarGround(rec);
+  }
+
+  /**
+   * Rebuild the obstacle columns from the current aero snapshot. Static features → rebuilt only on
+   * data / visibility change (not per camera frame).
+   *
+   * Heights: we sample Cesium's own terrain (ellipsoidal) at each obstacle and place the column
+   * absolutely on it (base → base + heightM). This is **geoid-independent** and always sits exactly on
+   * the ground, robust to camera/UAV position and to on-demand rendering — unlike RELATIVE_TO_GROUND
+   * clamping, which drifts when the terrain under the obstacle isn't loaded (off-screen). A slim
+   * real-world footprint makes the column shrink perspectively with distance (not a fixed-size sprite).
+   */
+  async function updateObstacles3D() {
+    if (!viewer) return;
+    const gen = ++obstacle3dGen;
+    for (const e of obstacle3dEntities) viewer.entities.remove(e);
+    obstacle3dEntities.length = 0;
+
+    const air = get(settings).airspace;
+    // Skip the (terrain-sampling) build while the 3D view is hidden — the activation effect rebuilds on
+    // re-entry. `active` is the only inexpensive gate that matters here.
+    if (!active || !air.enabled || !air.layers.obstacles.d3) { viewer.scene.requestRender(); return; }
+
+    let obstacles = get(aeroData).obstacles;
+    if (obstacles.length === 0) { viewer.scene.requestRender(); return; }
+
+    // Horizontal sight-line limit: render only obstacles within the configured range of the camera's
+    // ground point (falls back to the UAV / radar reference when the camera looks at the sky). Keeps
+    // the scene to nearby hazards and bounds the terrain-sampling cost.
+    const camGround = getCamFocus();
+    const ref = (camGround ? { lat: camGround.lat, lon: camGround.lon } : null) ?? radarReference ?? uavLatLon;
+    aeroRefGround = ref ?? undefined;
+    if (ref) {
+      const maxM = air.obstacleDistanceKm * 1000;
+      obstacles = obstacles
+        .map((p) => ({ p, d: haversineDistance(ref.lat, ref.lon, p.lat, p.lon) }))
+        .filter((x) => x.d <= maxM)
+        .sort((a, b) => a.d - b.d)
+        .slice(0, OBSTACLE_3D_MAX)
+        .map((x) => x.p);
+    } else if (obstacles.length > OBSTACLE_3D_MAX) {
+      obstacles = obstacles.slice(0, OBSTACLE_3D_MAX); // no reference yet → just cap
+    }
+    if (obstacles.length === 0) { viewer.scene.requestRender(); return; }
+
+    // Sample the real terrain height (above the ellipsoid) at every obstacle in one batched call.
+    let groundEll: (number | undefined)[] = [];
+    const tp = viewer.scene.terrainProvider;
+    if (tp && !(tp instanceof Cesium.EllipsoidTerrainProvider)) {
+      try {
+        const carto = obstacles.map((p) => Cesium.Cartographic.fromDegrees(p.lon, p.lat));
+        const sampled = await Cesium.sampleTerrainMostDetailed(tp, carto);
+        if (gen !== obstacle3dGen || !viewer) return; // a newer rebuild superseded this one
+        groundEll = sampled.map((c) => c.height);
+      } catch (e) {
+        console.warn("[Map3D] obstacle terrain sample failed", e);
+      }
+    }
+
+    // Surveyed height → solid orange; estimated (height-less) → translucent + yellow outline.
+    const fillKnown = Cesium.Color.fromCssColorString("#e8740c").withAlpha(0.45);
+    const outlineKnown = Cesium.Color.fromCssColorString("#ff9a2e").withAlpha(0.9);
+    const fillEst = Cesium.Color.fromCssColorString("#ffd24a").withAlpha(0.16);
+    const outlineEst = Cesium.Color.fromCssColorString("#ffd24a").withAlpha(0.7);
+    for (let i = 0; i < obstacles.length; i++) {
+      const p = obstacles[i];
+      const estimated = p.heightM == null; // no surveyed AGL height → typed default, drawn distinctly
+      const h = p.heightM ?? (p.subtype === "Wind Turbine" ? OBSTACLE_3D_TURBINE_H : OBSTACLE_3D_DEFAULT_H);
+      const ellipse: Cesium.EllipseGraphics.ConstructorOptions = {
+        semiMinorAxis: OBSTACLE_3D_RADIUS_M,
+        semiMajorAxis: OBSTACLE_3D_RADIUS_M,
+        material: estimated ? fillEst : fillKnown,
+        outline: true,
+        outlineColor: estimated ? outlineEst : outlineKnown,
+        numberOfVerticalLines: 4,
+      };
+      const base = groundEll[i];
+      if (base != null && isFinite(base)) {
+        ellipse.height = base; // absolute ellipsoidal ground from the terrain sample
+        ellipse.extrudedHeight = base + h;
+      } else {
+        // Terrain not ready / sample failed → clamp to ground as a fallback so it still shows.
+        ellipse.height = 0;
+        ellipse.heightReference = Cesium.HeightReference.RELATIVE_TO_GROUND;
+        ellipse.extrudedHeight = h;
+        ellipse.extrudedHeightReference = Cesium.HeightReference.RELATIVE_TO_GROUND;
+      }
+      const ent = viewer.entities.add({ position: Cesium.Cartesian3.fromDegrees(p.lon, p.lat), ellipse });
+      obstacle3dEntities.push(ent);
+    }
+    viewer.scene.requestRender();
+  }
+
+  /** Lateral nearest-vertex distance (m) from a point to an airspace outline. */
+  function airspaceLateralM(a: Airspace, lat: number, lon: number): number {
+    let best = Number.POSITIVE_INFINITY;
+    for (const ring of a.outlines) {
+      for (const [vlon, vlat] of ring) {
+        const d = haversineDistance(lat, lon, vlat, vlon);
+        if (d < best) best = d;
+      }
+    }
+    return best;
+  }
+
+  /** Bounding-box diagonal (km) of an airspace — used to skip rendering country-sized airspaces. */
+  function airspaceMaxExtentKm(a: Airspace): number {
+    let minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
+    for (const ring of a.outlines) {
+      for (const [lon, lat] of ring) {
+        if (lat < minLat) minLat = lat; if (lat > maxLat) maxLat = lat;
+        if (lon < minLon) minLon = lon; if (lon > maxLon) maxLon = lon;
+      }
+    }
+    return haversineDistance(minLat, minLon, maxLat, maxLon) / 1000;
+  }
+
+  /** Ellipsoidal height (m) for an airspace altitude limit. GND → terrain; MSL/STD(FL) → value + geoid. */
+  function limitEll(lim: AltLimit, groundEll: number): number {
+    return lim.datum === "gnd" ? groundEll + lim.valueM : lim.valueM + geoidOffset;
+  }
+
+  /**
+   * Rebuild the airspace volumes relevant to the reference (camera ground, else UAV/GCS). An airspace is
+   * relevant when the reference is inside it or within AIRSPACE_3D_LATERAL_M of its boundary. FIR/UIR and
+   * unclassified "free" airspace are skipped (huge / clutter — same spirit as the 2D click list). Extruded
+   * floor→ceiling polygons, class-coloured + translucent.
+   */
+  async function updateAirspaces3D() {
+    if (!viewer) return;
+    const gen = ++airspace3dGen;
+    for (const p of airspace3dPrimitives) viewer.scene.primitives.remove(p); // remove() also destroys
+    airspace3dPrimitives.length = 0;
+
+    const air = get(settings).airspace;
+    if (!active || !air.enabled || !air.layers.airspaces.d3) { viewer.scene.requestRender(); return; }
+
+    const camGround = getCamFocus();
+    // Culling / which airspaces to show follows the camera ground focus...
+    const ref = (camGround ? { lat: camGround.lat, lon: camGround.lon } : null) ?? radarReference ?? uavLatLon;
+    if (!ref) { viewer.scene.requestRender(); return; }
+    // ...but the patterned "nearest wall" is relative to the UAV (or GCS) — that's the proximity warning
+    // reference, independent of where the camera looks. No real reference (e.g. fake GPS without an FC) →
+    // no wall is drawn (never fall back to the camera, which would mark misleading walls). A fake position
+    // fed through a connected FC arrives as telemetry → it IS a valid uavRef, so walls still draw.
+    const uavRef = radarReference ?? uavLatLon;
+    aeroRefGround = ref;
+    // Ensure the geoid offset is known for this region (kept once; rebuild when it resolves).
+    if (!geoidComputed) void computeGeoidOnce(ref.lat, ref.lon).then((ok) => { if (ok) updateAirspaces3D(); });
+
+    const relevant = get(aeroData).airspaces.filter((a) => {
+      if (isAirspaceHidden(a) || !airspaceIsRelevant(a)) return false; // FIR/UIR + unclassified clutter
+      if (airspaceLateralM(a, ref.lat, ref.lon) <= AIRSPACE_3D_LATERAL_M) return true; // a wall is near
+      // Inside, but only for reasonably-sized airspaces — never render country-sized upper air / CTAs.
+      return airspaceContainsPoint(a, ref.lat, ref.lon) && airspaceMaxExtentKm(a) <= AIRSPACE_3D_MAX_EXTENT_KM;
+    }).slice(0, AIRSPACE_3D_MAX);
+    if (relevant.length === 0) { viewer.scene.requestRender(); return; }
+
+    // Sample terrain once per airspace (first-ring centroid) for GND-referenced floors/ceilings.
+    const centroids = relevant.map((a) => {
+      const ring = a.outlines[0] ?? [];
+      let sx = 0, sy = 0;
+      for (const [lon, lat] of ring) { sx += lon; sy += lat; }
+      const n = Math.max(1, ring.length);
+      return Cesium.Cartographic.fromDegrees(sx / n, sy / n);
+    });
+    let groundEll: number[] = centroids.map(() => 0);
+    const tp = viewer.scene.terrainProvider;
+    if (tp && !(tp instanceof Cesium.EllipsoidTerrainProvider)) {
+      try {
+        const sampled = await Cesium.sampleTerrainMostDetailed(tp, centroids);
+        if (gen !== airspace3dGen || !viewer) return; // superseded
+        groundEll = sampled.map((c) => (isFinite(c.height) ? c.height : 0));
+      } catch (e) {
+        console.warn("[Map3D] airspace terrain sample failed", e);
+      }
+    }
+
+    // All primitives are raw (not Entities) so they can be allowPicking:false → out of scene.pick and
+    // not a click target. The volume is a plain, very faint translucent hull (presence only); only the
+    // boundary section nearest the reference is given a pattern (proximity reference / approach warning).
+    const polyVF = Cesium.PerInstanceColorAppearance.VERTEX_FORMAT;
+    const wallVF = Cesium.MaterialAppearance.MaterialSupport.TEXTURED.vertexFormat;
+    const addPrim = (prim: Cesium.Primitive) => { viewer!.scene.primitives.add(prim); airspace3dPrimitives.push(prim); };
+
+    for (let i = 0; i < relevant.length; i++) {
+      const a = relevant[i];
+      const g = groundEll[i];
+      const floor = limitEll(a.lower, g);
+      const ceil = limitEll(a.upper, g);
+      if (!(ceil > floor)) continue; // bad/degenerate altitude band
+      const col = Cesium.Color.fromCssColorString(airspaceStyle(a).color);
+
+      // Faint hull (no pattern) so the airspace extent is just visible.
+      for (const ring of a.outlines) {
+        if (ring.length < 3) continue;
+        const geometry = new Cesium.PolygonGeometry({
+          polygonHierarchy: new Cesium.PolygonHierarchy(ring.map(([lon, lat]) => Cesium.Cartesian3.fromDegrees(lon, lat))),
+          height: floor, extrudedHeight: ceil, perPositionHeight: false, vertexFormat: polyVF,
+        });
+        addPrim(new Cesium.Primitive({
+          geometryInstances: new Cesium.GeometryInstance({
+            geometry,
+            attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(col.withAlpha(0.07)) },
+          }),
+          appearance: new Cesium.PerInstanceColorAppearance({ translucent: true, closed: false }),
+          allowPicking: false, asynchronous: false,
+        }));
+      }
+
+      // Patterned "facing" walls = approach reference. An edge faces the UAV when BOTH:
+      //  (1) the UAV's foot of perpendicular falls within the edge (t∈[0,1] = UAV in its ground zone), and
+      //  (2) the UAV is on the edge's OUTWARD side (away from the ring centroid) — without (2) the test
+      //      also matches the opposite/back wall, which spans the same perpendicular band.
+      // Robust for long edges + curved boundaries (several consecutive front edges face at once). Plus one
+      // neighbour each side; if the UAV is past every edge (a corner), use the single nearest edge.
+      // No UAV/GCS reference → skip (only the hull renders), never mark camera-relative walls.
+      if (uavRef) {
+      const mLat = 111320, mLon = 111320 * Math.cos((uavRef.lat * Math.PI) / 180);
+      const walls: Cesium.GeometryInstance[] = [];
+      for (const ring of a.outlines) {
+        const ec = ring.length - 1; // edge count (closed ring: ring[ec] == ring[0])
+        if (ec < 1) continue;
+        // Ring centroid in UAV-local metres (UAV at origin), to orient each edge's outward normal.
+        let cx = 0, cy = 0;
+        for (let k = 0; k < ec; k++) { cx += (ring[k][0] - uavRef.lon) * mLon; cy += (ring[k][1] - uavRef.lat) * mLat; }
+        cx /= ec; cy /= ec;
+        const facing: boolean[] = new Array(ec).fill(false);
+        let anyFacing = false, nearest = 0, nearestD = Number.POSITIVE_INFINITY;
+        for (let k = 0; k < ec; k++) {
+          const p1 = ring[k], p2 = ring[k + 1];
+          const ax = (p1[0] - uavRef.lon) * mLon, ay = (p1[1] - uavRef.lat) * mLat; // UAV at origin
+          const bx = (p2[0] - uavRef.lon) * mLon, by = (p2[1] - uavRef.lat) * mLat;
+          const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
+          const t = len2 > 0 ? -(ax * dx + ay * dy) / len2 : 0; // projection param (unclamped)
+          // Outward normal (perpendicular to the edge, pointing away from the centroid).
+          const mx = (ax + bx) / 2, my = (ay + by) / 2;
+          let nx = -dy, ny = dx;
+          if (nx * (mx - cx) + ny * (my - cy) < 0) { nx = -nx; ny = -ny; }
+          const outward = mx * nx + my * ny < 0; // UAV(origin) on the outward side: (−mid)·n > 0
+          if (t >= 0 && t <= 1 && outward) { facing[k] = true; anyFacing = true; }
+          const tc = Math.max(0, Math.min(1, t));
+          const d = Math.hypot(ax + tc * dx, ay + tc * dy);
+          if (d < nearestD) { nearestD = d; nearest = k; }
+        }
+        if (!anyFacing) facing[nearest] = true; // corner / inside: UAV not outward of any edge → nearest
+        const draw = facing.slice();
+        for (let k = 0; k < ec; k++) if (facing[k]) { draw[(k - 1 + ec) % ec] = true; draw[(k + 1) % ec] = true; }
+        for (let k = 0; k < ec; k++) {
+          if (!draw[k]) continue;
+          const p1 = ring[k], p2 = ring[k + 1];
+          walls.push(new Cesium.GeometryInstance({
+            geometry: Cesium.WallGeometry.fromConstantHeights({
+              positions: [Cesium.Cartesian3.fromDegrees(p1[0], p1[1]), Cesium.Cartesian3.fromDegrees(p2[0], p2[1])],
+              minimumHeight: floor, maximumHeight: ceil, vertexFormat: wallVF,
+            }),
+          }));
+        }
+      }
+      if (walls.length) {
+        const mat = Cesium.Material.fromType("Grid", {
+          color: col.withAlpha(0.55),
+          cellAlpha: 0.1,
+          lineCount: new Cesium.Cartesian2(6, 4),
+          lineThickness: new Cesium.Cartesian2(1.4, 1.4),
+        });
+        addPrim(new Cesium.Primitive({
+          geometryInstances: walls,
+          appearance: new Cesium.MaterialAppearance({ material: mat, translucent: true }),
+          allowPicking: false, asynchronous: false,
+        }));
+      }
+      } // if (uavRef)
+    }
+    viewer.scene.requestRender();
   }
 
   /** Diff the 3D radar entities from the latest snapshot + map controls. */
@@ -1868,8 +2215,12 @@
     return geoidPromise;
   }
 
-  /** Compute the geoid offset (if not yet done) and re-place the mission at the new height. */
+  /** Compute the geoid offset (if not yet done) and re-place the mission at the new height. Once the
+   *  offset is known this is a no-op — without the guard it re-rendered the mission on *every* telemetry
+   *  frame (computeGeoidOnce resolves true immediately when already computed), which flickered the
+   *  waypoints (renderMission3D removes them, awaits terrain, re-adds). */
   async function ensureGeoid(lat: number, lon: number) {
+    if (geoidComputed) return; // already derived → nothing to re-place (mission store changes re-render)
     const ok = await computeGeoidOnce(lat, lon);
     if (ok) { scheduleMissionRender(); viewer?.scene.requestRender(); }
   }

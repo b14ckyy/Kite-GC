@@ -22,6 +22,7 @@
   import { cachedTileLayer } from "$lib/cache/CachedTileLayer";
   import { initTileCache } from "$lib/cache/tileCache";
   import { homePosition } from "$lib/stores/home";
+  import { editMode } from "$lib/stores/mission";
   import MissionLayer from "./mission/MissionLayer.svelte";
   import SurveyPatternLayer from "./mission/SurveyPatternLayer.svelte";
   import TerrainCursorLayer from "./terrain/TerrainCursorLayer.svelte";
@@ -46,8 +47,8 @@
   import { radarVehicles, radarSelection, enrichList, type RadarSnapshot, type EnrichedVehicle } from "$lib/stores/radarTracking";
   import { radarAlertLevels, type AlertLevel } from "$lib/controllers/radarAlerts";
   import { gcsLocation, gcsAccuracyM, setGcsManual } from "$lib/stores/gcsLocation";
-  import { aeroData, aeroLayers, aeroFocus, type AeroPoint, type Airspace } from "$lib/stores/airspace";
-  import { airspaceStyle, aeroPointIconHtml, aeroPointInfo, airspaceMinZoom, airportMinZoom, obstacleMinZoom, RC_MIN_ZOOM, airspaceContainsPoint, airspaceIsRelevant } from "$lib/helpers/airspaceStyle";
+  import { aeroData, aeroFocus, type AeroPoint, type Airspace } from "$lib/stores/airspace";
+  import { airspaceStyle, aeroPointIconHtml, aeroPointInfo, airspaceMinZoom, airportMinZoom, obstacleMinZoom, RC_MIN_ZOOM, airspaceContainsPoint, airspaceIsRelevant, isAirspaceHidden } from "$lib/helpers/airspaceStyle";
   import { type RadarMapSettings, type GcsMode } from "$lib/stores/settings";
   import { openContextMenu } from "$lib/stores/contextMenu";
   import { t } from "svelte-i18n";
@@ -380,7 +381,6 @@
   // ── Airspace Manager (aeronautical data) 2D layer ──
   let airspaceLayer: L.LayerGroup | undefined;
   let unsubAero: (() => void) | undefined;
-  let unsubAeroLayers: (() => void) | undefined;
   let unsubAeroFocus: (() => void) | undefined;
   const MAX_AERO_MARKERS = 1500; // cap rendered point markers per redraw (dense regions)
   // Airspaces currently drawn (passed the zoom filter) — the click handler tests these for
@@ -396,12 +396,13 @@
     group.clearLayers();
     if (!$settings.airspace.enabled) return; // OFF → nothing drawn
     const data = get(aeroData);
-    const vis = get(aeroLayers);
+    const vis = get(settings).airspace.layers;
     const z = map.getZoom(); // zoom-density: each feature has a min-zoom by importance/size
 
     drawnAirspaces = [];
     if (vis.airspaces.d2) {
       for (const a of data.airspaces) {
+        if (isAirspaceHidden(a)) continue; // FIR/UIR blanket the country → never drawn / clickable
         if (z < airspaceMinZoom(a)) continue;
         drawnAirspaces.push(a);
         const st = airspaceStyle(a);
@@ -449,6 +450,7 @@
    */
   function onAirspaceClick(e: L.LeafletMouseEvent) {
     if (!map || !$settings.airspace.enabled) return;
+    if (get(editMode)) return; // while editing waypoints, map clicks deselect WPs — don't pop the airspace list
     // Toggle: if the list popup is already open, a second map click just dismisses it.
     if (aeroPopup && aeroPopup.isOpen()) {
       map.closePopup(aeroPopup);
@@ -846,9 +848,9 @@
     unsubGcs = gcsLocation.subscribe(() => updateGcsMarker());
     unsubGcsAcc = gcsAccuracyM.subscribe(() => updateGcsAccuracyCircle());
 
-    // Airspace overlay: redraw on new data / visibility changes; re-clip points to the view on pan.
+    // Airspace overlay: redraw on new data; re-clip points to the view on pan. Layer-visibility changes
+    // ride the `$settings.airspace` effect below (visibility now lives in the persisted settings store).
     unsubAero = aeroData.subscribe(() => updateAirspace());
-    unsubAeroLayers = aeroLayers.subscribe(() => updateAirspace());
     unsubAeroFocus = aeroFocus.subscribe((f) => { if (f && map) map.setView([f.lat, f.lon], Math.max(map.getZoom(), 11)); });
     map.on("moveend", updateAirspace);
     map.on("click", onAirspaceClick); // click empty map / airspace fill → list all airspaces there
@@ -1026,7 +1028,6 @@
     unsubGcs?.();
     unsubGcsAcc?.();
     unsubAero?.();
-    unsubAeroLayers?.();
     unsubAeroFocus?.();
     if (unsubTelemetry) unsubTelemetry();
     if (unsubSettings) unsubSettings();

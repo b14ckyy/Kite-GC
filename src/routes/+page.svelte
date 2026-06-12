@@ -96,6 +96,9 @@
   // render loop while hidden.
   let map3dEverOpened = $state(false);
   $effect(() => { if (mapViewMode === '3d') map3dEverOpened = true; });
+  // Waypoints can only be edited on the 2D map → entering edit mode forces 2D (untracked read/write so
+  // toggling the view later doesn't re-trigger this; it reacts to the edit-mode transition only).
+  $effect(() => { if ($editMode) untrack(() => { if (mapViewMode === '3d') mapViewMode = '2d'; }); });
   // Map3D instance handle — used to read the 3D camera focus on a 3D→2D switch so
   // the 2D map can re-centre on the same spot (keeping its own zoom).
   let map3dRef: {

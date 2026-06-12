@@ -177,12 +177,27 @@ fn parse_point(v: &Value, kind: &'static str) -> Option<PointFeature> {
     let lat = c.get(1)?.as_f64()?;
     let type_raw = v.get("type").and_then(Value::as_u64).map(|t| t as u16);
     let type_id = type_raw.unwrap_or(0);
-    let subtype = match kind {
+    let mut subtype = match kind {
         "obstacle" => obstacle_type_name(type_id),
         "airport" => airport_type_name(type_id),
         _ => "",
     };
     let mut extra: HashMap<String, String> = HashMap::new();
+    // Obstacles: OpenAIP's `type` is almost always 0 ("Obstacle") even for turbines — the OSM tags are
+    // the authoritative source. Detect wind turbines from them and carry the operator for the popup.
+    if kind == "obstacle" {
+        if let Some(tags) = v.get("osmTags") {
+            let is_wind = tags.get("generator:source").and_then(Value::as_str) == Some("wind")
+                || tags.get("generator:method").and_then(Value::as_str) == Some("wind_turbine")
+                || tags.get("value").and_then(Value::as_str) == Some("wind_turbine");
+            if is_wind {
+                subtype = "Wind Turbine";
+            }
+            if let Some(op) = tags.get("operator").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+                extra.insert("operator".into(), op.to_string());
+            }
+        }
+    }
     if kind == "rc" {
         if let Some(a) = v.get("permittedAltitude").and_then(Value::as_f64) {
             extra.insert("permittedAltitude".into(), format!("{}", a as i64));

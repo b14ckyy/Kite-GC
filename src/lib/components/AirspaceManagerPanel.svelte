@@ -5,20 +5,17 @@
 
 <script lang="ts">
   // Airspace Manager panel (aeronautical data) on the panel framework — the static counterpart to the
-  // Radar panel. `advanced` two-column: left = per-layer 2D/3D visibility + cache; right = the per-layer
-  // grouped nearby list (Obstacles · Airspaces · Airfields). See docs/active/AIRSPACE_MANAGER.md.
-  import { onMount } from 'svelte';
+  // Radar panel. `advanced` two-column: left = per-layer 2D/3D visibility + the render/list ranges;
+  // right = the per-layer grouped nearby list (Obstacles · Airspaces · Airfields). A Compact button
+  // collapses it to the `info` variant (list only). See docs/active/AIRSPACE_MANAGER.md.
   import { t } from 'svelte-i18n';
   import PanelShell from '$lib/components/panel/PanelShell.svelte';
   import Toggle from '$lib/components/panel/Toggle.svelte';
   import Button from '$lib/components/panel/Button.svelte';
-  import {
-    aeroData, aeroLayers, aeroCacheStats, clearAeroCache, refreshAeroCacheStats, focusAero,
-    type AeroLayerKey, type Airspace,
-  } from '$lib/stores/airspace';
+  import { aeroData, focusAero, type AeroLayerKey, type Airspace } from '$lib/stores/airspace';
+  import { settings, AERO_DISTANCE_OPTIONS, type DistanceUnit } from '$lib/stores/settings';
   import { haversineDistance } from '$lib/utils/geo';
   import { aeroPointInfo } from '$lib/helpers/airspaceStyle';
-  import type { DistanceUnit } from '$lib/stores/settings';
   import { convertDistance, formatConverted } from '$lib/utils/units';
 
   let { reference = null, distanceUnit = 'metric' }: {
@@ -26,8 +23,10 @@
     distanceUnit?: DistanceUnit;
   } = $props();
 
-  const variant = 'advanced' as const;
-  const LIST_CAP = 25;
+  const LIST_CAP = 10; // entries per group, nearest first
+
+  const compact = $derived($settings.airspace.compact);
+  const variant = $derived(compact ? ('info' as const) : ('advanced' as const));
 
   const LAYERS: { key: AeroLayerKey; label: () => string }[] = [
     { key: 'airspaces', label: () => $t('airspace.layerAirspaces') },
@@ -37,7 +36,16 @@
   ];
 
   function setVis(key: AeroLayerKey, dim: 'd2' | 'd3', on: boolean) {
-    aeroLayers.update((l) => ({ ...l, [key]: { ...l[key], [dim]: on } }));
+    settings.update((s) => ({
+      ...s,
+      airspace: { ...s.airspace, layers: { ...s.airspace.layers, [key]: { ...s.airspace.layers[key], [dim]: on } } },
+    }));
+  }
+  function setRange(field: 'obstacleDistanceKm' | 'airfieldDistanceKm', km: number) {
+    settings.update((s) => ({ ...s, airspace: { ...s.airspace, [field]: km } }));
+  }
+  function setCompact(v: boolean) {
+    settings.update((s) => ({ ...s, airspace: { ...s.airspace, compact: v } }));
   }
 
   function distM(lat: number, lon: number): number {
@@ -59,29 +67,61 @@
     return best;
   }
 
+  // Lists: nearest LIST_CAP per group. Point groups are range-limited (the same range used for 3D
+  // rendering); airspaces are sparse → nearest-only. With no reference (no UAV + no GCS) the range
+  // filter is skipped so the list isn't empty.
+  const hasRef = $derived(reference != null);
+  const obstacleMaxM = $derived($settings.airspace.obstacleDistanceKm * 1000);
+  const airfieldMaxM = $derived($settings.airspace.airfieldDistanceKm * 1000);
+
+  const nearObstacles = $derived(
+    $aeroData.obstacles
+      .map((p) => ({ p, d: distM(p.lat, p.lon) }))
+      .filter((x) => !hasRef || x.d <= obstacleMaxM)
+      .sort((x, y) => x.d - y.d)
+      .slice(0, LIST_CAP),
+  );
   const nearAirspaces = $derived(
     $aeroData.airspaces
       .map((a) => ({ a, d: airspaceDist(a) }))
       .sort((x, y) => x.d - y.d)
       .slice(0, LIST_CAP),
   );
-  const nearObstacles = $derived(
-    $aeroData.obstacles
-      .map((p) => ({ p, d: distM(p.lat, p.lon) }))
-      .sort((x, y) => x.d - y.d)
-      .slice(0, LIST_CAP),
-  );
   const nearAirfields = $derived(
     [...$aeroData.airports, ...$aeroData.rcAirfields]
       .map((p) => ({ p, d: distM(p.lat, p.lon) }))
+      .filter((x) => !hasRef || x.d <= airfieldMaxM)
       .sort((x, y) => x.d - y.d)
       .slice(0, LIST_CAP),
   );
-
-  onMount(() => { void refreshAeroCacheStats(); });
 </script>
 
-<PanelShell {variant} title={$t('airspace.title')} detailTitle={$t('airspace.nearby')} body={controls} detail={nearbyList} />
+<PanelShell
+  {variant}
+  title={$t('airspace.title')}
+  detailTitle={$t('airspace.nearby')}
+  detailActions={compact ? undefined : compactBtn}
+  body={compact ? compactBody : controls}
+  detail={compact ? undefined : nearbyList}
+/>
+
+{#snippet compactBtn()}
+  <Button variant="standard" size="sm" onclick={() => setCompact(true)}>← {$t('airspace.compact')}</Button>
+{/snippet}
+
+{#snippet compactBody()}
+  <!-- info variant: clicking the panel re-expands it (like the logbook). -->
+  <div
+    class="am-compact"
+    role="button"
+    tabindex="0"
+    title={$t('airspace.expand')}
+    onclick={() => setCompact(false)}
+    onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCompact(false); } }}
+  >
+    {@render nearbyList()}
+  </div>
+{/snippet}
 
 {#snippet controls()}
   <div class="am-controls">
@@ -93,21 +133,32 @@
     {#each LAYERS as layer}
       <div class="am-row">
         <span class="am-layer">{layer.label()}</span>
-        <Toggle checked={$aeroLayers[layer.key].d2} onchange={(c) => setVis(layer.key, 'd2', c)} />
-        <Toggle checked={$aeroLayers[layer.key].d3} onchange={(c) => setVis(layer.key, 'd3', c)} />
+        <Toggle checked={$settings.airspace.layers[layer.key].d2} onchange={(c) => setVis(layer.key, 'd2', c)} />
+        <Toggle checked={$settings.airspace.layers[layer.key].d3} onchange={(c) => setVis(layer.key, 'd3', c)} />
       </div>
     {/each}
 
-    <div class="am-cache">
-      <span class="am-cache-label">{$t('airspace.cache')}</span>
-      {#if $aeroCacheStats}
-        <span class="am-cache-val">
-          {$aeroCacheStats.total} · {($aeroCacheStats.approxBytes / 1024).toFixed(0)} KB
-        </span>
-      {:else}
-        <span class="am-cache-val">—</span>
-      {/if}
-      <Button variant="standard" size="sm" onclick={() => clearAeroCache()}>{$t('settings.clear')}</Button>
+    <div class="am-ranges">
+      <label class="am-range">
+        <span class="am-range-label">{$t('airspace.rangeObstacles')}</span>
+        <select
+          class="am-select"
+          value={$settings.airspace.obstacleDistanceKm}
+          onchange={(e) => setRange('obstacleDistanceKm', Number(e.currentTarget.value))}
+        >
+          {#each AERO_DISTANCE_OPTIONS as km}<option value={km}>{km} km</option>{/each}
+        </select>
+      </label>
+      <label class="am-range">
+        <span class="am-range-label">{$t('airspace.rangeAirfields')}</span>
+        <select
+          class="am-select"
+          value={$settings.airspace.airfieldDistanceKm}
+          onchange={(e) => setRange('airfieldDistanceKm', Number(e.currentTarget.value))}
+        >
+          {#each AERO_DISTANCE_OPTIONS as km}<option value={km}>{km} km</option>{/each}
+        </select>
+      </label>
     </div>
   </div>
 {/snippet}
@@ -115,7 +166,7 @@
 {#snippet nearbyList()}
   <div class="am-list">
     <!-- Obstacles -->
-    <div class="am-group-head">{$t('airspace.layerObstacles')} <span class="am-group-count">{$aeroData.obstacles.length}</span></div>
+    <div class="am-group-head">{$t('airspace.layerObstacles')} <span class="am-group-count">{nearObstacles.length}</span></div>
     {#each nearObstacles as { p, d }}
       <button class="am-item" onclick={() => focusAero(p.lat, p.lon)}>
         <span class="am-item-name">{p.name || p.subtype}</span>
@@ -125,7 +176,7 @@
     {/each}
 
     <!-- Airspaces -->
-    <div class="am-group-head">{$t('airspace.layerAirspaces')} <span class="am-group-count">{$aeroData.airspaces.length}</span></div>
+    <div class="am-group-head">{$t('airspace.layerAirspaces')} <span class="am-group-count">{nearAirspaces.length}</span></div>
     {#each nearAirspaces as { a, d }}
       <button class="am-item" onclick={() => { const o = a.outlines[0]?.[0]; if (o) focusAero(o[1], o[0]); }}>
         <span class="am-item-name">{a.name}</span>
@@ -135,7 +186,7 @@
     {/each}
 
     <!-- Airfields -->
-    <div class="am-group-head">{$t('airspace.layerAirfields')} <span class="am-group-count">{$aeroData.airports.length + $aeroData.rcAirfields.length}</span></div>
+    <div class="am-group-head">{$t('airspace.layerAirfields')} <span class="am-group-count">{nearAirfields.length}</span></div>
     {#each nearAirfields as { p, d }}
       <button class="am-item" onclick={() => focusAero(p.lat, p.lon)}>
         <span class="am-item-name">{p.name || p.subtype}</span>
@@ -159,16 +210,22 @@
   .am-layer { font-size: 13px; color: #e0e0e0; }
   .am-row { padding: 4px 2px; }
 
-  .am-cache {
+  .am-ranges {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    flex-direction: column;
+    gap: 6px;
     margin-top: 10px;
     padding-top: 8px;
     border-top: 1px solid #272727;
   }
-  .am-cache-label { font-size: 12px; color: #949494; }
-  .am-cache-val { font-size: 12px; color: #e0e0e0; flex: 1; }
+  .am-range { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; }
+  .am-range-label { font-size: 12px; color: #949494; }
+  .am-select {
+    background: #1f1f1f; color: #e0e0e0; border: 1px solid #272727; border-radius: 4px;
+    padding: 2px 6px; font-size: 12px; cursor: pointer;
+  }
+
+  .am-compact { cursor: pointer; }
 
   .am-list { display: flex; flex-direction: column; }
   .am-group-head {

@@ -66,15 +66,9 @@ export function focusAero(lat: number, lon: number): void {
   aeroFocus.set({ lat, lon });
 }
 
-// ── Per-layer 2D/3D visibility (panel-controlled) ───────────────────
+// Per-layer 2D/3D visibility now lives in the persisted settings store (`settings.airspace.layers`,
+// type `AeroLayers`) so it survives a restart — see $lib/stores/settings.ts.
 export type AeroLayerKey = 'airspaces' | 'obstacles' | 'airports' | 'rc';
-export interface LayerVis { d2: boolean; d3: boolean }
-export const aeroLayers = writable<Record<AeroLayerKey, LayerVis>>({
-  airspaces: { d2: true, d3: false },
-  obstacles: { d2: true, d3: false },
-  airports: { d2: true, d3: false },
-  rc: { d2: true, d3: false },
-});
 
 /** Layer keys to fetch (the backend understands airspaces/obstacles/airports/rc). */
 export const ALL_AERO_LAYERS: AeroLayerKey[] = ['airspaces', 'obstacles', 'airports', 'rc'];

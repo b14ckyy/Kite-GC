@@ -165,7 +165,13 @@ export const DEFAULT_RADAR: RadarSettings = {
 
 /** Airspace Manager — aeronautical-data provider (one active at a time). See docs/active/AIRSPACE_MANAGER.md. */
 export type AirspaceProvider = 'none' | 'openaip';
-/** Airspace Manager global settings (Data tab). Per-layer 2D/3D visibility + filters live in the panel. */
+/** Per-layer 2D / 3D visibility for the four aero layers (panel-controlled, persisted). */
+export interface AeroLayerVis { d2: boolean; d3: boolean }
+export type AeroLayers = Record<'airspaces' | 'obstacles' | 'airports' | 'rc', AeroLayerVis>;
+/** Selectable render / list ranges (km) for the dense point layers. */
+export const AERO_DISTANCE_OPTIONS = [1, 2, 5, 10, 15, 25] as const;
+
+/** Airspace Manager global settings (Data tab) + the panel's persisted view state. */
 export interface AirspaceSettings {
   /** Global feature toggle — enables the subsystem + shows the panel in the nav rail. */
   enabled: boolean;
@@ -173,12 +179,29 @@ export interface AirspaceSettings {
   provider: AirspaceProvider;
   /** Provider API key (user-supplied; persisted). */
   apiKey: string;
+  /** Per-layer 2D/3D visibility (panel toggles). */
+  layers: AeroLayers;
+  /** Obstacle render (3D) + list range in km (horizontal, from the camera/reference). */
+  obstacleDistanceKm: number;
+  /** Airport + RC-airfield render + list range in km (shared). */
+  airfieldDistanceKm: number;
+  /** Panel collapsed to the compact (list-only) view. */
+  compact: boolean;
 }
 
 export const DEFAULT_AIRSPACE: AirspaceSettings = {
   enabled: false,
   provider: 'none',
   apiKey: '',
+  layers: {
+    airspaces: { d2: true, d3: false },
+    obstacles: { d2: true, d3: false },
+    airports: { d2: true, d3: false },
+    rc: { d2: true, d3: false },
+  },
+  obstacleDistanceKm: 5,
+  airfieldDistanceKm: 15,
+  compact: false,
 };
 
 export interface AppSettings {
@@ -323,7 +346,21 @@ function load(): AppSettings {
             alerts: { ...dr.alerts, ...(pr.alerts ?? {}) },
           };
         })(),
-        airspace: { ...defaults.airspace, ...(parsed.airspace ?? {}) },
+        airspace: (() => {
+          const da = defaults.airspace;
+          const pa = (parsed.airspace ?? {}) as Partial<AirspaceSettings>;
+          const pl = (pa.layers ?? {}) as Partial<AeroLayers>;
+          return {
+            ...da,
+            ...pa,
+            layers: {
+              airspaces: { ...da.layers.airspaces, ...(pl.airspaces ?? {}) },
+              obstacles: { ...da.layers.obstacles, ...(pl.obstacles ?? {}) },
+              airports: { ...da.layers.airports, ...(pl.airports ?? {}) },
+              rc: { ...da.layers.rc, ...(pl.rc ?? {}) },
+            },
+          };
+        })(),
       };
     }
   } catch {

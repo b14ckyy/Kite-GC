@@ -110,6 +110,11 @@ export function airspaceIsRelevant(a: Airspace): boolean {
   return CLASSIFIED_ICAO.has(a.icaoClassName) || ALWAYS_SHOW_TYPES.has(a.typeId);
 }
 
+/** Information regions (FIR / UIR) blanket whole countries — never drawn as filled polygons (2D + 3D). */
+export function isAirspaceHidden(a: Airspace): boolean {
+  return a.typeId === 10 || a.typeId === 11;
+}
+
 // ── Zoom-density management ─────────────────────────────────────────
 // Each feature appears only at/above a minimum 2D (Leaflet) zoom, by importance/size — so zoomed out
 // you see only the big/important features and detail fills in as you zoom in (à la the OpenAIP map).
@@ -147,8 +152,9 @@ export function obstacleMinZoom(p: AeroPoint): number {
 /** Short info line for a point feature (popup / nearby list). */
 export function aeroPointInfo(p: AeroPoint): string {
   const parts: string[] = [];
-  if (p.kind === 'obstacle' && p.heightM != null) parts.push(`${Math.round(p.heightM)} m AGL`);
+  if (p.kind === 'obstacle') parts.push(p.heightM != null ? `${Math.round(p.heightM)} m AGL` : 'height n/a');
   if (p.subtype) parts.push(p.subtype);
+  if (p.kind === 'obstacle' && p.extra.operator) parts.push(p.extra.operator);
   if (p.kind === 'rc' && p.extra.permittedAltitude) parts.push(`max ${p.extra.permittedAltitude} m`);
   if (p.kind === 'rc' && p.extra.operator) parts.push(p.extra.operator);
   return parts.join(' · ');

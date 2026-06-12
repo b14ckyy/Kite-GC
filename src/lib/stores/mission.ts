@@ -8,6 +8,7 @@
 import { writable, derived, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { connection } from './connection';
+import { homePosition } from './home';
 
 // ── Types (mirror Rust mission::types) ──────────────────────────────
 
@@ -711,6 +712,7 @@ export async function missionReorderWp(from: number, to: number): Promise<Missio
 export async function missionDownload(fromEeprom = false): Promise<Mission> {
   const m = await invoke<Mission>('mission_download', { fromEeprom });
   mission.set(m);
+  applyMissionLaunchDefault(m); // FC has no embedded home → UAV HOME, else WP1
   clearUndoHistory();
   markMissionSynced('fc');
   loadedMissionId.set(null);
@@ -736,9 +738,22 @@ function launchHomeArg(): [number, number] | undefined {
   return lp ? [lp.lat, lp.lng] : undefined;
 }
 
-/** Apply a loaded mission's <mwp> home to the launch-point store, if present. */
-function applyLoadedHome(m: Mission) {
-  if (m.home) launchPoint.set({ lat: m.home.lat, lng: m.home.lon });
+/**
+ * Default the planning launch/home point after loading a mission (DB / file / FC) so REL waypoint
+ * altitudes resolve correctly even before editing.
+ *  1. A home embedded WITH the mission (file `<mwp>` meta / DB row) is authoritative → always applied.
+ *  2. Otherwise an existing launch point (e.g. user-placed in edit mode) is KEPT — loading a mission
+ *     without its own home must not reset it.
+ *  3. Only when none exists is one generated: live UAV HOME, else the first geo-waypoint (WP1).
+ */
+export function applyMissionLaunchDefault(m: Mission, embeddedHome?: { lat: number; lng: number }) {
+  if (embeddedHome) { launchPoint.set(embeddedHome); return; }
+  if (m.home) { launchPoint.set({ lat: m.home.lat, lng: m.home.lon }); return; }
+  if (get(launchPoint)) return; // keep an existing (e.g. user-placed) launch point
+  const h = get(homePosition);
+  if (h.set && (h.lat !== 0 || h.lon !== 0)) { launchPoint.set({ lat: h.lat, lng: h.lon }); return; }
+  const fw = m.waypoints.find((w) => hasLocation(w.action) && !(w.lat === 0 && w.lon === 0));
+  if (fw) launchPoint.set({ lat: toDeg(fw.lat), lng: toDeg(fw.lon) });
 }
 
 /** Export mission as XML string (includes the launch point as <mwp> meta) */
@@ -750,7 +765,7 @@ export async function missionExportXml(): Promise<string> {
 export async function missionImportXml(xml: string): Promise<Mission> {
   const m = await invoke<Mission>('mission_import_xml', { xml });
   mission.set(m);
-  applyLoadedHome(m);
+  applyMissionLaunchDefault(m);
   clearUndoHistory();
   markMissionSynced('file');
   loadedMissionId.set(null);
@@ -767,7 +782,7 @@ export async function missionSaveFile(path: string): Promise<void> {
 export async function missionLoadFile(path: string): Promise<Mission> {
   const m = await invoke<Mission>('mission_load_file', { path });
   mission.set(m);
-  applyLoadedHome(m);
+  applyMissionLaunchDefault(m);
   clearUndoHistory();
   markMissionSynced('file');
   loadedMissionId.set(null);
