@@ -16,6 +16,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **nearby list** (Obstacles · Airspaces · Airfields, click to centre) on the right. **Zoom-density
   management** shows only big/important features when zoomed out and fills in detail (obstacles, RC fields,
   small airfields, minor airspaces) as you zoom in. _3D rendering + alerts are P2._
+- **Airspace Manager — 3D + refinements (P2).** The globe now renders the aero layers, and the panel
+  settings persist:
+  - **Obstacle columns (3D).** Slim vertical columns on the **real terrain** (sampled per obstacle →
+    geoid-independent, no float/sink), perspective-correct (not sprites). OpenAIP often omits the AGL
+    height *and* mis-types turbines as generic obstacles, so we now read the **OSM tags** to detect wind
+    turbines (proper icon + operator) and, where the height is missing, draw a **typed estimated** column
+    (taller for turbines) rendered **visibly distinct** (translucent + yellow) so it never poses as
+    surveyed data.
+  - **Airspace volumes (3D).** Extruded floor→ceiling hulls for the airspaces **relevant to the UAV**
+    (inside, or a boundary within range; country-sized FIR/UIR + upper-air/CTAs are skipped). The
+    boundary section **facing the UAV** is given a pattern as an **approach reference** (perpendicular
+    "zone" test + outward-sidedness so only the truly-facing wall lights up). Volumes are non-pickable
+    (raw primitives) so they never block clicks or the camera.
+  - **2D click → all airspaces here.** Clicking the map lists **every** airspace stacked at the point
+    (overlap-aware), dropping unclassified "free" airspace as clutter when a classified/critical one
+    covers the same spot; a second click toggles the popup shut. FIR/UIR are no longer drawn.
+  - **Typed 2D markers.** Subtle black obstacle silhouettes (white outline, no disc) and airport icons
+    colour-coded by type (international = red, airport = blue, airfield = green, heliport = "H").
+  - **Persistence + panel polish.** Per-layer 2D/3D visibility, the obstacle/airfield **render ranges**
+    (1/2/5/10/15/25 km, used for both the 3D cull and the nearby list) and the **Compact** view now
+    persist (in settings). The nearby list is capped to the nearest 10 per group within range; the
+    confusing cache readout was removed.
 - **ADS-B online query bounded to what the free-look camera looks at.** In the 3D free-look camera the
   online ADS-B fetch now centres on the screen-centre ground point, with that point's offset from the
   camera nadir (and the query radius) capped at 150 km — projected 150 km along the look direction when
@@ -91,6 +113,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Log player shows the time-of-day** (flight start + elapsed) at the current playback position.
 
 ### Fixed
+- **3D mission waypoints no longer flicker / sit underground with live telemetry.** The geoid helper
+  re-rendered the whole mission on **every telemetry frame** (it reports success immediately once the
+  offset is known), so `renderMission3D` repeatedly removed the waypoints, awaited terrain, and re-added
+  them — a flicker that worsened once the new aero terrain-sampling shared the same pipeline. It now
+  re-places the mission only when the geoid offset was *just* derived.
+- **Mission launch/home defaults to WP1.** Loading a mission (DB / file / FC) with no launch point now
+  derives one — live UAV HOME → the mission's embedded home → the first waypoint — so REL waypoint
+  altitudes resolve before any edit. An existing (e.g. user-placed) launch point is kept.
+- **Waypoint editing UX.** Entering edit mode auto-switches to the 2D map (waypoints can't be edited in
+  3D), and while editing, map clicks no longer pop the airspace info list (they only de-select waypoints).
 - **3D radar no longer stutters when many contacts load.** Contact entities (the glb model + ground
   geometry) are now pooled and reused as aircraft enter/leave the view instead of being destroyed and
   rebuilt — building a Cesium model per contact was a main-thread "Scripting" stall (160–250 ms) that

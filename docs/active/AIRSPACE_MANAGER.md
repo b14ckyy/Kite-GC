@@ -10,14 +10,28 @@
 > · **2D rendering** (class-coloured polygons + typed markers incl. the wind-turbine icon) · **zoom-density
 > management**.
 >
-> **Open (P2, next):**
-> - **Centre fallback bug** — the fetch only follows the UAV position; it does **not** fall back to the GCS
->   marker / map centre when no UAV is connected. Fix the `radarReference ?? map.centre` path in `+page`.
-> - **3D rendering** — the per-layer **3D toggles exist but don't render yet**: airspace extruded volumes
->   (with the relevance filter), obstacle columns, RC/airport ground projection.
-> - **Density fine-tuning** — calibrate the min-zoom thresholds (`helpers/airspaceStyle.ts`) against the
->   OpenAIP map; possibly tie the obstacle/airport fetch radius to zoom too.
-> - **Polish** — a class/type legend; nearby-list search + the `info` minimized panel variant.
+> **Status — P2 shipped (2026-06-12):**
+> - **3D obstacle columns** — slim terrain-sampled columns (geoid-independent, perspective-correct);
+>   wind-turbine detection + operator from **OSM tags** (OpenAIP mis-types turbines as generic & often
+>   omits height); height-less obstacles drawn as a **typed estimated** column, visibly distinct.
+> - **3D airspace volumes** — extruded floor→ceiling hulls for the **UAV-relevant** set (FIR/UIR +
+>   country-sized upper-air skipped); the **UAV-facing** boundary section is patterned as an approach
+>   reference (perpendicular-zone + outward-sidedness test). Non-pickable raw primitives (no click/camera
+>   interference). Altitudes via the app's geoid offset (GND→terrain).
+> - **2D refinements** — overlap-aware click list (all airspaces at the point, unclassified dropped when a
+>   classified one overlaps, toggle on re-click); FIR/UIR no longer drawn; subtle obstacle silhouettes +
+>   type-coloured airport icons (intl/airport/airfield/heliport).
+> - **Persistence + ranges** — per-layer 2D/3D visibility, configurable obstacle/airfield **render+list
+>   ranges** (1/2/5/10/15/25 km), and the **Compact** view persist (settings). Nearby list capped to the
+>   nearest 10 per group within range; cache readout removed.
+>
+> **Open (P3, next):**
+> - **Centre fallback** — the 2D fetch still follows the UAV; fall back to the GCS marker / map centre when
+>   no UAV. (3D culling already uses the camera focus.)
+> - **Alerts** — airspace-level / obstacle-proximity warnings.
+> - **3D polish** — RC/airport ground projection; per-vertex GND-floor terrain clamp (currently centroid);
+>   pattern style tuning; the systemic dynamic geoid (per-region recompute, also relevant to UAV/track).
+> - **Density fine-tuning** + a class/type legend + nearby-list search / `info` minimized variant.
 
 ## Mental model: the static counterpart to Radar
 Same shape as the Radar subsystem, but for **static aeronautical features** instead of moving vehicles:
