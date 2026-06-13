@@ -16,3 +16,6 @@ viability, hardware, a partner, etc.).
 - [MULTI_OPERATOR_CENTRAL_ARCHIVE.md](MULTI_OPERATOR_CENTRAL_ARCHIVE.md) — central, multi-operator
   flight archive (sync local SQLite stores into a company-wide archive). Gated on the app going
   public and earning revenue.
+- [UAV_GEOZONES_NFZ.md](UAV_GEOZONES_NFZ.md) — explicit drone no-fly / geozone maps (not the generic
+  airspace overlay). Worldwide → multi-provider; normalize to ED-269/318. Gated on the geozone-data
+  landscape maturing + the per-source licensing/commercial question.
