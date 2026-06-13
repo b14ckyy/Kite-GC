@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Live recording — crash-safe temp session store + complete capture (ADR-040).** A live flight is
+  now recorded into a **separate per-session SQLite file** (`sessions/active_<ts>.ktmp`) and committed
+  into the main logbook DB **atomically on disarm** — the production database is no longer written
+  mid-flight, so an app crash leaves a recoverable session file instead of a half-written, non-finalized
+  flight. The recorder also now captures the fields it was dropping despite already polling them:
+  **active waypoint + nav state** (so a live-recorded mission shows active-WP tracking on replay, matching
+  live), **GPS HDOP**, and **packed sensor-health** — no schema change (the columns already existed).
+  _Crash recovery/resume, reconnect-during-flight, and save-trigger tuning are a follow-up phase._
 - **Home / Launch reference unified + recovered from the FC (ADR-039).** The orange draggable **"L"
   launch** point and the green **"H" home** marker are now one source-tagged reference per map
   (`homePosition.source` = `fc` | `manual` | `replay`): a connected FC home shows a **locked green "H"**

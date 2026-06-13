@@ -1807,5 +1807,51 @@ field, not the `boxId_e` ordinal).
 
 ---
 
+## ADR-040: Live Recording — Temp Session Store (Commit-on-Disarm) + Capture Completeness
+
+**Date**: 2026-06-13
+**Status**: Accepted
+**Related**: ADR-039 (arm-edge baseline / reconnect-while-armed), DATA_PIPELINE.md, FLIGHTLOG_DATABASE.md,
+[LIVE_RECORDING_TEMP_STORE.md](active/LIVE_RECORDING_TEMP_STORE.md)
+
+**Context**: A live flight was recorded **straight into the main `flights.db`** — the `flights` row was
+inserted on the disarmed→armed edge and `telemetry_records` batch-flushed every 50 samples during flight.
+A crash therefore left a **half-written, non-finalized flight** in the production DB (`end_time`/stats
+`NULL`) and the session **could not be resumed**. Separately, the unified `TelemetryRecord` (the
+protocol-agnostic unit both MSP and MAVLink converge on) was captured **incompletely**: `active_wp_number`,
+`nav_state`, `gps_hdop`, and `hw_health_status` were hard-coded `None` even though those MSP messages are
+**already polled and emitted** — so a live-recorded mission showed **no active-WP tracking on replay** while
+live tracking worked.
+
+**Decision**: record each armed session into a **separate per-session SQLite file**
+(`<db_dir>/sessions/active_<ts>.ktmp`, same `telemetry_records` DDL + a self-describing `session_meta`
+table), and **commit it into the main DB atomically on disarm** (insert the finalized `flights` row →
+`ATTACH` the temp file → copy `telemetry_records` rewriting `flight_id` → `COMMIT` → `DETACH` → delete the
+temp file). The temp file is the durable buffer (not memory); the main DB never sees a half-flight. This
+**defers `flight_id` to disarm**: `flight-recording-started` becomes an id-less signal, mission save+link
+moves to the `flight-recording-ended` event, and weather/geocode enrichment runs at disarm against the new
+id. The temp store sits at the `TelemetryRecord` level, so it is inherently **protocol-independent**.
+
+Capture completeness is fixed in the same rework (schema untouched — columns exist since `v4`): add
+`on_nav_status` / `on_gps_stats` / `on_sensor_status` to the recorder, the matching
+`MSP_NAV_STATUS`/`MSP_GPSSTATISTICS`/`MSP_SENSOR_STATUS` branches to `feed_recorder()`, and pack
+`hw_health_status` from the per-sensor status — so the temp store carries the **complete** unified record.
+
+**Deferred (next phase)**: crash **recovery/resume** (startup scan of `sessions/*.ktmp`, finalize from
+`session_meta`), **reconnect during an active flight** (continue the same `.ktmp` rather than start a new
+flight), and **save-trigger tuning** (batch size / fsync cadence). The self-describing temp file is designed
+to enable these without further schema change. **Raw recording** (`raw_logger`/tlog) is unchanged — it
+remains the parallel write-only backup, out of scope here.
+
+**Consequences**: the production DB stays clean during flight and a crash leaves a recoverable session file
+instead of a corrupt half-flight; replay of a live recording regains active-WP / nav context. Cost: a
+recorder lifecycle change (insert-on-disarm) that ripples into the two lifecycle events, enrichment timing,
+and the DB-disabled/raw-only path; the copy-on-commit reuses the `.kflight` flight-copy machinery in
+`exchange.rs`. Fields that are genuinely **Blackbox-sourced** (`wind_*`, `rc_*`, `gps_eph/epv`,
+`baro_temperature`, `state_flags`) stay `NULL` for live MSP — whether any merit a dedicated MSP poll is a
+separate, version-safe investigation, not part of this rework.
+
+---
+
 *End of Architecture Decision Records*
 
