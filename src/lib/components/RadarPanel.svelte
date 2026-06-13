@@ -17,6 +17,7 @@
   import SegmentedToggle, { type SegOption } from '$lib/components/panel/SegmentedToggle.svelte';
   import { radarVehicles, radarAdsbStatus, radarSelection, enrichList, type EnrichedVehicle } from '$lib/stores/radarTracking';
   import { BUILTIN_ADSB_PROVIDERS } from '$lib/stores/settings';
+  import { panelState } from '$lib/stores/panelState';
   import type { AppSettings, RadarSettings, InterfaceSettings } from '$lib/stores/settings';
   import type { PortInfo } from '$lib/stores/connection';
   import { convertSpeed, convertAltitude, convertDistance, formatConverted } from '$lib/utils/units';
@@ -84,7 +85,8 @@
   }
   onMount(refreshPorts);
 
-  let compact = $state(false);
+  // Compact/advanced view persists across panel switches + restart (panelState store).
+  const compact = $derived($panelState.radarCompact);
 
   // Enabled systems → groups (label + enriched, distance-sorted list). Disabled systems are hidden.
   const groups = $derived(
@@ -156,7 +158,7 @@
   <!-- Compact collapses the panel to the info variant (list only). Right-aligned, on the detail
        toolbar row (same level as the tab switcher on the left). Left chevron = collapse leftward. -->
   <div class="rt-right">
-    <Button variant="standard" size="sm" onclick={() => (compact = true)}>← {$t('radar.compact')}</Button>
+    <Button variant="standard" size="sm" onclick={() => panelState.patch({ radarCompact: true })}>← {$t('radar.compact')}</Button>
   </div>
 {/snippet}
 
@@ -168,8 +170,8 @@
     role="button"
     tabindex="0"
     title={$t('radar.expand')}
-    onclick={() => (compact = false)}
-    onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); compact = false; } }}
+    onclick={() => panelState.patch({ radarCompact: false })}
+    onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); panelState.patch({ radarCompact: false }); } }}
   >
     {@render vehicleList()}
   </div>

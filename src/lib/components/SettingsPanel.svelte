@@ -13,6 +13,7 @@
   import { MAP_PROVIDERS } from '$lib/config/mapProviders';
   import { WIDGET_DEFS } from '$lib/config/widgetRegistry';
   import { DEFAULT_RADAR, DEFAULT_AIRSPACE } from '$lib/stores/settings';
+  import { panelState } from '$lib/stores/panelState';
   import { resetGcsManual, gcsManuallySet } from '$lib/stores/gcsLocation';
   import type { AppSettings, InterfaceSettings, RadarSettings, GcsMode, AirspaceSettings, AirspaceProvider } from '$lib/stores/settings';
   import type { TileCacheStats } from '$lib/cache/tileCache';
@@ -102,7 +103,8 @@
     onGeoCheck?: () => void;
   } = $props();
 
-  let tab = $state<'interface' | 'data'>('interface');
+  // Active tab persists across panel switches + restart (panelState store).
+  const tab = $derived($panelState.settingsTab);
 
   const DEV = import.meta.env.DEV;
   /** Patch the nested radar settings (onPatch merges shallowly, so pass the whole radar object). */
@@ -162,7 +164,7 @@
       full
       options={[{ value: 'interface', label: $t('settings.interface') }, { value: 'data', label: $t('settings.tabData') }]}
       value={tab}
-      onchange={(v) => (tab = v as 'interface' | 'data')}
+      onchange={(v) => panelState.patch({ settingsTab: v as 'interface' | 'data' })}
     />
   </div>
 {/snippet}

@@ -124,9 +124,10 @@
     font-weight: 600;
   }
 
+  /* Fixed 2 columns so the panel doesn't grow wide with the feature count (wraps to 2×N rows). */
   .feature-list {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     gap: 4px;
   }
 
@@ -135,6 +136,7 @@
     border-radius: 3px;
     font-size: 10px;
     font-weight: 600;
+    text-align: center;
   }
 
   .feature-badge.available {

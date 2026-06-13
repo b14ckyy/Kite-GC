@@ -1212,6 +1212,17 @@
     replaySource = 'live';
     linkedPartnerTrack = [];
     resetPlayback();
+
+    // While connected to a UAV, selecting a logbook entry shows DETAILS ONLY — nothing is loaded
+    // onto the map (no mission, home, launch or playback), so the live FC mission/home stay
+    // authoritative (this was the source of the FC↔map desync). To fly a logbook flight's mission,
+    // open it from the detail's linked-mission chip → Mission Manager.
+    if (connStatus === 'connected') {
+      replayWpTotal.set(null);
+      await loadLogbook();
+      return;
+    }
+
     if (data.hasGpsData) playbackActive = true;
 
     // Resolve the replay WP total (X for the WP N/X readout) and load the flown mission.
@@ -2041,17 +2052,21 @@
   <!-- Full-size video shown in the map area when the view is swapped (videoPrimary).
        Double-click to swap back. -->
   {#if mapInFrame}
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <!-- svelte-ignore a11y_media_has_caption -->
-    <video
-      class="map-video"
-      class:mirror={$videoState.mirror}
-      bind:this={mapVideoEl}
-      autoplay
-      muted
-      playsinline
-      ondblclick={() => setVideoPrimary(false)}
-    ></video>
+    <!-- Wrapper carries the inset + black backdrop; the video fills it with object-fit: contain so
+         it scales to the window (full height/width) without distortion — bars where aspect differs. -->
+    <div class="map-video-wrap">
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <!-- svelte-ignore a11y_media_has_caption -->
+      <video
+        class="map-video"
+        class:mirror={$videoState.mirror}
+        bind:this={mapVideoEl}
+        autoplay
+        muted
+        playsinline
+        ondblclick={() => setVideoPrimary(false)}
+      ></video>
+    </div>
   {/if}
 
   <!-- Map lives in the unzoomed `.layer-map` above (see docs/archive/UI_SCALING.md). -->
@@ -2425,16 +2440,26 @@
     z-index: 2; /* above .ui-scale (z:1): into the floating frame body; frame draws the border */
     border-radius: 0 0 7px 7px;
   }
-  /* Full-size video shown in the content area when swapped (videoPrimary) */
-  .map-video {
+  /* Full-size video shown in the content area when swapped (videoPrimary). The wrapper holds the
+     chrome inset + black backdrop; the video fills it. */
+  .map-video-wrap {
     position: absolute;
     top: 53px;
     left: 0;
     right: 0;
     bottom: 24px;
-    object-fit: cover;
     background: #000;
     z-index: 0;
+  }
+  /* width/height 100% (not auto) so the replaced <video> stretches to the wrapper instead of using
+     its intrinsic stream resolution; object-fit: contain keeps the aspect ratio (letterbox bars). */
+  .map-video {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
   }
   .map-video.mirror {
     transform: scaleX(-1);
