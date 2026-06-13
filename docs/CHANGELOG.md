@@ -9,13 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Live recording — crash-safe temp session store + complete capture (ADR-040).** A live flight is
-  now recorded into a **separate per-session SQLite file** (`sessions/active_<ts>.ktmp`) and committed
-  into the main logbook DB **atomically on disarm** — the production database is no longer written
-  mid-flight, so an app crash leaves a recoverable session file instead of a half-written, non-finalized
-  flight. The recorder also now captures the fields it was dropping despite already polling them:
-  **active waypoint + nav state** (so a live-recorded mission shows active-WP tracking on replay, matching
-  live), **GPS HDOP**, and **packed sensor-health** — no schema change (the columns already existed).
-  _Crash recovery/resume, reconnect-during-flight, and save-trigger tuning are a follow-up phase._
+  now recorded into a **separate per-session SQLite file** (`sessions/active_<ts>.ktmp`) instead of
+  straight into the production database, so an app crash leaves a recoverable session file rather than
+  a half-written, non-finalized flight. The recorder also now captures the fields it was dropping
+  despite already polling them: **active waypoint + nav state** (so a live-recorded mission shows
+  active-WP tracking on replay, matching live), **GPS HDOP/EPH/EPV**, and **packed sensor-health** — no
+  schema change (the columns already existed).
+- **Deferred commit + End-Flight dialog as the commit gate (ADR-041).** The temp session is committed
+  into the main DB **only** on an explicit **Save** or when a new flight is armed after a **5 s grace**
+  — nothing is written while the summary dialog is open. So **Discard Recording** simply drops the temp
+  file, and an **accidental disarm re-armed within 5 s stays one continuous log** (INAV-style grace)
+  instead of splitting into two flights. The End-Flight summary is now **modal** (a click next to it or
+  Escape no longer closes it — it can't be dismissed by accident), gains a **Discard Recording** button
+  (with confirmation) and drops the confusing **Skip**. The FC-synced flown mission is captured at
+  disarm and linked when the flight is committed. _Recovery prompt on start/reconnect for an orphaned
+  session, and save-trigger tuning, are a follow-up phase._
 - **Home / Launch reference unified + recovered from the FC (ADR-039).** The orange draggable **"L"
   launch** point and the green **"H" home** marker are now one source-tagged reference per map
   (`homePosition.source` = `fc` | `manual` | `replay`): a connected FC home shows a **locked green "H"**

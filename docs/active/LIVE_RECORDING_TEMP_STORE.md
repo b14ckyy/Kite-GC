@@ -1,8 +1,9 @@
 # Live Recording — Temp Session Store + Capture Completeness
 
-> Status: **Planned** (2026-06-13). Backend recorder rework. Schema-neutral for the telemetry
-> field set (columns already exist at `v11`); adds a separate per-session temp SQLite file.
-> Related: [DATA_PIPELINE.md](DATA_PIPELINE.md), [FLIGHTLOG_DATABASE.md](FLIGHTLOG_DATABASE.md), ADR-040.
+> Status: **In progress** (2026-06-13). Temp store + capture completeness shipped; deferred commit +
+> End-Flight dialog gate + 5 s re-arm grace this round; recovery prompt on start/reconnect is the next
+> phase. Schema-neutral (columns exist at `v11`); adds a per-session temp SQLite file.
+> Related: [DATA_PIPELINE.md](DATA_PIPELINE.md), [FLIGHTLOG_DATABASE.md](FLIGHTLOG_DATABASE.md), ADR-040, ADR-041.
 
 ## Why
 
@@ -44,46 +45,72 @@ protocol-agnostic.
 - The temp DB is the **durable buffer** — not memory. Samples are still grouped into small batches
   (≈10–25) purely for write efficiency; the point is that committed batches survive a crash.
 
-### Lifecycle (this phase)
+### Lifecycle (deferred commit — ADR-041)
+
+The commit into the main DB is **deferred**: while the End-Flight summary dialog is open after a
+disarm, **nothing** is written to `flights.db` — not even after the grace window. The temp session
+is committed **only** on an explicit **Save** or when the **grace lapses and a new arm starts the
+next flight**. This makes **Discard** trivial (just drop the temp) and lets an accidental disarm be
+re-armed into the **same** log.
 
 ```
-ARM (disarmed→armed edge, live)
-  └─ create sessions/active_<ts>.ktmp  (telemetry_records + session_meta)
-  └─ write session_meta row (start_time, fc_info, protocol, start_lat/lon)
-  └─ NOTE: nothing is written to the main flights.db yet  ← behavioural change
+ARM — fresh session (no pending)
+  └─ create sessions/active_<ts>.ktmp (telemetry_records + session_meta)
+  └─ write session_meta (start_time, fc_info, protocol, start_lat/lon)
+  └─ emit id-less "flight-recording-started"; nothing in flights.db
 
 … during flight …
   └─ each unified sample → INSERT into the temp DB (small batches)
-  └─ statistics (max alt/speed/distance, total distance, start_mah) accumulated in memory as today
+  └─ stats (max alt/speed/distance, total distance, start_mah) accumulated as today
 
-DISARM (armed→disarmed edge)
-  └─ main DB transaction:
-        INSERT finalized flights row (end_time, duration, stats, battery_used)
-        ATTACH the temp .ktmp
-        INSERT INTO telemetry_records SELECT … (rewriting flight_id to the new main id)
-        COMMIT  → DETACH → delete the .ktmp
-  └─ the main DB sees the flight only as a finished whole — never as a half-flight
+DISARM
+  └─ flush tail + close the temp DB (WAL checkpoint); do NOT commit, do NOT delete
+  └─ build the finalized Flight (end_time, duration, stats, battery_used) and store it as the
+     PENDING SESSION in app-state (temp_path, db_path, Flight, start_mah, last_ts, disarm_instant)
+  └─ emit "flight-recording-ended" carrying the STATS (no flight_id yet → dialog reads the payload)
+
+The pending session is then resolved by exactly one of:
+  SAVE  (user, command)         → commit pending → main DB, return flight_id, enrich, delete temp
+  re-ARM after grace (≥5 s)     → commit pending (the previous flight) → main DB, enrich, delete temp,
+                                  emit "flight-recording-committed{flight_id}", then start a fresh session
+  re-ARM within grace (<5 s)    → reopen the SAME .ktmp and CONTINUE the flight (timestamps continue
+                                  from max(timestamp_ms)); emit "flight-recording-resumed"; no commit
+  DISCARD (user, confirmed)     → delete temp; no commit
 ```
 
-The copy-with-id-rewrite step reuses the flight-copy machinery already in
-[`exchange.rs`](../../src-tauri/src/flightlog/exchange.rs) (the `.kflight` export copies
-`telemetry_records` for a flight the same way).
+**Commit = atomic main-DB transaction** (same for the SAVE command and the grace-arm path): insert the
+finalized `flights` row → `ATTACH` the temp `.ktmp` → `INSERT … SELECT` its `telemetry_records`
+(rewriting `flight_id` to the new main id) → `COMMIT` → `DETACH` → delete the `.ktmp`. Reuses the
+flight-copy approach already in [`exchange.rs`](../../src-tauri/src/flightlog/exchange.rs). The main DB
+only ever sees a finished flight, never a half-flight.
 
-### Behavioural change: `flight_id` is assigned at DISARM, not ARM
+### Why the pending session lives in app-state
 
-Today `on_arm` inserts the main `flights` row immediately to obtain a `flight_id`, which is carried
-in the `flight-recording-started` event. With deferred insert the real id only exists at disarm.
-Three downstream touch-points adjust:
+It must survive a **disconnect while the dialog is open** (Save/Discard must still work afterwards) and
+be reachable by the `flightlog_commit_pending_session` / `flightlog_discard_pending_session` Tauri
+commands. So it lives in a shared `Arc<Mutex<Option<PendingSession>>>` in app-state — **not** in the
+recorder (which is torn down with the connection). The recorder holds the same `Arc` and, on a new arm,
+`take()`s it under the mutex for the grace decision (so the command thread and the recorder can never
+both commit the same session).
 
-1. **Lifecycle events.** `flight-recording-started` becomes an **id-less** "recording started"
-   signal; mission save+link moves to **`flight-recording-ended`** (which already fires at disarm
-   with the id). The exact frontend usage in `+page.svelte` / `logbookController` is verified before
-   changing the event payload, so the flown-mission link still lands on the right flight.
-2. **Weather / geocode enrichment.** Currently spawned at arm against the main `flight_id`. Moves to
-   **disarm**, against the newly inserted id (same `enrich_flight_async`, just reordered).
-3. **DB-disabled / raw-only mode.** When `db_enabled` is false there is no main flight to commit to;
-   the temp store is skipped (or kept only as the raw-log backup path — unchanged from today, since
-   raw logging is explicitly out of scope here).
+### Behavioural change: `flight_id` is assigned at COMMIT, not ARM
+
+`on_arm` no longer inserts a `flights` row; the id is born at commit (Save / grace-arm). Touch-points:
+
+1. **Events.** `flight-recording-started` is an **id-less** signal. `flight-recording-ended` carries
+   the **stats** (the dialog no longer reads a committed flight). New: `flight-recording-committed
+   {flight_id}` (a pending session was auto-committed on a grace-arm → frontend links the captured
+   mission + closes the dialog) and `flight-recording-resumed` (re-arm within grace → frontend just
+   closes the dialog; the flight continues).
+2. **Mission save+link.** The FC-synced flown mission is **captured at disarm** (waypoints + hash,
+   while FC-sync still holds) and **linked at commit** (Save → the returned id; grace-arm → the
+   committed event), even if FC-sync was lost meanwhile.
+3. **Weather / geocode enrichment.** Runs at **commit** against the new id (same `enrich_flight_async`).
+4. **DB-disabled / raw-only mode.** No temp store / no pending; the raw-log backup path is unchanged.
+5. **Disconnect with an active (armed) flight** (interim): `shutdown()` finalizes the active flight as
+   a **pending session** + emits `flight-recording-ended` (the dialog appears), instead of committing
+   outright. A reconnect+arm within grace then continues the same `.ktmp`. The richer
+   recovery-on-reconnect prompt is the next phase.
 
 ### Capture completeness (folded in)
 
@@ -96,16 +123,26 @@ Schema is untouched (columns exist since `v4`). Wiring only:
 - `hw_health_status` is packed from the per-sensor `SensorStatusData` into the 2-bit-per-sensor
   layout documented in [FLIGHTLOG_DATABASE.md](FLIGHTLOG_DATABASE.md#hw_health_status).
 
+### End-Flight summary dialog (ADR-041)
+
+The disarm summary ([`EndFlightDialog.svelte`](../../src/lib/components/logbook/EndFlightDialog.svelte))
+is the commit gate when DB recording is on:
+- **Modal** — no backdrop-click / Escape dismissal (a stray click must not lose the recording).
+- **Save** commits the pending session; **Discard** (with an in-dialog confirmation, irreversible)
+  drops it. The old **Skip** button is gone.
+- A **re-arm** while it is open force-closes it (the flight is continued within grace, or already
+  auto-committed beyond grace — the backend decides).
+
 ## Out of scope (deferred — next phase)
 
-Agreed to handle after the core store lands:
-
-- **Crash recovery / resume.** Startup scan of `sessions/*.ktmp` → offer to recover an unfinished
-  flight from `session_meta` (finalize with `end_time` = last sample). The self-describing temp file
-  is designed for this, but the recovery UI/flow is deferred.
-- **Reconnect during an active flight.** Continue appending to the **same** `.ktmp` session on
-  reconnect instead of starting a new flight (the `.ktmp` is the session anchor). Needs the
-  arm-edge / reconnect interplay (see ADR-039) worked through.
+- **Recovery prompt on start / reconnect.** Startup scan of `sessions/*.ktmp`; for an orphan (app
+  was killed) show the 3-option prompt (Discard / Save Incomplete / Continue on Reconnect). The
+  temp store is already self-describing for this; the prompt + the explicit "continue on reconnect"
+  wait-state are the next phase. (The 5 s grace-continue across a normal disarm→re-arm is **done**
+  here; the cross-disconnect reconnect prompt is not.)
+- **Single-temp invariant enforcement.** There must never be more than one `.ktmp`; the deferred
+  flow already removes it on commit/discard, but the startup scan that guarantees a clean slate is
+  part of the recovery phase.
 - **Save trigger tuning.** Batch size, fsync cadence, and whether to also flush on a timer.
 - **Raw recording** (`raw_logger` / tlog) — unchanged here; it stays the parallel write-only backup.
 
@@ -114,17 +151,19 @@ Agreed to handle after the core store lands:
 - `link_quality` — MSP exposes no LQ (CRSF/Blackbox only).
 - `nav_lat` / `nav_lon` — always `NULL` by design (local-frame `navPos`, see FLIGHTLOG_DATABASE.md).
 - `nav_alt_m` — Blackbox EKF fused altitude; live MSP altitude is already in `alt_m` / `baro_alt_m`.
-- `wind_*`, `rc_data_json`, `rc_command_json`, `gps_eph`/`gps_epv`, `baro_temperature`, `state_flags`
-  — **Blackbox-sourced** in the current model; whether any have a clean MSP poll worth the bandwidth
-  is a **separate, later investigation** (verified against the INAV repo, version-safe), not part of
-  this rework.
+- `wind_*`, `rc_data_json`, `rc_command_json`, `baro_temperature`, `state_flags` — **Blackbox-sourced**
+  in the current model; whether any have a clean MSP poll worth the bandwidth is a **separate, later
+  investigation** (verified against the INAV repo, version-safe), not part of this rework.
+  (`gps_hdop` + `gps_eph`/`gps_epv` are now captured — they ride along in `MSP_GPSSTATISTICS`.)
 
 ## File index
 
 | File | Change |
 |---|---|
-| `src-tauri/src/flightlog/recorder.rs` | Temp-store lifecycle (create on arm, commit+delete on disarm); deferred main-DB insert; snapshot + record-builder completeness |
-| `src-tauri/src/flightlog/db.rs` | Temp-DB open/DDL helpers; attach-and-copy commit into main DB (id rewrite) |
-| `src-tauri/src/flightlog/types.rs` | (only if a `session_meta` struct is warranted) |
-| `src-tauri/src/scheduler/telemetry.rs` | `feed_recorder()` NAV_STATUS / GPSSTATISTICS / SENSOR_STATUS branches |
-| `src/routes/+page.svelte`, `logbookController.ts` | Move flown-mission link to the `ended` event if the id-less `started` change requires it |
+| `src-tauri/src/state.rs` | `PendingSession` + shared `Arc<Mutex<Option<PendingSession>>>` |
+| `src-tauri/src/flightlog/recorder.rs` | Deferred-commit lifecycle: on_disarm → pending + ended-stats; on_arm grace (continue / commit+new); shutdown → pending; snapshot + record-builder completeness; altitude (`alt_m` = GPS MSL) |
+| `src-tauri/src/flightlog/db.rs` | Temp-DB open/DDL + session_meta; attach-and-copy `commit_session_to_main` (id rewrite); `remove_temp_session` |
+| `src-tauri/src/commands/flightlog.rs` | `flightlog_commit_pending_session` / `flightlog_discard_pending_session` commands |
+| `src-tauri/src/scheduler/telemetry.rs` | `feed_recorder()` NAV_STATUS / GPSSTATISTICS / SENSOR_STATUS branches; GpsStatsData eph/epv |
+| `src/lib/components/logbook/EndFlightDialog.svelte` | Modal; Discard + confirm; Skip removed |
+| `src/routes/+page.svelte` | ended-stats → dialog; Save/Discard → commit/discard commands; committed/resumed listeners; FC-mission snapshot at disarm |

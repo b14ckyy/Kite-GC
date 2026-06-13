@@ -1853,5 +1853,55 @@ separate, version-safe investigation, not part of this rework.
 
 ---
 
+## ADR-041: Deferred Commit — End-Flight Dialog as the Commit Gate + 5 s Re-Arm Grace
+
+**Date**: 2026-06-13
+**Status**: Accepted (supersedes the commit-on-disarm timing of ADR-040; the temp-store + capture
+parts of ADR-040 stand)
+**Related**: ADR-040 (temp session store), ADR-039 (arm-edge baseline),
+[LIVE_RECORDING_TEMP_STORE.md](active/LIVE_RECORDING_TEMP_STORE.md)
+
+**Context**: ADR-040 committed the temp session into the main DB **immediately on disarm**, then
+showed the End-Flight summary as a post-save editor. That made **Discard** mean "delete an
+already-saved flight", couldn't honour an INAV-style **disarm→re-arm grace** (an accidental disarm
+re-armed within seconds is *one* flight, not two), and wrote to the production DB before the operator
+had decided the flight's fate.
+
+**Decision**: **defer the commit.** On disarm the recorder flushes + closes the temp `.ktmp`, builds
+the finalized `Flight`, and stores it as a **pending session** in app-state (a shared
+`Arc<Mutex<Option<PendingSession>>>`, *not* in the connection-scoped recorder — it must outlive a
+disconnect while the dialog is open). The `flight-recording-ended` event now carries the **stats**
+(no `flight_id` exists yet). The pending session is resolved by exactly one path, each `take()`ing it
+under the mutex so the command thread and the recorder can never both commit it:
+
+- **Save** (`flightlog_commit_pending_session` command) → commit → main DB, return `flight_id`, enrich,
+  delete temp.
+- **Re-arm after grace (≥ 5 s)** → commit the previous flight, enrich, delete temp, emit
+  `flight-recording-committed{flight_id}`, then start a fresh session.
+- **Re-arm within grace (< 5 s)** → reopen the **same** `.ktmp` and continue the flight (timestamps
+  resume from `max(timestamp_ms)`); emit `flight-recording-resumed`; no commit.
+- **Discard** (`flightlog_discard_pending_session`, confirmed in-dialog) → delete temp; no commit.
+
+The commit is one atomic main-DB transaction (insert finalized `flights` row → ATTACH temp → copy
+`telemetry_records` rewriting `flight_id` → COMMIT → DETACH → delete temp). `flight_id` is therefore
+born at commit, not arm: `flight-recording-started` is an id-less signal, and the **FC-synced flown
+mission is captured at disarm** (waypoints + hash, while FC-sync holds) and **linked at commit**.
+The End-Flight dialog becomes the commit gate: **modal** (no backdrop/Escape dismiss so a stray click
+can't lose the flight), **Save** / **Discard (+confirm)**, **Skip** removed; a re-arm force-closes it.
+
+**Disconnect with an active flight** (interim): `shutdown()` finalizes the active flight as a pending
+session + emits `flight-recording-ended` (dialog appears) instead of committing outright — a
+reconnect+arm within grace continues the same `.ktmp`.
+
+**Consequences**: the production DB is written only on an explicit Save or a genuine next-flight arm;
+Discard is a temp delete; an accidental disarm re-armed within 5 s stays one continuous log. Cost: the
+pending session is shared mutable state across the recorder, the Tauri command layer, and (next phase)
+startup recovery; the dialog can be force-closed by backend events, so the frontend must treat a
+`null` dialog result as "backend already handled it". The **recovery prompt on start/reconnect**
+(orphan `.ktmp` after a kill, the explicit "continue on reconnect" wait-state) and the **single-temp
+startup sweep** remain the next phase.
+
+---
+
 *End of Architecture Decision Records*
 
