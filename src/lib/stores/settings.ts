@@ -61,7 +61,7 @@ export interface AdsbLocalSource {
  *  on/off state is persisted (in `radar.adsb.builtins`). */
 export const BUILTIN_ADSB_PROVIDERS: { name: string; url: string }[] = [
   { name: 'adsb.lol', url: 'https://api.adsb.lol/v2/point/{lat}/{lon}/{dist}' },
-  { name: 'adsb.one', url: 'https://api.adsb.one/v2/point/{lat}/{lon}/{dist}' },
+  { name: 'adsb.fi', url: 'https://opendata.adsb.fi/api/v3/lat/{lat}/lon/{lon}/dist/{dist}' },
 ];
 
 /** Radar (foreign-vehicle tracking) settings: master switch + per-system enables + per-system
@@ -132,14 +132,15 @@ export interface RadarMapSettings {
   visible: { adsb: boolean; formationFlight: boolean; radio: boolean };
 }
 
-/** Default radar settings — built-ins (adsb.lol/.one) on; adsb.fi as a custom example (off). */
+/** Default radar settings — built-ins (adsb.lol/.fi) on; adsb.one as a custom (off — currently
+ *  unreachable). */
 export const DEFAULT_RADAR: RadarSettings = {
-  enabled: false,
+  enabled: true,
   adsb: {
-    enabled: false,
-    builtins: { 'adsb.lol': true, 'adsb.one': true },
+    enabled: true,
+    builtins: { 'adsb.lol': true, 'adsb.fi': true },
     online: [
-      { name: 'adsb.fi', url: 'https://opendata.adsb.fi/api/v3/lat/{lat}/lon/{lon}/dist/{dist}', enabled: false },
+      { name: 'adsb.one', url: 'https://api.adsb.one/v2/point/{lat}/{lon}/{dist}', enabled: false },
     ],
     local: [],
     mspFromFc: false,
@@ -190,7 +191,7 @@ export interface AirspaceSettings {
 }
 
 export const DEFAULT_AIRSPACE: AirspaceSettings = {
-  enabled: false,
+  enabled: true,
   provider: 'none',
   apiKey: '',
   layers: {
@@ -267,15 +268,15 @@ const defaults: AppSettings = {
     center: [51.505, -0.09],
     zoom: 13,
   },
-  mapProvider: 'osm',
+  mapProvider: 'esri-hybrid',
   mapCacheMaxMB: 200,
-  navPanelOpen: false,
+  navPanelOpen: true,
   activeTab: 'uav-info',
   attitudeRateHz: 5,
   positionRateHz: 2,
   airspeedEnabled: false,
-  flightLoggingEnabled: false,
-  flightRecordingEnabled: false,
+  flightLoggingEnabled: true,
+  flightRecordingEnabled: true,
   flightLogDbPath: '',
   flightLogRawEnabled: false,
   flightLogRawAlways: false,
@@ -291,17 +292,17 @@ const defaults: AppSettings = {
     temperatureUnit: 'c',
   },
   panels: {
-    bottom: ['home', 'battery', 'speed', 'ahi', 'altitude', 'gps', 'compass'],
-    right: ['rawTelemetry'],
+    bottom: ['home', 'speed', 'ahi', 'altitude', 'gps', 'compass'],
+    right: ['flightMode', 'battery'],
   },
   locale: 'en',
   uiScale: 1,
   cesiumIonToken: '',
   altitudeCurtain3D: true,
-  realLighting3D: false,
-  logReplayTime: false,
-  nightMode2D: 'off',
-  gcsMode: 'manual',
+  realLighting3D: true,
+  logReplayTime: true,
+  nightMode2D: 'auto',
+  gcsMode: 'continuous',
   userLocation: null,
   radar: DEFAULT_RADAR,
   airspace: DEFAULT_AIRSPACE,
