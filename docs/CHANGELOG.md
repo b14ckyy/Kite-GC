@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Home / Launch reference unified + recovered from the FC (ADR-039).** The orange draggable **"L"
+  launch** point and the green **"H" home** marker are now one source-tagged reference per map
+  (`homePosition.source` = `fc` | `manual` | `replay`): a connected FC home shows a **locked green "H"**
+  pinned to home (the "L" hides); with no FC home the **draggable "L" is the home** and the Home widget
+  follows it. Home is now **recovered on connect** via a one-shot `MSP_WP` #0 (INAV's RTH home) — so a
+  mid-flight connect or an app restart no longer leaves Home unset — and it only re-homes on a **genuine
+  disarmed→armed edge** (a reconnect while already armed keeps the marker put). The 3D "L" shows only
+  during an active connection; on disconnect a locked home degrades to a manual reference (kept in place).
+- **3D active-waypoint pulse.** The FC's current target waypoint now pulses with a green glow on the 3D
+  globe, centred on the pin head — the same active-WP cue as the 2D map (driven by the same trusted
+  `activeWpNumber`), rendered continuously only while a pulse is on screen.
 - **About dialog + automatic build stamp.** An **About** button in the Settings panel header opens a
   dialog with the logo (placeholder), name, **version + short git commit + build date**, the GPL-3.0-or-later
   licence/copyright, a source-repo link, and a curated third-party-licence list. The commit id (with a
@@ -122,6 +133,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Log player shows the time-of-day** (flight start + elapsed) at the current playback position.
 
 ### Fixed
+- **Live flight mode + waypoint tracking now decode correctly (MSP active modes).** A flown mission showed
+  **"Cruise"** instead of **"Mission"** and the active waypoint never pulsed on a live connection (replay was
+  fine — it reads the logged flight-mode flags directly). Root cause: the box-id→flight-mode table used the
+  INAV **`boxId_e` enum ordinals**, but `MSP_BOXIDS` returns the **`permanentId`** field (different for most
+  boxes — e.g. NAV WP is enum 19 but permanentId **28**, TURN ASSIST is enum 26 but permanentId **35**). The
+  table is now keyed by the authoritative `permanentId` values from INAV `fc/fc_msp_box.c` (stable across
+  releases), so all NAV/stabilization modes decode correctly.
+- **Whole UI froze when toggling 2D follow mode with live telemetry.** In follow mode the rAF loop recentred
+  the map every frame via `setView`, whose synchronous `moveend` ran `saveMapState` → `settings.patch` —
+  i.e. an `$effect` wrote the settings store mid-flush, tripping Svelte's `effect_update_depth_exceeded` and
+  killing every subsequent render (imperative Leaflet handlers kept working, so the freeze looked partial).
+  Programmatic follow recentres no longer persist map state (they were never user-initiated), which also
+  removes a 60 Hz localStorage-write + airspace-redraw storm.
+- **3D live track: full height, no flicker, no FPV overshoot.** The live 3D trail is now driven by the
+  `liveTrack` store (the full flown history since arm) instead of being built incrementally only from the
+  moment 3D was first opened — so the whole track shows at the correct geoid height (the pre-3D portion no
+  longer "comes out of the ground"). The growing segment uses a `CallbackProperty` (no per-point
+  remove/re-add → no 1 Hz flicker), and the drawn tip trails the smoothed UAV by one point so the coloured
+  line never shoots ahead of the model in the FPV view.
 - **3D mission waypoints no longer flicker / sit underground with live telemetry.** The geoid helper
   re-rendered the whole mission on **every telemetry frame** (it reports success immediately once the
   offset is known), so `renderMission3D` repeatedly removed the waypoints, awaited terrain, and re-added

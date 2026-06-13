@@ -1755,5 +1755,57 @@ without one).
 
 ---
 
+## ADR-039: Home / Launch Reference Point — One Source-Tagged Marker + FC-Home Recovery
+
+**Date**: 2026-06-13
+**Status**: Accepted
+**Related**: ADR-013 (mission planning state), ADR-026 (terrain / AGL — launch as the REL altitude reference)
+
+**Context**: There were **two** independent on-map points for one concept. The orange **"L" launch
+marker** (`launchPoint` store, user-draggable) is the planning reference for REL↔AGL altitude conversions.
+The green **"H" home marker** (`homePosition` store) was set **only on the disarmed→armed transition**, and
+inconsistently rendered (2D drew it imperatively on arm; 3D drew it from the store). Connecting **mid-flight**
+or after an **app restart** left no home at all (no arm transition was witnessed). The two markers could both
+be visible at once, and `homePosition` carried no notion of *where it came from*.
+
+**Decision**: collapse them into **one reference marker per map**, driven by a `source` tag on `homePosition`
+(`'fc' | 'manual' | 'replay'`):
+
+- **FC home (`source: 'fc'`)** → a **locked green "H"** pinned to the real home, non-draggable; `launchPoint`
+  is forced to it. The draggable "L" is hidden (the "H" represents the same point).
+- **No FC home (`'manual'`)** → the **draggable orange "L"** *is* the home reference. A `launchPoint` →
+  `homePosition` **mirror** keeps them equal so the Home widget points at the "L".
+- **Replay (`'replay'`)** → the flight's start position shown as "H".
+- Two derived stores express the policy: `homeLocked` (`set && source==='fc'`) hides the "L"; `homeMarkerShown`
+  (`set && source∈{fc,replay}`) gates the green "H". The old arm-driven 2D home marker is gone — both maps'
+  "H" now follows `homePosition`.
+
+**FC-home recovery** is a one-shot **`MSP_WP` #0** at connect (INAV's RTH home). It is parsed **raw** (21-byte
+WP payload), *not* via `decode_wp` and *not* via a box-id table, so it is independent of any version-specific
+numbering; `lat==lon==0` ⇒ no home set yet ⇒ skipped. It emits a **protocol-agnostic `home-position` event**
+(so a MAVLink `HOME_POSITION` path can emit the same later). The live arm transition also sets `source:'fc'`.
+
+**Arm-edge baseline**: home/launch moves **only on a genuine disarmed→armed edge observed live**. The first
+valid telemetry frame of each connection seeds `prevArmed`, so a **reconnect while already armed** is not seen
+as an edge — the marker stays put (it does not jump to the in-flight position). `resetTelemetry()` on
+disconnect makes the baseline reliable.
+
+**3D "L" visibility**: the orange launch billboard shows **only during an active primary connection** (the
+live manual-reference case) — offline planning and replay show no "L" (replay shows the start "H"). The "H"
+home entity is mission-independent (always shown for FC/replay home).
+
+Coordination is centralized in `+page`: the mirror, the disconnect **`fc`→`manual` downgrade** (keeps the
+position as a manual reference so planning continues), and `applyMissionLaunchDefault` **keeping** an FC home
+over a mission file's embedded home.
+
+**Consequences**: one coherent reference instead of two; mid-flight connect / restart recovers home; a manual
+operator reference exists when there is no FC home (forward-looking for telemetry-only tracking). The 3D
+manual "L" billboard still lives inside the mission render, so a manual reference **without a loaded mission**
+is not drawn in 3D (the FC-home "H" is, since it is mission-independent) — accepted; the common HITL case is
+FC home. Box-id flight-mode decoding is unrelated (see the CHANGELOG fix: MSP_BOXIDS returns the **`permanentId`**
+field, not the `boxId_e` ordinal).
+
+---
+
 *End of Architecture Decision Records*
 
