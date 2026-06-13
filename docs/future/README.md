@@ -19,3 +19,5 @@ viability, hardware, a partner, etc.).
 - [UAV_GEOZONES_NFZ.md](UAV_GEOZONES_NFZ.md) — explicit drone no-fly / geozone maps (not the generic
   airspace overlay). Worldwide → multi-provider; normalize to ED-269/318. Gated on the geozone-data
   landscape maturing + the per-source licensing/commercial question.
+- [WIND_CRAB_INDICATOR.md](WIND_CRAB_INDICATOR.md) — PFD/map wind + crab indicator + flight-path
+  marker. Gated on INAV exposing `MSP2_INAV_WIND` (0x2231, PR #11611 — unmerged; 9.1 vs 10 unknown).
