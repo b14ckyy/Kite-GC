@@ -5,6 +5,7 @@
 
 <script lang="ts">
   import { t } from 'svelte-i18n';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
   import Button from '$lib/components/panel/Button.svelte';
   import SegmentedToggle from '$lib/components/panel/SegmentedToggle.svelte';
   import WindowControls from '$lib/components/WindowControls.svelte';
@@ -52,9 +53,20 @@
     const types: Record<number, string> = { 1: $t('gps.fix2d'), 2: $t('gps.fix3d'), 3: $t('gps.fix3dDgps') };
     return types[telem.fixType] || `FIX:${telem.fixType}`;
   }
+
+  // Double-click the title bar to maximize/restore. Windows/macOS drag regions already do this
+  // natively, so only Linux/GTK needs the manual handler (otherwise it would toggle twice).
+  const isLinux = typeof navigator !== 'undefined' && navigator.userAgent.includes('Linux');
+  function onTitlebarDblClick(e: MouseEvent) {
+    if (!isLinux) return;
+    // Ignore double-clicks that land on interactive controls (buttons, selects, the window buttons).
+    if ((e.target as HTMLElement).closest('button, select, input, a')) return;
+    void getCurrentWindow().toggleMaximize();
+  }
 </script>
 
-<header class="toolbar" data-tauri-drag-region>
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<header class="toolbar" data-tauri-drag-region ondblclick={onTitlebarDblClick}>
   <div class="toolbar-left" data-tauri-drag-region>
     <div class="logo" data-tauri-drag-region>{$t('app.brand')}</div>
     <span class="version" data-tauri-drag-region>v{appVersion}</span>
