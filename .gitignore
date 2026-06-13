@@ -55,8 +55,9 @@ target/
 *.swp
 *.swo
 
-# AI assistant local data (Claude Desktop, etc.)
-.claude/
+# AI assistant local data — share project-level Claude config (.claude/settings.json,
+# commands, agents) but never commit machine-local settings / permissions.
+.claude/settings.local.json
 
 # =============================================================================
 # just task runner (if user installs it locally)

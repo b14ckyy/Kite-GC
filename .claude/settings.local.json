@@ -2,7 +2,40 @@
   "permissions": {
     "allow": [
       "Bash(npm run *)",
-      "Bash(npx svelte-check *)"
+      "Bash(npx svelte-check *)",
+      "Read(//usr/lib/**)",
+      "Bash(npm --version)",
+      "Bash(rustc --version)",
+      "Bash(cargo --version)",
+      "Bash(just --version)",
+      "Bash(pkg-config --modversion webkit2gtk-4.1)",
+      "Bash(sudo apt update)",
+      "Bash(sudo apt install -y build-essential curl wget file libssl-dev libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev pkg-config)",
+      "Bash(curl --version)",
+      "Bash(command -v curl)",
+      "Bash(curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init.sh)",
+      "Bash(wget -qO /tmp/rustup-init.sh https://sh.rustup.rs)",
+      "Bash(sh /tmp/rustup-init.sh -y --default-toolchain stable --profile default)",
+      "Bash(~/.cargo/bin/rustc --version)",
+      "Bash(~/.cargo/bin/cargo --version)",
+      "Bash(~/.cargo/bin/cargo install *)",
+      "Bash(~/.cargo/bin/just --version)",
+      "Read(//home/marc/**)",
+      "Bash(npm install *)",
+      "Bash(apt-cache policy *)",
+      "Read(//var/lib/apt/lists/**)",
+      "Read(//etc/apt/sources.list.d/**)",
+      "Read(//etc/apt/**)",
+      "Bash(apt-mark showmanual *)",
+      "Bash(aptitude why *)",
+      "Bash(apt-cache rdepends *)",
+      "Bash(git rm *)",
+      "Bash(git check-ignore *)",
+      "Bash(git checkout *)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(open\\('src-tauri/tauri.conf.json'\\)\\); print\\(json.dumps\\(d.get\\('app',{}\\).get\\('windows',d.get\\('tauri',{}\\).get\\('windows','NO windows key'\\)\\), indent=2\\)\\)\")",
+      "Bash(ps -eo pid,ppid,comm,args)",
+      "Bash(set -e)",
+      "Bash(git commit *)"
     ]
   }
 }
