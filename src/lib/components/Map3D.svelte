@@ -15,7 +15,8 @@
     (window as any).CESIUM_BASE_URL = '/cesium';
   }
     import { telemetry } from "$lib/stores/telemetry";
-  import { homePosition } from "$lib/stores/home";
+  import { liveTrack, type LiveTrackPoint } from "$lib/stores/liveTrack";
+  import { homePosition, homeLocked } from "$lib/stores/home";
   import { connection, type ConnectionStatus } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
   import { gcsLocation } from "$lib/stores/gcsLocation";
@@ -45,6 +46,7 @@
     hasLocation, toDeg, WpAction, type Waypoint, type Mission,
   } from "$lib/stores/mission";
   import { wpIconSpec } from "$lib/helpers/missionIcons";
+  import { activeWpNumber } from "$lib/stores/navStatus";
   import {
     buildDisplayNumbers, isFlightPathWp, findMissionEndIndex, findPreviousGeoWp,
   } from "$lib/helpers/missionGeometry";
@@ -155,6 +157,9 @@
   let curShowMission = get(showMission);
   let curReplayActive = get(replayActive);
   let curLaunch = get(launchPoint);
+  let curActiveWp3d = get(activeWpNumber); // FC's active target WP (0 = none) → pulsing green glow
+  let unsubActiveWp3d: (() => void) | undefined;
+  let wpPulseActive = false; // an active-WP glow is on screen → keep rendering continuously
   let playbackMarkerEntity: Cesium.Entity | undefined;
   let unsubTelemetry: (() => void) | undefined;
   let unsubHome: (() => void) | undefined;
@@ -163,15 +168,24 @@
   let unsubShowMissionStore: (() => void) | undefined;
   let unsubReplayStore: (() => void) | undefined;
   let unsubLaunchStore: (() => void) | undefined;
+  let unsubLiveTrack: (() => void) | undefined;
 
-    // Trail (live tracking) — initialized in updateTrail3D
-  let trailPositions: Cesium.Cartesian3[] = [];
+  // Live trail — driven entirely by the `liveTrack` store (the full flown history since arm), so the
+  // whole track renders in 3D regardless of when 3D was first opened, and at the correct height once
+  // the geoid offset is known. Flightmode-coloured segments: finalized runs are static polylines; the
+  // growing run uses a CallbackProperty (Cesium reads the array each frame → no entity churn / flicker).
   let lastTrailLat = 0;
   let lastTrailLon = 0;
   let trailSegments3D: { entity: Cesium.Entity; color: string }[] = [];
   let activeTrailEntity: Cesium.Entity | undefined;
   let activeTrailPositions: Cesium.Cartesian3[] = [];
   let trailCurrentColor3D = '';
+  let trailConsumed = 0; // how many liveTrack points are already in the trail (incremental append cursor)
+  // Newest point held back one segment: the UAV marker is smoothed (lags the raw fix), so drawing the
+  // trail to the latest point shoots the coloured line ahead of the craft — very visible in FPV. We
+  // commit a point only once the NEXT one arrives, so the drawn tip always trails the live position.
+  let pendingTrailPos: Cesium.Cartesian3 | undefined;
+  let pendingTrailColor = '';
   const MIN_TRAIL_DIST_3D = 1; // meters
   // Pre-arm trail: a thin plain black, ground-clamped line of GPS movement while
   // DISARMED (monitoring only). Cleared on arm; the colored flight trail takes over.
@@ -945,10 +959,9 @@
       if (needsInitialRecenter && uavEntity) { needsInitialRecenter = false; recenter3D(); }
       // Follow/orbit camera is driven from the smoothed state inside the motion smoother.
 
-      // Trail reset on arm transition (same as Map.svelte): drop the pre-arm
-      // black line and start the colored flight trail fresh.
+      // On arm: drop the pre-arm black line. The coloured flight trail resets itself via
+      // clearLiveTrack() (+page) → the liveTrack subscription rebuilds it from the (now empty) store.
       if (armed && !wasArmed && telem.fixType >= 2 && telem.lat !== 0) {
-        resetTrail3D();
         resetPreArmTrail3D();
       }
       wasArmed = armed;
@@ -956,10 +969,31 @@
       viewer.scene.requestRender();
     });
 
+    // Live 3D trail — driven by the liveTrack store (full flown history since arm), so the whole
+    // track shows in 3D no matter when 3D was first opened. We wait for the geoid offset (ensureGeoid
+    // triggers the first rebuild) so points aren't placed sunk into the ground; afterwards we append
+    // only the new tail (cheap, no churn). A shrink (clearLiveTrack on re-arm) triggers a full rebuild.
+    unsubLiveTrack = liveTrack.subscribe((pts) => {
+      if (!viewer || !geoidComputed) return; // geoid not ready yet → ensureGeoid will rebuild
+      if (pts.length < trailConsumed) { rebuildLiveTrail3D(); return; }
+      if (pts.length === trailConsumed) return;
+      for (let i = trailConsumed; i < pts.length; i++) appendTrailPoint3D(pts[i]);
+      trailConsumed = pts.length;
+      viewer.scene.requestRender();
+    });
+
     // Subscribe to home position
+    // Green "H" home entity: shown only for an authoritative FC home (or a replay's start) — a manual
+    // reference is the orange "L" launch billboard instead. scheduleMissionRender() refreshes that
+    // billboard's visibility when the lock state flips.
     unsubHome = homePosition.subscribe((home) => {
-      if (!viewer || !home.set) return;
-      updateHomePosition3D(home.lat, home.lon, home.alt);
+      if (!viewer) return;
+      if (home.set && (home.source === 'fc' || home.source === 'replay')) {
+        updateHomePosition3D(home.lat, home.lon, home.alt);
+      } else if (homeEntity) {
+        viewer.entities.remove(homeEntity); homeEntity = undefined;
+      }
+      scheduleMissionRender();
       viewer.scene.requestRender();
     });
 
@@ -1023,6 +1057,8 @@
       scheduleMissionRender();
     });
     unsubLaunchStore = launchPoint.subscribe((v) => { curLaunch = v; scheduleMissionRender(); });
+    // Active target WP (live MSP_NAV_STATUS / replay) → re-render so its pulsing glow follows the FC.
+    unsubActiveWp3d = activeWpNumber.subscribe((v) => { curActiveWp3d = v; scheduleMissionRender(); });
 
     // Foreign-vehicle contacts: click to select (sync with list/2D), hover → pointer cursor.
     radar3dPickHandler = new Cesium.ScreenSpaceEventHandler(viewer.canvas);
@@ -1060,6 +1096,7 @@
         geoidGen++; geoidPromise = null;
         geoidComputed = false;
       }
+      if (c.status !== was) scheduleMissionRender(); // launch "L" visibility depends on the connection
     });
   });
 
@@ -1089,6 +1126,8 @@
     unsubShowMissionStore?.();
     unsubReplayStore?.();
     unsubLaunchStore?.();
+    unsubActiveWp3d?.();
+    unsubLiveTrack?.();
     unsubConnection?.();
     if (viewer && !viewer.isDestroyed()) {
       // Clean up trail segments (they will be destroyed with viewer, but be explicit)
@@ -1746,11 +1785,9 @@
       if (!seen.has(id)) { releaseBundle(rec); radar3dRecs.delete(id); } // pool the bundle, don't destroy
     }
     if (radar3dCreateQueue.length && !radar3dCreateRaf) radar3dCreateRaf = requestAnimationFrame(drainRadarCreateQueue);
-    // Any active alert → render continuously so the pulse animates (CallbackProperty materials); otherwise
-    // back to on-demand (requestRenderMode) to save the GPU. The alert geometry itself stays static.
-    let anyAlert = false;
-    for (const rec of radar3dRecs.values()) if (rec.alertLevel) { anyAlert = true; break; }
-    viewer.scene.requestRenderMode = !anyAlert;
+    // A pulse (radar alert or active-WP glow) needs continuous rendering; otherwise on-demand. Shared
+    // helper so the alert and WP pulses don't fight over requestRenderMode.
+    syncContinuousRender();
     viewer.scene.requestRender();
   }
 
@@ -2096,9 +2133,7 @@
     }
     // Position + attitude go through the adaptive smoother (also drives the camera).
     pushUavSample(uavEntity, lat, lon, alt, heading, orientation);
-
-    // Live trail — only while armed (no trail in the disarmed state)
-    if (armed) updateTrail3D(lat, lon, alt);
+    // Live trail is built from the liveTrack store (see the liveTrack subscription), not here.
   }
 
   // ── Home Position ──────────────────────────────────────────────────
@@ -2138,65 +2173,80 @@
 
     // ── Live Trail (Flightmode-colored segments) ───────────────────────
 
-  function updateTrail3D(lat: number, lon: number, alt: number) {
+  /** Material for a trail segment of the given CSS colour (FPV-dimmed alpha). */
+  function trailMaterial(color: string): Cesium.ColorMaterialProperty {
+    return new Cesium.ColorMaterialProperty(Cesium.Color.fromCssColorString(color).withAlpha(fpvAlpha(0.7)));
+  }
+
+  /** Bake the current growing run into a static polyline (called on a colour change). */
+  function finalizeActiveSegment() {
+    if (!viewer || activeTrailPositions.length < 2) return;
+    const seg = viewer.entities.add({
+      polyline: {
+        positions: [...activeTrailPositions],
+        width: 2,
+        material: trailMaterial(trailCurrentColor3D),
+        clampToGround: false,
+      },
+    });
+    trailSegments3D.push({ entity: seg, color: trailCurrentColor3D });
+  }
+
+  /** Append one liveTrack point to the colour-segmented 3D trail. The growing run is a single
+   *  CallbackProperty polyline (no remove/re-add per point → no flicker); a flight-mode change bakes
+   *  the completed run into a static segment and recolours the growing one. */
+  function appendTrailPoint3D(pt: LiveTrackPoint) {
     if (!viewer) return;
+    const alt = pt.alt_m + geoidOffset; // raw MSL + geoid → ellipsoid height (correct once geoid is known)
+    const pos = Cesium.Cartesian3.fromDegrees(pt.lon, pt.lat, alt);
 
-    const pos = Cesium.Cartesian3.fromDegrees(lon, lat, alt);
-
-    // Skip if too close to last point
     if (lastTrailLat !== 0 || lastTrailLon !== 0) {
       const prev = Cesium.Cartesian3.fromDegrees(lastTrailLon, lastTrailLat, alt);
-      const dist = Cesium.Cartesian3.distance(pos, prev);
-      if (dist < MIN_TRAIL_DIST_3D) return;
+      if (Cesium.Cartesian3.distance(pos, prev) < MIN_TRAIL_DIST_3D) return;
     }
+    lastTrailLat = pt.lat;
+    lastTrailLon = pt.lon;
 
-    lastTrailLat = lat;
-    lastTrailLon = lon;
-    trailPositions.push(pos);
+    // Hold the newest point back by one: commit the previous (now-confirmed) point, keep this one
+    // pending. The drawn tip stays one segment behind the live (smoothed) UAV → no FPV overshoot.
+    if (pendingTrailPos) commitTrailPoint(pendingTrailPos, pendingTrailColor);
+    pendingTrailPos = pos;
+    pendingTrailColor = classifyFlightMode(pt.mode_flags ?? 0).color;
+  }
 
-    // We need flightModeFlags from telemetry — fall back to unknown
-    // (telemetry store is already providing data; we re-read inside updateUavPosition3D)
-    // Since this is called from updateUavPosition3D, we need flightModeFlags
-    // but we don't have them here. Instead, we get them from the telemetry store.
-
-    // Color by flight mode (same logic as Map.svelte updateTrail)
-    // Read active flight mode from the telemetry store directly
-    const telem = get(telemetry);
-    const color = classifyFlightMode(telem.activeFlightModeFlags ?? 0).color;
-
-    // Color changed → finalize the active segment and start a new one
+  /** Add one confirmed point to the colour-segmented active run (a colour change bakes the completed
+   *  run into a static segment and recolours the growing one). */
+  function commitTrailPoint(pos: Cesium.Cartesian3, color: string) {
+    if (!viewer) return;
     if (color !== trailCurrentColor3D && activeTrailPositions.length >= 2) {
-      if (activeTrailEntity) {
-        trailSegments3D.push({ entity: activeTrailEntity, color: trailCurrentColor3D });
-        activeTrailEntity = undefined;
-      }
-      // Start new segment from last point for continuity
+      finalizeActiveSegment();
       activeTrailPositions = [activeTrailPositions[activeTrailPositions.length - 1]];
+      if (activeTrailEntity?.polyline) activeTrailEntity.polyline.material = trailMaterial(color);
     }
-
     trailCurrentColor3D = color;
     activeTrailPositions.push(pos);
 
-    // Update or create the active (in-progress) polyline
-    if (activeTrailPositions.length >= 2) {
-      const cesiumColor = Cesium.Color.fromCssColorString(color).withAlpha(fpvAlpha(0.7));
-      // Use a shallow copy for the positions array so Cesium sees the updated array
-      const positionsCopy = [...activeTrailPositions];
-
-      if (activeTrailEntity) {
-        // For an already-created entity, update its polyline positions via CallbackProperty
-        // Since Cesium Entity polyline positions are not easily mutated, we remove and re-create
-        viewer.entities.remove(activeTrailEntity);
-      }
+    if (!activeTrailEntity) {
       activeTrailEntity = viewer.entities.add({
         polyline: {
-          positions: positionsCopy,
+          positions: new Cesium.CallbackProperty(() => activeTrailPositions, false),
           width: 2,
-          material: new Cesium.ColorMaterialProperty(cesiumColor),
+          material: trailMaterial(color),
           clampToGround: false,
         },
       });
     }
+  }
+
+  /** Rebuild the whole 3D trail from the liveTrack store at the current geoid offset. Used when the
+   *  geoid offset becomes known (corrects the first points) and on a clear/re-arm (store shrinks). */
+  function rebuildLiveTrail3D() {
+    if (!viewer) return;
+    resetTrail3D();
+    const pts = get(liveTrack);
+    for (const pt of pts) appendTrailPoint3D(pt);
+    trailConsumed = pts.length;
+    viewer.scene.requestRender();
   }
 
   /**
@@ -2288,7 +2338,9 @@
   async function ensureGeoid(lat: number, lon: number) {
     if (geoidComputed) return; // already derived → nothing to re-place (mission store changes re-render)
     const ok = await computeGeoidOnce(lat, lon);
-    if (ok) { scheduleMissionRender(); viewer?.scene.requestRender(); }
+    // Re-place everything that was drawn at offset 0 before the geoid was known: the mission and the
+    // full live trail (its first points were placed at the wrong height / sunk into the ground).
+    if (ok) { scheduleMissionRender(); rebuildLiveTrail3D(); viewer?.scene.requestRender(); }
   }
 
   /** Thin plain black, ground-clamped trail of GPS movement while disarmed. */
@@ -2335,7 +2387,9 @@
     }
     activeTrailPositions = [];
     trailCurrentColor3D = '';
-    trailPositions = [];
+    trailConsumed = 0;
+    pendingTrailPos = undefined;
+    pendingTrailColor = '';
     lastTrailLat = 0;
     lastTrailLon = 0;
   }
@@ -2713,6 +2767,56 @@
     missionEntities.push(ent);
   }
 
+  // ── Active waypoint pulse (mirrors the 2D `mission-wp-active`: the marker itself pulses, 2 s period) ──
+  /** 0→1→0 over a 2 s period (matches the 2D keyframe), evaluated per frame while continuous-rendering. */
+  function wpPulse01(): number {
+    return 0.5 + 0.5 * Math.sin((Date.now() / 1000) * Math.PI); // sin(π·t) → 2 s period
+  }
+  /** Soft radial green glow, drawn BEHIND the active WP marker and sized to cover its body, with a
+   *  pulsing alpha + scale (mimics the 2D marker's green drop-shadow "glow" pulse — no size change to
+   *  the marker icon itself). Anchored like the marker (same verticalOrigin) so it sits over the icon,
+   *  not at the on-ground tip. */
+  const WP_GLOW_SVG =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">' +
+    '<defs><radialGradient id="g" cx="50%" cy="50%" r="50%">' +
+    '<stop offset="0%" stop-color="#7CFF3A" stop-opacity="1"/>' +
+    '<stop offset="45%" stop-color="#59aa29" stop-opacity="0.7"/>' +
+    '<stop offset="100%" stop-color="#59aa29" stop-opacity="0"/></radialGradient></defs>' +
+    '<circle cx="32" cy="32" r="32" fill="url(#g)"/></svg>';
+  function addActiveWpGlow(lon: number, lat: number, height: number, spec: ReturnType<typeof wpIconSpec>) {
+    // Centre the glow on the marker's HEAD (the round blob), not the on-ground anchor:
+    //  - teardrops (bottom-anchored, anchorY ≈ height): head sits ~0.64·h above the tip;
+    //  - centred icons (anchorY ≈ h/2): the head IS the on-coordinate centre.
+    // CENTER origin + a fixed pixelOffset keeps the glow on the head (billboards are screen-space, so
+    // the offset tracks the marker at any zoom) and lets the scale pulse grow symmetrically from it.
+    const bottomAnchored = spec.anchorY >= spec.height - 1;
+    const headUpPx = bottomAnchored ? spec.height * 0.64 : spec.height / 2 - spec.anchorY;
+    const d = spec.width * 1.3; // ≈ the head diameter + halo bleed
+    const ent = viewer!.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(lon, lat, height),
+      billboard: {
+        image: 'data:image/svg+xml,' + encodeURIComponent(WP_GLOW_SVG),
+        width: d, height: d,
+        horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+        verticalOrigin: Cesium.VerticalOrigin.CENTER,
+        pixelOffset: new Cesium.Cartesian2(0, -headUpPx), // negative Y = up (onto the head)
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        scale: new Cesium.CallbackProperty(() => 0.9 + 0.35 * wpPulse01(), false),
+        color: new Cesium.CallbackProperty(() => Cesium.Color.WHITE.withAlpha(0.2 + 0.65 * wpPulse01()), false),
+      },
+    });
+    missionEntities.push(ent);
+  }
+
+  /** Continuous rendering is needed while a pulse animates (active-WP glow OR a radar alert); otherwise
+   *  fall back to on-demand (requestRenderMode) to spare the GPU. Both call sites use this so they agree. */
+  function syncContinuousRender() {
+    if (!viewer) return;
+    let anyAlert = false;
+    for (const rec of radar3dRecs.values()) if (rec.alertLevel) { anyAlert = true; break; }
+    viewer.scene.requestRenderMode = !(wpPulseActive || anyAlert);
+  }
+
   function missionLine(positions: Cesium.Cartesian3[], cssColor: string, alpha: number, width: number, dash: boolean) {
     const color = Cesium.Color.fromCssColorString(cssColor).withAlpha(alpha);
     const mat = () => dash
@@ -2771,7 +2875,11 @@
         const launchHeight = (launchGround ?? 0) + geoidOffset;
         const lpos = Cesium.Cartesian3.fromDegrees(curLaunch.lng, curLaunch.lat, launchHeight);
         missionLine([lpos, fp], '#f39c12', 0.7, 2, true);
-        missionBillboard(curLaunch.lng, curLaunch.lat, launchHeight, LAUNCH_SVG, 32, 44, 16, 44);
+        // Shown only during an active primary connection (live manual reference); hidden when FC-locked
+        // (the green "H" home entity represents the same point) and in offline planning.
+        if (!get(homeLocked) && get(connection).status === 'connected') {
+          missionBillboard(curLaunch.lng, curLaunch.lat, launchHeight, LAUNCH_SVG, 32, 44, 16, 44);
+        }
       }
     }
 
@@ -2779,6 +2887,7 @@
     const fpActive: Cesium.Cartesian3[] = [];
     const fpGreyed: Cesium.Cartesian3[] = [];
     let enteredGreyed = false;
+    let anyActiveWp = false; // set when the active target WP's glow is drawn → continuous render
 
     for (let i = 0; i < wps.length; i++) {
       const wp = wps[i];
@@ -2825,15 +2934,23 @@
         missionLine([top, bottom], '#ffffff', 0.95, 1.5, true);  // white dashed
       }
 
-      // Waypoint marker — same SVG as 2D, as a viewport-facing billboard.
+      // Waypoint marker — same SVG as 2D, as a viewport-facing billboard. The active target WP gets a
+      // pulsing green glow behind its (static) marker, mirroring the 2D `mission-wp-active` glow.
+      const wpHeight = a ? a.altMsl + geoidOffset : 0;
       const spec = wpIconSpec(wp, displayNums.get(i) ?? 0, false);
-      missionBillboard(toDeg(wp.lon), toDeg(wp.lat), a ? a.altMsl + geoidOffset : 0, spec.svg, spec.width, spec.height, spec.anchorX, spec.anchorY, greyed ? 0.35 : 1);
+      if (!greyed && curActiveWp3d > 0 && wp.number === curActiveWp3d) {
+        addActiveWpGlow(toDeg(wp.lon), toDeg(wp.lat), wpHeight, spec); // behind the marker (added first)
+        anyActiveWp = true;
+      }
+      missionBillboard(toDeg(wp.lon), toDeg(wp.lat), wpHeight, spec.svg, spec.width, spec.height, spec.anchorX, spec.anchorY, greyed ? 0.35 : 1);
     }
 
     if (fpActive.length > 1) missionLine(fpActive, '#37a8db', 0.8, 3, false);
     if (fpGreyed.length > 1) missionLine(fpGreyed, '#666666', 0.4, 2, true);
     void enteredGreyed;
 
+    wpPulseActive = anyActiveWp;
+    syncContinuousRender(); // (de)activate continuous rendering for the pulse
     viewer.scene.requestRender();
   }
 

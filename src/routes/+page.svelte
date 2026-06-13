@@ -220,6 +220,10 @@
   // Reactive telemetry subscription
   let liveTelem = $state(get(telemetry));
   let prevArmed = false;
+  // Seed `prevArmed` from the FIRST valid telemetry frame of each connection so a reconnect mid-flight
+  // (already armed) is NOT seen as a disarmed→armed edge — the home/launch marker must stay put on
+  // reconnect and only move on a genuine arm transition observed live. Reset on each fresh connect.
+  let armEdgeInit = false;
   // Live flight-stats accumulator (armed period) — drives the End-Flight summary when there is
   // no DB recording (the recorded case reads the finalized stats from the flight row instead).
   let armStartMs = 0;
@@ -229,6 +233,8 @@
     liveTelem = t;
     // Accumulate the live flown track (RAM) for the Terrain Analyzer
     const armed = isArmed(t.armingFlags, t.lastUpdate);
+    // Baseline the armed state on the first real frame after (re)connect → no false edge on reconnect.
+    if (!armEdgeInit && t.lastUpdate > 0) { armEdgeInit = true; prevArmed = armed; }
     if (armed && !prevArmed) {
       clearLiveTrack();
       // reset the flight-stats accumulator for the new flight
@@ -254,12 +260,34 @@
       }
     }
     if (armed && isValidGpsCoordinate(t.lat, t.lon)) {
-      appendLivePoint(t.lat, t.lon, t.altMsl, t.lastUpdate || Date.now());
+      appendLivePoint(t.lat, t.lon, t.altMsl, t.activeFlightModeFlags ?? 0, t.lastUpdate || Date.now());
+    }
+    // Home on arm: the FC sets home at the launch point. Authoritative (locked green "H") when
+    // connected via MSP/MAVLink; otherwise (future telemetry-only tracking) seed the manual launch
+    // reference once from the current fix (mirrored into a manual home below → the widget points to it).
+    if (armed && !prevArmed && t.fixType >= 2 && isValidGpsCoordinate(t.lat, t.lon)) {
+      if (get(connection).status === 'connected') {
+        homePosition.set({ lat: t.lat, lon: t.lon, alt: t.altitude, set: true, source: 'fc' });
+        launchPoint.set({ lat: t.lat, lng: t.lon });
+      } else if (get(homePosition).source !== 'fc') {
+        launchPoint.set({ lat: t.lat, lng: t.lon });
+      }
     }
     if (!armed && prevArmed) {
       void handleDisarm(t.lastUpdate || Date.now());
     }
     prevArmed = armed;
+  });
+
+  // Mirror the manual launch reference into the Home store so the Home widget points at the
+  // draggable "L" marker when there is no authoritative FC home. Skipped when home is FC-locked or
+  // a replay (those own the Home store); never downgrades an FC home.
+  launchPoint.subscribe((lp) => {
+    if (!lp) return;
+    const h = get(homePosition);
+    if (h.source === 'fc' || h.source === 'replay') return;
+    if (h.set && h.lat === lp.lat && h.lon === lp.lng) return;
+    homePosition.set({ lat: lp.lat, lon: lp.lng, alt: h.alt, set: true, source: 'manual' });
   });
 
   // On disarm: show the End-Flight summary. When DB recording is on, the
@@ -457,9 +485,17 @@
     const wasConnected = connStatus === 'connected';
     connStatus = c.status;
     fcInfo = c.fcInfo;
+    // Fresh connection → re-baseline the arm-edge detector (see armEdgeInit).
+    if (!wasConnected && c.status === 'connected') armEdgeInit = false;
     // Auto-refresh the logbook on disconnect (picks up a just-recorded live flight) — replaces
     // the manual Refresh button. Disarm is covered by the flight-recording-ended listener.
-    if (wasConnected && c.status !== 'connected') void loadLogbook();
+    if (wasConnected && c.status !== 'connected') {
+      void loadLogbook();
+      // Lost the FC → the locked home becomes a manual reference (keeps its position so planning
+      // continues; the marker reverts to a draggable orange "L").
+      const h = get(homePosition);
+      if (h.source === 'fc') homePosition.set({ ...h, source: 'manual' });
+    }
   });
   availablePorts.subscribe((p) => {
     ports = p;
@@ -882,7 +918,7 @@
 
   function closePlayer() {
     resetPlayback();
-    homePosition.set({ lat: 0, lon: 0, alt: 0, set: false });
+    homePosition.set({ lat: 0, lon: 0, alt: 0, set: false, source: 'manual' });
     selectedFlight = null;
     selectedFlightTrack = [];
     selectedFlightId = null;
@@ -1213,7 +1249,7 @@
 
     // Set home position for replay (used by HomeWidget)
     if (data.flight?.start_lat != null && data.flight?.start_lon != null) {
-      homePosition.set({ lat: data.flight.start_lat, lon: data.flight.start_lon, alt: 0, set: true });
+      homePosition.set({ lat: data.flight.start_lat, lon: data.flight.start_lon, alt: 0, set: true, source: 'replay' });
     }
 
     await loadLogbook();
@@ -1765,6 +1801,14 @@
       if (activeTab === 'logbook' && event.payload.paths?.length) {
         importDroppedFiles(event.payload.paths);
       }
+    });
+    // Home from the FC (MSP_WP 0), pushed once at connect — recovers Home on a mid-flight connect /
+    // app restart. The live arm-transition path (Map.svelte) overwrites it on the next arm.
+    void listen<{ lat: number; lon: number; alt: number }>('home-position', (event) => {
+      const { lat, lon, alt } = event.payload;
+      if (lat === 0 && lon === 0) return;
+      homePosition.set({ lat, lon, alt, set: true, source: 'fc' }); // authoritative → locked green "H"
+      launchPoint.set({ lat, lng: lon }); // pin the planning reference to the real home
     });
   }
 

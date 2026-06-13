@@ -3,14 +3,14 @@
 
 // Connection Commands — serial port listing, connect, disconnect, BLE scanning
 
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 
 use crate::flightlog::recorder::FlightRecorder;
 use crate::flightlog::types::FlightLogSettings;
 use crate::mavlink_proto;
 use crate::msp::{
     FcInfo, FeatureSet, InavVersion, MspTransport, MSP_API_VERSION, MSP_BOARD_INFO, MSP_FC_VARIANT,
-    MSP_FC_VERSION, MSP_NAME, MSPV2_INAV_MIXER,
+    MSP_FC_VERSION, MSP_NAME, MSP_WP, MSPV2_INAV_MIXER,
 };
 use crate::msp::features::is_version_supported;
 use crate::scheduler;
@@ -21,6 +21,15 @@ use crate::transport::serial::SerialConnection;
 use crate::transport::tcp::TcpTransport;
 use crate::transport::udp::UdpTransport;
 use crate::transport::ble::BleDeviceInfo;
+
+/// Home position pushed to the frontend (event `home-position`). Same shape/name regardless of
+/// protocol so MAVLink (HOME_POSITION) can emit it identically later.
+#[derive(serde::Serialize, Clone)]
+struct HomeEvent {
+    lat: f64,
+    lon: f64,
+    alt: f64,
+}
 
 /// List available serial ports
 #[tauri::command]
@@ -260,6 +269,33 @@ fn connect_msp(
         Err(e) => {
             log::warn!("Failed to query craft name: {}", e);
         }
+    }
+
+    // 7) Home position — MSP_WP #0 is INAV's RTH home (GPS_home, lat/lon in deg·1e7). One-shot at
+    //    connect so a mid-flight connect / app restart recovers Home; the live arm-transition path
+    //    only sets it when we actually witness the arm. Raw-parse the 21-byte WP payload (the home
+    //    WP's action byte isn't a normal nav action, so we don't go through decode_wp). lat==lon==0
+    //    means no home is set yet (on the ground, pre-arm) → skip; arm will set it live.
+    match transport.msp_request(MSP_WP, &[0]) {
+        Ok(resp) if resp.payload.len() >= 14 => {
+            let p = &resp.payload;
+            let lat_e7 = i32::from_le_bytes([p[2], p[3], p[4], p[5]]);
+            let lon_e7 = i32::from_le_bytes([p[6], p[7], p[8], p[9]]);
+            let alt_cm = i32::from_le_bytes([p[10], p[11], p[12], p[13]]);
+            if lat_e7 != 0 || lon_e7 != 0 {
+                let home = HomeEvent {
+                    lat: lat_e7 as f64 / 1e7,
+                    lon: lon_e7 as f64 / 1e7,
+                    alt: alt_cm as f64 / 100.0,
+                };
+                log::info!("Home from FC (MSP_WP 0): {:.7}, {:.7}", home.lat, home.lon);
+                let _ = app_handle.emit("home-position", home);
+            } else {
+                log::info!("MSP_WP(0): no home set on FC yet");
+            }
+        }
+        Ok(_) => log::warn!("MSP_WP(0) home response too short"),
+        Err(e) => log::warn!("Failed to query home (MSP_WP 0): {}", e),
     }
 
     let transport_desc = transport.description();

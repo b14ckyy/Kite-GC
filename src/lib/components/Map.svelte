@@ -21,7 +21,7 @@
   import { MAP_PROVIDERS, getProviderById, type MapProvider } from "$lib/config/mapProviders";
   import { cachedTileLayer } from "$lib/cache/CachedTileLayer";
   import { initTileCache } from "$lib/cache/tileCache";
-  import { homePosition } from "$lib/stores/home";
+  import { homePosition, homeMarkerShown } from "$lib/stores/home";
   import { editMode } from "$lib/stores/mission";
   import MissionLayer from "./mission/MissionLayer.svelte";
   import SurveyPatternLayer from "./mission/SurveyPatternLayer.svelte";
@@ -297,6 +297,7 @@
   let gcsSelected = false; // show the accuracy circle only while selected
   let unsubGcs: (() => void) | undefined;
   let unsubGcsAcc: (() => void) | undefined;
+  let unsubHome2d: (() => void) | undefined;
   const gcsMode = $derived<GcsMode>($settings.gcsMode);
 
   /** Satellite-dish marker on a dark translucent disc; mode tweaks the affordance (drag ring / live dot). */
@@ -501,6 +502,11 @@
   let activeColor = '#37a8db';
   let followRaf: number | null = null;
   let followLastT = 0;
+  // True only while applyFollowFrame() drives a programmatic recenter. Leaflet fires `moveend`
+  // SYNCHRONOUSLY inside setView, so saveMapState would otherwise persist the UAV-locked centre
+  // 60×/s — writing the settings store from inside the render flush (→ effect_update_depth_exceeded)
+  // and pointlessly thrashing localStorage. The follow centre is not user map state; skip it.
+  let followDrivingView = false;
   const FOLLOW_TAU_MS = 200; // exp. time constant (~250 ms to mostly catch up)
   const FOLLOW_SNAP_M = 300; // jump farther than this → snap, don't glide
 
@@ -558,7 +564,9 @@
     }
     // Don't fight an in-progress zoom animation (would snap mid-zoom).
     if (viewMode !== 'free' && !(map as unknown as { _animatingZoom?: boolean })._animatingZoom) {
-      map.setView(ll, map.getZoom(), { animate: false });
+      followDrivingView = true;
+      map.setView(ll, map.getZoom(), { animate: false }); // fires moveend synchronously → saveMapState (guarded)
+      followDrivingView = false;
       if (viewMode === 'heading-follow') {
         mapHeading = followCurrent.heading;
         mapContainer?.style.setProperty('--map-rotation', `${-mapHeading}deg`);
@@ -594,9 +602,17 @@
     });
   }
 
-  function updateHomeMarker(lat: number, lon: number) {
+  /** The dedicated green "H" marker is shown only for an authoritative FC home (or a replay's start) —
+   *  a manual reference is represented by the draggable orange "L" launch marker instead. Driven by the
+   *  homePosition store (see homeMarkerShown), not by the arm transition. */
+  function renderHomeMarker() {
     if (!map) return;
-    const pos: L.LatLngExpression = [lat, lon];
+    const h = get(homePosition);
+    if (!get(homeMarkerShown)) {
+      if (homeMarker) { try { map.removeLayer(homeMarker); } catch {} homeMarker = undefined; }
+      return;
+    }
+    const pos: L.LatLngExpression = [h.lat, h.lon];
     if (homeMarker) {
       homeMarker.setLatLng(pos);
     } else {
@@ -814,7 +830,7 @@
   });
 
   function saveMapState() {
-    if (!map) return;
+    if (!map || followDrivingView) return; // ignore programmatic follow recenters (see followDrivingView)
     const c = map.getCenter();
     settings.patch({
       map: { center: [c.lat, c.lng], zoom: map.getZoom() },
@@ -847,6 +863,8 @@
     // GCS marker follows its store; accuracy circle follows the accuracy + selection.
     unsubGcs = gcsLocation.subscribe(() => updateGcsMarker());
     unsubGcsAcc = gcsAccuracyM.subscribe(() => updateGcsAccuracyCircle());
+    // Home "H" marker follows the homePosition store (FC home / replay only — see renderHomeMarker).
+    unsubHome2d = homePosition.subscribe(() => renderHomeMarker());
 
     // Airspace overlay: redraw on new data; re-clip points to the view on pan. Layer-visibility changes
     // ride the `$settings.airspace` effect below (visibility now lives in the persisted settings store).
@@ -892,10 +910,8 @@
           else updatePreArmTrail(t.lat, t.lon);
         }
 
-        // Home position: set on arm transition when GPS has fix
+        // Trail reset on arm (home is set centrally in +page → the home marker follows homePosition).
         if (armed && !wasArmed && t.fixType >= 2 && t.lat !== 0) {
-          homePosition.set({ lat: t.lat, lon: t.lon, alt: t.altitude, set: true });
-          updateHomeMarker(t.lat, t.lon);
           // Clear trail for new flight
           for (const seg of trailSegments) { map?.removeLayer(seg); }
           trailSegments = [];
@@ -1027,6 +1043,7 @@
     unsubRadarAlerts?.();
     unsubGcs?.();
     unsubGcsAcc?.();
+    unsubHome2d?.();
     unsubAero?.();
     unsubAeroFocus?.();
     if (unsubTelemetry) unsubTelemetry();

@@ -20,7 +20,7 @@
     type Waypoint, type Mission, type LaunchPoint, WpAction, hasLocation, isModifier, toDeg, fromDeg, altFromM,
     WP_ACTION_LABELS, WP_ACTION_KEYS, WP_FLAG_FBH,
   } from '$lib/stores/mission';
-  import { homePosition } from '$lib/stores/home';
+  import { homePosition, homeLocked } from '$lib/stores/home';
   import { activeSurveyPattern } from '$lib/stores/surveyPattern.svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { iconForWp, fbhDivIcon } from '$lib/helpers/missionIcons';
@@ -104,10 +104,11 @@
     launchPoint.set({ lat: c.lat, lng: c.lng });
   }
 
-  /** Always-visible draggable launch marker (the mission's home reference). */
+  /** Draggable orange "L" launch / home reference marker. Hidden when an authoritative FC home is
+   *  present — then the locked green "H" home marker (Map.svelte) represents the same point instead. */
   function renderLaunchMarker() {
     const lp = get(launchPoint);
-    if (!lp) {
+    if (!lp || get(homeLocked)) {
       if (launchMarker) { try { map.removeLayer(launchMarker); } catch {} launchMarker = undefined; }
       return;
     }
@@ -132,6 +133,8 @@
   }
 
   const unsubLaunch = launchPoint.subscribe(lp => { currentLaunch = lp; renderLaunchMarker(); });
+  // Re-render the launch marker when home (un)locks: locked → hide "L" (green "H" takes over).
+  const unsubHomeLocked = homeLocked.subscribe(() => renderLaunchMarker());
 
   // Active target waypoint (live MSP_NAV_STATUS / replay record) → the WP icon itself
   // pulses (brightness + green glow) via the `mission-wp-active` class on its divIcon.
@@ -853,7 +856,7 @@
   $effect(() => { void currentLaunch; void currentSelSet; void currentShowMission; void currentReplayActive; void currentActiveWp; renderMission(currentMission, currentSelIdx, currentEditing); });
 
   onDestroy(() => {
-    unsubMission(); unsubSelIdx(); unsubSelSet(); unsubEditMode(); unsubShowMission(); unsubReplayActive(); unsubLaunch(); unsubActiveWp();
+    unsubMission(); unsubSelIdx(); unsubSelSet(); unsubEditMode(); unsubShowMission(); unsubReplayActive(); unsubLaunch(); unsubHomeLocked(); unsubActiveWp();
     if (launchMarker) { try { map.removeLayer(launchMarker); } catch {} launchMarker = undefined; }
     map.off('click', onMapClick);
     map.off('zoomend', onMapZoomRerender);

@@ -268,31 +268,37 @@ fn decode_analog(payload: &[u8]) -> TelemetryPayload {
     })
 }
 
-/// Map INAV boxId_e values to our FLIGHT_MODE bitmask positions.
-/// Box IDs are from INAV `fc/rc_modes.h` (master / 9.x),
-/// output bits match `runtime_config.h` flightModeFlags_e AND `trackColors.ts` FLIGHT_MODE.
+/// Map an INAV **permanent box ID** to our FLIGHT_MODE bitmask position.
+///
+/// CRITICAL: MSP_BOXIDS (and therefore the active-modes bitmask) reports the **`permanentId`**
+/// field from INAV `fc/fc_msp_box.c` `boxes[]` — NOT the `boxId_e` enum ordinal. The two differ
+/// for most boxes (e.g. BOXNAVWP: enum 19 but permanentId 28; BOXTURNASSIST: enum 26 but
+/// permanentId 35). The permanentId is STABLE across releases (that is its entire purpose), so a
+/// permanentId table is version-robust. Output bits match `runtime_config.h` flightModeFlags_e and
+/// `trackColors.ts` FLIGHT_MODE. (An earlier version used the enum ordinals → NAV_WP decoded as
+/// AUTO_TUNE and TURN_ASSIST as NAV_COURSE_HOLD, so a flown mission showed "Cruise" not "Mission".)
 fn box_id_to_flight_mode_bit(box_id: usize) -> Option<u32> {
     match box_id {
-        1  => Some(1 << 0),   // BOXANGLE       → ANGLE_MODE
-        2  => Some(1 << 1),   // BOXHORIZON     → HORIZON_MODE
-        4  => Some(1 << 2),   // BOXHEADINGHOLD → HEADING_MODE
-        3  => Some(1 << 3),   // BOXNAVALTHOLD  → NAV_ALTHOLD_MODE
-        8  => Some(1 << 4),   // BOXNAVRTH      → NAV_RTH_MODE
-        9  => Some(1 << 5),   // BOXNAVPOSHOLD  → NAV_POSHOLD_MODE
-        5  => Some(1 << 6),   // BOXHEADFREE    → HEADFREE_MODE
-        14 => Some(1 << 7),   // BOXNAVLAUNCH   → NAV_LAUNCH_MODE
-        10 => Some(1 << 8),   // BOXMANUAL      → MANUAL_MODE
-        18 => Some(1 << 9),   // BOXFAILSAFE    → FAILSAFE_MODE
-        28 => Some(1 << 10),  // BOXAUTOTUNE    → AUTO_TUNE
-        19 => Some(1 << 11),  // BOXNAVWP       → NAV_WP_MODE
-        35 => Some(1 << 12),  // BOXNAVCOURSEHOLD → NAV_COURSE_HOLD_MODE
-        25 => Some(1 << 13),  // BOXFLAPERON    → FLAPERON
-        26 => Some(1 << 14),  // BOXTURNASSIST  → TURN_ASSISTANT
-        43 => Some(1 << 15),  // BOXTURTLE      → TURTLE_MODE
-        47 => Some(1 << 16),  // BOXSOARING     → SOARING_MODE
-        55 => Some(1 << 17),  // BOXANGLEHOLD   → ANGLEHOLD_MODE
-        // BOXNAVCRUISE = 44 is cruise mode (speed+heading), maps to same bit as course hold for now
-        44 => Some(1 << 12),  // BOXNAVCRUISE   → NAV_COURSE_HOLD_MODE (shares display)
+        1  => Some(1 << 0),   // BOXANGLE         → ANGLE_MODE
+        2  => Some(1 << 1),   // BOXHORIZON       → HORIZON_MODE
+        5  => Some(1 << 2),   // BOXHEADINGHOLD   → HEADING_MODE
+        3  => Some(1 << 3),   // BOXNAVALTHOLD    → NAV_ALTHOLD_MODE
+        10 => Some(1 << 4),   // BOXNAVRTH        → NAV_RTH_MODE
+        11 => Some(1 << 5),   // BOXNAVPOSHOLD    → NAV_POSHOLD_MODE
+        6  => Some(1 << 6),   // BOXHEADFREE      → HEADFREE_MODE
+        36 => Some(1 << 7),   // BOXNAVLAUNCH     → NAV_LAUNCH_MODE
+        12 => Some(1 << 8),   // BOXMANUAL        → MANUAL_MODE
+        27 => Some(1 << 9),   // BOXFAILSAFE      → FAILSAFE_MODE
+        21 => Some(1 << 10),  // BOXAUTOTUNE      → AUTO_TUNE
+        28 => Some(1 << 11),  // BOXNAVWP         → NAV_WP_MODE
+        45 => Some(1 << 12),  // BOXNAVCOURSEHOLD → NAV_COURSE_HOLD_MODE
+        53 => Some(1 << 12),  // BOXNAVCRUISE     → NAV_COURSE_HOLD_MODE (cruise = course hold + alt; shares display)
+        34 => Some(1 << 13),  // BOXFLAPERON      → FLAPERON
+        35 => Some(1 << 14),  // BOXTURNASSIST    → TURN_ASSISTANT
+        52 => Some(1 << 15),  // BOXTURTLE        → TURTLE_MODE
+        56 => Some(1 << 16),  // BOXSOARING       → SOARING_MODE
+        64 => Some(1 << 17),  // BOXANGLEHOLD     → ANGLEHOLD_MODE
+        // NAV_FW_AUTOLAND (1<<18) has no box → not detectable live; appears only in logged flags (replay).
         _  => None,
     }
 }

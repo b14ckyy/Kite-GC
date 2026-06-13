@@ -747,6 +747,9 @@ function launchHomeArg(): [number, number] | undefined {
  *  3. Only when none exists is one generated: live UAV HOME, else the first geo-waypoint (WP1).
  */
 export function applyMissionLaunchDefault(m: Mission, embeddedHome?: { lat: number; lng: number }) {
+  // An authoritative FC home wins over everything: keep the launch reference pinned to the real home.
+  const hp = get(homePosition);
+  if (hp.set && hp.source === 'fc') { launchPoint.set({ lat: hp.lat, lng: hp.lon }); return; }
   if (embeddedHome) { launchPoint.set(embeddedHome); return; }
   if (m.home) { launchPoint.set({ lat: m.home.lat, lng: m.home.lon }); return; }
   if (get(launchPoint)) return; // keep an existing (e.g. user-placed) launch point
