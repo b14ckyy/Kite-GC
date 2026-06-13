@@ -52,8 +52,12 @@ sudo apt install -y \
     libgtk-3-dev \
     libwebkit2gtk-4.1-dev \
     libayatana-appindicator3-dev \
-    librsvg2-dev
+    librsvg2-dev \
+    libxdo-dev
 ```
+
+> `libwebkit2gtk-4.1-dev` is the Tauri 2 / WebKitGTK 4.1 package. On older distros that only ship
+> `4.0`, you must use a release new enough to provide **4.1** (Ubuntu 22.04+ / Debian 12+).
 
 These packages are required by Tauri to build the Linux desktop application.
 
@@ -156,9 +160,13 @@ This is extremely common on Windows.
 ### OneDrive path issues (Windows)
 Cargo builds can fail or become very slow when the project lives inside OneDrive (because of spaces and sync locks).
 
-The project already works around this via `src-tauri/.cargo/config.toml`, which redirects the cargo target directory to `D:\cargo-target\kite-gc`.
+Work around it by pointing Cargo at a target dir **outside** OneDrive via the `CARGO_TARGET_DIR`
+environment variable (do **not** hardcode an absolute path in `src-tauri/.cargo/config.toml` — that
+would break Linux/CI builds):
 
-Do **not** delete or modify this file unless you know what you're doing.
+```powershell
+$env:CARGO_TARGET_DIR = "D:\cargo-target\kite-gc"
+```
 
 ### Missing MSVC linker on Windows
 If you get linker errors during `cargo check` or build, you are missing the C++ build tools.
@@ -167,6 +175,51 @@ Install "Desktop development with C++" via the Visual Studio Installer.
 
 ### File not found during Blackbox import or other native features
 Make sure you are running a **debug build** (`just dev`) or a **release build** (`just build`). Some features (like external binaries) behave differently in dev vs release.
+
+---
+
+## Linux runtime notes
+
+The Linux build itself is covered above; these are **runtime** things to know when testing the
+packaged app (they are not build-time errors):
+
+### `blackbox_decode` is an external runtime dependency (not bundled)
+Blackbox import shells out to the INAV **`blackbox_decode`** binary; it is **not** bundled in the
+package. The app looks for it **next to the executable** first, then on **`PATH`**. For testing,
+either drop the `blackbox_decode` binary beside the app binary or install it on `PATH`
+(`blackbox_decode.exe` on Windows, `blackbox_decode` on Linux). Without it, only Blackbox *import*
+is affected — live recording, replay of already-imported flights, etc. work fine.
+
+### Serial port permissions
+Serial devices appear as `/dev/ttyUSB*` / `/dev/ttyACM*`. If no ports show up (or opening fails),
+the user is usually not in the right group:
+
+```bash
+sudo usermod -aG dialout "$USER"   # (some distros use the 'uucp' group)
+# log out / back in for it to take effect
+```
+
+### 3D globe / blank WebView (WebKitGTK)
+The 3D map (CesiumJS / WebGL) runs in WebKitGTK, which is more fragile than the Windows WebView2 —
+especially on some GPU/driver combos (notably Nvidia). If the window is blank or the 3D globe fails
+to render, try launching with the DMA-BUF renderer disabled:
+
+```bash
+WEBKIT_DISABLE_DMABUF_RENDERER=1 ./kite-gc        # most common fix
+# or, if compositing itself misbehaves:
+WEBKIT_DISABLE_COMPOSITING_MODE=1 ./kite-gc
+```
+
+### Which package to test
+`tauri build` targets are set to `all` → `.deb`, `.AppImage` and `.rpm` are produced in
+`src-tauri/target/release/bundle/`. For a first smoke test, the **`.deb`** (or running the raw
+binary in `…/release/`) is usually the most reliable; AppImage adds its own FUSE/sandbox layer that
+can mask or add issues.
+
+### Data locations (installed vs portable)
+Installed mode stores the flight DB + terrain cache under `~/.local/share/kite-gc/`. A **portable**
+build (a `.portable` marker file next to the binary) keeps everything in a `data/` folder beside the
+binary and redirects WebKitGTK's storage there via `XDG_DATA_HOME`/`XDG_CONFIG_HOME`.
 
 ---
 
