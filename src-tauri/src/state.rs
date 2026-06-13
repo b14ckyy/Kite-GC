@@ -42,6 +42,10 @@ pub struct AppState {
     /// recorder on disarm; resolved by the Save/Discard commands or the recorder's grace-arm path.
     /// Lives here (not in the recorder) so it survives a disconnect while the End-Flight dialog is open.
     pub pending_session: PendingSessionHandle,
+    /// A recovered orphan session the user chose to **continue on reconnect** (ADR-042). The next
+    /// recorder consults it on its first polled status: armed → resume the same `.ktmp`; disarmed →
+    /// finalize it into `pending_session` + the End-Flight dialog.
+    pub resume_pending: PendingSessionHandle,
 }
 
 impl AppState {
@@ -57,6 +61,7 @@ impl AppState {
             ble_scan_stop: Mutex::new(None),
             aero: Mutex::new(None),
             pending_session: Arc::new(Mutex::new(None)),
+            resume_pending: Arc::new(Mutex::new(None)),
         }
     }
 }

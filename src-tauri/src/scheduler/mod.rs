@@ -227,6 +227,19 @@ fn scheduler_loop(
     );
 
     loop {
+        // 0. Bail out if the device is gone (fatal transport error — e.g. USB unplugged). A mere
+        //    response timeout (OTA stall) does NOT set this, so we never tear down on a stalled link.
+        if transport.is_connection_lost() {
+            log::warn!("Scheduler: transport connection lost (device gone) — tearing down");
+            if let Some(ref rec) = recorder {
+                if let Ok(mut r) = rec.lock() {
+                    r.shutdown_lost();
+                }
+            }
+            let _ = app_handle.emit("connection-lost", ());
+            return Some(transport);
+        }
+
         // 1. Check for stop/commands (non-blocking)
         match cmd_rx.try_recv() {
             Ok(SchedulerCommand::Stop) => {

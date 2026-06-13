@@ -269,6 +269,41 @@ export async function flightlogDiscardPending(): Promise<void> {
   await invoke('flightlog_discard_pending_session');
 }
 
+/** Continue-on-reconnect for a session interrupted by a disconnect while armed: move the pending
+ *  session into the resume slot so the next connection resumes/finalizes it (ADR-042). */
+export async function flightlogContinuePending(): Promise<void> {
+  await invoke('flightlog_continue_pending_session');
+}
+
+/** An orphan temp recording session found at startup (crash/close recovery, ADR-042). */
+export interface OrphanSession {
+  temp_path: string;
+  craft_name: string;
+  start_time: string;
+  duration_sec: number;
+  sample_count: number;
+}
+
+/** Scan for an orphan temp session left by a crash/close; null if none. */
+export async function scanOrphanSessions(dbPath: string): Promise<OrphanSession | null> {
+  return invoke<OrphanSession | null>('flightlog_scan_orphan_sessions', { dbPath: dbPath || undefined });
+}
+
+/** Recovery → Discard: delete the orphan temp file. */
+export async function recoverDiscard(tempPath: string): Promise<void> {
+  await invoke('flightlog_recover_discard', { tempPath });
+}
+
+/** Recovery → Save Incomplete: commit the orphan to the DB as a finished flight; returns its id. */
+export async function recoverSaveIncomplete(tempPath: string, dbPath: string): Promise<number> {
+  return invoke<number>('flightlog_recover_save_incomplete', { tempPath, dbPath: dbPath || undefined });
+}
+
+/** Recovery → Continue on Reconnect: arm the orphan for resumption on the next connection. */
+export async function recoverContinue(tempPath: string, dbPath: string): Promise<void> {
+  await invoke('flightlog_recover_continue', { tempPath, dbPath: dbPath || undefined });
+}
+
 export async function updateFlightNotes(id: number, notes: string, dbPath: string): Promise<void> {
   return invoke('flightlog_update_notes', {
     flightId: id,

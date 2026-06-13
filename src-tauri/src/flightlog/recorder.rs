@@ -48,6 +48,18 @@ struct RecordingEndedEvent {
     battery_used_mah: Option<u32>,
 }
 
+/// Payload for `flight-recording-interrupted` — a disconnect while the UAV was still armed (ADR-042).
+/// The frontend shows the recovery prompt (Discard / Save / Continue on Reconnect), not the
+/// End-Flight dialog: the flight is not necessarily over (port change, switch to telemetry, …).
+#[derive(serde::Serialize, Clone)]
+struct RecordingInterruptedEvent {
+    temp_path: String,
+    craft_name: String,
+    start_time: String,
+    duration_sec: i64,
+    sample_count: i64,
+}
+
 /// A finished live-recording session awaiting commit/discard (deferred commit, ADR-041). Held in
 /// app-state so it survives a disconnect while the End-Flight dialog is open. Carries everything
 /// both consumers need: the finalized `Flight` + temp/db paths (to commit), and the resume fields
@@ -88,6 +100,121 @@ pub fn commit_pending_session(session: PendingSession) -> Result<i64, String> {
 pub fn discard_pending_session(session: PendingSession) {
     db::remove_temp_session(&session.temp_path);
     log::info!("Pending session discarded: {}", session.temp_path.display());
+}
+
+/// Reconstruct a `PendingSession` from an orphan temp `.ktmp` left by a crash/close (recovery,
+/// ADR-042): read its `session_meta` + telemetry, recompute the flight stats, and finalize the
+/// `Flight` (`end_time` = last sample). Returns the session + its telemetry sample count. The temp
+/// file is left in place (the caller decides: commit / discard / continue-on-reconnect).
+pub fn summarize_temp_session(
+    temp_path: PathBuf,
+    db_path: PathBuf,
+) -> Result<(PendingSession, i64), String> {
+    let conn =
+        db::open_temp_session(&temp_path).map_err(|e| format!("Cannot open temp session: {}", e))?;
+    let meta = db::read_session_meta(&conn)
+        .map_err(|e| format!("Cannot read session_meta: {}", e))?
+        .ok_or_else(|| "Temp session has no metadata".to_string())?;
+    let rows = db::get_flight_track(&conn, 0)
+        .map_err(|e| format!("Cannot read temp telemetry: {}", e))?;
+    if rows.is_empty() {
+        return Err("Temp session has no telemetry".into());
+    }
+
+    let start_time = chrono::DateTime::parse_from_rfc3339(&meta.start_time)
+        .map(|t| t.with_timezone(&Utc))
+        .unwrap_or_else(|_| Utc::now());
+    let start_lat = meta.start_lat.or_else(|| rows.iter().find_map(|r| r.lat));
+    let start_lon = meta.start_lon.or_else(|| rows.iter().find_map(|r| r.lon));
+
+    let mut max_alt = 0.0f64;
+    let mut max_speed = 0.0f64;
+    let mut max_distance = 0.0f64;
+    let mut total_distance = 0.0f64;
+    let mut last_lat: Option<f64> = None;
+    let mut last_lon: Option<f64> = None;
+    let mut start_mah: Option<u32> = None;
+    let mut end_mah: Option<u32> = None;
+    let last_timestamp_ms = rows.last().map(|r| r.timestamp_ms).unwrap_or(0);
+
+    for r in &rows {
+        if let Some(a) = r.baro_alt_m.or(r.alt_m) {
+            if a > max_alt {
+                max_alt = a;
+            }
+        }
+        if let Some(s) = r.speed_ms {
+            if s > max_speed {
+                max_speed = s;
+            }
+        }
+        if let Some(m) = r.mah_drawn {
+            if start_mah.is_none() {
+                start_mah = Some(m);
+            }
+            end_mah = Some(m);
+        }
+        if let (Some(lat), Some(lon)) = (r.lat, r.lon) {
+            if let (Some(plat), Some(plon)) = (last_lat, last_lon) {
+                total_distance += haversine_m(plat, plon, lat, lon);
+            }
+            if let (Some(slat), Some(slon)) = (start_lat, start_lon) {
+                let d = haversine_m(slat, slon, lat, lon);
+                if d > max_distance {
+                    max_distance = d;
+                }
+            }
+            last_lat = Some(lat);
+            last_lon = Some(lon);
+        }
+    }
+
+    let battery_used = match (start_mah, end_mah) {
+        (Some(s), Some(e)) if e >= s => Some(e - s),
+        _ => None,
+    };
+    let flight = Flight {
+        id: 0,
+        start_time,
+        end_time: Some(start_time + chrono::Duration::milliseconds(last_timestamp_ms.max(0))),
+        duration_sec: Some((last_timestamp_ms / 1000).max(0)),
+        source: "live".into(),
+        craft_name: meta.craft_name,
+        fc_variant: meta.fc_variant,
+        fc_version: meta.fc_version,
+        board_id: meta.board_id,
+        platform_type: meta.platform_type,
+        protocol: meta.protocol,
+        start_lat,
+        start_lon,
+        location_name: None,
+        weather_temp_c: None,
+        weather_wind_ms: None,
+        weather_wind_deg: None,
+        weather_desc: None,
+        max_alt_m: Some(max_alt),
+        max_speed_ms: Some(max_speed),
+        max_distance_m: Some(max_distance),
+        total_distance_m: Some(total_distance),
+        battery_used_mah: battery_used,
+        notes: None,
+        linked_flight_id: None,
+        pilot_name: None,
+        pilot_id: None,
+        battery_serial: None,
+    };
+    let count = rows.len() as i64;
+    Ok((
+        PendingSession {
+            temp_path,
+            db_path,
+            flight,
+            disarm_instant: Instant::now(),
+            start_mah,
+            last_timestamp_ms,
+        },
+        count,
+    ))
 }
 
 #[inline]
@@ -226,6 +353,12 @@ pub struct FlightRecorder {
     /// Shared slot for the pending (awaiting commit/discard) session — also read on the next arm for
     /// the grace decision. Shared with app-state so it outlives this connection (ADR-041).
     pending: PendingSessionHandle,
+    /// A recovered session the user chose to continue on reconnect (ADR-042), consulted once on the
+    /// first polled status of this connection (armed → resume; disarmed → finalize).
+    resume: PendingSessionHandle,
+    /// Whether the first polled status has been seen on this connection (the trustworthy point to
+    /// evaluate the continue-on-reconnect decision — past any handshake residual flags).
+    first_status_seen: bool,
 }
 
 /// Thread-safe handle to the flight recorder
@@ -241,6 +374,7 @@ impl FlightRecorder {
         portable: bool,
         app_handle: AppHandle,
         pending: PendingSessionHandle,
+        resume: PendingSessionHandle,
     ) -> Result<Self, String> {
         let db_path = db::resolve_db_path(&settings.db_path, portable);
         log::info!("Flight log database: {}", db_path.display());
@@ -265,6 +399,8 @@ impl FlightRecorder {
             session_instant: None,
             app_handle,
             pending,
+            resume,
+            first_status_seen: false,
         })
     }
 
@@ -386,6 +522,24 @@ impl FlightRecorder {
 
         let is_armed = (data.arming_flags & ARMED_FLAG) != 0;
 
+        // First polled status of this connection: settle any continue-on-reconnect session (ADR-042).
+        // The poller's status is past any handshake residual flags, so it is the trustworthy point.
+        if !self.first_status_seen {
+            self.first_status_seen = true;
+            let resume = self.resume.lock().ok().and_then(|mut s| s.take());
+            if let Some(p) = resume {
+                if is_armed {
+                    log::info!("Continue-on-reconnect: armed on first poll — resuming the recovered session");
+                    self.resume_session(p);
+                } else {
+                    log::info!("Continue-on-reconnect: disarmed on first poll — finalizing the recovered session");
+                    self.stash_pending_and_emit_ended(p);
+                }
+                self.was_armed = is_armed;
+                return;
+            }
+        }
+
         if is_armed && !self.was_armed {
             self.on_arm();
         } else if !is_armed && self.was_armed {
@@ -393,6 +547,25 @@ impl FlightRecorder {
         }
 
         self.was_armed = is_armed;
+    }
+
+    /// Move a finalized session into the shared pending slot and tell the frontend to show the
+    /// End-Flight summary (Save/Discard). Used by `on_disarm` and the continue-on-reconnect
+    /// disarmed-on-first-poll path.
+    fn stash_pending_and_emit_ended(&self, session: PendingSession) {
+        let ev = RecordingEndedEvent {
+            duration_sec: session.flight.duration_sec.unwrap_or(0),
+            max_alt_m: session.flight.max_alt_m.unwrap_or(0.0),
+            max_speed_ms: session.flight.max_speed_ms.unwrap_or(0.0),
+            max_distance_m: session.flight.max_distance_m.unwrap_or(0.0),
+            battery_used_mah: session.flight.battery_used_mah,
+        };
+        if let Ok(mut slot) = self.pending.lock() {
+            *slot = Some(session);
+        }
+        if let Err(e) = self.app_handle.emit("flight-recording-ended", ev) {
+            log::warn!("Failed to emit flight-recording-ended: {}", e);
+        }
     }
 
     /// Called when an arm transition is detected. Resolves any pending session first (deferred
@@ -569,107 +742,99 @@ impl FlightRecorder {
         }
     }
 
-    /// Called when a disarm transition is detected. Flushes the tail to the temp store, closes it
-    /// (WAL checkpoint), and stashes it as the PENDING session in app-state — it is NOT committed to
-    /// the main DB here (deferred commit, ADR-041). The frontend gets `flight-recording-ended` with
-    /// the stats and decides via the summary dialog (Save / Discard); a re-arm resolves it instead.
+    /// Take the active flight, close its raw loggers, flush + close its temp store, and build the
+    /// finalized `PendingSession` (+ its telemetry sample count). Returns `None` in raw-only mode
+    /// (no DB session to commit). Shared by `on_disarm` and `shutdown` — they differ only in which
+    /// lifecycle event they then emit.
+    fn take_active_as_pending(&mut self) -> Option<(PendingSession, i64)> {
+        let mut flight = self.active_flight.take()?;
+        let end_time = Utc::now();
+        let duration = flight.start_instant.elapsed().as_secs() as i64;
+        let last_timestamp_ms = flight.start_instant.elapsed().as_millis() as i64;
+        let battery_used = match (flight.start_mah, self.snapshot.mah_drawn) {
+            (Some(start), Some(end)) if end >= start => Some(end - start),
+            _ => None,
+        };
+
+        // Close raw/tlog logger (non-continuous mode) regardless of the DB path.
+        if !self.settings.raw_always {
+            if let Some(mut logger) = self.raw_logger.take() {
+                logger.close();
+            }
+            if let Some(mut logger) = self.tlog_logger.take() {
+                logger.close();
+            }
+        }
+
+        let (Some(temp_db), Some(temp_path)) = (flight.temp_db.take(), flight.temp_path.clone())
+        else {
+            log::info!(
+                "Flight ended (raw-only): {}s, max_alt={:.1}m, max_speed={:.1}m/s, distance={:.0}m",
+                duration, flight.max_alt, flight.max_speed, flight.total_distance,
+            );
+            return None;
+        };
+
+        if !flight.buffer.is_empty() {
+            if let Err(e) = db::insert_telemetry_batch(&temp_db, &flight.buffer) {
+                log::error!("Failed to flush final telemetry batch to temp store: {}", e);
+            }
+        }
+        let sample_count = db::temp_session_row_count(&temp_db).unwrap_or(0);
+        drop(temp_db); // checkpoint the WAL before any later ATTACH
+
+        let flight_row = Flight {
+            id: 0,
+            start_time: flight.start_time,
+            end_time: Some(end_time),
+            duration_sec: Some(duration),
+            source: "live".into(),
+            craft_name: self.fc_info.craft_name.clone(),
+            fc_variant: self.fc_info.fc_variant.clone(),
+            fc_version: self.fc_info.fc_version.clone(),
+            board_id: self.fc_info.board_id.clone(),
+            platform_type: self.fc_info.platform_type,
+            protocol: self.protocol.clone(),
+            start_lat: flight.start_lat,
+            start_lon: flight.start_lon,
+            location_name: None,
+            weather_temp_c: None,
+            weather_wind_ms: None,
+            weather_wind_deg: None,
+            weather_desc: None,
+            max_alt_m: Some(flight.max_alt),
+            max_speed_ms: Some(flight.max_speed),
+            max_distance_m: Some(flight.max_distance),
+            total_distance_m: Some(flight.total_distance),
+            battery_used_mah: battery_used,
+            notes: None,
+            linked_flight_id: None,
+            pilot_name: None,
+            pilot_id: None,
+            battery_serial: None,
+        };
+        Some((
+            PendingSession {
+                temp_path,
+                db_path: self.db_file_path.clone(),
+                flight: flight_row,
+                disarm_instant: Instant::now(),
+                start_mah: flight.start_mah,
+                last_timestamp_ms,
+            },
+            sample_count,
+        ))
+    }
+
+    /// Called when a disarm transition is detected. The flight is finalized as the pending session
+    /// (deferred commit, ADR-041) and the frontend shows the End-Flight summary (Save / Discard); a
+    /// re-arm resolves it instead.
     fn on_disarm(&mut self) {
         log::info!("DISARM detected — stopping flight recording");
-
-        if let Some(mut flight) = self.active_flight.take() {
-            let end_time = Utc::now();
-            let duration = flight.start_instant.elapsed().as_secs() as i64;
-            let last_timestamp_ms = flight.start_instant.elapsed().as_millis() as i64;
-            let battery_used = match (flight.start_mah, self.snapshot.mah_drawn) {
-                (Some(start), Some(end)) if end >= start => Some(end - start),
-                _ => None,
-            };
-
-            // Close raw/tlog logger (non-continuous mode) regardless of the DB path.
-            if !self.settings.raw_always {
-                if let Some(mut logger) = self.raw_logger.take() {
-                    logger.close();
-                }
-                if let Some(mut logger) = self.tlog_logger.take() {
-                    logger.close();
-                }
-            }
-            // else: continuous mode — loggers stay open until disconnect
-
-            // DB recording: flush + close the temp store, then stash it as the pending session.
-            if let (Some(temp_db), Some(temp_path)) = (flight.temp_db.take(), flight.temp_path.clone())
-            {
-                if !flight.buffer.is_empty() {
-                    if let Err(e) = db::insert_telemetry_batch(&temp_db, &flight.buffer) {
-                        log::error!("Failed to flush final telemetry batch to temp store: {}", e);
-                    }
-                }
-                drop(temp_db); // checkpoint the WAL before any later ATTACH
-
-                let flight_row = Flight {
-                    id: 0,
-                    start_time: flight.start_time,
-                    end_time: Some(end_time),
-                    duration_sec: Some(duration),
-                    source: "live".into(),
-                    craft_name: self.fc_info.craft_name.clone(),
-                    fc_variant: self.fc_info.fc_variant.clone(),
-                    fc_version: self.fc_info.fc_version.clone(),
-                    board_id: self.fc_info.board_id.clone(),
-                    platform_type: self.fc_info.platform_type,
-                    protocol: self.protocol.clone(),
-                    start_lat: flight.start_lat,
-                    start_lon: flight.start_lon,
-                    location_name: None,
-                    weather_temp_c: None,
-                    weather_wind_ms: None,
-                    weather_wind_deg: None,
-                    weather_desc: None,
-                    max_alt_m: Some(flight.max_alt),
-                    max_speed_ms: Some(flight.max_speed),
-                    max_distance_m: Some(flight.max_distance),
-                    total_distance_m: Some(flight.total_distance),
-                    battery_used_mah: battery_used,
-                    notes: None,
-                    linked_flight_id: None,
-                    pilot_name: None,
-                    pilot_id: None,
-                    battery_serial: None,
-                };
-
-                let session = PendingSession {
-                    temp_path,
-                    db_path: self.db_file_path.clone(),
-                    flight: flight_row,
-                    disarm_instant: Instant::now(),
-                    start_mah: flight.start_mah,
-                    last_timestamp_ms,
-                };
-                if let Ok(mut slot) = self.pending.lock() {
-                    *slot = Some(session); // resolved by Save/Discard commands or the next arm
-                }
-
-                let ev = RecordingEndedEvent {
-                    duration_sec: duration,
-                    max_alt_m: flight.max_alt,
-                    max_speed_ms: flight.max_speed,
-                    max_distance_m: flight.max_distance,
-                    battery_used_mah: battery_used,
-                };
-                if let Err(e) = self.app_handle.emit("flight-recording-ended", ev) {
-                    log::warn!("Failed to emit flight-recording-ended: {}", e);
-                }
-                log::info!(
-                    "Flight pending commit: {}s, max_alt={:.1}m, max_speed={:.1}m/s, distance={:.0}m",
-                    duration, flight.max_alt, flight.max_speed, flight.total_distance,
-                );
-            } else {
-                // Raw-only mode (no temp store / no DB flight): nothing to commit.
-                log::info!(
-                    "Flight ended (raw-only): {}s, max_alt={:.1}m, max_speed={:.1}m/s, distance={:.0}m",
-                    duration, flight.max_alt, flight.max_speed, flight.total_distance,
-                );
-            }
+        if let Some((session, _count)) = self.take_active_as_pending() {
+            let dur = session.flight.duration_sec.unwrap_or(0);
+            self.stash_pending_and_emit_ended(session);
+            log::info!("Flight pending commit (disarm): {}s", dur);
         }
     }
 
@@ -830,16 +995,49 @@ impl FlightRecorder {
         }
     }
 
-    /// Graceful shutdown (disconnect). An active flight is finalized as a PENDING session via
-    /// `on_disarm` (not committed) — the End-Flight dialog appears and the pending session survives
-    /// in app-state, so Save/Discard still work and a reconnect+arm within grace continues it (the
-    /// richer recovery-on-reconnect prompt is a later phase, ADR-041).
+    /// Graceful shutdown (disconnect). An **active (armed) flight** is finalized as a pending session
+    /// and the frontend is shown the **recovery prompt** via `flight-recording-interrupted` — the
+    /// flight may not be over (the user could be changing the COM port or switching to telemetry), so
+    /// Continue-on-Reconnect must be offered (ADR-042), not the End-Flight dialog.
     pub fn shutdown(&mut self) {
         if self.active_flight.is_some() {
-            log::info!("Recorder shutdown with active flight — finalizing as a pending session");
-            self.on_disarm();
+            log::info!("Disconnect with active flight — stashed as pending (frontend confirmed, applies the action)");
+            if let Some((session, _count)) = self.take_active_as_pending() {
+                if let Ok(mut slot) = self.pending.lock() {
+                    *slot = Some(session); // resolved by the frontend's Save/Discard/Continue
+                }
+            }
         }
-        // Always close continuous loggers on disconnect
+        self.close_continuous_loggers();
+    }
+
+    /// Connection lost (device gone — e.g. USB unplugged), detected by the scheduler. Like `shutdown`,
+    /// but emits `flight-recording-interrupted` so the frontend shows the recovery prompt — there was
+    /// no chance to pre-confirm the disconnect (ADR-042).
+    pub fn shutdown_lost(&mut self) {
+        if self.active_flight.is_some() {
+            log::info!("Connection lost with active flight — offering recovery");
+            if let Some((session, sample_count)) = self.take_active_as_pending() {
+                let ev = RecordingInterruptedEvent {
+                    temp_path: session.temp_path.to_string_lossy().to_string(),
+                    craft_name: session.flight.craft_name.clone(),
+                    start_time: session.flight.start_time.to_rfc3339(),
+                    duration_sec: session.flight.duration_sec.unwrap_or(0),
+                    sample_count,
+                };
+                if let Ok(mut slot) = self.pending.lock() {
+                    *slot = Some(session); // Save/Discard via commands; Continue moves it to resume
+                }
+                if let Err(e) = self.app_handle.emit("flight-recording-interrupted", ev) {
+                    log::warn!("Failed to emit flight-recording-interrupted: {}", e);
+                }
+            }
+        }
+        self.close_continuous_loggers();
+    }
+
+    /// Close the continuous (pre-arm) raw/tlog loggers on disconnect.
+    fn close_continuous_loggers(&mut self) {
         if let Some(mut logger) = self.raw_logger.take() {
             log::info!("Closing continuous raw log session");
             logger.close();

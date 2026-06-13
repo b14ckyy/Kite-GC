@@ -799,6 +799,26 @@
     "close": "Close",
     "notRecordedHint": "Recording was off — this is a summary only."
   },
+  "recovery": {
+    "title": "Unfinished recording found",
+    "intro": "A recording from a previous session was not closed properly (the app may have crashed or been closed mid-flight).",
+    "titleLost": "Device connection lost",
+    "introLost": "The connection to the aircraft dropped (the serial device was unplugged or the BLE link was lost) while a flight was being recorded. Choose what to do with the recording.",
+    "craft": "Aircraft",
+    "started": "Started",
+    "samples": "Samples",
+    "discard": "Discard",
+    "discardConfirm": "Discard this recording? It will be permanently deleted and cannot be recovered.",
+    "discardConfirmYes": "Discard",
+    "saveIncomplete": "Save Incomplete",
+    "continue": "Continue on Reconnect",
+    "waitingBanner": "Recording paused — connect to the aircraft to continue the recovered flight."
+  },
+  "disconnectArmed": {
+    "title": "Disconnect while recording?",
+    "intro": "The aircraft is armed and a flight is being recorded. Choose what to do with the recording before disconnecting (e.g. you may be changing the COM port or switching to a telemetry link).",
+    "cancel": "Stay Connected"
+  },
   "survey": {
     "title": "Survey Pattern",
     "shape": "Shape",

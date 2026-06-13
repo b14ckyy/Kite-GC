@@ -85,6 +85,14 @@ pub trait Transport: Send {
 
     /// Human-readable description of this transport (for logging)
     fn description(&self) -> String;
+
+    /// True once a **fatal** transport failure has occurred — the device is gone (write failed, or a
+    /// `Disconnected`/IO read error), as opposed to a mere response timeout (an OTA stall, where the
+    /// device is still attached). The scheduler tears the connection down on this; it never reacts to
+    /// timeouts. Default `false` for transports that don't track it.
+    fn is_connection_lost(&self) -> bool {
+        false
+    }
 }
 
 /// Connection state shared across all transports

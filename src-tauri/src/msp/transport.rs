@@ -21,6 +21,8 @@ const MSP_RESPONSE_TIMEOUT_MS: u64 = 2000;
 pub struct MspTransport {
     inner: Box<dyn ByteTransport>,
     parser: MspParser,
+    /// Set once a fatal transport error (device gone) is seen — see `Transport::is_connection_lost`.
+    connection_lost: bool,
 }
 
 impl MspTransport {
@@ -29,6 +31,7 @@ impl MspTransport {
         Self {
             inner: transport,
             parser: MspParser::new(),
+            connection_lost: false,
         }
     }
 
@@ -43,9 +46,12 @@ impl Transport for MspTransport {
     fn msp_request(&mut self, code: u16, payload: &[u8]) -> Result<MspMessage, String> {
         // Encode and send MSP v2 frame
         let frame = MspCodec::encode_v2(code, payload);
-        self.inner
-            .write_bytes(&frame)
-            .map_err(|e| format!("MSP write failed: {}", e))?;
+        if let Err(e) = self.inner.write_bytes(&frame) {
+            // A failed write means the device is gone (the local port handle is invalid) — fatal,
+            // distinct from a no-reply timeout on the air link.
+            self.connection_lost = true;
+            return Err(format!("MSP write failed: {}", e));
+        }
 
         // Read until we get the matching response or timeout
         let mut buf = [0u8; 512];
@@ -74,9 +80,11 @@ impl Transport for MspTransport {
                     // Retry until deadline
                 }
                 Err(crate::transport::TransportError::Disconnected) => {
+                    self.connection_lost = true; // device gone
                     return Err("Transport disconnected".to_string());
                 }
                 Err(e) => {
+                    self.connection_lost = true; // IO error on a removed device
                     return Err(format!("MSP read error: {}", e));
                 }
             }
@@ -85,5 +93,9 @@ impl Transport for MspTransport {
 
     fn description(&self) -> String {
         self.inner.description()
+    }
+
+    fn is_connection_lost(&self) -> bool {
+        self.connection_lost
     }
 }

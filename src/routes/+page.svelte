@@ -4,7 +4,7 @@
 -->
 
 <script lang="ts">
-  import { onDestroy, untrack } from "svelte";
+  import { onDestroy, onMount, untrack } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { open, save } from "@tauri-apps/plugin-dialog";
@@ -49,9 +49,11 @@
   import { activeWpNumber, replayWpTotal } from '$lib/stores/navStatus';
   import { missionManagerOpen, missionManagerSelectedId, requestOpenFlightId, requestOpenMissionId } from '$lib/stores/missionManager';
   import { batteryManagerOpen } from '$lib/stores/batteryManager';
-  import { missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode, flightSetBatterySerial, updateFlightNotes, getFlight, flightlogCommitPending, flightlogDiscardPending, batteryDbFindBySerial, batteryDbAddUsage } from '$lib/stores/flightlog';
+  import { missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode, flightSetBatterySerial, updateFlightNotes, getFlight, flightlogCommitPending, flightlogDiscardPending, flightlogContinuePending, scanOrphanSessions, recoverDiscard, recoverSaveIncomplete, recoverContinue, batteryDbFindBySerial, batteryDbAddUsage } from '$lib/stores/flightlog';
   import EndFlightDialog from "$lib/components/logbook/EndFlightDialog.svelte";
   import type { EndFlightStats } from "$lib/components/logbook/EndFlightDialog.svelte";
+  import RecoveryPrompt from "$lib/components/logbook/RecoveryPrompt.svelte";
+  import DisconnectArmedDialog from "$lib/components/logbook/DisconnectArmedDialog.svelte";
   import { haversineDistance, bearing, destinationPoint } from '$lib/utils/geo';
   import { buildMissionInput } from '$lib/helpers/missionLibrary';
   import { homePosition } from '$lib/stores/home';
@@ -400,6 +402,10 @@
   // Shared in-app dialog (replaces all native confirm/alert calls)
   let confirmDialog: ReturnType<typeof ConfirmDialog>;
   let endFlightDialog: ReturnType<typeof EndFlightDialog>;
+  let recoveryPrompt: ReturnType<typeof RecoveryPrompt>;
+  let disconnectArmedDialog: ReturnType<typeof DisconnectArmedDialog>;
+  // True after "Continue on Reconnect" until the next connection resolves the recovered session.
+  let awaitingResumeReconnect = $state(false);
 
   async function showDialog(opts: DialogOptions): Promise<string | null> {
     return confirmDialog.show(opts);
@@ -1422,6 +1428,42 @@
 
   async function handleConnect() {
     if (connStatus === "connected") {
+      // Disconnect while a flight is being recorded (armed) → confirm first and let the user decide
+      // what happens to the in-progress recording (ADR-042) — we do NOT disconnect immediately.
+      const tnow = get(telemetry);
+      const armed = isArmed(tnow.armingFlags, tnow.lastUpdate);
+      const recordingActive = flightLoggingEnabled && flightRecordingEnabled;
+      if (armed && recordingActive) {
+        const choice = await disconnectArmedDialog.show({
+          durationSec: armStartMs ? Math.round((Date.now() - armStartMs) / 1000) : null,
+        });
+        if (choice === 'cancel') return; // stay connected
+        // Capture the flown mission now (still connected + FC-synced) for a Save/Continue commit.
+        endedMissionWps = [...get(mission).waypoints];
+        endedMissionFc = get(missionFlags).fc;
+        try {
+          await disconnectFC(selectedBaud); // backend stashes the active flight as the pending session
+        } catch (e) {
+          errorMsg = String(e);
+          return;
+        }
+        try {
+          if (choice === 'discard') {
+            await flightlogDiscardPending();
+          } else if (choice === 'save') {
+            const flightId = await flightlogCommitPending();
+            await linkEndedMission(flightId, false);
+            void loadLogbook();
+          } else if (choice === 'continue') {
+            await flightlogContinuePending();
+            awaitingResumeReconnect = true;
+          }
+        } catch (e) {
+          console.warn('[disconnect-armed] action failed', e);
+        }
+        errorMsg = "";
+        return;
+      }
       try {
         await disconnectFC(selectedBaud);
         errorMsg = "";
@@ -1728,6 +1770,7 @@
   }
 
   async function onRecordingEnded(stats: EndFlightStats): Promise<void> {
+    awaitingResumeReconnect = false; // a recovered session that came back disarmed is now in the dialog
     // Capture the flown mission at disarm, while FC-sync still reflects what the FC flew.
     endedMissionWps = [...get(mission).waypoints];
     endedMissionFc = get(missionFlags).fc;
@@ -1751,6 +1794,53 @@
       console.warn('[end-flight] disarm dialog failed', e);
     }
   }
+
+  // Disconnect while the UAV was still armed (ADR-042): the recovery prompt (Discard / Save /
+  // Continue on Reconnect), NOT the End-Flight dialog — the flight may not be over (port change,
+  // switch to telemetry). The session is already stashed as pending in the backend.
+  async function onRecordingInterrupted(info: { temp_path: string; craft_name: string; start_time: string; duration_sec: number; sample_count: number }): Promise<void> {
+    // Capture the flown mission (FC-sync) for a later commit.
+    endedMissionWps = [...get(mission).waypoints];
+    endedMissionFc = get(missionFlags).fc;
+    awaitingResumeReconnect = false;
+    try {
+      const choice = await recoveryPrompt.show(info, { reason: 'lost' });
+      if (choice === 'discard') {
+        await flightlogDiscardPending();
+      } else if (choice === 'save') {
+        const flightId = await flightlogCommitPending();
+        await linkEndedMission(flightId, false);
+        void loadLogbook();
+      } else if (choice === 'continue') {
+        await flightlogContinuePending();
+        awaitingResumeReconnect = true; // resolved by the next connection's first poll
+      }
+    } catch (e) {
+      console.warn('[interrupted] recovery failed', e);
+    }
+  }
+
+  // Startup recovery (ADR-042): if a crash/close left an orphan temp session, prompt for it.
+  async function runStartupRecovery(): Promise<void> {
+    try {
+      const orphan = await scanOrphanSessions(flightLogDbPath);
+      if (!orphan) return;
+      const choice = await recoveryPrompt.show(orphan);
+      if (choice === 'discard') {
+        await recoverDiscard(orphan.temp_path);
+      } else if (choice === 'save') {
+        await recoverSaveIncomplete(orphan.temp_path, flightLogDbPath);
+        void loadLogbook();
+      } else if (choice === 'continue') {
+        await recoverContinue(orphan.temp_path, flightLogDbPath);
+        awaitingResumeReconnect = true; // resolved by the next connection's first poll
+      }
+    } catch (e) {
+      console.warn('[recovery] startup recovery failed', e);
+    }
+  }
+
+  onMount(() => { void runStartupRecovery(); });
 
   // Jump to a flight in the Logbook when requested (e.g. from the Mission Manager's
   // "flights with this mission" list).
@@ -1802,9 +1892,21 @@
       }
       void loadLogbook();
     });
-    // Re-arm within grace continues the same flight — just drop the stale summary dialog.
+    // Re-arm within grace (or a recovered session resumed on reconnect) continues the same flight —
+    // drop the stale summary dialog and exit the awaiting-reconnect state.
     void listen('flight-recording-resumed', () => {
+      awaitingResumeReconnect = false;
       endFlightDialog?.close();
+    });
+    // Connection lost while recording (device gone, e.g. USB unplugged) → recovery prompt.
+    void listen<{ temp_path: string; craft_name: string; start_time: string; duration_sec: number; sample_count: number }>(
+      'flight-recording-interrupted',
+      (event) => { void onRecordingInterrupted(event.payload); },
+    );
+    // The device vanished (fatal transport error) — the backend tore the scheduler down. Clean up the
+    // connection state so the UI shows disconnected and the user can simply reconnect.
+    void listen('connection-lost', () => {
+      void disconnectFC(selectedBaud).catch(() => {});
     });
     void listen<BlackboxImportProgress>('flightlog-import-progress', (event) => {
       blackboxImportProgress = event.payload;
@@ -1898,6 +2000,12 @@
 
 <ConfirmDialog bind:this={confirmDialog} />
 <EndFlightDialog bind:this={endFlightDialog} {interfaceSettings} />
+<RecoveryPrompt bind:this={recoveryPrompt} />
+<DisconnectArmedDialog bind:this={disconnectArmedDialog} />
+
+{#if awaitingResumeReconnect}
+  <div class="resume-banner">{$t('recovery.waitingBanner')}</div>
+{/if}
 
 <main
   class="app"
@@ -2174,6 +2282,24 @@
      Color palette derived from INAV Configurator
      https://github.com/iNavFlight/inav-configurator
      ============================================================ */
+
+  /* Continue-on-reconnect status banner (recovery, ADR-042) */
+  .resume-banner {
+    position: fixed;
+    bottom: 36px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 9000;
+    padding: 8px 16px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #cfe8f5;
+    background: rgba(26, 107, 148, 0.92);
+    border: 1px solid #2590c8;
+    border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+    pointer-events: none;
+  }
 
   :global(body) {
     margin: 0;

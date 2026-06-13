@@ -799,6 +799,26 @@
     "close": "Schließen",
     "notRecordedHint": "Aufzeichnung war aus — nur eine Zusammenfassung."
   },
+  "recovery": {
+    "title": "Unvollständige Aufnahme gefunden",
+    "intro": "Eine Aufnahme aus einer früheren Sitzung wurde nicht ordnungsgemäß abgeschlossen (die App ist evtl. abgestürzt oder wurde während des Flugs geschlossen).",
+    "titleLost": "Geräteverbindung verloren",
+    "introLost": "Die Verbindung zum Fluggerät ist abgebrochen (das serielle Gerät wurde getrennt oder der BLE-Link ging verloren), während ein Flug aufgezeichnet wurde. Wähle, was mit der Aufnahme passieren soll.",
+    "craft": "Fluggerät",
+    "started": "Gestartet",
+    "samples": "Datenpunkte",
+    "discard": "Verwerfen",
+    "discardConfirm": "Diese Aufnahme verwerfen? Sie wird dauerhaft gelöscht und kann nicht wiederhergestellt werden.",
+    "discardConfirmYes": "Verwerfen",
+    "saveIncomplete": "Unvollständig speichern",
+    "continue": "Bei Reconnect fortsetzen",
+    "waitingBanner": "Aufnahme pausiert — mit dem Fluggerät verbinden, um den wiederhergestellten Flug fortzusetzen."
+  },
+  "disconnectArmed": {
+    "title": "Trennen während der Aufnahme?",
+    "intro": "Das Fluggerät ist armed und ein Flug wird aufgezeichnet. Wähle, was mit der Aufnahme passieren soll, bevor getrennt wird (z.B. COM-Port wechseln oder auf Telemetrie umschalten).",
+    "cancel": "Verbunden bleiben"
+  },
   "survey": {
     "title": "Vermessungs-Pattern",
     "shape": "Form",

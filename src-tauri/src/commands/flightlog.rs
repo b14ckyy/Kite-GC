@@ -923,3 +923,147 @@ pub fn flightlog_discard_pending_session(
     }
     Ok(())
 }
+
+/// Continue-on-reconnect for a session interrupted by a disconnect while armed (ADR-042): move the
+/// pending session into the resume slot so the next connection's recorder resumes/finalizes it.
+#[tauri::command]
+pub fn flightlog_continue_pending_session(
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<(), String> {
+    let session = state
+        .pending_session
+        .lock()
+        .map_err(|_| "Pending-session lock poisoned".to_string())?
+        .take();
+    if let Some(session) = session {
+        *state
+            .resume_pending
+            .lock()
+            .map_err(|_| "Resume-session lock poisoned".to_string())? = Some(session);
+    }
+    Ok(())
+}
+
+// ── Recovery of an orphan temp session left by a crash/close (ADR-042) ──────────────────
+
+/// Summary of an orphan temp `.ktmp` for the recovery prompt.
+#[derive(serde::Serialize)]
+pub struct OrphanInfo {
+    pub temp_path: String,
+    pub craft_name: String,
+    pub start_time: String,
+    pub duration_sec: i64,
+    pub sample_count: i64,
+}
+
+/// Resolve the main DB path (custom dir or default/portable).
+fn resolve_main_db_path(custom: &str) -> std::path::PathBuf {
+    let portable = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.join(".portable").exists()))
+        .unwrap_or(false);
+    db::resolve_db_path(custom, portable)
+}
+
+fn sessions_dir(custom: &str) -> std::path::PathBuf {
+    resolve_main_db_path(custom)
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .join("sessions")
+}
+
+/// Scan `<db_dir>/sessions/*.ktmp` for an orphan session left by a crash/close. Empty temp files
+/// (no telemetry) are deleted in passing; the newest non-empty one is returned for the recovery
+/// prompt. There should be at most one (the single-temp invariant); a straggler is simply offered
+/// on a later launch.
+#[tauri::command]
+pub fn flightlog_scan_orphan_sessions(db_path: Option<String>) -> Result<Option<OrphanInfo>, String> {
+    let dir = sessions_dir(&db_path.unwrap_or_default());
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(e) => e,
+        Err(_) => return Ok(None), // no sessions dir yet → nothing to recover
+    };
+    let mut best: Option<OrphanInfo> = None;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("ktmp") {
+            continue;
+        }
+        let conn = match db::open_temp_session(&path) {
+            Ok(c) => c,
+            Err(e) => {
+                log::warn!("Orphan scan: cannot open {}: {}", path.display(), e);
+                continue;
+            }
+        };
+        let count = db::temp_session_row_count(&conn).unwrap_or(0);
+        if count == 0 {
+            drop(conn);
+            db::remove_temp_session(&path); // empty → worthless
+            continue;
+        }
+        let meta = db::read_session_meta(&conn).ok().flatten();
+        let max_ts: i64 = conn
+            .query_row("SELECT COALESCE(MAX(timestamp_ms), 0) FROM telemetry_records", [], |r| r.get(0))
+            .unwrap_or(0);
+        let (craft_name, start_time) = match meta {
+            Some(m) => (m.craft_name, m.start_time),
+            None => (String::new(), String::new()),
+        };
+        let info = OrphanInfo {
+            temp_path: path.to_string_lossy().to_string(),
+            craft_name,
+            start_time,
+            duration_sec: max_ts / 1000,
+            sample_count: count,
+        };
+        // Keep the newest by start_time (RFC3339 sorts lexicographically).
+        best = match best {
+            Some(b) if b.start_time >= info.start_time => Some(b),
+            _ => Some(info),
+        };
+    }
+    Ok(best)
+}
+
+/// Recovery prompt → **Discard**: delete the orphan temp file; nothing reaches the main DB.
+#[tauri::command]
+pub fn flightlog_recover_discard(temp_path: String) -> Result<(), String> {
+    db::remove_temp_session(std::path::Path::new(&temp_path));
+    Ok(())
+}
+
+/// Recovery prompt → **Save Incomplete**: reconstruct the flight from the orphan and commit it to
+/// the main DB (finalized with `end_time` = last sample). Returns the new flight id.
+#[tauri::command]
+pub fn flightlog_recover_save_incomplete(
+    temp_path: String,
+    db_path: Option<String>,
+) -> Result<i64, String> {
+    let main_db = resolve_main_db_path(&db_path.unwrap_or_default());
+    let (session, _count) = crate::flightlog::recorder::summarize_temp_session(
+        std::path::PathBuf::from(&temp_path),
+        main_db,
+    )?;
+    crate::flightlog::recorder::commit_pending_session(session)
+}
+
+/// Recovery prompt → **Continue on Reconnect**: load the orphan into the shared resume slot; the
+/// next connection's recorder resumes it (armed) or finalizes it (disarmed) on its first poll.
+#[tauri::command]
+pub fn flightlog_recover_continue(
+    temp_path: String,
+    db_path: Option<String>,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<(), String> {
+    let main_db = resolve_main_db_path(&db_path.unwrap_or_default());
+    let (session, _count) = crate::flightlog::recorder::summarize_temp_session(
+        std::path::PathBuf::from(&temp_path),
+        main_db,
+    )?;
+    *state
+        .resume_pending
+        .lock()
+        .map_err(|_| "Resume-session lock poisoned".to_string())? = Some(session);
+    Ok(())
+}

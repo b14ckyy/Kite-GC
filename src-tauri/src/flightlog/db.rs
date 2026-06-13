@@ -699,6 +699,47 @@ pub fn write_session_meta(
     Ok(())
 }
 
+/// The self-describing metadata of a temp session (from its `session_meta` row).
+pub struct SessionMetaRow {
+    pub start_time: String,
+    pub craft_name: String,
+    pub fc_variant: String,
+    pub fc_version: String,
+    pub board_id: String,
+    pub platform_type: u8,
+    pub protocol: String,
+    pub start_lat: Option<f64>,
+    pub start_lon: Option<f64>,
+}
+
+/// Read the single `session_meta` row of a temp session (None if absent — e.g. a malformed file).
+pub fn read_session_meta(conn: &Connection) -> SqlResult<Option<SessionMetaRow>> {
+    conn.query_row(
+        "SELECT start_time, craft_name, fc_variant, fc_version, board_id, platform_type, \
+                protocol, start_lat, start_lon FROM session_meta WHERE id = 1",
+        [],
+        |row| {
+            Ok(SessionMetaRow {
+                start_time: row.get(0)?,
+                craft_name: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                fc_variant: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                fc_version: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                board_id: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                platform_type: row.get::<_, Option<i64>>(5)?.unwrap_or(0) as u8,
+                protocol: row.get::<_, Option<String>>(6)?.unwrap_or_else(|| "MSP".into()),
+                start_lat: row.get(7)?,
+                start_lon: row.get(8)?,
+            })
+        },
+    )
+    .optional()
+}
+
+/// Count telemetry rows in a temp session (cheap orphan triage — an empty `.ktmp` is worthless).
+pub fn temp_session_row_count(conn: &Connection) -> SqlResult<i64> {
+    conn.query_row("SELECT COUNT(*) FROM telemetry_records", [], |row| row.get(0))
+}
+
 /// Commit a finished temp session into the main DB atomically: insert the finalized `flights` row,
 /// ATTACH the temp file, copy its `telemetry_records` (rewriting `flight_id` to the new main id),
 /// then DETACH. Returns the new flight id. The main DB therefore only ever sees the flight as a
