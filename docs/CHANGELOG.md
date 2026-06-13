@@ -141,6 +141,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Log player shows the time-of-day** (flight start + elapsed) at the current playback position.
 
 ### Fixed
+- **Live-recorded altitude now replays at the correct height.** A live recording replayed ~one terrain
+  height too low (e.g. **−84 m AGL at takeoff** on a ~84 m-MSL field) — the 3D track sat underground —
+  while the relative-altitude widget was fine. The recorder stored the **baro relative-to-home** altitude
+  in `alt_m`, but `alt_m` is the **GPS-MSL** column the replay map uses as the track height (the adapter
+  maps `alt_m → altMsl`). It now stores GPS MSL there (matching the live track + Blackbox import); the
+  relative reading stays in `baro_alt_m` for the widget. _Existing live recordings keep the old wrong
+  `alt_m` — only flights recorded after this fix replay correctly._
 - **Live flight mode + waypoint tracking now decode correctly (MSP active modes).** A flown mission showed
   **"Cruise"** instead of **"Mission"** and the active waypoint never pulsed on a live connection (replay was
   fine — it reads the logged flight-mode flags directly). Root cause: the box-id→flight-mode table used the
