@@ -889,3 +889,37 @@ pub fn flightlog_find_linkable(
     db::find_linkable_live_flight(&conn, &craft_name, dt)
         .map_err(|e| format!("Query error: {}", e))
 }
+
+// ── Deferred-commit: resolve the pending live-recording session (ADR-041) ──────────────
+
+/// Commit the pending live-recording session into the main DB (the End-Flight dialog's **Save**).
+/// Returns the new flight id so the frontend can link the flown mission + battery/notes.
+#[tauri::command]
+pub fn flightlog_commit_pending_session(
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<i64, String> {
+    let session = state
+        .pending_session
+        .lock()
+        .map_err(|_| "Pending-session lock poisoned".to_string())?
+        .take()
+        .ok_or_else(|| "No pending recording session to commit".to_string())?;
+    crate::flightlog::recorder::commit_pending_session(session)
+}
+
+/// Discard the pending live-recording session (the End-Flight dialog's **Discard Recording**) —
+/// the temp file is deleted and nothing reaches the main DB.
+#[tauri::command]
+pub fn flightlog_discard_pending_session(
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<(), String> {
+    let session = state
+        .pending_session
+        .lock()
+        .map_err(|_| "Pending-session lock poisoned".to_string())?
+        .take();
+    if let Some(session) = session {
+        crate::flightlog::recorder::discard_pending_session(session);
+    }
+    Ok(())
+}

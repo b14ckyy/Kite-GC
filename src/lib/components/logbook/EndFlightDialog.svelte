@@ -12,7 +12,7 @@
     batteryUsedMah: number | null;
     locationName?: string | null;
   }
-  export interface EndFlightResult { batterySerial: string; notes: string; linkMission: boolean; }
+  export interface EndFlightResult { batterySerial: string; notes: string; linkMission: boolean; discard?: boolean; }
   export interface EndFlightOptions {
     stats: EndFlightStats;
     /** Recorded to the DB → show the editable battery/notes/mission section. */
@@ -38,6 +38,7 @@
   let serial = $state('');
   let notes = $state('');
   let linkMission = $state(false);
+  let confirmingDiscard = $state(false);
   let resolver: ((v: EndFlightResult | null) => void) | null = null;
 
   export function show(opts: EndFlightOptions): Promise<EndFlightResult | null> {
@@ -47,20 +48,24 @@
     serial = '';
     notes = '';
     linkMission = false; // unverified mission → opt-in
+    confirmingDiscard = false;
     open = true;
     return new Promise((resolve) => { resolver = resolve; });
   }
 
-  /** Force-close without a result (e.g. on re-arm). */
+  /** Force-close without a result (e.g. on re-arm — the flight is already saved). */
   export function close() { settle(null); }
 
   function settle(v: EndFlightResult | null) {
     if (!open) return;
     open = false;
+    confirmingDiscard = false;
     if (resolver) { resolver(v); resolver = null; }
   }
   function save() { settle({ batterySerial: serial.trim(), notes: notes.trim(), linkMission: missionConfirm && linkMission }); }
-  function handleKeydown(e: KeyboardEvent) { if (e.key === 'Escape') settle(null); }
+  function confirmDiscard() { settle({ batterySerial: '', notes: '', linkMission: false, discard: true }); }
+  // Modal: deliberately no backdrop-click / Escape dismissal — closing is an explicit Save or
+  // Discard (a stray click next to the popup must not lose the just-recorded flight).
 
   let ui = $derived(interfaceSettings);
   function fmtAlt(m: number | null | undefined): string { return m == null ? '—' : formatConverted(convertAltitude(m, ui.altitudeUnit), 1); }
@@ -69,12 +74,10 @@
 </script>
 
 {#if open && stats}
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="dialog-backdrop" onclick={() => settle(null)} onkeydown={handleKeydown}>
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="dialog-box" onclick={(e) => e.stopPropagation()}>
+  <!-- Modal: the backdrop intentionally has no click/Escape handler so it can't be dismissed by
+       a stray click — the flight is only kept (Save) or dropped (Discard) by an explicit button. -->
+  <div class="dialog-backdrop">
+    <div class="dialog-box">
       <div class="dialog-title">{$t('endFlight.title')}</div>
 
       <div class="fc-info-grid">
@@ -105,10 +108,19 @@
             <span>{$t('endFlight.linkMission')}</span>
           </label>
         {/if}
-        <div class="dialog-buttons">
-          <button class="dialog-btn dialog-btn-cancel" onclick={() => settle(null)}>{$t('endFlight.skip')}</button>
-          <button class="dialog-btn dialog-btn-primary" onclick={save}>{$t('endFlight.save')}</button>
-        </div>
+        {#if confirmingDiscard}
+          <div class="ef-discard-warn">{$t('endFlight.discardConfirm')}</div>
+          <div class="dialog-buttons">
+            <button class="dialog-btn" onclick={() => (confirmingDiscard = false)}>{$t('endFlight.cancel')}</button>
+            <button class="dialog-btn dialog-btn-danger" onclick={confirmDiscard}>{$t('endFlight.discardConfirmYes')}</button>
+          </div>
+        {:else}
+          <div class="dialog-buttons">
+            <button class="dialog-btn dialog-btn-danger" onclick={() => (confirmingDiscard = true)}>{$t('endFlight.discard')}</button>
+            <span class="ef-spacer"></span>
+            <button class="dialog-btn dialog-btn-primary" onclick={save}>{$t('endFlight.save')}</button>
+          </div>
+        {/if}
       {:else}
         <div class="ef-note">{$t('endFlight.notRecordedHint')}</div>
         <div class="dialog-buttons">
@@ -140,10 +152,14 @@
   .ef-check { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #e0e0e0; margin-bottom: 12px; cursor: pointer; }
   .ef-check input { accent-color: #37a8db; }
 
-  .dialog-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+  .ef-discard-warn { font-size: 12px; color: #f0b0b0; background: rgba(212, 0, 0, 0.12); border: 1px solid rgba(212, 0, 0, 0.4); border-radius: 4px; padding: 8px 10px; margin: 10px 0 12px; }
+
+  .dialog-buttons { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 4px; }
+  .ef-spacer { flex: 1 1 auto; }
   .dialog-btn { padding: 6px 14px; font-size: 12px; font-weight: 600; border-radius: 4px; border: 1px solid #555; background: #434343; color: #e0e0e0; cursor: pointer; transition: background 0.15s; }
   .dialog-btn:hover { background: #505050; }
-  .dialog-btn-cancel { color: #999; }
   .dialog-btn-primary { background: #1a6b94; border-color: #2590c8; color: #fff; }
   .dialog-btn-primary:hover { background: #237fae; }
+  .dialog-btn-danger { background: #5a1414; border-color: #d40000; color: #f3c5c5; }
+  .dialog-btn-danger:hover { background: #7a1a1a; }
 </style>

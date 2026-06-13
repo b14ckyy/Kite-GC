@@ -49,11 +49,11 @@
   import { activeWpNumber, replayWpTotal } from '$lib/stores/navStatus';
   import { missionManagerOpen, missionManagerSelectedId, requestOpenFlightId, requestOpenMissionId } from '$lib/stores/missionManager';
   import { batteryManagerOpen } from '$lib/stores/batteryManager';
-  import { missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode, flightSetBatterySerial, updateFlightNotes, getFlight, batteryDbFindBySerial, batteryDbAddUsage } from '$lib/stores/flightlog';
+  import { missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode, flightSetBatterySerial, updateFlightNotes, getFlight, flightlogCommitPending, flightlogDiscardPending, batteryDbFindBySerial, batteryDbAddUsage } from '$lib/stores/flightlog';
   import EndFlightDialog from "$lib/components/logbook/EndFlightDialog.svelte";
   import type { EndFlightStats } from "$lib/components/logbook/EndFlightDialog.svelte";
   import { haversineDistance, bearing, destinationPoint } from '$lib/utils/geo';
-  import { buildMissionInput, missionContentHash } from '$lib/helpers/missionLibrary';
+  import { buildMissionInput } from '$lib/helpers/missionLibrary';
   import { homePosition } from '$lib/stores/home';
   import { MAP_PROVIDERS } from "$lib/config/mapProviders";
   import { tileCacheStats, setCacheMaxMB, clearCache } from "$lib/cache/tileCache";
@@ -64,7 +64,7 @@
   import FloatingVideoWindow from "$lib/components/video/FloatingVideoWindow.svelte";
   import { initVideo, videoState, videoStream, setVideoPrimary, registerPiPElement } from "$lib/stores/video";
   import TerrainAnalysisPanel from "$lib/components/terrain/TerrainAnalysisPanel.svelte";
-  import { editMode, replayActive, mission, missionFlags, missionDownload, missionUpload, missionFcInfo, markMissionSynced, loadedMissionId, missionSetWaypoints, launchPoint, hasLocation, toDeg } from "$lib/stores/mission";
+  import { editMode, replayActive, mission, missionFlags, missionDownload, missionUpload, missionFcInfo, markMissionSynced, loadedMissionId, missionSetWaypoints, launchPoint, hasLocation, toDeg, type Waypoint } from "$lib/stores/mission";
   import { terrainAnalysis, patchTerrainAnalysis } from "$lib/stores/terrainAnalysis";
   import { DEFAULT_RADAR, DEFAULT_AIRSPACE, BUILTIN_ADSB_PROVIDERS } from "$lib/stores/settings";
   import type { AppSettings, InterfaceSettings, PanelConfig, RadarSettings, GcsMode, AirspaceSettings } from "$lib/stores/settings";
@@ -1695,65 +1695,60 @@
     }
   });
 
-  // ── Mission recording link (arm-save / disarm-link) ──────────────────
-  // On arm (with DB recording), save the displayed mission to the library and link it to the
-  // just-created flight. On disarm, if the mission changed during the flight (e.g. a new
-  // mission uploaded), offer to update the link. See docs/archive/MISSION_LIBRARY_AND_DB.md.
-  let flightMissionHash: string | null = null;
-
+  // ── Mission recording link (deferred commit, ADR-041) ────────────────
+  // The flown mission is captured at disarm (while FC-sync still reflects what the FC flew) and
+  // linked when the pending session is committed (Save, or a grace-lapsed re-arm auto-commit).
   async function linkMissionToFlight(flightId: number, wps = get(mission).waypoints): Promise<void> {
     const input = await buildMissionInput(wps);
     const id = await missionDbSave(input, flightLogDbPath);
     await flightLinkMission(flightId, id, flightLogDbPath);
     markMissionSynced('db');
     loadedMissionId.set(id);
-    flightMissionHash = input.content_hash;
     void missionDbGeocode(id, $locale ?? 'en', flightLogDbPath).catch(() => {});
   }
 
-  // Commit-on-disarm (ADR-040): the DB flight id only exists at disarm, so there is no arm-time
-  // link any more — onRecordingEnded does the linking once the flight is committed. Here we just
-  // reset the flown-mission baseline so the end-of-flight re-upload check starts clean.
-  function onRecordingStarted(): void {
-    flightMissionHash = null;
+  // Flown mission captured at the disarm that produced the pending session (FC-synced waypoints +
+  // whether they were FC-synced). Used to link the mission when that session is committed.
+  let endedMissionWps: Waypoint[] = [];
+  let endedMissionFc = false;
+
+  /** Link the captured flown mission to a freshly committed flight: FC-synced → silently;
+   *  otherwise only when the user opted in via the dialog checkbox. */
+  async function linkEndedMission(flightId: number, userOptedIn: boolean): Promise<void> {
+    if (endedMissionWps.length === 0) return;
+    if (!endedMissionFc && !userOptedIn) return;
+    try { await linkMissionToFlight(flightId, endedMissionWps); }
+    catch (e) { console.warn('[end-flight] mission link failed', e); }
   }
 
-  async function onRecordingEnded(flightId: number): Promise<void> {
-    try {
-      const wps = get(mission).waypoints;
-      const fc = get(missionFlags).fc;
-      // FC-synced mission is trusted (it's what the FC flew) → link it silently. Covers a
-      // mid-flight re-upload (relink to the new one); unchanged since arm is already linked.
-      if (wps.length > 0 && fc) {
-        const curHash = await missionContentHash(wps);
-        if (curHash !== flightMissionHash) {
-          try { await linkMissionToFlight(flightId, wps); } catch (e) { console.warn('[end-flight] fc relink failed', e); }
-        }
-      }
-      // A non-FC-synced mission is uncertain (may not be what was flown) → offer to link it
-      // with explicit confirmation. linkMissionToFlight upserts (saves if not in the DB) + links.
-      const missionConfirm = wps.length > 0 && !fc;
+  // Fresh recording started — clear any stale captured-mission snapshot (defensive).
+  function onRecordingStarted(): void {
+    endedMissionWps = [];
+    endedMissionFc = false;
+  }
 
-      // Summary from the finalized flight row.
-      const flight = await getFlight(flightId, flightLogDbPath);
-      const stats: EndFlightStats = {
-        durationSec: flight?.duration_sec ?? null,
-        maxAltM: flight?.max_alt_m ?? null,
-        maxSpeedMs: flight?.max_speed_ms ?? null,
-        maxDistM: flight?.max_distance_m ?? null,
-        batteryUsedMah: flight?.battery_used_mah ?? null,
-        locationName: flight?.location_name ?? null,
-      };
+  async function onRecordingEnded(stats: EndFlightStats): Promise<void> {
+    // Capture the flown mission at disarm, while FC-sync still reflects what the FC flew.
+    endedMissionWps = [...get(mission).waypoints];
+    endedMissionFc = get(missionFlags).fc;
+    const missionConfirm = endedMissionWps.length > 0 && !endedMissionFc;
+    try {
       const res = await endFlightDialog.show({ stats, recorded: true, missionConfirm });
-      if (res) {
-        if (res.batterySerial) await flightSetBatterySerial(flightId, res.batterySerial, flightLogDbPath);
-        if (res.notes) await updateFlightNotes(flightId, res.notes, flightLogDbPath);
-        if (res.linkMission) await linkMissionToFlight(flightId, wps);
+      // null = the dialog was force-closed by a re-arm (resumed) or a grace auto-commit — the
+      // backend already resolved the pending session, so there is nothing to do here.
+      if (res === null) return;
+      if (res.discard) {
+        await flightlogDiscardPending();
+        return;
       }
+      // Save → commit the pending session, then link mission + battery/notes against the new id.
+      const flightId = await flightlogCommitPending();
+      if (res.batterySerial) await flightSetBatterySerial(flightId, res.batterySerial, flightLogDbPath);
+      if (res.notes) await updateFlightNotes(flightId, res.notes, flightLogDbPath);
+      await linkEndedMission(flightId, res.linkMission);
+      void loadLogbook();
     } catch (e) {
       console.warn('[end-flight] disarm dialog failed', e);
-    } finally {
-      flightMissionHash = null;
     }
   }
 
@@ -1780,11 +1775,36 @@
 
   if (typeof window !== 'undefined') {
     void listen('flight-recording-started', () => {
-      onRecordingStarted(); // id-less signal — recording started (commit-on-disarm, ADR-040)
+      onRecordingStarted(); // id-less signal — recording started (deferred commit, ADR-041)
     });
-    void listen<{ flight_id: number }>('flight-recording-ended', async (event) => {
-      await onRecordingEnded(event.payload.flight_id); // End-Flight dialog (summary + battery/notes/mission)
-      void loadLogbook(); // refresh the list with the just-recorded (and linked) flight
+    // Disarm → the summary dialog (stats arrive in the payload; no flight_id yet under deferred
+    // commit). Save commits the pending session, Discard drops it.
+    void listen<{ duration_sec: number; max_alt_m: number; max_speed_ms: number; max_distance_m: number; battery_used_mah: number | null }>(
+      'flight-recording-ended',
+      (event) => {
+        const p = event.payload;
+        void onRecordingEnded({
+          durationSec: p.duration_sec,
+          maxAltM: p.max_alt_m,
+          maxSpeedMs: p.max_speed_ms,
+          maxDistM: p.max_distance_m,
+          batteryUsedMah: p.battery_used_mah,
+        });
+      },
+    );
+    // Grace-lapsed re-arm auto-committed the previous flight: close the (now stale) summary and link
+    // the mission captured at that disarm.
+    void listen<{ flight_id: number }>('flight-recording-committed', async (event) => {
+      const wps = endedMissionWps; const wasFc = endedMissionFc; // snapshot before any await
+      endFlightDialog?.close();
+      if (wps.length > 0 && wasFc) {
+        try { await linkMissionToFlight(event.payload.flight_id, wps); } catch (e) { console.warn('[auto-commit] link failed', e); }
+      }
+      void loadLogbook();
+    });
+    // Re-arm within grace continues the same flight — just drop the stale summary dialog.
+    void listen('flight-recording-resumed', () => {
+      endFlightDialog?.close();
     });
     void listen<BlackboxImportProgress>('flightlog-import-progress', (event) => {
       blackboxImportProgress = event.payload;

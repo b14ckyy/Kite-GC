@@ -792,7 +792,10 @@
     "batteryHint": "Serial of the battery you flew",
     "linkMission": "Link the loaded mission to this flight",
     "save": "Save",
-    "skip": "Skip",
+    "discard": "Discard Recording",
+    "discardConfirm": "Discard this recording? It will be permanently deleted and cannot be recovered.",
+    "discardConfirmYes": "Discard",
+    "cancel": "Cancel",
     "close": "Close",
     "notRecordedHint": "Recording was off — this is a summary only."
   },

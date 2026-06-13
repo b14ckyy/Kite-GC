@@ -8,6 +8,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use crate::aero::AeroCache;
+use crate::flightlog::recorder::PendingSessionHandle;
 use crate::mavlink_proto::MavlinkHandle;
 use crate::msp::FcInfo;
 use crate::radar::source::SourceUpdate;
@@ -37,6 +38,10 @@ pub struct AppState {
     pub ble_scan_stop: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
     /// Airspace Manager (aeronautical data) — last fetched region cached in RAM, or None.
     pub aero: Mutex<Option<AeroCache>>,
+    /// Pending live-recording session awaiting commit/discard (deferred commit, ADR-041). Set by the
+    /// recorder on disarm; resolved by the Save/Discard commands or the recorder's grace-arm path.
+    /// Lives here (not in the recorder) so it survives a disconnect while the End-Flight dialog is open.
+    pub pending_session: PendingSessionHandle,
 }
 
 impl AppState {
@@ -51,6 +56,7 @@ impl AppState {
             radar_msp_enabled: Arc::new(AtomicBool::new(false)),
             ble_scan_stop: Mutex::new(None),
             aero: Mutex::new(None),
+            pending_session: Arc::new(Mutex::new(None)),
         }
     }
 }

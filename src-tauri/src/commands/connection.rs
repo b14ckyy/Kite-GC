@@ -332,7 +332,7 @@ fn connect_msp(
             .and_then(|p| p.parent().map(|p| p.join(".portable").exists()))
             .unwrap_or(false);
 
-        match FlightRecorder::new(flight_log_settings, fc_info.clone(), "MSP", portable, app_handle.clone()) {
+        match FlightRecorder::new(flight_log_settings, fc_info.clone(), "MSP", portable, app_handle.clone(), state.pending_session.clone()) {
             Ok(mut rec) => {
                 rec.start_continuous_log();
                 let handle = std::sync::Arc::new(std::sync::Mutex::new(rec));
@@ -406,7 +406,7 @@ fn connect_mavlink(
             .and_then(|p| p.parent().map(|p| p.join(".portable").exists()))
             .unwrap_or(false);
 
-        match FlightRecorder::new(flight_log_settings, fc_info.clone(), "MAVLink", portable, app_handle.clone()) {
+        match FlightRecorder::new(flight_log_settings, fc_info.clone(), "MAVLink", portable, app_handle.clone(), state.pending_session.clone()) {
             Ok(mut rec) => {
                 rec.start_continuous_log();
                 let handle = std::sync::Arc::new(std::sync::Mutex::new(rec));

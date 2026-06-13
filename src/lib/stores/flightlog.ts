@@ -258,6 +258,17 @@ export async function deleteFlight(id: number, dbPath: string): Promise<boolean>
   });
 }
 
+/** Commit the pending live-recording session into the main DB (End-Flight dialog Save).
+ *  Returns the new flight id. Deferred commit — see ADR-041. */
+export async function flightlogCommitPending(): Promise<number> {
+  return invoke<number>('flightlog_commit_pending_session');
+}
+
+/** Discard the pending live-recording session (End-Flight dialog Discard) — drops the temp file. */
+export async function flightlogDiscardPending(): Promise<void> {
+  await invoke('flightlog_discard_pending_session');
+}
+
 export async function updateFlightNotes(id: number, notes: string, dbPath: string): Promise<void> {
   return invoke('flightlog_update_notes', {
     flightId: id,

@@ -4,8 +4,9 @@
 // Flight Recorder — detects arm/disarm transitions and records telemetry.
 // Designed to be called from the scheduler thread with each decoded telemetry payload.
 
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use rusqlite::Connection;
@@ -24,13 +25,69 @@ use crate::scheduler::telemetry::{
 /// Bit 2 in arming_flags indicates ARMED state
 const ARMED_FLAG: u32 = 0x04; // bit 2
 
-/// Payload for the `flight-recording-ended` event. The frontend uses `flight_id` to save + link
-/// the flown mission to this DB flight (see docs/archive/MISSION_LIBRARY_AND_DB.md). The flight id
-/// only exists at disarm now (commit-on-disarm, ADR-040), so `flight-recording-started` is an
-/// id-less signal and carries no payload.
+/// INAV-style disarm→re-arm grace: a re-arm within this window continues the SAME log (an accidental
+/// disarm in flight is one flight, not two). Beyond it, the previous flight is committed and a new
+/// session starts. See ADR-041.
+const REARM_GRACE: Duration = Duration::from_secs(5);
+
+/// Payload for the `flight-recording-committed` event (a pending session was auto-committed on a
+/// grace-lapsed re-arm). The frontend links the captured mission + closes the dialog.
 #[derive(serde::Serialize, Clone)]
 struct FlightRecordingEvent {
     flight_id: i64,
+}
+
+/// Payload for `flight-recording-ended` — the disarm summary stats (no `flight_id` exists yet under
+/// deferred commit, ADR-041; the dialog reads these directly).
+#[derive(serde::Serialize, Clone)]
+struct RecordingEndedEvent {
+    duration_sec: i64,
+    max_alt_m: f64,
+    max_speed_ms: f64,
+    max_distance_m: f64,
+    battery_used_mah: Option<u32>,
+}
+
+/// A finished live-recording session awaiting commit/discard (deferred commit, ADR-041). Held in
+/// app-state so it survives a disconnect while the End-Flight dialog is open. Carries everything
+/// both consumers need: the finalized `Flight` + temp/db paths (to commit), and the resume fields
+/// (`start_mah`, `last_timestamp_ms`) so a re-arm within grace can continue the same `.ktmp`.
+pub struct PendingSession {
+    pub temp_path: PathBuf,
+    pub db_path: PathBuf,
+    pub flight: Flight,
+    pub disarm_instant: Instant,
+    pub start_mah: Option<u32>,
+    pub last_timestamp_ms: i64,
+}
+
+/// Shared, connection-independent slot for the one pending session (see `state::AppState`).
+pub type PendingSessionHandle = Arc<Mutex<Option<PendingSession>>>;
+
+/// Commit a pending session into the main DB: insert the finalized flight, copy the temp
+/// `telemetry_records`, remove the temp file, and spawn weather/geocode enrichment. Returns the new
+/// flight id. Shared by the Save command and the recorder's grace-lapsed re-arm path.
+pub fn commit_pending_session(session: PendingSession) -> Result<i64, String> {
+    let conn = db::open_database(&session.db_path)
+        .map_err(|e| format!("Failed to open flight DB for commit: {}", e))?;
+    let flight_id = db::commit_session_to_main(&conn, &session.temp_path, &session.flight)
+        .map_err(|e| format!("Failed to commit session: {}", e))?;
+    db::remove_temp_session(&session.temp_path);
+
+    if let (Some(lat), Some(lon)) = (session.flight.start_lat, session.flight.start_lon) {
+        if is_valid_gps_coord(lat, lon) {
+            let db_path = session.db_path.to_string_lossy().to_string();
+            tauri::async_runtime::spawn(enrich_flight_async(flight_id, lat, lon, db_path));
+        }
+    }
+    log::info!("Pending session committed as flight {}", flight_id);
+    Ok(flight_id)
+}
+
+/// Discard a pending session — delete the temp `.ktmp` (and its WAL/SHM); nothing reaches the main DB.
+pub fn discard_pending_session(session: PendingSession) {
+    db::remove_temp_session(&session.temp_path);
+    log::info!("Pending session discarded: {}", session.temp_path.display());
 }
 
 #[inline]
@@ -155,7 +212,6 @@ pub struct FlightRecorder {
     fc_info: FcInfo,
     protocol: String,
     db_file_path: std::path::PathBuf,
-    db: Connection,
     raw_logger: Option<RawLogger>,
     tlog_logger: Option<TlogLogger>,
     snapshot: TelemetrySnapshot,
@@ -167,6 +223,9 @@ pub struct FlightRecorder {
     session_instant: Option<Instant>,
     /// For emitting flight-recording lifecycle events to the frontend.
     app_handle: AppHandle,
+    /// Shared slot for the pending (awaiting commit/discard) session — also read on the next arm for
+    /// the grace decision. Shared with app-state so it outlives this connection (ADR-041).
+    pending: PendingSessionHandle,
 }
 
 /// Thread-safe handle to the flight recorder
@@ -181,11 +240,14 @@ impl FlightRecorder {
         protocol: &str,
         portable: bool,
         app_handle: AppHandle,
+        pending: PendingSessionHandle,
     ) -> Result<Self, String> {
         let db_path = db::resolve_db_path(&settings.db_path, portable);
         log::info!("Flight log database: {}", db_path.display());
 
-        let db = db::open_database(&db_path).map_err(|e| {
+        // Validate the flight DB is openable now (fail fast). The actual writes use their own
+        // connections — the temp store on arm, and the main DB at commit (ADR-041).
+        db::open_database(&db_path).map_err(|e| {
             format!("Failed to open flight log database: {}", e)
         })?;
 
@@ -194,7 +256,6 @@ impl FlightRecorder {
             fc_info,
             protocol: protocol.to_string(),
             db_file_path: db_path,
-            db,
             raw_logger: None,
             tlog_logger: None,
             snapshot: TelemetrySnapshot::default(),
@@ -203,6 +264,7 @@ impl FlightRecorder {
             session_start: None,
             session_instant: None,
             app_handle,
+            pending,
         })
     }
 
@@ -333,13 +395,74 @@ impl FlightRecorder {
         self.was_armed = is_armed;
     }
 
-    /// Called when arm transition is detected.
-    ///
-    /// Commit-on-disarm (ADR-040): nothing is written to the main DB here. When DB recording is on,
-    /// a per-session temp `.ktmp` is opened — it is the durable in-flight buffer and is committed
-    /// into the main DB atomically on disarm. The real `flight_id` therefore exists only at disarm,
-    /// so `flight-recording-started` is an id-less signal.
+    /// Called when an arm transition is detected. Resolves any pending session first (deferred
+    /// commit + grace, ADR-041): a re-arm within the grace window continues the SAME log; beyond it
+    /// the previous flight is auto-committed and a fresh session starts.
     fn on_arm(&mut self) {
+        let pending = self.pending.lock().ok().and_then(|mut s| s.take());
+        if let Some(p) = pending {
+            if p.disarm_instant.elapsed() < REARM_GRACE {
+                self.resume_session(p);
+                return;
+            }
+            // Grace lapsed → auto-commit the previous flight, then start a fresh session.
+            match commit_pending_session(p) {
+                Ok(flight_id) => {
+                    if let Err(e) = self
+                        .app_handle
+                        .emit("flight-recording-committed", FlightRecordingEvent { flight_id })
+                    {
+                        log::warn!("Failed to emit flight-recording-committed: {}", e);
+                    }
+                }
+                Err(e) => log::error!("Auto-commit on re-arm failed: {}", e),
+            }
+        }
+        self.start_fresh_session();
+    }
+
+    /// Re-arm within the grace window — reopen the same `.ktmp` and continue the flight, with
+    /// timestamps resuming where they left off (so the gap is real elapsed time, not a reset).
+    fn resume_session(&mut self, p: PendingSession) {
+        log::info!("Re-arm within grace — continuing the same recording");
+        let temp_db = match db::open_temp_session(&p.temp_path) {
+            Ok(c) => Some(c),
+            Err(e) => {
+                log::error!(
+                    "Failed to reopen temp session {}: {} — starting a fresh one",
+                    p.temp_path.display(), e,
+                );
+                self.start_fresh_session();
+                return;
+            }
+        };
+        let start_instant = Instant::now()
+            .checked_sub(Duration::from_millis(p.last_timestamp_ms.max(0) as u64))
+            .unwrap_or_else(Instant::now);
+        self.active_flight = Some(ActiveFlight {
+            temp_db,
+            temp_path: Some(p.temp_path),
+            start_time: p.flight.start_time,
+            start_instant,
+            start_lat: p.flight.start_lat,
+            start_lon: p.flight.start_lon,
+            buffer: Vec::with_capacity(FLUSH_THRESHOLD),
+            max_alt: p.flight.max_alt_m.unwrap_or(0.0),
+            max_speed: p.flight.max_speed_ms.unwrap_or(0.0),
+            max_distance: p.flight.max_distance_m.unwrap_or(0.0),
+            total_distance: p.flight.total_distance_m.unwrap_or(0.0),
+            last_lat: None,
+            last_lon: None,
+            start_mah: p.start_mah,
+        });
+        if let Err(e) = self.app_handle.emit("flight-recording-resumed", ()) {
+            log::warn!("Failed to emit flight-recording-resumed: {}", e);
+        }
+    }
+
+    /// Open a brand-new recording session (temp store + raw logger) and announce it. Nothing is
+    /// written to the main DB here — the real `flight_id` is born at commit (ADR-041).
+    fn start_fresh_session(&mut self) {
         log::info!("ARM detected — starting flight recording");
 
         let now = Utc::now();
@@ -446,32 +569,42 @@ impl FlightRecorder {
         }
     }
 
-    /// Called when disarm transition is detected. Flushes the tail of the buffer to the temp store,
-    /// closes it (WAL checkpoint), then commits it into the main DB atomically as one finalized
-    /// flight (commit-on-disarm, ADR-040) and removes the temp file. The real `flight_id` is born
-    /// here, so this is where the frontend is told to link the flown mission.
+    /// Called when a disarm transition is detected. Flushes the tail to the temp store, closes it
+    /// (WAL checkpoint), and stashes it as the PENDING session in app-state — it is NOT committed to
+    /// the main DB here (deferred commit, ADR-041). The frontend gets `flight-recording-ended` with
+    /// the stats and decides via the summary dialog (Save / Discard); a re-arm resolves it instead.
     fn on_disarm(&mut self) {
         log::info!("DISARM detected — stopping flight recording");
 
         if let Some(mut flight) = self.active_flight.take() {
             let end_time = Utc::now();
             let duration = flight.start_instant.elapsed().as_secs() as i64;
+            let last_timestamp_ms = flight.start_instant.elapsed().as_millis() as i64;
             let battery_used = match (flight.start_mah, self.snapshot.mah_drawn) {
                 (Some(start), Some(end)) if end >= start => Some(end - start),
                 _ => None,
             };
 
-            // Commit the temp session into the main DB (DB recording only).
+            // Close raw/tlog logger (non-continuous mode) regardless of the DB path.
+            if !self.settings.raw_always {
+                if let Some(mut logger) = self.raw_logger.take() {
+                    logger.close();
+                }
+                if let Some(mut logger) = self.tlog_logger.take() {
+                    logger.close();
+                }
+            }
+            // else: continuous mode — loggers stay open until disconnect
+
+            // DB recording: flush + close the temp store, then stash it as the pending session.
             if let (Some(temp_db), Some(temp_path)) = (flight.temp_db.take(), flight.temp_path.clone())
             {
-                // Flush the remaining buffer into the temp store, then close it so its WAL is
-                // checkpointed before the main connection ATTACHes the file.
                 if !flight.buffer.is_empty() {
                     if let Err(e) = db::insert_telemetry_batch(&temp_db, &flight.buffer) {
                         log::error!("Failed to flush final telemetry batch to temp store: {}", e);
                     }
                 }
-                drop(temp_db);
+                drop(temp_db); // checkpoint the WAL before any later ATTACH
 
                 let flight_row = Flight {
                     id: 0,
@@ -504,37 +637,32 @@ impl FlightRecorder {
                     battery_serial: None,
                 };
 
-                match db::commit_session_to_main(&self.db, &temp_path, &flight_row) {
-                    Ok(flight_id) => {
-                        db::remove_temp_session(&temp_path);
-                        log::info!(
-                            "Flight {} committed: {}s, max_alt={:.1}m, max_speed={:.1}m/s, distance={:.0}m",
-                            flight_id, duration, flight.max_alt, flight.max_speed, flight.total_distance,
-                        );
-
-                        // Deferred enrichment: weather + geocode against the now-committed flight id.
-                        if let (Some(lat), Some(lon)) = (flight.start_lat, flight.start_lon) {
-                            if is_valid_gps_coord(lat, lon) {
-                                let db_path = self.db_file_path.to_string_lossy().to_string();
-                                tauri::async_runtime::spawn(enrich_flight_async(flight_id, lat, lon, db_path));
-                            }
-                        }
-
-                        // The frontend links the flown mission now that the DB flight exists.
-                        if let Err(e) = self.app_handle.emit(
-                            "flight-recording-ended",
-                            FlightRecordingEvent { flight_id },
-                        ) {
-                            log::warn!("Failed to emit flight-recording-ended: {}", e);
-                        }
-                    }
-                    Err(e) => {
-                        log::error!(
-                            "Failed to commit session to main DB: {} — temp file kept for recovery at {}",
-                            e, temp_path.display(),
-                        );
-                    }
+                let session = PendingSession {
+                    temp_path,
+                    db_path: self.db_file_path.clone(),
+                    flight: flight_row,
+                    disarm_instant: Instant::now(),
+                    start_mah: flight.start_mah,
+                    last_timestamp_ms,
+                };
+                if let Ok(mut slot) = self.pending.lock() {
+                    *slot = Some(session); // resolved by Save/Discard commands or the next arm
                 }
+
+                let ev = RecordingEndedEvent {
+                    duration_sec: duration,
+                    max_alt_m: flight.max_alt,
+                    max_speed_ms: flight.max_speed,
+                    max_distance_m: flight.max_distance,
+                    battery_used_mah: battery_used,
+                };
+                if let Err(e) = self.app_handle.emit("flight-recording-ended", ev) {
+                    log::warn!("Failed to emit flight-recording-ended: {}", e);
+                }
+                log::info!(
+                    "Flight pending commit: {}s, max_alt={:.1}m, max_speed={:.1}m/s, distance={:.0}m",
+                    duration, flight.max_alt, flight.max_speed, flight.total_distance,
+                );
             } else {
                 // Raw-only mode (no temp store / no DB flight): nothing to commit.
                 log::info!(
@@ -542,17 +670,6 @@ impl FlightRecorder {
                     duration, flight.max_alt, flight.max_speed, flight.total_distance,
                 );
             }
-
-            // Close raw/tlog logger only in non-continuous mode
-            if !self.settings.raw_always {
-                if let Some(mut logger) = self.raw_logger.take() {
-                    logger.close();
-                }
-                if let Some(mut logger) = self.tlog_logger.take() {
-                    logger.close();
-                }
-            }
-            // else: continuous mode — loggers stay open until disconnect
         }
     }
 
@@ -713,10 +830,13 @@ impl FlightRecorder {
         }
     }
 
-    /// Graceful shutdown — flush and finalize any active flight.
+    /// Graceful shutdown (disconnect). An active flight is finalized as a PENDING session via
+    /// `on_disarm` (not committed) — the End-Flight dialog appears and the pending session survives
+    /// in app-state, so Save/Discard still work and a reconnect+arm within grace continues it (the
+    /// richer recovery-on-reconnect prompt is a later phase, ADR-041).
     pub fn shutdown(&mut self) {
         if self.active_flight.is_some() {
-            log::info!("Recorder shutdown with active flight — forcing disarm");
+            log::info!("Recorder shutdown with active flight — finalizing as a pending session");
             self.on_disarm();
         }
         // Always close continuous loggers on disconnect
