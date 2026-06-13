@@ -441,6 +441,11 @@ This document tracks planned features, organized by milestone.
 - [x] MAVLink → normalized payloads mapping (10 receive messages → same Tauri events)
 - [x] GCS IDs: sysid=255, compid=190
 - [x] ArduPilot + PX4 + INAV MAVLink firmware support
+- [x] **MAVLink telemetry stream rates — GCS-requested via `SET_MESSAGE_INTERVAL`, MSP-parity** (ADR-043): same two knobs (Attitude/GPS), ballast disabled, fits real RC links (~500–650 B/s); **Full MAVLink Telemetry** toggle leaves it to the FC's `SRn_*` params (reset-to-default)
+- [x] **MAVLink Debug Monitor tab** — per-message ID counts/rate/last-seen + RX/TX direction (push-side counterpart to the MSP poll view)
+- [x] **ArduPilot per-vehicle flight-mode mapping** — vehicle-specific `fc_variant` (ArduPlane/Copter/Rover/Sub) + raw `custom_mode` forwarded to the per-vehicle mode table (live + replay)
+- [x] **MAVLink home from `HOME_POSITION`** — authoritative FC home on the protocol-agnostic `home-position` event (consistent across reconnects)
+- [ ] **Unify home-on-arm into the adapter layer** — for telemetry-only inputs (CRSF/Smartport passthrough) home derives from the GPS fix at the arm edge; move today's frontend fallback into the backend adapter so all home sourcing flows through `home-position` (see ADR-039)
 
 **Phase 3 — Protocol Selection & Connection Handling**:
 - [x] Protocol selection: explicit UI dropdown (MSP / MAVLink), no auto-detect

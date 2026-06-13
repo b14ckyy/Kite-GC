@@ -1805,6 +1805,15 @@ is not drawn in 3D (the FC-home "H" is, since it is mission-independent) — acc
 FC home. Box-id flight-mode decoding is unrelated (see the CHANGELOG fix: MSP_BOXIDS returns the **`permanentId`**
 field, not the `boxId_e` ordinal).
 
+**Home sourcing is unified on the protocol-agnostic `home-position` event** — each protocol adapter sources
+home however it can and pushes the same `{lat, lon, alt}` (→ locked green "H"): MSP from `MSP_WP 0` at
+connect; MAVLink from `HOME_POSITION` (242), pushed at ~0.2 Hz (so on connect the GPS-fix fallback shows
+briefly until the first push corrects it — accepted). **Future (telemetry-only adapters — CRSF / Smartport
+passthrough):** there is no explicit home message, only a disarm→arm edge, so that adapter must derive home
+from the **current GPS fix at the arm edge** and emit it through the **same event** — moving today's
+**frontend** home-on-arm fallback (`+page` telemetry subscribe) **into the adapter (backend)** so all home
+sourcing flows through one seam and the frontend fallback can retire.
+
 ---
 
 ## ADR-040: Live Recording — Temp Session Store (Commit-on-Disarm) + Capture Completeness
@@ -1961,6 +1970,75 @@ stitched back into one log across a reconnect — even across protocols. Cost: a
 non-empty file and defers a (anomalous) non-empty straggler to a later launch rather than auto-deleting
 it. Save-trigger tuning (batch size / fsync cadence — a hard crash can still lose the last unflushed
 batch) remains open.
+
+---
+
+## ADR-043: MAVLink Telemetry Stream Rates — GCS-Requested via SET_MESSAGE_INTERVAL (MSP-Parity) + Full-Telemetry Bypass
+
+**Status**: Accepted
+**Related**: ADR-040/041/042 (recording lifecycle — the stream feeds the recorder), the MSP poll
+scheduler (`scheduler/mod.rs` `build_slots`) whose two rate knobs this mirrors.
+
+**Context**: Unlike MSP (strict request→response polling, where the GCS pulls exactly what it wants),
+MAVLink is **push-based**: ArduPilot streams telemetry on a port according to that port's `SRn_*`
+stream-group parameters, and begins as soon as it sees a GCS heartbeat — the GCS need request nothing.
+Empirically (MAVLink Debug Monitor) a fresh connection already streams ~30 message types. Two problems
+for a GCS that must run over **real radio links**:
+
+1. **Bandwidth.** ELRS MAVLink on 2.4 GHz / dual-band tops out around **~500 B/s** (single-band
+   900 MHz ~50 B/s — ELRS itself discourages it); Crossfire/ELRS passthrough are slower still; mLRS in
+   its slowest 19 Hz mode ≈ 1500 B/s. The default SRn firehose (RAW_IMU, pressures, IMU2/3, vibration,
+   AHRS…) blows past that, and with no poll throttle we would just flood a too-slow link.
+2. **Parity.** The app already exposes two telemetry knobs for MSP — **Attitude rate** (default 5 Hz,
+   1/2/3/5) and **GPS Position rate** (default 2 Hz) — with everything else at 1 Hz. We want the MAVLink
+   user experience to be **identical**, so the same two settings govern both protocols.
+
+A GCS can override the push rates per message via `MAV_CMD_SET_MESSAGE_INTERVAL` (511; interval in µs,
+`-1` disables a message, `0` resets it to the SRn default). Crucially this is applied **per channel**:
+ArduPilot scopes the request to the link it arrived on, so the GCS never needs to know which physical
+FC port (Telem1/Telem2/USB) its RC/telemetry hardware is wired to — the FC routes it.
+
+**Decision**: On MAVLink connect, **after the handshake** (before the handler thread starts, while we
+still own the byte transport), send a one-shot batch of `SET_MESSAGE_INTERVAL` commands:
+
+- **Wanted messages** at MSP-equivalent rates, driven by the **same** `attitudeRateHz` /
+  `positionRateHz` settings:
+  - `ATTITUDE` (30) = attitude rate
+  - `GPS_RAW_INT` (24), `GLOBAL_POSITION_INT` (33), `VFR_HUD` (74) = position rate
+  - `SYS_STATUS` (1), `BATTERY_STATUS` (147), `NAV_CONTROLLER_OUTPUT` (62), `MISSION_CURRENT` (42) = 1 Hz
+  - `HOME_POSITION` (242) low; `STATUSTEXT` (253) event-driven (left alone). `HEARTBEAT` is FC-fixed.
+- **Ballast disabled** (`interval = -1`): RAW_IMU, SCALED_IMU2/3, SCALED_PRESSURE*, VIBRATION,
+  AHRS/AHRS2, EKF_STATUS_REPORT, SERVO_OUTPUT_RAW, RC_CHANNELS, POWER_STATUS, MEMINFO, SYSTEM_TIME …
+  (a fixed list of high-rate messages no widget consumes).
+
+At the default knobs this yields ≈ 650 B/s; dialling Attitude→2 / Position→1 drops it to ≈ 450 B/s,
+fitting the tightest practical link. The same knobs thus double as the bandwidth control — no separate
+"profile" system.
+
+**Full MAVLink Telemetry** (`mavlinkFullTelemetry`, setting, default **off**): when **on**, the
+Attitude/GPS rate settings are ignored and ArduPilot streams purely per the operator's on-FC `SRn_*`
+config — for high-bandwidth links (e.g. Siyi) where an operator wants **every** message the UAV emits
+captured in the `.tlog`. What is streamed and at what rate then lies entirely with the FC parameters,
+not with Kite.
+
+Crucially this is **not** "send nothing": `SET_MESSAGE_INTERVAL` is **sticky** on the FC channel until
+the FC reboots, so a link previously narrowed by a reduced-mode session would otherwise stay narrow.
+Full mode therefore sends a `SET_MESSAGE_INTERVAL` with **`interval = 0`** ("reset to the SRn default")
+for **every** message we manage (the wanted set *and* the ballast list), undoing any prior reduction so
+the operator's full stream returns. Both modes thus share one managed-message list (single source of
+truth) — reduced applies rates/`-1`, full resets all to `0`.
+
+We do **not** touch the FC's `SRn_*` parameters (persistent on the aircraft — overwriting them would be
+overreaching); everything is runtime, scoped to our channel. Like the MSP rate knobs, the config is
+applied **once on connect** — there is **no mid-session re-apply**. Changing a rate or the Full toggle
+takes effect on the next connect; an operator who reconnects mid-flight is covered by recording recovery
+(ADR-042), losing only a few seconds of log.
+
+**Consequences**: identical two-knob UX across MSP and MAVLink, a stream that fits real RC links by
+default, and an explicit escape hatch for "record everything" use-cases. Costs: a fixed ballast-disable
+list to maintain as we add/remove consumed messages; rates that are fire-and-forget on connect (we do
+not read `COMMAND_ACK`, acceptable for stream setup); and the connect-time-only semantics (no live
+re-tuning), consistent with the existing MSP rate behaviour.
 
 ---
 

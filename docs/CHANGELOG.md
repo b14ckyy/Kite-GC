@@ -18,6 +18,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the feature count.
 
 ### Added
+- **MAVLink telemetry stream rates — GCS-requested, with MSP parity (ADR-043).** ArduPilot is
+  push-based: it streams per its `SRn_*` params as soon as it sees a GCS heartbeat, which floods slow
+  RC links (ELRS/CRSF/mLRS) with messages no widget uses. Kite now requests an explicit rate set on
+  connect via `SET_MESSAGE_INTERVAL`, driven by the **same two knobs as MSP** — Attitude rate +
+  GPS Position rate — with everything else at 1 Hz and the high-rate "ballast" (RAW_IMU, pressures,
+  IMU2/3, vibration, AHRS, …) disabled. Cuts the default ~2 KB/s firehose to ~500–650 B/s so it fits a
+  real radio link, and the two knobs double as the bandwidth control. A new **Full MAVLink Telemetry**
+  setting (default off) leaves streaming entirely to the FC's params (resetting any prior reduction to
+  default) — for high-bandwidth links + capturing everything in the `.tlog`.
+- **MAVLink Debug Monitor tab.** The in-app Debug Monitor gains a **MAVLink** tab alongside MSP/Alerts:
+  every message ID seen in the session with its direction (RX/TX), count, measured rate and
+  "last seen" age, plus aggregate MSG/s + throughput — the push-side counterpart to the MSP poll view.
+- **MAVLink home from the FC (`HOME_POSITION`).** The map now shows the aircraft's stored home from
+  `HOME_POSITION` (the authoritative locked green "H"), consistent across reconnects, instead of only
+  guessing from the GPS fix at arm.
+- **Full connection path is remembered.** Transport, host, TCP/UDP port and BLE device are now
+  persisted alongside port/baud/protocol and restored on the next launch — no re-entering the whole
+  connection each time.
 - **Custom window titlebar — reclaims the native title-bar height (Linux especially).** The app now
   runs borderless (`decorations: false`) with its own titlebar: the window controls (minimize /
   maximize-restore / close) are folded into the existing toolbar, the toolbar doubles as the drag
@@ -179,6 +197,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Log player shows the time-of-day** (flight start + elapsed) at the current playback position.
 
 ### Fixed
+- **ArduPilot flight mode now shows correctly.** Two MAVLink-side bugs made the mode widget show an
+  INAV mode (e.g. "HORIZON"/"ACRO") for an ArduPilot vehicle: the connection reported a generic
+  `fc_variant` of `"ArduPilot"` (so the frontend fell back to the Copter mode table even for a plane),
+  and the handler squeezed the raw `custom_mode` into INAV box-flag bits instead of passing it through.
+  Now the variant is vehicle-specific (`ArduPlane`/`ArduCopter`/`ArduRover`/`ArduSub`) and the raw mode
+  number is forwarded, so the per-vehicle mode table resolves the real mode (Manual/FBW-A/Auto/RTL/…).
+  Applies live and in replay of MAVLink-recorded flights.
+- **Toolbar port field no longer has the number spinner.** The TCP/UDP port input dropped the native
+  up/down arrows (clutter in the toolbar) — it is now a plain numeric field.
 - **PFD bank scale now reads as two distinct marks.** The fixed zero-bank reference and the live roll
   pointer pointed the same way (both ▲), so the attitude display read as two identical pointers. The
   fixed **roll index** now points **down** at the live **roll pointer** (sky-pointer convention — they
