@@ -1,9 +1,10 @@
 # Live Recording — Temp Session Store + Capture Completeness
 
-> Status: **In progress** (2026-06-13). Temp store + capture completeness shipped; deferred commit +
-> End-Flight dialog gate + 5 s re-arm grace this round; recovery prompt on start/reconnect is the next
-> phase. Schema-neutral (columns exist at `v11`); adds a per-session temp SQLite file.
-> Related: [DATA_PIPELINE.md](DATA_PIPELINE.md), [FLIGHTLOG_DATABASE.md](FLIGHTLOG_DATABASE.md), ADR-040, ADR-041.
+> Status: **Implemented** (2026-06-13). Temp store + capture completeness (ADR-040), deferred commit +
+> End-Flight dialog gate + 5 s re-arm grace (ADR-041), and crash/disconnect recovery (orphan scan +
+> 3-option prompt + continue-on-reconnect, ADR-042). Schema-neutral (columns exist at `v11`); adds a
+> per-session temp SQLite file. Remaining: save-trigger tuning.
+> Related: [DATA_PIPELINE.md](DATA_PIPELINE.md), [FLIGHTLOG_DATABASE.md](FLIGHTLOG_DATABASE.md), ADR-040, ADR-041, ADR-042.
 
 ## Why
 
@@ -107,10 +108,9 @@ both commit the same session).
    committed event), even if FC-sync was lost meanwhile.
 3. **Weather / geocode enrichment.** Runs at **commit** against the new id (same `enrich_flight_async`).
 4. **DB-disabled / raw-only mode.** No temp store / no pending; the raw-log backup path is unchanged.
-5. **Disconnect with an active (armed) flight** (interim): `shutdown()` finalizes the active flight as
-   a **pending session** + emits `flight-recording-ended` (the dialog appears), instead of committing
-   outright. A reconnect+arm within grace then continues the same `.ktmp`. The richer
-   recovery-on-reconnect prompt is the next phase.
+5. **Disconnect with an active (armed) flight** (ADR-042): handled in two ways depending on origin —
+   see *Disconnect triggers* below. A manual button disconnect **confirms first**
+   (`DisconnectArmedDialog`); a device-gone drop shows the recovery prompt after the fact.
 
 ### Capture completeness (folded in)
 
@@ -133,17 +133,55 @@ is the commit gate when DB recording is on:
 - A **re-arm** while it is open force-closes it (the flight is continued within grace, or already
   auto-committed beyond grace — the backend decides).
 
-## Out of scope (deferred — next phase)
+### Recovery of an orphan session (ADR-042)
 
-- **Recovery prompt on start / reconnect.** Startup scan of `sessions/*.ktmp`; for an orphan (app
-  was killed) show the 3-option prompt (Discard / Save Incomplete / Continue on Reconnect). The
-  temp store is already self-describing for this; the prompt + the explicit "continue on reconnect"
-  wait-state are the next phase. (The 5 s grace-continue across a normal disarm→re-arm is **done**
-  here; the cross-disconnect reconnect prompt is not.)
-- **Single-temp invariant enforcement.** There must never be more than one `.ktmp`; the deferred
-  flow already removes it on commit/discard, but the startup scan that guarantees a clean slate is
-  part of the recovery phase.
-- **Save trigger tuning.** Batch size, fsync cadence, and whether to also flush on a timer.
+A crash/close (or a disconnect that left the recorder with no commit) leaves an orphan `.ktmp`. On
+startup `flightlog_scan_orphan_sessions` scans `<db_dir>/sessions/*.ktmp`, deletes empty ones, and
+returns the newest non-empty one as an `OrphanInfo` (craft, start time, duration, sample count). The
+frontend then shows a **modal 3-option prompt** ([`RecoveryPrompt.svelte`](../../src/lib/components/logbook/RecoveryPrompt.svelte)):
+
+- **Discard** (with confirm) → `flightlog_recover_discard` deletes the temp file.
+- **Save Incomplete** → `flightlog_recover_save_incomplete` reconstructs the flight from the temp DB
+  (`summarize_temp_session`: session_meta + a single pass over the telemetry to recompute stats,
+  `end_time` = last sample) and commits it.
+- **Continue on Reconnect** → `flightlog_recover_continue` loads the reconstructed session into the
+  shared `resume_pending` slot and the UI shows a waiting banner. The **next connection's** recorder
+  consults it on its **first polled status** (past handshake residual flags): **armed → resume the
+  same `.ktmp`** (timestamps continue); **disarmed → finalize into the pending session + End-Flight
+  dialog**. Because the resume sits at the `TelemetryRecord` level, the reconnect may use a
+  **different protocol** (e.g. start MSP, continue via MAVLink) — missing fields just stay `NULL`.
+
+The same prompt is reused for a **disconnect while armed** (the `flight-recording-interrupted` event
+above): there the session is already in `pending_session`, so Discard/Save use the pending commands
+and Continue moves it to `resume_pending` (`flightlog_continue_pending_session`).
+
+The single-temp invariant holds: the deferred flow removes the `.ktmp` on commit/discard, and the
+startup scan clears empty stragglers; a non-empty straggler (should not occur) is simply offered on
+the next launch.
+
+### Disconnect triggers — coverage
+
+- **Button disconnect while armed + recording** → a **confirm-first** dialog
+  ([`DisconnectArmedDialog.svelte`](../../src/lib/components/logbook/DisconnectArmedDialog.svelte)):
+  **Stay Connected** / **Discard** / **Save Incomplete** / **Continue on Reconnect**. We do **not**
+  disconnect until the user chooses; then `disconnectFC` tears down (recorder `shutdown()` stashes the
+  flight as the pending session, **no event**) and the frontend applies the choice
+  (`flightlog_commit/discard/continue_pending_session`). ✓
+- **USB unplug / BLE hard drop** → the MSP transport flags `is_connection_lost` on a **fatal** error
+  (a failed write, or a `Disconnected`/IO read error — *not* a timeout); the scheduler then tears down,
+  calls `shutdown_lost` (→ `flight-recording-interrupted` → the recovery prompt) and emits
+  `connection-lost` (→ the frontend cleans up the connection so the UI shows disconnected and a
+  reconnect works without a manual disconnect first). ✓
+- **Telemetry/OTA stall** (link down, device still attached) → the scheduler keeps polling with
+  per-message timeouts; a timeout is **not** fatal, so **no teardown, no event** — only time gaps in
+  the log. ✓
+
+## Out of scope (deferred)
+
+- **MAVLink auto-drop** → the MAVLink handler tears down silently (stashes pending, no prompt); the
+  orphan is offered on the next launch. (MSP serial is the focus here.)
+- **Save trigger tuning.** Batch size, fsync cadence, and whether to also flush on a timer
+  (currently a 50-sample batch — a hard crash can lose up to the last unflushed batch).
 - **Raw recording** (`raw_logger` / tlog) — unchanged here; it stays the parallel write-only backup.
 
 ## Fields explicitly left `NULL` for live MSP (correct, not a gap)
@@ -160,10 +198,14 @@ is the commit gate when DB recording is on:
 
 | File | Change |
 |---|---|
-| `src-tauri/src/state.rs` | `PendingSession` + shared `Arc<Mutex<Option<PendingSession>>>` |
-| `src-tauri/src/flightlog/recorder.rs` | Deferred-commit lifecycle: on_disarm → pending + ended-stats; on_arm grace (continue / commit+new); shutdown → pending; snapshot + record-builder completeness; altitude (`alt_m` = GPS MSL) |
-| `src-tauri/src/flightlog/db.rs` | Temp-DB open/DDL + session_meta; attach-and-copy `commit_session_to_main` (id rewrite); `remove_temp_session` |
-| `src-tauri/src/commands/flightlog.rs` | `flightlog_commit_pending_session` / `flightlog_discard_pending_session` commands |
-| `src-tauri/src/scheduler/telemetry.rs` | `feed_recorder()` NAV_STATUS / GPSSTATISTICS / SENSOR_STATUS branches; GpsStatsData eph/epv |
+| `src-tauri/src/state.rs` | Shared `pending_session` + `resume_pending` slots (`PendingSessionHandle`) |
+| `src-tauri/src/flightlog/recorder.rs` | Deferred-commit lifecycle (on_disarm → pending+ended-stats; on_arm grace continue/commit+new); `take_active_as_pending`; `shutdown` (silent) + `shutdown_lost` (interrupted); `on_status` continue-on-reconnect first-poll; `summarize_temp_session`; `commit/discard_pending_session`; capture completeness; altitude (`alt_m` = GPS MSL) |
+| `src-tauri/src/flightlog/db.rs` | Temp-DB open/DDL + `session_meta`; `read_session_meta`; `temp_session_row_count`; attach-and-copy `commit_session_to_main`; `remove_temp_session` |
+| `src-tauri/src/commands/flightlog.rs` | `flightlog_commit/discard/continue_pending_session`; orphan scan + `recover_discard/save_incomplete/continue` |
+| `src-tauri/src/scheduler/{mod,telemetry}.rs` | `feed_recorder()` NAV_STATUS/GPSSTATISTICS/SENSOR_STATUS; GpsStatsData eph/epv; connection-lost teardown (`shutdown_lost` + `connection-lost` event) |
+| `src-tauri/src/transport/mod.rs`, `src-tauri/src/msp/transport.rs` | `Transport::is_connection_lost` + MspTransport fatal-error flag (write-fail/Disconnected/IO, not timeout) |
 | `src/lib/components/logbook/EndFlightDialog.svelte` | Modal; Discard + confirm; Skip removed |
-| `src/routes/+page.svelte` | ended-stats → dialog; Save/Discard → commit/discard commands; committed/resumed listeners; FC-mission snapshot at disarm |
+| `src/lib/components/logbook/RecoveryPrompt.svelte` | Startup-orphan + device-lost recovery prompt (reason-based text; 3 options) |
+| `src/lib/components/logbook/DisconnectArmedDialog.svelte` | Confirm-before-disconnect while armed (Stay Connected / Discard / Save / Continue) |
+| `src/routes/+page.svelte` | ended-stats → dialog; Save/Discard/Continue → pending commands; committed/resumed listeners; startup orphan scan; `flight-recording-interrupted` + `connection-lost` listeners; disconnect-armed confirm; FC-mission snapshot |
+| `src/lib/stores/flightlog.ts` | Pending + recovery invoke wrappers |

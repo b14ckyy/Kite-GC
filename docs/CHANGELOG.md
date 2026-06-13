@@ -22,8 +22,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of splitting into two flights. The End-Flight summary is now **modal** (a click next to it or
   Escape no longer closes it — it can't be dismissed by accident), gains a **Discard Recording** button
   (with confirmation) and drops the confusing **Skip**. The FC-synced flown mission is captured at
-  disarm and linked when the flight is committed. _Recovery prompt on start/reconnect for an orphaned
-  session, and save-trigger tuning, are a follow-up phase._
+  disarm and linked when the flight is committed.
+- **Live-recording recovery — orphan scan + continue-on-reconnect (ADR-042).** If the app crashed or
+  was closed mid-flight, an unfinished recording is now detected on the next start and a prompt offers
+  **Discard**, **Save Incomplete** (reconstruct + save the flight up to the last sample), or
+  **Continue on Reconnect**. The latter waits for the next connection and — on the first polled status
+  — **resumes the same log if the aircraft is still armed** (so a mid-air disconnect stitches back into
+  one continuous flight, even if you reconnect over a **different protocol**), or finalizes it into the
+  End-Flight dialog if disarmed. Clicking **Disconnect while the UAV is armed** now **asks first**
+  (Stay Connected / Discard / Save Incomplete / Continue on Reconnect) instead of disconnecting
+  immediately — handy when you only mean to change the COM port or switch to a telemetry link. A
+  **USB unplug / BLE drop** is now detected (a fatal transport error, distinct from a response
+  timeout) and shows the recovery prompt + cleans up the connection, so a reconnect works without
+  having to manually disconnect first; a telemetry/OTA stall still just keeps polling (only time gaps
+  in the log). _Save-trigger tuning (flush cadence) is a follow-up._
 - **Home / Launch reference unified + recovered from the FC (ADR-039).** The orange draggable **"L"
   launch** point and the green **"H" home** marker are now one source-tagged reference per map
   (`homePosition.source` = `fc` | `manual` | `replay`): a connected FC home shows a **locked green "H"**

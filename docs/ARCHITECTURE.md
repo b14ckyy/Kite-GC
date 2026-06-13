@@ -1903,5 +1903,66 @@ startup sweep** remain the next phase.
 
 ---
 
+## ADR-042: Live-Recording Recovery — Orphan Scan + Continue-on-Reconnect
+
+**Date**: 2026-06-13
+**Status**: Accepted
+**Related**: ADR-041 (deferred commit + pending session), ADR-040 (temp store), ADR-039 (arm-edge),
+[LIVE_RECORDING_TEMP_STORE.md](active/LIVE_RECORDING_TEMP_STORE.md)
+
+**Context**: With deferred commit (ADR-041) a flight lives in a temp `.ktmp` until committed. A hard
+crash/close — or a disconnect that left the recorder with no chance to commit — leaves an **orphan**
+`.ktmp`. The recording must be recoverable, the operator must be able to **continue** a flight that is
+still airborne after a reconnect, and there must **never be more than one** temp file lingering.
+
+**Decision**: on startup, `flightlog_scan_orphan_sessions` scans `<db_dir>/sessions/*.ktmp`, deletes
+empty ones, and returns the newest non-empty one. The frontend shows a **modal 3-option prompt**:
+
+- **Discard** (confirm) → delete the temp file.
+- **Save Incomplete** → `summarize_temp_session` reconstructs the flight from the temp DB
+  (`session_meta` + one pass over the telemetry to recompute stats; `end_time` = last sample) and
+  commits it via the same `commit_pending_session` path.
+- **Continue on Reconnect** → load the reconstructed session into a shared `resume_pending` slot in
+  app-state. The next connection's recorder consults it on its **first polled status** (the
+  trustworthy point, past any handshake residual flags): **armed → resume the same `.ktmp`** (reopen,
+  timestamps continue from `max(timestamp_ms)`); **disarmed → finalize into the `pending_session` +
+  End-Flight dialog**. Because resume sits at the protocol-agnostic `TelemetryRecord` level, the
+  reconnect may use a **different protocol** than the original (e.g. start MSP, continue via MAVLink);
+  fields the new link does not provide simply stay `NULL`.
+
+A continue-on-reconnect leaves the `.ktmp` on disk while the in-memory `resume_pending` waits, so if
+the app is closed again before reconnecting it is re-offered on the next launch (no data loss). The
+single-temp invariant holds: commit/discard remove the file and the startup scan clears empty
+stragglers.
+
+**Disconnect while armed** is handled by origin:
+
+- **Manual (button):** the frontend **confirms first** (`DisconnectArmedDialog`: Stay Connected /
+  Discard / Save Incomplete / Continue on Reconnect) — we do not disconnect until the user chooses,
+  since the flight may not be over (COM-port change, switch to a telemetry link). On confirm,
+  `disconnectFC` tears down — the recorder's `shutdown()` stashes the flight as the pending session
+  **silently** (no event) — and the frontend applies the choice via the
+  `flightlog_commit/discard/continue_pending_session` commands.
+- **Device gone (USB unplug / BLE drop):** the MSP transport sets `is_connection_lost` on a **fatal**
+  error — a failed write, or a `Disconnected`/IO read error, as opposed to a response **timeout**. The
+  scheduler tears down, calls the recorder's `shutdown_lost()` (→ `flight-recording-interrupted` → the
+  recovery prompt, since no pre-confirm was possible) and emits `connection-lost` so the frontend
+  cleans up the connection (the UI shows disconnected and a reconnect works without a manual
+  disconnect first — previously a dead serial handle kept the scheduler polling forever).
+- **Telemetry/OTA stall** (link down, device still attached): a timeout is **not** fatal, so the
+  scheduler keeps polling and the log just gains time gaps — no teardown, no prompt.
+
+MAVLink auto-drop tears down silently (the orphan is offered on the next launch); MSP serial is the
+focus here.
+
+**Consequences**: a crash no longer loses the flight and an accidental disconnect mid-air can be
+stitched back into one log across a reconnect — even across protocols. Cost: a second shared slot
+(`resume_pending`) and a first-status gate in the recorder; the orphan scan trusts the **newest**
+non-empty file and defers a (anomalous) non-empty straggler to a later launch rather than auto-deleting
+it. Save-trigger tuning (batch size / fsync cadence — a hard crash can still lose the last unflushed
+batch) remains open.
+
+---
+
 *End of Architecture Decision Records*
 
