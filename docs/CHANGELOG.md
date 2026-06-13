@@ -18,6 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the feature count.
 
 ### Added
+- **Custom window titlebar — reclaims the native title-bar height (Linux especially).** The app now
+  runs borderless (`decorations: false`) with its own titlebar: the window controls (minimize /
+  maximize-restore / close) are folded into the existing toolbar, the toolbar doubles as the drag
+  region (double-click maximizes), and thin edge/corner grips re-add window resizing (the GTK resize
+  border is lost when decorations are off). On Linux/GNOME the tall native header bar is gone, so the
+  toolbar *is* the titlebar — one bar instead of two. The window-state plugin is configured to persist
+  everything **except** the decorations flag, so a previously-saved state can no longer restore the
+  native bar over the config.
 - **Live recording — crash-safe temp session store + complete capture (ADR-040).** A live flight is
   now recorded into a **separate per-session SQLite file** (`sessions/active_<ts>.ktmp`) instead of
   straight into the production database, so an app crash leaves a recoverable session file rather than
