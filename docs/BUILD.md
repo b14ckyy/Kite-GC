@@ -157,17 +157,6 @@ We also have a CI workflow that executes these checks on every push and pull req
 This is extremely common on Windows.
 **Solution**: Fully close VSCode and reopen it (or reload the window with `Ctrl+Shift+P` → "Developer: Reload Window").
 
-### OneDrive path issues (Windows)
-Cargo builds can fail or become very slow when the project lives inside OneDrive (because of spaces and sync locks).
-
-Work around it by pointing Cargo at a target dir **outside** OneDrive via the `CARGO_TARGET_DIR`
-environment variable (do **not** hardcode an absolute path in `src-tauri/.cargo/config.toml` — that
-would break Linux/CI builds):
-
-```powershell
-$env:CARGO_TARGET_DIR = "D:\cargo-target\kite-gc"
-```
-
 ### Missing MSVC linker on Windows
 If you get linker errors during `cargo check` or build, you are missing the C++ build tools.
 
