@@ -17,15 +17,17 @@ use super::tlog_logger::TlogLogger;
 use super::types::{Flight, FlightLogSettings, TelemetryRecord};
 use crate::msp::FcInfo;
 use crate::scheduler::telemetry::{
-    AirspeedData, AltitudeData, AnalogData, AttitudeData, GpsData, StatusData,
+    AirspeedData, AltitudeData, AnalogData, AttitudeData, GpsData, GpsStatsData, NavStatusData,
+    SensorStatusData, StatusData,
 };
 
 /// Bit 2 in arming_flags indicates ARMED state
 const ARMED_FLAG: u32 = 0x04; // bit 2
 
-/// Payload for the `flight-recording-started` / `flight-recording-ended` events. The frontend
-/// uses `flight_id` to save + link the flown mission to this DB flight (see
-/// docs/archive/MISSION_LIBRARY_AND_DB.md).
+/// Payload for the `flight-recording-ended` event. The frontend uses `flight_id` to save + link
+/// the flown mission to this DB flight (see docs/archive/MISSION_LIBRARY_AND_DB.md). The flight id
+/// only exists at disarm now (commit-on-disarm, ADR-040), so `flight-recording-started` is an
+/// id-less signal and carries no payload.
 #[derive(serde::Serialize, Clone)]
 struct FlightRecordingEvent {
     flight_id: i64,
@@ -112,15 +114,30 @@ struct TelemetrySnapshot {
     arming_flags: Option<u32>,
     cpu_load: Option<u16>,
     active_flight_mode_flags: Option<u32>,
+    // Navigation (MSP_NAV_STATUS) — mission context for replay
+    active_wp_number: Option<i32>,
+    nav_state: Option<i32>,
+    // GPS quality (MSP_GPSSTATISTICS)
+    gps_hdop: Option<f64>,
+    gps_eph: Option<f64>,
+    gps_epv: Option<f64>,
+    // Packed per-sensor hardware health (MSP_SENSOR_STATUS), 2 bits/sensor
+    hw_health_status: Option<i64>,
 }
 
 /// Active flight session
 struct ActiveFlight {
-    flight_id: i64,
+    /// Per-session temp SQLite store (the durable in-flight buffer). `None` in raw-only mode
+    /// (`db_enabled == false`), where the only sink is the raw text/tlog logger.
+    temp_db: Option<Connection>,
+    /// Path of the temp `.ktmp` file (kept so it can be committed + removed on disarm).
+    temp_path: Option<std::path::PathBuf>,
+    /// Wall-clock flight start (the finalized `flights.start_time` written at commit).
+    start_time: chrono::DateTime<Utc>,
     start_instant: Instant,
     start_lat: Option<f64>,
     start_lon: Option<f64>,
-    /// Accumulated telemetry records pending flush
+    /// Accumulated telemetry records pending flush to the temp store
     buffer: Vec<TelemetryRecord>,
     // Statistics tracking
     max_alt: f64,
@@ -264,6 +281,34 @@ impl FlightRecorder {
         self.snapshot.airspeed = Some(data.airspeed);
     }
 
+    /// Feed navigation status (MSP_NAV_STATUS) — the FC's current target waypoint + nav state.
+    /// Recorded so a live-flown mission shows active-WP tracking on replay (matching the live map).
+    pub fn on_nav_status(&mut self, data: &NavStatusData) {
+        self.snapshot.active_wp_number = Some(data.active_wp_number as i32);
+        self.snapshot.nav_state = Some(data.nav_state as i32);
+    }
+
+    /// Feed GPS quality stats (MSP_GPSSTATISTICS) — HDOP/EPH/EPV carried in one message.
+    pub fn on_gps_stats(&mut self, data: &GpsStatsData) {
+        self.snapshot.gps_hdop = Some(data.hdop);
+        self.snapshot.gps_eph = data.eph;
+        self.snapshot.gps_epv = data.epv;
+    }
+
+    /// Feed per-sensor hardware health (MSP_SENSOR_STATUS), packed 2 bits/sensor into
+    /// `hw_health_status` in the order documented in FLIGHTLOG_DATABASE.md (gyro, acc, mag, baro,
+    /// gps, rangefinder, pitot). Values 0=NONE,1=OK,2=UNAVAILABLE,3=UNHEALTHY.
+    pub fn on_sensor_status(&mut self, data: &SensorStatusData) {
+        let packed = (data.gyro as i64 & 0x3)
+            | ((data.acc as i64 & 0x3) << 2)
+            | ((data.mag as i64 & 0x3) << 4)
+            | ((data.baro as i64 & 0x3) << 6)
+            | ((data.gps as i64 & 0x3) << 8)
+            | ((data.rangefinder as i64 & 0x3) << 10)
+            | ((data.pitot as i64 & 0x3) << 12);
+        self.snapshot.hw_health_status = Some(packed);
+    }
+
     /// Write a raw MAVLink frame to the tlog file (if active)
     pub fn write_raw_mavlink_frame(&mut self, raw_frame: &[u8]) {
         if let Some(ref mut logger) = self.tlog_logger {
@@ -288,68 +333,66 @@ impl FlightRecorder {
         self.was_armed = is_armed;
     }
 
-    /// Called when arm transition is detected
+    /// Called when arm transition is detected.
+    ///
+    /// Commit-on-disarm (ADR-040): nothing is written to the main DB here. When DB recording is on,
+    /// a per-session temp `.ktmp` is opened — it is the durable in-flight buffer and is committed
+    /// into the main DB atomically on disarm. The real `flight_id` therefore exists only at disarm,
+    /// so `flight-recording-started` is an id-less signal.
     fn on_arm(&mut self) {
         log::info!("ARM detected — starting flight recording");
 
         let now = Utc::now();
 
-        // Determine flight_id: from DB if db_enabled, otherwise use timestamp
-        let flight_id = if self.settings.db_enabled {
-            let flight = Flight {
-                id: 0,
-                start_time: now,
-                end_time: None,
-                duration_sec: None,
-                source: "live".into(),
-                craft_name: self.fc_info.craft_name.clone(),
-                fc_variant: self.fc_info.fc_variant.clone(),
-                fc_version: self.fc_info.fc_version.clone(),
-                board_id: self.fc_info.board_id.clone(),
-                platform_type: self.fc_info.platform_type,
-                protocol: self.protocol.clone(),
-                start_lat: self.snapshot.lat,
-                start_lon: self.snapshot.lon,
-                location_name: None,
-                weather_temp_c: None,
-                weather_wind_ms: None,
-                weather_wind_deg: None,
-                weather_desc: None,
-                max_alt_m: None,
-                max_speed_ms: None,
-                max_distance_m: None,
-                total_distance_m: None,
-                battery_used_mah: None,
-                notes: None,
-                linked_flight_id: None,
-                pilot_name: None,
-                pilot_id: None,
-                battery_serial: None,
-            };
-
-            match db::insert_flight(&self.db, &flight) {
-                Ok(id) => id,
+        // Open the per-session temp store (DB recording only).
+        let (temp_db, temp_path) = if self.settings.db_enabled {
+            let sessions_dir = self
+                .db_file_path
+                .parent()
+                .unwrap_or(std::path::Path::new("."))
+                .join("sessions");
+            let path = sessions_dir.join(format!("active_{}.ktmp", now.format("%Y-%m-%d_%H%M%S")));
+            match db::open_temp_session(&path) {
+                Ok(conn) => {
+                    if let Err(e) = db::write_session_meta(
+                        &conn,
+                        &now,
+                        &self.fc_info.craft_name,
+                        &self.fc_info.fc_variant,
+                        &self.fc_info.fc_version,
+                        &self.fc_info.board_id,
+                        self.fc_info.platform_type,
+                        &self.protocol,
+                        self.snapshot.lat,
+                        self.snapshot.lon,
+                    ) {
+                        log::warn!("Failed to write session_meta: {}", e);
+                    }
+                    log::info!("Temp session store: {}", path.display());
+                    (Some(conn), Some(path))
+                }
                 Err(e) => {
-                    log::error!("Failed to insert flight record: {}", e);
-                    return;
+                    log::error!("Failed to open temp session store: {} — this flight won't be recorded to the DB", e);
+                    (None, None)
                 }
             }
         } else {
-            // Raw-only mode: use timestamp as pseudo flight_id
-            now.timestamp()
+            (None, None)
         };
 
-        // Start raw/tlog logger if enabled AND not already running (continuous mode)
+        // Start raw/tlog logger if enabled AND not already running (continuous mode). The raw log is
+        // a parallel backup; it has no DB flight id, so it is named by a timestamp pseudo-id.
         let log_dir = self
             .db_file_path
             .parent()
             .unwrap_or(std::path::Path::new("."));
+        let raw_pseudo_id = now.timestamp();
 
         if !self.settings.raw_always {
             // Non-continuous: create per-flight raw/tlog logger
             let (raw_logger, tlog_logger) = if self.settings.raw_enabled {
                 if self.protocol == "MAVLink" {
-                    match TlogLogger::new(log_dir, flight_id, &now) {
+                    match TlogLogger::new(log_dir, raw_pseudo_id, &now) {
                         Ok(logger) => (None, Some(logger)),
                         Err(e) => {
                             log::warn!("Failed to create tlog logger: {}", e);
@@ -357,7 +400,7 @@ impl FlightRecorder {
                         }
                     }
                 } else {
-                    match RawLogger::new(log_dir, flight_id, &now) {
+                    match RawLogger::new(log_dir, raw_pseudo_id, &now) {
                         Ok(logger) => (Some(logger), None),
                         Err(e) => {
                             log::warn!("Failed to create raw logger: {}", e);
@@ -373,18 +416,12 @@ impl FlightRecorder {
         }
         // else: continuous mode — loggers already running from start_continuous_log()
 
-        // Spawn async weather + geocode enrichment (non-blocking, DB-only)
-        if self.settings.db_enabled {
-            if let (Some(lat), Some(lon)) = (self.snapshot.lat, self.snapshot.lon) {
-                if is_valid_gps_coord(lat, lon) {
-                    let db_path = self.db_file_path.to_string_lossy().to_string();
-                    tauri::async_runtime::spawn(enrich_flight_async(flight_id, lat, lon, db_path));
-                }
-            }
-        }
+        // Enrichment (weather + geocode) is deferred to disarm — it needs the committed flight id.
 
         self.active_flight = Some(ActiveFlight {
-            flight_id,
+            temp_db,
+            temp_path,
+            start_time: now,
             start_instant: Instant::now(),
             start_lat: self.snapshot.lat,
             start_lon: self.snapshot.lon,
@@ -398,60 +435,112 @@ impl FlightRecorder {
             start_mah: self.snapshot.mah_drawn,
         });
 
-        log::info!("Flight {} started (db={})", flight_id, self.settings.db_enabled);
+        log::info!("Flight recording started (db={})", self.settings.db_enabled);
 
-        // Notify the frontend so it can save + link the flown mission (DB flights only — a
-        // raw-only pseudo flight_id has no DB row to link).
+        // Id-less signal that recording is active (the frontend resets its flown-mission baseline;
+        // the actual mission link happens on `flight-recording-ended` once the id exists).
         if self.settings.db_enabled {
-            if let Err(e) = self
-                .app_handle
-                .emit("flight-recording-started", FlightRecordingEvent { flight_id })
-            {
+            if let Err(e) = self.app_handle.emit("flight-recording-started", ()) {
                 log::warn!("Failed to emit flight-recording-started: {}", e);
             }
         }
     }
 
-    /// Called when disarm transition is detected
+    /// Called when disarm transition is detected. Flushes the tail of the buffer to the temp store,
+    /// closes it (WAL checkpoint), then commits it into the main DB atomically as one finalized
+    /// flight (commit-on-disarm, ADR-040) and removes the temp file. The real `flight_id` is born
+    /// here, so this is where the frontend is told to link the flown mission.
     fn on_disarm(&mut self) {
         log::info!("DISARM detected — stopping flight recording");
 
-        if let Some(flight) = self.active_flight.take() {
-            if self.settings.db_enabled {
-                // Flush remaining buffer to DB
+        if let Some(mut flight) = self.active_flight.take() {
+            let end_time = Utc::now();
+            let duration = flight.start_instant.elapsed().as_secs() as i64;
+            let battery_used = match (flight.start_mah, self.snapshot.mah_drawn) {
+                (Some(start), Some(end)) if end >= start => Some(end - start),
+                _ => None,
+            };
+
+            // Commit the temp session into the main DB (DB recording only).
+            if let (Some(temp_db), Some(temp_path)) = (flight.temp_db.take(), flight.temp_path.clone())
+            {
+                // Flush the remaining buffer into the temp store, then close it so its WAL is
+                // checkpointed before the main connection ATTACHes the file.
                 if !flight.buffer.is_empty() {
-                    if let Err(e) = db::insert_telemetry_batch(&self.db, &flight.buffer) {
-                        log::error!("Failed to flush final telemetry batch: {}", e);
+                    if let Err(e) = db::insert_telemetry_batch(&temp_db, &flight.buffer) {
+                        log::error!("Failed to flush final telemetry batch to temp store: {}", e);
                     }
                 }
+                drop(temp_db);
 
-                let end_time = Utc::now();
-                let duration = flight.start_instant.elapsed().as_secs() as i64;
-
-                // Calculate battery used
-                let battery_used = match (flight.start_mah, self.snapshot.mah_drawn) {
-                    (Some(start), Some(end)) if end >= start => Some(end - start),
-                    _ => None,
+                let flight_row = Flight {
+                    id: 0,
+                    start_time: flight.start_time,
+                    end_time: Some(end_time),
+                    duration_sec: Some(duration),
+                    source: "live".into(),
+                    craft_name: self.fc_info.craft_name.clone(),
+                    fc_variant: self.fc_info.fc_variant.clone(),
+                    fc_version: self.fc_info.fc_version.clone(),
+                    board_id: self.fc_info.board_id.clone(),
+                    platform_type: self.fc_info.platform_type,
+                    protocol: self.protocol.clone(),
+                    start_lat: flight.start_lat,
+                    start_lon: flight.start_lon,
+                    location_name: None,
+                    weather_temp_c: None,
+                    weather_wind_ms: None,
+                    weather_wind_deg: None,
+                    weather_desc: None,
+                    max_alt_m: Some(flight.max_alt),
+                    max_speed_ms: Some(flight.max_speed),
+                    max_distance_m: Some(flight.max_distance),
+                    total_distance_m: Some(flight.total_distance),
+                    battery_used_mah: battery_used,
+                    notes: None,
+                    linked_flight_id: None,
+                    pilot_name: None,
+                    pilot_id: None,
+                    battery_serial: None,
                 };
 
-                if let Err(e) = db::finalize_flight(
-                    &self.db,
-                    flight.flight_id,
-                    end_time,
-                    duration,
-                    Some(flight.max_alt),
-                    Some(flight.max_speed),
-                    Some(flight.max_distance),
-                    Some(flight.total_distance),
-                    battery_used,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                ) {
-                    log::error!("Failed to finalize flight: {}", e);
+                match db::commit_session_to_main(&self.db, &temp_path, &flight_row) {
+                    Ok(flight_id) => {
+                        db::remove_temp_session(&temp_path);
+                        log::info!(
+                            "Flight {} committed: {}s, max_alt={:.1}m, max_speed={:.1}m/s, distance={:.0}m",
+                            flight_id, duration, flight.max_alt, flight.max_speed, flight.total_distance,
+                        );
+
+                        // Deferred enrichment: weather + geocode against the now-committed flight id.
+                        if let (Some(lat), Some(lon)) = (flight.start_lat, flight.start_lon) {
+                            if is_valid_gps_coord(lat, lon) {
+                                let db_path = self.db_file_path.to_string_lossy().to_string();
+                                tauri::async_runtime::spawn(enrich_flight_async(flight_id, lat, lon, db_path));
+                            }
+                        }
+
+                        // The frontend links the flown mission now that the DB flight exists.
+                        if let Err(e) = self.app_handle.emit(
+                            "flight-recording-ended",
+                            FlightRecordingEvent { flight_id },
+                        ) {
+                            log::warn!("Failed to emit flight-recording-ended: {}", e);
+                        }
+                    }
+                    Err(e) => {
+                        log::error!(
+                            "Failed to commit session to main DB: {} — temp file kept for recovery at {}",
+                            e, temp_path.display(),
+                        );
+                    }
                 }
+            } else {
+                // Raw-only mode (no temp store / no DB flight): nothing to commit.
+                log::info!(
+                    "Flight ended (raw-only): {}s, max_alt={:.1}m, max_speed={:.1}m/s, distance={:.0}m",
+                    duration, flight.max_alt, flight.max_speed, flight.total_distance,
+                );
             }
 
             // Close raw/tlog logger only in non-continuous mode
@@ -464,28 +553,6 @@ impl FlightRecorder {
                 }
             }
             // else: continuous mode — loggers stay open until disconnect
-
-            let duration = flight.start_instant.elapsed().as_secs();
-            log::info!(
-                "Flight {} ended: {}s, max_alt={:.1}m, max_speed={:.1}m/s, distance={:.0}m (db={})",
-                flight.flight_id,
-                duration,
-                flight.max_alt,
-                flight.max_speed,
-                flight.total_distance,
-                self.settings.db_enabled,
-            );
-
-            // Notify the frontend: link the flown mission now that the DB flight exists, and
-            // (if a new mission was uploaded in-flight) prompt to update the link.
-            if self.settings.db_enabled {
-                if let Err(e) = self.app_handle.emit(
-                    "flight-recording-ended",
-                    FlightRecordingEvent { flight_id: flight.flight_id },
-                ) {
-                    log::warn!("Failed to emit flight-recording-ended: {}", e);
-                }
-            }
         }
     }
 
@@ -496,14 +563,13 @@ impl FlightRecorder {
         if self.active_flight.is_none() && self.settings.raw_always {
             if let Some(session_instant) = &self.session_instant {
                 let elapsed_ms = session_instant.elapsed().as_millis() as i64;
-                let alt = self.snapshot.alt_baro.or(self.snapshot.alt_gps);
                 let record = TelemetryRecord {
                     id: 0,
                     flight_id: 0, // no DB flight
                     timestamp_ms: elapsed_ms,
                     lat: self.snapshot.lat,
                     lon: self.snapshot.lon,
-                    alt_m: alt,
+                    alt_m: self.snapshot.alt_gps, // GPS MSL (replay map height); baro is relative
                     speed_ms: self.snapshot.speed,
                     heading: self.snapshot.heading,
                     vario_ms: self.snapshot.vario,
@@ -520,11 +586,11 @@ impl FlightRecorder {
                     cpu_load: self.snapshot.cpu_load,
                     link_quality: None,
                     baro_alt_m: self.snapshot.alt_baro,
-                    gps_hdop: None, gps_eph: None, gps_epv: None,
-                    active_wp_number: None,
+                    gps_hdop: self.snapshot.gps_hdop, gps_eph: self.snapshot.gps_eph, gps_epv: self.snapshot.gps_epv,
+                    active_wp_number: self.snapshot.active_wp_number,
                     active_flight_mode_flags: self.snapshot.active_flight_mode_flags.map(|f| f as i64),
-                    state_flags: None, nav_state: None, nav_flags: None,
-                    rx_signal_received: None, hw_health_status: None, baro_temperature: None,
+                    state_flags: None, nav_state: self.snapshot.nav_state, nav_flags: None,
+                    rx_signal_received: None, hw_health_status: self.snapshot.hw_health_status, baro_temperature: None,
                     wind_n_ms: None, wind_e_ms: None, wind_d_ms: None,
                     rc_data_json: None, rc_command_json: None,
                     nav_lat: None, nav_lon: None, nav_alt_m: None,
@@ -544,16 +610,20 @@ impl FlightRecorder {
 
         let elapsed_ms = flight.start_instant.elapsed().as_millis() as i64;
 
-        // Use baro altitude as primary, fall back to GPS
-        let alt = self.snapshot.alt_baro.or(self.snapshot.alt_gps);
+        // Relative altitude (baro, GPS fallback) drives the flight's max-altitude statistic and the
+        // replay widget's relative reading. The stored `alt_m` is GPS MSL (see below).
+        let alt_rel = self.snapshot.alt_baro.or(self.snapshot.alt_gps);
 
         let record = TelemetryRecord {
             id: 0,
-            flight_id: flight.flight_id,
+            flight_id: 0, // temp store local id; rewritten to the main flight id on commit
             timestamp_ms: elapsed_ms,
             lat: self.snapshot.lat,
             lon: self.snapshot.lon,
-            alt_m: alt,
+            // GPS MSL — the replay map/3D height (the adapter maps alt_m → altMsl, matching the live
+            // track + Blackbox import). baro is relative-to-home, so storing it here made replay
+            // AGL = baro − terrain (e.g. −84 m at a ~84 m-MSL field).
+            alt_m: self.snapshot.alt_gps,
             speed_ms: self.snapshot.speed,
             heading: self.snapshot.heading,
             vario_ms: self.snapshot.vario,
@@ -570,16 +640,16 @@ impl FlightRecorder {
             cpu_load: self.snapshot.cpu_load,
             link_quality: None, // MSP does not expose LQ; populated via Blackbox import
             baro_alt_m: self.snapshot.alt_baro,
-            gps_hdop: None,
-            gps_eph: None,
-            gps_epv: None,
-            active_wp_number: None,
+            gps_hdop: self.snapshot.gps_hdop,
+            gps_eph: self.snapshot.gps_eph,
+            gps_epv: self.snapshot.gps_epv,
+            active_wp_number: self.snapshot.active_wp_number,
             active_flight_mode_flags: self.snapshot.active_flight_mode_flags.map(|f| f as i64),
-            state_flags: None,
-            nav_state: None,
-            nav_flags: None,
+            state_flags: None, // INAV stateFlags is Blackbox-only (no live MSP source)
+            nav_state: self.snapshot.nav_state,
+            nav_flags: None, // MSP_NAV_STATUS exposes the target WP + state, not the nav flag bitmask
             rx_signal_received: None,
-            hw_health_status: None,
+            hw_health_status: self.snapshot.hw_health_status,
             baro_temperature: None,
             wind_n_ms: None,
             wind_e_ms: None,
@@ -596,8 +666,8 @@ impl FlightRecorder {
             logger.write_record(&record);
         }
 
-        // Update statistics
-        if let Some(a) = alt {
+        // Update statistics (max altitude is the relative-to-home reading, like the Blackbox stats)
+        if let Some(a) = alt_rel {
             if a > flight.max_alt {
                 flight.max_alt = a;
             }
@@ -625,8 +695,9 @@ impl FlightRecorder {
             flight.last_lon = Some(lon);
         }
 
-        // Only buffer for DB when db is enabled
-        if self.settings.db_enabled {
+        // Buffer + flush into the temp session store (DB recording only). The temp store is the
+        // durable buffer; the main DB is untouched until the commit on disarm.
+        if let Some(ref temp_db) = flight.temp_db {
             flight.buffer.push(record);
 
             // Flush buffer when threshold reached
@@ -635,8 +706,8 @@ impl FlightRecorder {
                     &mut flight.buffer,
                     Vec::with_capacity(FLUSH_THRESHOLD),
                 );
-                if let Err(e) = db::insert_telemetry_batch(&self.db, &records) {
-                    log::error!("Failed to flush telemetry batch: {}", e);
+                if let Err(e) = db::insert_telemetry_batch(temp_db, &records) {
+                    log::error!("Failed to flush telemetry batch to temp store: {}", e);
                 }
             }
         }

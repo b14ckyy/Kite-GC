@@ -1711,19 +1711,11 @@
     void missionDbGeocode(id, $locale ?? 'en', flightLogDbPath).catch(() => {});
   }
 
-  async function onRecordingStarted(flightId: number): Promise<void> {
+  // Commit-on-disarm (ADR-040): the DB flight id only exists at disarm, so there is no arm-time
+  // link any more — onRecordingEnded does the linking once the flight is committed. Here we just
+  // reset the flown-mission baseline so the end-of-flight re-upload check starts clean.
+  function onRecordingStarted(): void {
     flightMissionHash = null;
-    const wps = get(mission).waypoints;
-    // Only link the mission that is actually being flown: it must be in sync with the FC
-    // (FC flag). A stale plan, or an edited-but-not-reuploaded mission, is NOT what the FC
-    // flies, so we don't link it. (This also keeps arm-save INAV-only — ArduPilot uses a
-    // separate mission path without this flag.)
-    if (wps.length === 0 || !get(missionFlags).fc) return;
-    try {
-      await linkMissionToFlight(flightId, wps);
-    } catch (e) {
-      console.warn('[mission-link] arm-save failed', e);
-    }
   }
 
   async function onRecordingEnded(flightId: number): Promise<void> {
@@ -1787,8 +1779,8 @@
   });
 
   if (typeof window !== 'undefined') {
-    void listen<{ flight_id: number }>('flight-recording-started', (event) => {
-      void onRecordingStarted(event.payload.flight_id);
+    void listen('flight-recording-started', () => {
+      onRecordingStarted(); // id-less signal — recording started (commit-on-disarm, ADR-040)
     });
     void listen<{ flight_id: number }>('flight-recording-ended', async (event) => {
       await onRecordingEnded(event.payload.flight_id); // End-Flight dialog (summary + battery/notes/mission)

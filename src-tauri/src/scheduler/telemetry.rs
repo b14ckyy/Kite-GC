@@ -107,6 +107,10 @@ pub struct AirspeedData {
 #[derive(Debug, Clone, Serialize)]
 pub struct GpsStatsData {
     pub hdop: f64,
+    /// Estimated horizontal/vertical position error (raw INAV units, cm). `None` if the firmware's
+    /// payload is too short to contain them.
+    pub eph: Option<f64>,
+    pub epv: Option<f64>,
 }
 
 /// Navigation status (from MSP_NAV_STATUS 121) — the currently targeted waypoint.
@@ -412,8 +416,11 @@ fn decode_airspeed(payload: &[u8]) -> TelemetryPayload {
 fn decode_gps_statistics(payload: &[u8]) -> TelemetryPayload {
     let hdop_raw = read_u16(payload, 16); // bytes 16–17
     let hdop = hdop_raw as f64 / 100.0;
-    eprintln!("[GPS-STATS] hdop_raw={} hdop={:.2}", hdop_raw, hdop);
-    TelemetryPayload::GpsStats(GpsStatsData { hdop })
+    // eph (18–19) / epv (20–21) ride along in the same message — captured for the recorder.
+    let eph = if payload.len() >= 20 { Some(read_u16(payload, 18) as f64) } else { None };
+    let epv = if payload.len() >= 22 { Some(read_u16(payload, 20) as f64) } else { None };
+    eprintln!("[GPS-STATS] hdop_raw={} hdop={:.2} eph={:?} epv={:?}", hdop_raw, hdop, eph, epv);
+    TelemetryPayload::GpsStats(GpsStatsData { hdop, eph, epv })
 }
 
 /// Feed decoded telemetry data to the flight recorder.
@@ -473,6 +480,25 @@ pub fn feed_recorder(code: u16, payload: &[u8], recorder: &mut FlightRecorder, b
                 airspeed: read_i32(payload, 0) as f64 / 100.0,
             };
             recorder.on_airspeed(&data);
+        }
+        MSP_NAV_STATUS => {
+            // Mission context (target WP + nav state) — recorded so replay matches the live map.
+            if let Ok(s) = crate::mission::codec::decode_nav_status(payload) {
+                recorder.on_nav_status(&NavStatusData {
+                    active_wp_number: s.active_wp_number,
+                    nav_state: s.nav_state,
+                });
+            }
+        }
+        MSP_GPSSTATISTICS => {
+            if let TelemetryPayload::GpsStats(data) = decode_gps_statistics(payload) {
+                recorder.on_gps_stats(&data);
+            }
+        }
+        MSP_SENSOR_STATUS => {
+            if let TelemetryPayload::SensorStatus(data) = decode_sensor_status(payload) {
+                recorder.on_sensor_status(&data);
+            }
         }
         _ => {}
     }

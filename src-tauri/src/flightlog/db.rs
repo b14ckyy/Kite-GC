@@ -17,6 +17,36 @@ use super::types::{
 
 const CURRENT_SCHEMA_VERSION: u32 = 11;
 
+/// Column list (excluding the autoincrement `id`) for `telemetry_records`, shared by the temp-session
+/// copy so the SELECT and INSERT column orders can never drift apart. `flight_id` is first so the
+/// copy can swap it for the freshly inserted main id (see `commit_session_to_main`).
+const TELEMETRY_COLS: &str = "flight_id, timestamp_ms, lat, lon, alt_m, speed_ms, heading, \
+    vario_ms, voltage, current_a, mah_drawn, rssi, battery_percentage, \
+    roll, pitch, yaw, fix_type, num_sat, cpu_load, link_quality, \
+    baro_alt_m, gps_hdop, gps_eph, gps_epv, \
+    active_wp_number, active_flight_mode_flags, state_flags, nav_state, nav_flags, \
+    rx_signal_received, hw_health_status, baro_temperature, \
+    wind_n_ms, wind_e_ms, wind_d_ms, rc_data_json, rc_command_json, \
+    nav_lat, nav_lon, nav_alt_m";
+
+/// Full single-statement DDL for `telemetry_records` at the current field set. The main DB grows
+/// this table via the migration chain; the per-session temp DB (no migration history) creates it
+/// in one shot. The two MUST describe the same columns (the temp rows are copied into the main
+/// table on disarm). No FK here — the temp DB has no `flights` table.
+const TELEMETRY_RECORDS_DDL_FULL: &str = "CREATE TABLE IF NOT EXISTS telemetry_records (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    flight_id    INTEGER NOT NULL,
+    timestamp_ms INTEGER NOT NULL,
+    lat REAL, lon REAL, alt_m REAL, speed_ms REAL, heading INTEGER, vario_ms REAL,
+    voltage REAL, current_a REAL, mah_drawn INTEGER, rssi INTEGER, battery_percentage INTEGER,
+    roll REAL, pitch REAL, yaw INTEGER, fix_type INTEGER, num_sat INTEGER, cpu_load INTEGER,
+    link_quality INTEGER, baro_alt_m REAL, gps_hdop REAL, gps_eph REAL, gps_epv REAL,
+    active_wp_number INTEGER, active_flight_mode_flags INTEGER, state_flags INTEGER,
+    nav_state INTEGER, nav_flags INTEGER, rx_signal_received INTEGER, hw_health_status INTEGER,
+    baro_temperature REAL, wind_n_ms REAL, wind_e_ms REAL, wind_d_ms REAL,
+    rc_data_json TEXT, rc_command_json TEXT, nav_lat REAL, nav_lon REAL, nav_alt_m REAL
+);";
+
 /// Open (or create) the flight log database at the given path.
 /// Runs migrations if needed.
 pub fn open_database(path: &Path) -> SqlResult<Connection> {
@@ -598,6 +628,128 @@ pub fn insert_telemetry_batch(
     }
     tx.commit()?;
     Ok(())
+}
+
+// ── Live recording: per-session temp store (commit-on-disarm, ADR-040) ──────────────
+
+/// Open (creating its parent dir) a per-session temp SQLite file: the `telemetry_records` table
+/// (full current field set) plus a self-describing `session_meta` table so an orphaned `.ktmp`
+/// left by a crash can be interpreted on its own (crash recovery is a later phase). WAL +
+/// `synchronous = NORMAL`: the file is the durable buffer for the in-flight stream.
+pub fn open_temp_session(path: &Path) -> SqlResult<Connection> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    let conn = Connection::open(path)?;
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         PRAGMA synchronous = NORMAL;",
+    )?;
+    conn.execute_batch(TELEMETRY_RECORDS_DDL_FULL)?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS session_meta (
+            id            INTEGER PRIMARY KEY CHECK (id = 1),
+            start_time    TEXT NOT NULL,
+            craft_name    TEXT,
+            fc_variant    TEXT,
+            fc_version    TEXT,
+            board_id      TEXT,
+            platform_type INTEGER,
+            protocol      TEXT,
+            start_lat     REAL,
+            start_lon     REAL
+        );
+        CREATE INDEX IF NOT EXISTS idx_session_telemetry
+            ON telemetry_records(timestamp_ms);",
+    )?;
+    Ok(conn)
+}
+
+/// Write the single `session_meta` row that makes a temp session self-describing.
+#[allow(clippy::too_many_arguments)]
+pub fn write_session_meta(
+    conn: &Connection,
+    start_time: &DateTime<Utc>,
+    craft_name: &str,
+    fc_variant: &str,
+    fc_version: &str,
+    board_id: &str,
+    platform_type: u8,
+    protocol: &str,
+    start_lat: Option<f64>,
+    start_lon: Option<f64>,
+) -> SqlResult<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO session_meta
+            (id, start_time, craft_name, fc_variant, fc_version, board_id, platform_type,
+             protocol, start_lat, start_lon)
+         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            start_time.to_rfc3339(),
+            craft_name,
+            fc_variant,
+            fc_version,
+            board_id,
+            platform_type,
+            protocol,
+            start_lat,
+            start_lon,
+        ],
+    )?;
+    Ok(())
+}
+
+/// Commit a finished temp session into the main DB atomically: insert the finalized `flights` row,
+/// ATTACH the temp file, copy its `telemetry_records` (rewriting `flight_id` to the new main id),
+/// then DETACH. Returns the new flight id. The main DB therefore only ever sees the flight as a
+/// finished whole. `ATTACH`/`DETACH` cannot run inside a transaction, so they bracket it.
+pub fn commit_session_to_main(
+    conn: &Connection,
+    temp_path: &Path,
+    flight: &Flight,
+) -> SqlResult<i64> {
+    let temp_str = temp_path.to_string_lossy().to_string();
+    conn.execute("ATTACH DATABASE ?1 AS sess", params![temp_str])?;
+
+    let outcome = (|| -> SqlResult<i64> {
+        let tx = conn.unchecked_transaction()?;
+        let flight_id = insert_flight(&tx, flight)?;
+        // Swap the leading `flight_id` column name for the new id literal in the SELECT.
+        let select_cols = TELEMETRY_COLS.replacen("flight_id", &flight_id.to_string(), 1);
+        tx.execute(
+            &format!(
+                "INSERT INTO main.telemetry_records ({cols}) \
+                 SELECT {sel} FROM sess.telemetry_records ORDER BY timestamp_ms ASC",
+                cols = TELEMETRY_COLS,
+                sel = select_cols,
+            ),
+            [],
+        )?;
+        tx.commit()?;
+        Ok(flight_id)
+    })();
+
+    // Always detach, even if the transaction failed, so the connection isn't left with `sess` bound.
+    let _ = conn.execute("DETACH DATABASE sess", []);
+    outcome
+}
+
+/// Best-effort removal of a temp session file and its WAL/SHM sidecars (after a successful commit).
+pub fn remove_temp_session(temp_path: &Path) {
+    for suffix in ["", "-wal", "-shm"] {
+        let p = if suffix.is_empty() {
+            temp_path.to_path_buf()
+        } else {
+            let mut s = temp_path.as_os_str().to_os_string();
+            s.push(suffix);
+            PathBuf::from(s)
+        };
+        if p.exists() {
+            if let Err(e) = std::fs::remove_file(&p) {
+                log::warn!("Failed to remove temp session file {}: {}", p.display(), e);
+            }
+        }
+    }
 }
 
 /// List flight summaries ordered by start_time DESC.
