@@ -448,7 +448,8 @@
   // Solid flat movie camera (Video): two reels + body + lens funnel.
   const ICON_VIDEO = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="7" cy="7" r="2.9"/><circle cx="12.6" cy="7" r="2.9"/><rect x="2.5" y="9.5" width="13" height="9" rx="1.6"/><path d="M15.5 12 21.5 9.5V18.5L15.5 16Z"/></svg>';
   // Radar dish on a mast with two sweep arcs (Radar / foreign-vehicle tracking).
-  const ICON_RADAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 20.5h6"/><path d="M6.5 20.5 8.4 13.6"/><path d="M3.8 12.2a6 6 0 0 1 8.6-2.2L8.5 13.6a1.6 1.6 0 0 1-2.3-.4Z"/><circle cx="8.3" cy="11.7" r="1" fill="currentColor"/><path d="M14 5.5a7 7 0 0 1 4.8 4.8"/><path d="M13 9a3.5 3.5 0 0 1 2.2 2.2"/></svg>';
+  // Stylised radar scope: outer ring + inner range ring + sweep line + contact blips.
+  const ICON_RADAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.3"/><path d="M12 12 18.7 6.4"/><circle cx="17.6" cy="9.4" r="1.15" fill="currentColor" stroke="none"/><circle cx="7.6" cy="15.4" r="0.85" fill="currentColor" stroke="none"/><circle cx="9.4" cy="6.8" r="0.85" fill="currentColor" stroke="none"/></svg>';
 
   // Stacked layers (Airspace Manager / aeronautical data).
   const ICON_AIRSPACE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3 21 7.5 12 12 3 7.5Z"/><path d="M3 12 12 16.5 21 12"/><path d="M3 16.5 12 21 21 16.5"/></svg>';
