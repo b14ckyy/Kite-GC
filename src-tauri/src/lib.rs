@@ -109,7 +109,15 @@ pub fn run() {
     // Windows (Known-Folder API, not env-driven) — so only enable it in installed mode.
     // Portable builds trade window-geometry persistence for a clean, system-path-free runtime.
     if !is_portable() {
-        builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
+        use tauri_plugin_window_state::StateFlags;
+        // Persist everything EXCEPT the decorations flag: we run with a custom titlebar
+        // (`decorations: false` in tauri.conf.json), and the state plugin would otherwise
+        // restore a previously-saved `decorations: true` and re-add the native title bar.
+        builder = builder.plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(StateFlags::all() & !StateFlags::DECORATIONS)
+                .build(),
+        );
     }
 
     builder

@@ -15,7 +15,8 @@
         "title": "Kite Ground Control",
         "width": 1280,
         "height": 800,
-        "dragDropEnabled": true
+        "dragDropEnabled": true,
+        "decorations": false
       }
     ],
     "security": {

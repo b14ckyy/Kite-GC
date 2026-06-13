@@ -3,6 +3,12 @@
     "brand": "KiteGC",
     "version": "v{version}"
   },
+  "window": {
+    "minimize": "Minimieren",
+    "maximize": "Maximieren",
+    "restore": "Wiederherstellen",
+    "close": "Schließen"
+  },
   "connection": {
     "connect": "Verbinden",
     "disconnect": "Trennen",

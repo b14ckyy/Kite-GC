@@ -25,6 +25,7 @@
   import BatchEditPopup from "$lib/components/mission/BatchEditPopup.svelte";
   import type { DialogButton, DialogOptions } from "$lib/components/ConfirmDialog.svelte";
   import Toolbar from "$lib/components/Toolbar.svelte";
+  import WindowResizeBorders from "$lib/components/WindowResizeBorders.svelte";
   import StatusBar from "$lib/components/StatusBar.svelte";
   import NavRail from "$lib/components/NavRail.svelte";
   import PanelPlayground from "$lib/components/panel/PanelPlayground.svelte";
@@ -1948,6 +1949,10 @@
 <svelte:window bind:innerWidth={winW} bind:innerHeight={winH} />
 
 <div class="ui-root" style:--ui-scale={uiScale}>
+  <!-- Window resize grips — outside `.ui-scale` so position:fixed stays viewport-relative.
+       Re-adds edge resizing lost when the native decorations are disabled. -->
+  <WindowResizeBorders />
+
   <!-- ======= MAP LAYER — unzoomed / native resolution (see docs/archive/UI_SCALING.md) =======
        The map must stay crisp, so it lives OUTSIDE the zoomed `.ui-scale` layer. It is the
        same single Map/Map3D instance (no re-mount). Normally it sits behind the chrome; when

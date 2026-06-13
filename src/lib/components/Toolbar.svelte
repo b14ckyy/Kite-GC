@@ -7,6 +7,7 @@
   import { t } from 'svelte-i18n';
   import Button from '$lib/components/panel/Button.svelte';
   import SegmentedToggle from '$lib/components/panel/SegmentedToggle.svelte';
+  import WindowControls from '$lib/components/WindowControls.svelte';
   import type { PortInfo, BleDeviceInfo, TransportType, ProtocolType } from '$lib/stores/connection';
   import type { TelemetryData } from '$lib/stores/telemetry';
 
@@ -53,12 +54,12 @@
   }
 </script>
 
-<header class="toolbar">
-  <div class="toolbar-left">
-    <div class="logo">{$t('app.brand')}</div>
-    <span class="version">v{appVersion}</span>
+<header class="toolbar" data-tauri-drag-region>
+  <div class="toolbar-left" data-tauri-drag-region>
+    <div class="logo" data-tauri-drag-region>{$t('app.brand')}</div>
+    <span class="version" data-tauri-drag-region>v{appVersion}</span>
   </div>
-  <div class="toolbar-center">
+  <div class="toolbar-center" data-tauri-drag-region>
     <div class="sensor-bar">
       <div class="sensor" class:active={telem.sensorGyro === 1} class:error={telem.sensorGyro === 3} title={$t('sensors.gyroTooltip')}>{$t('sensors.gyro')}</div>
       <div class="sensor" class:active={telem.sensorAcc === 1} class:error={telem.sensorAcc === 3} title={$t('sensors.accTooltip')}>{$t('sensors.acc')}</div>
@@ -67,7 +68,7 @@
       <div class="sensor" class:active={telem.sensorGps === 1 && telem.fixType >= 2} class:warning={telem.sensorGps === 1 && telem.fixType < 2} class:error={telem.sensorGps === 3} title="GPS: {getGpsFixLabel()} {telem.numSat}S">{$t('sensors.gps')}</div>
     </div>
   </div>
-  <div class="toolbar-right">
+  <div class="toolbar-right" data-tauri-drag-region>
     <div class="port-controls">
       {#if connStatus !== "connected"}
         <!-- Protocol selector (2 options → segmented toggle) -->
@@ -137,6 +138,7 @@
         <Button variant="data" onclick={onConnect}>{$t('connection.connect')}</Button>
       {/if}
     </div>
+    <WindowControls />
   </div>
 </header>
 
@@ -168,6 +170,7 @@
   .toolbar-right {
     display: flex;
     align-items: center;
+    align-self: stretch;
     gap: 8px;
   }
 
