@@ -40,11 +40,20 @@ build-linux:
 # Quality Checks
 # =============================================================================
 
-# Run frontend + backend static checks
+# Run frontend + backend static checks (Windows)
+[windows]
 check:
     @powershell -Command "Write-Host '→ Running svelte-check...' -ForegroundColor Cyan"
     npm run check
     @powershell -Command "Write-Host '→ Running cargo check...' -ForegroundColor Cyan"
+    cargo check --manifest-path src-tauri/Cargo.toml --quiet
+
+# Run frontend + backend static checks (Linux / macOS)
+[unix]
+check:
+    @echo '→ Running svelte-check...'
+    npm run check
+    @echo '→ Running cargo check...'
     cargo check --manifest-path src-tauri/Cargo.toml --quiet
 
 # Frontend check in watch mode
@@ -59,9 +68,16 @@ check-watch:
 install:
     npm install
 
-# Clean build artifacts
+# Clean build artifacts (Windows)
+[windows]
 clean:
     @powershell -Command "Write-Host 'Cleaning...' -ForegroundColor Cyan"
-    powershell -Command "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue 'build', '.svelte-kit'" 2>$null || true
-    rm -rf build .svelte-kit 2>/dev/null || true
+    @powershell -Command "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue 'build', '.svelte-kit'"
+    cargo clean --manifest-path src-tauri/Cargo.toml
+
+# Clean build artifacts (Linux / macOS)
+[unix]
+clean:
+    @echo 'Cleaning...'
+    rm -rf build .svelte-kit
     cargo clean --manifest-path src-tauri/Cargo.toml
