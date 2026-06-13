@@ -45,6 +45,7 @@ You need the following system packages:
 sudo apt update
 sudo apt install -y \
     build-essential \
+    pkg-config \
     curl \
     wget \
     file \
@@ -58,6 +59,10 @@ sudo apt install -y \
 
 > `libwebkit2gtk-4.1-dev` is the Tauri 2 / WebKitGTK 4.1 package. On older distros that only ship
 > `4.0`, you must use a release new enough to provide **4.1** (Ubuntu 22.04+ / Debian 12+).
+
+> `pkg-config` is required by the Rust build to locate the system libraries via their `.pc` files.
+> On Debian it is provided by the `pkgconf` package and is normally pulled in transitively by
+> `libgtk-3-dev`; it is listed explicitly here so the dependency is not left to chance.
 
 These packages are required by Tauri to build the Linux desktop application.
 
@@ -140,7 +145,10 @@ This runs:
 - `npm run check` (svelte-check + TypeScript)
 - `cargo check` (in `src-tauri/`)
 
-The `check` recipe prints status messages using PowerShell on Windows (the `justfile` is configured with `set windows-shell` for this reason).
+The `check` and `clean` recipes are defined as **platform-specific variants** (`just`'s
+`[windows]` / `[unix]` attributes): on Windows they print coloured status via PowerShell
+(`set windows-shell`), on Linux/macOS they use plain `echo` and POSIX tools. `just` picks the
+right variant automatically per OS, so the same `just check` / `just clean` works on both.
 
 We also have a CI workflow that executes these checks on every push and pull request.
 
