@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **First-start defaults now show off more out of the box** (fresh installs only — existing settings
+  are untouched): flight **recording + logbook on**, map provider **ESRI Hybrid**, **night mode Auto**,
+  3D **real lighting + log-replay sun time on**, **nav panel open**, **GCS marker continuous**, the
+  **Radar and Airspace panels enabled**, the right widget dock = **Flight Mode + Battery** (Battery
+  moved out of the bottom dock, Raw Telemetry off by default). ADS-B built-ins are now **adsb.lol +
+  adsb.fi** (adsb.one demoted to an off-by-default custom provider — currently unreachable).
+- **UAV Info features** are laid out in a fixed **2-column** grid so the panel no longer widens with
+  the feature count.
+
 ### Added
 - **Live recording — crash-safe temp session store + complete capture (ADR-040).** A live flight is
   now recorded into a **separate per-session SQLite file** (`sessions/active_<ts>.ktmp`) instead of
@@ -161,6 +171,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Log player shows the time-of-day** (flight start + elapsed) at the current playback position.
 
 ### Fixed
+- **Panel view state now persists across switching panels.** The Radar panel kept reverting to the
+  advanced view (instead of remembering Compact) and the Settings panel forgot which tab (Interface /
+  Data) was open — both now persist (a `panelState` store), so panel operation is consistent.
+- **Selecting a logbook entry while connected no longer loads it onto the map.** It used to load the
+  linked mission + set home/launch from the flight in the background — which fought the live FC state
+  and caused the FC↔map desync. While connected, a logbook selection now shows **details only**
+  (nothing on the map); load a flight's mission via its linked-mission chip → Mission Manager.
+- **Swapped video scales to the window.** With video as the background (swapped with the map) it was
+  shown at its native resolution instead of filling the area; it now scales to full width/height with
+  `object-fit: contain` (letterbox/pillarbox bars when the aspect ratio differs).
 - **Live-recorded altitude now replays at the correct height.** A live recording replayed ~one terrain
   height too low (e.g. **−84 m AGL at takeoff** on a ~84 m-MSL field) — the 3D track sat underground —
   while the relative-altitude widget was fine. The recorder stored the **baro relative-to-home** altitude
