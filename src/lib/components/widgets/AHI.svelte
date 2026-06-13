@@ -94,12 +94,13 @@
       <line {x1} {y1} {x2} {y2} stroke="white" stroke-width="1.5" opacity="0.5" />
     {/each}
 
-    <!-- Fixed roll reference triangle (top) -->
-    <polygon points="100,8 96,16 104,16" fill="white" opacity="0.6" />
+    <!-- Fixed roll index (zero-bank reference) — points DOWN at the roll pointer,
+         so it reads distinctly from the live sky pointer (they converge when level). -->
+    <polygon points="100,13 96,5 104,5" fill="white" />
 
     <!-- Roll pointer (rotates with aircraft) -->
     <g transform="rotate({rollDeg}, 100, 100)">
-      <polygon points="100,14 97,22 103,22" fill="#37a8db" />
+      <polygon points="100,14 97,22 103,22" fill="white" />
     </g>
 
     <!-- Bezel ring -->

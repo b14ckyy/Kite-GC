@@ -133,11 +133,12 @@
     {#each bankTicks as b}
       <line class="hud-line" x1={b.x1} y1={b.y1} x2={b.x2} y2={b.y2} />
     {/each}
-    <!-- zero (top) reference triangle on the scale -->
-    <polygon class="hud-fill" points="{CX},{CY - BANK_R + 2} {CX - 9},{CY - BANK_R + 18} {CX + 9},{CY - BANK_R + 18}" />
+    <!-- Roll pointer (sky pointer) — rides with the horizon, points UP at the fixed index -->
+    <polygon class="hud-fill bright" points="{CX},{CY - BANK_R + 2} {CX - 9},{CY - BANK_R + 18} {CX + 9},{CY - BANK_R + 18}" />
   </g>
-  <!-- fixed pointer (aircraft) just below the arc apex -->
-  <polygon class="hud-fill bright" points="{CX},{CY - BANK_R + 22} {CX - 8},{CY - BANK_R + 36} {CX + 8},{CY - BANK_R + 36}" />
+  <!-- Fixed roll index (zero-bank reference) — points DOWN at the sky pointer, so the two converge
+       when wings are level and read as distinct marks (not two identical pointers). -->
+  <polygon class="hud-fill" points="{CX},{CY - BANK_R} {CX - 8},{CY - BANK_R - 16} {CX + 8},{CY - BANK_R - 16}" />
 
   <!-- Heading tape (top) -->
   <g>
