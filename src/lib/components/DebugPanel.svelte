@@ -14,7 +14,7 @@
 
   let { onclose }: { onclose: () => void } = $props();
 
-  type Tab = 'msp' | 'alerts';
+  type Tab = 'msp' | 'mavlink' | 'alerts';
   let tab = $state<Tab>('msp');
 
   // Dev GPS injection (global — visible in both tabs). Mirror the store so reopening reflects the
@@ -58,19 +58,51 @@
     bytes_per_sec_rx: 0,
   });
 
+  // MAVLink is push-based: no request/response/timeout — just per-message-ID counts, a measured
+  // rate and a "last seen" age, separated by direction (RX from FC, TX from us).
+  interface MavMsgDebug {
+    id: number;
+    name: string;
+    dir: string;        // "RX" | "TX"
+    count: number;
+    rate_hz: number;
+    last_seen_s: number;
+  }
+
+  interface MavlinkDebugSnapshot {
+    messages: MavMsgDebug[];
+    msg_per_sec_rx: number;
+    msg_per_sec_tx: number;
+    bytes_per_sec_rx: number;
+    bytes_per_sec_tx: number;
+  }
+
+  let mavSnapshot = $state<MavlinkDebugSnapshot>({
+    messages: [],
+    msg_per_sec_rx: 0,
+    msg_per_sec_tx: 0,
+    bytes_per_sec_rx: 0,
+    bytes_per_sec_tx: 0,
+  });
+
   // Alerts tab reads the controller's live debug snapshot directly (frontend store).
   const alerts = $derived($radarAlertDebug);
 
   let unlisten: (() => void) | null = null;
+  let unlistenMav: (() => void) | null = null;
 
   onMount(async () => {
     unlisten = await listen<DebugSnapshot>("debug-msp-stats", (event) => {
       snapshot = event.payload;
     });
+    unlistenMav = await listen<MavlinkDebugSnapshot>("debug-mavlink-stats", (event) => {
+      mavSnapshot = event.payload;
+    });
   });
 
   onDestroy(() => {
     if (unlisten) unlisten();
+    if (unlistenMav) unlistenMav();
   });
 
   function ledColor(status: string): string {
@@ -80,6 +112,14 @@
       case "timeout": return "#d40000";
       default: return "#555";
     }
+  }
+
+  // MAVLink LED: green = fresh, amber = slowing, grey = stale (push-based, so age-driven
+  // rather than the MSP request/response status).
+  function mavLedColor(lastSeenS: number): string {
+    if (lastSeenS < 1) return "#59aa29";
+    if (lastSeenS < 3) return "#f5a623";
+    return "#555";
   }
 
   function levelColor(level: AlertLevel | null): string {
@@ -115,6 +155,7 @@
 
   <div class="debug-tabs">
     <button class="tab" class:active={tab === 'msp'} onclick={() => tab = 'msp'}>{$t('debug.tabMsp')}</button>
+    <button class="tab" class:active={tab === 'mavlink'} onclick={() => tab = 'mavlink'}>{$t('debug.tabMavlink')}</button>
     <button class="tab" class:active={tab === 'alerts'} onclick={() => tab = 'alerts'}>{$t('debug.tabAlerts')}</button>
   </div>
 
@@ -186,6 +227,62 @@
               <td class="col-rate" class:throttled={msg.is_polling && msg.target_rate_hz > 0 && msg.actual_rate_hz < msg.target_rate_hz * 0.85}>
                 {msg.actual_rate_hz > 0 ? `${msg.actual_rate_hz} Hz` : '—'}
               </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
+  {:else if tab === 'mavlink'}
+    <div class="debug-stats">
+      <div class="stat-group">
+        <span class="stat-label">{$t('debug.msgPerSec')}</span>
+        <span class="stat-value">TX {mavSnapshot.msg_per_sec_tx.toFixed(1)}</span>
+        <span class="stat-sep">|</span>
+        <span class="stat-value">RX {mavSnapshot.msg_per_sec_rx.toFixed(1)}</span>
+      </div>
+      <div class="stat-group">
+        <span class="stat-label">{$t('debug.throughput')}</span>
+        <span class="stat-value">TX {formatBytes(mavSnapshot.bytes_per_sec_tx)}</span>
+        <span class="stat-sep">|</span>
+        <span class="stat-value">RX {formatBytes(mavSnapshot.bytes_per_sec_rx)}</span>
+      </div>
+    </div>
+
+    <div class="debug-table-wrap">
+      <table class="debug-table">
+        <thead>
+          <tr>
+            <th class="col-led"></th>
+            <th class="col-code">{$t('debug.colId')}</th>
+            <th class="col-name">{$t('debug.colName')}</th>
+            <th class="col-status">{$t('debug.colDir')}</th>
+            <th class="col-num">{$t('debug.colCount')}</th>
+            <th class="col-rate">{$t('debug.colRate')}</th>
+            <th class="col-rate">{$t('debug.colLast')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#if mavSnapshot.messages.length === 0}
+            <tr class="inactive"><td colspan="7" class="empty-cell">{$t('debug.mavNoData')}</td></tr>
+          {/if}
+          {#each mavSnapshot.messages as msg (msg.dir + msg.id)}
+            <tr class:inactive={msg.last_seen_s >= 3}>
+              <td class="col-led">
+                <span
+                  class="led"
+                  style="background: {mavLedColor(msg.last_seen_s)}; box-shadow: 0 0 4px {mavLedColor(msg.last_seen_s)};"
+                ></span>
+              </td>
+              <td class="col-code">{msg.id}</td>
+              <td class="col-name">{msg.name}</td>
+              <td class="col-status">
+                <span class="status-badge" class:polling={msg.dir === 'RX'} class:init={msg.dir === 'TX'}>
+                  {msg.dir}
+                </span>
+              </td>
+              <td class="col-num">{msg.count}</td>
+              <td class="col-rate">{msg.rate_hz > 0 ? `${msg.rate_hz} Hz` : '—'}</td>
+              <td class="col-rate">{msg.last_seen_s.toFixed(1)}s</td>
             </tr>
           {/each}
         </tbody>
@@ -525,6 +622,13 @@
 
   .debug-table tr.inactive td {
     color: #777;
+  }
+
+  .empty-cell {
+    text-align: center;
+    color: #777;
+    font-style: italic;
+    padding: 12px 8px;
   }
 
   .col-led {

@@ -209,6 +209,11 @@ export interface AppSettings {
   lastPort: string;
   lastBaud: number;
   lastProtocol: string;
+  // Full last-used connection path (restored on startup so nothing has to be re-entered)
+  lastTransport: string;
+  lastHost: string;
+  lastTcpPort: number;
+  lastBleDevice: string;
   map: MapState;
   mapProvider: string;
   mapCacheMaxMB: number;
@@ -218,6 +223,9 @@ export interface AppSettings {
   attitudeRateHz: number;
   positionRateHz: number;
   airspeedEnabled: boolean;
+  // MAVLink only: stream everything the FC sends (per its SRn_* params) instead of requesting our
+  // reduced rate set — ignores the two rate knobs. For high-bandwidth links + full .tlog capture.
+  mavlinkFullTelemetry: boolean;
   // Flight logging
   flightLoggingEnabled: boolean;
   flightRecordingEnabled: boolean;
@@ -264,6 +272,10 @@ const defaults: AppSettings = {
   lastPort: '',
   lastBaud: 115200,
   lastProtocol: 'msp',
+  lastTransport: 'serial',
+  lastHost: '192.168.1.1',
+  lastTcpPort: 5761,
+  lastBleDevice: '',
   map: {
     center: [51.505, -0.09],
     zoom: 13,
@@ -275,6 +287,7 @@ const defaults: AppSettings = {
   attitudeRateHz: 5,
   positionRateHz: 2,
   airspeedEnabled: false,
+  mavlinkFullTelemetry: false,
   flightLoggingEnabled: true,
   flightRecordingEnabled: true,
   flightLogDbPath: '',

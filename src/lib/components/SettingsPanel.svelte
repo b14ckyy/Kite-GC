@@ -43,6 +43,7 @@
     attitudeRateHz = 5,
     positionRateHz = 2,
     airspeedEnabled = false,
+    mavlinkFullTelemetry = false,
     flightLoggingEnabled = false,
     flightRecordingEnabled = false,
     flightLogRawEnabled = false,
@@ -80,6 +81,7 @@
     attitudeRateHz?: number;
     positionRateHz?: number;
     airspeedEnabled?: boolean;
+    mavlinkFullTelemetry?: boolean;
     flightLoggingEnabled?: boolean;
     flightRecordingEnabled?: boolean;
     flightLogRawEnabled?: boolean;
@@ -398,6 +400,11 @@
       <div class="s-row">
         <label class="s-label" for="airspeed-toggle">{$t('settings.airspeed')}</label>
         <Toggle checked={airspeedEnabled} id="airspeed-toggle" onchange={(c) => onPatch({ airspeedEnabled: c })} />
+      </div>
+      <!-- MAVLink-only: stream everything the FC sends (ignores the two rate knobs above). -->
+      <div class="s-row" title={$t('settings.mavlinkFullTelemetryHint')}>
+        <label class="s-label" for="mav-full-telem">{$t('settings.mavlinkFullTelemetry')}</label>
+        <Toggle checked={mavlinkFullTelemetry} id="mav-full-telem" onchange={(c) => onPatch({ mavlinkFullTelemetry: c })} />
       </div>
 
       <!-- Radar (foreign-vehicle tracking) — master + per-system enables. -->

@@ -109,9 +109,20 @@ pub fn perform_handshake(transport: &mut dyn ByteTransport) -> Result<(FcInfo, u
 
                         fc_sysid = frame.header.system_id;
 
-                        // Map autopilot type to fc_variant string
+                        // Map autopilot (+ vehicle type) to fc_variant string. For ArduPilot the
+                        // variant is per-vehicle ("ArduPlane"/"ArduCopter"/...) because the frontend
+                        // picks the flight-mode name table from this string (Plane vs Copter mode
+                        // numbers differ entirely) — a generic "ArduPilot" would wrongly use Copter.
                         fc_info.fc_variant = match hb.autopilot {
-                            MavAutopilot::MAV_AUTOPILOT_ARDUPILOTMEGA => "ArduPilot".into(),
+                            MavAutopilot::MAV_AUTOPILOT_ARDUPILOTMEGA => match hb.mavtype {
+                                // Note: QuadPlane (VTOL_* types) also runs ArduPlane and uses the
+                                // Plane mode table — it currently falls back to "ArduCopter" naming;
+                                // refine the VTOL types here if QuadPlane support is needed.
+                                MavType::MAV_TYPE_FIXED_WING => "ArduPlane".into(),
+                                MavType::MAV_TYPE_GROUND_ROVER => "ArduRover".into(),
+                                MavType::MAV_TYPE_SUBMARINE => "ArduSub".into(),
+                                _ => "ArduCopter".into(),
+                            },
                             MavAutopilot::MAV_AUTOPILOT_PX4 => "PX4".into(),
                             MavAutopilot::MAV_AUTOPILOT_GENERIC => "Generic".into(),
                             other => format!("{:?}", other),

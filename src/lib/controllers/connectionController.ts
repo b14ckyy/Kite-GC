@@ -94,6 +94,7 @@ export interface ConnectParams {
   attitudeRateHz: number;
   positionRateHz: number;
   airspeedEnabled: boolean;
+  mavlinkFullTelemetry: boolean;
   flightLogEnabled: boolean;
   flightLogDbEnabled: boolean;
   flightLogPath: string;
@@ -116,6 +117,7 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
     attitudeRateHz: params.attitudeRateHz,
     positionRateHz: params.positionRateHz,
     airspeedEnabled: params.airspeedEnabled,
+    mavlinkFullTelemetry: params.mavlinkFullTelemetry,
     flightLogEnabled: params.flightLogEnabled,
     flightLogDbEnabled: params.flightLogDbEnabled,
     flightLogPath: params.flightLogPath,

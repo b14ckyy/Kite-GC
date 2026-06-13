@@ -112,6 +112,7 @@ fn handler_loop(
     let mut buf = [0u8; 1024];
     let mut last_heartbeat = Instant::now() - HEARTBEAT_INTERVAL; // Send immediately
     let mut msg_count: u64 = 0;
+    let mut debug_tracker = super::debug::MavlinkDebugTracker::new();
 
     // Accumulated analog state — MAVLink splits battery data across multiple messages
     let mut analog = AnalogState::default();
@@ -136,6 +137,7 @@ fn handler_loop(
             }
             Ok(MavlinkCommand::SendMessage { msg, reply }) => {
                 let frame = codec::serialize_v2(&gcs_header, &msg, &mut seq);
+                debug_tracker.on_tx(msg.message_id(), frame.len());
                 let result = transport
                     .write_bytes(&frame)
                     .map_err(|e| format!("MAVLink send failed: {}", e));
@@ -166,6 +168,7 @@ fn handler_loop(
         if last_heartbeat.elapsed() >= HEARTBEAT_INTERVAL {
             let hb_msg = codec::gcs_heartbeat();
             let frame = codec::serialize_v2(&gcs_header, &hb_msg, &mut seq);
+            debug_tracker.on_tx(hb_msg.message_id(), frame.len());
             if let Err(e) = transport.write_bytes(&frame) {
                 log::warn!("Failed to send GCS heartbeat: {}", e);
             }
@@ -180,6 +183,7 @@ fn handler_loop(
                     if frame.header.system_id != fc_sysid { continue; }
 
                     msg_count += 1;
+                    debug_tracker.on_rx(frame.message.message_id(), frame.raw_bytes.len());
 
                     // Record raw frame to tlog before any forwarding
                     if !frame.raw_bytes.is_empty() {
@@ -218,6 +222,9 @@ fn handler_loop(
                 log::warn!("MAVLink read error: {}", e);
             }
         }
+
+        // 4. Emit debug stats to the Debug Monitor (throttled internally; no-op in release)
+        debug_tracker.maybe_emit(&app_handle);
     }
 }
 
@@ -237,6 +244,16 @@ fn is_mission_message(msg: &MavMessage) -> bool {
         | MavMessage::MISSION_ITEM_INT(_)
         | MavMessage::MISSION_ITEM(_)
     )
+}
+
+/// Authoritative FC home, emitted as the protocol-agnostic `home-position` event (same `{lat,lon,alt}`
+/// shape the MSP path emits). MAVLink-adapter-local so we don't reach into the MSP / unified telemetry
+/// pipeline — the frontend listener turns it into the locked green "H".
+#[derive(serde::Serialize)]
+struct HomeEvent {
+    lat: f64,
+    lon: f64,
+    alt: f64,
 }
 
 /// Accumulated analog/battery state — MAVLink splits data across SYS_STATUS,
@@ -278,7 +295,10 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, app_handle: &AppHa
             // Encode arming_flags compatible with recorder's ARMED_FLAG (bit 2 = 0x04)
             // Recorder checks: (arming_flags & 0x04) != 0 → armed
             let arming_flags: u32 = if armed { 0x04 } else { 0 };
-            let flight_mode_flags = ardupilot_custom_mode_to_flags(hb.custom_mode);
+            // ArduPilot encodes the flight mode as a single raw custom_mode value. The frontend
+            // (classifyArduPilotMode) maps that raw number per vehicle type, so pass it through
+            // unchanged — do NOT squeeze it into INAV box-flag bits.
+            let flight_mode_flags = hb.custom_mode;
 
             let data = StatusData {
                 arming_flags,
@@ -290,6 +310,18 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, app_handle: &AppHa
             if let Some(ref rec) = recorder {
                 if let Ok(mut r) = rec.lock() { r.on_status(&data); }
             }
+        }
+
+        // ── HOME_POSITION → home-position ───────────────────────────
+        // Authoritative FC home from the aircraft's memory (pushed at ~0.2 Hz + on home change), so
+        // the map shows a consistent home instead of guessing from the GPS fix at arm.
+        MavMessage::HOME_POSITION(home) => {
+            let data = HomeEvent {
+                lat: home.latitude as f64 / 1e7,
+                lon: home.longitude as f64 / 1e7,
+                alt: home.altitude as f64 / 1000.0, // mm AMSL → m
+            };
+            let _ = app_handle.emit("home-position", &data);
         }
 
         // ── ATTITUDE → telemetry-attitude ───────────────────────────
@@ -470,25 +502,3 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, app_handle: &AppHa
     }
 }
 
-/// Map ArduPilot custom_mode (from HEARTBEAT) to our flight mode flags bitmask.
-/// ArduPilot encodes the flight mode as a single u32 custom_mode value.
-/// We map known modes to the closest INAV-equivalent flag bits for display.
-fn ardupilot_custom_mode_to_flags(custom_mode: u32) -> u32 {
-    // ArduPilot Copter flight modes (from mode.h)
-    match custom_mode {
-        0  => 0,                    // STABILIZE → no nav mode
-        1  => 1 << 1,              // ACRO → HORIZON-like
-        2  => 1 << 0,              // ALT_HOLD → ANGLE
-        3  => 1 << 0,              // AUTO → ANGLE + (WP implied)
-        4  => 1 << 0,              // GUIDED → ANGLE
-        5  => 0,                    // LOITER → POSHOLD-like
-        6  => 1 << 4,              // RTL → NAV_RTH
-        7  => 0,                    // CIRCLE
-        9  => 0,                    // LAND
-        16 => 1 << 5,              // POSHOLD → NAV_POSHOLD
-        17 => 0,                    // BRAKE
-        18 => 0,                    // THROW
-        21 => 0,                    // SMART_RTL
-        _ => 0,
-    }
-}

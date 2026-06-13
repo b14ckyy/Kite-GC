@@ -273,6 +273,17 @@
   .host-input { width: 150px; }
   .port-input { width: 72px; }
 
+  /* Drop the native number spinner — the up/down arrows are clutter in the toolbar. */
+  .port-input {
+    appearance: textfield;
+    -moz-appearance: textfield;
+  }
+  .port-input::-webkit-inner-spin-button,
+  .port-input::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
   .tb-input::placeholder {
     color: #777;
   }

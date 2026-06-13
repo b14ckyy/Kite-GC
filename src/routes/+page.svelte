@@ -339,6 +339,7 @@
   let attitudeRateHz = $state(5);
   let positionRateHz = $state(2);
   let airspeedEnabled = $state(false);
+  let mavlinkFullTelemetry = $state(false);
   let flightLoggingEnabled = $state(false);
   let flightRecordingEnabled = $state(false);
   let flightLogDbPath = $state("");
@@ -517,12 +518,20 @@
   selectedPort = saved.lastPort;
   selectedBaud = saved.lastBaud;
   selectedProtocol = (saved.lastProtocol === 'mavlink' ? 'mavlink' : 'msp') as ProtocolType;
+  // Restore the full last-used connection path so nothing has to be re-entered.
+  if (saved.lastTransport === 'serial' || saved.lastTransport === 'tcp' || saved.lastTransport === 'udp' || saved.lastTransport === 'ble') {
+    selectedTransport = saved.lastTransport;
+  }
+  if (saved.lastHost) tcpHost = saved.lastHost;
+  if (saved.lastTcpPort) tcpPort = saved.lastTcpPort;
+  if (saved.lastBleDevice) selectedBleDevice = saved.lastBleDevice;
   navPanelOpen = saved.navPanelOpen;
   // Drop any legacy "-v2" suffix from a persisted tab (the migration scaffolding is gone now).
   activeTab = (saved.activeTab ?? 'uav-info').replace(/-v2$/, '');
   attitudeRateHz = saved.attitudeRateHz;
   positionRateHz = saved.positionRateHz;
   airspeedEnabled = saved.airspeedEnabled;
+  mavlinkFullTelemetry = saved.mavlinkFullTelemetry;
   flightLoggingEnabled = saved.flightLoggingEnabled;
   flightRecordingEnabled = saved.flightRecordingEnabled ?? false;
   flightLogDbPath = saved.flightLogDbPath;
@@ -757,6 +766,7 @@
     if (patch.attitudeRateHz != null) attitudeRateHz = patch.attitudeRateHz;
     if (patch.positionRateHz != null) positionRateHz = patch.positionRateHz;
     if (patch.airspeedEnabled != null) airspeedEnabled = patch.airspeedEnabled;
+    if (patch.mavlinkFullTelemetry != null) mavlinkFullTelemetry = patch.mavlinkFullTelemetry;
     if (patch.flightLoggingEnabled != null) flightLoggingEnabled = patch.flightLoggingEnabled;
     if (patch.flightRecordingEnabled != null) flightRecordingEnabled = patch.flightRecordingEnabled;
     if (patch.flightLogRawEnabled != null) flightLogRawEnabled = patch.flightLogRawEnabled;
@@ -1506,7 +1516,7 @@
     isConnecting = true;
     errorMsg = "";
     connection.update((c) => ({ ...c, status: "connecting" }));
-    settings.patch({ lastPort: selectedPort, lastBaud: selectedBaud, lastProtocol: selectedProtocol, flightLoggingEnabled, flightRecordingEnabled, flightLogDbPath, flightLogRawEnabled, flightLogRawAlways });
+    settings.patch({ lastPort: selectedPort, lastBaud: selectedBaud, lastProtocol: selectedProtocol, lastTransport: selectedTransport, lastHost: tcpHost, lastTcpPort: tcpPort, lastBleDevice: selectedBleDevice, flightLoggingEnabled, flightRecordingEnabled, flightLogDbPath, flightLogRawEnabled, flightLogRawAlways });
 
     try {
       await connectFC({
@@ -1520,6 +1530,7 @@
         attitudeRateHz,
         positionRateHz,
         airspeedEnabled,
+        mavlinkFullTelemetry,
         flightLogEnabled: flightRecordingEnabled,
         flightLogDbEnabled: flightLoggingEnabled && flightRecordingEnabled,
         flightLogPath: flightLogDbPath,
@@ -2136,6 +2147,7 @@
         {attitudeRateHz}
         {positionRateHz}
         {airspeedEnabled}
+        {mavlinkFullTelemetry}
         {flightLoggingEnabled}
         {flightRecordingEnabled}
         {flightLogRawEnabled}

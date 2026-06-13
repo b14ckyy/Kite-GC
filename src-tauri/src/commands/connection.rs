@@ -89,6 +89,8 @@ pub async fn connect(
     attitude_rate_hz: Option<f64>,
     position_rate_hz: Option<f64>,
     airspeed_enabled: Option<bool>,
+    // MAVLink: when true, request no stream rates — FC streams per its own SRn_* params (ADR-043)
+    mavlink_full_telemetry: Option<bool>,
     // Flight log config
     flight_log_enabled: Option<bool>,
     flight_log_db_enabled: Option<bool>,
@@ -137,6 +139,9 @@ pub async fn connect(
         // ── MAVLink Path ─────────────────────────────────────────────
         connect_mavlink(
             byte_transport,
+            attitude_rate_hz,
+            position_rate_hz,
+            mavlink_full_telemetry,
             flight_log_enabled,
             flight_log_db_enabled,
             flight_log_path,
@@ -371,8 +376,12 @@ fn connect_msp(
 }
 
 /// MAVLink connection path: handshake → handler
+#[allow(clippy::too_many_arguments)]
 fn connect_mavlink(
     mut byte_transport: Box<dyn ByteTransport>,
+    attitude_rate_hz: Option<f64>,
+    position_rate_hz: Option<f64>,
+    mavlink_full_telemetry: Option<bool>,
     flight_log_enabled: Option<bool>,
     flight_log_db_enabled: Option<bool>,
     flight_log_path: Option<String>,
@@ -390,6 +399,22 @@ fn connect_mavlink(
         fc_sysid,
         byte_transport.description(),
     );
+
+    // Configure telemetry stream rates (ADR-043) — mirrors the MSP poll-rate knobs. Skipped when
+    // "Full MAVLink Telemetry" is on, so the FC streams purely per its own SRn_* params (.tlog gets
+    // everything). Applied here, before the handler thread starts, while we still own the transport.
+    if mavlink_full_telemetry.unwrap_or(false) {
+        // SET_MESSAGE_INTERVAL is sticky on the FC until reboot, so a prior reduced session would
+        // otherwise keep the link narrow. Reset our managed messages to the FC's SRn defaults.
+        mavlink_proto::streamrates::reset_stream_rates(&mut *byte_transport, fc_sysid);
+    } else {
+        mavlink_proto::streamrates::apply_stream_rates(
+            &mut *byte_transport,
+            fc_sysid,
+            attitude_rate_hz.unwrap_or(5.0),
+            position_rate_hz.unwrap_or(2.0),
+        );
+    }
 
     // ── Flight recorder setup ────────────────────────────────────────────
     let flight_log_settings = FlightLogSettings {
