@@ -179,6 +179,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Log player shows the time-of-day** (flight start + elapsed) at the current playback position.
 
 ### Fixed
+- **PFD bank scale now reads as two distinct marks.** The fixed zero-bank reference and the live roll
+  pointer pointed the same way (both ▲), so the attitude display read as two identical pointers. The
+  fixed **roll index** now points **down** at the live **roll pointer** (sky-pointer convention — they
+  converge when wings are level), in both the AHI widget and the FPV HUD. In the AHI widget both marks
+  are white (the green index was barely visible); in the green FPV HUD the pointer is bright/white and
+  the index is HUD-green.
 - **Panel view state now persists across switching panels.** The Radar panel kept reverting to the
   advanced view (instead of remembering Compact) and the Settings panel forgot which tab (Interface /
   Data) was open — both now persist (a `panelState` store), so panel operation is consistent.
