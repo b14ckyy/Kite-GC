@@ -28,7 +28,7 @@ export const CATEGORY_COLOR: Record<ModeCategory, string> = {
   acro:       '#c0c0c0',
   stabilized: '#59aa29',
   althold:    '#e8c820',
-  poshold:    '#00bcd4',
+  poshold:    '#1abc9c',
   cruise:     '#ff8c00',
   mission:    '#37a8db',
   guided:     '#2980b9',

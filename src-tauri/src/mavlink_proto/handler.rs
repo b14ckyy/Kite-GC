@@ -286,12 +286,16 @@ impl AnalogState {
     }
 }
 
-/// Last fused position from GLOBAL_POSITION_INT (the EKF solution). ArduPilot ALSO sends
-/// GPS_RAW_INT carrying the raw receiver position — noisier and lagging the fused fix. Both messages
-/// carry lat/lon, so naively emitting both interleaves two slightly-offset position streams and the
-/// track zig-zags (sawtooth). We keep GLOBAL_POSITION_INT as the single position authority and stamp
-/// its fused fix onto the GPS_RAW_INT update (which only contributes sat count + fix type), so the
-/// position never regresses to the raw receiver value — in the live track *and* the recording.
+/// Shared GPS cache that splits the two overlapping ArduPilot GPS messages into single owners.
+///
+/// Position: GLOBAL_POSITION_INT carries the **fused** EKF solution; GPS_RAW_INT carries the raw
+/// receiver position — noisier and lagging. Both carry lat/lon, so naively emitting both interleaves
+/// two offset streams and the track zig-zags (sawtooth). GLOBAL_POSITION_INT owns position; GPS_RAW_INT
+/// reuses the cached fused fix instead of its own raw lat/lon.
+///
+/// Fix type + sat count: only GPS_RAW_INT has them; GLOBAL_POSITION_INT does not. So GPS_RAW_INT owns
+/// `fix_type`/`num_sat` and GLOBAL_POSITION_INT reuses the cached values — otherwise the two messages
+/// would emit conflicting fix/sats (GLOBAL_POSITION_INT sending 0 sats) and the UI would flash.
 #[derive(Default, Clone, Copy)]
 struct FusedPos {
     valid: bool,
@@ -300,6 +304,8 @@ struct FusedPos {
     alt_msl: f64,
     ground_speed: f64,
     course: f64,
+    fix_type: u8,
+    num_sat: u8,
 }
 
 /// Dispatch a received MAVLink message to the same Tauri events as the MSP scheduler.
@@ -376,23 +382,24 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
 
         // ── GLOBAL_POSITION_INT → telemetry-gps + telemetry-altitude
         MavMessage::GLOBAL_POSITION_INT(gpi) => {
+            // Update the shared cache's position (fix_type/num_sat are owned by GPS_RAW_INT — leave them).
+            fused.valid = true;
+            fused.lat = gpi.lat as f64 / 1e7;
+            fused.lon = gpi.lon as f64 / 1e7;
+            fused.alt_msl = gpi.alt as f64 / 1000.0; // mm → m
+            fused.ground_speed = ((gpi.vx as f64).powi(2) + (gpi.vy as f64).powi(2)).sqrt() / 100.0; // cm/s → m/s
+            fused.course = gpi.hdg as f64 / 100.0; // cdeg → deg
+
             let gps = GpsData {
-                fix_type: 2, // GLOBAL_POSITION_INT implies at least 3D fix
-                num_sat: 0,  // Not in this message — GPS_RAW_INT has it
-                lat: gpi.lat as f64 / 1e7,
-                lon: gpi.lon as f64 / 1e7,
-                alt_msl: gpi.alt as f64 / 1000.0, // mm → m
-                ground_speed: ((gpi.vx as f64).powi(2) + (gpi.vy as f64).powi(2)).sqrt() / 100.0, // cm/s → m/s
-                course: (gpi.hdg as f64 / 100.0), // cdeg → deg
-            };
-            // Remember the fused fix so GPS_RAW_INT can reuse it instead of emitting its raw position.
-            *fused = FusedPos {
-                valid: true,
-                lat: gps.lat,
-                lon: gps.lon,
-                alt_msl: gps.alt_msl,
-                ground_speed: gps.ground_speed,
-                course: gps.course,
+                // Fix/sat come from GPS_RAW_INT (cached). Before the first GPS_RAW_INT, GLOBAL_POSITION_INT
+                // already implies at least a 3D fix, so fall back to 2 rather than reporting "no fix".
+                fix_type: if fused.fix_type > 0 { fused.fix_type } else { 2 },
+                num_sat: fused.num_sat,
+                lat: fused.lat,
+                lon: fused.lon,
+                alt_msl: fused.alt_msl,
+                ground_speed: fused.ground_speed,
+                course: fused.course,
             };
             let _ = app_handle.emit("telemetry-gps", &gps);
 
@@ -423,10 +430,15 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
                 _ => 0,
             };
 
-            // GPS_RAW_INT contributes satellite count + fix type. Position comes from the fused
-            // GLOBAL_POSITION_INT solution (cached in `fused`) — emitting GPS_RAW_INT's own raw
-            // lat/lon here would interleave two offset position streams and sawtooth the track.
-            // Before the first GLOBAL_POSITION_INT (no fused fix yet) fall back to the raw value.
+            // GPS_RAW_INT owns fix type + sat count — cache them so GLOBAL_POSITION_INT reuses the same
+            // values instead of emitting a conflicting fix/0-sats (which made the UI flash).
+            fused.fix_type = fix_type;
+            fused.num_sat = gps.satellites_visible;
+
+            // Position comes from the fused GLOBAL_POSITION_INT solution (cached in `fused`) — emitting
+            // GPS_RAW_INT's own raw lat/lon here would interleave two offset position streams and
+            // sawtooth the track. Before the first GLOBAL_POSITION_INT (no fused fix yet) fall back to
+            // the raw value.
             let data = if fused.valid {
                 GpsData {
                     fix_type,
@@ -449,6 +461,14 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
                 }
             };
             let _ = app_handle.emit("telemetry-gps", &data);
+
+            // HDOP — GPS_RAW_INT.eph is HDOP × 100 (u16::MAX = unknown). Reuse the same stats event INAV
+            // uses (MSP_GPSSTATISTICS), so the frontend HDOP readout works identically for both protocols.
+            if gps.eph != u16::MAX {
+                let _ = app_handle.emit("telemetry-gps-stats", serde_json::json!({
+                    "hdop": gps.eph as f64 / 100.0,
+                }));
+            }
 
             // Per-sensor hardware health is owned by SYS_STATUS (real present/health bitmasks); the
             // GPS fix nuance (amber on <3D) is layered on top frontend-side from this message's fix.

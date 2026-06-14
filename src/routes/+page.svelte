@@ -265,7 +265,10 @@
         }
       }
     }
-    if (armed && isValidGpsCoordinate(t.lat, t.lon)) {
+    // Require a known flight mode before recording a track point: a GPS frame can arrive before the
+    // first post-handshake HEARTBEAT, and appending then bakes a grey "unknown-mode" leading segment
+    // into the (immutable) live track — visible as a grey start of the 3D trail until the next mode.
+    if (armed && isValidGpsCoordinate(t.lat, t.lon) && t.flightMode.primary) {
       appendLivePoint(t.lat, t.lon, t.altMsl, t.flightMode.primary, t.lastUpdate || Date.now());
     }
     // Home on arm: the FC sets home at the launch point. Authoritative (locked green "H") when
@@ -1961,6 +1964,15 @@
     void listen<{ lat: number; lon: number; alt: number }>('home-position', (event) => {
       const { lat, lon, alt } = event.payload;
       if (lat === 0 && lon === 0) return;
+      // The FC re-broadcasts HOME_POSITION (ArduPilot ~0.2 Hz), often with sub-metre jitter. Re-setting
+      // the stores on every tick churns every subscriber — writable stores emit even on an identical
+      // value — and the 3D mission overlay rebuilds, flickering its polylines. Only update on a real move.
+      const h = get(homePosition);
+      const unchanged = h.set && h.source === 'fc'
+        && Math.abs(h.lat - lat) < 5e-6   // ≈ 0.55 m
+        && Math.abs(h.lon - lon) < 5e-6
+        && Math.abs(h.alt - alt) < 1;
+      if (unchanged) return;
       homePosition.set({ lat, lon, alt, set: true, source: 'fc' }); // authoritative → locked green "H"
       launchPoint.set({ lat, lng: lon }); // pin the planning reference to the real home
     });

@@ -16,7 +16,7 @@
   }
     import { telemetry } from "$lib/stores/telemetry";
   import { liveTrack, type LiveTrackPoint } from "$lib/stores/liveTrack";
-  import { homePosition, homeLocked } from "$lib/stores/home";
+  import { homePosition, homeLocked, type HomePosition } from "$lib/stores/home";
   import { connection, type ConnectionStatus } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
   import { gcsLocation } from "$lib/stores/gcsLocation";
@@ -45,7 +45,14 @@
     mission, showMission, replayActive, launchPoint,
     hasLocation, toDeg, WpAction, type Waypoint, type Mission,
   } from "$lib/stores/mission";
-  import { wpIconSpec } from "$lib/helpers/missionIcons";
+  import { wpIconSpec, type WpIconSpec } from "$lib/helpers/missionIcons";
+  import {
+    arduMission, type ArduWaypoint,
+    MAV_FRAME_GLOBAL, MAV_FRAME_GLOBAL_TERRAIN_ALT, MAV_CMD_DO_JUMP,
+  } from "$lib/stores/missionArdupilot";
+  import { cmdHasLocation, cmdStandaloneCoordinate, cmdIsTakeoff } from "$lib/helpers/arduCommandCatalog";
+  import { arduWpIconSpec } from "$lib/helpers/missionIconsArdupilot";
+  import { autopilotSystem, type AutopilotSystem } from "$lib/stores/autopilotContext";
   import { activeWpNumber } from "$lib/stores/navStatus";
   import {
     buildDisplayNumbers, isFlightPathWp, findMissionEndIndex, findPreviousGeoWp,
@@ -151,8 +158,10 @@
   let unsubUserGeo: (() => void) | undefined;        // recompute when OS geolocation resolves
 
   // ── Mission overlay (mirrors the 2D map: same markers/lines + drop-lines) ──
-  let missionEntities: Cesium.Entity[] = [];
+  let missionEntities: Cesium.Entity[] = [];         // billboards (markers, launch, active glow)
+  let missionPrimitives: Cesium.Primitive[] = [];    // overlay lines — depth-test-free primitives (no z-fight)
   let missionRenderToken = 0;                        // guards async terrain races
+  let lastMissionSig = '';                           // signature of the drawn model → skip identical redraws
   let curMission: Mission = get(mission);
   let curShowMission = get(showMission);
   let curReplayActive = get(replayActive);
@@ -169,6 +178,19 @@
   let unsubReplayStore: (() => void) | undefined;
   let unsubLaunchStore: (() => void) | undefined;
   let unsubLiveTrack: (() => void) | undefined;
+
+  // ArduPilot mission overlay — separate model/store from INAV, but reuses the shared icon specs
+  // (arduWpIconSpec) and the same billboard/line/glow/drop-line primitives. The active autopilot
+  // system picks which mission renders (3D mirror of the 2D MissionLayer switcher).
+  let curArduMission: ArduWaypoint[] = get(arduMission);
+  let curAutopilotSystem: AutopilotSystem = get(autopilotSystem);
+  let curHome3d: HomePosition = get(homePosition);
+  // Last home we actually acted on. ArduPilot re-sends HOME_POSITION ~0.2 Hz and its reported home
+  // jitters sub-metre (EKF origin), so we re-render only when home *meaningfully* moved — otherwise the
+  // 5 s rebuild drops a frame on the mission polylines (flicker).
+  let lastRenderedHome3d: { set: boolean; lat: number; lon: number; alt: number; source: string } | null = null;
+  let unsubArduMission: (() => void) | undefined;
+  let unsubAutopilot: (() => void) | undefined;
 
   // Live trail — driven entirely by the `liveTrack` store (the full flown history since arm), so the
   // whole track renders in 3D regardless of when 3D was first opened, and at the correct height once
@@ -987,7 +1009,19 @@
     // reference is the orange "L" launch billboard instead. scheduleMissionRender() refreshes that
     // billboard's visibility when the lock state flips.
     unsubHome = homePosition.subscribe((home) => {
+      curHome3d = home; // ArduPilot REL/TERRAIN altitude reference + takeoff anchor
       if (!viewer) return;
+      // ArduPilot re-sends HOME_POSITION ~0.2 Hz and its reported home jitters sub-metre. Acting on each
+      // tick (move the marker, rebuild the mission overlay, request a frame) makes the depth-tested
+      // mission polylines drop a frame on re-add → a 5 s flicker. Act only on a meaningful change.
+      const lh = lastRenderedHome3d;
+      const changed = !lh
+        || lh.set !== home.set || lh.source !== home.source
+        || Math.abs(home.lat - lh.lat) > 1e-5   // ≈ 1.1 m
+        || Math.abs(home.lon - lh.lon) > 1e-5
+        || Math.abs(home.alt - lh.alt) > 1.0;    // 1 m
+      if (!changed) return;
+      lastRenderedHome3d = { set: home.set, lat: home.lat, lon: home.lon, alt: home.alt, source: home.source };
       if (home.set && (home.source === 'fc' || home.source === 'replay')) {
         updateHomePosition3D(home.lat, home.lon, home.alt);
       } else if (homeEntity) {
@@ -1059,6 +1093,9 @@
     unsubLaunchStore = launchPoint.subscribe((v) => { curLaunch = v; scheduleMissionRender(); });
     // Active target WP (live MSP_NAV_STATUS / replay) → re-render so its pulsing glow follows the FC.
     unsubActiveWp3d = activeWpNumber.subscribe((v) => { curActiveWp3d = v; scheduleMissionRender(); });
+    // ArduPilot mission overlay + autopilot-system switch (3D mirror of the 2D MissionLayer switcher).
+    unsubArduMission = arduMission.subscribe((m) => { curArduMission = m; scheduleMissionRender(); });
+    unsubAutopilot = autopilotSystem.subscribe((s) => { curAutopilotSystem = s; scheduleMissionRender(); });
 
     // Foreign-vehicle contacts: click to select (sync with list/2D), hover → pointer cursor.
     radar3dPickHandler = new Cesium.ScreenSpaceEventHandler(viewer.canvas);
@@ -1127,6 +1164,8 @@
     unsubReplayStore?.();
     unsubLaunchStore?.();
     unsubActiveWp3d?.();
+    unsubArduMission?.();
+    unsubAutopilot?.();
     unsubLiveTrack?.();
     unsubConnection?.();
     if (viewer && !viewer.isDestroyed()) {
@@ -2817,106 +2856,222 @@
     viewer.scene.requestRenderMode = !(wpPulseActive || anyAlert);
   }
 
+  // Overlay mission line — a depth-test-free Primitive so it stays visible through terrain (like the
+  // billboards) WITHOUT the z-fighting the old Entity dual-pass (material + depthFailMaterial) caused
+  // against the globe. Drawn straight (ArcType.NONE — legs are short) and never writes depth.
   function missionLine(positions: Cesium.Cartesian3[], cssColor: string, alpha: number, width: number, dash: boolean) {
+    if (!viewer || positions.length < 2) return;
     const color = Cesium.Color.fromCssColorString(cssColor).withAlpha(alpha);
-    const mat = () => dash
-      ? new Cesium.PolylineDashMaterialProperty({ color, dashLength: 10 })
-      : new Cesium.ColorMaterialProperty(color);
-    const ent = viewer!.entities.add({
-      polyline: { positions, width, material: mat(), depthFailMaterial: mat(), clampToGround: false },
+    const material = dash
+      ? Cesium.Material.fromType('PolylineDash', { color, dashLength: 16 })
+      : Cesium.Material.fromType('Color', { color });
+    const prim = new Cesium.Primitive({
+      geometryInstances: new Cesium.GeometryInstance({
+        geometry: new Cesium.PolylineGeometry({
+          positions,
+          width,
+          arcType: Cesium.ArcType.NONE,
+          vertexFormat: Cesium.PolylineMaterialAppearance.VERTEX_FORMAT,
+        }),
+      }),
+      appearance: new Cesium.PolylineMaterialAppearance({
+        material,
+        translucent: true,
+        // No depth test (always on top) and no depth write (doesn't occlude markers) → no terrain z-fight.
+        // getDefaultRenderState builds a correct translucent render state; it exists at runtime but is
+        // missing from the Cesium TS typings.
+        // @ts-expect-error — getDefaultRenderState is untyped in the Cesium typings
+        renderState: Cesium.Appearance.getDefaultRenderState(true, false, {
+          depthTest: { enabled: false },
+          depthMask: false,
+        }),
+      }),
+      asynchronous: false, // build now → no one-frame flash on rebuild
     });
-    missionEntities.push(ent);
+    viewer.scene.primitives.add(prim);
+    missionPrimitives.push(prim);
   }
 
   function scheduleMissionRender() { void renderMission3D(); }
 
+  // ── Unified mission overlay (INAV + ArduPilot) ──────────────────────
+  // One renderer, one geoid path, one set of draw primitives. The two autopilots differ only in how
+  // their mission model maps to geometry (INAV WpAction + alt_mode vs. ArduPilot MavCmd + frame), so
+  // each has a thin *adapter* (buildInavModel / buildArduModel) that resolves its waypoints to a
+  // protocol-neutral `Mission3DModel` in pure MSL. `renderMission3D` then draws any model identically —
+  // exactly the 2D pattern (shared primitives + a per-platform mapper), now for 3D too.
+
+  interface P3 { lat: number; lon: number; altMsl: number; }
+  interface Mission3DWp {
+    lat: number; lon: number; altMsl: number;
+    ground: number | null;        // terrain MSL beneath the WP (drop-line target); null = no terrain
+    spec: WpIconSpec;             // shared icon SVG spec (same source 2D uses)
+    active: boolean;              // FC's current target WP → pulsing glow
+    greyed: boolean;              // dimmed (beyond the mission end, INAV)
+  }
+  interface Mission3DLine { positions: P3[]; color: string; alpha: number; width: number; dashed: boolean; }
+  interface Mission3DModel {
+    wps: Mission3DWp[];
+    lines: Mission3DLine[];       // flight path + jump/RTH/launch connectors, pre-styled
+    launch: { lat: number; lon: number; groundMsl: number | null } | null; // orange "L" billboard (INAV)
+    geoidRef: { lat: number; lon: number } | null; // reference point for the geoid offset
+  }
+
+  /** Draw a resolved mission model. Pure + synchronous: the geoid offset is applied here (the model is
+   *  MSL), so the model build stays protocol-neutral and terrain/geoid handling lives in one place. */
+  function drawMission3DModel(model: Mission3DModel) {
+    if (!viewer) return;
+    const toCart = (p: P3) => Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.altMsl + geoidOffset);
+
+    // Lines (flight path, jump/RTH/launch connectors).
+    for (const ln of model.lines) {
+      if (ln.positions.length < 2) continue;
+      missionLine(ln.positions.map(toCart), ln.color, ln.alpha, ln.width, ln.dashed);
+    }
+
+    // Launch "L" marker (the adapter already applied its visibility gating).
+    if (model.launch) {
+      const h = (model.launch.groundMsl ?? 0) + geoidOffset;
+      missionBillboard(model.launch.lon, model.launch.lat, h, LAUNCH_SVG, 32, 44, 16, 44);
+    }
+
+    // Waypoints — drop-line to the ground, active-WP glow (behind), then the marker billboard.
+    let anyActiveWp = false;
+    for (const wp of model.wps) {
+      const top = toCart(wp);
+      if (wp.ground != null) {
+        const bottom = toCart({ lat: wp.lat, lon: wp.lon, altMsl: wp.ground });
+        missionLine([top, bottom], '#000000', 0.85, 3.5, true);  // outline
+        missionLine([top, bottom], '#ffffff', 0.95, 1.5, true);  // white dashed
+      }
+      const h = wp.altMsl + geoidOffset;
+      if (wp.active) { addActiveWpGlow(wp.lon, wp.lat, h, wp.spec); anyActiveWp = true; }
+      missionBillboard(wp.lon, wp.lat, h, wp.spec.svg, wp.spec.width, wp.spec.height, wp.spec.anchorX, wp.spec.anchorY, wp.greyed ? 0.35 : 1);
+    }
+
+    wpPulseActive = anyActiveWp;
+    syncContinuousRender(); // (de)activate continuous rendering for the pulse
+    viewer.scene.requestRender();
+  }
+
   async function renderMission3D() {
     if (!viewer) return;
     const token = ++missionRenderToken;
-    for (const e of missionEntities) viewer.entities.remove(e);
-    missionEntities = [];
 
-    // Replay → follow the MISSION toggle; planning/live → always shown.
+    // Build the protocol-neutral model (the only async part: terrain sampling). Replay → follow the
+    // MISSION toggle; planning/live → always shown.
     const visible = !curReplayActive || curShowMission;
-    const wps = curMission.waypoints;
-    const hasGeo = wps.some((w) => hasLocation(w.action) && !(w.lat === 0 && w.lon === 0));
-    if (!visible || !hasGeo) { viewer.scene.requestRender(); return; }
+    const model = !visible
+      ? null
+      : curAutopilotSystem === 'ardupilot'
+        ? await buildArduModel(token)
+        : await buildInavModel(token);
+    if (token !== missionRenderToken || !viewer) return; // superseded while building
 
-    // The mission sits at `altMsl + geoidOffset`, so it must WAIT for the geoid offset.
-    // computeGeoidOnce is single-flight: if a track/live fix is already computing it, we
-    // join that promise (same offset); otherwise we derive it from the first waypoint
-    // (mission preview with no live/replay). On failure (no terrain) we draw at offset 0.
-    if (!geoidComputed) {
-      const g = wps.find((w) => hasLocation(w.action) && !(w.lat === 0 && w.lon === 0));
-      if (g) {
-        await computeGeoidOnce(toDeg(g.lat), toDeg(g.lon));
-        if (token !== missionRenderToken || !viewer) return; // superseded while awaiting
-      }
+    // The mission sits at `altMsl + geoidOffset`, so the offset must be ready before we draw.
+    // computeGeoidOnce is single-flight + cached: a track/live fix may already be computing it.
+    if (!geoidComputed && model?.geoidRef) {
+      await computeGeoidOnce(model.geoidRef.lat, model.geoidRef.lon);
+      if (token !== missionRenderToken || !viewer) return; // superseded while awaiting
     }
 
-    const { alts, launchGround } = await resolveMissionAltitudes(wps, curLaunch);
-    if (token !== missionRenderToken || !viewer) return; // superseded by a newer render
+    // Skip the redraw when the result is visually identical to what's already on screen. Many triggers
+    // (a jittering HOME re-broadcasting launchPoint, redundant store sets) ask for a re-render without
+    // any real change; rebuilding identical entities makes the depth-tested polylines drop a frame
+    // (the 5 s flicker). Quantised so sub-metre FC jitter doesn't count as a change.
+    const sig = model ? missionModelSignature(model) : '';
+    if (sig === lastMissionSig && missionEntities.length > 0) return;
+    lastMissionSig = sig;
 
-    const wpPos = (i: number): Cesium.Cartesian3 | null => {
+    // From here on it's synchronous: clear the old entities/primitives and draw the new ones in the SAME
+    // frame, so the overlay never blanks between renders (no async gap — fixes the flicker on home ticks).
+    for (const e of missionEntities) viewer.entities.remove(e);
+    missionEntities = [];
+    for (const p of missionPrimitives) viewer.scene.primitives.remove(p);
+    missionPrimitives = [];
+    if (!model) { wpPulseActive = false; syncContinuousRender(); viewer.scene.requestRender(); return; }
+    drawMission3DModel(model);
+  }
+
+  /** A quantised fingerprint of the drawn model: positions to ~0.5 m, plus colours/flags/icon hashes.
+   *  Identical fingerprint ⇒ nothing visible changed ⇒ skip the redraw (avoids polyline-rebuild flicker). */
+  function missionModelSignature(m: Mission3DModel): string {
+    const q = (n: number) => Math.round(n * 2) / 2;            // 0.5 m for heights
+    const qc = (n: number) => Math.round(n * 2e5) / 2e5;       // ≈ 0.55 m for lat/lon
+    const hash = (s: string) => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return h; };
+    const parts: string[] = [`g${q(geoidOffset)}`];
+    for (const w of m.wps) parts.push(`w${qc(w.lat)},${qc(w.lon)},${q(w.altMsl)},${w.active ? 1 : 0},${w.greyed ? 1 : 0},${hash(w.spec.svg)}`);
+    for (const ln of m.lines) {
+      let lp = `l${ln.color}${ln.dashed ? 'd' : ''}${ln.width}`;
+      for (const p of ln.positions) lp += `;${qc(p.lat)},${qc(p.lon)},${q(p.altMsl)}`;
+      parts.push(lp);
+    }
+    if (m.launch) parts.push(`L${qc(m.launch.lat)},${qc(m.launch.lon)},${q(m.launch.groundMsl ?? 0)}`);
+    return parts.join('|');
+  }
+
+  // ── INAV mission adapter ────────────────────────────────────────────
+  async function buildInavModel(token: number): Promise<Mission3DModel | null> {
+    const wps = curMission.waypoints;
+    const firstGeoIdx = wps.findIndex((w) => hasLocation(w.action) && !(w.lat === 0 && w.lon === 0));
+    if (firstGeoIdx < 0) return null;
+
+    const { alts, launchGround } = await resolveMissionAltitudes(wps, curLaunch);
+    if (token !== missionRenderToken) return null;
+
+    const wpMsl = (i: number): P3 | null => {
       const a = alts.get(i);
-      if (!a) return null;
-      return Cesium.Cartesian3.fromDegrees(toDeg(wps[i].lon), toDeg(wps[i].lat), a.altMsl + geoidOffset);
+      return a ? { lat: toDeg(wps[i].lat), lon: toDeg(wps[i].lon), altMsl: a.altMsl } : null;
     };
 
     const displayNums = buildDisplayNumbers(wps);
     const endIdx = findMissionEndIndex(wps);
+    const model: Mission3DModel = {
+      wps: [], lines: [], launch: null,
+      geoidRef: { lat: toDeg(wps[firstGeoIdx].lat), lon: toDeg(wps[firstGeoIdx].lon) },
+    };
 
-    // Launch → first waypoint connector (orange dashed), + launch marker.
+    // Launch → first-waypoint connector (orange dashed) + the "L" marker (live manual reference only;
+    // hidden when FC-locked — the green "H" represents the same point — and in offline planning).
     if (curLaunch) {
-      const firstGeo = wps.findIndex((w) => hasLocation(w.action) && !(w.lat === 0 && w.lon === 0));
-      const fp = firstGeo >= 0 ? wpPos(firstGeo) : null;
+      const fp = wpMsl(firstGeoIdx);
       if (fp) {
-        // Anchor the launch marker on the terrain at the launch point.
-        const launchHeight = (launchGround ?? 0) + geoidOffset;
-        const lpos = Cesium.Cartesian3.fromDegrees(curLaunch.lng, curLaunch.lat, launchHeight);
-        missionLine([lpos, fp], '#f39c12', 0.7, 2, true);
-        // Shown only during an active primary connection (live manual reference); hidden when FC-locked
-        // (the green "H" home entity represents the same point) and in offline planning.
+        const launchP: P3 = { lat: curLaunch.lat, lon: curLaunch.lng, altMsl: launchGround ?? 0 };
+        model.lines.push({ positions: [launchP, fp], color: '#f39c12', alpha: 0.7, width: 2, dashed: true });
         if (!get(homeLocked) && get(connection).status === 'connected') {
-          missionBillboard(curLaunch.lng, curLaunch.lat, launchHeight, LAUNCH_SVG, 32, 44, 16, 44);
+          model.launch = { lat: curLaunch.lat, lon: curLaunch.lng, groundMsl: launchGround ?? 0 };
         }
       }
     }
 
-    // Flight path (active blue + greyed-beyond-end grey dashed), markers, modifier lines, drop-lines.
-    const fpActive: Cesium.Cartesian3[] = [];
-    const fpGreyed: Cesium.Cartesian3[] = [];
-    let enteredGreyed = false;
-    let anyActiveWp = false; // set when the active target WP's glow is drawn → continuous render
-
+    const fpActive: P3[] = [];
+    const fpGreyed: P3[] = [];
     for (let i = 0; i < wps.length; i++) {
       const wp = wps[i];
       if (!hasLocation(wp.action) || (wp.lat === 0 && wp.lon === 0)) {
-        // Jump / RTH connector lines (use the previous geo-WP as origin)
+        // Jump / RTH connector lines (origin = the previous geo waypoint).
         if (wp.action === WpAction.Jump && wp.p1 > 0) {
           const src = findPreviousGeoWp(wps, i);
           const tgtIdx = wp.p1 - 1;
           const srcIdx = src ? wps.indexOf(src) : -1;
-          const a = srcIdx >= 0 ? wpPos(srcIdx) : null;
-          const b = hasLocation(wps[tgtIdx]?.action) ? wpPos(tgtIdx) : null;
-          if (a && b) missionLine([a, b], '#8e44ad', 0.8, 2, true);
+          const a = srcIdx >= 0 ? wpMsl(srcIdx) : null;
+          const b = hasLocation(wps[tgtIdx]?.action) ? wpMsl(tgtIdx) : null;
+          if (a && b) model.lines.push({ positions: [a, b], color: '#8e44ad', alpha: 0.8, width: 2, dashed: true });
         }
         if (wp.action === WpAction.Rth) {
           const src = findPreviousGeoWp(wps, i);
           const srcIdx = src ? wps.indexOf(src) : -1;
-          const firstGeo = wps.findIndex((w) => isFlightPathWp(w.action) && !(w.lat === 0 && w.lon === 0));
-          const a = srcIdx >= 0 ? wpPos(srcIdx) : null;
-          const b = firstGeo >= 0 ? wpPos(firstGeo) : null;
-          if (a && b) missionLine([a, b], '#e67e22', 0.7, 2, true);
+          const firstFp = wps.findIndex((w) => isFlightPathWp(w.action) && !(w.lat === 0 && w.lon === 0));
+          const a = srcIdx >= 0 ? wpMsl(srcIdx) : null;
+          const b = firstFp >= 0 ? wpMsl(firstFp) : null;
+          if (a && b) model.lines.push({ positions: [a, b], color: '#e67e22', alpha: 0.7, width: 2, dashed: true });
         }
         continue;
       }
-
-      const p = wpPos(i);
+      const p = wpMsl(i);
       if (!p) continue;
+      const a = alts.get(i);
       const greyed = endIdx >= 0 && i > endIdx;
-      if (greyed) enteredGreyed = true;
-
       if (isFlightPathWp(wp.action)) {
         if (!greyed) fpActive.push(p);
         else {
@@ -2924,34 +3079,127 @@
           fpGreyed.push(p);
         }
       }
-
-      // Drop-line to the ground (white dashed + black dashed outline behind it).
-      const a = alts.get(i);
-      if (a) {
-        const top = p;
-        const bottom = Cesium.Cartesian3.fromDegrees(toDeg(wp.lon), toDeg(wp.lat), (a.ground ?? 0) + geoidOffset);
-        missionLine([top, bottom], '#000000', 0.85, 3.5, true);  // outline
-        missionLine([top, bottom], '#ffffff', 0.95, 1.5, true);  // white dashed
-      }
-
-      // Waypoint marker — same SVG as 2D, as a viewport-facing billboard. The active target WP gets a
-      // pulsing green glow behind its (static) marker, mirroring the 2D `mission-wp-active` glow.
-      const wpHeight = a ? a.altMsl + geoidOffset : 0;
-      const spec = wpIconSpec(wp, displayNums.get(i) ?? 0, false);
-      if (!greyed && curActiveWp3d > 0 && wp.number === curActiveWp3d) {
-        addActiveWpGlow(toDeg(wp.lon), toDeg(wp.lat), wpHeight, spec); // behind the marker (added first)
-        anyActiveWp = true;
-      }
-      missionBillboard(toDeg(wp.lon), toDeg(wp.lat), wpHeight, spec.svg, spec.width, spec.height, spec.anchorX, spec.anchorY, greyed ? 0.35 : 1);
+      model.wps.push({
+        lat: p.lat, lon: p.lon, altMsl: p.altMsl, ground: a?.ground ?? null,
+        spec: wpIconSpec(wp, displayNums.get(i) ?? 0, false),
+        active: !greyed && curActiveWp3d > 0 && wp.number === curActiveWp3d,
+        greyed,
+      });
     }
 
-    if (fpActive.length > 1) missionLine(fpActive, '#37a8db', 0.8, 3, false);
-    if (fpGreyed.length > 1) missionLine(fpGreyed, '#666666', 0.4, 2, true);
-    void enteredGreyed;
+    if (fpActive.length > 1) model.lines.push({ positions: fpActive, color: '#37a8db', alpha: 0.8, width: 3, dashed: false });
+    if (fpGreyed.length > 1) model.lines.push({ positions: fpGreyed, color: '#666666', alpha: 0.4, width: 2, dashed: true });
+    return model;
+  }
 
-    wpPulseActive = anyActiveWp;
-    syncContinuousRender(); // (de)activate continuous rendering for the pulse
-    viewer.scene.requestRender();
+  // ── ArduPilot mission adapter ───────────────────────────────────────
+  // The location/altitude resolution is ArduPilot-specific (MavCmd + per-WP frame, takeoff anchoring);
+  // everything visual then flows through the shared model + renderer.
+
+  /** Takeoff carries no real coords — anchor it on FC home, else the centroid of the located waypoints. */
+  function arduTakeoffLatLon3d(wps: ArduWaypoint[]): { lat: number; lon: number } | null {
+    if (curHome3d.set) return { lat: curHome3d.lat, lon: curHome3d.lon };
+    let sLat = 0, sLon = 0, n = 0;
+    for (const w of wps) {
+      if (cmdIsTakeoff(w.command) || !cmdHasLocation(w.command)) continue;
+      if (w.lat === 0 && w.lon === 0) continue;
+      sLat += w.lat / 1e7; sLon += w.lon / 1e7; n++;
+    }
+    return n > 0 ? { lat: sLat / n, lon: sLon / n } : null;
+  }
+
+  function arduWpLatLon3d(wp: ArduWaypoint, wps: ArduWaypoint[]): { lat: number; lon: number } | null {
+    if (cmdIsTakeoff(wp.command)) return arduTakeoffLatLon3d(wps);
+    if (wp.lat === 0 && wp.lon === 0) return null;
+    return { lat: wp.lat / 1e7, lon: wp.lon / 1e7 };
+  }
+
+  interface ArduWpAlt { altMsl: number; ground: number | null; lat: number; lon: number; }
+
+  /** Resolve each ArduPilot waypoint to MSL using its altitude frame (AMSL = value, REL = home-MSL +
+   *  value, TERRAIN = terrain + value) and sample the terrain ground beneath it for the drop-line. */
+  async function resolveArduAltitudes3d(wps: ArduWaypoint[], homeRefMsl: number | null): Promise<Map<number, ArduWpAlt>> {
+    const out = new Map<number, ArduWpAlt>();
+    for (let i = 0; i < wps.length; i++) {
+      const wp = wps[i];
+      if (!cmdHasLocation(wp.command) && !cmdStandaloneCoordinate(wp.command)) continue;
+      const ll = arduWpLatLon3d(wp, wps);
+      if (!ll) continue;
+      const ground = await invoke<number | null>('terrain_elevation', { lat: ll.lat, lon: ll.lon });
+      let altMsl: number;
+      if (wp.frame === MAV_FRAME_GLOBAL) altMsl = wp.alt;                                          // AMSL
+      else if (wp.frame === MAV_FRAME_GLOBAL_TERRAIN_ALT) altMsl = (ground ?? homeRefMsl ?? 0) + wp.alt; // TERRAIN
+      else altMsl = (homeRefMsl ?? 0) + wp.alt;                                                    // REL
+      out.set(i, { altMsl, ground, lat: ll.lat, lon: ll.lon });
+    }
+    return out;
+  }
+
+  async function buildArduModel(token: number): Promise<Mission3DModel | null> {
+    const wps = curArduMission;
+    const hasGeo = wps.some((w) => cmdHasLocation(w.command) && (cmdIsTakeoff(w.command) || !(w.lat === 0 && w.lon === 0)));
+    if (!hasGeo) return null;
+
+    const g = wps.find((w) => cmdHasLocation(w.command) && !cmdIsTakeoff(w.command) && !(w.lat === 0 && w.lon === 0));
+    const geoidRef = g ? { lat: g.lat / 1e7, lon: g.lon / 1e7 } : (curHome3d.set ? { lat: curHome3d.lat, lon: curHome3d.lon } : null);
+
+    // REL reference: the FC home MSL if known, else terrain under the takeoff/first waypoint (planning).
+    let homeRefMsl: number | null = curHome3d.set ? curHome3d.alt : null;
+    if (homeRefMsl == null) {
+      const anchor = arduTakeoffLatLon3d(wps);
+      if (anchor) {
+        homeRefMsl = await invoke<number | null>('terrain_elevation', { lat: anchor.lat, lon: anchor.lon });
+        if (token !== missionRenderToken) return null;
+      }
+    }
+
+    const alts = await resolveArduAltitudes3d(wps, homeRefMsl);
+    if (token !== missionRenderToken) return null;
+
+    const wpMsl = (i: number): P3 | null => {
+      const a = alts.get(i);
+      return a ? { lat: a.lat, lon: a.lon, altMsl: a.altMsl } : null;
+    };
+
+    const model: Mission3DModel = { wps: [], lines: [], launch: null, geoidRef };
+    const fp: P3[] = [];
+    const fpIdx: number[] = [];
+
+    for (let i = 0; i < wps.length; i++) {
+      const wp = wps[i];
+      if (cmdHasLocation(wp.command) || cmdStandaloneCoordinate(wp.command)) {
+        const a = alts.get(i);
+        const p = a ? wpMsl(i) : null;
+        if (a && p) {
+          if (cmdHasLocation(wp.command)) { fp.push(p); fpIdx.push(i); }
+          const displayNum = i + 1;
+          model.wps.push({
+            lat: p.lat, lon: p.lon, altMsl: p.altMsl, ground: a.ground,
+            spec: arduWpIconSpec(wp, displayNum, false),
+            active: curActiveWp3d > 0 && displayNum === curActiveWp3d,
+            greyed: false,
+          });
+        }
+      }
+
+      // DO_JUMP connector (previous located WP → target), purple dashed — mirrors the 2D layer.
+      if (wp.command === MAV_CMD_DO_JUMP && wp.param1 > 0) {
+        const tIdx = Math.round(wp.param1) - 1;
+        let prevLocIdx = -1;
+        for (let k = i - 1; k >= 0; k--) { if (cmdHasLocation(wps[k].command)) { prevLocIdx = k; break; } }
+        const a = prevLocIdx >= 0 ? wpMsl(prevLocIdx) : null;
+        const b = wps[tIdx] && cmdHasLocation(wps[tIdx].command) ? wpMsl(tIdx) : null;
+        if (a && b) model.lines.push({ positions: [a, b], color: '#8e44ad', alpha: 0.8, width: 2, dashed: true });
+      }
+    }
+
+    // Flight-path legs (blue); a leg touching a takeoff is dashed (its position is an anchor estimate).
+    for (let s = 0; s < fp.length - 1; s++) {
+      const loose = cmdIsTakeoff(wps[fpIdx[s]]?.command) || cmdIsTakeoff(wps[fpIdx[s + 1]]?.command);
+      model.lines.push({ positions: [fp[s], fp[s + 1]], color: '#37a8db', alpha: 0.8, width: 3, dashed: loose });
+    }
+
+    return model;
   }
 
   // ── Playback Marker ────────────────────────────────────────────────
