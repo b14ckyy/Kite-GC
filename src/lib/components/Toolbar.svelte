@@ -54,6 +54,27 @@
     return types[telem.fixType] || `FIX:${telem.fixType}`;
   }
 
+  // Sensor-health bar: one tile per sensor, shown only when present (state !== 0), so the bar adapts
+  // to the airframe (rangefinder/pitot appear only when equipped). State 0=NONE / 1=OK / 2|3=fault.
+  // GPS additionally goes amber while the fix is below 3D. Fed by SYS_STATUS (MAVLink) or
+  // MSP_SENSOR_STATUS (INAV) — both land in the same telemetry fields.
+  type SensorTile = { key: string; state: number; label: string; tooltip: string; warn: boolean };
+  const sensorTiles = $derived<SensorTile[]>(
+    [
+      { key: 'gyro', state: telem.sensorGyro, label: $t('sensors.gyro'), tooltip: $t('sensors.gyroTooltip'), warn: false },
+      { key: 'acc', state: telem.sensorAcc, label: $t('sensors.acc'), tooltip: $t('sensors.accTooltip'), warn: false },
+      { key: 'mag', state: telem.sensorMag, label: $t('sensors.mag'), tooltip: $t('sensors.magTooltip'), warn: false },
+      { key: 'baro', state: telem.sensorBaro, label: $t('sensors.baro'), tooltip: $t('sensors.baroTooltip'), warn: false },
+      { key: 'gps', state: telem.sensorGps, label: $t('sensors.gps'), tooltip: `GPS: ${getGpsFixLabel()} ${telem.numSat}S`, warn: telem.sensorGps === 1 && telem.fixType < 2 },
+      { key: 'rangefinder', state: telem.sensorRangefinder, label: $t('sensors.rangefinder'), tooltip: $t('sensors.rangefinderTooltip'), warn: false },
+      { key: 'pitot', state: telem.sensorPitot, label: $t('sensors.pitot'), tooltip: $t('sensors.pitotTooltip'), warn: false },
+    ].filter((s) => s.state !== 0)
+  );
+
+  // EKF estimator tile (ArduPilot only — INAV never sets ekfStatus, so it stays hidden). Label shows
+  // the active core; colour follows the estimator health.
+  const ekfLabel = $derived(telem.ekfType === 2 ? 'EKF2' : telem.ekfType === 3 ? 'EKF3' : 'EKF');
+
   // Double-click the title bar to maximize/restore. Windows/macOS drag regions already do this
   // natively, so only Linux/GTK needs the manual handler (otherwise it would toggle twice).
   const isLinux = typeof navigator !== 'undefined' && navigator.userAgent.includes('Linux');
@@ -73,11 +94,20 @@
   </div>
   <div class="toolbar-center" data-tauri-drag-region>
     <div class="sensor-bar">
-      <div class="sensor" class:active={telem.sensorGyro === 1} class:error={telem.sensorGyro === 3} title={$t('sensors.gyroTooltip')}>{$t('sensors.gyro')}</div>
-      <div class="sensor" class:active={telem.sensorAcc === 1} class:error={telem.sensorAcc === 3} title={$t('sensors.accTooltip')}>{$t('sensors.acc')}</div>
-      <div class="sensor" class:active={telem.sensorMag === 1} class:error={telem.sensorMag === 3} title={$t('sensors.magTooltip')}>{$t('sensors.mag')}</div>
-      <div class="sensor" class:active={telem.sensorBaro === 1} class:error={telem.sensorBaro === 3} title={$t('sensors.baroTooltip')}>{$t('sensors.baro')}</div>
-      <div class="sensor" class:active={telem.sensorGps === 1 && telem.fixType >= 2} class:warning={telem.sensorGps === 1 && telem.fixType < 2} class:error={telem.sensorGps === 3} title="GPS: {getGpsFixLabel()} {telem.numSat}S">{$t('sensors.gps')}</div>
+      {#each sensorTiles as s (s.key)}
+        <div class="sensor"
+          class:active={s.state === 1 && !s.warn}
+          class:warning={s.warn}
+          class:error={s.state >= 2}
+          title={s.tooltip}>{s.label}</div>
+      {/each}
+      {#if telem.ekfStatus !== 0}
+        <div class="sensor"
+          class:active={telem.ekfStatus === 1}
+          class:warning={telem.ekfStatus === 2}
+          class:error={telem.ekfStatus === 3}
+          title={$t('sensors.ekfTooltip')}>{ekfLabel}</div>
+      {/if}
     </div>
   </div>
   <div class="toolbar-right" data-tauri-drag-region>

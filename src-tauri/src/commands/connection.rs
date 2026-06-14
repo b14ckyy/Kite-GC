@@ -141,6 +141,7 @@ pub async fn connect(
             byte_transport,
             attitude_rate_hz,
             position_rate_hz,
+            airspeed_enabled,
             mavlink_full_telemetry,
             flight_log_enabled,
             flight_log_db_enabled,
@@ -381,6 +382,7 @@ fn connect_mavlink(
     mut byte_transport: Box<dyn ByteTransport>,
     attitude_rate_hz: Option<f64>,
     position_rate_hz: Option<f64>,
+    airspeed_enabled: Option<bool>,
     mavlink_full_telemetry: Option<bool>,
     flight_log_enabled: Option<bool>,
     flight_log_db_enabled: Option<bool>,
@@ -413,8 +415,13 @@ fn connect_mavlink(
             fc_sysid,
             attitude_rate_hz.unwrap_or(5.0),
             position_rate_hz.unwrap_or(2.0),
+            airspeed_enabled.unwrap_or(false),
         );
     }
+
+    // Ask the FC which EKF core is active (AHRS_EKF_TYPE) for the header EKF indicator. One-shot,
+    // fire-and-forget — the PARAM_VALUE reply is decoded by the handler thread once it starts.
+    mavlink_proto::params::request_ekf_type(&mut *byte_transport, fc_sysid);
 
     // ── Flight recorder setup ────────────────────────────────────────────
     let flight_log_settings = FlightLogSettings {

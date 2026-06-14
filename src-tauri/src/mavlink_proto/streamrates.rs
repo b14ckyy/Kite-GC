@@ -27,10 +27,11 @@ const ID_SYS_STATUS: f32 = 1.0;
 const ID_GPS_RAW_INT: f32 = 24.0;
 const ID_GLOBAL_POSITION_INT: f32 = 33.0;
 const ID_MISSION_CURRENT: f32 = 42.0;
-const ID_NAV_CONTROLLER_OUTPUT: f32 = 62.0;
+const ID_RC_CHANNELS: f32 = 65.0;
 const ID_VFR_HUD: f32 = 74.0;
 const ID_ATTITUDE: f32 = 30.0;
 const ID_BATTERY_STATUS: f32 = 147.0;
+const ID_EKF_STATUS_REPORT: f32 = 193.0;
 const ID_HOME_POSITION: f32 = 242.0;
 
 // Rate kinds for the wanted messages (resolved against the two settings at apply time).
@@ -42,13 +43,17 @@ const R_HOME_LOW: u8 = 3;
 /// Wanted messages: (message_id, rate_kind). Single source of truth — also drives the reset list.
 const WANTED: &[(f32, u8)] = &[
     (ID_ATTITUDE, R_ATTITUDE),
-    (ID_GPS_RAW_INT, R_POSITION),
     (ID_GLOBAL_POSITION_INT, R_POSITION),
+    // GPS_RAW_INT now contributes only fix type / sat count / HDOP (slow-changing) — the position,
+    // ground speed and course all come from the fused GLOBAL_POSITION_INT, so 1 Hz is plenty.
+    (ID_GPS_RAW_INT, R_FIXED_1HZ),
+    // VFR_HUD is consumed only for airspeed — gated on the airspeed module (see apply_stream_rates).
     (ID_VFR_HUD, R_POSITION),
     (ID_SYS_STATUS, R_FIXED_1HZ),
     (ID_BATTERY_STATUS, R_FIXED_1HZ),
-    (ID_NAV_CONTROLLER_OUTPUT, R_FIXED_1HZ),
+    (ID_RC_CHANNELS, R_FIXED_1HZ), // RSSI (link quality)
     (ID_MISSION_CURRENT, R_FIXED_1HZ),
+    (ID_EKF_STATUS_REPORT, R_FIXED_1HZ),
     (ID_HOME_POSITION, R_HOME_LOW),
 ];
 
@@ -58,7 +63,7 @@ const BALLAST_IDS: &[f32] = &[
     27.0,  // RAW_IMU
     29.0,  // SCALED_PRESSURE
     36.0,  // SERVO_OUTPUT_RAW
-    65.0,  // RC_CHANNELS
+    // 65 (RC_CHANNELS) is now WANTED at 1 Hz — it is our RSSI source.
     116.0, // SCALED_IMU2
     125.0, // POWER_STATUS
     129.0, // SCALED_IMU3
@@ -69,8 +74,9 @@ const BALLAST_IDS: &[f32] = &[
     163.0, // AHRS
     165.0, // HWSTATUS
     178.0, // AHRS2
-    182.0, // AHRS3
-    193.0, // EKF_STATUS_REPORT
+    // 182 (AHRS3) intentionally omitted: obsolete in modern ArduPilot (no longer produced), so a
+    // SET_MESSAGE_INTERVAL for it makes the FC emit "No ap_message for mavlink id (182)" on connect.
+    // 193 (EKF_STATUS_REPORT) is now WANTED at 1 Hz — it drives the header EKF indicator.
     241.0, // VIBRATION
 ];
 
@@ -101,13 +107,21 @@ pub fn apply_stream_rates(
     fc_sysid: u8,
     attitude_hz: f64,
     position_hz: f64,
+    airspeed_enabled: bool,
 ) {
     let header = codec::gcs_header();
     let mut seq = MavSequence::new();
 
     let mut sent = 0usize;
     for &(msg_id, kind) in WANTED {
-        let interval = hz_to_interval_us(rate_hz(kind, attitude_hz, position_hz));
+        // VFR_HUD is consumed only for airspeed: disable it entirely unless the airspeed module is on
+        // (sent as -1, not skipped, because SET_MESSAGE_INTERVAL is sticky — a prior session may have
+        // enabled it).
+        let interval = if msg_id == ID_VFR_HUD && !airspeed_enabled {
+            -1.0
+        } else {
+            hz_to_interval_us(rate_hz(kind, attitude_hz, position_hz))
+        };
         if send_set_interval(transport, &header, &mut seq, fc_sysid, msg_id, interval) {
             sent += 1;
         }
@@ -119,8 +133,8 @@ pub fn apply_stream_rates(
     }
 
     eprintln!(
-        "[MAVLINK-RATES] reduced stream config: attitude={:.0}Hz, position={:.0}Hz, {} SET_MESSAGE_INTERVAL sent ({} disabled)",
-        attitude_hz, position_hz, sent, BALLAST_IDS.len()
+        "[MAVLINK-RATES] reduced stream config: attitude={:.0}Hz, position={:.0}Hz, airspeed={}, {} SET_MESSAGE_INTERVAL sent ({} disabled)",
+        attitude_hz, position_hz, airspeed_enabled, sent, BALLAST_IDS.len()
     );
 }
 

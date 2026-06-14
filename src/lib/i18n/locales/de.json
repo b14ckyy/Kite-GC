@@ -30,10 +30,15 @@
     "mag": "MAG",
     "baro": "BARO",
     "gps": "GPS",
+    "rangefinder": "RNGFND",
+    "pitot": "PITOT",
     "gyroTooltip": "Gyroskop",
     "accTooltip": "Beschleunigungssensor",
     "magTooltip": "Magnetometer",
-    "baroTooltip": "Barometer"
+    "baroTooltip": "Barometer",
+    "rangefinderTooltip": "Abstandssensor (Rangefinder)",
+    "pitotTooltip": "Pitot- / Fahrtmesssensor",
+    "ekfTooltip": "EKF-Schätzer-Status (grün = OK, gelb = eingeschränkt, rot = fehlerhaft)"
   },
   "gps": {
     "noFix": "KEIN FIX",
@@ -307,6 +312,11 @@
     "defaultPhTime": "Standard-PH-Zeit",
     "alerts": "Warnungen",
     "altitude": "Höhe",
+    "systemMessages": "Systemmeldungen",
+    "sysMsgOff": "Aus",
+    "sysMsgError": "Fehler",
+    "sysMsgWarning": "Warnungen",
+    "sysMsgAll": "Alle",
     "alertThresholdsHint": "Warnschwellen. 0 = deaktiviert.",
     "hudWidgets": "HUD Widgets",
     "rateHint": "Ratenänderungen gelten ab nächster Verbindung.",

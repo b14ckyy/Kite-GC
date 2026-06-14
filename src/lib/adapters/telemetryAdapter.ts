@@ -61,6 +61,10 @@ export function toTelemetryData(r: TelemetryRecord, fcVariant = 'INAV'): Telemet
     sensorPitot: 0,
     sensorOpflow: 0,
 
+    // EKF estimator — live-only (not recorded), default to hidden on replay
+    ekfStatus: 0,
+    ekfType: 0,
+
     // Flight mode (canonical) & navigation state
     flightMode: {
       primary: r.mode_primary ?? '',

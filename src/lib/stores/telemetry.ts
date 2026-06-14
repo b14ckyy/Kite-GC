@@ -57,6 +57,12 @@ export interface TelemetryData {
   sensorPitot: number;
   sensorOpflow: number;
 
+  // EKF estimator health (ArduPilot only; INAV never emits these so the tile stays hidden)
+  // ekfStatus: 0=none/unknown, 1=OK (green), 2=warning (amber), 3=error (red)
+  // ekfType: 0=unknown, 2=EKF2, 3=EKF3 (from the AHRS_EKF_TYPE parameter)
+  ekfStatus: number;
+  ekfType: number;
+
   // Flight mode (canonical, protocol-agnostic — see flightModeRegistry) & navigation
   flightMode: FlightModeState;
   navState: number;
@@ -79,6 +85,7 @@ const defaultTelemetry: TelemetryData = {
   armingFlags: 0, cpuLoad: 0, sensorStatus: 0,
   sensorGyro: 0, sensorAcc: 0, sensorMag: 0, sensorBaro: 0,
   sensorGps: 0, sensorRangefinder: 0, sensorPitot: 0, sensorOpflow: 0,
+  ekfStatus: 0, ekfType: 0,
   flightMode: { primary: '', modifiers: [] }, navState: 0, activeWpNumber: 0,
   fcVariant: 'INAV',
   lastUpdate: 0,
@@ -246,6 +253,20 @@ export async function startTelemetryListeners() {
         sensorOpflow: p.opflow,
         lastUpdate: Date.now(),
       }));
+    })
+  );
+
+  // EKF estimator health (ArduPilot) — drives the header EKF indicator.
+  unlisteners.push(
+    await listen<{ status: number; max_variance: number; flags: number }>('telemetry-ekf-status', (event) => {
+      telemetry.update((t) => ({ ...t, ekfStatus: event.payload.status, lastUpdate: Date.now() }));
+    })
+  );
+
+  // EKF core version (AHRS_EKF_TYPE) — one-shot reply on connect, so no lastUpdate bump.
+  unlisteners.push(
+    await listen<{ ekf_type: number }>('telemetry-ekf-type', (event) => {
+      telemetry.update((t) => ({ ...t, ekfType: event.payload.ekf_type }));
     })
   );
 

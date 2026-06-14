@@ -450,19 +450,8 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
             };
             let _ = app_handle.emit("telemetry-gps", &data);
 
-            // Emit sensor status with GPS health
-            let gps_health: u8 = if fix_type >= 2 { 1 } else if fix_type > 0 { 2 } else { 0 };
-            let sensor_data = SensorStatusData {
-                gyro: 1,  // If we get messages, assume IMU is working
-                acc: 1,
-                mag: 0,   // Unknown from this message
-                baro: 0,
-                gps: gps_health,
-                rangefinder: 0,
-                pitot: 0,
-                opflow: 0,
-            };
-            let _ = app_handle.emit("telemetry-sensor-status", &sensor_data);
+            // Per-sensor hardware health is owned by SYS_STATUS (real present/health bitmasks); the
+            // GPS fix nuance (amber on <3D) is layered on top frontend-side from this message's fix.
 
             if let Some(ref rec) = recorder {
                 if let Ok(mut r) = rec.lock() { r.on_gps(&data); }
@@ -491,6 +480,27 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
             if let Some(ref rec) = recorder {
                 if let Ok(mut r) = rec.lock() { r.on_analog(&analog.to_analog_data()); }
             }
+
+            // Per-sensor hardware health from the standard MAVLink sensor bitmasks. We map to the
+            // same 0=NONE / 1=OK / 3=UNHEALTHY model MSP_SENSOR_STATUS uses (3-state: "enabled" is
+            // intentionally ignored — a not-present sensor is simply hidden in the header bar).
+            use ::mavlink::ardupilotmega::MavSysStatusSensor as Sns;
+            let present = sys.onboard_control_sensors_present;
+            let health = sys.onboard_control_sensors_health;
+            let s3 = |bit: Sns| -> u8 {
+                if !present.contains(bit) { 0 } else if health.contains(bit) { 1 } else { 3 }
+            };
+            let sensor_data = SensorStatusData {
+                gyro: s3(Sns::MAV_SYS_STATUS_SENSOR_3D_GYRO),
+                acc: s3(Sns::MAV_SYS_STATUS_SENSOR_3D_ACCEL),
+                mag: s3(Sns::MAV_SYS_STATUS_SENSOR_3D_MAG),
+                baro: s3(Sns::MAV_SYS_STATUS_SENSOR_ABSOLUTE_PRESSURE),
+                gps: s3(Sns::MAV_SYS_STATUS_SENSOR_GPS),
+                rangefinder: s3(Sns::MAV_SYS_STATUS_SENSOR_LASER_POSITION),
+                pitot: s3(Sns::MAV_SYS_STATUS_SENSOR_DIFFERENTIAL_PRESSURE),
+                opflow: s3(Sns::MAV_SYS_STATUS_SENSOR_OPTICAL_FLOW),
+            };
+            let _ = app_handle.emit("telemetry-sensor-status", &sensor_data);
         }
 
         // ── VFR_HUD → telemetry-airspeed ───────────────────────────
@@ -548,6 +558,50 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
                 "severity": st.severity as u8,
                 "text": text,
             }));
+        }
+
+        // ── EKF_STATUS_REPORT → telemetry-ekf-status ────────────────
+        // Estimator health for the header EKF indicator. Mission-Planner-style thresholds on the
+        // worst normalised variance: green < 0.5, amber 0.5–0.8, red ≥ 0.8. Flags escalate: a GPS
+        // glitch forces red; an uninitialised filter or no absolute horizontal position forces at
+        // least amber (CONST_POS_MODE is a deliberate no-GPS mode, so it does not count as a fault).
+        MavMessage::EKF_STATUS_REPORT(ekf) => {
+            use ::mavlink::ardupilotmega::EkfStatusFlags as Ekf;
+            let flags = ekf.flags;
+            let max_var = ekf
+                .velocity_variance
+                .max(ekf.pos_horiz_variance)
+                .max(ekf.pos_vert_variance)
+                .max(ekf.compass_variance);
+            let mut status: u8 = if max_var >= 0.8 { 3 } else if max_var >= 0.5 { 2 } else { 1 };
+            if flags.contains(Ekf::EKF_GPS_GLITCHING) {
+                status = status.max(3);
+            }
+            if flags.contains(Ekf::EKF_UNINITIALIZED)
+                || (!flags.contains(Ekf::EKF_POS_HORIZ_ABS) && !flags.contains(Ekf::EKF_CONST_POS_MODE))
+            {
+                status = status.max(2);
+            }
+            let _ = app_handle.emit("telemetry-ekf-status", serde_json::json!({
+                "status": status,
+                "max_variance": max_var,
+                "flags": flags.bits(),
+            }));
+        }
+
+        // ── PARAM_VALUE → telemetry-ekf-type (AHRS_EKF_TYPE only) ───
+        // Reply to the one-shot AHRS_EKF_TYPE read issued on connect (see params.rs). 2 = EKF2,
+        // 3 = EKF3; anything else is shown as a generic "EKF" label frontend-side.
+        MavMessage::PARAM_VALUE(pv) => {
+            let end = pv.param_id.iter().position(|&c| c == 0).unwrap_or(pv.param_id.len());
+            let name: String = pv.param_id[..end].iter().map(|&c| c as char).collect();
+            if name == "AHRS_EKF_TYPE" {
+                let ekf_type = pv.param_value as i32;
+                eprintln!("[MAVLINK-PARAM] AHRS_EKF_TYPE = {}", ekf_type);
+                let _ = app_handle.emit("telemetry-ekf-type", serde_json::json!({
+                    "ekf_type": ekf_type,
+                }));
+            }
         }
 
         _ => {

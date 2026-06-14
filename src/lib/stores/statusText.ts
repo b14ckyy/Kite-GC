@@ -6,8 +6,9 @@
 // the last one arrived, and play a severity-tiered audio cue. Severity is MAV_SEVERITY (0 = emergency
 // … 7 = debug).
 
-import { writable } from 'svelte/store';
+import { writable, get } from 'svelte/store';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { settings } from './settings';
 
 export type StatusTextLevel = 'error' | 'warning' | 'info';
 
@@ -18,15 +19,25 @@ export interface StatusTextMsg {
   text: string;
 }
 
-const MAX_SHOWN = 5;
-const CLEAR_AFTER_MS = 60_000; // fade everything out 60 s after the last message
-const SOUND_MIN_GAP_MS = 1200; // don't let an INFO flood machine-gun the speaker
+const MAX_BUFFER = 12;          // lines kept (the banner shows a few and scrolls to the newest)
+const CLEAR_AFTER_MS = 60_000;  // fade everything out 60 s after the last message
+const SOUND_MIN_GAP_MS = 1200;  // don't let an INFO flood machine-gun the speaker
 
 /** MAV_SEVERITY → display/sound level. ≤3 ERROR/CRITICAL/ALERT/EMERGENCY, 4 WARNING, ≥5 NOTICE/INFO/DEBUG. */
 export function statusLevel(severity: number): StatusTextLevel {
   if (severity <= 3) return 'error';
   if (severity === 4) return 'warning';
   return 'info';
+}
+
+/** Honour the "System Messages" setting (off / error / warning / all). */
+function levelAllowed(level: StatusTextLevel): boolean {
+  switch (get(settings).systemMessages) {
+    case 'off': return false;
+    case 'error': return level === 'error';
+    case 'warning': return level !== 'info';
+    default: return true; // 'all'
+  }
 }
 
 export const statusTexts = writable<StatusTextMsg[]>([]);
@@ -41,11 +52,12 @@ function push(severity: number, text: string): void {
   const clean = text.trim();
   if (!clean) return;
   const level = statusLevel(severity);
+  if (!levelAllowed(level)) return; // filtered out by the "System Messages" setting
 
   statusTexts.update((list) => {
     // Light de-dup: a repeated identical line just refreshes the timer, no duplicate row.
     if (list.length && list[list.length - 1].text === clean) return list;
-    return [...list, { id: nextId++, severity, level, text: clean }].slice(-MAX_SHOWN);
+    return [...list, { id: nextId++, severity, level, text: clean }].slice(-MAX_BUFFER);
   });
 
   if (clearTimer) clearTimeout(clearTimer);

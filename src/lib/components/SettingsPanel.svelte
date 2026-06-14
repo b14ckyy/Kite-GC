@@ -15,7 +15,7 @@
   import { DEFAULT_RADAR, DEFAULT_AIRSPACE } from '$lib/stores/settings';
   import { panelState } from '$lib/stores/panelState';
   import { resetGcsManual, gcsManuallySet } from '$lib/stores/gcsLocation';
-  import type { AppSettings, InterfaceSettings, RadarSettings, GcsMode, AirspaceSettings, AirspaceProvider } from '$lib/stores/settings';
+  import type { AppSettings, InterfaceSettings, RadarSettings, GcsMode, AirspaceSettings, AirspaceProvider, SystemMessagesLevel } from '$lib/stores/settings';
   import type { TileCacheStats } from '$lib/cache/tileCache';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import UnitStepper from '$lib/components/UnitStepper.svelte';
@@ -53,6 +53,7 @@
     defaultWpAltitudeM = 50,
     defaultPhTimeSec = 30,
     warnAltitudeM = 120,
+    systemMessages = 'all',
     interfaceSettings = { speedUnit: 'kmh', altitudeUnit: 'm', distanceUnit: 'metric', verticalSpeedUnit: 'ms', temperatureUnit: 'c' },
     radar = DEFAULT_RADAR,
     airspace = DEFAULT_AIRSPACE,
@@ -91,6 +92,7 @@
     defaultWpAltitudeM?: number;
     defaultPhTimeSec?: number;
     warnAltitudeM?: number;
+    systemMessages?: SystemMessagesLevel;
     interfaceSettings?: InterfaceSettings;
     radar?: RadarSettings;
     airspace?: AirspaceSettings;
@@ -480,6 +482,16 @@
       <div class="s-row">
         <span class="s-label">{$t('settings.altitude')}</span>
         <UnitStepper bind:value={warnAlt} kind="altitude" settings={interfaceSettings} min={0} max={5000} step={10} decimals={0} onchange={onWarnAltChange} />
+      </div>
+      <div class="s-row">
+        <span class="s-label">{$t('settings.systemMessages')}</span>
+        <select id="system-messages" class="s-select" value={systemMessages}
+          onchange={(e) => onPatch({ systemMessages: (e.target as HTMLSelectElement).value as SystemMessagesLevel })}>
+          <option value="off">{$t('settings.sysMsgOff')}</option>
+          <option value="error">{$t('settings.sysMsgError')}</option>
+          <option value="warning">{$t('settings.sysMsgWarning')}</option>
+          <option value="all">{$t('settings.sysMsgAll')}</option>
+        </select>
       </div>
     </div>
   {/if}

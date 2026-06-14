@@ -73,7 +73,7 @@
   import { pendingSystemSwitch } from "$lib/stores/autopilotContext";
   import { terrainAnalysis, patchTerrainAnalysis } from "$lib/stores/terrainAnalysis";
   import { DEFAULT_RADAR, DEFAULT_AIRSPACE, BUILTIN_ADSB_PROVIDERS } from "$lib/stores/settings";
-  import type { AppSettings, InterfaceSettings, PanelConfig, RadarSettings, GcsMode, AirspaceSettings } from "$lib/stores/settings";
+  import type { AppSettings, InterfaceSettings, PanelConfig, RadarSettings, GcsMode, AirspaceSettings, SystemMessagesLevel } from "$lib/stores/settings";
   import { layout, GRID_DEFAULTS } from '$lib/stores/layout';
   import {
     getDefaultFlightlogPath,
@@ -362,6 +362,7 @@
   let defaultWpAltitudeM = $state(50);
   let defaultPhTimeSec = $state(30);
   let warnAltitudeM = $state(120);
+  let systemMessages = $state<SystemMessagesLevel>('all');
   let interfaceSettings = $state<InterfaceSettings>({
     speedUnit: 'kmh',
     altitudeUnit: 'm',
@@ -553,6 +554,7 @@
   defaultWpAltitudeM = saved.defaultWpAltitudeM;
   defaultPhTimeSec = saved.defaultPhTimeSec;
   warnAltitudeM = saved.warnAltitudeM;
+  systemMessages = saved.systemMessages ?? 'all';
   uiScale = saved.uiScale ?? 1;
   interfaceSettings = saved.interface ?? {
     speedUnit: 'kmh',
@@ -792,6 +794,7 @@
     if (patch.defaultWpAltitudeM != null) defaultWpAltitudeM = patch.defaultWpAltitudeM;
     if (patch.defaultPhTimeSec != null) defaultPhTimeSec = patch.defaultPhTimeSec;
     if (patch.warnAltitudeM != null) warnAltitudeM = patch.warnAltitudeM;
+    if (patch.systemMessages != null) systemMessages = patch.systemMessages;
     if (patch.uiScale != null) uiScale = patch.uiScale;
     if (patch.interface != null) {
       interfaceSettings = { ...interfaceSettings, ...patch.interface };
@@ -2173,6 +2176,7 @@
         {defaultWpAltitudeM}
         {defaultPhTimeSec}
         {warnAltitudeM}
+        {systemMessages}
         {interfaceSettings}
         radar={radarSettings}
         airspace={airspaceSettings}

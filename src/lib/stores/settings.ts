@@ -205,6 +205,9 @@ export const DEFAULT_AIRSPACE: AirspaceSettings = {
   compact: false,
 };
 
+/** FC system-message (STATUSTEXT) toast verbosity: off, errors only, warnings+errors, or everything. */
+export type SystemMessagesLevel = 'off' | 'error' | 'warning' | 'all';
+
 export interface AppSettings {
   lastPort: string;
   lastBaud: number;
@@ -238,6 +241,8 @@ export interface AppSettings {
   lastAutopilotSystem: string;
   // Alerts
   warnAltitudeM: number;
+  /** Which FC system messages (MAVLink STATUSTEXT) surface as on-screen toasts. */
+  systemMessages: SystemMessagesLevel;
   // Global UI options (display-only conversions)
   interface: InterfaceSettings;
   // Widget panel layout
@@ -297,6 +302,7 @@ const defaults: AppSettings = {
   defaultPhTimeSec: 30,
   lastAutopilotSystem: 'inav',
   warnAltitudeM: 120,
+  systemMessages: 'all',
   interface: {
     speedUnit: 'kmh',
     altitudeUnit: 'm',
