@@ -15,15 +15,12 @@
   import { t } from 'svelte-i18n';
   import {
     arduMission, arduSelectedWpIndex, arduEditMode,
-    arduMissionClear, arduRemoveWp,
-    arduHasLocation, MAV_CMD_LABELS, MAV_CMD_SHORT,
-    MAV_CMD_NAV_LOITER_UNLIM, MAV_CMD_NAV_LOITER_TIME,
-    MAV_CMD_NAV_LOITER_TURNS, MAV_CMD_DO_JUMP, MAV_CMD_DO_CHANGE_SPEED,
-    MAV_CMD_NAV_WAYPOINT, MAV_CMD_CONDITION_DELAY,
+    arduMissionClear, arduRemoveWp, groupArduMission,
     MAV_FRAME_GLOBAL, MAV_FRAME_GLOBAL_TERRAIN_ALT,
     serializeWaypoints, parseWaypoints,
     type ArduWaypoint,
   } from '$lib/stores/missionArdupilot';
+  import { cmdName, cmdShort, cmdHasLocation, cmdDef, enumLabel } from '$lib/helpers/arduCommandCatalog';
   import { connection } from '$lib/stores/connection';
   import PanelShell from '$lib/components/panel/PanelShell.svelte';
   import Button from '$lib/components/panel/Button.svelte';
@@ -133,6 +130,10 @@
     }
   }
 
+  // INAV-style grouped list: each location (NAV) command is a primary row; its trailing non-location
+  // commands are its modifiers (indented sub-rows, numbered — ArduPilot numbers every item).
+  let groups = $derived(groupArduMission(currentMission));
+
   function frameLabel(frame: number): string {
     if (frame === MAV_FRAME_GLOBAL) return 'AMSL';
     if (frame === MAV_FRAME_GLOBAL_TERRAIN_ALT) return 'TRN';
@@ -140,24 +141,43 @@
   }
 
   function formatAltShort(wp: ArduWaypoint): string {
-    return arduHasLocation(wp.command) ? `${wp.alt.toFixed(0)}m ${frameLabel(wp.frame)}` : '—';
+    return cmdHasLocation(wp.command) ? `${wp.alt.toFixed(0)}m ${frameLabel(wp.frame)}` : '—';
   }
 
-  function formatParam(wp: ArduWaypoint): string {
-    switch (wp.command) {
-      case MAV_CMD_NAV_LOITER_TIME:    return `${wp.param1.toFixed(0)}s`;
-      case MAV_CMD_NAV_LOITER_TURNS:   return `×${wp.param1.toFixed(0)}`;
-      case MAV_CMD_NAV_LOITER_UNLIM:
-      case MAV_CMD_NAV_WAYPOINT:       return wp.param3 > 0 ? `R${wp.param3.toFixed(0)}m` : '';
-      case MAV_CMD_DO_JUMP:            return `→${wp.param1.toFixed(0)} ×${wp.param2 < 0 ? '∞' : wp.param2.toFixed(0)}`;
-      case MAV_CMD_DO_CHANGE_SPEED:    return `${wp.param2.toFixed(1)}m/s`;
-      case MAV_CMD_CONDITION_DELAY:    return `${wp.param1.toFixed(0)}s`;
-      default:                         return '';
+  /** Catalog-driven one-line param summary (enum labels / value+unit; non-zero numbers only). */
+  function paramSummary(wp: ArduWaypoint): string {
+    const def = cmdDef(wp.command);
+    if (!def?.params) return '';
+    const vals = [wp.param1, wp.param2, wp.param3, wp.param4, wp.lat, wp.lon, wp.alt];
+    const parts: string[] = [];
+    for (const pidx of [1, 2, 3, 4, 5, 6, 7] as const) {
+      const spec = def.params[pidx];
+      if (!spec) continue;
+      if (spec.advanced) continue; // keep the list summary concise — advanced params are detail-only
+      const v = vals[pidx - 1];
+      if (spec.enumStrings && spec.enumValues) parts.push(enumLabel(spec, v));
+      else if (v !== 0) parts.push(`${v}${spec.units ?? ''}`);
     }
+    return parts.slice(0, 3).join(' · ');
+  }
+
+  /** Per-param detail entries (label + display value) for the footer detail. */
+  function paramEntries(wp: ArduWaypoint): { label: string; display: string }[] {
+    const def = cmdDef(wp.command);
+    if (!def?.params) return [];
+    const vals = [wp.param1, wp.param2, wp.param3, wp.param4, wp.lat, wp.lon, wp.alt];
+    const out: { label: string; display: string }[] = [];
+    for (const pidx of [1, 2, 3, 4, 5, 6, 7] as const) {
+      const spec = def.params[pidx];
+      if (!spec) continue;
+      const v = vals[pidx - 1];
+      const display = spec.enumStrings && spec.enumValues ? enumLabel(spec, v) : `${v}${spec.units ? ' ' + spec.units : ''}`;
+      out.push({ label: spec.label, display });
+    }
+    return out;
   }
 
   function formatCoord(valE7: number): string { return (valE7 / 1e7).toFixed(6); }
-  function shortType(cmd: number): string { return MAV_CMD_SHORT[cmd] ?? `C${cmd}`; }
 </script>
 
 {#snippet toolbar()}
@@ -189,13 +209,23 @@
           </tr>
         </thead>
         <tbody>
-          {#each currentMission as wp, i}
-            <tr class="wp-row" class:selected={i === currentSelIdx} onclick={() => arduSelectedWpIndex.set(i)}>
-              <td class="col-num"><span class="wp-num-badge">{i + 1}</span></td>
-              <td class="col-type">{shortType(wp.command)}</td>
-              <td class="col-alt">{formatAltShort(wp)}</td>
-              <td class="col-param">{formatParam(wp)}</td>
-            </tr>
+          {#each groups as g}
+            {#if g.anchor}
+              <tr class="wp-row" class:selected={g.anchorIdx === currentSelIdx} onclick={() => arduSelectedWpIndex.set(g.anchorIdx)}>
+                <td class="col-num"><span class="wp-num-badge">{g.anchorIdx + 1}</span></td>
+                <td class="col-type">{cmdShort(g.anchor.command)}</td>
+                <td class="col-alt">{formatAltShort(g.anchor)}</td>
+                <td class="col-param">{paramSummary(g.anchor)}</td>
+              </tr>
+            {/if}
+            {#each g.modifiers as m}
+              <tr class="wp-row wp-mod-row" class:selected={m.idx === currentSelIdx} onclick={() => arduSelectedWpIndex.set(m.idx)}>
+                <td class="col-num"><span class="wp-num-badge mod">{m.idx + 1}</span></td>
+                <td class="col-type">{cmdShort(m.wp.command)}</td>
+                <td class="col-alt">—</td>
+                <td class="col-param">{paramSummary(m.wp)}</td>
+              </tr>
+            {/each}
           {/each}
         </tbody>
       </table>
@@ -209,28 +239,15 @@
     {#if currentSelIdx >= 0 && currentSelIdx < currentMission.length}
       {@const wp = currentMission[currentSelIdx]}
       <div class="wp-detail">
-        <div class="detail-header">WP {currentSelIdx + 1} — {MAV_CMD_LABELS[wp.command] ?? `CMD${wp.command}`}</div>
-        {#if arduHasLocation(wp.command)}
+        <div class="detail-header">WP {currentSelIdx + 1} — {cmdName(wp.command)}</div>
+        {#if cmdHasLocation(wp.command)}
           <div class="detail-row"><span class="detail-label">{$t('mission.lat')}</span><span class="detail-value">{formatCoord(wp.lat)}</span></div>
           <div class="detail-row"><span class="detail-label">{$t('mission.lon')}</span><span class="detail-value">{formatCoord(wp.lon)}</span></div>
           <div class="detail-row"><span class="detail-label">{$t('mission.alt')}</span><span class="detail-value">{formatAltShort(wp)}</span></div>
         {/if}
-        {#if wp.command === MAV_CMD_NAV_LOITER_UNLIM || wp.command === MAV_CMD_NAV_LOITER_TIME || wp.command === MAV_CMD_NAV_LOITER_TURNS}
-          <div class="detail-row"><span class="detail-label">{$t('arduMission.radius')}</span><span class="detail-value">{wp.param3.toFixed(0)}m</span></div>
-        {/if}
-        {#if wp.command === MAV_CMD_NAV_LOITER_TIME}
-          <div class="detail-row"><span class="detail-label">{$t('mission.hold')}</span><span class="detail-value">{wp.param1.toFixed(0)}s</span></div>
-        {/if}
-        {#if wp.command === MAV_CMD_NAV_LOITER_TURNS}
-          <div class="detail-row"><span class="detail-label">{$t('arduMission.turns')}</span><span class="detail-value">{wp.param1.toFixed(0)}</span></div>
-        {/if}
-        {#if wp.command === MAV_CMD_DO_JUMP}
-          <div class="detail-row"><span class="detail-label">{$t('mission.target')}</span><span class="detail-value">WP {wp.param1.toFixed(0)}</span></div>
-          <div class="detail-row"><span class="detail-label">{$t('mission.repeat')}</span><span class="detail-value">{wp.param2 < 0 ? '∞' : wp.param2.toFixed(0)}</span></div>
-        {/if}
-        {#if wp.command === MAV_CMD_DO_CHANGE_SPEED}
-          <div class="detail-row"><span class="detail-label">{$t('arduMission.speed')}</span><span class="detail-value">{wp.param2.toFixed(1)} m/s</span></div>
-        {/if}
+        {#each paramEntries(wp) as p}
+          <div class="detail-row"><span class="detail-label">{p.label}</span><span class="detail-value">{p.display}</span></div>
+        {/each}
         {#if currentEditing}<div class="detail-hint">{$t('mission.clickMarkerHint')}</div>{/if}
       </div>
     {/if}
@@ -275,6 +292,10 @@
   .col-alt { width: 72px; color: #8bc34a; }
   .col-param { color: #aaa; }
   .wp-num-badge { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: #37a8db; color: #fff; font-size: 10px; font-weight: bold; }
+  /* Modifier sub-rows: indented + smaller, like INAV modifier waypoints, but numbered. */
+  .wp-mod-row td { font-size: 11px; color: #aaa; }
+  .wp-mod-row .col-num { padding-left: 14px; }
+  .wp-num-badge.mod { width: 17px; height: 17px; font-size: 9px; background: #5a6b75; }
 
   .miss-footer { width: 100%; display: flex; flex-direction: column; gap: 4px; }
   .wp-detail { padding: 6px 8px; border: 1px solid #333; border-radius: 4px; background: #1e1e1e; max-height: 180px; overflow-y: auto; }

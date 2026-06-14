@@ -11,8 +11,10 @@ use std::time::Duration;
 
 use super::{ByteTransport, TransportError};
 
-/// Read timeout for individual recv calls
-const READ_TIMEOUT_MS: u64 = 1000;
+/// Read timeout for individual recv calls. Short on purpose — bounds the latency the MAVLink handler
+/// loop adds to outgoing commands (it services a queued write only once the current blocking recv
+/// returns). See the TCP transport for the full rationale.
+const READ_TIMEOUT_MS: u64 = 50;
 
 /// An active UDP transport to a flight controller
 pub struct UdpTransport {

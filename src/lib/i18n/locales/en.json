@@ -946,6 +946,8 @@
     "sec": "sec",
     "actions": "Actions",
     "removeModifier": "Remove modifier",
+    "appliesNext": "→ next",
+    "advanced": "Advanced",
     "landField": "Land",
     "yes": "Yes",
     "no": "No",

@@ -13,8 +13,13 @@ use super::{ByteTransport, TransportError};
 
 /// TCP connection timeout
 const CONNECT_TIMEOUT_MS: u64 = 5000;
-/// Read timeout for individual read calls
-const READ_TIMEOUT_MS: u64 = 1000;
+/// Read timeout for individual read calls. Kept short: the MAVLink handler loop interleaves reads
+/// with outgoing writes (a queued command — e.g. a mission item to upload — is only serviced once the
+/// current blocking read returns), so this value bounds the latency of every GCS→FC message. A long
+/// timeout stalled mission upload (each item delayed up to a second → ArduPilot cancels the transfer
+/// with MAV_MISSION_OPERATION_CANCELLED); 50 ms makes uploads snappy without busy-spinning (the read
+/// still sleeps when no data is available).
+const READ_TIMEOUT_MS: u64 = 50;
 
 /// An active TCP connection to a flight controller
 pub struct TcpTransport {

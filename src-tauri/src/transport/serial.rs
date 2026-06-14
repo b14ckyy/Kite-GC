@@ -10,8 +10,10 @@ use std::time::Duration;
 
 use super::{ByteTransport, PortInfo, TransportError};
 
-/// Default read timeout for serial operations
-const READ_TIMEOUT_MS: u64 = 1000;
+/// Default read timeout for serial operations. Short on purpose — bounds the latency the MAVLink
+/// handler loop adds to outgoing commands (mission upload items, param sets) since it only services a
+/// queued write once the current blocking read returns. See the TCP transport for the full rationale.
+const READ_TIMEOUT_MS: u64 = 50;
 
 /// List available serial ports on the system
 pub fn list_ports() -> Vec<PortInfo> {

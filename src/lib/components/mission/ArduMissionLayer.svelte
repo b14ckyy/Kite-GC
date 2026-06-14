@@ -4,7 +4,9 @@
 -->
 
 <!-- ArduMissionLayer.svelte
-     Renders ArduPilot mission waypoints on the Leaflet map.
+     Renders ArduPilot mission waypoints on the Leaflet map and the catalog-driven editor popup.
+     Location (NAV) commands are markers; non-location commands are shown as INAV-style modifiers
+     under their preceding waypoint. The editable fields come entirely from arduCommandCatalog.
      Usage: <ArduMissionLayer {map} />
 -->
 <script lang="ts">
@@ -13,17 +15,23 @@
   import { get } from 'svelte/store';
   import { t } from 'svelte-i18n';
   import {
-    arduMission, arduSelectedWpIndex, arduEditMode,
-    arduUpdateWp, arduRemoveWp, arduMoveWp, arduAddWp,
-    arduHasLocation, arduIsLoiter,
-    MAV_CMD_NAV_WAYPOINT, MAV_CMD_NAV_LOITER_UNLIM, MAV_CMD_NAV_LOITER_TURNS,
-    MAV_CMD_NAV_LOITER_TIME, MAV_CMD_NAV_RETURN_TO_LAUNCH, MAV_CMD_NAV_LAND,
-    MAV_CMD_NAV_TAKEOFF, MAV_CMD_DO_JUMP, MAV_CMD_DO_CHANGE_SPEED,
-    MAV_CMD_DO_SET_ROI, MAV_CMD_CONDITION_DELAY,
+    arduMission, arduSelectedWpIndex, arduEditMode, arduVehicleClass,
+    arduUpdateWp, arduRemoveWp, arduAddWp,
+    groupArduMission, groupEndIndex, type ArduGroup,
+    MAV_CMD_NAV_WAYPOINT,
     MAV_FRAME_GLOBAL, MAV_FRAME_GLOBAL_RELATIVE_ALT, MAV_FRAME_GLOBAL_TERRAIN_ALT,
-    MAV_CMD_LABELS,
     type ArduWaypoint, type MavFrame,
   } from '$lib/stores/missionArdupilot';
+  import {
+    cmdDef, cmdName, cmdRawName, cmdHasLocation, cmdStandaloneCoordinate, cmdIsLoiter, cmdIsTakeoff,
+    cmdDefaultParams, cmdDefaultCoordParams, locationCommandsByCategory, modifierCommandsByCategory,
+    type ParamSpec, type ParamIndex, type VehicleClass,
+  } from '$lib/helpers/arduCommandCatalog';
+  import {
+    newPopupState, renderEditorPopup, closeEditorPopup,
+    numInputHtml, enumSelectHtml, paramRow, canonicalLabel, actionsHtml, modifierSection,
+    addModifierSelect, attachNumBtnEvents, disablePopupPropagation,
+  } from '$lib/helpers/missionEditorPopup';
   import { iconForArduWp } from '$lib/helpers/missionIconsArdupilot';
   import { settings } from '$lib/stores/settings';
   import { homePosition, type HomePosition } from '$lib/stores/home';
@@ -31,36 +39,22 @@
   interface Props { map: L.Map; }
   let { map }: Props = $props();
 
-  let currentWps    = $state<ArduWaypoint[]>(get(arduMission));
-  let currentSelIdx = $state<number>(get(arduSelectedWpIndex));
+  let currentWps     = $state<ArduWaypoint[]>(get(arduMission));
+  let currentSelIdx  = $state<number>(get(arduSelectedWpIndex));
   let currentEditing = $state<boolean>(get(arduEditMode));
-  let currentHome   = $state<HomePosition>(get(homePosition));
+  let currentHome    = $state<HomePosition>(get(homePosition));
+  let currentVehicle = $state<VehicleClass>(get(arduVehicleClass));
 
   const unsubMission  = arduMission.subscribe(wps => { currentWps = wps; });
   const unsubSelIdx   = arduSelectedWpIndex.subscribe(i => { currentSelIdx = i; });
   const unsubEditMode = arduEditMode.subscribe(e => { currentEditing = e; });
   const unsubHome     = homePosition.subscribe(h => { currentHome = h; });
+  const unsubVehicle  = arduVehicleClass.subscribe(v => { currentVehicle = v; });
 
   // svelte-ignore state_referenced_locally
   const missionGroup = L.layerGroup().addTo(map);
-  let wpMarkers: L.Marker[] = [];
-  let loiterCircles: L.Circle[] = [];
-  let editorPopup: L.Popup | undefined;
-  let editorPopupIdx = -1;
-
-  const CMD_OPTIONS: Array<[number, string]> = [
-    [MAV_CMD_NAV_WAYPOINT,         'Waypoint'],
-    [MAV_CMD_NAV_LOITER_UNLIM,     'Loiter Unlim'],
-    [MAV_CMD_NAV_LOITER_TURNS,     'Loiter Turns'],
-    [MAV_CMD_NAV_LOITER_TIME,      'Loiter Time'],
-    [MAV_CMD_NAV_RETURN_TO_LAUNCH, 'Return to Launch'],
-    [MAV_CMD_NAV_LAND,             'Land'],
-    [MAV_CMD_NAV_TAKEOFF,          'Takeoff'],
-    [MAV_CMD_DO_JUMP,              'Jump'],
-    [MAV_CMD_DO_CHANGE_SPEED,      'Change Speed'],
-    [MAV_CMD_DO_SET_ROI,           'Set ROI'],
-    [MAV_CMD_CONDITION_DELAY,      'Delay'],
-  ];
+  // Shared editor-popup lifecycle (content-signature redraw guard lives in the framework module).
+  const popupState = newPopupState();
 
   function frameLabel(frame: MavFrame): string {
     if (frame === MAV_FRAME_GLOBAL) return 'AMSL';
@@ -74,147 +68,168 @@
     return MAV_FRAME_GLOBAL_RELATIVE_ALT;
   }
 
-  function numInputHtml(field: string, value: number, step: number, min?: number, max?: number): string {
-    const minAttr = min !== undefined ? `min="${min}"` : '';
-    const maxAttr = max !== undefined ? `max="${max}"` : '';
-    return `<div class="wpe-num-ctrl"><button class="wpe-num-btn" data-numdir="-1" data-field="${field}">−</button><input type="number" data-field="${field}" value="${value}" step="${step}" ${minAttr} ${maxAttr}/><button class="wpe-num-btn" data-numdir="1" data-field="${field}">+</button></div>`;
-  }
+  // ── Catalog-driven editor HTML ──────────────────────────────────────
 
-  function selectHtml(field: string, options: Array<[number, string]>, current: number): string {
-    const opts = options.map(([v, l]) => `<option value="${v}"${v === current ? ' selected' : ''}>${l}</option>`).join('');
-    return `<select data-field="${field}" class="wpe-row-select">${opts}</select>`;
-  }
-
-  function getDefaultParams(cmd: number): { param1: number; param2: number; param3: number; param4: number } {
-    switch (cmd) {
-      case MAV_CMD_NAV_LOITER_UNLIM:
-        return { param1: 0, param2: 0, param3: 50, param4: 0 };
-      case MAV_CMD_NAV_LOITER_TURNS:
-        return { param1: 1, param2: 0, param3: 50, param4: 0 };
-      case MAV_CMD_NAV_LOITER_TIME:
-        return { param1: 30, param2: 0, param3: 50, param4: 0 };
-      case MAV_CMD_DO_JUMP:
-        return { param1: 1, param2: 1, param3: 0, param4: 0 };
-      case MAV_CMD_DO_CHANGE_SPEED:
-        return { param1: 0, param2: 10, param3: -1, param4: 0 };
-      default:
-        return { param1: 0, param2: 0, param3: 0, param4: 0 };
+  function paramFieldHtml(spec: ParamSpec, value: number, dataAttr: string): string {
+    if (spec.enumStrings && spec.enumValues) {
+      const options = spec.enumValues.map((v, i) => [v, spec.enumStrings![i]] as [number, string]);
+      return enumSelectHtml(dataAttr, options, value);
     }
+    const step = spec.decimals && spec.decimals > 0 ? Math.pow(10, -spec.decimals) : 1;
+    return numInputHtml(dataAttr, value, { step, min: spec.min, max: spec.max });
   }
 
-  function attachNumBtnEvents(el: HTMLElement) {
-    el.querySelectorAll('.wpe-num-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.preventDefault(); e.stopPropagation();
-        const b = btn as HTMLElement;
-        const parent = b.closest('.wpe-num-ctrl');
-        if (!parent) return;
-        const input = parent.querySelector('input') as HTMLInputElement;
-        if (!input) return;
-        const dir = Number(b.dataset.numdir);
-        const step = Number(input.step) || 1;
-        const min = input.min !== '' ? Number(input.min) : -Infinity;
-        const max = input.max !== '' ? Number(input.max) : Infinity;
-        let val = Number(input.value) + dir * step;
-        val = Math.max(min, Math.min(max, val));
-        input.value = String(val);
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-      });
-    });
+  function paramRowsHtml(wp: ArduWaypoint, target: 'primary' | 'mod', modIdx = -1): string {
+    const def = cmdDef(wp.command);
+    if (!def?.params) return '';
+    let normal = '';
+    let advanced = '';
+    for (const pidx of [1, 2, 3, 4, 5, 6, 7] as ParamIndex[]) {
+      const spec = def.params[pidx];
+      if (!spec) continue;
+      // params 5/6/7 are stored in x/y/z (lat/lon/alt) — read them raw for non-coordinate commands.
+      const value = pidx <= 4
+        ? [wp.param1, wp.param2, wp.param3, wp.param4][pidx - 1]
+        : [wp.lat, wp.lon, wp.alt][pidx - 5];
+      const dataAttr = target === 'primary'
+        ? `data-target="primary" data-pidx="${pidx}"`
+        : `data-target="mod" data-modidx="${modIdx}" data-pidx="${pidx}"`;
+      const row = paramRow(spec.label, paramFieldHtml(spec, value, dataAttr), { unit: spec.units, tooltip: spec.tooltip });
+      if (spec.advanced) advanced += row; else normal += row;
+    }
+    // Advanced (rare) params collapse under an expander, QGC-style — common fields stay uncluttered.
+    if (advanced) {
+      normal += `<button type="button" class="wpe-adv-toggle" data-advtoggle>▾ ${$t('missionLayer.advanced')}</button>`
+        + `<div class="wpe-adv-body" data-advbody hidden>${advanced}</div>`;
+    }
+    return normal;
   }
 
-  function buildEditorHtml(wp: ArduWaypoint, idx: number, total: number, displayNum: number): string {
-    const cmd = wp.command;
-    const latDeg = (wp.lat / 1e7).toFixed(7);
-    const lonDeg = (wp.lon / 1e7).toFixed(7);
-    const frameLbl = frameLabel(wp.frame);
-
-    const cmdOpts = CMD_OPTIONS.map(([v, lbl]) =>
-      `<option value="${v}"${v === cmd ? ' selected' : ''}>${lbl}</option>`
+  function categorizedOptions(
+    groups: { category: string; cmds: { id: number; friendlyName: string }[] }[],
+    selected: number,
+  ): string {
+    return groups.map(g =>
+      `<optgroup label="${g.category}">`
+      + g.cmds.map(c => `<option value="${c.id}"${c.id === selected ? ' selected' : ''}>${c.friendlyName}</option>`).join('')
+      + `</optgroup>`,
     ).join('');
+  }
+
+  function primaryCmdSelectHtml(cmd: number, vehicle: VehicleClass): string {
+    const groups = locationCommandsByCategory(vehicle);
+    let opts = categorizedOptions(groups, cmd);
+    // Keep an out-of-catalog / non-location current command selectable so it round-trips.
+    if (!groups.some(g => g.cmds.some(c => c.id === cmd))) {
+      opts = `<option value="${cmd}" selected>${cmdName(cmd)}</option>` + opts;
+    }
+    return `<select data-field="cmdType" class="wpe-cmd-select">${opts}</select>`;
+  }
+
+  function addModSelectHtml(vehicle: VehicleClass): string {
+    const groups = modifierCommandsByCategory(vehicle);
+    const opts = `<option value="" selected disabled>${$t('missionLayer.addModifier')}</option>`
+      + categorizedOptions(groups, -1);
+    return addModifierSelect(opts);
+  }
+
+  function buildGroupEditorHtml(group: ArduGroup, total: number, vehicle: VehicleClass): string {
+    const wp = group.anchor!;
+    const idx = group.anchorIdx;
+    const def = cmdDef(wp.command);
+    const displayNum = idx + 1;
 
     let html = `<div class="wp-editor-popup">`;
-    html += `<div class="wpe-header"><span class="wpe-num">WP${displayNum}</span><select data-field="cmdType" class="wpe-cmd-select">${cmdOpts}</select></div>`;
+    html += `<div class="wpe-header"><span class="wpe-num">WP${displayNum}</span>${primaryCmdSelectHtml(wp.command, vehicle)}</div>`;
+    html += `<div class="wpe-canonical-line"><span class="wpe-canonical">${cmdRawName(wp.command)}</span></div>`;
 
-    if (arduHasLocation(cmd)) {
-      html += `<div class="wpe-row"><label>${$t('missionLayer.alt')}</label>${numInputHtml('alt', wp.alt, 1, 0)}<button data-field="frameToggle" class="wpe-toggle">${frameLbl}</button></div>`;
-      // Takeoff has no editable position (anchored on home) — show altitude only, no lat/lon.
-      if (cmd !== MAV_CMD_NAV_TAKEOFF) {
+    if (def?.specifiesCoordinate) {
+      html += `<div class="wpe-row"><label>${$t('missionLayer.alt')}</label>`
+        + `<div class="wpe-num-ctrl"><button class="wpe-num-btn" data-numdir="-1">−</button>`
+        + `<input type="number" data-field="alt" value="${wp.alt}" step="1" min="0"/>`
+        + `<button class="wpe-num-btn" data-numdir="1">+</button></div>`
+        + `<button data-field="frameToggle" class="wpe-toggle">${frameLabel(wp.frame)}</button></div>`;
+      if (!def.isTakeoff) {
+        const latDeg = (wp.lat / 1e7).toFixed(7);
+        const lonDeg = (wp.lon / 1e7).toFixed(7);
         html += `<div class="wpe-row"><label>${$t('missionLayer.lat')}</label><input type="number" data-field="lat" value="${latDeg}" step="0.0000001" min="-90" max="90" class="wpe-coord-input"/></div>`;
         html += `<div class="wpe-row"><label>${$t('missionLayer.lon')}</label><input type="number" data-field="lon" value="${lonDeg}" step="0.0000001" min="-180" max="180" class="wpe-coord-input"/></div>`;
       }
     }
 
-    if (cmd === MAV_CMD_NAV_WAYPOINT) {
-      html += `<div class="wpe-row"><label>${$t('arduMission.hold')}</label>${numInputHtml('p1', wp.param1, 0.5, 0)}<span class="wpe-unit">${$t('arduMission.sec')}</span></div>`;
-      html += `<div class="wpe-row"><label>${$t('arduMission.accept')}</label>${numInputHtml('p2', wp.param2, 1, 0)}<span class="wpe-unit">m</span></div>`;
-      html += `<div class="wpe-row"><label>${$t('arduMission.passRadius')}</label>${numInputHtml('p3', wp.param3, 1, 0)}<span class="wpe-unit">m</span></div>`;
-      html += `<div class="wpe-row"><label>${$t('arduMission.yaw')}</label>${numInputHtml('p4', wp.param4, 1, -1, 360)}<span class="wpe-unit">°</span></div>`;
-    }
-    if (arduIsLoiter(cmd)) {
-      html += `<div class="wpe-row"><label>${$t('arduMission.radius')} (+CW/−CCW)</label>${numInputHtml('p3', wp.param3, 1)}<span class="wpe-unit">m</span></div>`;
-    }
-    if (cmd === MAV_CMD_NAV_LOITER_UNLIM) {
-      html += `<div class="wpe-row"><label>${$t('arduMission.yaw')}</label>${numInputHtml('p4', wp.param4, 1, -1, 360)}<span class="wpe-unit">°</span></div>`;
-    }
-    if (cmd === MAV_CMD_NAV_LOITER_TURNS) {
-      html += `<div class="wpe-row"><label>${$t('arduMission.turns')}</label>${numInputHtml('p1', wp.param1, 1, 1)}</div>`;
-      html += `<div class="wpe-row"><label>${$t('arduMission.headingReq')}</label>${selectHtml('p2', [[0, $t('arduMission.no')], [1, $t('arduMission.yes')]], wp.param2)}</div>`;
-      html += `<div class="wpe-row"><label>${$t('arduMission.exitXtrack')}</label>${selectHtml('p4', [[0, $t('arduMission.exitLoiter')], [1, $t('arduMission.exitXtrack')]], wp.param4)}</div>`;
-    }
-    if (cmd === MAV_CMD_NAV_LOITER_TIME) {
-      html += `<div class="wpe-row"><label>${$t('arduMission.time')}</label>${numInputHtml('p1', wp.param1, 1, 0)}<span class="wpe-unit">${$t('arduMission.sec')}</span></div>`;
-      html += `<div class="wpe-row"><label>${$t('arduMission.headingReq')}</label>${selectHtml('p2', [[0, $t('arduMission.no')], [1, $t('arduMission.yes')]], wp.param2)}</div>`;
-      html += `<div class="wpe-row"><label>${$t('arduMission.exitXtrack')}</label>${selectHtml('p4', [[0, $t('arduMission.exitLoiter')], [1, $t('arduMission.exitXtrack')]], wp.param4)}</div>`;
-    }
-    if (cmd === MAV_CMD_NAV_LAND) {
-      html += `<div class="wpe-row"><label>${$t('arduMission.abortAlt')}</label>${numInputHtml('p1', wp.param1, 1, 0)}<span class="wpe-unit">m</span></div>`;
-      html += `<div class="wpe-row"><label>${$t('arduMission.precisionLand')}</label>${selectHtml('p2', [[0, $t('arduMission.precNone')], [1, $t('arduMission.precOpport')], [2, $t('arduMission.precRequired')]], wp.param2)}</div>`;
-      html += `<div class="wpe-row"><label>${$t('arduMission.yaw')}</label>${numInputHtml('p4', wp.param4, 1, -1, 360)}<span class="wpe-unit">°</span></div>`;
-    }
-    if (cmd === MAV_CMD_NAV_TAKEOFF) {
-      html += `<div class="wpe-row"><label>${$t('arduMission.minPitch')}</label>${numInputHtml('p1', wp.param1, 1, 0, 90)}<span class="wpe-unit">°</span></div>`;
-      html += `<div class="wpe-row"><label>${$t('arduMission.yaw')}</label>${numInputHtml('p4', wp.param4, 1, -1, 360)}<span class="wpe-unit">°</span></div>`;
-    }
-    if (cmd === MAV_CMD_DO_JUMP) {
-      html += `<div class="wpe-row"><label>${$t('missionLayer.toWp')}</label>${numInputHtml('p1', wp.param1, 1, 1, total)}</div>`;
-      html += `<div class="wpe-row"><label>${$t('mission.repeat')}</label>${numInputHtml('p2', wp.param2, 1, -1)}</div>`;
-    }
-    if (cmd === MAV_CMD_DO_CHANGE_SPEED) {
-      html += `<div class="wpe-row"><label>${$t('arduMission.speedType')}</label>${selectHtml('p1', [[0, $t('arduMission.airspeed')], [1, $t('arduMission.groundspeed')], [2, $t('arduMission.climbspeed')], [3, $t('arduMission.descentspeed')]], wp.param1)}</div>`;
-      html += `<div class="wpe-row"><label>${$t('arduMission.speed')}</label>${numInputHtml('p2', wp.param2, 0.5, -1)}<span class="wpe-unit">m/s</span></div>`;
-      html += `<div class="wpe-row"><label>${$t('arduMission.throttle')}</label>${numInputHtml('p3', wp.param3, 1, -1, 100)}<span class="wpe-unit">%</span></div>`;
-    }
-    if (cmd === MAV_CMD_CONDITION_DELAY) {
-      html += `<div class="wpe-row"><label>${$t('arduMission.delay')}</label>${numInputHtml('p1', wp.param1, 1, 0)}<span class="wpe-unit">${$t('arduMission.sec')}</span></div>`;
+    html += paramRowsHtml(wp, 'primary');
+
+    // Modifiers (non-location commands attached to this waypoint), INAV-style — numbered (ArduPilot
+    // numbers every mission item).
+    for (const m of group.modifiers) {
+      const def2 = cmdDef(m.wp.command);
+      const applies = def2?.appliesTo === 'next' ? ` <span class="wpe-applies">${$t('missionLayer.appliesNext')}</span>` : '';
+      const header = `${m.idx + 1} ${canonicalLabel(cmdName(m.wp.command), cmdRawName(m.wp.command))}${applies}`;
+      html += modifierSection(header, paramRowsHtml(m.wp, 'mod', m.idx), `data-modremove="${m.idx}"`, $t('missionLayer.removeModifier'));
     }
 
-    html += `<div class="wpe-actions">`;
-    html += `<button data-action="moveUp" ${idx <= 0 ? 'disabled' : ''} title="${$t('missionLayer.moveUp')}">▲</button>`;
-    html += `<button data-action="moveDown" ${idx >= total - 1 ? 'disabled' : ''} title="${$t('missionLayer.moveDown')}">▼</button>`;
-    html += `<button data-action="remove" class="wpe-remove" title="${$t('missionLayer.removeWp')}">✕</button>`;
-    html += `</div></div>`;
+    html += addModSelectHtml(vehicle);
+    html += actionsHtml({
+      disableUp: idx <= 0, disableDown: idx >= total - 1,
+      upTitle: $t('missionLayer.moveUp'), downTitle: $t('missionLayer.moveDown'), removeTitle: $t('missionLayer.removeWp'),
+    });
+    html += `</div>`;
     return html;
   }
 
-  function attachEditorEvents(popup: L.Popup, wp: ArduWaypoint, idx: number) {
+  function setParam(targetIdx: number, pidx: number, value: number) {
+    const cur = get(arduMission)[targetIdx];
+    if (!cur) return;
+    const patch = { ...cur };
+    if (pidx === 1) patch.param1 = value;
+    else if (pidx === 2) patch.param2 = value;
+    else if (pidx === 3) patch.param3 = value;
+    else if (pidx === 4) patch.param4 = value;
+    else if (pidx === 5) patch.lat = value; // params 5/6/7 = x/y/z
+    else if (pidx === 6) patch.lon = value;
+    else patch.alt = value;
+    arduUpdateWp(targetIdx, patch);
+  }
+
+  function moveGroup(group: ArduGroup, dir: -1 | 1) {
+    const groups = groupArduMission(get(arduMission));
+    const gi = groups.findIndex(g => g.anchorIdx === group.anchorIdx);
+    const target = gi + dir;
+    if (gi < 0 || target < 0 || target >= groups.length) return;
+    const order = [...groups];
+    const [moved] = order.splice(gi, 1);
+    order.splice(target, 0, moved);
+    const flat: ArduWaypoint[] = [];
+    let newAnchor = -1;
+    for (const g of order) {
+      if (g === moved) newAnchor = flat.length;
+      if (g.anchor) flat.push(g.anchor);
+      for (const m of g.modifiers) flat.push(m.wp);
+    }
+    arduMission.set(flat);
+    arduSelectedWpIndex.set(newAnchor);
+  }
+
+  function attachGroupEditorEvents(popup: L.Popup, group: ArduGroup) {
     const el = popup.getElement();
     if (!el) return;
+    const idx = group.anchorIdx;
+    const wp = () => get(arduMission)[idx];
 
-    const cmdSelect = el.querySelector('select[data-field="cmdType"]') as HTMLSelectElement | null;
-    cmdSelect?.addEventListener('change', () => {
-      const newCmd = Number(cmdSelect.value);
-      arduUpdateWp(idx, { ...wp, command: newCmd, ...getDefaultParams(newCmd) });
+    (el.querySelector('select[data-field="cmdType"]') as HTMLSelectElement | null)?.addEventListener('change', (e) => {
+      const newCmd = Number((e.target as HTMLSelectElement).value);
+      const cur = wp(); if (!cur) return;
+      arduUpdateWp(idx, { ...cur, command: newCmd, ...cmdDefaultParams(newCmd) });
     });
 
-    const altInput = el.querySelector('input[data-field="alt"]') as HTMLInputElement | null;
-    altInput?.addEventListener('change', () => {
-      arduUpdateWp(idx, { ...wp, alt: Number(altInput.value) });
+    (el.querySelector('input[data-field="alt"]') as HTMLInputElement | null)?.addEventListener('change', (e) => {
+      const cur = wp(); if (!cur) return;
+      arduUpdateWp(idx, { ...cur, alt: Number((e.target as HTMLInputElement).value) });
     });
 
-    const frameBtn = el.querySelector('button[data-field="frameToggle"]') as HTMLButtonElement | null;
-    frameBtn?.addEventListener('click', () => {
-      arduUpdateWp(idx, { ...wp, frame: nextFrame(wp.frame) });
+    (el.querySelector('button[data-field="frameToggle"]') as HTMLButtonElement | null)?.addEventListener('click', () => {
+      const cur = wp(); if (!cur) return;
+      arduUpdateWp(idx, { ...cur, frame: nextFrame(cur.frame) });
     });
 
     const latInput = el.querySelector('input[data-field="lat"]') as HTMLInputElement | null;
@@ -223,151 +238,164 @@
       const newLat = parseFloat(latInput?.value ?? '');
       const newLon = parseFloat(lonInput?.value ?? '');
       if (isNaN(newLat) || isNaN(newLon)) return;
-      arduUpdateWp(idx, { ...wp, lat: Math.round(newLat * 1e7), lon: Math.round(newLon * 1e7) });
+      const cur = wp(); if (!cur) return;
+      arduUpdateWp(idx, { ...cur, lat: Math.round(newLat * 1e7), lon: Math.round(newLon * 1e7) });
       map.panTo(L.latLng(newLat, newLon));
     }
     latInput?.addEventListener('change', applyCoordChange);
     lonInput?.addEventListener('change', applyCoordChange);
 
-    // Generic binder for p1–p4: matches both <input> and <select>
-    function bindParam(field: string, apply: (v: number) => ArduWaypoint) {
-      const node = el!.querySelector(`[data-field="${field}"]`) as HTMLInputElement | HTMLSelectElement | null;
-      node?.addEventListener('change', () => arduUpdateWp(idx, apply(Number(node.value))));
-    }
-    bindParam('p1', v => ({ ...wp, param1: v }));
-    bindParam('p2', v => ({ ...wp, param2: v }));
-    bindParam('p3', v => ({ ...wp, param3: v }));
-    bindParam('p4', v => ({ ...wp, param4: v }));
+    // Generic param binding (primary + modifiers), via data-target / data-modidx / data-pidx.
+    el.querySelectorAll('[data-pidx]').forEach((node) => {
+      node.addEventListener('change', () => {
+        const n = node as HTMLInputElement | HTMLSelectElement;
+        const pidx = Number(n.dataset.pidx);
+        const targetIdx = n.dataset.target === 'mod' ? Number(n.dataset.modidx) : idx;
+        setParam(targetIdx, pidx, Number(n.value));
+      });
+    });
+
+    el.querySelectorAll('button[data-modremove]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        arduRemoveWp(Number((btn as HTMLElement).dataset.modremove));
+        arduSelectedWpIndex.set(idx);
+      });
+    });
+
+    (el.querySelector('select[data-field="addMod"]') as HTMLSelectElement | null)?.addEventListener('change', (e) => {
+      const newCmd = Number((e.target as HTMLSelectElement).value);
+      if (!newCmd) return;
+      const cur = wp();
+      const standalone = cmdStandaloneCoordinate(newCmd);
+      const coord = cmdDefaultCoordParams(newCmd); // params 5/6/7 defaults (data-in-x/y/z commands)
+      const mod: ArduWaypoint = {
+        command: newCmd, frame: MAV_FRAME_GLOBAL_RELATIVE_ALT, ...cmdDefaultParams(newCmd),
+        lat: standalone && cur ? cur.lat : (coord.x ?? 0),
+        lon: standalone && cur ? cur.lon : (coord.y ?? 0),
+        alt: coord.z ?? 0, autocontinue: true,
+      };
+      const at = groupEndIndex(group);
+      const updated = [...get(arduMission)];
+      updated.splice(at, 0, mod);
+      arduMission.set(updated);
+      arduSelectedWpIndex.set(idx);
+    });
+
+    // Advanced-params expander(s) — toggle the sibling body (DOM-only state; survives the redraw guard).
+    el.querySelectorAll('[data-advtoggle]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        const b = btn as HTMLElement;
+        const body = b.nextElementSibling as HTMLElement | null;
+        if (!body) return;
+        const show = body.hasAttribute('hidden');
+        if (show) body.removeAttribute('hidden'); else body.setAttribute('hidden', '');
+        b.textContent = `${show ? '▴' : '▾'} ${$t('missionLayer.advanced')}`;
+      });
+    });
 
     attachNumBtnEvents(el);
 
-    el.querySelector('button[data-action="moveUp"]')?.addEventListener('click', () => {
-      if (idx > 0) { arduMoveWp(idx, idx - 1); arduSelectedWpIndex.set(idx - 1); }
-    });
-    el.querySelector('button[data-action="moveDown"]')?.addEventListener('click', () => {
-      if (idx < currentWps.length - 1) { arduMoveWp(idx, idx + 1); arduSelectedWpIndex.set(idx + 1); }
-    });
+    el.querySelector('button[data-action="moveUp"]')?.addEventListener('click', () => moveGroup(group, -1));
+    el.querySelector('button[data-action="moveDown"]')?.addEventListener('click', () => moveGroup(group, 1));
     el.querySelector('button[data-action="remove"]')?.addEventListener('click', () => {
-      arduRemoveWp(idx);
+      // Remove the waypoint and its attached modifiers (back-to-front to keep indices valid).
+      const idxs = [group.anchorIdx, ...group.modifiers.map(m => m.idx)].sort((a, b) => b - a);
+      for (const i of idxs) arduRemoveWp(i);
       arduSelectedWpIndex.set(-1);
     });
 
-    el.querySelectorAll('input, select, button').forEach(input => {
-      L.DomEvent.disableClickPropagation(input as HTMLElement);
-    });
+    disablePopupPropagation(el);
   }
 
-  // ArduPilot NAV_TAKEOFF has no horizontal position (the vehicle launches from where it is and
-  // climbs to the command altitude); its lat/lon are 0. Anchor the marker on the FC home, falling
-  // back to the mission-area centroid, and otherwise omit it rather than drop a marker at 0/0.
+  // ── Takeoff position resolution (no real coords → anchor on home/centroid) ──
+
   function resolveTakeoffLatLng(wps: ArduWaypoint[], home: HomePosition): L.LatLng | null {
     if (home.set) return L.latLng(home.lat, home.lon);
     let sumLat = 0, sumLon = 0, n = 0;
     for (const w of wps) {
-      if (w.command === MAV_CMD_NAV_TAKEOFF || !arduHasLocation(w.command)) continue;
+      if (cmdIsTakeoff(w.command) || !cmdHasLocation(w.command)) continue;
       if (w.lat === 0 && w.lon === 0) continue;
       sumLat += w.lat / 1e7; sumLon += w.lon / 1e7; n++;
     }
     return n > 0 ? L.latLng(sumLat / n, sumLon / n) : null;
   }
 
-  /** Display position of a waypoint on the map: real coords, except takeoff which is anchored on
-   *  home/centroid (and may be null if neither exists). Used for the marker, flight path and jump
-   *  lines so they all agree on where a positionless takeoff sits. */
   function wpDisplayLatLng(wp: ArduWaypoint, wps: ArduWaypoint[], home: HomePosition): L.LatLng | null {
-    if (wp.command === MAV_CMD_NAV_TAKEOFF) return resolveTakeoffLatLng(wps, home);
+    if (cmdIsTakeoff(wp.command)) return resolveTakeoffLatLng(wps, home);
     return L.latLng(wp.lat / 1e7, wp.lon / 1e7);
   }
 
-  function renderMission(wps: ArduWaypoint[], selIdx: number, editing: boolean, home: HomePosition) {
-    const keepPopup = editing && editorPopup && editorPopupIdx === selIdx && selIdx >= 0;
-    missionGroup.clearLayers();
-    wpMarkers = []; loiterCircles = [];
-
-    if (!keepPopup) {
-      if (editorPopup) map.removeLayer(editorPopup);
-      editorPopup = undefined; editorPopupIdx = -1;
+  function findPrevLocationIdx(wps: ArduWaypoint[], fromIndex: number): number {
+    for (let i = fromIndex - 1; i >= 0; i--) {
+      if (cmdHasLocation(wps[i].command)) return i;
     }
-    if (wps.length === 0) return;
+    return -1;
+  }
+
+  // ── Render ──────────────────────────────────────────────────────────
+
+  function renderMission(wps: ArduWaypoint[], selIdx: number, editing: boolean, home: HomePosition, vehicle: VehicleClass) {
+    const groups = groupArduMission(wps);
+    const selGroup = groups.find(g => g.anchorIdx === selIdx || g.modifiers.some(m => m.idx === selIdx)) ?? null;
+
+    missionGroup.clearLayers(); // markers/lines only — the editor popup is a separate map layer
+    if (wps.length === 0) { closeEditorPopup(map, popupState); return; }
 
     const fpPositions: L.LatLng[] = [];
     const fpWpIndices: number[] = [];
 
     for (let i = 0; i < wps.length; i++) {
       const wp = wps[i];
-      const selected = i === selIdx;
+      const hasLoc = cmdHasLocation(wp.command);
+      const standalone = cmdStandaloneCoordinate(wp.command);
       const displayNum = i + 1;
 
-      if (arduHasLocation(wp.command)) {
-        const isTakeoff = wp.command === MAV_CMD_NAV_TAKEOFF;
-        // Takeoff is anchored on home/centroid (no real coords); skip it entirely if neither exists.
+      if (hasLoc || standalone) {
+        const isTakeoff = cmdIsTakeoff(wp.command);
         const latLng = wpDisplayLatLng(wp, wps, home);
         if (!latLng) continue;
 
-        if (wp.command !== MAV_CMD_DO_SET_ROI) {
-          fpPositions.push(latLng);
-          fpWpIndices.push(i);
-        }
+        if (hasLoc) { fpPositions.push(latLng); fpWpIndices.push(i); }
 
-        const icon = iconForArduWp(wp, displayNum, selected);
         const marker = L.marker(latLng, {
-          icon,
-          draggable: editing && !isTakeoff, // takeoff has no editable position
-          title: `WP${displayNum}: ${MAV_CMD_LABELS[wp.command] ?? ''}`,
+          icon: iconForArduWp(wp, displayNum, i === selIdx),
+          draggable: editing && !isTakeoff,
+          title: `WP${displayNum}: ${cmdName(wp.command)}`,
         }).addTo(missionGroup);
 
         marker.on('click', () => { arduSelectedWpIndex.set(i); });
         if (editing && !isTakeoff) {
           marker.on('dragend', () => {
             const pos = marker.getLatLng();
-            arduUpdateWp(i, { ...wp, lat: Math.round(pos.lat * 1e7), lon: Math.round(pos.lng * 1e7) });
+            const cur = get(arduMission)[i];
+            if (cur) arduUpdateWp(i, { ...cur, lat: Math.round(pos.lat * 1e7), lon: Math.round(pos.lng * 1e7) });
           });
         }
 
-        if (arduIsLoiter(wp.command) && wp.param3 > 0) {
-          const circle = L.circle(latLng, {
+        if (cmdIsLoiter(wp.command) && wp.param3 > 0) {
+          L.circle(latLng, {
             radius: Math.abs(wp.param3),
-            color: '#00bcd4', weight: 1.5, fill: false, opacity: 0.5, dashArray: '4 4',
+            color: '#f39c12', weight: 1.5, fill: false, opacity: 0.5, dashArray: '4 4',
           }).addTo(missionGroup);
-          loiterCircles.push(circle);
-        }
-
-        if (editing && selected) {
-          const htmlContent = buildEditorHtml(wp, i, wps.length, displayNum);
-          if (keepPopup && editorPopup) {
-            editorPopup.setLatLng(latLng);
-            const contentEl = editorPopup.getElement()?.querySelector('.leaflet-popup-content');
-            if (contentEl) contentEl.innerHTML = htmlContent;
-          } else {
-            if (editorPopup) map.removeLayer(editorPopup);
-            editorPopup = L.popup({
-              closeButton: false, autoClose: false, closeOnClick: false,
-              className: 'wp-editor-popup-container', offset: L.point(0, -30), maxWidth: 240, minWidth: 190,
-            }).setLatLng(latLng).setContent(htmlContent).addTo(map);
-          }
-          editorPopupIdx = i;
-          setTimeout(() => { if (editorPopup) attachEditorEvents(editorPopup, wp, i); }, 50);
         }
 
         if (!editing) {
-          const frameLbl = frameLabel(wp.frame);
           marker.bindTooltip(
-            `WP${displayNum} ${MAV_CMD_LABELS[wp.command] ?? ''}<br>${wp.alt.toFixed(1)}m ${frameLbl}`,
-            { direction: 'top', offset: L.point(0, -20) }
+            `WP${displayNum} ${cmdName(wp.command)}<br>${wp.alt.toFixed(1)}m ${frameLabel(wp.frame)}`,
+            { direction: 'top', offset: L.point(0, -20) },
           );
         }
-        wpMarkers.push(marker);
       }
 
-      if (wp.command === MAV_CMD_DO_JUMP && wp.param1 > 0) {
+      // Jump connector line (DO_JUMP → target waypoint).
+      if (cmdIsModifierJump(wp.command) && wp.param1 > 0) {
         const targetIdx = Math.round(wp.param1) - 1;
         const targetWp = wps[targetIdx];
         const prevLocIdx = findPrevLocationIdx(wps, i);
         const sourceWp = prevLocIdx >= 0 ? wps[prevLocIdx] : null;
-        // Resolve display positions (so a jump to/from the positionless takeoff lands on its
-        // home/centroid anchor instead of 0/0, matching Mission Planner).
         const src = sourceWp ? wpDisplayLatLng(sourceWp, wps, home) : null;
-        const dst = targetWp && arduHasLocation(targetWp.command) ? wpDisplayLatLng(targetWp, wps, home) : null;
+        const dst = targetWp && cmdHasLocation(targetWp.command) ? wpDisplayLatLng(targetWp, wps, home) : null;
         if (src && dst) {
           L.polyline([src, dst], { color: '#8e44ad', weight: 2, dashArray: '8 4', opacity: 0.8 })
             .addTo(missionGroup)
@@ -376,87 +404,88 @@
       }
     }
 
+    // Flight path (location commands only), takeoff-adjacent leg dashed.
     if (fpPositions.length > 1) {
-      // Insert a waypoint at the click (nearest leg midpoint). Attached to every leg so clicking
-      // any part of the path works — the search spans all positions regardless of which leg fired.
       const insertOnPath = (e: L.LeafletMouseEvent) => {
         L.DomEvent.stopPropagation(e);
-        const clickLatLng = e.latlng;
         let bestInsertIdx = wps.length;
         let bestDist = Infinity;
         for (let s = 0; s < fpPositions.length - 1; s++) {
-          const mid = L.latLng(
-            (fpPositions[s].lat + fpPositions[s + 1].lat) / 2,
-            (fpPositions[s].lng + fpPositions[s + 1].lng) / 2,
-          );
-          const d = clickLatLng.distanceTo(mid);
+          const mid = L.latLng((fpPositions[s].lat + fpPositions[s + 1].lat) / 2, (fpPositions[s].lng + fpPositions[s + 1].lng) / 2);
+          const d = e.latlng.distanceTo(mid);
           if (d < bestDist) { bestDist = d; bestInsertIdx = fpWpIndices[s + 1] ?? wps.length; }
         }
-        const defaultAlt = get(settings).defaultWpAltitudeM;
         const updated = [...wps];
-        updated.splice(bestInsertIdx, 0, {
-          command: MAV_CMD_NAV_WAYPOINT,
-          frame: MAV_FRAME_GLOBAL_RELATIVE_ALT,
-          param1: 0, param2: 0, param3: 0, param4: 0,
-          lat: Math.round(clickLatLng.lat * 1e7),
-          lon: Math.round(clickLatLng.lng * 1e7),
-          alt: defaultAlt,
-          autocontinue: true,
-        });
+        updated.splice(bestInsertIdx, 0, newWaypointAt(e.latlng));
         arduMission.set(updated);
         arduSelectedWpIndex.set(bestInsertIdx);
       };
 
-      // Draw the path leg by leg: the leg touching a takeoff is dashed, because the takeoff has no
-      // fixed horizontal position (anchored on home), so that leg is an estimate — same dashed
-      // "not-fixed" language as the jump line, but in the flight-path blue. ArduPilot-only: INAV has
-      // no positionless waypoint type, so this stays in the Ardu layer.
       for (let s = 0; s < fpPositions.length - 1; s++) {
-        const loose = wps[fpWpIndices[s]]?.command === MAV_CMD_NAV_TAKEOFF
-          || wps[fpWpIndices[s + 1]]?.command === MAV_CMD_NAV_TAKEOFF;
+        const loose = cmdIsTakeoff(wps[fpWpIndices[s]]?.command) || cmdIsTakeoff(wps[fpWpIndices[s + 1]]?.command);
         const leg = L.polyline([fpPositions[s], fpPositions[s + 1]], {
-          color: '#37a8db',
-          weight: editing ? 6 : 3,
-          opacity: 0.7,
+          color: '#37a8db', weight: editing ? 6 : 3, opacity: 0.7,
           ...(loose ? { dashArray: '8 6' } : {}),
         }).addTo(missionGroup);
         if (editing) leg.on('click', insertOnPath);
       }
     }
+
+    // Editor popup for the selected group (anchored on its primary waypoint) — shared framework with
+    // the content-signature redraw guard, so live redraws don't close an open dropdown.
+    const anchorLatLng = editing && selGroup?.anchor ? wpDisplayLatLng(selGroup.anchor, wps, home) : null;
+    if (editing && selGroup?.anchor && anchorLatLng) {
+      const g = selGroup;
+      renderEditorPopup(
+        map, popupState, g.anchorIdx, anchorLatLng,
+        buildGroupEditorHtml(g, wps.length, vehicle),
+        (popup) => attachGroupEditorEvents(popup, g),
+        { popupOptions: { maxWidth: 260, minWidth: 200 } },
+      );
+    } else {
+      closeEditorPopup(map, popupState);
+    }
   }
 
-  function findPrevLocationIdx(wps: ArduWaypoint[], fromIndex: number): number {
-    for (let i = fromIndex - 1; i >= 0; i--) {
-      if (arduHasLocation(wps[i].command)) return i;
-    }
-    return -1;
+  // DO_JUMP id (177) without importing the whole constant set just for the connector check.
+  function cmdIsModifierJump(cmd: number): boolean { return cmd === 177; }
+
+  function newWaypointAt(latlng: L.LatLng): ArduWaypoint {
+    return {
+      command: MAV_CMD_NAV_WAYPOINT, frame: MAV_FRAME_GLOBAL_RELATIVE_ALT,
+      param1: 0, param2: 0, param3: 0, param4: 0,
+      lat: Math.round(latlng.lat * 1e7), lon: Math.round(latlng.lng * 1e7),
+      alt: get(settings).defaultWpAltitudeM, autocontinue: true,
+    };
   }
 
   function onMapClick(e: L.LeafletMouseEvent) {
     if (!currentEditing) return;
     if (currentSelIdx >= 0) { arduSelectedWpIndex.set(-1); return; }
-    const defaultAlt = get(settings).defaultWpAltitudeM;
-    arduAddWp({
-      command: MAV_CMD_NAV_WAYPOINT,
-      frame: MAV_FRAME_GLOBAL_RELATIVE_ALT,
-      param1: 0, param2: 0, param3: 0, param4: 0,
-      lat: Math.round(e.latlng.lat * 1e7),
-      lon: Math.round(e.latlng.lng * 1e7),
-      alt: defaultAlt,
-      autocontinue: true,
-    });
+    arduAddWp(newWaypointAt(e.latlng));
   }
 
   // svelte-ignore state_referenced_locally
   map.on('click', onMapClick);
 
-  $effect(() => { renderMission(currentWps, currentSelIdx, currentEditing, currentHome); });
+  $effect(() => { renderMission(currentWps, currentSelIdx, currentEditing, currentHome, currentVehicle); });
 
   onDestroy(() => {
-    unsubMission(); unsubSelIdx(); unsubEditMode(); unsubHome();
+    unsubMission(); unsubSelIdx(); unsubEditMode(); unsubHome(); unsubVehicle();
     map.off('click', onMapClick);
-    if (editorPopup) { map.removeLayer(editorPopup); editorPopup = undefined; }
+    closeEditorPopup(map, popupState);
     missionGroup.clearLayers();
     map.removeLayer(missionGroup);
   });
 </script>
+
+<style>
+  /* New popup-framework classes (the base wpe-* classes are global in InavMissionLayer). */
+  :global(.wpe-applies) { color: #888; font-size: 10px; font-weight: 400; margin-left: 4px; }
+  :global(.wpe-canonical) { color: #7a7a7a; font-size: 10px; font-weight: 400; font-family: 'Consolas', monospace; }
+  :global(.wpe-canonical-line) { margin: 1px 0 4px; padding-left: 2px; }
+  :global(.wpe-info) { color: #37a8db; font-size: 10px; cursor: help; opacity: 0.8; }
+  :global(.wpe-adv-toggle) { display: block; width: 100%; text-align: left; background: none; border: none; border-top: 1px dashed #555; margin-top: 4px; padding: 4px 0 2px; color: #37a8db; font-size: 11px; cursor: pointer; }
+  :global(.wpe-adv-toggle:hover) { color: #5cc0ec; }
+  :global(.wpe-adv-body) { margin-top: 2px; }
+</style>

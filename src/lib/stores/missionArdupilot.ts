@@ -2,6 +2,8 @@
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
 import { writable, get } from 'svelte/store';
+import { connection } from './connection';
+import { cmdHasLocation, type VehicleClass } from '$lib/helpers/arduCommandCatalog';
 
 // ── MAV_CMD constants ─────────────────────────────────────────────────
 export const MAV_CMD_NAV_WAYPOINT        = 16;
@@ -93,6 +95,63 @@ export function arduIsLoiter(cmd: number): boolean {
 export const arduMission        = writable<ArduWaypoint[]>([]);
 export const arduSelectedWpIndex = writable<number>(-1);
 export const arduEditMode       = writable<boolean>(false);
+
+// ── Vehicle class (drives the command catalog filter) ─────────────────
+// Online: derived from the FC's variant and locked. Offline: the operator picks it (QuadPlane can't be
+// auto-detected — it reports as ArduPlane — so it is an offline-only choice for now).
+
+export const arduVehicleClass = writable<VehicleClass>('plane');
+
+function variantToVehicleClass(variant: string): VehicleClass | null {
+  const v = variant.toLowerCase();
+  if (v.includes('plane')) return 'plane';     // QuadPlane also reports ArduPlane (manual override)
+  if (v.includes('copter') || v.includes('heli')) return 'copter';
+  if (v.includes('rover')) return 'rover';
+  if (v.includes('boat')) return 'boat';
+  if (v.includes('sub')) return 'sub';
+  return null;
+}
+
+let _lastVariantForClass = '';
+connection.subscribe((c) => {
+  if (c.status !== 'connected' || !c.fcInfo) { _lastVariantForClass = ''; return; }
+  if (c.fcInfo.fc_variant === _lastVariantForClass) return;
+  _lastVariantForClass = c.fcInfo.fc_variant;
+  const cls = variantToVehicleClass(c.fcInfo.fc_variant);
+  if (cls) arduVehicleClass.set(cls);
+});
+
+// ── Modifier grouping (INAV-style list/editor presentation over the flat sequence) ──
+// A "group" = a location command (a map waypoint) plus the trailing non-location commands that follow
+// it in the sequence (its modifiers). Leading modifiers before the first waypoint group with `anchor:
+// null`. Indices are the original flat-array indices (for editing).
+
+export interface ArduGroup {
+  anchorIdx: number;                          // -1 for a leading modifier-only group
+  anchor: ArduWaypoint | null;
+  modifiers: { idx: number; wp: ArduWaypoint }[];
+}
+
+export function groupArduMission(wps: ArduWaypoint[]): ArduGroup[] {
+  const groups: ArduGroup[] = [];
+  let current: ArduGroup | null = null;
+  wps.forEach((wp, idx) => {
+    if (cmdHasLocation(wp.command)) {
+      current = { anchorIdx: idx, anchor: wp, modifiers: [] };
+      groups.push(current);
+    } else {
+      if (!current) { current = { anchorIdx: -1, anchor: null, modifiers: [] }; groups.push(current); }
+      current.modifiers.push({ idx, wp });
+    }
+  });
+  return groups;
+}
+
+/** Index in the flat sequence just after the given group (where a new modifier is inserted). */
+export function groupEndIndex(g: ArduGroup): number {
+  if (g.modifiers.length) return g.modifiers[g.modifiers.length - 1].idx + 1;
+  return g.anchorIdx + 1;
+}
 
 // ── Mutations ─────────────────────────────────────────────────────────
 

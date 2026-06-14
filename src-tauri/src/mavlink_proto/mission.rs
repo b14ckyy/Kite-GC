@@ -107,6 +107,9 @@ pub fn download(
 }
 
 /// Upload waypoints to the FC, replacing its current mission.
+// `#[allow(deprecated)]`: ArduPilot can request items with the deprecated `MISSION_REQUEST` (float)
+// variant instead of `MISSION_REQUEST_INT` — we must answer both or the FC stalls and cancels.
+#[allow(deprecated)]
 pub fn upload(
     cmd_tx: &mpsc::Sender<MavlinkCommand>,
     fc_sysid: u8,
@@ -118,6 +121,7 @@ pub fn upload(
     let count = waypoints.len() as u16 + 1;
 
     // 1. Announce item count
+    eprintln!("MAVLink upload: announcing {} items ({} waypoints + home slot)", count, waypoints.len());
     if let Err(e) = send(cmd_tx, MavMessage::MISSION_COUNT(MISSION_COUNT_DATA {
         target_system: fc_sysid,
         target_component: 0,
@@ -129,7 +133,8 @@ pub fn upload(
         return Err(e);
     }
 
-    // 2. Respond to MISSION_REQUEST_INT messages until we receive MISSION_ACK
+    // 2. Respond to the FC's item requests (MISSION_REQUEST_INT *or* the deprecated MISSION_REQUEST)
+    //    until we receive MISSION_ACK.
     let deadline = Instant::now() + UPLOAD_DEADLINE;
     loop {
         if Instant::now() > deadline {
@@ -138,18 +143,16 @@ pub fn upload(
         }
         match rx.recv_timeout(ITEM_TIMEOUT) {
             Ok(MavMessage::MISSION_REQUEST_INT(req)) => {
-                // seq 0 = home placeholder; the operator's waypoints are at seq 1..=len.
-                let item = if req.seq == 0 {
-                    home_item(waypoints, fc_sysid)
-                } else {
-                    let idx = req.seq as usize - 1;
-                    if idx >= waypoints.len() {
-                        unregister(cmd_tx);
-                        return Err(format!("FC requested WP {} but mission has only {}", req.seq, waypoints.len()));
-                    }
-                    wp_to_item(&waypoints[idx], req.seq, fc_sysid)
-                };
-                if let Err(e) = send(cmd_tx, MavMessage::MISSION_ITEM_INT(item)) {
+                if let Err(e) = respond_item(cmd_tx, req.seq, waypoints, fc_sysid) {
+                    unregister(cmd_tx);
+                    return Err(e);
+                }
+            }
+            Ok(MavMessage::MISSION_REQUEST(req)) => {
+                // Deprecated float-coordinate request — still answer with MISSION_ITEM_INT (the FC
+                // accepts it). Without this the upload stalls → MAV_MISSION_OPERATION_CANCELLED.
+                // (ArduPilot SITL uses this variant.)
+                if let Err(e) = respond_item(cmd_tx, req.seq, waypoints, fc_sysid) {
                     unregister(cmd_tx);
                     return Err(e);
                 }
@@ -157,13 +160,17 @@ pub fn upload(
             Ok(MavMessage::MISSION_ACK(ack)) => {
                 unregister(cmd_tx);
                 return if ack.mavtype == MavMissionResult::MAV_MISSION_ACCEPTED {
-                    log::info!("MAVLink mission upload complete: {} items accepted", count);
+                    eprintln!("MAVLink upload complete: {} items accepted", count);
                     Ok(())
                 } else {
                     Err(format!("FC rejected upload: {:?}", ack.mavtype))
                 };
             }
-            Ok(_) => {} // other mission messages during upload — ignore
+            Ok(other) => {
+                // Anything else on the mission channel during an upload is unexpected (e.g. another GCS
+                // starting its own mission op → the FC cancels ours). Log it so we can tell.
+                eprintln!("MAVLink upload: unexpected mission msg during upload: {:?}", other);
+            }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 unregister(cmd_tx);
                 return Err("FC stopped responding during upload".into());
@@ -173,6 +180,27 @@ pub fn upload(
             }
         }
     }
+}
+
+/// Send the mission item the FC requested for `seq`: seq 0 = home placeholder, seq 1..=len = the
+/// operator's waypoints. Always replies with MISSION_ITEM_INT (the FC accepts it for either request
+/// variant).
+fn respond_item(
+    cmd_tx: &mpsc::Sender<MavlinkCommand>,
+    seq: u16,
+    waypoints: &[ArduWaypoint],
+    fc_sysid: u8,
+) -> Result<(), String> {
+    let item = if seq == 0 {
+        home_item(waypoints, fc_sysid)
+    } else {
+        let idx = seq as usize - 1;
+        if idx >= waypoints.len() {
+            return Err(format!("FC requested WP {} but mission has only {}", seq, waypoints.len()));
+        }
+        wp_to_item(&waypoints[idx], seq, fc_sysid)
+    };
+    send(cmd_tx, MavMessage::MISSION_ITEM_INT(item))
 }
 
 /// Clear all missions stored on the FC.

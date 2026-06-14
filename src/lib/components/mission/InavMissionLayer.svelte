@@ -149,6 +149,9 @@
   let paramLabels: L.Marker[] = [];
   let editorPopup: L.Popup | undefined;
   let editorPopupIdx: number = -1;
+  // Content signature for the redraw guard: only rewrite the popup DOM when the rendered HTML changes,
+  // so unrelated map redraws don't tear down an open dropdown (shared concept with missionEditorPopup).
+  let editorPopupHtml = '';
 
   function buildDisplayNumbers(waypoints: Waypoint[]): Map<number, number> {
     const nums = new Map<number, number>();
@@ -536,7 +539,7 @@
 
     if (!keepPopup) {
       if (editorPopup) map.removeLayer(editorPopup);
-      editorPopup = undefined; editorPopupIdx = -1;
+      editorPopup = undefined; editorPopupIdx = -1; editorPopupHtml = '';
     }
     // In replay the mission follows the "Show Mission" toggle; in planning/live
     // a loaded mission is always shown.
@@ -628,10 +631,15 @@
 
         if (editing && primaryForPopup && !greyed) {
           const htmlContent = buildEditorHtml(wp, i, m.waypoints.length, dn, modifiers, fbhChild);
+          const doAttach = () => setTimeout(() => { if (editorPopup) attachEditorEvents(editorPopup, wp, i, modifiers, fbhChild); }, 50);
           if (keepPopup && editorPopup) {
             editorPopup.setLatLng(latLng);
-            const contentEl = editorPopup.getElement()?.querySelector('.leaflet-popup-content');
-            if (contentEl) contentEl.innerHTML = htmlContent;
+            // Redraw guard: rewrite + re-wire only when the content actually changed, so unrelated map
+            // redraws (telemetry/home ticks) don't close an open dropdown mid-interaction.
+            if (htmlContent !== editorPopupHtml) {
+              const contentEl = editorPopup.getElement()?.querySelector('.leaflet-popup-content');
+              if (contentEl) { contentEl.innerHTML = htmlContent; editorPopupHtml = htmlContent; doAttach(); }
+            }
           } else {
             if (editorPopup) map.removeLayer(editorPopup);
             // autoPan off: Leaflet's default only fits the popup into the map *container*,
@@ -641,6 +649,7 @@
               closeButton: false, autoClose: false, closeOnClick: false, autoPan: false,
               className: 'wp-editor-popup-container', offset: L.point(0, -30), maxWidth: 240, minWidth: 190,
             }).setLatLng(latLng).setContent(htmlContent).addTo(map);
+            editorPopupHtml = htmlContent;
             // Center the freshly selected WP in the visible area: biased right (clears the
             // mission panel on the left) and below centre (the editor popup opens upward, so
             // this leaves it roughly centred, above the player/widgets at the bottom). The
@@ -649,9 +658,9 @@
             const wpPt = map.latLngToContainerPoint(latLng);
             const targetPt = L.point(size.x * 0.55, size.y * 0.6);
             map.panBy(wpPt.subtract(targetPt), { animate: true });
+            doAttach();
           }
           editorPopupIdx = selIdx;
-          setTimeout(() => { if (editorPopup) attachEditorEvents(editorPopup, wp, i, modifiers, fbhChild); }, 50);
         }
 
         if (!editing) {
