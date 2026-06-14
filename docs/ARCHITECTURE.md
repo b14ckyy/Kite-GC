@@ -2004,12 +2004,19 @@ still own the byte transport), send a one-shot batch of `SET_MESSAGE_INTERVAL` c
 - **Wanted messages** at MSP-equivalent rates, driven by the **same** `attitudeRateHz` /
   `positionRateHz` settings:
   - `ATTITUDE` (30) = attitude rate
-  - `GPS_RAW_INT` (24), `GLOBAL_POSITION_INT` (33), `VFR_HUD` (74) = position rate
-  - `SYS_STATUS` (1), `BATTERY_STATUS` (147), `NAV_CONTROLLER_OUTPUT` (62), `MISSION_CURRENT` (42) = 1 Hz
+  - `GLOBAL_POSITION_INT` (33) = position rate (the fused position/altitude/ground-speed/course source)
+  - `VFR_HUD` (74) = position rate, but **only when the airspeed module is enabled** — it is consumed
+    solely for airspeed, so it is disabled (`-1`) otherwise (mirrors the MSP airspeed-poll gating).
+  - `GPS_RAW_INT` (24) = **1 Hz** — contributes only fix type / sat count / HDOP (slow-changing);
+    position, ground speed and course all come from the fused `GLOBAL_POSITION_INT`.
+  - `SYS_STATUS` (1), `BATTERY_STATUS` (147), `RC_CHANNELS` (65, RSSI), `MISSION_CURRENT` (42),
+    `EKF_STATUS_REPORT` (193) = 1 Hz
   - `HOME_POSITION` (242) low; `STATUSTEXT` (253) event-driven (left alone). `HEARTBEAT` is FC-fixed.
+    `PARAM_VALUE` (22) is a one-shot reply to the `AHRS_EKF_TYPE` read issued on connect (see below).
 - **Ballast disabled** (`interval = -1`): RAW_IMU, SCALED_IMU2/3, SCALED_PRESSURE*, VIBRATION,
-  AHRS/AHRS2, EKF_STATUS_REPORT, SERVO_OUTPUT_RAW, RC_CHANNELS, POWER_STATUS, MEMINFO, SYSTEM_TIME …
-  (a fixed list of high-rate messages no widget consumes).
+  AHRS/AHRS2, NAV_CONTROLLER_OUTPUT, SERVO_OUTPUT_RAW, POWER_STATUS, MEMINFO, SYSTEM_TIME … (a fixed
+  list of high-rate messages no widget consumes). (`AHRS3`/182 is intentionally **not** listed —
+  obsolete in modern ArduPilot, so a `SET_MESSAGE_INTERVAL` on it triggers a "No ap_message" warning.)
 
 At the default knobs this yields ≈ 650 B/s; dialling Attitude→2 / Position→1 drops it to ≈ 450 B/s,
 fitting the tightest practical link. The same knobs thus double as the bandwidth control — no separate
@@ -2039,6 +2046,27 @@ default, and an explicit escape hatch for "record everything" use-cases. Costs: 
 list to maintain as we add/remove consumed messages; rates that are fire-and-forget on connect (we do
 not read `COMMAND_ACK`, acceptable for stream setup); and the connect-time-only semantics (no live
 re-tuning), consistent with the existing MSP rate behaviour.
+
+**Update (2026-06-14) — sensor-health + EKF indicator, and a stream audit.** Adding the EKF indicator
+prompted a full pass over the requested set (what we ask for vs. what the handler actually consumes):
+
+- **Per-sensor health is now real, from `SYS_STATUS`.** The header sensor bar was fed by a hard-coded
+  stub (`gyro=1, acc=1, mag=0 …` synthesised in `GPS_RAW_INT`). It now decodes the standard
+  `onboard_control_sensors_present` / `_health` bitmasks into the same `0=NONE / 1=OK / 3=UNHEALTHY`
+  model MSP's `MSP_SENSOR_STATUS` uses, so MAVLink and INAV land in the same telemetry fields. The bar
+  renders **adaptively** (only present sensors) and gained **rangefinder + pitot** tiles (data INAV
+  already provided but never displayed). "Enabled-but-not-healthy" is collapsed into UNHEALTHY (3-state).
+- **EKF indicator (ArduPilot).** `EKF_STATUS_REPORT` (193) was **promoted out of the ballast list** to
+  1 Hz; its worst normalised variance drives a green/amber/red estimator tile (Mission-Planner-style
+  thresholds: < 0.5 / 0.5–0.8 / ≥ 0.8, with a GPS glitch or uninitialised filter escalating). The
+  active core (**EKF2/EKF3**) is not in any telemetry message, so it is read once on connect via a
+  `PARAM_REQUEST_READ` for `AHRS_EKF_TYPE` (`mavlink_proto/params.rs`); the `PARAM_VALUE` reply is
+  decoded in the handler. INAV never emits EKF, so the tile stays hidden there.
+- **Audit fixes.** `NAV_CONTROLLER_OUTPUT` (62) was requested at 1 Hz but **never consumed** → dropped.
+  `RC_CHANNELS` (65) was **disabled in ballast while the handler read RSSI from it** (so MAVLink RSSI
+  was always 0) → moved to the wanted set at 1 Hz. `GPS_RAW_INT` dropped from position-rate to 1 Hz
+  (see above). `VFR_HUD` is now gated on the airspeed module. Net: one fewer message type for a typical
+  no-airspeed multirotor, yet RSSI and EKF now work — less bandwidth, more signal.
 
 ---
 

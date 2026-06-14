@@ -8,12 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **FC system messages on screen (MAVLink STATUSTEXT toasts).** ArduPilot's status messages (mode
-  changes, prearm failures, errors, …) now appear as single-line toasts at the top edge — up to 5,
-  colour-coded by severity (info blue / warning amber / error red) with a matching audio cue (gentle
-  for info, discreetly alarming for warnings/errors). The stack fades out 60 s after the last message;
-  repeated identical lines are de-duplicated and info cues are rate-limited so a boot-time flood doesn't
-  machine-gun the speaker.
+- **FC system messages on screen (MAVLink STATUSTEXT).** ArduPilot's status messages (mode changes,
+  prearm failures, errors, …) appear in a single compact **banner** at the top edge — one line per
+  message, newest at the bottom, the field scrolling to the latest (≈5 lines visible), colour-coded by
+  severity (info blue / warning amber / error red) with a matching audio cue (gentle for info,
+  discreetly alarming for warnings/errors). The banner fades out 60 s after the last message; repeated
+  identical lines are de-duplicated and info cues are rate-limited so a boot-time flood doesn't
+  machine-gun the speaker. A **System Messages** setting (DATA tab → Alerts: Off / Errors / Warnings /
+  All) controls verbosity by `MAV_SEVERITY` — protocol-neutral, so it can gate INAV messages later too.
+- **Real per-sensor health on the header bar, MAVLink included.** ArduPilot now feeds the sensor bar
+  from the standard `SYS_STATUS` present/health bitmasks (previously a hard-coded stub that left
+  mag/baro dark), mapped to the same model INAV uses. The bar is **adaptive** — it shows only the
+  sensors actually present, so it adapts per airframe — and gained **rangefinder + pitot** tiles (data
+  INAV already provided but never displayed). GPS keeps its amber "fix below 3D" nuance.
+- **EKF estimator indicator (ArduPilot).** A new header tile shows the active core (**EKF2 / EKF3**,
+  read once from the `AHRS_EKF_TYPE` parameter on connect) and its health as a green/amber/red light
+  from `EKF_STATUS_REPORT` — green when all variances are nominal, amber when degraded, red on a GPS
+  glitch / unhealthy filter. Hidden for INAV (which doesn't report EKF status).
 - **ArduPilot active-waypoint tracking.** The Flight Mode widget shows `WP N/X` during an ArduPilot Auto
   mission (current item from `MISSION_CURRENT`, total from the loaded mission), and the active waypoint
   on the 2D map gets the same pulsing glow INAV already has — via the shared marker helper, so the two
@@ -60,6 +71,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   adsb.fi** (adsb.one demoted to an off-by-default custom provider — currently unreachable).
 - **UAV Info features** are laid out in a fixed **2-column** grid so the panel no longer widens with
   the feature count.
+- **MAVLink stream set audited (ADR-043).** Requesting `EKF_STATUS_REPORT` for the new EKF tile
+  prompted a pass over what we ask for vs. what the handler consumes: `NAV_CONTROLLER_OUTPUT` was
+  requested but never read → dropped; `RC_CHANNELS` was disabled in ballast while the handler read RSSI
+  from it (so MAVLink RSSI was always 0) → enabled at 1 Hz; `GPS_RAW_INT` dropped from position-rate to
+  1 Hz (it only contributes fix/sats/HDOP now — position comes from the fused `GLOBAL_POSITION_INT`);
+  and `VFR_HUD` is now gated on the airspeed module (its only consumer). Net less bandwidth, yet RSSI
+  and EKF now work. Also: `AHRS3` (182) is no longer touched — obsolete in modern ArduPilot, it logged
+  a "No ap_message" warning on connect.
 
 ### Added
 - **MAVLink telemetry stream rates — GCS-requested, with MSP parity (ADR-043).** ArduPilot is
