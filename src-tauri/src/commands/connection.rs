@@ -448,7 +448,7 @@ fn connect_mavlink(
     };
 
     // Start the MAVLink handler thread
-    let handle = mavlink_proto::handler::start(byte_transport, fc_sysid, app_handle, recorder_handle);
+    let handle = mavlink_proto::handler::start(byte_transport, fc_sysid, fc_info.fc_variant.clone(), app_handle, recorder_handle);
 
     // Store MAVLink handle and FC info
     {

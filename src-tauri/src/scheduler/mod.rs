@@ -424,6 +424,17 @@ fn poll_slot(
                 if let Err(e) = app_handle.emit(&event_name, &payload) {
                     log::warn!("Failed to emit {}: {}", event_name, e);
                 }
+
+                // Flight mode: classify the INAV status bitmask into the canonical model and emit the
+                // protocol-agnostic event (+ feed the recorder). The raw flags stay in StatusData as a
+                // forensic field only. See docs/active/FLIGHT_MODE_UNIFIED.md.
+                if let telemetry::TelemetryPayload::Status(ref s) = payload {
+                    let fm = crate::flightmode::classify_inav(s.flight_mode_flags);
+                    let _ = app_handle.emit("telemetry-flightmode", &fm);
+                    if let Some(ref rec) = recorder {
+                        if let Ok(mut r) = rec.lock() { r.on_flightmode(&fm); }
+                    }
+                }
             }
             Err(e) => {
                 tracker.on_timeout(code);

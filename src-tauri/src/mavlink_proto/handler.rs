@@ -83,13 +83,14 @@ impl MavlinkHandle {
 pub fn start(
     transport: Box<dyn ByteTransport>,
     fc_sysid: u8,
+    fc_variant: String,
     app_handle: AppHandle,
     recorder: Option<FlightRecorderHandle>,
 ) -> MavlinkHandle {
     let (cmd_tx, cmd_rx) = mpsc::channel::<MavlinkCommand>();
 
     let thread = thread::spawn(move || {
-        handler_loop(transport, fc_sysid, app_handle, cmd_rx, recorder)
+        handler_loop(transport, fc_sysid, fc_variant, app_handle, cmd_rx, recorder)
     });
 
     MavlinkHandle {
@@ -103,6 +104,7 @@ pub fn start(
 fn handler_loop(
     mut transport: Box<dyn ByteTransport>,
     fc_sysid: u8,
+    fc_variant: String,
     app_handle: AppHandle,
     cmd_rx: mpsc::Receiver<MavlinkCommand>,
     recorder: Option<FlightRecorderHandle>,
@@ -206,7 +208,7 @@ fn handler_loop(
                         }
                     }
 
-                    dispatch_message(&frame.header, &frame.message, &app_handle, &mut analog, &recorder);
+                    dispatch_message(&frame.header, &frame.message, &fc_variant, &app_handle, &mut analog, &recorder);
                 }
             }
             Err(crate::transport::TransportError::Timeout) => {}
@@ -285,9 +287,9 @@ impl AnalogState {
 
 /// Dispatch a received MAVLink message to the same Tauri events as the MSP scheduler.
 /// This ensures widgets/store work identically regardless of protocol.
-fn dispatch_message(header: &MavHeader, message: &MavMessage, app_handle: &AppHandle, analog: &mut AnalogState, recorder: &Option<FlightRecorderHandle>) {
+fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, app_handle: &AppHandle, analog: &mut AnalogState, recorder: &Option<FlightRecorderHandle>) {
     match message {
-        // ── HEARTBEAT → telemetry-status ────────────────────────────
+        // ── HEARTBEAT → telemetry-status + telemetry-flightmode ─────
         MavMessage::HEARTBEAT(hb) => {
             let armed_bit = ::mavlink::ardupilotmega::MavModeFlag::MAV_MODE_FLAG_SAFETY_ARMED;
             let armed = hb.base_mode.bits() & armed_bit.bits() != 0;
@@ -295,9 +297,8 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, app_handle: &AppHa
             // Encode arming_flags compatible with recorder's ARMED_FLAG (bit 2 = 0x04)
             // Recorder checks: (arming_flags & 0x04) != 0 → armed
             let arming_flags: u32 = if armed { 0x04 } else { 0 };
-            // ArduPilot encodes the flight mode as a single raw custom_mode value. The frontend
-            // (classifyArduPilotMode) maps that raw number per vehicle type, so pass it through
-            // unchanged — do NOT squeeze it into INAV box-flag bits.
+            // ArduPilot encodes the flight mode as a single raw custom_mode value. We keep it in
+            // StatusData as a forensic field, and classify it into the canonical model below.
             let flight_mode_flags = hb.custom_mode;
 
             let data = StatusData {
@@ -307,8 +308,16 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, app_handle: &AppHa
                 sensor_status: 0,
             };
             let _ = app_handle.emit("telemetry-status", &data);
+
+            // Flight mode (canonical, protocol-agnostic). See docs/active/FLIGHT_MODE_UNIFIED.md.
+            let fm = crate::flightmode::classify_ardupilot(hb.custom_mode, fc_variant);
+            let _ = app_handle.emit("telemetry-flightmode", &fm);
+
             if let Some(ref rec) = recorder {
-                if let Ok(mut r) = rec.lock() { r.on_status(&data); }
+                if let Ok(mut r) = rec.lock() {
+                    r.on_status(&data);
+                    r.on_flightmode(&fm);
+                }
             }
         }
 
@@ -432,24 +441,18 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, app_handle: &AppHa
             }
         }
 
-        // ── VFR_HUD → telemetry-altitude + telemetry-airspeed ──────
+        // ── VFR_HUD → telemetry-airspeed ───────────────────────────
+        // Altitude is intentionally NOT emitted here: VFR_HUD.alt is MSL, but the altitude widget +
+        // recorder expect the relative (above-home) value. GLOBAL_POSITION_INT owns altitude
+        // (relative_alt) and vario (vz); VFR_HUD only contributes airspeed.
         MavMessage::VFR_HUD(hud) => {
-            let alt = AltitudeData {
-                altitude: hud.alt as f64,   // meters
-                vario: hud.climb as f64,    // m/s
-            };
-            let _ = app_handle.emit("telemetry-altitude", &alt);
-
             let airspeed = AirspeedData {
                 airspeed: hud.airspeed as f64, // m/s
             };
             let _ = app_handle.emit("telemetry-airspeed", &airspeed);
 
             if let Some(ref rec) = recorder {
-                if let Ok(mut r) = rec.lock() {
-                    r.on_altitude(&alt);
-                    r.on_airspeed(&airspeed);
-                }
+                if let Ok(mut r) = rec.lock() { r.on_airspeed(&airspeed); }
             }
         }
 

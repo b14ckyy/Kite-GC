@@ -81,7 +81,7 @@
   } from "$lib/stores/flightlog";
   import type { TrackColorMode } from "$lib/helpers/trackColors";
   import type { UavModelOverride } from "$lib/helpers/uavIcons";
-  import { FLIGHT_MODE } from "$lib/helpers/trackColors";
+  import { modeCategory } from "$lib/helpers/flightModeRegistry";
 
   // ── Layout zone CSS custom properties (driven by layout store) ──
   const gridBottomHeight = $derived(
@@ -263,7 +263,7 @@
       }
     }
     if (armed && isValidGpsCoordinate(t.lat, t.lon)) {
-      appendLivePoint(t.lat, t.lon, t.altMsl, t.activeFlightModeFlags ?? 0, t.lastUpdate || Date.now());
+      appendLivePoint(t.lat, t.lon, t.altMsl, t.flightMode.primary, t.lastUpdate || Date.now());
     }
     // Home on arm: the FC sets home at the launch point. Authoritative (locked green "H") when
     // connected via MSP/MAVLink; otherwise (future telemetry-only tracking) seed the manual launch
@@ -1675,7 +1675,7 @@
   // Gate: surface the active target WP only when in NAV_WP mode AND the mission is trusted.
   $effect(() => {
     const wp = telem.activeWpNumber ?? 0;
-    const inWpMode = (telem.activeFlightModeFlags & FLIGHT_MODE.NAV_WP) !== 0;
+    const inWpMode = modeCategory(telem.flightMode.primary) === 'mission';
     const isReplay = playbackActive && !isPrimaryConnected;
     const armed = isArmed(telem.armingFlags, telem.lastUpdate);
     const f = $missionFlags;

@@ -273,6 +273,11 @@ pub struct TelemetryRecord {
     pub nav_lat: Option<f64>,
     pub nav_lon: Option<f64>,
     pub nav_alt_m: Option<f64>,
+    /// Canonical flight mode (protocol-agnostic, see docs/active/FLIGHT_MODE_UNIFIED.md):
+    /// `mode_primary` = canonical primary id; `mode_modifiers` = comma-separated modifier ids
+    /// (None when none). The raw `active_flight_mode_flags` stays as a forensic field.
+    pub mode_primary: Option<String>,
+    pub mode_modifiers: Option<String>,
 }
 
 /// Summary for the logbook list view

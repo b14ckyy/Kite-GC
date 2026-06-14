@@ -15,7 +15,7 @@ use super::types::{
     TelemetryRecord,
 };
 
-const CURRENT_SCHEMA_VERSION: u32 = 11;
+const CURRENT_SCHEMA_VERSION: u32 = 12;
 
 /// Column list (excluding the autoincrement `id`) for `telemetry_records`, shared by the temp-session
 /// copy so the SELECT and INSERT column orders can never drift apart. `flight_id` is first so the
@@ -27,7 +27,7 @@ const TELEMETRY_COLS: &str = "flight_id, timestamp_ms, lat, lon, alt_m, speed_ms
     active_wp_number, active_flight_mode_flags, state_flags, nav_state, nav_flags, \
     rx_signal_received, hw_health_status, baro_temperature, \
     wind_n_ms, wind_e_ms, wind_d_ms, rc_data_json, rc_command_json, \
-    nav_lat, nav_lon, nav_alt_m";
+    nav_lat, nav_lon, nav_alt_m, mode_primary, mode_modifiers";
 
 /// Full single-statement DDL for `telemetry_records` at the current field set. The main DB grows
 /// this table via the migration chain; the per-session temp DB (no migration history) creates it
@@ -44,7 +44,8 @@ const TELEMETRY_RECORDS_DDL_FULL: &str = "CREATE TABLE IF NOT EXISTS telemetry_r
     active_wp_number INTEGER, active_flight_mode_flags INTEGER, state_flags INTEGER,
     nav_state INTEGER, nav_flags INTEGER, rx_signal_received INTEGER, hw_health_status INTEGER,
     baro_temperature REAL, wind_n_ms REAL, wind_e_ms REAL, wind_d_ms REAL,
-    rc_data_json TEXT, rc_command_json TEXT, nav_lat REAL, nav_lon REAL, nav_alt_m REAL
+    rc_data_json TEXT, rc_command_json TEXT, nav_lat REAL, nav_lon REAL, nav_alt_m REAL,
+    mode_primary TEXT, mode_modifiers TEXT
 );";
 
 /// Open (or create) the flight log database at the given path.
@@ -165,6 +166,10 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
         migrate_v10_to_v11(conn)?;
     }
 
+    if current < 12 {
+        migrate_v11_to_v12(conn)?;
+    }
+
     // Self-heal: ensure the latest schema actually exists even if a prior version bump left it
     // incomplete. Legacy migrations call set_user_version(CURRENT), so a CURRENT bump can
     // mark the DB as the newest version without the matching migration ever creating its
@@ -173,6 +178,7 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
     ensure_v9_schema(conn)?;
     ensure_v10_schema(conn)?;
     ensure_v11_schema(conn)?;
+    ensure_v12_schema(conn)?;
 
     Ok(())
 }
@@ -306,6 +312,25 @@ fn ensure_v11_schema(conn: &Connection) -> SqlResult<()> {
 
 fn migrate_v10_to_v11(conn: &Connection) -> SqlResult<()> {
     ensure_v11_schema(conn)?;
+    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    Ok(())
+}
+
+/// v12: canonical flight-mode columns on telemetry_records (see docs/active/FLIGHT_MODE_UNIFIED.md).
+/// Additive + idempotent; old rows keep NULL (render as the `other` category on replay — acceptable
+/// in alpha). The raw `active_flight_mode_flags` column stays as a forensic field.
+fn ensure_v12_schema(conn: &Connection) -> SqlResult<()> {
+    if !column_exists(conn, "telemetry_records", "mode_primary")? {
+        conn.execute_batch("ALTER TABLE telemetry_records ADD COLUMN mode_primary TEXT;")?;
+    }
+    if !column_exists(conn, "telemetry_records", "mode_modifiers")? {
+        conn.execute_batch("ALTER TABLE telemetry_records ADD COLUMN mode_modifiers TEXT;")?;
+    }
+    Ok(())
+}
+
+fn migrate_v11_to_v12(conn: &Connection) -> SqlResult<()> {
+    ensure_v12_schema(conn)?;
     set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
     Ok(())
 }
@@ -569,7 +594,8 @@ pub fn insert_telemetry_batch(
                 rx_signal_received, hw_health_status, baro_temperature,
                 wind_n_ms, wind_e_ms, wind_d_ms,
                 rc_data_json, rc_command_json,
-                nav_lat, nav_lon, nav_alt_m
+                nav_lat, nav_lon, nav_alt_m,
+                mode_primary, mode_modifiers
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
                 ?14, ?15, ?16, ?17, ?18, ?19, ?20,
@@ -578,7 +604,8 @@ pub fn insert_telemetry_batch(
                 ?30, ?31, ?32,
                 ?33, ?34, ?35,
                 ?36, ?37,
-                ?38, ?39, ?40
+                ?38, ?39, ?40,
+                ?41, ?42
             )",
         )?;
         for r in records {
@@ -623,6 +650,8 @@ pub fn insert_telemetry_batch(
                 r.nav_lat,
                 r.nav_lon,
                 r.nav_alt_m,
+                r.mode_primary,
+                r.mode_modifiers,
             ])?;
         }
     }
@@ -1363,7 +1392,8 @@ pub fn get_flight_track(
             rx_signal_received, hw_health_status, baro_temperature,
             wind_n_ms, wind_e_ms, wind_d_ms,
             rc_data_json, rc_command_json,
-            nav_lat, nav_lon, nav_alt_m
+            nav_lat, nav_lon, nav_alt_m,
+            mode_primary, mode_modifiers
          FROM telemetry_records
          WHERE flight_id = ?1
          ORDER BY timestamp_ms ASC",
@@ -1412,6 +1442,8 @@ pub fn get_flight_track(
             nav_lat: row.get(38)?,
             nav_lon: row.get(39)?,
             nav_alt_m: row.get(40)?,
+            mode_primary: row.get(41)?,
+            mode_modifiers: row.get(42)?,
         })
     })?;
 
@@ -1984,6 +2016,8 @@ mod tests {
                 nav_lat: None,
                 nav_lon: None,
                 nav_alt_m: None,
+                mode_primary: None,
+                mode_modifiers: None,
             })
             .collect();
 
@@ -2070,6 +2104,8 @@ mod tests {
             nav_lat: None,
             nav_lon: None,
             nav_alt_m: None,
+            mode_primary: None,
+            mode_modifiers: None,
         };
         insert_telemetry_batch(&conn, &[rec]).unwrap();
 

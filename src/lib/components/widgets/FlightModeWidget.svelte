@@ -6,55 +6,41 @@
 <!-- Flight Mode widget — shows current flight mode as colored badge -->
 <script lang="ts">
   import type { TelemetryData } from "$lib/stores/telemetry";
-  import { classifyMode, isArduPilot, FLIGHT_MODE } from "$lib/helpers/trackColors";
+  import { modeLabel, modeColor, modeShort, modeCategory } from "$lib/helpers/flightModeRegistry";
   import { mission, replayActive } from "$lib/stores/mission";
   import { replayWpTotal } from "$lib/stores/navStatus";
 
   let { telem, size = 9 }: { telem: TelemetryData; size?: number } = $props();
 
-  let flags = $derived(telem.activeFlightModeFlags);
-  let fcVariant = $derived(telem.fcVariant ?? 'INAV');
-  let isArdu = $derived(isArduPilot(fcVariant));
-  let mode = $derived(classifyMode(flags, fcVariant));
+  // Canonical, protocol-agnostic flight mode (see flightModeRegistry).
+  let primary = $derived(telem.flightMode.primary);
+  let label = $derived(modeLabel(primary));
+  let color = $derived(modeColor(primary));
+  let modifiers = $derived(telem.flightMode.modifiers);
 
-  // In MISSION (NAV_WP) mode, show the FC's current target waypoint as "WP N/X"
-  // (N = active waypoint number, X = total waypoints). With no mission / no active
-  // WP, INAV falls back to RTH — show "WP-RTH" instead of a number. INAV only.
-  let inMission = $derived(!isArdu && (flags & FLIGHT_MODE.NAV_WP) !== 0);
+  // In a MISSION-category mode, show the FC's current target waypoint as "WP N/X"
+  // (N = active waypoint number, X = total waypoints). Only when an active WP number is known.
+  let inMission = $derived(modeCategory(primary) === 'mission');
   // X (total): in replay use the flown mission's count (linked library mission or Blackbox
   // header); live uses the loaded planner mission's length.
   let wpTotal = $derived($replayActive ? ($replayWpTotal ?? 0) : $mission.waypoints.length);
   let wpText = $derived.by(() => {
     if (!inMission) return null;
     const n = telem.activeWpNumber;
-    if (n <= 0) return 'WP-RTH';
+    if (n <= 0) return null;
     return wpTotal > 0 ? `WP ${n}/${wpTotal}` : `WP ${n}`;
-  });
-
-  // Show active modifier flags as small tags (INAV only — ArduPilot uses flat mode numbers)
-  let modifiers = $derived(() => {
-    if (isArdu) return [];
-    const mods: string[] = [];
-    if (flags & FLIGHT_MODE.NAV_ALTHOLD)    mods.push('ALT');
-    if (flags & FLIGHT_MODE.HEADING)        mods.push('HDG');
-    if (flags & FLIGHT_MODE.HEADFREE)       mods.push('HFREE');
-    if (flags & FLIGHT_MODE.SOARING)        mods.push('SOAR');
-    if (flags & FLIGHT_MODE.AUTO_TUNE)      mods.push('TUNE');
-    if (flags & FLIGHT_MODE.FLAPERON)       mods.push('FLAP');
-    if (flags & FLIGHT_MODE.NAV_FW_AUTOLAND) mods.push('LAND');
-    return mods;
   });
 </script>
 
 <div class="widget-card" style="--ws: {size}px">
   <span class="w-label">MODE</span>
-  <span class="w-mode" style="background: {mode.color}; color: {mode.color === '#c0c0c0' ? '#1a1a1a' : '#fff'}">
-    {mode.label}
+  <span class="w-mode" style="background: {color}; color: {color === '#c0c0c0' ? '#1a1a1a' : '#fff'}">
+    {label}
   </span>
-  {#if modifiers().length > 0}
+  {#if modifiers.length > 0}
     <div class="w-mods">
-      {#each modifiers() as mod}
-        <span class="w-mod-tag">{mod}</span>
+      {#each modifiers as mod}
+        <span class="w-mod-tag">{modeShort(mod)}</span>
       {/each}
     </div>
   {/if}

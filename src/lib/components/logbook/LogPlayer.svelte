@@ -86,7 +86,7 @@
   }
 
   let usedModes = $derived(
-    trackColorMode === 'flightmode' ? getUsedFlightModes(playbackTrack ?? [], selectedFlight?.fc_variant ?? 'INAV') : []
+    trackColorMode === 'flightmode' ? getUsedFlightModes(playbackTrack ?? []) : []
   );
 
   let gradientMeta = $derived.by(() => {

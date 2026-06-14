@@ -810,6 +810,12 @@ where
             format!("[{},{},{},{}]", a, b, c, d)
         });
 
+        // Canonical flight mode from the logged ArduPilot custom_mode (+ the vehicle variant).
+        let (mode_primary, mode_modifiers) = match r.custom_mode {
+            Some(m) => (Some(crate::flightmode::classify_ardupilot(m as u32, &fc_variant).primary), None),
+            None => (None, None),
+        };
+
         telemetry_rows.push(TelemetryRecord {
             id: 0,
             flight_id: 0, // set after insert_flight
@@ -854,6 +860,8 @@ where
             nav_lat: None,
             nav_lon: None,
             nav_alt_m: r.nav_alt_m,
+            mode_primary,
+            mode_modifiers,
         });
     }
 

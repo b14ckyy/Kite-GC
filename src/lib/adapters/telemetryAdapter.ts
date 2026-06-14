@@ -61,8 +61,11 @@ export function toTelemetryData(r: TelemetryRecord, fcVariant = 'INAV'): Telemet
     sensorPitot: 0,
     sensorOpflow: 0,
 
-    // Flight mode & navigation state
-    activeFlightModeFlags: r.active_flight_mode_flags ?? 0,
+    // Flight mode (canonical) & navigation state
+    flightMode: {
+      primary: r.mode_primary ?? '',
+      modifiers: r.mode_modifiers ? r.mode_modifiers.split(',').filter(Boolean) : [],
+    },
     navState: r.nav_state ?? 0,
     activeWpNumber: r.active_wp_number ?? 0,
 

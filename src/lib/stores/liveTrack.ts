@@ -12,7 +12,7 @@ export interface LiveTrackPoint {
   lat: number;
   lon: number;
   alt_m: number; // MSL
-  mode_flags: number; // active flight-mode flags (for the 3D trail's per-segment colour)
+  mode_primary: string; // canonical flight-mode id (for the 3D trail's per-segment colour)
   timestamp_ms: number;
 }
 
@@ -32,14 +32,14 @@ function haversine(aLat: number, aLon: number, bLat: number, bLon: number): numb
   return 2 * EARTH_R * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
-export function appendLivePoint(lat: number, lon: number, alt_m: number, mode_flags: number, timestamp_ms: number): void {
+export function appendLivePoint(lat: number, lon: number, alt_m: number, mode_primary: string, timestamp_ms: number): void {
   liveTrack.update((arr) => {
     if (arr.length > 0) {
       const last = arr[arr.length - 1];
       if (haversine(last.lat, last.lon, lat, lon) < MIN_DIST_M) return arr;
     }
     // Mutate in place (O(1) append); `update` still notifies subscribers.
-    arr.push({ lat, lon, alt_m, mode_flags, timestamp_ms });
+    arr.push({ lat, lon, alt_m, mode_primary, timestamp_ms });
     return arr;
   });
 }

@@ -4,6 +4,7 @@
 mod aero;
 mod commands;
 mod flightlog;
+mod flightmode;
 mod mavlink_proto;
 mod mission;
 mod msp;

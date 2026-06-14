@@ -33,10 +33,10 @@
     segmentTrackBySpeed,
     segmentTrackBySignal,
     getNavStateColor,
-    classifyFlightMode,
     type TrackColorMode,
     type TrackSegment,
   } from "$lib/helpers/trackColors";
+  import { modeColor } from "$lib/helpers/flightModeRegistry";
   import { PLATFORM_MULTIROTOR, type PlatformType, type UavModelOverride } from "$lib/helpers/uavIcons";
   import { resolveModelKind, modelUri } from "$lib/helpers/uavModels";
   import { loadUavMesh, type UavMesh } from "$lib/helpers/uavMesh";
@@ -620,7 +620,7 @@
     }
   }
 
-  function updateTrail(lat: number, lon: number, flightModeFlags: number) {
+  function updateTrail(lat: number, lon: number, modePrimary: string) {
     if (!map) return;
     const pos = L.latLng(lat, lon);
 
@@ -630,7 +630,7 @@
       return;
     }
 
-    const color = classifyFlightMode(flightModeFlags).color;
+    const color = modeColor(modePrimary);
 
     // Color changed → finalize the active segment and start a new one
     if (color !== trailCurrentColor && trailCurrentPositions.length >= 2) {
@@ -700,7 +700,7 @@
     playbackLayerGroup = L.layerGroup().addTo(map);
 
     if (colorMode === 'flightmode') {
-      const segments = segmentTrackByFlightMode(validTrack, fcVariant);
+      const segments = segmentTrackByFlightMode(validTrack);
       for (const seg of segments) {
         if (seg.points.length >= 2) {
           L.polyline(seg.points, { color: seg.color, weight: 3, opacity: 0.9 }).addTo(playbackLayerGroup);
@@ -906,7 +906,7 @@
         // monitoring line while disarmed (pre-arm).
         const armed = (t.armingFlags & (1 << ARMING_FLAG_ARMED)) !== 0;
         if (isValidGpsCoordinate(t.lat, t.lon)) {
-          if (armed) updateTrail(t.lat, t.lon, t.activeFlightModeFlags);
+          if (armed) updateTrail(t.lat, t.lon, t.flightMode.primary);
           else updatePreArmTrail(t.lat, t.lon);
         }
 

@@ -202,6 +202,10 @@ export interface TelemetryRecord {
   nav_lat: number | null;
   nav_lon: number | null;
   nav_alt_m: number | null;
+  /** Canonical flight mode (protocol-agnostic, see flightModeRegistry). `mode_modifiers` is a
+   *  comma-separated list of modifier ids (null when none). */
+  mode_primary: string | null;
+  mode_modifiers: string | null;
 }
 
 export type LogbookSortMode =

@@ -7,6 +7,7 @@
 
 import { writable } from 'svelte/store';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import type { FlightModeState } from '$lib/helpers/flightModeRegistry';
 
 export interface TelemetryData {
   // GPS
@@ -56,8 +57,8 @@ export interface TelemetryData {
   sensorPitot: number;
   sensorOpflow: number;
 
-  // Flight mode & navigation
-  activeFlightModeFlags: number;
+  // Flight mode (canonical, protocol-agnostic — see flightModeRegistry) & navigation
+  flightMode: FlightModeState;
   navState: number;
   /** FC's current target waypoint (MSP_NAV_STATUS live / blackbox in replay). 0 = none. */
   activeWpNumber: number;
@@ -78,7 +79,7 @@ const defaultTelemetry: TelemetryData = {
   armingFlags: 0, cpuLoad: 0, sensorStatus: 0,
   sensorGyro: 0, sensorAcc: 0, sensorMag: 0, sensorBaro: 0,
   sensorGps: 0, sensorRangefinder: 0, sensorPitot: 0, sensorOpflow: 0,
-  activeFlightModeFlags: 0, navState: 0, activeWpNumber: 0,
+  flightMode: { primary: '', modifiers: [] }, navState: 0, activeWpNumber: 0,
   fcVariant: 'INAV',
   lastUpdate: 0,
 };
@@ -206,12 +207,22 @@ export async function startTelemetryListeners() {
 
   unlisteners.push(
     await listen<{ arming_flags: number; flight_mode_flags: number; cpu_load: number; sensor_status: number }>('telemetry-status', (event) => {
+      // flight_mode_flags is now forensic only — the canonical mode comes via telemetry-flightmode.
       telemetry.update((t) => ({
         ...t,
         armingFlags: event.payload.arming_flags,
-        activeFlightModeFlags: event.payload.flight_mode_flags,
         cpuLoad: event.payload.cpu_load,
         sensorStatus: event.payload.sensor_status,
+        lastUpdate: Date.now(),
+      }));
+    })
+  );
+
+  unlisteners.push(
+    await listen<FlightModeState>('telemetry-flightmode', (event) => {
+      telemetry.update((t) => ({
+        ...t,
+        flightMode: { primary: event.payload.primary, modifiers: event.payload.modifiers ?? [] },
         lastUpdate: Date.now(),
       }));
     })

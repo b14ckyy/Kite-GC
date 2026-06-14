@@ -32,10 +32,10 @@
     segmentTrackBySignal,
     trackPointColorizer,
     getNavStateColor,
-    classifyFlightMode,
     type TrackColorMode,
     type TrackSegment,
   } from "$lib/helpers/trackColors";
+  import { modeColor } from "$lib/helpers/flightModeRegistry";
   import type { TelemetryRecord } from "$lib/stores/flightlog";
   import { toTelemetryData } from "$lib/adapters/telemetryAdapter";
   import type { PlatformType, UavModelOverride } from "$lib/helpers/uavIcons";
@@ -2211,7 +2211,7 @@
     // pending. The drawn tip stays one segment behind the live (smoothed) UAV → no FPV overshoot.
     if (pendingTrailPos) commitTrailPoint(pendingTrailPos, pendingTrailColor);
     pendingTrailPos = pos;
-    pendingTrailColor = classifyFlightMode(pt.mode_flags ?? 0).color;
+    pendingTrailColor = modeColor(pt.mode_primary);
   }
 
   /** Add one confirmed point to the colour-segmented active run (a colour change bakes the completed
@@ -2506,7 +2506,7 @@
     let segments: TrackSegment[] = [];
 
     if (colorMode === 'flightmode') {
-      segments = segmentTrackByFlightMode(validTrack as TelemetryRecord[], fcVariant);
+      segments = segmentTrackByFlightMode(validTrack as TelemetryRecord[]);
     } else if (colorMode === 'altitude' || colorMode === 'speed' || colorMode === 'signal') {
       const warnAlt = get(settings).warnAltitudeM ?? 120;
       const result =
@@ -2546,7 +2546,7 @@
     decoValidTrack = validTrack as TelemetryRecord[];
     decoColorMode = colorMode;
     decoPointColor = trackPointColorizer(
-      decoValidTrack, colorMode, fcVariant, get(settings).warnAltitudeM ?? 120,
+      decoValidTrack, colorMode, get(settings).warnAltitudeM ?? 120,
     );
     decoThrottleUntil = 0; // clearDeco above reset the cursor
     decoLastFlown = 0;

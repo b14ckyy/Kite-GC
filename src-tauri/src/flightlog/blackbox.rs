@@ -598,6 +598,17 @@ fn build_telemetry_record_indexed(
     let lat = read_f64(cols.lat, record).map(|v| if v.abs() > 90.0 { v / 1e7 } else { v });
     let lon = read_f64(cols.lon, record).map(|v| if v.abs() > 180.0 { v / 1e7 } else { v });
 
+    // Canonical flight mode from the logged INAV flightModeFlags (same bit layout as classify_inav).
+    let mode_flags = read_i64(cols.active_flight_mode_flags, record);
+    let (mode_primary, mode_modifiers) = match mode_flags {
+        Some(f) => {
+            let fm = crate::flightmode::classify_inav(f as u32);
+            let mods = if fm.modifiers.is_empty() { None } else { Some(fm.modifiers.join(",")) };
+            (Some(fm.primary), mods)
+        }
+        None => (None, None),
+    };
+
     TelemetryRecord {
         id: 0,
         flight_id: 0,
@@ -628,7 +639,7 @@ fn build_telemetry_record_indexed(
         gps_eph: read_f64(cols.gps_eph, record),
         gps_epv: read_f64(cols.gps_epv, record),
         active_wp_number: read_i32(cols.active_wp_number, record),
-        active_flight_mode_flags: read_i64(cols.active_flight_mode_flags, record),
+        active_flight_mode_flags: mode_flags,
         state_flags: read_i64(cols.state_flags, record),
         nav_state: read_i32(cols.nav_state, record),
         nav_flags: read_i64(cols.nav_flags, record),
@@ -646,6 +657,8 @@ fn build_telemetry_record_indexed(
         nav_lon: None,
         // navPos[2] = fused altitude in cm relative to home, always /100
         nav_alt_m: read_f64(cols.nav_pos_up, record).map(|v| v / 100.0),
+        mode_primary,
+        mode_modifiers,
     }
 }
 
