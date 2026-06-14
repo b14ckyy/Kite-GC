@@ -205,6 +205,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Log player shows the time-of-day** (flight start + elapsed) at the current playback position.
 
 ### Fixed
+- **MAVLink track no longer sawtooths (2D + 3D, live and replay).** ArduPilot sends both
+  `GLOBAL_POSITION_INT` (the fused EKF position) and `GPS_RAW_INT` (the raw, noisier, lagging receiver
+  position); both were emitted as position, so the track flip-flopped between two slightly-offset
+  solutions every frame. `GLOBAL_POSITION_INT` is now the single position authority — `GPS_RAW_INT`
+  only contributes satellite count + fix type and reuses the fused fix — so map smoothing and the FPV
+  view track cleanly again.
+- **Downloading a mission no longer freezes the app.** The mission download/upload commands ran
+  synchronously on the main thread, so the blocking microprotocol handshake locked the whole UI for the
+  duration — painful for a large mission over a slow SiK link. They now run off the main thread
+  (`ardu_mission_download`/`ardu_mission_upload` and the MSP `mission_download`/`mission_fc_info`).
+- **Flight-mode badge with no FC connected is now "N/A".** The "Unknown" placeholder overflowed the
+  fixed-size widget card; shortened to keep it inside the bounds.
 - **ArduPilot flight mode now shows correctly.** Two MAVLink-side bugs made the mode widget show an
   INAV mode (e.g. "HORIZON"/"ACRO") for an ArduPilot vehicle: the connection reported a generic
   `fc_variant` of `"ArduPilot"` (so the frontend fell back to the Copter mode table even for a plane),
