@@ -7,7 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Full ArduPilot mission editor — catalog-driven, ~40 commands (ADR-046).** The ArduPilot mission
+  planner went from a flat ~11-command editor to a declarative command catalog (`arduCommandCatalog.ts`,
+  modelled on QGroundControl): a **categorized, vehicle-filtered** command picker, a generic param editor
+  (number field / enum dropdown) that shows **only the params each command uses**, per-param **(ⓘ)
+  tooltips**, and an **Advanced** expander for rare fields. Non-location commands (DO_/CONDITION_) appear
+  as **numbered, indented modifiers** under their waypoint — the INAV editing model, over ArduPilot's flat
+  sequence. Each command shows a friendly name + its canonical `MAV_CMD` name (so Mission Planner / QGC
+  users recognise it). Commands carrying data in the coordinate fields (e.g. `DO_DIGICAM_CONTROL`) are
+  modelled honestly (params 1..7) instead of showing a bogus map position. The curated **modern** set is
+  offered in the picker; legacy commands still round-trip (download / `.waypoints`) rendered raw; the full
+  per-command rationale is in `docs/active/ARDUPILOT_COMMAND_COVERAGE.md`.
+
 ### Changed
+- **Mission WP-editor popups are one shared framework now (ADR-046).** The INAV and ArduPilot map layers
+  had separate copies of the popup-building + event-wiring code; the lifecycle + HTML/event primitives now
+  live in one `missionEditorPopup` module. Its lifecycle carries a **content-signature redraw guard** —
+  the popup DOM is rewritten only when the content actually changes, so live telemetry/home redraws no
+  longer close an open dropdown mid-edit (fixed for both planners).
 - **Mission waypoint markers now share one icon schema across INAV + ArduPilot (ADR-045).** The two
   planners used hand-copied, independently-drifting icon sets (e.g. loiter had become cyan on ArduPilot
   but orange on INAV). Shapes (teardrop, loiter ring, house, …) and a canonical colour palette now live
@@ -213,6 +231,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Log player shows the time-of-day** (flight start + elapsed) at the current playback position.
 
 ### Fixed
+- **ArduPilot mission upload works (was always cancelled).** Uploading a mission failed with
+  `MAV_MISSION_OPERATION_CANCELLED` after ~5 s. Two causes: the MAVLink handler-loop read timeout was 1 s
+  (so each item reply lagged — now 50 ms, across TCP/serial/UDP), and decisively, we only answered the
+  FC's `MISSION_REQUEST_INT` while ArduPilot (SITL) requests items with the deprecated `MISSION_REQUEST`
+  (float) variant — we now answer both. Upload completes in under a second.
 - **ArduPilot mission round-trip is now faithful.** The mission codec mapped commands/frames through a
   small hand-maintained whitelist, so any waypoint type Kite had no editor for was silently rewritten to
   a plain waypoint on upload. Commands and frames now map by their numeric id across the full MAVLink

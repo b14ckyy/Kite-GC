@@ -2119,5 +2119,60 @@ shared primitives. Cost: a small shared vocabulary (semantic colour keys) both m
 
 ---
 
+## ADR-046: Catalog-Driven ArduPilot Mission Editor + Shared WP-Editor Popup Framework
+
+**Status**: Accepted — implemented (plan: `docs/active/ARDUPILOT_WAYPOINT_ARCHITECTURE.md`; full
+command list: `docs/active/ARDUPILOT_COMMAND_COVERAGE.md`)
+**Related**: the ArduPilot mission path (`missionArdupilot.ts`, `ArduMissionLayer/Panel`), the MAVLink
+mission codec (`mavlink_proto/mission.rs`), and the INAV mission layer (shares the popup framework).
+
+**Context**: ArduPilot's mission command set is large, **vehicle-dependent**, and genuinely messy — a
+MAV_CMD carries 7 generic params where 5/6/7 double as x/y/z, several commands **repurpose the coordinate
+fields as data** (e.g. `DO_DIGICAM_CONTROL` puts shutter/cmd-id/shot in x/y/z), and there are overlapping
+legacy/modern commands (ArduPilot does **not** formally deprecate). The first pass hand-coded a flat
+~11-command editor with a per-command `if`-chain for params — it diverged from QGroundControl/Mission
+Planner naming, dropped valid params, and did not scale. Separately, the INAV and ArduPilot map layers
+each carried their **own copy** of the popup-building + event-wiring scaffolding (a redraw rebuilt the
+popup DOM on every map tick, closing an open dropdown).
+
+**Decision**:
+
+1. **Declarative command catalog** (`arduCommandCatalog.ts`), modelled on QGC's `MavCmdInfo*.json`. Each
+   command = friendly name + **canonical MAV_CMD name** + UI category + coordinate role
+   (`specifiesCoordinate`/`standaloneCoordinate`) + params (1..7: `label/units/decimals/min/max/enum/
+   tooltip/advanced`) + `vehicles[]`. The catalog drives the **whole UI** — the categorized, vehicle-
+   filtered picker, the generic param editor (number field vs enum dropdown), and the INAV-style list —
+   so adding/adjusting a command is a **data edit**, never UI code.
+2. **Params 1..7 model**: 5/6/7 map to x/y/z. A command uses them as a **real coordinate** (map marker)
+   *or* as **labelled data fields** (DIGICAM) — modelled honestly, so unlike Mission Planner we never
+   show a meaningless coordinate for a camera command.
+3. **Curated modern set**: only modern commands are selectable. "Legacy" is **our curatorial call** (a
+   newer preferred command exists — ArduPilot keeps both) — legacy/unknown commands are **not** in the
+   picker but still **round-trip** (download / `.waypoints`), rendered raw. Runtime / camera-video-
+   protocol commands (`SET_CAMERA_*`, `IMAGE_/VIDEO_*`) are excluded (not mission items). The full
+   command-by-command rationale lives in `ARDUPILOT_COMMAND_COVERAGE.md` (destined for user docs).
+4. **Naming + UX**: the friendly Kite name is primary, the canonical MAV_CMD name a subtle grey subtitle
+   (MP/QGC users recognise it); QGC param **descriptions** surface as `(ⓘ)` tooltips; rarely-used params
+   collapse under an **Advanced** expander (QGC-style) so common fields stay uncluttered.
+5. **INAV-style modifier UX over a flat sequence**: non-location commands render as **numbered, indented
+   modifiers** under the preceding waypoint (same mental model as INAV modifier waypoints / User
+   Actions), while the wire format stays ArduPilot's flat numbered sequence.
+6. **Shared WP-editor popup framework** (`missionEditorPopup.ts`): the popup **lifecycle** (with a
+   content-signature **redraw guard** — rewrite the DOM only when the rendered HTML changes, so map
+   redraws don't close an open dropdown) plus the HTML/event primitives, consumed by both mission
+   layers. ArduPilot uses it fully; INAV adopts the redraw guard now (full primitive migration is a
+   follow-up, its `renderMission` has several early-returns).
+
+**Consequences**: adding ArduPilot mission commands is declarative and operator-reviewable; the editor
+matches QGC/MP familiarity while staying clean (Advanced tier + tooltips); the popup scaffolding is
+shared so the redraw-guard bug is fixed in one place; the MAVLink codec stays **protocol-faithful**
+(round-trips any command/frame via `FromPrimitive`, so legacy commands survive even without an editor).
+Costs: catalog param ranges/defaults need ArduPilot-operator review (marked ⚠); "legacy" is a judgment
+call (ArduPilot doesn't deprecate); INAV's full adoption of the shared primitives is pending. Vehicle
+scope is **Plane-first** — the catalog structure covers all classes; Copter/QuadPlane/Rover/Sub are data
+to fill in later.
+
+---
+
 *End of Architecture Decision Records*
 
