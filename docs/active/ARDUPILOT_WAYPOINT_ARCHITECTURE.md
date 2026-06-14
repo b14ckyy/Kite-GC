@@ -428,6 +428,27 @@ would confuse ArduPilot users. Corrected approach (locked with the user):
 
 ---
 
+## Planned extensions (noted 2026-06-14, not started)
+
+Future ArduPilot mission work — each reuses the **shared** helpers we already have for INAV where the
+job is the same (the established pattern: shared icon primitives ADR-045, shared popup framework ADR-046):
+
+1. ✅ **Active-waypoint tracking** (the pulsing glow INAV has) — shipped. `MISSION_CURRENT` (id 42) →
+   `telemetry-nav-status` → `activeWpNumber`; `iconForArduWp` takes an `active` flag (shared
+   `mission-wp-active` glow CSS); the widget shows `WP N/X` (total from `arduMission` when ArduPilot).
+2. **3D mission rendering** — the **2D** side is already shared (icon primitives + popup framework give
+   both planners one visual schema); **only 3D is missing**. Map3D renders INAV missions only today
+   (`wpIconSpec` + `WpAction`), yet both mappers already return a 3D-capable `WpIconSpec` (ADR-045). So
+   the work is: a **shared 3D mission renderer** consuming a normalised render model (positions + icon
+   spec + connector/modifier lines), with INAV and ArduPilot each just producing that model — extending
+   the existing shared-helper pattern to 3D so the two stay visually identical there too.
+3. **Mission library DB + flight-recording link for ArduPilot.** The mission DB stores INAV `Waypoint[]`
+   today; ArduPilot needs `ArduWaypoint[]` (or a normalised form) persisted + linked to MAVLink flight
+   recordings (the flightlog already carries `mode_primary`, etc.). Data-layer feature, its own step.
+4. **Visual refinement** (also wanted for INAV): extra markers / sub-markers on the WP teardrops.
+
+---
+
 ## Sources
 
 - ArduCopter command handlers — `ArduCopter/mode_auto.cpp` (`start_command`/`verify_command`)

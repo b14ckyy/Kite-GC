@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **FC system messages on screen (MAVLink STATUSTEXT toasts).** ArduPilot's status messages (mode
+  changes, prearm failures, errors, …) now appear as single-line toasts at the top edge — up to 5,
+  colour-coded by severity (info blue / warning amber / error red) with a matching audio cue (gentle
+  for info, discreetly alarming for warnings/errors). The stack fades out 60 s after the last message;
+  repeated identical lines are de-duplicated and info cues are rate-limited so a boot-time flood doesn't
+  machine-gun the speaker.
+- **ArduPilot active-waypoint tracking.** The Flight Mode widget shows `WP N/X` during an ArduPilot Auto
+  mission (current item from `MISSION_CURRENT`, total from the loaded mission), and the active waypoint
+  on the 2D map gets the same pulsing glow INAV already has — via the shared marker helper, so the two
+  planners look identical.
 - **Full ArduPilot mission editor — catalog-driven, ~40 commands (ADR-046).** The ArduPilot mission
   planner went from a flat ~11-command editor to a declarative command catalog (`arduCommandCatalog.ts`,
   modelled on QGroundControl): a **categorized, vehicle-filtered** command picker, a generic param editor
