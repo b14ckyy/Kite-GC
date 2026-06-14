@@ -332,6 +332,21 @@ All widgets receive `telem` prop → identical interface for live and replay
 | DB Schema | Unified — NULL where protocol doesn't provide a field | None |
 | Adapter | Same `toTelemetryData()` — no change | None |
 
+### Flight Mode — unified canonical model (in progress)
+
+Flight mode is the one telemetry field that is **not** yet protocol-agnostic: a single `u32`
+(`flightModeFlags`) carries an INAV **box bitmask** *or* an ArduPilot **raw `custom_mode`**, and the
+widget + track-coloring branch on `fcVariant` to interpret it. This is being unified so the pipeline,
+widget, recording and replay consume only a canonical model — see
+**[FLIGHT_MODE_UNIFIED.md](FLIGHT_MODE_UNIFIED.md)**.
+
+Target flow: each protocol **input adapter** classifies raw mode data into a canonical
+`FlightModeState { primary, modifiers[] }` (string ids) → one `telemetry-flightmode` event → store →
+a frontend **output registry** (id → label + category; category → color). The recorder stores
+`mode_primary` / `mode_modifiers`; replay reads them directly (no re-classification). New protocols
+(CRSF / Smartport / Betaflight) = a new adapter + a few registry ids — no pipeline/widget changes.
+_(This section is updated to the implemented detail when the refactor lands.)_
+
 ---
 
 ## 5. Data Format Reference
