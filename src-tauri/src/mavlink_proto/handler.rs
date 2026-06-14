@@ -118,6 +118,7 @@ fn handler_loop(
 
     // Accumulated analog state — MAVLink splits battery data across multiple messages
     let mut analog = AnalogState::default();
+    let mut fused = FusedPos::default();
 
     // Active mission operation receiver — when set, MISSION_* messages are forwarded
     // here instead of being dispatched as telemetry events.
@@ -208,7 +209,7 @@ fn handler_loop(
                         }
                     }
 
-                    dispatch_message(&frame.header, &frame.message, &fc_variant, &app_handle, &mut analog, &recorder);
+                    dispatch_message(&frame.header, &frame.message, &fc_variant, &app_handle, &mut analog, &mut fused, &recorder);
                 }
             }
             Err(crate::transport::TransportError::Timeout) => {}
@@ -285,9 +286,25 @@ impl AnalogState {
     }
 }
 
+/// Last fused position from GLOBAL_POSITION_INT (the EKF solution). ArduPilot ALSO sends
+/// GPS_RAW_INT carrying the raw receiver position — noisier and lagging the fused fix. Both messages
+/// carry lat/lon, so naively emitting both interleaves two slightly-offset position streams and the
+/// track zig-zags (sawtooth). We keep GLOBAL_POSITION_INT as the single position authority and stamp
+/// its fused fix onto the GPS_RAW_INT update (which only contributes sat count + fix type), so the
+/// position never regresses to the raw receiver value — in the live track *and* the recording.
+#[derive(Default, Clone, Copy)]
+struct FusedPos {
+    valid: bool,
+    lat: f64,
+    lon: f64,
+    alt_msl: f64,
+    ground_speed: f64,
+    course: f64,
+}
+
 /// Dispatch a received MAVLink message to the same Tauri events as the MSP scheduler.
 /// This ensures widgets/store work identically regardless of protocol.
-fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, app_handle: &AppHandle, analog: &mut AnalogState, recorder: &Option<FlightRecorderHandle>) {
+fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, app_handle: &AppHandle, analog: &mut AnalogState, fused: &mut FusedPos, recorder: &Option<FlightRecorderHandle>) {
     match message {
         // ── HEARTBEAT → telemetry-status + telemetry-flightmode ─────
         MavMessage::HEARTBEAT(hb) => {
@@ -357,6 +374,15 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
                 ground_speed: ((gpi.vx as f64).powi(2) + (gpi.vy as f64).powi(2)).sqrt() / 100.0, // cm/s → m/s
                 course: (gpi.hdg as f64 / 100.0), // cdeg → deg
             };
+            // Remember the fused fix so GPS_RAW_INT can reuse it instead of emitting its raw position.
+            *fused = FusedPos {
+                valid: true,
+                lat: gps.lat,
+                lon: gps.lon,
+                alt_msl: gps.alt_msl,
+                ground_speed: gps.ground_speed,
+                course: gps.course,
+            };
             let _ = app_handle.emit("telemetry-gps", &gps);
 
             let alt = AltitudeData {
@@ -386,15 +412,30 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
                 _ => 0,
             };
 
-            // Emit GPS with satellite & fix info (lat/lon from GLOBAL_POSITION_INT is more reliable)
-            let data = GpsData {
-                fix_type,
-                num_sat: gps.satellites_visible,
-                lat: gps.lat as f64 / 1e7,
-                lon: gps.lon as f64 / 1e7,
-                alt_msl: gps.alt as f64 / 1000.0, // mm → m
-                ground_speed: gps.vel as f64 / 100.0, // cm/s → m/s
-                course: gps.cog as f64 / 100.0, // cdeg → deg
+            // GPS_RAW_INT contributes satellite count + fix type. Position comes from the fused
+            // GLOBAL_POSITION_INT solution (cached in `fused`) — emitting GPS_RAW_INT's own raw
+            // lat/lon here would interleave two offset position streams and sawtooth the track.
+            // Before the first GLOBAL_POSITION_INT (no fused fix yet) fall back to the raw value.
+            let data = if fused.valid {
+                GpsData {
+                    fix_type,
+                    num_sat: gps.satellites_visible,
+                    lat: fused.lat,
+                    lon: fused.lon,
+                    alt_msl: fused.alt_msl,
+                    ground_speed: fused.ground_speed,
+                    course: fused.course,
+                }
+            } else {
+                GpsData {
+                    fix_type,
+                    num_sat: gps.satellites_visible,
+                    lat: gps.lat as f64 / 1e7,
+                    lon: gps.lon as f64 / 1e7,
+                    alt_msl: gps.alt as f64 / 1000.0, // mm → m
+                    ground_speed: gps.vel as f64 / 100.0, // cm/s → m/s
+                    course: gps.cog as f64 / 100.0, // cdeg → deg
+                }
             };
             let _ = app_handle.emit("telemetry-gps", &data);
 

@@ -110,7 +110,9 @@ export const MODE_REGISTRY: Record<string, ModeDef> = {
   loiter_qland: { label: 'Loiter QLand', category: 'land' },
 };
 
-const UNKNOWN: ModeDef = { label: 'Unknown', category: 'other' };
+// Shown when no FC is connected (empty primary id). Kept short so the badge stays inside the
+// widget bounds (the full "Unknown" overflowed the fixed-size card).
+const UNKNOWN: ModeDef = { label: 'N/A', category: 'other' };
 
 function def(id: string | null | undefined): ModeDef {
   if (!id) return UNKNOWN;

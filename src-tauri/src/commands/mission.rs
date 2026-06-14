@@ -143,7 +143,9 @@ pub fn mission_reorder_wp(from: usize, to: usize, store: State<'_, MissionStore>
 }
 
 /// Download mission from FC via MSP
-#[tauri::command]
+/// `(async)` runs off the main thread — each MSP_WP request blocks on the scheduler, so a large
+/// mission over a slow telemetry link would otherwise freeze the UI (same fix as the MAVLink path).
+#[tauri::command(async)]
 pub fn mission_download(
     from_eeprom: bool,
     state: State<'_, AppState>,
@@ -187,7 +189,8 @@ pub fn mission_download(
 
 /// Query the FC's mission info (MSP_WP_GETINFO) without downloading the waypoints.
 /// Used on connect to decide whether to offer downloading the FC's mission.
-#[tauri::command]
+/// `(async)` — the MSP_WP_GETINFO request blocks on the scheduler; keep it off the main thread.
+#[tauri::command(async)]
 pub fn mission_fc_info(state: State<'_, AppState>) -> Result<MissionInfo, String> {
     let proto = state.protocol.lock().map_err(|e| e.to_string())?;
     let handle = match proto.as_ref() {
@@ -336,7 +339,11 @@ pub fn mission_load_file(path: String, store: State<'_, MissionStore>) -> Result
 
 /// Download ArduPilot mission from FC via MAVLink mission microprotocol.
 /// Returns the mission as a flat Vec<ArduWaypoint> for the frontend store.
-#[tauri::command]
+///
+/// `(async)` runs this on a worker thread: the mission microprotocol blocks while waiting for each
+/// MISSION_ITEM (up to seconds each over a slow SiK link). A plain sync command would run on the
+/// main thread and freeze the whole UI for the duration of the download.
+#[tauri::command(async)]
 pub fn ardu_mission_download(state: State<'_, AppState>) -> Result<Vec<ArduWaypoint>, String> {
     // Clone the command sender + sysid while holding the mutex briefly.
     // The actual protocol exchange runs after the lock is released.
@@ -352,7 +359,9 @@ pub fn ardu_mission_download(state: State<'_, AppState>) -> Result<Vec<ArduWaypo
 }
 
 /// Upload an ArduPilot mission to the FC via MAVLink mission microprotocol.
-#[tauri::command]
+/// `(async)` runs this off the main thread — the upload handshake blocks (same reasoning as
+/// `ardu_mission_download`).
+#[tauri::command(async)]
 pub fn ardu_mission_upload(
     waypoints: Vec<ArduWaypoint>,
     state: State<'_, AppState>,
