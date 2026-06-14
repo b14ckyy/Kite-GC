@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Mission waypoint markers now share one icon schema across INAV + ArduPilot (ADR-045).** The two
+  planners used hand-copied, independently-drifting icon sets (e.g. loiter had become cyan on ArduPilot
+  but orange on INAV). Shapes (teardrop, loiter ring, house, …) and a canonical colour palette now live
+  in one `missionIconPrimitives` module that both mappers consume; each keeps only its own
+  type→primitive mapping + platform-specific markers (ArduPilot takeoff, INAV fly-by-home). A shared
+  marker changes in one place. ArduPilot loiter is back to the INAV orange + shows the hold value
+  (∞/seconds/turns) and ROI is back to the INAV purple. The shared spec also carries the 2D/3D billboard
+  format, so ArduPilot mission markers can render in 3D (previously INAV-only).
 - **Flight mode is now protocol-agnostic end-to-end (ADR-044).** Mode classification moved into the
   protocol adapters: each emits a canonical `FlightModeState { primary, modifiers[] }` (string ids), and
   a single frontend registry maps id → label + **category** (category drives the colour, the label stays
@@ -205,6 +213,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Log player shows the time-of-day** (flight start + elapsed) at the current playback position.
 
 ### Fixed
+- **ArduPilot mission round-trip is now faithful.** The mission codec mapped commands/frames through a
+  small hand-maintained whitelist, so any waypoint type Kite had no editor for was silently rewritten to
+  a plain waypoint on upload. Commands and frames now map by their numeric id across the full MAVLink
+  dialect (`FromPrimitive`), so every type the FC sends survives download→upload unchanged (shown
+  generically until it gets a dedicated editor).
+- **ArduPilot home slot (mission item 0) handled correctly.** ArduPilot reserves mission slot 0 for
+  home, not a waypoint. Download dropped that slot so the planner shows only real waypoints; upload
+  re-injects a home placeholder at slot 0 (the operator's waypoints follow at 1..). Fixes the off-by-one
+  where the first list entry sat on home.
+- **ArduPilot takeoff waypoint no longer sits at 0/0.** `NAV_TAKEOFF` has no horizontal position (the
+  vehicle launches from where it is); its marker is now anchored on the FC home (fallback: mission-area
+  centroid; otherwise hidden), the leg out of it is dashed to show the position isn't fixed, and a jump
+  to/from it draws to the same anchor — matching Mission Planner.
+- **Mission planner auto-switches to ArduPilot on connect again.** The connect-time autopilot detection
+  still compared against `"ArduPilot"`, but the variant became vehicle-specific (`ArduPlane`/`ArduCopter`/…),
+  so the planner stayed in INAV mode for ArduPilot FCs. It now matches the whole ArduPilot family.
+- **No stray "Track mission?" prompt during a system switch.** Connecting an ArduPilot FC with an INAV
+  mission still loaded raised the live track-mission prompt behind the Clear-or-Disconnect dialog; it is
+  now suppressed while a system switch is pending (that dialog owns the loaded mission).
 - **MAVLink track no longer sawtooths (2D + 3D, live and replay).** ArduPilot sends both
   `GLOBAL_POSITION_INT` (the fused EKF position) and `GPS_RAW_INT` (the raw, noisier, lagging receiver
   position); both were emitted as position, so the track flip-flopped between two slightly-offset

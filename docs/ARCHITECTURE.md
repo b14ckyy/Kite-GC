@@ -2082,5 +2082,42 @@ already supports.
 
 ---
 
+## ADR-045: Shared Mission-Icon Primitive Layer — One Visual Schema, Per-Platform Mappers
+
+**Status**: Accepted — implemented
+**Related**: mission rendering (2D `InavMissionLayer`/`ArduMissionLayer`, 3D `Map3D`), the per-platform
+mission stores.
+
+**Context**: INAV and ArduPilot keep **separate mission layers** (their waypoint models genuinely
+differ — INAV has modifier-waypoints attached to a geo-waypoint; ArduPilot has flat MAV_CMD items), and
+each had its **own hand-written icon set** (`missionIcons.ts` vs `missionIconsArdupilot.ts`). The
+ArduPilot set was a hand-copy of the INAV visual vocabulary kept in sync only by comments — and had
+already drifted (loiter cyan vs orange, ROI teal vs purple). Worse, INAV's icons exposed a `WpIconSpec`
+(SVG + size + anchor) shared by 2D **and** 3D, while ArduPilot's returned a Leaflet `DivIcon` directly,
+so ArduPilot missions had no 3D-marker path. Changing a marker that exists on both platforms meant
+editing two files and risking further drift.
+
+**Decision**: Extract the **shapes and the colour palette** into one `missionIconPrimitives` module; keep
+the **type→primitive mapping per platform**.
+
+- **Primitives**: parametrized SVG builders (`teardropNumberSpec`, `teardropArrowSpec`, `orbitSpec`,
+  `houseSpec`, `eyeSpec`, `genericSpec`) returning `WpIconSpec`, plus `divIconFromSpec` (2D wrapper). All
+  SVGs carry `xmlns`, so a spec renders both as a Leaflet divIcon (2D) and a Cesium billboard (3D).
+- **Canonical palette** `WP_COLOR` (+ `WP_SELECTED`): the single colour source, keyed by semantic
+  (waypoint/loiter/land/takeoff/rth/poi/generic). Set to INAV's established values so the ArduPilot layer
+  **conforms** to them — recolour a type for both platforms by flipping one entry.
+- **Mappers**: `wpIconSpec` (INAV `WpAction → primitive`) and `arduWpIconSpec` (ArduPilot
+  `MavCmd → primitive`). Each owns only its mapping + its platform-specific markers (ArduPilot takeoff,
+  INAV fly-by-home).
+
+**Consequences**: comparable waypoint types stay visually in sync by construction; a shared marker is a
+one-place change; the drift is resolved (ArduPilot loiter/ROI back to the INAV schema, loiter now shows
+the hold value). ArduPilot gains a `WpIconSpec` path, so 3D mission markers become possible (not yet
+wired). The mission **layers** stay separate (different data models — not worth unifying); when a new
+INAV waypoint type later correlates with an ArduPilot one, its shape/colour moves from the layer into the
+shared primitives. Cost: a small shared vocabulary (semantic colour keys) both mappers depend on.
+
+---
+
 *End of Architecture Decision Records*
 
