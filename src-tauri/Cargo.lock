@@ -2231,6 +2231,7 @@ dependencies = [
  "futures",
  "log",
  "mavlink",
+ "num-traits",
  "reqwest 0.12.28",
  "rusqlite",
  "serde",

@@ -66,8 +66,10 @@
         <p class="switch-body">
           {$t('mission.systemSwitchChooseBody', { values: { from: systemLabel(currentSwitchReq.from), to: systemLabel(currentSwitchReq.to) } })}
         </p>
+        <!-- Mission-type conversion is deferred (see autopilotContext / missionConverter): cross-firmware
+             conversion is only meaningful for offline editing and will return as its own feature. For
+             now an offline system switch is Keep / Clear / Cancel. -->
         <div class="switch-actions">
-          <button class="btn-switch-convert" onclick={() => confirmSystemSwitch('convert')}>{$t('mission.switchConvert', { values: { to: systemLabel(currentSwitchReq.to) } })}</button>
           <button class="btn-switch-keep" onclick={() => confirmSystemSwitch('keep')}>{$t('mission.switchKeep')}</button>
           <button class="btn-switch-confirm" onclick={() => confirmSystemSwitch('clear')}>{$t('mission.switchClear')}</button>
           <button class="btn-switch-cancel" onclick={handleCancelSwitch}>{$t('mission.systemSwitchCancel')}</button>
@@ -100,8 +102,6 @@
   .switch-actions { display: flex; flex-direction: column; gap: 6px; }
   .btn-switch-confirm { width: 100%; padding: 7px; background: #c0392b; border: none; border-radius: 4px; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; }
   .btn-switch-confirm:hover { background: #e74c3c; }
-  .btn-switch-convert { width: 100%; padding: 7px; background: #1a3a5c; border: 1px solid #37a8db; border-radius: 4px; color: #37a8db; font-size: 13px; font-weight: 600; cursor: pointer; }
-  .btn-switch-convert:hover { background: #37a8db; color: #fff; }
   .btn-switch-keep { width: 100%; padding: 7px; background: #2a3a2a; border: 1px solid #4caf50; border-radius: 4px; color: #81c784; font-size: 13px; cursor: pointer; }
   .btn-switch-keep:hover { background: #4caf50; color: #fff; }
   .btn-switch-cancel { width: 100%; padding: 7px; background: #333; border: 1px solid #555; border-radius: 4px; color: #ccc; font-size: 13px; cursor: pointer; }

@@ -68,6 +68,7 @@
   import { initVideo, videoState, videoStream, setVideoPrimary, registerPiPElement } from "$lib/stores/video";
   import TerrainAnalysisPanel from "$lib/components/terrain/TerrainAnalysisPanel.svelte";
   import { editMode, replayActive, mission, missionFlags, missionDownload, missionUpload, missionFcInfo, markMissionSynced, loadedMissionId, missionSetWaypoints, launchPoint, hasLocation, toDeg, type Waypoint } from "$lib/stores/mission";
+  import { pendingSystemSwitch } from "$lib/stores/autopilotContext";
   import { terrainAnalysis, patchTerrainAnalysis } from "$lib/stores/terrainAnalysis";
   import { DEFAULT_RADAR, DEFAULT_AIRSPACE, BUILTIN_ADSB_PROVIDERS } from "$lib/stores/settings";
   import type { AppSettings, InterfaceSettings, PanelConfig, RadarSettings, GcsMode, AirspaceSettings } from "$lib/stores/settings";
@@ -1709,9 +1710,12 @@
   });
 
   // Live prompt: once at arm, if connected and the mission isn't FC-synced.
+  // Suppressed while a system switch is pending (e.g. an INAV mission is still loaded when an
+  // ArduPilot FC connects): the Clear-or-Disconnect dialog handles that mission, so tracking the
+  // soon-to-be-cleared INAV waypoints during the new flight is meaningless.
   $effect(() => {
     const armed = isArmed(telem.armingFlags, telem.lastUpdate);
-    if (isPrimaryConnected && armed && !prevArmedForTrack) {
+    if (isPrimaryConnected && armed && !prevArmedForTrack && !get(pendingSystemSwitch)) {
       liveTrackConfirmed = false;
       if (get(mission).waypoints.length > 0 && !get(missionFlags).fc) {
         void promptTrackMission('flight').then((ok) => { liveTrackConfirmed = ok; });

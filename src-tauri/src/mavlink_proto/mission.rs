@@ -16,6 +16,7 @@ use ::mavlink::ardupilotmega::{
     MISSION_REQUEST_LIST_DATA, MISSION_COUNT_DATA, MISSION_REQUEST_INT_DATA,
     MISSION_ITEM_INT_DATA, MISSION_ACK_DATA, MISSION_CLEAR_ALL_DATA,
 };
+use num_traits::FromPrimitive;
 use serde::{Deserialize, Serialize};
 
 use super::handler::MavlinkCommand;
@@ -75,8 +76,12 @@ pub fn download(
         return Ok(vec![]);
     }
 
-    // 3. Request and receive each item
-    let mut items = Vec::with_capacity(count as usize);
+    // 3. Request and receive each item.
+    // ArduPilot mission slot 0 is ALWAYS the home location, not a real waypoint — every item the
+    // operator authored is at seq 1..count. We still request seq 0 (the FC streams items in order),
+    // but drop it from the returned list so the planner shows/edits only real waypoints. `upload`
+    // mirrors this by re-injecting a home placeholder at seq 0.
+    let mut items = Vec::with_capacity(count.saturating_sub(1) as usize);
     for seq in 0..count {
         if let Err(e) = send(cmd_tx, MavMessage::MISSION_REQUEST_INT(MISSION_REQUEST_INT_DATA {
             target_system: fc_sysid,
@@ -89,7 +94,7 @@ pub fn download(
         }
 
         match wait_for_item(&rx, seq, ITEM_TIMEOUT) {
-            Ok(wp) => items.push(wp),
+            Ok(wp) => { if seq != 0 { items.push(wp); } }
             Err(e) => { unregister(cmd_tx); return Err(e); }
         }
     }
@@ -108,7 +113,9 @@ pub fn upload(
     waypoints: &[ArduWaypoint],
 ) -> Result<(), String> {
     let rx = register(cmd_tx)?;
-    let count = waypoints.len() as u16;
+    // ArduPilot reserves mission slot 0 for home, so the wire count is waypoints + 1: seq 0 is a
+    // home placeholder and the operator's waypoints follow at seq 1.. (download dropped slot 0).
+    let count = waypoints.len() as u16 + 1;
 
     // 1. Announce item count
     if let Err(e) = send(cmd_tx, MavMessage::MISSION_COUNT(MISSION_COUNT_DATA {
@@ -131,12 +138,17 @@ pub fn upload(
         }
         match rx.recv_timeout(ITEM_TIMEOUT) {
             Ok(MavMessage::MISSION_REQUEST_INT(req)) => {
-                let seq = req.seq as usize;
-                if seq >= waypoints.len() {
-                    unregister(cmd_tx);
-                    return Err(format!("FC requested WP {} but mission has only {}", seq, waypoints.len()));
-                }
-                let item = wp_to_item(&waypoints[seq], req.seq, fc_sysid);
+                // seq 0 = home placeholder; the operator's waypoints are at seq 1..=len.
+                let item = if req.seq == 0 {
+                    home_item(waypoints, fc_sysid)
+                } else {
+                    let idx = req.seq as usize - 1;
+                    if idx >= waypoints.len() {
+                        unregister(cmd_tx);
+                        return Err(format!("FC requested WP {} but mission has only {}", req.seq, waypoints.len()));
+                    }
+                    wp_to_item(&waypoints[idx], req.seq, fc_sysid)
+                };
                 if let Err(e) = send(cmd_tx, MavMessage::MISSION_ITEM_INT(item)) {
                     unregister(cmd_tx);
                     return Err(e);
@@ -290,6 +302,25 @@ fn item_to_wp(item: &MISSION_ITEM_INT_DATA) -> ArduWaypoint {
     }
 }
 
+/// Home placeholder for mission slot 0. ArduPilot replaces slot 0 with the vehicle's actual home on
+/// upload, so the coordinates are nominal — we seed them from the first authored waypoint (a sane,
+/// in-area fallback) so a firmware that *does* keep them never lands on 0/0 in the ocean.
+fn home_item(waypoints: &[ArduWaypoint], target: u8) -> MISSION_ITEM_INT_DATA {
+    let (lat, lon) = waypoints.first().map(|w| (w.lat, w.lon)).unwrap_or((0, 0));
+    MISSION_ITEM_INT_DATA {
+        target_system:    target,
+        target_component: 0,
+        seq:              0,
+        frame:            MavFrame::MAV_FRAME_GLOBAL,
+        command:          MavCmd::MAV_CMD_NAV_WAYPOINT,
+        current:          1, // slot 0 is the "current"/home item
+        autocontinue:     1,
+        param1: 0.0, param2: 0.0, param3: 0.0, param4: 0.0,
+        x: lat, y: lon, z: 0.0,
+        mission_type: MavMissionType::MAV_MISSION_TYPE_MISSION,
+    }
+}
+
 fn wp_to_item(wp: &ArduWaypoint, seq: u16, target: u8) -> MISSION_ITEM_INT_DATA {
     MISSION_ITEM_INT_DATA {
         target_system:    target,
@@ -310,32 +341,15 @@ fn wp_to_item(wp: &ArduWaypoint, seq: u16, target: u8) -> MISSION_ITEM_INT_DATA 
     }
 }
 
+// Round-trip-faithful int → enum: the MavCmd/MavFrame enums (ardupilotmega dialect) cover every
+// command/frame ArduPilot emits, so we map by their numeric discriminant via FromPrimitive instead
+// of a hand-maintained whitelist. This preserves any command the FC sends — including ones Kite has
+// no dedicated editor for yet — on download→upload, instead of silently rewriting them to a plain
+// waypoint. Truly-unknown values (not in the dialect) fall back to a safe default.
 fn u8_to_frame(v: u8) -> MavFrame {
-    match v {
-        0  => MavFrame::MAV_FRAME_GLOBAL,
-        3  => MavFrame::MAV_FRAME_GLOBAL_RELATIVE_ALT,
-        10 => MavFrame::MAV_FRAME_GLOBAL_TERRAIN_ALT,
-        _  => MavFrame::MAV_FRAME_GLOBAL_RELATIVE_ALT,
-    }
+    MavFrame::from_u8(v).unwrap_or(MavFrame::MAV_FRAME_GLOBAL_RELATIVE_ALT)
 }
 
-// Wire command 201 maps to `MAV_CMD_DO_SET_ROI` — that enum variant *is* value 201; the
-// newer `*_ROI_LOCATION`/`*_ROI_NONE` commands have different IDs, so for parsing a mission
-// item carrying cmd 201 this deprecated variant is the correct (only) match.
-#[allow(deprecated)]
 fn u16_to_cmd(v: u16) -> MavCmd {
-    match v {
-        16  => MavCmd::MAV_CMD_NAV_WAYPOINT,
-        17  => MavCmd::MAV_CMD_NAV_LOITER_UNLIM,
-        18  => MavCmd::MAV_CMD_NAV_LOITER_TURNS,
-        19  => MavCmd::MAV_CMD_NAV_LOITER_TIME,
-        20  => MavCmd::MAV_CMD_NAV_RETURN_TO_LAUNCH,
-        21  => MavCmd::MAV_CMD_NAV_LAND,
-        22  => MavCmd::MAV_CMD_NAV_TAKEOFF,
-        112 => MavCmd::MAV_CMD_CONDITION_DELAY,
-        177 => MavCmd::MAV_CMD_DO_JUMP,
-        178 => MavCmd::MAV_CMD_DO_CHANGE_SPEED,
-        201 => MavCmd::MAV_CMD_DO_SET_ROI,
-        _   => MavCmd::MAV_CMD_NAV_WAYPOINT,
-    }
+    MavCmd::from_u16(v).unwrap_or(MavCmd::MAV_CMD_NAV_WAYPOINT)
 }

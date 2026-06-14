@@ -26,6 +26,7 @@
   } from '$lib/stores/missionArdupilot';
   import { iconForArduWp } from '$lib/helpers/missionIconsArdupilot';
   import { settings } from '$lib/stores/settings';
+  import { homePosition, type HomePosition } from '$lib/stores/home';
 
   interface Props { map: L.Map; }
   let { map }: Props = $props();
@@ -33,16 +34,17 @@
   let currentWps    = $state<ArduWaypoint[]>(get(arduMission));
   let currentSelIdx = $state<number>(get(arduSelectedWpIndex));
   let currentEditing = $state<boolean>(get(arduEditMode));
+  let currentHome   = $state<HomePosition>(get(homePosition));
 
   const unsubMission  = arduMission.subscribe(wps => { currentWps = wps; });
   const unsubSelIdx   = arduSelectedWpIndex.subscribe(i => { currentSelIdx = i; });
   const unsubEditMode = arduEditMode.subscribe(e => { currentEditing = e; });
+  const unsubHome     = homePosition.subscribe(h => { currentHome = h; });
 
   // svelte-ignore state_referenced_locally
   const missionGroup = L.layerGroup().addTo(map);
   let wpMarkers: L.Marker[] = [];
   let loiterCircles: L.Circle[] = [];
-  let flightPath: L.Polyline | undefined;
   let editorPopup: L.Popup | undefined;
   let editorPopupIdx = -1;
 
@@ -136,8 +138,11 @@
 
     if (arduHasLocation(cmd)) {
       html += `<div class="wpe-row"><label>${$t('missionLayer.alt')}</label>${numInputHtml('alt', wp.alt, 1, 0)}<button data-field="frameToggle" class="wpe-toggle">${frameLbl}</button></div>`;
-      html += `<div class="wpe-row"><label>${$t('missionLayer.lat')}</label><input type="number" data-field="lat" value="${latDeg}" step="0.0000001" min="-90" max="90" class="wpe-coord-input"/></div>`;
-      html += `<div class="wpe-row"><label>${$t('missionLayer.lon')}</label><input type="number" data-field="lon" value="${lonDeg}" step="0.0000001" min="-180" max="180" class="wpe-coord-input"/></div>`;
+      // Takeoff has no editable position (anchored on home) — show altitude only, no lat/lon.
+      if (cmd !== MAV_CMD_NAV_TAKEOFF) {
+        html += `<div class="wpe-row"><label>${$t('missionLayer.lat')}</label><input type="number" data-field="lat" value="${latDeg}" step="0.0000001" min="-90" max="90" class="wpe-coord-input"/></div>`;
+        html += `<div class="wpe-row"><label>${$t('missionLayer.lon')}</label><input type="number" data-field="lon" value="${lonDeg}" step="0.0000001" min="-180" max="180" class="wpe-coord-input"/></div>`;
+      }
     }
 
     if (cmd === MAV_CMD_NAV_WAYPOINT) {
@@ -252,7 +257,29 @@
     });
   }
 
-  function renderMission(wps: ArduWaypoint[], selIdx: number, editing: boolean) {
+  // ArduPilot NAV_TAKEOFF has no horizontal position (the vehicle launches from where it is and
+  // climbs to the command altitude); its lat/lon are 0. Anchor the marker on the FC home, falling
+  // back to the mission-area centroid, and otherwise omit it rather than drop a marker at 0/0.
+  function resolveTakeoffLatLng(wps: ArduWaypoint[], home: HomePosition): L.LatLng | null {
+    if (home.set) return L.latLng(home.lat, home.lon);
+    let sumLat = 0, sumLon = 0, n = 0;
+    for (const w of wps) {
+      if (w.command === MAV_CMD_NAV_TAKEOFF || !arduHasLocation(w.command)) continue;
+      if (w.lat === 0 && w.lon === 0) continue;
+      sumLat += w.lat / 1e7; sumLon += w.lon / 1e7; n++;
+    }
+    return n > 0 ? L.latLng(sumLat / n, sumLon / n) : null;
+  }
+
+  /** Display position of a waypoint on the map: real coords, except takeoff which is anchored on
+   *  home/centroid (and may be null if neither exists). Used for the marker, flight path and jump
+   *  lines so they all agree on where a positionless takeoff sits. */
+  function wpDisplayLatLng(wp: ArduWaypoint, wps: ArduWaypoint[], home: HomePosition): L.LatLng | null {
+    if (wp.command === MAV_CMD_NAV_TAKEOFF) return resolveTakeoffLatLng(wps, home);
+    return L.latLng(wp.lat / 1e7, wp.lon / 1e7);
+  }
+
+  function renderMission(wps: ArduWaypoint[], selIdx: number, editing: boolean, home: HomePosition) {
     const keepPopup = editing && editorPopup && editorPopupIdx === selIdx && selIdx >= 0;
     missionGroup.clearLayers();
     wpMarkers = []; loiterCircles = [];
@@ -272,7 +299,10 @@
       const displayNum = i + 1;
 
       if (arduHasLocation(wp.command)) {
-        const latLng = L.latLng(wp.lat / 1e7, wp.lon / 1e7);
+        const isTakeoff = wp.command === MAV_CMD_NAV_TAKEOFF;
+        // Takeoff is anchored on home/centroid (no real coords); skip it entirely if neither exists.
+        const latLng = wpDisplayLatLng(wp, wps, home);
+        if (!latLng) continue;
 
         if (wp.command !== MAV_CMD_DO_SET_ROI) {
           fpPositions.push(latLng);
@@ -282,12 +312,12 @@
         const icon = iconForArduWp(wp, displayNum, selected);
         const marker = L.marker(latLng, {
           icon,
-          draggable: editing,
+          draggable: editing && !isTakeoff, // takeoff has no editable position
           title: `WP${displayNum}: ${MAV_CMD_LABELS[wp.command] ?? ''}`,
         }).addTo(missionGroup);
 
         marker.on('click', () => { arduSelectedWpIndex.set(i); });
-        if (editing) {
+        if (editing && !isTakeoff) {
           marker.on('dragend', () => {
             const pos = marker.getLatLng();
             arduUpdateWp(i, { ...wp, lat: Math.round(pos.lat * 1e7), lon: Math.round(pos.lng * 1e7) });
@@ -334,49 +364,63 @@
         const targetWp = wps[targetIdx];
         const prevLocIdx = findPrevLocationIdx(wps, i);
         const sourceWp = prevLocIdx >= 0 ? wps[prevLocIdx] : null;
-        if (sourceWp && targetWp && arduHasLocation(targetWp.command)) {
-          L.polyline([
-            L.latLng(sourceWp.lat / 1e7, sourceWp.lon / 1e7),
-            L.latLng(targetWp.lat / 1e7, targetWp.lon / 1e7),
-          ], { color: '#8e44ad', weight: 2, dashArray: '8 4', opacity: 0.8 }).addTo(missionGroup)
-           .bindTooltip(`Jump → WP${wp.param1} ×${wp.param2 < 0 ? '∞' : wp.param2}`, { sticky: true });
+        // Resolve display positions (so a jump to/from the positionless takeoff lands on its
+        // home/centroid anchor instead of 0/0, matching Mission Planner).
+        const src = sourceWp ? wpDisplayLatLng(sourceWp, wps, home) : null;
+        const dst = targetWp && arduHasLocation(targetWp.command) ? wpDisplayLatLng(targetWp, wps, home) : null;
+        if (src && dst) {
+          L.polyline([src, dst], { color: '#8e44ad', weight: 2, dashArray: '8 4', opacity: 0.8 })
+            .addTo(missionGroup)
+            .bindTooltip(`Jump → WP${wp.param1} ×${wp.param2 < 0 ? '∞' : wp.param2}`, { sticky: true });
         }
       }
     }
 
     if (fpPositions.length > 1) {
-      flightPath = L.polyline(fpPositions, {
-        color: '#37a8db', weight: editing ? 6 : 3, opacity: 0.7,
-      }).addTo(missionGroup);
-
-      if (editing) {
-        flightPath.on('click', (e: L.LeafletMouseEvent) => {
-          L.DomEvent.stopPropagation(e);
-          const clickLatLng = e.latlng;
-          let bestInsertIdx = wps.length;
-          let bestDist = Infinity;
-          for (let s = 0; s < fpPositions.length - 1; s++) {
-            const mid = L.latLng(
-              (fpPositions[s].lat + fpPositions[s + 1].lat) / 2,
-              (fpPositions[s].lng + fpPositions[s + 1].lng) / 2,
-            );
-            const d = clickLatLng.distanceTo(mid);
-            if (d < bestDist) { bestDist = d; bestInsertIdx = fpWpIndices[s + 1] ?? wps.length; }
-          }
-          const defaultAlt = get(settings).defaultWpAltitudeM;
-          const updated = [...wps];
-          updated.splice(bestInsertIdx, 0, {
-            command: MAV_CMD_NAV_WAYPOINT,
-            frame: MAV_FRAME_GLOBAL_RELATIVE_ALT,
-            param1: 0, param2: 0, param3: 0, param4: 0,
-            lat: Math.round(clickLatLng.lat * 1e7),
-            lon: Math.round(clickLatLng.lng * 1e7),
-            alt: defaultAlt,
-            autocontinue: true,
-          });
-          arduMission.set(updated);
-          arduSelectedWpIndex.set(bestInsertIdx);
+      // Insert a waypoint at the click (nearest leg midpoint). Attached to every leg so clicking
+      // any part of the path works — the search spans all positions regardless of which leg fired.
+      const insertOnPath = (e: L.LeafletMouseEvent) => {
+        L.DomEvent.stopPropagation(e);
+        const clickLatLng = e.latlng;
+        let bestInsertIdx = wps.length;
+        let bestDist = Infinity;
+        for (let s = 0; s < fpPositions.length - 1; s++) {
+          const mid = L.latLng(
+            (fpPositions[s].lat + fpPositions[s + 1].lat) / 2,
+            (fpPositions[s].lng + fpPositions[s + 1].lng) / 2,
+          );
+          const d = clickLatLng.distanceTo(mid);
+          if (d < bestDist) { bestDist = d; bestInsertIdx = fpWpIndices[s + 1] ?? wps.length; }
+        }
+        const defaultAlt = get(settings).defaultWpAltitudeM;
+        const updated = [...wps];
+        updated.splice(bestInsertIdx, 0, {
+          command: MAV_CMD_NAV_WAYPOINT,
+          frame: MAV_FRAME_GLOBAL_RELATIVE_ALT,
+          param1: 0, param2: 0, param3: 0, param4: 0,
+          lat: Math.round(clickLatLng.lat * 1e7),
+          lon: Math.round(clickLatLng.lng * 1e7),
+          alt: defaultAlt,
+          autocontinue: true,
         });
+        arduMission.set(updated);
+        arduSelectedWpIndex.set(bestInsertIdx);
+      };
+
+      // Draw the path leg by leg: the leg touching a takeoff is dashed, because the takeoff has no
+      // fixed horizontal position (anchored on home), so that leg is an estimate — same dashed
+      // "not-fixed" language as the jump line, but in the flight-path blue. ArduPilot-only: INAV has
+      // no positionless waypoint type, so this stays in the Ardu layer.
+      for (let s = 0; s < fpPositions.length - 1; s++) {
+        const loose = wps[fpWpIndices[s]]?.command === MAV_CMD_NAV_TAKEOFF
+          || wps[fpWpIndices[s + 1]]?.command === MAV_CMD_NAV_TAKEOFF;
+        const leg = L.polyline([fpPositions[s], fpPositions[s + 1]], {
+          color: '#37a8db',
+          weight: editing ? 6 : 3,
+          opacity: 0.7,
+          ...(loose ? { dashArray: '8 6' } : {}),
+        }).addTo(missionGroup);
+        if (editing) leg.on('click', insertOnPath);
       }
     }
   }
@@ -406,10 +450,10 @@
   // svelte-ignore state_referenced_locally
   map.on('click', onMapClick);
 
-  $effect(() => { renderMission(currentWps, currentSelIdx, currentEditing); });
+  $effect(() => { renderMission(currentWps, currentSelIdx, currentEditing, currentHome); });
 
   onDestroy(() => {
-    unsubMission(); unsubSelIdx(); unsubEditMode();
+    unsubMission(); unsubSelIdx(); unsubEditMode(); unsubHome();
     map.off('click', onMapClick);
     if (editorPopup) { map.removeLayer(editorPopup); editorPopup = undefined; }
     missionGroup.clearLayers();

@@ -23,8 +23,10 @@ export interface SystemSwitchRequest {
 function variantToSystem(variant: string): AutopilotSystem | null {
   const v = variant.toLowerCase();
   if (v === 'inav') return 'inav';
-  if (v === 'ardupilot') return 'ardupilot';
   if (v === 'px4') return 'px4';
+  // fc_variant is vehicle-specific for ArduPilot ("ArduPlane"/"ArduCopter"/"ArduRover"/"ArduSub",
+  // see handshake.rs) — match the family so the planner auto-switches on connect for any of them.
+  if (v.startsWith('ardu')) return 'ardupilot';
   return null;
 }
 

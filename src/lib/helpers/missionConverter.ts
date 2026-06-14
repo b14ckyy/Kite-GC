@@ -53,9 +53,10 @@ export function inavToArdu(wps: Waypoint[]): ArduWaypoint[] {
 // ── ArduPilot → INAV ──────────────────────────────────────────────────
 
 export function arduToInav(wps: ArduWaypoint[]): Waypoint[] {
-  return wps.map((wp, i) => {
+  const out: Waypoint[] = [];
+  for (const wp of wps) {
     const base: Omit<Waypoint, 'action'> = {
-      number: i + 1,
+      number: out.length + 1, // renumber after dropping unsupported commands
       lat: wp.lat,
       lon: wp.lon,
       altitude: arduAltToInav(wp.alt),
@@ -64,25 +65,37 @@ export function arduToInav(wps: ArduWaypoint[]): Waypoint[] {
     };
     switch (wp.command) {
       case MAV_CMD_NAV_WAYPOINT:
-        return { ...base, action: WpAction.Waypoint };
+        out.push({ ...base, action: WpAction.Waypoint });
+        break;
       case MAV_CMD_NAV_LOITER_UNLIM:
-        return { ...base, action: WpAction.PosholdUnlim };
-      case MAV_CMD_NAV_LOITER_TIME:
-        return { ...base, action: WpAction.PosholdTime, p1: Math.round(wp.param1) };
-      case MAV_CMD_NAV_LAND:
-        return { ...base, action: WpAction.Land };
-      case MAV_CMD_NAV_RETURN_TO_LAUNCH:
-        return { ...base, action: WpAction.Rth };
-      case MAV_CMD_DO_SET_ROI:
-        return { ...base, action: WpAction.SetPoi };
-      case MAV_CMD_DO_JUMP:
-        return { ...base, action: WpAction.Jump, p1: Math.round(wp.param1), p2: Math.round(wp.param2) };
       case MAV_CMD_NAV_LOITER_TURNS:
-        return { ...base, action: WpAction.PosholdTime, p1: Math.round(wp.param1 * 10) };
+        // INAV has no turn-count loiter — map both to an unlimited hold at the point (turns lost).
+        out.push({ ...base, action: WpAction.PosholdUnlim });
+        break;
+      case MAV_CMD_NAV_LOITER_TIME:
+        out.push({ ...base, action: WpAction.PosholdTime, p1: Math.round(wp.param1) });
+        break;
+      case MAV_CMD_NAV_LAND:
+        out.push({ ...base, action: WpAction.Land });
+        break;
+      case MAV_CMD_NAV_RETURN_TO_LAUNCH:
+        out.push({ ...base, action: WpAction.Rth });
+        break;
+      case MAV_CMD_DO_SET_ROI:
+        out.push({ ...base, action: WpAction.SetPoi });
+        break;
+      case MAV_CMD_DO_JUMP:
+        out.push({ ...base, action: WpAction.Jump, p1: Math.round(wp.param1), p2: Math.round(wp.param2) });
+        break;
       case MAV_CMD_NAV_TAKEOFF:
-        return { ...base, action: WpAction.Waypoint };
+        // INAV auto-launches; nearest equivalent is a waypoint at the takeoff point.
+        out.push({ ...base, action: WpAction.Waypoint });
+        break;
       default:
-        return { ...base, action: WpAction.Waypoint };
+        // Unsupported on INAV (Delay, Change Speed, splines, camera, …) — drop it rather than
+        // emit a phantom waypoint (these often carry no/zeroed coordinates).
+        break;
     }
-  });
+  }
+  return out;
 }
