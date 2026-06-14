@@ -350,6 +350,17 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
             let _ = app_handle.emit("home-position", &data);
         }
 
+        // ── MISSION_CURRENT → telemetry-nav-status (active waypoint) ─
+        // The FC's current mission item sequence. Our displayed waypoints are seq 1..N (home slot 0 is
+        // dropped), so seq maps directly to the displayed WP number. Reuses the unified nav-status event
+        // (same shape MSP emits) so the widget + map highlight work identically.
+        MavMessage::MISSION_CURRENT(mc) => {
+            let _ = app_handle.emit("telemetry-nav-status", serde_json::json!({
+                "active_wp_number": mc.seq,
+                "nav_state": 0u8, // ArduPilot has no INAV nav_state; mission detection uses flight mode
+            }));
+        }
+
         // ── ATTITUDE → telemetry-attitude ───────────────────────────
         MavMessage::ATTITUDE(att) => {
             let data = AttitudeData {

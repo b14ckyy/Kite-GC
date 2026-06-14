@@ -36,6 +36,8 @@
   import RadarPanel from "$lib/components/RadarPanel.svelte";
   import AirspaceManagerPanel from "$lib/components/AirspaceManagerPanel.svelte";
   import RadarAlertBanner from "$lib/components/RadarAlertBanner.svelte";
+  import StatusTextToasts from "$lib/components/StatusTextToasts.svelte";
+  import { startStatusText } from "$lib/stores/statusText";
   import SettingsPanel from "$lib/components/SettingsPanel.svelte";
   import { ensureUserLocation, requestUserLocation, userGeoLocation } from "$lib/helpers/userLocation";
   import { gcsLocation } from "$lib/stores/gcsLocation";
@@ -690,6 +692,7 @@
     void startRadarListeners();
     startRadarAlerts();
     startAlertAudio();
+    void startStatusText();
     pushRadarConfig();
     // Query centre follows the map view: 2D pans update settings.map.center (broad subscribe, gated by
     // the ~100 m key); 3D camera moves come via Map3D's onCamFocus; the mode flip via the effect below.
@@ -1682,7 +1685,13 @@
     const f = $missionFlags;
     let trusted = false;
     if (isReplay) trusted = f.db || replayTrackConfirmed;
-    else if (isPrimaryConnected) trusted = armed && (f.fc || liveTrackConfirmed);
+    else if (isPrimaryConnected) {
+      // ArduPilot/MAVLink reports its own current mission item (MISSION_CURRENT) — that is the FC's
+      // own truth, so trust it whenever armed + in a mission mode. INAV needs the mission to be FC-
+      // synced (or operator-confirmed) since the active WP is matched against the loaded planner mission.
+      const fcOwnsActiveWp = get(connection).protocolType === 'mavlink';
+      trusted = armed && (fcOwnsActiveWp || f.fc || liveTrackConfirmed);
+    }
     activeWpNumber.set(inWpMode && trusted ? wp : 0);
   });
 
@@ -2025,6 +2034,9 @@
 
     <!-- Conflict-alert banner — pinned to the top of the map, above 2D/3D (renders nothing when idle). -->
     <RadarAlertBanner {interfaceSettings} />
+
+    <!-- FC system messages (MAVLink STATUSTEXT) as top-edge toasts (renders nothing when idle). -->
+    <StatusTextToasts />
   </div>
 
   <!-- ======= UI CHROME LAYER — zoomed by --ui-scale ======= -->

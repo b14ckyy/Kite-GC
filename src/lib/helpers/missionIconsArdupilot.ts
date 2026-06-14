@@ -42,7 +42,8 @@ export function arduWpIconSpec(wp: ArduWaypoint, displayNum: number, selected: b
   }
 }
 
-/** 2D Leaflet divIcon for an ArduPilot waypoint (built from the shared spec). */
-export function iconForArduWp(wp: ArduWaypoint, displayNum: number, selected: boolean): L.DivIcon {
-  return divIconFromSpec(arduWpIconSpec(wp, displayNum, selected));
+/** 2D Leaflet divIcon for an ArduPilot waypoint (built from the shared spec). `active` adds the
+ *  pulsing-glow class for the FC's current target waypoint (same as INAV). */
+export function iconForArduWp(wp: ArduWaypoint, displayNum: number, selected: boolean, active = false): L.DivIcon {
+  return divIconFromSpec(arduWpIconSpec(wp, displayNum, selected), active);
 }

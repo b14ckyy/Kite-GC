@@ -35,6 +35,7 @@
   import { iconForArduWp } from '$lib/helpers/missionIconsArdupilot';
   import { settings } from '$lib/stores/settings';
   import { homePosition, type HomePosition } from '$lib/stores/home';
+  import { activeWpNumber } from '$lib/stores/navStatus';
 
   interface Props { map: L.Map; }
   let { map }: Props = $props();
@@ -44,12 +45,14 @@
   let currentEditing = $state<boolean>(get(arduEditMode));
   let currentHome    = $state<HomePosition>(get(homePosition));
   let currentVehicle = $state<VehicleClass>(get(arduVehicleClass));
+  let currentActiveWp = $state<number>(get(activeWpNumber));
 
   const unsubMission  = arduMission.subscribe(wps => { currentWps = wps; });
   const unsubSelIdx   = arduSelectedWpIndex.subscribe(i => { currentSelIdx = i; });
   const unsubEditMode = arduEditMode.subscribe(e => { currentEditing = e; });
   const unsubHome     = homePosition.subscribe(h => { currentHome = h; });
   const unsubVehicle  = arduVehicleClass.subscribe(v => { currentVehicle = v; });
+  const unsubActiveWp = activeWpNumber.subscribe(v => { currentActiveWp = v; });
 
   // svelte-ignore state_referenced_locally
   const missionGroup = L.layerGroup().addTo(map);
@@ -335,7 +338,7 @@
 
   // ── Render ──────────────────────────────────────────────────────────
 
-  function renderMission(wps: ArduWaypoint[], selIdx: number, editing: boolean, home: HomePosition, vehicle: VehicleClass) {
+  function renderMission(wps: ArduWaypoint[], selIdx: number, editing: boolean, home: HomePosition, vehicle: VehicleClass, activeWp: number) {
     const groups = groupArduMission(wps);
     const selGroup = groups.find(g => g.anchorIdx === selIdx || g.modifiers.some(m => m.idx === selIdx)) ?? null;
 
@@ -359,7 +362,7 @@
         if (hasLoc) { fpPositions.push(latLng); fpWpIndices.push(i); }
 
         const marker = L.marker(latLng, {
-          icon: iconForArduWp(wp, displayNum, i === selIdx),
+          icon: iconForArduWp(wp, displayNum, i === selIdx, activeWp > 0 && displayNum === activeWp),
           draggable: editing && !isTakeoff,
           title: `WP${displayNum}: ${cmdName(wp.command)}`,
         }).addTo(missionGroup);
@@ -468,10 +471,10 @@
   // svelte-ignore state_referenced_locally
   map.on('click', onMapClick);
 
-  $effect(() => { renderMission(currentWps, currentSelIdx, currentEditing, currentHome, currentVehicle); });
+  $effect(() => { renderMission(currentWps, currentSelIdx, currentEditing, currentHome, currentVehicle, currentActiveWp); });
 
   onDestroy(() => {
-    unsubMission(); unsubSelIdx(); unsubEditMode(); unsubHome(); unsubVehicle();
+    unsubMission(); unsubSelIdx(); unsubEditMode(); unsubHome(); unsubVehicle(); unsubActiveWp();
     map.off('click', onMapClick);
     closeEditorPopup(map, popupState);
     missionGroup.clearLayers();

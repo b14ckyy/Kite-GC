@@ -8,6 +8,8 @@
   import type { TelemetryData } from "$lib/stores/telemetry";
   import { modeLabel, modeColor, modeShort, modeCategory } from "$lib/helpers/flightModeRegistry";
   import { mission, replayActive } from "$lib/stores/mission";
+  import { arduMission } from "$lib/stores/missionArdupilot";
+  import { autopilotSystem } from "$lib/stores/autopilotContext";
   import { replayWpTotal } from "$lib/stores/navStatus";
 
   let { telem, size = 9 }: { telem: TelemetryData; size?: number } = $props();
@@ -23,7 +25,13 @@
   let inMission = $derived(modeCategory(primary) === 'mission');
   // X (total): in replay use the flown mission's count (linked library mission or Blackbox
   // header); live uses the loaded planner mission's length.
-  let wpTotal = $derived($replayActive ? ($replayWpTotal ?? 0) : $mission.waypoints.length);
+  // X (total): replay → flown mission count; live → the loaded planner mission length, from the
+  // ArduPilot store when ArduPilot is active, otherwise the INAV store.
+  let wpTotal = $derived(
+    $replayActive ? ($replayWpTotal ?? 0)
+    : $autopilotSystem === 'ardupilot' ? $arduMission.length
+    : $mission.waypoints.length,
+  );
   let wpText = $derived.by(() => {
     if (!inMission) return null;
     const n = telem.activeWpNumber;
