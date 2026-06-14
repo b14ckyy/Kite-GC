@@ -2202,5 +2202,47 @@ to fill in later.
 
 ---
 
+## ADR-047: Unified 3D Mission Overlay — One Model-Driven Renderer, Per-Platform Adapters
+
+**Status**: Accepted — implemented
+**Related**: ADR-045 (shared 2D mission-icon primitives — this is its 3D counterpart), the 3D map
+(`Map3D.svelte`), the INAV (`mission.ts`) + ArduPilot (`missionArdupilot.ts`) mission models.
+
+**Context**: The 3D map originally rendered only INAV missions. Adding ArduPilot raised the same
+question ADR-045 answered for 2D markers: a twin renderer, or one shared system? The mission **models**
+genuinely differ (INAV `WpAction` + `alt_mode`; ArduPilot `MavCmd` + per-WP altitude **frame** +
+takeoff anchoring), but everything *visual* — geoid (MSL→ellipsoid) compensation, terrain sampling,
+billboards, lines, the active-WP glow, drop-lines — is identical and should live once.
+
+**Decision**:
+
+1. **Protocol-neutral model + per-platform adapters.** `buildInavModel` / `buildArduModel` resolve their
+   waypoints (each its own altitude/terrain/anchor logic) into a common `Mission3DModel { wps, lines,
+   launch, geoidRef }` in **pure MSL**. One `renderMission3D` dispatches on `autopilotSystem` (3D mirror
+   of the 2D `MissionLayer` switcher), then **one** `drawMission3DModel` draws any model identically. The
+   geoid offset is applied **at draw** (model stays geoid-agnostic), so geoid/terrain handling exists in
+   exactly one place. Icons come from the shared ADR-045 specs (`wpIconSpec` / `arduWpIconSpec`).
+2. **Overlay lines are depth-test-free `Primitive`s.** The mission overlay is meant to stay visible
+   through terrain (like the billboard markers, which use `disableDepthTestDistance`). Entity polylines
+   with `material` + `depthFailMaterial` achieved that but **z-fought the terrain** (worst at the
+   ground-anchored drop-lines) → sporadic flicker on camera moves / partial-window repaints. Lines now
+   render as `PolylineMaterialAppearance` primitives with `depthTest` disabled + `depthMask: false` —
+   always on top, single pass, **no z-fight**. (The flown track keeps normal depth-testing — it
+   *should* be occluded by terrain.)
+3. **Flicker guards.** Two unrelated triggers rebuilt the overlay needlessly: the `home-position`
+   listener re-broadcast `launchPoint` on every (jittering, ~0.2 Hz) HOME, and writable stores emit even
+   on identical values. Fixed at the source (dedupe HOME by a movement threshold) **and** structurally:
+   `renderMission3D` builds the model, computes a **quantised signature**, and **skips the redraw
+   entirely** when nothing visible changed — so any spurious re-render is a no-op, not an entity churn.
+
+**Consequences**: INAV + ArduPilot 3D missions look identical and share one geoid/terrain/draw path;
+future visual changes (or a third protocol) touch the renderer once + a thin adapter. The overlay no
+longer flickers (z-fight removed; redundant rebuilds skipped). Costs: each line is its own primitive
+(per-line colour/dash precludes one batched draw) — fine for mission-sized overlays; a residual
+partial-repaint flicker from `requestRenderMode` would be a separate render-trigger fix, not a line
+issue.
+
+---
+
 *End of Architecture Decision Records*
 

@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **ArduPilot missions render in 3D — one shared renderer with INAV (ADR-047).** The 3D map drew only
+  INAV missions; ArduPilot now renders there too, through a single model-driven renderer: per-platform
+  adapters resolve each mission model (INAV `WpAction`/`alt_mode`, ArduPilot `MavCmd`/altitude-frame +
+  takeoff anchoring) into one protocol-neutral 3D model, then one draw path renders both identically —
+  markers, flight-path lines, jump/RTH connectors, the active-WP glow and ground drop-lines, sharing the
+  same geoid/terrain compensation and the ADR-045 icon specs.
 - **FC system messages on screen (MAVLink STATUSTEXT).** ArduPilot's status messages (mode changes,
   prearm failures, errors, …) appear in a single compact **banner** at the top edge — one line per
   message, newest at the bottom, the field scrolling to the latest (≈5 lines visible), colour-coded by
@@ -79,6 +85,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `VFR_HUD` is now gated on the airspeed module (its only consumer). Net less bandwidth, yet RSSI
   and EKF now work. Also: `AHRS3` (182) is no longer touched — obsolete in modern ArduPilot, it logged
   a "No ap_message" warning on connect.
+- **Flight-mode track colour — PosHold/Loiter is more distinct.** The `poshold` category (INAV PosHold,
+  ArduPilot Loiter) moved from cyan `#00bcd4` to turquoise `#1abc9c` so it no longer reads almost
+  identical to the `mission` blue (ArduPilot Auto) on the track/badge.
+
+### Fixed
+- **MAVLink GPS — satellites/fix no longer flash, HDOP shows.** `GLOBAL_POSITION_INT` was emitting a
+  hard-coded `fix=2, sats=0` that fought `GPS_RAW_INT`'s real values (flashing 0↔N); fix type and sat
+  count are now owned solely by `GPS_RAW_INT` (cached, reused by `GLOBAL_POSITION_INT`), and HDOP is
+  emitted from `GPS_RAW_INT.eph` via the same stats event INAV uses (was always "–").
+- **3D mission overlay no longer flickers.** The lines/markers rebuilt on every (sub-metre-jittering,
+  ~0.2 Hz) HOME because the home handler re-broadcast `launchPoint` unconditionally; and the overlay
+  lines z-fought the terrain. Fixed by deduping HOME, skipping identical redraws (quantised model
+  signature), and rendering the overlay lines as depth-test-free primitives (ADR-047).
+- **3D live track is coloured from the start.** A GPS frame arriving before the first flight-mode update
+  baked a grey "unknown-mode" leading segment into the (immutable) live track; track points are now
+  recorded only once the flight mode is known.
 
 ### Added
 - **MAVLink telemetry stream rates — GCS-requested, with MSP parity (ADR-043).** ArduPilot is
