@@ -1,9 +1,11 @@
 # Unified Flight-Mode Pipeline — Protocol-Agnostic Mode Model
 
-> **STATUS: PLANNED — agreed direction, not yet implemented.** Make the flight-mode path
+> **STATUS: IMPLEMENTED (DB v12) — decision recorded in ADR-044.** The flight-mode path is now
 > protocol-agnostic: protocol adapters classify raw mode data into a canonical model; the pipeline,
 > widget, track-coloring and recording/replay consume only that model. Future protocols (CRSF /
-> Smartport) become an adapter + a few registry entries — no pipeline or widget surgery.
+> Smartport / Betaflight) become an adapter + a few registry entries — no pipeline or widget surgery.
+> Kept as the detailed implementation reference (code comments point here); DATA_PIPELINE.md has the
+> shipped data-flow summary.
 
 ## Problem
 

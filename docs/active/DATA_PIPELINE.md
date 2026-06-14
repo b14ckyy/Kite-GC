@@ -332,20 +332,32 @@ All widgets receive `telem` prop → identical interface for live and replay
 | DB Schema | Unified — NULL where protocol doesn't provide a field | None |
 | Adapter | Same `toTelemetryData()` — no change | None |
 
-### Flight Mode — unified canonical model (in progress)
+### Flight Mode — unified canonical model (shipped, ADR-044)
 
-Flight mode is the one telemetry field that is **not** yet protocol-agnostic: a single `u32`
-(`flightModeFlags`) carries an INAV **box bitmask** *or* an ArduPilot **raw `custom_mode`**, and the
-widget + track-coloring branch on `fcVariant` to interpret it. This is being unified so the pipeline,
-widget, recording and replay consume only a canonical model — see
-**[FLIGHT_MODE_UNIFIED.md](FLIGHT_MODE_UNIFIED.md)**.
+Flight mode is fully protocol-agnostic. Each protocol **input adapter** classifies its raw mode data
+(INAV box bitmask / ArduPilot `custom_mode`) into a canonical model — the raw value never reaches the
+widget. Plan: [FLIGHT_MODE_UNIFIED.md](FLIGHT_MODE_UNIFIED.md); decision: ADR-044.
 
-Target flow: each protocol **input adapter** classifies raw mode data into a canonical
-`FlightModeState { primary, modifiers[] }` (string ids) → one `telemetry-flightmode` event → store →
-a frontend **output registry** (id → label + category; category → color). The recorder stores
-`mode_primary` / `mode_modifiers`; replay reads them directly (no re-classification). New protocols
-(CRSF / Smartport / Betaflight) = a new adapter + a few registry ids — no pipeline/widget changes.
-_(This section is updated to the implemented detail when the refactor lands.)_
+```
+INAV bits  ─► classify_inav ─┐
+                             ├─► FlightModeState ─► "telemetry-flightmode" ─► store.flightMode ─► widget
+Ardu mode  ─► classify_ardu ─┘   { primary, modifiers[] }            └─► recorder (mode_primary/modifiers)
+                                       (string ids)                          └─► DB ─► replay (read directly)
+```
+
+- **Backend** (`flightmode/mod.rs`): `classify_inav` (priority-selected primary + stacked modifiers) and
+  `classify_ardupilot` (per-vehicle table). Emitted by the MSP scheduler (`poll_slot`, Status payload)
+  and the MAVLink handler (HEARTBEAT). Raw `flight_mode_flags` stays in `StatusData` as forensic only.
+- **Frontend output registry** (`helpers/flightModeRegistry.ts`): the single presentation source —
+  id → `{ label, category }`, `category → colour`. The **category** is the shared colour axis (widget
+  badge + track-coloring); the **label** stays exact per mode, so equivalent modes share a colour with no
+  information lost. `FlightModeWidget`, `trackColors.ts`, Map/Map3D, `LogPlayer` and the replay adapter
+  all consume only this — no `fcVariant` branching anywhere.
+- **Recording/replay**: `telemetry_records.mode_primary` / `mode_modifiers` (DB v12); imports classify on
+  import; replay reads the canonical fields directly. Pre-v12 rows → NULL → neutral `other` category.
+
+New protocols (CRSF / Smartport / Betaflight) = a new adapter that emits `FlightModeState` + a few
+registry ids. No pipeline or widget changes.
 
 ---
 

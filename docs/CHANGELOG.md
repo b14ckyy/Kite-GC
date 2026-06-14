@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Flight mode is now protocol-agnostic end-to-end (ADR-044).** Mode classification moved into the
+  protocol adapters: each emits a canonical `FlightModeState { primary, modifiers[] }` (string ids), and
+  a single frontend registry maps id → label + **category** (category drives the colour, the label stays
+  exact). The widget, 2D/3D track-coloring and replay no longer branch on the firmware — INAV keeps its
+  rich **primary + modifier** stacking (Horizon+Alt, Acro+Tune), ArduPilot shows its real per-vehicle
+  modes, and a future protocol (CRSF/Smartport/Betaflight) is just an adapter + a few registry ids.
+  Recorded flights store the canonical mode (`telemetry_records` gains `mode_primary` / `mode_modifiers`,
+  DB v12); replay reads it directly. Old (pre-v12) rows render as the neutral "other" category.
 - **First-start defaults now show off more out of the box** (fresh installs only — existing settings
   are untouched): flight **recording + logbook on**, map provider **ESRI Hybrid**, **night mode Auto**,
   3D **real lighting + log-replay sun time on**, **nav panel open**, **GCS marker continuous**, the
