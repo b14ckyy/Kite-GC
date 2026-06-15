@@ -1,5 +1,7 @@
 [package]
 name = "kite-gc"
+# NOT the app version source — bump only package.json. The app/bundle version comes from
+# package.json via tauri.conf.json (`"version": "../package.json"`); this is crate metadata only.
 version = "0.8.0"
 description = "Kite Ground Control — Universal Ground Control Station"
 authors = ["you"]

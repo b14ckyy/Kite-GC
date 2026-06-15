@@ -3,8 +3,11 @@
 
 // Info Commands — app version, build info, etc.
 
-/// Return application version info
+use tauri::Manager;
+
+/// Return the application version. Sourced from the Tauri package info, which resolves to
+/// `package.json` (via `tauri.conf.json`'s `version` path) — the single version source of truth.
 #[tauri::command]
-pub fn get_app_version() -> String {
-    env!("CARGO_PKG_VERSION").to_string()
+pub fn get_app_version(app: tauri::AppHandle) -> String {
+    app.package_info().version.to_string()
 }
