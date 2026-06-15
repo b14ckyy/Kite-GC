@@ -67,6 +67,8 @@ export interface ProfileData {
   pathAtTerrain: (number | null)[];
   /** clearance = pathAtTerrain − terrain.elev, aligned to `terrain` */
   clearance: (number | null)[];
+  /** Logged RSSI (Track mode), nearest track point per terrain sample; all null otherwise. */
+  rssi: (number | null)[];
   markers: ProfileMarker[];
   /** Distances (m) where the route is cut by a simulated jump loop. */
   cuts: number[];
@@ -263,6 +265,21 @@ function bridgeGaps(raw: RawSample[]): void {
   }
 }
 
+/** Nearest value (by cumulative distance) from a sparse {dist, val} series — for per-sample RSSI. */
+function nearestByDist(dist: number[], vals: (number | null)[], target: number): number | null {
+  if (dist.length === 0) return null;
+  let lo = 0;
+  let hi = dist.length - 1;
+  while (lo < hi) {
+    const m = (lo + hi) >> 1;
+    if (dist[m] < target) lo = m + 1;
+    else hi = m;
+  }
+  // lo is the first index with dist[lo] >= target; compare with its predecessor
+  if (lo > 0 && Math.abs(dist[lo - 1] - target) <= Math.abs(dist[lo] - target)) lo -= 1;
+  return vals[lo] ?? null;
+}
+
 /** Fold terrain + path + markers into the final profile (clearance, ranges, climb). */
 function finishProfile(
   source: 'waypoint' | 'track',
@@ -272,6 +289,7 @@ function finishProfile(
   totalDist: number,
   cuts: number[],
   jumpLegs: { start: number; end: number }[],
+  terrainRssi: (number | null)[] | null = null,
 ): ProfileData {
   const pathAtTerrain = terrain.map((s) => (s.cut ? null : pathAltAt(path, s.dist)));
   const clearance = terrain.map((s, i) => {
@@ -315,6 +333,7 @@ function finishProfile(
     path,
     pathAtTerrain,
     clearance,
+    rssi: terrainRssi ?? terrain.map(() => null),
     markers,
     cuts,
     jumpLegs,
@@ -478,6 +497,8 @@ export interface TrackPoint {
   lon: number | null;
   alt_m: number | null;
   timestamp_ms?: number;
+  /** Logged signal strength at this fix (Track mode replay/live) — for the measured-link line. */
+  rssi?: number | null;
 }
 
 /**
@@ -486,7 +507,7 @@ export interface TrackPoint {
  */
 export async function buildTrackProfile(track: TrackPoint[]): Promise<ProfileData | null> {
   const pts = track.filter(
-    (p): p is { lat: number; lon: number; alt_m: number } =>
+    (p): p is TrackPoint & { lat: number; lon: number; alt_m: number } =>
       p.lat != null && p.lon != null && p.alt_m != null,
   );
   if (pts.length < 2) return null;
@@ -503,7 +524,13 @@ export async function buildTrackProfile(track: TrackPoint[]): Promise<ProfileDat
   const terrain: TerrainSample[] = raw.map((s) => ({ dist: s.dist_m, elev: s.elev_m, lat: s.lat, lon: s.lon }));
 
   const path: PathPoint[] = pts.map((p, i) => ({ dist: dist[i], altMsl: p.alt_m }));
-  return finishProfile('track', terrain, path, [], totalDist, [], []);
+
+  // Per-terrain-sample RSSI: the nearest track fix's value (only if the track carries any RSSI).
+  const trackRssi = pts.map((p) => p.rssi ?? null);
+  const hasRssi = trackRssi.some((v) => v != null);
+  const terrainRssi = hasRssi ? terrain.map((s) => (s.cut ? null : nearestByDist(dist, trackRssi, s.dist))) : null;
+
+  return finishProfile('track', terrain, path, [], totalDist, [], [], terrainRssi);
 }
 
 /**

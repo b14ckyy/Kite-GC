@@ -54,6 +54,16 @@ export interface TerrainAnalysisState {
   radarPredictive: boolean;
   /** Terrain-radar widget: total clearance colour scale in metres (red < 0 … green at scale, off above) */
   radarScale: number;
+  /** RF analysis — geometric LOS occlusion (naïve; ignored when rfFresnel is on) */
+  rfLos: boolean;
+  /** RF analysis — Fresnel-zone / knife-edge diffraction loss */
+  rfFresnel: boolean;
+  /** RF analysis — two-ray ground-reflection lobing (signed) */
+  rfTworay: boolean;
+  /** RF analysis — active band (MHz key): '5800' | '2400' | '900' | '433' */
+  rfBand: '5800' | '2400' | '900' | '433';
+  /** RF analysis — clutter/vegetation height (m) added to terrain for the obstacle analysis */
+  rfClutterM: number;
 }
 
 const INITIAL: TerrainAnalysisState = {
@@ -76,6 +86,11 @@ const INITIAL: TerrainAnalysisState = {
   viewEnd: null,
   radarPredictive: false,
   radarScale: 120,
+  rfLos: false,
+  rfFresnel: false,
+  rfTworay: false,
+  rfBand: '900',
+  rfClutterM: 10,
 };
 
 export const terrainAnalysis = writable<TerrainAnalysisState>({ ...INITIAL });

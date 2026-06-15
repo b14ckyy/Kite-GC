@@ -20,6 +20,7 @@
   import { t } from 'svelte-i18n';
   import { onDestroy } from 'svelte';
   import { get } from 'svelte/store';
+  import { invoke } from '@tauri-apps/api/core';
   import {
     mission,
     launchPoint,
@@ -54,6 +55,7 @@
   } from '$lib/helpers/terrainProfile';
   import { liveTrack } from '$lib/stores/liveTrack';
   import { computeCorrection, type CorrectionResult } from '$lib/helpers/terrainCorrection';
+  import { computeRfField } from '$lib/helpers/rfLink';
   import TerrainProfileChart, { type HoverInfo } from './TerrainProfileChart.svelte';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import UnitStepper from '$lib/components/UnitStepper.svelte';
@@ -432,6 +434,79 @@
   const terrainAvailable = $derived(
     data ? data.terrain.some((s) => s.elev != null) : true,
   );
+
+  // Track carries logged RSSI → show the measured-link line + legend entry.
+  const hasRssi = $derived(!!data && data.rssi.some((v) => v != null));
+
+  // ── RF link / radio-shadow field (background rainbow + LOS-clearance line) ──────────
+  let rfDb = $state<(number | null)[] | null>(null);
+  let losClearance = $state<(number | null)[] | null>(null);
+  let rfToken = 0;
+
+  /** Home (GCS) reference for the radial RF analysis. In Track mode this is the flight's actual
+   *  take-off — the track's first fix — NOT the mission launch point (which is a planning artifact
+   *  and may be stale from a previously-edited mission). In Waypoint mode it is the launch point. */
+  function rfHomeLatLon(
+    mode: 'waypoint' | 'track',
+    lp: { lat: number; lng: number } | null,
+    trk: TrackPoint[],
+  ): { lat: number; lon: number } | null {
+    const firstFix = () => {
+      for (const p of trk) if (p.lat != null && p.lon != null) return { lat: p.lat, lon: p.lon };
+      return null;
+    };
+    if (mode === 'track') return firstFix();
+    if (lp) return { lat: lp.lat, lon: lp.lng };
+    return firstFix();
+  }
+
+  function setRfBand(band: '5800' | '2400' | '900' | '433') {
+    patchTerrainAnalysis({ rfBand: band });
+  }
+
+  // Clutter/vegetation offset (m) added to terrain in the RF obstacle analysis.
+  let rfClutter = $state($terrainAnalysis.rfClutterM);
+  function onClutterChange() {
+    patchTerrainAnalysis({ rfClutterM: Math.max(0, rfClutter) });
+  }
+
+  $effect(() => {
+    const st = $terrainAnalysis;
+    const d = data;
+    const lp = $launchPoint;
+    const trk = track;
+    const anyRf = st.rfLos || st.rfFresnel || st.rfTworay;
+    if (!st.open || !d || !anyRf) {
+      rfDb = null;
+      losClearance = null;
+      return;
+    }
+    const home = rfHomeLatLon(st.viewMode, lp, trk);
+    if (!home) {
+      rfDb = null;
+      losClearance = null;
+      return;
+    }
+    const opts = { band: st.rfBand, los: st.rfLos, fresnel: st.rfFresnel, tworay: st.rfTworay, clutterM: st.rfClutterM };
+    const token = ++rfToken;
+    const timer = setTimeout(async () => {
+      try {
+        const ground = await invoke<number | null>('terrain_elevation', { lat: home.lat, lon: home.lon });
+        const field = await computeRfField(d, { lat: home.lat, lon: home.lon, ground: ground ?? 0 }, opts);
+        if (token === rfToken) {
+          rfDb = field.db;
+          losClearance = field.losClearance;
+        }
+      } catch (e) {
+        console.error('[terrain] RF field computation failed', e);
+        if (token === rfToken) {
+          rfDb = null;
+          losClearance = null;
+        }
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  });
 </script>
 
 {#snippet headerActions()}
@@ -476,6 +551,52 @@
         <span class="lg"><i class="sw terrain"></i>{$t('terrain.terrain')}</span>
         <span class="lg"><i class="sw floor"></i>{$t('terrain.clearanceFloor')}</span>
         <span class="lg"><i class="sw unsafe"></i>{$t('terrain.unsafe')}</span>
+        {#if hasRssi}<span class="lg"><i class="sw rssi"></i>{$t('terrain.rssi')}</span>{/if}
+      </div>
+
+      <div class="rf-section">
+        <span class="rf-head">{$t('terrain.rfTitle')}</span>
+        <div class="rf-methods">
+          <Button variant="mode" active={$terrainAnalysis.rfLos} onclick={() => patchTerrainAnalysis({ rfLos: !$terrainAnalysis.rfLos })} title={$t('terrain.rfLosHint')}>
+            {$t('terrain.rfLos')}
+          </Button>
+          <Button variant="mode" active={$terrainAnalysis.rfFresnel} onclick={() => patchTerrainAnalysis({ rfFresnel: !$terrainAnalysis.rfFresnel })} title={$t('terrain.rfFresnelHint')}>
+            {$t('terrain.rfFresnel')}
+          </Button>
+          <Button variant="mode" active={$terrainAnalysis.rfTworay} onclick={() => patchTerrainAnalysis({ rfTworay: !$terrainAnalysis.rfTworay })} title={$t('terrain.rfTworayHint')}>
+            {$t('terrain.rfTworay')}
+          </Button>
+        </div>
+        <SegmentedToggle
+          full
+          options={[
+            { value: '5800', label: '5.8G' },
+            { value: '2400', label: '2.4G' },
+            { value: '900', label: '900M' },
+            { value: '433', label: '433M' },
+          ]}
+          value={$terrainAnalysis.rfBand}
+          onchange={(v) => setRfBand(v as '5800' | '2400' | '900' | '433')}
+        />
+        <div class="ctrl">
+          <span>{$t('terrain.rfClutter')}</span>
+          <UnitStepper
+            bind:value={rfClutter}
+            kind="altitude"
+            settings={interfaceSettings}
+            min={0}
+            step={5}
+            decimals={0}
+            onchange={onClutterChange}
+          />
+        </div>
+        {#if $terrainAnalysis.rfLos && $terrainAnalysis.rfFresnel}
+          <p class="rf-note">{$t('terrain.rfLosIgnored')}</p>
+        {/if}
+        {#if $terrainAnalysis.datum === 'agl'}
+          <p class="rf-note">{$t('terrain.rfRainbowMsl')}</p>
+        {/if}
+        <p class="rf-note">{$t('terrain.rfDisclaimer')}</p>
       </div>
 
       {#if showCorrection}
@@ -569,6 +690,9 @@
           activeEndDist={activeRange.endDist}
           {placedDist}
           {previewPath}
+          {rfDb}
+          {losClearance}
+          rssi={data?.rssi ?? null}
           bind:viewStart={$terrainAnalysis.viewStart}
           bind:viewEnd={$terrainAnalysis.viewEnd}
           onhover={onChartHover}
@@ -703,7 +827,35 @@
   .sw.unsafe {
     background: #e74c3c;
   }
+  .sw.rssi {
+    background: #e0508a;
+  }
   .hint {
+    margin: 0;
+    font-size: 10px;
+    color: #6e6e6e;
+    line-height: 1.4;
+  }
+
+  /* RF link / radio-shadow analysis section */
+  .rf-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    padding-top: 11px;
+  }
+  .rf-head {
+    font-size: 12px;
+    font-weight: 600;
+    color: #cdd6db;
+  }
+  .rf-methods {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .rf-note {
     margin: 0;
     font-size: 10px;
     color: #6e6e6e;

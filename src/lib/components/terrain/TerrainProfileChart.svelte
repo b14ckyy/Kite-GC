@@ -5,6 +5,7 @@
 
 <script lang="ts">
   import type { ProfileData } from '$lib/helpers/terrainProfile';
+  import { rfColor } from '$lib/helpers/rfLink';
   import { convertAltitude } from '$lib/utils/units';
   import type { InterfaceSettings } from '$lib/stores/settings';
 
@@ -29,6 +30,9 @@
     activeEndDist = Infinity,
     placedDist = null,
     previewPath = null,
+    rfDb = null,
+    losClearance = null,
+    rssi = null,
     viewStart = $bindable(null),
     viewEnd = $bindable(null),
     onhover,
@@ -37,6 +41,12 @@
     data: ProfileData | null;
     datum?: 'msl' | 'agl';
     settings: InterfaceSettings;
+    /** RF excess gain/loss (dB, signed) per terrain sample → background rainbow (MSL datum). */
+    rfDb?: (number | null)[] | null;
+    /** Min sightline clearance (m) per terrain sample → extra line (AGL datum). */
+    losClearance?: (number | null)[] | null;
+    /** Logged RSSI per terrain sample (Track mode) → measured-link line. */
+    rssi?: (number | null)[] | null;
     /** Live Track mode (FC connected) — min window 250 m */
     live?: boolean;
     /** Follow the newest data on the right (no pan, zoom-only) */
@@ -135,6 +145,9 @@
     clearance: number | null;
     lat: number;
     lon: number;
+    rfDb: number | null;
+    losClear: number | null;
+    rssi: number | null;
   }
 
   function lowerBound(arr: { dist: number }[], x: number): number {
@@ -169,6 +182,9 @@
           clearance: data.clearance[i],
           lat: t[i].lat,
           lon: t[i].lon,
+          rfDb: rfDb?.[i] ?? null,
+          losClear: losClearance?.[i] ?? null,
+          rssi: rssi?.[i] ?? null,
         });
       }
       return out;
@@ -196,6 +212,12 @@
         }
       }
       const idx = worst === Infinity ? maxElevI : repi;
+      // Carry the bucket's *worst* (lowest) RF dB so red spots survive decimation.
+      let worstDb: number | null = null;
+      for (let i = s; i <= e; i++) {
+        const v = rfDb?.[i];
+        if (v != null && (worstDb == null || v < worstDb)) worstDb = v;
+      }
       out.push({
         dist: t[idx].dist,
         elev: t[idx].elev,
@@ -203,6 +225,9 @@
         clearance: data.clearance[idx],
         lat: t[idx].lat,
         lon: t[idx].lon,
+        rfDb: worstDb,
+        losClear: losClearance?.[idx] ?? null,
+        rssi: rssi?.[idx] ?? null,
       });
     }
     return out;
@@ -228,6 +253,76 @@
     }
     flush(d.length - 1);
     return path;
+  });
+
+  // ── RF rainbow (background loss field, MSL datum) ──────────────────
+  // Horizontal gradient (one stop per visible sample) filling the area from the baseline up to the
+  // path line — colour = the sample's combined excess-dB. Pale (low opacity) so it sits behind.
+  const rfActive = $derived(rfDb != null && datum === 'msl');
+  const rfStops = $derived.by(() => {
+    if (!rfActive) return [] as { offset: number; color: string }[];
+    const d = display;
+    const out: { offset: number; color: string }[] = [];
+    for (let i = 0; i < d.length; i++) {
+      const off = Math.max(0, Math.min(1, (xS(d[i].dist) - PAD.l) / plotW));
+      out.push({ offset: off, color: d[i].rfDb != null ? rfColor(d[i].rfDb) : 'transparent' });
+    }
+    return out;
+  });
+  const rfAreaPath = $derived.by(() => {
+    if (!rfActive) return '';
+    const d = display;
+    let path = '';
+    let runStart = -1;
+    const flush = (end: number) => {
+      if (runStart < 0) return;
+      path += ` M ${xS(d[runStart].dist).toFixed(1)} ${baselineY.toFixed(1)}`;
+      for (let k = runStart; k <= end; k++) path += ` L ${xS(d[k].dist).toFixed(1)} ${yS(d[k].pathAlt as number).toFixed(1)}`;
+      path += ` L ${xS(d[end].dist).toFixed(1)} ${baselineY.toFixed(1)} Z`;
+      runStart = -1;
+    };
+    for (let i = 0; i < d.length; i++) {
+      if (d[i].pathAlt == null) flush(i - 1);
+      else if (runStart < 0) runStart = i;
+    }
+    flush(d.length - 1);
+    return path;
+  });
+
+  // LOS sightline-clearance line (AGL datum): min clearance of the home→sample ray over terrain.
+  const losClearRuns = $derived.by(() => {
+    if (datum !== 'agl' || losClearance == null) return [] as string[];
+    const d = display;
+    const runs: string[][] = [];
+    let cur: string[] = [];
+    for (let i = 0; i < d.length; i++) {
+      if (d[i].losClear == null) {
+        if (cur.length) runs.push(cur);
+        cur = [];
+        continue;
+      }
+      cur.push(`${xS(d[i].dist).toFixed(1)},${yS(d[i].losClear as number).toFixed(1)}`);
+    }
+    if (cur.length) runs.push(cur);
+    return runs.map((r) => r.join(' '));
+  });
+
+  // Logged-RSSI line (Track mode): normalised to the plot height (shape overlay, no own axis).
+  const rssiActive = $derived(rssi != null && data?.source === 'track');
+  const rssiLine = $derived.by(() => {
+    if (!rssiActive) return '';
+    const d = display;
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const s of d) if (s.rssi != null) { if (s.rssi < lo) lo = s.rssi; if (s.rssi > hi) hi = s.rssi; }
+    if (!isFinite(lo) || hi <= lo) return '';
+    const pts: string[] = [];
+    for (const s of d) {
+      if (s.rssi == null) continue;
+      const yn = PAD.t + (1 - (s.rssi - lo) / (hi - lo)) * plotH;
+      pts.push(`${xS(s.dist).toFixed(1)},${yn.toFixed(1)}`);
+    }
+    return pts.join(' ');
   });
 
   const floorPath = $derived.by(() => {
@@ -626,6 +721,11 @@
       <clipPath id="plotClip">
         <rect x={PAD.l} y={PAD.t} width={plotW} height={plotH} />
       </clipPath>
+      {#if rfStops.length}
+        <linearGradient id="rfGrad" gradientUnits="userSpaceOnUse" x1={PAD.l} y1="0" x2={PAD.l + plotW} y2="0">
+          {#each rfStops as st}<stop offset={st.offset} stop-color={st.color} />{/each}
+        </linearGradient>
+      {/if}
     </defs>
 
     <!-- Y grid + labels -->
@@ -648,6 +748,10 @@
 
     <g clip-path="url(#plotClip)">
       {#if data}
+        <!-- RF loss rainbow — behind everything (MSL datum) -->
+        {#if rfActive && rfAreaPath}
+          <path class="rf-fill" d={rfAreaPath} fill="url(#rfGrad)" />
+        {/if}
         {#if datum === 'agl'}
           <rect class="terrain-fill" x={PAD.l} y={yS(0)} width={plotW} height={Math.max(0, baselineY - yS(0))} />
           <line class="ground-line" x1={PAD.l} y1={yS(0)} x2={PAD.l + plotW} y2={yS(0)} />
@@ -673,6 +777,16 @@
             <polyline class="path-line jump" points={run.points} />
           {/if}
         {/each}
+
+        <!-- LOS sightline-clearance line (AGL datum) -->
+        {#each losClearRuns as pts}
+          <polyline class="los-clear-line" points={pts} />
+        {/each}
+
+        <!-- Logged RSSI (Track mode), normalised shape overlay -->
+        {#if rssiLine}
+          <polyline class="rssi-line" points={rssiLine} />
+        {/if}
 
         <!-- Jump cut markers -->
         {#each cutXs as cx}
@@ -750,6 +864,25 @@
   .axis-unit {
     fill: #6e6e6e;
     font-size: 13px;
+  }
+  .rf-fill {
+    /* pale / dark so the loss field sits quietly behind terrain + the lines */
+    opacity: 0.3;
+    stroke: none;
+  }
+  .los-clear-line {
+    fill: none;
+    stroke: #9b7fe0;
+    stroke-width: 1.5;
+    stroke-dasharray: 5 3;
+    stroke-linejoin: round;
+  }
+  .rssi-line {
+    fill: none;
+    stroke: #e0508a;
+    stroke-width: 1.5;
+    opacity: 0.85;
+    stroke-linejoin: round;
   }
   .terrain-fill {
     fill: url(#terrainGrad);
