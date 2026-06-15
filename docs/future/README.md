@@ -21,3 +21,8 @@ viability, hardware, a partner, etc.).
   landscape maturing + the per-source licensing/commercial question.
 - [WIND_CRAB_INDICATOR.md](WIND_CRAB_INDICATOR.md) — PFD/map wind + crab indicator + flight-path
   marker. Gated on INAV exposing `MSP2_INAV_WIND` (0x2231, PR #11611 — unmerged; 9.1 vs 10 unknown).
+- [EXTERNAL_API.md](EXTERNAL_API.md) — external control API (read state / set waypoints / run commands)
+  for AI/LLM-assisted mission planning: external tool *authors* intent → Kite *validates* against a real
+  terrain/airspace/traffic envelope → FC *flies* (LLM out of the control loop). Lean MCP + a
+  schema-agnostic intent/envelope validator. Gated on demand + the safety work; prompted by the INAV/URML
+  outreach (#11651).
