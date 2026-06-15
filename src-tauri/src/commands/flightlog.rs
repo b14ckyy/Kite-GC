@@ -635,6 +635,39 @@ pub async fn flightlog_import_blackbox(
     Ok(result)
 }
 
+/// Parse a recorded raw serial log (.rawmsp = MSP, .tlog = MAVLink) into the logbook as LIVE
+/// flights, split at arm/disarm (ADR-049). Emits `flightlog-import-progress` while running.
+#[tauri::command]
+pub async fn flightlog_import_raw(
+    file_path: String,
+    db_path: Option<String>,
+    app_handle: tauri::AppHandle,
+) -> Result<crate::flightlog::raw_import::RawImportResult, String> {
+    let db_path = db_path.unwrap_or_default();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let emit_progress = |progress: u8, stage: &str, message: &str| {
+            let _ = app_handle.emit(
+                "flightlog-import-progress",
+                BlackboxImportProgress {
+                    stage: stage.to_string(),
+                    progress,
+                    message: message.to_string(),
+                },
+            );
+        };
+        emit_progress(0, "start", "Preparing raw-log import...");
+        let conn = open_db(&db_path)?;
+        crate::flightlog::raw_import::import_raw_log_with_progress(
+            &conn,
+            std::path::Path::new(&file_path),
+            emit_progress,
+        )
+    })
+    .await
+    .map_err(|e| format!("Raw import task failed: {}", e))?
+}
+
 // ── Export / Import / Offline replay ────────────────────────────────
 
 /// Export a flight track as KMZ/KML/GPX/CSV (format detected from file extension)

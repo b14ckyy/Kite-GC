@@ -13,7 +13,7 @@ use rusqlite::Connection;
 use tauri::{AppHandle, Emitter};
 
 use super::db;
-use super::raw_logger::RawLogger;
+use super::msp_raw_logger::{MspRawLogger, MspRawSink};
 use super::tlog_logger::TlogLogger;
 use super::types::{Flight, FlightLogSettings, TelemetryRecord};
 use crate::msp::FcInfo;
@@ -347,15 +347,14 @@ pub struct FlightRecorder {
     db_file_path: std::path::PathBuf,
     /// Base dir for raw logs (raw_logs/*.tlog | *.rawmsp) — separate from the DB folder.
     raw_log_dir: std::path::PathBuf,
-    raw_logger: Option<RawLogger>,
+    /// Shared MSP raw-log sink (ADR-049): the transport writes the raw serial bytes into it; the
+    /// recorder owns its lifecycle (opens on arm / continuous, drops on disarm / disconnect). `None`
+    /// inside the slot when not recording; on MAVLink it stays empty (that path uses `tlog_logger`).
+    msp_raw_sink: MspRawSink,
     tlog_logger: Option<TlogLogger>,
     snapshot: TelemetrySnapshot,
     active_flight: Option<ActiveFlight>,
     was_armed: bool,
-    /// Continuous session log start time (for session file naming)
-    session_start: Option<chrono::DateTime<Utc>>,
-    /// Track continuous-mode session start Instant for raw sample timestamps
-    session_instant: Option<Instant>,
     /// For emitting flight-recording lifecycle events to the frontend.
     app_handle: AppHandle,
     /// Shared slot for the pending (awaiting commit/discard) session — also read on the next arm for
@@ -383,6 +382,7 @@ impl FlightRecorder {
         app_handle: AppHandle,
         pending: PendingSessionHandle,
         resume: PendingSessionHandle,
+        msp_raw_sink: MspRawSink,
     ) -> Result<Self, String> {
         let db_path = db::resolve_db_path(&settings.db_path, portable);
         let raw_log_dir = db::resolve_raw_log_dir(&settings.raw_log_path, portable);
@@ -401,13 +401,11 @@ impl FlightRecorder {
             protocol: protocol.to_string(),
             db_file_path: db_path,
             raw_log_dir,
-            raw_logger: None,
+            msp_raw_sink,
             tlog_logger: None,
             snapshot: TelemetrySnapshot::default(),
             active_flight: None,
             was_armed: false,
-            session_start: None,
-            session_instant: None,
             app_handle,
             pending,
             resume,
@@ -435,16 +433,41 @@ impl FlightRecorder {
                 Err(e) => log::warn!("Failed to create continuous tlog: {}", e),
             }
         } else {
-            match RawLogger::new(log_dir, 0, &now) {
-                Ok(logger) => {
-                    log::info!("Continuous raw session started");
-                    self.raw_logger = Some(logger);
+            // MSP: open the shared raw-serial sink; the transport writes into it (ADR-049).
+            self.open_msp_raw_log(0, &now);
+            log::info!("Continuous MSP raw session started");
+        }
+    }
+
+    /// Open the shared MSP raw-serial logger (ADR-049) into the sink the transport writes to. No-op on
+    /// MAVLink (that path records via `tlog_logger`).
+    fn open_msp_raw_log(&self, flight_id: i64, now: &chrono::DateTime<Utc>) {
+        if self.protocol == "MAVLink" {
+            return;
+        }
+        // Don't reopen if a logger is already running — in continuous mode the connect path opens it
+        // BEFORE the handshake (so the handshake's identity frames land in the log, ADR-049); the
+        // recorder then adopts that one instead of starting a fresh (handshake-less) file.
+        if self.msp_raw_sink.lock().map(|g| g.is_some()).unwrap_or(false) {
+            return;
+        }
+        match MspRawLogger::new(self.raw_log_dir.as_path(), flight_id, now) {
+            Ok(logger) => {
+                if let Ok(mut g) = self.msp_raw_sink.lock() {
+                    *g = Some(logger);
                 }
-                Err(e) => log::warn!("Failed to create continuous raw logger: {}", e),
+            }
+            Err(e) => log::warn!("Failed to create MSP raw log: {}", e),
+        }
+    }
+
+    /// Flush + clear the shared MSP raw logger (so the transport stops writing).
+    fn close_msp_raw_log(&self) {
+        if let Ok(mut g) = self.msp_raw_sink.lock() {
+            if let Some(mut logger) = g.take() {
+                logger.close();
             }
         }
-        self.session_start = Some(now);
-        self.session_instant = Some(Instant::now());
     }
 
     /// Feed attitude data from the scheduler
@@ -701,30 +724,18 @@ impl FlightRecorder {
         let raw_pseudo_id = now.timestamp();
 
         if !self.settings.raw_always {
-            // Non-continuous: create per-flight raw/tlog logger
-            let (raw_logger, tlog_logger) = if self.settings.raw_enabled {
+            // Non-continuous: create the per-flight raw logger for this protocol (named by a
+            // timestamp pseudo-id, no DB flight id yet). MAVLink → tlog; MSP → shared raw-serial sink.
+            if self.settings.raw_enabled {
                 if self.protocol == "MAVLink" {
                     match TlogLogger::new(log_dir, raw_pseudo_id, &now) {
-                        Ok(logger) => (None, Some(logger)),
-                        Err(e) => {
-                            log::warn!("Failed to create tlog logger: {}", e);
-                            (None, None)
-                        }
+                        Ok(logger) => self.tlog_logger = Some(logger),
+                        Err(e) => log::warn!("Failed to create tlog logger: {}", e),
                     }
                 } else {
-                    match RawLogger::new(log_dir, raw_pseudo_id, &now) {
-                        Ok(logger) => (Some(logger), None),
-                        Err(e) => {
-                            log::warn!("Failed to create raw logger: {}", e);
-                            (None, None)
-                        }
-                    }
+                    self.open_msp_raw_log(raw_pseudo_id, &now);
                 }
-            } else {
-                (None, None)
-            };
-            self.raw_logger = raw_logger;
-            self.tlog_logger = tlog_logger;
+            }
         }
         // else: continuous mode — loggers already running from start_continuous_log()
 
@@ -774,9 +785,7 @@ impl FlightRecorder {
 
         // Close raw/tlog logger (non-continuous mode) regardless of the DB path.
         if !self.settings.raw_always {
-            if let Some(mut logger) = self.raw_logger.take() {
-                logger.close();
-            }
+            self.close_msp_raw_log();
             if let Some(mut logger) = self.tlog_logger.take() {
                 logger.close();
             }
@@ -857,55 +866,10 @@ impl FlightRecorder {
         }
     }
 
-    /// Record a telemetry sample if we have an active flight or continuous logging.
-    /// Called after attitude or GPS updates (the highest-frequency data).
+    /// Record a telemetry sample into the active flight's temp store / statistics.
+    /// Called after attitude or GPS updates (the highest-frequency data). Raw serial logging is
+    /// independent — it happens at the transport (tlog frames / MSP raw sink), not here.
     fn maybe_record_sample(&mut self) {
-        // Continuous mode: write to raw logger even without an active flight
-        if self.active_flight.is_none() && self.settings.raw_always {
-            if let Some(session_instant) = &self.session_instant {
-                let elapsed_ms = session_instant.elapsed().as_millis() as i64;
-                let record = TelemetryRecord {
-                    id: 0,
-                    flight_id: 0, // no DB flight
-                    timestamp_ms: elapsed_ms,
-                    lat: self.snapshot.lat,
-                    lon: self.snapshot.lon,
-                    alt_m: self.snapshot.alt_gps, // GPS MSL (replay map height); baro is relative
-                    speed_ms: self.snapshot.speed,
-                    heading: self.snapshot.heading,
-                    vario_ms: self.snapshot.vario,
-                    voltage: self.snapshot.voltage,
-                    current_a: self.snapshot.current,
-                    mah_drawn: self.snapshot.mah_drawn,
-                    rssi: self.snapshot.rssi,
-                    battery_percentage: self.snapshot.battery_percentage,
-                    roll: self.snapshot.roll,
-                    pitch: self.snapshot.pitch,
-                    yaw: self.snapshot.yaw,
-                    fix_type: self.snapshot.fix_type,
-                    num_sat: self.snapshot.num_sat,
-                    cpu_load: self.snapshot.cpu_load,
-                    link_quality: None,
-                    baro_alt_m: self.snapshot.alt_baro,
-                    gps_hdop: self.snapshot.gps_hdop, gps_eph: self.snapshot.gps_eph, gps_epv: self.snapshot.gps_epv,
-                    active_wp_number: self.snapshot.active_wp_number,
-                    active_flight_mode_flags: self.snapshot.active_flight_mode_flags.map(|f| f as i64),
-                    state_flags: None, nav_state: self.snapshot.nav_state, nav_flags: None,
-                    rx_signal_received: None, hw_health_status: self.snapshot.hw_health_status, baro_temperature: None,
-                    wind_n_ms: None, wind_e_ms: None, wind_d_ms: None,
-                    rc_data_json: None, rc_command_json: None,
-                    nav_lat: None, nav_lon: None, nav_alt_m: None,
-                    mode_primary: self.snapshot.mode_primary.clone(),
-                    mode_modifiers: self.snapshot.mode_modifiers.clone(),
-                };
-                if let Some(ref mut logger) = self.raw_logger {
-                    logger.write_record(&record);
-                }
-                // tlog is written via write_raw_mavlink_frame(), not here
-            }
-            return;
-        }
-
         let flight = match &mut self.active_flight {
             Some(f) => f,
             None => return,
@@ -965,11 +929,6 @@ impl FlightRecorder {
             mode_primary: self.snapshot.mode_primary.clone(),
             mode_modifiers: self.snapshot.mode_modifiers.clone(),
         };
-
-        // Write to raw logger if active
-        if let Some(ref mut logger) = self.raw_logger {
-            logger.write_record(&record);
-        }
 
         // Update statistics (max altitude is the relative-to-home reading, like the Blackbox stats)
         if let Some(a) = alt_rel {
@@ -1061,10 +1020,7 @@ impl FlightRecorder {
 
     /// Close the continuous (pre-arm) raw/tlog loggers on disconnect.
     fn close_continuous_loggers(&mut self) {
-        if let Some(mut logger) = self.raw_logger.take() {
-            log::info!("Closing continuous raw log session");
-            logger.close();
-        }
+        self.close_msp_raw_log();
         if let Some(mut logger) = self.tlog_logger.take() {
             log::info!("Closing continuous tlog session");
             logger.close();

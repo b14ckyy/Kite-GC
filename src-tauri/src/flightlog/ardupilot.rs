@@ -239,6 +239,12 @@ impl<'a> DataFlashScanner<'a> {
             // ── Known type from registry ─────────────────────────────────────
             if let Some(fmt_def) = self.type_registry.get(&type_id).cloned() {
                 let total_len = fmt_def.record_length as usize;
+                // A record must be at least header(3) bytes; a malformed/corrupt FMT could declare less,
+                // which would make `[pos+3..end]` a reverse slice (panic). Resync one byte instead.
+                if total_len < 3 {
+                    self.pos += 1;
+                    continue;
+                }
                 let end = self.pos + total_len;
 
                 if end > self.data.len() {

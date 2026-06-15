@@ -51,7 +51,7 @@
     weatherEditing = $bindable(),
     onExpand,
     onLoadLogbook,
-    onImportBlackbox,
+    onImport,
     onSelectFlight,
     onSaveNotes,
     onSaveWeather,
@@ -62,7 +62,6 @@
     onExportFlights,
     onExportBlackbox,
     onExportTrack,
-    onImportKflight,
   }: {
     flightLoggingEnabled: boolean;
     logbookMinimized: boolean;
@@ -82,7 +81,7 @@
     weatherEditing: boolean;
     onExpand?: () => void;
     onLoadLogbook: () => void;
-    onImportBlackbox: () => void;
+    onImport: () => void;
     onSelectFlight: (id: number) => void;
     onSaveNotes: () => void;
     onSaveWeather: () => void;
@@ -93,7 +92,6 @@
     onExportFlights: (ids: number[]) => void;
     onExportBlackbox: () => void;
     onExportTrack: () => void;
-    onImportKflight: () => void;
   } = $props();
 
   let logbookSortMode = $state<LogbookSortMode>('aircraft-location-date');
@@ -272,10 +270,9 @@
 
 {#snippet importGroup()}
   <div class="tb-right">
-    <Button variant="data" icon="import" disabled={blackboxImporting} onclick={onImportBlackbox}>
-      {blackboxImporting ? $t('logbook.importingBlackbox') : $t('logbook.importBlackbox')}
+    <Button variant="data" icon="import" disabled={blackboxImporting} onclick={onImport}>
+      {blackboxImporting ? $t('logbook.importing') : $t('logbook.import')}
     </Button>
-    <Button variant="data" icon="import" onclick={onImportKflight}>{$t('logbook.importKflight')}</Button>
   </div>
 {/snippet}
 

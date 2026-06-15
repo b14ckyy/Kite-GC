@@ -414,6 +414,21 @@ export async function importArdupilotLog(
   });
 }
 
+/** Result of parsing a recorded raw log (.rawmsp / .tlog) into the logbook (ADR-049). */
+export interface RawImportResult {
+  imported: number;
+  skipped: number;
+  flightIds: number[];
+}
+
+/** Parse a recorded raw serial log into the logbook as LIVE flights (split at arm/disarm). */
+export async function importRawLog(filePath: string, dbPath: string): Promise<RawImportResult> {
+  return invoke<RawImportResult>('flightlog_import_raw', {
+    filePath,
+    dbPath: dbPath || undefined,
+  });
+}
+
 export async function linkFlights(flightA: number, flightB: number, dbPath: string): Promise<void> {
   await invoke('flightlog_link_flights', {
     flightA,

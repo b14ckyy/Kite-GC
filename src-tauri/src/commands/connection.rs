@@ -5,6 +5,7 @@
 
 use tauri::{AppHandle, Emitter, State};
 
+use crate::flightlog::msp_raw_logger::MspRawSink;
 use crate::flightlog::recorder::FlightRecorder;
 use crate::flightlog::types::FlightLogSettings;
 use crate::mavlink_proto;
@@ -189,8 +190,39 @@ fn connect_msp(
     state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<FcInfo, String> {
+    // Shared MSP raw-serial log sink (ADR-049): the transport writes into it, the recorder owns its
+    // lifecycle. Created up front so both share the same slot.
+    let msp_raw_sink: MspRawSink = std::sync::Arc::new(std::sync::Mutex::new(None));
+
+    // In CONTINUOUS raw mode, open the raw logger NOW — before the handshake — so the handshake's
+    // identity frames (MSP_NAME / MSP_FC_VARIANT / …) are captured in the log and the offline parser
+    // can recover the vehicle info. The recorder later adopts this same logger (ADR-049). Per-flight
+    // mode opens on arm instead, so it intentionally has no handshake.
+    if flight_log_enabled.unwrap_or(false)
+        && flight_log_raw.unwrap_or(false)
+        && flight_log_raw_always.unwrap_or(false)
+    {
+        let portable = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.join(".portable").exists()))
+            .unwrap_or(false);
+        let raw_dir = crate::flightlog::db::resolve_raw_log_dir(
+            flight_log_raw_path.as_deref().unwrap_or(""),
+            portable,
+        );
+        match crate::flightlog::msp_raw_logger::MspRawLogger::new(&raw_dir, 0, &chrono::Utc::now()) {
+            Ok(logger) => {
+                if let Ok(mut g) = msp_raw_sink.lock() {
+                    *g = Some(logger);
+                }
+                log::info!("Continuous MSP raw log opened pre-handshake");
+            }
+            Err(e) => log::warn!("Failed to open pre-handshake MSP raw log: {}", e),
+        }
+    }
+
     // Wrap in MSP protocol layer (adds MSP v2 framing + response parser)
-    let mut transport = MspTransport::new(byte_transport);
+    let mut transport = MspTransport::new(byte_transport, msp_raw_sink.clone());
 
     // ── MSP Handshake ──────────────────────────────────────────────
     let mut fc_info = FcInfo::default();
@@ -343,7 +375,7 @@ fn connect_msp(
             .and_then(|p| p.parent().map(|p| p.join(".portable").exists()))
             .unwrap_or(false);
 
-        match FlightRecorder::new(flight_log_settings, fc_info.clone(), "MSP", portable, app_handle.clone(), state.pending_session.clone(), state.resume_pending.clone()) {
+        match FlightRecorder::new(flight_log_settings, fc_info.clone(), "MSP", portable, app_handle.clone(), state.pending_session.clone(), state.resume_pending.clone(), msp_raw_sink.clone()) {
             Ok(mut rec) => {
                 rec.start_continuous_log();
                 let handle = std::sync::Arc::new(std::sync::Mutex::new(rec));
@@ -445,7 +477,9 @@ fn connect_mavlink(
             .and_then(|p| p.parent().map(|p| p.join(".portable").exists()))
             .unwrap_or(false);
 
-        match FlightRecorder::new(flight_log_settings, fc_info.clone(), "MAVLink", portable, app_handle.clone(), state.pending_session.clone(), state.resume_pending.clone()) {
+        // MAVLink records via .tlog; the MSP raw sink is unused here (kept empty).
+        let msp_raw_sink: MspRawSink = std::sync::Arc::new(std::sync::Mutex::new(None));
+        match FlightRecorder::new(flight_log_settings, fc_info.clone(), "MAVLink", portable, app_handle.clone(), state.pending_session.clone(), state.resume_pending.clone(), msp_raw_sink) {
             Ok(mut rec) => {
                 rec.start_continuous_log();
                 let handle = std::sync::Arc::new(std::sync::Mutex::new(rec));

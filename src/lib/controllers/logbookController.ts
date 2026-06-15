@@ -15,6 +15,8 @@ import {
   fetchFlightWeather,
   importBlackboxLog,
   importArdupilotLog,
+  importRawLog,
+  type RawImportResult,
   linkFlights as linkFlightsStore,
   unlinkFlight as unlinkFlightStore,
   exportFlights,
@@ -193,6 +195,11 @@ export async function importArdupilot(
   locale: string,
 ) {
   return importArdupilotLog(filePath, dbPath, forceImport, locale);
+}
+
+/** Parse a recorded raw serial log (.rawmsp / .tlog) into the logbook as LIVE flights (ADR-049). */
+export async function importRaw(filePath: string, dbPath: string): Promise<RawImportResult> {
+  return importRawLog(filePath, dbPath);
 }
 
 /** Export selected flights to a .kflight file. Returns the number exported. */

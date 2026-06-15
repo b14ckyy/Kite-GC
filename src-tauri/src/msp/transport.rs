@@ -7,6 +7,7 @@
 
 use std::time::{Duration, Instant};
 
+use crate::flightlog::msp_raw_logger::{log_to_sink, MspRawSink, DIR_IN, DIR_OUT};
 use crate::transport::{ByteTransport, Transport};
 
 use super::{MspCodec, MspMessage, MspParser};
@@ -23,15 +24,20 @@ pub struct MspTransport {
     parser: MspParser,
     /// Set once a fatal transport error (device gone) is seen — see `Transport::is_connection_lost`.
     connection_lost: bool,
+    /// Shared raw-serial log sink (ADR-049). Every outgoing frame ('o') and incoming read-chunk ('i')
+    /// is captured here in mwptools' v2 format while the recorder has a logger open; otherwise a no-op.
+    raw_sink: MspRawSink,
 }
 
 impl MspTransport {
-    /// Wrap a ByteTransport with MSP framing
-    pub fn new(transport: Box<dyn ByteTransport>) -> Self {
+    /// Wrap a ByteTransport with MSP framing. `raw_sink` is the shared MSP raw-log slot (the recorder
+    /// owns its lifecycle); pass an empty `Arc::new(Mutex::new(None))` to disable raw capture.
+    pub fn new(transport: Box<dyn ByteTransport>, raw_sink: MspRawSink) -> Self {
         Self {
             inner: transport,
             parser: MspParser::new(),
             connection_lost: false,
+            raw_sink,
         }
     }
 
@@ -52,6 +58,8 @@ impl Transport for MspTransport {
             self.connection_lost = true;
             return Err(format!("MSP write failed: {}", e));
         }
+        // Raw-log the outgoing frame (ADR-049).
+        log_to_sink(&self.raw_sink, DIR_OUT, &frame);
 
         // Read until we get the matching response or timeout
         let mut buf = [0u8; 512];
@@ -67,6 +75,8 @@ impl Transport for MspTransport {
                     // No data available (timeout from underlying transport) — retry
                 }
                 Ok(n) => {
+                    // Raw-log the incoming chunk (ADR-049) — mirrors mwp-serial-cap (per read-chunk).
+                    log_to_sink(&self.raw_sink, DIR_IN, &buf[..n]);
                     for &byte in &buf[..n] {
                         if let Some(msg) = self.parser.push(byte) {
                             if msg.code == code {

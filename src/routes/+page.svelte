@@ -390,10 +390,6 @@
   let selectedFlightId: number | null = $state(null);
   let selectedFlightNotes = $state("");
 
-  // Remember last selected blackbox filter type ('inav' or 'ardupilot')
-  let lastBlackboxFilter = $state<string>(
-    (typeof localStorage !== 'undefined' && localStorage.getItem('lastBlackboxFilter')) || 'inav'
-  );
   let weatherTempC = $state("");
   let weatherWindMs = $state("");
   let weatherWindDir = $state("");
@@ -995,44 +991,84 @@
     if (wasPlayingBeforeScrub) startPlayback();
   }
 
-  async function importBlackbox() {
-    if (blackboxImporting) return;
-    try {
-      const inavFilter = { name: $t('logbook.inavBlackboxFilter'), extensions: ['txt'] };
-      const apFilter = { name: $t('logbook.ardupilotFilter'), extensions: ['bin'] };
-      const filters = lastBlackboxFilter === 'ardupilot' ? [apFilter, inavFilter] : [inavFilter, apFilter];
+  /** Route one log file to the right importer by extension. Single source of truth for the
+   *  one-button import and drag-drop. New formats (e.g. radio CSV later) just add a branch. */
+  async function dispatchImport(filePath: string) {
+    const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
+    if (ext === 'bin') {
+      await performArdupilotImport(filePath, false); // ArduPilot DataFlash
+    } else if (ext === 'kflight') {
+      await performKflightImport(filePath); // KiteGC exchange file
+    } else if (ext === 'rawmsp' || ext === 'tlog') {
+      await performRawImport(filePath); // raw serial log (ADR-049)
+    } else {
+      await performImport(filePath, undefined, false); // INAV Blackbox text (.txt/.bbl/.bfl)
+    }
+  }
 
+  async function performRawImport(filePath: string) {
+    const result = await logbookCtrl.importRaw(filePath, flightLogDbPath);
+    await loadLogbook();
+    if (result.flightIds.length > 0) {
+      await selectFlight(result.flightIds[result.flightIds.length - 1]);
+    }
+  }
+
+  async function performKflightImport(filePath: string) {
+    const result = await logbookCtrl.importFromKflight(filePath, flightLogDbPath);
+    await loadLogbook();
+    let msg = $t('logbook.importKflightResult', {
+      values: { imported: result.imported, skipped: result.skipped },
+    });
+    if (result.errors.length > 0) msg += '\n' + result.errors.join('\n');
+    await showInfo($t('logbook.importKflightTitle'), msg);
+  }
+
+  function baseName(p: string): string {
+    return p.split(/[\\/]/).pop() ?? p;
+  }
+
+  /** Import a batch of files, isolating each so one bad/corrupt/non-log file doesn't abort the rest;
+   *  failures (with the per-importer reason) are collected and surfaced together. */
+  async function importFiles(files: string[]) {
+    blackboxImporting = true;
+    const failures: string[] = [];
+    for (const filePath of files) {
+      try {
+        await dispatchImport(filePath);
+      } catch (e) {
+        failures.push(`${baseName(filePath)}: ${String(e)}`);
+      }
+    }
+    blackboxImporting = false;
+    blackboxImportProgress = null;
+    if (failures.length > 0) {
+      errorMsg = $t('logbook.importErrors', { values: { errors: failures.join('\n') } });
+    }
+  }
+
+  /** One import action: pick any supported log file(s); the importer is chosen per file by extension. */
+  async function importFlightLog() {
+    if (blackboxImporting) return;
+    let files: string[];
+    try {
       const selected = await open({
         multiple: true,
-        filters,
+        filters: [
+          {
+            name: $t('logbook.allLogsFilter'),
+            extensions: ['txt', 'bbl', 'bfl', 'bin', 'kflight', 'rawmsp', 'tlog'],
+          },
+        ],
       });
       if (!selected) return;
-      const files = Array.isArray(selected) ? selected : [selected];
-      if (files.length === 0) return;
-
-      // Remember which format was picked based on file extension
-      const firstExt = files[0].split('.').pop()?.toLowerCase();
-      if (firstExt === 'bin') {
-        lastBlackboxFilter = 'ardupilot';
-      } else {
-        lastBlackboxFilter = 'inav';
-      }
-      localStorage.setItem('lastBlackboxFilter', lastBlackboxFilter);
-
-      blackboxImporting = true;
-      for (const filePath of files) {
-        if (/\.bin$/i.test(filePath)) {
-          await performArdupilotImport(filePath, false);
-        } else {
-          await performImport(filePath, undefined, false);
-        }
-      }
+      files = Array.isArray(selected) ? selected : [selected];
     } catch (e) {
       errorMsg = String(e);
-    } finally {
-      blackboxImporting = false;
-      blackboxImportProgress = null;
+      return;
     }
+    if (files.length === 0) return;
+    await importFiles(files);
   }
 
   async function importDroppedFiles(paths: string[]) {
@@ -1044,49 +1080,9 @@
 
     console.log('[IMPORT] importDroppedFiles called with', paths.length, 'files');
 
-    // Set guard early to prevent concurrent calls
-    const hasBbFiles = paths.some((p) => /\.(txt|bin)$/i.test(p));
-    if (hasBbFiles) blackboxImporting = true;
-
-    try {
-    // Handle .kflight files
-    const kflightFiles = paths.filter((p) => /\.kflight$/i.test(p));
-    for (const filePath of kflightFiles) {
-      try {
-        const result = await logbookCtrl.importFromKflight(filePath, flightLogDbPath);
-        await loadLogbook();
-        let msg = $t('logbook.importKflightResult', {
-          values: { imported: result.imported, skipped: result.skipped },
-        });
-        if (result.errors.length > 0) {
-          msg += '\n' + result.errors.join('\n');
-        }
-        await showInfo($t('logbook.importKflightTitle'), msg);
-      } catch (e) {
-        errorMsg = String(e);
-      }
-    }
-
-    // Handle ArduPilot .bin files
-    const binFiles = paths.filter((p) => /\.bin$/i.test(p));
-    for (const filePath of binFiles) {
-      await performArdupilotImport(filePath, false);
-    }
-
-    // Handle blackbox files
-    const bbFiles = paths.filter((p) => /\.txt$/i.test(p));
-    for (const filePath of bbFiles) {
-      await performImport(filePath, undefined, false);
-    }
-
-    } catch (e) {
-      errorMsg = String(e);
-    } finally {
-      if (hasBbFiles) {
-        blackboxImporting = false;
-        blackboxImportProgress = null;
-      }
-    }
+    const supported = paths.filter((p) => /\.(txt|bbl|bfl|bin|kflight|rawmsp|tlog)$/i.test(p));
+    if (supported.length === 0) return;
+    await importFiles(supported);
   }
 
   async function exportFlightsToKflight(flightIds: number[]) {
@@ -1153,28 +1149,6 @@
     }
   }
 
-  async function importKflightFile() {
-    try {
-      const selected = await open({
-        multiple: false,
-        filters: [{ name: $t('logbook.kflightFileFilter'), extensions: ['kflight'] }],
-      });
-      if (!selected) return;
-      const filePath = Array.isArray(selected) ? selected[0] : selected;
-      if (!filePath) return;
-      const result = await logbookCtrl.importFromKflight(filePath, flightLogDbPath);
-      await loadLogbook();
-      let msg = $t('logbook.importKflightResult', {
-        values: { imported: result.imported, skipped: result.skipped },
-      });
-      if (result.errors.length > 0) {
-        msg += '\n' + result.errors.join('\n');
-      }
-      await showInfo($t('logbook.importKflightTitle'), msg);
-    } catch (e) {
-      errorMsg = String(e);
-    }
-  }
 
   async function performImport(filePath: string, logIndex: number | undefined, forceImport: boolean) {
     const result = await logbookCtrl.importBlackbox(filePath, flightLogDbPath, logIndex, forceImport, $locale ?? 'en');
@@ -2257,7 +2231,7 @@
         bind:weatherEditing
         onExpand={expandLogbook}
         onLoadLogbook={loadLogbook}
-        onImportBlackbox={importBlackbox}
+        onImport={importFlightLog}
         onSelectFlight={selectFlight}
         onSaveNotes={saveSelectedFlightNotes}
         onSaveWeather={saveSelectedFlightWeather}
@@ -2268,7 +2242,6 @@
         onExportFlights={exportFlightsToKflight}
         onExportBlackbox={exportBlackbox}
         onExportTrack={exportTrack}
-        onImportKflight={importKflightFile}
       />
     {:else if activeTab === 'mission'}
       <MissionPanel />
