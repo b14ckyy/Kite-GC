@@ -12,9 +12,9 @@
   import { get } from 'svelte/store';
   import { save, open } from '@tauri-apps/plugin-dialog';
   import { invoke } from '@tauri-apps/api/core';
-  import { t } from 'svelte-i18n';
+  import { t, locale } from 'svelte-i18n';
   import {
-    arduMission, arduSelectedWpIndex, arduEditMode,
+    arduMission, arduSelectedWpIndex, arduEditMode, arduLoadedMissionId,
     arduMissionClear, arduRemoveWp, groupArduMission,
     MAV_FRAME_GLOBAL, MAV_FRAME_GLOBAL_TERRAIN_ALT,
     serializeWaypoints, parseWaypoints,
@@ -22,9 +22,17 @@
   } from '$lib/stores/missionArdupilot';
   import { cmdName, cmdShort, cmdHasLocation, cmdDef, enumLabel } from '$lib/helpers/arduCommandCatalog';
   import { connection } from '$lib/stores/connection';
+  import { settings } from '$lib/stores/settings';
+  import { autopilotSystem } from '$lib/stores/autopilotContext';
+  import { missionManagerOpen } from '$lib/stores/missionManager';
+  import { buildArduMissionInput } from '$lib/helpers/missionLibraryArdu';
+  import { missionDbSave, missionDbUpdate, missionDbGet, missionDbFindByHash, missionDbGeocode } from '$lib/stores/flightlog';
   import PanelShell from '$lib/components/panel/PanelShell.svelte';
   import Button from '$lib/components/panel/Button.svelte';
   import AutopilotSelect from '$lib/components/mission/AutopilotSelect.svelte';
+  import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+  import MissionSaveDialog from '$lib/components/mission/MissionSaveDialog.svelte';
+  import MissionManager from '$lib/components/mission/MissionManager.svelte';
 
   let currentMission  = $state<ArduWaypoint[]>(get(arduMission));
   let currentSelIdx   = $state<number>(get(arduSelectedWpIndex));
@@ -32,6 +40,8 @@
   let currentConn     = $state(get(connection));
   let statusMessage   = $state('');
   let dragOver        = $state(false);
+  let confirmDialog: ReturnType<typeof ConfirmDialog>;
+  let missionSaveDialog: ReturnType<typeof MissionSaveDialog>;
   // Auto-clear the transient status line after 10s — persistent state is shown by the flags.
   $effect(() => {
     if (!statusMessage) return;
@@ -77,6 +87,7 @@
       const wps = parseWaypoints(content);
       arduMission.set(wps);
       arduSelectedWpIndex.set(-1);
+      arduLoadedMissionId.set(null); // fresh file → not yet a library mission
       statusMessage = $t('mission.loaded', { values: { count: wps.length } });
     } catch (e) {
       statusMessage = $t('mission.openFailed', { values: { error: String(e) } });
@@ -97,9 +108,73 @@
       const wps = parseWaypoints(await file.text());
       arduMission.set(wps);
       arduSelectedWpIndex.set(-1);
+      arduLoadedMissionId.set(null); // fresh file → not yet a library mission
       statusMessage = $t('mission.loadedFromFile', { values: { count: wps.length, file: file.name } });
     } catch (e) {
       statusMessage = $t('mission.importFailed', { values: { error: String(e) } });
+    }
+  }
+
+  /** Auto-name for fresh missions: "New Mission - YYYY-MM-DD HH:MM". */
+  function autoMissionName(): string {
+    const d = new Date();
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `New Mission - ${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+
+  /** Save the current ArduPilot/PX4 mission to the DB library (dedup by content hash). Mirrors the
+   *  INAV panel's save-to-library: NEW vs OVERWRITE driven by `arduLoadedMissionId`. */
+  async function handleSaveToLibrary() {
+    const wps = get(arduMission);
+    if (wps.length === 0) return;
+    const dbPath = get(settings).flightLogDbPath;
+    const lang = get(locale) ?? 'en';
+    const fmt = get(autopilotSystem) === 'px4' ? 'px4' : 'ardupilot';
+    const id = get(arduLoadedMissionId);
+    try {
+      if (id != null) {
+        const ans = await confirmDialog.show({
+          title: $t('mission.saveLibUpdateTitle'),
+          message: $t('mission.saveLibUpdateMsg'),
+          buttons: [
+            { label: $t('mission.saveLibNew'), value: 'new' },
+            { label: $t('mission.saveLibOverwrite'), value: 'overwrite', primary: true },
+          ],
+        });
+        if (ans == null) return;
+        if (ans === 'overwrite') {
+          const existing = await missionDbGet(id, dbPath);
+          const input = await buildArduMissionInput(wps, { name: existing?.name ?? autoMissionName(), notes: existing?.notes ?? '', format: fmt });
+          const collide = await missionDbFindByHash(input.content_hash, dbPath);
+          if (collide && collide.id !== id) {
+            arduLoadedMissionId.set(collide.id);
+            statusMessage = $t('mission.saveLibDuplicate');
+            return;
+          }
+          await missionDbUpdate(id, input, dbPath);
+          arduLoadedMissionId.set(id);
+          void missionDbGeocode(id, lang, dbPath).catch(() => {});
+          statusMessage = $t('mission.saveLibUpdated');
+          return;
+        }
+      }
+
+      const input = await buildArduMissionInput(wps, { name: autoMissionName(), format: fmt });
+      const collide = await missionDbFindByHash(input.content_hash, dbPath);
+      if (collide) {
+        arduLoadedMissionId.set(collide.id);
+        statusMessage = $t('mission.saveLibDuplicate');
+        return;
+      }
+      const res = await missionSaveDialog.show({ defaultName: autoMissionName() });
+      if (!res) return;
+      const named = await buildArduMissionInput(wps, { name: res.name || autoMissionName(), notes: res.notes, format: fmt });
+      const newId = await missionDbSave(named, dbPath);
+      arduLoadedMissionId.set(newId);
+      void missionDbGeocode(newId, lang, dbPath).catch(() => {});
+      statusMessage = $t('mission.saveLibSaved');
+    } catch (e) {
+      statusMessage = $t('mission.saveLibFailed', { values: { error: String(e) } });
     }
   }
 
@@ -112,6 +187,7 @@
       const wps = await invoke<ArduWaypoint[]>('ardu_mission_download');
       arduMission.set(wps);
       arduSelectedWpIndex.set(-1);
+      arduLoadedMissionId.set(null); // downloaded from FC → not a library mission
       statusMessage = $t('mission.downloaded', { values: { count: wps.length } });
     } catch (e) {
       statusMessage = $t('mission.downloadFailed', { values: { error: String(e) } });
@@ -185,6 +261,11 @@
     <Button variant="mode" active={currentEditing} icon="edit" onclick={() => arduEditMode.update(v => !v)} title={$t('mission.toggleEdit')}>
       {currentEditing ? $t('mission.editing') : $t('mission.edit')}
     </Button>
+    {#if !currentEditing}
+      <Button variant="standard" icon="library" onclick={() => missionManagerOpen.set(true)} title={$t('mission.missionManager')}>
+        {$t('mission.missionManager')}
+      </Button>
+    {/if}
     <div class="tb-spacer"></div>
     {#if currentEditing && currentSelIdx >= 0}
       <Button variant="danger" icon="close" onclick={removeSelected} title={$t('mission.removeWp')} />
@@ -260,17 +341,27 @@
       <Button variant="standard" icon="folder" full onclick={handleOpenFile}>{$t('mission.open')}</Button>
       <Button variant="standard" icon="save" full onclick={handleSaveFile}>{$t('mission.save')}</Button>
     </div>
+    <div class="ctrl-row">
+      <Button variant="data" icon="library" full disabled={currentMission.length === 0} onclick={handleSaveToLibrary}>{$t('mission.saveToLibrary')}</Button>
+    </div>
 
     {#if statusMessage}<div class="mission-status">{statusMessage}</div>{/if}
     {#if currentMission.length > 0}<div class="mission-summary">{currentMission.length} WPs</div>{/if}
   </div>
 {/snippet}
 
-<div class="amv2">
-  <PanelShell variant="compact" title={$t('nav.mission')} {toolbar} {body} {footer}>
-    {#snippet headerActions()}<AutopilotSelect />{/snippet}
-  </PanelShell>
-</div>
+{#if $missionManagerOpen}
+  <MissionManager onBack={() => missionManagerOpen.set(false)} />
+{:else}
+  <div class="amv2">
+    <PanelShell variant="compact" title={$t('nav.mission')} {toolbar} {body} {footer}>
+      {#snippet headerActions()}<AutopilotSelect />{/snippet}
+    </PanelShell>
+  </div>
+{/if}
+
+<ConfirmDialog bind:this={confirmDialog} />
+<MissionSaveDialog bind:this={missionSaveDialog} />
 
 <style>
   .miss-toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; width: 100%; }

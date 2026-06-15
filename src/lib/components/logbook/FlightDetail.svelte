@@ -6,15 +6,18 @@
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import { convertAltitude, convertDistance, convertSpeed, convertTemperature, formatConverted } from '$lib/utils/units';
-  import { formatDurationSec, formatFlightDateTime, flightTzLabel, missionDbForFlight, flightLoggedWpCount, flightLinkMission, flightUnlinkMission, missionDbSave, missionDbGeocode, flightSetBatterySerial, batteryDbFindBySerial } from '$lib/stores/flightlog';
+  import { formatDurationSec, formatFlightDateTime, flightTzLabel, missionDbForFlight, flightLoggedWpCount, flightLinkMission, flightUnlinkMission, missionDbSave, missionDbFindByHash, missionDbGeocode, flightSetBatterySerial, batteryDbFindBySerial } from '$lib/stores/flightlog';
   import type { Flight, LibraryMission, BatteryPack } from '$lib/stores/flightlogTypes';
   import type { InterfaceSettings } from '$lib/stores/settings';
   import { settings } from '$lib/stores/settings';
   import { mission, missionFlags, loadedMissionId, markMissionSynced } from '$lib/stores/mission';
+  import { arduMission, arduLoadedMissionId } from '$lib/stores/missionArdupilot';
+  import { autopilotSystem } from '$lib/stores/autopilotContext';
   import { batteryManagerOpen, batteryManagerSelectedId } from '$lib/stores/batteryManager';
   import { requestOpenMissionId } from '$lib/stores/missionManager';
   import { replayWpTotal } from '$lib/stores/navStatus';
   import { buildMissionInput } from '$lib/helpers/missionLibrary';
+  import { buildArduMissionInput } from '$lib/helpers/missionLibraryArdu';
   import { get } from 'svelte/store';
   import { locale } from 'svelte-i18n';
   import WeatherEditor from './WeatherEditor.svelte';
@@ -79,8 +82,12 @@
 
   // The map mission can be linked only if it is a "real" mission (has a provenance flag);
   // a pure unsaved scratch mission can't. DB → link directly; FILE/FC → save-to-DB-then-link.
+  // ArduPilot/PX4 has no provenance flags yet (Phase 2) → any loaded AP mission is linkable
+  // (it is saved to the library on link if not already there).
   let canLink = $derived(
-    $mission.waypoints.length > 0 && ($missionFlags.db || $missionFlags.file || $missionFlags.fc)
+    $autopilotSystem === 'inav'
+      ? ($mission.waypoints.length > 0 && ($missionFlags.db || $missionFlags.file || $missionFlags.fc))
+      : $arduMission.length > 0
   );
 
   /** WP count for display: the linked mission's, else the Blackbox-header fallback. */
@@ -117,14 +124,27 @@
     const dbPath = get(settings).flightLogDbPath;
     const lang = get(locale) ?? 'en';
     try {
-      const flags = get(missionFlags);
-      let missionId = get(loadedMissionId);
-      if (!(flags.db && missionId != null)) {
-        const input = await buildMissionInput(get(mission).waypoints, { name: defaultMissionName() });
-        missionId = await missionDbSave(input, dbPath);
-        loadedMissionId.set(missionId);
-        markMissionSynced('db');
-        void missionDbGeocode(missionId, lang, dbPath).catch(() => {});
+      let missionId: number | null;
+      if (get(autopilotSystem) === 'inav') {
+        const flags = get(missionFlags);
+        missionId = get(loadedMissionId);
+        if (!(flags.db && missionId != null)) {
+          const input = await buildMissionInput(get(mission).waypoints, { name: defaultMissionName() });
+          missionId = await missionDbSave(input, dbPath);
+          loadedMissionId.set(missionId);
+          markMissionSynced('db');
+          void missionDbGeocode(missionId, lang, dbPath).catch(() => {});
+        }
+      } else {
+        const fmt = get(autopilotSystem) === 'px4' ? 'px4' : 'ardupilot';
+        missionId = get(arduLoadedMissionId);
+        if (missionId == null) {
+          const input = await buildArduMissionInput(get(arduMission), { name: defaultMissionName(), format: fmt });
+          const collide = await missionDbFindByHash(input.content_hash, dbPath);
+          missionId = collide ? collide.id : await missionDbSave(input, dbPath);
+          arduLoadedMissionId.set(missionId);
+          if (!collide) void missionDbGeocode(missionId, lang, dbPath).catch(() => {});
+        }
       }
       await flightLinkMission(flight.id, missionId, dbPath);
       await refreshLink(flight.id);

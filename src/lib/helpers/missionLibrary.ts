@@ -25,7 +25,9 @@ function haversineM(aLat: number, aLon: number, bLat: number, bLon: number): num
   return 2 * EARTH_R * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
-async function sha256Hex(s: string): Promise<string> {
+/** SHA-256 hex of a string. Shared with the ArduPilot library builder so both protocols derive
+ *  their DB `content_hash` the same way. */
+export async function sha256Hex(s: string): Promise<string> {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }

@@ -59,6 +59,7 @@
   import DisconnectArmedDialog from "$lib/components/logbook/DisconnectArmedDialog.svelte";
   import { haversineDistance, bearing, destinationPoint } from '$lib/utils/geo';
   import { buildMissionInput } from '$lib/helpers/missionLibrary';
+  import { buildArduMissionInput } from '$lib/helpers/missionLibraryArdu';
   import { homePosition } from '$lib/stores/home';
   import { MAP_PROVIDERS } from "$lib/config/mapProviders";
   import { tileCacheStats, setCacheMaxMB, clearCache } from "$lib/cache/tileCache";
@@ -70,7 +71,8 @@
   import { initVideo, videoState, videoStream, setVideoPrimary, registerPiPElement } from "$lib/stores/video";
   import TerrainAnalysisPanel from "$lib/components/terrain/TerrainAnalysisPanel.svelte";
   import { editMode, replayActive, mission, missionFlags, missionDownload, missionUpload, missionFcInfo, markMissionSynced, loadedMissionId, missionSetWaypoints, launchPoint, hasLocation, toDeg, type Waypoint } from "$lib/stores/mission";
-  import { pendingSystemSwitch } from "$lib/stores/autopilotContext";
+  import { pendingSystemSwitch, autopilotSystem, setAutopilotSystem, confirmSystemSwitch } from "$lib/stores/autopilotContext";
+  import { arduMission, arduSelectedWpIndex, arduLoadedMissionId, type ArduWaypoint } from "$lib/stores/missionArdupilot";
   import { terrainAnalysis, patchTerrainAnalysis } from "$lib/stores/terrainAnalysis";
   import { DEFAULT_RADAR, DEFAULT_AIRSPACE, BUILTIN_ADSB_PROVIDERS } from "$lib/stores/settings";
   import type { AppSettings, InterfaceSettings, PanelConfig, RadarSettings, GcsMode, AirspaceSettings, SystemMessagesLevel } from "$lib/stores/settings";
@@ -1255,19 +1257,30 @@
       const linked = await missionDbForFlight(flightId, flightLogDbPath);
       if (linked) {
         try {
-          await missionSetWaypoints(JSON.parse(linked.waypoints_json));
-          loadedMissionId.set(linked.id);
-          markMissionSynced('db'); // it's the library mission → trusted for the highlight
-          // Launch/home reference for the replay mission (REL waypoint altitudes + 3D height):
-          // the real flown start if known, else the mission's saved home, else its first waypoint.
-          const fl = data.flight;
-          if (fl?.start_lat != null && fl?.start_lon != null) {
-            launchPoint.set({ lat: fl.start_lat, lng: fl.start_lon });
-          } else if (linked.home_lat != null && linked.home_lon != null) {
-            launchPoint.set({ lat: linked.home_lat, lng: linked.home_lon });
+          const linkedSys = linked.format === 'ardupilot' || linked.format === 'px4' ? linked.format : 'inav';
+          if (linkedSys === 'inav') {
+            switchAutopilotSystemForReplay('inav');
+            await missionSetWaypoints(JSON.parse(linked.waypoints_json));
+            loadedMissionId.set(linked.id);
+            markMissionSynced('db'); // it's the library mission → trusted for the highlight
+            // Launch/home reference for the replay mission (REL waypoint altitudes + 3D height):
+            // the real flown start if known, else the mission's saved home, else its first waypoint.
+            const fl = data.flight;
+            if (fl?.start_lat != null && fl?.start_lon != null) {
+              launchPoint.set({ lat: fl.start_lat, lng: fl.start_lon });
+            } else if (linked.home_lat != null && linked.home_lon != null) {
+              launchPoint.set({ lat: linked.home_lat, lng: linked.home_lon });
+            } else {
+              const fw = get(mission).waypoints.find((w) => hasLocation(w.action) && !(w.lat === 0 && w.lon === 0));
+              if (fw) launchPoint.set({ lat: toDeg(fw.lat), lng: toDeg(fw.lon) });
+            }
           } else {
-            const fw = get(mission).waypoints.find((w) => hasLocation(w.action) && !(w.lat === 0 && w.lon === 0));
-            if (fw) launchPoint.set({ lat: toDeg(fw.lat), lng: toDeg(fw.lon) });
+            // ArduPilot/PX4 linked mission → render via the AP layer (the mission layer switches on
+            // the active autopilot system).
+            switchAutopilotSystemForReplay(linkedSys);
+            arduMission.set(JSON.parse(linked.waypoints_json) as ArduWaypoint[]);
+            arduSelectedWpIndex.set(-1);
+            arduLoadedMissionId.set(linked.id);
           }
         } catch (e) {
           console.warn('[replay] failed to load linked mission', e);
@@ -1472,8 +1485,7 @@
         });
         if (choice === 'cancel') return; // stay connected
         // Capture the flown mission now (still connected + FC-synced) for a Save/Continue commit.
-        endedMissionWps = [...get(mission).waypoints];
-        endedMissionFc = get(missionFlags).fc;
+        captureEndedMission();
         try {
           await disconnectFC(selectedBaud); // backend stashes the active flight as the pending session
         } catch (e) {
@@ -1789,41 +1801,74 @@
   // ── Mission recording link (deferred commit, ADR-041) ────────────────
   // The flown mission is captured at disarm (while FC-sync still reflects what the FC flew) and
   // linked when the pending session is committed (Save, or a grace-lapsed re-arm auto-commit).
-  async function linkMissionToFlight(flightId: number, wps = get(mission).waypoints): Promise<void> {
-    const input = await buildMissionInput(wps);
-    const id = await missionDbSave(input, flightLogDbPath);
-    await flightLinkMission(flightId, id, flightLogDbPath);
-    markMissionSynced('db');
-    loadedMissionId.set(id);
-    void missionDbGeocode(id, $locale ?? 'en', flightLogDbPath).catch(() => {});
+  // Captured per active autopilot system: INAV carries an FC-sync flag (links silently when synced);
+  // ArduPilot/PX4 have no provenance flag yet (Phase 2) → linked only on explicit user opt-in.
+  interface EndedMissionSnapshot {
+    system: 'inav' | 'ardupilot' | 'px4';
+    inavWps: Waypoint[];
+    arduWps: ArduWaypoint[];
+    fc: boolean;
+  }
+  let endedMission: EndedMissionSnapshot = { system: 'inav', inavWps: [], arduWps: [], fc: false };
+
+  /** Snapshot the flown mission from the active autopilot system (at disarm / interrupt). */
+  function captureEndedMission(): void {
+    const sys = get(autopilotSystem);
+    if (sys === 'inav') {
+      endedMission = { system: 'inav', inavWps: [...get(mission).waypoints], arduWps: [], fc: get(missionFlags).fc };
+    } else {
+      endedMission = { system: sys, inavWps: [], arduWps: [...get(arduMission)], fc: false };
+    }
   }
 
-  // Flown mission captured at the disarm that produced the pending session (FC-synced waypoints +
-  // whether they were FC-synced). Used to link the mission when that session is committed.
-  let endedMissionWps: Waypoint[] = [];
-  let endedMissionFc = false;
+  function endedMissionHasWps(snap: EndedMissionSnapshot): boolean {
+    return snap.system === 'inav' ? snap.inavWps.length > 0 : snap.arduWps.length > 0;
+  }
+
+  /** Save the captured mission to the library (dedup) and link it to the committed flight. */
+  async function linkCapturedMission(flightId: number, snap: EndedMissionSnapshot): Promise<void> {
+    let id: number;
+    if (snap.system === 'inav') {
+      id = await missionDbSave(await buildMissionInput(snap.inavWps), flightLogDbPath);
+      markMissionSynced('db');
+      loadedMissionId.set(id);
+    } else {
+      const fmt = snap.system === 'px4' ? 'px4' : 'ardupilot';
+      id = await missionDbSave(await buildArduMissionInput(snap.arduWps, { format: fmt }), flightLogDbPath);
+      arduLoadedMissionId.set(id);
+    }
+    await flightLinkMission(flightId, id, flightLogDbPath);
+    void missionDbGeocode(id, $locale ?? 'en', flightLogDbPath).catch(() => {});
+  }
 
   /** Link the captured flown mission to a freshly committed flight: FC-synced → silently;
    *  otherwise only when the user opted in via the dialog checkbox. */
   async function linkEndedMission(flightId: number, userOptedIn: boolean): Promise<void> {
-    if (endedMissionWps.length === 0) return;
-    if (!endedMissionFc && !userOptedIn) return;
-    try { await linkMissionToFlight(flightId, endedMissionWps); }
+    if (!endedMissionHasWps(endedMission)) return;
+    if (!endedMission.fc && !userOptedIn) return;
+    try { await linkCapturedMission(flightId, endedMission); }
     catch (e) { console.warn('[end-flight] mission link failed', e); }
   }
 
   // Fresh recording started — clear any stale captured-mission snapshot (defensive).
   function onRecordingStarted(): void {
-    endedMissionWps = [];
-    endedMissionFc = false;
+    endedMission = { system: 'inav', inavWps: [], arduWps: [], fc: false };
+  }
+
+  /** Switch the active autopilot system for replay rendering (the mission layer switches on it),
+   *  keeping any in-editor mission in memory — no destructive clear, no global switch dialog.
+   *  No-op when already on that system or connected (locked). */
+  function switchAutopilotSystemForReplay(sys: 'inav' | 'ardupilot' | 'px4'): void {
+    if (get(autopilotSystem) === sys) return;
+    setAutopilotSystem(sys);
+    if (get(pendingSystemSwitch)) confirmSystemSwitch('keep');
   }
 
   async function onRecordingEnded(stats: EndFlightStats): Promise<void> {
     awaitingResumeReconnect = false; // a recovered session that came back disarmed is now in the dialog
     // Capture the flown mission at disarm, while FC-sync still reflects what the FC flew.
-    endedMissionWps = [...get(mission).waypoints];
-    endedMissionFc = get(missionFlags).fc;
-    const missionConfirm = endedMissionWps.length > 0 && !endedMissionFc;
+    captureEndedMission();
+    const missionConfirm = endedMissionHasWps(endedMission) && !endedMission.fc;
     try {
       const res = await endFlightDialog.show({ stats, recorded: true, missionConfirm });
       // null = the dialog was force-closed by a re-arm (resumed) or a grace auto-commit — the
@@ -1849,8 +1894,7 @@
   // switch to telemetry). The session is already stashed as pending in the backend.
   async function onRecordingInterrupted(info: { temp_path: string; craft_name: string; start_time: string; duration_sec: number; sample_count: number }): Promise<void> {
     // Capture the flown mission (FC-sync) for a later commit.
-    endedMissionWps = [...get(mission).waypoints];
-    endedMissionFc = get(missionFlags).fc;
+    captureEndedMission();
     awaitingResumeReconnect = false;
     try {
       const choice = await recoveryPrompt.show(info, { reason: 'lost' });
@@ -1934,10 +1978,10 @@
     // Grace-lapsed re-arm auto-committed the previous flight: close the (now stale) summary and link
     // the mission captured at that disarm.
     void listen<{ flight_id: number }>('flight-recording-committed', async (event) => {
-      const wps = endedMissionWps; const wasFc = endedMissionFc; // snapshot before any await
+      const snap = endedMission; // snapshot before any await
       endFlightDialog?.close();
-      if (wps.length > 0 && wasFc) {
-        try { await linkMissionToFlight(event.payload.flight_id, wps); } catch (e) { console.warn('[auto-commit] link failed', e); }
+      if (endedMissionHasWps(snap) && snap.fc) {
+        try { await linkCapturedMission(event.payload.flight_id, snap); } catch (e) { console.warn('[auto-commit] link failed', e); }
       }
       void loadLogbook();
     });

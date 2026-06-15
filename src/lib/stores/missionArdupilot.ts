@@ -96,6 +96,12 @@ export const arduMission        = writable<ArduWaypoint[]>([]);
 export const arduSelectedWpIndex = writable<number>(-1);
 export const arduEditMode       = writable<boolean>(false);
 
+/** DB id of the currently loaded/imported library mission (null = fresh / never saved).
+ *  ArduPilot/PX4 counterpart to `mission.ts` `loadedMissionId`: set on DB-load and on import when
+ *  the content hash matches an existing row; the link target for arm-time/End-Flight recording
+ *  saves. See docs/active/ARDUPILOT_MISSION_LIBRARY.md. */
+export const arduLoadedMissionId = writable<number | null>(null);
+
 // ── Vehicle class (drives the command catalog filter) ─────────────────
 // Online: derived from the FC's variant and locked. Offline: the operator picks it (QuadPlane can't be
 // auto-detected — it reports as ArduPlane — so it is an offline-only choice for now).
@@ -158,6 +164,7 @@ export function groupEndIndex(g: ArduGroup): number {
 export function arduMissionClear(): void {
   arduMission.set([]);
   arduSelectedWpIndex.set(-1);
+  arduLoadedMissionId.set(null);
 }
 
 export function arduAddWp(wp: ArduWaypoint): void {

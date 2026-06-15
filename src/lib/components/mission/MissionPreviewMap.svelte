@@ -17,8 +17,14 @@
   import { getProviderById } from '$lib/config/mapProviders';
   import { cachedTileLayer } from '$lib/cache/CachedTileLayer';
   import { hasLocation, toDeg, type Waypoint } from '$lib/stores/mission';
+  import { arduHasLocation, type ArduWaypoint } from '$lib/stores/missionArdupilot';
 
-  let { waypointsJson }: { waypointsJson: string } = $props();
+  let { waypointsJson, format = 'inav' }: { waypointsJson: string; format?: string } = $props();
+
+  // The preview box aspect mirrors the mission's bbox aspect (set by the Manager), so a tight, even
+  // ~10px border fills it nicely. maxZoom is generous so small missions still fill to the border
+  // instead of sitting tiny in the middle (the bbox fits at whatever zoom reaches the 10px inset).
+  const FIT_OPTS: L.FitBoundsOptions = { padding: [10, 10], maxZoom: 21 };
 
   let container: HTMLDivElement;
   let map: L.Map | undefined;
@@ -28,6 +34,13 @@
   let refitTimer: ReturnType<typeof setTimeout> | undefined;
 
   function geoLatLngs(json: string): [number, number][] {
+    if (format === 'ardupilot' || format === 'px4') {
+      let wps: ArduWaypoint[];
+      try { wps = JSON.parse(json); } catch { return []; }
+      return wps
+        .filter((w) => arduHasLocation(w.command) && !(w.lat === 0 && w.lon === 0))
+        .map((w) => [w.lat / 1e7, w.lon / 1e7] as [number, number]);
+    }
     let wps: Waypoint[];
     try { wps = JSON.parse(json); } catch { return []; }
     return wps
@@ -48,7 +61,7 @@
     overlay = g;
     const b = pl.getBounds();
     bounds = b.isValid() ? b : undefined;
-    if (bounds) map.fitBounds(bounds, { padding: [6, 6], maxZoom: 18 });
+    if (bounds) map.fitBounds(bounds, FIT_OPTS);
   }
 
   // Resize handler: the panel animates its width (transition) the first time a mission is
@@ -57,7 +70,7 @@
   function refit() {
     if (!map) return;
     map.invalidateSize();
-    if (bounds) map.fitBounds(bounds, { padding: [6, 6], maxZoom: 18 });
+    if (bounds) map.fitBounds(bounds, FIT_OPTS);
   }
 
   // Debounce: the width transition fires the ResizeObserver many times with intermediate
@@ -77,9 +90,13 @@
     });
     map.setView([0, 0], 2);
     const provider = getProviderById(s.mapProvider);
+    // maxNativeZoom caps tile *requests* at the provider's real max, but maxZoom lets the map (and
+    // thus fitBounds) zoom further by upscaling those tiles — so a small mission still fills the
+    // preview to the ~10px border instead of being capped tiny at the provider's native zoom.
     cachedTileLayer(provider.url, {
       attribution: '',
-      maxZoom: provider.maxZoom,
+      maxZoom: 21,
+      maxNativeZoom: provider.maxZoom,
       providerId: provider.detectPlaceholders ? provider.id : undefined,
     }).addTo(map);
     draw(waypointsJson);
@@ -93,6 +110,7 @@
   // Redraw when the mission changes (draw() only mutates Leaflet layers → no reactive loop).
   $effect(() => {
     void waypointsJson;
+    void format;
     if (map) draw(waypointsJson);
   });
 

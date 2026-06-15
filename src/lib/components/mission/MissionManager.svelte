@@ -13,6 +13,7 @@
   import { t, locale } from 'svelte-i18n';
   import { get } from 'svelte/store';
   import { save, open } from '@tauri-apps/plugin-dialog';
+  import { invoke } from '@tauri-apps/api/core';
   import { settings } from '$lib/stores/settings';
   import {
     missionDbList, missionDbFlights, missionDbDelete, missionDbSetMeta,
@@ -24,8 +25,17 @@
     mission, missionModified, missionSetWaypoints, loadedMissionId, markMissionSynced,
     missionImportXml, missionLoadFile, applyMissionLaunchDefault, type Waypoint,
   } from '$lib/stores/mission';
+  import {
+    arduMission, arduSelectedWpIndex, arduLoadedMissionId,
+    parseWaypoints, type ArduWaypoint,
+  } from '$lib/stores/missionArdupilot';
+  import {
+    autopilotSystem, autopilotLocked, setAutopilotSystem, confirmSystemSwitch,
+    pendingSystemSwitch, type AutopilotSystem,
+  } from '$lib/stores/autopilotContext';
   import { missionManagerSelectedId, requestOpenFlightId } from '$lib/stores/missionManager';
   import { buildMissionInput, findLibraryMissionId } from '$lib/helpers/missionLibrary';
+  import { buildArduMissionInput, findArduLibraryMissionId } from '$lib/helpers/missionLibraryArdu';
   import { convertAltitude, convertDistance, formatConverted } from '$lib/utils/units';
   import PanelShell, { type PanelVariant } from '$lib/components/panel/PanelShell.svelte';
   import Button from '$lib/components/panel/Button.svelte';
@@ -56,6 +66,27 @@
   let selected = $derived(missions.find((m) => m.id === $missionManagerSelectedId) ?? null);
   const variant = $derived<PanelVariant>(selected != null ? 'advanced' : 'compact');
 
+  // ── Format filter (shown only when the library holds ≥2 mission formats) ──────────
+  let formatFilter = $state<string>('all');
+
+  /** Distinct formats present in the library, ordered INAV → ArduPilot → PX4 → other. */
+  let presentFormats = $derived.by(() => {
+    const set = new Set<string>();
+    for (const m of missions) set.add(m.format || 'inav');
+    const order = ['inav', 'ardupilot', 'px4'];
+    const rank = (f: string) => { const i = order.indexOf(f); return i < 0 ? 99 : i; };
+    return [...set].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+  });
+
+  // Drop a stale filter (its last mission was deleted) back to "all".
+  $effect(() => {
+    if (formatFilter !== 'all' && !presentFormats.includes(formatFilter)) formatFilter = 'all';
+  });
+
+  let filteredMissions = $derived(
+    formatFilter === 'all' ? missions : missions.filter((m) => (m.format || 'inav') === formatFilter),
+  );
+
   /** Preview aspect ratio (width / height) = the mission's geographic bbox aspect. */
   let previewAspect = $derived.by(() => {
     const m = selected;
@@ -72,7 +103,7 @@
   /** Group missions by location_name (missions without one go to the Unknown group). */
   let groups = $derived.by(() => {
     const map = new Map<string, LibraryMission[]>();
-    for (const m of missions) {
+    for (const m of filteredMissions) {
       const key = m.location_name?.trim() ? m.location_name.trim() : UNKNOWN;
       const arr = map.get(key);
       if (arr) arr.push(m);
@@ -127,24 +158,99 @@
     }
   }
 
-  async function loadToMap(m: LibraryMission) {
-    if (get(missionModified) && get(mission).waypoints.length > 0) {
-      const ans = await confirmDialog.show({
-        title: $t('missionMgr.replaceTitle'),
-        message: $t('missionMgr.replaceMsg'),
-        buttons: [{ label: $t('missionMgr.replaceYes'), value: 'replace', primary: true }],
-      });
-      if (ans !== 'replace') return;
+  /** The autopilot system a library mission belongs to (its DB `format` → active-system enum). */
+  function formatToSystem(fmt: string): AutopilotSystem {
+    return fmt === 'ardupilot' || fmt === 'px4' ? (fmt as AutopilotSystem) : 'inav';
+  }
+
+  function sameFamily(a: AutopilotSystem, b: AutopilotSystem): boolean {
+    return (a === 'ardupilot' || a === 'px4') && (b === 'ardupilot' || b === 'px4');
+  }
+
+  /** Short badge label for a non-INAV mission format. */
+  function formatBadge(fmt: string): string {
+    if (fmt === 'ardupilot') return 'ArduPilot';
+    if (fmt === 'px4') return 'PX4';
+    return fmt.toUpperCase();
+  }
+
+  /** Readable name for an autopilot system (switch-dialog message). */
+  function systemLabel(sys: AutopilotSystem): string {
+    if (sys === 'ardupilot') return 'ArduPilot';
+    if (sys === 'px4') return 'PX4';
+    return 'INAV';
+  }
+
+  /** Cross-format guard: switch the active editor to the system the mission belongs to. INAV and
+   *  ArduPilot keep separate stores, so the switch never destroys data — the user chooses whether to
+   *  keep the current editor's mission in memory or discard it. Returns false if blocked (FC locked
+   *  to another system) or cancelled. */
+  async function ensureSystemForFormat(targetSys: AutopilotSystem): Promise<boolean> {
+    const cur = get(autopilotSystem);
+    if (cur === targetSys) return true;
+    if (get(autopilotLocked)) {
+      statusMessage = $t('missionMgr.systemLocked');
+      return false;
     }
+    const curHasMission = cur === 'inav'
+      ? get(mission).waypoints.length > 0
+      : get(arduMission).length > 0;
+    let action: 'keep' | 'clear' = 'keep';
+    if (curHasMission && !sameFamily(cur, targetSys)) {
+      const ans = await confirmDialog.show({
+        title: $t('mission.systemSwitchTitle'),
+        message: $t('mission.systemSwitchChooseBody', { values: { from: systemLabel(cur) } }),
+        buttons: [
+          { label: $t('mission.switchClear'), value: 'clear', danger: true },
+          { label: $t('mission.switchKeep'), value: 'keep', primary: true },
+        ],
+      });
+      if (ans == null) return false;
+      action = ans as 'keep' | 'clear';
+    }
+    setAutopilotSystem(targetSys);
+    // setAutopilotSystem defers a cross-family switch to a pending request when the source has a
+    // mission — resolve it synchronously here with the user's choice (no global dialog flashes).
+    if (get(pendingSystemSwitch)) confirmSystemSwitch(action);
+    return get(autopilotSystem) === targetSys;
+  }
+
+  async function loadToMap(m: LibraryMission) {
+    const targetSys = formatToSystem(m.format);
+    const curSys = get(autopilotSystem);
+
+    if (targetSys === curSys) {
+      // Same system: warn before discarding unsaved changes in the active editor.
+      const dirty = curSys === 'inav'
+        ? (get(missionModified) && get(mission).waypoints.length > 0)
+        : (get(arduMission).length > 0 && get(arduLoadedMissionId) !== m.id);
+      if (dirty) {
+        const ans = await confirmDialog.show({
+          title: $t('missionMgr.replaceTitle'),
+          message: $t('missionMgr.replaceMsg'),
+          buttons: [{ label: $t('missionMgr.replaceYes'), value: 'replace', primary: true }],
+        });
+        if (ans !== 'replace') return;
+      }
+    } else if (!(await ensureSystemForFormat(targetSys))) {
+      return;
+    }
+
     try {
-      const loaded = await missionSetWaypoints(JSON.parse(m.waypoints_json));
-      loadedMissionId.set(m.id);
-      markMissionSynced('db');
-      // Launch/home reference (REL altitude + 3D-preview): UAV HOME → the DB-saved home → WP1.
-      applyMissionLaunchDefault(
-        loaded,
-        m.home_lat != null && m.home_lon != null ? { lat: m.home_lat, lng: m.home_lon } : undefined,
-      );
+      if (targetSys === 'inav') {
+        const loaded = await missionSetWaypoints(JSON.parse(m.waypoints_json));
+        loadedMissionId.set(m.id);
+        markMissionSynced('db');
+        // Launch/home reference (REL altitude + 3D-preview): UAV HOME → the DB-saved home → WP1.
+        applyMissionLaunchDefault(
+          loaded,
+          m.home_lat != null && m.home_lon != null ? { lat: m.home_lat, lng: m.home_lon } : undefined,
+        );
+      } else {
+        arduMission.set(JSON.parse(m.waypoints_json) as ArduWaypoint[]);
+        arduSelectedWpIndex.set(-1);
+        arduLoadedMissionId.set(m.id);
+      }
       onBack();
     } catch (e) {
       statusMessage = $t('missionMgr.loadToMapFailed', { values: { error: String(e) } });
@@ -217,13 +323,49 @@
     }
   }
 
+  /** After an ArduPilot `.waypoints` file is parsed, ask whether to add it to the library and/or
+   *  load it onto the map (mirrors {@link importMission}, over the ArduPilot store). */
+  async function importArduMission(wps: ArduWaypoint[], suggestedName: string) {
+    const existingId = await findArduLibraryMissionId(wps, dbPath()).catch(() => null);
+    const ans = await confirmDialog.show({
+      title: $t('missionMgr.importTitle'),
+      message: $t('missionMgr.importMsg'),
+      buttons: [
+        { label: $t('missionMgr.importMapOnly'), value: 'map' },
+        { label: $t('missionMgr.importDb'), value: 'db', primary: true },
+      ],
+    });
+    if (ans == null) return;
+    if (ans === 'db') {
+      if (existingId == null) {
+        const input = await buildArduMissionInput(wps, { name: suggestedName, format: 'ardupilot' });
+        const id = await missionDbSave(input, dbPath());
+        void missionDbGeocode(id, lang(), dbPath()).catch(() => {});
+      }
+      await reload();
+      statusMessage = $t('missionMgr.imported');
+    } else {
+      if (!(await ensureSystemForFormat('ardupilot'))) return;
+      arduMission.set(wps);
+      arduSelectedWpIndex.set(-1);
+      arduLoadedMissionId.set(existingId);
+      statusMessage = $t('missionMgr.loadedToMap');
+    }
+  }
+
   async function handleImportButton() {
     try {
-      const path = await open({ title: $t('missionMgr.openTitle'), multiple: false, filters: [{ name: 'Mission', extensions: ['mission'] }] });
+      const path = await open({ title: $t('missionMgr.openTitle'), multiple: false, filters: [{ name: 'Mission', extensions: ['mission', 'waypoints', 'txt'] }] });
       if (!path || typeof path !== 'string') return;
-      const m = await missionLoadFile(path);
       const stem = path.replace(/^.*[\\/]/, '').replace(/\.[^.]+$/, '');
-      await importMission(m.waypoints, stem || autoName());
+      const lower = path.toLowerCase();
+      if (lower.endsWith('.waypoints') || lower.endsWith('.txt')) {
+        const text = await invoke<string>('read_text_file', { path });
+        await importArduMission(parseWaypoints(text), stem || autoName());
+      } else {
+        const m = await missionLoadFile(path);
+        await importMission(m.waypoints, stem || autoName());
+      }
     } catch (e) {
       statusMessage = $t('missionMgr.importFailed', { values: { error: String(e) } });
     }
@@ -242,12 +384,19 @@
     e.stopPropagation();
     dragOver = false;
     const file = e.dataTransfer?.files?.[0];
-    if (!file || !file.name.endsWith('.mission')) { statusMessage = $t('missionMgr.onlyMission'); return; }
+    const name = file?.name.toLowerCase() ?? '';
+    if (!file || !(name.endsWith('.mission') || name.endsWith('.waypoints') || name.endsWith('.txt'))) {
+      statusMessage = $t('missionMgr.onlyMission'); return;
+    }
     try {
       const text = await file.text();
-      const m = await missionImportXml(text);
       const stem = file.name.replace(/\.[^.]+$/, '');
-      await importMission(m.waypoints, stem || autoName());
+      if (name.endsWith('.waypoints') || name.endsWith('.txt')) {
+        await importArduMission(parseWaypoints(text), stem || autoName());
+      } else {
+        const m = await missionImportXml(text);
+        await importMission(m.waypoints, stem || autoName());
+      }
     } catch (err) {
       statusMessage = $t('missionMgr.importFailed', { values: { error: String(err) } });
     }
@@ -302,6 +451,14 @@
   <div class="mmv2-toolbtns">
     <Button variant="standard" icon="library" onclick={onBack}>← {$t('missionMgr.back')}</Button>
     <Button variant="data" icon="import" onclick={handleImportButton}>{$t('missionMgr.import')}</Button>
+    {#if presentFormats.length >= 2}
+      <select class="fmt-filter" bind:value={formatFilter} title={$t('missionMgr.filterByFormat')}>
+        <option value="all">{$t('missionMgr.filterAll')}</option>
+        {#each presentFormats as f}
+          <option value={f}>{formatBadge(f)}</option>
+        {/each}
+      </select>
+    {/if}
   </div>
 {/snippet}
 
@@ -329,6 +486,7 @@
                   <div class="lib-item-meta">
                     <span>{m.wp_count} WP</span>
                     <span>{fmtDist(m.total_distance_m)}</span>
+                    <span class="fmt-badge">{formatBadge(m.format || 'inav')}</span>
                   </div>
                 </button>
               {/each}
@@ -356,7 +514,7 @@
       {#if m.bndbox_min_lat != null}
         <div class="preview-wrap" style="aspect-ratio: {previewAspect};">
           {#key m.id}
-            <MissionPreviewMap waypointsJson={m.waypoints_json} />
+            <MissionPreviewMap waypointsJson={m.waypoints_json} format={m.format} />
           {/key}
         </div>
       {/if}
@@ -412,6 +570,9 @@
 
 <style>
   .mmv2-toolbtns { display: flex; align-items: center; gap: 6px; width: 100%; }
+  /* Matches the framework form-control height (28px md button), like AutopilotSelect's .ap-select. */
+  .fmt-filter { margin-left: auto; height: 28px; padding: 0 8px; font-size: 12px; color: #e0e0e0; background: #434343; border: 1px solid #555; border-radius: 4px; font-family: 'Segoe UI', Tahoma, sans-serif; cursor: pointer; }
+  .fmt-filter:focus { outline: none; border-color: #37a8db; }
 
   .mmv2-detail-actions { display: flex; flex: 1; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
 
@@ -435,7 +596,8 @@
   .lib-item:hover { border-color: #37a8db; }
   .lib-item.selected { border-color: #37a8db; background: rgba(55, 168, 219, 0.18); }
   .lib-item-title { font-size: 12px; color: #fff; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .lib-item-meta { margin-top: 2px; display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 10px; color: #aaa; }
+  .lib-item-meta { margin-top: 2px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 10px; color: #aaa; }
+  .fmt-badge { font-size: 9px; font-weight: 600; color: #9cc6d9; background: rgba(55, 168, 219, 0.14); border: 1px solid rgba(55, 168, 219, 0.34); border-radius: 999px; padding: 0 6px; text-transform: uppercase; letter-spacing: 0.4px; }
 
   .mmv2-detail { display: flex; flex-direction: column; gap: 10px; overflow-anchor: none; }
   .preview-wrap { width: 100%; max-height: 300px; flex-shrink: 0; overflow: hidden; border-radius: 4px; }
