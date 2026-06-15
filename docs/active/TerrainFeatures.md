@@ -1,7 +1,7 @@
 # Terrain Features — Concept & Implementation Plan
 
-**Status**: Implemented (features 1–5 done: elevation provider, AGL waypoints, terrain analysis + correction, Live AGL widget, Terrain Radar widget). **Only Feature 4 — LOS analysis — remains (deferred, low priority).** COG performance follow-up cancelled.
-**Last Updated**: 2026-06-01
+**Status**: Implemented (all features done: elevation provider, AGL waypoints, terrain analysis + correction, Live AGL widget, Terrain Radar widget, **and Feature 4 — LOS analysis, shipped 2026-06-15 as the layered RF link analysis — see [RF_LINK_ANALYSIS.md](RF_LINK_ANALYSIS.md)**). COG performance follow-up cancelled.
+**Last Updated**: 2026-06-15
 
 This doc plans the four terrain-based features for the **2D map / mission planning** path. The 3D map (Cesium) is out of scope here — its quirks are tracked separately under Milestone 7.
 
@@ -234,11 +234,14 @@ A 1×1 (`large`) **top-down, track-up** terrain-awareness display (`widgets/Terr
 - **Heatmap look** — cells (32×16 polar grid) are textured with an SVG **`feTurbulence` + `feDisplacementMap`** filter (dissolves the grid blocks organically) plus a very light `feGaussianBlur`, clipped to the fan sector. Chosen over a plain blur so terrain detail survives.
 - **Backend**: new `terrain_fan(lat, lon, heading, half_angle, range, ang_cells, rad_cells)` command — one IPC call per refresh, server-side polar sampling via the existing tile cache. Re-sampled only on meaningful change (movement > ½ radial cell / turn > 2° / scale change / > 1 s). Default **off**.
 
-### Feature 4 — LOS (line-of-sight) analysis — **LAST, no priority**
+### Feature 4 — LOS (line-of-sight) analysis — ✅ **DONE (shipped 2026-06-15)**
 
-Line-of-sight / radio-horizon analysis along the route (à la MWPTools): detect where terrain occludes the line between the GCS/home and points along the mission.
-
-**TBD**: home/GCS reference point, occlusion sampling, visualization (on map and/or in the profile view), antenna height assumptions.
+Shipped, and expanded well beyond naïve LOS into a layered **RF link / radio-shadow analysis** —
+geometric LOS occlusion + Fresnel/knife-edge diffraction + two-ray ground reflection, rendered as a
+background "rainbow" loss field in the Terrain Analyzer profile (plus a LOS-clearance line and a
+logged-RSSI overlay in Track mode for prediction-vs-measurement comparison). Radial 1° sampling from
+the launch point; per-band (5.8/2.4/0.9/0.433 GHz); clutter/vegetation offset. **Full design + as-built
+detail in [RF_LINK_ANALYSIS.md](RF_LINK_ANALYSIS.md).**
 
 ---
 
@@ -249,7 +252,7 @@ Line-of-sight / radio-horizon analysis along the route (à la MWPTools): detect 
 3. ✅ **Terrain analysis** — full-width NavRail overlay; view modes Waypoint / Track; SVG profile chart with zoom/pan + clearance coloring; Terrain Correction (Terrain Follow / Clearance Check) over a WP range, preview → APPLY, manual Add WP, jump-loop simulation — all done
 4. ✅ **Live AGL widget** — 2×1 `wide` forward-looking terrain HUD; dedicated renderer, history from the telemetry stream (live + replay), heading-projected terrain ahead + vario flight line
 5. ✅ **Terrain Radar widget** — 1×1 top-down track-up EGPWS-style fan; `terrain_fan` backend, continuous clearance heatmap (REL/PRED), own 60/120/250 m colour scale
-6. **LOS analysis** — deferred, low priority
+6. ✅ **LOS analysis** — shipped as the layered RF link analysis (LOS + Fresnel/diffraction + two-ray, rainbow loss field + RSSI overlay); see `RF_LINK_ANALYSIS.md`
 
 ## 5. Protocol scope (TBD)
 

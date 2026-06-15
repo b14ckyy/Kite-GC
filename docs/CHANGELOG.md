@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **RF link / radio-shadow analysis in the Terrain Analyzer (Feature 4 / `RF_LINK_ANALYSIS.md`).**
+  For a mission or a flown track, the profile chart now shows **where terrain degrades or blocks the
+  radio link** from the launch point as a background green→red "rainbow" loss field. Three toggleable
+  methods — **LOS occlusion**, **Fresnel/knife-edge diffraction**, and **two-ray ground reflection**
+  (the lobing pattern that shows up on long-range RSSI plots) — combined per sample, with a per-band
+  selector (**5.8 / 2.4 / 0.9 / 0.433 GHz**). Geometric blockage is fundamental (red under any method;
+  two-ray only adds where there's clear line-of-sight). A **clutter/vegetation offset** (default 10 m)
+  accounts for forest/buildings the bare DEM misses. Adds a **line-of-sight clearance line** (AGL view)
+  and, in Track mode, overlays the **logged RSSI** so predicted vs. measured can be compared directly.
+  Radial 1°-from-home sampling keeps it cheap. It is an honest *risk indicator*, not an exact RSSI
+  predictor (near-field, antenna pattern/attitude and per-pixel canopy are out of scope).
 - **ArduPilot/PX4 mission library — full parity with INAV (ADR-050).** ArduPilot missions can now be
   **saved to the library, deduplicated, retrieved, previewed and linked to flights** exactly like INAV
   missions — the ArduPilot editor gained a "Save to library" button and the "Mission Manager", and the
