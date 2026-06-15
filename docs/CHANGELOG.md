@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Import recorded raw logs into the logbook (ADR-049).** A new "Import Raw Log" action parses a
+  recorded `.rawmsp` (MSP) or `.tlog` (MAVLink) file into the logbook. A continuous log (one file across
+  many arm/disarm cycles) is **split into individual flights** at arm/disarm — applying the same 5 s
+  re-arm grace as live recording, but **filling** the short grace gap (the raw log has that data, unlike
+  a live recording). Parsed flights are stored as normal **live** flights (with a duplicate check, so
+  re-importing one that's already recorded is skipped). Lets you recover flights from raw logs taken with
+  the DB disabled, or from logs shared by others.
+- **Raw MSP serial logging, mwptools-compatible (ADR-049).** The "Save Raw Data Logs" option now records
+  the actual MSP serial traffic — both directions, with timing — to a `.rawmsp` file, using **mwptools'
+  own raw "v2" format**. That means the logs replay directly in mwp's tools ("Replay mwp RAW log" /
+  `mwp-log-replay`) and any existing MSP decoder. It's the MSP counterpart to MAVLink's `.tlog`: each
+  protocol now logs in its community's de-facto raw format. (Replaces the previous decoded telemetry-CSV
+  "raw" log — a lossless raw capture is more useful and a human-readable decode can be derived from it
+  later.)
 - **Flight times shown in the flight's local time, not UTC (ADR-048).** Log titles, the logbook list and
   the replay clock now read the wall-clock time **of the place the flight happened** — so a single-area
   pilot sees the correct local time, and a cross-timezone operator no longer sees flights apparently at
@@ -56,6 +70,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per-command rationale is in `docs/active/ARDUPILOT_COMMAND_COVERAGE.md`.
 
 ### Changed
+- **One "Import" button in the logbook instead of three.** The separate Blackbox / Raw Log / .kflight
+  import buttons are now a single **Import** action: the file picker accepts every supported log type
+  (INAV Blackbox `.txt`/`.bbl`/`.bfl`, ArduPilot `.bin`, raw `.rawmsp`/`.tlog`, `.kflight`) and the right
+  importer is chosen per file by extension. Drag-and-drop uses the same dispatch (now incl. raw logs).
+  Keeps the toolbar clean as more formats are added (e.g. radio CSV later).
 - **3D real-time lighting clock stays in true UTC (ADR-048).** The sun position is physics (absolute
   instant + globe location), so it's automatically correct for the flight location — the new local-time
   display is a presentation layer only and does not shift the lighting clock.

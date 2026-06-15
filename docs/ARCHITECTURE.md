@@ -2288,5 +2288,80 @@ app over the imprecise `lon/15` approximation. Schema migration only (additive `
 
 ---
 
+## ADR-049: MSP Raw Serial Logging — MWP-Compatible v2 Format, Transport-Level Tap
+
+**Status**: Accepted — implemented
+**Related**: ADR-040/041 (recording lifecycle), ADR-048 (separate raw-log folder), the MAVLink `.tlog`
+writer (`tlog_logger.rs`) — this is its MSP counterpart. Future: in-app raw-log replay.
+
+**Context**: MAVLink already records lossless raw frames as `.tlog` (replayable in MP/QGC). MSP had no
+equivalent — the "Save Raw Data Logs" toggle produced a **decoded telemetry CSV** (`raw_logger.rs`), a
+sampled fused-state export, not protocol-level capture. We want a lossless, replayable MSP raw log, and
+the INAV community's **mwptools** already defines one — so cross-compatibility (use mwp's existing
+decoders / "Replay mwp RAW log") is the prize.
+
+**Decision**:
+
+1. **Adopt mwptools' "v2" raw format verbatim.** File header `v2\n`; then per record, little-endian:
+   `{ offset: f64 (seconds since log start), size: u16 (payload len), dirn: u8 ('i' incoming FC→GCS /
+   'o' outgoing GCS→FC) }` followed by `size` payload bytes (verified against mwp-serial-cap.go /
+   mwp-log-replay.go). Our files are therefore directly readable by mwp's replay tools. Extension is
+   **`.rawmsp`** (our UX choice; the format stays mwp-compatible — mwp opens via a file dialog, the
+   extension is cosmetic). Absolute time is carried by the filename (local time, ADR-048) + the DB
+   flight, so the in-file relative offset suffices.
+2. **Capture at the MSP transport boundary** (`MspTransport::msp_request`): each TX frame is logged as
+   `'o'`, each RX **read-chunk** (`buf[..n]`) as `'i'` — mirroring `mwp-serial-cap` exactly (it also
+   logs read-chunks, not frame-aligned records; mwp's replay just re-streams payloads with timing). One
+   tap captures **all** MSP traffic (telemetry, secondaries, commands, radar, …) with **zero** scheduler
+   call-site changes, and records the **literal wire bytes** — including anything the parser later
+   discards.
+3. **Lifecycle owned by the `FlightRecorder`** via a shared `MspRawSink = Arc<Mutex<Option<MspRawLogger>>>`:
+   the recorder opens the logger on arm / continuous-on-connect and drops it on disarm / disconnect
+   (same lifecycle as `.tlog`); the transport writes only while the `Option` is `Some`. In **continuous**
+   mode the connect path opens the logger **before the handshake** (so the identity frames are captured)
+   and the recorder **adopts** that logger rather than starting a fresh one. The sink handle
+   is created at connect and handed to both `MspTransport` and the recorder (mirrors how the
+   `FlightRecorderHandle` is already shared).
+4. **Replaces the decoded telemetry CSV** (`raw_logger.rs` removed). "Save Raw Data Logs" now yields
+   `.rawmsp` for MSP and `.tlog` for MAVLink — **each protocol in its ecosystem's de-facto raw format**.
+
+**Consequences**: lossless, community-tool-compatible MSP logs; in-app replay later = feed the `'i'`
+records back through the existing MSP parser (deferred — the pipeline already exists, we just ignore
+`'o'`). Costs: a single-crate reference from `msp::transport` to the flightlog `MspRawSink` type (minor
+layering wart, accepted for a one-point faithful tap); per-chunk (not frame-aligned) records, matching
+mwp; the Excel-friendly telemetry CSV is gone — a human-readable decoded `.txt` (MWP-style) can be
+derived from the raw later if wanted.
+
+**Continuous vs per-flight (behaviour).** With continuous logging (`raw_always`) the raw log opens **on
+connect** and closes **on disconnect**, spanning any number of arm/disarm cycles → **one** continuous
+file, while the DB still commits a separate flight per arm→disarm. Per-flight mode opens/closes the raw
+log on arm/disarm. (Known gap, pre-existing: a re-arm inside the 5 s grace, `resume_session`, does not
+reopen a per-flight raw log — irrelevant in continuous mode.)
+
+**Parsing raw logs into the logbook (implemented — `raw_import.rs`).** `flightlog_import_raw` parses a
+recorded `.rawmsp` (MSP) or `.tlog` (MAVLink) into the logbook: it decodes frames back through the
+existing parsers (`MspParser` + `decode_telemetry`; `MavParser` + typed `MavMessage`) into a telemetry
+stream + an armed flag, then: (1) **splits into individual flights at arm/disarm** (arming from MSP
+`MSPV2_INAV_STATUS` flags / MAVLink heartbeat `SAFETY_ARMED`), applying the **same 5 s grace as live
+recording** (a re-arm within 5 s stays **one** flight — implemented as merging armed runs whose disarmed
+gap ≤ 5 s); (2) unlike live recording — which stops sampling while disarmed, leaving a sub-5 s gap — the
+parser **fills** the grace gap, because the raw log **has** those bytes and they are real flight data (the
+grace exists for an accidental in-flight disarm); disarmed periods **> 5 s** are dropped (no flight); (3)
+flights are stored as **`source = "live"`**, NOT `"blackbox"`; (4) therefore **no** live↔blackbox
+auto-linking applies, but a **duplicate check** (craft + start_time ±15 s) still runs, so re-parsing a log
+whose live flight is already in the DB is skipped. Absolute time comes from the embedded µs stamps
+(`.tlog`) or the local-time filename (`.rawmsp`, ADR-048).
+
+**Vehicle identity.** MAVLink: derived from the (continuously streamed) HEARTBEAT — `autopilot`+`mavtype`
+→ `fc_variant` (`ArduPlane`/`ArduCopter`/…) + `platform_type`, mirroring the live handshake. **Getting the
+variant right is what makes the imported flight's mode resolve** (the Plane and Copter `custom_mode`
+tables differ — a generic variant mis-maps). MSP: in **continuous** mode the raw logger is opened
+**before** the handshake (connect path), so `MSP_NAME`/`MSP_FC_VARIANT`/`MSP_FC_VERSION`/`MSP_BOARD_INFO`/
+`MSP2_INAV_MIXER` are captured and the parser recovers full craft/FC/board/platform. Known limits:
+per-flight (non-continuous) MSP logs have no handshake → craft/FC default (also weakens dedup); MSP
+flight-mode classification runs without box-ids (handshake-only); no reverse-geocode on parsed flights yet.
+
+---
+
 *End of Architecture Decision Records*
 
