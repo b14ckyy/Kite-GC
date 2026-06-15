@@ -195,6 +195,10 @@ pub struct RadarManager {
     query_center: Arc<Mutex<Option<(f64, f64)>>>,
     /// Live ADS-B query radius (km), shared so the 3D view can size the query to the visible area.
     query_radius: Arc<Mutex<Option<f64>>>,
+    /// Instant of the last ADS-B online fetch, shared with the source so a source rebuilt by a
+    /// reconfigure waits out the poll interval instead of fetching immediately (would bypass the poll
+    /// rate on rapid reconfigures → provider rate-limit / IP ban).
+    adsb_last_fetch: Arc<Mutex<Option<Instant>>>,
     /// Live GCS node position `(lat, lon, alt_m)` advertised to a FormationFlight module (we emulate an
     /// FC at this spot). Shared so it follows the resolved GCS location without restarting the source.
     node_pos: Arc<Mutex<Option<(f64, f64, f64)>>>,
@@ -218,6 +222,7 @@ impl RadarManager {
             running: None,
             query_center: Arc::new(Mutex::new(None)),
             query_radius: Arc::new(Mutex::new(None)),
+            adsb_last_fetch: Arc::new(Mutex::new(None)),
             node_pos: Arc::new(Mutex::new(None)),
             node_name: Arc::new(Mutex::new(String::new())),
             ingest: Arc::new(Mutex::new(None)),
@@ -270,6 +275,7 @@ impl RadarManager {
         // Cheap Arc clones so we can build sources while `running` is mutably borrowed below.
         let query_center = self.query_center.clone();
         let query_radius = self.query_radius.clone();
+        let adsb_last_fetch = self.adsb_last_fetch.clone();
         let node_pos = self.node_pos.clone();
         let node_name = self.node_name.clone();
         // Seed the live node name from config (also pushed live via radar_set_node_name) — updating it
@@ -284,7 +290,7 @@ impl RadarManager {
         // serial port open across unrelated reconfigures so the ESP32 isn't reset).
         if let Some(r) = self.running.as_mut() {
             r.sources.clear(); // drop old workers (each SourceHandle's Drop stops its thread)
-            r.sources = build_sources(config, &r.update_tx, app, &query_center, &query_radius);
+            r.sources = build_sources(config, &r.update_tx, app, &query_center, &query_radius, &adsb_last_fetch);
             reconcile_ff(&mut r.ff, config, &r.update_tx, app, &node_pos, &node_name);
             eprintln!(
                 "[radar] reconfigured in place: {} source(s){}",
@@ -301,7 +307,7 @@ impl RadarManager {
         let agg = spawn_aggregator(rx, stop.clone(), snapshot.clone(), app.clone());
         // Expose the ingest channel so scheduler-fed sources (ADS-B via MSP) push into this pipeline.
         *self.ingest.lock().unwrap() = Some(tx.clone());
-        let sources = build_sources(config, &tx, app, &query_center, &query_radius);
+        let sources = build_sources(config, &tx, app, &query_center, &query_radius, &adsb_last_fetch);
         let ff = make_ff(config, &tx, app, &node_pos, &node_name);
         eprintln!(
             "[radar] configured: enabled, {} source(s){}",
@@ -346,6 +352,7 @@ fn build_sources(
     app: &AppHandle,
     query_center: &Arc<Mutex<Option<(f64, f64)>>>,
     query_radius: &Arc<Mutex<Option<f64>>>,
+    adsb_last_fetch: &Arc<Mutex<Option<Instant>>>,
 ) -> Vec<SourceHandle> {
     let mut sources: Vec<SourceHandle> = Vec::new();
 
@@ -373,7 +380,8 @@ fn build_sources(
             *query_radius.lock().unwrap() = Some(radius_km);
             let poll_sec = if config.adsb.poll_sec > 0.0 { config.adsb.poll_sec } else { 5.0 };
             let src = Box::new(sources::adsb_online::AdsbOnlineSource::new(
-                providers, query_center.clone(), query_radius.clone(), radius_km, poll_sec, app.clone(),
+                providers, query_center.clone(), query_radius.clone(), radius_km, poll_sec,
+                adsb_last_fetch.clone(), app.clone(),
             ));
             sources.push(src.start(tx.clone()));
         }

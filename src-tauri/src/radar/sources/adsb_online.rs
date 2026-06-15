@@ -12,7 +12,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -47,16 +47,23 @@ pub struct AdsbOnlineSource {
     radius: Arc<Mutex<Option<f64>>>,
     radius_km: f64,
     poll: Duration,
+    /// Instant of the last fetch, **shared by the manager** so it survives a reconfigure (which rebuilds
+    /// this source). Lets a fresh instance wait out the remaining poll interval instead of fetching
+    /// immediately — otherwise rapid reconfigures (connect/disconnect, settings toggles) would bypass
+    /// the poll rate and hammer the provider (HTTP 429 / IP ban).
+    last_fetch: Arc<Mutex<Option<Instant>>>,
     app: AppHandle,
 }
 
 impl AdsbOnlineSource {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         providers: Vec<AdsbOnlineProvider>,
         center: Arc<Mutex<Option<(f64, f64)>>>,
         radius: Arc<Mutex<Option<f64>>>,
         radius_km: f64,
         poll_sec: f64,
+        last_fetch: Arc<Mutex<Option<Instant>>>,
         app: AppHandle,
     ) -> Self {
         Self {
@@ -65,6 +72,7 @@ impl AdsbOnlineSource {
             radius,
             radius_km,
             poll: Duration::from_secs_f64(poll_sec.max(1.0)),
+            last_fetch,
             app,
         }
     }
@@ -88,10 +96,30 @@ impl RadarSource for AdsbOnlineSource {
                 .build()
                 .unwrap_or_else(|_| reqwest::Client::new());
 
-            loop {
+            'outer: loop {
                 if stop_task.load(Ordering::Relaxed) {
                     break;
                 }
+                // Rate gate: wait until at least `poll` has elapsed since the last fetch. The instant is
+                // shared with the manager, so a source rebuilt by a reconfigure (connect/disconnect, a
+                // settings toggle) keeps the gap instead of fetching immediately — the poll interval can
+                // no longer be bypassed, no matter what triggers the rebuild. Cold start (None) → no wait.
+                let due_in = self
+                    .last_fetch
+                    .lock()
+                    .ok()
+                    .and_then(|g| *g)
+                    .map(|t| self.poll.saturating_sub(t.elapsed()))
+                    .unwrap_or(Duration::ZERO);
+                let mut waited = Duration::ZERO;
+                while waited < due_in {
+                    if stop_task.load(Ordering::Relaxed) {
+                        break 'outer;
+                    }
+                    tokio::time::sleep(POLL_GRANULARITY).await;
+                    waited += POLL_GRANULARITY;
+                }
+
                 // Live radius each cycle (3D sizes the query to the visible area); fall back to config.
                 let radius_km = self.radius.lock().ok().and_then(|r| *r).unwrap_or(self.radius_km);
                 let dist_nm = (radius_km / KM_PER_NM).clamp(1.0, 250.0).round() as i64;
@@ -127,6 +155,12 @@ impl RadarSource for AdsbOnlineSource {
                     }
                 }
 
+                // Stamp the fetch time (shared) so the next cycle — and any source rebuilt by a
+                // reconfigure — spaces the next request by the poll interval.
+                if let Ok(mut g) = self.last_fetch.lock() {
+                    *g = Some(Instant::now());
+                }
+
                 // Per-provider status (counts / errors) for the panel.
                 let _ = self.app.emit(ADSB_STATUS_EVENT, &statuses);
 
@@ -141,16 +175,7 @@ impl RadarSource for AdsbOnlineSource {
                         break; // aggregator gone
                     }
                 }
-
-                // Interruptible wait so stop is honoured promptly.
-                let mut waited = Duration::ZERO;
-                while waited < self.poll {
-                    if stop_task.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    tokio::time::sleep(POLL_GRANULARITY).await;
-                    waited += POLL_GRANULARITY;
-                }
+                // Spacing is handled by the rate gate at the top of the loop (shared across restarts).
             }
         });
 
