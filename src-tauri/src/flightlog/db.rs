@@ -15,7 +15,7 @@ use super::types::{
     TelemetryRecord,
 };
 
-const CURRENT_SCHEMA_VERSION: u32 = 12;
+const CURRENT_SCHEMA_VERSION: u32 = 13;
 
 /// Column list (excluding the autoincrement `id`) for `telemetry_records`, shared by the temp-session
 /// copy so the SELECT and INSERT column orders can never drift apart. `flight_id` is first so the
@@ -109,6 +109,35 @@ pub fn resolve_db_path(custom_path: &str, portable: bool) -> PathBuf {
     PathBuf::from("flights.db")
 }
 
+/// Resolve the **raw-log base directory** (where `raw_logs/` with .tlog / raw MSP files live). This is
+/// intentionally **separate from the database folder**: the DB defaults to AppData, but raw logs default
+/// to the user's Documents (`Documents/KiteGC`) where they are easy to find / hand to Mission Planner.
+/// `custom_path` (empty = use default) overrides it; both are configurable independently in Settings.
+pub fn resolve_raw_log_dir(custom_path: &str, portable: bool) -> PathBuf {
+    if !custom_path.is_empty() {
+        return PathBuf::from(custom_path);
+    }
+
+    if portable {
+        if let Some(exe_dir) = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        {
+            return exe_dir.join("data");
+        }
+    }
+
+    // Default: the user's Documents folder → Documents/KiteGC (Windows honours OneDrive relocation,
+    // Linux uses XDG_DOCUMENTS_DIR). Falls back to ~/Documents, then the current dir.
+    if let Some(docs) = dirs::document_dir() {
+        return docs.join("KiteGC");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join("Documents").join("KiteGC");
+    }
+    PathBuf::from(".")
+}
+
 // ── Schema migrations ────────────────────────────────────────────────
 
 fn get_user_version(conn: &Connection) -> SqlResult<u32> {
@@ -170,6 +199,10 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
         migrate_v11_to_v12(conn)?;
     }
 
+    if current < 13 {
+        migrate_v12_to_v13(conn)?;
+    }
+
     // Self-heal: ensure the latest schema actually exists even if a prior version bump left it
     // incomplete. Legacy migrations call set_user_version(CURRENT), so a CURRENT bump can
     // mark the DB as the newest version without the matching migration ever creating its
@@ -179,6 +212,7 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
     ensure_v10_schema(conn)?;
     ensure_v11_schema(conn)?;
     ensure_v12_schema(conn)?;
+    ensure_v13_schema(conn)?;
 
     Ok(())
 }
@@ -331,6 +365,22 @@ fn ensure_v12_schema(conn: &Connection) -> SqlResult<()> {
 
 fn migrate_v11_to_v12(conn: &Connection) -> SqlResult<()> {
     ensure_v12_schema(conn)?;
+    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    Ok(())
+}
+
+/// v13: flight-local time. `flights.utc_offset_min` = the local UTC offset (minutes, east-positive) at
+/// the flight location, DST-aware (ADR-048). Additive + idempotent; old rows keep NULL → displayed in
+/// UTC. `start_time` itself is unchanged (always true UTC going forward).
+fn ensure_v13_schema(conn: &Connection) -> SqlResult<()> {
+    if !column_exists(conn, "flights", "utc_offset_min")? {
+        conn.execute_batch("ALTER TABLE flights ADD COLUMN utc_offset_min INTEGER;")?;
+    }
+    Ok(())
+}
+
+fn migrate_v12_to_v13(conn: &Connection) -> SqlResult<()> {
+    ensure_v13_schema(conn)?;
     set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
     Ok(())
 }
@@ -494,10 +544,10 @@ pub fn insert_flight(conn: &Connection, flight: &Flight) -> SqlResult<i64> {
             start_lat, start_lon, location_name,
             weather_temp_c, weather_wind_ms, weather_wind_deg, weather_desc,
             max_alt_m, max_speed_ms, max_distance_m, total_distance_m,
-            battery_used_mah, notes, pilot_name, pilot_id, battery_serial
+            battery_used_mah, notes, pilot_name, pilot_id, battery_serial, utc_offset_min
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-            ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26
+            ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27
         )",
         params![
             flight.start_time.to_rfc3339(),
@@ -526,6 +576,7 @@ pub fn insert_flight(conn: &Connection, flight: &Flight) -> SqlResult<i64> {
             flight.pilot_name,
             flight.pilot_id,
             flight.battery_serial,
+            flight.utc_offset_min,
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -826,7 +877,8 @@ pub fn remove_temp_session(temp_path: &Path) {
 pub fn list_flights(conn: &Connection) -> SqlResult<Vec<FlightSummary>> {
     let mut stmt = conn.prepare(
         "SELECT id, start_time, duration_sec, source, craft_name, location_name,
-            max_alt_m, max_speed_ms, total_distance_m, platform_type, linked_flight_id, notes
+            max_alt_m, max_speed_ms, total_distance_m, platform_type, linked_flight_id, notes,
+            utc_offset_min
          FROM flights ORDER BY start_time DESC",
     )?;
 
@@ -849,6 +901,7 @@ pub fn list_flights(conn: &Connection) -> SqlResult<Vec<FlightSummary>> {
             platform_type: row.get(9)?,
             linked_flight_id: row.get(10)?,
             notes: row.get(11)?,
+            utc_offset_min: row.get(12)?,
         })
     })?;
 
@@ -863,7 +916,8 @@ pub fn get_flight(conn: &Connection, flight_id: i64) -> SqlResult<Option<Flight>
                 start_lat, start_lon, location_name,
                 weather_temp_c, weather_wind_ms, weather_wind_deg, weather_desc,
                 max_alt_m, max_speed_ms, max_distance_m, total_distance_m,
-                battery_used_mah, notes, linked_flight_id, pilot_name, pilot_id, battery_serial
+                battery_used_mah, notes, linked_flight_id, pilot_name, pilot_id, battery_serial,
+                utc_offset_min
          FROM flights WHERE id = ?1",
     )?;
 
@@ -909,6 +963,7 @@ pub fn get_flight(conn: &Connection, flight_id: i64) -> SqlResult<Option<Flight>
             pilot_name: row.get(25)?,
             pilot_id: row.get(26)?,
             battery_serial: row.get(27)?,
+            utc_offset_min: row.get(28)?,
         })
     })?;
 
@@ -1135,7 +1190,8 @@ pub fn delete_mission(conn: &Connection, id: i64) -> SqlResult<()> {
 pub fn list_flights_for_mission(conn: &Connection, mission_id: i64) -> SqlResult<Vec<FlightSummary>> {
     let mut stmt = conn.prepare(
         "SELECT id, start_time, duration_sec, source, craft_name, location_name,
-            max_alt_m, max_speed_ms, total_distance_m, platform_type, linked_flight_id, notes
+            max_alt_m, max_speed_ms, total_distance_m, platform_type, linked_flight_id, notes,
+            utc_offset_min
          FROM flights WHERE mission_id = ?1 ORDER BY start_time DESC",
     )?;
     let rows = stmt.query_map(params![mission_id], |row| {
@@ -1156,6 +1212,7 @@ pub fn list_flights_for_mission(conn: &Connection, mission_id: i64) -> SqlResult
             platform_type: row.get(9)?,
             linked_flight_id: row.get(10)?,
             notes: row.get(11)?,
+            utc_offset_min: row.get(12)?,
         })
     })?;
     rows.collect()
@@ -1324,7 +1381,8 @@ pub fn battery_aggregate(conn: &Connection, serial: &str) -> SqlResult<BatteryAg
 pub fn list_flights_for_serial(conn: &Connection, serial: &str) -> SqlResult<Vec<FlightSummary>> {
     let mut stmt = conn.prepare(
         "SELECT id, start_time, duration_sec, source, craft_name, location_name,
-            max_alt_m, max_speed_ms, total_distance_m, platform_type, linked_flight_id, notes
+            max_alt_m, max_speed_ms, total_distance_m, platform_type, linked_flight_id, notes,
+            utc_offset_min
          FROM flights WHERE battery_serial = ?1 ORDER BY start_time DESC",
     )?;
     let rows = stmt.query_map(params![serial], |row| {
@@ -1345,6 +1403,7 @@ pub fn list_flights_for_serial(conn: &Connection, serial: &str) -> SqlResult<Vec
             platform_type: row.get(9)?,
             linked_flight_id: row.get(10)?,
             notes: row.get(11)?,
+            utc_offset_min: row.get(12)?,
         })
     })?;
     rows.collect()
@@ -1534,6 +1593,7 @@ pub fn find_duplicate_flight(
                     pilot_name: None,
                     pilot_id: None,
                     battery_serial: None,
+                    utc_offset_min: None,
                 })
             },
         )
@@ -1720,6 +1780,7 @@ pub fn find_linkable_live_flight(
                     platform_type: row.get(9)?,
                     linked_flight_id: row.get(10)?,
                     notes: None,
+                    utc_offset_min: None,
                 })
             },
         )
@@ -1871,6 +1932,7 @@ mod tests {
             pilot_name: None,
             pilot_id: None,
             battery_serial: None,
+            utc_offset_min: None,
         };
         let id = insert_flight(&conn, &flight).unwrap();
         let loaded = get_flight(&conn, id).unwrap().unwrap();
@@ -1911,6 +1973,7 @@ mod tests {
             pilot_name: None,
             pilot_id: None,
             battery_serial: None,
+            utc_offset_min: None,
         };
         let id = insert_flight(&conn, &flight).unwrap();
         finalize_flight(
@@ -1970,6 +2033,7 @@ mod tests {
             pilot_name: None,
             pilot_id: None,
             battery_serial: None,
+            utc_offset_min: None,
         };
         let fid = insert_flight(&conn, &flight).unwrap();
 
@@ -2060,6 +2124,7 @@ mod tests {
             pilot_name: None,
             pilot_id: None,
             battery_serial: None,
+            utc_offset_min: None,
         };
         let fid = insert_flight(&conn, &flight).unwrap();
         let rec = TelemetryRecord {
@@ -2148,6 +2213,7 @@ mod tests {
             pilot_name: None,
             pilot_id: None,
             battery_serial: None,
+            utc_offset_min: None,
         };
         let flight_id = insert_flight(&conn, &flight).unwrap();
         insert_blackbox_records(&conn, flight_id, &[(123_000, "{}".into())]).unwrap();

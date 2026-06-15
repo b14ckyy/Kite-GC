@@ -141,6 +141,11 @@ fn handler_loop(
             Ok(MavlinkCommand::SendMessage { msg, reply }) => {
                 let frame = codec::serialize_v2(&gcs_header, &msg, &mut seq);
                 debug_tracker.on_tx(msg.message_id(), frame.len());
+                // Record our outgoing frame to the tlog too (mission upload, commands, …) → a faithful
+                // bidirectional .tlog, like Mission Planner / QGC.
+                if let Some(ref rec) = recorder {
+                    if let Ok(mut r) = rec.lock() { r.write_raw_mavlink_frame(&frame); }
+                }
                 let result = transport
                     .write_bytes(&frame)
                     .map_err(|e| format!("MAVLink send failed: {}", e));
@@ -172,6 +177,9 @@ fn handler_loop(
             let hb_msg = codec::gcs_heartbeat();
             let frame = codec::serialize_v2(&gcs_header, &hb_msg, &mut seq);
             debug_tracker.on_tx(hb_msg.message_id(), frame.len());
+            if let Some(ref rec) = recorder {
+                if let Ok(mut r) = rec.lock() { r.write_raw_mavlink_frame(&frame); }
+            }
             if let Err(e) = transport.write_bytes(&frame) {
                 log::warn!("Failed to send GCS heartbeat: {}", e);
             }

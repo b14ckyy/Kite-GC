@@ -127,6 +127,8 @@ export interface FlightSummary {
   platform_type: number;
   linked_flight_id: number | null;
   notes: string | null;
+  /** Local UTC offset (minutes, east-positive) at the flight location; null → display in UTC (ADR-048). */
+  utc_offset_min: number | null;
 }
 
 export interface Flight {
@@ -158,6 +160,8 @@ export interface Flight {
   pilot_name: string | null;
   pilot_id: string | null;
   battery_serial: string | null;
+  /** Local UTC offset (minutes, east-positive) at the flight location; null → display in UTC (ADR-048). */
+  utc_offset_min: number | null;
 }
 
 export interface TelemetryRecord {

@@ -553,6 +553,18 @@ pub fn flightlog_default_db_path() -> String {
         .to_string()
 }
 
+/// Default raw-log directory (separate from the DB folder) — shown in Settings when no override is set.
+#[tauri::command]
+pub fn flightlog_default_raw_log_path() -> String {
+    let portable = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.join(".portable").exists()))
+        .unwrap_or(false);
+    db::resolve_raw_log_dir("", portable)
+        .to_string_lossy()
+        .to_string()
+}
+
 #[tauri::command]
 pub async fn flightlog_import_blackbox(
     file_path: String,

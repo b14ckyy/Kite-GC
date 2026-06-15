@@ -16,6 +16,8 @@ pub struct FlightLogSettings {
     pub db_enabled: bool,
     /// Custom database directory (empty string = default AppData)
     pub db_path: String,
+    /// Custom raw-log directory (empty string = default Documents/KiteGC). Separate from `db_path`.
+    pub raw_log_path: String,
     /// Whether to also write raw text log files
     pub raw_enabled: bool,
     /// Continuous raw logging: start recording on connect, not just on arm.
@@ -29,6 +31,7 @@ impl Default for FlightLogSettings {
             enabled: false,
             db_enabled: false,
             db_path: String::new(),
+            raw_log_path: String::new(),
             raw_enabled: false,
             raw_always: false,
         }
@@ -77,6 +80,10 @@ pub struct Flight {
     /// Serial of the battery pack flown (soft link — resolved to a `battery_packs` row by
     /// serial match at read time; may reference a serial with no pack row → "not in library")
     pub battery_serial: Option<String>,
+    /// Local UTC offset (minutes, east-positive) at the flight location, DST-aware (ADR-048).
+    /// `start_time` is always true UTC; this offset shifts it to flight-local time for display.
+    /// `None` (old rows / no GPS) → display in UTC.
+    pub utc_offset_min: Option<i32>,
 }
 
 /// A reusable mission stored in the library (row in `missions` table).
@@ -295,6 +302,8 @@ pub struct FlightSummary {
     pub platform_type: u8,
     pub linked_flight_id: Option<i64>,
     pub notes: Option<String>,
+    /// Local UTC offset (minutes, east-positive) at the flight location, DST-aware (ADR-048).
+    pub utc_offset_min: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

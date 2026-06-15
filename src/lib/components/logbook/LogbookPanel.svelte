@@ -17,6 +17,8 @@
   import {
     buildFlightTree,
     formatDurationSec,
+    formatFlightDateTime,
+    flightTzLabel,
     type BlackboxImportProgress,
     type Flight,
     type FlightSummary,
@@ -245,11 +247,6 @@
     return { update(s: boolean) { if (s) node.scrollIntoView({ block: 'nearest' }); } };
   }
 
-  function formatDateTime(value: string): string {
-    const d = new Date(value);
-    return d.toLocaleString();
-  }
-
   function flightListMarker(f: FlightSummary): string {
     let marker = '';
     if (f.source === 'blackbox') marker = '◈ ';
@@ -393,7 +390,7 @@
                             onclick={(e) => handleFlightClick(f.id, e)}
                             use:revealSelected={selectedFlightId === f.id && !hasMultiSelection}
                           >
-                            <div class="logbook-item-title">{flightListMarker(f)}{formatDateTime(f.start_time)} <span class="logbook-item-id">#{f.id}</span></div>
+                            <div class="logbook-item-title">{flightListMarker(f)}{formatFlightDateTime(f.start_time, f.utc_offset_min)} <span class="logbook-item-tz">{flightTzLabel(f.utc_offset_min)}</span> <span class="logbook-item-id">#{f.id}</span></div>
                             <div class="logbook-item-meta">
                               <span>{f.craft_name || $t('logbook.unnamedCraft')}</span>
                               <span>{f.location_name || $t('logbook.unknownLocation')}</span>
@@ -719,6 +716,13 @@
     font-weight: 400;
     color: #777;
     margin-left: 4px;
+  }
+
+  .logbook-item-tz {
+    font-size: 10px;
+    font-weight: 400;
+    color: #949494;
+    margin-left: 2px;
   }
 
   .logbook-item-meta {

@@ -98,6 +98,7 @@ export interface ConnectParams {
   flightLogEnabled: boolean;
   flightLogDbEnabled: boolean;
   flightLogPath: string;
+  flightLogRawPath: string;
   flightLogRaw: boolean;
   flightLogRawAlways: boolean;
 }
@@ -121,6 +122,7 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
     flightLogEnabled: params.flightLogEnabled,
     flightLogDbEnabled: params.flightLogDbEnabled,
     flightLogPath: params.flightLogPath,
+    flightLogRawPath: params.flightLogRawPath,
     flightLogRaw: params.flightLogRaw,
     flightLogRawAlways: params.flightLogRawAlways,
   });

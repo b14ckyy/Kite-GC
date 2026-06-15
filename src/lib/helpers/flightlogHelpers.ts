@@ -10,9 +10,49 @@ import type {
   LogbookSortDimension,
 } from '$lib/stores/flightlogTypes';
 
-function dateKey(ts: string): string {
-  const d = new Date(ts);
-  return d.toISOString().slice(0, 10);
+// ── Flight-local time (ADR-048) ──────────────────────────────────────────────
+// A flight's `start_time` is always true UTC; `utc_offset_min` shifts it to the wall-clock of the
+// place the flight happened. We shift the epoch by the offset and then read the **UTC** components of
+// the result — that yields the flight-local wall clock without involving the browser's own timezone.
+// Unknown offset (null) → fall back to UTC and mark it, rather than guessing.
+
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+/** The flight-local `Date` (read its `getUTC*` parts), or null if the timestamp is unparseable. */
+export function flightLocalDate(isoUtc: string, offsetMin: number | null | undefined): Date | null {
+  const baseMs = new Date(isoUtc).getTime();
+  if (!Number.isFinite(baseMs)) return null;
+  return new Date(baseMs + (offsetMin ?? 0) * 60_000);
+}
+
+/** Timezone label, e.g. `UTC+02:00`, or `UTC` when the offset is unknown. */
+export function flightTzLabel(offsetMin: number | null | undefined): string {
+  if (offsetMin == null) return 'UTC';
+  const sign = offsetMin < 0 ? '-' : '+';
+  const a = Math.abs(offsetMin);
+  return `UTC${sign}${pad2(Math.floor(a / 60))}:${pad2(a % 60)}`;
+}
+
+/** `YYYY-MM-DD HH:MM` in flight-local time (no timezone label — pair with {@link flightTzLabel}). */
+export function formatFlightDateTime(isoUtc: string, offsetMin: number | null | undefined): string {
+  const d = flightLocalDate(isoUtc, offsetMin);
+  if (!d) return '-';
+  return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())} ${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`;
+}
+
+/** `HH:MM:SS` in flight-local time (for the replay clock readout). */
+export function formatFlightClock(isoUtc: string, offsetMin: number | null | undefined): string | null {
+  const d = flightLocalDate(isoUtc, offsetMin);
+  if (!d) return null;
+  return `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())}`;
+}
+
+/** Date-only grouping key (`YYYY-MM-DD`) in flight-local time, so a late-evening flight groups under
+ *  its local date rather than the UTC one. */
+function dateKey(ts: string, offsetMin?: number | null): string {
+  const d = flightLocalDate(ts, offsetMin);
+  if (!d) return ts.slice(0, 10);
+  return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
 }
 
 function primaryOrUnknown(v: string | null | undefined, unknown = 'Unknown'): string {
@@ -32,7 +72,7 @@ function getModeDimensions(
 function getDimensionValue(f: FlightSummary, dim: LogbookSortDimension): string {
   if (dim === 'aircraft') return primaryOrUnknown(f.craft_name, 'Unnamed craft');
   if (dim === 'location') return primaryOrUnknown(f.location_name, 'Unknown location');
-  return dateKey(f.start_time);
+  return dateKey(f.start_time, f.utc_offset_min);
 }
 
 function compareDimensionValues(a: string, b: string, dim: LogbookSortDimension): number {

@@ -216,7 +216,11 @@ fn create_export_db(path: &Path) -> Result<Connection, String> {
             total_distance_m REAL,
             battery_used_mah INTEGER,
             notes           TEXT,
-            linked_flight_id INTEGER REFERENCES flights(id)
+            linked_flight_id INTEGER REFERENCES flights(id),
+            pilot_name      TEXT,
+            pilot_id        TEXT,
+            battery_serial  TEXT,
+            utc_offset_min  INTEGER
         );
 
         CREATE TABLE IF NOT EXISTS telemetry_records (

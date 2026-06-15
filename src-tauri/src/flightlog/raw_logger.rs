@@ -8,7 +8,7 @@ use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local, Utc};
 
 use super::types::TelemetryRecord;
 
@@ -26,9 +26,11 @@ impl RawLogger {
         let log_dir = base_dir.join("raw_logs");
         fs::create_dir_all(&log_dir).map_err(|e| format!("Cannot create raw_logs dir: {}", e))?;
 
+        // Name in the GCS's local time (it sits at the flight location) so the file title matches the
+        // flight-local clock shown in the logbook (ADR-048), not UTC.
         let filename = format!(
             "{}_flight_{}.txt",
-            start_time.format("%Y-%m-%d_%H%M%S"),
+            start_time.with_timezone(&Local).format("%Y-%m-%d_%H%M%S"),
             flight_id
         );
         let path = log_dir.join(&filename);

@@ -111,16 +111,17 @@
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   }
 
-  // Wall-clock time-of-day at the current playback position = flight start + elapsed.
-  // The DB stores the log's reported time verbatim in the UTC fields (no TZ conversion),
-  // so format in UTC to recover the original on-aircraft clock. NOTE: INAV writes the
-  // pilot's local time → correct as-is. ArduPilot TZ handling still TBD (may need offset).
+  // Wall-clock time-of-day at the current playback position = flight start + elapsed, shown in the
+  // flight's LOCAL time (ADR-048). `start_time` is true UTC; `utc_offset_min` is the location's offset
+  // (null ⇒ UTC). We add the offset to the epoch and read UTC components to get the local wall clock
+  // without involving the browser timezone.
   const logClock = $derived.by(() => {
     const s = selectedFlight?.start_time;
     if (!s) return null;
     const base = new Date(s).getTime();
     if (!Number.isFinite(base)) return null;
-    const d = new Date(base + playbackCurrentMs);
+    const offMin = selectedFlight?.utc_offset_min ?? 0;
+    const d = new Date(base + playbackCurrentMs + offMin * 60_000);
     const p = (n: number) => String(n).padStart(2, '0');
     return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
   });

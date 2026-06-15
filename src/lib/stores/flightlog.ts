@@ -24,7 +24,13 @@ export type {
   KflightImportResult,
 } from './flightlogTypes';
 
-export { buildFlightTree, formatDurationSec } from '../helpers/flightlogHelpers';
+export {
+  buildFlightTree,
+  formatDurationSec,
+  formatFlightDateTime,
+  formatFlightClock,
+  flightTzLabel,
+} from '../helpers/flightlogHelpers';
 
 // ── Tauri command wrappers ───────────────────────────────────────────
 
@@ -372,6 +378,10 @@ export async function updateFlightWeather(
 
 export async function getDefaultFlightlogPath(): Promise<string> {
   return invoke<string>('flightlog_default_db_path');
+}
+
+export async function getDefaultRawLogPath(): Promise<string> {
+  return invoke<string>('flightlog_default_raw_log_path');
 }
 
 export async function importBlackboxLog(

@@ -13,7 +13,7 @@ use std::io::{BufWriter, Write};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local, Utc};
 
 pub struct TlogLogger {
     writer: BufWriter<File>,
@@ -30,9 +30,11 @@ impl TlogLogger {
         let log_dir = base_dir.join("raw_logs");
         fs::create_dir_all(&log_dir).map_err(|e| format!("Cannot create raw_logs dir: {}", e))?;
 
+        // Name in the GCS's local time (it sits at the flight location) so the file title matches the
+        // flight-local clock shown in the logbook (ADR-048), not UTC.
         let filename = format!(
             "{}_flight_{}.tlog",
-            start_time.format("%Y-%m-%d_%H%M%S"),
+            start_time.with_timezone(&Local).format("%Y-%m-%d_%H%M%S"),
             flight_id
         );
         let path = log_dir.join(&filename);

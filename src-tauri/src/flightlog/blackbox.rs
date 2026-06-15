@@ -128,7 +128,6 @@ where
     let first_us = rows.first().map(|row| row.timestamp_us).unwrap_or(0);
     let last_us = rows.last().map(|row| row.timestamp_us).unwrap_or(0);
     let duration_us = (last_us - first_us).max(0);
-    let end_time = start_time + Duration::microseconds(duration_us);
     let duration_sec = Some((duration_us / 1_000_000).max(0));
 
     let mut start_lat = None;
@@ -192,6 +191,20 @@ where
     // Capture before constructing Flight (which moves other header fields out).
     let logged_wp_count = header.logged_wp_count;
 
+    // INAV Blackbox stores the pilot's LOCAL time in the header (it lands in `start_time`'s UTC
+    // components without conversion). Resolve the flight-location offset from the start coordinates,
+    // then back-compute the true-UTC start so `start_time` is a real absolute instant (ADR-048). This
+    // also repairs the 3D real-lighting sun for these imports (it reads `start_time` as true UTC).
+    let utc_offset_min = match (start_lat, start_lon) {
+        (Some(la), Some(lo)) => super::timezone::offset_min_at(la, lo, start_time),
+        _ => None,
+    };
+    let start_time = match utc_offset_min {
+        Some(off) => start_time - Duration::minutes(off as i64),
+        None => start_time,
+    };
+    let end_time = start_time + Duration::microseconds(duration_us);
+
     let flight = Flight {
         id: 0,
         start_time,
@@ -221,6 +234,7 @@ where
         pilot_name: None,
         pilot_id: None,
         battery_serial: None,
+        utc_offset_min,
     };
 
     report(72, "store-flight", "Creating logbook entry...");

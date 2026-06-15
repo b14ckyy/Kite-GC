@@ -233,6 +233,7 @@ export interface AppSettings {
   flightLoggingEnabled: boolean;
   flightRecordingEnabled: boolean;
   flightLogDbPath: string;
+  flightLogRawPath: string;
   flightLogRawEnabled: boolean;
   flightLogRawAlways: boolean;
   // Mission Control
@@ -296,6 +297,7 @@ const defaults: AppSettings = {
   flightLoggingEnabled: true,
   flightRecordingEnabled: true,
   flightLogDbPath: '',
+  flightLogRawPath: '',
   flightLogRawEnabled: false,
   flightLogRawAlways: false,
   defaultWpAltitudeM: 50,

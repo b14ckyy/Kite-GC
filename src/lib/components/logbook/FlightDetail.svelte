@@ -6,7 +6,7 @@
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import { convertAltitude, convertDistance, convertSpeed, convertTemperature, formatConverted } from '$lib/utils/units';
-  import { formatDurationSec, missionDbForFlight, flightLoggedWpCount, flightLinkMission, flightUnlinkMission, missionDbSave, missionDbGeocode, flightSetBatterySerial, batteryDbFindBySerial } from '$lib/stores/flightlog';
+  import { formatDurationSec, formatFlightDateTime, flightTzLabel, missionDbForFlight, flightLoggedWpCount, flightLinkMission, flightUnlinkMission, missionDbSave, missionDbGeocode, flightSetBatterySerial, batteryDbFindBySerial } from '$lib/stores/flightlog';
   import type { Flight, LibraryMission, BatteryPack } from '$lib/stores/flightlogTypes';
   import type { InterfaceSettings } from '$lib/stores/settings';
   import { settings } from '$lib/stores/settings';
@@ -311,11 +311,6 @@
     return $t('logbook.sourceLive');
   }
 
-  function formatDateTime(value: string): string {
-    const d = new Date(value);
-    return d.toLocaleString();
-  }
-
   let tempUnitLabel = $derived(interfaceSettings.temperatureUnit === 'f' ? '°F' : '°C');
   let windUnitLabel = $derived(convertSpeed(1, interfaceSettings.speedUnit).unit);
 
@@ -447,7 +442,7 @@
       {/if}
     </span>
     <span class="fc-label">{$t('logbook.started')}</span>
-    <span class="fc-value">{formatDateTime(flight.start_time)}</span>
+    <span class="fc-value">{formatFlightDateTime(flight.start_time, flight.utc_offset_min)} <span class="fc-tz">{flightTzLabel(flight.utc_offset_min)}</span></span>
     <span class="fc-label">{$t('logbook.duration')}</span>
     <span class="fc-value">{formatDurationSec(flight.duration_sec)}</span>
     <span class="fc-label">{$t('logbook.location')}</span>
@@ -545,6 +540,12 @@
   .fc-value {
     color: #e0e0e0;
     font-weight: 600;
+  }
+
+  .fc-tz {
+    color: #949494;
+    font-weight: 400;
+    font-size: 0.85em;
   }
 
   .weather-value-row {

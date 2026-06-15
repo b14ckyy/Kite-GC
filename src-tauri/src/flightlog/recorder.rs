@@ -202,6 +202,9 @@ pub fn summarize_temp_session(
         pilot_name: None,
         pilot_id: None,
         battery_serial: None,
+        // Live recording: the GCS sits at the flight location, so its own offset is the flight-local
+        // offset (ADR-048).
+        utc_offset_min: Some(super::timezone::local_offset_min_now()),
     };
     let count = rows.len() as i64;
     Ok((
@@ -342,6 +345,8 @@ pub struct FlightRecorder {
     fc_info: FcInfo,
     protocol: String,
     db_file_path: std::path::PathBuf,
+    /// Base dir for raw logs (raw_logs/*.tlog | *.rawmsp) — separate from the DB folder.
+    raw_log_dir: std::path::PathBuf,
     raw_logger: Option<RawLogger>,
     tlog_logger: Option<TlogLogger>,
     snapshot: TelemetrySnapshot,
@@ -380,7 +385,9 @@ impl FlightRecorder {
         resume: PendingSessionHandle,
     ) -> Result<Self, String> {
         let db_path = db::resolve_db_path(&settings.db_path, portable);
+        let raw_log_dir = db::resolve_raw_log_dir(&settings.raw_log_path, portable);
         log::info!("Flight log database: {}", db_path.display());
+        log::info!("Raw log directory: {}", raw_log_dir.display());
 
         // Validate the flight DB is openable now (fail fast). The actual writes use their own
         // connections — the temp store on arm, and the main DB at commit (ADR-041).
@@ -393,6 +400,7 @@ impl FlightRecorder {
             fc_info,
             protocol: protocol.to_string(),
             db_file_path: db_path,
+            raw_log_dir,
             raw_logger: None,
             tlog_logger: None,
             snapshot: TelemetrySnapshot::default(),
@@ -415,10 +423,7 @@ impl FlightRecorder {
             return;
         }
         let now = Utc::now();
-        let log_dir = self
-            .db_file_path
-            .parent()
-            .unwrap_or(std::path::Path::new("."));
+        let log_dir = self.raw_log_dir.as_path();
 
         // Use session timestamp + "session" label, flight_id=0 (no DB flight yet)
         if self.protocol == "MAVLink" {
@@ -692,10 +697,7 @@ impl FlightRecorder {
 
         // Start raw/tlog logger if enabled AND not already running (continuous mode). The raw log is
         // a parallel backup; it has no DB flight id, so it is named by a timestamp pseudo-id.
-        let log_dir = self
-            .db_file_path
-            .parent()
-            .unwrap_or(std::path::Path::new("."));
+        let log_dir = self.raw_log_dir.as_path();
         let raw_pseudo_id = now.timestamp();
 
         if !self.settings.raw_always {
@@ -826,6 +828,9 @@ impl FlightRecorder {
             pilot_name: None,
             pilot_id: None,
             battery_serial: None,
+            // Live recording: the GCS sits at the flight location, so its own offset is the
+            // flight-local offset (ADR-048).
+            utc_offset_min: Some(super::timezone::local_offset_min_now()),
         };
         Some((
             PendingSession {

@@ -904,6 +904,12 @@ where
         pilot_name: None,
         pilot_id: None,
         battery_serial: None,
+        // `start_time` is true UTC (GPS week→UTC); resolve the flight-local offset from the start
+        // coordinates for display (ADR-048).
+        utc_offset_min: match (start_lat, start_lon) {
+            (Some(la), Some(lo)) => super::timezone::offset_min_at(la, lo, start_time),
+            _ => None,
+        },
     };
 
     let flight_id = db::insert_flight(conn, &flight)

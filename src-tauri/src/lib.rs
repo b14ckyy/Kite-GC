@@ -18,7 +18,7 @@ use commands::connection::{connect, disconnect, list_serial_ports, scan_ble_devi
 use commands::flightlog::{
     flightlog_list, flightlog_get, flightlog_get_track, flightlog_delete,
     flightlog_update_notes, flightlog_update_craft_name, flightlog_update_platform_type, flightlog_update_pilot, flightlog_update_weather, flightlog_geocode, flightlog_fetch_weather,
-    flightlog_default_db_path, flightlog_import_blackbox,
+    flightlog_default_db_path, flightlog_default_raw_log_path, flightlog_import_blackbox,
     flightlog_export, flightlog_export_blackbox, flightlog_export_track, flightlog_import_kflight,
     flightlog_kflight_list, flightlog_kflight_get, flightlog_kflight_track,
     flightlog_probe_ardupilot, flightlog_decode_ardupilot_csv,
@@ -191,6 +191,7 @@ pub fn run() {
             flightlog_geocode,
             flightlog_fetch_weather,
             flightlog_default_db_path,
+            flightlog_default_raw_log_path,
             flightlog_import_blackbox,
             flightlog_export,
             flightlog_export_blackbox,

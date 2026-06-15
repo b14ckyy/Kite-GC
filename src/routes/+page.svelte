@@ -77,6 +77,7 @@
   import { layout, GRID_DEFAULTS } from '$lib/stores/layout';
   import {
     getDefaultFlightlogPath,
+    getDefaultRawLogPath,
     type BlackboxImportProgress,
     type Flight,
     type FlightSummary,
@@ -349,9 +350,11 @@
   let flightLoggingEnabled = $state(false);
   let flightRecordingEnabled = $state(false);
   let flightLogDbPath = $state("");
+  let flightLogRawPath = $state("");
   let flightLogRawEnabled = $state(false);
   let flightLogRawAlways = $state(false);
   let defaultFlightLogPath = $state("");
+  let defaultRawLogPath = $state("");
   let mapProvider = $state("osm");
   let mapCacheMaxMB = $state(200);
   let cesiumIonToken = $state("");
@@ -542,6 +545,7 @@
   flightLoggingEnabled = saved.flightLoggingEnabled;
   flightRecordingEnabled = saved.flightRecordingEnabled ?? false;
   flightLogDbPath = saved.flightLogDbPath;
+  flightLogRawPath = saved.flightLogRawPath ?? '';
   flightLogRawEnabled = saved.flightLogRawEnabled;
   flightLogRawAlways = saved.flightLogRawAlways ?? false;
   mapProvider = saved.mapProvider;
@@ -781,6 +785,7 @@
     if (patch.flightLogRawEnabled != null) flightLogRawEnabled = patch.flightLogRawEnabled;
     if (patch.flightLogRawAlways != null) flightLogRawAlways = patch.flightLogRawAlways;
     if (patch.flightLogDbPath != null) flightLogDbPath = patch.flightLogDbPath;
+    if (patch.flightLogRawPath != null) flightLogRawPath = patch.flightLogRawPath;
     if (patch.mapProvider != null) mapProvider = patch.mapProvider;
     if (patch.mapCacheMaxMB != null) mapCacheMaxMB = patch.mapCacheMaxMB;
     if (patch.cesiumIonToken != null) cesiumIonToken = patch.cesiumIonToken;
@@ -858,6 +863,27 @@
   function resetFlightLogPath() {
     flightLogDbPath = '';
     settings.patch({ flightLogDbPath: '' });
+  }
+
+  async function chooseRawLogPath() {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        defaultPath: flightLogRawPath || defaultRawLogPath || undefined,
+      });
+      if (typeof selected === 'string' && selected.length > 0) {
+        flightLogRawPath = selected;
+        settings.patch({ flightLogRawPath });
+      }
+    } catch (e) {
+      console.error('Failed to choose raw log path', e);
+    }
+  }
+
+  function resetRawLogPath() {
+    flightLogRawPath = '';
+    settings.patch({ flightLogRawPath: '' });
   }
 
   async function loadLogbook() {
@@ -1526,7 +1552,7 @@
     isConnecting = true;
     errorMsg = "";
     connection.update((c) => ({ ...c, status: "connecting" }));
-    settings.patch({ lastPort: selectedPort, lastBaud: selectedBaud, lastProtocol: selectedProtocol, lastTransport: selectedTransport, lastHost: tcpHost, lastTcpPort: tcpPort, lastBleDevice: selectedBleDevice, flightLoggingEnabled, flightRecordingEnabled, flightLogDbPath, flightLogRawEnabled, flightLogRawAlways });
+    settings.patch({ lastPort: selectedPort, lastBaud: selectedBaud, lastProtocol: selectedProtocol, lastTransport: selectedTransport, lastHost: tcpHost, lastTcpPort: tcpPort, lastBleDevice: selectedBleDevice, flightLoggingEnabled, flightRecordingEnabled, flightLogDbPath, flightLogRawPath, flightLogRawEnabled, flightLogRawAlways });
 
     try {
       await connectFC({
@@ -1544,6 +1570,7 @@
         flightLogEnabled: flightRecordingEnabled,
         flightLogDbEnabled: flightLoggingEnabled && flightRecordingEnabled,
         flightLogPath: flightLogDbPath,
+        flightLogRawPath,
         flightLogRaw: flightRecordingEnabled && (!flightLoggingEnabled || flightLogRawEnabled),
         flightLogRawAlways: flightRecordingEnabled && flightLogRawAlways,
       });
@@ -1562,6 +1589,11 @@
       defaultFlightLogPath = await getDefaultFlightlogPath();
     } catch {
       defaultFlightLogPath = '';
+    }
+    try {
+      defaultRawLogPath = await getDefaultRawLogPath();
+    } catch {
+      defaultRawLogPath = '';
     }
     if (activeTab === 'logbook') {
       await loadLogbook();
@@ -2185,6 +2217,8 @@
         {flightLogRawAlways}
         {flightLogDbPath}
         {defaultFlightLogPath}
+        {flightLogRawPath}
+        {defaultRawLogPath}
         {defaultWpAltitudeM}
         {defaultPhTimeSec}
         {warnAltitudeM}
@@ -2199,6 +2233,8 @@
         onClearCache={clearCache}
         onChooseFlightLogPath={chooseFlightLogPath}
         onResetFlightLogPath={resetFlightLogPath}
+        onChooseRawLogPath={chooseRawLogPath}
+        onResetRawLogPath={resetRawLogPath}
         onToggleWidget={toggleWidget}
       />
     {:else if activeTab === 'logbook'}

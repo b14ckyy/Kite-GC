@@ -50,6 +50,8 @@
     flightLogRawAlways = false,
     flightLogDbPath = '',
     defaultFlightLogPath = '',
+    flightLogRawPath = '',
+    defaultRawLogPath = '',
     defaultWpAltitudeM = 50,
     defaultPhTimeSec = 30,
     warnAltitudeM = 120,
@@ -64,6 +66,8 @@
     onClearCache = () => {},
     onChooseFlightLogPath = () => {},
     onResetFlightLogPath = () => {},
+    onChooseRawLogPath = () => {},
+    onResetRawLogPath = () => {},
     onToggleWidget = (_widgetId: string) => {},
     onGeoCheck = () => {},
   }: {
@@ -89,6 +93,8 @@
     flightLogRawAlways?: boolean;
     flightLogDbPath?: string;
     defaultFlightLogPath?: string;
+    flightLogRawPath?: string;
+    defaultRawLogPath?: string;
     defaultWpAltitudeM?: number;
     defaultPhTimeSec?: number;
     warnAltitudeM?: number;
@@ -103,6 +109,8 @@
     onClearCache?: () => void;
     onChooseFlightLogPath?: () => void;
     onResetFlightLogPath?: () => void;
+    onChooseRawLogPath?: () => void;
+    onResetRawLogPath?: () => void;
     onToggleWidget?: (widgetId: string) => void;
     onGeoCheck?: () => void;
   } = $props();
@@ -459,6 +467,14 @@
           <input class="s-input path-input" type="text" readonly value={flightLogDbPath || defaultFlightLogPath || $t('settings.defaultPathUnknown')} />
           <Button variant="standard" size="sm" onclick={onChooseFlightLogPath}>{$t('settings.choose')}</Button>
           <Button variant="standard" size="sm" onclick={onResetFlightLogPath}>{$t('settings.useDefault')}</Button>
+        </div>
+      </div>
+      <div class="s-row s-row-stack">
+        <span class="s-label">{$t('settings.rawLogPath')}</span>
+        <div class="path-picker-row">
+          <input class="s-input path-input" type="text" readonly value={flightLogRawPath || defaultRawLogPath || $t('settings.defaultPathUnknown')} />
+          <Button variant="standard" size="sm" onclick={onChooseRawLogPath}>{$t('settings.choose')}</Button>
+          <Button variant="standard" size="sm" onclick={onResetRawLogPath}>{$t('settings.useDefault')}</Button>
         </div>
       </div>
     </div>
