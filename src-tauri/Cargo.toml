@@ -1,6 +1,6 @@
 [package]
 name = "kite-gc"
-version = "0.5.0"
+version = "0.8.0"
 description = "Kite Ground Control — Universal Ground Control Station"
 authors = ["you"]
 license = "GPL-3.0-or-later"
