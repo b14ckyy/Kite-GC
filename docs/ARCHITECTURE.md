@@ -2363,5 +2363,49 @@ flight-mode classification runs without box-ids (handshake-only); no reverse-geo
 
 ---
 
+## ADR-050: ArduPilot/PX4 Mission Library — One Shared DB Path, System-Tagged Format
+
+**Status**: Accepted (Phase 1 shipped) · **Date**: 2026-06-15
+**Related**: ADR-045 (shared mission icon layer), the multi-autopilot plan
+(`docs/active/MISSION_MULTIAUTOPILOT_PLAN.md`), the archived INAV library
+(`docs/archive/MISSION_LIBRARY_AND_DB.md`), MISSION_TRACKING_AND_PROVENANCE (provenance flags).
+**Detail**: `docs/active/ARDUPILOT_MISSION_LIBRARY.md`.
+
+**Problem**: ArduPilot missions could be planned, flown and exchanged as `.waypoints` files, but had
+no parity with INAV's mission **library** — save/dedup/retrieve/preview and flight↔mission linking.
+PX4 is on the roadmap and uses the **same** MAVLink mission protocol + `ArduWaypoint` model as
+ArduPilot, so a per-vendor library fork would be wasted work.
+
+**Decision**:
+1. **One format-agnostic DB layer, one shared frontend path.** The `missions` table (`format`,
+   `waypoints_json`, `content_hash` UNIQUE, flight `mission_id`) and the `mission_db_*` /
+   `flight_link_mission` commands were already protocol-neutral — **no Rust changes**. The work is a
+   parallel ArduPilot builder (`helpers/missionLibraryArdu.ts`) over the existing `ArduWaypoint`
+   model: content hash + geometry metadata + `buildArduMissionInput`. Functions are named for the
+   **model** (`hashArduWaypoints`), not the vendor, so PX4 reuses them unchanged.
+2. **`format` stores the concrete system** (`'ardupilot'` / `'px4'` / `'inav'`), never a generic
+   `'mavlink'` — load dispatch, the preview renderer and the Manager's format badge + filter key on
+   it. PX4 then appears automatically (first saved PX4 mission) with no code change; system-specific
+   behaviour (modes, command catalog, param semantics) stays in the layers that already branch on the
+   autopilot system (ADR-046 vehicle-filtered catalog, `autopilotContext`).
+3. **Content hash excludes launch/home (like INAV).** ArduPilot home is mission slot 0, which
+   `mavlink_proto/mission.rs` **drops on download** and re-injects on upload — so the `arduMission`
+   store holds only authored waypoints and home is naturally out of the hash (INAV excludes its
+   separate launch point the same way). `home_lat/lon` are null for AP missions.
+4. **Cross-format load reuses the autopilot-switch dialog.** INAV (`mission`) and ArduPilot
+   (`arduMission`) are independent stores, so switching the active system never destroys data; loading
+   a library mission of the other format switches the editor and offers **keep-in-memory / discard**
+   (the existing `confirmSystemSwitch('keep' | 'clear')`), and is **blocked** when a FC is connected
+   (locked to its type). Same-system load keeps the existing replace guard.
+5. **Flight↔mission link is system-aware** (`arduLoadedMissionId` mirrors `loadedMissionId`): arm-time
+   / End-Flight capture, the manual link in FlightDetail, and replay-load all dispatch by active
+   system. AP has no FC-sync provenance flag yet (Phase 2), so AP missions link on explicit opt-in.
+
+**Consequences**: ArduPilot reaches full library parity with INAV with zero backend change; PX4 is a
+thin future add-on, not a second mission stack. Phase 2 (deferred): full fc/file/db provenance flags
+for the ArduPilot store (sync indicators), mirroring MISSION_TRACKING_AND_PROVENANCE.
+
+---
+
 *End of Architecture Decision Records*
 

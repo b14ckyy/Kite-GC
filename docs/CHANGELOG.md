@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **ArduPilot/PX4 mission library — full parity with INAV (ADR-050).** ArduPilot missions can now be
+  **saved to the library, deduplicated, retrieved, previewed and linked to flights** exactly like INAV
+  missions — the ArduPilot editor gained a "Save to library" button and the "Mission Manager", and the
+  Manager itself is now format-aware: each mission shows a format tag (INAV / ArduPilot / PX4), a
+  **format filter** appears next to Import once two or more formats are present (listing only the formats
+  actually in the library), the preview renders ArduPilot missions, and `.waypoints` files can be imported
+  into the library. Loading a mission of the other format auto-switches the editor (keep-in-memory or
+  discard, since INAV and ArduPilot keep separate missions) and is blocked while a different FC is
+  connected. Live/imported ArduPilot flights link their mission the same way INAV flights do. Built on the
+  already format-agnostic mission DB — **no backend change** — and structured so **PX4 rides the same path**
+  (it appears automatically once a PX4 mission is saved; no further code needed).
 - **Import recorded raw logs into the logbook (ADR-049).** A new "Import Raw Log" action parses a
   recorded `.rawmsp` (MSP) or `.tlog` (MAVLink) file into the logbook. A continuous log (one file across
   many arm/disarm cycles) is **split into individual flights** at arm/disarm — applying the same 5 s
