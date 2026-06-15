@@ -516,7 +516,7 @@ FlightRecorder
     ├─ detect ARM/DISARM from MSPV2_INAV_STATUS arming_flags bit 2
     ├─ start/finish flight session rows in SQLite
     ├─ batch-write telemetry samples
-    └─ optional raw text log writer
+    └─ optional raw data log writer (.tlog / raw MSP, separate folder)
 ```
 
 **Data storage**:
@@ -2241,6 +2241,50 @@ longer flickers (z-fight removed; redundant rebuilds skipped). Costs: each line 
 (per-line colour/dash precludes one batched draw) — fine for mission-sized overlays; a residual
 partial-repaint flicker from `requestRenderMode` would be a separate render-trigger fix, not a line
 issue.
+
+---
+
+## ADR-048: Flight Timestamps — Store True UTC + Resolved Local Offset; Display in Flight-Location Local Time
+
+**Status**: Accepted — implemented
+**Related**: ADR-040/041 (live recording → `flights.start_time`), the Blackbox (`blackbox.rs`) +
+ArduPilot (`ardupilot.rs`) importers, the 3D real-lighting clock (`Map3D.svelte`), the log player +
+logbook list. Closes the open ArduPilot-TZ question tracked in the dev notes.
+
+**Context**: A `flights.start_time` carried an *inconsistent meaning* per source: live recording stored
+**true UTC** (`Utc::now()`), ArduPilot `.bin` import stored **true UTC** (GPS week→UTC), but INAV
+Blackbox import stored the **pilot's local time mislabelled as UTC**. Display formatted everything in
+UTC. Two problems followed: (a) single-area users saw a "wrong" (UTC-shifted) wall-clock; cross-timezone
+operators saw flights apparently at 3 a.m. (b) The 3D real-lighting clock is fed `start_time` as an
+absolute instant — correct for live/ArduPilot, but **wrong for INAV Blackbox** (sun off by the offset),
+because that stored value wasn't really UTC.
+
+**Decision**:
+
+1. **One invariant: `start_time` is always a true absolute UTC instant.** Live + ArduPilot already are;
+   INAV Blackbox import now back-computes true UTC from the stored local time minus the resolved offset.
+2. **New `flights.utc_offset_min` column** (minutes, east-positive) = the local UTC offset **at the
+   flight location, on the flight date** (DST included). Sourced per origin:
+   - **Live (INAV & MAVLink):** the GCS PC's own offset at commit (`chrono::Local`) — the GCS sits at
+     the field, so this is exact.
+   - **Imports (ArduPilot & INAV):** resolved from the start coordinates via a coordinate→timezone
+     lookup (`tzf-rs` → IANA zone) + `chrono-tz` (zone + date → offset). INAV additionally uses it to
+     convert its local timestamp back to UTC.
+3. **Display = UTC + offset → flight-location wall-clock.** The offset is a pure presentation layer
+   (log player clock, logbook list, raw-log/file naming derive from `start_time` + offset). Fallback
+   when the offset is unknown (old rows / no GPS): show **UTC** with a small `UTC` marker — honest, not
+   guessed.
+4. **The Cesium real-lighting clock stays true UTC.** The sun's position over a lat/lon at a UTC instant
+   is physics — Cesium derives it from the absolute clock + globe geometry, so **no timezone correction
+   is needed**; feeding true UTC is automatically correct for the flight location. (Fixing invariant #1
+   is what repairs the previously-wrong INAV-Blackbox lighting.)
+
+**Consequences**: Both single-area and cross-timezone displays read the flight's real local time, and 3D
+lighting is correct for every source. The TZ lookup runs **only in the backend at record/import time**
+(the resolved offset is persisted); the frontend just applies a stored integer — no lib/data on the web
+side. Cost: `tzf-rs` embeds a timezone-boundary dataset (a few MB in the binary) — accepted for a desktop
+app over the imprecise `lon/15` approximation. Schema migration only (additive `utc_offset_min`, old rows
+`NULL` → UTC fallback); no data conversion (pre-1.0).
 
 ---
 

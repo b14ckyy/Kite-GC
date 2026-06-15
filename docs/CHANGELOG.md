@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Flight times shown in the flight's local time, not UTC (ADR-048).** Log titles, the logbook list and
+  the replay clock now read the wall-clock time **of the place the flight happened** — so a single-area
+  pilot sees the correct local time, and a cross-timezone operator no longer sees flights apparently at
+  3 a.m. Under the hood every flight now stores a true-UTC instant **plus** the location's UTC offset:
+  live flights take the ground-station PC's own offset (it sits at the field); imports resolve the offset
+  from the start coordinates (timezone-from-coordinates lookup + DST). This also fixed INAV Blackbox
+  imports, whose stored time wasn't true UTC — their 3D real-lighting sun was previously off by the
+  offset. Flights with no known offset (older rows / no GPS) keep showing **UTC** with a small marker.
 - **ArduPilot missions render in 3D — one shared renderer with INAV (ADR-047).** The 3D map drew only
   INAV missions; ArduPilot now renders there too, through a single model-driven renderer: per-platform
   adapters resolve each mission model (INAV `WpAction`/`alt_mode`, ArduPilot `MavCmd`/altitude-frame +
@@ -48,6 +56,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per-command rationale is in `docs/active/ARDUPILOT_COMMAND_COVERAGE.md`.
 
 ### Changed
+- **3D real-time lighting clock stays in true UTC (ADR-048).** The sun position is physics (absolute
+  instant + globe location), so it's automatically correct for the flight location — the new local-time
+  display is a presentation layer only and does not shift the lighting clock.
 - **Mission WP-editor popups are one shared framework now (ADR-046).** The INAV and ArduPilot map layers
   had separate copies of the popup-building + event-wiring code; the lifecycle + HTML/event primitives now
   live in one `missionEditorPopup` module. Its lifecycle carries a **content-signature redraw guard** —
