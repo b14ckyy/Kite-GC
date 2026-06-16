@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Heading / course / crab direction cues (`WIND_CRAB_INDICATOR.md`, archived).** The compass widget now
+  shows a **course-over-ground track bug** + amber COG readout alongside the heading (the gap = crab), and
+  the 2D map draws **HDG / COG nose lines** plus a **predicted turn-radius arc** at the aircraft (velocity-
+  vector length = 15 s of travel, the arc capped at a 180° sweep). All run through the position smoother
+  (incl. an eased turn rate) so they track stably; the turn rate is computed on the source time base so
+  replay is playback-speed-independent. New **Direction indicators** toggle (Settings → Data → Telemetry,
+  default on). The wind-arrow / flight-path-marker idea is parked pending INAV's `MSP2_INAV_WIND`.
 - **RF link / radio-shadow analysis in the Terrain Analyzer (Feature 4 / `RF_LINK_ANALYSIS.md`).**
   For a mission or a flown track, the profile chart now shows **where terrain degrades or blocks the
   radio link** from the launch point as a background green→red "rainbow" loss field. Three toggleable
@@ -147,6 +154,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   identical to the `mission` blue (ArduPilot Auto) on the track/badge.
 
 ### Fixed
+- **Heading vs. course-over-ground now consistent across all paths.** Unified the two channels (FC fused
+  heading vs. GPS course) for live MSP, live MAVLink and Blackbox import, and de-conflated replay so the
+  UAV model/icon — in **2D and 3D, live and replay** — points along the real heading (showing crab in
+  wind) instead of riding the ground track "on rails". MAVLink now derives COG from the fused velocity
+  rather than mis-using `GLOBAL_POSITION_INT.hdg` (which is the vehicle heading).
 - **MAVLink GPS — satellites/fix no longer flash, HDOP shows.** `GLOBAL_POSITION_INT` was emitting a
   hard-coded `fix=2, sats=0` that fought `GPS_RAW_INT`'s real values (flashing 0↔N); fix type and sat
   count are now owned solely by `GPS_RAW_INT` (cached, reused by `GLOBAL_POSITION_INT`), and HDOP is

@@ -539,6 +539,7 @@ This document tracks planned features, organized by milestone.
 - [ ] **Stick / gimbal overlay** — animated RC transmitter sticks (two gimbals) driven by recorded RC-channel data, à la Blackbox Explorer. **Replay only for now** (from `RC_CHANNELS` / blackbox `rcCommand`); live later. Configurable channel map (AETR/TAER) + stick mode 1–4. As a widget or a corner overlay on the map/replay.
 - [ ] Audio status alerts (TTS)
 - [x] Terrain analysis — _elevation profile + clearance + correction (Terrain Follow / Clearance Check) + jump simulation done; see Terrain Elevation section_
+- [x] **Heading / course / crab cues** — compass COG track-bug + amber readout next to heading; 2D map **HDG / COG nose lines** + **predicted turn-radius arc** at the aircraft (velocity-vector length, arc capped at 180°); unified FC-heading-vs-COG pipeline across MSP / MAVLink / Blackbox and 2D+3D, live+replay; **Direction indicators** settings toggle. Wind-arrow / flight-path-marker **parked** on INAV `MSP2_INAV_WIND` (unmerged, likely v10); 3D markers deferred. See `docs/archive/WIND_CRAB_INDICATOR.md`
 - [~] Embedded video — _built: source router + webcam/USB-capture (`getUserMedia`, cross-platform), NavRail panel (live preview, 60 fps MJPEG fix), 2×1 dock widget, snap/drag floating window, double-click map⇄video swap, native Picture-in-Picture, persistence + auto-start. **Pending (v2):** network streams (RTSP/UDP), native `nokhwa` capture, snapshot/record; see `docs/active/VideoFeature.md`_
 - [ ] FW approach / autoland planner
 - [ ] Geozone editor
@@ -676,4 +677,4 @@ Source: **Copernicus DEM GLO-30** (geoid/EGM2008 ≈ MSL, no API key, offline-ca
 
 ---
 
-*Last updated: 2026-06-04*
+*Last updated: 2026-06-16*
