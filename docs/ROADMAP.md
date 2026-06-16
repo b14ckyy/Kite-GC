@@ -554,6 +554,7 @@ A third connection mode ("Telemetry") that listens to telemetry forwarded by the
 - [ ] Audio status alerts (TTS)
 - [x] Terrain analysis — _elevation profile + clearance + correction (Terrain Follow / Clearance Check) + jump simulation done; see Terrain Elevation section_
 - [x] **Heading / course / crab cues** — compass COG track-bug + amber readout next to heading; 2D map **HDG / COG nose lines** + **predicted turn-radius arc** at the aircraft (velocity-vector length, arc capped at 180°); unified FC-heading-vs-COG pipeline across MSP / MAVLink / Blackbox and 2D+3D, live+replay; **Direction indicators** settings toggle. Wind-arrow / flight-path-marker **parked** on INAV `MSP2_INAV_WIND` (unmerged, likely v10); 3D map markers **not planned** (revisit only on request). See `docs/archive/WIND_CRAB_INDICATOR.md`
+- [ ] **Flight-path marker (velocity vector) on the AHI + 3D FPV HUD** — show where the aircraft is actually *going* vs where the nose points. **No wind estimate needed** (the classic PFD FPM needs wind only to split heading from track — we already have the track directly): horizontal offset = **COG − heading** (the crab we compute today), vertical = **flight-path angle** `atan2(vertical speed, ground speed)` vs the AHI pitch. All data present **live + replay**. Overlay on the AHI widget and the 3D cockpit/FPV view. Supersedes the wind-gated FPM from the Wind/Crab feature for this use.
 - [~] Embedded video — _built: source router + webcam/USB-capture (`getUserMedia`, cross-platform), NavRail panel (live preview, 60 fps MJPEG fix), 2×1 dock widget, snap/drag floating window, double-click map⇄video swap, native Picture-in-Picture, persistence + auto-start. **Pending (v2):** network streams (RTSP/UDP), native `nokhwa` capture, snapshot/record; see `docs/active/VideoFeature.md`_
 - [ ] FW approach / autoland planner
 - [ ] Geozone editor
@@ -691,4 +692,4 @@ Source: **Copernicus DEM GLO-30** (geoid/EGM2008 ≈ MSL, no API key, offline-ca
 
 ---
 
-*Last updated: 2026-06-16 (LOS/RF shipped; 3D direction markers dropped; passive radio telemetry + RC Link widget added)*
+*Last updated: 2026-06-16 (LOS/RF shipped; 3D direction markers dropped; passive radio telemetry + RC Link widget + flight-path marker added)*
