@@ -101,10 +101,16 @@ in the validation phase) the raw bytes also go to the capture sink.
 - **Phase B — FrSky validation (capture-to-file).** On connect, capture the full raw stream to file (see
   below). Debug Monitor tab shows: detected protocol, byte rate, live framing/hex tail. **Goal: hand the
   capture files back for analysis** to confirm format + authenticity. *(EdgeTX **and** ETHOS, both via BLE.)*
-- **Phase C — FrSky → unified pipeline adapter.** Map decoded FrSky sensors onto the existing telemetry
-  events so widgets/map work live. Define which sensors map to which fields.
-- **Phase D+ — more protocols.** CRSF, LTM, MAVLink-passive (decoder reuse, TX disabled). Then, later:
-  `.csv` raw recording, and a decision on DB recording for telemetry-mode flights.
+- **Phase C ✅ — FrSky → unified pipeline adapter (shipped).** `decoders/frsky.rs` maps S.Port appIDs onto
+  the existing telemetry events (attitude/gps/altitude/analog/airspeed/status/flightmode). MODES (flight
+  mode + armed, decimal-column-packed → normalized bitmask → `classify_inav`) and GNSS (sats + fix)
+  decoded. INAV 7/8/9 via dispatch-by-appID. Bench-validated.
+- **Phase D ~ — DB recording (built; pending armed-flight test).** The passive path now creates a
+  `FlightRecorder` (when flight logging is enabled) and feeds it the decoded telemetry; arm/disarm is
+  driven by the FrSky MODES armed bit (`arming_flags & 0x04`), reusing the existing recorder verbatim.
+  No raw byte log on this path (FrSky has no MSP raw stream).
+- **Phase E+ — more protocols.** CRSF, LTM, MAVLink-passive (decoder reuse, TX disabled); later a `.csv`
+  raw recording; link-quality field for the RC Link widget; ArduPilot FrSky-passthrough (0x5000) decoder.
 
 ---
 
@@ -200,6 +206,24 @@ ArduPilot **FrSky passthrough** ("Yaapu") protocol — bit-packed, MAVLink-deriv
 different decoding from INAV's per-sensor appIDs. This is handled as its **own decoder**, documented and
 kept strictly separate from the INAV/standard-FrSky path (selected by detecting `0x5000`-range frames).
 Scope for a later phase.
+
+## Logbook / DB integration (Phase D)
+
+How telemetry-mode flights appear in the logbook (passive telemetry carries no FC identity):
+
+- **`source` = `live`** — it's a real-time recording (not a blackbox file), so it stays eligible for
+  linking. The *protocol* lives in `flight.protocol`, set by the handler once detected:
+  `Telemetry (SmartPort | CRSF | LTM | MAVLink)`. Shown as a **Protocol** row in the flight detail.
+- **Firmware = N/A** — no handshake, so `fc_variant`/`fc_version` are empty; the detail shows `N/A`
+  (named protocols still show e.g. `INAV 9.1.0` = variant + version).
+- **Platform = Generic (`255`)** — SmartPort/CRSF carry no vehicle type, so the map shows the generic
+  arrow (not a defaulted multirotor) and the UAV-type reads "Generic" (user can override). Also fixed a
+  pre-existing platform-enum mismatch in `uavIcons.ts` (was `4=boat,5=other`; canonical is
+  `4=rover,5=boat,6=other`, matching INAV `flyingPlatformType_e` + the logbook dropdown).
+- **Auto-link to a blackbox:** the existing matcher is craft-name + start-time ±60 s. Telemetry logs have
+  **no craft name**, so a duration fallback was added: when the live flight's `craft_name` is empty, match
+  on a **near-identical duration** (±10 s, covering the arm/disarm grace) within the ±60 s window. Exact
+  craft-name matches still win. Manual linking remains available.
 
 ## Link-quality fields (for a future RC Link widget)
 

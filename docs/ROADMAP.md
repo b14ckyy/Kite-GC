@@ -474,10 +474,12 @@ A third connection mode ("Telemetry") that listens to telemetry forwarded by the
 (EdgeTX/ETHOS) / ELRS backpack / DIY bridge, auto-detecting the protocol. Dev-only for now.
 - [x] Phase A/B: listen-only handler, protocol detector, raw capture-to-file, Debug Monitor tab, BLE
   GATT-explorer auto-discovery (validated on ETHOS X20RS, service `0xFFF0` / char `0xFFF6`)
-- [~] Phase C: **FrSkyX / S.Port decoder → unified telemetry events** (INAV 7/8/9, dispatch by appID);
-  AHI/compass/GPS/speed/altitude/vario/battery/RSSI/airspeed live. _Remaining: MODES (flight mode +
-  armed) + GNSS fix-type decode; link-quality field; ArduPilot FrSky-passthrough (0x5000) decoder_
-- [ ] Phase D: DB recording for telemetry-mode flights (arm/disarm derived from FrSky MODES)
+- [x] Phase C: **FrSkyX / S.Port decoder → unified telemetry events** (INAV 7/8/9, dispatch by appID);
+  AHI/compass/GPS/speed/altitude/vario/battery/RSSI/airspeed live. MODES (flight mode + armed) + GNSS
+  (sats + fix) decoded → flight-mode widget + ARMED + GPS fix. _Remaining: link-quality field (RC Link
+  widget); ArduPilot FrSky-passthrough (0x5000) decoder_
+- [~] Phase D: DB recording for telemetry-mode flights — recorder wired (arm/disarm from FrSky MODES,
+  fed the decoded telemetry). _Built; pending verification on a real armed flight._
 - [ ] `CrsfSource` — CRSF/ELRS telemetry frames (decode by frame/sub-type; INAV reworked these across versions)
 - [ ] `LtmSource` — LTM (Lightweight Telemetry) passive frame parser
 - [ ] MAVLink-passive decoder (reuse the MAVLink parser, TX disabled)
