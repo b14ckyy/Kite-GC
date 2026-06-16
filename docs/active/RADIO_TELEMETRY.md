@@ -201,6 +201,29 @@ different decoding from INAV's per-sensor appIDs. This is handled as its **own d
 kept strictly separate from the INAV/standard-FrSky path (selected by detecting `0x5000`-range frames).
 Scope for a later phase.
 
+## Link-quality fields (for a future RC Link widget)
+
+Confirmed on the bench (physID `0x98` = receiver): **RSSI = `0xF101`**, **Link Quality / VFR = `0xF010`**,
+**RxBt = `0xF104`**. `0xF010` is injected by the receiver/radio, not in INAV's `smartport.c`. These feed a
+planned protocol-agnostic **RC Link widget** (RSSI + LQ, also MSP link-stats / CRSF). Needs a unified
+`link_quality` field on the live telemetry pipeline (the DB already has one for replay).
+
+## BLE link — internal kinks (lessons learned)
+
+Practical gotchas for connecting to radio BLE telemetry modules (keep for future transports):
+
+1. **Web-Bluetooth scanners under-report services.** They only list services the page explicitly
+   requested, so a generic web scan of the X20RS showed *only* DIS (`0x180A`) + GAP (`0x1800`) and hid the
+   real vendor service. **Always do a native full GATT enumeration** (btleplug/BlueZ/CoreBluetooth) — that
+   sees everything.
+2. **Don't require a known profile.** The telemetry service is vendor-specific (`0xFFF0` on the X20RS) and
+   varies per radio. Connect to any device, enumerate, and **subscribe to whatever characteristic has the
+   Notify property** (`connect_ble_listen`). Hard-coding a profile would have missed it.
+3. **The streaming service only appears in the radio's "Telemetry" BT mode.** In other BT modes (trainer,
+   etc.) the vendor service may be absent — set the radio's Bluetooth mode to Telemetry first.
+4. **BLE is just a byte pipe** — decode the payload (S.Port/CRSF/…) independently of the link; chunk
+   boundaries from notifications don't align with protocol frames (the `.jsonl` capture preserves them).
+
 ## Open questions (to settle during research/validation, not blocking the plan)
 
 - Does EdgeTX/ETHOS emit raw `0x7E` S.Port frames, a decoded plain-text variant, or something else? →

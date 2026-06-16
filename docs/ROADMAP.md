@@ -469,9 +469,20 @@ This document tracks planned features, organized by milestone.
 - [x] ArduPilot mission system (MAVLink WP protocol) — complete: `mavlink_proto/mission.rs` upload/download/clear microprotocol + `ardu_mission_download`/`ardu_mission_upload`, wired to the ArduPilot mission panel/layer; `.waypoints` (QGC WPL) file save/load/drop + INAV↔ArduPilot WP conversion. See `docs/active/MISSION_MULTIAUTOPILOT_PLAN.md`
 - [ ] **ArduPilot WP types per vehicle class** — the valid mission commands differ a lot by vehicle (Copter / Plane / Rover / Sub), so the ArduPilot WP-type palette + validation should adapt to the detected/selected vehicle type rather than offering one flat list. _Major consideration_: **QuadPlane/VTOL** auto-switches between fixed-wing and multirotor modes mid-mission (`VTOL_TAKEOFF` / `VTOL_LAND` / transition commands), which changes the legal WP types per phase — the planner needs a vehicle-class model and ideally a visual cue for transition points. Builds on the multi-autopilot foundation; gated on test hardware. Full plan in `docs/active/ARDUPILOT_WAYPOINT_ARCHITECTURE.md`.
 
-### Future Protocols
+### Passive Radio Telemetry (listen-only ground-side, ADR/plan: `docs/active/RADIO_TELEMETRY.md`)
+A third connection mode ("Telemetry") that listens to telemetry forwarded by the transmitter
+(EdgeTX/ETHOS) / ELRS backpack / DIY bridge, auto-detecting the protocol. Dev-only for now.
+- [x] Phase A/B: listen-only handler, protocol detector, raw capture-to-file, Debug Monitor tab, BLE
+  GATT-explorer auto-discovery (validated on ETHOS X20RS, service `0xFFF0` / char `0xFFF6`)
+- [~] Phase C: **FrSkyX / S.Port decoder → unified telemetry events** (INAV 7/8/9, dispatch by appID);
+  AHI/compass/GPS/speed/altitude/vario/battery/RSSI/airspeed live. _Remaining: MODES (flight mode +
+  armed) + GNSS fix-type decode; link-quality field; ArduPilot FrSky-passthrough (0x5000) decoder_
+- [ ] Phase D: DB recording for telemetry-mode flights (arm/disarm derived from FrSky MODES)
+- [ ] `CrsfSource` — CRSF/ELRS telemetry frames (decode by frame/sub-type; INAV reworked these across versions)
 - [ ] `LtmSource` — LTM (Lightweight Telemetry) passive frame parser
-- [ ] `CrsfSource` — CRSF/ELRS telemetry frames
+- [ ] MAVLink-passive decoder (reuse the MAVLink parser, TX disabled)
+
+### Future Protocols
 - [ ] Multi-aircraft support (multiple protocol handler instances, per-UAV stores)
 
 ### Additional Transports
@@ -537,6 +548,7 @@ This document tracks planned features, organized by milestone.
 - [ ] Safehome editor
 - [ ] HID controller input (gamepad/joystick)
 - [ ] **Stick / gimbal overlay** — animated RC transmitter sticks (two gimbals) driven by recorded RC-channel data, à la Blackbox Explorer. **Replay only for now** (from `RC_CHANNELS` / blackbox `rcCommand`); live later. Configurable channel map (AETR/TAER) + stick mode 1–4. As a widget or a corner overlay on the map/replay.
+- [ ] **RC Link widget** — dedicated link-quality readout (RSSI + LQ, optionally SNR) as a HUD widget, protocol-agnostic. Sources: MSP `MSP2_INAV_GET_LINK_STATS` (see Milestone 6 Link Statistics), CRSF LQ/RSSI/SNR, and **FrSky passive telemetry** (RSSI `0xF101`, Link Quality / VFR `0xF010`, RxBt `0xF104`). Needs a unified `link_quality` field on the live telemetry pipeline (already present in the DB schema for replay).
 - [ ] Audio status alerts (TTS)
 - [x] Terrain analysis — _elevation profile + clearance + correction (Terrain Follow / Clearance Check) + jump simulation done; see Terrain Elevation section_
 - [x] **Heading / course / crab cues** — compass COG track-bug + amber readout next to heading; 2D map **HDG / COG nose lines** + **predicted turn-radius arc** at the aircraft (velocity-vector length, arc capped at 180°); unified FC-heading-vs-COG pipeline across MSP / MAVLink / Blackbox and 2D+3D, live+replay; **Direction indicators** settings toggle. Wind-arrow / flight-path-marker **parked** on INAV `MSP2_INAV_WIND` (unmerged, likely v10); 3D map markers **not planned** (revisit only on request). See `docs/archive/WIND_CRAB_INDICATOR.md`
@@ -677,4 +689,4 @@ Source: **Copernicus DEM GLO-30** (geoid/EGM2008 ≈ MSL, no API key, offline-ca
 
 ---
 
-*Last updated: 2026-06-16 (LOS/RF marked shipped; 3D direction markers dropped)*
+*Last updated: 2026-06-16 (LOS/RF shipped; 3D direction markers dropped; passive radio telemetry + RC Link widget added)*
