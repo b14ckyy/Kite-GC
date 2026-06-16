@@ -7,6 +7,7 @@
 // reset when the app process exits (per design — not written to disk).
 
 import { writable } from 'svelte/store';
+import type { RfRay } from '$lib/helpers/rfLink';
 
 export type TerrainViewMode = 'waypoint' | 'track';
 export type TerrainDatum = 'msl' | 'agl';
@@ -132,4 +133,13 @@ export function clearTerrainHover(): void {
 
 export function clearTerrainPlaced(): void {
   terrainCursor.update((s) => (s.placed ? { ...s, placed: null } : s));
+}
+
+// ── RF map overlay ──────────────────────────────────────────────────
+// Critical-point ray triangles (one per occupied 1° azimuth bin) published by the RF analysis for the
+// 2D map overlay. Empty unless an RF method is active. The map gates display on Show-Map (compact) mode.
+export const terrainRfRays = writable<RfRay[]>([]);
+
+export function setTerrainRfRays(rays: RfRay[]): void {
+  terrainRfRays.set(rays);
 }

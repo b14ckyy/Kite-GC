@@ -33,10 +33,28 @@ const K_FACTOR = 4 / 3;        // standard-atmosphere effective earth (radio hor
 const AE = RE * K_FACTOR;
 const GCS_ANTENNA_M = 2;       // assumed GCS antenna height above ground (link-budget phase will expose)
 
+// Two-ray ground-reflection parameters (averaged ground; moisture/material folded into ε_r).
+const GROUND_EPS = 15;                 // relative permittivity, averaged soil/vegetation
+const GROUND_ROUGHNESS_FLOOR_M = 0.3;  // surface micro-roughness floor (crops/soil) even where the DSM is flat
+const TWORAY_ROUGHNESS_SPAN_M = 2000;  // terrain window (from home) whose RMS roughness gates the reflection
+
 /** Colour-scale floor (dB). Total loss at/below this renders fully red. */
 export const RF_RED_DB = -18;
 /** Excess loss assigned to a hard geometric block (≪ RF_RED_DB so it clamps to red). */
 const BLOCKED_DB = -120;
+/** Map ray triangles are drawn only where the combined loss is worse than this (clutter-free corridors stay invisible). */
+export const RF_RAY_DB = -3;
+/** Clutter ramps from 0 at each path endpoint to full over this distance: the operator launches from a
+ *  clearing and the UAV climbs out / is airborne, so vegetation/buildings beside the antennas don't
+ *  block — only clutter in the path interior does. The ramp must outlast the climb-out: with a low
+ *  GCS antenna the rising sightline only clears a uniform clutter carpet after a few hundred metres, so
+ *  too short a taper skims the carpet over flat terrain and raises a false diffraction warning. Bare
+ *  terrain (real hills) is unaffected — it always blocks. */
+const RAY_CLUTTER_TAPER_M = 300;
+/** Within one azimuth bin, degraded points closer together than this are one fly-through and collapse
+ *  to a single ray (otherwise a radial leg's 30-m samples stack into hundreds of nested triangles).
+ *  A larger distance gap (e.g. a near loiter vs a far leg on the same bearing) starts a new ray. */
+const RAY_CLUSTER_GAP_M = 500;
 
 export interface RfOptions {
   band: RfBand;
@@ -56,6 +74,24 @@ export interface RfField {
   db: (number | null)[];
   /** Min clearance (m) of the home→sample sightline above terrain (null = no data), aligned. */
   losClearance: (number | null)[];
+  /** Critical-point triangles for the 2D map overlay (one per degraded measurement point). */
+  rays: RfRay[];
+}
+
+/**
+ * One ray triangle for the 2D map overlay: a thin wedge from the ground interference point (`apex` —
+ * the closest-approach near-point of the worst sample) out to a degraded fly-through's farthest point
+ * (`base`, ~1° wide). Emitted per distance cluster per azimuth bin where the loss is worse than RF_RAY_DB.
+ */
+export interface RfRay {
+  /** Azimuth from home (deg) to the measurement point. */
+  az: number;
+  /** Worst combined excess loss (dB, ≤ RF_RAY_DB) in the cluster — drives the uniform fill colour. */
+  db: number;
+  /** Ground interference point [lat, lon] — the ray origin (closest-approach near-point). */
+  apex: [number, number];
+  /** 1°-wide base [left, right] at the cluster's farthest point. */
+  base: [[number, number], [number, number]];
 }
 
 export interface RfHome {
@@ -101,10 +137,11 @@ function evalObstacle(
   uavAlt: number,
   lambda: number,
   clutterM: number,
-): { diffractionDb: number; minClear: number; blocked: boolean } {
+): { diffractionDb: number; minClear: number; blocked: boolean; nearDist: number } {
   const n = Math.max(1, Math.floor(D / radial.step));
   let blocked = false;
   let worstV = -Infinity;
+  let worstDist = radial.step;
   let minClear = Infinity;
 
   for (let i = 1; i < n; i++) {
@@ -112,31 +149,84 @@ function evalObstacle(
     const d2 = D - d1;
     if (d2 <= 0) break;
     const ray = homeAlt + ((uavAlt - homeAlt) * d1) / D;          // straight chord
-    const terr = (radial.elev[i] ?? radial.elev[radial.elev.length - 1] ?? 0) + clutterM + earthBulge(d1, d2);
+    // Clutter tapered to 0 at both endpoints (launch clearing / airborne UAV), full in the interior.
+    const clutterW = Math.min(1, Math.min(d1, d2) / RAY_CLUTTER_TAPER_M);
+    const bare = radial.elev[i] ?? radial.elev[radial.elev.length - 1] ?? 0;
+    const terr = bare + clutterM * clutterW + earthBulge(d1, d2);
     const clear = ray - terr;                                     // + = ray above terrain
     if (clear < minClear) minClear = clear;
     if (clear < 0) blocked = true;
     // knife-edge parameter (h = obstruction above the ray = −clearance)
     const v = -clear * Math.sqrt((2 / lambda) * (1 / d1 + 1 / d2));
-    if (v > worstV) worstV = v;
+    if (v > worstV) { worstV = v; worstDist = d1; }
   }
   if (!isFinite(minClear)) minClear = uavAlt - homeAlt;
 
   // Continuous knife-edge diffraction loss (negative dB) + whether the chord is geometrically blocked.
-  return { diffractionDb: -knifeEdgeLossDb(worstV), minClear, blocked };
+  // `nearDist` is the closest-approach point (worst-v = minimum-clearance sample) — where the sightline
+  // comes nearest the terrain. Always defined, so the map ray can start at this ground interference
+  // point rather than at home.
+  return { diffractionDb: -knifeEdgeLossDb(worstV), minClear, blocked, nearDist: worstDist };
 }
 
-/** Two-ray ground-reflection excess gain/loss (dB, signed) — flat-earth far-field, Γ ≈ −1 (grazing). */
-function twoRayDb(D: number, homeAlt: number, uavAlt: number, homeGround: number, uavGround: number, lambda: number): number {
+/**
+ * Two-ray ground-reflection excess gain/loss (dB, signed) — flat-earth interference of the direct and
+ * ground-reflected rays, `|1 + Γ_eff·e^{−jφ}|`. The effective reflection coefficient `Γ_eff` is the
+ * **Fresnel** coefficient (horizontal polarisation, averaged ground permittivity) reduced by the
+ * **Ament/Rayleigh roughness factor** `ρ = exp(−2(k·σ·sinψ)²)`. This makes the reflection grazing-angle,
+ * frequency and terrain-roughness dependent — so deep multipath nulls only appear at shallow grazing
+ * (several km), over flat terrain (small σ), and mostly at the low bands (2.4/5.8 GHz are scattered
+ * away). `sigma` = RMS terrain roughness (m) near the reflection zone. See Parsons / Rappaport;
+ * roughness after Ament (1953) / ITU-R P.526.
+ */
+function twoRayDb(
+  D: number,
+  homeAlt: number,
+  uavAlt: number,
+  homeGround: number,
+  uavGround: number,
+  lambda: number,
+  sigma: number,
+): number {
   const hr = Math.max(0.5, homeAlt - homeGround + GCS_ANTENNA_M); // GCS antenna height above ground
   const ht = Math.max(0.5, uavAlt - uavGround);                   // UAV height above ground
   if (D <= 0) return 0;
+  const psi = Math.atan2(hr + ht, D);                             // grazing angle at the reflection point
+  const sinPsi = Math.sin(psi);
+  const cos2 = Math.cos(psi) ** 2;
+  // Fresnel reflection coefficient, horizontal polarisation, real ε_r (negative; → −1 as ψ → 0).
+  const root = Math.sqrt(Math.max(0, GROUND_EPS - cos2));
+  const gammaFresnel = (sinPsi - root) / (sinPsi + root);
+  // Ament/Rayleigh roughness reduction — scatters the coherent reflection (∝ frequency, ψ, σ).
+  const k = (2 * Math.PI) / lambda;
+  const rho = Math.exp(-2 * (k * sigma * sinPsi) ** 2);
+  const gamma = gammaFresnel * rho;                               // effective reflection coefficient
   const pathDiff = (2 * hr * ht) / D;                             // direct vs ground-reflected
   const phi = (2 * Math.PI * pathDiff) / lambda;
-  // |1 + Γ·e^{jφ}| with Γ = −1  →  |1 − e^{jφ}| = 2·|sin(φ/2)|
-  const factor = 2 * Math.abs(Math.sin(phi / 2));
+  // |1 + Γ_eff·e^{−jφ}|² = 1 + Γ² + 2Γ·cos φ   (Γ real)
+  const factor = Math.sqrt(Math.max(0, 1 + gamma * gamma + 2 * gamma * Math.cos(phi)));
   if (factor <= 1e-3) return RF_RED_DB;                           // deep null → clamp to scale floor
   return Math.max(RF_RED_DB, 20 * Math.log10(factor));            // up to +6 dB; nulls toward −∞
+}
+
+/** RMS terrain roughness (m) of a radial's first `spanM`, detrended (a smooth slope isn't "rough").
+ *  Floored at the surface micro-roughness so flat DSM still scatters higher bands realistically. */
+function radialRoughness(radial: Radial, spanM: number): number {
+  const m = Math.min(radial.elev.length, Math.max(2, Math.floor(spanM / radial.step)));
+  // Least-squares linear detrend over samples 0..m-1, then RMS of the residual.
+  let sx = 0, sy = 0, sxx = 0, sxy = 0;
+  for (let i = 0; i < m; i++) {
+    sx += i; sy += radial.elev[i]; sxx += i * i; sxy += i * radial.elev[i];
+  }
+  const denom = m * sxx - sx * sx;
+  const slope = denom !== 0 ? (m * sxy - sx * sy) / denom : 0;
+  const intercept = (sy - slope * sx) / m;
+  let sse = 0;
+  for (let i = 0; i < m; i++) {
+    const r = radial.elev[i] - (intercept + slope * i);
+    sse += r * r;
+  }
+  return Math.max(GROUND_ROUGHNESS_FLOOR_M, Math.sqrt(sse / m));
 }
 
 /** Build a home→bearing radial terrain profile out to `maxDist` (one backend call). */
@@ -192,6 +282,7 @@ export async function computeRfField(
   const n = t.length;
   const db: (number | null)[] = new Array(n).fill(null);
   const losClearance: (number | null)[] = new Array(n).fill(null);
+  const rays: RfRay[] = [];
 
   // Group sample indices by 1° azimuth bin from home; track the max distance per bin.
   const bins = new Map<number, { idx: number; dist: number; uavAlt: number }[]>();
@@ -214,17 +305,22 @@ export async function computeRfField(
   const wantRadial = opts.fresnel || opts.los || opts.tworay;
   for (const [bin, entries] of bins) {
     const radial = wantRadial ? await sampleRadial(home, bin, (maxDist.get(bin) as number) + PROFILE_SPACING_M) : null;
+    // Terrain roughness near the reflection zone gates the two-ray reflection (flat → coherent).
+    const sigma = radial ? radialRoughness(radial, TWORAY_ROUGHNESS_SPAN_M) : GROUND_ROUGHNESS_FLOOR_M;
+    // Degraded points in this bin, collected then collapsed to one ray per distance cluster.
+    const qual: { dist: number; db: number; nearDist: number; lat: number; lon: number }[] = [];
     for (const e of entries) {
       let total = 0;
       let clear: number | null = null;
       let blocked = false;
+      let nearDist = 0;
       if (radial) {
-        // Raise the home/GCS endpoint by the clutter offset too: the operator launches from a clear
-        // spot (antenna at/above local vegetation), not from the forest floor — otherwise the
-        // clutter-raised terrain right beside the GCS would block every sample.
-        const o = evalObstacle(radial, e.dist, home.ground + opts.clutterM, e.uavAlt, lambda, opts.clutterM);
+        // The GCS endpoint sits at the operator's antenna height above bare ground; clutter is tapered
+        // to 0 at both endpoints inside evalObstacle, so a clearing beside the antenna doesn't block.
+        const o = evalObstacle(radial, e.dist, home.ground + GCS_ANTENNA_M, e.uavAlt, lambda, opts.clutterM);
         clear = o.minClear;
         blocked = o.blocked;
+        nearDist = o.nearDist;
         if (opts.fresnel) {
           total += o.diffractionDb;              // realistic, continuous obstacle loss (covers blockage)
         } else if (opts.los && blocked) {
@@ -240,14 +336,46 @@ export async function computeRfField(
           if (!opts.fresnel) total = BLOCKED_DB;
         } else {
           const uavGround = (t[e.idx].elev as number);
-          total += twoRayDb(e.dist, home.ground, e.uavAlt, home.ground, uavGround, lambda);
+          total += twoRayDb(e.dist, home.ground, e.uavAlt, home.ground, uavGround, lambda, sigma);
         }
       }
       db[e.idx] = Math.max(BLOCKED_DB, total);
       losClearance[e.idx] = clear;
+
+      if ((db[e.idx] as number) < RF_RAY_DB) {
+        const s = t[e.idx];
+        qual.push({ dist: e.dist, db: db[e.idx] as number, nearDist, lat: s.lat, lon: s.lon });
+      }
+    }
+
+    // Map overlay: collapse each contiguous distance cluster (one fly-through) to a single ray, so a
+    // radial leg's many samples don't stack into nested triangles. The ray starts at the worst point's
+    // ground interference point (closest-approach near-point) and reaches the cluster's farthest point;
+    // its colour = the worst loss in the cluster.
+    qual.sort((a, b) => a.dist - b.dist);
+    let runStart = 0;
+    for (let k = 1; k <= qual.length; k++) {
+      if (k < qual.length && qual[k].dist - qual[k - 1].dist <= RAY_CLUSTER_GAP_M) continue;
+      let worst = qual[runStart];
+      let far = qual[runStart];
+      for (let j = runStart; j < k; j++) {
+        if (qual[j].db < worst.db) worst = qual[j];
+        if (qual[j].dist > far.dist) far = qual[j];
+      }
+      const brg = bearing(home.lat, home.lon, far.lat, far.lon);
+      const apex = destinationPoint(home.lat, home.lon, brg, worst.nearDist);
+      const bl = destinationPoint(home.lat, home.lon, brg - 0.5, far.dist);
+      const br = destinationPoint(home.lat, home.lon, brg + 0.5, far.dist);
+      rays.push({
+        az: brg,
+        db: worst.db,
+        apex: [apex.lat, apex.lon],
+        base: [[bl.lat, bl.lon], [br.lat, br.lon]],
+      });
+      runStart = k;
     }
   }
-  return { db, losClearance };
+  return { db, losClearance, rays };
 }
 
 const D2R = Math.PI / 180;

@@ -45,6 +45,7 @@
     toggleTerrainPlaced,
     clearTerrainHover,
     clearTerrainPlaced,
+    setTerrainRfRays,
   } from '$lib/stores/terrainAnalysis';
   import {
     buildWaypointProfile,
@@ -234,8 +235,11 @@
     toggleTerrainPlaced(p);
   }
 
-  // Drop the transient hover when the panel closes (the pinned marker stays)
-  onDestroy(() => clearTerrainHover());
+  // Drop the transient hover + RF overlay when the panel closes (the pinned marker stays)
+  onDestroy(() => {
+    clearTerrainHover();
+    setTerrainRfRays([]);
+  });
 
   // Ground Clearance via the standard stepper (5 m steps, 1 m manual precision).
   let groundClearance = $state($terrainAnalysis.groundClearance);
@@ -499,12 +503,14 @@
     if (!st.open || !d || !anyRf) {
       rfDb = null;
       losClearance = null;
+      setTerrainRfRays([]);
       return;
     }
     const home = rfHomeLatLon(st.viewMode, lp, trk);
     if (!home) {
       rfDb = null;
       losClearance = null;
+      setTerrainRfRays([]);
       return;
     }
     const opts = { band: st.rfBand, los: st.rfLos, fresnel: st.rfFresnel, tworay: st.rfTworay, clutterM: st.rfClutterM };
@@ -515,12 +521,14 @@
         if (token === rfToken) {
           rfDb = field.db;
           losClearance = field.losClearance;
+          setTerrainRfRays(field.rays);
         }
       } catch (e) {
         console.error('[terrain] RF field computation failed', e);
         if (token === rfToken) {
           rfDb = null;
           losClearance = null;
+          setTerrainRfRays([]);
         }
       }
     }, 300);
