@@ -97,7 +97,9 @@
     border-radius: 4px;
     cursor: pointer;
     font-family: inherit;
-    line-height: 1.2;
+    /* Roomy line box so descenders (g, p, y) clear the label's `overflow: hidden` clip and the text
+       sits optically centred; the button height is fixed, so this only affects the inner text box. */
+    line-height: 1.5;
     white-space: nowrap;
     transition: background 0.15s, border-color 0.15s, color 0.15s;
   }

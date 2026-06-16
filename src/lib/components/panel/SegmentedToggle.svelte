@@ -109,6 +109,8 @@
     justify-content: center;
     gap: 5px;
     padding: 0 12px;
+    /* Roomy line box so descenders clear the label's `overflow: hidden` and the text sits centred. */
+    line-height: 1.5;
     background: none;
     border: none;
     color: #aaa;
