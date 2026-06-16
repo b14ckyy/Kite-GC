@@ -150,8 +150,50 @@ smaller zone, sharper shadows, finer two-ray fringes.
    RSSI, draw it as an extra line on the chart (predicted rainbow vs measured RSSI side by side — the
    mLRS-style out-and-back curve, auto-generated). It's just another line graph, so it rides along with
    this phase rather than being a separate milestone.
+1b. **Map representation (planned — next):** see the dedicated section below.
 2. **Phase 2 (later) — link budget / range:** per-band TX/gain/RX presets → absolute margin + predicted
    range; "first link-critical point at X".
+
+---
+
+## Phase 1b — Map representation: critical-point ray triangles (PLAN, not started)
+
+**2D only** (we do no terrain analysis in 3D). A lightweight overlay that points at the terrain-critical
+spots — *not* a shadow simulation, not a heatmap (a heatmap needs an assumed flight altitude; the rays
+use the real mission/track altitudes instead).
+
+**The overlay.** Cast one ray per **1° azimuth** bin from the launch point (≤ 360 rays). Per bin, use the
+single mission/track point with the **lowest elevation angle** from launch (the flattest ray = the most
+shadow-prone; steeper points in the same bin have better coverage and are already on the profile chart).
+For that point, draw a thin, transparent **triangle**:
+- **apex = the obstruction near-point** — the binding terrain edge from the LOS/Fresnel/diffraction
+  analysis (`evalObstacle`'s worst-`v` sample; we add its distance to the output). This is the "here's
+  the critical terrain point" indicator.
+- **base = the measurement point** (the WP-path point in Waypoint mode / track point in Track mode),
+  spanning the 1° width.
+- **uniform fill** = `rfColor(combined dB at the measurement point)` — a single colour, **not** graded
+  along the ray. The wavy intermediate low/high zones between obstacle and aircraft aren't flown
+  (mission) / weren't flown (track), so only the final combined value at the measurement point matters.
+- **drawn only where the combined loss is worse than −3 dB** — better than that → invisible (no map
+  clutter); so only problem corridors show, intersecting the track / WP path as coloured areas.
+
+**Two-ray:** contributes to the fill **colour** (combined dB) but **not** the geometry — it has no
+near-point. A bin whose loss is purely two-ray (no terrain obstruction) draws **no** triangle; that's a
+distance effect, it stays on the profile chart. So the map overlay is fundamentally terrain-obstruction
+driven (LOS/Fresnel/diffraction define the apex).
+
+**Gating:** shown **only while the Terrain Analyzer is open in Show-Map (compact) mode** — the layout
+where map + analyzer are visible together.
+
+**Why it's cheap.** ≤ 360 geographic Leaflet polygons; they pan/zoom natively with no recompute. Rebuild
+only when an input changes (home, band, methods, clutter, route/track) — reuse the existing radial
+compute (`computeRfField` / `evalObstacle`), just also returning the near-point distance per bin and the
+per-bin flattest-point endpoint. No per-frame cost (unlike the in-chart gradient).
+
+**Touches (planned):** `rfLink.ts` (emit per-bin `{ nearLat/Lon, endLat/Lon, az, db }` triangles
+alongside the field), a new `components/terrain/RfRayLayer.svelte` (Leaflet polygons), wire it into
+`Map.svelte` gated on Show-Map + RF active, reading the shared result. Optional: a small **home/launch
+marker** (the radial origin).
 
 ---
 
