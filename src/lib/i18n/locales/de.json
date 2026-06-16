@@ -310,6 +310,8 @@
     "gpsPosition": "GPS Position",
     "optionalModules": "Optionale Module",
     "airspeed": "Fluggeschw.",
+    "directionLines": "Richtungsanzeiger",
+    "directionLinesHint": "Heading-, Kurs- und Turn-Linien am Flugzeug auf der Karte",
     "mavlinkFullTelemetry": "Volle MAVLink-Telemetrie",
     "mavlinkFullTelemetryHint": "Nur MAVLink: streamt alles, was der FC mit seinen eigenen konfigurierten Raten sendet (ignoriert die Fluglage-/GPS-Rate-Einstellungen). Für Highspeed-Links und vollständige Aufzeichnung im .tlog. Standard aus — Kite fordert ein reduziertes Rate-Set an, das auf langsame RC-Links passt.",
     "flightLogging": "Flugbuch",

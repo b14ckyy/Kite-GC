@@ -43,6 +43,7 @@
     attitudeRateHz = 5,
     positionRateHz = 2,
     airspeedEnabled = false,
+    directionLines = true,
     mavlinkFullTelemetry = false,
     flightLoggingEnabled = false,
     flightRecordingEnabled = false,
@@ -86,6 +87,7 @@
     attitudeRateHz?: number;
     positionRateHz?: number;
     airspeedEnabled?: boolean;
+    directionLines?: boolean;
     mavlinkFullTelemetry?: boolean;
     flightLoggingEnabled?: boolean;
     flightRecordingEnabled?: boolean;
@@ -410,6 +412,10 @@
       <div class="s-row">
         <label class="s-label" for="airspeed-toggle">{$t('settings.airspeed')}</label>
         <Toggle checked={airspeedEnabled} id="airspeed-toggle" onchange={(c) => onPatch({ airspeedEnabled: c })} />
+      </div>
+      <div class="s-row" title={$t('settings.directionLinesHint')}>
+        <label class="s-label" for="direction-lines-toggle">{$t('settings.directionLines')}</label>
+        <Toggle checked={directionLines} id="direction-lines-toggle" onchange={(c) => onPatch({ directionLines: c })} />
       </div>
       <!-- MAVLink-only: stream everything the FC sends (ignores the two rate knobs above). -->
       <div class="s-row" title={$t('settings.mavlinkFullTelemetryHint')}>

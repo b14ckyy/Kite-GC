@@ -23,12 +23,14 @@ export function toTelemetryData(r: TelemetryRecord, fcVariant = 'INAV'): Telemet
     numSat: r.num_sat ?? 0,
     fixType: r.fix_type ?? 0,
     gpsHdop: r.gps_hdop ?? 0,
+    // `heading` column = course over ground (direction of travel); `yaw` column = FC fused heading.
     course: r.heading ?? 0,
 
-    // Attitude — yaw: prefer GPS COG for replay (heading), fall back to attitude yaw
+    // Attitude — yaw is the FC fused heading (body orientation / icon). Fall back to COG only if the
+    // log has no heading at all, so the icon still points sensibly.
     roll: r.roll ?? 0,
     pitch: r.pitch ?? 0,
-    yaw: r.heading ?? r.yaw ?? 0,
+    yaw: r.yaw ?? r.heading ?? 0,
 
     // Altitude — prefer nav filter fused altitude (smooth), fallback to baro, then GPS
     altitude: r.nav_alt_m ?? r.baro_alt_m ?? r.alt_m ?? 0,

@@ -491,8 +491,10 @@ impl ColumnIndices {
             alt: resolve_col(m, &["gps_altitude", "altitude", "baroalt_cm"]),
             baro_alt: resolve_col(m, &["baroalt", "baroaltitude", "baro_alt", "baro_altitude"]),
             speed: resolve_col(m, &["gps_speed", "speed"]),
-            // INAV: "heading" is attitude heading in decidegrees; GPS course is "gps_ground_course"
-            heading: resolve_col(m, &["heading", "gps_ground_course", "course"]),
+            // The DB `heading` column holds course-over-ground (consistent with the live recorder, which
+            // stores gps.course there); the FC fused heading goes to the `yaw` column below. INAV logs
+            // COG as "gps_ground_course".
+            heading: resolve_col(m, &["gps_ground_course", "gps_cog", "course"]),
             vario: resolve_col(m, &["vario", "vertical_speed"]),
             gps_vel_d: resolve_col(m, &["gps_velned[2]", "gps_velned2", "gps_vertical_speed"]),
             voltage: resolve_col(m, &["vbat", "voltage"]),
@@ -501,7 +503,9 @@ impl ColumnIndices {
             rssi: resolve_col(m, &["rssi"]),
             roll: resolve_col(m, &["roll", "attitude0", "attitude_roll"]),
             pitch: resolve_col(m, &["pitch", "attitude1", "attitude_pitch"]),
-            yaw: resolve_col(m, &["yaw", "attitude2", "attitude_yaw"]),
+            // The DB `yaw` column holds the FC fused heading (INAV's "heading" field is the AHRS heading
+            // in decidegrees; fall back to the raw IMU yaw / attitude[2]).
+            yaw: resolve_col(m, &["heading", "yaw", "attitude2", "attitude_yaw"]),
             sats: resolve_col(m, &["gps_numsat", "gps_sats"]),
             lq: resolve_col(m, &["lq", "link_quality", "rxlq"]),
             gps_hdop: resolve_col(m, &["gps_hdop"]),
@@ -590,7 +594,7 @@ fn build_telemetry_record_indexed(
         .and_then(|v| parse_loose_i64(v))
         .unwrap_or(row_fallback);
 
-    // INAV blackbox "heading" is in decidegrees (0–3600), so divide by 10.
+    // Course over ground (gps_ground_course) is in decidegrees (0–3600), so divide by 10.
     let heading = cols
         .heading
         .and_then(|i| record.get(i))

@@ -226,6 +226,8 @@ export interface AppSettings {
   attitudeRateHz: number;
   positionRateHz: number;
   airspeedEnabled: boolean;
+  /** Show the heading / course-over-ground / predicted-turn direction lines at the aircraft on the 2D map. */
+  directionLines: boolean;
   // MAVLink only: stream everything the FC sends (per its SRn_* params) instead of requesting our
   // reduced rate set — ignores the two rate knobs. For high-bandwidth links + full .tlog capture.
   mavlinkFullTelemetry: boolean;
@@ -293,6 +295,7 @@ const defaults: AppSettings = {
   attitudeRateHz: 5,
   positionRateHz: 2,
   airspeedEnabled: false,
+  directionLines: true,
   mavlinkFullTelemetry: false,
   flightLoggingEnabled: true,
   flightRecordingEnabled: true,

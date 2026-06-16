@@ -2228,6 +2228,7 @@
         {attitudeRateHz}
         {positionRateHz}
         {airspeedEnabled}
+        directionLines={$settings.directionLines}
         {mavlinkFullTelemetry}
         {flightLoggingEnabled}
         {flightRecordingEnabled}

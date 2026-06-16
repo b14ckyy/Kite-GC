@@ -396,7 +396,13 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
             fused.lon = gpi.lon as f64 / 1e7;
             fused.alt_msl = gpi.alt as f64 / 1000.0; // mm → m
             fused.ground_speed = ((gpi.vx as f64).powi(2) + (gpi.vy as f64).powi(2)).sqrt() / 100.0; // cm/s → m/s
-            fused.course = gpi.hdg as f64 / 100.0; // cdeg → deg
+            // Course over ground from the fused horizontal velocity (vx=North, vy=East). NOTE: `gpi.hdg`
+            // is the vehicle HEADING (yaw), not COG — heading is sourced from ATTITUDE.yaw, so don't
+            // conflate it into `course` here. Below a walking pace COG is just atan2 of velocity noise,
+            // so hold the previous value.
+            if fused.ground_speed > 0.5 {
+                fused.course = (gpi.vy as f64).atan2(gpi.vx as f64).to_degrees().rem_euclid(360.0);
+            }
 
             let gps = GpsData {
                 // Fix/sat come from GPS_RAW_INT (cached). Before the first GPS_RAW_INT, GLOBAL_POSITION_INT

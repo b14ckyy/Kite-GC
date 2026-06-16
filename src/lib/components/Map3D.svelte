@@ -3228,13 +3228,15 @@
     const lat = point.lat;
     const lon = point.lon;
     const alt = startMslGps + geoidOffset + (point.nav_alt_m ?? point.baro_alt_m ?? 0);
-    const heading = point.heading ?? 0;
     const color = getNavStateColor(point.nav_state ?? 0); // marker = nav state
     const cesiumColor = Cesium.Color.fromCssColorString(color);
     const position = Cesium.Cartesian3.fromDegrees(lon, lat, alt);
     // Attitude from the SAME unified adapter the AHI widget uses (consistent across
-    // INAV / ArduPilot / live / replay) rather than the raw record.
+    // INAV / ArduPilot / live / replay) rather than the raw record. NB: the model heading is the FC
+    // fused HEADING (`td.yaw`), NOT the GPS course (`point.heading` = COG) — so the model/FPV/camera
+    // show the real crab against the track instead of riding it like rails.
     const td = toTelemetryData(point, fcVariant);
+    const heading = td.yaw;
     const orientation = uavOrientation(position, heading, td.pitch, td.roll);
 
     // FPV HUD data (replay source).

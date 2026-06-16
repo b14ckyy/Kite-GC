@@ -12,6 +12,10 @@
 
   let rotation = $derived(-telem.yaw);
 
+  // Course-over-ground (track) bug. COG is noise at standstill, so only show it while moving.
+  const COG_MIN_SPEED = 1.5; // m/s
+  let cogShown = $derived(!!telem.lastUpdate && telem.groundSpeed > COG_MIN_SPEED);
+
   function cardinalLabel(heading: number): string {
     const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
     return dirs[Math.round(heading / 45) % 8];
@@ -49,10 +53,27 @@
             fill="white" font-size="22" font-weight="600" opacity="0.8" font-family="sans-serif">{$t('compass.s')}</text>
       <text x="48" y="104" text-anchor="middle" dominant-baseline="middle"
             fill="white" font-size="22" font-weight="600" opacity="0.8" font-family="sans-serif">{$t('compass.w')}</text>
+
+      <!-- Course-over-ground track bug: rides the rose rim at the COG bearing. Nested inside the rose
+           (rotation = −yaw) and rotated by course, it lands at screen angle course−yaw; the gap to the
+           fixed heading pointer at the top is the crab angle. Inward-pointing amber triangle on the rim,
+           clear of the centre heading value. -->
+      {#if cogShown}
+        <g transform="rotate({telem.course}, 100, 100)">
+          <polygon points="100,24 92,8 108,8" fill="#f5a623" opacity="0.85" />
+        </g>
+      {/if}
     </g>
 
     <!-- Fixed heading pointer (top) -->
     <polygon points="100,2 92,20 108,20" fill="#37a8db" />
+
+    <!-- COG readout (amber, matches the track bug) — smaller, above the heading value -->
+    {#if cogShown}
+      <text x="100" y="80" text-anchor="middle" dominant-baseline="middle"
+            fill="#f5a623" font-size="17" font-weight="600" font-family="sans-serif"
+            style="font-variant-numeric: tabular-nums">{Math.round(telem.course)}°</text>
+    {/if}
 
     <!-- Center heading value -->
     <text x="100" y="105" text-anchor="middle" dominant-baseline="middle"

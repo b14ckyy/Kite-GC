@@ -484,6 +484,8 @@ impl FlightRecorder {
         self.snapshot.lon = Some(data.lon);
         self.snapshot.alt_gps = Some(data.alt_msl);
         self.snapshot.speed = Some(data.ground_speed);
+        // DB column `heading` = course over ground (GpsData.course); the FC fused heading is stored
+        // separately in `yaw` (from on_attitude). Kept distinct for the wind/crab analysis.
         self.snapshot.heading = Some(data.course as i16);
         self.snapshot.fix_type = Some(data.fix_type);
         self.snapshot.num_sat = Some(data.num_sat);

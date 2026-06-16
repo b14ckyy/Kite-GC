@@ -23,6 +23,7 @@
   import { initTileCache } from "$lib/cache/tileCache";
   import { homePosition, homeMarkerShown } from "$lib/stores/home";
   import { editMode } from "$lib/stores/mission";
+  import { destinationPoint } from "$lib/utils/geo";
   import MissionLayer from "./mission/MissionLayer.svelte";
   import SurveyPatternLayer from "./mission/SurveyPatternLayer.svelte";
   import TerrainCursorLayer from "./terrain/TerrainCursorLayer.svelte";
@@ -198,6 +199,33 @@
   let preArmPositions: L.LatLng[] = [];
   let playbackLayerGroup: L.LayerGroup | undefined;
   let playbackMarker: L.Marker | undefined;
+
+  // ── Direction marker lines (heading + course-over-ground) ────────────
+  // Two short lines from the UAV nose: HDG (solid blue) along the FC heading, COG (dashed amber) along
+  // the ground track — the angle between them is the crab. Colours match the compass widget. Drawn from
+  // the SMOOTHED follow state (same filtering as the marker), geographic so they pan/zoom natively.
+  let dirLayer: L.LayerGroup | undefined;
+  let hdgLine: L.Polyline | undefined;
+  let cogLine: L.Polyline | undefined;
+  let hdgCasing: L.Polyline | undefined; // dark outline under each line for contrast on any terrain
+  let cogCasing: L.Polyline | undefined;
+  let turnLine: L.Polyline | undefined;  // predicted turn arc (thin white, drawn under the H/B lines)
+  let turnCasing: L.Polyline | undefined;
+  const DIR_LEAD_S = 15;     // line length = how far the UAV travels in this many seconds (velocity vector)
+  const DIR_COG_MIN_SPEED = 1.5; // m/s — COG is noise below this → hide the amber line
+  const TURN_SHOW_RATE = 5;  // deg/s — only START showing on a real turn (above fluctuation noise)
+  const TURN_KEEP_RATE = 3;  // deg/s — once shown, keep while above this …
+  const TURN_HOLD_MS = 2000; // … and for this long after it drops below (hysteresis vs. fluctuations)
+  const TURN_MAX_SWEEP = 180; // cap the arc at a half-circle so it never spirals
+  const TURN_SEG_DEG = 5;    // arc polyline resolution (degrees of turn per segment)
+  // Turn-rate estimate (deg/s, signed): low-passed dCOG/dt on the SOURCE time base (wall clock live,
+  // log timestamp in replay → playback speed doesn't distort it). The DISPLAYED rate is eased per-frame
+  // in followLoop (followCurrent.turnRate) so the arc transitions smoothly instead of whipping.
+  let turnRateDegS = 0;
+  let prevCog: number | null = null;
+  let prevCogTs = 0;
+  let turnArcShown = false;    // hysteresis: is the arc currently displayed?
+  let turnArcLastActiveTs = 0; // last source time the rate was ≥ TURN_KEEP_RATE
 
   // ── Foreign-vehicle (radar) contacts — isolated layer, diffed by id ──
   let radarLayer: L.LayerGroup | undefined;
@@ -484,6 +512,8 @@
 
   // Redraw on enable-toggle, new data, or visibility change (data/visibility via subscriptions below).
   $effect(() => { void $settings.airspace.enabled; if (map) updateAirspace(); });
+  // Toggle the heading/course/turn nose lines on/off (clears or redraws immediately, not just next frame).
+  $effect(() => { void $settings.directionLines; if (map) redrawDirLines(); });
 
   // Follow mode (bindable prop, see $props above):
   // - free: manual map movement
@@ -496,7 +526,7 @@
   // marker. A rAF loop eases the displayed position toward the latest target
   // (exponential, ~250 ms catch-up), decoupled from the update rate. Large
   // jumps (replay scrub, new flight, first fix) snap instead of gliding.
-  interface FollowPt { lat: number; lon: number; heading: number; pitch: number; roll: number; }
+  interface FollowPt { lat: number; lon: number; heading: number; pitch: number; roll: number; course: number; speed: number; turnRate: number; }
   let followTarget: FollowPt | null = null;
   let followCurrent: FollowPt | null = null;
   let activeFollowMarker: L.Marker | undefined;
@@ -513,16 +543,41 @@
 
   /** Set the latest position + attitude target; the rAF loop eases toward it and redraws the model
    *  marker every frame (so the orientation is smooth, not stepped at the data rate). */
-  function setFollowTarget(lat: number, lon: number, heading: number, pitch: number, roll: number, color: string, marker: L.Marker | undefined) {
+  function setFollowTarget(lat: number, lon: number, heading: number, pitch: number, roll: number, color: string, marker: L.Marker | undefined, course = heading, speed = 0, timeMs = 0) {
     if (!isValidGpsCoordinate(lat, lon)) return;
     activeFollowMarker = marker;
     activeColor = color;
-    followTarget = { lat, lon, heading, pitch, roll };
+
+    // Turn-rate estimate: low-passed dCOG/dt on the source time base. Only trusted while moving; a
+    // standstill, a time gap or a scrub resets it so the arc never lags or spins from stale COG.
+    if (speed > DIR_COG_MIN_SPEED && prevCog != null && timeMs > 0) {
+      const dtS = (timeMs - prevCogTs) / 1000;
+      if (dtS > 0.05 && dtS < 4) {
+        const dCog = ((course - prevCog + 540) % 360) - 180; // shortest-path COG change
+        turnRateDegS += ((dCog / dtS) - turnRateDegS) * 0.25; // low-pass
+      } else {
+        turnRateDegS = 0; // gap / scrub
+      }
+    } else {
+      turnRateDegS = 0;
+    }
+    prevCog = speed > DIR_COG_MIN_SPEED ? course : null;
+    prevCogTs = timeMs;
+
+    // Arc show/hide hysteresis on the source time base: start only above TURN_SHOW_RATE (a real turn),
+    // then stay visible while ≥ TURN_KEEP_RATE and for TURN_HOLD_MS after it drops below.
+    const absRate = Math.abs(turnRateDegS);
+    if (absRate >= TURN_KEEP_RATE) turnArcLastActiveTs = timeMs;
+    if (!turnArcShown && absRate > TURN_SHOW_RATE) turnArcShown = true;
+    else if (turnArcShown && timeMs - turnArcLastActiveTs > TURN_HOLD_MS) turnArcShown = false;
+
+    followTarget = { lat, lon, heading, pitch, roll, course, speed, turnRate: turnRateDegS };
     if (!followCurrent) {
       followCurrent = { ...followTarget };
       applyFollowFrame();
     } else if (L.latLng(followCurrent.lat, followCurrent.lon).distanceTo([lat, lon]) > FOLLOW_SNAP_M) {
       followCurrent = { ...followTarget }; // big jump → snap
+      turnRateDegS = 0; prevCog = null; turnArcShown = false; // jump → drop the stale turn rate + arc
       applyFollowFrame();
     }
     if (followRaf == null) {
@@ -543,9 +598,13 @@
     followCurrent.pitch += (followTarget.pitch - followCurrent.pitch) * k;
     const dr = ((followTarget.roll - followCurrent.roll + 540) % 360) - 180; // shortest path (handles ±180 inversion)
     followCurrent.roll += dr * k;
+    const dc = ((followTarget.course - followCurrent.course + 540) % 360) - 180; // course, shortest path
+    followCurrent.course = (followCurrent.course + dc * k + 360) % 360;
+    followCurrent.speed += (followTarget.speed - followCurrent.speed) * k;
+    followCurrent.turnRate += (followTarget.turnRate - followCurrent.turnRate) * k; // eased → smooth arc
     applyFollowFrame();
     const dist = L.latLng(followCurrent.lat, followCurrent.lon).distanceTo([followTarget.lat, followTarget.lon]);
-    if (dist < 0.5 && Math.abs(dh) < 0.3 && Math.abs(followTarget.pitch - followCurrent.pitch) < 0.3 && Math.abs(dr) < 0.3) {
+    if (dist < 0.5 && Math.abs(dh) < 0.3 && Math.abs(followTarget.pitch - followCurrent.pitch) < 0.3 && Math.abs(dr) < 0.3 && Math.abs(dc) < 0.3 && Math.abs(followTarget.turnRate - followCurrent.turnRate) < 0.3) {
       followCurrent = { ...followTarget }; // settled — snap exactly + stop until next target
       applyFollowFrame();
       followRaf = null;
@@ -563,6 +622,7 @@
       activeFollowMarker.setLatLng(ll);
       drawModel(activeFollowMarker, followCurrent.heading, followCurrent.pitch, followCurrent.roll, activeColor);
     }
+    redrawDirLines();
     // Don't fight an in-progress zoom animation (would snap mid-zoom).
     if (viewMode !== 'free' && !(map as unknown as { _animatingZoom?: boolean })._animatingZoom) {
       followDrivingView = true;
@@ -575,13 +635,82 @@
     }
   }
 
+  /** Redraw the HDG/COG nose lines from the SMOOTHED follow state (so they track the UAV stably, the
+   *  same filtering as the marker). Geographic lines → they pan/zoom natively, no per-frame reprojection.
+   *  Hidden when there's no active marker; the COG line hides below walking pace (COG is noise there). */
+  function redrawDirLines() {
+    if (!map) return;
+    if (!$settings.directionLines || !activeFollowMarker || !followCurrent) {
+      for (const p of [turnCasing, turnLine, hdgCasing, hdgLine, cogCasing, cogLine]) p?.setLatLngs([]);
+      return;
+    }
+    if (!dirLayer) {
+      // Dedicated pane above the overlay pane (flight track, z=400) but below the marker pane (UAV
+      // model, z=600), so the lines sit over the track yet under the aircraft.
+      if (!map.getPane('dirLines')) {
+        const pane = map.createPane('dirLines');
+        pane.style.zIndex = '450';
+        pane.style.pointerEvents = 'none';
+      }
+      dirLayer = L.layerGroup().addTo(map);
+      // Add order = draw order: the turn arc first (bottom, under the H/B lines), then dark casings,
+      // then the coloured H/B lines on top. All in the dirLines pane → above the track, below the UAV.
+      turnCasing = L.polyline([], { pane: 'dirLines', color: '#000', weight: 3.5, opacity: 0.3, lineCap: 'round', interactive: false }).addTo(dirLayer);
+      turnLine = L.polyline([], { pane: 'dirLines', color: '#fff', weight: 1.5, opacity: 0.95, lineCap: 'round', interactive: false }).addTo(dirLayer);
+      hdgCasing = L.polyline([], { pane: 'dirLines', color: '#000', weight: 6, opacity: 0.3, lineCap: 'round', interactive: false }).addTo(dirLayer);
+      cogCasing = L.polyline([], { pane: 'dirLines', color: '#000', weight: 6, opacity: 0.3, lineCap: 'round', interactive: false }).addTo(dirLayer);
+      hdgLine = L.polyline([], { pane: 'dirLines', color: '#37a8db', weight: 3, opacity: 1, lineCap: 'round', interactive: false }).addTo(dirLayer);
+      cogLine = L.polyline([], { pane: 'dirLines', color: '#f5a623', weight: 3, opacity: 1, dashArray: '6 5', lineCap: 'round', interactive: false }).addTo(dirLayer);
+    }
+    const { lat, lon, heading, course, speed } = followCurrent;
+    const len = speed * DIR_LEAD_S; // 15 s of travel → the lines represent ground speed
+    const h = destinationPoint(lat, lon, heading, len);
+    const hll: L.LatLngExpression[] = [[lat, lon], [h.lat, h.lon]];
+    hdgCasing!.setLatLngs(hll);
+    hdgLine!.setLatLngs(hll);
+    if (speed > DIR_COG_MIN_SPEED) {
+      const c = destinationPoint(lat, lon, course, len);
+      const cll: L.LatLngExpression[] = [[lat, lon], [c.lat, c.lon]];
+      cogCasing!.setLatLngs(cll);
+      cogLine!.setLatLngs(cll);
+    } else {
+      cogCasing!.setLatLngs([]);
+      cogLine!.setLatLngs([]);
+    }
+
+    // Turn-radius arc: predicted ground path starting at the nose along COG, curving at the filtered
+    // turn rate. Arc length = 15 s of travel but capped at a 180° sweep (no spiral). Hidden when slow
+    // or nearly straight (the COG line already shows that case).
+    const rate = followCurrent.turnRate; // eased per-frame → smooth
+    const sweep = Math.max(-TURN_MAX_SWEEP, Math.min(TURN_MAX_SWEEP, rate * DIR_LEAD_S)); // signed deg
+    if (turnArcShown && speed > DIR_COG_MIN_SPEED && Math.abs(rate) > 0.5 && Math.abs(sweep) > TURN_SEG_DEG) {
+      const rAbs = speed / (Math.abs(rate) * Math.PI / 180); // turn radius (m)
+      const n = Math.max(2, Math.ceil(Math.abs(sweep) / TURN_SEG_DEG));
+      const stepDeg = sweep / n;
+      const segDist = rAbs * Math.abs(stepDeg) * Math.PI / 180; // chord ≈ arc per small step
+      const pts: L.LatLngExpression[] = [[lat, lon]];
+      let cLat = lat, cLon = lon;
+      for (let i = 1; i <= n; i++) {
+        const b = course + stepDeg * (i - 0.5); // midpoint bearing per segment
+        const p = destinationPoint(cLat, cLon, b, segDist);
+        cLat = p.lat; cLon = p.lon;
+        pts.push([cLat, cLon]);
+      }
+      turnCasing!.setLatLngs(pts);
+      turnLine!.setLatLngs(pts);
+    } else {
+      turnCasing!.setLatLngs([]);
+      turnLine!.setLatLngs([]);
+    }
+  }
+
   let followTitle = $derived.by(() => {
     if (viewMode === 'free') return 'Follow mode: Free';
     if (viewMode === 'follow') return 'Follow mode: Follow';
     return 'Follow mode: Heading Follow';
   });
 
-  function updateUavPosition(lat: number, lon: number, heading: number, navState = 0, roll = 0, pitch = 0) {
+  function updateUavPosition(lat: number, lon: number, heading: number, navState = 0, roll = 0, pitch = 0, course = heading, speed = 0, timeMs = 0) {
     if (!map) return;
     if (!isValidGpsCoordinate(lat, lon)) return;
 
@@ -589,7 +718,7 @@
     if (!uavMarker) {
       uavMarker = L.marker([lat, lon], { icon: makeModelIcon(modelSizePx(lat)), zIndexOffset: 1000 }).addTo(map);
     }
-    setFollowTarget(lat, lon, heading, pitch, roll, color, uavMarker); // eases + redraws the model
+    setFollowTarget(lat, lon, heading, pitch, roll, color, uavMarker, course, speed, timeMs); // eases + redraws the model
   }
 
   function createHomeIcon(): L.DivIcon {
@@ -740,7 +869,10 @@
     if (!map) return;
 
     if (!point || point.lat == null || point.lon == null || !isValidGpsCoordinate(point.lat, point.lon)) {
-      if (activeFollowMarker === playbackMarker) activeFollowMarker = undefined;
+      if (activeFollowMarker === playbackMarker) {
+        activeFollowMarker = undefined;
+        redrawDirLines(); // clears the nose lines (no active marker)
+      }
       if (playbackMarker) {
         map.removeLayer(playbackMarker);
         playbackMarker = undefined;
@@ -748,14 +880,15 @@
       return;
     }
 
-    const heading = point.heading ?? 0;
     const color = getNavStateColor(point.nav_state ?? 0); // marker = nav state
-    // Attitude from the same unified adapter the AHI / 3D model use.
+    // Attitude from the same unified adapter the AHI / 3D model use. The icon points along the FC fused
+    // HEADING (`td.yaw`), NOT the GPS course (`point.heading` = COG) — so it shows the real crab.
     const td = toTelemetryData(point, fcVariant);
+    const heading = td.yaw;
     if (!playbackMarker) {
       playbackMarker = L.marker([point.lat, point.lon], { icon: makeModelIcon(modelSizePx(point.lat)), zIndexOffset: 900 }).addTo(map);
     }
-    setFollowTarget(point.lat, point.lon, heading, td.pitch, td.roll, color, playbackMarker); // eases + redraws
+    setFollowTarget(point.lat, point.lon, heading, td.pitch, td.roll, color, playbackMarker, td.course, td.groundSpeed, point.timestamp_ms ?? 0); // eases + redraws
   }
 
   function applyProvider(provider: MapProvider) {
@@ -901,7 +1034,7 @@
     // Subscribe to telemetry for UAV position, flight trail, and home detection
     unsubTelemetry = telemetry.subscribe((t) => {
       if (t.lastUpdate > 0) {
-        updateUavPosition(t.lat, t.lon, t.yaw, t.navState, t.roll, t.pitch); // drives the smoother (marker + follow)
+        updateUavPosition(t.lat, t.lon, t.yaw, t.navState, t.roll, t.pitch, t.course, t.groundSpeed, t.lastUpdate); // drives the smoother (marker + follow)
 
         // Flight trail: colored by flight mode while armed; a thin black
         // monitoring line while disarmed (pre-arm).
@@ -1060,6 +1193,7 @@
       if (preArmTrailLine) map.removeLayer(preArmTrailLine);
       if (playbackLayerGroup) map.removeLayer(playbackLayerGroup);
       if (playbackMarker) map.removeLayer(playbackMarker);
+      if (dirLayer) map.removeLayer(dirLayer);
       if (homeMarker) map.removeLayer(homeMarker);
       if (radarLayer) map.removeLayer(radarLayer);
       map.remove();
