@@ -202,13 +202,28 @@ Home ground = `terrain_elevation(home)`.
 fitted reflecting plane. Good for the long-range/grazing regime it targets. The fitted-plane / Deygout
 multi-obstacle refinements from the plan were **not** needed for Phase 1 (single worst knife-edge).
 
-**RSSI overlay.** In Track mode, per-terrain-sample RSSI (nearest fix by cumulative distance) drawn as a
-line **normalised to the visible plot height** (shape overlay, rescales on zoom) — enough for pattern
-comparison vs the predicted rainbow.
+**RSSI overlay (refined 2026-06-16).** In Track mode, per-terrain-sample RSSI (nearest fix by cumulative
+distance) drawn as a shape line. Scale is **robust + fixed over the whole track**: the 2nd–98th
+percentile (dropout spikes to 0 / very low dBm no longer squash the useful signal), clamped, and stable
+under pan/zoom (no rescaling). **Unit is auto-detected from the values** — `max ≤ 0` → dBm,
+`max ≤ 100` → percent, else raw — since the DB doesn't record it and it differs by source (INAV ~0–1023/%,
+MAVLink RADIO_STATUS 0–254 raw, CRSF/ELRS/mLRS often negative dBm). "Higher = better" holds for all, so
+the mapping is identical; detection is for labelling. A **toggle button** under the band selector shows/
+hides the line (auto-disabled in Waypoint mode or when RSSI is permanently 0); independent of the
+analysis methods.
+
+**Render performance (2026-06-16).** The rainbow gradient is binned into **5 px-wide bands** (one `<stop>`
+per band, worst-dB kept) instead of one per sample — the per-frame DOM churn of ~plotW stop-nodes was the
+RF-on pan/zoom bottleneck. Graph polylines stay at **1 sample/px with sub-pixel (`toFixed`) coordinates**
+(integer rounding made the lines "crawl" while panning). Panel `activeRange`/clearance reads are
+decoupled from `viewStart/viewEnd` (via a narrow `gcVal` derived) so they don't recompute O(n) per pan
+frame. Fast method-switching no longer leaves a stale field (the compute token bumps on every change,
+before the early-returns).
 
 **Validation (2026-06-15).** Matched real RSSI well for a loiter behind a slope; long-range patterns
 track the two-ray lobing. Confirmed the model is a **risk indicator, not an exact RSSI predictor** —
 near-field, antenna pattern/attitude, and per-pixel canopy height are out of scope.
 
-**Parked for later (separate steps):** GCS antenna height as a parameter; fixed vs. window-normalised
-RSSI scale; differentiated clutter layer; **Phase 2** link budget / absolute range.
+**Parked for later (separate steps):** GCS antenna height as a parameter; surfacing the detected RSSI
+unit as a visible label; differentiated clutter layer; canvas-rendered rainbow if the band gradient ever
+needs to scale further; **Phase 2** link budget / absolute range.

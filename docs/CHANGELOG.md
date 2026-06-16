@@ -18,7 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   accounts for forest/buildings the bare DEM misses. Adds a **line-of-sight clearance line** (AGL view)
   and, in Track mode, overlays the **logged RSSI** so predicted vs. measured can be compared directly.
   Radial 1°-from-home sampling keeps it cheap. It is an honest *risk indicator*, not an exact RSSI
-  predictor (near-field, antenna pattern/attitude and per-pixel canopy are out of scope).
+  predictor (near-field, antenna pattern/attitude and per-pixel canopy are out of scope). The RSSI
+  overlay uses a **robust, fixed scale** (2nd–98th percentile so dropout spikes don't squash it) with
+  **auto-detected unit** (dBm / percent / raw) and its own **show/hide toggle** (disabled in Waypoint
+  mode or without RSSI). Tuned for smooth pan/zoom on long flights: the loss field renders as 5 px
+  colour bands (not one gradient stop per pixel) and the clearance recompute is decoupled from the
+  zoom window.
 - **ArduPilot/PX4 mission library — full parity with INAV (ADR-050).** ArduPilot missions can now be
   **saved to the library, deduplicated, retrieved, previewed and linked to flights** exactly like INAV
   missions — the ArduPilot editor gained a "Save to library" button and the "Mission Manager", and the
