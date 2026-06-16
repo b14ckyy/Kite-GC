@@ -152,6 +152,55 @@ emitted as `ble-gatt-char-data`). This both reveals what the radio exposes and c
 the radio's BLE telemetry mode is active. **To test: set the radio's Bluetooth mode to Telemetry, then
 connect** — the streaming service/characteristic should appear and start delivering bytes.
 
+## Validated: FrSky S.Port over BLE (ETHOS X20RS, INAV 9.x)
+
+First real capture (241 KB, 21 922 frames) — framing fully reverse-engineered:
+
+- **Transport (BLE):** vendor service **`0xFFF0`**, characteristic **`0xFFF6`** (WriteNR + **Notify**) carries
+  the stream; `0xFFF3` (WriteNR) is the unused uplink. Listen-only = subscribe to `0xFFF6`. See the BLE
+  discovery note above (Web-BLE under-reporting hid `0xFFF0`).
+- **Frame:** raw FrSky **S.Port**, `0x7E`-delimited (frames separated by `7E 7E`), with **`0x7D`
+  byte-stuffing** (`7D xx → xx XOR 0x20`). Unstuffed frame = **9 bytes**:
+  `<physID> 0x10 <appID:2 LE> <value:4 LE> <crc>`. Type byte is always `0x10` (data frame).
+- **physID:** `0x00` = the flight controller, `0x98` = the receiver (RSSI/RxBt on `0xF101`/`0xF104`).
+- **CRC:** the trailing byte is **not** the standard S.Port checksum (no common variant matched). The
+  `0x7E` framing + constant `0x10` type is reliable on its own; CRC validation is deferred (corrupt-frame
+  filtering only).
+- GPS (`0x0800` lat/lon, `0x0820` alt, `0x0840` course) decoded to a real location — capture is authentic.
+
+## INAV S.Port appID map + version coverage (7.0 vs 8.0/9.0)
+
+Standard FrSky fields are **stable across INAV 7/8/9** (same appID + encoding): `0x0100` Alt, `0x0110`
+Vario, `0x0200` Current, `0x0210` VFAS, `0x0300` Cells, `0x0830` GPS-speed, `0x0840` Heading, `0x0820`
+GPS-alt, `0x0800` lat/lon, `0x0430` Pitch, `0x0440` Roll, `0x0450` FPV, `0x0460` Azimuth, `0x0420`
+Home-dist, `0x0700/0710/0720` Acc, `0x0A00` Airspeed, `0x0910` A4, `0xF102/0xF103` ADC1/2.
+
+**The INAV-specific status fields moved** (verified against `telemetry/smartport.c` at tags 7.0.0 / 8.0.0 / 9.0.0):
+
+| Data | INAV ≤ 7.x | INAV ≥ 8.0 |
+|---|---|---|
+| Flight modes | `0x0400` (T1) | `0x0470` (MODES) |
+| GNSS state | `0x0410` (T2) | `0x0480` (GNSS) |
+
+In 8.0+ the old IDs are renamed `LEGACY_MODES`/`LEGACY_GNSS`, kept only as `#define`s and **not
+transmitted** (removal slated for INAV 10). 7.x transmits `0x0400`/`0x0410`; 8.0+ transmits
+`0x0470`/`0x0480`. The bit-packing of the modes/GNSS payload also differs between the old and new fields.
+
+**Coverage strategy — dispatch by appID, no version sniffing:** the legacy (`0x0400`/`0x0410`) and new
+(`0x0470`/`0x0480`) IDs are disjoint, so the appID itself disambiguates the firmware era. We implement
+**both** decoders and route by appID; whichever the FC emits is decoded with its matching layout. This
+auto-covers 7.x ↔ 8.0+ (and future FCs/Betaflight) without detecting a version. The same principle applies
+to CRSF (INAV also reworked CRSF custom frames across versions) — decode by frame/sub-type, not version.
+
+## ArduPilot — separate decoder (FrSky passthrough / "Yaapu")
+
+ArduPilot exposes only **minimal native FrSky fields**; almost everything (attitude, GPS, battery,
+**text status messages**, AP flight modes) is packed into the **DIY appID range `0x5000–0x52FF`** using the
+ArduPilot **FrSky passthrough** ("Yaapu") protocol — bit-packed, MAVLink-derived messages, a completely
+different decoding from INAV's per-sensor appIDs. This is handled as its **own decoder**, documented and
+kept strictly separate from the INAV/standard-FrSky path (selected by detecting `0x5000`-range frames).
+Scope for a later phase.
+
 ## Open questions (to settle during research/validation, not blocking the plan)
 
 - Does EdgeTX/ETHOS emit raw `0x7E` S.Port frames, a decoded plain-text variant, or something else? →
