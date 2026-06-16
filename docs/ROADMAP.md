@@ -539,7 +539,7 @@ This document tracks planned features, organized by milestone.
 - [ ] **Stick / gimbal overlay** — animated RC transmitter sticks (two gimbals) driven by recorded RC-channel data, à la Blackbox Explorer. **Replay only for now** (from `RC_CHANNELS` / blackbox `rcCommand`); live later. Configurable channel map (AETR/TAER) + stick mode 1–4. As a widget or a corner overlay on the map/replay.
 - [ ] Audio status alerts (TTS)
 - [x] Terrain analysis — _elevation profile + clearance + correction (Terrain Follow / Clearance Check) + jump simulation done; see Terrain Elevation section_
-- [x] **Heading / course / crab cues** — compass COG track-bug + amber readout next to heading; 2D map **HDG / COG nose lines** + **predicted turn-radius arc** at the aircraft (velocity-vector length, arc capped at 180°); unified FC-heading-vs-COG pipeline across MSP / MAVLink / Blackbox and 2D+3D, live+replay; **Direction indicators** settings toggle. Wind-arrow / flight-path-marker **parked** on INAV `MSP2_INAV_WIND` (unmerged, likely v10); 3D markers deferred. See `docs/archive/WIND_CRAB_INDICATOR.md`
+- [x] **Heading / course / crab cues** — compass COG track-bug + amber readout next to heading; 2D map **HDG / COG nose lines** + **predicted turn-radius arc** at the aircraft (velocity-vector length, arc capped at 180°); unified FC-heading-vs-COG pipeline across MSP / MAVLink / Blackbox and 2D+3D, live+replay; **Direction indicators** settings toggle. Wind-arrow / flight-path-marker **parked** on INAV `MSP2_INAV_WIND` (unmerged, likely v10); 3D map markers **not planned** (revisit only on request). See `docs/archive/WIND_CRAB_INDICATOR.md`
 - [~] Embedded video — _built: source router + webcam/USB-capture (`getUserMedia`, cross-platform), NavRail panel (live preview, 60 fps MJPEG fix), 2×1 dock widget, snap/drag floating window, double-click map⇄video swap, native Picture-in-Picture, persistence + auto-start. **Pending (v2):** network streams (RTSP/UDP), native `nokhwa` capture, snapshot/record; see `docs/active/VideoFeature.md`_
 - [ ] FW approach / autoland planner
 - [ ] Geozone editor
@@ -600,7 +600,7 @@ Source: **Copernicus DEM GLO-30** (geoid/EGM2008 ≈ MSL, no API key, offline-ca
 - [x] **Live Track mode** — Track mode follows the live flown track when connected: shared in-RAM `liveTrack` store (accumulates while armed), terrain pre-fetch on arm, incremental 5 s sampling, Follow toggle (pin-right zoom-only / free pan), 250 m default window. _(built; field-test pending)_
 - [x] **Live AGL widget** — forward-looking terrain HUD (new 2×1 `wide` widget class): flown terrain/history left, UAV marker tracking altitude, **estimated terrain ahead along heading** right; history accumulated from the telemetry stream so it works live **and** in replay; projected flight line from (averaged) FC vario; speed-based scale (300/900/1800/3600 m) with boundary hysteresis; relative-altitude + distance axes. _(built; field-tested via blackbox replay)_
 - [x] **Terrain Radar widget** — 1×1 top-down, track-up EGPWS-style 120° fan coloured by terrain clearance; new `terrain_fan` backend (server-side polar sampling); speed-driven forward distance (shared 300/900/1800/3600 m scale) + own clearance colour scale (60/120/250 m); continuous heatmap ramp with REL/PRED (sink-angle) reference; turbulence-texture filter. _(built; field-tested via blackbox replay)_
-- [ ] **LOS (line-of-sight) analysis** for waypoint missions — terrain occlusion / radio horizon along the route, à la MWPTools
+- [x] **LOS (line-of-sight) / RF link analysis** for waypoint missions + flown tracks — shipped as the **RF Link / Radio-Shadow** analysis inside the Terrain Analyzer (LOS occlusion + Fresnel/diffraction + two-ray ground reflection, rendered as a background loss field) **plus a 2D-map ray-triangle overlay** of the radio-shadow geometry. See `docs/active/RF_LINK_ANALYSIS.md`. _Phase 2 (absolute link budget / range) deferred._
 
 ### Code Health & Maintainability
 - [ ] Rust module reorganization when `flightlog/` exceeds 20 files (parsers/, exporters/, models/) — _currently 12/20, not yet needed_
@@ -677,4 +677,4 @@ Source: **Copernicus DEM GLO-30** (geoid/EGM2008 ≈ MSL, no API key, offline-ca
 
 ---
 
-*Last updated: 2026-06-16*
+*Last updated: 2026-06-16 (LOS/RF marked shipped; 3D direction markers dropped)*

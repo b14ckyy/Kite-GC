@@ -3,9 +3,9 @@
 > **ARCHIVED (2026-06-16).** Phase 1 (heading / course-over-ground / crab cues) **shipped** — see
 > As-built below. Phase 2 (FC **wind estimate** → wind arrow + wind-derived flight-path marker) is
 > **parked**: it needs `MSP2_INAV_WIND`, still unmerged in INAV (likely INAV 10), and is not required
-> before the Kite release. **3D versions of the map markers are deferred** until explicitly requested
-> (the turn arc would need a 3D spline). Revisit Phase 2 only if the firmware ships the wind message and
-> there is demand. Orig. GitHub issue #3.
+> before the Kite release. **3D versions of the map markers are not planned** (revisit only on explicit
+> request; the turn arc would need a 3D spline). Revisit Phase 2 only if the firmware ships the wind message
+> and there is demand. Orig. GitHub issue #3.
 
 ## The idea
 
@@ -87,7 +87,7 @@ gate on "wind valid" + INAV version; FPM on the PFD; replay needs a recorded win
 
 ## Deferred
 
-- **3D map markers** (HDG/COG lines + turn arc) — only if explicitly requested; the turn arc needs a 3D spline.
+- **3D map markers** (HDG/COG lines + turn arc) — **not planned** (revisit only on explicit request; the turn arc would need a 3D spline).
 - **Dedicated signed crab readout** — covered by the compass dual (heading + COG) readout; add a separate
   numeric `HDG − COG` only if wanted.
 - Slip/skid "ball" (issue #2) — **rejected** (no accelerometer path without extra traffic).
