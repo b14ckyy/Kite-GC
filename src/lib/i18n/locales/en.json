@@ -224,6 +224,7 @@
     "rfTworay": "Two-Ray",
     "rfTworayHint": "Ground-reflection multipath lobing (nulls and constructive peaks).",
     "rfClutter": "Clutter / vegetation",
+    "rfRssiHint": "Show the logged RSSI line (Track mode; disabled in Waypoint mode or without RSSI data).",
     "rfLosIgnored": "LOS blocking is superseded by Fresnel/diffraction while both are on.",
     "rfRainbowMsl": "The loss rainbow is shown in the MSL view; here only the sightline clearance line is drawn.",
     "rfDisclaimer": "Terrain-only estimate from the launch point — excludes near-field, antenna pattern and aircraft attitude; two-ray null depth is approximate.",

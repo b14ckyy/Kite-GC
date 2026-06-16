@@ -224,6 +224,7 @@
     "rfTworay": "Two-Ray",
     "rfTworayHint": "Bodenreflexions-Mehrwege-Lobing (Nullstellen und konstruktive Maxima).",
     "rfClutter": "Bewuchs / Bebauung",
+    "rfRssiHint": "Geloggte RSSI-Linie anzeigen (Track-Modus; im Wegpunkt-Modus oder ohne RSSI-Daten deaktiviert).",
     "rfLosIgnored": "LOS-Blockade wird durch Fresnel/Beugung ersetzt, solange beide aktiv sind.",
     "rfRainbowMsl": "Das Verlust-Rainbow erscheint in der MSL-Ansicht; hier wird nur die Sichtlinien-Clearance-Linie gezeichnet.",
     "rfDisclaimer": "Reine Terrain-Schätzung vom Startpunkt — ohne Nahfeld, Antennendiagramm und Fluglage; Two-Ray-Nulltiefe ist näherungsweise.",

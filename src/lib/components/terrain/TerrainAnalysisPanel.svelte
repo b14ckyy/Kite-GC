@@ -243,11 +243,17 @@
     patchTerrainAnalysis({ groundClearance: Math.max(0, groundClearance) });
   }
 
+  // Narrow derived of just the ground-clearance value. Reading `$terrainAnalysis.groundClearance`
+  // directly inside the O(n) `activeRange`/`warnThreshold` would couple them to the whole store, so
+  // they'd recompute on every zoom/pan (which writes viewStart/viewEnd into the store). Depending on
+  // this memoised value instead means they only recompute when the clearance actually changes.
+  const gcVal = $derived($terrainAnalysis.groundClearance);
+
   // Clearance analysis ignores the take-off climb-out and landing descent:
   // skip the leading/trailing runs that sit below clearance (we start/land on
   // the ground), so only the en-route portion drives the min-clearance alert.
   const activeRange = $derived.by(() => {
-    const gc = $terrainAnalysis.groundClearance;
+    const gc = gcVal;
     if (!data) return { startDist: -Infinity, endDist: Infinity, min: null as number | null };
     const t = data.terrain;
     const cl = data.clearance;
@@ -280,7 +286,7 @@
   });
 
   // Warn/colour at 95% of the target (5% grace) so exact-clearance isn't already red
-  const warnThreshold = $derived($terrainAnalysis.groundClearance * 0.95);
+  const warnThreshold = $derived(gcVal * 0.95);
   const belowClearance = $derived(activeRange.min != null && activeRange.min < warnThreshold);
 
   // Distance of the pinned map marker along the current profile (nearest sample
@@ -435,8 +441,17 @@
     data ? data.terrain.some((s) => s.elev != null) : true,
   );
 
-  // Track carries logged RSSI → show the measured-link line + legend entry.
-  const hasRssi = $derived(!!data && data.rssi.some((v) => v != null));
+  // The track carries usable RSSI (Track mode + at least one non-null, non-zero sample). "Permanent 0"
+  // (field never populated) counts as unavailable → the toggle is disabled.
+  const rssiAvailable = $derived(
+    !!data && data.source === 'track' && data.rssi.some((v) => v != null && v !== 0),
+  );
+  // The RSSI line is shown when available and the toggle is on. Independent of the analysis methods.
+  const rssiShown = $derived(rssiAvailable && $terrainAnalysis.rfShowRssi);
+
+  function toggleRssi() {
+    patchTerrainAnalysis({ rfShowRssi: !$terrainAnalysis.rfShowRssi });
+  }
 
   // ── RF link / radio-shadow field (background rainbow + LOS-clearance line) ──────────
   let rfDb = $state<(number | null)[] | null>(null);
@@ -475,6 +490,10 @@
     const d = data;
     const lp = $launchPoint;
     const trk = track;
+    // Bump the token on EVERY change (before any early return) so a still-in-flight compute from a
+    // previous run can never apply after the inputs changed — e.g. toggling the last method off must
+    // not let a pending result resurrect a stale rainbow.
+    const token = ++rfToken;
     const anyRf = st.rfLos || st.rfFresnel || st.rfTworay;
     if (!st.open || !d || !anyRf) {
       rfDb = null;
@@ -488,7 +507,6 @@
       return;
     }
     const opts = { band: st.rfBand, los: st.rfLos, fresnel: st.rfFresnel, tworay: st.rfTworay, clutterM: st.rfClutterM };
-    const token = ++rfToken;
     const timer = setTimeout(async () => {
       try {
         const ground = await invoke<number | null>('terrain_elevation', { lat: home.lat, lon: home.lon });
@@ -551,7 +569,7 @@
         <span class="lg"><i class="sw terrain"></i>{$t('terrain.terrain')}</span>
         <span class="lg"><i class="sw floor"></i>{$t('terrain.clearanceFloor')}</span>
         <span class="lg"><i class="sw unsafe"></i>{$t('terrain.unsafe')}</span>
-        {#if hasRssi}<span class="lg"><i class="sw rssi"></i>{$t('terrain.rssi')}</span>{/if}
+        {#if rssiShown}<span class="lg"><i class="sw rssi"></i>{$t('terrain.rssi')}</span>{/if}
       </div>
 
       <div class="rf-section">
@@ -578,6 +596,17 @@
           value={$terrainAnalysis.rfBand}
           onchange={(v) => setRfBand(v as '5800' | '2400' | '900' | '433')}
         />
+        <div class="rf-methods">
+          <Button
+            variant="mode"
+            active={rssiAvailable && $terrainAnalysis.rfShowRssi}
+            disabled={!rssiAvailable}
+            onclick={toggleRssi}
+            title={$t('terrain.rfRssiHint')}
+          >
+            {$t('terrain.rssi')}
+          </Button>
+        </div>
         <div class="ctrl">
           <span>{$t('terrain.rfClutter')}</span>
           <UnitStepper
@@ -684,7 +713,7 @@
           settings={interfaceSettings}
           live={liveActive}
           follow={$terrainAnalysis.follow}
-          groundClearance={$terrainAnalysis.groundClearance}
+          groundClearance={gcVal}
           {warnThreshold}
           activeStartDist={activeRange.startDist}
           activeEndDist={activeRange.endDist}
@@ -692,7 +721,7 @@
           {previewPath}
           {rfDb}
           {losClearance}
-          rssi={data?.rssi ?? null}
+          rssi={rssiShown ? (data?.rssi ?? null) : null}
           bind:viewStart={$terrainAnalysis.viewStart}
           bind:viewEnd={$terrainAnalysis.viewEnd}
           onhover={onChartHover}

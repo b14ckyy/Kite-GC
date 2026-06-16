@@ -171,7 +171,9 @@
     const n = i1 - i0 + 1;
     if (n <= 0) return [];
 
-    const targetBuckets = Math.max(2, Math.floor(plotW * 1.5));
+    // One sample per pixel — the visible limit. (Coarser than this makes the line "crawl" as the
+    // per-bucket representative jumps around while panning.)
+    const targetBuckets = Math.max(2, Math.floor(plotW));
     if (n <= targetBuckets) {
       const out: DSample[] = [];
       for (let i = i0; i <= i1; i++) {
@@ -259,14 +261,34 @@
   // Horizontal gradient (one stop per visible sample) filling the area from the baseline up to the
   // path line — colour = the sample's combined excess-dB. Pale (low opacity) so it sits behind.
   const rfActive = $derived(rfDb != null && datum === 'msl');
+  // Bin the gradient into ~5 px-wide bands instead of one <stop> per sample: a stop per pixel meant
+  // ~plotW DOM stop-nodes rebuilt every pan/zoom frame (the real RF-on bottleneck). Each band keeps
+  // the *worst* (lowest dB) sample so a narrow red/blocked zone still shows.
+  const RF_BAND_PX = 5;
   const rfStops = $derived.by(() => {
     if (!rfActive) return [] as { offset: number; color: string }[];
     const d = display;
     const out: { offset: number; color: string }[] = [];
+    let curBand = -1;
+    let worst: number | null = null;
+    const emit = (band: number, w: number | null) => {
+      out.push({
+        offset: Math.max(0, Math.min(1, (band * RF_BAND_PX) / plotW)),
+        color: w != null ? rfColor(w) : 'transparent',
+      });
+    };
     for (let i = 0; i < d.length; i++) {
-      const off = Math.max(0, Math.min(1, (xS(d[i].dist) - PAD.l) / plotW));
-      out.push({ offset: off, color: d[i].rfDb != null ? rfColor(d[i].rfDb) : 'transparent' });
+      const band = Math.floor((xS(d[i].dist) - PAD.l) / RF_BAND_PX);
+      if (band !== curBand) {
+        if (curBand >= 0) emit(curBand, worst);
+        curBand = band;
+        worst = d[i].rfDb;
+      } else {
+        const v = d[i].rfDb;
+        if (v != null && (worst == null || v < worst)) worst = v;
+      }
     }
+    if (curBand >= 0) emit(curBand, worst);
     return out;
   });
   const rfAreaPath = $derived.by(() => {
@@ -307,19 +329,36 @@
     return runs.map((r) => r.join(' '));
   });
 
-  // Logged-RSSI line (Track mode): normalised to the plot height (shape overlay, no own axis).
+  // Logged-RSSI line (Track mode): a shape overlay (no own axis) normalised to the plot height.
   const rssiActive = $derived(rssi != null && data?.source === 'track');
+  // Robust, fixed scale computed over the WHOLE track (not the visible slice, so it doesn't rescale
+  // while panning/zooming). The range is the 2nd–98th percentile — dropout spikes (RSSI → 0 / a very
+  // low dBm) would otherwise dominate min/max and squash the useful signal into a sliver. Higher =
+  // better for every format (%, raw, or dBm where less-negative = stronger), so the mapping is the
+  // same; `fmt` is only the detected unit for labelling.
+  const rssiScale = $derived.by(() => {
+    if (!rssiActive || !rssi) return null;
+    const vals = rssi.filter((v): v is number => v != null);
+    if (vals.length < 2) return null;
+    const sorted = [...vals].sort((a, b) => a - b);
+    const pct = (p: number) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.round(p * (sorted.length - 1))))];
+    let lo = pct(0.02);
+    let hi = pct(0.98);
+    if (hi <= lo) { lo = sorted[0]; hi = sorted[sorted.length - 1]; }
+    if (hi <= lo) return null;
+    const maxV = sorted[sorted.length - 1];
+    // Value-based unit detection: dBm is negative, percent fits 0–100, anything larger is a raw scale.
+    const fmt: 'dbm' | 'percent' | 'raw' = maxV <= 0 ? 'dbm' : maxV <= 100 ? 'percent' : 'raw';
+    return { lo, hi, fmt };
+  });
   const rssiLine = $derived.by(() => {
-    if (!rssiActive) return '';
-    const d = display;
-    let lo = Infinity;
-    let hi = -Infinity;
-    for (const s of d) if (s.rssi != null) { if (s.rssi < lo) lo = s.rssi; if (s.rssi > hi) hi = s.rssi; }
-    if (!isFinite(lo) || hi <= lo) return '';
+    if (!rssiActive || !rssiScale) return '';
+    const { lo, hi } = rssiScale;
     const pts: string[] = [];
-    for (const s of d) {
+    for (const s of display) {
       if (s.rssi == null) continue;
-      const yn = PAD.t + (1 - (s.rssi - lo) / (hi - lo)) * plotH;
+      const cv = Math.max(lo, Math.min(hi, s.rssi)); // clamp outliers to the robust band
+      const yn = PAD.t + (1 - (cv - lo) / (hi - lo)) * plotH;
       pts.push(`${xS(s.dist).toFixed(1)},${yn.toFixed(1)}`);
     }
     return pts.join(' ');

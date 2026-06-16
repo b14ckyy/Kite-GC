@@ -64,6 +64,8 @@ export interface TerrainAnalysisState {
   rfBand: '5800' | '2400' | '900' | '433';
   /** RF analysis — clutter/vegetation height (m) added to terrain for the obstacle analysis */
   rfClutterM: number;
+  /** Show the logged-RSSI line in Track mode (toggle; auto-disabled in Waypoint mode / no RSSI) */
+  rfShowRssi: boolean;
 }
 
 const INITIAL: TerrainAnalysisState = {
@@ -91,6 +93,7 @@ const INITIAL: TerrainAnalysisState = {
   rfTworay: false,
   rfBand: '900',
   rfClutterM: 10,
+  rfShowRssi: true,
 };
 
 export const terrainAnalysis = writable<TerrainAnalysisState>({ ...INITIAL });
