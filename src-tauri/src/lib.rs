@@ -8,6 +8,7 @@ mod flightmode;
 mod mavlink_proto;
 mod mission;
 mod msp;
+mod passive_telemetry;
 mod radar;
 mod scheduler;
 mod state;

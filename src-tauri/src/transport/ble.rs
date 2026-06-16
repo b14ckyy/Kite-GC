@@ -441,6 +441,200 @@ pub async fn connect_ble(device_id: &str) -> Result<BleTransport, String> {
     })
 }
 
+// ── BLE GATT Explorer (dev) — listen-only auto-discovery ──────────────────────
+// For the passive Telemetry mode we don't know the device's profile (e.g. FrSky ETHOS radios expose
+// no standard serial service). Instead of matching a known profile we connect to ANY device, dump its
+// full GATT table to the Debug Monitor and subscribe to every Notify/Indicate characteristic, routing
+// their bytes into the read stream. This both reveals what the radio exposes and captures the stream
+// once the radio's BLE telemetry mode is active. See docs/active/RADIO_TELEMETRY.md.
+
+/// One characteristic in the discovered GATT table (Debug Monitor `ble-gatt-services` event).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct GattCharInfo {
+    pub uuid: String,
+    pub properties: Vec<String>,
+    /// True if we subscribed to it (Notify/Indicate).
+    pub subscribed: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct GattServiceInfo {
+    pub uuid: String,
+    pub characteristics: Vec<GattCharInfo>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct GattTable {
+    pub device: String,
+    pub services: Vec<GattServiceInfo>,
+}
+
+/// Per-notification activity, attributed to its characteristic (Debug Monitor `ble-gatt-char-data`).
+#[derive(Debug, Clone, serde::Serialize)]
+struct GattCharData {
+    uuid: String,
+    len: usize,
+}
+
+fn char_property_names(p: btleplug::api::CharPropFlags) -> Vec<String> {
+    use btleplug::api::CharPropFlags as F;
+    let mut v = Vec::new();
+    if p.contains(F::READ) { v.push("Read".into()); }
+    if p.contains(F::WRITE) { v.push("Write".into()); }
+    if p.contains(F::WRITE_WITHOUT_RESPONSE) { v.push("WriteNR".into()); }
+    if p.contains(F::NOTIFY) { v.push("Notify".into()); }
+    if p.contains(F::INDICATE) { v.push("Indicate".into()); }
+    v
+}
+
+/// Connect to a BLE device in **listen-only** mode (no profile required, no writes). Emits the full
+/// GATT table as `ble-gatt-services`, subscribes to every Notify/Indicate characteristic and forwards
+/// their bytes into the read stream (each notification also emitted as `ble-gatt-char-data`).
+pub async fn connect_ble_listen(
+    device_id: &str,
+    app: tauri::AppHandle,
+) -> Result<BleTransport, String> {
+    use btleplug::api::{Central, CharPropFlags, Manager as _, Peripheral as _, ScanFilter};
+    use btleplug::platform::Manager;
+    use futures::StreamExt;
+    use tauri::Emitter;
+
+    let manager = Manager::new()
+        .await
+        .map_err(|e| format!("BLE manager init failed: {}", e))?;
+    let adapter = manager
+        .adapters()
+        .await
+        .map_err(|e| format!("No BLE adapters found: {}", e))?
+        .into_iter()
+        .next()
+        .ok_or_else(|| "No BLE adapter available".to_string())?;
+
+    // Rediscover the selected device.
+    adapter
+        .start_scan(ScanFilter { services: vec![] })
+        .await
+        .map_err(|e| format!("BLE scan failed: {}", e))?;
+    tokio::time::sleep(Duration::from_millis(3000)).await;
+    adapter
+        .stop_scan()
+        .await
+        .map_err(|e| format!("BLE stop scan failed: {}", e))?;
+
+    let peripheral = adapter
+        .peripherals()
+        .await
+        .map_err(|e| format!("Failed to list peripherals: {}", e))?
+        .into_iter()
+        .find(|p| p.id().to_string() == device_id)
+        .ok_or_else(|| format!("BLE device '{}' not found. Rescan required.", device_id))?;
+
+    peripheral
+        .connect()
+        .await
+        .map_err(|e| format!("BLE connect failed: {}", e))?;
+    peripheral
+        .discover_services()
+        .await
+        .map_err(|e| format!("BLE service discovery failed: {}", e))?;
+
+    let device_name = peripheral
+        .properties()
+        .await
+        .ok()
+        .flatten()
+        .and_then(|p| p.local_name)
+        .unwrap_or_else(|| "Unknown".to_string());
+
+    // Build the GATT table + subscribe to every Notify/Indicate characteristic.
+    let services = peripheral.services();
+    let mut table_services = Vec::new();
+    let mut subscribed_count = 0usize;
+
+    for service in &services {
+        let mut chars = Vec::new();
+        for ch in &service.characteristics {
+            let notifiable = ch
+                .properties
+                .intersects(CharPropFlags::NOTIFY | CharPropFlags::INDICATE);
+            let mut subscribed = false;
+            if notifiable {
+                match peripheral.subscribe(ch).await {
+                    Ok(()) => {
+                        subscribed = true;
+                        subscribed_count += 1;
+                        log::info!("BLE listen: subscribed to {} (service {})", ch.uuid, service.uuid);
+                    }
+                    Err(e) => log::warn!("BLE listen: subscribe to {} failed: {}", ch.uuid, e),
+                }
+            }
+            chars.push(GattCharInfo {
+                uuid: ch.uuid.to_string(),
+                properties: char_property_names(ch.properties),
+                subscribed,
+            });
+        }
+        table_services.push(GattServiceInfo {
+            uuid: service.uuid.to_string(),
+            characteristics: chars,
+        });
+    }
+
+    log::info!(
+        "BLE listen: '{}' — {} services, subscribed to {} notify/indicate characteristics",
+        device_name,
+        table_services.len(),
+        subscribed_count
+    );
+    let _ = app.emit(
+        "ble-gatt-services",
+        GattTable { device: device_name.clone(), services: table_services },
+    );
+
+    let notification_stream = peripheral
+        .notifications()
+        .await
+        .map_err(|e| format!("BLE notification stream failed: {}", e))?;
+
+    // Channels bridging async BLE → sync ByteTransport. Listen-only: the write channel exists to satisfy
+    // the struct but is never driven (the passive handler never transmits).
+    let (write_tx, _write_async_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+    let (read_tx, read_rx) = mpsc::channel::<Vec<u8>>();
+    let (stop_tx, mut stop_async_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+
+    let peripheral_clone = peripheral.clone();
+    let app_clone = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let mut notifications = notification_stream;
+        loop {
+            tokio::select! {
+                Some(n) = notifications.next() => {
+                    let _ = app_clone.emit("ble-gatt-char-data", GattCharData {
+                        uuid: n.uuid.to_string(),
+                        len: n.value.len(),
+                    });
+                    let _ = read_tx.send(n.value);
+                }
+                _ = stop_async_rx.recv() => {
+                    log::info!("BLE listen runtime stopping");
+                    let _ = peripheral_clone.disconnect().await;
+                    break;
+                }
+            }
+        }
+    });
+
+    Ok(BleTransport {
+        device_name,
+        profile_name: "Listen (auto)".to_string(),
+        write_tx,
+        read_rx,
+        stop_tx,
+        read_buffer: Vec::new(),
+        write_delay: Duration::from_millis(0),
+    })
+}
+
 impl ByteTransport for BleTransport {
     fn read_bytes(&mut self, buf: &mut [u8]) -> Result<usize, TransportError> {
         // First, drain any buffered bytes from previous reads

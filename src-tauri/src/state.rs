@@ -11,6 +11,7 @@ use crate::aero::AeroCache;
 use crate::flightlog::recorder::PendingSessionHandle;
 use crate::mavlink_proto::MavlinkHandle;
 use crate::msp::FcInfo;
+use crate::passive_telemetry::PassiveHandle;
 use crate::radar::source::SourceUpdate;
 use crate::radar::RadarManager;
 use crate::scheduler::SchedulerHandle;
@@ -19,6 +20,8 @@ use crate::scheduler::SchedulerHandle;
 pub enum ActiveProtocol {
     Msp(SchedulerHandle),
     Mavlink(MavlinkHandle),
+    /// Passive, listen-only telemetry (FrSkyX/CRSF/LTM/MAVLink-passive), protocol auto-detected.
+    PassiveTelemetry(PassiveHandle),
 }
 
 /// Global application state managed by Tauri

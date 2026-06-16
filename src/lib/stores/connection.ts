@@ -10,7 +10,7 @@ export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'er
 
 export type TransportType = 'serial' | 'tcp' | 'udp' | 'ble';
 
-export type ProtocolType = 'msp' | 'mavlink';
+export type ProtocolType = 'msp' | 'mavlink' | 'telemetry';
 
 export interface InavVersion {
   major: number;

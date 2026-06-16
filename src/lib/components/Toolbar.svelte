@@ -113,9 +113,12 @@
   <div class="toolbar-right" data-tauri-drag-region>
     <div class="port-controls">
       {#if connStatus !== "connected"}
-        <!-- Protocol selector (2 options → segmented toggle) -->
+        <!-- Protocol selector. The dev-only passive "Telemetry" mode (listen-only, auto-detect) is
+             added only in dev builds until the pipeline is real. -->
         <SegmentedToggle
-          options={[{ value: 'msp', label: 'MSP' }, { value: 'mavlink', label: 'MAVLink' }]}
+          options={import.meta.env.DEV
+            ? [{ value: 'msp', label: 'MSP' }, { value: 'mavlink', label: 'MAVLink' }, { value: 'telemetry', label: 'Telemetry' }]
+            : [{ value: 'msp', label: 'MSP' }, { value: 'mavlink', label: 'MAVLink' }]}
           value={selectedProtocol}
           onchange={(v) => (selectedProtocol = v as ProtocolType)}
         />

@@ -1,0 +1,213 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
+// Passive telemetry handler — a dedicated, strictly listen-only thread that owns the ByteTransport.
+//
+// It reads incoming bytes, captures them to file (Phase B), feeds the protocol detector and reports
+// framing stats to the Debug Monitor via the `debug-telemetry-stats` event. It NEVER writes to the
+// transport.
+
+use std::collections::VecDeque;
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, Instant};
+
+use serde::Serialize;
+use tauri::{AppHandle, Emitter};
+
+use crate::transport::{ByteTransport, TransportError};
+
+use super::capture::Capture;
+use super::detector::Detector;
+
+/// Bytes of the live stream kept for the Debug Monitor hex tail.
+const HEX_TAIL_BYTES: usize = 192;
+/// Debug snapshot emit throttle.
+const EMIT_INTERVAL: Duration = Duration::from_millis(100);
+/// Capture flush cadence (so a crash keeps most of the data).
+const FLUSH_INTERVAL: Duration = Duration::from_secs(2);
+
+pub enum PassiveCommand {
+    Stop,
+}
+
+pub struct PassiveHandle {
+    cmd_tx: mpsc::Sender<PassiveCommand>,
+    thread: Option<thread::JoinHandle<Option<Box<dyn ByteTransport>>>>,
+}
+
+impl PassiveHandle {
+    /// Stop the handler and return the transport for cleanup.
+    pub fn stop(mut self) -> Option<Box<dyn ByteTransport>> {
+        let _ = self.cmd_tx.send(PassiveCommand::Stop);
+        self.thread.take().and_then(|t| t.join().ok()).flatten()
+    }
+}
+
+/// Start the passive telemetry handler on a dedicated thread.
+pub fn start(transport: Box<dyn ByteTransport>, app_handle: AppHandle) -> PassiveHandle {
+    let (cmd_tx, cmd_rx) = mpsc::channel::<PassiveCommand>();
+    let thread = thread::spawn(move || handler_loop(transport, app_handle, cmd_rx));
+    PassiveHandle {
+        cmd_tx,
+        thread: Some(thread),
+    }
+}
+
+/// Per-protocol hit count for the Debug Monitor.
+#[derive(Clone, Serialize)]
+struct ProtoHit {
+    name: String,
+    count: u32,
+}
+
+/// Debug snapshot emitted as `debug-telemetry-stats`.
+#[derive(Clone, Serialize)]
+struct TelemSnapshot {
+    /// Locked protocol name, or "" while still searching.
+    locked: String,
+    /// Best current guess (highest hits), or "" if nothing matched yet.
+    best_guess: String,
+    total_bytes: u64,
+    bytes_per_sec: u64,
+    chunk_count: u64,
+    /// Last bytes of the stream, space-separated hex.
+    hex_tail: String,
+    /// Absolute path of the .bin capture (so the user can find/hand off the files).
+    capture_file: String,
+    hits: Vec<ProtoHit>,
+}
+
+fn handler_loop(
+    mut transport: Box<dyn ByteTransport>,
+    app_handle: AppHandle,
+    cmd_rx: mpsc::Receiver<PassiveCommand>,
+) -> Option<Box<dyn ByteTransport>> {
+    log::info!(
+        "Passive telemetry handler started (listen-only) via {}",
+        transport.description()
+    );
+
+    // Capture files live under the raw-log dir (Documents/KiteGC by default), in a radiotelem/ subfolder.
+    let raw_dir = crate::flightlog::db::resolve_raw_log_dir("", crate::is_portable());
+    let mut capture = match Capture::new(&raw_dir) {
+        Ok(c) => {
+            log::info!("Radio telemetry capture → {}", c.bin_path());
+            Some(c)
+        }
+        Err(e) => {
+            log::error!("Failed to open radio telemetry capture: {}", e);
+            None
+        }
+    };
+    let capture_file = capture.as_ref().map(|c| c.bin_path()).unwrap_or_default();
+
+    let mut detector = Detector::new();
+    let mut hex_tail: VecDeque<u8> = VecDeque::with_capacity(HEX_TAIL_BYTES);
+    let mut buf = [0u8; 1024];
+
+    // Throughput window.
+    let mut win_start = Instant::now();
+    let mut win_bytes: u64 = 0;
+    let mut last_bytes_per_sec: u64 = 0;
+
+    let mut last_emit = Instant::now() - EMIT_INTERVAL;
+    let mut last_flush = Instant::now();
+
+    loop {
+        // 1. Commands (non-blocking).
+        match cmd_rx.try_recv() {
+            Ok(PassiveCommand::Stop) => {
+                log::info!("Passive telemetry handler stopping");
+                if let Some(c) = capture.as_mut() {
+                    c.flush();
+                }
+                return Some(transport);
+            }
+            Err(mpsc::TryRecvError::Empty) => {}
+            Err(mpsc::TryRecvError::Disconnected) => {
+                if let Some(c) = capture.as_mut() {
+                    c.flush();
+                }
+                return Some(transport);
+            }
+        }
+
+        // 2. Read incoming bytes — listen-only, never write.
+        match transport.read_bytes(&mut buf) {
+            Ok(0) => {
+                // Idle (timeout). Small sleep so we never busy-spin if a transport returns immediately.
+                thread::sleep(Duration::from_millis(1));
+            }
+            Ok(n) => {
+                let chunk = &buf[..n];
+                if let Some(c) = capture.as_mut() {
+                    c.write(chunk);
+                }
+                detector.push(chunk);
+                win_bytes += n as u64;
+                for &b in chunk {
+                    if hex_tail.len() == HEX_TAIL_BYTES {
+                        hex_tail.pop_front();
+                    }
+                    hex_tail.push_back(b);
+                }
+            }
+            Err(TransportError::Timeout) => {
+                thread::sleep(Duration::from_millis(1));
+            }
+            Err(TransportError::Disconnected) => {
+                log::warn!("Passive telemetry transport disconnected");
+                if let Some(c) = capture.as_mut() {
+                    c.flush();
+                }
+                let _ = app_handle.emit("telemetry-disconnected", ());
+                return Some(transport);
+            }
+            Err(e) => {
+                log::warn!("Passive telemetry read error: {}", e);
+            }
+        }
+
+        // 3. Roll the throughput window.
+        let elapsed = win_start.elapsed().as_secs_f64();
+        if elapsed >= 1.0 {
+            last_bytes_per_sec = (win_bytes as f64 / elapsed) as u64;
+            win_bytes = 0;
+            win_start = Instant::now();
+        }
+
+        // 4. Periodic capture flush.
+        if last_flush.elapsed() >= FLUSH_INTERVAL {
+            if let Some(c) = capture.as_mut() {
+                c.flush();
+            }
+            last_flush = Instant::now();
+        }
+
+        // 5. Emit debug stats (throttled).
+        if last_emit.elapsed() >= EMIT_INTERVAL {
+            let hex_tail_str = hex_tail
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let snapshot = TelemSnapshot {
+                locked: detector.locked().map(|p| p.name().to_string()).unwrap_or_default(),
+                best_guess: detector.best_guess().map(|p| p.name().to_string()).unwrap_or_default(),
+                total_bytes: detector.total_bytes(),
+                bytes_per_sec: last_bytes_per_sec,
+                chunk_count: capture.as_ref().map(|c| c.chunks()).unwrap_or(0),
+                hex_tail: hex_tail_str,
+                capture_file: capture_file.clone(),
+                hits: detector
+                    .hit_table()
+                    .into_iter()
+                    .map(|(name, count)| ProtoHit { name: name.to_string(), count })
+                    .collect(),
+            };
+            let _ = app_handle.emit("debug-telemetry-stats", &snapshot);
+            last_emit = Instant::now();
+        }
+    }
+}

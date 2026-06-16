@@ -110,7 +110,7 @@ pub async fn connect(
         }
     }
 
-    let use_mavlink = protocol.as_deref() == Some("mavlink");
+    let proto = protocol.as_deref().unwrap_or("msp");
 
     // Open byte-level transport based on type
     let byte_transport: Box<dyn ByteTransport> = match transport_type {
@@ -131,45 +131,58 @@ pub async fn connect(
         }
         TransportType::Ble => {
             let dev_id = ble_device_id.ok_or("BLE device ID required")?;
-            Box::new(crate::transport::ble::connect_ble(&dev_id).await?)
+            if proto == "telemetry" {
+                // Passive mode: no known profile required — auto-discover + subscribe to all
+                // Notify/Indicate characteristics and dump the GATT table to the Debug Monitor.
+                Box::new(crate::transport::ble::connect_ble_listen(&dev_id, app_handle.clone()).await?)
+            } else {
+                Box::new(crate::transport::ble::connect_ble(&dev_id).await?)
+            }
         }
     };
 
-    log::info!("Transport opened, protocol={}", if use_mavlink { "MAVLink" } else { "MSP" });
+    log::info!("Transport opened, protocol={}", proto);
 
-    let fc_info = if use_mavlink {
-        // ── MAVLink Path ─────────────────────────────────────────────
-        connect_mavlink(
-            byte_transport,
-            attitude_rate_hz,
-            position_rate_hz,
-            airspeed_enabled,
-            mavlink_full_telemetry,
-            flight_log_enabled,
-            flight_log_db_enabled,
-            flight_log_path,
-            flight_log_raw_path,
-            flight_log_raw,
-            flight_log_raw_always,
-            state,
-            app_handle,
-        )?
-    } else {
-        // ── MSP Path ────────────────────────────────────────────────
-        connect_msp(
-            byte_transport,
-            attitude_rate_hz,
-            position_rate_hz,
-            airspeed_enabled,
-            flight_log_enabled,
-            flight_log_db_enabled,
-            flight_log_path,
-            flight_log_raw_path,
-            flight_log_raw,
-            flight_log_raw_always,
-            state,
-            app_handle,
-        )?
+    let fc_info = match proto {
+        "mavlink" => {
+            // ── MAVLink Path ─────────────────────────────────────────────
+            connect_mavlink(
+                byte_transport,
+                attitude_rate_hz,
+                position_rate_hz,
+                airspeed_enabled,
+                mavlink_full_telemetry,
+                flight_log_enabled,
+                flight_log_db_enabled,
+                flight_log_path,
+                flight_log_raw_path,
+                flight_log_raw,
+                flight_log_raw_always,
+                state,
+                app_handle,
+            )?
+        }
+        "telemetry" => {
+            // ── Passive Telemetry Path (listen-only, auto-detect) ────────
+            connect_passive_telemetry(byte_transport, state, app_handle)?
+        }
+        _ => {
+            // ── MSP Path ────────────────────────────────────────────────
+            connect_msp(
+                byte_transport,
+                attitude_rate_hz,
+                position_rate_hz,
+                airspeed_enabled,
+                flight_log_enabled,
+                flight_log_db_enabled,
+                flight_log_path,
+                flight_log_raw_path,
+                flight_log_raw,
+                flight_log_raw_always,
+                state,
+                app_handle,
+            )?
+        }
     };
 
     Ok(fc_info)
@@ -511,6 +524,37 @@ fn connect_mavlink(
     Ok(fc_info)
 }
 
+/// Passive telemetry path: no handshake — start the listen-only handler immediately.
+/// The wire protocol is auto-detected by the handler; nothing is ever transmitted.
+fn connect_passive_telemetry(
+    byte_transport: Box<dyn ByteTransport>,
+    state: State<'_, AppState>,
+    app_handle: AppHandle,
+) -> Result<FcInfo, String> {
+    log::info!(
+        "Passive telemetry connect (listen-only) via {}",
+        byte_transport.description()
+    );
+
+    // Synthesize a minimal FcInfo so the frontend enters the connected state. Identity is unknown
+    // until the stream is decoded (Phase C); for now it is just a passive-monitor marker.
+    let mut fc_info = FcInfo::default();
+    fc_info.fc_variant = "Telemetry".to_string();
+
+    let handle = crate::passive_telemetry::start(byte_transport, app_handle);
+
+    {
+        let mut proto = state.protocol.lock().map_err(|e| e.to_string())?;
+        *proto = Some(ActiveProtocol::PassiveTelemetry(handle));
+    }
+    {
+        let mut info = state.fc_info.lock().map_err(|e| e.to_string())?;
+        *info = Some(fc_info.clone());
+    }
+
+    Ok(fc_info)
+}
+
 /// Disconnect from the flight controller
 #[tauri::command]
 pub async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
@@ -528,6 +572,10 @@ pub async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
         Some(ActiveProtocol::Mavlink(handle)) => {
             let _transport = handle.stop(); // transport dropped here
             log::info!("MAVLink handler stopped");
+        }
+        Some(ActiveProtocol::PassiveTelemetry(handle)) => {
+            let _transport = handle.stop(); // transport dropped here
+            log::info!("Passive telemetry handler stopped");
         }
         None => {}
     }

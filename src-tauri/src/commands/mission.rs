@@ -155,6 +155,7 @@ pub fn mission_download(
     let handle = match proto.as_ref() {
         Some(ActiveProtocol::Msp(h)) => h,
         Some(ActiveProtocol::Mavlink(_)) => return Err("Mission download not supported via MAVLink yet".into()),
+        Some(ActiveProtocol::PassiveTelemetry(_)) => return Err("Mission download not available in telemetry monitoring mode".into()),
         None => return Err("Not connected".into()),
     };
 
@@ -196,6 +197,7 @@ pub fn mission_fc_info(state: State<'_, AppState>) -> Result<MissionInfo, String
     let handle = match proto.as_ref() {
         Some(ActiveProtocol::Msp(h)) => h,
         Some(ActiveProtocol::Mavlink(_)) => return Err("Mission info not supported via MAVLink yet".into()),
+        Some(ActiveProtocol::PassiveTelemetry(_)) => return Err("Mission info not available in telemetry monitoring mode".into()),
         None => return Err("Not connected".into()),
     };
     let info_payload = handle.msp_request(MSP_WP_GETINFO, &[])?;
@@ -222,6 +224,7 @@ pub async fn mission_upload(
     let handle = match proto.as_ref() {
         Some(ActiveProtocol::Msp(h)) => h,
         Some(ActiveProtocol::Mavlink(_)) => return Err("Mission upload not supported via MAVLink yet".into()),
+        Some(ActiveProtocol::PassiveTelemetry(_)) => return Err("Mission upload not available in telemetry monitoring mode".into()),
         None => return Err("Not connected".into()),
     };
 
@@ -352,6 +355,7 @@ pub fn ardu_mission_download(state: State<'_, AppState>) -> Result<Vec<ArduWaypo
         match proto.as_ref() {
             Some(ActiveProtocol::Mavlink(h)) => (h.cmd_tx_clone(), h.fc_sysid),
             Some(ActiveProtocol::Msp(_)) => return Err("FC is not running MAVLink".into()),
+            Some(ActiveProtocol::PassiveTelemetry(_)) => return Err("FC is not running MAVLink".into()),
             None => return Err("Not connected".into()),
         }
     };
@@ -374,6 +378,7 @@ pub fn ardu_mission_upload(
         match proto.as_ref() {
             Some(ActiveProtocol::Mavlink(h)) => (h.cmd_tx_clone(), h.fc_sysid),
             Some(ActiveProtocol::Msp(_)) => return Err("FC is not running MAVLink".into()),
+            Some(ActiveProtocol::PassiveTelemetry(_)) => return Err("FC is not running MAVLink".into()),
             None => return Err("Not connected".into()),
         }
     };
