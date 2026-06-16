@@ -22,6 +22,7 @@
     const keys: Record<number, string> = {
       0: 'platform.multirotor', 1: 'platform.airplane', 2: 'platform.helicopter',
       3: 'platform.tricopter', 4: 'platform.rover', 5: 'platform.boat', 6: 'platform.other',
+      7: 'platform.vtol', 255: 'platform.generic',
     };
     return keys[type] ? $t(keys[type]) : $t('platform.unknown', { values: { type } });
   }

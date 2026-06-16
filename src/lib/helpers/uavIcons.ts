@@ -7,14 +7,16 @@
 // removed when the 2D map switched to rendering the same procedural glTF models top-down — see
 // uavModels.ts (selection), uavMesh.ts (.glb loader) and uavTopDown.ts (canvas renderer).
 
-// ── INAV Platform Types (from mixerConfig.platformType) ─────────────
+// ── INAV Platform Types (from mixerConfig.platformType / flyingPlatformType_e) ─────────────
 export const PLATFORM_MULTIROTOR = 0;
 export const PLATFORM_AIRPLANE   = 1;
 export const PLATFORM_HELICOPTER = 2;
 export const PLATFORM_TRICOPTER  = 3;
-export const PLATFORM_BOAT       = 4;
-export const PLATFORM_OTHER      = 5;
+export const PLATFORM_ROVER      = 4;
+export const PLATFORM_BOAT       = 5;
+export const PLATFORM_OTHER      = 6;
 export const PLATFORM_VTOL       = 7; // not an INAV-parsed type — manual override only (quadplane)
+export const PLATFORM_GENERIC    = 255; // no FC identity (passive telemetry) → generic arrow marker
 
 export type PlatformType = number;
 

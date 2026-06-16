@@ -620,8 +620,9 @@ pub async fn flightlog_import_blackbox(
                 }
             }
 
-            // Check if a linkable live flight exists (same craft, ±60s)
-            if let Ok(Some(linkable)) = db::find_linkable_live_flight(&conn, &flight.craft_name, flight.start_time) {
+            // Check if a linkable live flight exists (same craft ±60s, or — for craft-name-less
+            // telemetry recordings — a near-identical duration within the window)
+            if let Ok(Some(linkable)) = db::find_linkable_live_flight(&conn, &flight.craft_name, flight.start_time, flight.duration_sec.unwrap_or(0)) {
                 eprintln!("[LINK-AUTO] Found linkable live flight {} for blackbox import {}", linkable.id, flight_id);
                 return Ok(BlackboxImportStatus::SuccessLinkable {
                     flight_id: *flight_id,
@@ -881,8 +882,9 @@ pub async fn flightlog_import_ardupilot(
                 }
             }
 
-            // Check if a linkable live flight exists (same craft, ±60s)
-            if let Ok(Some(linkable)) = db::find_linkable_live_flight(&conn, &flight.craft_name, flight.start_time) {
+            // Check if a linkable live flight exists (same craft ±60s, or — for craft-name-less
+            // telemetry recordings — a near-identical duration within the window)
+            if let Ok(Some(linkable)) = db::find_linkable_live_flight(&conn, &flight.craft_name, flight.start_time, flight.duration_sec.unwrap_or(0)) {
                 eprintln!("[LINK-AUTO] Found linkable live flight {} for ArduPilot import {}", linkable.id, flight_id);
                 return Ok(BlackboxImportStatus::SuccessLinkable {
                     flight_id: *flight_id,
@@ -925,13 +927,14 @@ pub fn flightlog_unlink_flight(
 pub fn flightlog_find_linkable(
     craft_name: String,
     start_time: String,
+    duration_sec: i64,
     db_path: Option<String>,
 ) -> Result<Option<FlightSummary>, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
     let dt = chrono::DateTime::parse_from_rfc3339(&start_time)
         .map(|t| t.with_timezone(&chrono::Utc))
         .map_err(|e| format!("Invalid timestamp: {}", e))?;
-    db::find_linkable_live_flight(&conn, &craft_name, dt)
+    db::find_linkable_live_flight(&conn, &craft_name, dt, duration_sec)
         .map_err(|e| format!("Query error: {}", e))
 }
 

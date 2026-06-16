@@ -48,6 +48,7 @@
     "boat": "Bateau",
     "other": "Autre",
     "vtol": "VTOL",
+    "generic": "Générique",
     "unknown": "Inconnu ({type})"
   },
   "nav": {
@@ -334,6 +335,8 @@
     "type": "Type",
     "editType": "Modifier le type de plateforme",
     "firmware": "Firmware",
+    "protocol": "Protocole",
+    "notAvailable": "N/A",
     "started": "Début",
     "duration": "Durée",
     "location": "Lieu",

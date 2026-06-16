@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
+use crate::flightlog::recorder::FlightRecorderHandle;
 use crate::transport::{ByteTransport, TransportError};
 
 use super::capture::Capture;
@@ -46,9 +47,13 @@ impl PassiveHandle {
 }
 
 /// Start the passive telemetry handler on a dedicated thread.
-pub fn start(transport: Box<dyn ByteTransport>, app_handle: AppHandle) -> PassiveHandle {
+pub fn start(
+    transport: Box<dyn ByteTransport>,
+    app_handle: AppHandle,
+    recorder: Option<FlightRecorderHandle>,
+) -> PassiveHandle {
     let (cmd_tx, cmd_rx) = mpsc::channel::<PassiveCommand>();
-    let thread = thread::spawn(move || handler_loop(transport, app_handle, cmd_rx));
+    let thread = thread::spawn(move || handler_loop(transport, app_handle, cmd_rx, recorder));
     PassiveHandle {
         cmd_tx,
         thread: Some(thread),
@@ -83,6 +88,7 @@ fn handler_loop(
     mut transport: Box<dyn ByteTransport>,
     app_handle: AppHandle,
     cmd_rx: mpsc::Receiver<PassiveCommand>,
+    recorder: Option<FlightRecorderHandle>,
 ) -> Option<Box<dyn ByteTransport>> {
     log::info!(
         "Passive telemetry handler started (listen-only) via {}",
@@ -106,6 +112,8 @@ fn handler_loop(
     let mut detector = Detector::new();
     // Active decoder, created once the detector locks a protocol we can decode (FrSky first).
     let mut frsky: Option<FrskyDecoder> = None;
+    // Refine the recorder's protocol label once the sub-protocol is locked (set only once).
+    let mut protocol_labeled = false;
     let mut hex_tail: VecDeque<u8> = VecDeque::with_capacity(HEX_TAIL_BYTES);
     let mut buf = [0u8; 1024];
 
@@ -122,15 +130,17 @@ fn handler_loop(
         match cmd_rx.try_recv() {
             Ok(PassiveCommand::Stop) => {
                 log::info!("Passive telemetry handler stopping");
-                if let Some(c) = capture.as_mut() {
-                    c.flush();
+                if let Some(c) = capture.as_mut() { c.flush(); }
+                if let Some(ref rec) = recorder {
+                    if let Ok(mut r) = rec.lock() { r.shutdown(); }
                 }
                 return Some(transport);
             }
             Err(mpsc::TryRecvError::Empty) => {}
             Err(mpsc::TryRecvError::Disconnected) => {
-                if let Some(c) = capture.as_mut() {
-                    c.flush();
+                if let Some(c) = capture.as_mut() { c.flush(); }
+                if let Some(ref rec) = recorder {
+                    if let Ok(mut r) = rec.lock() { r.shutdown(); }
                 }
                 return Some(transport);
             }
@@ -148,6 +158,22 @@ fn handler_loop(
                     c.write(chunk);
                 }
                 detector.push(chunk);
+                // On first lock, refine the recorder's protocol label to the detected sub-protocol.
+                if !protocol_labeled {
+                    if let Some(p) = detector.locked() {
+                        let label = match p {
+                            Protocol::Frsky => "Telemetry (SmartPort)",
+                            Protocol::Crsf => "Telemetry (CRSF)",
+                            Protocol::Ltm => "Telemetry (LTM)",
+                            Protocol::Mavlink => "Telemetry (MAVLink)",
+                        };
+                        if let Some(ref rec) = recorder {
+                            if let Ok(mut r) = rec.lock() { r.set_protocol(label); }
+                        }
+                        log::info!("Passive telemetry locked: {}", label);
+                        protocol_labeled = true;
+                    }
+                }
                 // Once FrSky is locked, decode the stream into unified telemetry events.
                 if detector.locked() == Some(Protocol::Frsky) {
                     frsky.get_or_insert_with(FrskyDecoder::new).push_bytes(chunk);
@@ -165,8 +191,9 @@ fn handler_loop(
             }
             Err(TransportError::Disconnected) => {
                 log::warn!("Passive telemetry transport disconnected");
-                if let Some(c) = capture.as_mut() {
-                    c.flush();
+                if let Some(c) = capture.as_mut() { c.flush(); }
+                if let Some(ref rec) = recorder {
+                    if let Ok(mut r) = rec.lock() { r.shutdown(); }
                 }
                 let _ = app_handle.emit("telemetry-disconnected", ());
                 return Some(transport);
@@ -215,9 +242,9 @@ fn handler_loop(
             };
             let _ = app_handle.emit("debug-telemetry-stats", &snapshot);
 
-            // Push decoded telemetry to the widgets/map (unified events).
+            // Push decoded telemetry to the widgets/map (unified events) + the flight recorder.
             if let Some(dec) = frsky.as_ref() {
-                dec.emit(&app_handle);
+                dec.publish(&app_handle, recorder.as_ref());
             }
             last_emit = Instant::now();
         }

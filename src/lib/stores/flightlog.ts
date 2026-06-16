@@ -447,11 +447,13 @@ export async function unlinkFlight(flightId: number, dbPath: string): Promise<vo
 export async function findLinkableFlight(
   craftName: string,
   startTime: string,
+  durationSec: number,
   dbPath: string,
 ): Promise<FlightSummary | null> {
   return invoke<FlightSummary | null>('flightlog_find_linkable', {
     craftName,
     startTime,
+    durationSec,
     dbPath: dbPath || undefined,
   });
 }

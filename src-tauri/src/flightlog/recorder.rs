@@ -413,6 +413,13 @@ impl FlightRecorder {
         })
     }
 
+    /// Update the protocol label (recorded in the flight metadata). Passive telemetry detects its
+    /// sub-protocol from the stream after connect, so the handler refines the label (e.g.
+    /// "Telemetry (SmartPort)") once locked — before a flight is created on arm.
+    pub fn set_protocol(&mut self, protocol: &str) {
+        self.protocol = protocol.to_string();
+    }
+
     /// Start continuous raw logging immediately on connect.
     /// Called when `raw_always` is enabled. Opens a session-level raw/tlog file
     /// that records all data (including pre-arm) until disconnect.

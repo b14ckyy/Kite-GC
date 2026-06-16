@@ -1745,10 +1745,16 @@ pub fn unlink_flight(conn: &Connection, flight_id: i64) -> SqlResult<()> {
 
 /// Find a live flight that could be linked to a blackbox import.
 /// Matches on craft_name and overlapping time window (±60 seconds).
+/// Duration-match tolerance (seconds) for the craft-name-less fallback (covers the recorder's arm/disarm
+/// grace + detection latency). Passive telemetry (FrSky/CRSF) carries no craft name, so a blackbox of the
+/// same flight can't match on name — fall back to a near-identical duration within the ±60 s start window.
+const DURATION_MATCH_TOLERANCE_SEC: i64 = 10;
+
 pub fn find_linkable_live_flight(
     conn: &Connection,
     craft_name: &str,
     start_time: DateTime<Utc>,
+    duration_sec: i64,
 ) -> SqlResult<Option<FlightSummary>> {
     let time_lower = (start_time - chrono::Duration::seconds(60)).to_rfc3339();
     let time_upper = (start_time + chrono::Duration::seconds(60)).to_rfc3339();
@@ -1759,9 +1765,11 @@ pub fn find_linkable_live_flight(
                                         max_alt_m, max_speed_ms, total_distance_m, platform_type, linked_flight_id
              FROM flights
              WHERE source = 'live' AND linked_flight_id IS NULL
-               AND craft_name = ?1 AND start_time >= ?2 AND start_time <= ?3
-             ORDER BY id DESC LIMIT 1",
-            params![craft_name, time_lower, time_upper],
+               AND start_time >= ?2 AND start_time <= ?3
+               AND ( craft_name = ?1
+                     OR (craft_name = '' AND ABS(duration_sec - ?4) <= ?5) )
+             ORDER BY (craft_name = ?1) DESC, ABS(duration_sec - ?4) ASC, id DESC LIMIT 1",
+            params![craft_name, time_lower, time_upper, duration_sec, DURATION_MATCH_TOLERANCE_SEC],
             |row| {
                 let ts_str: String = row.get(1)?;
                 let st = DateTime::parse_from_rfc3339(&ts_str)

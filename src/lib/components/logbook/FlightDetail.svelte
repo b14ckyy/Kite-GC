@@ -259,9 +259,9 @@
   const PLATFORM_KEYS: Record<number, string> = {
     0: 'platform.multirotor', 1: 'platform.airplane', 2: 'platform.helicopter',
     3: 'platform.tricopter', 4: 'platform.rover', 5: 'platform.boat', 6: 'platform.other',
-    7: 'platform.vtol',
+    7: 'platform.vtol', 255: 'platform.generic',
   };
-  const PLATFORM_OPTIONS = [0, 1, 2, 3, 4, 5, 6, 7];
+  const PLATFORM_OPTIONS = [0, 1, 2, 3, 4, 5, 6, 7, 255];
   function platformLabel(type: number): string {
     return PLATFORM_KEYS[type] ? $t(PLATFORM_KEYS[type]) : $t('platform.unknown', { values: { type } });
   }
@@ -410,7 +410,9 @@
       {/if}
     </span>
     <span class="fc-label">{$t('logbook.firmware')}</span>
-    <span class="fc-value">{flight.fc_version || `${flight.fc_variant || '—'}`}</span>
+    <span class="fc-value">{(flight.fc_variant || flight.fc_version) ? `${flight.fc_variant} ${flight.fc_version}`.trim() : $t('logbook.notAvailable')}</span>
+    <span class="fc-label">{$t('logbook.protocol')}</span>
+    <span class="fc-value">{flight.protocol || $t('logbook.notAvailable')}</span>
     <span class="fc-label">{$t('logbook.source')}</span>
     <span class="fc-value">
       {formatFlightSource(flight.source)}

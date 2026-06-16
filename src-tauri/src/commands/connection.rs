@@ -164,7 +164,15 @@ pub async fn connect(
         }
         "telemetry" => {
             // ── Passive Telemetry Path (listen-only, auto-detect) ────────
-            connect_passive_telemetry(byte_transport, state, app_handle)?
+            connect_passive_telemetry(
+                byte_transport,
+                flight_log_enabled,
+                flight_log_db_enabled,
+                flight_log_path,
+                flight_log_raw_path,
+                state,
+                app_handle,
+            )?
         }
         _ => {
             // ── MSP Path ────────────────────────────────────────────────
@@ -525,9 +533,15 @@ fn connect_mavlink(
 }
 
 /// Passive telemetry path: no handshake — start the listen-only handler immediately.
-/// The wire protocol is auto-detected by the handler; nothing is ever transmitted.
+/// The wire protocol is auto-detected by the handler; nothing is ever transmitted. When flight logging
+/// is enabled, a recorder is attached and fed the decoded telemetry (arm/disarm derived from the FC's
+/// flight-mode field — e.g. FrSky MODES).
 fn connect_passive_telemetry(
     byte_transport: Box<dyn ByteTransport>,
+    flight_log_enabled: Option<bool>,
+    flight_log_db_enabled: Option<bool>,
+    flight_log_path: Option<String>,
+    flight_log_raw_path: Option<String>,
     state: State<'_, AppState>,
     app_handle: AppHandle,
 ) -> Result<FcInfo, String> {
@@ -536,12 +550,44 @@ fn connect_passive_telemetry(
         byte_transport.description()
     );
 
-    // Synthesize a minimal FcInfo so the frontend enters the connected state. Identity is unknown
-    // until the stream is decoded (Phase C); for now it is just a passive-monitor marker.
+    // Synthesize a minimal FcInfo so the frontend enters the connected state. Passive telemetry carries
+    // no FC identity (no handshake) — leave firmware empty (shown as "N/A") and use the Generic platform
+    // (255) so the map shows the generic arrow rather than defaulting to a multirotor.
     let mut fc_info = FcInfo::default();
-    fc_info.fc_variant = "Telemetry".to_string();
+    fc_info.platform_type = 255; // PLATFORM_GENERIC
 
-    let handle = crate::passive_telemetry::start(byte_transport, app_handle);
+    // Flight recorder (no raw byte log on this path — FrSky has no MSP raw stream).
+    let flight_log_settings = FlightLogSettings {
+        enabled: flight_log_enabled.unwrap_or(false),
+        db_enabled: flight_log_db_enabled.unwrap_or(false),
+        db_path: flight_log_path.unwrap_or_default(),
+        raw_log_path: flight_log_raw_path.unwrap_or_default(),
+        raw_enabled: false,
+        raw_always: false,
+    };
+
+    let recorder_handle = if flight_log_settings.enabled {
+        let portable = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.join(".portable").exists()))
+            .unwrap_or(false);
+        let msp_raw_sink: MspRawSink = std::sync::Arc::new(std::sync::Mutex::new(None));
+        match FlightRecorder::new(flight_log_settings, fc_info.clone(), "Telemetry", portable, app_handle.clone(), state.pending_session.clone(), state.resume_pending.clone(), msp_raw_sink) {
+            Ok(mut rec) => {
+                rec.start_continuous_log();
+                log::info!("Flight recorder initialized (passive telemetry)");
+                Some(std::sync::Arc::new(std::sync::Mutex::new(rec)))
+            }
+            Err(e) => {
+                log::error!("Failed to initialize flight recorder: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    let handle = crate::passive_telemetry::start(byte_transport, app_handle, recorder_handle);
 
     {
         let mut proto = state.protocol.lock().map_err(|e| e.to_string())?;
