@@ -195,6 +195,36 @@ alongside the field), a new `components/terrain/RfRayLayer.svelte` (Leaflet poly
 `Map.svelte` gated on Show-Map + RF active, reading the shared result. Optional: a small **home/launch
 marker** (the radial origin).
 
+### As-built (Phase 1b) — provisional, under evaluation
+
+Shipped, but the representation still feels like over-probing — kept as a checkpoint while we gather
+representative two-path-reflection logs to validate against. What actually landed, and where it diverged
+from the plan above:
+
+- **Not one ray per bin / flattest point.** The flattest-elevation pick selected the take-off/landing
+  loiter (low, near home) instead of distant cruise, so it was dropped. Instead, **every degraded
+  measurement point** is considered, then collapsed: within each 1° bin the qualifying points (loss
+  worse than −3 dB) are **clustered by distance** (`RAY_CLUSTER_GAP_M = 500 m`) so a radial leg's many
+  30 m samples don't stack into hundreds of nested triangles. **One ray per cluster (fly-through)** —
+  base at the cluster's farthest point, fill = the cluster's **worst** dB.
+- **Apex = ground interference point**, not the terrain edge and not home: the **closest-approach**
+  sample (`evalObstacle.nearDist`, min-clearance point), always defined. So a pure two-ray loss still
+  gets a full ray from the near-ground interaction zone out to the measurement point.
+- **Two-ray physics reworked** (the original `Γ = −1` everywhere was unphysical — nulls right around the
+  pilot, no frequency dependence). Now `Γ_eff = Γ_Fresnel(ψ, ε_r=15, horizontal pol) · ρ_Ament(k, σ, ψ)`,
+  with σ = detrended RMS terrain roughness of the radial's first 2 km (floored at 0.3 m micro-roughness).
+  Result: a **frequency-dependent soft minimum distance** (≈3 km @ 900 MHz, ≈1.3 km @ 433 MHz, 2.4/5.8 GHz
+  effectively scattered away) and reflections **only over flat terrain** — no hard radius. Refs: Parsons /
+  Rappaport (two-ray + Fresnel), Ament 1953 / ITU-R P.526 (roughness).
+- **Canvas renderer** (`L.canvas`) for the layer — hundreds of polygons pan/zoom in one draw (SVG
+  reprojected each path → stutter).
+- Files: `rfLink.ts` (`RfRay`, clustering, `radialRoughness`, reworked `twoRayDb`), new
+  `components/terrain/RfRayLayer.svelte`, `stores/terrainAnalysis.ts` (`terrainRfRays`),
+  `TerrainAnalysisPanel.svelte` (publishes rays), `Map.svelte` (layer wired, Show-Map gated).
+
+**Open / to revisit:** whether the ray metaphor is the right call at all; validate two-ray against real
+logs; the near-home apex still rings slightly; possibly a clearer near→far colour story.
+
 ---
 
 ## Touch list (Phase 1) — shipped
