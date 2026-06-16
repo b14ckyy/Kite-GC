@@ -335,18 +335,23 @@
   const showCorrection = $derived($terrainAnalysis.viewMode === 'waypoint' && !$terrainAnalysis.compact);
   const canAddWp = $derived($terrainCursor.placed != null && placedDist != null && data != null);
 
-  function toggleCorrection() {
-    const st = get(terrainAnalysis);
-    const enabling = !st.correctionEnabled;
-    if (enabling) {
-      patchTerrainAnalysis({
-        correctionEnabled: true,
-        rangeStart: st.rangeStart > 0 ? st.rangeStart : 1,
-        rangeEnd: st.rangeEnd > 0 ? st.rangeEnd : maxWpNumber,
-      });
-    } else {
+  // Combined 3-way correction control: 'off' disables it, 'follow'/'check' enable + set the mode
+  // (and a default WP range on first enable). Default off.
+  const correctionValue = $derived<'off' | 'follow' | 'check'>(
+    $terrainAnalysis.correctionEnabled ? $terrainAnalysis.correctionMode : 'off',
+  );
+  function setCorrection(v: 'off' | 'follow' | 'check') {
+    if (v === 'off') {
       patchTerrainAnalysis({ correctionEnabled: false });
+      return;
     }
+    const st = get(terrainAnalysis);
+    patchTerrainAnalysis({
+      correctionEnabled: true,
+      correctionMode: v,
+      rangeStart: st.rangeStart > 0 ? st.rangeStart : 1,
+      rangeEnd: st.rangeEnd > 0 ? st.rangeEnd : maxWpNumber,
+    });
   }
 
   let applying = $state(false);
@@ -379,10 +384,6 @@
       endUndoGroup();
       applying = false;
     }
-  }
-
-  function setCorrectionMode(m: 'follow' | 'check') {
-    patchTerrainAnalysis({ correctionMode: m });
   }
 
   /** Interpolated mission-path MSL altitude at a distance (to place a WP on the track). */
@@ -572,6 +573,7 @@
         {#if rssiShown}<span class="lg"><i class="sw rssi"></i>{$t('terrain.rssi')}</span>{/if}
       </div>
 
+      {#if !$terrainAnalysis.compact}
       <div class="rf-section">
         <span class="rf-head">{$t('terrain.rfTitle')}</span>
         <div class="rf-methods">
@@ -627,25 +629,23 @@
         {/if}
         <p class="rf-note">{$t('terrain.rfDisclaimer')}</p>
       </div>
+      {/if}
 
       {#if showCorrection}
         <div class="correction">
-          <label class="corr-head">
-            <input
-              type="checkbox"
-              checked={$terrainAnalysis.correctionEnabled}
-              onchange={toggleCorrection}
-            />
-            {$t('terrain.correction')}
-          </label>
+          <span class="rf-head">{$t('terrain.correction')}</span>
+          <SegmentedToggle
+            full
+            options={[
+              { value: 'off', label: $t('terrain.corrOff') },
+              { value: 'follow', label: $t('terrain.corrFollow') },
+              { value: 'check', label: $t('terrain.corrCheck') },
+            ]}
+            value={correctionValue}
+            onchange={(v) => setCorrection(v as 'off' | 'follow' | 'check')}
+          />
 
           {#if $terrainAnalysis.correctionEnabled}
-            <SegmentedToggle
-              options={[{ value: 'follow', label: $t('terrain.terrainFollow') }, { value: 'check', label: $t('terrain.clearanceCheck') }]}
-              value={$terrainAnalysis.correctionMode}
-              onchange={(v) => setCorrectionMode(v as 'follow' | 'check')}
-            />
-
             <div class="ctrl">
               <span>{$t('terrain.range')}</span>
               <div class="range-row">
@@ -898,15 +898,6 @@
     gap: 9px;
     border-top: 1px solid rgba(255, 255, 255, 0.08);
     padding-top: 11px;
-  }
-  .corr-head {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    font-size: 12px;
-    font-weight: 600;
-    color: #cdd6db;
-    cursor: pointer;
   }
   .corr-check {
     display: flex;
