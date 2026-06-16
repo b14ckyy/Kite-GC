@@ -18,7 +18,8 @@ use tauri::{AppHandle, Emitter};
 use crate::transport::{ByteTransport, TransportError};
 
 use super::capture::Capture;
-use super::detector::Detector;
+use super::decoders::frsky::FrskyDecoder;
+use super::detector::{Detector, Protocol};
 
 /// Bytes of the live stream kept for the Debug Monitor hex tail.
 const HEX_TAIL_BYTES: usize = 192;
@@ -103,6 +104,8 @@ fn handler_loop(
     let capture_file = capture.as_ref().map(|c| c.bin_path()).unwrap_or_default();
 
     let mut detector = Detector::new();
+    // Active decoder, created once the detector locks a protocol we can decode (FrSky first).
+    let mut frsky: Option<FrskyDecoder> = None;
     let mut hex_tail: VecDeque<u8> = VecDeque::with_capacity(HEX_TAIL_BYTES);
     let mut buf = [0u8; 1024];
 
@@ -145,6 +148,10 @@ fn handler_loop(
                     c.write(chunk);
                 }
                 detector.push(chunk);
+                // Once FrSky is locked, decode the stream into unified telemetry events.
+                if detector.locked() == Some(Protocol::Frsky) {
+                    frsky.get_or_insert_with(FrskyDecoder::new).push_bytes(chunk);
+                }
                 win_bytes += n as u64;
                 for &b in chunk {
                     if hex_tail.len() == HEX_TAIL_BYTES {
@@ -207,6 +214,11 @@ fn handler_loop(
                     .collect(),
             };
             let _ = app_handle.emit("debug-telemetry-stats", &snapshot);
+
+            // Push decoded telemetry to the widgets/map (unified events).
+            if let Some(dec) = frsky.as_ref() {
+                dec.emit(&app_handle);
+            }
             last_emit = Instant::now();
         }
     }

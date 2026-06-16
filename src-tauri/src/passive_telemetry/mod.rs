@@ -15,6 +15,7 @@
 // (Phase C) is built once a real capture has been analysed.
 
 pub mod capture;
+pub mod decoders;
 pub mod detector;
 pub mod handler;
 
