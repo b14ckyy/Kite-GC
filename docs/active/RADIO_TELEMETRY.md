@@ -4,7 +4,9 @@
 verify). **CRSF (Phase E) built but WIP/TEMPORARY (2026-06-17)** — detector + decoder + unified-pipeline
 adapter done; framing/CRC + ATTITUDE confirmed, but **only against mLRS** (non-native CRSF, transcodes
 INAV MSP → CRSF; emits no OK/!ERR sentinels so arming is untestable). Remaining scalings + flight-mode +
-arming need a **native CRSF rig** to validate. Test BT module is unusable (BLE kink #6).
+arming need a **native CRSF rig** to validate. Test BT module is unusable (BLE kink #6). **LTM (Phase F)
+built (2026-06-17)** — serial/UART decoder → unified events + recorder; fully testable (INAV LTM over a
+TTL-USB COM port, real armed/failsafe bits).
 **Created:** 2026-06-16
 
 ---
@@ -120,8 +122,13 @@ in the validation phase) the raw bytes also go to the capture sink.
   but **not yet empirically validated** (the bench rig sent no fix/battery/baro/0x21). **E4 ✅ built** —
   `decoders/crsf.rs` accumulates state + `publish()`es unified events + feeds the recorder; pending a real
   armed INAV+CRSF flight to confirm the remaining scalings. See the CRSF section below for the frame map.
-- **Phase F+ — remaining protocols.** LTM, MAVLink-passive (decoder reuse, TX disabled); later a `.csv`
-  raw recording; link-quality field for the RC Link widget; ArduPilot FrSky-passthrough (0x5000) decoder.
+- **Phase F ✅ built — LTM (Lightweight TeleMetry).** Serial/UART (TTL-USB COM port) — the existing
+  `Serial` transport + `telemetry` protocol path already covers it (no backend change). Detector
+  XOR-validates LTM frames; `decoders/ltm.rs` decodes A/G/S into unified events + recorder and dumps all
+  frames (incl. O/N/X) to `radiotelem_<ts>.ltm.txt`. **Fully testable** — INAV emits LTM over a UART to a
+  COM port, and the S-frame carries real armed + failsafe bits (unlike CRSF). See the LTM section below.
+- **Phase G+ — remaining protocols.** MAVLink-passive (decoder reuse, TX disabled); later a `.csv` raw
+  recording; link-quality field for the RC Link widget; ArduPilot FrSky-passthrough (0x5000) decoder.
 
 ---
 
@@ -246,7 +253,7 @@ Research validated against the official **TBS CRSF spec** (<https://github.com/c
 
 | Type | Frame | Layout (big-endian) | Conversion → unified event |
 |---|---|---|---|
-| `0x02` | GPS | `lat:i32, lon:i32, gspeed:u16, hdg:u16, alt:u16, sats:u8` | lat/lon ÷ 1e7; ground speed ÷ 36 → m/s (frame is km/h×10); course ÷ 100 (frame is centideg); alt − 1000 → m; **no fix type in frame** → derive (sats ≥ 4 ⇒ 3D) → `GpsData` |
+| `0x02` | GPS | `lat:i32, lon:i32, gspeed:u16, hdg:u16, alt:u16, sats:u8` | lat/lon ÷ 1e7; ground speed ÷ 36 → m/s (frame is km/h×10); course ÷ 100 (frame is centideg); alt − 1000 → m (**arming-relative, not MSL** → same ground anchor as LTM, see the LTM "No MSL altitude" note); **no fix type in frame** → derive (sats ≥ 4 ⇒ 3D) → `GpsData` |
 | `0x07` | Vario | `vspeed:i16` | ÷ 100 → m/s → `AltitudeData.vario` |
 | `0x08` | Battery | `volt:u16, curr:u16, cap:u24, remain:u8` | INAV sends `getBatteryVoltage()/10` & `getAmperage()/10` (its getters are centi-units) → **÷ 10 ⇒ V / A**; cap = mAh; remain = % → `AnalogData` |
 | `0x09` | Baro alt | `alt_packed:u16` | packed: high range in m, low range decimetres − 10000 offset → `AltitudeData.altitude` *(confirm packing from capture)* |
@@ -293,6 +300,62 @@ stream before wiring the adapter — exactly the FrSky procedure.
   characteristic carries them (`connect_ble_listen` subscribes to all Notify chars, so it's covered)?
 - Baro-altitude (`0x09`) packing thresholds — confirm the m/dm boundary empirically.
 - Battery scaling — INAV getter units vs. the CRSF nominal 0.1 V/A; confirm `÷10` yields real volts/amps.
+
+## LTM (Lightweight TeleMetry) — frame map + decoder (Phase F)
+
+Source: INAV `telemetry/ltm.c` + `ltm.h`. Frame: `'$' 'T' <type> <payload> <crc>`; the **payload length
+is fixed per type**, the **CRC is the XOR of the payload bytes only** (not `$T`, not the type char), and
+**all multi-byte fields are little-endian** (INAV `sbuf`). Transport is a plain serial/UART COM port (TTL-
+USB) at the configured LTM baud. Decoder + detector live in `decoders/ltm.rs` (detector reuses
+`ltm_payload_len`).
+
+| Type | Len | Payload (LE) | → unified event |
+|---|---|---|---|
+| `A` attitude | 6 | pitch i16, roll i16, yaw i16 (whole **degrees**) | `AttitudeData` (yaw `rem_euclid 360`; integer-degree resolution) |
+| `G` gps | 14 | lat i32 (÷1e7), lon i32 (÷1e7), gspeed u8 (m/s), alt i32 (cm→m), sat/fix u8 | `GpsData` + `AltitudeData` (sat = `byte>>2`; fix = `byte&3`: 1=nofix,2=2D,3=3D). **COG + vario synthesized** (see below) |
+| `S` status | 7 | vbat u16 (mV→V ÷1000), mAh u16, rssi u8 (0..254), airspeed u8 (m/s), **statemode u8** | `AnalogData` (current=0, only mAh) + `AirspeedData` + `StatusData`/flightmode |
+| `O` home | 14 | home lat/lon/alt + osd + fix | dump only |
+| `N` nav | 6 | 6×u8 nav status | dump only |
+| `X` extra | 6 | hdop u16, hw u8, counter u8, disarm u8, reserved | dump only |
+
+**Status byte (S-frame)** = `(flightmode << 2) | (failsafe << 1) | armed`. So armed + failsafe come
+**directly and reliably** (unlike CRSF, which has no arming trigger). `flightmode` is the `ltm_modes_e`
+ordinal (0=Manual, 2=Angle, 3=Horizon, 8=AltHold, 9=GPSHold, 10=Waypoints, 11=HeadHold, 13=RTH,
+15=Land/FW-autoland, 18=Cruise, 20=Launch, 21=AutoTune, …) → mapped to the canonical `FlightModeState`
+(`classify_ltm_mode`; failsafe overrides to `failsafe`/`failsafe_rth`). RSSI (0..254) is rescaled to the
+MSP 0..1023 convention.
+
+**Missing fields / compensation (→ destined for the user docs as "LTM limitations").** INAV's LTM field
+set is limited; we fill the gaps where possible. This list is written to be lifted into the eventual user
+documentation:
+
+- **No course-over-ground (COG).** The A-frame yaw is the **FC heading** (compass/IMU), *not* COG, and the
+  G-frame has no COG field. Confirmed live: with wind enabled the AHI/FPV markers show crabbing, i.e.
+  heading ≠ track — proof the value is heading and COG is genuinely absent. COG-dependent markers (velocity
+  vector / FPM, COG nose line, turn arc) would otherwise freeze. We **synthesize COG from successive GPS
+  fixes** (`bearing_deg` over an anchor baseline, gated on `MIN_COG_SPEED_MS` + `MIN_COG_DIST_M` to reject
+  GPS jitter); until the first reliable COG we **fall back to heading** so markers track the nose.
+- **No vertical speed (vario).** LTM has no vario field. We **emulate it from the altitude derivative**
+  between G-frames, low-passed (`VARIO_SMOOTH`). So climb/sink is reconstructed, not measured.
+- **No MSL altitude — only arming-relative.** The G-frame altitude is relative to the arming point, not
+  true MSL, so terrain-relative **AGL** can't be computed directly. The backend signals this via
+  `telemetry-alt-ref { msl: false }` (also CRSF); the frontend then **anchors** the relative altitude to a
+  ground MSL **captured at the arming edge** (when the craft is on the ground, `|rel| < 5 m`, with a fix —
+  `stores/telemetry.ts::captureGroundAnchor`). True MSL = `groundAnchor + rel`. The anchor **persists
+  across reconnects** until a real-MSL protocol (MSP/MAVLink) supersedes it. With **no anchor** (connected
+  mid-flight, or armed in the air) the ground reference is unrecoverable → **AGL shows N/A** and the 3D
+  map falls back to the raw value. The ALT readout always stays the (pilot-expected) relative altitude.
+- **Speed quantisation.** Ground speed and airspeed are both **u8 whole m/s** (1 m/s resolution) — the
+  small airspeed "rounding error" is this protocol quantisation, not a bug. Airspeed only when a pitot is
+  configured.
+- **No instantaneous current** (only mAh drawn) → `current`/`power` stay 0. **Attitude** is whole-degree
+  resolution. **RSSI** (0..254) is rescaled to the MSP 0..1023 convention.
+
+The Debug Monitor `.ltm.txt` dump shows the synthesized `cog_est` + `vario_est` per G-frame for validation.
+
+**Validation status:** confirmed live on a sim FC over TTL-USB — widgets populate, crabbing visible with
+wind (COG synthesis good), armed/failsafe authoritative from the S-frame. Remaining: a DB-recording run
+(arm in the sim).
 
 ## Logbook / DB integration (Phase D)
 
