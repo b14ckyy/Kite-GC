@@ -127,8 +127,17 @@ in the validation phase) the raw bytes also go to the capture sink.
   XOR-validates LTM frames; `decoders/ltm.rs` decodes A/G/S into unified events + recorder and dumps all
   frames (incl. O/N/X) to `radiotelem_<ts>.ltm.txt`. **Fully testable** — INAV emits LTM over a UART to a
   COM port, and the S-frame carries real armed + failsafe bits (unlike CRSF). See the LTM section below.
-- **Phase G+ — remaining protocols.** MAVLink-passive (decoder reuse, TX disabled); later a `.csv` raw
-  recording; link-quality field for the RC Link widget; ArduPilot FrSky-passthrough (0x5000) decoder.
+- **Phase G ~ — ArduPilot Passthrough ("Yaapu").** **v1 built (2026-06-17):** shared
+  `decoders/ap_passthrough.rs` fed by both carriers (S.Port `0x5000`-range routed in `frsky.rs`, CRSF
+  `0x80`/`0x7F` AP_CUSTOM_TELEM single `0xF0` / multi `0xF2` / status-text `0xF1`, routed in `crsf.rs`;
+  sub-frame layouts verified against `AP_CRSF_Telem.h`). Emits the **AP-unique** data — **flight mode**
+  (`classify_ardupilot`), **armed**, **EKF health**, **status-text** (reusing the MAVLink statustext
+  sink), **waypoint #** — while GPS/battery/attitude stay with the native decoder (no overlap). On CRSF
+  the native mode is suppressed when AP is active. **v2 (deferred):** `prep_number` metric fields (HDOP,
+  home distance, speeds, rangefinder, terrain, wind), GPS sats/HDOP, PARAM-variant verification, and an
+  AP-specific MSL/alt-ref.
+- **Phase H+ — remaining.** MAVLink-passive (decoder reuse, TX disabled); later a `.csv` raw recording;
+  link-quality field for the RC Link widget.
 
 ---
 
@@ -216,14 +225,85 @@ transmitted** (removal slated for INAV 10). 7.x transmits `0x0400`/`0x0410`; 8.0
 auto-covers 7.x ↔ 8.0+ (and future FCs/Betaflight) without detecting a version. The same principle applies
 to CRSF (INAV also reworked CRSF custom frames across versions) — decode by frame/sub-type, not version.
 
-## ArduPilot — separate decoder (FrSky passthrough / "Yaapu")
+## ArduPilot Passthrough ("Yaapu") — shared decoder over S.Port + CRSF (Phase G)
 
-ArduPilot exposes only **minimal native FrSky fields**; almost everything (attitude, GPS, battery,
-**text status messages**, AP flight modes) is packed into the **DIY appID range `0x5000–0x52FF`** using the
-ArduPilot **FrSky passthrough** ("Yaapu") protocol — bit-packed, MAVLink-derived messages, a completely
-different decoding from INAV's per-sensor appIDs. This is handled as its **own decoder**, documented and
-kept strictly separate from the INAV/standard-FrSky path (selected by detecting `0x5000`-range frames).
-Scope for a later phase.
+**Goal:** monitor ArduPilot-specific telemetry — **status-text messages, flight mode, armed, EKF/health,
+home, waypoint** — from a vehicle that talks **CRSF/ELRS/Crossfire on the FC side** (one-way, no SiK
+radio). Listen-only. Source: ArduPilot `AP_Frsky_SPort_Passthrough.cpp` + `AP_CRSF` / `AP_CRSF_Protocol.h`.
+
+**Scope boundary.** This is the **one-way AP passthrough** only. The **ELRS/mLRS MAVLink mode**
+(bidirectional raw MAVLink over the link) is explicitly **out of scope** — there you just talk MAVLink to
+the module directly (our existing MAVLink path), no envelope work needed. The CRSF **MAVLink-envelope**
+(`0xAA`) path is likewise dropped.
+
+### Key insight — one packet decoder, two carriers
+ArduPilot passthrough is a set of **bit-packed `{appID:u16, data:u32}` packets** (NOT raw MAVLink). The
+**same packets** travel over either carrier, so the packet decoder is shared:
+- **S.Port:** each `0x10` data frame whose appID is in **`0x5000–0x500D`** carries one packet.
+- **CRSF:** frame type **`0x80`** (`CRSF_FRAMETYPE_AP_CUSTOM_TELEM`, legacy `0x7F`) wraps the packets,
+  with a sub-type byte: **`0xF0`** single packet (`appid:u16 + data:u32`), **`0xF2`** multi-packet
+  (count + N×`{appid,data}`), **`0xF1`** status-text.
+
+### Two-level detection (the "different detection")
+- **Level 1 (existing detector):** carrier framing — FrSky `0x7E` vs CRSF `0xC8` vs LTM vs MAVLink.
+- **Level 2 (within the locked carrier):** is this an ArduPilot-passthrough stream?
+  - S.Port: appIDs in `0x5000–0x52FF` present → passthrough.
+  - CRSF: frame type `0x80`/`0x7F` present → passthrough.
+  Disjoint from native IDs, so it self-identifies (same "dispatch, no version sniffing" principle).
+
+### Coexistence + dedup
+- **S.Port + AP:** the FC sends **only** the `0x5000` family (no native INAV appIDs); the receiver still
+  injects RSSI (`0xF101`). → passthrough decoder is the primary source; keep RSSI from `0xF1xx`.
+- **CRSF + AP:** the FC sends **both** standard CRSF frames (`0x02` GPS, `0x08` batt, `0x1E` attitude,
+  `0x14` link-stats) **and** the `0x80` passthrough. Run **both** the native-CRSF decoder and the
+  passthrough decoder, then **merge with per-field priority**: native frames win for GPS/battery/attitude
+  (finer resolution); link-stats give RSSI/LQ (passthrough has none); passthrough is the **only** source
+  for status-text / AP_STATUS (mode+armed+EKF) / home / waypoint / terrain / wind / params.
+
+### Passthrough packet bit-layouts (uint32 `data`, from AP source)
+
+| appID | Packet | Bit-packing (LSB→MSB) |
+|---|---|---|
+| `0x5000` | TEXT | 4 ASCII chars/packet (`[7:0]`=c1…`[31:24]`=c4); on the final chunk severity is OR'd into bits 7/15/23 (the `&1<<7`, `&2<<14`, `&4<<21` trick) → reassemble to a status-text line |
+| `0x5001` | AP_STATUS | `[4:0]` control_mode = `(custom_mode+1)&0x1F`; b5 simple; b6 supersimple; b7 is-flying; **b8 armed**; b9 batt-FS; `[11:10]` **EKF-FS**; b12 generic-FS; b13 fence-present; b14 fence-breach; `[19:18]`… throttle; `[31:26]` IMU-temp |
+| `0x5002` | GPS_STATUS | `[3:0]` sats; `[5:4]` fix (0..3); `[13:6]` HDOP (`prep_number`); `[17:14]` adv (DGPS/RTK); `[31:22]` alt-MSL (`prep_number`) |
+| `0x5003` | BATT_1 | `[8:0]` voltage (dV); `[17:9]` current (dA, `prep_number`); `[31:17]` mAh (cap 0x7FFF) |
+| `0x5004` | HOME | `[10:0]` dist-to-home (m, `prep_number`); `[17:12]` alt-above-home (dm, `prep_number`); `[31:25]` bearing (×3°) |
+| `0x5005` | VEL_YAW | `[8:0]` vert-speed (dm/s, `prep_number`); `[17:9]` horiz-speed (dm/s); `[28:17]` yaw (×0.2°); b28 airspeed-flag |
+| `0x5006` | ATTITUDE_RANGE | `[10:0]` roll (×0.2°, +18000 off); `[20:11]` pitch (×0.2°, +9000 off); `[31:21]` rangefinder (cm, `prep_number`) |
+| `0x5007` | PARAM | `[31:24]` param-id; `[23:0]` value (frame-type, batt capacities, …) |
+| `0x5008` | BATT_2 | as `0x5003` |
+| `0x500A` | RPM | `[15:0]` esc1 (×0.1, signed); `[31:16]` esc2 |
+| `0x500B` | TERRAIN | `[10:0]` height-above-terrain (dm, `prep_number`); b13 unhealthy |
+| `0x500C` | WIND | `[7:0]` dir (×3°); `[14:7]` speed (dm/s) (+apparent fields on Rover) |
+| `0x500D` | WAYPOINT | `[10:0]` wp-number; `[21:11]` dist (m, `prep_number`); `[31:23]` bearing (×3°) |
+
+`prep_number(value, digits, power)` is ArduPilot's compact float encoding (mantissa + sign + base-10
+exponent) — must be replicated to decode HDOP/current/distances/speeds.
+
+### Mapping to the unified pipeline
+- AP_STATUS → `StatusData.armed` (b8) + **flight mode via `classify_ardupilot(custom_mode, variant)`**
+  (`custom_mode = (control_mode−1)`; we already have this) + **EKF** → `telemetry-ekf-status`.
+- TEXT → status-text messages (reuse the MAVLink STATUSTEXT sink/panel — verify it exists).
+- GPS/BATT/ATTITUDE/VEL_YAW → standard events (on CRSF, native frames take priority).
+- HOME → home distance/bearing; WAYPOINT → `activeWpNumber`; TERRAIN → AGL.
+
+### v1 status (built) + open questions
+**v1 done:** AP_STATUS (mode/armed/EKF), TEXT (S.Port chunked + CRSF `0xF1` status-text → MAVLink
+statustext sink), PARAM→variant (best-effort), WAYPOINT #; CRSF `0x80` single (`0xF0`) + multi (`0xF2`)
+unpack (layouts verified vs `AP_CRSF_Telem.h`); level-2 routing in `frsky.rs`/`crsf.rs`; native mode
+suppressed on CRSF when AP active. Composes with the native decoder (GPS/battery/attitude stay native),
+so no field fights.
+
+**Open / v2 (verify against a real AP source):**
+- **Vehicle variant** — v1 maps PARAM `0x5007` frame-type ≈ MAV_TYPE → plane/copter best-effort, defaults
+  copter. Confirm the PARAM frame-type semantics; rover currently falls back to the copter table.
+- **prep_number metric fields** — HDOP, home distance/alt/bearing, speeds, rangefinder, terrain, wind
+  (decoder for ArduPilot's compact float is specced; not yet wired).
+- **Status-text severity** is best-effort (S.Port: bits 7/15/23 of the final chunk; CRSF `0xF1` carries it
+  directly).
+- **Platform/icon** — set a proper ArduPilot platform + icon for this source (bonus, when variant known).
+- **alt-ref/MSL** for the AP path (GPS_STATUS carries MSL alt; reconcile with the carrier's alt-ref).
 
 ## CRSF (Crossfire / ELRS) — frame map + decoder plan (Phase E)
 
