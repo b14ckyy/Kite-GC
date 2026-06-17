@@ -234,7 +234,7 @@ pub struct TelemetryRecord {
     pub lon: Option<f64>,
     pub alt_m: Option<f64>,
     pub speed_ms: Option<f64>,
-    pub heading: Option<i16>,
+    pub heading: Option<f64>, // course over ground (degrees, decimals preserved)
     pub vario_ms: Option<f64>,
     pub voltage: Option<f64>,
     pub current_a: Option<f64>,
@@ -245,7 +245,7 @@ pub struct TelemetryRecord {
     pub battery_percentage: Option<u8>,
     pub roll: Option<f64>,
     pub pitch: Option<f64>,
-    pub yaw: Option<i16>,
+    pub yaw: Option<f64>, // FC fused heading (degrees, decimals preserved)
     pub fix_type: Option<u8>,
     pub num_sat: Option<u8>,
     pub cpu_load: Option<u16>,

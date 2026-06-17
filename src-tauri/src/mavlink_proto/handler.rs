@@ -380,7 +380,7 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
             let data = AttitudeData {
                 roll: att.roll.to_degrees() as f64,
                 pitch: -(att.pitch.to_degrees() as f64), // MAVLink: up=positive → INAV: down=positive
-                yaw: att.yaw.to_degrees().rem_euclid(360.0) as i16,
+                yaw: (att.yaw.to_degrees() as f64).rem_euclid(360.0),
             };
             let _ = app_handle.emit("telemetry-attitude", &data);
             if let Some(ref rec) = recorder {

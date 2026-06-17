@@ -830,7 +830,7 @@ where
             lon: r.lon,
             alt_m: r.gps_alt_m,
             speed_ms: r.speed_ms,
-            heading: r.ground_course_deg.map(|v| v as i16),
+            heading: r.ground_course_deg,
             // Prefer baro climb rate (positive = up, correct sign).
             // Fallback: GPS VZ is NED (positive = down) → negate.
             vario_ms: r.baro_climb_rate_ms.or(r.gps_vz_ms.map(|v| -v)),
@@ -841,7 +841,7 @@ where
             battery_percentage: None, // not present in ArduPilot blackbox logs
             roll: r.roll_deg,
             pitch: r.pitch_deg,
-            yaw: r.yaw_deg.map(|v| v as i16),
+            yaw: r.yaw_deg,
             fix_type: r.fix_type,
             num_sat: r.num_sat,
             cpu_load: None,

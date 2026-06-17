@@ -594,15 +594,13 @@ fn build_telemetry_record_indexed(
         .and_then(|v| parse_loose_i64(v))
         .unwrap_or(row_fallback);
 
-    // Course over ground (gps_ground_course) is in decidegrees (0–3600), so divide by 10.
+    // Course over ground. blackbox_decode emits gps_ground_course in degrees (decimals preserved).
+    // Keep the >360 fallback for any source that hands us decidegrees, but never round (full precision).
     let heading = cols
         .heading
         .and_then(|i| record.get(i))
         .and_then(|v| parse_loose_f64(v))
-        .map(|v| {
-            // Values > 360 are decidegrees; values ≤ 360 are already degrees
-            if v > 360.0 { (v / 10.0).round() as i16 } else { v.round() as i16 }
-        });
+        .map(|v| if v > 360.0 { v / 10.0 } else { v });
 
     let alt = read_f64(cols.alt, record).map(|v| if v > 10_000.0 { v / 100.0 } else { v });
 
@@ -642,12 +640,11 @@ fn build_telemetry_record_indexed(
         mah_drawn: read_f64(cols.mah, record).map(|v| v.round() as u32),
         rssi: read_f64(cols.rssi, record).map(|v| v.round() as u16),
         battery_percentage: None, // not present in INAV blackbox logs
-        // INAV blackbox attitude values are always in decidegrees — unconditionally /10
+        // INAV blackbox attitude values (incl. yaw = attitude[2]) are always in decidegrees —
+        // unconditionally /10, decimals preserved (0.1° resolution).
         roll: read_f64(cols.roll, record).map(|v| v / 10.0),
         pitch: read_f64(cols.pitch, record).map(|v| v / 10.0),
-        yaw: read_f64(cols.yaw, record).map(|v| {
-            if v > 360.0 { (v / 10.0).round() as i16 } else { v.round() as i16 }
-        }),
+        yaw: read_f64(cols.yaw, record).map(|v| v / 10.0),
         fix_type: read_f64(cols.sats, record).map(|_| 3u8),
         num_sat: read_f64(cols.sats, record).map(|v| v.round() as u8),
         cpu_load: None,

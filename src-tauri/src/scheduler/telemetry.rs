@@ -47,7 +47,7 @@ impl Default for TelemetryConfig {
 pub struct AttitudeData {
     pub roll: f64,  // degrees, ±180
     pub pitch: f64, // degrees, ±90
-    pub yaw: i16,   // heading 0–360
+    pub yaw: f64,   // heading 0–360 (degrees, decimals preserved)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -168,7 +168,7 @@ pub fn decode_telemetry(code: u16, payload: &[u8], box_ids: &[u8]) -> TelemetryP
             TelemetryPayload::Attitude(AttitudeData {
                 roll: 0.0,
                 pitch: 0.0,
-                yaw: 0,
+                yaw: 0.0,
             })
         }
     }
@@ -225,7 +225,7 @@ fn decode_attitude(payload: &[u8]) -> TelemetryPayload {
     TelemetryPayload::Attitude(AttitudeData {
         roll: read_i16(payload, 0) as f64 / 10.0,
         pitch: read_i16(payload, 2) as f64 / 10.0,
-        yaw: read_i16(payload, 4),
+        yaw: read_i16(payload, 4) as f64, // MSP yaw is whole degrees
     })
 }
 
@@ -431,7 +431,7 @@ pub fn feed_recorder(code: u16, payload: &[u8], recorder: &mut FlightRecorder, b
             let data = AttitudeData {
                 roll: read_i16(payload, 0) as f64 / 10.0,
                 pitch: read_i16(payload, 2) as f64 / 10.0,
-                yaw: read_i16(payload, 4),
+                yaw: read_i16(payload, 4) as f64, // MSP yaw is whole degrees
             };
             recorder.on_attitude(&data);
         }
@@ -520,7 +520,7 @@ mod tests {
             TelemetryPayload::Attitude(a) => {
                 assert!((a.roll - 45.0).abs() < 0.01);
                 assert!((a.pitch - (-10.5)).abs() < 0.01);
-                assert_eq!(a.yaw, 270);
+                assert_eq!(a.yaw, 270.0);
             }
             _ => panic!("Expected Attitude"),
         }

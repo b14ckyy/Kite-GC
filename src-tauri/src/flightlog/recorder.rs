@@ -277,13 +277,13 @@ struct TelemetrySnapshot {
     // Attitude
     roll: Option<f64>,
     pitch: Option<f64>,
-    yaw: Option<i16>,
+    yaw: Option<f64>,
     // GPS
     lat: Option<f64>,
     lon: Option<f64>,
     alt_gps: Option<f64>,
     speed: Option<f64>,
-    heading: Option<i16>,
+    heading: Option<f64>,
     fix_type: Option<u8>,
     num_sat: Option<u8>,
     // Altitude (baro)
@@ -493,7 +493,7 @@ impl FlightRecorder {
         self.snapshot.speed = Some(data.ground_speed);
         // DB column `heading` = course over ground (GpsData.course); the FC fused heading is stored
         // separately in `yaw` (from on_attitude). Kept distinct for the wind/crab analysis.
-        self.snapshot.heading = Some(data.course as i16);
+        self.snapshot.heading = Some(data.course);
         self.snapshot.fix_type = Some(data.fix_type);
         self.snapshot.num_sat = Some(data.num_sat);
         self.maybe_record_sample();

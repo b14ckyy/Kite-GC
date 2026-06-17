@@ -92,7 +92,7 @@ fn decode_modes(value: u32) -> (bool, u32) {
 struct State {
     roll: f64,
     pitch: f64,
-    yaw: i16,
+    yaw: f64,
     seen_attitude: bool,
 
     lat: f64,
@@ -185,7 +185,7 @@ impl FrskyDecoder {
             ID_ROLL => { s.roll = ivalue as f64 / 10.0; s.seen_attitude = true; }
             ID_FPV => { s.course = (ivalue as f64 / 10.0).rem_euclid(360.0); s.seen_gps = true; }
             ID_HEADING => {
-                s.yaw = ((value as f64 / 100.0).round() as i32).rem_euclid(360) as i16;
+                s.yaw = (value as f64 / 100.0).rem_euclid(360.0); // FrSky HEADING is deg*100
                 s.seen_attitude = true;
             }
             ID_SPEED => { s.ground_speed = value as f64 / 1944.0; s.seen_gps = true; }

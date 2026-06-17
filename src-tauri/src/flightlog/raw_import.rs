@@ -53,12 +53,12 @@ pub struct RawImportResult {
 struct Snap {
     roll: Option<f64>,
     pitch: Option<f64>,
-    yaw: Option<i16>,
+    yaw: Option<f64>,
     lat: Option<f64>,
     lon: Option<f64>,
     alt_gps: Option<f64>,
     speed: Option<f64>,
-    heading: Option<i16>,
+    heading: Option<f64>,
     fix_type: Option<u8>,
     num_sat: Option<u8>,
     alt_baro: Option<f64>,
@@ -242,7 +242,7 @@ fn update_from_msp(code: u16, payload: &[u8], s: &mut Snap, armed: &mut bool, id
             s.lon = Some(g.lon);
             s.alt_gps = Some(g.alt_msl);
             s.speed = Some(g.ground_speed);
-            s.heading = Some(g.course as i16);
+            s.heading = Some(g.course);
             s.fix_type = Some(g.fix_type);
             s.num_sat = Some(g.num_sat);
         }
@@ -373,7 +373,7 @@ fn update_from_mav(msg: &MavMessage, s: &mut Snap, armed: &mut bool, variant: &s
         MavMessage::ATTITUDE(a) => {
             s.roll = Some(a.roll.to_degrees() as f64);
             s.pitch = Some(a.pitch.to_degrees() as f64);
-            s.yaw = Some(a.yaw.to_degrees() as i16);
+            s.yaw = Some((a.yaw.to_degrees() as f64).rem_euclid(360.0));
             true
         }
         MavMessage::GLOBAL_POSITION_INT(g) => {
@@ -382,7 +382,7 @@ fn update_from_mav(msg: &MavMessage, s: &mut Snap, armed: &mut bool, variant: &s
             s.alt_gps = Some(g.alt as f64 / 1000.0);
             s.alt_baro = Some(g.relative_alt as f64 / 1000.0);
             if g.hdg != u16::MAX {
-                s.heading = Some((g.hdg as f64 / 100.0) as i16);
+                s.heading = Some(g.hdg as f64 / 100.0);
             }
             true
         }

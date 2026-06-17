@@ -12,8 +12,8 @@
   //    schematic overlay capped at 50% of the viewport.
   // Driven purely by props (attitude + display values already converted to the user's units).
 
-  import { onMount, onDestroy } from 'svelte';
-  import { easeFactor, easeToward, easeAngleToward } from '$lib/utils/smoothing';
+  import { untrack } from 'svelte';
+  import { easeToward, easeAngleToward } from '$lib/utils/smoothing';
 
   let {
     heading = 0,   // deg, 0..360 (0 = N)
@@ -108,28 +108,24 @@
   // Conformal (same projection + FOV scaling as the pitch ladder), body-frame / pilot's view: vertical
   // = flight-path angle via rungY (= AoA depression below the boresight), horizontal = crab. Drawn in
   // the full-viewport AHI layer but OUTSIDE the roll rotation, so it stays upright relative to the UAV
-  // while the horizon turns around it. Smoothed with the shared exponential ease.
-  const FPM_TAU_MS = 200;
+  // while the horizon turns around it.
+  const FPM_SMOOTH = 0.35; // per-update ease factor
   let dispGamma = $state(0);
   let dispCrab = $state(0);
   const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
   const fpmX = $derived(clamp(CX + fAhi * Math.tan(dispCrab * RAD), 60, W - 60));
   const fpmY = $derived(clamp(rungY(dispGamma), 40, H - 40));
 
-  let raf = 0;
-  let lastT = 0;
-  onMount(() => {
-    const loop = (t: number) => {
-      const dt = lastT ? t - lastT : 16;
-      lastT = t;
-      const f = easeFactor(dt, FPM_TAU_MS);
-      dispGamma = easeToward(dispGamma, fpmGamma, f);
-      dispCrab = easeAngleToward(dispCrab, fpmCrab, f);
-      raf = requestAnimationFrame(loop);
-    };
-    raf = requestAnimationFrame(loop);
+  // Ease toward the target props on every update; untracked self-read avoids a re-run loop. (A rAF
+  // reading the reactive target proved unreliable — it could freeze.)
+  $effect(() => {
+    const tg = fpmGamma;
+    const tc = fpmCrab;
+    untrack(() => {
+      dispGamma = easeToward(dispGamma, tg, FPM_SMOOTH);
+      dispCrab = easeAngleToward(dispCrab, tc, FPM_SMOOTH);
+    });
   });
-  onDestroy(() => cancelAnimationFrame(raf));
 </script>
 
 <!-- ── Conformal artificial horizon (full viewport) ── -->
