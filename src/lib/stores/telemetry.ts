@@ -8,6 +8,7 @@
 import { writable, get } from 'svelte/store';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
+import { connectionProtocol, fcLinkAlive } from '$lib/stores/connection';
 import type { FlightModeState } from '$lib/helpers/flightModeRegistry';
 
 export interface TelemetryData {
@@ -358,6 +359,20 @@ export async function startTelemetryListeners() {
       altReference.set({ msl: event.payload.msl });
       // A real-MSL protocol supersedes any relative ground anchor.
       if (event.payload.msl) groundAnchor.set(null);
+    })
+  );
+
+  // Passive-telemetry locked protocol (+ optional secondary) for the connection status box.
+  unlisteners.push(
+    await listen<{ primary: string; secondary: string | null }>('telemetry-protocol', (event) => {
+      connectionProtocol.set({ primary: event.payload.primary, secondary: event.payload.secondary });
+    })
+  );
+
+  // FC-link liveness (passive): fresh FC-origin frames, independent of the cached-state re-emit + RX noise.
+  unlisteners.push(
+    await listen<{ alive: boolean }>('telemetry-fc-link', (event) => {
+      fcLinkAlive.set(event.payload.alive);
     })
   );
 

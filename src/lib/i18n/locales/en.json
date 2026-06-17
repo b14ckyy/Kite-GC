@@ -9,6 +9,11 @@
     "restore": "Restore",
     "close": "Close"
   },
+  "statusBox": {
+    "live": "Receiving data",
+    "noData": "No valid data >5s",
+    "waiting": "Waiting for data"
+  },
   "connection": {
     "connect": "Connect",
     "disconnect": "Disconnect",

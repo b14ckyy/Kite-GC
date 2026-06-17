@@ -230,6 +230,8 @@ pub struct LtmDecoder {
     start: Instant,
     frames: u64,
     dump: Option<BufWriter<File>>,
+    /// Last time a valid LTM frame was seen (all LTM frames are FC-origin) — drives FC-link-alive.
+    last_fc: Option<Instant>,
 }
 
 impl LtmDecoder {
@@ -251,7 +253,13 @@ impl LtmDecoder {
             start: Instant::now(),
             frames: 0,
             dump,
+            last_fc: None,
         }
+    }
+
+    /// Age (ms) of the last valid LTM frame, or None if none seen yet.
+    pub fn fc_age_ms(&self) -> Option<u128> {
+        self.last_fc.map(|t| t.elapsed().as_millis())
     }
 
     /// Feed a freshly-read chunk; extract complete CRC-valid LTM frames, apply them to the accumulated
@@ -282,6 +290,7 @@ impl LtmDecoder {
             let payload = self.acc[i + 3..crc_idx].to_vec();
             let decoded = decode_ltm(ty, &payload);
             self.frames += 1;
+            self.last_fc = Some(Instant::now()); // all LTM frames are FC-origin
             self.apply(&decoded);
             self.dump_frame(ty, &payload, &decoded);
             i = crc_idx + 1; // consume the validated frame

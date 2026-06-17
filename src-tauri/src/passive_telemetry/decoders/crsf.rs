@@ -227,6 +227,9 @@ pub struct CrsfDecoder {
     dump: Option<BufWriter<File>>,
     /// Lazily created when ArduPilot AP_CUSTOM_TELEM (0x80/0x7F) frames appear (level-2 sub-detection).
     ap: Option<ApPassthroughDecoder>,
+    /// Last time an FC-origin frame was seen (anything but RF link-stats) — drives FC-link-alive. The
+    /// TX/RX keeps sending link-stats (0x14/0x1C/0x1D) after the FC link drops, so those don't count.
+    last_fc: Option<Instant>,
 }
 
 impl CrsfDecoder {
@@ -249,6 +252,7 @@ impl CrsfDecoder {
             frames: 0,
             dump,
             ap: None,
+            last_fc: None,
         }
     }
 
@@ -278,6 +282,10 @@ impl CrsfDecoder {
             // Copy the payload out before mutating self (state/dump writer).
             let payload = self.acc[i + 3..crc_idx].to_vec();
             self.frames += 1;
+            // FC-origin frame (anything but RF link-stats / radio-id) → FC link alive.
+            if !matches!(ty, 0x14 | 0x1C | 0x1D | 0x3A) {
+                self.last_fc = Some(Instant::now());
+            }
             if ty == FT_AP_CUSTOM_TELEM || ty == FT_AP_CUSTOM_TELEM_LEGACY {
                 // ArduPilot source: route the embedded passthrough packets to the AP sub-decoder. The
                 // native CRSF frames (GPS/battery/attitude/link-stats) continue to be decoded normally.
@@ -467,6 +475,16 @@ impl CrsfDecoder {
 
     pub fn frames(&self) -> u64 {
         self.frames
+    }
+
+    /// True once ArduPilot-passthrough (AP_CUSTOM_TELEM) frames have appeared → a secondary protocol.
+    pub fn ap_active(&self) -> bool {
+        self.ap.is_some()
+    }
+
+    /// Age (ms) of the last FC-origin frame (excludes RF link-stats), or None if none seen yet.
+    pub fn fc_age_ms(&self) -> Option<u128> {
+        self.last_fc.map(|t| t.elapsed().as_millis())
     }
 
     pub fn flush(&mut self) {

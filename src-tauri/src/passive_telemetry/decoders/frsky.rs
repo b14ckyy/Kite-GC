@@ -10,6 +10,8 @@
 // Frame (after 0x7D unstuffing, 0x7E-delimited): <physID> 0x10 <appID:2 LE> <value:4 LE> <crc>.
 // physID 0x00 = flight controller, 0x98 = receiver.
 
+use std::time::Instant;
+
 use tauri::{AppHandle, Emitter};
 
 use crate::flightlog::recorder::FlightRecorderHandle;
@@ -135,11 +137,25 @@ pub struct FrskyDecoder {
     state: State,
     /// Lazily created when ArduPilot passthrough (0x5000-range) frames appear (level-2 sub-detection).
     ap: Option<ApPassthroughDecoder>,
+    /// Last time a frame from the flight controller (physID ≠ 0x98 receiver) was seen — drives the
+    /// FC-link-alive signal. The receiver/TX keeps sending RSSI etc. after the FC link drops, so "any
+    /// data" isn't enough; we track FC-origin frames specifically.
+    last_fc: Option<Instant>,
 }
 
 impl FrskyDecoder {
     pub fn new() -> Self {
-        Self { acc: Vec::with_capacity(16), state: State::default(), ap: None }
+        Self { acc: Vec::with_capacity(16), state: State::default(), ap: None, last_fc: None }
+    }
+
+    /// True once ArduPilot-passthrough (0x5000-range) frames have appeared → a secondary protocol.
+    pub fn ap_active(&self) -> bool {
+        self.ap.is_some()
+    }
+
+    /// Age (ms) of the last FC-origin frame, or None if none seen yet.
+    pub fn fc_age_ms(&self) -> Option<u128> {
+        self.last_fc.map(|t| t.elapsed().as_millis())
     }
 
     /// Feed a freshly-read chunk; extract + apply complete S.Port frames.
@@ -174,6 +190,11 @@ impl FrskyDecoder {
         }
         if f.len() != 9 || f[1] != 0x10 {
             return; // not a data frame
+        }
+        // physID 0x98 = receiver/TX (RSSI/RxBt keep coming after an FC-link loss); anything else is the
+        // flight controller → marks the FC link as alive.
+        if f[0] != 0x98 {
+            self.last_fc = Some(Instant::now());
         }
         let appid = (f[2] as u16) | ((f[3] as u16) << 8);
         let value = u32::from_le_bytes([f[4], f[5], f[6], f[7]]);

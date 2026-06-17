@@ -30,6 +30,10 @@ const HEX_TAIL_BYTES: usize = 192;
 const EMIT_INTERVAL: Duration = Duration::from_millis(100);
 /// Capture flush cadence (so a crash keeps most of the data).
 const FLUSH_INTERVAL: Duration = Duration::from_secs(2);
+/// FC link is considered lost after this long without a fresh FC-origin frame. The receiver/TX keeps
+/// sending housekeeping (RSSI, link-stats) after the FC drops, so "any data" never goes stale — this
+/// tracks FC-origin frames specifically.
+const FC_STALE_MS: u128 = 5000;
 
 pub enum PassiveCommand {
     Stop,
@@ -75,6 +79,32 @@ struct ProtoHit {
 #[derive(Clone, Serialize)]
 struct AltRef {
     msl: bool,
+}
+
+/// Active-protocol signal (`telemetry-protocol`) for the connection status box: the locked primary
+/// protocol + an optional secondary (a higher-level protocol tunneled inside it, e.g. ArduPilot
+/// passthrough → "MAVLink").
+#[derive(Clone, Serialize, PartialEq)]
+struct ProtoInfo {
+    primary: String,
+    secondary: Option<String>,
+}
+
+/// FC-link liveness signal (`telemetry-fc-link`) for the status box: false once FC-origin frames have
+/// gone quiet for `FC_STALE_MS`, even while the receiver/TX keeps sending housekeeping.
+#[derive(Clone, Serialize)]
+struct FcLink {
+    alive: bool,
+}
+
+/// Display name of the locked carrier protocol for the status box ("SmartPort", not "FrSkyX/SmartPort").
+fn primary_name(p: Protocol) -> &'static str {
+    match p {
+        Protocol::Frsky => "SmartPort",
+        Protocol::Crsf => "CRSF",
+        Protocol::Ltm => "LTM",
+        Protocol::Mavlink => "MAVLink",
+    }
 }
 
 /// Debug snapshot emitted as `debug-telemetry-stats`.
@@ -134,6 +164,10 @@ fn handler_loop(
     let mut ltm: Option<LtmDecoder> = None;
     // Refine the recorder's protocol label once the sub-protocol is locked (set only once).
     let mut protocol_labeled = false;
+    // Last protocol info pushed to the status box (re-emitted only on change, e.g. AP passthrough start).
+    let mut last_proto: Option<ProtoInfo> = None;
+    // Last FC-link-alive state pushed to the status box (re-emitted only on change).
+    let mut last_fc_alive: Option<bool> = None;
     let mut hex_tail: VecDeque<u8> = VecDeque::with_capacity(HEX_TAIL_BYTES);
     let mut buf = [0u8; 1024];
 
@@ -298,6 +332,36 @@ fn handler_loop(
             }
             if let Some(dec) = ltm.as_ref() {
                 dec.publish(&app_handle, recorder.as_ref());
+            }
+
+            // Connection status-box protocol signal (primary + optional secondary), change-detected so
+            // it fires on lock and again when ArduPilot passthrough turns up as a secondary protocol.
+            if let Some(p) = detector.locked() {
+                let secondary = if frsky.as_ref().map_or(false, |d| d.ap_active())
+                    || crsf.as_ref().map_or(false, |d| d.ap_active())
+                {
+                    Some("MAVLink".to_string())
+                } else {
+                    None
+                };
+                let info = ProtoInfo { primary: primary_name(p).to_string(), secondary };
+                if last_proto.as_ref() != Some(&info) {
+                    let _ = app_handle.emit("telemetry-protocol", &info);
+                    last_proto = Some(info);
+                }
+
+                // FC-link liveness: based on fresh FC-origin frames (not RX/TX housekeeping).
+                let fc_age = match p {
+                    Protocol::Frsky => frsky.as_ref().and_then(|d| d.fc_age_ms()),
+                    Protocol::Crsf => crsf.as_ref().and_then(|d| d.fc_age_ms()),
+                    Protocol::Ltm => ltm.as_ref().and_then(|d| d.fc_age_ms()),
+                    Protocol::Mavlink => None,
+                };
+                let alive = fc_age.map_or(true, |ms| ms < FC_STALE_MS);
+                if last_fc_alive != Some(alive) {
+                    let _ = app_handle.emit("telemetry-fc-link", FcLink { alive });
+                    last_fc_alive = Some(alive);
+                }
             }
             last_emit = Instant::now();
         }

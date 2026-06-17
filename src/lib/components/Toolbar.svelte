@@ -9,6 +9,7 @@
   import Button from '$lib/components/panel/Button.svelte';
   import SegmentedToggle from '$lib/components/panel/SegmentedToggle.svelte';
   import WindowControls from '$lib/components/WindowControls.svelte';
+  import ConnectionStatusBox from '$lib/components/ConnectionStatusBox.svelte';
   import type { PortInfo, BleDeviceInfo, TransportType, ProtocolType } from '$lib/stores/connection';
   import type { TelemetryData } from '$lib/stores/telemetry';
 
@@ -178,6 +179,7 @@
       {#if isConnecting}
         <Button variant="warning" disabled>{$t('connection.connecting')}</Button>
       {:else if connStatus === "connected"}
+        <ConnectionStatusBox {telem} />
         <Button variant="danger" onclick={onConnect}>{$t('connection.disconnect')}</Button>
       {:else}
         <Button variant="data" onclick={onConnect}>{$t('connection.connect')}</Button>

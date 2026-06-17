@@ -73,6 +73,20 @@ export const connection = writable<ConnectionInfo>({
   fcInfo: null,
 });
 
+/// Active protocol for the connection status box: the primary protocol name (MSP / MAVLink / SmartPort /
+/// CRSF / LTM) and an optional secondary tunneled inside it (e.g. ArduPilot passthrough → "MAVLink").
+/// Set from `protocolType` on connect for MSP/MAVLink; for passive telemetry the backend's
+/// `telemetry-protocol` event fills it once the sub-protocol locks.
+export const connectionProtocol = writable<{ primary: string; secondary: string | null }>({
+  primary: '',
+  secondary: null,
+});
+
+/// FC-link liveness for passive telemetry. The decoder re-emits cached state and the receiver/TX keeps
+/// sending housekeeping (RSSI) after the FC drops, so the generic "any data" heartbeat never goes stale;
+/// the backend's `telemetry-fc-link` tracks fresh FC-origin frames instead. true = FC data flowing.
+export const fcLinkAlive = writable<boolean>(true);
+
 export const availablePorts = writable<PortInfo[]>([]);
 
 export const bleDevices = writable<BleDeviceInfo[]>([]);

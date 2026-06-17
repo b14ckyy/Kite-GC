@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { get } from 'svelte/store';
 import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from '$lib/stores/connection';
-import { connection, availablePorts, bleDevices } from '$lib/stores/connection';
+import { connection, connectionProtocol, fcLinkAlive, availablePorts, bleDevices } from '$lib/stores/connection';
 import { startTelemetryListeners, stopTelemetryListeners, resetTelemetry } from '$lib/stores/telemetry';
 
 /**
@@ -135,6 +135,13 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
     errorMessage: "",
     fcInfo: info,
   });
+  // Seed the status-box protocol. MSP/MAVLink are known now; passive telemetry shows a placeholder
+  // until the backend's `telemetry-protocol` event reports the locked sub-protocol.
+  connectionProtocol.set({
+    primary: params.protocolType === 'mavlink' ? 'MAVLink' : params.protocolType === 'msp' ? 'MSP' : 'Telemetry',
+    secondary: null,
+  });
+  fcLinkAlive.set(true);
   await startTelemetryListeners();
   return info;
 }
@@ -145,6 +152,8 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
 export async function disconnectFC(baudRate: number): Promise<void> {
   stopTelemetryListeners();
   resetTelemetry();
+  connectionProtocol.set({ primary: '', secondary: null });
+  fcLinkAlive.set(true);
   await invoke("disconnect");
   connection.set({
     status: "disconnected",

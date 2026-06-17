@@ -3,6 +3,11 @@
     "brand": "KiteGC",
     "version": "v{version}"
   },
+  "statusBox": {
+    "live": "Réception de données",
+    "noData": "Aucune donnée valide >5s",
+    "waiting": "En attente de données"
+  },
   "connection": {
     "connect": "Connecter",
     "disconnect": "Déconnecter",
