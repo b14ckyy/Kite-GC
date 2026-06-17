@@ -23,6 +23,7 @@ use super::decoders::crsf::CrsfDecoder;
 use super::decoders::frsky::FrskyDecoder;
 use super::decoders::ltm::LtmDecoder;
 use super::detector::{Detector, Protocol};
+use super::msp_probe::{MspProbe, MspProbeStats};
 
 /// Bytes of the live stream kept for the Debug Monitor hex tail.
 const HEX_TAIL_BYTES: usize = 192;
@@ -34,6 +35,19 @@ const FLUSH_INTERVAL: Duration = Duration::from_secs(2);
 /// sending housekeeping (RSSI, link-stats) after the FC drops, so "any data" never goes stale — this
 /// tracks FC-origin frames specifically.
 const FC_STALE_MS: u128 = 5000;
+/// Experimental MSP-over-SmartPort probe — the one deliberate exception to the listen-only rule. Tests
+/// whether the radio's BLE bridge forwards an inbound S.Port frame into the FC uplink (see `msp_probe`).
+/// Dev-only (release never writes to the transport).
+///
+/// STATUS (2026-06-17): kept ARMED but not yet working. On the FrSky X20RS the Ethos Bluetooth only does
+/// telemetry *forwarding* (downlink mirror) — injected writes to every writable characteristic
+/// (0xFFF3/0xFFF6) × all frame variants produced no FC reply, while the passive MSP reassembler decoded
+/// the radio's own polling cleanly. Pending the Ethos dev confirming whether a bidirectional/serial BT
+/// mode can forward the uplink; once it does, this fires automatically on reconnect. This whole feature
+/// is an isolated commit and can be reverted wholesale if the idea is abandoned.
+const MSP_PROBE_ENABLED: bool = cfg!(debug_assertions);
+/// How often to fire the MSP_API_VERSION probe request.
+const MSP_PROBE_INTERVAL: Duration = Duration::from_secs(1);
 
 pub enum PassiveCommand {
     Stop,
@@ -125,6 +139,8 @@ struct TelemSnapshot {
     crsf_frames: u64,
     /// Decoded LTM frame count (0 unless LTM is locked).
     ltm_frames: u64,
+    /// MSP-over-SmartPort probe diagnostics (only present in dev builds once SmartPort is locked).
+    msp_probe: Option<MspProbeStats>,
     hits: Vec<ProtoHit>,
 }
 
@@ -162,6 +178,9 @@ fn handler_loop(
     // LTM decoder: on lock, publishes unified events + feeds the recorder, and writes a
     // radiotelem_<ts>.ltm.txt decoded dump for validation.
     let mut ltm: Option<LtmDecoder> = None;
+    // Experimental MSP-over-SmartPort probe (dev-only): created once SmartPort is locked.
+    let mut msp_probe: Option<MspProbe> = None;
+    let mut last_probe = Instant::now() - MSP_PROBE_INTERVAL;
     // Refine the recorder's protocol label once the sub-protocol is locked (set only once).
     let mut protocol_labeled = false;
     // Last protocol info pushed to the status box (re-emitted only on change, e.g. AP passthrough start).
@@ -236,6 +255,10 @@ fn handler_loop(
                 // Once FrSky is locked, decode the stream into unified telemetry events.
                 if detector.locked() == Some(Protocol::Frsky) {
                     frsky.get_or_insert_with(FrskyDecoder::new).push_bytes(chunk);
+                    // Experimental MSP probe: watch the same stream for MSP replies (primID 0x32).
+                    if MSP_PROBE_ENABLED {
+                        msp_probe.get_or_insert_with(MspProbe::new).push_bytes(chunk);
+                    }
                 }
                 // Once CRSF is locked, decode frames into the analysis dump (E2; no widget feed yet).
                 if detector.locked() == Some(Protocol::Crsf) {
@@ -273,6 +296,19 @@ fn handler_loop(
             }
             Err(e) => {
                 log::warn!("Passive telemetry read error: {}", e);
+            }
+        }
+
+        // 2b. Fire the experimental MSP probe (dev-only). Writes one MSP_API_VERSION request frame
+        //     into the transport every MSP_PROBE_INTERVAL — the deliberate exception to listen-only.
+        if let Some(probe) = msp_probe.as_mut() {
+            if last_probe.elapsed() >= MSP_PROBE_INTERVAL {
+                let frame = probe.next_tx();
+                match transport.write_bytes(&frame) {
+                    Ok(()) => log::debug!("[MSP-PROBE] tx {} bytes", frame.len()),
+                    Err(e) => log::warn!("[MSP-PROBE] tx failed: {}", e),
+                }
+                last_probe = Instant::now();
             }
         }
 
@@ -315,6 +351,7 @@ fn handler_loop(
                 capture_file: capture_file.clone(),
                 crsf_frames: crsf.as_ref().map(|c| c.frames()).unwrap_or(0),
                 ltm_frames: ltm.as_ref().map(|c| c.frames()).unwrap_or(0),
+                msp_probe: msp_probe.as_ref().map(|p| p.stats().clone()),
                 hits: detector
                     .hit_table()
                     .into_iter()

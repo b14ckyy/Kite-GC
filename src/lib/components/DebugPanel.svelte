@@ -102,7 +102,23 @@
     capture_file: string;
     crsf_frames: number;
     ltm_frames: number;
+    msp_probe: MspProbeStats | null;
     hits: TelemProtoHit[];
+  }
+
+  // Experimental MSP-over-SmartPort probe diagnostics (dev-only; present once SmartPort is locked).
+  interface MspProbeStats {
+    tx_count: number;
+    rx_chunks: number;
+    replies: number;
+    probe_replies: number;
+    cmds_seen: string;
+    last_reply_cmd: number;
+    last_reply_hex: string;
+    last_tx_hex: string;
+    last_tx_variant: string;
+    last_rx_hex: string;
+    last_rx_note: string;
   }
 
   let telemSnapshot = $state<TelemSnapshot>({
@@ -115,6 +131,7 @@
     capture_file: "",
     crsf_frames: 0,
     ltm_frames: 0,
+    msp_probe: null,
     hits: [],
   });
 
@@ -403,6 +420,70 @@
         {/if}
       </div>
     </div>
+
+    {#if telemSnapshot.msp_probe}
+      {@const probe = telemSnapshot.msp_probe}
+      <div class="debug-stats">
+        <div class="stat-group">
+          <span class="stat-label">{$t('debug.mspProbe')}</span>
+          {#if probe.probe_replies > 0}
+            <span class="gate-badge stable">{$t('debug.mspProbeOurReply')}</span>
+          {:else if probe.replies > 0}
+            <span class="gate-badge stable">{$t('debug.mspProbeSniffed')}</span>
+          {:else}
+            <span class="gate-badge unstable">{$t('debug.mspProbeNoReply')}</span>
+          {/if}
+          <span class="stat-sep">|</span>
+          <span class="stat-label">{$t('debug.mspProbeTx')}</span>
+          <span class="stat-value">{probe.tx_count}</span>
+          <span class="stat-sep">|</span>
+          <span class="stat-label">{$t('debug.mspProbeRx')}</span>
+          <span class="stat-value">{probe.rx_chunks}</span>
+          <span class="stat-sep">|</span>
+          <span class="stat-label">{$t('debug.mspProbeReplies')}</span>
+          <span class="stat-value">{probe.replies}</span>
+          <span class="stat-sep">|</span>
+          <span class="stat-label">{$t('debug.mspProbeOurs')}</span>
+          <span class="stat-value">{probe.probe_replies}</span>
+        </div>
+      </div>
+      {#if probe.cmds_seen}
+        <div class="cap-row" title={probe.cmds_seen}>
+          <span class="stat-label">{$t('debug.mspProbeCmds')}</span>
+          <span class="cap-path">{probe.cmds_seen}</span>
+        </div>
+      {/if}
+      {#if probe.last_reply_hex}
+        <div class="cap-row" title={probe.last_reply_hex}>
+          <span class="stat-label">{$t('debug.mspProbeLast')}</span>
+          <span class="cap-path">cmd {probe.last_reply_cmd}: {probe.last_reply_hex}</span>
+        </div>
+      {/if}
+      {#if probe.last_rx_note}
+        <div class="cap-row" title={probe.last_rx_note}>
+          <span class="stat-label">{$t('debug.mspProbeParse')}</span>
+          <span class="cap-path">{probe.last_rx_note}</span>
+        </div>
+      {/if}
+      {#if probe.last_rx_hex}
+        <div class="hex-tail">
+          <div class="hex-label">{$t('debug.mspProbeRxRaw')}</div>
+          <div class="hex-bytes">{probe.last_rx_hex}</div>
+        </div>
+      {/if}
+      {#if probe.last_tx_variant}
+        <div class="cap-row" title={probe.last_tx_variant}>
+          <span class="stat-label">{$t('debug.mspProbeVariant')}</span>
+          <span class="cap-path">{probe.last_tx_variant}</span>
+        </div>
+      {/if}
+      {#if probe.last_tx_hex}
+        <div class="hex-tail">
+          <div class="hex-label">{$t('debug.mspProbeTxRaw')}</div>
+          <div class="hex-bytes">{probe.last_tx_hex}</div>
+        </div>
+      {/if}
+    {/if}
 
     {#if telemSnapshot.capture_file}
       <div class="cap-row" title={telemSnapshot.capture_file}>

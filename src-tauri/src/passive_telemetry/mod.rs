@@ -18,5 +18,6 @@ pub mod capture;
 pub mod decoders;
 pub mod detector;
 pub mod handler;
+pub mod msp_probe;
 
 pub use handler::{start, PassiveHandle};

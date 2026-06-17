@@ -513,7 +513,7 @@ pub async fn connect_ble_listen(
     device_id: &str,
     app: tauri::AppHandle,
 ) -> Result<BleTransport, String> {
-    use btleplug::api::{Central, CharPropFlags, Manager as _, Peripheral as _, ScanFilter};
+    use btleplug::api::{Central, CharPropFlags, Manager as _, Peripheral as _, ScanFilter, WriteType};
     use btleplug::platform::Manager;
     use futures::StreamExt;
     use tauri::Emitter;
@@ -570,6 +570,12 @@ pub async fn connect_ble_listen(
     let mut table_services = Vec::new();
     let mut subscribed_count = 0usize;
 
+    // Collect ALL writable vendor-service characteristics so the listen path can transmit (e.g. the
+    // experimental MSP-over-SmartPort probe). We don't know which characteristic the radio's bridge
+    // routes to the FC uplink, so during this trial phase we write to every candidate (e.g. FrSky
+    // X20RS exposes both 0xFFF3 and 0xFFF6) and let the probe's reply detection reveal what works.
+    let mut write_chars: Vec<(btleplug::api::Characteristic, WriteType)> = Vec::new();
+
     for service in &services {
         // Skip standard SIG services — subscribing to their characteristics (esp. Service Changed,
         // 0x2A05) triggers a spurious WinRT pairing/PIN prompt. Telemetry is always on a vendor service.
@@ -579,6 +585,15 @@ pub async fn connect_ble_listen(
             let notifiable = ch
                 .properties
                 .intersects(CharPropFlags::NOTIFY | CharPropFlags::INDICATE);
+            // Collect every writable vendor characteristic as a transmit candidate.
+            if !skip_service {
+                let can_wnr = ch.properties.contains(CharPropFlags::WRITE_WITHOUT_RESPONSE);
+                let can_w = ch.properties.contains(CharPropFlags::WRITE);
+                if can_wnr || can_w {
+                    let wt = if can_wnr { WriteType::WithoutResponse } else { WriteType::WithResponse };
+                    write_chars.push((ch.clone(), wt));
+                }
+            }
             let mut subscribed = false;
             if notifiable && skip_service {
                 log::info!(
@@ -623,9 +638,19 @@ pub async fn connect_ble_listen(
         .await
         .map_err(|e| format!("BLE notification stream failed: {}", e))?;
 
-    // Channels bridging async BLE → sync ByteTransport. Listen-only: the write channel exists to satisfy
-    // the struct but is never driven (the passive handler never transmits).
-    let (write_tx, _write_async_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+    if write_chars.is_empty() {
+        log::warn!("BLE listen: no writable characteristic — transmit disabled");
+    } else {
+        let names: Vec<String> = write_chars
+            .iter()
+            .map(|(c, t)| format!("{} ({:?})", c.uuid, t))
+            .collect();
+        log::info!("BLE listen: transmit enabled on {} characteristic(s): {}", write_chars.len(), names.join(", "));
+    }
+
+    // Channels bridging async BLE → sync ByteTransport. The write channel is now driven if any writable
+    // characteristic was found, so the listen path can transmit (e.g. the MSP-over-SmartPort probe).
+    let (write_tx, mut write_async_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
     let (read_tx, read_rx) = mpsc::channel::<Vec<u8>>();
     let (stop_tx, mut stop_async_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
 
@@ -641,6 +666,22 @@ pub async fn connect_ble_listen(
                         len: n.value.len(),
                     });
                     let _ = read_tx.send(n.value);
+                }
+                Some(data) = write_async_rx.recv() => {
+                    if write_chars.is_empty() {
+                        log::warn!("BLE listen: write requested but no writable characteristic — dropping {} bytes", data.len());
+                    } else {
+                        // Trial phase: write to every writable candidate (we don't yet know which one
+                        // the radio routes to the FC uplink).
+                        for (wc, wt) in &write_chars {
+                            for chunk in data.chunks(BLE_WRITE_MTU) {
+                                if let Err(e) = peripheral_clone.write(wc, chunk, *wt).await {
+                                    log::error!("BLE listen write to {} failed: {}", wc.uuid, e);
+                                    break;
+                                }
+                            }
+                        }
+                    }
                 }
                 _ = stop_async_rx.recv() => {
                     log::info!("BLE listen runtime stopping");

@@ -481,6 +481,36 @@ for passive.
 > Note: during a passive FC-link loss the widgets still show the last (frozen) values — only the status
 > box flags it. Visually marking frozen widgets as stale is a separate, not-yet-done step.
 
+## MSP-over-SmartPort (active inject) — experiment, PARKED (2026-06-17)
+
+Reminder/notes for the open question of running MSP **actively** over the same BLE telemetry link (e.g. to
+trigger a waypoint-mission download, like the user's ETHOS Mapping Widget does *on* the radio).
+
+**What was built** (`passive_telemetry/msp_probe.rs`, dev-only, `MSP_PROBE_ENABLED = cfg!(debug_assertions)`,
+kept armed): the one deliberate exception to listen-only. It packs `MSP_API_VERSION` (cmd 1, V1) into an
+S.Port **uplink** frame and reassembles MSP **replies**. Methodology mirrors INAV `telemetry/msp_shared.c`
+and the user's own reference `INAVConfiguratorLite` (`msp/protocol.lua` + `platform/ethos/transport.lua`):
+- **Request frame:** physID `0x0D`, primID `0x30`; status byte `start(0x10)|version(<<5)|seq`; MSP-V1 body
+  `[size,cmd]` + XOR checksum; 6-byte chunk → `appId = chunk[0..2] LE`, `value = chunk[2..6] LE`; wrapped
+  `7E <physID> <primID> <appId:2> <value:4> <crc>` (FrSky S.Port CRC over primID..value, `0x7D`-stuffed).
+- **Reply frame:** physID `0x1B` (S.Port) / `0x00` (FPort), primID `0x32`; the 6 data bytes are the MSP
+  chunk, reassembled by sequence number.
+- **`connect_ble_listen` fix:** the listen transport previously dropped its write channel
+  (`_write_async_rx`); it now binds **all** writable vendor characteristics and drives them.
+
+**Result on the FrSky X20RS:** the reassembler **works** (proven by decoding the radio's own MSP polling
+when the Mapping Widget ran — clean cmd 101 `MSP_STATUS` / cmd 2 replies). But **uplink inject failed**:
+writes to *both* writable vendor chars (`0xFFF3` WriteNR + `0xFFF6` WriteNR·Notify) × 4 frame-format
+variants (±leading `0x7E`, ±CRC, ±byte-stuffing) produced **zero** FC reply. The downlink mirror
+(`0xFFF0`/`0xFFF6` Notify) streams flawlessly.
+
+**Conclusion:** Ethos Bluetooth currently appears to be **telemetry-forwarding (downlink) only** — it does
+not inject BLE-received bytes into the S.Port uplink. The two-way hardware exists (BT also serves as a
+trainer link), so this is a software-forwarding question on the radio side. **Open:** ask the Ethos main
+developer whether a bidirectional/serial BT mode can forward the uplink. If yes, the armed probe shows
+results on reconnect with no code change. **Passive MSP decode was rejected** (against spec; nothing
+periodic we don't already get via telemetry; waypoint download needs an active trigger).
+
 ## Link-quality fields (for a future RC Link widget)
 
 Confirmed on the bench (physID `0x98` = receiver): **RSSI = `0xF101`**, **Link Quality / VFR = `0xF010`**,
