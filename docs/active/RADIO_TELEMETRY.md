@@ -455,6 +455,32 @@ How telemetry-mode flights appear in the logbook (passive telemetry carries no F
   on a **near-identical duration** (±10 s, covering the arm/disarm grace) within the ±60 s window. Exact
   craft-name matches still win. Manual linking remains available.
 
+## Connection status box + FC-link liveness
+
+A small status box sits **left of the Disconnect button** (Toolbar, shown only when connected) with the
+**primary** protocol (MSP / MAVLink / SmartPort / CRSF / LTM) and, on a second line, a **secondary**
+tunneled protocol when present (ArduPilot passthrough → "MAVLink"; MSP-over-telemetry → "MSP", later). A
+coloured dot reflects data flow: grey until the first data, **green** while valid parser data arrives,
+**red** after >5 s without — without disconnecting.
+
+**Why FC-link liveness needs its own signal (passive only).** The generic "any telemetry event" heartbeat
+(`telem.lastUpdate`) does *not* go stale on a passive FC-link loss, because (a) the decoders re-emit their
+cached state every 100 ms, and (b) the receiver/TX keeps sending housekeeping (RSSI/RxBt, link-stats)
+after the FC drops — the byte rate falls (≈800→≈200 B/s on SmartPort) but never to zero. So the backend
+tracks **fresh FC-origin frames** specifically and emits `telemetry-fc-link {alive}` (5 s threshold,
+`FC_STALE_MS`):
+- **SmartPort:** physID ≠ `0x98` (the receiver/TX sends RSSI from `0x98`).
+- **CRSF:** any frame except RF link-stats `0x14`/`0x1C`/`0x1D` + radio-id `0x3A`.
+- **LTM:** every frame (all FC-origin).
+
+The status box uses `fcLinkAlive` for passive protocols and `lastUpdate` for MSP/MAVLink (which only emit
+on real data, so they have neither problem). The protocol name comes from `protocolType` for MSP/MAVLink
+and the backend `telemetry-protocol {primary, secondary}` (emitted on lock + when AP passthrough appears)
+for passive.
+
+> Note: during a passive FC-link loss the widgets still show the last (frozen) values — only the status
+> box flags it. Visually marking frozen widgets as stale is a separate, not-yet-done step.
+
 ## Link-quality fields (for a future RC Link widget)
 
 Confirmed on the bench (physID `0x98` = receiver): **RSSI = `0xF101`**, **Link Quality / VFR = `0xF010`**,

@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Connection status box (left of the Disconnect button).** Shows the active protocol — primary
+  (MSP / MAVLink / SmartPort / CRSF / LTM) plus an optional secondary tunneled inside it (ArduPilot
+  passthrough → MAVLink) — and a data-flow dot: green while valid data arrives, red after >5 s without,
+  grey until the first data. For passive telemetry the staleness tracks **fresh FC-origin frames** (not
+  the receiver/TX housekeeping such as RSSI that keeps flowing after an FC-link loss), so it goes red on a
+  real link loss **without disconnecting**; MSP/MAVLink use the telemetry heartbeat directly.
 - **Flight-path marker (velocity vector) on the AHI widget + 3D FPV HUD.** Shows where the aircraft is
   actually going vs. where the nose points — derived purely from existing telemetry (no wind estimate):
   lateral = COG − heading (crab), vertical = flight-path angle `atan2(vario, ground speed)` vs. pitch.
