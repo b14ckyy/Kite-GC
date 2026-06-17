@@ -101,6 +101,7 @@
     hex_tail: string;
     capture_file: string;
     crsf_frames: number;
+    ltm_frames: number;
     hits: TelemProtoHit[];
   }
 
@@ -113,6 +114,7 @@
     hex_tail: "",
     capture_file: "",
     crsf_frames: 0,
+    ltm_frames: 0,
     hits: [],
   });
 
@@ -393,6 +395,11 @@
           <span class="stat-sep">|</span>
           <span class="stat-label">{$t('debug.telCrsfFrames')}</span>
           <span class="stat-value">{telemSnapshot.crsf_frames}</span>
+        {/if}
+        {#if telemSnapshot.ltm_frames > 0}
+          <span class="stat-sep">|</span>
+          <span class="stat-label">{$t('debug.telLtmFrames')}</span>
+          <span class="stat-value">{telemSnapshot.ltm_frames}</span>
         {/if}
       </div>
     </div>

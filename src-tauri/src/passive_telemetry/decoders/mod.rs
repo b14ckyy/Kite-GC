@@ -6,3 +6,4 @@
 
 pub mod crsf;
 pub mod frsky;
+pub mod ltm;

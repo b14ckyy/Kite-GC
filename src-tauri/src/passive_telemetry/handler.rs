@@ -21,6 +21,7 @@ use crate::transport::{ByteTransport, TransportError};
 use super::capture::Capture;
 use super::decoders::crsf::CrsfDecoder;
 use super::decoders::frsky::FrskyDecoder;
+use super::decoders::ltm::LtmDecoder;
 use super::detector::{Detector, Protocol};
 
 /// Bytes of the live stream kept for the Debug Monitor hex tail.
@@ -68,6 +69,14 @@ struct ProtoHit {
     count: u32,
 }
 
+/// Altitude-reference signal (`telemetry-alt-ref`): tells the frontend whether this protocol's GPS
+/// altitude is true MSL (`msl: true`) or only relative-to-arming (`msl: false`). Relative-only protocols
+/// (LTM, CRSF) carry no MSL, so the frontend must anchor them to a ground reference for correct AGL/3D.
+#[derive(Clone, Serialize)]
+struct AltRef {
+    msl: bool,
+}
+
 /// Debug snapshot emitted as `debug-telemetry-stats`.
 #[derive(Clone, Serialize)]
 struct TelemSnapshot {
@@ -84,6 +93,8 @@ struct TelemSnapshot {
     capture_file: String,
     /// Decoded CRSF frame count (0 unless CRSF is locked) — confirms live decoding into the dump.
     crsf_frames: u64,
+    /// Decoded LTM frame count (0 unless LTM is locked).
+    ltm_frames: u64,
     hits: Vec<ProtoHit>,
 }
 
@@ -118,6 +129,9 @@ fn handler_loop(
     // CRSF decoder (Phase E2): on lock, decodes frames into the radiotelem_<ts>.crsf.txt dump for
     // offline scaling validation. Does NOT yet publish unified events (that is E4).
     let mut crsf: Option<CrsfDecoder> = None;
+    // LTM decoder: on lock, publishes unified events + feeds the recorder, and writes a
+    // radiotelem_<ts>.ltm.txt decoded dump for validation.
+    let mut ltm: Option<LtmDecoder> = None;
     // Refine the recorder's protocol label once the sub-protocol is locked (set only once).
     let mut protocol_labeled = false;
     let mut hex_tail: VecDeque<u8> = VecDeque::with_capacity(HEX_TAIL_BYTES);
@@ -176,7 +190,12 @@ fn handler_loop(
                         if let Some(ref rec) = recorder {
                             if let Ok(mut r) = rec.lock() { r.set_protocol(label); }
                         }
-                        log::info!("Passive telemetry locked: {}", label);
+                        // Tell the frontend whether this protocol delivers true MSL altitude. LTM/CRSF
+                        // send only arming-relative altitude → the frontend must anchor it to a ground
+                        // reference (captured at the arm edge) for correct AGL/3D.
+                        let msl = !matches!(p, Protocol::Ltm | Protocol::Crsf);
+                        let _ = app_handle.emit("telemetry-alt-ref", AltRef { msl });
+                        log::info!("Passive telemetry locked: {} (alt MSL: {})", label, msl);
                         protocol_labeled = true;
                     }
                 }
@@ -188,6 +207,13 @@ fn handler_loop(
                 if detector.locked() == Some(Protocol::Crsf) {
                     crsf.get_or_insert_with(|| {
                         CrsfDecoder::new(capture.as_ref().map(|c| c.sibling_path("crsf.txt")))
+                    })
+                    .push_bytes(chunk);
+                }
+                // Once LTM is locked, decode into unified events (+ dump for validation).
+                if detector.locked() == Some(Protocol::Ltm) {
+                    ltm.get_or_insert_with(|| {
+                        LtmDecoder::new(capture.as_ref().map(|c| c.sibling_path("ltm.txt")))
                     })
                     .push_bytes(chunk);
                 }
@@ -232,6 +258,9 @@ fn handler_loop(
             if let Some(c) = crsf.as_mut() {
                 c.flush();
             }
+            if let Some(c) = ltm.as_mut() {
+                c.flush();
+            }
             last_flush = Instant::now();
         }
 
@@ -251,6 +280,7 @@ fn handler_loop(
                 hex_tail: hex_tail_str,
                 capture_file: capture_file.clone(),
                 crsf_frames: crsf.as_ref().map(|c| c.frames()).unwrap_or(0),
+                ltm_frames: ltm.as_ref().map(|c| c.frames()).unwrap_or(0),
                 hits: detector
                     .hit_table()
                     .into_iter()
@@ -264,6 +294,9 @@ fn handler_loop(
                 dec.publish(&app_handle, recorder.as_ref());
             }
             if let Some(dec) = crsf.as_ref() {
+                dec.publish(&app_handle, recorder.as_ref());
+            }
+            if let Some(dec) = ltm.as_ref() {
                 dec.publish(&app_handle, recorder.as_ref());
             }
             last_emit = Instant::now();

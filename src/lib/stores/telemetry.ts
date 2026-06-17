@@ -5,8 +5,9 @@
 // Holds real-time telemetry data received from the flight controller.
 // Listens to Tauri events emitted by the MSP scheduler thread.
 
-import { writable } from 'svelte/store';
+import { writable, get } from 'svelte/store';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
 import type { FlightModeState } from '$lib/helpers/flightModeRegistry';
 
 export interface TelemetryData {
@@ -126,12 +127,72 @@ gpsInject.subscribe((g) => {
 
 export function resetTelemetry() {
   telemetry.set({ ...defaultTelemetry });
+  // Altitude reference defaults back to MSL (replay/idle treat altMsl as true MSL). The ground anchor
+  // is intentionally NOT cleared — it persists across reconnects so a relative-only session (LTM) keeps
+  // its reference until a real-MSL protocol supersedes it.
+  altReference.set({ msl: true });
   // Keep an active injection alive across a telemetry reset (e.g. disconnect while testing).
   if (gpsOverride) {
     const o = gpsOverride;
     telemetry.update((t) => ({ ...t, lat: o.lat, lon: o.lon, altMsl: o.altMsl, fixType: 3, numSat: 12 }));
   }
 }
+
+// ── Altitude reference + ground MSL anchor (relative-only protocols: LTM / CRSF) ─────
+// Some passive protocols (LTM, CRSF) send only arming-relative altitude, never true MSL. To place the
+// UAV against terrain (Live AGL widget, 3D map) we anchor that relative altitude to a ground MSL
+// captured at the ARMING EDGE — when the aircraft is on the ground (rel ≈ 0) at the home point. The
+// anchor persists across reconnects until a real-MSL protocol supersedes it. With no anchor (late
+// connect, or armed in the air) the true MSL is unknown → AGL is shown as N/A.
+
+/** Whether the active protocol delivers true MSL GPS altitude. Default true; the backend's
+ *  `telemetry-alt-ref` sets it false for relative-only protocols (LTM/CRSF). */
+export const altReference = writable<{ msl: boolean }>({ msl: true });
+/** Ground MSL (m) captured at the arming edge for relative-only protocols, or null if unknown. */
+export const groundAnchor = writable<number | null>(null);
+
+/** |relative altitude| (m) at the arm edge must be below this to trust it as the ground reference —
+ *  this also excludes "armed in the air" (HITL / mid-air arm), where no ground ref is recoverable. */
+const GROUND_ARM_MAX_REL = 5;
+
+/** Resolve true MSL from a (possibly relative) altitude + the altitude reference + the ground anchor.
+ *  Returns null when the protocol is relative-only and no ground anchor is known (→ AGL/3D show N/A). */
+export function resolveTrueMsl(altMsl: number, ref: { msl: boolean }, anchor: number | null): number | null {
+  if (ref.msl) return altMsl; // protocol already reports true MSL
+  if (anchor != null) return anchor + altMsl; // relative + captured ground MSL
+  return null; // relative-only, no reference yet
+}
+
+let prevArmed = false;
+let anchorBusy = false;
+
+/** Capture the ground MSL at the arming edge (relative-only protocols only, when on the ground). */
+async function captureGroundAnchor(t: TelemetryData): Promise<void> {
+  if (anchorBusy) return;
+  if (get(altReference).msl) return; // protocol already in MSL → no anchor needed
+  const validCoord = (t.lat !== 0 || t.lon !== 0) && Math.abs(t.lat) <= 90 && Math.abs(t.lon) <= 180;
+  if (t.fixType < 2 || !validCoord) return; // need a GPS fix
+  if (Math.abs(t.altMsl) > GROUND_ARM_MAX_REL) return; // armed in the air → no valid ground reference
+  anchorBusy = true;
+  try {
+    const g = await invoke<number | null>('terrain_elevation', { lat: t.lat, lon: t.lon });
+    if (g != null) {
+      groundAnchor.set(g);
+      console.log(`[altAnchor] ground MSL anchor = ${g.toFixed(1)} m (captured at arm, rel ${t.altMsl.toFixed(1)} m)`);
+    }
+  } catch (e) {
+    console.warn('[altAnchor] terrain lookup failed', e);
+  } finally {
+    anchorBusy = false;
+  }
+}
+
+// Detect the disarm→arm transition on the live telemetry stream (cheap; only acts on the edge).
+telemetry.subscribe((t) => {
+  const armed = (t.armingFlags & 0x04) !== 0;
+  if (armed && !prevArmed) void captureGroundAnchor(t);
+  prevArmed = armed;
+});
 
 // ── Event listeners for scheduler telemetry ─────────────────────────
 
@@ -288,6 +349,15 @@ export async function startTelemetryListeners() {
         airspeed: event.payload.airspeed,
         lastUpdate: Date.now(),
       }));
+    })
+  );
+
+  // Altitude reference: does this protocol deliver true MSL, or only arming-relative altitude?
+  unlisteners.push(
+    await listen<{ msl: boolean }>('telemetry-alt-ref', (event) => {
+      altReference.set({ msl: event.payload.msl });
+      // A real-MSL protocol supersedes any relative ground anchor.
+      if (event.payload.msl) groundAnchor.set(null);
     })
   );
 

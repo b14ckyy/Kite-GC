@@ -179,16 +179,29 @@ fn scan_crsf(scan: &[u8], carry_len: usize) -> u32 {
     n
 }
 
-/// LTM: ASCII "$T" header (0x24 0x54) followed by a frame-type letter.
+/// LTM: full XOR-validated frame `$T<type><payload><crc>` (CRC = XOR of payload only). Validating the
+/// checksum makes the "$T" + type-letter signature false-positive-free, on par with the CRSF matcher.
 fn scan_ltm(scan: &[u8], carry_len: usize) -> u32 {
+    use super::decoders::ltm::ltm_payload_len;
     let mut n = 0;
-    for i in 0..scan.len().saturating_sub(2) {
-        if scan[i] == 0x24 && scan[i + 1] == 0x54 {
-            let f = scan[i + 2];
-            if matches!(f, b'A' | b'G' | b'S' | b'O' | b'N' | b'X') && i + 2 >= carry_len {
-                n += 1;
+    let mut i = 0;
+    while i + 2 < scan.len() {
+        if scan[i] == b'$' && scan[i + 1] == b'T' {
+            if let Some(plen) = ltm_payload_len(scan[i + 2]) {
+                let crc_idx = i + 3 + plen;
+                if crc_idx < scan.len() {
+                    let crc = scan[i + 3..crc_idx].iter().fold(0u8, |c, &b| c ^ b);
+                    if crc == scan[crc_idx] {
+                        if crc_idx >= carry_len {
+                            n += 1;
+                        }
+                        i = crc_idx + 1;
+                        continue;
+                    }
+                }
             }
         }
+        i += 1;
     }
     n
 }

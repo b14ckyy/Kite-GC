@@ -14,7 +14,7 @@
   if (typeof window !== 'undefined') {
     (window as any).CESIUM_BASE_URL = '/cesium';
   }
-    import { telemetry } from "$lib/stores/telemetry";
+    import { telemetry, altReference, groundAnchor, resolveTrueMsl } from "$lib/stores/telemetry";
   import { liveTrack, type LiveTrackPoint } from "$lib/stores/liveTrack";
   import { homePosition, homeLocked, type HomePosition } from "$lib/stores/home";
   import { connection, type ConnectionStatus } from "$lib/stores/connection";
@@ -968,9 +968,10 @@
       // Derive the geoid undulation for the live location once per session.
       ensureGeoid(telem.lat, telem.lon);
 
-      // Use MSL altitude + geoid offset for correct ellipsoid height.
-      // Fall back to relative baro altitude + geoid offset.
-      const altMsl = telem.altMsl ?? telem.altitude;
+      // Use MSL altitude + geoid offset for correct ellipsoid height. Relative-only protocols (LTM/CRSF)
+      // are anchored to the ground MSL captured at arm; with no anchor we fall back to the raw value
+      // (unchanged legacy behaviour) rather than dropping the UAV.
+      const altMsl = resolveTrueMsl(telem.altMsl, get(altReference), get(groundAnchor)) ?? telem.altMsl ?? telem.altitude;
       const alt = Math.max(altMsl + geoidOffset, 0);
       updateUavPosition3D(telem.lat, telem.lon, alt, telem.yaw, telem.navState, armed, telem.roll, telem.pitch);
 

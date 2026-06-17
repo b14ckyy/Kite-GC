@@ -18,8 +18,9 @@
   // history:forward), with hysteresis. Visual language follows the Terrain
   // Analysis panel (grid, ground gradient) inside a standard widget card.
   import { untrack } from 'svelte';
+  import { get } from 'svelte/store';
   import { invoke } from '@tauri-apps/api/core';
-  import type { TelemetryData } from '$lib/stores/telemetry';
+  import { altReference, groundAnchor, resolveTrueMsl, type TelemetryData } from '$lib/stores/telemetry';
   import type { InterfaceSettings } from '$lib/stores/settings';
   import { LiveTrackProfiler, type ProfileData } from '$lib/helpers/terrainProfile';
   import { isValidGpsCoordinate } from '$lib/helpers/telemetry';
@@ -133,6 +134,7 @@
   let forward = $state<{ dist: number; elev: number | null }[]>([]);
   let step = $state(SCALE_STEPS[0]);
   let curAltMsl = $state(0);
+  let mslValid = $state(true); // false → relative-only protocol with no ground anchor → AGL is N/A
   let terrainAtUav = $state<number | null>(null);
   let slope = $state(0); // m vertical per m horizontal (vario / groundspeed)
   let hasData = $state(false);
@@ -205,7 +207,12 @@
       // History terrain + flight path from the incremental profiler
       hist = await profiler.update(histBuf);
 
-      curAltMsl = t.altMsl;
+      // Resolve true MSL: relative-only protocols (LTM/CRSF) are anchored to the ground MSL captured at
+      // arm; without an anchor the true altitude is unknown (→ AGL N/A). Fall back to the relative value
+      // only to keep the plot positioned.
+      const tm = resolveTrueMsl(t.altMsl, get(altReference), get(groundAnchor));
+      mslValid = tm != null;
+      curAltMsl = tm ?? t.altMsl;
       terrainAtUav = forward.length ? forward[0].elev : null;
       slope = speed > SPEED_FILTER ? vario / speed : 0;
 
@@ -364,7 +371,7 @@
   const uavY = $derived(yS(curAltMsl));
 
   // Readouts
-  const aglM = $derived(terrainAtUav != null ? curAltMsl - terrainAtUav : null);
+  const aglM = $derived(mslValid && terrainAtUav != null ? curAltMsl - terrainAtUav : null);
   const aglLabel = $derived.by(() => {
     if (aglM == null) return '—';
     const c = convertAltitude(aglM, interfaceSettings.altitudeUnit);
@@ -372,6 +379,7 @@
   });
   /** Minimum clearance of the projected line vs terrain ahead. */
   const minAheadM = $derived.by(() => {
+    if (!mslValid) return null; // no MSL reference → clearance is meaningless
     let m: number | null = null;
     for (const s of forward) {
       if (s.elev == null) continue;

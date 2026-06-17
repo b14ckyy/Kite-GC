@@ -1021,6 +1021,7 @@
     "telTotal": "Gesamt",
     "telChunks": "Chunks",
     "telCrsfFrames": "CRSF-Frames",
+    "telLtmFrames": "LTM-Frames",
     "telCapture": "Aufzeichnung",
     "telProto": "Protokoll",
     "telHits": "Treffer",
