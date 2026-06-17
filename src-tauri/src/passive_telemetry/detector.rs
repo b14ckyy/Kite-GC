@@ -12,6 +12,8 @@
 
 use std::collections::VecDeque;
 
+use crate::msp::codec::MspCodec;
+
 /// Protocols we may eventually decode. FrSky is the one wired first.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Protocol {
@@ -41,8 +43,9 @@ pub const REGISTERED: [Protocol; 4] = [
 ];
 
 /// Number of carry bytes kept between chunks so signatures spanning a chunk/notification boundary are
-/// still counted (and not double-counted).
-const CARRY: usize = 8;
+/// still counted (and not double-counted). Sized to hold a full CRSF frame (max 64 B) so CRC-validated
+/// CRSF frames split across a BLE notification boundary are still recognized.
+const CARRY: usize = 64;
 
 /// Minimum plausible-frame hits before a protocol may lock, and the dominance it must show over the
 /// runner-up (winner ≥ 2× the rest combined).
@@ -147,15 +150,31 @@ fn scan_frsky(scan: &[u8], carry_len: usize) -> u32 {
     n
 }
 
-/// CRSF: sync byte 0xC8 (or 0xEE for the radio addr) followed by a length byte in a plausible range.
+/// CRSF: a full CRC-validated frame `<sync> <len> <type> <payload> <crc8>`. We require the CRC8/DVB-S2
+/// (the same poly as MSP v2) over `type..payload` to match the trailing byte — a CRC-valid frame is
+/// effectively false-positive-free, so CRSF locks cleanly even next to FrSky's raw 0x7E counting.
+/// `sync` may be the FC (0xC8), radio TX (0xEA) or TX module (0xEE) address depending on how the radio
+/// re-wraps the forwarded stream.
 fn scan_crsf(scan: &[u8], carry_len: usize) -> u32 {
     let mut n = 0;
-    for i in 0..scan.len().saturating_sub(1) {
+    let mut i = 0;
+    while i + 1 < scan.len() {
         let sync = scan[i];
-        let len = scan[i + 1];
-        if (sync == 0xC8 || sync == 0xEE) && (2..=62).contains(&len) && i + 1 >= carry_len {
-            n += 1;
+        let len = scan[i + 1] as usize;
+        if matches!(sync, 0xC8 | 0xEA | 0xEE) && (2..=62).contains(&len) {
+            let crc_idx = i + 1 + len; // sync, len, then `len` bytes (type..payload..crc)
+            if crc_idx < scan.len() {
+                let crc = MspCodec::crc8_dvb_s2(&scan[i + 2..crc_idx]); // over type..payload
+                if crc == scan[crc_idx] {
+                    if crc_idx >= carry_len {
+                        n += 1;
+                    }
+                    i = crc_idx + 1; // consume the validated frame
+                    continue;
+                }
+            }
         }
+        i += 1;
     }
     n
 }

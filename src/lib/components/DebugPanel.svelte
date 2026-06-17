@@ -100,6 +100,7 @@
     chunk_count: number;
     hex_tail: string;
     capture_file: string;
+    crsf_frames: number;
     hits: TelemProtoHit[];
   }
 
@@ -111,6 +112,7 @@
     chunk_count: 0,
     hex_tail: "",
     capture_file: "",
+    crsf_frames: 0,
     hits: [],
   });
 
@@ -387,6 +389,11 @@
         <span class="stat-sep">|</span>
         <span class="stat-label">{$t('debug.telChunks')}</span>
         <span class="stat-value">{telemSnapshot.chunk_count}</span>
+        {#if telemSnapshot.crsf_frames > 0}
+          <span class="stat-sep">|</span>
+          <span class="stat-label">{$t('debug.telCrsfFrames')}</span>
+          <span class="stat-value">{telemSnapshot.crsf_frames}</span>
+        {/if}
       </div>
     </div>
 

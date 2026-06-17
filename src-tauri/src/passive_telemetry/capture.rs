@@ -81,6 +81,12 @@ impl Capture {
         self.bin_path.to_string_lossy().to_string()
     }
 
+    /// Path of a sibling file next to the `.bin` capture, e.g. `sibling_path("crsf.txt")` →
+    /// `radiotelem_<ts>.crsf.txt`. Used by decoders that want to write a decoded dump for analysis.
+    pub fn sibling_path(&self, suffix: &str) -> PathBuf {
+        self.bin_path.with_extension(suffix)
+    }
+
     pub fn chunks(&self) -> u64 {
         self.chunks
     }

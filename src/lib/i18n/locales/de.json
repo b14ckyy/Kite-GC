@@ -1020,6 +1020,7 @@
     "telLocked": "FIXIERT",
     "telTotal": "Gesamt",
     "telChunks": "Chunks",
+    "telCrsfFrames": "CRSF-Frames",
     "telCapture": "Aufzeichnung",
     "telProto": "Protokoll",
     "telHits": "Treffer",

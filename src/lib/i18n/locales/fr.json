@@ -948,6 +948,7 @@
     "telLocked": "VERROUILLÉ",
     "telTotal": "Total",
     "telChunks": "Chunks",
+    "telCrsfFrames": "Trames CRSF",
     "telCapture": "Capture",
     "telProto": "Protocole",
     "telHits": "Occurrences",

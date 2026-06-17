@@ -476,6 +476,25 @@ struct GattCharData {
     len: usize,
 }
 
+/// True for standard Bluetooth-SIG services that never carry application telemetry. We enumerate their
+/// characteristics for the GATT table but must NOT subscribe to them: subscribing to Generic Attribute's
+/// "Service Changed" (0x2A05, Indicate) makes Windows/WinRT demand an authenticated link and pops a
+/// pairing (PIN) prompt — even though the vendor telemetry characteristic itself needs no pairing. The
+/// telemetry stream always lives on a vendor service (e.g. 0xFFF0 on FrSky radios), so skipping these is
+/// safe and avoids the spurious pairing entirely.
+fn is_standard_gatt_service(uuid: uuid::Uuid) -> bool {
+    // 16-bit SIG UUIDs use the base 0000xxxx-0000-1000-8000-00805f9b34fb.
+    let b = uuid.as_bytes();
+    const BASE: [u8; 12] = [0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0x80, 0x5f, 0x9b, 0x34, 0xfb];
+    if b[0] == 0 && b[1] == 0 && b[4..16] == BASE {
+        let short = ((b[2] as u16) << 8) | b[3] as u16;
+        // Generic Access (0x1800), Generic Attribute (0x1801, holds Service Changed), Device Info (0x180A).
+        matches!(short, 0x1800 | 0x1801 | 0x180A)
+    } else {
+        false
+    }
+}
+
 fn char_property_names(p: btleplug::api::CharPropFlags) -> Vec<String> {
     use btleplug::api::CharPropFlags as F;
     let mut v = Vec::new();
@@ -552,13 +571,21 @@ pub async fn connect_ble_listen(
     let mut subscribed_count = 0usize;
 
     for service in &services {
+        // Skip standard SIG services — subscribing to their characteristics (esp. Service Changed,
+        // 0x2A05) triggers a spurious WinRT pairing/PIN prompt. Telemetry is always on a vendor service.
+        let skip_service = is_standard_gatt_service(service.uuid);
         let mut chars = Vec::new();
         for ch in &service.characteristics {
             let notifiable = ch
                 .properties
                 .intersects(CharPropFlags::NOTIFY | CharPropFlags::INDICATE);
             let mut subscribed = false;
-            if notifiable {
+            if notifiable && skip_service {
+                log::info!(
+                    "BLE listen: skipping standard-service char {} (service {}) — avoids pairing prompt",
+                    ch.uuid, service.uuid
+                );
+            } else if notifiable {
                 match peripheral.subscribe(ch).await {
                     Ok(()) => {
                         subscribed = true;

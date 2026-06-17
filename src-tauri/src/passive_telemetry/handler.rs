@@ -19,6 +19,7 @@ use crate::flightlog::recorder::FlightRecorderHandle;
 use crate::transport::{ByteTransport, TransportError};
 
 use super::capture::Capture;
+use super::decoders::crsf::CrsfDecoder;
 use super::decoders::frsky::FrskyDecoder;
 use super::detector::{Detector, Protocol};
 
@@ -81,6 +82,8 @@ struct TelemSnapshot {
     hex_tail: String,
     /// Absolute path of the .bin capture (so the user can find/hand off the files).
     capture_file: String,
+    /// Decoded CRSF frame count (0 unless CRSF is locked) — confirms live decoding into the dump.
+    crsf_frames: u64,
     hits: Vec<ProtoHit>,
 }
 
@@ -112,6 +115,9 @@ fn handler_loop(
     let mut detector = Detector::new();
     // Active decoder, created once the detector locks a protocol we can decode (FrSky first).
     let mut frsky: Option<FrskyDecoder> = None;
+    // CRSF decoder (Phase E2): on lock, decodes frames into the radiotelem_<ts>.crsf.txt dump for
+    // offline scaling validation. Does NOT yet publish unified events (that is E4).
+    let mut crsf: Option<CrsfDecoder> = None;
     // Refine the recorder's protocol label once the sub-protocol is locked (set only once).
     let mut protocol_labeled = false;
     let mut hex_tail: VecDeque<u8> = VecDeque::with_capacity(HEX_TAIL_BYTES);
@@ -178,6 +184,13 @@ fn handler_loop(
                 if detector.locked() == Some(Protocol::Frsky) {
                     frsky.get_or_insert_with(FrskyDecoder::new).push_bytes(chunk);
                 }
+                // Once CRSF is locked, decode frames into the analysis dump (E2; no widget feed yet).
+                if detector.locked() == Some(Protocol::Crsf) {
+                    crsf.get_or_insert_with(|| {
+                        CrsfDecoder::new(capture.as_ref().map(|c| c.sibling_path("crsf.txt")))
+                    })
+                    .push_bytes(chunk);
+                }
                 win_bytes += n as u64;
                 for &b in chunk {
                     if hex_tail.len() == HEX_TAIL_BYTES {
@@ -211,9 +224,12 @@ fn handler_loop(
             win_start = Instant::now();
         }
 
-        // 4. Periodic capture flush.
+        // 4. Periodic capture + dump flush.
         if last_flush.elapsed() >= FLUSH_INTERVAL {
             if let Some(c) = capture.as_mut() {
+                c.flush();
+            }
+            if let Some(c) = crsf.as_mut() {
                 c.flush();
             }
             last_flush = Instant::now();
@@ -234,6 +250,7 @@ fn handler_loop(
                 chunk_count: capture.as_ref().map(|c| c.chunks()).unwrap_or(0),
                 hex_tail: hex_tail_str,
                 capture_file: capture_file.clone(),
+                crsf_frames: crsf.as_ref().map(|c| c.frames()).unwrap_or(0),
                 hits: detector
                     .hit_table()
                     .into_iter()
@@ -244,6 +261,9 @@ fn handler_loop(
 
             // Push decoded telemetry to the widgets/map (unified events) + the flight recorder.
             if let Some(dec) = frsky.as_ref() {
+                dec.publish(&app_handle, recorder.as_ref());
+            }
+            if let Some(dec) = crsf.as_ref() {
                 dec.publish(&app_handle, recorder.as_ref());
             }
             last_emit = Instant::now();
