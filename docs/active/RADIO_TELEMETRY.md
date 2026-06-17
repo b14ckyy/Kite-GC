@@ -1,7 +1,10 @@
 # Radio Telemetry (passive monitoring) — Plan
 
-**Status:** **Planning (2026-06-16).** Interface + architecture first, then research, then a FrSky
-capture-to-file for validation, then the unified-pipeline adapter. **No code until this plan is OK'd.**
+**Status:** FrSky / S.Port path **shipped through Phase D** (decode + DB recording; pending armed-flight
+verify). **CRSF (Phase E) built but WIP/TEMPORARY (2026-06-17)** — detector + decoder + unified-pipeline
+adapter done; framing/CRC + ATTITUDE confirmed, but **only against mLRS** (non-native CRSF, transcodes
+INAV MSP → CRSF; emits no OK/!ERR sentinels so arming is untestable). Remaining scalings + flight-mode +
+arming need a **native CRSF rig** to validate. Test BT module is unusable (BLE kink #6).
 **Created:** 2026-06-16
 
 ---
@@ -109,7 +112,15 @@ in the validation phase) the raw bytes also go to the capture sink.
   `FlightRecorder` (when flight logging is enabled) and feeds it the decoded telemetry; arm/disarm is
   driven by the FrSky MODES armed bit (`arming_flags & 0x04`), reusing the existing recorder verbatim.
   No raw byte log on this path (FrSky has no MSP raw stream).
-- **Phase E+ — more protocols.** CRSF, LTM, MAVLink-passive (decoder reuse, TX disabled); later a `.csv`
+- **Phase E ~ — CRSF (Crossfire / ELRS) → unified pipeline.** Mirrors the FrSky path. **E1 ✅** detector
+  CRC-validates CRSF frames (no false positives next to SmartPort; sync `0xC8`/`0xEA`/`0xEE`). **E2 ✅**
+  raw `.bin`/`.jsonl` capture **+ decoded `radiotelem_<ts>.crsf.txt` dump**; Debug Monitor shows a live
+  CRSF-frame counter. **E3 ~ partial** — bench capture confirmed framing/CRC (sync `0xEA`) + the ATTITUDE
+  scaling exactly; GPS/battery/airspeed/baro and the flight-mode (0x21) string→mode map are source-derived
+  but **not yet empirically validated** (the bench rig sent no fix/battery/baro/0x21). **E4 ✅ built** —
+  `decoders/crsf.rs` accumulates state + `publish()`es unified events + feeds the recorder; pending a real
+  armed INAV+CRSF flight to confirm the remaining scalings. See the CRSF section below for the frame map.
+- **Phase F+ — remaining protocols.** LTM, MAVLink-passive (decoder reuse, TX disabled); later a `.csv`
   raw recording; link-quality field for the RC Link widget; ArduPilot FrSky-passthrough (0x5000) decoder.
 
 ---
@@ -207,6 +218,82 @@ different decoding from INAV's per-sensor appIDs. This is handled as its **own d
 kept strictly separate from the INAV/standard-FrSky path (selected by detecting `0x5000`-range frames).
 Scope for a later phase.
 
+## CRSF (Crossfire / ELRS) — frame map + decoder plan (Phase E)
+
+> **⚠ WIP / TEMPORARY (2026-06-17).** The CRSF path is built but **not validated against a native CRSF
+> system**. All current test data came from **mLRS**, which is **not native CRSF** — it *emulates* CRSF
+> telemetry by transcoding INAV's **MSP-parsed** data. The mLRS author doesn't run INAV and has relied on
+> external testing, so that emulation isn't 100 % trustworthy. Critically, **mLRS emits no `OK`/`!ERR`
+> disarmed sentinels — only the active mode string** — so there is **no arming edge to test**, and our
+> `armed = string ∉ {OK, WAIT, !ERR}` logic (see below) can't be confirmed with mLRS. **A real CRSF-based
+> system (ELRS/Crossfire on native INAV) is required** to validate arming, the flight-mode strings, and
+> the GPS/battery/airspeed/baro scalings before this is considered done.
+
+Research validated against the official **TBS CRSF spec** (<https://github.com/crsf-wg/crsf>) and INAV
+`telemetry/crsf.c` (master). Decode **by frame type**, no version sniffing (same principle as S.Port).
+
+### Framing
+`[sync] [len] [type] [payload] [crc8]`
+
+- **sync / device address** — telemetry originating at the FC uses `0xC8`
+  (`CRSF_ADDRESS_FLIGHT_CONTROLLER` / `CRSF_TELEMETRY_SYNC_BYTE`). A radio-forwarded stream may re-wrap
+  with `0xEA` (radio TX) or `0xEE` (TX module) — **confirm from the capture** (as we did for S.Port).
+- **len** — counts `type + payload + crc` (i.e. `payload_len + 2`). Full on-wire frame = `len + 2` bytes.
+- **crc8** — **CRC8 / DVB-S2, poly `0xD5`**, computed over `type + payload` (everything between `len` and
+  `crc`, exclusive). Identical algorithm to MSP v2 → **reuse `MspCodec::crc8_dvb_s2`** (`msp/codec.rs`).
+
+### INAV CRSF frames → unified telemetry events
+
+| Type | Frame | Layout (big-endian) | Conversion → unified event |
+|---|---|---|---|
+| `0x02` | GPS | `lat:i32, lon:i32, gspeed:u16, hdg:u16, alt:u16, sats:u8` | lat/lon ÷ 1e7; ground speed ÷ 36 → m/s (frame is km/h×10); course ÷ 100 (frame is centideg); alt − 1000 → m; **no fix type in frame** → derive (sats ≥ 4 ⇒ 3D) → `GpsData` |
+| `0x07` | Vario | `vspeed:i16` | ÷ 100 → m/s → `AltitudeData.vario` |
+| `0x08` | Battery | `volt:u16, curr:u16, cap:u24, remain:u8` | INAV sends `getBatteryVoltage()/10` & `getAmperage()/10` (its getters are centi-units) → **÷ 10 ⇒ V / A**; cap = mAh; remain = % → `AnalogData` |
+| `0x09` | Baro alt | `alt_packed:u16` | packed: high range in m, low range decimetres − 10000 offset → `AltitudeData.altitude` *(confirm packing from capture)* |
+| `0x0A` | Airspeed | `aspd:u16` | ÷ 36 → m/s (frame is km/h×10) → `AirspeedData` |
+| `0x1E` | Attitude | `pitch:i16, roll:i16, yaw:i16` | radians × 10000 → ÷ 10000 → rad → deg; yaw `rem_euclid(360)`; **order pitch, roll, yaw** → `AttitudeData` |
+| `0x21` | Flight mode | null-terminated **ASCII string** | see below → `StatusData` + `telemetry-flightmode` |
+| `0x0C`/`0x0D`/`0x29`/`0xF0` | RPM / Temp / Device-info / MSP-over-tlm | — | **ignored for now** (`0x29` device name is a possible future identity source) |
+
+### Flight mode is a STRING — the key difference from S.Port
+
+S.Port packs modes into a decimal-column bitmask (`decode_modes`); **CRSF sends one ASCII mode string**
+per frame (`crsfFrameFlightMode`). INAV's strings: armed → `ACRO` (default), `ANGL`, `HOR`, `ANGH`,
+`AH`, `HOLD`, `LOTR`, `CRUZ`, `CRSH`, `WP`, `RTH`, `WRTH`, `MANU`, `TURT`, `HRST`, `GEO`, `!FS!`
+(failsafe); disarmed → **`OK`**, **`WAIT`** (no GPS fix/home), **`!ERR`** (arming disabled).
+
+- **Armed** = the string is **not** in `{ "OK", "WAIT", "!ERR" }`. ⚠ **Untested** — mLRS (our only test
+  source so far) never sends these disarmed sentinels, only the active mode, so this can't be exercised
+  until a native CRSF rig is available. On such a non-conformant source the heuristic would read *always
+  armed*; revisit once we can capture a real arm/disarm edge.
+- A small **string → mode mapper** sets the matching `F_*` bit (e.g. `ANGL`→`F_ANGLE`, `RTH`/`WRTH`→
+  `F_NAV_RTH`, `HOLD`/`LOTR`→`F_NAV_POSHOLD`, `CRUZ`/`CRSH`→`F_NAV_COURSE_HOLD`, `WP`→`F_NAV_WP`,
+  `AH`→`F_NAV_ALTHOLD`, `MANU`→`F_MANUAL`, `!FS!`→`F_FAILSAFE`, `ACRO`→none) then reuses
+  `classify_inav` for the same `FlightModeState` shape. CRSF carries only the **dominant** mode (not a
+  full bitmask), so the widget shows a single mode — expected.
+
+### Detector hardening (E1)
+
+Replace the crude `sync + len-range` heuristic with **full-frame CRC validation**: for each candidate
+start (`sync ∈ {0xC8, 0xEA, 0xEE}`, `len ∈ 2..=62`, full frame present in the window), recompute
+`crc8_dvb_s2(type..payload)` and only count it as a hit when the CRC matches. A CRC-valid CRSF frame is
+essentially false-positive-free, so CRSF locks cleanly alongside FrSky's `0x7E` counting (FrSky frames
+won't pass CRSF CRC, and CRSF frames rarely contain `0x7E`).
+
+### Validation workflow (E2/E3)
+
+The `.bin` + `.jsonl` capture is protocol-agnostic and already runs. Add a **decoded CRSF frame dump**
+(one line per frame: `type`, hex payload, decoded fields) during the validation phase + a Debug Monitor
+view, so scalings (especially **battery units** and **baro packing**) can be confirmed against the real
+stream before wiring the adapter — exactly the FrSky procedure.
+
+### Open questions (settle from the capture)
+
+- Does the radio forward **raw CRSF frames** (sync `0xC8`) or re-wrap/transcode them? Which BLE
+  characteristic carries them (`connect_ble_listen` subscribes to all Notify chars, so it's covered)?
+- Baro-altitude (`0x09`) packing thresholds — confirm the m/dm boundary empirically.
+- Battery scaling — INAV getter units vs. the CRSF nominal 0.1 V/A; confirm `÷10` yields real volts/amps.
+
 ## Logbook / DB integration (Phase D)
 
 How telemetry-mode flights appear in the logbook (passive telemetry carries no FC identity):
@@ -247,6 +334,17 @@ Practical gotchas for connecting to radio BLE telemetry modules (keep for future
    etc.) the vendor service may be absent — set the radio's Bluetooth mode to Telemetry first.
 4. **BLE is just a byte pipe** — decode the payload (S.Port/CRSF/…) independently of the link; chunk
    boundaries from notifications don't align with protocol frames (the `.jsonl` capture preserves them).
+5. **Don't subscribe to standard SIG services.** `connect_ble_listen` now skips Generic Access (0x1800),
+   Generic Attribute (0x1801) and Device Info (0x180A). Subscribing to Generic Attribute's **Service
+   Changed (0x2A05, Indicate)** makes WinRT demand an authenticated link → spurious pairing/PIN prompt,
+   even though the vendor telemetry characteristic needs none. Telemetry always lives on a vendor service.
+6. **Some BT modules mandate bonding at the link layer (can't be worked around).** A retro-fitted older
+   FrSky BT module (Radiomaster/EdgeTX, CRSF) demanded a passkey **on connect** — identically on Windows
+   *and* Android, i.e. peripheral-driven (SMP Security Request / authenticated characteristic), so kink #5
+   doesn't help and btleplug (no pairing API) can't satisfy it cleanly. Combined with a ~5 s pairing
+   window, a bond it never persists, and data tearing off after 1–2 min, the module is effectively
+   unusable for a stable link. Lesson: such a link can't be opened "without pairing" in software — use a
+   module that doesn't force bonding (e.g. the X20RS, 0xFFF0/0xFFF6) or a wired/ELRS-backpack transport.
 
 ## Open questions (to settle during research/validation, not blocking the plan)
 
