@@ -574,7 +574,7 @@ blackbox_decode --merge-gps --datetime --unit-height m --unit-gps-speed mps --st
 - **Downsampling**: `H looptime` + `H P interval` headers read from raw file to compute effective log Hz; rows skipped to achieve ≤ 10 Hz in the DB (e.g. 500 Hz → keep 1 in 50 rows)
 - **Raw CSV line storage**: Comma-joined raw CSV stored in `blackbox_records.csv_data` — no JSON re-serialization overhead
 
-**Heading handling**: INAV blackbox `heading` column is in decidegrees (0–3600). Parser auto-detects: if value > 360 → divide by 10. Same for `yaw`.
+**Heading handling**: the FC fused heading (`yaw` column, from INAV `attitude[2]`) is in decidegrees (0–3600) and is **always ÷10** (like roll/pitch) — a per-value ">360 → ÷10" heuristic mis-scaled the 0–36° band (decidegrees ≤360), producing a spurious heading spin on every north crossing. Course-over-ground (`heading` column, from `gps_ground_course`) is in degrees and kept as-is. Both are stored as **f64** (0.1° resolution preserved, no rounding to whole degrees).
 
 **Data storage**:
 - **Parsed telemetry**: `telemetry_records` table — downsampled at ≤ 10 Hz, same schema as live MSP recordings

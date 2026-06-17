@@ -162,14 +162,14 @@ Rust CSV Parser (blackbox.rs)
     ├── Resolve ColumnIndices struct (once):
     │     roll → ["roll", "attitude0", "attitude_roll"]
     │     pitch → ["pitch", "attitude1", "attitude_pitch"]
-    │     yaw → ["yaw", "attitude2", "attitude_yaw"]
-    │     heading → ["heading", "GPS_ground_course"]
+    │     yaw (FC fused heading) → ["heading", "yaw", "attitude2", "attitude_yaw"]
+    │     heading (course over ground) → ["gps_ground_course", "gps_cog", "course"]
     │     vario → ["gps_velned2", "vario"]
     │     ... (all field aliases)
     │
-    ├── Unit conversions in parser:
-    │     roll, pitch:  ALWAYS ÷10 (INAV decidegrees → degrees)
-    │     yaw, heading: ÷10 only if > 360 (heuristic: may be degrees or decidegrees)
+    ├── Unit conversions in parser (angles stored as f64 — 0.1° resolution preserved):
+    │     roll, pitch, yaw:  ALWAYS ÷10 (INAV attitude incl. attitude[2] is decidegrees → degrees)
+    │     heading (COG):     degrees as-is (÷10 fallback only if a source ever gives decidegrees >360)
     │     vario:        gps_velned[2] → negate (NED down→up) ÷100 (cm/s → m/s)
     │                   vario fallback → ÷100 (cm/s → m/s)
     │     altitude:     baroAlt_cm → ÷100 (cm → m)
@@ -189,8 +189,8 @@ flights table: new entry with source="blackbox", metadata from header
 
 | Field | Raw Blackbox Unit | DB Unit | Conversion | Location |
 |---|---|---|---|---|
-| roll, pitch | decidegrees | degrees | ÷10 (unconditional) | blackbox.rs |
-| yaw, heading | degrees or decidegrees | degrees | ÷10 if >360 | blackbox.rs |
+| roll, pitch, yaw | decidegrees (`attitude[*]`) | degrees (f64, 0.1°) | ÷10 (unconditional) | blackbox.rs |
+| heading (COG) | degrees (`gps_ground_course`) | degrees (f64) | as-is (÷10 fallback if >360) | blackbox.rs |
 | vario (gps_velned[2]) | cm/s, NED down | m/s, climb positive | negate, ÷100 | blackbox.rs |
 | vario (fallback) | cm/s | m/s | ÷100 | blackbox.rs |
 | altitude (baro) | cm | m | ÷100 | blackbox.rs |

@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Flight-path marker (velocity vector) on the AHI widget + 3D FPV HUD.** Shows where the aircraft is
+  actually going vs. where the nose points — derived purely from existing telemetry (no wind estimate):
+  lateral = COG − heading (crab), vertical = flight-path angle `atan2(vario, ground speed)` vs. pitch.
+  Body-frame / pilot's view (upright; the horizon turns around it). Yellow on the AHI, green & conformal
+  (FOV-scaled) on the FPV HUD. Live + replay; hidden below 1.5 m/s and eased per update. Shared geometry
+  in `utils/flightPath.ts`.
 - **Heading / course / crab direction cues (`WIND_CRAB_INDICATOR.md`, archived).** The compass widget now
   shows a **course-over-ground track bug** + amber COG readout alongside the heading (the gap = crab), and
   the 2D map draws **HDG / COG nose lines** plus a **predicted turn-radius arc** at the aircraft (velocity-
@@ -104,6 +110,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per-command rationale is in `docs/active/ARDUPILOT_COMMAND_COVERAGE.md`.
 
 ### Changed
+- **Full-precision heading / course / attitude (decimal degrees).** `yaw` (FC fused heading) and `heading`
+  (course over ground) are now carried and stored as `f64` (0.1° resolution) instead of rounded whole
+  degrees — across MSP / MAVLink / FrSky live, Blackbox / ArduPilot / raw import, the DB and replay.
+  Widgets still round for display (e.g. the compass), while the map direction lines, FPV HUD and
+  flight-path marker use the full precision. No schema migration (SQLite stores the values as `REAL`
+  via column affinity); **re-import existing INAV logs** to pick up the precise heading.
 - **One "Import" button in the logbook instead of three.** The separate Blackbox / Raw Log / .kflight
   import buttons are now a single **Import** action: the file picker accepts every supported log type
   (INAV Blackbox `.txt`/`.bbl`/`.bfl`, ArduPilot `.bin`, raw `.rawmsp`/`.tlog`, `.kflight`) and the right
@@ -154,6 +166,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   identical to the `mission` blue (ArduPilot Auto) on the track/badge.
 
 ### Fixed
+- **North-crossing heading "spin" in INAV blackbox replay.** A per-value ">360 → ÷10" scaling heuristic
+  left decidegree `yaw` values in the 0–36° band (`attitude[2]` ≤ 360 decidegrees) undivided, so the
+  displayed heading swung wildly — the UAV model on the map and the compass appeared to spin over 1–3 s —
+  whenever a turn passed through north, in either direction. The FC heading (`attitude[2]`, decidegrees)
+  is now **always ÷10** like roll/pitch; course-over-ground (`gps_ground_course`, degrees) is unchanged.
+  Re-import affected INAV logs.
+- **Flight-path marker frozen on the AHI widget.** The marker's smoothing ran in a `requestAnimationFrame`
+  loop that read a reactive value which went stale, pinning the marker at the dial edge regardless of the
+  real crab. Reworked to ease in a reactive `$effect` (untracked self-read) so it tracks live again —
+  consistent with the FPV HUD.
 - **Heading vs. course-over-ground now consistent across all paths.** Unified the two channels (FC fused
   heading vs. GPS course) for live MSP, live MAVLink and Blackbox import, and de-conflated replay so the
   UAV model/icon — in **2D and 3D, live and replay** — points along the real heading (showing crab in

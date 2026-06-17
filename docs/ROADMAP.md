@@ -340,7 +340,7 @@ This document tracks planned features, organized by milestone.
 - [x] Downsample to ≤ 10 Hz using time-based sampling (100ms interval)
 - [x] Store parsed rows as raw comma-joined CSV in `blackbox_records` table (no JSON overhead)
 - [x] Archive original .TXT as BLOB in `blackbox_files` table
-- [x] Heading in decidegrees auto-detected (> 360 → ÷ 10); priority: `heading` → `GPS_ground_course`
+- [x] FC heading (`yaw` ← `heading`/`attitude[2]`) always ÷10 (decidegrees → degrees); COG (`heading` ← `gps_ground_course`) kept in degrees; both stored as f64 (0.1°)
 - [x] Link Quality from `lq` / `link_quality` / `rxlq` column → `link_quality` in `TelemetryRecord`
 - [x] Roll/pitch column resolution: `roll`/`attitude[0]`/`attitude_roll` — unconditional ÷10 (INAV decidegrees)
 - [x] Vario from `gps_velned[2]`: NED down cm/s → negated ÷100 → climb m/s

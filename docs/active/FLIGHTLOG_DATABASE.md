@@ -96,7 +96,7 @@ These are sampled replay records. New `v4` fields below are the current target s
 | `lon` | `REAL` | existing | GPS / blackbox | Replay track |
 | `alt_m` | `REAL` | existing | GPS altitude | Replay altitude |
 | `speed_ms` | `REAL` | existing | GPS speed | Replay speed |
-| `heading` | `INTEGER` | existing | GPS course / heading | Replay orientation |
+| `heading` | `INTEGER`¹ | existing | GPS course over ground | Replay orientation |
 | `vario_ms` | `REAL` | existing, newly populated in v4 plan | `gps_velned[2]` (negated ÷100) or `vario` (÷100) | GPS vertical speed (m/s, positive = climbing) |
 | `voltage` | `REAL` | existing | battery | Power analysis |
 | `current_a` | `REAL` | existing | current meter | Power analysis |
@@ -104,9 +104,12 @@ These are sampled replay records. New `v4` fields below are the current target s
 | `rssi` | `INTEGER` | existing | receiver | Link quality fallback |
 | `roll` | `REAL` | existing | attitude | Replay orientation |
 | `pitch` | `REAL` | existing | attitude | Replay orientation |
-| `yaw` | `INTEGER` | existing | attitude | Replay orientation |
+| `yaw` | `INTEGER`¹ | existing | FC fused heading (attitude) | Replay orientation |
 | `fix_type` | `INTEGER` | existing | GPS | GPS quality |
 | `num_sat` | `INTEGER` | existing | GPS | GPS quality |
+
+¹ `heading` and `yaw` are **decimal degrees** (`f64`, 0.1° resolution). The column affinity is still
+`INTEGER` (historical), but SQLite stores the values as `REAL` automatically — no schema migration needed.
 | `cpu_load` | `INTEGER` | existing | MSP live only | FC load |
 | `link_quality` | `INTEGER` | existing | CRSF / blackbox `lq` | Link quality |
 | `baro_alt_m` | `REAL` | existing (`v4`) | `BaroAlt` | Barometric altitude for comparison and later derived baro vario |

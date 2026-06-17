@@ -408,7 +408,7 @@ The raw `.TXT` file is always archived in `blackbox_files` regardless of downsam
 | `lon` | `GPS_coord[1]` | requires `--merge-gps` |
 | `alt_m` | `GPS_altitude` / `altitude` / `baroAlt_cm` | cm values auto-divided by 100 |
 | `speed_ms` | `GPS_speed` | in m/s with `--unit-gps-speed mps` |
-| `heading` | **`heading`** → `GPS_ground_course` | INAV attitude heading (decidegrees ÷10 auto-detected) |
+| `heading` | `gps_ground_course` / `gps_cog` / `course` | course over ground, **degrees** (kept as-is; f64) |
 | `vario_ms` | `gps_velned[2]` → `vario` | NED down cm/s: negated and ÷100 for climb m/s |
 | `voltage` | `vbat` | |
 | `current_a` | `amperage` | |
@@ -416,7 +416,7 @@ The raw `.TXT` file is always archived in `blackbox_files` regardless of downsam
 | `rssi` | `rssi` | |
 | `roll` | `roll` / `attitude[0]` / `attitude_roll` | **always ÷10** (INAV decidegrees → degrees) |
 | `pitch` | `pitch` / `attitude[1]` / `attitude_pitch` | **always ÷10** (INAV decidegrees → degrees) |
-| `yaw` | `yaw` / `attitude[2]` / `attitude_yaw` | decidegrees auto-detected (>360 → ÷10) |
+| `yaw` | `heading` / `attitude[2]` / `attitude_yaw` | FC fused heading, **always ÷10** (INAV decidegrees → degrees; f64) |
 | `num_sat` | `GPS_numSat` | |
 | `link_quality` | `lq` / `link_quality` / `rxlq` | ELRS/CRSF only; `None` if column absent |
 
