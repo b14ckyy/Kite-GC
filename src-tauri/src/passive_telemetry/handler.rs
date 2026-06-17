@@ -290,10 +290,10 @@ fn handler_loop(
             let _ = app_handle.emit("debug-telemetry-stats", &snapshot);
 
             // Push decoded telemetry to the widgets/map (unified events) + the flight recorder.
-            if let Some(dec) = frsky.as_ref() {
+            if let Some(dec) = frsky.as_mut() {
                 dec.publish(&app_handle, recorder.as_ref());
             }
-            if let Some(dec) = crsf.as_ref() {
+            if let Some(dec) = crsf.as_mut() {
                 dec.publish(&app_handle, recorder.as_ref());
             }
             if let Some(dec) = ltm.as_ref() {

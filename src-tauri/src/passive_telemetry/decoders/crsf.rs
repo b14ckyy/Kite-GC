@@ -33,6 +33,13 @@ use crate::scheduler::telemetry::{
     AirspeedData, AltitudeData, AnalogData, AttitudeData, GpsData, StatusData,
 };
 
+use super::ap_passthrough::ApPassthroughDecoder;
+
+/// CRSF frame types carrying ArduPilot passthrough packets (AP_CUSTOM_TELEM, new + legacy) → routed to
+/// the shared AP-passthrough sub-decoder (level-2 sub-detection).
+const FT_AP_CUSTOM_TELEM: u8 = 0x80;
+const FT_AP_CUSTOM_TELEM_LEGACY: u8 = 0x7F;
+
 /// INAV arming_flags bit 2 = ARMED (what the recorder + frontend look for).
 const ARMED_FLAG: u32 = 0x04;
 
@@ -132,6 +139,7 @@ fn frame_name(ty: u8) -> &'static str {
         0x1D => "LINK_TX",
         0x29 => "DEVICE_INFO",
         0x3A => "RADIO_ID",
+        0x7F | 0x80 => "AP_CUSTOM",
         0xF0 => "MSP_RESP",
         _ => "?",
     }
@@ -217,6 +225,8 @@ pub struct CrsfDecoder {
     start: Instant,
     frames: u64,
     dump: Option<BufWriter<File>>,
+    /// Lazily created when ArduPilot AP_CUSTOM_TELEM (0x80/0x7F) frames appear (level-2 sub-detection).
+    ap: Option<ApPassthroughDecoder>,
 }
 
 impl CrsfDecoder {
@@ -238,6 +248,7 @@ impl CrsfDecoder {
             start: Instant::now(),
             frames: 0,
             dump,
+            ap: None,
         }
     }
 
@@ -266,8 +277,13 @@ impl CrsfDecoder {
             let ty = self.acc[i + 2];
             // Copy the payload out before mutating self (state/dump writer).
             let payload = self.acc[i + 3..crc_idx].to_vec();
-            let decoded = decode_frame(ty, &payload);
             self.frames += 1;
+            if ty == FT_AP_CUSTOM_TELEM || ty == FT_AP_CUSTOM_TELEM_LEGACY {
+                // ArduPilot source: route the embedded passthrough packets to the AP sub-decoder. The
+                // native CRSF frames (GPS/battery/attitude/link-stats) continue to be decoded normally.
+                self.ap.get_or_insert_with(ApPassthroughDecoder::new).apply_crsf_custom(&payload);
+            }
+            let decoded = decode_frame(ty, &payload);
             self.apply(&decoded);
             self.dump_frame(sync, ty, &payload, &decoded);
             i = crc_idx + 1; // consume the validated frame
@@ -364,10 +380,13 @@ impl CrsfDecoder {
 
     /// Emit the accumulated state as the unified telemetry events and feed the flight recorder. Each
     /// event is only sent once its relevant fields have been seen (mirrors the FrSky decoder).
-    pub fn publish(&self, app: &AppHandle, recorder: Option<&FlightRecorderHandle>) {
+    pub fn publish(&mut self, app: &AppHandle, recorder: Option<&FlightRecorderHandle>) {
+        // ArduPilot passthrough (if present) owns status / flight mode / EKF — suppress the native CRSF
+        // mode here so the real AP modes win (the native 0x21 string would be misread as an INAV mode).
+        let ap_active = self.ap.is_some();
         let s = &self.state;
 
-        if s.seen_status {
+        if s.seen_status && !ap_active {
             let status = StatusData {
                 arming_flags: if s.armed { ARMED_FLAG } else { 0 },
                 flight_mode_flags: 0, // CRSF carries a single mode string, not the raw INAV bitmask
@@ -438,6 +457,11 @@ impl CrsfDecoder {
             if let Some(rec) = recorder {
                 if let Ok(mut r) = rec.lock() { r.on_airspeed(&aspd); }
             }
+        }
+
+        // AP passthrough owns the AP-unique data (mode/armed/EKF/status-text/waypoint).
+        if let Some(ap) = self.ap.as_mut() {
+            ap.publish(app, recorder);
         }
     }
 

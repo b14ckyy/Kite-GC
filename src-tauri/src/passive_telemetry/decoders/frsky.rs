@@ -18,6 +18,12 @@ use crate::scheduler::telemetry::{
     AirspeedData, AltitudeData, AnalogData, AttitudeData, GpsData, StatusData,
 };
 
+use super::ap_passthrough::ApPassthroughDecoder;
+
+/// ArduPilot FrSky-passthrough DIY appID range (Yaapu). Frames in this range are routed to the shared
+/// AP-passthrough sub-decoder instead of the INAV-native sensor map (level-2 sub-detection).
+const AP_PASSTHROUGH_RANGE: std::ops::RangeInclusive<u16> = 0x5000..=0x52FF;
+
 // ── FrSky S.Port appIDs (INAV; standard FrSky IDs stable across 7/8/9) ────────
 const ID_ALTITUDE: u16 = 0x0100;
 const ID_VARIO: u16 = 0x0110;
@@ -127,11 +133,13 @@ struct State {
 pub struct FrskyDecoder {
     acc: Vec<u8>,
     state: State,
+    /// Lazily created when ArduPilot passthrough (0x5000-range) frames appear (level-2 sub-detection).
+    ap: Option<ApPassthroughDecoder>,
 }
 
 impl FrskyDecoder {
     pub fn new() -> Self {
-        Self { acc: Vec::with_capacity(16), state: State::default() }
+        Self { acc: Vec::with_capacity(16), state: State::default(), ap: None }
     }
 
     /// Feed a freshly-read chunk; extract + apply complete S.Port frames.
@@ -169,7 +177,13 @@ impl FrskyDecoder {
         }
         let appid = (f[2] as u16) | ((f[3] as u16) << 8);
         let value = u32::from_le_bytes([f[4], f[5], f[6], f[7]]);
-        self.apply(appid, value);
+        if AP_PASSTHROUGH_RANGE.contains(&appid) {
+            // ArduPilot source: route to the passthrough sub-decoder. The native sensor map (lat/lon,
+            // alt, speed, battery, …) is still fed by the standard FrSky sensors ArduPilot also sends.
+            self.ap.get_or_insert_with(ApPassthroughDecoder::new).apply_packet(appid, value);
+        } else {
+            self.apply(appid, value);
+        }
     }
 
     fn apply(&mut self, appid: u16, value: u32) {
@@ -221,7 +235,12 @@ impl FrskyDecoder {
     /// Emit the accumulated state as the unified telemetry events and feed the flight recorder. Each
     /// event is only sent once its relevant fields have been seen, so widgets/recorder aren't fed
     /// placeholder zeros.
-    pub fn publish(&self, app: &AppHandle, recorder: Option<&FlightRecorderHandle>) {
+    pub fn publish(&mut self, app: &AppHandle, recorder: Option<&FlightRecorderHandle>) {
+        // ArduPilot passthrough (if present) owns flight mode / armed / EKF / status-text; the native
+        // INAV status fields are simply never seen for an AP source, so there is no conflict.
+        if let Some(ap) = self.ap.as_mut() {
+            ap.publish(app, recorder);
+        }
         let s = &self.state;
 
         // Status first: drives the recorder's arm/disarm edge + the ARMED indicator.

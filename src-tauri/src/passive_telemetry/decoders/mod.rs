@@ -4,6 +4,7 @@
 // Protocol decoders for passive telemetry. Each turns a locked protocol's frames into the unified
 // telemetry events (same names/payloads as MSP/MAVLink) so the frontend is protocol-agnostic.
 
+pub mod ap_passthrough;
 pub mod crsf;
 pub mod frsky;
 pub mod ltm;
