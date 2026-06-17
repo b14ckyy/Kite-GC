@@ -5,7 +5,10 @@
 
 <!-- Artificial Horizon Indicator — circular SVG with pitch/roll animation -->
 <script lang="ts">
+  import { onMount, onDestroy } from "svelte";
   import type { TelemetryData } from "$lib/stores/telemetry";
+  import { flightPathVector } from "$lib/utils/flightPath";
+  import { easeFactor, easeToward, easeAngleToward } from "$lib/utils/smoothing";
 
   let { telem, size = 22.5 }: { telem: TelemetryData; size?: number } = $props();
 
@@ -14,6 +17,39 @@
   // INAV: negative pitch = nose up, so negate for display
   let pitchPx = $derived(-telem.pitch * PITCH_SCALE);
   let rollDeg = $derived(-telem.roll);
+
+  // ── Flight-path marker (velocity vector) ────────────────────────────
+  // Body-frame (pilot's view): offset from the fixed aircraft symbol by crab (lateral) and AoA
+  // (pitch − flight-path angle, vertical). Smoothed with the shared exponential ease.
+  const FPM_TAU_MS = 200;
+  const FPM_MAX_PX = 72; // keep the marker inside the dial
+  const clampPx = (v: number) => Math.max(-FPM_MAX_PX, Math.min(FPM_MAX_PX, v));
+
+  let fpm = $derived(flightPathVector(telem.groundSpeed, telem.vario, telem.course, telem.yaw));
+  let dispGamma = $state(0);
+  let dispCrab = $state(0);
+
+  let pitchDisp = $derived(-telem.pitch); // + = nose up
+  let fpmX = $derived(100 + clampPx(dispCrab * PITCH_SCALE));
+  let fpmY = $derived(100 + clampPx((pitchDisp - dispGamma) * PITCH_SCALE));
+
+  let raf = 0;
+  let lastT = 0;
+  onMount(() => {
+    const loop = (t: number) => {
+      const dt = lastT ? t - lastT : 16;
+      lastT = t;
+      const f = easeFactor(dt, FPM_TAU_MS);
+      // Read telemetry directly here (not the $derived) — a $derived read inside rAF isn't tracked and
+      // would stay frozen at its mount-time value. telem (props) is always current when read.
+      const fv = flightPathVector(telem.groundSpeed, telem.vario, telem.course, telem.yaw);
+      dispGamma = easeToward(dispGamma, fv.gamma, f);
+      dispCrab = easeAngleToward(dispCrab, fv.crab, f);
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+  });
+  onDestroy(() => cancelAnimationFrame(raf));
 
   // Pitch ladder marks: major every 10°, minor every 5°
   const pitchMarks: { deg: number; hw: number; label: boolean }[] = [];
@@ -116,6 +152,16 @@
             stroke="#f0c040" stroke-width="2.5" />
     <line x1="100" y1="104" x2="100" y2="112"
           stroke="#f0c040" stroke-width="2.5" stroke-linecap="round" />
+
+    <!-- Flight-path marker (velocity vector) — where the aircraft is actually going, body-frame -->
+    {#if fpm.shown}
+      <g opacity="0.9">
+        <circle cx={fpmX} cy={fpmY} r="7" fill="none" stroke="#f0c040" stroke-width="2" />
+        <line x1={fpmX - 7} y1={fpmY} x2={fpmX - 16} y2={fpmY} stroke="#f0c040" stroke-width="2" stroke-linecap="round" />
+        <line x1={fpmX + 7} y1={fpmY} x2={fpmX + 16} y2={fpmY} stroke="#f0c040" stroke-width="2" stroke-linecap="round" />
+        <line x1={fpmX} y1={fpmY - 7} x2={fpmX} y2={fpmY - 15} stroke="#f0c040" stroke-width="2" stroke-linecap="round" />
+      </g>
+    {/if}
   </svg>
 </div>
 

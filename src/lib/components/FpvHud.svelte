@@ -12,6 +12,9 @@
   //    schematic overlay capped at 50% of the viewport.
   // Driven purely by props (attitude + display values already converted to the user's units).
 
+  import { onMount, onDestroy } from 'svelte';
+  import { easeFactor, easeToward, easeAngleToward } from '$lib/utils/smoothing';
+
   let {
     heading = 0,   // deg, 0..360 (0 = N)
     pitch = 0,     // deg, + = nose up
@@ -21,6 +24,9 @@
     altitude = 0,  // already in display unit
     altitudeUnit = 'm',
     fov = 60,      // horizontal field of view (deg) — drives the conformal pitch scaling
+    fpmGamma = 0,  // flight-path angle (deg, + = climb)
+    fpmCrab = 0,   // crab (deg, + = track right of nose)
+    fpmShown = false,
   }: {
     heading?: number;
     pitch?: number;
@@ -30,6 +36,9 @@
     altitude?: number;
     altitudeUnit?: string;
     fov?: number;
+    fpmGamma?: number;
+    fpmCrab?: number;
+    fpmShown?: boolean;
   } = $props();
 
   // viewBox geometry (16:9), centred.
@@ -94,6 +103,33 @@
   );
 
   const fmt = (n: number) => (Math.abs(n) >= 100 ? Math.round(n).toString() : n.toFixed(0));
+
+  // ── Flight-path marker (velocity vector) ────────────────────────────
+  // Conformal (same projection + FOV scaling as the pitch ladder), body-frame / pilot's view: vertical
+  // = flight-path angle via rungY (= AoA depression below the boresight), horizontal = crab. Drawn in
+  // the full-viewport AHI layer but OUTSIDE the roll rotation, so it stays upright relative to the UAV
+  // while the horizon turns around it. Smoothed with the shared exponential ease.
+  const FPM_TAU_MS = 200;
+  let dispGamma = $state(0);
+  let dispCrab = $state(0);
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+  const fpmX = $derived(clamp(CX + fAhi * Math.tan(dispCrab * RAD), 60, W - 60));
+  const fpmY = $derived(clamp(rungY(dispGamma), 40, H - 40));
+
+  let raf = 0;
+  let lastT = 0;
+  onMount(() => {
+    const loop = (t: number) => {
+      const dt = lastT ? t - lastT : 16;
+      lastT = t;
+      const f = easeFactor(dt, FPM_TAU_MS);
+      dispGamma = easeToward(dispGamma, fpmGamma, f);
+      dispCrab = easeAngleToward(dispCrab, fpmCrab, f);
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+  });
+  onDestroy(() => cancelAnimationFrame(raf));
 </script>
 
 <!-- ── Conformal artificial horizon (full viewport) ── -->
@@ -115,6 +151,15 @@
       </g>
     {/each}
   </g>
+  <!-- Flight-path marker (velocity vector) — body-frame, outside the roll rotation -->
+  {#if fpmShown}
+    <g class="hud-fpm">
+      <circle cx={fpmX} cy={fpmY} r="5" />
+      <line x1={fpmX - 5} y1={fpmY} x2={fpmX - 12} y2={fpmY} />
+      <line x1={fpmX + 5} y1={fpmY} x2={fpmX + 12} y2={fpmY} />
+      <line x1={fpmX} y1={fpmY - 5} x2={fpmX} y2={fpmY - 11} />
+    </g>
+  {/if}
 </svg>
 
 <!-- ── Instrument cluster (compact, ≤50% of the viewport) ── -->
@@ -210,6 +255,8 @@
   .hud-fill { fill: #3cff8e; stroke: none; }
   .hud-fill.bright { fill: #eaffe9; }
   .hud-box { fill: rgba(8, 24, 14, 0.35); stroke: #3cff8e; stroke-width: 2; }
+  /* Flight-path marker — HUD green, slightly heavier so it reads against the fine conformal ladder */
+  .hud-fpm circle, .hud-fpm line { stroke: #3cff8e; stroke-width: 1.5; fill: none; }
 
   .hud-text {
     fill: #3cff8e;

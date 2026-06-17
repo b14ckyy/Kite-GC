@@ -40,6 +40,7 @@
   import { toTelemetryData } from "$lib/adapters/telemetryAdapter";
   import type { PlatformType, UavModelOverride } from "$lib/helpers/uavIcons";
   import { PLATFORM_MULTIROTOR } from "$lib/helpers/uavIcons";
+  import { flightPathVector } from "$lib/utils/flightPath";
   import { modelUriForPlatform } from "$lib/helpers/uavModels";
   import {
     mission, showMission, replayActive, launchPoint,
@@ -229,7 +230,7 @@
   let fpvFov = $state(60);           // horizontal field of view (deg), the FPV "zoom"
   let fpvWheelHandler: Cesium.ScreenSpaceEventHandler | undefined;
   // Live HUD data (raw SI) for the FPV overlay — updated from the active source (replay/live).
-  let hud = $state({ heading: 0, pitch: 0, roll: 0, altM: 0, speedMs: 0 });
+  let hud = $state({ heading: 0, pitch: 0, roll: 0, altM: 0, speedMs: 0, fpmGamma: 0, fpmCrab: 0, fpmShown: false });
   let hudSpeedUnit = $state<SpeedUnit>('kmh');
   let hudAltUnit = $state<AltitudeUnit>('m');
   const fpvScratchM3 = new Cesium.Matrix3();
@@ -976,6 +977,10 @@
       // FPV HUD data (live source).
       hud.heading = telem.yaw; hud.pitch = telem.pitch; hud.roll = telem.roll;
       hud.altM = telem.altitude; hud.speedMs = telem.groundSpeed;
+      {
+        const fv = flightPathVector(telem.groundSpeed, telem.vario, telem.course, telem.yaw);
+        hud.fpmGamma = fv.gamma; hud.fpmCrab = fv.crab; hud.fpmShown = fv.shown;
+      }
       if (!armed) updatePreArmTrail3D(telem.lat, telem.lon);
       // Live: recenter once after the UAV exists (every 2D→3D switch remounts us).
       if (needsInitialRecenter && uavEntity) { needsInitialRecenter = false; recenter3D(); }
@@ -3243,6 +3248,10 @@
     hud.heading = heading; hud.pitch = td.pitch; hud.roll = td.roll;
     hud.altM = point.nav_alt_m ?? point.baro_alt_m ?? 0;
     hud.speedMs = point.speed_ms ?? 0;
+    {
+      const fv = flightPathVector(td.groundSpeed, td.vario, td.course, heading);
+      hud.fpmGamma = fv.gamma; hud.fpmCrab = fv.crab; hud.fpmShown = fv.shown;
+    }
 
     if (!playbackMarkerEntity) {
       playbackMarkerEntity = viewer.entities.add({
@@ -3674,6 +3683,9 @@
       altitude={al.value}
       altitudeUnit={al.unit}
       fov={fpvFov}
+      fpmGamma={hud.fpmGamma}
+      fpmCrab={hud.fpmCrab}
+      fpmShown={hud.fpmShown}
     />
   {/if}
 
