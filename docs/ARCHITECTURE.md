@@ -2407,5 +2407,44 @@ for the ArduPilot store (sync indicators), mirroring MISSION_TRACKING_AND_PROVEN
 
 ---
 
+## ADR-051: Telemetry Relay — Backend Transcoder Fed by a Self-Event Tap
+
+**Status**: Accepted — implemented (validation pending vs. real GCS/trackers)
+**Related**: ADR-010 (multi-protocol ByteTransport), the passive decoders (`RADIO_TELEMETRY.md` — the
+inverse direction), ADR-029 (panel framework). **Detail**: `docs/active/TELEMETRY_FORWARDING.md`.
+
+**Context**: Operators want to forward Kite's live telemetry into another wire protocol out a second link
+— to drive antenna trackers, mobile monitoring apps or other GCS. We already **decode** LTM/CRSF/SmartPort/
+MAVLink inbound into a unified set of `telemetry-*` events; the relay is the inverse (encode out), and
+should work regardless of the inbound protocol or the active panel.
+
+**Decision**:
+
+1. **Backend subsystem** `src-tauri/src/telemetry_forward/` (encoders × output sinks + a `RelayHub`),
+   not frontend — output is serial/BLE/TCP/UDP I/O and must run independent of the UI.
+2. **Self-event tap.** The `RelayHub` registers Rust-side `Listener` handlers for the same `telemetry-*`
+   events the decoders already emit, deserializes them into a latest-values cache and fans updates out to
+   N relays. **Zero producer changes** (just `Deserialize` on the telemetry structs); the relay is fully
+   decoupled from MSP/MAVLink/passive. The serialize→deserialize round-trip is negligible at ≤ 5 Hz.
+3. **Paced emission, live-only, always re-encode.** One full frame set per **pacer tick** (the attitude
+   update; GPS fallback) — not per inbound event — so the output rate follows the real data rate, not the
+   input's framing/republish cadence. No replay. No raw passthrough: every output is built from the
+   unified cache (one code path; enables conversion; the single tap suffices).
+4. **Each encoder is the strict inverse of its passive decoder** (`encoders/{ltm,mavlink,crsf,smartport}`).
+   MAVLink reuses `mavlink_proto::codec::serialize_v2`; MAVLink **pitch is negated** (MAVLink nose-up-positive
+   vs. our nose-down-positive). CRSF is big-endian with radian attitude. LTM carries heading (no COG field).
+5. **Diff-reconcile config.** `configure()` reuses relays whose config is unchanged (no rebind → an edit to
+   one relay never drops another's TCP clients) and drops removed/changed ones **first** (frees ports) +
+   pauses before rebuilding. Configs persist frontend-side and **auto-connect** with the primary link; the
+   UI keeps TCP listen ports / UDP targets unique (auto-bump).
+
+**Consequences**: a new protocol = one encoder; a new transport = one sink — the matrix composes, and the
+relay never perturbs the inbound path. Costs/open: validation against real GCS/trackers; a generic
+no-vehicle-type MAVLink HEARTBEAT (no type/named-mode in the unified model); best-effort CRSF/SmartPort
+mode mapping; and a separate root-cause fix to the passive decoders' fixed-rate (10 Hz) republish so
+passive-sourced relays emit at the true data rate.
+
+---
+
 *End of Architecture Decision Records*
 

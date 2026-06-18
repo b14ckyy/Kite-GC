@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Telemetry Relay — forwarding & conversion (`TELEMETRY_FORWARDING.md`, ADR-051).** Re-encodes the live
+  inbound telemetry (MSP / MAVLink / passive) into a chosen wire protocol and sends it out a second link —
+  for antenna trackers, monitoring apps or other GCS. Protocols: **LTM / MAVLink / CRSF / SmartPort**
+  (each the inverse of the matching passive decoder); outputs: **Serial / BLE / TCP-server / UDP**. UI is a
+  dropdown under the connection bar (`⇅ Relay`): a basic LINK diagnostic (RX/TX B/s, msgs/s, protocol) plus
+  N relay rows (protocol · combined Serial+BLE device / TCP / UDP · enable toggle · live status). Configs
+  persist and **auto-connect** with the primary link (push telemetry needs no handshake); emission is paced
+  on the attitude update so the output rate follows the real data rate. TCP listen ports / UDP targets are
+  kept unique (auto-bump). Verified live: TCP + LTM against mwptools from another PC.
 - **Connection status box (left of the Disconnect button).** Shows the active protocol — primary
   (MSP / MAVLink / SmartPort / CRSF / LTM) plus an optional secondary tunneled inside it (ArduPilot
   passthrough → MAVLink) — and a data-flow dot: green while valid data arrives, red after >5 s without,

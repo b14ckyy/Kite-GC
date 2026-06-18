@@ -484,6 +484,19 @@ A third connection mode ("Telemetry") that listens to telemetry forwarded by the
 - [ ] `LtmSource` — LTM (Lightweight Telemetry) passive frame parser
 - [ ] MAVLink-passive decoder (reuse the MAVLink parser, TX disabled)
 
+### Telemetry Relay — forwarding & conversion (ADR-051, plan: `docs/active/TELEMETRY_FORWARDING.md`)
+Re-encode the live inbound telemetry into a chosen wire protocol and send it out a second link (antenna
+trackers / monitoring apps / other GCS). Backend transcoder fed by a self-event tap; the inverse of the
+passive decoders. Dropdown panel under the connection bar; persisted, auto-connecting relays.
+- [x] LTM / MAVLink / CRSF / SmartPort encoders (each the inverse of the matching passive decoder)
+- [x] Serial / BLE / TCP-server / UDP outputs; combined Serial+BLE device picker; multiple relays with
+  unique-port guard; basic LINK diagnostic (RX/TX B/s, msgs/s, protocol)
+- [x] TCP + LTM verified live against mwptools from another PC
+- [ ] Validate MAVLink vs Mission Planner / QGC, CRSF vs handset, SmartPort vs OpenTX/Ethos sensor screen
+- [ ] MAVLink HEARTBEAT real vehicle type + named flight mode (currently generic + armed flag)
+- [ ] Root-cause: passive decoders re-emit only on a fresh frame (not the fixed 10 Hz republish) so
+  passive-sourced relays emit at the true data rate; also de-bloats widgets/recorder/logs
+
 ### Future Protocols
 - [ ] Multi-aircraft support (multiple protocol handler instances, per-UAV stores)
 
