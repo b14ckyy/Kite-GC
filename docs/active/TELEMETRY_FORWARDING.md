@@ -229,9 +229,12 @@ modes (manual, acro, angle, horizon, althold, poshold, RTH, waypoint, cruise, �
 - CRSF / SmartPort flight-mode strings/packing are best-effort inverses — refine if a consumer misreads.
 - Slim always-available LINK-stats event (the panel currently reuses the dev-gated Debug Monitor stats).
 - Practical max concurrent BLE relays (find empirically; serial/TCP/UDP unbounded).
-- **Separate follow-up (option B):** make the passive decoders re-emit a unified event only when a fresh
-  frame actually arrived (not all cached state every 100 ms). Fixes the relay output rate at the root for
-  passive sources (SmartPort republishes at 10 Hz vs real ~3 Hz) and de-bloats widgets/recorder/logs.
+- **Option B — DONE (2026-06-18).** The passive decoders (frsky/crsf/ltm) now re-emit a unified event
+  only when a **fresh frame** updated that type since the last `publish()` (per-type `fresh_*` flags set in
+  `apply()`, gated + cleared in `publish()`) — not all cached state every 100 ms. So passive-sourced relays
+  (and widgets/recorder) now run at the real frame rate (~3 Hz) instead of the fixed 10 Hz, with no
+  per-value change-detection (a fresh frame with an unchanged value still emits — correct for a static
+  craft on the ground). MSP/MAVLink already emitted at their real poll rate and are unaffected.
 
 Relates to `docs/active/RADIO_TELEMETRY.md` (decoders = the inverse direction), the MAVLink TX work, and
 the panel framework (`docs/active/PANEL_FRAMEWORK.md`).
