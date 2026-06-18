@@ -1,5 +1,9 @@
 # ArduPilot / PX4 Mission Library — Architecture Plan
 
+> **ARCHIVED (2026-06-18)** — Phase 1 (functional library + flight-link parity, ADR-050) shipped. Phase 2
+> (provenance / fc-file-db sync chips for the AP store) deferred — tracked in `ROADMAP.md`. Archived ≠
+> abandoned: resume here if the AP provenance chips are picked up.
+
 **Status:** **Phase 1 shipped (2026-06-15, ADR-050).** Phase 2 (provenance/sync indicators for the
 ArduPilot store) deferred. Extends the multi-autopilot work
 ([MISSION_MULTIAUTOPILOT_PLAN.md](MISSION_MULTIAUTOPILOT_PLAN.md), Phases 1–4) with the

@@ -40,3 +40,7 @@ are still perfectly fine; the doc simply isn't on the active work surface anymor
   into LTM/MAVLink/CRSF/SmartPort and emit out Serial/BLE/TCP/UDP. P1–P3 shipped (TCP+LTM verified vs
   mwptools). **Open (resume on trigger):** validate the encoders against real GCS/trackers; MAVLink real
   vehicle-type/mode in HEARTBEAT.
+- **ARDUPILOT_MISSION_LIBRARY.md** — ArduPilot/PX4 mission-library DB parity with INAV (ADR-050): save/
+  dedup/preview/export + flight-link over the format-agnostic `missions` table. Phase 1 shipped. **Open
+  (deferred):** Phase 2 provenance / fc-file-db sync chips for the AP store. (The broader ArduPilot
+  WP-type/vehicle-class work stays active in `../active/ARDUPILOT_WAYPOINT_ARCHITECTURE.md`.)
