@@ -423,8 +423,7 @@ This document tracks planned features, organized by milestone.
 - [x] Feature gate: `Feature::LinkStats` (`InavVersion >= 9.1`)
 - [x] `MSP2_INAV_GET_LINK_STATS` (`0x2103`): `uplinkRSSI_dBm` (u8, negated), `uplinkLQ` (u8, %), `uplinkSNR` (i8, dB) — own 1 Hz poll slot, feeds the RC Link widget (live)
 - [x] Fall back to `MSPV2_INAV_ANALOG` RSSI for firmware < 9.1 (the ANALOG-derived RSSI-only link is suppressed once `0x2103` is polled so the two don't clobber each other)
-- [ ] Populate `link_quality` from `uplinkLQ` in the DB recorder (field already in DB schema v3) — currently live-only; LQ in replay still comes only from Blackbox imports
-- [ ] Add `uplink_snr_db` to `TelemetryRecord` + schema migration (record live SNR for replay)
+- [x] Record the live link to the DB (schema **v14**): `link_quality` (LQ) now populated live (was Blackbox-only) + new `link_snr` / `link_rssi_dbm` columns, fed from the unified link-stats pipeline (CRSF / INAV 9.1) so the RC Link widget replays the real values.
 
 ### Multi-Protocol Architecture (see `docs/archive/PROTOCOL_REFACTORING.md`)
 

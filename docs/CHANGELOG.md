@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Flight recording: live RC-link metrics + QuadPlane vehicle type (DB schema v14).** Recorded flights
+  now capture the full RC link for replay — `link_quality` (LQ) is populated live (was Blackbox-only) and
+  two new `telemetry_records` columns, `link_snr` (dB) and `link_rssi_dbm`, store SNR + raw uplink RSSI
+  from the unified link-stats pipeline (CRSF `0x14`, INAV 9.1 `MSP2_INAV_GET_LINK_STATS`, SmartPort LQ).
+  The RC Link widget therefore shows the real values on replay, not just Blackbox LQ. A detected ArduPilot
+  **QuadPlane** (`Q_ENABLE`) is now recorded as platform type **VTOL** so the flight-detail vehicle type
+  is correct (it reports `MAV_TYPE_FIXED_WING` on the wire). Additive, idempotent migration.
 - **ArduPilot mission: vehicle-class selector + catalog-driven waypoint representation (ADR-046).** The
   mission firmware picker is now a 3-way `SegmentedToggle` (INAV / ArduPilot / PX4); the ArduPilot toolbar
   adds a **vehicle-type dropdown** (Plane / Copter / QuadPlane / Rover / Boat / Sub) — both locked while
