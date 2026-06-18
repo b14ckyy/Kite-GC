@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **PX4 mission planning.** The PX4 path on the shared MAVLink mission editor is now complete. PX4 speaks
+  the same mission protocol and MAV_CMD ids as ArduPilot, so the planner reuses the whole pipeline — only
+  the **command catalog** differs: PX4 gets its verified supported subset (no `JUMP_TAG`, no extra loiter
+  variants, no relay/parachute/fence/condition commands), resolved firmware-aware. Unlike ArduPilot, PX4
+  has **one mission interpreter for all airframes**, so there is **no vehicle-type selector** — the full
+  PX4 catalog (including VTOL commands) is always offered and a soft-warning flags a VTOL command on a
+  non-VTOL airframe (or any PX4-unsupported command) once connected. The PX4 airframe class is read
+  straight from `MAV_TYPE` (PX4 reports it accurately). Critically, the **home-slot convention is now
+  firmware-aware**: ArduPilot reserves mission item 0 for home, PX4 does not — upload/download no longer
+  inject/drop a home placeholder for PX4 (which would otherwise corrupt the mission).
+- **ArduPilot/PX4 takeoff waypoint is positionable when planning offline.** The takeoff marker used to
+  be pinned to the mission centroid (no real coordinates) and recomputed on every edit, so it often sat
+  in the way and could not be moved. Offline (no UAV connected) it is now **freely draggable** and keeps
+  its position — stored coordinates win, the editor exposes its lat/lon fields, and converting an existing
+  waypoint to Takeoff keeps its location instead of snapping to centre. With a UAV connected it still
+  anchors on the FC home and is locked (the real takeoff point). The position is also the correct target
+  for PX4 / ArduPlane takeoff. 2D and 3D stay in sync.
 - **Flight recording: live RC-link metrics + QuadPlane vehicle type (DB schema v14).** Recorded flights
   now capture the full RC link for replay — `link_quality` (LQ) is populated live (was Blackbox-only) and
   two new `telemetry_records` columns, `link_snr` (dB) and `link_rssi_dbm`, store SNR + raw uplink RSSI

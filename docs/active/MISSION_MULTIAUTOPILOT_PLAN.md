@@ -1,10 +1,11 @@
 # Multi-Autopilot Mission Planning — Architecture Plan
 
 **Status:** Phases 1–4 complete for the **ArduPilot/PX4** path (autopilot context + locking,
-ArduPilot WP types/UI/conversion, MAVLink mission microprotocol, survey planner). **Deferred:**
-INAV-over-MAVLink (see Open Questions). PX4 rides on the ArduPilot foundation (~80%), untested
-for lack of hardware.  
-**Created:** 2026-04-21 · **Last Updated:** 2026-06-01
+ArduPilot WP types/UI/conversion, MAVLink mission microprotocol, survey planner). **PX4 path
+completed 2026-06-18** — verified command subset, firmware-aware home-slot handling, MAV_TYPE-based
+airframe class (see PX4 note below); still untested on real PX4 hardware. **Deferred:**
+INAV-over-MAVLink (see Open Questions).  
+**Created:** 2026-04-21 · **Last Updated:** 2026-06-18
 
 ---
 
@@ -194,9 +195,30 @@ math, no FC protocol dependency; output feeds the active autopilot mission.
 
 ---
 
+## PX4 path (completed 2026-06-18)
+
+PX4 rides on the ArduPilot foundation — same transport, codec, MISSION_ITEM_INT round-trip, store,
+panel, layer, icons. Three firmware-specific differences are handled:
+
+1. **Command catalog (subset).** PX4 implements a smaller, standard MAV_CMD subset than ArduPilot
+   (no `JUMP_TAG`/`DO_JUMP_TAG`, no `NAV_LOITER_TURNS`/`SPLINE`/`ALTITUDE_WAIT`/`PAYLOAD_PLACE`, no
+   relay/parachute/fence/inverted/gripper/aux/condition commands). `arduCommandCatalog.ts` gains a
+   `Firmware` dimension + a verified `PX4_COMMANDS` set; `resolveCatalog(vehicle, firmware)` returns
+   the PX4 subset when `firmware === 'px4'`. Source of truth: PX4 docs "Mission Mode" supported list +
+   `mavlink_mission.cpp` `parse_mavlink_mission_item`. PX4 rejects unsupported items at upload
+   (feasibility checker), so the set stays tight.
+2. **No vehicle-type selector.** PX4 has one mission interpreter for all airframes — the full PX4
+   catalog (incl. VTOL commands) is always offered; the dropdown is ArduPilot-only. The airframe class
+   is read straight from `MAV_TYPE` (PX4 reports it accurately; ArduPilot QuadPlane lies). A connect-time
+   soft-warning (`cmdValidForPx4`) flags a VTOL command on a non-VTOL airframe or any PX4-unsupported
+   command — never blocking, mirroring the ArduPilot warning.
+3. **No home mission-slot.** ArduPilot reserves mission item 0 for home (GCS injects/drops a placeholder);
+   **PX4 does not** — item 0 is the first real waypoint. `mission.rs` `upload`/`download` take a
+   `reserve_home` flag derived from `fc_variant` (false for PX4), so PX4 missions map straight to seq
+   0..len with no placeholder. (Confirmed: QGC `sendHomePositionToVehicle` → true for APM, false for PX4.)
+
 ## Open Questions / Future Decisions
 
 - **INAV over MAVLink**: when this is supported, the `protocol + fc_variant` combination determines system, not just `fc_variant` alone
-- **PX4**: very similar to ArduPilot (same MAVLink mission protocol), mainly different MAV_CMD parameter semantics. Phase 2 ArduPilot foundation should cover ~80% of PX4.
 - **EEPROM save for ArduPilot**: ArduPilot uses `MAV_CMD_PREFLIGHT_STORAGE` — separate from mission upload
 - **Multi-mission for ArduPilot**: ArduPilot doesn't have the INAV multi-mission concept. Single mission only.

@@ -313,8 +313,16 @@ function resolveCatalog(fw: FirmwareType, cls: VehicleClass): MissionCmdSpec[];
     approach (`missionIconsArdupilot`, line styles).
 - **Why layered, not flat:** common NAV commands are defined **once** in the base; classes only
   declare their *additions* and *param tweaks* (QGC-style), instead of Mission Planner's full
-  per-bucket duplication. Adding **PX4** later = adding `firmwareType: 'px4'` override layers, no
-  structural change.
+  per-bucket duplication.
+
+> **Implemented (2026-06-18) — simpler than the layered-tree sketch above.** The shipped catalog
+> (`arduCommandCatalog.ts`) is a single flat `ARDU_CATALOG` with a per-command `vehicles[]` field, not
+> a base+override tree. **PX4 was added** as a `Firmware` dimension on `resolveCatalog(vehicle, firmware)`
+> plus a verified `PX4_COMMANDS` set (the MAV_CMDs PX4 accepts in a mission). For `firmware === 'px4'`,
+> `resolveCatalog` returns that subset **ignoring the vehicle class** (PX4 has one mission interpreter
+> for all airframes), so PX4 needs no vehicle-type selector. Soft-warnings use `cmdValidForPx4()`
+> (VTOL-on-non-VTOL or PX4-unsupported command). The override-layer mechanism (`CmdOverride`) was not
+> needed and remains a future option if per-firmware param tweaks become necessary.
 - **Integration points:** `missionArdupilot.ts` (store + the layered tree + `resolveCatalog`),
   `ArduMissionPanel` (palette + class selector + per-command editor), `ArduMissionLayer`
   (markers/lines + VTOL-transition badges), `missionConverter.ts` (INAV ↔ ArduPilot per command),
