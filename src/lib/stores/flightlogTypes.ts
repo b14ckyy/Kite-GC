@@ -210,6 +210,10 @@ export interface TelemetryRecord {
    *  comma-separated list of modifier ids (null when none). */
   mode_primary: string | null;
   mode_modifiers: string | null;
+  /** RC-link metrics (unified link-stats pipeline). `link_quality` (above) = LQ 0–100; these add SNR
+   *  (dB) and raw uplink RSSI (dBm) when the protocol provides them (CRSF / INAV 9.1+). */
+  link_snr: number | null;
+  link_rssi_dbm: number | null;
 }
 
 export type LogbookSortMode =

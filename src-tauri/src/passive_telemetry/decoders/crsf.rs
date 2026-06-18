@@ -530,6 +530,9 @@ impl CrsfDecoder {
                 snr_db: Some(s.link_snr),
             };
             let _ = app.emit("telemetry-linkstats", &ls);
+            if let Some(rec) = recorder {
+                if let Ok(mut r) = rec.lock() { r.on_linkstats(&ls); }
+            }
         }
 
         // AP passthrough owns the AP-unique data (mode/armed/EKF/status-text/waypoint).

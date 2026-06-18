@@ -20,6 +20,12 @@ function rssiRawToPercent(raw: number): number {
   return (raw / 1023) * 100;
 }
 
+/** Map a CRSF/ELRS uplink RSSI in dBm to 0–100 % — mirrors the backend `LinkStatsData::dbm_to_percent`
+ *  (−50 dBm = 100 %, −120 dBm = 0 %). */
+function dbmToPercent(dbm: number): number {
+  return Math.max(0, Math.min(100, ((dbm + 120) / 70) * 100));
+}
+
 /** Convert a DB telemetry row to the widget-consumable TelemetryData format. */
 export function toTelemetryData(r: TelemetryRecord, fcVariant = 'INAV'): TelemetryData {
   return {
@@ -56,13 +62,15 @@ export function toTelemetryData(r: TelemetryRecord, fcVariant = 'INAV'): Telemet
     batteryPercentage: r.battery_percentage ?? 0,
     cellCount: 0,         // not recorded in DB yet
 
-    // RC link — best-effort from the recorded fields (raw dBm/SNR aren't stored). The DB's raw RSSI
-    // scale is protocol-dependent, so normalize heuristically (≤100 = %, ≤255 = 0–254, else 0–1023).
+    // RC link — from the recorded link-stats fields. dBm (CRSF / INAV 9.1) → % via the same curve as
+    // the backend; otherwise normalize the raw RSSI heuristically (≤100 = %, ≤255 = 0–254, else 0–1023).
     link: {
-      rssiPercent: r.rssi != null ? rssiRawToPercent(r.rssi) : null,
-      rssiDbm: null,
+      rssiPercent: r.link_rssi_dbm != null
+        ? dbmToPercent(r.link_rssi_dbm)
+        : (r.rssi != null ? rssiRawToPercent(r.rssi) : null),
+      rssiDbm: r.link_rssi_dbm ?? null,
       lq: r.link_quality != null && r.link_quality > 0 ? Math.min(100, r.link_quality) : null,
-      snrDb: null,
+      snrDb: r.link_snr ?? null,
     },
 
     // Status

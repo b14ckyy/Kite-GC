@@ -18,8 +18,8 @@ use super::tlog_logger::TlogLogger;
 use super::types::{Flight, FlightLogSettings, TelemetryRecord};
 use crate::msp::FcInfo;
 use crate::scheduler::telemetry::{
-    AirspeedData, AltitudeData, AnalogData, AttitudeData, GpsData, GpsStatsData, NavStatusData,
-    SensorStatusData, StatusData,
+    AirspeedData, AltitudeData, AnalogData, AttitudeData, GpsData, GpsStatsData, LinkStatsData,
+    NavStatusData, SensorStatusData, StatusData,
 };
 
 /// Bit 2 in arming_flags indicates ARMED state
@@ -295,6 +295,10 @@ struct TelemetrySnapshot {
     mah_drawn: Option<u32>,
     rssi: Option<u16>,
     battery_percentage: Option<u8>,
+    // RC link (unified link-stats pipeline) — LQ / SNR / raw uplink RSSI dBm, per protocol availability
+    link_quality: Option<u8>,
+    link_snr: Option<i8>,
+    link_rssi_dbm: Option<i16>,
     // Airspeed
     airspeed: Option<f64>,
     // Status
@@ -512,6 +516,21 @@ impl FlightRecorder {
         self.snapshot.mah_drawn = Some(data.mah_drawn);
         self.snapshot.rssi = Some(data.rssi);
         self.snapshot.battery_percentage = if data.battery_percentage > 0 { Some(data.battery_percentage) } else { None };
+    }
+
+    /// Feed unified RC-link stats — only updates the fields a given frame actually carries, so a
+    /// RSSI-only protocol doesn't wipe LQ/SNR seen from another (and vice versa).
+    pub fn on_linkstats(&mut self, data: &LinkStatsData) {
+        if data.lq.is_some() { self.snapshot.link_quality = data.lq; }
+        if data.snr_db.is_some() { self.snapshot.link_snr = data.snr_db; }
+        if data.rssi_dbm.is_some() { self.snapshot.link_rssi_dbm = data.rssi_dbm; }
+    }
+
+    /// Mark the connected vehicle as a QuadPlane (ArduPilot `Q_ENABLE`). A QuadPlane reports
+    /// MAV_TYPE_FIXED_WING → recorded as platform_type 1 (Airplane); override it to 7 (VTOL) so
+    /// replay / the flight-detail vehicle-type field show the correct type. Idempotent.
+    pub fn set_quadplane(&mut self) {
+        self.fc_info.platform_type = 7; // PLATFORM_VTOL (matches the frontend platform table)
     }
 
     /// Feed airspeed data from the scheduler
@@ -914,7 +933,7 @@ impl FlightRecorder {
             fix_type: self.snapshot.fix_type,
             num_sat: self.snapshot.num_sat,
             cpu_load: self.snapshot.cpu_load,
-            link_quality: None, // MSP does not expose LQ; populated via Blackbox import
+            link_quality: self.snapshot.link_quality, // live LQ from the unified link-stats pipeline
             baro_alt_m: self.snapshot.alt_baro,
             gps_hdop: self.snapshot.gps_hdop,
             gps_eph: self.snapshot.gps_eph,
@@ -937,6 +956,8 @@ impl FlightRecorder {
             nav_alt_m: None,
             mode_primary: self.snapshot.mode_primary.clone(),
             mode_modifiers: self.snapshot.mode_modifiers.clone(),
+            link_snr: self.snapshot.link_snr,
+            link_rssi_dbm: self.snapshot.link_rssi_dbm,
         };
 
         // Update statistics (max altitude is the relative-to-home reading, like the Blackbox stats)

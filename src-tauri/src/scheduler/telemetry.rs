@@ -555,6 +555,12 @@ pub fn feed_recorder(code: u16, payload: &[u8], recorder: &mut FlightRecorder, b
                 recorder.on_sensor_status(&data);
             }
         }
+        MSP2_INAV_GET_LINK_STATS => {
+            // INAV 9.1+ real RC link stats (dBm / LQ / SNR) → recorded for replay.
+            if let TelemetryPayload::LinkStats(data) = decode_link_stats(payload) {
+                recorder.on_linkstats(&data);
+            }
+        }
         _ => {}
     }
 }

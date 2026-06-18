@@ -868,6 +868,8 @@ where
             nav_alt_m: r.nav_alt_m,
             mode_primary,
             mode_modifiers,
+            link_snr: None,
+            link_rssi_dbm: None,
         });
     }
 

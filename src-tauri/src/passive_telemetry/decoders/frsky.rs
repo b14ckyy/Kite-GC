@@ -406,6 +406,9 @@ impl FrskyDecoder {
                 ..Default::default()
             };
             let _ = app.emit("telemetry-linkstats", &ls);
+            if let Some(rec) = recorder {
+                if let Ok(mut r) = rec.lock() { r.on_linkstats(&ls); }
+            }
         }
     }
 }

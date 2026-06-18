@@ -674,6 +674,8 @@ fn build_telemetry_record_indexed(
         nav_alt_m: read_f64(cols.nav_pos_up, record).map(|v| v / 100.0),
         mode_primary,
         mode_modifiers,
+        link_snr: None,      // INAV blackbox has no SNR column
+        link_rssi_dbm: None, // RSSI is the legacy 0–1023 `rssi` field, not dBm
     }
 }
 

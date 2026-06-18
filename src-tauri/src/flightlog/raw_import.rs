@@ -146,6 +146,8 @@ fn snap_to_record(s: &Snap, t_ms: i64) -> TelemetryRecord {
         nav_alt_m: None,
         mode_primary: s.mode_primary.clone(),
         mode_modifiers: s.mode_modifiers.clone(),
+        link_snr: None,
+        link_rssi_dbm: None,
     }
 }
 

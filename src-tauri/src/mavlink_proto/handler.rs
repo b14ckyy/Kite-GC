@@ -652,6 +652,13 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
                 let _ = app_handle.emit("telemetry-vehicle", serde_json::json!({
                     "quadplane": quadplane,
                 }));
+                // Annotate the recorded fc_variant so replay/logbook show "QuadPlane" (it reports
+                // MAV_TYPE_FIXED_WING, so the recorded variant would otherwise read plain ArduPlane).
+                if quadplane {
+                    if let Some(ref rec) = recorder {
+                        if let Ok(mut r) = rec.lock() { r.set_quadplane(); }
+                    }
+                }
             }
         }
 

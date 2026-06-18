@@ -285,6 +285,10 @@ pub struct TelemetryRecord {
     /// (None when none). The raw `active_flight_mode_flags` stays as a forensic field.
     pub mode_primary: Option<String>,
     pub mode_modifiers: Option<String>,
+    /// RC-link metrics (unified link-stats pipeline). `link_quality` (above) = LQ 0–100; these add the
+    /// SNR (dB) and raw uplink RSSI (dBm) when the protocol provides them (CRSF / INAV 9.1+).
+    pub link_snr: Option<i8>,
+    pub link_rssi_dbm: Option<i16>,
 }
 
 /// Summary for the logbook list view
