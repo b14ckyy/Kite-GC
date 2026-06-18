@@ -130,6 +130,16 @@ struct State {
     armed: bool,
     mode_flags: u32,
     seen_status: bool,
+
+    // Per-type "a fresh frame arrived since the last publish" flags — emission gates on these so cached
+    // state isn't re-published at the fixed handler tick (output rate follows the real frame rate). Set in
+    // apply(), cleared in publish().
+    fresh_attitude: bool,
+    fresh_gps: bool,
+    fresh_altitude: bool,
+    fresh_analog: bool,
+    fresh_airspeed: bool,
+    fresh_status: bool,
 }
 
 pub struct FrskyDecoder {
@@ -251,6 +261,16 @@ impl FrskyDecoder {
             ID_RSSI => { s.rssi = value as u16; s.seen_analog = true; }
             _ => {}
         }
+        // Mark the relevant emit-group fresh (gates publish; mirrors the appID→field mapping above).
+        match appid {
+            ID_PITCH | ID_ROLL | ID_HEADING => s.fresh_attitude = true,
+            ID_FPV | ID_SPEED | ID_GPS_ALT | ID_LATLONG | ID_GNSS | ID_LEGACY_GNSS => s.fresh_gps = true,
+            ID_ALTITUDE | ID_VARIO => s.fresh_altitude = true,
+            ID_CURRENT | ID_VFAS | ID_FUEL | ID_RSSI => s.fresh_analog = true,
+            ID_ASPD => s.fresh_airspeed = true,
+            ID_MODES | ID_LEGACY_MODES => s.fresh_status = true,
+            _ => {}
+        }
     }
 
     /// Emit the accumulated state as the unified telemetry events and feed the flight recorder. Each
@@ -262,10 +282,22 @@ impl FrskyDecoder {
         if let Some(ap) = self.ap.as_mut() {
             ap.publish(app, recorder);
         }
+        // Only emit a type when a fresh frame updated it since the last publish (no fixed-tick re-publish
+        // of cached state). Capture + clear the flags, then emit from the immutably-borrowed state.
+        let (f_status, f_att, f_gps, f_alt, f_an, f_asp) = {
+            let s = &self.state;
+            (s.fresh_status, s.fresh_attitude, s.fresh_gps && s.have_fix, s.fresh_altitude, s.fresh_analog, s.fresh_airspeed)
+        };
+        self.state.fresh_status = false;
+        self.state.fresh_attitude = false;
+        self.state.fresh_gps = false;
+        self.state.fresh_altitude = false;
+        self.state.fresh_analog = false;
+        self.state.fresh_airspeed = false;
         let s = &self.state;
 
         // Status first: drives the recorder's arm/disarm edge + the ARMED indicator.
-        if s.seen_status {
+        if f_status {
             let status = StatusData {
                 arming_flags: if s.armed { ARMED_FLAG } else { 0 },
                 flight_mode_flags: s.mode_flags,
@@ -283,7 +315,7 @@ impl FrskyDecoder {
             }
         }
 
-        if s.seen_attitude {
+        if f_att {
             let att = AttitudeData { roll: s.roll, pitch: s.pitch, yaw: s.yaw };
             let _ = app.emit("telemetry-attitude", &att);
             if let Some(rec) = recorder {
@@ -291,7 +323,7 @@ impl FrskyDecoder {
             }
         }
 
-        if s.seen_gps && s.have_fix {
+        if f_gps {
             let fix = if s.seen_gnss { s.fix_type } else if s.num_sat >= 4 { 3 } else { 2 };
             let gps = GpsData {
                 fix_type: fix,
@@ -308,7 +340,7 @@ impl FrskyDecoder {
             }
         }
 
-        if s.seen_altitude {
+        if f_alt {
             let alt = AltitudeData { altitude: s.baro_alt, vario: s.vario };
             let _ = app.emit("telemetry-altitude", &alt);
             if let Some(rec) = recorder {
@@ -316,7 +348,7 @@ impl FrskyDecoder {
             }
         }
 
-        if s.seen_analog {
+        if f_an {
             let analog = AnalogData {
                 voltage: s.voltage,
                 mah_drawn: s.mah_drawn,
@@ -332,7 +364,7 @@ impl FrskyDecoder {
             }
         }
 
-        if s.seen_airspeed {
+        if f_asp {
             let aspd = AirspeedData { airspeed: s.airspeed };
             let _ = app.emit("telemetry-airspeed", &aspd);
             if let Some(rec) = recorder {

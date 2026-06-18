@@ -367,7 +367,7 @@ fn handler_loop(
             if let Some(dec) = crsf.as_mut() {
                 dec.publish(&app_handle, recorder.as_ref());
             }
-            if let Some(dec) = ltm.as_ref() {
+            if let Some(dec) = ltm.as_mut() {
                 dec.publish(&app_handle, recorder.as_ref());
             }
 

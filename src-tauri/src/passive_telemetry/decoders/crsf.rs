@@ -217,6 +217,16 @@ struct State {
     armed: bool,
     mode: FlightModeState,
     seen_status: bool,
+
+    // Per-type "a fresh frame arrived since the last publish" flags. Emission gates on these so we don't
+    // re-publish unchanged cached state at the fixed handler tick — the output rate (and the relay) then
+    // follows the FC's real data rate. Set in apply(), cleared in publish().
+    fresh_attitude: bool,
+    fresh_gps: bool,
+    fresh_altitude: bool,
+    fresh_analog: bool,
+    fresh_airspeed: bool,
+    fresh_status: bool,
 }
 
 pub struct CrsfDecoder {
@@ -318,10 +328,12 @@ impl CrsfDecoder {
                     s.have_fix = true;
                 }
                 s.seen_gps = true;
+                s.fresh_gps = true;
             }
             Decoded::Vario { vspeed_ms } => {
                 s.vario = *vspeed_ms;
                 s.seen_altitude = true;
+                s.fresh_altitude = true;
             }
             Decoded::Battery { volts, amps, mah, pct } => {
                 s.voltage = *volts;
@@ -329,26 +341,31 @@ impl CrsfDecoder {
                 s.mah_drawn = *mah;
                 s.battery_pct = *pct;
                 s.seen_analog = true;
+                s.fresh_analog = true;
             }
             Decoded::BaroAlt { alt_m, .. } => {
                 s.baro_alt = *alt_m;
                 s.seen_altitude = true;
+                s.fresh_altitude = true;
             }
             Decoded::Airspeed { aspd_ms } => {
                 s.airspeed = *aspd_ms;
                 s.seen_airspeed = true;
+                s.fresh_airspeed = true;
             }
             Decoded::Attitude { pitch, roll, yaw } => {
                 s.pitch = *pitch;
                 s.roll = *roll;
                 s.yaw = *yaw;
                 s.seen_attitude = true;
+                s.fresh_attitude = true;
             }
             Decoded::FlightMode { text } => {
                 let (armed, mode) = classify_crsf_mode(text);
                 s.armed = armed;
                 s.mode = mode;
                 s.seen_status = true;
+                s.fresh_status = true;
             }
             Decoded::Other => {}
         }
@@ -392,9 +409,21 @@ impl CrsfDecoder {
         // ArduPilot passthrough (if present) owns status / flight mode / EKF — suppress the native CRSF
         // mode here so the real AP modes win (the native 0x21 string would be misread as an INAV mode).
         let ap_active = self.ap.is_some();
+        // Only emit a type when a fresh frame updated it since the last publish (no fixed-tick re-publish
+        // of cached state). Capture + clear the flags, then emit from the (now-immutably-borrowed) state.
+        let (f_status, f_att, f_gps, f_alt, f_an, f_asp) = {
+            let s = &self.state;
+            (s.fresh_status, s.fresh_attitude, s.fresh_gps && s.have_fix, s.fresh_altitude, s.fresh_analog, s.fresh_airspeed)
+        };
+        self.state.fresh_status = false;
+        self.state.fresh_attitude = false;
+        self.state.fresh_gps = false;
+        self.state.fresh_altitude = false;
+        self.state.fresh_analog = false;
+        self.state.fresh_airspeed = false;
         let s = &self.state;
 
-        if s.seen_status && !ap_active {
+        if f_status && !ap_active {
             let status = StatusData {
                 arming_flags: if s.armed { ARMED_FLAG } else { 0 },
                 flight_mode_flags: 0, // CRSF carries a single mode string, not the raw INAV bitmask
@@ -411,7 +440,7 @@ impl CrsfDecoder {
             }
         }
 
-        if s.seen_attitude {
+        if f_att {
             let att = AttitudeData { roll: s.roll, pitch: s.pitch, yaw: s.yaw };
             let _ = app.emit("telemetry-attitude", &att);
             if let Some(rec) = recorder {
@@ -419,7 +448,7 @@ impl CrsfDecoder {
             }
         }
 
-        if s.seen_gps && s.have_fix {
+        if f_gps {
             let gps = GpsData {
                 fix_type: if s.num_sat >= 4 { 3 } else { 2 },
                 num_sat: s.num_sat,
@@ -435,7 +464,7 @@ impl CrsfDecoder {
             }
         }
 
-        if s.seen_altitude {
+        if f_alt {
             let alt = AltitudeData { altitude: s.baro_alt, vario: s.vario };
             let _ = app.emit("telemetry-altitude", &alt);
             if let Some(rec) = recorder {
@@ -443,7 +472,7 @@ impl CrsfDecoder {
             }
         }
 
-        if s.seen_analog {
+        if f_an {
             let analog = AnalogData {
                 voltage: s.voltage,
                 mah_drawn: s.mah_drawn,
@@ -459,7 +488,7 @@ impl CrsfDecoder {
             }
         }
 
-        if s.seen_airspeed {
+        if f_asp {
             let aspd = AirspeedData { airspeed: s.airspeed };
             let _ = app.emit("telemetry-airspeed", &aspd);
             if let Some(rec) = recorder {

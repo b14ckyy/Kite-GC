@@ -222,6 +222,16 @@ struct State {
     armed: bool,
     mode: FlightModeState,
     seen_status: bool,
+
+    // Per-type "a fresh frame arrived since the last publish" flags — emission gates on these so cached
+    // state isn't re-published at the fixed handler tick (output rate follows the real frame rate). Set in
+    // apply(), cleared in publish().
+    fresh_attitude: bool,
+    fresh_gps: bool,
+    fresh_altitude: bool,
+    fresh_analog: bool,
+    fresh_airspeed: bool,
+    fresh_status: bool,
 }
 
 pub struct LtmDecoder {
@@ -311,6 +321,7 @@ impl LtmDecoder {
                 s.roll = *roll;
                 s.yaw = *yaw;
                 s.seen_attitude = true;
+                s.fresh_attitude = true;
             }
             Decoded::Gps { lat, lon, gs_ms, alt_m, sats, fix } => {
                 s.lat = *lat;
@@ -321,6 +332,7 @@ impl LtmDecoder {
                 s.fix_type = if *fix == 3 { 3 } else if *fix == 2 { 2 } else { 0 };
                 s.have_fix = *fix >= 2;
                 s.seen_gps = true;
+                s.fresh_gps = true;
 
                 // Altitude (baro/estimated) is present even without a GPS fix; emulate vertical speed
                 // from its time derivative (LTM has no vario), low-passed to tame the noise.
@@ -335,6 +347,7 @@ impl LtmDecoder {
                 s.last_alt_ms = now_ms;
                 s.have_alt_prev = true;
                 s.alt_seen = true;
+                s.fresh_altitude = true;
 
                 // Synthesize COG from successive fixes (LTM has none). Gate on speed + a minimum
                 // baseline from the last anchor so it isn't GPS jitter; until we have a real COG, fall
@@ -361,13 +374,16 @@ impl LtmDecoder {
                 s.mah_drawn = *mah;
                 s.rssi = *rssi;
                 s.seen_analog = true;
+                s.fresh_analog = true;
                 s.airspeed = *airspeed_ms;
                 if *airspeed_ms > 0.0 {
                     s.seen_airspeed = true;
+                    s.fresh_airspeed = true;
                 }
                 s.armed = *armed;
                 s.mode = classify_ltm_mode(*mode, *failsafe);
                 s.seen_status = true;
+                s.fresh_status = true;
             }
             Decoded::Home { .. } | Decoded::Nav { .. } | Decoded::Extra { .. } | Decoded::Other => {}
         }
@@ -412,10 +428,22 @@ impl LtmDecoder {
 
     /// Emit the accumulated state as the unified telemetry events and feed the flight recorder. Each
     /// event is only sent once its relevant fields have been seen (mirrors the FrSky/CRSF decoders).
-    pub fn publish(&self, app: &AppHandle, recorder: Option<&FlightRecorderHandle>) {
+    pub fn publish(&mut self, app: &AppHandle, recorder: Option<&FlightRecorderHandle>) {
+        // Only emit a type when a fresh frame updated it since the last publish (no fixed-tick re-publish
+        // of cached state). Capture + clear the flags, then emit from the immutably-borrowed state.
+        let (f_status, f_att, f_gps, f_alt, f_an, f_asp) = {
+            let s = &self.state;
+            (s.fresh_status, s.fresh_attitude, s.fresh_gps && s.have_fix, s.fresh_altitude, s.fresh_analog, s.fresh_airspeed)
+        };
+        self.state.fresh_status = false;
+        self.state.fresh_attitude = false;
+        self.state.fresh_gps = false;
+        self.state.fresh_altitude = false;
+        self.state.fresh_analog = false;
+        self.state.fresh_airspeed = false;
         let s = &self.state;
 
-        if s.seen_status {
+        if f_status {
             let status = StatusData {
                 arming_flags: if s.armed { ARMED_FLAG } else { 0 },
                 flight_mode_flags: 0, // LTM carries a single mode number, not the raw INAV bitmask
@@ -432,7 +460,7 @@ impl LtmDecoder {
             }
         }
 
-        if s.seen_attitude {
+        if f_att {
             let att = AttitudeData { roll: s.roll, pitch: s.pitch, yaw: s.yaw };
             let _ = app.emit("telemetry-attitude", &att);
             if let Some(rec) = recorder {
@@ -440,7 +468,7 @@ impl LtmDecoder {
             }
         }
 
-        if s.seen_gps && s.have_fix {
+        if f_gps {
             let gps = GpsData {
                 fix_type: s.fix_type,
                 num_sat: s.num_sat,
@@ -457,7 +485,7 @@ impl LtmDecoder {
         }
 
         // Altitude (G-frame baro/estimated alt) + emulated vario — independent of GPS fix.
-        if s.alt_seen {
+        if f_alt {
             let alt = AltitudeData { altitude: s.alt, vario: s.vario };
             let _ = app.emit("telemetry-altitude", &alt);
             if let Some(rec) = recorder {
@@ -465,7 +493,7 @@ impl LtmDecoder {
             }
         }
 
-        if s.seen_analog {
+        if f_an {
             let analog = AnalogData {
                 voltage: s.voltage,
                 mah_drawn: s.mah_drawn,
@@ -481,7 +509,7 @@ impl LtmDecoder {
             }
         }
 
-        if s.seen_airspeed {
+        if f_asp {
             let aspd = AirspeedData { airspeed: s.airspeed };
             let _ = app.emit("telemetry-airspeed", &aspd);
             if let Some(rec) = recorder {
