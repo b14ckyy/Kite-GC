@@ -14,6 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `classify_px4()` plus a `classify_mavlink()` dispatcher now route PX4 vs ArduPilot by `fc_variant`, for
   both the live link and tlog import; modes use the QGC names (Altitude, Position, Hold, Return, Offboard,
   VTOL Takeoff, …).
+- **RC Link widget — protocol-agnostic link-quality readout.** A new adaptive HUD widget shows whatever
+  the active link reports and hides the rest: LQ big when available (else RSSI %), with RSSI (dBm
+  preferred) and SNR as secondary lines, colour-coded by quality. Backed by a unified `LinkStatsData`
+  (`rssi_percent` normalized at the source, plus optional `rssi_dbm` / `lq` / `snr_db`) on a new
+  `telemetry-linkstats` event, so every protocol fills only what it can. Sources: **CRSF** LinkStatistics
+  `0x14` (uplink RSSI dBm + LQ + SNR), **SmartPort** (RSSI `0xF101` + LQ from `0xF010`/"VFR", decoded as
+  `100 − loss`; the FC's unconfigured-channel RSSI-0 is ignored to stop a 0/100 flicker), **MAVLink**
+  `RC_CHANNELS` RSSI, **LTM** S-frame RSSI, and **INAV** `MSPV2_INAV_ANALOG` RSSI plus — on **INAV 9.1+** —
+  real dBm/LQ/SNR from `MSP2_INAV_GET_LINK_STATS` (`0x2103`, own 1 Hz poll, gated by `Feature::LinkStats`).
+  Replay maps the recorded `link_quality` / `rssi`.
 - **Telemetry Relay — forwarding & conversion (`TELEMETRY_FORWARDING.md`, ADR-051).** Re-encodes the live
   inbound telemetry (MSP / MAVLink / passive) into a chosen wire protocol and sends it out a second link —
   for antenna trackers, monitoring apps or other GCS. Protocols: **LTM / MAVLink / CRSF / SmartPort**

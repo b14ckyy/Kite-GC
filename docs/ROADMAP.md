@@ -420,11 +420,11 @@ This document tracks planned features, organized by milestone.
 ## Milestone 6: Advanced Features (v0.6.x+)
 
 ### MSP Link Statistics (INAV 9.x+)
-- [ ] Feature gate: `InavVersion >= 9.1` (exact version TBD, INAV PR #11496 targeting `maintenance-9.x`)
-- [ ] `MSP2_INAV_GET_LINK_STATS` (`0x2103`): `uplinkRSSI_dBm` (u8), `uplinkLQ` (u8, %), `uplinkSNR` (i8, dB)
-- [ ] Populate `link_quality` from `uplinkLQ` (field already in DB schema v3)
-- [ ] Add `uplink_snr_db` to `TelemetryRecord` + schema v4 migration
-- [ ] Fall back to `MSPV2_INAV_ANALOG` RSSI for firmware < 9.1
+- [x] Feature gate: `Feature::LinkStats` (`InavVersion >= 9.1`)
+- [x] `MSP2_INAV_GET_LINK_STATS` (`0x2103`): `uplinkRSSI_dBm` (u8, negated), `uplinkLQ` (u8, %), `uplinkSNR` (i8, dB) — own 1 Hz poll slot, feeds the RC Link widget (live)
+- [x] Fall back to `MSPV2_INAV_ANALOG` RSSI for firmware < 9.1 (the ANALOG-derived RSSI-only link is suppressed once `0x2103` is polled so the two don't clobber each other)
+- [ ] Populate `link_quality` from `uplinkLQ` in the DB recorder (field already in DB schema v3) — currently live-only; LQ in replay still comes only from Blackbox imports
+- [ ] Add `uplink_snr_db` to `TelemetryRecord` + schema migration (record live SNR for replay)
 
 ### Multi-Protocol Architecture (see `docs/archive/PROTOCOL_REFACTORING.md`)
 
@@ -477,8 +477,9 @@ A third connection mode ("Telemetry") that listens to telemetry forwarded by the
   GATT-explorer auto-discovery (validated on ETHOS X20RS, service `0xFFF0` / char `0xFFF6`)
 - [x] Phase C: **FrSkyX / S.Port decoder → unified telemetry events** (INAV 7/8/9, dispatch by appID);
   AHI/compass/GPS/speed/altitude/vario/battery/RSSI/airspeed live. MODES (flight mode + armed) + GNSS
-  (sats + fix) decoded → flight-mode widget + ARMED + GPS fix. _Remaining: link-quality field (RC Link
-  widget); ArduPilot FrSky-passthrough (0x5000) decoder_
+  (sats + fix) decoded → flight-mode widget + ARMED + GPS fix. Link quality (`0xF010`/"VFR" = `100 − loss`)
+  + RSSI (`0xF101`) now feed the **RC Link widget** (see Advanced UI). _Remaining: ArduPilot
+  FrSky-passthrough (0x5000) decoder_
 - [~] Phase D: DB recording for telemetry-mode flights — recorder wired (arm/disarm from FrSky MODES,
   fed the decoded telemetry). _Built; pending verification on a real armed flight._
 - [ ] `CrsfSource` — CRSF/ELRS telemetry frames (decode by frame/sub-type; INAV reworked these across versions)
@@ -564,7 +565,7 @@ passive decoders. Dropdown panel under the connection bar; persisted, auto-conne
 - [ ] Safehome editor
 - [ ] HID controller input (gamepad/joystick)
 - [ ] **Stick / gimbal overlay** — animated RC transmitter sticks (two gimbals) driven by recorded RC-channel data, à la Blackbox Explorer. **Replay only for now** (from `RC_CHANNELS` / blackbox `rcCommand`); live later. Configurable channel map (AETR/TAER) + stick mode 1–4. As a widget or a corner overlay on the map/replay.
-- [ ] **RC Link widget** — dedicated link-quality readout (RSSI + LQ, optionally SNR) as a HUD widget, protocol-agnostic. Sources: MSP `MSP2_INAV_GET_LINK_STATS` (see Milestone 6 Link Statistics), CRSF LQ/RSSI/SNR, and **FrSky passive telemetry** (RSSI `0xF101`, Link Quality / VFR `0xF010`, RxBt `0xF104`). Needs a unified `link_quality` field on the live telemetry pipeline (already present in the DB schema for replay).
+- [x] **RC Link widget** — protocol-agnostic, adaptive HUD widget that shows whatever the active link reports and hides the rest (LQ big when present, else RSSI %; RSSI dBm + SNR as meta). Backed by a unified `LinkStatsData` (`rssi_percent` normalized at the source + optional `rssi_dbm` / `lq` / `snr_db`) on a new `telemetry-linkstats` event. Sources: **CRSF** LinkStatistics `0x14` (uplink RSSI dBm + LQ + SNR), **SmartPort** (RSSI `0xF101` + LQ from `0xF010`/"VFR" = `100 − loss`; RSSI-0 from the FC's unconfigured channel ignored), **MAVLink** `RC_CHANNELS` RSSI, **LTM** S-frame RSSI, **INAV** `MSPV2_INAV_ANALOG` RSSI and (9.1+) `MSP2_INAV_GET_LINK_STATS` for real dBm/LQ/SNR. Replay maps the DB `link_quality`/`rssi`. _Open:_ record live LQ/SNR to the DB (see Link Statistics above).
 - [ ] Audio status alerts (TTS)
 - [x] Terrain analysis — _elevation profile + clearance + correction (Terrain Follow / Clearance Check) + jump simulation done; see Terrain Elevation section_
 - [x] **Heading / course / crab cues** — compass COG track-bug + amber readout next to heading; 2D map **HDG / COG nose lines** + **predicted turn-radius arc** at the aircraft (velocity-vector length, arc capped at 180°); unified FC-heading-vs-COG pipeline across MSP / MAVLink / Blackbox and 2D+3D, live+replay; **Direction indicators** settings toggle. Wind-arrow / flight-path-marker **parked** on INAV `MSP2_INAV_WIND` (unmerged, likely v10); 3D map markers **not planned** (revisit only on request). See `docs/archive/WIND_CRAB_INDICATOR.md`
