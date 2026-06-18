@@ -78,6 +78,8 @@ pub enum Feature {
     AuxRc,
     /// ADS-B vehicle list over MSP — MSP2_ADSB_VEHICLE_LIST (INAV 8.0+)
     AdsbMsp,
+    /// RC link statistics — MSP2_INAV_GET_LINK_STATS (INAV 9.1+)
+    LinkStats,
 }
 
 impl Feature {
@@ -90,6 +92,7 @@ impl Feature {
             Feature::MspRc => InavVersion::new(8, 0, 0),
             Feature::AuxRc => InavVersion::new(9, 1, 0),
             Feature::AdsbMsp => InavVersion::new(8, 0, 0),
+            Feature::LinkStats => InavVersion::new(9, 1, 0),
         }
     }
 
@@ -101,6 +104,7 @@ impl Feature {
         Feature::MspRc,
         Feature::AuxRc,
         Feature::AdsbMsp,
+        Feature::LinkStats,
     ];
 }
 
@@ -116,6 +120,7 @@ pub struct FeatureSet {
     pub msp_rc: bool,
     pub aux_rc: bool,
     pub adsb_msp: bool,
+    pub link_stats: bool,
 }
 
 impl FeatureSet {
@@ -128,6 +133,7 @@ impl FeatureSet {
             msp_rc: version.is_at_least(Feature::MspRc.min_version()),
             aux_rc: version.is_at_least(Feature::AuxRc.min_version()),
             adsb_msp: version.is_at_least(Feature::AdsbMsp.min_version()),
+            link_stats: version.is_at_least(Feature::LinkStats.min_version()),
         }
     }
 
@@ -140,6 +146,7 @@ impl FeatureSet {
             Feature::MspRc => self.msp_rc,
             Feature::AuxRc => self.aux_rc,
             Feature::AdsbMsp => self.adsb_msp,
+            Feature::LinkStats => self.link_stats,
         }
     }
 }
@@ -219,6 +226,13 @@ mod tests {
         assert!(fs.has(Feature::MspRc));
         assert!(fs.has(Feature::Geozones));
         assert!(fs.has(Feature::AutolandConfig));
+        assert!(fs.has(Feature::LinkStats));
+    }
+
+    #[test]
+    fn test_link_stats_gated_below_910() {
+        assert!(!FeatureSet::for_version(InavVersion::new(9, 0, 0)).has(Feature::LinkStats));
+        assert!(!FeatureSet::for_version(InavVersion::new(8, 0, 0)).has(Feature::LinkStats));
     }
 
     #[test]

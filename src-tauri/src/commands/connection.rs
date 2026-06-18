@@ -308,6 +308,7 @@ fn connect_msp(
         feature_set.msp_rc,
         feature_set.aux_rc
     );
+    let link_stats_supported = feature_set.link_stats;
     fc_info.features = Some(feature_set);
 
     // 5) MSP2_INAV_MIXER → platform type and mixer preset
@@ -378,6 +379,8 @@ fn connect_msp(
         attitude_rate_hz: attitude_rate_hz.unwrap_or(5.0),
         position_rate_hz: position_rate_hz.unwrap_or(2.0),
         airspeed_enabled: airspeed_enabled.unwrap_or(false),
+        // RC link stats poll (MSP2_INAV_GET_LINK_STATS) — INAV 9.1+ only.
+        link_stats_enabled: link_stats_supported,
     };
 
     // ── Flight recorder setup ────────────────────────────────────────────

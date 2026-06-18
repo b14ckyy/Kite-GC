@@ -289,7 +289,7 @@ fn scheduler_loop(
             .map(|(i, _, _)| i);
 
         if let Some(idx) = most_overdue {
-            poll_slot(&mut *transport, &mut slots[idx], &app_handle, &mut debug_tracker, &recorder, &box_ids);
+            poll_slot(&mut *transport, &mut slots[idx], &app_handle, &mut debug_tracker, &recorder, &box_ids, config.link_stats_enabled);
             debug_tracker.maybe_emit(&app_handle);
             continue;
         }
@@ -347,7 +347,7 @@ fn build_slots(config: &TelemetryConfig) -> Vec<TelemetrySlot> {
         secondary_codes.push(MSPV2_INAV_AIR_SPEED);
     }
 
-    vec![
+    let mut slots = vec![
         TelemetrySlot::new(
             TelemetryGroup::Attitude,
             vec![MSP_ATTITUDE],
@@ -378,7 +378,19 @@ fn build_slots(config: &TelemetryConfig) -> Vec<TelemetrySlot> {
             1.0,
             4,
         ),
-    ]
+    ];
+
+    // RC link stats (INAV 9.1+) — own 1 Hz slot, low priority (degrades first under load).
+    if config.link_stats_enabled {
+        slots.push(TelemetrySlot::new(
+            TelemetryGroup::LinkStats,
+            vec![MSP2_INAV_GET_LINK_STATS],
+            1.0,
+            1,
+        ));
+    }
+
+    slots
 }
 
 /// Poll a single telemetry slot and emit events
@@ -389,6 +401,7 @@ fn poll_slot(
     tracker: &mut debug::DebugTracker,
     recorder: &Option<FlightRecorderHandle>,
     box_ids: &[u8],
+    link_stats_enabled: bool,
 ) {
     // Mark poll time BEFORE the request — the interval measures request-to-request,
     // not reply-to-request. This prevents reply latency from artificially slowing
@@ -433,6 +446,17 @@ fn poll_slot(
                     let _ = app_handle.emit("telemetry-flightmode", &fm);
                     if let Some(ref rec) = recorder {
                         if let Ok(mut r) = rec.lock() { r.on_flightmode(&fm); }
+                    }
+                }
+
+                // RC link: INAV pre-9.1 carries only the configured RSSI channel (0–1023) in ANALOG.
+                // Surface it as a normalized RSSI-only link for the RC Link widget. When the FC supports
+                // MSP2_INAV_GET_LINK_STATS (9.1+) we poll that richer source instead and suppress this one
+                // so the two don't clobber each other on the frontend.
+                if !link_stats_enabled {
+                    if let telemetry::TelemetryPayload::Analog(ref a) = payload {
+                        let ls = telemetry::LinkStatsData::from_rssi_1023(a.rssi);
+                        let _ = app_handle.emit("telemetry-linkstats", &ls);
                     }
                 }
             }

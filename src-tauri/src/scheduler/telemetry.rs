@@ -18,6 +18,7 @@ pub enum TelemetryGroup {
     PositionPrimary,
     PositionSecondary,
     Status,
+    LinkStats,
 }
 
 /// User-configurable telemetry polling rates
@@ -29,6 +30,10 @@ pub struct TelemetryConfig {
     pub position_rate_hz: f64,
     /// Enable airspeed polling (requires pitot sensor)
     pub airspeed_enabled: bool,
+    /// Poll MSP2_INAV_GET_LINK_STATS (RC link RSSI/LQ/SNR) — INAV 9.1+ only. When on, the RSSI-only
+    /// link derived from MSPV2_INAV_ANALOG is suppressed so this richer source is authoritative.
+    #[serde(default)]
+    pub link_stats_enabled: bool,
 }
 
 impl Default for TelemetryConfig {
@@ -37,6 +42,7 @@ impl Default for TelemetryConfig {
             attitude_rate_hz: 5.0,
             position_rate_hz: 2.0,
             airspeed_enabled: false,
+            link_stats_enabled: false,
         }
     }
 }
@@ -103,6 +109,35 @@ pub struct AirspeedData {
     pub airspeed: f64, // cm/s → m/s
 }
 
+/// Unified RC-link statistics (RC Link widget). Every field is optional: each protocol fills only what
+/// it can (LTM/MAVLink/INAV-pre-9.1 = RSSI only; SmartPort = RSSI + LQ; CRSF = RSSI dBm + LQ + SNR), and
+/// the widget shows present fields and hides the rest. `rssi_percent` is normalized at the source (which
+/// knows its own raw scale) so the frontend never has to guess the protocol's RSSI range.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LinkStatsData {
+    pub rssi_percent: Option<f32>, // 0–100, normalized
+    pub rssi_dbm: Option<i16>,     // raw dBm (negative), when the protocol reports it (CRSF, INAV 9.1+)
+    pub lq: Option<u8>,            // link quality 0–100
+    pub snr_db: Option<i8>,        // signal-to-noise ratio, dB (CRSF, INAV 9.1+)
+}
+
+impl LinkStatsData {
+    /// RSSI-only link from a 0–1023 INAV-scale value (INAV `MSPV2_INAV_ANALOG`; LTM after its
+    /// 0–254→0–1023 mapping). Out-of-range values are clamped.
+    pub fn from_rssi_1023(rssi: u16) -> Self {
+        Self {
+            rssi_percent: Some((rssi.min(1023) as f32) / 1023.0 * 100.0),
+            ..Default::default()
+        }
+    }
+
+    /// Map a CRSF/ELRS uplink RSSI in dBm to a 0–100 percentage. Linear over the usable window
+    /// −50 dBm (close, 100 %) … −120 dBm (sensitivity floor, 0 %) — the convention OpenTX/Yaapu use.
+    pub fn dbm_to_percent(dbm: i16) -> f32 {
+        (((dbm as f32) + 120.0) / 70.0 * 100.0).clamp(0.0, 100.0)
+    }
+}
+
 /// GPS quality statistics (from MSP_GPSSTATISTICS 166)
 #[derive(Debug, Clone, Serialize)]
 pub struct GpsStatsData {
@@ -133,6 +168,7 @@ pub enum TelemetryPayload {
     Airspeed(AirspeedData),
     GpsStats(GpsStatsData),
     NavStatus(NavStatusData),
+    LinkStats(LinkStatsData),
 }
 
 /// Map MSP code to Tauri event name
@@ -147,6 +183,7 @@ pub fn event_name_for_code(code: u16) -> String {
         MSPV2_INAV_AIR_SPEED => "telemetry-airspeed".into(),
         MSP_GPSSTATISTICS => "telemetry-gps-stats".into(),
         MSP_NAV_STATUS => "telemetry-nav-status".into(),
+        MSP2_INAV_GET_LINK_STATS => "telemetry-linkstats".into(),
         _ => format!("telemetry-0x{:04X}", code),
     }
 }
@@ -163,6 +200,7 @@ pub fn decode_telemetry(code: u16, payload: &[u8], box_ids: &[u8]) -> TelemetryP
         MSPV2_INAV_AIR_SPEED => decode_airspeed(payload),
         MSP_GPSSTATISTICS => decode_gps_statistics(payload),
         MSP_NAV_STATUS => decode_nav_status_event(payload),
+        MSP2_INAV_GET_LINK_STATS => decode_link_stats(payload),
         _ => {
             log::warn!("No decoder for MSP 0x{:04X}", code);
             TelemetryPayload::Attitude(AttitudeData {
@@ -186,6 +224,23 @@ fn decode_nav_status_event(payload: &[u8]) -> TelemetryPayload {
         }),
         Err(_) => TelemetryPayload::NavStatus(NavStatusData { active_wp_number: 0, nav_state: 0 }),
     }
+}
+
+/// MSP2_INAV_GET_LINK_STATS (0x2103, INAV 9.1+): [uplinkRSSI:u8 (=−dBm), uplinkLQ:u8 (%), uplinkSNR:i8 (dB)].
+/// INAV sends the RSSI as the negated magnitude (`(uint8_t)-uplinkRSSI`), so the true dBm is −byte0.
+fn decode_link_stats(payload: &[u8]) -> TelemetryPayload {
+    if payload.len() < 3 {
+        return TelemetryPayload::LinkStats(LinkStatsData::default());
+    }
+    let rssi_dbm = -(payload[0] as i16);
+    let lq = payload[1];
+    let snr = payload[2] as i8;
+    TelemetryPayload::LinkStats(LinkStatsData {
+        rssi_percent: Some(LinkStatsData::dbm_to_percent(rssi_dbm)),
+        rssi_dbm: Some(rssi_dbm),
+        lq: Some(lq),
+        snr_db: Some(snr),
+    })
 }
 
 fn read_i16(buf: &[u8], offset: usize) -> i16 {

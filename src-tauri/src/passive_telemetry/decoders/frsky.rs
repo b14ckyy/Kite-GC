@@ -17,7 +17,7 @@ use tauri::{AppHandle, Emitter};
 use crate::flightlog::recorder::FlightRecorderHandle;
 use crate::flightmode::{classify_inav, FlightModeState};
 use crate::scheduler::telemetry::{
-    AirspeedData, AltitudeData, AnalogData, AttitudeData, GpsData, StatusData,
+    AirspeedData, AltitudeData, AnalogData, AttitudeData, GpsData, LinkStatsData, StatusData,
 };
 
 use super::ap_passthrough::ApPassthroughDecoder;
@@ -45,6 +45,11 @@ const ID_GNSS: u16 = 0x0480; // INAV >=8.0 packed GNSS state
 const ID_LEGACY_GNSS: u16 = 0x0410; // INAV <=7.x (T2)
 const ID_ASPD: u16 = 0x0A00;
 const ID_RSSI: u16 = 0xF101;
+const ID_LQ: u16 = 0xF010; // link quality, sent as the "VFR"/RxQuality sensor (FrSky ACCESS, 2019+)
+
+/// S.Port physical ID of the receiver/TX — its frames (RSSI/RxBt) keep coming after an FC-link loss,
+/// so anything else marks the FC link alive.
+const RECEIVER_PHYS_ID: u8 = 0x98;
 
 // Normalized INAV flight-mode bits — must match the layout in `flightmode::classify_inav`.
 const F_ANGLE: u32 = 1 << 0;
@@ -124,6 +129,10 @@ struct State {
     rssi: u16,
     seen_analog: bool,
 
+    // RC link health (RC Link widget). RSSI (0xF101) and LQ (0xF010) are both 0–100 % on FrSky.
+    link_rssi: Option<u8>,
+    lq: Option<u8>,
+
     airspeed: f64,
     seen_airspeed: bool,
 
@@ -140,6 +149,7 @@ struct State {
     fresh_analog: bool,
     fresh_airspeed: bool,
     fresh_status: bool,
+    fresh_link: bool,
 }
 
 pub struct FrskyDecoder {
@@ -203,7 +213,7 @@ impl FrskyDecoder {
         }
         // physID 0x98 = receiver/TX (RSSI/RxBt keep coming after an FC-link loss); anything else is the
         // flight controller → marks the FC link as alive.
-        if f[0] != 0x98 {
+        if f[0] != RECEIVER_PHYS_ID {
             self.last_fc = Some(Instant::now());
         }
         let appid = (f[2] as u16) | ((f[3] as u16) << 8);
@@ -258,7 +268,22 @@ impl FrskyDecoder {
                 s.seen_status = true;
             }
             ID_ASPD => { s.airspeed = value as f64 * 0.514444; s.seen_airspeed = true; }
-            ID_RSSI => { s.rssi = value as u16; s.seen_analog = true; }
+            ID_RSSI => {
+                s.rssi = value as u16;
+                s.seen_analog = true;
+                // The FC also emits 0xF101 from its (often-unconfigured) RSSI channel — a phantom 0 that
+                // alternates with the receiver's real value (0/100 flicker). Ignore 0 for the RC link: a
+                // genuine 0 RSSI means the link is dead, in which case no frames would be arriving anyway.
+                if value > 0 {
+                    s.link_rssi = Some((value as u16).min(100) as u8);
+                    s.fresh_link = true;
+                }
+            }
+            ID_LQ => {
+                // 0xF010 carries packet LOSS %, not quality (matches the radio's VFR = 100 − raw).
+                s.lq = Some(100u32.saturating_sub(value) as u8);
+                s.fresh_link = true;
+            }
             _ => {}
         }
         // Mark the relevant emit-group fresh (gates publish; mirrors the appID→field mapping above).
@@ -284,9 +309,9 @@ impl FrskyDecoder {
         }
         // Only emit a type when a fresh frame updated it since the last publish (no fixed-tick re-publish
         // of cached state). Capture + clear the flags, then emit from the immutably-borrowed state.
-        let (f_status, f_att, f_gps, f_alt, f_an, f_asp) = {
+        let (f_status, f_att, f_gps, f_alt, f_an, f_asp, f_link) = {
             let s = &self.state;
-            (s.fresh_status, s.fresh_attitude, s.fresh_gps && s.have_fix, s.fresh_altitude, s.fresh_analog, s.fresh_airspeed)
+            (s.fresh_status, s.fresh_attitude, s.fresh_gps && s.have_fix, s.fresh_altitude, s.fresh_analog, s.fresh_airspeed, s.fresh_link)
         };
         self.state.fresh_status = false;
         self.state.fresh_attitude = false;
@@ -294,6 +319,7 @@ impl FrskyDecoder {
         self.state.fresh_altitude = false;
         self.state.fresh_analog = false;
         self.state.fresh_airspeed = false;
+        self.state.fresh_link = false;
         let s = &self.state;
 
         // Status first: drives the recorder's arm/disarm edge + the ARMED indicator.
@@ -370,6 +396,16 @@ impl FrskyDecoder {
             if let Some(rec) = recorder {
                 if let Ok(mut r) = rec.lock() { r.on_airspeed(&aspd); }
             }
+        }
+
+        // RC link: RSSI (0xF101) + LQ (0xF010), both native %; no SNR over S.Port.
+        if f_link {
+            let ls = LinkStatsData {
+                rssi_percent: s.link_rssi.map(|v| v as f32),
+                lq: s.lq,
+                ..Default::default()
+            };
+            let _ = app.emit("telemetry-linkstats", &ls);
         }
     }
 }

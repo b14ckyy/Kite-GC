@@ -63,6 +63,13 @@
     "fix3d": "3D",
     "fix3dDgps": "3D DGPS"
   },
+  "rcLink": {
+    "title": "LIEN",
+    "lq": "LQ",
+    "rssi": "RSSI",
+    "snr": "SNR",
+    "noLink": "PAS DE LIEN"
+  },
   "arming": {
     "armed": "ARMÉ",
     "disarmed": "DÉSARMÉ"
@@ -496,6 +503,7 @@
     "altitude": "Altitude",
     "battery": "Batterie",
     "gps": "GPS",
+    "rcLink": "Lien RC",
     "compass": "Compas",
     "home": "Home",
     "flightMode": "Mode de vol",

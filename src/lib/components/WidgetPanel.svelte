@@ -13,6 +13,7 @@
   import AltWidget from "./widgets/AltWidget.svelte";
   import BatteryWidget from "./widgets/BatteryWidget.svelte";
   import GpsWidget from "./widgets/GpsWidget.svelte";
+  import RcLinkWidget from "./widgets/RcLinkWidget.svelte";
   import CompassWidget from "./widgets/CompassWidget.svelte";
   import HomeWidget from "./widgets/HomeWidget.svelte";
   import FlightModeWidget from "./widgets/FlightModeWidget.svelte";
@@ -468,6 +469,8 @@
           <BatteryWidget {telem} size={item.sizePx} />
         {:else if item.id === 'gps'}
           <GpsWidget {telem} size={item.sizePx} />
+        {:else if item.id === 'rcLink'}
+          <RcLinkWidget {telem} size={item.sizePx} />
         {:else if item.id === 'compass'}
           <CompassWidget {telem} size={item.sizePx} />
         {:else if item.id === 'home'}

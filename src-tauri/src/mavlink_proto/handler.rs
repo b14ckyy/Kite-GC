@@ -554,11 +554,20 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
 
         // ── RC_CHANNELS → RSSI (merged into analog state) ──────────
         MavMessage::RC_CHANNELS(rc) => {
-            // rssi is 0–255 in RC_CHANNELS, map to 0–1023 like INAV
+            // rssi is 0–254 in RC_CHANNELS (255 = invalid), map to 0–1023 like INAV
             analog.rssi = (rc.rssi as u16) * 4;
             let _ = app_handle.emit("telemetry-analog", &analog.to_analog_data());
             if let Some(ref rec) = recorder {
                 if let Ok(mut r) = rec.lock() { r.on_analog(&analog.to_analog_data()); }
+            }
+            // RC link: ArduPilot/PX4 expose only the receiver RSSI over MAVLink (no LQ/SNR in a
+            // standard field). Surface it as a normalized RSSI-only link for the RC Link widget.
+            if rc.rssi != 255 {
+                let ls = crate::scheduler::telemetry::LinkStatsData {
+                    rssi_percent: Some((rc.rssi as f32) / 254.0 * 100.0),
+                    ..Default::default()
+                };
+                let _ = app_handle.emit("telemetry-linkstats", &ls);
             }
         }
 

@@ -11,6 +11,16 @@ import { invoke } from '@tauri-apps/api/core';
 import { connectionProtocol, fcLinkAlive } from '$lib/stores/connection';
 import type { FlightModeState } from '$lib/helpers/flightModeRegistry';
 
+/** Unified RC-link statistics (RC Link widget). Each field is null when the active protocol can't
+ *  provide it — the widget shows present fields and hides the rest. `rssiPercent` is normalized at the
+ *  backend source (which knows its own raw RSSI scale). */
+export interface LinkStats {
+  rssiPercent: number | null; // 0–100
+  rssiDbm: number | null;     // raw dBm (CRSF, INAV 9.1+)
+  lq: number | null;          // link quality 0–100
+  snrDb: number | null;       // dB (CRSF, INAV 9.1+)
+}
+
 export interface TelemetryData {
   // GPS
   lat: number;
@@ -42,6 +52,9 @@ export interface TelemetryData {
   power: number;
   batteryPercentage: number;
   cellCount: number;
+
+  // RC link statistics (RSSI / LQ / SNR — protocol-dependent, see LinkStats)
+  link: LinkStats;
 
   // Status
   armingFlags: number;
@@ -84,6 +97,7 @@ const defaultTelemetry: TelemetryData = {
   altitude: 0, vario: 0,
   airspeed: 0,
   voltage: 0, current: 0, mAhDrawn: 0, rssi: 0, power: 0, batteryPercentage: 0, cellCount: 0,
+  link: { rssiPercent: null, rssiDbm: null, lq: null, snrDb: null },
   armingFlags: 0, cpuLoad: 0, sensorStatus: 0,
   sensorGyro: 0, sensorAcc: 0, sensorMag: 0, sensorBaro: 0,
   sensorGps: 0, sensorRangefinder: 0, sensorPitot: 0, sensorOpflow: 0,
@@ -268,6 +282,20 @@ export async function startTelemetryListeners() {
           power: p.power,
           batteryPercentage: p.battery_percentage,
           cellCount: p.cell_count,
+          lastUpdate: Date.now(),
+        }));
+      }
+    )
+  );
+
+  unlisteners.push(
+    await listen<{ rssi_percent: number | null; rssi_dbm: number | null; lq: number | null; snr_db: number | null }>(
+      'telemetry-linkstats',
+      (event) => {
+        const p = event.payload;
+        telemetry.update((t) => ({
+          ...t,
+          link: { rssiPercent: p.rssi_percent, rssiDbm: p.rssi_dbm, lq: p.lq, snrDb: p.snr_db },
           lastUpdate: Date.now(),
         }));
       }

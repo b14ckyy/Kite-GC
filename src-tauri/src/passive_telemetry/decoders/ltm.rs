@@ -22,7 +22,7 @@ use tauri::{AppHandle, Emitter};
 use crate::flightlog::recorder::FlightRecorderHandle;
 use crate::flightmode::FlightModeState;
 use crate::scheduler::telemetry::{
-    AirspeedData, AltitudeData, AnalogData, AttitudeData, GpsData, StatusData,
+    AirspeedData, AltitudeData, AnalogData, AttitudeData, GpsData, LinkStatsData, StatusData,
 };
 
 /// INAV arming_flags bit 2 = ARMED (what the recorder + frontend look for).
@@ -507,6 +507,9 @@ impl LtmDecoder {
             if let Some(rec) = recorder {
                 if let Ok(mut r) = rec.lock() { r.on_analog(&analog); }
             }
+            // RC link: LTM's S-frame RSSI is the only link metric (no LQ/SNR). Already scaled to the
+            // 0–1023 INAV range on decode.
+            let _ = app.emit("telemetry-linkstats", &LinkStatsData::from_rssi_1023(s.rssi));
         }
 
         if f_asp {

@@ -12,6 +12,14 @@
 import type { TelemetryData } from '$lib/stores/telemetry';
 import type { TelemetryRecord } from '$lib/stores/flightlog';
 
+/** Normalize a recorded raw RSSI to 0–100 %. The scale isn't stored, so infer it from the magnitude:
+ *  ≤100 already a percentage, ≤255 the MAVLink 0–254 range, otherwise the INAV 0–1023 range. */
+function rssiRawToPercent(raw: number): number {
+  if (raw <= 100) return raw;
+  if (raw <= 255) return (raw / 254) * 100;
+  return (raw / 1023) * 100;
+}
+
 /** Convert a DB telemetry row to the widget-consumable TelemetryData format. */
 export function toTelemetryData(r: TelemetryRecord, fcVariant = 'INAV'): TelemetryData {
   return {
@@ -47,6 +55,15 @@ export function toTelemetryData(r: TelemetryRecord, fcVariant = 'INAV'): Telemet
     power: (r.voltage ?? 0) * (r.current_a ?? 0),
     batteryPercentage: r.battery_percentage ?? 0,
     cellCount: 0,         // not recorded in DB yet
+
+    // RC link — best-effort from the recorded fields (raw dBm/SNR aren't stored). The DB's raw RSSI
+    // scale is protocol-dependent, so normalize heuristically (≤100 = %, ≤255 = 0–254, else 0–1023).
+    link: {
+      rssiPercent: r.rssi != null ? rssiRawToPercent(r.rssi) : null,
+      rssiDbm: null,
+      lq: r.link_quality != null && r.link_quality > 0 ? Math.min(100, r.link_quality) : null,
+      snrDb: null,
+    },
 
     // Status
     armingFlags: r.state_flags ?? 0,

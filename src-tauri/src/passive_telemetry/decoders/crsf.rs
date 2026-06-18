@@ -30,7 +30,7 @@ use crate::flightlog::recorder::FlightRecorderHandle;
 use crate::flightmode::FlightModeState;
 use crate::msp::codec::MspCodec;
 use crate::scheduler::telemetry::{
-    AirspeedData, AltitudeData, AnalogData, AttitudeData, GpsData, StatusData,
+    AirspeedData, AltitudeData, AnalogData, AttitudeData, GpsData, LinkStatsData, StatusData,
 };
 
 use super::ap_passthrough::ApPassthroughDecoder;
@@ -51,6 +51,7 @@ const FT_BARO_ALT: u8 = 0x09;
 const FT_AIRSPEED: u8 = 0x0A;
 const FT_ATTITUDE: u8 = 0x1E;
 const FT_FLIGHT_MODE: u8 = 0x21;
+const FT_LINK_STATS: u8 = 0x14;
 
 /// Decoded view of one CRSF frame (E2: used for the analysis dump; E4 will reuse the scalings).
 enum Decoded {
@@ -61,6 +62,7 @@ enum Decoded {
     Airspeed { aspd_ms: f64 },
     Attitude { pitch: f64, roll: f64, yaw: f64 },
     FlightMode { text: String },
+    LinkStats { rssi_dbm: i16, lq: u8, snr: i8 },
     Other,
 }
 
@@ -107,6 +109,13 @@ fn decode_frame(ty: u8, p: &[u8]) -> Decoded {
             // Null-terminated ASCII string.
             let end = p.iter().position(|&b| b == 0).unwrap_or(p.len());
             Decoded::FlightMode { text: String::from_utf8_lossy(&p[..end]).into_owned() }
+        }
+        FT_LINK_STATS if p.len() >= 10 => {
+            // LinkStatistics (RF link health). We surface the UPLINK (handset→model control link) —
+            // what a pilot watches. RSSI is stored as a positive value = −dBm; the active antenna
+            // (p[4]) selects which of the two uplink RSSI readings is live.
+            let rssi_pos = if p[4] == 1 { p[1] } else { p[0] };
+            Decoded::LinkStats { rssi_dbm: -(rssi_pos as i16), lq: p[2], snr: p[3] as i8 }
         }
         _ => Decoded::Other,
     }
@@ -218,6 +227,11 @@ struct State {
     mode: FlightModeState,
     seen_status: bool,
 
+    link_rssi_dbm: i16,
+    link_lq: u8,
+    link_snr: i8,
+    seen_link: bool,
+
     // Per-type "a fresh frame arrived since the last publish" flags. Emission gates on these so we don't
     // re-publish unchanged cached state at the fixed handler tick — the output rate (and the relay) then
     // follows the FC's real data rate. Set in apply(), cleared in publish().
@@ -227,6 +241,7 @@ struct State {
     fresh_analog: bool,
     fresh_airspeed: bool,
     fresh_status: bool,
+    fresh_link: bool,
 }
 
 pub struct CrsfDecoder {
@@ -367,6 +382,13 @@ impl CrsfDecoder {
                 s.seen_status = true;
                 s.fresh_status = true;
             }
+            Decoded::LinkStats { rssi_dbm, lq, snr } => {
+                s.link_rssi_dbm = *rssi_dbm;
+                s.link_lq = *lq;
+                s.link_snr = *snr;
+                s.seen_link = true;
+                s.fresh_link = true;
+            }
             Decoded::Other => {}
         }
     }
@@ -389,6 +411,7 @@ impl CrsfDecoder {
                 format!("pitch={:.1} roll={:.1} yaw={:.1}", pitch, roll, yaw)
             }
             Decoded::FlightMode { text } => format!("text={:?}", text),
+            Decoded::LinkStats { rssi_dbm, lq, snr } => format!("rssi={}dBm lq={}% snr={}dB", rssi_dbm, lq, snr),
             Decoded::Other => String::from("(undecoded)"),
         };
         let line = format!(
@@ -411,9 +434,9 @@ impl CrsfDecoder {
         let ap_active = self.ap.is_some();
         // Only emit a type when a fresh frame updated it since the last publish (no fixed-tick re-publish
         // of cached state). Capture + clear the flags, then emit from the (now-immutably-borrowed) state.
-        let (f_status, f_att, f_gps, f_alt, f_an, f_asp) = {
+        let (f_status, f_att, f_gps, f_alt, f_an, f_asp, f_link) = {
             let s = &self.state;
-            (s.fresh_status, s.fresh_attitude, s.fresh_gps && s.have_fix, s.fresh_altitude, s.fresh_analog, s.fresh_airspeed)
+            (s.fresh_status, s.fresh_attitude, s.fresh_gps && s.have_fix, s.fresh_altitude, s.fresh_analog, s.fresh_airspeed, s.fresh_link)
         };
         self.state.fresh_status = false;
         self.state.fresh_attitude = false;
@@ -421,6 +444,7 @@ impl CrsfDecoder {
         self.state.fresh_altitude = false;
         self.state.fresh_analog = false;
         self.state.fresh_airspeed = false;
+        self.state.fresh_link = false;
         let s = &self.state;
 
         if f_status && !ap_active {
@@ -494,6 +518,18 @@ impl CrsfDecoder {
             if let Some(rec) = recorder {
                 if let Ok(mut r) = rec.lock() { r.on_airspeed(&aspd); }
             }
+        }
+
+        // RC link health (uplink RSSI dBm + LQ + SNR). Protocol-independent — emitted for both native
+        // INAV-CRSF and AP-over-CRSF sources (the radio sends 0x14 regardless of the FC).
+        if f_link {
+            let ls = LinkStatsData {
+                rssi_percent: Some(LinkStatsData::dbm_to_percent(s.link_rssi_dbm)),
+                rssi_dbm: Some(s.link_rssi_dbm),
+                lq: Some(s.link_lq),
+                snr_db: Some(s.link_snr),
+            };
+            let _ = app.emit("telemetry-linkstats", &ls);
         }
 
         // AP passthrough owns the AP-unique data (mode/armed/EKF/status-text/waypoint).
