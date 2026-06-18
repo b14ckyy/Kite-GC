@@ -21,7 +21,7 @@
     serializeWaypoints, parseWaypoints,
     type ArduWaypoint,
   } from '$lib/stores/missionArdupilot';
-  import { cmdName, cmdShort, cmdHasLocation, cmdDef, cmdValidForVehicle, enumLabel, type VehicleClass } from '$lib/helpers/arduCommandCatalog';
+  import { cmdName, cmdShort, cmdHasLocation, cmdDef, cmdValidForVehicle, cmdValidForPx4, enumLabel, type VehicleClass } from '$lib/helpers/arduCommandCatalog';
   import { connection } from '$lib/stores/connection';
   import { settings } from '$lib/stores/settings';
   import { autopilotSystem, type AutopilotSystem } from '$lib/stores/autopilotContext';
@@ -72,10 +72,17 @@
   ];
   const showVehicleSelect = $derived(currentSystem === 'ardupilot');
   const vehicleLocked = $derived(currentConn.status === 'connected');
-  // Soft-warning: count mission items whose command isn't valid for the selected vehicle class.
-  const invalidCount = $derived(
-    currentMission.filter((w) => !cmdValidForVehicle(w.command, currentVehicle)).length,
-  );
+  // Soft-warning is vehicle-class aware. ArduPilot's class is operator-chosen (meaningful offline too);
+  // PX4 has no class selector, so its class is only known once connected → warn only then. PX4 also
+  // flags commands the firmware doesn't support at all (would be rejected at upload).
+  const vehicleWarnActive = $derived(currentSystem === 'ardupilot' || currentConn.status === 'connected');
+  function cmdInvalid(cmd: number): boolean {
+    if (!vehicleWarnActive) return false;
+    return currentSystem === 'px4'
+      ? !cmdValidForPx4(cmd, currentVehicle)
+      : !cmdValidForVehicle(cmd, currentVehicle);
+  }
+  const invalidCount = $derived(currentMission.filter((w) => cmdInvalid(w.command)).length);
 
   const isMavlinkConnected = $derived(
     currentConn.status === 'connected' && currentConn.protocolType === 'mavlink'
@@ -332,7 +339,7 @@
                 <td class="col-num"><span class="wp-num-badge">{g.anchorIdx + 1}</span></td>
                 <td class="col-type">
                   {cmdShort(g.anchor.command)}
-                  {#if !cmdValidForVehicle(g.anchor.command, currentVehicle)}<span class="wp-warn" title={$t('arduMission.cmdInvalidForVehicle')}>⚠</span>{/if}
+                  {#if cmdInvalid(g.anchor.command)}<span class="wp-warn" title={$t('arduMission.cmdInvalidForVehicle')}>⚠</span>{/if}
                 </td>
                 <td class="col-alt">{formatAltShort(g.anchor)}</td>
                 <td class="col-param">{paramSummary(g.anchor)}</td>
@@ -343,7 +350,7 @@
                 <td class="col-num"><span class="wp-num-badge mod">{m.idx + 1}</span></td>
                 <td class="col-type">
                   {cmdShort(m.wp.command)}
-                  {#if !cmdValidForVehicle(m.wp.command, currentVehicle)}<span class="wp-warn" title={$t('arduMission.cmdInvalidForVehicle')}>⚠</span>{/if}
+                  {#if cmdInvalid(m.wp.command)}<span class="wp-warn" title={$t('arduMission.cmdInvalidForVehicle')}>⚠</span>{/if}
                 </td>
                 <td class="col-alt">—</td>
                 <td class="col-param">{paramSummary(m.wp)}</td>

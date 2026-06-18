@@ -26,8 +26,10 @@
     CMD,
     cmdDef, cmdName, cmdRawName, cmdHasLocation, cmdStandaloneCoordinate, cmdIsLoiter, cmdIsTakeoff,
     cmdDefaultParams, cmdDefaultCoordParams, locationCommandsByCategory, modifierCommandsByCategory,
-    type ParamSpec, type ParamIndex, type VehicleClass,
+    type ParamSpec, type ParamIndex, type VehicleClass, type Firmware,
   } from '$lib/helpers/arduCommandCatalog';
+  import { autopilotSystem, type AutopilotSystem } from '$lib/stores/autopilotContext';
+  import { connection } from '$lib/stores/connection';
   import {
     newPopupState, renderEditorPopup, closeEditorPopup,
     numInputHtml, enumSelectHtml, paramRow, canonicalLabel, actionsHtml, modifierSection,
@@ -47,6 +49,9 @@
   let currentHome    = $state<HomePosition>(get(homePosition));
   let currentVehicle = $state<VehicleClass>(get(arduVehicleClass));
   let currentActiveWp = $state<number>(get(activeWpNumber));
+  let currentSystem  = $state<AutopilotSystem>(get(autopilotSystem));
+  const firmware = $derived<Firmware>(currentSystem === 'px4' ? 'px4' : 'ardupilot');
+  let connected      = $state<boolean>(get(connection).status === 'connected');
 
   const unsubMission  = arduMission.subscribe(wps => { currentWps = wps; });
   const unsubSelIdx   = arduSelectedWpIndex.subscribe(i => { currentSelIdx = i; });
@@ -54,6 +59,8 @@
   const unsubHome     = homePosition.subscribe(h => { currentHome = h; });
   const unsubVehicle  = arduVehicleClass.subscribe(v => { currentVehicle = v; });
   const unsubActiveWp = activeWpNumber.subscribe(v => { currentActiveWp = v; });
+  const unsubSystem   = autopilotSystem.subscribe(s => { currentSystem = s; });
+  const unsubConn     = connection.subscribe(c => { connected = c.status === 'connected'; });
 
   // svelte-ignore state_referenced_locally
   const missionGroup = L.layerGroup().addTo(map);
@@ -121,7 +128,7 @@
   }
 
   function primaryCmdSelectHtml(cmd: number, vehicle: VehicleClass): string {
-    const groups = locationCommandsByCategory(vehicle);
+    const groups = locationCommandsByCategory(vehicle, firmware);
     let opts = categorizedOptions(groups, cmd);
     // Keep an out-of-catalog / non-location current command selectable so it round-trips.
     if (!groups.some(g => g.cmds.some(c => c.id === cmd))) {
@@ -131,7 +138,7 @@
   }
 
   function addModSelectHtml(vehicle: VehicleClass): string {
-    const groups = modifierCommandsByCategory(vehicle);
+    const groups = modifierCommandsByCategory(vehicle, firmware);
     const opts = `<option value="" selected disabled>${$t('missionLayer.addModifier')}</option>`
       + categorizedOptions(groups, -1);
     return addModifierSelect(opts);
@@ -153,7 +160,9 @@
         + `<input type="number" data-field="alt" value="${wp.alt}" step="1" min="0"/>`
         + `<button class="wpe-num-btn" data-numdir="1">+</button></div>`
         + `<button data-field="frameToggle" class="wpe-toggle">${frameLabel(wp.frame)}</button></div>`;
-      if (!def.isTakeoff) {
+      // Takeoff coords are hidden when connected (it takes off from the FC home), but editable offline
+      // so the operator can place it precisely (drag on the map or type here).
+      if (!def.isTakeoff || !connected) {
         const latDeg = (wp.lat / 1e7).toFixed(7);
         const lonDeg = (wp.lon / 1e7).toFixed(7);
         html += `<div class="wpe-row"><label>${$t('missionLayer.lat')}</label><input type="number" data-field="lat" value="${latDeg}" step="0.0000001" min="-90" max="90" class="wpe-coord-input"/></div>`;
@@ -330,8 +339,14 @@
     return n > 0 ? L.latLng(sumLat / n, sumLon / n) : null;
   }
 
-  function wpDisplayLatLng(wp: ArduWaypoint, wps: ArduWaypoint[], home: HomePosition): L.LatLng | null {
-    if (cmdIsTakeoff(wp.command)) return resolveTakeoffLatLng(wps, home);
+  function wpDisplayLatLng(wp: ArduWaypoint, wps: ArduWaypoint[], home: HomePosition, conn: boolean): L.LatLng | null {
+    if (cmdIsTakeoff(wp.command)) {
+      // Offline the operator may position the takeoff freely (stored coords win) so it stays out of the
+      // way — also the correct target for PX4 / ArduPlane takeoff. With a UAV connected the real takeoff
+      // is the FC home, so anchor there and lock it (mirrors the "locked when connected" mission rule).
+      if (!conn && (wp.lat !== 0 || wp.lon !== 0)) return L.latLng(wp.lat / 1e7, wp.lon / 1e7);
+      return resolveTakeoffLatLng(wps, home);
+    }
     return L.latLng(wp.lat / 1e7, wp.lon / 1e7);
   }
 
@@ -364,7 +379,7 @@
 
   // ── Render ──────────────────────────────────────────────────────────
 
-  function renderMission(wps: ArduWaypoint[], selIdx: number, editing: boolean, home: HomePosition, vehicle: VehicleClass, activeWp: number) {
+  function renderMission(wps: ArduWaypoint[], selIdx: number, editing: boolean, home: HomePosition, vehicle: VehicleClass, activeWp: number, conn: boolean) {
     const groups = groupArduMission(wps);
     const selGroup = groups.find(g => g.anchorIdx === selIdx || g.modifiers.some(m => m.idx === selIdx)) ?? null;
 
@@ -384,19 +399,21 @@
 
       if (hasLoc || standalone) {
         const isTakeoff = cmdIsTakeoff(wp.command);
-        const latLng = wpDisplayLatLng(wp, wps, home);
+        const latLng = wpDisplayLatLng(wp, wps, home, conn);
         if (!latLng) continue;
 
         if (hasLoc) { fpPositions.push(latLng); fpWpIndices.push(i); }
 
+        // Takeoff is draggable too while planning offline (a connected UAV locks it to its FC home).
+        const draggable = editing && (!isTakeoff || !conn);
         const marker = L.marker(latLng, {
           icon: iconForArduWp(wp, displayNum, i === selIdx, activeWp > 0 && displayNum === activeWp),
-          draggable: editing && !isTakeoff,
+          draggable,
           title: `WP${displayNum}: ${cmdName(wp.command)}`,
         }).addTo(missionGroup);
 
         marker.on('click', () => { arduSelectedWpIndex.set(i); });
-        if (editing && !isTakeoff) {
+        if (draggable) {
           marker.on('dragend', () => {
             const pos = marker.getLatLng();
             const cur = get(arduMission)[i];
@@ -429,8 +446,8 @@
         const prevLocIdx = findPrevLocationIdx(wps, i);
         const sourceWp = prevLocIdx >= 0 ? wps[prevLocIdx] : null;
         const targetWp = targetLocIdx >= 0 ? wps[targetLocIdx] : null;
-        const src = sourceWp ? wpDisplayLatLng(sourceWp, wps, home) : null;
-        const dst = targetWp ? wpDisplayLatLng(targetWp, wps, home) : null;
+        const src = sourceWp ? wpDisplayLatLng(sourceWp, wps, home, conn) : null;
+        const dst = targetWp ? wpDisplayLatLng(targetWp, wps, home, conn) : null;
         if (src && dst) {
           const repeat = wp.param2 < 0 ? '∞' : wp.param2;
           const label = wp.command === CMD.DO_JUMP
@@ -486,7 +503,7 @@
 
     // Editor popup for the selected group (anchored on its primary waypoint) — shared framework with
     // the content-signature redraw guard, so live redraws don't close an open dropdown.
-    const anchorLatLng = editing && selGroup?.anchor ? wpDisplayLatLng(selGroup.anchor, wps, home) : null;
+    const anchorLatLng = editing && selGroup?.anchor ? wpDisplayLatLng(selGroup.anchor, wps, home, conn) : null;
     if (editing && selGroup?.anchor && anchorLatLng) {
       const g = selGroup;
       renderEditorPopup(
@@ -518,10 +535,10 @@
   // svelte-ignore state_referenced_locally
   map.on('click', onMapClick);
 
-  $effect(() => { renderMission(currentWps, currentSelIdx, currentEditing, currentHome, currentVehicle, currentActiveWp); });
+  $effect(() => { renderMission(currentWps, currentSelIdx, currentEditing, currentHome, currentVehicle, currentActiveWp, connected); });
 
   onDestroy(() => {
-    unsubMission(); unsubSelIdx(); unsubEditMode(); unsubHome(); unsubVehicle(); unsubActiveWp();
+    unsubMission(); unsubSelIdx(); unsubEditMode(); unsubHome(); unsubVehicle(); unsubActiveWp(); unsubSystem(); unsubConn();
     map.off('click', onMapClick);
     closeEditorPopup(map, popupState);
     missionGroup.clearLayers();

@@ -123,10 +123,24 @@ export function setArduVehicleClass(cls: VehicleClass): void {
   settings.patch({ lastArduVehicleClass: cls });
 }
 
-/** Map the FC's MAVLink vehicle type to a class. `mavType` is the HEARTBEAT MAV_TYPE; it is the only
- *  reliable QuadPlane signal (a QuadPlane reports fc_variant "ArduPlane" but a VTOL_* MAV_TYPE). Falls
- *  back to the fc_variant string when the type is unknown/absent. */
+/** MAV_TYPE → vehicle class. PX4 reports an accurate MAV_TYPE for every airframe, so the class is read
+ *  straight from it (unlike ArduPilot, where a QuadPlane lies and reports MAV_TYPE_FIXED_WING). */
+function mavTypeToClass(mavType: number): VehicleClass | null {
+  if (mavType === 1) return 'plane';                              // FIXED_WING
+  if ([2, 3, 4, 13, 14, 15].includes(mavType)) return 'copter';  // quad/coaxial/heli/hexa/octo/tri
+  if (mavType === 10) return 'rover';                             // GROUND_ROVER
+  if (mavType === 11) return 'boat';                              // SURFACE_BOAT
+  if (mavType === 12) return 'sub';                              // SUBMARINE
+  if (mavType >= 19 && mavType <= 25) return 'quadplane';        // VTOL family
+  return null;
+}
+
+/** Map the FC's variant + MAVLink vehicle type to a class. For **PX4** the class comes straight from
+ *  the MAV_TYPE (PX4 reports it accurately). For **ArduPilot** the MAV_TYPE is only a reliable QuadPlane
+ *  signal (a QuadPlane reports fc_variant "ArduPlane" but a VTOL_* MAV_TYPE); otherwise the per-vehicle
+ *  fc_variant string ("ArduPlane"/"ArduCopter"/…) is authoritative. */
 function detectVehicleClass(variant: string, mavType: number | null | undefined): VehicleClass | null {
+  if (variant.toLowerCase() === 'px4') return mavType != null ? mavTypeToClass(mavType) : null;
   // MAV_TYPE VTOL range (19–25: tailsitter duo/quad, tiltrotor, …) → QuadPlane.
   if (mavType != null && mavType >= 19 && mavType <= 25) return 'quadplane';
   const v = variant.toLowerCase();

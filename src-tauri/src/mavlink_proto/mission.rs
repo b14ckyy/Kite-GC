@@ -50,9 +50,14 @@ pub struct ArduWaypoint {
 // ── Public protocol functions ─────────────────────────────────────────────────
 
 /// Download the mission stored on the FC.
+///
+/// `reserve_home` reflects the firmware's home-slot convention: ArduPilot stores the home location as
+/// mission item 0 (dropped here so the planner only edits real waypoints), while PX4 has no home slot
+/// (item 0 is the first real waypoint). See `ardu_mission_download`.
 pub fn download(
     cmd_tx: &mpsc::Sender<MavlinkCommand>,
     fc_sysid: u8,
+    reserve_home: bool,
 ) -> Result<Vec<ArduWaypoint>, String> {
     let rx = register(cmd_tx)?;
 
@@ -80,8 +85,9 @@ pub fn download(
     // ArduPilot mission slot 0 is ALWAYS the home location, not a real waypoint — every item the
     // operator authored is at seq 1..count. We still request seq 0 (the FC streams items in order),
     // but drop it from the returned list so the planner shows/edits only real waypoints. `upload`
-    // mirrors this by re-injecting a home placeholder at seq 0.
-    let mut items = Vec::with_capacity(count.saturating_sub(1) as usize);
+    // mirrors this by re-injecting a home placeholder at seq 0. PX4 has no home slot: every item
+    // (including seq 0) is a real waypoint, so when `reserve_home` is false nothing is dropped.
+    let mut items = Vec::with_capacity(count.saturating_sub(reserve_home as u16) as usize);
     for seq in 0..count {
         if let Err(e) = send(cmd_tx, MavMessage::MISSION_REQUEST_INT(MISSION_REQUEST_INT_DATA {
             target_system: fc_sysid,
@@ -94,7 +100,7 @@ pub fn download(
         }
 
         match wait_for_item(&rx, seq, ITEM_TIMEOUT) {
-            Ok(wp) => { if seq != 0 { items.push(wp); } }
+            Ok(wp) => { if !(reserve_home && seq == 0) { items.push(wp); } }
             Err(e) => { unregister(cmd_tx); return Err(e); }
         }
     }
@@ -114,11 +120,13 @@ pub fn upload(
     cmd_tx: &mpsc::Sender<MavlinkCommand>,
     fc_sysid: u8,
     waypoints: &[ArduWaypoint],
+    reserve_home: bool,
 ) -> Result<(), String> {
     let rx = register(cmd_tx)?;
     // ArduPilot reserves mission slot 0 for home, so the wire count is waypoints + 1: seq 0 is a
-    // home placeholder and the operator's waypoints follow at seq 1.. (download dropped slot 0).
-    let count = waypoints.len() as u16 + 1;
+    // home placeholder and the operator's waypoints follow at seq 1.. (download dropped slot 0). PX4
+    // has no home slot: the waypoints map straight to seq 0..len.
+    let count = waypoints.len() as u16 + reserve_home as u16;
 
     // 1. Announce item count
     eprintln!("MAVLink upload: announcing {} items ({} waypoints + home slot)", count, waypoints.len());
@@ -143,7 +151,7 @@ pub fn upload(
         }
         match rx.recv_timeout(ITEM_TIMEOUT) {
             Ok(MavMessage::MISSION_REQUEST_INT(req)) => {
-                if let Err(e) = respond_item(cmd_tx, req.seq, waypoints, fc_sysid) {
+                if let Err(e) = respond_item(cmd_tx, req.seq, waypoints, fc_sysid, reserve_home) {
                     unregister(cmd_tx);
                     return Err(e);
                 }
@@ -152,7 +160,7 @@ pub fn upload(
                 // Deprecated float-coordinate request — still answer with MISSION_ITEM_INT (the FC
                 // accepts it). Without this the upload stalls → MAV_MISSION_OPERATION_CANCELLED.
                 // (ArduPilot SITL uses this variant.)
-                if let Err(e) = respond_item(cmd_tx, req.seq, waypoints, fc_sysid) {
+                if let Err(e) = respond_item(cmd_tx, req.seq, waypoints, fc_sysid, reserve_home) {
                     unregister(cmd_tx);
                     return Err(e);
                 }
@@ -182,19 +190,20 @@ pub fn upload(
     }
 }
 
-/// Send the mission item the FC requested for `seq`: seq 0 = home placeholder, seq 1..=len = the
-/// operator's waypoints. Always replies with MISSION_ITEM_INT (the FC accepts it for either request
-/// variant).
+/// Send the mission item the FC requested for `seq`. With `reserve_home` (ArduPilot): seq 0 = home
+/// placeholder, seq 1..=len = the operator's waypoints. Without it (PX4): seq 0..len map straight to
+/// the waypoints. Always replies with MISSION_ITEM_INT (the FC accepts it for either request variant).
 fn respond_item(
     cmd_tx: &mpsc::Sender<MavlinkCommand>,
     seq: u16,
     waypoints: &[ArduWaypoint],
     fc_sysid: u8,
+    reserve_home: bool,
 ) -> Result<(), String> {
-    let item = if seq == 0 {
+    let item = if reserve_home && seq == 0 {
         home_item(waypoints, fc_sysid)
     } else {
-        let idx = seq as usize - 1;
+        let idx = seq as usize - reserve_home as usize;
         if idx >= waypoints.len() {
             return Err(format!("FC requested WP {} but mission has only {}", seq, waypoints.len()));
         }

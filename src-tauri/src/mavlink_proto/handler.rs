@@ -48,6 +48,10 @@ pub struct MavlinkHandle {
     thread: Option<thread::JoinHandle<Option<Box<dyn ByteTransport>>>>,
     /// System ID of the connected FC (from handshake)
     pub fc_sysid: u8,
+    /// FC variant string from the handshake ("ArduPlane"/"ArduCopter"/"PX4"/…). Drives firmware-
+    /// specific mission handling — notably the home-slot convention (ArduPilot reserves mission item 0
+    /// for home, PX4 does not).
+    pub fc_variant: String,
 }
 
 impl MavlinkHandle {
@@ -89,6 +93,7 @@ pub fn start(
 ) -> MavlinkHandle {
     let (cmd_tx, cmd_rx) = mpsc::channel::<MavlinkCommand>();
 
+    let handle_variant = fc_variant.clone();
     let thread = thread::spawn(move || {
         handler_loop(transport, fc_sysid, fc_variant, app_handle, cmd_rx, recorder)
     });
@@ -97,6 +102,7 @@ pub fn start(
         cmd_tx,
         thread: Some(thread),
         fc_sysid,
+        fc_variant: handle_variant,
     }
 }
 

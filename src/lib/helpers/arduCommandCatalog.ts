@@ -23,6 +23,12 @@
 
 export type VehicleClass = 'plane' | 'copter' | 'quadplane' | 'rover' | 'boat' | 'sub';
 
+/** Autopilot firmware family the catalog is resolved for. ArduPilot and PX4 share the MAVLink mission
+ *  protocol and the same MAV_CMD ids, but PX4 implements a smaller, standard subset (see PX4_COMMANDS)
+ *  and — unlike ArduPilot — has **one** mission interpreter for all airframes (no per-vehicle command
+ *  split). INAV does not use this catalog (it has its own MSP waypoint model). */
+export type Firmware = 'ardupilot' | 'px4';
+
 /** QGC-style picker categories (the grouping shown in the command list). */
 export type UiCategory =
   | 'Basic' | 'Loiter' | 'Flight control' | 'Conditionals' | 'Camera' | 'Safety' | 'VTOL' | 'Advanced';
@@ -84,6 +90,22 @@ export const CMD = {
   DO_SET_RESUME_REPEAT_DIST: 215, DO_AUX_FUNCTION: 218, DO_GUIDED_LIMITS: 222,
   JUMP_TAG: 600, DO_JUMP_TAG: 601, DO_GIMBAL_MANAGER_PITCHYAW: 1000, DO_VTOL_TRANSITION: 3000,
 } as const;
+
+// MAV_CMDs PX4 accepts in a mission. Verified against the PX4 docs ("Mission Mode" supported-command
+// list) + the authoritative source `MavlinkMissionManager::parse_mavlink_mission_item` in
+// firmware/src/modules/mavlink/mavlink_mission.cpp. PX4 implements a smaller, standard subset than
+// ArduPilot (no JUMP_TAG, no extra LOITER variants, no relay/parachute/fence/condition commands) and
+// has no per-vehicle command split — one interpreter for all airframes. The VTOL commands are offered
+// for any PX4 airframe; a soft-warning at connect flags them on a non-VTOL vehicle (mirrors ArduPilot).
+// PX4 rejects unsupported commands at upload (mission feasibility checker), so this set must stay tight.
+const PX4_COMMANDS = new Set<number>([
+  CMD.NAV_WAYPOINT, CMD.NAV_LOITER_UNLIM, CMD.NAV_LOITER_TIME, CMD.NAV_LOITER_TO_ALT,
+  CMD.NAV_TAKEOFF, CMD.NAV_LAND, CMD.NAV_RETURN_TO_LAUNCH, CMD.NAV_DELAY,
+  CMD.DO_JUMP, CMD.DO_CHANGE_SPEED, CMD.DO_SET_HOME, CMD.DO_SET_SERVO, CMD.DO_LAND_START,
+  CMD.DO_SET_ROI_LOCATION, CMD.DO_SET_ROI_NONE, CMD.DO_DIGICAM_CONTROL, CMD.DO_SET_CAM_TRIGG_DIST,
+  CMD.DO_GIMBAL_MANAGER_PITCHYAW, CMD.DO_AUTOTUNE_ENABLE,
+  CMD.NAV_VTOL_TAKEOFF, CMD.NAV_VTOL_LAND, CMD.DO_VTOL_TRANSITION,
+]);
 
 // Vehicle-class groupings (readability).
 const FIXED: VehicleClass[] = ['plane', 'quadplane'];
@@ -483,9 +505,17 @@ export function cmdDefaultCoordParams(id: number): { x?: number; y?: number; z?:
   return { x: p?.[5]?.default, y: p?.[6]?.default, z: p?.[7]?.default };
 }
 
-/** Commands available for a vehicle class. */
-export function resolveCatalog(vehicle: VehicleClass): ArduCmdDef[] {
+/** Commands offered for a firmware/vehicle. ArduPilot: filtered by the vehicle class. PX4: the whole
+ *  PX4 subset regardless of class (one interpreter for all airframes; VTOL commands are always offered
+ *  and soft-warned at connect on a non-VTOL vehicle). */
+export function resolveCatalog(vehicle: VehicleClass, firmware: Firmware = 'ardupilot'): ArduCmdDef[] {
+  if (firmware === 'px4') return ARDU_CATALOG.filter((c) => PX4_COMMANDS.has(c.id));
   return ARDU_CATALOG.filter((c) => c.vehicles.includes(vehicle));
+}
+
+/** Is this command part of the PX4-supported set? */
+export function cmdSupportedByPx4(id: number): boolean {
+  return PX4_COMMANDS.has(id);
 }
 
 /** Soft-validity: is this command valid for the given vehicle class? A catalog-unknown (legacy /
@@ -496,14 +526,22 @@ export function cmdValidForVehicle(id: number, vehicle: VehicleClass): boolean {
   return !d || d.vehicles.includes(vehicle);
 }
 
-/** Location (primary-waypoint) commands for a vehicle, grouped by UI category in display order. */
-export function locationCommandsByCategory(vehicle: VehicleClass): { category: UiCategory; cmds: ArduCmdDef[] }[] {
-  return groupByCategory(resolveCatalog(vehicle).filter((c) => c.specifiesCoordinate));
+/** Soft-validity for PX4. Flags two cases the FC would reject at upload: (1) a known ArduPilot-only
+ *  command not in the PX4 set, and (2) a VTOL command on a non-VTOL airframe. Catalog-unknown (legacy /
+ *  round-trip-only) commands are NOT flagged — we can't judge them and they must round-trip untouched. */
+export function cmdValidForPx4(id: number, vehicle: VehicleClass): boolean {
+  if (!PX4_COMMANDS.has(id)) return !BY_ID.has(id); // unknown → don't flag; known-but-not-PX4 → flag
+  return BY_ID.get(id)?.category === 'VTOL' ? vehicle === 'quadplane' : true;
 }
 
-/** Modifier (non-location) commands for a vehicle, grouped by UI category — drives "+ Add modifier". */
-export function modifierCommandsByCategory(vehicle: VehicleClass): { category: UiCategory; cmds: ArduCmdDef[] }[] {
-  return groupByCategory(resolveCatalog(vehicle).filter((c) => !c.specifiesCoordinate));
+/** Location (primary-waypoint) commands for a firmware/vehicle, grouped by UI category in display order. */
+export function locationCommandsByCategory(vehicle: VehicleClass, firmware: Firmware = 'ardupilot'): { category: UiCategory; cmds: ArduCmdDef[] }[] {
+  return groupByCategory(resolveCatalog(vehicle, firmware).filter((c) => c.specifiesCoordinate));
+}
+
+/** Modifier (non-location) commands for a firmware/vehicle, grouped by UI category — drives "+ Add modifier". */
+export function modifierCommandsByCategory(vehicle: VehicleClass, firmware: Firmware = 'ardupilot'): { category: UiCategory; cmds: ArduCmdDef[] }[] {
+  return groupByCategory(resolveCatalog(vehicle, firmware).filter((c) => !c.specifiesCoordinate));
 }
 
 function groupByCategory(cmds: ArduCmdDef[]): { category: UiCategory; cmds: ArduCmdDef[] }[] {

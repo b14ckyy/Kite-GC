@@ -3115,7 +3115,13 @@
   }
 
   function arduWpLatLon3d(wp: ArduWaypoint, wps: ArduWaypoint[]): { lat: number; lon: number } | null {
-    if (cmdIsTakeoff(wp.command)) return arduTakeoffLatLon3d(wps);
+    if (cmdIsTakeoff(wp.command)) {
+      // Offline the operator can position the takeoff freely (stored coords win) — mirror the 2D layer.
+      // Connected, it anchors on the FC home (the real takeoff point). See ArduMissionLayer.wpDisplayLatLng.
+      const conn = get(connection).status === 'connected';
+      if (!conn && !(wp.lat === 0 && wp.lon === 0)) return { lat: wp.lat / 1e7, lon: wp.lon / 1e7 };
+      return arduTakeoffLatLon3d(wps);
+    }
     if (wp.lat === 0 && wp.lon === 0) return null;
     return { lat: wp.lat / 1e7, lon: wp.lon / 1e7 };
   }

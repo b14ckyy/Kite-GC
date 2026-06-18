@@ -350,16 +350,17 @@ pub fn mission_load_file(path: String, store: State<'_, MissionStore>) -> Result
 pub fn ardu_mission_download(state: State<'_, AppState>) -> Result<Vec<ArduWaypoint>, String> {
     // Clone the command sender + sysid while holding the mutex briefly.
     // The actual protocol exchange runs after the lock is released.
-    let (cmd_tx, fc_sysid) = {
+    let (cmd_tx, fc_sysid, reserve_home) = {
         let proto = state.protocol.lock().map_err(|e| e.to_string())?;
         match proto.as_ref() {
-            Some(ActiveProtocol::Mavlink(h)) => (h.cmd_tx_clone(), h.fc_sysid),
+            // PX4 has no home mission-slot (item 0 is a real waypoint); ArduPilot reserves slot 0 for home.
+            Some(ActiveProtocol::Mavlink(h)) => (h.cmd_tx_clone(), h.fc_sysid, !h.fc_variant.eq_ignore_ascii_case("px4")),
             Some(ActiveProtocol::Msp(_)) => return Err("FC is not running MAVLink".into()),
             Some(ActiveProtocol::PassiveTelemetry(_)) => return Err("FC is not running MAVLink".into()),
             None => return Err("Not connected".into()),
         }
     };
-    mavlink_proto::mission::download(&cmd_tx, fc_sysid)
+    mavlink_proto::mission::download(&cmd_tx, fc_sysid, reserve_home)
 }
 
 /// Upload an ArduPilot mission to the FC via MAVLink mission microprotocol.
@@ -373,16 +374,17 @@ pub fn ardu_mission_upload(
     if waypoints.is_empty() {
         return Err("No waypoints to upload".into());
     }
-    let (cmd_tx, fc_sysid) = {
+    let (cmd_tx, fc_sysid, reserve_home) = {
         let proto = state.protocol.lock().map_err(|e| e.to_string())?;
         match proto.as_ref() {
-            Some(ActiveProtocol::Mavlink(h)) => (h.cmd_tx_clone(), h.fc_sysid),
+            // PX4 has no home mission-slot (item 0 is a real waypoint); ArduPilot reserves slot 0 for home.
+            Some(ActiveProtocol::Mavlink(h)) => (h.cmd_tx_clone(), h.fc_sysid, !h.fc_variant.eq_ignore_ascii_case("px4")),
             Some(ActiveProtocol::Msp(_)) => return Err("FC is not running MAVLink".into()),
             Some(ActiveProtocol::PassiveTelemetry(_)) => return Err("FC is not running MAVLink".into()),
             None => return Err("Not connected".into()),
         }
     };
-    mavlink_proto::mission::upload(&cmd_tx, fc_sysid, &waypoints)
+    mavlink_proto::mission::upload(&cmd_tx, fc_sysid, &waypoints, reserve_home)
 }
 
 /// Read a text file from disk (used for .waypoints and similar formats)
