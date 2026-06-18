@@ -83,6 +83,62 @@ pub fn classify_inav(flags: u32) -> FlightModeState {
     FlightModeState { primary: primary.to_string(), modifiers }
 }
 
+/// Dispatch a MAVLink HEARTBEAT `custom_mode` to the right per-autopilot classifier, selected by the
+/// `fc_variant` string. PX4 packs the mode (main + sub) into `custom_mode` completely differently from
+/// ArduPilot's flat per-vehicle table, so they need separate decoders. Used by the live MAVLink handler
+/// and the tlog importer (both have the variant from the HEARTBEAT autopilot field).
+pub fn classify_mavlink(custom_mode: u32, variant: &str) -> FlightModeState {
+    if variant.eq_ignore_ascii_case("PX4") {
+        classify_px4(custom_mode)
+    } else {
+        classify_ardupilot(custom_mode, variant)
+    }
+}
+
+/// Classify a PX4 HEARTBEAT `custom_mode` into the canonical model (no modifiers). PX4 uses
+/// `union px4_custom_mode`: `main_mode` in bits 16-23 and `sub_mode` in bits 24-31. The sub_mode
+/// only refines AUTO and POSCTL; every other mode is identified by main_mode alone. Ids mirror the
+/// frontend `MODE_REGISTRY` (`px4_*` plus the shared manual/acro/mission/land/takeoff entries).
+pub fn classify_px4(custom_mode: u32) -> FlightModeState {
+    let main_mode = ((custom_mode >> 16) & 0xFF) as u8;
+    let sub_mode = ((custom_mode >> 24) & 0xFF) as u8;
+    match px4_mode_id(main_mode, sub_mode) {
+        Some(id) => FlightModeState::primary(id),
+        None => FlightModeState::primary(&format!("px4_mode_{}_{}", main_mode, sub_mode)),
+    }
+}
+
+/// PX4_CUSTOM_MAIN_MODE_* (+ PX4_CUSTOM_SUB_MODE_AUTO_* / _POSCTL_*) → canonical id.
+/// Values from PX4 `commander/px4_custom_mode.h`; labels match the QGC mode names.
+fn px4_mode_id(main_mode: u8, sub_mode: u8) -> Option<&'static str> {
+    Some(match main_mode {
+        1 => "manual",            // MANUAL
+        2 => "px4_altitude",      // ALTCTL
+        3 => match sub_mode {     // POSCTL
+            1 => "px4_orbit",     //   POSCTL_ORBIT
+            _ => "px4_position",  //   POSCTL_POSCTL / _SLOW
+        },
+        4 => match sub_mode {     // AUTO
+            1 => "px4_ready",         //   AUTO_READY
+            2 => "takeoff",           //   AUTO_TAKEOFF
+            3 => "px4_hold",          //   AUTO_LOITER  → "Hold"
+            4 => "mission",           //   AUTO_MISSION
+            5 => "px4_return",        //   AUTO_RTL     → "Return"
+            6 => "land",              //   AUTO_LAND
+            8 => "px4_follow_me",     //   AUTO_FOLLOW_TARGET
+            9 => "px4_precland",      //   AUTO_PRECLAND
+            10 => "px4_vtol_takeoff", //   AUTO_VTOL_TAKEOFF
+            _ => return None,
+        },
+        5 => "acro",              // ACRO
+        6 => "px4_offboard",      // OFFBOARD
+        7 => "px4_stabilized",    // STABILIZED
+        8 => "px4_rattitude",     // RATTITUDE
+        10 => "px4_termination",  // TERMINATION
+        _ => return None,
+    })
+}
+
 /// Classify an ArduPilot HEARTBEAT custom_mode into the canonical model (no modifiers). The id set
 /// mirrors the old frontend `ARDU_PLANE_MODES` / `ARDU_COPTER_MODES` tables; the registry resolves
 /// label + category. Plane vs Copter is selected from the fc_variant string.
@@ -158,4 +214,51 @@ fn ardu_copter_mode_id(mode: u32) -> Option<&'static str> {
         27 => "autortl",
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a PX4 custom_mode the way the firmware packs it: main_mode in bits 16-23,
+    /// sub_mode in bits 24-31.
+    fn px4_mode(main: u8, sub: u8) -> u32 {
+        ((sub as u32) << 24) | ((main as u32) << 16)
+    }
+
+    #[test]
+    fn px4_main_modes() {
+        assert_eq!(classify_px4(px4_mode(1, 0)).primary, "manual");
+        assert_eq!(classify_px4(px4_mode(2, 0)).primary, "px4_altitude");
+        assert_eq!(classify_px4(px4_mode(3, 0)).primary, "px4_position");
+        assert_eq!(classify_px4(px4_mode(5, 0)).primary, "acro");
+        assert_eq!(classify_px4(px4_mode(6, 0)).primary, "px4_offboard");
+        assert_eq!(classify_px4(px4_mode(7, 0)).primary, "px4_stabilized");
+    }
+
+    #[test]
+    fn px4_auto_sub_modes() {
+        assert_eq!(classify_px4(px4_mode(4, 2)).primary, "takeoff");
+        assert_eq!(classify_px4(px4_mode(4, 3)).primary, "px4_hold");
+        assert_eq!(classify_px4(px4_mode(4, 4)).primary, "mission");
+        assert_eq!(classify_px4(px4_mode(4, 5)).primary, "px4_return");
+        assert_eq!(classify_px4(px4_mode(4, 6)).primary, "land");
+        assert_eq!(classify_px4(px4_mode(3, 1)).primary, "px4_orbit");
+    }
+
+    #[test]
+    fn px4_unknown_falls_back() {
+        assert_eq!(classify_px4(px4_mode(99, 0)).primary, "px4_mode_99_0");
+        assert_eq!(classify_px4(px4_mode(4, 99)).primary, "px4_mode_4_99");
+    }
+
+    #[test]
+    fn dispatch_routes_by_variant() {
+        // PX4 variant → PX4 table (main=4/sub=4 = Mission).
+        assert_eq!(classify_mavlink(px4_mode(4, 4), "PX4").primary, "mission");
+        // ArduPilot variant → flat table (raw custom_mode 4 = Guided on Copter).
+        assert_eq!(classify_mavlink(4, "ArduCopter").primary, "guided");
+        // The same raw value 4 under PX4 is main_mode 0 (no high bytes) → unknown.
+        assert_eq!(classify_mavlink(4, "PX4").primary, "px4_mode_0_0");
+    }
 }

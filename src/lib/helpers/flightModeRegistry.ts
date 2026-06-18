@@ -108,6 +108,21 @@ export const MODE_REGISTRY: Record<string, ModeDef> = {
   qacro:        { label: 'QAcro',       category: 'acro' },
   thermal:      { label: 'Thermal',     category: 'other' },
   loiter_qland: { label: 'Loiter QLand', category: 'land' },
+
+  // ── PX4 (main + sub mode; shared manual/acro/mission/land/takeoff reuse the entries above) ──
+  px4_altitude:     { label: 'Altitude',       category: 'althold' },
+  px4_position:     { label: 'Position',       category: 'poshold' },
+  px4_orbit:        { label: 'Orbit',          category: 'cruise' },
+  px4_offboard:     { label: 'Offboard',       category: 'guided' },
+  px4_stabilized:   { label: 'Stabilized',     category: 'stabilized' },
+  px4_rattitude:    { label: 'Rattitude',      category: 'acro' },
+  px4_return:       { label: 'Return',         category: 'rth' },
+  px4_hold:         { label: 'Hold',           category: 'poshold' },
+  px4_ready:        { label: 'Ready',          category: 'other' },
+  px4_follow_me:    { label: 'Follow Me',      category: 'guided' },
+  px4_precland:     { label: 'Precision Land', category: 'land' },
+  px4_vtol_takeoff: { label: 'VTOL Takeoff',   category: 'launch' },
+  px4_termination:  { label: 'Termination',    category: 'failsafe' },
 };
 
 // Shown when no FC is connected (empty primary id). Kept short so the badge stays inside the

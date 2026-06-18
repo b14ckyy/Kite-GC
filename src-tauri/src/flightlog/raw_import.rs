@@ -364,7 +364,7 @@ fn update_from_mav(msg: &MavMessage, s: &mut Snap, armed: &mut bool, variant: &s
             if hb.mavtype != MavType::MAV_TYPE_GCS {
                 *armed = hb.base_mode.bits() & MavModeFlag::MAV_MODE_FLAG_SAFETY_ARMED.bits() != 0;
                 s.flight_mode_flags = Some(hb.custom_mode);
-                let fm = crate::flightmode::classify_ardupilot(hb.custom_mode, variant);
+                let fm = crate::flightmode::classify_mavlink(hb.custom_mode, variant);
                 s.mode_primary = Some(fm.primary);
                 s.mode_modifiers = if fm.modifiers.is_empty() { None } else { Some(fm.modifiers.join(",")) };
             }

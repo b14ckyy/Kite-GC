@@ -341,7 +341,7 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
             let _ = app_handle.emit("telemetry-status", &data);
 
             // Flight mode (canonical, protocol-agnostic). See docs/active/FLIGHT_MODE_UNIFIED.md.
-            let fm = crate::flightmode::classify_ardupilot(hb.custom_mode, fc_variant);
+            let fm = crate::flightmode::classify_mavlink(hb.custom_mode, fc_variant);
             let _ = app_handle.emit("telemetry-flightmode", &fm);
 
             if let Some(ref rec) = recorder {
