@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **ArduPilot mission: vehicle-class selector + catalog-driven waypoint representation (ADR-046).** The
+  mission firmware picker is now a 3-way `SegmentedToggle` (INAV / ArduPilot / PX4); the ArduPilot toolbar
+  adds a **vehicle-type dropdown** (Plane / Copter / QuadPlane / Rover / Boat / Sub) — both locked while
+  connected, the class persisted for offline planning, so Copter/QuadPlane-specific commands are now
+  reachable. **QuadPlane is auto-detected** from the `Q_ENABLE` parameter (a QuadPlane reports
+  `MAV_TYPE_FIXED_WING`, so MAV_TYPE alone can't tell — ArduPilot issue #7137); the MAV_TYPE VTOL range is
+  kept as a secondary signal (PX4 VTOL / manually-set MAV_TYPE). Waypoint **icons are now catalog-driven**
+  and cover the whole command set: VTOL takeoff/land with a "V" badge, spline "S" / payload "P", ROI eye,
+  Set-Home house (no more generic "?"). **Soft-warnings** flag mission items whose command isn't valid for
+  the active vehicle class (⚠ in the list + a footer count, never blocking).
+- **Jump / Jump-Tag map representation (ArduPilot + INAV).** The jump connector line now covers both
+  `DO_JUMP` (→ item number) and `DO_JUMP_TAG` (→ the matching Jump Tag), with a readable **repeat-count
+  badge (↺N)** pinned to the source waypoint instead of only a hover tooltip. A `JUMP_TAG` added while
+  editing a waypoint is inserted **before** it and groups with that waypoint (its jump target), matching
+  how the FC resumes. INAV gets the same ↺N badge plus a **User-Action indicator** — a 4-slot dot row
+  (UA1–4 from `p3` bits 1–4, active slots bright) on the waypoint teardrop.
 - **PX4 flight-mode decoding (MAVLink).** PX4 packs its flight mode (`main_mode` + `sub_mode`) into the
   HEARTBEAT `custom_mode` completely differently from ArduPilot's flat per-vehicle table, so PX4 modes
   were previously misclassified (the ArduPilot table was applied to all MAVLink variants). A new

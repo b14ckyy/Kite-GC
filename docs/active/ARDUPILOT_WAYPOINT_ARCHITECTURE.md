@@ -1,8 +1,26 @@
 # ArduPilot Waypoint Architecture — vehicle-class & VTOL aware mission planning
 
-**Status:** Implemented (catalog + UI + framework, ArduPlane-first) — ADR-046. Vehicle classes beyond
-Plane + the deferred items below remain open.
+**Status:** Implemented — ADR-046. Catalog + UI + framework; **vehicle classes Copter/Plane/QuadPlane
+first-class** (offline selector + online detection incl. QuadPlane via `Q_ENABLE`); **catalog-driven
+icons**, **soft-warnings**, and jump/jump-tag map representation done. The VTOL-phase model (Phase 4) and
+the deferred items below remain open.
 **Created:** 2026-06-02
+
+> **Update (2026-06-18):** vehicle-class selector shipped — the firmware picker is now a 3-way
+> `SegmentedToggle` (INAV/ArduPilot/PX4) and the ArduPilot toolbar carries a **vehicle-type dropdown**
+> (Plane/Copter/QuadPlane/Rover/Boat/Sub), both locked while connected, the class persisted offline.
+> **QuadPlane detection:** a QuadPlane reports `MAV_TYPE_FIXED_WING` (ArduPilot issue #7137), so MAV_TYPE
+> alone can't tell it apart — we read **`Q_ENABLE`** on connect (one-shot PARAM_REQUEST, like
+> `AHRS_EKF_TYPE`) and upgrade the class to quadplane; the MAV_TYPE VTOL-range check is kept for PX4 VTOL
+> and a manually-set ArduPilot `MAV_TYPE`. **Icons** are now **catalog-flag-driven** (`missionIconsArdupilot`
+> reads isTakeoff/isLand/isLoiter/specifiesCoordinate/standaloneCoordinate) — VTOL takeoff/land carry a "V"
+> badge, spline "S"/payload "P", ROI eye, Set-Home house; the whole catalog is covered (no more "?").
+> **Soft-warnings** flag mission items whose command isn't valid for the active class (⚠ in the list +
+> footer count, never blocking). **Jump representation:** the connector line + a readable repeat-count
+> badge (↺N) now cover both `DO_JUMP` and `DO_JUMP_TAG`; a `JUMP_TAG` is inserted **before** the edited
+> waypoint and groups with the **following** waypoint (its jump target), matching FC resume behaviour.
+> **INAV parity:** the same ↺N jump badge + a **User-Action 4-slot indicator** (UA1–4 from `p3` bits 1–4)
+> on the waypoint teardrop.
 
 > **Implemented (2026-06-14, ADR-046):** the catalog-driven editor is live. `arduCommandCatalog.ts` is a
 > declarative QGC-style command catalog (friendly + canonical names, params 1..7, units/ranges/enums,
@@ -400,12 +418,14 @@ would confuse ArduPilot users. Corrected approach (locked with the user):
 
 0. ✅ **Upload-reject fixed.** Not a data problem — read-timeout latency (1 s → 50 ms) + we now answer
    both `MISSION_REQUEST_INT` and the deprecated `MISSION_REQUEST` (ArduPilot SITL uses the latter).
-1. ✅ **Vehicle-class detection** — `arduVehicleClass` from `fc_variant` (online), default Plane offline.
-   _(Offline class **selector** UI still to add for Copter/QuadPlane.)_
+1. ✅ **Vehicle-class detection + selector** — `arduVehicleClass` from `fc_variant` + `MAV_TYPE` + the
+   `Q_ENABLE` param (QuadPlane); **offline selector** in the ArduPilot toolbar (3-way firmware
+   `SegmentedToggle` + vehicle-type dropdown), persisted, locked while connected.
 2. ✅ **Command catalog + editor** — `arduCommandCatalog.ts` (curated modern set, params 1..7, tooltips,
    Advanced tier) drives the categorized picker, generic param editor, and grouped list. Curation +
    coverage in `ARDUPILOT_COMMAND_COVERAGE.md`.
-3. ⏳ **Soft-warnings** — command not valid for the active class + VTOL-phase warnings (non-blocking).
+3. ✅ **Soft-warnings** — command not valid for the active class flagged (⚠ list + footer count, never
+   blocking). _VTOL-phase warnings fold into Phase 4._
 4. ⏳ **VTOL phase model + visualisation** — phase tracking, transition badges, VTOL-land approach hint.
 5. ✅ **DO_\* / CONDITION_\* catalog** — included in the curated set (modifiers).
 6. ⏳ **(optional, low prio)** Version soft-hints (e.g. VTOL-land 4.1 behaviour note).
@@ -419,7 +439,8 @@ would confuse ArduPilot users. Corrected approach (locked with the user):
 
 - Exact `MAV_CMD` numbers for `NAV_ATTITUDE_TIME` and whether `NAV_ARC_WAYPOINT` (36) is really
   exposed to GCS missions.
-- QuadPlane `MAV_TYPE` reporting in practice (VTOL_* vs FIXED_WING) → reliable class detection.
+- ✅ QuadPlane `MAV_TYPE` reporting: confirmed it reports **FIXED_WING** by default (issue #7137), so we
+  detect QuadPlane from the **`Q_ENABLE`** param instead (MAV_TYPE VTOL-range kept as a secondary signal).
 - Per-command **param semantics + frames** (REL/AMSL/TERRAIN) for each NAV command — fill the
   `params[]`/frame columns precisely from `common.xml` + the wiki command pages.
 - How `missionConverter` maps these to/from INAV WP types (many have no INAV equivalent →
