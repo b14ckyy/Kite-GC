@@ -2411,7 +2411,7 @@ for the ArduPilot store (sync indicators), mirroring MISSION_TRACKING_AND_PROVEN
 
 **Status**: Accepted — implemented (validation pending vs. real GCS/trackers)
 **Related**: ADR-010 (multi-protocol ByteTransport), the passive decoders (`RADIO_TELEMETRY.md` — the
-inverse direction), ADR-029 (panel framework). **Detail**: `docs/active/TELEMETRY_FORWARDING.md`.
+inverse direction), ADR-029 (panel framework). **Detail**: `docs/archive/TELEMETRY_FORWARDING.md`.
 
 **Context**: Operators want to forward Kite's live telemetry into another wire protocol out a second link
 — to drive antenna trackers, mobile monitoring apps or other GCS. We already **decode** LTM/CRSF/SmartPort/

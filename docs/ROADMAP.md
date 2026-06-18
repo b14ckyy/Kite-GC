@@ -469,7 +469,7 @@ This document tracks planned features, organized by milestone.
 - [x] ArduPilot mission system (MAVLink WP protocol) — complete: `mavlink_proto/mission.rs` upload/download/clear microprotocol + `ardu_mission_download`/`ardu_mission_upload`, wired to the ArduPilot mission panel/layer; `.waypoints` (QGC WPL) file save/load/drop + INAV↔ArduPilot WP conversion. See `docs/active/MISSION_MULTIAUTOPILOT_PLAN.md`
 - [ ] **ArduPilot WP types per vehicle class** — the valid mission commands differ a lot by vehicle (Copter / Plane / Rover / Sub), so the ArduPilot WP-type palette + validation should adapt to the detected/selected vehicle type rather than offering one flat list. _Major consideration_: **QuadPlane/VTOL** auto-switches between fixed-wing and multirotor modes mid-mission (`VTOL_TAKEOFF` / `VTOL_LAND` / transition commands), which changes the legal WP types per phase — the planner needs a vehicle-class model and ideally a visual cue for transition points. Builds on the multi-autopilot foundation; gated on test hardware. Full plan in `docs/active/ARDUPILOT_WAYPOINT_ARCHITECTURE.md`.
 
-### Passive Radio Telemetry (listen-only ground-side, ADR/plan: `docs/active/RADIO_TELEMETRY.md`)
+### Passive Radio Telemetry (listen-only ground-side, ADR/plan: `docs/archive/RADIO_TELEMETRY.md`)
 A third connection mode ("Telemetry") that listens to telemetry forwarded by the transmitter
 (EdgeTX/ETHOS) / ELRS backpack / DIY bridge, auto-detecting the protocol. Dev-only for now.
 - [x] Phase A/B: listen-only handler, protocol detector, raw capture-to-file, Debug Monitor tab, BLE
@@ -484,7 +484,7 @@ A third connection mode ("Telemetry") that listens to telemetry forwarded by the
 - [ ] `LtmSource` — LTM (Lightweight Telemetry) passive frame parser
 - [ ] MAVLink-passive decoder (reuse the MAVLink parser, TX disabled)
 
-### Telemetry Relay — forwarding & conversion (ADR-051, plan: `docs/active/TELEMETRY_FORWARDING.md`)
+### Telemetry Relay — forwarding & conversion (ADR-051, plan: `docs/archive/TELEMETRY_FORWARDING.md`)
 Re-encode the live inbound telemetry into a chosen wire protocol and send it out a second link (antenna
 trackers / monitoring apps / other GCS). Backend transcoder fed by a self-event tap; the inverse of the
 passive decoders. Dropdown panel under the connection bar; persisted, auto-connecting relays.

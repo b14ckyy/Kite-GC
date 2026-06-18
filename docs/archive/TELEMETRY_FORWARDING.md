@@ -1,5 +1,9 @@
 # Telemetry Forwarding & Conversion ("Relay") — Plan
 
+> ARCHIVED (2026-06-18) — Relay shipped (P1–P3: LTM/MAVLink/CRSF/SmartPort × Serial/BLE/TCP/UDP, ADR-051).
+> Remaining work is **validation against real GCS/trackers** (and a few polish items) — tracked in
+> `ROADMAP.md`, not active build work.
+
 **Status:** P1+P2+P3 BUILT (2026-06-18) — LTM/MAVLink/CRSF/SmartPort encoders × Serial/BLE/TCP/UDP
 outputs. TCP+LTM verified live against mwptools; the rest pending hardware/GCS validation. Not committed.
 
@@ -236,5 +240,5 @@ modes (manual, acro, angle, horizon, althold, poshold, RTH, waypoint, cruise, �
   per-value change-detection (a fresh frame with an unchanged value still emits — correct for a static
   craft on the ground). MSP/MAVLink already emitted at their real poll rate and are unaffected.
 
-Relates to `docs/active/RADIO_TELEMETRY.md` (decoders = the inverse direction), the MAVLink TX work, and
+Relates to `docs/archive/RADIO_TELEMETRY.md` (decoders = the inverse direction), the MAVLink TX work, and
 the panel framework (`docs/active/PANEL_FRAMEWORK.md`).

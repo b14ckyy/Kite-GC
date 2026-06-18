@@ -1,5 +1,12 @@
 # Radio Telemetry (passive monitoring) — Plan
 
+> ARCHIVED (2026-06-18) — out of active focus, **not abandoned** (resume when triggered). Passive
+> telemetry shipped: SmartPort/CRSF/LTM decode + DB recording + ArduPilot passthrough + the fresh-frame
+> rate fix. **Open / will resume on a trigger:** (1) MSP-over-SmartPort uplink — blocked in ETHOS; the
+> core dev will ship a **custom one-line-change build**, then test (probe mechanism is armed in the dev
+> build, no Kite change needed); (2) native-CRSF validation; (3) armed-flight DB verify; (4) RC Link
+> widget. Tracked in `ROADMAP.md`.
+
 **Status:** FrSky / S.Port path **shipped through Phase D** (decode + DB recording; pending armed-flight
 verify). **CRSF (Phase E) built but WIP/TEMPORARY (2026-06-17)** — detector + decoder + unified-pipeline
 adapter done; framing/CRC + ATTITUDE confirmed, but **only against mLRS** (non-native CRSF, transcodes
@@ -504,12 +511,17 @@ writes to *both* writable vendor chars (`0xFFF3` WriteNR + `0xFFF6` WriteNR·Not
 variants (±leading `0x7E`, ±CRC, ±byte-stuffing) produced **zero** FC reply. The downlink mirror
 (`0xFFF0`/`0xFFF6` Notify) streams flawlessly.
 
-**Conclusion:** Ethos Bluetooth currently appears to be **telemetry-forwarding (downlink) only** — it does
-not inject BLE-received bytes into the S.Port uplink. The two-way hardware exists (BT also serves as a
-trainer link), so this is a software-forwarding question on the radio side. **Open:** ask the Ethos main
-developer whether a bidirectional/serial BT mode can forward the uplink. If yes, the armed probe shows
-results on reconnect with no code change. **Passive MSP decode was rejected** (against spec; nothing
-periodic we don't already get via telemetry; waypoint download needs an active trigger).
+**Conclusion:** Ethos Bluetooth is **telemetry-forwarding (downlink) only** — it does not inject
+BLE-received bytes into the S.Port uplink. **Confirmed by the ETHOS core developer (2026-06-18):** the
+S.Port uplink path is blocked in ETHOS; it's a **one-line change** to allow it, and he'll provide a
+**custom ETHOS build** when he has time. The two-way hardware exists (BT also serves as a trainer link),
+so this was purely a software gate on the radio side.
+
+**Status: PARKED, ready to test.** The probe **mechanism is armed in the dev build** (`MSP_PROBE_ENABLED =
+cfg!(debug_assertions)`, `passive_telemetry/msp_probe.rs`) — once the custom ETHOS build is flashed, connect
++ watch the Debug Monitor "MSP Probe" tab; if uplink forwarding works, replies appear with **no Kite code
+change**. **Passive MSP decode was rejected** (against spec; nothing periodic we don't already get via
+telemetry; waypoint download needs an active trigger).
 
 ## Link-quality fields (for a future RC Link widget)
 

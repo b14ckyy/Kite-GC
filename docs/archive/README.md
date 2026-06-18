@@ -32,3 +32,11 @@ are still perfectly fine; the doc simply isn't on the active work surface anymor
   link). Shipped; awaiting simulator/field testing.
 - **M5_TEST_CHECKLIST.md** — Manual verification checklist for M5 (recording + logbook). Kept for
   reference (M5 shipped).
+- **RADIO_TELEMETRY.md** — Passive (listen-only) radio telemetry: SmartPort/CRSF/LTM decode → unified
+  pipeline + DB, ArduPilot passthrough, fresh-frame rate fix. Shipped. **Open (resume on trigger):**
+  MSP-over-SmartPort uplink (blocked in ETHOS — core dev to ship a one-line-change custom build; probe
+  mechanism armed in the dev build), native-CRSF validation, armed-flight DB verify, RC Link widget.
+- **TELEMETRY_FORWARDING.md** — Telemetry Relay (forwarding/conversion, ADR-051): re-encode live telemetry
+  into LTM/MAVLink/CRSF/SmartPort and emit out Serial/BLE/TCP/UDP. P1–P3 shipped (TCP+LTM verified vs
+  mwptools). **Open (resume on trigger):** validate the encoders against real GCS/trackers; MAVLink real
+  vehicle-type/mode in HEARTBEAT.
