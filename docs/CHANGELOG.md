@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **PX4 flight-mode decoding (MAVLink).** PX4 packs its flight mode (`main_mode` + `sub_mode`) into the
+  HEARTBEAT `custom_mode` completely differently from ArduPilot's flat per-vehicle table, so PX4 modes
+  were previously misclassified (the ArduPilot table was applied to all MAVLink variants). A new
+  `classify_px4()` plus a `classify_mavlink()` dispatcher now route PX4 vs ArduPilot by `fc_variant`, for
+  both the live link and tlog import; modes use the QGC names (Altitude, Position, Hold, Return, Offboard,
+  VTOL Takeoff, …).
 - **Telemetry Relay — forwarding & conversion (`TELEMETRY_FORWARDING.md`, ADR-051).** Re-encodes the live
   inbound telemetry (MSP / MAVLink / passive) into a chosen wire protocol and sends it out a second link —
   for antenna trackers, monitoring apps or other GCS. Protocols: **LTM / MAVLink / CRSF / SmartPort**

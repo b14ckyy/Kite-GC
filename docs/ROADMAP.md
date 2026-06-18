@@ -445,6 +445,7 @@ This document tracks planned features, organized by milestone.
 - [x] **MAVLink telemetry stream rates — GCS-requested via `SET_MESSAGE_INTERVAL`, MSP-parity** (ADR-043): same two knobs (Attitude/GPS), ballast disabled, fits real RC links (~500–650 B/s); **Full MAVLink Telemetry** toggle leaves it to the FC's `SRn_*` params (reset-to-default)
 - [x] **MAVLink Debug Monitor tab** — per-message ID counts/rate/last-seen + RX/TX direction (push-side counterpart to the MSP poll view)
 - [x] **ArduPilot per-vehicle flight-mode mapping** — vehicle-specific `fc_variant` (ArduPlane/Copter/Rover/Sub) + raw `custom_mode` forwarded to the per-vehicle mode table (live + replay)
+- [x] **PX4 flight-mode classification** — PX4 packs `main_mode`/`sub_mode` into `custom_mode` differently from ArduPilot's flat table; `classify_px4()` + a `classify_mavlink()` dispatcher route PX4 vs ArduPilot by `fc_variant` (live + tlog import), QGC mode names
 - [x] **MAVLink home from `HOME_POSITION`** — authoritative FC home on the protocol-agnostic `home-position` event (consistent across reconnects)
 - [ ] **Unify home-on-arm into the adapter layer** — for telemetry-only inputs (CRSF/Smartport passthrough) home derives from the GPS fix at the arm edge; move today's frontend fallback into the backend adapter so all home sourcing flows through `home-position` (see ADR-039)
 
