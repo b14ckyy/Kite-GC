@@ -4,52 +4,34 @@
 -->
 
 <script lang="ts">
-  // Autopilot-system picker for the mission panel headers (INAV / ArduPilot / PX4). Shared by
-  // both mission editors so the control lives in one place. Locked while connected.
+  // Autopilot-system picker for the mission panel headers (INAV / ArduPilot / PX4). Shared by both
+  // mission editors so the control lives in one place. A 3-way SegmentedToggle (we only have three
+  // systems); read-only (dimmed) while connected — the system is then fixed to the detected FC.
   import { t } from 'svelte-i18n';
   import { get } from 'svelte/store';
+  import { onDestroy } from 'svelte';
   import { autopilotSystem, autopilotLocked, setAutopilotSystem, type AutopilotSystem } from '$lib/stores/autopilotContext';
+  import SegmentedToggle, { type SegOption } from '$lib/components/panel/SegmentedToggle.svelte';
 
   let system = $state<AutopilotSystem>(get(autopilotSystem));
   let locked = $state<boolean>(get(autopilotLocked));
   const unsubSystem = autopilotSystem.subscribe((s) => { system = s; });
   const unsubLocked = autopilotLocked.subscribe((l) => { locked = l; });
-  import { onDestroy } from 'svelte';
   onDestroy(() => { unsubSystem(); unsubLocked(); });
 
-  function systemLabel(s: AutopilotSystem): string {
-    if (s === 'ardupilot') return 'ArduPilot';
-    if (s === 'px4') return 'PX4';
-    return 'INAV';
-  }
+  const OPTIONS: SegOption[] = [
+    { value: 'inav', label: 'INAV' },
+    { value: 'ardupilot', label: 'ArduPilot' },
+    { value: 'px4', label: 'PX4' },
+  ];
 </script>
 
-{#if locked}
-  <span class="ap-locked" title={$t('mission.autopilotSystem')}>🔒 {systemLabel(system)}</span>
-{:else}
-  <select
-    class="ap-select"
+<div title={locked ? $t('mission.autopilotLocked') : $t('mission.autopilotSystem')}>
+  <SegmentedToggle
+    options={OPTIONS}
     value={system}
-    title={$t('mission.autopilotSystem')}
-    onchange={(e) => setAutopilotSystem((e.target as HTMLSelectElement).value as AutopilotSystem)}
-  >
-    <option value="inav">INAV</option>
-    <option value="ardupilot">ArduPilot</option>
-    <option value="px4">PX4</option>
-  </select>
-{/if}
-
-<style>
-  /* Matches the framework form-control height (28px md button). */
-  .ap-select {
-    height: 28px;
-    padding: 0 8px;
-    background: #434343;
-    border: 1px solid #555;
-    border-radius: 4px;
-    color: #e0e0e0;
-    font-size: 12px;
-    cursor: pointer;
-  }
-  .ap-locked { font-size: 12px; color: #f39c12; font-weight: 600; white-space: nowrap; }
-</style>
+    size="sm"
+    disabled={locked}
+    onchange={(v) => setAutopilotSystem(v as AutopilotSystem)}
+  />
+</div>

@@ -105,4 +105,8 @@ pub struct FcInfo {
     pub features: Option<super::features::FeatureSet>,
     /// Craft name configured in the FC (MSP_NAME)
     pub craft_name: String,
+    /// MAVLink HEARTBEAT MAV_TYPE (ArduPilot/PX4 only; 0 for MSP). The reliable QuadPlane signal —
+    /// a QuadPlane reports fc_variant "ArduPlane" but a VTOL_* MAV_TYPE.
+    #[serde(default)]
+    pub mav_type: u8,
 }

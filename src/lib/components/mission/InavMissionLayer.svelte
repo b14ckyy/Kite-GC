@@ -571,6 +571,8 @@
     // separately (dashed inbound/outbound legs through the home ring + a house marker).
     const fpBreakAfter = new Set<number>();
     const fbhEntries: { idx: number; dn: number; inSel: boolean; isPrimary: boolean; greyed: boolean; prevLatLng: L.LatLng | null }[] = [];
+    // Jump repeat-count badges placed per source waypoint, so multiple jumps stack instead of overlap.
+    const jumpBadgesBySource = new Map<string, number>();
 
     for (let i = 0; i < m.waypoints.length; i++) {
       const wp = m.waypoints[i];
@@ -679,13 +681,28 @@
         const sourceWp = findPreviousGeoWp(m.waypoints, i);
         const targetWp = m.waypoints[targetIdx];
         if (sourceWp && targetWp && hasLocation(targetWp.action)) {
+          const src = L.latLng(toDeg(sourceWp.lat), toDeg(sourceWp.lon));
           const line = L.polyline([
-            L.latLng(toDeg(sourceWp.lat), toDeg(sourceWp.lon)),
+            src,
             L.latLng(toDeg(targetWp.lat), toDeg(targetWp.lon)),
           ], { color: '#8e44ad', weight: 2, dashArray: '8 4', opacity: 0.8 }).addTo(missionGroup);
-          const jLabel = wp.p2 === -1 ? '∞' : `×${wp.p2}`;
-          line.bindTooltip($t('missionLayer.jumpLineTooltip', { values: { target: wp.p1, label: jLabel } }), { sticky: true });
+          const repeat = wp.p2 === -1 ? '∞' : wp.p2;
+          line.bindTooltip($t('missionLayer.jumpLineTooltip', { values: { target: wp.p1, label: `×${repeat}` } }), { sticky: true });
           modifierLines.push(line);
+          // Repeat-count badge on the source waypoint marker (readable count on the map, not just hover).
+          const key = `${sourceWp.lat}_${sourceWp.lon}`;
+          const stack = jumpBadgesBySource.get(key) ?? 0;
+          L.marker(src, {
+            icon: L.divIcon({
+              className: 'mission-jump-badge',
+              html: `↺${repeat}`,
+              iconSize: [34, 18],
+              iconAnchor: [-4, 64 + stack * 20],
+            }),
+            interactive: false,
+            zIndexOffset: 1000,
+          }).addTo(missionGroup);
+          jumpBadgesBySource.set(key, stack + 1);
         }
       }
 
@@ -895,6 +912,15 @@
   @keyframes wpActiveGlow {
     0%, 100% { filter: brightness(1)   drop-shadow(0 0 2px rgba(89,170,41,0.55)); }
     50%      { filter: brightness(1.6) drop-shadow(0 0 9px rgba(89,170,41,0.95)); }
+  }
+  /* Jump repeat-count badge (↺N) pinned near the source waypoint — purple to match the jump line. */
+  :global(.mission-jump-badge) {
+    display: flex; align-items: center; justify-content: center;
+    background: #8e44ad; color: #fff;
+    font-size: 11px; font-weight: 700; line-height: 1;
+    border: 1px solid rgba(255, 255, 255, 0.85); border-radius: 9px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+    white-space: nowrap;
   }
   :global(.wp-param-label-wrapper) { background: none !important; border: none !important; overflow: visible !important; width: auto !important; height: auto !important; }
   :global(.wp-param-label) { background: rgba(30,30,30,0.88); color: #ccc; padding: 3px 8px; border-radius: 4px; font-size: 12px; line-height: 1.4; white-space: nowrap; border: 1px solid rgba(55,168,219,0.35); pointer-events: none; transform: scale(var(--ui-scale, 1)); transform-origin: top left; }

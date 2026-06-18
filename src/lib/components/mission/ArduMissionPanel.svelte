@@ -16,14 +16,15 @@
   import {
     arduMission, arduSelectedWpIndex, arduEditMode, arduLoadedMissionId,
     arduMissionClear, arduRemoveWp, groupArduMission,
+    arduVehicleClass, setArduVehicleClass,
     MAV_FRAME_GLOBAL, MAV_FRAME_GLOBAL_TERRAIN_ALT,
     serializeWaypoints, parseWaypoints,
     type ArduWaypoint,
   } from '$lib/stores/missionArdupilot';
-  import { cmdName, cmdShort, cmdHasLocation, cmdDef, enumLabel } from '$lib/helpers/arduCommandCatalog';
+  import { cmdName, cmdShort, cmdHasLocation, cmdDef, cmdValidForVehicle, enumLabel, type VehicleClass } from '$lib/helpers/arduCommandCatalog';
   import { connection } from '$lib/stores/connection';
   import { settings } from '$lib/stores/settings';
-  import { autopilotSystem } from '$lib/stores/autopilotContext';
+  import { autopilotSystem, type AutopilotSystem } from '$lib/stores/autopilotContext';
   import { missionManagerOpen } from '$lib/stores/missionManager';
   import { buildArduMissionInput } from '$lib/helpers/missionLibraryArdu';
   import { missionDbSave, missionDbUpdate, missionDbGet, missionDbFindByHash, missionDbGeocode } from '$lib/stores/flightlog';
@@ -49,16 +50,38 @@
     return () => clearTimeout(id);
   });
 
+  let currentVehicle  = $state<VehicleClass>(get(arduVehicleClass));
+  let currentSystem   = $state<AutopilotSystem>(get(autopilotSystem));
+
   const unsubMission  = arduMission.subscribe(m => { currentMission = m; });
   const unsubSelIdx   = arduSelectedWpIndex.subscribe(i => { currentSelIdx = i; });
   const unsubEditMode = arduEditMode.subscribe(e => { currentEditing = e; });
   const unsubConn     = connection.subscribe(c => { currentConn = c; });
+  const unsubVehicle  = arduVehicleClass.subscribe(v => { currentVehicle = v; });
+  const unsubSystem   = autopilotSystem.subscribe(s => { currentSystem = s; });
+
+  // Vehicle-class selector (ArduPilot only; PX4 uses the same panel but has no class palette yet).
+  // Offline it is selectable; while connected it is locked to the detected FC.
+  const VEHICLE_OPTIONS: { value: VehicleClass; key: string }[] = [
+    { value: 'plane', key: 'arduMission.vehiclePlane' },
+    { value: 'copter', key: 'arduMission.vehicleCopter' },
+    { value: 'quadplane', key: 'arduMission.vehicleQuadplane' },
+    { value: 'rover', key: 'arduMission.vehicleRover' },
+    { value: 'boat', key: 'arduMission.vehicleBoat' },
+    { value: 'sub', key: 'arduMission.vehicleSub' },
+  ];
+  const showVehicleSelect = $derived(currentSystem === 'ardupilot');
+  const vehicleLocked = $derived(currentConn.status === 'connected');
+  // Soft-warning: count mission items whose command isn't valid for the selected vehicle class.
+  const invalidCount = $derived(
+    currentMission.filter((w) => !cmdValidForVehicle(w.command, currentVehicle)).length,
+  );
 
   const isMavlinkConnected = $derived(
     currentConn.status === 'connected' && currentConn.protocolType === 'mavlink'
   );
 
-  onDestroy(() => { unsubMission(); unsubSelIdx(); unsubEditMode(); unsubConn(); });
+  onDestroy(() => { unsubMission(); unsubSelIdx(); unsubEditMode(); unsubConn(); unsubVehicle(); unsubSystem(); });
 
   async function handleSaveFile() {
     try {
@@ -267,6 +290,19 @@
       </Button>
     {/if}
     <div class="tb-spacer"></div>
+    {#if showVehicleSelect}
+      <select
+        class="ap-vehicle-select"
+        value={currentVehicle}
+        disabled={vehicleLocked}
+        title={vehicleLocked ? $t('arduMission.vehicleLocked') : $t('arduMission.vehicleClass')}
+        onchange={(e) => setArduVehicleClass((e.target as HTMLSelectElement).value as VehicleClass)}
+      >
+        {#each VEHICLE_OPTIONS as o}
+          <option value={o.value}>{$t(o.key)}</option>
+        {/each}
+      </select>
+    {/if}
     {#if currentEditing && currentSelIdx >= 0}
       <Button variant="danger" icon="close" onclick={removeSelected} title={$t('mission.removeWp')} />
     {/if}
@@ -294,7 +330,10 @@
             {#if g.anchor}
               <tr class="wp-row" class:selected={g.anchorIdx === currentSelIdx} onclick={() => arduSelectedWpIndex.set(g.anchorIdx)}>
                 <td class="col-num"><span class="wp-num-badge">{g.anchorIdx + 1}</span></td>
-                <td class="col-type">{cmdShort(g.anchor.command)}</td>
+                <td class="col-type">
+                  {cmdShort(g.anchor.command)}
+                  {#if !cmdValidForVehicle(g.anchor.command, currentVehicle)}<span class="wp-warn" title={$t('arduMission.cmdInvalidForVehicle')}>⚠</span>{/if}
+                </td>
                 <td class="col-alt">{formatAltShort(g.anchor)}</td>
                 <td class="col-param">{paramSummary(g.anchor)}</td>
               </tr>
@@ -302,7 +341,10 @@
             {#each g.modifiers as m}
               <tr class="wp-row wp-mod-row" class:selected={m.idx === currentSelIdx} onclick={() => arduSelectedWpIndex.set(m.idx)}>
                 <td class="col-num"><span class="wp-num-badge mod">{m.idx + 1}</span></td>
-                <td class="col-type">{cmdShort(m.wp.command)}</td>
+                <td class="col-type">
+                  {cmdShort(m.wp.command)}
+                  {#if !cmdValidForVehicle(m.wp.command, currentVehicle)}<span class="wp-warn" title={$t('arduMission.cmdInvalidForVehicle')}>⚠</span>{/if}
+                </td>
                 <td class="col-alt">—</td>
                 <td class="col-param">{paramSummary(m.wp)}</td>
               </tr>
@@ -346,6 +388,7 @@
     </div>
 
     {#if statusMessage}<div class="mission-status">{statusMessage}</div>{/if}
+    {#if invalidCount > 0}<div class="mission-warn">⚠ {$t('arduMission.cmdInvalidCount', { values: { count: invalidCount } })}</div>{/if}
     {#if currentMission.length > 0}<div class="mission-summary">{currentMission.length} WPs</div>{/if}
   </div>
 {/snippet}
@@ -366,6 +409,18 @@
 <style>
   .miss-toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; width: 100%; }
   .tb-spacer { flex: 1; }
+  /* Vehicle-class dropdown — matches the framework form-control height (28px). */
+  .ap-vehicle-select {
+    height: 28px;
+    padding: 0 6px;
+    background: #434343;
+    border: 1px solid #555;
+    border-radius: 4px;
+    color: #e0e0e0;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .ap-vehicle-select:disabled { opacity: 0.55; cursor: not-allowed; color: #f39c12; }
 
   .miss-dropzone { position: relative; min-height: 100%; }
   .miss-dropzone.drag-over { outline: 2px dashed #37a8db; outline-offset: -2px; border-radius: 4px; }
@@ -397,6 +452,8 @@
   .detail-hint { color: #37a8db; font-size: 11px; text-align: center; margin-top: 4px; font-style: italic; }
   .ctrl-row { display: flex; gap: 4px; }
   .mission-status { padding: 3px 6px; font-size: 11px; color: #f39c12; text-align: center; }
+  .mission-warn { padding: 3px 6px; font-size: 11px; color: #f39c12; text-align: center; }
   .mission-summary { display: flex; justify-content: center; padding: 3px; font-size: 12px; color: #888; }
+  .wp-warn { color: #f39c12; margin-left: 3px; cursor: help; }
   .drop-overlay { position: absolute; inset: 0; background: rgba(55,168,219,0.15); border: 2px dashed #37a8db; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #37a8db; font-size: 13px; font-weight: bold; z-index: 10; pointer-events: none; }
 </style>

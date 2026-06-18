@@ -23,6 +23,7 @@
     type ArduWaypoint, type MavFrame,
   } from '$lib/stores/missionArdupilot';
   import {
+    CMD,
     cmdDef, cmdName, cmdRawName, cmdHasLocation, cmdStandaloneCoordinate, cmdIsLoiter, cmdIsTakeoff,
     cmdDefaultParams, cmdDefaultCoordParams, locationCommandsByCategory, modifierCommandsByCategory,
     type ParamSpec, type ParamIndex, type VehicleClass,
@@ -277,11 +278,16 @@
         lon: standalone && cur ? cur.lon : (coord.y ?? 0),
         alt: coord.z ?? 0, autocontinue: true,
       };
-      const at = groupEndIndex(group);
+      // A JUMP_TAG marks the waypoint being edited as the jump target, so it must go BEFORE the anchor
+      // (the FC resumes at the next nav waypoint after the tag = this waypoint). All other modifiers
+      // act on / gate from this waypoint, so they trail it.
+      const leading = newCmd === CMD.JUMP_TAG;
+      const at = leading ? group.anchorIdx : groupEndIndex(group);
       const updated = [...get(arduMission)];
       updated.splice(at, 0, mod);
       arduMission.set(updated);
-      arduSelectedWpIndex.set(idx);
+      // Inserting before the anchor shifts it down one; keep the editor on the same waypoint.
+      arduSelectedWpIndex.set(leading ? idx + 1 : idx);
     });
 
     // Advanced-params expander(s) — toggle the sibling body (DOM-only state; survives the redraw guard).
@@ -336,6 +342,26 @@
     return -1;
   }
 
+  /** First location waypoint at or after `fromIndex` (the visual target of a jump that lands on a
+   *  non-location item such as a Jump Tag). */
+  function findNextLocationIdx(wps: ArduWaypoint[], fromIndex: number): number {
+    for (let i = Math.max(0, fromIndex); i < wps.length; i++) {
+      if (cmdHasLocation(wps[i].command)) return i;
+    }
+    return -1;
+  }
+
+  /** Resolve where a jump points, as a mission-item index: DO_JUMP targets an absolute item number
+   *  (param1, 1-based); DO_JUMP_TAG targets the JUMP_TAG item whose id matches param1. -1 if none. */
+  function jumpTargetIdx(wps: ArduWaypoint[], jump: ArduWaypoint): number {
+    if (jump.command === CMD.DO_JUMP) return Math.round(jump.param1) - 1;
+    if (jump.command === CMD.DO_JUMP_TAG) {
+      const tag = Math.round(jump.param1);
+      return wps.findIndex((w) => w.command === CMD.JUMP_TAG && Math.round(w.param1) === tag);
+    }
+    return -1;
+  }
+
   // ── Render ──────────────────────────────────────────────────────────
 
   function renderMission(wps: ArduWaypoint[], selIdx: number, editing: boolean, home: HomePosition, vehicle: VehicleClass, activeWp: number) {
@@ -347,6 +373,8 @@
 
     const fpPositions: L.LatLng[] = [];
     const fpWpIndices: number[] = [];
+    // Count of jump badges already placed per source waypoint, so multiple jumps stack instead of overlap.
+    const jumpBadgesBySource = new Map<number, number>();
 
     for (let i = 0; i < wps.length; i++) {
       const wp = wps[i];
@@ -376,9 +404,11 @@
           });
         }
 
-        if (cmdIsLoiter(wp.command) && wp.param3 > 0) {
+        // Loiter radius is in param3 for most loiters, but param2 for NAV_LOITER_TO_ALT.
+        const loiterRadius = wp.command === CMD.NAV_LOITER_TO_ALT ? wp.param2 : wp.param3;
+        if (cmdIsLoiter(wp.command) && loiterRadius > 0) {
           L.circle(latLng, {
-            radius: Math.abs(wp.param3),
+            radius: Math.abs(loiterRadius),
             color: '#f39c12', weight: 1.5, fill: false, opacity: 0.5, dashArray: '4 4',
           }).addTo(missionGroup);
         }
@@ -391,18 +421,38 @@
         }
       }
 
-      // Jump connector line (DO_JUMP → target waypoint).
-      if (cmdIsModifierJump(wp.command) && wp.param1 > 0) {
-        const targetIdx = Math.round(wp.param1) - 1;
-        const targetWp = wps[targetIdx];
+      // Jump connector line — DO_JUMP (→ absolute item) and DO_JUMP_TAG (→ matching Jump Tag). Both
+      // draw from the jump's preceding waypoint to the first location at/after the resolved target.
+      if ((wp.command === CMD.DO_JUMP || wp.command === CMD.DO_JUMP_TAG) && wp.param1 > 0) {
+        const targetIdx = jumpTargetIdx(wps, wp);
+        const targetLocIdx = targetIdx >= 0 ? findNextLocationIdx(wps, targetIdx) : -1;
         const prevLocIdx = findPrevLocationIdx(wps, i);
         const sourceWp = prevLocIdx >= 0 ? wps[prevLocIdx] : null;
+        const targetWp = targetLocIdx >= 0 ? wps[targetLocIdx] : null;
         const src = sourceWp ? wpDisplayLatLng(sourceWp, wps, home) : null;
-        const dst = targetWp && cmdHasLocation(targetWp.command) ? wpDisplayLatLng(targetWp, wps, home) : null;
+        const dst = targetWp ? wpDisplayLatLng(targetWp, wps, home) : null;
         if (src && dst) {
+          const repeat = wp.param2 < 0 ? '∞' : wp.param2;
+          const label = wp.command === CMD.DO_JUMP
+            ? `Jump → WP${wp.param1} ×${repeat}`
+            : `Jump → Tag ${wp.param1} ×${repeat}`;
           L.polyline([src, dst], { color: '#8e44ad', weight: 2, dashArray: '8 4', opacity: 0.8 })
             .addTo(missionGroup)
-            .bindTooltip(`Jump → WP${wp.param1} ×${wp.param2 < 0 ? '∞' : wp.param2}`, { sticky: true });
+            .bindTooltip(label, { sticky: true });
+          // Repeat-count badge on the source waypoint marker — ArduPilot otherwise shows no count.
+          // Stacked upward when a waypoint has several jumps so the pills don't overlap.
+          const stack = jumpBadgesBySource.get(prevLocIdx) ?? 0;
+          L.marker(src, {
+            icon: L.divIcon({
+              className: 'mission-jump-badge',
+              html: `↺${repeat}`,
+              iconSize: [34, 18],
+              iconAnchor: [-4, 64 + stack * 20],
+            }),
+            interactive: false,
+            zIndexOffset: 1000,
+          }).addTo(missionGroup);
+          jumpBadgesBySource.set(prevLocIdx, stack + 1);
         }
       }
     }
@@ -450,9 +500,6 @@
     }
   }
 
-  // DO_JUMP id (177) without importing the whole constant set just for the connector check.
-  function cmdIsModifierJump(cmd: number): boolean { return cmd === 177; }
-
   function newWaypointAt(latlng: L.LatLng): ArduWaypoint {
     return {
       command: MAV_CMD_NAV_WAYPOINT, frame: MAV_FRAME_GLOBAL_RELATIVE_ALT,
@@ -491,4 +538,13 @@
   :global(.wpe-adv-toggle) { display: block; width: 100%; text-align: left; background: none; border: none; border-top: 1px dashed #555; margin-top: 4px; padding: 4px 0 2px; color: #37a8db; font-size: 11px; cursor: pointer; }
   :global(.wpe-adv-toggle:hover) { color: #5cc0ec; }
   :global(.wpe-adv-body) { margin-top: 2px; }
+  /* Jump repeat-count badge (↺N) pinned near the source waypoint — purple to match the jump line. */
+  :global(.mission-jump-badge) {
+    display: flex; align-items: center; justify-content: center;
+    background: #8e44ad; color: #fff;
+    font-size: 11px; font-weight: 700; line-height: 1;
+    border: 1px solid rgba(255, 255, 255, 0.85); border-radius: 9px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+    white-space: nowrap;
+  }
 </style>

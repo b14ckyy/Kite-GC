@@ -17,7 +17,7 @@
   // unequal segment widths.
   import { iconSvg } from './Button.svelte';
 
-  let { options, value, onchange = undefined, size = 'md', full = false }: {
+  let { options, value, onchange = undefined, size = 'md', full = false, disabled = false }: {
     options: SegOption[];
     value: string;
     onchange?: (value: string) => void;
@@ -25,6 +25,8 @@
     /** Stretch to the parent's full width and distribute segments evenly (for fixed-width tab bars).
      *  Default = content-sized (each segment fits its label). */
     full?: boolean;
+    /** Read-only: segments are shown (active one highlighted) but not clickable, dimmed. */
+    disabled?: boolean;
   } = $props();
 
   const idx = $derived(Math.max(0, options.findIndex((o) => o.value === value)));
@@ -60,10 +62,10 @@
   });
 </script>
 
-<div class="seg seg-{size}" class:full bind:this={segEl}>
+<div class="seg seg-{size}" class:full class:disabled bind:this={segEl}>
   <div class="seg-ind" style="left:{indLeft}px; width:{indWidth}px"></div>
   {#each options as o, i}
-    <button bind:this={btnEls[i]} class="seg-btn" class:active={i === idx} type="button" title={o.label} onclick={() => onchange?.(o.value)}>
+    <button bind:this={btnEls[i]} class="seg-btn" class:active={i === idx} type="button" {disabled} title={o.label} onclick={() => onchange?.(o.value)}>
       {#if o.icon}<span class="seg-icon">{@html iconSvg(o.icon)}</span>{/if}
       <span class="seg-label">{o.label}</span>
     </button>
@@ -121,6 +123,10 @@
   }
   .seg-btn:hover:not(.active) { color: #e0e0e0; }
   .seg-btn.active { color: #37a8db; }
+  /* Read-only: dim the whole control and show a not-allowed cursor; the active segment stays marked. */
+  .seg.disabled { opacity: 0.55; }
+  .seg.disabled .seg-btn { cursor: not-allowed; }
+  .seg.disabled .seg-btn:hover:not(.active) { color: #aaa; }
   /* Harmless in content mode (segment fits its label); the graceful fallback in full mode. */
   .seg-label { overflow: hidden; text-overflow: ellipsis; }
   .seg-icon { display: inline-flex; flex-shrink: 0; }

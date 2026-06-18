@@ -485,6 +485,12 @@ fn connect_mavlink(
     // fire-and-forget — the PARAM_VALUE reply is decoded by the handler thread once it starts.
     mavlink_proto::params::request_ekf_type(&mut *byte_transport, fc_sysid);
 
+    // ArduPilot: read Q_ENABLE to detect a QuadPlane (which reports MAV_TYPE_FIXED_WING, so the mission
+    // vehicle class can't be told from the HEARTBEAT alone). Copter/Rover/Sub lack the param → no reply.
+    if fc_info.fc_variant.starts_with("Ardu") {
+        mavlink_proto::params::request_quadplane_flag(&mut *byte_transport, fc_sysid);
+    }
+
     // ── Flight recorder setup ────────────────────────────────────────────
     let flight_log_settings = FlightLogSettings {
         enabled: flight_log_enabled.unwrap_or(false),

@@ -644,6 +644,14 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
                 let _ = app_handle.emit("telemetry-ekf-type", serde_json::json!({
                     "ekf_type": ekf_type,
                 }));
+            } else if name == "Q_ENABLE" {
+                // Q_ENABLE = 1 → QuadPlane (the mission planner upgrades the vehicle class to quadplane;
+                // a plain plane reports FIXED_WING and Q_ENABLE = 0 / no param). See params.rs.
+                let quadplane = pv.param_value as i32 >= 1;
+                eprintln!("[MAVLINK-PARAM] Q_ENABLE = {} (quadplane={})", pv.param_value, quadplane);
+                let _ = app_handle.emit("telemetry-vehicle", serde_json::json!({
+                    "quadplane": quadplane,
+                }));
             }
         }
 

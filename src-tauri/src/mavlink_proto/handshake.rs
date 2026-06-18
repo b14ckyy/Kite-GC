@@ -128,6 +128,10 @@ pub fn perform_handshake(transport: &mut dyn ByteTransport) -> Result<(FcInfo, u
                             other => format!("{:?}", other),
                         };
 
+                        // Raw MAV_TYPE — the frontend uses it to detect QuadPlane (VTOL_* range), which
+                        // the per-vehicle fc_variant string can't express (QuadPlane reports ArduPlane).
+                        fc_info.mav_type = hb.mavtype as u8;
+
                         // Map vehicle type to platform_type
                         fc_info.platform_type = match hb.mavtype {
                             MavType::MAV_TYPE_FIXED_WING => 1,

@@ -9,6 +9,7 @@ import { writable, get } from 'svelte/store';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { connectionProtocol, fcLinkAlive } from '$lib/stores/connection';
+import { arduVehicleClass } from '$lib/stores/missionArdupilot';
 import type { FlightModeState } from '$lib/helpers/flightModeRegistry';
 
 /** Unified RC-link statistics (RC Link widget). Each field is null when the active protocol can't
@@ -357,6 +358,14 @@ export async function startTelemetryListeners() {
   unlisteners.push(
     await listen<{ ekf_type: number }>('telemetry-ekf-type', (event) => {
       telemetry.update((t) => ({ ...t, ekfType: event.payload.ekf_type }));
+    })
+  );
+
+  // QuadPlane detection (ArduPilot Q_ENABLE reply) — a QuadPlane reports MAV_TYPE_FIXED_WING, so the
+  // mission vehicle class can only be upgraded to quadplane from this one-shot param. Upgrade only.
+  unlisteners.push(
+    await listen<{ quadplane: boolean }>('telemetry-vehicle', (event) => {
+      if (event.payload.quadplane) arduVehicleClass.set('quadplane');
     })
   );
 

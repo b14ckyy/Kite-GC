@@ -3,7 +3,8 @@
 
 import { writable, get } from 'svelte/store';
 import { connection } from './connection';
-import { cmdHasLocation, type VehicleClass } from '$lib/helpers/arduCommandCatalog';
+import { settings } from './settings';
+import { CMD, cmdHasLocation, type VehicleClass } from '$lib/helpers/arduCommandCatalog';
 
 // ── MAV_CMD constants ─────────────────────────────────────────────────
 export const MAV_CMD_NAV_WAYPOINT        = 16;
@@ -106,11 +107,30 @@ export const arduLoadedMissionId = writable<number | null>(null);
 // Online: derived from the FC's variant and locked. Offline: the operator picks it (QuadPlane can't be
 // auto-detected — it reports as ArduPlane — so it is an offline-only choice for now).
 
-export const arduVehicleClass = writable<VehicleClass>('plane');
+const VEHICLE_CLASSES: VehicleClass[] = ['plane', 'copter', 'quadplane', 'rover', 'boat', 'sub'];
 
-function variantToVehicleClass(variant: string): VehicleClass | null {
+function coerceVehicleClass(s: string): VehicleClass {
+  return (VEHICLE_CLASSES as string[]).includes(s) ? (s as VehicleClass) : 'plane';
+}
+
+export const arduVehicleClass = writable<VehicleClass>(coerceVehicleClass(get(settings).lastArduVehicleClass));
+
+/** Set the vehicle class from the offline selector and remember it. Ignored while connected (the class
+ *  is then locked to the detected FC). */
+export function setArduVehicleClass(cls: VehicleClass): void {
+  if (get(connection).status === 'connected') return;
+  arduVehicleClass.set(cls);
+  settings.patch({ lastArduVehicleClass: cls });
+}
+
+/** Map the FC's MAVLink vehicle type to a class. `mavType` is the HEARTBEAT MAV_TYPE; it is the only
+ *  reliable QuadPlane signal (a QuadPlane reports fc_variant "ArduPlane" but a VTOL_* MAV_TYPE). Falls
+ *  back to the fc_variant string when the type is unknown/absent. */
+function detectVehicleClass(variant: string, mavType: number | null | undefined): VehicleClass | null {
+  // MAV_TYPE VTOL range (19–25: tailsitter duo/quad, tiltrotor, …) → QuadPlane.
+  if (mavType != null && mavType >= 19 && mavType <= 25) return 'quadplane';
   const v = variant.toLowerCase();
-  if (v.includes('plane')) return 'plane';     // QuadPlane also reports ArduPlane (manual override)
+  if (v.includes('plane')) return 'plane';
   if (v.includes('copter') || v.includes('heli')) return 'copter';
   if (v.includes('rover')) return 'rover';
   if (v.includes('boat')) return 'boat';
@@ -121,16 +141,20 @@ function variantToVehicleClass(variant: string): VehicleClass | null {
 let _lastVariantForClass = '';
 connection.subscribe((c) => {
   if (c.status !== 'connected' || !c.fcInfo) { _lastVariantForClass = ''; return; }
-  if (c.fcInfo.fc_variant === _lastVariantForClass) return;
-  _lastVariantForClass = c.fcInfo.fc_variant;
-  const cls = variantToVehicleClass(c.fcInfo.fc_variant);
+  const key = `${c.fcInfo.fc_variant}/${c.fcInfo.mav_type ?? ''}`;
+  if (key === _lastVariantForClass) return;
+  _lastVariantForClass = key;
+  const cls = detectVehicleClass(c.fcInfo.fc_variant, c.fcInfo.mav_type);
   if (cls) arduVehicleClass.set(cls);
 });
 
 // ── Modifier grouping (INAV-style list/editor presentation over the flat sequence) ──
-// A "group" = a location command (a map waypoint) plus the trailing non-location commands that follow
-// it in the sequence (its modifiers). Leading modifiers before the first waypoint group with `anchor:
-// null`. Indices are the original flat-array indices (for editing).
+// A "group" = a location command (a map waypoint) plus the non-location commands attached to it. Most
+// modifiers (DO_*/CONDITION_*, executed on arrival / gating the next leg) TRAIL their waypoint. A
+// JUMP_TAG is the exception: it's a jump *target* — the FC resumes at the next nav waypoint after the
+// tag — so it LEADS the waypoint it marks (grouped with the FOLLOWING location, not the preceding one),
+// which matches both the FC behaviour and "the tag belongs to this waypoint". Leading modifiers before
+// the first waypoint group with `anchor: null`. Indices are the original flat-array indices (for editing).
 
 export interface ArduGroup {
   anchorIdx: number;                          // -1 for a leading modifier-only group
@@ -141,22 +165,34 @@ export interface ArduGroup {
 export function groupArduMission(wps: ArduWaypoint[]): ArduGroup[] {
   const groups: ArduGroup[] = [];
   let current: ArduGroup | null = null;
+  let leading: { idx: number; wp: ArduWaypoint }[] = []; // JUMP_TAGs awaiting their target waypoint
+
   wps.forEach((wp, idx) => {
     if (cmdHasLocation(wp.command)) {
-      current = { anchorIdx: idx, anchor: wp, modifiers: [] };
+      current = { anchorIdx: idx, anchor: wp, modifiers: [...leading] }; // leading tags belong to this WP
+      leading = [];
       groups.push(current);
+    } else if (wp.command === CMD.JUMP_TAG) {
+      leading.push({ idx, wp }); // defer: attach to the NEXT location (the jump target)
     } else {
       if (!current) { current = { anchorIdx: -1, anchor: null, modifiers: [] }; groups.push(current); }
       current.modifiers.push({ idx, wp });
     }
   });
+  // Trailing JUMP_TAG(s) with no following waypoint → attach to the last group (fallback).
+  if (leading.length) {
+    if (!current) { current = { anchorIdx: -1, anchor: null, modifiers: [] }; groups.push(current); }
+    current.modifiers.push(...leading);
+  }
   return groups;
 }
 
-/** Index in the flat sequence just after the given group (where a new modifier is inserted). */
+/** Index in the flat sequence just after the given group's TRAILING items (where a new trailing
+ *  modifier is inserted). Leading modifiers (JUMP_TAGs, idx < anchorIdx) are ignored here. */
 export function groupEndIndex(g: ArduGroup): number {
-  if (g.modifiers.length) return g.modifiers[g.modifiers.length - 1].idx + 1;
-  return g.anchorIdx + 1;
+  let end = g.anchorIdx;
+  for (const m of g.modifiers) if (m.idx > end) end = m.idx;
+  return end + 1;
 }
 
 // ── Mutations ─────────────────────────────────────────────────────────

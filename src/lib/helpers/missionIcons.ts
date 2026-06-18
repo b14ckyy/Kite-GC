@@ -35,8 +35,10 @@ export function fbhIconSpec(num: number, selected: boolean): WpIconSpec {
 
 /** Pick the right icon SPEC for a waypoint (shared by 2D + 3D rendering). */
 export function wpIconSpec(wp: Waypoint, displayNum: number, selected: boolean): WpIconSpec {
+  // INAV User Actions UA1–4 live in p3 bits 1–4 → a 4-slot indicator on the waypoint teardrop.
+  const uaMask = (wp.p3 >> 1) & 0xF;
   switch (wp.action) {
-    case WpAction.Waypoint:     return teardropNumberSpec(displayNum, wpColor('waypoint', selected));
+    case WpAction.Waypoint:     return teardropNumberSpec(displayNum, wpColor('waypoint', selected), undefined, uaMask);
     case WpAction.PosholdUnlim: return orbitSpec(displayNum, '∞', wpColor('loiter', selected));
     case WpAction.PosholdTime:  return orbitSpec(displayNum, `${wp.p1}s`, wpColor('loiter', selected));
     case WpAction.SetPoi:       return eyeSpec(displayNum, wpColor('poi', selected));

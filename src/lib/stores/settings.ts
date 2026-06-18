@@ -243,6 +243,8 @@ export interface AppSettings {
   defaultWpAltitudeM: number;
   defaultPhTimeSec: number;
   lastAutopilotSystem: string;
+  /** Last ArduPilot vehicle class chosen for offline mission planning (VehicleClass string). */
+  lastArduVehicleClass: string;
   // Alerts
   warnAltitudeM: number;
   /** Which FC system messages (MAVLink STATUSTEXT) surface as on-screen toasts. */
@@ -309,6 +311,7 @@ const defaults: AppSettings = {
   defaultWpAltitudeM: 50,
   defaultPhTimeSec: 30,
   lastAutopilotSystem: 'inav',
+  lastArduVehicleClass: 'plane',
   warnAltitudeM: 120,
   systemMessages: 'all',
   interface: {

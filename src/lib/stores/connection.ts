@@ -38,6 +38,9 @@ export interface FcInfo {
   platform_type: number;
   mixer_preset: number;
   features: FeatureSet | null;
+  /** MAVLink HEARTBEAT MAV_TYPE (ArduPilot/PX4 only; 0 for MSP). The only reliable QuadPlane signal
+   *  (a QuadPlane reports fc_variant "ArduPlane" but a VTOL_* MAV_TYPE). */
+  mav_type: number;
 }
 
 export interface PortInfo {

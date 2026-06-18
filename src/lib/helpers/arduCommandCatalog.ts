@@ -488,6 +488,14 @@ export function resolveCatalog(vehicle: VehicleClass): ArduCmdDef[] {
   return ARDU_CATALOG.filter((c) => c.vehicles.includes(vehicle));
 }
 
+/** Soft-validity: is this command valid for the given vehicle class? A catalog-unknown (legacy /
+ *  round-trip-only) command is NOT flagged — we can't judge it and it must round-trip untouched. A
+ *  known command whose `vehicles[]` excludes the class is flagged (warn, never block). */
+export function cmdValidForVehicle(id: number, vehicle: VehicleClass): boolean {
+  const d = BY_ID.get(id);
+  return !d || d.vehicles.includes(vehicle);
+}
+
 /** Location (primary-waypoint) commands for a vehicle, grouped by UI category in display order. */
 export function locationCommandsByCategory(vehicle: VehicleClass): { category: UiCategory; cmds: ArduCmdDef[] }[] {
   return groupByCategory(resolveCatalog(vehicle).filter((c) => c.specifiesCoordinate));

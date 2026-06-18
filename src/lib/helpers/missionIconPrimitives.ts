@@ -58,21 +58,48 @@ export function wpColor(semantic: WpSemantic, selected: boolean): WpColor {
 
 // ── Shape primitives ────────────────────────────────────────────────────────
 
-/** Upside-down teardrop with a waypoint number (48×66, bottom-anchored). */
-export function teardropNumberSpec(num: number, c: WpColor): WpIconSpec {
+/** Optional small corner badge (e.g. "V" for VTOL, "S" for spline) for the teardrop specs. Rendered
+ *  top-right in the 32×44 teardrop viewBox; empty string when no badge. */
+function badgeSvg(badge?: string): string {
+  if (!badge) return '';
+  return `<circle cx="25" cy="9" r="7" fill="#2c3e50" stroke="white" stroke-width="1.5"/>
+      <text x="25" y="12" text-anchor="middle" fill="white" font-size="8" font-weight="bold"
+            font-family="sans-serif">${badge}</text>`;
+}
+
+/** Optional 4-slot indicator row (INAV User Actions UA1–4) inside the teardrop bulb. `mask` is a 4-bit
+ *  flag set (bit0 = slot 1 … bit3 = slot 4); active slots are bright amber, inactive faint. Empty when
+ *  no slot is set, so unflagged waypoints stay clean. */
+function uaDotsSvg(mask?: number): string {
+  if (!mask) return '';
+  const xs = [11.5, 14.7, 17.9, 21.1];
+  let s = '';
+  for (let i = 0; i < 4; i++) {
+    const on = (mask >> i) & 1;
+    s += `<circle cx="${xs[i]}" cy="29" r="1.6" fill="${on ? '#ffd000' : '#ffffff'}"${on ? '' : ' opacity="0.25"'} stroke="#000" stroke-width="0.5"/>`;
+  }
+  return s;
+}
+
+/** Upside-down teardrop with a waypoint number (48×66, bottom-anchored). Optional corner `badge`
+ *  marks a variant (e.g. "S" spline, "P" payload-place); optional `uaMask` draws the UA1–4 indicator. */
+export function teardropNumberSpec(num: number, c: WpColor, badge?: string, uaMask?: number): WpIconSpec {
   return {
     svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 44" width="48" height="66">
       <path d="M16 44 C16 44 2 24 2 16 A14 14 0 1 1 30 16 C30 24 16 44 16 44Z"
             fill="${c.fill}" stroke="${c.stroke}" stroke-width="2"/>
       <text x="16" y="20" text-anchor="middle" fill="white" font-size="12" font-weight="bold"
             font-family="sans-serif">${num}</text>
+      ${uaDotsSvg(uaMask)}
+      ${badgeSvg(badge)}
     </svg>`,
     width: 48, height: 66, anchorX: 24, anchorY: 66,
   };
 }
 
-/** Teardrop with an up/down arrow (Takeoff / Land) (48×66, bottom-anchored). */
-export function teardropArrowSpec(dir: 'up' | 'down', c: WpColor): WpIconSpec {
+/** Teardrop with an up/down arrow (Takeoff / Land) (48×66, bottom-anchored). Optional corner `badge`
+ *  distinguishes VTOL takeoff/land ("V") from the fixed-wing/multirotor variants. */
+export function teardropArrowSpec(dir: 'up' | 'down', c: WpColor, badge?: string): WpIconSpec {
   const arrow = dir === 'down'
     ? 'M16 10 L16 25 M11 20 L16 25 L21 20'
     : 'M16 26 L16 11 M11 16 L16 11 L21 16';
@@ -82,6 +109,7 @@ export function teardropArrowSpec(dir: 'up' | 'down', c: WpColor): WpIconSpec {
             fill="${c.fill}" stroke="${c.stroke}" stroke-width="2"/>
       <path d="${arrow}" fill="none" stroke="white"
             stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      ${badgeSvg(badge)}
     </svg>`,
     width: 48, height: 66, anchorX: 24, anchorY: 66,
   };
