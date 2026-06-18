@@ -7,6 +7,7 @@ import { get } from 'svelte/store';
 import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from '$lib/stores/connection';
 import { connection, connectionProtocol, fcLinkAlive, availablePorts, bleDevices } from '$lib/stores/connection';
 import { startTelemetryListeners, stopTelemetryListeners, resetTelemetry } from '$lib/stores/telemetry';
+import { applyRelaysOnConnect, clearRelaysOnDisconnect } from '$lib/controllers/relayController';
 
 /**
  * Refresh the list of serial ports via Tauri and return the port that should be selected.
@@ -143,6 +144,8 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
   });
   fcLinkAlive.set(true);
   await startTelemetryListeners();
+  // Auto-start the saved telemetry relays (push telemetry → no handshake needed).
+  await applyRelaysOnConnect();
   return info;
 }
 
@@ -150,6 +153,7 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
  * Disconnect from the flight controller, stop listeners, reset telemetry.
  */
 export async function disconnectFC(baudRate: number): Promise<void> {
+  await clearRelaysOnDisconnect();
   stopTelemetryListeners();
   resetTelemetry();
   connectionProtocol.set({ primary: '', secondary: null });

@@ -25,6 +25,7 @@
   import BatchEditPopup from "$lib/components/mission/BatchEditPopup.svelte";
   import type { DialogButton, DialogOptions } from "$lib/components/ConfirmDialog.svelte";
   import Toolbar from "$lib/components/Toolbar.svelte";
+  import RelayPanel from "$lib/components/RelayPanel.svelte";
   import WindowResizeBorders from "$lib/components/WindowResizeBorders.svelte";
   import StatusBar from "$lib/components/StatusBar.svelte";
   import NavRail from "$lib/components/NavRail.svelte";
@@ -213,6 +214,8 @@
   let errorMsg = $state("");
   let navPanelOpen = $state(false);
   let activeTab = $state("uav-info");
+  // Telemetry Relay dropdown (under the connection bar).
+  let relayPanelOpen = $state(false);
 
   // Terrain Analysis overlay (NavRail-triggered, full-width over the map)
   let terrainOpen = $state(false);
@@ -2140,7 +2143,10 @@
     bind:selectedBleDevice
     {baudRates}
     onConnect={handleConnect}
+    relayOpen={relayPanelOpen}
+    onToggleRelay={() => (relayPanelOpen = !relayPanelOpen)}
   />
+    <RelayPanel open={relayPanelOpen} />
   </div>
 
   <!-- ======= MAP (always fullscreen behind everything) ======= -->

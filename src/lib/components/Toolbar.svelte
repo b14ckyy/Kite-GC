@@ -30,6 +30,8 @@
     selectedBleDevice = $bindable(),
     baudRates,
     onConnect,
+    relayOpen = false,
+    onToggleRelay,
   }: {
     appVersion: string;
     telem: TelemetryData;
@@ -47,6 +49,8 @@
     selectedBleDevice: string;
     baudRates: number[];
     onConnect: () => void;
+    relayOpen?: boolean;
+    onToggleRelay?: () => void;
   } = $props();
 
   function getGpsFixLabel(): string {
@@ -185,6 +189,14 @@
         <Button variant="data" onclick={onConnect}>{$t('connection.connect')}</Button>
       {/if}
     </div>
+    <button
+      class="relay-toggle"
+      class:open={relayOpen}
+      onclick={() => onToggleRelay?.()}
+      title={$t('relay.title')}
+    >
+      ⇅ {$t('relay.short')}
+    </button>
     <WindowControls />
   </div>
 </header>
@@ -278,6 +290,31 @@
     display: flex;
     align-items: center;
     gap: 4px;
+  }
+
+  /* Relay dropdown toggle — always visible, right of the connection controls. */
+  .relay-toggle {
+    height: 28px;
+    box-sizing: border-box;
+    padding: 0 10px;
+    background: #434343;
+    border: 1px solid #555;
+    border-radius: 4px;
+    color: #cfcfcf;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+  }
+  .relay-toggle:hover {
+    background: rgba(55, 168, 219, 0.18);
+    color: #e0e0e0;
+  }
+  .relay-toggle.open {
+    background: rgba(55, 168, 219, 0.22);
+    border-color: #37a8db;
+    color: #37a8db;
   }
 
   /* Unified toolbar form controls — match the control-library height (28px), so selects, inputs,

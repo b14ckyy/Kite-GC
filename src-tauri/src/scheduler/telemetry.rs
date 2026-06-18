@@ -43,14 +43,14 @@ impl Default for TelemetryConfig {
 
 // ── Telemetry event payloads ─────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AttitudeData {
     pub roll: f64,  // degrees, ±180
     pub pitch: f64, // degrees, ±90
     pub yaw: f64,   // heading 0–360 (degrees, decimals preserved)
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GpsData {
     pub fix_type: u8,
     pub num_sat: u8,
@@ -61,13 +61,13 @@ pub struct GpsData {
     pub course: f64,      // degrees * 10 → degrees
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AltitudeData {
     pub altitude: f64, // cm → meters
     pub vario: f64,    // cm/s → m/s
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalogData {
     pub voltage: f64,     // V (0.01V units → V)
     pub mah_drawn: u32,
@@ -78,7 +78,7 @@ pub struct AnalogData {
     pub cell_count: u8,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatusData {
     pub arming_flags: u32,
     pub flight_mode_flags: u32,
@@ -98,7 +98,7 @@ pub struct SensorStatusData {
     pub opflow: u8,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AirspeedData {
     pub airspeed: f64, // cm/s → m/s
 }

@@ -5,6 +5,7 @@
 // Stores user preferences in localStorage, survives between sessions
 
 import { writable } from 'svelte/store';
+import type { RelayConfig } from '$lib/stores/relay';
 
 export interface MapState {
   center: [number, number];
@@ -272,6 +273,8 @@ export interface AppSettings {
   radar: RadarSettings;
   /** Airspace Manager (aeronautical data) global settings. */
   airspace: AirspaceSettings;
+  /** Telemetry Relay (forwarding/conversion) configs — persisted, auto-connected on primary connect. */
+  relays: RelayConfig[];
 }
 
 const STORAGE_KEY = 'kite-gc-settings';
@@ -330,6 +333,7 @@ const defaults: AppSettings = {
   userLocation: null,
   radar: DEFAULT_RADAR,
   airspace: DEFAULT_AIRSPACE,
+  relays: [],
 };
 
 function load(): AppSettings {

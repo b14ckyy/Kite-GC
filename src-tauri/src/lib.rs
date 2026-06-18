@@ -12,6 +12,7 @@ mod passive_telemetry;
 mod radar;
 mod scheduler;
 mod state;
+mod telemetry_forward;
 mod terrain;
 mod transport;
 
@@ -53,6 +54,7 @@ use commands::mission::{
 };
 use mission::store::MissionStore;
 use state::AppState;
+use telemetry_forward::{relay_configure, relay_clear, RelayHub};
 
 /// True when a `.portable` marker file sits next to the executable. Used both to
 /// redirect data (`setup_portable_mode`) and to gate plugins whose storage path we
@@ -126,6 +128,7 @@ pub fn run() {
         .manage(AppState::new())
         .manage(MissionStore::new())
         .manage(TerrainProvider::new())
+        .manage(RelayHub::new())
         .invoke_handler(tauri::generate_handler![
             list_serial_ports,
             scan_ble_devices,
@@ -225,6 +228,8 @@ pub fn run() {
             aero_fetch,
             aero_cache_stats,
             aero_cache_clear,
+            relay_configure,
+            relay_clear,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Kite Ground Control");
