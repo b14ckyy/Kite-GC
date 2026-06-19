@@ -640,7 +640,9 @@
   .mod-indent { padding-left: 8px; color: #e67e22; font-style: italic; }
 
   .miss-footer { width: 100%; display: flex; flex-direction: column; gap: 4px; }
-  .wp-detail { padding: 6px 8px; border: 1px solid #333; border-radius: 4px; background: #1e1e1e; max-height: 180px; overflow-y: auto; }
+  /* No internal scroll: the PanelShell footer is pinned and the column scrolls as a last resort, so a
+     full WP's params show without a spurious inner scrollbar (the detail is bounded — a handful of rows). */
+  .wp-detail { padding: 6px 8px; border: 1px solid #333; border-radius: 4px; background: #1e1e1e; }
   .detail-header { font-weight: bold; font-size: 13px; color: #37a8db; margin-bottom: 4px; padding-bottom: 3px; border-bottom: 1px solid #333; }
   .detail-row { display: flex; justify-content: space-between; padding: 1px 0; font-size: 12px; color: #ccc; }
   .detail-label { color: #888; font-size: 11px; }
