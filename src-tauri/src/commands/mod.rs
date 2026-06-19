@@ -7,6 +7,7 @@
 
 pub mod aero;
 pub mod connection;
+pub mod control;
 pub mod flightlog;
 pub mod info;
 pub mod mission;

@@ -6,6 +6,7 @@
 // Uses the `mavlink` crate for message definitions (ardupilotmega dialect).
 
 pub mod codec;
+pub mod control;
 pub mod handler;
 pub mod handshake;
 pub mod mission;

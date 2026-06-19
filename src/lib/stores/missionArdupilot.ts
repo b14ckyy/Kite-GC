@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-import { writable, get } from 'svelte/store';
+import { writable, derived, get } from 'svelte/store';
 import { connection } from './connection';
 import { settings } from './settings';
 import { CMD, cmdHasLocation, type VehicleClass } from '$lib/helpers/arduCommandCatalog';
@@ -102,6 +102,24 @@ export const arduEditMode       = writable<boolean>(false);
  *  the content hash matches an existing row; the link target for arm-time/End-Flight recording
  *  saves. See docs/active/ARDUPILOT_MISSION_LIBRARY.md. */
 export const arduLoadedMissionId = writable<number | null>(null);
+
+/** Serialized snapshot of the mission at the last successful FC download/upload this session (null
+ *  until one happens). Used to tell whether the on-screen mission still matches the FC's. */
+export const arduMissionFcRef = writable<string | null>(null);
+
+/** True when the current mission still matches what was last synced with the FC (download/upload) —
+ *  i.e. no edits since. Gates FC-relative actions like "Set active WP". This is a lightweight
+ *  in-session signal; the full FC/DB/File provenance flags for the ArduPilot store (with Mission
+ *  Manager indicators, like INAV) are still a deferred Phase-2 item — see ADR-050. */
+export const arduMissionFcSynced = derived(
+  [arduMission, arduMissionFcRef],
+  ([m, ref]) => ref !== null && m.length > 0 && serializeWaypoints(m) === ref,
+);
+
+/** Record the current mission as the FC-synced reference (call after a successful download/upload). */
+export function markArduMissionFcSynced(wps: ArduWaypoint[]): void {
+  arduMissionFcRef.set(serializeWaypoints(wps));
+}
 
 // ── Vehicle class (drives the command catalog filter) ─────────────────
 // Online: derived from the FC's variant and locked. Offline: the operator picks it (QuadPlane can't be

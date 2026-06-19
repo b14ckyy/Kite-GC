@@ -33,6 +33,7 @@
   import UavInfoPanel from "$lib/components/UavInfoPanel.svelte";
   import LogbookPanel from "$lib/components/logbook/LogbookPanel.svelte";
   import MissionPanel from "$lib/components/mission/MissionPanel.svelte";
+  import MavCommandPanel from "$lib/components/control/MavCommandPanel.svelte";
   import VideoPanel from "$lib/components/video/VideoPanel.svelte";
   import RadarPanel from "$lib/components/RadarPanel.svelte";
   import AirspaceManagerPanel from "$lib/components/AirspaceManagerPanel.svelte";
@@ -467,9 +468,18 @@
   // Stacked layers (Airspace Manager / aeronautical data).
   const ICON_AIRSPACE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3 21 7.5 12 12 3 7.5Z"/><path d="M3 12 12 16.5 21 12"/><path d="M3 16.5 12 21 21 16.5"/></svg>';
 
+  // Joystick/gamepad (Vehicle Control) — two sticks in a rounded gamepad body.
+  const ICON_CONTROL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="7.5" width="19" height="11" rx="4.5"/><circle cx="8" cy="13" r="2.1"/><circle cx="16" cy="13" r="2.1"/><path d="M8 10.9v-1M16 15.1v1"/></svg>';
+
+  // The vehicle-control panel is MAVLink-only (ArduPilot/PX4) and only meaningful while connected.
+  const isMavlinkConnected = $derived(
+    $connection.status === 'connected' && $connection.protocolType === 'mavlink'
+  );
+
   const allTabs = [
     { id: "uav-info", label: () => $t('nav.uavInfo'), icon: ICON_UAV_INFO },
     { id: "mission", label: () => $t('nav.mission'), icon: ICON_MISSION },
+    { id: "control", label: () => $t('nav.control'), icon: ICON_CONTROL },
     { id: "terrain", label: () => $t('nav.terrain'), icon: ICON_TERRAIN },
     { id: "logbook", label: () => $t('nav.logbook'), icon: ICON_LOGBOOK },
     { id: "radar", label: () => $t('nav.radar'), icon: ICON_RADAR },
@@ -480,6 +490,7 @@
   const tabs = $derived(
     allTabs.filter(t =>
       (t.id !== 'logbook' || flightLoggingEnabled) &&
+      (t.id !== 'control' || isMavlinkConnected) && // control tab only when connected via MAVLink
       (t.id !== 'radar' || radarSettings.enabled) && // radar tab only when the master switch is on
       (t.id !== 'airspace' || airspaceSettings.enabled) // airspace tab only when its master switch is on
     )
@@ -2296,6 +2307,8 @@
       />
     {:else if activeTab === 'mission'}
       <MissionPanel />
+    {:else if activeTab === 'control'}
+      <MavCommandPanel />
     {:else if activeTab === 'radar'}
       <RadarPanel radar={radarSettings} {interfaceSettings} referencePoint={radarReference} mspSupported={mspAdsbSupported} onPatch={applySettingsPatch} />
     {:else if activeTab === 'airspace'}

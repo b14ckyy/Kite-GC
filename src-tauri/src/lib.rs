@@ -52,6 +52,13 @@ use commands::mission::{
     read_text_file, write_text_file,
     ardu_mission_download, ardu_mission_upload,
 };
+use commands::control::{
+    mav_set_mode, mav_arm, mav_takeoff, mav_land, mav_rtl, mav_reposition,
+    mav_change_speed, mav_mission_start, mav_mission_pause, mav_mission_set_current,
+    mav_set_home_here, mav_abort_landing, mav_set_param,
+    mav_guided_change_heading, mav_guided_clear_heading, mav_condition_yaw,
+    mav_vtol_transition,
+};
 use mission::store::MissionStore;
 use state::AppState;
 use telemetry_forward::{relay_configure, relay_clear, RelayHub};
@@ -157,6 +164,23 @@ pub fn run() {
             write_text_file,
             ardu_mission_download,
             ardu_mission_upload,
+            mav_set_mode,
+            mav_arm,
+            mav_takeoff,
+            mav_land,
+            mav_rtl,
+            mav_reposition,
+            mav_change_speed,
+            mav_mission_start,
+            mav_mission_pause,
+            mav_mission_set_current,
+            mav_set_home_here,
+            mav_abort_landing,
+            mav_set_param,
+            mav_guided_change_heading,
+            mav_guided_clear_heading,
+            mav_condition_yaw,
+            mav_vtol_transition,
             flightlog_list,
             flightlog_get,
             flightlog_get_track,

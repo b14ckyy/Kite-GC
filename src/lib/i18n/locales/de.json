@@ -106,8 +106,64 @@
     "radar": "Radar",
     "airspace": "Luftraum",
     "video": "Video",
+    "control": "Steuerung",
     "closePanel": "Panel schließen",
     "openPanel": "Panel öffnen"
+  },
+  "control": {
+    "title": "Fahrzeugsteuerung",
+    "notConnected": "Über MAVLink (ArduPilot / PX4) verbinden, um das Fahrzeug zu steuern.",
+    "section": {
+      "flightMode": "Flugmodus",
+      "actions": "Armieren & Start",
+      "guided": "Guided",
+      "mission": "Mission",
+      "modes": "Weitere Modi",
+      "adjust": "Aktiver Flug",
+      "transition": "VTOL-Übergang"
+    },
+    "mode": {
+      "select": "Modus wählen…",
+      "current": "Aktiver Modus"
+    },
+    "showAllModes": "Alle Modi anzeigen",
+    "rcLockHint": "Stick-gesteuerte Modi brauchen eine verbundene RC-Fernsteuerung.",
+    "noRcLink": "Keine RC-Verbindung",
+    "takeoffAlt": "Starthöhe (m)",
+    "alt": "Höhe (m)",
+    "heading": "Kurs (°)",
+    "loiterRadius": "Radius (m)",
+    "guidedHint": "Guided aktivieren, dann auf die Karte klicken, um das Fahrzeug dorthin zu senden.",
+    "guidedClickHint": "Auf die Karte klicken, um das Ziel zu setzen.",
+    "flyHere": "Hierhin fliegen",
+    "setWpHint": "Mission mit dem FC synchronisieren (Download/Upload), um zu aktivieren.",
+    "ack": {
+      "ok": "Angenommen"
+    },
+    "action": {
+      "setMode": "Modus setzen",
+      "arm": "Zum ARMIEREN schieben",
+      "disarm": "Zum DISARMIEREN halten",
+      "takeoff": "Start",
+      "land": "Landen",
+      "rtl": "RTL",
+      "guided": "Guided",
+      "missionStart": "Start",
+      "missionRestart": "Neustart",
+      "setWp": "WP setzen",
+      "changeAlt": "Höhe ändern",
+      "setHeading": "Kurs setzen",
+      "changeSpeed": "Geschwindigkeit",
+      "setLoiterRadius": "Loiter-Radius setzen",
+      "setHome": "Home hierher setzen",
+      "abortLanding": "Landung abbrechen",
+      "toForward": "Vorwärtsflug",
+      "toHover": "Schwebeflug",
+      "missionPause": "Pause",
+      "missionResume": "Fortsetzen",
+      "changeSpeed": "Geschwindigkeit",
+      "reposition": "Hierhin fliegen"
+    }
   },
   "airspace": {
     "title": "Airspace Manager",

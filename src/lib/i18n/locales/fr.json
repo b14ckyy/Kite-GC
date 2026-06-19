@@ -95,8 +95,64 @@
     "radar": "Radar",
     "airspace": "Espace aérien",
     "video": "Vidéo",
+    "control": "Pilotage",
     "closePanel": "Fermer le panneau",
     "openPanel": "Ouvrir le panneau"
+  },
+  "control": {
+    "title": "Pilotage du véhicule",
+    "notConnected": "Connectez-vous via MAVLink (ArduPilot / PX4) pour commander le véhicule.",
+    "section": {
+      "flightMode": "Mode de vol",
+      "actions": "Armement & Décollage",
+      "guided": "Guided",
+      "mission": "Mission",
+      "modes": "Modes",
+      "adjust": "Vol actif",
+      "transition": "Transition VTOL"
+    },
+    "mode": {
+      "select": "Choisir un mode…",
+      "current": "Mode actif"
+    },
+    "showAllModes": "Afficher tous les modes",
+    "rcLockHint": "Les modes au manche nécessitent une radiocommande connectée.",
+    "noRcLink": "Pas de liaison RC",
+    "takeoffAlt": "Altitude de décollage (m)",
+    "alt": "Alt (m)",
+    "heading": "Cap (°)",
+    "loiterRadius": "Rayon (m)",
+    "guidedHint": "Activez Guided, puis cliquez sur la carte pour y envoyer le véhicule.",
+    "guidedClickHint": "Cliquez sur la carte pour définir la cible.",
+    "flyHere": "Voler ici",
+    "setWpHint": "Synchronisez la mission avec le FC (téléchargement) pour activer.",
+    "ack": {
+      "ok": "Accepté"
+    },
+    "action": {
+      "setMode": "Définir le mode",
+      "arm": "Glisser pour ARMER",
+      "disarm": "Maintenir pour DÉSARMER",
+      "takeoff": "Décollage",
+      "land": "Atterrir",
+      "rtl": "RTL",
+      "guided": "Guided",
+      "missionStart": "Démarrer",
+      "missionRestart": "Redémarrer",
+      "setWp": "Définir WP",
+      "changeAlt": "Changer altitude",
+      "setHeading": "Définir cap",
+      "changeSpeed": "Changer vitesse",
+      "setLoiterRadius": "Régler rayon loiter",
+      "setHome": "Définir Home ici",
+      "abortLanding": "Annuler atterrissage",
+      "toForward": "Vol horizontal",
+      "toHover": "Vol stationnaire",
+      "missionPause": "Pause",
+      "missionResume": "Reprendre",
+      "changeSpeed": "Vitesse",
+      "reposition": "Voler ici"
+    }
   },
   "airspace": {
     "title": "Gestionnaire d'espace aérien",

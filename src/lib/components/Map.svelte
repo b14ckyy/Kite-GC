@@ -12,7 +12,7 @@
 </script>
 
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
+  import { onMount, onDestroy, mount, unmount } from "svelte";
   import L from "leaflet";
   import "leaflet/dist/leaflet.css";
   import { settings } from "$lib/stores/settings";
@@ -24,7 +24,9 @@
   import { homePosition, homeMarkerShown } from "$lib/stores/home";
   import { editMode, geoWaypoints, launchPoint, replayActive, toDeg } from "$lib/stores/mission";
   import { autopilotSystem } from "$lib/stores/autopilotContext";
-  import { arduMission } from "$lib/stores/missionArdupilot";
+  import { arduMission, arduVehicleClass } from "$lib/stores/missionArdupilot";
+  import { guidedActive, repositionTo, type GuidedParams } from "$lib/controllers/vehicleControl";
+  import GuidedTargetForm from "$lib/components/control/GuidedTargetForm.svelte";
   import { cmdHasLocation } from "$lib/helpers/arduCommandCatalog";
   import { connection } from "$lib/stores/connection";
   import { frameMissionSignal } from "$lib/stores/mapCamera";
@@ -488,6 +490,7 @@
   function onAirspaceClick(e: L.LeafletMouseEvent) {
     if (!map || !$settings.airspace.enabled) return;
     if (get(editMode)) return; // while editing waypoints, map clicks deselect WPs — don't pop the airspace list
+    if (get(guidedActive)) return; // Guided "fly here" owns the click → don't also pop the airspace list
     // Toggle: if the list popup is already open, a second map click just dismisses it.
     if (aeroPopup && aeroPopup.isOpen()) {
       map.closePopup(aeroPopup);
@@ -516,6 +519,70 @@
       .setContent(`<div style="max-height:240px;overflow:auto;">${rows}</div>`)
       .openOn(map);
   }
+
+  // ── Guided "fly here" (vehicle control) ──────────────────────────────────
+  // When the Guided toggle is on (MAVLink ArduPilot/PX4), a map click opens a small popup with the
+  // target coordinates + vehicle-aware params (Copter/VTOL: alt + heading · Plane: alt + loiter
+  // radius) and a "Fly Here" button that sends MAV_CMD_DO_REPOSITION. Last values persist for the
+  // next click. See docs/active/VEHICLE_CONTROL.md.
+  let guidedPopup: L.Popup | undefined;
+  let guidedForm: ReturnType<typeof mount> | undefined;
+
+  function closeGuidedPopup() {
+    if (guidedForm) { void unmount(guidedForm); guidedForm = undefined; }
+    if (guidedPopup) { map?.closePopup(guidedPopup); guidedPopup = undefined; }
+  }
+
+  function onGuidedClick(e: L.LeafletMouseEvent) {
+    if (!map || !get(guidedActive)) return;
+    // Ignore clicks that originate inside an open popup (e.g. the "Fly Here" button) — they must not
+    // open a second target popup at the cursor.
+    const tgt = e.originalEvent?.target as HTMLElement | undefined;
+    if (tgt?.closest?.(".leaflet-popup")) return;
+    // Toggle off if a popup is already open at the previous click.
+    if (guidedPopup && guidedPopup.isOpen()) {
+      closeGuidedPopup();
+      return;
+    }
+    const { lat, lng } = e.latlng;
+    const sys = get(autopilotSystem);
+    const cls = get(arduVehicleClass);
+    const multirotor = sys === "px4" ? true : (cls === "copter" || cls === "quadplane");
+
+    // Mount the Svelte form (NumberStepper fields) into the popup container.
+    const el = document.createElement("div");
+    el.className = "guided-popup";
+    guidedForm = mount(GuidedTargetForm, {
+      target: el,
+      props: {
+        lat, lon: lng, multirotor,
+        onfly: (flat: number, flon: number, p: GuidedParams) => {
+          void repositionTo(flat, flon, p);
+          // Defer the close so the originating click finishes bubbling first (the popup is still in
+          // the DOM, so the in-popup guard above suppresses a stray second popup).
+          setTimeout(closeGuidedPopup, 0);
+        },
+      },
+    });
+
+    guidedPopup = L.popup({ maxWidth: 240, closeOnClick: false, className: "guided-popup-wrap" })
+      .setLatLng(e.latlng)
+      .setContent(el)
+      .openOn(map);
+    // Stop clicks inside the popup from propagating to the map (the canonical Leaflet fix applied to
+    // the actual popup container, not just the inner content node).
+    const popEl = guidedPopup.getElement();
+    if (popEl) {
+      L.DomEvent.disableClickPropagation(popEl);
+      L.DomEvent.disableScrollPropagation(popEl);
+    }
+    // Unmount the form when the popup is dismissed by any means (Leaflet close button / Esc).
+    guidedPopup.on("remove", () => { if (guidedForm) { void unmount(guidedForm); guidedForm = undefined; } });
+  }
+
+  // Close the Guided target popup as soon as the Guided toggle is switched off in the panel — so a
+  // reposition can't be sent while Guided is disabled in the UI.
+  $effect(() => { if (!$guidedActive) closeGuidedPopup(); });
 
   // Redraw on enable-toggle, new data, or visibility change (data/visibility via subscriptions below).
   $effect(() => { void $settings.airspace.enabled; if (map) updateAirspace(); });
@@ -1048,6 +1115,7 @@
     unsubAero = aeroData.subscribe(() => updateAirspace());
     unsubAeroFocus = aeroFocus.subscribe((f) => { if (f && map) map.setView([f.lat, f.lon], Math.max(map.getZoom(), 11)); });
     map.on("moveend", updateAirspace);
+    map.on("click", onGuidedClick); // Guided "fly here" target popup (vehicle control)
     map.on("click", onAirspaceClick); // click empty map / airspace fill → list all airspaces there
 
     // Auto night mode: physical location + re-check every minute so wall-clock drift fades day↔night.
@@ -1435,6 +1503,16 @@
   :global(.leaflet-default-icon-path) {
     background-image: url("leaflet/dist/images/marker-icon.png");
   }
+
+  /* Guided "fly here" popup (vehicle control) — dark theme to match the app. */
+  :global(.guided-popup-wrap .leaflet-popup-content-wrapper) {
+    background: rgba(46, 46, 46, 0.97);
+    color: #e0e0e0;
+    border: 1px solid #37a8db;
+    border-radius: 6px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+  }
+  :global(.guided-popup-wrap .leaflet-popup-tip) { background: rgba(46, 46, 46, 0.97); }
 
   /* Foreign-vehicle (radar) contact icons */
   :global(.radar-divicon) {

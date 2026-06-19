@@ -106,8 +106,64 @@
     "radar": "Radar",
     "airspace": "Airspace",
     "video": "Video",
+    "control": "Control",
     "closePanel": "Close panel",
     "openPanel": "Open panel"
+  },
+  "control": {
+    "title": "Vehicle Control",
+    "notConnected": "Connect via MAVLink (ArduPilot / PX4) to command the vehicle.",
+    "section": {
+      "flightMode": "Flight Mode",
+      "actions": "Arm & Takeoff",
+      "guided": "Guided",
+      "mission": "Mission",
+      "modes": "Modes",
+      "adjust": "Active Flight",
+      "transition": "VTOL Transition"
+    },
+    "mode": {
+      "select": "Select mode…",
+      "current": "Active mode"
+    },
+    "showAllModes": "Show all modes",
+    "rcLockHint": "Stick-flown modes need a connected RC transmitter.",
+    "noRcLink": "No RC link",
+    "takeoffAlt": "Takeoff altitude (m)",
+    "alt": "Alt (m)",
+    "heading": "Heading (°)",
+    "loiterRadius": "Radius (m)",
+    "guidedHint": "Enable Guided, then click the map to send the vehicle there.",
+    "guidedClickHint": "Click the map to set the target.",
+    "flyHere": "Fly Here",
+    "setWpHint": "Sync the mission with the FC (download/upload) to enable.",
+    "ack": {
+      "ok": "Accepted"
+    },
+    "action": {
+      "setMode": "Set mode",
+      "arm": "Slide to ARM",
+      "disarm": "Hold to DISARM",
+      "takeoff": "Takeoff",
+      "land": "Land",
+      "rtl": "RTL",
+      "guided": "Guided",
+      "missionStart": "Start",
+      "missionRestart": "Restart",
+      "setWp": "Set WP",
+      "changeAlt": "Change Alt",
+      "setHeading": "Set Heading",
+      "changeSpeed": "Change Speed",
+      "setLoiterRadius": "Set Loiter Radius",
+      "setHome": "Set Home Here",
+      "abortLanding": "Abort Landing",
+      "toForward": "Forward Flight",
+      "toHover": "Hover",
+      "missionPause": "Pause",
+      "missionResume": "Resume",
+      "changeSpeed": "Change speed",
+      "reposition": "Fly here"
+    }
   },
   "airspace": {
     "title": "Airspace Manager",

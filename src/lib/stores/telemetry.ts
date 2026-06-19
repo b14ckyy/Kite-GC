@@ -61,6 +61,9 @@ export interface TelemetryData {
   armingFlags: number;
   cpuLoad: number;
   sensorStatus: number;
+  /** Raw flight-mode flags. For MAVLink this is the FC's `custom_mode` (used by the vehicle-control
+   *  panel to match/highlight the active mode); for MSP it is INAV's box flag bitfield (forensic). */
+  flightModeFlags: number;
 
   // Sensor hardware status (from MSP_SENSOR_STATUS 151)
   // Values: 0=NONE, 1=OK, 2=UNAVAILABLE, 3=UNHEALTHY
@@ -99,7 +102,7 @@ const defaultTelemetry: TelemetryData = {
   airspeed: 0,
   voltage: 0, current: 0, mAhDrawn: 0, rssi: 0, power: 0, batteryPercentage: 0, cellCount: 0,
   link: { rssiPercent: null, rssiDbm: null, lq: null, snrDb: null },
-  armingFlags: 0, cpuLoad: 0, sensorStatus: 0,
+  armingFlags: 0, cpuLoad: 0, sensorStatus: 0, flightModeFlags: 0,
   sensorGyro: 0, sensorAcc: 0, sensorMag: 0, sensorBaro: 0,
   sensorGps: 0, sensorRangefinder: 0, sensorPitot: 0, sensorOpflow: 0,
   ekfStatus: 0, ekfType: 0,
@@ -317,6 +320,7 @@ export async function startTelemetryListeners() {
         armingFlags: event.payload.arming_flags,
         cpuLoad: event.payload.cpu_load,
         sensorStatus: event.payload.sensor_status,
+        flightModeFlags: event.payload.flight_mode_flags,
         lastUpdate: Date.now(),
       }));
     })

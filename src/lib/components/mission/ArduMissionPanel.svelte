@@ -15,7 +15,7 @@
   import { t, locale } from 'svelte-i18n';
   import {
     arduMission, arduSelectedWpIndex, arduEditMode, arduLoadedMissionId,
-    arduMissionClear, arduRemoveWp, groupArduMission,
+    arduMissionClear, arduRemoveWp, groupArduMission, markArduMissionFcSynced,
     arduVehicleClass, setArduVehicleClass,
     MAV_FRAME_GLOBAL, MAV_FRAME_GLOBAL_TERRAIN_ALT,
     serializeWaypoints, parseWaypoints,
@@ -222,6 +222,7 @@
       arduMission.set(wps);
       arduSelectedWpIndex.set(-1);
       arduLoadedMissionId.set(null); // downloaded from FC → not a library mission
+      markArduMissionFcSynced(wps); // now in sync with the FC (gates Set-WP in the control panel)
       statusMessage = $t('mission.downloaded', { values: { count: wps.length } });
       frameMissionOnMap();
     } catch (e) {
@@ -235,6 +236,7 @@
     statusMessage = $t('arduMission.uploading');
     try {
       await invoke<void>('ardu_mission_upload', { waypoints: wps });
+      markArduMissionFcSynced(wps); // FC now holds exactly this mission
       statusMessage = $t('mission.uploaded', { values: { count: wps.length } });
     } catch (e) {
       statusMessage = $t('mission.uploadFailed', { values: { error: String(e) } });

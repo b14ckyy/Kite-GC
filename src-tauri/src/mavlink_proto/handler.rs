@@ -40,6 +40,11 @@ pub enum MavlinkCommand {
     RegisterMissionReceiver(mpsc::Sender<MavMessage>),
     /// Unregister the mission receiver — telemetry dispatch resumes for all messages
     UnregisterMissionReceiver,
+    /// Register a channel to receive COMMAND_ACK during an active command operation
+    /// (mode switch / arm / takeoff / reposition / …). See `control.rs`.
+    RegisterCommandReceiver(mpsc::Sender<MavMessage>),
+    /// Unregister the command-ack receiver
+    UnregisterCommandReceiver,
 }
 
 /// Handle for interacting with the running MAVLink handler
@@ -130,6 +135,21 @@ fn handler_loop(
     // here instead of being dispatched as telemetry events.
     let mut mission_fwd: Option<mpsc::Sender<MavMessage>> = None;
 
+    // Active command operation receiver — when set, COMMAND_ACK is forwarded here so the
+    // blocking command helper (control.rs) can match the ACK to the command it sent.
+    let mut cmd_fwd: Option<mpsc::Sender<MavMessage>> = None;
+
+    // QuadPlane detection robustness: a QuadPlane reports MAV_TYPE_FIXED_WING, so the only reliable
+    // signal is the Q_ENABLE parameter. The single pre-handler PARAM_REQUEST_READ can be lost on a
+    // noisy link (then a QuadPlane is mistaken for a plain plane until reconnect), so we re-request it
+    // a few times here until the FC answers. Bounded so a plain plane (no/zero Q_ENABLE) stops soon.
+    let is_ardupilot = fc_variant.starts_with("Ardu");
+    let mut quadplane_seen = false;
+    let mut param_probes: u8 = 0;
+    let mut last_param_probe = Instant::now();
+    const MAX_PARAM_PROBES: u8 = 6;
+    const PARAM_PROBE_INTERVAL: Duration = Duration::from_millis(1200);
+
     let gcs_header = codec::gcs_header();
 
     log::info!("MAVLink handler started (FC sysid={})", fc_sysid);
@@ -168,6 +188,16 @@ fn handler_loop(
                 mission_fwd = None;
                 continue;
             }
+            Ok(MavlinkCommand::RegisterCommandReceiver(tx)) => {
+                log::debug!("MAVLink command receiver registered");
+                cmd_fwd = Some(tx);
+                continue;
+            }
+            Ok(MavlinkCommand::UnregisterCommandReceiver) => {
+                log::debug!("MAVLink command receiver unregistered");
+                cmd_fwd = None;
+                continue;
+            }
             Err(mpsc::TryRecvError::Empty) => {}
             Err(mpsc::TryRecvError::Disconnected) => {
                 log::warn!("MAVLink handler command channel disconnected");
@@ -190,6 +220,15 @@ fn handler_loop(
                 log::warn!("Failed to send GCS heartbeat: {}", e);
             }
             last_heartbeat = Instant::now();
+        }
+
+        // 2b. Re-probe Q_ENABLE until the FC answers (robust QuadPlane detection — see above).
+        if is_ardupilot && !quadplane_seen && param_probes < MAX_PARAM_PROBES
+            && last_param_probe.elapsed() >= PARAM_PROBE_INTERVAL
+        {
+            super::params::request_quadplane_flag(&mut *transport, fc_sysid);
+            param_probes += 1;
+            last_param_probe = Instant::now();
         }
 
         // 3. Read incoming bytes and parse MAVLink frames
@@ -223,7 +262,19 @@ fn handler_loop(
                         }
                     }
 
-                    dispatch_message(&frame.header, &frame.message, &fc_variant, &app_handle, &mut analog, &mut fused, &recorder);
+                    // Forward COMMAND_ACK to any active command operation so the helper can match it
+                    // to the command it sent (mode/arm/takeoff/reposition/…). Otherwise it falls
+                    // through to dispatch (which logs it at trace level).
+                    if matches!(frame.message, MavMessage::COMMAND_ACK(_)) {
+                        if let Some(ref tx) = cmd_fwd {
+                            if tx.send(frame.message).is_err() {
+                                cmd_fwd = None;
+                            }
+                            continue;
+                        }
+                    }
+
+                    dispatch_message(&frame.header, &frame.message, &fc_variant, &app_handle, &mut analog, &mut fused, &mut quadplane_seen, &recorder);
                 }
             }
             Err(crate::transport::TransportError::Timeout) => {}
@@ -324,7 +375,7 @@ struct FusedPos {
 
 /// Dispatch a received MAVLink message to the same Tauri events as the MSP scheduler.
 /// This ensures widgets/store work identically regardless of protocol.
-fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, app_handle: &AppHandle, analog: &mut AnalogState, fused: &mut FusedPos, recorder: &Option<FlightRecorderHandle>) {
+fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, app_handle: &AppHandle, analog: &mut AnalogState, fused: &mut FusedPos, quadplane_seen: &mut bool, recorder: &Option<FlightRecorderHandle>) {
     match message {
         // ── HEARTBEAT → telemetry-status + telemetry-flightmode ─────
         MavMessage::HEARTBEAT(hb) => {
@@ -653,6 +704,7 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
             } else if name == "Q_ENABLE" {
                 // Q_ENABLE = 1 → QuadPlane (the mission planner upgrades the vehicle class to quadplane;
                 // a plain plane reports FIXED_WING and Q_ENABLE = 0 / no param). See params.rs.
+                *quadplane_seen = true; // got the answer → the loop stops re-probing
                 let quadplane = pv.param_value as i32 >= 1;
                 eprintln!("[MAVLINK-PARAM] Q_ENABLE = {} (quadplane={})", pv.param_value, quadplane);
                 let _ = app_handle.emit("telemetry-vehicle", serde_json::json!({
