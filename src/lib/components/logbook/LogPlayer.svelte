@@ -9,6 +9,8 @@
   import { getUsedFlightModes, segmentTrackByAltitude, segmentTrackBySpeed, segmentTrackBySignal, type TrackColorMode, type FlightModeInfo, type GradientResult } from '$lib/helpers/trackColors';
   import type { UavModelOverride } from '$lib/helpers/uavIcons';
   import { showMission, geoWaypoints } from '$lib/stores/mission';
+  import StickOverlay from '$lib/components/sticks/StickOverlay.svelte';
+  import { computeStickData } from '$lib/helpers/stickInput';
 
   let {
     showPlayer = false,
@@ -130,10 +132,26 @@
     const target = event.currentTarget as HTMLInputElement;
     onScrub(Number(target.value));
   }
+
+  // Stick overlay (replay-only): normalize the current sample's recorded RC channels. Null when the
+  // log has no RC (e.g. .tlog / live-recorded flights) → the overlay is hidden.
+  const currentRecord = $derived(
+    playbackTrack.length > 0
+      ? playbackTrack[Math.min(playbackIndex, playbackTrack.length - 1)]
+      : null,
+  );
+  const stickData = $derived(
+    currentRecord
+      ? computeStickData(currentRecord.rc_command_json, currentRecord.rc_data_json, selectedFlight?.fc_variant)
+      : null,
+  );
+
+  // Measured player-bar height so the stick overlay sits flush (top + bottom) beside it.
+  let barHeight = $state(0);
 </script>
 
 {#if showPlayer && selectedFlight}
-  <div class="log-player">
+  <div class="log-player" bind:clientHeight={barHeight}>
     <div class="log-player-top">
       <div class="log-player-source">
         {#if hasLinkedPartner}
@@ -239,6 +257,10 @@
       </div>
     </div>
   </div>
+
+  {#if stickData}
+    <StickOverlay data={stickData} {barHeight} />
+  {/if}
 {/if}
 
 <style>
