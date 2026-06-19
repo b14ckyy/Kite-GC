@@ -1,5 +1,13 @@
 # 3D Map Rework — Plan
 
+> **ARCHIVED (2026-06-19) — fully shipped.** All phases landed: track outline + ground shadow +
+> altitude curtain incl. the live trail (Phase 1), mission path in 3D (Phase 2), camera incl. the
+> heading-follow jitter fix **and the FPV cockpit view** (Phase 3 — later extended with a vector
+> marker), and the jagged-track / geoid-altitude rework (Phase 4). Some `[ ]` checkboxes below were
+> simply never ticked; the code is the source of truth (`Map3D.svelte`: `Camera3DMode` incl. `'fpv'`,
+> `enterFpv`/`updateFpvCamera`, the altitude curtain, the terrain-derived geoid). Kept for the
+> detailed build reasoning. See also [[project_3d_rework]].
+
 Working plan for the CesiumJS 3D view (`src/lib/components/Map3D.svelte`) overhaul.
 Agreed 2026-05-31. Built in phases; tick items as they land.
 

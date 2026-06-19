@@ -18,6 +18,9 @@ are still perfectly fine; the doc simply isn't on the active work surface anymor
   Recovered from git history (it had been deleted on 2026-05-29).
 - **COLORED_TRACK_PLAN.md** — Colored flight tracks + flight-mode widget + UAV nav-state coloring.
   All steps S1–S10 shipped (S9 mode-label i18n intentionally dropped — mode names stay English).
+- **Map3DRework.md** — CesiumJS 3D view overhaul. All phases shipped: track outline + ground shadow +
+  altitude curtain (Phase 1, incl. live trail), mission path in 3D (Phase 2), camera incl. heading-follow
+  jitter fix + FPV cockpit view (Phase 3), jagged-track / terrain-derived-geoid altitude rework (Phase 4).
 - **ARDUPILOT_IMPORT_PLAN.md** — ArduPilot DataFlash `.bin` import (decode → DB → replay).
   Phases 1–3 shipped. (`.tlog` import is separate, tracked in ROADMAP / PROTOCOL_REFACTORING.)
 - **BATTERY_MANAGEMENT.md** — Battery library + manager (schema v10, serial soft-link, `.kbatt`
