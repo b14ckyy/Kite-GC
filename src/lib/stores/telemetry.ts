@@ -126,17 +126,23 @@ export const gpsInject = writable<GpsInject>({ active: false, lat: 0, lon: 0, al
  *  the subscription below). null = no injection. */
 let gpsOverride: GpsInject | null = null;
 
+let gpsInjectWasActive = false;
 gpsInject.subscribe((g) => {
   gpsOverride = g.active ? g : null;
   if (g.active) {
+    gpsInjectWasActive = true;
     telemetry.update((t) => ({
       ...t,
       lat: g.lat, lon: g.lon, altMsl: g.altMsl,
       fixType: 3, numSat: t.numSat || 12,
       lastUpdate: Date.now(),
     }));
-  } else {
+  } else if (gpsInjectWasActive) {
     // Drop the fake fix so alerts deactivate; a real connection re-fills on its next GPS packet.
+    // Guarded by `gpsInjectWasActive`: the subscription also fires once on app start with active=false,
+    // and bumping `lastUpdate` there made an idle store look "live" (lat/lon 0,0) → widgets such as HOME
+    // showed a bogus distance with no connection. Only clear when an injection was actually on.
+    gpsInjectWasActive = false;
     telemetry.update((t) => ({ ...t, fixType: 0, lastUpdate: Date.now() }));
   }
 });

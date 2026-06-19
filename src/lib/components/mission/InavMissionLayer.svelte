@@ -33,6 +33,7 @@
   import { settings } from '$lib/stores/settings';
   import type { InterfaceSettings } from '$lib/stores/settings';
   import { convertAltitude, toAltitudeM, convertSpeed, toSpeedMs } from '$lib/utils/units';
+  import { inavWpDetailLines } from '$lib/helpers/missionWpDetails';
   import { t } from 'svelte-i18n';
 
   const IFACE_FALLBACK: InterfaceSettings = {
@@ -666,10 +667,10 @@
         }
 
         if (!editing) {
-          const a = altDisp(wp.altitude / 100);
-          const altType = altLabel(wp);
+          // Hover (view mode): list every parameter — shared with the panel footer so they never drift.
+          const detail = inavWpDetailLines(wp, $t, iface()).map((l) => `${l.label}: ${l.value}`).join('<br>');
           const mods = getModifiersForWp(m.waypoints, i);
-          let tip = `WP${dn} ${$t(WP_ACTION_KEYS[wp.action])}<br>${a.value.toFixed(1)}${a.unit} ${altType}`;
+          let tip = `<b>WP${dn} ${$t(WP_ACTION_KEYS[wp.action])}</b>${detail ? '<br>' + detail : ''}`;
           for (const mod of mods) tip += `<br>${$t(WP_ACTION_KEYS[mod.wp.action])}`;
           marker.bindTooltip(tip, { direction: 'top', offset: L.point(0, -20) });
         }

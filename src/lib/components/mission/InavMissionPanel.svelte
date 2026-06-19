@@ -44,6 +44,7 @@
   import { settings } from '$lib/stores/settings';
   import type { InterfaceSettings } from '$lib/stores/settings';
   import { convertAltitude, convertSpeed, convertDistance, formatConverted } from '$lib/utils/units';
+  import { inavWpDetailLines } from '$lib/helpers/missionWpDetails';
   import { save, open } from '@tauri-apps/plugin-dialog';
   import { t } from 'svelte-i18n';
   // Helper: untyped $t wrapper for dynamic params (svelte-i18n types are too strict)
@@ -347,7 +348,6 @@
     }
   }
 
-  function formatCoord(val: number): string { return (val / 1e7).toFixed(6); }
 
   function shortType(action: WpAction): string {
     switch (action) {
@@ -513,31 +513,9 @@
       {@const wp = currentMission.waypoints[currentSelIdx]}
       <div class="wp-detail">
         <div class="detail-header">{isModifier(wp.action) ? '' : `WP ${displayNums.get(currentSelIdx) ?? ''} — `}{isFlyByHome(wp) ? $t('mission.flagFbh') : $t(WP_ACTION_KEYS[wp.action])}</div>
-        {#if hasLocation(wp.action) && !isFlyByHome(wp)}
-          <div class="detail-row"><span class="detail-label">{$t('mission.lat')}</span><span class="detail-value">{formatCoord(wp.lat)}</span></div>
-          <div class="detail-row"><span class="detail-label">{$t('mission.lon')}</span><span class="detail-value">{formatCoord(wp.lon)}</span></div>
-        {/if}
-        <div class="detail-row"><span class="detail-label">{$t('mission.alt')}</span><span class="detail-value">{formatAltShort(wp)}</span></div>
-        {#if wp.action === WpAction.Waypoint || wp.action === WpAction.Land}
-          <div class="detail-row"><span class="detail-label">{$t('mission.speed')}</span><span class="detail-value">{wp.p1 > 0 ? fmtSpeed(wp.p1) : $t('mission.speedDefault')}</span></div>
-        {/if}
-        {#if wp.action === WpAction.PosholdTime}
-          <div class="detail-row"><span class="detail-label">{$t('mission.hold')}</span><span class="detail-value">{wp.p1}s</span></div>
-        {/if}
-        {#if wp.action === WpAction.PosholdUnlim}
-          <div class="detail-row"><span class="detail-label">{$t('mission.hold')}</span><span class="detail-value">{$t('mission.holdUnlimited')}</span></div>
-        {/if}
-        {#if wp.action === WpAction.Rth}
-          <div class="detail-row"><span class="detail-label">{$t('mission.land')}</span><span class="detail-value">{wp.p1 ? $t('mission.landYes') : $t('mission.landNoHover')}</span></div>
-        {/if}
-        {#if wp.action === WpAction.Jump}
-          <div class="detail-row"><span class="detail-label">{$t('mission.target')}</span><span class="detail-value">WP {wp.p1}</span></div>
-          <div class="detail-row"><span class="detail-label">{$t('mission.repeat')}</span><span class="detail-value">{wp.p2 === -1 ? '∞' : wp.p2}</span></div>
-        {/if}
-        {#if wp.action === WpAction.SetHead}
-          <div class="detail-row"><span class="detail-label">{$t('mission.heading')}</span><span class="detail-value">{wp.p1 === -1 ? $t('mission.headingFree') : `${wp.p1}°`}</span></div>
-        {/if}
-        <div class="detail-row"><span class="detail-label">{$t('mission.flag')}</span><span class="detail-value">{wp.flag === 0xa5 ? $t('mission.flagLast') : wp.flag === 0x48 ? $t('mission.flagFbh') : $t('mission.flagNormal')}</span></div>
+        {#each inavWpDetailLines(wp, $t, iface) as p}
+          <div class="detail-row"><span class="detail-label">{p.label}</span><span class="detail-value">{p.value}</span></div>
+        {/each}
         {#if currentEditing}<div class="detail-hint">{$t('mission.clickMarkerHint')}</div>{/if}
       </div>
     {/if}

@@ -22,7 +22,12 @@
   import { cachedTileLayer } from "$lib/cache/CachedTileLayer";
   import { initTileCache } from "$lib/cache/tileCache";
   import { homePosition, homeMarkerShown } from "$lib/stores/home";
-  import { editMode } from "$lib/stores/mission";
+  import { editMode, geoWaypoints, launchPoint, replayActive, toDeg } from "$lib/stores/mission";
+  import { autopilotSystem } from "$lib/stores/autopilotContext";
+  import { arduMission } from "$lib/stores/missionArdupilot";
+  import { cmdHasLocation } from "$lib/helpers/arduCommandCatalog";
+  import { connection } from "$lib/stores/connection";
+  import { frameMissionSignal } from "$lib/stores/mapCamera";
   import { destinationPoint } from "$lib/utils/geo";
   import MissionLayer from "./mission/MissionLayer.svelte";
   import SurveyPatternLayer from "./mission/SurveyPatternLayer.svelte";
@@ -176,6 +181,8 @@
   let uavMarker: L.Marker | undefined;
   let unsubTelemetry: (() => void) | undefined;
   let unsubSettings: (() => void) | undefined;
+  let unsubFrameMission: (() => void) | undefined;
+  let unsubConnForJump: (() => void) | undefined;
 
   // Active tile layers (base + overlays)
   let currentBase: L.TileLayer | undefined;
@@ -865,6 +872,42 @@
     }
   }
 
+  // ── Auto-framing: mission fit + go-to-UAV on connect (free pan only) ─────────
+  let pendingUavJump = false; // set on a fresh connect; cleared after the first jump (once per connect)
+
+  /** Lat/lngs of the active mission's location waypoints + home/launch (when set), for fit-bounds. */
+  function collectMissionLatLngs(): L.LatLng[] {
+    const pts: L.LatLng[] = [];
+    if (get(autopilotSystem) === 'inav') {
+      for (const wp of get(geoWaypoints)) {
+        if (wp.lat !== 0 || wp.lon !== 0) pts.push(L.latLng(toDeg(wp.lat), toDeg(wp.lon)));
+      }
+      // launchPoint is INAV-only planning state — only fold it in for INAV, never a stale INAV launch
+      // into an ArduPilot/PX4 fit (that inflated the bounds to a continent-wide zoom-out).
+      const lp = get(launchPoint);
+      if (lp) pts.push(L.latLng(lp.lat, lp.lng));
+    } else {
+      for (const wp of get(arduMission)) {
+        if (cmdHasLocation(wp.command) && (wp.lat !== 0 || wp.lon !== 0)) pts.push(L.latLng(wp.lat / 1e7, wp.lon / 1e7));
+      }
+    }
+    // Only the authoritative FC home (source 'fc'). The 'manual' home mirrors the INAV launchPoint
+    // (already folded in above for INAV) — including it for ArduPilot dragged a stale INAV-planning
+    // launch into the bounds → continent-wide zoom-out.
+    const hp = get(homePosition);
+    if (hp?.set && hp.source === 'fc') pts.push(L.latLng(hp.lat, hp.lon));
+    return pts;
+  }
+
+  /** Frame the whole loaded mission once — free pan only, and never over a replay (the replay frames
+   *  its own track; a replay-linked mission must not steal the view). */
+  function frameMission() {
+    if (!map || viewMode !== 'free' || get(replayActive)) return;
+    const pts = collectMissionLatLngs();
+    if (pts.length === 0) return;
+    map.fitBounds(L.latLngBounds(pts), { padding: [40, 40], maxZoom: 16 });
+  }
+
   function updatePlaybackMarker(point: TelemetryRecord | null) {
     if (!map) return;
 
@@ -1036,6 +1079,13 @@
       if (t.lastUpdate > 0) {
         updateUavPosition(t.lat, t.lon, t.yaw, t.navState, t.roll, t.pitch, t.course, t.groundSpeed, t.lastUpdate); // drives the smoother (marker + follow)
 
+        // Go-to-UAV on connect: jump once to the craft at a sensible zoom, deferred to the first 3D fix
+        // (no fix ⇒ no UAV rendered). Free pan only; following already centres on the UAV.
+        if (pendingUavJump && viewMode === 'free' && !get(replayActive) && t.fixType >= 3 && isValidGpsCoordinate(t.lat, t.lon)) {
+          map?.setView([t.lat, t.lon], 16);
+          pendingUavJump = false;
+        }
+
         // Flight trail: colored by flight mode while armed; a thin black
         // monitoring line while disarmed (pre-arm).
         const armed = (t.armingFlags & (1 << ARMING_FLAG_ARMED)) !== 0;
@@ -1057,6 +1107,21 @@
         }
         wasArmed = armed;
       }
+    });
+
+    // Frame the loaded mission on a real load event (signal increments; ignore the initial emission).
+    let frameSigInit = true;
+    unsubFrameMission = frameMissionSignal.subscribe(() => {
+      if (frameSigInit) { frameSigInit = false; return; }
+      frameMission();
+    });
+
+    // Go-to-UAV: arm a one-shot jump on a fresh connect (not on a 2D↔3D remount while connected).
+    let prevConnStatus = get(connection).status;
+    unsubConnForJump = connection.subscribe((c) => {
+      if (c.status === 'connected' && prevConnStatus !== 'connected') pendingUavJump = true;
+      else if (c.status === 'disconnected') pendingUavJump = false;
+      prevConnStatus = c.status;
     });
 
     // React to provider changes from settings
@@ -1182,6 +1247,8 @@
     unsubAeroFocus?.();
     if (unsubTelemetry) unsubTelemetry();
     if (unsubSettings) unsubSettings();
+    unsubFrameMission?.();
+    unsubConnForJump?.();
     if (map) {
       map.off("moveend", saveMapState);
       map.off("zoomend", saveMapState);

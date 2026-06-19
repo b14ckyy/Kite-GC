@@ -29,6 +29,7 @@
     arduMission, arduSelectedWpIndex, arduLoadedMissionId,
     parseWaypoints, type ArduWaypoint,
   } from '$lib/stores/missionArdupilot';
+  import { frameMissionOnMap } from '$lib/stores/mapCamera';
   import {
     autopilotSystem, autopilotLocked, setAutopilotSystem, confirmSystemSwitch,
     pendingSystemSwitch, type AutopilotSystem,
@@ -245,12 +246,14 @@
         applyMissionLaunchDefault(
           loaded,
           m.home_lat != null && m.home_lon != null ? { lat: m.home_lat, lng: m.home_lon } : undefined,
+          true, // fresh load → reset to this mission's home/first-WP, don't keep the previous launch
         );
       } else {
         arduMission.set(JSON.parse(m.waypoints_json) as ArduWaypoint[]);
         arduSelectedWpIndex.set(-1);
         arduLoadedMissionId.set(m.id);
       }
+      frameMissionOnMap(); // standalone library load → frame the mission (not a replay-linked attach)
       onBack();
     } catch (e) {
       statusMessage = $t('missionMgr.loadToMapFailed', { values: { error: String(e) } });

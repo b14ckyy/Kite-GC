@@ -22,6 +22,8 @@
     type ArduWaypoint,
   } from '$lib/stores/missionArdupilot';
   import { cmdName, cmdShort, cmdHasLocation, cmdDef, cmdValidForVehicle, cmdValidForPx4, enumLabel, type VehicleClass } from '$lib/helpers/arduCommandCatalog';
+  import { arduWpDetailLines } from '$lib/helpers/missionWpDetails';
+  import { frameMissionOnMap } from '$lib/stores/mapCamera';
   import { connection } from '$lib/stores/connection';
   import { settings } from '$lib/stores/settings';
   import { autopilotSystem, type AutopilotSystem } from '$lib/stores/autopilotContext';
@@ -119,6 +121,7 @@
       arduSelectedWpIndex.set(-1);
       arduLoadedMissionId.set(null); // fresh file → not yet a library mission
       statusMessage = $t('mission.loaded', { values: { count: wps.length } });
+      frameMissionOnMap();
     } catch (e) {
       statusMessage = $t('mission.openFailed', { values: { error: String(e) } });
     }
@@ -140,6 +143,7 @@
       arduSelectedWpIndex.set(-1);
       arduLoadedMissionId.set(null); // fresh file → not yet a library mission
       statusMessage = $t('mission.loadedFromFile', { values: { count: wps.length, file: file.name } });
+      frameMissionOnMap();
     } catch (e) {
       statusMessage = $t('mission.importFailed', { values: { error: String(e) } });
     }
@@ -219,6 +223,7 @@
       arduSelectedWpIndex.set(-1);
       arduLoadedMissionId.set(null); // downloaded from FC → not a library mission
       statusMessage = $t('mission.downloaded', { values: { count: wps.length } });
+      frameMissionOnMap();
     } catch (e) {
       statusMessage = $t('mission.downloadFailed', { values: { error: String(e) } });
     }
@@ -267,23 +272,6 @@
     return parts.slice(0, 3).join(' · ');
   }
 
-  /** Per-param detail entries (label + display value) for the footer detail. */
-  function paramEntries(wp: ArduWaypoint): { label: string; display: string }[] {
-    const def = cmdDef(wp.command);
-    if (!def?.params) return [];
-    const vals = [wp.param1, wp.param2, wp.param3, wp.param4, wp.lat, wp.lon, wp.alt];
-    const out: { label: string; display: string }[] = [];
-    for (const pidx of [1, 2, 3, 4, 5, 6, 7] as const) {
-      const spec = def.params[pidx];
-      if (!spec) continue;
-      const v = vals[pidx - 1];
-      const display = spec.enumStrings && spec.enumValues ? enumLabel(spec, v) : `${v}${spec.units ? ' ' + spec.units : ''}`;
-      out.push({ label: spec.label, display });
-    }
-    return out;
-  }
-
-  function formatCoord(valE7: number): string { return (valE7 / 1e7).toFixed(6); }
 </script>
 
 {#snippet toolbar()}
@@ -370,13 +358,8 @@
       {@const wp = currentMission[currentSelIdx]}
       <div class="wp-detail">
         <div class="detail-header">WP {currentSelIdx + 1} — {cmdName(wp.command)}</div>
-        {#if cmdHasLocation(wp.command)}
-          <div class="detail-row"><span class="detail-label">{$t('mission.lat')}</span><span class="detail-value">{formatCoord(wp.lat)}</span></div>
-          <div class="detail-row"><span class="detail-label">{$t('mission.lon')}</span><span class="detail-value">{formatCoord(wp.lon)}</span></div>
-          <div class="detail-row"><span class="detail-label">{$t('mission.alt')}</span><span class="detail-value">{formatAltShort(wp)}</span></div>
-        {/if}
-        {#each paramEntries(wp) as p}
-          <div class="detail-row"><span class="detail-label">{p.label}</span><span class="detail-value">{p.display}</span></div>
+        {#each arduWpDetailLines(wp, $t) as p}
+          <div class="detail-row"><span class="detail-label">{p.label}</span><span class="detail-value">{p.value}</span></div>
         {/each}
         {#if currentEditing}<div class="detail-hint">{$t('mission.clickMarkerHint')}</div>{/if}
       </div>

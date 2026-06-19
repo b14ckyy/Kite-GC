@@ -9,6 +9,7 @@ import { writable, derived, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { connection } from './connection';
 import { homePosition } from './home';
+import { frameMissionOnMap } from './mapCamera';
 
 // ── Types (mirror Rust mission::types) ──────────────────────────────
 
@@ -341,6 +342,7 @@ export async function switchMission(newIdx: number): Promise<void> {
   mission.set(m);
   activeMissionIndex.set(newIdx);
   clearWpSelection();
+  frameMissionOnMap(); // switching the active multi-mission reframes the map (free pan only)
 }
 
 /** Add a new mission tab. Returns new mission index, or -1 if at limit. */
@@ -712,10 +714,11 @@ export async function missionReorderWp(from: number, to: number): Promise<Missio
 export async function missionDownload(fromEeprom = false): Promise<Mission> {
   const m = await invoke<Mission>('mission_download', { fromEeprom });
   mission.set(m);
-  applyMissionLaunchDefault(m); // FC has no embedded home → UAV HOME, else WP1
+  applyMissionLaunchDefault(m, undefined, true); // FC has no embedded home → UAV HOME, else WP1
   clearUndoHistory();
   markMissionSynced('fc');
   loadedMissionId.set(null);
+  frameMissionOnMap(); // loaded from the FC → frame it (free pan only)
   return m;
 }
 
@@ -746,17 +749,24 @@ function launchHomeArg(): [number, number] | undefined {
  *     without its own home must not reset it.
  *  3. Only when none exists is one generated: live UAV HOME, else the first geo-waypoint (WP1).
  */
-export function applyMissionLaunchDefault(m: Mission, embeddedHome?: { lat: number; lng: number }) {
+export function applyMissionLaunchDefault(m: Mission, embeddedHome?: { lat: number; lng: number }, resetLaunch = false) {
   // An authoritative FC home wins over everything: keep the launch reference pinned to the real home.
   const hp = get(homePosition);
   if (hp.set && hp.source === 'fc') { launchPoint.set({ lat: hp.lat, lng: hp.lon }); return; }
   if (embeddedHome) { launchPoint.set(embeddedHome); return; }
   if (m.home) { launchPoint.set({ lat: m.home.lat, lng: m.home.lon }); return; }
-  if (get(launchPoint)) return; // keep an existing (e.g. user-placed) launch point
+  // Keep a user-placed launch — but NOT across a fresh mission load (`resetLaunch`): each loaded mission
+  // has its own home/first-WP reference, so a stale launch from a previous mission must not stick.
+  if (!resetLaunch && get(launchPoint)) return;
+  // Non-FC home fallback. On a fresh load this is SKIPPED: the only authoritative home (source 'fc') was
+  // already handled above; what remains here is the 'manual' home, which just MIRRORS the previous
+  // launchPoint (set via the launchPoint→homePosition link in +page) — using it would resurrect the
+  // exact stale launch we're trying to reset (e.g. a Germany launch sticking to a Macedonia mission).
   const h = get(homePosition);
-  if (h.set && (h.lat !== 0 || h.lon !== 0)) { launchPoint.set({ lat: h.lat, lng: h.lon }); return; }
+  if (!resetLaunch && h.set && (h.lat !== 0 || h.lon !== 0)) { launchPoint.set({ lat: h.lat, lng: h.lon }); return; }
   const fw = m.waypoints.find((w) => hasLocation(w.action) && !(w.lat === 0 && w.lon === 0));
   if (fw) launchPoint.set({ lat: toDeg(fw.lat), lng: toDeg(fw.lon) });
+  else if (resetLaunch) launchPoint.set(null); // fresh load with no usable reference → drop the stale launch
 }
 
 /** Export mission as XML string (includes the launch point as <mwp> meta) */
@@ -768,10 +778,11 @@ export async function missionExportXml(): Promise<string> {
 export async function missionImportXml(xml: string): Promise<Mission> {
   const m = await invoke<Mission>('mission_import_xml', { xml });
   mission.set(m);
-  applyMissionLaunchDefault(m);
+  applyMissionLaunchDefault(m, undefined, true);
   clearUndoHistory();
   markMissionSynced('file');
   loadedMissionId.set(null);
+  frameMissionOnMap(); // imported from a file → frame it (free pan only)
   return m;
 }
 
@@ -785,9 +796,10 @@ export async function missionSaveFile(path: string): Promise<void> {
 export async function missionLoadFile(path: string): Promise<Mission> {
   const m = await invoke<Mission>('mission_load_file', { path });
   mission.set(m);
-  applyMissionLaunchDefault(m);
+  applyMissionLaunchDefault(m, undefined, true);
   clearUndoHistory();
   markMissionSynced('file');
   loadedMissionId.set(null);
+  frameMissionOnMap(); // loaded from a file → frame it (free pan only)
   return m;
 }

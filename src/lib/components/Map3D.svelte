@@ -54,6 +54,7 @@
   import { cmdHasLocation, cmdStandaloneCoordinate, cmdIsTakeoff } from "$lib/helpers/arduCommandCatalog";
   import { arduWpIconSpec } from "$lib/helpers/missionIconsArdupilot";
   import { autopilotSystem, type AutopilotSystem } from "$lib/stores/autopilotContext";
+  import { frameMissionSignal } from "$lib/stores/mapCamera";
   import { activeWpNumber } from "$lib/stores/navStatus";
   import {
     buildDisplayNumbers, isFlightPathWp, findMissionEndIndex, findPreviousGeoWp,
@@ -291,7 +292,10 @@
   // Set on a fresh connect; the next telemetry frame decides whether to clear
   // (only if the UAV is DISARMED — armed = connection recovery, keep the track).
   let pendingConnectArmCheck = false;
+  // Go-to-UAV on connect: armed on a fresh connect, fired once on the first 3D fix (free look only).
+  let pendingUavJump3d = false;
   let unsubConnection: (() => void) | undefined;
+  let unsubFrameMission3d: (() => void) | undefined;
 
   // ── Foreign-vehicle (radar) 3D contacts ──────────────────────────────
   // One record per contact id, holding the live data + Cesium entities; CallbackProperties read from
@@ -610,6 +614,39 @@
       });
     };
     requestAnimationFrame(() => tryFly(0));
+  }
+
+  /** Frame the whole loaded mission once (free look only, not over a replay). BoundingSphere from the
+   *  active mission's location WPs + home/launch; range 0 lets Cesium fit the sphere to the viewport. */
+  function frameMission3d() {
+    if (!viewer || !isFreeLook() || get(replayActive)) return;
+    // Read the stores FRESH (not the cached cur* mirrors) so a clear-and-switch can't frame against a
+    // stale system/mission/home — this must behave identically to the 2D Map.collectMissionLatLngs.
+    const carts: Cesium.Cartesian3[] = [];
+    if (get(autopilotSystem) === 'inav') {
+      for (const wp of get(mission).waypoints) {
+        if (hasLocation(wp.action) && (wp.lat !== 0 || wp.lon !== 0)) carts.push(Cesium.Cartesian3.fromDegrees(toDeg(wp.lon), toDeg(wp.lat)));
+      }
+      // launchPoint is INAV-only planning state — never mix a stale INAV launch into an ArduPilot fit.
+      const lp = get(launchPoint);
+      if (lp) carts.push(Cesium.Cartesian3.fromDegrees(lp.lng, lp.lat));
+    } else {
+      for (const wp of get(arduMission)) {
+        if (cmdHasLocation(wp.command) && (wp.lat !== 0 || wp.lon !== 0)) carts.push(Cesium.Cartesian3.fromDegrees(wp.lon / 1e7, wp.lat / 1e7));
+      }
+    }
+    // Only the authoritative FC home (source 'fc'); the 'manual' home mirrors the INAV launchPoint
+    // (handled above for INAV) and would drag a stale INAV-planning launch into an ArduPilot fit.
+    const hp = get(homePosition);
+    if (hp.set && hp.source === 'fc') carts.push(Cesium.Cartesian3.fromDegrees(hp.lon, hp.lat));
+    if (carts.length === 0) return;
+    pendingUavJump3d = false; // a mission load is the latest positioning intent
+    const sphere = Cesium.BoundingSphere.fromPoints(carts);
+    const range = sphere.radius > 1 ? 0 : 600; // 0 = fit the whole sphere to the viewport; 600 m for a single WP
+    viewer.camera.flyToBoundingSphere(sphere, {
+      duration: 1.2,
+      offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-45), range),
+    });
   }
 
   // Suppress content fly-to until this timestamp (set by a 2D→3D camera sync).
@@ -975,6 +1012,16 @@
       const alt = Math.max(altMsl + geoidOffset, 0);
       updateUavPosition3D(telem.lat, telem.lon, alt, telem.yaw, telem.navState, armed, telem.roll, telem.pitch);
 
+      // Go-to-UAV on connect: jump once to the craft (range ~600 m ≈ 2D zoom 16), deferred to the first
+      // 3D fix. Free look only; follow/orbit/fpv already track the UAV.
+      if (pendingUavJump3d && isFreeLook() && telem.fixType >= 3) {
+        pendingUavJump3d = false;
+        viewer.camera.flyToBoundingSphere(
+          new Cesium.BoundingSphere(Cesium.Cartesian3.fromDegrees(telem.lon, telem.lat, alt), 1),
+          { duration: 1.2, offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-45), 600) },
+        );
+      }
+
       // FPV HUD data (live source).
       hud.heading = telem.yaw; hud.pitch = telem.pitch; hud.roll = telem.roll;
       hud.altM = telem.altitude; hud.speedMs = telem.groundSpeed;
@@ -1136,10 +1183,19 @@
       prevConnStatus = c.status;
       if (c.status === 'connected' && was !== 'connected') {
         pendingConnectArmCheck = true;
+        pendingUavJump3d = true; // jump to the UAV on the first 3D fix after this connect
         geoidGen++; geoidPromise = null;
         geoidComputed = false;
       }
+      if (c.status === 'disconnected') pendingUavJump3d = false;
       if (c.status !== was) scheduleMissionRender(); // launch "L" visibility depends on the connection
+    });
+
+    // Frame the mission on a real load event (signal increments; ignore the initial emission).
+    let frameSigInit3d = true;
+    unsubFrameMission3d = frameMissionSignal.subscribe(() => {
+      if (frameSigInit3d) { frameSigInit3d = false; return; }
+      frameMission3d();
     });
   });
 
@@ -1174,6 +1230,7 @@
     unsubAutopilot?.();
     unsubLiveTrack?.();
     unsubConnection?.();
+    unsubFrameMission3d?.();
     if (viewer && !viewer.isDestroyed()) {
       // Clean up trail segments (they will be destroyed with viewer, but be explicit)
       viewer.entities.removeAll();
@@ -3104,7 +3161,12 @@
 
   /** Takeoff carries no real coords — anchor it on FC home, else the centroid of the located waypoints. */
   function arduTakeoffLatLon3d(wps: ArduWaypoint[]): { lat: number; lon: number } | null {
-    if (curHome3d.set) return { lat: curHome3d.lat, lon: curHome3d.lon };
+    // Only the authoritative FC home — a 'manual' home is the stale INAV-launch mirror (often another
+    // region / sea-level alt) and would put the REL base in the wrong place → WPs sinking into terrain.
+    if (curHome3d.set && curHome3d.source === 'fc') return { lat: curHome3d.lat, lon: curHome3d.lon };
+    // Offline the takeoff WP is ArduPilot's launch reference: prefer a positioned one, else the centroid.
+    const tk = wps.find((w) => cmdIsTakeoff(w.command) && !(w.lat === 0 && w.lon === 0));
+    if (tk) return { lat: tk.lat / 1e7, lon: tk.lon / 1e7 };
     let sLat = 0, sLon = 0, n = 0;
     for (const w of wps) {
       if (cmdIsTakeoff(w.command) || !cmdHasLocation(w.command)) continue;
@@ -3155,8 +3217,10 @@
     const g = wps.find((w) => cmdHasLocation(w.command) && !cmdIsTakeoff(w.command) && !(w.lat === 0 && w.lon === 0));
     const geoidRef = g ? { lat: g.lat / 1e7, lon: g.lon / 1e7 } : (curHome3d.set ? { lat: curHome3d.lat, lon: curHome3d.lon } : null);
 
-    // REL reference: the FC home MSL if known, else terrain under the takeoff/first waypoint (planning).
-    let homeRefMsl: number | null = curHome3d.set ? curHome3d.alt : null;
+    // REL reference: the FC home MSL only when it's the authoritative FC home — a 'manual' home (the
+    // stale INAV-launch mirror, alt ≈ 0) would anchor REL altitudes at sea level → WPs sink into the
+    // ground. Offline we therefore sample the terrain under the takeoff/first waypoint instead.
+    let homeRefMsl: number | null = (curHome3d.set && curHome3d.source === 'fc') ? curHome3d.alt : null;
     if (homeRefMsl == null) {
       const anchor = arduTakeoffLatLon3d(wps);
       if (anchor) {

@@ -26,10 +26,12 @@
     CMD,
     cmdDef, cmdName, cmdRawName, cmdHasLocation, cmdStandaloneCoordinate, cmdIsLoiter, cmdIsTakeoff,
     cmdDefaultParams, cmdDefaultCoordParams, locationCommandsByCategory, modifierCommandsByCategory,
+    enumLabel,
     type ParamSpec, type ParamIndex, type VehicleClass, type Firmware,
   } from '$lib/helpers/arduCommandCatalog';
   import { autopilotSystem, type AutopilotSystem } from '$lib/stores/autopilotContext';
   import { connection } from '$lib/stores/connection';
+  import { arduWpDetailLines } from '$lib/helpers/missionWpDetails';
   import {
     newPopupState, renderEditorPopup, closeEditorPopup,
     numInputHtml, enumSelectHtml, paramRow, canonicalLabel, actionsHtml, modifierSection,
@@ -66,6 +68,38 @@
   const missionGroup = L.layerGroup().addTo(map);
   // Shared editor-popup lifecycle (content-signature redraw guard lives in the framework module).
   const popupState = newPopupState();
+  // Which "Advanced" param sections are expanded, keyed per section ('primary' / 'mod-<idx>'). Persisted
+  // here (not just in the DOM) so a value edit — which rebuilds the popup HTML — keeps them open.
+  const expandedAdv = new Set<string>();
+
+  /** Permanent on-map reference label (edit mode): altitude + frame, plus a compact summary of the
+   *  command's key params (loiter radius/time, hold, …) — the ArduPilot/PX4 counterpart to INAV's
+   *  edit-mode alt/speed labels. Speed isn't a per-WP field in ArduPilot (it's DO_CHANGE_SPEED), so
+   *  altitude is the primary reference. */
+  function arduParamLabelHtml(wp: ArduWaypoint): string {
+    const lines = [`${wp.alt.toFixed(0)}m ${frameLabel(wp.frame)}`];
+    const def = cmdDef(wp.command);
+    if (def?.params) {
+      const vals = [wp.param1, wp.param2, wp.param3, wp.param4];
+      const parts: string[] = [];
+      for (const pidx of [1, 2, 3, 4] as const) {
+        const spec = def.params[pidx];
+        if (!spec || spec.advanced) continue;
+        const v = vals[pidx - 1];
+        if (spec.enumStrings && spec.enumValues) parts.push(enumLabel(spec, v));
+        else if (v !== 0) parts.push(`${v}${spec.units ?? ''}`);
+      }
+      if (parts.length) lines.push(parts.slice(0, 2).join(' · '));
+    }
+    return `<div class="wp-param-label">${lines.join('<br>')}</div>`;
+  }
+
+  function createParamLabel(latLng: L.LatLng, html: string): L.Marker {
+    return L.marker(latLng, {
+      icon: L.divIcon({ className: 'wp-param-label-wrapper', html, iconSize: [1, 1], iconAnchor: [-12, 10] }),
+      interactive: false,
+    });
+  }
 
   function frameLabel(frame: MavFrame): string {
     if (frame === MAV_FRAME_GLOBAL) return 'AMSL';
@@ -110,8 +144,10 @@
     }
     // Advanced (rare) params collapse under an expander, QGC-style — common fields stay uncluttered.
     if (advanced) {
-      normal += `<button type="button" class="wpe-adv-toggle" data-advtoggle>▾ ${$t('missionLayer.advanced')}</button>`
-        + `<div class="wpe-adv-body" data-advbody hidden>${advanced}</div>`;
+      const key = target === 'primary' ? 'primary' : `mod-${modIdx}`;
+      const open = expandedAdv.has(key);
+      normal += `<button type="button" class="wpe-adv-toggle" data-advtoggle data-advkey="${key}">${open ? '▴' : '▾'} ${$t('missionLayer.advanced')}</button>`
+        + `<div class="wpe-adv-body" data-advbody${open ? '' : ' hidden'}>${advanced}</div>`;
     }
     return normal;
   }
@@ -150,7 +186,7 @@
     const def = cmdDef(wp.command);
     const displayNum = idx + 1;
 
-    let html = `<div class="wp-editor-popup">`;
+    let html = `<div class="wp-editor-popup wp-editor-popup-ardu">`;
     html += `<div class="wpe-header"><span class="wpe-num">WP${displayNum}</span>${primaryCmdSelectHtml(wp.command, vehicle)}</div>`;
     html += `<div class="wpe-canonical-line"><span class="wpe-canonical">${cmdRawName(wp.command)}</span></div>`;
 
@@ -299,15 +335,18 @@
       arduSelectedWpIndex.set(leading ? idx + 1 : idx);
     });
 
-    // Advanced-params expander(s) — toggle the sibling body (DOM-only state; survives the redraw guard).
+    // Advanced-params expander(s): toggle the sibling body AND remember the state in `expandedAdv`, so a
+    // subsequent value edit (which rebuilds the popup HTML) re-renders the section already open.
     el.querySelectorAll('[data-advtoggle]').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.preventDefault(); e.stopPropagation();
         const b = btn as HTMLElement;
         const body = b.nextElementSibling as HTMLElement | null;
         if (!body) return;
+        const key = b.dataset.advkey ?? 'primary';
         const show = body.hasAttribute('hidden');
-        if (show) body.removeAttribute('hidden'); else body.setAttribute('hidden', '');
+        if (show) { body.removeAttribute('hidden'); expandedAdv.add(key); }
+        else { body.setAttribute('hidden', ''); expandedAdv.delete(key); }
         b.textContent = `${show ? '▴' : '▾'} ${$t('missionLayer.advanced')}`;
       });
     });
@@ -431,10 +470,18 @@
         }
 
         if (!editing) {
+          // Hover (view mode): list every parameter — shared with the panel footer so they never drift.
+          const detail = arduWpDetailLines(wp, $t).map((l) => `${l.label}: ${l.value}`).join('<br>');
           marker.bindTooltip(
-            `WP${displayNum} ${cmdName(wp.command)}<br>${wp.alt.toFixed(1)}m ${frameLabel(wp.frame)}`,
+            `<b>WP${displayNum} ${cmdName(wp.command)}</b>${detail ? '<br>' + detail : ''}`,
             { direction: 'top', offset: L.point(0, -20) },
           );
+        }
+
+        // Edit mode: permanent reference label (alt + key params) on every location WP except the
+        // selected one (its editor popup already shows the details). Mirrors the INAV edit labels.
+        if (editing && hasLoc && i !== selIdx) {
+          createParamLabel(latLng, arduParamLabelHtml(wp)).addTo(missionGroup);
         }
       }
 
@@ -547,7 +594,16 @@
 </script>
 
 <style>
+  /* Permanent edit-mode reference labels (same look as the INAV layer; only one mission layer is
+     mounted at a time, so the duplicate :global rule never conflicts). */
+  :global(.wp-param-label-wrapper) { background: none !important; border: none !important; overflow: visible !important; width: auto !important; height: auto !important; }
+  :global(.wp-param-label) { background: rgba(30,30,30,0.88); color: #ccc; padding: 3px 8px; border-radius: 4px; font-size: 12px; line-height: 1.4; white-space: nowrap; border: 1px solid rgba(55,168,219,0.35); pointer-events: none; transform: scale(var(--ui-scale, 1)); transform-origin: top left; }
+
   /* New popup-framework classes (the base wpe-* classes are global in InavMissionLayer). */
+  /* ArduPilot param labels (Acceptance / Pass Radius / …) are longer than INAV's — give them a wider,
+     no-wrap label column so they stay on one line and the value controls line up. Scoped to the Ardu
+     popup so INAV's narrower layout is untouched. */
+  :global(.wp-editor-popup-ardu .wpe-row label) { width: 78px; white-space: nowrap; }
   :global(.wpe-applies) { color: #888; font-size: 10px; font-weight: 400; margin-left: 4px; }
   :global(.wpe-canonical) { color: #7a7a7a; font-size: 10px; font-weight: 400; font-family: 'Consolas', monospace; }
   :global(.wpe-canonical-line) { margin: 1px 0 4px; padding-left: 2px; }
