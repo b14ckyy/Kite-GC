@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Stick / gimbal overlay (replay).** Two animated Mode-2 transmitter gimbals beside the replay player,
+  à la Blackbox Explorer. Replay-only — built from the log-imported RC columns (live RC is only ~1 Hz, not
+  worth the bandwidth). **INAV blackbox** shows `rcCommand` as the blue primary **and**, when the log has
+  it, raw `rcData` as a dimmed orange dot behind — so you can actually see the FC's expo / self-level / nav
+  override of the raw stick. **ArduPilot `.bin`** shows RCIN (blue). Glass panels flush with the player bar
+  (measured height). Reusable `GimbalStick` component + pure `stickInput` adapter (per-firmware channel
+  order: INAV `[R,P,Y,T]` vs ArduPilot AETR; µs vs centred-rcCommand scaling).
 - **PX4 mission planning.** The PX4 path on the shared MAVLink mission editor is now complete. PX4 speaks
   the same mission protocol and MAV_CMD ids as ArduPilot, so the planner reuses the whole pipeline — only
   the **command catalog** differs: PX4 gets its verified supported subset (no `JUMP_TAG`, no extra loiter
