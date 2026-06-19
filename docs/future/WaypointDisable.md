@@ -1,6 +1,12 @@
-# Waypoint Disable / Enable — plan (not yet implemented)
+# Waypoint Disable / Enable — plan (CUT)
 
-Status: **planned.** Captures the design so it can be built later. A waypoint can
+> **CUT (2026-06-19) — decided not to implement.** It risks **`.waypoints` / mission-JSON export
+> incompatibility** (a disabled state has no standard representation, so round-tripping through QGC WPL /
+> other GCS would lose or corrupt it), it adds **risky complexity** to the mission model + codec, and the
+> feature is not expected to see real use. Moved to `docs/future/` (not deleted) so the design reasoning
+> survives if it's ever reconsidered — but it is **not on the roadmap**.
+
+Status: ~~**planned.**~~ **Cut** — see banner above. Captures the design so it can be built later. A waypoint can
 be *disabled* in a loaded mission without deleting it — frozen in place, excluded
 from the flown path and never uploaded to the FC, but kept in the file and on the
 map for re-enabling.

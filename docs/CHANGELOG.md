@@ -244,6 +244,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   identical to the `mission` blue (ArduPilot Auto) on the track/badge.
 
 ### Fixed
+- **Spurious scrollbar in the mission WP detail panel.** The per-waypoint parameter panel capped its
+  height (`max-height: 180px; overflow-y: auto`), so an ArduPilot WP's full param set (Lat/Lon/Alt + Hold/
+  Acceptance/Pass Radius/Yaw) tripped an inner scrollbar. Removed the cap — the PanelShell already pins the
+  footer and scrolls the column only as a last resort, so all params show cleanly (INAV + ArduPilot/PX4).
 - **North-crossing heading "spin" in INAV blackbox replay.** A per-value ">360 → ÷10" scaling heuristic
   left decidegree `yaw` values in the 0–36° band (`attitude[2]` ≤ 360 decidegrees) undivided, so the
   displayed heading swung wildly — the UAV model on the map and the compass appeared to spin over 1–3 s —

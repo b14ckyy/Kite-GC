@@ -19,6 +19,9 @@ viability, hardware, a partner, etc.).
 - [UAV_GEOZONES_NFZ.md](UAV_GEOZONES_NFZ.md) — explicit drone no-fly / geozone maps (not the generic
   airspace overlay). Worldwide → multi-provider; normalize to ED-269/318. Gated on the geozone-data
   landscape maturing + the per-source licensing/commercial question.
+- [WaypointDisable.md](WaypointDisable.md) — disable/enable a waypoint in a loaded mission without deleting
+  it. **Cut** (not gated, actively rejected): no standard `.waypoints`/JSON representation → export
+  round-trip incompatibility + risky codec complexity for a low-use feature. Kept for the design reasoning.
 - [EXTERNAL_API.md](EXTERNAL_API.md) — external control API (read state / set waypoints / run commands)
   for AI/LLM-assisted mission planning: external tool *authors* intent → Kite *validates* against a real
   terrain/airspace/traffic envelope → FC *flies* (LLM out of the control loop). Lean MCP + a
