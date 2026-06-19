@@ -264,7 +264,7 @@ This document tracks planned features, organized by milestone.
 - [x] SQLite database via `rusqlite` (bundled, zero user dependencies)
 - [x] Schema migration system (`user_version` pragma, sequential migrations)
 - [x] User-configurable database storage path (respects portable mode)
-- [ ] Protocol-agnostic recording: works with any `TelemetrySource` that provides arming state
+- [x] Protocol-agnostic recording: works with any `TelemetrySource` that provides arming state
 - [x] Records ONLY from primary connection (no secondary telemetry sources)
 - [x] Automatic flight session creation on arm event
 - [x] Automatic session close on disarm event

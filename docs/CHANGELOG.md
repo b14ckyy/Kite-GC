@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Map auto-framing: frame mission on load + go-to-UAV on connect.** Loading a mission onto the map
+  (file / FC download / standalone library / INAV multi-mission switch) now frames the whole mission in
+  the viewport, in 2D **and** 3D — free pan/look only, never over a replay (a replay-linked mission keeps
+  the track centred). Connecting a UAV jumps once to the craft at a sensible zoom (2D ~16 / 3D ~600 m),
+  deferred to the first 3D fix. Home/launch is included when applicable; via a small `mapCamera` signal bus.
+- **Per-waypoint hover tooltip lists every parameter (INAV + ArduPilot/PX4).** In view mode, hovering a
+  waypoint now shows its full parameter set — the same data as the panel's detail footer, both fed by one
+  shared `missionWpDetails` helper so they can't drift (they used to: the footer listed all params while
+  the tooltip showed only name + altitude).
+- **ArduPilot/PX4 edit-mode reference labels.** Each location waypoint now carries a permanent black
+  reference label in edit mode (altitude + frame, plus the command's key params), mirroring the INAV
+  edit labels.
 - **Stick / gimbal overlay (replay).** Two animated Mode-2 transmitter gimbals beside the replay player,
   à la Blackbox Explorer. Replay-only — built from the log-imported RC columns (live RC is only ~1 Hz, not
   worth the bandwidth). **INAV blackbox** shows `rcCommand` as the blue primary **and**, when the log has
@@ -244,6 +256,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   identical to the `mission` blue (ArduPilot Auto) on the track/badge.
 
 ### Fixed
+- **ArduPilot 3D mission altitudes sank into the terrain when loaded offline.** The REL-altitude base used
+  `homePosition.alt` whenever a home was set — but offline that is the stale `'manual'` home (the INAV
+  launch mirror, ≈ sea level / wrong region), so REL waypoints anchored at sea level and dropped below
+  ground. The base now trusts only the authoritative FC home (`source 'fc'`); otherwise it samples the
+  terrain under the takeoff waypoint (a positioned takeoff is now ArduPilot's launch reference) or the WP
+  centroid.
+- **HOME widget showed a bogus distance with no connection/log.** The GPS-injection store fired once on
+  app start with `active: false` and bumped `telemetry.lastUpdate`, making an idle store look "live" (lat/
+  lon 0,0) → HOME computed a distance to it. The clear branch now only runs when an injection was actually
+  active, so idle widgets stay blank until a real connection/replay.
+- **Mission load left a stale launch point / framed the wrong area.** A previously-loaded mission's launch
+  point stuck across loads (resurrected via the launch→home `'manual'` mirror), so loading a mission in a
+  new region drew a long launch line to the old spot and zoomed the map out continent-wide. Each load now
+  resets the launch to that mission's own home/first-WP, and the map fit ignores the INAV launch / non-FC
+  home for the wrong system.
+- **ArduPilot WP edit popup.** The Advanced section collapsed on every +/- value step (its open state was
+  DOM-only and lost on the popup rebuild — now persisted per section), and long param labels (Acceptance /
+  Pass Radius) wrapped (wider, no-wrap label column scoped to the ArduPilot popup).
 - **Spurious scrollbar in the mission WP detail panel.** The per-waypoint parameter panel capped its
   height (`max-height: 180px; overflow-y: auto`), so an ArduPilot WP's full param set (Lat/Lon/Alt + Hold/
   Acceptance/Pass Radius/Yaw) tripped an inner scrollbar. Removed the cap — the PanelShell already pins the
