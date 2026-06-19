@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Vehicle control — GCS command & guided steering (V1, MAVLink).** A new `control` nav-rail panel
+  (shown only while connected via MAVLink) to command an ArduPilot/PX4 vehicle directly from the GCS,
+  without a transmitter — done better than Mission Planner's flat button grid. **SITL-verified on
+  ArduPilot Copter/Plane/QuadPlane; PX4 path is firmware-aware but untested on real hardware.** Features:
+  curated **mode switching** (firmware/vehicle mode tables; stick-flown modes hidden behind a reveal and
+  **hard-locked unless an RC link is present**), **Arm** (slide-to-confirm) / **Disarm** + all other
+  actions via a reusable **`HoldToConfirm`** (1 s) gesture, **Takeoff** (alt), **Land**, **RTL**,
+  **Abort Landing** (go-around), a **Guided toggle** + map-click **"Fly Here"** popup
+  (`DO_REPOSITION`, vehicle-aware fields), active-flight adjustments (**Change Alt** — Guided-only,
+  **Change Speed**, **Set Loiter Radius**, **Set Home**, **Set Heading** — Copter-only), **Mission**
+  start/restart/set-current, and **VTOL transition** for QuadPlane. Async `COMMAND_ACK` feedback per
+  action. Firmware divergence handled throughout (Mission Start, Land, loiter-radius param, transition,
+  PX4 packed custom_mode). Robust **QuadPlane detection** (re-probes `Q_ENABLE`). Backend `control.rs`
+  (COMMAND_LONG/INT + ACK correlation, PARAM_SET) + `controllers/vehicleControl.ts`. INAV guided + HID/
+  joystick RC + advanced outputs (servo/gripper/gimbal) are deferred. See `docs/active/VEHICLE_CONTROL.md`.
 - **Map auto-framing: frame mission on load + go-to-UAV on connect.** Loading a mission onto the map
   (file / FC download / standalone library / INAV multi-mission switch) now frames the whole mission in
   the viewport, in 2D **and** 3D — free pan/look only, never over a replay (a replay-linked mission keeps
