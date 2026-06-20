@@ -159,16 +159,38 @@ scheduler runs an independent RC tick (full-duplex) — decided in Phase 4.
 
 ---
 
-## 7. Mapping model + profiles (Phase 2)
+## 7. Mapping model + profiles (Phase 2, shipped local part)
 
-Per-axis / button / hat mapping. Concept borrowed from MWP, trimmed:
+**Channel-centric, helper-driven.** Each RC channel (1..32) is driven by one **method** (a pure helper
+in `helpers/rcMethods.ts`), fed by HID inputs. Internally everything is **normalised −1..+1** (clear
+input/output separation, trivial µs conversion `µs = 1500 + v·500`); the UI shows the µs preview. Inputs
+are referenced by stable labels **A&lt;n&gt;** (axis) / **B&lt;n&gt;** (button) / **H&lt;n&gt;** (hat
+direction — hats are treated like buttons, 4 dirs each). **No expo** (the firmware does that).
 
-- **Axis:** `{ channel: 1..32, source: 'axis', invert, deadband, expo }` (min/max/trim later if needed).
-- **Button / hat:** `{ channel, source, … }` — latch mode (momentary / toggle / multi-position) TBD.
-- **Live calibration:** the collapsible raw-input monitor streams raw values so the operator can wiggle
-  a stick to identify the control before assigning it (MWP does this; the only sane UX).
-- Channel labels come from the FC: read `MSP_BOXNAMES` / `MSP_MODE_RANGES` so each AUX channel shows
-  **which mode box it drives** ("CH5 → ANGLE", "CH7 → RTH"). (Needs MSP — after the local part.)
+The 7 methods (an idea for a future "direct mode-select" helper that reads INAV box/mode-ranges and maps
+flight modes onto buttons is parked):
+
+| Method | Inputs | Behaviour |
+|---|---|---|
+| **passthrough** | 1 axis | direct (invert, deadband; default deadband 0) |
+| **analogAdjust** | 1 axis | axis sets the rate of change (general: throttle/gimbal); invert, rate, deadband 5% |
+| **dualAxis** | 2 axes/triggers | one adds, one subtracts; both released → centre; mode absolute \| adjust |
+| **hold** | 1 button | high while pressed, low released (invert swaps) |
+| **toggle** | 1 button | cycle 2–6 positions (wrap) |
+| **buttonStep** | 2 buttons | discrete 3–16 steps, +/−, clamp |
+| **buttonAdjust** | 2 buttons | constant-rate ramp +/− while held, clamp |
+
+- **Defaults:** every adjustable/value-holding method starts at the **lowest µs** (1000), even when
+  inverted; passthrough is stateless (follows the input). Each channel has an optional **display name**
+  shown in the channel monitor.
+- **Engine** (`stores/rcEngine.ts`): runs the helpers each ~50 Hz input frame with per-channel state +
+  dt (rate integrators); resets a channel's state on config change. Pure + portable to Rust for the MSP
+  stream later.
+- **Learn:** the collapsible raw-input monitor + a per-slot "Learn" that binds the input with the largest
+  significant **change** since arming (axis delta, or button/hat press) — works for sliders resting at an
+  end too.
+- *Later (needs MSP):* read `MSP_BOXNAMES` / `MSP_MODE_RANGES` so AUX channels show **which mode box they
+  drive** ("CH5 → ANGLE"); custom (non-evenly-spaced) toggle/step position values.
 
 **Profiles (shipped).** Mappings live in **shareable profile files**, NOT in settings/localStorage:
 `Documents/KiteGC/HID-Profiles/<name>.json` (`hid/profiles.rs` + `stores/rcProfiles.ts`). A profile is
@@ -217,8 +239,9 @@ Exact layout deferred — agreed to settle when we build it.
    enumeration, live axis/button/hat stream + shared centre deadband. Verified on Windows.
 2a. **Profiles + raw monitor relocation** *(shipped)* — shareable profile files (§7), Save/New/Delete,
    collapsible raw-input monitor on the config side.
-2b. **Channel mapping** *(now)* — assign axis/button/hat → channel 1..32 with method/behaviour, write
-   into the active profile; live channel-value view. (The complex part.)
+2b. **Channel mapping** *(shipped)* — channel-centric editor: 7 helper methods (§7), A/B/H input
+   assignment + Learn, per-channel name, live channel-value view; all written into the active profile.
+   Local part complete — verified on Windows.
 3. **AUX_RC path (9.1+)** *(later)* — latched switches CH13–32. The safe, simple first real control.
 4. **SET_RAW_RC streaming (8.0+)** *(later)* — codec flag byte, `SchedulerCommand::RcStream`, deadman
    watchdog, Modes A/C, send-mask + zero-skip.

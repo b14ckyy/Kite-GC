@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **RC Control — channel mapping (Phase 2b, local).** A channel-centric mapping editor: each RC channel
+  (1..32) is driven by one of **7 input methods** — passthrough, analog-adjust (axis sets rate),
+  dual-source (two triggers add/subtract), button hold, button toggle (2–6 positions), button step
+  (discrete 3–16) and button adjust (constant-rate). Inputs are referenced as **A/B/H** labels (axes /
+  buttons / hat directions) and assigned via dropdown or **Learn** (binds the input you move/press the
+  most). Per-channel **name** (shown in the live channel monitor), invert, deadband and rate as
+  applicable. Everything is normalised −1..+1 internally with a live µs preview, computed by a pure,
+  reusable helper layer (`helpers/rcMethods.ts`) + engine (`stores/rcEngine.ts`) and saved into the
+  active profile. No MSP yet (streaming is a later phase).
 - **RC Control — profile system + config layout (Phase 2a, local).** Shareable RC config **profiles**
   stored as files under `Documents/KiteGC/HID-Profiles/<name>.json` (not localStorage), with a profile
   dropdown + **Save** (overwrite, confirm) / **New** (name prompt) / **Delete** (confirm; keeps the
