@@ -66,15 +66,12 @@
 
     const unlisteners: UnlistenFn[] = [];
     const sub = async () => {
+      // MSP + MAVLink feed the always-on `link-stats` meter (compiled in release too); the passive
+      // 'telemetry' mode reports its byte rate on the always-emitted `debug-telemetry-stats`. Only one
+      // protocol is active at a time, so a single shared `link` state is fine.
       unlisteners.push(
         await listen<{ bytes_per_sec_rx: number; bytes_per_sec_tx: number; msg_per_sec_rx: number; msg_per_sec_tx: number }>(
-          'debug-msp-stats',
-          (e) => (link = { rxBps: e.payload.bytes_per_sec_rx, txBps: e.payload.bytes_per_sec_tx, msgRx: e.payload.msg_per_sec_rx, msgTx: e.payload.msg_per_sec_tx }),
-        ),
-      );
-      unlisteners.push(
-        await listen<{ bytes_per_sec_rx: number; bytes_per_sec_tx: number; msg_per_sec_rx: number; msg_per_sec_tx: number }>(
-          'debug-mavlink-stats',
+          'link-stats',
           (e) => (link = { rxBps: e.payload.bytes_per_sec_rx, txBps: e.payload.bytes_per_sec_tx, msgRx: e.payload.msg_per_sec_rx, msgTx: e.payload.msg_per_sec_tx }),
         ),
       );

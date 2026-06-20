@@ -160,16 +160,29 @@ export async function resolveMissionAltitudes(
   launch: { lat: number; lng: number } | null,
 ): Promise<{ alts: Map<number, WpMsl>; launchGround: number | null }> {
   const out = new Map<number, WpMsl>();
-  let launchGround: number | null = null;
-  if (launch) {
-    launchGround = await invoke<number | null>('terrain_elevation', { lat: launch.lat, lon: launch.lng });
-  }
+
+  // Gather every point that needs a terrain sample (launch + each geo WP), then
+  // resolve them all in a single batched IPC call instead of one round-trip per
+  // waypoint — the dominant cost when the 3D mission overlay is (re)built.
+  const points: [number, number][] = [];
+  if (launch) points.push([launch.lat, launch.lng]);
+  const launchIdx = launch ? 0 : -1;
+  const wpPointIdx = new Map<number, number>(); // mission index → index into `points`
   for (let i = 0; i < waypoints.length; i++) {
     const wp = waypoints[i];
     if (!hasLocation(wp.action) || (wp.lat === 0 && wp.lon === 0)) continue;
-    const lat = toDeg(wp.lat);
-    const lon = toDeg(wp.lon);
-    const ground = await invoke<number | null>('terrain_elevation', { lat, lon });
+    wpPointIdx.set(i, points.length);
+    points.push([toDeg(wp.lat), toDeg(wp.lon)]);
+  }
+
+  const grounds = points.length > 0
+    ? await invoke<(number | null)[]>('terrain_elevations', { points })
+    : [];
+
+  const launchGround: number | null = launchIdx >= 0 ? grounds[launchIdx] ?? null : null;
+  for (const [i, pi] of wpPointIdx) {
+    const wp = waypoints[i];
+    const ground = grounds[pi] ?? null;
     const mode = wpAltMode(wp);
     const valM = wp.altitude / 100;
     let altMsl: number;

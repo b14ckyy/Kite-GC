@@ -5,6 +5,7 @@ mod aero;
 mod commands;
 mod flightlog;
 mod flightmode;
+mod link_stats;
 mod mavlink_proto;
 mod mission;
 mod msp;
@@ -42,7 +43,10 @@ use commands::flightlog::{
 use commands::aero::{aero_fetch, aero_cache_stats, aero_cache_clear};
 use commands::info::get_app_version;
 use commands::radar::{radar_configure, radar_set_center, radar_set_node_pos, radar_snapshot};
-use commands::terrain::{terrain_elevation, terrain_fan, terrain_profile};
+use commands::terrain::{
+    terrain_cache_clear, terrain_cache_stats, terrain_elevation, terrain_elevations, terrain_fan,
+    terrain_profile,
+};
 use terrain::TerrainProvider;
 use commands::mission::{
     mission_get, mission_clear, mission_set, mission_add_wp, mission_insert_wp,
@@ -243,8 +247,11 @@ pub fn run() {
             flightlog_recover_save_incomplete,
             flightlog_recover_continue,
             terrain_elevation,
+            terrain_elevations,
             terrain_profile,
             terrain_fan,
+            terrain_cache_stats,
+            terrain_cache_clear,
             radar_configure,
             radar_set_center,
             radar_set_node_pos,

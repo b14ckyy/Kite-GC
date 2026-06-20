@@ -174,6 +174,59 @@ impl TerrainProvider {
         }
     }
 
+    /// Total bytes + file count of the on-disk terrain tile cache (`*.tif`).
+    pub fn cache_stats(&self) -> (u64, usize) {
+        let mut bytes = 0u64;
+        let mut count = 0usize;
+        if let Ok(entries) = std::fs::read_dir(&self.cache_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("tif") {
+                    if let Ok(meta) = entry.metadata() {
+                        bytes += meta.len();
+                        count += 1;
+                    }
+                }
+            }
+        }
+        (bytes, count)
+    }
+
+    /// Delete all on-disk terrain tiles and clear the in-memory caches. Returns files removed.
+    pub fn clear_cache(&self) -> usize {
+        let mut removed = 0usize;
+        if let Ok(entries) = std::fs::read_dir(&self.cache_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("tif")
+                    && std::fs::remove_file(&path).is_ok()
+                {
+                    removed += 1;
+                }
+            }
+        }
+        // Drop decoded tiles + the known-missing set so cleared tiles re-download on demand.
+        if let Ok(mut st) = self.state.lock() {
+            st.tiles.clear();
+            st.missing.clear();
+            st.order.clear();
+        }
+        removed
+    }
+
+    /// Elevation (metres ≈ MSL) at each lat/lon, in input order. A batched
+    /// `elevation()` so a caller resolving many points (e.g. every mission
+    /// waypoint) pays a single IPC round-trip instead of one per point. Loads
+    /// stay serialized via `elevation()`'s `load_lock`, so points sharing a tile
+    /// reuse the same load rather than racing duplicate 42 MB downloads.
+    pub async fn elevations(&self, points: &[(f64, f64)]) -> Vec<Option<f32>> {
+        let mut out = Vec::with_capacity(points.len());
+        for &(lat, lon) in points {
+            out.push(self.elevation(lat, lon).await);
+        }
+        out
+    }
+
     /// Sample terrain along a polyline of waypoints at `spacing_m` ground spacing.
     /// Returns cumulative-distance samples (including the exact waypoint positions).
     pub async fn profile(&self, points: &[(f64, f64)], spacing_m: f64) -> Vec<ProfileSample> {

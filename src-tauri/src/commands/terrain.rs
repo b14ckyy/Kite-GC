@@ -4,7 +4,30 @@
 // Terrain elevation Tauri commands (Copernicus GLO-30, ≈ MSL).
 
 use crate::terrain::{ProfileSample, TerrainFan, TerrainProvider};
+use serde::Serialize;
 use tauri::State;
+
+/// On-disk terrain tile cache size for the settings readout.
+#[derive(Serialize)]
+pub struct TerrainCacheStats {
+    pub bytes: u64,
+    pub count: usize,
+}
+
+/// Current size + tile count of the on-disk terrain cache.
+#[tauri::command]
+pub async fn terrain_cache_stats(
+    provider: State<'_, TerrainProvider>,
+) -> Result<TerrainCacheStats, String> {
+    let (bytes, count) = provider.cache_stats();
+    Ok(TerrainCacheStats { bytes, count })
+}
+
+/// Delete every cached terrain tile from disk. Returns the number of files removed.
+#[tauri::command]
+pub async fn terrain_cache_clear(provider: State<'_, TerrainProvider>) -> Result<usize, String> {
+    Ok(provider.clear_cache())
+}
 
 /// Terrain elevation (metres ≈ MSL) at a single lat/lon. `null` if unavailable.
 #[tauri::command]
@@ -14,6 +37,17 @@ pub async fn terrain_elevation(
     provider: State<'_, TerrainProvider>,
 ) -> Result<Option<f32>, String> {
     Ok(provider.elevation(lat, lon).await)
+}
+
+/// Terrain elevation (metres ≈ MSL) at each lat/lon, in input order. `null`
+/// where unavailable. Batched so a caller resolving many points pays one IPC
+/// round-trip instead of one per point.
+#[tauri::command]
+pub async fn terrain_elevations(
+    points: Vec<(f64, f64)>,
+    provider: State<'_, TerrainProvider>,
+) -> Result<Vec<Option<f32>>, String> {
+    Ok(provider.elevations(&points).await)
 }
 
 /// Terrain profile along a polyline of `[lat, lon]` points, sampled every

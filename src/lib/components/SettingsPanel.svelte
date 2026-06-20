@@ -8,6 +8,7 @@
   // a SegmentedToggle tab switcher (Interface / Data) in the toolbar; each tab is grouped into
   // labelled subsections. On/off switches use the shared <Toggle>, actions use <Button>, selects
   // match the framework height. All tiny italic hints are dropped except the Cesium-token one.
+  import { invoke } from '@tauri-apps/api/core';
   import { t, locale } from 'svelte-i18n';
   import { SUPPORTED_LOCALES } from '$lib/i18n';
   import { MAP_PROVIDERS } from '$lib/config/mapProviders';
@@ -121,6 +122,29 @@
   const tab = $derived($panelState.settingsTab);
 
   const DEV = import.meta.env.DEV;
+
+  /** Human size: GB for ≥1 GiB, else MB. Used for both cache readouts. */
+  function fmtSize(bytes: number): string {
+    if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+    return `${(bytes / 1024 ** 2).toFixed(0)} MB`;
+  }
+
+  // Terrain cache (Copernicus DEM tiles on disk) — unbounded, so we only show size + a clear button.
+  let terrainCache = $state<{ bytes: number; count: number }>({ bytes: 0, count: 0 });
+  async function loadTerrainCache() {
+    try {
+      terrainCache = await invoke<{ bytes: number; count: number }>('terrain_cache_stats');
+    } catch { /* backend unavailable — leave at zero */ }
+  }
+  async function clearTerrainCache() {
+    try { await invoke('terrain_cache_clear'); } catch { /* non-critical */ }
+    await loadTerrainCache();
+  }
+  // Refresh the terrain-cache size whenever the Data tab (which hosts the Map section) is shown.
+  $effect(() => {
+    if (tab !== 'interface') void loadTerrainCache();
+  });
+
   /** Patch the nested radar settings (onPatch merges shallowly, so pass the whole radar object). */
   function patchRadar(partial: Partial<RadarSettings>) {
     onPatch({ radar: { ...radar, ...partial } });
@@ -324,7 +348,9 @@
           <option value={100}>100 MB</option>
           <option value={200}>200 MB</option>
           <option value={500}>500 MB</option>
-          <option value={1000}>1000 MB</option>
+          <option value={1000}>1 GB</option>
+          <option value={2000}>2 GB</option>
+          <option value={5000}>5 GB</option>
         </select>
       </div>
       {#if mapCacheMaxMB > 0}
@@ -337,11 +363,20 @@
             ></div>
           </div>
           <span class="cache-bar-label">
-            {(cacheStats.usedBytes / 1024 / 1024).toFixed(1)} / {mapCacheMaxMB} MB · {cacheStats.tileCount} tiles
+            {fmtSize(cacheStats.usedBytes)} / {fmtSize(mapCacheMaxMB * 1024 * 1024)} · {cacheStats.tileCount} tiles
           </span>
           <Button variant="standard" size="sm" onclick={onClearCache} title={$t('settings.clear')}>{$t('settings.clear')}</Button>
         </div>
       {/if}
+
+      <!-- Terrain (Copernicus DEM) cache — unbounded on disk; size readout + clear only. -->
+      <div class="s-row">
+        <span class="s-label">{$t('settings.terrainCache')}</span>
+        <div class="cache-inline">
+          <span class="cache-bar-label">{fmtSize(terrainCache.bytes)} · {terrainCache.count} tiles</span>
+          <Button variant="standard" size="sm" onclick={clearTerrainCache} title={$t('settings.clear')}>{$t('settings.clear')}</Button>
+        </div>
+      </div>
       <div class="s-row">
         <label class="s-label" for="cesium-ion-token">Cesium Ion Token</label>
         <input
@@ -591,6 +626,7 @@
   .cache-bar-fill { height: 100%; background: #37a8db; border-radius: 3px; transition: width 0.3s ease; }
   .cache-bar-fill.cache-bar-warning { background: #e8a317; }
   .cache-bar-label { font-size: 9px; color: #888; white-space: nowrap; }
+  .cache-inline { display: flex; align-items: center; gap: 8px; }
 
   .widget-toggle-group { display: flex; align-items: center; gap: 8px; }
   .widget-panel-indicator { font-size: 9px; color: #888; min-width: 38px; text-align: right; }

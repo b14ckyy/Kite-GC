@@ -337,6 +337,7 @@
     "map": "Carte",
     "tileProvider": "Fournisseur de tuiles",
     "tileCache": "Cache de tuiles",
+    "terrainCache": "Cache de terrain",
     "altitudeCurtain": "Rideau d'altitude (3D)",
     "realLighting": "Heure réelle et éclairage (3D)",
     "logReplayTime": "Heure du replay (3D)",

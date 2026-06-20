@@ -38,6 +38,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
 use crate::flightlog::recorder::FlightRecorderHandle;
+use crate::link_stats::LinkStats;
 use crate::radar;
 use crate::radar::source::SourceUpdate;
 use crate::transport::Transport;
@@ -218,6 +219,10 @@ fn scheduler_loop(
         )
     };
 
+    // Always-on link-rate meter (compiled in release too) — feeds the Relay panel's live RX/TX readout,
+    // independent of the dev-only Debug Monitor tracker above.
+    let mut link_stats = LinkStats::new();
+
     log::info!(
         "Scheduler started: {} telemetry slots (attitude={:.0}Hz, position={:.0}Hz, airspeed={})",
         slots.len(),
@@ -256,9 +261,10 @@ fn scheduler_loop(
                 payload,
                 reply,
             }) => {
-                let result = do_msp_request(&mut *transport, code, &payload, &mut debug_tracker);
+                let result = do_msp_request(&mut *transport, code, &payload, &mut debug_tracker, &mut link_stats);
                 let _ = reply.send(result);
                 debug_tracker.maybe_emit(&app_handle);
+                link_stats.maybe_emit(&app_handle);
                 continue; // re-check commands before polling
             }
             Err(mpsc::TryRecvError::Empty) => {}
@@ -271,8 +277,9 @@ fn scheduler_loop(
         // 1b. ADS-B from the FC via MSP (opt-in, lowest cadence) → radar pipeline.
         if radar_msp_enabled.load(Ordering::Relaxed) && radar_last.elapsed() >= RADAR_MSP_INTERVAL {
             radar_last = Instant::now();
-            poll_radar_adsb(&mut *transport, &radar_ingest, &app_handle, &mut debug_tracker);
+            poll_radar_adsb(&mut *transport, &radar_ingest, &app_handle, &mut debug_tracker, &mut link_stats);
             debug_tracker.maybe_emit(&app_handle);
+            link_stats.maybe_emit(&app_handle);
             continue;
         }
 
@@ -289,8 +296,9 @@ fn scheduler_loop(
             .map(|(i, _, _)| i);
 
         if let Some(idx) = most_overdue {
-            poll_slot(&mut *transport, &mut slots[idx], &app_handle, &mut debug_tracker, &recorder, &box_ids, config.link_stats_enabled);
+            poll_slot(&mut *transport, &mut slots[idx], &app_handle, &mut debug_tracker, &mut link_stats, &recorder, &box_ids, config.link_stats_enabled);
             debug_tracker.maybe_emit(&app_handle);
+            link_stats.maybe_emit(&app_handle);
             continue;
         }
 
@@ -318,9 +326,10 @@ fn scheduler_loop(
                 payload,
                 reply,
             }) => {
-                let result = do_msp_request(&mut *transport, code, &payload, &mut debug_tracker);
+                let result = do_msp_request(&mut *transport, code, &payload, &mut debug_tracker, &mut link_stats);
                 let _ = reply.send(result);
                 debug_tracker.maybe_emit(&app_handle);
+                link_stats.maybe_emit(&app_handle);
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -399,6 +408,7 @@ fn poll_slot(
     slot: &mut TelemetrySlot,
     app_handle: &AppHandle,
     tracker: &mut debug::DebugTracker,
+    link_stats: &mut LinkStats,
     recorder: &Option<FlightRecorderHandle>,
     box_ids: &[u8],
     link_stats_enabled: bool,
@@ -421,9 +431,11 @@ fn poll_slot(
 
     for code in codes_to_poll {
         tracker.on_request(code, 9); // MSP V2 request frame = 9 bytes (empty payload)
+        link_stats.on_tx(9);
         match transport.msp_request(code, &[]) {
             Ok(msg) => {
                 tracker.on_response(code, 9 + msg.payload.len());
+                link_stats.on_rx(9 + msg.payload.len());
                 let event_name = telemetry::event_name_for_code(code);
                 let payload = telemetry::decode_telemetry(code, &msg.payload, box_ids);
 
@@ -474,11 +486,16 @@ fn do_msp_request(
     code: u16,
     payload: &[u8],
     tracker: &mut debug::DebugTracker,
+    link_stats: &mut LinkStats,
 ) -> Result<Vec<u8>, String> {
     tracker.on_request(code, 9 + payload.len());
+    link_stats.on_tx(9 + payload.len());
     let resp = transport.msp_request(code, payload);
     match &resp {
-        Ok(msg) => tracker.on_response(code, 9 + msg.payload.len()),
+        Ok(msg) => {
+            tracker.on_response(code, 9 + msg.payload.len());
+            link_stats.on_rx(9 + msg.payload.len());
+        }
         Err(_) => tracker.on_timeout(code),
     }
     resp.map(|msg| msg.payload)
@@ -490,13 +507,16 @@ fn poll_radar_adsb(
     radar_ingest: &RadarIngest,
     app: &AppHandle,
     tracker: &mut debug::DebugTracker,
+    link_stats: &mut LinkStats,
 ) {
     let code = crate::msp::MSP2_ADSB_VEHICLE_LIST;
     tracker.mark_polling(code, 1.0 / RADAR_MSP_INTERVAL.as_secs_f64());
     tracker.on_request(code, 9);
+    link_stats.on_tx(9);
     match transport.msp_request(code, &[]) {
         Ok(msg) => {
             tracker.on_response(code, 9 + msg.payload.len());
+            link_stats.on_rx(9 + msg.payload.len());
             let vehicles = radar::sources::adsb_msp::decode(&msg.payload, radar::now_ms());
             let count = vehicles.len();
             if let Ok(guard) = radar_ingest.lock() {

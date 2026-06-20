@@ -300,6 +300,11 @@
   // a replay (those own the Home store); never downgrades an FC home.
   launchPoint.subscribe((lp) => {
     if (!lp) return;
+    // Never mirror an invalid / 0,0 launch into Home: before a GPS fix the launch auto-place can fall
+    // back to the map centre (≈ 0,0), which would otherwise light up the Home widget with a bogus
+    // ~5800 km distance to null island. Home stays unset until a real reference (FC home on arm, a
+    // valid manual placement, or replay) exists.
+    if (!isValidGpsCoordinate(lp.lat, lp.lng)) return;
     const h = get(homePosition);
     if (h.source === 'fc' || h.source === 'replay') return;
     if (h.set && h.lat === lp.lat && h.lon === lp.lng) return;

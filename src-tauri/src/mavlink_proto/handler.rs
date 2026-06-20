@@ -126,6 +126,8 @@ fn handler_loop(
     let mut last_heartbeat = Instant::now() - HEARTBEAT_INTERVAL; // Send immediately
     let mut msg_count: u64 = 0;
     let mut debug_tracker = super::debug::MavlinkDebugTracker::new();
+    // Always-on link-rate meter (release too) — feeds the Relay panel's live RX/TX readout.
+    let mut link_stats = crate::link_stats::LinkStats::new();
 
     // Accumulated analog state — MAVLink splits battery data across multiple messages
     let mut analog = AnalogState::default();
@@ -167,6 +169,7 @@ fn handler_loop(
             Ok(MavlinkCommand::SendMessage { msg, reply }) => {
                 let frame = codec::serialize_v2(&gcs_header, &msg, &mut seq);
                 debug_tracker.on_tx(msg.message_id(), frame.len());
+                link_stats.on_tx(frame.len());
                 // Record our outgoing frame to the tlog too (mission upload, commands, …) → a faithful
                 // bidirectional .tlog, like Mission Planner / QGC.
                 if let Some(ref rec) = recorder {
@@ -213,6 +216,7 @@ fn handler_loop(
             let hb_msg = codec::gcs_heartbeat();
             let frame = codec::serialize_v2(&gcs_header, &hb_msg, &mut seq);
             debug_tracker.on_tx(hb_msg.message_id(), frame.len());
+            link_stats.on_tx(frame.len());
             if let Some(ref rec) = recorder {
                 if let Ok(mut r) = rec.lock() { r.write_raw_mavlink_frame(&frame); }
             }
@@ -240,6 +244,7 @@ fn handler_loop(
 
                     msg_count += 1;
                     debug_tracker.on_rx(frame.message.message_id(), frame.raw_bytes.len());
+                    link_stats.on_rx(frame.raw_bytes.len());
 
                     // Record raw frame to tlog before any forwarding
                     if !frame.raw_bytes.is_empty() {
@@ -293,6 +298,8 @@ fn handler_loop(
 
         // 4. Emit debug stats to the Debug Monitor (throttled internally; no-op in release)
         debug_tracker.maybe_emit(&app_handle);
+        // Always-on link-rate emit (Relay panel) — throttled internally, compiled in release too.
+        link_stats.maybe_emit(&app_handle);
     }
 }
 

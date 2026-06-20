@@ -364,6 +364,7 @@
     "map": "Karte",
     "tileProvider": "Karten-Anbieter",
     "tileCache": "Karten-Cache",
+    "terrainCache": "Gelände-Cache",
     "altitudeCurtain": "Altitude Curtain (3D)",
     "realLighting": "Echte Tageszeit und Beleuchtung (3D)",
     "logReplayTime": "Log-Replay-Zeit (3D)",

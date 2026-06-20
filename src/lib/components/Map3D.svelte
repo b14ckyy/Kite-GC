@@ -24,7 +24,7 @@
   import type { MapProvider } from "$lib/config/mapProviders";
   import { getCachedTile, putCachedTile, initTileCache } from "$lib/cache/tileCache";
   import { isKnownUnavailable, isPlaceholderTile } from "$lib/cache/tileAvailability";
-  import { isValidGpsCoordinate } from "$lib/helpers/telemetry";
+  import { isValidGpsCoordinate, MIN_FIX_SATELLITES } from "$lib/helpers/telemetry";
   import {
     segmentTrackByFlightMode,
     segmentTrackByAltitude,
@@ -164,6 +164,12 @@
   let missionPrimitives: Cesium.Primitive[] = [];    // overlay lines — depth-test-free primitives (no z-fight)
   let missionRenderToken = 0;                        // guards async terrain races
   let lastMissionSig = '';                           // signature of the drawn model → skip identical redraws
+  // Cache for the expensive terrain-altitude resolution, keyed by a signature of the inputs that affect
+  // it (waypoint positions/alt-frames + launch/home). A 3D re-open or any redundant render trigger then
+  // reuses the resolved altitudes instead of re-sampling terrain (the 15–20 s cost), while cheap visual
+  // changes (active-WP highlight, greying, geoid) still rebuild + redraw the model each render.
+  let inavAltCache: { sig: string; alts: Map<number, WpMsl>; launchGround: number | null } | null = null;
+  let arduAltCache: { sig: string; alts: Map<number, ArduWpAlt>; homeRefMsl: number | null } | null = null;
   let curMission: Mission = get(mission);
   let curShowMission = get(showMission);
   let curReplayActive = get(replayActive);
@@ -1014,7 +1020,7 @@
 
       // Go-to-UAV on connect: jump once to the craft (range ~600 m ≈ 2D zoom 16), deferred to the first
       // 3D fix. Free look only; follow/orbit/fpv already track the UAV.
-      if (pendingUavJump3d && isFreeLook() && telem.fixType >= 3) {
+      if (pendingUavJump3d && isFreeLook() && telem.fixType >= 3 && telem.numSat >= MIN_FIX_SATELLITES) {
         pendingUavJump3d = false;
         viewer.camera.flyToBoundingSphere(
           new Cesium.BoundingSphere(Cesium.Cartesian3.fromDegrees(telem.lon, telem.lat, alt), 1),
@@ -3074,13 +3080,34 @@
   }
 
   // ── INAV mission adapter ────────────────────────────────────────────
+  /** Signature of the inputs that drive resolveMissionAltitudes (positions + alt-frame + launch). */
+  function inavAltInputSig(wps: Waypoint[], launch: { lat: number; lng: number } | null): string {
+    const parts: string[] = [launch ? `L${launch.lat.toFixed(7)},${launch.lng.toFixed(7)}` : 'L-'];
+    for (let i = 0; i < wps.length; i++) {
+      const w = wps[i];
+      if (!hasLocation(w.action) || (w.lat === 0 && w.lon === 0)) continue;
+      parts.push(`${i}:${w.lat},${w.lon},${w.altitude},${w.alt_mode ?? -1},${w.p3}`);
+    }
+    return parts.join('|');
+  }
+
   async function buildInavModel(token: number): Promise<Mission3DModel | null> {
     const wps = curMission.waypoints;
     const firstGeoIdx = wps.findIndex((w) => hasLocation(w.action) && !(w.lat === 0 && w.lon === 0));
     if (firstGeoIdx < 0) return null;
 
-    const { alts, launchGround } = await resolveMissionAltitudes(wps, curLaunch);
-    if (token !== missionRenderToken) return null;
+    // Reuse the cached terrain resolution when the altitude-relevant inputs are unchanged (e.g. a 3D
+    // re-open) — only the cheap model build below re-runs. Otherwise resolve + cache.
+    const altSig = inavAltInputSig(wps, curLaunch);
+    let alts: Map<number, WpMsl>;
+    let launchGround: number | null;
+    if (inavAltCache && inavAltCache.sig === altSig) {
+      ({ alts, launchGround } = inavAltCache);
+    } else {
+      ({ alts, launchGround } = await resolveMissionAltitudes(wps, curLaunch));
+      if (token !== missionRenderToken) return null;
+      inavAltCache = { sig: altSig, alts, launchGround };
+    }
 
     const wpMsl = (i: number): P3 | null => {
       const a = alts.get(i);
@@ -3194,19 +3221,45 @@
    *  value, TERRAIN = terrain + value) and sample the terrain ground beneath it for the drop-line. */
   async function resolveArduAltitudes3d(wps: ArduWaypoint[], homeRefMsl: number | null): Promise<Map<number, ArduWpAlt>> {
     const out = new Map<number, ArduWpAlt>();
+
+    // Collect every locatable waypoint, then sample all terrain grounds in one batched
+    // IPC call instead of one round-trip per waypoint (the dominant 3D-overlay cost).
+    const located: { i: number; lat: number; lon: number }[] = [];
     for (let i = 0; i < wps.length; i++) {
       const wp = wps[i];
       if (!cmdHasLocation(wp.command) && !cmdStandaloneCoordinate(wp.command)) continue;
       const ll = arduWpLatLon3d(wp, wps);
       if (!ll) continue;
-      const ground = await invoke<number | null>('terrain_elevation', { lat: ll.lat, lon: ll.lon });
+      located.push({ i, lat: ll.lat, lon: ll.lon });
+    }
+
+    const grounds = located.length > 0
+      ? await invoke<(number | null)[]>('terrain_elevations', { points: located.map((p) => [p.lat, p.lon]) })
+      : [];
+
+    for (let k = 0; k < located.length; k++) {
+      const { i, lat, lon } = located[k];
+      const ground = grounds[k] ?? null;
+      const wp = wps[i];
       let altMsl: number;
       if (wp.frame === MAV_FRAME_GLOBAL) altMsl = wp.alt;                                          // AMSL
       else if (wp.frame === MAV_FRAME_GLOBAL_TERRAIN_ALT) altMsl = (ground ?? homeRefMsl ?? 0) + wp.alt; // TERRAIN
       else altMsl = (homeRefMsl ?? 0) + wp.alt;                                                    // REL
-      out.set(i, { altMsl, ground, lat: ll.lat, lon: ll.lon });
+      out.set(i, { altMsl, ground, lat, lon });
     }
     return out;
+  }
+
+  /** Signature of the inputs that drive the ArduPilot altitude resolution (positions + frames + home + link). */
+  function arduAltInputSig(wps: ArduWaypoint[]): string {
+    const h = curHome3d;
+    const conn = get(connection).status === 'connected' ? 1 : 0;
+    const parts: string[] = [`H${h.set ? 1 : 0},${h.source},${h.lat.toFixed(7)},${h.lon.toFixed(7)},${h.alt}`, `C${conn}`];
+    for (let i = 0; i < wps.length; i++) {
+      const w = wps[i];
+      parts.push(`${i}:${w.command},${w.frame},${w.lat},${w.lon},${w.alt}`);
+    }
+    return parts.join('|');
   }
 
   async function buildArduModel(token: number): Promise<Mission3DModel | null> {
@@ -3217,20 +3270,29 @@
     const g = wps.find((w) => cmdHasLocation(w.command) && !cmdIsTakeoff(w.command) && !(w.lat === 0 && w.lon === 0));
     const geoidRef = g ? { lat: g.lat / 1e7, lon: g.lon / 1e7 } : (curHome3d.set ? { lat: curHome3d.lat, lon: curHome3d.lon } : null);
 
-    // REL reference: the FC home MSL only when it's the authoritative FC home — a 'manual' home (the
-    // stale INAV-launch mirror, alt ≈ 0) would anchor REL altitudes at sea level → WPs sink into the
-    // ground. Offline we therefore sample the terrain under the takeoff/first waypoint instead.
-    let homeRefMsl: number | null = (curHome3d.set && curHome3d.source === 'fc') ? curHome3d.alt : null;
-    if (homeRefMsl == null) {
-      const anchor = arduTakeoffLatLon3d(wps);
-      if (anchor) {
-        homeRefMsl = await invoke<number | null>('terrain_elevation', { lat: anchor.lat, lon: anchor.lon });
-        if (token !== missionRenderToken) return null;
+    // Reuse the cached terrain resolution (home-ref + per-WP grounds) when the altitude-relevant inputs
+    // are unchanged (e.g. a 3D re-open); only the cheap model build below re-runs. Otherwise resolve.
+    const altSig = arduAltInputSig(wps);
+    let alts: Map<number, ArduWpAlt>;
+    let homeRefMsl: number | null;
+    if (arduAltCache && arduAltCache.sig === altSig) {
+      ({ alts, homeRefMsl } = arduAltCache);
+    } else {
+      // REL reference: the FC home MSL only when it's the authoritative FC home — a 'manual' home (the
+      // stale INAV-launch mirror, alt ≈ 0) would anchor REL altitudes at sea level → WPs sink into the
+      // ground. Offline we therefore sample the terrain under the takeoff/first waypoint instead.
+      homeRefMsl = (curHome3d.set && curHome3d.source === 'fc') ? curHome3d.alt : null;
+      if (homeRefMsl == null) {
+        const anchor = arduTakeoffLatLon3d(wps);
+        if (anchor) {
+          homeRefMsl = await invoke<number | null>('terrain_elevation', { lat: anchor.lat, lon: anchor.lon });
+          if (token !== missionRenderToken) return null;
+        }
       }
+      alts = await resolveArduAltitudes3d(wps, homeRefMsl);
+      if (token !== missionRenderToken) return null;
+      arduAltCache = { sig: altSig, alts, homeRefMsl };
     }
-
-    const alts = await resolveArduAltitudes3d(wps, homeRefMsl);
-    if (token !== missionRenderToken) return null;
 
     const wpMsl = (i: number): P3 | null => {
       const a = alts.get(i);

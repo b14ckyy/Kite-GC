@@ -17,6 +17,7 @@
   import "leaflet/dist/leaflet.css";
   import { settings } from "$lib/stores/settings";
   import { telemetry } from "$lib/stores/telemetry";
+  import { MIN_FIX_SATELLITES } from "$lib/helpers/telemetry";
   import { get } from "svelte/store";
   import { MAP_PROVIDERS, getProviderById, type MapProvider } from "$lib/config/mapProviders";
   import { cachedTileLayer } from "$lib/cache/CachedTileLayer";
@@ -1149,7 +1150,7 @@
 
         // Go-to-UAV on connect: jump once to the craft at a sensible zoom, deferred to the first 3D fix
         // (no fix ⇒ no UAV rendered). Free pan only; following already centres on the UAV.
-        if (pendingUavJump && viewMode === 'free' && !get(replayActive) && t.fixType >= 3 && isValidGpsCoordinate(t.lat, t.lon)) {
+        if (pendingUavJump && viewMode === 'free' && !get(replayActive) && t.fixType >= 3 && t.numSat >= MIN_FIX_SATELLITES && isValidGpsCoordinate(t.lat, t.lon)) {
           map?.setView([t.lat, t.lon], 16);
           pendingUavJump = false;
         }

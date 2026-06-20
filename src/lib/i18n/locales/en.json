@@ -364,6 +364,7 @@
     "map": "Map",
     "tileProvider": "Tile Provider",
     "tileCache": "Tile Cache",
+    "terrainCache": "Terrain Cache",
     "altitudeCurtain": "Altitude Curtain (3D)",
     "realLighting": "Real Daytime and Lighting (3D)",
     "logReplayTime": "Log Replay Time (3D)",
