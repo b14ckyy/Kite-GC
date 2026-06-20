@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **RC Control — HID/joystick input foundation (Phase 1, local).** Groundwork for GCS RC steering of
+  INAV over MSP (`docs/active/RC_CONTROL.md`). A new opt-in **RC** nav-rail panel (Settings → Data →
+  "RC Control") with a live device picker + calibration view (bipolar axis bars, hat indicators,
+  numbered buttons) — works offline, no FC needed. Input is read by a dedicated backend thread using
+  **native per-OS raw backends** (not a gamepad library, which misclassifies HOTAS/RC-transmitter axes
+  as buttons): **Windows.Gaming.Input `RawGameController`** on Windows, **evdev** on Linux. Verified on
+  Windows (VelocityOne Flightstick — all axes/buttons/hats incl. a rotary trim axis). No channel mapping
+  or MSP yet (next phases). Backend `src-tauri/src/hid/`, store `stores/hid.ts`, panel `RcControlPanel`.
 - **Toolbar arming + battery indicators.** Flanking the sensor-health bar: a prominent **arming traffic
   light** (green = ready & disarmed, amber = armed, red = not ready) and a **battery indicator** (glyph +
   %). INAV lists the blocking `ARMING_DISABLED_*` reasons on hover (read straight from the armingFlags
