@@ -70,14 +70,18 @@ export interface ToggleConfig {
   kind: 'toggle';
   input: string;
   positions: number[]; // normalised values, length 2..6
+  /** Hold time in ms required to advance (must hold, not tap); 0/undefined = instant. Anti-accidental
+   *  for critical switches (e.g. a 2-position arming toggle on a gamepad). */
+  holdMs?: number;
 }
 
-/** 2 buttons step a channel +/− through 3..16 discrete steps (clamp at ends). */
+/** 2 buttons step a channel +/− through 3..15 discrete steps (clamp at ends). Capped at 15 so it fits
+ *  a 4-bit AUX_RC channel (value 0 = "no update", leaving 15 usable levels). */
 export interface ButtonStepConfig {
   kind: 'buttonStep';
   inputUp: string;
   inputDown: string;
-  steps: number; // 3..16
+  steps: number; // 3..15
 }
 
 /** 2 buttons ramp a channel +/− at a constant rate while held (clamp at ends). */
@@ -113,6 +117,8 @@ export interface MethodState {
   pos: number;
   /** Previous pressed state per input label (button edge detection). */
   prev: Record<string, boolean>;
+  /** Accumulated ms the toggle button has been held (for hold-to-toggle). */
+  held: number;
 }
 
 /** Initial state for a method — every adjustable/value-holding method starts at the LOWEST µs value
@@ -126,7 +132,7 @@ export function initState(method: RcMethod): MethodState {
     if (pos < 0) pos = 0;
     value = method.positions[pos];
   }
-  return { value, pos, prev: {} };
+  return { value, pos, prev: {}, held: 0 };
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────────────────────
@@ -166,7 +172,7 @@ export function stepMethod(
   dtMs: number,
 ): { value: number; state: MethodState } {
   const dt = dtMs / 1000;
-  const next: MethodState = { value: state.value, pos: state.pos, prev: { ...state.prev } };
+  const next: MethodState = { value: state.value, pos: state.pos, prev: { ...state.prev }, held: state.held };
 
   switch (method.kind) {
     case 'passthrough': {
@@ -195,7 +201,21 @@ export function stepMethod(
     }
     case 'toggle': {
       const n = method.positions.length || 1;
-      if (edge(next, method.input, frame.button(method.input))) next.pos = (state.pos + 1) % n;
+      const pressed = frame.button(method.input);
+      const hold = method.holdMs ?? 0;
+      if (hold > 0) {
+        // Hold-to-toggle: advance once when the press crosses the hold threshold; release to re-arm.
+        if (pressed) {
+          const before = state.held;
+          next.held = before + dtMs;
+          if (before < hold && next.held >= hold) next.pos = (state.pos + 1) % n;
+        } else {
+          next.held = 0;
+        }
+        next.prev[method.input] = pressed;
+      } else if (edge(next, method.input, pressed)) {
+        next.pos = (state.pos + 1) % n;
+      }
       return { value: method.positions[next.pos] ?? -1, state: next };
     }
     case 'buttonStep': {

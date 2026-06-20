@@ -13,4 +13,5 @@ pub mod hid;
 pub mod info;
 pub mod mission;
 pub mod radar;
+pub mod rc;
 pub mod terrain;

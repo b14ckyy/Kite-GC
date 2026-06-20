@@ -10,36 +10,57 @@
   import { t } from 'svelte-i18n';
   import { currentChannels } from '$lib/stores/rcProfiles';
   import { channelValues } from '$lib/stores/rcEngine';
+  import { rcLayout } from '$lib/stores/rcLayout';
 
   const channels = $derived(Object.keys($currentChannels).map(Number).sort((a, b) => a - b));
+  const rawCh = $derived(channels.filter((c) => c <= $rcLayout.rawMax));
+  const auxCh = $derived(channels.filter((c) => c > $rcLayout.rawMax));
   const usPct = (us: number) => Math.max(0, Math.min(100, ((us - 1000) / 1000) * 100));
 </script>
 
+{#snippet chRow(ch: number)}
+  {@const us = $channelValues[ch] ?? 1500}
+  {@const name = $currentChannels[ch]?.name}
+  <div class="cs-row">
+    <div class="cs-label">
+      <span class="cs-num">CH{ch}</span>
+      {#if name}<span class="cs-name" title={name}>{name}</span>{/if}
+    </div>
+    <div class="cs-bar">
+      <span class="cs-centre"></span>
+      <span class="cs-fill" style="width:{usPct(us)}%"></span>
+    </div>
+    <span class="cs-val">{us}</span>
+  </div>
+{/snippet}
+
 {#if channels.length === 0}
   <div class="cs-empty">{$t('rc.noChannels')}</div>
+{:else if $rcLayout.split}
+  <div class="cs">
+    {#if rawCh.length}
+      <div class="cs-group">{$t('rc.groupRaw')}</div>
+      {#each rawCh as ch (ch)}{@render chRow(ch)}{/each}
+    {/if}
+    {#if auxCh.length}
+      <div class="cs-group">{$t('rc.groupAux')}</div>
+      {#each auxCh as ch (ch)}{@render chRow(ch)}{/each}
+    {/if}
+  </div>
 {:else}
   <div class="cs">
-    {#each channels as ch (ch)}
-      {@const us = $channelValues[ch] ?? 1500}
-      {@const name = $currentChannels[ch]?.name}
-      <div class="cs-row">
-        <div class="cs-label">
-          <span class="cs-num">CH{ch}</span>
-          {#if name}<span class="cs-name" title={name}>{name}</span>{/if}
-        </div>
-        <div class="cs-bar">
-          <span class="cs-centre"></span>
-          <span class="cs-fill" style="width:{usPct(us)}%"></span>
-        </div>
-        <span class="cs-val">{us}</span>
-      </div>
-    {/each}
+    {#each channels as ch (ch)}{@render chRow(ch)}{/each}
   </div>
 {/if}
 
 <style>
   .cs-empty { color: #949494; font-size: 12px; font-style: italic; padding: 8px; }
   .cs { display: flex; flex-direction: column; gap: 5px; }
+  .cs-group {
+    color: #37a8db; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+    margin: 6px 0 2px; padding-bottom: 3px; border-bottom: 1px solid rgba(55, 168, 219, 0.25);
+  }
+  .cs-group:first-child { margin-top: 0; }
   .cs-row { display: grid; grid-template-columns: 110px 1fr 42px; align-items: center; gap: 8px; }
   .cs-label { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
   .cs-num { color: #37a8db; font-weight: 700; font-size: 12px; flex: none; }

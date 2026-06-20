@@ -11,11 +11,38 @@
   import { radarAlertDebug, type AlertLevel } from "$lib/controllers/radarAlerts";
   import { gpsInject } from "$lib/stores/telemetry";
   import { settings } from "$lib/stores/settings";
+  import { invoke } from "@tauri-apps/api/core";
+  import { hidSnapshot } from "$lib/stores/hid";
+  import { currentChannels } from "$lib/stores/rcProfiles";
+  import { channelValues } from "$lib/stores/rcEngine";
 
   let { onclose }: { onclose: () => void } = $props();
 
-  type Tab = 'msp' | 'mavlink' | 'alerts' | 'telemetry';
+  type Tab = 'msp' | 'mavlink' | 'alerts' | 'telemetry' | 'rc';
   let tab = $state<Tab>('msp');
+
+  // ── RC control (MSP) diagnostics ──
+  let rcFc = $state<{ receiver_type: number; msp_override_channels: number | null } | null>(null);
+  let rcErr = $state('');
+  async function readRcFc() {
+    rcErr = '';
+    try {
+      rcFc = await invoke('rc_read_fc_config');
+    } catch (e) {
+      rcErr = String(e);
+      rcFc = null;
+    }
+  }
+  const rxName = (t: number) => (t === 2 ? 'MSP' : t === 1 ? 'SERIAL' : t === 0 ? 'NONE' : `?(${t})`);
+  function bitChannels(mask: number): string {
+    const ch: string[] = [];
+    for (let i = 0; i < 32; i++) if (mask & (1 << i)) ch.push(`CH${i + 1}`);
+    return ch.length ? ch.join(', ') : '—';
+  }
+  function channelSummary(map: Record<number, unknown>, vals: Record<number, number>): string {
+    const ks = Object.keys(map).map(Number).sort((a, b) => a - b);
+    return ks.length ? ks.map((c) => `CH${c}=${vals[c] ?? '—'}`).join('  ') : '—';
+  }
 
   // Dev GPS injection (global — visible in both tabs). Mirror the store so reopening reflects the
   // current override; write back on every change.
@@ -259,6 +286,7 @@
     <button class="tab" class:active={tab === 'mavlink'} onclick={() => tab = 'mavlink'}>{$t('debug.tabMavlink')}</button>
     <button class="tab" class:active={tab === 'telemetry'} onclick={() => tab = 'telemetry'}>{$t('debug.tabTelemetry')}</button>
     <button class="tab" class:active={tab === 'alerts'} onclick={() => tab = 'alerts'}>{$t('debug.tabAlerts')}</button>
+    <button class="tab" class:active={tab === 'rc'} onclick={() => tab = 'rc'}>{$t('debug.tabRc')}</button>
   </div>
 
   <div class="inject-row" class:on={inj.active}>
@@ -538,6 +566,39 @@
         </div>
       {/if}
     </div>
+  {:else if tab === 'rc'}
+    <div class="debug-stats">
+      <div class="stat-group">
+        <button class="dbg-btn" onclick={readRcFc}>{$t('debug.rcRead')}</button>
+        {#if rcErr}<span class="stat-warn">{rcErr}</span>{/if}
+      </div>
+      {#if rcFc}
+        <div class="stat-group">
+          <span class="stat-label">{$t('debug.rcRxType')}</span>
+          <span class="stat-value">{rxName(rcFc.receiver_type)}</span>
+          <span class="stat-sep">|</span>
+          <span class="stat-label">{$t('debug.rcOverride')}</span>
+          <span class="stat-value">{rcFc.msp_override_channels == null ? 'n/a' : '0x' + rcFc.msp_override_channels.toString(16)}</span>
+        </div>
+        {#if rcFc.msp_override_channels != null}
+          <div class="cap-row">
+            <span class="stat-label">{$t('debug.rcOverrideCh')}</span>
+            <span class="cap-path">{bitChannels(rcFc.msp_override_channels)}</span>
+          </div>
+        {/if}
+      {/if}
+      <div class="stat-group">
+        <span class="stat-label">{$t('debug.rcHid')}</span>
+        <span class="stat-value">{$hidSnapshot ? `id ${$hidSnapshot.id}` : '—'}</span>
+        <span class="stat-sep">|</span>
+        <span class="stat-label">{$t('debug.rcAxesBtnHat')}</span>
+        <span class="stat-value">{$hidSnapshot ? `${$hidSnapshot.axes.length}/${$hidSnapshot.buttons.length}/${$hidSnapshot.hats.length}` : '—'}</span>
+      </div>
+      <div class="cap-row">
+        <span class="stat-label">{$t('debug.rcChannels')}</span>
+        <span class="cap-path">{channelSummary($currentChannels, $channelValues)}</span>
+      </div>
+    </div>
   {:else}
     <div class="debug-stats alerts-stats">
       {#if !alerts.uavValid}
@@ -765,6 +826,19 @@
   }
 
   .inj-btn:hover {
+    background: rgba(55, 168, 219, 0.3);
+  }
+
+  .dbg-btn {
+    background: rgba(55, 168, 219, 0.15);
+    border: 1px solid rgba(55, 168, 219, 0.3);
+    border-radius: 3px;
+    color: #37a8db;
+    cursor: pointer;
+    font-size: 12px;
+    padding: 4px 10px;
+  }
+  .dbg-btn:hover {
     background: rgba(55, 168, 219, 0.3);
   }
 

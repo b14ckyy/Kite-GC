@@ -65,6 +65,16 @@ pub const MSP_BOXIDS: u16 = 119;
 pub const MSP_WP: u16 = 118;
 pub const MSP_NAV_STATUS: u16 = 121;
 pub const MSP_SET_WP: u16 = 209;
+pub const MSP_MODE_RANGES: u16 = 34;
+pub const MSP_RX_CONFIG: u16 = 44;
+
+// ── RC control over MSP (see msp/rc_encode.rs, docs/active/RC_CONTROL.md) ──
+pub const MSP_SET_RAW_RC: u16 = 200;
+pub const MSP2_INAV_SET_AUX_RC: u16 = 0x2230;
+/// Generic setting read/write by name (null-terminated) — used to read receiver_type /
+/// msp_override_channels and to fix the override bitmask.
+pub const MSP2_COMMON_SETTING: u16 = 0x1003;
+pub const MSP2_COMMON_SET_SETTING: u16 = 0x1004;
 
 // ── INAV MSP v2 command codes ───────────────────────────────────────
 pub const MSPV2_INAV_STATUS: u16 = 0x2000;

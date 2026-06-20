@@ -15,6 +15,7 @@
   import { hidSnapshot } from '$lib/stores/hid';
   import { currentChannels } from '$lib/stores/rcProfiles';
   import { channelValues } from '$lib/stores/rcEngine';
+  import { rcLayout } from '$lib/stores/rcLayout';
   import {
     defaultMethod,
     evenPositions,
@@ -22,7 +23,6 @@
     type RcMethodKind,
   } from '$lib/helpers/rcMethods';
 
-  const MAX_CHANNELS = 32;
   const AXIS_KINDS: RcMethodKind[] = ['passthrough', 'analogAdjust', 'dualAxis'];
   const BUTTON_KINDS: RcMethodKind[] = ['hold', 'toggle', 'buttonStep', 'buttonAdjust'];
 
@@ -43,8 +43,12 @@
   let addCh = $state<number>(0);
 
   const channels = $derived(Object.keys($currentChannels).map(Number).sort((a, b) => a - b));
+  const rawCh = $derived(channels.filter((c) => c <= $rcLayout.rawMax));
+  const auxCh = $derived(channels.filter((c) => c > $rcLayout.rawMax));
+  // Free channels respect the layout: split → CH1–32, single block → CH1–rawMax (16).
+  const maxChannel = $derived($rcLayout.split ? $rcLayout.auxMax : $rcLayout.rawMax);
   const freeChannels = $derived(
-    Array.from({ length: MAX_CHANNELS }, (_, i) => i + 1).filter((n) => !(n in $currentChannels)),
+    Array.from({ length: maxChannel }, (_, i) => i + 1).filter((n) => !(n in $currentChannels)),
   );
   const axisLabels = $derived(($hidSnapshot?.axes ?? []).map((_, i) => `A${i + 1}`));
   const buttonLabels = $derived([
@@ -106,6 +110,14 @@
     const dflt = firstType === 'button' ? buttonLabels[0] : axisLabels[0];
     setMethod(ch, defaultMethod(kind, dflt ?? ''));
     syncStepper(ch);
+    // If Learn was armed for this channel, re-arm it for the new method's first input (correct type) —
+    // otherwise a learn armed for an axis would keep waiting for axis motion after switching to a
+    // button method (and vice versa).
+    if (learn?.ch === ch) {
+      const first = slots($currentChannels[ch])[0];
+      if (first) armLearn(ch, first.key, first.type);
+      else learn = null;
+    }
   }
 
   function openChannel(ch: number): void {
@@ -169,7 +181,7 @@
     <div class="cc-empty">{$t('rc.noChannels')}</div>
   {/if}
 
-  {#each channels as ch (ch)}
+  {#snippet chBlock(ch: number)}
     {@const cfg = $currentChannels[ch]}
     {@const us = $channelValues[ch] ?? 1500}
     <div class="cc-ch" class:open={expanded === ch}>
@@ -261,12 +273,22 @@
               <span class="cc-label">{$t('rc.positions')}</span>
               <NumberStepper bind:value={stepperVal} min={2} max={6} onchange={() => patch(ch, { positions: evenPositions(stepperVal) })} />
             </div>
+            <label class="cc-field cc-inline">
+              <span class="cc-label">{$t('rc.holdToggle')}</span>
+              <input type="checkbox" checked={(cfg.holdMs ?? 0) > 0} onchange={(e) => patch(ch, { holdMs: (e.currentTarget as HTMLInputElement).checked ? 1000 : 0 })} />
+            </label>
+            {#if (cfg.holdMs ?? 0) > 0}
+              <div class="cc-field">
+                <span class="cc-label">{$t('rc.holdTime')} <span class="cc-pct">{((cfg.holdMs ?? 1000) / 1000).toFixed(1)} s</span></span>
+                <input type="range" min="0.5" max="2" step="0.1" value={(cfg.holdMs ?? 1000) / 1000} oninput={(e) => patch(ch, { holdMs: Math.round(Number((e.currentTarget as HTMLInputElement).value) * 1000) })} />
+              </div>
+            {/if}
           {/if}
 
           {#if cfg.kind === 'buttonStep'}
             <div class="cc-field cc-inline">
               <span class="cc-label">{$t('rc.steps')}</span>
-              <NumberStepper bind:value={stepperVal} min={3} max={16} onchange={() => patch(ch, { steps: stepperVal })} />
+              <NumberStepper bind:value={stepperVal} min={3} max={15} onchange={() => patch(ch, { steps: stepperVal })} />
             </div>
           {/if}
 
@@ -283,7 +305,20 @@
         </div>
       {/if}
     </div>
-  {/each}
+  {/snippet}
+
+  {#if $rcLayout.split}
+    {#if rawCh.length}
+      <div class="cc-group">{$t('rc.groupRaw')}</div>
+      {#each rawCh as ch (ch)}{@render chBlock(ch)}{/each}
+    {/if}
+    {#if auxCh.length}
+      <div class="cc-group">{$t('rc.groupAux')}</div>
+      {#each auxCh as ch (ch)}{@render chBlock(ch)}{/each}
+    {/if}
+  {:else}
+    {#each channels as ch (ch)}{@render chBlock(ch)}{/each}
+  {/if}
 
   {#if freeChannels.length > 0}
     <div class="cc-add">
@@ -299,6 +334,11 @@
 <style>
   .cc { display: flex; flex-direction: column; gap: 4px; }
   .cc-empty { color: #949494; font-size: 12px; font-style: italic; padding: 6px 2px; }
+  .cc-group {
+    color: #37a8db; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+    margin: 8px 0 2px; padding-bottom: 3px; border-bottom: 1px solid rgba(55, 168, 219, 0.25);
+  }
+  .cc-group:first-child { margin-top: 0; }
 
   .cc-ch { border: 1px solid #333; border-radius: 5px; background: #262626; overflow: hidden; }
   .cc-ch.open { border-color: rgba(55, 168, 219, 0.4); }
