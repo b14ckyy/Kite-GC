@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **RC Control — safety locks + FC validation (Phase 3b).** Reads the FC mode ranges (`MSP_MODE_RANGES`)
+  and shows, under each channel, which flight-mode box it triggers (alarm-coloured only on AUX, since
+  only AUX_RC channels latch on link loss). A safety evaluation over the AUX channels you control:
+  ARM / RTH / FAILSAFE → **blocks** RC output (a latched critical switch couldn't be cleared on GCS
+  loss); CRUISE / WP / POSHOLD / ALTHOLD → **warns** (overridable only by MANUAL/RTH), escalating to a
+  block when no MANUAL mode is configured. Receiver-type hints (MSP vs SERIAL/NONE) and an
+  override-bitmask check with a one-click **"set override bitmask"** for your RAW_RC channels — applied
+  at runtime only (no EEPROM save, reverts on reboot). Also: Button-Toggle now toggles on release with a
+  0.5 s abort (a long hold doesn't toggle, freeing the long-press for a second function on the button).
 - **RC Control — MSP message builder, FC reads + RAW/AUX split (Phase 3a).** Groundwork for streaming
   RC to INAV over MSP: tested byte encoders (`msp/rc_encode.rs`) for `MSP_SET_RAW_RC` (trimmed u16-LE)
   and `MSP2_INAV_SET_AUX_RC` (2/4/16-bit packed, `0`=skip), an FC-config read (`rc_read_fc_config`:

@@ -254,9 +254,13 @@ Exact layout deferred — agreed to settle when we build it.
    Local part complete — verified on Windows.
 3a. **MSP message builder + FC reads** *(shipped)* — `msp/rc_encode.rs` (tested encoders), `rc_read_fc_config`
    (receiver_type / msp_override_channels) + MSP-RC debug tab, RAW/AUX split layout (`rcLayout.ts`).
-3b. **Safety + validation** *(next)* — mode-range/box-ID reads → mode labels under channels + hard-locks
-   (arming/RTH/failsafe on an AUX channel = block all output), override-bitmask check + "fix" button,
-   receiver-type hints, autonomous-GPS-mode warning banner.
+3b. **Safety + validation** *(shipped)* — `MSP_MODE_RANGES` read → mode labels under channels
+   (`helpers/inavModes.ts`, alarm-coloured only on AUX); safety eval (`helpers/rcSafety.ts`) over
+   **controlled AUX channels only** (they latch on link loss; MSP-RC fails safe): critical (ARM/RTH/
+   FAILSAFE) → block; autonomous GPS (CRUISE/WP/POSHOLD/ALTHOLD) → warn, escalates to block without a
+   MANUAL fallback. Receiver-type hints + override-bitmask check with a runtime-only "set bitmask"
+   button (MSP2_COMMON_SET_SETTING, **no EEPROM save** — reverts on reboot by design). Toggle changed
+   to tap-on-release with a 0.5 s abort (frees the long-press for dual assignment).
 4. **Send pipeline** *(later)* — RAW_RC 10 Hz stream + AUX_RC on-change (group templates, ACK-resend
    after 100 ms, no NO_REPLY) + deadman; `SchedulerCommand` integration; the §3 takeover modes.
 5. **Takeover UI + arming policy** *(later)* — config-driven mode (§3) with explicit confirm, live stick HUD.
