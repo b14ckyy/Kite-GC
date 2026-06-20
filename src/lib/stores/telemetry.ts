@@ -76,6 +76,10 @@ export interface TelemetryData {
   sensorPitot: number;
   sensorOpflow: number;
 
+  /** Pre-arm readiness (MAVLink SYS_STATUS PREARM_CHECK): 0=unknown, 1=ready, 2=blocked. INAV leaves
+   *  this 0 and signals blockers via armingFlags instead. Drives the toolbar arming indicator. */
+  prearmHealthy: number;
+
   // EKF estimator health (ArduPilot only; INAV never emits these so the tile stays hidden)
   // ekfStatus: 0=none/unknown, 1=OK (green), 2=warning (amber), 3=error (red)
   // ekfType: 0=unknown, 2=EKF2, 3=EKF3 (from the AHRS_EKF_TYPE parameter)
@@ -104,7 +108,7 @@ const defaultTelemetry: TelemetryData = {
   link: { rssiPercent: null, rssiDbm: null, lq: null, snrDb: null },
   armingFlags: 0, cpuLoad: 0, sensorStatus: 0, flightModeFlags: 0,
   sensorGyro: 0, sensorAcc: 0, sensorMag: 0, sensorBaro: 0,
-  sensorGps: 0, sensorRangefinder: 0, sensorPitot: 0, sensorOpflow: 0,
+  sensorGps: 0, sensorRangefinder: 0, sensorPitot: 0, sensorOpflow: 0, prearmHealthy: 0,
   ekfStatus: 0, ekfType: 0,
   flightMode: { primary: '', modifiers: [] }, navState: 0, activeWpNumber: 0,
   fcVariant: 'INAV',
@@ -339,7 +343,7 @@ export async function startTelemetryListeners() {
   unlisteners.push(
     await listen<{
       gyro: number; acc: number; mag: number; baro: number;
-      gps: number; rangefinder: number; pitot: number; opflow: number;
+      gps: number; rangefinder: number; pitot: number; opflow: number; prearm: number;
     }>('telemetry-sensor-status', (event) => {
       const p = event.payload;
       telemetry.update((t) => ({
@@ -352,6 +356,7 @@ export async function startTelemetryListeners() {
         sensorRangefinder: p.rangefinder,
         sensorPitot: p.pitot,
         sensorOpflow: p.opflow,
+        prearmHealthy: p.prearm,
         lastUpdate: Date.now(),
       }));
     })

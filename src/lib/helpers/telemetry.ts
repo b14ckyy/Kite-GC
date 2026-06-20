@@ -19,6 +19,12 @@ export function hasKnownLocation(name: string | null | undefined): boolean {
   return n !== 'Unknown location' && n !== 'Unbekannter Ort';
 }
 
+/** Reject null island AND its immediate neighbourhood. A GPS receiver / EKF reports a position at (or
+ *  very near) 0°,0° before it has a real origin/fix — ArduPilot in particular emits a brief near-0,0
+ *  frame on acquisition, which otherwise leaks into the pre-arm track and the go-to-UAV camera jump.
+ *  There is no land within ~100 m of 0,0 (mid-Atlantic), and a real flight on the equator OR the prime
+ *  meridian has only ONE component near zero — so requiring BOTH to be ~0 is safe. */
+const NULL_ISLAND_EPS = 0.001; // ≈ 111 m
 export function isValidGpsCoordinate(
   lat: number | null | undefined,
   lon: number | null | undefined,
@@ -26,5 +32,5 @@ export function isValidGpsCoordinate(
   if (lat == null || lon == null) return false;
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
   if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return false;
-  return !(lat === 0 && lon === 0);
+  return !(Math.abs(lat) < NULL_ISLAND_EPS && Math.abs(lon) < NULL_ISLAND_EPS);
 }

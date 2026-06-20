@@ -42,6 +42,30 @@ function levelAllowed(level: StatusTextLevel): boolean {
 
 export const statusTexts = writable<StatusTextMsg[]>([]);
 
+/** Recent ArduPilot/PX4 "PreArm: …" failure reasons (newline-joined), for the arming indicator tooltip.
+ *  Tracked independently of the toast `systemMessages` filter (so the detail is available even with
+ *  toasts off). The red "not ready" STATE itself comes from the SYS_STATUS PREARM_CHECK bit, not this —
+ *  this only supplies the human-readable reasons. Distinct lines accumulate during a check burst and the
+ *  whole set clears once the FC stops repeating them (block cleared / armed). */
+export const prearmReason = writable<string | null>(null);
+// ArduPilot phrases arming blockers as "PreArm: …"; PX4 uses "Preflight Fail: …" / "Arming denied: …".
+// (PX4 matching is best-effort / untested — the SYS_STATUS PREARM_CHECK bit is the other fallback.)
+const PREARM_PREFIX = /^(pre[\s-]?arm|preflight fail|arming denied)[:\s]+/i;
+const PREARM_CLEAR_MS = 40_000; // wide enough to bridge a repeating prearm burst without green flicker
+                                // between nags; exact ArduPilot cadence is uncertain (see arming notes)
+let prearmTimer: ReturnType<typeof setTimeout> | null = null;
+let prearmLines: string[] = [];
+
+function trackPrearm(text: string): void {
+  const clean = text.trim();
+  if (!PREARM_PREFIX.test(clean)) return;
+  const reason = clean.replace(PREARM_PREFIX, '').trim() || clean;
+  if (!prearmLines.includes(reason)) prearmLines = [...prearmLines, reason].slice(-8);
+  prearmReason.set(prearmLines.join('\n'));
+  if (prearmTimer) clearTimeout(prearmTimer);
+  prearmTimer = setTimeout(() => { prearmLines = []; prearmReason.set(null); }, PREARM_CLEAR_MS);
+}
+
 let nextId = 1;
 let clearTimer: ReturnType<typeof setTimeout> | null = null;
 let lastSoundAt = 0;
@@ -116,6 +140,7 @@ function playTone(level: StatusTextLevel): void {
 export async function startStatusText(): Promise<void> {
   if (unlisten) return;
   unlisten = await listen<{ severity: number; text: string }>('mavlink-statustext', (e) => {
+    trackPrearm(e.payload.text); // unfiltered — drives the arming indicator regardless of toast settings
     push(e.payload.severity, e.payload.text);
   });
 }
@@ -124,6 +149,9 @@ export function stopStatusText(): void {
   unlisten?.();
   unlisten = null;
   if (clearTimer) { clearTimeout(clearTimer); clearTimer = null; }
+  if (prearmTimer) { clearTimeout(prearmTimer); prearmTimer = null; }
+  prearmLines = [];
   statusTexts.set([]);
+  prearmReason.set(null);
   lastText = '';
 }

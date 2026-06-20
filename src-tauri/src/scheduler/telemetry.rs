@@ -102,6 +102,9 @@ pub struct SensorStatusData {
     pub rangefinder: u8,
     pub pitot: u8,
     pub opflow: u8,
+    /// Pre-arm readiness (MAVLink only, from SYS_STATUS PREARM_CHECK bit): 0=unknown, 1=ready, 2=blocked.
+    /// INAV leaves this 0 — it reports arming-blockers via the armingFlags bitfield instead.
+    pub prearm: u8,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -455,6 +458,7 @@ fn decode_sensor_status(payload: &[u8]) -> TelemetryPayload {
         rangefinder: if payload.len() > 6 { payload[6] } else { 0 },
         pitot: if payload.len() > 7 { payload[7] } else { 0 },
         opflow: if payload.len() > 8 { payload[8] } else { 0 },
+        prearm: 0, // INAV signals arming-blockers via armingFlags, not the sensor status
     })
 }
 

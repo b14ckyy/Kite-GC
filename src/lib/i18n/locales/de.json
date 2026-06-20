@@ -83,7 +83,36 @@
   },
   "arming": {
     "armed": "SCHARF",
-    "disarmed": "ENTSCHÄRFT"
+    "disarmed": "ENTSCHÄRFT",
+    "ready": "BEREIT",
+    "notReady": "NICHT BEREIT",
+    "readyHint": "Bereit zum Scharfschalten",
+    "reasons": {
+      "geozone": "Geozone blockiert",
+      "failsafe": "Failsafe aktiv",
+      "notLevel": "Nicht waagerecht",
+      "calibrating": "Sensoren kalibrieren",
+      "overloaded": "System überlastet",
+      "navUnsafe": "Navigation unsicher",
+      "compass": "Kompass nicht kalibriert",
+      "accel": "Beschleunigungssensor nicht kalibriert",
+      "armSwitch": "Arm-Schalter aktiv",
+      "hardware": "Hardware-Fehler",
+      "boxFailsafe": "Failsafe-Box aktiv",
+      "rcLink": "Keine RC-Verbindung",
+      "throttle": "Gas nicht unten",
+      "cli": "CLI aktiv",
+      "cmsMenu": "CMS-Menü aktiv",
+      "osdMenu": "OSD-Menü aktiv",
+      "rollPitch": "Roll/Nick nicht zentriert",
+      "servoAutotrim": "Servo-Autotrim aktiv",
+      "oom": "Speicher voll",
+      "invalidSetting": "Ungültige Einstellung",
+      "pwmError": "PWM-Ausgabefehler",
+      "noPrearm": "Prearm nicht erfolgt",
+      "dshotBeeper": "DShot-Beeper aktiv",
+      "landingDetected": "Landung erkannt"
+    }
   },
   "platform": {
     "multirotor": "Multirotor",

@@ -10,6 +10,8 @@
   import SegmentedToggle from '$lib/components/panel/SegmentedToggle.svelte';
   import WindowControls from '$lib/components/WindowControls.svelte';
   import ConnectionStatusBox from '$lib/components/ConnectionStatusBox.svelte';
+  import ArmingIndicator from '$lib/components/ArmingIndicator.svelte';
+  import BatteryIndicator from '$lib/components/BatteryIndicator.svelte';
   import type { PortInfo, BleDeviceInfo, TransportType, ProtocolType } from '$lib/stores/connection';
   import type { TelemetryData } from '$lib/stores/telemetry';
 
@@ -98,6 +100,7 @@
     <span class="version" data-tauri-drag-region>v{appVersion}</span>
   </div>
   <div class="toolbar-center" data-tauri-drag-region>
+    <ArmingIndicator {telem} />
     <div class="sensor-bar">
       {#each sensorTiles as s (s.key)}
         <div class="sensor"
@@ -114,6 +117,7 @@
           title={$t('sensors.ekfTooltip')}>{ekfLabel}</div>
       {/if}
     </div>
+    <BatteryIndicator {telem} />
   </div>
   <div class="toolbar-right" data-tauri-drag-region>
     <div class="port-controls">
@@ -221,6 +225,7 @@
   .toolbar-center {
     display: flex;
     align-items: center;
+    gap: 10px;
   }
 
   .toolbar-right {

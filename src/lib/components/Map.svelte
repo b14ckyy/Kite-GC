@@ -169,6 +169,9 @@
   const ARMING_FLAG_ARMED = 2;
   const MIN_TRAIL_DIST = 1; // meters — don't add trail point if moved less
 
+  // Reject null island AND its immediate neighbourhood (~111 m): the FC briefly reports a near-0,0
+  // position before a real fix/origin (ArduPilot especially), which otherwise leaks into the pre-arm
+  // track + the go-to-UAV camera jump. Requiring BOTH components ~0 keeps real equator/meridian flights.
   function isValidGpsCoordinate(lat: number, lon: number): boolean {
     return Number.isFinite(lat)
       && Number.isFinite(lon)
@@ -176,7 +179,7 @@
       && lat <= 90
       && lon >= -180
       && lon <= 180
-      && !(lat === 0 && lon === 0);
+      && !(Math.abs(lat) < 0.001 && Math.abs(lon) < 0.001);
   }
 
   let mapContainer: HTMLDivElement;

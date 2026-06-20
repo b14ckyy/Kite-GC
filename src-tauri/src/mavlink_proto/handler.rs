@@ -588,6 +588,15 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
             let s3 = |bit: Sns| -> u8 {
                 if !present.contains(bit) { 0 } else if health.contains(bit) { 1 } else { 3 }
             };
+            // Pre-arm readiness: ArduPilot/PX4 publish the prearm-check result via the PREARM_CHECK bit
+            // (enabled = checks active, health = all passed) — the same signal QGC/MP use for "Ready to
+            // Fly". 0=unknown (bit absent), 1=ready, 2=blocked. Authoritative + 1 Hz, unlike the periodic
+            // "PreArm: …" STATUSTEXT (which we keep only for the human-readable tooltip detail).
+            let enabled = sys.onboard_control_sensors_enabled;
+            let prearm = {
+                let bit = Sns::MAV_SYS_STATUS_PREARM_CHECK;
+                if !enabled.contains(bit) { 0 } else if health.contains(bit) { 1 } else { 2 }
+            };
             let sensor_data = SensorStatusData {
                 gyro: s3(Sns::MAV_SYS_STATUS_SENSOR_3D_GYRO),
                 acc: s3(Sns::MAV_SYS_STATUS_SENSOR_3D_ACCEL),
@@ -597,6 +606,7 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
                 rangefinder: s3(Sns::MAV_SYS_STATUS_SENSOR_LASER_POSITION),
                 pitot: s3(Sns::MAV_SYS_STATUS_SENSOR_DIFFERENTIAL_PRESSURE),
                 opflow: s3(Sns::MAV_SYS_STATUS_SENSOR_OPTICAL_FLOW),
+                prearm,
             };
             let _ = app_handle.emit("telemetry-sensor-status", &sensor_data);
         }

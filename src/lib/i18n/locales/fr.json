@@ -72,7 +72,36 @@
   },
   "arming": {
     "armed": "ARMÉ",
-    "disarmed": "DÉSARMÉ"
+    "disarmed": "DÉSARMÉ",
+    "ready": "PRÊT",
+    "notReady": "PAS PRÊT",
+    "readyHint": "Prêt à armer",
+    "reasons": {
+      "geozone": "Géozone bloquante",
+      "failsafe": "Failsafe actif",
+      "notLevel": "Pas à niveau",
+      "calibrating": "Capteurs en calibration",
+      "overloaded": "Système surchargé",
+      "navUnsafe": "Navigation non sûre",
+      "compass": "Boussole non calibrée",
+      "accel": "Accéléromètre non calibré",
+      "armSwitch": "Interrupteur d'armement actif",
+      "hardware": "Panne matérielle",
+      "boxFailsafe": "Failsafe (box) actif",
+      "rcLink": "Pas de liaison RC",
+      "throttle": "Gaz pas au minimum",
+      "cli": "CLI actif",
+      "cmsMenu": "Menu CMS actif",
+      "osdMenu": "Menu OSD actif",
+      "rollPitch": "Roulis/Tangage non centrés",
+      "servoAutotrim": "Autotrim servo actif",
+      "oom": "Mémoire insuffisante",
+      "invalidSetting": "Réglage invalide",
+      "pwmError": "Erreur sortie PWM",
+      "noPrearm": "Prearm non effectué",
+      "dshotBeeper": "Bipeur DShot actif",
+      "landingDetected": "Atterrissage détecté"
+    }
   },
   "platform": {
     "multirotor": "Multirotor",
