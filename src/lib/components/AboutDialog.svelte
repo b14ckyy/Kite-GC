@@ -11,13 +11,13 @@
   import {
     APP_NAME, APP_TAGLINE, APP_VERSION, GIT_COMMIT, BUILD_DATE, COPYRIGHT, LICENSE, REPO_URL,
   } from '$lib/buildInfo';
-  import { THIRD_PARTY_LICENSES } from '$lib/config/thirdPartyLicenses';
+  import { THIRD_PARTY_LICENSES, SUPPORTED_FIRMWARE } from '$lib/config/thirdPartyLicenses';
 
   let { open = $bindable(false) }: { open?: boolean } = $props();
 
   function close() { open = false; }
   function onKeydown(e: KeyboardEvent) { if (e.key === 'Escape') close(); }
-  async function openRepo() { try { await openUrl(REPO_URL); } catch { /* link is shown as text too */ } }
+  async function openExt(url: string) { try { await openUrl(url); } catch { /* link is shown as text too */ } }
 </script>
 
 {#if open}
@@ -46,7 +46,19 @@
         </div>
         <div class="about-row">
           <span class="about-k">{$t('about.source')}</span>
-          <button class="about-link" onclick={openRepo}>{REPO_URL}</button>
+          <button class="about-link" onclick={() => openExt(REPO_URL)}>{REPO_URL}</button>
+        </div>
+      </div>
+
+      <div class="about-fw">
+        <div class="about-fw-head">{$t('about.supportedFirmware')}</div>
+        <div class="about-fw-list">
+          {#each SUPPORTED_FIRMWARE as fw}
+            <div class="about-fw-row">
+              <button class="about-link" onclick={() => openExt(fw.url)}>{fw.name}</button>
+              <span class="about-fw-lic">{fw.license}</span>
+            </div>
+          {/each}
         </div>
       </div>
 
@@ -109,6 +121,12 @@
   .about-mono { font-family: 'Consolas', monospace; color: #37a8db; }
   .about-link { background: none; border: none; padding: 0; color: #37a8db; cursor: pointer; font: inherit; text-align: left; }
   .about-link:hover { text-decoration: underline; }
+
+  .about-fw { margin-top: 14px; }
+  .about-fw-head { font-size: 11px; font-weight: 700; color: #37a8db; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+  .about-fw-list { display: flex; flex-direction: column; gap: 3px; }
+  .about-fw-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: baseline; font-size: 12px; }
+  .about-fw-lic { color: #949494; white-space: nowrap; }
 
   .about-tp { margin-top: 14px; }
   .about-tp-head { font-size: 11px; font-weight: 700; color: #37a8db; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }

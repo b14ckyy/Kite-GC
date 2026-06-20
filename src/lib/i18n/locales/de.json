@@ -228,6 +228,7 @@
     "button": "Über",
     "license": "Lizenz",
     "source": "Quellcode",
+    "supportedFirmware": "Unterstützte Autopilot-Firmware",
     "thirdParty": "Drittanbieter-Lizenzen",
     "thirdPartyNote": "Eingebundene Komponenten und ihre Lizenzen. Transitive Abhängigkeiten stehen unter kompatiblen permissiven Lizenzen.",
     "close": "Schließen"

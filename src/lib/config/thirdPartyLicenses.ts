@@ -10,6 +10,20 @@ export interface LicenseGroup {
   items: { name: string; license: string }[];
 }
 
+/** Autopilot firmware Kite GC interoperates with (MSP / MAVLink). Shown as a linked "special mention"
+ *  above the third-party block — acknowledgement, not a licence obligation (we bundle none of it). */
+export interface SupportedFirmware {
+  name: string;
+  url: string;
+  license: string;
+}
+
+export const SUPPORTED_FIRMWARE: SupportedFirmware[] = [
+  { name: 'INAV', url: 'https://github.com/iNavFlight/inav', license: 'GPL-3.0' },
+  { name: 'ArduPilot', url: 'https://ardupilot.org', license: 'GPL-3.0' },
+  { name: 'PX4 Autopilot', url: 'https://px4.io', license: 'BSD-3-Clause' },
+];
+
 export const THIRD_PARTY_LICENSES: LicenseGroup[] = [
   {
     heading: 'Components',
@@ -28,6 +42,7 @@ export const THIRD_PARTY_LICENSES: LicenseGroup[] = [
       { name: 'Map tiles — © OpenStreetMap contributors & tile providers', license: 'ODbL / provider terms' },
       { name: 'Aeronautical data — © OpenAIP contributors', license: 'OpenAIP terms' },
       { name: 'Terrain — Copernicus GLO-30 DEM / Cesium World Terrain', license: 'Copernicus / Cesium terms' },
+      { name: 'Timezone boundaries — © OpenStreetMap contributors (timezone-boundary-builder)', license: 'ODbL' },
     ],
   },
 ];

@@ -217,6 +217,7 @@
     "button": "À propos",
     "license": "Licence",
     "source": "Code source",
+    "supportedFirmware": "Firmware d'autopilote prise en charge",
     "thirdParty": "Licences tierces",
     "thirdPartyNote": "Composants intégrés et leurs licences. Les dépendances transitives sont sous licences permissives compatibles.",
     "close": "Fermer"
