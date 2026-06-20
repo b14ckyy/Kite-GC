@@ -15,6 +15,7 @@
   import { hidSnapshot } from "$lib/stores/hid";
   import { currentChannels } from "$lib/stores/rcProfiles";
   import { channelValues } from "$lib/stores/rcEngine";
+  import { boxName } from "$lib/helpers/inavModes";
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -22,7 +23,11 @@
   let tab = $state<Tab>('msp');
 
   // ── RC control (MSP) diagnostics ──
-  let rcFc = $state<{ receiver_type: number; msp_override_channels: number | null } | null>(null);
+  let rcFc = $state<{
+    receiver_type: number;
+    msp_override_channels: number | null;
+    mode_ranges: { permanent_id: number; channel: number; range_min: number; range_max: number }[];
+  } | null>(null);
   let rcErr = $state('');
   async function readRcFc() {
     rcErr = '';
@@ -586,6 +591,10 @@
             <span class="cap-path">{bitChannels(rcFc.msp_override_channels)}</span>
           </div>
         {/if}
+        <div class="cap-row">
+          <span class="stat-label">{$t('debug.rcModes')}</span>
+          <span class="cap-path">{rcFc.mode_ranges.length ? rcFc.mode_ranges.map((m) => `CH${m.channel}:${boxName(m.permanent_id)}`).join('  ') : '—'}</span>
+        </div>
       {/if}
       <div class="stat-group">
         <span class="stat-label">{$t('debug.rcHid')}</span>

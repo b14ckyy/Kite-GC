@@ -18,6 +18,10 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
 
+/** Tap-toggle abort threshold (ms): a press released sooner than this toggles on release; a longer
+ *  hold aborts (no toggle), freeing the long-press for a second function on the same button. */
+const TOGGLE_ABORT_MS = 500;
+
 /** Abstract input frame — decouples the methods from the HID backend (built in the engine). */
 export interface InputFrame {
   /** Axis value −1..+1 for label "A<n>" (0 if missing). */
@@ -65,13 +69,14 @@ export interface HoldConfig {
   high: number;
 }
 
-/** 1 button cycles sequentially through 2..6 positions (wrap). */
+/** 1 button cycles sequentially through 2..6 positions (wrap). Default = tap-toggle on RELEASE with a
+ *  short-press abort (a long hold doesn't toggle → frees the long-press for a 2nd function). */
 export interface ToggleConfig {
   kind: 'toggle';
   input: string;
   positions: number[]; // normalised values, length 2..6
-  /** Hold time in ms required to advance (must hold, not tap); 0/undefined = instant. Anti-accidental
-   *  for critical switches (e.g. a 2-position arming toggle on a gamepad). */
+  /** Hold time in ms required to advance (must hold, not tap); 0/undefined = the default tap-toggle.
+   *  Anti-accidental for critical switches (e.g. a 2-position arming toggle on a gamepad). */
   holdMs?: number;
 }
 
@@ -212,10 +217,18 @@ export function stepMethod(
         } else {
           next.held = 0;
         }
-        next.prev[method.input] = pressed;
-      } else if (edge(next, method.input, pressed)) {
-        next.pos = (state.pos + 1) % n;
+      } else {
+        // Tap-toggle: flip on RELEASE, but only if the press was short (< abort). A long hold aborts
+        // (no flip) → the long-press is free for a second function on the same button (dual assign).
+        const wasPressed = state.prev[method.input] ?? false;
+        if (pressed) {
+          next.held = state.held + dtMs;
+        } else {
+          if (wasPressed && state.held > 0 && state.held < TOGGLE_ABORT_MS) next.pos = (state.pos + 1) % n;
+          next.held = 0;
+        }
       }
+      next.prev[method.input] = pressed;
       return { value: method.positions[next.pos] ?? -1, state: next };
     }
     case 'buttonStep': {

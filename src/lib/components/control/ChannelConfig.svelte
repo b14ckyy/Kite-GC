@@ -16,6 +16,8 @@
   import { currentChannels } from '$lib/stores/rcProfiles';
   import { channelValues } from '$lib/stores/rcEngine';
   import { rcLayout } from '$lib/stores/rcLayout';
+  import { rcFcConfig } from '$lib/stores/rcFcConfig';
+  import { boxName, boxCategory } from '$lib/helpers/inavModes';
   import {
     defaultMethod,
     evenPositions,
@@ -184,6 +186,7 @@
   {#snippet chBlock(ch: number)}
     {@const cfg = $currentChannels[ch]}
     {@const us = $channelValues[ch] ?? 1500}
+    {@const modes = ($rcFcConfig?.mode_ranges ?? []).filter((m) => m.channel === ch)}
     <div class="cc-ch" class:open={expanded === ch}>
       <button class="cc-row" onclick={() => openChannel(ch)}>
         <span class="cc-chnum">CH{ch}</span>
@@ -192,6 +195,20 @@
         <span class="cc-val">{us}</span>
         <div class="cc-bar"><span class="cc-bar-fill" style="width:{usPct(us)}%"></span></div>
       </button>
+
+      {#if modes.length}
+        <div class="cc-modes">
+          {#each modes as m (m.permanent_id)}
+            <!-- Only AUX_RC channels (CH13+) are safety-relevant: they latch and persist on GCS loss.
+                 The same mode on an MSP-RC channel (CH1–12) fails safe, so it's shown neutral. -->
+            <span
+              class="cc-mode"
+              class:crit={boxCategory(m.permanent_id) === 'critical' && ch > $rcLayout.rawMax}
+              class:gps={boxCategory(m.permanent_id) === 'gps' && ch > $rcLayout.rawMax}
+            >{boxName(m.permanent_id)}</span>
+          {/each}
+        </div>
+      {/if}
 
       {#if expanded === ch}
         <div class="cc-edit">
@@ -353,6 +370,14 @@
   .cc-val { color: #e0e0e0; font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; }
   .cc-bar { height: 8px; background: #1f1f1f; border: 1px solid #333; border-radius: 3px; overflow: hidden; }
   .cc-bar-fill { display: block; height: 100%; background: #37a8db; }
+
+  .cc-modes { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 9px 6px; }
+  .cc-mode {
+    font-size: 9.5px; padding: 1px 6px; border-radius: 3px; letter-spacing: 0.3px;
+    background: #2f2f2f; color: #9a9a9a; border: 1px solid #3a3a3a;
+  }
+  .cc-mode.crit { background: rgba(212, 0, 0, 0.18); color: #ff8a8a; border-color: rgba(212, 0, 0, 0.45); }
+  .cc-mode.gps { background: rgba(232, 163, 23, 0.16); color: #f0b443; border-color: rgba(232, 163, 23, 0.4); }
 
   .cc-edit { padding: 8px 10px 10px; border-top: 1px solid #333; display: flex; flex-direction: column; gap: 9px; }
   .cc-field { display: flex; flex-direction: column; gap: 4px; }

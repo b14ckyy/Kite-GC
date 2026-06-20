@@ -36,6 +36,10 @@
     profilesDir,
     type RcProfile,
   } from '$lib/stores/rcProfiles';
+  import { connection } from '$lib/stores/connection';
+  import { loadRcFcConfig, rcFcConfig, setOverrideBitmask } from '$lib/stores/rcFcConfig';
+  import { rcLayout } from '$lib/stores/rcLayout';
+  import { evaluateRcSafety } from '$lib/helpers/rcSafety';
 
   // Configuration lives in the right (advanced) region; open it by default since that's the work area.
   let variant = $state<PanelVariant>('advanced');
@@ -147,6 +151,53 @@
 
   const nameTaken = $derived($rcProfiles.some((p) => p.name === newName.trim()));
 
+  // ── Safety evaluation (AUX-RC channels we control only — they latch on link loss) ──
+  const safety = $derived(
+    $rcFcConfig
+      ? evaluateRcSafety($rcFcConfig.mode_ranges, Object.keys($currentChannels).map(Number), $rcLayout.rawMax)
+      : { locked: false, blocks: [], warnings: [], manualConfigured: true },
+  );
+  const issueList = (arr: { channel: number; mode: string }[]) =>
+    arr.map((i) => `CH${i.channel}: ${i.mode}`).join(', ');
+  const hasCritical = $derived(safety.blocks.some((b) => b.reason === 'critical'));
+  const hasNoManual = $derived(safety.blocks.some((b) => b.reason === 'gpsNoManual'));
+
+  // ── Receiver-type hint + override-bitmask check (RAW_RC of a normal RX needs the bitmask) ──
+  const rxType = $derived($rcFcConfig?.receiver_type ?? null);
+  const overrideMask = $derived($rcFcConfig?.msp_override_channels ?? null);
+  /** Bitmask the configured RAW_RC channels (CH1..rawMax) require. */
+  const requiredMask = $derived(
+    Object.keys($currentChannels)
+      .map(Number)
+      .filter((c) => c <= $rcLayout.rawMax)
+      .reduce((m, ch) => m | (1 << (ch - 1)), 0),
+  );
+  // Only relevant when overriding a normal RX (receiver_type ≠ MSP) and the FC exposes the setting.
+  const needsBitmaskFix = $derived(
+    rxType != null && rxType !== 2 && requiredMask !== 0 && overrideMask != null &&
+      (requiredMask & ~overrideMask) !== 0,
+  );
+  let fixingMask = $state(false);
+  async function fixBitmask(): Promise<void> {
+    fixingMask = true;
+    try {
+      await setOverrideBitmask(requiredMask);
+    } catch (e) {
+      console.warn('[rc] fixBitmask failed', e);
+    } finally {
+      fixingMask = false;
+    }
+  }
+
+  // Read FC config whenever we're connected via MSP (mode ranges for labels/safety + override bitmask).
+  $effect(() => {
+    if ($connection.status === 'connected' && $connection.protocolType === 'msp') {
+      void loadRcFcConfig();
+    } else {
+      rcFcConfig.set(null);
+    }
+  });
+
   onMount(() => {
     void startHid();
     void (async () => {
@@ -188,6 +239,32 @@
 
   <!-- Left (compact) stage: the live control surface — current channel outputs. -->
   {#snippet body()}
+    {#if safety.blocks.length}
+      <div class="rc-banner rc-banner-block">
+        <div class="rc-banner-title">⛔ {$t('rc.lockTitle')}</div>
+        <div class="rc-banner-list">{issueList(safety.blocks)}</div>
+        {#if hasCritical}<div class="rc-banner-hint">{$t('rc.lockCriticalHint')}</div>{/if}
+        {#if hasNoManual}<div class="rc-banner-hint">{$t('rc.lockNoManualHint')}</div>{/if}
+      </div>
+    {/if}
+    {#if safety.warnings.length}
+      <div class="rc-banner rc-banner-warn">
+        <div class="rc-banner-title">⚠ {$t('rc.warnGpsTitle')}</div>
+        <div class="rc-banner-hint">{$t('rc.warnGps', { values: { list: issueList(safety.warnings) } })}</div>
+      </div>
+    {/if}
+    {#if $rcFcConfig && rxType != null}
+      <div class="rc-banner rc-banner-info">
+        <div class="rc-banner-hint">{rxType === 2 ? $t('rc.rxMspHint') : $t('rc.rxSerialHint')}</div>
+      </div>
+    {/if}
+    {#if needsBitmaskFix}
+      <div class="rc-banner rc-banner-warn">
+        <div class="rc-banner-title">⚠ {$t('rc.bitmaskTitle')}</div>
+        <div class="rc-banner-hint">{$t('rc.bitmaskHint')}</div>
+        <button class="rc-fix-btn" disabled={fixingMask} onclick={fixBitmask}>{$t('rc.bitmaskFix')}</button>
+      </div>
+    {/if}
     {#if !selectedDevice}
       <div class="rc-empty">{$t('rc.connectHint')}</div>
     {:else}
@@ -326,6 +403,26 @@
   .rc-empty, .rc-hint {
     color: #949494; font-size: 12px; padding: 8px; font-style: italic;
   }
+
+  .rc-banner { border-radius: 5px; padding: 7px 9px; margin-bottom: 8px; font-size: 11px; }
+  .rc-banner-title { font-weight: 700; font-size: 11px; margin-bottom: 3px; }
+  .rc-banner-list { font-variant-numeric: tabular-nums; margin-bottom: 3px; }
+  .rc-banner-hint { color: #d8d8d8; line-height: 1.4; }
+  .rc-banner-block {
+    background: rgba(212, 0, 0, 0.16); border: 1px solid rgba(212, 0, 0, 0.5); color: #ff9a9a;
+  }
+  .rc-banner-warn {
+    background: rgba(232, 163, 23, 0.14); border: 1px solid rgba(232, 163, 23, 0.45); color: #f0b443;
+  }
+  .rc-banner-info {
+    background: rgba(55, 168, 219, 0.12); border: 1px solid rgba(55, 168, 219, 0.35); color: #9fd4ec;
+  }
+  .rc-fix-btn {
+    margin-top: 6px; padding: 4px 10px; font-size: 11px; font-weight: 600; border-radius: 4px; cursor: pointer;
+    background: rgba(232, 163, 23, 0.2); color: #f0b443; border: 1px solid rgba(232, 163, 23, 0.5);
+  }
+  .rc-fix-btn:hover:not(:disabled) { background: rgba(232, 163, 23, 0.32); }
+  .rc-fix-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
   /* Collapsible raw monitor */
   .rc-collapse { border: 1px solid #333; border-radius: 6px; margin-bottom: 12px; background: #262626; }
