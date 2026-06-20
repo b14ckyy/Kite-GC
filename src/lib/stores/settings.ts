@@ -206,6 +206,44 @@ export const DEFAULT_AIRSPACE: AirspaceSettings = {
   compact: false,
 };
 
+// ── RC Control (INAV RC over MSP — see docs/active/RC_CONTROL.md) ──────────────────────────────────
+// A binding maps one HID control (axis or button, identified by its platform event code) to one RC
+// channel (1..32). Persisted per physical device (by UUID) so a remembered transmitter keeps its map.
+// Phase 1 uses only `enabled` + `selectedUuid`; the mapping fields are filled in by the mapping UI.
+
+export interface RcBinding {
+  /** Platform event code (u32) of the source control, as reported by the HID backend. */
+  code: number;
+  source: 'axis' | 'button';
+  invert: boolean;
+  /** Centre deadband, 0..1 (axes only). */
+  deadband: number;
+  /** Exponential curve strength, 0..1 (axes only); 0 = linear. */
+  expo: number;
+}
+
+export interface RcDeviceMapping {
+  uuid: string;
+  name: string;
+  /** RC channel (1..32) → binding. */
+  channels: Record<number, RcBinding>;
+}
+
+export interface RcControlSettings {
+  /** Master switch — shows the RC nav-rail tab. Off by default (opt-in feature). */
+  enabled: boolean;
+  /** UUID of the device last worked with (re-selected on next open). */
+  selectedUuid: string | null;
+  /** Saved per-device channel mappings. */
+  devices: RcDeviceMapping[];
+}
+
+export const DEFAULT_RC_CONTROL: RcControlSettings = {
+  enabled: false,
+  selectedUuid: null,
+  devices: [],
+};
+
 /** FC system-message (STATUSTEXT) toast verbosity: off, errors only, warnings+errors, or everything. */
 export type SystemMessagesLevel = 'off' | 'error' | 'warning' | 'all';
 
@@ -277,6 +315,8 @@ export interface AppSettings {
   airspace: AirspaceSettings;
   /** Telemetry Relay (forwarding/conversion) configs — persisted, auto-connected on primary connect. */
   relays: RelayConfig[];
+  /** RC Control (INAV RC over MSP) — HID device + channel mappings. */
+  rcControl: RcControlSettings;
 }
 
 const STORAGE_KEY = 'kite-gc-settings';
@@ -337,6 +377,7 @@ const defaults: AppSettings = {
   radar: DEFAULT_RADAR,
   airspace: DEFAULT_AIRSPACE,
   relays: [],
+  rcControl: DEFAULT_RC_CONTROL,
 };
 
 function load(): AppSettings {
@@ -393,6 +434,10 @@ function load(): AppSettings {
             },
           };
         })(),
+        rcControl: {
+          ...DEFAULT_RC_CONTROL,
+          ...(parsed.rcControl ?? {}),
+        },
       };
     }
   } catch {

@@ -136,8 +136,24 @@
     "airspace": "Airspace",
     "video": "Video",
     "control": "Control",
+    "rc": "RC",
     "closePanel": "Close panel",
     "openPanel": "Open panel"
+  },
+  "rc": {
+    "title": "RC Control",
+    "config": "Configuration",
+    "expand": "Show configuration",
+    "collapse": "Hide configuration",
+    "device": "Device",
+    "noDevice": "No controller connected",
+    "connectHint": "Connect a joystick or transmitter (USB / gamepad mode).",
+    "axes": "Axes",
+    "buttons": "Buttons",
+    "hats": "Hats",
+    "moveHint": "Move a stick to detect its axes.",
+    "pressHint": "Press a button to detect it.",
+    "mappingSoon": "Channel mapping — coming next."
   },
   "control": {
     "title": "Vehicle Control",
@@ -423,6 +439,7 @@
     "clear": "Clear",
     "telemetryRates": "Telemetry Rates",
     "telemetry": "Telemetry",
+    "rcControl": "RC Control",
     "radarTracking": "Radar Tracking",
     "radarAdsb": "ADS-B",
     "radarFormationFlight": "FormationFlight",

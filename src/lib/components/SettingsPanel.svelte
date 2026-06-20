@@ -13,10 +13,10 @@
   import { SUPPORTED_LOCALES } from '$lib/i18n';
   import { MAP_PROVIDERS } from '$lib/config/mapProviders';
   import { WIDGET_DEFS } from '$lib/config/widgetRegistry';
-  import { DEFAULT_RADAR, DEFAULT_AIRSPACE } from '$lib/stores/settings';
+  import { DEFAULT_RADAR, DEFAULT_AIRSPACE, DEFAULT_RC_CONTROL } from '$lib/stores/settings';
   import { panelState } from '$lib/stores/panelState';
   import { resetGcsManual, gcsManuallySet } from '$lib/stores/gcsLocation';
-  import type { AppSettings, InterfaceSettings, RadarSettings, GcsMode, AirspaceSettings, AirspaceProvider, SystemMessagesLevel } from '$lib/stores/settings';
+  import type { AppSettings, InterfaceSettings, RadarSettings, GcsMode, AirspaceSettings, AirspaceProvider, SystemMessagesLevel, RcControlSettings } from '$lib/stores/settings';
   import type { TileCacheStats } from '$lib/cache/tileCache';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import UnitStepper from '$lib/components/UnitStepper.svelte';
@@ -61,6 +61,7 @@
     interfaceSettings = { speedUnit: 'kmh', altitudeUnit: 'm', distanceUnit: 'metric', verticalSpeedUnit: 'ms', temperatureUnit: 'c' },
     radar = DEFAULT_RADAR,
     airspace = DEFAULT_AIRSPACE,
+    rcControl = DEFAULT_RC_CONTROL,
     isWidgetActive = (_widgetId: string) => false,
     getWidgetPanelLabel = (_widgetId: string) => '',
     onPatch = (_patch: Partial<AppSettings>) => {},
@@ -105,6 +106,7 @@
     interfaceSettings?: InterfaceSettings;
     radar?: RadarSettings;
     airspace?: AirspaceSettings;
+    rcControl?: RcControlSettings;
     isWidgetActive?: (widgetId: string) => boolean;
     getWidgetPanelLabel?: (widgetId: string) => string;
     onPatch?: (patch: Partial<AppSettings>) => void;
@@ -148,6 +150,9 @@
   /** Patch the nested radar settings (onPatch merges shallowly, so pass the whole radar object). */
   function patchRadar(partial: Partial<RadarSettings>) {
     onPatch({ radar: { ...radar, ...partial } });
+  }
+  function patchRcControl(partial: Partial<RcControlSettings>) {
+    onPatch({ rcControl: { ...rcControl, ...partial } });
   }
   function patchAirspace(partial: Partial<AirspaceSettings>) {
     onPatch({ airspace: { ...airspace, ...partial } });
@@ -481,6 +486,12 @@
           <Toggle checked={radar.sim} id="radar-sim" disabled={!radar.enabled} onchange={(c) => patchRadar({ sim: c })} />
         </div>
       {/if}
+
+      <!-- RC Control (INAV RC over MSP) — master switch for the RC nav-rail tab. -->
+      <div class="s-row">
+        <label class="s-label" for="rc-control-enabled">{$t('settings.rcControl')}</label>
+        <Toggle checked={rcControl.enabled} id="rc-control-enabled" onchange={(c) => patchRcControl({ enabled: c })} />
+      </div>
     </div>
 
     <!-- ── Flight Logbook ────────────────────────────── -->

@@ -5,6 +5,7 @@ mod aero;
 mod commands;
 mod flightlog;
 mod flightmode;
+mod hid;
 mod link_stats;
 mod mavlink_proto;
 mod mission;
@@ -41,6 +42,7 @@ use commands::flightlog::{
     battery_file_write, battery_file_read,
 };
 use commands::aero::{aero_fetch, aero_cache_stats, aero_cache_clear};
+use commands::hid::{hid_start, hid_stop, hid_select_device};
 use commands::info::get_app_version;
 use commands::radar::{radar_configure, radar_set_center, radar_set_node_pos, radar_snapshot};
 use commands::terrain::{
@@ -63,6 +65,7 @@ use commands::control::{
     mav_guided_change_heading, mav_guided_clear_heading, mav_condition_yaw,
     mav_vtol_transition,
 };
+use hid::HidManager;
 use mission::store::MissionStore;
 use state::AppState;
 use telemetry_forward::{relay_configure, relay_clear, RelayHub};
@@ -140,6 +143,7 @@ pub fn run() {
         .manage(MissionStore::new())
         .manage(TerrainProvider::new())
         .manage(RelayHub::new())
+        .manage(HidManager::new())
         .invoke_handler(tauri::generate_handler![
             list_serial_ports,
             scan_ble_devices,
@@ -261,6 +265,9 @@ pub fn run() {
             aero_cache_clear,
             relay_configure,
             relay_clear,
+            hid_start,
+            hid_stop,
+            hid_select_device,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Kite Ground Control");

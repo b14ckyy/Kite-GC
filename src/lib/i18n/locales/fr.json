@@ -125,8 +125,24 @@
     "airspace": "Espace aérien",
     "video": "Vidéo",
     "control": "Pilotage",
+    "rc": "RC",
     "closePanel": "Fermer le panneau",
     "openPanel": "Ouvrir le panneau"
+  },
+  "rc": {
+    "title": "Commande RC",
+    "config": "Configuration",
+    "expand": "Afficher la configuration",
+    "collapse": "Masquer la configuration",
+    "device": "Périphérique",
+    "noDevice": "Aucun contrôleur connecté",
+    "connectHint": "Connectez un joystick ou une radiocommande (mode USB / manette).",
+    "axes": "Axes",
+    "buttons": "Boutons",
+    "hats": "Hats",
+    "moveHint": "Bougez un manche pour détecter ses axes.",
+    "pressHint": "Appuyez sur un bouton pour le détecter.",
+    "mappingSoon": "Affectation des voies — bientôt disponible."
   },
   "control": {
     "title": "Pilotage du véhicule",
@@ -396,6 +412,7 @@
     "clear": "Vider",
     "telemetryRates": "Fréquences de télémétrie",
     "telemetry": "Télémétrie",
+    "rcControl": "Commande RC",
     "radarTracking": "Suivi radar",
     "radarAdsb": "ADS-B",
     "radarFormationFlight": "FormationFlight",

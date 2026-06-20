@@ -136,8 +136,24 @@
     "airspace": "Luftraum",
     "video": "Video",
     "control": "Steuerung",
+    "rc": "RC",
     "closePanel": "Panel schließen",
     "openPanel": "Panel öffnen"
+  },
+  "rc": {
+    "title": "RC-Steuerung",
+    "config": "Konfiguration",
+    "expand": "Konfiguration anzeigen",
+    "collapse": "Konfiguration ausblenden",
+    "device": "Gerät",
+    "noDevice": "Kein Controller verbunden",
+    "connectHint": "Joystick oder Sender anschließen (USB / Gamepad-Modus).",
+    "axes": "Achsen",
+    "buttons": "Tasten",
+    "hats": "HATs",
+    "moveHint": "Bewege einen Stick, um seine Achsen zu erkennen.",
+    "pressHint": "Drücke eine Taste, um sie zu erkennen.",
+    "mappingSoon": "Kanal-Zuordnung — folgt als Nächstes."
   },
   "control": {
     "title": "Fahrzeugsteuerung",
@@ -423,6 +439,7 @@
     "clear": "Leeren",
     "telemetryRates": "Telemetrie-Raten",
     "telemetry": "Telemetrie",
+    "rcControl": "RC-Steuerung",
     "radarTracking": "Radar-Tracking",
     "radarAdsb": "ADS-B",
     "radarFormationFlight": "FormationFlight",
