@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **RC Control — profile system + config layout (Phase 2a, local).** Shareable RC config **profiles**
+  stored as files under `Documents/KiteGC/HID-Profiles/<name>.json` (not localStorage), with a profile
+  dropdown + **Save** (overwrite, confirm) / **New** (name prompt) / **Delete** (confirm; keeps the
+  working config loaded). Profiles are never auto-linked to a device or FC — the user manages the
+  matching FC settings. The raw-input monitor moved to a collapsible section on the panel's
+  configuration side (default collapsed; it's only a wiring check); the channel mapping comes next.
+  Backend `hid/profiles.rs`, store `stores/rcProfiles.ts`. Also adds a small shared ±0.05 (2.5%) scaled
+  centre deadband to every raw axis (both backends) so a controller's resting offset can't leak a
+  stray command.
 - **RC Control — HID/joystick input foundation (Phase 1, local).** Groundwork for GCS RC steering of
   INAV over MSP (`docs/active/RC_CONTROL.md`). A new opt-in **RC** nav-rail panel (Settings → Data →
   "RC Control") with a live device picker + calibration view (bipolar axis bars, hat indicators,

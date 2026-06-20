@@ -159,16 +159,28 @@ scheduler runs an independent RC tick (full-duplex) — decided in Phase 4.
 
 ---
 
-## 7. Mapping model (Phase 2)
+## 7. Mapping model + profiles (Phase 2)
 
-Per-axis and per-button mapping, persisted (settings store). Concept borrowed from MWP, trimmed:
+Per-axis / button / hat mapping. Concept borrowed from MWP, trimmed:
 
-- **Axis:** `{ channel: 0=unmapped | 1..32, invert: bool, deadband, expo, min/max/trim }`.
-- **Button:** `{ channel, latch mode (momentary / toggle / multi-position), values }`.
-- **Live calibration:** the mapping UI shows raw axis values streaming in so the operator can wiggle a
-  stick to identify the axis and assign a channel (MWP does this; it's the only sane UX).
+- **Axis:** `{ channel: 1..32, source: 'axis', invert, deadband, expo }` (min/max/trim later if needed).
+- **Button / hat:** `{ channel, source, … }` — latch mode (momentary / toggle / multi-position) TBD.
+- **Live calibration:** the collapsible raw-input monitor streams raw values so the operator can wiggle
+  a stick to identify the control before assigning it (MWP does this; the only sane UX).
 - Channel labels come from the FC: read `MSP_BOXNAMES` / `MSP_MODE_RANGES` so each AUX channel shows
-  **which mode box it drives** ("CH5 → ANGLE", "CH7 → RTH").
+  **which mode box it drives** ("CH5 → ANGLE", "CH7 → RTH"). (Needs MSP — after the local part.)
+
+**Profiles (shipped).** Mappings live in **shareable profile files**, NOT in settings/localStorage:
+`Documents/KiteGC/HID-Profiles/<name>.json` (`hid/profiles.rs` + `stores/rcProfiles.ts`). A profile is
+`{ name, deviceUuid?, deviceName?, channels }` and is **never auto-linked** to a device or FC — the user
+picks the active profile and the matching FC config themselves. The panel's config side has a profile
+dropdown + **Save** (overwrite, confirm) / **New** (name prompt) / **Delete** (confirm; keeps the
+working config loaded). `settings.rcControl` holds only `{ enabled, selectedUuid, activeProfile }`.
+
+**Shared centre deadband (shipped).** A small ±0.05 (2.5% of full travel) scaled centre deadband is
+applied to every raw axis in `hid/mod.rs` (both backends) so a controller's resting centre offset
+(seen up to ~0.04 on a gamepad) can't leak a stray command. Per-channel deadband/expo come on top in
+the mapping layer.
 
 ---
 
@@ -201,10 +213,12 @@ Exact layout deferred — agreed to settle when we build it.
 
 ## 10. Phasing
 
-1. **HID foundation** *(now)* — `gilrs` in the backend, device enumeration, live axis/button stream to
-   the frontend. Works on Windows + Linux.
-2. **Mapping + config** *(now)* — per-axis/button model (§7), live calibration UI, persisted; FC box-name
-   labelling.
+1. **HID foundation** *(shipped)* — native per-OS backend (RawGameController / evdev), device
+   enumeration, live axis/button/hat stream + shared centre deadband. Verified on Windows.
+2a. **Profiles + raw monitor relocation** *(shipped)* — shareable profile files (§7), Save/New/Delete,
+   collapsible raw-input monitor on the config side.
+2b. **Channel mapping** *(now)* — assign axis/button/hat → channel 1..32 with method/behaviour, write
+   into the active profile; live channel-value view. (The complex part.)
 3. **AUX_RC path (9.1+)** *(later)* — latched switches CH13–32. The safe, simple first real control.
 4. **SET_RAW_RC streaming (8.0+)** *(later)* — codec flag byte, `SchedulerCommand::RcStream`, deadman
    watchdog, Modes A/C, send-mask + zero-skip.
