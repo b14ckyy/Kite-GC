@@ -9,22 +9,7 @@
 
 import { writable } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
-
-/** One HID-control → RC-channel binding. (Filled by the mapping UI in the next phase.) */
-export interface RcBinding {
-  /** Backend-stable code of the source control (axis/button/hat). */
-  code: number;
-  source: 'axis' | 'button' | 'hat';
-  /** Invert the axis direction (axes only). */
-  invert: boolean;
-  /** Centre deadband, 0..1 (axes only). */
-  deadband: number;
-  /** Exponential curve strength, 0..1 (axes only); 0 = linear. */
-  expo: number;
-}
-
-/** RC channel number (1..32) → its binding. */
-export type RcChannelMap = Record<number, RcBinding>;
+import type { RcChannelMap } from '$lib/helpers/rcMethods';
 
 export interface RcProfile {
   /** Display name (also the basis of the on-disk filename). */

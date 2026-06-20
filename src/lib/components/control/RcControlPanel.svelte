@@ -16,6 +16,8 @@
   import PanelShell, { type PanelVariant } from '$lib/components/panel/PanelShell.svelte';
   import Button from '$lib/components/panel/Button.svelte';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+  import ChannelConfig from '$lib/components/control/ChannelConfig.svelte';
+  import ChannelStates from '$lib/components/control/ChannelStates.svelte';
   import { settings } from '$lib/stores/settings';
   import {
     hidDevices,
@@ -184,12 +186,12 @@
     </div>
   {/snippet}
 
-  <!-- Left (compact) stage: the live control surface — built in the mapping phase. -->
+  <!-- Left (compact) stage: the live control surface — current channel outputs. -->
   {#snippet body()}
     {#if !selectedDevice}
       <div class="rc-empty">{$t('rc.connectHint')}</div>
     {:else}
-      <div class="rc-placeholder">{$t('rc.controlSoon')}</div>
+      <ChannelStates />
     {/if}
   {/snippet}
 
@@ -274,9 +276,9 @@
       {/if}
     </div>
 
-    <!-- Channel mapping goes here (next phase). -->
+    <!-- Channel mapping. -->
     <div class="rc-section-title">{$t('rc.channels')}</div>
-    <div class="rc-stub">{$t('rc.mappingSoon')}</div>
+    <ChannelConfig />
   {/snippet}
 </PanelShell>
 
@@ -321,7 +323,7 @@
   }
   .rc-nodev { color: #949494; font-size: 12px; font-style: italic; }
 
-  .rc-empty, .rc-hint, .rc-placeholder {
+  .rc-empty, .rc-hint {
     color: #949494; font-size: 12px; padding: 8px; font-style: italic;
   }
 
@@ -379,8 +381,6 @@
   .rc-profile-actions { display: flex; gap: 6px; }
   .rc-dir { font-size: 10px; color: #6f6f6f; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rc-dir-path { color: #888; }
-
-  .rc-stub { color: #949494; font-size: 12px; font-style: italic; padding: 8px 2px; }
 
   /* New-profile modal */
   .rc-modal-backdrop {
