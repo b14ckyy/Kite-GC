@@ -207,41 +207,22 @@ export const DEFAULT_AIRSPACE: AirspaceSettings = {
 };
 
 // ── RC Control (INAV RC over MSP — see docs/active/RC_CONTROL.md) ──────────────────────────────────
-// A binding maps one HID control (axis or button, identified by its platform event code) to one RC
-// channel (1..32). Persisted per physical device (by UUID) so a remembered transmitter keeps its map.
-// Phase 1 uses only `enabled` + `selectedUuid`; the mapping fields are filled in by the mapping UI.
-
-export interface RcBinding {
-  /** Platform event code (u32) of the source control, as reported by the HID backend. */
-  code: number;
-  source: 'axis' | 'button';
-  invert: boolean;
-  /** Centre deadband, 0..1 (axes only). */
-  deadband: number;
-  /** Exponential curve strength, 0..1 (axes only); 0 = linear. */
-  expo: number;
-}
-
-export interface RcDeviceMapping {
-  uuid: string;
-  name: string;
-  /** RC channel (1..32) → binding. */
-  channels: Record<number, RcBinding>;
-}
+// Only lightweight UI state lives in settings. The actual channel mappings live in shareable profile
+// FILES under Documents/KiteGC/HID-Profiles (see stores/rcProfiles.ts) — not in localStorage.
 
 export interface RcControlSettings {
   /** Master switch — shows the RC nav-rail tab. Off by default (opt-in feature). */
   enabled: boolean;
   /** UUID of the device last worked with (re-selected on next open). */
   selectedUuid: string | null;
-  /** Saved per-device channel mappings. */
-  devices: RcDeviceMapping[];
+  /** Name of the active profile (re-selected on next open), or null. */
+  activeProfile: string | null;
 }
 
 export const DEFAULT_RC_CONTROL: RcControlSettings = {
   enabled: false,
   selectedUuid: null,
-  devices: [],
+  activeProfile: null,
 };
 
 /** FC system-message (STATUSTEXT) toast verbosity: off, errors only, warnings+errors, or everything. */

@@ -17,6 +17,7 @@
 
 #[cfg(target_os = "linux")]
 mod linux;
+pub mod profiles;
 #[cfg(target_os = "windows")]
 mod windows;
 
@@ -32,6 +33,21 @@ use tauri::{AppHandle, Emitter};
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
 /// Sentinel for "no device explicitly selected" stored in the atomic (real ids are small).
 const NO_SELECTION: usize = usize::MAX;
+
+/// Shared centre deadband applied to every raw axis (both backends): zero out the small resting offset
+/// some controllers report at centre (observed up to ~0.04 on a gamepad) so the centre reads clean and
+/// can't leak a stray RC command. ±0.05 on the −1..1 axis scale = 2.5% of the 2.0 full travel — just
+/// above the observed error. Scaled (not hard-clipped) so travel past the deadband still reaches ±1
+/// with no discontinuity at the edge. Per-channel deadband/expo come later in the mapping layer.
+const CENTER_DEADBAND: f32 = 0.05;
+
+fn apply_deadband(v: f32) -> f32 {
+    if v.abs() <= CENTER_DEADBAND {
+        0.0
+    } else {
+        v.signum() * (v.abs() - CENTER_DEADBAND) / (1.0 - CENTER_DEADBAND)
+    }
+}
 
 /// A connected input device, for the frontend device picker.
 #[derive(Clone, Serialize, PartialEq)]
@@ -181,7 +197,10 @@ fn input_loop(app: AppHandle, running: Arc<AtomicBool>, selected: Arc<AtomicUsiz
         }
 
         if let Some(target) = resolve_target(&devices, selected.load(Ordering::SeqCst)) {
-            if let Some(snap) = backend.snapshot(target) {
+            if let Some(mut snap) = backend.snapshot(target) {
+                for axis in &mut snap.axes {
+                    axis.value = apply_deadband(axis.value);
+                }
                 let _ = app.emit("hid-input", &snap);
             }
         }
