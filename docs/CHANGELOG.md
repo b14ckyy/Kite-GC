@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Map & terrain cache controls.** The tile-cache size selector gains **2 GB / 5 GB** tiers (default
+  stays 200 MB), and a new **Terrain Cache** row shows the on-disk Copernicus DEM size + tile count with a
+  **Clear** button (the terrain cache is uncapped, so it's size-only — no limit selector).
 - **Vehicle control — GCS command & guided steering (V1, MAVLink).** A new `control` nav-rail panel
   (shown only while connected via MAVLink) to command an ArduPilot/PX4 vehicle directly from the GCS,
   without a transmitter — done better than Mission Planner's flat button grid. **SITL-verified on
@@ -215,6 +218,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per-command rationale is in `docs/active/ARDUPILOT_COMMAND_COVERAGE.md`.
 
 ### Changed
+- **Passive "Telemetry" connection mode is now available in release builds.** The listen-only,
+  auto-detect protocol was gated to dev builds; the pipeline is complete, so it now ships.
+- **3D mission overlay re-renders much faster.** The terrain-altitude resolution is cached by an input
+  signature, so re-opening 3D (or a redundant render trigger) no longer re-samples terrain — fixing a
+  15–20 s stall on repeated switches; per-waypoint elevation lookups are also batched into one IPC call.
 - **Full-precision heading / course / attitude (decimal degrees).** `yaw` (FC fused heading) and `heading`
   (course over ground) are now carried and stored as `f64` (0.1° resolution) instead of rounded whole
   degrees — across MSP / MAVLink / FrSky live, Blackbox / ArduPilot / raw import, the DB and replay.
@@ -271,6 +279,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   identical to the `mission` blue (ArduPilot Auto) on the track/badge.
 
 ### Fixed
+- **Live link RX/TX rate stayed at 0 in release builds.** The Relay panel read its rate from the dev-only
+  Debug Monitor events; a lightweight always-on link meter (`link-stats`, compiled in every build) now
+  feeds it for both MSP and MAVLink.
+- **Camera snapped to 0,0 before a solid GPS fix.** The go-to-UAV jump fired on `fixType ≥ 3`, which the
+  FC can briefly report with near-0,0 coordinates; it now also requires ≥ 6 satellites (2D and 3D).
+- **Home widget showed a bogus ~5800 km distance to 0,0.** Before a fix the launch auto-place falls back
+  to the map centre (≈ 0,0), which was mirrored into Home with `set:true`; an invalid / 0,0 launch is no
+  longer mirrored, so Home stays empty until a real reference (FC home on arm, a valid manual placement,
+  or replay) exists.
 - **ArduPilot 3D mission altitudes sank into the terrain when loaded offline.** The REL-altitude base used
   `homePosition.alt` whenever a home was set — but offline that is the stale `'manual'` home (the INAV
   launch mirror, ≈ sea level / wrong region), so REL waypoints anchored at sea level and dropped below
