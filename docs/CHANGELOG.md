@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **RC Control — MSP message builder, FC reads + RAW/AUX split (Phase 3a).** Groundwork for streaming
+  RC to INAV over MSP: tested byte encoders (`msp/rc_encode.rs`) for `MSP_SET_RAW_RC` (trimmed u16-LE)
+  and `MSP2_INAV_SET_AUX_RC` (2/4/16-bit packed, `0`=skip), an FC-config read (`rc_read_fc_config`:
+  `receiver_type` + `msp_override_channels`) surfaced in a new dev **MSP-RC** debug-monitor tab, and the
+  transport split — CH1–12 (MSP-RC) vs CH13–32 (MSP-AUX) on INAV 9.1+, a single ≤16-channel block on
+  8.0–9.0 — which now groups both the channel config editor and the live monitor. Also: an optional
+  **hold-to-toggle** (0.5–2 s) on the Button-Toggle method (anti-accidental, e.g. for an arming switch)
+  and the Button-Step range capped at 15 (fits a 4-bit AUX channel). No live streaming yet.
 - **RC Control — channel mapping (Phase 2b, local).** A channel-centric mapping editor: each RC channel
   (1..32) is driven by one of **7 input methods** — passthrough, analog-adjust (axis sets rate),
   dual-source (two triggers add/subtract), button hold, button toggle (2–6 positions), button step

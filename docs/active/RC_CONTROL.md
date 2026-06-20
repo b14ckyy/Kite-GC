@@ -176,8 +176,8 @@ flight modes onto buttons is parked):
 | **analogAdjust** | 1 axis | axis sets the rate of change (general: throttle/gimbal); invert, rate, deadband 5% |
 | **dualAxis** | 2 axes/triggers | one adds, one subtracts; both released → centre; mode absolute \| adjust |
 | **hold** | 1 button | high while pressed, low released (invert swaps) |
-| **toggle** | 1 button | cycle 2–6 positions (wrap) |
-| **buttonStep** | 2 buttons | discrete 3–16 steps, +/−, clamp |
+| **toggle** | 1 button | cycle 2–6 positions (wrap); optional **hold-to-toggle** (0.5–2 s, anti-accidental for arming) |
+| **buttonStep** | 2 buttons | discrete **3–15** steps, +/−, clamp (15 = fits a 4-bit AUX_RC channel) |
 | **buttonAdjust** | 2 buttons | constant-rate ramp +/− while held, clamp |
 
 - **Defaults:** every adjustable/value-holding method starts at the **lowest µs** (1000), even when
@@ -191,6 +191,16 @@ flight modes onto buttons is parked):
   end too.
 - *Later (needs MSP):* read `MSP_BOXNAMES` / `MSP_MODE_RANGES` so AUX channels show **which mode box they
   drive** ("CH5 → ANGLE"); custom (non-evenly-spaced) toggle/step position values.
+
+**MSP layer (in progress).** Byte encoders `msp/rc_encode.rs` (verified vs the firmware decoders):
+`encode_raw_rc` (u16-LE, trimmed) + `encode_aux_rc` (2/4/16-bit packed, defByte, 0=skip). AUX resolution
+is auto-derived per method (2-bit: hold / toggle ≤3-pos; 4-bit: toggle 4–6 / buttonStep; 16-bit:
+continuous). FC config read via `rc_read_fc_config` (`receiver_type`, `msp_override_channels` over
+MSP2_COMMON_SETTING) — shown in the dev **MSP-RC** debug tab. The channel split (CH1–12 MSP-RC vs
+CH13–32 MSP-AUX on 9.1+, else single ≤16) is derived in `stores/rcLayout.ts` and groups both the config
+editor and the live monitor. Still to come: mode-range/box-ID reads for safety locks + mode labels, the
+override-bitmask "fix" button + receiver-type validation, and the send pipeline (RAW 10 Hz + AUX
+on-change/ACK-resend + deadman).
 
 **Profiles (shipped).** Mappings live in **shareable profile files**, NOT in settings/localStorage:
 `Documents/KiteGC/HID-Profiles/<name>.json` (`hid/profiles.rs` + `stores/rcProfiles.ts`). A profile is
@@ -242,11 +252,14 @@ Exact layout deferred — agreed to settle when we build it.
 2b. **Channel mapping** *(shipped)* — channel-centric editor: 7 helper methods (§7), A/B/H input
    assignment + Learn, per-channel name, live channel-value view; all written into the active profile.
    Local part complete — verified on Windows.
-3. **AUX_RC path (9.1+)** *(later)* — latched switches CH13–32. The safe, simple first real control.
-4. **SET_RAW_RC streaming (8.0+)** *(later)* — codec flag byte, `SchedulerCommand::RcStream`, deadman
-   watchdog, Modes A/C, send-mask + zero-skip.
-5. **Mode detection + takeover UI** *(later)* — config-driven mode (§3) with explicit confirm, live
-   stick HUD, arming policy.
+3a. **MSP message builder + FC reads** *(shipped)* — `msp/rc_encode.rs` (tested encoders), `rc_read_fc_config`
+   (receiver_type / msp_override_channels) + MSP-RC debug tab, RAW/AUX split layout (`rcLayout.ts`).
+3b. **Safety + validation** *(next)* — mode-range/box-ID reads → mode labels under channels + hard-locks
+   (arming/RTH/failsafe on an AUX channel = block all output), override-bitmask check + "fix" button,
+   receiver-type hints, autonomous-GPS-mode warning banner.
+4. **Send pipeline** *(later)* — RAW_RC 10 Hz stream + AUX_RC on-change (group templates, ACK-resend
+   after 100 ms, no NO_REPLY) + deadman; `SchedulerCommand` integration; the §3 takeover modes.
+5. **Takeover UI + arming policy** *(later)* — config-driven mode (§3) with explicit confirm, live stick HUD.
 
 ---
 
