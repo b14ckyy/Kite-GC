@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Toolbar arming + battery indicators.** Flanking the sensor-health bar: a prominent **arming traffic
+  light** (green = ready & disarmed, amber = armed, red = not ready) and a **battery indicator** (glyph +
+  %). INAV lists the blocking `ARMING_DISABLED_*` reasons on hover (read straight from the armingFlags
+  bitfield — no extra query); ArduPilot/PX4 derive "not ready" from the SYS_STATUS PREARM_CHECK bit and
+  show the latest "PreArm: …" reasons (tracked independently of the toast filter). Battery uses the
+  FC-native percentage (INAV capacity / MAVLink remaining) when present, else a per-cell voltage estimate;
+  voltage / cell count / mAh on hover.
 - **Map & terrain cache controls.** The tile-cache size selector gains **2 GB / 5 GB** tiers (default
   stays 200 MB), and a new **Terrain Cache** row shows the on-disk Copernicus DEM size + tile count with a
   **Clear** button (the terrain cache is uncapped, so it's size-only — no limit selector).
@@ -279,6 +286,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   identical to the `mission` blue (ArduPilot Auto) on the track/badge.
 
 ### Fixed
+- **Near-0,0 GPS glitch leaked into the map (ArduPilot).** The FC briefly reports a position right next to
+  0°,0° before it has a real origin/fix (e.g. `N 0.00002 / W 0.00001`, 0 sats) — which slipped past the
+  exact-0,0 check into the pre-arm track (a black line from null island) and the camera jump.
+  `isValidGpsCoordinate` now rejects the whole ~111 m null-island neighbourhood (requiring BOTH components
+  ~0, so real equator/prime-meridian flights are unaffected), fixing it for the camera + track in 2D & 3D.
 - **Live link RX/TX rate stayed at 0 in release builds.** The Relay panel read its rate from the dev-only
   Debug Monitor events; a lightweight always-on link meter (`link-stats`, compiled in every build) now
   feeds it for both MSP and MAVLink.
