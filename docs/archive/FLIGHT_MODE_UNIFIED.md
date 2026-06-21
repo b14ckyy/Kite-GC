@@ -1,5 +1,7 @@
 # Unified Flight-Mode Pipeline — Protocol-Agnostic Mode Model
 
+> 📦 ARCHIVED (2026-06-21) — Implemented (DB v12, ADR-044). Architecture lives in the ADR; kept for reference.
+
 > **STATUS: IMPLEMENTED (DB v12) — decision recorded in ADR-044.** The flight-mode path is now
 > protocol-agnostic: protocol adapters classify raw mode data into a canonical model; the pipeline,
 > widget, track-coloring and recording/replay consume only that model. Future protocols (CRSF /

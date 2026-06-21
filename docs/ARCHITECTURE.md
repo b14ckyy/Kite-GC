@@ -582,7 +582,7 @@ blackbox_decode --merge-gps --datetime --unit-height m --unit-gps-speed mps --st
 - **Original file**: Raw .TXT archived as BLOB in `blackbox_files.file_data` for re-download/re-processing
 - **Intermediate CSV**: Not persisted — parsed in-memory from stdout, discarded after import
 
-Detailed replay-oriented DB field selection is documented in `docs/FLIGHTLOG_DATABASE.md`.
+Detailed replay-oriented DB field selection is documented in `docs/reference/FLIGHTLOG_DATABASE.md`.
 
 **DB schema** (migrations v1→v2→v3→v4→v5):
 ```sql

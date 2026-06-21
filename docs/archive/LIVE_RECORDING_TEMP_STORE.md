@@ -1,5 +1,7 @@
 # Live Recording — Temp Session Store + Capture Completeness
 
+> 📦 ARCHIVED (2026-06-21) — Shipped (ADR-040/041/042): temp `.ktmp` store, deferred commit + End-Flight gate + re-arm grace, crash/disconnect recovery; commit/discard/continue-pending commands wired into all three recorders (MSP/MAVLink/Telemetry). Verified. Kept for reference.
+
 > Status: **Implemented** (2026-06-13). Temp store + capture completeness (ADR-040), deferred commit +
 > End-Flight dialog gate + 5 s re-arm grace (ADR-041), and crash/disconnect recovery (orphan scan +
 > 3-option prompt + continue-on-reconnect, ADR-042). Schema-neutral (columns exist at `v11`); adds a

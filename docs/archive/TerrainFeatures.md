@@ -1,5 +1,7 @@
 # Terrain Features — Concept & Implementation Plan
 
+> 📦 ARCHIVED (2026-06-21) — All four terrain features shipped (Feature 4 lives on in `RF_LINK_ANALYSIS.md`). Kept for reference.
+
 **Status**: Implemented (all features done: elevation provider, AGL waypoints, terrain analysis + correction, Live AGL widget, Terrain Radar widget, **and Feature 4 — LOS analysis, shipped 2026-06-15 as the layered RF link analysis — see [RF_LINK_ANALYSIS.md](RF_LINK_ANALYSIS.md)**). COG performance follow-up cancelled.
 **Last Updated**: 2026-06-15
 

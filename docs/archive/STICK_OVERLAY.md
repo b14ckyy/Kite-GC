@@ -1,5 +1,7 @@
 # Stick / Gimbal Overlay — Plan
 
+> 📦 ARCHIVED (2026-06-21) — Shipped (replay-only gimbal overlay; ROADMAP done). Kept for reference.
+
 Two animated transmitter-gimbal indicators shown beside the replay player, à la Blackbox Explorer.
 **Replay-only** (gimmick/analysis feature) — no live recording, no Rust changes. Agreed 2026-06-19.
 

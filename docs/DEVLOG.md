@@ -53,22 +53,29 @@ Kite Ground Control/
 │       │   └── Map.svelte · Map3D.svelte · UavInfoPanel · SettingsPanel · Toolbar · StatusBar · NavRail · dialogs …
 │       ├── cache/                    # IndexedDB tile cache (+ CachedTileLayer)
 │       ├── config/                   # mapProviders, widgetRegistry
-│       ├── i18n/                     # svelte-i18n setup + locales/{en,de}.json
+│       ├── i18n/                     # svelte-i18n setup + locales/{en,de,fr}.json
 │       └── utils/                    # geo, units
 │
 ├── src-tauri/src/                    # Rust backend (Tauri 2)
-│   ├── lib.rs · main.rs · state.rs   # App builder + plugin registration + AppState (ActiveProtocol: MSP/MAVLink)
-│   ├── commands/                     # Tauri IPC (connection, flightlog, mission, info)
-│   ├── flightlog/                    # Recording + logbook + SQLite (schema v11) + blackbox/ardupilot import + exchange/exports
-│   ├── mission/                      # INAV mission model + MSP_WP codec + store
-│   ├── scheduler/                    # MSP scheduler (dedicated thread) + telemetry decode + dev debug
-│   ├── msp/                          # MSP v1/v2 codec, parser, transport framing, feature gating
-│   ├── mavlink_proto/               # MAVLink parser/codec/handshake/handler + mission microprotocol
+│   ├── lib.rs · main.rs · state.rs   # App builder + plugin registration + AppState (ActiveProtocol: MSP/MAVLink/PassiveTelemetry)
+│   ├── commands/                     # Tauri IPC (connection, flightlog, mission, info, control, rc, radar, aero, hid, terrain)
+│   ├── flightlog/                    # Recording + logbook + SQLite (schema v13) + blackbox/ardupilot/raw import + exchange/exports
+│   ├── mission/                      # INAV mission model + MSP_WP codec + store (MAVLink missions live in mavlink_proto)
+│   ├── scheduler/                    # MSP scheduler (dedicated thread) + telemetry decode + RC-injection state (rc_tx) + dev debug
+│   ├── msp/                          # MSP v1/v2 codec, parser, transport framing, feature gating, RC encoders
+│   ├── mavlink_proto/               # MAVLink parser/codec/handshake/handler + mission microprotocol + control + RC stream
+│   ├── passive_telemetry/           # Listen-only telemetry: detect + decode SmartPort/CRSF/LTM/MAVLink (+ MSP probe)
+│   ├── telemetry_forward/           # Telemetry Relay: re-encode live telemetry → LTM/MAVLink/CRSF/SmartPort out (ADR-051)
+│   ├── radar/                        # Foreign-vehicle tracking: ADS-B + FormationFlight sources → radar-vehicles
+│   ├── aero/                         # Airspace Manager aeronautical data (OpenAIP, ADR-038)
+│   ├── flightmode/                   # Protocol-agnostic flight-mode classification (ADR-044)
+│   ├── hid/                          # Native HID/gamepad backend for RC control (WGI / evdev)
 │   ├── terrain/                      # Copernicus DEM elevation provider (fetch/decode/cache/sample)
 │   └── transport/                    # ByteTransport trait + serial / tcp / udp / ble
 │
 ├── docs/                             # Core dev docs: ARCHITECTURE (ADRs) · ROADMAP · CHANGELOG · DEVLOG · BUILD
-│   ├── active/                       # Active feature-plan / reference docs (open work)
+│   ├── active/                       # Active feature plans (open work)
+│   ├── reference/                    # Living reference docs (DATA_PIPELINE, FLIGHTLOG_DATABASE, PROTOCOL_FLIGHT_MODES)
 │   ├── future/                       # Exploratory, not-planned notes
 │   └── archive/                      # Completed feature plans (kept for design rationale)
 │
@@ -420,40 +427,18 @@ The raw `.TXT` file is always archived in `blackbox_files` regardless of downsam
 | `num_sat` | `GPS_numSat` | |
 | `link_quality` | `lq` / `link_quality` / `rxlq` | ELRS/CRSF only; `None` if column absent |
 
-### DB Schema (v5)
+### DB Schema
 
-Current schema version is **5**. Migration path: v0→v1 (initial schema), v1→v2 (blackbox tables + `flights.source`), v2→v3 (link_quality column), v3→v4 (replay telemetry fields), v4→v5 (craft_name column).
+Schema evolves via `PRAGMA user_version` + a sequential migration chain (`flightlog/db.rs`,
+`migrate_vN_to_vN+1`) — **earlier migrations are never modified**. **Current version: v13.** Highlights of
+the chain: v2 (blackbox tables + `flights.source`), v3 (link_quality), v4 (replay telemetry fields), v5
+(craft_name), v10 (battery DB + serial soft-link), v11 (live-recording temp-store columns), v12
+(canonical `mode_primary` / `mode_modifiers` for the unified flight mode), v13.
 
-```sql
--- v5 migration (2026-04-21):
-ALTER TABLE flights ADD COLUMN craft_name TEXT;
-
--- v4 migration (replay-focused fields):
--- Added baro_alt_m, gps_alt_m, fix_type, num_sat, gps_hdop, active_flight_modes,
--- arming_flags, flight_mode_flags, cpu_load, nav_state, nav_wp_number, wind_speed_ms,
--- wind_direction, rc_channels (JSON), sensors_health to telemetry_records
-
--- v3 migration (2026-04-17):
-ALTER TABLE telemetry_records ADD COLUMN link_quality INTEGER;
-
--- v2 tables (unchanged):
-CREATE TABLE blackbox_records (
-    id            INTEGER PRIMARY KEY,
-    flight_id     INTEGER NOT NULL REFERENCES flights(id) ON DELETE CASCADE,
-    timestamp_us  INTEGER NOT NULL,
-    csv_data      TEXT NOT NULL  -- raw comma-joined CSV row (not JSON)
-);
-CREATE TABLE blackbox_files (
-    id                INTEGER PRIMARY KEY,
-    flight_id         INTEGER NOT NULL REFERENCES flights(id) ON DELETE CASCADE,
-    original_filename TEXT NOT NULL,
-    log_index         INTEGER NOT NULL DEFAULT 0,
-    file_data         BLOB NOT NULL,
-    file_size         INTEGER NOT NULL,
-    imported_at       TEXT NOT NULL DEFAULT (datetime('now'))
-);
--- flights.source: 'live' | 'blackbox' | 'both'
-```
+The full, current table/column layout is the canonical **reference**, not duplicated here — see
+[reference/FLIGHTLOG_DATABASE.md](reference/FLIGHTLOG_DATABASE.md). `flights.source`: `'live' | 'blackbox'
+| 'both'`; `blackbox_records` stores raw comma-joined CSV rows; `blackbox_files` archives the original
+`.TXT` BLOB.
 
 ## Survey Pattern Generator
 
@@ -571,3 +556,38 @@ Bringing the MAVLink (ArduPilot) path to parity with MSP — data flow for later
 - **Debug Monitor MAVLink tab** (`mavlink_proto/debug.rs`, `#[cfg(debug_assertions)]` like the MSP one). Keyed by `(message_id, is_tx)` — HEARTBEAT shows as both RX (FC) and TX (our GCS HB). `on_rx`/`on_tx` hooks in the handler loop; `maybe_emit` ~60 Hz → `debug-mavlink-stats`. Rate decays to 0 after >2 s stale; names via a small lookup table (rest `MSG_<id>`).
 - **Flight mode** — two bugs: handshake set a generic `fc_variant="ArduPilot"` (frontend `/Plane/i` test → wrong table) and the handler mangled raw `custom_mode` into INAV box-flag bits. Fix: vehicle-specific variant from `mav_type` + **forward raw `custom_mode`** ([handler.rs] HEARTBEAT arm). Frontend `classifyArduPilotMode` already keys per-vehicle on the raw number. **Only the MAVLink adapter changed** — MSP/unified untouched.
 - **Home** — handler now processes `HOME_POSITION` (242) → emits the protocol-agnostic `home-position` event (adapter-local `HomeEvent` struct; lat/lon degE7→deg, alt mm→m). On connect the frontend GPS-fix fallback shows briefly until the first 0.2 Hz push corrects it (accepted). Future: telemetry-only adapters (CRSF/Smartport) have no home msg → derive from the arm-edge GPS fix **in the adapter** and emit the same event (see ADR-039).
+
+## Subsystems beyond the telemetry pipeline (foundations + pointers)
+
+The sections above predate several subsystems. Rather than duplicate their design here, this maps the
+**foundations** and points at the canonical doc for each. The end-to-end data flow (the three inbound
+protocols + these parallel networks) is the living reference in
+[reference/DATA_PIPELINE.md](reference/DATA_PIPELINE.md).
+
+- **Three live protocols (ADR-010).** MSP (poll), MAVLink (push), **Passive telemetry** (listen-only:
+  SmartPort/CRSF/LTM/MAVLink, sub-protocol auto-detected) — `ActiveProtocol::{Msp, Mavlink,
+  PassiveTelemetry}`. All decode to the **same** payload structs + `telemetry-*` events; the frontend never
+  branches on protocol. Passive path lives in `passive_telemetry/` (archived plan
+  `archive/RADIO_TELEMETRY.md`).
+- **Unified flight mode (ADR-044, `flightmode/`).** Each input adapter classifies raw mode data into a
+  canonical `{ primary, modifiers[] }`; widget/track/recording consume only that. New protocol = new
+  adapter + a few registry ids.
+- **RC control — outbound uplink** (`scheduler/rc_tx.rs`, `hid/`, `msp/rc_encode.rs`,
+  `mavlink_proto/handler.rs`). HID → `rcEngine`/`rcManual` → `rc_stream_*` commands → shared `RcTxState`
+  (independent of `protocol`) → streamed to the FC: MSP `SET_RAW_RC` + `SET_AUX_RC` (INAV), or
+  `RC_CHANNELS_OVERRIDE` (ArduPilot) / `MANUAL_CONTROL` (PX4). Engage seeds from the FC's current
+  channels; a frontend heartbeat drives a backend deadman. Docs: `archive/MSP_RC_CONTROL.md` +
+  `active/MAVLINK_RC_CONTROL.md`.
+- **Radar (`radar/`).** Independent foreign-vehicle tracking — ADS-B (online / serial-MAVLink /
+  MSP-from-UAV) + FormationFlight (ESP32 mesh). Aggregator thread → `radar-vehicles` / `radar-adsb-status`
+  events. Alerts ADR-035, FormationFlight ADR-036; core plan `archive/RADAR_TRACKING_CORE.md`.
+- **Live recording — temp store (ADR-040/041/042, `flightlog/recorder.rs`).** Per-session `.ktmp` SQLite
+  on arm; on disarm/disconnect the session becomes **pending** in app-state and is committed only via the
+  End-Flight dialog or a re-arm grace; orphan recovery on reconnect. Fed by all three protocols.
+- **Telemetry Relay (ADR-051, `telemetry_forward/`).** Taps live decoded telemetry, re-encodes to
+  LTM/MAVLink/CRSF/SmartPort, sends out Serial/BLE/TCP/UDP. Plan `archive/TELEMETRY_FORWARDING.md`.
+- **Vehicle Control (`commands/control.rs`).** MAVLink command panel (mode/arm/takeoff/RTL/guided/…) via
+  `COMMAND_LONG`/`COMMAND_INT` + `COMMAND_ACK` correlation. Plan `active/VEHICLE_CONTROL.md` (slated for
+  ADR-052 — not yet written into ARCHITECTURE.md).
+- **Airspace Manager (ADR-038, `aero/`).** On-demand OpenAIP aeronautical overlay (airspaces/obstacles/
+  airports) — separate from the live telemetry path. Plan `active/AIRSPACE_MANAGER.md`.

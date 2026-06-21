@@ -13,6 +13,10 @@ viability, hardware, a partner, etc.).
   pointer to those (or is archived).
 
 ## Index
+- [RADIO_SOURCE_RADAR.md](RADIO_SOURCE_RADAR.md) — track foreign vehicles from radio telemetry (CRSF/
+  MAVLink/FrSkyX) as a third Radar source family. Was Radar Phase 5; **cancelled for initial release** —
+  no use case for tracking extra radios beside the primary link (technically unblocked now the shared
+  passive parser exists).
 - [MULTI_OPERATOR_CENTRAL_ARCHIVE.md](MULTI_OPERATOR_CENTRAL_ARCHIVE.md) — central, multi-operator
   flight archive (sync local SQLite stores into a company-wide archive). Gated on the app going
   public and earning revenue.

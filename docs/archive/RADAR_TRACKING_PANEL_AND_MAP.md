@@ -1,5 +1,7 @@
 # Radar Tracking — Panel & Map Visualization (Plan B)
 
+> 📦 ARCHIVED (2026-06-21) — Shipped (B0–B4). Residual polish only: exclude the primary connection's own port from radar source lists (minor TODO via a store). Kept for reference.
+
 > Status: **B0–B4 shipped** (2026-06-07). The user-facing half of the foreign-vehicle tracking feature
 > ("Radar"). Covers the **Advanced Radar Panel** (settings + tracked-vehicle lists) and the **map
 > visualization** (2D + 3D). The backend subsystem, data model, sources and the `radar-vehicles`

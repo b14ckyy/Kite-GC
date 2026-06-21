@@ -1,10 +1,12 @@
 # RF Link / Radio-Shadow Analysis — Plan
 
 **Status:** **Phase 1 shipped (2026-06-15).** Realises **Feature 4 (LOS analysis)** of
-[TerrainFeatures.md](TerrainFeatures.md), expanded from naïve line-of-sight into a layered RF
+[TerrainFeatures.md](../archive/TerrainFeatures.md), expanded from naïve line-of-sight into a layered RF
 propagation analysis (LOS occlusion + Fresnel/diffraction + two-ray ground reflection) rendered
-**inside the existing Terrain Analyzer**. Phase 2 (link budget / range) deferred.
-**Created:** 2026-06-15
+**inside the existing Terrain Analyzer**. **Phase 1b** (map representation) is implemented but **needs a
+rework pass** (the doc stays active for that). **Phase 2** (link budget / range) is **deferred to a future
+release** — not in the initial release.
+**Created:** 2026-06-15 · **Last Updated:** 2026-06-21
 
 > The "Confirmed design decisions" + "Computation core" below are the original plan. See
 > **§As-built (Phase 1)** at the end for what actually shipped and where it deviates.
@@ -156,7 +158,7 @@ smaller zone, sharper shadows, finer two-ray fringes.
 
 ---
 
-## Phase 1b — Map representation: critical-point ray triangles (PLAN, not started)
+## Phase 1b — Map representation: critical-point ray triangles (IMPLEMENTED — needs rework)
 
 **2D only** (we do no terrain analysis in 3D). A lightweight overlay that points at the terrain-critical
 spots — *not* a shadow simulation, not a heatmap (a heatmap needs an assumed flight altitude; the rays

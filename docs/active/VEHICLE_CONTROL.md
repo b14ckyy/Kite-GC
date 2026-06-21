@@ -21,8 +21,9 @@
 > - **QuadPlane detection** (reports `MAV_TYPE_FIXED_WING`) is resolved by re-probing `Q_ENABLE` until
 >   the FC answers (the single connect-time request could be lost → mis-detected as a plain plane).
 > - Set WP / Mission Restart use `DO_SET_MISSION_CURRENT` (needs reasonably recent PX4 firmware).
-> - **Advanced controls deferred** to the right-hand `advanced` split panel: set-servo, gripper/payload,
->   gimbal/ROI, plus **HID/joystick RC control** — see §11.
+> - **Advanced controls → FUTURE / on-request** (2026-06-21): set-servo, gripper/payload, gimbal/ROI on
+>   the right-hand `advanced` split panel — not in the initial release; build on demand. (HID/joystick RC
+>   control already shipped as its own RC-control feature — see `MAVLINK_RC_CONTROL.md`.)
 
 Related: ADR-010 (multi-protocol schedulers), ADR-029 (panel framework + control library),
 ADR-043 (MAVLink stream rates / GCS-requested), ADR-044 (unified flight-mode model),

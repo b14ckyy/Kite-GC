@@ -3,9 +3,10 @@
 **Status:** Phases 1–4 complete for the **ArduPilot/PX4** path (autopilot context + locking,
 ArduPilot WP types/UI/conversion, MAVLink mission microprotocol, survey planner). **PX4 path
 completed 2026-06-18** — verified command subset, firmware-aware home-slot handling, MAV_TYPE-based
-airframe class (see PX4 note below); still untested on real PX4 hardware. **Deferred:**
-INAV-over-MAVLink (see Open Questions).  
-**Created:** 2026-04-21 · **Last Updated:** 2026-06-18
+airframe class (see PX4 note below); still untested on real PX4 hardware. **INAV-over-MAVLink: WON'T DO**
+(2026-06-21) — only possible from INAV 10 *if* the MSP-over-MAVLink PR merges; INAV uses MSP-WP today, so
+this is redundant and zero priority. Stays active only until the **PX4 hardware test** closes it out.  
+**Created:** 2026-04-21 · **Last Updated:** 2026-06-21
 
 ---
 
@@ -219,6 +220,6 @@ panel, layer, icons. Three firmware-specific differences are handled:
 
 ## Open Questions / Future Decisions
 
-- **INAV over MAVLink**: when this is supported, the `protocol + fc_variant` combination determines system, not just `fc_variant` alone
+- **INAV over MAVLink** — **WON'T DO** (2026-06-21): redundant (INAV uses MSP-WP); only feasible from INAV 10 if the MSP-over-MAVLink PR lands. If ever revisited, the `protocol + fc_variant` combination (not `fc_variant` alone) would determine the system.
 - **EEPROM save for ArduPilot**: ArduPilot uses `MAV_CMD_PREFLIGHT_STORAGE` — separate from mission upload
 - **Multi-mission for ArduPilot**: ArduPilot doesn't have the INAV multi-mission concept. Single mission only.

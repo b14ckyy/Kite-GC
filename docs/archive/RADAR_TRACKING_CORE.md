@@ -1,8 +1,13 @@
 # Radar Tracking — Core & Sources (Plan A)
 
-> Status: **In progress** (2026-06-06). **Shipped: Phase 0 (core), Phase 1 (ADS-B online), Phase 2
-> (ADS-B serial MAVLink receiver), Phase 4 (ADS-B from UAV via MSP, INAV 8.0+)**; next: ADS-B TCP
-> transport, Phase 3 (FormationFlight). Concrete plan for the *foreign-vehicle tracking* subsystem.
+> 📦 ARCHIVED (2026-06-21) — Shipped: Phase 0 (core), Phase 1 (ADS-B online), Phase 2 (ADS-B serial
+> MAVLink receiver), Phase 3 (FormationFlight, ADR-036), Phase 4 (ADS-B from UAV via MSP, INAV 8.0+).
+> **Cut:** ADS-B TCP transport (not supported by the author's hardware, no users). **Deferred to future:**
+> Phase 5 radio-telemetry-source radar — see `docs/future/RADIO_SOURCE_RADAR.md` (no current use case for
+> tracking extra radios beside the primary link; technically unblocked now that the passive telemetry
+> parser exists). Kept for reference.
+>
+> Concrete plan for the *foreign-vehicle tracking* subsystem.
 > This doc covers the **backend subsystem + data sources** (Phases 0–3). The user-facing **Advanced
 > Panel + map visualization** is a separate plan — see `RADAR_TRACKING_PANEL_AND_MAP.md` (Plan B). An
 > ADR will be written once the core architecture is locked.

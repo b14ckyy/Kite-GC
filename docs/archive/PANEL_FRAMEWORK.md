@@ -1,5 +1,7 @@
 # Panel Framework
 
+> 📦 ARCHIVED (2026-06-21) — Shipped + in daily use for weeks; all 15 nav-rail panels on `PanelShell`, no legacy base remaining (verified). Living reference; architecture in ADR-029.
+
 > Status: **Complete** (2026-06-04). Phase 0 (shell + control library) signed off; **all** nav-rail
 > panels migrated onto `PanelShell`, cut over, the legacy panels deleted, and the components renamed
 > to their canonical names (see "Cutover done + finalised" below). This doc now serves as the
