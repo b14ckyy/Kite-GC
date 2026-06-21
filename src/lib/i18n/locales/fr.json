@@ -1247,6 +1247,7 @@
     "colTimeout": "T/O",
     "colTarget": "Cible",
     "colActual": "Réel",
+    "colLatency": "Latence",
     "poll": "POLL",
     "init": "INIT",
     "alNoFix": "Pas de fix UAV — alertes de conflit inactives",

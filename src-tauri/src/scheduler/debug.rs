@@ -31,10 +31,20 @@ struct CodeStats {
     timeout_count: u64,
     /// Activity since last emit (reset after each snapshot)
     cycle_status: MspActivity,
-    // Actual rate measurement: count responses in a rolling 1s window
+    // Actual-rate measurement over a rolling ~1 s window. We count requests AND responses separately and
+    // report max(req, resp): a request/response poll has req ≈ resp (the effective rate), while a
+    // fire-and-forget send (MSP_SET_RAW_RC, no reply) only has requests — so its rate is the send cadence
+    // rather than frozen at the last response. The window is rolled over time-based in `maybe_emit`, so a
+    // code that goes quiet correctly decays to 0 Hz instead of holding its last value.
     rate_window_start: Instant,
-    rate_window_count: u64,
+    req_window_count: u64,
+    resp_window_count: u64,
     actual_rate_hz: f64,
+    // Round-trip latency: timestamp of the last request, and the last measured request→response time
+    // (ms). Lets us see the real MSP transaction time per code so the response timeout can be tuned.
+    // Stays 0 for fire-and-forget sends (no reply) — shown as "—".
+    last_request_at: Option<Instant>,
+    latency_ms: f64,
 }
 
 /// Snapshot of a single MSP code's debug info (sent to frontend)
@@ -52,6 +62,8 @@ pub struct MspCodeDebug {
     pub target_rate_hz: f64,
     /// Measured actual rate in Hz over the last second
     pub actual_rate_hz: f64,
+    /// Last measured request→response round-trip in ms (0 = no response / fire-and-forget)
+    pub latency_ms: f64,
 }
 
 /// Full debug snapshot emitted as a Tauri event
@@ -103,8 +115,11 @@ impl DebugTracker {
                     timeout_count: 0,
                     cycle_status: MspActivity::Idle,
                     rate_window_start: now,
-                    rate_window_count: 0,
+                    req_window_count: 0,
+                    resp_window_count: 0,
                     actual_rate_hz: 0.0,
+                    last_request_at: None,
+                    latency_ms: 0.0,
                 },
             );
         }
@@ -123,8 +138,11 @@ impl DebugTracker {
                         timeout_count: 0,
                         cycle_status: MspActivity::Idle,
                         rate_window_start: now,
-                        rate_window_count: 0,
+                        req_window_count: 0,
+                        resp_window_count: 0,
                         actual_rate_hz: 0.0,
+                        last_request_at: None,
+                        latency_ms: 0.0,
                     },
                 );
             }
@@ -159,6 +177,8 @@ impl DebugTracker {
         self.ensure_code(code);
         if let Some(s) = self.stats.get_mut(&code) {
             s.request_count += 1;
+            s.req_window_count += 1; // actual-rate window (covers fire-and-forget sends with no reply)
+            s.last_request_at = Some(Instant::now()); // start the round-trip timer
             // Only upgrade to Request if not already Response/Timeout in this cycle
             if matches!(s.cycle_status, MspActivity::Idle) {
                 s.cycle_status = MspActivity::Request;
@@ -173,16 +193,12 @@ impl DebugTracker {
         self.ensure_code(code);
         if let Some(s) = self.stats.get_mut(&code) {
             s.response_count += 1;
-            s.cycle_status = MspActivity::Response;
-
-            // Per-code rate measurement: count in 1s window then roll over
-            s.rate_window_count += 1;
-            let elapsed = s.rate_window_start.elapsed().as_secs_f64();
-            if elapsed >= 1.0 {
-                s.actual_rate_hz = s.rate_window_count as f64 / elapsed;
-                s.rate_window_count = 0;
-                s.rate_window_start = Instant::now();
+            s.resp_window_count += 1; // actual-rate window; rolled over time-based in maybe_emit
+            // Round-trip latency: time since the matching request (strict request→response, one outstanding).
+            if let Some(sent) = s.last_request_at.take() {
+                s.latency_ms = sent.elapsed().as_secs_f64() * 1000.0;
             }
+            s.cycle_status = MspActivity::Response;
         }
         self.window_bytes_rx += frame_bytes as u64;
         self.window_msg_rx += 1;
@@ -221,6 +237,16 @@ impl DebugTracker {
             .stats
             .iter_mut()
             .map(|(&code, s)| {
+                // Per-code actual-rate rollover (time-based, so a quiet code decays to 0). max(req, resp):
+                // poll codes have req ≈ resp; a no-reply send (SET_RAW_RC) reports its request cadence.
+                let el = s.rate_window_start.elapsed().as_secs_f64();
+                if el >= 1.0 {
+                    s.actual_rate_hz = s.req_window_count.max(s.resp_window_count) as f64 / el;
+                    s.req_window_count = 0;
+                    s.resp_window_count = 0;
+                    s.rate_window_start = Instant::now();
+                }
+
                 let status_str = match s.cycle_status {
                     MspActivity::Idle => "idle",
                     MspActivity::Request => "request",
@@ -239,6 +265,7 @@ impl DebugTracker {
                     last_status: status_str.into(),
                     target_rate_hz: (s.target_rate_hz * 10.0).round() / 10.0,
                     actual_rate_hz: (s.actual_rate_hz * 10.0).round() / 10.0,
+                    latency_ms: (s.latency_ms * 10.0).round() / 10.0,
                 };
                 s.cycle_status = MspActivity::Idle;
                 snapshot
@@ -275,8 +302,11 @@ impl DebugTracker {
             timeout_count: 0,
             cycle_status: MspActivity::Idle,
             rate_window_start: now,
-            rate_window_count: 0,
+            req_window_count: 0,
+            resp_window_count: 0,
             actual_rate_hz: 0.0,
+            last_request_at: None,
+            latency_ms: 0.0,
         });
     }
 }
@@ -290,7 +320,9 @@ fn msp_code_name(code: u16) -> String {
         4 => "MSP_BOARD_INFO".into(),
         5 => "MSP_BUILD_INFO".into(),
         10 => "MSP_NAME".into(),
+        34 => "MSP_MODE_RANGES".into(),
         101 => "MSP_STATUS".into(),
+        105 => "MSP_RC".into(),
         106 => "MSP_RAW_GPS".into(),
         108 => "MSP_ATTITUDE".into(),
         109 => "MSP_ALTITUDE".into(),
@@ -303,13 +335,18 @@ fn msp_code_name(code: u16) -> String {
         150 => "MSP_STATUS_EX".into(),
         151 => "MSP_SENSOR_STATUS".into(),
         166 => "MSP_GPSSTATISTICS".into(),
+        200 => "MSP_SET_RAW_RC".into(),
         209 => "MSP_SET_WP".into(),
+        0x1003 => "MSP2_COMMON_SETTING".into(),
+        0x1004 => "MSP2_COMMON_SET_SETTING".into(),
         0x2000 => "MSPV2_INAV_STATUS".into(),
         0x2002 => "MSPV2_INAV_ANALOG".into(),
         0x2003 => "MSPV2_INAV_MISC".into(),
         0x2009 => "MSPV2_INAV_AIR_SPEED".into(),
         0x2010 => "MSPV2_INAV_MIXER".into(),
         0x2090 => "MSP2_ADSB_VEHICLE_LIST".into(),
+        0x2103 => "MSP2_INAV_GET_LINK_STATS".into(),
+        0x2230 => "MSP2_INAV_SET_AUX_RC".into(),
         _ => format!("MSP_0x{:04X}", code),
     }
 }

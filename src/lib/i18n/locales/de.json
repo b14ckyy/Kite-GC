@@ -1319,6 +1319,7 @@
     "colTimeout": "T/O",
     "colTarget": "Ziel",
     "colActual": "Ist",
+    "colLatency": "Latenz",
     "colId": "ID",
     "colDir": "Ri.",
     "colCount": "Anz.",

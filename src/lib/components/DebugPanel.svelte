@@ -73,6 +73,7 @@
     last_status: string;
     target_rate_hz: number;
     actual_rate_hz: number;
+    latency_ms: number;
   }
 
   interface DebugSnapshot {
@@ -338,6 +339,7 @@
             <th class="col-num">{$t('debug.colTimeout')}</th>
             <th class="col-rate">{$t('debug.colTarget')}</th>
             <th class="col-rate">{$t('debug.colActual')}</th>
+            <th class="col-rate">{$t('debug.colLatency')}</th>
           </tr>
         </thead>
         <tbody>
@@ -350,7 +352,7 @@
                 ></span>
               </td>
               <td class="col-code">{formatCode(msg.code)}</td>
-              <td class="col-name">{msg.name}</td>
+              <td class="col-name" title={msg.name}>{msg.name}</td>
               <td class="col-status">
                 <span class="status-badge" class:polling={msg.is_polling} class:init={!msg.is_polling}>
                   {msg.is_polling ? "POLL" : "INIT"}
@@ -363,6 +365,7 @@
               <td class="col-rate" class:throttled={msg.is_polling && msg.target_rate_hz > 0 && msg.actual_rate_hz < msg.target_rate_hz * 0.85}>
                 {msg.actual_rate_hz > 0 ? `${msg.actual_rate_hz} Hz` : '—'}
               </td>
+              <td class="col-rate">{msg.latency_ms > 0 ? `${msg.latency_ms} ms` : '—'}</td>
             </tr>
           {/each}
         </tbody>
@@ -410,7 +413,7 @@
                 ></span>
               </td>
               <td class="col-code">{msg.id}</td>
-              <td class="col-name">{msg.name}</td>
+              <td class="col-name" title={msg.name}>{msg.name}</td>
               <td class="col-status">
                 <span class="status-badge" class:polling={msg.dir === 'RX'} class:init={msg.dir === 'TX'}>
                   {msg.dir}
@@ -980,7 +983,13 @@
   }
 
   .col-name {
+    /* Flexible column that absorbs the remaining width and truncates with an ellipsis instead of
+       widening the table (max-width:0 + width:100% is the standard single-flex-column table trick). */
+    max-width: 0;
+    width: 100%;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .col-status {

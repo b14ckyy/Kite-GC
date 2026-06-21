@@ -1319,6 +1319,7 @@
     "colTimeout": "T/O",
     "colTarget": "Target",
     "colActual": "Actual",
+    "colLatency": "Latency",
     "colId": "ID",
     "colDir": "Dir",
     "colCount": "Count",
