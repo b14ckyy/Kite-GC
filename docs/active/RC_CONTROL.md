@@ -172,8 +172,8 @@ input/output separation, trivial µs conversion `µs = 1500 + v·500`); the UI s
 are referenced by stable labels **A&lt;n&gt;** (axis) / **B&lt;n&gt;** (button) / **H&lt;n&gt;** (hat
 direction — hats are treated like buttons, 4 dirs each). **No expo** (the firmware does that).
 
-The 7 methods (an idea for a future "direct mode-select" helper that reads INAV box/mode-ranges and maps
-flight modes onto buttons is parked):
+The 8 methods (a future variant that auto-reads INAV box/mode-ranges to label the buttons is parked —
+`buttonSet` already covers the manual "press → fixed value" case):
 
 | Method | Inputs | Behaviour |
 |---|---|---|
@@ -182,8 +182,9 @@ flight modes onto buttons is parked):
 | **dualAxis** | 2 axes/triggers | one adds, one subtracts; both released → centre; mode absolute \| adjust |
 | **hold** | 1 button | high while pressed, low released (invert swaps) |
 | **toggle** | 1 button | cycle 2–6 positions (wrap); optional **hold-to-toggle** (0.5–2 s, anti-accidental for arming) |
-| **buttonStep** | 2 buttons | discrete **3–15** steps, +/−, clamp (15 = fits a 4-bit AUX_RC channel) |
+| **buttonStep** | 2 buttons | discrete **3–25** steps, +/−, clamp (≈40 µs resolution; AUX sent 16-bit) |
 | **buttonAdjust** | 2 buttons | constant-rate ramp +/− while held, clamp |
+| **buttonSet** | up to 6 buttons | each press latches the channel to its own fixed value (µs entered per button) |
 
 - **Defaults:** every adjustable/value-holding method starts at the **lowest µs** (1000), even when
   inverted; passthrough is stateless (follows the input). Each channel has an optional **display name**
@@ -253,7 +254,7 @@ Exact layout deferred — agreed to settle when we build it.
    enumeration, live axis/button/hat stream + shared centre deadband. Verified on Windows.
 2a. **Profiles + raw monitor relocation** *(shipped)* — shareable profile files (§7), Save/New/Delete,
    collapsible raw-input monitor on the config side.
-2b. **Channel mapping** *(shipped)* — channel-centric editor: 7 helper methods (§7), A/B/H input
+2b. **Channel mapping** *(shipped)* — channel-centric editor: 8 helper methods (§7), A/B/H input
    assignment + Learn, per-channel name, live channel-value view; all written into the active profile.
    Local part complete — verified on Windows.
 3a. **MSP message builder + FC reads** *(shipped)* — `msp/rc_encode.rs` (tested encoders), `rc_read_fc_config`

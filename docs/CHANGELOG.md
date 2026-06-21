@@ -36,11 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transport split — CH1–12 (MSP-RC) vs CH13–32 (MSP-AUX) on INAV 9.1+, a single ≤16-channel block on
   8.0–9.0 — which now groups both the channel config editor and the live monitor. Also: an optional
   **hold-to-toggle** (0.5–2 s) on the Button-Toggle method (anti-accidental, e.g. for an arming switch)
-  and the Button-Step range capped at 15 (fits a 4-bit AUX channel). No live streaming yet.
+  and the Button-Step range (originally capped at 15 for a 4-bit AUX channel; later raised to 25 once AUX
+  moved to 16-bit). No live streaming yet.
 - **RC Control — channel mapping (Phase 2b, local).** A channel-centric mapping editor: each RC channel
-  (1..32) is driven by one of **7 input methods** — passthrough, analog-adjust (axis sets rate),
+  (1..32) is driven by one of **8 input methods** — passthrough, analog-adjust (axis sets rate),
   dual-source (two triggers add/subtract), button hold, button toggle (2–6 positions), button step
-  (discrete 3–16) and button adjust (constant-rate). Inputs are referenced as **A/B/H** labels (axes /
+  (discrete 3–25), button adjust (constant-rate) and **button set** (up to 6 buttons, each press latches
+  the channel to its own fixed µs value). Inputs are referenced as **A/B/H** labels (axes /
   buttons / hat directions) and assigned via dropdown or **Learn** (binds the input you move/press the
   most). Per-channel **name** (shown in the live channel monitor), invert, deadband and rate as
   applicable. Everything is normalised −1..+1 internally with a live µs preview, computed by a pure,
