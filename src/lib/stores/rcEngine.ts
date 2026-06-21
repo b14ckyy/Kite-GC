@@ -18,8 +18,9 @@ import {
 /** RC channel number → current µs value. */
 export const channelValues = writable<Record<number, number>>({});
 
-/** Build the A/B/H input frame from a raw HID snapshot. Inputs are 1-based per type (sorted order). */
-function makeFrame(snap: HidSnapshot): InputFrame {
+/** Build the A/B/H input frame from a raw HID snapshot. Inputs are 1-based per type (sorted order).
+ *  Exported so the PX4 manual-control evaluator (stores/rcManual.ts) resolves inputs identically. */
+export function makeFrame(snap: HidSnapshot): InputFrame {
   return {
     axis(label) {
       const n = Number(label.slice(1));

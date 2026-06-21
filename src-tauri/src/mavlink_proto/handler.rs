@@ -10,7 +10,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use ::mavlink::ardupilotmega::{MavMessage, RC_CHANNELS_OVERRIDE_DATA};
+use ::mavlink::ardupilotmega::{MavMessage, RC_CHANNELS_OVERRIDE_DATA, MANUAL_CONTROL_DATA};
 use ::mavlink::{MavHeader, Message};
 use tauri::{AppHandle, Emitter};
 
@@ -156,6 +156,8 @@ fn handler_loop(
     // noisy link (then a QuadPlane is mistaken for a plain plane until reconnect), so we re-request it
     // a few times here until the FC answers. Bounded so a plain plane (no/zero Q_ENABLE) stops soon.
     let is_ardupilot = fc_variant.starts_with("Ardu");
+    // PX4 takes RC over MANUAL_CONTROL (#69); everything else (ArduPilot) over RC_CHANNELS_OVERRIDE (#70).
+    let is_px4 = fc_variant == "PX4";
     let mut quadplane_seen = false;
     let mut param_probes: u8 = 0;
     let mut last_param_probe = Instant::now();
@@ -245,17 +247,22 @@ fn handler_loop(
             last_heartbeat = Instant::now();
         }
 
-        // 2a. RC override streaming (ArduPilot). Send RC_CHANNELS_OVERRIDE at the selected rate while
-        // engaged + fresh; on the falling edge send one release frame so channels return to the real RX.
+        // 2a. RC streaming. ArduPilot → RC_CHANNELS_OVERRIDE (#70); PX4 → MANUAL_CONTROL (#69). Both stream
+        // from the shared RcTxState while engaged + the frontend heartbeat is fresh, at the selected rate.
         {
             let now = Instant::now();
-            let (alive, frame, interval) = match rc_tx.lock() {
+            let (alive, msg, interval) = match rc_tx.lock() {
                 Ok(s) => {
-                    let alive = s.enabled
-                        && now.duration_since(s.last_update) < rc_tx::RC_DEADMAN
-                        && !s.mav_override_us.is_empty();
-                    let frame = if alive { Some(rc_tx::override_channels(&s.mav_override_us)) } else { None };
-                    (alive, frame, s.raw_interval)
+                    let has_payload = if is_px4 { s.mav_manual.is_some() } else { !s.mav_override_us.is_empty() };
+                    let alive = s.enabled && now.duration_since(s.last_update) < rc_tx::RC_DEADMAN && has_payload;
+                    let msg = if !alive {
+                        None
+                    } else if is_px4 {
+                        s.mav_manual.map(|m| manual_control_msg(fc_sysid, &m))
+                    } else {
+                        Some(rc_override_msg(fc_sysid, &rc_tx::override_channels(&s.mav_override_us)))
+                    };
+                    (alive, msg, s.raw_interval)
                 }
                 Err(_) => (false, None, rc_tx::RC_RAW_DEFAULT_INTERVAL),
             };
@@ -267,25 +274,23 @@ fn handler_loop(
                 rc_fast_read = alive;
             }
 
-            if alive {
-                if now.duration_since(rc_override_last) >= interval {
-                    if let Some(ch) = frame {
-                        send_rc_override(&mut *transport, &gcs_header, &mut seq, fc_sysid, &ch,
-                            &mut debug_tracker, &mut link_stats, &recorder);
-                        // Catch-up scheduling: advance by exactly one interval so loop jitter doesn't drag
-                        // the long-term rate below target. If we've fallen more than one interval behind
-                        // (engage, or a stall), resync to now instead of bursting to catch up.
-                        rc_override_last += interval;
-                        if now.duration_since(rc_override_last) > interval {
-                            rc_override_last = now;
-                        }
+            if alive && now.duration_since(rc_override_last) >= interval {
+                if let Some(m) = msg {
+                    send_mav_frame(&mut *transport, &gcs_header, &mut seq, &m,
+                        &mut debug_tracker, &mut link_stats, &recorder);
+                    // Catch-up scheduling: advance by exactly one interval so loop jitter doesn't drag the
+                    // long-term rate below target. If we've fallen more than one interval behind (engage,
+                    // or a stall), resync to now instead of bursting to catch up.
+                    rc_override_last += interval;
+                    if now.duration_since(rc_override_last) > interval {
+                        rc_override_last = now;
                     }
                 }
             }
             // On disengage / deadman we intentionally send NO release frame. With the GCS as the sole RC
             // source (no physical RX) an explicit release fires ArduPilot's RC failsafe instantly; simply
-            // stopping the stream lets the FC hold the last override for RC_OVERRIDE_TIME (~3 s) as a
-            // re-engage grace window before its own failsafe takes over.
+            // stopping the stream lets the FC hold the last override for RC_OVERRIDE_TIME (~3 s, ArduPilot)
+            // / COM_RC_LOSS_T (PX4) as a re-engage grace window before its own failsafe takes over.
         }
 
         // 2b. Re-probe Q_ENABLE until the FC answers (robust QuadPlane detection — see above).
@@ -365,21 +370,10 @@ fn handler_loop(
     }
 }
 
-/// Serialize + send one RC_CHANNELS_OVERRIDE frame (ArduPilot RC injection). `ch` is the 18-channel
-/// positional wire array already carrying the per-band ignore/release sentinels (see rc_tx helpers).
-/// Mirrors the send-path bookkeeping of the command channel (debug stats, link meter, tlog record).
-#[allow(clippy::too_many_arguments)]
-fn send_rc_override(
-    transport: &mut dyn ByteTransport,
-    header: &MavHeader,
-    seq: &mut MavSequence,
-    fc_sysid: u8,
-    ch: &[u16; rc_tx::MAV_OVERRIDE_CHANNELS],
-    debug_tracker: &mut super::debug::MavlinkDebugTracker,
-    link_stats: &mut crate::link_stats::LinkStats,
-    recorder: &Option<FlightRecorderHandle>,
-) {
-    let msg = MavMessage::RC_CHANNELS_OVERRIDE(RC_CHANNELS_OVERRIDE_DATA {
+/// Build an `RC_CHANNELS_OVERRIDE` message (ArduPilot RC injection). `ch` is the 18-channel positional
+/// wire array already carrying the per-band ignore sentinels (see rc_tx::override_channels).
+fn rc_override_msg(fc_sysid: u8, ch: &[u16; rc_tx::MAV_OVERRIDE_CHANNELS]) -> MavMessage {
+    MavMessage::RC_CHANNELS_OVERRIDE(RC_CHANNELS_OVERRIDE_DATA {
         target_system: fc_sysid,
         target_component: 1, // MAV_COMP_ID_AUTOPILOT1
         chan1_raw: ch[0], chan2_raw: ch[1], chan3_raw: ch[2], chan4_raw: ch[3],
@@ -387,15 +381,44 @@ fn send_rc_override(
         chan9_raw: ch[8], chan10_raw: ch[9], chan11_raw: ch[10], chan12_raw: ch[11],
         chan13_raw: ch[12], chan14_raw: ch[13], chan15_raw: ch[14], chan16_raw: ch[15],
         chan17_raw: ch[16], chan18_raw: ch[17],
-    });
-    let frame = codec::serialize_v2(header, &msg, seq);
+    })
+}
+
+/// Build a `MANUAL_CONTROL` message (PX4 RC injection). Axes already normalised to [-1000,1000];
+/// `s`/`t` (pitch/roll-only extra-DOF axes) are unused. aux1–6 + enabled_extensions carry the optional
+/// continuous extension axes.
+fn manual_control_msg(fc_sysid: u8, m: &rc_tx::ManualControl) -> MavMessage {
+    MavMessage::MANUAL_CONTROL(MANUAL_CONTROL_DATA {
+        x: m.x, y: m.y, z: m.z, r: m.r,
+        buttons: m.buttons,
+        target: fc_sysid,
+        buttons2: m.buttons2,
+        enabled_extensions: m.ext,
+        s: 0, t: 0,
+        aux1: m.aux[0], aux2: m.aux[1], aux3: m.aux[2],
+        aux4: m.aux[3], aux5: m.aux[4], aux6: m.aux[5],
+    })
+}
+
+/// Serialize + send one streamed RC message (override / manual), with the same send-path bookkeeping as
+/// the command channel (debug stats, link meter, tlog record).
+fn send_mav_frame(
+    transport: &mut dyn ByteTransport,
+    header: &MavHeader,
+    seq: &mut MavSequence,
+    msg: &MavMessage,
+    debug_tracker: &mut super::debug::MavlinkDebugTracker,
+    link_stats: &mut crate::link_stats::LinkStats,
+    recorder: &Option<FlightRecorderHandle>,
+) {
+    let frame = codec::serialize_v2(header, msg, seq);
     debug_tracker.on_tx(msg.message_id(), frame.len());
     link_stats.on_tx(frame.len());
     if let Some(ref rec) = recorder {
         if let Ok(mut r) = rec.lock() { r.write_raw_mavlink_frame(&frame); }
     }
     if let Err(e) = transport.write_bytes(&frame) {
-        log::warn!("Failed to send RC_CHANNELS_OVERRIDE: {}", e);
+        log::warn!("Failed to send streamed RC frame: {}", e);
     }
 }
 

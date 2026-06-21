@@ -15,6 +15,7 @@ import { channelValues } from './rcEngine';
 import { rcEngaged } from './rcEngage';
 import { rcLayout } from './rcLayout';
 import { rcPlatform } from './rcPlatform';
+import { manualOutput } from './rcManual';
 import { currentChannels } from './rcProfiles';
 import { settings } from './settings';
 
@@ -90,11 +91,19 @@ function evalAux(): void {
 }
 
 function tick(): void {
-  // ArduPilot streams one combined RC_CHANNELS_OVERRIDE frame; INAV splits into RAW + change-only AUX;
-  // PX4 (MANUAL_CONTROL) isn't wired yet, so it streams nothing (the engage UI guards against it too).
+  // ArduPilot streams one combined RC_CHANNELS_OVERRIDE frame; PX4 streams a MANUAL_CONTROL setpoint
+  // (computed live in rcManual); INAV splits into RAW + change-only AUX.
   const platform = get(rcPlatform);
   if (platform === 'ardupilot') {
     void invoke('rc_stream_set_override', { channels: buildOverride() });
+    return;
+  }
+  if (platform === 'px4') {
+    const o = get(manualOutput);
+    void invoke('rc_stream_set_manual', {
+      x: o.x, y: o.y, z: o.z, r: o.r,
+      buttons: o.buttons, buttons2: o.buttons2, aux: o.aux, ext: o.ext,
+    });
     return;
   }
   if (platform !== 'inav') return;

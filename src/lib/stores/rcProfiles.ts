@@ -10,6 +10,7 @@
 import { writable } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import type { RcChannelMap } from '$lib/helpers/rcMethods';
+import type { ManualMap } from './rcManual';
 
 export interface RcProfile {
   /** Display name (also the basis of the on-disk filename). */
@@ -17,8 +18,10 @@ export interface RcProfile {
   /** Device the profile was built for — metadata only, never auto-applied. */
   deviceUuid: string | null;
   deviceName: string | null;
-  /** Channel assignments/methods/behaviour. */
+  /** Channel assignments/methods/behaviour (INAV / ArduPilot channel platforms). */
   channels: RcChannelMap;
+  /** PX4 MANUAL_CONTROL mapping (4 sticks + aux + buttons). Optional — only set for PX4 profiles. */
+  manual?: ManualMap;
 }
 
 /** All profiles found on disk (sorted by name). */

@@ -20,6 +20,8 @@
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
   import ChannelConfig from '$lib/components/control/ChannelConfig.svelte';
   import ChannelStates from '$lib/components/control/ChannelStates.svelte';
+  import ManualConfig from '$lib/components/control/ManualConfig.svelte';
+  import ManualStates from '$lib/components/control/ManualStates.svelte';
   import { settings } from '$lib/stores/settings';
   import {
     hidDevices,
@@ -43,6 +45,7 @@
   import { loadRcFcConfig, rcFcConfig, setOverrideBitmask } from '$lib/stores/rcFcConfig';
   import { rcEngaged, engage, disengage } from '$lib/stores/rcEngage';
   import { syncFromFc } from '$lib/stores/rcMirror';
+  import { rcManual, defaultManualMap } from '$lib/stores/rcManual';
   import '$lib/stores/rcStream'; // self-initialising RC injection pump (engage-driven)
   import { rcLayout } from '$lib/stores/rcLayout';
   import { rcPlatform, rcPlatformLocked, setOfflinePlatform, type RcPlatform } from '$lib/stores/rcPlatform';
@@ -110,14 +113,20 @@
       deviceUuid: selectedDevice?.uuid ?? existing?.deviceUuid ?? null,
       deviceName: selectedDevice?.name ?? existing?.deviceName ?? null,
       channels: structuredClone($currentChannels),
+      manual: structuredClone($rcManual), // PX4 manual map (harmless for channel platforms)
     };
+  }
+
+  /** Load a profile's working state (both the channel map and the PX4 manual map). */
+  function loadWorking(p: RcProfile | null): void {
+    currentChannels.set(p ? structuredClone(p.channels) : {});
+    rcManual.set(p?.manual ? structuredClone(p.manual) : defaultManualMap());
   }
 
   function onProfilePick(e: Event): void {
     const name = (e.currentTarget as HTMLSelectElement).value || null;
     setActive(name);
-    const p = name ? $rcProfiles.find((x) => x.name === name) : null;
-    currentChannels.set(p ? structuredClone(p.channels) : {});
+    loadWorking(name ? $rcProfiles.find((x) => x.name === name) ?? null : null);
   }
 
   async function onSave(): Promise<void> {
@@ -200,8 +209,12 @@
   // ArduPilot over MAVLink: same engage/stream pipeline, RC_CHANNELS_OVERRIDE adapter. No MSP FC-config
   // read, no override-mode gate — the manual engage is the sole guard.
   const connectedArdu = $derived($connection.status === 'connected' && $rcPlatform === 'ardupilot');
-  // Any FC we can inject RC to. (PX4 = MANUAL_CONTROL is not wired yet → not included.)
-  const rcConnected = $derived(connectedMsp || connectedArdu);
+  // PX4 over MAVLink: MANUAL_CONTROL adapter (4 sticks + buttons), separate manual mapping UI.
+  const connectedPx4 = $derived($connection.status === 'connected' && $rcPlatform === 'px4');
+  // Any FC we can inject RC to.
+  const rcConnected = $derived(connectedMsp || connectedArdu || connectedPx4);
+  // PX4 uses the manual map + editor/monitor instead of the channel grid.
+  const isManualPlatform = $derived($rcPlatform === 'px4');
 
   // Armed state (protocol-agnostic: bit 2 of arming flags, set by both the MSP scheduler and the MAVLink
   // handler). Drives the "still armed" confirmation before a manual release.
@@ -298,7 +311,7 @@
       dirPath = await profilesDir();
       const name = $settings.rcControl.activeProfile;
       const p = name ? get(rcProfiles).find((x) => x.name === name) : null;
-      currentChannels.set(p ? structuredClone(p.channels) : {});
+      loadWorking(p ?? null);
     })();
     void (async () => {
       linkUnlisten = await listen<RcLinkWarn>('rc-link-slow', (e) => (linkWarn = e.payload));
@@ -410,19 +423,21 @@
             {$telemetry.mspRcOverride ? $t('rc.overrideActive') : $t('rc.overrideInactive')}
           </div>
         {/if}
+        {#if connectedPx4}
+          <!-- PX4 ignores MANUAL_CONTROL unless COM_RC_IN_MODE allows a MAVLink/joystick source. -->
+          <div class="rc-banner rc-banner-info">
+            <div class="rc-banner-hint">{$t('rc.manual.comRcInModeHint')}</div>
+          </div>
+        {/if}
         <div class="rc-rate">
           <label class="rc-rate-label" for="rc-rate">{$t('rc.rawRate')}</label>
           <select id="rc-rate" class="rc-rate-sel" value={rawRateHz} onchange={onRatePick}>
             {#each RC_RATES as hz (hz)}<option value={hz}>{hz} Hz</option>{/each}
           </select>
         </div>
-      {:else if $connection.status === 'connected' && !$rcLayout.supported}
-        <div class="rc-banner rc-banner-info">
-          <div class="rc-banner-hint">{$t('rc.px4Unsupported')}</div>
-        </div>
       {/if}
       {#if !$hidSnapshot && !$rcEngaged.on}<div class="rc-hint">{$t('rc.waitingInput')}</div>{/if}
-      <ChannelStates />
+      {#if isManualPlatform}<ManualStates />{:else}<ChannelStates />{/if}
     {/if}
   {/snippet}
 
@@ -507,9 +522,9 @@
       {/if}
     </div>
 
-    <!-- Channel mapping. -->
-    <div class="rc-section-title">{$t('rc.channels')}</div>
-    <ChannelConfig />
+    <!-- Mapping: channel grid (INAV/ArduPilot) or the PX4 manual map. -->
+    <div class="rc-section-title">{isManualPlatform ? $t('rc.manual.title') : $t('rc.channels')}</div>
+    {#if isManualPlatform}<ManualConfig />{:else}<ChannelConfig />{/if}
   {/snippet}
 </PanelShell>
 

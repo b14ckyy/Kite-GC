@@ -167,6 +167,29 @@ pub fn rc_stream_set_override(channels: Vec<u16>, state: State<'_, AppState>) ->
     Ok(())
 }
 
+/// Push the latest PX4/MAVLink `MANUAL_CONTROL` setpoint (normalised axes [-1000,1000] + button
+/// bitfields + aux extensions) + refresh the deadman. The MAVLink handler streams it as `MANUAL_CONTROL`
+/// (#69) at the selected rate when the FC is PX4. Doubles as the deadman heartbeat for the PX4 path.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn rc_stream_set_manual(
+    x: i16, y: i16, z: i16, r: i16,
+    buttons: u16, buttons2: u16,
+    aux: Vec<i16>, ext: u8,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mut a = [0i16; 6];
+    for (i, v) in aux.iter().take(6).enumerate() {
+        a[i] = *v;
+    }
+    let mut rc = state.rc_tx.lock().map_err(|e| e.to_string())?;
+    rc.mav_manual = Some(crate::scheduler::rc_tx::ManualControl {
+        x, y, z, r, buttons, buttons2, aux: a, ext,
+    });
+    rc.last_update = std::time::Instant::now();
+    Ok(())
+}
+
 /// Enable/disable the RC injection stream (engage/disengage). Disabling stops all sending immediately;
 /// enabling refreshes the deadman so a first frame can flow right away.
 #[tauri::command]
@@ -178,6 +201,7 @@ pub fn rc_stream_enable(enabled: bool, state: State<'_, AppState>) -> Result<(),
     } else {
         rc.aux_pending.clear();
         rc.mav_override_us.clear();
+        rc.mav_manual = None;
     }
     Ok(())
 }

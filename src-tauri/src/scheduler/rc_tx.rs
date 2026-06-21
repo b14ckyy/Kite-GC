@@ -51,6 +51,25 @@ pub struct RcTxState {
     /// (the MAVLink handler maps it to the per-band "ignore" sentinel). Empty = nothing to stream.
     /// Independent of `raw`/`aux_pending` (those are MSP-only); only one protocol thread reads each.
     pub mav_override_us: Vec<u16>,
+    /// PX4/MAVLink manual-control state (`MANUAL_CONTROL` #69). `None` = nothing to stream. The PX4 path
+    /// uses this instead of `mav_override_us` (normalised 4 axes + buttons, not per-channel µs).
+    pub mav_manual: Option<ManualControl>,
+}
+
+/// One `MANUAL_CONTROL` setpoint (PX4 manual flying over MAVLink). Axes are normalised to [-1000, 1000]
+/// (z thrust: -1000 = 0 %, 0 = mid, +1000 = full). `buttons`/`buttons2` are the 1→pressed bitfields for
+/// joystick buttons 1–16 / 17–32 (PX4 maps each to an action FC-side). `aux[0..6]` are the optional
+/// continuous extension axes (aux1–6); `ext` is the `enabled_extensions` bitmask flagging which are valid.
+#[derive(Clone, Copy)]
+pub struct ManualControl {
+    pub x: i16,
+    pub y: i16,
+    pub z: i16,
+    pub r: i16,
+    pub buttons: u16,
+    pub buttons2: u16,
+    pub aux: [i16; 6],
+    pub ext: u8,
 }
 
 impl Default for RcTxState {
@@ -62,6 +81,7 @@ impl Default for RcTxState {
             aux_pending: BTreeMap::new(),
             raw_interval: RC_RAW_DEFAULT_INTERVAL,
             mav_override_us: Vec::new(),
+            mav_manual: None,
         }
     }
 }

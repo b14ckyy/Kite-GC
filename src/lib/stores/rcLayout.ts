@@ -59,9 +59,10 @@ export const rcLayout = derived([connection, rcPlatform], ([$c, $platform]): RcL
     };
   }
   if ($platform === 'px4') {
-    // MANUAL_CONTROL: 4 normalised axes — channel mapping doesn't fit yet (deferred). Keep a minimal,
-    // clearly-unsupported layout so the editor renders without pretending the channels stream.
-    return { platform: 'px4', split: false, rawMax: 4, auxMin: 5, auxMax: 4, supported: false };
+    // MANUAL_CONTROL: 4 normalised axes + aux — not a channel grid. The panel renders the dedicated
+    // manual editor/monitor (ManualConfig/ManualStates) for PX4, so these channel-grid fields are unused;
+    // `supported` just gates the engage UI on.
+    return { platform: 'px4', split: false, rawMax: 4, auxMin: 5, auxMax: 4, supported: true };
   }
 
   // INAV / MSP.

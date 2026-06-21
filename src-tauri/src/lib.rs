@@ -49,7 +49,7 @@ use commands::hid::{
 use commands::rc::{
     rc_read_fc_config, rc_set_override_bitmask, rc_read_channels,
     rc_stream_update, rc_stream_set_aux, rc_stream_enable, rc_stream_set_rate,
-    rc_stream_set_override,
+    rc_stream_set_override, rc_stream_set_manual,
 };
 use commands::info::get_app_version;
 use commands::radar::{radar_configure, radar_set_center, radar_set_node_pos, radar_snapshot};
@@ -288,6 +288,7 @@ pub fn run() {
             rc_stream_enable,
             rc_stream_set_rate,
             rc_stream_set_override,
+            rc_stream_set_manual,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Kite Ground Control");
