@@ -55,6 +55,12 @@ impl WgiBackend {
         };
         let count = controllers.Size().unwrap_or(0);
 
+        // Reuse the existing controller objects for devices still present — recreating them resets
+        // GetCurrentReading to a zero/no-reading state, which would re-trigger the startup "no valid
+        // reading yet" gate every rescan. Only added devices get a fresh object.
+        let mut prev: HashMap<String, DeviceEntry> =
+            self.devices.drain(..).map(|d| (d.uuid.clone(), d)).collect();
+
         let mut entries = Vec::new();
         // Intentionally index with GetAt instead of into_iter() — the iterator can crash under some
         // hosts (see gilrs issue 132).
@@ -64,6 +70,12 @@ impl WgiBackend {
                 .NonRoamableId()
                 .map(|h| h.to_string())
                 .unwrap_or_default();
+
+            if let Some(existing) = prev.remove(&uuid) {
+                entries.push(existing); // keep the live controller (and its reading)
+                continue;
+            }
+
             let name = ctrl
                 .DisplayName()
                 .map(|h| h.to_string())
@@ -115,9 +127,18 @@ impl super::HidBackend for WgiBackend {
         let mut buttons = vec![false; dev.buttons];
         let mut switches = vec![GameControllerSwitchPosition::Center; dev.switches];
         let mut axes = vec![0.0_f64; dev.axes];
-        dev.ctrl
+        let timestamp = dev
+            .ctrl
             .GetCurrentReading(&mut buttons, &mut switches, &mut axes)
             .ok()?;
+
+        // WGI returns a zero-initialised reading (all axes 0.0 → −1.0 after remap) with timestamp 0
+        // until the device delivers its first report — some controllers stay silent at rest. Suppress
+        // it so we never surface/stream bogus neutral values at startup; the first input (any movement)
+        // produces a real reading. evdev (Linux) reads the kernel's cached state, so it isn't affected.
+        if timestamp == 0 {
+            return None;
+        }
 
         Some(HidSnapshot {
             id,

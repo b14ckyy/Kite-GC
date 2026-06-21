@@ -151,6 +151,7 @@
     "axes": "Achsen",
     "buttons": "Tasten",
     "hats": "HATs",
+    "waitingInput": "Warte auf ersten Input — ein Bedienelement einmal bewegen zum Initialisieren.",
     "moveHint": "Bewege einen Stick, um seine Achsen zu erkennen.",
     "pressHint": "Drücke eine Taste, um sie zu erkennen.",
     "mappingSoon": "Kanal-Zuordnung — folgt als Nächstes.",

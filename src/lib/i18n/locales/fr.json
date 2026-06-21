@@ -140,6 +140,7 @@
     "axes": "Axes",
     "buttons": "Boutons",
     "hats": "Hats",
+    "waitingInput": "En attente de la première entrée — bougez une commande une fois pour initialiser.",
     "moveHint": "Bougez un manche pour détecter ses axes.",
     "pressHint": "Appuyez sur un bouton pour le détecter.",
     "mappingSoon": "Affectation des voies — bientôt disponible.",

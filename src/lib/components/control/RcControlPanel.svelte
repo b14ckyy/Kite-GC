@@ -268,6 +268,7 @@
     {#if !selectedDevice}
       <div class="rc-empty">{$t('rc.connectHint')}</div>
     {:else}
+      {#if !$hidSnapshot}<div class="rc-hint">{$t('rc.waitingInput')}</div>{/if}
       <ChannelStates />
     {/if}
   {/snippet}
