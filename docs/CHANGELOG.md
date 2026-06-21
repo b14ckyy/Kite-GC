@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **RC Control — ArduPilot over MAVLink (SITL-verified).** The same HID/mapping/profile UI now steers
+  ArduPilot via `RC_CHANNELS_OVERRIDE` (#70) — a firmware-gated copy of the MSP pipeline. A **platform
+  dropdown** behind "Device" (INAV · ArduPilot · PX4) drives the layout/adapter; it's derived from the FC
+  and **locked** on connect, and the offline choice is persisted for config without an FC. ArduPilot uses
+  **Primary CH1–8 / Secondary CH9–16** (one override frame; the channel-group labels switch to
+  Primary/Secondary accordingly). Engage **seeds** from the FC's `RC_CHANNELS` broadcast (no extra
+  request) so there's no jump; the MAVLink handler streams the override at the selected **10/15/20/25 Hz**
+  with an **adaptive read timeout + catch-up pacing** (the read-driven loop otherwise ran the rate ~⅓
+  low). On disengage we send **no forced release** — the FC holds the last override for `RC_OVERRIDE_TIME`
+  (~3 s) as a re-engage grace window instead of failsafing instantly (no physical RX = GCS is the sole RC
+  source). A new **armed-disengage confirmation** (protocol-agnostic) warns before handing control back
+  while armed. The RC tab is hidden on passive-telemetry links (no uplink). _Deferred:_ per-platform
+  profile auto-load, `SYSID_MYGCS` mismatch warning, PX4 `MANUAL_CONTROL`. See
+  `docs/active/MAVLINK_RC_CONTROL.md`.
 - **RC Control — live send pipeline (Phase 4).** Kite can now actually steer INAV over MSP. Channel split
   is **CH1–16 RAW_RC / CH17–32 AUX_RC** (keeping the mode switches incl. `MSP RC OVERRIDE` on the
   releasable RAW band). Three stages: **monitoring** (not engaged — preview only), **AUX-only** (engaged:

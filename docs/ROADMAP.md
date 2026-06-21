@@ -567,9 +567,12 @@ passive decoders. Dropdown panel under the connection bar; persisted, auto-conne
 - [~] HID controller input (gamepad/joystick) — joystick/HID phase of **Vehicle control** above. **INAV
   (Phases 1–4, pending on-hardware test):** native HID backend, channel-mapping profiles, safety locks,
   and the live MSP send pipeline (CH1–16 RAW_RC / CH17–32 AUX_RC, engage gate, seed-on-connect, deadman,
-  link probe) — `docs/archive/MSP_RC_CONTROL.md`. **MAVLink (planned):** ArduPilot `RC_CHANNELS_OVERRIDE`
-  (firmware-gated copy, CH1–8 / CH9–16) + PX4 `MANUAL_CONTROL`, with platform gating + per-platform
-  profiles — `docs/active/MAVLINK_RC_CONTROL.md`.
+  link probe) — `docs/archive/MSP_RC_CONTROL.md`. **MAVLink — ArduPilot shipped (SITL-verified):**
+  `RC_CHANNELS_OVERRIDE` (#70) as a firmware-gated copy of the MSP pipeline — Primary CH1–8 / Secondary
+  CH9–16, platform dropdown (locked on connect), seed from `RC_CHANNELS`, deadman, adaptive read-timeout
+  + catch-up pacing (accurate 10–25 Hz), grace-window disengage (no forced release), armed-disengage
+  confirmation. **PX4 `MANUAL_CONTROL` still planned.** Deferred: per-platform profile auto-load,
+  `SYSID_MYGCS` mismatch warning — `docs/active/MAVLINK_RC_CONTROL.md`.
 - [x] **Stick / gimbal overlay** — animated RC transmitter sticks (two gimbals, Mode 2) beside the replay player, à la Blackbox Explorer. **Replay-only** (live RC is only ~1 Hz — not worth it): reads the log-imported RC columns — INAV blackbox shows `rcCommand` (blue) **and** raw `rcData` (orange, behind) so the FC's expo / self-level override is visible; ArduPilot `.bin` shows RCIN (blue). Reusable `GimbalStick` component + pure `stickInput` adapter (per-firmware channel order + scaling). Plan: `docs/active/STICK_OVERLAY.md`. _Follow-ups:_ stick modes 1/3/4 + AETR/TAER setting; live HUD reuse if a cheap live RC source appears.
 - [x] **RC Link widget** — protocol-agnostic, adaptive HUD widget that shows whatever the active link reports and hides the rest (LQ big when present, else RSSI %; RSSI dBm + SNR as meta). Backed by a unified `LinkStatsData` (`rssi_percent` normalized at the source + optional `rssi_dbm` / `lq` / `snr_db`) on a new `telemetry-linkstats` event. Sources: **CRSF** LinkStatistics `0x14` (uplink RSSI dBm + LQ + SNR), **SmartPort** (RSSI `0xF101` + LQ from `0xF010`/"VFR" = `100 − loss`; RSSI-0 from the FC's unconfigured channel ignored), **MAVLink** `RC_CHANNELS` RSSI, **LTM** S-frame RSSI, **INAV** `MSPV2_INAV_ANALOG` RSSI and (9.1+) `MSP2_INAV_GET_LINK_STATS` for real dBm/LQ/SNR. Replay maps the DB `link_quality`/`rssi`. _Open:_ record live LQ/SNR to the DB (see Link Statistics above).
 - [ ] Audio status alerts (TTS)
