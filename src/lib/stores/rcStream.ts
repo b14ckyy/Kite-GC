@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// RC injection pump (docs/active/RC_CONTROL.md §10 Phase 4c). While engaged, this pushes the live
+// RC injection pump (docs/archive/MSP_RC_CONTROL.md §10 Phase 4c). While engaged, this pushes the live
 // channel frame to the backend at a fixed rate (the scheduler thread does the actual MSP streaming):
 //   • RAW-RC every 30 ms — steady heartbeat (drives the backend deadman) + latest values, so the FC
 //     holds the last command even when nothing changes;

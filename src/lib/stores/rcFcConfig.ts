@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Live INAV config relevant to GCS RC injection (docs/active/RC_CONTROL.md). Read on demand from the
+// Live INAV config relevant to GCS RC injection (docs/archive/MSP_RC_CONTROL.md). Read on demand from the
 // FC via `rc_read_fc_config` (receiver_type + msp_override_channels + mode ranges). Feeds the mode
 // labels under channels and the RC safety locks/warnings. Null until read / when not MSP-connected.
 

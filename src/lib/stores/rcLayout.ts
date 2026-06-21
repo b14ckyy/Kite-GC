@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
 // RC channel layout — how channels split across the two MSP transports, derived from the connected FC
-// (docs/active/RC_CONTROL.md §7). INAV 9.1+ (AUX_RC) → CH1–16 via MSP_SET_RAW_RC ("MSP-RC") + CH17–32
+// (docs/archive/MSP_RC_CONTROL.md §7). INAV 9.1+ (AUX_RC) → CH1–16 via MSP_SET_RAW_RC ("MSP-RC") + CH17–32
 // via MSP2_INAV_SET_AUX_RC ("MSP-AUX"). INAV 8.0–9.0 → a single MSP-RC block, capped at 16 channels.
 // Offline / unknown → assume the modern 9.1+ split (the richer layout; the user configures without an FC).
 //

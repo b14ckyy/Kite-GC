@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
 // RC input methods — the reusable, pure "helper" layer that turns HID inputs into a channel value
-// (docs/active/RC_CONTROL.md §7). Each RC channel is driven by one method. Values are NORMALISED
+// (docs/archive/MSP_RC_CONTROL.md §7). Each RC channel is driven by one method. Values are NORMALISED
 // −1..+1 internally (input/output stay comparable, trivial µs conversion); the UI shows the µs preview.
 // Inputs are referenced by stable labels: A<n> = axis, B<n> = button, H<n> = hat direction (hats are
 // treated like buttons). Stateful methods (adjust integrators, toggle/step) keep their state in
@@ -154,7 +154,7 @@ export function initState(method: RcMethod): MethodState {
 
 /** Seed a method's runtime state from the FC's CURRENT channel value (µs) at engage time, so a
  *  stateful method continues from where the FC already is — no jump / unexpected mode change at
- *  handover (docs/active/RC_CONTROL.md §10 Phase 4). Reverse of `toUs`. Stateless / live-input methods
+ *  handover (docs/archive/MSP_RC_CONTROL.md §10 Phase 4). Reverse of `toUs`. Stateless / live-input methods
  *  (passthrough, hold, dualAxis-absolute) follow their input directly and are returned at their
  *  base state (the caller skips re-seeding them). */
 export function seedState(method: RcMethod, us: number): MethodState {

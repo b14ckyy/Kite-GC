@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
 // RC engine — runs the input methods (helpers/rcMethods.ts) against the live HID frame to produce the
-// channel µs values (docs/active/RC_CONTROL.md §7). Drives the live channel-state view now; the MSP
+// channel µs values (docs/archive/MSP_RC_CONTROL.md §7). Drives the live channel-state view now; the MSP
 // stream later. Stateful methods (adjust integrators, toggle/step) keep per-channel state across frames;
 // state is reset when a channel's config changes. Subscribes to the ~50 Hz hid-input stream so rate
 // integrators advance even while an input is held steady.
@@ -49,7 +49,7 @@ let lastTime = 0;
 
 /** Seed the per-channel runtime state from the FC's current channel values (µs, index 0 = CH1), so on
  *  engage every stateful method continues from where the FC already is — no jump at handover
- *  (docs/active/RC_CONTROL.md §10 Phase 4). Passthrough / hold follow live input and are left untouched.
+ *  (docs/archive/MSP_RC_CONTROL.md §10 Phase 4). Passthrough / hold follow live input and are left untouched.
  *  The next HID frame recomputes from these seeds; we also push the seeded values to `channelValues`
  *  immediately so the RC-Out view reflects the handover without waiting for a frame. */
 export function seedFromFc(channelsUs: number[]): void {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// RC safety evaluation (docs/active/RC_CONTROL.md safety section). Only **AUX_RC channels we control**
+// RC safety evaluation (docs/archive/MSP_RC_CONTROL.md safety section). Only **AUX_RC channels we control**
 // matter: those latch in the FC and persist on GCS link loss (no failsafe), unlike MSP-RC channels
 // (CH1–16) which fail safe. So we evaluate modes whose channel is BOTH in the AUX range AND configured
 // in the active profile (i.e. we send a latching AUX_RC value for it):

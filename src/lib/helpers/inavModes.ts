@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// INAV flight-mode boxes — permanent box-ID → name + safety category (docs/active/RC_CONTROL.md
+// INAV flight-mode boxes — permanent box-ID → name + safety category (docs/archive/MSP_RC_CONTROL.md
 // safety section). IDs/names from INAV `fc/fc_msp_box.c`. Used for the mode labels under each channel
 // and the RC safety locks/warnings:
 //   • critical — RTH/FAILSAFE override every other mode (incl. MANUAL); ARM on a latched AUX channel

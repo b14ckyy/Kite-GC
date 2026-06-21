@@ -2,7 +2,7 @@
 
 Audience: an AI assistant on the Linux build machine. Purpose: diagnose/fix the Linux HID backend if it
 fails to compile or detect a joystick. The Windows backend is verified working; Linux was written on a
-Windows host and **never compiled there** (cfg-gated out). Full design: `docs/active/RC_CONTROL.md` §6.
+Windows host and **never compiled there** (cfg-gated out). Full design: `docs/archive/MSP_RC_CONTROL.md` §6.
 
 ## What this subsystem is
 Native HID/joystick input for GCS RC control (INAV RC over MSP), Phase 1 = raw input only. A dedicated

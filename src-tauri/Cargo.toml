@@ -50,7 +50,7 @@ mavlink = { version = "0.17", default-features = false, features = ["std", "ardu
 num-traits = "0.2"  # FromPrimitive for lossless MavCmd/MavFrame <-> int (mission codec round-trip)
 tiff = "0.9"  # decode Copernicus GLO-30 GeoTIFF DEM tiles (Float32, DEFLATE, predictor 3)
 
-# HID / joystick input for GCS RC control (docs/active/RC_CONTROL.md). Native per-OS backends read
+# HID / joystick input for GCS RC control (docs/archive/MSP_RC_CONTROL.md). Native per-OS backends read
 # RAW axes/buttons/hats (no gamepad projection) so flight hardware / RC transmitters map correctly:
 #   Windows → Windows.Gaming.Input RawGameController (the `windows` crate is already pulled by btleplug;
 #             we just add the Gaming_Input features). Linux → evdev (pure Rust, no libevdev).

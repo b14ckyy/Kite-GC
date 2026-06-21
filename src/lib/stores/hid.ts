@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// HID / joystick input store — mirrors the Rust `crate::hid` backend (docs/active/RC_CONTROL.md).
+// HID / joystick input store — mirrors the Rust `crate::hid` backend (docs/archive/MSP_RC_CONTROL.md).
 // The backend thread streams the connected-device list (`hid-devices`) and the live raw axis/button
 // state of the selected device (`hid-input`). This store wires those events into reactive state and
 // exposes start/stop/select. Phase 1 carries RAW values only — channel mapping comes later.

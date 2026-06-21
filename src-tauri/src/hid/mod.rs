@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// HID / joystick input backend for GCS RC control (INAV RC over MSP — see docs/active/RC_CONTROL.md).
+// HID / joystick input backend for GCS RC control (INAV RC over MSP — see docs/archive/MSP_RC_CONTROL.md).
 //
 // Phase 1: raw device input only. A dedicated thread polls the selected device at ~50 Hz and streams
 // RAW axis/button/hat state to the frontend (`hid-input`), plus the connected-device list

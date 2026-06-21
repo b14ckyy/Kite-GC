@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// FC RC-channel sync (docs/active/RC_CONTROL.md §10 Phase 4a). We do NOT poll the FC continuously
+// FC RC-channel sync (docs/archive/MSP_RC_CONTROL.md §10 Phase 4a). We do NOT poll the FC continuously
 // (MSP_RC is a ~80-byte reply — a recurring RX spike): instead we read the FC's current channel values
 // ONCE, at the moment we engage, and seed our internal channel state from it (helpers/rcMethods.ts
 // seedState). That way a stateful method (toggle/adjust) continues from where the FC already is — no

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// RC-control engage gate (docs/active/RC_CONTROL.md §10 Phase 4b). "Engaged" = we have taken over and
+// RC-control engage gate (docs/archive/MSP_RC_CONTROL.md §10 Phase 4b). "Engaged" = we have taken over and
 // (later phase) stream RC to the FC. Engaging always SYNCS first: read the FC's current channels once
 // and seed our state, so there's no jump at handover. Two ways to engage:
 //   • serial RX → automatic: the panel watches the FC's MSP RC OVERRIDE box and engages while it's on

@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
 // RC-control FC-side commands — read the INAV config that decides whether/which GCS-injected RC
-// channels actually take effect (docs/active/RC_CONTROL.md §3/§4). One-shot MSP reads through the
+// channels actually take effect (docs/archive/MSP_RC_CONTROL.md §3/§4). One-shot MSP reads through the
 // scheduler. The local HID side lives in commands/hid.rs; the byte encoders in msp/rc_encode.rs.
 
 use serde::Serialize;
@@ -14,7 +14,7 @@ use crate::scheduler::SchedulerHandle;
 use crate::state::{ActiveProtocol, AppState};
 
 /// One configured mode-activation range (a box assigned to an RC channel window). Only non-empty
-/// ranges are returned. Used for mode labels + safety locks (docs/active/RC_CONTROL.md §-safety).
+/// ranges are returned. Used for mode labels + safety locks (docs/archive/MSP_RC_CONTROL.md §-safety).
 #[derive(Serialize)]
 pub struct ModeRange {
     /// INAV permanent box ID (e.g. ARM=0, NAV RTH=10, FAILSAFE=27).
@@ -128,7 +128,7 @@ pub fn rc_read_channels(state: State<'_, AppState>) -> Result<Vec<u16>, String> 
     Ok(raw.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect())
 }
 
-// ── RC injection stream (docs/active/RC_CONTROL.md §10 Phase 4c) ──────────────────────────────────
+// ── RC injection stream (docs/archive/MSP_RC_CONTROL.md §10 Phase 4c) ──────────────────────────────────
 // The frontend (rcEngine) drives these; the MSP scheduler thread does the actual sending from the
 // shared RcTxState. `rc_stream_update` doubles as the deadman heartbeat (it bumps `last_update`).
 

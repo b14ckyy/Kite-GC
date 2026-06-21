@@ -58,7 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   centre deadband to every raw axis (both backends) so a controller's resting offset can't leak a
   stray command.
 - **RC Control — HID/joystick input foundation (Phase 1, local).** Groundwork for GCS RC steering of
-  INAV over MSP (`docs/active/RC_CONTROL.md`). A new opt-in **RC** nav-rail panel (Settings → Data →
+  INAV over MSP (`docs/archive/MSP_RC_CONTROL.md`). A new opt-in **RC** nav-rail panel (Settings → Data →
   "RC Control") with a live device picker + calibration view (bipolar axis bars, hat indicators,
   numbered buttons) — works offline, no FC needed. Input is read by a dedicated backend thread using
   **native per-OS raw backends** (not a gamepad library, which misclassifies HOTAS/RC-transmitter axes

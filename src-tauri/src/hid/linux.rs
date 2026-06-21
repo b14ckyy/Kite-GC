@@ -4,7 +4,7 @@
 // Linux HID backend — evdev (pure Rust). Reads the device's raw ABS axes, BTN keys and HAT axes
 // directly via EVIOCGABS / EVIOCGKEY ioctls each tick (no event-stream draining needed for a live
 // state view). HAT0..3 X/Y absolute-axis pairs are surfaced as hats, the rest as axes, matching the
-// Windows backend's shape. See docs/active/RC_CONTROL.md §6.
+// Windows backend's shape. See docs/archive/MSP_RC_CONTROL.md §6.
 //
 // NOTE: compiled only on Linux; it is not built/verified on the Windows dev host. Requires read access
 // to /dev/input/event* (the user must be in the `input` group).

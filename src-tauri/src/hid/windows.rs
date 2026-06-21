@@ -4,7 +4,7 @@
 // Windows HID backend — Windows.Gaming.Input `RawGameController`. Unlike the WGI *Gamepad* projection
 // (which forces an Xbox layout and misclassifies HOTAS / RC-transmitter axes as buttons), the raw
 // controller exposes the device's true axes / buttons / switches. We read the live reading every tick.
-// See docs/active/RC_CONTROL.md §6.
+// See docs/archive/MSP_RC_CONTROL.md §6.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};

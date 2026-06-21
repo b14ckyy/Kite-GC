@@ -3,7 +3,7 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
-<!-- RcControlPanel.svelte — GCS RC control over MSP for INAV (docs/active/RC_CONTROL.md).
+<!-- RcControlPanel.svelte — GCS RC control over MSP for INAV (docs/archive/MSP_RC_CONTROL.md).
      Left (compact) stage = control surface (live channel view — coming with the mapping phase).
      Right (advanced) stage = Configuration: a collapsible raw-input monitor (default collapsed, just a
      wiring check) + the profile bar (dropdown + Save/New/Delete), and below it the channel mapping

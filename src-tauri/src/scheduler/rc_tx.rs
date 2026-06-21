@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// RC-injection shared state (docs/active/RC_CONTROL.md §10 Phase 4c). The frontend (rcEngine) writes the
+// RC-injection shared state (docs/archive/MSP_RC_CONTROL.md §10 Phase 4c). The frontend (rcEngine) writes the
 // latest channel frame here as a heartbeat; the scheduler thread reads it and streams the RC to the FC:
 //   • MSP_SET_RAW_RC  — fire-and-forget at a fixed rate (highest priority, never blocks on an ACK so the
 //     RAW_RC cadence stays jitter-free);

@@ -37,7 +37,7 @@ pub struct AppState {
     /// (Some while radar runs) and a runtime on/off flag the MSP scheduler polls.
     pub radar_ingest: Arc<Mutex<Option<std::sync::mpsc::Sender<SourceUpdate>>>>,
     pub radar_msp_enabled: Arc<AtomicBool>,
-    /// GCS RC-injection state (docs/active/RC_CONTROL.md §10 Phase 4c). Written by the rc_stream_*
+    /// GCS RC-injection state (docs/archive/MSP_RC_CONTROL.md §10 Phase 4c). Written by the rc_stream_*
     /// commands, read+streamed by the MSP scheduler thread. Independent of `protocol` lifecycle.
     pub rc_tx: RcTxHandle,
     /// Stop handle for the live BLE scan session (Some while scanning). Dropping/replacing the

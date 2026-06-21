@@ -49,7 +49,7 @@ const RADAR_MSP_INTERVAL: Duration = Duration::from_millis(1000);
 /// Shared ingest channel + on/off flag for the scheduler-fed ADS-B-via-MSP source.
 type RadarIngest = Arc<Mutex<Option<mpsc::Sender<SourceUpdate>>>>;
 
-/// RC injection cadences (docs/active/RC_CONTROL.md §10 Phase 4c). RAW rate is dynamic (RcTxState,
+/// RC injection cadences (docs/archive/MSP_RC_CONTROL.md §10 Phase 4c). RAW rate is dynamic (RcTxState,
 /// user-selectable 10–25 Hz); AUX re-send weave is fixed at 5 Hz.
 const RC_AUX_INTERVAL: Duration = Duration::from_millis(200);
 /// Frontend-heartbeat deadman: no fresh RC frame for this long → stop streaming (FC failsafes).

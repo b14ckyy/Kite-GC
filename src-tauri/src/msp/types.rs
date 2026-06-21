@@ -68,7 +68,7 @@ pub const MSP_SET_WP: u16 = 209;
 pub const MSP_MODE_RANGES: u16 = 34;
 pub const MSP_RX_CONFIG: u16 = 44;
 
-// ── RC control over MSP (see msp/rc_encode.rs, docs/active/RC_CONTROL.md) ──
+// ── RC control over MSP (see msp/rc_encode.rs, docs/archive/MSP_RC_CONTROL.md) ──
 pub const MSP_SET_RAW_RC: u16 = 200;
 pub const MSP2_INAV_SET_AUX_RC: u16 = 0x2230;
 /// Generic setting read/write by name (null-terminated) — used to read receiver_type /

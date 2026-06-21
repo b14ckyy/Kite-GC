@@ -206,7 +206,7 @@ export const DEFAULT_AIRSPACE: AirspaceSettings = {
   compact: false,
 };
 
-// ── RC Control (INAV RC over MSP — see docs/active/RC_CONTROL.md) ──────────────────────────────────
+// ── RC Control (INAV RC over MSP — see docs/archive/MSP_RC_CONTROL.md) ──────────────────────────────────
 // Only lightweight UI state lives in settings. The actual channel mappings live in shareable profile
 // FILES under Documents/KiteGC/HID-Profiles (see stores/rcProfiles.ts) — not in localStorage.
 

@@ -3,7 +3,7 @@
 
 // HID / joystick input commands — start/stop the input thread and pick the streamed device. The
 // thread emits `hid-devices` (connected list) and `hid-input` (live raw axis/button state). See
-// `crate::hid` and docs/active/RC_CONTROL.md.
+// `crate::hid` and docs/archive/MSP_RC_CONTROL.md.
 
 use tauri::{AppHandle, State};
 

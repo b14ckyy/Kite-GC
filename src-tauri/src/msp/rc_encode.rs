@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// RC-control message builders (docs/active/RC_CONTROL.md §7). Pure byte-level encoders for the two
+// RC-control message builders (docs/archive/MSP_RC_CONTROL.md §7). Pure byte-level encoders for the two
 // INAV messages used to inject RC from the GCS — verified against the firmware decoders in
 // `src/main/fc/fc_msp.c` (MSP_SET_RAW_RC / MSP2_INAV_SET_AUX_RC):
 //

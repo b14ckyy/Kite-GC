@@ -5,7 +5,7 @@
 // see src-tauri/src/hid/profiles.rs). A profile bundles the channel assignments/methods/behaviour and
 // is NOT auto-linked to any device or FC — the user picks the active profile and the matching FC
 // config themselves. This store mirrors the files and exposes load/save/delete + the working channel
-// map currently being edited. See docs/active/RC_CONTROL.md §7.
+// map currently being edited. See docs/archive/MSP_RC_CONTROL.md §7.
 
 import { writable } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
