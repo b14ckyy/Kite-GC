@@ -3,7 +3,7 @@
 
 // RC safety evaluation (docs/active/RC_CONTROL.md safety section). Only **AUX_RC channels we control**
 // matter: those latch in the FC and persist on GCS link loss (no failsafe), unlike MSP-RC channels
-// (CH1–12) which fail safe. So we evaluate modes whose channel is BOTH in the AUX range AND configured
+// (CH1–16) which fail safe. So we evaluate modes whose channel is BOTH in the AUX range AND configured
 // in the active profile (i.e. we send a latching AUX_RC value for it):
 //   • critical (ARM/RTH/FAILSAFE) → BLOCK all RC output (e.g. ARM latched on link loss = can't disarm).
 //   • gps autonomous (CRUISE/WP/POSHOLD/ALTHOLD) → WARN (overridable only by MANUAL/RTH on link loss);

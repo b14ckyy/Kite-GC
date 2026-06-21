@@ -10,7 +10,10 @@
 import { writable, get } from 'svelte/store';
 import { hidSnapshot, type HidSnapshot } from './hid';
 import { currentChannels } from './rcProfiles';
-import { initState, stepMethod, toUs, type InputFrame, type MethodState } from '$lib/helpers/rcMethods';
+import {
+  initState, seedState, stepMethod, toUs,
+  type InputFrame, type MethodState, type RcMethod,
+} from '$lib/helpers/rcMethods';
 
 /** RC channel number → current µs value. */
 export const channelValues = writable<Record<number, number>>({});
@@ -43,6 +46,28 @@ function makeFrame(snap: HidSnapshot): InputFrame {
 
 const states = new Map<number, { cfg: unknown; state: MethodState }>();
 let lastTime = 0;
+
+/** Seed the per-channel runtime state from the FC's current channel values (µs, index 0 = CH1), so on
+ *  engage every stateful method continues from where the FC already is — no jump at handover
+ *  (docs/active/RC_CONTROL.md §10 Phase 4). Passthrough / hold follow live input and are left untouched.
+ *  The next HID frame recomputes from these seeds; we also push the seeded values to `channelValues`
+ *  immediately so the RC-Out view reflects the handover without waiting for a frame. */
+export function seedFromFc(channelsUs: number[]): void {
+  const channels = get(currentChannels);
+  const seeded: Record<number, number> = {};
+  for (const [key, cfg] of Object.entries(channels)) {
+    const ch = Number(key);
+    const us = channelsUs[ch - 1];
+    if (us == null) continue;
+    const m = cfg as RcMethod;
+    if (m.kind === 'passthrough' || m.kind === 'hold') continue; // live input — nothing to latch
+    if (m.kind === 'dualAxis' && m.mode === 'absolute') continue;
+    const state = seedState(m, us);
+    states.set(ch, { cfg, state });
+    seeded[ch] = toUs(state.value);
+  }
+  if (Object.keys(seeded).length) channelValues.update((cur) => ({ ...cur, ...seeded }));
+}
 
 hidSnapshot.subscribe((snap) => {
   if (!snap) return;

@@ -415,6 +415,11 @@ fn connect_msp(
         None
     };
 
+    // Fresh link starts with RC injection off (frontend re-engages explicitly).
+    if let Ok(mut rc) = state.rc_tx.lock() {
+        *rc = crate::scheduler::rc_tx::RcTxState::default();
+    }
+
     let handle = scheduler::start(
         Box::new(transport),
         config,
@@ -422,6 +427,7 @@ fn connect_msp(
         recorder_handle,
         state.radar_ingest.clone(),
         state.radar_msp_enabled.clone(),
+        state.rc_tx.clone(),
     );
 
     // Store MSP scheduler handle and FC info

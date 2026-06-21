@@ -453,6 +453,7 @@ impl CrsfDecoder {
                 flight_mode_flags: 0, // CRSF carries a single mode string, not the raw INAV bitmask
                 cpu_load: 0,
                 sensor_status: 0,
+                msp_rc_override: false,
             };
             let _ = app.emit("telemetry-status", &status);
             let _ = app.emit("telemetry-flightmode", &s.mode);

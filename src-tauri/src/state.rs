@@ -14,6 +14,7 @@ use crate::msp::FcInfo;
 use crate::passive_telemetry::PassiveHandle;
 use crate::radar::source::SourceUpdate;
 use crate::radar::RadarManager;
+use crate::scheduler::rc_tx::{RcTxHandle, RcTxState};
 use crate::scheduler::SchedulerHandle;
 
 /// Which protocol is currently active
@@ -36,6 +37,9 @@ pub struct AppState {
     /// (Some while radar runs) and a runtime on/off flag the MSP scheduler polls.
     pub radar_ingest: Arc<Mutex<Option<std::sync::mpsc::Sender<SourceUpdate>>>>,
     pub radar_msp_enabled: Arc<AtomicBool>,
+    /// GCS RC-injection state (docs/active/RC_CONTROL.md §10 Phase 4c). Written by the rc_stream_*
+    /// commands, read+streamed by the MSP scheduler thread. Independent of `protocol` lifecycle.
+    pub rc_tx: RcTxHandle,
     /// Stop handle for the live BLE scan session (Some while scanning). Dropping/replacing the
     /// sender ends the session — see `commands::connection::ble_scan_start` / `ble_scan_stop`.
     pub ble_scan_stop: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
@@ -61,6 +65,7 @@ impl AppState {
             radar: Mutex::new(radar),
             radar_ingest,
             radar_msp_enabled: Arc::new(AtomicBool::new(false)),
+            rc_tx: Arc::new(Mutex::new(RcTxState::default())),
             ble_scan_stop: Mutex::new(None),
             aero: Mutex::new(None),
             pending_session: Arc::new(Mutex::new(None)),

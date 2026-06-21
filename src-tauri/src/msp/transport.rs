@@ -27,6 +27,9 @@ pub struct MspTransport {
     /// Shared raw-serial log sink (ADR-049). Every outgoing frame ('o') and incoming read-chunk ('i')
     /// is captured here in mwptools' v2 format while the recorder has a logger open; otherwise a no-op.
     raw_sink: MspRawSink,
+    /// Distinct MSP codes of non-matching messages parsed during reads (unsolicited / fire-and-forget
+    /// ACKs). Drained by `take_unsolicited_codes` — see the RC AUX_RC confirmation path.
+    unsolicited: Vec<u16>,
 }
 
 impl MspTransport {
@@ -38,6 +41,7 @@ impl MspTransport {
             parser: MspParser::new(),
             connection_lost: false,
             raw_sink,
+            unsolicited: Vec::new(),
         }
     }
 
@@ -46,10 +50,24 @@ impl MspTransport {
     pub fn into_inner(self) -> Box<dyn ByteTransport> {
         self.inner
     }
+
+    /// Write a pre-encoded MSP frame, raw-logging it and flagging a lost connection on write failure.
+    fn write_frame(&mut self, frame: Vec<u8>) -> Result<(), String> {
+        if let Err(e) = self.inner.write_bytes(&frame) {
+            self.connection_lost = true; // failed write = device gone (same as msp_request)
+            return Err(format!("MSP send failed: {}", e));
+        }
+        log_to_sink(&self.raw_sink, DIR_OUT, &frame);
+        Ok(())
+    }
 }
 
 impl Transport for MspTransport {
     fn msp_request(&mut self, code: u16, payload: &[u8]) -> Result<MspMessage, String> {
+        self.msp_request_timeout(code, payload, MSP_RESPONSE_TIMEOUT_MS)
+    }
+
+    fn msp_request_timeout(&mut self, code: u16, payload: &[u8], timeout_ms: u64) -> Result<MspMessage, String> {
         // Encode and send MSP v2 frame
         let frame = MspCodec::encode_v2(code, payload);
         if let Err(e) = self.inner.write_bytes(&frame) {
@@ -63,7 +81,7 @@ impl Transport for MspTransport {
 
         // Read until we get the matching response or timeout
         let mut buf = [0u8; 512];
-        let deadline = Instant::now() + Duration::from_millis(MSP_RESPONSE_TIMEOUT_MS);
+        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
 
         loop {
             if Instant::now() > deadline {
@@ -82,7 +100,11 @@ impl Transport for MspTransport {
                             if msg.code == code {
                                 return Ok(msg);
                             }
-                            // Non-matching message — discard (unsolicited or out-of-order)
+                            // Non-matching message (unsolicited or out-of-order) — record its code so a
+                            // fire-and-forget ACK (e.g. SET_AUX_RC's 0x2230) can be observed, then drop it.
+                            if !self.unsolicited.contains(&msg.code) {
+                                self.unsolicited.push(msg.code);
+                            }
                         }
                     }
                 }
@@ -99,6 +121,19 @@ impl Transport for MspTransport {
                 }
             }
         }
+    }
+
+    fn msp_send(&mut self, code: u16, payload: &[u8]) -> Result<(), String> {
+        self.write_frame(MspCodec::encode_v2(code, payload))
+    }
+
+    fn msp_send_no_reply(&mut self, code: u16, payload: &[u8]) -> Result<(), String> {
+        // flag = 1 → INAV sends no reply for SET_RAW_RC (zero downlink for the RC stream).
+        self.write_frame(MspCodec::encode_v2_flagged(code, payload, 1))
+    }
+
+    fn take_unsolicited_codes(&mut self) -> Vec<u16> {
+        std::mem::take(&mut self.unsolicited)
     }
 
     fn description(&self) -> String {

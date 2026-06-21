@@ -217,12 +217,15 @@ export interface RcControlSettings {
   selectedUuid: string | null;
   /** Name of the active profile (re-selected on next open), or null. */
   activeProfile: string | null;
+  /** RAW_RC stream rate in Hz (10/15/20/25). Default 10 — conservative for slow OTA links. */
+  rawRateHz: number;
 }
 
 export const DEFAULT_RC_CONTROL: RcControlSettings = {
   enabled: false,
   selectedUuid: null,
   activeProfile: null,
+  rawRateHz: 10,
 };
 
 /** FC system-message (STATUSTEXT) toast verbosity: off, errors only, warnings+errors, or everything. */

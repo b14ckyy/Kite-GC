@@ -8,7 +8,8 @@
 use serde::Serialize;
 use tauri::State;
 
-use crate::msp::{MSP2_COMMON_SETTING, MSP2_COMMON_SET_SETTING, MSP_MODE_RANGES};
+use crate::msp::rc_encode::encode_raw_rc;
+use crate::msp::{MSP2_COMMON_SETTING, MSP2_COMMON_SET_SETTING, MSP_MODE_RANGES, MSP_RC};
 use crate::scheduler::SchedulerHandle;
 use crate::state::{ActiveProtocol, AppState};
 
@@ -110,5 +111,70 @@ pub fn rc_set_override_bitmask(mask: u32, state: State<'_, AppState>) -> Result<
     payload.extend_from_slice(&mask.to_le_bytes()); // u32 LE value
     handle.msp_request(MSP2_COMMON_SET_SETTING, &payload)?;
     eprintln!("[RC] set msp_override_channels = 0x{mask:x} (runtime only)");
+    Ok(())
+}
+
+/// Read the FC's current RC channel values (MSP_RC) as µs per channel (CH1..). The handover mirror
+/// polls this (~0.5 Hz) so our internal state can track what the FC currently has — no jump on engage.
+#[tauri::command(async)]
+pub fn rc_read_channels(state: State<'_, AppState>) -> Result<Vec<u16>, String> {
+    let proto = state.protocol.lock().map_err(|e| e.to_string())?;
+    let handle = match proto.as_ref() {
+        Some(ActiveProtocol::Msp(h)) => h,
+        Some(_) => return Err("FC is not running MSP (INAV)".into()),
+        None => return Err("Not connected".into()),
+    };
+    let raw = handle.msp_request(MSP_RC, &[])?;
+    Ok(raw.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect())
+}
+
+// ── RC injection stream (docs/active/RC_CONTROL.md §10 Phase 4c) ──────────────────────────────────
+// The frontend (rcEngine) drives these; the MSP scheduler thread does the actual sending from the
+// shared RcTxState. `rc_stream_update` doubles as the deadman heartbeat (it bumps `last_update`).
+
+/// Push the latest RAW-RC frame (µs per channel, CH1..rawMax) to the injection stream + refresh the
+/// deadman. Encoded here so the scheduler hot path only writes bytes. No-op effect until enabled.
+#[tauri::command]
+pub fn rc_stream_update(channels: Vec<u16>, state: State<'_, AppState>) -> Result<(), String> {
+    let mut rc = state.rc_tx.lock().map_err(|e| e.to_string())?;
+    rc.raw = encode_raw_rc(&channels);
+    rc.last_update = std::time::Instant::now();
+    Ok(())
+}
+
+/// Push AUX-RC channel changes (latched overlay). `channels` are 0-based indices (≥16 / CH17+ by Kite
+/// policy), `values` the matching target µs. They're accumulated into the pending map; the scheduler
+/// packs the minimal 16-bit run and re-sends at 5 Hz until the FC ACKs. Call only with channels that
+/// actually changed — sending one channel costs one channel, not the whole AUX block.
+#[tauri::command]
+pub fn rc_stream_set_aux(channels: Vec<u8>, values: Vec<u16>, state: State<'_, AppState>) -> Result<(), String> {
+    let mut rc = state.rc_tx.lock().map_err(|e| e.to_string())?;
+    for (c, v) in channels.iter().zip(values.iter()) {
+        rc.aux_pending.insert(*c, *v);
+    }
+    Ok(())
+}
+
+/// Enable/disable the RC injection stream (engage/disengage). Disabling stops all sending immediately;
+/// enabling refreshes the deadman so a first frame can flow right away.
+#[tauri::command]
+pub fn rc_stream_enable(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+    let mut rc = state.rc_tx.lock().map_err(|e| e.to_string())?;
+    rc.enabled = enabled;
+    if enabled {
+        rc.last_update = std::time::Instant::now();
+    } else {
+        rc.aux_pending.clear();
+    }
+    Ok(())
+}
+
+/// Set the RAW_RC send rate (Hz). Clamped to 5..=50; the UI offers 10/15/20/25 (default 10 for slow
+/// links). AUX stays fixed at 5 Hz regardless.
+#[tauri::command]
+pub fn rc_stream_set_rate(hz: u16, state: State<'_, AppState>) -> Result<(), String> {
+    let hz = hz.clamp(5, 50);
+    let mut rc = state.rc_tx.lock().map_err(|e| e.to_string())?;
+    rc.raw_interval = std::time::Duration::from_millis((1000 / hz as u64).max(1));
     Ok(())
 }

@@ -401,6 +401,7 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
                 flight_mode_flags,
                 cpu_load: 0, // Not available from HEARTBEAT
                 sensor_status: 0,
+                msp_rc_override: false,
             };
             let _ = app_handle.emit("telemetry-status", &data);
 

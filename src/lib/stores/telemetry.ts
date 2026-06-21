@@ -64,6 +64,9 @@ export interface TelemetryData {
   /** Raw flight-mode flags. For MAVLink this is the FC's `custom_mode` (used by the vehicle-control
    *  panel to match/highlight the active mode); for MSP it is INAV's box flag bitfield (forensic). */
   flightModeFlags: number;
+  /** INAV `MSP RC OVERRIDE` box active (permanent ID 50). Not a flight mode, so it's surfaced
+   *  separately here — drives the RC-control serial engage trigger. */
+  mspRcOverride: boolean;
 
   // Sensor hardware status (from MSP_SENSOR_STATUS 151)
   // Values: 0=NONE, 1=OK, 2=UNAVAILABLE, 3=UNHEALTHY
@@ -106,7 +109,7 @@ const defaultTelemetry: TelemetryData = {
   airspeed: 0,
   voltage: 0, current: 0, mAhDrawn: 0, rssi: 0, power: 0, batteryPercentage: 0, cellCount: 0,
   link: { rssiPercent: null, rssiDbm: null, lq: null, snrDb: null },
-  armingFlags: 0, cpuLoad: 0, sensorStatus: 0, flightModeFlags: 0,
+  armingFlags: 0, cpuLoad: 0, sensorStatus: 0, flightModeFlags: 0, mspRcOverride: false,
   sensorGyro: 0, sensorAcc: 0, sensorMag: 0, sensorBaro: 0,
   sensorGps: 0, sensorRangefinder: 0, sensorPitot: 0, sensorOpflow: 0, prearmHealthy: 0,
   ekfStatus: 0, ekfType: 0,
@@ -317,7 +320,7 @@ export async function startTelemetryListeners() {
   );
 
   unlisteners.push(
-    await listen<{ arming_flags: number; flight_mode_flags: number; cpu_load: number; sensor_status: number }>('telemetry-status', (event) => {
+    await listen<{ arming_flags: number; flight_mode_flags: number; cpu_load: number; sensor_status: number; msp_rc_override?: boolean }>('telemetry-status', (event) => {
       // flight_mode_flags is now forensic only — the canonical mode comes via telemetry-flightmode.
       telemetry.update((t) => ({
         ...t,
@@ -325,6 +328,7 @@ export async function startTelemetryListeners() {
         cpuLoad: event.payload.cpu_load,
         sensorStatus: event.payload.sensor_status,
         flightModeFlags: event.payload.flight_mode_flags,
+        mspRcOverride: event.payload.msp_rc_override ?? false,
         lastUpdate: Date.now(),
       }));
     })

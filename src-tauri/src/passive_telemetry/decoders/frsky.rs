@@ -329,6 +329,7 @@ impl FrskyDecoder {
                 flight_mode_flags: s.mode_flags,
                 cpu_load: 0,
                 sensor_status: 0,
+                msp_rc_override: false,
             };
             let fm: FlightModeState = classify_inav(s.mode_flags);
             let _ = app.emit("telemetry-status", &status);

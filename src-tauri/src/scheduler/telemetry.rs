@@ -90,6 +90,12 @@ pub struct StatusData {
     pub flight_mode_flags: u32,
     pub cpu_load: u16,
     pub sensor_status: u16,
+    /// MSP RC OVERRIDE box (permanent ID 50) currently active. Not a flight mode, so it never appears
+    /// in `flight_mode_flags` — surfaced separately as the RC-control engage trigger (serial RX: we
+    /// start streaming RAW_RC when the pilot flips this on the TX). `#[serde(default)]` keeps older
+    /// recorded payloads loadable.
+    #[serde(default)]
+    pub msp_rc_override: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -427,6 +433,36 @@ fn parse_active_modes(payload: &[u8], box_ids: &[u8]) -> u32 {
     flags
 }
 
+/// INAV permanent box ID for MSP RC OVERRIDE (the box that makes the FC accept MSP-injected RC).
+const BOX_MSP_RC_OVERRIDE: usize = 50;
+
+/// Whether a given permanent box ID is currently active, read from the MSPV2_INAV_STATUS activeModes
+/// bitset (indexed by MSP_BOXIDS order, translated to permanent IDs). Used for the RC-control engage
+/// trigger: the override box is not a flight mode, so `parse_active_modes` (which keeps only flight
+/// modes) drops it — we check it directly here.
+fn box_active(payload: &[u8], box_ids: &[u8], target: usize) -> bool {
+    if payload.len() < 15 {
+        return false;
+    }
+    let modes_bytes = &payload[13..payload.len() - 1];
+    for (byte_idx, &byte) in modes_bytes.iter().enumerate() {
+        for bit in 0..8usize {
+            if byte & (1 << bit) != 0 {
+                let bit_index = byte_idx * 8 + bit;
+                let pid = if bit_index < box_ids.len() {
+                    box_ids[bit_index] as usize
+                } else {
+                    bit_index
+                };
+                if pid == target {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 /// MSPV2_INAV_STATUS (0x2000): comprehensive FC status
 /// Layout: [cycleTime:u16, i2cErrors:u16, sensorStatus:u16, cpuLoad:u16,
 ///          profileAndBattProfile:u8, armingFlags:u32, activeModes:..., mixerProfile:u8]
@@ -441,6 +477,7 @@ fn decode_status(payload: &[u8], box_ids: &[u8]) -> TelemetryPayload {
         flight_mode_flags,
         cpu_load,
         sensor_status,
+        msp_rc_override: box_active(payload, box_ids, BOX_MSP_RC_OVERRIDE),
     })
 }
 
@@ -531,6 +568,7 @@ pub fn feed_recorder(code: u16, payload: &[u8], recorder: &mut FlightRecorder, b
                 flight_mode_flags: parse_active_modes(payload, box_ids),
                 cpu_load: read_u16(payload, 6),
                 sensor_status: read_u16(payload, 4),
+                msp_rc_override: box_active(payload, box_ids, BOX_MSP_RC_OVERRIDE),
             };
             recorder.on_status(&data);
         }

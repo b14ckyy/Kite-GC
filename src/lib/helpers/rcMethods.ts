@@ -140,6 +140,39 @@ export function initState(method: RcMethod): MethodState {
   return { value, pos, prev: {}, held: 0 };
 }
 
+/** Seed a method's runtime state from the FC's CURRENT channel value (µs) at engage time, so a
+ *  stateful method continues from where the FC already is — no jump / unexpected mode change at
+ *  handover (docs/active/RC_CONTROL.md §10 Phase 4). Reverse of `toUs`. Stateless / live-input methods
+ *  (passthrough, hold, dualAxis-absolute) follow their input directly and are returned at their
+ *  base state (the caller skips re-seeding them). */
+export function seedState(method: RcMethod, us: number): MethodState {
+  const v = clamp((us - 1500) / 500, -1, 1);
+  const base = initState(method);
+  switch (method.kind) {
+    case 'analogAdjust':
+    case 'buttonAdjust':
+      return { ...base, value: v };
+    case 'dualAxis':
+      return method.mode === 'adjust' ? { ...base, value: v } : base;
+    case 'toggle': {
+      // Latch onto the position whose value is closest to the FC's current value.
+      let pos = 0;
+      let best = Infinity;
+      method.positions.forEach((p, i) => {
+        const d = Math.abs(p - v);
+        if (d < best) { best = d; pos = i; }
+      });
+      return { ...base, pos, value: method.positions[pos] ?? -1 };
+    }
+    case 'buttonStep': {
+      const pos = clamp(Math.round(((v + 1) / 2) * (method.steps - 1)), 0, method.steps - 1);
+      return { ...base, pos, value: stepValue(pos, method.steps) };
+    }
+    default:
+      return base; // passthrough / hold — live input, nothing to latch
+  }
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────────────────────────
 
 /** Apply a centre deadband to a −1..+1 value (rescaled so it still reaches ±1). */

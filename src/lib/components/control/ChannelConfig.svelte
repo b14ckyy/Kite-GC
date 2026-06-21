@@ -199,8 +199,8 @@
       {#if modes.length}
         <div class="cc-modes">
           {#each modes as m (m.permanent_id)}
-            <!-- Only AUX_RC channels (CH13+) are safety-relevant: they latch and persist on GCS loss.
-                 The same mode on an MSP-RC channel (CH1–12) fails safe, so it's shown neutral. -->
+            <!-- Only AUX_RC channels (CH17+) are safety-relevant: they latch and persist on GCS loss.
+                 The same mode on an MSP-RC channel (CH1–16) fails safe, so it's shown neutral. -->
             <span
               class="cc-mode"
               class:crit={boxCategory(m.permanent_id) === 'critical' && ch > $rcLayout.rawMax}

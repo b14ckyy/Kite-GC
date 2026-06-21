@@ -78,6 +78,7 @@ export function toTelemetryData(r: TelemetryRecord, fcVariant = 'INAV'): Telemet
     cpuLoad: r.cpu_load ?? 0,
     sensorStatus: r.hw_health_status ?? 0,
     flightModeFlags: 0, // raw custom_mode is live-only (vehicle control); not replayed from the DB
+    mspRcOverride: false, // live-only (RC control engage); not replayed from the DB
 
     // Sensor hardware status — not individually recorded in DB
     sensorGyro: 0,

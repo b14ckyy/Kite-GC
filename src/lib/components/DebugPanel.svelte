@@ -15,6 +15,7 @@
   import { hidSnapshot } from "$lib/stores/hid";
   import { currentChannels } from "$lib/stores/rcProfiles";
   import { channelValues } from "$lib/stores/rcEngine";
+  import { fcChannels } from "$lib/stores/rcMirror";
   import { boxName } from "$lib/helpers/inavModes";
 
   let { onclose }: { onclose: () => void } = $props();
@@ -606,6 +607,10 @@
       <div class="cap-row">
         <span class="stat-label">{$t('debug.rcChannels')}</span>
         <span class="cap-path">{channelSummary($currentChannels, $channelValues)}</span>
+      </div>
+      <div class="cap-row">
+        <span class="stat-label">{$t('debug.rcFcMirror')}</span>
+        <span class="cap-path">{$fcChannels.length ? $fcChannels.map((v, i) => `CH${i + 1}:${v}`).join('  ') : '—'}</span>
       </div>
     </div>
   {:else}

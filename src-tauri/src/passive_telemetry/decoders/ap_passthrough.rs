@@ -188,6 +188,7 @@ impl ApPassthroughDecoder {
                 flight_mode_flags: 0,
                 cpu_load: 0,
                 sensor_status: 0,
+                msp_rc_override: false,
             };
             let variant = if s.variant.is_empty() { "copter" } else { s.variant.as_str() };
             let fm: FlightModeState = classify_ardupilot(s.custom_mode, variant);

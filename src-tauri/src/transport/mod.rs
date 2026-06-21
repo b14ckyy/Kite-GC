@@ -83,6 +83,35 @@ pub trait Transport: Send {
     /// Send an MSP v2 request and wait for the matching response
     fn msp_request(&mut self, code: u16, payload: &[u8]) -> Result<MspMessage, String>;
 
+    /// Like `msp_request` but with a caller-chosen response timeout (ms). Used by the RC link-speed
+    /// probe to bound how long it waits for each SET_RAW_RC ACK. Default: ignore the timeout and
+    /// delegate (transports that don't support it keep their built-in timeout).
+    fn msp_request_timeout(&mut self, code: u16, payload: &[u8], timeout_ms: u64) -> Result<MspMessage, String> {
+        let _ = timeout_ms;
+        self.msp_request(code, payload)
+    }
+
+    /// Send an MSP v2 frame **without** waiting for the reply (fire-and-forget). Used for the RC
+    /// injection stream (SET_RAW_RC / SET_AUX_RC), where blocking on each ACK would jitter the RC rate.
+    /// The FC's ACK arrives asynchronously and is surfaced via `take_unsolicited_codes`. Default:
+    /// delegate to `msp_request` and drop the reply.
+    fn msp_send(&mut self, code: u16, payload: &[u8]) -> Result<(), String> {
+        self.msp_request(code, payload).map(|_| ())
+    }
+
+    /// Like `msp_send`, but with the MSPv2 header flag set to 1 — INAV suppresses the reply for
+    /// `MSP_SET_RAW_RC` (zero downlink for the RC stream). Used for the non-probe RAW_RC stream; AUX_RC
+    /// keeps `msp_send` (flag 0) so its ACK can be observed. Default: delegate to `msp_send`.
+    fn msp_send_no_reply(&mut self, code: u16, payload: &[u8]) -> Result<(), String> {
+        self.msp_send(code, payload)
+    }
+
+    /// Drain the MSP codes of unsolicited / out-of-order responses seen since the last call — e.g. the
+    /// echoed ACK of a fire-and-forget `msp_send` (a SET_AUX_RC confirmation). Default: none.
+    fn take_unsolicited_codes(&mut self) -> Vec<u16> {
+        Vec::new()
+    }
+
     /// Human-readable description of this transport (for logging)
     fn description(&self) -> String;
 

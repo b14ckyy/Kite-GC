@@ -61,14 +61,21 @@ impl MspCodec {
         frame
     }
 
-    /// Encode an MSP v2 request frame
+    /// Encode an MSP v2 request frame (flag = 0 → normal request, FC replies).
     pub fn encode_v2(code: u16, payload: &[u8]) -> Vec<u8> {
+        Self::encode_v2_flagged(code, payload, 0)
+    }
+
+    /// Encode an MSP v2 request with an explicit header flag. INAV treats `flag = 1` on `MSP_SET_RAW_RC`
+    /// as **fire-and-forget** (no reply) → zero downlink for the RC stream. Only meaningful for
+    /// SET_RAW_RC; other commands ignore it and reply as usual.
+    pub fn encode_v2_flagged(code: u16, payload: &[u8], flag: u8) -> Vec<u8> {
         let payload_len = payload.len() as u16;
         let mut frame = Vec::with_capacity(9 + payload.len());
         frame.push(b'$');
         frame.push(b'X');
         frame.push(b'<');
-        frame.push(0); // flag
+        frame.push(flag);
         frame.push((code & 0xFF) as u8);
         frame.push((code >> 8) as u8);
         frame.push((payload_len & 0xFF) as u8);
