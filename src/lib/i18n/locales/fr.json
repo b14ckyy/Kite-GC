@@ -204,6 +204,8 @@
     "modeAdjust": "Ajustement",
     "positions": "Positions",
     "steps": "Paliers",
+    "buttonSetButtons": "Boutons (appui → valeur fixe)",
+    "buttonSetAdd": "Ajouter un bouton",
     "remove": "Retirer",
     "method": {
       "label": "Méthode",
@@ -215,7 +217,8 @@
       "hold": "Bouton maintenu",
       "toggle": "Bouton bascule",
       "buttonStep": "Bouton pas-à-pas",
-      "buttonAdjust": "Bouton ajustement"
+      "buttonAdjust": "Bouton ajustement",
+      "buttonSet": "Bouton valeur fixe"
     }
   },
   "control": {

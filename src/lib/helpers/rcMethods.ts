@@ -80,13 +80,13 @@ export interface ToggleConfig {
   holdMs?: number;
 }
 
-/** 2 buttons step a channel +/− through 3..15 discrete steps (clamp at ends). Capped at 15 so it fits
- *  a 4-bit AUX_RC channel (value 0 = "no update", leaving 15 usable levels). */
+/** 2 buttons step a channel +/− through 3..25 discrete steps (clamp at ends). 25 steps ≈ 40 µs
+ *  resolution — fine since AUX_RC is sent 16-bit (the old 15-step / 4-bit cap no longer applies). */
 export interface ButtonStepConfig {
   kind: 'buttonStep';
   inputUp: string;
   inputDown: string;
-  steps: number; // 3..15
+  steps: number; // 3..25
 }
 
 /** 2 buttons ramp a channel +/− at a constant rate while held (clamp at ends). */
@@ -95,6 +95,15 @@ export interface ButtonAdjustConfig {
   inputUp: string;
   inputDown: string;
   rate: number; // normalised units/sec
+}
+
+/** Up to 6 buttons; each press latches the channel to its own fixed value (held until another is
+ *  pressed). Unlike `toggle` (cycle through one button) each button jumps straight to a set value —
+ *  e.g. direct flight-mode select. Values are normalised; the editor enters them as µs (1000–2000). */
+export interface ButtonSetConfig {
+  kind: 'buttonSet';
+  inputs: string[]; // 1..6 button labels
+  values: number[]; // matching normalised targets, same length as inputs
 }
 
 /** Every channel config also carries an optional display name (shown in the channel monitor). */
@@ -106,6 +115,7 @@ export type RcMethod = { name?: string } & (
   | ToggleConfig
   | ButtonStepConfig
   | ButtonAdjustConfig
+  | ButtonSetConfig
 );
 
 /** RC channel number (1..32) → its method config. */
@@ -136,6 +146,8 @@ export function initState(method: RcMethod): MethodState {
     pos = method.positions.indexOf(Math.min(...method.positions));
     if (pos < 0) pos = 0;
     value = method.positions[pos];
+  } else if (method.kind === 'buttonSet' && method.values.length) {
+    value = method.values[0]; // hold the first button's value until one is pressed
   }
   return { value, pos, prev: {}, held: 0 };
 }
@@ -167,6 +179,16 @@ export function seedState(method: RcMethod, us: number): MethodState {
     case 'buttonStep': {
       const pos = clamp(Math.round(((v + 1) / 2) * (method.steps - 1)), 0, method.steps - 1);
       return { ...base, pos, value: stepValue(pos, method.steps) };
+    }
+    case 'buttonSet': {
+      // Latch onto the button whose value is closest to the FC's current value.
+      let pos = 0;
+      let best = Infinity;
+      method.values.forEach((p, i) => {
+        const d = Math.abs(p - v);
+        if (d < best) { best = d; pos = i; }
+      });
+      return { ...base, pos, value: method.values[pos] ?? -1 };
     }
     default:
       return base; // passthrough / hold — live input, nothing to latch
@@ -277,6 +299,20 @@ export function stepMethod(
       next.value = clamp(state.value + dir * method.rate * dt, -1, 1);
       return { value: next.value, state: next };
     }
+    case 'buttonSet': {
+      // Each button latches its own fixed value on press (rising edge); held until another is pressed.
+      let value = state.value;
+      let pos = state.pos;
+      method.inputs.forEach((label, i) => {
+        if (edge(next, label, frame.button(label))) {
+          value = method.values[i] ?? -1;
+          pos = i;
+        }
+      });
+      next.value = value;
+      next.pos = pos;
+      return { value, state: next };
+    }
   }
 }
 
@@ -298,5 +334,7 @@ export function defaultMethod(kind: RcMethodKind, input: string): RcMethod {
       return { kind, inputUp: input, inputDown: '', steps: 5 };
     case 'buttonAdjust':
       return { kind, inputUp: input, inputDown: '', rate: 1 };
+    case 'buttonSet':
+      return { kind, inputs: [input], values: [0] }; // one button, centre (1500 µs)
   }
 }

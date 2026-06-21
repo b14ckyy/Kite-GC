@@ -215,6 +215,8 @@
     "modeAdjust": "Adjust",
     "positions": "Positionen",
     "steps": "Stufen",
+    "buttonSetButtons": "Buttons (Druck → Wert setzen)",
+    "buttonSetAdd": "Button hinzufügen",
     "remove": "Entfernen",
     "method": {
       "label": "Methode",
@@ -226,7 +228,8 @@
       "hold": "Button-Hold",
       "toggle": "Button-Toggle",
       "buttonStep": "Button-Step",
-      "buttonAdjust": "Button-Adjust"
+      "buttonAdjust": "Button-Adjust",
+      "buttonSet": "Button-Set"
     }
   },
   "control": {

@@ -21,12 +21,13 @@
   import {
     defaultMethod,
     evenPositions,
+    toUs,
     type RcMethod,
     type RcMethodKind,
   } from '$lib/helpers/rcMethods';
 
   const AXIS_KINDS: RcMethodKind[] = ['passthrough', 'analogAdjust', 'dualAxis'];
-  const BUTTON_KINDS: RcMethodKind[] = ['hold', 'toggle', 'buttonStep', 'buttonAdjust'];
+  const BUTTON_KINDS: RcMethodKind[] = ['hold', 'toggle', 'buttonStep', 'buttonAdjust', 'buttonSet'];
 
   interface Slot {
     key: string; // config field name
@@ -78,8 +79,29 @@
           { key: 'inputUp', type: 'button', label: $t('rc.sourceUp'), value: cfg.inputUp },
           { key: 'inputDown', type: 'button', label: $t('rc.sourceDown'), value: cfg.inputDown },
         ];
+      case 'buttonSet':
+        return []; // dynamic button list rendered separately (per-button input + value)
     }
   }
+
+  // ── buttonSet: dynamic per-button input + fixed µs value (up to 6) ──
+  function bsetUpdate(ch: number, fn: (cfg: import('$lib/helpers/rcMethods').ButtonSetConfig) => void): void {
+    currentChannels.update((m) => {
+      const cur = m[ch];
+      if (cur?.kind !== 'buttonSet') return m;
+      const next = { ...cur, inputs: [...cur.inputs], values: [...cur.values] };
+      fn(next);
+      return { ...m, [ch]: next };
+    });
+  }
+  const setBSetInput = (ch: number, i: number, label: string) => bsetUpdate(ch, (c) => { c.inputs[i] = label; });
+  /** UI enters µs (1000–2000); stored normalised. */
+  const setBSetValue = (ch: number, i: number, us: number) =>
+    bsetUpdate(ch, (c) => { c.values[i] = Math.max(-1, Math.min(1, (us - 1500) / 500)); });
+  const addBSetButton = (ch: number) =>
+    bsetUpdate(ch, (c) => { if (c.inputs.length < 6) { c.inputs.push(buttonLabels[0] ?? ''); c.values.push(0); } });
+  const removeBSetButton = (ch: number, i: number) =>
+    bsetUpdate(ch, (c) => { if (c.inputs.length > 1) { c.inputs.splice(i, 1); c.values.splice(i, 1); } });
 
   function setMethod(ch: number, cfg: RcMethod): void {
     currentChannels.update((m) => ({ ...m, [ch]: cfg }));
@@ -168,13 +190,19 @@
     });
   });
   function finishLearn(label: string): void {
-    if (learn) patch(learn.ch, { [learn.key]: label });
+    if (learn) {
+      if (learn.key.startsWith('bset.')) setBSetInput(learn.ch, Number(learn.key.slice(5)), label);
+      else patch(learn.ch, { [learn.key]: label });
+    }
     learn = null;
   }
 
   const methodLabel = (kind: RcMethodKind) => $t(`rc.method.${kind}`);
   const usPct = (us: number) => Math.max(0, Math.min(100, ((us - 1000) / 1000) * 100));
-  const summary = (cfg: RcMethod) => slots(cfg).map((s) => s.value || '—').join(' / ');
+  const summary = (cfg: RcMethod) =>
+    cfg.kind === 'buttonSet'
+      ? cfg.inputs.map((s) => s || '—').join('/')
+      : slots(cfg).map((s) => s.value || '—').join(' / ');
   const optionsFor = (type: 'axis' | 'button') => (type === 'axis' ? axisLabels : buttonLabels);
 </script>
 
@@ -305,7 +333,43 @@
           {#if cfg.kind === 'buttonStep'}
             <div class="cc-field cc-inline">
               <span class="cc-label">{$t('rc.steps')}</span>
-              <NumberStepper bind:value={stepperVal} min={3} max={15} onchange={() => patch(ch, { steps: stepperVal })} />
+              <NumberStepper bind:value={stepperVal} min={3} max={25} onchange={() => patch(ch, { steps: stepperVal })} />
+            </div>
+          {/if}
+
+          {#if cfg.kind === 'buttonSet'}
+            <div class="cc-field">
+              <span class="cc-label">{$t('rc.buttonSetButtons')}</span>
+              {#each cfg.inputs as inp, i (i)}
+                <div class="cc-bset-row">
+                  <select class="cc-input" value={inp} onchange={(e) => setBSetInput(ch, i, (e.currentTarget as HTMLSelectElement).value)}>
+                    {#if !inp}<option value="">—</option>{/if}
+                    {#each buttonLabels as lbl}<option value={lbl}>{lbl}</option>{/each}
+                  </select>
+                  <button
+                    class="cc-learn"
+                    class:armed={learn?.ch === ch && learn?.key === `bset.${i}`}
+                    onclick={() => (learn?.ch === ch && learn?.key === `bset.${i}` ? (learn = null) : armLearn(ch, `bset.${i}`, 'button'))}
+                  >
+                    {learn?.ch === ch && learn?.key === `bset.${i}` ? $t('rc.learning') : $t('rc.learn')}
+                  </button>
+                  <input
+                    class="cc-bset-val"
+                    type="number"
+                    min="1000"
+                    max="2000"
+                    step="5"
+                    value={toUs(cfg.values[i] ?? 0)}
+                    onchange={(e) => setBSetValue(ch, i, Number((e.currentTarget as HTMLInputElement).value))}
+                  />
+                  {#if cfg.inputs.length > 1}
+                    <button class="cc-bset-del" title={$t('rc.remove')} onclick={() => removeBSetButton(ch, i)}>✕</button>
+                  {/if}
+                </div>
+              {/each}
+              {#if cfg.inputs.length < 6}
+                <button class="cc-bset-add" onclick={() => addBSetButton(ch)}>+ {$t('rc.buttonSetAdd')}</button>
+              {/if}
             </div>
           {/if}
 
@@ -398,6 +462,22 @@
   }
   .cc-learn:hover { border-color: #37a8db; color: #37a8db; }
   .cc-learn.armed { background: rgba(55, 168, 219, 0.2); color: #37a8db; border-color: #37a8db; }
+
+  .cc-bset-row { display: flex; align-items: center; gap: 6px; }
+  .cc-bset-val {
+    width: 64px; flex: none; padding: 4px 6px; font-size: 12px; background: #2a2a2a; color: #e0e0e0;
+    border: 1px solid #444; border-radius: 4px; font-variant-numeric: tabular-nums;
+  }
+  .cc-bset-del {
+    flex: none; width: 24px; height: 24px; font-size: 11px; line-height: 1; border-radius: 4px; cursor: pointer;
+    background: #2a2a2a; color: #c97070; border: 1px solid #5a3030;
+  }
+  .cc-bset-del:hover { background: #3a2020; color: #e08080; }
+  .cc-bset-add {
+    align-self: flex-start; padding: 4px 10px; font-size: 11px; border-radius: 4px; cursor: pointer;
+    background: #2a2a2a; color: #cfcfcf; border: 1px solid #444;
+  }
+  .cc-bset-add:hover { border-color: #37a8db; color: #37a8db; }
 
   .cc-edit-foot { display: flex; justify-content: flex-end; }
   .cc-remove {
