@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **RC Control — live send pipeline (Phase 4).** Kite can now actually steer INAV over MSP. Channel split
+  is **CH1–16 RAW_RC / CH17–32 AUX_RC** (keeping the mode switches incl. `MSP RC OVERRIDE` on the
+  releasable RAW band). Three stages: **monitoring** (not engaged — preview only), **AUX-only** (engaged:
+  AUX_RC streams independent of override, so the GCS can flip the override switch itself and drive AUX
+  modes) and **full control** (engaged + override active: RAW_RC takes over the sticks). Engaging is a
+  manual long-press toggle (default off, never auto on connect). On connect we read the FC channels once
+  (`MSP_RC`) and **seed** every non-passthrough channel so the takeover never jumps. Streaming runs at
+  highest scheduler priority: RAW_RC fire-and-forget (no-reply flag, zero downlink) at a selectable
+  **10/15/20/25 Hz** (default 10), trimmed to the highest controlled channel; AUX_RC on-change only,
+  sending the minimal channel run and re-sending until the FC ACK (works on an uplink-only link). A
+  **deadman** (frontend heartbeat → scheduler) stops the stream on any chain break, and a 2 s **link-speed
+  probe** after takeover warns if the link can't sustain the chosen RC rate.
 - **RC Control — safety locks + FC validation (Phase 3b).** Reads the FC mode ranges (`MSP_MODE_RANGES`)
   and shows, under each channel, which flight-mode box it triggers (alarm-coloured only on AUX, since
   only AUX_RC channels latch on link loss). A safety evaluation over the AUX channels you control:

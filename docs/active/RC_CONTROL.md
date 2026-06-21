@@ -46,8 +46,10 @@ behind explicit, configuration-aware gating.
 - **Has a failsafe contract** (§4) — this is the *safe* streaming primitive.
 
 ### 2.2 `MSP2_INAV_SET_AUX_RC` (cmd 0x2230) — latched AUX channels · INAV **9.1+**
-- Sets **individual AUX channels, range 13–32 only**. **Channels 1–12 are blocked by design**
-  (the four sticks + the low AUX band that carries arm/mode are off-limits to this path).
+- Sets **individual AUX channels, range 13–32 only** (firmware floor). **Channels 1–12 are blocked by
+  design** (the four sticks + the low AUX band that carries arm/mode are off-limits to this path).
+  *(Kite policy is stricter — it keeps **CH1–16 on RAW_RC** and uses **CH17–32** for AUX so the mode
+  switches incl. `MSP RC OVERRIDE` stay releasable; see §7 / §10.)*
 - **Latch semantics:** a value, once set, **persists in the FC** until the next AUX_RC update. It is
   *not* a streamed frame.
 - **No failsafe, no auto-fallback.** If the GCS disconnects, the channel simply **holds its last
@@ -89,7 +91,8 @@ with stick streaming.
    independently defines **which channels MSP is even allowed to override**. Our send mask and the
    FC mask both apply — a channel passes only if neither blocks it. The GCS should **read/display**
    the FC bitmask so the operator understands why a channel won't move.
-3. **AUX_RC is channel 13–32 only** (§2.2) and ignores the bitmask question (it's a different path).
+3. **AUX_RC is channel 13–32** (firmware; Kite policy CH17–32, §2.2) and ignores the bitmask question
+   (it's a different path, and does **not** require the override bitmask at all).
 4. Net send model per channel: `value = mapped_stick` if we own it, else `0` (skip). The advanced
    panel surfaces, per channel, {owned-by-GCS / skipped / blocked-by-FC-mask / driven-by-which-mode}.
 
@@ -105,9 +108,11 @@ What the FC does once streaming stops (<5 Hz) then depends on its config:
 - **MSP is the only configured receiver** → **Failsafe → RTH** (the safe outcome for Mode C).
 - **A normal serial RC link also exists** → **fallback to the standard RC link** (Mode A/B).
 
-The watchdog lives in the **Rust backend (gilrs) thread**, independent of the webview — so a frozen,
-unfocused or crashed UI cannot keep stale sticks streaming. AUX_RC, being latched, has *no* such net;
-that is exactly why we keep arming/critical switches off it.
+The deadman is enforced in the **Rust scheduler thread** (which owns the serial link), independent of the
+webview: the frontend heartbeats the latest RC frame into shared state (`RcTxState`) every ~30 ms, and the
+scheduler stops streaming if no fresh frame arrives within **500 ms** (or on disengage / disconnect /
+safety-lock) — so a frozen, unfocused or crashed UI cannot keep stale sticks streaming. AUX_RC, being
+latched, has *no* such net; that is exactly why we keep arming/critical switches off it.
 
 ---
 
@@ -192,22 +197,21 @@ flight modes onto buttons is parked):
 - *Later (needs MSP):* read `MSP_BOXNAMES` / `MSP_MODE_RANGES` so AUX channels show **which mode box they
   drive** ("CH5 → ANGLE"); custom (non-evenly-spaced) toggle/step position values.
 
-**MSP layer (in progress).** Byte encoders `msp/rc_encode.rs` (verified vs the firmware decoders):
-`encode_raw_rc` (u16-LE, trimmed) + `encode_aux_rc` (2/4/16-bit packed, defByte, 0=skip). AUX resolution
-is auto-derived per method (2-bit: hold / toggle ≤3-pos; 4-bit: toggle 4–6 / buttonStep; 16-bit:
-continuous). FC config read via `rc_read_fc_config` (`receiver_type`, `msp_override_channels` over
-MSP2_COMMON_SETTING) — shown in the dev **MSP-RC** debug tab. The channel split (CH1–12 MSP-RC vs
-CH13–32 MSP-AUX on 9.1+, else single ≤16) is derived in `stores/rcLayout.ts` and groups both the config
-editor and the live monitor. Still to come: mode-range/box-ID reads for safety locks + mode labels, the
-override-bitmask "fix" button + receiver-type validation, and the send pipeline (RAW 10 Hz + AUX
-on-change/ACK-resend + deadman).
+**MSP layer (shipped).** Byte encoders `msp/rc_encode.rs` (verified vs the firmware decoders):
+`encode_raw_rc` (u16-LE, trimmed) + `encode_aux_rc` (2/4/16-bit packed, defByte, 0=skip — the encoder
+supports all three; the streaming layer currently uses **16-bit** for AUX, lossless, since AUX is
+on-change so bandwidth is moot). FC config read via `rc_read_fc_config` (`receiver_type`,
+`msp_override_channels` over MSP2_COMMON_SETTING) — shown in the dev **MSP-RC** debug tab. The channel
+split (**CH1–16 MSP-RC vs CH17–32 MSP-AUX** on 9.1+, else single ≤16) is derived in `stores/rcLayout.ts`
+and groups both the config editor and the live monitor. The full send pipeline (sync/seed, engage gate,
+RAW+AUX streaming, deadman, link probe) is described in §10 Phase 4.
 
 **Profiles (shipped).** Mappings live in **shareable profile files**, NOT in settings/localStorage:
 `Documents/KiteGC/HID-Profiles/<name>.json` (`hid/profiles.rs` + `stores/rcProfiles.ts`). A profile is
 `{ name, deviceUuid?, deviceName?, channels }` and is **never auto-linked** to a device or FC — the user
 picks the active profile and the matching FC config themselves. The panel's config side has a profile
 dropdown + **Save** (overwrite, confirm) / **New** (name prompt) / **Delete** (confirm; keeps the
-working config loaded). `settings.rcControl` holds only `{ enabled, selectedUuid, activeProfile }`.
+working config loaded). `settings.rcControl` holds only `{ enabled, selectedUuid, activeProfile, rawRateHz }`.
 
 **Shared centre deadband (shipped).** A small ±0.05 (2.5% of full travel) scaled centre deadband is
 applied to every raw axis in `hid/mod.rs` (both backends) so a controller's resting centre offset
@@ -237,7 +241,7 @@ Exact layout deferred — agreed to settle when we build it.
 
 | Capability | Min INAV | Feature flag |
 |---|---|---|
-| AUX_RC latched switches (CH13–32) | **9.1** | `Feature::AuxRc` |
+| AUX_RC latched switches (CH13–32 firmware; Kite uses CH17–32) | **9.1** | `Feature::AuxRc` |
 | SET_RAW_RC stick streaming (fire-and-forget) | **8.0** | `Feature::MspRc` |
 | RC over MSP at all | **8.0** | (block < 8.0 — pre-8.0 replies waste downlink) |
 
@@ -261,18 +265,31 @@ Exact layout deferred — agreed to settle when we build it.
    MANUAL fallback. Receiver-type hints + override-bitmask check with a runtime-only "set bitmask"
    button (MSP2_COMMON_SET_SETTING, **no EEPROM save** — reverts on reboot by design). Toggle changed
    to tap-on-release with a 0.5 s abort (frees the long-press for dual assignment).
-4. **Send pipeline** *(next)* — handover-safe streaming, built in steps:
-   - **4a. FC channel mirror** — poll `MSP_RC` (105) every ~2 s (via the scheduler); mirror the FC's
-     current channel µs. The RC-Out monitor (left) shows the **mirror / what we send**, not the raw
-     helper output (the helper preview stays on the config side).
-   - **4b. Engage gate** — **no output until engaged.** Serial RX: engage = the FC's `MSP RC OVERRIDE`
-     box is **active** (detected via the active-modes we already poll; the pilot flips it on the TX, we
-     follow; off → we stop). MSP RX: an explicit GCS **long-press toggle, default OFF** at app start.
-   - **4c. Seed + send** — on engage, seed our internal state of every non-passthrough channel from the
-     mirror (toggle/step → nearest position, adjust → integrator = FC µs) so the output starts == FC
-     value → **no jump / unexpected mode change**. Then stream RAW_RC @10 Hz (CH1–12) + send AUX_RC
-     **only on real change** (group templates, ACK-resend after 100 ms, no NO_REPLY). Never send on
-     connect / plug-in / init. Deadman: chain break → stop (§5). Enforce the safety `locked` state.
+4. **Send pipeline** *(shipped)* — three-stage, handover-safe streaming:
+   - **Channel split (Kite policy):** RAW_RC covers **CH1–16**, AUX_RC **CH17–32** (`rcLayout.ts`). RAW is
+     gated by override + the FC bitmask and reverts cleanly when we stop; AUX latches permanently. Keeping
+     the mode switches (incl. the `MSP RC OVERRIDE` box) on CH1–16 means we never lock ourselves out of
+     toggling override. Same full RAW config on every INAV version; AUX is purely additive on 9.1+.
+   - **Sync (on MSP connect):** one read-only `MSP_RC` (105) poll → seed every non-passthrough channel's
+     state from the FC (`seedState`: toggle/step → nearest position, adjust → integrator = FC µs), and
+     again at the moment override turns on, so our output starts == FC value → **no jump**.
+   - **Engage gate:** a manual **long-press toggle (default OFF, both RX types)** — never auto on
+     connect/plug-in. Three stages: **(1) Monitoring/offline** — not engaged; RC-Out is a mapping preview,
+     nothing sent. **(2) AUX-only** — engaged: AUX_RC streams *independent of override*, so the GCS can
+     flip the `MSP RC OVERRIDE` box itself + drive AUX modes. **(3) Full control** — engaged **and**
+     override active (TX switch or via a GCS-driven AUX channel): RAW_RC (CH1–CHmax) takes over the sticks.
+     Override-active is read from the status poll we already run (`msp_rc_override`).
+   - **Streaming (`scheduler/rc_tx.rs` + the scheduler RC slot, highest priority):** RAW_RC fire-and-forget
+     (MSPv2 header **flag = 1 → no reply**, zero downlink) at a user-selectable **10/15/20/25 Hz** (default
+     10), trimmed to **CH1–CHmax** (gaps = 0/skip — saves TX bandwidth). AUX_RC fire-and-forget **on change
+     only**: the frontend pushes just the changed channels, the scheduler accumulates them and sends the
+     **minimal 16-bit run** at 5 Hz, re-sending until the FC ACK (echoed 0x2230, observed asynchronously)
+     then stopping. Works on an uplink-only link (the change still applies; only the ACK is missing).
+   - **Deadman:** the frontend heartbeats the RC frame every 30 ms; no fresh frame for >500 ms — or
+     disengage / disconnect / safety-`locked` — → the scheduler stops sending (FC failsafes per its config).
+   - **Link-speed probe:** for ~2 s after RAW starts streaming, send RAW *with* reply and measure the ACK
+     round-trip; if >30 % of frames can't meet the chosen rate, emit `rc-link-slow` → a banner suggesting a
+     lower RC or telemetry rate.
 5. **Takeover UI + arming policy** *(later)* — the §3 mode picker / refinements, live stick HUD.
 
 ---
