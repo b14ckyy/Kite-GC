@@ -329,6 +329,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   identical to the `mission` blue (ArduPilot Auto) on the track/badge.
 
 ### Fixed
+- **RC Control — bogus maxed-out axis values at startup (Windows).** Windows.Gaming.Input returns a
+  zero-initialised reading (all axes 0.0 → −1.0) until a controller delivers its first report, so RC
+  channels showed garbage extremes until something was moved. The HID backend now suppresses readings
+  with a zero timestamp (waits for the first real one) and reuses controller objects across rescans;
+  the panel shows "waiting for first input" until then. (Linux/evdev reads the kernel's cached state and
+  was unaffected.)
 - **Near-0,0 GPS glitch leaked into the map (ArduPilot).** The FC briefly reports a position right next to
   0°,0° before it has a real origin/fix (e.g. `N 0.00002 / W 0.00001`, 0 sats) — which slipped past the
   exact-0,0 check into the pre-arm track (a black line from null island) and the camera jump.

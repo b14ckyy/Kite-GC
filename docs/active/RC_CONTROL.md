@@ -261,9 +261,19 @@ Exact layout deferred — agreed to settle when we build it.
    MANUAL fallback. Receiver-type hints + override-bitmask check with a runtime-only "set bitmask"
    button (MSP2_COMMON_SET_SETTING, **no EEPROM save** — reverts on reboot by design). Toggle changed
    to tap-on-release with a 0.5 s abort (frees the long-press for dual assignment).
-4. **Send pipeline** *(later)* — RAW_RC 10 Hz stream + AUX_RC on-change (group templates, ACK-resend
-   after 100 ms, no NO_REPLY) + deadman; `SchedulerCommand` integration; the §3 takeover modes.
-5. **Takeover UI + arming policy** *(later)* — config-driven mode (§3) with explicit confirm, live stick HUD.
+4. **Send pipeline** *(next)* — handover-safe streaming, built in steps:
+   - **4a. FC channel mirror** — poll `MSP_RC` (105) every ~2 s (via the scheduler); mirror the FC's
+     current channel µs. The RC-Out monitor (left) shows the **mirror / what we send**, not the raw
+     helper output (the helper preview stays on the config side).
+   - **4b. Engage gate** — **no output until engaged.** Serial RX: engage = the FC's `MSP RC OVERRIDE`
+     box is **active** (detected via the active-modes we already poll; the pilot flips it on the TX, we
+     follow; off → we stop). MSP RX: an explicit GCS **long-press toggle, default OFF** at app start.
+   - **4c. Seed + send** — on engage, seed our internal state of every non-passthrough channel from the
+     mirror (toggle/step → nearest position, adjust → integrator = FC µs) so the output starts == FC
+     value → **no jump / unexpected mode change**. Then stream RAW_RC @10 Hz (CH1–12) + send AUX_RC
+     **only on real change** (group templates, ACK-resend after 100 ms, no NO_REPLY). Never send on
+     connect / plug-in / init. Deadman: chain break → stop (§5). Enforce the safety `locked` state.
+5. **Takeover UI + arming policy** *(later)* — the §3 mode picker / refinements, live stick HUD.
 
 ---
 
