@@ -14,6 +14,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { channelValues } from './rcEngine';
 import { rcEngaged } from './rcEngage';
 import { rcLayout } from './rcLayout';
+import { rcPlatform } from './rcPlatform';
 import { currentChannels } from './rcProfiles';
 import { settings } from './settings';
 
@@ -35,6 +36,25 @@ function buildRaw(): number[] {
   const out: number[] = [];
   for (let c = 1; c <= maxCh; c++) {
     out.push(controlled[c] ? Math.round(ch[c] ?? 1500) : 0); // 0 = skip
+  }
+  return out;
+}
+
+/** Build the ArduPilot RC_CHANNELS_OVERRIDE frame as CH1..CHmax µs, where CHmax is the highest
+ *  *controlled* channel (≤ CH16). Controlled channels carry the mapping output; uncontrolled gaps are
+ *  sent as 0, which the backend maps to the MAVLink per-band "ignore" sentinel (leave to the real RX) —
+ *  so the wire frame's release/ignore semantics stay in one place (the Rust adapter). Returns [] when
+ *  nothing is controlled → no override. Unlike INAV there is no RAW/AUX split on the wire: one frame. */
+function buildOverride(): number[] {
+  const layout = get(rcLayout);
+  const controlled = get(currentChannels);
+  const nums = Object.keys(controlled).map(Number).filter((c) => c >= 1 && c <= layout.auxMax);
+  if (!nums.length) return [];
+  const maxCh = Math.max(...nums);
+  const ch = get(channelValues);
+  const out: number[] = [];
+  for (let c = 1; c <= maxCh; c++) {
+    out.push(controlled[c] ? Math.round(ch[c] ?? 1500) : 0); // 0 = uncontrolled → backend "ignore"
   }
   return out;
 }
@@ -70,6 +90,15 @@ function evalAux(): void {
 }
 
 function tick(): void {
+  // ArduPilot streams one combined RC_CHANNELS_OVERRIDE frame; INAV splits into RAW + change-only AUX;
+  // PX4 (MANUAL_CONTROL) isn't wired yet, so it streams nothing (the engage UI guards against it too).
+  const platform = get(rcPlatform);
+  if (platform === 'ardupilot') {
+    void invoke('rc_stream_set_override', { channels: buildOverride() });
+    return;
+  }
+  if (platform !== 'inav') return;
+
   void invoke('rc_stream_update', { channels: buildRaw() });
   const now = performance.now();
   if (now - lastAuxEval >= AUX_EVAL_MS) {

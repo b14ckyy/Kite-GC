@@ -219,13 +219,20 @@ export interface RcControlSettings {
   activeProfile: string | null;
   /** RAW_RC stream rate in Hz (10/15/20/25). Default 10 — conservative for slow OTA links. */
   rawRateHz: number;
+  /** Offline platform selection for the config editor (see docs/active/MAVLINK_RC_CONTROL.md §2). When a
+   *  FC is connected the detected platform wins and locks; this is the choice used while disconnected. */
+  platform: RcPlatform;
 }
+
+/** Flight-stack the RC-control config targets — drives the channel split + the send adapter. */
+export type RcPlatform = 'inav' | 'ardupilot' | 'px4';
 
 export const DEFAULT_RC_CONTROL: RcControlSettings = {
   enabled: false,
   selectedUuid: null,
   activeProfile: null,
   rawRateHz: 10,
+  platform: 'inav',
 };
 
 /** FC system-message (STATUSTEXT) toast verbosity: off, errors only, warnings+errors, or everything. */

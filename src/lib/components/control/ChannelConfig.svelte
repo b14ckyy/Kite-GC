@@ -15,7 +15,7 @@
   import { hidSnapshot } from '$lib/stores/hid';
   import { currentChannels } from '$lib/stores/rcProfiles';
   import { channelValues } from '$lib/stores/rcEngine';
-  import { rcLayout } from '$lib/stores/rcLayout';
+  import { rcLayout, rcGroupLabels } from '$lib/stores/rcLayout';
   import { rcFcConfig } from '$lib/stores/rcFcConfig';
   import { boxName, boxCategory } from '$lib/helpers/inavModes';
   import {
@@ -390,11 +390,11 @@
 
   {#if $rcLayout.split}
     {#if rawCh.length}
-      <div class="cc-group">{$t('rc.groupRaw')}</div>
+      <div class="cc-group">{$rcGroupLabels.primary}</div>
       {#each rawCh as ch (ch)}{@render chBlock(ch)}{/each}
     {/if}
     {#if auxCh.length}
-      <div class="cc-group">{$t('rc.groupAux')}</div>
+      <div class="cc-group">{$rcGroupLabels.secondary}</div>
       {#each auxCh as ch (ch)}{@render chBlock(ch)}{/each}
     {/if}
   {:else}

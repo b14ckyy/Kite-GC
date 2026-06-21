@@ -76,6 +76,10 @@ impl ByteTransport for TcpTransport {
         Ok(())
     }
 
+    fn set_read_timeout(&mut self, timeout: Duration) {
+        let _ = self.stream.set_read_timeout(Some(timeout));
+    }
+
     fn description(&self) -> String {
         format!("TCP({})", self.address)
     }

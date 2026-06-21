@@ -10,7 +10,7 @@
   import { t } from 'svelte-i18n';
   import { currentChannels } from '$lib/stores/rcProfiles';
   import { channelValues } from '$lib/stores/rcEngine';
-  import { rcLayout } from '$lib/stores/rcLayout';
+  import { rcLayout, rcGroupLabels } from '$lib/stores/rcLayout';
   import { rcEngaged } from '$lib/stores/rcEngage';
 
   const channels = $derived(Object.keys($currentChannels).map(Number).sort((a, b) => a - b));
@@ -42,11 +42,11 @@
   <div class="cs">
     <div class="cs-source" class:live={$rcEngaged.on}>{$rcEngaged.on ? $t('rc.outLive') : $t('rc.outPreview')}</div>
     {#if rawCh.length}
-      <div class="cs-group">{$t('rc.groupRaw')}</div>
+      <div class="cs-group">{$rcGroupLabels.primary}</div>
       {#each rawCh as ch (ch)}{@render chRow(ch)}{/each}
     {/if}
     {#if auxCh.length}
-      <div class="cs-group">{$t('rc.groupAux')}</div>
+      <div class="cs-group">{$rcGroupLabels.secondary}</div>
       {#each auxCh as ch (ch)}{@render chRow(ch)}{/each}
     {/if}
   </div>

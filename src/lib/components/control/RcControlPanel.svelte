@@ -45,6 +45,7 @@
   import { syncFromFc } from '$lib/stores/rcMirror';
   import '$lib/stores/rcStream'; // self-initialising RC injection pump (engage-driven)
   import { rcLayout } from '$lib/stores/rcLayout';
+  import { rcPlatform, rcPlatformLocked, setOfflinePlatform, type RcPlatform } from '$lib/stores/rcPlatform';
   import { evaluateRcSafety } from '$lib/helpers/rcSafety';
 
   // Configuration lives in the right (advanced) region; open it by default since that's the work area.
@@ -196,6 +197,25 @@
   }
 
   const connectedMsp = $derived($connection.status === 'connected' && $connection.protocolType === 'msp');
+  // ArduPilot over MAVLink: same engage/stream pipeline, RC_CHANNELS_OVERRIDE adapter. No MSP FC-config
+  // read, no override-mode gate — the manual engage is the sole guard.
+  const connectedArdu = $derived($connection.status === 'connected' && $rcPlatform === 'ardupilot');
+  // Any FC we can inject RC to. (PX4 = MANUAL_CONTROL is not wired yet → not included.)
+  const rcConnected = $derived(connectedMsp || connectedArdu);
+
+  // Armed state (protocol-agnostic: bit 2 of arming flags, set by both the MSP scheduler and the MAVLink
+  // handler). Drives the "still armed" confirmation before a manual release.
+  const vehicleArmed = $derived(($telemetry.armingFlags & 0x04) !== 0);
+
+  // ── Platform selection (offline dropdown; locked to the FC when connected) ──
+  const PLATFORMS: { id: RcPlatform; label: string }[] = [
+    { id: 'inav', label: 'INAV' },
+    { id: 'ardupilot', label: 'ArduPilot' },
+    { id: 'px4', label: 'PX4' },
+  ];
+  function onPlatformPick(e: Event): void {
+    setOfflinePlatform((e.currentTarget as HTMLSelectElement).value as RcPlatform);
+  }
 
   // Read FC config + sync the FC channel state once whenever we (re)connect via MSP. The sync is a
   // read-only MSP_RC poll that seeds our state from INAV — so AUX starts from the FC's current values.
@@ -208,9 +228,9 @@
     }
   });
 
-  // Disengage automatically when the MSP link goes away or a safety lock trips.
+  // Disengage automatically when the link goes away or a safety lock trips.
   $effect(() => {
-    if ($rcEngaged.on && (!connectedMsp || safety.locked)) disengage();
+    if ($rcEngaged.on && (!rcConnected || safety.locked)) disengage();
   });
 
   // RAW_RC only takes effect on the FC while MSP-RC-OVERRIDE is active. Re-seed at the moment it turns
@@ -236,8 +256,21 @@
     if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; }
   }
   async function toggleEngage(): Promise<void> {
-    if ($rcEngaged.on) disengage();
-    else if (!safety.locked) await engage(rxType === 2 ? 'msp' : 'serial');
+    if ($rcEngaged.on) {
+      // Releasing control while the vehicle is ARMED hands flying back to the FC — with the GCS as the
+      // sole RC source that means a failsafe (default config can disarm → crash). Make the user confirm.
+      if (vehicleArmed) {
+        const ans = await confirmDialog.show({
+          title: $t('rc.disengageArmedTitle'),
+          message: $t('rc.disengageArmedMsg'),
+          buttons: [{ label: $t('rc.disengageArmedConfirm'), value: 'ok', danger: true }],
+        });
+        if (ans !== 'ok') return;
+      }
+      disengage();
+    }
+    // INAV serial-RX auto-watches the override box ('serial'); everything else is a manual takeover.
+    else if (!safety.locked) await engage(connectedMsp && rxType !== 2 ? 'serial' : 'msp');
   }
 
   // ── RAW_RC rate (user-selectable; AUX stays 5 Hz) ───────────────────────
@@ -302,6 +335,19 @@
           {/each}
         </select>
       {/if}
+      <label class="rc-dev-label" for="rc-platform">{$t('rc.platform')}</label>
+      <select
+        id="rc-platform"
+        class="rc-platform"
+        value={$rcPlatform}
+        onchange={onPlatformPick}
+        disabled={$rcPlatformLocked}
+        title={$rcPlatformLocked ? $t('rc.platformLocked') : ''}
+      >
+        {#each PLATFORMS as p (p.id)}
+          <option value={p.id}>{p.label}</option>
+        {/each}
+      </select>
     </div>
   {/snippet}
 
@@ -344,7 +390,7 @@
     {#if !selectedDevice}
       <div class="rc-empty">{$t('rc.connectHint')}</div>
     {:else}
-      {#if connectedMsp}
+      {#if rcConnected}
         <div class="rc-engage" class:on={$rcEngaged.on}>
           <button
             class="rc-engage-btn"
@@ -358,7 +404,8 @@
             <span class="rc-engage-hold">{$t('rc.engageHoldHint')}</span>
           </button>
         </div>
-        {#if $rcEngaged.on}
+        {#if $rcEngaged.on && connectedMsp}
+          <!-- MSP-RC-OVERRIDE box state — INAV only (ArduPilot has no override-mode gate). -->
           <div class="rc-engage-status" class:on={$telemetry.mspRcOverride}>
             {$telemetry.mspRcOverride ? $t('rc.overrideActive') : $t('rc.overrideInactive')}
           </div>
@@ -368,6 +415,10 @@
           <select id="rc-rate" class="rc-rate-sel" value={rawRateHz} onchange={onRatePick}>
             {#each RC_RATES as hz (hz)}<option value={hz}>{hz} Hz</option>{/each}
           </select>
+        </div>
+      {:else if $connection.status === 'connected' && !$rcLayout.supported}
+        <div class="rc-banner rc-banner-info">
+          <div class="rc-banner-hint">{$t('rc.px4Unsupported')}</div>
         </div>
       {/if}
       {#if !$hidSnapshot && !$rcEngaged.on}<div class="rc-hint">{$t('rc.waitingInput')}</div>{/if}
@@ -502,6 +553,11 @@
     background: #2a2a2a; color: #e0e0e0; border: 1px solid #444; border-radius: 4px;
   }
   .rc-nodev { color: #949494; font-size: 12px; font-style: italic; }
+  .rc-platform {
+    padding: 4px 6px; font-size: 12px;
+    background: #2a2a2a; color: #e0e0e0; border: 1px solid #444; border-radius: 4px;
+  }
+  .rc-platform:disabled { opacity: 0.7; cursor: default; }
 
   .rc-empty, .rc-hint {
     color: #949494; font-size: 12px; padding: 8px; font-style: italic;

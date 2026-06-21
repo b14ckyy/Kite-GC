@@ -52,8 +52,8 @@ type RadarIngest = Arc<Mutex<Option<mpsc::Sender<SourceUpdate>>>>;
 /// RC injection cadences (docs/archive/MSP_RC_CONTROL.md §10 Phase 4c). RAW rate is dynamic (RcTxState,
 /// user-selectable 10–25 Hz); AUX re-send weave is fixed at 5 Hz.
 const RC_AUX_INTERVAL: Duration = Duration::from_millis(200);
-/// Frontend-heartbeat deadman: no fresh RC frame for this long → stop streaming (FC failsafes).
-const RC_DEADMAN: Duration = Duration::from_millis(500);
+/// Frontend-heartbeat deadman (shared with the MAVLink handler) — see rc_tx::RC_DEADMAN.
+use rc_tx::RC_DEADMAN;
 /// Link-speed probe: for this long after engage, send RAW_RC WITH reply and measure the ACK round-trip.
 const RC_PROBE_WINDOW: Duration = Duration::from_secs(2);
 /// Per-frame ACK timeout during the probe (ms) — beyond this the frame counts as a timeout.

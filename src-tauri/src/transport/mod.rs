@@ -71,6 +71,14 @@ pub trait ByteTransport: Send {
     /// Write all bytes to the transport.
     fn write_bytes(&mut self, data: &[u8]) -> Result<(), TransportError>;
 
+    /// Set the read/recv timeout for subsequent `read_bytes` calls. Lets a read-driven protocol loop
+    /// tighten its cadence on demand: the MAVLink handler shortens it while streaming RC overrides so the
+    /// send rate isn't quantized by the (deliberately coarse) idle read timeout. Default: no-op — the
+    /// transport keeps its built-in timeout.
+    fn set_read_timeout(&mut self, timeout: std::time::Duration) {
+        let _ = timeout;
+    }
+
     /// Human-readable description (for logging)
     fn description(&self) -> String;
 }

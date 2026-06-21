@@ -65,6 +65,10 @@ impl ByteTransport for UdpTransport {
         Ok(())
     }
 
+    fn set_read_timeout(&mut self, timeout: Duration) {
+        let _ = self.socket.set_read_timeout(Some(timeout));
+    }
+
     fn description(&self) -> String {
         format!("UDP({})", self.address)
     }

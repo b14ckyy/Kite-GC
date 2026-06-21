@@ -118,6 +118,10 @@ impl ByteTransport for SerialConnection {
         Ok(())
     }
 
+    fn set_read_timeout(&mut self, timeout: Duration) {
+        let _ = self.port.set_timeout(timeout);
+    }
+
     fn description(&self) -> String {
         format!("Serial({})", self.port_name)
     }

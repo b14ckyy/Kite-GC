@@ -10,11 +10,12 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use ::mavlink::ardupilotmega::MavMessage;
+use ::mavlink::ardupilotmega::{MavMessage, RC_CHANNELS_OVERRIDE_DATA};
 use ::mavlink::{MavHeader, Message};
 use tauri::{AppHandle, Emitter};
 
 use crate::flightlog::recorder::FlightRecorderHandle;
+use crate::scheduler::rc_tx::{self, RcTxHandle};
 use crate::scheduler::telemetry::{
     AttitudeData, GpsData, AltitudeData, AnalogData, StatusData,
     SensorStatusData, AirspeedData,
@@ -26,6 +27,13 @@ use super::parser::MavParser;
 
 /// GCS heartbeat interval (1 Hz as per MAVLink spec)
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
+
+/// Read timeout while RC override is streaming. The loop is read-driven, so the idle read timeout (50 ms)
+/// would otherwise quantize the RC send rate (a 25 Hz request landing on a 50 ms grid only managed ~15
+/// Hz). 10 ms granularity lets even 25 Hz stream accurately; restored to the idle value on disengage.
+const RC_READ_TIMEOUT_FAST: Duration = Duration::from_millis(10);
+/// Idle read timeout (matches the transports' construction default) — restored when RC isn't streaming.
+const RC_READ_TIMEOUT_IDLE: Duration = Duration::from_millis(50);
 
 /// Commands sent to the handler thread via channel
 pub enum MavlinkCommand {
@@ -95,12 +103,13 @@ pub fn start(
     fc_variant: String,
     app_handle: AppHandle,
     recorder: Option<FlightRecorderHandle>,
+    rc_tx: RcTxHandle,
 ) -> MavlinkHandle {
     let (cmd_tx, cmd_rx) = mpsc::channel::<MavlinkCommand>();
 
     let handle_variant = fc_variant.clone();
     let thread = thread::spawn(move || {
-        handler_loop(transport, fc_sysid, fc_variant, app_handle, cmd_rx, recorder)
+        handler_loop(transport, fc_sysid, fc_variant, app_handle, cmd_rx, recorder, rc_tx)
     });
 
     MavlinkHandle {
@@ -119,6 +128,7 @@ fn handler_loop(
     app_handle: AppHandle,
     cmd_rx: mpsc::Receiver<MavlinkCommand>,
     recorder: Option<FlightRecorderHandle>,
+    rc_tx: RcTxHandle,
 ) -> Option<Box<dyn ByteTransport>> {
     let mut parser = MavParser::new();
     let mut seq = MavSequence::new();
@@ -153,6 +163,15 @@ fn handler_loop(
     const PARAM_PROBE_INTERVAL: Duration = Duration::from_millis(1200);
 
     let gcs_header = codec::gcs_header();
+
+    // RC override streaming (ArduPilot, docs/active/MAVLINK_RC_CONTROL.md §3). We stream
+    // RC_CHANNELS_OVERRIDE from the shared RcTxState while engaged + the frontend heartbeat is fresh,
+    // at the user-selected rate. `rc_override_last` paces it. On disengage we deliberately do NOT send a
+    // release frame (see the streaming block). PX4 (MANUAL_CONTROL) is not handled here yet.
+    let mut rc_override_last = Instant::now();
+    // Tracks whether the read timeout is currently in fast (streaming) mode, so we only re-set it on a
+    // transition rather than every loop.
+    let mut rc_fast_read = false;
 
     log::info!("MAVLink handler started (FC sysid={})", fc_sysid);
 
@@ -224,6 +243,49 @@ fn handler_loop(
                 log::warn!("Failed to send GCS heartbeat: {}", e);
             }
             last_heartbeat = Instant::now();
+        }
+
+        // 2a. RC override streaming (ArduPilot). Send RC_CHANNELS_OVERRIDE at the selected rate while
+        // engaged + fresh; on the falling edge send one release frame so channels return to the real RX.
+        {
+            let now = Instant::now();
+            let (alive, frame, interval) = match rc_tx.lock() {
+                Ok(s) => {
+                    let alive = s.enabled
+                        && now.duration_since(s.last_update) < rc_tx::RC_DEADMAN
+                        && !s.mav_override_us.is_empty();
+                    let frame = if alive { Some(rc_tx::override_channels(&s.mav_override_us)) } else { None };
+                    (alive, frame, s.raw_interval)
+                }
+                Err(_) => (false, None, rc_tx::RC_RAW_DEFAULT_INTERVAL),
+            };
+
+            // Shorten the read timeout while streaming so the send cadence isn't capped by the 50 ms idle
+            // read; restore it on disengage. Only toggled on transition.
+            if alive != rc_fast_read {
+                transport.set_read_timeout(if alive { RC_READ_TIMEOUT_FAST } else { RC_READ_TIMEOUT_IDLE });
+                rc_fast_read = alive;
+            }
+
+            if alive {
+                if now.duration_since(rc_override_last) >= interval {
+                    if let Some(ch) = frame {
+                        send_rc_override(&mut *transport, &gcs_header, &mut seq, fc_sysid, &ch,
+                            &mut debug_tracker, &mut link_stats, &recorder);
+                        // Catch-up scheduling: advance by exactly one interval so loop jitter doesn't drag
+                        // the long-term rate below target. If we've fallen more than one interval behind
+                        // (engage, or a stall), resync to now instead of bursting to catch up.
+                        rc_override_last += interval;
+                        if now.duration_since(rc_override_last) > interval {
+                            rc_override_last = now;
+                        }
+                    }
+                }
+            }
+            // On disengage / deadman we intentionally send NO release frame. With the GCS as the sole RC
+            // source (no physical RX) an explicit release fires ArduPilot's RC failsafe instantly; simply
+            // stopping the stream lets the FC hold the last override for RC_OVERRIDE_TIME (~3 s) as a
+            // re-engage grace window before its own failsafe takes over.
         }
 
         // 2b. Re-probe Q_ENABLE until the FC answers (robust QuadPlane detection — see above).
@@ -300,6 +362,40 @@ fn handler_loop(
         debug_tracker.maybe_emit(&app_handle);
         // Always-on link-rate emit (Relay panel) — throttled internally, compiled in release too.
         link_stats.maybe_emit(&app_handle);
+    }
+}
+
+/// Serialize + send one RC_CHANNELS_OVERRIDE frame (ArduPilot RC injection). `ch` is the 18-channel
+/// positional wire array already carrying the per-band ignore/release sentinels (see rc_tx helpers).
+/// Mirrors the send-path bookkeeping of the command channel (debug stats, link meter, tlog record).
+#[allow(clippy::too_many_arguments)]
+fn send_rc_override(
+    transport: &mut dyn ByteTransport,
+    header: &MavHeader,
+    seq: &mut MavSequence,
+    fc_sysid: u8,
+    ch: &[u16; rc_tx::MAV_OVERRIDE_CHANNELS],
+    debug_tracker: &mut super::debug::MavlinkDebugTracker,
+    link_stats: &mut crate::link_stats::LinkStats,
+    recorder: &Option<FlightRecorderHandle>,
+) {
+    let msg = MavMessage::RC_CHANNELS_OVERRIDE(RC_CHANNELS_OVERRIDE_DATA {
+        target_system: fc_sysid,
+        target_component: 1, // MAV_COMP_ID_AUTOPILOT1
+        chan1_raw: ch[0], chan2_raw: ch[1], chan3_raw: ch[2], chan4_raw: ch[3],
+        chan5_raw: ch[4], chan6_raw: ch[5], chan7_raw: ch[6], chan8_raw: ch[7],
+        chan9_raw: ch[8], chan10_raw: ch[9], chan11_raw: ch[10], chan12_raw: ch[11],
+        chan13_raw: ch[12], chan14_raw: ch[13], chan15_raw: ch[14], chan16_raw: ch[15],
+        chan17_raw: ch[16], chan18_raw: ch[17],
+    });
+    let frame = codec::serialize_v2(header, &msg, seq);
+    debug_tracker.on_tx(msg.message_id(), frame.len());
+    link_stats.on_tx(frame.len());
+    if let Some(ref rec) = recorder {
+        if let Ok(mut r) = rec.lock() { r.write_raw_mavlink_frame(&frame); }
+    }
+    if let Err(e) = transport.write_bytes(&frame) {
+        log::warn!("Failed to send RC_CHANNELS_OVERRIDE: {}", e);
     }
 }
 
@@ -627,8 +723,19 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
             }
         }
 
-        // ── RC_CHANNELS → RSSI (merged into analog state) ──────────
+        // ── RC_CHANNELS → RSSI (merged into analog state) + live channel µs (RC-control seed) ──
         MavMessage::RC_CHANNELS(rc) => {
+            // Current RC channel µs, CH1..chancount — the RC-control engage seed reads the last value
+            // (the MAVLink equivalent of MSP_RC; same `telemetry-rc-channels` event the seed listens to).
+            let all = [
+                rc.chan1_raw, rc.chan2_raw, rc.chan3_raw, rc.chan4_raw, rc.chan5_raw, rc.chan6_raw,
+                rc.chan7_raw, rc.chan8_raw, rc.chan9_raw, rc.chan10_raw, rc.chan11_raw, rc.chan12_raw,
+                rc.chan13_raw, rc.chan14_raw, rc.chan15_raw, rc.chan16_raw, rc.chan17_raw, rc.chan18_raw,
+            ];
+            let n = (rc.chancount as usize).clamp(1, all.len());
+            let channels: Vec<u16> = all[..n].to_vec();
+            let _ = app_handle.emit("telemetry-rc-channels", &channels);
+
             // rssi is 0–254 in RC_CHANNELS (255 = invalid), map to 0–1023 like INAV
             analog.rssi = (rc.rssi as u16) * 4;
             let _ = app_handle.emit("telemetry-analog", &analog.to_analog_data());

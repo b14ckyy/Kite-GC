@@ -531,8 +531,13 @@ fn connect_mavlink(
         None
     };
 
+    // Fresh link starts with RC injection off (frontend re-engages explicitly) — same as the MSP path.
+    if let Ok(mut rc) = state.rc_tx.lock() {
+        *rc = crate::scheduler::rc_tx::RcTxState::default();
+    }
+
     // Start the MAVLink handler thread
-    let handle = mavlink_proto::handler::start(byte_transport, fc_sysid, fc_info.fc_variant.clone(), app_handle, recorder_handle);
+    let handle = mavlink_proto::handler::start(byte_transport, fc_sysid, fc_info.fc_variant.clone(), app_handle, recorder_handle, state.rc_tx.clone());
 
     // Store MAVLink handle and FC info
     {

@@ -155,6 +155,18 @@ pub fn rc_stream_set_aux(channels: Vec<u8>, values: Vec<u16>, state: State<'_, A
     Ok(())
 }
 
+/// Push the latest ArduPilot/MAVLink override frame (positional µs per channel, CH1..CHmax; 0 = leave
+/// to the real RX) + refresh the deadman. The MAVLink handler maps gaps to the per-band ignore sentinel
+/// and streams RC_CHANNELS_OVERRIDE at the selected rate. Doubles as the deadman heartbeat for MAVLink
+/// (the MSP path uses `rc_stream_update` for that). No-op effect until enabled.
+#[tauri::command]
+pub fn rc_stream_set_override(channels: Vec<u16>, state: State<'_, AppState>) -> Result<(), String> {
+    let mut rc = state.rc_tx.lock().map_err(|e| e.to_string())?;
+    rc.mav_override_us = channels;
+    rc.last_update = std::time::Instant::now();
+    Ok(())
+}
+
 /// Enable/disable the RC injection stream (engage/disengage). Disabling stops all sending immediately;
 /// enabling refreshes the deadman so a first frame can flow right away.
 #[tauri::command]
@@ -165,6 +177,7 @@ pub fn rc_stream_enable(enabled: bool, state: State<'_, AppState>) -> Result<(),
         rc.last_update = std::time::Instant::now();
     } else {
         rc.aux_pending.clear();
+        rc.mav_override_us.clear();
     }
     Ok(())
 }

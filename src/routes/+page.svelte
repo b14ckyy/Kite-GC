@@ -485,6 +485,19 @@
     $connection.status === 'connected' && $connection.protocolType === 'mavlink'
   );
 
+  // Passive telemetry (listen-only) has no uplink — there's no way to send RC channels — so the RC tab
+  // is hidden while connected that way. Available = master switch on AND not telemetry-connected.
+  const isTelemetryConnected = $derived(
+    $connection.status === 'connected' && $connection.protocolType === 'telemetry'
+  );
+  const rcTabAvailable = $derived($settings.rcControl.enabled && !isTelemetryConnected);
+
+  // If the RC tab is open when it becomes unavailable (e.g. a telemetry connection comes up), fall back
+  // to the UAV-info tab so the now-hidden panel isn't left rendered.
+  $effect(() => {
+    if (!rcTabAvailable && activeTab === 'rc-control') activeTab = 'uav-info';
+  });
+
   const allTabs = [
     { id: "uav-info", label: () => $t('nav.uavInfo'), icon: ICON_UAV_INFO },
     { id: "mission", label: () => $t('nav.mission'), icon: ICON_MISSION },
@@ -501,7 +514,7 @@
     allTabs.filter(t =>
       (t.id !== 'logbook' || flightLoggingEnabled) &&
       (t.id !== 'control' || isMavlinkConnected) && // control tab only when connected via MAVLink
-      (t.id !== 'rc-control' || $settings.rcControl.enabled) && // RC tab only when the master switch is on
+      (t.id !== 'rc-control' || rcTabAvailable) && // RC tab: master switch on + not telemetry-connected
       (t.id !== 'radar' || radarSettings.enabled) && // radar tab only when the master switch is on
       (t.id !== 'airspace' || airspaceSettings.enabled) // airspace tab only when its master switch is on
     )
