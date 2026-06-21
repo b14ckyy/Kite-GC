@@ -5,7 +5,7 @@
 > QuadPlane** (modes, arm/disarm, takeoff, RTL, Guided + Fly-Here, change alt/speed, set home, abort
 > landing, mission start/restart/set-WP, VTOL transition, RC-presence lock, safety gestures). The
 > **PX4 path is firmware-aware in code but untested on real hardware** (test-pilot pending). INAV
-> guided (WP #255) and joystick/HID RC control remain **deferred** (see §11). Becomes ADR-052.
+> guided (WP #255) and joystick/HID RC control remain **deferred** (see §11). Recorded as ADR-052.
 >
 > **Firmware/vehicle learnings baked into V1:**
 > - **Mission Start** is firmware-specific — ArduPilot `MISSION_START`, PX4 enters **Mission mode**.

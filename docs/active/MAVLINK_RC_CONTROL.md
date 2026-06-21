@@ -22,8 +22,9 @@
 > **Deferred:** per-platform last-profile auto-load (§6), `SYSID_MYGCS` / `COM_RC_IN_MODE` *mismatch*
 > warnings (currently a static hint), GCS-side expo/curves (we leave expo to the FC).
 
-Related: ADR-010 (schedulers own the link), ADR-052 (`VEHICLE_CONTROL.md` — the MAVLink command path,
-mode switching, arming), `docs/archive/MSP_RC_CONTROL.md` (the INAV/MSP RC pipeline + shared layer).
+Related: **ADR-054** (RC control — the decision record this plan + `docs/archive/MSP_RC_CONTROL.md` detail),
+ADR-010 (schedulers own the link), ADR-052 (`VEHICLE_CONTROL.md` — the MAVLink command path, mode
+switching, arming), `docs/archive/MSP_RC_CONTROL.md` (the INAV/MSP RC pipeline + shared layer).
 
 ---
 

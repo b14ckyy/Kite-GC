@@ -2446,5 +2446,116 @@ passive-sourced relays emit at the true data rate.
 
 ---
 
+## ADR-052: Vehicle Control — GCS Command Panel (MAVLink, ArduPilot + PX4)
+
+**Status**: Accepted — V1 shipped (ArduPilot SITL-verified on Copter/Plane/QuadPlane; PX4 firmware-aware
+but **untested on hardware**). **Detail**: `docs/active/VEHICLE_CONTROL.md`.
+**Related**: ADR-010 (multi-protocol), ADR-029 (panel framework), ADR-043 (MAVLink stream rates),
+ADR-044 (unified flight mode), ADR-046 (catalog-driven editor), ADR-039 (home reference), ADR-054 (the
+continuous-RC sibling).
+
+**Context**: Operators want to command the vehicle **directly from the GCS without a transmitter** — arm,
+take off, switch modes, fly to a clicked point, change speed/altitude, run the mission, land, RTL — like
+Mission Planner / QGroundControl but better than MP's flat button grid. MAVLink only (INAV uses MSP-WP
++ its own paths). Two capabilities share the panel; only **discrete commands** are V1 (continuous RC is
+ADR-054).
+
+**Decision**:
+
+1. A **`control` nav-rail panel**, shown **only while MAVLink-connected**. One-shot
+   `COMMAND_LONG`/`COMMAND_INT` + `SET_MODE` + `SET_POSITION_TARGET`, with **async `COMMAND_ACK`
+   correlation** through the MAVLink command channel (matches by command id; never holds the AppState
+   mutex during the exchange — disconnect stays safe).
+2. **Curated, GCS-safe mode switching** — stick-required modes are hidden **and hard-locked via
+   RC-presence detection**. Direct mode **buttons**, not a dropdown.
+3. **Safety layer**: slide-to-confirm Arm; a reusable **`HoldToConfirm`** (timed fill) for every other
+   action. No switching into stick-flown modes without an RC link.
+4. **Firmware/vehicle divergence handled per-action**: Mission Start (ArduPilot `MISSION_START` vs PX4
+   Mission mode), Land (`NAV_LAND` / QuadPlane `QLAND` / hidden for plain ArduPlane), loiter-radius param
+   name (`WP_LOITER_RAD` vs `NAV_LOITER_RAD`), Set-Heading **Copter-only** (`CONDITION_YAW`; the ArduPlane
+   guided-heading-slew path was cut — sticky override bug), VTOL transition (PX4 `DO_VTOL_TRANSITION` vs
+   ArduPlane by mode), Change-Alt = `DO_REPOSITION` Guided-only, QuadPlane detection by **re-probing
+   `Q_ENABLE`** (it reports `MAV_TYPE_FIXED_WING`), Set-WP/Restart via `DO_SET_MISSION_CURRENT`.
+
+**Consequences**: new vehicle behaviour = a per-action firmware branch, not a new pipeline. PX4 needs a
+hardware test. **Deferred** (future/on-request): INAV guided (WP #255 reposition + WP #0 live-home),
+advanced outputs (servo/gripper/gimbal-ROI). Continuous HID/joystick RC became its own feature (ADR-054).
+
+---
+
+## ADR-053: Passive Telemetry — Listen-Only Third Protocol with Auto-Detection
+
+**Status**: Accepted — shipped (FrSky/SmartPort, LTM, MAVLink-passive; CRSF built, **native validation
+pending**). **Detail**: `docs/archive/RADIO_TELEMETRY.md`.
+**Related**: ADR-010 (ByteTransport + separate protocol handlers), ADR-044 (unified flight mode),
+ADR-051 (Telemetry Relay — the inverse, encode-out direction).
+
+**Context**: Operators want to **monitor** telemetry forwarded from the **ground side** (EdgeTX/ETHOS
+radios, ELRS backpacks, DIY bridges) — not tapped off the aircraft — and have the existing widgets/map
+light up. The wire could be any of several hobby protocols, and the GCS must never transmit on it.
+
+**Decision**:
+
+1. A **third protocol** — `ProtocolType 'telemetry'` / `ActiveProtocol::PassiveTelemetry` alongside
+   MSP/MAVLink (ADR-010). **Strictly listen-only**: no handshake, no heartbeat, no upload — nothing
+   outbound, ever. A minimal `FcInfo` is synthesized.
+2. **Auto-detect the sub-protocol** via a signature/matcher table (`passive_telemetry/detector.rs`): the
+   first confident match **locks** the decoder for the session — the user does **not** pick the protocol
+   (one "Telemetry" entry covers all). Baud is neutral/manual (BLE baud-less; USB 57600/115200).
+3. **Unified output (D7)** — every decoder emits the **same `telemetry-*` events + payload structs** as
+   MSP/MAVLink, so the frontend stays protocol-agnostic. Adds `telemetry-protocol` (the locked
+   sub-protocol name) and `telemetry-fc-link` (FC-origin liveness — housekeeping/RSSI frames keep the
+   generic "any data" heartbeat alive after the FC drops, so a dedicated FC-fresh signal is needed).
+4. **MAVLink-passive reuses the MAVLink decoder** with all TX suppressed (effectively "Full Telemetry"
+   that never transmits).
+5. Rides the existing **`ByteTransport`** (BLE-first; serial/TCP/UDP later).
+
+**Consequences**: a new passive protocol = one detector matcher + one decoder; zero frontend change.
+Feeds the relay's inverse direction (ADR-051). Open/resume-triggers: native-CRSF validation (only tested
+vs mLRS so far), armed-flight DB verify, and MSP-over-SmartPort **uplink** (blocked in ETHOS — a custom FC
+build is needed; the probe is armed in the dev build).
+
+---
+
+## ADR-054: RC Control — Outbound RC Injection (GCS as Transmitter)
+
+**Status**: Accepted — INAV/MSP shipped (on-hardware); ArduPilot/MAVLink **SITL-verified**; PX4
+implemented but **untested**. **Detail**: `docs/archive/MSP_RC_CONTROL.md` + `docs/active/MAVLINK_RC_CONTROL.md`.
+**Related**: ADR-010 (the owning protocol thread streams the link), ADR-007 (MSP scheduler), ADR-052 (the
+discrete-command sibling — modes/arm stay there).
+
+**Context**: Steer the FC from a **HID gamepad/joystick over the existing link** (no transmitter), across
+**INAV, ArduPilot and PX4**, reusing one mapping/profile UI. The transports differ fundamentally, but the
+HID → channel front of the pipeline is shared.
+
+**Decision**:
+
+1. **Native HID backend** (`hid/`): Windows.Gaming.Input / Linux evdev — **not** gilrs (full axis/button
+   fidelity + hot-plug). Profiles are shareable files.
+2. **Shared mapping engine** (8 channel methods + Learn + per-channel name) + **platform-aware layout**.
+   PX4's model isn't per-channel PWM, so it uses a **distinct 4-axis "manual" mapping** (sticks + aux +
+   buttons) instead of the channel grid.
+3. **Shared `RcTxState`** in AppState, **independent of the `protocol` lifecycle**; the frontend pushes
+   frames via `rc_stream_*` commands and the **owning protocol thread** streams them to the FC.
+4. **Per-platform wire encoder**: INAV `MSP_SET_RAW_RC` (fire-and-forget, MSPv2 **flag=1 → no reply**,
+   woven between telemetry polls) + `MSP2_INAV_SET_AUX_RC` (latched, on-change); ArduPilot
+   `RC_CHANNELS_OVERRIDE` (#70); PX4 `MANUAL_CONTROL` (#69, FC maps buttons to actions).
+5. **Handover-safe engage**: manual long-press gate (default off, never auto-on-connect) + **seed from the
+   FC's current channels** (`MSP_RC` / MAVLink `RC_CHANNELS`) so there's no jump + a **frontend-heartbeat
+   deadman** (stale → stop → FC failsafes).
+6. **MAVLink rate accuracy**: an **adaptive read timeout + catch-up pacing** in the read-driven handler
+   loop (it otherwise quantized the override rate ~⅓ low); **no forced release on disengage** (an explicit
+   release fires the FC's RC failsafe instantly when the GCS is the sole RC source — instead we stop and
+   let `RC_OVERRIDE_TIME`/`COM_RC_LOSS_T` run as a re-engage grace window); a protocol-agnostic
+   **armed-disengage confirmation**.
+7. **Safety**: arming/critical modes are blocked only on **latched AUX** channels (RAW_RC / override fail
+   safe, so they're recoverable); the RC tab is hidden on passive-telemetry links (no uplink).
+
+**Consequences**: a new stack = a send adapter + platform gating; the HID/mapping/profile/engine layer is
+reused. PX4 needs flight validation. **Deferred**: per-platform last-profile auto-load,
+`SYSID_MYGCS`/`COM_RC_IN_MODE` mismatch warnings, GCS-side expo/curves (left to the FC).
+
+---
+
 *End of Architecture Decision Records*
 

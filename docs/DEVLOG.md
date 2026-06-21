@@ -2,9 +2,24 @@
 
 ## Project Overview
 
-Kite Ground Control is a cross-platform Ground Control Station supporting [INAV](https://github.com/iNavFlight/inav)-based flight controllers (ArduPilot planned). It communicates primarily via MSP (MultiWii Serial Protocol) and aims to provide mission planning, real-time telemetry monitoring, and flight control capabilities.
+Kite Ground Control is a cross-platform Ground Control Station for **INAV** (via MSP), **ArduPilot & PX4**
+(via MAVLink) and **passive telemetry** (listen-only: SmartPort/CRSF/LTM/MAVLink). It provides mission
+planning, real-time telemetry + flight logging/replay, GCS **vehicle control** and **RC injection**,
+**foreign-vehicle radar**, an **airspace** overlay, and **terrain / RF-link** analysis.
 
 **Long-term scope reference**: [MWPTools](https://stronnag.grebedoc.dev/mwptools/)
+
+### Start here (new collaborators)
+
+Read in this order to get the mental model fast:
+1. **This file (DEVLOG)** — stack, project structure, module concept, and the per-subsystem foundations
+   (incl. the *Subsystems beyond the telemetry pipeline* section near the end).
+2. **[ARCHITECTURE.md](ARCHITECTURE.md)** — the **why**: every cross-cutting decision is an ADR
+   (ADR-001…054), with context + consequences. Skim the titles; read the ones touching your area.
+3. **[reference/DATA_PIPELINE.md](reference/DATA_PIPELINE.md)** — the **how**: end-to-end data flow
+   (three live protocols → unified events → store → widgets/map, plus the parallel networks).
+4. Per-feature detail lives in **`docs/active/`** (open plans), **`docs/reference/`** (living refs) and
+   **`docs/archive/`** (shipped plans, kept for rationale). `CLAUDE.md` has the working rules.
 
 ## Technology Stack
 
@@ -23,9 +38,9 @@ Kite Ground Control is a cross-platform Ground Control Station supporting [INAV]
 | Platform | Status | Notes |
 |---|---|---|
 | Windows (x64) | Active Development | Primary development platform |
-| Linux (x86_64) | Planned | |
+| Linux (x86_64) | Active Development | Tested in snapshots — co-developed on a Linux machine, verified on backend changes + general functionality |
 | Linux (ARM64) | Planned | Raspberry Pi, etc. |
-| Android | Planned | Via Tauri mobile support |
+| Android | Future | Separate Android UI — scope/timeline TBD, **not** targeted for 1.0; via Tauri mobile |
 | macOS | Future | Needs test hardware |
 | iOS | Future | Needs test hardware |
 
@@ -567,12 +582,12 @@ protocols + these parallel networks) is the living reference in
 - **Three live protocols (ADR-010).** MSP (poll), MAVLink (push), **Passive telemetry** (listen-only:
   SmartPort/CRSF/LTM/MAVLink, sub-protocol auto-detected) — `ActiveProtocol::{Msp, Mavlink,
   PassiveTelemetry}`. All decode to the **same** payload structs + `telemetry-*` events; the frontend never
-  branches on protocol. Passive path lives in `passive_telemetry/` (archived plan
-  `archive/RADIO_TELEMETRY.md`).
+  branches on protocol. Passive path (listen-only, auto-detected) = **ADR-053**, `passive_telemetry/`
+  (archived plan `archive/RADIO_TELEMETRY.md`).
 - **Unified flight mode (ADR-044, `flightmode/`).** Each input adapter classifies raw mode data into a
   canonical `{ primary, modifiers[] }`; widget/track/recording consume only that. New protocol = new
   adapter + a few registry ids.
-- **RC control — outbound uplink** (`scheduler/rc_tx.rs`, `hid/`, `msp/rc_encode.rs`,
+- **RC control — outbound uplink (ADR-054)** (`scheduler/rc_tx.rs`, `hid/`, `msp/rc_encode.rs`,
   `mavlink_proto/handler.rs`). HID → `rcEngine`/`rcManual` → `rc_stream_*` commands → shared `RcTxState`
   (independent of `protocol`) → streamed to the FC: MSP `SET_RAW_RC` + `SET_AUX_RC` (INAV), or
   `RC_CHANNELS_OVERRIDE` (ArduPilot) / `MANUAL_CONTROL` (PX4). Engage seeds from the FC's current
@@ -586,8 +601,7 @@ protocols + these parallel networks) is the living reference in
   End-Flight dialog or a re-arm grace; orphan recovery on reconnect. Fed by all three protocols.
 - **Telemetry Relay (ADR-051, `telemetry_forward/`).** Taps live decoded telemetry, re-encodes to
   LTM/MAVLink/CRSF/SmartPort, sends out Serial/BLE/TCP/UDP. Plan `archive/TELEMETRY_FORWARDING.md`.
-- **Vehicle Control (`commands/control.rs`).** MAVLink command panel (mode/arm/takeoff/RTL/guided/…) via
-  `COMMAND_LONG`/`COMMAND_INT` + `COMMAND_ACK` correlation. Plan `active/VEHICLE_CONTROL.md` (slated for
-  ADR-052 — not yet written into ARCHITECTURE.md).
+- **Vehicle Control (ADR-052, `commands/control.rs`).** MAVLink command panel (mode/arm/takeoff/RTL/
+  guided/…) via `COMMAND_LONG`/`COMMAND_INT` + `COMMAND_ACK` correlation. Plan `active/VEHICLE_CONTROL.md`.
 - **Airspace Manager (ADR-038, `aero/`).** On-demand OpenAIP aeronautical overlay (airspaces/obstacles/
   airports) — separate from the live telemetry path. Plan `active/AIRSPACE_MANAGER.md`.
