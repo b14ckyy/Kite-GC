@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **RC Control — PX4 over MAVLink (`MANUAL_CONTROL`, implemented — UNTESTED).** PX4's native joystick path
+  (#69) instead of channel override: a dedicated **manual mapping** model — assign a HID axis to each of
+  roll/pitch/throttle/yaw (→ y/x/z/r, normalised −1000…1000, **z=0 = mid throttle**), up to **6 aux axes**,
+  and HID buttons → **MANUAL_CONTROL button numbers 1–32** (the FC maps each to an action per vehicle, so
+  there's nothing button-related to maintain GCS-side). Its own compact editor + monitor replace the
+  channel grid when the platform is PX4; the `rcManual` store evaluates the setpoint live. Engage gate,
+  deadman, rate and the armed-disengage confirmation are reused; modes/arm stay on the control panel
+  (`DO_SET_MODE`). A `COM_RC_IN_MODE` reminder is shown (PX4 ignores manual control unless it allows a
+  MAVLink source). **No PX4 SITL/hardware was available to test this — it compiles + type-checks but needs
+  validation before it's considered shipped.** See `docs/active/MAVLINK_RC_CONTROL.md` §5.
 - **RC Control — ArduPilot over MAVLink (SITL-verified).** The same HID/mapping/profile UI now steers
   ArduPilot via `RC_CHANNELS_OVERRIDE` (#70) — a firmware-gated copy of the MSP pipeline. A **platform
   dropdown** behind "Device" (INAV · ArduPilot · PX4) drives the layout/adapter; it's derived from the FC

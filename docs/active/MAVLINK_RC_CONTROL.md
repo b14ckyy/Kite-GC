@@ -1,20 +1,26 @@
 # RC Control over MAVLink — ArduPilot + PX4 (cross-platform plan)
 
-> Status: **ArduPilot SHIPPED** (2026-06-21, SITL-verified) · **PX4 still planned**. Extends the shipped
-> INAV/MSP RC control to MAVLink flight stacks. The **shared layer** (HID backend, channel-mapping
-> methods, profiles, engine, engage gate, seed, deadman) is reused as-is — see the archived
-> `docs/archive/MSP_RC_CONTROL.md`. This doc covers only what differs: the **per-platform send adapter**
-> and the platform gating. Doc stays in `active/` until PX4 is decided/done.
+> Status: **ArduPilot SHIPPED** (2026-06-21, SITL-verified) · **PX4 IMPLEMENTED, UNTESTED** (2026-06-21,
+> no PX4 SITL/hardware available here — needs validation). Extends the shipped INAV/MSP RC control to
+> MAVLink flight stacks. The **shared layer** (HID backend, profiles, engine, engage gate, deadman) is
+> reused as-is — see the archived `docs/archive/MSP_RC_CONTROL.md`. This doc covers only what differs: the
+> **per-platform send adapter** and the platform gating. Doc stays in `active/` until PX4 is validated.
 >
-> **Implemented (ArduPilot):** §2 platform gating (dropdown behind "Device", locked on connect, persisted
-> offline choice), §3 `RC_CHANNELS_OVERRIDE` adapter (Primary/Secondary, no forced release on disengage),
-> §4 platform-aware `rcLayout` + Primary/Secondary group labels. Plus: seed from the FC's `RC_CHANNELS`
-> broadcast (no extra request), an **adaptive read timeout + catch-up pacing** in the MAVLink handler so
-> the override rate actually hits 10–25 Hz (the read-driven loop otherwise quantized it ~⅓ low), an
+> **Implemented (ArduPilot, SITL-verified):** §2 platform gating (dropdown behind "Device", locked on
+> connect, persisted offline choice), §3 `RC_CHANNELS_OVERRIDE` adapter (Primary/Secondary, no forced
+> release on disengage), §4 platform-aware `rcLayout` + Primary/Secondary group labels. Plus: seed from
+> the FC's `RC_CHANNELS` broadcast, an **adaptive read timeout + catch-up pacing** in the MAVLink handler
+> so the rate actually hits 10–25 Hz (the read-driven loop otherwise quantized it ~⅓ low), an
 > **armed-disengage confirmation** (protocol-agnostic), and the RC tab hidden on passive-telemetry links.
 >
-> **Deferred:** per-platform last-profile auto-load (§6), `SYSID_MYGCS` mismatch warning (§3), GCS-side
-> expo/curves (MP has them; we leave expo to the FC's `RCx_*`). **PX4** (§5) — not started.
+> **Implemented (PX4, UNTESTED):** §5 `MANUAL_CONTROL` (#69) adapter — a dedicated 4-axis manual mapping
+> model (roll/pitch/throttle/yaw → y/x/z/r, z=0 = mid) + up to 6 aux axes + buttons 1–32 (FC maps the
+> action), its own editor/monitor (`ManualConfig`/`ManualStates`), `rcManual` store + live evaluator,
+> reuses engage/deadman/rate/armed-confirm. Modes/arm stay on the control panel (`DO_SET_MODE`). A
+> `COM_RC_IN_MODE` reminder is shown. **Needs a PX4 SITL/hardware pass before it can be called shipped.**
+>
+> **Deferred:** per-platform last-profile auto-load (§6), `SYSID_MYGCS` / `COM_RC_IN_MODE` *mismatch*
+> warnings (currently a static hint), GCS-side expo/curves (we leave expo to the FC).
 
 Related: ADR-010 (schedulers own the link), ADR-052 (`VEHICLE_CONTROL.md` — the MAVLink command path,
 mode switching, arming), `docs/archive/MSP_RC_CONTROL.md` (the INAV/MSP RC pipeline + shared layer).
@@ -101,20 +107,36 @@ platform, and both the config editor and the live monitor group by it.
 
 ---
 
-## 5. PX4 — `MANUAL_CONTROL` (#69)
+## 5. PX4 — `MANUAL_CONTROL` (#69) — implemented, untested
 
-Fundamentally different — **not** per-channel PWM:
+Fundamentally different from the channel platforms — **not** per-channel PWM, so PX4 uses a **dedicated
+manual mapping model**, not the channel grid. (Verified against PX4 docs + `mavlink_receiver.cpp`.)
 
-- Fields `x` (pitch), `y` (roll), `z` (throttle), `r` (yaw), normalised **−1000…1000** (`z` often
-  0…1000), `buttons`/`buttons2` bitmasks, newer revisions `aux1…aux6`.
-- It's stick-level manual flight (the QGC joystick path), not a 16-channel override.
-- **Requirements:** joystick enabled / `COM_RC_IN_MODE`, a mode that accepts manual control. Mode
-  switching is via commands (`DO_SET_MODE`), not the message; buttons can map to actions.
-- Some PX4 builds accept `RC_CHANNELS_OVERRIDE` partially, but `MANUAL_CONTROL` is canonical.
+**Wire fields** (`mavlink` crate confirmed): `x` (pitch), `y` (roll), `z` (thrust), `r` (yaw), all
+normalised **−1000…1000**; `buttons` + `buttons2` (32 button bits); `enabled_extensions` + `aux1…aux6`
+continuous extension axes. `target` = FC sysid. `INT16_MAX` on an axis = "invalid".
 
-**Implication:** our channel-centric mapping (up to 32 channels) doesn't fit. PX4 needs a dedicated
-**"manual" mapping mode** — pick 4 axes → x/y/z/r + a button map — or be deferred. **Open question:**
-full PX4 manual support vs. minimal (modes/commands only, no continuous stick injection).
+- **Throttle (`z`)**: PX4 maps stick **[−1,1] → throttle [0,1]** for **both** multicopter and fixed-wing,
+  so **`z` = 0 is mid** (hover/centre), −1000 = 0 %, +1000 = full. We send `z = 0` at stick centre.
+- **Activation:** PX4 ignores `MANUAL_CONTROL` unless **`COM_RC_IN_MODE`** allows a MAVLink/joystick
+  source (0 = RC only and 4 = disabled both block it; 1/2/3/5–8 allow it). We show a static reminder; a
+  live *mismatch* warning is deferred (we don't read the param yet).
+- **Buttons:** sent as the raw bitfield; **the FC maps each button → action per vehicle** (PX4/QGC
+  joystick config). Simpler for us and more flexible for the user — nothing button-related to maintain GCS
+  side. Modes/arm still go through the control panel (`DO_SET_MODE` / `COMPONENT_ARM_DISARM`, ADR-052).
+- **No seed:** PX4 doesn't echo `MANUAL_CONTROL` and manual axes are live (no latched state) → engage
+  starts streaming immediately (a throttle-position jump is possible, as in QGC; accepted).
+- **Failsafe/deadman:** PX4 has a short manual-setpoint timeout → `COM_RC_LOSS_T` failsafe action. Our
+  heartbeat deadman + the no-forced-release-on-disengage grace concept apply the same as ArduPilot.
+- `RC_CHANNELS_OVERRIDE` is also accepted by recent PX4 (it has `handle_message_rc_channels_override`),
+  but it routes through PX4's RC-calibration / `RC_MAP_*` path (fragile, FC-config-dependent), so
+  `MANUAL_CONTROL` is the canonical, chosen path.
+
+**Implementation:** a `ManualMap` (4 sticks + ≤6 aux + buttons 1–32) in `stores/rcManual.ts` with a live
+evaluator (`manualOutput`, reusing `rcEngine.makeFrame` for input resolution), a dedicated editor
+(`ManualConfig.svelte`) + monitor (`ManualStates.svelte`), the `rc_stream_set_manual` command, and the
+MAVLink handler sending `MANUAL_CONTROL` when `fc_variant == "PX4"`. Engage/deadman/rate/armed-confirm
+reused. **Status: compiles + type-checks; NOT yet flown against PX4 SITL/hardware — validation pending.**
 
 ---
 
@@ -162,7 +184,8 @@ and the profile files all stay. Additions:
    `RC_CHANNELS` broadcast. Adaptive read timeout + catch-up pacing for accurate 10–25 Hz. No forced
    release on disengage (grace window — see §7). Firmware-gated. SITL-verified.
 3. [ ] **Per-platform profile auto-load** (`lastProfileByPlatform`). Deferred.
-4. [ ] **PX4** — `MANUAL_CONTROL`, full manual mode vs minimal. Not started (next).
+4. [~] **PX4** — `MANUAL_CONTROL` full manual mode (4 sticks + aux1–6 + buttons 1–32). **Implemented,
+   UNTESTED** — needs a PX4 SITL/hardware pass (no PX4 SITL available to the author).
 
 ---
 
