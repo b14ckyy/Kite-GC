@@ -367,7 +367,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   identical to the `mission` blue (ArduPilot Auto) on the track/badge.
 
 ### Fixed
-- **RC Control — bogus maxed-out axis values at startup (Windows).** Windows.Gaming.Input returns a
+- **Debug Monitor — frozen actual-rate for fire-and-forget sends + message-name/layout polish.** The
+  per-code "Actual Hz" only counted responses (and rolled the window over inside `on_response`), so a
+  no-reply send like `MSP_SET_RAW_RC` showed a stale frozen rate; it now measures `max(request,response)`
+  over a time-based window, so the RC send cadence reads correctly and a quiet code decays to 0 instead of
+  freezing. Added the missing human-readable names (MSP: MSP_RC, MSP_SET_RAW_RC, MSP_MODE_RANGES,
+  MSP2_COMMON_(SET_)SETTING, MSP2_INAV_GET_LINK_STATS, MSP2_INAV_SET_AUX_RC; MAVLink: MANUAL_CONTROL,
+  RC_CHANNELS_OVERRIDE, COMMAND_INT) so fewer rows show raw hex. The Name column now truncates with an
+  ellipsis (full name on hover) instead of widening the table. New **Latency** column (request→response
+  round-trip in ms per code) to inspect real MSP transaction times.
   zero-initialised reading (all axes 0.0 → −1.0) until a controller delivers its first report, so RC
   channels showed garbage extremes until something was moved. The HID backend now suppresses readings
   with a zero timestamp (waits for the first real one) and reuses controller objects across rescans;
