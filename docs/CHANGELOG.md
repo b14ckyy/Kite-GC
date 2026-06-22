@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **INAV Safe Home Manager + autoland config (in progress).** On connecting to INAV, Kite now downloads
+  all safehomes (any version) plus — on **INAV ≥7.1** — the fixed-wing autoland approach config and the
+  approach-relevant `nav_fw_land_*` settings. A new **Safe Home Manager** (house button in the INAV
+  mission panel, ≥7.1) edits the 8 safehome slots (enable, lat/lon, a **+** button that drops the point
+  at the map centre) and their per-site approach (approach/land alt, two headings with an **Excl.**
+  exclusive-direction toggle, turn direction, sea-level ref), plus the global approach params (approach
+  length, glide/flare alt+pitch, pitch-to-throttle modifier). Flare fields show only when a rangefinder
+  is present. **Save to FC** writes the whole config as one batch + EEPROM. Versions >9.1.x show a
+  "not validated" hint. _Map representation (markers + radius rings + approach geometry) is next._ See
+  `docs/active/AUTOLAND_SAFEHOME.md`.
 - **Automatic `blackbox_decode` download.** INAV Blackbox imports need the external `blackbox_decode`
   tool (kept external so it can track new INAV versions). When it's missing, Kite now offers a one-click
   download from the latest [iNavFlight/blackbox-tools](https://github.com/iNavFlight/blackbox-tools)
