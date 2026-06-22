@@ -15,9 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at the map centre) and their per-site approach (approach/land alt, two headings with an **Excl.**
   exclusive-direction toggle, turn direction, sea-level ref), plus the global approach params (approach
   length, glide/flare alt+pitch, pitch-to-throttle modifier). Flare fields show only when a rangefinder
-  is present. **Save to FC** writes the whole config as one batch + EEPROM. Versions >9.1.x show a
-  "not validated" hint. _Map representation (markers + radius rings + approach geometry) is next._ See
-  `docs/active/AUTOLAND_SAFEHOME.md`.
+  is present; REL↔MSL altitude toggling auto-converts via the terrain elevation at the point. **Save to
+  FC** writes the whole config as one batch + EEPROM. Versions >9.1.x show a "not validated" hint. The
+  **2D map** shows enabled safehomes (draggable) with a green `max_distance` ring (disarmed-only) + a
+  yellow `loiter_radius` ring and the full approach pattern (downwind/base/final, INAV-configurator
+  style). _3D map overlay is next._ See `docs/active/AUTOLAND_SAFEHOME.md`.
 - **Automatic `blackbox_decode` download.** INAV Blackbox imports need the external `blackbox_decode`
   tool (kept external so it can track new INAV versions). When it's missing, Kite now offers a one-click
   download from the latest [iNavFlight/blackbox-tools](https://github.com/iNavFlight/blackbox-tools)

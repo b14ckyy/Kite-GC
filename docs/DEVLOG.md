@@ -613,8 +613,10 @@ protocols + these parallel networks) is the living reference in
   approaches + `nav_fw_land_*` on ≥7.1, via `MSP2_INAV_SAFEHOME` / `MSP2_INAV_FW_APPROACH` +
   `read_setting` (shared `commands/fc_settings.rs`). The Safe Home Manager (swapped into the INAV mission
   slim panel via a house button) edits a working copy; "Save to FC" writes everything as one batch +
-  `MSP_EEPROM_WRITE`. Gated by `FeatureSet.autoland_config` (≥7.1) / `autoland_validated` (≤9.1.x). Map
-  overlay (2D + 3D markers/rings/approach geometry) is the next phase. Plan `active/AUTOLAND_SAFEHOME.md`.
+  `MSP_EEPROM_WRITE`. Gated by `FeatureSet.autoland_config` (≥7.1) / `autoland_validated` (≤9.1.x). The
+  **2D map overlay** (markers + green/yellow rings + full approach pattern via the shared
+  `helpers/autolandGeometry.ts`, ported from the INAV configurator) is shipped; the 3D overlay is next.
+  Plan `active/AUTOLAND_SAFEHOME.md`.
 - **Diagnostic file logging (ADR-055, `logging/`).** A custom `log::Log` logger installed before the Tauri
   builder writes a rotating TXT file (`<AppData>/kite-gc/kite-gc.log`, portable → `data/`; previous run →
   `*.prev`). Until this landed, **no logger was installed**, so every `log::` call in the codebase was a

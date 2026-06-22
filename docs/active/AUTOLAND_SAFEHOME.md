@@ -5,8 +5,8 @@
 
 # Autoland & Safe Home Manager (INAV) — Feature Plan
 
-> STATUS: IN PROGRESS (Iteration 1). Phases **A–C done** (backend read/write + connect-load + the Safe
-> Home Manager editor); **D/E (2D + 3D map overlay) next**. The first of the three "Airspace Manager"
+> STATUS: IN PROGRESS (Iteration 1). Phases **A–D done** (backend read/write + connect-load + Safe Home
+> Manager editor + 2D map overlay); **E (3D map overlay) next**. The first of the three "Airspace Manager"
 > safety subsystems (Autoland → Geozones → Geofence). This iteration covers **safehome display + the
 > Safe Home Manager (safehome editing + fixed-wing autoland approach config)**. The **mission
 > LAND-waypoint** autoland (fwapproach indices 8+, waypoint placement) is a deliberate follow-up.
