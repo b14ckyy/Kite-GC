@@ -372,11 +372,11 @@
       <Button variant="data" icon="upload" full disabled={!isMavlinkConnected} onclick={handleFcUpload}>{$t('mission.fcUpload')}</Button>
     </div>
     <div class="ctrl-row">
-      <Button variant="standard" icon="folder" full onclick={handleOpenFile}>{$t('mission.open')}</Button>
-      <Button variant="standard" icon="save" full onclick={handleSaveFile}>{$t('mission.save')}</Button>
+      <Button variant="data" icon="library" full disabled={currentMission.length === 0} onclick={handleSaveToLibrary}>{$t('mission.saveToLibrary')}</Button>
     </div>
     <div class="ctrl-row">
-      <Button variant="data" icon="library" full disabled={currentMission.length === 0} onclick={handleSaveToLibrary}>{$t('mission.saveToLibrary')}</Button>
+      <Button variant="standard" icon="folder" full onclick={handleOpenFile}>{$t('mission.open')}</Button>
+      <Button variant="standard" icon="save" full onclick={handleSaveFile}>{$t('mission.save')}</Button>
     </div>
 
     {#if statusMessage}<div class="mission-status">{statusMessage}</div>{/if}
