@@ -605,3 +605,11 @@ protocols + these parallel networks) is the living reference in
   guided/…) via `COMMAND_LONG`/`COMMAND_INT` + `COMMAND_ACK` correlation. Plan `active/VEHICLE_CONTROL.md`.
 - **Airspace Manager (ADR-038, `aero/`).** On-demand OpenAIP aeronautical overlay (airspaces/obstacles/
   airports) — separate from the live telemetry path. Plan `active/AIRSPACE_MANAGER.md`.
+- **Diagnostic file logging (ADR-055, `logging/`).** A custom `log::Log` logger installed before the Tauri
+  builder writes a rotating TXT file (`<AppData>/kite-gc/kite-gc.log`, portable → `data/`; previous run →
+  `*.prev`). Until this landed, **no logger was installed**, so every `log::` call in the codebase was a
+  silent no-op — a failed connect left no trace. Level is user-set in Settings → Diagnostics
+  (OFF/Error/Warning/Debug; default Warning) via `set_log_level`, applied at runtime through
+  `log::set_max_level`. `eprintln!` still goes to the console; this captures the `log` facade. **Diagnosing
+  a connection problem**: set level to Debug, reproduce, hand back the log. The in-app Debug Monitor
+  (ADR-008) is the live counterpart for inspecting protocol traffic.

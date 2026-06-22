@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Diagnostic file logging (ADR-055).** The backend now writes a real log file so connection problems
+  leave a trace. Until now a logger was **never installed**, so every `log::` call was a silent no-op — a
+  failed connect only showed a UI toast. A custom `log::Log` logger (no new dependency) writes a rotating
+  TXT to `<AppData>/kite-gc/kite-gc.log` (portable → `data/`; the previous run is kept as `*.prev`).
+  Verbosity is set in **Settings → Diagnostics** (OFF / Errors / Warnings / Debug; default Warnings) and
+  applied at runtime; an **Open Folder** button reveals the file. To diagnose a connection issue: set
+  Debug, reproduce, send the log. Connection-flow logging (transport open, MAVLink handshake, FC-stack
+  identification, success/failure) is now captured.
+- **MAVLink handshake — autopilot-component lock (PX4 robustness).** The handshake locked onto the *first*
+  non-GCS HEARTBEAT, which on multi-component systems (PX4 with a gimbal/companion reporting
+  `autopilot=INVALID` from a non-autopilot component) could mis-identify the FC and skip the PX4 path. It
+  now waits for an actual autopilot heartbeat (`autopilot≠INVALID` or component 1), logging what it sees.
 - **RC Control — PX4 over MAVLink (`MANUAL_CONTROL`, implemented — UNTESTED).** PX4's native joystick path
   (#69) instead of channel override: a dedicated **manual mapping** model — assign a HID axis to each of
   roll/pitch/throttle/yaw (→ y/x/z/r, normalised −1000…1000, **z=0 = mid throttle**), up to **6 aux axes**,

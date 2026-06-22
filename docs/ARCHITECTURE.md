@@ -2557,5 +2557,39 @@ reused. PX4 needs flight validation. **Deferred**: per-platform last-profile aut
 
 ---
 
+## ADR-055: Diagnostic File Logging
+
+**Status**: Accepted — shipped. **Related**: ADR-010 (the multi-protocol connect/handshake flow this
+primarily serves), ADR-008 (dev-only Debug Monitor — the live, in-app counterpart to this on-disk log).
+
+**Context**: The backend already logged liberally through the `log` facade
+(`log::info!`/`warn!`/`error!`/`debug!`), but **no logger was ever installed** — so every one of those
+calls was a silent no-op. When a user reported they couldn't connect to a PX4 board, there was *nothing*
+to go on: a failed connect only surfaced a UI toast and left no trace. We needed a persistent, user-
+configurable diagnostic trail without taking on a heavy logging dependency.
+
+**Decision**:
+
+1. **Custom `log::Log` file logger** (`logging/`) — no new crate; just `std` + `chrono` (already a dep).
+   Installing our own logger keeps full control over format, file location and runtime level changes.
+2. **One TXT file in the app data folder** (`<AppData>/kite-gc/kite-gc.log`; portable → `data/`), path
+   logic mirroring the DB resolver. On each start the previous run rotates to `kite-gc.log.prev`, so there
+   are always exactly two files (current + previous) — bounded, easy to find, easy to hand back.
+3. **Every record flushed immediately** — low-volume diagnostic log, so a crash mid-connect still leaves
+   the last lines on disk.
+4. **Runtime-configurable level via `log::set_max_level`** (the macros gate on it before reaching the
+   logger, so `set_level` is a single atomic store). Four user-facing levels: **OFF / Error / Warning /
+   Debug** (Debug also captures Info — the connection/handshake milestones). Default **Warning**: failures
+   are recorded out of the box; the user switches to Debug to capture a full byte/frame trace.
+5. **Init before the Tauri builder** so startup is captured; the frontend re-applies the persisted level
+   on startup (`set_log_level`) and exposes the file via `get_log_path` + "Open Folder" (Settings →
+   Diagnostics).
+
+**Consequences**: all existing `log::` calls become useful retroactively (no code churn at call sites).
+`eprintln!` still goes to stderr/console as before (CLAUDE.md keeps it) — the file logger captures the
+`log` facade only. Future subsystems get diagnostics for free by using `log::`.
+
+---
+
 *End of Architecture Decision Records*
 
