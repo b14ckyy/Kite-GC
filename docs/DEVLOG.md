@@ -355,13 +355,16 @@ Blackbox log files from INAV flight controllers contain high-resolution telemetr
 
 ### External Binary Approach
 
-Blackbox logs are decoded using the official `blackbox_decode` binary from [iNavFlight/blackbox-tools](https://github.com/iNavFlight/blackbox-tools) (GPL-3.0). The binary is bundled alongside the application, **not** compiled into `kite-gc.exe`.
+Blackbox logs are decoded using the official `blackbox_decode` binary from [iNavFlight/blackbox-tools](https://github.com/iNavFlight/blackbox-tools) (GPL-3.0). The binary is kept **external** (next to the app, **not** compiled in) on purpose, so it can be updated independently when a new INAV version changes the log format.
 
-**Binary discovery** (in order):
+**Binary discovery** (`flightlog/blackbox.rs::find_decoder`, in order):
 1. Application folder (next to executable)
-2. System PATH fallback
+2. Auto-download install dir (`<AppData>/kite-gc/bin`, portable → `data/bin`)
+3. System PATH fallback
 
-No settings UI for the path — if the binary is missing, import is disabled with a user-facing message.
+**On-demand download** (`flightlog/decoder.rs`, ADR-008-style external dep): if the decoder is missing when an INAV-blackbox import starts, the user is offered a one-click download from the latest GitHub release. Windows pulls the `.zip` (extracted via the `zip` crate); Linux/macOS pull the `.tar.zst` (via `zstd` + `tar`), with the executable bit set. Arch matching uses aliases because the release names the Linux x64 build `x64_64` (not `x86_64`). Android isn't supported (no blackbox import there).
+
+**Version visibility** (`blackbox_decoder_version` → `blackbox_decode --version`, e.g. `9.0.0 INAV 1918a75`): shown read-only in Settings → Flight Logbook with a Download/Update button — works for an externally-placed binary too (the tool carries no Windows file-version resource), so the user can tell whether it needs updating for a new INAV version.
 
 **Invocation**:
 ```

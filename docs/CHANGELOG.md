@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Automatic `blackbox_decode` download.** INAV Blackbox imports need the external `blackbox_decode`
+  tool (kept external so it can track new INAV versions). When it's missing, Kite now offers a one-click
+  download from the latest [iNavFlight/blackbox-tools](https://github.com/iNavFlight/blackbox-tools)
+  release instead of just erroring — Windows (`.zip`) and Linux/macOS (`.tar.zst`), installed into a
+  writable app-data `bin/` dir. Settings → Flight Logbook shows the installed decoder version
+  (`blackbox_decode --version`, read-only) with a Download/Update button, so it's clear when an update is
+  needed for a newer INAV log format. Android is not supported (no Blackbox import there).
 - **Runtime debug mode for release builds (`--debug`, ADR-056).** Starting a shipped release build with
   `--debug` exposes the full in-app Debug Monitor (incl. the MSP/MAVLink stat tabs + DEV playground) and
   raises the diagnostic file log to Debug — no separate debug binary needed. The stat trackers are now
