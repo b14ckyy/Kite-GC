@@ -2,9 +2,10 @@
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
 // MSP Debug Statistics Tracker
-// Only compiled in debug builds via #[cfg(debug_assertions)] in mod.rs.
-// Tracks per-message request/response/timeout stats and emits periodic
-// debug snapshots to the frontend via Tauri events.
+// Compiled into all builds; every public method early-returns on `crate::debug_mode::enabled()`, so
+// it's active in debug builds and in a release started with `--debug`, and a near-zero-cost no-op
+// otherwise. Tracks per-message request/response/timeout stats and emits periodic debug snapshots to
+// the frontend via Tauri events.
 
 use std::collections::HashMap;
 use std::time::Instant;
@@ -165,6 +166,7 @@ impl DebugTracker {
     /// Mark a (possibly dynamically-added) code as an active poll with a target rate, so it shows as
     /// POLL rather than INIT. Used for conditionally-polled messages like the radar ADS-B list.
     pub fn mark_polling(&mut self, code: u16, target_rate_hz: f64) {
+        if !crate::debug_mode::enabled() { return; }
         self.ensure_code(code);
         if let Some(s) = self.stats.get_mut(&code) {
             s.is_polling = true;
@@ -174,6 +176,7 @@ impl DebugTracker {
 
     /// Record that an MSP request was sent
     pub fn on_request(&mut self, code: u16, frame_bytes: usize) {
+        if !crate::debug_mode::enabled() { return; }
         self.ensure_code(code);
         if let Some(s) = self.stats.get_mut(&code) {
             s.request_count += 1;
@@ -190,6 +193,7 @@ impl DebugTracker {
 
     /// Record that an MSP response was received
     pub fn on_response(&mut self, code: u16, frame_bytes: usize) {
+        if !crate::debug_mode::enabled() { return; }
         self.ensure_code(code);
         if let Some(s) = self.stats.get_mut(&code) {
             s.response_count += 1;
@@ -206,6 +210,7 @@ impl DebugTracker {
 
     /// Record that an MSP request timed out
     pub fn on_timeout(&mut self, code: u16) {
+        if !crate::debug_mode::enabled() { return; }
         self.ensure_code(code);
         if let Some(s) = self.stats.get_mut(&code) {
             s.timeout_count += 1;
@@ -215,6 +220,7 @@ impl DebugTracker {
 
     /// Emit debug stats to the frontend at ~60 Hz
     pub fn maybe_emit(&mut self, app_handle: &AppHandle) {
+        if !crate::debug_mode::enabled() { return; }
         if self.last_emit.elapsed().as_millis() < 16 {
             return;
         }

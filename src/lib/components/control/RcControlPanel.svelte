@@ -12,6 +12,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { get } from 'svelte/store';
+  import { untrack } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { t } from 'svelte-i18n';
@@ -38,7 +39,9 @@
     saveProfile,
     deleteProfile,
     profilesDir,
+    profileKind,
     type RcProfile,
+    type RcProfileKind,
   } from '$lib/stores/rcProfiles';
   import { connection } from '$lib/stores/connection';
   import { telemetry } from '$lib/stores/telemetry';
@@ -100,26 +103,35 @@
 
   // ── Profiles ────────────────────────────────────────────────────────────
   const activeProfile = $derived($settings.rcControl.activeProfile);
+  // PX4 uses the manual map + editor/monitor instead of the channel grid; it also gets its own profile
+  // group. Declared here (not with the other connection-derived flags below) because the profile helpers
+  // above reference it.
+  const isManualPlatform = $derived($rcPlatform === 'px4');
 
   function setActive(name: string | null): void {
     settings.patch({ rcControl: { ...$settings.rcControl, activeProfile: name } });
   }
 
-  /** Snapshot the working config into a profile object (with the current device as metadata). */
+  /** Snapshot the working config into a profile object (with the current device as metadata). The
+   *  profile's kind follows the active platform — a PX4 profile holds only the manual map, an
+   *  INAV/ArduPilot profile only the channel map (the two models aren't interchangeable). */
   function buildProfile(name: string): RcProfile {
     const existing = $rcProfiles.find((p) => p.name === name);
-    return {
+    const base = {
       name,
       deviceUuid: selectedDevice?.uuid ?? existing?.deviceUuid ?? null,
       deviceName: selectedDevice?.name ?? existing?.deviceName ?? null,
-      channels: structuredClone($currentChannels),
-      manual: structuredClone($rcManual), // PX4 manual map (harmless for channel platforms)
     };
+    return isManualPlatform
+      ? { ...base, kind: 'manual', manual: structuredClone($rcManual) }
+      : { ...base, kind: 'channel', channels: structuredClone($currentChannels) };
   }
 
-  /** Load a profile's working state (both the channel map and the PX4 manual map). */
+  /** Load a profile's working state. A channel profile seeds the channel grid; a manual (PX4) profile
+   *  seeds the manual map. Each editor only reads its own model, so loading the irrelevant default for
+   *  the other is harmless. */
   function loadWorking(p: RcProfile | null): void {
-    currentChannels.set(p ? structuredClone(p.channels) : {});
+    currentChannels.set(p?.channels ? structuredClone(p.channels) : {});
     rcManual.set(p?.manual ? structuredClone(p.manual) : defaultManualMap());
   }
 
@@ -128,6 +140,24 @@
     setActive(name);
     loadWorking(name ? $rcProfiles.find((x) => x.name === name) ?? null : null);
   }
+
+  // Only profiles matching the active platform group are selectable — INAV/ArduPilot share the channel
+  // model, PX4 is a separate manual model, and they're not cross-compatible.
+  const currentKind = $derived<RcProfileKind>(isManualPlatform ? 'manual' : 'channel');
+  const visibleProfiles = $derived($rcProfiles.filter((p) => profileKind(p) === currentKind));
+
+  // When the platform group changes (offline pick or FC lock on connect), an active profile from the
+  // other group is no longer valid — deselect it so the dropdown + working state stay consistent.
+  $effect(() => {
+    const name = activeProfile;
+    const valid = visibleProfiles.some((p) => p.name === name);
+    if (name && !valid) {
+      untrack(() => {
+        setActive(null);
+        loadWorking(null);
+      });
+    }
+  });
 
   async function onSave(): Promise<void> {
     if (!activeProfile) return;
@@ -213,8 +243,6 @@
   const connectedPx4 = $derived($connection.status === 'connected' && $rcPlatform === 'px4');
   // Any FC we can inject RC to.
   const rcConnected = $derived(connectedMsp || connectedArdu || connectedPx4);
-  // PX4 uses the manual map + editor/monitor instead of the channel grid.
-  const isManualPlatform = $derived($rcPlatform === 'px4');
 
   // Armed state (protocol-agnostic: bit 2 of arming flags, set by both the MSP scheduler and the MAVLink
   // handler). Drives the "still armed" confirmation before a manual release.
@@ -507,7 +535,7 @@
         <label class="rc-prof-label" for="rc-prof">{$t('rc.profile')}</label>
         <select id="rc-prof" class="rc-prof" value={activeProfile ?? ''} onchange={onProfilePick}>
           <option value="">{$t('rc.noProfile')}</option>
-          {#each $rcProfiles as p (p.name)}
+          {#each visibleProfiles as p (p.name)}
             <option value={p.name}>{p.name}</option>
           {/each}
         </select>

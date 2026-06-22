@@ -3,6 +3,7 @@
 
 mod aero;
 mod commands;
+mod debug_mode;
 mod flightlog;
 mod flightmode;
 mod hid;
@@ -52,7 +53,7 @@ use commands::rc::{
     rc_stream_update, rc_stream_set_aux, rc_stream_enable, rc_stream_set_rate,
     rc_stream_set_override, rc_stream_set_manual,
 };
-use commands::info::get_app_version;
+use commands::info::{get_app_version, is_debug_mode};
 use commands::logging::{set_log_level, get_log_path};
 use commands::radar::{radar_configure, radar_set_center, radar_set_node_pos, radar_snapshot};
 use commands::terrain::{
@@ -128,10 +129,19 @@ pub fn setup_portable_mode() {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // `--debug` (release builds) turns on the in-app Debug Monitor + verbose logging at runtime. Debug
+    // builds default to on (see debug_mode). Parse it before anything else.
+    let debug_flag = debug_mode::debug_flag_present();
+    if debug_flag {
+        debug_mode::set(true);
+    }
+
     // Install the file logger before anything else so startup + connection diagnostics are captured.
-    // The frontend re-applies the user's persisted level on startup; we begin at Warning so early
-    // failures are recorded without flooding the file in normal operation.
-    logging::init(log::LevelFilter::Warn, is_portable());
+    // Default Warning so early failures are recorded without flooding the file in normal operation; a
+    // `--debug` start raises it to Debug. The frontend re-applies the persisted level on startup (and
+    // keeps Debug when in debug mode).
+    let log_level = if debug_flag { log::LevelFilter::Debug } else { log::LevelFilter::Warn };
+    logging::init(log_level, is_portable());
 
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -167,6 +177,7 @@ pub fn run() {
             connect,
             disconnect,
             get_app_version,
+            is_debug_mode,
             set_log_level,
             get_log_path,
             mission_get,

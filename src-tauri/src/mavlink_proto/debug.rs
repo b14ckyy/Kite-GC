@@ -2,7 +2,8 @@
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
 // MAVLink Debug Statistics Tracker
-// Only compiled in debug builds (gated via #[cfg(debug_assertions)] in mod.rs).
+// Compiled into all builds; methods early-return on `crate::debug_mode::enabled()` (active in debug
+// builds + a release started with `--debug`, near-zero-cost otherwise).
 // MAVLink is push-based, so — unlike the MSP tracker — there is no request/response/
 // timeout model. We track every message ID seen in the session, separately per direction
 // (RX from the FC, TX from us), with a measured update rate and a "last seen" age.
@@ -92,6 +93,7 @@ impl MavlinkDebugTracker {
 
     /// Record a received MAVLink frame
     pub fn on_rx(&mut self, msg_id: u32, frame_bytes: usize) {
+        if !crate::debug_mode::enabled() { return; }
         self.record(msg_id, false, frame_bytes);
         self.window_bytes_rx += frame_bytes as u64;
         self.window_msg_rx += 1;
@@ -99,6 +101,7 @@ impl MavlinkDebugTracker {
 
     /// Record a transmitted MAVLink frame (our heartbeat, commands, mission items)
     pub fn on_tx(&mut self, msg_id: u32, frame_bytes: usize) {
+        if !crate::debug_mode::enabled() { return; }
         self.record(msg_id, true, frame_bytes);
         self.window_bytes_tx += frame_bytes as u64;
         self.window_msg_tx += 1;
@@ -128,6 +131,7 @@ impl MavlinkDebugTracker {
 
     /// Emit debug stats to the frontend at ~60 Hz
     pub fn maybe_emit(&mut self, app_handle: &AppHandle) {
+        if !crate::debug_mode::enabled() { return; }
         if self.last_emit.elapsed().as_millis() < 16 {
             return;
         }

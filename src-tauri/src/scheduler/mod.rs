@@ -8,28 +8,11 @@
 pub mod rc_tx;
 pub mod telemetry;
 
-#[cfg(debug_assertions)]
+// The DebugTracker is compiled into ALL builds now (it used to be a release-time no-op stub), so a
+// release `--debug` run can populate the Debug Monitor. Its methods early-return on
+// `crate::debug_mode::enabled()`, so when debug mode is off the cost is a single relaxed atomic load
+// per call (ADR-008 runtime-gated instead of compiled out).
 mod debug;
-
-// In release builds, DebugTracker is a zero-sized no-op struct.
-// All tracking calls are inlined away by the compiler.
-#[cfg(not(debug_assertions))]
-mod debug {
-    pub struct DebugTracker;
-    impl DebugTracker {
-        pub fn new(_polling: &[(u16, f64)], _handshake: &[u16]) -> Self { Self }
-        #[inline(always)]
-        pub fn mark_polling(&mut self, _: u16, _: f64) {}
-        #[inline(always)]
-        pub fn on_request(&mut self, _: u16, _: usize) {}
-        #[inline(always)]
-        pub fn on_response(&mut self, _: u16, _: usize) {}
-        #[inline(always)]
-        pub fn on_timeout(&mut self, _: u16) {}
-        #[inline(always)]
-        pub fn maybe_emit(&mut self, _: &tauri::AppHandle) {}
-    }
-}
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};

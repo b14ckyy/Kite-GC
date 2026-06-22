@@ -12,16 +12,33 @@ import { invoke } from '@tauri-apps/api/core';
 import type { RcChannelMap } from '$lib/helpers/rcMethods';
 import type { ManualMap } from './rcManual';
 
+/** Which mapping model a profile holds. `channel` = INAV/ArduPilot channel methods (cross-compatible);
+ *  `manual` = PX4 MANUAL_CONTROL raw mapping. The two are NOT interchangeable, so the profile dropdown
+ *  only shows the kind matching the active platform. */
+export type RcProfileKind = 'channel' | 'manual';
+
 export interface RcProfile {
   /** Display name (also the basis of the on-disk filename). */
   name: string;
+  /** Which platform group this profile targets — drives the dropdown filter. Older profiles lack it;
+   *  `profileKind()` infers it from the payload for those. */
+  kind?: RcProfileKind;
   /** Device the profile was built for — metadata only, never auto-applied. */
   deviceUuid: string | null;
   deviceName: string | null;
-  /** Channel assignments/methods/behaviour (INAV / ArduPilot channel platforms). */
-  channels: RcChannelMap;
-  /** PX4 MANUAL_CONTROL mapping (4 sticks + aux + buttons). Optional — only set for PX4 profiles. */
+  /** Channel assignments/methods/behaviour (INAV / ArduPilot channel platforms). Set for `channel`. */
+  channels?: RcChannelMap;
+  /** PX4 MANUAL_CONTROL mapping (4 sticks + aux + buttons). Set for `manual`. */
   manual?: ManualMap;
+}
+
+/** A profile's kind — explicit when present, otherwise inferred for legacy files: a populated channel
+ *  map means a channel (INAV/ArduPilot) profile; otherwise a stored manual map means a PX4 profile. */
+export function profileKind(p: RcProfile): RcProfileKind {
+  if (p.kind === 'channel' || p.kind === 'manual') return p.kind;
+  const hasChannels = p.channels && Object.keys(p.channels).length > 0;
+  if (hasChannels) return 'channel';
+  return p.manual ? 'manual' : 'channel';
 }
 
 /** All profiles found on disk (sorted by name). */

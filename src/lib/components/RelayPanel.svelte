@@ -15,9 +15,7 @@
   import { settings } from '$lib/stores/settings';
   import { relayStats, relayResults, newRelay, type RelayConfig } from '$lib/stores/relay';
   import { reconfigureRelays } from '$lib/controllers/relayController';
-  import { startBleScan, stopBleScan, startBleDeviceListener, stopBleDeviceListener } from '$lib/controllers/connectionController';
-
-  type Category = 'device' | 'tcp' | 'udp';
+  import { startBleScan, stopBleScan, startBleDeviceListener, stopBleDeviceListener, refreshSerialPorts } from '$lib/controllers/connectionController';
 
   let { open }: { open: boolean } = $props();
 
@@ -26,17 +24,25 @@
   const connected = $derived($connection.status === 'connected');
   const relays = $derived($settings.relays ?? []);
 
-  // Scan for BLE devices while the panel is open so they appear in the combined device list — but ONLY
-  // when the primary link is already connected via a non-BLE transport, so we never fight the main
-  // connection's own BLE scan (while disconnected the user may be picking a BLE primary) or share the
-  // adapter with a BLE primary link.
+  // Listen for BLE discovery events whenever the panel is open. This is pure event subscription (no
+  // adapter use), so it's always safe and lets devices found by ANY scan — the main connect's or ours —
+  // populate the relay's BLE picker.
+  $effect(() => {
+    if (!open) return;
+    void startBleDeviceListener();
+    return () => stopBleDeviceListener();
+  });
+
+  // Run our OWN BLE scan to populate the picker — but ONLY when connected via a non-BLE transport, so we
+  // never fight the main connection's BLE scan (while disconnected the user may be picking a BLE primary)
+  // or share the adapter with a BLE primary link. Refresh the serial list at the same time so both
+  // device pickers are self-sufficient (the relay panel no longer depends on the main bar having scanned).
   $effect(() => {
     if (open && $connection.status === 'connected' && $connection.transportType !== 'ble') {
-      void startBleDeviceListener();
+      void refreshSerialPorts(''); // return value (the auto-selected port) is irrelevant here
       void startBleScan();
       return () => {
         void stopBleScan();
-        stopBleDeviceListener();
       };
     }
   });
@@ -137,24 +143,6 @@
     });
   }
 
-  // Top-level category (serial+ble collapse into one "Device" picker); TCP/UDP are their own.
-  function categoryOf(kind: RelayConfig['output']['kind']): Category {
-    return kind === 'tcp' ? 'tcp' : kind === 'udp' ? 'udp' : 'device';
-  }
-  function setCategory(r: RelayConfig, cat: Category) {
-    setKind(r, cat === 'tcp' ? 'tcp' : cat === 'udp' ? 'udp' : 'serial');
-  }
-  // Combined Serial+BLE picker. Option values are prefixed (`serial:<path>` / `ble:<id>`).
-  function deviceValue(r: RelayConfig): string {
-    return r.output.kind === 'ble' ? `ble:${r.output.bleDeviceId ?? ''}` : `serial:${r.output.port ?? ''}`;
-  }
-  function setDevice(r: RelayConfig, value: string) {
-    if (value.startsWith('ble:')) {
-      patchOutput(r.id, { kind: 'ble', bleDeviceId: value.slice(4) });
-    } else {
-      patchOutput(r.id, { kind: 'serial', port: value.slice('serial:'.length), baud: r.output.baud ?? 115200 });
-    }
-  }
   function addRelay() {
     settings.patch({ relays: [...relays, newRelay()] });
   }
@@ -216,28 +204,31 @@
           <option value="crsf">CRSF</option>
           <option value="smartport">SmartPort</option>
         </select>
-        <select class="r-select kind" value={categoryOf(r.output.kind)} onchange={(e) => setCategory(r, e.currentTarget.value as Category)}>
-          <option value="device">{$t('relay.device')}</option>
+        <select class="r-select kind" value={r.output.kind} onchange={(e) => setKind(r, e.currentTarget.value as RelayConfig['output']['kind'])}>
+          <option value="serial">{$t('relay.serial')}</option>
+          <option value="ble">{$t('relay.ble')}</option>
           <option value="tcp">TCP</option>
           <option value="udp">UDP</option>
         </select>
-        {#if r.output.kind === 'serial' || r.output.kind === 'ble'}
-          <select class="r-select port" value={deviceValue(r)} onchange={(e) => setDevice(r, e.currentTarget.value)}>
-            <option value="serial:">{$t('relay.selectDevice')}</option>
+        {#if r.output.kind === 'serial'}
+          <select class="r-select port" value={r.output.port ?? ''} onchange={(e) => patchOutput(r.id, { port: e.currentTarget.value, baud: r.output.baud ?? 115200 })}>
+            <option value="">{$t('relay.selectDevice')}</option>
             {#each $availablePorts as p}
-              <option value={`serial:${p.path}`}>{p.label}</option>
-            {/each}
-            {#each $bleDevices as d}
-              <option value={`ble:${d.id}`}>BLE: {d.name}{d.profile && d.profile !== 'Unknown' ? ` (${d.profile})` : ''}</option>
+              <option value={p.path}>{p.label}</option>
             {/each}
           </select>
-          {#if r.output.kind === 'serial'}
-            <select class="r-select baud" value={r.output.baud ?? 115200} onchange={(e) => patchOutput(r.id, { baud: Number(e.currentTarget.value) })}>
-              {#each BAUD_RATES as b}
-                <option value={b}>{b}</option>
-              {/each}
-            </select>
-          {/if}
+          <select class="r-select baud" value={r.output.baud ?? 115200} onchange={(e) => patchOutput(r.id, { baud: Number(e.currentTarget.value) })}>
+            {#each BAUD_RATES as b}
+              <option value={b}>{b}</option>
+            {/each}
+          </select>
+        {:else if r.output.kind === 'ble'}
+          <select class="r-select port" value={r.output.bleDeviceId ?? ''} onchange={(e) => patchOutput(r.id, { bleDeviceId: e.currentTarget.value })}>
+            <option value="">{$t('relay.selectDevice')}</option>
+            {#each $bleDevices as d}
+              <option value={d.id}>{d.name}{d.profile && d.profile !== 'Unknown' ? ` (${d.profile})` : ''}</option>
+            {/each}
+          </select>
         {:else if r.output.kind === 'tcp'}
           <input
             class="r-input port-num"

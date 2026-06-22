@@ -14,24 +14,10 @@ pub mod params;
 pub mod parser;
 pub mod streamrates;
 
-// MAVLink debug-stats tracker (Debug Monitor). Real implementation only in debug builds;
-// in release it is a zero-sized no-op struct, so all tracking calls compile away.
-#[cfg(debug_assertions)]
+// MAVLink debug-stats tracker (Debug Monitor). Compiled into all builds now (was a release no-op stub)
+// so a release `--debug` run populates the MAVLink tab. Methods early-return on
+// `crate::debug_mode::enabled()` — a single atomic load when debug mode is off (ADR-008 runtime-gated).
 pub mod debug;
-
-#[cfg(not(debug_assertions))]
-pub mod debug {
-    pub struct MavlinkDebugTracker;
-    impl MavlinkDebugTracker {
-        pub fn new() -> Self { Self }
-        #[inline(always)]
-        pub fn on_rx(&mut self, _: u32, _: usize) {}
-        #[inline(always)]
-        pub fn on_tx(&mut self, _: u32, _: usize) {}
-        #[inline(always)]
-        pub fn maybe_emit(&mut self, _: &tauri::AppHandle) {}
-    }
-}
 
 pub use handler::MavlinkHandle;
 pub use handshake::perform_handshake;

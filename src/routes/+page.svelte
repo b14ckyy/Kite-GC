@@ -223,13 +223,19 @@
   let terrainOpen = $state(false);
   terrainAnalysis.subscribe((s) => { terrainOpen = s.open; });
 
-  // Dev-only debug panel (tree-shaken in production builds)
-  const DEV_MODE = import.meta.env.DEV;
+  // Debug Monitor + dev UI. In dev builds `import.meta.env.DEV` is true; in a RELEASE build it's enabled
+  // at runtime when started with `--debug` (backend `is_debug_mode`, fetched in initPage → debugMode).
+  // Because DEV_MODE now depends on a runtime value, Vite can no longer prove the DebugPanel import dead,
+  // so the chunk stays in the release bundle (loaded lazily only when debug mode is actually on).
+  let debugMode = $state(false);
+  const DEV_MODE = $derived(import.meta.env.DEV || debugMode);
   let debugOpen = $state(false);
   let DebugPanelCmp: any = $state(null);
-  if (DEV_MODE) {
-    import('$lib/components/DebugPanel.svelte').then(m => { DebugPanelCmp = m.default; });
-  }
+  $effect(() => {
+    if (DEV_MODE && !DebugPanelCmp) {
+      void import('$lib/components/DebugPanel.svelte').then(m => { DebugPanelCmp = m.default; });
+    }
+  });
 
   // Reactive telemetry subscription
   let liveTelem = $state(get(telemetry));
@@ -600,9 +606,19 @@
   warnAltitudeM = saved.warnAltitudeM;
   systemMessages = saved.systemMessages ?? 'all';
   // Apply the persisted diagnostic log level to the backend logger (it starts at Warning by default).
-  logLevel = saved.logLevel ?? 'warning';
-  // svelte-ignore state_referenced_locally
-  void invoke('set_log_level', { level: logLevel }).catch(() => {});
+  // When the app runs in debug mode (release `--debug` or any debug build) surface the Debug Monitor
+  // and force the log to Debug regardless of the saved level.
+  const savedLogLevel: LogLevel = saved.logLevel ?? 'warning';
+  logLevel = savedLogLevel;
+  void invoke<boolean>('is_debug_mode')
+    .then((dbg) => {
+      debugMode = !!dbg;
+      if (dbg) logLevel = 'debug'; // reflect the forced level in the Settings dropdown
+      void invoke('set_log_level', { level: dbg ? 'debug' : savedLogLevel }).catch(() => {});
+    })
+    .catch(() => {
+      void invoke('set_log_level', { level: savedLogLevel }).catch(() => {});
+    });
   uiScale = saved.uiScale ?? 1;
   interfaceSettings = saved.interface ?? {
     speedUnit: 'kmh',
