@@ -285,6 +285,7 @@
     "dirLeft": "Gauche",
     "dirRight": "Droite",
     "seaLevelRef": "Altitudes au niveau de la mer (AMSL)",
+    "noTerrain": "Aucune donnée de terrain pour ce point — altitudes non converties.",
     "noApproach": "Aucune donnée d'approche pour ce slot.",
     "revert": "Annuler",
     "saveToFc": "Enregistrer sur FC",

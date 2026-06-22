@@ -100,6 +100,24 @@ export async function saveSafehomeConfig(): Promise<void> {
   await loadSafehomeConfig();
 }
 
+/** Set a safehome's position (deg×1e7) directly on the working copy — shared by the panel's lat/lon
+ *  inputs, its "+" set-at-map-centre button, and the 2D-map drag, so all three stay in sync. Optionally
+ *  enables the slot (placing implies use). */
+export function setSafehomePosition(index: number, latE7: number, lonE7: number, enable = false): void {
+  safehomeWorking.update((c) =>
+    c
+      ? { ...c, safehomes: c.safehomes.map((s, i) => (i === index ? { ...s, lat: latE7, lon: lonE7, enabled: enable ? true : s.enabled } : s)) }
+      : c,
+  );
+}
+
+/** Toggle a safehome's enabled flag directly on the working copy. */
+export function setSafehomeEnabled(index: number, enabled: boolean): void {
+  safehomeWorking.update((c) =>
+    c ? { ...c, safehomes: c.safehomes.map((s, i) => (i === index ? { ...s, enabled } : s)) } : c,
+  );
+}
+
 /** Discard pending edits — reset the working copy to the loaded snapshot. */
 export function revertSafehomeWorking(): void {
   const loaded = get(safehomeConfig);

@@ -16,13 +16,14 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { get } from 'svelte/store';
+  import { invoke } from '@tauri-apps/api/core';
   import { t } from 'svelte-i18n';
   import { connection } from '$lib/stores/connection';
   import { telemetry } from '$lib/stores/telemetry';
   import { settings } from '$lib/stores/settings';
   import {
     safehomeConfig, safehomeWorking, safehomeDirty, saveSafehomeConfig, revertSafehomeWorking,
-    isSafehomeEmpty, type SafeHomeConfig,
+    isSafehomeEmpty, setSafehomePosition, setSafehomeEnabled, type SafeHomeConfig,
   } from '$lib/stores/safehome';
   import PanelShell from '$lib/components/panel/PanelShell.svelte';
   import Button from '$lib/components/panel/Button.svelte';
@@ -57,7 +58,9 @@
   // Headings are edited as a positive magnitude + an "exclusive" flag. INAV encodes the sign: a
   // negative heading = exclusive (that direction only), positive = bidirectional (opposite allowed),
   // 0 = off. We invert in the background on commit so the field never shows a negative value.
-  interface SMirror { enabled: boolean; lat: number; lon: number; appAlt: number; landAlt: number; hdg1Mag: number; hdg1Excl: boolean; hdg2Mag: number; hdg2Excl: boolean; dir: number; seaLevel: boolean; }
+  // Mirror holds only the NumberStepper/select fields. enabled + lat/lon are edited directly on the
+  // working store (shared with the map drag + "+" button), so they're NOT mirrored here.
+  interface SMirror { appAlt: number; landAlt: number; hdg1Mag: number; hdg1Excl: boolean; hdg2Mag: number; hdg2Excl: boolean; dir: number; seaLevel: boolean; }
 
   /** magnitude + excl flag → INAV's signed heading (0 stays 0 = off). */
   const signedHeading = (mag: number, excl: boolean) => {
@@ -69,6 +72,10 @@
   let sm = $state<SMirror[]>([]);
 
   const cmToM = (cm: number | null | undefined) => (cm == null ? 0 : cm / 100);
+
+  // Default approach altitude (m) for an unconfigured slot — never 0, which would be a ground-level
+  // approach (crash risk if the user places a safehome and forgets to set it).
+  const DEFAULT_APPROACH_ALT_M = 40;
 
   function initMirror(c: SafeHomeConfig | null) {
     if (!c) { g = null; sm = []; return; }
@@ -85,10 +92,7 @@
     sm = c.safehomes.map((s) => {
       const ap = c.approaches.find((a) => a.index === s.index);
       return {
-        enabled: s.enabled,
-        lat: s.lat / 1e7,
-        lon: s.lon / 1e7,
-        appAlt: ap ? ap.approach_alt_cm / 100 : 0,
+        appAlt: ap && ap.approach_alt_cm > 0 ? ap.approach_alt_cm / 100 : DEFAULT_APPROACH_ALT_M,
         landAlt: ap ? ap.land_alt_cm / 100 : 0,
         hdg1Mag: Math.abs(ap?.heading1 ?? 0),
         hdg1Excl: (ap?.heading1 ?? 0) < 0,
@@ -115,9 +119,6 @@
             pitch2throttle_mod: Math.round(g.p2t),
           }
         : w.autoland;
-      const safehomes = w.safehomes.map((s, i) =>
-        sm[i] ? { ...s, enabled: sm[i].enabled, lat: Math.round(sm[i].lat * 1e7), lon: Math.round(sm[i].lon * 1e7) } : s,
-      );
       const approaches = w.approaches.map((a) => {
         const i = w.safehomes.findIndex((s) => s.index === a.index);
         const r = i >= 0 ? sm[i] : undefined;
@@ -125,7 +126,7 @@
           ? { ...a, approach_alt_cm: Math.round(r.appAlt * 100), land_alt_cm: Math.round(r.landAlt * 100), heading1: signedHeading(r.hdg1Mag, r.hdg1Excl), heading2: signedHeading(r.hdg2Mag, r.hdg2Excl), approach_direction: r.dir, sea_level_ref: r.seaLevel }
           : a;
       });
-      return { ...w, autoland, safehomes, approaches };
+      return { ...w, autoland, approaches }; // safehomes (lat/lon/enabled) edited directly via helpers
     });
   }
 
@@ -143,15 +144,49 @@
     expanded = n;
   }
 
-  /** Place safehome i at the current 2D map-view centre (and enable it). Drag-refine comes with the map. */
+  /** Place safehome i at the current 2D map-view centre (and enable it). Drag-refine on the map. */
   function setFromMapCenter(i: number) {
-    if (!canEdit || !sm[i]) return;
+    if (!canEdit) return;
     const c = get(settings).map.center;
-    sm[i].lat = c[0];
-    sm[i].lon = c[1];
-    sm[i].enabled = true;
+    setSafehomePosition(i, Math.round(c[0] * 1e7), Math.round(c[1] * 1e7), true);
     if (!expanded.has(i)) toggleExpand(i);
+    commit(); // push the mirror's approach defaults (incl. the 40 m approach alt) into the working copy
+  }
+
+  /** Toggle the sea-level reference and auto-convert approach/land alt using the terrain elevation at the
+   *  safehome (REL→MSL adds the ground elevation, MSL→REL subtracts it) so the physical altitude is kept.
+   *  If terrain data isn't available, the flag still flips but the values are left as-is (with a note). */
+  async function onSeaLevelToggle(i: number, newVal: boolean) {
+    const r = sm[i];
+    if (!r || r.seaLevel === newVal) return;
+    const s = get(safehomeWorking)?.safehomes[i];
+    let elev: number | null = null;
+    if (s && !isSafehomeEmpty(s)) {
+      try {
+        elev = await invoke<number | null>('terrain_elevation', { lat: s.lat / 1e7, lon: s.lon / 1e7 });
+      } catch {
+        elev = null;
+      }
+    }
+    if (elev != null && isFinite(elev)) {
+      const sign = newVal ? 1 : -1;
+      r.appAlt = Math.round(r.appAlt + sign * elev);
+      r.landAlt = Math.round((r.landAlt + sign * elev) * 10) / 10;
+    } else {
+      statusMessage = $t('safehome.noTerrain');
+    }
+    r.seaLevel = newVal;
     commit();
+  }
+
+  /** Lat/Lon field edit → write straight to the working store (keeps map + panel in sync). */
+  function onCoordInput(i: number, which: 'lat' | 'lon', v: string) {
+    const n = Number(v);
+    if (v.trim() === '' || isNaN(n)) return;
+    const s = get(safehomeWorking)?.safehomes[i];
+    if (!s) return;
+    if (which === 'lat') setSafehomePosition(i, Math.round(n * 1e7), s.lon);
+    else setSafehomePosition(i, s.lat, Math.round(n * 1e7));
   }
 
   function onRevert() {
@@ -199,7 +234,7 @@
 
 {#snippet body()}
   <div class="shm-body">
-    {#if !$safehomeConfig}
+    {#if !$safehomeConfig || !$safehomeWorking}
       <div class="shm-note">{$t('safehome.notLoaded')}</div>
     {:else}
       {#if !connectedMsp}
@@ -233,14 +268,15 @@
       <!-- ── Safehome slots ─────────────────────────────────────────── -->
       <div class="shm-section">{$t('safehome.safehomes')}</div>
       {#each sm as r, i (i)}
-        {@const empty = isSafehomeEmpty($safehomeConfig.safehomes[i])}
-        <div class="sh-row" class:empty={empty && !r.enabled}>
+        {@const shw = $safehomeWorking.safehomes[i]}
+        {@const empty = isSafehomeEmpty(shw)}
+        <div class="sh-row" class:empty={empty && !shw.enabled}>
           <div class="sh-head">
             <button class="sh-caret" onclick={() => toggleExpand(i)} title={$t('safehome.expand')}>{expanded.has(i) ? '▾' : '▸'}</button>
             <span class="sh-badge">{i + 1}</span>
-            <Toggle checked={r.enabled} id={`sh-en-${i}`} disabled={!canEdit} onchange={(c) => { r.enabled = c; commit(); }} />
-            <input class="sh-coord" type="number" step="0.0000001" disabled={!canEdit} placeholder={$t('safehome.lat')} bind:value={r.lat} onchange={commit} />
-            <input class="sh-coord" type="number" step="0.0000001" disabled={!canEdit} placeholder={$t('safehome.lon')} bind:value={r.lon} onchange={commit} />
+            <Toggle checked={shw.enabled} id={`sh-en-${i}`} disabled={!canEdit} onchange={(c) => setSafehomeEnabled(i, c)} />
+            <input class="sh-coord" type="number" step="0.0000001" disabled={!canEdit} placeholder={$t('safehome.lat')} value={empty ? '' : (shw.lat / 1e7).toFixed(7)} onchange={(e) => onCoordInput(i, 'lat', e.currentTarget.value)} />
+            <input class="sh-coord" type="number" step="0.0000001" disabled={!canEdit} placeholder={$t('safehome.lon')} value={empty ? '' : (shw.lon / 1e7).toFixed(7)} onchange={(e) => onCoordInput(i, 'lon', e.currentTarget.value)} />
             <Button variant="standard" icon="add" disabled={!canEdit} title={$t('safehome.setHere')} onclick={() => setFromMapCenter(i)} />
           </div>
           {#if expanded.has(i)}
@@ -248,23 +284,23 @@
               <div class="sh-approach" class:readonly={!canEdit}>
                 <div class="cell"><span class="cl">{$t('safehome.approachAlt')}</span><NumberStepper bind:value={r.appAlt} min={1} max={1000} step={1} decimals={0} unit="m" disabled={!canEdit} onchange={commit} /></div>
                 <div class="cell"><span class="cl">{$t('safehome.landAlt')}</span><NumberStepper bind:value={r.landAlt} min={-500} max={5000} step={0.1} decimals={1} unit="m" disabled={!canEdit} onchange={commit} /></div>
-                <label class="cell wide"><span class="cl">{$t('safehome.direction')}</span>
-                  <select class="sh-sel" disabled={!canEdit} bind:value={r.dir} onchange={commit}>
-                    <option value={0}>{$t('safehome.dirLeft')}</option>
-                    <option value={1}>{$t('safehome.dirRight')}</option>
-                  </select>
-                </label>
+                <div class="cell wide dir">
+                  <span class="cl hdl">{$t('safehome.direction')}</span>
+                  <span class="dir-opt" class:active={r.dir === 0}>{$t('safehome.dirLeft')}</span>
+                  <Toggle checked={r.dir === 1} id={`sh-dir-${i}`} disabled={!canEdit} onchange={(c) => { r.dir = c ? 1 : 0; commit(); }} />
+                  <span class="dir-opt" class:active={r.dir === 1}>{$t('safehome.dirRight')}</span>
+                </div>
                 <div class="cell wide hd">
                   <span class="cl hdl">{$t('safehome.heading1')}</span>
-                  <NumberStepper bind:value={r.hdg1Mag} min={0} max={360} step={5} decimals={0} unit="°" disabled={!canEdit} onchange={commit} />
+                  <NumberStepper bind:value={r.hdg1Mag} min={0} max={360} step={1} decimals={0} unit="°" disabled={!canEdit} onchange={commit} />
                   <label class="excl"><Toggle checked={r.hdg1Excl} id={`sh-x1-${i}`} disabled={!canEdit} onchange={(c) => { r.hdg1Excl = c; commit(); }} /><span>{$t('safehome.exclusive')}</span></label>
                 </div>
                 <div class="cell wide hd">
                   <span class="cl hdl">{$t('safehome.heading2')}</span>
-                  <NumberStepper bind:value={r.hdg2Mag} min={0} max={360} step={5} decimals={0} unit="°" disabled={!canEdit} onchange={commit} />
+                  <NumberStepper bind:value={r.hdg2Mag} min={0} max={360} step={1} decimals={0} unit="°" disabled={!canEdit} onchange={commit} />
                   <label class="excl"><Toggle checked={r.hdg2Excl} id={`sh-x2-${i}`} disabled={!canEdit} onchange={(c) => { r.hdg2Excl = c; commit(); }} /><span>{$t('safehome.exclusive')}</span></label>
                 </div>
-                <label class="cell wide chk"><Toggle checked={r.seaLevel} id={`sh-sl-${i}`} disabled={!canEdit} onchange={(c) => { r.seaLevel = c; commit(); }} /><span>{$t('safehome.seaLevelRef')}</span></label>
+                <label class="cell wide chk"><Toggle checked={r.seaLevel} id={`sh-sl-${i}`} disabled={!canEdit} onchange={(c) => onSeaLevelToggle(i, c)} /><span>{$t('safehome.seaLevelRef')}</span></label>
               </div>
             {:else}
               <div class="sh-approach"><span class="shm-note">{$t('safehome.noApproach')}</span></div>
@@ -315,8 +351,9 @@
   .cell.hd .hdl { width: 84px; flex: none; }
   .excl { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #cfcfcf; }
   .cl { font-size: 10px; color: #949494; text-transform: uppercase; letter-spacing: 0.04em; }
-  .sh-sel { height: 26px; padding: 0 6px; font-size: 12px; color: #e0e0e0; background: #434343; border: 1px solid #555; border-radius: 4px; }
-  .sh-sel:focus { outline: none; border-color: #37a8db; }
+  .cell.dir { flex-direction: row; align-items: center; gap: 8px; }
+  .dir-opt { font-size: 11px; color: #777; }
+  .dir-opt.active { color: #e0e0e0; font-weight: 600; }
 
   .sh-row { border: 1px solid #333; border-radius: 4px; background: #242424; padding: 4px 6px; }
   .sh-row.empty { opacity: 0.55; }

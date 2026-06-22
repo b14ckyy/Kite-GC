@@ -296,6 +296,7 @@
     "dirLeft": "Links",
     "dirRight": "Rechts",
     "seaLevelRef": "Höhen über Meeresspiegel (AMSL)",
+    "noTerrain": "Keine Terraindaten für diesen Punkt — Höhen nicht umgerechnet.",
     "noApproach": "Keine Anflugdaten für diesen Slot.",
     "revert": "Zurücksetzen",
     "saveToFc": "Auf FC speichern",

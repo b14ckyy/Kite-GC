@@ -17,6 +17,7 @@
   import "leaflet/dist/leaflet.css";
   import { settings } from "$lib/stores/settings";
   import { telemetry } from "$lib/stores/telemetry";
+  import { safehomeWorking, isSafehomeEmpty, setSafehomePosition } from "$lib/stores/safehome";
   import { MIN_FIX_SATELLITES } from "$lib/helpers/telemetry";
   import { get } from "svelte/store";
   import { MAP_PROVIDERS, getProviderById, type MapProvider } from "$lib/config/mapProviders";
@@ -32,6 +33,7 @@
   import { connection } from "$lib/stores/connection";
   import { frameMissionSignal } from "$lib/stores/mapCamera";
   import { destinationPoint } from "$lib/utils/geo";
+  import { buildApproachGeometry } from "$lib/helpers/autolandGeometry";
   import MissionLayer from "./mission/MissionLayer.svelte";
   import SurveyPatternLayer from "./mission/SurveyPatternLayer.svelte";
   import TerrainCursorLayer from "./terrain/TerrainCursorLayer.svelte";
@@ -425,6 +427,10 @@
   let airspaceLayer: L.LayerGroup | undefined;
   let unsubAero: (() => void) | undefined;
   let unsubAeroFocus: (() => void) | undefined;
+  // Safehome + autoland overlay (INAV).
+  let safehomeLayer: L.LayerGroup | undefined;
+  let unsubSafehome: (() => void) | undefined;
+  let lastSafehomeArmed = false;
   const MAX_AERO_MARKERS = 1500; // cap rendered point markers per redraw (dense regions)
   // Airspaces currently drawn (passed the zoom filter) — the click handler tests these for
   // point-in-polygon so a single click lists *every* airspace stacked at that spot, not just the top one.
@@ -484,6 +490,70 @@
     addPoints(data.obstacles, vis.obstacles.d2, obstacleMinZoom);
     addPoints(data.airports, vis.airports.d2, airportMinZoom);
     addPoints(data.rcAirfields, vis.rc.d2, () => RC_MIN_ZOOM);
+  }
+
+  // ── Safehome + autoland overlay (INAV; see docs/active/AUTOLAND_SAFEHOME.md) ──────────────────
+  function createSafehomeIcon(enabled: boolean): L.DivIcon {
+    const bg = enabled ? '#59aa29' : '#888';
+    // 20×20 teardrop rotated -45°: the sharp (point) corner ends up ~24px below the box top, centred at
+    // x=10 → anchor there so the tip sits on the exact coordinate. box-sizing keeps the 20×20 exact.
+    const html = `<div style="box-sizing:border-box;width:20px;height:20px;border:2px solid #000;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:${bg};box-shadow:0 0 3px rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center"><span style="transform:rotate(45deg);color:#fff;font-size:10px;font-weight:bold;line-height:1">H</span></div>`;
+    return L.divIcon({ className: 'safehome-divicon', html, iconSize: [20, 20], iconAnchor: [10, 24] });
+  }
+
+  /** Redraw the safehome markers + radius rings (+ approach corridors). Source is the working copy so
+   *  edits/drag reflect live. Green max-distance ring is disarmed-only; yellow loiter ring always. */
+  function updateSafehome() {
+    if (!map) return;
+    if (!safehomeLayer) safehomeLayer = L.layerGroup().addTo(map);
+    const group = safehomeLayer;
+    group.clearLayers();
+    if (!get(settings).showSafehomes) return;
+    const cfg = get(safehomeWorking);
+    if (!cfg) return;
+    const armed = (get(telemetry).armingFlags & (1 << ARMING_FLAG_ARMED)) !== 0;
+    const conn = get(connection);
+    const canEdit = conn.status === 'connected' && conn.protocolType === 'msp' && !!conn.fcInfo?.features?.autoland_config;
+    const maxDistM = cfg.safehome_max_distance_cm != null ? cfg.safehome_max_distance_cm / 100 : null;
+    const loiterM = cfg.loiter_radius_cm != null ? cfg.loiter_radius_cm / 100 : null;
+    const approachLenM = cfg.autoland.approach_length_cm != null ? cfg.autoland.approach_length_cm / 100 : 0;
+
+    cfg.safehomes.forEach((sh, i) => {
+      if (isSafehomeEmpty(sh)) return;
+      const lat = sh.lat / 1e7, lon = sh.lon / 1e7;
+
+      // Rings + approach are only drawn for ENABLED safehomes — a disabled slot keeps just the grey
+      // marker (it won't be used for RTH/landing, so its zones/approach are irrelevant).
+      if (sh.enabled) {
+        // Green max-distance ring — disarmed only (black casing under the dashes for contrast).
+        if (maxDistM && !armed) {
+          group.addLayer(L.circle([lat, lon], { radius: maxDistM, color: '#000', weight: 4, opacity: 0.4, fill: false, dashArray: '6 6', interactive: false }));
+          group.addLayer(L.circle([lat, lon], { radius: maxDistM, color: '#59aa29', weight: 2, opacity: 0.95, fill: false, dashArray: '6 6', interactive: false }));
+        }
+        // Yellow loiter ring.
+        if (loiterM) {
+          group.addLayer(L.circle([lat, lon], { radius: loiterM, color: '#000', weight: 4, opacity: 0.35, fill: false, dashArray: '4 5', interactive: false }));
+          group.addLayer(L.circle([lat, lon], { radius: loiterM, color: '#f5a623', weight: 2, opacity: 0.95, fill: false, dashArray: '4 5', interactive: false }));
+        }
+        // Full approach pattern (loiter → downwind → base → final), ≥7.1 with approach data.
+        const ap = cfg.approaches.find((a) => a.index === sh.index);
+        if (ap && cfg.has_autoland && approachLenM > 0 && loiterM) {
+          for (const leg of buildApproachGeometry(lat, lon, { heading1: ap.heading1, heading2: ap.heading2, approachLengthM: approachLenM, loiterRadiusM: loiterM, approachDirection: ap.approach_direction })) {
+            const pts = leg.points as L.LatLngExpression[];
+            const color = leg.final ? '#f78a05' : '#2e6fff'; // orange final, blue downwind/base (like the INAV configurator)
+            group.addLayer(L.polyline(pts, { color: '#000', weight: 4, opacity: 0.3, interactive: false }));
+            group.addLayer(L.polyline(pts, { color, weight: 2.5, opacity: 0.95, interactive: false }));
+          }
+        }
+      }
+      // Marker — always (grey when disabled); draggable while editing → writes back to the working copy.
+      const m = L.marker([lat, lon], { icon: createSafehomeIcon(sh.enabled), draggable: canEdit, zIndexOffset: 480 });
+      m.bindTooltip(`${get(t)('safehome.title')} ${i + 1}`, { direction: 'top', offset: [0, -18], opacity: 0.9 });
+      if (canEdit) {
+        m.on('dragend', () => { const p = m.getLatLng(); setSafehomePosition(i, Math.round(p.lat * 1e7), Math.round(p.lng * 1e7)); });
+      }
+      group.addLayer(m);
+    });
   }
 
   /**
@@ -590,6 +660,7 @@
 
   // Redraw on enable-toggle, new data, or visibility change (data/visibility via subscriptions below).
   $effect(() => { void $settings.airspace.enabled; if (map) updateAirspace(); });
+  $effect(() => { void $settings.showSafehomes; if (map) updateSafehome(); });
   // Toggle the heading/course/turn nose lines on/off (clears or redraws immediately, not just next frame).
   $effect(() => { void $settings.directionLines; if (map) redrawDirLines(); });
 
@@ -1117,6 +1188,9 @@
     // Airspace overlay: redraw on new data; re-clip points to the view on pan. Layer-visibility changes
     // ride the `$settings.airspace` effect below (visibility now lives in the persisted settings store).
     unsubAero = aeroData.subscribe(() => updateAirspace());
+    // Safehome overlay follows the working copy (load / edit / drag / "+"); arm-state change is handled
+    // in the telemetry subscription (the green ring is disarmed-only).
+    unsubSafehome = safehomeWorking.subscribe(() => updateSafehome());
     unsubAeroFocus = aeroFocus.subscribe((f) => { if (f && map) map.setView([f.lat, f.lon], Math.max(map.getZoom(), 11)); });
     map.on("moveend", updateAirspace);
     map.on("click", onGuidedClick); // Guided "fly here" target popup (vehicle control)
@@ -1178,6 +1252,9 @@
           resetPreArmTrail();
         }
         wasArmed = armed;
+
+        // Safehome green (max-distance) ring is disarmed-only → redraw on arm-state change.
+        if (armed !== lastSafehomeArmed) { lastSafehomeArmed = armed; updateSafehome(); }
       }
     });
 
@@ -1321,6 +1398,7 @@
     if (unsubSettings) unsubSettings();
     unsubFrameMission?.();
     unsubConnForJump?.();
+    unsubSafehome?.();
     if (map) {
       map.off("moveend", saveMapState);
       map.off("zoomend", saveMapState);
@@ -1334,6 +1412,7 @@
       if (playbackMarker) map.removeLayer(playbackMarker);
       if (dirLayer) map.removeLayer(dirLayer);
       if (homeMarker) map.removeLayer(homeMarker);
+      if (safehomeLayer) map.removeLayer(safehomeLayer);
       if (radarLayer) map.removeLayer(radarLayer);
       map.remove();
     }

@@ -296,6 +296,7 @@
     "dirLeft": "Left",
     "dirRight": "Right",
     "seaLevelRef": "Altitudes are sea-level (AMSL)",
+    "noTerrain": "No terrain data for this point — altitudes not converted.",
     "noApproach": "No approach data for this slot.",
     "revert": "Revert",
     "saveToFc": "Save to FC",
