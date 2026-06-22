@@ -206,7 +206,8 @@ Tauri Events → Frontend (telemetry-attitude, telemetry-gps, ...)
 ## ADR-008: Dev-Only Debug Module with Zero-Cost Release Build
 
 **Date**: 2026-04-15
-**Status**: Accepted
+**Status**: Accepted — **amended by ADR-056** (the trackers are now compiled into all builds and gated
+at *runtime* on `--debug`, instead of compiled out, so a release build can expose the Debug Monitor).
 
 **Context**: Debugging MSP communication (timing, throughput, throttling, timeouts) requires visibility into the scheduler's internal state. Shipping debug instrumentation in release builds adds overhead and attack surface.
 
@@ -2588,6 +2589,37 @@ configurable diagnostic trail without taking on a heavy logging dependency.
 **Consequences**: all existing `log::` calls become useful retroactively (no code churn at call sites).
 `eprintln!` still goes to stderr/console as before (CLAUDE.md keeps it) — the file logger captures the
 `log` facade only. Future subsystems get diagnostics for free by using `log::`.
+
+---
+
+## ADR-056: Runtime Debug Mode (`--debug`) for Release Builds
+
+**Status**: Accepted — shipped. **Amends**: ADR-008 (compile-out → runtime gate). **Related**: ADR-055
+(the file logger `--debug` also raises to Debug level).
+
+**Context**: ADR-008 gated the Debug Monitor + stat trackers at **compile time**
+(`#[cfg(debug_assertions)]` backend, `import.meta.env.DEV` frontend), so they were stripped from release
+builds entirely. But field diagnostics (e.g. a user who can't connect a PX4 board) need that
+instrumentation in a **shipped release** build, on demand — without handing out a separate debug binary.
+
+**Decision**:
+
+1. **A runtime flag** (`debug_mode`, a single `AtomicBool`) set once at startup from the `--debug` CLI
+   argument. Default = `cfg!(debug_assertions)`, so `tauri dev` behaves exactly as before (on, no flag);
+   release starts off until `--debug` flips it on. The value never changes after startup.
+2. **The two stat trackers are now compiled into all builds** (the release no-op stubs are gone). Every
+   public method early-returns on `debug_mode::enabled()` — a single relaxed atomic load when off. The
+   ~47 hot-path call sites are unchanged; only the two `#[cfg]` module swaps were removed.
+3. **Frontend**: `DEV_MODE = import.meta.env.DEV || <runtime flag>` (from `is_debug_mode`). Because it now
+   depends on a runtime value, Vite can no longer prove the `DebugPanel` import dead, so the chunk stays
+   in the release bundle and is **lazy-loaded only when debug mode is actually on**.
+4. **A `--debug` start also raises the file log (ADR-055) to Debug**, and the frontend keeps Debug rather
+   than re-applying the lower persisted level.
+
+**Consequences**: ~44 kB larger release executable + one atomic load per tracker call when off — both
+measured/negligible. ADR-008's "zero-cost, nothing leaks into release" property is traded for on-demand
+field diagnostics; the trackers carry no dev-only dependencies, so nothing sensitive is exposed. Run a
+shipped build with `--debug` to get the full Debug Monitor (incl. MSP/MAVLink stat tabs) + verbose log.
 
 ---
 

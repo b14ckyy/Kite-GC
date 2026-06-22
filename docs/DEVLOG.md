@@ -613,3 +613,10 @@ protocols + these parallel networks) is the living reference in
   `log::set_max_level`. `eprintln!` still goes to the console; this captures the `log` facade. **Diagnosing
   a connection problem**: set level to Debug, reproduce, hand back the log. The in-app Debug Monitor
   (ADR-008) is the live counterpart for inspecting protocol traffic.
+- **Runtime debug mode (ADR-056, `debug_mode.rs`).** A shipped **release** build started with `--debug`
+  exposes the full Debug Monitor (incl. the MSP/MAVLink stat tabs) + raises the log to Debug. The stat
+  trackers are now compiled into every build and gated at runtime on a single `AtomicBool` (default
+  on in debug builds, off in release until `--debug`); the frontend's `DEV_MODE` is
+  `import.meta.env.DEV || is_debug_mode`, keeping the `DebugPanel` chunk in the release bundle (lazy).
+  Costs ~44 kB + one atomic load per tracker call when off. This **amends ADR-008** (compile-out → runtime
+  gate).

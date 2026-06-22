@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Runtime debug mode for release builds (`--debug`, ADR-056).** Starting a shipped release build with
+  `--debug` exposes the full in-app Debug Monitor (incl. the MSP/MAVLink stat tabs + DEV playground) and
+  raises the diagnostic file log to Debug — no separate debug binary needed. The stat trackers are now
+  compiled into every build and gated at runtime (one atomic load when off; ~44 kB larger executable);
+  `tauri dev` is unchanged. Amends ADR-008 (compile-out → runtime gate).
+- **RC profiles split by platform.** The profile dropdown now only shows profiles matching the active
+  platform group — INAV/ArduPilot share the channel-method model, PX4 is a separate manual (MANUAL_CONTROL)
+  model, and the two aren't interchangeable. Profiles carry an explicit `kind` (inferred for older files);
+  switching platform deselects an incompatible active profile instead of showing it.
+- **Telemetry Relay: Serial and BLE split into separate output categories** again (Serial / BLE / TCP /
+  UDP) instead of one combined "Device" picker. The BLE discovery listener now runs whenever the relay
+  panel is open (pure event subscription, collision-free), and the panel runs its own serial+BLE scan when
+  connected via a non-BLE transport — so BLE devices appear without first selecting BLE in the main connect
+  bar. (A BLE *primary* link still can't be scanned in parallel — single adapter.)
+- **RC input methods: axis methods now carry an "Axis" prefix** (Axis Passthrough / Axis Analog Adjust /
+  Axis Dual Source), mirroring the "Button …" methods, so the selected method reads unambiguously when the
+  dropdown is closed.
 - **Diagnostic file logging (ADR-055).** The backend now writes a real log file so connection problems
   leave a trace. Until now a logger was **never installed**, so every `log::` call was a silent no-op — a
   failed connect only showed a UI toast. A custom `log::Log` logger (no new dependency) writes a rotating
