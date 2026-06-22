@@ -869,7 +869,9 @@ fn resolve_start_time(header: &HeaderMetadata, file_path: &Path) -> DateTime<Utc
     Utc::now()
 }
 
-fn find_decoder() -> Option<PathBuf> {
+/// Locate `blackbox_decode`: next to the app executable, in our auto-download install dir, or on PATH.
+/// `pub(crate)` so the on-demand downloader (`decoder.rs`) can report availability.
+pub(crate) fn find_decoder() -> Option<PathBuf> {
     let binary_name = if cfg!(target_os = "windows") {
         WINDOWS_BINARY
     } else {
@@ -884,6 +886,12 @@ fn find_decoder() -> Option<PathBuf> {
         if candidate.is_file() {
             return Some(candidate);
         }
+    }
+
+    // The on-demand download installs here (writable; the exe dir may be read-only when installed).
+    let installed = super::decoder::install_dir().join(binary_name);
+    if installed.is_file() {
+        return Some(installed);
     }
 
     let path_var = std::env::var_os("PATH")?;

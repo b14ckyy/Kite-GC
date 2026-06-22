@@ -400,6 +400,22 @@ export async function importBlackboxLog(
   });
 }
 
+/** True when blackbox_decode is available (PATH, exe dir, or the auto-download dir). */
+export async function blackboxDecoderAvailable(): Promise<boolean> {
+  return invoke<boolean>('blackbox_decoder_available');
+}
+
+/** Version string of the installed blackbox_decode (e.g. "9.0.0 INAV 1918a75"), or null if absent. */
+export async function blackboxDecoderVersion(): Promise<string | null> {
+  return invoke<string | null>('blackbox_decoder_version');
+}
+
+/** Download + install blackbox_decode from the latest GitHub release (Windows only). Returns the
+ *  installed path; progress is emitted on `flightlog-import-progress` (stage "decoder-download"). */
+export async function downloadBlackboxDecode(): Promise<string> {
+  return invoke<string>('download_blackbox_decode');
+}
+
 export async function importArdupilotLog(
   filePath: string,
   dbPath: string,

@@ -55,7 +55,7 @@
   import { activeWpNumber, replayWpTotal } from '$lib/stores/navStatus';
   import { missionManagerOpen, missionManagerSelectedId, requestOpenFlightId, requestOpenMissionId } from '$lib/stores/missionManager';
   import { batteryManagerOpen } from '$lib/stores/batteryManager';
-  import { missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode, flightSetBatterySerial, updateFlightNotes, getFlight, flightlogCommitPending, flightlogDiscardPending, flightlogContinuePending, scanOrphanSessions, recoverDiscard, recoverSaveIncomplete, recoverContinue, batteryDbFindBySerial, batteryDbAddUsage } from '$lib/stores/flightlog';
+  import { missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode, flightSetBatterySerial, updateFlightNotes, getFlight, flightlogCommitPending, flightlogDiscardPending, flightlogContinuePending, scanOrphanSessions, recoverDiscard, recoverSaveIncomplete, recoverContinue, batteryDbFindBySerial, batteryDbAddUsage, blackboxDecoderAvailable, downloadBlackboxDecode } from '$lib/stores/flightlog';
   import EndFlightDialog from "$lib/components/logbook/EndFlightDialog.svelte";
   import type { EndFlightStats } from "$lib/components/logbook/EndFlightDialog.svelte";
   import RecoveryPrompt from "$lib/components/logbook/RecoveryPrompt.svelte";
@@ -1093,9 +1093,41 @@
     return p.split(/[\\/]/).pop() ?? p;
   }
 
+  /** INAV blackbox text logs need the external `blackbox_decode`. If it's missing, offer to fetch it
+   *  from GitHub (Windows auto-download) and report progress on the shared import progress bar.
+   *  Returns true when the decoder is available afterwards. */
+  async function ensureBlackboxDecoder(): Promise<boolean> {
+    try {
+      if (await blackboxDecoderAvailable()) return true;
+    } catch {
+      // Availability probe failed — fall through to the offer; the download surfaces a real error.
+    }
+    const answer = await showDialog({
+      title: $t('logbook.decoderMissingTitle'),
+      message: $t('logbook.decoderMissingMsg'),
+      buttons: [{ label: $t('logbook.decoderDownload'), value: 'download', primary: true }],
+    });
+    if (answer !== 'download') return false;
+    blackboxImporting = true; // drives the progress bar; the backend emits decoder-download progress
+    try {
+      await downloadBlackboxDecode();
+      return true;
+    } catch (e) {
+      errorMsg = $t('logbook.decoderDownloadFailed', { values: { error: String(e) } });
+      return false;
+    } finally {
+      blackboxImporting = false;
+      blackboxImportProgress = null;
+    }
+  }
+
   /** Import a batch of files, isolating each so one bad/corrupt/non-log file doesn't abort the rest;
    *  failures (with the per-importer reason) are collected and surfaced together. */
   async function importFiles(files: string[]) {
+    // INAV blackbox text logs (.txt/.bbl/.bfl) need blackbox_decode — ensure it once before the batch.
+    if (files.some((f) => /\.(txt|bbl|bfl)$/i.test(f)) && !(await ensureBlackboxDecoder())) {
+      return;
+    }
     blackboxImporting = true;
     const failures: string[] = [];
     for (const filePath of files) {

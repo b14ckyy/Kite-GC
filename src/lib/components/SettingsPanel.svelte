@@ -18,6 +18,7 @@
   import { resetGcsManual, gcsManuallySet } from '$lib/stores/gcsLocation';
   import type { AppSettings, InterfaceSettings, RadarSettings, GcsMode, AirspaceSettings, AirspaceProvider, SystemMessagesLevel, LogLevel, RcControlSettings } from '$lib/stores/settings';
   import { revealItemInDir } from '@tauri-apps/plugin-opener';
+  import { blackboxDecoderVersion, downloadBlackboxDecode } from '$lib/stores/flightlog';
   import type { TileCacheStats } from '$lib/cache/tileCache';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import UnitStepper from '$lib/components/UnitStepper.svelte';
@@ -146,6 +147,27 @@
     await loadTerrainCache();
   }
 
+  // blackbox_decode (the one external dependency, INAV-only). Show its version so the user can tell
+  // whether it needs updating for a new INAV version, and offer a one-click download/update.
+  let bbVersion = $state<string | null>(null);
+  let bbBusy = $state(false);
+  let bbError = $state('');
+  async function loadBbVersion() {
+    try { bbVersion = await blackboxDecoderVersion(); } catch { bbVersion = null; }
+  }
+  async function updateBbDecoder() {
+    bbBusy = true;
+    bbError = '';
+    try {
+      await downloadBlackboxDecode();
+      await loadBbVersion();
+    } catch (e) {
+      bbError = String(e);
+    } finally {
+      bbBusy = false;
+    }
+  }
+
   // Reveal the backend diagnostic log file in the OS file manager (Settings → Diagnostics).
   async function openLogFolder() {
     try {
@@ -153,9 +175,12 @@
       if (p) await revealItemInDir(p);
     } catch { /* logging unavailable — nothing to open */ }
   }
-  // Refresh the terrain-cache size whenever the Data tab (which hosts the Map section) is shown.
+  // Refresh the terrain-cache size + blackbox_decode version whenever the Data tab is shown.
   $effect(() => {
-    if (tab !== 'interface') void loadTerrainCache();
+    if (tab !== 'interface') {
+      void loadTerrainCache();
+      void loadBbVersion();
+    }
   });
 
   /** Patch the nested radar settings (onPatch merges shallowly, so pass the whole radar object). */
@@ -540,6 +565,16 @@
           <Button variant="standard" size="sm" onclick={onResetRawLogPath}>{$t('settings.useDefault')}</Button>
         </div>
       </div>
+      <div class="s-row s-row-stack">
+        <span class="s-label">{$t('settings.blackboxDecoder')}</span>
+        <div class="path-picker-row">
+          <span class="s-readout">{bbVersion ?? $t('settings.bbDecoderMissing')}</span>
+          <Button variant="standard" size="sm" disabled={bbBusy} onclick={updateBbDecoder}>
+            {bbBusy ? $t('settings.bbDecoderBusy') : bbVersion ? $t('settings.bbDecoderUpdate') : $t('settings.bbDecoderDownload')}
+          </Button>
+        </div>
+        {#if bbError}<span class="s-err">{bbError}</span>{/if}
+      </div>
     </div>
 
     <!-- ── Diagnostics ───────────────────────────────── -->
@@ -633,6 +668,24 @@
   .s-indent { padding-left: 16px; }
 
   .s-label { font-size: 12px; color: #e0e0e0; }
+  .s-err { font-size: 11px; color: #d40000; }
+  /* Read-only value display (not an input) — matches the locked-field look without being editable. */
+  .s-readout {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    height: 28px;
+    padding: 0 8px;
+    background: #2a2a2a;
+    border: 1px solid #3a3a3a;
+    border-radius: 4px;
+    color: #cfcfcf;
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   .s-label-disabled { opacity: 0.45; }
   .s-loc { display: flex; align-items: center; gap: 8px; }
   .s-loc-coords { font-size: 11px; color: #949494; font-variant-numeric: tabular-nums; white-space: nowrap; }

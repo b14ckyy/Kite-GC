@@ -8,6 +8,7 @@
 pub mod db;
 pub mod ardupilot;
 pub mod blackbox;
+pub mod decoder;
 pub mod exchange;
 pub mod geocode;
 pub mod msp_raw_logger;

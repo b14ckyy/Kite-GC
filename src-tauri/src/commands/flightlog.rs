@@ -636,6 +636,39 @@ pub async fn flightlog_import_blackbox(
     Ok(result)
 }
 
+/// True when `blackbox_decode` is available (PATH, exe dir, or our download dir). The frontend checks
+/// this before an INAV-blackbox import and offers an auto-download when it's missing.
+#[tauri::command]
+pub fn blackbox_decoder_available() -> bool {
+    crate::flightlog::decoder::available()
+}
+
+/// Version string of the installed decoder (`blackbox_decode --version`, e.g. "9.0.0 INAV 1918a75"),
+/// or `None` if it's not installed. Lets the user see whether it needs updating for a new INAV version.
+#[tauri::command]
+pub fn blackbox_decoder_version() -> Option<String> {
+    crate::flightlog::decoder::version()
+}
+
+/// Download `blackbox_decode` from the latest iNavFlight/blackbox-tools GitHub release and install it
+/// into the app-data `bin/` dir. Emits `flightlog-import-progress` so the existing import progress bar
+/// shows the download. Returns the installed path. Windows-only (other OS assets are .tar.zst).
+#[tauri::command]
+pub async fn download_blackbox_decode(app_handle: tauri::AppHandle) -> Result<String, String> {
+    let report = |progress: u8, message: &str| {
+        let _ = app_handle.emit(
+            "flightlog-import-progress",
+            BlackboxImportProgress {
+                stage: "decoder-download".to_string(),
+                progress,
+                message: message.to_string(),
+            },
+        );
+    };
+    let path = crate::flightlog::decoder::download(report).await?;
+    Ok(path.to_string_lossy().to_string())
+}
+
 /// Parse a recorded raw serial log (.rawmsp = MSP, .tlog = MAVLink) into the logbook as LIVE
 /// flights, split at arm/disarm (ADR-049). Emits `flightlog-import-progress` while running.
 #[tauri::command]
