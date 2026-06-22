@@ -21,6 +21,8 @@ export interface InavVersion {
 export interface FeatureSet {
   version: InavVersion;
   autoland_config: boolean;
+  /** Autoland config is within the GCS-validated INAV range (7.1.0..=9.1.x). Outside → "not validated". */
+  autoland_validated: boolean;
   geozones: boolean;
   msp_rc: boolean;
   aux_rc: boolean;

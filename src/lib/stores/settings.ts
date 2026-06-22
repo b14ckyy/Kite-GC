@@ -262,6 +262,9 @@ export interface AppSettings {
   airspeedEnabled: boolean;
   /** Show the heading / course-over-ground / predicted-turn direction lines at the aircraft on the 2D map. */
   directionLines: boolean;
+  /** Show INAV safehome markers + radius rings (+ autoland approaches) on the map. Default on; toggled
+   *  in the Safe Home Manager (≥7.1). See docs/active/AUTOLAND_SAFEHOME.md. */
+  showSafehomes: boolean;
   // MAVLink only: stream everything the FC sends (per its SRn_* params) instead of requesting our
   // reduced rate set — ignores the two rate knobs. For high-bandwidth links + full .tlog capture.
   mavlinkFullTelemetry: boolean;
@@ -338,6 +341,7 @@ const defaults: AppSettings = {
   positionRateHz: 2,
   airspeedEnabled: false,
   directionLines: true,
+  showSafehomes: true,
   mavlinkFullTelemetry: false,
   flightLoggingEnabled: true,
   flightRecordingEnabled: true,

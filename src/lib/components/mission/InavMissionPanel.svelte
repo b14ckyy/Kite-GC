@@ -28,6 +28,8 @@
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
   import MissionSaveDialog from '$lib/components/mission/MissionSaveDialog.svelte';
   import MissionManager from '$lib/components/mission/MissionManager.svelte';
+  import SafeHomeManager from '$lib/components/mission/SafeHomeManager.svelte';
+  import { safeHomeManagerOpen } from '$lib/stores/safehome';
   import PanelShell from '$lib/components/panel/PanelShell.svelte';
   import Button from '$lib/components/panel/Button.svelte';
   import AutopilotSelect from '$lib/components/mission/AutopilotSelect.svelte';
@@ -121,6 +123,14 @@
   function isConnected(): boolean {
     return get(connection)?.status === 'connected';
   }
+
+  // Safe Home Manager button: only with a live INAV link that supports the autoland/safehome config
+  // (≥7.1). Safehome display works on older INAV, but editing (this panel) is gated to ≥7.1.
+  const showSafehomeBtn = $derived(
+    $connection.status === 'connected'
+      && $connection.protocolType === 'msp'
+      && !!$connection.fcInfo?.features?.autoland_config,
+  );
 
   function isArmed(): boolean {
     return currentTelem.lastUpdate > 0 && (currentTelem.armingFlags & (1 << ARMING_FLAG_ARMED)) !== 0;
@@ -419,6 +429,9 @@
       <Button variant="standard" icon="library" onclick={() => missionManagerOpen.set(true)} title={$t('mission.missionManager')}>
         {$t('mission.missionManager')}
       </Button>
+      {#if showSafehomeBtn}
+        <Button variant="standard" icon="home" onclick={() => safeHomeManagerOpen.set(true)} title={$t('safehome.title')} />
+      {/if}
     {/if}
     {#if currentEditing && !showPatternPanel}
       <Button variant="standard" icon="undo" disabled={!canUndoNow} onclick={() => undo()} title={$t('mission.undo')} />
@@ -566,7 +579,9 @@
   </div>
 {/snippet}
 
-{#if $missionManagerOpen}
+{#if $safeHomeManagerOpen}
+  <SafeHomeManager onBack={() => safeHomeManagerOpen.set(false)} />
+{:else if $missionManagerOpen}
   <MissionManager onBack={() => missionManagerOpen.set(false)} />
 {:else}
   <div class="imv2">

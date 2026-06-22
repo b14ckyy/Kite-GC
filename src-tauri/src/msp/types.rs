@@ -76,6 +76,13 @@ pub const MSP2_INAV_SET_AUX_RC: u16 = 0x2230;
 pub const MSP2_COMMON_SETTING: u16 = 0x1003;
 pub const MSP2_COMMON_SET_SETTING: u16 = 0x1004;
 
+// ── Safehome + fixed-wing autoland approach (INAV; see docs/active/AUTOLAND_SAFEHOME.md) ──
+// SAFEHOME is per-index (loop 0..7); FW_APPROACH per-index (0..7 = safehome, 8+ = mission LAND).
+pub const MSP2_INAV_SAFEHOME: u16 = 0x2038;
+pub const MSP2_INAV_SET_SAFEHOME: u16 = 0x2039;
+pub const MSP2_INAV_FW_APPROACH: u16 = 0x204A;
+pub const MSP2_INAV_SET_FW_APPROACH: u16 = 0x204B;
+
 // ── INAV MSP v2 command codes ───────────────────────────────────────
 pub const MSPV2_INAV_STATUS: u16 = 0x2000;
 pub const MSPV2_INAV_ANALOG: u16 = 0x2002;

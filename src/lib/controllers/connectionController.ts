@@ -8,6 +8,7 @@ import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } fro
 import { connection, connectionProtocol, fcLinkAlive, availablePorts, bleDevices } from '$lib/stores/connection';
 import { startTelemetryListeners, stopTelemetryListeners, resetTelemetry } from '$lib/stores/telemetry';
 import { applyRelaysOnConnect, clearRelaysOnDisconnect } from '$lib/controllers/relayController';
+import { loadSafehomeConfig, clearSafehome } from '$lib/stores/safehome';
 
 /**
  * Refresh the list of serial ports via Tauri and return the port that should be selected.
@@ -146,6 +147,9 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
   await startTelemetryListeners();
   // Auto-start the saved telemetry relays (push telemetry → no handshake needed).
   await applyRelaysOnConnect();
+  // INAV/MSP: always download safehomes + autoland config for the map overlay (fire-and-forget; the
+  // store updates when the ~18 MSP reads complete). See docs/active/AUTOLAND_SAFEHOME.md.
+  if (params.protocolType === 'msp') void loadSafehomeConfig();
   return info;
 }
 
@@ -154,6 +158,7 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
  */
 export async function disconnectFC(baudRate: number): Promise<void> {
   await clearRelaysOnDisconnect();
+  clearSafehome();
   stopTelemetryListeners();
   resetTelemetry();
   connectionProtocol.set({ primary: '', secondary: null });

@@ -54,6 +54,7 @@ use commands::rc::{
     rc_stream_update, rc_stream_set_aux, rc_stream_enable, rc_stream_set_rate,
     rc_stream_set_override, rc_stream_set_manual,
 };
+use commands::safehome::{safehome_read_all, safehome_write_all};
 use commands::info::{get_app_version, is_debug_mode};
 use commands::logging::{set_log_level, get_log_path};
 use commands::radar::{radar_configure, radar_set_center, radar_set_node_pos, radar_snapshot};
@@ -313,6 +314,8 @@ pub fn run() {
             rc_stream_set_rate,
             rc_stream_set_override,
             rc_stream_set_manual,
+            safehome_read_all,
+            safehome_write_all,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Kite Ground Control");

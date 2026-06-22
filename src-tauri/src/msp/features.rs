@@ -116,6 +116,10 @@ pub struct FeatureSet {
     pub version: InavVersion,
     /// Individual feature availability
     pub autoland_config: bool,
+    /// Autoland config is within the GCS-validated INAV range (7.1.0..=9.1.x). Outside it (a newer
+    /// INAV) the editor still works but the frontend shows a "not validated" hint — the INAV config
+    /// scheme is expected to change and will be re-gated then.
+    pub autoland_validated: bool,
     pub geozones: bool,
     pub msp_rc: bool,
     pub aux_rc: bool,
@@ -129,6 +133,7 @@ impl FeatureSet {
         Self {
             version,
             autoland_config: version.is_at_least(Feature::AutolandConfig.min_version()),
+            autoland_validated: autoland_validated(version),
             geozones: version.is_at_least(Feature::Geozones.min_version()),
             msp_rc: version.is_at_least(Feature::MspRc.min_version()),
             aux_rc: version.is_at_least(Feature::AuxRc.min_version()),
@@ -154,6 +159,15 @@ impl FeatureSet {
 /// Check if the connected version is supported at all
 pub fn is_version_supported(version: InavVersion) -> bool {
     version.is_at_least(MIN_SUPPORTED_VERSION)
+}
+
+/// Highest INAV minor the autoland config UI has been validated against (inclusive of all its patches).
+const AUTOLAND_VALIDATED_MAX: (u8, u8) = (9, 1);
+
+/// True when autoland config is both available (≥7.1.0) and within the validated range (≤ 9.1.x).
+pub fn autoland_validated(version: InavVersion) -> bool {
+    version.is_at_least(Feature::AutolandConfig.min_version())
+        && (version.major, version.minor) <= AUTOLAND_VALIDATED_MAX
 }
 
 #[cfg(test)]

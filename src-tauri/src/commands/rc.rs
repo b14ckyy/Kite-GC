@@ -8,9 +8,9 @@
 use serde::Serialize;
 use tauri::State;
 
+use crate::commands::fc_settings::{read_setting, set_setting};
 use crate::msp::rc_encode::encode_raw_rc;
-use crate::msp::{MSP2_COMMON_SETTING, MSP2_COMMON_SET_SETTING, MSP_MODE_RANGES, MSP_RC};
-use crate::scheduler::SchedulerHandle;
+use crate::msp::{MSP_MODE_RANGES, MSP_RC};
 use crate::state::{ActiveProtocol, AppState};
 
 /// One configured mode-activation range (a box assigned to an RC channel window). Only non-empty
@@ -52,13 +52,6 @@ fn parse_mode_ranges(payload: &[u8]) -> Vec<ModeRange> {
             range_max: 900 + c[3] as u16 * 25,
         })
         .collect()
-}
-
-/// Read a setting by name via MSP2_COMMON_SETTING (null-terminated name → raw value bytes).
-fn read_setting(handle: &SchedulerHandle, name: &str) -> Result<Vec<u8>, String> {
-    let mut payload = name.as_bytes().to_vec();
-    payload.push(0);
-    handle.msp_request(MSP2_COMMON_SETTING, &payload)
 }
 
 #[tauri::command(async)]
@@ -106,10 +99,7 @@ pub fn rc_set_override_bitmask(mask: u32, state: State<'_, AppState>) -> Result<
         None => return Err("Not connected".into()),
     };
 
-    let mut payload = b"msp_override_channels".to_vec();
-    payload.push(0); // null-terminated name
-    payload.extend_from_slice(&mask.to_le_bytes()); // u32 LE value
-    handle.msp_request(MSP2_COMMON_SET_SETTING, &payload)?;
+    set_setting(handle, "msp_override_channels", &mask.to_le_bytes())?;
     eprintln!("[RC] set msp_override_channels = 0x{mask:x} (runtime only)");
     Ok(())
 }
