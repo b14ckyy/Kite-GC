@@ -11,6 +11,7 @@ pub mod control;
 pub mod flightlog;
 pub mod hid;
 pub mod info;
+pub mod logging;
 pub mod mission;
 pub mod radar;
 pub mod rc;

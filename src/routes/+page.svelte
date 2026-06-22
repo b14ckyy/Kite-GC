@@ -78,7 +78,7 @@
   import { arduMission, arduSelectedWpIndex, arduLoadedMissionId, type ArduWaypoint } from "$lib/stores/missionArdupilot";
   import { terrainAnalysis, patchTerrainAnalysis } from "$lib/stores/terrainAnalysis";
   import { DEFAULT_RADAR, DEFAULT_AIRSPACE, BUILTIN_ADSB_PROVIDERS } from "$lib/stores/settings";
-  import type { AppSettings, InterfaceSettings, PanelConfig, RadarSettings, GcsMode, AirspaceSettings, SystemMessagesLevel } from "$lib/stores/settings";
+  import type { AppSettings, InterfaceSettings, PanelConfig, RadarSettings, GcsMode, AirspaceSettings, SystemMessagesLevel, LogLevel } from "$lib/stores/settings";
   import { layout, GRID_DEFAULTS } from '$lib/stores/layout';
   import {
     getDefaultFlightlogPath,
@@ -381,6 +381,7 @@
   let defaultPhTimeSec = $state(30);
   let warnAltitudeM = $state(120);
   let systemMessages = $state<SystemMessagesLevel>('all');
+  let logLevel = $state<LogLevel>('warning');
   let interfaceSettings = $state<InterfaceSettings>({
     speedUnit: 'kmh',
     altitudeUnit: 'm',
@@ -598,6 +599,10 @@
   defaultPhTimeSec = saved.defaultPhTimeSec;
   warnAltitudeM = saved.warnAltitudeM;
   systemMessages = saved.systemMessages ?? 'all';
+  // Apply the persisted diagnostic log level to the backend logger (it starts at Warning by default).
+  logLevel = saved.logLevel ?? 'warning';
+  // svelte-ignore state_referenced_locally
+  void invoke('set_log_level', { level: logLevel }).catch(() => {});
   uiScale = saved.uiScale ?? 1;
   interfaceSettings = saved.interface ?? {
     speedUnit: 'kmh',
@@ -839,6 +844,10 @@
     if (patch.defaultPhTimeSec != null) defaultPhTimeSec = patch.defaultPhTimeSec;
     if (patch.warnAltitudeM != null) warnAltitudeM = patch.warnAltitudeM;
     if (patch.systemMessages != null) systemMessages = patch.systemMessages;
+    if (patch.logLevel != null) {
+      logLevel = patch.logLevel;
+      void invoke('set_log_level', { level: patch.logLevel }).catch(() => {});
+    }
     if (patch.uiScale != null) uiScale = patch.uiScale;
     if (patch.interface != null) {
       interfaceSettings = { ...interfaceSettings, ...patch.interface };
@@ -2283,6 +2292,7 @@
         {defaultPhTimeSec}
         {warnAltitudeM}
         {systemMessages}
+        {logLevel}
         {interfaceSettings}
         radar={radarSettings}
         airspace={airspaceSettings}

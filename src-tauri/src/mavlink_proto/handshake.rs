@@ -107,7 +107,27 @@ pub fn perform_handshake(transport: &mut dyn ByteTransport) -> Result<(FcInfo, u
                             continue;
                         }
 
+                        // Lock onto an *autopilot* heartbeat, not the first non-GCS one. PX4 (and many
+                        // vehicles) stream HEARTBEATs from several components — a gimbal / companion /
+                        // ADS-B receiver typically reports autopilot=INVALID from a component_id ≠ 1.
+                        // Accepting one of those would set fc_variant to "MAV_AUTOPILOT_INVALID" and the
+                        // PX4 path (is_px4) would never engage. Accept when the autopilot field is set,
+                        // or the heartbeat comes from the autopilot component (compid 1 = AUTOPILOT1).
+                        let is_autopilot = hb.autopilot != MavAutopilot::MAV_AUTOPILOT_INVALID
+                            || frame.header.component_id == 1;
+                        if !is_autopilot {
+                            log::info!(
+                                "MAVLink handshake: skipping non-autopilot heartbeat (sysid={} compid={} autopilot={:?}) — waiting for the autopilot",
+                                frame.header.system_id, frame.header.component_id, hb.autopilot,
+                            );
+                            continue;
+                        }
+
                         fc_sysid = frame.header.system_id;
+                        log::info!(
+                            "MAVLink handshake: locked onto autopilot heartbeat (sysid={} compid={} autopilot={:?})",
+                            frame.header.system_id, frame.header.component_id, hb.autopilot,
+                        );
 
                         // Map autopilot (+ vehicle type) to fc_variant string. For ArduPilot the
                         // variant is per-vehicle ("ArduPlane"/"ArduCopter"/...) because the frontend

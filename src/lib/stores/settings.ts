@@ -238,6 +238,10 @@ export const DEFAULT_RC_CONTROL: RcControlSettings = {
 /** FC system-message (STATUSTEXT) toast verbosity: off, errors only, warnings+errors, or everything. */
 export type SystemMessagesLevel = 'off' | 'error' | 'warning' | 'all';
 
+/** Backend diagnostic file-log verbosity. "debug" also captures info-level connection milestones.
+ *  Written to `<AppData>/kite-gc/kite-gc.log` (portable: `data/`). See src-tauri/src/logging. */
+export type LogLevel = 'off' | 'error' | 'warning' | 'debug';
+
 export interface AppSettings {
   lastPort: string;
   lastBaud: number;
@@ -278,6 +282,8 @@ export interface AppSettings {
   warnAltitudeM: number;
   /** Which FC system messages (MAVLink STATUSTEXT) surface as on-screen toasts. */
   systemMessages: SystemMessagesLevel;
+  /** Backend diagnostic file-log verbosity (applied to the Rust logger on startup + on change). */
+  logLevel: LogLevel;
   // Global UI options (display-only conversions)
   interface: InterfaceSettings;
   // Widget panel layout
@@ -345,6 +351,7 @@ const defaults: AppSettings = {
   lastArduVehicleClass: 'plane',
   warnAltitudeM: 120,
   systemMessages: 'all',
+  logLevel: 'warning',
   interface: {
     speedUnit: 'kmh',
     altitudeUnit: 'm',

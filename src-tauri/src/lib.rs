@@ -7,6 +7,7 @@ mod flightlog;
 mod flightmode;
 mod hid;
 mod link_stats;
+mod logging;
 mod mavlink_proto;
 mod mission;
 mod msp;
@@ -52,6 +53,7 @@ use commands::rc::{
     rc_stream_set_override, rc_stream_set_manual,
 };
 use commands::info::get_app_version;
+use commands::logging::{set_log_level, get_log_path};
 use commands::radar::{radar_configure, radar_set_center, radar_set_node_pos, radar_snapshot};
 use commands::terrain::{
     terrain_cache_clear, terrain_cache_stats, terrain_elevation, terrain_elevations, terrain_fan,
@@ -126,6 +128,11 @@ pub fn setup_portable_mode() {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Install the file logger before anything else so startup + connection diagnostics are captured.
+    // The frontend re-applies the user's persisted level on startup; we begin at Warning so early
+    // failures are recorded without flooding the file in normal operation.
+    logging::init(log::LevelFilter::Warn, is_portable());
+
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init());
@@ -160,6 +167,8 @@ pub fn run() {
             connect,
             disconnect,
             get_app_version,
+            set_log_level,
+            get_log_path,
             mission_get,
             mission_clear,
             mission_set,

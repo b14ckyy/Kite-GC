@@ -112,6 +112,11 @@ pub async fn connect(
 
     let proto = protocol.as_deref().unwrap_or("msp");
 
+    log::info!(
+        "Connect requested: protocol={} transport={:?} port={:?} baud={:?} host={:?} tcp_port={:?} ble={:?}",
+        proto, transport_type, port, baud_rate, host, tcp_port, ble_device_id,
+    );
+
     // Open byte-level transport based on type
     let byte_transport: Box<dyn ByteTransport> = match transport_type {
         TransportType::Serial => {
@@ -143,7 +148,7 @@ pub async fn connect(
 
     log::info!("Transport opened, protocol={}", proto);
 
-    let fc_info = match proto {
+    let result = match proto {
         "mavlink" => {
             // ── MAVLink Path ─────────────────────────────────────────────
             connect_mavlink(
@@ -160,7 +165,7 @@ pub async fn connect(
                 flight_log_raw_always,
                 state,
                 app_handle,
-            )?
+            )
         }
         "telemetry" => {
             // ── Passive Telemetry Path (listen-only, auto-detect) ────────
@@ -172,7 +177,7 @@ pub async fn connect(
                 flight_log_raw_path,
                 state,
                 app_handle,
-            )?
+            )
         }
         _ => {
             // ── MSP Path ────────────────────────────────────────────────
@@ -189,11 +194,21 @@ pub async fn connect(
                 flight_log_raw_always,
                 state,
                 app_handle,
-            )?
+            )
         }
     };
 
-    Ok(fc_info)
+    // Central success/failure log — a failed connect otherwise only surfaces in the UI toast and
+    // leaves no trace in the diagnostics log (the original PX4 report had nothing to go on).
+    match &result {
+        Ok(info) => log::info!(
+            "Connection established: {} {} (platform={})",
+            info.fc_variant, info.fc_version, info.platform_type,
+        ),
+        Err(e) => log::error!("Connection failed (protocol={}): {}", proto, e),
+    }
+
+    result
 }
 
 /// MSP connection path: handshake → scheduler

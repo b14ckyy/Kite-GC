@@ -16,7 +16,8 @@
   import { DEFAULT_RADAR, DEFAULT_AIRSPACE, DEFAULT_RC_CONTROL } from '$lib/stores/settings';
   import { panelState } from '$lib/stores/panelState';
   import { resetGcsManual, gcsManuallySet } from '$lib/stores/gcsLocation';
-  import type { AppSettings, InterfaceSettings, RadarSettings, GcsMode, AirspaceSettings, AirspaceProvider, SystemMessagesLevel, RcControlSettings } from '$lib/stores/settings';
+  import type { AppSettings, InterfaceSettings, RadarSettings, GcsMode, AirspaceSettings, AirspaceProvider, SystemMessagesLevel, LogLevel, RcControlSettings } from '$lib/stores/settings';
+  import { revealItemInDir } from '@tauri-apps/plugin-opener';
   import type { TileCacheStats } from '$lib/cache/tileCache';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import UnitStepper from '$lib/components/UnitStepper.svelte';
@@ -58,6 +59,7 @@
     defaultPhTimeSec = 30,
     warnAltitudeM = 120,
     systemMessages = 'all',
+    logLevel = 'warning',
     interfaceSettings = { speedUnit: 'kmh', altitudeUnit: 'm', distanceUnit: 'metric', verticalSpeedUnit: 'ms', temperatureUnit: 'c' },
     radar = DEFAULT_RADAR,
     airspace = DEFAULT_AIRSPACE,
@@ -103,6 +105,7 @@
     defaultPhTimeSec?: number;
     warnAltitudeM?: number;
     systemMessages?: SystemMessagesLevel;
+    logLevel?: LogLevel;
     interfaceSettings?: InterfaceSettings;
     radar?: RadarSettings;
     airspace?: AirspaceSettings;
@@ -141,6 +144,14 @@
   async function clearTerrainCache() {
     try { await invoke('terrain_cache_clear'); } catch { /* non-critical */ }
     await loadTerrainCache();
+  }
+
+  // Reveal the backend diagnostic log file in the OS file manager (Settings → Diagnostics).
+  async function openLogFolder() {
+    try {
+      const p = await invoke<string | null>('get_log_path');
+      if (p) await revealItemInDir(p);
+    } catch { /* logging unavailable — nothing to open */ }
   }
   // Refresh the terrain-cache size whenever the Data tab (which hosts the Map section) is shown.
   $effect(() => {
@@ -528,6 +539,25 @@
           <Button variant="standard" size="sm" onclick={onChooseRawLogPath}>{$t('settings.choose')}</Button>
           <Button variant="standard" size="sm" onclick={onResetRawLogPath}>{$t('settings.useDefault')}</Button>
         </div>
+      </div>
+    </div>
+
+    <!-- ── Diagnostics ───────────────────────────────── -->
+    <div class="s-group">
+      <h4 class="s-head">{$t('settings.diagnostics')}</h4>
+      <div class="s-row">
+        <span class="s-label">{$t('settings.logLevel')}</span>
+        <select id="log-level" class="s-select" value={logLevel}
+          onchange={(e) => onPatch({ logLevel: (e.target as HTMLSelectElement).value as LogLevel })}>
+          <option value="off">{$t('settings.logOff')}</option>
+          <option value="error">{$t('settings.logError')}</option>
+          <option value="warning">{$t('settings.logWarning')}</option>
+          <option value="debug">{$t('settings.logDebug')}</option>
+        </select>
+      </div>
+      <div class="s-row">
+        <span class="s-label">{$t('settings.logFolder')}</span>
+        <Button variant="standard" size="sm" onclick={openLogFolder}>{$t('settings.openLogFolder')}</Button>
       </div>
     </div>
 
