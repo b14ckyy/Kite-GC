@@ -11,6 +11,7 @@ import { applyRelaysOnConnect, clearRelaysOnDisconnect } from '$lib/controllers/
 import { loadSafehomeConfig, clearSafehome } from '$lib/stores/safehome';
 import { loadGeozoneConfig, clearGeozones } from '$lib/stores/geozone';
 import { loadFenceConfig, clearFence } from '$lib/stores/fence';
+import { loadRallyConfig, clearRally } from '$lib/stores/rally';
 
 /**
  * Refresh the list of serial ports via Tauri and return the port that should be selected.
@@ -156,8 +157,12 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
     // Geozones (INAV ≥8.0; the backend returns has_geozones=false on older FCs). See docs/active/GEOZONES.md.
     void loadGeozoneConfig();
   }
-  // ArduPilot/PX4 geofence over MAVLink (MAV_MISSION_TYPE_FENCE). See docs/active/GEOFENCE.md.
-  if (params.protocolType === 'mavlink') void loadFenceConfig();
+  // ArduPilot/PX4 geofence + rally points over MAVLink (MAV_MISSION_TYPE_FENCE/RALLY). Both ride the
+  // mission microprotocol (strict request→response) — run them SEQUENTIALLY so the two downloads don't
+  // collide. See docs/active/GEOFENCE.md.
+  if (params.protocolType === 'mavlink') {
+    void (async () => { await loadFenceConfig(); await loadRallyConfig(); })();
+  }
   return info;
 }
 
@@ -169,6 +174,7 @@ export async function disconnectFC(baudRate: number): Promise<void> {
   clearSafehome();
   clearGeozones();
   clearFence();
+  clearRally();
   stopTelemetryListeners();
   resetTelemetry();
   connectionProtocol.set({ primary: '', secondary: null });

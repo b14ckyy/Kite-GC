@@ -375,6 +375,8 @@
     "layerAirspaces": "Airspaces",
     "layerGeozones": "Geozones",
     "layerFence": "Geofence",
+    "layerRally": "Rally points",
+    "showOnMap": "Show on map",
     "layerObstacles": "Obstacles",
     "layerAirports": "Airports",
     "layerRc": "RC fields",
@@ -476,6 +478,23 @@
     "saveMsg": "Write all fence zones and parameters to the flight controller?",
     "saveConfirm": "Save",
     "armedLocked": "Fence editing is disabled while armed."
+  },
+  "rally": {
+    "title": "Rally points",
+    "abbrev": "R",
+    "none": "No rally points configured",
+    "point": "Point",
+    "add": "Add rally point",
+    "alt": "Altitude",
+    "params": "Rally parameters",
+    "pLimitKm": "Use limit",
+    "pInclHome": "Include home",
+    "saveToFc": "Save to FC",
+    "saving": "Saving…",
+    "saveTitle": "Save rally points to FC",
+    "saveMsg": "Write all rally points and parameters to the flight controller?",
+    "saveConfirm": "Save",
+    "armedLocked": "Rally editing is disabled while armed."
   },
   "about": {
     "button": "About",

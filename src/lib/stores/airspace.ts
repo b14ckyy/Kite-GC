@@ -71,7 +71,7 @@ export function focusAero(lat: number, lon: number): void {
 // `geozones` (INAV) and `fence` (ArduPilot/PX4) are FC config layers (not OpenAIP data) but share the
 // panel's 2D/3D toggle grid, so they live in the same key union (and in `AeroLayers`). They are
 // deliberately NOT in `ALL_AERO_LAYERS`, which drives the OpenAIP fetch loops.
-export type AeroLayerKey = 'airspaces' | 'geozones' | 'fence' | 'obstacles' | 'airports' | 'rc';
+export type AeroLayerKey = 'airspaces' | 'geozones' | 'fence' | 'rally' | 'obstacles' | 'airports' | 'rc';
 
 /** Layer keys to fetch (the backend understands airspaces/obstacles/airports/rc). */
 export const ALL_AERO_LAYERS: AeroLayerKey[] = ['airspaces', 'obstacles', 'airports', 'rc'];

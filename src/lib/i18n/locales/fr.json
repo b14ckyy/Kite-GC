@@ -364,6 +364,8 @@
     "layerAirspaces": "Espaces aériens",
     "layerGeozones": "Géozones",
     "layerFence": "Géofence",
+    "layerRally": "Points de ralliement",
+    "showOnMap": "Afficher sur la carte",
     "layerObstacles": "Obstacles",
     "layerAirports": "Aérodromes",
     "layerRc": "Sites RC",
@@ -465,6 +467,23 @@
     "saveMsg": "Écrire toutes les zones et paramètres de géofence sur le contrôleur de vol ?",
     "saveConfirm": "Enregistrer",
     "armedLocked": "L'édition de la géofence est désactivée lorsque le drone est armé."
+  },
+  "rally": {
+    "title": "Points de ralliement",
+    "abbrev": "R",
+    "none": "Aucun point de ralliement configuré",
+    "point": "Point",
+    "add": "Ajouter un point de ralliement",
+    "alt": "Altitude",
+    "params": "Paramètres de ralliement",
+    "pLimitKm": "Limite d'utilisation",
+    "pInclHome": "Inclure le point home",
+    "saveToFc": "Enregistrer sur le FC",
+    "saving": "Enregistrement…",
+    "saveTitle": "Enregistrer les points de ralliement sur le FC",
+    "saveMsg": "Écrire tous les points de ralliement et paramètres sur le contrôleur de vol ?",
+    "saveConfirm": "Enregistrer",
+    "armedLocked": "L'édition des points de ralliement est désactivée lorsque le drone est armé."
   },
   "about": {
     "button": "À propos",

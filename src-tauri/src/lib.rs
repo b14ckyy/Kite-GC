@@ -57,6 +57,7 @@ use commands::rc::{
 use commands::safehome::{safehome_read_all, safehome_write_all};
 use commands::geozone::{geozone_read_all, geozone_write_all};
 use commands::fence::{fence_read_all, fence_write_all};
+use commands::rally::{rally_read_all, rally_write_all};
 use commands::info::{get_app_version, is_debug_mode};
 use commands::logging::{set_log_level, get_log_path};
 use commands::radar::{radar_configure, radar_set_center, radar_set_node_pos, radar_snapshot};
@@ -322,6 +323,8 @@ pub fn run() {
             geozone_write_all,
             fence_read_all,
             fence_write_all,
+            rally_read_all,
+            rally_write_all,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Kite Ground Control");

@@ -27,6 +27,11 @@
     saveFenceConfig, revertFenceWorking, type FenceZone,
   } from '$lib/stores/fence';
   import { fenceColor, fenceRadiusM } from '$lib/helpers/fenceStyle';
+  import {
+    rallyWorking, rallyDirty, rallyEditing,
+    addRallyPoint, deleteRallyPoint, setRallyAlt, setRallyParam,
+    saveRallyConfig, revertRallyWorking, type RallyPoint,
+  } from '$lib/stores/rally';
   import { validateGeozones, ensureCCWConfig } from '$lib/helpers/geozoneSanity';
   import { settings, AERO_DISTANCE_OPTIONS, type DistanceUnit } from '$lib/stores/settings';
   import { telemetry } from '$lib/stores/telemetry';
@@ -58,6 +63,7 @@
     { key: 'airspaces', label: () => $t('airspace.layerAirspaces') },
     { key: 'geozones', label: () => $t('airspace.layerGeozones') },
     { key: 'fence', label: () => $t('airspace.layerFence') },
+    { key: 'rally', label: () => $t('airspace.layerRally') },
     { key: 'obstacles', label: () => $t('airspace.layerObstacles') },
     { key: 'airports', label: () => $t('airspace.layerAirports') },
     { key: 'rc', label: () => $t('airspace.layerRc') },
@@ -66,12 +72,13 @@
   // The Geozones toggle + list only exist when a geozone-capable INAV FC (≥8.0) is connected (the
   // working copy is non-null only then, and is cleared on disconnect → it doubles as the edit gate).
   const hasGeozones = $derived($geozoneWorking?.has_geozones ?? false);
-  // The Geofence toggle + list only exist when a MAVLink (ArduPilot/PX4) FC is connected.
+  // The Geofence/Rally toggles + lists only exist when a MAVLink (ArduPilot/PX4) FC is connected.
   const hasFence = $derived($fenceWorking?.has_fence ?? false);
-  // OpenAIP layer rows only when the subsystem is on; the geozones/fence rows whenever a capable FC is connected.
+  const hasRally = $derived($rallyWorking?.has_rally ?? false);
+  // OpenAIP layer rows only when the subsystem is on; the geozones/fence/rally rows whenever a capable FC is connected.
   const visibleLayers = $derived(
     LAYERS.filter((l) =>
-      l.key === 'geozones' ? hasGeozones : l.key === 'fence' ? hasFence : airspaceEnabled),
+      l.key === 'geozones' ? hasGeozones : l.key === 'fence' ? hasFence : l.key === 'rally' ? hasRally : airspaceEnabled),
   );
 
   // Accordion: at most one expanded geozone row.
@@ -311,6 +318,56 @@
     paramDraft = d;
   });
 
+  // ── Rally-point editing (ArduPilot/PX4) ──
+  const rallyPoints = $derived($rallyWorking?.points ?? []);
+  const rallyParams = $derived($rallyWorking?.params ?? []);
+  let expandedRally = $state<number | null>(null);
+  function toggleRally(i: number) { expandedRally = expandedRally === i ? null : i; }
+  $effect(() => { if (armed && $rallyEditing) rallyEditing.set(false); });
+
+  let rallyBusy = $state(false);
+  let editRallyAltM = $state(0);
+  $effect(() => {
+    const p = rallyPoints[expandedRally ?? -1];
+    if (p) editRallyAltM = Math.round(p.alt_cm / 100);
+  });
+  function commitRallyAlt(i: number) { setRallyAlt(i, (editRallyAltM || 0) * 100); }
+
+  function onAddRally() {
+    const i = addRallyPoint();
+    if (i != null) { expandedRally = i; rallyEditing.set(true); }
+  }
+  function onDeleteRally(i: number) { deleteRallyPoint(i); expandedRally = null; }
+  function onRevertRally() { revertRallyWorking(); expandedRally = null; }
+  async function onSaveRally() {
+    if (rallyBusy || armed) return;
+    const ans = await confirmDialog.show({
+      title: $t('rally.saveTitle'),
+      message: $t('rally.saveMsg'),
+      buttons: [{ label: $t('rally.saveConfirm'), value: 'ok', primary: true }],
+    });
+    if (ans !== 'ok') return;
+    rallyBusy = true;
+    try { await saveRallyConfig(); } finally { rallyBusy = false; }
+  }
+  function rallyCenter(p: RallyPoint): { lat: number; lon: number } { return { lat: p.lat / 1e7, lon: p.lon / 1e7 }; }
+
+  // Rally param metadata (ArduPilot only): RALLY_LIMIT_KM (km) + RALLY_INCL_HOME (0/1 toggle).
+  const RALLY_PARAM_META: Record<string, FenceParamMeta> = {
+    RALLY_LIMIT_KM:  { key: 'rally.pLimitKm', unit: 'km', min: 0, max: 100, step: 0.5, decimals: 1 },
+    RALLY_INCL_HOME: { key: 'rally.pInclHome', min: 0, max: 1, step: 1, toggle: true },
+  };
+  function rallyParamLabel(name: string): string {
+    const m = RALLY_PARAM_META[name];
+    return m ? `${$t(m.key)} (${name})` : name;
+  }
+  let rallyParamDraft = $state<Record<string, number>>({});
+  $effect(() => {
+    const d: Record<string, number> = {};
+    for (const p of rallyParams) d[p.name] = p.value;
+    rallyParamDraft = d;
+  });
+
   function setVis(key: AeroLayerKey, dim: 'd2' | 'd3', on: boolean) {
     settings.update((s) => ({
       ...s,
@@ -388,44 +445,6 @@
 
 {#snippet controls()}
   <div class="am-controls">
-    <div class="am-head-row">
-      <span class="am-col-label"></span>
-      <span class="am-dim">2D</span>
-      <span class="am-dim">3D</span>
-    </div>
-    {#each visibleLayers as layer}
-      <div class="am-row">
-        <span class="am-layer">{layer.label()}</span>
-        <Toggle checked={$settings.airspace.layers[layer.key].d2} onchange={(c) => setVis(layer.key, 'd2', c)} />
-        <Toggle checked={$settings.airspace.layers[layer.key].d3} onchange={(c) => setVis(layer.key, 'd3', c)} />
-      </div>
-    {/each}
-
-    {#if airspaceEnabled}
-      <div class="am-ranges">
-        <label class="am-range">
-          <span class="am-range-label">{$t('airspace.rangeObstacles')}</span>
-          <select
-            class="am-select"
-            value={$settings.airspace.obstacleDistanceKm}
-            onchange={(e) => setRange('obstacleDistanceKm', Number(e.currentTarget.value))}
-          >
-            {#each AERO_DISTANCE_OPTIONS as km}<option value={km}>{km} km</option>{/each}
-          </select>
-        </label>
-        <label class="am-range">
-          <span class="am-range-label">{$t('airspace.rangeAirfields')}</span>
-          <select
-            class="am-select"
-            value={$settings.airspace.airfieldDistanceKm}
-            onchange={(e) => setRange('airfieldDistanceKm', Number(e.currentTarget.value))}
-          >
-            {#each AERO_DISTANCE_OPTIONS as km}<option value={km}>{km} km</option>{/each}
-          </select>
-        </label>
-      </div>
-    {/if}
-
     {#if hasGeozones}
       <div class="gz-section">
         <div class="gz-head">
@@ -653,6 +672,140 @@
         {/if}
       </div>
     {/if}
+
+    {#if hasRally}
+      <div class="gz-section">
+        <div class="gz-head">
+          <span class="gz-title">{$t('rally.title')}</span>
+          <span class="gz-count">{rallyPoints.length}</span>
+        </div>
+
+        {#if armed}
+          <div class="gz-armed">{$t('rally.armedLocked')}</div>
+        {/if}
+
+        <!-- Toolbar: add point + the map edit-lock toggle. -->
+        <div class="gz-toolbar">
+          <button class="gz-add" disabled={armed} title={$t('rally.add')} onclick={onAddRally}>＋ {$t('rally.point')}</button>
+          <span class="gz-spacer"></span>
+          <label class="gz-editlock" title={$t('geozone.editLockHint')}>
+            <span>{$t('geozone.editLock')}</span>
+            <Toggle checked={$rallyEditing} disabled={armed} onchange={(c) => rallyEditing.set(c)} />
+          </label>
+        </div>
+
+        {#if !rallyPoints.length}
+          <div class="gz-empty">{$t('rally.none')}</div>
+        {:else}
+          {#each rallyPoints as point, i (i)}
+            {@const center = rallyCenter(point)}
+            <div class="gz-row" style="--gz-color:#59aa29">
+              <button class="gz-rowhead" onclick={() => toggleRally(i)} title={$t('geozone.expand')}>
+                <span class="gz-dot"></span>
+                <span class="gz-name">{$t('rally.abbrev')}{i + 1}</span>
+                <span class="gz-shape">{$t('rally.point')}</span>
+                <span class="gz-sub">{Math.round(point.alt_cm / 100)} m</span>
+              </button>
+              {#if expandedRally === i}
+                <div class="gz-detail">
+                  <div class="gz-edit">
+                    <span class="gz-elabel">{$t('rally.alt')}</span>
+                    <NumberStepper bind:value={editRallyAltM} min={0} step={5} unit="m" disabled={armed} onchange={() => commitRallyAlt(i)} />
+                  </div>
+                  <div class="gz-rowactions">
+                    <button class="gz-focus" onclick={() => focusAero(center.lat, center.lon)}>{$t('geozone.focus')}</button>
+                    <button class="gz-delete" disabled={armed} onclick={() => onDeleteRally(i)}>{$t('geozone.delete')}</button>
+                  </div>
+                </div>
+              {/if}
+            </div>
+          {/each}
+        {/if}
+
+        <!-- Global rally params (ArduPilot: RALLY_LIMIT_KM + RALLY_INCL_HOME). -->
+        {#if rallyParams.length}
+          <div class="gz-params">
+            <div class="gz-params-head">{$t('rally.params')}</div>
+            {#each rallyParams as p (p.name)}
+              {@const meta = RALLY_PARAM_META[p.name]}
+              <div class="gz-edit">
+                <span class="gz-elabel" title={p.name}>{rallyParamLabel(p.name)}</span>
+                {#if meta?.toggle}
+                  <div class="gz-typetoggle">
+                    <span class="gz-tname">{p.value ? $t('fence.on') : $t('fence.off')}</span>
+                    <Toggle checked={p.value !== 0} disabled={armed} onchange={(c) => setRallyParam(p.name, c ? 1 : 0)} />
+                  </div>
+                {:else}
+                  <NumberStepper
+                    bind:value={rallyParamDraft[p.name]}
+                    min={meta?.min ?? -Infinity}
+                    max={meta?.max ?? Infinity}
+                    step={meta?.step ?? 1}
+                    unit={meta?.unit ?? ''}
+                    decimals={meta?.decimals}
+                    disabled={armed}
+                    onchange={() => setRallyParam(p.name, rallyParamDraft[p.name])}
+                  />
+                {/if}
+              </div>
+            {/each}
+          </div>
+        {/if}
+
+        <!-- Save / Revert (only when there are pending edits). -->
+        {#if $rallyDirty}
+          <div class="gz-save">
+            <Button variant="data" icon="save" disabled={rallyBusy || armed} onclick={onSaveRally}>
+              {rallyBusy ? $t('rally.saving') : $t('rally.saveToFc')}
+            </Button>
+            <Button variant="standard" disabled={rallyBusy} onclick={onRevertRally}>{$t('geozone.revert')}</Button>
+          </div>
+        {/if}
+      </div>
+    {/if}
+
+    <!-- Map-visibility toggles + render ranges, grouped at the end so the FC editors above stay
+         reachable as the panel grows. -->
+    <div class="am-showmap">
+      <div class="am-showmap-head">{$t('airspace.showOnMap')}</div>
+      <div class="am-head-row">
+        <span class="am-col-label"></span>
+        <span class="am-dim">2D</span>
+        <span class="am-dim">3D</span>
+      </div>
+      {#each visibleLayers as layer}
+        <div class="am-row">
+          <span class="am-layer">{layer.label()}</span>
+          <Toggle checked={$settings.airspace.layers[layer.key].d2} onchange={(c) => setVis(layer.key, 'd2', c)} />
+          <Toggle checked={$settings.airspace.layers[layer.key].d3} onchange={(c) => setVis(layer.key, 'd3', c)} />
+        </div>
+      {/each}
+
+      {#if airspaceEnabled}
+        <div class="am-ranges">
+          <label class="am-range">
+            <span class="am-range-label">{$t('airspace.rangeObstacles')}</span>
+            <select
+              class="am-select"
+              value={$settings.airspace.obstacleDistanceKm}
+              onchange={(e) => setRange('obstacleDistanceKm', Number(e.currentTarget.value))}
+            >
+              {#each AERO_DISTANCE_OPTIONS as km}<option value={km}>{km} km</option>{/each}
+            </select>
+          </label>
+          <label class="am-range">
+            <span class="am-range-label">{$t('airspace.rangeAirfields')}</span>
+            <select
+              class="am-select"
+              value={$settings.airspace.airfieldDistanceKm}
+              onchange={(e) => setRange('airfieldDistanceKm', Number(e.currentTarget.value))}
+            >
+              {#each AERO_DISTANCE_OPTIONS as km}<option value={km}>{km} km</option>{/each}
+            </select>
+          </label>
+        </div>
+      {/if}
+    </div>
   </div>
 {/snippet}
 
@@ -703,6 +856,12 @@
   .am-layer { font-size: 13px; color: #e0e0e0; }
   .am-row { padding: 4px 2px; }
 
+  /* "Show on Map" group — the layer-visibility toggles + render ranges, pinned to the end. */
+  .am-showmap { margin-top: 10px; padding-top: 8px; border-top: 1px solid #272727; }
+  .am-showmap-head {
+    font-size: 11px; font-weight: 700; color: #37a8db; text-transform: uppercase; letter-spacing: 0.5px;
+    padding: 0 2px 4px;
+  }
   .am-ranges {
     display: flex;
     flex-direction: column;

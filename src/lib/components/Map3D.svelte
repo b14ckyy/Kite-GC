@@ -77,6 +77,8 @@
   import { geozonePathStyle, geozoneRadiusM } from "$lib/helpers/geozoneStyle";
   import { fenceWorking, FENCE_SHAPE_CIRCLE } from "$lib/stores/fence";
   import { fencePathStyle, fenceRadiusM } from "$lib/helpers/fenceStyle";
+  import { rallyWorking } from "$lib/stores/rally";
+  import { t } from "svelte-i18n";
   import { buildApproachGeometry } from "$lib/helpers/autolandGeometry";
 
   let {
@@ -422,6 +424,10 @@
   let unsubFence3d: (() => void) | undefined;
   let fence3dGen = 0;                                 // race guard for the async terrain sample
   let fenceD3 = true;                                 // last-seen fence 3D toggle (default on)
+  // Rally points overlay (ArduPilot/PX4 RTL divert points) — ground-clamped labelled markers.
+  let rally3dEntities: Cesium.Entity[] = [];
+  let unsubRally3d: (() => void) | undefined;
+  let rallyD3 = true;                                 // last-seen rally 3D toggle (default on)
 
   // One-shot camera recenter after a (re)mount. The 2D↔3D toggle remounts this
   // component, so this fires once on every switch to 3D.
@@ -842,6 +848,7 @@
         updateGeozones3D();   // (re)build geozone volumes for the now-visible 3D view
         updateGeozoneViolations3D(); // (re)build the red mission-violation overlay
         updateFence3D();      // (re)build geofence volumes for the now-visible 3D view
+        updateRally3D();      // (re)build rally markers for the now-visible 3D view
       } else {
         // Leaving 3D while in FPV: undo FPV's viewer changes (camera inputs, model/track,
         // wheel handler) so nothing carries over and blocks the map — but keep cameraMode
@@ -1181,6 +1188,11 @@
         fenceD3 = next.airspace.layers.fence.d3;
         updateFence3D();
       }
+      // Rally points — same: FC config, watch only its own toggle.
+      if (next.airspace.layers.rally.d3 !== rallyD3) {
+        rallyD3 = next.airspace.layers.rally.d3;
+        updateRally3D();
+      }
     });
 
     // Mission overlay — re-render on mission / visibility / launch changes.
@@ -1238,6 +1250,8 @@
     // Geofence volumes follow the working copy (downloaded at handshake; reflects live edits).
     unsubFence3d = fenceWorking.subscribe(() => updateFence3D());
     void waitForTerrain(viewer).then((tp) => { if (tp) updateFence3D(); });
+    // Rally markers follow the working copy.
+    unsubRally3d = rallyWorking.subscribe(() => updateRally3D());
 
     // Obstacle columns + airspace volumes: rebuild on new aero data (toggle / range changes ride the
     // settings-watch below; camera-pan re-culls via the debounced moveEnd handler — the window follows
@@ -1288,6 +1302,7 @@
     unsubGeozone3d?.();
     unsubGeozoneViol3d?.();
     unsubFence3d?.();
+    unsubRally3d?.();
     unsubAero3d?.();
     if (obstacleMoveTimer) clearTimeout(obstacleMoveTimer);
     radar3dPickHandler?.destroy();
@@ -2379,6 +2394,46 @@
         polyline: { positions: ringAt(ceilEll), arcType: Cesium.ArcType.NONE, width: st.weight, material: lineColor },
       }));
     }
+    viewer.scene.requestRender();
+  }
+
+  // ── Rally points overlay (ArduPilot/PX4; see docs/active/GEOFENCE.md) ──────────────────────────
+  /** Rebuild the rally-point markers: a green ground-clamped point + label per point. Rally altitude is
+   *  relative to home (not drawn here — the markers mark the ground location). Gated by the rally 3D toggle. */
+  function updateRally3D() {
+    if (!viewer) return;
+    for (const e of rally3dEntities) viewer.entities.remove(e);
+    rally3dEntities.length = 0;
+    if (!active || !get(settings).airspace.layers.rally.d3) { viewer.scene.requestRender(); return; }
+    const cfg = get(rallyWorking);
+    if (!cfg || !cfg.has_rally || cfg.points.length === 0) { viewer.scene.requestRender(); return; }
+
+    const tr = get(t);
+    cfg.points.forEach((p, i) => {
+      const pos = Cesium.Cartesian3.fromDegrees(p.lon / 1e7, p.lat / 1e7);
+      rally3dEntities.push(viewer!.entities.add({
+        position: pos,
+        point: {
+          pixelSize: 12,
+          color: Cesium.Color.fromCssColorString("#59aa29"),
+          outlineColor: Cesium.Color.WHITE,
+          outlineWidth: 2,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+        label: {
+          text: `${tr("rally.abbrev")}${i + 1}`,
+          font: "bold 12px 'Segoe UI', sans-serif",
+          fillColor: Cesium.Color.WHITE,
+          showBackground: true,
+          backgroundColor: Cesium.Color.fromCssColorString("#59aa29").withAlpha(0.85),
+          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+          pixelOffset: new Cesium.Cartesian2(0, -14),
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      }));
+    });
     viewer.scene.requestRender();
   }
 

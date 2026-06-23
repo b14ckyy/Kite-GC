@@ -17,6 +17,7 @@ pub mod info;
 pub mod logging;
 pub mod mission;
 pub mod radar;
+pub mod rally;
 pub mod rc;
 pub mod safehome;
 pub mod terrain;

@@ -28,6 +28,9 @@
     setFenceVertex, insertFenceVertex, removeFenceVertex, setFenceRadius,
   } from "$lib/stores/fence";
   import { fencePathStyle, fenceRadiusM, fenceColor } from "$lib/helpers/fenceStyle";
+  import {
+    rallyWorking, rallyEditing, setRallyPoint, setRallyAlt,
+  } from "$lib/stores/rally";
   import { MIN_FIX_SATELLITES } from "$lib/helpers/telemetry";
   import { get } from "svelte/store";
   import { MAP_PROVIDERS, getProviderById, type MapProvider } from "$lib/config/mapProviders";
@@ -450,6 +453,9 @@
   // Geofence overlay (ArduPilot/PX4 MAVLink FC config).
   let fenceLayer: L.LayerGroup | undefined;
   let unsubFence: (() => void) | undefined;
+  // Rally points overlay (ArduPilot/PX4 RTL divert points).
+  let rallyLayer: L.LayerGroup | undefined;
+  let unsubRally: (() => void) | undefined;
   const MAX_AERO_MARKERS = 1500; // cap rendered point markers per redraw (dense regions)
   // Airspaces currently drawn (passed the zoom filter) — the click handler tests these for
   // point-in-polygon so a single click lists *every* airspace stacked at that spot, not just the top one.
@@ -865,6 +871,72 @@
     });
   }
 
+  // ── Rally points overlay (ArduPilot/PX4; see docs/active/GEOFENCE.md) ──────────────────────────
+  const RALLY_COLOR = "#59aa29"; // green = "safe return"
+
+  /** WP-style popup for a rally point: exact lat/lon + altitude (m, relative to home), Apply + Delete. */
+  function buildRallyPopup(index: number): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.className = "gz-popup";
+    const p = get(rallyWorking)?.points[index];
+    if (!p) return wrap;
+    const tr = get(t);
+    const field = (label: string, value: string, step: string) => {
+      const row = document.createElement("label");
+      row.className = "gz-popup-row";
+      const span = document.createElement("span");
+      span.textContent = label;
+      const input = document.createElement("input");
+      input.type = "number"; input.step = step; input.value = value;
+      row.append(span, input);
+      return { row, input };
+    };
+    const latF = field(tr("geozone.lat"), (p.lat / 1e7).toFixed(7), "0.0000001");
+    const lonF = field(tr("geozone.lon"), (p.lon / 1e7).toFixed(7), "0.0000001");
+    const altF = field(`${tr("rally.alt")} (m)`, String(Math.round(p.alt_cm / 100)), "1");
+    wrap.append(latF.row, lonF.row, altF.row);
+    const btns = document.createElement("div");
+    btns.className = "gz-popup-btns";
+    const apply = document.createElement("button");
+    apply.className = "gz-popup-apply"; apply.textContent = tr("geozone.apply");
+    apply.onclick = () => {
+      const lat = Number(latF.input.value), lon = Number(lonF.input.value), alt = Number(altF.input.value);
+      if (isFinite(lat) && isFinite(lon)) setRallyPoint(index, gzE7(lat), gzE7(lon));
+      if (isFinite(alt)) setRallyAlt(index, alt * 100);
+      map?.closePopup();
+    };
+    btns.append(apply);
+    wrap.append(btns);
+    return wrap;
+  }
+
+  /** Redraw the rally-points overlay. Static labelled markers show per the layer toggle / mission edit
+   *  mode / rally edit-lock; markers become draggable (with a popup) only when the edit-lock is on. */
+  function updateRally() {
+    if (!map) return;
+    if (!rallyLayer) rallyLayer = L.layerGroup().addTo(map);
+    const group = rallyLayer;
+    group.clearLayers();
+    const editing = get(rallyEditing);
+    if (!get(settings).airspace.layers.rally.d2 && !get(editMode) && !editing) return;
+    const cfg = get(rallyWorking);
+    if (!cfg || !cfg.has_rally) return;
+
+    cfg.points.forEach((p, index) => {
+      const lat = p.lat / 1e7, lon = p.lon / 1e7;
+      const m = L.marker([lat, lon], {
+        draggable: editing,
+        icon: geozoneHandleIcon(RALLY_COLOR, { label: `${get(t)("rally.abbrev")}${index + 1}` }),
+        zIndexOffset: 700,
+      });
+      if (editing) {
+        m.on("dragend", () => { const ll = m.getLatLng(); setRallyPoint(index, gzE7(ll.lat), gzE7(ll.lng)); });
+        m.bindPopup(buildRallyPopup(index), { className: "gz-popup-container" });
+      }
+      group.addLayer(m);
+    });
+  }
+
   /** Red overlay for the mission legs flagged by the geozone safety check (NFZ crossing / leaving an
    *  inclusion zone). Hint only — drawn on top of the mission line. */
   function updateGeozoneViolations() {
@@ -997,6 +1069,8 @@
   $effect(() => { void $settings.airspace.layers.geozones.d2; void $editMode; void $geozoneEditing; if (map) updateGeozones(); });
   // Geofence: same trigger set (layer toggle / mission edit-mode / fence edit-lock).
   $effect(() => { void $settings.airspace.layers.fence.d2; void $editMode; void $fenceEditing; if (map) updateFence(); });
+  // Rally points: same trigger set (layer toggle / mission edit-mode / rally edit-lock).
+  $effect(() => { void $settings.airspace.layers.rally.d2; void $editMode; void $rallyEditing; if (map) updateRally(); });
   // Toggle the heading/course/turn nose lines on/off (clears or redraws immediately, not just next frame).
   $effect(() => { void $settings.directionLines; if (map) redrawDirLines(); });
 
@@ -1533,6 +1607,8 @@
     unsubGeozoneViol = geozoneMissionResult.subscribe(() => updateGeozoneViolations());
     // Geofence overlay follows the working copy (downloaded at handshake; reflects live edits).
     unsubFence = fenceWorking.subscribe(() => updateFence());
+    // Rally-points overlay follows the working copy.
+    unsubRally = rallyWorking.subscribe(() => updateRally());
     unsubAeroFocus = aeroFocus.subscribe((f) => { if (f && map) map.setView([f.lat, f.lon], Math.max(map.getZoom(), 11)); });
     map.on("moveend", updateAirspace);
     map.on("click", onGuidedClick); // Guided "fly here" target popup (vehicle control)
@@ -1744,6 +1820,7 @@
     unsubGeozone?.();
     unsubGeozoneViol?.();
     unsubFence?.();
+    unsubRally?.();
     if (map) {
       map.off("moveend", saveMapState);
       map.off("zoomend", saveMapState);
@@ -1761,6 +1838,7 @@
       if (geozoneLayer) map.removeLayer(geozoneLayer);
       if (geozoneViolationLayer) map.removeLayer(geozoneViolationLayer);
       if (fenceLayer) map.removeLayer(fenceLayer);
+      if (rallyLayer) map.removeLayer(rallyLayer);
       if (radarLayer) map.removeLayer(radarLayer);
       map.remove();
     }

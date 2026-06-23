@@ -40,6 +40,7 @@
   import AirspaceManagerPanel from "$lib/components/AirspaceManagerPanel.svelte";
   import { geozoneWorking } from "$lib/stores/geozone";
   import { fenceWorking } from "$lib/stores/fence";
+  import { rallyWorking } from "$lib/stores/rally";
   import RadarAlertBanner from "$lib/components/RadarAlertBanner.svelte";
   import StatusTextToasts from "$lib/components/StatusTextToasts.svelte";
   import { startStatusText } from "$lib/stores/statusText";
@@ -523,13 +524,14 @@
   // the panel can host the geozone editor even with the OpenAIP overlay disabled). (Ardu/PX4 geofence later.)
   const geozonesAvailable = $derived($geozoneWorking?.has_geozones ?? false);
   const fenceAvailable = $derived($fenceWorking?.has_fence ?? false);
+  const rallyAvailable = $derived($rallyWorking?.has_rally ?? false);
   const tabs = $derived(
     allTabs.filter(t =>
       (t.id !== 'logbook' || flightLoggingEnabled) &&
       (t.id !== 'control' || isMavlinkConnected) && // control tab only when connected via MAVLink
       (t.id !== 'rc-control' || rcTabAvailable) && // RC tab: master switch on + not telemetry-connected
       (t.id !== 'radar' || radarSettings.enabled) && // radar tab only when the master switch is on
-      (t.id !== 'airspace' || airspaceSettings.enabled || geozonesAvailable || fenceAvailable) // airspace: master switch, or geozone (INAV) / fence (MAVLink) capable FC
+      (t.id !== 'airspace' || airspaceSettings.enabled || geozonesAvailable || fenceAvailable || rallyAvailable) // airspace: master switch, or geozone (INAV) / fence+rally (MAVLink) capable FC
     )
   );
 
@@ -2405,7 +2407,7 @@
     {:else if activeTab === 'airspace'}
       <!-- Re-init the panel on connect/disconnect + when the FC's geozone/fence capability resolves
            (loaded async after connect) so an already-open panel reflects the new FC without a tab switch. -->
-      {#key `${$connection.status}-${geozonesAvailable}-${fenceAvailable}`}
+      {#key `${$connection.status}-${geozonesAvailable}-${fenceAvailable}-${rallyAvailable}`}
         <AirspaceManagerPanel reference={radarReference} distanceUnit={interfaceSettings.distanceUnit} />
       {/key}
     {:else if activeTab === 'video'}

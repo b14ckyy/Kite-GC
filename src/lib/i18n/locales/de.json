@@ -375,6 +375,8 @@
     "layerAirspaces": "Lufträume",
     "layerGeozones": "Geozonen",
     "layerFence": "Geofence",
+    "layerRally": "Rally-Punkte",
+    "showOnMap": "Auf Karte anzeigen",
     "layerObstacles": "Hindernisse",
     "layerAirports": "Flugplätze",
     "layerRc": "RC-Plätze",
@@ -476,6 +478,23 @@
     "saveMsg": "Alle Fence-Zonen und Parameter auf den Flight Controller schreiben?",
     "saveConfirm": "Speichern",
     "armedLocked": "Fence-Bearbeitung ist im Armed-Zustand deaktiviert."
+  },
+  "rally": {
+    "title": "Rally-Punkte",
+    "abbrev": "R",
+    "none": "Keine Rally-Punkte konfiguriert",
+    "point": "Punkt",
+    "add": "Rally-Punkt hinzufügen",
+    "alt": "Höhe",
+    "params": "Rally-Parameter",
+    "pLimitKm": "Nutzungs-Limit",
+    "pInclHome": "Home einbeziehen",
+    "saveToFc": "Auf FC speichern",
+    "saving": "Speichern…",
+    "saveTitle": "Rally-Punkte auf FC speichern",
+    "saveMsg": "Alle Rally-Punkte und Parameter auf den Flight Controller schreiben?",
+    "saveConfirm": "Speichern",
+    "armedLocked": "Rally-Bearbeitung ist im Armed-Zustand deaktiviert."
   },
   "about": {
     "button": "Über",
