@@ -88,6 +88,7 @@ export const CMD = {
   DO_SET_ROI_NONE: 197, DO_DIGICAM_CONTROL: 203, DO_SET_CAM_TRIGG_DIST: 206, DO_FENCE_ENABLE: 207,
   DO_PARACHUTE: 208, DO_INVERTED_FLIGHT: 210, DO_GRIPPER: 211, DO_AUTOTUNE_ENABLE: 212,
   DO_SET_RESUME_REPEAT_DIST: 215, DO_AUX_FUNCTION: 218, DO_GUIDED_LIMITS: 222,
+  DO_SET_REVERSE: 594,
   JUMP_TAG: 600, DO_JUMP_TAG: 601, DO_GIMBAL_MANAGER_PITCHYAW: 1000, DO_VTOL_TRANSITION: 3000,
 } as const;
 
@@ -260,6 +261,12 @@ export const ARDU_CATALOG: ArduCmdDef[] = [
     id: CMD.DO_INVERTED_FLIGHT, friendlyName: 'Inverted Flight', short: 'INV', category: 'Flight control',
     vehicles: ['plane'], appliesTo: 'prev',
     params: { 1: { label: 'Inverted', default: 0, decimals: 0, enumStrings: ['Normal', 'Inverted'], enumValues: [0, 1], tooltip: 'Fly upright or inverted from here on.' } },
+  },
+  {
+    // Rover/Boat-specific: drive forward or in reverse from here on (ArduRover).
+    id: CMD.DO_SET_REVERSE, friendlyName: 'Set Reverse', short: 'REV', category: 'Flight control',
+    vehicles: ['rover', 'boat'], appliesTo: 'prev',
+    params: { 1: { label: 'Direction', default: 0, decimals: 0, enumStrings: ['Forward', 'Reverse'], enumValues: [0, 1], tooltip: 'Drive forward or in reverse from this point on.' } },
   },
 
   // ── Conditionals (gate the next nav command) ──
