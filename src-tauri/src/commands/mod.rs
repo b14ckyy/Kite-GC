@@ -10,6 +10,7 @@ pub mod connection;
 pub mod control;
 pub mod fc_settings;
 pub mod flightlog;
+pub mod geozone;
 pub mod hid;
 pub mod info;
 pub mod logging;

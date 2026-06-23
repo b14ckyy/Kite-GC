@@ -169,7 +169,7 @@ export const DEFAULT_RADAR: RadarSettings = {
 export type AirspaceProvider = 'none' | 'openaip';
 /** Per-layer 2D / 3D visibility for the four aero layers (panel-controlled, persisted). */
 export interface AeroLayerVis { d2: boolean; d3: boolean }
-export type AeroLayers = Record<'airspaces' | 'obstacles' | 'airports' | 'rc', AeroLayerVis>;
+export type AeroLayers = Record<'airspaces' | 'geozones' | 'obstacles' | 'airports' | 'rc', AeroLayerVis>;
 /** Selectable render / list ranges (km) for the dense point layers. */
 export const AERO_DISTANCE_OPTIONS = [1, 2, 5, 10, 15, 25] as const;
 
@@ -197,6 +197,7 @@ export const DEFAULT_AIRSPACE: AirspaceSettings = {
   apiKey: '',
   layers: {
     airspaces: { d2: false, d3: false },
+    geozones: { d2: true, d3: true },
     obstacles: { d2: true, d3: true },
     airports: { d2: true, d3: true },
     rc: { d2: true, d3: true },
@@ -430,6 +431,7 @@ function load(): AppSettings {
             ...pa,
             layers: {
               airspaces: { ...da.layers.airspaces, ...(pl.airspaces ?? {}) },
+              geozones: { ...da.layers.geozones, ...(pl.geozones ?? {}) },
               obstacles: { ...da.layers.obstacles, ...(pl.obstacles ?? {}) },
               airports: { ...da.layers.airports, ...(pl.airports ?? {}) },
               rc: { ...da.layers.rc, ...(pl.rc ?? {}) },

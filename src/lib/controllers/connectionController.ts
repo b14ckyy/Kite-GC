@@ -9,6 +9,7 @@ import { connection, connectionProtocol, fcLinkAlive, availablePorts, bleDevices
 import { startTelemetryListeners, stopTelemetryListeners, resetTelemetry } from '$lib/stores/telemetry';
 import { applyRelaysOnConnect, clearRelaysOnDisconnect } from '$lib/controllers/relayController';
 import { loadSafehomeConfig, clearSafehome } from '$lib/stores/safehome';
+import { loadGeozoneConfig, clearGeozones } from '$lib/stores/geozone';
 
 /**
  * Refresh the list of serial ports via Tauri and return the port that should be selected.
@@ -149,7 +150,11 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
   await applyRelaysOnConnect();
   // INAV/MSP: always download safehomes + autoland config for the map overlay (fire-and-forget; the
   // store updates when the ~18 MSP reads complete). See docs/active/AUTOLAND_SAFEHOME.md.
-  if (params.protocolType === 'msp') void loadSafehomeConfig();
+  if (params.protocolType === 'msp') {
+    void loadSafehomeConfig();
+    // Geozones (INAV ≥8.0; the backend returns has_geozones=false on older FCs). See docs/active/GEOZONES.md.
+    void loadGeozoneConfig();
+  }
   return info;
 }
 
@@ -159,6 +164,7 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
 export async function disconnectFC(baudRate: number): Promise<void> {
   await clearRelaysOnDisconnect();
   clearSafehome();
+  clearGeozones();
   stopTelemetryListeners();
   resetTelemetry();
   connectionProtocol.set({ primary: '', secondary: null });

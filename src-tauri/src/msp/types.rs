@@ -83,6 +83,14 @@ pub const MSP2_INAV_SET_SAFEHOME: u16 = 0x2039;
 pub const MSP2_INAV_FW_APPROACH: u16 = 0x204A;
 pub const MSP2_INAV_SET_FW_APPROACH: u16 = 0x204B;
 
+// ── Geozones (INAV ≥8.0; see docs/active/GEOZONES.md) ──
+// GEOZONE is per-index (loop 0..62); GEOZONE_VERTEX per (zoneId, vertexId). A circle has vertexCount 1
+// (centre) with the radius appended to its vertex; a polygon has vertexCount = N vertices.
+pub const MSP2_INAV_GEOZONE: u16 = 0x2210;
+pub const MSP2_INAV_SET_GEOZONE: u16 = 0x2211;
+pub const MSP2_INAV_GEOZONE_VERTEX: u16 = 0x2212;
+pub const MSP2_INAV_SET_GEOZONE_VERTEX: u16 = 0x2213;
+
 // ── INAV MSP v2 command codes ───────────────────────────────────────
 pub const MSPV2_INAV_STATUS: u16 = 0x2000;
 pub const MSPV2_INAV_ANALOG: u16 = 0x2002;

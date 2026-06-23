@@ -68,7 +68,10 @@ export function focusAero(lat: number, lon: number): void {
 
 // Per-layer 2D/3D visibility now lives in the persisted settings store (`settings.airspace.layers`,
 // type `AeroLayers`) so it survives a restart — see $lib/stores/settings.ts.
-export type AeroLayerKey = 'airspaces' | 'obstacles' | 'airports' | 'rc';
+// `geozones` is an INAV FC layer (not OpenAIP data) but shares the panel's 2D/3D toggle grid, so it
+// lives in the same key union (and in `AeroLayers`). It is deliberately NOT in `ALL_AERO_LAYERS`, which
+// drives the OpenAIP fetch loops.
+export type AeroLayerKey = 'airspaces' | 'geozones' | 'obstacles' | 'airports' | 'rc';
 
 /** Layer keys to fetch (the backend understands airspaces/obstacles/airports/rc). */
 export const ALL_AERO_LAYERS: AeroLayerKey[] = ['airspaces', 'obstacles', 'airports', 'rc'];

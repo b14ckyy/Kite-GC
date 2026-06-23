@@ -18,6 +18,8 @@
   import { settings } from "$lib/stores/settings";
   import { telemetry } from "$lib/stores/telemetry";
   import { safehomeWorking, isSafehomeEmpty, setSafehomePosition } from "$lib/stores/safehome";
+  import { geozoneConfig, GEOZONE_SHAPE_CIRCULAR } from "$lib/stores/geozone";
+  import { geozonePathStyle, geozoneRadiusM } from "$lib/helpers/geozoneStyle";
   import { MIN_FIX_SATELLITES } from "$lib/helpers/telemetry";
   import { get } from "svelte/store";
   import { MAP_PROVIDERS, getProviderById, type MapProvider } from "$lib/config/mapProviders";
@@ -431,6 +433,9 @@
   let safehomeLayer: L.LayerGroup | undefined;
   let unsubSafehome: (() => void) | undefined;
   let lastSafehomeArmed = false;
+  // Geozone overlay (INAV ≥8.0 FC config).
+  let geozoneLayer: L.LayerGroup | undefined;
+  let unsubGeozone: (() => void) | undefined;
   const MAX_AERO_MARKERS = 1500; // cap rendered point markers per redraw (dense regions)
   // Airspaces currently drawn (passed the zoom filter) — the click handler tests these for
   // point-in-polygon so a single click lists *every* airspace stacked at that spot, not just the top one.
@@ -556,6 +561,51 @@
     });
   }
 
+  // ── Geozones overlay (INAV ≥8.0; see docs/active/GEOZONES.md) ─────────────────────────────────
+  /** Redraw the geozone shapes (read-only in P1). Source is the loaded FC config. Inclusive = blue,
+   *  exclusive = amber (dashed). Shown when the layer toggle is on OR while editing a mission (geozones
+   *  are safety-critical FC data the planner must always see), independent of the OpenAIP subsystem. */
+  function updateGeozones() {
+    if (!map) return;
+    if (!geozoneLayer) geozoneLayer = L.layerGroup().addTo(map);
+    const group = geozoneLayer;
+    group.clearLayers();
+    if (!get(settings).airspace.layers.geozones.d2 && !get(editMode)) return;
+    const cfg = get(geozoneConfig);
+    if (!cfg || !cfg.has_geozones) return;
+
+    for (const zone of cfg.zones) {
+      if (zone.vertices.length === 0) continue;
+      const st = geozonePathStyle(zone);
+      const opts = {
+        color: st.color, weight: st.weight, opacity: st.opacity, dashArray: st.dashArray,
+        fill: st.fill, fillColor: st.fillColor, fillOpacity: st.fillOpacity, interactive: false,
+      };
+      let center: L.LatLng | undefined;
+      if (zone.shape === GEOZONE_SHAPE_CIRCULAR) {
+        const c = zone.vertices[0];
+        const radius = geozoneRadiusM(zone);
+        if (radius == null || radius <= 0) continue;
+        const lat = c.lat / 1e7, lon = c.lon / 1e7;
+        group.addLayer(L.circle([lat, lon], { radius, ...opts }));
+        center = L.latLng(lat, lon);
+      } else {
+        const latlngs = zone.vertices.map((v) => [v.lat / 1e7, v.lon / 1e7] as [number, number]);
+        if (latlngs.length < 3) continue;
+        const poly = L.polygon(latlngs, opts);
+        group.addLayer(poly);
+        center = poly.getBounds().getCenter();
+      }
+      if (center) {
+        group.addLayer(
+          L.tooltip({ permanent: true, direction: "center", className: "geozone-label", opacity: 0.95 })
+            .setLatLng(center)
+            .setContent(`${get(t)("geozone.abbrev")}${zone.id + 1}`),
+        );
+      }
+    }
+  }
+
   /**
    * Map click → list *all* airspaces stacked at that point (overlapping airspaces hide one another
    * with per-polygon popups). Unclassified airspaces (no ICAO class) are skipped to cut clutter.
@@ -661,6 +711,8 @@
   // Redraw on enable-toggle, new data, or visibility change (data/visibility via subscriptions below).
   $effect(() => { void $settings.airspace.enabled; if (map) updateAirspace(); });
   $effect(() => { void $settings.showSafehomes; if (map) updateSafehome(); });
+  // Geozones: redraw on layer-toggle change and on mission edit-mode change (edit mode force-shows them).
+  $effect(() => { void $settings.airspace.layers.geozones.d2; void $editMode; if (map) updateGeozones(); });
   // Toggle the heading/course/turn nose lines on/off (clears or redraws immediately, not just next frame).
   $effect(() => { void $settings.directionLines; if (map) redrawDirLines(); });
 
@@ -1191,6 +1243,8 @@
     // Safehome overlay follows the working copy (load / edit / drag / "+"); arm-state change is handled
     // in the telemetry subscription (the green ring is disarmed-only).
     unsubSafehome = safehomeWorking.subscribe(() => updateSafehome());
+    // Geozone overlay follows the loaded FC config (downloaded at handshake).
+    unsubGeozone = geozoneConfig.subscribe(() => updateGeozones());
     unsubAeroFocus = aeroFocus.subscribe((f) => { if (f && map) map.setView([f.lat, f.lon], Math.max(map.getZoom(), 11)); });
     map.on("moveend", updateAirspace);
     map.on("click", onGuidedClick); // Guided "fly here" target popup (vehicle control)
@@ -1399,6 +1453,7 @@
     unsubFrameMission?.();
     unsubConnForJump?.();
     unsubSafehome?.();
+    unsubGeozone?.();
     if (map) {
       map.off("moveend", saveMapState);
       map.off("zoomend", saveMapState);
@@ -1413,6 +1468,7 @@
       if (dirLayer) map.removeLayer(dirLayer);
       if (homeMarker) map.removeLayer(homeMarker);
       if (safehomeLayer) map.removeLayer(safehomeLayer);
+      if (geozoneLayer) map.removeLayer(geozoneLayer);
       if (radarLayer) map.removeLayer(radarLayer);
       map.remove();
     }
@@ -1470,6 +1526,20 @@
     overflow: hidden;
     position: relative;
   }
+
+  /* Geozone centre label: a bare, high-contrast caption (no Leaflet tooltip box/arrow). */
+  :global(.leaflet-tooltip.geozone-label) {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    text-shadow: 0 0 3px rgba(0, 0, 0, 0.9), 0 0 2px rgba(0, 0, 0, 0.9);
+    pointer-events: none;
+  }
+  :global(.leaflet-tooltip.geozone-label::before) { display: none; }
 
   .map {
     width: 100%;

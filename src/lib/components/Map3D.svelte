@@ -73,6 +73,8 @@
   import { ARROW_POLY, contactModelClass, radarModelUri, type RadarModelClass } from "$lib/helpers/radar3d";
   import { radarAlertLevels, ALERT_CONFIG, type AlertLevel } from "$lib/controllers/radarAlerts";
   import { safehomeWorking, isSafehomeEmpty } from "$lib/stores/safehome";
+  import { geozoneConfig, GEOZONE_SHAPE_CIRCULAR } from "$lib/stores/geozone";
+  import { geozonePathStyle, geozoneRadiusM } from "$lib/helpers/geozoneStyle";
   import { buildApproachGeometry } from "$lib/helpers/autolandGeometry";
 
   let {
@@ -406,6 +408,11 @@
   let unsubSafehome3d: (() => void) | undefined;
   let lastSafehomeArmed3d = false;                    // green ring is disarmed-only → redraw on arm change
   let safehome3dGen = 0;                              // race guard for the async terrain sample
+  // Geozone overlay (INAV ≥8.0 FC config) — extruded volumes (circle → cylinder, polygon → hull).
+  let geozone3dEntities: Cesium.Entity[] = [];
+  let unsubGeozone3d: (() => void) | undefined;
+  let geozone3dGen = 0;                               // race guard for the async terrain sample
+  let geozoneD3 = true;                               // last-seen geozones 3D toggle (default on)
 
   // One-shot camera recenter after a (re)mount. The 2D↔3D toggle remounts this
   // component, so this fires once on every switch to 3D.
@@ -823,6 +830,7 @@
         updateObstacles3D();  // (re)build obstacle columns for the now-visible 3D view
         updateAirspaces3D();  // (re)build airspace volumes for the now-visible 3D view
         updateAirports3D();   // (re)build airports/runways for the now-visible 3D view
+        updateGeozones3D();   // (re)build geozone volumes for the now-visible 3D view
       } else {
         // Leaving 3D while in FPV: undo FPV's viewer changes (camera inputs, model/track,
         // wheel handler) so nothing carries over and blocks the map — but keep cameraMode
@@ -1152,6 +1160,11 @@
         airportDistKm = next.airspace.airfieldDistanceKm;
         updateAirports3D(); // master toggle / airport 3D-visibility / range change → rebuild airports
       }
+      // Geozones are FC config, independent of the OpenAIP subsystem master toggle → watch only their own toggle.
+      if (next.airspace.layers.geozones.d3 !== geozoneD3) {
+        geozoneD3 = next.airspace.layers.geozones.d3;
+        updateGeozones3D();
+      }
     });
 
     // Mission overlay — re-render on mission / visibility / launch changes.
@@ -1200,6 +1213,10 @@
     // its real 3D height — without needing a parameter change to re-trigger the render.
     void waitForTerrain(viewer).then((tp) => { if (tp) updateSafehome3D(); });
 
+    // Geozone volumes follow the loaded FC config (downloaded at handshake); same first-open terrain fix.
+    unsubGeozone3d = geozoneConfig.subscribe(() => updateGeozones3D());
+    void waitForTerrain(viewer).then((tp) => { if (tp) updateGeozones3D(); });
+
     // Obstacle columns + airspace volumes: rebuild on new aero data (toggle / range changes ride the
     // settings-watch below; camera-pan re-culls via the debounced moveEnd handler — the window follows
     // the camera).
@@ -1246,6 +1263,7 @@
     unsubRadarAlerts3d?.();
     unsubGcs3d?.();
     unsubSafehome3d?.();
+    unsubGeozone3d?.();
     unsubAero3d?.();
     if (obstacleMoveTimer) clearTimeout(obstacleMoveTimer);
     radar3dPickHandler?.destroy();
@@ -2124,6 +2142,108 @@
 
   // Redraw on the display toggle (mirrors the 2D `$effect` on `$settings.showSafehomes`).
   $effect(() => { void $settings.showSafehomes; if (viewer) updateSafehome3D(); });
+
+  // ── Geozones overlay (INAV ≥8.0; see docs/active/GEOZONES.md) ─────────────────────────────────
+  /** Rebuild the geozone volumes (read-only in P1). Circle → extruded cylinder, polygon → extruded
+   *  hull; blue inclusive / amber exclusive. Floor/ceiling from the zone's min/max altitude (AGL →
+   *  terrain-sampled ground, AMSL → + geoid); max 0 = no upper limit → a tall visual cap. Gated by the
+   *  3D layer toggle (independent of the OpenAIP airspace subsystem). */
+  async function updateGeozones3D() {
+    if (!viewer) return;
+    const gen = ++geozone3dGen;
+    for (const e of geozone3dEntities) viewer.entities.remove(e);
+    geozone3dEntities.length = 0;
+    if (!active || !get(settings).airspace.layers.geozones.d3) { viewer.scene.requestRender(); return; }
+    const cfg = get(geozoneConfig);
+    if (!cfg || !cfg.has_geozones || cfg.zones.length === 0) { viewer.scene.requestRender(); return; }
+
+    const NO_LIMIT_H = 1000; // visual extrusion height (m) for a "no upper limit" (max 0) zone
+
+    // One representative point per zone (circle centre / polygon centroid) for the AGL ground sample.
+    const reps = cfg.zones.map((z) => {
+      if (z.shape === GEOZONE_SHAPE_CIRCULAR) {
+        const c = z.vertices[0];
+        return Cesium.Cartographic.fromDegrees((c?.lon ?? 0) / 1e7, (c?.lat ?? 0) / 1e7);
+      }
+      let sx = 0, sy = 0;
+      for (const v of z.vertices) { sx += v.lon; sy += v.lat; }
+      const n = Math.max(1, z.vertices.length);
+      return Cesium.Cartographic.fromDegrees(sx / n / 1e7, sy / n / 1e7);
+    });
+    let groundEll: number[] = reps.map(() => 0);
+    const tp = viewer.scene.terrainProvider;
+    if (tp && !(tp instanceof Cesium.EllipsoidTerrainProvider)) {
+      try {
+        const sampled = await Cesium.sampleTerrainMostDetailed(tp, reps);
+        if (gen !== geozone3dGen || !viewer) return; // superseded by a newer redraw
+        groundEll = sampled.map((c) => (isFinite(c.height) ? c.height : 0));
+      } catch (e) {
+        console.warn("[Map3D] geozone terrain sample failed", e);
+      }
+    }
+
+    for (let i = 0; i < cfg.zones.length; i++) {
+      const z = cfg.zones[i];
+      if (z.vertices.length === 0) continue;
+      const baseRef = z.is_sealevel_ref ? geoidOffset : groundEll[i]; // AMSL → + geoid; AGL → terrain ground
+      const floorEll = baseRef + z.min_alt_cm / 100;                  // min 0 = ground / sea level
+      const ceilEll = z.max_alt_cm > 0 ? baseRef + z.max_alt_cm / 100 : floorEll + NO_LIMIT_H; // max 0 = ∞
+      if (!(ceilEll > floorEll)) continue;
+
+      const st = geozonePathStyle(z); // same type+action scheme as 2D (colour, weight, dash, fill)
+      const lineColor = Cesium.Color.fromCssColorString(st.color).withAlpha(st.opacity);
+      // The line variants in 3D go on real polylines: Cesium outline width/dash on extruded volumes is
+      // unreliable (WebGL clamps to 1 px, no dash). None → dashed; Pos-Hold/RTH → thick (st.weight).
+      const lineMat = st.dashArray
+        ? new Cesium.PolylineDashMaterialProperty({ color: lineColor, dashLength: 16.0 })
+        : lineColor;
+
+      // Footprint ring ([lat,lon], closed) + the circle centre/radius for the fill volume.
+      let ring: [number, number][];
+      let circleCentre: { lat: number; lon: number; r: number } | null = null;
+      if (z.shape === GEOZONE_SHAPE_CIRCULAR) {
+        const c = z.vertices[0];
+        const r = geozoneRadiusM(z);
+        if (r == null || r <= 0) continue;
+        const lat = c.lat / 1e7, lon = c.lon / 1e7;
+        circleCentre = { lat, lon, r };
+        ring = safehomeCircle(lat, lon, r);
+      } else {
+        ring = z.vertices.map((v) => [v.lat / 1e7, v.lon / 1e7] as [number, number]);
+        if (ring.length < 3) continue;
+        ring.push(ring[0]); // close the loop
+      }
+
+      // Translucent volume — only for (type, action) combos that get a fill (mwp scheme); no entity
+      // outline (the boundary polylines below carry the line style).
+      if (st.fill) {
+        const fillMaterial = Cesium.Color.fromCssColorString(st.color).withAlpha(0.13);
+        if (circleCentre) {
+          geozone3dEntities.push(viewer.entities.add({
+            position: Cesium.Cartesian3.fromDegrees(circleCentre.lon, circleCentre.lat),
+            ellipse: { semiMinorAxis: circleCentre.r, semiMajorAxis: circleCentre.r, height: floorEll, extrudedHeight: ceilEll, material: fillMaterial, outline: false },
+          }));
+        } else {
+          const positions = Cesium.Cartesian3.fromDegreesArray(z.vertices.flatMap((v) => [v.lon / 1e7, v.lat / 1e7]));
+          geozone3dEntities.push(viewer.entities.add({
+            polygon: { hierarchy: new Cesium.PolygonHierarchy(positions), height: floorEll, extrudedHeight: ceilEll, perPositionHeight: false, material: fillMaterial, outline: false },
+          }));
+        }
+      }
+
+      // Boundary rings: floor (always) + ceiling (only a real ceiling, max>0) — width/dash per action.
+      const ringAt = (h: number) => Cesium.Cartesian3.fromDegreesArrayHeights(ring.flatMap(([la, lo]) => [lo, la, h]));
+      geozone3dEntities.push(viewer.entities.add({
+        polyline: { positions: ringAt(floorEll), arcType: Cesium.ArcType.NONE, width: st.weight, material: lineMat },
+      }));
+      if (z.max_alt_cm > 0) {
+        geozone3dEntities.push(viewer.entities.add({
+          polyline: { positions: ringAt(ceilEll), arcType: Cesium.ArcType.NONE, width: st.weight, material: lineMat },
+        }));
+      }
+    }
+    viewer.scene.requestRender();
+  }
 
   // ── Sky clock (sun/moon position) ──────────────────────────────────
   // Cesium positions the Sun/Moon from real ephemeris at viewer.clock.currentTime.

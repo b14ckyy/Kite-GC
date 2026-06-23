@@ -13,9 +13,14 @@
   import Toggle from '$lib/components/panel/Toggle.svelte';
   import Button from '$lib/components/panel/Button.svelte';
   import { aeroData, focusAero, type AeroLayerKey, type Airspace } from '$lib/stores/airspace';
+  import {
+    geozoneConfig, GEOZONE_TYPE_INCLUSIVE, GEOZONE_SHAPE_CIRCULAR,
+    GEOZONE_ACTION_AVOID, GEOZONE_ACTION_POSHOLD, GEOZONE_ACTION_RTH, type GeoZone,
+  } from '$lib/stores/geozone';
   import { settings, AERO_DISTANCE_OPTIONS, type DistanceUnit } from '$lib/stores/settings';
   import { haversineDistance } from '$lib/utils/geo';
   import { aeroPointInfo } from '$lib/helpers/airspaceStyle';
+  import { geozoneColor, geozoneRadiusM } from '$lib/helpers/geozoneStyle';
   import { convertDistance, formatConverted } from '$lib/utils/units';
 
   let { reference = null, distanceUnit = 'metric' }: {
@@ -30,10 +35,39 @@
 
   const LAYERS: { key: AeroLayerKey; label: () => string }[] = [
     { key: 'airspaces', label: () => $t('airspace.layerAirspaces') },
+    { key: 'geozones', label: () => $t('airspace.layerGeozones') },
     { key: 'obstacles', label: () => $t('airspace.layerObstacles') },
     { key: 'airports', label: () => $t('airspace.layerAirports') },
     { key: 'rc', label: () => $t('airspace.layerRc') },
   ];
+
+  // The Geozones toggle + list only exist when a geozone-capable INAV FC (≥8.0) is connected.
+  const hasGeozones = $derived($geozoneConfig?.has_geozones ?? false);
+  const visibleLayers = $derived(LAYERS.filter((l) => l.key !== 'geozones' || hasGeozones));
+
+  // Accordion: at most one expanded geozone row.
+  let expandedZone = $state<number | null>(null);
+  function toggleZone(id: number) { expandedZone = expandedZone === id ? null : id; }
+
+  /** Representative point of a zone (circle centre / polygon centroid) for the focus-on-click. */
+  function geozoneCenter(z: GeoZone): { lat: number; lon: number } | null {
+    if (z.vertices.length === 0) return null;
+    if (z.shape === GEOZONE_SHAPE_CIRCULAR) return { lat: z.vertices[0].lat / 1e7, lon: z.vertices[0].lon / 1e7 };
+    let sx = 0, sy = 0;
+    for (const v of z.vertices) { sx += v.lat; sy += v.lon; }
+    return { lat: sx / z.vertices.length / 1e7, lon: sy / z.vertices.length / 1e7 };
+  }
+  function fmtAltCm(cm: number): string { return `${Math.round(cm / 100)} m`; }
+  function fmtRadius(z: GeoZone): string {
+    const r = geozoneRadiusM(z);
+    return r != null ? `${Math.round(r)} m` : '—';
+  }
+  function actionLabel(a: number): string {
+    if (a === GEOZONE_ACTION_AVOID) return $t('geozone.actionAvoid');
+    if (a === GEOZONE_ACTION_POSHOLD) return $t('geozone.actionPoshold');
+    if (a === GEOZONE_ACTION_RTH) return $t('geozone.actionRth');
+    return $t('geozone.actionNone');
+  }
 
   function setVis(key: AeroLayerKey, dim: 'd2' | 'd3', on: boolean) {
     settings.update((s) => ({
@@ -130,7 +164,7 @@
       <span class="am-dim">2D</span>
       <span class="am-dim">3D</span>
     </div>
-    {#each LAYERS as layer}
+    {#each visibleLayers as layer}
       <div class="am-row">
         <span class="am-layer">{layer.label()}</span>
         <Toggle checked={$settings.airspace.layers[layer.key].d2} onchange={(c) => setVis(layer.key, 'd2', c)} />
@@ -160,6 +194,46 @@
         </select>
       </label>
     </div>
+
+    {#if hasGeozones}
+      <div class="gz-section">
+        <div class="gz-head">
+          <span class="gz-title">{$t('geozone.title')}</span>
+          <span class="gz-count">{$geozoneConfig?.zones.length ?? 0}</span>
+        </div>
+        {#if !$geozoneConfig?.zones.length}
+          <div class="gz-empty">{$t('geozone.none')}</div>
+        {:else}
+          {#each $geozoneConfig.zones as zone (zone.id)}
+            {@const inclusive = zone.zone_type === GEOZONE_TYPE_INCLUSIVE}
+            {@const circle = zone.shape === GEOZONE_SHAPE_CIRCULAR}
+            {@const center = geozoneCenter(zone)}
+            <div class="gz-row" style="--gz-color:{geozoneColor(zone)}">
+              <button class="gz-rowhead" onclick={() => toggleZone(zone.id)} title={$t('geozone.expand')}>
+                <span class="gz-dot"></span>
+                <span class="gz-name">{$t('geozone.abbrev')}{zone.id + 1}</span>
+                <span class="gz-shape">{circle ? $t('geozone.shapeCircle') : $t('geozone.shapePolygon')}</span>
+                <span class="gz-sub">
+                  {circle ? fmtRadius(zone) : $t('geozone.vertexCount', { values: { n: zone.vertices.length } })}
+                </span>
+              </button>
+              {#if expandedZone === zone.id}
+                <div class="gz-detail">
+                  <div class="gz-kv"><span>{$t('geozone.type')}</span><span>{inclusive ? $t('geozone.inclusive') : $t('geozone.exclusive')}</span></div>
+                  <div class="gz-kv"><span>{$t('geozone.lowerAlt')}</span><span>{fmtAltCm(zone.min_alt_cm)}</span></div>
+                  <div class="gz-kv"><span>{$t('geozone.upperAlt')}</span><span>{zone.max_alt_cm > 0 ? fmtAltCm(zone.max_alt_cm) : '∞'}</span></div>
+                  <div class="gz-kv"><span>{$t('geozone.reference')}</span><span>{zone.is_sealevel_ref ? 'AMSL' : 'AGL'}</span></div>
+                  <div class="gz-kv"><span>{$t('geozone.action')}</span><span>{actionLabel(zone.fence_action)}</span></div>
+                  {#if center}
+                    <button class="gz-focus" onclick={() => focusAero(center.lat, center.lon)}>{$t('geozone.focus')}</button>
+                  {/if}
+                </div>
+              {/if}
+            </div>
+          {/each}
+        {/if}
+      </div>
+    {/if}
   </div>
 {/snippet}
 
@@ -251,4 +325,30 @@
   .am-item-name { grid-area: name; font-size: 12px; color: #e0e0e0; }
   .am-item-sub { grid-area: sub; font-size: 10.5px; color: #949494; }
   .am-item-dist { grid-area: dist; align-self: center; font-size: 11px; color: #37a8db; white-space: nowrap; }
+
+  /* Geozones section (FC config) — collapsible zone rows, colour-coded by type. */
+  .gz-section { margin-top: 10px; padding-top: 8px; border-top: 1px solid #272727; display: flex; flex-direction: column; gap: 3px; }
+  .gz-head { display: flex; align-items: center; justify-content: space-between; padding: 0 2px 4px; }
+  .gz-title { font-size: 11px; font-weight: 700; color: #37a8db; text-transform: uppercase; letter-spacing: 0.5px; }
+  .gz-count { font-size: 11px; color: #949494; font-weight: 600; }
+  .gz-empty { font-size: 12px; color: #949494; padding: 2px 4px 4px; }
+  .gz-row { border-left: 3px solid var(--gz-color); background: #272727; border-radius: 3px; overflow: hidden; }
+  .gz-rowhead {
+    display: grid; grid-template-columns: auto auto 1fr auto; align-items: center; gap: 8px;
+    width: 100%; text-align: left; background: none; border: none; padding: 5px 8px; cursor: pointer; color: inherit;
+  }
+  .gz-rowhead:hover { background: rgba(55, 168, 219, 0.08); }
+  .gz-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--gz-color); }
+  .gz-name { font-size: 12px; font-weight: 700; color: #e0e0e0; }
+  .gz-shape { font-size: 11px; color: #b8b8b8; }
+  .gz-sub { font-size: 10.5px; color: #949494; text-align: right; }
+  .gz-detail { display: flex; flex-direction: column; gap: 2px; padding: 4px 10px 8px; border-top: 1px solid #1f1f1f; }
+  .gz-kv { display: flex; justify-content: space-between; font-size: 11.5px; }
+  .gz-kv span:first-child { color: #949494; }
+  .gz-kv span:last-child { color: #e0e0e0; }
+  .gz-focus {
+    margin-top: 4px; align-self: flex-start; background: none; border: 1px solid #37a8db; color: #37a8db;
+    border-radius: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer;
+  }
+  .gz-focus:hover { background: rgba(55, 168, 219, 0.12); }
 </style>
