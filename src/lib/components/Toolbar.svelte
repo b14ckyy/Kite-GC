@@ -129,8 +129,14 @@
           onchange={(v) => (selectedProtocol = v as ProtocolType)}
         />
 
-        <!-- Transport type selector -->
-        <select class="tb-select transport-select" bind:value={selectedTransport}>
+        <!-- Transport type selector. Switching between TCP/UDP flips the port between the two known
+             defaults (TCP 5761 ⇄ UDP 14550 = the MAVLink convention) — a custom port (e.g. SITL 5762)
+             is left untouched. Protocol-independent (MSP has no standard network port). -->
+        <select class="tb-select transport-select" bind:value={selectedTransport}
+          onchange={() => {
+            if (selectedTransport === 'udp' && tcpPort === 5761) tcpPort = 14550;
+            else if (selectedTransport === 'tcp' && tcpPort === 14550) tcpPort = 5761;
+          }}>
           <option value="serial">Serial</option>
           <option value="tcp">TCP</option>
           <option value="udp">UDP</option>

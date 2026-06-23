@@ -22,6 +22,7 @@
   } from '$lib/stores/geozone';
   import { validateGeozones, ensureCCWConfig } from '$lib/helpers/geozoneSanity';
   import { settings, AERO_DISTANCE_OPTIONS, type DistanceUnit } from '$lib/stores/settings';
+  import { telemetry } from '$lib/stores/telemetry';
   import { haversineDistance } from '$lib/utils/geo';
   import { aeroPointInfo } from '$lib/helpers/airspaceStyle';
   import { geozoneColor, geozoneRadiusM } from '$lib/helpers/geozoneStyle';
@@ -37,8 +38,13 @@
 
   const LIST_CAP = 10; // entries per group, nearest first
 
-  const compact = $derived($settings.airspace.compact);
-  const variant = $derived(compact ? ('info' as const) : ('advanced' as const));
+  // Single-column panel with two views: the Nearby list (info variant) and the Settings/editor view
+  // (compact variant). When the OpenAIP subsystem is off but a geozone-capable FC is connected, only the
+  // Settings view exists (geozone editor + its overlay toggles) — there is no OpenAIP nearby data.
+  const airspaceEnabled = $derived($settings.airspace.enabled);
+  let settingsView = $state(false);
+  const showSettings = $derived(!airspaceEnabled || settingsView);
+  const variant = $derived(showSettings ? ('compact' as const) : ('info' as const));
 
   const LAYERS: { key: AeroLayerKey; label: () => string }[] = [
     { key: 'airspaces', label: () => $t('airspace.layerAirspaces') },
@@ -51,7 +57,8 @@
   // The Geozones toggle + list only exist when a geozone-capable INAV FC (≥8.0) is connected (the
   // working copy is non-null only then, and is cleared on disconnect → it doubles as the edit gate).
   const hasGeozones = $derived($geozoneWorking?.has_geozones ?? false);
-  const visibleLayers = $derived(LAYERS.filter((l) => l.key !== 'geozones' || hasGeozones));
+  // OpenAIP layer rows only when the subsystem is on; the geozones row whenever a capable FC is connected.
+  const visibleLayers = $derived(LAYERS.filter((l) => (l.key === 'geozones' ? hasGeozones : airspaceEnabled)));
 
   // Accordion: at most one expanded geozone row.
   let expandedZone = $state<number | null>(null);
@@ -62,6 +69,12 @@
   const canAddZone = $derived(zones.length < MAX_GEOZONES);
   const issues = $derived(validateGeozones(zones));
   const hasErrors = $derived(issues.some((i) => i.level === 'error'));
+
+  // Geozone editing is blocked while armed (the reboot-to-apply can't happen in flight, and editing
+  // zones mid-flight is unsafe). Force the map edit-lock off when arming.
+  const ARMING_FLAG_ARMED = 2;
+  const armed = $derived($telemetry.lastUpdate > 0 && ($telemetry.armingFlags & (1 << ARMING_FLAG_ARMED)) !== 0);
+  $effect(() => { if (armed && $geozoneEditing) geozoneEditing.set(false); });
 
   const ACTIONS = [
     { v: GEOZONE_ACTION_NONE, label: () => $t('geozone.actionNone') },
@@ -126,7 +139,7 @@
   }
   function onRevert() { revertGeozoneWorking(); expandedZone = null; }
   async function onSave() {
-    if (busy || hasErrors) return;
+    if (busy || hasErrors || armed) return;
     const ans = await confirmDialog.show({
       title: $t('geozone.saveTitle'),
       message: $t('geozone.saveMsg'),
@@ -163,9 +176,6 @@
   }
   function setRange(field: 'obstacleDistanceKm' | 'airfieldDistanceKm', km: number) {
     settings.update((s) => ({ ...s, airspace: { ...s.airspace, [field]: km } }));
-  }
-  function setCompact(v: boolean) {
-    settings.update((s) => ({ ...s, airspace: { ...s.airspace, compact: v } }));
   }
 
   function distM(lat: number, lon: number): number {
@@ -219,30 +229,18 @@
 <PanelShell
   {variant}
   title={$t('airspace.title')}
-  detailTitle={$t('airspace.nearby')}
-  detailActions={compact ? undefined : compactBtn}
-  body={compact ? compactBody : controls}
-  detail={compact ? undefined : nearbyList}
+  headerActions={airspaceEnabled ? viewToggle : undefined}
+  body={showSettings ? controls : nearbyList}
 />
 
 <ConfirmDialog bind:this={confirmDialog} />
 
-{#snippet compactBtn()}
-  <Button variant="standard" size="sm" onclick={() => setCompact(true)}>← {$t('airspace.compact')}</Button>
-{/snippet}
-
-{#snippet compactBody()}
-  <!-- info variant: clicking the panel re-expands it (like the logbook). -->
-  <div
-    class="am-compact"
-    role="button"
-    tabindex="0"
-    title={$t('airspace.expand')}
-    onclick={() => setCompact(false)}
-    onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCompact(false); } }}
-  >
-    {@render nearbyList()}
-  </div>
+{#snippet viewToggle()}
+  {#if settingsView}
+    <Button variant="standard" size="sm" onclick={() => (settingsView = false)}>← {$t('airspace.nearby')}</Button>
+  {:else}
+    <Button variant="standard" size="sm" onclick={() => (settingsView = true)}>⚙ {$t('airspace.settings')}</Button>
+  {/if}
 {/snippet}
 
 {#snippet controls()}
@@ -260,28 +258,30 @@
       </div>
     {/each}
 
-    <div class="am-ranges">
-      <label class="am-range">
-        <span class="am-range-label">{$t('airspace.rangeObstacles')}</span>
-        <select
-          class="am-select"
-          value={$settings.airspace.obstacleDistanceKm}
-          onchange={(e) => setRange('obstacleDistanceKm', Number(e.currentTarget.value))}
-        >
-          {#each AERO_DISTANCE_OPTIONS as km}<option value={km}>{km} km</option>{/each}
-        </select>
-      </label>
-      <label class="am-range">
-        <span class="am-range-label">{$t('airspace.rangeAirfields')}</span>
-        <select
-          class="am-select"
-          value={$settings.airspace.airfieldDistanceKm}
-          onchange={(e) => setRange('airfieldDistanceKm', Number(e.currentTarget.value))}
-        >
-          {#each AERO_DISTANCE_OPTIONS as km}<option value={km}>{km} km</option>{/each}
-        </select>
-      </label>
-    </div>
+    {#if airspaceEnabled}
+      <div class="am-ranges">
+        <label class="am-range">
+          <span class="am-range-label">{$t('airspace.rangeObstacles')}</span>
+          <select
+            class="am-select"
+            value={$settings.airspace.obstacleDistanceKm}
+            onchange={(e) => setRange('obstacleDistanceKm', Number(e.currentTarget.value))}
+          >
+            {#each AERO_DISTANCE_OPTIONS as km}<option value={km}>{km} km</option>{/each}
+          </select>
+        </label>
+        <label class="am-range">
+          <span class="am-range-label">{$t('airspace.rangeAirfields')}</span>
+          <select
+            class="am-select"
+            value={$settings.airspace.airfieldDistanceKm}
+            onchange={(e) => setRange('airfieldDistanceKm', Number(e.currentTarget.value))}
+          >
+            {#each AERO_DISTANCE_OPTIONS as km}<option value={km}>{km} km</option>{/each}
+          </select>
+        </label>
+      </div>
+    {/if}
 
     {#if hasGeozones}
       <div class="gz-section">
@@ -290,14 +290,18 @@
           <span class="gz-count">{zones.length}/{MAX_GEOZONES}</span>
         </div>
 
-        <!-- Toolbar: add zone + the map edit-lock toggle. -->
+        {#if armed}
+          <div class="gz-armed">{$t('geozone.armedLocked')}</div>
+        {/if}
+
+        <!-- Toolbar: add zone + the map edit-lock toggle (disabled while armed). -->
         <div class="gz-toolbar">
-          <button class="gz-add" disabled={!canAddZone} title={$t('geozone.addCircle')} onclick={() => onAddZone(GEOZONE_SHAPE_CIRCULAR)}>○ {$t('geozone.shapeCircle')}</button>
-          <button class="gz-add" disabled={!canAddZone} title={$t('geozone.addPolygon')} onclick={() => onAddZone(GEOZONE_SHAPE_POLYGON)}>▱ {$t('geozone.shapePolygon')}</button>
+          <button class="gz-add" disabled={!canAddZone || armed} title={$t('geozone.addCircle')} onclick={() => onAddZone(GEOZONE_SHAPE_CIRCULAR)}>○ {$t('geozone.shapeCircle')}</button>
+          <button class="gz-add" disabled={!canAddZone || armed} title={$t('geozone.addPolygon')} onclick={() => onAddZone(GEOZONE_SHAPE_POLYGON)}>▱ {$t('geozone.shapePolygon')}</button>
           <span class="gz-spacer"></span>
           <label class="gz-editlock" title={$t('geozone.editLockHint')}>
             <span>{$t('geozone.editLock')}</span>
-            <Toggle checked={$geozoneEditing} onchange={(c) => geozoneEditing.set(c)} />
+            <Toggle checked={$geozoneEditing} disabled={armed} onchange={(c) => geozoneEditing.set(c)} />
           </label>
         </div>
 
@@ -324,30 +328,30 @@
                     <span class="gz-elabel">{$t('geozone.type')}</span>
                     <div class="gz-typetoggle">
                       <span class="gz-tname">{inclusive ? $t('geozone.inclusive') : $t('geozone.exclusive')}</span>
-                      <Toggle checked={inclusive} onchange={(c) => setGeozoneType(zone.id, c ? GEOZONE_TYPE_INCLUSIVE : GEOZONE_TYPE_EXCLUSIVE)} />
+                      <Toggle checked={inclusive} disabled={armed} onchange={(c) => setGeozoneType(zone.id, c ? GEOZONE_TYPE_INCLUSIVE : GEOZONE_TYPE_EXCLUSIVE)} />
                     </div>
                   </div>
                   <!-- Fence action. -->
                   <div class="gz-edit">
                     <span class="gz-elabel">{$t('geozone.action')}</span>
-                    <select class="am-select" value={zone.fence_action} onchange={(e) => setGeozoneAction(zone.id, Number(e.currentTarget.value))}>
+                    <select class="am-select" value={zone.fence_action} disabled={armed} onchange={(e) => setGeozoneAction(zone.id, Number(e.currentTarget.value))}>
                       {#each ACTIONS as a}<option value={a.v}>{a.label()}</option>{/each}
                     </select>
                   </div>
                   <!-- Altitudes (10 m steps; upper 0 = no limit). -->
                   <div class="gz-edit">
                     <span class="gz-elabel">{$t('geozone.lowerAlt')}</span>
-                    <NumberStepper bind:value={editMinM} min={0} step={10} unit="m" onchange={() => commitAlts(zone.id)} />
+                    <NumberStepper bind:value={editMinM} min={0} step={10} unit="m" disabled={armed} onchange={() => commitAlts(zone.id)} />
                   </div>
                   <div class="gz-edit">
                     <span class="gz-elabel">{$t('geozone.upperAlt')}</span>
-                    <NumberStepper bind:value={editMaxM} min={0} step={10} unit="m" onchange={() => commitAlts(zone.id)} />
+                    <NumberStepper bind:value={editMaxM} min={0} step={10} unit="m" disabled={armed} onchange={() => commitAlts(zone.id)} />
                   </div>
                   {#if zone.max_alt_cm === 0}<div class="gz-hint">{$t('geozone.upperUnlimited')}</div>{/if}
                   {#if circle}
                     <div class="gz-edit">
                       <span class="gz-elabel">{$t('geozone.radius')}</span>
-                      <NumberStepper bind:value={editRadiusM} min={1} step={10} unit="m" onchange={() => commitRadius(zone.id)} />
+                      <NumberStepper bind:value={editRadiusM} min={1} step={10} unit="m" disabled={armed} onchange={() => commitRadius(zone.id)} />
                     </div>
                   {/if}
                   <!-- Altitude reference. -->
@@ -355,7 +359,7 @@
                     <span class="gz-elabel">{$t('geozone.reference')}</span>
                     <div class="gz-typetoggle">
                       <span class="gz-tname">{zone.is_sealevel_ref ? 'AMSL' : 'AGL'}</span>
-                      <Toggle checked={zone.is_sealevel_ref} onchange={(c) => onSealevelToggle(zone, c)} />
+                      <Toggle checked={zone.is_sealevel_ref} disabled={armed} onchange={(c) => onSealevelToggle(zone, c)} />
                     </div>
                   </div>
                   {#if terrainNote}<div class="gz-hint">{terrainNote}</div>{/if}
@@ -363,7 +367,7 @@
                     {#if center}
                       <button class="gz-focus" onclick={() => focusAero(center.lat, center.lon)}>{$t('geozone.focus')}</button>
                     {/if}
-                    <button class="gz-delete" onclick={() => onDeleteZone(zone.id)}>{$t('geozone.delete')}</button>
+                    <button class="gz-delete" disabled={armed} onclick={() => onDeleteZone(zone.id)}>{$t('geozone.delete')}</button>
                   </div>
                 </div>
               {/if}
@@ -383,7 +387,7 @@
         <!-- Save / Revert (only when there are pending edits). -->
         {#if $geozoneDirty}
           <div class="gz-save">
-            <Button variant="data" icon="save" disabled={busy || hasErrors} onclick={onSave}>
+            <Button variant="data" icon="save" disabled={busy || hasErrors || armed} onclick={onSave}>
               {busy ? $t('geozone.saving') : $t('geozone.saveToFc')}
             </Button>
             <Button variant="standard" disabled={busy} onclick={onRevert}>{$t('geozone.revert')}</Button>
@@ -456,7 +460,6 @@
     padding: 2px 6px; font-size: 12px; cursor: pointer;
   }
 
-  .am-compact { cursor: pointer; }
 
   .am-list { display: flex; flex-direction: column; }
   .am-group-head {
@@ -529,6 +532,10 @@
   }
   .gz-delete:hover { background: rgba(212, 0, 0, 0.12); }
 
+  .gz-armed {
+    font-size: 11.5px; color: #1a1a1a; background: #f5a623; font-weight: 600;
+    border-radius: 4px; padding: 4px 8px; margin: 2px 2px 4px;
+  }
   .gz-issues { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
   .gz-issue { font-size: 11px; color: #f5a623; }
   .gz-issue.gz-err { color: #ff5a5a; }

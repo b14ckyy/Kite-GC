@@ -105,12 +105,13 @@ export async function loadGeozoneConfig(): Promise<void> {
   }
 }
 
-/** "Save to FC": send the working copy as one batch + EEPROM, then re-read so loaded == FC truth. */
+/** "Save to FC": send the working copy as one batch + EEPROM + reboot. Geozones only apply after a
+ *  reboot (INAV recomputes the internal zone structures at boot), so the FC restarts and the link drops
+ *  — we do NOT re-read here; the reconnect handshake reloads the saved config. */
 export async function saveGeozoneConfig(): Promise<void> {
   const cfg = get(geozoneWorking);
   if (!cfg) return;
   await invoke('geozone_write_all', { config: cfg });
-  await loadGeozoneConfig();
 }
 
 /** Discard pending edits — reset the working copy to the loaded snapshot. */

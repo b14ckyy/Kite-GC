@@ -236,7 +236,7 @@ pub async fn mission_upload(
         handle.msp_request(MSP_SET_WP, &payload)?;
     }
 
-    // Optional: save to EEPROM
+    // Optional: save to EEPROM (mission ID byte reserved → 0).
     if save_eeprom {
         handle.msp_request(MSP_WP_MISSION_SAVE, &[0])?;
     }
@@ -244,6 +244,9 @@ pub async fn mission_upload(
     // Verify by reading back mission info
     let info_payload = handle.msp_request(MSP_WP_GETINFO, &[])?;
     let info = codec::decode_wp_getinfo(&info_payload)?;
+    if save_eeprom {
+        eprintln!("[MISSION] EEPROM save: FC reports valid={} wpCount={}", info.is_valid, info.wp_count);
+    }
     store.set_info(info);
     store.mark_clean();
 

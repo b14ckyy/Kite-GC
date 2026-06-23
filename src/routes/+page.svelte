@@ -38,6 +38,7 @@
   import VideoPanel from "$lib/components/video/VideoPanel.svelte";
   import RadarPanel from "$lib/components/RadarPanel.svelte";
   import AirspaceManagerPanel from "$lib/components/AirspaceManagerPanel.svelte";
+  import { geozoneWorking } from "$lib/stores/geozone";
   import RadarAlertBanner from "$lib/components/RadarAlertBanner.svelte";
   import StatusTextToasts from "$lib/components/StatusTextToasts.svelte";
   import { startStatusText } from "$lib/stores/statusText";
@@ -517,13 +518,16 @@
     { id: "video", label: () => $t('nav.video'), icon: ICON_VIDEO },
     { id: "settings", label: () => $t('nav.settings'), icon: ICON_SETTINGS },
   ];
+  // Airspace tab shows when its master switch is on, OR when a geozone-capable INAV FC is connected (so
+  // the panel can host the geozone editor even with the OpenAIP overlay disabled). (Ardu/PX4 geofence later.)
+  const geozonesAvailable = $derived($geozoneWorking?.has_geozones ?? false);
   const tabs = $derived(
     allTabs.filter(t =>
       (t.id !== 'logbook' || flightLoggingEnabled) &&
       (t.id !== 'control' || isMavlinkConnected) && // control tab only when connected via MAVLink
       (t.id !== 'rc-control' || rcTabAvailable) && // RC tab: master switch on + not telemetry-connected
       (t.id !== 'radar' || radarSettings.enabled) && // radar tab only when the master switch is on
-      (t.id !== 'airspace' || airspaceSettings.enabled) // airspace tab only when its master switch is on
+      (t.id !== 'airspace' || airspaceSettings.enabled || geozonesAvailable) // airspace: master switch on, or geozone-capable FC
     )
   );
 

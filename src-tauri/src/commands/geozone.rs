@@ -13,7 +13,7 @@ use tauri::State;
 
 use crate::msp::{
     MSP2_INAV_GEOZONE, MSP2_INAV_GEOZONE_VERTEX, MSP2_INAV_SET_GEOZONE, MSP2_INAV_SET_GEOZONE_VERTEX,
-    MSP_EEPROM_WRITE,
+    MSP_EEPROM_WRITE, MSP_SET_REBOOT,
 };
 use crate::scheduler::SchedulerHandle;
 use crate::state::{ActiveProtocol, AppState};
@@ -202,5 +202,11 @@ pub fn geozone_write_all(config: GeozoneConfig, state: State<'_, AppState>) -> R
 
     handle.msp_request(MSP_EEPROM_WRITE, &[])?;
     eprintln!("[GEOZONE] saved {} active zone(s) to FC (EEPROM written)", config.zones.len());
+
+    // Geozones MUST be applied via a reboot: INAV recomputes the internal zone structures only at boot,
+    // so the EEPROM write alone doesn't take effect. INAV ACKs the reboot before restarting; the link
+    // then drops (the frontend reconnects + re-reads on handshake), so a missing/late reply is fine.
+    let _ = handle.msp_request(MSP_SET_REBOOT, &[]);
+    eprintln!("[GEOZONE] reboot requested to apply geozones");
     Ok(())
 }
