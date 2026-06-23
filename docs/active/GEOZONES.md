@@ -114,9 +114,14 @@ telemetry can't starve it). Warning bar in `InavMissionPanel` (above the WP list
 `drawMission3DModel`, placed at `altMsl + geoidOffset` so it sits exactly on the mission line). i18n
 `warn*` keys. NOTE: altitude for terrain-following (AGL) WPs is approximated as launch-relative.
 
-### Phase 3 — Alerts (deferred)
-Geozone breach-proximity alerts, hooked into the existing alert infrastructure (the ADS-B conflict
-pipeline). Possibly the "Geozone Behaviour" global-settings block lands here.
+### Phase 3 — Breach toast (scoped down, 2026-06-23)
+INAV itself performs the geozone avoidance (RTH/Pos-Hold/Avoid) — we do **not** re-implement
+proximity prediction. Instead, keep it **simple**: when INAV reports its explicit geozone-avoidance
+**flight mode** (the dedicated AUTO/avoidance state, distinct from plain WP/NAV), show a short **toast**
+("Geozone avoidance active") so the pilot knows the FC took over. TODO when building: verify the exact
+INAV flight-mode / box-flag that marks the avoidance state, and reuse it for future avoidance maneuvers
+too. (The earlier idea of a full breach-proximity pipeline hooked into the ADS-B conflict infra is
+dropped as overkill.) Possibly the "Geozone Behaviour" global-settings block lands here.
 
 ## Reused infrastructure
 - Backend: `safehome.rs` (per-index read loop + batch write + EEPROM), `fc_settings.rs`

@@ -1,5 +1,8 @@
 # Radar — FormationFlight (INAV-Radar / ESP32) integration
 
+> ARCHIVED (2026-06-23) — F1 fully shipped (ADR-036); no open work (the "open" note below is just a
+> serial-reset gotcha, not a backlog item). Kept for the detailed feature-level rationale.
+
 > Status: **F1 shipped** (2026-06-07) — link + FC emulation + peer parse + 2D/3D rendering, bench-validated
 > with two ESP32-C3 over ESP-NOW. See **ADR-036**. Adds the `formationFlight` radar system: peers shared by
 > an ESP32 INAV-Radar/FormationFlight module (LoRa / ESP-NOW) over a serial MSP link. Monitoring /
