@@ -525,7 +525,9 @@
       for (let k = modifiers.length - 1; k >= 0; k--) missionRemoveWp(modifiers[k].idx);
       missionRemoveWp(idx);
       endUndoGroup();
-      selectedWpIndex.set(-1);
+      // Clear BOTH the primary index and the multi-select set — otherwise the stale set entry would
+      // re-highlight whichever WP shifts into this index (and a next click would start multi-select).
+      clearWpSelection();
     });
 
     el.querySelectorAll('input, select, button').forEach(input => {
