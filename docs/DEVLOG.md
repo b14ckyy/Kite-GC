@@ -649,6 +649,30 @@ protocols + these parallel networks) is the living reference in
   `MSP_SET_REBOOT`, link drops → reconnect re-reads). Editing locked while armed. The Airspace Manager
   panel was reworked to single-column **Nearby ↔ Settings** (header toggle); it also appears for a
   geozone-capable FC even when the OpenAIP overlay is disabled (geozone editor only).
+- **Geofence (ArduPilot/PX4; `commands/fence.rs`, `stores/fence.ts`).** Third Airspace-Manager safety
+  subsystem (Autoland → Geozones → **Geofence**) — the MAVLink counterpart to the INAV geozone editor.
+  Geometry is exchanged over the normal mission microprotocol with `MAV_MISSION_TYPE_FENCE`:
+  `mavlink_proto/mission.rs` was **parametrised by `mission_type`** (existing mission callers pass
+  `MAV_MISSION_TYPE_MISSION`); a new `mavlink_proto/params_rt.rs` reads runtime params
+  (`RegisterParamReceiver` + `PARAM_REQUEST_READ`/`PARAM_VALUE`), writes reuse `control::set_param`.
+  `fence_read_all`/`fence_write_all` download/upload (or clear when empty) the items + read/write a
+  curated param set. The codec groups `MAV_CMD_NAV_FENCE_*` items into zones: polygon vertices by
+  command + `param1` count (5001 incl / 5002 excl), circle = one item with `param1`=radius (5003/5004),
+  plus the return point (5000). **Frontend:** `stores/fence.ts` (FenceConfig: zones[{kind,shape,
+  radius_cm,vertices}], return_point, params, has_fence) — loaded on **MAVLink connect**, cleared on
+  disconnect; **index-based** mutations (no per-zone id, unlike geozones). 2D
+  (`Map.svelte::updateFence`) + 3D (`Map3D.svelte::updateFence3D`, extruded to the global vertical limit
+  `FENCE_ALT_MAX` / `GF_MAX_VER_DIST`, fallback cap) reuse the geozone overlay/edit UX via
+  `helpers/fenceStyle.ts` (**blue inclusion / amber exclusion**, solid line + translucent fill). The
+  Airspace Manager panel gains a **Fence** section parallel to the geozone one (add incl/excl × poly/
+  circle, per-zone kind toggle + radius, the global params, Save/Revert, armed-gating) + a 6th layer
+  toggle (`fence`, capability-gated). Global params render with friendly labels + units + spec-based
+  bounds (NumberStepper); `FENCE_ENABLE` → Toggle, breach action → a **named dropdown** whose options
+  come from an internal table keyed by system (FENCE_* = ArduPilot, GF_* = PX4) + vehicle (MAV_TYPE →
+  Copter/Plane/Rover) — the raw code is written, the human name shown. The panel is wrapped in a
+  `{#key connection-status + capability}` in `+page.svelte` so an already-open panel re-inits when the
+  FC's (async-loaded) geozone/fence capability resolves. No reboot needed (unlike geozones). Plan
+  `active/GEOFENCE.md`. Follow-ups: SITL verification, rally points (`MAV_MISSION_TYPE_RALLY`).
 - **Mission EEPROM save fix.** `MSP_WP_MISSION_LOAD`/`SAVE` were swapped (18/19) in `msp/types.rs`, so
   "Save to EEPROM" actually sent *load* (and vice-versa) → nothing persisted. Corrected to INAV's
   LOAD=18 / SAVE=19. Also: the default **UDP** connection port is now 14550 (MAVLink convention; TCP 5761

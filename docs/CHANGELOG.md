@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Airspace Manager panel didn't refresh on connect.** An already-open panel didn't show the geozone /
+  geofence sections until a tab switch, because the FC capability loads asynchronously after connect; the
+  panel now re-initialises on connect/disconnect and when that capability resolves.
 - **Mission EEPROM save.** "Save to EEPROM" persisted nothing (a later "Load from EEPROM" returned the
   old mission) — the `MSP_WP_MISSION_LOAD`/`SAVE` command codes were swapped (18/19), so the app actually
   sent *load* on save (overwriting the upload with the stored mission) and *save* on load. Corrected to
@@ -25,6 +28,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   between TCP `5761` and UDP `14550` without overwriting a custom port (e.g. SITL `5762`). TCP unchanged.
 
 ### Added
+- **ArduPilot / PX4 Geofence — full editor.** Third Airspace-Manager safety subsystem (after Autoland and
+  Geozones), the MAVLink counterpart to the INAV geozone editor. On connecting to an ArduPilot/PX4 FC,
+  Kite downloads the on-board geofence (inclusion/exclusion × polygon/circle + the return point, via
+  `MAV_MISSION_TYPE_FENCE`) and shows it on both maps — **blue inclusion / amber exclusion**, with the 3D
+  view extruding each zone to the global vertical limit (`FENCE_ALT_MAX` / `GF_MAX_VER_DIST`). Zones can be
+  **created and edited** on the map (drag handles, edge-midpoint insert, waypoint-style popup for exact
+  coordinates + radius) — the same UX as the geozone editor. The Airspace Manager panel gains a **Fence**
+  section (add inclusion/exclusion × polygon/circle, per-zone type toggle + radius) plus the global
+  enforcement params shown with friendly labels, units and spec-based value bounds: the fence master
+  switch is a toggle and the **breach action** is a named dropdown (options chosen automatically by
+  autopilot + vehicle type — Copter/Plane/Rover/PX4 — while the raw firmware code is what gets written).
+  **Save to FC** uploads the geometry + writes the changed params (no reboot needed). A new **Geofence**
+  layer toggle (2D + 3D, capability-gated) sits under Geozones. See `docs/active/GEOFENCE.md`.
 - **INAV Geozones — map display (read-only).** On connecting to a geozone-capable INAV FC (**≥8.0**),
   Kite now downloads the on-board geozone config (all zones + their vertices, via `MSP2_INAV_GEOZONE` /
   `..._VERTEX`) and shows it on both maps. Inclusive (Flight-Zone) zones are drawn **blue**, Exclusive
