@@ -17,6 +17,16 @@ const LEFT = 0;
 const RIGHT = 1;
 const wrap360 = (d: number) => ((d % 360) + 360) % 360;
 
+// 3D descent profile (INAV autoland behaviour), expressed as a fraction of the approach altitude per
+// vertex (1 = approach_alt at the top, 0 = ground at the landing point). The 2D overlay ignores it; the
+// 3D overlay scales it by the actual approach altitude. Per pattern: downwind stays level at the
+// approach altitude, the base/crosswind leg loses BASE_DESCENT of the height over its length, and the
+// final approach descends linearly to the ground.
+const BASE_DESCENT = 0.33;
+const FRAC_TOP = 1;                  // downwind altitude (= approach_alt)
+const FRAC_BASE_END = 1 - BASE_DESCENT; // after the base leg's −33 % descent
+const FRAC_GROUND = 0;               // touchdown
+
 export interface ApproachInput {
   heading1: number;
   heading2: number;
@@ -28,19 +38,23 @@ export interface ApproachInput {
   approachDirection: number;
 }
 
-/** One drawn leg. `final` = the orange final-approach line; otherwise a blue downwind/base leg. */
+/** One drawn leg. `final` = the orange final-approach line; otherwise a blue downwind/base leg.
+ *  `altFrac` is the per-vertex altitude fraction (parallel to `points`; see BASE_DESCENT) for the 3D
+ *  descent profile — 2D ignores it. */
 export interface ApproachLeg {
   points: LatLon[];
   final: boolean;
+  altFrac: number[];
 }
 
-/** Small arrowhead (two barbs) at the end of a leg, pointing along it. Inherits the leg's `final`. */
-function arrowhead(from: LatLon, to: LatLon, final: boolean, sizeM: number): ApproachLeg {
+/** Small arrowhead (two barbs) at the end of a leg, pointing along it. Inherits the leg's `final` and
+ *  its tip altitude fraction `frac`. */
+function arrowhead(from: LatLon, to: LatLon, final: boolean, sizeM: number, frac: number): ApproachLeg {
   const brg = bearing(from[0], from[1], to[0], to[1]);
   const back = wrap360(brg + 180);
   const a1 = destinationPoint(to[0], to[1], wrap360(back + 24), sizeM);
   const a2 = destinationPoint(to[0], to[1], wrap360(back - 24), sizeM);
-  return { points: [[a1.lat, a1.lon], to, [a2.lat, a2.lon]], final };
+  return { points: [[a1.lat, a1.lon], to, [a2.lat, a2.lon]], final, altFrac: [frac, frac, frac] };
 }
 
 /** One approach (mirrors the configurator's paintApproach): land → pos2 → pos1 (blue), pos1 → land
@@ -58,13 +72,14 @@ function paintApproach(
   const p2: LatLon = [pos2.lat, pos2.lon];
   const land: LatLon = [lat, lon];
   const barb = Math.max(8, approachLengthM * 0.05);
+  // Altitude profile (3D): downwind level at the top → base −33 % → final linear to the ground.
   return [
-    { points: [land, p2], final: false },
-    arrowhead(land, p2, false, barb),
-    { points: [p2, p1], final: false },
-    arrowhead(p2, p1, false, barb),
-    { points: [p1, land], final: true },
-    arrowhead(p1, land, true, barb),
+    { points: [land, p2], final: false, altFrac: [FRAC_TOP, FRAC_TOP] },         // downwind (level)
+    arrowhead(land, p2, false, barb, FRAC_TOP),
+    { points: [p2, p1], final: false, altFrac: [FRAC_TOP, FRAC_BASE_END] },      // base (−33 %)
+    arrowhead(p2, p1, false, barb, FRAC_BASE_END),
+    { points: [p1, land], final: true, altFrac: [FRAC_BASE_END, FRAC_GROUND] },  // final (to ground)
+    arrowhead(p1, land, true, barb, FRAC_GROUND),
   ];
 }
 

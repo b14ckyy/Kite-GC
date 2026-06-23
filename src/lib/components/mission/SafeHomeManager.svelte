@@ -23,7 +23,7 @@
   import { settings } from '$lib/stores/settings';
   import {
     safehomeConfig, safehomeWorking, safehomeDirty, saveSafehomeConfig, revertSafehomeWorking,
-    isSafehomeEmpty, setSafehomePosition, setSafehomeEnabled, type SafeHomeConfig,
+    isSafehomeEmpty, setSafehomePosition, setSafehomeEnabled, clearSafehomeSlot, DEFAULT_APPROACH_ALT_M, type SafeHomeConfig,
   } from '$lib/stores/safehome';
   import PanelShell from '$lib/components/panel/PanelShell.svelte';
   import Button from '$lib/components/panel/Button.svelte';
@@ -73,10 +73,6 @@
 
   const cmToM = (cm: number | null | undefined) => (cm == null ? 0 : cm / 100);
 
-  // Default approach altitude (m) for an unconfigured slot — never 0, which would be a ground-level
-  // approach (crash risk if the user places a safehome and forgets to set it).
-  const DEFAULT_APPROACH_ALT_M = 40;
-
   function initMirror(c: SafeHomeConfig | null) {
     if (!c) { g = null; sm = []; return; }
     g = c.has_autoland
@@ -92,7 +88,7 @@
     sm = c.safehomes.map((s) => {
       const ap = c.approaches.find((a) => a.index === s.index);
       return {
-        appAlt: ap && ap.approach_alt_cm > 0 ? ap.approach_alt_cm / 100 : DEFAULT_APPROACH_ALT_M,
+        appAlt: isSafehomeEmpty(s) ? DEFAULT_APPROACH_ALT_M : (ap?.approach_alt_cm ?? 0) / 100,
         landAlt: ap ? ap.land_alt_cm / 100 : 0,
         hdg1Mag: Math.abs(ap?.heading1 ?? 0),
         hdg1Excl: (ap?.heading1 ?? 0) < 0,
@@ -102,6 +98,13 @@
         seaLevel: ap?.sea_level_ref ?? false,
       };
     });
+  }
+
+  /** Clean a slot: clear coords (→ unset, hidden on the map) + reset its approach, and reset the display
+   *  mirror so the now-empty slot shows the default again. */
+  function onClean(i: number) {
+    clearSafehomeSlot(i);
+    sm[i] = { appAlt: DEFAULT_APPROACH_ALT_M, landAlt: 0, hdg1Mag: 0, hdg1Excl: false, hdg2Mag: 0, hdg2Excl: false, dir: 0, seaLevel: false };
   }
 
   /** Push the mirror into the working copy (map overlay + dirty + Save read this). */
@@ -278,6 +281,7 @@
             <input class="sh-coord" type="number" step="0.0000001" disabled={!canEdit} placeholder={$t('safehome.lat')} value={empty ? '' : (shw.lat / 1e7).toFixed(7)} onchange={(e) => onCoordInput(i, 'lat', e.currentTarget.value)} />
             <input class="sh-coord" type="number" step="0.0000001" disabled={!canEdit} placeholder={$t('safehome.lon')} value={empty ? '' : (shw.lon / 1e7).toFixed(7)} onchange={(e) => onCoordInput(i, 'lon', e.currentTarget.value)} />
             <Button variant="standard" icon="add" disabled={!canEdit} title={$t('safehome.setHere')} onclick={() => setFromMapCenter(i)} />
+            <Button variant="standard" icon="delete" disabled={!canEdit || empty} title={$t('safehome.clean')} onclick={() => onClean(i)} />
           </div>
           {#if expanded.has(i)}
             {#if hasAutoland}

@@ -286,6 +286,7 @@
     "safehomes": "Safehomes",
     "expand": "Expand",
     "setHere": "Set here (map centre)",
+    "clean": "Clear safehome",
     "lat": "Lat",
     "lon": "Lon",
     "approachAlt": "Approach alt",

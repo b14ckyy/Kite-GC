@@ -64,7 +64,7 @@
   import { ensureUserLocation, resolveUserLocation, userGeoLocation } from "$lib/helpers/userLocation";
   import FpvHud from "$lib/components/FpvHud.svelte";
   import { convertSpeed, convertAltitude, convertDistance, convertVerticalSpeed, formatConverted } from "$lib/utils/units";
-  import { haversineDistance, bearing } from "$lib/utils/geo";
+  import { haversineDistance, bearing, destinationPoint } from "$lib/utils/geo";
   import type { SpeedUnit, AltitudeUnit, RadarMapSettings, GcsMode } from "$lib/stores/settings";
   import { radarVehicles, radarSelection, type RadarSnapshot } from "$lib/stores/radarTracking";
   import { aeroData, type Airspace, type AltLimit } from "$lib/stores/airspace";
@@ -72,6 +72,8 @@
   import { contactColor, ffContactColor, contactVisibleOnMap, REL_OVERRIDE_M } from "$lib/helpers/radarMap";
   import { ARROW_POLY, contactModelClass, radarModelUri, type RadarModelClass } from "$lib/helpers/radar3d";
   import { radarAlertLevels, ALERT_CONFIG, type AlertLevel } from "$lib/controllers/radarAlerts";
+  import { safehomeWorking, isSafehomeEmpty } from "$lib/stores/safehome";
+  import { buildApproachGeometry } from "$lib/helpers/autolandGeometry";
 
   let {
     active = true,
@@ -394,6 +396,16 @@
   const OBSTACLE_3D_TURBINE_H = 120; // estimated height for a height-less wind turbine
   const OBSTACLE_3D_DEFAULT_H = 40;  // estimated height for a height-less generic obstacle
   const OBSTACLE_3D_MAX = 1200;      // cap rendered columns (dense regions → nearest-N to the reference)
+
+  // ── Safehome + fixed-wing autoland overlay (INAV) ────────────────────
+  // Mirrors the 2D overlay (Map.svelte::updateSafehome): teardrop "H" markers + green max-distance ring
+  // (disarmed-only) + yellow loiter ring + the planned approach path. Source is `safehomeWorking` (so
+  // panel/drag edits reflect live). The approach path is drawn at its real 3D descent altitude (the
+  // loiter ring sits at the downwind/approach altitude), so a terrain sample per safehome is needed.
+  let safehomeEntities: Cesium.Entity[] = [];        // markers + rings + approach legs (all Entities)
+  let unsubSafehome3d: (() => void) | undefined;
+  let lastSafehomeArmed3d = false;                    // green ring is disarmed-only → redraw on arm change
+  let safehome3dGen = 0;                              // race guard for the async terrain sample
 
   // One-shot camera recenter after a (re)mount. The 2D↔3D toggle remounts this
   // component, so this fires once on every switch to 3D.
@@ -993,6 +1005,9 @@
 
       const armed = (telem.armingFlags & (1 << ARMING_FLAG_ARMED)) !== 0;
 
+      // Safehome green (max-distance) ring is disarmed-only → redraw on arm-state change (mirror 2D).
+      if (armed !== lastSafehomeArmed3d) { lastSafehomeArmed3d = armed; updateSafehome3D(); }
+
       // Decide clear-on-connect from the first telemetry frame after a connect:
       // only wipe the map if the UAV is DISARMED. If it's armed we assume a
       // connection recovery and keep the existing track.
@@ -1177,6 +1192,14 @@
     unsubRadarAlerts3d = radarAlertLevels.subscribe((m) => { radar3dAlertLevels = m; if (viewer) updateRadar3D(); });
     unsubGcs3d = gcsLocation.subscribe(() => updateGcs3d());
 
+    // Safehome + autoland overlay follows the working copy (load / panel edit / drag / "+"). Arm-state
+    // changes (the green max-distance ring is disarmed-only) ride the telemetry handler below.
+    unsubSafehome3d = safehomeWorking.subscribe(() => updateSafehome3D());
+    // On first 3D open the world-terrain provider isn't swapped in yet (still Ellipsoid), so the initial
+    // draw samples ground = 0 and the approach path renders flat. Redraw once terrain is ready so it gets
+    // its real 3D height — without needing a parameter change to re-trigger the render.
+    void waitForTerrain(viewer).then((tp) => { if (tp) updateSafehome3D(); });
+
     // Obstacle columns + airspace volumes: rebuild on new aero data (toggle / range changes ride the
     // settings-watch below; camera-pan re-culls via the debounced moveEnd handler — the window follows
     // the camera).
@@ -1222,6 +1245,7 @@
     unsubRadarSel3d?.();
     unsubRadarAlerts3d?.();
     unsubGcs3d?.();
+    unsubSafehome3d?.();
     unsubAero3d?.();
     if (obstacleMoveTimer) clearTimeout(obstacleMoveTimer);
     radar3dPickHandler?.destroy();
@@ -1957,6 +1981,149 @@
   }
 
   $effect(() => { gcsMode3d; if (viewer) updateGcs3d(); });
+
+  // ── Safehome + autoland overlay (3D mirror of Map.svelte::updateSafehome) ────────────────────────
+  /** Teardrop "H" pin as an SVG data URI (the 2D marker is HTML, not reusable here). Tip at the bottom
+   *  centre → place with verticalOrigin BOTTOM so the point sits on the coordinate. */
+  function safehomeBillboardSvg(enabled: boolean): string {
+    const bg = enabled ? '#59aa29' : '#888';
+    const svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="26" height="32" viewBox="0 0 26 32">' +
+      `<path d="M13 31C13 31 24 18.5 24 11A11 11 0 1 0 2 11C2 18.5 13 31 13 31Z" fill="${bg}" stroke="#000" stroke-width="2"/>` +
+      '<text x="13" y="15" text-anchor="middle" font-family="Segoe UI, Tahoma, sans-serif" font-size="12" font-weight="bold" fill="#fff">H</text>' +
+      '</svg>';
+    return 'data:image/svg+xml,' + encodeURIComponent(svg);
+  }
+
+  /** A closed circle (lat/lon ring) of `segments` points around a centre — used for the radius rings. */
+  function safehomeCircle(lat: number, lon: number, radiusM: number, segments = 64): [number, number][] {
+    const out: [number, number][] = [];
+    for (let i = 0; i <= segments; i++) {
+      const p = destinationPoint(lat, lon, (360 / segments) * i, radiusM);
+      out.push([p.lat, p.lon]);
+    }
+    return out;
+  }
+
+  /** Redraw the safehome markers + radius rings (+ 3D approach paths). Mirrors the 2D overlay; the
+   *  approach path and the elevated loiter ring need the safehome's ground ellipsoid height, so those
+   *  are drawn after an async terrain sample (guarded by `safehome3dGen`, like the airspace overlay). */
+  async function updateSafehome3D() {
+    if (!viewer) return;
+    const gen = ++safehome3dGen;
+    for (const e of safehomeEntities) viewer.entities.remove(e);
+    safehomeEntities.length = 0;
+    if (!get(settings).showSafehomes) { viewer.scene.requestRender(); return; }
+    const cfg = get(safehomeWorking);
+    if (!cfg) { viewer.scene.requestRender(); return; }
+
+    const armed = (get(telemetry).armingFlags & (1 << ARMING_FLAG_ARMED)) !== 0;
+    const maxDistM = cfg.safehome_max_distance_cm != null ? cfg.safehome_max_distance_cm / 100 : null;
+    const loiterM = cfg.loiter_radius_cm != null ? cfg.loiter_radius_cm / 100 : null;
+    const approachLenM = cfg.autoland.approach_length_cm != null ? cfg.autoland.approach_length_cm / 100 : 0;
+
+    const flat = (pts: [number, number][]) => pts.flatMap(([la, lo]) => [lo, la]);
+    const addGroundRing = (lat: number, lon: number, radiusM: number, css: string) => {
+      safehomeEntities.push(viewer!.entities.add({
+        polyline: {
+          positions: Cesium.Cartesian3.fromDegreesArray(flat(safehomeCircle(lat, lon, radiusM))),
+          clampToGround: true, width: 2.5, material: Cesium.Color.fromCssColorString(css),
+        },
+      }));
+    };
+
+    // Per-safehome jobs that need a terrain sample (elevated loiter ring + the 3D approach path).
+    const jobs: { lat: number; lon: number; ap: typeof cfg.approaches[number] }[] = [];
+
+    for (const sh of cfg.safehomes) {
+      if (isSafehomeEmpty(sh)) continue;
+      const lat = sh.lat / 1e7, lon = sh.lon / 1e7;
+
+      // Rings + approach only for ENABLED safehomes (a disabled slot keeps just the grey marker).
+      if (sh.enabled) {
+        if (maxDistM && !armed) addGroundRing(lat, lon, maxDistM, '#59aa29');  // green, disarmed-only
+        const ap = cfg.approaches.find((a) => a.index === sh.index);
+        const hasApproach = !!ap && cfg.has_autoland && approachLenM > 0 && !!loiterM;
+        if (hasApproach) {
+          jobs.push({ lat, lon, ap: ap! }); // elevated loiter ring + path drawn after the terrain sample
+        } else if (loiterM) {
+          addGroundRing(lat, lon, loiterM, '#f5a623'); // no approach data → loiter ring on the ground
+        }
+      }
+
+      // Marker — always (grey when disabled). Display-only in 3D; editing stays on 2D + the panel.
+      safehomeEntities.push(viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(lon, lat),
+        billboard: {
+          image: safehomeBillboardSvg(sh.enabled),
+          width: 26, height: 32,
+          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      }));
+    }
+    viewer.scene.requestRender(); // markers + ground rings show immediately
+
+    if (jobs.length === 0) return;
+
+    // Ground ellipsoid height per safehome — for the elevated loiter ring + the descending approach path.
+    let groundEll: number[] = jobs.map(() => 0);
+    const tp = viewer.scene.terrainProvider;
+    if (tp && !(tp instanceof Cesium.EllipsoidTerrainProvider)) {
+      try {
+        const sampled = await Cesium.sampleTerrainMostDetailed(tp, jobs.map((j) => Cesium.Cartographic.fromDegrees(j.lon, j.lat)));
+        if (gen !== safehome3dGen || !viewer) return; // superseded by a newer redraw
+        groundEll = sampled.map((c) => (isFinite(c.height) ? c.height : 0));
+      } catch (e) {
+        console.warn('[Map3D] safehome terrain sample failed', e);
+      }
+    }
+
+    for (let i = 0; i < jobs.length; i++) {
+      const { lat, lon, ap } = jobs[i];
+      const gEll = groundEll[i];
+      // Set safehomes show the loaded approach_alt as-is (0 = unconfigured → a flat ground path); empty
+      // (0,0) slots aren't drawn at all, and the editor pre-fills the default only for those.
+      const approachAltM = ap.approach_alt_cm / 100;
+      // Top of the descent = downwind/approach altitude, drawn RELATIVE to the safehome's own ground (a
+      // visual 3D depiction, not a metric reference). We deliberately ignore sea_level_ref / geoid: anchor
+      // the whole pattern to the home height, otherwise an MSL/geoid-0 top detaches the path from the
+      // ground and the descent collapses onto one level.
+      const topEll = gEll + approachAltM;
+
+      // Yellow loiter ring at the downwind altitude.
+      if (loiterM) {
+        safehomeEntities.push(viewer.entities.add({
+          polyline: {
+            positions: Cesium.Cartesian3.fromDegreesArrayHeights(
+              safehomeCircle(lat, lon, loiterM).flatMap(([la, lo]) => [lo, la, topEll]),
+            ),
+            arcType: Cesium.ArcType.NONE, width: 2.5, material: Cesium.Color.fromCssColorString('#f5a623'),
+          },
+        }));
+      }
+
+      // Approach path drawn at its real 3D descent altitude (downwind level → base −33 % → final to ground).
+      for (const leg of buildApproachGeometry(lat, lon, {
+        heading1: ap.heading1, heading2: ap.heading2,
+        approachLengthM: approachLenM, loiterRadiusM: loiterM!, approachDirection: ap.approach_direction,
+      })) {
+        const positions = leg.points.map(([la, lo], k) =>
+          Cesium.Cartesian3.fromDegrees(lo, la, gEll + (leg.altFrac[k] ?? 0) * (topEll - gEll)));
+        safehomeEntities.push(viewer.entities.add({
+          polyline: {
+            positions, arcType: Cesium.ArcType.NONE, width: 4,
+            material: Cesium.Color.fromCssColorString(leg.final ? '#f78a05' : '#2e6fff'), // orange final, blue downwind/base
+          },
+        }));
+      }
+    }
+    viewer.scene.requestRender();
+  }
+
+  // Redraw on the display toggle (mirrors the 2D `$effect` on `$settings.showSafehomes`).
+  $effect(() => { void $settings.showSafehomes; if (viewer) updateSafehome3D(); });
 
   // ── Sky clock (sun/moon position) ──────────────────────────────────
   // Cesium positions the Sun/Moon from real ephemeris at viewer.clock.currentTime.

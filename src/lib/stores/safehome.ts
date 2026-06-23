@@ -62,6 +62,11 @@ export function isSafehomeEmpty(sh: SafeHome): boolean {
   return sh.lat === 0 && sh.lon === 0;
 }
 
+/** Default approach altitude (m) for a slot whose `approach_alt_cm` is 0/unconfigured — never 0, which
+ *  would be a ground-level approach (crash risk). Used by the editor's display + the 3D overlay so both
+ *  show the same effective altitude. */
+export const DEFAULT_APPROACH_ALT_M = 40;
+
 /** Last snapshot read from the FC — drives the map overlay. Null until first read / when not INAV. */
 export const safehomeConfig = writable<SafeHomeConfig | null>(null);
 
@@ -115,6 +120,24 @@ export function setSafehomePosition(index: number, latE7: number, lonE7: number,
 export function setSafehomeEnabled(index: number, enabled: boolean): void {
   safehomeWorking.update((c) =>
     c ? { ...c, safehomes: c.safehomes.map((s, i) => (i === index ? { ...s, enabled } : s)) } : c,
+  );
+}
+
+/** Clean a safehome slot: clear its coordinates (→ "not set", hidden on the map) + disable it, and reset
+ *  its approach config to zero. Shared by the editor's per-slot clean button. */
+export function clearSafehomeSlot(index: number): void {
+  safehomeWorking.update((c) =>
+    c
+      ? {
+          ...c,
+          safehomes: c.safehomes.map((s, i) => (i === index ? { ...s, lat: 0, lon: 0, enabled: false } : s)),
+          approaches: c.approaches.map((a) =>
+            a.index === index
+              ? { ...a, approach_alt_cm: 0, land_alt_cm: 0, approach_direction: 0, heading1: 0, heading2: 0, sea_level_ref: false }
+              : a,
+          ),
+        }
+      : c,
   );
 }
 
