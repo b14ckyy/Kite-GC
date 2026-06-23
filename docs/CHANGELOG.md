@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **WP popup delete left a stale selection (INAV mission editor).** Deleting a waypoint via its map
+  popup only cleared the primary index, not the multi-select set — so the waypoint that shifted into the
+  freed index stayed highlighted and a subsequent click started a multi-selection. The popup delete now
+  fully clears the selection, matching the panel's delete button.
 - **Airspace Manager panel didn't refresh on connect.** An already-open panel didn't show the geozone /
   geofence sections until a tab switch, because the FC capability loads asynchronously after connect; the
   panel now re-initialises on connect/disconnect and when that capability resolves.
