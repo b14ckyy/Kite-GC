@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Mission EEPROM save.** "Save to EEPROM" persisted nothing (a later "Load from EEPROM" returned the
+  old mission) — the `MSP_WP_MISSION_LOAD`/`SAVE` command codes were swapped (18/19), so the app actually
+  sent *load* on save (overwriting the upload with the stored mission) and *save* on load. Corrected to
+  INAV's codes (LOAD=18, SAVE=19); EEPROM save/load now round-trip.
+
+### Changed
+- **Geozones reboot the FC after saving + are locked while armed.** INAV recomputes the internal geozone
+  structures only at boot, so "Save to FC" now writes + EEPROM + **reboots** (the link drops, then the
+  reconnect handshake re-reads). Geozone editing is disabled while the craft is armed.
+- **Airspace Manager panel reworked.** Dropped the two-column split: the panel is single-column with a
+  **Nearby** view (default) and a **Settings/editor** view, switched by a header button (no nearby list
+  while editing). When the OpenAIP overlay is disabled in settings but a geozone-capable INAV FC is
+  connected, the panel still appears and shows **only** the geozone editor + its overlay toggles.
+- **Default UDP connection port is now 14550** (the MAVLink convention); switching the transport flips
+  between TCP `5761` and UDP `14550` without overwriting a custom port (e.g. SITL `5762`). TCP unchanged.
+
 ### Added
 - **INAV Geozones — map display (read-only).** On connecting to a geozone-capable INAV FC (**≥8.0**),
   Kite now downloads the on-board geozone config (all zones + their vertices, via `MSP2_INAV_GEOZONE` /

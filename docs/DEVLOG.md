@@ -645,6 +645,14 @@ protocols + these parallel networks) is the living reference in
   starve it). Warning bar in `InavMissionPanel`; offending legs drawn red in 2D (a pane *below* the
   mission line → red outline) + 3D (redrawn inside `drawMission3DModel` so it sits on the line at
   `altMsl + geoidOffset`). Hints only, never a blocker. Plan `active/GEOZONES.md`.
+  **Save = write + EEPROM + reboot** (INAV recomputes zones only at boot; `geozone_write_all` sends
+  `MSP_SET_REBOOT`, link drops → reconnect re-reads). Editing locked while armed. The Airspace Manager
+  panel was reworked to single-column **Nearby ↔ Settings** (header toggle); it also appears for a
+  geozone-capable FC even when the OpenAIP overlay is disabled (geozone editor only).
+- **Mission EEPROM save fix.** `MSP_WP_MISSION_LOAD`/`SAVE` were swapped (18/19) in `msp/types.rs`, so
+  "Save to EEPROM" actually sent *load* (and vice-versa) → nothing persisted. Corrected to INAV's
+  LOAD=18 / SAVE=19. Also: the default **UDP** connection port is now 14550 (MAVLink convention; TCP 5761
+  unchanged, custom ports preserved).
 - **Diagnostic file logging (ADR-055, `logging/`).** A custom `log::Log` logger installed before the Tauri
   builder writes a rotating TXT file (`<AppData>/kite-gc/kite-gc.log`, portable → `data/`; previous run →
   `*.prev`). Until this landed, **no logger was installed**, so every `log::` call in the codebase was a
