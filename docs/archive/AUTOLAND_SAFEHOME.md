@@ -5,11 +5,18 @@
 
 # Autoland & Safe Home Manager (INAV) — Feature Plan
 
-> STATUS: IN PROGRESS (Iteration 1). Phases **A–D done** (backend read/write + connect-load + Safe Home
-> Manager editor + 2D map overlay); **E (3D map overlay) next**. The first of the three "Airspace Manager"
-> safety subsystems (Autoland → Geozones → Geofence). This iteration covers **safehome display + the
-> Safe Home Manager (safehome editing + fixed-wing autoland approach config)**. The **mission
-> LAND-waypoint** autoland (fwapproach indices 8+, waypoint placement) is a deliberate follow-up.
+> ARCHIVED (2026-06-23) — SHIPPED. Phases **A–E done** (backend read/write + connect-load + Safe Home
+> Manager editor + 2D **and 3D** map overlays). The first of the three "Airspace Manager" safety
+> subsystems (Autoland → Geozones → Geofence). This iteration covered **safehome display + the Safe Home
+> Manager (safehome editing + fixed-wing autoland approach config)**. Deliberate follow-ups: the **mission
+> LAND-waypoint** autoland (fwapproach indices 8+, waypoint placement) and the home-marker→safehome swap
+> on arm. Next safety subsystem: **Geozones**.
+>
+> Phase E (3D, `Map3D.svelte::updateSafehome3D`): teardrop "H" billboards + green `max_distance` ring
+> (disarmed-only) + yellow `loiter_radius` ring at the approach altitude + the approach drawn as a real
+> descent (downwind level → base −33 % → final to ground), all height-anchored to the safehome's Cesium
+> ground sample (purely visual — no MSL/geoid dependency). Per-slot **Clear** button + empty-slot vs
+> set-slot default handling added.
 
 ## Context / why
 
