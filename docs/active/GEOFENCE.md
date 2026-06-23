@@ -74,6 +74,13 @@ altitude/action → the 2D/3D rendering + map editor are reused with blue=inclus
 ### Sanity
 Polygon ≥ 3 vertices; circle radius > 0; (PX4) clockwise winding auto-applied on save. No per-zone alt.
 
+## Rally points (shipped — same subsystem)
+ArduPilot/PX4 **rally points** (RTL divert/return locations) ride the same path: `MAV_MISSION_TYPE_RALLY`
+over the parametrised mission protocol. Geometry is just points (`MAV_CMD_NAV_RALLY_POINT` 5100, lat/lon
++ alt rel. home). `commands/rally.rs` (`rally_read_all`/`rally_write_all` + `RALLY_LIMIT_KM` /
+`RALLY_INCL_HOME` params, ArduPilot-only), `stores/rally.ts` (index-based), green **R** markers in 2D
+(`Map.svelte::updateRally`, draggable + lat/lon/alt popup) + 3D (`Map3D.svelte::updateRally3D`), a Rally
+section in the Airspace panel + a `rally` layer toggle. Loaded on MAVLink connect; no reboot; armed-locked.
+
 ## Out of scope / later
-Rally points (`MAV_MISSION_TYPE_RALLY` — same protocol, trivial follow-up); INAV (uses its own geozones);
-in-flight breach alerts (shared with the geozone P3 alert work).
+INAV (uses its own geozones); in-flight breach alerts (shared with the geozone P3 alert work).

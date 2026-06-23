@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   INAV's codes (LOAD=18, SAVE=19); EEPROM save/load now round-trip.
 
 ### Changed
+- **Airspace Manager settings reordered.** The FC editors (Geozones / Geofence / Rally points) now sit at
+  the top of the Settings view so they stay reachable as the panel grows; the per-layer 2D/3D visibility
+  toggles + render ranges moved to a **"Show on map"** group at the end.
 - **Geozones reboot the FC after saving + are locked while armed.** INAV recomputes the internal geozone
   structures only at boot, so "Save to FC" now writes + EEPROM + **reboots** (the link drops, then the
   reconnect handshake re-reads). Geozone editing is disabled while the craft is armed.
@@ -32,6 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   between TCP `5761` and UDP `14550` without overwriting a custom port (e.g. SITL `5762`). TCP unchanged.
 
 ### Added
+- **ArduPilot / PX4 Rally points.** RTL divert/return locations — on RTL the vehicle returns to the
+  nearest rally point (within `RALLY_LIMIT_KM`) instead of home. On connecting to an ArduPilot/PX4 FC,
+  Kite downloads the rally points (`MAV_MISSION_TYPE_RALLY`) and shows them as green **R**-markers on
+  both maps; in edit mode they are draggable with a popup for exact lat/lon + altitude. The Airspace
+  Manager gains a **Rally** section (add point, per-point altitude, the global `RALLY_LIMIT_KM` /
+  `RALLY_INCL_HOME` params) with **Save to FC**, plus a Rally layer toggle (2D + 3D). Same family as the
+  geofence (no reboot, locked while armed).
 - **ArduPilot / PX4 Geofence — full editor.** Third Airspace-Manager safety subsystem (after Autoland and
   Geozones), the MAVLink counterpart to the INAV geozone editor. On connecting to an ArduPilot/PX4 FC,
   Kite downloads the on-board geofence (inclusion/exclusion × polygon/circle + the return point, via

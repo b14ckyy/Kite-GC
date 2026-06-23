@@ -671,8 +671,18 @@ protocols + these parallel networks) is the living reference in
   come from an internal table keyed by system (FENCE_* = ArduPilot, GF_* = PX4) + vehicle (MAV_TYPE →
   Copter/Plane/Rover) — the raw code is written, the human name shown. The panel is wrapped in a
   `{#key connection-status + capability}` in `+page.svelte` so an already-open panel re-inits when the
-  FC's (async-loaded) geozone/fence capability resolves. No reboot needed (unlike geozones). Plan
-  `active/GEOFENCE.md`. Follow-ups: SITL verification, rally points (`MAV_MISSION_TYPE_RALLY`).
+  FC's (async-loaded) geozone/fence/rally capability resolves. No reboot needed (unlike geozones). Plan
+  `active/GEOFENCE.md`. Follow-up: SITL verification.
+- **Rally points (ArduPilot/PX4; `commands/rally.rs`, `stores/rally.ts`).** RTL divert/return points —
+  same mission microprotocol with `MAV_MISSION_TYPE_RALLY` (reuses the parametrised `mission.rs` +
+  `params_rt.rs`). Geometry is just points: each item = `MAV_CMD_NAV_RALLY_POINT` (5100, frame
+  GLOBAL_RELATIVE_ALT, x/y = lat/lon, z = alt rel. home); `rally_read_all`/`rally_write_all` + the
+  global `RALLY_LIMIT_KM` / `RALLY_INCL_HOME` params (ArduPilot; PX4 has the items but no RALLY_*).
+  Frontend `stores/rally.ts` (points[{lat,lon,alt_cm}] + params, has_rally), loaded on MAVLink connect,
+  index-based mutations. Green ground-clamped markers ("R{n}") in 2D (`Map.svelte::updateRally`,
+  draggable + WP-style lat/lon/alt popup) and 3D (`Map3D.svelte::updateRally3D`, point + label). A
+  **Rally** section in the Airspace Manager panel (add point, per-point altitude, the params, Save/Revert,
+  armed-gating) + a 7th `rally` layer toggle. Shares the panel `{#key}` re-init.
 - **Mission EEPROM save fix.** `MSP_WP_MISSION_LOAD`/`SAVE` were swapped (18/19) in `msp/types.rs`, so
   "Save to EEPROM" actually sent *load* (and vice-versa) → nothing persisted. Corrected to INAV's
   LOAD=18 / SAVE=19. Also: the default **UDP** connection port is now 14550 (MAVLink convention; TCP 5761
