@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **INAV Geozones — map display (read-only).** On connecting to a geozone-capable INAV FC (**≥8.0**),
+  Kite now downloads the on-board geozone config (all zones + their vertices, via `MSP2_INAV_GEOZONE` /
+  `..._VERTEX`) and shows it on both maps. Inclusive (Flight-Zone) zones are drawn **blue**, Exclusive
+  (No-Flight-Zone) **amber**, and the **fence action** drives the line/fill style (scheme adopted from
+  MWPTools): `None` → dashed thin, `Avoid` → solid thin, `Pos-Hold`/`RTH` → solid thick; a translucent
+  area fill for every exclusive zone with a real action and for inclusive RTH zones. The **3D** view
+  extrudes each zone between its min/max altitude (circle → cylinder, polygon → hull; AGL terrain-
+  anchored, AMSL geoid-referenced, "no upper limit" capped) and mirrors the same line/fill scheme via
+  boundary polylines. A new **Geozones** layer toggle (2D + 3D, default on, only shown when a capable FC
+  is connected) sits under Airspaces in the Airspace Manager panel, which also lists the configured
+  zones (collapsible rows: number · shape · vertex count / radius, with type/altitudes/action on
+  expand). Geozones are always shown while the Mission Planner is in edit mode. Editing/writing is a
+  follow-up. See `docs/active/GEOZONES.md`.
 - **INAV Safe Home Manager + autoland config.** On connecting to INAV, Kite now downloads
   all safehomes (any version) plus — on **INAV ≥7.1** — the fixed-wing autoland approach config and the
   approach-relevant `nav_fw_land_*` settings. A new **Safe Home Manager** (house button in the INAV

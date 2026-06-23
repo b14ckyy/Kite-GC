@@ -620,6 +620,18 @@ protocols + these parallel networks) is the living reference in
   the safehome's Cesium ground sample). A per-slot Clear button resets a safehome to unset; empty (0,0)
   slots are hidden and only the editor pre-fills the default approach altitude. Plan archived
   `archive/AUTOLAND_SAFEHOME.md`.
+- **Geozones (INAV ≥8.0; `commands/geozone.rs`, `stores/geozone.ts`).** Second Airspace-Manager safety
+  subsystem (Autoland → **Geozones** → Geofence). On INAV connect, `geozone_read_all` downloads every
+  used zone (header + vertices) via `MSP2_INAV_GEOZONE` / `..._VERTEX` (0x2210–0x2213); gated by
+  `FeatureSet.geozones`. **P1 = read-only display**: 2D (`Map.svelte::updateGeozones`) + 3D
+  (`Map3D.svelte::updateGeozones3D`, extruded volumes + boundary polylines) sharing
+  `helpers/geozoneStyle.ts`. Colours **blue inclusive / amber exclusive** (ours, not the configurator's
+  green/red); the **fence action** drives line style + fill (dashed/thin/thick + selective translucent
+  fill), a scheme adopted from MWPTools' geozone manager (`mwp-geozonemgr.vala`, worked out with the
+  INAV author). A 5th layer toggle (default on, capability-gated) + a collapsible zone list live inline
+  in `AirspaceManagerPanel.svelte`; data is also force-shown in the Mission Planner edit mode. The 2D
+  interactive editor + Save-to-FC (batch SET + EEPROM) + sanity checks are **P2**. Plan
+  `active/GEOZONES.md`.
 - **Diagnostic file logging (ADR-055, `logging/`).** A custom `log::Log` logger installed before the Tauri
   builder writes a rotating TXT file (`<AppData>/kite-gc/kite-gc.log`, portable → `data/`; previous run →
   `*.prev`). Until this landed, **no logger was installed**, so every `log::` call in the codebase was a
