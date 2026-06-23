@@ -183,7 +183,7 @@
     border: none;
     color: #e0e0e0;
     font-size: 11px;
-    width: 54px;
+    width: 74px;
     text-align: center;
     color-scheme: dark;
     appearance: textfield;

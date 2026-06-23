@@ -9,6 +9,7 @@ pub mod aero;
 pub mod connection;
 pub mod control;
 pub mod fc_settings;
+pub mod fence;
 pub mod flightlog;
 pub mod geozone;
 pub mod hid;

@@ -53,6 +53,10 @@ pub enum MavlinkCommand {
     RegisterCommandReceiver(mpsc::Sender<MavMessage>),
     /// Unregister the command-ack receiver
     UnregisterCommandReceiver,
+    /// Register a channel to receive PARAM_VALUE during an active param read/write (see `params_rt.rs`)
+    RegisterParamReceiver(mpsc::Sender<MavMessage>),
+    /// Unregister the param receiver
+    UnregisterParamReceiver,
 }
 
 /// Handle for interacting with the running MAVLink handler
@@ -150,6 +154,7 @@ fn handler_loop(
     // Active command operation receiver — when set, COMMAND_ACK is forwarded here so the
     // blocking command helper (control.rs) can match the ACK to the command it sent.
     let mut cmd_fwd: Option<mpsc::Sender<MavMessage>> = None;
+    let mut param_fwd: Option<mpsc::Sender<MavMessage>> = None;
 
     // QuadPlane detection robustness: a QuadPlane reports MAV_TYPE_FIXED_WING, so the only reliable
     // signal is the Q_ENABLE parameter. The single pre-handler PARAM_REQUEST_READ can be lost on a
@@ -220,6 +225,16 @@ fn handler_loop(
             Ok(MavlinkCommand::UnregisterCommandReceiver) => {
                 log::debug!("MAVLink command receiver unregistered");
                 cmd_fwd = None;
+                continue;
+            }
+            Ok(MavlinkCommand::RegisterParamReceiver(tx)) => {
+                log::debug!("MAVLink param receiver registered");
+                param_fwd = Some(tx);
+                continue;
+            }
+            Ok(MavlinkCommand::UnregisterParamReceiver) => {
+                log::debug!("MAVLink param receiver unregistered");
+                param_fwd = None;
                 continue;
             }
             Err(mpsc::TryRecvError::Empty) => {}
@@ -341,6 +356,17 @@ fn handler_loop(
                         if let Some(ref tx) = cmd_fwd {
                             if tx.send(frame.message).is_err() {
                                 cmd_fwd = None;
+                            }
+                            continue;
+                        }
+                    }
+
+                    // Forward PARAM_VALUE to an active param read/write (fence params). Otherwise it
+                    // falls through to dispatch (the handshake EKF-type reader).
+                    if matches!(frame.message, MavMessage::PARAM_VALUE(_)) {
+                        if let Some(ref tx) = param_fwd {
+                            if tx.send(frame.message).is_err() {
+                                param_fwd = None;
                             }
                             continue;
                         }

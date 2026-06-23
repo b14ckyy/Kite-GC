@@ -23,6 +23,11 @@
     setGeozoneVertex, insertGeozoneVertex, removeGeozoneVertex, setGeozoneRadius,
   } from "$lib/stores/geozone";
   import { geozonePathStyle, geozoneRadiusM, geozoneColor } from "$lib/helpers/geozoneStyle";
+  import {
+    fenceWorking, fenceEditing, FENCE_SHAPE_CIRCLE,
+    setFenceVertex, insertFenceVertex, removeFenceVertex, setFenceRadius,
+  } from "$lib/stores/fence";
+  import { fencePathStyle, fenceRadiusM, fenceColor } from "$lib/helpers/fenceStyle";
   import { MIN_FIX_SATELLITES } from "$lib/helpers/telemetry";
   import { get } from "svelte/store";
   import { MAP_PROVIDERS, getProviderById, type MapProvider } from "$lib/config/mapProviders";
@@ -442,6 +447,9 @@
   // Red overlay for mission legs that violate a geozone (the safety check).
   let geozoneViolationLayer: L.LayerGroup | undefined;
   let unsubGeozoneViol: (() => void) | undefined;
+  // Geofence overlay (ArduPilot/PX4 MAVLink FC config).
+  let fenceLayer: L.LayerGroup | undefined;
+  let unsubFence: (() => void) | undefined;
   const MAX_AERO_MARKERS = 1500; // cap rendered point markers per redraw (dense regions)
   // Airspaces currently drawn (passed the zoom filter) — the click handler tests these for
   // point-in-polygon so a single click lists *every* airspace stacked at that spot, not just the top one.
@@ -723,6 +731,140 @@
     }
   }
 
+  // ── Geofence overlay (ArduPilot/PX4; see docs/active/GEOFENCE.md) ──────────────────────────────
+  /** WP-style popup for a fence point: exact lat/lon (+ radius for a circle), Apply + (polygon) Delete.
+   *  Fence zones are identified by ARRAY INDEX (no id, unlike geozones). */
+  function buildFencePopup(index: number, vi: number, isCircle: boolean): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.className = "gz-popup";
+    const z = get(fenceWorking)?.zones[index];
+    const v = z?.vertices[vi];
+    if (!v) return wrap;
+    const tr = get(t);
+    const field = (label: string, value: string, step: string) => {
+      const row = document.createElement("label");
+      row.className = "gz-popup-row";
+      const span = document.createElement("span");
+      span.textContent = label;
+      const input = document.createElement("input");
+      input.type = "number"; input.step = step; input.value = value;
+      row.append(span, input);
+      return { row, input };
+    };
+    const latF = field(tr("geozone.lat"), (v.lat / 1e7).toFixed(7), "0.0000001");
+    const lonF = field(tr("geozone.lon"), (v.lon / 1e7).toFixed(7), "0.0000001");
+    wrap.append(latF.row, lonF.row);
+    let radF: { input: HTMLInputElement } | null = null;
+    if (isCircle) {
+      const f = field(`${tr("geozone.radius")} (m)`, String(Math.round((z?.radius_cm ?? 0) / 100)), "1");
+      wrap.append(f.row); radF = f;
+    }
+    const btns = document.createElement("div");
+    btns.className = "gz-popup-btns";
+    const apply = document.createElement("button");
+    apply.className = "gz-popup-apply"; apply.textContent = tr("geozone.apply");
+    apply.onclick = () => {
+      const lat = Number(latF.input.value), lon = Number(lonF.input.value);
+      if (isFinite(lat) && isFinite(lon)) setFenceVertex(index, vi, gzE7(lat), gzE7(lon));
+      if (radF) { const r = Number(radF.input.value); if (isFinite(r) && r > 0) setFenceRadius(index, r * 100); }
+      map?.closePopup();
+    };
+    btns.append(apply);
+    if (!isCircle && (z?.vertices.length ?? 0) > 3) {
+      const del = document.createElement("button");
+      del.className = "gz-popup-del"; del.textContent = tr("geozone.delete");
+      del.onclick = () => { removeFenceVertex(index, vi); map?.closePopup(); };
+      btns.append(del);
+    }
+    wrap.append(btns);
+    return wrap;
+  }
+
+  /** Redraw the geofence overlay. Mirrors `updateGeozones` but index-based and simpler (no per-zone
+   *  action/altitude). Plain coloured shapes show per the layer toggle / mission edit mode / fence
+   *  edit-lock; draggable handles + popups appear ONLY when the fence edit-lock is on (`fenceEditing`). */
+  function updateFence() {
+    if (!map) return;
+    if (!fenceLayer) fenceLayer = L.layerGroup().addTo(map);
+    const group = fenceLayer;
+    group.clearLayers();
+    const editing = get(fenceEditing);
+    if (!get(settings).airspace.layers.fence.d2 && !get(editMode) && !editing) return;
+    const cfg = get(fenceWorking);
+    if (!cfg || !cfg.has_fence) return;
+
+    cfg.zones.forEach((zone, index) => {
+      if (zone.vertices.length === 0) return;
+      const st = fencePathStyle(zone);
+      const opts = {
+        color: st.color, weight: st.weight, opacity: st.opacity,
+        fill: st.fill, fillColor: st.fillColor, fillOpacity: st.fillOpacity, interactive: false,
+      };
+      const isCircle = zone.shape === FENCE_SHAPE_CIRCLE;
+      let center: L.LatLng | undefined;
+      let circleLayer: L.Circle | undefined;
+      let polyLayer: L.Polygon | undefined;
+      if (isCircle) {
+        const radius = fenceRadiusM(zone);
+        if (radius == null || radius <= 0) return;
+        const c = zone.vertices[0];
+        circleLayer = L.circle([c.lat / 1e7, c.lon / 1e7], { radius, ...opts });
+        group.addLayer(circleLayer);
+        center = L.latLng(c.lat / 1e7, c.lon / 1e7);
+      } else {
+        const latlngs = zone.vertices.map((v) => [v.lat / 1e7, v.lon / 1e7] as [number, number]);
+        if (latlngs.length < 3) return;
+        polyLayer = L.polygon(latlngs, opts);
+        group.addLayer(polyLayer);
+        center = polyLayer.getBounds().getCenter();
+      }
+      // Centroid Fn label — skipped for a circle in edit mode (its centre handle already shows Fn).
+      if (center && !(editing && isCircle)) {
+        group.addLayer(
+          L.tooltip({ permanent: true, direction: "center", className: "geozone-label", opacity: 0.95 })
+            .setLatLng(center)
+            .setContent(`${get(t)("fence.abbrev")}${index + 1}`),
+        );
+      }
+
+      if (!editing) return;
+      const color = fenceColor(zone);
+
+      if (isCircle && circleLayer) {
+        const c = zone.vertices[0];
+        const clat = c.lat / 1e7, clon = c.lon / 1e7;
+        const radiusM = fenceRadiusM(zone)!;
+        const cm = L.marker([clat, clon], { draggable: true, icon: geozoneHandleIcon(color, { label: `${get(t)("fence.abbrev")}${index + 1}` }), zIndexOffset: 700 });
+        const edge = destinationPoint(clat, clon, 90, radiusM);
+        const rm = L.marker([edge.lat, edge.lon], { draggable: true, icon: geozoneHandleIcon(color, { small: true }), zIndexOffset: 700 });
+        cm.on("drag", () => { const p = cm.getLatLng(); circleLayer!.setLatLng(p); const e = destinationPoint(p.lat, p.lng, 90, circleLayer!.getRadius()); rm.setLatLng([e.lat, e.lon]); });
+        cm.on("dragend", () => { const p = cm.getLatLng(); setFenceVertex(index, 0, gzE7(p.lat), gzE7(p.lng)); });
+        cm.bindPopup(buildFencePopup(index, 0, true), { className: "gz-popup-container" });
+        rm.on("drag", () => { const p = rm.getLatLng(); const cll = circleLayer!.getLatLng(); circleLayer!.setRadius(haversineDistance(cll.lat, cll.lng, p.lat, p.lng)); });
+        rm.on("dragend", () => { const p = rm.getLatLng(); const cll = circleLayer!.getLatLng(); setFenceRadius(index, Math.round(haversineDistance(cll.lat, cll.lng, p.lat, p.lng) * 100)); });
+        group.addLayer(cm); group.addLayer(rm);
+      } else if (polyLayer) {
+        const live = zone.vertices.map((v) => [v.lat / 1e7, v.lon / 1e7] as [number, number]);
+        zone.vertices.forEach((v, vi) => {
+          const m = L.marker([v.lat / 1e7, v.lon / 1e7], { draggable: true, icon: geozoneHandleIcon(color, { label: String(vi + 1) }), zIndexOffset: 700 });
+          m.on("drag", () => { const p = m.getLatLng(); live[vi] = [p.lat, p.lng]; polyLayer!.setLatLngs(live); });
+          m.on("dragend", () => { const p = m.getLatLng(); setFenceVertex(index, vi, gzE7(p.lat), gzE7(p.lng)); });
+          m.bindPopup(buildFencePopup(index, vi, false), { className: "gz-popup-container" });
+          group.addLayer(m);
+        });
+        // Edge midpoint handles → click inserts a new vertex there.
+        const n = zone.vertices.length;
+        for (let i = 0; i < n; i++) {
+          const a = zone.vertices[i], b = zone.vertices[(i + 1) % n];
+          const mlat = (a.lat + b.lat) / 2 / 1e7, mlon = (a.lon + b.lon) / 2 / 1e7;
+          const mm = L.marker([mlat, mlon], { icon: geozoneHandleIcon(color, { mid: true }), zIndexOffset: 650, title: get(t)("geozone.insertVertex") });
+          mm.on("click", () => insertFenceVertex(index, i, gzE7(mlat), gzE7(mlon)));
+          group.addLayer(mm);
+        }
+      }
+    });
+  }
+
   /** Red overlay for the mission legs flagged by the geozone safety check (NFZ crossing / leaving an
    *  inclusion zone). Hint only — drawn on top of the mission line. */
   function updateGeozoneViolations() {
@@ -853,6 +995,8 @@
   // Geozones: redraw on layer-toggle / mission edit-mode / geozone edit-lock change (the last toggles
   // the editable markers).
   $effect(() => { void $settings.airspace.layers.geozones.d2; void $editMode; void $geozoneEditing; if (map) updateGeozones(); });
+  // Geofence: same trigger set (layer toggle / mission edit-mode / fence edit-lock).
+  $effect(() => { void $settings.airspace.layers.fence.d2; void $editMode; void $fenceEditing; if (map) updateFence(); });
   // Toggle the heading/course/turn nose lines on/off (clears or redraws immediately, not just next frame).
   $effect(() => { void $settings.directionLines; if (map) redrawDirLines(); });
 
@@ -1387,6 +1531,8 @@
     unsubGeozone = geozoneWorking.subscribe(() => updateGeozones());
     // Red violation overlay follows the safety-check result.
     unsubGeozoneViol = geozoneMissionResult.subscribe(() => updateGeozoneViolations());
+    // Geofence overlay follows the working copy (downloaded at handshake; reflects live edits).
+    unsubFence = fenceWorking.subscribe(() => updateFence());
     unsubAeroFocus = aeroFocus.subscribe((f) => { if (f && map) map.setView([f.lat, f.lon], Math.max(map.getZoom(), 11)); });
     map.on("moveend", updateAirspace);
     map.on("click", onGuidedClick); // Guided "fly here" target popup (vehicle control)
@@ -1597,6 +1743,7 @@
     unsubSafehome?.();
     unsubGeozone?.();
     unsubGeozoneViol?.();
+    unsubFence?.();
     if (map) {
       map.off("moveend", saveMapState);
       map.off("zoomend", saveMapState);
@@ -1613,6 +1760,7 @@
       if (safehomeLayer) map.removeLayer(safehomeLayer);
       if (geozoneLayer) map.removeLayer(geozoneLayer);
       if (geozoneViolationLayer) map.removeLayer(geozoneViolationLayer);
+      if (fenceLayer) map.removeLayer(fenceLayer);
       if (radarLayer) map.removeLayer(radarLayer);
       map.remove();
     }

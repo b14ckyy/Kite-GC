@@ -20,9 +20,17 @@
     MAX_GEOZONES, addGeozone, deleteGeozone, setGeozoneType, setGeozoneAction, setGeozoneAlts,
     setGeozoneSealevel, setGeozoneRadius, saveGeozoneConfig, revertGeozoneWorking, type GeoZone,
   } from '$lib/stores/geozone';
+  import {
+    fenceWorking, fenceDirty, fenceEditing,
+    FENCE_KIND_INCLUSION, FENCE_KIND_EXCLUSION, FENCE_SHAPE_CIRCLE, FENCE_SHAPE_POLYGON,
+    addFenceZone, deleteFenceZone, setFenceKind, setFenceRadius, setFenceParam,
+    saveFenceConfig, revertFenceWorking, type FenceZone,
+  } from '$lib/stores/fence';
+  import { fenceColor, fenceRadiusM } from '$lib/helpers/fenceStyle';
   import { validateGeozones, ensureCCWConfig } from '$lib/helpers/geozoneSanity';
   import { settings, AERO_DISTANCE_OPTIONS, type DistanceUnit } from '$lib/stores/settings';
   import { telemetry } from '$lib/stores/telemetry';
+  import { connection } from '$lib/stores/connection';
   import { haversineDistance } from '$lib/utils/geo';
   import { aeroPointInfo } from '$lib/helpers/airspaceStyle';
   import { geozoneColor, geozoneRadiusM } from '$lib/helpers/geozoneStyle';
@@ -49,6 +57,7 @@
   const LAYERS: { key: AeroLayerKey; label: () => string }[] = [
     { key: 'airspaces', label: () => $t('airspace.layerAirspaces') },
     { key: 'geozones', label: () => $t('airspace.layerGeozones') },
+    { key: 'fence', label: () => $t('airspace.layerFence') },
     { key: 'obstacles', label: () => $t('airspace.layerObstacles') },
     { key: 'airports', label: () => $t('airspace.layerAirports') },
     { key: 'rc', label: () => $t('airspace.layerRc') },
@@ -57,8 +66,13 @@
   // The Geozones toggle + list only exist when a geozone-capable INAV FC (≥8.0) is connected (the
   // working copy is non-null only then, and is cleared on disconnect → it doubles as the edit gate).
   const hasGeozones = $derived($geozoneWorking?.has_geozones ?? false);
-  // OpenAIP layer rows only when the subsystem is on; the geozones row whenever a capable FC is connected.
-  const visibleLayers = $derived(LAYERS.filter((l) => (l.key === 'geozones' ? hasGeozones : airspaceEnabled)));
+  // The Geofence toggle + list only exist when a MAVLink (ArduPilot/PX4) FC is connected.
+  const hasFence = $derived($fenceWorking?.has_fence ?? false);
+  // OpenAIP layer rows only when the subsystem is on; the geozones/fence rows whenever a capable FC is connected.
+  const visibleLayers = $derived(
+    LAYERS.filter((l) =>
+      l.key === 'geozones' ? hasGeozones : l.key === 'fence' ? hasFence : airspaceEnabled),
+  );
 
   // Accordion: at most one expanded geozone row.
   let expandedZone = $state<number | null>(null);
@@ -167,6 +181,135 @@
     const r = geozoneRadiusM(z);
     return r != null ? `${Math.round(r)} m` : '—';
   }
+
+  // ── Geofence editing (ArduPilot/PX4) ──
+  const fenceZones = $derived($fenceWorking?.zones ?? []);
+  const fenceParams = $derived($fenceWorking?.params ?? []);
+  let expandedFence = $state<number | null>(null);
+  function toggleFence(i: number) { expandedFence = expandedFence === i ? null : i; }
+
+  // Editing blocked while armed (same rationale as geozones). Force the map edit-lock off when arming.
+  $effect(() => { if (armed && $fenceEditing) fenceEditing.set(false); });
+
+  let fenceBusy = $state(false);
+  let editFenceRadiusM = $state(0);
+  $effect(() => {
+    const z = fenceZones[expandedFence ?? -1];
+    if (z) editFenceRadiusM = z.radius_cm != null ? Math.round(z.radius_cm / 100) : 0;
+  });
+  function commitFenceRadius(i: number) { setFenceRadius(i, (editFenceRadiusM || 0) * 100); }
+
+  function onAddFence(shape: number) {
+    const i = addFenceZone(FENCE_KIND_INCLUSION, shape);
+    if (i != null) { expandedFence = i; fenceEditing.set(true); }
+  }
+  function onDeleteFence(i: number) {
+    deleteFenceZone(i);
+    expandedFence = null;
+  }
+  function onRevertFence() { revertFenceWorking(); expandedFence = null; }
+  async function onSaveFence() {
+    if (fenceBusy || armed) return;
+    const ans = await confirmDialog.show({
+      title: $t('fence.saveTitle'),
+      message: $t('fence.saveMsg'),
+      buttons: [{ label: $t('fence.saveConfirm'), value: 'ok', primary: true }],
+    });
+    if (ans !== 'ok') return;
+    fenceBusy = true;
+    try { await saveFenceConfig(); } finally { fenceBusy = false; }
+  }
+
+  /** Representative point of a fence zone (circle centre / polygon centroid) for focus-on-click. */
+  function fenceCenter(z: FenceZone): { lat: number; lon: number } | null {
+    if (z.vertices.length === 0) return null;
+    if (z.shape === FENCE_SHAPE_CIRCLE) return { lat: z.vertices[0].lat / 1e7, lon: z.vertices[0].lon / 1e7 };
+    let sx = 0, sy = 0;
+    for (const v of z.vertices) { sx += v.lat; sy += v.lon; }
+    return { lat: sx / z.vertices.length / 1e7, lon: sy / z.vertices.length / 1e7 };
+  }
+  function fmtFenceRadius(z: FenceZone): string {
+    const r = fenceRadiusM(z);
+    return r != null ? `${Math.round(r)} m` : '—';
+  }
+
+  // Friendly metadata for the global fence params, with value bounds per the ArduPilot (FENCE_*) /
+  // PX4 (GF_*) specs. `toggle` → a Toggle; `enum` → a named-action dropdown; the rest → a NumberStepper
+  // with a unit. Unknown params fall back to a plain NumberStepper showing the raw FC name.
+  interface FenceParamMeta { key: string; unit?: string; min: number; max: number; step: number; toggle?: boolean; enum?: boolean; decimals?: number }
+  const FENCE_PARAM_META: Record<string, FenceParamMeta> = {
+    FENCE_ENABLE:    { key: 'fence.pEnable', min: 0, max: 1, step: 1, toggle: true },
+    FENCE_ACTION:    { key: 'fence.pAction', min: 0, max: 7, step: 1, enum: true },
+    FENCE_ALT_MAX:   { key: 'fence.pAltMax', unit: 'm', min: 0, max: 100000, step: 5 },
+    FENCE_ALT_MIN:   { key: 'fence.pAltMin', unit: 'm', min: -500, max: 100000, step: 5 },
+    FENCE_RADIUS:    { key: 'fence.pRadius', unit: 'm', min: 30, max: 100000, step: 10 },
+    FENCE_MARGIN:    { key: 'fence.pMargin', unit: 'm', min: 1, max: 10000, step: 1 },
+    GF_ACTION:       { key: 'fence.pAction', min: 0, max: 5, step: 1, enum: true },
+    GF_MAX_HOR_DIST: { key: 'fence.pMaxHor', unit: 'm', min: 0, max: 100000, step: 10 },
+    GF_MAX_VER_DIST: { key: 'fence.pMaxVer', unit: 'm', min: 0, max: 100000, step: 10 },
+  };
+  function paramLabel(name: string): string {
+    const m = FENCE_PARAM_META[name];
+    return m ? `${$t(m.key)} (${name})` : name;
+  }
+
+  // Breach-action option tables (value = raw FC code, key = i18n label). The valid set depends on the
+  // firmware/vehicle: ArduPilot FENCE_ACTION differs per Copter/Plane/Rover; PX4 GF_ACTION is one set.
+  // The raw code is what gets written; the dropdown only shows the human name.
+  interface ActionOpt { value: number; key: string }
+  const ACT_COPTER: ActionOpt[] = [
+    { value: 0, key: 'fence.act.reportOnly' },
+    { value: 1, key: 'fence.act.rtlOrLand' },
+    { value: 2, key: 'fence.act.alwaysLand' },
+    { value: 3, key: 'fence.act.smartRtlRtlLand' },
+    { value: 4, key: 'fence.act.brakeOrLand' },
+    { value: 5, key: 'fence.act.smartRtlOrLand' },
+  ];
+  const ACT_PLANE: ActionOpt[] = [
+    { value: 0, key: 'fence.act.reportOnly' },
+    { value: 1, key: 'fence.act.rtl' },
+    { value: 6, key: 'fence.act.guided' },
+    { value: 7, key: 'fence.act.guidedThrPass' },
+  ];
+  const ACT_ROVER: ActionOpt[] = [
+    { value: 0, key: 'fence.act.reportOnly' },
+    { value: 1, key: 'fence.act.rtlOrHold' },
+    { value: 2, key: 'fence.act.hold' },
+    { value: 3, key: 'fence.act.smartRtlRtlHold' },
+    { value: 4, key: 'fence.act.smartRtlOrHold' },
+  ];
+  const ACT_PX4: ActionOpt[] = [
+    { value: 0, key: 'fence.act.none' },
+    { value: 1, key: 'fence.act.warning' },
+    { value: 2, key: 'fence.act.holdMode' },
+    { value: 3, key: 'fence.act.returnMode' },
+    { value: 4, key: 'fence.act.terminate' },
+    { value: 5, key: 'fence.act.landMode' },
+  ];
+
+  /** Classify the ArduPilot vehicle family from the MAVLink MAV_TYPE (HEARTBEAT). Fixed-wing + VTOL/
+   *  QuadPlane run Plane firmware; rover/boat run Rover; everything else (multirotor/heli) → Copter. */
+  function arduVehicle(mavType: number): 'copter' | 'plane' | 'rover' {
+    if (mavType === 10 || mavType === 11) return 'rover';                 // GROUND_ROVER / SURFACE_BOAT
+    if (mavType === 1 || (mavType >= 19 && mavType <= 25)) return 'plane'; // FIXED_WING / VTOL_*
+    return 'copter';
+  }
+  /** Action options for a given action param, by system + vehicle (PX4 by param name, Ardu by MAV_TYPE). */
+  function actionOptions(name: string): ActionOpt[] {
+    if (name === 'GF_ACTION') return ACT_PX4;
+    const v = arduVehicle($connection.fcInfo?.mav_type ?? 0);
+    return v === 'plane' ? ACT_PLANE : v === 'rover' ? ACT_ROVER : ACT_COPTER;
+  }
+
+  // Local draft mirror so NumberStepper's +/- buttons (synthetic onchange event) commit cleanly.
+  // Reseeded from the working params (load / revert / commit) — a commit reseeds to the same value, so
+  // no drift; the draft is keyed by raw param name.
+  let paramDraft = $state<Record<string, number>>({});
+  $effect(() => {
+    const d: Record<string, number> = {};
+    for (const p of fenceParams) d[p.name] = p.value;
+    paramDraft = d;
+  });
 
   function setVis(key: AeroLayerKey, dim: 'd2' | 'd3', on: boolean) {
     settings.update((s) => ({
@@ -395,6 +538,121 @@
         {/if}
       </div>
     {/if}
+
+    {#if hasFence}
+      <div class="gz-section">
+        <div class="gz-head">
+          <span class="gz-title">{$t('fence.title')}</span>
+          <span class="gz-count">{fenceZones.length}</span>
+        </div>
+
+        {#if armed}
+          <div class="gz-armed">{$t('fence.armedLocked')}</div>
+        {/if}
+
+        <!-- Toolbar: add zone (defaults to inclusion; toggle per-zone) + the map edit-lock toggle. -->
+        <div class="gz-toolbar">
+          <button class="gz-add" disabled={armed} title={$t('fence.addCircle')} onclick={() => onAddFence(FENCE_SHAPE_CIRCLE)}>○ {$t('geozone.shapeCircle')}</button>
+          <button class="gz-add" disabled={armed} title={$t('fence.addPolygon')} onclick={() => onAddFence(FENCE_SHAPE_POLYGON)}>▱ {$t('geozone.shapePolygon')}</button>
+          <span class="gz-spacer"></span>
+          <label class="gz-editlock" title={$t('geozone.editLockHint')}>
+            <span>{$t('geozone.editLock')}</span>
+            <Toggle checked={$fenceEditing} disabled={armed} onchange={(c) => fenceEditing.set(c)} />
+          </label>
+        </div>
+
+        {#if !fenceZones.length}
+          <div class="gz-empty">{$t('fence.none')}</div>
+        {:else}
+          {#each fenceZones as zone, i (i)}
+            {@const inclusion = zone.kind === FENCE_KIND_INCLUSION}
+            {@const circle = zone.shape === FENCE_SHAPE_CIRCLE}
+            {@const center = fenceCenter(zone)}
+            <div class="gz-row" style="--gz-color:{fenceColor(zone)}">
+              <button class="gz-rowhead" onclick={() => toggleFence(i)} title={$t('geozone.expand')}>
+                <span class="gz-dot"></span>
+                <span class="gz-name">{$t('fence.abbrev')}{i + 1}</span>
+                <span class="gz-shape">{circle ? $t('geozone.shapeCircle') : $t('geozone.shapePolygon')}</span>
+                <span class="gz-sub">
+                  {circle ? fmtFenceRadius(zone) : $t('geozone.vertexCount', { values: { n: zone.vertices.length } })}
+                </span>
+              </button>
+              {#if expandedFence === i}
+                <div class="gz-detail">
+                  <!-- Kind (Inclusion/Exclusion) slide toggle. -->
+                  <div class="gz-edit">
+                    <span class="gz-elabel">{$t('fence.kind')}</span>
+                    <div class="gz-typetoggle">
+                      <span class="gz-tname">{inclusion ? $t('fence.inclusion') : $t('fence.exclusion')}</span>
+                      <Toggle checked={inclusion} disabled={armed} onchange={(c) => setFenceKind(i, c ? FENCE_KIND_INCLUSION : FENCE_KIND_EXCLUSION)} />
+                    </div>
+                  </div>
+                  {#if circle}
+                    <div class="gz-edit">
+                      <span class="gz-elabel">{$t('geozone.radius')}</span>
+                      <NumberStepper bind:value={editFenceRadiusM} min={1} step={10} unit="m" disabled={armed} onchange={() => commitFenceRadius(i)} />
+                    </div>
+                  {/if}
+                  <div class="gz-rowactions">
+                    {#if center}
+                      <button class="gz-focus" onclick={() => focusAero(center.lat, center.lon)}>{$t('geozone.focus')}</button>
+                    {/if}
+                    <button class="gz-delete" disabled={armed} onclick={() => onDeleteFence(i)}>{$t('geozone.delete')}</button>
+                  </div>
+                </div>
+              {/if}
+            </div>
+          {/each}
+        {/if}
+
+        <!-- Global fence params (enforcement: enable/action/altitude/radius). Friendly labels + units,
+             value bounds per the ArduPilot/PX4 specs; enable → Toggle, breach action → named dropdown. -->
+        {#if fenceParams.length}
+          <div class="gz-params">
+            <div class="gz-params-head">{$t('fence.params')}</div>
+            {#each fenceParams as p (p.name)}
+              {@const meta = FENCE_PARAM_META[p.name]}
+              <div class="gz-edit">
+                <span class="gz-elabel" title={p.name}>{paramLabel(p.name)}</span>
+                {#if meta?.toggle}
+                  <div class="gz-typetoggle">
+                    <span class="gz-tname">{p.value ? $t('fence.on') : $t('fence.off')}</span>
+                    <Toggle checked={p.value !== 0} disabled={armed} onchange={(c) => setFenceParam(p.name, c ? 1 : 0)} />
+                  </div>
+                {:else if meta?.enum}
+                  {@const opts = actionOptions(p.name)}
+                  <select class="am-select" value={p.value} disabled={armed} onchange={(e) => setFenceParam(p.name, Number(e.currentTarget.value))}>
+                    {#each opts as opt}<option value={opt.value}>{$t(opt.key)}</option>{/each}
+                    {#if !opts.some((o) => o.value === p.value)}<option value={p.value}>{p.value}</option>{/if}
+                  </select>
+                {:else}
+                  <NumberStepper
+                    bind:value={paramDraft[p.name]}
+                    min={meta?.min ?? -Infinity}
+                    max={meta?.max ?? Infinity}
+                    step={meta?.step ?? 1}
+                    unit={meta?.unit ?? ''}
+                    decimals={meta?.decimals}
+                    disabled={armed}
+                    onchange={() => setFenceParam(p.name, paramDraft[p.name])}
+                  />
+                {/if}
+              </div>
+            {/each}
+          </div>
+        {/if}
+
+        <!-- Save / Revert (only when there are pending edits). -->
+        {#if $fenceDirty}
+          <div class="gz-save">
+            <Button variant="data" icon="save" disabled={fenceBusy || armed} onclick={onSaveFence}>
+              {fenceBusy ? $t('fence.saving') : $t('fence.saveToFc')}
+            </Button>
+            <Button variant="standard" disabled={fenceBusy} onclick={onRevertFence}>{$t('geozone.revert')}</Button>
+          </div>
+        {/if}
+      </div>
+    {/if}
   </div>
 {/snippet}
 
@@ -536,6 +794,10 @@
     font-size: 11.5px; color: #1a1a1a; background: #f5a623; font-weight: 600;
     border-radius: 4px; padding: 4px 8px; margin: 2px 2px 4px;
   }
+  /* Global fence params (raw FC param names + numeric inputs). */
+  .gz-params { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; padding-top: 6px; border-top: 1px solid #1f1f1f; }
+  .gz-params-head { font-size: 11px; font-weight: 700; color: #949494; text-transform: uppercase; letter-spacing: 0.5px; padding: 0 2px 2px; }
+
   .gz-issues { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
   .gz-issue { font-size: 11px; color: #f5a623; }
   .gz-issue.gz-err { color: #ff5a5a; }

@@ -75,6 +75,8 @@
   import { safehomeWorking, isSafehomeEmpty } from "$lib/stores/safehome";
   import { geozoneWorking, geozoneMissionResult, GEOZONE_SHAPE_CIRCULAR } from "$lib/stores/geozone";
   import { geozonePathStyle, geozoneRadiusM } from "$lib/helpers/geozoneStyle";
+  import { fenceWorking, FENCE_SHAPE_CIRCLE } from "$lib/stores/fence";
+  import { fencePathStyle, fenceRadiusM } from "$lib/helpers/fenceStyle";
   import { buildApproachGeometry } from "$lib/helpers/autolandGeometry";
 
   let {
@@ -415,6 +417,11 @@
   let unsubGeozoneViol3d: (() => void) | undefined;
   let geozone3dGen = 0;                               // race guard for the async terrain sample
   let geozoneD3 = true;                               // last-seen geozones 3D toggle (default on)
+  // Geofence overlay (ArduPilot/PX4 MAVLink FC config) — extruded volumes to the global ALT_MAX.
+  let fence3dEntities: Cesium.Entity[] = [];
+  let unsubFence3d: (() => void) | undefined;
+  let fence3dGen = 0;                                 // race guard for the async terrain sample
+  let fenceD3 = true;                                 // last-seen fence 3D toggle (default on)
 
   // One-shot camera recenter after a (re)mount. The 2D↔3D toggle remounts this
   // component, so this fires once on every switch to 3D.
@@ -834,6 +841,7 @@
         updateAirports3D();   // (re)build airports/runways for the now-visible 3D view
         updateGeozones3D();   // (re)build geozone volumes for the now-visible 3D view
         updateGeozoneViolations3D(); // (re)build the red mission-violation overlay
+        updateFence3D();      // (re)build geofence volumes for the now-visible 3D view
       } else {
         // Leaving 3D while in FPV: undo FPV's viewer changes (camera inputs, model/track,
         // wheel handler) so nothing carries over and blocks the map — but keep cameraMode
@@ -1168,6 +1176,11 @@
         geozoneD3 = next.airspace.layers.geozones.d3;
         updateGeozones3D();
       }
+      // Geofence — same: FC config, watch only its own toggle.
+      if (next.airspace.layers.fence.d3 !== fenceD3) {
+        fenceD3 = next.airspace.layers.fence.d3;
+        updateFence3D();
+      }
     });
 
     // Mission overlay — re-render on mission / visibility / launch changes.
@@ -1222,6 +1235,10 @@
     // Red mission-violation overlay follows the safety-check result.
     unsubGeozoneViol3d = geozoneMissionResult.subscribe(() => updateGeozoneViolations3D());
 
+    // Geofence volumes follow the working copy (downloaded at handshake; reflects live edits).
+    unsubFence3d = fenceWorking.subscribe(() => updateFence3D());
+    void waitForTerrain(viewer).then((tp) => { if (tp) updateFence3D(); });
+
     // Obstacle columns + airspace volumes: rebuild on new aero data (toggle / range changes ride the
     // settings-watch below; camera-pan re-culls via the debounced moveEnd handler — the window follows
     // the camera).
@@ -1270,6 +1287,7 @@
     unsubSafehome3d?.();
     unsubGeozone3d?.();
     unsubGeozoneViol3d?.();
+    unsubFence3d?.();
     unsubAero3d?.();
     if (obstacleMoveTimer) clearTimeout(obstacleMoveTimer);
     radar3dPickHandler?.destroy();
@@ -2267,6 +2285,98 @@
       ];
       geozone3dViolationEntities.push(viewer.entities.add({
         polyline: { positions, arcType: Cesium.ArcType.NONE, width: 5, material: Cesium.Color.fromCssColorString("#ff2d2d") },
+      }));
+    }
+    viewer.scene.requestRender();
+  }
+
+  // ── Geofence overlay (ArduPilot/PX4; see docs/active/GEOFENCE.md) ──────────────────────────────
+  /** Rebuild the geofence volumes. Circle → extruded cylinder, polygon → extruded hull; blue inclusion
+   *  / amber exclusion. Fences have no per-zone altitude, so all zones extrude from the terrain ground
+   *  up to the global vertical limit (ArduPilot FENCE_ALT_MAX / PX4 GF_MAX_VER_DIST), with a visual
+   *  fallback cap when no such param exists. Gated by the fence 3D layer toggle. */
+  async function updateFence3D() {
+    if (!viewer) return;
+    const gen = ++fence3dGen;
+    for (const e of fence3dEntities) viewer.entities.remove(e);
+    fence3dEntities.length = 0;
+    if (!active || !get(settings).airspace.layers.fence.d3) { viewer.scene.requestRender(); return; }
+    const cfg = get(fenceWorking);
+    if (!cfg || !cfg.has_fence || cfg.zones.length === 0) { viewer.scene.requestRender(); return; }
+
+    const NO_LIMIT_H = 120; // visual extrusion height (m) when no vertical-limit param is set
+    const altParam = cfg.params.find((p) => p.name === "FENCE_ALT_MAX" || p.name === "GF_MAX_VER_DIST");
+    const altMaxM = altParam && altParam.value > 0 ? altParam.value : NO_LIMIT_H;
+
+    // One representative point per zone (circle centre / polygon centroid) for the AGL ground sample.
+    const reps = cfg.zones.map((z) => {
+      if (z.shape === FENCE_SHAPE_CIRCLE) {
+        const c = z.vertices[0];
+        return Cesium.Cartographic.fromDegrees((c?.lon ?? 0) / 1e7, (c?.lat ?? 0) / 1e7);
+      }
+      let sx = 0, sy = 0;
+      for (const v of z.vertices) { sx += v.lon; sy += v.lat; }
+      const n = Math.max(1, z.vertices.length);
+      return Cesium.Cartographic.fromDegrees(sx / n / 1e7, sy / n / 1e7);
+    });
+    let groundEll: number[] = reps.map(() => 0);
+    const tp = viewer.scene.terrainProvider;
+    if (tp && !(tp instanceof Cesium.EllipsoidTerrainProvider)) {
+      try {
+        const sampled = await Cesium.sampleTerrainMostDetailed(tp, reps);
+        if (gen !== fence3dGen || !viewer) return; // superseded by a newer redraw
+        groundEll = sampled.map((c) => (isFinite(c.height) ? c.height : 0));
+      } catch (e) {
+        console.warn("[Map3D] fence terrain sample failed", e);
+      }
+    }
+
+    for (let i = 0; i < cfg.zones.length; i++) {
+      const z = cfg.zones[i];
+      if (z.vertices.length === 0) continue;
+      const floorEll = groundEll[i];
+      const ceilEll = floorEll + altMaxM;
+
+      const st = fencePathStyle(z); // blue inclusion / amber exclusion
+      const lineColor = Cesium.Color.fromCssColorString(st.color).withAlpha(st.opacity);
+
+      // Footprint ring ([lat,lon], closed) + the circle centre/radius for the fill volume.
+      let ring: [number, number][];
+      let circleCentre: { lat: number; lon: number; r: number } | null = null;
+      if (z.shape === FENCE_SHAPE_CIRCLE) {
+        const c = z.vertices[0];
+        const r = fenceRadiusM(z);
+        if (r == null || r <= 0) continue;
+        const lat = c.lat / 1e7, lon = c.lon / 1e7;
+        circleCentre = { lat, lon, r };
+        ring = safehomeCircle(lat, lon, r);
+      } else {
+        ring = z.vertices.map((v) => [v.lat / 1e7, v.lon / 1e7] as [number, number]);
+        if (ring.length < 3) continue;
+        ring.push(ring[0]); // close the loop
+      }
+
+      // Translucent fill volume (no entity outline — the boundary polylines below carry the line style).
+      const fillMaterial = Cesium.Color.fromCssColorString(st.color).withAlpha(0.13);
+      if (circleCentre) {
+        fence3dEntities.push(viewer.entities.add({
+          position: Cesium.Cartesian3.fromDegrees(circleCentre.lon, circleCentre.lat),
+          ellipse: { semiMinorAxis: circleCentre.r, semiMajorAxis: circleCentre.r, height: floorEll, extrudedHeight: ceilEll, material: fillMaterial, outline: false },
+        }));
+      } else {
+        const positions = Cesium.Cartesian3.fromDegreesArray(z.vertices.flatMap((v) => [v.lon / 1e7, v.lat / 1e7]));
+        fence3dEntities.push(viewer.entities.add({
+          polygon: { hierarchy: new Cesium.PolygonHierarchy(positions), height: floorEll, extrudedHeight: ceilEll, perPositionHeight: false, material: fillMaterial, outline: false },
+        }));
+      }
+
+      // Boundary rings: floor + ceiling.
+      const ringAt = (h: number) => Cesium.Cartesian3.fromDegreesArrayHeights(ring.flatMap(([la, lo]) => [lo, la, h]));
+      fence3dEntities.push(viewer.entities.add({
+        polyline: { positions: ringAt(floorEll), arcType: Cesium.ArcType.NONE, width: st.weight, material: lineColor },
+      }));
+      fence3dEntities.push(viewer.entities.add({
+        polyline: { positions: ringAt(ceilEll), arcType: Cesium.ArcType.NONE, width: st.weight, material: lineColor },
       }));
     }
     viewer.scene.requestRender();

@@ -363,7 +363,7 @@ pub fn ardu_mission_download(state: State<'_, AppState>) -> Result<Vec<ArduWaypo
             None => return Err("Not connected".into()),
         }
     };
-    mavlink_proto::mission::download(&cmd_tx, fc_sysid, reserve_home)
+    mavlink_proto::mission::download(&cmd_tx, fc_sysid, reserve_home, ::mavlink::ardupilotmega::MavMissionType::MAV_MISSION_TYPE_MISSION)
 }
 
 /// Upload an ArduPilot mission to the FC via MAVLink mission microprotocol.
@@ -387,7 +387,7 @@ pub fn ardu_mission_upload(
             None => return Err("Not connected".into()),
         }
     };
-    mavlink_proto::mission::upload(&cmd_tx, fc_sysid, &waypoints, reserve_home)
+    mavlink_proto::mission::upload(&cmd_tx, fc_sysid, &waypoints, reserve_home, ::mavlink::ardupilotmega::MavMissionType::MAV_MISSION_TYPE_MISSION)
 }
 
 /// Read a text file from disk (used for .waypoints and similar formats)

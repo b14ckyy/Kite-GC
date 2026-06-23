@@ -58,6 +58,7 @@ pub fn download(
     cmd_tx: &mpsc::Sender<MavlinkCommand>,
     fc_sysid: u8,
     reserve_home: bool,
+    mission_type: MavMissionType,
 ) -> Result<Vec<ArduWaypoint>, String> {
     let rx = register(cmd_tx)?;
 
@@ -65,7 +66,7 @@ pub fn download(
     send(cmd_tx, MavMessage::MISSION_REQUEST_LIST(MISSION_REQUEST_LIST_DATA {
         target_system: fc_sysid,
         target_component: 0,
-        mission_type: MavMissionType::MAV_MISSION_TYPE_MISSION,
+        mission_type,
     }))?;
 
     // 2. Wait for item count
@@ -76,7 +77,7 @@ pub fn download(
     log::info!("MAVLink mission download: FC reports {} items", count);
 
     if count == 0 {
-        let _ = send(cmd_tx, make_ack(fc_sysid, MavMissionResult::MAV_MISSION_ACCEPTED));
+        let _ = send(cmd_tx, make_ack(fc_sysid, MavMissionResult::MAV_MISSION_ACCEPTED, mission_type));
         unregister(cmd_tx);
         return Ok(vec![]);
     }
@@ -93,7 +94,7 @@ pub fn download(
             target_system: fc_sysid,
             target_component: 0,
             seq,
-            mission_type: MavMissionType::MAV_MISSION_TYPE_MISSION,
+            mission_type,
         })) {
             unregister(cmd_tx);
             return Err(e);
@@ -106,7 +107,7 @@ pub fn download(
     }
 
     // 4. Acknowledge
-    let _ = send(cmd_tx, make_ack(fc_sysid, MavMissionResult::MAV_MISSION_ACCEPTED));
+    let _ = send(cmd_tx, make_ack(fc_sysid, MavMissionResult::MAV_MISSION_ACCEPTED, mission_type));
     unregister(cmd_tx);
     log::info!("MAVLink mission download complete: {} items", items.len());
     Ok(items)
@@ -121,6 +122,7 @@ pub fn upload(
     fc_sysid: u8,
     waypoints: &[ArduWaypoint],
     reserve_home: bool,
+    mission_type: MavMissionType,
 ) -> Result<(), String> {
     let rx = register(cmd_tx)?;
     // ArduPilot reserves mission slot 0 for home, so the wire count is waypoints + 1: seq 0 is a
@@ -134,7 +136,7 @@ pub fn upload(
         target_system: fc_sysid,
         target_component: 0,
         count,
-        mission_type: MavMissionType::MAV_MISSION_TYPE_MISSION,
+        mission_type,
         opaque_id: 0,
     })) {
         unregister(cmd_tx);
@@ -151,7 +153,7 @@ pub fn upload(
         }
         match rx.recv_timeout(ITEM_TIMEOUT) {
             Ok(MavMessage::MISSION_REQUEST_INT(req)) => {
-                if let Err(e) = respond_item(cmd_tx, req.seq, waypoints, fc_sysid, reserve_home) {
+                if let Err(e) = respond_item(cmd_tx, req.seq, waypoints, fc_sysid, reserve_home, mission_type) {
                     unregister(cmd_tx);
                     return Err(e);
                 }
@@ -160,7 +162,7 @@ pub fn upload(
                 // Deprecated float-coordinate request — still answer with MISSION_ITEM_INT (the FC
                 // accepts it). Without this the upload stalls → MAV_MISSION_OPERATION_CANCELLED.
                 // (ArduPilot SITL uses this variant.)
-                if let Err(e) = respond_item(cmd_tx, req.seq, waypoints, fc_sysid, reserve_home) {
+                if let Err(e) = respond_item(cmd_tx, req.seq, waypoints, fc_sysid, reserve_home, mission_type) {
                     unregister(cmd_tx);
                     return Err(e);
                 }
@@ -199,6 +201,7 @@ fn respond_item(
     waypoints: &[ArduWaypoint],
     fc_sysid: u8,
     reserve_home: bool,
+    mission_type: MavMissionType,
 ) -> Result<(), String> {
     let item = if reserve_home && seq == 0 {
         home_item(waypoints, fc_sysid)
@@ -207,7 +210,7 @@ fn respond_item(
         if idx >= waypoints.len() {
             return Err(format!("FC requested WP {} but mission has only {}", seq, waypoints.len()));
         }
-        wp_to_item(&waypoints[idx], seq, fc_sysid)
+        wp_to_item(&waypoints[idx], seq, fc_sysid, mission_type)
     };
     send(cmd_tx, MavMessage::MISSION_ITEM_INT(item))
 }
@@ -216,13 +219,14 @@ fn respond_item(
 pub fn clear(
     cmd_tx: &mpsc::Sender<MavlinkCommand>,
     fc_sysid: u8,
+    mission_type: MavMissionType,
 ) -> Result<(), String> {
     let rx = register(cmd_tx)?;
 
     if let Err(e) = send(cmd_tx, MavMessage::MISSION_CLEAR_ALL(MISSION_CLEAR_ALL_DATA {
         target_system: fc_sysid,
         target_component: 0,
-        mission_type: MavMissionType::MAV_MISSION_TYPE_MISSION,
+        mission_type,
     })) {
         unregister(cmd_tx);
         return Err(e);
@@ -266,12 +270,12 @@ fn send(cmd_tx: &mpsc::Sender<MavlinkCommand>, msg: MavMessage) -> Result<(), St
         .map_err(|_| "MAVLink send timed out".to_string())?
 }
 
-fn make_ack(target: u8, result: MavMissionResult) -> MavMessage {
+fn make_ack(target: u8, result: MavMissionResult, mission_type: MavMissionType) -> MavMessage {
     MavMessage::MISSION_ACK(MISSION_ACK_DATA {
         target_system: target,
         target_component: 0,
         mavtype: result,
-        mission_type: MavMissionType::MAV_MISSION_TYPE_MISSION,
+        mission_type,
         opaque_id: 0,
     })
 }
@@ -358,14 +362,15 @@ fn home_item(waypoints: &[ArduWaypoint], target: u8) -> MISSION_ITEM_INT_DATA {
     }
 }
 
-fn wp_to_item(wp: &ArduWaypoint, seq: u16, target: u8) -> MISSION_ITEM_INT_DATA {
+fn wp_to_item(wp: &ArduWaypoint, seq: u16, target: u8, mission_type: MavMissionType) -> MISSION_ITEM_INT_DATA {
     MISSION_ITEM_INT_DATA {
         target_system:    target,
         target_component: 0,
         seq,
         frame:        u8_to_frame(wp.frame),
         command:      u16_to_cmd(wp.command),
-        current:      if seq == 0 { 1 } else { 0 },
+        // `current` flags the active waypoint of a real mission (slot 0); meaningless for fence/rally.
+        current:      if seq == 0 && mission_type == MavMissionType::MAV_MISSION_TYPE_MISSION { 1 } else { 0 },
         autocontinue: wp.autocontinue as u8,
         param1:       wp.param1,
         param2:       wp.param2,
@@ -374,7 +379,7 @@ fn wp_to_item(wp: &ArduWaypoint, seq: u16, target: u8) -> MISSION_ITEM_INT_DATA 
         x:            wp.lat,
         y:            wp.lon,
         z:            wp.alt,
-        mission_type: MavMissionType::MAV_MISSION_TYPE_MISSION,
+        mission_type,
     }
 }
 
