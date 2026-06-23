@@ -1,6 +1,7 @@
 # INAV Geozones — Feature Plan
 
-> STATUS: planned · 2026-06-23. Second of the three "Airspace Manager" safety subsystems
+> STATUS: P1 (display) + P2 (editor) + mission safety check SHIPPED · 2026-06-23. P3 (alerts) open.
+> Second of the three "Airspace Manager" safety subsystems
 > (Autoland → **Geozones** → Geofence). Distinct from the worldwide-NFZ idea (that one is generic
 > drone no-fly maps from external providers; see the future note). This is the **INAV FC geozone
 > editor**: read/write the flight controller's own geozone config over MSP.
@@ -85,13 +86,33 @@ polygon→extruded hull; AGL via terrain sample, AMSL via geoid; max=0 → cappe
 "Geozones" list section (collapsed + expanded showing values **read-only** in P1) + the 5th layer
 toggle. i18n en/de/fr.
 
-### Phase 2 — Editor (interactive map + write)
-Working/dirty store; the expanded panel fields + type toggle become live; the edit-lock toggle; map
-markers become draggable with the WP-style popup (polygon vertex add/move/delete, circle centre +
-radius); **Save to FC** (SET_GEOZONE header → SET_GEOZONE_VERTEX per vertex → `MSP_EEPROM_WRITE`);
-**sanity checks**: ≤63 zones, ≤126 vertices total, circle=2 / polygon≥3, **CCW + non
-self-intersecting**, upper>lower (except 0). Advanced multi-zone overlap checks (≥2 shared borders
-≥2.5× loiter radius apart; ≥50 m vertical overlap) surfaced as **warnings**, not hard blocks.
+### Phase 2 — Editor (interactive map + write) — *SHIPPED*
+Working/dirty store (`geozoneWorking`/`geozoneDirty`/`geozoneEditing` + mutations) — 2D/3D/panel now
+render from the working copy. **Backend** `geozone_write_all`: writes all 63 slots (active with data,
+empties cleared via `vertexCount 0`), **header before vertices** (the vertex SET handler branches on the
+stored shape to read a circle radius), circle radius appended, then one `MSP_EEPROM_WRITE`. **Map-first
+editing** (`Map.svelte`, edit-lock gate so handles only show in edit mode): labelled drag handles
+(vertex number / "GZn"), edge-midpoint click to insert, WP-style popup for exact lat/lon (+ radius) with
+per-vertex delete; new zones placed at the map centre, **sized to the current zoom** (circle = 2 tiles
+radius; polygon = ~2×3-tile trapezoid). **Panel editor**: type toggle, action select, lower/upper alt
+(10 m steps), radius, AGL/AMSL (auto-converts the altitudes via `terrain_elevation`), delete,
+Save/Revert (+ ConfirmDialog). **Sanity** (`helpers/geozoneSanity.ts`): ≤63 zones, ≤126 vertices total,
+circle = radius > 0, polygon ≥ 3 + non-self-intersecting, upper > lower (except 0); **CCW auto-fix at
+save**. (The advanced multi-zone overlap warnings — ≥2 shared borders ≥2.5× loiter apart; ≥50 m vertical
+overlap — were not needed and are deferred.)
+
+### Phase 2.5 — Mission ↔ geozone safety check — *SHIPPED*
+Hints only, never a blocker. `helpers/geozoneMissionCheck.ts` (pure, **altitude-aware**): normalises the
+path to metres-above-launch via `resolveMissionAltitudes` (same launch-ground + per-WP `altMsl` as the
+3D mission renderer), samples each leg ~40 m. **Inclusion** zones are enforced only when launch/home is
+laterally inside one (else ignored, like INAV); a leg is bad if a sample leaves the **union** of the
+inclusive zones (overlap = corridor, handled naturally). **NFZ**: launch/home inside (red — arming may
+be blocked) and path crossing (amber). Driven by a debounced controller in `stores/geozone.ts`
+(`geozoneMissionResult`; immediate recompute on the edit-mode toggle + a 400 ms max-wait so frequent
+telemetry can't starve it). Warning bar in `InavMissionPanel` (above the WP list); offending legs drawn
+**red** in 2D (a pane *below* the mission line → red outline/halo) and 3D (redrawn inside
+`drawMission3DModel`, placed at `altMsl + geoidOffset` so it sits exactly on the mission line). i18n
+`warn*` keys. NOTE: altitude for terrain-following (AGL) WPs is approximated as launch-relative.
 
 ### Phase 3 — Alerts (deferred)
 Geozone breach-proximity alerts, hooked into the existing alert infrastructure (the ADS-B conflict

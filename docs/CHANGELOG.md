@@ -19,8 +19,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   boundary polylines. A new **Geozones** layer toggle (2D + 3D, default on, only shown when a capable FC
   is connected) sits under Airspaces in the Airspace Manager panel, which also lists the configured
   zones (collapsible rows: number · shape · vertex count / radius, with type/altitudes/action on
-  expand). Geozones are always shown while the Mission Planner is in edit mode. Editing/writing is a
-  follow-up. See `docs/active/GEOZONES.md`.
+  expand). Geozones are always shown while the Mission Planner is in edit mode.
+- **INAV Geozones — editor + mission safety check.** Geozones can now be **created and edited** and
+  written back to the FC. Add a circle or polygon (sized to the current map zoom — a circle = 2 tiles
+  radius, a polygon = a ~2×3-tile trapezoid); toggle **Edit on map** to drag the labelled vertex /
+  centre / radius handles, click an edge midpoint to insert a vertex, or open a waypoint-style popup for
+  exact coordinates (+ radius) and per-vertex delete. The panel edits each zone's type (Inclusive ↔
+  Exclusive), fence action, lower/upper altitude (10 m steps; 0 upper = no limit), radius and AGL/AMSL
+  reference (which auto-converts the altitudes via the terrain elevation). **Save to FC** writes the
+  whole set as a batch + EEPROM, gated by **sanity checks** matching INAV's (≤63 zones, ≤126 vertices
+  total, circle = radius > 0, polygon ≥ 3 vertices + non-self-intersecting, upper > lower; polygon
+  winding auto-corrected to CCW on save). A **mission safety check** (in mission edit mode) flags —
+  without ever blocking — when the planned path would cross a No-Flight-Zone (red) or leave an inclusion
+  zone (amber, only enforced when launch/home is inside one, mirroring INAV), or when launch/home sits
+  inside an NFZ (arming may be blocked). It is altitude-aware (waypoint height vs each zone's band) and
+  draws the offending legs **red** on both the 2D and 3D maps. See `docs/active/GEOZONES.md`.
 - **INAV Safe Home Manager + autoland config.** On connecting to INAV, Kite now downloads
   all safehomes (any version) plus — on **INAV ≥7.1** — the fixed-wing autoland approach config and the
   approach-relevant `nav_fw_land_*` settings. A new **Safe Home Manager** (house button in the INAV

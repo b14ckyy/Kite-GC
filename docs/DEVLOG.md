@@ -629,9 +629,22 @@ protocols + these parallel networks) is the living reference in
   green/red); the **fence action** drives line style + fill (dashed/thin/thick + selective translucent
   fill), a scheme adopted from MWPTools' geozone manager (`mwp-geozonemgr.vala`, worked out with the
   INAV author). A 5th layer toggle (default on, capability-gated) + a collapsible zone list live inline
-  in `AirspaceManagerPanel.svelte`; data is also force-shown in the Mission Planner edit mode. The 2D
-  interactive editor + Save-to-FC (batch SET + EEPROM) + sanity checks are **P2**. Plan
-  `active/GEOZONES.md`.
+  in `AirspaceManagerPanel.svelte`; data is also force-shown in the Mission Planner edit mode.
+  **P2 = editor + write (shipped):** `geozone_write_all` (SET all 63 slots — active w/ data, empties
+  cleared via vertexCount 0; header before vertices; circle radius appended; then EEPROM). Working/dirty
+  store + mutations; map-first editing in `Map.svelte::updateGeozones` (drag handles labelled with the
+  vertex no. / "GZn", edge-midpoint insert, WP-style popup for exact lat/lon + radius, per-vertex delete;
+  edit-lock gate so handles only show in edit mode). Panel editor (type/action/alt/radius/AGL-AMSL with
+  terrain-based MSL conversion, add/delete, Save/Revert + ConfirmDialog). `helpers/geozoneSanity.ts`
+  (≤63/≤126, circle=radius>0, polygon≥3 + non-self-intersecting, upper>lower; CCW auto-fix at save).
+  **Mission safety check (shipped):** `helpers/geozoneMissionCheck.ts` (pure, altitude-aware: normalise
+  to metres-above-launch via `resolveMissionAltitudes`; sample legs; inclusive enforced only when
+  launch/home is laterally inside one, leg bad if it leaves the inclusive **union** = corridor; NFZ
+  launch-inside / path-cross) driven by a debounced controller in `stores/geozone.ts`
+  (`geozoneMissionResult`; immediate recompute on edit-mode toggle + 400 ms max-wait so telemetry can't
+  starve it). Warning bar in `InavMissionPanel`; offending legs drawn red in 2D (a pane *below* the
+  mission line → red outline) + 3D (redrawn inside `drawMission3DModel` so it sits on the line at
+  `altMsl + geoidOffset`). Hints only, never a blocker. Plan `active/GEOZONES.md`.
 - **Diagnostic file logging (ADR-055, `logging/`).** A custom `log::Log` logger installed before the Tauri
   builder writes a rotating TXT file (`<AppData>/kite-gc/kite-gc.log`, portable → `data/`; previous run →
   `*.prev`). Until this landed, **no logger was installed**, so every `log::` call in the codebase was a
