@@ -30,6 +30,7 @@
   import MissionManager from '$lib/components/mission/MissionManager.svelte';
   import SafeHomeManager from '$lib/components/mission/SafeHomeManager.svelte';
   import { safeHomeManagerOpen } from '$lib/stores/safehome';
+  import { geozoneMissionResult } from '$lib/stores/geozone';
   import PanelShell from '$lib/components/panel/PanelShell.svelte';
   import Button from '$lib/components/panel/Button.svelte';
   import AutopilotSelect from '$lib/components/mission/AutopilotSelect.svelte';
@@ -451,6 +452,17 @@
 {#snippet body()}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="miss-dropzone" class:drag-over={dragOver} ondragover={onDragOver} ondragleave={onDragLeave} ondrop={onDrop}>
+    {#if $geozoneMissionResult.active}
+      {#if $geozoneMissionResult.nfzLaunchInside}
+        <div class="gz-warn gz-warn-red">{$t('geozone.warnNfzLaunch')}</div>
+      {/if}
+      {#if $geozoneMissionResult.nfzPathViolated}
+        <div class="gz-warn gz-warn-amber">{$t('geozone.warnNfzPath')}</div>
+      {/if}
+      {#if $geozoneMissionResult.inclusiveActive && $geozoneMissionResult.inclusiveViolated}
+        <div class="gz-warn gz-warn-amber">{$t('geozone.warnInclusion')}</div>
+      {/if}
+    {/if}
     <div class="mission-tabs">
       {#each Array.from({length: currentMissionCount}, (_, i) => i + 1) as n}
         <button class="mission-tab" class:active={currentMissionIdx === n} onclick={() => switchMission(n)}>{n}</button>
@@ -600,6 +612,11 @@
 
   .miss-dropzone { position: relative; min-height: 100%; }
   .miss-dropzone.drag-over { outline: 2px dashed #37a8db; outline-offset: -2px; border-radius: 4px; }
+
+  /* Geozone safety-check warnings (above the mission tabs/WP list). */
+  .gz-warn { padding: 4px 8px; font-size: 11.5px; font-weight: 600; border-radius: 4px; margin-bottom: 4px; }
+  .gz-warn-red { background: rgba(212, 0, 0, 0.18); color: #ff6b6b; border: 1px solid rgba(212, 0, 0, 0.5); }
+  .gz-warn-amber { background: rgba(245, 166, 35, 0.16); color: #f5a623; border: 1px solid rgba(245, 166, 35, 0.45); }
 
   .mission-tabs { display: flex; border-bottom: 1px solid #444; background: #1a1a1a; border-radius: 4px 4px 0 0; margin-bottom: 4px; }
   .mission-tab { flex: 1; padding: 4px 0; border: none; background: transparent; color: #666; cursor: pointer; font-size: 11px; font-weight: 600; text-align: center; transition: all 0.15s; border-right: 1px solid #333; }

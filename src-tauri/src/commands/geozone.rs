@@ -11,7 +11,10 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use crate::msp::{MSP2_INAV_GEOZONE, MSP2_INAV_GEOZONE_VERTEX};
+use crate::msp::{
+    MSP2_INAV_GEOZONE, MSP2_INAV_GEOZONE_VERTEX, MSP2_INAV_SET_GEOZONE, MSP2_INAV_SET_GEOZONE_VERTEX,
+    MSP_EEPROM_WRITE,
+};
 use crate::scheduler::SchedulerHandle;
 use crate::state::{ActiveProtocol, AppState};
 
@@ -134,4 +137,70 @@ pub fn geozone_read_all(state: State<'_, AppState>) -> Result<GeozoneConfig, Str
 
     eprintln!("[GEOZONE] read {} active zone(s)", zones.len());
     Ok(GeozoneConfig { zones, has_geozones: true })
+}
+
+/// "Save to FC": write the whole geozone config as a batch, then a single EEPROM write to persist.
+/// Every slot id 0..62 is written — active zones with their data, all other slots cleared
+/// (`vertexCount = 0`) so removed zones don't linger. The zone header is written BEFORE its vertices
+/// (the FC's vertex handler branches on the stored shape to read the circle radius); polygon vertices
+/// go out in ascending order; a circle writes its single centre vertex with the radius appended.
+#[tauri::command(async)]
+pub fn geozone_write_all(config: GeozoneConfig, state: State<'_, AppState>) -> Result<(), String> {
+    let proto = state.protocol.lock().map_err(|e| e.to_string())?;
+    let handle = msp_handle(&proto)?;
+
+    for id in 0..MAX_GEOZONES {
+        let zone = config.zones.iter().find(|z| z.id == id);
+        match zone {
+            Some(z) => {
+                let circular = z.shape == GEOZONE_SHAPE_CIRCULAR;
+                let vertex_count: u8 = if circular { 1 } else { z.vertices.len() as u8 };
+                // Header [id, type, shape, minAlt(4), maxAlt(4), isSealevelRef, fenceAction, vertexCount].
+                let mut h = Vec::with_capacity(14);
+                h.push(id);
+                h.push(z.zone_type);
+                h.push(z.shape);
+                h.extend_from_slice(&z.min_alt_cm.to_le_bytes());
+                h.extend_from_slice(&z.max_alt_cm.to_le_bytes());
+                h.push(z.is_sealevel_ref as u8);
+                h.push(z.fence_action);
+                h.push(vertex_count);
+                handle.msp_request(MSP2_INAV_SET_GEOZONE, &h)?;
+
+                if circular {
+                    // [id, 0, lat(4), lon(4), radius(4)] — FC stores the radius as the hidden vertex 1.
+                    let c = z.vertices.first().ok_or("circular geozone has no centre vertex")?;
+                    let mut p = Vec::with_capacity(14);
+                    p.push(id);
+                    p.push(0);
+                    p.extend_from_slice(&c.lat.to_le_bytes());
+                    p.extend_from_slice(&c.lon.to_le_bytes());
+                    p.extend_from_slice(&z.radius_cm.unwrap_or(0).to_le_bytes());
+                    handle.msp_request(MSP2_INAV_SET_GEOZONE_VERTEX, &p)?;
+                } else {
+                    for (vi, v) in z.vertices.iter().enumerate() {
+                        let mut p = Vec::with_capacity(10);
+                        p.push(id);
+                        p.push(vi as u8);
+                        p.extend_from_slice(&v.lat.to_le_bytes());
+                        p.extend_from_slice(&v.lon.to_le_bytes());
+                        handle.msp_request(MSP2_INAV_SET_GEOZONE_VERTEX, &p)?;
+                    }
+                }
+            }
+            None => {
+                // Clear the slot: header with vertexCount 0 marks it unused.
+                let mut h = Vec::with_capacity(14);
+                h.push(id);
+                h.extend_from_slice(&[0u8; 11]); // type, shape, minAlt(4), maxAlt(4), isSealevelRef
+                h.push(0); // fenceAction
+                h.push(0); // vertexCount
+                handle.msp_request(MSP2_INAV_SET_GEOZONE, &h)?;
+            }
+        }
+    }
+
+    handle.msp_request(MSP_EEPROM_WRITE, &[])?;
+    eprintln!("[GEOZONE] saved {} active zone(s) to FC (EEPROM written)", config.zones.len());
+    Ok(())
 }

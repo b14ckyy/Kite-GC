@@ -18,8 +18,11 @@
   import { settings } from "$lib/stores/settings";
   import { telemetry } from "$lib/stores/telemetry";
   import { safehomeWorking, isSafehomeEmpty, setSafehomePosition } from "$lib/stores/safehome";
-  import { geozoneConfig, GEOZONE_SHAPE_CIRCULAR } from "$lib/stores/geozone";
-  import { geozonePathStyle, geozoneRadiusM } from "$lib/helpers/geozoneStyle";
+  import {
+    geozoneWorking, geozoneEditing, geozoneMissionResult, GEOZONE_SHAPE_CIRCULAR,
+    setGeozoneVertex, insertGeozoneVertex, removeGeozoneVertex, setGeozoneRadius,
+  } from "$lib/stores/geozone";
+  import { geozonePathStyle, geozoneRadiusM, geozoneColor } from "$lib/helpers/geozoneStyle";
   import { MIN_FIX_SATELLITES } from "$lib/helpers/telemetry";
   import { get } from "svelte/store";
   import { MAP_PROVIDERS, getProviderById, type MapProvider } from "$lib/config/mapProviders";
@@ -34,7 +37,7 @@
   import { cmdHasLocation } from "$lib/helpers/arduCommandCatalog";
   import { connection } from "$lib/stores/connection";
   import { frameMissionSignal } from "$lib/stores/mapCamera";
-  import { destinationPoint } from "$lib/utils/geo";
+  import { destinationPoint, haversineDistance } from "$lib/utils/geo";
   import { buildApproachGeometry } from "$lib/helpers/autolandGeometry";
   import MissionLayer from "./mission/MissionLayer.svelte";
   import SurveyPatternLayer from "./mission/SurveyPatternLayer.svelte";
@@ -436,6 +439,9 @@
   // Geozone overlay (INAV ≥8.0 FC config).
   let geozoneLayer: L.LayerGroup | undefined;
   let unsubGeozone: (() => void) | undefined;
+  // Red overlay for mission legs that violate a geozone (the safety check).
+  let geozoneViolationLayer: L.LayerGroup | undefined;
+  let unsubGeozoneViol: (() => void) | undefined;
   const MAX_AERO_MARKERS = 1500; // cap rendered point markers per redraw (dense regions)
   // Airspaces currently drawn (passed the zoom filter) — the click handler tests these for
   // point-in-polygon so a single click lists *every* airspace stacked at that spot, not just the top one.
@@ -562,16 +568,87 @@
   }
 
   // ── Geozones overlay (INAV ≥8.0; see docs/active/GEOZONES.md) ─────────────────────────────────
-  /** Redraw the geozone shapes (read-only in P1). Source is the loaded FC config. Inclusive = blue,
-   *  exclusive = amber (dashed). Shown when the layer toggle is on OR while editing a mission (geozones
-   *  are safety-critical FC data the planner must always see), independent of the OpenAIP subsystem. */
+  const gzE7 = (v: number) => Math.round(v * 1e7);
+
+  /** Draggable handle icon: a zone-coloured rounded square for a vertex/centre (with a centred label —
+   *  the vertex number, or "GZn" for a circle centre); a small white circle for an edge midpoint insert
+   *  handle; a small coloured circle for the circle radius grip. */
+  function geozoneHandleIcon(color: string, opts: { mid?: boolean; small?: boolean; label?: string } = {}): L.DivIcon {
+    if (opts.mid) {
+      const s = 14;
+      const html = `<div style="box-sizing:border-box;width:${s}px;height:${s}px;border:2px solid #fff;border-radius:50%;background:rgba(255,255,255,0.55);box-shadow:0 0 3px rgba(0,0,0,.6)"></div>`;
+      return L.divIcon({ className: "gz-handle", html, iconSize: [s, s], iconAnchor: [s / 2, s / 2] });
+    }
+    if (opts.small) {
+      const s = 16;
+      const html = `<div style="box-sizing:border-box;width:${s}px;height:${s}px;border:2px solid #fff;border-radius:50%;background:${color};box-shadow:0 0 3px rgba(0,0,0,.6)"></div>`;
+      return L.divIcon({ className: "gz-handle", html, iconSize: [s, s], iconAnchor: [s / 2, s / 2] });
+    }
+    const s = 24;
+    const html =
+      `<div style="box-sizing:border-box;width:${s}px;height:${s}px;border:2px solid #fff;border-radius:5px;background:${color};box-shadow:0 0 3px rgba(0,0,0,.6);` +
+      `display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:700;line-height:1">${opts.label ?? ""}</div>`;
+    return L.divIcon({ className: "gz-handle", html, iconSize: [s, s], iconAnchor: [s / 2, s / 2] });
+  }
+
+  /** WP-style popup for a geozone point: exact lat/lon (+ radius for a circle), Apply + (polygon) Delete. */
+  function buildGeozonePopup(zoneId: number, idx: number, isCircle: boolean): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.className = "gz-popup";
+    const z = get(geozoneWorking)?.zones.find((x) => x.id === zoneId);
+    const v = z?.vertices[idx];
+    if (!v) return wrap;
+    const tr = get(t);
+    const field = (label: string, value: string, step: string) => {
+      const row = document.createElement("label");
+      row.className = "gz-popup-row";
+      const span = document.createElement("span");
+      span.textContent = label;
+      const input = document.createElement("input");
+      input.type = "number"; input.step = step; input.value = value;
+      row.append(span, input);
+      return { row, input };
+    };
+    const latF = field(tr("geozone.lat"), (v.lat / 1e7).toFixed(7), "0.0000001");
+    const lonF = field(tr("geozone.lon"), (v.lon / 1e7).toFixed(7), "0.0000001");
+    wrap.append(latF.row, lonF.row);
+    let radF: { input: HTMLInputElement } | null = null;
+    if (isCircle) {
+      const f = field(`${tr("geozone.radius")} (m)`, String(Math.round((z?.radius_cm ?? 0) / 100)), "1");
+      wrap.append(f.row); radF = f;
+    }
+    const btns = document.createElement("div");
+    btns.className = "gz-popup-btns";
+    const apply = document.createElement("button");
+    apply.className = "gz-popup-apply"; apply.textContent = tr("geozone.apply");
+    apply.onclick = () => {
+      const lat = Number(latF.input.value), lon = Number(lonF.input.value);
+      if (isFinite(lat) && isFinite(lon)) setGeozoneVertex(zoneId, idx, gzE7(lat), gzE7(lon));
+      if (radF) { const r = Number(radF.input.value); if (isFinite(r) && r > 0) setGeozoneRadius(zoneId, r * 100); }
+      map?.closePopup();
+    };
+    btns.append(apply);
+    if (!isCircle && (z?.vertices.length ?? 0) > 3) {
+      const del = document.createElement("button");
+      del.className = "gz-popup-del"; del.textContent = tr("geozone.delete");
+      del.onclick = () => { removeGeozoneVertex(zoneId, idx); map?.closePopup(); };
+      btns.append(del);
+    }
+    wrap.append(btns);
+    return wrap;
+  }
+
+  /** Redraw the geozone overlay. The plain coloured shapes always show (per the layer toggle / mission
+   *  edit mode / geozone edit-lock); the draggable edit markers + popups appear ONLY in edit mode
+   *  (`geozoneEditing`). Drags update the shape live and commit to the working store on `dragend`. */
   function updateGeozones() {
     if (!map) return;
     if (!geozoneLayer) geozoneLayer = L.layerGroup().addTo(map);
     const group = geozoneLayer;
     group.clearLayers();
-    if (!get(settings).airspace.layers.geozones.d2 && !get(editMode)) return;
-    const cfg = get(geozoneConfig);
+    const editing = get(geozoneEditing);
+    if (!get(settings).airspace.layers.geozones.d2 && !get(editMode) && !editing) return;
+    const cfg = get(geozoneWorking);
     if (!cfg || !cfg.has_geozones) return;
 
     for (const zone of cfg.zones) {
@@ -581,28 +658,90 @@
         color: st.color, weight: st.weight, opacity: st.opacity, dashArray: st.dashArray,
         fill: st.fill, fillColor: st.fillColor, fillOpacity: st.fillOpacity, interactive: false,
       };
+      const isCircle = zone.shape === GEOZONE_SHAPE_CIRCULAR;
       let center: L.LatLng | undefined;
-      if (zone.shape === GEOZONE_SHAPE_CIRCULAR) {
-        const c = zone.vertices[0];
+      let circleLayer: L.Circle | undefined;
+      let polyLayer: L.Polygon | undefined;
+      if (isCircle) {
         const radius = geozoneRadiusM(zone);
         if (radius == null || radius <= 0) continue;
-        const lat = c.lat / 1e7, lon = c.lon / 1e7;
-        group.addLayer(L.circle([lat, lon], { radius, ...opts }));
-        center = L.latLng(lat, lon);
+        const c = zone.vertices[0];
+        circleLayer = L.circle([c.lat / 1e7, c.lon / 1e7], { radius, ...opts });
+        group.addLayer(circleLayer);
+        center = L.latLng(c.lat / 1e7, c.lon / 1e7);
       } else {
         const latlngs = zone.vertices.map((v) => [v.lat / 1e7, v.lon / 1e7] as [number, number]);
         if (latlngs.length < 3) continue;
-        const poly = L.polygon(latlngs, opts);
-        group.addLayer(poly);
-        center = poly.getBounds().getCenter();
+        polyLayer = L.polygon(latlngs, opts);
+        group.addLayer(polyLayer);
+        center = polyLayer.getBounds().getCenter();
       }
-      if (center) {
+      // Centroid GZn label — skipped for a circle in edit mode (its centre handle already shows GZn).
+      if (center && !(editing && isCircle)) {
         group.addLayer(
           L.tooltip({ permanent: true, direction: "center", className: "geozone-label", opacity: 0.95 })
             .setLatLng(center)
             .setContent(`${get(t)("geozone.abbrev")}${zone.id + 1}`),
         );
       }
+
+      if (!editing) continue;
+      const color = geozoneColor(zone);
+
+      if (isCircle && circleLayer) {
+        const c = zone.vertices[0];
+        const clat = c.lat / 1e7, clon = c.lon / 1e7;
+        const radiusM = geozoneRadiusM(zone)!;
+        const cm = L.marker([clat, clon], { draggable: true, icon: geozoneHandleIcon(color, { label: `GZ${zone.id + 1}` }), zIndexOffset: 700 });
+        const edge = destinationPoint(clat, clon, 90, radiusM);
+        const rm = L.marker([edge.lat, edge.lon], { draggable: true, icon: geozoneHandleIcon(color, { small: true }), zIndexOffset: 700 });
+        cm.on("drag", () => { const p = cm.getLatLng(); circleLayer!.setLatLng(p); const e = destinationPoint(p.lat, p.lng, 90, circleLayer!.getRadius()); rm.setLatLng([e.lat, e.lon]); });
+        cm.on("dragend", () => { const p = cm.getLatLng(); setGeozoneVertex(zone.id, 0, gzE7(p.lat), gzE7(p.lng)); });
+        cm.bindPopup(buildGeozonePopup(zone.id, 0, true), { className: "gz-popup-container" });
+        rm.on("drag", () => { const p = rm.getLatLng(); const cll = circleLayer!.getLatLng(); circleLayer!.setRadius(haversineDistance(cll.lat, cll.lng, p.lat, p.lng)); });
+        rm.on("dragend", () => { const p = rm.getLatLng(); const cll = circleLayer!.getLatLng(); setGeozoneRadius(zone.id, Math.round(haversineDistance(cll.lat, cll.lng, p.lat, p.lng) * 100)); });
+        group.addLayer(cm); group.addLayer(rm);
+      } else if (polyLayer) {
+        const live = zone.vertices.map((v) => [v.lat / 1e7, v.lon / 1e7] as [number, number]);
+        zone.vertices.forEach((v, idx) => {
+          const m = L.marker([v.lat / 1e7, v.lon / 1e7], { draggable: true, icon: geozoneHandleIcon(color, { label: String(idx + 1) }), zIndexOffset: 700 });
+          m.on("drag", () => { const p = m.getLatLng(); live[idx] = [p.lat, p.lng]; polyLayer!.setLatLngs(live); });
+          m.on("dragend", () => { const p = m.getLatLng(); setGeozoneVertex(zone.id, idx, gzE7(p.lat), gzE7(p.lng)); });
+          m.bindPopup(buildGeozonePopup(zone.id, idx, false), { className: "gz-popup-container" });
+          group.addLayer(m);
+        });
+        // Edge midpoint handles → click inserts a new vertex there.
+        const n = zone.vertices.length;
+        for (let i = 0; i < n; i++) {
+          const a = zone.vertices[i], b = zone.vertices[(i + 1) % n];
+          const mlat = (a.lat + b.lat) / 2 / 1e7, mlon = (a.lon + b.lon) / 2 / 1e7;
+          const mm = L.marker([mlat, mlon], { icon: geozoneHandleIcon(color, { mid: true }), zIndexOffset: 650, title: get(t)("geozone.insertVertex") });
+          mm.on("click", () => insertGeozoneVertex(zone.id, i, gzE7(mlat), gzE7(mlon)));
+          group.addLayer(mm);
+        }
+      }
+    }
+  }
+
+  /** Red overlay for the mission legs flagged by the geozone safety check (NFZ crossing / leaving an
+   *  inclusion zone). Hint only — drawn on top of the mission line. */
+  function updateGeozoneViolations() {
+    if (!map) return;
+    // A dedicated pane BELOW the overlay pane (400) so the red renders *behind* the blue mission line —
+    // it peeks out as a red outline/halo rather than covering the path (mirrors the 3D look).
+    if (!map.getPane("gzViolation")) {
+      map.createPane("gzViolation");
+      const p = map.getPane("gzViolation");
+      if (p) { p.style.zIndex = "395"; p.style.pointerEvents = "none"; }
+    }
+    if (!geozoneViolationLayer) geozoneViolationLayer = L.layerGroup().addTo(map);
+    const group = geozoneViolationLayer;
+    group.clearLayers();
+    const res = get(geozoneMissionResult);
+    if (!res.active || res.segments.length === 0) return;
+    for (const seg of res.segments) {
+      const pts: [number, number][] = [[seg.a.lat, seg.a.lon], [seg.b.lat, seg.b.lon]];
+      group.addLayer(L.polyline(pts, { color: "#ff2d2d", weight: 9, opacity: 0.9, interactive: false, pane: "gzViolation" }));
     }
   }
 
@@ -711,8 +850,9 @@
   // Redraw on enable-toggle, new data, or visibility change (data/visibility via subscriptions below).
   $effect(() => { void $settings.airspace.enabled; if (map) updateAirspace(); });
   $effect(() => { void $settings.showSafehomes; if (map) updateSafehome(); });
-  // Geozones: redraw on layer-toggle change and on mission edit-mode change (edit mode force-shows them).
-  $effect(() => { void $settings.airspace.layers.geozones.d2; void $editMode; if (map) updateGeozones(); });
+  // Geozones: redraw on layer-toggle / mission edit-mode / geozone edit-lock change (the last toggles
+  // the editable markers).
+  $effect(() => { void $settings.airspace.layers.geozones.d2; void $editMode; void $geozoneEditing; if (map) updateGeozones(); });
   // Toggle the heading/course/turn nose lines on/off (clears or redraws immediately, not just next frame).
   $effect(() => { void $settings.directionLines; if (map) redrawDirLines(); });
 
@@ -1243,8 +1383,10 @@
     // Safehome overlay follows the working copy (load / edit / drag / "+"); arm-state change is handled
     // in the telemetry subscription (the green ring is disarmed-only).
     unsubSafehome = safehomeWorking.subscribe(() => updateSafehome());
-    // Geozone overlay follows the loaded FC config (downloaded at handshake).
-    unsubGeozone = geozoneConfig.subscribe(() => updateGeozones());
+    // Geozone overlay follows the working copy (downloaded at handshake; reflects live edits).
+    unsubGeozone = geozoneWorking.subscribe(() => updateGeozones());
+    // Red violation overlay follows the safety-check result.
+    unsubGeozoneViol = geozoneMissionResult.subscribe(() => updateGeozoneViolations());
     unsubAeroFocus = aeroFocus.subscribe((f) => { if (f && map) map.setView([f.lat, f.lon], Math.max(map.getZoom(), 11)); });
     map.on("moveend", updateAirspace);
     map.on("click", onGuidedClick); // Guided "fly here" target popup (vehicle control)
@@ -1454,6 +1596,7 @@
     unsubConnForJump?.();
     unsubSafehome?.();
     unsubGeozone?.();
+    unsubGeozoneViol?.();
     if (map) {
       map.off("moveend", saveMapState);
       map.off("zoomend", saveMapState);
@@ -1469,6 +1612,7 @@
       if (homeMarker) map.removeLayer(homeMarker);
       if (safehomeLayer) map.removeLayer(safehomeLayer);
       if (geozoneLayer) map.removeLayer(geozoneLayer);
+      if (geozoneViolationLayer) map.removeLayer(geozoneViolationLayer);
       if (radarLayer) map.removeLayer(radarLayer);
       map.remove();
     }
@@ -1540,6 +1684,30 @@
     pointer-events: none;
   }
   :global(.leaflet-tooltip.geozone-label::before) { display: none; }
+
+  /* Geozone edit handles: strip Leaflet's default div-icon white box (the handle is the inner div). */
+  :global(.leaflet-div-icon.gz-handle) { background: transparent; border: none; }
+
+  /* Geozone vertex popup (dark, matching the mission WP editor popup). */
+  :global(.gz-popup-container .leaflet-popup-content-wrapper) {
+    background: rgba(30, 30, 30, 0.92); color: #ddd; border: 1px solid rgba(55, 168, 219, 0.35);
+    border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  }
+  :global(.gz-popup-container .leaflet-popup-tip) {
+    background: rgba(30, 30, 30, 0.92); border: 1px solid rgba(55, 168, 219, 0.35);
+  }
+  :global(.gz-popup) { display: flex; flex-direction: column; gap: 5px; min-width: 160px; }
+  :global(.gz-popup-row) { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: #cfcfcf; }
+  :global(.gz-popup-row input) {
+    width: 98px; background: #1f1f1f; color: #e0e0e0; border: 1px solid #3a3a3a; border-radius: 4px;
+    padding: 2px 4px; font-size: 12px;
+  }
+  :global(.gz-popup-btns) { display: flex; gap: 6px; margin-top: 3px; }
+  :global(.gz-popup-apply), :global(.gz-popup-del) {
+    border: none; border-radius: 4px; padding: 3px 10px; font-size: 12px; cursor: pointer;
+  }
+  :global(.gz-popup-apply) { background: #37a8db; color: #04222e; font-weight: 600; }
+  :global(.gz-popup-del) { background: none; border: 1px solid #d40000; color: #ff5a5a; }
 
   .map {
     width: 100%;

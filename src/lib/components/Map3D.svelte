@@ -73,7 +73,7 @@
   import { ARROW_POLY, contactModelClass, radarModelUri, type RadarModelClass } from "$lib/helpers/radar3d";
   import { radarAlertLevels, ALERT_CONFIG, type AlertLevel } from "$lib/controllers/radarAlerts";
   import { safehomeWorking, isSafehomeEmpty } from "$lib/stores/safehome";
-  import { geozoneConfig, GEOZONE_SHAPE_CIRCULAR } from "$lib/stores/geozone";
+  import { geozoneWorking, geozoneMissionResult, GEOZONE_SHAPE_CIRCULAR } from "$lib/stores/geozone";
   import { geozonePathStyle, geozoneRadiusM } from "$lib/helpers/geozoneStyle";
   import { buildApproachGeometry } from "$lib/helpers/autolandGeometry";
 
@@ -411,6 +411,8 @@
   // Geozone overlay (INAV ≥8.0 FC config) — extruded volumes (circle → cylinder, polygon → hull).
   let geozone3dEntities: Cesium.Entity[] = [];
   let unsubGeozone3d: (() => void) | undefined;
+  let geozone3dViolationEntities: Cesium.Entity[] = [];
+  let unsubGeozoneViol3d: (() => void) | undefined;
   let geozone3dGen = 0;                               // race guard for the async terrain sample
   let geozoneD3 = true;                               // last-seen geozones 3D toggle (default on)
 
@@ -831,6 +833,7 @@
         updateAirspaces3D();  // (re)build airspace volumes for the now-visible 3D view
         updateAirports3D();   // (re)build airports/runways for the now-visible 3D view
         updateGeozones3D();   // (re)build geozone volumes for the now-visible 3D view
+        updateGeozoneViolations3D(); // (re)build the red mission-violation overlay
       } else {
         // Leaving 3D while in FPV: undo FPV's viewer changes (camera inputs, model/track,
         // wheel handler) so nothing carries over and blocks the map — but keep cameraMode
@@ -1213,9 +1216,11 @@
     // its real 3D height — without needing a parameter change to re-trigger the render.
     void waitForTerrain(viewer).then((tp) => { if (tp) updateSafehome3D(); });
 
-    // Geozone volumes follow the loaded FC config (downloaded at handshake); same first-open terrain fix.
-    unsubGeozone3d = geozoneConfig.subscribe(() => updateGeozones3D());
+    // Geozone volumes follow the working copy (downloaded at handshake; reflects live edits).
+    unsubGeozone3d = geozoneWorking.subscribe(() => updateGeozones3D());
     void waitForTerrain(viewer).then((tp) => { if (tp) updateGeozones3D(); });
+    // Red mission-violation overlay follows the safety-check result.
+    unsubGeozoneViol3d = geozoneMissionResult.subscribe(() => updateGeozoneViolations3D());
 
     // Obstacle columns + airspace volumes: rebuild on new aero data (toggle / range changes ride the
     // settings-watch below; camera-pan re-culls via the debounced moveEnd handler — the window follows
@@ -1264,6 +1269,7 @@
     unsubGcs3d?.();
     unsubSafehome3d?.();
     unsubGeozone3d?.();
+    unsubGeozoneViol3d?.();
     unsubAero3d?.();
     if (obstacleMoveTimer) clearTimeout(obstacleMoveTimer);
     radar3dPickHandler?.destroy();
@@ -2154,7 +2160,7 @@
     for (const e of geozone3dEntities) viewer.entities.remove(e);
     geozone3dEntities.length = 0;
     if (!active || !get(settings).airspace.layers.geozones.d3) { viewer.scene.requestRender(); return; }
-    const cfg = get(geozoneConfig);
+    const cfg = get(geozoneWorking);
     if (!cfg || !cfg.has_geozones || cfg.zones.length === 0) { viewer.scene.requestRender(); return; }
 
     const NO_LIMIT_H = 1000; // visual extrusion height (m) for a "no upper limit" (max 0) zone
@@ -2241,6 +2247,27 @@
           polyline: { positions: ringAt(ceilEll), arcType: Cesium.ArcType.NONE, width: st.weight, material: lineMat },
         }));
       }
+    }
+    viewer.scene.requestRender();
+  }
+
+  /** Red overlay for the mission legs flagged by the geozone safety check, drawn at the mission's 3D
+   *  height (launch-relative, matching the mission line). Hint only. */
+  function updateGeozoneViolations3D() {
+    if (!viewer) return;
+    for (const e of geozone3dViolationEntities) viewer.entities.remove(e);
+    geozone3dViolationEntities.length = 0;
+    const res = get(geozoneMissionResult);
+    if (!active || !res.active || res.segments.length === 0) { viewer.scene.requestRender(); return; }
+    for (const seg of res.segments) {
+      // Match the mission line exactly: it places each WP at altMsl + geoidOffset (resolveMissionAltitudes).
+      const positions = [
+        Cesium.Cartesian3.fromDegrees(seg.a.lon, seg.a.lat, seg.a.altMsl + geoidOffset),
+        Cesium.Cartesian3.fromDegrees(seg.b.lon, seg.b.lat, seg.b.altMsl + geoidOffset),
+      ];
+      geozone3dViolationEntities.push(viewer.entities.add({
+        polyline: { positions, arcType: Cesium.ArcType.NONE, width: 5, material: Cesium.Color.fromCssColorString("#ff2d2d") },
+      }));
     }
     viewer.scene.requestRender();
   }
@@ -3306,6 +3333,9 @@
     }
 
     wpPulseActive = anyActiveWp;
+    // Recolour the violating legs in sync with the mission line (same geoidOffset + redraw timing) so
+    // the red sits exactly on the path — not a stale overlay drawn before the geoid resolved.
+    updateGeozoneViolations3D();
     syncContinuousRender(); // (de)activate continuous rendering for the pulse
     viewer.scene.requestRender();
   }
