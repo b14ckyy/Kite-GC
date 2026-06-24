@@ -1,4 +1,3 @@
-- Make the Battery selector in post flight a dropdown (Maybe combined with search field to keep both usage options) 
 - RTSP video input on ToDo to test with DJI PC capture software
 - add popup if Cesium key is missing when first entering 3D view with option to enter, ignore or remind later
 - Check Airspeed for Mavlink - Make airspeed the primary value on widget when available

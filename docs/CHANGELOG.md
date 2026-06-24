@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Post-flight battery picker is now a searchable combobox.** The End-Flight dialog's battery serial
+  field filters a live dropdown of existing packs (serial + label/capacity/cells) as you type — pick an
+  existing one or type a new serial. If the entered serial matches no pack, saving the flight offers to
+  create one, opening the Battery Manager's create form with the serial pre-filled.
 - **Force Arm / Force Disarm after an FC rejection (MAVLink).** When the flight controller rejects a
   normal arm or disarm (e.g. a failed pre-arm check), the vehicle-control panel now reveals a
   long-press (2 s) danger "Force Arm" / "Force Disarm" button that bypasses the checks (ArduPilot
