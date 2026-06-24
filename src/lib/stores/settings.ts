@@ -270,6 +270,9 @@ export interface AppSettings {
   lastHost: string;
   lastTcpPort: number;
   lastBleDevice: string;
+  /** User-assigned names for Bluetooth SPP COM ports, keyed by COM path (e.g. "COM7" → "Goggles").
+   *  Only outgoing BT SPP ports are renameable; physical ports keep their device descriptors. */
+  btPortNames: Record<string, string>;
   map: MapState;
   mapProvider: string;
   mapCacheMaxMB: number;
@@ -284,6 +287,10 @@ export interface AppSettings {
   /** Show INAV safehome markers + radius rings (+ autoland approaches) on the map. Default on; toggled
    *  in the Safe Home Manager (≥7.1). See docs/active/AUTOLAND_SAFEHOME.md. */
   showSafehomes: boolean;
+  /** Terrain Radar widget — persisted clearance colour scale (m). */
+  terrainRadarScaleM: number;
+  /** Terrain Radar widget — colour reference: predictive (sink-angle) vs flat current altitude. */
+  terrainRadarPredictive: boolean;
   // MAVLink only: stream everything the FC sends (per its SRn_* params) instead of requesting our
   // reduced rate set — ignores the two rate knobs. For high-bandwidth links + full .tlog capture.
   mavlinkFullTelemetry: boolean;
@@ -348,6 +355,7 @@ const defaults: AppSettings = {
   lastHost: '192.168.1.1',
   lastTcpPort: 5761,
   lastBleDevice: '',
+  btPortNames: {},
   map: {
     center: [51.505, -0.09],
     zoom: 13,
@@ -361,6 +369,8 @@ const defaults: AppSettings = {
   airspeedEnabled: false,
   directionLines: true,
   showSafehomes: true,
+  terrainRadarScaleM: 120,
+  terrainRadarPredictive: false,
   mavlinkFullTelemetry: false,
   flightLoggingEnabled: true,
   flightRecordingEnabled: true,

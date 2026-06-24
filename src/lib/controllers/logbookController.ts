@@ -21,6 +21,9 @@ import {
   unlinkFlight as unlinkFlightStore,
   exportFlights,
   exportBlackboxFile,
+  blackboxFileInfo as blackboxFileInfoStore,
+  deleteBlackboxFile as deleteBlackboxFileStore,
+  type BlackboxFileInfo,
   exportTrackFile,
   importKflight,
   type Flight,
@@ -226,6 +229,21 @@ export async function exportBlackbox(
   dbPath: string,
 ): Promise<string> {
   return exportBlackboxFile(flightId, outputPath, dbPath);
+}
+
+export type { BlackboxFileInfo };
+
+/** Original blackbox file info (filename + size) for a flight, or null if none (gates export/delete). */
+export async function getBlackboxInfo(
+  flightId: number,
+  dbPath: string,
+): Promise<BlackboxFileInfo | null> {
+  return blackboxFileInfoStore(flightId, dbPath);
+}
+
+/** Delete the stored original blackbox file. Returns the original filename, or null if none. */
+export async function deleteBlackbox(flightId: number, dbPath: string): Promise<string | null> {
+  return deleteBlackboxFileStore(flightId, dbPath);
 }
 
 /** Export a flight track as KMZ/KML/GPX/CSV (format from file extension). */

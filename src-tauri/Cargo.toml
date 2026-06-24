@@ -56,6 +56,10 @@ tiff = "0.9"  # decode Copernicus GLO-30 GeoTIFF DEM tiles (Float32, DEFLATE, pr
 # RAW axes/buttons/hats (no gamepad projection) so flight hardware / RC transmitters map correctly:
 #   Windows → Windows.Gaming.Input RawGameController (the `windows` crate is already pulled by btleplug;
 #             we just add the Gaming_Input features). Linux → evdev (pure Rust, no libevdev).
+[target.'cfg(target_os = "windows")'.dependencies]
+# Read HKLM\...\Enum\BTHENUM to classify Bluetooth SPP COM ports (outgoing vs incoming) — see serial.rs.
+winreg = "0.52"
+
 [target.'cfg(target_os = "windows")'.dependencies.windows]
 version = "0.61"
 features = ["Gaming_Input", "Foundation_Collections"]

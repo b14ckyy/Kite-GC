@@ -20,6 +20,7 @@
     formatFlightDateTime,
     flightTzLabel,
     type BlackboxImportProgress,
+    type BlackboxFileInfo,
     type Flight,
     type FlightSummary,
     type FlightTree,
@@ -61,6 +62,8 @@
     onDeleteFlight,
     onExportFlights,
     onExportBlackbox,
+    onDeleteBlackbox,
+    blackboxFileInfo = null,
     onExportTrack,
   }: {
     flightLoggingEnabled: boolean;
@@ -91,6 +94,10 @@
     onDeleteFlight: () => void;
     onExportFlights: (ids: number[]) => void;
     onExportBlackbox: () => void;
+    onDeleteBlackbox: () => void;
+    /** The selected flight's stored original blackbox file (filename + size), or null — accurate BLOB
+     *  presence supplied by the parent. Gates the export button + the inline delete button/size. */
+    blackboxFileInfo?: BlackboxFileInfo | null;
     onExportTrack: () => void;
   } = $props();
 
@@ -129,8 +136,7 @@
   }
 
   const hasBlackboxFile = $derived(
-    selectedFlight != null && !hasMultiSelection &&
-    (selectedFlight.source === 'blackbox' || selectedFlight.source === 'both')
+    selectedFlight != null && !hasMultiSelection && blackboxFileInfo != null
   );
 
   const filteredSummaries = $derived.by<FlightSummary[]>(() => {
@@ -458,6 +464,8 @@
         {onSavePilot}
         {onDeleteFlight}
         {onExportTrack}
+        blackboxFile={hasMultiSelection ? null : blackboxFileInfo}
+        {onDeleteBlackbox}
       />
     {/if}
   </div>

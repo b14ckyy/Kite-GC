@@ -98,6 +98,12 @@
 
   const feedback = $derived($lastFeedback);
   function actionLabel(action: string): string { return $t(`control.action.${action}`, { default: action }); }
+
+  // Force arm/disarm: only offered after the FC *rejected* a normal arm/disarm (e.g. failed pre-arm
+  // checks). The force command sets the ArduPilot bypass magic (param2 = 21196). Long-press +
+  // danger styling keeps it a deliberate, double-guarded action.
+  const armRejected = $derived(feedback != null && feedback.action === 'arm' && !feedback.ok);
+  const disarmRejected = $derived(feedback != null && feedback.action === 'disarm' && !feedback.ok);
 </script>
 
 <PanelShell variant="compact" title={$t('control.title')}>
@@ -109,10 +115,20 @@
         <!-- 1. Arm / disarm -->
         {#if !$isArmed}
           <ArmSlider label={$t('control.action.arm')} busy={busy('arm')} onconfirm={() => arm()} />
+          {#if armRejected}
+            <HoldToConfirm variant="danger" duration={2000} busy={busy('arm')} title={$t('control.action.forceArmHint')} onconfirm={() => arm(true)}>
+              {$t('control.action.forceArm')}
+            </HoldToConfirm>
+          {/if}
         {:else}
           <HoldToConfirm variant="danger" busy={busy('disarm')} onconfirm={() => disarm()}>
             {$t('control.action.disarm')}
           </HoldToConfirm>
+          {#if disarmRejected}
+            <HoldToConfirm variant="danger" duration={2000} busy={busy('disarm')} title={$t('control.action.forceDisarmHint')} onconfirm={() => disarm(true)}>
+              {$t('control.action.forceDisarm')}
+            </HoldToConfirm>
+          {/if}
         {/if}
 
         <!-- 2. Active flight mode (large, centred) -->

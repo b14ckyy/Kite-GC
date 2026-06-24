@@ -41,6 +41,8 @@
     onSavePilot,
     onDeleteFlight,
     onExportTrack,
+    blackboxFile = null,
+    onDeleteBlackbox,
   }: {
     flight: Flight;
     trackCount: number;
@@ -59,7 +61,18 @@
     onSavePilot: (pilotName: string, pilotId: string) => void;
     onDeleteFlight: () => void;
     onExportTrack: () => void;
+    /** Stored original blackbox file (filename + size) for an inline delete button next to the
+     *  Source line, or null when none is stored. */
+    blackboxFile?: { filename: string; size_bytes: number } | null;
+    onDeleteBlackbox?: () => void;
   } = $props();
+
+  /** Human-readable file size for the raw-log size badge. */
+  function formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
 
   let craftNameEditing = $state(false);
   let craftNameDraft = $state('');
@@ -418,6 +431,12 @@
       {formatFlightSource(flight.source)}
       {#if !minimized}<span class="flight-id-tag">#{flight.id}</span>{/if}
       {#if flight.linked_flight_id} 🔗 #{flight.linked_flight_id}{/if}
+      {#if !minimized && blackboxFile && onDeleteBlackbox}
+        <span class="raw-size" title={blackboxFile.filename}>{formatBytes(blackboxFile.size_bytes)}</span>
+        <button class="raw-del-btn" onclick={onDeleteBlackbox} title={$t('logbook.deleteBlackboxTitle')}>
+          🗑 {$t('logbook.deleteBlackbox')}
+        </button>
+      {/if}
     </span>
     <span class="fc-label">{$t('logbook.mission')}</span>
     <span class="fc-value craft-value-row">
@@ -639,6 +658,31 @@
     font-size: 10px;
     color: #777;
     margin-left: 2px;
+  }
+
+  /* Raw-log size badge + small inline delete button next to the Source line. */
+  .raw-size {
+    font-size: 10px;
+    color: #949494;
+    margin-left: 8px;
+  }
+  .raw-del-btn {
+    margin-left: 6px;
+    padding: 1px 6px;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.4;
+    color: #f3b5b5;
+    background: rgba(212, 0, 0, 0.14);
+    border: 1px solid #d40000;
+    border-radius: 4px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background-color 0.15s, color 0.15s;
+  }
+  .raw-del-btn:hover {
+    background: rgba(212, 0, 0, 0.28);
+    color: #ffd9d9;
   }
 
   .battery-missing {

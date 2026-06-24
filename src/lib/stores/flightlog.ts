@@ -498,6 +498,31 @@ export async function exportBlackboxFile(
   });
 }
 
+/** Original blackbox file info for a flight (filename + size), or null if none is stored. Gates the
+ *  export/delete buttons and supplies the size shown next to them. */
+export interface BlackboxFileInfo {
+  filename: string;
+  size_bytes: number;
+}
+export async function blackboxFileInfo(
+  flightId: number,
+  dbPath: string,
+): Promise<BlackboxFileInfo | null> {
+  return invoke<BlackboxFileInfo | null>('flightlog_blackbox_file_info', {
+    flightId,
+    dbPath: dbPath || undefined,
+  });
+}
+
+/** Delete the stored original blackbox file for a flight (keeps the parsed flight + replay data).
+ *  Returns the deleted file's original filename, or null if there was nothing to delete. */
+export async function deleteBlackboxFile(flightId: number, dbPath: string): Promise<string | null> {
+  return invoke<string | null>('flightlog_delete_blackbox_file', {
+    flightId,
+    dbPath: dbPath || undefined,
+  });
+}
+
 export async function exportTrackFile(
   flightId: number,
   outputPath: string,

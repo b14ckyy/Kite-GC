@@ -1233,6 +1233,43 @@
     }
   }
 
+  // The selected flight's stored original blackbox file (filename + size), or null. Accurate BLOB
+  // presence (not just the source proxy — goes null after the file is deleted). Gates export + delete
+  // and supplies the size shown inline next to the Source line.
+  let blackboxFileInfo = $state<logbookCtrl.BlackboxFileInfo | null>(null);
+  $effect(() => {
+    const id = selectedFlightId;
+    const src = selectedFlight?.source;
+    if (id && (src === 'blackbox' || src === 'both')) {
+      logbookCtrl
+        .getBlackboxInfo(id, flightLogDbPath)
+        .then((v) => (blackboxFileInfo = v))
+        .catch(() => (blackboxFileInfo = null));
+    } else {
+      blackboxFileInfo = null;
+    }
+  });
+
+  async function deleteBlackbox() {
+    if (!selectedFlightId || !selectedFlight || !blackboxFileInfo) return;
+    const value = await showDialog({
+      title: $t('logbook.deleteBlackboxTitle'),
+      message: $t('logbook.deleteBlackboxWarning'),
+      buttons: [{ label: $t('logbook.deleteBlackboxConfirm'), value: 'delete', danger: true }],
+    });
+    if (value !== 'delete' || !selectedFlightId) return;
+    try {
+      const filename = await logbookCtrl.deleteBlackbox(selectedFlightId, flightLogDbPath);
+      blackboxFileInfo = null;
+      await showInfo(
+        $t('logbook.deleteBlackboxTitle'),
+        $t('logbook.deleteBlackboxSuccess', { values: { filename: filename ?? '' } }),
+      );
+    } catch (e) {
+      errorMsg = String(e);
+    }
+  }
+
   async function exportTrack() {
     if (!selectedFlightId || !selectedFlight) return;
     try {
@@ -2396,6 +2433,8 @@
         onDeleteFlight={removeSelectedFlight}
         onExportFlights={exportFlightsToKflight}
         onExportBlackbox={exportBlackbox}
+        onDeleteBlackbox={deleteBlackbox}
+        {blackboxFileInfo}
         onExportTrack={exportTrack}
       />
     {:else if activeTab === 'mission'}

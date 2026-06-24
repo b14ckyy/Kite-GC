@@ -740,6 +740,35 @@ pub fn flightlog_export_blackbox(
     Ok(filename)
 }
 
+/// Info about the original blackbox file stored for a flight (filename + size), or null if none.
+/// Gates the export / delete buttons and supplies the size shown next to them.
+#[derive(serde::Serialize)]
+pub struct BlackboxFileInfo {
+    pub filename: String,
+    pub size_bytes: i64,
+}
+
+#[tauri::command]
+pub fn flightlog_blackbox_file_info(
+    flight_id: i64,
+    db_path: Option<String>,
+) -> Result<Option<BlackboxFileInfo>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    let info = db::blackbox_file_info(&conn, flight_id).map_err(|e| format!("DB error: {}", e))?;
+    Ok(info.map(|(filename, size_bytes)| BlackboxFileInfo { filename, size_bytes }))
+}
+
+/// Delete the stored original blackbox file for a flight, keeping the parsed flight + replay data.
+/// Returns the deleted file's original filename (None if there was nothing to delete).
+#[tauri::command]
+pub fn flightlog_delete_blackbox_file(
+    flight_id: i64,
+    db_path: Option<String>,
+) -> Result<Option<String>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::delete_blackbox_file(&conn, flight_id).map_err(|e| format!("DB error: {}", e))
+}
+
 /// Export selected flights to a .kflight file
 #[tauri::command]
 pub fn flightlog_export(

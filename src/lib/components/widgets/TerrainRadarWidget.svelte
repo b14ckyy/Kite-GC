@@ -17,7 +17,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import type { TelemetryData } from '$lib/stores/telemetry';
   import type { InterfaceSettings } from '$lib/stores/settings';
-  import { terrainAnalysis, patchTerrainAnalysis } from '$lib/stores/terrainAnalysis';
+  import { settings } from '$lib/stores/settings';
   import { isValidGpsCoordinate } from '$lib/helpers/telemetry';
   import { convertLength } from '$lib/utils/units';
 
@@ -105,8 +105,8 @@
   let sampling = false;
   let lastFan: { lat: number; lon: number; heading: number; step: number; time: number } | null = null;
 
-  const radarScale = $derived($terrainAnalysis.radarScale);
-  const predictive = $derived($terrainAnalysis.radarPredictive);
+  const radarScale = $derived($settings.terrainRadarScaleM);
+  const predictive = $derived($settings.terrainRadarPredictive);
 
   // Scale stays metric internally; in feet we show coarse round numbers (not exact
   // conversions): 60→200, 120→400, 250→800 ft.
@@ -292,11 +292,11 @@
   // (track readout removed — the heading only drives sampling, not a label)
 
   function toggleMode() {
-    patchTerrainAnalysis({ radarPredictive: !predictive });
+    settings.patch({ terrainRadarPredictive: !predictive });
   }
   function cycleScale() {
     const i = RADAR_SCALES.indexOf(radarScale);
-    patchTerrainAnalysis({ radarScale: RADAR_SCALES[(i + 1) % RADAR_SCALES.length] });
+    settings.patch({ terrainRadarScaleM: RADAR_SCALES[(i + 1) % RADAR_SCALES.length] });
   }
 </script>
 

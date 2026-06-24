@@ -1893,6 +1893,96 @@ pub fn get_blackbox_file(
     Ok(None)
 }
 
+/// Original blackbox file info (filename + size in bytes) stored for this flight (or its linked
+/// partner). Lightweight — does not load the BLOB. `None` if there's no stored original. Gates the
+/// export / delete-original buttons and supplies the size shown next to them.
+pub fn blackbox_file_info(conn: &Connection, flight_id: i64) -> SqlResult<Option<(String, i64)>> {
+    let here: Option<(String, i64)> = conn
+        .query_row(
+            "SELECT original_filename, file_size FROM blackbox_files WHERE flight_id = ?1 LIMIT 1",
+            params![flight_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    if here.is_some() {
+        return Ok(here);
+    }
+    // A 'both' flight may hold the file on its linked live/blackbox partner.
+    let linked_id: Option<i64> = conn
+        .query_row(
+            "SELECT linked_flight_id FROM flights WHERE id = ?1",
+            params![flight_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten();
+    if let Some(partner) = linked_id {
+        return conn
+            .query_row(
+                "SELECT original_filename, file_size FROM blackbox_files WHERE flight_id = ?1 LIMIT 1",
+                params![partner],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional();
+    }
+    Ok(None)
+}
+
+/// Delete the stored original blackbox file BLOB for a flight (or its linked partner), keeping the
+/// parsed `blackbox_records` + the flight row intact — replay still works from the DB, only the
+/// "export original" capability is lost. Returns the deleted file's original filename (None if there
+/// was nothing to delete).
+pub fn delete_blackbox_file(conn: &Connection, flight_id: i64) -> SqlResult<Option<String>> {
+    // Resolve which flight actually holds the file: this one, else its linked partner.
+    let mut target: Option<i64> = None;
+    let here: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM blackbox_files WHERE flight_id = ?1)",
+        params![flight_id],
+        |row| row.get(0),
+    )?;
+    if here {
+        target = Some(flight_id);
+    } else if let Some(partner) = conn
+        .query_row(
+            "SELECT linked_flight_id FROM flights WHERE id = ?1",
+            params![flight_id],
+            |row| row.get::<_, Option<i64>>(0),
+        )
+        .optional()?
+        .flatten()
+    {
+        let there: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM blackbox_files WHERE flight_id = ?1)",
+            params![partner],
+            |row| row.get(0),
+        )?;
+        if there {
+            target = Some(partner);
+        }
+    }
+
+    let Some(target_id) = target else {
+        return Ok(None);
+    };
+
+    let filename: Option<String> = conn
+        .query_row(
+            "SELECT original_filename FROM blackbox_files WHERE flight_id = ?1 LIMIT 1",
+            params![target_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let affected = conn.execute(
+        "DELETE FROM blackbox_files WHERE flight_id = ?1",
+        params![target_id],
+    )?;
+    if affected > 0 {
+        // Reclaim disk space — blackbox_files stores large BLOBs.
+        conn.execute_batch("VACUUM;")?;
+    }
+    Ok(filename)
+}
+
 pub fn insert_blackbox_file(
     conn: &Connection,
     flight_id: i64,

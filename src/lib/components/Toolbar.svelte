@@ -14,6 +14,7 @@
   import BatteryIndicator from '$lib/components/BatteryIndicator.svelte';
   import type { PortInfo, BleDeviceInfo, TransportType, ProtocolType } from '$lib/stores/connection';
   import type { TelemetryData } from '$lib/stores/telemetry';
+  import { settings } from '$lib/stores/settings';
 
   let {
     appVersion,
@@ -54,6 +55,42 @@
     relayOpen?: boolean;
     onToggleRelay?: () => void;
   } = $props();
+
+  // ── Bluetooth SPP port custom names ────────────────────────────────
+  // Outgoing BT SPP ports (tagged `bluetooth-spp` by the backend) get no useful OS descriptor, so the
+  // user can rename them; the name is stored per COM path in settings and appended to "COMx".
+  function portLabel(p: PortInfo): string {
+    if (p.port_type !== 'bluetooth-spp') return p.label;
+    const name = $settings.btPortNames[p.path];
+    return name ? `${p.path} — ${name}` : `${p.path} — ${$t('connection.bluetooth')}`;
+  }
+  const selectedIsBtSpp = $derived(
+    ports.some((p) => p.path === selectedPort && p.port_type === 'bluetooth-spp'),
+  );
+
+  let editingBt = $state(false);
+  let btNameDraft = $state('');
+
+  function openBtEdit() {
+    btNameDraft = $settings.btPortNames[selectedPort] ?? '';
+    editingBt = true;
+  }
+  function saveBtName() {
+    const name = btNameDraft.trim();
+    settings.update((s) => {
+      const map = { ...s.btPortNames };
+      if (name) map[selectedPort] = name;
+      else delete map[selectedPort];
+      return { ...s, btPortNames: map };
+    });
+    editingBt = false;
+  }
+  // Close the editor when the selection changes (or leaves BT SPP / serial).
+  $effect(() => {
+    void selectedPort;
+    void selectedTransport;
+    editingBt = false;
+  });
 
   function getGpsFixLabel(): string {
     if (!telem.lastUpdate || telem.fixType === 0) return $t('gps.noFix');
@@ -149,10 +186,28 @@
               <option value="">{$t('connection.noPortsFound')}</option>
             {:else}
               {#each ports as port}
-                <option value={port.path}>{port.label}</option>
+                <option value={port.path}>{portLabel(port)}</option>
               {/each}
             {/if}
           </select>
+          {#if selectedIsBtSpp}
+            {#if editingBt}
+              <input
+                class="tb-input bt-name-input"
+                type="text"
+                bind:value={btNameDraft}
+                placeholder={$t('connection.btNamePlaceholder')}
+                onkeydown={(e) => {
+                  if (e.key === 'Enter') saveBtName();
+                  else if (e.key === 'Escape') (editingBt = false);
+                }}
+              />
+              <button class="bt-edit" onclick={saveBtName} title={$t('connection.btNameSave')}>✓</button>
+              <button class="bt-edit" onclick={() => (editingBt = false)} title={$t('connection.btNameCancel')}>✕</button>
+            {:else}
+              <button class="bt-edit" onclick={openBtEdit} title={$t('connection.renameBtPort')}>✎</button>
+            {/if}
+          {/if}
           <select class="tb-select baud-select" bind:value={selectedBaud}>
             {#each baudRates as baud}
               <option value={baud}>{baud}</option>
@@ -352,6 +407,27 @@
   }
   .host-input { width: 150px; }
   .port-input { width: 72px; }
+  .bt-name-input { width: 130px; }
+
+  /* Small square icon button for the Bluetooth-port rename (✎ / ✓ / ✕). */
+  .bt-edit {
+    height: 28px;
+    width: 28px;
+    box-sizing: border-box;
+    padding: 0;
+    background: #434343;
+    border: 1px solid #555;
+    border-radius: 4px;
+    color: #cfcfcf;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+  }
+  .bt-edit:hover {
+    background: rgba(55, 168, 219, 0.18);
+    color: #37a8db;
+    border-color: #37a8db;
+  }
 
   /* Drop the native number spinner — the up/down arrows are clutter in the toolbar. */
   .port-input {

@@ -15,12 +15,116 @@ use super::{ByteTransport, PortInfo, TransportError};
 /// queued write once the current blocking read returns. See the TCP transport for the full rationale.
 const READ_TIMEOUT_MS: u64 = 50;
 
-/// List available serial ports on the system
+/// Bluetooth SPP COM-port classification (Windows). A paired SPP device creates *two* virtual COM
+/// ports — an outgoing (client) one we connect through and an incoming (local server) one that's
+/// useless to us. We only want the outgoing one (like MWPTools). The registry tells them apart
+/// locale-independently; see `bt_spp_outgoing_ports`.
+#[cfg(target_os = "windows")]
+fn bt_spp_outgoing_ports() -> std::collections::HashSet<String> {
+    use winreg::enums::HKEY_LOCAL_MACHINE;
+    use winreg::RegKey;
+
+    let mut out = std::collections::HashSet::new();
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    // BTHENUM enumerates Bluetooth RFCOMM (SPP) devices. Layout:
+    //   BTHENUM\{service-class-guid}_<id>\<instance>\Device Parameters\PortName = "COMx"
+    // The *incoming* (local server) ports live under a class key containing "LOCALMFG"; the *outgoing*
+    // (client) ports reference the remote device address instead. We keep only the latter.
+    let bthenum = match hklm.open_subkey(r"SYSTEM\CurrentControlSet\Enum\BTHENUM") {
+        Ok(k) => k,
+        Err(e) => {
+            log::debug!("BTHENUM enum not available ({}) — no Bluetooth SPP classification", e);
+            return out;
+        }
+    };
+
+    for class_name in bthenum.enum_keys().flatten() {
+        // Skip local/incoming server ports.
+        if class_name.to_uppercase().contains("LOCALMFG") {
+            continue;
+        }
+        let class_key = match bthenum.open_subkey(&class_name) {
+            Ok(k) => k,
+            Err(_) => continue,
+        };
+        for inst_name in class_key.enum_keys().flatten() {
+            let port = class_key
+                .open_subkey(&inst_name)
+                .ok()
+                .and_then(|inst| inst.open_subkey("Device Parameters").ok())
+                .and_then(|dp| dp.get_value::<String, _>("PortName").ok());
+            if let Some(com) = port {
+                log::debug!("Bluetooth SPP outgoing port: {} ({}\\{})", com, class_name, inst_name);
+                out.insert(com.to_uppercase());
+            }
+        }
+    }
+    out
+}
+
+/// All Bluetooth SPP COM ports (outgoing + incoming), so we can drop the incoming ones from the list.
+#[cfg(target_os = "windows")]
+fn bt_spp_all_ports() -> std::collections::HashSet<String> {
+    use winreg::enums::HKEY_LOCAL_MACHINE;
+    use winreg::RegKey;
+
+    let mut out = std::collections::HashSet::new();
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    let bthenum = match hklm.open_subkey(r"SYSTEM\CurrentControlSet\Enum\BTHENUM") {
+        Ok(k) => k,
+        Err(_) => return out,
+    };
+    for class_name in bthenum.enum_keys().flatten() {
+        let class_key = match bthenum.open_subkey(&class_name) {
+            Ok(k) => k,
+            Err(_) => continue,
+        };
+        for inst_name in class_key.enum_keys().flatten() {
+            let port = class_key
+                .open_subkey(&inst_name)
+                .ok()
+                .and_then(|inst| inst.open_subkey("Device Parameters").ok())
+                .and_then(|dp| dp.get_value::<String, _>("PortName").ok());
+            if let Some(com) = port {
+                out.insert(com.to_uppercase());
+            }
+        }
+    }
+    out
+}
+
+/// List available serial ports on the system.
+///
+/// On Windows, Bluetooth SPP ports are special-cased: the *incoming* (local server) port of each
+/// paired device is hidden, and the *outgoing* (client) port is tagged `bluetooth-spp` so the UI can
+/// offer a custom rename (the OS gives them no useful device descriptor). All other ports keep their
+/// USB/PCI descriptors.
 pub fn list_ports() -> Vec<PortInfo> {
+    #[cfg(target_os = "windows")]
+    let (spp_outgoing, spp_all) = (bt_spp_outgoing_ports(), bt_spp_all_ports());
+
     match serialport::available_ports() {
         Ok(ports) => ports
             .into_iter()
-            .map(|p| {
+            .filter_map(|p| {
+                let port_upper = p.port_name.to_uppercase();
+
+                // Windows: drop incoming Bluetooth SPP ports (any SPP port that isn't an outgoing one).
+                #[cfg(target_os = "windows")]
+                if spp_all.contains(&port_upper) && !spp_outgoing.contains(&port_upper) {
+                    return None;
+                }
+
+                // Windows: tag outgoing Bluetooth SPP ports; the UI handles their label (+ custom name).
+                #[cfg(target_os = "windows")]
+                if spp_outgoing.contains(&port_upper) {
+                    return Some(PortInfo {
+                        path: p.port_name.clone(),
+                        label: p.port_name,
+                        port_type: "bluetooth-spp".to_string(),
+                    });
+                }
+
                 let (label, port_type) = match &p.port_type {
                     serialport::SerialPortType::UsbPort(usb) => {
                         let label = match (&usb.manufacturer, &usb.product) {
@@ -43,11 +147,11 @@ pub fn list_ports() -> Vec<PortInfo> {
                         (p.port_name.clone(), "Unknown".to_string())
                     }
                 };
-                PortInfo {
+                Some(PortInfo {
                     path: p.port_name,
                     label,
                     port_type,
-                }
+                })
             })
             .collect(),
         Err(e) => {

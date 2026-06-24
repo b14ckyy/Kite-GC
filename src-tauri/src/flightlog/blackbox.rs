@@ -82,33 +82,11 @@ where
     let start_time = resolve_start_time(&header, file_path);
     eprintln!("[BBX-HEADER] craft={:?}, header_start_time={:?}, resolved_start_time={}", craft_name, header.start_time, start_time.to_rfc3339());
 
-    // Early duplicate check based on header alone (before expensive decode)
-    if !force_import {
-        report(8, "check-dup", "Checking for duplicate flights...");
-        eprintln!("[DUP-CHECK] craft_name={:?}, start_time={}, force_import={}", craft_name, start_time.to_rfc3339(), force_import);
-        match db::find_duplicate_flight(conn, &craft_name, start_time) {
-            Ok(Some(existing_flight)) => {
-                eprintln!("[DUP-CHECK] DUPLICATE FOUND: flight_id={}", existing_flight.id);
-                return Ok(BlackboxImportStatus::DuplicateDetected {
-                    existing_flight,
-                    duplicate_craft_name: craft_name,
-                    duplicate_start_time: start_time,
-                    duplicate_duration_sec: None,
-                    duplicate_lat: None,
-                    duplicate_lon: None,
-                });
-            }
-            Ok(None) => {
-                eprintln!("[DUP-CHECK] No duplicate found, proceeding with import");
-            }
-            Err(e) => {
-                eprintln!("[DUP-CHECK] ERROR: {}", e);
-                return Err(format!("Duplicate check failed: {}", e));
-            }
-        }
-    } else {
-        eprintln!("[DUP-CHECK] Skipped (force_import=true)");
-    }
+    // NOTE: the duplicate check runs *after* decode + the UTC correction below, not here. The stored
+    // start_time is the true-UTC value (header local time minus the location offset, ADR-048), and the
+    // offset is only known once the GPS start position has been decoded — so a header-only early check
+    // would compare an uncorrected time against the corrected stored one and miss every duplicate of a
+    // log whose header carries a non-UTC local time. See the post-correction check below.
 
     report(10, "decoder", "Searching for blackbox_decode...");
     let decoder = find_decoder().ok_or_else(|| {
@@ -204,6 +182,35 @@ where
         None => start_time,
     };
     let end_time = start_time + Duration::microseconds(duration_us);
+
+    // Duplicate check on the *corrected* (true-UTC) start_time — the same value stored below, so a
+    // re-import of the same log matches regardless of the header's local-time offset (ADR-048).
+    if !force_import {
+        report(70, "check-dup", "Checking for duplicate flights...");
+        eprintln!("[DUP-CHECK] craft_name={:?}, start_time={}, force_import={}", craft_name, start_time.to_rfc3339(), force_import);
+        match db::find_duplicate_flight(conn, &craft_name, start_time) {
+            Ok(Some(existing_flight)) => {
+                eprintln!("[DUP-CHECK] DUPLICATE FOUND: flight_id={}", existing_flight.id);
+                return Ok(BlackboxImportStatus::DuplicateDetected {
+                    existing_flight,
+                    duplicate_craft_name: craft_name,
+                    duplicate_start_time: start_time,
+                    duplicate_duration_sec: duration_sec,
+                    duplicate_lat: start_lat,
+                    duplicate_lon: start_lon,
+                });
+            }
+            Ok(None) => {
+                eprintln!("[DUP-CHECK] No duplicate found, proceeding with import");
+            }
+            Err(e) => {
+                eprintln!("[DUP-CHECK] ERROR: {}", e);
+                return Err(format!("Duplicate check failed: {}", e));
+            }
+        }
+    } else {
+        eprintln!("[DUP-CHECK] Skipped (force_import=true)");
+    }
 
     let flight = Flight {
         id: 0,

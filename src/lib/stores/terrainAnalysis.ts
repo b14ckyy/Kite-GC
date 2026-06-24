@@ -51,10 +51,6 @@ export interface TerrainAnalysisState {
   /** Visible distance window (m); null = full route */
   viewStart: number | null;
   viewEnd: number | null;
-  /** Terrain-radar widget: colour by predicted altitude (sink-angle) vs flat current altitude */
-  radarPredictive: boolean;
-  /** Terrain-radar widget: total clearance colour scale in metres (red < 0 … green at scale, off above) */
-  radarScale: number;
   /** RF analysis — geometric LOS occlusion (naïve; ignored when rfFresnel is on) */
   rfLos: boolean;
   /** RF analysis — Fresnel-zone / knife-edge diffraction loss */
@@ -87,8 +83,6 @@ const INITIAL: TerrainAnalysisState = {
   rangeEnd: 0,
   viewStart: null,
   viewEnd: null,
-  radarPredictive: false,
-  radarScale: 120,
   rfLos: false,
   rfFresnel: false,
   rfTworay: false,
