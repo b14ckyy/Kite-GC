@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **3D render frame-rate cap + low-power mode.** The 3D view now always caps at 60 fps (Cesium would
+  otherwise render at the display refresh rate — 120/144 Hz panels waste GPU/battery for no benefit on a
+  map). A new "3D Power Saving" setting drops that to 20 fps: **Off** (60 fps), **On** (always 20 fps),
+  or **Auto** (20 fps only while on battery). Battery/AC state is detected cross-platform (Windows +
+  Linux + macOS) via a native backend command (`system_on_battery`, using `starship-battery`).
 - **Missing Cesium Ion key prompt on first 3D entry.** Entering the 3D view without a Cesium Ion token
   now shows a one-time prompt to paste + save a key (enabling real world terrain), with "remind me
   later" (re-armed on the next switch to 3D) and "don't remind me" (persisted). A saved key is applied

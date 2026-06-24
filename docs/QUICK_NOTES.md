@@ -1,5 +1,4 @@
 - RTSP video input on ToDo to test with DJI PC capture software
 - Check Airspeed for Mavlink - Make airspeed the primary value on widget when available
 - Add Wind Speed and heading indicator since Ardu already provides, INAV version gated for now
-- Add a low power mode that limits 3D view to 20fps render to save performance and battery in the field
 - Vehicle database: a selectable vehicle (or auto-linked by craft name on INAV) in post-flight, holding base data (airframe, motor, FC, anything worth recording), linked to flight logs to accumulate cumulative flight stats + show record values. Larger dedicated feature — deferred for now; doc: docs/future/VEHICLE_DATABASE.md
