@@ -683,6 +683,18 @@ protocols + these parallel networks) is the living reference in
   draggable + WP-style lat/lon/alt popup) and 3D (`Map3D.svelte::updateRally3D`, point + label). A
   **Rally** section in the Airspace Manager panel (add point, per-point altitude, the params, Save/Revert,
   armed-gating) + a 7th `rally` layer toggle. Shares the panel `{#key}` re-init.
+- **In-flight breach monitor (`controllers/breachMonitor.ts`).** INAV doesn't expose its geozone-avoidance
+  flight mode (`NAV_SEND_TO`, bit 19 — no box, absent from `packBoxModeFlags`, so invisible over MSP; OSD
+  shows "GEO"), so the GCS detects a breach itself: while connected+armed+fix, it tests the live position
+  against the loaded zones, altitude-aware (3D), and pushes one toast on breach onset (latched, via
+  `pushLocalStatus` → the STATUSTEXT banner). INAV uses `checkLiveGeozoneBreach` (helpers/geozoneMissionCheck);
+  ArduPilot/PX4 keep STATUSTEXT as the primary cue + a geometric fallback `checkLiveFenceBreach`
+  (helpers/fenceBreach). The FC's RTH/PosHold mode-change during avoidance is shown as usual (flight-mode
+  widget) but intentionally not used for the toast.
+- **Terrain Analyzer multi-autopilot fix.** Waypoint-mode profiling read only the INAV `mission` store →
+  empty for ArduPilot/PX4 (separate `arduMission` store). Now an autopilot-aware source (`arduToInav` sets
+  `alt_mode` from the MAVLink frame; FC home as launch ref); the RF origin falls back home→Takeoff-WP→hint.
+  Editing (Terrain Correction / Add-WP, INAV mission store) stays INAV-gated.
 - **Mission EEPROM save fix.** `MSP_WP_MISSION_LOAD`/`SAVE` were swapped (18/19) in `msp/types.rs`, so
   "Save to EEPROM" actually sent *load* (and vice-versa) → nothing persisted. Corrected to INAV's
   LOAD=18 / SAVE=19. Also: the default **UDP** connection port is now 14550 (MAVLink convention; TCP 5761

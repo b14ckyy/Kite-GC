@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Terrain analysis now works with ArduPilot/PX4 missions.** Waypoint-mode terrain profiling only read
+  the INAV mission store, so the profile (and the RF obstacle analysis) were empty for MAVLink missions,
+  which live in a separate store. The Terrain Analyzer now uses an autopilot-aware mission source
+  (converting ArduPilot frames → AMSL/AGL/relative) with the FC home as the launch reference. The RF
+  analysis falls back to a Takeoff waypoint when no home is set, and shows a hint if it has no launch
+  reference at all. (Terrain Correction / Add-WP editing stays INAV-only for now.)
 - **WP popup delete left a stale selection (INAV mission editor).** Deleting a waypoint via its map
   popup only cleared the primary index, not the multi-select set — so the waypoint that shifted into the
   freed index stayed highlighted and a subsequent click started a multi-selection. The popup delete now
@@ -35,6 +41,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   between TCP `5761` and UDP `14550` without overwriting a custom port (e.g. SITL `5762`). TCP unchanged.
 
 ### Added
+- **In-flight geozone / geofence breach toast.** While armed, the GCS now watches the live position and
+  raises a top-of-screen toast the moment the aircraft actually breaches a zone — geometric + altitude-
+  aware (3D), so it works even though INAV doesn't expose its geozone-avoidance mode over MSP. INAV: inside
+  a No-Flight-Zone, or leaving the flight zone (when home is inside an inclusion zone). ArduPilot/PX4: the
+  FC's own STATUSTEXT stays the primary cue, with a geometric fence fallback (inside an exclusion / outside
+  the inclusion / above the vertical limit). One toast per breach onset (no spam).
+- **Radar conflict-alert tuning (C3).** The proximity (Stage 1) and CPA (Stage 2) thresholds are now
+  user-editable under their toggles in the Radar panel: proximity radius + vertical separation, and CPA
+  miss radius / height / look-ahead. Persisted; they override the built-in defaults.
 - **ArduPilot / PX4 Rally points.** RTL divert/return locations — on RTL the vehicle returns to the
   nearest rally point (within `RALLY_LIMIT_KM`) instead of home. On connecting to an ArduPilot/PX4 FC,
   Kite downloads the rally points (`MAV_MISSION_TYPE_RALLY`) and shows them as green **R**-markers on
