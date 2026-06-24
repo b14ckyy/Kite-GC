@@ -9,3 +9,4 @@
 - Check Airspeed for Mavlink - Make airspeed the primary value on widget when available
 - Add Wind Speed and heading indicator since Ardu already provides, INAV version gated for now
 - Add option to discard RAW Blackbox files
+- Add a low power mode that limits 3D view to 20fps render to save performance and battery in the field
