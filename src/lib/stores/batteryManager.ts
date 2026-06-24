@@ -16,6 +16,11 @@ export const batteryManagerOpen = writable<boolean>(false);
 /** The pack selected in the Manager (persists across close/reopen). */
 export const batteryManagerSelectedId = writable<number | null>(null);
 
+/** One-shot signal: open the Manager straight into the create form with this serial pre-filled.
+ *  Set from the End-Flight flow when a flight's battery serial matches no existing pack; the Manager
+ *  consumes it (starts a create, fills the serial) and resets it to null. */
+export const batteryManagerCreateSerial = writable<string | null>(null);
+
 /** List grouping mode (groups are always ordered large → small). */
 export const batteryGroupMode = writable<BatteryGroupMode>('cell-capacity');
 

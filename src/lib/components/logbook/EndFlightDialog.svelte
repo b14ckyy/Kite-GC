@@ -25,9 +25,12 @@
 
 <script lang="ts">
   import { t } from 'svelte-i18n';
+  import { get } from 'svelte/store';
   import type { InterfaceSettings } from '$lib/stores/settings';
+  import { settings } from '$lib/stores/settings';
   import { convertAltitude, convertSpeed, convertDistance, formatConverted } from '$lib/utils/units';
-  import { formatDurationSec } from '$lib/stores/flightlog';
+  import { formatDurationSec, batteryDbList } from '$lib/stores/flightlog';
+  import type { BatteryPack } from '$lib/stores/flightlogTypes';
 
   let { interfaceSettings }: { interfaceSettings: InterfaceSettings } = $props();
 
@@ -41,6 +44,36 @@
   let confirmingDiscard = $state(false);
   let resolver: ((v: EndFlightResult | null) => void) | null = null;
 
+  // Battery serial combobox: filter text + a dropdown of existing packs. The typed value is what's
+  // saved; if it matches no pack the caller offers to create one (see +page onRecordingEnded).
+  let batteries = $state<BatteryPack[]>([]);
+  let listOpen = $state(false);
+
+  const filteredBatteries = $derived.by(() => {
+    const q = serial.trim().toLowerCase();
+    const list = q
+      ? batteries.filter((b) => b.serial.toLowerCase().includes(q) || (b.label ?? '').toLowerCase().includes(q))
+      : batteries;
+    return list.slice(0, 8);
+  });
+  const serialIsNew = $derived(
+    serial.trim().length > 0 && !batteries.some((b) => b.serial.toLowerCase() === serial.trim().toLowerCase()),
+  );
+
+  function batteryMeta(b: BatteryPack): string {
+    return [b.label, b.capacity_mah ? `${b.capacity_mah} mAh` : null, b.cell_count ? `${b.cell_count}S` : null]
+      .filter(Boolean)
+      .join(' · ');
+  }
+
+  async function loadBatteries() {
+    try {
+      batteries = await batteryDbList(get(settings).flightLogDbPath);
+    } catch {
+      batteries = [];
+    }
+  }
+
   export function show(opts: EndFlightOptions): Promise<EndFlightResult | null> {
     stats = opts.stats;
     recorded = opts.recorded;
@@ -49,6 +82,9 @@
     notes = '';
     linkMission = false; // unverified mission → opt-in
     confirmingDiscard = false;
+    listOpen = false;
+    batteries = [];
+    if (opts.recorded) void loadBatteries();
     open = true;
     return new Promise((resolve) => { resolver = resolve; });
   }
@@ -95,8 +131,32 @@
         <div class="ef-divider"></div>
         <label class="fld">
           <span class="fld-label">{$t('endFlight.battery')}</span>
-          <!-- svelte-ignore a11y_autofocus -->
-          <input class="fld-input" type="text" placeholder={$t('endFlight.batteryHint')} bind:value={serial} autofocus />
+          <div class="battery-combo">
+            <!-- svelte-ignore a11y_autofocus -->
+            <input
+              class="fld-input"
+              type="text"
+              placeholder={$t('endFlight.batteryHint')}
+              bind:value={serial}
+              autofocus
+              onfocus={() => (listOpen = true)}
+              oninput={() => (listOpen = true)}
+              onblur={() => setTimeout(() => (listOpen = false), 120)}
+            />
+            {#if listOpen && filteredBatteries.length > 0}
+              <ul class="battery-dropdown">
+                {#each filteredBatteries as b (b.id)}
+                  <li>
+                    <button type="button" class="battery-opt" onmousedown={(e) => { e.preventDefault(); serial = b.serial; listOpen = false; }}>
+                      <span class="bo-serial">{b.serial}</span>
+                      {#if batteryMeta(b)}<span class="bo-meta">{batteryMeta(b)}</span>{/if}
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+          </div>
+          {#if serialIsNew}<span class="battery-new-hint">{$t('endFlight.batteryNewHint')}</span>{/if}
         </label>
         <label class="fld">
           <span class="fld-label">{$t('logbook.notes')}</span>
@@ -148,6 +208,25 @@
   .fld-input { box-sizing: border-box; width: 100%; padding: 6px 8px; font-size: 13px; color: #e0e0e0; background: #1f1f1f; border: 1px solid #444; border-radius: 4px; font-family: 'Segoe UI', Tahoma, sans-serif; }
   .fld-input:focus { outline: none; border-color: #37a8db; }
   .fld-area { resize: vertical; }
+
+  /* Battery serial combobox: filter input + dropdown of existing packs. */
+  .battery-combo { position: relative; }
+  .battery-dropdown {
+    position: absolute; top: 100%; left: 0; right: 0; z-index: 10;
+    margin: 2px 0 0; padding: 4px; list-style: none;
+    max-height: 180px; overflow-y: auto;
+    background: #262626; border: 1px solid #444; border-radius: 4px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+  }
+  .battery-opt {
+    display: flex; align-items: baseline; gap: 8px; width: 100%;
+    padding: 5px 8px; border: none; border-radius: 3px; background: transparent;
+    color: #e0e0e0; font-size: 12px; text-align: left; cursor: pointer;
+  }
+  .battery-opt:hover { background: rgba(55, 168, 219, 0.18); }
+  .bo-serial { font-weight: 600; }
+  .bo-meta { color: #949494; font-size: 11px; }
+  .battery-new-hint { display: block; margin-top: 4px; font-size: 11px; color: #37a8db; }
 
   .ef-check { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #e0e0e0; margin-bottom: 12px; cursor: pointer; }
   .ef-check input { accent-color: #37a8db; }

@@ -23,6 +23,7 @@
   import type { BatteryPack, BatteryPackInput, BatteryAggregate, BatteryFile, FlightSummary } from '$lib/stores/flightlogTypes';
   import {
     batteryManagerSelectedId, batteryGroupMode, batteryLeafAsc, batterySearchQuery, batterySortField,
+    batteryManagerCreateSerial,
   } from '$lib/stores/batteryManager';
   import { requestOpenFlightId } from '$lib/stores/missionManager';
   import PanelShell, { type PanelVariant } from '$lib/components/panel/PanelShell.svelte';
@@ -516,6 +517,16 @@
     autoResize(el);
     return { update() { autoResize(el); } };
   }
+
+  // External "create new battery with this serial" trigger (End-Flight flow): open straight into the
+  // create form with the serial pre-filled, then consume the one-shot signal.
+  $effect(() => {
+    const s = $batteryManagerCreateSerial;
+    if (s == null) return;
+    startCreate();
+    form.serial = s;
+    batteryManagerCreateSerial.set(null);
+  });
 
   // Init once: load + restore selection.
   let didInit = false;

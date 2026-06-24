@@ -58,7 +58,7 @@
   import { toTelemetryData } from '$lib/adapters/telemetryAdapter';
   import { activeWpNumber, replayWpTotal } from '$lib/stores/navStatus';
   import { missionManagerOpen, missionManagerSelectedId, requestOpenFlightId, requestOpenMissionId } from '$lib/stores/missionManager';
-  import { batteryManagerOpen } from '$lib/stores/batteryManager';
+  import { batteryManagerOpen, batteryManagerCreateSerial } from '$lib/stores/batteryManager';
   import { missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode, flightSetBatterySerial, updateFlightNotes, getFlight, flightlogCommitPending, flightlogDiscardPending, flightlogContinuePending, scanOrphanSessions, recoverDiscard, recoverSaveIncomplete, recoverContinue, batteryDbFindBySerial, batteryDbAddUsage, blackboxDecoderAvailable, downloadBlackboxDecode } from '$lib/stores/flightlog';
   import EndFlightDialog from "$lib/components/logbook/EndFlightDialog.svelte";
   import type { EndFlightStats } from "$lib/components/logbook/EndFlightDialog.svelte";
@@ -2032,7 +2032,27 @@
       }
       // Save → commit the pending session, then link mission + battery/notes against the new id.
       const flightId = await flightlogCommitPending();
-      if (res.batterySerial) await flightSetBatterySerial(flightId, res.batterySerial, flightLogDbPath);
+      if (res.batterySerial) {
+        await flightSetBatterySerial(flightId, res.batterySerial, flightLogDbPath);
+        // Unknown serial → offer to create a battery (opens the Battery Manager create form pre-filled).
+        const existing = await batteryDbFindBySerial(res.batterySerial, flightLogDbPath).catch(() => null);
+        if (!existing) {
+          const choice = await showDialog({
+            title: $t('endFlight.newBatteryTitle'),
+            message: $t('endFlight.newBatteryMessage', { values: { serial: res.batterySerial } }),
+            buttons: [
+              { label: $t('endFlight.newBatteryCreate'), value: 'create' },
+              { label: $t('endFlight.newBatterySkip'), value: 'skip' },
+            ],
+          });
+          if (choice === 'create') {
+            activeTab = 'logbook';
+            settings.patch({ activeTab: 'logbook' });
+            batteryManagerOpen.set(true);
+            batteryManagerCreateSerial.set(res.batterySerial);
+          }
+        }
+      }
       if (res.notes) await updateFlightNotes(flightId, res.notes, flightLogDbPath);
       await linkEndedMission(flightId, res.linkMission);
       void loadLogbook();
