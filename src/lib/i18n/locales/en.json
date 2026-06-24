@@ -59,6 +59,15 @@
     "btNameSave": "Save name",
     "btNameCancel": "Cancel"
   },
+  "cesiumKey": {
+    "title": "3D Terrain Needs a Cesium Ion Key",
+    "body": "The 3D view works without it, but a free Cesium Ion access token enables real world terrain. Paste your token to save it, or skip for now.",
+    "getKey": "Get a free token at ion.cesium.com →",
+    "placeholder": "Cesium Ion access token",
+    "save": "Save key",
+    "later": "Remind me later",
+    "ignore": "Don't remind me"
+  },
   "sensors": {
     "gyro": "GYRO",
     "acc": "ACC",

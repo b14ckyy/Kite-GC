@@ -776,6 +776,21 @@
    * Exposed (instance method) so +page can read it on a 3D→2D switch and re-centre the
    * 2D map on the same spot.
    */
+  /** Apply a Cesium Ion token entered after the viewer was created (no token at init = no world
+   *  terrain). Sets the global token and swaps world terrain in live, so the 3D view gains real
+   *  terrain without an app restart. */
+  export function applyIonToken(token: string) {
+    const t = token.trim();
+    if (!t || !viewer) return;
+    Cesium.Ion.defaultAccessToken = t;
+    try {
+      viewer.scene.setTerrain(Cesium.Terrain.fromWorldTerrain({ requestVertexNormals: true }));
+      viewer.scene.requestRender();
+    } catch (e) {
+      console.warn('[Map3D] applyIonToken: failed to enable world terrain', e);
+    }
+  }
+
   export function getCamFocus(): { lat: number; lon: number; range: number; heading: number; pitch: number } | null {
     if (!viewer) return null;
     const scene = viewer.scene, canvas = viewer.canvas;

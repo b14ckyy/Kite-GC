@@ -59,6 +59,15 @@
     "btNameSave": "Name speichern",
     "btNameCancel": "Abbrechen"
   },
+  "cesiumKey": {
+    "title": "3D-Terrain benötigt einen Cesium-Ion-Key",
+    "body": "Die 3D-Ansicht funktioniert auch ohne, aber ein kostenloser Cesium-Ion-Token aktiviert echtes Geländerelief. Token einfügen zum Speichern oder vorerst überspringen.",
+    "getKey": "Kostenlosen Token auf ion.cesium.com holen →",
+    "placeholder": "Cesium-Ion-Access-Token",
+    "save": "Key speichern",
+    "later": "Später erinnern",
+    "ignore": "Nicht mehr erinnern"
+  },
   "sensors": {
     "gyro": "GYRO",
     "acc": "ACC",

@@ -53,6 +53,15 @@
     "btNameSave": "Enregistrer le nom",
     "btNameCancel": "Annuler"
   },
+  "cesiumKey": {
+    "title": "Le relief 3D nécessite une clé Cesium Ion",
+    "body": "La vue 3D fonctionne sans, mais un jeton d'accès Cesium Ion gratuit active le relief réel du terrain. Collez votre jeton pour l'enregistrer, ou ignorez pour l'instant.",
+    "getKey": "Obtenir un jeton gratuit sur ion.cesium.com →",
+    "placeholder": "Jeton d'accès Cesium Ion",
+    "save": "Enregistrer la clé",
+    "later": "Me rappeler plus tard",
+    "ignore": "Ne plus me rappeler"
+  },
   "sensors": {
     "gyro": "GYRO",
     "acc": "ACC",

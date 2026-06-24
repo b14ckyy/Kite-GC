@@ -20,6 +20,7 @@
   import { t, locale } from 'svelte-i18n';
   import Map from "$lib/components/Map.svelte";
   import Map3D from "$lib/components/Map3D.svelte";
+  import CesiumKeyPrompt from "$lib/components/CesiumKeyPrompt.svelte";
   import LogPlayer from "$lib/components/logbook/LogPlayer.svelte";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import ContextMenu from "$lib/components/ContextMenu.svelte";
@@ -122,7 +123,34 @@
     getCamSubpoint?: () => { lat: number; lon: number } | null;
     getCamGeo?: () => { sub: { lat: number; lon: number }; focus: { lat: number; lon: number } | null; headingDeg: number } | null;
     isFreeLook?: () => boolean;
+    applyIonToken?: (token: string) => void;
   } | undefined = $state();
+
+  // Missing-Cesium-key prompt: shown on the first switch to 3D when no Ion token is set (unless the
+  // user dismissed it for good). `remind later` just closes (re-armed on the next 2D→3D switch).
+  let cesiumKeyPromptOpen = $state(false);
+  let cesiumPromptArmed = true; // re-armed whenever we leave 3D, so "remind later" re-triggers
+  $effect(() => {
+    if (mapViewMode === '3d') {
+      const s = get(settings);
+      if (cesiumPromptArmed && !s.cesiumIonToken && !s.cesiumKeyPromptDismissed) {
+        cesiumKeyPromptOpen = true;
+        cesiumPromptArmed = false;
+      }
+    } else {
+      cesiumPromptArmed = true;
+    }
+  });
+  function cesiumKeySave(token: string) {
+    applySettingsPatch({ cesiumIonToken: token });
+    map3dRef?.applyIonToken?.(token);
+    cesiumKeyPromptOpen = false;
+  }
+  function cesiumKeyRemindLater() { cesiumKeyPromptOpen = false; }
+  function cesiumKeyIgnore() {
+    settings.patch({ cesiumKeyPromptDismissed: true });
+    cesiumKeyPromptOpen = false;
+  }
   // 2D follow state, lifted here so it survives the 2D map's remount on each 2D↔3D toggle
   // (the 3D camera mode persists on its own since Map3D stays mounted).
   let map2dViewMode = $state<'free' | 'follow' | 'heading-follow'>('free');
@@ -2280,6 +2308,7 @@
   <div class="ui-scale">
 
 <ConfirmDialog bind:this={confirmDialog} />
+<CesiumKeyPrompt bind:open={cesiumKeyPromptOpen} onSave={cesiumKeySave} onRemindLater={cesiumKeyRemindLater} onIgnore={cesiumKeyIgnore} />
 <EndFlightDialog bind:this={endFlightDialog} {interfaceSettings} />
 <RecoveryPrompt bind:this={recoveryPrompt} />
 <DisconnectArmedDialog bind:this={disconnectArmedDialog} />

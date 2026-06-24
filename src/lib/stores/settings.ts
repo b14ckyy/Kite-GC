@@ -323,6 +323,8 @@ export interface AppSettings {
   uiScale: number;
   // 3D Map
   cesiumIonToken: string;
+  /** User chose "don't remind me" on the missing-Cesium-key prompt → never auto-show it again. */
+  cesiumKeyPromptDismissed: boolean;
   /** Show the vertical altitude curtain (wall down to ground) under the 3D track. */
   altitudeCurtain3D: boolean;
   /** Light the 3D globe with the real sun position (day/night terminator + shading). */
@@ -399,6 +401,7 @@ const defaults: AppSettings = {
   locale: 'en',
   uiScale: 1,
   cesiumIonToken: '',
+  cesiumKeyPromptDismissed: false,
   altitudeCurtain3D: true,
   realLighting3D: true,
   logReplayTime: true,
