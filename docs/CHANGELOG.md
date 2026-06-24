@@ -66,6 +66,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   INAV's codes (LOAD=18, SAVE=19); EEPROM save/load now round-trip.
 
 ### Changed
+- **Flight-log database space is now reclaimed incrementally.** Deleting a flight (or a stored
+  blackbox original) used to run a full `VACUUM`, rewriting the entire database file — fine for a few
+  flights, but unusably slow once logs reach GBs (common with ArduPilot DataFlash). The DB now uses
+  `auto_vacuum = INCREMENTAL` and reclaims only the freed pages via `PRAGMA incremental_vacuum` after a
+  delete (cost ∝ deleted data, not DB size). Existing databases convert once on first open. A new
+  **Compact Database** button in Settings still offers a full defragmenting VACUUM on demand (rarely
+  needed).
 - **Airspace Manager settings reordered.** The FC editors (Geozones / Geofence / Rally points) now sit at
   the top of the Settings view so they stay reachable as the panel grows; the per-layer 2D/3D visibility
   toggles + render ranges moved to a **"Show on map"** group at the end.
