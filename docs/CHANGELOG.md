@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **UDP MAVLink link never received any data (handshake timeout).** The UDP transport bound to an
+  ephemeral local port and `connect()`-restricted the peer, so it silently dropped everything a Wi-Fi
+  telemetry bridge (mavesp8266 / DroneBridge / ESP AP at `192.168.4.1`) sends to the well-known port —
+  whether by broadcast, by unicast from a different source port, or to a fixed port 14550. It now binds
+  to the targeted port number (like Mission Planner's listener default; ephemeral fallback if busy) and
+  uses `recv_from`/`send_to` with peer learning instead of `connect()`: the initial GCS HEARTBEAT goes to
+  the configured host:port, then sends re-target to whoever actually replies. Covers listen-mode bridges,
+  client-mode SITL and broadcast setups. (Awaiting on-device verification.)
 - **Terrain analysis now works with ArduPilot/PX4 missions.** Waypoint-mode terrain profiling only read
   the INAV mission store, so the profile (and the RF obstacle analysis) were empty for MAVLink missions,
   which live in a separate store. The Terrain Analyzer now uses an autopilot-aware mission source

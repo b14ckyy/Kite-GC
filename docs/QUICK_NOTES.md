@@ -1,4 +1,4 @@
-- UDP link via Mavlink not working but TCP fine
+- [x] UDP link via Mavlink not working but TCP fine — FIXED (bind to fixed port + peer-learning recv_from/send_to instead of bind(:0)+connect); awaiting on-device test, remove this line once verified
 - Make the Battery selector in post flight a dropdown (Maybe combined with search field to keep both usage options) 
 - User feedback:
 > In the serial option, the COM port selection... is it possible to add an addition description to the COM ports which are for bluetooth devices, so I'd know which ones are the bluetooth ones? MP has that and it makes it so much easier, especially in my case where I have like 50 bluetooth COM ports for all the various gear!
