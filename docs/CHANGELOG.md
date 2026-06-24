@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Missing Cesium Ion key prompt on first 3D entry.** Entering the 3D view without a Cesium Ion token
+  now shows a one-time prompt to paste + save a key (enabling real world terrain), with "remind me
+  later" (re-armed on the next switch to 3D) and "don't remind me" (persisted). A saved key is applied
+  live — terrain appears without restarting.
 - **Post-flight battery picker is now a searchable combobox.** The End-Flight dialog's battery serial
   field filters a live dropdown of existing packs (serial + label/capacity/cells) as you type — pick an
   existing one or type a new serial. If the entered serial matches no pack, saving the flight offers to

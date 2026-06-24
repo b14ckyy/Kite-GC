@@ -1,5 +1,4 @@
 - RTSP video input on ToDo to test with DJI PC capture software
-- add popup if Cesium key is missing when first entering 3D view with option to enter, ignore or remind later
 - Check Airspeed for Mavlink - Make airspeed the primary value on widget when available
 - Add Wind Speed and heading indicator since Ardu already provides, INAV version gated for now
 - Add a low power mode that limits 3D view to 20fps render to save performance and battery in the field
