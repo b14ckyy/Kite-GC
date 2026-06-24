@@ -1,19 +1,27 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-import { WpAction, type Waypoint } from '$lib/stores/mission';
+import { WpAction, ALT_MODE_REL, ALT_MODE_AMSL, ALT_MODE_AGL, type Waypoint } from '$lib/stores/mission';
 import {
   type ArduWaypoint, type MavFrame,
   MAV_CMD_NAV_WAYPOINT, MAV_CMD_NAV_LOITER_UNLIM, MAV_CMD_NAV_LOITER_TIME,
   MAV_CMD_NAV_RETURN_TO_LAUNCH, MAV_CMD_NAV_LAND, MAV_CMD_DO_SET_ROI,
   MAV_CMD_DO_JUMP, MAV_CMD_NAV_LOITER_TURNS, MAV_CMD_NAV_TAKEOFF,
-  MAV_FRAME_GLOBAL_RELATIVE_ALT,
+  MAV_FRAME_GLOBAL, MAV_FRAME_GLOBAL_RELATIVE_ALT, MAV_FRAME_GLOBAL_TERRAIN_ALT,
 } from '$lib/stores/missionArdupilot';
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
 function inavAltToArdu(altCm: number): number { return altCm / 100; }
 function arduAltToInav(altM: number): number   { return Math.round(altM * 100); }
+
+/** Map an ArduPilot altitude frame to INAV's alt_mode so converted waypoints keep their reference
+ *  (GLOBAL = AMSL, TERRAIN_ALT = AGL, RELATIVE_ALT = launch/home-relative). */
+function frameToAltMode(frame: MavFrame): number {
+  if (frame === MAV_FRAME_GLOBAL) return ALT_MODE_AMSL;
+  if (frame === MAV_FRAME_GLOBAL_TERRAIN_ALT) return ALT_MODE_AGL;
+  return ALT_MODE_REL;
+}
 
 // ── INAV → ArduPilot ──────────────────────────────────────────────────
 
@@ -60,6 +68,7 @@ export function arduToInav(wps: ArduWaypoint[]): Waypoint[] {
       lat: wp.lat,
       lon: wp.lon,
       altitude: arduAltToInav(wp.alt),
+      alt_mode: frameToAltMode(wp.frame),
       p1: 0, p2: 0, p3: 0,
       flag: 0,
     };

@@ -429,7 +429,9 @@
     "insertVertex": "Insert vertex",
     "warnNfzLaunch": "Launch/Home is inside a No-Flight-Zone — arming may be blocked here",
     "warnNfzPath": "Mission path may cross a No-Flight-Zone",
-    "warnInclusion": "Mission path leaves the inclusion zone"
+    "warnInclusion": "Mission path leaves the inclusion zone",
+    "breachNfz": "Geozone breach — inside a No-Flight-Zone",
+    "breachInclusion": "Geozone breach — left the flight zone"
   },
   "fence": {
     "title": "Geofence",
@@ -477,7 +479,8 @@
     "saveTitle": "Save geofence to FC",
     "saveMsg": "Write all fence zones and parameters to the flight controller?",
     "saveConfirm": "Save",
-    "armedLocked": "Fence editing is disabled while armed."
+    "armedLocked": "Fence editing is disabled while armed.",
+    "breach": "Geofence breach"
   },
   "rally": {
     "title": "Rally points",
@@ -550,6 +553,11 @@
     "alertStage2Desc": "Predicts the closest point of approach from both 3D tracks (course + climb/sink); warns on a likely conflict (miss < 1000 m / 250 m within 45 s).",
     "alertSound": "Alert sound",
     "alertVoice": "Alert voice",
+    "alertProximityRadius": "Proximity radius",
+    "alertVerticalSep": "Vertical separation",
+    "alertCpaRadius": "CPA miss radius",
+    "alertCpaHeight": "CPA miss height",
+    "alertCpaLookAhead": "CPA look-ahead",
     "ffModule": "ESP32 module (serial)",
     "ffNodeName": "Node name",
     "ffNodeNamePlaceholder": "KITE-GCS",
@@ -637,6 +645,7 @@
     "rfRssiHint": "Show the logged RSSI line (Track mode; disabled in Waypoint mode or without RSSI data).",
     "rfLosIgnored": "LOS blocking is superseded by Fresnel/diffraction while both are on.",
     "rfRainbowMsl": "The loss rainbow is shown in the MSL view; here only the sightline clearance line is drawn.",
+    "rfNoOrigin": "RF analysis needs a launch reference. Connect (uses FC home) or add a Takeoff waypoint to anchor the rays.",
     "rfDisclaimer": "Terrain-only estimate from the launch point — excludes near-field, antenna pattern and aircraft attitude; two-ray null depth is approximate.",
     "rssi": "Logged RSSI",
     "correction": "Terrain Correction",

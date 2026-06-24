@@ -36,6 +36,10 @@
     altFromM,
     fromDeg,
   } from '$lib/stores/mission';
+  import { autopilotSystem } from '$lib/stores/autopilotContext';
+  import { arduMission, MAV_CMD_NAV_TAKEOFF } from '$lib/stores/missionArdupilot';
+  import { arduToInav } from '$lib/helpers/missionConverter';
+  import { homePosition } from '$lib/stores/home';
   import {
     terrainAnalysis,
     terrainCursor,
@@ -93,6 +97,28 @@
     return `${c.value.toFixed(digits)} ${c.unit}`;
   }
 
+  // Autopilot-aware mission source. INAV uses its `mission` store + the planning launch point; ArduPilot/
+  // PX4 missions live in the separate `arduMission` store, converted to the shared Waypoint shape (frame
+  // → alt_mode) with the FC home as the launch reference. Editing (correction APPLY / Add WP) stays
+  // INAV-only for now — those write via the INAV mission store; the profile DISPLAY works for all.
+  const isInav = $derived($autopilotSystem === 'inav');
+  const effWaypoints = $derived(isInav ? $mission.waypoints : arduToInav($arduMission));
+  const effLaunch = $derived.by<{ lat: number; lng: number } | null>(() => {
+    if (isInav) return $launchPoint ? { lat: $launchPoint.lat, lng: $launchPoint.lng } : null;
+    const h = $homePosition;
+    return h.set ? { lat: h.lat, lng: h.lon } : null; // ArduPilot relative alt is home-referenced
+  });
+
+  // RF obstacle analysis needs a ground origin (the GCS antenna ≈ launch/home). When no FC home is set
+  // (offline ArduPilot planning), fall back to a NAV_TAKEOFF waypoint's location; if neither exists we
+  // can't anchor the rays → show a hint instead of guessing (a wrong origin gives misleading shadows).
+  const arduTakeoff = $derived.by<{ lat: number; lng: number } | null>(() => {
+    if (isInav) return null;
+    const tk = $arduMission.find((w) => w.command === MAV_CMD_NAV_TAKEOFF && (w.lat !== 0 || w.lon !== 0));
+    return tk ? { lat: tk.lat / 1e7, lng: tk.lon / 1e7 } : null;
+  });
+  const rfWpOrigin = $derived(effLaunch ?? arduTakeoff);
+
   let data = $state<ProfileData | null>(null);
   let loading = $state(false);
   let errorKind = $state<'none' | 'insufficient' | 'noTrack'>('none');
@@ -105,8 +131,8 @@
   // Results are cached per mode so switching Waypoints↔Track is instant.
   $effect(() => {
     const st = $terrainAnalysis;
-    const wps = $mission.waypoints;
-    const lp = $launchPoint;
+    const wps = effWaypoints;
+    const lp = effLaunch;
     const trk = track;
     if (!st.open) return;
     const mode = st.viewMode;
@@ -336,8 +362,10 @@
   });
 
   const previewPath = $derived(correction ? correction.previewPath : null);
-  const showCorrection = $derived($terrainAnalysis.viewMode === 'waypoint' && !$terrainAnalysis.compact);
-  const canAddWp = $derived($terrainCursor.placed != null && placedDist != null && data != null);
+  // Editing (Terrain Correction + Add WP) writes via the INAV mission store → INAV only for now. The
+  // profile/clearance/RF DISPLAY still works for ArduPilot/PX4 missions.
+  const showCorrection = $derived(isInav && $terrainAnalysis.viewMode === 'waypoint' && !$terrainAnalysis.compact);
+  const canAddWp = $derived(isInav && $terrainCursor.placed != null && placedDist != null && data != null);
 
   // Combined 3-way correction control: 'off' disables it, 'follow'/'check' enable + set the mode
   // (and a default WP range on first enable). Default off.
@@ -360,6 +388,7 @@
 
   let applying = $state(false);
   async function applyCorrection() {
+    if (!isInav) return; // editing writes via the INAV mission store (ArduPilot edit path is a follow-up)
     const c = correction;
     if (!c || c.changedCount === 0) return;
     if (confirm) {
@@ -410,6 +439,7 @@
   // Manually add a waypoint at the pinned marker — exactly on the current track.
   // Then the user re-runs Terrain Follow to adjust it.
   async function addWaypointAtMarker() {
+    if (!isInav) return; // INAV mission store only (ArduPilot edit path is a follow-up)
     const p = get(terrainCursor).placed;
     if (!p || !data || placedDist == null) return;
     if (getTotalWpCount() >= MAX_WAYPOINTS_TOTAL) {
@@ -476,9 +506,16 @@
       return null;
     };
     if (mode === 'track') return firstFix();
-    if (lp) return { lat: lp.lat, lon: lp.lng };
+    if (lp) return { lat: lp.lat, lon: lp.lng }; // INAV launch point / FC home / ArduPilot takeoff WP
     return firstFix();
   }
+
+  // RF rays enabled in waypoint mode but no origin → tell the user how to anchor it.
+  const rfNoOrigin = $derived(
+    $terrainAnalysis.viewMode === 'waypoint' &&
+    ($terrainAnalysis.rfLos || $terrainAnalysis.rfFresnel || $terrainAnalysis.rfTworay) &&
+    !rfWpOrigin,
+  );
 
   function setRfBand(band: '5800' | '2400' | '900' | '433') {
     patchTerrainAnalysis({ rfBand: band });
@@ -493,7 +530,7 @@
   $effect(() => {
     const st = $terrainAnalysis;
     const d = data;
-    const lp = $launchPoint;
+    const lp = rfWpOrigin; // INAV launch point / FC home / ArduPilot takeoff WP (autopilot-aware)
     const trk = track;
     // Bump the token on EVERY change (before any early return) so a still-in-flight compute from a
     // previous run can never apply after the inputs changed — e.g. toggling the last method off must
@@ -634,6 +671,9 @@
         {/if}
         {#if $terrainAnalysis.datum === 'agl'}
           <p class="rf-note">{$t('terrain.rfRainbowMsl')}</p>
+        {/if}
+        {#if rfNoOrigin}
+          <p class="rf-note rf-warn">{$t('terrain.rfNoOrigin')}</p>
         {/if}
         <p class="rf-note">{$t('terrain.rfDisclaimer')}</p>
       </div>
@@ -897,6 +937,9 @@
     font-size: 10px;
     color: #6e6e6e;
     line-height: 1.4;
+  }
+  .rf-warn {
+    color: #f5a623;
   }
 
   /* Terrain Correction sub-panel */

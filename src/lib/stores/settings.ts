@@ -118,6 +118,17 @@ export interface RadarAlertSettings {
   soundEnabled: boolean;
   /** Spoken callout ("Traffic" / "Collision") on alert. */
   voiceEnabled: boolean;
+  // ── C3 tuning (feed AlertConfig overrides) ──
+  /** Stage 1 horizontal proximity warn radius (m). */
+  proximityRadiusM: number;
+  /** Vertical separation band (m) — Stage 1 band + the global vertical relevance cutoff. */
+  verticalSepM: number;
+  /** Stage 2 CPA horizontal miss radius (m). */
+  cpaRadiusM: number;
+  /** Stage 2 CPA vertical miss height (m). */
+  cpaHeightM: number;
+  /** Stage 2 look-ahead window (s). */
+  cpaLookAheadS: number;
 }
 
 /** Map-rendering controls for radar contacts (panel "Map" tab). See RADAR_TRACKING_PANEL_AND_MAP §4. */
@@ -161,6 +172,11 @@ export const DEFAULT_RADAR: RadarSettings = {
     stage2Enabled: true,
     soundEnabled: true,
     voiceEnabled: true,
+    proximityRadiusM: 5000,
+    verticalSepM: 2000,
+    cpaRadiusM: 1000,
+    cpaHeightM: 250,
+    cpaLookAheadS: 45,
   },
   sim: false,
 };

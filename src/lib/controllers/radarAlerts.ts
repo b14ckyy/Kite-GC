@@ -256,10 +256,20 @@ function evadeHeading(courseDeg: number, offE: number, offN: number): number {
 let lastLog = 0;
 
 function evaluate() {
-  const cfg = ALERT_CONFIG;
   const s = get(settings);
   const t = get(telemetry);
   const now = Date.now();
+
+  // C3: the user-tunable thresholds override the built-in defaults (the rest stay fixed). `?? default`
+  // guards settings persisted before these fields existed.
+  const a = s.radar.alerts;
+  const cfg = resolveConfig({
+    rWarn: a.proximityRadiusM ?? ALERT_CONFIG.rWarn,
+    hWarn: a.verticalSepM ?? ALERT_CONFIG.hWarn,
+    rCpa: a.cpaRadiusM ?? ALERT_CONFIG.rCpa,
+    hCpa: a.cpaHeightM ?? ALERT_CONFIG.hCpa,
+    lookAhead: a.cpaLookAheadS ?? ALERT_CONFIG.lookAhead,
+  });
 
   const radarOn = s.radar.enabled;
   const stage1On = s.radar.alerts.stage1Enabled;

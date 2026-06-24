@@ -418,7 +418,9 @@
     "insertVertex": "Insérer un sommet",
     "warnNfzLaunch": "Le launch/home est dans une No-Flight-Zone — l'armement peut être bloqué ici",
     "warnNfzPath": "Le trajet de mission peut traverser une No-Flight-Zone",
-    "warnInclusion": "Le trajet de mission quitte la zone d'inclusion"
+    "warnInclusion": "Le trajet de mission quitte la zone d'inclusion",
+    "breachNfz": "Violation de géozone — dans une zone d'exclusion",
+    "breachInclusion": "Violation de géozone — sortie de la zone de vol"
   },
   "fence": {
     "title": "Géofence",
@@ -466,7 +468,8 @@
     "saveTitle": "Enregistrer la géofence sur le FC",
     "saveMsg": "Écrire toutes les zones et paramètres de géofence sur le contrôleur de vol ?",
     "saveConfirm": "Enregistrer",
-    "armedLocked": "L'édition de la géofence est désactivée lorsque le drone est armé."
+    "armedLocked": "L'édition de la géofence est désactivée lorsque le drone est armé.",
+    "breach": "Violation de géofence"
   },
   "rally": {
     "title": "Points de ralliement",
@@ -539,6 +542,11 @@
     "alertStage2Desc": "Prédit le point de rapprochement le plus proche à partir des deux trajectoires 3D (cap + montée/descente) ; alerte d'un conflit probable (écart < 1000 m / 250 m sous 45 s).",
     "alertSound": "Son d'alerte",
     "alertVoice": "Annonce vocale",
+    "alertProximityRadius": "Rayon de proximité",
+    "alertVerticalSep": "Séparation verticale",
+    "alertCpaRadius": "Rayon d'écart CPA",
+    "alertCpaHeight": "Hauteur d'écart CPA",
+    "alertCpaLookAhead": "Anticipation CPA",
     "ffModule": "Module ESP32 (série)",
     "ffNodeName": "Nom du nœud",
     "ffNodeNamePlaceholder": "KITE-GCS",
@@ -590,6 +598,7 @@
   },
   "terrain": {
     "title": "Analyse du terrain",
+    "rfNoOrigin": "L'analyse RF a besoin d'une référence de lancement. Connectez-vous (utilise le home du FC) ou ajoutez un waypoint de décollage pour ancrer les rayons.",
     "showMap": "Afficher la carte",
     "showMapHint": "Mode compact — reporter le curseur du graphique sur la carte",
     "follow": "Suivre",

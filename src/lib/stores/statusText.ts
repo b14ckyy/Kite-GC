@@ -136,6 +136,12 @@ function playTone(level: StatusTextLevel): void {
   }
 }
 
+/** Inject a GCS-local message into the same toast banner (e.g. a geozone/geofence breach the GCS detects
+ *  itself). Goes through the same severity filter + audio cue as FC STATUSTEXT. */
+export function pushLocalStatus(severity: number, text: string): void {
+  push(severity, text);
+}
+
 /** Start listening for FC STATUSTEXT messages. Safe to call once on app init. */
 export async function startStatusText(): Promise<void> {
   if (unlisten) return;

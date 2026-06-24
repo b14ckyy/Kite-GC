@@ -429,7 +429,9 @@
     "insertVertex": "Eckpunkt einfügen",
     "warnNfzLaunch": "Launch/Home liegt in einer No-Flight-Zone — Arming hier evtl. blockiert",
     "warnNfzPath": "Missionspfad kreuzt möglicherweise eine No-Flight-Zone",
-    "warnInclusion": "Missionspfad verlässt die Inclusion-Zone"
+    "warnInclusion": "Missionspfad verlässt die Inclusion-Zone",
+    "breachNfz": "Geozone-Verletzung — in einer No-Flight-Zone",
+    "breachInclusion": "Geozone-Verletzung — Flugzone verlassen"
   },
   "fence": {
     "title": "Geofence",
@@ -477,7 +479,8 @@
     "saveTitle": "Geofence auf FC speichern",
     "saveMsg": "Alle Fence-Zonen und Parameter auf den Flight Controller schreiben?",
     "saveConfirm": "Speichern",
-    "armedLocked": "Fence-Bearbeitung ist im Armed-Zustand deaktiviert."
+    "armedLocked": "Fence-Bearbeitung ist im Armed-Zustand deaktiviert.",
+    "breach": "Geofence-Verletzung"
   },
   "rally": {
     "title": "Rally-Punkte",
@@ -550,6 +553,11 @@
     "alertStage2Desc": "Berechnet die dichteste Annäherung aus beiden 3D-Kursen (Kurs + Steig-/Sinkrate); warnt bei wahrscheinlichem Konflikt (Miss < 1000 m / 250 m innerhalb 45 s).",
     "alertSound": "Alarm-Ton",
     "alertVoice": "Alarm-Ansage",
+    "alertProximityRadius": "Annäherungsradius",
+    "alertVerticalSep": "Vertikale Trennung",
+    "alertCpaRadius": "CPA-Miss-Radius",
+    "alertCpaHeight": "CPA-Miss-Höhe",
+    "alertCpaLookAhead": "CPA-Vorausschau",
     "ffModule": "ESP32-Modul (seriell)",
     "ffNodeName": "Node-Name",
     "ffNodeNamePlaceholder": "KITE-GCS",
@@ -637,6 +645,7 @@
     "rfRssiHint": "Geloggte RSSI-Linie anzeigen (Track-Modus; im Wegpunkt-Modus oder ohne RSSI-Daten deaktiviert).",
     "rfLosIgnored": "LOS-Blockade wird durch Fresnel/Beugung ersetzt, solange beide aktiv sind.",
     "rfRainbowMsl": "Das Verlust-Rainbow erscheint in der MSL-Ansicht; hier wird nur die Sichtlinien-Clearance-Linie gezeichnet.",
+    "rfNoOrigin": "RF-Analyse braucht eine Startreferenz. Verbinde (nutzt FC-Home) oder füge einen Takeoff-Wegpunkt hinzu, um die Strahlen zu verankern.",
     "rfDisclaimer": "Reine Terrain-Schätzung vom Startpunkt — ohne Nahfeld, Antennendiagramm und Fluglage; Two-Ray-Nulltiefe ist näherungsweise.",
     "rssi": "Geloggtes RSSI",
     "correction": "Geländekorrektur",

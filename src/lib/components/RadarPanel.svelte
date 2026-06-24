@@ -15,6 +15,7 @@
   import Button from '$lib/components/panel/Button.svelte';
   import Toggle from '$lib/components/panel/Toggle.svelte';
   import SegmentedToggle, { type SegOption } from '$lib/components/panel/SegmentedToggle.svelte';
+  import NumberStepper from '$lib/components/NumberStepper.svelte';
   import { radarVehicles, radarAdsbStatus, radarSelection, enrichList, type EnrichedVehicle } from '$lib/stores/radarTracking';
   import { BUILTIN_ADSB_PROVIDERS } from '$lib/stores/settings';
   import { panelState } from '$lib/stores/panelState';
@@ -44,6 +45,18 @@
   const patchAdsb = (partial: Partial<RadarSettings['adsb']>) => patchRadar({ adsb: { ...radar.adsb, ...partial } });
   const patchMap = (partial: Partial<RadarSettings['map']>) => patchRadar({ map: { ...radar.map, ...partial } });
   const patchAlerts = (partial: Partial<RadarSettings['alerts']>) => patchRadar({ alerts: { ...radar.alerts, ...partial } });
+
+  // Local mirror for the C3 threshold steppers: NumberStepper's +/- buttons fire a target-less change
+  // event, so bind to a draft + commit it in onchange. Reseeded from props (a commit reseeds to the same
+  // value → no drift).
+  let alertDraft = $state({ proximityRadiusM: 0, verticalSepM: 0, cpaRadiusM: 0, cpaHeightM: 0, cpaLookAheadS: 0 });
+  $effect(() => {
+    const a = radar.alerts;
+    alertDraft = {
+      proximityRadiusM: a.proximityRadiusM, verticalSepM: a.verticalSepM,
+      cpaRadiusM: a.cpaRadiusM, cpaHeightM: a.cpaHeightM, cpaLookAheadS: a.cpaLookAheadS,
+    };
+  });
   const patchFf = (partial: Partial<RadarSettings['formationFlight']>) => patchRadar({ formationFlight: { ...radar.formationFlight, ...partial } });
   const setMapVisible = (key: 'adsb' | 'formationFlight' | 'radio', on: boolean) =>
     patchMap({ visible: { ...radar.map.visible, [key]: on } });
@@ -197,10 +210,34 @@
         <span class="src-label">{$t('radar.alertStage1')}<span class="src-info" title={$t('radar.alertStage1Desc')}>ⓘ</span></span>
         <Toggle checked={radar.alerts.stage1Enabled} onchange={(c) => patchAlerts({ stage1Enabled: c })} />
       </div>
+      {#if radar.alerts.stage1Enabled}
+        <div class="src-row src-subrow">
+          <span class="src-label">{$t('radar.alertProximityRadius')}</span>
+          <NumberStepper bind:value={alertDraft.proximityRadiusM} min={100} max={50000} step={100} unit="m" onchange={() => patchAlerts({ proximityRadiusM: alertDraft.proximityRadiusM })} />
+        </div>
+        <div class="src-row src-subrow">
+          <span class="src-label">{$t('radar.alertVerticalSep')}</span>
+          <NumberStepper bind:value={alertDraft.verticalSepM} min={50} max={10000} step={50} unit="m" onchange={() => patchAlerts({ verticalSepM: alertDraft.verticalSepM })} />
+        </div>
+      {/if}
       <div class="src-row">
         <span class="src-label">{$t('radar.alertStage2')}<span class="src-info" title={$t('radar.alertStage2Desc')}>ⓘ</span></span>
         <Toggle checked={radar.alerts.stage2Enabled} onchange={(c) => patchAlerts({ stage2Enabled: c })} />
       </div>
+      {#if radar.alerts.stage2Enabled}
+        <div class="src-row src-subrow">
+          <span class="src-label">{$t('radar.alertCpaRadius')}</span>
+          <NumberStepper bind:value={alertDraft.cpaRadiusM} min={50} max={20000} step={50} unit="m" onchange={() => patchAlerts({ cpaRadiusM: alertDraft.cpaRadiusM })} />
+        </div>
+        <div class="src-row src-subrow">
+          <span class="src-label">{$t('radar.alertCpaHeight')}</span>
+          <NumberStepper bind:value={alertDraft.cpaHeightM} min={25} max={5000} step={25} unit="m" onchange={() => patchAlerts({ cpaHeightM: alertDraft.cpaHeightM })} />
+        </div>
+        <div class="src-row src-subrow">
+          <span class="src-label">{$t('radar.alertCpaLookAhead')}</span>
+          <NumberStepper bind:value={alertDraft.cpaLookAheadS} min={5} max={180} step={5} unit="s" onchange={() => patchAlerts({ cpaLookAheadS: alertDraft.cpaLookAheadS })} />
+        </div>
+      {/if}
       <div class="src-row">
         <span class="src-label">{$t('radar.alertSound')}</span>
         <Toggle checked={radar.alerts.soundEnabled} onchange={(c) => patchAlerts({ soundEnabled: c })} />
@@ -480,6 +517,7 @@
   /* ── ADS-B sources pane ── */
   .src-block { display: flex; flex-direction: column; gap: 4px; }
   .src-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 2px; }
+  .src-subrow { padding-left: 14px; }
   .src-head { color: #949494; font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; margin: 8px 2px 2px; }
   .src-label { color: #cdd6da; font-size: 12px; }
   .src-info { margin-left: 5px; color: #6f96a6; cursor: help; font-size: 11px; }

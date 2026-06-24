@@ -159,3 +159,24 @@ export function checkMissionGeozones(
 
   return { active: true, inclusiveActive, inclusiveViolated, nfzLaunchInside, nfzPathViolated, segments };
 }
+
+/**
+ * Live single-point breach check (3D) for the in-flight breach toast. Mirrors the mission check but for
+ * the current UAV position: inside any NFZ → `nfz`; if inclusion zones are enforced (home inside one,
+ * INAV-style) and the point is outside the inclusion union → `inclusion`. `point.relM` is altitude above
+ * launch; `homeAmsl` the launch ground (m MSL) for AMSL zone bands.
+ */
+export function checkLiveGeozoneBreach(
+  zones: GeoZone[],
+  point: { lat: number; lon: number; relM: number },
+  home: { lat: number; lon: number } | null,
+  homeAmsl: number | null,
+): { nfz: boolean; inclusion: boolean } {
+  const inclusive = zones.filter((z) => z.zone_type === TYPE_INCLUSIVE);
+  const exclusive = zones.filter((z) => z.zone_type !== TYPE_INCLUSIVE);
+  const nfz = exclusive.some((z) => zoneContains3D(z, point.lat, point.lon, point.relM, homeAmsl));
+  const inclusiveActive = !!home && inclusive.some((z) => zoneContainsLatLon(z, home.lat, home.lon));
+  const inclusion =
+    inclusiveActive && !inclusive.some((z) => zoneContains3D(z, point.lat, point.lon, point.relM, homeAmsl));
+  return { nfz, inclusion };
+}
