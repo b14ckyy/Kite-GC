@@ -20,25 +20,28 @@
     interfaceSettings?: InterfaceSettings;
   } = $props();
 
-  let speedConv = $derived(convertSpeed(telem.groundSpeed, interfaceSettings.speedUnit));
-  let speed = $derived(telem.lastUpdate ? speedConv.value.toFixed(0) : '—');
-  let airspeed = $derived(
-    telem.lastUpdate && telem.airspeed > 0
-      ? $t('widgetLabels.airspeed', {
-          values: {
-            value: `${convertSpeed(telem.airspeed, interfaceSettings.speedUnit).value.toFixed(0)} ${speedConv.unit}`,
-          },
-        })
+  // Airspeed is the primary readout when available (it's what matters for flight); ground speed then
+  // drops to the secondary line. Without airspeed, ground speed stays primary.
+  let hasAir = $derived(telem.lastUpdate && telem.airspeed > 0);
+  let gsConv = $derived(convertSpeed(telem.groundSpeed, interfaceSettings.speedUnit));
+  let asConv = $derived(convertSpeed(telem.airspeed, interfaceSettings.speedUnit));
+
+  let label = $derived(hasAir ? $t('widgetLabels.aspd') : $t('widgetLabels.spd'));
+  let primaryConv = $derived(hasAir ? asConv : gsConv);
+  let speed = $derived(telem.lastUpdate ? primaryConv.value.toFixed(0) : '—');
+  let secondary = $derived(
+    hasAir
+      ? $t('widgetLabels.gs', { values: { value: `${gsConv.value.toFixed(0)} ${gsConv.unit}` } })
       : null
   );
 </script>
 
 <div class="widget-card" style="--ws: {size}px">
-  <span class="w-label">{$t('widgetLabels.spd')}</span>
+  <span class="w-label">{label}</span>
   <span class="w-value">{speed}</span>
-  <span class="w-unit">{speedConv.unit}</span>
-  {#if airspeed}
-    <span class="w-secondary">{airspeed}</span>
+  <span class="w-unit">{primaryConv.unit}</span>
+  {#if secondary}
+    <span class="w-secondary">{secondary}</span>
   {/if}
 </div>
 

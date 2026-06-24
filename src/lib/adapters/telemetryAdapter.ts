@@ -50,8 +50,8 @@ export function toTelemetryData(r: TelemetryRecord, fcVariant = 'INAV'): Telemet
     altitude: r.nav_alt_m ?? r.baro_alt_m ?? r.alt_m ?? 0,
     vario: r.vario_ms ?? 0,
 
-    // Airspeed — not in current DB schema, default 0
-    airspeed: 0,
+    // Airspeed (m/s) from the record when present (live recording, ArduPilot ARSP, INAV blackbox).
+    airspeed: r.airspeed_ms ?? 0,
 
     // Battery / Analog
     voltage: r.voltage ?? 0,

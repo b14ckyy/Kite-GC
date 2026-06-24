@@ -15,7 +15,7 @@ use super::types::{
     TelemetryRecord,
 };
 
-const CURRENT_SCHEMA_VERSION: u32 = 14;
+const CURRENT_SCHEMA_VERSION: u32 = 15;
 
 /// Column list (excluding the autoincrement `id`) for `telemetry_records`, shared by the temp-session
 /// copy so the SELECT and INSERT column orders can never drift apart. `flight_id` is first so the
@@ -27,7 +27,7 @@ const TELEMETRY_COLS: &str = "flight_id, timestamp_ms, lat, lon, alt_m, speed_ms
     active_wp_number, active_flight_mode_flags, state_flags, nav_state, nav_flags, \
     rx_signal_received, hw_health_status, baro_temperature, \
     wind_n_ms, wind_e_ms, wind_d_ms, rc_data_json, rc_command_json, \
-    nav_lat, nav_lon, nav_alt_m, mode_primary, mode_modifiers, link_snr, link_rssi_dbm";
+    nav_lat, nav_lon, nav_alt_m, mode_primary, mode_modifiers, link_snr, link_rssi_dbm, airspeed_ms";
 
 /// Full single-statement DDL for `telemetry_records` at the current field set. The main DB grows
 /// this table via the migration chain; the per-session temp DB (no migration history) creates it
@@ -45,7 +45,8 @@ const TELEMETRY_RECORDS_DDL_FULL: &str = "CREATE TABLE IF NOT EXISTS telemetry_r
     nav_state INTEGER, nav_flags INTEGER, rx_signal_received INTEGER, hw_health_status INTEGER,
     baro_temperature REAL, wind_n_ms REAL, wind_e_ms REAL, wind_d_ms REAL,
     rc_data_json TEXT, rc_command_json TEXT, nav_lat REAL, nav_lon REAL, nav_alt_m REAL,
-    mode_primary TEXT, mode_modifiers TEXT, link_snr INTEGER, link_rssi_dbm INTEGER
+    mode_primary TEXT, mode_modifiers TEXT, link_snr INTEGER, link_rssi_dbm INTEGER,
+    airspeed_ms REAL
 );";
 
 /// Open (or create) the flight log database at the given path.
@@ -226,6 +227,10 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
         migrate_v13_to_v14(conn)?;
     }
 
+    if current < 15 {
+        migrate_v14_to_v15(conn)?;
+    }
+
     // Self-heal: ensure the latest schema actually exists even if a prior version bump left it
     // incomplete. Legacy migrations call set_user_version(CURRENT), so a CURRENT bump can
     // mark the DB as the newest version without the matching migration ever creating its
@@ -237,6 +242,7 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
     ensure_v12_schema(conn)?;
     ensure_v13_schema(conn)?;
     ensure_v14_schema(conn)?;
+    ensure_v15_schema(conn)?;
 
     Ok(())
 }
@@ -424,6 +430,21 @@ fn ensure_v14_schema(conn: &Connection) -> SqlResult<()> {
 
 fn migrate_v13_to_v14(conn: &Connection) -> SqlResult<()> {
     ensure_v14_schema(conn)?;
+    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    Ok(())
+}
+
+/// v15: airspeed (m/s) on telemetry_records — VFR_HUD (MAVLink) / MSP2_INAV_AIR_SPEED (live), ARSP
+/// sensor airspeed (ArduPilot DataFlash), `airspeed` column (INAV blackbox). Additive + idempotent.
+fn ensure_v15_schema(conn: &Connection) -> SqlResult<()> {
+    if !column_exists(conn, "telemetry_records", "airspeed_ms")? {
+        conn.execute_batch("ALTER TABLE telemetry_records ADD COLUMN airspeed_ms REAL;")?;
+    }
+    Ok(())
+}
+
+fn migrate_v14_to_v15(conn: &Connection) -> SqlResult<()> {
+    ensure_v15_schema(conn)?;
     set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
     Ok(())
 }
@@ -690,7 +711,7 @@ pub fn insert_telemetry_batch(
                 rc_data_json, rc_command_json,
                 nav_lat, nav_lon, nav_alt_m,
                 mode_primary, mode_modifiers,
-                link_snr, link_rssi_dbm
+                link_snr, link_rssi_dbm, airspeed_ms
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
                 ?14, ?15, ?16, ?17, ?18, ?19, ?20,
@@ -701,7 +722,7 @@ pub fn insert_telemetry_batch(
                 ?36, ?37,
                 ?38, ?39, ?40,
                 ?41, ?42,
-                ?43, ?44
+                ?43, ?44, ?45
             )",
         )?;
         for r in records {
@@ -750,6 +771,7 @@ pub fn insert_telemetry_batch(
                 r.mode_modifiers,
                 r.link_snr,
                 r.link_rssi_dbm,
+                r.airspeed_ms,
             ])?;
         }
     }
@@ -1500,7 +1522,7 @@ pub fn get_flight_track(
             rc_data_json, rc_command_json,
             nav_lat, nav_lon, nav_alt_m,
             mode_primary, mode_modifiers,
-            link_snr, link_rssi_dbm
+            link_snr, link_rssi_dbm, airspeed_ms
          FROM telemetry_records
          WHERE flight_id = ?1
          ORDER BY timestamp_ms ASC",
@@ -1553,6 +1575,7 @@ pub fn get_flight_track(
             mode_modifiers: row.get(42)?,
             link_snr: row.get(43)?,
             link_rssi_dbm: row.get(44)?,
+            airspeed_ms: row.get(45)?,
         })
     })?;
 
@@ -2194,6 +2217,7 @@ mod tests {
                 lon: Some(11.0 + (i as f64) * 0.0001),
                 alt_m: Some(100.0 + i as f64),
                 speed_ms: Some(10.0),
+                airspeed_ms: Some(11.0),
                 heading: Some(90.0),
                 vario_ms: Some(0.5),
                 voltage: Some(12.6),
@@ -2285,6 +2309,7 @@ mod tests {
             lon: None,
             alt_m: None,
             speed_ms: None,
+            airspeed_ms: None,
             heading: None,
             vario_ms: None,
             voltage: None,

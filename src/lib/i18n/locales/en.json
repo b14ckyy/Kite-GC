@@ -999,6 +999,8 @@
   },
   "widgetLabels": {
     "spd": "SPD",
+    "aspd": "ASPD",
+    "gs": "GS {value}",
     "kmh": "km/h",
     "airspeed": "AS {value}",
     "alt": "ALT",

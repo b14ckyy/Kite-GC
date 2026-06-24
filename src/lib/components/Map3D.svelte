@@ -255,7 +255,7 @@
   let fpvFov = $state(60);           // horizontal field of view (deg), the FPV "zoom"
   let fpvWheelHandler: Cesium.ScreenSpaceEventHandler | undefined;
   // Live HUD data (raw SI) for the FPV overlay — updated from the active source (replay/live).
-  let hud = $state({ heading: 0, pitch: 0, roll: 0, altM: 0, speedMs: 0, fpmGamma: 0, fpmCrab: 0, fpmShown: false });
+  let hud = $state({ heading: 0, pitch: 0, roll: 0, altM: 0, speedMs: 0, speedIsAir: false, fpmGamma: 0, fpmCrab: 0, fpmShown: false });
   let hudSpeedUnit = $state<SpeedUnit>('kmh');
   let hudAltUnit = $state<AltitudeUnit>('m');
   const fpvScratchM3 = new Cesium.Matrix3();
@@ -1119,7 +1119,10 @@
 
       // FPV HUD data (live source).
       hud.heading = telem.yaw; hud.pitch = telem.pitch; hud.roll = telem.roll;
-      hud.altM = telem.altitude; hud.speedMs = telem.groundSpeed;
+      hud.altM = telem.altitude;
+      // Airspeed when available (matches the 2D Speed widget), else ground speed.
+      hud.speedIsAir = telem.airspeed > 0;
+      hud.speedMs = hud.speedIsAir ? telem.airspeed : telem.groundSpeed;
       {
         const fv = flightPathVector(telem.groundSpeed, telem.vario, telem.course, telem.yaw);
         hud.fpmGamma = fv.gamma; hud.fpmCrab = fv.crab; hud.fpmShown = fv.shown;
@@ -3922,7 +3925,9 @@
     // FPV HUD data (replay source).
     hud.heading = heading; hud.pitch = td.pitch; hud.roll = td.roll;
     hud.altM = point.nav_alt_m ?? point.baro_alt_m ?? 0;
-    hud.speedMs = point.speed_ms ?? 0;
+    // Airspeed when the record has it (live recording / ArduPilot ARSP / INAV blackbox), else ground speed.
+    hud.speedIsAir = point.airspeed_ms != null && point.airspeed_ms > 0;
+    hud.speedMs = hud.speedIsAir ? (point.airspeed_ms ?? 0) : (point.speed_ms ?? 0);
     {
       const fv = flightPathVector(td.groundSpeed, td.vario, td.course, heading);
       hud.fpmGamma = fv.gamma; hud.fpmCrab = fv.crab; hud.fpmShown = fv.shown;
@@ -4355,6 +4360,7 @@
       roll={hud.roll}
       speed={sp.value}
       speedUnit={sp.unit}
+      speedLabel={hud.speedIsAir ? 'ASPD' : 'SPD'}
       altitude={al.value}
       altitudeUnit={al.unit}
       fov={fpvFov}

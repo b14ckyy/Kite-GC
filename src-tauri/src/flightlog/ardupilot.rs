@@ -424,6 +424,8 @@ pub struct NormalizedRecord {
     pub ground_course_deg: Option<f64>,
     /// GPS vertical speed (m/s, negative = descending).
     pub gps_vz_ms: Option<f64>,
+    /// Airspeed (m/s) from the ARSP sensor message (synthetic-only logs have none).
+    pub airspeed_ms: Option<f64>,
 
     // ── Attitude ────────────────────────────────────────────────────────────
     pub roll_deg: Option<f64>,
@@ -505,6 +507,7 @@ struct DecoderState {
     nav_alt_m: Option<f64>,
     wind_n_ms: Option<f64>,
     wind_e_ms: Option<f64>,
+    airspeed_ms: Option<f64>,
     rc_channels: Option<[u16; 4]>,
     active_wp: Option<u16>,
     mode: Option<u8>,
@@ -870,6 +873,7 @@ where
             mode_modifiers,
             link_snr: None,
             link_rssi_dbm: None,
+            airspeed_ms: r.airspeed_ms,
         });
     }
 
@@ -1033,6 +1037,7 @@ fn process_message(
                     nav_alt_m: state.nav_alt_m,
                     wind_n_ms: state.wind_n_ms,
                     wind_e_ms: state.wind_e_ms,
+                    airspeed_ms: state.airspeed_ms,
                     rc_data: state.rc_channels,
                     active_wp_number: state.active_wp,
                     custom_mode: state.mode,
@@ -1191,6 +1196,12 @@ fn process_message(
             if let Some(vwe) = msg.get_f64("VWE") { state.wind_e_ms = Some(vwe); }
         }
 
+        // Physical airspeed sensor. Synthetic/sensor-less estimate is not logged as a clean scalar,
+        // so only sensor-equipped logs carry replay airspeed (sensor-primary, matching the live path).
+        "ARSP" => {
+            if let Some(a) = msg.get_f64("Airspeed") { state.airspeed_ms = Some(a); }
+        }
+
         "RCIN" => {
             let c1 = msg.get_f64("C1").map(|v| v as u16).unwrap_or(0);
             let c2 = msg.get_f64("C2").map(|v| v as u16).unwrap_or(0);
@@ -1231,7 +1242,7 @@ fn write_normalized_csv(rows: &[NormalizedRecord], out_path: &Path) -> Result<()
          wind_n_ms,wind_e_ms,\
          rc1,rc2,rc3,rc4,\
          active_wp_number,\
-         custom_mode,armed,vehicle_type,fw_version"
+         custom_mode,armed,vehicle_type,fw_version,airspeed_ms"
     )
     .map_err(|e| e.to_string())?;
 
@@ -1244,7 +1255,7 @@ fn write_normalized_csv(rows: &[NormalizedRecord], out_path: &Path) -> Result<()
         };
         writeln!(
             w,
-            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
             r.timestamp_us,
             r.utc_time
                 .map(|t| t.to_rfc3339())
@@ -1276,6 +1287,7 @@ fn write_normalized_csv(rows: &[NormalizedRecord], out_path: &Path) -> Result<()
             r.armed as u8,
             csv_escape(r.vehicle_type.as_deref().unwrap_or("")),
             csv_escape(r.fw_version.as_deref().unwrap_or("")),
+            fmt_opt_f(r.airspeed_ms, 3),
         )
         .map_err(|e| e.to_string())?;
     }

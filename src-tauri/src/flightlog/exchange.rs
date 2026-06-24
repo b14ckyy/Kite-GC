@@ -263,7 +263,13 @@ fn create_export_db(path: &Path) -> Result<Connection, String> {
             rc_command_json TEXT,
             nav_lat      REAL,
             nav_lon      REAL,
-            nav_alt_m    REAL
+            nav_alt_m    REAL,
+            battery_percentage INTEGER,
+            mode_primary TEXT,
+            mode_modifiers TEXT,
+            link_snr     INTEGER,
+            link_rssi_dbm INTEGER,
+            airspeed_ms  REAL
         );
 
         CREATE TABLE IF NOT EXISTS blackbox_records (

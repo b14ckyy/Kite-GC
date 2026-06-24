@@ -21,6 +21,7 @@
     roll = 0,      // deg, + = right wing down
     speed = 0,     // already in display unit
     speedUnit = 'm/s',
+    speedLabel = 'SPD', // 'SPD' (ground speed) or 'ASPD' (airspeed, when available)
     altitude = 0,  // already in display unit
     altitudeUnit = 'm',
     fov = 60,      // horizontal field of view (deg) — drives the conformal pitch scaling
@@ -33,6 +34,7 @@
     roll?: number;
     speed?: number;
     speedUnit?: string;
+    speedLabel?: string;
     altitude?: number;
     altitudeUnit?: string;
     fov?: number;
@@ -191,21 +193,21 @@
     <!-- centre index + readout -->
     <polygon class="hud-fill bright" points="{CX},70 {CX - 8},58 {CX + 8},58" />
     <rect class="hud-box" x={CX - 34} y="74" width="68" height="26" />
-    <text class="hud-text" x={CX} y="93" text-anchor="middle">{Math.round(((heading % 360) + 360) % 360)}</text>
+    <text class="hud-text" x={CX} y="87" text-anchor="middle" dominant-baseline="central">{Math.round(((heading % 360) + 360) % 360)}</text>
   </g>
 
   <!-- Speed (left) -->
   <g>
-    <text class="hud-text small dim" x={CX - 430} y={CY - 34} text-anchor="middle">SPD {speedUnit}</text>
+    <text class="hud-text small dim" x={CX - 430} y={CY - 34} text-anchor="middle">{speedLabel} {speedUnit}</text>
     <rect class="hud-box" x={CX - 490} y={CY - 18} width="120" height="36" />
-    <text class="hud-text big" x={CX - 430} y={CY + 10} text-anchor="middle">{fmt(speed)}</text>
+    <text class="hud-text big" x={CX - 430} y={CY} text-anchor="middle" dominant-baseline="central">{fmt(speed)}</text>
   </g>
 
   <!-- Altitude (right) -->
   <g>
     <text class="hud-text small dim" x={CX + 430} y={CY - 34} text-anchor="middle">ALT {altitudeUnit}</text>
     <rect class="hud-box" x={CX + 370} y={CY - 18} width="120" height="36" />
-    <text class="hud-text big" x={CX + 430} y={CY + 10} text-anchor="middle">{fmt(altitude)}</text>
+    <text class="hud-text big" x={CX + 430} y={CY} text-anchor="middle" dominant-baseline="central">{fmt(altitude)}</text>
   </g>
 </svg>
 

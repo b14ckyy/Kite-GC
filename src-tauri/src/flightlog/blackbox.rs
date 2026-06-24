@@ -450,6 +450,7 @@ struct ColumnIndices {
     alt: Option<usize>,
     baro_alt: Option<usize>,
     speed: Option<usize>,
+    airspeed: Option<usize>,
     heading: Option<usize>,
     vario: Option<usize>,
     gps_vel_d: Option<usize>,
@@ -498,6 +499,8 @@ impl ColumnIndices {
             alt: resolve_col(m, &["gps_altitude", "altitude", "baroalt_cm"]),
             baro_alt: resolve_col(m, &["baroalt", "baroaltitude", "baro_alt", "baro_altitude"]),
             speed: resolve_col(m, &["gps_speed", "speed"]),
+            // INAV logs `airspeed` in cm/s (pitot or virtual, depending on config) → /100 below.
+            airspeed: resolve_col(m, &["airspeed", "airspeed_cms", "air_speed"]),
             // The DB `heading` column holds course-over-ground (consistent with the live recorder, which
             // stores gps.course there); the FC fused heading goes to the `yaw` column below. INAV logs
             // COG as "gps_ground_course".
@@ -683,6 +686,8 @@ fn build_telemetry_record_indexed(
         mode_modifiers,
         link_snr: None,      // INAV blackbox has no SNR column
         link_rssi_dbm: None, // RSSI is the legacy 0–1023 `rssi` field, not dBm
+        // INAV blackbox `airspeed` is cm/s → m/s.
+        airspeed_ms: read_f64(cols.airspeed, record).map(|v| v / 100.0),
     }
 }
 

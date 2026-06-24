@@ -920,6 +920,7 @@ impl FlightRecorder {
             // AGL = baro − terrain (e.g. −84 m at a ~84 m-MSL field).
             alt_m: self.snapshot.alt_gps,
             speed_ms: self.snapshot.speed,
+            airspeed_ms: self.snapshot.airspeed,
             heading: self.snapshot.heading,
             vario_ms: self.snapshot.vario,
             voltage: self.snapshot.voltage,

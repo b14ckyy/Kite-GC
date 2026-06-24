@@ -234,6 +234,9 @@ pub struct TelemetryRecord {
     pub lon: Option<f64>,
     pub alt_m: Option<f64>,
     pub speed_ms: Option<f64>,
+    /// Airspeed (m/s): VFR_HUD / MSP2_INAV_AIR_SPEED live; ARSP sensor (ArduPilot) / `airspeed`
+    /// column (INAV blackbox) on import. None when not available.
+    pub airspeed_ms: Option<f64>,
     pub heading: Option<f64>, // course over ground (degrees, decimals preserved)
     pub vario_ms: Option<f64>,
     pub voltage: Option<f64>,

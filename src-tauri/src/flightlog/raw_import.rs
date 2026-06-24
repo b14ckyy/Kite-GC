@@ -110,6 +110,7 @@ fn snap_to_record(s: &Snap, t_ms: i64) -> TelemetryRecord {
         lon: s.lon,
         alt_m: s.alt_gps,
         speed_ms: s.speed,
+        airspeed_ms: None, // MSP2_INAV_AIR_SPEED not yet parsed in the raw-import path
         heading: s.heading,
         vario_ms: s.vario,
         voltage: s.voltage,
