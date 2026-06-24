@@ -8,3 +8,4 @@
 - Add Force Arm and Force Disarm Option if the FC rejected the standard arming
 - Check Airspeed for Mavlink - Make airspeed the primary value on widget when available
 - Add Wind Speed and heading indicator since Ardu already provides, INAV version gated for now
+- Add option to discard RAW Blackbox files
