@@ -7,7 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Force Arm / Force Disarm after an FC rejection (MAVLink).** When the flight controller rejects a
+  normal arm or disarm (e.g. a failed pre-arm check), the vehicle-control panel now reveals a
+  long-press (2 s) danger "Force Arm" / "Force Disarm" button that bypasses the checks (ArduPilot
+  `COMMAND_ARM_DISARM` param2 = 21196). It only appears on a rejection and is double-guarded by the
+  hold gesture, so it can't be triggered accidentally.
+- **Delete the stored original of an imported blackbox.** Imported INAV `.TXT` / ArduPilot DataFlash
+  `.bin` logs keep their original file as a BLOB in the DB so it can be re-exported later. A small red
+  inline "Delete Raw File" button (with its size shown beside it) now sits next to the flight's
+  **Source** line in the logbook detail; with a confirmation it drops the stored original and reclaims
+  the space, while the parsed flight stays in the database for replay — only the "export original"
+  capability is lost. The export + delete controls reflect the actual stored-file presence/size (the
+  Export Blackbox button correctly disables once the original is gone).
+- **Bluetooth SPP COM ports are identified and renameable (Windows).** A paired SPP device creates two
+  virtual COM ports (an outgoing client port and an incoming local-server port); the connection picker
+  now hides the useless incoming one and tags the outgoing one (classified via the `BTHENUM` registry,
+  locale-independently). Tagged ports get a pencil button in the toolbar to assign a custom name (e.g.
+  "COM7 — Goggles"), persisted per port — making a long list of Bluetooth COM ports actually navigable.
+  Physical USB/PCI ports are untouched (they keep their device descriptors).
+
 ### Fixed
+- **Blackbox import duplicate detection was broken for local-time logs.** The INAV blackbox import
+  checked for duplicates using the *uncorrected* header timestamp, but stored the flight with the
+  *true-UTC* start time (header local time minus the GPS-location offset, ADR-048). Any log whose
+  header carried a non-UTC local time could therefore be re-imported endlessly without a duplicate
+  warning (the two times differed by the timezone offset). The duplicate check now runs after decode +
+  the UTC correction, comparing the same value that gets stored. (ArduPilot DataFlash logs were
+  unaffected — they take the start time straight from GPS UTC.) Deleting a flight's stored raw file
+  does not affect this — the flight row still triggers the duplicate check on a re-import.
+- **Terrain Radar widget settings now persist.** The clearance colour scale (60/120/250 m) and the
+  reference mode (predictive vs flat) reset to defaults on every app restart because they lived in the
+  in-memory terrain-analysis store. They now live in the persisted settings and survive restarts.
 - **UDP MAVLink link never received any data (handshake timeout).** The UDP transport bound to an
   ephemeral local port and `connect()`-restricted the peer, so it silently dropped everything a Wi-Fi
   telemetry bridge (mavesp8266 / DroneBridge / ESP AP at `192.168.4.1`) sends to the well-known port —
