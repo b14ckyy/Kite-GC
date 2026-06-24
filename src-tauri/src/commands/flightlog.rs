@@ -769,6 +769,22 @@ pub fn flightlog_delete_blackbox_file(
     db::delete_blackbox_file(&conn, flight_id).map_err(|e| format!("DB error: {}", e))
 }
 
+/// Compact (defragment) the flight-log database with a full VACUUM. Routine deletes already reclaim
+/// space incrementally; this is the explicit on-demand "Compact Database" maintenance action.
+/// Returns the resulting database size in bytes.
+#[tauri::command]
+pub fn flightlog_compact_db(db_path: Option<String>) -> Result<i64, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::compact_database(&conn).map_err(|e| format!("Compact failed: {}", e))?;
+    let page_count: i64 = conn
+        .query_row("PRAGMA page_count", [], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    let page_size: i64 = conn
+        .query_row("PRAGMA page_size", [], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    Ok(page_count * page_size)
+}
+
 /// Export selected flights to a .kflight file
 #[tauri::command]
 pub fn flightlog_export(

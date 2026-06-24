@@ -23,6 +23,7 @@ import {
   exportBlackboxFile,
   blackboxFileInfo as blackboxFileInfoStore,
   deleteBlackboxFile as deleteBlackboxFileStore,
+  compactDatabase as compactDatabaseStore,
   type BlackboxFileInfo,
   exportTrackFile,
   importKflight,
@@ -244,6 +245,11 @@ export async function getBlackboxInfo(
 /** Delete the stored original blackbox file. Returns the original filename, or null if none. */
 export async function deleteBlackbox(flightId: number, dbPath: string): Promise<string | null> {
   return deleteBlackboxFileStore(flightId, dbPath);
+}
+
+/** Compact (defragment) the flight-log database. Returns the resulting size in bytes. */
+export async function compactDb(dbPath: string): Promise<number> {
+  return compactDatabaseStore(dbPath);
 }
 
 /** Export a flight track as KMZ/KML/GPX/CSV (format from file extension). */

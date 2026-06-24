@@ -1270,6 +1270,16 @@
     }
   }
 
+  async function compactDb() {
+    try {
+      const sizeBytes = await logbookCtrl.compactDb(flightLogDbPath);
+      const mb = (sizeBytes / (1024 * 1024)).toFixed(1);
+      await showInfo($t('settings.compactDb'), $t('settings.compactDbDone', { values: { size: `${mb} MB` } }));
+    } catch (e) {
+      errorMsg = String(e);
+    }
+  }
+
   async function exportTrack() {
     if (!selectedFlightId || !selectedFlight) return;
     try {
@@ -2397,6 +2407,7 @@
         onPatch={applySettingsPatch}
         onSetCacheMaxMB={setCacheMaxMB}
         onClearCache={clearCache}
+        onCompactDb={compactDb}
         onChooseFlightLogPath={chooseFlightLogPath}
         onResetFlightLogPath={resetFlightLogPath}
         onChooseRawLogPath={chooseRawLogPath}

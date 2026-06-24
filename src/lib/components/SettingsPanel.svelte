@@ -72,6 +72,7 @@
     onClearCache = () => {},
     onChooseFlightLogPath = () => {},
     onResetFlightLogPath = () => {},
+    onCompactDb = () => {},
     onChooseRawLogPath = () => {},
     onResetRawLogPath = () => {},
     onToggleWidget = (_widgetId: string) => {},
@@ -118,6 +119,7 @@
     onClearCache?: () => void;
     onChooseFlightLogPath?: () => void;
     onResetFlightLogPath?: () => void;
+    onCompactDb?: () => void;
     onChooseRawLogPath?: () => void;
     onResetRawLogPath?: () => void;
     onToggleWidget?: (widgetId: string) => void;
@@ -555,6 +557,13 @@
           <input class="s-input path-input" type="text" readonly value={flightLogDbPath || defaultFlightLogPath || $t('settings.defaultPathUnknown')} />
           <Button variant="standard" size="sm" onclick={onChooseFlightLogPath}>{$t('settings.choose')}</Button>
           <Button variant="standard" size="sm" onclick={onResetFlightLogPath}>{$t('settings.useDefault')}</Button>
+        </div>
+      </div>
+      <div class="s-row">
+        <span class="s-label">{$t('settings.compactDb')}</span>
+        <div class="s-loc">
+          <span class="s-loc-coords">{$t('settings.compactDbHint')}</span>
+          <Button variant="standard" size="sm" onclick={onCompactDb} title={$t('settings.compactDbHint')}>{$t('settings.compactDbBtn')}</Button>
         </div>
       </div>
       <div class="s-row s-row-stack">

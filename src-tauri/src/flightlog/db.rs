@@ -63,8 +63,27 @@ pub fn open_database(path: &Path) -> SqlResult<Connection> {
          PRAGMA foreign_keys = ON;",
     )?;
 
+    // Incremental auto-vacuum: freed pages (e.g. a deleted blackbox BLOB) go on a freelist and are
+    // reclaimed cheaply via `PRAGMA incremental_vacuum` after a delete — cost ∝ freed pages, not the
+    // whole DB. (A full `VACUUM` rewrites the entire file, which is unusable once logs reach GBs.)
+    // The mode can only be set before tables exist on a fresh DB, or converted with one VACUUM on an
+    // existing one — so do that one-time conversion here when the DB isn't already INCREMENTAL (2).
+    let auto_vacuum: i64 = conn.query_row("PRAGMA auto_vacuum", [], |row| row.get(0))?;
+    if auto_vacuum != 2 {
+        conn.execute_batch("PRAGMA auto_vacuum = INCREMENTAL;")?;
+        // Cheap on a fresh/empty DB; a one-time rewrite on an existing one (then never again).
+        conn.execute_batch("VACUUM;")?;
+    }
+
     migrate(&conn)?;
     Ok(conn)
+}
+
+/// Full defragmenting VACUUM — rebuilds the whole DB file to squeeze out fragmentation. Expensive
+/// (cost ∝ DB size); exposed only as an explicit "Compact Database" maintenance action. Routine
+/// deletes use incremental_vacuum instead (see `open_database`).
+pub fn compact_database(conn: &Connection) -> SqlResult<()> {
+    conn.execute_batch("VACUUM;")
 }
 
 /// Resolve the database file path based on settings.
@@ -1652,9 +1671,9 @@ pub fn delete_flight(conn: &Connection, flight_id: i64) -> SqlResult<bool> {
     conn.execute("DELETE FROM telemetry_records WHERE flight_id = ?1", params![flight_id])?;
     let affected = conn.execute("DELETE FROM flights WHERE id = ?1", params![flight_id])?;
 
-    // Reclaim disk space — blackbox_files stores large BLOBs
+    // Reclaim the freed pages (large blackbox BLOBs) — cheap incremental reclaim, not a full rewrite.
     if affected > 0 {
-        conn.execute_batch("VACUUM;")?;
+        conn.execute_batch("PRAGMA incremental_vacuum;")?;
     }
 
     Ok(affected > 0)
@@ -1977,8 +1996,8 @@ pub fn delete_blackbox_file(conn: &Connection, flight_id: i64) -> SqlResult<Opti
         params![target_id],
     )?;
     if affected > 0 {
-        // Reclaim disk space — blackbox_files stores large BLOBs.
-        conn.execute_batch("VACUUM;")?;
+        // Reclaim the freed BLOB pages incrementally (cheap), not via a full-DB VACUUM rewrite.
+        conn.execute_batch("PRAGMA incremental_vacuum;")?;
     }
     Ok(filename)
 }

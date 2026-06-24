@@ -523,6 +523,11 @@ export async function deleteBlackboxFile(flightId: number, dbPath: string): Prom
   });
 }
 
+/** Compact (full VACUUM / defragment) the flight-log database. Returns the resulting size in bytes. */
+export async function compactDatabase(dbPath: string): Promise<number> {
+  return invoke<number>('flightlog_compact_db', { dbPath: dbPath || undefined });
+}
+
 export async function exportTrackFile(
   flightId: number,
   outputPath: string,
