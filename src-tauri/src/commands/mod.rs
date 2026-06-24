@@ -20,4 +20,5 @@ pub mod radar;
 pub mod rally;
 pub mod rc;
 pub mod safehome;
+pub mod system;
 pub mod terrain;

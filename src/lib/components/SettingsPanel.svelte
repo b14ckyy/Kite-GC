@@ -41,6 +41,7 @@
     realLighting3D = false,
     logReplayTime = false,
     nightMode2D = 'off',
+    lowPower3D = 'auto',
     gcsMode = 'manual',
     userLocation = null,
     attitudeRateHz = 5,
@@ -88,6 +89,7 @@
     realLighting3D?: boolean;
     logReplayTime?: boolean;
     nightMode2D?: 'off' | 'auto' | 'on';
+    lowPower3D?: 'off' | 'on' | 'auto';
     gcsMode?: GcsMode;
     userLocation?: { lat: number; lon: number } | null;
     attitudeRateHz?: number;
@@ -298,6 +300,14 @@
           <option value="off">{$t('settings.nightModeOff')}</option>
           <option value="auto">{$t('settings.nightModeAuto')}</option>
           <option value="on">{$t('settings.nightModeOn')}</option>
+        </select>
+      </div>
+      <div class="s-row">
+        <label class="s-label" for="low-power-3d">{$t('settings.lowPower3D')}</label>
+        <select id="low-power-3d" class="s-select" value={lowPower3D} onchange={(e) => onPatch({ lowPower3D: (e.target as HTMLSelectElement).value as 'off' | 'on' | 'auto' })}>
+          <option value="off">{$t('settings.lowPower3DOff')}</option>
+          <option value="on">{$t('settings.lowPower3DOn')}</option>
+          <option value="auto">{$t('settings.lowPower3DAuto')}</option>
         </select>
       </div>
       <div class="s-row">

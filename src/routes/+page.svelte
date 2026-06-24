@@ -2426,6 +2426,7 @@
         {realLighting3D}
         {logReplayTime}
         {nightMode2D}
+        lowPower3D={$settings.lowPower3D}
         {gcsMode}
         userLocation={$userGeoLocation}
         onGeoCheck={requestUserLocation}

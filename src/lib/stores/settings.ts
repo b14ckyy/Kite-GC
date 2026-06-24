@@ -325,6 +325,8 @@ export interface AppSettings {
   cesiumIonToken: string;
   /** User chose "don't remind me" on the missing-Cesium-key prompt → never auto-show it again. */
   cesiumKeyPromptDismissed: boolean;
+  /** Low-power 3D render cap: off = uncapped · on = always 20fps · auto = 20fps only while on battery. */
+  lowPower3D: 'off' | 'on' | 'auto';
   /** Show the vertical altitude curtain (wall down to ground) under the 3D track. */
   altitudeCurtain3D: boolean;
   /** Light the 3D globe with the real sun position (day/night terminator + shading). */
@@ -402,6 +404,7 @@ const defaults: AppSettings = {
   uiScale: 1,
   cesiumIonToken: '',
   cesiumKeyPromptDismissed: false,
+  lowPower3D: 'auto',
   altitudeCurtain3D: true,
   realLighting3D: true,
   logReplayTime: true,

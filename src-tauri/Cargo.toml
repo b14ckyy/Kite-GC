@@ -51,6 +51,7 @@ futures = "0.3"
 mavlink = { version = "0.17", default-features = false, features = ["std", "ardupilotmega", "emit-extensions"] }
 num-traits = "0.2"  # FromPrimitive for lossless MavCmd/MavFrame <-> int (mission codec round-trip)
 tiff = "0.9"  # decode Copernicus GLO-30 GeoTIFF DEM tiles (Float32, DEFLATE, predictor 3)
+starship-battery = "0.10"  # cross-platform AC/battery state (Windows + Linux + macOS) for the low-power 3D auto mode
 
 # HID / joystick input for GCS RC control (docs/archive/MSP_RC_CONTROL.md). Native per-OS backends read
 # RAW axes/buttons/hats (no gamepad projection) so flight hardware / RC transmitters map correctly:

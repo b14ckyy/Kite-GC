@@ -152,6 +152,16 @@
   let curtainEnabled = true;                         // settings.altitudeCurtain3D
   const DECO_CHUNK_MAX = 150;                        // finalize a chunk at this many points
 
+  // ── 3D render frame-rate cap (settings.lowPower3D) ─────────────────
+  // A 60fps baseline always applies (Cesium would otherwise render at the display refresh rate — 120/
+  // 144Hz panels waste GPU/battery for no benefit on a map). Low-power drops that to 20fps:
+  //   off = 60fps · on = always 20fps · auto = 20fps only while on battery (queried from the backend).
+  let lowPower3DSetting: 'off' | 'on' | 'auto' = 'off';
+  let onBattery = false;
+  let batteryPollId: ReturnType<typeof setInterval> | undefined;
+  const BASE_FPS = 60;
+  const LOW_POWER_FPS = 20;
+
   // ── Sun / lighting ────────────────────────────────────────────────
   let lightingEnabled = false;                       // settings.realLighting3D → globe sun-shading
   let replayTimeEnabled = false;                     // settings.logReplayTime → clock from log timestamp
@@ -776,6 +786,28 @@
    * Exposed (instance method) so +page can read it on a 3D→2D switch and re-centre the
    * 2D map on the same spot.
    */
+  /** Cap (or un-cap) the 3D render frame rate per the low-power setting + battery state. With
+   *  requestRenderMode the view is idle-cheap already; this bounds the rate during animation/interaction. */
+  function applyFrameRateCap() {
+    if (!viewer) return;
+    let cap = BASE_FPS;
+    if (lowPower3DSetting === 'on') cap = LOW_POWER_FPS;
+    else if (lowPower3DSetting === 'auto') cap = onBattery ? LOW_POWER_FPS : BASE_FPS;
+    viewer.targetFrameRate = cap;
+    viewer.scene.requestRender();
+  }
+
+  /** In auto mode, query the backend for the AC/battery state and re-apply the cap. No-op otherwise. */
+  async function refreshBattery() {
+    if (lowPower3DSetting !== 'auto') return;
+    try {
+      onBattery = await invoke<boolean>('system_on_battery');
+    } catch {
+      onBattery = false; // detection unavailable → treat as AC (no cap)
+    }
+    applyFrameRateCap();
+  }
+
   /** Apply a Cesium Ion token entered after the viewer was created (no token at init = no world
    *  terrain). Sets the global token and swaps world terrain in live, so the 3D view gains real
    *  terrain without an app restart. */
@@ -901,6 +933,7 @@
       nightModeSetting = s.nightMode2D ?? 'off';
       hudSpeedUnit = s.interface?.speedUnit ?? 'kmh';
       hudAltUnit = s.interface?.altitudeUnit ?? 'm';
+      lowPower3DSetting = s.lowPower3D ?? 'off';
     });
     unsubSettings(); // read once, unsubscribe
 
@@ -1175,6 +1208,12 @@
       }
       hudSpeedUnit = next.interface?.speedUnit ?? 'kmh';
       hudAltUnit = next.interface?.altitudeUnit ?? 'm';
+      const lowPower = next.lowPower3D ?? 'off';
+      if (lowPower !== lowPower3DSetting) {
+        lowPower3DSetting = lowPower;
+        applyFrameRateCap();
+        void refreshBattery(); // auto mode → fetch battery state + re-apply
+      }
       const aspEnabledChg = next.airspace.enabled !== airspaceEnabled;
       if (aspEnabledChg || next.airspace.layers.obstacles.d3 !== obstacleD3 || next.airspace.obstacleDistanceKm !== obstacleDistKm) {
         airspaceEnabled = next.airspace.enabled;
@@ -1294,6 +1333,11 @@
       if (frameSigInit3d) { frameSigInit3d = false; return; }
       frameMission3d();
     });
+
+    // Low-power render cap: apply now + (auto mode) poll the battery state periodically.
+    applyFrameRateCap();
+    void refreshBattery();
+    batteryPollId = setInterval(() => void refreshBattery(), 30000);
   });
 
     onDestroy(() => {
@@ -1302,6 +1346,7 @@
     if (smRaf) cancelAnimationFrame(smRaf);
     if (radar3dCreateRaf) cancelAnimationFrame(radar3dCreateRaf);
     if (nightTimer3D) clearInterval(nightTimer3D);
+    if (batteryPollId) clearInterval(batteryPollId);
     unsubUserGeo?.();
     if (viewer && !viewer.isDestroyed()) viewer.camera.moveEnd.removeEventListener(updateNightDim3D);
     if (decoTrailingTimer != null) clearTimeout(decoTrailingTimer);
