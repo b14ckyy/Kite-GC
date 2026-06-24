@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Airspeed is now the primary speed readout when available, and is stored for replay.** The Speed
+  widget shows airspeed as the big value (ground speed drops to a secondary line) whenever airspeed is
+  present; without it, ground speed stays primary. Airspeed is also persisted per telemetry sample
+  (`telemetry_records.airspeed_ms`, schema v15) for replay: captured live (MAVLink `VFR_HUD` /
+  MSP2_INAV_AIR_SPEED), and on import from ArduPilot DataFlash (`ARSP` sensor) + INAV blackbox
+  (`airspeed` column). MAVLink `VFR_HUD.airspeed` is already sensor-when-healthy / synthetic-estimate
+  otherwise, so no client-side source juggling is needed; DataFlash carries only the physical-sensor
+  airspeed (no clean synthetic scalar is logged). The **3D FPV HUD** likewise shows airspeed (labelled
+  `ASPD`) instead of ground speed when available, live and in replay.
 - **3D render frame-rate cap + low-power mode.** The 3D view now always caps at 60 fps (Cesium would
   otherwise render at the display refresh rate — 120/144 Hz panels waste GPU/battery for no benefit on a
   map). A new "3D Power Saving" setting drops that to 20 fps: **Off** (60 fps), **On** (always 20 fps),
@@ -41,6 +50,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Physical USB/PCI ports are untouched (they keep their device descriptors).
 
 ### Fixed
+- **3D FPV HUD numbers were vertically off-centre in their boxes.** The heading / speed / altitude
+  readouts used a baseline-anchored y offset; they now centre via `dominant-baseline` at the box centre.
+- **`.kflight` export dropped newer telemetry columns.** The exchange export DB was still defined at the
+  v6 telemetry schema, so its `telemetry_records` table lacked `battery_percentage`, the canonical mode
+  columns and the live link-stat columns that the shared insert writes — the export DDL is now brought up
+  to the full schema (incl. the new `airspeed_ms`).
 - **Blackbox import duplicate detection was broken for local-time logs.** The INAV blackbox import
   checked for duplicates using the *uncorrected* header timestamp, but stored the flight with the
   *true-UTC* start time (header local time minus the GPS-location offset, ADR-048). Any log whose
