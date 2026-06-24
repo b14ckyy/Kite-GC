@@ -2623,5 +2623,40 @@ shipped build with `--debug` to get the full Debug Monitor (incl. MSP/MAVLink st
 
 ---
 
+## ADR-057: Flight-Log DB Space Reclaim — Incremental Auto-Vacuum, Not Per-Delete Full VACUUM
+
+**Status**: Accepted — shipped. **Amends**: ADR-016 (the BLOB/DB storage design) and the flight-log DB
+created in ADR-015. **Related**: ADR-022 (recording vs. logbook separation).
+
+**Context**: The flight-log database stores large rows — downsampled `telemetry_records` /
+`blackbox_records`, and especially the original blackbox file as a BLOB in `blackbox_files` (ADR-016).
+The original DB design reclaimed space on delete by running a **full `VACUUM`** after removing a flight
+(and, later, after deleting a stored blackbox original). This was a deliberate fix for an earlier
+problem where deleted rows left the file permanently bloated — but `VACUUM` rewrites the **entire**
+database file (cost ∝ total DB size, plus ~2× peak disk). At a handful of flights it already took
+several seconds; with ArduPilot DataFlash imports a logbook can reach tens of GB, where a per-delete
+full VACUUM becomes minutes-long and effectively unusable.
+
+**Decision**: Switch to SQLite **`auto_vacuum = INCREMENTAL`** and reclaim space incrementally.
+1. The pragma is set on database creation (before any table exists) and **converted once** on first
+   open for an existing DB (`PRAGMA auto_vacuum` ≠ 2 → set it + one `VACUUM`). That single conversion
+   is the last full rewrite; it preserves existing data (pre-1.0 we could also have orphaned old DBs,
+   but conversion is friendlier).
+2. Delete paths (`delete_flight`, `delete_blackbox_file`) replace `VACUUM` with
+   **`PRAGMA incremental_vacuum`**, which returns only the freed pages to the OS — cost ∝ deleted data,
+   not DB size. Deleting a flight is now sub-second regardless of total DB size.
+3. A manual **"Compact Database"** action (Settings → `flightlog_compact_db`) still runs a full
+   defragmenting `VACUUM` on demand, for the rare case where fragmentation matters.
+
+**Consequences**: Routine deletes are fast and scale. The trade-offs of incremental auto-vacuum
+(slightly more per-commit bookkeeping; the file can fragment over time) are acceptable for this
+append-heavy / occasional-bulk-delete workload, and the manual Compact covers fragmentation. The
+one-time conversion VACUUM on first open of a pre-existing DB is expected (a few seconds for a small
+DB; proportional for a large one) and happens exactly once. Future option (not taken now): move the
+blackbox-original BLOBs to external files so their deletion never touches the DB at all (ADR-016's BLOB
+choice is retained for now since it keeps a flight self-contained for `.kflight` export).
+
+---
+
 *End of Architecture Decision Records*
 
