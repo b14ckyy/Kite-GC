@@ -14,6 +14,10 @@ node_modules
 /.svelte-kit
 /package
 
+# Documentation site (MkDocs) build output + local Python venv
+/site/
+/.venv/
+
 # Environment
 .env
 .env.*

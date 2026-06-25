@@ -1,0 +1,54 @@
+# Build + deploy the user documentation site (MkDocs Material) to GitHub Pages.
+#
+# DORMANT until the repository is public AND Pages is enabled:
+#   Repo → Settings → Pages → Build and deployment → Source = "GitHub Actions".
+# GitHub Pages on a PRIVATE repo requires GitHub Pro/Team, so until then this workflow simply has
+# nothing to publish to. The build job still validates the docs on every push (mkdocs build --strict).
+#
+# Local preview needs no CI: `mkdocs serve` (see docs/requirements.txt).
+
+name: docs
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - docs/user/**
+      - mkdocs.yml
+      - docs/requirements.txt
+      - .github/workflows/docs.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow only one concurrent deployment.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r docs/requirements.txt
+      - run: mkdocs build --strict
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

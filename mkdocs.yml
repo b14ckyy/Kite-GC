@@ -1,0 +1,92 @@
+# MkDocs config for the Kite Ground Control user documentation site.
+# Source = docs/user/ only (dev docs under docs/ are NOT published). See
+# docs/active/USER_DOCS_ARCHITECTURE.md. Local preview: `mkdocs serve` (http://localhost:8000).
+
+site_name: Kite Ground Control
+site_description: User documentation for Kite Ground Control — an INAV / ArduPilot / PX4 ground control station.
+site_url: https://b14ckyy.github.io/Kite-GCS/
+repo_url: https://github.com/b14ckyy/Kite-GCS
+repo_name: b14ckyy/Kite-GCS
+edit_uri: edit/master/docs/user/
+docs_dir: docs/user
+site_dir: site
+copyright: Copyright &copy; Marc Hoffmann (b14ckyy) — GPL-3.0-or-later
+
+theme:
+  name: material
+  language: en
+  palette:
+    # Dark by default (matches the app's INAV dark theme), with a light toggle.
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue
+      accent: light blue
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue
+      accent: light blue
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.instant
+    - navigation.tracking
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.blocks.caption
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Installation: getting-started/installation.md
+      - First connection: getting-started/first-connection.md
+      - Quick tour: getting-started/quick-tour.md
+  - Guides:
+      - Connecting: guides/connecting.md
+      - Telemetry & display: guides/telemetry-and-display.md
+      - Missions: guides/missions.md
+      - Logbook: guides/logbook.md
+      - Vehicles: guides/vehicles.md
+      - Batteries: guides/batteries.md
+      - Video: guides/video.md
+      - Safety: guides/safety.md
+      - Radar & ADS-B: guides/radar-and-adsb.md
+      - 3D map: guides/map-3d.md
+      - Relay & forwarding: guides/relay-and-forwarding.md
+      - RC control: guides/rc-control.md
+  - Reference:
+      - Settings: reference/settings.md
+      - Keyboard shortcuts: reference/keyboard-shortcuts.md
+      - File formats: reference/file-formats.md
+  - Troubleshooting:
+      - Connection: troubleshooting/connection.md
+      - Video: troubleshooting/video.md
+      - FAQ: troubleshooting/faq.md

@@ -1,0 +1,5 @@
+# Documentation site toolchain (MkDocs + Material). Install into a venv to preview the user docs:
+#   python -m venv .venv && .venv/Scripts/pip install -r docs/requirements.txt   (Windows)
+#   python -m venv .venv && .venv/bin/pip install -r docs/requirements.txt        (Linux/macOS)
+# Then: mkdocs serve   (http://localhost:8000)   ·   mkdocs build --strict
+mkdocs-material>=9.5
