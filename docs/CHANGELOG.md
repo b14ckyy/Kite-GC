@@ -59,6 +59,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Physical USB/PCI ports are untouched (they keep their device descriptors).
 
 ### Fixed
+- **Turn-rate arc was missing/unstable in live MAVLink (ArduPilot/PX4).** The predicted-turn arc uses
+  dCOG/dt of the EKF course-over-ground (the true ground-track turn, incl. wind + skid). The estimator
+  consumed every telemetry update, but the store also fires for attitude/analog and MAVLink re-emits the
+  same fused COG from GPS_RAW_INT — all carrying the last `course`. Those stale repeats (dCOG = 0)
+  decayed the estimate between GPS samples and spiked it on the next, so the arc pulsed in the GPS
+  cadence (and bursts could zero it entirely). It now samples only on a genuinely fresh COG value
+  (`course !== prevCog`), i.e. exactly one EKF-COG sample per real change — stable live + replay on both
+  MSP and MAVLink.
+- **2D traffic-alert pulse ring jittered instead of pulsing smoothly.** The pulsing glow ring around an
+  alerting ADS-B contact was part of the contact's DivIcon, which is re-`setIcon`-ed on every
+  position/heading update (2–10 Hz) — restarting the CSS animation each time. The ring is now its own
+  persistent marker (fixed size, re-set only on alert-level change; position via `setLatLng`), so the
+  pulse runs uninterrupted.
 - **3D FPV HUD numbers were vertically off-centre in their boxes.** The heading / speed / altitude
   readouts used a baseline-anchored y offset; they now centre via `dominant-baseline` at the box centre.
 - **`.kflight` export dropped newer telemetry columns.** The exchange export DB was still defined at the

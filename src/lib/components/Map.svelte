@@ -241,14 +241,16 @@
   let turnCasing: L.Polyline | undefined;
   const DIR_LEAD_S = 15;     // line length = how far the UAV travels in this many seconds (velocity vector)
   const DIR_COG_MIN_SPEED = 1.5; // m/s — COG is noise below this → hide the amber line
-  const TURN_SHOW_RATE = 5;  // deg/s — only START showing on a real turn (above fluctuation noise)
-  const TURN_KEEP_RATE = 3;  // deg/s — once shown, keep while above this …
+  const TURN_SHOW_RATE = 3;  // deg/s — only START showing on a real turn (above fluctuation noise)
+  const TURN_KEEP_RATE = 2;  // deg/s — once shown, keep while above this …
   const TURN_HOLD_MS = 2000; // … and for this long after it drops below (hysteresis vs. fluctuations)
   const TURN_MAX_SWEEP = 180; // cap the arc at a half-circle so it never spirals
   const TURN_SEG_DEG = 5;    // arc polyline resolution (degrees of turn per segment)
-  // Turn-rate estimate (deg/s, signed): low-passed dCOG/dt on the SOURCE time base (wall clock live,
-  // log timestamp in replay → playback speed doesn't distort it). The DISPLAYED rate is eased per-frame
-  // in followLoop (followCurrent.turnRate) so the arc transitions smoothly instead of whipping.
+  // Turn-rate estimate (deg/s, signed): low-passed dCOG/dt of the EKF course-over-ground — the TRUE
+  // ground-track turn (includes wind + skid), the right quantity for a track-prediction arc (vs. the
+  // theoretical g·tan(bank)/V). Sampled only on a genuinely fresh COG value (see setFollowTarget). The
+  // DISPLAYED rate is eased per-frame in followLoop (followCurrent.turnRate) so the arc transitions
+  // smoothly instead of whipping.
   let turnRateDegS = 0;
   let prevCog: number | null = null;
   let prevCogTs = 0;
@@ -258,6 +260,22 @@
   // ── Foreign-vehicle (radar) contacts — isolated layer, diffed by id ──
   let radarLayer: L.LayerGroup | undefined;
   const radarMarkers = new Map<string, L.Marker>();
+  // Conflict-alert pulse rings are SEPARATE persistent markers (not part of the contact icon): the
+  // contact icon is re-set on every position/heading update, which would restart the CSS pulse and make
+  // it jitter. As their own markers they only re-`setIcon` on a level change; position uses setLatLng,
+  // so the pulse animation runs uninterrupted. `radarAlertRendered` tracks the level currently drawn.
+  const radarAlertMarkers = new Map<string, L.Marker>();
+  const radarAlertRendered = new Map<string, AlertLevel>();
+  /** Fixed-size pulsing alert ring as a standalone DivIcon (size is relevance-independent so it never
+   *  needs a re-setIcon while alerting). */
+  function makeAlertRingIcon(level: NonNullable<AlertLevel>, sizePx: number): L.DivIcon {
+    return L.divIcon({
+      className: 'radar-alert-divicon',
+      html: `<span class="radar-alert-ring ${level}"></span>`,
+      iconSize: [sizePx, sizePx],
+      iconAnchor: [sizePx / 2, sizePx / 2],
+    });
+  }
   let radarSnap: RadarSnapshot = { adsb: [], formationFlight: [], radio: [], lastUpdate: 0 };
   let radarSelectedId: string | null = null;
   let radarAlertMap: Map<string, AlertLevel> = new Map();
@@ -291,7 +309,12 @@
     if (!radarLayer) radarLayer = L.layerGroup().addTo(map);
     const ms = radarMapSettings;
     if (!radarActive || !ms) {
-      if (radarMarkers.size) { radarLayer.clearLayers(); radarMarkers.clear(); }
+      if (radarMarkers.size || radarAlertMarkers.size) {
+        radarLayer.clearLayers();
+        radarMarkers.clear();
+        radarAlertMarkers.clear();
+        radarAlertRendered.clear();
+      }
       return;
     }
     const all = [...radarSnap.adsb, ...radarSnap.formationFlight, ...radarSnap.radio];
@@ -316,7 +339,9 @@
         selected: v.id === radarSelectedId,
         label: v.callsign?.trim() || undefined,
         badgeLabel: v.system === 'formationFlight', // big single-letter id badge
-        alertLevel: radarAlertMap.get(v.id) ?? null,
+        // Alert ring is drawn as a separate persistent marker (below) so its pulse doesn't reset on
+        // every icon update — keep it OUT of the contact icon.
+        alertLevel: null,
       });
       const icon = L.divIcon({ className: 'radar-divicon', html, iconSize: [size, size], iconAnchor: [size / 2, size / 2] });
       const existing = radarMarkers.get(v.id);
@@ -332,9 +357,35 @@
         m.addTo(radarLayer);
         radarMarkers.set(id, m);
       }
+
+      // Conflict-alert ring — own persistent marker (fixed size, relevance-independent) so the CSS
+      // pulse runs uninterrupted; re-setIcon only when the level changes, position via setLatLng.
+      const level = radarAlertMap.get(v.id) ?? null;
+      if (level) {
+        const ringSize = Math.round(RADAR_BASE_PX * (uiScale || 1) * 1.7 * sizeMul);
+        const am = radarAlertMarkers.get(v.id);
+        if (!am) {
+          const ring = L.marker([v.lat, v.lon], { icon: makeAlertRingIcon(level, ringSize), zIndexOffset: 390, interactive: false });
+          ring.addTo(radarLayer);
+          radarAlertMarkers.set(v.id, ring);
+          radarAlertRendered.set(v.id, level);
+        } else {
+          am.setLatLng([v.lat, v.lon]);
+          if (radarAlertRendered.get(v.id) !== level) {
+            am.setIcon(makeAlertRingIcon(level, ringSize));
+            radarAlertRendered.set(v.id, level);
+          }
+        }
+      } else {
+        const am = radarAlertMarkers.get(v.id);
+        if (am) { radarLayer.removeLayer(am); radarAlertMarkers.delete(v.id); radarAlertRendered.delete(v.id); }
+      }
     }
     for (const [id, m] of radarMarkers) {
       if (!seen.has(id)) { radarLayer.removeLayer(m); radarMarkers.delete(id); }
+    }
+    for (const [id, am] of radarAlertMarkers) {
+      if (!seen.has(id)) { radarLayer.removeLayer(am); radarAlertMarkers.delete(id); radarAlertRendered.delete(id); }
     }
   }
 
@@ -1107,21 +1158,33 @@
     activeFollowMarker = marker;
     activeColor = color;
 
-    // Turn-rate estimate: low-passed dCOG/dt on the source time base. Only trusted while moving; a
-    // standstill, a time gap or a scrub resets it so the arc never lags or spins from stale COG.
-    if (speed > DIR_COG_MIN_SPEED && prevCog != null && timeMs > 0) {
-      const dtS = (timeMs - prevCogTs) / 1000;
-      if (dtS > 0.05 && dtS < 4) {
-        const dCog = ((course - prevCog + 540) % 360) - 180; // shortest-path COG change
-        turnRateDegS += ((dCog / dtS) - turnRateDegS) * 0.25; // low-pass
-      } else {
-        turnRateDegS = 0; // gap / scrub
+    // Turn rate from dCOG/dt of the EKF course-over-ground — the true ground-track turn (matches the
+    // real flown path incl. wind + skid), unlike the theoretical g·tan(bank)/V. Sample ONLY on a
+    // genuinely fresh COG value: the store also fires for attitude/analog, and MAVLink re-emits the
+    // SAME fused COG from GPS_RAW_INT — all carrying the last `course`. Consuming those stale repeats
+    // decayed the estimate between GPS updates and then spiked it on the next one, so the arc pulsed in
+    // the GPS cadence. `course !== prevCog` takes exactly one EKF-COG sample per real change at the GPS
+    // rate (the duplicate GPS_RAW_INT emission is identical → skipped); only trusted while moving.
+    if (speed > DIR_COG_MIN_SPEED && timeMs > 0) {
+      if (prevCog == null) {
+        prevCog = course; prevCogTs = timeMs; // seed
+      } else if (course !== prevCog) {
+        const dtS = (timeMs - prevCogTs) / 1000;
+        if (dtS >= 0.05 && dtS < 4) {
+          const dCog = ((course - prevCog + 540) % 360) - 180; // shortest-path COG change
+          turnRateDegS += ((dCog / dtS) - turnRateDegS) * 0.4; // low-pass (responsive at the ~2–4 Hz COG rate)
+          prevCog = course; prevCogTs = timeMs;
+        } else if (dtS >= 4) {
+          turnRateDegS = 0; prevCog = course; prevCogTs = timeMs; // gap / scrub → reset
+        }
+        // dtS < 0.05 (a changed-COG burst, rare) → skip; wait for a real interval
       }
+      // course unchanged → stale repeat (attitude/burst/duplicate GPS) → ignore
     } else {
       turnRateDegS = 0;
+      prevCog = speed > DIR_COG_MIN_SPEED ? course : null;
+      prevCogTs = timeMs;
     }
-    prevCog = speed > DIR_COG_MIN_SPEED ? course : null;
-    prevCogTs = timeMs;
 
     // Arc show/hide hysteresis on the source time base: start only above TURN_SHOW_RATE (a real turn),
     // then stay visible while ≥ TURN_KEEP_RATE and for TURN_HOLD_MS after it drops below.
@@ -2094,24 +2157,27 @@
     border-radius: 4px;
     transform: translate(-50%, 3px);
   }
-  /* Conflict-alert ring around a contact icon — pulsing glow (yellow caution / red warning). */
-  :global(.radar-divicon .radar-alert-ring) {
+  /* Conflict-alert ring — a standalone pulsing marker behind the contact (yellow caution / red
+     warning). Its own marker (not part of the contact icon) so the pulse never resets on icon
+     updates; the DivIcon is sized to the ring, so the span just fills it. */
+  :global(.radar-alert-divicon) { background: none; border: none; }
+  :global(.radar-alert-divicon .radar-alert-ring) {
     position: absolute;
     top: 50%;
     left: 50%;
-    width: 150%;
-    height: 150%;
+    width: 100%;
+    height: 100%;
     transform: translate(-50%, -50%);
     border-radius: 50%;
     box-sizing: border-box;
     pointer-events: none;
   }
-  :global(.radar-divicon .radar-alert-ring.caution) {
+  :global(.radar-alert-divicon .radar-alert-ring.caution) {
     border: 2px solid #f4c020;
     box-shadow: 0 0 7px 1px #f4c020, inset 0 0 4px #f4c020;
     animation: radar-alert-caution 1s ease-in-out infinite;
   }
-  :global(.radar-divicon .radar-alert-ring.warning) {
+  :global(.radar-alert-divicon .radar-alert-ring.warning) {
     border: 3px solid #ff2a2a;
     box-shadow: 0 0 12px 3px #ff2a2a, inset 0 0 7px #ff2a2a;
     animation: radar-alert-warning 1s ease-in-out infinite;
@@ -2125,7 +2191,7 @@
     50% { opacity: 1; transform: translate(-50%, -50%) scale(1.15); }
   }
   @media (prefers-reduced-motion: reduce) {
-    :global(.radar-divicon .radar-alert-ring) { animation: none !important; }
+    :global(.radar-alert-divicon .radar-alert-ring) { animation: none !important; }
   }
 
   /* ── GCS (ground-station) marker ── */
