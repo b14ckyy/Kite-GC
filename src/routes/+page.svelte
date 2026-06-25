@@ -76,7 +76,8 @@
   import WidgetPanel from "$lib/components/WidgetPanel.svelte";
   import { LARGE_BASE_VMIN } from "$lib/config/widgetRegistry";
   import FloatingVideoWindow from "$lib/components/video/FloatingVideoWindow.svelte";
-  import { initVideo, videoState, videoStream, bindVideoEl, setVideoPrimary, registerPiPElement } from "$lib/stores/video";
+  import { initVideo, videoState, videoStream, bindVideoEl, setMapLocation, setFloatHeightFrac, setFloatPos, registerPiPElement } from "$lib/stores/video";
+  import { openUrl } from "@tauri-apps/plugin-opener";
   import TerrainAnalysisPanel from "$lib/components/terrain/TerrainAnalysisPanel.svelte";
   import { editMode, replayActive, mission, missionFlags, missionDownload, missionUpload, missionFcInfo, markMissionSynced, loadedMissionId, missionSetWaypoints, launchPoint, hasLocation, toDeg, type Waypoint } from "$lib/stores/mission";
   import { pendingSystemSwitch, autopilotSystem, setAutopilotSystem, confirmSystemSwitch } from "$lib/stores/autopilotContext";
@@ -208,16 +209,95 @@
   // to place the map inside the window's frame when the view is swapped. The window
   // lives in the zoomed `.ui-scale` layer but the map is unzoomed, so the visual rect
   // is the window's logical rect * uiScale.
-  const FLOAT_HDR = 20; // floating-window header height
-  const floatH = $derived(Math.round($videoState.floatHeightFrac * winH));
+  // Must match FloatingVideoWindow's geometry exactly (incl. the 200px min-height floor that keeps
+  // the mini-map's 4 control buttons from overflowing) so the in-frame map aligns with the frame.
+  const FLOAT_MIN_H = 200;
+  const floatH = $derived(
+    Math.min(Math.round(0.3 * winH), Math.max(FLOAT_MIN_H, Math.round($videoState.floatHeightFrac * winH))),
+  );
   const floatW = $derived(Math.min(Math.round(floatH * ($videoState.aspect || 16 / 9)), Math.round(winW * 0.7)));
   const floatLeft = $derived($videoState.floatSnapped ? 8 : $videoState.floatX);
   const floatTop = $derived($videoState.floatSnapped ? winH - floatH - 30 : $videoState.floatY);
-  // When video is primary, the map occupies the window's body (below the header).
-  const mapInFrame = $derived($videoState.videoPrimary && $videoState.status === 'live');
+  // The single map jumps to whichever video surface was double-clicked: `floating` → the chromeless
+  // floating window frame, `widget` → the video-widget tile (its published rect). Every other surface
+  // shows video. `main` (default) = the normal full-screen map.
+  const mapInFrame = $derived($videoState.mapLocation !== 'main' && $videoState.status === 'live');
+  const mapFloating = $derived($videoState.mapLocation === 'floating');
+  const mapInWidget = $derived($videoState.mapLocation === 'widget');
   const mapFrameStyle = $derived(
-    `left:${floatLeft * uiScale}px; top:${(floatTop + FLOAT_HDR) * uiScale}px; width:${floatW * uiScale}px; height:${(floatH - FLOAT_HDR) * uiScale}px;`,
+    `left:${floatLeft * uiScale}px; top:${floatTop * uiScale}px; width:${floatW * uiScale}px; height:${floatH * uiScale}px;`,
   );
+  // The rect the in-frame map is positioned into (screen px): the floating frame, or the widget tile.
+  const inFrameStyle = $derived(
+    mapFloating
+      ? mapFrameStyle
+      : $videoState.widgetRect
+        ? `left:${$videoState.widgetRect.x}px; top:${$videoState.widgetRect.y}px; width:${$videoState.widgetRect.w}px; height:${$videoState.widgetRect.h}px;`
+        : '',
+  );
+
+  // Safety: if the video feed drops while the map is parked on a video surface, bring it back.
+  $effect(() => {
+    if ($videoState.mapLocation !== 'main' && $videoState.status !== 'live') {
+      untrack(() => setMapLocation('main'));
+    }
+  });
+
+  // ── Mini-map frame controls (videoPrimary) ──────────────────────────
+  // Rendered top-level (unzoomed, above the in-frame map at z2) because the float-win's own corners
+  // live in the .ui-scale layer (z1) and would sit *behind* the map. Close swaps back; the grip
+  // resizes (top-right, bottom-left anchored), mirroring FloatingVideoWindow.
+  let miniResizing = false;
+  let mrStartY = 0;
+  let mrStartFrac = 0;
+  let mrStartBottom = 0;
+  let mrSnapped = false;
+  function miniResizeDown(e: PointerEvent) {
+    e.stopPropagation();
+    e.preventDefault();
+    miniResizing = true;
+    mrStartY = e.clientY;
+    mrStartFrac = $videoState.floatHeightFrac;
+    mrStartBottom = floatTop + floatH;
+    mrSnapped = $videoState.floatSnapped;
+    window.addEventListener('pointermove', miniResizeMove);
+    window.addEventListener('pointerup', miniResizeUp);
+  }
+  function miniResizeMove(e: PointerEvent) {
+    if (!miniResizing) return;
+    const delta = (mrStartY - e.clientY) / winH; // drag up → larger
+    const fracMin = Math.max(0.1, FLOAT_MIN_H / winH);
+    const newFrac = Math.min(0.3, Math.max(fracMin, mrStartFrac + delta));
+    setFloatHeightFrac(newFrac);
+    if (!mrSnapped) setFloatPos($videoState.floatX, mrStartBottom - newFrac * winH);
+  }
+  function miniResizeUp() {
+    miniResizing = false;
+    window.removeEventListener('pointermove', miniResizeMove);
+    window.removeEventListener('pointerup', miniResizeUp);
+  }
+
+  // The WIDGET mini-map is locked to a clean nav view: 2D + heading-follow, zoom-only (3D/mode buttons
+  // hidden via `miniControls`). The FLOATING map stays fully operational. Restore the view on release.
+  let miniLockActive = false;
+  let savedMapViewMode: '2d' | '3d' = '2d';
+  let savedMode2d: 'free' | 'follow' | 'heading-follow' = 'free';
+  $effect(() => {
+    const lock = mapInWidget && $videoState.status === 'live';
+    untrack(() => {
+      if (lock && !miniLockActive) {
+        miniLockActive = true;
+        savedMapViewMode = mapViewMode;
+        savedMode2d = map2dViewMode;
+        mapViewMode = '2d';
+        map2dViewMode = 'heading-follow';
+      } else if (!lock && miniLockActive) {
+        miniLockActive = false;
+        mapViewMode = savedMapViewMode;
+        map2dViewMode = savedMode2d;
+      }
+    });
+  });
 
   // Per-container px-per-unit: 1 unit = cross-axis fraction so that
   // LARGE_BASE_VMIN units == cross-axis px (widget fills dock height/width).
@@ -2137,6 +2217,23 @@
 
   onMount(() => { void runStartupRecovery(); });
 
+  // External links (e.g. the Leaflet/OSM map attribution) must open in the system browser — the
+  // webview has no tabs/back, so navigating it to an external page traps the user with no way out.
+  // Intercept clicks on absolute http(s) anchors (cross-origin) and hand them to the OS browser.
+  onMount(() => {
+    const onClick = (e: MouseEvent) => {
+      const a = (e.target as HTMLElement | null)?.closest?.('a[href]') as HTMLAnchorElement | null;
+      if (!a) return;
+      const href = a.getAttribute('href') ?? '';
+      if (/^https?:\/\//i.test(href) && !href.startsWith(location.origin)) {
+        e.preventDefault();
+        void openUrl(href).catch(() => {});
+      }
+    };
+    document.addEventListener('click', onClick, true);
+    return () => document.removeEventListener('click', onClick, true);
+  });
+
   // Jump to a flight in the Logbook when requested (e.g. from the Mission Manager's
   // "flights with this mission" list).
   $effect(() => {
@@ -2253,7 +2350,7 @@
   <div
     class="layer-map"
     class:in-frame={mapInFrame}
-    style={mapInFrame ? mapFrameStyle : ''}
+    style={mapInFrame ? inFrameStyle : ''}
     onclick={minimizeLogbook}
   >
     {#if mapViewMode === '2d'}
@@ -2269,6 +2366,7 @@
         {mapViewMode}
         onToggleMapView={toggleMapView}
         bind:viewMode={map2dViewMode}
+        miniControls={mapInWidget}
         radarActive={radarSettings.enabled}
         radarMapSettings={radarSettings.map}
         {radarReference}
@@ -2299,12 +2397,28 @@
       </div>
     {/if}
 
-    <!-- Conflict-alert banner — pinned to the top of the map, above 2D/3D (renders nothing when idle). -->
-    <RadarAlertBanner {interfaceSettings} />
+  </div>
 
+  <!-- Toasts & alerts pinned to the MAIN APP FRAME (not the map): the map can shrink into the
+       floating window or a widget tile, and map-bound banners would then cover that tiny tile. This
+       container sits above everything in the content area so alerts stay readable. -->
+  <div class="app-toasts">
+    <!-- Conflict-alert banner (renders nothing when idle). -->
+    <RadarAlertBanner {interfaceSettings} />
     <!-- FC system messages (MAVLink STATUSTEXT) as top-edge toasts (renders nothing when idle). -->
     <StatusTextToasts />
   </div>
+
+  <!-- Floating-frame map controls — top-level/unzoomed so they sit ABOVE the in-frame map (z2); the
+       float-win's own corners live in .ui-scale (z1) and would be hidden behind it. Only for the
+       floating frame (resizable); the widget tile is sized by the dock. ✕ sends the map back to main. -->
+  {#if mapFloating && $videoState.status === 'live'}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="miniframe-ctl" style={mapFrameStyle}>
+      <button class="mf-corner mf-close" onclick={() => setMapLocation('main')} title={$t('video.close')}>✕</button>
+      <div class="mf-corner mf-resize" onpointerdown={miniResizeDown} title="Resize"></div>
+    </div>
+  {/if}
 
   <!-- ======= UI CHROME LAYER — zoomed by --ui-scale ======= -->
   <div class="ui-scale">
@@ -2352,8 +2466,8 @@
   <!-- ======= MAP (always fullscreen behind everything) ======= -->
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <!-- Full-size video shown in the map area when the view is swapped (videoPrimary).
-       Double-click to swap back. -->
+  <!-- Full-size video shown in the main map zone whenever the map has jumped to another surface.
+       Double-click brings the map back to the main full-screen view. -->
   {#if mapInFrame}
     <!-- Wrapper carries the inset + black backdrop; the video fills it with object-fit: contain so
          it scales to the window (full height/width) without distortion — bars where aspect differs. -->
@@ -2367,7 +2481,7 @@
         autoplay
         muted
         playsinline
-        ondblclick={() => setVideoPrimary(false)}
+        ondblclick={() => setMapLocation('main')}
       ></video>
     </div>
   {/if}
@@ -2762,7 +2876,63 @@
     right: auto;
     bottom: auto; /* left/top/width/height come from the inline rect */
     z-index: 2; /* above .ui-scale (z:1): into the floating frame body; frame draws the border */
-    border-radius: 0 0 7px 7px;
+    border-radius: 7px;
+  }
+  /* Hide the Leaflet attribution while the map is in the tiny floating frame: it's illegible there
+     and tapping it navigates the whole webview to an inescapable page. (Stays on the full map.) */
+  .layer-map.in-frame :global(.leaflet-control-attribution) {
+    display: none;
+  }
+  /* Toasts & alerts container — pinned to the app frame's top, above the map/video layers (z2/z0) so
+     banners are never tied to (or clipped by) a shrunken in-frame map. Zero-height (children are
+     absolutely positioned) so it never blocks clicks. */
+  .app-toasts {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 40;
+  }
+  /* Mini-map frame controls — overlay the in-frame map's top corners (z above the map). */
+  .miniframe-ctl {
+    position: absolute;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .mf-corner {
+    position: absolute;
+    top: 0;
+    width: 26px;
+    height: 26px;
+    pointer-events: auto;
+    box-sizing: border-box;
+    touch-action: none;
+  }
+  .mf-close {
+    left: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    line-height: 1;
+    color: #e0e0e0;
+    background: rgba(0, 0, 0, 0.5);
+    border: none;
+    border-radius: 8px 0 8px 0;
+    cursor: pointer;
+  }
+  .mf-close:hover {
+    background: rgba(212, 0, 0, 0.7);
+    color: #fff;
+  }
+  .mf-resize {
+    right: 0;
+    cursor: nesw-resize;
+    border-radius: 0 8px 0 8px;
+    background: linear-gradient(225deg, rgba(55, 168, 219, 0.85) 42%, transparent 42%);
+  }
+  .mf-resize:hover {
+    background: linear-gradient(225deg, rgba(55, 168, 219, 1) 50%, transparent 50%);
   }
   /* Full-size video shown in the content area when swapped (videoPrimary). The wrapper holds the
      chrome inset + black backdrop; the video fills it. */

@@ -26,6 +26,8 @@ export type VideoResolution = 'auto' | '720p' | '1080p';
 export type VideoKind = 'camera' | 'rtsp';
 /** Which go2rtc reader served the live RTSP feed: native client or the ffmpeg fallback. */
 export type RtspEngine = 'native' | 'ffmpeg' | null;
+/** Where the single map instance currently lives (the inverse of which surfaces show video). */
+export type MapLocation = 'main' | 'floating' | 'widget';
 
 export interface VideoState {
   /** Active source kind. `camera` → MediaStream/`srcObject`; `rtsp` → loopback `<video src>`. */
@@ -64,8 +66,13 @@ export interface VideoState {
   floatY: number;
   /** Window height as a fraction of the viewport height (0.1…0.3); width = height·aspect. */
   floatHeightFrac: number;
-  /** Map-swap: video fills the map zone, map shrinks to a PiP (transient, not persisted). */
-  videoPrimary: boolean;
+  /** Where the single map instance currently lives (transient, not persisted). `main` = the normal
+   *  full-screen map; `floating`/`widget` = the map jumped into that video surface (which double-
+   *  clicked), and every other surface shows video. Double-clicking a video moves the map there. */
+  mapLocation: MapLocation;
+  /** Screen rect (px) of the video widget tile, published by the widget — used to overlay the map
+   *  onto it when `mapLocation === 'widget'`. Null until measured. */
+  widgetRect: { x: number; y: number; w: number; h: number } | null;
 }
 
 // ── Persistence ─────────────────────────────────────────────────────
@@ -170,7 +177,8 @@ const INITIAL: VideoState = {
   floatX: boot.floatX,
   floatY: boot.floatY,
   floatHeightFrac: boot.floatHeightFrac,
-  videoPrimary: false,
+  mapLocation: 'main',
+  widgetRect: null,
 };
 
 export const videoState = writable<VideoState>({ ...INITIAL });
@@ -469,18 +477,34 @@ export function setFloatHeightFrac(frac: number): void {
   savePrefs();
 }
 
-// ── Map-swap (video ⇄ map) ───────────────────────────────────────────
-/** Swap the main map view with the video (video fills the zone, map → PiP).
- *  Fires a resize so Leaflet/Cesium re-fit to their new container size. */
-export function setVideoPrimary(v: boolean): void {
-  patch({ videoPrimary: v });
+// ── Map ⇄ video placement ────────────────────────────────────────────
+/** Move the single map instance to a surface. Double-clicking a video calls this with that surface;
+ *  the map jumps there and every other surface shows video. Fires a resize so Leaflet/Cesium re-fit
+ *  to the new container size (the Map also has a ResizeObserver as a backstop). */
+export function setMapLocation(loc: MapLocation): void {
+  patch({ mapLocation: loc });
   if (typeof window !== 'undefined') {
     setTimeout(() => window.dispatchEvent(new Event('resize')), 60);
   }
 }
 
-export function toggleVideoPrimary(): void {
-  setVideoPrimary(!get(videoState).videoPrimary);
+/** Publish the video widget's on-screen rect so the map can overlay it in `widget` mode. No-op when
+ *  unchanged — callers fire it from ResizeObserver/resize handlers, and a redundant patch would churn
+ *  the store (and could feed an effect loop). */
+export function setWidgetRect(rect: { x: number; y: number; w: number; h: number } | null): void {
+  const cur = get(videoState).widgetRect;
+  if (cur === rect) return;
+  if (
+    cur &&
+    rect &&
+    cur.x === rect.x &&
+    cur.y === rect.y &&
+    cur.w === rect.w &&
+    cur.h === rect.h
+  ) {
+    return;
+  }
+  patch({ widgetRect: rect });
 }
 
 // ── Native Picture-in-Picture ────────────────────────────────────────

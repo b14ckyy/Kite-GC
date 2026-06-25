@@ -4,20 +4,18 @@
 -->
 
 <script lang="ts">
-  // Floating video window — an in-app overlay sink for the video router.
-  //  • snaps to the bottom-left corner (above the status bar; the bottom widget
-  //    dock reflows out of the way — handled in +page.svelte) or floats freely
-  //  • drag the header to move (away from the corner un-snaps; dropping near the
-  //    corner re-snaps); corner-drag to resize (aspect-locked, 10–30 % of vh)
+  // Floating video window — a chromeless in-app overlay sink for the video router.
+  //  • snaps to the bottom-left corner (above the status bar; the bottom widget dock reflows out of
+  //    the way — handled in +page.svelte) or floats freely
+  //  • drag the video body to move (away from the corner un-snaps; dropping near the corner re-snaps)
+  //  • TOP-RIGHT corner grip resizes (aspect-locked, 10–30 % of vh, touch-friendly)
+  //  • TOP-LEFT ✕ closes (swaps back first if it was primary)
   //  • double-click the video to swap it with the map (→ videoPrimary)
-  //  • ✕ closes the window (swaps back first if it was primary)
   //
-  // Layering: the frame is drawn as separate absolutely-positioned layers that
-  // share the page stacking context (the .float-win wrapper has no z-index, so it
-  // creates no stacking context). That lets the map (rendered top-level in
-  // +page when swapped) sit *between* the frame's blurred background (z 60) and
-  // its header/resize chrome (z 62) at z 61 — so the map is fully interactive
-  // while the header/resize stay usable. Frame styling matches the NavRail panels.
+  // No title bar (space is precious on a flight display). Layering: separate absolutely-positioned
+  // layers share the page stacking context (the .float-win wrapper has no z-index). The map (rendered
+  // top-level in +page when swapped) composes between the frosted background (z 60) and the corner
+  // controls (z 62), so the mini-map stays interactive while close/resize stay usable.
   import { t } from 'svelte-i18n';
   import {
     videoStream,
@@ -26,9 +24,12 @@
     setFloatPos,
     setFloatSnapped,
     setFloatHeightFrac,
-    setVideoPrimary,
+    setMapLocation,
     toggleFloating,
   } from '$lib/stores/video';
+
+  // True while the map occupies this floating frame (so this window shows the map, not video).
+  const mapHere = $derived($videoState.mapLocation === 'floating');
 
   let vw = $state(typeof window !== 'undefined' ? window.innerWidth : 1280);
   let vh = $state(typeof window !== 'undefined' ? window.innerHeight : 720);
@@ -41,14 +42,29 @@
   const MARGIN = 8;
   const SNAP_BOTTOM = 30; // align the snapped bottom with the widgets (above the 24px status bar)
   const SNAP_THRESHOLD = 56;
+  const FRAC_MIN = 0.1;
+  const FRAC_MAX = 0.3;
+  // Floor the height so the mini-map's 4 stacked control buttons (4×38 + 3×8 gap + 8 bottom offset +
+  // breathing room) never overflow the frame in videoPrimary mode.
+  const MIN_H_PX = 200;
+
+  let floatWinEl = $state<HTMLDivElement | null>(null);
 
   const aspect = $derived($videoState.aspect || 16 / 9);
-  const height = $derived(Math.round($videoState.floatHeightFrac * vh));
+  const height = $derived(
+    Math.min(Math.round(FRAC_MAX * vh), Math.max(MIN_H_PX, Math.round($videoState.floatHeightFrac * vh))),
+  );
   const width = $derived(Math.min(Math.round(height * aspect), Math.round(vw * 0.7)));
   const left = $derived($videoState.floatSnapped ? MARGIN : $videoState.floatX);
   const top = $derived($videoState.floatSnapped ? vh - height - SNAP_BOTTOM : $videoState.floatY);
 
-  // ── Drag (header) ──────────────────────────────────────────────────
+  // This ✕ only shows while the window holds video → it closes the floating window. (When the map is
+  // in the frame, +page renders its own ✕ on top that sends the map back to the main view instead.)
+  function closeWindow() {
+    toggleFloating();
+  }
+
+  // ── Drag (from the video body) ─────────────────────────────────────
   let pendingDrag = false;
   let moved = false;
   let startX = 0;
@@ -56,8 +72,8 @@
   let baseLeft = 0;
   let baseTop = 0;
 
-  function onHeaderPointerDown(e: PointerEvent) {
-    if ((e.target as HTMLElement).closest('.fw-btn')) return; // let buttons click
+  function onBodyPointerDown(e: PointerEvent) {
+    if ((e.target as HTMLElement).closest('.fw-corner')) return; // let the corner controls handle it
     pendingDrag = true;
     moved = false;
     startX = e.clientX;
@@ -92,54 +108,161 @@
     if (nearLeft && nearBottom) setFloatSnapped(true);
   }
 
-  // ── Resize (bottom-right handle) ───────────────────────────────────
+  // ── Resize (top-right handle) ──────────────────────────────────────
+  // Dragging the top-right corner grows the window up + right with the bottom-left anchored:
+  // up = bigger, and for a free (un-snapped) window we move the top so the bottom edge stays put.
   let resizing = false;
   let resizeStartY = 0;
   let startFrac = 0;
+  let startBottom = 0;
+  let startSnapped = false;
   function onResizePointerDown(e: PointerEvent) {
     e.stopPropagation();
     resizing = true;
     resizeStartY = e.clientY;
     startFrac = $videoState.floatHeightFrac;
+    startBottom = top + height;
+    startSnapped = $videoState.floatSnapped;
     window.addEventListener('pointermove', onResizeMove);
     window.addEventListener('pointerup', onResizeUp);
   }
   function onResizeMove(e: PointerEvent) {
     if (!resizing) return;
-    setFloatHeightFrac(startFrac + (e.clientY - resizeStartY) / vh);
+    const delta = (resizeStartY - e.clientY) / vh; // drag up → larger
+    const fracMin = Math.max(FRAC_MIN, MIN_H_PX / vh); // honour the 4-button px floor
+    const newFrac = Math.min(FRAC_MAX, Math.max(fracMin, startFrac + delta));
+    setFloatHeightFrac(newFrac);
+    if (!startSnapped) {
+      // Keep the bottom edge fixed (top-right grip): top = bottom − newHeight.
+      setFloatPos($videoState.floatX, startBottom - newFrac * vh);
+    }
   }
   function onResizeUp() {
     resizing = false;
     window.removeEventListener('pointermove', onResizeMove);
     window.removeEventListener('pointerup', onResizeUp);
   }
+
+  // ── Mini-map move (videoPrimary) — right mouse / two-finger ─────────
+  // In primary mode the frame holds the interactive map, so left-drag/single-touch pan the map. To
+  // MOVE the frame we grab with the right mouse button (desktop) or two fingers (touch); pinch-zoom
+  // is sacrificed there (the zoom buttons + follow mode cover it). Window-level capture so we run
+  // before Leaflet and can stop it seeing the gesture.
+  let fmActive = false;
+  let fmStartX = 0;
+  let fmStartY = 0;
+  let fmBaseLeft = 0;
+  let fmBaseTop = 0;
+  let fmMoved = false;
+
+  function pointInFrame(cx: number, cy: number): boolean {
+    const r = floatWinEl?.getBoundingClientRect();
+    return !!r && cx >= r.left && cx <= r.right && cy >= r.top && cy <= r.bottom;
+  }
+  function frameMoveStart(cx: number, cy: number) {
+    fmActive = true;
+    fmMoved = false;
+    fmStartX = cx;
+    fmStartY = cy;
+    fmBaseLeft = left;
+    fmBaseTop = top;
+  }
+  function frameMoveTo(cx: number, cy: number) {
+    if (!fmActive) return;
+    const dx = cx - fmStartX;
+    const dy = cy - fmStartY;
+    if (!fmMoved && Math.hypot(dx, dy) < 4) return;
+    if (!fmMoved) {
+      fmMoved = true;
+      setFloatSnapped(false);
+    }
+    setFloatPos(
+      Math.max(0, Math.min(fmBaseLeft + dx, vw - width)),
+      Math.max(0, Math.min(fmBaseTop + dy, vh - height)),
+    );
+  }
+  function frameMoveEnd() {
+    if (!fmActive) return;
+    fmActive = false;
+    if (!fmMoved) return;
+    const nearLeft = $videoState.floatX <= MARGIN + SNAP_THRESHOLD;
+    const nearBottom = $videoState.floatY + height >= vh - SNAP_BOTTOM - SNAP_THRESHOLD;
+    if (nearLeft && nearBottom) setFloatSnapped(true);
+  }
+
+  $effect(() => {
+    if (!$videoState.floating || !mapHere) return;
+    const mid = (t: TouchList) => ({
+      x: (t[0].clientX + t[1].clientX) / 2,
+      y: (t[0].clientY + t[1].clientY) / 2,
+    });
+    const onCtx = (e: MouseEvent) => {
+      if (pointInFrame(e.clientX, e.clientY)) e.preventDefault(); // no context menu over the frame
+    };
+    const onPD = (e: PointerEvent) => {
+      if (e.button === 2 && pointInFrame(e.clientX, e.clientY)) {
+        e.preventDefault();
+        e.stopPropagation();
+        frameMoveStart(e.clientX, e.clientY);
+      }
+    };
+    const onPM = (e: PointerEvent) => {
+      if (fmActive) frameMoveTo(e.clientX, e.clientY);
+    };
+    const onPU = () => frameMoveEnd();
+    const onTS = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        const m = mid(e.touches);
+        if (pointInFrame(m.x, m.y)) {
+          e.preventDefault();
+          e.stopPropagation();
+          frameMoveStart(m.x, m.y);
+        }
+      }
+    };
+    const onTM = (e: TouchEvent) => {
+      if (fmActive && e.touches.length >= 2) {
+        e.preventDefault();
+        e.stopPropagation();
+        const m = mid(e.touches);
+        frameMoveTo(m.x, m.y);
+      }
+    };
+    const onTE = (e: TouchEvent) => {
+      if (fmActive && e.touches.length < 2) frameMoveEnd();
+    };
+    window.addEventListener('contextmenu', onCtx, true);
+    window.addEventListener('pointerdown', onPD, true);
+    window.addEventListener('pointermove', onPM, true);
+    window.addEventListener('pointerup', onPU, true);
+    window.addEventListener('touchstart', onTS, { capture: true, passive: false });
+    window.addEventListener('touchmove', onTM, { capture: true, passive: false });
+    window.addEventListener('touchend', onTE, true);
+    return () => {
+      window.removeEventListener('contextmenu', onCtx, true);
+      window.removeEventListener('pointerdown', onPD, true);
+      window.removeEventListener('pointermove', onPM, true);
+      window.removeEventListener('pointerup', onPU, true);
+      window.removeEventListener('touchstart', onTS, true);
+      window.removeEventListener('touchmove', onTM, true);
+      window.removeEventListener('touchend', onTE, true);
+    };
+  });
 </script>
 
 <svelte:window bind:innerWidth={vw} bind:innerHeight={vh} />
 
 {#if $videoState.floating}
-  <!-- No z-index on the wrapper → no stacking context; the layers below compose
-       with the top-level map (z 61) rendered in +page when swapped. -->
-  <div class="float-win" style="left:{left}px; top:{top}px; width:{width}px; height:{height}px;">
-    <!-- frame background (drawn first / behind), frosted like the NavRail panels -->
+  <!-- No z-index on the wrapper → no stacking context; layers compose with the top-level map. -->
+  <div bind:this={floatWinEl} class="float-win" style="left:{left}px; top:{top}px; width:{width}px; height:{height}px;">
+    <!-- frosted frame background (behind), like the NavRail panels -->
     <div class="fw-bg"></div>
 
-    <!-- header strip (on top) — drag handle + close -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="fw-header" onpointerdown={onHeaderPointerDown}>
-      <span class="fw-title">{$videoState.videoPrimary ? $t('nav.video') : $t('video.title')}</span>
-      <button
-        class="fw-btn"
-        onclick={() => ($videoState.videoPrimary ? setVideoPrimary(false) : toggleFloating())}
-        title={$t('video.close')}
-      >✕</button>
-    </div>
-
-    <!-- content: the video (normal). When swapped, the map (top-level in +page)
-         fills this area at z 61 instead. -->
-    {#if !$videoState.videoPrimary}
+    <!-- content: the video. When the map is in this frame, it's rendered (top-level) by +page here
+         instead, and the body is omitted. Double-click the video → the map jumps into this frame. -->
+    {#if !mapHere}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <div class="fw-body" ondblclick={() => setVideoPrimary(true)}>
+      <div class="fw-body" onpointerdown={onBodyPointerDown} ondblclick={() => setMapLocation('floating')}>
         {#if $videoState.status === 'live'}
           <!-- svelte-ignore a11y_media_has_caption -->
           <video bind:this={videoEl} autoplay muted playsinline class:mirror={$videoState.mirror}></video>
@@ -149,9 +272,16 @@
       </div>
     {/if}
 
-    <!-- resize grip (on top, usable in both modes) -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="fw-resize" onpointerdown={onResizePointerDown} title="Resize"></div>
+    <!-- Corner controls (video mode only). When the map fills this frame, the map (a separate unzoomed
+         top-level layer) covers these, so +page renders the equivalents above it. -->
+    {#if !mapHere}
+      <!-- close (top-left) — overlay, touch-sized -->
+      <button class="fw-corner fw-close" onclick={closeWindow} title={$t('video.close')}>✕</button>
+
+      <!-- resize grip (top-right) — visible, touch-sized -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="fw-corner fw-resize" onpointerdown={onResizePointerDown} title="Resize"></div>
+    {/if}
   </div>
 {/if}
 
@@ -173,61 +303,19 @@
     border-radius: 8px;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
   }
-  .fw-header {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 20px;
-    z-index: 62;
-    pointer-events: auto;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 0 4px 0 8px;
-    box-sizing: border-box;
-    cursor: grab;
-  }
-  .fw-header:active {
-    cursor: grabbing;
-  }
-  .fw-title {
-    flex: 1;
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: #9ad0e8;
-  }
-  .fw-btn {
-    width: 16px;
-    height: 16px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 11px;
-    line-height: 1;
-    color: #aaa;
-    background: transparent;
-    border: none;
-    border-radius: 3px;
-    cursor: pointer;
-  }
-  .fw-btn:hover {
-    background: rgba(255, 255, 255, 0.12);
-    color: #fff;
-  }
   .fw-body {
     position: absolute;
-    left: 0;
-    right: 0;
-    top: 20px;
-    bottom: 0;
+    inset: 0;
     z-index: 61;
     pointer-events: auto;
     background: #000;
     overflow: hidden;
-    border-radius: 0 0 7px 7px;
+    border-radius: 8px;
+    cursor: grab;
+    touch-action: none; /* let pointer-drag move the window instead of scrolling/panning */
+  }
+  .fw-body:active {
+    cursor: grabbing;
   }
   .fw-body video {
     width: 100%;
@@ -247,15 +335,43 @@
     color: #888;
     font-size: 12px;
   }
-  .fw-resize {
+
+  /* Corner controls — overlay the content corners (no title bar); touch-sized. */
+  .fw-corner {
     position: absolute;
-    right: 0;
-    bottom: 0;
-    width: 16px;
-    height: 16px;
+    top: 0;
+    width: 26px;
+    height: 26px;
     z-index: 62;
     pointer-events: auto;
-    cursor: nwse-resize;
-    background: linear-gradient(135deg, transparent 50%, rgba(55, 168, 219, 0.5) 50%);
+    box-sizing: border-box;
+    touch-action: none;
+  }
+  .fw-close {
+    left: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    line-height: 1;
+    color: #e0e0e0;
+    background: rgba(0, 0, 0, 0.45);
+    border: none;
+    border-radius: 8px 0 8px 0;
+    cursor: pointer;
+  }
+  .fw-close:hover {
+    background: rgba(212, 0, 0, 0.7);
+    color: #fff;
+  }
+  .fw-resize {
+    right: 0;
+    cursor: nesw-resize;
+    border-radius: 0 8px 0 8px;
+    /* visible grab affordance in the top-right corner */
+    background: linear-gradient(225deg, rgba(55, 168, 219, 0.85) 42%, transparent 42%);
+  }
+  .fw-resize:hover {
+    background: linear-gradient(225deg, rgba(55, 168, 219, 1) 50%, transparent 50%);
   }
 </style>

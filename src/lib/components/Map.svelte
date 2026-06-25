@@ -12,7 +12,7 @@
 </script>
 
 <script lang="ts">
-  import { onMount, onDestroy, mount, unmount } from "svelte";
+  import { onMount, onDestroy, mount, unmount, untrack } from "svelte";
   import L from "leaflet";
   import "leaflet/dist/leaflet.css";
   import { settings } from "$lib/stores/settings";
@@ -92,6 +92,7 @@
     fcVariant = 'INAV',
     mapViewMode = '2d' as '2d' | '3d',
     onToggleMapView,
+    miniControls = false,
     viewMode = $bindable<'free' | 'follow' | 'heading-follow'>('free'),
     radarActive = false,
     radarMapSettings = null,
@@ -109,6 +110,8 @@
     fcVariant?: string;
     mapViewMode?: '2d' | '3d';
     onToggleMapView?: () => void;
+    /** Mini-map mode (in the video frame): hide the 2D/3D + view-mode buttons, keep zoom only. */
+    miniControls?: boolean;
     /** 2D follow state, lifted so it persists across 2D↔3D remounts (bound by the parent). */
     viewMode?: 'free' | 'follow' | 'heading-follow';
     /** Radar master enable (renders nothing when off). */
@@ -198,6 +201,7 @@
   }
 
   let mapContainer: HTMLDivElement;
+  let mapResizeObs: ResizeObserver | undefined;
   let map = $state<L.Map | undefined>(undefined);
   let uavMarker: L.Marker | undefined;
   let unsubTelemetry: (() => void) | undefined;
@@ -1690,16 +1694,25 @@
     };
     window.addEventListener("resize", onResize);
 
+    // The map container also resizes WITHOUT a window resize — e.g. when it's moved into/out of the
+    // floating video frame or a widget tile (video-swap). A window 'resize' may fire before the new
+    // layout settles (→ Leaflet renders a tiny map until a manual 3D toggle). Observe the wrapper so
+    // invalidateSize runs exactly when the real size changes.
+    if (mapContainer?.parentElement && typeof ResizeObserver !== 'undefined') {
+      mapResizeObs = new ResizeObserver(() => {
+        if (viewMode === 'heading-follow') applyHeadingUpSize(true);
+        map?.invalidateSize();
+      });
+      mapResizeObs.observe(mapContainer.parentElement);
+    }
+
     // Fix tile rendering on initial load
     setTimeout(() => map?.invalidateSize(), 100);
 
-    // Restore a persisted follow mode (the parent keeps `viewMode` across 2D↔3D remounts).
-    if (viewMode !== 'free') {
-      map.dragging.disable();
-      setZoomAnchor('center');
-      if (viewMode === 'heading-follow') applyHeadingUpSize(true);
-      applyFollowFrame();
-    }
+    // Restore a persisted follow mode (the parent keeps `viewMode` across 2D↔3D remounts). Apply via
+    // the shared path and mark it applied so the reactive $effect doesn't re-run it on first tick.
+    applyViewModeEffects(viewMode);
+    appliedViewMode = viewMode;
 
     // Subscribe to telemetry for UAV position, flight trail, and home detection
     unsubTelemetry = telemetry.subscribe((t) => {
@@ -1768,7 +1781,10 @@
     unsubRadarSel = radarSelection.subscribe((id) => { radarSelectedId = id; updateRadar(); });
     unsubRadarAlerts = radarAlertLevels.subscribe((m) => { radarAlertMap = m; updateRadar(); });
 
-    return () => window.removeEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      mapResizeObs?.disconnect();
+    };
   });
 
   function applyHeadingUpSize(enable: boolean) {
@@ -1801,35 +1817,50 @@
     setTimeout(() => map?.invalidateSize(), 50);
   }
 
-  function toggleViewMode() {
-    if (viewMode === 'free') {
-      viewMode = 'follow';
+  // Apply the side-effects for a view mode (idempotent): heading-up container sizing, panning enable/
+  // disable, zoom anchor, and an immediate follow-frame. Must run for EXTERNAL viewMode changes too
+  // (the parent forces heading-follow for the widget mini-map), not just the toolbar button — so the
+  // $effect below drives this on every change. free: drag, cursor-zoom; follow/heading: locked +
+  // centre-zoom (+ rotation for heading).
+  function applyViewModeEffects(mode: 'free' | 'follow' | 'heading-follow') {
+    if (!map) return;
+    if (mode === 'heading-follow') {
+      applyHeadingUpSize(true);
+      map.dragging.disable();
+      setZoomAnchor('center');
+      applyFollowFrame();
+    } else if (mode === 'follow') {
       mapHeading = 0;
       mapContainer?.style.setProperty('--map-rotation', '0deg');
       applyHeadingUpSize(false);
-      // Disable panning while following — the view is locked to the UAV, so a
-      // drag would only fight the follow. Zoom stays enabled, but anchored to
-      // the map centre (= UAV) instead of the cursor.
-      map?.dragging.disable();
+      map.dragging.disable();
       setZoomAnchor('center');
-      applyFollowFrame(); // center on the current position immediately
-      return;
+      applyFollowFrame();
+    } else {
+      mapHeading = 0;
+      mapContainer?.style.setProperty('--map-rotation', '0deg');
+      applyHeadingUpSize(false);
+      map.dragging.enable();
+      setZoomAnchor('cursor');
     }
-
-    if (viewMode === 'follow') {
-      viewMode = 'heading-follow';
-      applyHeadingUpSize(true);
-      applyFollowFrame(); // apply rotation immediately
-      return; // dragging stays disabled
-    }
-
-    viewMode = 'free';
-    mapHeading = 0;
-    mapContainer?.style.setProperty('--map-rotation', '0deg');
-    applyHeadingUpSize(false);
-    map?.dragging.enable();
-    setZoomAnchor('cursor');
   }
+
+  // The toolbar button just cycles the mode; the $effect applies the side-effects (same path as an
+  // external change), so the two can never desync.
+  function toggleViewMode() {
+    viewMode = viewMode === 'free' ? 'follow' : viewMode === 'follow' ? 'heading-follow' : 'free';
+  }
+
+  let appliedViewMode: 'free' | 'follow' | 'heading-follow' = 'free';
+  $effect(() => {
+    const m = viewMode;
+    untrack(() => {
+      if (map && m !== appliedViewMode) {
+        appliedViewMode = m;
+        applyViewModeEffects(m);
+      }
+    });
+  });
 
   /** Anchor wheel/dblclick/pinch zoom to the map centre (UAV in follow) or the
    *  cursor (free). Leaflet reads these options at zoom time, so mutating them
@@ -1912,33 +1943,35 @@
   <div bind:this={mapContainer} class="map" style="--map-rotation: 0deg"></div>
 
   <div class="map-controls-corner">
-    <button class="map-control-btn map-mode-btn"
-            onclick={() => onToggleMapView?.()}
-            title={mapViewMode === '2d' ? '3D View' : '2D View'}
-            aria-label={mapViewMode === '2d' ? 'Switch to 3D view' : 'Switch to 2D view'}>
-      {mapViewMode === '2d' ? '3D' : '2D'}
-    </button>
+    {#if !miniControls}
+      <button class="map-control-btn map-mode-btn"
+              onclick={() => onToggleMapView?.()}
+              title={mapViewMode === '2d' ? '3D View' : '2D View'}
+              aria-label={mapViewMode === '2d' ? 'Switch to 3D view' : 'Switch to 2D view'}>
+        {mapViewMode === '2d' ? '3D' : '2D'}
+      </button>
 
-    <button class="map-control-btn map-heading-btn"
-            class:mode-free={viewMode === 'free'}
-            class:mode-follow={viewMode === 'follow'}
-            class:mode-heading={viewMode === 'heading-follow'}
-            onclick={toggleViewMode}
-            title={followTitle}
-            aria-label={followTitle}>
-      {#if viewMode === 'heading-follow'}
-        <svg class="heading-icon heading-icon-up" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-          <polygon class="uav-arrow" points="12,6 7.5,17.5 12,15.2 16.5,17.5" />
-        </svg>
-      {:else}
-        <svg class="heading-icon heading-icon-diag" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-          <polygon class="north-triangle" points="12,4.6 9.9,8.6 14.1,8.6" />
-          <g transform="translate(0 -1.5) rotate(-70 12 15)">
-            <polygon class="uav-arrow" points="12,8.6 7.7,19.6 12,17.4 16.3,19.6" />
-          </g>
-        </svg>
-      {/if}
-    </button>
+      <button class="map-control-btn map-heading-btn"
+              class:mode-free={viewMode === 'free'}
+              class:mode-follow={viewMode === 'follow'}
+              class:mode-heading={viewMode === 'heading-follow'}
+              onclick={toggleViewMode}
+              title={followTitle}
+              aria-label={followTitle}>
+        {#if viewMode === 'heading-follow'}
+          <svg class="heading-icon heading-icon-up" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <polygon class="uav-arrow" points="12,6 7.5,17.5 12,15.2 16.5,17.5" />
+          </svg>
+        {:else}
+          <svg class="heading-icon heading-icon-diag" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <polygon class="north-triangle" points="12,4.6 9.9,8.6 14.1,8.6" />
+            <g transform="translate(0 -1.5) rotate(-70 12 15)">
+              <polygon class="uav-arrow" points="12,8.6 7.7,19.6 12,17.4 16.3,19.6" />
+            </g>
+          </svg>
+        {/if}
+      </button>
+    {/if}
 
     <button class="map-control-btn map-zoom-btn map-zoom-in" onclick={zoomIn} title="Zoom in" aria-label="Zoom in">+</button>
     <button class="map-control-btn map-zoom-btn map-zoom-out" onclick={zoomOut} title="Zoom out" aria-label="Zoom out">-</button>
