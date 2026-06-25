@@ -1,2 +1,3 @@
 - RTSP video input on ToDo to test with DJI PC capture software
 - Vehicle database: a selectable vehicle (or auto-linked by craft name on INAV) in post-flight, holding base data (airframe, motor, FC, anything worth recording), linked to flight logs to accumulate cumulative flight stats + show record values. Larger dedicated feature — deferred for now; doc: docs/future/VEHICLE_DATABASE.md
+- External-binary auto-download needs a rethink for Linux before we lean on it in the user docs: `blackbox_decode` auto-downloads on Win+Linux, but `ffmpeg` + `go2rtc` are Windows-only auto-download (Linux users must install manually). Decide the Linux approach (package deps / bundle / guided install), then revisit the Installation page's "External dependencies" section.
