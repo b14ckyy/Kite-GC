@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Vehicle library (Vehicle DB).** A library of your aircraft, reached from a new **Vehicles** button
+  in the Flight Logbook (before Batteries). Each vehicle is a structured build sheet — image header
+  (like the WP mission preview), airframe (model/wingspan/length/AUW/dry weight), propulsion, radio/
+  FPV/datalink, sensor checkboxes (GPS/RTK/compass/airspeed/rangefinder/optical-flow), flight controller
+  (model/maker/firmware/blackbox), notes, type (incl. **VTOL**) and status (incl. **crashed**). Flights
+  **soft-link by craft name** (the name already recorded per flight — works retroactively, no migration):
+  INAV supplies it automatically; ArduPilot/PX4 link it post-flight. In the flight detail the craft name
+  becomes a **link** to its vehicle when it matches one (plain text otherwise), with a real-time picker
+  dropdown of known craft names and an **Add vehicle** shortcut; clicking a flight in a vehicle's list
+  jumps straight to it. After disarm, an unknown craft name offers to **create a vehicle** from it.
+  Per-vehicle **statistics** (total flights/time/distance) and **records** (max flight time/distance/
+  altitude, each linking to the achieving flight) are derived live from the linked flights. INAV extras:
+  **write a craft name to the FC** (MSP_SET_NAME + EEPROM, so future flights auto-link) and **adopt the
+  FC's lifetime `stats` totals** (flights/time/distance/energy) as a vehicle baseline — both offered only
+  when an INAV FC is connected and disarmed. Vehicles export/import as self-contained **`.kvehicle`**
+  files (image + baseline included). DB schema v16.
 - **Battery serial hardening.** Battery serials are now restricted to **A–Z + 0–9, auto-uppercased**
   (spaces, punctuation and case are stripped as you type) — the serial is the soft-link key between a
   flight and its pack, and free-form spacing/case was a silent source of broken links (and hardware
