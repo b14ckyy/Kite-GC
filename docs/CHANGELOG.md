@@ -59,6 +59,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Physical USB/PCI ports are untouched (they keep their device descriptors).
 
 ### Fixed
+- **Safety: geofence + rally points stay editable while armed (ArduPilot/PX4).** They were locked
+  while armed like INAV geozones, but that's dangerous on MAVLink: a craft stuck in a permanent loiter
+  under a valid fence/rally config can only be recovered by editing/clearing it **in flight** — locking
+  the editor traps the aircraft. The armed-lock (banner + disabled controls + forced edit-lock-off +
+  save guard) is removed for fence + rally. INAV geozones keep their armed-lock (they apply via reboot,
+  which can't happen in flight anyway).
 - **Turn-rate arc was missing/unstable in live MAVLink (ArduPilot/PX4).** The predicted-turn arc uses
   dCOG/dt of the EKF course-over-ground (the true ground-track turn, incl. wind + skid). The estimator
   consumed every telemetry update, but the store also fires for attitude/analog and MAVLink re-emits the

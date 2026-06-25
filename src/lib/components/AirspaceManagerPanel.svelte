@@ -195,9 +195,10 @@
   let expandedFence = $state<number | null>(null);
   function toggleFence(i: number) { expandedFence = expandedFence === i ? null : i; }
 
-  // Editing blocked while armed (same rationale as geozones). Force the map edit-lock off when arming.
-  $effect(() => { if (armed && $fenceEditing) fenceEditing.set(false); });
-
+  // SAFETY: fence editing is intentionally NOT blocked while armed. An ArduPilot/PX4 craft can get
+  // stuck in a permanent loiter under a valid fence/rally config; if you can't edit/clear the fence in
+  // flight you never regain control. So fence editing stays available armed (unlike INAV geozones,
+  // which apply via reboot and thus can't change in flight anyway).
   let fenceBusy = $state(false);
   let editFenceRadiusM = $state(0);
   $effect(() => {
@@ -216,7 +217,7 @@
   }
   function onRevertFence() { revertFenceWorking(); expandedFence = null; }
   async function onSaveFence() {
-    if (fenceBusy || armed) return;
+    if (fenceBusy) return;
     const ans = await confirmDialog.show({
       title: $t('fence.saveTitle'),
       message: $t('fence.saveMsg'),
@@ -323,7 +324,8 @@
   const rallyParams = $derived($rallyWorking?.params ?? []);
   let expandedRally = $state<number | null>(null);
   function toggleRally(i: number) { expandedRally = expandedRally === i ? null : i; }
-  $effect(() => { if (armed && $rallyEditing) rallyEditing.set(false); });
+  // SAFETY: rally editing stays available while armed too — same in-flight recovery rationale as the
+  // fence (a stuck loiter must be editable in the air). See the note on fenceBusy above.
 
   let rallyBusy = $state(false);
   let editRallyAltM = $state(0);
@@ -340,7 +342,7 @@
   function onDeleteRally(i: number) { deleteRallyPoint(i); expandedRally = null; }
   function onRevertRally() { revertRallyWorking(); expandedRally = null; }
   async function onSaveRally() {
-    if (rallyBusy || armed) return;
+    if (rallyBusy) return;
     const ans = await confirmDialog.show({
       title: $t('rally.saveTitle'),
       message: $t('rally.saveMsg'),
@@ -565,18 +567,15 @@
           <span class="gz-count">{fenceZones.length}</span>
         </div>
 
-        {#if armed}
-          <div class="gz-armed">{$t('fence.armedLocked')}</div>
-        {/if}
-
-        <!-- Toolbar: add zone (defaults to inclusion; toggle per-zone) + the map edit-lock toggle. -->
+        <!-- Toolbar: add zone (defaults to inclusion; toggle per-zone) + the map edit-lock toggle.
+             NOTE: fence editing stays enabled WHILE ARMED on purpose (safety) — see onSaveFence. -->
         <div class="gz-toolbar">
-          <button class="gz-add" disabled={armed} title={$t('fence.addCircle')} onclick={() => onAddFence(FENCE_SHAPE_CIRCLE)}>○ {$t('geozone.shapeCircle')}</button>
-          <button class="gz-add" disabled={armed} title={$t('fence.addPolygon')} onclick={() => onAddFence(FENCE_SHAPE_POLYGON)}>▱ {$t('geozone.shapePolygon')}</button>
+          <button class="gz-add" title={$t('fence.addCircle')} onclick={() => onAddFence(FENCE_SHAPE_CIRCLE)}>○ {$t('geozone.shapeCircle')}</button>
+          <button class="gz-add" title={$t('fence.addPolygon')} onclick={() => onAddFence(FENCE_SHAPE_POLYGON)}>▱ {$t('geozone.shapePolygon')}</button>
           <span class="gz-spacer"></span>
           <label class="gz-editlock" title={$t('geozone.editLockHint')}>
             <span>{$t('geozone.editLock')}</span>
-            <Toggle checked={$fenceEditing} disabled={armed} onchange={(c) => fenceEditing.set(c)} />
+            <Toggle checked={$fenceEditing} onchange={(c) => fenceEditing.set(c)} />
           </label>
         </div>
 
@@ -603,20 +602,20 @@
                     <span class="gz-elabel">{$t('fence.kind')}</span>
                     <div class="gz-typetoggle">
                       <span class="gz-tname">{inclusion ? $t('fence.inclusion') : $t('fence.exclusion')}</span>
-                      <Toggle checked={inclusion} disabled={armed} onchange={(c) => setFenceKind(i, c ? FENCE_KIND_INCLUSION : FENCE_KIND_EXCLUSION)} />
+                      <Toggle checked={inclusion} onchange={(c) => setFenceKind(i, c ? FENCE_KIND_INCLUSION : FENCE_KIND_EXCLUSION)} />
                     </div>
                   </div>
                   {#if circle}
                     <div class="gz-edit">
                       <span class="gz-elabel">{$t('geozone.radius')}</span>
-                      <NumberStepper bind:value={editFenceRadiusM} min={1} step={10} unit="m" disabled={armed} onchange={() => commitFenceRadius(i)} />
+                      <NumberStepper bind:value={editFenceRadiusM} min={1} step={10} unit="m" onchange={() => commitFenceRadius(i)} />
                     </div>
                   {/if}
                   <div class="gz-rowactions">
                     {#if center}
                       <button class="gz-focus" onclick={() => focusAero(center.lat, center.lon)}>{$t('geozone.focus')}</button>
                     {/if}
-                    <button class="gz-delete" disabled={armed} onclick={() => onDeleteFence(i)}>{$t('geozone.delete')}</button>
+                    <button class="gz-delete" onclick={() => onDeleteFence(i)}>{$t('geozone.delete')}</button>
                   </div>
                 </div>
               {/if}
@@ -636,11 +635,11 @@
                 {#if meta?.toggle}
                   <div class="gz-typetoggle">
                     <span class="gz-tname">{p.value ? $t('fence.on') : $t('fence.off')}</span>
-                    <Toggle checked={p.value !== 0} disabled={armed} onchange={(c) => setFenceParam(p.name, c ? 1 : 0)} />
+                    <Toggle checked={p.value !== 0} onchange={(c) => setFenceParam(p.name, c ? 1 : 0)} />
                   </div>
                 {:else if meta?.enum}
                   {@const opts = actionOptions(p.name)}
-                  <select class="am-select" value={p.value} disabled={armed} onchange={(e) => setFenceParam(p.name, Number(e.currentTarget.value))}>
+                  <select class="am-select" value={p.value} onchange={(e) => setFenceParam(p.name, Number(e.currentTarget.value))}>
                     {#each opts as opt}<option value={opt.value}>{$t(opt.key)}</option>{/each}
                     {#if !opts.some((o) => o.value === p.value)}<option value={p.value}>{p.value}</option>{/if}
                   </select>
@@ -652,7 +651,6 @@
                     step={meta?.step ?? 1}
                     unit={meta?.unit ?? ''}
                     decimals={meta?.decimals}
-                    disabled={armed}
                     onchange={() => setFenceParam(p.name, paramDraft[p.name])}
                   />
                 {/if}
@@ -664,7 +662,7 @@
         <!-- Save / Revert (only when there are pending edits). -->
         {#if $fenceDirty}
           <div class="gz-save">
-            <Button variant="data" icon="save" disabled={fenceBusy || armed} onclick={onSaveFence}>
+            <Button variant="data" icon="save" disabled={fenceBusy} onclick={onSaveFence}>
               {fenceBusy ? $t('fence.saving') : $t('fence.saveToFc')}
             </Button>
             <Button variant="standard" disabled={fenceBusy} onclick={onRevertFence}>{$t('geozone.revert')}</Button>
@@ -680,17 +678,14 @@
           <span class="gz-count">{rallyPoints.length}</span>
         </div>
 
-        {#if armed}
-          <div class="gz-armed">{$t('rally.armedLocked')}</div>
-        {/if}
-
-        <!-- Toolbar: add point + the map edit-lock toggle. -->
+        <!-- Toolbar: add point + the map edit-lock toggle. Rally editing stays enabled WHILE ARMED on
+             purpose (safety) — see onSaveRally. -->
         <div class="gz-toolbar">
-          <button class="gz-add" disabled={armed} title={$t('rally.add')} onclick={onAddRally}>＋ {$t('rally.point')}</button>
+          <button class="gz-add" title={$t('rally.add')} onclick={onAddRally}>＋ {$t('rally.point')}</button>
           <span class="gz-spacer"></span>
           <label class="gz-editlock" title={$t('geozone.editLockHint')}>
             <span>{$t('geozone.editLock')}</span>
-            <Toggle checked={$rallyEditing} disabled={armed} onchange={(c) => rallyEditing.set(c)} />
+            <Toggle checked={$rallyEditing} onchange={(c) => rallyEditing.set(c)} />
           </label>
         </div>
 
@@ -710,11 +705,11 @@
                 <div class="gz-detail">
                   <div class="gz-edit">
                     <span class="gz-elabel">{$t('rally.alt')}</span>
-                    <NumberStepper bind:value={editRallyAltM} min={0} step={5} unit="m" disabled={armed} onchange={() => commitRallyAlt(i)} />
+                    <NumberStepper bind:value={editRallyAltM} min={0} step={5} unit="m" onchange={() => commitRallyAlt(i)} />
                   </div>
                   <div class="gz-rowactions">
                     <button class="gz-focus" onclick={() => focusAero(center.lat, center.lon)}>{$t('geozone.focus')}</button>
-                    <button class="gz-delete" disabled={armed} onclick={() => onDeleteRally(i)}>{$t('geozone.delete')}</button>
+                    <button class="gz-delete" onclick={() => onDeleteRally(i)}>{$t('geozone.delete')}</button>
                   </div>
                 </div>
               {/if}
@@ -733,7 +728,7 @@
                 {#if meta?.toggle}
                   <div class="gz-typetoggle">
                     <span class="gz-tname">{p.value ? $t('fence.on') : $t('fence.off')}</span>
-                    <Toggle checked={p.value !== 0} disabled={armed} onchange={(c) => setRallyParam(p.name, c ? 1 : 0)} />
+                    <Toggle checked={p.value !== 0} onchange={(c) => setRallyParam(p.name, c ? 1 : 0)} />
                   </div>
                 {:else}
                   <NumberStepper
@@ -743,7 +738,6 @@
                     step={meta?.step ?? 1}
                     unit={meta?.unit ?? ''}
                     decimals={meta?.decimals}
-                    disabled={armed}
                     onchange={() => setRallyParam(p.name, rallyParamDraft[p.name])}
                   />
                 {/if}
@@ -755,7 +749,7 @@
         <!-- Save / Revert (only when there are pending edits). -->
         {#if $rallyDirty}
           <div class="gz-save">
-            <Button variant="data" icon="save" disabled={rallyBusy || armed} onclick={onSaveRally}>
+            <Button variant="data" icon="save" disabled={rallyBusy} onclick={onSaveRally}>
               {rallyBusy ? $t('rally.saving') : $t('rally.saveToFc')}
             </Button>
             <Button variant="standard" disabled={rallyBusy} onclick={onRevertRally}>{$t('geozone.revert')}</Button>
