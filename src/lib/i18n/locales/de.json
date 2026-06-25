@@ -612,10 +612,29 @@
     "stop": "Video stoppen",
     "starting": "Startet…",
     "off": "Video aus",
+    "source": "Quelle",
+    "kind": {
+      "camera": "Kamera (Gerät)",
+      "rtsp": "RTSP (Netzwerk)"
+    },
     "device": "Video-Gerät",
     "defaultDevice": "Standardgerät",
     "resolution": "Auflösung",
     "auto": "Auto",
+    "rtspUrl": "RTSP-URL",
+    "transport": "Transport",
+    "transportOpt": {
+      "auto": "Auto (aushandeln)",
+      "tcp": "TCP (zuverlässig)",
+      "udp": "UDP (geringe Latenz)"
+    },
+    "engineMissing": "Die Streaming-Engine go2rtc wird für RTSP benötigt und ist noch nicht installiert.",
+    "engineDownload": "go2rtc herunterladen",
+    "engineReady": "go2rtc bereit",
+    "via": {
+      "native": "Stream: go2rtc (nativ)",
+      "ffmpeg": "Stream: ffmpeg-Fallback"
+    },
     "mirror": "Horizontal spiegeln",
     "codec": "Codec",
     "floatingWindow": "Schwebendes Fenster",

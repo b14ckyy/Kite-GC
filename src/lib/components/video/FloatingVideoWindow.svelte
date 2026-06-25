@@ -22,6 +22,7 @@
   import {
     videoStream,
     videoState,
+    bindVideoEl,
     setFloatPos,
     setFloatSnapped,
     setFloatHeightFrac,
@@ -34,7 +35,7 @@
 
   let videoEl = $state<HTMLVideoElement | null>(null);
   $effect(() => {
-    if (videoEl) videoEl.srcObject = $videoStream;
+    bindVideoEl(videoEl, $videoStream);
   });
 
   const MARGIN = 8;

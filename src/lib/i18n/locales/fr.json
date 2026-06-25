@@ -601,10 +601,29 @@
     "stop": "Arrêter la vidéo",
     "starting": "Démarrage…",
     "off": "Vidéo désactivée",
+    "source": "Source",
+    "kind": {
+      "camera": "Caméra (périphérique)",
+      "rtsp": "RTSP (réseau)"
+    },
     "device": "Périphérique vidéo",
     "defaultDevice": "Périphérique par défaut",
     "resolution": "Résolution",
     "auto": "Auto",
+    "rtspUrl": "URL RTSP",
+    "transport": "Transport",
+    "transportOpt": {
+      "auto": "Auto (négocier)",
+      "tcp": "TCP (fiable)",
+      "udp": "UDP (faible latence)"
+    },
+    "engineMissing": "Le moteur de streaming go2rtc est requis pour RTSP et n'est pas encore installé.",
+    "engineDownload": "Télécharger go2rtc",
+    "engineReady": "go2rtc prêt",
+    "via": {
+      "native": "Flux : go2rtc (natif)",
+      "ffmpeg": "Flux : repli ffmpeg"
+    },
     "mirror": "Miroir horizontal",
     "codec": "Codec",
     "floatingWindow": "Fenêtre flottante",

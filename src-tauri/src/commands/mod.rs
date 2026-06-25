@@ -22,3 +22,4 @@ pub mod rc;
 pub mod safehome;
 pub mod system;
 pub mod terrain;
+pub mod video;

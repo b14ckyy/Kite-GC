@@ -76,7 +76,7 @@
   import WidgetPanel from "$lib/components/WidgetPanel.svelte";
   import { LARGE_BASE_VMIN } from "$lib/config/widgetRegistry";
   import FloatingVideoWindow from "$lib/components/video/FloatingVideoWindow.svelte";
-  import { initVideo, videoState, videoStream, setVideoPrimary, registerPiPElement } from "$lib/stores/video";
+  import { initVideo, videoState, videoStream, bindVideoEl, setVideoPrimary, registerPiPElement } from "$lib/stores/video";
   import TerrainAnalysisPanel from "$lib/components/terrain/TerrainAnalysisPanel.svelte";
   import { editMode, replayActive, mission, missionFlags, missionDownload, missionUpload, missionFcInfo, markMissionSynced, loadedMissionId, missionSetWaypoints, launchPoint, hasLocation, toDeg, type Waypoint } from "$lib/stores/mission";
   import { pendingSystemSwitch, autopilotSystem, setAutopilotSystem, confirmSystemSwitch } from "$lib/stores/autopilotContext";
@@ -189,17 +189,15 @@
   // Map-swap: the full-size video sink shown in the map zone when videoPrimary.
   let mapVideoEl = $state<HTMLVideoElement | null>(null);
   $effect(() => {
-    if (mapVideoEl) mapVideoEl.srcObject = $videoStream;
+    bindVideoEl(mapVideoEl, $videoStream);
   });
 
   // Persistent (always-mounted) source element for native Picture-in-Picture, so
   // the PiP window survives closing the Video panel. Hidden but rendered/playing.
   let pipVideoEl = $state<HTMLVideoElement | null>(null);
   $effect(() => {
-    if (pipVideoEl) {
-      pipVideoEl.srcObject = $videoStream;
-      registerPiPElement(pipVideoEl);
-    }
+    bindVideoEl(pipVideoEl, $videoStream);
+    if (pipVideoEl) registerPiPElement(pipVideoEl);
   });
 
   // Global UI scale (1 = 100%, up to 2). Zooms the chrome via `.ui-scale`; the map

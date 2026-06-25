@@ -19,6 +19,7 @@ mod state;
 mod telemetry_forward;
 mod terrain;
 mod transport;
+mod video;
 
 use commands::connection::{connect, disconnect, list_serial_ports, scan_ble_devices, ble_scan_start, ble_scan_stop};
 use commands::flightlog::{
@@ -60,6 +61,12 @@ use commands::fence::{fence_read_all, fence_write_all};
 use commands::rally::{rally_read_all, rally_write_all};
 use commands::info::{get_app_version, is_debug_mode};
 use commands::system::system_on_battery;
+use commands::video::{
+    video_ffmpeg_status, video_ffmpeg_download, video_rtsp_start, video_rtsp_stop,
+    video_go2rtc_status, video_go2rtc_download, video_webrtc_start, video_webrtc_offer,
+    video_webrtc_stop,
+};
+use video::{Go2Rtc, VideoBridge};
 use commands::logging::{set_log_level, get_log_path};
 use commands::radar::{radar_configure, radar_set_center, radar_set_node_pos, radar_snapshot};
 use commands::terrain::{
@@ -175,6 +182,8 @@ pub fn run() {
         .manage(TerrainProvider::new())
         .manage(RelayHub::new())
         .manage(HidManager::new())
+        .manage(VideoBridge::new())
+        .manage(Go2Rtc::new())
         .invoke_handler(tauri::generate_handler![
             list_serial_ports,
             scan_ble_devices,
@@ -297,6 +306,15 @@ pub fn run() {
             terrain_cache_stats,
             terrain_cache_clear,
             system_on_battery,
+            video_ffmpeg_status,
+            video_ffmpeg_download,
+            video_rtsp_start,
+            video_rtsp_stop,
+            video_go2rtc_status,
+            video_go2rtc_download,
+            video_webrtc_start,
+            video_webrtc_offer,
+            video_webrtc_stop,
             radar_configure,
             radar_set_center,
             radar_set_node_pos,

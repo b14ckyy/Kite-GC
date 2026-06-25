@@ -13,6 +13,7 @@
 // gstreamer pipeline) and OS-window detach are v2, layered on this same router.
 
 import { writable, get } from 'svelte/store';
+import { invoke } from '@tauri-apps/api/core';
 
 export interface VideoDevice {
   deviceId: string;
@@ -21,8 +22,15 @@ export interface VideoDevice {
 
 export type VideoStatus = 'off' | 'starting' | 'live' | 'error';
 export type VideoResolution = 'auto' | '720p' | '1080p';
+/** Source kind: a local capture device (MediaStream) or a backend RTSP bridge (loopback URL). */
+export type VideoKind = 'camera' | 'rtsp';
+export type RtspTransport = 'auto' | 'tcp' | 'udp';
+/** Which go2rtc reader served the live RTSP feed: native client or the ffmpeg fallback. */
+export type RtspEngine = 'native' | 'ffmpeg' | null;
 
 export interface VideoState {
+  /** Active source kind. `camera` → MediaStream/`srcObject`; `rtsp` → loopback `<video src>`. */
+  kind: VideoKind;
   /** User wants video on (source open). */
   enabled: boolean;
   status: VideoStatus;
@@ -30,6 +38,13 @@ export interface VideoState {
   /** Selected video input device (null = system default). */
   deviceId: string | null;
   resolution: VideoResolution;
+  // ── RTSP source ──────────────────────────────────────────────────
+  /** RTSP URL (e.g. rtsp://192.168.1.10:554/live). */
+  rtspUrl: string;
+  /** RTSP transport — TCP (reliable) or UDP (lower latency). */
+  rtspTransport: RtspTransport;
+  /** Active RTSP reader once live (native go2rtc client vs ffmpeg fallback); runtime-only. */
+  rtspEngine: RtspEngine;
   /** Mirror horizontally (front-facing cams) — applied by the display sinks. */
   mirror: boolean;
   /** Source aspect ratio (w/h); drives the widget / floating-window sizing. */
@@ -63,9 +78,12 @@ export interface VideoState {
 const STORAGE_KEY = 'kite-gc-video';
 
 interface VideoPrefs {
+  kind: VideoKind;
   enabled: boolean;
   deviceId: string | null;
   resolution: VideoResolution;
+  rtspUrl: string;
+  rtspTransport: RtspTransport;
   mirror: boolean;
   floating: boolean;
   floatSnapped: boolean;
@@ -75,9 +93,12 @@ interface VideoPrefs {
 }
 
 const PREF_DEFAULTS: VideoPrefs = {
+  kind: 'camera',
   enabled: false,
   deviceId: null,
   resolution: 'auto',
+  rtspUrl: '',
+  rtspTransport: 'auto',
   mirror: false,
   floating: false,
   floatSnapped: true,
@@ -94,8 +115,11 @@ function loadPrefs(): VideoPrefs {
       return {
         ...PREF_DEFAULTS,
         ...p,
+        kind: p.kind ?? 'camera',
         deviceId: p.deviceId ?? null,
         resolution: p.resolution ?? 'auto',
+        rtspUrl: p.rtspUrl ?? '',
+        rtspTransport: p.rtspTransport ?? 'auto',
       };
     }
   } catch {
@@ -111,9 +135,12 @@ function savePrefs(): void {
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
+        kind: s.kind,
         enabled: s.enabled,
         deviceId: s.deviceId,
         resolution: s.resolution,
+        rtspUrl: s.rtspUrl,
+        rtspTransport: s.rtspTransport,
         mirror: s.mirror,
         floating: s.floating,
         floatSnapped: s.floatSnapped,
@@ -130,11 +157,15 @@ function savePrefs(): void {
 const boot = loadPrefs();
 
 const INITIAL: VideoState = {
+  kind: boot.kind,
   enabled: false, // runtime flag — auto-start (below) decides whether to turn on
   status: 'off',
   devices: [],
   deviceId: boot.deviceId,
   resolution: boot.resolution,
+  rtspUrl: boot.rtspUrl,
+  rtspTransport: boot.rtspTransport,
+  rtspEngine: null,
   mirror: boot.mirror,
   aspect: 16 / 9,
   width: null,
@@ -152,11 +183,30 @@ const INITIAL: VideoState = {
 
 export const videoState = writable<VideoState>({ ...INITIAL });
 
-/** The live MediaStream (or null). Sinks subscribe and set `<video>.srcObject`. */
+/**
+ * The single live MediaStream that every sink renders. For `camera` it is the
+ * `getUserMedia` stream; for `rtsp` it is the `captureStream()` of a hidden driver
+ * `<video>` that plays the loopback feed (see startRtsp). Either way a MediaStream
+ * attaches to many `<video>` elements at once, so one decode/connection feeds all
+ * sinks — and the RTSP feed has exactly one ffmpeg/loopback connection.
+ */
 export const videoStream = writable<MediaStream | null>(null);
 
 function patch(p: Partial<VideoState>): void {
   videoState.update((s) => ({ ...s, ...p }));
+}
+
+/** Bind a sink's `<video>` element to the shared MediaStream (camera or rtsp). */
+export function bindVideoEl(el: HTMLVideoElement | null, stream: MediaStream | null): void {
+  if (!el) return;
+  el.srcObject = stream;
+}
+
+/** Report the natural size of the live source (from a sink's `loadedmetadata`) so the
+ *  floating window / widget can size to the real aspect ratio (RTSP has no upfront caps). */
+export function reportVideoSize(width: number, height: number): void {
+  if (!width || !height) return;
+  patch({ width, height, aspect: width / height });
 }
 
 // Without a frameRate hint the browser may negotiate an uncompressed camera
@@ -200,6 +250,43 @@ function stopTracks(): void {
   const s = get(videoStream);
   if (s) for (const tr of s.getTracks()) tr.stop();
   videoStream.set(null);
+  closeRtc();
+}
+
+// ── RTSP via WebRTC (go2rtc) ─────────────────────────────────────────
+// go2rtc ingests the RTSP source and republishes it as WebRTC: the browser negotiates a
+// peer connection (SDP exchange proxied through Rust to avoid CORS) and gets a real, native,
+// low-latency MediaStream — which slots straight into the shared `videoStream` so every sink
+// renders it via srcObject exactly like the camera (no fMP4/MSE/captureStream gymnastics).
+let rtcConn: RTCPeerConnection | null = null;
+
+function closeRtc(): void {
+  if (!rtcConn) return;
+  const pc = rtcConn;
+  rtcConn = null;
+  try {
+    pc.getReceivers().forEach((r) => r.track?.stop());
+    pc.close();
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Resolve once ICE gathering completes (or a short timeout) — HTTP signaling can't trickle,
+ *  so the offer must already carry candidates; on loopback they gather almost instantly. */
+function waitIceGathering(pc: RTCPeerConnection): Promise<void> {
+  if (pc.iceGatheringState === 'complete') return Promise.resolve();
+  return new Promise((resolve) => {
+    const finish = () => {
+      pc.removeEventListener('icegatheringstatechange', check);
+      resolve();
+    };
+    const check = () => {
+      if (pc.iceGatheringState === 'complete') finish();
+    };
+    pc.addEventListener('icegatheringstatechange', check);
+    setTimeout(finish, 800);
+  });
 }
 
 /** Open (or re-open) the webcam with the current device/resolution selection. */
@@ -209,7 +296,7 @@ export async function startVideo(): Promise<void> {
     return;
   }
   stopTracks();
-  patch({ enabled: true, status: 'starting', error: null });
+  patch({ kind: 'camera', enabled: true, status: 'starting', error: null });
   savePrefs(); // remember the intent immediately
   const st = get(videoState);
   const base: MediaTrackConstraints = { ...RES_CONSTRAINTS[st.resolution] };
@@ -256,16 +343,103 @@ export async function startVideo(): Promise<void> {
   }
 }
 
-/** Stop the source and release the camera. */
+/** Register the source with go2rtc and complete one WebRTC negotiation. Throws on failure. */
+async function negotiateWebrtc(url: string, transport: RtspTransport, useFfmpeg: boolean): Promise<void> {
+  await invoke('video_webrtc_start', { url, transport, useFfmpeg });
+
+  const pc = new RTCPeerConnection({ iceServers: [] });
+  rtcConn = pc;
+  pc.addTransceiver('video', { direction: 'recvonly' });
+  pc.ontrack = (e) => {
+    if (rtcConn !== pc) return;
+    const stream = e.streams[0] ?? new MediaStream([e.track]);
+    videoStream.set(stream);
+    patch({ status: 'live', error: null });
+  };
+  pc.onconnectionstatechange = () => {
+    if (rtcConn === pc && (pc.connectionState === 'failed' || pc.connectionState === 'closed')) {
+      patch({ status: 'error', error: `WebRTC ${pc.connectionState}` });
+    }
+  };
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  await waitIceGathering(pc);
+  if (rtcConn !== pc) return; // stopped while gathering
+  const answerSdp = await invoke<string>('video_webrtc_offer', {
+    sdp: pc.localDescription?.sdp ?? offer.sdp,
+  });
+  if (rtcConn !== pc) return;
+  await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+  patch({ rtspEngine: useFfmpeg ? 'ffmpeg' : 'native' });
+}
+
+/** Open (or re-open) the RTSP feed via go2rtc + WebRTC. Tries go2rtc's native RTSP client first,
+ *  then automatically falls back to its bundled-ffmpeg reader (handles quirky servers). */
+export async function startRtsp(): Promise<void> {
+  stopTracks(); // release the camera / previous peer connection
+  const st = get(videoState);
+  const url = st.rtspUrl.trim();
+  if (!url) {
+    patch({ kind: 'rtsp', enabled: true, status: 'error', error: 'No RTSP URL' });
+    return;
+  }
+  patch({ kind: 'rtsp', enabled: true, status: 'starting', error: null, rtspEngine: null });
+  savePrefs();
+
+  try {
+    await negotiateWebrtc(url, st.rtspTransport, false); // native go2rtc RTSP client
+  } catch (nativeErr) {
+    console.warn('[video] native go2rtc RTSP failed, retrying via ffmpeg', nativeErr);
+    closeRtc();
+    if (get(videoState).status === 'off') return; // stopped meanwhile
+    try {
+      await negotiateWebrtc(url, st.rtspTransport, true); // ffmpeg reader fallback
+    } catch (ffmpegErr) {
+      closeRtc();
+      patch({ status: 'error', error: ffmpegErr instanceof Error ? ffmpegErr.message : String(ffmpegErr) });
+    }
+  }
+}
+
+/** Start whichever source kind is currently selected. */
+export function startActive(): Promise<void> {
+  return get(videoState).kind === 'rtsp' ? startRtsp() : startVideo();
+}
+
+/** Stop the source and release the camera / go2rtc engine. */
 export function stopVideo(): void {
+  const wasRtsp = get(videoState).kind === 'rtsp';
   stopTracks();
-  patch({ enabled: false, status: 'off', error: null });
+  if (wasRtsp) void invoke('video_webrtc_stop').catch(() => {});
+  patch({ enabled: false, status: 'off', error: null, rtspEngine: null });
   savePrefs();
 }
 
 export function toggleVideo(): void {
   if (get(videoState).enabled) stopVideo();
-  else void startVideo();
+  else void startActive();
+}
+
+/** Switch source kind (camera ⇄ rtsp); restarts the new source if video was running. */
+export async function setVideoKind(kind: VideoKind): Promise<void> {
+  if (get(videoState).kind === kind) return;
+  const wasEnabled = get(videoState).enabled;
+  if (wasEnabled) stopVideo();
+  patch({ kind, status: 'off', error: null });
+  savePrefs();
+  if (wasEnabled) await startActive();
+}
+
+export function setRtspUrl(rtspUrl: string): void {
+  patch({ rtspUrl });
+  savePrefs();
+}
+
+export async function setRtspTransport(rtspTransport: RtspTransport): Promise<void> {
+  patch({ rtspTransport });
+  savePrefs();
+  const s = get(videoState);
+  if (s.enabled && s.kind === 'rtsp') await startRtsp();
 }
 
 /** Switch device / resolution; restarts the stream if currently live. */
@@ -359,7 +533,6 @@ export async function enterPiP(): Promise<void> {
  * saved one is gone). Call once, client-side.
  */
 export async function initVideo(): Promise<void> {
-  if (!mediaDevicesAvailable()) return;
-  await enumerateVideoDevices();
-  if (boot.enabled) await startVideo();
+  if (mediaDevicesAvailable()) await enumerateVideoDevices();
+  if (boot.enabled) await startActive();
 }

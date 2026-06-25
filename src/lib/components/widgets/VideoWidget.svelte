@@ -9,13 +9,13 @@
   // to read OSD anyway). Standard widget card with a thin rounded frame around
   // the video. No settings — the NavRail Video panel owns all control.
   import { t } from 'svelte-i18n';
-  import { videoStream, videoState } from '$lib/stores/video';
+  import { videoStream, videoState, bindVideoEl } from '$lib/stores/video';
 
   let { width = 300, height = 150 }: { width?: number; height?: number } = $props();
 
   let videoEl = $state<HTMLVideoElement | null>(null);
   $effect(() => {
-    if (videoEl) videoEl.srcObject = $videoStream;
+    bindVideoEl(videoEl, $videoStream);
   });
 </script>
 
