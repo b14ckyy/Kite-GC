@@ -47,6 +47,7 @@
     attitudeRateHz = 5,
     positionRateHz = 2,
     airspeedEnabled = false,
+    windEnabled = false,
     directionLines = true,
     mavlinkFullTelemetry = false,
     flightLoggingEnabled = false,
@@ -95,6 +96,7 @@
     attitudeRateHz?: number;
     positionRateHz?: number;
     airspeedEnabled?: boolean;
+    windEnabled?: boolean;
     directionLines?: boolean;
     mavlinkFullTelemetry?: boolean;
     flightLoggingEnabled?: boolean;
@@ -500,6 +502,10 @@
       <div class="s-row">
         <label class="s-label" for="airspeed-toggle">{$t('settings.airspeed')}</label>
         <Toggle checked={airspeedEnabled} id="airspeed-toggle" onchange={(c) => onPatch({ airspeedEnabled: c })} />
+      </div>
+      <div class="s-row" title={$t('settings.windHint')}>
+        <label class="s-label" for="wind-toggle">{$t('settings.wind')}</label>
+        <Toggle checked={windEnabled} id="wind-toggle" onchange={(c) => onPatch({ windEnabled: c })} />
       </div>
       <div class="s-row" title={$t('settings.directionLinesHint')}>
         <label class="s-label" for="direction-lines-toggle">{$t('settings.directionLines')}</label>

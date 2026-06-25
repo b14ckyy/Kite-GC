@@ -34,6 +34,9 @@ pub struct TelemetryConfig {
     /// link derived from MSPV2_INAV_ANALOG is suppressed so this richer source is authoritative.
     #[serde(default)]
     pub link_stats_enabled: bool,
+    /// Poll MSP2_INAV_WIND (wind estimate) — INAV 10.0+ only, opt-in (extra message).
+    #[serde(default)]
+    pub wind_enabled: bool,
 }
 
 impl Default for TelemetryConfig {
@@ -43,6 +46,7 @@ impl Default for TelemetryConfig {
             position_rate_hz: 2.0,
             airspeed_enabled: false,
             link_stats_enabled: false,
+            wind_enabled: false,
         }
     }
 }
@@ -118,6 +122,14 @@ pub struct AirspeedData {
     pub airspeed: f64, // cm/s → m/s
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WindData {
+    /// Bearing the wind blows FROM, degrees (meteorological convention; ArduPilot WIND.direction).
+    pub direction_from_deg: f64,
+    /// Horizontal wind speed (m/s).
+    pub speed_ms: f64,
+}
+
 /// Unified RC-link statistics (RC Link widget). Every field is optional: each protocol fills only what
 /// it can (LTM/MAVLink/INAV-pre-9.1 = RSSI only; SmartPort = RSSI + LQ; CRSF = RSSI dBm + LQ + SNR), and
 /// the widget shows present fields and hides the rest. `rssi_percent` is normalized at the source (which
@@ -178,6 +190,7 @@ pub enum TelemetryPayload {
     GpsStats(GpsStatsData),
     NavStatus(NavStatusData),
     LinkStats(LinkStatsData),
+    Wind(WindData),
 }
 
 /// Map MSP code to Tauri event name
@@ -193,6 +206,7 @@ pub fn event_name_for_code(code: u16) -> String {
         MSP_GPSSTATISTICS => "telemetry-gps-stats".into(),
         MSP_NAV_STATUS => "telemetry-nav-status".into(),
         MSP2_INAV_GET_LINK_STATS => "telemetry-linkstats".into(),
+        MSP2_INAV_WIND => "telemetry-wind".into(),
         _ => format!("telemetry-0x{:04X}", code),
     }
 }
@@ -210,6 +224,7 @@ pub fn decode_telemetry(code: u16, payload: &[u8], box_ids: &[u8]) -> TelemetryP
         MSP_GPSSTATISTICS => decode_gps_statistics(payload),
         MSP_NAV_STATUS => decode_nav_status_event(payload),
         MSP2_INAV_GET_LINK_STATS => decode_link_stats(payload),
+        MSP2_INAV_WIND => decode_wind(payload),
         _ => {
             log::warn!("No decoder for MSP 0x{:04X}", code);
             TelemetryPayload::Attitude(AttitudeData {
@@ -506,6 +521,17 @@ fn decode_airspeed(payload: &[u8]) -> TelemetryPayload {
     })
 }
 
+/// MSP2_INAV_WIND (0x2231): [speed:u16 cm/s, angle:u16 deg, flags:u8] — INAV 10.0+ (PR #11611).
+/// `angle` is taken as the bearing the wind blows FROM (to match ArduPilot WIND.direction — verify on
+/// real INAV 10 firmware). speed is reported as 0 when the estimate is invalid (flags bit0 = 0).
+fn decode_wind(payload: &[u8]) -> TelemetryPayload {
+    let valid = payload.len() > 4 && (payload[4] & 0x01) != 0;
+    TelemetryPayload::Wind(WindData {
+        direction_from_deg: read_u16(payload, 2) as f64,
+        speed_ms: if valid { read_u16(payload, 0) as f64 / 100.0 } else { 0.0 },
+    })
+}
+
 /// MSP_GPSSTATISTICS (166): [lastDt:u32, errors:u32, timeouts:u32, packetCount:u32,
 ///                            hdop:u16, eph:u16, epv:u16]
 /// HDOP is a raw u16, scaled * 100 by INAV (e.g. 100 = HDOP 1.00).
@@ -577,6 +603,14 @@ pub fn feed_recorder(code: u16, payload: &[u8], recorder: &mut FlightRecorder, b
                 airspeed: read_i32(payload, 0) as f64 / 100.0,
             };
             recorder.on_airspeed(&data);
+        }
+        MSP2_INAV_WIND => {
+            if payload.len() > 4 && (payload[4] & 0x01) != 0 {
+                recorder.on_wind(&WindData {
+                    direction_from_deg: read_u16(payload, 2) as f64,
+                    speed_ms: read_u16(payload, 0) as f64 / 100.0,
+                });
+            }
         }
         MSP_NAV_STATUS => {
             // Mission context (target WP + nav state) — recorded so replay matches the live map.

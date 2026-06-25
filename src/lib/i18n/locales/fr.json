@@ -726,6 +726,8 @@
     "gpsPosition": "Position GPS",
     "optionalModules": "Modules optionnels",
     "airspeed": "Vitesse air",
+    "wind": "Estimation du vent",
+    "windHint": "Interroger l'estimation du vent en direct (message supplémentaire). En direct ArduPilot uniquement ; INAV à partir de 10.0. Le replay/blackbox affiche toujours le vent.",
     "flightLogging": "Carnet de vol",
     "enableFlightLogging": "Activer le carnet de vol",
     "enableFlightRecording": "Activer l'enregistrement de vol",

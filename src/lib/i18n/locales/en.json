@@ -753,6 +753,8 @@
     "gpsPosition": "GPS Position",
     "optionalModules": "Optional Modules",
     "airspeed": "Airspeed",
+    "wind": "Wind estimate",
+    "windHint": "Poll the live wind estimate (an extra message). ArduPilot only live; INAV needs 10.0+. Blackbox/replay always shows wind.",
     "directionLines": "Direction indicators",
     "directionLinesHint": "Heading, course-over-ground and predicted-turn lines at the aircraft on the map",
     "mavlinkFullTelemetry": "Full MAVLink Telemetry",

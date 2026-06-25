@@ -6,15 +6,33 @@
 <!-- Compass widget — rotating compass rose with heading display -->
 <script lang="ts">
   import type { TelemetryData } from "$lib/stores/telemetry";
+  import type { InterfaceSettings } from "$lib/stores/settings";
+  import { convertSpeed } from "$lib/utils/units";
   import { t } from 'svelte-i18n';
 
-  let { telem, size = 22.5 }: { telem: TelemetryData; size?: number } = $props();
+  let {
+    telem,
+    size = 22.5,
+    interfaceSettings = { speedUnit: 'kmh', altitudeUnit: 'm', distanceUnit: 'metric', verticalSpeedUnit: 'ms', temperatureUnit: 'c' },
+  }: {
+    telem: TelemetryData;
+    size?: number;
+    interfaceSettings?: InterfaceSettings;
+  } = $props();
 
   let rotation = $derived(-telem.yaw);
 
   // Course-over-ground (track) bug. COG is noise at standstill, so only show it while moving.
   const COG_MIN_SPEED = 1.5; // m/s
   let cogShown = $derived(!!telem.lastUpdate && telem.groundSpeed > COG_MIN_SPEED);
+
+  // Wind arrow (translucent, pinned to the rose rim): fixed-size arrow whose tip sits at the rim,
+  // pointing downwind (drift direction). Speed is shown as a number below the heading instead of via
+  // length (kept legible at low wind). Hidden when calm / no estimate.
+  const WIND_MIN_MS = 0.3;
+  let windShown = $derived(!!telem.lastUpdate && telem.windSpeedMs > WIND_MIN_MS);
+  let windDownwind = $derived((telem.windDirFrom + 180) % 360);
+  let windSpeedConv = $derived(convertSpeed(telem.windSpeedMs, interfaceSettings.speedUnit));
 
   function cardinalLabel(heading: number): string {
     const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
@@ -32,6 +50,15 @@
   <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
     <!-- Rotating compass card -->
     <g transform="rotate({rotation}, 100, 100)">
+      <!-- Wind arrow (behind the ticks/labels): fixed-size, tip pinned near the rim, pointing downwind.
+           Nested in the rose + rotated by the downwind bearing → lands at the true wind direction
+           relative to the nose. Speed is read out as a number below the heading. -->
+      {#if windShown}
+        <g transform="rotate({windDownwind}, 100, 100)" opacity="0.45">
+          <line x1="100" y1="58" x2="100" y2="30" stroke="#7fd4ff" stroke-width="6" stroke-linecap="round" />
+          <polygon points="100,16 90,34 110,34" fill="#7fd4ff" />
+        </g>
+      {/if}
       {#each ticks as t}
         {@const rad = (t.deg - 90) * Math.PI / 180}
         {@const inner = t.major ? 68 : 76}
@@ -65,8 +92,8 @@
       {/if}
     </g>
 
-    <!-- Fixed heading pointer (top) -->
-    <polygon points="100,2 92,20 108,20" fill="#37a8db" />
+    <!-- Fixed heading pointer (top) — white to match the heading text -->
+    <polygon points="100,2 92,20 108,20" fill="#e0e0e0" />
 
     <!-- COG readout (amber, matches the track bug) — smaller, above the heading value -->
     {#if cogShown}
@@ -79,6 +106,13 @@
     <text x="100" y="105" text-anchor="middle" dominant-baseline="middle"
           fill="#e0e0e0" font-size="28" font-weight="700" font-family="sans-serif"
           style="font-variant-numeric: tabular-nums">{telem.lastUpdate ? Math.round(telem.yaw) + '°' : '—'}</text>
+
+    <!-- Wind speed readout (blue, matches the wind arrow) — below the heading. -->
+    {#if windShown}
+      <text x="100" y="128" text-anchor="middle" dominant-baseline="middle"
+            fill="#7fd4ff" font-size="15" font-weight="600" font-family="sans-serif"
+            style="font-variant-numeric: tabular-nums">{windSpeedConv.value.toFixed(0)} {windSpeedConv.unit}</text>
+    {/if}
 
     <!-- Bezel ring -->
     <circle cx="100" cy="100" r="88" fill="none"

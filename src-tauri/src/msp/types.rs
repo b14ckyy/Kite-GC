@@ -103,6 +103,8 @@ pub const MSPV2_INAV_AIR_SPEED: u16 = 0x2009;
 pub const MSPV2_INAV_MIXER: u16 = 0x2010;
 /// INAV RC link statistics (uplink RSSI dBm / LQ / SNR) — INAV 9.1+.
 pub const MSP2_INAV_GET_LINK_STATS: u16 = 0x2103;
+/// INAV wind estimate (speed cm/s, angle deg, flags) — INAV 10.0+ (PR #11611).
+pub const MSP2_INAV_WIND: u16 = 0x2231;
 /// INAV ADS-B vehicle list (onboard receiver) — fed into the radar pipeline.
 pub const MSP2_ADSB_VEHICLE_LIST: u16 = 0x2090;
 

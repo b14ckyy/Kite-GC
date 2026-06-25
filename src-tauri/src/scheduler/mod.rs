@@ -494,6 +494,10 @@ fn build_slots(config: &TelemetryConfig) -> Vec<TelemetrySlot> {
     if config.airspeed_enabled {
         secondary_codes.push(MSPV2_INAV_AIR_SPEED);
     }
+    // Wind estimate (INAV 10.0+) — opt-in extra poll, already version-gated in TelemetryConfig.
+    if config.wind_enabled {
+        secondary_codes.push(MSP2_INAV_WIND);
+    }
 
     let mut slots = vec![
         TelemetrySlot::new(

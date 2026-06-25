@@ -90,6 +90,7 @@ pub async fn connect(
     attitude_rate_hz: Option<f64>,
     position_rate_hz: Option<f64>,
     airspeed_enabled: Option<bool>,
+    wind_enabled: Option<bool>,
     // MAVLink: when true, request no stream rates — FC streams per its own SRn_* params (ADR-043)
     mavlink_full_telemetry: Option<bool>,
     // Flight log config
@@ -156,6 +157,7 @@ pub async fn connect(
                 attitude_rate_hz,
                 position_rate_hz,
                 airspeed_enabled,
+                wind_enabled,
                 mavlink_full_telemetry,
                 flight_log_enabled,
                 flight_log_db_enabled,
@@ -186,6 +188,7 @@ pub async fn connect(
                 attitude_rate_hz,
                 position_rate_hz,
                 airspeed_enabled,
+                wind_enabled,
                 flight_log_enabled,
                 flight_log_db_enabled,
                 flight_log_path,
@@ -217,6 +220,7 @@ fn connect_msp(
     attitude_rate_hz: Option<f64>,
     position_rate_hz: Option<f64>,
     airspeed_enabled: Option<bool>,
+    wind_enabled: Option<bool>,
     flight_log_enabled: Option<bool>,
     flight_log_db_enabled: Option<bool>,
     flight_log_path: Option<String>,
@@ -324,6 +328,7 @@ fn connect_msp(
         feature_set.aux_rc
     );
     let link_stats_supported = feature_set.link_stats;
+    let wind_supported = feature_set.wind_estimate;
     fc_info.features = Some(feature_set);
 
     // 5) MSP2_INAV_MIXER → platform type and mixer preset
@@ -396,6 +401,8 @@ fn connect_msp(
         airspeed_enabled: airspeed_enabled.unwrap_or(false),
         // RC link stats poll (MSP2_INAV_GET_LINK_STATS) — INAV 9.1+ only.
         link_stats_enabled: link_stats_supported,
+        // Wind poll (MSP2_INAV_WIND) — opt-in AND INAV 10.0+ only.
+        wind_enabled: wind_enabled.unwrap_or(false) && wind_supported,
     };
 
     // ── Flight recorder setup ────────────────────────────────────────────
@@ -465,6 +472,7 @@ fn connect_mavlink(
     attitude_rate_hz: Option<f64>,
     position_rate_hz: Option<f64>,
     airspeed_enabled: Option<bool>,
+    wind_enabled: Option<bool>,
     mavlink_full_telemetry: Option<bool>,
     flight_log_enabled: Option<bool>,
     flight_log_db_enabled: Option<bool>,
@@ -499,6 +507,7 @@ fn connect_mavlink(
             attitude_rate_hz.unwrap_or(5.0),
             position_rate_hz.unwrap_or(2.0),
             airspeed_enabled.unwrap_or(false),
+            wind_enabled.unwrap_or(false),
         );
     }
 

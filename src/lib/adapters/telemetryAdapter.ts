@@ -53,6 +53,13 @@ export function toTelemetryData(r: TelemetryRecord, fcVariant = 'INAV'): Telemet
     // Airspeed (m/s) from the record when present (live recording, ArduPilot ARSP, INAV blackbox).
     airspeed: r.airspeed_ms ?? 0,
 
+    // Wind from the stored NED velocity vector (direction the air moves TOWARD) → "from" bearing.
+    windSpeedMs: Math.hypot(r.wind_n_ms ?? 0, r.wind_e_ms ?? 0),
+    windDirFrom:
+      (r.wind_n_ms || r.wind_e_ms)
+        ? ((Math.atan2(r.wind_e_ms ?? 0, r.wind_n_ms ?? 0) * 180) / Math.PI + 180 + 360) % 360
+        : 0,
+
     // Battery / Analog
     voltage: r.voltage ?? 0,
     current: r.current_a ?? 0,

@@ -282,6 +282,8 @@ export interface AppSettings {
   attitudeRateHz: number;
   positionRateHz: number;
   airspeedEnabled: boolean;
+  /** Poll the live wind estimate (extra message): ArduPilot WIND / INAV MSP2_INAV_WIND (10.0+). */
+  windEnabled: boolean;
   /** Show the heading / course-over-ground / predicted-turn direction lines at the aircraft on the 2D map. */
   directionLines: boolean;
   /** Show INAV safehome markers + radius rings (+ autoland approaches) on the map. Default on; toggled
@@ -371,6 +373,7 @@ const defaults: AppSettings = {
   attitudeRateHz: 5,
   positionRateHz: 2,
   airspeedEnabled: false,
+  windEnabled: false,
   directionLines: true,
   showSafehomes: true,
   terrainRadarScaleM: 120,

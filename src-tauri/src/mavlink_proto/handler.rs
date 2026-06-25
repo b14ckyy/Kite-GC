@@ -18,7 +18,7 @@ use crate::flightlog::recorder::FlightRecorderHandle;
 use crate::scheduler::rc_tx::{self, RcTxHandle};
 use crate::scheduler::telemetry::{
     AttitudeData, GpsData, AltitudeData, AnalogData, StatusData,
-    SensorStatusData, AirspeedData,
+    SensorStatusData, AirspeedData, WindData,
 };
 use crate::transport::ByteTransport;
 
@@ -769,6 +769,21 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
 
             if let Some(ref rec) = recorder {
                 if let Ok(mut r) = rec.lock() { r.on_airspeed(&airspeed); }
+            }
+        }
+
+        // ── WIND → telemetry-wind ──────────────────────────────────
+        // ArduPilot's EKF wind estimate. `direction` is the bearing the wind blows FROM (deg);
+        // `speed` is horizontal m/s. INAV has no live wind MSP message (blackbox/replay only).
+        MavMessage::WIND(w) => {
+            let wind = WindData {
+                direction_from_deg: w.direction as f64,
+                speed_ms: w.speed as f64,
+            };
+            let _ = app_handle.emit("telemetry-wind", &wind);
+
+            if let Some(ref rec) = recorder {
+                if let Ok(mut r) = rec.lock() { r.on_wind(&wind); }
             }
         }
 

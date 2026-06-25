@@ -45,6 +45,10 @@ export interface TelemetryData {
   // Airspeed
   airspeed: number;
 
+  // Wind estimate (ArduPilot WIND live / INAV MSP2_INAV_WIND 10.0+ / blackbox replay).
+  windDirFrom: number; // bearing the wind blows FROM (deg)
+  windSpeedMs: number; // horizontal wind speed (m/s); 0 = none/invalid
+
   // Battery / Analog
   voltage: number;
   current: number;
@@ -107,6 +111,7 @@ const defaultTelemetry: TelemetryData = {
   roll: 0, pitch: 0, yaw: 0,
   altitude: 0, vario: 0,
   airspeed: 0,
+  windDirFrom: 0, windSpeedMs: 0,
   voltage: 0, current: 0, mAhDrawn: 0, rssi: 0, power: 0, batteryPercentage: 0, cellCount: 0,
   link: { rssiPercent: null, rssiDbm: null, lq: null, snrDb: null },
   armingFlags: 0, cpuLoad: 0, sensorStatus: 0, flightModeFlags: 0, mspRcOverride: false,
@@ -404,6 +409,17 @@ export async function startTelemetryListeners() {
       telemetry.update((t) => ({
         ...t,
         airspeed: event.payload.airspeed,
+        lastUpdate: Date.now(),
+      }));
+    })
+  );
+
+  unlisteners.push(
+    await listen<{ direction_from_deg: number; speed_ms: number }>('telemetry-wind', (event) => {
+      telemetry.update((t) => ({
+        ...t,
+        windDirFrom: event.payload.direction_from_deg,
+        windSpeedMs: event.payload.speed_ms,
         lastUpdate: Date.now(),
       }));
     })

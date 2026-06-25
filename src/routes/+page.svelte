@@ -396,6 +396,7 @@
   let attitudeRateHz = $state(5);
   let positionRateHz = $state(2);
   let airspeedEnabled = $state(false);
+  let windEnabled = $state(false);
   let mavlinkFullTelemetry = $state(false);
   let flightLoggingEnabled = $state(false);
   let flightRecordingEnabled = $state(false);
@@ -621,6 +622,7 @@
   attitudeRateHz = saved.attitudeRateHz;
   positionRateHz = saved.positionRateHz;
   airspeedEnabled = saved.airspeedEnabled;
+  windEnabled = saved.windEnabled;
   mavlinkFullTelemetry = saved.mavlinkFullTelemetry;
   flightLoggingEnabled = saved.flightLoggingEnabled;
   flightRecordingEnabled = saved.flightRecordingEnabled ?? false;
@@ -874,6 +876,7 @@
     if (patch.attitudeRateHz != null) attitudeRateHz = patch.attitudeRateHz;
     if (patch.positionRateHz != null) positionRateHz = patch.positionRateHz;
     if (patch.airspeedEnabled != null) airspeedEnabled = patch.airspeedEnabled;
+    if (patch.windEnabled != null) windEnabled = patch.windEnabled;
     if (patch.mavlinkFullTelemetry != null) mavlinkFullTelemetry = patch.mavlinkFullTelemetry;
     if (patch.flightLoggingEnabled != null) flightLoggingEnabled = patch.flightLoggingEnabled;
     if (patch.flightRecordingEnabled != null) flightRecordingEnabled = patch.flightRecordingEnabled;
@@ -1732,6 +1735,7 @@
         attitudeRateHz,
         positionRateHz,
         airspeedEnabled,
+        windEnabled,
         mavlinkFullTelemetry,
         flightLogEnabled: flightRecordingEnabled,
         flightLogDbEnabled: flightLoggingEnabled && flightRecordingEnabled,
@@ -2433,6 +2437,7 @@
         {attitudeRateHz}
         {positionRateHz}
         {airspeedEnabled}
+        {windEnabled}
         directionLines={$settings.directionLines}
         {mavlinkFullTelemetry}
         {flightLoggingEnabled}

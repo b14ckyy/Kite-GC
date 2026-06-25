@@ -80,6 +80,8 @@ pub enum Feature {
     AdsbMsp,
     /// RC link statistics — MSP2_INAV_GET_LINK_STATS (INAV 9.1+)
     LinkStats,
+    /// Wind estimate over MSP — MSP2_INAV_WIND 0x2231 (INAV 10.0+, PR #11611; not in 9.x)
+    WindEstimate,
 }
 
 impl Feature {
@@ -93,6 +95,7 @@ impl Feature {
             Feature::AuxRc => InavVersion::new(9, 1, 0),
             Feature::AdsbMsp => InavVersion::new(8, 0, 0),
             Feature::LinkStats => InavVersion::new(9, 1, 0),
+            Feature::WindEstimate => InavVersion::new(10, 0, 0),
         }
     }
 
@@ -105,6 +108,7 @@ impl Feature {
         Feature::AuxRc,
         Feature::AdsbMsp,
         Feature::LinkStats,
+        Feature::WindEstimate,
     ];
 }
 
@@ -125,6 +129,7 @@ pub struct FeatureSet {
     pub aux_rc: bool,
     pub adsb_msp: bool,
     pub link_stats: bool,
+    pub wind_estimate: bool,
 }
 
 impl FeatureSet {
@@ -139,6 +144,7 @@ impl FeatureSet {
             aux_rc: version.is_at_least(Feature::AuxRc.min_version()),
             adsb_msp: version.is_at_least(Feature::AdsbMsp.min_version()),
             link_stats: version.is_at_least(Feature::LinkStats.min_version()),
+            wind_estimate: version.is_at_least(Feature::WindEstimate.min_version()),
         }
     }
 
@@ -152,6 +158,7 @@ impl FeatureSet {
             Feature::AuxRc => self.aux_rc,
             Feature::AdsbMsp => self.adsb_msp,
             Feature::LinkStats => self.link_stats,
+            Feature::WindEstimate => self.wind_estimate,
         }
     }
 }

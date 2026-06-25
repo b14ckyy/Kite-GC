@@ -472,7 +472,7 @@
         {:else if item.id === 'rcLink'}
           <RcLinkWidget {telem} size={item.sizePx} />
         {:else if item.id === 'compass'}
-          <CompassWidget {telem} size={item.sizePx} />
+          <CompassWidget {telem} size={item.sizePx} {interfaceSettings} />
         {:else if item.id === 'home'}
           <HomeWidget {telem} size={item.sizePx} {interfaceSettings} />
         {:else if item.id === 'flightMode'}

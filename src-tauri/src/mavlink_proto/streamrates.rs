@@ -33,6 +33,7 @@ const ID_ATTITUDE: f32 = 30.0;
 const ID_BATTERY_STATUS: f32 = 147.0;
 const ID_EKF_STATUS_REPORT: f32 = 193.0;
 const ID_HOME_POSITION: f32 = 242.0;
+const ID_WIND: f32 = 168.0;
 
 // Rate kinds for the wanted messages (resolved against the two settings at apply time).
 const R_ATTITUDE: u8 = 0;
@@ -49,6 +50,8 @@ const WANTED: &[(f32, u8)] = &[
     (ID_GPS_RAW_INT, R_FIXED_1HZ),
     // VFR_HUD is consumed only for airspeed — gated on the airspeed module (see apply_stream_rates).
     (ID_VFR_HUD, R_POSITION),
+    // WIND (ArduPilot EKF wind estimate) — gated on the wind module (see apply_stream_rates).
+    (ID_WIND, R_FIXED_1HZ),
     (ID_SYS_STATUS, R_FIXED_1HZ),
     (ID_BATTERY_STATUS, R_FIXED_1HZ),
     (ID_RC_CHANNELS, R_FIXED_1HZ), // RSSI (link quality)
@@ -108,16 +111,18 @@ pub fn apply_stream_rates(
     attitude_hz: f64,
     position_hz: f64,
     airspeed_enabled: bool,
+    wind_enabled: bool,
 ) {
     let header = codec::gcs_header();
     let mut seq = MavSequence::new();
 
     let mut sent = 0usize;
     for &(msg_id, kind) in WANTED {
-        // VFR_HUD is consumed only for airspeed: disable it entirely unless the airspeed module is on
-        // (sent as -1, not skipped, because SET_MESSAGE_INTERVAL is sticky — a prior session may have
-        // enabled it).
+        // VFR_HUD (airspeed) and WIND each cost an extra message and are gated on their module — sent as
+        // -1 when off (not skipped) because SET_MESSAGE_INTERVAL is sticky FC-side across sessions.
         let interval = if msg_id == ID_VFR_HUD && !airspeed_enabled {
+            -1.0
+        } else if msg_id == ID_WIND && !wind_enabled {
             -1.0
         } else {
             hz_to_interval_us(rate_hz(kind, attitude_hz, position_hz))

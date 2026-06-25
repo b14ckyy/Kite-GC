@@ -19,7 +19,7 @@ use super::types::{Flight, FlightLogSettings, TelemetryRecord};
 use crate::msp::FcInfo;
 use crate::scheduler::telemetry::{
     AirspeedData, AltitudeData, AnalogData, AttitudeData, GpsData, GpsStatsData, LinkStatsData,
-    NavStatusData, SensorStatusData, StatusData,
+    NavStatusData, SensorStatusData, StatusData, WindData,
 };
 
 /// Bit 2 in arming_flags indicates ARMED state
@@ -301,6 +301,10 @@ struct TelemetrySnapshot {
     link_rssi_dbm: Option<i16>,
     // Airspeed
     airspeed: Option<f64>,
+    // Wind (live ArduPilot WIND), stored as the NED velocity vector (direction the air moves TOWARD)
+    // to match the imported VWN/VWE convention used on replay.
+    wind_n_ms: Option<f64>,
+    wind_e_ms: Option<f64>,
     // Status
     arming_flags: Option<u32>,
     cpu_load: Option<u16>,
@@ -536,6 +540,14 @@ impl FlightRecorder {
     /// Feed airspeed data from the scheduler
     pub fn on_airspeed(&mut self, data: &AirspeedData) {
         self.snapshot.airspeed = Some(data.airspeed);
+    }
+
+    /// Feed wind data (MAVLink WIND / INAV MSP2_INAV_WIND). Stored as the NED velocity vector
+    /// (direction the air moves TOWARD) to match the imported VWN/VWE convention used on replay.
+    pub fn on_wind(&mut self, data: &WindData) {
+        let toward = (data.direction_from_deg + 180.0).to_radians();
+        self.snapshot.wind_n_ms = Some(data.speed_ms * toward.cos());
+        self.snapshot.wind_e_ms = Some(data.speed_ms * toward.sin());
     }
 
     /// Feed navigation status (MSP_NAV_STATUS) — the FC's current target waypoint + nav state.
@@ -947,8 +959,8 @@ impl FlightRecorder {
             rx_signal_received: None,
             hw_health_status: self.snapshot.hw_health_status,
             baro_temperature: None,
-            wind_n_ms: None,
-            wind_e_ms: None,
+            wind_n_ms: self.snapshot.wind_n_ms,
+            wind_e_ms: self.snapshot.wind_e_ms,
             wind_d_ms: None,
             rc_data_json: None,
             rc_command_json: None,
