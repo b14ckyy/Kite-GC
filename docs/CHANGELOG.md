@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Battery serial hardening.** Battery serials are now restricted to **A–Z + 0–9, auto-uppercased**
+  (spaces, punctuation and case are stripped as you type) — the serial is the soft-link key between a
+  flight and its pack, and free-form spacing/case was a silent source of broken links (and hardware
+  barcodes are upper-alnum anyway). Normalization is enforced live in every serial field *and* on the
+  backend (store + lookup + link). The End-Flight "is this a new serial?" hint now matches the actual
+  (case-insensitive) link, so it can't mislead. Retired/damaged packs are hidden from the End-Flight
+  picker dropdown (still linkable by typing the exact serial, but with a confirmation prompt — guards
+  against accidental serial reuse).
 - **Map ⇄ video swapping + chromeless floating video window.** There is one map instance; double-
   clicking any video surface (the floating window, the dock video widget, or the full-screen background)
   moves the map *there* and shows video everywhere else (one map, multi-video — avoids a second map
