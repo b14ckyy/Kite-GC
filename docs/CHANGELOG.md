@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Wind indicator on the compass.** A translucent fixed-size arrow pinned to the compass rose rim
+  points downwind (the way the aircraft drifts), with the wind speed read out below the heading (in the
+  configured speed unit, same blue as the arrow). The fixed heading pointer is now white to match the
+  heading text. Live wind
+  is opt-in via a new "Wind estimate" toggle (Settings, under Airspeed) since it needs an extra message:
+  ArduPilot streams the `WIND` message; INAV gets `MSP2_INAV_WIND` (0x2231) but only on **10.0+** (PR
+  #11611, version-gated — off on all current INAV). Blackbox/replay always shows wind (from the stored
+  `wind_n/e/d`, now also captured during live recording). INAV < 10.0 has no live wind source, so the
+  toggle only affects ArduPilot live there.
 - **Airspeed is now the primary speed readout when available, and is stored for replay.** The Speed
   widget shows airspeed as the big value (ground speed drops to a secondary line) whenever airspeed is
   present; without it, ground speed stays primary. Airspeed is also persisted per telemetry sample

@@ -1,3 +1,2 @@
 - RTSP video input on ToDo to test with DJI PC capture software
-- Add Wind Speed and heading indicator since Ardu already provides, INAV version gated for now
 - Vehicle database: a selectable vehicle (or auto-linked by craft name on INAV) in post-flight, holding base data (airframe, motor, FC, anything worth recording), linked to flight logs to accumulate cumulative flight stats + show record values. Larger dedicated feature — deferred for now; doc: docs/future/VEHICLE_DATABASE.md
