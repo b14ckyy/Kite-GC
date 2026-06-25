@@ -9,7 +9,8 @@ use crate::flightlog::db;
 use crate::flightlog::exchange;
 use crate::flightlog::types::{
     BatteryAggregate, BatteryFile, BatteryPack, BatteryPackInput, BlackboxImportProgress,
-    BlackboxImportStatus, Flight, FlightSummary, Mission, MissionInput, TelemetryRecord,
+    BlackboxImportStatus, Flight, FlightSummary, Mission, MissionInput, TelemetryRecord, Vehicle,
+    VehicleAggregate, VehicleFile, VehicleInput,
 };
 
 /// Resolve the database path and open a connection.
@@ -348,6 +349,111 @@ pub fn battery_file_read(path: String) -> Result<BatteryFile, String> {
         serde_json::from_str(&text).map_err(|e| format!("Parse error: {}", e))?;
     if file.format != "kbatt" {
         return Err(format!("Not a battery file (format: {})", file.format));
+    }
+    Ok(file)
+}
+
+// ── Vehicle library ─────────────────────────────────────────────────
+
+/// Create a new vehicle. Returns the new id.
+#[tauri::command]
+pub fn vehicle_db_create(vehicle: VehicleInput, db_path: Option<String>) -> Result<i64, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::create_vehicle(&conn, &vehicle).map_err(|e| format!("Create error: {}", e))
+}
+
+/// Update a vehicle's fields.
+#[tauri::command]
+pub fn vehicle_db_update(
+    id: i64,
+    vehicle: VehicleInput,
+    db_path: Option<String>,
+) -> Result<(), String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::update_vehicle(&conn, id, &vehicle).map_err(|e| format!("Update error: {}", e))
+}
+
+/// List all vehicles (newest first) — for the Vehicle Manager.
+#[tauri::command]
+pub fn vehicle_db_list(db_path: Option<String>) -> Result<Vec<Vehicle>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::list_vehicles(&conn).map_err(|e| format!("Query error: {}", e))
+}
+
+/// Fetch a vehicle by id.
+#[tauri::command]
+pub fn vehicle_db_get(id: i64, db_path: Option<String>) -> Result<Option<Vehicle>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::get_vehicle(&conn, id).map_err(|e| format!("Query error: {}", e))
+}
+
+/// Find a vehicle by craft name (link resolution / "create from craft name" check).
+#[tauri::command]
+pub fn vehicle_db_find_by_craft_name(
+    craft_name: String,
+    db_path: Option<String>,
+) -> Result<Option<Vehicle>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::find_vehicle_by_craft_name(&conn, &craft_name).map_err(|e| format!("Query error: {}", e))
+}
+
+/// Delete a vehicle (flights keep their craft name → "not in library").
+#[tauri::command]
+pub fn vehicle_db_delete(id: i64, db_path: Option<String>) -> Result<(), String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::delete_vehicle(&conn, id).map_err(|e| format!("Delete error: {}", e))
+}
+
+/// Aggregate the flights linked to a craft name (totals + records).
+#[tauri::command]
+pub fn vehicle_db_aggregate(
+    craft_name: String,
+    db_path: Option<String>,
+) -> Result<VehicleAggregate, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::vehicle_aggregate(&conn, &craft_name).map_err(|e| format!("Query error: {}", e))
+}
+
+/// List the flights linked to a craft name (Manager detail + delete warning).
+#[tauri::command]
+pub fn vehicle_db_flights(
+    craft_name: String,
+    db_path: Option<String>,
+) -> Result<Vec<FlightSummary>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::list_flights_for_craft(&conn, &craft_name).map_err(|e| format!("Query error: {}", e))
+}
+
+/// Write a vehicle to a `.kvehicle` file (one vehicle per file; self-contained incl. image).
+#[tauri::command]
+pub fn vehicle_file_write(path: String, file: VehicleFile) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(&file).map_err(|e| format!("Serialize error: {}", e))?;
+    std::fs::write(&path, json).map_err(|e| format!("Write error: {}", e))
+}
+
+/// Set a vehicle's lifetime baseline to absolute values (adopt FC `stats` totals / `.kvehicle` import).
+#[tauri::command]
+pub fn vehicle_db_set_baseline(
+    id: i64,
+    flight_count: i64,
+    total_time_s: i64,
+    total_dist_m: i64,
+    total_energy: i64,
+    db_path: Option<String>,
+) -> Result<(), String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::set_vehicle_baseline(&conn, id, flight_count, total_time_s, total_dist_m, total_energy)
+        .map_err(|e| format!("Update error: {}", e))
+}
+
+/// Read + validate a `.kvehicle` file (for the import preview).
+#[tauri::command]
+pub fn vehicle_file_read(path: String) -> Result<VehicleFile, String> {
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("Read error: {}", e))?;
+    let file: VehicleFile =
+        serde_json::from_str(&text).map_err(|e| format!("Parse error: {}", e))?;
+    if file.format != "kvehicle" {
+        return Err(format!("Not a vehicle file (format: {})", file.format));
     }
     Ok(file)
 }

@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { get } from 'svelte/store';
 import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from '$lib/stores/connection';
+import type { InavStats } from '$lib/stores/flightlogTypes';
 import { connection, connectionProtocol, fcLinkAlive, availablePorts, bleDevices } from '$lib/stores/connection';
 import { startTelemetryListeners, stopTelemetryListeners, resetTelemetry } from '$lib/stores/telemetry';
 import { applyRelaysOnConnect, clearRelaysOnDisconnect } from '$lib/controllers/relayController';
@@ -191,4 +192,15 @@ export async function disconnectFC(baudRate: number): Promise<void> {
     errorMessage: "",
     fcInfo: null,
   });
+}
+
+/** Write a craft name to the connected INAV FC (MSP_SET_NAME + EEPROM). INAV/MSP only — errors for
+ *  other links. Used post-flight to push a newly chosen craft name so future flights auto-link. */
+export async function setInavCraftName(name: string): Promise<void> {
+  await invoke("inav_set_craft_name", { name });
+}
+
+/** Read the INAV lifetime flight statistics from the FC `stats` settings (INAV/MSP only). */
+export async function readInavStats(): Promise<InavStats> {
+  return invoke<InavStats>("inav_read_stats");
 }

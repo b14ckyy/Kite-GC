@@ -34,7 +34,7 @@ export {
 
 // ── Tauri command wrappers ───────────────────────────────────────────
 
-import type { FlightSummary, Flight, TelemetryRecord, BlackboxImportStatus, KflightImportResult, LibraryMission, LibraryMissionInput, BatteryPack, BatteryPackInput, BatteryAggregate, BatteryFile } from './flightlogTypes';
+import type { FlightSummary, Flight, TelemetryRecord, BlackboxImportStatus, KflightImportResult, LibraryMission, LibraryMissionInput, BatteryPack, BatteryPackInput, BatteryAggregate, BatteryFile, Vehicle, VehicleInput, VehicleAggregate, VehicleFile } from './flightlogTypes';
 
 /** Save a mission to the library (dedup by content hash). Returns the mission id. */
 export async function missionDbSave(mission: LibraryMissionInput, dbPath: string): Promise<number> {
@@ -235,6 +235,72 @@ export async function batteryFileWrite(path: string, file: BatteryFile): Promise
 /** Read + validate a `.kbatt` file (import preview). */
 export async function batteryFileRead(path: string): Promise<BatteryFile> {
   return invoke<BatteryFile>('battery_file_read', { path });
+}
+
+// ── Vehicle library ─────────────────────────────────────────────────
+
+/** Create a new vehicle. Returns the new id. */
+export async function vehicleDbCreate(vehicle: VehicleInput, dbPath: string): Promise<number> {
+  return invoke<number>('vehicle_db_create', { vehicle, dbPath: dbPath || undefined });
+}
+
+/** Update a vehicle's fields. */
+export async function vehicleDbUpdate(id: number, vehicle: VehicleInput, dbPath: string): Promise<void> {
+  return invoke<void>('vehicle_db_update', { id, vehicle, dbPath: dbPath || undefined });
+}
+
+/** List all vehicles (newest first). */
+export async function vehicleDbList(dbPath: string): Promise<Vehicle[]> {
+  return invoke<Vehicle[]>('vehicle_db_list', { dbPath: dbPath || undefined });
+}
+
+/** Fetch a vehicle by id. */
+export async function vehicleDbGet(id: number, dbPath: string): Promise<Vehicle | null> {
+  return invoke<Vehicle | null>('vehicle_db_get', { id, dbPath: dbPath || undefined });
+}
+
+/** Find a vehicle by craft name (link resolution / "create from craft name"), or null. */
+export async function vehicleDbFindByCraftName(craftName: string, dbPath: string): Promise<Vehicle | null> {
+  return invoke<Vehicle | null>('vehicle_db_find_by_craft_name', { craftName, dbPath: dbPath || undefined });
+}
+
+/** Delete a vehicle (flights keep their craft name → "not in library"). */
+export async function vehicleDbDelete(id: number, dbPath: string): Promise<void> {
+  return invoke<void>('vehicle_db_delete', { id, dbPath: dbPath || undefined });
+}
+
+/** Aggregate the flights linked to a craft name (totals + records). */
+export async function vehicleDbAggregate(craftName: string, dbPath: string): Promise<VehicleAggregate> {
+  return invoke<VehicleAggregate>('vehicle_db_aggregate', { craftName, dbPath: dbPath || undefined });
+}
+
+/** List the flights linked to a craft name. */
+export async function vehicleDbFlights(craftName: string, dbPath: string): Promise<FlightSummary[]> {
+  return invoke<FlightSummary[]>('vehicle_db_flights', { craftName, dbPath: dbPath || undefined });
+}
+
+/** Set a vehicle's lifetime baseline to absolute values (adopt FC stats / `.kvehicle` import). */
+export async function vehicleDbSetBaseline(
+  id: number,
+  flightCount: number,
+  totalTimeS: number,
+  totalDistM: number,
+  totalEnergy: number,
+  dbPath: string,
+): Promise<void> {
+  return invoke<void>('vehicle_db_set_baseline', {
+    id, flightCount, totalTimeS, totalDistM, totalEnergy, dbPath: dbPath || undefined,
+  });
+}
+
+/** Write a vehicle to a `.kvehicle` file (self-contained). */
+export async function vehicleFileWrite(path: string, file: VehicleFile): Promise<void> {
+  return invoke<void>('vehicle_file_write', { path, file });
+}
+
+/** Read + validate a `.kvehicle` file. */
+export async function vehicleFileRead(path: string): Promise<VehicleFile> {
+  return invoke<VehicleFile>('vehicle_file_read', { path });
 }
 
 export async function listFlights(dbPath: string): Promise<FlightSummary[]> {

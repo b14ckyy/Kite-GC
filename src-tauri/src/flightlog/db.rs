@@ -12,10 +12,10 @@ use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
 
 use super::types::{
     BatteryAggregate, BatteryPack, BatteryPackInput, Flight, FlightSummary, Mission, MissionInput,
-    TelemetryRecord,
+    TelemetryRecord, Vehicle, VehicleAggregate, VehicleInput,
 };
 
-const CURRENT_SCHEMA_VERSION: u32 = 15;
+const CURRENT_SCHEMA_VERSION: u32 = 16;
 
 /// Column list (excluding the autoincrement `id`) for `telemetry_records`, shared by the temp-session
 /// copy so the SELECT and INSERT column orders can never drift apart. `flight_id` is first so the
@@ -231,6 +231,10 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
         migrate_v14_to_v15(conn)?;
     }
 
+    if current < 16 {
+        migrate_v15_to_v16(conn)?;
+    }
+
     // Self-heal: ensure the latest schema actually exists even if a prior version bump left it
     // incomplete. Legacy migrations call set_user_version(CURRENT), so a CURRENT bump can
     // mark the DB as the newest version without the matching migration ever creating its
@@ -243,6 +247,7 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
     ensure_v13_schema(conn)?;
     ensure_v14_schema(conn)?;
     ensure_v15_schema(conn)?;
+    ensure_v16_schema(conn)?;
 
     Ok(())
 }
@@ -445,6 +450,78 @@ fn ensure_v15_schema(conn: &Connection) -> SqlResult<()> {
 
 fn migrate_v14_to_v15(conn: &Connection) -> SqlResult<()> {
     ensure_v15_schema(conn)?;
+    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    Ok(())
+}
+
+/// v16: the vehicle library — a `vehicles` table holding the per-aircraft build sheet. Flights
+/// soft-link by the existing `flights.craft_name` (no FK, no flight-row change), so the link works
+/// retroactively. Idempotent; only creates the table if missing. Records (max time/dist/alt) are
+/// derived from the linked flights, not stored here.
+fn ensure_v16_schema(conn: &Connection) -> SqlResult<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS vehicles (
+            id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+            name                      TEXT NOT NULL,
+            craft_name                TEXT,
+            vehicle_type              TEXT NOT NULL DEFAULT 'other',
+            status                    TEXT NOT NULL DEFAULT 'active',
+            image                     TEXT,
+            notes                     TEXT,
+            model                     TEXT,
+            wingspan_mm               INTEGER,
+            length_mm                 INTEGER,
+            weight_auw_g              INTEGER,
+            weight_dry_g              INTEGER,
+            motors                    TEXT,
+            props                     TEXT,
+            esc                       TEXT,
+            recommended_cells         TEXT,
+            recommended_capacity_mah  INTEGER,
+            rx                        TEXT,
+            vtx                       TEXT,
+            camera                    TEXT,
+            gimbal_camera             TEXT,
+            datalink                  TEXT,
+            sensor_airspeed           INTEGER NOT NULL DEFAULT 0,
+            sensor_rangefinder        INTEGER NOT NULL DEFAULT 0,
+            sensor_optical_flow       INTEGER NOT NULL DEFAULT 0,
+            sensor_gps                INTEGER NOT NULL DEFAULT 0,
+            sensor_rtk                INTEGER NOT NULL DEFAULT 0,
+            sensor_compass            INTEGER NOT NULL DEFAULT 0,
+            fc_model                  TEXT,
+            fc_manufacturer           TEXT,
+            fc_firmware               TEXT,
+            fc_firmware_version       TEXT,
+            blackbox_available        INTEGER NOT NULL DEFAULT 0,
+            base_flight_count         INTEGER NOT NULL DEFAULT 0,
+            base_total_time_s         INTEGER NOT NULL DEFAULT 0,
+            base_total_dist_m         INTEGER NOT NULL DEFAULT 0,
+            base_total_energy         INTEGER NOT NULL DEFAULT 0,
+            created_at                TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at                TEXT NOT NULL DEFAULT (datetime('now'))
+        );",
+    )?;
+    // The base_* baseline columns were added after the initial v16 table — idempotently add them to
+    // a table created before they existed (this session's dev builds), so no schema bump is needed.
+    for col in [
+        "base_flight_count",
+        "base_total_time_s",
+        "base_total_dist_m",
+        "base_total_energy",
+    ] {
+        if !column_exists(conn, "vehicles", col)? {
+            conn.execute_batch(&format!(
+                "ALTER TABLE vehicles ADD COLUMN {} INTEGER NOT NULL DEFAULT 0;",
+                col
+            ))?;
+        }
+    }
+    Ok(())
+}
+
+fn migrate_v15_to_v16(conn: &Connection) -> SqlResult<()> {
+    ensure_v16_schema(conn)?;
     set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
     Ok(())
 }
@@ -1504,6 +1581,289 @@ pub fn set_flight_battery_serial(
         params![serial, flight_id],
     )?;
     Ok(())
+}
+
+// ── Vehicle library ─────────────────────────────────────────────────
+
+const VEHICLE_COLS: &str = "id, name, craft_name, vehicle_type, status, image, notes, \
+    model, wingspan_mm, length_mm, weight_auw_g, weight_dry_g, \
+    motors, props, esc, recommended_cells, recommended_capacity_mah, \
+    rx, vtx, camera, gimbal_camera, datalink, \
+    sensor_airspeed, sensor_rangefinder, sensor_optical_flow, sensor_gps, sensor_rtk, sensor_compass, \
+    fc_model, fc_manufacturer, fc_firmware, fc_firmware_version, blackbox_available, \
+    base_flight_count, base_total_time_s, base_total_dist_m, base_total_energy, \
+    created_at, updated_at";
+
+fn row_to_vehicle(row: &rusqlite::Row) -> SqlResult<Vehicle> {
+    Ok(Vehicle {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        craft_name: row.get(2)?,
+        vehicle_type: row.get(3)?,
+        status: row.get(4)?,
+        image: row.get(5)?,
+        notes: row.get(6)?,
+        model: row.get(7)?,
+        wingspan_mm: row.get(8)?,
+        length_mm: row.get(9)?,
+        weight_auw_g: row.get(10)?,
+        weight_dry_g: row.get(11)?,
+        motors: row.get(12)?,
+        props: row.get(13)?,
+        esc: row.get(14)?,
+        recommended_cells: row.get(15)?,
+        recommended_capacity_mah: row.get(16)?,
+        rx: row.get(17)?,
+        vtx: row.get(18)?,
+        camera: row.get(19)?,
+        gimbal_camera: row.get(20)?,
+        datalink: row.get(21)?,
+        sensor_airspeed: row.get(22)?,
+        sensor_rangefinder: row.get(23)?,
+        sensor_optical_flow: row.get(24)?,
+        sensor_gps: row.get(25)?,
+        sensor_rtk: row.get(26)?,
+        sensor_compass: row.get(27)?,
+        fc_model: row.get(28)?,
+        fc_manufacturer: row.get(29)?,
+        fc_firmware: row.get(30)?,
+        fc_firmware_version: row.get(31)?,
+        blackbox_available: row.get(32)?,
+        base_flight_count: row.get(33)?,
+        base_total_time_s: row.get(34)?,
+        base_total_dist_m: row.get(35)?,
+        base_total_energy: row.get(36)?,
+        created_at: row.get(37)?,
+        updated_at: row.get(38)?,
+    })
+}
+
+/// Canonical craft name: trim leading/trailing whitespace, preserve case + inner content (it is a
+/// user-facing display string, unlike a battery serial). The flight↔vehicle match is done
+/// case-insensitively (`COLLATE NOCASE`) on the trimmed value. Keep identical to the frontend
+/// `normalizeCraftName`. Returns `None` for an empty/whitespace-only string.
+pub fn normalize_craft_name(s: &str) -> Option<String> {
+    let t = s.trim();
+    if t.is_empty() {
+        None
+    } else {
+        Some(t.to_string())
+    }
+}
+
+/// Create a vehicle. Returns the new row id.
+pub fn create_vehicle(conn: &Connection, v: &VehicleInput) -> SqlResult<i64> {
+    let craft = v.craft_name.as_deref().and_then(normalize_craft_name);
+    conn.execute(
+        "INSERT INTO vehicles (
+            name, craft_name, vehicle_type, status, image, notes,
+            model, wingspan_mm, length_mm, weight_auw_g, weight_dry_g,
+            motors, props, esc, recommended_cells, recommended_capacity_mah,
+            rx, vtx, camera, gimbal_camera, datalink,
+            sensor_airspeed, sensor_rangefinder, sensor_optical_flow, sensor_gps, sensor_rtk, sensor_compass,
+            fc_model, fc_manufacturer, fc_firmware, fc_firmware_version, blackbox_available
+        ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
+            ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32
+        )",
+        params![
+            v.name, craft, v.vehicle_type, v.status, v.image, v.notes,
+            v.model, v.wingspan_mm, v.length_mm, v.weight_auw_g, v.weight_dry_g,
+            v.motors, v.props, v.esc, v.recommended_cells, v.recommended_capacity_mah,
+            v.rx, v.vtx, v.camera, v.gimbal_camera, v.datalink,
+            v.sensor_airspeed, v.sensor_rangefinder, v.sensor_optical_flow, v.sensor_gps, v.sensor_rtk, v.sensor_compass,
+            v.fc_model, v.fc_manufacturer, v.fc_firmware, v.fc_firmware_version, v.blackbox_available,
+        ],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Update a vehicle's fields (bumps `updated_at`).
+pub fn update_vehicle(conn: &Connection, id: i64, v: &VehicleInput) -> SqlResult<()> {
+    let craft = v.craft_name.as_deref().and_then(normalize_craft_name);
+    conn.execute(
+        "UPDATE vehicles SET
+            name = ?1, craft_name = ?2, vehicle_type = ?3, status = ?4, image = ?5, notes = ?6,
+            model = ?7, wingspan_mm = ?8, length_mm = ?9, weight_auw_g = ?10, weight_dry_g = ?11,
+            motors = ?12, props = ?13, esc = ?14, recommended_cells = ?15, recommended_capacity_mah = ?16,
+            rx = ?17, vtx = ?18, camera = ?19, gimbal_camera = ?20, datalink = ?21,
+            sensor_airspeed = ?22, sensor_rangefinder = ?23, sensor_optical_flow = ?24,
+            sensor_gps = ?25, sensor_rtk = ?26, sensor_compass = ?27,
+            fc_model = ?28, fc_manufacturer = ?29, fc_firmware = ?30, fc_firmware_version = ?31,
+            blackbox_available = ?32, updated_at = datetime('now')
+         WHERE id = ?33",
+        params![
+            v.name, craft, v.vehicle_type, v.status, v.image, v.notes,
+            v.model, v.wingspan_mm, v.length_mm, v.weight_auw_g, v.weight_dry_g,
+            v.motors, v.props, v.esc, v.recommended_cells, v.recommended_capacity_mah,
+            v.rx, v.vtx, v.camera, v.gimbal_camera, v.datalink,
+            v.sensor_airspeed, v.sensor_rangefinder, v.sensor_optical_flow, v.sensor_gps, v.sensor_rtk, v.sensor_compass,
+            v.fc_model, v.fc_manufacturer, v.fc_firmware, v.fc_firmware_version, v.blackbox_available, id,
+        ],
+    )?;
+    Ok(())
+}
+
+/// List all vehicles (newest first).
+pub fn list_vehicles(conn: &Connection) -> SqlResult<Vec<Vehicle>> {
+    let mut stmt =
+        conn.prepare(&format!("SELECT {} FROM vehicles ORDER BY created_at DESC", VEHICLE_COLS))?;
+    let rows = stmt.query_map([], row_to_vehicle)?;
+    rows.collect()
+}
+
+/// Fetch a vehicle by id.
+pub fn get_vehicle(conn: &Connection, id: i64) -> SqlResult<Option<Vehicle>> {
+    conn.query_row(
+        &format!("SELECT {} FROM vehicles WHERE id = ?1", VEHICLE_COLS),
+        params![id],
+        row_to_vehicle,
+    )
+    .optional()
+}
+
+/// Find a vehicle by craft name (link resolution / "create from craft name" check). Trimmed +
+/// case-insensitive. Returns the most recently created match if several share a craft name.
+pub fn find_vehicle_by_craft_name(conn: &Connection, craft: &str) -> SqlResult<Option<Vehicle>> {
+    let Some(craft) = normalize_craft_name(craft) else {
+        return Ok(None);
+    };
+    conn.query_row(
+        &format!(
+            "SELECT {} FROM vehicles WHERE TRIM(craft_name) = ?1 COLLATE NOCASE \
+             ORDER BY created_at DESC LIMIT 1",
+            VEHICLE_COLS
+        ),
+        params![craft],
+        row_to_vehicle,
+    )
+    .optional()
+}
+
+/// Delete a vehicle. Flights keep their `craft_name` and fall back to "not in library".
+pub fn delete_vehicle(conn: &Connection, id: i64) -> SqlResult<()> {
+    conn.execute("DELETE FROM vehicles WHERE id = ?1", params![id])?;
+    Ok(())
+}
+
+/// Set the persistent lifetime baseline to absolute values (adopt the INAV FC `stats` totals, or
+/// restore from a `.kvehicle` import). Not additive — overwrites the stored baseline.
+pub fn set_vehicle_baseline(
+    conn: &Connection,
+    id: i64,
+    flight_count: i64,
+    total_time_s: i64,
+    total_dist_m: i64,
+    total_energy: i64,
+) -> SqlResult<()> {
+    conn.execute(
+        "UPDATE vehicles SET
+            base_flight_count = ?1, base_total_time_s = ?2, base_total_dist_m = ?3, base_total_energy = ?4
+         WHERE id = ?5",
+        params![flight_count, total_time_s, total_dist_m, total_energy, id],
+    )?;
+    Ok(())
+}
+
+/// Aggregate the flights linked to a craft name: totals + the per-flight records (max flight
+/// time / distance / altitude, each with the achieving flight id). Trimmed + case-insensitive.
+pub fn vehicle_aggregate(conn: &Connection, craft: &str) -> SqlResult<VehicleAggregate> {
+    let Some(craft) = normalize_craft_name(craft) else {
+        return Ok(VehicleAggregate::default());
+    };
+    let mut agg = conn.query_row(
+        "SELECT COUNT(*), COALESCE(SUM(duration_sec), 0), COALESCE(SUM(total_distance_m), 0),
+                MIN(start_time), MAX(start_time)
+         FROM flights WHERE TRIM(craft_name) = ?1 COLLATE NOCASE",
+        params![craft],
+        |row| {
+            Ok(VehicleAggregate {
+                flight_count: row.get(0)?,
+                sum_duration_sec: row.get(1)?,
+                sum_distance_m: row.get(2)?,
+                first_used: row.get(3)?,
+                last_used: row.get(4)?,
+                ..Default::default()
+            })
+        },
+    )?;
+
+    // Records: the single best flight per metric (argmax), each as (flight_id, value).
+    if let Some((id, v)) = conn
+        .query_row(
+            "SELECT id, duration_sec FROM flights
+             WHERE TRIM(craft_name) = ?1 COLLATE NOCASE AND duration_sec IS NOT NULL
+             ORDER BY duration_sec DESC LIMIT 1",
+            params![craft],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+        )
+        .optional()?
+    {
+        agg.max_flight_time_flight_id = Some(id);
+        agg.max_flight_time_sec = Some(v);
+    }
+    if let Some((id, v)) = conn
+        .query_row(
+            "SELECT id, total_distance_m FROM flights
+             WHERE TRIM(craft_name) = ?1 COLLATE NOCASE AND total_distance_m IS NOT NULL
+             ORDER BY total_distance_m DESC LIMIT 1",
+            params![craft],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?)),
+        )
+        .optional()?
+    {
+        agg.max_distance_flight_id = Some(id);
+        agg.max_distance_m = Some(v);
+    }
+    if let Some((id, v)) = conn
+        .query_row(
+            "SELECT id, max_alt_m FROM flights
+             WHERE TRIM(craft_name) = ?1 COLLATE NOCASE AND max_alt_m IS NOT NULL
+             ORDER BY max_alt_m DESC LIMIT 1",
+            params![craft],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?)),
+        )
+        .optional()?
+    {
+        agg.max_altitude_flight_id = Some(id);
+        agg.max_altitude_m = Some(v);
+    }
+    Ok(agg)
+}
+
+/// List the flight summaries linked to a craft name (Manager detail + delete reference warning).
+pub fn list_flights_for_craft(conn: &Connection, craft: &str) -> SqlResult<Vec<FlightSummary>> {
+    let Some(craft) = normalize_craft_name(craft) else {
+        return Ok(Vec::new());
+    };
+    let mut stmt = conn.prepare(
+        "SELECT id, start_time, duration_sec, source, craft_name, location_name,
+            max_alt_m, max_speed_ms, total_distance_m, platform_type, linked_flight_id, notes,
+            utc_offset_min
+         FROM flights WHERE TRIM(craft_name) = ?1 COLLATE NOCASE ORDER BY start_time DESC",
+    )?;
+    let rows = stmt.query_map(params![craft], |row| {
+        let ts_str: String = row.get(1)?;
+        let start_time = DateTime::parse_from_rfc3339(&ts_str)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now());
+        Ok(FlightSummary {
+            id: row.get(0)?,
+            start_time,
+            duration_sec: row.get(2)?,
+            source: row.get(3)?,
+            craft_name: row.get(4)?,
+            location_name: row.get(5)?,
+            max_alt_m: row.get(6)?,
+            max_speed_ms: row.get(7)?,
+            total_distance_m: row.get(8)?,
+            platform_type: row.get(9)?,
+            linked_flight_id: row.get(10)?,
+            notes: row.get(11)?,
+            utc_offset_min: row.get(12)?,
+        })
+    })?;
+    rows.collect()
 }
 
 /// Read the Blackbox-header waypoint count for a flight (fallback `X` for replay).

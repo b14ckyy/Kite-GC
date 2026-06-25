@@ -32,6 +32,8 @@
   import FlightDetail from './FlightDetail.svelte';
   import BatteryManager from './BatteryManager.svelte';
   import { batteryManagerOpen } from '$lib/stores/batteryManager';
+  import VehicleManager from './VehicleManager.svelte';
+  import { vehicleManagerOpen } from '$lib/stores/vehicleManager';
 
   let {
     flightLoggingEnabled,
@@ -270,6 +272,7 @@
      import/export are data-transfer actions (`data` variant); the Batteries toggle is `standard`. -->
 {#snippet leftGroup()}
   <div class="tb-left">
+    <Button variant="standard" icon="drone" onclick={() => vehicleManagerOpen.set(true)}>{$t('vehicleMgr.toVehicles')}</Button>
     <Button variant="standard" icon="battery" onclick={() => batteryManagerOpen.set(true)}>{$t('batteryMgr.toBatteries')}</Button>
   </div>
 {/snippet}
@@ -471,7 +474,9 @@
   </div>
 {/snippet}
 
-{#if $batteryManagerOpen}
+{#if $vehicleManagerOpen}
+  <VehicleManager onBack={() => vehicleManagerOpen.set(false)} />
+{:else if $batteryManagerOpen}
   <BatteryManager onBack={() => batteryManagerOpen.set(false)} />
 {:else}
   <div class="lbv2">

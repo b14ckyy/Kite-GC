@@ -223,6 +223,153 @@ pub struct BatteryAggregate {
     pub last_used: Option<String>,
 }
 
+// ── Vehicle library ─────────────────────────────────────────────────
+
+/// A vehicle/aircraft stored in the library (row in `vehicles` table). Flights soft-link by
+/// `craft_name` (no FK) — the same craft name already recorded per flight. INAV provides the
+/// craft name automatically; ArduPilot/PX4 are linked manually post-flight.
+/// Records (max flight time / distance / altitude) are NOT stored here — they are derived live
+/// from the linked flights (see `VehicleAggregate`), so they stay correct after relink/delete.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Vehicle {
+    pub id: i64,
+    pub name: String,
+    /// Soft-link key to `flights.craft_name` (trimmed; case-insensitive match). May differ from `name`.
+    pub craft_name: Option<String>,
+    /// `fixed_wing` | `flying_wing` | `vtol` | `multirotor` | `helicopter` | `rover` | `boat` | `other`
+    pub vehicle_type: String,
+    /// `active` | `storage` | `retired` | `damaged` | `crashed`
+    pub status: String,
+    /// Optional image as a base64 data URI (self-contained → travels with `.kvehicle` export).
+    pub image: Option<String>,
+    pub notes: Option<String>,
+    // Airframe
+    pub model: Option<String>,
+    pub wingspan_mm: Option<i64>,
+    pub length_mm: Option<i64>,
+    pub weight_auw_g: Option<i64>,
+    pub weight_dry_g: Option<i64>,
+    // Propulsion (freetext)
+    pub motors: Option<String>,
+    pub props: Option<String>,
+    pub esc: Option<String>,
+    // Power recommendation (documentation only — no battery link)
+    pub recommended_cells: Option<String>,
+    pub recommended_capacity_mah: Option<i64>,
+    // Radio / FPV / Link (freetext)
+    pub rx: Option<String>,
+    pub vtx: Option<String>,
+    pub camera: Option<String>,
+    pub gimbal_camera: Option<String>,
+    pub datalink: Option<String>,
+    // Sensors (present/absent)
+    pub sensor_airspeed: bool,
+    pub sensor_rangefinder: bool,
+    pub sensor_optical_flow: bool,
+    pub sensor_gps: bool,
+    pub sensor_rtk: bool,
+    pub sensor_compass: bool,
+    // Flight controller (can be prefilled from the latest linked flight, editable)
+    pub fc_model: Option<String>,
+    pub fc_manufacturer: Option<String>,
+    pub fc_firmware: Option<String>,
+    pub fc_firmware_version: Option<String>,
+    pub blackbox_available: bool,
+    // Persistent lifetime baseline (adopted on request from the INAV FC `stats` feature). Additive to
+    // the logged flights — the displayed lifetime = baseline + Σ(linked flights). Never auto-updated.
+    pub base_flight_count: i64,
+    pub base_total_time_s: i64,
+    pub base_total_dist_m: i64,
+    pub base_total_energy: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Payload for creating/updating a vehicle (no `id` / timestamps and no `base_*` — the baseline is
+/// set only via the explicit `set_vehicle_baseline` path, mirroring the battery pack baseline).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VehicleInput {
+    pub name: String,
+    pub craft_name: Option<String>,
+    pub vehicle_type: String,
+    pub status: String,
+    pub image: Option<String>,
+    pub notes: Option<String>,
+    pub model: Option<String>,
+    pub wingspan_mm: Option<i64>,
+    pub length_mm: Option<i64>,
+    pub weight_auw_g: Option<i64>,
+    pub weight_dry_g: Option<i64>,
+    pub motors: Option<String>,
+    pub props: Option<String>,
+    pub esc: Option<String>,
+    pub recommended_cells: Option<String>,
+    pub recommended_capacity_mah: Option<i64>,
+    pub rx: Option<String>,
+    pub vtx: Option<String>,
+    pub camera: Option<String>,
+    pub gimbal_camera: Option<String>,
+    pub datalink: Option<String>,
+    pub sensor_airspeed: bool,
+    pub sensor_rangefinder: bool,
+    pub sensor_optical_flow: bool,
+    pub sensor_gps: bool,
+    pub sensor_rtk: bool,
+    pub sensor_compass: bool,
+    pub fc_model: Option<String>,
+    pub fc_manufacturer: Option<String>,
+    pub fc_firmware: Option<String>,
+    pub fc_firmware_version: Option<String>,
+    pub blackbox_available: bool,
+}
+
+/// A single vehicle exported to a `.kvehicle` file (one vehicle per file). Self-contained
+/// (the image data URI + the lifetime baseline travel inside the JSON).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VehicleFile {
+    /// Always "kvehicle" (validated on import).
+    pub format: String,
+    pub version: u32,
+    pub exported_at: String,
+    pub vehicle: VehicleInput,
+    #[serde(default)]
+    pub base_flight_count: i64,
+    #[serde(default)]
+    pub base_total_time_s: i64,
+    #[serde(default)]
+    pub base_total_dist_m: i64,
+    #[serde(default)]
+    pub base_total_energy: i64,
+}
+
+/// INAV lifetime flight statistics read from the FC `stats` settings (MSP2_COMMON_SETTING by name).
+/// `enabled` reflects the `stats` toggle; the totals are only meaningful when it is on.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct InavStats {
+    pub enabled: bool,
+    pub flight_count: i64,
+    pub total_time_s: i64,
+    pub total_dist_m: i64,
+    pub total_energy: i64,
+}
+
+/// Aggregated contribution of the flights linked to a vehicle (by craft name). Totals + the
+/// per-flight records (max flight time / distance / altitude, each with the achieving flight id).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct VehicleAggregate {
+    pub flight_count: i64,
+    pub sum_duration_sec: i64,
+    pub sum_distance_m: f64,
+    pub first_used: Option<String>,
+    pub last_used: Option<String>,
+    pub max_flight_time_sec: Option<i64>,
+    pub max_flight_time_flight_id: Option<i64>,
+    pub max_distance_m: Option<f64>,
+    pub max_distance_flight_id: Option<i64>,
+    pub max_altitude_m: Option<f64>,
+    pub max_altitude_flight_id: Option<i64>,
+}
+
 /// A single telemetry sample (row in `telemetry_records` table)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TelemetryRecord {

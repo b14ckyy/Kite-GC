@@ -114,6 +114,98 @@ export interface BatteryAggregate {
   last_used: string | null;
 }
 
+/** A vehicle/aircraft in the library (mirrors the Rust Vehicle). Flights soft-link by craft_name. */
+export interface Vehicle {
+  id: number;
+  name: string;
+  craft_name: string | null;
+  vehicle_type: string; // fixed_wing | flying_wing | vtol | multirotor | helicopter | rover | boat | other
+  status: string; // active | storage | retired | damaged | crashed
+  image: string | null; // base64 data URI
+  notes: string | null;
+  // Airframe
+  model: string | null;
+  wingspan_mm: number | null;
+  length_mm: number | null;
+  weight_auw_g: number | null;
+  weight_dry_g: number | null;
+  // Propulsion (freetext)
+  motors: string | null;
+  props: string | null;
+  esc: string | null;
+  // Power recommendation
+  recommended_cells: string | null;
+  recommended_capacity_mah: number | null;
+  // Radio / FPV / Link (freetext)
+  rx: string | null;
+  vtx: string | null;
+  camera: string | null;
+  gimbal_camera: string | null;
+  datalink: string | null;
+  // Sensors
+  sensor_airspeed: boolean;
+  sensor_rangefinder: boolean;
+  sensor_optical_flow: boolean;
+  sensor_gps: boolean;
+  sensor_rtk: boolean;
+  sensor_compass: boolean;
+  // Flight controller
+  fc_model: string | null;
+  fc_manufacturer: string | null;
+  fc_firmware: string | null;
+  fc_firmware_version: string | null;
+  blackbox_available: boolean;
+  // Persistent lifetime baseline (adopted on request from the INAV FC `stats` feature).
+  base_flight_count: number;
+  base_total_time_s: number;
+  base_total_dist_m: number;
+  base_total_energy: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Create/update payload for a vehicle (no id/timestamps, no baseline — baseline is set separately). */
+export type VehicleInput = Omit<
+  Vehicle,
+  'id' | 'created_at' | 'updated_at' | 'base_flight_count' | 'base_total_time_s' | 'base_total_dist_m' | 'base_total_energy'
+>;
+
+/** A `.kvehicle` export file (one vehicle; self-contained incl. image + lifetime baseline). */
+export interface VehicleFile {
+  format: string; // "kvehicle"
+  version: number;
+  exported_at: string;
+  vehicle: VehicleInput;
+  base_flight_count: number;
+  base_total_time_s: number;
+  base_total_dist_m: number;
+  base_total_energy: number;
+}
+
+/** INAV lifetime flight statistics read from the FC `stats` settings. */
+export interface InavStats {
+  enabled: boolean;
+  flight_count: number;
+  total_time_s: number;
+  total_dist_m: number;
+  total_energy: number;
+}
+
+/** Aggregated flights linked to a vehicle (totals + per-flight records). */
+export interface VehicleAggregate {
+  flight_count: number;
+  sum_duration_sec: number;
+  sum_distance_m: number;
+  first_used: string | null;
+  last_used: string | null;
+  max_flight_time_sec: number | null;
+  max_flight_time_flight_id: number | null;
+  max_distance_m: number | null;
+  max_distance_flight_id: number | null;
+  max_altitude_m: number | null;
+  max_altitude_flight_id: number | null;
+}
+
 export interface FlightSummary {
   id: number;
   start_time: string;

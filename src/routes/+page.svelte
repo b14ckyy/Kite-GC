@@ -60,7 +60,8 @@
   import { activeWpNumber, replayWpTotal } from '$lib/stores/navStatus';
   import { missionManagerOpen, missionManagerSelectedId, requestOpenFlightId, requestOpenMissionId } from '$lib/stores/missionManager';
   import { batteryManagerOpen, batteryManagerCreateSerial } from '$lib/stores/batteryManager';
-  import { missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode, flightSetBatterySerial, updateFlightNotes, getFlight, flightlogCommitPending, flightlogDiscardPending, flightlogContinuePending, scanOrphanSessions, recoverDiscard, recoverSaveIncomplete, recoverContinue, batteryDbFindBySerial, batteryDbAddUsage, blackboxDecoderAvailable, downloadBlackboxDecode } from '$lib/stores/flightlog';
+  import { vehicleManagerOpen, vehicleManagerCreateCraft } from '$lib/stores/vehicleManager';
+  import { missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode, flightSetBatterySerial, updateFlightNotes, getFlight, flightlogCommitPending, flightlogDiscardPending, flightlogContinuePending, scanOrphanSessions, recoverDiscard, recoverSaveIncomplete, recoverContinue, batteryDbFindBySerial, batteryDbAddUsage, vehicleDbFindByCraftName, blackboxDecoderAvailable, downloadBlackboxDecode } from '$lib/stores/flightlog';
   import EndFlightDialog from "$lib/components/logbook/EndFlightDialog.svelte";
   import type { EndFlightStats } from "$lib/components/logbook/EndFlightDialog.svelte";
   import RecoveryPrompt from "$lib/components/logbook/RecoveryPrompt.svelte";
@@ -2163,6 +2164,28 @@
           }
         }
       }
+      // Unknown craft name → offer to create a vehicle (opens the Vehicle Manager create form
+      // pre-filled). The FC's craft name is the one just recorded for this flight.
+      const craft = (fcInfo?.craft_name ?? '').trim();
+      if (craft) {
+        const veh = await vehicleDbFindByCraftName(craft, flightLogDbPath).catch(() => null);
+        if (!veh) {
+          const choice = await showDialog({
+            title: $t('endFlight.newVehicleTitle'),
+            message: $t('endFlight.newVehicleMessage', { values: { craft } }),
+            buttons: [
+              { label: $t('endFlight.newVehicleCreate'), value: 'create' },
+              { label: $t('endFlight.newVehicleSkip'), value: 'skip' },
+            ],
+          });
+          if (choice === 'create') {
+            activeTab = 'logbook';
+            settings.patch({ activeTab: 'logbook' });
+            vehicleManagerOpen.set(true);
+            vehicleManagerCreateCraft.set(craft);
+          }
+        }
+      }
       if (res.notes) await updateFlightNotes(flightId, res.notes, flightLogDbPath);
       await linkEndedMission(flightId, res.linkMission);
       void loadLogbook();
@@ -2242,6 +2265,7 @@
     requestOpenFlightId.set(null);
     activeTab = 'logbook';
     batteryManagerOpen.set(false); // leave the Battery Manager so the flight detail is shown
+    vehicleManagerOpen.set(false); // leave the Vehicle Manager too (same reason)
     void selectFlight(id);
   });
 

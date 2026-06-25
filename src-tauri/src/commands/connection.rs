@@ -7,11 +7,11 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::flightlog::msp_raw_logger::MspRawSink;
 use crate::flightlog::recorder::FlightRecorder;
-use crate::flightlog::types::FlightLogSettings;
+use crate::flightlog::types::{FlightLogSettings, InavStats};
 use crate::mavlink_proto;
 use crate::msp::{
-    FcInfo, FeatureSet, InavVersion, MspTransport, MSP_API_VERSION, MSP_BOARD_INFO, MSP_FC_VARIANT,
-    MSP_FC_VERSION, MSP_NAME, MSP_WP, MSPV2_INAV_MIXER,
+    FcInfo, FeatureSet, InavVersion, MspTransport, MSP_API_VERSION, MSP_BOARD_INFO, MSP_EEPROM_WRITE,
+    MSP_FC_VARIANT, MSP_FC_VERSION, MSP_NAME, MSP_SET_NAME, MSP_WP, MSPV2_INAV_MIXER,
 };
 use crate::msp::features::is_version_supported;
 use crate::scheduler;
@@ -68,6 +68,58 @@ pub fn ble_scan_stop(state: State<'_, AppState>) -> Result<(), String> {
     let mut guard = state.ble_scan_stop.lock().map_err(|e| e.to_string())?;
     *guard = None; // drop the sender → the session's stop future resolves
     Ok(())
+}
+
+/// Write a craft name to the connected INAV FC (MSP_SET_NAME) and persist it (MSP_EEPROM_WRITE),
+/// then update the cached `fc_info`. INAV/MSP only; rejected for non-MSP / disconnected links. Used
+/// post-flight to push a newly chosen craft name to the FC so future flights auto-link to a vehicle.
+#[tauri::command(async)]
+pub fn inav_set_craft_name(name: String, state: State<'_, AppState>) -> Result<(), String> {
+    let trimmed = name.trim();
+    // INAV stores the craft name in a fixed 16-byte buffer; clamp to the conventional limit.
+    if trimmed.len() > 16 {
+        return Err("Craft name too long (max 16 characters)".into());
+    }
+    {
+        let proto = state.protocol.lock().map_err(|e| e.to_string())?;
+        let handle = match proto.as_ref() {
+            Some(ActiveProtocol::Msp(h)) => h,
+            Some(_) => return Err("FC is not running MSP (INAV)".into()),
+            None => return Err("Not connected".into()),
+        };
+        handle.msp_request(MSP_SET_NAME, trimmed.as_bytes())?;
+        handle.msp_request(MSP_EEPROM_WRITE, &[])?;
+    }
+    // Keep the cached craft name in sync so the UI reflects it without a reconnect.
+    if let Ok(mut info) = state.fc_info.lock() {
+        if let Some(fc) = info.as_mut() {
+            fc.craft_name = trimmed.to_string();
+        }
+    }
+    Ok(())
+}
+
+/// Read the INAV lifetime flight statistics from the FC `stats` settings (MSP2_COMMON_SETTING by
+/// name). `enabled` mirrors the `stats` toggle; the totals are only meaningful when it is on. Used
+/// to offer the FC's lifetime totals as a vehicle baseline. INAV/MSP only.
+#[tauri::command(async)]
+pub fn inav_read_stats(state: State<'_, AppState>) -> Result<InavStats, String> {
+    use crate::commands::fc_settings::read_uint_setting;
+    let proto = state.protocol.lock().map_err(|e| e.to_string())?;
+    let handle = match proto.as_ref() {
+        Some(ActiveProtocol::Msp(h)) => h,
+        Some(_) => return Err("FC is not running MSP (INAV)".into()),
+        None => return Err("Not connected".into()),
+    };
+    let enabled = read_uint_setting(handle, "stats").unwrap_or(0) != 0;
+    let mut stats = InavStats { enabled, ..Default::default() };
+    if enabled {
+        stats.flight_count = read_uint_setting(handle, "stats_flight_count").unwrap_or(0) as i64;
+        stats.total_time_s = read_uint_setting(handle, "stats_total_time").unwrap_or(0) as i64;
+        stats.total_dist_m = read_uint_setting(handle, "stats_total_dist").unwrap_or(0) as i64;
+        stats.total_energy = read_uint_setting(handle, "stats_total_energy").unwrap_or(0) as i64;
+    }
+    Ok(stats)
 }
 
 /// Connect to a flight controller on the given transport and protocol.

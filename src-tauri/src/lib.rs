@@ -21,7 +21,7 @@ mod terrain;
 mod transport;
 mod video;
 
-use commands::connection::{connect, disconnect, list_serial_ports, scan_ble_devices, ble_scan_start, ble_scan_stop};
+use commands::connection::{connect, disconnect, list_serial_ports, scan_ble_devices, ble_scan_start, ble_scan_stop, inav_set_craft_name, inav_read_stats};
 use commands::flightlog::{
     flightlog_list, flightlog_get, flightlog_get_track, flightlog_delete,
     flightlog_update_notes, flightlog_update_craft_name, flightlog_update_platform_type, flightlog_update_pilot, flightlog_update_weather, flightlog_geocode, flightlog_fetch_weather,
@@ -44,6 +44,9 @@ use commands::flightlog::{
     battery_db_find_by_serial, battery_db_delete, battery_db_add_usage, battery_db_aggregate,
     battery_db_flights, flight_set_battery_serial, battery_db_set_baseline,
     battery_file_write, battery_file_read,
+    vehicle_db_create, vehicle_db_update, vehicle_db_list, vehicle_db_get,
+    vehicle_db_find_by_craft_name, vehicle_db_delete, vehicle_db_aggregate, vehicle_db_flights,
+    vehicle_db_set_baseline, vehicle_file_write, vehicle_file_read,
 };
 use commands::aero::{aero_fetch, aero_cache_stats, aero_cache_clear};
 use commands::hid::{
@@ -188,6 +191,8 @@ pub fn run() {
             scan_ble_devices,
             ble_scan_start,
             ble_scan_stop,
+            inav_set_craft_name,
+            inav_read_stats,
             connect,
             disconnect,
             get_app_version,
@@ -261,6 +266,17 @@ pub fn run() {
             battery_db_set_baseline,
             battery_file_write,
             battery_file_read,
+            vehicle_db_create,
+            vehicle_db_update,
+            vehicle_db_list,
+            vehicle_db_get,
+            vehicle_db_find_by_craft_name,
+            vehicle_db_delete,
+            vehicle_db_aggregate,
+            vehicle_db_flights,
+            vehicle_db_set_baseline,
+            vehicle_file_write,
+            vehicle_file_read,
             flightlog_update_notes,
             flightlog_update_craft_name,
             flightlog_update_platform_type,

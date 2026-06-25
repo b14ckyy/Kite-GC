@@ -32,6 +32,7 @@
     link: '<path d="M9.5 12a3 3 0 0 1 3-3h3a3 3 0 0 1 0 6h-1.5"/><path d="M14.5 12a3 3 0 0 1-3 3h-3a3 3 0 0 1 0-6H10"/>',
     info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/>',
     home: '<path d="M4 11 12 4l8 7"/><path d="M6 10v9h12v-9"/><path d="M10 19v-5h4v5"/>',
+    drone: '<circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M7.8 7.8l8.4 8.4M16.2 7.8l-8.4 8.4"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/>',
   };
   export type ButtonIcon = keyof typeof ICONS;
 

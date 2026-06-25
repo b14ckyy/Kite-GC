@@ -37,6 +37,7 @@ pub const MSP_FC_VERSION: u16 = 3;
 pub const MSP_BOARD_INFO: u16 = 4;
 pub const MSP_BUILD_INFO: u16 = 5;
 pub const MSP_NAME: u16 = 10;
+pub const MSP_SET_NAME: u16 = 11;
 pub const MSP_STATUS: u16 = 101;
 pub const MSP_RAW_IMU: u16 = 102;
 pub const MSP_SERVO: u16 = 103;
