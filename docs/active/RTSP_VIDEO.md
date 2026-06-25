@@ -57,16 +57,20 @@ pipeline for a copy stream.
 ## Source router
 `stores/video.ts` exposes `{ kind: 'camera'|'rtsp', … }`; the camera path is `getUserMedia`, the rtsp
 path is go2rtc/WebRTC. Both end as one shared `videoStream`, so panel/floating/widget/map-swap/PiP are
-unchanged. URL + transport persist (transport is currently advisory — go2rtc/ffmpeg negotiate it).
+unchanged. The RTSP URL persists (the transport selector was removed — go2rtc/ffmpeg negotiate it).
+
+## Done since the first cut
+- **Cleanup:** removed the dead ffmpeg→fMP4 loopback bridge (`video/rtsp.rs`, `VideoBridge`,
+  `video_rtsp_start/stop`) and the now-irrelevant transport dropdown. `video_ffmpeg_status/download`
+  are kept — repurposed as the fallback-reader dependency.
+- **ffmpeg fallback dependency:** go2rtc's config now always points `ffmpeg.bin` at the resolved path
+  *or the path the guided download will write to*, so a later download is picked up without restarting
+  go2rtc. The Video panel checks ffmpeg and offers a non-blocking download (separate from the required
+  go2rtc download) when it's missing.
 
 ## Open / follow-ups
 - **Native-source test with DJI / a real IP camera** (the native go2rtc path; OBS only exercised the
   ffmpeg fallback).
-- **Bundle/ensure ffmpeg for the fallback** the same guided way as go2rtc (today the fallback needs an
-  ffmpeg already present; the panel only offers the go2rtc download).
-- **Cleanup (separate commit):** remove the now-dead ffmpeg→fMP4 loopback bridge (`video/rtsp.rs` +
-  `video_rtsp_start/stop`, `video_ffmpeg_status/download`) once WebRTC is fully accepted; rework the
-  transport dropdown (irrelevant to WebRTC) or repurpose it (native vs ffmpeg force).
 - **Robustness:** auto-reconnect on drop, error/spinner states, HEVC sources, audio.
 - **Licensing/size note in BUILD.md** for the bundled go2rtc (+ ffmpeg) binaries.
 
