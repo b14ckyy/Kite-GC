@@ -13,7 +13,7 @@
   import { mission, missionFlags, loadedMissionId, markMissionSynced } from '$lib/stores/mission';
   import { arduMission, arduLoadedMissionId } from '$lib/stores/missionArdupilot';
   import { autopilotSystem } from '$lib/stores/autopilotContext';
-  import { batteryManagerOpen, batteryManagerSelectedId } from '$lib/stores/batteryManager';
+  import { batteryManagerOpen, batteryManagerSelectedId, normalizeSerial } from '$lib/stores/batteryManager';
   import { requestOpenMissionId } from '$lib/stores/missionManager';
   import { replayWpTotal } from '$lib/stores/navStatus';
   import { buildMissionInput } from '$lib/helpers/missionLibrary';
@@ -209,7 +209,7 @@
 
   async function linkBattery() {
     if (batteryBusy) return;
-    const serial = batterySerialDraft.trim();
+    const serial = normalizeSerial(batterySerialDraft);
     batteryBusy = true;
     const dbPath = get(settings).flightLogDbPath;
     try {
@@ -464,7 +464,11 @@
           class="craft-name-input"
           type="text"
           placeholder={$t('logbook.batterySerialPlaceholder')}
-          bind:value={batterySerialDraft}
+          value={batterySerialDraft}
+          autocapitalize="characters"
+          autocomplete="off"
+          spellcheck="false"
+          oninput={(e) => (batterySerialDraft = normalizeSerial(e.currentTarget.value))}
           onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') linkBattery(); if (e.key === 'Escape') batteryEditing = false; }}
           use:focusOnMount
         />

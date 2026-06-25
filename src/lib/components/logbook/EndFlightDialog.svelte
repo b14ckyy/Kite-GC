@@ -30,6 +30,7 @@
   import { settings } from '$lib/stores/settings';
   import { convertAltitude, convertSpeed, convertDistance, formatConverted } from '$lib/utils/units';
   import { formatDurationSec, batteryDbList } from '$lib/stores/flightlog';
+  import { normalizeSerial } from '$lib/stores/batteryManager';
   import type { BatteryPack } from '$lib/stores/flightlogTypes';
 
   let { interfaceSettings }: { interfaceSettings: InterfaceSettings } = $props();
@@ -42,6 +43,7 @@
   let notes = $state('');
   let linkMission = $state(false);
   let confirmingDiscard = $state(false);
+  let confirmingArchived = $state(false);
   let resolver: ((v: EndFlightResult | null) => void) | null = null;
 
   // Battery serial combobox: filter text + a dropdown of existing packs. The typed value is what's
@@ -49,16 +51,34 @@
   let batteries = $state<BatteryPack[]>([]);
   let listOpen = $state(false);
 
+  // `serial` is kept normalized (upper alnum) live as the user types, so matching the (also
+  // normalized) pack serials is an exact, reliable comparison.
+  const isArchived = (b: BatteryPack) => b.status === 'retired' || b.status === 'damaged';
   const filteredBatteries = $derived.by(() => {
-    const q = serial.trim().toLowerCase();
-    const list = q
-      ? batteries.filter((b) => b.serial.toLowerCase().includes(q) || (b.label ?? '').toLowerCase().includes(q))
-      : batteries;
-    return list.slice(0, 8);
+    const q = serial.toLowerCase();
+    // Retired/damaged packs are hidden from the picker — you can still link one by typing its exact
+    // serial (with a confirmation), but it shouldn't be offered as a normal choice.
+    const list = batteries.filter((b) => !isArchived(b));
+    const matches = q
+      ? list.filter((b) => b.serial.toLowerCase().includes(q) || (b.label ?? '').toLowerCase().includes(q))
+      : list;
+    return matches.slice(0, 8);
   });
   const serialIsNew = $derived(
-    serial.trim().length > 0 && !batteries.some((b) => b.serial.toLowerCase() === serial.trim().toLowerCase()),
+    serial.length > 0 && !batteries.some((b) => normalizeSerial(b.serial) === serial),
   );
+  // A retired/damaged pack whose serial was typed exactly — link is allowed but must be confirmed
+  // (could be an accidental serial reuse).
+  const archivedMatch = $derived(
+    serial.length > 0
+      ? (batteries.find((b) => normalizeSerial(b.serial) === serial && isArchived(b)) ?? null)
+      : null,
+  );
+  // Re-arm the confirmation whenever the serial changes.
+  $effect(() => {
+    void serial;
+    confirmingArchived = false;
+  });
 
   function batteryMeta(b: BatteryPack): string {
     return [b.label, b.capacity_mah ? `${b.capacity_mah} mAh` : null, b.cell_count ? `${b.cell_count}S` : null]
@@ -82,6 +102,7 @@
     notes = '';
     linkMission = false; // unverified mission → opt-in
     confirmingDiscard = false;
+    confirmingArchived = false;
     listOpen = false;
     batteries = [];
     if (opts.recorded) void loadBatteries();
@@ -96,9 +117,14 @@
     if (!open) return;
     open = false;
     confirmingDiscard = false;
+    confirmingArchived = false;
     if (resolver) { resolver(v); resolver = null; }
   }
-  function save() { settle({ batterySerial: serial.trim(), notes: notes.trim(), linkMission: missionConfirm && linkMission }); }
+  function save() {
+    // Linking to a retired/damaged pack needs an explicit confirm (possible accidental serial reuse).
+    if (archivedMatch && !confirmingArchived) { confirmingArchived = true; return; }
+    settle({ batterySerial: normalizeSerial(serial), notes: notes.trim(), linkMission: missionConfirm && linkMission });
+  }
   function confirmDiscard() { settle({ batterySerial: '', notes: '', linkMission: false, discard: true }); }
   // Modal: deliberately no backdrop-click / Escape dismissal — closing is an explicit Save or
   // Discard (a stray click next to the popup must not lose the just-recorded flight).
@@ -137,17 +163,20 @@
               class="fld-input"
               type="text"
               placeholder={$t('endFlight.batteryHint')}
-              bind:value={serial}
+              value={serial}
               autofocus
+              autocapitalize="characters"
+              autocomplete="off"
+              spellcheck="false"
               onfocus={() => (listOpen = true)}
-              oninput={() => (listOpen = true)}
+              oninput={(e) => { serial = normalizeSerial(e.currentTarget.value); listOpen = true; }}
               onblur={() => setTimeout(() => (listOpen = false), 120)}
             />
             {#if listOpen && filteredBatteries.length > 0}
               <ul class="battery-dropdown">
                 {#each filteredBatteries as b (b.id)}
                   <li>
-                    <button type="button" class="battery-opt" onmousedown={(e) => { e.preventDefault(); serial = b.serial; listOpen = false; }}>
+                    <button type="button" class="battery-opt" onmousedown={(e) => { e.preventDefault(); serial = normalizeSerial(b.serial); listOpen = false; }}>
                       <span class="bo-serial">{b.serial}</span>
                       {#if batteryMeta(b)}<span class="bo-meta">{batteryMeta(b)}</span>{/if}
                     </button>
@@ -168,7 +197,15 @@
             <span>{$t('endFlight.linkMission')}</span>
           </label>
         {/if}
-        {#if confirmingDiscard}
+        {#if confirmingArchived && archivedMatch}
+          <div class="ef-discard-warn">
+            {$t('endFlight.batteryArchivedWarn', { values: { status: $t(`batteryMgr.statusVal.${archivedMatch.status}`) } })}
+          </div>
+          <div class="dialog-buttons">
+            <button class="dialog-btn" onclick={() => (confirmingArchived = false)}>{$t('endFlight.cancel')}</button>
+            <button class="dialog-btn dialog-btn-danger" onclick={save}>{$t('endFlight.batteryArchivedYes')}</button>
+          </div>
+        {:else if confirmingDiscard}
           <div class="ef-discard-warn">{$t('endFlight.discardConfirm')}</div>
           <div class="dialog-buttons">
             <button class="dialog-btn" onclick={() => (confirmingDiscard = false)}>{$t('endFlight.cancel')}</button>

@@ -1287,6 +1287,8 @@
     "battery": "N° de série batterie",
     "batteryHint": "Numéro de série de la batterie utilisée",
     "batteryNewHint": "Nouveau numéro de série — vous pourrez créer cette batterie après l'enregistrement.",
+    "batteryArchivedWarn": "Cette batterie est marquée {status}. La lier quand même au vol ?",
+    "batteryArchivedYes": "Lier quand même",
     "newBatteryTitle": "Créer une batterie ?",
     "newBatteryMessage": "Aucune batterie avec le numéro de série « {serial} » n'existe encore. En créer une maintenant ?",
     "newBatteryCreate": "Créer la batterie",

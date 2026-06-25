@@ -23,7 +23,7 @@
   import type { BatteryPack, BatteryPackInput, BatteryAggregate, BatteryFile, FlightSummary } from '$lib/stores/flightlogTypes';
   import {
     batteryManagerSelectedId, batteryGroupMode, batteryLeafAsc, batterySearchQuery, batterySortField,
-    batteryManagerCreateSerial,
+    batteryManagerCreateSerial, normalizeSerial,
   } from '$lib/stores/batteryManager';
   import { requestOpenFlightId } from '$lib/stores/missionManager';
   import PanelShell, { type PanelVariant } from '$lib/components/panel/PanelShell.svelte';
@@ -118,7 +118,7 @@
 
   function formToInput(): BatteryPackInput {
     return {
-      serial: form.serial.trim(),
+      serial: normalizeSerial(form.serial),
       label: strOrNull(form.label),
       manufacturer: strOrNull(form.manufacturer),
       model: strOrNull(form.model),
@@ -433,9 +433,9 @@
       if (!path || typeof path !== 'string') return;
       const file = await batteryFileRead(path);
       importFile = file;
-      importSerial = file.pack.serial;
+      importSerial = normalizeSerial(file.pack.serial);
       // Serial is editable only if it collides with an existing pack (conflict resolution).
-      importSerialEditable = batteries.some((b) => b.serial === file.pack.serial);
+      importSerialEditable = batteries.some((b) => normalizeSerial(b.serial) === importSerial);
       editing = false;
       showUsage = false;
     } catch (e) {
@@ -446,12 +446,12 @@
   function cancelImport() { importFile = null; }
 
   /** Does the current import serial collide with an existing pack? (drives the action buttons) */
-  let importConflict = $derived(importFile != null && batteries.some((b) => b.serial === importSerial.trim()));
+  let importConflict = $derived(importFile != null && batteries.some((b) => normalizeSerial(b.serial) === importSerial));
 
   async function applyImport(mode: 'new' | 'consolidate' | 'overwrite') {
     if (!importFile || importBusy) return;
     const f = importFile;
-    const serial = importSerial.trim();
+    const serial = normalizeSerial(importSerial);
     if (!serial) { statusMessage = $t('batteryMgr.serialRequired'); return; }
     importBusy = true;
     try {
@@ -461,7 +461,7 @@
         await batteryDbSetBaseline(id, f.base_flight_seconds, f.base_mah, f.base_cycles, f.base_charges, dbPath());
         targetId = id;
       } else {
-        const existing = batteries.find((b) => b.serial === serial);
+        const existing = batteries.find((b) => normalizeSerial(b.serial) === serial);
         if (!existing) { statusMessage = $t('batteryMgr.serialRequired'); importBusy = false; return; }
         if (mode === 'consolidate') {
           await batteryDbAddUsage(existing.id, f.base_flight_seconds, f.base_mah, f.base_cycles, f.base_charges, dbPath());
@@ -524,7 +524,7 @@
     const s = $batteryManagerCreateSerial;
     if (s == null) return;
     startCreate();
-    form.serial = s;
+    form.serial = normalizeSerial(s);
     batteryManagerCreateSerial.set(null);
   });
 
@@ -771,7 +771,16 @@
 
       <div class="fld">
         <span class="fld-label">{$t('batteryMgr.serial')}{importSerialEditable ? ' *' : ''}</span>
-        <input class="fld-input" type="text" bind:value={importSerial} readonly={!importSerialEditable} />
+        <input
+          class="fld-input"
+          type="text"
+          value={importSerial}
+          readonly={!importSerialEditable}
+          autocapitalize="characters"
+          autocomplete="off"
+          spellcheck="false"
+          oninput={(e) => (importSerial = normalizeSerial(e.currentTarget.value))}
+        />
       </div>
       {#if importSerialEditable}
         <div class="usage-hint">
@@ -827,7 +836,16 @@
   <div class="section-heading">{isCreate ? $t('batteryMgr.newTitle') : $t('batteryMgr.editTitle')}</div>
   <div class="form-grid">
     <label class="fld"><span class="fld-label">{$t('batteryMgr.serial')} *</span>
-      <input class="fld-input" type="text" bind:value={form.serial} disabled={!isCreate} />
+      <input
+        class="fld-input"
+        type="text"
+        value={form.serial}
+        disabled={!isCreate}
+        autocapitalize="characters"
+        autocomplete="off"
+        spellcheck="false"
+        oninput={(e) => (form.serial = normalizeSerial(e.currentTarget.value))}
+      />
     </label>
     <label class="fld"><span class="fld-label">{$t('batteryMgr.label')}</span>
       <input class="fld-input" type="text" bind:value={form.label} />

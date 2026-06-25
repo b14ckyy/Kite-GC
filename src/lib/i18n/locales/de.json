@@ -1333,6 +1333,8 @@
     "battery": "Akku-Seriennummer",
     "batteryHint": "Seriennummer des geflogenen Akkus",
     "batteryNewHint": "Neue Seriennummer — du kannst diesen Akku nach dem Speichern anlegen.",
+    "batteryArchivedWarn": "Dieser Akku ist als {status} markiert. Trotzdem mit dem Flug verknüpfen?",
+    "batteryArchivedYes": "Trotzdem verknüpfen",
     "newBatteryTitle": "Akku anlegen?",
     "newBatteryMessage": "Es existiert noch kein Akku mit der Seriennummer \"{serial}\". Jetzt anlegen?",
     "newBatteryCreate": "Akku anlegen",

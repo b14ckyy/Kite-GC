@@ -1333,6 +1333,8 @@
     "battery": "Battery serial",
     "batteryHint": "Serial of the battery you flew",
     "batteryNewHint": "New serial — you can create this battery after saving.",
+    "batteryArchivedWarn": "This battery is marked {status}. Link the flight to it anyway?",
+    "batteryArchivedYes": "Link anyway",
     "newBatteryTitle": "Create Battery?",
     "newBatteryMessage": "No battery with serial \"{serial}\" exists yet. Create one now?",
     "newBatteryCreate": "Create battery",

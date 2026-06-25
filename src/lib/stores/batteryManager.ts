@@ -7,6 +7,14 @@
 
 import { writable } from 'svelte/store';
 
+/** Canonicalize a battery serial: ASCII letters + digits only, upper-cased (drops spaces, punctuation
+ *  and case). The serial is the soft-link key, so any inconsistency silently breaks the flight↔pack
+ *  link; hardware barcodes are upper alnum anyway. MUST match the Rust `normalize_serial` (db.rs) —
+ *  applied live in the inputs AND enforced again on the backend. */
+export function normalizeSerial(s: string): string {
+  return s.toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
 /** Grouping mode for the battery list (reuses the logbook's top-right select). */
 export type BatteryGroupMode = 'cell-capacity' | 'capacity-cell' | 'flat';
 

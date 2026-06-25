@@ -639,7 +639,7 @@ pub fn insert_flight(conn: &Connection, flight: &Flight) -> SqlResult<i64> {
             flight.notes,
             flight.pilot_name,
             flight.pilot_id,
-            flight.battery_serial,
+            flight.battery_serial.as_deref().map(normalize_serial).filter(|s| !s.is_empty()),
             flight.utc_offset_min,
         ],
     )?;
@@ -1317,16 +1317,28 @@ fn row_to_battery(row: &rusqlite::Row) -> SqlResult<BatteryPack> {
     })
 }
 
+/// Canonical battery serial: ASCII alphanumerics only, upper-cased. The serial is the soft-link key,
+/// and free-form spaces/punctuation/case are a common source of links that silently fail to resolve
+/// (and hardware barcodes are upper alnum anyway). We hard-normalize at every store + lookup so the
+/// exact-match link is reliable; keep this identical to the frontend `normalizeSerial`.
+pub fn normalize_serial(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .map(|c| c.to_ascii_uppercase())
+        .collect()
+}
+
 /// Create a new battery pack. The `serial` is UNIQUE → a duplicate surfaces as an error
 /// (the caller should pre-check `find_battery_by_serial`). The `base_*` baseline starts at 0.
 pub fn create_battery(conn: &Connection, b: &BatteryPackInput) -> SqlResult<i64> {
+    let serial = normalize_serial(&b.serial);
     conn.execute(
         "INSERT INTO battery_packs (
             serial, label, manufacturer, model, chemistry, cell_count, capacity_mah,
             c_rating_discharge, c_rating_charge, connector, in_service_date, status, notes
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
-            b.serial, b.label, b.manufacturer, b.model, b.chemistry, b.cell_count, b.capacity_mah,
+            serial, b.label, b.manufacturer, b.model, b.chemistry, b.cell_count, b.capacity_mah,
             b.c_rating_discharge, b.c_rating_charge, b.connector, b.in_service_date, b.status, b.notes,
         ],
     )?;
@@ -1371,6 +1383,7 @@ pub fn get_battery(conn: &Connection, id: i64) -> SqlResult<Option<BatteryPack>>
 
 /// Find a pack by serial (link resolution / unknown-serial dedup check).
 pub fn find_battery_by_serial(conn: &Connection, serial: &str) -> SqlResult<Option<BatteryPack>> {
+    let serial = normalize_serial(serial);
     conn.query_row(
         &format!("SELECT {} FROM battery_packs WHERE serial = ?1", BATTERY_COLS),
         params![serial],
@@ -1484,6 +1497,8 @@ pub fn set_flight_battery_serial(
     flight_id: i64,
     serial: Option<&str>,
 ) -> SqlResult<()> {
+    // Normalize + treat an empty result (blank / punctuation-only) as clearing the link.
+    let serial = serial.map(normalize_serial).filter(|s| !s.is_empty());
     conn.execute(
         "UPDATE flights SET battery_serial = ?1 WHERE id = ?2",
         params![serial, flight_id],
