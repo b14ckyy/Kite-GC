@@ -105,6 +105,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Physical USB/PCI ports are untouched (they keep their device descriptors).
 
 ### Fixed
+- **Bluetooth-SPP serial connect retries on open (Windows error 121).** Opening a paired BT-SPP COM
+  port often failed the *first* attempt with "The semaphore timeout period has expired" — opening the
+  port is what wakes/brings up the RFCOMM link, and if the remote is asleep or a previous owner (e.g.
+  Mission Planner) hasn't fully released the channel, the driver's internal semaphore times out. Serial
+  open now retries up to 3× (500 ms apart), which clears the transient case. On final failure it logs
+  the exact per-attempt OS error plus a Bluetooth-SPP classification dump (every BTHENUM port tagged
+  outgoing-client vs incoming-server, and where the chosen port falls) to aid diagnosis. Harmless for
+  USB serial (a genuinely busy/missing port still fails all attempts and is reported).
 - **Safety: geofence + rally points stay editable while armed (ArduPilot/PX4).** They were locked
   while armed like INAV geozones, but that's dangerous on MAVLink: a craft stuck in a permanent loiter
   under a valid fence/rally config can only be recovered by editing/clearing it **in flight** — locking
