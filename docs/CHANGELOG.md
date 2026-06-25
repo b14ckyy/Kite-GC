@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Live RTSP video input (go2rtc → WebRTC).** The video subsystem gains a network source: pick **RTSP
+  (network)** in the Video panel, enter a URL, and the feed plays in all video surfaces (panel, floating
+  window, widget, map-swap, PiP). A WebView can't play RTSP natively, so the backend runs **go2rtc**
+  (downloaded on demand like `blackbox_decode`/ffmpeg, into the app-data `bin/`) which republishes the
+  RTSP stream as **WebRTC** — played natively/hardware-accelerated as a real `MediaStream` (~200 ms
+  latency, shared across sinks like the camera). The SDP exchange is proxied through Rust (no CORS).
+  go2rtc's native RTSP client is tried first; on failure it **falls back automatically to reading via
+  the bundled ffmpeg** (no forced transport — handles quirky servers like obs-rtspserver that reject any
+  forced RTSP transport); the panel shows which reader is live. Note: low-latency WebRTC needs a
+  Baseline/no-B-frame source (FPV/DJI/IP cameras already are; set OBS B-frames=0). See
+  `docs/active/RTSP_VIDEO.md`.
 - **Wind indicator on the compass.** A translucent fixed-size arrow pinned to the compass rose rim
   points downwind (the way the aircraft drifts), with the wind speed read out below the heading (in the
   configured speed unit, same blue as the arrow). The fixed heading pointer is now white to match the
