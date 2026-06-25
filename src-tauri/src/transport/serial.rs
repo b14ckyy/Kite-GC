@@ -15,6 +15,15 @@ use super::{ByteTransport, PortInfo, TransportError};
 /// queued write once the current blocking read returns. See the TCP transport for the full rationale.
 const READ_TIMEOUT_MS: u64 = 50;
 
+/// Open-retry budget. Bluetooth SPP ports often fail the *first* open with Windows error 121
+/// ("The semaphore timeout period has expired") because opening the COM port is what triggers the
+/// RFCOMM link to be (re)established in the BT stack — if the remote is asleep, out of range, or a
+/// previous owner (e.g. Mission Planner) hasn't fully released the channel yet, the driver's internal
+/// semaphore times out. A short retry usually succeeds once the link is up. Harmless for USB serial
+/// (a genuinely busy/missing port just fails all attempts and we still report it).
+const OPEN_RETRY_ATTEMPTS: usize = 3;
+const OPEN_RETRY_DELAY_MS: u64 = 500;
+
 /// Bluetooth SPP COM-port classification (Windows). A paired SPP device creates *two* virtual COM
 /// ports — an outgoing (client) one we connect through and an incoming (local server) one that's
 /// useless to us. We only want the outgoing one (like MWPTools). The registry tells them apart
@@ -161,6 +170,76 @@ pub fn list_ports() -> Vec<PortInfo> {
     }
 }
 
+/// Log what `serialport` reports for `port_name` (USB / Bluetooth / PCI / Unknown), or that it isn't
+/// listed at all — tells a real USB-serial problem apart from a Bluetooth-SPP one in a tester's log.
+fn log_serialport_type(port_name: &str) {
+    match serialport::available_ports() {
+        Ok(ports) => match ports.iter().find(|p| p.port_name.eq_ignore_ascii_case(port_name)) {
+            Some(p) => log::info!("serialport reports {}: type={:?}", port_name, p.port_type),
+            None => log::warn!(
+                "serialport does NOT list {} among available ports ({:?})",
+                port_name,
+                ports.iter().map(|p| p.port_name.clone()).collect::<Vec<_>>()
+            ),
+        },
+        Err(e) => log::warn!("serialport enumeration failed while opening {}: {}", port_name, e),
+    }
+}
+
+/// On open failure, dump how every Bluetooth-SPP port is classified (outgoing client vs incoming
+/// server) and where `target` falls. Logged at `warn` so it lands in a tester's log at the default
+/// level. Reveals the misclassification case: if `target` is an *incoming/server* port it can never
+/// be opened outbound and will always fail with Windows error 121.
+#[cfg(target_os = "windows")]
+fn log_bt_spp_diagnostics(target: &str) {
+    use winreg::enums::HKEY_LOCAL_MACHINE;
+    use winreg::RegKey;
+
+    let target_u = target.to_uppercase();
+    let outgoing = bt_spp_outgoing_ports();
+    let all = bt_spp_all_ports();
+    let verdict = if outgoing.contains(&target_u) {
+        "OUTGOING (client) — should be openable"
+    } else if all.contains(&target_u) {
+        "INCOMING (server) — NOT openable outbound (likely the cause!)"
+    } else {
+        "not classified as a Bluetooth-SPP port"
+    };
+    log::warn!(
+        "BT-SPP diagnostics for {}: {} | outgoing-client ports: {:?}",
+        target, verdict, outgoing
+    );
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    match hklm.open_subkey(r"SYSTEM\CurrentControlSet\Enum\BTHENUM") {
+        Ok(bthenum) => {
+            for class_name in bthenum.enum_keys().flatten() {
+                let is_local = class_name.to_uppercase().contains("LOCALMFG");
+                let Ok(class_key) = bthenum.open_subkey(&class_name) else { continue };
+                for inst_name in class_key.enum_keys().flatten() {
+                    let port = class_key
+                        .open_subkey(&inst_name)
+                        .ok()
+                        .and_then(|inst| inst.open_subkey("Device Parameters").ok())
+                        .and_then(|dp| dp.get_value::<String, _>("PortName").ok());
+                    if let Some(com) = port {
+                        log::warn!(
+                            "  BTHENUM {}: {} (class={}, instance={})",
+                            com,
+                            if is_local { "INCOMING/server (LOCALMFG)" } else { "OUTGOING/client" },
+                            class_name,
+                            inst_name
+                        );
+                    }
+                }
+            }
+        }
+        Err(e) => log::warn!("BT-SPP diagnostics: BTHENUM registry not readable: {}", e),
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn log_bt_spp_diagnostics(_target: &str) {}
+
 /// An active serial connection to a flight controller
 pub struct SerialConnection {
     port_name: String,
@@ -171,17 +250,53 @@ pub struct SerialConnection {
 unsafe impl Send for SerialConnection {}
 
 impl SerialConnection {
-    /// Open a serial port connection
+    /// Open a serial port connection. Retries a few times on failure (BT-SPP first-open flakiness —
+    /// Windows error 121) and, on final failure, dumps Bluetooth-SPP port diagnostics to the log so a
+    /// tester's log file shows the exact OS error + how every BT port was classified.
     pub fn open(port_name: &str, baud_rate: u32) -> Result<Self, String> {
-        let port = serialport::new(port_name, baud_rate)
-            .timeout(Duration::from_millis(READ_TIMEOUT_MS))
-            .open()
-            .map_err(|e| format!("Failed to open {}: {}", port_name, e))?;
+        log::info!("Serial open requested: {} @ {} baud", port_name, baud_rate);
+        log_serialport_type(port_name);
 
-        Ok(Self {
-            port_name: port_name.to_string(),
-            port,
-        })
+        let mut last_err = String::new();
+        for attempt in 1..=OPEN_RETRY_ATTEMPTS {
+            match serialport::new(port_name, baud_rate)
+                .timeout(Duration::from_millis(READ_TIMEOUT_MS))
+                .open()
+            {
+                Ok(port) => {
+                    if attempt > 1 {
+                        eprintln!("[serial] {} opened on attempt {}/{}", port_name, attempt, OPEN_RETRY_ATTEMPTS);
+                        log::info!("Serial port {} opened on attempt {}/{}", port_name, attempt, OPEN_RETRY_ATTEMPTS);
+                    }
+                    return Ok(Self {
+                        port_name: port_name.to_string(),
+                        port,
+                    });
+                }
+                Err(e) => {
+                    last_err = e.to_string();
+                    eprintln!(
+                        "[serial] open {} attempt {}/{} failed: kind={:?} err={}",
+                        port_name, attempt, OPEN_RETRY_ATTEMPTS, e.kind(), e
+                    );
+                    log::warn!(
+                        "Serial open {} attempt {}/{} failed (kind={:?}): {}",
+                        port_name, attempt, OPEN_RETRY_ATTEMPTS, e.kind(), e
+                    );
+                    if attempt < OPEN_RETRY_ATTEMPTS {
+                        std::thread::sleep(Duration::from_millis(OPEN_RETRY_DELAY_MS));
+                    }
+                }
+            }
+        }
+
+        // All attempts failed — emit the BT-SPP classification table so the tester's log reveals
+        // whether the chosen port is actually an *incoming* (server) port that can never open outbound.
+        log_bt_spp_diagnostics(port_name);
+        Err(format!(
+            "Failed to open {} after {} attempts: {}",
+            port_name, OPEN_RETRY_ATTEMPTS, last_err
+        ))
     }
 
     /// Close the connection (port is closed on drop)
