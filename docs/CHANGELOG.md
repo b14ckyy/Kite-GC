@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Map ⇄ video swapping + chromeless floating video window.** There is one map instance; double-
+  clicking any video surface (the floating window, the dock video widget, or the full-screen background)
+  moves the map *there* and shows video everywhere else (one map, multi-video — avoids a second map
+  renderer). The floating window lost its title bar: drag the video to move, a touch-friendly resize
+  grip sits top-right, close top-left; when it holds the map you move it with the right mouse button or
+  two fingers. The floating map is fully operational (all modes, resizable); the **widget** mini-map is
+  locked to a clean 2D heading-follow, zoom-only nav view. External links (e.g. the Leaflet/OSM map
+  attribution) now open in the **system browser** instead of trapping the webview on an inescapable
+  page, and STATUSTEXT toasts / conflict alerts render pinned to the **app frame** instead of being
+  tied to the (now shrinkable) map.
 - **Live RTSP video input (go2rtc → WebRTC).** The video subsystem gains a network source: pick **RTSP
   (network)** in the Video panel, enter a URL, and the feed plays in all video surfaces (panel, floating
   window, widget, map-swap, PiP). A WebView can't play RTSP natively, so the backend runs **go2rtc**

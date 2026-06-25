@@ -59,6 +59,17 @@ pipeline for a copy stream.
 path is go2rtc/WebRTC. Both end as one shared `videoStream`, so panel/floating/widget/map-swap/PiP are
 unchanged. The RTSP URL persists (the transport selector was removed — go2rtc/ffmpeg negotiate it).
 
+## Map ⇄ video surfaces (swap model)
+There is **one** map instance. `stores/video.ts` tracks `mapLocation: 'main' | 'floating' | 'widget'`
+(+ the widget's published `widgetRect`). Double-clicking a video surface sets `mapLocation` to it: the
+map (the unzoomed top-level `.layer-map`) is positioned into that surface's rect and every other
+surface renders video. One map, multi-video — no second map renderer. The floating window is
+chromeless (drag video to move; resize grip top-right; right-mouse/two-finger move when it holds the
+map) and fully operational; the widget map is locked to 2D heading-follow zoom-only (`miniControls` on
+`<Map>`, view forced + restored in `+page`). Map mode side-effects (panning/heading-up sizing/zoom
+anchor) are applied **reactively** in `<Map>` so external mode forcing can't desync. External links
+open in the system browser; toasts/alerts are pinned to the app frame, not the map.
+
 ## Done since the first cut
 - **Cleanup:** removed the dead ffmpeg→fMP4 loopback bridge (`video/rtsp.rs`, `VideoBridge`,
   `video_rtsp_start/stop`) and the now-irrelevant transport dropdown. `video_ffmpeg_status/download`
