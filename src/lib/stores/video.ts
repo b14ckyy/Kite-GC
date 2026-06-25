@@ -24,7 +24,6 @@ export type VideoStatus = 'off' | 'starting' | 'live' | 'error';
 export type VideoResolution = 'auto' | '720p' | '1080p';
 /** Source kind: a local capture device (MediaStream) or a backend RTSP bridge (loopback URL). */
 export type VideoKind = 'camera' | 'rtsp';
-export type RtspTransport = 'auto' | 'tcp' | 'udp';
 /** Which go2rtc reader served the live RTSP feed: native client or the ffmpeg fallback. */
 export type RtspEngine = 'native' | 'ffmpeg' | null;
 
@@ -41,8 +40,6 @@ export interface VideoState {
   // ── RTSP source ──────────────────────────────────────────────────
   /** RTSP URL (e.g. rtsp://192.168.1.10:554/live). */
   rtspUrl: string;
-  /** RTSP transport — TCP (reliable) or UDP (lower latency). */
-  rtspTransport: RtspTransport;
   /** Active RTSP reader once live (native go2rtc client vs ffmpeg fallback); runtime-only. */
   rtspEngine: RtspEngine;
   /** Mirror horizontally (front-facing cams) — applied by the display sinks. */
@@ -83,7 +80,6 @@ interface VideoPrefs {
   deviceId: string | null;
   resolution: VideoResolution;
   rtspUrl: string;
-  rtspTransport: RtspTransport;
   mirror: boolean;
   floating: boolean;
   floatSnapped: boolean;
@@ -98,7 +94,6 @@ const PREF_DEFAULTS: VideoPrefs = {
   deviceId: null,
   resolution: 'auto',
   rtspUrl: '',
-  rtspTransport: 'auto',
   mirror: false,
   floating: false,
   floatSnapped: true,
@@ -119,7 +114,6 @@ function loadPrefs(): VideoPrefs {
         deviceId: p.deviceId ?? null,
         resolution: p.resolution ?? 'auto',
         rtspUrl: p.rtspUrl ?? '',
-        rtspTransport: p.rtspTransport ?? 'auto',
       };
     }
   } catch {
@@ -140,7 +134,6 @@ function savePrefs(): void {
         deviceId: s.deviceId,
         resolution: s.resolution,
         rtspUrl: s.rtspUrl,
-        rtspTransport: s.rtspTransport,
         mirror: s.mirror,
         floating: s.floating,
         floatSnapped: s.floatSnapped,
@@ -164,7 +157,6 @@ const INITIAL: VideoState = {
   deviceId: boot.deviceId,
   resolution: boot.resolution,
   rtspUrl: boot.rtspUrl,
-  rtspTransport: boot.rtspTransport,
   rtspEngine: null,
   mirror: boot.mirror,
   aspect: 16 / 9,
@@ -344,8 +336,8 @@ export async function startVideo(): Promise<void> {
 }
 
 /** Register the source with go2rtc and complete one WebRTC negotiation. Throws on failure. */
-async function negotiateWebrtc(url: string, transport: RtspTransport, useFfmpeg: boolean): Promise<void> {
-  await invoke('video_webrtc_start', { url, transport, useFfmpeg });
+async function negotiateWebrtc(url: string, useFfmpeg: boolean): Promise<void> {
+  await invoke('video_webrtc_start', { url, useFfmpeg });
 
   const pc = new RTCPeerConnection({ iceServers: [] });
   rtcConn = pc;
@@ -387,13 +379,13 @@ export async function startRtsp(): Promise<void> {
   savePrefs();
 
   try {
-    await negotiateWebrtc(url, st.rtspTransport, false); // native go2rtc RTSP client
+    await negotiateWebrtc(url, false); // native go2rtc RTSP client
   } catch (nativeErr) {
     console.warn('[video] native go2rtc RTSP failed, retrying via ffmpeg', nativeErr);
     closeRtc();
     if (get(videoState).status === 'off') return; // stopped meanwhile
     try {
-      await negotiateWebrtc(url, st.rtspTransport, true); // ffmpeg reader fallback
+      await negotiateWebrtc(url, true); // ffmpeg reader fallback
     } catch (ffmpegErr) {
       closeRtc();
       patch({ status: 'error', error: ffmpegErr instanceof Error ? ffmpegErr.message : String(ffmpegErr) });
@@ -433,13 +425,6 @@ export async function setVideoKind(kind: VideoKind): Promise<void> {
 export function setRtspUrl(rtspUrl: string): void {
   patch({ rtspUrl });
   savePrefs();
-}
-
-export async function setRtspTransport(rtspTransport: RtspTransport): Promise<void> {
-  patch({ rtspTransport });
-  savePrefs();
-  const s = get(videoState);
-  if (s.enabled && s.kind === 'rtsp') await startRtsp();
 }
 
 /** Switch device / resolution; restarts the stream if currently live. */

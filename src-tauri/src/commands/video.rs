@@ -1,24 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! Video commands — ffmpeg availability/download + the RTSP loopback bridge lifecycle.
+//! Video commands — the go2rtc RTSP→WebRTC engine + its ffmpeg fallback dependency.
 //! See docs/active/RTSP_VIDEO.md.
 
 use tauri::{AppHandle, Emitter, State};
 
-use crate::video::{ffmpeg, go2rtc, Go2Rtc, VideoBridge};
+use crate::video::{ffmpeg, go2rtc, Go2Rtc};
 
 /// Fixed go2rtc stream name for the single live RTSP feed.
 const STREAM_NAME: &str = "kite";
 
-/// ffmpeg version string (`ffmpeg -version` first line), or null if it isn't installed yet.
+/// ffmpeg version string (`ffmpeg -version` first line), or null if it isn't installed yet. ffmpeg is
+/// the fallback RTSP reader for go2rtc (sources its native client can't read), not always required.
 #[tauri::command]
 pub fn video_ffmpeg_status() -> Option<String> {
     ffmpeg::version()
 }
 
 /// Download ffmpeg into the app-data `bin/` dir (Windows). Emits `ffmpeg-download-progress`
-/// (`{ pct, msg }`). Returns the installed path.
+/// (`{ pct, msg }`). Returns the installed path. go2rtc is pointed at this path, so a freshly
+/// downloaded ffmpeg is picked up on the next stream start without restarting go2rtc.
 #[tauri::command]
 pub async fn video_ffmpeg_download(app_handle: AppHandle) -> Result<String, String> {
     let report = |pct: u8, msg: &str| {
@@ -29,24 +31,6 @@ pub async fn video_ffmpeg_download(app_handle: AppHandle) -> Result<String, Stri
     };
     let path = ffmpeg::download(report).await?;
     Ok(path.to_string_lossy().to_string())
-}
-
-/// Start the RTSP→fMP4 loopback bridge. `transport` is "tcp" or "udp". Returns the loopback stream URL
-/// for a `<video src>`.
-#[tauri::command]
-pub fn video_rtsp_start(
-    url: String,
-    transport: String,
-    bridge: State<'_, VideoBridge>,
-) -> Result<String, String> {
-    bridge.start(url, transport)
-}
-
-/// Stop the RTSP bridge (kills ffmpeg). Idempotent.
-#[tauri::command]
-pub fn video_rtsp_stop(bridge: State<'_, VideoBridge>) -> Result<(), String> {
-    bridge.stop();
-    Ok(())
 }
 
 // ── go2rtc / WebRTC (the live RTSP path) ─────────────────────────────
@@ -81,7 +65,6 @@ pub async fn video_go2rtc_download(app_handle: AppHandle) -> Result<String, Stri
 #[tauri::command]
 pub async fn video_webrtc_start(
     url: String,
-    _transport: String, // go2rtc negotiates RTSP transport itself; kept for UI symmetry
     use_ffmpeg: bool,
     engine: State<'_, Go2Rtc>,
 ) -> Result<(), String> {

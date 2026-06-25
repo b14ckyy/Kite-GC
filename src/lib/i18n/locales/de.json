@@ -622,15 +622,11 @@
     "resolution": "Auflösung",
     "auto": "Auto",
     "rtspUrl": "RTSP-URL",
-    "transport": "Transport",
-    "transportOpt": {
-      "auto": "Auto (aushandeln)",
-      "tcp": "TCP (zuverlässig)",
-      "udp": "UDP (geringe Latenz)"
-    },
     "engineMissing": "Die Streaming-Engine go2rtc wird für RTSP benötigt und ist noch nicht installiert.",
     "engineDownload": "go2rtc herunterladen",
     "engineReady": "go2rtc bereit",
+    "ffmpegFallbackMissing": "Optional: ffmpeg ermöglicht einen Fallback-Reader für Quellen, die go2rtc nicht nativ lesen kann (z. B. manche OBS-RTSP-Server).",
+    "ffmpegFallbackDownload": "ffmpeg herunterladen (Fallback)",
     "via": {
       "native": "Stream: go2rtc (nativ)",
       "ffmpeg": "Stream: ffmpeg-Fallback"

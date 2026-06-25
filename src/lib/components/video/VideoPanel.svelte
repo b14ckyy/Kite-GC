@@ -24,13 +24,11 @@
     setVideoMirror,
     setVideoKind,
     setRtspUrl,
-    setRtspTransport,
     toggleFloating,
     enterPiP,
     pipSupported,
     type VideoResolution,
     type VideoKind,
-    type RtspTransport,
   } from '$lib/stores/video';
   import PanelShell from '$lib/components/panel/PanelShell.svelte';
   import Button from '$lib/components/panel/Button.svelte';
@@ -48,12 +46,20 @@
     void enumerateVideoDevices();
   });
 
-  // ── go2rtc (RTSP→WebRTC engine dependency) ───────────────────────────
+  // ── RTSP dependencies ────────────────────────────────────────────────
+  // go2rtc is required (the RTSP→WebRTC engine); ffmpeg is the optional fallback reader for sources
+  // go2rtc's native client can't read (e.g. obs-rtspserver). Both are downloaded on demand.
   let engineVer = $state<string | null>(null);
   let engineChecked = $state(false);
-  let downloading = $state(false);
-  let dlPct = $state(0);
-  let dlMsg = $state('');
+  let engineDownloading = $state(false);
+  let enginePct = $state(0);
+  let engineMsg = $state('');
+
+  let ffmpegVer = $state<string | null>(null);
+  let ffmpegChecked = $state(false);
+  let ffmpegDownloading = $state(false);
+  let ffmpegPct = $state(0);
+  let ffmpegMsg = $state('');
 
   async function checkEngine(): Promise<void> {
     try {
@@ -64,32 +70,59 @@
     engineChecked = true;
   }
 
+  async function checkFfmpeg(): Promise<void> {
+    try {
+      ffmpegVer = await invoke<string | null>('video_ffmpeg_status');
+    } catch {
+      ffmpegVer = null;
+    }
+    ffmpegChecked = true;
+  }
+
   async function downloadEngine(): Promise<void> {
-    downloading = true;
-    dlPct = 0;
-    dlMsg = '';
+    engineDownloading = true;
+    enginePct = 0;
+    engineMsg = '';
     try {
       await invoke('video_go2rtc_download');
       await checkEngine();
     } catch (e) {
-      dlMsg = e instanceof Error ? e.message : String(e);
+      engineMsg = e instanceof Error ? e.message : String(e);
     } finally {
-      downloading = false;
+      engineDownloading = false;
+    }
+  }
+
+  async function downloadFfmpeg(): Promise<void> {
+    ffmpegDownloading = true;
+    ffmpegPct = 0;
+    ffmpegMsg = '';
+    try {
+      await invoke('video_ffmpeg_download');
+      await checkFfmpeg();
+    } catch (e) {
+      ffmpegMsg = e instanceof Error ? e.message : String(e);
+    } finally {
+      ffmpegDownloading = false;
     }
   }
 
   onMount(() => {
     void checkEngine();
-    let unlisten: UnlistenFn | undefined;
+    void checkFfmpeg();
+    const unlisteners: UnlistenFn[] = [];
     void listen<{ pct: number; msg: string }>('go2rtc-download-progress', (e) => {
-      dlPct = e.payload.pct;
-      dlMsg = e.payload.msg;
-    }).then((u) => (unlisten = u));
-    return () => unlisten?.();
+      enginePct = e.payload.pct;
+      engineMsg = e.payload.msg;
+    }).then((u) => unlisteners.push(u));
+    void listen<{ pct: number; msg: string }>('ffmpeg-download-progress', (e) => {
+      ffmpegPct = e.payload.pct;
+      ffmpegMsg = e.payload.msg;
+    }).then((u) => unlisteners.push(u));
+    return () => unlisteners.forEach((u) => u());
   });
 
   const KINDS: VideoKind[] = ['camera', 'rtsp'];
-  const TRANSPORTS: RtspTransport[] = ['auto', 'tcp', 'udp'];
 
   // Measured (real) frame rate via requestVideoFrameCallback.
   let measuredFps = $state(0);
@@ -222,36 +255,44 @@
         />
       </label>
 
-      <label class="field">
-        <span class="label">{$t('video.transport')}</span>
-        <select
-          value={$videoState.rtspTransport}
-          onchange={(e) => setRtspTransport((e.currentTarget as HTMLSelectElement).value as RtspTransport)}
-        >
-          {#each TRANSPORTS as tp}
-            <option value={tp}>{$t(`video.transportOpt.${tp}`)}</option>
-          {/each}
-        </select>
-      </label>
-
       {#if engineChecked && !engineVer}
+        <!-- go2rtc is required for any RTSP source. -->
         <div class="ffmpeg-box">
           <p class="hint">{$t('video.engineMissing')}</p>
-          {#if downloading}
+          {#if engineDownloading}
             <div class="dl-row">
-              <div class="dl-bar"><div class="dl-fill" style="width:{dlPct}%"></div></div>
-              <span class="dl-pct">{dlPct}%</span>
+              <div class="dl-bar"><div class="dl-fill" style="width:{enginePct}%"></div></div>
+              <span class="dl-pct">{enginePct}%</span>
             </div>
-            {#if dlMsg}<p class="hint">{dlMsg}</p>{/if}
+            {#if engineMsg}<p class="hint">{engineMsg}</p>{/if}
           {:else}
             <Button variant="data" onclick={downloadEngine}>{$t('video.engineDownload')}</Button>
-            {#if dlMsg}<p class="hint err">{dlMsg}</p>{/if}
+            {#if engineMsg}<p class="hint err">{engineMsg}</p>{/if}
           {/if}
         </div>
-      {:else if $videoState.status === 'live' && $videoState.rtspEngine}
-        <p class="hint">{$t(`video.via.${$videoState.rtspEngine}`)}</p>
       {:else if engineVer}
-        <p class="hint">{$t('video.engineReady')}</p>
+        {#if $videoState.status === 'live' && $videoState.rtspEngine}
+          <p class="hint">{$t(`video.via.${$videoState.rtspEngine}`)}</p>
+        {:else}
+          <p class="hint">{$t('video.engineReady')}</p>
+        {/if}
+
+        {#if ffmpegChecked && !ffmpegVer}
+          <!-- ffmpeg is the optional fallback reader (e.g. obs-rtspserver). Non-blocking. -->
+          <div class="ffmpeg-box">
+            <p class="hint">{$t('video.ffmpegFallbackMissing')}</p>
+            {#if ffmpegDownloading}
+              <div class="dl-row">
+                <div class="dl-bar"><div class="dl-fill" style="width:{ffmpegPct}%"></div></div>
+                <span class="dl-pct">{ffmpegPct}%</span>
+              </div>
+              {#if ffmpegMsg}<p class="hint">{ffmpegMsg}</p>{/if}
+            {:else}
+              <Button variant="standard" onclick={downloadFfmpeg}>{$t('video.ffmpegFallbackDownload')}</Button>
+              {#if ffmpegMsg}<p class="hint err">{ffmpegMsg}</p>{/if}
+            {/if}
+          </div>
+        {/if}
       {/if}
     {/if}
 

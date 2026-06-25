@@ -232,18 +232,21 @@ impl Go2Rtc {
         // JSON is valid YAML — go2rtc parses it. A real file (not inline) so its config-patch on
         // PUT /api/streams succeeds. Point go2rtc at our bundled ffmpeg so the `ffmpeg:` source
         // fallback works for quirky RTSP servers go2rtc's native client can't read.
-        let mut cfg = serde_json::json!({
+        // Point go2rtc at ffmpeg by its resolved path, or — if not installed yet — at the path the
+        // guided download WILL write to. go2rtc spawns ffmpeg per-source on demand, so a later
+        // download is picked up on the next stream start without restarting go2rtc.
+        let ffmpeg_bin = super::ffmpeg::find_ffmpeg()
+            .unwrap_or_else(|| dir.join(super::ffmpeg::binary_name()));
+        let cfg = serde_json::json!({
             "api": { "listen": format!("127.0.0.1:{api_port}") },
             "rtsp": { "listen": format!("127.0.0.1:{rtsp_port}") },
             "webrtc": {
                 "listen": format!("127.0.0.1:{webrtc_port}"),
                 "candidates": [format!("127.0.0.1:{webrtc_port}")],
             },
+            "ffmpeg": { "bin": ffmpeg_bin.to_string_lossy() },
             "log": { "level": "warn" },
         });
-        if let Some(ff) = super::ffmpeg::find_ffmpeg() {
-            cfg["ffmpeg"] = serde_json::json!({ "bin": ff.to_string_lossy() });
-        }
         std::fs::write(&cfg_path, cfg.to_string())
             .map_err(|e| format!("Cannot write go2rtc config: {e}"))?;
 
