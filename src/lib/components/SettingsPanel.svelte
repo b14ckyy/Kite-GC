@@ -576,11 +576,8 @@
         </div>
       </div>
       <div class="s-row">
-        <span class="s-label">{$t('settings.compactDb')}</span>
-        <div class="s-loc">
-          <span class="s-loc-coords">{$t('settings.compactDbHint')}</span>
-          <Button variant="standard" size="sm" onclick={onCompactDb} title={$t('settings.compactDbHint')}>{$t('settings.compactDbBtn')}</Button>
-        </div>
+        <span class="s-label" title={$t('settings.compactDbHint')}>{$t('settings.compactDb')}</span>
+        <Button variant="standard" size="sm" onclick={onCompactDb} title={$t('settings.compactDbHint')}>{$t('settings.compactDbBtn')}</Button>
       </div>
       <div class="s-row s-row-stack">
         <span class="s-label">{$t('settings.rawLogPath')}</span>
