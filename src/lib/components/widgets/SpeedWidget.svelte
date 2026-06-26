@@ -3,7 +3,8 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
-<!-- Speed widget — ground speed + optional airspeed -->
+<!-- Speed widget — ground/airspeed readout, flanked by a throttle bar (left) and a derived
+     acceleration bar (right). -->
 <script lang="ts">
   import type { TelemetryData } from "$lib/stores/telemetry";
   import type { InterfaceSettings } from "$lib/stores/settings";
@@ -34,15 +35,74 @@
       ? $t('widgetLabels.gs', { values: { value: `${gsConv.value.toFixed(0)} ${gsConv.unit}` } })
       : null
   );
+
+  // Throttle bar fill, 0–100% (FC output via MSP2_INAV_MISC2 / VFR_HUD).
+  let thrPct = $derived(Math.max(0, Math.min(100, telem.lastUpdate ? telem.throttle : 0)));
+
+  // ── Derived longitudinal acceleration (m/s²) ──────────────────────────────
+  // No FC field for it — we differentiate the speed we display (airspeed when present, else ground
+  // speed) over the telemetry timestamp and low-pass it. Scale ±10 m/s² (~±1 g) → ±full bar; no numbers.
+  // EMA accumulator stays a plain (non-reactive) var so the $effect never reads the state it writes
+  // (that read+write-same-state pattern freezes the main thread — see other telemetry widgets).
+  const ACC_SCALE = 4;      // m/s² at full deflection (small range — long-range craft change gently)
+  const ACC_ALPHA = 0.3;    // EMA smoothing factor
+  let accel = $state(0);
+  let emaA = 0;
+  let prevV: number | null = null;
+  let prevT = 0;
+
+  $effect(() => {
+    const now = telem.lastUpdate;
+    const v = telem.airspeed > 0 ? telem.airspeed : telem.groundSpeed; // raw m/s (unit-independent)
+    if (!now) { emaA = 0; accel = 0; prevV = null; prevT = 0; return; }
+    if (prevV !== null && now > prevT) {
+      const dt = (now - prevT) / 1000;
+      if (dt > 0 && dt < 5) {               // ignore stale gaps (reconnect, paused stream)
+        emaA = emaA * (1 - ACC_ALPHA) + ((v - prevV) / dt) * ACC_ALPHA;
+        accel = emaA;
+      }
+    }
+    prevV = v;
+    prevT = now;
+  });
+
+  let accFrac = $derived(Math.max(-1, Math.min(1, accel / ACC_SCALE))); // −1…+1 of the bar
 </script>
 
 <div class="widget-card" style="--ws: {size}px">
-  <span class="w-label">{label}</span>
-  <span class="w-value">{speed}</span>
-  <span class="w-unit">{primaryConv.unit}</span>
-  {#if secondary}
-    <span class="w-secondary">{secondary}</span>
-  {/if}
+  <!-- Throttle (left): fills bottom→top 0–100%. -->
+  <div class="vbar">
+    <span class="vbar-label">{$t('widgetLabels.thr')}</span>
+    <div class="vbar-track">
+      <div class="vbar-fill thr" style="height: {thrPct}%"></div>
+      <!-- 25 / 50 / 75 % reference ticks (above the fill so they stay visible) -->
+      <div class="thr-tick" style="bottom: 25%"></div>
+      <div class="thr-tick" style="bottom: 50%"></div>
+      <div class="thr-tick" style="bottom: 75%"></div>
+    </div>
+  </div>
+
+  <div class="center">
+    <span class="w-label">{label}</span>
+    <span class="w-value">{speed}</span>
+    <span class="w-unit">{primaryConv.unit}</span>
+    {#if secondary}
+      <span class="w-secondary">{secondary}</span>
+    {/if}
+  </div>
+
+  <!-- Acceleration (right): bipolar from the centre — up = speeding up, down = slowing down. -->
+  <div class="vbar">
+    <span class="vbar-label">{$t('widgetLabels.acc')}</span>
+    <div class="vbar-track acc-track">
+      <div
+        class="vbar-fill acc {accFrac >= 0 ? 'pos' : 'neg'}"
+        style={accFrac >= 0
+          ? `bottom: 50%; height: ${accFrac * 50}%`
+          : `top: 50%; height: ${-accFrac * 50}%`}
+      ></div>
+    </div>
+  </div>
 </div>
 
 <style>
@@ -50,17 +110,30 @@
     width: var(--ws);
     height: var(--ws);
     display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: flex-start;
+    flex-direction: row;
+    align-items: stretch;
+    justify-content: space-between;
     background: rgba(30, 30, 30, 0.75);
     backdrop-filter: blur(10px);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: calc(var(--ws) * 0.08);
-    gap: calc(var(--ws) * 0.02);
+    gap: calc(var(--ws) * 0.015);
     box-sizing: border-box;
-    padding: calc(var(--ws) * 0.05) calc(var(--ws) * 0.06) calc(var(--ws) * 0.04);
+    padding: calc(var(--ws) * 0.05) calc(var(--ws) * 0.035) calc(var(--ws) * 0.05);
+    overflow: hidden;
   }
+
+  .center {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    gap: calc(var(--ws) * 0.02);
+    white-space: nowrap;
+  }
+
   .w-label {
     font-size: calc(var(--ws) * 0.13);
     font-weight: 600;
@@ -81,7 +154,65 @@
     color: #888;
   }
   .w-secondary {
-    font-size: calc(var(--ws) * 0.12);
+    font-size: calc(var(--ws) * 0.11);
     color: #aaa;
   }
+
+  /* ── Side bars (throttle / acceleration) ── */
+  .vbar {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: calc(var(--ws) * 0.02);
+  }
+  .vbar-label {
+    font-size: calc(var(--ws) * 0.08);
+    font-weight: 600;
+    color: #888;
+    letter-spacing: 0.02em;
+  }
+  .vbar-track {
+    position: relative;
+    flex: 1 1 auto;
+    width: calc(var(--ws) * 0.05);
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: calc(var(--ws) * 0.03);
+  }
+  .vbar-fill {
+    position: absolute;
+    left: 0;
+    right: 0;
+    border-radius: calc(var(--ws) * 0.025);
+  }
+  .vbar-fill.thr {
+    bottom: 0;
+    background: #37a8db;
+    transition: height 0.2s ease;
+  }
+  /* 25/50/75 % reference ticks on the throttle bar — thicker and overhanging both sides for clarity. */
+  .thr-tick {
+    position: absolute;
+    left: calc(var(--ws) * -0.018);
+    right: calc(var(--ws) * -0.018);
+    height: calc(var(--ws) * 0.014);
+    transform: translateY(50%); /* centre the line on the % mark */
+    background: rgba(255, 255, 255, 0.6);
+    border-radius: 1px;
+  }
+  /* Centre baseline for the bipolar acceleration bar. */
+  .acc-track::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.25);
+  }
+  .vbar-fill.acc {
+    transition: height 0.15s ease, bottom 0.15s ease, top 0.15s ease;
+  }
+  .vbar-fill.acc.pos { background: #59aa29; } /* accelerating */
+  .vbar-fill.acc.neg { background: #f5a623; } /* decelerating */
 </style>

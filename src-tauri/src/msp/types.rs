@@ -102,6 +102,8 @@ pub const MSPV2_INAV_MISC: u16 = 0x2003;
 pub const MSPV2_INAV_BATTERY_CONFIG: u16 = 0x2005;
 pub const MSPV2_INAV_AIR_SPEED: u16 = 0x2009;
 pub const MSPV2_INAV_MIXER: u16 = 0x2010;
+/// INAV misc2: [uptime_s:u32, flight_time_s:u32, throttle_pct:u8, auto_throttle:u8] — INAV 2.x+.
+pub const MSP2_INAV_MISC2: u16 = 0x203A;
 /// INAV RC link statistics (uplink RSSI dBm / LQ / SNR) — INAV 9.1+.
 pub const MSP2_INAV_GET_LINK_STATS: u16 = 0x2103;
 /// INAV wind estimate (speed cm/s, angle deg, flags) — INAV 10.0+ (PR #11611).

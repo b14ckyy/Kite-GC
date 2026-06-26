@@ -265,6 +265,7 @@ export interface TelemetryRecord {
   alt_m: number | null;
   speed_ms: number | null;
   airspeed_ms: number | null;
+  throttle_pct: number | null;
   heading: number | null;
   vario_ms: number | null;
   voltage: number | null;

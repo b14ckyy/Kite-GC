@@ -530,6 +530,14 @@ fn build_slots(config: &TelemetryConfig) -> Vec<TelemetrySlot> {
             1.0,
             4,
         ),
+        // Throttle + timers (MSP2_INAV_MISC2): own slot at 2 Hz — small message, low priority so it
+        // degrades first under load. Drives the Speed widget throttle bar.
+        TelemetrySlot::new(
+            TelemetryGroup::Misc2,
+            vec![MSP2_INAV_MISC2],
+            2.0,
+            1,
+        ),
     ];
 
     // RC link stats (INAV 9.1+) — own 1 Hz slot, low priority (degrades first under load).

@@ -269,7 +269,8 @@ fn create_export_db(path: &Path) -> Result<Connection, String> {
             mode_modifiers TEXT,
             link_snr     INTEGER,
             link_rssi_dbm INTEGER,
-            airspeed_ms  REAL
+            airspeed_ms  REAL,
+            throttle_pct REAL
         );
 
         CREATE TABLE IF NOT EXISTS blackbox_records (

@@ -58,6 +58,9 @@ export interface TelemetryData {
   batteryPercentage: number;
   cellCount: number;
 
+  // Throttle output, 0–100% (INAV MSP2_INAV_MISC2 / MAVLink VFR_HUD). Drives the Speed widget bar.
+  throttle: number;
+
   // RC link statistics (RSSI / LQ / SNR — protocol-dependent, see LinkStats)
   link: LinkStats;
 
@@ -113,6 +116,7 @@ const defaultTelemetry: TelemetryData = {
   airspeed: 0,
   windDirFrom: 0, windSpeedMs: 0,
   voltage: 0, current: 0, mAhDrawn: 0, rssi: 0, power: 0, batteryPercentage: 0, cellCount: 0,
+  throttle: 0,
   link: { rssiPercent: null, rssiDbm: null, lq: null, snrDb: null },
   armingFlags: 0, cpuLoad: 0, sensorStatus: 0, flightModeFlags: 0, mspRcOverride: false,
   sensorGyro: 0, sensorAcc: 0, sensorMag: 0, sensorBaro: 0,
@@ -306,6 +310,17 @@ export async function startTelemetryListeners() {
           cellCount: p.cell_count,
           lastUpdate: Date.now(),
         }));
+      }
+    )
+  );
+
+  unlisteners.push(
+    await listen<{ throttle_pct: number; auto_throttle: boolean; uptime_s: number; flight_time_s: number }>(
+      'telemetry-misc2',
+      (event) => {
+        // Only throttle is consumed continuously today; uptime/flight_time ride along for a future
+        // flight-time timer (seeded once, then counted locally).
+        telemetry.update((t) => ({ ...t, throttle: event.payload.throttle_pct, lastUpdate: Date.now() }));
       }
     )
   );

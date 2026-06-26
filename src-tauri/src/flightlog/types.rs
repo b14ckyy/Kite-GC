@@ -384,6 +384,9 @@ pub struct TelemetryRecord {
     /// Airspeed (m/s): VFR_HUD / MSP2_INAV_AIR_SPEED live; ARSP sensor (ArduPilot) / `airspeed`
     /// column (INAV blackbox) on import. None when not available.
     pub airspeed_ms: Option<f64>,
+    /// Throttle output (0–100%): MSP2_INAV_MISC2 / VFR_HUD live; INAV blackbox RC throttle channel;
+    /// ArduPilot CTUN throttle-out on import. None when not available.
+    pub throttle_pct: Option<f64>,
     pub heading: Option<f64>, // course over ground (degrees, decimals preserved)
     pub vario_ms: Option<f64>,
     pub voltage: Option<f64>,

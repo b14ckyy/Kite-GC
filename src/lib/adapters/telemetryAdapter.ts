@@ -68,6 +68,7 @@ export function toTelemetryData(r: TelemetryRecord, fcVariant = 'INAV'): Telemet
     power: (r.voltage ?? 0) * (r.current_a ?? 0),
     batteryPercentage: r.battery_percentage ?? 0,
     cellCount: 0,         // not recorded in DB yet
+    throttle: r.throttle_pct ?? 0,
 
     // RC link — from the recorded link-stats fields. dBm (CRSF / INAV 9.1) → % via the same curve as
     // the backend; otherwise normalize the raw RSSI heuristically (≤100 = %, ≤255 = 0–254, else 0–1023).
