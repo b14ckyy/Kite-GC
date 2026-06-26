@@ -444,6 +444,26 @@ pub struct TelemetryRecord {
     pub link_rssi_dbm: Option<i16>,
 }
 
+/// A single per-instance battery sample (row in `battery_records`). ArduPilot/PX4 can run several
+/// battery monitors at once (e.g. a forward fixed-wing pack + a VTOL lift pack); each is identified by
+/// `instance` (0..9). INAV is single-battery and uses the denormalised columns on `telemetry_records`
+/// instead, so it produces no rows here. See docs/active/MULTI_BATTERY.md.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatteryRecord {
+    pub id: i64,
+    pub flight_id: i64,
+    /// Milliseconds since flight start (shares the exact `telemetry_records.timestamp_ms` grid so the
+    /// frontend can align batteries to a track frame by timestamp).
+    pub timestamp_ms: i64,
+    pub instance: u8,
+    pub voltage: Option<f64>,
+    pub current_a: Option<f64>,
+    pub mah_drawn: Option<u32>,
+    pub battery_percentage: Option<u8>,
+    pub cell_count: Option<u8>,
+    pub temperature: Option<f64>,
+}
+
 /// Summary for the logbook list view
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FlightSummary {

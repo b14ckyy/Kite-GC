@@ -311,6 +311,12 @@ export interface AppSettings {
   lastArduVehicleClass: string;
   // Alerts
   warnAltitudeM: number;
+  /** Battery low-charge alert threshold (%). The battery widget enters its alert state below this, and
+   *  in AUTO mode switches to show the lowest battery once any pack drops under it. 0 = disabled. */
+  batteryAlertPct: number;
+  /** Per-widget battery selection: 'auto' or an instance id (as a string). Keyed by widget id
+   *  ('battery' / 'battery2'). Lets each battery widget pin a specific pack. See MULTI_BATTERY.md. */
+  batterySelect: Record<string, string>;
   /** Which FC system messages (MAVLink STATUSTEXT) surface as on-screen toasts. */
   systemMessages: SystemMessagesLevel;
   /** Backend diagnostic file-log verbosity (applied to the Rust logger on startup + on change). */
@@ -390,6 +396,8 @@ const defaults: AppSettings = {
   lastAutopilotSystem: 'inav',
   lastArduVehicleClass: 'plane',
   warnAltitudeM: 120,
+  batteryAlertPct: 30,
+  batterySelect: {},
   systemMessages: 'all',
   logLevel: 'warning',
   interface: {

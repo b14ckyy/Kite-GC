@@ -18,7 +18,7 @@ use crate::flightlog::recorder::FlightRecorderHandle;
 use crate::scheduler::rc_tx::{self, RcTxHandle};
 use crate::scheduler::telemetry::{
     AttitudeData, GpsData, AltitudeData, AnalogData, StatusData,
-    SensorStatusData, AirspeedData, WindData, Misc2Data,
+    SensorStatusData, AirspeedData, WindData, Misc2Data, BatteryInstanceData,
 };
 use crate::transport::ByteTransport;
 
@@ -145,6 +145,9 @@ fn handler_loop(
 
     // Accumulated analog state — MAVLink splits battery data across multiple messages
     let mut analog = AnalogState::default();
+    // Per-instance battery monitors (ArduPilot/PX4 multi-battery): latest BATTERY_STATUS per id.
+    let mut batteries: std::collections::BTreeMap<u8, BatteryInstanceData> =
+        std::collections::BTreeMap::new();
     let mut fused = FusedPos::default();
 
     // Active mission operation receiver — when set, MISSION_* messages are forwarded
@@ -372,7 +375,7 @@ fn handler_loop(
                         }
                     }
 
-                    dispatch_message(&frame.header, &frame.message, &fc_variant, &app_handle, &mut analog, &mut fused, &mut quadplane_seen, &recorder);
+                    dispatch_message(&frame.header, &frame.message, &fc_variant, &app_handle, &mut analog, &mut batteries, &mut fused, &mut quadplane_seen, &recorder);
                 }
             }
             Err(crate::transport::TransportError::Timeout) => {}
@@ -527,7 +530,7 @@ struct FusedPos {
 
 /// Dispatch a received MAVLink message to the same Tauri events as the MSP scheduler.
 /// This ensures widgets/store work identically regardless of protocol.
-fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, app_handle: &AppHandle, analog: &mut AnalogState, fused: &mut FusedPos, quadplane_seen: &mut bool, recorder: &Option<FlightRecorderHandle>) {
+fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, app_handle: &AppHandle, analog: &mut AnalogState, batteries: &mut std::collections::BTreeMap<u8, BatteryInstanceData>, fused: &mut FusedPos, quadplane_seen: &mut bool, recorder: &Option<FlightRecorderHandle>) {
     match message {
         // ── HEARTBEAT → telemetry-status + telemetry-flightmode ─────
         MavMessage::HEARTBEAT(hb) => {
@@ -827,21 +830,48 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
             }
         }
 
-        // ── BATTERY_STATUS → cumulative mAh (merged into analog) ───
+        // ── BATTERY_STATUS → per-instance battery (multi-battery) + primary into analog ───
+        // ArduPilot/PX4 send one BATTERY_STATUS per configured monitor, keyed by `id`. Total pack
+        // voltage is the sum of the non-0xFFFF entries in `voltages[]` (mV); current is cA, consumed
+        // is mAh, remaining is %, temperature is centi-°C (INT16_MAX = invalid).
         MavMessage::BATTERY_STATUS(bat) => {
-            if bat.current_consumed >= 0 {
-                analog.mah_drawn = bat.current_consumed as u32;
+            let voltage = bat
+                .voltages
+                .iter()
+                .filter(|&&v| v != u16::MAX)
+                .map(|&v| v as f64)
+                .sum::<f64>()
+                / 1000.0;
+            let current = if bat.current_battery >= 0 { bat.current_battery as f64 / 100.0 } else { 0.0 };
+            let mah = if bat.current_consumed >= 0 { bat.current_consumed as u32 } else { 0 };
+            let pct = if bat.battery_remaining >= 0 { bat.battery_remaining as u8 } else { 0 };
+            let cell_count = if voltage > 0.5 { ((voltage / 3.7).round() as u8).max(1) } else { 0 };
+            let temperature = if bat.temperature != i16::MAX { Some(bat.temperature as f64 / 100.0) } else { None };
+
+            batteries.insert(bat.id, BatteryInstanceData {
+                id: bat.id, voltage, current, mah_drawn: mah, percentage: pct, cell_count, temperature,
+            });
+            let list: Vec<BatteryInstanceData> = batteries.values().cloned().collect();
+            let _ = app_handle.emit("telemetry-batteries", &list);
+
+            // Primary monitor (id 0) also feeds the single-battery analog path (top bar / widgets).
+            if bat.id == 0 {
+                analog.mah_drawn = mah;
+                if bat.current_battery >= 0 {
+                    analog.current = current;
+                    analog.power = analog.voltage * analog.current;
+                }
+                if bat.battery_remaining >= 0 {
+                    analog.battery_percentage = pct;
+                }
+                let _ = app_handle.emit("telemetry-analog", &analog.to_analog_data());
             }
-            if bat.current_battery >= 0 {
-                analog.current = bat.current_battery as f64 / 100.0;
-                analog.power = analog.voltage * analog.current;
-            }
-            if bat.battery_remaining >= 0 {
-                analog.battery_percentage = bat.battery_remaining as u8;
-            }
-            let _ = app_handle.emit("telemetry-analog", &analog.to_analog_data());
+
             if let Some(ref rec) = recorder {
-                if let Ok(mut r) = rec.lock() { r.on_analog(&analog.to_analog_data()); }
+                if let Ok(mut r) = rec.lock() {
+                    r.on_batteries(&list);
+                    if bat.id == 0 { r.on_analog(&analog.to_analog_data()); }
+                }
             }
         }
 

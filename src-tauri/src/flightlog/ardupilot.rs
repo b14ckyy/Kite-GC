@@ -21,7 +21,7 @@ use std::path::Path;
 use chrono::{DateTime, Duration, Utc};
 
 use super::db;
-use super::types::{BlackboxImportStatus, Flight, TelemetryRecord};
+use super::types::{BatteryRecord, BlackboxImportStatus, Flight, TelemetryRecord};
 use rusqlite::Connection;
 
 // ─── DataFlash framing constants ─────────────────────────────────────────────
@@ -428,6 +428,8 @@ pub struct NormalizedRecord {
     pub airspeed_ms: Option<f64>,
     /// Throttle output (0–100%) from CTUN.ThO.
     pub throttle_pct: Option<f64>,
+    /// Per-instance battery snapshot at this row (ArduPilot multi-battery). Empty = single battery.
+    batteries: Vec<ApBattery>,
 
     // ── Attitude ────────────────────────────────────────────────────────────
     pub roll_deg: Option<f64>,
@@ -438,6 +440,9 @@ pub struct NormalizedRecord {
     pub voltage_v: Option<f64>,
     pub current_a: Option<f64>,
     pub mah_drawn: Option<f64>,
+    /// Primary monitor remaining charge (%) from BAT.RemPct — so the toolbar shows the FC's own % on
+    /// replay instead of a voltage estimate.
+    pub battery_pct: Option<f64>,
 
     // ── Barometer ───────────────────────────────────────────────────────────
     pub baro_alt_m: Option<f64>,
@@ -504,7 +509,8 @@ fn platform_type_from_vehicle(vehicle: Option<&str>) -> u8 {
 #[derive(Default)]
 struct DecoderState {
     att: Option<AttState>,
-    bat: Option<BatState>,
+    /// Battery monitors by instance (ArduPilot/PX4 multi-battery; BAT.Instance). Instance 0 = primary.
+    bat_instances: std::collections::BTreeMap<u8, BatState>,
     baro: Option<BaroState>,
     nav_alt_m: Option<f64>,
     wind_n_ms: Option<f64>,
@@ -549,6 +555,19 @@ struct BatState {
     voltage: f64,
     current: f64,
     mah: f64,
+    pct: Option<f64>,
+    temp: Option<f64>,
+}
+
+/// One battery monitor instance captured at a NormalizedRecord (ArduPilot multi-battery import).
+#[derive(Debug, Default, Clone)]
+struct ApBattery {
+    instance: u8,
+    voltage: f64,
+    current: f64,
+    mah: f64,
+    pct: Option<f64>,
+    temp: Option<f64>,
 }
 
 #[derive(Default, Clone)]
@@ -761,6 +780,7 @@ where
     let mut kept_count: usize = 0;
 
     let mut telemetry_rows: Vec<TelemetryRecord> = Vec::new();
+    let mut battery_rows: Vec<BatteryRecord> = Vec::new();
     let mut start_lat: Option<f64> = None;
     let mut start_lon: Option<f64> = None;
     let mut max_alt_m: Option<f64> = None;
@@ -848,7 +868,9 @@ where
             current_a: r.current_a,
             mah_drawn: r.mah_drawn.map(|v| v as u32),
             rssi: None,
-            battery_percentage: None, // not present in ArduPilot blackbox logs
+            // Primary monitor RemPct (BAT.RemPct) → so the toolbar uses the FC's % on replay, matching
+            // the widget (instead of falling back to a per-cell voltage estimate). 0/absent = unknown.
+            battery_percentage: r.battery_pct.map(|p| p.clamp(0.0, 100.0) as u8),
             roll: r.roll_deg,
             pitch: r.pitch_deg,
             yaw: r.yaw_deg,
@@ -883,6 +905,22 @@ where
             airspeed_ms: r.airspeed_ms,
             throttle_pct: r.throttle_pct,
         });
+
+        // Per-instance battery rows for this same timestamp (multi-battery; empty for single battery).
+        for b in &r.batteries {
+            battery_rows.push(BatteryRecord {
+                id: 0,
+                flight_id: 0, // set after insert_flight
+                timestamp_ms,
+                instance: b.instance,
+                voltage: Some(b.voltage),
+                current_a: Some(b.current),
+                mah_drawn: Some(b.mah as u32),
+                battery_percentage: b.pct.map(|p| p.clamp(0.0, 100.0) as u8),
+                cell_count: if b.voltage > 0.5 { Some(((b.voltage / 3.7).round() as u8).max(1)) } else { None },
+                temperature: b.temp,
+            });
+        }
     }
 
     if telemetry_rows.is_empty() {
@@ -944,6 +982,15 @@ where
     report(82, "store-track", "Storing track data...");
     db::insert_telemetry_batch(conn, &telemetry_rows)
         .map_err(|e| format!("Failed to store ArduPilot telemetry: {}", e))?;
+
+    // Per-instance battery samples (multi-battery; empty for single-battery logs).
+    if !battery_rows.is_empty() {
+        for row in &mut battery_rows {
+            row.flight_id = flight_id;
+        }
+        db::insert_battery_records_batch(conn, &battery_rows)
+            .map_err(|e| format!("Failed to store ArduPilot battery records: {}", e))?;
+    }
 
     report(92, "archive", "Archiving original DataFlash file...");
     db::insert_blackbox_file(
@@ -1019,6 +1066,29 @@ fn process_message(
                 stats.last_fix_time = utc;
                 stats.gps_rows += 1;
 
+                // Primary monitor = instance 0, else the lowest instance present.
+                let primary_bat = state
+                    .bat_instances
+                    .get(&0)
+                    .or_else(|| state.bat_instances.values().next());
+                // Per-instance snapshot only when >1 monitor (single-battery replays from primary cols).
+                let batteries: Vec<ApBattery> = if state.bat_instances.len() >= 2 {
+                    state
+                        .bat_instances
+                        .iter()
+                        .map(|(&instance, b)| ApBattery {
+                            instance,
+                            voltage: b.voltage,
+                            current: b.current,
+                            mah: b.mah,
+                            pct: b.pct,
+                            temp: b.temp,
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+
                 rows.push(NormalizedRecord {
                     timestamp_us: time_us,
                     utc_time: utc,
@@ -1036,9 +1106,11 @@ fn process_message(
                     // DB/INAV convention: positive = nose down → negate.
                     pitch_deg: state.att.as_ref().map(|a| -a.pitch),
                     yaw_deg: state.att.as_ref().map(|a| a.yaw),
-                    voltage_v: state.bat.as_ref().map(|b| b.voltage),
-                    current_a: state.bat.as_ref().map(|b| b.current),
-                    mah_drawn: state.bat.as_ref().map(|b| b.mah),
+                    // Primary battery (instance 0, else the lowest instance) → denormalised columns.
+                    voltage_v: primary_bat.map(|b| b.voltage),
+                    current_a: primary_bat.map(|b| b.current),
+                    mah_drawn: primary_bat.map(|b| b.mah),
+                    battery_pct: primary_bat.and_then(|b| b.pct),
                     baro_alt_m: state.baro.as_ref().map(|b| b.alt_m),
                     baro_climb_rate_ms: state.baro.as_ref().map(|b| b.climb_rate_ms),
                     baro_temp_c: state.baro.as_ref().map(|b| b.temp_c),
@@ -1058,6 +1130,7 @@ fn process_message(
                     armed: state.armed,
                     vehicle_type: state.vehicle_type.clone(),
                     fw_version: state.fw_version.clone(),
+                    batteries,
                 });
             }
         }
@@ -1073,15 +1146,19 @@ fn process_message(
         }
 
         "BAT" | "CURR" => {
-            let volt = msg.get_f64("Volt");
-            let curr = msg.get_f64("Curr");
-            let mah = msg.get_f64("CurrTot");
-            if let Some(v) = volt {
-                let bat = state.bat.get_or_insert_with(BatState::default);
-                bat.voltage = v;
-                if let Some(c) = curr { bat.current = c; }
-                if let Some(m) = mah { bat.mah = m; }
-            }
+            // Which battery-monitor instance? Modern ArduPilot logs the field as "Instance"; older
+            // logs used "Inst". Absent (very old single-battery logs) → instance 0.
+            let inst = msg
+                .get_f64("Instance")
+                .or_else(|| msg.get_f64("Inst"))
+                .map(|v| v as u8)
+                .unwrap_or(0);
+            let b = state.bat_instances.entry(inst).or_default();
+            if let Some(v) = msg.get_f64("Volt") { b.voltage = v; }
+            if let Some(c) = msg.get_f64("Curr") { b.current = c; }
+            if let Some(m) = msg.get_f64("CurrTot") { b.mah = m; }
+            if let Some(p) = msg.get_f64("RemPct") { b.pct = Some(p); }
+            if let Some(t) = msg.get_f64("Temp") { b.temp = Some(t); }
         }
 
         "BARO" => {

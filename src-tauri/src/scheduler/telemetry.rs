@@ -123,6 +123,20 @@ pub struct AirspeedData {
     pub airspeed: f64, // cm/s → m/s
 }
 
+/// One battery monitor instance for the `telemetry-batteries` event. ArduPilot/PX4 report several of
+/// these in parallel (one per configured monitor, keyed by `id`); INAV has a single battery. See
+/// docs/active/MULTI_BATTERY.md.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatteryInstanceData {
+    pub id: u8,
+    pub voltage: f64,
+    pub current: f64,
+    pub mah_drawn: u32,
+    pub percentage: u8,
+    pub cell_count: u8,
+    pub temperature: Option<f64>, // °C, when the monitor reports it
+}
+
 /// MSP2_INAV_MISC2 (0x203A): FC throttle output + timers. Small message added to the regular poller —
 /// `throttle_pct` drives the Speed widget's throttle bar; `uptime_s`/`flight_time_s` ride along for
 /// upcoming flight-timer use.

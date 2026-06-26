@@ -466,7 +466,9 @@
         {:else if item.id === 'altitude'}
           <AltWidget {telem} size={item.sizePx} {interfaceSettings} />
         {:else if item.id === 'battery'}
-          <BatteryWidget {telem} size={item.sizePx} />
+          <BatteryWidget {telem} size={item.sizePx} widgetId="battery" />
+        {:else if item.id === 'battery2'}
+          <BatteryWidget {telem} size={item.sizePx} widgetId="battery2" />
         {:else if item.id === 'gps'}
           <GpsWidget {telem} size={item.sizePx} />
         {:else if item.id === 'rcLink'}

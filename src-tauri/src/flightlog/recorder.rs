@@ -15,11 +15,11 @@ use tauri::{AppHandle, Emitter};
 use super::db;
 use super::msp_raw_logger::{MspRawLogger, MspRawSink};
 use super::tlog_logger::TlogLogger;
-use super::types::{Flight, FlightLogSettings, TelemetryRecord};
+use super::types::{BatteryRecord, Flight, FlightLogSettings, TelemetryRecord};
 use crate::msp::FcInfo;
 use crate::scheduler::telemetry::{
-    AirspeedData, AltitudeData, AnalogData, AttitudeData, GpsData, GpsStatsData, LinkStatsData,
-    Misc2Data, NavStatusData, SensorStatusData, StatusData, WindData,
+    AirspeedData, AltitudeData, AnalogData, AttitudeData, BatteryInstanceData, GpsData, GpsStatsData,
+    LinkStatsData, Misc2Data, NavStatusData, SensorStatusData, StatusData, WindData,
 };
 
 /// Bit 2 in arming_flags indicates ARMED state
@@ -303,6 +303,8 @@ struct TelemetrySnapshot {
     airspeed: Option<f64>,
     // Throttle output (0–100%) from MSP2_INAV_MISC2 / VFR_HUD
     throttle: Option<f64>,
+    // Latest per-instance batteries (ArduPilot/PX4 multi-monitor). Empty for single-battery setups.
+    batteries: Vec<BatteryInstanceData>,
     // Wind (live ArduPilot WIND), stored as the NED velocity vector (direction the air moves TOWARD)
     // to match the imported VWN/VWE convention used on replay.
     wind_n_ms: Option<f64>,
@@ -339,6 +341,8 @@ struct ActiveFlight {
     start_lon: Option<f64>,
     /// Accumulated telemetry records pending flush to the temp store
     buffer: Vec<TelemetryRecord>,
+    /// Accumulated per-instance battery records pending flush (multi-battery; ArduPilot/PX4).
+    bat_buffer: Vec<BatteryRecord>,
     // Statistics tracking
     max_alt: f64,
     max_speed: f64,
@@ -550,6 +554,12 @@ impl FlightRecorder {
         self.snapshot.throttle = Some(data.throttle_pct as f64);
     }
 
+    /// Feed the per-instance battery list (ArduPilot/PX4 multi-monitor). Each sample writes one
+    /// `battery_records` row per instance (see maybe_record_sample). Empty for single-battery setups.
+    pub fn on_batteries(&mut self, data: &[BatteryInstanceData]) {
+        self.snapshot.batteries = data.to_vec();
+    }
+
     /// Feed wind data (MAVLink WIND / INAV MSP2_INAV_WIND). Stored as the NED velocity vector
     /// (direction the air moves TOWARD) to match the imported VWN/VWE convention used on replay.
     pub fn on_wind(&mut self, data: &WindData) {
@@ -710,6 +720,7 @@ impl FlightRecorder {
             start_lat: p.flight.start_lat,
             start_lon: p.flight.start_lon,
             buffer: Vec::with_capacity(FLUSH_THRESHOLD),
+            bat_buffer: Vec::new(),
             max_alt: p.flight.max_alt_m.unwrap_or(0.0),
             max_speed: p.flight.max_speed_ms.unwrap_or(0.0),
             max_distance: p.flight.max_distance_m.unwrap_or(0.0),
@@ -797,6 +808,7 @@ impl FlightRecorder {
             start_lat: self.snapshot.lat,
             start_lon: self.snapshot.lon,
             buffer: Vec::with_capacity(FLUSH_THRESHOLD),
+            bat_buffer: Vec::new(),
             max_alt: 0.0,
             max_speed: 0.0,
             max_distance: 0.0,
@@ -851,6 +863,11 @@ impl FlightRecorder {
         if !flight.buffer.is_empty() {
             if let Err(e) = db::insert_telemetry_batch(&temp_db, &flight.buffer) {
                 log::error!("Failed to flush final telemetry batch to temp store: {}", e);
+            }
+        }
+        if !flight.bat_buffer.is_empty() {
+            if let Err(e) = db::insert_battery_records_batch(&temp_db, &flight.bat_buffer) {
+                log::error!("Failed to flush final battery batch to temp store: {}", e);
             }
         }
         let sample_count = db::temp_session_row_count(&temp_db).unwrap_or(0);
@@ -1011,6 +1028,26 @@ impl FlightRecorder {
             flight.last_lon = Some(lon);
         }
 
+        // Per-instance battery rows for this same timestamp (multi-battery; ArduPilot/PX4). Only when
+        // ≥2 monitors — single-battery flights replay from the denormalised primary on
+        // telemetry_records (matches the import path), so we write nothing redundant here.
+        if self.snapshot.batteries.len() >= 2 {
+        for b in &self.snapshot.batteries {
+            flight.bat_buffer.push(BatteryRecord {
+                id: 0,
+                flight_id: 0, // temp store local id; rewritten on commit
+                timestamp_ms: elapsed_ms,
+                instance: b.id,
+                voltage: Some(b.voltage),
+                current_a: Some(b.current),
+                mah_drawn: Some(b.mah_drawn),
+                battery_percentage: Some(b.percentage),
+                cell_count: Some(b.cell_count),
+                temperature: b.temperature,
+            });
+        }
+        }
+
         // Buffer + flush into the temp session store (DB recording only). The temp store is the
         // durable buffer; the main DB is untouched until the commit on disarm.
         if let Some(ref temp_db) = flight.temp_db {
@@ -1024,6 +1061,12 @@ impl FlightRecorder {
                 );
                 if let Err(e) = db::insert_telemetry_batch(temp_db, &records) {
                     log::error!("Failed to flush telemetry batch to temp store: {}", e);
+                }
+                if !flight.bat_buffer.is_empty() {
+                    let bat = std::mem::take(&mut flight.bat_buffer);
+                    if let Err(e) = db::insert_battery_records_batch(temp_db, &bat) {
+                        log::error!("Failed to flush battery batch to temp store: {}", e);
+                    }
                 }
             }
         }

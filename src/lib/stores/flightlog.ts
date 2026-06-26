@@ -34,7 +34,8 @@ export {
 
 // ── Tauri command wrappers ───────────────────────────────────────────
 
-import type { FlightSummary, Flight, TelemetryRecord, BlackboxImportStatus, KflightImportResult, LibraryMission, LibraryMissionInput, BatteryPack, BatteryPackInput, BatteryAggregate, BatteryFile, Vehicle, VehicleInput, VehicleAggregate, VehicleFile } from './flightlogTypes';
+import type { FlightSummary, Flight, TelemetryRecord, BatteryRecord, BlackboxImportStatus, KflightImportResult, LibraryMission, LibraryMissionInput, BatteryPack, BatteryPackInput, BatteryAggregate, BatteryFile, Vehicle, VehicleInput, VehicleAggregate, VehicleFile } from './flightlogTypes';
+import type { BatteryInstance } from './telemetry';
 
 /** Save a mission to the library (dedup by content hash). Returns the mission id. */
 export async function missionDbSave(mission: LibraryMissionInput, dbPath: string): Promise<number> {
@@ -317,10 +318,38 @@ export async function getFlight(id: number, dbPath: string): Promise<Flight | nu
 }
 
 export async function getFlightTrack(id: number, dbPath: string): Promise<TelemetryRecord[]> {
-  return invoke<TelemetryRecord[]>('flightlog_get_track', {
+  const track = await invoke<TelemetryRecord[]>('flightlog_get_track', {
     flightId: id,
     dbPath: dbPath || undefined,
   });
+  // Multi-battery: join per-instance samples (battery_records) onto the track by timestamp. Empty for
+  // single-battery flights → records keep no `batteries` and the widget falls back to the primary.
+  const bats = await invoke<BatteryRecord[]>('flightlog_get_battery_records', {
+    flightId: id,
+    dbPath: dbPath || undefined,
+  });
+  if (bats.length > 0) {
+    const byTs = new Map<number, BatteryInstance[]>();
+    for (const b of bats) {
+      const inst: BatteryInstance = {
+        id: b.instance,
+        voltage: b.voltage ?? 0,
+        current: b.current_a ?? 0,
+        mahDrawn: b.mah_drawn ?? 0,
+        percentage: b.battery_percentage ?? 0,
+        cellCount: b.cell_count ?? 0,
+        temperature: b.temperature,
+      };
+      const arr = byTs.get(b.timestamp_ms);
+      if (arr) arr.push(inst);
+      else byTs.set(b.timestamp_ms, [inst]);
+    }
+    for (const rec of track) {
+      const list = byTs.get(rec.timestamp_ms);
+      if (list) rec.batteries = list;
+    }
+  }
+  return track;
 }
 
 export async function deleteFlight(id: number, dbPath: string): Promise<boolean> {

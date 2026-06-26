@@ -107,6 +107,17 @@ pub fn flightlog_get_track(
     db::get_flight_track(&conn, flight_id).map_err(|e| format!("Query error: {}", e))
 }
 
+/// Get per-instance battery samples for a flight (multi-battery). Empty for single-battery flights —
+/// the frontend then synthesises a single instance from the primary battery columns.
+#[tauri::command]
+pub fn flightlog_get_battery_records(
+    flight_id: i64,
+    db_path: Option<String>,
+) -> Result<Vec<crate::flightlog::types::BatteryRecord>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::get_flight_battery_records(&conn, flight_id).map_err(|e| format!("Query error: {}", e))
+}
+
 // ── Mission library ─────────────────────────────────────────────────
 
 /// Save a mission to the library (dedup by content hash). Returns the mission id.

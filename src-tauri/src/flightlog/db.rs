@@ -11,11 +11,11 @@ use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
 
 use super::types::{
-    BatteryAggregate, BatteryPack, BatteryPackInput, Flight, FlightSummary, Mission, MissionInput,
-    TelemetryRecord, Vehicle, VehicleAggregate, VehicleInput,
+    BatteryAggregate, BatteryPack, BatteryPackInput, BatteryRecord, Flight, FlightSummary, Mission,
+    MissionInput, TelemetryRecord, Vehicle, VehicleAggregate, VehicleInput,
 };
 
-const CURRENT_SCHEMA_VERSION: u32 = 17;
+const CURRENT_SCHEMA_VERSION: u32 = 18;
 
 /// Column list (excluding the autoincrement `id`) for `telemetry_records`, shared by the temp-session
 /// copy so the SELECT and INSERT column orders can never drift apart. `flight_id` is first so the
@@ -48,6 +48,26 @@ const TELEMETRY_RECORDS_DDL_FULL: &str = "CREATE TABLE IF NOT EXISTS telemetry_r
     rc_data_json TEXT, rc_command_json TEXT, nav_lat REAL, nav_lon REAL, nav_alt_m REAL,
     mode_primary TEXT, mode_modifiers TEXT, link_snr INTEGER, link_rssi_dbm INTEGER,
     airspeed_ms REAL, throttle_pct REAL
+);";
+
+/// Per-instance battery samples (ArduPilot/PX4 multi-monitor). `flight_id` first so the temp-session
+/// copy can swap it for the new main id, mirroring TELEMETRY_COLS. See docs/active/MULTI_BATTERY.md.
+const BATTERY_RECORDS_COLS: &str = "flight_id, timestamp_ms, instance, voltage, current_a, mah_drawn, \
+    battery_percentage, cell_count, temperature";
+
+/// Full DDL for `battery_records`, shared by the main DB (via the migration chain) and the temp
+/// session store (one-shot). Both MUST describe the same columns (temp rows are copied to main).
+const BATTERY_RECORDS_DDL_FULL: &str = "CREATE TABLE IF NOT EXISTS battery_records (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    flight_id     INTEGER NOT NULL,
+    timestamp_ms  INTEGER NOT NULL,
+    instance      INTEGER NOT NULL,
+    voltage       REAL,
+    current_a     REAL,
+    mah_drawn     INTEGER,
+    battery_percentage INTEGER,
+    cell_count    INTEGER,
+    temperature   REAL
 );";
 
 /// Open (or create) the flight log database at the given path.
@@ -240,6 +260,10 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
         migrate_v16_to_v17(conn)?;
     }
 
+    if current < 18 {
+        migrate_v17_to_v18(conn)?;
+    }
+
     // Self-heal: ensure the latest schema actually exists even if a prior version bump left it
     // incomplete. Legacy migrations call set_user_version(CURRENT), so a CURRENT bump can
     // mark the DB as the newest version without the matching migration ever creating its
@@ -254,6 +278,7 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
     ensure_v15_schema(conn)?;
     ensure_v16_schema(conn)?;
     ensure_v17_schema(conn)?;
+    ensure_v18_schema(conn)?;
 
     Ok(())
 }
@@ -543,6 +568,24 @@ fn ensure_v17_schema(conn: &Connection) -> SqlResult<()> {
 
 fn migrate_v16_to_v17(conn: &Connection) -> SqlResult<()> {
     ensure_v17_schema(conn)?;
+    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    Ok(())
+}
+
+/// v18: per-instance battery samples (`battery_records`) for ArduPilot/PX4 multi-monitor logging —
+/// imported (BAT.Instance) and live (BATTERY_STATUS.id). INAV stays single-battery (no rows here).
+/// Additive + idempotent. See docs/active/MULTI_BATTERY.md.
+fn ensure_v18_schema(conn: &Connection) -> SqlResult<()> {
+    conn.execute_batch(BATTERY_RECORDS_DDL_FULL)?;
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_battery_flight \
+         ON battery_records(flight_id, timestamp_ms);",
+    )?;
+    Ok(())
+}
+
+fn migrate_v17_to_v18(conn: &Connection) -> SqlResult<()> {
+    ensure_v18_schema(conn)?;
     set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
     Ok(())
 }
@@ -878,6 +921,62 @@ pub fn insert_telemetry_batch(
     Ok(())
 }
 
+/// Insert a batch of per-instance battery samples (multi-battery; see docs/active/MULTI_BATTERY.md).
+pub fn insert_battery_records_batch(conn: &Connection, records: &[BatteryRecord]) -> SqlResult<()> {
+    let tx = conn.unchecked_transaction()?;
+    {
+        let mut stmt = tx.prepare_cached(
+            "INSERT INTO battery_records (
+                flight_id, timestamp_ms, instance, voltage, current_a, mah_drawn,
+                battery_percentage, cell_count, temperature
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        )?;
+        for r in records {
+            stmt.execute(params![
+                r.flight_id,
+                r.timestamp_ms,
+                r.instance,
+                r.voltage,
+                r.current_a,
+                r.mah_drawn,
+                r.battery_percentage,
+                r.cell_count,
+                r.temperature,
+            ])?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// Load all per-instance battery samples for a flight, ordered by time then instance. Empty for
+/// single-battery flights (INAV / ArduPilot with one monitor) — the frontend then falls back to the
+/// denormalised primary battery on `telemetry_records`.
+pub fn get_flight_battery_records(conn: &Connection, flight_id: i64) -> SqlResult<Vec<BatteryRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, flight_id, timestamp_ms, instance, voltage, current_a, mah_drawn,
+                battery_percentage, cell_count, temperature
+         FROM battery_records
+         WHERE flight_id = ?1
+         ORDER BY timestamp_ms ASC, instance ASC",
+    )?;
+    let rows = stmt.query_map(params![flight_id], |row| {
+        Ok(BatteryRecord {
+            id: row.get(0)?,
+            flight_id: row.get(1)?,
+            timestamp_ms: row.get(2)?,
+            instance: row.get(3)?,
+            voltage: row.get(4)?,
+            current_a: row.get(5)?,
+            mah_drawn: row.get(6)?,
+            battery_percentage: row.get(7)?,
+            cell_count: row.get(8)?,
+            temperature: row.get(9)?,
+        })
+    })?;
+    rows.collect()
+}
+
 // ── Live recording: per-session temp store (commit-on-disarm, ADR-040) ──────────────
 
 /// Open (creating its parent dir) a per-session temp SQLite file: the `telemetry_records` table
@@ -894,6 +993,7 @@ pub fn open_temp_session(path: &Path) -> SqlResult<Connection> {
          PRAGMA synchronous = NORMAL;",
     )?;
     conn.execute_batch(TELEMETRY_RECORDS_DDL_FULL)?;
+    conn.execute_batch(BATTERY_RECORDS_DDL_FULL)?;
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS session_meta (
             id            INTEGER PRIMARY KEY CHECK (id = 1),
@@ -1011,6 +1111,17 @@ pub fn commit_session_to_main(
                  SELECT {sel} FROM sess.telemetry_records ORDER BY timestamp_ms ASC",
                 cols = TELEMETRY_COLS,
                 sel = select_cols,
+            ),
+            [],
+        )?;
+        // Copy per-instance battery samples too (multi-battery), rewriting flight_id like above.
+        let bat_select = BATTERY_RECORDS_COLS.replacen("flight_id", &flight_id.to_string(), 1);
+        tx.execute(
+            &format!(
+                "INSERT INTO main.battery_records ({cols}) \
+                 SELECT {sel} FROM sess.battery_records ORDER BY timestamp_ms ASC",
+                cols = BATTERY_RECORDS_COLS,
+                sel = bat_select,
             ),
             [],
         )?;

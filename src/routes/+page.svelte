@@ -2587,6 +2587,7 @@
         {defaultWpAltitudeM}
         {defaultPhTimeSec}
         {warnAltitudeM}
+        batteryAlertPct={$settings.batteryAlertPct}
         {systemMessages}
         {logLevel}
         {interfaceSettings}

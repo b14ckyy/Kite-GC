@@ -800,6 +800,7 @@
     "defaultPhTime": "Default PH Time",
     "alerts": "Alerts",
     "altitude": "Altitude",
+    "batteryAlert": "Battery alert",
     "systemMessages": "System Messages",
     "sysMsgOff": "Off",
     "sysMsgError": "Errors",
@@ -1002,6 +1003,7 @@
     "speed": "Speed",
     "altitude": "Altitude",
     "battery": "Battery",
+    "battery2": "Battery 2",
     "gps": "GPS",
     "rcLink": "RC Link",
     "compass": "Compass",
@@ -1029,6 +1031,7 @@
     "home": "HOME",
     "thr": "THR",
     "acc": "ACC",
+    "auto": "AUTO",
     "na": "N/A"
   },
   "compass": {
