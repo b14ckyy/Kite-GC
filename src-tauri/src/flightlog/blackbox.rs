@@ -563,6 +563,11 @@ fn read_f64(cols: Option<usize>, record: &StringRecord) -> Option<f64> {
     cols.and_then(|i| record.get(i)).and_then(parse_loose_f64)
 }
 
+/// Read one channel (0-based) from an index-sorted channel vector (rcCommand/rcData).
+fn read_channel(channels: &[usize], ch: usize, record: &StringRecord) -> Option<f64> {
+    channels.get(ch).and_then(|&i| record.get(i)).and_then(parse_loose_f64)
+}
+
 fn read_i32(cols: Option<usize>, record: &StringRecord) -> Option<i32> {
     read_f64(cols, record).map(|v| v.round() as i32)
 }
@@ -688,6 +693,10 @@ fn build_telemetry_record_indexed(
         link_rssi_dbm: None, // RSSI is the legacy 0–1023 `rssi` field, not dBm
         // INAV blackbox `airspeed` is cm/s → m/s.
         airspeed_ms: read_f64(cols.airspeed, record).map(|v| v / 100.0),
+        // Throttle (%): INAV logs no single throttle output (it's per-motor via the mixer), so use the
+        // canonical throttle RC channel rcCommand[3] (order R,P,Y,T; µs 1000–2000) → 0–100%.
+        throttle_pct: read_channel(&cols.rc_command, 3, record)
+            .map(|us| ((us - 1000.0) / 10.0).clamp(0.0, 100.0)),
     }
 }
 

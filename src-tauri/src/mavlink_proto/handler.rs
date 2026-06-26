@@ -18,7 +18,7 @@ use crate::flightlog::recorder::FlightRecorderHandle;
 use crate::scheduler::rc_tx::{self, RcTxHandle};
 use crate::scheduler::telemetry::{
     AttitudeData, GpsData, AltitudeData, AnalogData, StatusData,
-    SensorStatusData, AirspeedData, WindData,
+    SensorStatusData, AirspeedData, WindData, Misc2Data,
 };
 use crate::transport::ByteTransport;
 
@@ -767,8 +767,18 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
             };
             let _ = app_handle.emit("telemetry-airspeed", &airspeed);
 
+            // Throttle output (0–100%). MAVLink has no live uptime/flight-time in this message — those
+            // stay 0 here (the frontend seeds its flight timer elsewhere); only throttle is meaningful.
+            let misc2 = Misc2Data {
+                throttle_pct: hud.throttle.min(100) as u8,
+                auto_throttle: false,
+                uptime_s: 0,
+                flight_time_s: 0,
+            };
+            let _ = app_handle.emit("telemetry-misc2", &misc2);
+
             if let Some(ref rec) = recorder {
-                if let Ok(mut r) = rec.lock() { r.on_airspeed(&airspeed); }
+                if let Ok(mut r) = rec.lock() { r.on_airspeed(&airspeed); r.on_misc2(&misc2); }
             }
         }
 

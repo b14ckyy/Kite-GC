@@ -984,6 +984,8 @@
     "mUnit": "m",
     "bat": "BAT",
     "home": "HOME",
+    "thr": "THR",
+    "acc": "ACC",
     "na": "N/D"
   },
   "compass": {

@@ -19,6 +19,7 @@ pub enum TelemetryGroup {
     PositionSecondary,
     Status,
     LinkStats,
+    Misc2,
 }
 
 /// User-configurable telemetry polling rates
@@ -122,6 +123,17 @@ pub struct AirspeedData {
     pub airspeed: f64, // cm/s → m/s
 }
 
+/// MSP2_INAV_MISC2 (0x203A): FC throttle output + timers. Small message added to the regular poller —
+/// `throttle_pct` drives the Speed widget's throttle bar; `uptime_s`/`flight_time_s` ride along for
+/// upcoming flight-timer use.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Misc2Data {
+    pub throttle_pct: u8,   // 0–100, getThrottlePercent(true)
+    pub auto_throttle: bool, // navigation is controlling throttle
+    pub uptime_s: u32,       // seconds since boot
+    pub flight_time_s: u32,  // seconds since first arm
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WindData {
     /// Bearing the wind blows FROM, degrees (meteorological convention; ArduPilot WIND.direction).
@@ -191,6 +203,7 @@ pub enum TelemetryPayload {
     NavStatus(NavStatusData),
     LinkStats(LinkStatsData),
     Wind(WindData),
+    Misc2(Misc2Data),
 }
 
 /// Map MSP code to Tauri event name
@@ -207,6 +220,7 @@ pub fn event_name_for_code(code: u16) -> String {
         MSP_NAV_STATUS => "telemetry-nav-status".into(),
         MSP2_INAV_GET_LINK_STATS => "telemetry-linkstats".into(),
         MSP2_INAV_WIND => "telemetry-wind".into(),
+        MSP2_INAV_MISC2 => "telemetry-misc2".into(),
         _ => format!("telemetry-0x{:04X}", code),
     }
 }
@@ -225,6 +239,7 @@ pub fn decode_telemetry(code: u16, payload: &[u8], box_ids: &[u8]) -> TelemetryP
         MSP_NAV_STATUS => decode_nav_status_event(payload),
         MSP2_INAV_GET_LINK_STATS => decode_link_stats(payload),
         MSP2_INAV_WIND => decode_wind(payload),
+        MSP2_INAV_MISC2 => decode_misc2(payload),
         _ => {
             log::warn!("No decoder for MSP 0x{:04X}", code);
             TelemetryPayload::Attitude(AttitudeData {
@@ -532,6 +547,17 @@ fn decode_wind(payload: &[u8]) -> TelemetryPayload {
     })
 }
 
+/// MSP2_INAV_MISC2 (0x203A): [uptime_s:u32, flight_time_s:u32, throttle_pct:u8, auto_throttle:u8].
+/// Throttle is the FC's applied output percent (incl. nav-controlled). 10-byte payload.
+fn decode_misc2(payload: &[u8]) -> TelemetryPayload {
+    TelemetryPayload::Misc2(Misc2Data {
+        uptime_s: read_u32(payload, 0),
+        flight_time_s: read_u32(payload, 4),
+        throttle_pct: if payload.len() > 8 { payload[8] } else { 0 },
+        auto_throttle: payload.len() > 9 && payload[9] != 0,
+    })
+}
+
 /// MSP_GPSSTATISTICS (166): [lastDt:u32, errors:u32, timeouts:u32, packetCount:u32,
 ///                            hdop:u16, eph:u16, epv:u16]
 /// HDOP is a raw u16, scaled * 100 by INAV (e.g. 100 = HDOP 1.00).
@@ -603,6 +629,11 @@ pub fn feed_recorder(code: u16, payload: &[u8], recorder: &mut FlightRecorder, b
                 airspeed: read_i32(payload, 0) as f64 / 100.0,
             };
             recorder.on_airspeed(&data);
+        }
+        MSP2_INAV_MISC2 => {
+            if let TelemetryPayload::Misc2(data) = decode_misc2(payload) {
+                recorder.on_misc2(&data);
+            }
         }
         MSP2_INAV_WIND => {
             if payload.len() > 4 && (payload[4] & 0x01) != 0 {
@@ -768,6 +799,26 @@ mod tests {
                 assert_eq!(s.sensor_status, 0x000F);
             }
             _ => panic!("Expected Status"),
+        }
+    }
+
+    #[test]
+    fn test_decode_misc2() {
+        // MSP2_INAV_MISC2 (0x203A): uptime_s:u32, flight_time_s:u32, throttle_pct:u8, auto_throttle:u8
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&3600u32.to_le_bytes()); // uptime = 1h
+        payload.extend_from_slice(&125u32.to_le_bytes());  // flight time = 125s
+        payload.push(73);                                    // throttle 73%
+        payload.push(1);                                     // auto-throttle on
+
+        match decode_telemetry(MSP2_INAV_MISC2, &payload, &[]) {
+            TelemetryPayload::Misc2(m) => {
+                assert_eq!(m.uptime_s, 3600);
+                assert_eq!(m.flight_time_s, 125);
+                assert_eq!(m.throttle_pct, 73);
+                assert!(m.auto_throttle);
+            }
+            _ => panic!("Expected Misc2"),
         }
     }
 

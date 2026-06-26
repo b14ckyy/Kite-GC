@@ -426,6 +426,8 @@ pub struct NormalizedRecord {
     pub gps_vz_ms: Option<f64>,
     /// Airspeed (m/s) from the ARSP sensor message (synthetic-only logs have none).
     pub airspeed_ms: Option<f64>,
+    /// Throttle output (0–100%) from CTUN.ThO.
+    pub throttle_pct: Option<f64>,
 
     // ── Attitude ────────────────────────────────────────────────────────────
     pub roll_deg: Option<f64>,
@@ -508,6 +510,11 @@ struct DecoderState {
     wind_n_ms: Option<f64>,
     wind_e_ms: Option<f64>,
     airspeed_ms: Option<f64>,
+    /// Fixed-wing forward throttle from CTUN (0–100%).
+    throttle_pct: Option<f64>,
+    /// VTOL/hover throttle from QTUN (QuadPlane only, 0–100%). Combined with `throttle_pct` (max) at
+    /// row emit to give the "currently active" throttle.
+    qtun_throttle_pct: Option<f64>,
     rc_channels: Option<[u16; 4]>,
     active_wp: Option<u16>,
     mode: Option<u8>,
@@ -874,6 +881,7 @@ where
             link_snr: None,
             link_rssi_dbm: None,
             airspeed_ms: r.airspeed_ms,
+            throttle_pct: r.throttle_pct,
         });
     }
 
@@ -1038,6 +1046,12 @@ fn process_message(
                     wind_n_ms: state.wind_n_ms,
                     wind_e_ms: state.wind_e_ms,
                     airspeed_ms: state.airspeed_ms,
+                    // "Currently active" throttle: max of fixed-wing (CTUN) and VTOL (QTUN) — in cruise
+                    // QTUN≈0 so CTUN wins, in hover CTUN≈0 so QTUN wins.
+                    throttle_pct: match (state.throttle_pct, state.qtun_throttle_pct) {
+                        (Some(a), Some(b)) => Some(a.max(b)),
+                        (a, b) => a.or(b),
+                    },
                     rc_data: state.rc_channels,
                     active_wp_number: state.active_wp,
                     custom_mode: state.mode,
@@ -1087,6 +1101,28 @@ fn process_message(
                     baro.alt_m = a;
                     if let Some(crt) = msg.get_f64("CRt") { baro.climb_rate_ms = crt; }
                 }
+            }
+            // Throttle output. Field name + scale differ by vehicle: Plane/QuadPlane log `ThrOut`
+            // (int16 percent, may be negative for reverse thrust); Copter/Heli log `ThO` (float 0–1).
+            let pct = msg
+                .get_f64("ThrOut")                                  // Plane: percent
+                .or_else(|| msg.get_f64("ThO").map(|v| if v.abs() > 1.5 { v } else { v * 100.0 })) // Copter: 0–1
+                .or_else(|| msg.get_f64("Thr").map(|v| if v.abs() > 1.5 { v } else { v * 100.0 }));
+            if let Some(pct) = pct {
+                state.throttle_pct = Some(pct.clamp(0.0, 100.0));
+            }
+        }
+
+        // QuadPlane VTOL/hover throttle. Combined with CTUN (max) at row emit for the active throttle.
+        // QTUN throttle is copter-style (float 0–1) → heuristic ×100.
+        "QTUN" => {
+            let pct = msg
+                .get_f64("ThrOut")
+                .or_else(|| msg.get_f64("Thr"))
+                .or_else(|| msg.get_f64("ThO"))
+                .map(|v| if v.abs() > 1.5 { v } else { v * 100.0 });
+            if let Some(pct) = pct {
+                state.qtun_throttle_pct = Some(pct.clamp(0.0, 100.0));
             }
         }
 
@@ -1242,7 +1278,7 @@ fn write_normalized_csv(rows: &[NormalizedRecord], out_path: &Path) -> Result<()
          wind_n_ms,wind_e_ms,\
          rc1,rc2,rc3,rc4,\
          active_wp_number,\
-         custom_mode,armed,vehicle_type,fw_version,airspeed_ms"
+         custom_mode,armed,vehicle_type,fw_version,airspeed_ms,throttle_pct"
     )
     .map_err(|e| e.to_string())?;
 
@@ -1255,7 +1291,7 @@ fn write_normalized_csv(rows: &[NormalizedRecord], out_path: &Path) -> Result<()
         };
         writeln!(
             w,
-            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
             r.timestamp_us,
             r.utc_time
                 .map(|t| t.to_rfc3339())
@@ -1288,6 +1324,7 @@ fn write_normalized_csv(rows: &[NormalizedRecord], out_path: &Path) -> Result<()
             csv_escape(r.vehicle_type.as_deref().unwrap_or("")),
             csv_escape(r.fw_version.as_deref().unwrap_or("")),
             fmt_opt_f(r.airspeed_ms, 3),
+            fmt_opt_f(r.throttle_pct, 1),
         )
         .map_err(|e| e.to_string())?;
     }

@@ -19,7 +19,7 @@ use super::types::{Flight, FlightLogSettings, TelemetryRecord};
 use crate::msp::FcInfo;
 use crate::scheduler::telemetry::{
     AirspeedData, AltitudeData, AnalogData, AttitudeData, GpsData, GpsStatsData, LinkStatsData,
-    NavStatusData, SensorStatusData, StatusData, WindData,
+    Misc2Data, NavStatusData, SensorStatusData, StatusData, WindData,
 };
 
 /// Bit 2 in arming_flags indicates ARMED state
@@ -301,6 +301,8 @@ struct TelemetrySnapshot {
     link_rssi_dbm: Option<i16>,
     // Airspeed
     airspeed: Option<f64>,
+    // Throttle output (0–100%) from MSP2_INAV_MISC2 / VFR_HUD
+    throttle: Option<f64>,
     // Wind (live ArduPilot WIND), stored as the NED velocity vector (direction the air moves TOWARD)
     // to match the imported VWN/VWE convention used on replay.
     wind_n_ms: Option<f64>,
@@ -540,6 +542,12 @@ impl FlightRecorder {
     /// Feed airspeed data from the scheduler
     pub fn on_airspeed(&mut self, data: &AirspeedData) {
         self.snapshot.airspeed = Some(data.airspeed);
+    }
+
+    /// Feed throttle (MSP2_INAV_MISC2 / VFR_HUD). Only the throttle percent is recorded; the message's
+    /// uptime/flight-time are not (the flight timer is derived from the recording itself).
+    pub fn on_misc2(&mut self, data: &Misc2Data) {
+        self.snapshot.throttle = Some(data.throttle_pct as f64);
     }
 
     /// Feed wind data (MAVLink WIND / INAV MSP2_INAV_WIND). Stored as the NED velocity vector
@@ -933,6 +941,7 @@ impl FlightRecorder {
             alt_m: self.snapshot.alt_gps,
             speed_ms: self.snapshot.speed,
             airspeed_ms: self.snapshot.airspeed,
+            throttle_pct: self.snapshot.throttle,
             heading: self.snapshot.heading,
             vario_ms: self.snapshot.vario,
             voltage: self.snapshot.voltage,
