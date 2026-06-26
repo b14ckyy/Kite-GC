@@ -22,7 +22,14 @@
 
   let altConv = $derived(convertAltitude(telem.altitude, interfaceSettings.altitudeUnit));
   let varioConv = $derived(convertVerticalSpeed(telem.vario, interfaceSettings.verticalSpeedUnit));
-  let alt = $derived(telem.lastUpdate ? altConv.value.toFixed(1) : '—');
+  // Above 999 m, switch the metric readout to km (2 decimals) so big altitudes stay compact.
+  let altDisplay = $derived.by(() => {
+    if (!telem.lastUpdate) return { value: '—', unit: altConv.unit };
+    if (altConv.unit === 'm' && Math.abs(altConv.value) > 999) {
+      return { value: (altConv.value / 1000).toFixed(2), unit: 'km' };
+    }
+    return { value: altConv.value.toFixed(1), unit: altConv.unit };
+  });
   let varioText = $derived(() => {
     if (!telem.lastUpdate) return `— ${varioConv.unit}`;
     const arrow = telem.vario > 0.1 ? '▲' : telem.vario < -0.1 ? '▼' : '•';
@@ -35,8 +42,8 @@
 
 <div class="widget-card" style="--ws: {size}px">
   <span class="w-label">{$t('widgetLabels.alt')}</span>
-  <span class="w-value">{alt}</span>
-  <span class="w-unit">{altConv.unit}</span>
+  <span class="w-value">{altDisplay.value}</span>
+  <span class="w-unit">{altDisplay.unit}</span>
   <span class="w-vario" class:vario-up={varioPositive} class:vario-down={varioNegative}>
     {varioText()}
   </span>
