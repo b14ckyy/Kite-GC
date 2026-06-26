@@ -324,6 +324,11 @@ loop {
 | Position Secondary | `MSP_ALTITUDE` (109), `MSPV2_INAV_AIR_SPEED`* (0x2009) | rotates | — | 1 (lowest) | *Airspeed optional |
 | Misc2 | `MSP2_INAV_MISC2` (0x203A) | 2 Hz | fixed | 1 (lowest) | Throttle % (+ uptime/flight-time); see ADR-058 |
 
+> **Multi-battery (ArduPilot/PX4, ADR-059):** MAVLink `BATTERY_STATUS` is collected per `id` and emitted
+> as `telemetry-batteries`; DataFlash import reads `BAT.Instance`. Per-instance samples are stored in the
+> `battery_records` table (schema v18) and joined onto the replay track by timestamp. INAV stays
+> single-battery (synthesised one-element list on the frontend). See docs/active/MULTI_BATTERY.md.
+
 ### Staggered Position Polling
 Position Secondary rotates through its codes (one per cycle):
 - Default (airspeed off): Only `MSP_ALTITUDE` every cycle

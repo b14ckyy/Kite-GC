@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Multi-battery support (ArduPilot / PX4).** Aircraft with several battery monitors (e.g. a QuadPlane
+  with a forward fixed-wing pack + a VTOL lift pack) now show **each** battery, live and on replay,
+  instead of just the primary. The battery widget shows one pack with an **AUTO** selector that follows
+  the **highest current draw** (with a short hysteresis so it doesn't flicker during transition), a
+  **low-battery safety override** (drops to the lowest-charge pack below the configurable **Battery
+  alert** threshold in Settings → Alerts, and the widget enters an alert state), and **manual pinning**
+  (click the BAT label to cycle AUTO → pack 1 → pack 2 → …). A **second dockable battery widget**
+  (“Battery 2”) lets you watch two packs at once. The top bar stays on the **primary** battery. Per-pack
+  samples are logged (schema v18) so replay matches live. INAV (single battery) is unchanged. The
+  battery indicator no longer **estimates** a charge % from voltage — it shows the FC's native % when
+  available, otherwise the **voltage** (a fixed per-cell curve can't tell LiPo / Li-Ion / LiFe apart).
+  See **ADR-059**.
 - **Throttle telemetry — live, widget bar, and logged.** Throttle is now a unified telemetry field
   fed from each source (INAV `MSP2_INAV_MISC2` at 2 Hz; MAVLink `VFR_HUD`; on import INAV `rcCommand[3]`
   and ArduPilot CTUN/QTUN with per-vehicle scaling, QuadPlane taking the active of forward/VTOL). The
