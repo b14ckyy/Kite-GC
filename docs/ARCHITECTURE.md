@@ -2692,5 +2692,50 @@ smoothed), not an FC value — recorded here so it is not mistaken for direct te
 
 ---
 
+## ADR-059: Multi-Battery Telemetry Model (ArduPilot / PX4)
+
+**Status**: Accepted — shipped. **Related**: ADR-058 (throttle normalization); the telemetry pipeline;
+schema **v18** (`battery_records`); [docs/active/MULTI_BATTERY.md](active/MULTI_BATTERY.md).
+
+**Context**: ArduPilot/PX4 can run up to **10 independent battery monitors** at once (e.g. a QuadPlane
+with a big Li-Ion for the fixed-wing forward motor + a small LiPo for the VTOL lift). Kite collapsed
+every `BATTERY_STATUS` into one battery (it ignored the instance `id`), so only the primary monitor was
+ever shown. We needed per-instance handling — live, on import, logged and on replay — with a sensible
+*single-widget* presentation, while INAV (single battery) degrades cleanly.
+
+**Decision**:
+1. **Data model** — a per-instance list flows *alongside* the existing single-battery path (unchanged).
+   New event **`telemetry-batteries`** (`Vec` keyed by `id`). Live MAVLink accumulates `BATTERY_STATUS`
+   per `id`; `SYS_STATUS` / id-0 still feed the single `telemetry-analog` (top bar). INAV emits none, so
+   the frontend **synthesises one entry** from the primary fields. **Data-gated, not autopilot-gated**:
+   the multi-battery UI appears only when **>1** instance is reported — so PX4 (same MAVLink path) and
+   single-monitor ArduPilot behave exactly like INAV, with no `if autopilot==…` special-casing.
+2. **Logging (schema v18)** — a dedicated **`battery_records`** table (`flight_id, timestamp_ms,
+   instance, voltage, current_a, mah_drawn, battery_percentage, cell_count, temperature`) on the **same
+   timestamp grid** as `telemetry_records`, so replay aligns batteries to a track frame by timestamp.
+   The **primary stays denormalised** on `telemetry_records` (top bar + single-battery replay path
+   untouched); rows are written **only when ≥2 monitors** (single-battery replays from the primary).
+   Import reads **`BAT.Instance`** (fallback `Inst`).
+3. **Widget** — shows **one** instance with an **AUTO** selector: pick the **highest current draw**, with
+   a **hardcoded 1 A margin + 5 s dwell hysteresis** (anti-flap during transition), and a **low-battery
+   safety override** (below the configurable alert %, show the **lowest-%** pack). Plus manual **pin /
+   toggle** (persisted per widget) and a widget **alert state**. **Two dockable widgets** (battery /
+   battery2). The **top bar stays the primary** (instance 0) — no switching (it's the at-a-glance vehicle
+   battery). So top bar vs widget can legitimately differ while AUTO shows a non-primary pack.
+4. **Charge %** — trust **only the FC's native %** (INAV always sends it and does its own
+   chemistry-aware estimate; MAVLink `battery_remaining` when capacity is configured). We do **not**
+   estimate % from voltage — a fixed per-cell curve can't tell LiPo / Li-Ion / LiFe apart, so a guess
+   would mislead. With no native %, the indicator shows **voltage**; `0 %` is treated as "no native %"
+   → voltage (useful for a misconfigured or genuinely empty pack).
+
+**Consequences**: Per-instance batteries are live, logged and replayed identically (the user's main
+constraint — no multi-battery SITL, so replay must equal live). INAV / single-battery is unaffected;
+PX4 comes for free via the shared MAVLink path. The AUTO "active pack" is a heuristic (highest draw) —
+correct for the forward/VTOL split, acceptable elsewhere. Deferred (see the plan doc): per-instance
+**naming**, a Battery-Manager **multi-pack link** per flight, and cell-level (`BCL`) voltages (pack
+totals only for now).
+
+---
+
 *End of Architecture Decision Records*
 
