@@ -81,15 +81,36 @@ pub fn status() -> Option<String> {
     Some("go2rtc installed".to_string())
 }
 
-/// Download go2rtc into the app-data `bin/` dir (Windows-only auto-install for now). Returns the path.
-pub async fn download<F: FnMut(u8, &str)>(mut report: F) -> Result<PathBuf, String> {
-    if !cfg!(target_os = "windows") {
-        return Err(format!(
-            "Automatic go2rtc download is currently Windows-only. Install go2rtc manually (e.g. from \
-             {}) and place it next to the app or on PATH.",
-            RELEASES_PAGE
-        ));
+/// The go2rtc release asset for this OS+arch, or None if we don't auto-download here (manual install).
+/// Windows = a zip (go2rtc.exe inside); Linux = a raw binary (no archive). armv7/32-bit and other
+/// platforms are intentionally unsupported — too little RAM/CPU to run Kite + video usefully.
+fn release_asset_name() -> Option<&'static str> {
+    if cfg!(target_os = "windows") {
+        Some("go2rtc_win64.zip")
+    } else if cfg!(target_os = "linux") {
+        match std::env::consts::ARCH {
+            "x86_64" => Some("go2rtc_linux_amd64"),
+            "aarch64" => Some("go2rtc_linux_arm64"),
+            _ => None,
+        }
+    } else {
+        None
     }
+}
+
+/// User-facing "do it yourself" message when auto-download isn't available/possible.
+fn manual_install_msg() -> String {
+    format!(
+        "Automatic go2rtc download isn't available for this system. Install go2rtc manually (from {}) \
+         and place it next to the app, on your PATH, or in {}.",
+        RELEASES_PAGE,
+        crate::flightlog::decoder::install_dir().display()
+    )
+}
+
+/// Download go2rtc into the app-data `bin/` dir (Windows + Linux x86_64/arm64). Returns the path.
+pub async fn download<F: FnMut(u8, &str)>(mut report: F) -> Result<PathBuf, String> {
+    let asset_name = release_asset_name().ok_or_else(manual_install_msg)?;
 
     report(5, "Querying latest go2rtc release");
     let client = reqwest::Client::builder()
@@ -113,15 +134,14 @@ pub async fn download<F: FnMut(u8, &str)>(mut report: F) -> Result<PathBuf, Stri
         .and_then(Value::as_array)
         .ok_or("Latest release has no downloadable assets")?;
 
-    // Windows x64 zip (contains go2rtc.exe at the archive root).
-    let (asset_name, url) = assets
+    let url = assets
         .iter()
         .find_map(|a| {
             let name = a.get("name").and_then(Value::as_str)?;
             let url = a.get("browser_download_url").and_then(Value::as_str)?;
-            (name == "go2rtc_win64.zip").then(|| (name.to_string(), url.to_string()))
+            (name == asset_name).then(|| url.to_string())
         })
-        .ok_or("No go2rtc_win64.zip asset found in the latest release")?;
+        .ok_or_else(|| format!("No '{asset_name}' asset found in the latest go2rtc release"))?;
 
     report(25, "Downloading go2rtc");
     let bytes = client
@@ -139,11 +159,35 @@ pub async fn download<F: FnMut(u8, &str)>(mut report: F) -> Result<PathBuf, Stri
     let dir = crate::flightlog::decoder::install_dir();
     std::fs::create_dir_all(&dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
     let target = dir.join(binary_name());
-    extract_from_zip(&bytes, &target)?;
+    if asset_name.ends_with(".zip") {
+        extract_from_zip(&bytes, &target)?;
+    } else {
+        // Linux: the asset is the raw binary.
+        std::fs::write(&target, &bytes)
+            .map_err(|e| format!("Cannot write {}: {e}", target.display()))?;
+    }
+    make_executable(&target)?;
 
     report(100, "Done");
     eprintln!("go2rtc installed from {} -> {}", asset_name, target.display());
     Ok(target)
+}
+
+/// Mark a freshly written binary executable (no-op on Windows).
+fn make_executable(path: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(path)
+            .map_err(|e| format!("Cannot stat {}: {e}", path.display()))?
+            .permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(path, perms)
+            .map_err(|e| format!("Cannot chmod {}: {e}", path.display()))?;
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
 }
 
 /// Extract the go2rtc binary from the release zip by basename.
