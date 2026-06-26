@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Linux auto-download for the video helpers (ffmpeg + go2rtc).** Previously these were fetched
+  automatically only on Windows; Linux users had to install them by hand. Now both download on **Linux**
+  too (x86_64 and ARM64 / Raspberry Pi) — go2rtc as a ready-to-run binary, ffmpeg as the official static
+  build (unpacked with the system `tar`), with ffmpeg from your distro/`PATH` still preferred when
+  present. On an unsupported CPU or if a download fails, you get a clear "install it manually" hint
+  instead. No root/`sudo` required.
 - **Multi-battery support (ArduPilot / PX4).** Aircraft with several battery monitors (e.g. a QuadPlane
   with a forward fixed-wing pack + a VTOL lift pack) now show **each** battery, live and on replay,
   instead of just the primary. The battery widget shows one pack with an **AUTO** selector that follows
