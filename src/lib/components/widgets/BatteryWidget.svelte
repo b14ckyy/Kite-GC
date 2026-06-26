@@ -3,7 +3,7 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
-<!-- Battery widget — voltage bar, voltage, current, mAh -->
+<!-- Battery widget — voltage bar, voltage, current + power, mAh -->
 <script lang="ts">
   import type { TelemetryData } from "$lib/stores/telemetry";
   import { t } from 'svelte-i18n';
@@ -13,7 +13,14 @@
   let pct = $derived(telem.lastUpdate ? Math.max(0, Math.min(100, telem.batteryPercentage)) : 0);
   let barColor = $derived(pct >= 50 ? '#27ae60' : pct >= 20 ? '#f39c12' : '#e74c3c');
   let voltage = $derived(telem.lastUpdate ? `${telem.voltage.toFixed(1)}V` : '—V');
-  let current = $derived(telem.lastUpdate ? `${telem.current.toFixed(1)}A` : '—A');
+  // Amps: drop the decimal at 100 A+ to save width (3-digit max). Watts (V×A) shown next to it,
+  // always integer — can reach 4 digits at 1000 W+ (rare, but it happens).
+  let current = $derived(
+    telem.lastUpdate
+      ? `${Math.abs(telem.current) >= 100 ? telem.current.toFixed(0) : telem.current.toFixed(1)}A`
+      : '—A'
+  );
+  let watt = $derived(telem.lastUpdate ? `${Math.round(telem.voltage * telem.current)}W` : '—W');
   let mah = $derived(telem.lastUpdate ? `${telem.mAhDrawn} mAh` : '—');
 </script>
 
@@ -28,7 +35,10 @@
   {/if}
 
   <span class="w-value">{voltage}</span>
-  <span class="w-secondary">{current}</span>
+  <div class="w-secondary-row">
+    <span class="w-secondary">{current}</span>
+    <span class="w-secondary">{watt}</span>
+  </div>
   <span class="w-tertiary">{mah}</span>
 </div>
 
@@ -63,7 +73,17 @@
     line-height: 1.1;
     margin-top: calc(var(--ws) * 0.01);
   }
+  /* Current + power sit side by side, evenly spaced, sharing the same type. */
+  .w-secondary-row {
+    display: flex;
+    width: 100%;
+    justify-content: space-around;
+    align-items: baseline;
+    gap: calc(var(--ws) * 0.06);
+  }
   .w-secondary {
+    flex: 1;
+    text-align: center;
     font-size: calc(var(--ws) * 0.13);
     color: #ccc;
     font-variant-numeric: tabular-nums;
