@@ -2658,5 +2658,39 @@ choice is retained for now since it keeps a flight self-contained for `.kflight`
 
 ---
 
+## ADR-058: Throttle Telemetry Normalization Across Protocols
+
+**Status**: Accepted — shipped. **Related**: the unified telemetry pipeline; schema **v17**
+(`telemetry_records.throttle_pct`). Mirrors the additive-field pattern used for airspeed (schema v15).
+
+**Context**: Kite had no throttle field. Surfacing one is awkward because *“throttle” is not one thing*
+across our three live protocols and the import paths: it can be a **stick command** or an **applied
+output**, a **single value** or a **per-motor mixer** result, and it is scaled **0–1** or **0–100**
+depending on the source. We wanted a single unified telemetry field driving one widget bar and one
+logged column — fed both live and on import — without pretending the underlying values are identical.
+
+**Decision**: Treat `throttle` as one unified **0–100 %** field, fed **best-effort** per source:
+- **INAV live** — `MSP2_INAV_MISC2` (0x203A) `getThrottlePercent` (the FC's applied throttle output).
+  Polled in its **own 2 Hz slot** (small message; it also carries uptime/flight-time, kept for a future
+  flight-time timer — only throttle is consumed/logged today).
+- **INAV blackbox import** — `rcCommand[3]` (throttle channel command, µs 1000–2000 → %). INAV logs no
+  single throttle *output* (the mixer is per-motor), so the throttle **command** is the pragmatic proxy.
+- **MAVLink live** — `VFR_HUD.throttle` (already in the broadcast stream; no extra request).
+- **ArduPilot DataFlash import** — CTUN throttle-out. Field/scale **differ by vehicle**: Plane/QuadPlane
+  `ThrOut` (int16 **percent**), Copter/Heli `ThO` (float **0–1**, ×100). For a **QuadPlane**, CTUN is
+  combined with **QTUN** via `max()` to give the *currently active* throttle (forward in cruise, VTOL in
+  hover).
+- Persisted as `telemetry_records.throttle_pct` (schema v17, additive `ALTER TABLE`); replay reads it back.
+
+**Consequences**: One field, one bar, one column regardless of source — but the **semantics are
+intentionally mixed** (command vs. applied output) and the value is a best-effort proxy, not a precise
+per-motor figure. That is acceptable for a situational-awareness gauge. **Known gap**: ArduPilot
+Rover/Boat DataFlash logs carry no CTUN, so import throttle is absent for them (live `VFR_HUD` still
+works) — to be added once a sample log is available, from the right message (`RCOU`/servo-out). Note:
+the **acceleration** bar shown beside throttle in the speed widget is **derived** (differentiated speed,
+smoothed), not an FC value — recorded here so it is not mistaken for direct telemetry.
+
+---
+
 *End of Architecture Decision Records*
 
