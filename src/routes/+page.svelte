@@ -1330,14 +1330,24 @@
     const src = selectedFlight.source;
     if (src !== 'blackbox' && src !== 'both') return;
     try {
-      const defaultName = `blackbox_flight_${selectedFlightId}.TXT`;
+      // Keep the stored original file's extension (INAV .txt/.bbl, ArduPilot .bin, .tlog, raw-MSP, …)
+      // and build a descriptive default name: <craft>_<date>_<flightId>.<ext>. The user can rename in
+      // the dialog. (Previously hardcoded to blackbox_flight_<id>.TXT — wrong extension for non-INAV.)
+      const orig = blackboxFileInfo?.filename ?? '';
+      const dot = orig.lastIndexOf('.');
+      const ext = (dot > 0 ? orig.slice(dot + 1) : 'log').toLowerCase();
+      const craft = (selectedFlight.craft_name || 'flight')
+        .trim().replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '') || 'flight';
+      const date = (selectedFlight.start_time ?? '').slice(0, 10); // YYYY-MM-DD
+      const base = date ? `${craft}_${date}_${selectedFlightId}` : `${craft}_${selectedFlightId}`;
       const outputPath = await save({
-        filters: [{ name: $t('logbook.blackboxFileFilter'), extensions: ['TXT', 'BBL', 'BFL'] }],
-        defaultPath: defaultName,
+        filters: [{ name: $t('logbook.blackboxFileFilter'), extensions: [ext] }],
+        defaultPath: `${base}.${ext}`,
       });
       if (!outputPath) return;
-      const originalFilename = await logbookCtrl.exportBlackbox(selectedFlightId, outputPath, flightLogDbPath);
-      await showInfo($t('logbook.exportBlackboxTitle'), $t('logbook.exportBlackboxSuccess', { values: { filename: originalFilename } }));
+      await logbookCtrl.exportBlackbox(selectedFlightId, outputPath, flightLogDbPath);
+      const savedName = outputPath.split(/[\\/]/).pop() ?? `${base}.${ext}`;
+      await showInfo($t('logbook.exportBlackboxTitle'), $t('logbook.exportBlackboxSuccess', { values: { filename: savedName } }));
     } catch (e) {
       errorMsg = String(e);
     }
