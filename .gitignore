@@ -67,3 +67,11 @@ target/
 # just task runner (if user installs it locally)
 # =============================================================================
 .just/
+
+# =============================================================================
+# Documentation site (MkDocs) — see docs/active/USER_DOCS_ARCHITECTURE.md
+# =============================================================================
+# Generated static site output (rebuilt by `mkdocs build` / `mkdocs serve`)
+/site/
+# Local Python virtualenv for the docs toolchain
+/.venv/
