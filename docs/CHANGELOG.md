@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Throttle telemetry — live, widget bar, and logged.** Throttle is now a unified telemetry field
+  fed from each source (INAV `MSP2_INAV_MISC2` at 2 Hz; MAVLink `VFR_HUD`; on import INAV `rcCommand[3]`
+  and ArduPilot CTUN/QTUN with per-vehicle scaling, QuadPlane taking the active of forward/VTOL). The
+  **speed widget** gains a left **throttle bar** (0–100 % with 25/50/75 % ticks) and a right **derived
+  acceleration bar** (±4 m/s², bipolar from centre; smoothed, no numbers). Throttle is recorded to the
+  flight log (schema **v17**) and shown on replay. See **ADR-058** for the cross-protocol normalization.
+- **Power (W) in the battery widget.** Live V×A shown next to current (same type); amps drop their
+  decimal at 100 A+, watts are integer.
+- **Altitude widget auto-scales to km.** Above 999 m the metric readout switches to km with 2 decimals.
 - **Vehicle library (Vehicle DB).** A library of your aircraft, reached from a new **Vehicles** button
   in the Flight Logbook (before Batteries). Each vehicle is a structured build sheet — image header
   (like the WP mission preview), airframe (model/wingspan/length/AUW/dry weight), propulsion, radio/

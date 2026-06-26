@@ -322,6 +322,7 @@ loop {
 | Analog | `MSPV2_INAV_ANALOG` (0x2002) | 1 Hz | fixed | 3 | Voltage, Current, mAh, RSSI |
 | Position Primary | `MSP_RAW_GPS` (106) | 2 Hz | 1–5 Hz | 2 | Lat, Lon, Speed, COG, numSat |
 | Position Secondary | `MSP_ALTITUDE` (109), `MSPV2_INAV_AIR_SPEED`* (0x2009) | rotates | — | 1 (lowest) | *Airspeed optional |
+| Misc2 | `MSP2_INAV_MISC2` (0x203A) | 2 Hz | fixed | 1 (lowest) | Throttle % (+ uptime/flight-time); see ADR-058 |
 
 ### Staggered Position Polling
 Position Secondary rotates through its codes (one per cycle):
