@@ -4,6 +4,8 @@
 // All shared types and interfaces for the flight logbook system.
 // Imported by flightlog.ts (store), logbookController.ts, and UI components.
 
+import type { BatteryInstance } from './telemetry';
+
 /** A reusable mission in the DB library (mirrors Rust flightlog::types::Mission). */
 export interface LibraryMission {
   id: number;
@@ -308,6 +310,23 @@ export interface TelemetryRecord {
    *  (dB) and raw uplink RSSI (dBm) when the protocol provides them (CRSF / INAV 9.1+). */
   link_snr: number | null;
   link_rssi_dbm: number | null;
+  /** Per-instance batteries for this timestamp (multi-battery). Attached on the frontend after loading
+   *  the track (joined from battery_records by timestamp); absent for single-battery flights. */
+  batteries?: BatteryInstance[];
+}
+
+/** A per-instance battery sample row (`battery_records`), as returned by flightlogGetBatteryRecords. */
+export interface BatteryRecord {
+  id: number;
+  flight_id: number;
+  timestamp_ms: number;
+  instance: number;
+  voltage: number | null;
+  current_a: number | null;
+  mah_drawn: number | null;
+  battery_percentage: number | null;
+  cell_count: number | null;
+  temperature: number | null;
 }
 
 export type LogbookSortMode =

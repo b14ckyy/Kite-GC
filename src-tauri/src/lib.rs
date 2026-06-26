@@ -23,7 +23,7 @@ mod video;
 
 use commands::connection::{connect, disconnect, list_serial_ports, scan_ble_devices, ble_scan_start, ble_scan_stop, inav_set_craft_name, inav_read_stats};
 use commands::flightlog::{
-    flightlog_list, flightlog_get, flightlog_get_track, flightlog_delete,
+    flightlog_list, flightlog_get, flightlog_get_track, flightlog_get_battery_records, flightlog_delete,
     flightlog_update_notes, flightlog_update_craft_name, flightlog_update_platform_type, flightlog_update_pilot, flightlog_update_weather, flightlog_geocode, flightlog_fetch_weather,
     flightlog_default_db_path, flightlog_default_raw_log_path, flightlog_import_blackbox,
     flightlog_export, flightlog_export_blackbox, flightlog_blackbox_file_info, flightlog_delete_blackbox_file, flightlog_compact_db, flightlog_export_track, flightlog_import_kflight,
@@ -239,6 +239,7 @@ pub fn run() {
             flightlog_list,
             flightlog_get,
             flightlog_get_track,
+            flightlog_get_battery_records,
             flightlog_delete,
             mission_db_save,
             mission_db_get,

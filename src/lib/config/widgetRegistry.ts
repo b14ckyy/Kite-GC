@@ -18,6 +18,7 @@ export const WIDGET_DEFS: WidgetDef[] = [
   { id: 'speed',        label: 'Speed',          labelKey: 'widgets.speed',        widgetClass: 'small' },
   { id: 'altitude',     label: 'Altitude',       labelKey: 'widgets.altitude',     widgetClass: 'small' },
   { id: 'battery',      label: 'Battery',        labelKey: 'widgets.battery',      widgetClass: 'small' },
+  { id: 'battery2',     label: 'Battery 2',      labelKey: 'widgets.battery2',     widgetClass: 'small' },
   { id: 'gps',          label: 'GPS',            labelKey: 'widgets.gps',          widgetClass: 'small' },
   { id: 'rcLink',       label: 'RC Link',        labelKey: 'widgets.rcLink',       widgetClass: 'small' },
   { id: 'compass',      label: 'Compass',        labelKey: 'widgets.compass',      widgetClass: 'large' },

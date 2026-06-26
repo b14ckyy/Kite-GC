@@ -12,7 +12,7 @@ use std::path::Path;
 use rusqlite::{params, Connection};
 
 use super::db;
-use super::types::{Flight, FlightSummary, TelemetryRecord};
+use super::types::{BatteryRecord, Flight, FlightSummary, TelemetryRecord};
 
 /// Schema version stored in exported .kflight files
 const KFLIGHT_SCHEMA_VERSION: u32 = 2;
@@ -273,6 +273,19 @@ fn create_export_db(path: &Path) -> Result<Connection, String> {
             throttle_pct REAL
         );
 
+        CREATE TABLE IF NOT EXISTS battery_records (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            flight_id     INTEGER NOT NULL REFERENCES flights(id) ON DELETE CASCADE,
+            timestamp_ms  INTEGER NOT NULL,
+            instance      INTEGER NOT NULL,
+            voltage       REAL,
+            current_a     REAL,
+            mah_drawn     INTEGER,
+            battery_percentage INTEGER,
+            cell_count    INTEGER,
+            temperature   REAL
+        );
+
         CREATE TABLE IF NOT EXISTS blackbox_records (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
             flight_id     INTEGER NOT NULL REFERENCES flights(id) ON DELETE CASCADE,
@@ -292,6 +305,8 @@ fn create_export_db(path: &Path) -> Result<Connection, String> {
 
         CREATE INDEX IF NOT EXISTS idx_telemetry_flight
             ON telemetry_records(flight_id, timestamp_ms);
+        CREATE INDEX IF NOT EXISTS idx_battery_flight
+            ON battery_records(flight_id, timestamp_ms);
         CREATE INDEX IF NOT EXISTS idx_blackbox_records_flight
             ON blackbox_records(flight_id, timestamp_us);
         CREATE INDEX IF NOT EXISTS idx_blackbox_files_flight
@@ -357,6 +372,21 @@ fn copy_flight(
             .collect();
         db::insert_telemetry_batch(dst, &remapped)
             .map_err(|e| format!("Insert telemetry: {}", e))?;
+    }
+
+    // 3b. Copy per-instance battery samples (multi-battery)
+    let bat = db::get_flight_battery_records(src, flight_id)
+        .map_err(|e| format!("Read battery records: {}", e))?;
+    if !bat.is_empty() {
+        let remapped: Vec<BatteryRecord> = bat
+            .into_iter()
+            .map(|mut r| {
+                r.flight_id = new_id;
+                r
+            })
+            .collect();
+        db::insert_battery_records_batch(dst, &remapped)
+            .map_err(|e| format!("Insert battery records: {}", e))?;
     }
 
     // 4. Copy blackbox records

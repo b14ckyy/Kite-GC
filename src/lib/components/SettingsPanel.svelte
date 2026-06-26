@@ -61,6 +61,7 @@
     defaultWpAltitudeM = 50,
     defaultPhTimeSec = 30,
     warnAltitudeM = 120,
+    batteryAlertPct = 30,
     systemMessages = 'all',
     logLevel = 'warning',
     interfaceSettings = { speedUnit: 'kmh', altitudeUnit: 'm', distanceUnit: 'metric', verticalSpeedUnit: 'ms', temperatureUnit: 'c' },
@@ -110,6 +111,7 @@
     defaultWpAltitudeM?: number;
     defaultPhTimeSec?: number;
     warnAltitudeM?: number;
+    batteryAlertPct?: number;
     systemMessages?: SystemMessagesLevel;
     logLevel?: LogLevel;
     interfaceSettings?: InterfaceSettings;
@@ -230,9 +232,12 @@
   let phTime = $state(defaultPhTimeSec);
   // svelte-ignore state_referenced_locally
   let warnAlt = $state(warnAltitudeM);
+  // svelte-ignore state_referenced_locally
+  let batAlert = $state(batteryAlertPct);
   function onWpAltChange() { onPatch({ defaultWpAltitudeM: Math.max(1, wpAlt) }); }
   function onPhTimeChange() { onPatch({ defaultPhTimeSec: Math.max(1, Math.round(phTime)) }); }
   function onWarnAltChange() { onPatch({ warnAltitudeM: Math.max(0, warnAlt) }); }
+  function onBatAlertChange() { onPatch({ batteryAlertPct: Math.max(0, Math.min(100, Math.round(batAlert))) }); }
 
   function patchIface(p: Partial<InterfaceSettings>) {
     onPatch({ interface: { ...interfaceSettings, ...p } });
@@ -637,6 +642,10 @@
       <div class="s-row">
         <span class="s-label">{$t('settings.altitude')}</span>
         <UnitStepper bind:value={warnAlt} kind="altitude" settings={interfaceSettings} min={0} max={5000} step={10} decimals={0} onchange={onWarnAltChange} />
+      </div>
+      <div class="s-row">
+        <span class="s-label">{$t('settings.batteryAlert')}</span>
+        <NumberStepper bind:value={batAlert} min={0} max={100} step={5} decimals={0} unit="%" onchange={onBatAlertChange} />
       </div>
       <div class="s-row">
         <span class="s-label">{$t('settings.systemMessages')}</span>

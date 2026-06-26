@@ -776,6 +776,7 @@
     "defaultPhTime": "Durée PH par défaut",
     "alerts": "Alertes",
     "altitude": "Altitude",
+    "batteryAlert": "Alerte batterie",
     "alertThresholdsHint": "Seuils d'alerte. 0 = désactivé.",
     "hudWidgets": "Widgets HUD",
     "rateHint": "Les changements de fréquence prennent effet à la prochaine connexion.",
@@ -959,6 +960,7 @@
     "speed": "Vitesse",
     "altitude": "Altitude",
     "battery": "Batterie",
+    "battery2": "Batterie 2",
     "gps": "GPS",
     "rcLink": "Lien RC",
     "compass": "Compas",
@@ -986,6 +988,7 @@
     "home": "HOME",
     "thr": "THR",
     "acc": "ACC",
+    "auto": "AUTO",
     "na": "N/D"
   },
   "compass": {
