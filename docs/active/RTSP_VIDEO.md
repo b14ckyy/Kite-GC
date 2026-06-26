@@ -28,8 +28,10 @@ sinks, one decode). Measured **~200 ms** end-to-end vs the OBS preview with a sa
 **go2rtc** (AlexxIT/go2rtc) is the RTSP→WebRTC engine — a single Go binary, discovered/downloaded
 exactly like `blackbox_decode`/ffmpeg (`flightlog::decoder::install_dir`, GitHub-release zip).
 
-- **`src-tauri/src/video/go2rtc.rs`** — discovery (`find_go2rtc`) · `status()` · `download()` (Windows
-  `go2rtc_win64.zip`) · `Go2Rtc` managed state running **one** local instance bound to `127.0.0.1` with
+- **`src-tauri/src/video/go2rtc.rs`** — discovery (`find_go2rtc`) · `status()` · `download()`
+  (arch-aware: Windows `go2rtc_win64.zip`; Linux x86_64/aarch64 raw binary `go2rtc_linux_amd64`/`_arm64`,
+  `chmod +x`; other arches → manual-install hint) · `Go2Rtc` managed state running **one** local
+  instance bound to `127.0.0.1` with
   **ephemeral free ports** for the API, the internal RTSP server, **and WebRTC** (a busy default WebRTC
   port 8555 makes pion's UDP mux nil → process-killing panic, go2rtc #1851/#1855). Config is written as
   JSON (valid YAML) and also points go2rtc at our bundled ffmpeg (`ffmpeg.bin`) for the fallback.
