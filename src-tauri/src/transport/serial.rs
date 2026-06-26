@@ -37,8 +37,11 @@ fn bt_spp_outgoing_ports() -> std::collections::HashSet<String> {
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     // BTHENUM enumerates Bluetooth RFCOMM (SPP) devices. Layout:
     //   BTHENUM\{service-class-guid}_<id>\<instance>\Device Parameters\PortName = "COMx"
-    // The *incoming* (local server) ports live under a class key containing "LOCALMFG"; the *outgoing*
-    // (client) ports reference the remote device address instead. We keep only the latter.
+    // Outgoing (client) ports reference a real REMOTE device address in their instance name; the
+    // incoming (local RFCOMM server) ports use the null address (00:00:…:00). We classify on the
+    // instance address — NOT the class-key name: a real outgoing port can sit under a `…_LOCALMFG&…`
+    // class (observed in the field), so the old "class contains LOCALMFG ⇒ incoming" test wrongly
+    // dropped working outgoing ports.
     let bthenum = match hklm.open_subkey(r"SYSTEM\CurrentControlSet\Enum\BTHENUM") {
         Ok(k) => k,
         Err(e) => {
@@ -48,10 +51,6 @@ fn bt_spp_outgoing_ports() -> std::collections::HashSet<String> {
     };
 
     for class_name in bthenum.enum_keys().flatten() {
-        // Skip local/incoming server ports.
-        if class_name.to_uppercase().contains("LOCALMFG") {
-            continue;
-        }
         let class_key = match bthenum.open_subkey(&class_name) {
             Ok(k) => k,
             Err(_) => continue,
@@ -63,12 +62,25 @@ fn bt_spp_outgoing_ports() -> std::collections::HashSet<String> {
                 .and_then(|inst| inst.open_subkey("Device Parameters").ok())
                 .and_then(|dp| dp.get_value::<String, _>("PortName").ok());
             if let Some(com) = port {
-                log::debug!("Bluetooth SPP outgoing port: {} ({}\\{})", com, class_name, inst_name);
-                out.insert(com.to_uppercase());
+                if bt_spp_is_outgoing(&inst_name) {
+                    log::debug!("Bluetooth SPP outgoing port: {} ({}\\{})", com, class_name, inst_name);
+                    out.insert(com.to_uppercase());
+                }
             }
         }
     }
     out
+}
+
+/// Classify a BTHENUM instance as an *outgoing* (client) SPP port vs an *incoming* (local server) one.
+/// The instance name ends in `…&<REMOTE_ADDR>_<suffix>` — outgoing ports carry a real remote address
+/// (e.g. `042404160E7B_C00000000`), incoming/server ports carry the null address (`000000000000_…`).
+/// Unparseable instances default to **outgoing** (fail-safe: never hide a possibly-real port).
+#[cfg(target_os = "windows")]
+fn bt_spp_is_outgoing(inst_name: &str) -> bool {
+    let tail = inst_name.rsplit('&').next().unwrap_or("");
+    let addr = tail.split('_').next().unwrap_or(tail);
+    !(!addr.is_empty() && addr.chars().all(|c| c == '0'))
 }
 
 /// All Bluetooth SPP COM ports (outgoing + incoming), so we can drop the incoming ones from the list.
@@ -102,6 +114,82 @@ fn bt_spp_all_ports() -> std::collections::HashSet<String> {
     out
 }
 
+/// One-time dump (per process) of the raw serial enumeration + Bluetooth-SPP registry classification.
+/// Reveals, in a tester's log, exactly which COM ports the OS reports, the type `serialport` assigns
+/// each, and how every BTHENUM (Bluetooth RFCOMM/SPP) entry is classified — so a "missing port" can be
+/// traced to either the OS enumeration or our classification.
+#[cfg(target_os = "windows")]
+fn log_port_enumeration_once(
+    ports: &[serialport::SerialPortInfo],
+    spp_all: &std::collections::HashSet<String>,
+) {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let spp_outgoing = bt_spp_outgoing_ports();
+        let dump = || {
+            eprintln!("[PORTS] serialport::available_ports() reported {} port(s):", ports.len());
+            for p in ports {
+                let kind = match &p.port_type {
+                    serialport::SerialPortType::UsbPort(_) => "USB",
+                    serialport::SerialPortType::BluetoothPort => "Bluetooth",
+                    serialport::SerialPortType::PciPort => "PCI",
+                    serialport::SerialPortType::Unknown => "Unknown",
+                };
+                let up = p.port_name.to_uppercase();
+                let cls = if spp_outgoing.contains(&up) {
+                    "SPP-outgoing"
+                } else if spp_all.contains(&up) {
+                    "SPP-incoming/unclassified"
+                } else {
+                    "non-SPP"
+                };
+                eprintln!("[PORTS]   {} type={} class={}", p.port_name, kind, cls);
+            }
+            eprintln!("[PORTS] BTHENUM outgoing set: {:?}", spp_outgoing);
+            eprintln!("[PORTS] BTHENUM all set:      {:?}", spp_all);
+            log_bthenum_tree();
+        };
+        dump();
+    });
+}
+
+/// Walk the entire BTHENUM registry subtree and log each class/instance + its PortName and whether the
+/// class key looks like a local (incoming) server (`LOCALMFG`). Diagnostic only.
+#[cfg(target_os = "windows")]
+fn log_bthenum_tree() {
+    use winreg::enums::HKEY_LOCAL_MACHINE;
+    use winreg::RegKey;
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    let bthenum = match hklm.open_subkey(r"SYSTEM\CurrentControlSet\Enum\BTHENUM") {
+        Ok(k) => k,
+        Err(e) => {
+            eprintln!("[PORTS] BTHENUM not readable: {}", e);
+            return;
+        }
+    };
+    eprintln!("[PORTS] --- BTHENUM tree ---");
+    for class_name in bthenum.enum_keys().flatten() {
+        let localmfg = class_name.to_uppercase().contains("LOCALMFG");
+        let class_key = match bthenum.open_subkey(&class_name) {
+            Ok(k) => k,
+            Err(_) => continue,
+        };
+        for inst_name in class_key.enum_keys().flatten() {
+            let port = class_key
+                .open_subkey(&inst_name)
+                .ok()
+                .and_then(|inst| inst.open_subkey("Device Parameters").ok())
+                .and_then(|dp| dp.get_value::<String, _>("PortName").ok());
+            eprintln!(
+                "[PORTS]   class={} localmfg={} inst={} port={:?}",
+                class_name, localmfg, inst_name, port
+            );
+        }
+    }
+    eprintln!("[PORTS] --- end BTHENUM tree ---");
+}
+
 /// List available serial ports on the system.
 ///
 /// On Windows, Bluetooth SPP ports are special-cased: the *incoming* (local server) port of each
@@ -113,18 +201,28 @@ pub fn list_ports() -> Vec<PortInfo> {
     let (spp_outgoing, spp_all) = (bt_spp_outgoing_ports(), bt_spp_all_ports());
 
     match serialport::available_ports() {
-        Ok(ports) => ports
+        Ok(ports) => {
+            // One-time diagnostics: the raw enumeration + Bluetooth-SPP registry classification, so a
+            // tester's log reveals exactly which ports the OS reports and how each is classified.
+            #[cfg(target_os = "windows")]
+            log_port_enumeration_once(&ports, &spp_all);
+
+            ports
             .into_iter()
             .filter_map(|p| {
+                #[cfg(target_os = "windows")]
                 let port_upper = p.port_name.to_uppercase();
 
-                // Windows: drop incoming Bluetooth SPP ports (any SPP port that isn't an outgoing one).
+                // Windows: hide the *incoming* (local server) SPP port of each paired device — it can't
+                // be used to connect out. Classification is by the instance's remote BT address (see
+                // bt_spp_is_outgoing), so any SPP port that is known and NOT outgoing is incoming.
                 #[cfg(target_os = "windows")]
                 if spp_all.contains(&port_upper) && !spp_outgoing.contains(&port_upper) {
                     return None;
                 }
 
-                // Windows: tag outgoing Bluetooth SPP ports; the UI handles their label (+ custom name).
+                // Windows: tag outgoing Bluetooth-SPP ports so the UI offers the custom rename (the OS
+                // gives them no useful descriptor).
                 #[cfg(target_os = "windows")]
                 if spp_outgoing.contains(&port_upper) {
                     return Some(PortInfo {
@@ -162,7 +260,8 @@ pub fn list_ports() -> Vec<PortInfo> {
                     port_type,
                 })
             })
-            .collect(),
+            .collect()
+        }
         Err(e) => {
             log::error!("Failed to enumerate serial ports: {}", e);
             Vec::new()
