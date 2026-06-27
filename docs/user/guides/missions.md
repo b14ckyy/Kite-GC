@@ -19,7 +19,7 @@ The planner always targets one stack at a time:
 
 If you connect to a different stack while a plan is loaded, Kite asks before discarding it.
 
-![The flight-stack selector](../assets/system_selector.png)
+![The flight-stack selector](../assets/guides/missions/system_selector.png)
 /// caption
 Pick the flight stack (and, for ArduPilot, the vehicle type) when planning offline; it locks to the
 connected aircraft once you're linked.
@@ -102,7 +102,7 @@ Each waypoint carries an altitude against a **reference**:
 - **Survey patterns** — generate an area scan (a back-and-forth grid over a drawn region) instead of
   placing every leg by hand.
 
-![Editing a mission — the waypoint list and map](../assets/editing.png)
+![Editing a mission — the waypoint list and map](../assets/guides/missions/editing.png)
 /// caption
 Building a mission: the numbered waypoint list (main waypoints with indented modifiers) and the route
 on the map.
@@ -125,10 +125,24 @@ the aircraft will fly.
 
 - **Save / load files** — INAV uses `.mission` (MultiWii XML); ArduPilot and PX4 use `.waypoints`
   (the QGroundControl-compatible plain-text format). You can also drag a file onto the map.
-- **Mission library** — save a plan into Kite's library to reuse it later, across sessions.
 - **Provenance badges** tell you where the loaded plan came from — **FC** (downloaded), **FILE** (opened
   from disk) or **DB** (from the library) — plus a **Modified** badge once you've edited it. Shown for
   all three stacks.
+
+### The mission library (Mission Manager)
+
+Save a plan into Kite's **library** to reuse it across sessions, then open the **Mission Manager** to
+browse them. Missions are grouped by **location** (named automatically from their coordinates) and can
+be **searched**, **loaded to the map**, **exported** to a file, or **deleted** — with a warning when
+flights still link to a mission you're removing. Saving **de-duplicates by content**, so re-saving an
+unchanged plan won't pile up copies. The library is **shared across the flight stacks** (each mission
+loads back into the stack it belongs to), and library missions also link to flights in the
+**[logbook](logbook.md)**.
+
+![The Mission Manager](../assets/guides/missions/mission_manager.png)
+/// caption
+The Mission Manager — your saved missions, grouped by location, ready to load to the map, export or delete.
+///
 
 ## Multiple missions (INAV)
 

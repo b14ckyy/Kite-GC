@@ -34,7 +34,7 @@ A small cluster of buttons sits in one corner of the map:
   centre *and* rotate the map to the aircraft's heading.
 - **Zoom + / −** — the mouse wheel works too.
 
-![The map control cluster in its different states](../assets/map_controls.png)
+![The map control cluster in its different states](../assets/guides/telemetry/map_controls.png)
 /// caption
 The map controls — the 2D/3D, follow-mode and zoom buttons (shown here in several states).
 ///
@@ -66,7 +66,7 @@ along the bottom. Each widget is self-contained and updates live.
 - Widgets scale to fit the dock, and your layout (including which dock each widget sits in) is
   **remembered between sessions**.
 
-![A widget dock in edit mode](../assets/widget_edit_mode.png)
+![A widget dock in edit mode](../assets/guides/telemetry/widget_edit_mode.png)
 /// caption
 Edit mode — drag widgets to reorder them or move them between the docks.
 ///
@@ -118,7 +118,7 @@ The **UAV Info** tool on the navigation rail is a quick read-out of *what you're
   AUX-RC, ADS-B), lit when your INAV version supports them. These are version-dependent and INAV-specific,
   so the section appears only on an INAV link.
 
-![The UAV Info panel](../assets/uav_info.png)
+![The UAV Info panel](../assets/guides/telemetry/uav_info.png)
 /// caption
 The UAV Info panel on an INAV link — flight-controller identity and the version-gated feature badges.
 ///

@@ -73,9 +73,10 @@ nav:
       - Connecting: guides/connecting.md
       - Telemetry & display: guides/telemetry-and-display.md
       - Missions: guides/missions.md
-      - Logbook: guides/logbook.md
-      - Vehicles: guides/vehicles.md
-      - Batteries: guides/batteries.md
+      - Logbook:
+          - guides/logbook.md
+          - Vehicles: guides/vehicles.md
+          - Batteries: guides/batteries.md
       - Video: guides/video.md
       - Safety: guides/safety.md
       - Radar & ADS-B: guides/radar-and-adsb.md

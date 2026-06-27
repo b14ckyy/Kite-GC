@@ -3,7 +3,7 @@
 A two-minute look at the Kite interface, so you know where everything lives. Don't worry about the
 details here — each area has its own guide; this is just the map of the cockpit.
 
-![The Kite interface with its main regions numbered](../assets/ui_overview.png)
+![The Kite interface with its main regions numbered](../assets/getting-started/ui_overview.png)
 /// caption
 The main interface, with the numbered regions described below.
 ///
@@ -50,7 +50,7 @@ Each tool, at a glance — expand for a quick description and the link to its fu
     Flight-controller identity (firmware variant, version, board) and live vehicle status — a quick
     read-out of what you're connected to and how it's doing.
 
-    ![The UAV Info panel](../assets/uav_info.png)
+    ![The UAV Info panel](../assets/guides/telemetry/uav_info.png)
 
     *Details: [Telemetry & display](../guides/telemetry-and-display.md).*
 
