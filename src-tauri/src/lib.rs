@@ -80,7 +80,8 @@ use terrain::TerrainProvider;
 use commands::mission::{
     mission_get, mission_clear, mission_set, mission_add_wp, mission_insert_wp,
     mission_remove_wp, mission_update_wp, mission_reorder_wp,
-    mission_download, mission_upload, mission_fc_info, mission_export_xml, mission_import_xml,
+    mission_download, mission_upload, mission_upload_multi, mission_get_active_index,
+    mission_fc_info, mission_export_xml, mission_import_xml,
     mission_save_file, mission_save_file_from_json, mission_load_file,
     read_text_file, write_text_file,
     ardu_mission_download, ardu_mission_upload,
@@ -210,6 +211,8 @@ pub fn run() {
             mission_reorder_wp,
             mission_download,
             mission_upload,
+            mission_upload_multi,
+            mission_get_active_index,
             mission_fc_info,
             mission_export_xml,
             mission_import_xml,
