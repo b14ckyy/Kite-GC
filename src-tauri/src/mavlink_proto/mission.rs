@@ -110,7 +110,14 @@ pub fn download(
         }
 
         match wait_for_item(&rx, seq, ITEM_TIMEOUT) {
-            Ok(wp) => { if !(reserve_home && seq == 0) { items.push(wp); } }
+            Ok(wp) => {
+                if reserve_home && seq == 0 {
+                    log::debug!("MAVLink download seq 0 (home slot, dropped): {wp:?}");
+                } else {
+                    log::debug!("MAVLink download item seq {seq}: {wp:?}");
+                    items.push(wp);
+                }
+            }
             Err(e) => { unregister(cmd_tx); return Err(e); }
         }
         // seq 0 with reserve_home is the home slot → stays "0 of n"; real WPs count from 1.
@@ -142,7 +149,10 @@ pub fn upload(
     let count = waypoints.len() as u16 + reserve_home as u16;
 
     // 1. Announce item count
-    eprintln!("MAVLink upload: announcing {} items ({} waypoints + home slot)", count, waypoints.len());
+    log::info!(
+        "MAVLink mission upload start: announcing {} items ({} waypoints{})",
+        count, waypoints.len(), if reserve_home { " + home slot" } else { "" }
+    );
     if let Err(e) = send(cmd_tx, MavMessage::MISSION_COUNT(MISSION_COUNT_DATA {
         target_system: fc_sysid,
         target_component: 0,
@@ -181,7 +191,7 @@ pub fn upload(
             Ok(MavMessage::MISSION_ACK(ack)) => {
                 unregister(cmd_tx);
                 return if ack.mavtype == MavMissionResult::MAV_MISSION_ACCEPTED {
-                    eprintln!("MAVLink upload complete: {} items accepted", count);
+                    log::info!("MAVLink mission upload complete: {} items accepted", count);
                     Ok(())
                 } else {
                     Err(format!("FC rejected upload: {:?}", ack.mavtype))
@@ -190,7 +200,7 @@ pub fn upload(
             Ok(other) => {
                 // Anything else on the mission channel during an upload is unexpected (e.g. another GCS
                 // starting its own mission op → the FC cancels ours). Log it so we can tell.
-                eprintln!("MAVLink upload: unexpected mission msg during upload: {:?}", other);
+                log::warn!("MAVLink upload: unexpected mission msg during upload: {other:?}");
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 unregister(cmd_tx);
@@ -215,12 +225,14 @@ fn respond_item(
     mission_type: MavMissionType,
 ) -> Result<(), String> {
     let item = if reserve_home && seq == 0 {
+        log::debug!("MAVLink upload seq 0 (home placeholder)");
         home_item(waypoints, fc_sysid)
     } else {
         let idx = seq as usize - reserve_home as usize;
         if idx >= waypoints.len() {
             return Err(format!("FC requested WP {} but mission has only {}", seq, waypoints.len()));
         }
+        log::debug!("MAVLink upload item seq {seq}: {:?}", waypoints[idx]);
         wp_to_item(&waypoints[idx], seq, fc_sysid, mission_type)
     };
     send(cmd_tx, MavMessage::MISSION_ITEM_INT(item))
