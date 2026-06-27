@@ -83,7 +83,7 @@ pub fn fence_read_all(state: State<'_, AppState>) -> Result<FenceConfig, String>
     let Some((cmd_tx, fc_sysid)) = mav_handle(&state)? else {
         return Ok(FenceConfig::default());
     };
-    let items = mavlink_proto::mission::download(&cmd_tx, fc_sysid, false, MavMissionType::MAV_MISSION_TYPE_FENCE)?;
+    let items = mavlink_proto::mission::download(&cmd_tx, fc_sysid, false, MavMissionType::MAV_MISSION_TYPE_FENCE, |_, _| {})?;
     let (zones, return_point) = decode_fence(&items);
     let pmap = params_rt::read_params(&cmd_tx, fc_sysid, FENCE_PARAM_NAMES);
     let params = FENCE_PARAM_NAMES.iter()

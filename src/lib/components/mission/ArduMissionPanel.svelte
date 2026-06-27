@@ -21,6 +21,7 @@
     serializeWaypoints, parseWaypoints,
     type ArduWaypoint,
   } from '$lib/stores/missionArdupilot';
+  import { onMissionDownloadProgress } from '$lib/stores/mission';
   import { cmdName, cmdShort, cmdHasLocation, cmdDef, cmdValidForVehicle, cmdValidForPx4, enumLabel, type VehicleClass } from '$lib/helpers/arduCommandCatalog';
   import { arduWpDetailLines } from '$lib/helpers/missionWpDetails';
   import { frameMissionOnMap } from '$lib/stores/mapCamera';
@@ -217,6 +218,12 @@
 
   async function handleFcDownload() {
     statusMessage = $t('arduMission.downloading');
+    // Live "x of n" status while the FC streams items (the count arrives before the items).
+    const un = await onMissionDownloadProgress(({ current, total }) => {
+      statusMessage = total > 0
+        ? $t('mission.downloadingProgress', { values: { current, total } })
+        : $t('mission.downloading');
+    });
     try {
       const wps = await invoke<ArduWaypoint[]>('ardu_mission_download');
       arduMission.set(wps);
@@ -227,7 +234,7 @@
       frameMissionOnMap();
     } catch (e) {
       statusMessage = $t('mission.downloadFailed', { values: { error: String(e) } });
-    }
+    } finally { un(); }
   }
 
   async function handleFcUpload() {

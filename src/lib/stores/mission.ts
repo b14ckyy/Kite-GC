@@ -7,6 +7,7 @@
 
 import { writable, derived, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { connection } from './connection';
 import { homePosition } from './home';
 import { frameMissionOnMap } from './mapCamera';
@@ -725,6 +726,21 @@ export async function missionDownload(fromEeprom = false): Promise<Mission> {
 /** Query the FC's mission info (wp_count) without downloading — for the connect prompt. */
 export async function missionFcInfo(): Promise<MissionInfo> {
   return invoke<MissionInfo>('mission_fc_info');
+}
+
+/** Waypoint-download progress emitted by the backend during an FC download (MSP + MAVLink). */
+export interface MissionDownloadProgress {
+  current: number;
+  total: number;
+}
+
+/**
+ * Subscribe to FC waypoint-download progress (`mission-download-progress`), for an "x of n" indicator.
+ * Returns the unlisten fn — call it once the download settles (in a `finally`). Shared by the INAV and
+ * ArduPilot mission panels (both backends emit the same event).
+ */
+export function onMissionDownloadProgress(cb: (p: MissionDownloadProgress) => void): Promise<() => void> {
+  return listen<MissionDownloadProgress>('mission-download-progress', (e) => cb(e.payload));
 }
 
 /** Upload mission to FC */

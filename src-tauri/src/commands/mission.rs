@@ -3,7 +3,7 @@
 
 // Mission Commands — Tauri command handlers for mission planning operations
 
-use tauri::State;
+use tauri::{Emitter, State};
 
 use crate::mavlink_proto::{self, ArduWaypoint};
 use crate::mission::store::{MissionStore, mission_from_xml, mission_to_xml};
@@ -26,6 +26,17 @@ fn apply_alt_mode(wp: &mut Waypoint, alt_mode: Option<u8>) {
 }
 use crate::msp::types::{MSP_WP, MSP_WP_GETINFO, MSP_WP_MISSION_LOAD, MSP_WP_MISSION_SAVE, MSP_SET_WP};
 use crate::state::{ActiveProtocol, AppState};
+
+/// Waypoint-download progress, emitted as the `mission-download-progress` event during an FC
+/// download (both MSP and MAVLink) so the Mission Manager can show an "x of n" counter.
+#[derive(Clone, serde::Serialize)]
+struct MissionDownloadProgress {
+    current: u16,
+    total: u16,
+}
+
+/// Event name for `MissionDownloadProgress`.
+const MISSION_DOWNLOAD_PROGRESS: &str = "mission-download-progress";
 
 /// Get the current mission snapshot
 #[tauri::command]
@@ -148,6 +159,7 @@ pub fn mission_reorder_wp(from: usize, to: usize, store: State<'_, MissionStore>
 #[tauri::command(async)]
 pub fn mission_download(
     from_eeprom: bool,
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     store: State<'_, MissionStore>,
 ) -> Result<Mission, String> {
@@ -177,10 +189,13 @@ pub fn mission_download(
     let mut mission = Mission::new();
     mission.info = info.clone();
 
+    let total = info.wp_count as u16;
+    let _ = app.emit(MISSION_DOWNLOAD_PROGRESS, MissionDownloadProgress { current: 0, total });
     for i in 1..=info.wp_count {
         let wp_payload = handle.msp_request(MSP_WP, &[i])?;
         let wp = codec::decode_wp(&wp_payload)?;
         mission.waypoints.push(wp);
+        let _ = app.emit(MISSION_DOWNLOAD_PROGRESS, MissionDownloadProgress { current: i as u16, total });
     }
     mission.dirty = false;
 
@@ -350,7 +365,7 @@ pub fn mission_load_file(path: String, store: State<'_, MissionStore>) -> Result
 /// MISSION_ITEM (up to seconds each over a slow SiK link). A plain sync command would run on the
 /// main thread and freeze the whole UI for the duration of the download.
 #[tauri::command(async)]
-pub fn ardu_mission_download(state: State<'_, AppState>) -> Result<Vec<ArduWaypoint>, String> {
+pub fn ardu_mission_download(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<Vec<ArduWaypoint>, String> {
     // Clone the command sender + sysid while holding the mutex briefly.
     // The actual protocol exchange runs after the lock is released.
     let (cmd_tx, fc_sysid, reserve_home) = {
@@ -363,7 +378,15 @@ pub fn ardu_mission_download(state: State<'_, AppState>) -> Result<Vec<ArduWaypo
             None => return Err("Not connected".into()),
         }
     };
-    mavlink_proto::mission::download(&cmd_tx, fc_sysid, reserve_home, ::mavlink::ardupilotmega::MavMissionType::MAV_MISSION_TYPE_MISSION)
+    mavlink_proto::mission::download(
+        &cmd_tx,
+        fc_sysid,
+        reserve_home,
+        ::mavlink::ardupilotmega::MavMissionType::MAV_MISSION_TYPE_MISSION,
+        |current, total| {
+            let _ = app.emit(MISSION_DOWNLOAD_PROGRESS, MissionDownloadProgress { current, total });
+        },
+    )
 }
 
 /// Upload an ArduPilot mission to the FC via MAVLink mission microprotocol.

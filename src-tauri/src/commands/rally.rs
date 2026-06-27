@@ -62,7 +62,7 @@ pub fn rally_read_all(state: State<'_, AppState>) -> Result<RallyConfig, String>
     let Some((cmd_tx, fc_sysid)) = mav_handle(&state)? else {
         return Ok(RallyConfig::default());
     };
-    let items = mavlink_proto::mission::download(&cmd_tx, fc_sysid, false, MavMissionType::MAV_MISSION_TYPE_RALLY)?;
+    let items = mavlink_proto::mission::download(&cmd_tx, fc_sysid, false, MavMissionType::MAV_MISSION_TYPE_RALLY, |_, _| {})?;
     let points = decode_rally(&items);
     let pmap = params_rt::read_params(&cmd_tx, fc_sysid, RALLY_PARAM_NAMES);
     let params = RALLY_PARAM_NAMES.iter()
