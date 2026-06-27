@@ -11,8 +11,14 @@
 // dedup hash, exactly like INAV's separate launch point. See docs/active/ARDUPILOT_MISSION_LIBRARY.md.
 
 import type { LibraryMissionInput } from '$lib/stores/flightlogTypes';
-import { arduHasLocation, type ArduWaypoint } from '$lib/stores/missionArdupilot';
-import { sha256Hex } from './missionLibrary';
+import {
+  arduHasLocation,
+  MAV_CMD_DO_CHANGE_SPEED,
+  MAV_CMD_NAV_LOITER_UNLIM,
+  type ArduWaypoint,
+} from '$lib/stores/missionArdupilot';
+import { sha256Hex, type MissionStats } from './missionLibrary';
+import { computeRouteStats, type RoutePoint } from './missionStats';
 import { missionDbFindByHash } from '$lib/stores/flightlog';
 
 const EARTH_R = 6371000;
@@ -109,6 +115,36 @@ export function computeArduMissionMetadata(wps: ArduWaypoint[]): ArduMissionMeta
   const altDiffM = maxAltM !== null && minAltM !== null ? maxAltM - minAltM : null;
 
   return { wpCount: wps.length, totalDistanceM, altDiffM, maxAltM, minAltM, bndbox };
+}
+
+/** Editor-facing mission stats for an ArduPilot/PX4 mission — the MAVLink counterpart to INAV's
+ *  `computeMissionStats`, returning the same shape so both panels render an identical footer.
+ *  Cruise speed for the flight-time comes from `DO_CHANGE_SPEED` (air/groundspeed, carried forward);
+ *  with none set the time stays `null` (we don't guess). A `NAV_LOITER_UNLIM` makes the time a lower
+ *  bound (≥). Only flight-path nodes (commands that specify a coordinate) count toward distance. */
+export function computeArduMissionStats(wps: ArduWaypoint[]): MissionStats {
+  let curSpeedMs: number | null = null;
+  let hasUnlimitedHold = false;
+  const points: RoutePoint[] = [];
+  for (const w of wps) {
+    if (w.command === MAV_CMD_DO_CHANGE_SPEED) {
+      // param1: speed type (0 airspeed, 1 groundspeed, 2 climb, 3 descent); param2: speed m/s (-1 = no change).
+      if ((w.param1 === 0 || w.param1 === 1) && w.param2 > 0) curSpeedMs = w.param2;
+      continue;
+    }
+    if (w.command === MAV_CMD_NAV_LOITER_UNLIM) hasUnlimitedHold = true;
+    if (!arduHasLocation(w.command)) continue;
+    points.push({ lat: w.lat / 1e7, lon: w.lon / 1e7, altM: w.alt, legSpeedMs: curSpeedMs });
+  }
+  const s = computeRouteStats(points);
+  return {
+    geoCount: s.geoCount,
+    legDistanceM: s.legDistanceM,
+    climbM: s.climbM,
+    descentM: s.descentM,
+    estTimeS: s.timeS,
+    hasUnlimitedHold,
+  };
 }
 
 export interface BuildArduMissionOpts {

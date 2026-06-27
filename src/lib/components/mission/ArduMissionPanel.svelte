@@ -15,7 +15,8 @@
   import { t, locale } from 'svelte-i18n';
   import {
     arduMission, arduSelectedWpIndex, arduEditMode, arduLoadedMissionId,
-    arduMissionClear, arduRemoveWp, groupArduMission, markArduMissionFcSynced,
+    arduMissionClear, arduRemoveWp, groupArduMission, markArduMissionSynced,
+    arduMissionFlags, arduMissionModified,
     arduVehicleClass, setArduVehicleClass,
     MAV_FRAME_GLOBAL, MAV_FRAME_GLOBAL_TERRAIN_ALT,
     serializeWaypoints, parseWaypoints,
@@ -29,7 +30,8 @@
   import { settings } from '$lib/stores/settings';
   import { autopilotSystem, type AutopilotSystem } from '$lib/stores/autopilotContext';
   import { missionManagerOpen } from '$lib/stores/missionManager';
-  import { buildArduMissionInput } from '$lib/helpers/missionLibraryArdu';
+  import { buildArduMissionInput, computeArduMissionStats } from '$lib/helpers/missionLibraryArdu';
+  import { convertAltitude, convertDistance, formatConverted } from '$lib/utils/units';
   import { missionDbSave, missionDbUpdate, missionDbGet, missionDbFindByHash, missionDbGeocode } from '$lib/stores/flightlog';
   import PanelShell from '$lib/components/panel/PanelShell.svelte';
   import Button from '$lib/components/panel/Button.svelte';
@@ -121,6 +123,7 @@
       arduMission.set(wps);
       arduSelectedWpIndex.set(-1);
       arduLoadedMissionId.set(null); // fresh file → not yet a library mission
+      markArduMissionSynced('file', wps);
       statusMessage = $t('mission.loaded', { values: { count: wps.length } });
       frameMissionOnMap();
     } catch (e) {
@@ -143,6 +146,7 @@
       arduMission.set(wps);
       arduSelectedWpIndex.set(-1);
       arduLoadedMissionId.set(null); // fresh file → not yet a library mission
+      markArduMissionSynced('file', wps);
       statusMessage = $t('mission.loadedFromFile', { values: { count: wps.length, file: file.name } });
       frameMissionOnMap();
     } catch (e) {
@@ -183,11 +187,13 @@
           const collide = await missionDbFindByHash(input.content_hash, dbPath);
           if (collide && collide.id !== id) {
             arduLoadedMissionId.set(collide.id);
+            markArduMissionSynced('db', wps);
             statusMessage = $t('mission.saveLibDuplicate');
             return;
           }
           await missionDbUpdate(id, input, dbPath);
           arduLoadedMissionId.set(id);
+          markArduMissionSynced('db', wps);
           void missionDbGeocode(id, lang, dbPath).catch(() => {});
           statusMessage = $t('mission.saveLibUpdated');
           return;
@@ -198,6 +204,7 @@
       const collide = await missionDbFindByHash(input.content_hash, dbPath);
       if (collide) {
         arduLoadedMissionId.set(collide.id);
+        markArduMissionSynced('db', wps);
         statusMessage = $t('mission.saveLibDuplicate');
         return;
       }
@@ -206,6 +213,7 @@
       const named = await buildArduMissionInput(wps, { name: res.name || autoMissionName(), notes: res.notes, format: fmt });
       const newId = await missionDbSave(named, dbPath);
       arduLoadedMissionId.set(newId);
+      markArduMissionSynced('db', wps);
       void missionDbGeocode(newId, lang, dbPath).catch(() => {});
       statusMessage = $t('mission.saveLibSaved');
     } catch (e) {
@@ -229,7 +237,7 @@
       arduMission.set(wps);
       arduSelectedWpIndex.set(-1);
       arduLoadedMissionId.set(null); // downloaded from FC → not a library mission
-      markArduMissionFcSynced(wps); // now in sync with the FC (gates Set-WP in the control panel)
+      markArduMissionSynced('fc', wps); // now in sync with the FC (gates Set-WP in the control panel)
       statusMessage = $t('mission.downloaded', { values: { count: wps.length } });
       frameMissionOnMap();
     } catch (e) {
@@ -243,7 +251,7 @@
     statusMessage = $t('arduMission.uploading');
     try {
       await invoke<void>('ardu_mission_upload', { waypoints: wps });
-      markArduMissionFcSynced(wps); // FC now holds exactly this mission
+      markArduMissionSynced('fc', wps); // FC now holds exactly this mission
       statusMessage = $t('mission.uploaded', { values: { count: wps.length } });
     } catch (e) {
       statusMessage = $t('mission.uploadFailed', { values: { error: String(e) } });
@@ -259,6 +267,30 @@
     if (frame === MAV_FRAME_GLOBAL_TERRAIN_ALT) return 'TRN';
     return 'REL';
   }
+
+  // Mission stats (distance / climb+descent / flight time) for the footer — same shape + rendering as
+  // the INAV panel. Units follow the global settings. Time only when WP speeds are set (see helper).
+  const stats = $derived(computeArduMissionStats(currentMission));
+  function fmtDist(m: number): string {
+    return formatConverted(convertDistance(m, $settings.interface.distanceUnit), m >= 1000 ? 2 : 0);
+  }
+  function fmtAltDelta(m: number): string {
+    const a = convertAltitude(m, $settings.interface.altitudeUnit);
+    return `${Math.round(a.value)}${a.unit}`;
+  }
+  function fmtDuration(s: number): string {
+    const total = Math.round(s);
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const sec = total % 60;
+    if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m`;
+    if (m > 0) return `${m}m ${String(sec).padStart(2, '0')}s`;
+    return `${sec}s`;
+  }
+  const estTimeText = $derived.by(() => {
+    if (stats.estTimeS === null) return null;
+    return `${stats.hasUnlimitedHold ? '≥ ' : ''}${fmtDuration(stats.estTimeS)}`;
+  });
 
   function formatAltShort(wp: ArduWaypoint): string {
     return cmdHasLocation(wp.command) ? `${wp.alt.toFixed(0)}m ${frameLabel(wp.frame)}` : '—';
@@ -388,7 +420,24 @@
 
     {#if statusMessage}<div class="mission-status">{statusMessage}</div>{/if}
     {#if invalidCount > 0}<div class="mission-warn">⚠ {$t('arduMission.cmdInvalidCount', { values: { count: invalidCount } })}</div>{/if}
-    {#if currentMission.length > 0}<div class="mission-summary">{currentMission.length} WPs</div>{/if}
+    {#if stats.geoCount >= 2}
+      <div class="mission-stats">
+        <span class="stat" title={$t('mission.statDistance')}>⤢ {fmtDist(stats.legDistanceM)}</span>
+        <span class="stat" title={$t('mission.statClimbDescent')}>↑{fmtAltDelta(stats.climbM)} ↓{fmtAltDelta(stats.descentM)}</span>
+        {#if estTimeText}
+          <span class="stat" title={$t('mission.statTime')}>⏱ {estTimeText}</span>
+        {/if}
+      </div>
+    {/if}
+    {#if currentMission.length > 0}
+      <div class="mission-summary">
+        {currentMission.length} WPs
+        {#if $arduMissionModified}<span class="dirty-badge">{$t('mission.modified')}</span>{/if}
+        {#if $arduMissionFlags.fc}<span class="prov-badge prov-fc" title={$t('mission.provFcTip')}>{$t('mission.provFc')}</span>{/if}
+        {#if $arduMissionFlags.file}<span class="prov-badge prov-file" title={$t('mission.provFileTip')}>{$t('mission.provFile')}</span>{/if}
+        {#if $arduMissionFlags.db}<span class="prov-badge prov-db" title={$t('mission.provDbTip')}>{$t('mission.provDb')}</span>{/if}
+      </div>
+    {/if}
   </div>
 {/snippet}
 
@@ -454,7 +503,14 @@
   .ctrl-row { display: flex; gap: 4px; }
   .mission-status { padding: 3px 6px; font-size: 11px; color: #f39c12; text-align: center; }
   .mission-warn { padding: 3px 6px; font-size: 11px; color: #f39c12; text-align: center; }
-  .mission-summary { display: flex; justify-content: center; padding: 3px; font-size: 12px; color: #888; }
+  .mission-stats { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 4px 3px 0; font-size: 12px; color: #9ad0e8; flex-wrap: wrap; font-variant-numeric: tabular-nums; }
+  .mission-stats .stat { white-space: nowrap; cursor: default; }
+  .mission-summary { display: flex; align-items: center; justify-content: center; gap: 4px; padding: 3px; font-size: 12px; color: #888; flex-wrap: wrap; }
+  .dirty-badge { background: #f39c12; color: #1a1a1a; padding: 1px 6px; border-radius: 8px; font-size: 11px; font-weight: bold; }
+  .prov-badge { color: #fff; padding: 1px 6px; border-radius: 8px; font-size: 11px; font-weight: bold; }
+  .prov-fc { background: #37a8db; }
+  .prov-file { background: #6c7a89; }
+  .prov-db { background: #59aa29; }
   .wp-warn { color: #f39c12; margin-left: 3px; cursor: help; }
   .drop-overlay { position: absolute; inset: 0; background: rgba(55,168,219,0.15); border: 2px dashed #37a8db; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #37a8db; font-size: 13px; font-weight: bold; z-index: 10; pointer-events: none; }
 </style>

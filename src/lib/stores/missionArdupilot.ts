@@ -103,23 +103,46 @@ export const arduEditMode       = writable<boolean>(false);
  *  saves. See docs/active/ARDUPILOT_MISSION_LIBRARY.md. */
 export const arduLoadedMissionId = writable<number | null>(null);
 
-/** Serialized snapshot of the mission at the last successful FC download/upload this session (null
- *  until one happens). Used to tell whether the on-screen mission still matches the FC's. */
-export const arduMissionFcRef = writable<string | null>(null);
+// ── Mission provenance (FC / FILE / DB), mirroring the INAV store ──────────────
+// Each flag holds the serialized snapshot of the mission at the moment it was last synced via that
+// channel; a flag is "lit" when the current mission still matches its snapshot (content-compared, so
+// it clears on edit and returns on undo). The FC flag also gates FC-relative actions like "Set active
+// WP". Single-mission, so a plain ref map (no per-slot like INAV).
+export type ArduSyncFlag = 'fc' | 'file' | 'db';
+const arduSyncRefs = new Map<ArduSyncFlag, string>();
+const arduProvVersion = writable(0);
 
-/** True when the current mission still matches what was last synced with the FC (download/upload) —
- *  i.e. no edits since. Gates FC-relative actions like "Set active WP". This is a lightweight
- *  in-session signal; the full FC/DB/File provenance flags for the ArduPilot store (with Mission
- *  Manager indicators, like INAV) are still a deferred Phase-2 item — see ADR-050. */
-export const arduMissionFcSynced = derived(
-  [arduMission, arduMissionFcRef],
-  ([m, ref]) => ref !== null && m.length > 0 && serializeWaypoints(m) === ref,
+/** Record the current mission as synced via `flag` (call after FC download/upload, file open, DB load/save). */
+export function markArduMissionSynced(flag: ArduSyncFlag, wps: ArduWaypoint[]): void {
+  arduSyncRefs.set(flag, serializeWaypoints(wps));
+  arduProvVersion.update((n) => n + 1);
+}
+
+/** Drop the FC flag (link gone) — the on-FC mission is unknown after a disconnect. */
+export function clearArduFcFlag(): void {
+  if (arduSyncRefs.delete('fc')) arduProvVersion.update((n) => n + 1);
+}
+
+export interface ArduMissionFlags { fc: boolean; file: boolean; db: boolean; }
+
+/** Live provenance flags for the current mission (content-compared to the snapshots). */
+export const arduMissionFlags = derived(
+  [arduMission, arduProvVersion],
+  ([m]): ArduMissionFlags => {
+    if (m.length === 0) return { fc: false, file: false, db: false };
+    const h = serializeWaypoints(m);
+    return { fc: arduSyncRefs.get('fc') === h, file: arduSyncRefs.get('file') === h, db: arduSyncRefs.get('db') === h };
+  },
 );
 
-/** Record the current mission as the FC-synced reference (call after a successful download/upload). */
-export function markArduMissionFcSynced(wps: ArduWaypoint[]): void {
-  arduMissionFcRef.set(serializeWaypoints(wps));
-}
+/** "Modified" = has content but matches none of its sync snapshots (unsaved relative to FC/FILE/DB). */
+export const arduMissionModified = derived(
+  [arduMission, arduMissionFlags],
+  ([m, f]) => m.length > 0 && !f.fc && !f.file && !f.db,
+);
+
+/** Whether the current mission still matches what's on the FC — gates "Set active WP". */
+export const arduMissionFcSynced = derived(arduMissionFlags, (f) => f.fc);
 
 // ── Vehicle class (drives the command catalog filter) ─────────────────
 // Online: derived from the FC's variant and locked. Offline: the operator picks it (QuadPlane can't be
@@ -178,6 +201,13 @@ connection.subscribe((c) => {
   _lastVariantForClass = key;
   const cls = detectVehicleClass(c.fcInfo.fc_variant, c.fcInfo.mav_type);
   if (cls) arduVehicleClass.set(cls);
+});
+
+// Drop the FC provenance flag on any disconnect — the on-FC mission is then unknown (mirrors INAV).
+let _arduPrevConn = 'disconnected';
+connection.subscribe((c) => {
+  if (_arduPrevConn === 'connected' && c.status !== 'connected') clearArduFcFlag();
+  _arduPrevConn = c.status;
 });
 
 // ── Modifier grouping (INAV-style list/editor presentation over the flat sequence) ──

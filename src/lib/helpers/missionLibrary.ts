@@ -11,6 +11,7 @@ import { get } from 'svelte/store';
 import { hashWaypoints, hasLocation, toDeg, altToM, WpAction, launchPoint, type Waypoint } from '$lib/stores/mission';
 import type { LibraryMissionInput } from '$lib/stores/flightlogTypes';
 import { missionDbFindByHash } from '$lib/stores/flightlog';
+import { computeRouteStats, type RoutePoint } from '$lib/helpers/missionStats';
 
 const EARTH_R = 6371000;
 const D2R = Math.PI / 180;
@@ -108,11 +109,6 @@ export function computeMissionMetadata(wps: Waypoint[]): MissionMetadata {
   return { wpCount: wps.length, totalDistanceM, altDiffM, maxAltM, minAltM, bndbox };
 }
 
-/** Default cruise speed (m/s) assumed for legs where no waypoint sets an explicit speed.
- *  INAV WPs carry an optional per-WP speed (cm/s in p1); when left at default the GCS has no
- *  authoritative value, so the time estimate falls back to this constant and is flagged approximate. */
-export const DEFAULT_CRUISE_MS = 5;
-
 export interface MissionStats {
   /** Number of geographic waypoints in the active mission part (up to the first Land/RTH). */
   geoCount: number;
@@ -122,68 +118,47 @@ export interface MissionStats {
   climbM: number;
   /** Sum of altitude losses across the legs (positive number). */
   descentM: number;
-  /** Estimated flight time in seconds (legs / cruise speed + hold times), or null with <2 geo-WPs. */
+  /** Flight time in seconds, or null when not every leg has an explicitly-set WP speed (we don't
+   *  guess a cruise speed). With <2 geo-WPs it's also null. */
   estTimeS: number | null;
-  /** A leg fell back to {@link DEFAULT_CRUISE_MS} (no explicit WP speed) → the time is rough. */
-  estTimeApprox: boolean;
-  /** A PosHold-∞ is present → the real flight time is unbounded (estimate is a lower bound). */
+  /** A PosHold-∞ is present → the real flight time is unbounded (the value is a lower bound). */
   hasUnlimitedHold: boolean;
-  /** The assumed cruise speed (m/s), surfaced for the tooltip. */
-  assumedCruiseMs: number;
 }
 
-/** Editor-facing mission stats: distance, climb/descent totals and an estimated flight time.
+/** Editor-facing mission stats: distance, climb/descent totals and (when known) the flight time.
  *  Only the active mission part counts (everything up to and including the first Land/RTH);
- *  JUMP repetition is not expanded, so loops read as a single straight-through pass. */
+ *  JUMP repetition is not expanded, so loops read as a single straight-through pass. The time is
+ *  reported only when waypoints set an explicit cruise speed (INAV `p1`, cm/s) — see `computeRouteStats`. */
 export function computeMissionStats(wps: Waypoint[]): MissionStats {
   const endIdx = wps.findIndex((w) => w.action === WpAction.Land || w.action === WpAction.Rth);
   const active = endIdx >= 0 ? wps.slice(0, endIdx + 1) : wps;
   const geo = active.filter((w) => hasLocation(w.action) && !(w.lat === 0 && w.lon === 0));
 
-  let legDistanceM = 0;
-  let climbM = 0;
-  let descentM = 0;
-  let estTimeS = 0;
-  let estTimeApprox = false;
-  let curSpeedMs = DEFAULT_CRUISE_MS;
-  let sawExplicitSpeed = false;
-
-  let prev: Waypoint | null = null;
-  for (const w of geo) {
-    // Carry-forward speed: a Waypoint/Land with an explicit p1 (>0) sets the cruise speed,
-    // which persists onto following legs until overridden (mirrors INAV's behaviour).
+  // Carry-forward cruise speed: a Waypoint/Land with explicit p1 (>0, cm/s) sets the speed for the leg
+  // ending at it and onward (mirrors INAV). Unset stays null → the time reads as "unknown".
+  let curSpeedMs: number | null = null;
+  const points: RoutePoint[] = geo.map((w) => {
     if ((w.action === WpAction.Waypoint || w.action === WpAction.Land) && w.p1 > 0) {
       curSpeedMs = w.p1 / 100;
-      sawExplicitSpeed = true;
     }
-    if (prev) {
-      const d = haversineM(toDeg(prev.lat), toDeg(prev.lon), toDeg(w.lat), toDeg(w.lon));
-      legDistanceM += d;
-      const dAlt = altToM(w.altitude) - altToM(prev.altitude);
-      if (dAlt > 0) climbM += dAlt;
-      else descentM += -dAlt;
-      const spd = curSpeedMs > 0 ? curSpeedMs : DEFAULT_CRUISE_MS;
-      estTimeS += d / spd;
-      if (!sawExplicitSpeed) estTimeApprox = true;
-    }
-    prev = w;
-  }
+    return { lat: toDeg(w.lat), lon: toDeg(w.lon), altM: altToM(w.altitude), legSpeedMs: curSpeedMs };
+  });
 
+  let holdS = 0;
   let hasUnlimitedHold = false;
   for (const w of active) {
-    if (w.action === WpAction.PosholdTime) estTimeS += Math.max(0, w.p1);
+    if (w.action === WpAction.PosholdTime) holdS += Math.max(0, w.p1);
     else if (w.action === WpAction.PosholdUnlim) hasUnlimitedHold = true;
   }
 
+  const s = computeRouteStats(points, holdS);
   return {
-    geoCount: geo.length,
-    legDistanceM,
-    climbM,
-    descentM,
-    estTimeS: geo.length > 1 ? estTimeS : null,
-    estTimeApprox,
+    geoCount: s.geoCount,
+    legDistanceM: s.legDistanceM,
+    climbM: s.climbM,
+    descentM: s.descentM,
+    estTimeS: s.timeS,
     hasUnlimitedHold,
-    assumedCruiseMs: DEFAULT_CRUISE_MS,
   };
 }
 
