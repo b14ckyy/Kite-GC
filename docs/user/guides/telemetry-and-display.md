@@ -81,11 +81,10 @@ Edit mode — drag widgets to reorder them or move them between the docks.
 | **Compass** | A rotating rose with the heading at the centre and a fixed top pointer. An amber **course-over-ground** bug rides the rim while moving — the gap to the nose is your **crab angle** — with the COG value read out above the heading. When wind is reported, a blue **wind arrow** (pointing downwind) and wind speed appear. |
 | **GPS** | Latitude / longitude, satellite count, fix type (No fix / 2D / 3D / 3D DGPS) and HDOP. |
 | **Home** | A large arrow pointing to home relative to the aircraft's heading, with distance and bearing. |
-| **Battery** | The pack's voltage, current and **power (V × A)**, plus charge. On multi-battery aircraft (ArduPilot / PX4) it follows the highest-draw pack automatically, with manual pinning — see **[Batteries](batteries.md)**. |
-| **Battery 2** | A second, independent battery widget so you can watch two packs at once. |
-| **Flight Mode** | The current flight mode as a colour-coded badge (and waypoint progress during a mission). |
-| **RC Link** | Link quality — shows whatever the active protocol provides (LQ, RSSI in % and dBm, SNR) and hides the rest. |
-| **Raw Telemetry** | A compact numeric dump: altitude, speed, vario, heading, roll, pitch, voltage, current, mAh, satellites, RSSI and CPU load. |
+| **Battery** | A charge bar (FC % when reported), voltage, current and **power (V × A)**, plus charge drawn. On multi-battery aircraft (ArduPilot / PX4) it follows the highest-draw pack automatically, with manual pinning; add a second **Battery 2** widget to watch two packs at once — see **[Batteries](batteries.md)**. |
+| **Flight Mode** | The current flight mode as a colour-coded badge — colour by mode category (shared with the track colours), with sub-mode modifier chips and waypoint progress during a mission. |
+| **RC Link** | Link quality — shows whatever the active protocol provides and hides the rest (CRSF / SmartPort / INAV 9.1+ give LQ + RSSI %/dBm + SNR; MAVLink, LTM and INAV before 9.1 give RSSI only). |
+| **Raw Telemetry** | A compact numeric dump: altitude, speed, vario, heading, roll, pitch, voltage, current, mAh, satellites and RSSI. |
 | **Live AGL** | A forward-looking terrain-profile HUD: flown terrain on the left, **estimated** terrain ahead on the right, with a projected flight line that warns of a ground intersection. |
 | **Terrain Radar** | A top-down, track-up terrain-awareness display (EGPWS-style): a forward fan coloured by clearance against your altitude, with a **range** and **REL / PRED** mode button. |
 | **Video** | A live video feed embedded as a widget — an RTSP stream or a local capture device / camera (e.g. a USB capture card). See **[Video](video.md)**. |

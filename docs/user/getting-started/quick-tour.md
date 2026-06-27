@@ -59,7 +59,7 @@ Each tool, at a glance — expand for a quick description and the link to its fu
     terrain-following), generate survey patterns, undo/redo, and upload / download to the aircraft.
     Includes the reusable mission library.
 
-    <!-- SCREENSHOT: ../assets/getting-started/panels/mission.png -->
+    ![The Mission panel](../assets/guides/missions/editing.png)
 
     *Details: [Missions](../guides/missions.md).*
 
@@ -81,7 +81,7 @@ Each tool, at a glance — expand for a quick description and the link to its fu
     A terrain-profile analysis of your planned mission or a recorded track — see the ground elevation
     beneath the route and check your above-ground clearance.
 
-    <!-- SCREENSHOT: ../assets/getting-started/panels/terrain.png -->
+    ![The Terrain analysis panel](../assets/guides/safety/terrain_analysis.png)
 
     *Details: [Missions](../guides/missions.md).*
 
@@ -90,7 +90,7 @@ Each tool, at a glance — expand for a quick description and the link to its fu
     Dataflash, MAVLink `.tlog` and MWPTools raw-MSP logs. Add notes and weather, and reach the **Vehicle**
     and **Battery** managers from here.
 
-    <!-- SCREENSHOT: ../assets/getting-started/panels/logbook.png -->
+    ![The Logbook panel](../assets/guides/logbook/logbook_detail.png)
 
     *Details: [Logbook](../guides/logbook.md) · [Vehicles](../guides/vehicles.md) · [Batteries](../guides/batteries.md).*
 
@@ -98,7 +98,7 @@ Each tool, at a glance — expand for a quick description and the link to its fu
     Foreign-vehicle radar — show nearby ADS-B (and other) traffic on the map, with proximity and
     conflict alerts. Only shown when radar is switched on.
 
-    <!-- SCREENSHOT: ../assets/getting-started/panels/radar.png -->
+    ![The Radar panel](../assets/guides/radar/radar_panel.png)
 
     *Details: [Radar & ADS-B](../guides/radar-and-adsb.md).*
 
@@ -107,7 +107,7 @@ Each tool, at a glance — expand for a quick description and the link to its fu
     **geozones** and ArduPilot/PX4 **geofences**. Shown when the overlay is on, or when a connected FC
     supports geozones/geofences.
 
-    <!-- SCREENSHOT: ../assets/getting-started/panels/airspace.png -->
+    ![The Airspace Manager panel](../assets/guides/airspace/airspace_nearby.png)
 
     *Details: [Safety](../guides/safety.md).*
 
@@ -115,7 +115,7 @@ Each tool, at a glance — expand for a quick description and the link to its fu
     Set up and watch a live RTSP video feed alongside (or behind) the map, with one-click map ⇄ video
     swapping.
 
-    <!-- SCREENSHOT: ../assets/getting-started/panels/video.png -->
+    ![The Video panel](../assets/guides/video/video_panel.png)
 
     *Details: [Video](../guides/video.md).*
 
@@ -123,7 +123,7 @@ Each tool, at a glance — expand for a quick description and the link to its fu
     Everything configurable — units, map provider, telemetry rates, flight logging, language, widget
     selection and more.
 
-    <!-- SCREENSHOT: ../assets/getting-started/panels/settings.png -->
+    ![The Settings panel](../assets/getting-started/panels/settings.png)
 
     *Details: [Settings reference](../reference/settings.md).*
 
@@ -133,8 +133,122 @@ Two docks hold your **flight widgets** (attitude, altitude, speed, compass, and 
 dock** (3) down the side, and the **bottom dock** (4) along the bottom.
 
 Click the **✎ (edit) button** by a dock to enter **edit mode**, then drag widgets to rearrange them or
-move them between docks. Choose which widgets appear in **Settings**. Your layout is remembered between
-sessions.
+move them between docks. Choose which widgets appear in **Settings → Interface**. Widgets scale to fit
+the dock, and your layout (including which dock each sits in) is remembered between sessions. Every widget
+follows your global units and works the same **live** and in **[replay](../guides/logbook.md)**.
+
+Each widget, at a glance — expand for what it shows and how it works:
+
+??? note "AHI — Artificial Horizon"
+    A circular attitude indicator: the horizon line moves with **pitch** and banks with **roll** around a
+    fixed aircraft symbol. A **flight-path-vector marker** shows where the aircraft is actually going —
+    offset from the symbol by **angle of attack** (vertically) and **crab** (laterally) — smoothed so it
+    reads cleanly.
+
+    ![The AHI widget](../assets/getting-started/widgets/ahi.png)
+
+??? note "Speed"
+    The big number is **airspeed** when the aircraft reports it (what matters in flight), with **ground
+    speed** on a second line; without an airspeed sensor, ground speed is the primary number. A
+    **throttle bar** (0–100 %, from the FC) sits on the left and a **derived acceleration bar** on the
+    right (±4 m/s², estimated from the speed trend — no number, just a bipolar bar from centre).
+
+    ![The Speed widget](../assets/getting-started/widgets/speed.png)
+
+??? note "Altitude"
+    The aircraft's altitude (barometric / navigation, relative to home), switching to **km** above
+    999 m to stay compact. Below it, a **vario** read-out with an ▲ / ▼ trend arrow and colour for climb
+    / sink.
+
+    ![The Altitude widget](../assets/getting-started/widgets/altitude.png)
+
+??? note "Battery"
+    A **charge bar** (the FC's battery percentage, shown when the FC reports one) plus **voltage**,
+    **current**, **power (V × A)** and **charge drawn (mAh)**. On multi-battery ArduPilot / PX4 aircraft
+    it shows one pack with an **AUTO** selector that follows the **highest-draw** pack (with a short
+    hysteresis so it doesn't flicker), a **low-battery safety override** (jumps to the lowest pack once one
+    drops below the **Battery alert** threshold), and **manual pinning** (click the **BAT** label to cycle
+    AUTO → pack 1 → pack 2 → …). Single-battery setups (INAV) just show the one pack. The charge figure is
+    the **FC's** percentage when available, otherwise the **voltage** (no guessed % from voltage). Add a
+    second **Battery 2** widget to watch two packs at once (e.g. a QuadPlane's forward and lift packs).
+    See **[Batteries](../guides/batteries.md)**.
+
+    ![The Battery widget](../assets/getting-started/widgets/battery.png)
+
+??? note "GPS"
+    **Latitude / longitude**, **satellite count**, **fix type** (No fix / 2D / 3D / 3D DGPS, colour-coded)
+    and **HDOP**.
+
+    ![The GPS widget](../assets/getting-started/widgets/gps.png)
+
+??? note "RC Link"
+    An adaptive radio-link read-out — it shows whatever the active protocol provides and hides the rest:
+    **LQ** (link quality), **RSSI** (in % and dBm) and **SNR**. What you get depends on the link:
+    **CRSF**, **SmartPort** and **INAV 9.1+** give the full set (LQ + RSSI %/dBm + SNR), while **MAVLink
+    (ArduPilot / PX4)**, **LTM** and **INAV before 9.1** report **RSSI only** — so that's all the widget
+    shows there. The primary value is colour-coded green / amber / red by strength.
+
+    ![The RC Link widget](../assets/getting-started/widgets/rclink.png)
+
+??? note "Compass"
+    A rotating compass rose with the **heading** at the centre and a fixed top pointer. While moving, an
+    amber **course-over-ground bug** rides the rim — the gap between it and the nose is your **crab
+    angle** — and the COG value is read out above the heading. When the aircraft reports wind, a blue
+    **wind arrow** (pointing downwind) and the wind speed appear.
+
+    ![The Compass widget](../assets/getting-started/widgets/compass.png)
+
+??? note "Home"
+    A large **arrow** pointing to the home / launch point relative to the aircraft's heading, with the
+    **distance** and **bearing** to home. Appears once the flight controller has set home.
+
+    ![The Home widget](../assets/getting-started/widgets/home.png)
+
+??? note "Flight Mode"
+    The current **flight mode** as a badge. Kite maps every stack's modes onto one **protocol-agnostic**
+    model, so INAV, ArduPilot and PX4 read consistently: the **exact mode name** is always kept (e.g.
+    *Angle*, *Cruise*, *RTL*, *FBW-A*, *QLoiter*), while the **badge colour** comes from the mode's
+    **category** — the *same* colour scheme used to colour the flight track on the map. Roughly:
+    stabilized = green, altitude-hold = yellow, position-hold = teal, cruise = orange, mission = blue,
+    guided = blue, RTH / return = violet, launch / takeoff = magenta, land = orange, failsafe = red,
+    manual = grey, acro = light grey.
+
+    INAV's (and PX4's) **main mode + sub-modes** are shown together: the **primary** mode is the badge,
+    and any active **modifiers** (AltHold, Heading, HeadFree, Soaring, Autoland, …) appear as small chips
+    beside it. During a mission the badge also shows the FC's current target as **WP N/X**.
+
+    ![The Flight Mode widget](../assets/getting-started/widgets/flightmode.png)
+
+??? note "Raw Telemetry"
+    A compact numeric dump for when you want the raw figures at a glance: altitude, speed, vario, heading,
+    roll, pitch, voltage, current, mAh, satellites and RSSI.
+
+    ![The Raw Telemetry widget](../assets/getting-started/widgets/rawtelemetry.png)
+
+??? note "Live AGL"
+    A forward-looking **terrain-profile HUD** (a wide widget). The left third shows the terrain you've
+    flown over with the aircraft riding at its current height; the right two-thirds shows the
+    **estimated** terrain ahead along your heading, with a dashed **projected flight line** so you can see
+    a climb, descent or ground intersection coming. Centre read-outs give **AGL** and **minimum clearance
+    ahead** (red when it goes negative). Works live and in replay.
+
+    ![The Live AGL widget](../assets/getting-started/widgets/liveagl.png)
+
+??? note "Terrain Radar"
+    A top-down, **track-up** terrain-awareness display in the style of an airliner's EGPWS: a forward fan
+    coloured by **clearance** against your altitude (red = at/above you → green = well below). Two
+    independent ranges — the **fan distance** scales with speed, and a separate **clearance colour scale**
+    (60 / 120 / 250 m, left button). A **REL / PRED** button (right) switches the reference between your
+    current altitude and a sink-rate-predicted one.
+
+    ![The Terrain Radar widget](../assets/getting-started/widgets/terrainradar.png)
+
+??? note "Video"
+    A live **video feed** embedded as a widget — an RTSP stream or a local capture device / camera (e.g. a
+    USB capture card), sized to the stream's aspect ratio. **Double-click** it to swap the feed with the
+    map. See **[Video](../guides/video.md)**.
+
+    <!-- SCREENSHOT: ../assets/getting-started/widgets/video.png -->
 
 ## 5 · Map & its controls
 
