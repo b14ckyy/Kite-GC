@@ -226,6 +226,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   INAV's codes (LOAD=18, SAVE=19); EEPROM save/load now round-trip.
 
 ### Changed
+- **Removed the CPU-load readout from the Raw Telemetry widget.** It never displayed a meaningful value;
+  no telemetry is saved by dropping it (CPU load only rides inside the INAV status / MAVLink `SYS_STATUS`
+  messages Kite already polls for arming, flight mode and sensor health).
 - **Radio Telemetry radar source hidden.** The third radar system (passive radio telemetry, internal
   `radio`) was never implemented and stays parked for now, so its toggle is removed from Settings → Data →
   Telemetry and from the Radar panel (no tab / list / map-visibility row). ADS-B and FormationFlight are
