@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **INAV multi-mission upload/download.** Uploading now sends **all** of your mission slots to the
+  flight controller as one combined sequence (each mission terminated correctly), and downloading
+  **splits** the FC's combined list back into the separate mission tabs — so a multi-mission round-trips
+  cleanly to RAM and EEPROM. (Selecting which mission is *active* will come later with a dedicated INAV
+  control panel.)
 - **Mission stats + provenance parity for ArduPilot / PX4.** The ArduPilot/PX4 mission panel now shows
   the same footer as INAV: total leg **distance**, **climb/descent**, flight **time**, and the **FC /
   FILE / DB** provenance badges plus a **Modified** badge — so you can see at a glance where the loaded
