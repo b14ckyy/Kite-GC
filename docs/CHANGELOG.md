@@ -226,6 +226,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   INAV's codes (LOAD=18, SAVE=19); EEPROM save/load now round-trip.
 
 ### Changed
+- **Radio Telemetry radar source hidden.** The third radar system (passive radio telemetry, internal
+  `radio`) was never implemented and stays parked for now, so its toggle is removed from Settings → Data →
+  Telemetry and from the Radar panel (no tab / list / map-visibility row). ADS-B and FormationFlight are
+  unaffected. The UI is only commented out and the store/types are kept, so it can return without rework
+  (the source family remains "not planned" — see `docs/future/RADIO_SOURCE_RADAR.md`).
 - **Flight-log database space is now reclaimed incrementally.** Deleting a flight (or a stored
   blackbox original) used to run a full `VACUUM`, rewriting the entire database file — fine for a few
   flights, but unusably slow once logs reach GBs (common with ArduPilot DataFlash). The DB now uses
