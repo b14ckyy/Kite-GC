@@ -34,6 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   least-squares slope over a sliding 1.5 s speed window, so it stays steady between the quantized
   ~1 km/h telemetry steps instead of spiking-then-zeroing on each update. Throttle is recorded to the
   flight log (schema **v17**) and shown on replay. See **ADR-058** for the cross-protocol normalization.
+- **Link several batteries to one flight.** A flight can now record more than one pack (e.g. a
+  parallel pair, or a QuadPlane's forward + lift packs) by listing serials comma-separated. The
+  post-flight dialog and the flight detail accept multiple serials (per-token picker; each chip in the
+  detail links to its pack, unknown ones offer to be created); each linked pack counts the flight in its
+  Battery Manager usage/history. Frontend-only, freetext `battery_serial` — no schema change.
 - **Waypoint-download progress counter.** Downloading a mission from the FC now shows an "x of n"
   counter in the Mission Manager status line as each waypoint arrives, instead of a static
   "Downloading…". Works for both MSP (INAV) and MAVLink (ArduPilot/PX4); the ArduPilot home slot is
