@@ -54,7 +54,13 @@ Project instructions for Claude Code. Loaded automatically every session.
   glassmorphism panels (`backdrop-filter: blur()` + semi-transparent backgrounds)
 
 ## Rust backend
-- `eprintln!()` liberally — keep debug prints in code, do **not** remove after fixing
+- **Logging convention** (route diagnostics through the `log` facade by level — the file logger is
+  gated by Settings → Diagnostics): `log::warn!` = recoverable problem **or** a tester-relevant
+  diagnostic that must arrive at the **default** level; `log::info!` = milestones (captured at Debug);
+  `log::debug!` = **verbose** opt-in detail (enumeration dumps, per-frame). `eprintln!` is **dev-only /
+  temporary** (NOT captured in the release log file → a tester can't send it) — remove or downgrade to
+  `log::debug!` once an issue is resolved. Apply **incrementally** (no mass overhaul); when working on
+  code that lacks convention-logging, **flag it, propose, and wait for sign-off** before adding.
 - One feature = one module folder (`msp/`, `flightlog/`, `mission/`, `transport/`, `scheduler/`)
 - DB migrations: incremental `PRAGMA user_version` chain — **never modify earlier migrations**
 - Dev-only code: `#[cfg(debug_assertions)]` with zero-cost no-op stubs for release
