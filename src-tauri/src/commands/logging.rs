@@ -19,3 +19,10 @@ pub fn set_log_level(level: String) {
 pub fn get_log_path() -> Option<String> {
     logging::log_path().map(|p| p.to_string_lossy().to_string())
 }
+
+/// Record a one-line settings snapshot in the current session's log header. Called once by the
+/// frontend after it loads the persisted settings (the backend can't see them at startup).
+#[tauri::command]
+pub fn log_session_settings(summary: String) {
+    logging::log_session_settings(&summary);
+}
