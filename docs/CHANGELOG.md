@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Mission stats + provenance parity for ArduPilot / PX4.** The ArduPilot/PX4 mission panel now shows
+  the same footer as INAV: total leg **distance**, **climb/descent**, flight **time**, and the **FC /
+  FILE / DB** provenance badges plus a **Modified** badge — so you can see at a glance where the loaded
+  plan came from and whether it's been edited. Stats are computed by a shared helper so both stacks read
+  identically. The flight **time** is now shown **only when waypoints carry an explicitly-set cruise
+  speed** (INAV per-WP speed / ArduPilot `DO_CHANGE_SPEED`); without one it's hidden rather than guessed
+  from an assumed cruise speed.
 - **Linux auto-download for the video helpers (ffmpeg + go2rtc).** Previously these were fetched
   automatically only on Windows; Linux users had to install them by hand. Now both download on **Linux**
   too (x86_64 and ARM64 / Raspberry Pi) — go2rtc as a ready-to-run binary, ffmpeg as the official static
