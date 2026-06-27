@@ -1143,6 +1143,8 @@
     "dropHint": ".mission Datei hier ablegen",
     "notConnected": "Nicht verbunden",
     "downloaded": "{count} WPs heruntergeladen",
+    "downloading": "Wegpunkte werden heruntergeladen…",
+    "downloadingProgress": "Wegpunkte werden heruntergeladen… {current} von {total}",
     "downloadFailed": "Download fehlgeschlagen: {error}",
     "uploaded": "{count} WPs hochgeladen",
     "uploadFailed": "Upload fehlgeschlagen: {error}",

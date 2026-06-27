@@ -24,6 +24,7 @@
     type Waypoint, type Mission, WpAction, WP_ACTION_KEYS,
     hasLocation, isModifier, missionFlags, missionModified,
     loadedMissionId, markMissionSynced,
+    onMissionDownloadProgress,
   } from '$lib/stores/mission';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
   import MissionSaveDialog from '$lib/components/mission/MissionSaveDialog.svelte';
@@ -137,15 +138,25 @@
     return currentTelem.lastUpdate > 0 && (currentTelem.armingFlags & (1 << ARMING_FLAG_ARMED)) !== 0;
   }
 
+  // Live "x of n" status while the FC streams waypoints. Returns the unlisten fn (call in `finally`).
+  function listenDownloadProgress() {
+    return onMissionDownloadProgress(({ current, total }) => {
+      statusMessage = total > 0
+        ? $t('mission.downloadingProgress', { values: { current, total } })
+        : $t('mission.downloading');
+    });
+  }
+
   async function handleDownload() {
     if (!isConnected()) { statusMessage = $t('mission.notConnected'); return; }
-    downloadLoading = true; statusMessage = '';
+    downloadLoading = true; statusMessage = $t('mission.downloading');
+    const un = await listenDownloadProgress();
     try {
       const m = await missionDownload(false);
       statusMessage = $t('mission.downloaded', { values: { count: m.waypoints.length } });
     } catch (e) {
       statusMessage = $t('mission.downloadFailed', { values: { error: String(e) } });
-    } finally { downloadLoading = false; }
+    } finally { un(); downloadLoading = false; }
   }
 
   async function handleUpload() {
@@ -172,13 +183,14 @@
 
   async function handleEepromLoad() {
     if (!isConnected()) { statusMessage = $t('mission.notConnected'); return; }
-    eepromLoadLoading = true; statusMessage = '';
+    eepromLoadLoading = true; statusMessage = $t('mission.downloading');
+    const un = await listenDownloadProgress();
     try {
       const m = await missionDownload(true);
       statusMessage = $t('mission.eepromLoaded', { values: { count: m.waypoints.length } });
     } catch (e) {
       statusMessage = $t('mission.eepromLoadFailed', { values: { error: String(e) } });
-    } finally { eepromLoadLoading = false; }
+    } finally { un(); eepromLoadLoading = false; }
   }
 
   async function handleSaveFile() {

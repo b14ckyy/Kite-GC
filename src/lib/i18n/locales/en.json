@@ -1143,6 +1143,8 @@
     "dropHint": "Drop .mission file here",
     "notConnected": "Not connected",
     "downloaded": "Downloaded {count} WPs",
+    "downloading": "Downloading waypoints…",
+    "downloadingProgress": "Downloading waypoints… {current} of {total}",
     "downloadFailed": "Download failed: {error}",
     "uploaded": "Uploaded {count} WPs",
     "uploadFailed": "Upload failed: {error}",

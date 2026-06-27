@@ -54,11 +54,15 @@ pub struct ArduWaypoint {
 /// `reserve_home` reflects the firmware's home-slot convention: ArduPilot stores the home location as
 /// mission item 0 (dropped here so the planner only edits real waypoints), while PX4 has no home slot
 /// (item 0 is the first real waypoint). See `ardu_mission_download`.
+/// `progress(current, total)` is invoked once with `(0, count)` as soon as the FC reports its item
+/// count, then after each item is received — so callers can surface an "x of n" download indicator.
+/// Pass `|_, _| {}` when no progress reporting is needed (fence/rally).
 pub fn download(
     cmd_tx: &mpsc::Sender<MavlinkCommand>,
     fc_sysid: u8,
     reserve_home: bool,
     mission_type: MavMissionType,
+    mut progress: impl FnMut(u16, u16),
 ) -> Result<Vec<ArduWaypoint>, String> {
     let rx = register(cmd_tx)?;
 
@@ -75,6 +79,11 @@ pub fn download(
         Err(e) => { unregister(cmd_tx); return Err(e); }
     };
     log::info!("MAVLink mission download: FC reports {} items", count);
+    // Report progress in terms of *real* waypoints: ArduPilot's seq-0 home slot (reserve_home) is
+    // dropped from the result, so it's excluded from the count too — keeping "x of n" consistent with
+    // the final waypoint total across MSP/PX4/ArduPilot.
+    let total = count.saturating_sub(reserve_home as u16);
+    progress(0, total);
 
     if count == 0 {
         let _ = send(cmd_tx, make_ack(fc_sysid, MavMissionResult::MAV_MISSION_ACCEPTED, mission_type));
@@ -104,6 +113,8 @@ pub fn download(
             Ok(wp) => { if !(reserve_home && seq == 0) { items.push(wp); } }
             Err(e) => { unregister(cmd_tx); return Err(e); }
         }
+        // seq 0 with reserve_home is the home slot → stays "0 of n"; real WPs count from 1.
+        progress((seq + 1).saturating_sub(reserve_home as u16), total);
     }
 
     // 4. Acknowledge
