@@ -80,6 +80,7 @@ nav:
       - Video: guides/video.md
       - Safety: guides/safety.md
       - Radar & ADS-B: guides/radar-and-adsb.md
+      - Airspace Manager: guides/airspace.md
       - 3D map: guides/map-3d.md
       - Relay & forwarding: guides/relay-and-forwarding.md
       - RC control: guides/rc-control.md
