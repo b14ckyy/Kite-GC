@@ -50,7 +50,7 @@ Each tool, at a glance — expand for a quick description and the link to its fu
     Flight-controller identity (firmware variant, version, board) and live vehicle status — a quick
     read-out of what you're connected to and how it's doing.
 
-    <!-- SCREENSHOT: ../assets/getting-started/panels/uav-info.png -->
+    ![The UAV Info panel](../assets/uav_info.png)
 
     *Details: [Telemetry & display](../guides/telemetry-and-display.md).*
 
