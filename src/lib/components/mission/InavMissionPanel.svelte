@@ -426,7 +426,7 @@
   const estTimeText = $derived.by(() => {
     if (stats.estTimeS === null) return null;
     const base = fmtDuration(stats.estTimeS);
-    const prefix = stats.hasUnlimitedHold ? '≥ ' : stats.estTimeApprox ? '~' : '';
+    const prefix = stats.hasUnlimitedHold ? '≥ ' : '';
     return `${prefix}${base}`;
   });
 </script>
@@ -582,7 +582,7 @@
         <span class="stat" title={$t('mission.statDistance')}>⤢ {fmtDist(stats.legDistanceM)}</span>
         <span class="stat" title={$t('mission.statClimbDescent')}>↑{fmtAltDelta(stats.climbM)} ↓{fmtAltDelta(stats.descentM)}</span>
         {#if estTimeText}
-          <span class="stat" title={stats.estTimeApprox || stats.hasUnlimitedHold ? _t('mission.statTimeTip', { speed: formatConverted(convertSpeed(stats.assumedCruiseMs, iface.speedUnit), 0) }) : $t('mission.statTime')}>⏱ {estTimeText}</span>
+          <span class="stat" title={$t('mission.statTime')}>⏱ {estTimeText}</span>
         {/if}
       </div>
     {/if}

@@ -7,7 +7,7 @@ use tauri::{Emitter, State};
 
 use crate::mavlink_proto::{self, ArduWaypoint};
 use crate::mission::store::{MissionStore, mission_from_xml, mission_to_xml};
-use crate::mission::types::{HomePt, Mission, MissionInfo, Waypoint, WpAction, ALT_MODE_AGL, ALT_MODE_AMSL, ALT_MODE_REL, P3_ALT_TYPE};
+use crate::mission::types::{HomePt, Mission, MissionInfo, Waypoint, WpAction, ALT_MODE_AGL, ALT_MODE_AMSL, ALT_MODE_REL, P3_ALT_TYPE, WP_FLAG_NORMAL, WP_FLAG_LAST, WP_FLAG_FBH};
 use crate::mission::codec;
 use crate::terrain::TerrainProvider;
 
@@ -273,6 +273,108 @@ pub async fn mission_upload(
     Ok(store.snapshot())
 }
 
+/// Concatenate per-mission waypoint lists into one INAV multi-mission sequence: global 1-based
+/// numbering and each segment's last WP flagged `WP_FLAG_LAST` (0xA5) — or `WP_FLAG_FBH` (0x48) kept
+/// when that last WP is already a fly-by-home — with every other WP `WP_FLAG_NORMAL`. INAV stores all
+/// missions as one list split on those terminator flags, so a stray mid-segment terminator would break
+/// the boundaries; mid-segment flags are therefore forced to NORMAL. Empty missions are skipped.
+fn assemble_multi_mission(missions: &[Vec<Waypoint>]) -> Vec<Waypoint> {
+    let mut out: Vec<Waypoint> = Vec::new();
+    for seg in missions {
+        if seg.is_empty() {
+            continue;
+        }
+        let last = seg.len() - 1;
+        for (i, wp) in seg.iter().enumerate() {
+            let mut w = wp.clone();
+            w.flag = if i == last {
+                if w.flag == WP_FLAG_FBH { WP_FLAG_FBH } else { WP_FLAG_LAST }
+            } else {
+                WP_FLAG_NORMAL
+            };
+            out.push(w);
+        }
+    }
+    for (i, w) in out.iter_mut().enumerate() {
+        w.number = (i + 1) as u8;
+    }
+    out
+}
+
+/// Upload one or more missions to the FC as a single INAV multi-mission.
+///
+/// `missions` is the per-mission waypoint lists in order (slot 1..N); they're concatenated with the
+/// proper end-of-mission flags + global numbering (`assemble_multi_mission`), AGL waypoints resolved to
+/// AMSL, and uploaded WP-by-WP via MSP_SET_WP. The **active** mission index is intentionally NOT set
+/// here — selecting the active mission will be handled by the planned INAV control panel.
+/// `(async)` off the main thread — the AGL resolve awaits terrain, then the MSP exchange blocks.
+#[tauri::command]
+pub async fn mission_upload_multi(
+    missions: Vec<Vec<Waypoint>>,
+    save_eeprom: bool,
+    state: State<'_, AppState>,
+    store: State<'_, MissionStore>,
+    terrain: State<'_, TerrainProvider>,
+) -> Result<Mission, String> {
+    let combined = assemble_multi_mission(&missions);
+    if combined.is_empty() {
+        return Err("No waypoints to upload".into());
+    }
+
+    // Resolve AGL → AMSL before touching the serial handle (async terrain lookup).
+    let mission = Mission { waypoints: combined, info: MissionInfo::default(), dirty: false, home: None };
+    let resolved = resolve_agl(&mission, &terrain).await;
+
+    let proto = state.protocol.lock().map_err(|e| e.to_string())?;
+    let handle = match proto.as_ref() {
+        Some(ActiveProtocol::Msp(h)) => h,
+        Some(ActiveProtocol::Mavlink(_)) => return Err("Mission upload not supported via MAVLink yet".into()),
+        Some(ActiveProtocol::PassiveTelemetry(_)) => return Err("Mission upload not available in telemetry monitoring mode".into()),
+        None => return Err("Not connected".into()),
+    };
+
+    let total = resolved.waypoints.len();
+    log::info!(
+        "MSP multi-mission upload start: {} mission(s), {total} waypoints, save_eeprom={save_eeprom}",
+        missions.iter().filter(|m| !m.is_empty()).count()
+    );
+    for (i, wp) in resolved.waypoints.iter().enumerate() {
+        log::debug!("MSP upload WP {}/{}: {wp:?}", i + 1, total);
+        handle.msp_request(MSP_SET_WP, &codec::encode_wp(wp))?;
+    }
+
+    // Optional: save to EEPROM (mission ID byte reserved → 0).
+    if save_eeprom {
+        handle.msp_request(MSP_WP_MISSION_SAVE, &[0])?;
+    }
+
+    let info_payload = handle.msp_request(MSP_WP_GETINFO, &[])?;
+    let info = codec::decode_wp_getinfo(&info_payload)?;
+    log::info!(
+        "MSP multi-mission upload complete: FC reports valid={} wpCount={}{}",
+        info.is_valid, info.wp_count, if save_eeprom { " (EEPROM saved)" } else { "" }
+    );
+    store.set_info(info);
+    store.mark_clean();
+
+    Ok(store.snapshot())
+}
+
+/// Read the FC's active multi-mission index (`nav_wp_multi_mission_index`). Defaults to 1 when the
+/// setting is absent (single-mission / older firmware). `(async)` — the setting read blocks on the
+/// scheduler.
+#[tauri::command(async)]
+pub fn mission_get_active_index(state: State<'_, AppState>) -> Result<u8, String> {
+    let proto = state.protocol.lock().map_err(|e| e.to_string())?;
+    let handle = match proto.as_ref() {
+        Some(ActiveProtocol::Msp(h)) => h,
+        Some(ActiveProtocol::Mavlink(_)) => return Err("Mission info not supported via MAVLink yet".into()),
+        Some(ActiveProtocol::PassiveTelemetry(_)) => return Err("Mission info not available in telemetry monitoring mode".into()),
+        None => return Err("Not connected".into()),
+    };
+    Ok(crate::commands::fc_settings::read_uint_setting(handle, "nav_wp_multi_mission_index").unwrap_or(1) as u8)
+}
+
 /// Resolve AGL waypoints to AMSL for export. INAV/.mission only understand
 /// REL/AMSL, so each AGL waypoint's above-ground value is turned into an
 /// absolute altitude: `AMSL = terrain_elevation(lat,lon) + AGL`. Non-AGL
@@ -428,4 +530,55 @@ pub fn read_text_file(path: String) -> Result<String, String> {
 #[tauri::command]
 pub fn write_text_file(path: String, content: String) -> Result<(), String> {
     std::fs::write(&path, content).map_err(|e| format!("Failed to write file: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn wp(action: WpAction, flag: u8) -> Waypoint {
+        let mut w = Waypoint::new(0, action, 0, 0, 0);
+        w.flag = flag;
+        w
+    }
+
+    #[test]
+    fn assemble_multi_mission_flags_and_numbering() {
+        // Two missions: each segment's last WP must become 0xA5, all others 0x00, numbered globally 1..N.
+        let m1 = vec![wp(WpAction::Waypoint, WP_FLAG_NORMAL), wp(WpAction::Waypoint, WP_FLAG_LAST)];
+        let m2 = vec![
+            wp(WpAction::Waypoint, WP_FLAG_NORMAL),
+            wp(WpAction::Waypoint, WP_FLAG_NORMAL),
+            wp(WpAction::Waypoint, WP_FLAG_LAST),
+        ];
+        let out = assemble_multi_mission(&[m1, m2]);
+
+        assert_eq!(out.len(), 5);
+        let nums: Vec<u8> = out.iter().map(|w| w.number).collect();
+        assert_eq!(nums, vec![1, 2, 3, 4, 5]);
+        let flags: Vec<u8> = out.iter().map(|w| w.flag).collect();
+        assert_eq!(
+            flags,
+            vec![WP_FLAG_NORMAL, WP_FLAG_LAST, WP_FLAG_NORMAL, WP_FLAG_NORMAL, WP_FLAG_LAST]
+        );
+    }
+
+    #[test]
+    fn assemble_multi_mission_preserves_fbh_last_and_skips_empty() {
+        // An empty mission is skipped; a fly-by-home last WP keeps its 0x48 terminator; a stray
+        // mid-segment terminator is forced back to NORMAL so it doesn't split the segment.
+        let m1 = vec![
+            wp(WpAction::Waypoint, WP_FLAG_LAST), // mid-segment stray terminator → must clear
+            wp(WpAction::Land, WP_FLAG_FBH),      // last, FBH → keep 0x48
+        ];
+        let empty: Vec<Waypoint> = vec![];
+        let m2 = vec![wp(WpAction::Waypoint, WP_FLAG_NORMAL)]; // single WP → becomes last (0xA5)
+        let out = assemble_multi_mission(&[m1, empty, m2]);
+
+        assert_eq!(out.len(), 3);
+        assert_eq!(out[0].flag, WP_FLAG_NORMAL); // stray mid terminator cleared
+        assert_eq!(out[1].flag, WP_FLAG_FBH); // FBH preserved
+        assert_eq!(out[2].flag, WP_FLAG_LAST); // single WP of m2 terminates it
+        assert_eq!(out.iter().map(|w| w.number).collect::<Vec<_>>(), vec![1, 2, 3]);
+    }
 }

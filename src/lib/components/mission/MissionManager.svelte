@@ -26,7 +26,7 @@
     missionImportXml, missionLoadFile, applyMissionLaunchDefault, type Waypoint,
   } from '$lib/stores/mission';
   import {
-    arduMission, arduSelectedWpIndex, arduLoadedMissionId,
+    arduMission, arduSelectedWpIndex, arduLoadedMissionId, markArduMissionSynced,
     parseWaypoints, type ArduWaypoint,
   } from '$lib/stores/missionArdupilot';
   import { frameMissionOnMap } from '$lib/stores/mapCamera';
@@ -249,9 +249,11 @@
           true, // fresh load → reset to this mission's home/first-WP, don't keep the previous launch
         );
       } else {
-        arduMission.set(JSON.parse(m.waypoints_json) as ArduWaypoint[]);
+        const wps = JSON.parse(m.waypoints_json) as ArduWaypoint[];
+        arduMission.set(wps);
         arduSelectedWpIndex.set(-1);
         arduLoadedMissionId.set(m.id);
+        markArduMissionSynced('db', wps);
       }
       frameMissionOnMap(); // standalone library load → frame the mission (not a replay-linked attach)
       onBack();

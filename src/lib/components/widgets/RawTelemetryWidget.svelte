@@ -47,7 +47,6 @@
     <div class="rt-row"><span class="rtk">MAH</span><span class="rtv">{telem.mAhDrawn}</span></div>
     <div class="rt-row"><span class="rtk">SAT</span><span class="rtv">{telem.numSat} {getGpsFixLabel()}</span></div>
     <div class="rt-row"><span class="rtk">RSSI</span><span class="rtv">{telem.rssi}</span></div>
-    <div class="rt-row"><span class="rtk">CPU</span><span class="rtv">{telem.cpuLoad}%</span></div>
   {:else}
     <span class="rt-nodata">{$t('rawTelemetry.noData')}</span>
   {/if}

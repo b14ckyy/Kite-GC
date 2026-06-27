@@ -106,7 +106,8 @@
     [
       { key: 'adsb', enabled: radar.adsb.enabled, label: $t('radar.adsb'), list: enrichList($radarVehicles.adsb, referencePoint) },
       { key: 'formationFlight', enabled: radar.formationFlight.enabled, label: $t('radar.formationFlight'), list: enrichList($radarVehicles.formationFlight, referencePoint) },
-      { key: 'radio', enabled: radar.radio.enabled, label: $t('radar.radio'), list: enrichList($radarVehicles.radio, referencePoint) },
+      // Radio Telemetry parked for now (feature cut; may return) — also commented out in Settings.
+      // { key: 'radio', enabled: radar.radio.enabled, label: $t('radar.radio'), list: enrichList($radarVehicles.radio, referencePoint) },
     ].filter((g) => g.enabled),
   );
 

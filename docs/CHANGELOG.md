@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **INAV multi-mission upload/download.** Uploading now sends **all** of your mission slots to the
+  flight controller as one combined sequence (each mission terminated correctly), and downloading
+  **splits** the FC's combined list back into the separate mission tabs — so a multi-mission round-trips
+  cleanly to RAM and EEPROM. (Selecting which mission is *active* will come later with a dedicated INAV
+  control panel.)
+- **Mission stats + provenance parity for ArduPilot / PX4.** The ArduPilot/PX4 mission panel now shows
+  the same footer as INAV: total leg **distance**, **climb/descent**, flight **time**, and the **FC /
+  FILE / DB** provenance badges plus a **Modified** badge — so you can see at a glance where the loaded
+  plan came from and whether it's been edited. Stats are computed by a shared helper so both stacks read
+  identically. The flight **time** is now shown **only when waypoints carry an explicitly-set cruise
+  speed** (INAV per-WP speed / ArduPilot `DO_CHANGE_SPEED`); without one it's hidden rather than guessed
+  from an assumed cruise speed.
 - **Linux auto-download for the video helpers (ffmpeg + go2rtc).** Previously these were fetched
   automatically only on Windows; Linux users had to install them by hand. Now both download on **Linux**
   too (x86_64 and ARM64 / Raspberry Pi) — go2rtc as a ready-to-run binary, ffmpeg as the official static
@@ -214,6 +226,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   INAV's codes (LOAD=18, SAVE=19); EEPROM save/load now round-trip.
 
 ### Changed
+- **Removed the CPU-load readout from the Raw Telemetry widget.** It never displayed a meaningful value;
+  no telemetry is saved by dropping it (CPU load only rides inside the INAV status / MAVLink `SYS_STATUS`
+  messages Kite already polls for arming, flight mode and sensor health).
+- **Radio Telemetry radar source hidden.** The third radar system (passive radio telemetry, internal
+  `radio`) was never implemented and stays parked for now, so its toggle is removed from Settings → Data →
+  Telemetry and from the Radar panel (no tab / list / map-visibility row). ADS-B and FormationFlight are
+  unaffected. The UI is only commented out and the store/types are kept, so it can return without rework
+  (the source family remains "not planned" — see `docs/future/RADIO_SOURCE_RADAR.md`).
 - **Flight-log database space is now reclaimed incrementally.** Deleting a flight (or a stored
   blackbox original) used to run a full `VACUUM`, rewriting the entire database file — fine for a few
   flights, but unusably slow once logs reach GBs (common with ArduPilot DataFlash). The DB now uses
