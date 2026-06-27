@@ -86,7 +86,6 @@ nav:
       - RC control: guides/rc-control.md
   - Reference:
       - Settings: reference/settings.md
-      - Keyboard shortcuts: reference/keyboard-shortcuts.md
       - File formats: reference/file-formats.md
   - Troubleshooting:
       - Connection: troubleshooting/connection.md

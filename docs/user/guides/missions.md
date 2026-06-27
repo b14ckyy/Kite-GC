@@ -98,7 +98,8 @@ Each waypoint carries an altitude against a **reference**:
 
 - **Add** points by clicking on the map; **drag** a marker to move it; **reorder** in the list.
 - **Edit** a point (type, altitude, parameters) from its popup or the list.
-- **Multi-select**, **undo / redo**, and **clear** are all available while editing.
+- **Multi-select**, **undo / redo** (**Ctrl+Z** / **Ctrl+Y**, or **Ctrl+Shift+Z** to redo), and
+  **clear** are all available while editing.
 - **Survey patterns** — generate an area scan (a back-and-forth grid over a drawn region) instead of
   placing every leg by hand.
 
