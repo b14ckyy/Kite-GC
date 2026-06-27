@@ -6,10 +6,6 @@ boats. It combines everything you expect from a GCS with a fast, intuitive inter
 you won't find anywhere else — like a full 3D flight view, a fleet & battery manager, and live video
 right next to the map.
 
-!!! note "Documentation in progress"
-    This user guide is being written for the first public release. Pages marked *work in progress*
-    are placeholders for now.
-
 ![Kite Ground Control in 3D mode](assets/main_interface_3d.png)
 /// caption
 Kite Ground Control flying in 3D mode.
