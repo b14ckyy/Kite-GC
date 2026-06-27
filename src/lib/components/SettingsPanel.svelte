@@ -535,10 +535,12 @@
         <label class="s-label" for="radar-ff">{$t('settings.radarFormationFlight')}</label>
         <Toggle checked={radar.formationFlight.enabled} id="radar-ff" disabled={!radar.enabled} onchange={(c) => patchRadar({ formationFlight: { ...radar.formationFlight, enabled: c } })} />
       </div>
-      <div class="s-row s-indent" class:s-disabled={!radar.enabled}>
+      <!-- Radio Telemetry radar system parked for now (feature cut; may return). Kept the store/type so
+           it can be re-enabled by un-commenting this row + the RadarPanel group entry. -->
+      <!-- <div class="s-row s-indent" class:s-disabled={!radar.enabled}>
         <label class="s-label" for="radar-radio">{$t('settings.radarRadio')}</label>
         <Toggle checked={radar.radio.enabled} id="radar-radio" disabled={!radar.enabled} onchange={(c) => patchRadar({ radio: { enabled: c } })} />
-      </div>
+      </div> -->
       {#if DEV}
         <div class="s-row s-indent" class:s-disabled={!radar.enabled}>
           <label class="s-label" for="radar-sim">{$t('settings.radarSimDev')}</label>
