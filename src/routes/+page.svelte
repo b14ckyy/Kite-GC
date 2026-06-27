@@ -737,6 +737,20 @@
     .catch(() => {
       void invoke('set_log_level', { level: savedLogLevel }).catch(() => {});
     });
+  // Record a curated settings snapshot in the log's session header (support-relevant config only —
+  // not the full blob with widget layout / map center / cache size). See logging::log_session_settings.
+  {
+    const s = saved;
+    const summary = JSON.stringify({
+      protocol: s.lastProtocol, transport: s.lastTransport, baud: s.lastBaud,
+      attitudeHz: s.attitudeRateHz, positionHz: s.positionRateHz,
+      airspeed: s.airspeedEnabled, mavlinkFull: s.mavlinkFullTelemetry,
+      flightLog: s.flightLoggingEnabled, rawLog: s.flightLogRawEnabled,
+      batteryAlertPct: s.batteryAlertPct, mapProvider: s.mapProvider,
+      uiScale: s.uiScale, logLevel: savedLogLevel,
+    });
+    void invoke('log_session_settings', { summary }).catch(() => {});
+  }
   uiScale = saved.uiScale ?? 1;
   interfaceSettings = saved.interface ?? {
     speedUnit: 'kmh',

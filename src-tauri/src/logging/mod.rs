@@ -126,10 +126,15 @@ fn resolve_log_dir(portable: bool) -> PathBuf {
     PathBuf::from(".")
 }
 
+/// Keep at most this many days of log files (older `kite-gc-*.log` are pruned on startup).
+const LOG_RETENTION_DAYS: u64 = 30;
+
 /// Install the file logger. Call once, as early as possible in `run()` so startup is captured.
 ///
 /// `level` is the initial filter (the frontend re-applies the persisted user choice on startup).
-/// Rotates the previous run's log to `*.prev`, then opens a fresh file. Logger-init failures are
+/// MWPTools-style scheme: **one file per day** (`kite-gc-YYYY-MM-DD.log`), **appended** across
+/// sessions on the same day, each session prefaced with a header block (time / version+build /
+/// platform / level). Files older than `LOG_RETENTION_DAYS` are pruned. Logger-init failures are
 /// printed to stderr and otherwise ignored — the app must still run without a log file.
 pub fn init(level: LevelFilter, portable: bool) {
     let dir = resolve_log_dir(portable);
@@ -137,14 +142,10 @@ pub fn init(level: LevelFilter, portable: bool) {
         eprintln!("logging: cannot create log dir {}: {}", dir.display(), e);
         return;
     }
-    let path = dir.join("kite-gc.log");
+    prune_old_logs(&dir);
 
-    // Rotate the previous session's log out of the way (best-effort).
-    if path.exists() {
-        let prev = dir.join("kite-gc.log.prev");
-        let _ = std::fs::remove_file(&prev);
-        let _ = std::fs::rename(&path, &prev);
-    }
+    let date = chrono::Local::now().format("%Y-%m-%d");
+    let path = dir.join(format!("kite-gc-{date}.log"));
 
     let file = match OpenOptions::new().create(true).append(true).open(&path) {
         Ok(f) => f,
@@ -164,18 +165,75 @@ pub fn init(level: LevelFilter, portable: bool) {
     }
 
     // `set_logger` only succeeds once for the process lifetime; ignore a double-init.
-    if log::set_logger(&LOGGER).is_ok() {
-        log::set_max_level(level);
-    } else {
-        // Already installed (e.g. a mobile re-entry) — at least apply the level.
-        log::set_max_level(level);
-    }
+    let _ = log::set_logger(&LOGGER);
+    log::set_max_level(level);
 
-    log::info!(
-        "Logger initialized — level={}, file={}",
-        level,
-        path.display()
-    );
+    write_session_header(level, portable);
+}
+
+/// Write the per-session header block straight to the file (raw — bypasses the level filter + the
+/// per-line timestamp/level prefix), so each day-file clearly delimits sessions.
+fn write_session_header(level: LevelFilter, portable: bool) {
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+    let sep = "=".repeat(64);
+    write_raw(&format!("\n{sep}"));
+    write_raw(&format!("Session start: {now}"));
+    write_raw(&format!(
+        "Kite Ground Control v{} (build {}, {}) \u{b7} {}/{} \u{b7} portable={}",
+        env!("CARGO_PKG_VERSION"),
+        env!("KITE_GIT_HASH"),
+        if cfg!(debug_assertions) { "debug" } else { "release" },
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        portable,
+    ));
+    write_raw(&format!("Log level: {level}"));
+    write_raw(&sep);
+}
+
+/// Append a one-line settings snapshot to the current day-file. Called once by the frontend after it
+/// loads the persisted settings (the backend can't see them at startup), so the session block records
+/// the active config. Raw line (no level gate / prefix).
+pub fn log_session_settings(summary: &str) {
+    write_raw(&format!("Settings: {summary}"));
+}
+
+/// Write a raw line (+ newline) directly to the log file, ignoring the level filter. Used for the
+/// session header / settings snapshot. Best-effort.
+fn write_raw(line: &str) {
+    if let Ok(mut guard) = LOGGER.state.lock() {
+        if let Some(w) = guard.writer.as_mut() {
+            let _ = w.write_all(line.as_bytes());
+            let _ = w.write_all(b"\n");
+            let _ = w.flush();
+        }
+    }
+}
+
+/// Delete `kite-gc*.log*` files older than `LOG_RETENTION_DAYS` (by mtime). Best-effort; covers the
+/// legacy `kite-gc.log`/`.prev` files too.
+fn prune_old_logs(dir: &Path) {
+    let max_age = std::time::Duration::from_secs(LOG_RETENTION_DAYS * 24 * 60 * 60);
+    let now = std::time::SystemTime::now();
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = match name.to_str() {
+            Some(n) => n,
+            None => continue,
+        };
+        if !(name.starts_with("kite-gc") && name.contains(".log")) {
+            continue;
+        }
+        if let Ok(modified) = entry.metadata().and_then(|m| m.modified()) {
+            if now.duration_since(modified).map(|age| age > max_age).unwrap_or(false) {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
 }
 
 /// Change the active log level at runtime (driven by Settings). Cheap atomic store.
