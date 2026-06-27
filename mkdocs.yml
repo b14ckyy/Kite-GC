@@ -90,3 +90,4 @@ nav:
   - Troubleshooting:
       - Connection: troubleshooting/connection.md
       - Video: troubleshooting/video.md
+      - Reporting a problem: troubleshooting/reporting-issues.md
