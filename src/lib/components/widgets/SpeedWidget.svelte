@@ -40,30 +40,48 @@
   let thrPct = $derived(Math.max(0, Math.min(100, telem.lastUpdate ? telem.throttle : 0)));
 
   // ── Derived longitudinal acceleration (m/s²) ──────────────────────────────
-  // No FC field for it — we differentiate the speed we display (airspeed when present, else ground
-  // speed) over the telemetry timestamp and low-pass it. Scale ±10 m/s² (~±1 g) → ±full bar; no numbers.
-  // EMA accumulator stays a plain (non-reactive) var so the $effect never reads the state it writes
-  // (that read+write-same-state pattern freezes the main thread — see other telemetry widgets).
-  const ACC_SCALE = 4;      // m/s² at full deflection (small range — long-range craft change gently)
-  const ACC_ALPHA = 0.3;    // EMA smoothing factor
+  // No FC field for it — we estimate it from the speed we display (airspeed when present, else ground
+  // speed). The raw speed is quantized (it only changes by ~1 km/h every few frames), so an
+  // instantaneous derivative spikes on the one frame the value steps and reads ~0 on every frame in
+  // between — the bar flicks up then drops to zero. Instead we fit a least-squares line to the speed
+  // samples in a sliding time window (ACC_WINDOW_MS) and take its slope: the estimate stays steady as
+  // long as the speed is trending across the window (it doesn't collapse to 0 between quantization
+  // steps) and only fades to 0 once the speed is genuinely flat over the whole window. Robust to slow /
+  // irregular update rates. A small deadband reads sub-threshold drift as "level". Scale ±4 m/s².
+  // `samples` is a plain (non-reactive) var; the $effect only writes `accel` ($state) — never reads the
+  // state it writes (that read+write-same-state pattern freezes the main thread — see other widgets).
+  const ACC_SCALE = 4;          // m/s² at full deflection (small range — long-range craft change gently)
+  const ACC_WINDOW_MS = 1500;   // sliding regression window — wider = steadier/laggier, narrower = livelier
+  const ACC_DEADBAND = 0.05;    // m/s² — suppress sub-threshold drift around zero
   let accel = $state(0);
-  let emaA = 0;
-  let prevV: number | null = null;
-  let prevT = 0;
+  let samples: { t: number; v: number }[] = [];
+
+  /** Least-squares slope (m/s²) of the windowed (t, v) samples; 0 with <2 samples. */
+  function windowSlope(s: { t: number; v: number }[]): number {
+    const n = s.length;
+    if (n < 2) return 0;
+    const t0 = s[0].t;
+    let sx = 0, sy = 0, sxx = 0, sxy = 0;
+    for (const p of s) {
+      const x = (p.t - t0) / 1000; // seconds
+      sx += x; sy += p.v; sxx += x * x; sxy += x * p.v;
+    }
+    const denom = n * sxx - sx * sx;
+    if (Math.abs(denom) < 1e-9) return 0;
+    return (n * sxy - sx * sy) / denom;
+  }
 
   $effect(() => {
     const now = telem.lastUpdate;
     const v = telem.airspeed > 0 ? telem.airspeed : telem.groundSpeed; // raw m/s (unit-independent)
-    if (!now) { emaA = 0; accel = 0; prevV = null; prevT = 0; return; }
-    if (prevV !== null && now > prevT) {
-      const dt = (now - prevT) / 1000;
-      if (dt > 0 && dt < 5) {               // ignore stale gaps (reconnect, paused stream)
-        emaA = emaA * (1 - ACC_ALPHA) + ((v - prevV) / dt) * ACC_ALPHA;
-        accel = emaA;
-      }
-    }
-    prevV = v;
-    prevT = now;
+    if (!now) { samples = []; accel = 0; return; }
+    const last = samples[samples.length - 1];
+    if (last && now - last.t > 5000) samples = []; // stale gap (reconnect/pause) → restart the window
+    if (!last || now > last.t) samples.push({ t: now, v });
+    const cutoff = now - ACC_WINDOW_MS;
+    while (samples.length > 2 && samples[0].t < cutoff) samples.shift();
+    const a = windowSlope(samples);
+    accel = Math.abs(a) < ACC_DEADBAND ? 0 : a;
   });
 
   let accFrac = $derived(Math.max(-1, Math.min(1, accel / ACC_SCALE))); // −1…+1 of the bar
