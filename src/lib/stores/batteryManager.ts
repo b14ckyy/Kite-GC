@@ -15,6 +15,30 @@ export function normalizeSerial(s: string): string {
   return s.toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
+/** Live input normalization for a serial *list* (one flight may link several packs): upper-case and
+ *  keep alnum plus the `,` / space separators the user is typing. Per-token cleanup + de-dupe happen
+ *  on save via {@link normalizeSerialList} — doing it live would fight the cursor. */
+export function normalizeSerialInput(s: string): string {
+  return s.toUpperCase().replace(/[^A-Z0-9, ]/g, '');
+}
+
+/** Split a serial-list string into normalized, de-duplicated, order-preserving tokens (drops empties). */
+export function serialTokens(s: string): string[] {
+  const out: string[] = [];
+  for (const tok of s.split(',')) {
+    const n = normalizeSerial(tok);
+    if (n && !out.includes(n)) out.push(n);
+  }
+  return out;
+}
+
+/** Canonical serial-list for storage/display: normalized tokens rejoined with ", ". The backend
+ *  re-normalizes to its own canonical form on store; MUST stay token-compatible with Rust
+ *  `normalize_serial_list` (db.rs). */
+export function normalizeSerialList(s: string): string {
+  return serialTokens(s).join(', ');
+}
+
 /** Grouping mode for the battery list (reuses the logbook's top-right select). */
 export type BatteryGroupMode = 'cell-capacity' | 'capacity-cell' | 'flat';
 

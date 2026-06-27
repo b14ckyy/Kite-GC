@@ -30,7 +30,7 @@
   import { settings } from '$lib/stores/settings';
   import { convertAltitude, convertSpeed, convertDistance, formatConverted } from '$lib/utils/units';
   import { formatDurationSec, batteryDbList } from '$lib/stores/flightlog';
-  import { normalizeSerial } from '$lib/stores/batteryManager';
+  import { normalizeSerial, normalizeSerialInput, serialTokens, normalizeSerialList } from '$lib/stores/batteryManager';
   import type { BatteryPack } from '$lib/stores/flightlogTypes';
 
   let { interfaceSettings }: { interfaceSettings: InterfaceSettings } = $props();
@@ -51,29 +51,42 @@
   let batteries = $state<BatteryPack[]>([]);
   let listOpen = $state(false);
 
-  // `serial` is kept normalized (upper alnum) live as the user types, so matching the (also
-  // normalized) pack serials is an exact, reliable comparison.
+  // `serial` is a comma-separated list (one flight may link several packs). It's kept input-normalized
+  // (upper alnum + the separators) live. The picker operates on the *active* (last) token being typed;
+  // the tokens before it are already committed.
   const isArchived = (b: BatteryPack) => b.status === 'retired' || b.status === 'damaged';
+  const activeToken = $derived(normalizeSerial(serial.split(',').pop() ?? '')); // segment being typed
+  const committedTokens = $derived(serialTokens(serial.split(',').slice(0, -1).join(','))); // already added
+  const selectedTokens = $derived(serialTokens(serial)); // all tokens (for archived check)
   const filteredBatteries = $derived.by(() => {
-    const q = serial.toLowerCase();
-    // Retired/damaged packs are hidden from the picker — you can still link one by typing its exact
-    // serial (with a confirmation), but it shouldn't be offered as a normal choice.
-    const list = batteries.filter((b) => !isArchived(b));
+    const q = activeToken.toLowerCase();
+    // Hide retired/damaged packs and ones already added to this flight. (You can still link an archived
+    // pack by typing its exact serial, with a confirmation, but it isn't offered as a normal choice.)
+    const list = batteries.filter((b) => !isArchived(b) && !committedTokens.includes(normalizeSerial(b.serial)));
     const matches = q
       ? list.filter((b) => b.serial.toLowerCase().includes(q) || (b.label ?? '').toLowerCase().includes(q))
       : list;
     return matches.slice(0, 8);
   });
   const serialIsNew = $derived(
-    serial.length > 0 && !batteries.some((b) => normalizeSerial(b.serial) === serial),
+    activeToken.length > 0 && !batteries.some((b) => normalizeSerial(b.serial) === activeToken),
   );
-  // A retired/damaged pack whose serial was typed exactly — link is allowed but must be confirmed
+  // A retired/damaged pack among the selected tokens — link is allowed but must be confirmed
   // (could be an accidental serial reuse).
   const archivedMatch = $derived(
-    serial.length > 0
-      ? (batteries.find((b) => normalizeSerial(b.serial) === serial && isArchived(b)) ?? null)
+    selectedTokens.length
+      ? (batteries.find((b) => selectedTokens.includes(normalizeSerial(b.serial)) && isArchived(b)) ?? null)
       : null,
   );
+
+  // Pick a pack from the dropdown → complete the active token and leave a trailing ", " so the next
+  // pack can be typed/picked straight away.
+  function pickSerial(pickedSerial: string) {
+    const prior = serialTokens(serial.split(',').slice(0, -1).join(','));
+    prior.push(normalizeSerial(pickedSerial));
+    serial = prior.join(', ') + ', ';
+    listOpen = true;
+  }
   // Re-arm the confirmation whenever the serial changes.
   $effect(() => {
     void serial;
@@ -123,7 +136,7 @@
   function save() {
     // Linking to a retired/damaged pack needs an explicit confirm (possible accidental serial reuse).
     if (archivedMatch && !confirmingArchived) { confirmingArchived = true; return; }
-    settle({ batterySerial: normalizeSerial(serial), notes: notes.trim(), linkMission: missionConfirm && linkMission });
+    settle({ batterySerial: normalizeSerialList(serial), notes: notes.trim(), linkMission: missionConfirm && linkMission });
   }
   function confirmDiscard() { settle({ batterySerial: '', notes: '', linkMission: false, discard: true }); }
   // Modal: deliberately no backdrop-click / Escape dismissal — closing is an explicit Save or
@@ -169,14 +182,14 @@
               autocomplete="off"
               spellcheck="false"
               onfocus={() => (listOpen = true)}
-              oninput={(e) => { serial = normalizeSerial(e.currentTarget.value); listOpen = true; }}
+              oninput={(e) => { serial = normalizeSerialInput(e.currentTarget.value); listOpen = true; }}
               onblur={() => setTimeout(() => (listOpen = false), 120)}
             />
             {#if listOpen && filteredBatteries.length > 0}
               <ul class="battery-dropdown">
                 {#each filteredBatteries as b (b.id)}
                   <li>
-                    <button type="button" class="battery-opt" onmousedown={(e) => { e.preventDefault(); serial = normalizeSerial(b.serial); listOpen = false; }}>
+                    <button type="button" class="battery-opt" onmousedown={(e) => { e.preventDefault(); pickSerial(b.serial); }}>
                       <span class="bo-serial">{b.serial}</span>
                       {#if batteryMeta(b)}<span class="bo-meta">{batteryMeta(b)}</span>{/if}
                     </button>

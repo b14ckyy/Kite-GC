@@ -59,7 +59,7 @@
   import { toTelemetryData } from '$lib/adapters/telemetryAdapter';
   import { activeWpNumber, replayWpTotal } from '$lib/stores/navStatus';
   import { missionManagerOpen, missionManagerSelectedId, requestOpenFlightId, requestOpenMissionId } from '$lib/stores/missionManager';
-  import { batteryManagerOpen, batteryManagerCreateSerial } from '$lib/stores/batteryManager';
+  import { batteryManagerOpen, batteryManagerCreateSerial, normalizeSerial } from '$lib/stores/batteryManager';
   import { vehicleManagerOpen, vehicleManagerCreateCraft } from '$lib/stores/vehicleManager';
   import { missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode, flightSetBatterySerial, updateFlightNotes, getFlight, flightlogCommitPending, flightlogDiscardPending, flightlogContinuePending, scanOrphanSessions, recoverDiscard, recoverSaveIncomplete, recoverContinue, batteryDbFindBySerial, batteryDbAddUsage, vehicleDbFindByCraftName, blackboxDecoderAvailable, downloadBlackboxDecode } from '$lib/stores/flightlog';
   import EndFlightDialog from "$lib/components/logbook/EndFlightDialog.svelte";
@@ -2169,12 +2169,15 @@
       const flightId = await flightlogCommitPending();
       if (res.batterySerial) {
         await flightSetBatterySerial(flightId, res.batterySerial, flightLogDbPath);
-        // Unknown serial → offer to create a battery (opens the Battery Manager create form pre-filled).
-        const existing = await batteryDbFindBySerial(res.batterySerial, flightLogDbPath).catch(() => null);
-        if (!existing) {
+        // A flight may link several packs (comma-separated). Offer to create each unknown serial; on the
+        // first "create" we open the Manager pre-filled for that pack (the rest can be added there).
+        const serials = res.batterySerial.split(',').map((s) => normalizeSerial(s)).filter(Boolean);
+        for (const serial of serials) {
+          const existing = await batteryDbFindBySerial(serial, flightLogDbPath).catch(() => null);
+          if (existing) continue;
           const choice = await showDialog({
             title: $t('endFlight.newBatteryTitle'),
-            message: $t('endFlight.newBatteryMessage', { values: { serial: res.batterySerial } }),
+            message: $t('endFlight.newBatteryMessage', { values: { serial } }),
             buttons: [
               { label: $t('endFlight.newBatteryCreate'), value: 'create' },
               { label: $t('endFlight.newBatterySkip'), value: 'skip' },
@@ -2184,7 +2187,8 @@
             activeTab = 'logbook';
             settings.patch({ activeTab: 'logbook' });
             batteryManagerOpen.set(true);
-            batteryManagerCreateSerial.set(res.batterySerial);
+            batteryManagerCreateSerial.set(serial);
+            break;
           }
         }
       }
