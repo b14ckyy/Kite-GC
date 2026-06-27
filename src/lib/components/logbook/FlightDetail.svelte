@@ -6,14 +6,14 @@
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import { convertAltitude, convertDistance, convertSpeed, convertTemperature, formatConverted } from '$lib/utils/units';
-  import { formatDurationSec, formatFlightDateTime, flightTzLabel, missionDbForFlight, flightLoggedWpCount, flightLinkMission, flightUnlinkMission, missionDbSave, missionDbFindByHash, missionDbGeocode, flightSetBatterySerial, batteryDbFindBySerial, vehicleDbList } from '$lib/stores/flightlog';
+  import { formatDurationSec, formatFlightDateTime, flightTzLabel, missionDbForFlight, flightLoggedWpCount, flightLinkMission, flightUnlinkMission, missionDbSave, missionDbFindByHash, missionDbGeocode, flightSetBatterySerial, batteryDbFindBySerial, batteryDbList, vehicleDbList } from '$lib/stores/flightlog';
   import type { Flight, LibraryMission, BatteryPack, Vehicle } from '$lib/stores/flightlogTypes';
   import type { InterfaceSettings } from '$lib/stores/settings';
   import { settings } from '$lib/stores/settings';
   import { mission, missionFlags, loadedMissionId, markMissionSynced } from '$lib/stores/mission';
   import { arduMission, arduLoadedMissionId } from '$lib/stores/missionArdupilot';
   import { autopilotSystem } from '$lib/stores/autopilotContext';
-  import { batteryManagerOpen, batteryManagerSelectedId, normalizeSerial } from '$lib/stores/batteryManager';
+  import { batteryManagerOpen, batteryManagerSelectedId, normalizeSerial, normalizeSerialInput, normalizeSerialList, serialTokens } from '$lib/stores/batteryManager';
   import { vehicleManagerOpen, vehicleManagerSelectedId, vehicleManagerCreateCraft, normalizeCraftName } from '$lib/stores/vehicleManager';
   import { requestOpenMissionId } from '$lib/stores/missionManager';
   import { replayWpTotal } from '$lib/stores/navStatus';
@@ -94,11 +94,53 @@
   let linkBusy = $state(false);
 
   // ── Linked battery (soft link by serial) ───────────────────────────
-  let batterySerial = $state('');           // the flight's serial (local copy, survives link/unlink)
-  let batteryPack = $state<BatteryPack | null>(null); // resolved pack, or null = "not in library"
+  let batterySerial = $state('');           // the flight's serial list (local copy, survives link/unlink)
+  // One flight may link several packs (comma-separated). Each token resolved to a pack (or null = not
+  // in library), rendered as its own chip.
+  let batteryLinks = $state<{ serial: string; pack: BatteryPack | null }[]>([]);
   let batteryEditing = $state(false);
   let batterySerialDraft = $state('');
   let batteryBusy = $state(false);
+  // Battery serial combobox (mirrors the End-Flight picker): library list + a per-token dropdown.
+  let batteries = $state<BatteryPack[]>([]);
+  let didLoadBatteries = false;
+  let batteryListOpen = $state(false);
+  const isBatteryArchived = (b: BatteryPack) => b.status === 'retired' || b.status === 'damaged';
+  // The draft is a comma-separated list; the picker works on the *active* (last) token being typed.
+  const batteryActiveToken = $derived(normalizeSerial(batterySerialDraft.split(',').pop() ?? ''));
+  const batteryCommittedTokens = $derived(serialTokens(batterySerialDraft.split(',').slice(0, -1).join(',')));
+  const batteryDropdown = $derived.by<BatteryPack[]>(() => {
+    if (!batteryListOpen) return [];
+    const q = batteryActiveToken.toLowerCase();
+    // Hide retired/damaged packs and ones already added to this flight.
+    const list = batteries.filter((b) => !isBatteryArchived(b) && !batteryCommittedTokens.includes(normalizeSerial(b.serial)));
+    const matches = q
+      ? list.filter((b) => b.serial.toLowerCase().includes(q) || (b.label ?? '').toLowerCase().includes(q))
+      : list;
+    return matches.slice(0, 8);
+  });
+
+  async function loadBatteries() {
+    try {
+      batteries = await batteryDbList(get(settings).flightLogDbPath);
+    } catch {
+      batteries = [];
+    }
+  }
+
+  function batteryOptMeta(b: BatteryPack): string {
+    return [b.label, b.capacity_mah ? `${b.capacity_mah} mAh` : null, b.cell_count ? `${b.cell_count}S` : null]
+      .filter(Boolean)
+      .join(' · ');
+  }
+
+  // Pick a pack from the dropdown → complete the active token and leave a trailing ", " for the next.
+  function pickBatterySerial(pickedSerial: string) {
+    const prior = serialTokens(batterySerialDraft.split(',').slice(0, -1).join(','));
+    prior.push(normalizeSerial(pickedSerial));
+    batterySerialDraft = prior.join(', ') + ', ';
+    batteryListOpen = true;
+  }
 
   // The map mission can be linked only if it is a "real" mission (has a provenance flag);
   // a pure unsaved scratch mission can't. DB → link directly; FILE/FC → save-to-DB-then-link.
@@ -191,15 +233,18 @@
     }
   }
 
-  // Resolve the flight's battery serial to a library pack (null = not in library).
-  async function refreshBattery(serial: string) {
-    if (!serial) { batteryPack = null; return; }
+  // Resolve the flight's (possibly multi-pack) serial list to library packs (null token = not in library).
+  async function refreshBattery(serialList: string) {
+    const tokens = serialTokens(serialList);
+    if (!tokens.length) { batteryLinks = []; return; }
     const dbPath = get(settings).flightLogDbPath;
-    try {
-      batteryPack = await batteryDbFindBySerial(serial, dbPath);
-    } catch {
-      batteryPack = null;
+    const out: { serial: string; pack: BatteryPack | null }[] = [];
+    for (const s of tokens) {
+      let pack: BatteryPack | null = null;
+      try { pack = await batteryDbFindBySerial(s, dbPath); } catch { pack = null; }
+      out.push({ serial: s, pack });
     }
+    batteryLinks = out;
   }
 
   // On flight change: take the serial from the flight and resolve the pack.
@@ -212,17 +257,20 @@
   function startBatteryEdit() {
     batterySerialDraft = batterySerial;
     batteryEditing = true;
+    batteryListOpen = true;
+    if (!didLoadBatteries) { didLoadBatteries = true; void loadBatteries(); }
   }
 
   async function linkBattery() {
     if (batteryBusy) return;
-    const serial = normalizeSerial(batterySerialDraft);
+    const serial = normalizeSerialList(batterySerialDraft); // comma-separated list (may be several packs)
     batteryBusy = true;
     const dbPath = get(settings).flightLogDbPath;
     try {
       await flightSetBatterySerial(flight.id, serial, dbPath);
       batterySerial = serial;
       batteryEditing = false;
+      batteryListOpen = false;
       await refreshBattery(serial);
     } catch (e) {
       console.warn('[flight-detail] link battery failed', e);
@@ -233,9 +281,8 @@
 
   // Jump to this pack in the Battery Manager (reverse of the battery's linked-flights jump) —
   // handy when a voltage issue in replay should lead straight to the pack's history.
-  function openBattery() {
-    if (!batteryPack) return;
-    batteryManagerSelectedId.set(batteryPack.id);
+  function openBattery(pack: BatteryPack) {
+    batteryManagerSelectedId.set(pack.id);
     batteryManagerOpen.set(true);
   }
 
@@ -252,7 +299,7 @@
     try {
       await flightSetBatterySerial(flight.id, '', dbPath);
       batterySerial = '';
-      batteryPack = null;
+      batteryLinks = [];
     } catch (e) {
       console.warn('[flight-detail] unlink battery failed', e);
     } finally {
@@ -556,27 +603,49 @@
     <span class="fc-label">{$t('logbook.battery')}</span>
     <span class="fc-value craft-value-row">
       {#if batteryEditing}
-        <input
-          class="craft-name-input"
-          type="text"
-          placeholder={$t('logbook.batterySerialPlaceholder')}
-          value={batterySerialDraft}
-          autocapitalize="characters"
-          autocomplete="off"
-          spellcheck="false"
-          oninput={(e) => (batterySerialDraft = normalizeSerial(e.currentTarget.value))}
-          onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') linkBattery(); if (e.key === 'Escape') batteryEditing = false; }}
-          use:focusOnMount
-        />
+        <span class="craft-combo">
+          <input
+            class="craft-name-input"
+            type="text"
+            placeholder={$t('logbook.batterySerialPlaceholder')}
+            value={batterySerialDraft}
+            autocapitalize="characters"
+            autocomplete="off"
+            spellcheck="false"
+            onfocus={() => (batteryListOpen = true)}
+            oninput={(e) => { batterySerialDraft = normalizeSerialInput(e.currentTarget.value); batteryListOpen = true; }}
+            onblur={() => setTimeout(() => (batteryListOpen = false), 150)}
+            onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') linkBattery(); if (e.key === 'Escape') { batteryEditing = false; batteryListOpen = false; } }}
+            use:focusOnMount
+          />
+          {#if batteryListOpen && batteryDropdown.length > 0}
+            <ul class="craft-dropdown">
+              {#each batteryDropdown as b (b.id)}
+                <li>
+                  <button type="button" class="craft-opt" onmousedown={(e) => { e.preventDefault(); pickBatterySerial(b.serial); }}>
+                    <span class="co-craft">{b.serial}</span>
+                    {#if batteryOptMeta(b)}<span class="co-meta">{batteryOptMeta(b)}</span>{/if}
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </span>
         <Button variant="compact" icon="check" onclick={linkBattery} disabled={batteryBusy} title={$t('logbook.batteryLinkSave')} />
-      {:else if batterySerial}
-        {#if batteryPack}
-          <Button variant="compact" onclick={openBattery} title={$t('logbook.openBattery')}>{batteryPack.label || batteryPack.serial}</Button>
-        {:else}
-          <span>{batterySerial}</span>
-          <span class="battery-missing">{$t('logbook.batteryNotInLibrary')}</span>
+      {:else if batteryLinks.length}
+        {#each batteryLinks as link (link.serial)}
+          {@const pack = link.pack}
+          {#if pack}
+            <Button variant="compact" onclick={() => openBattery(pack)} title={$t('logbook.openBattery')}>{pack.label || pack.serial}</Button>
+          {:else}
+            <span>{link.serial}</span>
+            <span class="battery-missing">{$t('logbook.batteryNotInLibrary')}</span>
+          {/if}
+        {/each}
+        {#if !minimized}
+          <Button variant="compact" icon="edit" onclick={startBatteryEdit} title={$t('logbook.batteryEdit')} />
+          <Button variant="compact" icon="close" onclick={unlinkBattery} disabled={batteryBusy} title={$t('logbook.batteryUnlink')} />
         {/if}
-        {#if !minimized}<Button variant="compact" icon="close" onclick={unlinkBattery} disabled={batteryBusy} title={$t('logbook.batteryUnlink')} />{/if}
       {:else}
         <span>{$t('logbook.missionNone')}</span>
         {#if !minimized}<Button variant="compact" icon="battery" onclick={startBatteryEdit} title={$t('logbook.linkBatteryTip')}>{$t('logbook.linkBattery')}</Button>{/if}

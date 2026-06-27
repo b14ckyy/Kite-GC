@@ -780,7 +780,7 @@ pub fn insert_flight(conn: &Connection, flight: &Flight) -> SqlResult<i64> {
             flight.notes,
             flight.pilot_name,
             flight.pilot_id,
-            flight.battery_serial.as_deref().map(normalize_serial).filter(|s| !s.is_empty()),
+            flight.battery_serial.as_deref().map(normalize_serial_list).filter(|s| !s.is_empty()),
             flight.utc_offset_min,
         ],
     )?;
@@ -1538,6 +1538,22 @@ pub fn normalize_serial(s: &str) -> String {
         .collect()
 }
 
+/// Canonical battery-serial *list*: a single flight may link several packs, stored comma-separated in
+/// the freetext `flights.battery_serial` column. Split on commas, normalize each token with
+/// `normalize_serial`, drop empties, de-duplicate (order-preserving), and rejoin with a plain comma
+/// (no spaces) — a canonical token list the `*_for_serial` lookups match exactly. Keep in sync with the
+/// frontend `normalizeSerialList`.
+pub fn normalize_serial_list(s: &str) -> String {
+    let mut out: Vec<String> = Vec::new();
+    for tok in s.split(',') {
+        let n = normalize_serial(tok);
+        if !n.is_empty() && !out.contains(&n) {
+            out.push(n);
+        }
+    }
+    out.join(",")
+}
+
 /// Create a new battery pack. The `serial` is UNIQUE → a duplicate surfaces as an error
 /// (the caller should pre-check `find_battery_by_serial`). The `base_*` baseline starts at 0.
 pub fn create_battery(conn: &Connection, b: &BatteryPackInput) -> SqlResult<i64> {
@@ -1653,9 +1669,12 @@ pub fn set_battery_baseline(
 /// pack's `base_*` baseline on the frontend).
 pub fn battery_aggregate(conn: &Connection, serial: &str) -> SqlResult<BatteryAggregate> {
     conn.query_row(
+        // A flight may link several packs (comma-separated list); match this serial as one token of
+        // that list. Stored values are canonical (alnum tokens, comma-joined, no spaces), so wrapping
+        // both sides in commas makes this an exact per-token match (and still matches a lone serial).
         "SELECT COUNT(*), COALESCE(SUM(duration_sec), 0), COALESCE(SUM(battery_used_mah), 0),
                 MIN(start_time), MAX(start_time)
-         FROM flights WHERE battery_serial = ?1",
+         FROM flights WHERE (',' || battery_serial || ',') LIKE ('%,' || ?1 || ',%')",
         params![serial],
         |row| {
             Ok(BatteryAggregate {
@@ -1675,7 +1694,8 @@ pub fn list_flights_for_serial(conn: &Connection, serial: &str) -> SqlResult<Vec
         "SELECT id, start_time, duration_sec, source, craft_name, location_name,
             max_alt_m, max_speed_ms, total_distance_m, platform_type, linked_flight_id, notes,
             utc_offset_min
-         FROM flights WHERE battery_serial = ?1 ORDER BY start_time DESC",
+         FROM flights WHERE (',' || battery_serial || ',') LIKE ('%,' || ?1 || ',%')
+         ORDER BY start_time DESC",
     )?;
     let rows = stmt.query_map(params![serial], |row| {
         let ts_str: String = row.get(1)?;
@@ -1707,8 +1727,9 @@ pub fn set_flight_battery_serial(
     flight_id: i64,
     serial: Option<&str>,
 ) -> SqlResult<()> {
-    // Normalize + treat an empty result (blank / punctuation-only) as clearing the link.
-    let serial = serial.map(normalize_serial).filter(|s| !s.is_empty());
+    // Normalize the (possibly multi-pack, comma-separated) list + treat an empty result (blank /
+    // punctuation-only) as clearing the link.
+    let serial = serial.map(normalize_serial_list).filter(|s| !s.is_empty());
     conn.execute(
         "UPDATE flights SET battery_serial = ?1 WHERE id = ?2",
         params![serial, flight_id],
