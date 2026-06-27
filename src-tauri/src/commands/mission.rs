@@ -181,7 +181,7 @@ pub fn mission_download(
     let info = codec::decode_wp_getinfo(&info_payload)?;
 
     log::info!(
-        "Mission download: max={}, valid={}, count={}",
+        "MSP mission download start: max={}, valid={}, count={}",
         info.max_waypoints, info.is_valid, info.wp_count
     );
 
@@ -194,10 +194,12 @@ pub fn mission_download(
     for i in 1..=info.wp_count {
         let wp_payload = handle.msp_request(MSP_WP, &[i])?;
         let wp = codec::decode_wp(&wp_payload)?;
+        log::debug!("MSP download WP {i}/{total}: {wp:?}");
         mission.waypoints.push(wp);
         let _ = app.emit(MISSION_DOWNLOAD_PROGRESS, MissionDownloadProgress { current: i as u16, total });
     }
     mission.dirty = false;
+    log::info!("MSP mission download complete: {} waypoints", mission.waypoints.len());
 
     store.set(mission.clone());
     Ok(mission)
@@ -243,10 +245,12 @@ pub async fn mission_upload(
         None => return Err("Not connected".into()),
     };
 
-    log::info!("Mission upload: {} waypoints", resolved.waypoints.len());
+    let total = resolved.waypoints.len();
+    log::info!("MSP mission upload start: {total} waypoints, save_eeprom={save_eeprom}");
 
     // Upload each waypoint
-    for wp in &resolved.waypoints {
+    for (i, wp) in resolved.waypoints.iter().enumerate() {
+        log::debug!("MSP upload WP {}/{}: {wp:?}", i + 1, total);
         let payload = codec::encode_wp(wp);
         handle.msp_request(MSP_SET_WP, &payload)?;
     }
@@ -259,9 +263,10 @@ pub async fn mission_upload(
     // Verify by reading back mission info
     let info_payload = handle.msp_request(MSP_WP_GETINFO, &[])?;
     let info = codec::decode_wp_getinfo(&info_payload)?;
-    if save_eeprom {
-        eprintln!("[MISSION] EEPROM save: FC reports valid={} wpCount={}", info.is_valid, info.wp_count);
-    }
+    log::info!(
+        "MSP mission upload complete: FC reports valid={} wpCount={}{}",
+        info.is_valid, info.wp_count, if save_eeprom { " (EEPROM saved)" } else { "" }
+    );
     store.set_info(info);
     store.mark_clean();
 
