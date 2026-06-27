@@ -300,9 +300,11 @@
   }
 </script>
 
-<div class="widget-card" style="width:{size}px; height:{size}px;">
+<div class="widget-card" style="width:{size}px; height:{size}px; padding:{size * 0.03}px;">
   {#if hasData}
-    <svg width={size} height={size} viewBox="0 0 {size} {size}">
+    <!-- 100% of the padded content box → the whole fan scales down a touch and the card padding
+         becomes a small even margin so the heatmap no longer bleeds to the side edges. -->
+    <svg width="100%" height="100%" viewBox="0 0 {size} {size}">
       <defs>
         <!-- Texture filter: turbulence displaces the cell edges into an organic
              heatmap grain — dissolves the grid blocks without blurring detail. -->
@@ -397,14 +399,14 @@
   .mode {
     position: absolute;
     top: 4px;
-    padding: 1px 5px;
-    font-size: 9px;
+    padding: 2px 10px;
+    font-size: 18px;
     font-weight: 700;
     letter-spacing: 0.05em;
     color: #37a8db;
     background: rgba(0, 0, 0, 0.4);
     border: 1px solid rgba(55, 168, 219, 0.4);
-    border-radius: 4px;
+    border-radius: 6px;
     cursor: pointer;
   }
   .mode.left {
