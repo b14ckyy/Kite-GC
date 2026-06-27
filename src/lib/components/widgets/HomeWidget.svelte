@@ -52,9 +52,12 @@
 
   {#if home.set && telem.lastUpdate}
     <!-- Direction arrow -->
+    <!-- Arrow drawn larger *within* the fixed-size viewBox (≈2×) so the glyph grows without changing
+         the SVG element's box — keeps the distance/bearing text below from shifting. Centred on (30,30)
+         so rotation stays clean and the rotated corners never exceed the box. -->
     <svg viewBox="0 0 60 60" class="home-arrow">
       <g transform="rotate({relativeAngle}, 30, 30)">
-        <polygon points="30,8 20,38 30,32 40,38" fill="#37a8db" />
+        <polygon points="30,4 14,52 30,42 46,52" fill="#37a8db" />
       </g>
     </svg>
     <span class="w-dist">{distanceText()}</span>

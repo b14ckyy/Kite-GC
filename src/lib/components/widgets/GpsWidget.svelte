@@ -79,7 +79,7 @@
     letter-spacing: 0.05em;
   }
   .w-coord {
-    font-size: calc(var(--ws) * 0.11);
+    font-size: calc(var(--ws) * 0.14);
     font-weight: 600;
     color: #d8d8d8;
     font-variant-numeric: tabular-nums;
