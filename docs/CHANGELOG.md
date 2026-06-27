@@ -30,8 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fed from each source (INAV `MSP2_INAV_MISC2` at 2 Hz; MAVLink `VFR_HUD`; on import INAV `rcCommand[3]`
   and ArduPilot CTUN/QTUN with per-vehicle scaling, QuadPlane taking the active of forward/VTOL). The
   **speed widget** gains a left **throttle bar** (0–100 % with 25/50/75 % ticks) and a right **derived
-  acceleration bar** (±4 m/s², bipolar from centre; smoothed, no numbers). Throttle is recorded to the
+  acceleration bar** (±4 m/s², bipolar from centre; no numbers). The acceleration is estimated by a
+  least-squares slope over a sliding 1.5 s speed window, so it stays steady between the quantized
+  ~1 km/h telemetry steps instead of spiking-then-zeroing on each update. Throttle is recorded to the
   flight log (schema **v17**) and shown on replay. See **ADR-058** for the cross-protocol normalization.
+- **Waypoint-download progress counter.** Downloading a mission from the FC now shows an "x of n"
+  counter in the Mission Manager status line as each waypoint arrives, instead of a static
+  "Downloading…". Works for both MSP (INAV) and MAVLink (ArduPilot/PX4); the ArduPilot home slot is
+  excluded so the count matches the final waypoint total.
 - **Power (W) in the battery widget.** Live V×A shown next to current (same type); amps drop their
   decimal at 100 A+, watts are integer.
 - **Altitude widget auto-scales to km.** Above 999 m the metric readout switches to km with 2 decimals.
