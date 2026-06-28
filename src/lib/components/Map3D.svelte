@@ -123,7 +123,7 @@
     radarReference?: { lat: number; lon: number } | null;
   } = $props();
 
-  // ── State ──────────────────────────────────────────────────────────
+  // ── State ──
 
   let cesiumContainer: HTMLDivElement;
   let viewer: Cesium.Viewer | undefined = $state(undefined);
@@ -132,11 +132,10 @@
   let playbackTrackEntity: Cesium.Entity | undefined;
   // Static full-track line segments — built once per track/color change.
   let playbackTrackParts: Cesium.Entity[] = [];
-  // Progressive ground shadow + altitude curtain up to the current replay
-  // position — grows behind the UAV so you can read flown progress. Chunked into
-  // fixed-size colour runs: finalized chunks are created once and never touched
-  // (no flicker, bounded entity count); only the small in-progress chunk is
-  // recreated as it grows.
+  // Progressive ground shadow + altitude curtain up to the current replay position — grows behind
+  // the UAV to show flown progress. Chunked into fixed-size colour runs: finalized chunks are
+  // created once and never touched (no flicker, bounded entity count); only the small in-progress
+  // chunk is recreated as it grows.
   let decoFinalized: Cesium.Entity[] = [];          // completed chunks (shadow + curtain)
   let decoActiveShadow: Cesium.Entity | undefined;
   let decoActiveCurtain: Cesium.Entity | undefined;
@@ -154,9 +153,9 @@
   let curtainEnabled = true;                         // settings.altitudeCurtain3D
   const DECO_CHUNK_MAX = 150;                        // finalize a chunk at this many points
 
-  // ── 3D render frame-rate cap (settings.lowPower3D) ─────────────────
-  // A 60fps baseline always applies (Cesium would otherwise render at the display refresh rate — 120/
-  // 144Hz panels waste GPU/battery for no benefit on a map). Low-power drops that to 20fps:
+  // ── 3D render frame-rate cap (settings.lowPower3D) ──
+  // A 60fps baseline always applies (else Cesium renders at the display refresh — 120/144Hz panels
+  // waste GPU/battery for no benefit on a map). Low-power drops to 20fps:
   //   off = 60fps · on = always 20fps · auto = 20fps only while on battery (queried from the backend).
   let lowPower3DSetting: 'off' | 'on' | 'auto' = 'off';
   let onBattery = false;
@@ -164,16 +163,16 @@
   const BASE_FPS = 60;
   const LOW_POWER_FPS = 20;
 
-  // ── Sun / lighting ────────────────────────────────────────────────
+  // ── Sun / lighting ──
   let lightingEnabled = false;                       // settings.realLighting3D → globe sun-shading
   let replayTimeEnabled = false;                     // settings.logReplayTime → clock from log timestamp
   let nightModeSetting: 'off' | 'auto' | 'on' = 'off'; // settings.nightMode2D (also applies to 3D)
   // Dev tool: override the sky clock with a manual time-of-day to preview lighting.
   let devTimeActive = $state(false);                 // slider overrides clock when on
   let devTimeMin = $state(12 * 60);                  // minutes since midnight (local solar at view lon)
-  // Night dimming: Cesium's own night side is ×0.3; we darken ONLY the imagery layers to
-  // match (entities/sky stay bright, like the 2D map). Applied as the *darker of the two*
-  // sources — never stacked on top of the real-lighting night shading.
+  // Night dimming: Cesium's own night side is ×0.3; we darken ONLY the imagery layers to match
+  // (entities/sky stay bright, like 2D). Applied as the darker of the two sources — never stacked
+  // on top of the real-lighting night shading.
   const NIGHT_BRIGHTNESS_3D = 0.3;
   let appliedImageryBrightness = 1.0;                // last value pushed to imagery layers
   let nightTimer3D: ReturnType<typeof setInterval> | undefined; // auto re-check (system-time drift)
@@ -184,10 +183,10 @@
   let missionPrimitives: Cesium.Primitive[] = [];    // overlay lines — depth-test-free primitives (no z-fight)
   let missionRenderToken = 0;                        // guards async terrain races
   let lastMissionSig = '';                           // signature of the drawn model → skip identical redraws
-  // Cache for the expensive terrain-altitude resolution, keyed by a signature of the inputs that affect
-  // it (waypoint positions/alt-frames + launch/home). A 3D re-open or any redundant render trigger then
-  // reuses the resolved altitudes instead of re-sampling terrain (the 15–20 s cost), while cheap visual
-  // changes (active-WP highlight, greying, geoid) still rebuild + redraw the model each render.
+  // Cache for the expensive terrain-altitude resolution, keyed by a signature of the alt-affecting inputs
+  // (waypoint positions/alt-frames + launch/home). A 3D re-open or redundant trigger reuses the resolved
+  // altitudes instead of re-sampling terrain (15–20 s); cheap visual changes (active-WP highlight, greying,
+  // geoid) still rebuild + redraw the model each render.
   let inavAltCache: { sig: string; alts: Map<number, WpMsl>; launchGround: number | null } | null = null;
   let arduAltCache: { sig: string; alts: Map<number, ArduWpAlt>; homeRefMsl: number | null } | null = null;
   let curMission: Mission = get(mission);
@@ -213,17 +212,16 @@
   let curArduMission: ArduWaypoint[] = get(arduMission);
   let curAutopilotSystem: AutopilotSystem = get(autopilotSystem);
   let curHome3d: HomePosition = get(homePosition);
-  // Last home we actually acted on. ArduPilot re-sends HOME_POSITION ~0.2 Hz and its reported home
-  // jitters sub-metre (EKF origin), so we re-render only when home *meaningfully* moved — otherwise the
-  // 5 s rebuild drops a frame on the mission polylines (flicker).
+  // Last home we acted on. ArduPilot re-sends HOME_POSITION ~0.2 Hz, jittering sub-metre (EKF origin),
+  // so we re-render only when home meaningfully moved — else the 5 s rebuild flickers the mission polylines.
   let lastRenderedHome3d: { set: boolean; lat: number; lon: number; alt: number; source: string } | null = null;
   let unsubArduMission: (() => void) | undefined;
   let unsubAutopilot: (() => void) | undefined;
 
-  // Live trail — driven entirely by the `liveTrack` store (the full flown history since arm), so the
-  // whole track renders in 3D regardless of when 3D was first opened, and at the correct height once
-  // the geoid offset is known. Flightmode-coloured segments: finalized runs are static polylines; the
-  // growing run uses a CallbackProperty (Cesium reads the array each frame → no entity churn / flicker).
+  // Live trail — driven entirely by the `liveTrack` store (full flown history since arm), so the whole
+  // track renders in 3D regardless of when 3D was opened, at the correct height once the geoid offset is
+  // known. Flightmode-coloured segments: finalized runs are static polylines; the growing run uses a
+  // CallbackProperty (Cesium reads the array each frame → no entity churn / flicker).
   let lastTrailLat = 0;
   let lastTrailLon = 0;
   let trailSegments3D: { entity: Cesium.Entity; color: string }[] = [];
@@ -232,13 +230,13 @@
   let trailCurrentColor3D = '';
   let trailConsumed = 0; // how many liveTrack points are already in the trail (incremental append cursor)
   // Newest point held back one segment: the UAV marker is smoothed (lags the raw fix), so drawing the
-  // trail to the latest point shoots the coloured line ahead of the craft — very visible in FPV. We
-  // commit a point only once the NEXT one arrives, so the drawn tip always trails the live position.
+  // trail to the latest point shoots the coloured line ahead of the craft (very visible in FPV). Commit
+  // a point only once the NEXT arrives, so the drawn tip always trails the live position.
   let pendingTrailPos: Cesium.Cartesian3 | undefined;
   let pendingTrailColor = '';
   const MIN_TRAIL_DIST_3D = 1; // meters
-  // Pre-arm trail: a thin plain black, ground-clamped line of GPS movement while
-  // DISARMED (monitoring only). Cleared on arm; the colored flight trail takes over.
+  // Pre-arm trail: a thin plain black, ground-clamped line of GPS movement while DISARMED (monitoring
+  // only). Cleared on arm; the colored flight trail takes over.
   let preArmTrailEntity: Cesium.Entity | undefined;
   let preArmPositions3D: Cesium.Cartesian3[] = [];
   let lastPreArmLat = 0;
@@ -249,7 +247,7 @@
   type Camera3DMode = 'free' | 'follow' | 'orbit' | 'fpv';
   let cameraMode = $state<Camera3DMode>('free');
 
-  // ── FPV (first-person view) ─────────────────────────────────────────
+  // ── FPV (first-person view) ──
   const FPV_FOV_MIN = 30;            // narrowest "lens" (deg, horizontal)
   const FPV_FOV_MAX = 120;           // widest "lens"
   const FPV_EYE_HEIGHT_M = 0.5;      // raise the eye slightly above the track to avoid trail clipping
@@ -292,24 +290,21 @@
   let chaseInited = false;
   const CHASE_SMOOTHING = 0.07; // 0..1 — lower = smoother (exponential lerp factor per frame)
 
-  // Geoid undulation N = ellipsoid − MSL, derived from terrain data
-  // (cesiumGround_ellipsoid − copernicusGround_MSL) at the first track point —
-  // GPS-independent, so a tower/rooftop start isn't snapped to ground.
+  // Geoid undulation N = ellipsoid − MSL, derived from terrain (cesiumGround_ellipsoid −
+  // copernicusGround_MSL) at the first track point — GPS-independent, so a tower/rooftop start isn't
+  // snapped to ground.
   let geoidOffset = 0;
-  // GPS MSL at the first fix — the absolute anchor for the (relative, fused)
-  // track altitude. Track ellipsoid = startMslGps + geoidOffset + nav_alt_m.
+  // GPS MSL at the first fix — absolute anchor for the (relative, fused) track altitude.
+  // Track ellipsoid = startMslGps + geoidOffset + nav_alt_m.
   let startMslGps = 0;
 
-  // geoidOffset is derived ONCE per scene from the terrain at the first thing that
-  // gets drawn — live GPS fix, replay track, OR a mission/launch waypoint. Deriving
-  // it from a waypoint (not just a UAV) means the 3D mission preview is height-correct
-  // without a live link or a loaded log. Generalises to future ADS-B / followers
-  // (compute from their first position).
+  // geoidOffset is derived ONCE per scene from terrain at the first thing drawn — live GPS fix, replay
+  // track, OR a mission/launch waypoint. Deriving it from a waypoint (not just a UAV) makes the 3D mission
+  // preview height-correct without a live link or loaded log. Generalises to future ADS-B / followers.
   //
-  // A SINGLE-FLIGHT awaitable promise (computeGeoidOnce) backs it: when a flight log
-  // with a linked mission loads, the track and the mission both kick a computation
-  // almost simultaneously — they share the one in-flight promise, so the mission waits
-  // for the SAME offset instead of drawing at 0 and racing a re-render.
+  // A SINGLE-FLIGHT awaitable promise (computeGeoidOnce) backs it: a log with a linked mission kicks the
+  // track and mission computations near-simultaneously — they share the one in-flight promise, so the
+  // mission waits for the SAME offset instead of drawing at 0 and racing a re-render.
   let geoidComputed = false;
   let geoidPromise: Promise<boolean> | null = null; // the in-flight single-flight computation
   let geoidGen = 0; // bumped on a source switch so an in-flight sample can't apply a stale offset
@@ -323,7 +318,7 @@
   let unsubConnection: (() => void) | undefined;
   let unsubFrameMission3d: (() => void) | undefined;
 
-  // ── Foreign-vehicle (radar) 3D contacts ──────────────────────────────
+  // ── Foreign-vehicle (radar) 3D contacts ──
   // One record per contact id, holding the live data + Cesium entities; CallbackProperties read from
   // the record so we diff (update fields) rather than recreate entities each snapshot. Flat extruded
   // silhouette sized in px by camera distance, drop-line + ground circle gated to the colour-scale zone.
@@ -341,8 +336,8 @@
     showGround: boolean;       // drop-line + circle visible (Δ ≤ +2000 m, or debug+show-all)
     selected: boolean;
     hideRadiusM: number;       // radius beyond which the contact is hidden (showAll → 1000 km)
-    // Drop-line colour held in a single ConstantProperty so we update it IN PLACE (setValue) instead of
-    // replacing the material each poll — replacing rebuilds the material (the colour-coded "blink").
+    // Drop-line colour in a single ConstantProperty so we update it IN PLACE (setValue) rather than
+    // replace the material each poll — replacing rebuilds the material (the colour-coded "blink").
     dropColorCP?: Cesium.ConstantProperty;
     dropColor?: Cesium.Color;
     alertLevel: AlertLevel | null; // conflict-alert highlight (pulsing red/yellow), or null
@@ -353,16 +348,16 @@
   };
   // A reusable 5-entity bundle (model + ground geometry). Creating a Cesium `Model` per contact is the
   // expensive part (per-instance node graph + shader pipeline → main-thread "Scripting" stall), so we
-  // POOL bundles instead of destroying/recreating them as contacts enter/leave the view: a contact that
-  // leaves hides its bundle and returns it; an arriving contact reuses a free one (just re-positioned/
-  // -coloured). The model glb is class-specific, so free bundles are keyed by model class (reusing across
-  // classes would need a uri swap → re-pays the setup we're avoiding).
+  // POOL bundles rather than destroy/recreate as contacts enter/leave: a leaving contact hides + returns
+  // its bundle; an arriving one reuses a free bundle (just re-positioned/-coloured). The glb is
+  // class-specific, so free bundles are keyed by model class (reusing across classes needs a uri swap →
+  // re-pays the setup we're avoiding).
   type Radar3dBundle = { entities: Cesium.Entity[]; dropColorCP: Cesium.ConstantProperty; dropColor: Cesium.Color; modelClass: RadarModelClass };
   const radar3dRecs = new Map<string, Radar3dRec>();
   const radar3dFree = new Map<RadarModelClass, Radar3dBundle[]>();
   // When no free bundle of the needed class exists, the rec is queued here and `drainRadarCreateQueue`
-  // builds new bundles a few per frame (a dense first load can need ~150 at once — building all their
-  // models in one frame stutters). The rec is in `radar3dRecs` immediately (with no entities yet).
+  // builds new bundles a few per frame (a dense first load can need ~150 at once — building all models
+  // in one frame stutters). The rec is in `radar3dRecs` immediately (with no entities yet).
   const radar3dCreateQueue: Radar3dRec[] = [];
   let radar3dCreateRaf = 0;
   let radar3dSnap: RadarSnapshot = { adsb: [], formationFlight: [], radio: [], lastUpdate: 0 };
@@ -375,10 +370,10 @@
   const radar3dEntityIds = new WeakMap<Cesium.Entity, string>();
   let radar3dPickHandler: Cesium.ScreenSpaceEventHandler | undefined;
 
-  // ── Airspace Manager: obstacle columns (3D) ──────────────────────────
+  // ── Airspace Manager: obstacle columns (3D) ──
   // Static hazards (masts, turbines, towers) as slim vertical columns. OpenAIP gives height (AGL) but
-  // no diameter → a fixed slim footprint, real-world-sized so it scales perspectively with distance
-  // (not a fixed-size sprite). Terrain-relative extrusion keeps the column on correct AGL height.
+  // no diameter → a fixed slim, real-world-sized footprint so it scales perspectively with distance
+  // (not a fixed-size sprite). Terrain-relative extrusion keeps the column at correct AGL height.
   const obstacle3dEntities: Cesium.Entity[] = [];
   let unsubAero3d: (() => void) | undefined;
   let uavLatLon: { lat: number; lon: number } | undefined; // last good UAV fix → fallback reference
@@ -389,10 +384,10 @@
   let aeroRefGround: { lat: number; lon: number } | undefined; // camera ground of the last build
   let obstacleMoveTimer: ReturnType<typeof setTimeout> | undefined; // debounce camera-move rebuilds
 
-  // ── Airspace Manager: airspace volumes (3D) ──────────────────────────
-  // Extruded polygons (floor → ceiling) for the airspaces relevant to the reference (inside / ≤5 km
-  // laterally) — the relevance filter keeps clutter + GPU cost down. Altitudes: MSL/FL → value + the
-  // app's geoid offset (locally correct since we only draw nearby airspaces); GND → terrain.
+  // ── Airspace Manager: airspace volumes (3D) ──
+  // Extruded polygons (floor → ceiling) for airspaces relevant to the reference (inside / ≤5 km
+  // laterally) — the relevance filter keeps clutter + GPU cost down. Altitudes: MSL/FL → value + geoid
+  // offset (locally correct since we only draw nearby airspaces); GND → terrain.
   const airspace3dPrimitives: Cesium.Primitive[] = [];
   let airspaceD3 = false;          // tracks the airspace 3D toggle (settings-watch rebuild trigger)
   let airspace3dGen = 0;           // race guard for the async terrain sample
@@ -400,7 +395,7 @@
   const AIRSPACE_3D_MAX_EXTENT_KM = 80; // "inside" only renders airspaces up to this size (skip CTAs/upper air)
   const AIRSPACE_3D_MAX = 60;           // cap rendered volumes
 
-  // ── Airspace Manager: airports (3D) ──────────────────────────────────
+  // ── Airspace Manager: airports (3D) ──
   // Real runways (OpenAIP carries heading + length/width) drawn as terrain-draped rectangles, oriented
   // by trueHeading and centred on the airport reference point + a type-coloured marker/label. Airports
   // without runways (heliports / small fields) get the marker only.
@@ -408,18 +403,18 @@
   let airportD3 = false;   // tracks the airport 3D toggle (settings-watch rebuild trigger)
   let airportDistKm = 15;  // tracks the airfield range (settings-watch rebuild trigger)
   const OBSTACLE_3D_RADIUS_M = 8;   // slim footprint (no diameter from the API) — tunable
-  // OpenAIP often omits the AGL height (and offers no derivable top). When missing we render a typed
-  // *estimated* column — tall for identified wind turbines, modest otherwise — drawn visibly distinct
-  // (translucent + yellow outline) so an estimated height never masquerades as surveyed data.
+  // OpenAIP often omits the AGL height (no derivable top). When missing we render a typed *estimated*
+  // column — tall for wind turbines, modest otherwise — drawn visibly distinct (translucent + yellow
+  // outline) so an estimated height never masquerades as surveyed data.
   const OBSTACLE_3D_TURBINE_H = 120; // estimated height for a height-less wind turbine
   const OBSTACLE_3D_DEFAULT_H = 40;  // estimated height for a height-less generic obstacle
   const OBSTACLE_3D_MAX = 1200;      // cap rendered columns (dense regions → nearest-N to the reference)
 
-  // ── Safehome + fixed-wing autoland overlay (INAV) ────────────────────
+  // ── Safehome + fixed-wing autoland overlay (INAV) ──
   // Mirrors the 2D overlay (Map.svelte::updateSafehome): teardrop "H" markers + green max-distance ring
-  // (disarmed-only) + yellow loiter ring + the planned approach path. Source is `safehomeWorking` (so
-  // panel/drag edits reflect live). The approach path is drawn at its real 3D descent altitude (the
-  // loiter ring sits at the downwind/approach altitude), so a terrain sample per safehome is needed.
+  // (disarmed-only) + yellow loiter ring + planned approach path. Source is `safehomeWorking` (panel/drag
+  // edits reflect live). The approach path is drawn at its real 3D descent altitude (loiter ring at the
+  // downwind/approach altitude), so a terrain sample per safehome is needed.
   let safehomeEntities: Cesium.Entity[] = [];        // markers + rings + approach legs (all Entities)
   let unsubSafehome3d: (() => void) | undefined;
   let unsubPerf3d: (() => void) | undefined;          // dev/--debug: Performance tab attach/detach
@@ -442,17 +437,16 @@
   let unsubRally3d: (() => void) | undefined;
   let rallyD3 = true;                                 // last-seen rally 3D toggle (default on)
 
-  // One-shot camera recenter after a (re)mount. The 2D↔3D toggle remounts this
-  // component, so this fires once on every switch to 3D.
+  // One-shot camera recenter after a (re)mount. The 2D↔3D toggle remounts this component, so this
+  // fires once on every switch to 3D.
   let needsInitialRecenter = true;
 
     // Home arm tracking for trail reset on re-arm
   let wasArmed = false;
   const ARMING_FLAG_ARMED = 2;
 
-  // 1×1 transparent canvas for tile fallback (avoids gray tiles on 404/error)
-  // REMOVED: transparent tiles replace parent → gray globe visible underneath
-  // Now we let errors propagate; Cesium keeps the parent tile visible for FAILED tiles.
+  // 1×1 transparent tile fallback REMOVED: transparent tiles replaced the parent → gray globe showed
+  // underneath. We now let errors propagate; Cesium keeps the parent tile visible for FAILED tiles.
 
   /**
    * Wait for Cesium World Terrain to finish loading.
@@ -476,7 +470,7 @@
     });
   }
 
-  // ── Cached Imagery Provider ────────────────────────────────────────
+  // ── Cached Imagery Provider ──
 
   /**
    * Convert a Leaflet-style URL template to Cesium-compatible format.
@@ -535,14 +529,13 @@
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`Tile ${resp.status}`);
     const buf = await resp.arrayBuffer();
-    // Over-zoom placeholder? Reject (Cesium keeps the parent z-1 tile) and don't
-    // cache it; the region's max zoom is now learned so siblings short-circuit.
-    // NOTE: we deliberately do NOT trigger a full imagery refresh here. Re-applying
-    // the provider does layers.removeAll() — a full-globe teardown that blanks every
-    // tile to dark blue and, when it fires per newly-crossed region during a 3D replay
-    // over a sparse area, storms into a stutter/permanent-blue collapse. The 1–2 blank
-    // tiles that slipped through before the hash was confirmed are self-correcting:
-    // any camera move re-requests them (now known → parent shown).
+    // Over-zoom placeholder? Reject (Cesium keeps the parent z-1 tile) and don't cache it; the region's
+    // max zoom is now learned so siblings short-circuit.
+    // NOTE: deliberately do NOT trigger a full imagery refresh here. Re-applying the provider does
+    // layers.removeAll() — a full-globe teardown that blanks every tile to dark blue and, fired per
+    // newly-crossed region during a 3D replay over a sparse area, storms into a stutter/permanent-blue
+    // collapse. The 1–2 blank tiles that slip through before the hash is confirmed self-correct: any
+    // camera move re-requests them (now known → parent shown).
     if (meta && isPlaceholderTile(meta.providerId, meta.z, meta.x, meta.y, buf, url)) {
       throw new Error('placeholder tile (over-zoom)');
     }
@@ -558,9 +551,8 @@
     });
   }
 
-  /** Return a 1×1 transparent canvas (created once, reused). Synchronous — no async load needed. */
-  // REMOVED — transparent tile approach replaced parent tiles with blank → gray globe
-  // Error propagation + errorEvent handler is the correct approach.
+  // 1×1 transparent canvas helper REMOVED — it replaced parent tiles with blank → gray globe.
+  // Error propagation + the errorEvent handler is the correct approach.
 
   /**
    * Create a CesiumJS imagery provider with IndexedDB tile caching.
@@ -640,17 +632,15 @@
   }
 
   /**
-   * Recenter the camera on the current content once, deferred until the canvas
-   * has a real size — the first 2D→3D switch can run this before layout, which
-   * made the old inline flyTo a no-op. Targets the UAV (replay marker / live
-   * UAV), falling back to the track-start anchor.
+   * Recenter the camera on the current content once, deferred until the canvas has a real size — the
+   * first 2D→3D switch can run this before layout, which made the old inline flyTo a no-op. Targets the
+   * UAV (replay / live marker), falling back to the track-start anchor.
    */
   function recenter3D() {
     if (!viewer) return;
-    // Suppressed right after a 2D→3D switch: the camera was just synced to the 2D
-    // viewport (setCameraFromMapView) and must not be yanked away by a content
-    // fly-to triggered by the mount's track effect. A genuine later log-load (well
-    // after the switch) is past the window and still frames the new track.
+    // Suppressed right after a 2D→3D switch: the camera was just synced to the 2D viewport
+    // (setCameraFromMapView) and must not be yanked away by a content fly-to from the mount's track
+    // effect. A genuine later log-load (well after the switch) is past the window and still frames it.
     if (performance.now() < recenterSuppressUntil) return;
     const tryFly = (attempt: number) => {
       if (!viewer) return;
@@ -708,18 +698,16 @@
   const SYNC_PITCH = Cesium.Math.toRadians(-55);
 
   /**
-   * Point the 3D camera at the spot the 2D (Leaflet) map currently shows (its
-   * persisted `settings.map.center`). Only the GROUND TARGET is taken from 2D — the
-   * camera keeps its OWN zoom/heading/pitch, so a switch never resets the 3D zoom
-   * (2D↔3D zooms are independent; transferring zoom across was unreliable over
-   * mountainous terrain anyway).
+   * Point the 3D camera at the spot the 2D (Leaflet) map currently shows (persisted
+   * `settings.map.center`). Only the GROUND TARGET comes from 2D — the camera keeps its OWN
+   * zoom/heading/pitch, so a switch never resets the 3D zoom (2D↔3D zooms are independent; transferring
+   * across was unreliable over mountainous terrain anyway).
    *
-   * If the 2D map wasn't panned since we left 3D, the EXACT captured camera matrix is
-   * replayed (setView) — re-deriving it via a ground pick would drift the zoom every
-   * round-trip, because the pick hits TERRAIN (height > 0) while a lookAt targets the
-   * ellipsoid (height 0). If the 2D map WAS panned, the camera re-targets the new
-   * centre keeping its zoom/angle. First-ever open (no snapshot) derives a starting
-   * range from the 2D zoom. Applied synchronously (no fly-to).
+   * If the 2D map wasn't panned since we left 3D, the EXACT captured camera matrix is replayed (setView)
+   * — re-deriving it via a ground pick would drift the zoom every round-trip, because the pick hits
+   * TERRAIN (height > 0) while a lookAt targets the ellipsoid (height 0). If it WAS panned, re-target the
+   * new centre keeping zoom/angle. First-ever open (no snapshot) derives a starting range from the 2D
+   * zoom. Applied synchronously (no fly-to).
    */
   function setCameraFromMapView(attempt = 0) {
     if (!viewer) return;
@@ -774,10 +762,9 @@
     viewer?.scene.requestRender();
   }
 
-  // The free-mode 3D camera captured when switching away to 2D: the full matrix (for an
-  // exact, drift-free restore when the 2D map wasn't panned) + the ground target & range
-  // (to re-target if it was). Re-applied on every return to 3D so the zoom/heading/pitch
-  // the user set survives a 2D round-trip.
+  // Free-mode 3D camera captured when switching to 2D: the full matrix (exact, drift-free restore when
+  // the 2D map wasn't panned) + the ground target & range (to re-target if it was). Re-applied on every
+  // return to 3D so the user's zoom/heading/pitch survives a 2D round-trip.
   type Cam3DSnapshot = {
     position: Cesium.Cartesian3; heading: number; pitch: number; roll: number;
     targetLat: number; targetLon: number; range: number;
@@ -785,9 +772,8 @@
   let cam3dSnapshot: Cam3DSnapshot | null = null;
 
   /**
-   * Ground point + spherical offset the 3D camera currently looks at (screen centre).
-   * Exposed (instance method) so +page can read it on a 3D→2D switch and re-centre the
-   * 2D map on the same spot.
+   * Ground point + spherical offset the 3D camera looks at (screen centre). Exposed so +page can read
+   * it on a 3D→2D switch and re-centre the 2D map on the same spot.
    */
   /** Cap (or un-cap) the 3D render frame rate per the low-power setting + battery state. With
    *  requestRenderMode the view is idle-cheap already; this bounds the rate during animation/interaction. */
@@ -872,9 +858,9 @@
     return cameraMode === 'free';
   }
 
-  // Activate/deactivate when the 2D↔3D toggle flips `active`. Inactive → snapshot the
-  // free-mode camera's own zoom/angle and pause the render loop (viewer stays in RAM,
-  // entities keep updating from the stores). Active → resume, resize, and frame the view:
+  // Activate/deactivate when the 2D↔3D toggle flips `active`. Inactive → snapshot the free-mode
+  // camera's zoom/angle and pause the render loop (viewer stays in RAM, entities keep updating from the
+  // stores). Active → resume, resize, and frame the view:
   //  • locked (follow/orbit) → re-anchor onto the UAV;
   //  • free → target the 2D spot, keeping 3D's own zoom/angle (no zoom reset).
   $effect(() => {
@@ -900,12 +886,10 @@
         updateFence3D();      // (re)build geofence volumes for the now-visible 3D view
         updateRally3D();      // (re)build rally markers for the now-visible 3D view
       } else {
-        // Leaving 3D while in FPV: undo FPV's viewer changes (camera inputs, model/track,
-        // wheel handler) so nothing carries over and blocks the map — but keep cameraMode
-        // 'fpv' so the next activate re-enters FPV.
+        // Leaving 3D while in FPV: undo FPV's viewer changes (camera inputs, model/track, wheel handler)
+        // so nothing carries over and blocks the map — but keep cameraMode 'fpv' to re-enter next activate.
         if (cameraMode === 'fpv') restoreFromFpv();
-        // Remember 3D's own camera (only in free mode; a locked excursion keeps the last
-        // free snapshot so returning to free still has it).
+        // Remember 3D's own camera (only in free mode; a locked excursion keeps the last free snapshot).
         if (cameraMode === 'free') {
           const f = getCamFocus();
           if (f) cam3dSnapshot = {
@@ -919,7 +903,7 @@
     });
   });
 
-  // ── Initialization ─────────────────────────────────────────────────
+  // ── Initialization ──
 
   onMount(async () => {
     // Read settings once
@@ -983,13 +967,13 @@
       // Rendering
       requestRenderMode: true,
       maximumRenderTimeChange: 0.0,
-      // No MSAA — its per-frame full-screen resolve is costly on the Linux/WebKitGTK + Intel iGPU
-      // path (a measured ~3-4 fps). FXAA (enabled below) gives equivalent visual quality far cheaper.
+      // No MSAA — its per-frame full-screen resolve is costly on Linux/WebKitGTK + Intel iGPU (measured
+      // ~3-4 fps). FXAA (enabled below) gives equivalent quality far cheaper.
       msaaSamples: 0,
       scene3DOnly: true,
-      // Debug: the Performance tab can disable OIT (a per-frame full-screen pass) via a localStorage
-      // flag to measure its cost. OIT is a constructor-only option, so the panel reloads to apply. The
-      // key is only ever written by the (debug-gated) panel, so reading it unconditionally is safe.
+      // Debug: the Performance tab can disable OIT (a per-frame full-screen pass) via a localStorage flag
+      // to measure its cost. OIT is constructor-only, so the panel reloads to apply. The key is only ever
+      // written by the (debug-gated) panel, so reading it unconditionally is safe.
       orderIndependentTranslucency:
         !(typeof localStorage !== 'undefined' && localStorage.getItem('kite_perf_oit') === 'off'),
     });
@@ -1024,12 +1008,10 @@
     // FXAA instead of MSAA (see msaaSamples: 0) — much cheaper anti-aliasing for the same look.
     viewer.scene.postProcessStages.fxaa.enabled = true;
 
-    // ── Camera input model ──────────────────────────────────────────────
-    // Default Cesium binds TILT to the middle button (+ Ctrl+Left) and ZOOM to the right button —
-    // awkward on touchpads / touchscreens that have no middle button. Remap to a middle-button-free
-    // scheme: LEFT = rotate, RIGHT-drag = tilt, WHEEL/PINCH = zoom (middle + Ctrl+Left kept as
-    // extras for mouse users; PINCH stays on zoom+tilt for native touch gestures). Set once here;
-    // it persists across camera modes (follow/fpv just toggle the enable* flags on top).
+    // ── Camera input model ──
+    // Cesium's default TILT=middle / ZOOM=right is awkward without a middle button. Remap to:
+    // LEFT=rotate, RIGHT-drag=tilt, WHEEL/PINCH=zoom (middle + Ctrl+Left kept for mouse users).
+    // Set once; persists across camera modes (follow/fpv only toggle the enable* flags).
     const ssc = viewer.scene.screenSpaceCameraController;
     ssc.rotateEventTypes = [Cesium.CameraEventType.LEFT_DRAG];
     ssc.tiltEventTypes = [
@@ -1039,9 +1021,8 @@
       { eventType: Cesium.CameraEventType.LEFT_DRAG, modifier: Cesium.KeyboardEventModifier.CTRL },
     ];
     ssc.zoomEventTypes = [Cesium.CameraEventType.WHEEL, Cesium.CameraEventType.PINCH];
-    // Cap zoom-out so the camera can't drift into the full-globe / "space" regime, where Cesium's
-    // control behaviour changes and widgets can cover the globe. ~8000 km stays near-surface and
-    // consistent while still allowing a generous wide view.
+    // Cap zoom-out so the camera can't drift into the full-globe / "space" regime, where Cesium's control
+    // behaviour changes and widgets can cover the globe. ~8000 km stays near-surface yet still wide.
     ssc.maximumZoomDistance = 8_000_000;
 
     // Lighting — real sun shading on the globe (opt-in). The sky Sun/Moon billboards
@@ -1050,8 +1031,8 @@
     viewer.scene.globe.enableLighting = lightingEnabled && nightModeSetting !== 'on';
 
     // Dev / --debug: expose the live scene to the Debug Panel's Performance tab for live tuning + fps.
-    // Gated by the runtime debug flag (dev builds, or a release started with --debug). Subscribing
-    // (not a one-shot check) so it still attaches if the flag resolves after the 3D view has mounted.
+    // Gated by the runtime debug flag (dev builds, or a release started with --debug). Subscribe (not a
+    // one-shot check) so it still attaches if the flag resolves after the 3D view has mounted.
     unsubPerf3d = isDebugMode.subscribe((on) => {
       if (on && viewer) attachPerf3d(viewer);
       else detachPerf3d();
@@ -1102,9 +1083,8 @@
       // Safehome green (max-distance) ring is disarmed-only → redraw on arm-state change (mirror 2D).
       if (armed !== lastSafehomeArmed3d) { lastSafehomeArmed3d = armed; updateSafehome3D(); }
 
-      // Decide clear-on-connect from the first telemetry frame after a connect:
-      // only wipe the map if the UAV is DISARMED. If it's armed we assume a
-      // connection recovery and keep the existing track.
+      // Decide clear-on-connect from the first telemetry frame after a connect: wipe the map only if the
+      // UAV is DISARMED. If armed, assume a connection recovery and keep the existing track.
       if (pendingConnectArmCheck) {
         pendingConnectArmCheck = false;
         if (!armed) clearAllMapData();
@@ -1113,16 +1093,16 @@
       if (!isValidGpsCoordinate(telem.lat, telem.lon)) return;
       uavLatLon = { lat: telem.lat, lon: telem.lon }; // reference for nearest-N obstacle culling
 
-      // While a replay log is shown, ignore live telemetry for the map — the
-      // replay track/marker owns it (prevents the live UAV lingering over replay).
+      // While a replay log is shown, ignore live telemetry for the map — the replay track/marker owns it
+      // (prevents the live UAV lingering over replay).
       if (curReplayActive) { wasArmed = armed; return; }
 
       // Derive the geoid undulation for the live location once per session.
       ensureGeoid(telem.lat, telem.lon);
 
-      // Use MSL altitude + geoid offset for correct ellipsoid height. Relative-only protocols (LTM/CRSF)
-      // are anchored to the ground MSL captured at arm; with no anchor we fall back to the raw value
-      // (unchanged legacy behaviour) rather than dropping the UAV.
+      // MSL altitude + geoid offset for correct ellipsoid height. Relative-only protocols (LTM/CRSF) are
+      // anchored to the ground MSL captured at arm; with no anchor, fall back to the raw value (legacy
+      // behaviour) rather than dropping the UAV.
       const altMsl = resolveTrueMsl(telem.altMsl, get(altReference), get(groundAnchor)) ?? telem.altMsl ?? telem.altitude;
       const alt = Math.max(altMsl + geoidOffset, 0);
       updateUavPosition3D(telem.lat, telem.lon, alt, telem.yaw, telem.navState, armed, telem.roll, telem.pitch);
@@ -1152,8 +1132,8 @@
       if (needsInitialRecenter && uavEntity) { needsInitialRecenter = false; recenter3D(); }
       // Follow/orbit camera is driven from the smoothed state inside the motion smoother.
 
-      // On arm: drop the pre-arm black line. The coloured flight trail resets itself via
-      // clearLiveTrack() (+page) → the liveTrack subscription rebuilds it from the (now empty) store.
+      // On arm: drop the pre-arm black line. The coloured flight trail resets via clearLiveTrack()
+      // (+page) → the liveTrack subscription rebuilds it from the (now empty) store.
       if (armed && !wasArmed && telem.fixType >= 2 && telem.lat !== 0) {
         resetPreArmTrail3D();
       }
@@ -1162,10 +1142,10 @@
       viewer.scene.requestRender();
     });
 
-    // Live 3D trail — driven by the liveTrack store (full flown history since arm), so the whole
-    // track shows in 3D no matter when 3D was first opened. We wait for the geoid offset (ensureGeoid
-    // triggers the first rebuild) so points aren't placed sunk into the ground; afterwards we append
-    // only the new tail (cheap, no churn). A shrink (clearLiveTrack on re-arm) triggers a full rebuild.
+    // Live 3D trail — driven by the liveTrack store (full flown history since arm), so the whole track
+    // shows no matter when 3D was opened. Wait for the geoid offset (ensureGeoid triggers the first
+    // rebuild) so points aren't sunk into the ground; afterwards append only the new tail (cheap, no
+    // churn). A shrink (clearLiveTrack on re-arm) triggers a full rebuild.
     unsubLiveTrack = liveTrack.subscribe((pts) => {
       if (!viewer || !geoidComputed) return; // geoid not ready yet → ensureGeoid will rebuild
       if (pts.length < trailConsumed) { rebuildLiveTrail3D(); return; }
@@ -1175,16 +1155,15 @@
       viewer.scene.requestRender();
     });
 
-    // Subscribe to home position
-    // Green "H" home entity: shown only for an authoritative FC home (or a replay's start) — a manual
-    // reference is the orange "L" launch billboard instead. scheduleMissionRender() refreshes that
-    // billboard's visibility when the lock state flips.
+    // Home position. Green "H" home entity: shown only for an authoritative FC home (or a replay's start)
+    // — a manual reference is the orange "L" launch billboard instead. scheduleMissionRender() refreshes
+    // that billboard's visibility when the lock state flips.
     unsubHome = homePosition.subscribe((home) => {
       curHome3d = home; // ArduPilot REL/TERRAIN altitude reference + takeoff anchor
       if (!viewer) return;
-      // ArduPilot re-sends HOME_POSITION ~0.2 Hz and its reported home jitters sub-metre. Acting on each
-      // tick (move the marker, rebuild the mission overlay, request a frame) makes the depth-tested
-      // mission polylines drop a frame on re-add → a 5 s flicker. Act only on a meaningful change.
+      // ArduPilot re-sends HOME_POSITION ~0.2 Hz, jittering sub-metre. Acting on each tick (move marker,
+      // rebuild overlay, request a frame) drops a frame re-adding the depth-tested mission polylines → a
+      // 5 s flicker. Act only on a meaningful change.
       const lh = lastRenderedHome3d;
       const changed = !lh
         || lh.set !== home.set || lh.source !== home.source
@@ -1314,8 +1293,8 @@
     // changes (the green max-distance ring is disarmed-only) ride the telemetry handler below.
     unsubSafehome3d = safehomeWorking.subscribe(() => updateSafehome3D());
     // On first 3D open the world-terrain provider isn't swapped in yet (still Ellipsoid), so the initial
-    // draw samples ground = 0 and the approach path renders flat. Redraw once terrain is ready so it gets
-    // its real 3D height — without needing a parameter change to re-trigger the render.
+    // draw samples ground = 0 and the approach path renders flat. Redraw once terrain is ready, without
+    // needing a parameter change to re-trigger the render.
     void waitForTerrain(viewer).then((tp) => { if (tp) updateSafehome3D(); });
 
     // Geozone volumes follow the working copy (downloaded at handshake; reflects live edits).
@@ -1331,12 +1310,11 @@
     unsubRally3d = rallyWorking.subscribe(() => updateRally3D());
 
     // Obstacle columns + airspace volumes: rebuild on new aero data (toggle / range changes ride the
-    // settings-watch below; camera-pan re-culls via the debounced moveEnd handler — the window follows
-    // the camera).
+    // settings-watch below; camera-pan re-culls via the debounced moveEnd handler).
     unsubAero3d = aeroData.subscribe(() => { updateObstacles3D(); updateAirspaces3D(); updateAirports3D(); });
 
-    // Connection edge: on a fresh (re)connect, flag the next telemetry frame to
-    // decide clearing (only if DISARMED) and force a live-geoid recompute.
+    // Connection edge: on a fresh (re)connect, flag the next telemetry frame to decide clearing (only if
+    // DISARMED) and force a live-geoid recompute.
     unsubConnection = connection.subscribe((c) => {
       const was = prevConnStatus;
       prevConnStatus = c.status;
@@ -1410,12 +1388,12 @@
     }
   });
 
-  // ── Radar (foreign-vehicle) 3D rendering ─────────────────────────────
+  // ── Radar (foreign-vehicle) 3D rendering ──
   const RADAR_CYAN = Cesium.Color.CYAN;
   const RADAR_ALERT_RED = Cesium.Color.fromCssColorString('#ff2a2a');
   const RADAR_ALERT_YELLOW = Cesium.Color.fromCssColorString('#f4c020');
   // Ground circle = exactly the Stage-2 collision miss radius (R_cpa) — the "never enter" blob — so the
-  // visual and the alert threshold stay deckungsgleich if R_cpa later becomes user-tunable.
+  // visual and the alert threshold stay congruent if R_cpa later becomes user-tunable.
   const CIRCLE_RADIUS_M = ALERT_CONFIG.rCpa;
   /** 0→1→0 once per second, for the alert pulse (evaluated per frame while continuous-rendering). */
   function alertPulse01(): number {
@@ -1465,9 +1443,9 @@
     if (radar3dCreateQueue.length) radar3dCreateRaf = requestAnimationFrame(drainRadarCreateQueue);
   }
 
-  // Contacts render like the UAV: a real glb MODEL (oriented to heading, altitude-tinted, minimumPixelSize
-  // for a screen-size floor) — no flicker and the heading reads from the 3D shape. The ground projection
-  // is a filled CLAMP_TO_GROUND ellipse + a filled heading arrow (drop-line is a polyline).
+  // Contacts render like the UAV: a real glb MODEL (heading-oriented, altitude-tinted, minimumPixelSize
+  // for a screen-size floor) — no flicker, heading reads from the 3D shape. The ground projection is a
+  // filled CLAMP_TO_GROUND ellipse + a filled heading arrow (drop-line is a polyline).
   const RADAR_MODEL_MIN_PX = 48;
   const DROP_DEPTH_M = 12000; // drop-line length below the contact (terrain depth test clips it at ground)
 
@@ -1481,7 +1459,7 @@
         maximumScale: 4000,
         scale: 5.2,
         // REPLACE (not MIX): the contact takes the EXACT altitude colour regardless of the glb's own
-        // colours — so any model (even white) shows the true height-scale colour without washing it out.
+        // colours — so any model (even white) shows the true height-scale colour without washing out.
         colorBlendMode: Cesium.ColorBlendMode.REPLACE,
         heightReference: Cesium.HeightReference.NONE,
       },
@@ -1501,9 +1479,9 @@
       },
     });
     // Drop-line: a thin dashed colour-coded line over a black dashed backing (contrast). The colour lives
-    // in a ConstantProperty we update in place (setValue) — building a NEW material object each poll makes
-    // Cesium rebuild the line (a black flash); updating the uniform in place doesn't. The ground-sync
-    // guard also means an unchanged contact is never touched at all.
+    // in a ConstantProperty updated in place (setValue) — a NEW material object each poll makes Cesium
+    // rebuild the line (a black flash); updating the uniform in place doesn't. The ground-sync guard also
+    // means an unchanged contact is never touched at all.
     const dropColor = Cesium.Color.WHITE.withAlpha(0.95);
     const dropColorCP = new Cesium.ConstantProperty(dropColor);
     const dropBg = viewer!.entities.add({
@@ -1566,7 +1544,7 @@
   }
 
   /** Update the contact model (position/orientation/colour/size) — cheap, no geometry rebuild. Skipped
-   *  entirely when nothing relevant changed (the snapshot fires up to 5 Hz; most contacts are unchanged). */
+   *  when nothing relevant changed (the snapshot fires up to 5 Hz; most contacts are unchanged). */
   function syncRadarModel(rec: Radar3dRec) {
     const e = rec.entities[0];
     if (!e.model) return;
@@ -1614,8 +1592,8 @@
   /** Update the ground projection (drop-line + filled circle + heading arrow). Solid materials reassigned
    *  per poll do NOT blink (only the dash material did). */
   function syncRadarGround(rec: Radar3dRec) {
-    // Skip entirely when nothing relevant changed: the snapshot fires at the (1 Hz) receiver poll rate,
-    // and re-touching a contact's ground geometry every snapshot — even unchanged — flashes the line.
+    // Skip when nothing relevant changed: the snapshot fires at the (1 Hz) receiver poll rate, and
+    // re-touching a contact's ground geometry every snapshot — even unchanged — flashes the line.
     const sig = `${rec.lat.toFixed(6)},${rec.lon.toFixed(6)},${Math.round(rec.contactEll)},${rec.headingDeg ?? 'x'},${rec.showGround},${rec.selected},${rec.color.toCssColorString()},${rec.hideRadiusM},${rec.alertLevel ?? 'n'}`;
     if (sig === rec.groundSig) return;
     rec.groundSig = sig;
@@ -1654,8 +1632,8 @@
     circle.position = new Cesium.ConstantPositionProperty(Cesium.Cartesian3.fromDegrees(rec.lon, rec.lat));
     if (circle.ellipse && !isFf) {
       if (rec.alertLevel) {
-        // Alerting: the whole 1 km collision blob pulses — red (warning) / yellow (caution). The blob is
-        // exactly R_cpa, so it reads as the "never enter" zone, unmissable from afar.
+        // Alerting: the whole 1 km collision blob pulses — red (warning) / yellow (caution). It's exactly
+        // R_cpa, so it reads as the "never enter" zone, unmissable from afar.
         const base = rec.alertLevel === 'warning' ? RADAR_ALERT_RED : RADAR_ALERT_YELLOW;
         circle.ellipse.material = new Cesium.ColorMaterialProperty(
           new Cesium.CallbackProperty(() => base.withAlpha(0.3 + 0.45 * alertPulse01()), false),
@@ -1688,11 +1666,11 @@
    * Rebuild the obstacle columns from the current aero snapshot. Static features → rebuilt only on
    * data / visibility change (not per camera frame).
    *
-   * Heights: we sample Cesium's own terrain (ellipsoidal) at each obstacle and place the column
-   * absolutely on it (base → base + heightM). This is **geoid-independent** and always sits exactly on
-   * the ground, robust to camera/UAV position and to on-demand rendering — unlike RELATIVE_TO_GROUND
-   * clamping, which drifts when the terrain under the obstacle isn't loaded (off-screen). A slim
-   * real-world footprint makes the column shrink perspectively with distance (not a fixed-size sprite).
+   * Heights: sample Cesium's own terrain (ellipsoidal) at each obstacle and place the column absolutely
+   * on it (base → base + heightM). **Geoid-independent** and always exactly on the ground, robust to
+   * camera/UAV position and on-demand rendering — unlike RELATIVE_TO_GROUND clamping, which drifts when
+   * the terrain under the obstacle isn't loaded (off-screen). A slim real-world footprint makes the
+   * column shrink perspectively with distance (not a fixed-size sprite).
    */
   async function updateObstacles3D() {
     if (!viewer) return;
@@ -1709,8 +1687,8 @@
     if (obstacles.length === 0) { viewer.scene.requestRender(); return; }
 
     // Horizontal sight-line limit: render only obstacles within the configured range of the camera's
-    // ground point (falls back to the UAV / radar reference when the camera looks at the sky). Keeps
-    // the scene to nearby hazards and bounds the terrain-sampling cost.
+    // ground point (falls back to UAV / radar reference when the camera looks at the sky). Keeps the
+    // scene to nearby hazards and bounds the terrain-sampling cost.
     const camGround = getCamFocus();
     const ref = (camGround ? { lat: camGround.lat, lon: camGround.lon } : null) ?? radarReference ?? uavLatLon;
     aeroRefGround = ref ?? undefined;
@@ -1805,10 +1783,10 @@
   }
 
   /**
-   * Rebuild the airspace volumes relevant to the reference (camera ground, else UAV/GCS). An airspace is
-   * relevant when the reference is inside it or within AIRSPACE_3D_LATERAL_M of its boundary. FIR/UIR and
-   * unclassified "free" airspace are skipped (huge / clutter — same spirit as the 2D click list). Extruded
-   * floor→ceiling polygons, class-coloured + translucent.
+   * Rebuild the airspace volumes relevant to the reference (camera ground, else UAV/GCS). Relevant =
+   * reference inside it or within AIRSPACE_3D_LATERAL_M of its boundary. FIR/UIR and unclassified "free"
+   * airspace are skipped (huge / clutter — same spirit as the 2D click list). Extruded floor→ceiling
+   * polygons, class-coloured + translucent.
    */
   async function updateAirspaces3D() {
     if (!viewer) return;
@@ -1823,10 +1801,10 @@
     // Culling / which airspaces to show follows the camera ground focus...
     const ref = (camGround ? { lat: camGround.lat, lon: camGround.lon } : null) ?? radarReference ?? uavLatLon;
     if (!ref) { viewer.scene.requestRender(); return; }
-    // ...but the patterned "nearest wall" is relative to the UAV (or GCS) — that's the proximity warning
+    // ...but the patterned "nearest wall" is relative to the UAV (or GCS) — the proximity-warning
     // reference, independent of where the camera looks. No real reference (e.g. fake GPS without an FC) →
-    // no wall is drawn (never fall back to the camera, which would mark misleading walls). A fake position
-    // fed through a connected FC arrives as telemetry → it IS a valid uavRef, so walls still draw.
+    // no wall drawn (never fall back to the camera → misleading walls). A fake position fed through a
+    // connected FC arrives as telemetry → it IS a valid uavRef, so walls still draw.
     const uavRef = radarReference ?? uavLatLon;
     aeroRefGround = ref;
     // Ensure the geoid offset is known for this region (kept once; rebuild when it resolves).
@@ -1860,9 +1838,9 @@
       }
     }
 
-    // All primitives are raw (not Entities) so they can be allowPicking:false → out of scene.pick and
-    // not a click target. The volume is a plain, very faint translucent hull (presence only); only the
-    // boundary section nearest the reference is given a pattern (proximity reference / approach warning).
+    // All primitives are raw (not Entities) so they can be allowPicking:false → out of scene.pick, not a
+    // click target. The volume is a very faint translucent hull (presence only); only the boundary
+    // section nearest the reference is patterned (proximity reference / approach warning).
     const polyVF = Cesium.PerInstanceColorAppearance.VERTEX_FORMAT;
     const wallVF = Cesium.MaterialAppearance.MaterialSupport.TEXTURED.vertexFormat;
     const addPrim = (prim: Cesium.Primitive) => { viewer!.scene.primitives.add(prim); airspace3dPrimitives.push(prim); };
@@ -1897,8 +1875,8 @@
       //  (2) the UAV is on the edge's OUTWARD side (away from the ring centroid) — without (2) the test
       //      also matches the opposite/back wall, which spans the same perpendicular band.
       // Robust for long edges + curved boundaries (several consecutive front edges face at once). Plus one
-      // neighbour each side; if the UAV is past every edge (a corner), use the single nearest edge.
-      // No UAV/GCS reference → skip (only the hull renders), never mark camera-relative walls.
+      // neighbour each side; if the UAV is past every edge (a corner), use the single nearest. No UAV/GCS
+      // reference → skip (only the hull renders), never mark camera-relative walls.
       if (uavRef) {
       const mLat = 111320, mLon = 111320 * Math.cos((uavRef.lat * Math.PI) / 180);
       const walls: Cesium.GeometryInstance[] = [];
@@ -1960,9 +1938,9 @@
   }
 
   /**
-   * Render airports within the configured airfield range of the reference (camera ground, else UAV/GCS)
-   * as a type-coloured, ground-clamped marker + name label. (OpenAIP has no runway threshold coordinates,
-   * so a projected runway would just cut through the airport point — not usable; markers only.)
+   * Render airports within the airfield range of the reference (camera ground, else UAV/GCS) as a
+   * type-coloured, ground-clamped marker + name label. (OpenAIP has no runway threshold coordinates, so
+   * a projected runway would just cut through the airport point — not usable; markers only.)
    */
   function updateAirports3D() {
     if (!viewer) return;
@@ -2072,9 +2050,9 @@
     if (viewer) updateRadar3D();
   });
 
-  // In a radar-only scene (no connected UAV/track) the geoid offset is never computed, so contacts
-  // (placed at MSL + geoidOffset) sink under the terrain by the local undulation (~tens of m). Compute it
-  // once at the GCS reference, then re-place the contacts at the corrected height.
+  // In a radar-only scene (no connected UAV/track) the geoid offset is never computed, so contacts (at
+  // MSL + geoidOffset) sink under the terrain by the local undulation (~tens of m). Compute it once at
+  // the GCS reference, then re-place the contacts at the corrected height.
   $effect(() => {
     if (!viewer || !radarActive) return;
     const ref = radarReference;
@@ -2082,7 +2060,7 @@
     void computeGeoidOnce(ref.lat, ref.lon).then((ok) => { if (ok) updateRadar3D(); });
   });
 
-  // ── GCS (ground-station) billboard ──────────────────────────────────
+  // ── GCS (ground-station) billboard ──
   let gcsEntity: Cesium.Entity | undefined;
   let unsubGcs3d: (() => void) | undefined;
   const gcsMode3d = $derived<GcsMode>($settings.gcsMode);
@@ -2125,8 +2103,8 @@
 
   $effect(() => { gcsMode3d; if (viewer) updateGcs3d(); });
 
-  // ── Safehome + autoland overlay (3D mirror of Map.svelte::updateSafehome) ────────────────────────
-  /** Teardrop "H" pin as an SVG data URI (the 2D marker is HTML, not reusable here). Tip at the bottom
+  // ── Safehome + autoland overlay (3D mirror of Map.svelte::updateSafehome) ──
+  /** Teardrop "H" pin as an SVG data URI (the 2D marker is HTML, not reusable here). Tip at bottom
    *  centre → place with verticalOrigin BOTTOM so the point sits on the coordinate. */
   function safehomeBillboardSvg(enabled: boolean): string {
     const bg = enabled ? '#59aa29' : '#888';
@@ -2149,8 +2127,8 @@
   }
 
   /** Redraw the safehome markers + radius rings (+ 3D approach paths). Mirrors the 2D overlay; the
-   *  approach path and the elevated loiter ring need the safehome's ground ellipsoid height, so those
-   *  are drawn after an async terrain sample (guarded by `safehome3dGen`, like the airspace overlay). */
+   *  approach path + elevated loiter ring need the safehome's ground ellipsoid height, so they're drawn
+   *  after an async terrain sample (guarded by `safehome3dGen`, like the airspace overlay). */
   async function updateSafehome3D() {
     if (!viewer) return;
     const gen = ++safehome3dGen;
@@ -2227,12 +2205,12 @@
       const { lat, lon, ap } = jobs[i];
       const gEll = groundEll[i];
       // Set safehomes show the loaded approach_alt as-is (0 = unconfigured → a flat ground path); empty
-      // (0,0) slots aren't drawn at all, and the editor pre-fills the default only for those.
+      // (0,0) slots aren't drawn, and the editor pre-fills the default only for those.
       const approachAltM = ap.approach_alt_cm / 100;
       // Top of the descent = downwind/approach altitude, drawn RELATIVE to the safehome's own ground (a
-      // visual 3D depiction, not a metric reference). We deliberately ignore sea_level_ref / geoid: anchor
-      // the whole pattern to the home height, otherwise an MSL/geoid-0 top detaches the path from the
-      // ground and the descent collapses onto one level.
+      // visual depiction, not a metric reference). Deliberately ignore sea_level_ref / geoid: anchor the
+      // whole pattern to the home height, else an MSL/geoid-0 top detaches the path from the ground and
+      // the descent collapses onto one level.
       const topEll = gEll + approachAltM;
 
       // Yellow loiter ring at the downwind altitude.
@@ -2268,7 +2246,7 @@
   // Redraw on the display toggle (mirrors the 2D `$effect` on `$settings.showSafehomes`).
   $effect(() => { void $settings.showSafehomes; if (viewer) updateSafehome3D(); });
 
-  // ── Geozones overlay (INAV ≥8.0; see docs/active/GEOZONES.md) ─────────────────────────────────
+  // ── Geozones overlay (INAV ≥8.0; see docs/active/GEOZONES.md) ──
   /** Rebuild the geozone volumes (read-only in P1). Circle → extruded cylinder, polygon → extruded
    *  hull; blue inclusive / amber exclusive. Floor/ceiling from the zone's min/max altitude (AGL →
    *  terrain-sampled ground, AMSL → + geoid); max 0 = no upper limit → a tall visual cap. Gated by the
@@ -2317,8 +2295,8 @@
 
       const st = geozonePathStyle(z); // same type+action scheme as 2D (colour, weight, dash, fill)
       const lineColor = Cesium.Color.fromCssColorString(st.color).withAlpha(st.opacity);
-      // The line variants in 3D go on real polylines: Cesium outline width/dash on extruded volumes is
-      // unreliable (WebGL clamps to 1 px, no dash). None → dashed; Pos-Hold/RTH → thick (st.weight).
+      // Line variants go on real polylines: Cesium outline width/dash on extruded volumes is unreliable
+      // (WebGL clamps to 1 px, no dash). None → dashed; Pos-Hold/RTH → thick (st.weight).
       const lineMat = st.dashArray
         ? new Cesium.PolylineDashMaterialProperty({ color: lineColor, dashLength: 16.0 })
         : lineColor;
@@ -2340,7 +2318,7 @@
       }
 
       // Translucent volume — only for (type, action) combos that get a fill (mwp scheme); no entity
-      // outline (the boundary polylines below carry the line style).
+      // outline (boundary polylines below carry the line style).
       if (st.fill) {
         const fillMaterial = Cesium.Color.fromCssColorString(st.color).withAlpha(0.13);
         if (circleCentre) {
@@ -2370,8 +2348,8 @@
     viewer.scene.requestRender();
   }
 
-  /** Red overlay for the mission legs flagged by the geozone safety check, drawn at the mission's 3D
-   *  height (launch-relative, matching the mission line). Hint only. */
+  /** Red overlay for mission legs flagged by the geozone safety check, drawn at the mission's 3D height
+   *  (launch-relative, matching the mission line). Hint only. */
   function updateGeozoneViolations3D() {
     if (!viewer) return;
     for (const e of geozone3dViolationEntities) viewer.entities.remove(e);
@@ -2391,7 +2369,7 @@
     viewer.scene.requestRender();
   }
 
-  // ── Geofence overlay (ArduPilot/PX4; see docs/active/GEOFENCE.md) ──────────────────────────────
+  // ── Geofence overlay (ArduPilot/PX4; see docs/active/GEOFENCE.md) ──
   /** Rebuild the geofence volumes. Circle → extruded cylinder, polygon → extruded hull; blue inclusion
    *  / amber exclusion. Fences have no per-zone altitude, so all zones extrude from the terrain ground
    *  up to the global vertical limit (ArduPilot FENCE_ALT_MAX / PX4 GF_MAX_VER_DIST), with a visual
@@ -2483,9 +2461,9 @@
     viewer.scene.requestRender();
   }
 
-  // ── Rally points overlay (ArduPilot/PX4; see docs/active/GEOFENCE.md) ──────────────────────────
+  // ── Rally points overlay (ArduPilot/PX4; see docs/active/GEOFENCE.md) ──
   /** Rebuild the rally-point markers: a green ground-clamped point + label per point. Rally altitude is
-   *  relative to home (not drawn here — the markers mark the ground location). Gated by the rally 3D toggle. */
+   *  relative to home (not drawn — the markers mark the ground location). Gated by the rally 3D toggle. */
   function updateRally3D() {
     if (!viewer) return;
     for (const e of rally3dEntities) viewer.entities.remove(e);
@@ -2523,10 +2501,10 @@
     viewer.scene.requestRender();
   }
 
-  // ── Sky clock (sun/moon position) ──────────────────────────────────
-  // Cesium positions the Sun/Moon from real ephemeris at viewer.clock.currentTime.
-  // We drive that clock from one of three sources (priority): the dev time slider,
-  // the replay log's timestamp (if enabled), else real wall-clock now.
+  // ── Sky clock (sun/moon position) ──
+  // Cesium positions the Sun/Moon from real ephemeris at viewer.clock.currentTime. We drive that clock
+  // from one of three sources (priority): the dev time slider, the replay log's timestamp (if enabled),
+  // else real wall-clock now.
 
   /** Build a JulianDate for a local-solar time-of-day at the currently viewed longitude. */
   function julianFromLocalTimeOfDay(minutes: number): Cesium.JulianDate {
@@ -2559,7 +2537,7 @@
     updateNightDim3D();
   }
 
-  // ── Night dimming (imagery only) ───────────────────────────────────
+  // ── Night dimming (imagery only) ──
 
   /** Camera target longitude/latitude in degrees (for the local sun calc). */
   function cameraLonLat(): { lat: number; lon: number } {
@@ -2583,13 +2561,12 @@
 
   /**
    * Night dimming as the *darker of two continuous brightness curves*, never stacked:
-   *  - cesiumFactor: the real-lighting day/night shading at the VIEWED location & clock time
-   *    (smooth 1.0→0.3 across the terminator; 1.0 if real lighting is off).
+   *  - cesiumFactor: real-lighting day/night shading at the VIEWED location & clock time (smooth 1.0→0.3
+   *    across the terminator; 1.0 if real lighting is off).
    *  - nightFactor:  the Night-Mode auto curve at the USER's physical location & system time.
-   * We push the imagery to min(cesium, night) WITHOUT double-darkening: since Cesium's lighting
-   * already multiplies the globe by cesiumFactor, the extra imagery dim is the ratio
-   * min(c,n)/c — i.e. 1.0 when Cesium is already as dark (terminator preserved), <1 only where
-   * Night Mode wants it darker than Cesium. Special cases:
+   * Push imagery to min(cesium, night) WITHOUT double-darkening: Cesium's lighting already multiplies the
+   * globe by cesiumFactor, so the extra imagery dim is the ratio min(c,n)/c — 1.0 when Cesium is already
+   * as dark (terminator preserved), <1 only where Night Mode wants it darker. Special cases:
    *  - Night Mode ON  → flat 0.3: force lighting off (uniform ground) + imagery 0.3; sky/sun stay real.
    *  - Night Mode OFF → imagery 1.0; lighting follows the real-lighting setting.
    */
@@ -2619,14 +2596,13 @@
     applyImageryBrightness(factor);
   }
 
-  // ── UAV Entity ─────────────────────────────────────────────────────
+  // ── UAV Entity ──
 
   // Low-poly UAV models (static/models/): +X = nose, Y-up. Quad = aviation nav-light rotor rings
   // (left/port = red, right/starboard = green → an inverted attitude is readable) + cyan nose arrow.
   // Arrow = generic flat marker for non-multirotor / unknown craft (until plane/heli models exist).
   // Tinted lightly by flight-mode colour (MIX) so the mode still reads; minimumPixelSize keeps it
-  // visible far out.
-  // Model selection (override > platform) lives in the shared uavModels helper (also used by 2D map).
+  // visible far out. Model selection (override > platform) lives in the shared uavModels helper (2D too).
   function currentModelUri(): string {
     return modelUriForPlatform(platformType, modelOverride);
   }
@@ -2638,15 +2614,15 @@
     }
     viewer?.scene.requestRender();
   });
-  // Heading offset stays 0 — the model's own frame is yaw-corrected in the .glb generators
-  // (ROOT_YAW_Y) so the explicit body-axis construction below needs no runtime fudge.
+  // Heading offset stays 0 — the model's frame is yaw-corrected in the .glb generators (ROOT_YAW_Y), so
+  // the explicit body-axis construction below needs no runtime fudge.
   const MODEL_HEADING_OFFSET_DEG = 0;
   // Attitude → orientation, built from EXPLICIT aircraft body axes in the local ENU frame (not by
   // permuting Cesium-HPR's pitch/roll slots — that only worked near level and broke at high bank /
-  // inverted). Sequence: yaw about Up, pitch about the right axis (nose up/down), roll about the
-  // nose axis (bank) — correct at ALL attitudes. Signs match the AHI widget: INAV pitch is negative
-  // = nose up (→ −1), roll is positive = right-wing-down (→ +1). The model's LOCAL frame after the
-  // glTF Y-up→Z-up load is nose=+X, up=+Z, left=+Y, so we map (nose, left, up) → world.
+  // inverted). Sequence: yaw about Up, pitch about the right axis (nose up/down), roll about the nose
+  // axis (bank) — correct at ALL attitudes. Signs match the AHI widget: INAV pitch negative = nose up
+  // (→ −1), roll positive = right-wing-down (→ +1). The model's LOCAL frame after the glTF Y-up→Z-up load
+  // is nose=+X, up=+Z, left=+Y, so we map (nose, left, up) → world.
   const MODEL_PITCH_SIGN = -1;
   const MODEL_ROLL_SIGN = 1;
   function uavOrientation(position: Cesium.Cartesian3, headingDeg: number, pitchDeg = 0, rollDeg = 0) {
@@ -2687,14 +2663,13 @@
   }
 
   // ── UAV motion smoothing (adaptive interpolation, separate for position + attitude) ──
-  // The replay player ticks at a fixed rate, but the underlying GPS/attitude samples change at
-  // their own (often lower) rate. We re-base an interpolation ONLY when a value actually CHANGES,
-  // and the transition time is the MEDIAN of recent real-change intervals — a median (not an
-  // average) means a single aliased/missed update can't corrupt the timing and cause a stutter.
-  // Each re-base starts from the CURRENTLY DISPLAYED state (not the last target), so a slightly-off
-  // interval only changes velocity — never a jump or a mid-glide pause. Position and attitude are
-  // tracked independently (e.g. 5 Hz GPS + 10 Hz attitude). A far jump (scrub / source switch /
-  // first sample) snaps. The smoothed state also drives the follow/orbit camera.
+  // The replay player ticks at a fixed rate, but the underlying GPS/attitude samples change at their own
+  // (often lower) rate. Re-base an interpolation ONLY when a value actually CHANGES, with transition time
+  // = the MEDIAN of recent real-change intervals — a median (not average) means a single aliased/missed
+  // update can't corrupt the timing into a stutter. Each re-base starts from the CURRENTLY DISPLAYED state
+  // (not the last target), so a slightly-off interval only changes velocity — never a jump or mid-glide
+  // pause. Position + attitude tracked independently (e.g. 5 Hz GPS + 10 Hz attitude). A far jump (scrub /
+  // source switch / first sample) snaps. The smoothed state also drives the follow/orbit camera.
   let smEntity: Cesium.Entity | undefined;
   let smRaf = 0;
   // position channel: interpolate from→to over pInt (started at pT0); lat/lon/alt held as scalars
@@ -2809,7 +2784,7 @@
     // Live trail is built from the liveTrack store (see the liveTrack subscription), not here.
   }
 
-  // ── Home Position ──────────────────────────────────────────────────
+  // ── Home Position ──
 
   function updateHomePosition3D(lat: number, lon: number, alt: number) {
     if (!viewer) return;
@@ -2844,7 +2819,7 @@
     }
   }
 
-    // ── Live Trail (Flightmode-colored segments) ───────────────────────
+    // ── Live Trail (Flightmode-colored segments) ──
 
   /** Material for a trail segment of the given CSS colour (FPV-dimmed alpha). */
   function trailMaterial(color: string): Cesium.ColorMaterialProperty {
@@ -2880,8 +2855,8 @@
     lastTrailLat = pt.lat;
     lastTrailLon = pt.lon;
 
-    // Hold the newest point back by one: commit the previous (now-confirmed) point, keep this one
-    // pending. The drawn tip stays one segment behind the live (smoothed) UAV → no FPV overshoot.
+    // Hold the newest point back by one: commit the previous (now-confirmed) point, keep this one pending.
+    // The drawn tip stays one segment behind the live (smoothed) UAV → no FPV overshoot.
     if (pendingTrailPos) commitTrailPoint(pendingTrailPos, pendingTrailColor);
     pendingTrailPos = pos;
     pendingTrailColor = modeColor(pt.mode_primary);
@@ -2923,10 +2898,9 @@
   }
 
   /**
-   * Wipe all *source-specific* map data (playback track + progressive deco, live
-   * trail, live + replay UAV markers, home) and reset altitude/geoid + session
-   * state. The mission overlay is intentionally KEPT (it is source-independent)
-   * and re-placed at the reset geoid. Called on source switches:
+   * Wipe all *source-specific* map data (playback track + progressive deco, live trail, live + replay UAV
+   * markers, home) and reset altitude/geoid + session state. The mission overlay is KEPT (source-
+   * independent) and re-placed at the reset geoid. Called on source switches:
    *  - leaving replay (replay → live/planning),
    *  - a fresh live connect while DISARMED.
    * (log → log and live → replay are handled at the top of updatePlaybackTrack3D.)
@@ -2965,14 +2939,13 @@
   }
 
   /**
-   * Derive the geoid undulation N = cesiumGround_ellipsoid − copernicusGround_MSL at
-   * `lat`/`lon`, ONCE per scene. Heights placed as `MSL + geoidOffset` (live UAV, track,
-   * mission waypoints, …) would otherwise sink by the full local undulation (~tens of m).
-   * Single-flight + awaitable: concurrent callers (a loading track + its linked mission)
-   * share the one promise and all see the same offset. Resolves to whether it succeeded;
-   * on failure (no terrain / no Copernicus ground) callers draw at offset 0 (best effort).
-   * `fallbackGroundMsl` (the replay's first-fix GPS MSL) substitutes for a missing
-   * Copernicus ground so the replay still gets an offset.
+   * Derive the geoid undulation N = cesiumGround_ellipsoid − copernicusGround_MSL at `lat`/`lon`, ONCE
+   * per scene. Heights placed as `MSL + geoidOffset` (live UAV, track, mission waypoints, …) would
+   * otherwise sink by the full local undulation (~tens of m). Single-flight + awaitable: concurrent
+   * callers (a loading track + its linked mission) share the one promise and all see the same offset.
+   * Resolves to whether it succeeded; on failure (no terrain / no Copernicus ground) callers draw at
+   * offset 0 (best effort). `fallbackGroundMsl` (the replay's first-fix GPS MSL) substitutes for a
+   * missing Copernicus ground so the replay still gets an offset.
    */
   function computeGeoidOnce(lat: number, lon: number, fallbackGroundMsl?: number): Promise<boolean> {
     if (geoidComputed) return Promise.resolve(true);
@@ -3004,15 +2977,15 @@
     return geoidPromise;
   }
 
-  /** Compute the geoid offset (if not yet done) and re-place the mission at the new height. Once the
-   *  offset is known this is a no-op — without the guard it re-rendered the mission on *every* telemetry
-   *  frame (computeGeoidOnce resolves true immediately when already computed), which flickered the
-   *  waypoints (renderMission3D removes them, awaits terrain, re-adds). */
+  /** Compute the geoid offset (if not yet done) and re-place the mission at the new height. A no-op once
+   *  the offset is known — without the guard it re-rendered the mission on *every* telemetry frame
+   *  (computeGeoidOnce resolves true immediately when computed), flickering the waypoints (renderMission3D
+   *  removes them, awaits terrain, re-adds). */
   async function ensureGeoid(lat: number, lon: number) {
     if (geoidComputed) return; // already derived → nothing to re-place (mission store changes re-render)
     const ok = await computeGeoidOnce(lat, lon);
-    // Re-place everything that was drawn at offset 0 before the geoid was known: the mission and the
-    // full live trail (its first points were placed at the wrong height / sunk into the ground).
+    // Re-place everything drawn at offset 0 before the geoid was known: the mission and the full live
+    // trail (its first points were placed at the wrong height / sunk into the ground).
     if (ok) { scheduleMissionRender(); rebuildLiveTrail3D(); viewer?.scene.requestRender(); }
   }
 
@@ -3067,7 +3040,7 @@
     lastTrailLon = 0;
   }
 
-  // ── Playback Track ─────────────────────────────────────────────────
+  // ── Playback Track ──
 
   $effect(() => {
     if (!viewer) return;
@@ -3077,10 +3050,9 @@
     async function updatePlaybackTrack3D(track: TelemetryRecord[], colorMode: TrackColorMode) {
     if (!viewer) return;
 
-    // Mark a load in progress and drop the previous track reference up front:
-    // this function is async (awaits terrain), and the playbackPoint effect may
-    // fire updateFlownDeco() during the await — the guard + empty track stop it
-    // from appending old (or mixing old+new) deco points.
+    // Mark a load in progress and drop the previous track reference up front: this function is async
+    // (awaits terrain), and the playbackPoint effect may fire updateFlownDeco() during the await — the
+    // guard + empty track stop it appending old (or mixing old+new) deco points.
     decoLoading = true;
     decoValidTrack = [];
 
@@ -3093,10 +3065,9 @@
       playbackTrackEntity = undefined;
     }
 
-    // Loading a (new) replay track is a source switch: wipe any lingering live
-    // data — the persistent live UAV, its trail, and the home marker — so we
-    // don't stack markers / draw a line across continents. Reset the live-geoid
-    // flag so a later live reconnect re-derives it. (Mission is kept.)
+    // Loading a (new) replay track is a source switch: wipe any lingering live data — the persistent live
+    // UAV, its trail, the home marker — so we don't stack markers / draw a line across continents. Reset
+    // the live-geoid flag so a later live reconnect re-derives it. (Mission is kept.)
     if (track.length >= 2) {
       resetTrail3D();
       resetPreArmTrail3D();
@@ -3114,19 +3085,16 @@
       (p) => p.lat != null && p.lon != null && isValidGpsCoordinate(p.lat!, p.lon!) && p.alt_m != null
     );
 
-    // Anchor: GPS MSL at the first fix (absolute reference for the relative,
-    // fused track altitude). Includes any real height-above-ground at the start
-    // (e.g. tower/rooftop) — we do NOT snap it to the ground.
+    // Anchor: GPS MSL at the first fix (absolute reference for the relative, fused track altitude).
+    // Includes any real height-above-ground at the start (e.g. tower/rooftop) — NOT snapped to ground.
     startMslGps = firstPt?.alt_m ?? 0;
 
-    // Geoid undulation N = cesiumGround_ellipsoid − copernicusGround_MSL at the
-    // first point. Derived purely from terrain (NOT the UAV's GPS altitude), so
-    // the offset is the true MSL→ellipsoid conversion regardless of how high the
-    // craft is when armed. Must wait for Cesium World Terrain to finish loading.
-    // Geoid offset for the track ellipsoid heights. Uses the SAME single-flight path as
-    // the mission, so a linked mission loading moments later (see +page) shares this exact
-    // computation and draws at the same height instead of racing it. Copernicus MSL is
-    // preferred; the first-fix GPS MSL is the fallback ground.
+    // Geoid offset for the track ellipsoid heights: N = cesiumGround_ellipsoid − copernicusGround_MSL at
+    // the first point. Derived purely from terrain (NOT the UAV's GPS altitude), so it's the true
+    // MSL→ellipsoid conversion regardless of arm height; must wait for Cesium World Terrain to load. Uses
+    // the SAME single-flight path as the mission, so a linked mission loading moments later (see +page)
+    // shares this exact computation and draws at the same height instead of racing it. Copernicus MSL is
+    // preferred; first-fix GPS MSL is the fallback ground.
     if (firstPt) await computeGeoidOnce(firstPt.lat!, firstPt.lon!, firstPt.alt_m ?? undefined);
 
     // Filter to valid GPS points and convert to Cartesian3 with geoid correction
@@ -3135,18 +3103,16 @@
     );
     if (validTrack.length < 2) return;
 
-    // Build a lookup map: lat,lng key → RELATIVE (fused, arming-relative) altitude
-    // for each valid track point. We use nav_alt_m (EKF, smooth, 0 at arm), with
-    // baro as a fallback — NOT raw GPS altitude (too erratic for the track shape).
+    // Lookup map: lat,lng key → RELATIVE (fused, arming-relative) altitude per valid track point. Uses
+    // nav_alt_m (EKF, smooth, 0 at arm), baro as fallback — NOT raw GPS altitude (too erratic for shape).
     const relLookup = new Map<string, number>();
     for (const pt of validTrack) {
       const key = `${pt.lat!.toFixed(6)},${pt.lon!.toFixed(6)}`;
       relLookup.set(key, pt.nav_alt_m ?? pt.baro_alt_m ?? 0);
     }
 
-    // Helper: [lat, lon] → Cesium Cartesian3. Ellipsoid height = the GPS-MSL start
-    // anchor + geoid undulation + the point's relative fused altitude. This keeps
-    // the start at its true height (tower preserved) and the track smooth.
+    // [lat, lon] → Cesium Cartesian3. Ellipsoid height = GPS-MSL start anchor + geoid undulation + the
+    // point's relative fused altitude. Keeps the start at its true height (tower preserved), track smooth.
     function segmentToPositions3D(points: [number, number][]): Cesium.Cartesian3[] {
       return points.map(([lat, lon]) => {
         const key = `${lat.toFixed(6)},${lon.toFixed(6)}`;
@@ -3155,9 +3121,8 @@
       });
     }
 
-    // The static flight line for a segment: a coloured polyline with a black
-    // outline. The ground shadow + altitude curtain are drawn separately and
-    // progressively (see updateFlownDeco), so they can grow behind the UAV.
+    // Static flight line for a segment: a coloured polyline with a black outline. The ground shadow +
+    // altitude curtain are drawn separately and progressively (see updateFlownDeco), to grow behind the UAV.
     function addTrackLine(positions: Cesium.Cartesian3[], cssColor: string) {
       if (!viewer || positions.length < 2) return;
       const color = Cesium.Color.fromCssColorString(cssColor);
@@ -3189,8 +3154,8 @@
       segments = result.segments;
     }
 
-    // Use a parent entity as a grouping container so we can flyTo() the whole track
-    // We add individual polyline entities as children for proper colored segments.
+    // Parent entity as a grouping container so we can flyTo() the whole track; individual polyline
+    // entities are added as children for proper colored segments.
     let firstPosition: Cesium.Cartesian3 | undefined;
     let bounds: Cesium.Cartesian3[] = [];
 
@@ -3214,8 +3179,8 @@
       addTrackLine(positions, '#f5a623');
     }
 
-    // Hand the track to the progressive shadow/curtain renderer and draw the
-    // portion flown so far (full track when not replaying).
+    // Hand the track to the progressive shadow/curtain renderer and draw the portion flown so far (full
+    // track when not replaying).
     decoValidTrack = validTrack as TelemetryRecord[];
     decoColorMode = colorMode;
     decoPointColor = trackPointColorizer(
@@ -3233,16 +3198,15 @@
         position: firstPosition,
         point: { pixelSize: 0 }, // invisible
       });
-      // Recenter on load (covers a 2D→3D switch with a log + log→log switches),
-      // deferred until the canvas is laid out so the first switch isn't a no-op.
+      // Recenter on load (covers a 2D→3D switch with a log + log→log switches), deferred until the canvas
+      // is laid out so the first switch isn't a no-op.
       needsInitialRecenter = false;
       recenter3D();
     }
 
-    // Re-place the replay model at the corrected height. The playbackPoint effect places
-    // it as soon as the track loads — but that can run BEFORE this function's (async) geoid
-    // computation finishes, leaving the model a few metres off the ground until the first
-    // position update. Now that the geoid offset is ready, snap it onto the first point.
+    // Re-place the replay model at the corrected height. The playbackPoint effect places it as soon as the
+    // track loads — but that can run BEFORE this function's (async) geoid computation finishes, leaving the
+    // model a few metres off the ground until the first position update. Now snap it onto the first point.
     if (playbackPoint) {
       resetUavSmoothing();
       updatePlaybackMarker3D(playbackPoint);
@@ -3251,13 +3215,11 @@
     viewer.scene.requestRender();
   }
 
-  // ── Progressive ground shadow + altitude curtain ───────────────────
-  // The flight LINE is static/full; the shadow + curtain are drawn only up to
-  // the current replay position so they build up behind the UAV (showing flown
-  // progress). Chunked into fixed-size colour runs so the entity count stays
-  // bounded and only the small in-progress chunk is redrawn (no flicker, scales
-  // to hour-long logs). When not replaying (playbackPoint null) the full track
-  // is shown.
+  // ── Progressive ground shadow + altitude curtain ──
+  // The flight LINE is static/full; the shadow + curtain are drawn only up to the current replay position
+  // so they build up behind the UAV (showing flown progress). Chunked into fixed-size colour runs so the
+  // entity count stays bounded and only the small in-progress chunk is redrawn (no flicker, scales to
+  // hour-long logs). When not replaying (playbackPoint null) the full track is shown.
 
   function posFromRecord(p: TelemetryRecord): Cesium.Cartesian3 {
     const rel = p.nav_alt_m ?? p.baro_alt_m ?? 0; // relative fused altitude (matches the track line)
@@ -3416,11 +3378,10 @@
     updateFlownDeco();
   }
 
-  // ── Mission overlay ────────────────────────────────────────────────
-  // Mirrors the 2D map: identical marker SVGs (as viewport-facing billboards)
-  // and identical line colours/styles, drawn as an always-visible overlay
-  // (depthFailMaterial / disableDepthTestDistance). The only 3D addition is a
-  // thin dashed drop-line from each waypoint down to the ground.
+  // ── Mission overlay ──
+  // Mirrors the 2D map: identical marker SVGs (as viewport-facing billboards) and line colours/styles,
+  // drawn as an always-visible overlay (depthFailMaterial / disableDepthTestDistance). The only 3D
+  // addition is a thin dashed drop-line from each waypoint down to the ground.
 
   const LAUNCH_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 44" width="32" height="44">
     <path d="M16 44 C16 44 2 24 2 16 A14 14 0 1 1 30 16 C30 24 16 44 16 44Z" fill="#f39c12" stroke="#fff" stroke-width="2"/>
@@ -3445,10 +3406,9 @@
   function wpPulse01(): number {
     return 0.5 + 0.5 * Math.sin((Date.now() / 1000) * Math.PI); // sin(π·t) → 2 s period
   }
-  /** Soft radial green glow, drawn BEHIND the active WP marker and sized to cover its body, with a
-   *  pulsing alpha + scale (mimics the 2D marker's green drop-shadow "glow" pulse — no size change to
-   *  the marker icon itself). Anchored like the marker (same verticalOrigin) so it sits over the icon,
-   *  not at the on-ground tip. */
+  /** Soft radial green glow, drawn BEHIND the active WP marker and sized to cover its body, with pulsing
+   *  alpha + scale (mimics the 2D marker's green drop-shadow "glow" pulse — no icon size change). Anchored
+   *  like the marker (same verticalOrigin) so it sits over the icon, not at the on-ground tip. */
   const WP_GLOW_SVG =
     '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">' +
     '<defs><radialGradient id="g" cx="50%" cy="50%" r="50%">' +
@@ -3460,8 +3420,8 @@
     // Centre the glow on the marker's HEAD (the round blob), not the on-ground anchor:
     //  - teardrops (bottom-anchored, anchorY ≈ height): head sits ~0.64·h above the tip;
     //  - centred icons (anchorY ≈ h/2): the head IS the on-coordinate centre.
-    // CENTER origin + a fixed pixelOffset keeps the glow on the head (billboards are screen-space, so
-    // the offset tracks the marker at any zoom) and lets the scale pulse grow symmetrically from it.
+    // CENTER origin + a fixed pixelOffset keeps the glow on the head (billboards are screen-space, so the
+    // offset tracks the marker at any zoom) and lets the scale pulse grow symmetrically from it.
     const bottomAnchored = spec.anchorY >= spec.height - 1;
     const headUpPx = bottomAnchored ? spec.height * 0.64 : spec.height / 2 - spec.anchorY;
     const d = spec.width * 1.3; // ≈ the head diameter + halo bleed
@@ -3494,7 +3454,7 @@
 
   // Overlay mission line — a depth-test-free Primitive so it stays visible through terrain (like the
   // billboards) WITHOUT the z-fighting the old Entity dual-pass (material + depthFailMaterial) caused
-  // against the globe. Drawn straight (ArcType.NONE — legs are short) and never writes depth.
+  // against the globe. Drawn straight (ArcType.NONE — legs are short), never writes depth.
   function missionLine(positions: Cesium.Cartesian3[], cssColor: string, alpha: number, width: number, dash: boolean) {
     if (!viewer || positions.length < 2) return;
     const color = Cesium.Color.fromCssColorString(cssColor).withAlpha(alpha);
@@ -3513,7 +3473,7 @@
       appearance: new Cesium.PolylineMaterialAppearance({
         material,
         translucent: true,
-        // No depth test (always on top) and no depth write (doesn't occlude markers) → no terrain z-fight.
+        // No depth test (always on top) + no depth write (doesn't occlude markers) → no terrain z-fight.
         // getDefaultRenderState builds a correct translucent render state; it exists at runtime but is
         // missing from the Cesium TS typings.
         // @ts-expect-error — getDefaultRenderState is untyped in the Cesium typings
@@ -3530,12 +3490,12 @@
 
   function scheduleMissionRender() { void renderMission3D(); }
 
-  // ── Unified mission overlay (INAV + ArduPilot) ──────────────────────
-  // One renderer, one geoid path, one set of draw primitives. The two autopilots differ only in how
-  // their mission model maps to geometry (INAV WpAction + alt_mode vs. ArduPilot MavCmd + frame), so
-  // each has a thin *adapter* (buildInavModel / buildArduModel) that resolves its waypoints to a
-  // protocol-neutral `Mission3DModel` in pure MSL. `renderMission3D` then draws any model identically —
-  // exactly the 2D pattern (shared primitives + a per-platform mapper), now for 3D too.
+  // ── Unified mission overlay (INAV + ArduPilot) ──
+  // One renderer, one geoid path, one set of draw primitives. The autopilots differ only in how their
+  // mission model maps to geometry (INAV WpAction + alt_mode vs. ArduPilot MavCmd + frame), so each has a
+  // thin *adapter* (buildInavModel / buildArduModel) resolving its waypoints to a protocol-neutral
+  // `Mission3DModel` in pure MSL. `renderMission3D` then draws any model identically — exactly the 2D
+  // pattern (shared primitives + a per-platform mapper), now for 3D too.
 
   interface P3 { lat: number; lon: number; altMsl: number; }
   interface Mission3DWp {
@@ -3554,7 +3514,7 @@
   }
 
   /** Draw a resolved mission model. Pure + synchronous: the geoid offset is applied here (the model is
-   *  MSL), so the model build stays protocol-neutral and terrain/geoid handling lives in one place. */
+   *  MSL), so the build stays protocol-neutral and terrain/geoid handling lives in one place. */
   function drawMission3DModel(model: Mission3DModel) {
     if (!viewer) return;
     const toCart = (p: P3) => Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.altMsl + geoidOffset);
@@ -3586,8 +3546,8 @@
     }
 
     wpPulseActive = anyActiveWp;
-    // Recolour the violating legs in sync with the mission line (same geoidOffset + redraw timing) so
-    // the red sits exactly on the path — not a stale overlay drawn before the geoid resolved.
+    // Recolour the violating legs in sync with the mission line (same geoidOffset + redraw timing) so the
+    // red sits exactly on the path — not a stale overlay drawn before the geoid resolved.
     updateGeozoneViolations3D();
     syncContinuousRender(); // (de)activate continuous rendering for the pulse
     viewer.scene.requestRender();
@@ -3597,8 +3557,8 @@
     if (!viewer) return;
     const token = ++missionRenderToken;
 
-    // Build the protocol-neutral model (the only async part: terrain sampling). Replay → follow the
-    // MISSION toggle; planning/live → always shown.
+    // Build the protocol-neutral model (only async part: terrain sampling). Replay → follow the MISSION
+    // toggle; planning/live → always shown.
     const visible = !curReplayActive || curShowMission;
     const model = !visible
       ? null
@@ -3614,15 +3574,15 @@
       if (token !== missionRenderToken || !viewer) return; // superseded while awaiting
     }
 
-    // Skip the redraw when the result is visually identical to what's already on screen. Many triggers
-    // (a jittering HOME re-broadcasting launchPoint, redundant store sets) ask for a re-render without
-    // any real change; rebuilding identical entities makes the depth-tested polylines drop a frame
-    // (the 5 s flicker). Quantised so sub-metre FC jitter doesn't count as a change.
+    // Skip the redraw when the result is visually identical to what's on screen. Many triggers (jittering
+    // HOME re-broadcasting launchPoint, redundant store sets) ask for a re-render without any real change;
+    // rebuilding identical entities drops a frame on the depth-tested polylines (the 5 s flicker).
+    // Quantised so sub-metre FC jitter doesn't count as a change.
     const sig = model ? missionModelSignature(model) : '';
     if (sig === lastMissionSig && missionEntities.length > 0) return;
     lastMissionSig = sig;
 
-    // From here on it's synchronous: clear the old entities/primitives and draw the new ones in the SAME
+    // From here it's synchronous: clear the old entities/primitives and draw the new ones in the SAME
     // frame, so the overlay never blanks between renders (no async gap — fixes the flicker on home ticks).
     for (const e of missionEntities) viewer.entities.remove(e);
     missionEntities = [];
@@ -3649,7 +3609,7 @@
     return parts.join('|');
   }
 
-  // ── INAV mission adapter ────────────────────────────────────────────
+  // ── INAV mission adapter ──
   /** Signature of the inputs that drive resolveMissionAltitudes (positions + alt-frame + launch). */
   function inavAltInputSig(wps: Waypoint[], launch: { lat: number; lng: number } | null): string {
     const parts: string[] = [launch ? `L${launch.lat.toFixed(7)},${launch.lng.toFixed(7)}` : 'L-'];
@@ -3692,7 +3652,7 @@
     };
 
     // Launch → first-waypoint connector (orange dashed) + the "L" marker (live manual reference only;
-    // hidden when FC-locked — the green "H" represents the same point — and in offline planning).
+    // hidden when FC-locked — the green "H" is the same point — and in offline planning).
     if (curLaunch) {
       const fp = wpMsl(firstGeoIdx);
       if (fp) {
@@ -3752,14 +3712,14 @@
     return model;
   }
 
-  // ── ArduPilot mission adapter ───────────────────────────────────────
+  // ── ArduPilot mission adapter ──
   // The location/altitude resolution is ArduPilot-specific (MavCmd + per-WP frame, takeoff anchoring);
   // everything visual then flows through the shared model + renderer.
 
   /** Takeoff carries no real coords — anchor it on FC home, else the centroid of the located waypoints. */
   function arduTakeoffLatLon3d(wps: ArduWaypoint[]): { lat: number; lon: number } | null {
     // Only the authoritative FC home — a 'manual' home is the stale INAV-launch mirror (often another
-    // region / sea-level alt) and would put the REL base in the wrong place → WPs sinking into terrain.
+    // region / sea-level alt) and would put the REL base in the wrong place → WPs sink into terrain.
     if (curHome3d.set && curHome3d.source === 'fc') return { lat: curHome3d.lat, lon: curHome3d.lon };
     // Offline the takeoff WP is ArduPilot's launch reference: prefer a positioned one, else the centroid.
     const tk = wps.find((w) => cmdIsTakeoff(w.command) && !(w.lat === 0 && w.lon === 0));
@@ -3776,7 +3736,7 @@
   function arduWpLatLon3d(wp: ArduWaypoint, wps: ArduWaypoint[]): { lat: number; lon: number } | null {
     if (cmdIsTakeoff(wp.command)) {
       // Offline the operator can position the takeoff freely (stored coords win) — mirror the 2D layer.
-      // Connected, it anchors on the FC home (the real takeoff point). See ArduMissionLayer.wpDisplayLatLng.
+      // Connected, it anchors on the FC home (real takeoff point). See ArduMissionLayer.wpDisplayLatLng.
       const conn = get(connection).status === 'connected';
       if (!conn && !(wp.lat === 0 && wp.lon === 0)) return { lat: wp.lat / 1e7, lon: wp.lon / 1e7 };
       return arduTakeoffLatLon3d(wps);
@@ -3792,8 +3752,8 @@
   async function resolveArduAltitudes3d(wps: ArduWaypoint[], homeRefMsl: number | null): Promise<Map<number, ArduWpAlt>> {
     const out = new Map<number, ArduWpAlt>();
 
-    // Collect every locatable waypoint, then sample all terrain grounds in one batched
-    // IPC call instead of one round-trip per waypoint (the dominant 3D-overlay cost).
+    // Collect every locatable waypoint, then sample all terrain grounds in one batched IPC call instead
+    // of one round-trip per waypoint (the dominant 3D-overlay cost).
     const located: { i: number; lat: number; lon: number }[] = [];
     for (let i = 0; i < wps.length; i++) {
       const wp = wps[i];
@@ -3841,16 +3801,16 @@
     const geoidRef = g ? { lat: g.lat / 1e7, lon: g.lon / 1e7 } : (curHome3d.set ? { lat: curHome3d.lat, lon: curHome3d.lon } : null);
 
     // Reuse the cached terrain resolution (home-ref + per-WP grounds) when the altitude-relevant inputs
-    // are unchanged (e.g. a 3D re-open); only the cheap model build below re-runs. Otherwise resolve.
+    // are unchanged (e.g. a 3D re-open); only the cheap model build re-runs. Otherwise resolve.
     const altSig = arduAltInputSig(wps);
     let alts: Map<number, ArduWpAlt>;
     let homeRefMsl: number | null;
     if (arduAltCache && arduAltCache.sig === altSig) {
       ({ alts, homeRefMsl } = arduAltCache);
     } else {
-      // REL reference: the FC home MSL only when it's the authoritative FC home — a 'manual' home (the
-      // stale INAV-launch mirror, alt ≈ 0) would anchor REL altitudes at sea level → WPs sink into the
-      // ground. Offline we therefore sample the terrain under the takeoff/first waypoint instead.
+      // REL reference: the FC home MSL only when it's the authoritative FC home — a 'manual' home (stale
+      // INAV-launch mirror, alt ≈ 0) anchors REL altitudes at sea level → WPs sink. Offline we therefore
+      // sample the terrain under the takeoff/first waypoint instead.
       homeRefMsl = (curHome3d.set && curHome3d.source === 'fc') ? curHome3d.alt : null;
       if (homeRefMsl == null) {
         const anchor = arduTakeoffLatLon3d(wps);
@@ -3910,14 +3870,13 @@
     return model;
   }
 
-  // ── Playback Marker ────────────────────────────────────────────────
+  // ── Playback Marker ──
 
   $effect(() => {
     if (!viewer) return;
     updatePlaybackMarker3D(playbackPoint);
     updateFlownDeco(); // grow shadow/curtain to the current replay position
-    // Move the sky clock along the flight time when "Log Replay Time" is on
-    // (dev slider, if active, wins).
+    // Move the sky clock along the flight time when "Log Replay Time" is on (dev slider, if active, wins).
     if (replayTimeEnabled && !devTimeActive) applyClockTime();
   });
 
@@ -3939,10 +3898,10 @@
     const color = getNavStateColor(point.nav_state ?? 0); // marker = nav state
     const cesiumColor = Cesium.Color.fromCssColorString(color);
     const position = Cesium.Cartesian3.fromDegrees(lon, lat, alt);
-    // Attitude from the SAME unified adapter the AHI widget uses (consistent across
-    // INAV / ArduPilot / live / replay) rather than the raw record. NB: the model heading is the FC
-    // fused HEADING (`td.yaw`), NOT the GPS course (`point.heading` = COG) — so the model/FPV/camera
-    // show the real crab against the track instead of riding it like rails.
+    // Attitude from the SAME unified adapter the AHI widget uses (consistent across INAV / ArduPilot /
+    // live / replay), not the raw record. NB: the model heading is the FC fused HEADING (`td.yaw`), NOT
+    // the GPS course (`point.heading` = COG) — so the model/FPV/camera show the real crab against the
+    // track instead of riding it like rails.
     const td = toTelemetryData(point, fcVariant);
     const heading = td.yaw;
     const orientation = uavOrientation(position, heading, td.pitch, td.roll);
@@ -3950,7 +3909,7 @@
     // FPV HUD data (replay source).
     hud.heading = heading; hud.pitch = td.pitch; hud.roll = td.roll;
     hud.altM = point.nav_alt_m ?? point.baro_alt_m ?? 0;
-    // Airspeed when the record has it (live recording / ArduPilot ARSP / INAV blackbox), else ground speed.
+    // Airspeed when the record has it (live recording / ArduPilot ARSP / INAV blackbox), else groundspeed.
     hud.speedIsAir = point.airspeed_ms != null && point.airspeed_ms > 0;
     hud.speedMs = hud.speedIsAir ? (point.airspeed_ms ?? 0) : (point.speed_ms ?? 0);
     {
@@ -3973,7 +3932,7 @@
     viewer.scene.requestRender();
   }
 
-  // ── Chase Camera ───────────────────────────────────────────────────
+  // ── Chase Camera ──
 
   /** Lerp a single value. */
   function lerp(a: number, b: number, t: number): number {
@@ -3987,10 +3946,9 @@
   }
 
   /**
-   * Toggle the heading-locked follow input model. When enabled, Cesium's own
-   * rotate/tilt/look/pan are disabled (a sideways drag would otherwise rotate
-   * the heading that the chase loop forces back every frame → jitter); pitch is
-   * driven by a custom vertical-drag handler instead. Zoom (→ lockRange) stays.
+   * Toggle the heading-locked follow input model. When enabled, Cesium's own rotate/tilt/look/pan are
+   * disabled (a sideways drag would otherwise rotate the heading that the chase loop forces back every
+   * frame → jitter); pitch is driven by a custom vertical-drag handler instead. Zoom (→ lockRange) stays.
    */
   function setFollowCameraControls(enabled: boolean) {
     if (!viewer) return;
@@ -4026,8 +3984,8 @@
     }
   }
 
-  // Previous frame's look target — lockRange (mouse-wheel zoom) is measured against THIS, not the
-  // newly-moved target, so the UAV's own radial motion isn't baked into the zoom (zoom-drift bug).
+  // Previous frame's look target — lockRange (mouse-wheel zoom) is measured against THIS, not the newly-
+  // moved target, so the UAV's own radial motion isn't baked into the zoom (zoom-drift bug).
   let chaseLastTarget: Cesium.Cartesian3 | undefined;
   let orbitLastCenter: Cesium.Cartesian3 | undefined;
 
@@ -4045,20 +4003,18 @@
       chaseCurrent.lon, chaseCurrent.lat, Math.max(chaseCurrent.alt, 1)
     );
 
-    // followPitch is driven by the custom vertical-drag handler (not read back
-    // from the camera), and heading is always locked to the UAV — so a sideways
-    // drag can't induce the heading fight that caused the jitter.
+    // followPitch is driven by the custom vertical-drag handler (not read back from the camera), and
+    // heading is always locked to the UAV — so a sideways drag can't induce the jitter-causing heading fight.
 
-    // Sync lockRange from mouse-wheel zoom only — measure the camera distance against the PREVIOUS
-    // frame's target (where the camera was framed), not the new moved one, so the UAV's own radial
-    // motion can't drift the zoom in/out.
+    // Sync lockRange from mouse-wheel zoom only — measure the camera distance against the PREVIOUS frame's
+    // target (where the camera was framed), not the new moved one, so the UAV's radial motion can't drift it.
     if (chaseLastTarget) {
       const userRange = Cesium.Cartesian3.distance(viewer.camera.positionWC, chaseLastTarget);
       if (userRange > 0.01) lockRange = Math.max(LOCK_ZOOM_MIN, Math.min(LOCK_ZOOM_MAX, userRange));
     }
 
-    // HPR.heading = the camera's LOOK direction. Setting it to UAV heading means
-    // the camera looks the same way as the UAV and is therefore positioned BEHIND it.
+    // HPR.heading = the camera's LOOK direction. Setting it to UAV heading makes the camera look the same
+    // way as the UAV and therefore sit BEHIND it.
     const behindHeading = chaseCurrent.heading * (Math.PI / 180);
 
     viewer.camera.lookAt(target, new Cesium.HeadingPitchRange(behindHeading, followPitch, lockRange));
@@ -4107,7 +4063,7 @@
     lastFollowHeading = heading;
   }
 
-  // ── Orbit Camera ───────────────────────────────────────────────────
+  // ── Orbit Camera ──
 
   /** Orbit camera animation loop — same CHASE_SMOOTHING as follow cam, free heading/pitch. */
   function orbitAnimationLoop() {
@@ -4153,9 +4109,9 @@
     }
   }
 
-  // ── Camera Mode Cycling ────────────────────────────────────────────
+  // ── Camera Mode Cycling ──
 
-  // ── FPV (first-person view) ────────────────────────────────────────
+  // ── FPV (first-person view) ──
 
   /** Track-line alpha for the current mode (FPV dims the flight track so it doesn't fill the view). */
   function fpvAlpha(base: number): number {
@@ -4249,8 +4205,8 @@
     viewer.scene.requestRender();
   }
 
-  /** Undo FPV's viewer changes (inputs, lens, model/track, wheel) WITHOUT touching the mode —
-   *  used both to leave FPV (exitFpv) and to suspend it while the 3D view is hidden. */
+  /** Undo FPV's viewer changes (inputs, lens, model/track, wheel) WITHOUT touching the mode — used both
+   *  to leave FPV (exitFpv) and to suspend it while the 3D view is hidden. */
   function restoreFromFpv() {
     if (!viewer) return;
     viewer.scene.screenSpaceCameraController.enableInputs = true;
@@ -4316,7 +4272,7 @@
     // orbit → fpv and fpv → free are handled by the early returns above.
   }
 
-  // ── Zoom ───────────────────────────────────────────────────────────
+  // ── Zoom ──
 
   // Zoom limits for follow / orbit modes
   const LOCK_ZOOM_MIN = 20;
@@ -4350,7 +4306,7 @@
     }
   }
 
-  // ── Public API ─────────────────────────────────────────────────────
+  // ── Public API ──
 
   export function flyTo(lat: number, lon: number, alt = 500) {
     if (!viewer) return;
@@ -4490,8 +4446,8 @@
     font-family: 'Segoe UI', Tahoma, sans-serif;
   }
 
-  /* Dev FPS overlay (scene.debugShowFramesPerSecond): move to bottom-left — the default top
-     position collides with the time control and the Debug Panel. */
+  /* Dev FPS overlay (scene.debugShowFramesPerSecond): move to bottom-left — the default top position
+     collides with the time control and the Debug Panel. */
   :global(.cesium-performanceDisplay-defaultContainer) {
     top: auto !important;
     right: auto !important;
