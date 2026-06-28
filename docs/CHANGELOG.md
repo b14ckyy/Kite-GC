@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Survey pattern generator for ArduPilot / PX4.** The pattern generator (all six shapes) now works on
+  ArduPilot/PX4 missions, not just INAV — identical geometry, appended as MAVLink `NAV_WAYPOINT` items
+  (plus a leading groundspeed change). These autopilots have no per-waypoint user-action bitmask like
+  INAV, so the action triggers are **DO_ command waypoints** instead: per-slot dropdowns (Line Start /
+  Line End for zig-zags, Start / Track / End for the others) offering Camera Auto-Trigger, Take Photo,
+  Aux Function, Set/Repeat Servo and Set/Repeat Relay, inserted at the matching positions; PX4 is limited
+  to the commands it supports. INAV keeps its UA-flag grid. While the generator is open the existing
+  mission stays visible but **non-interactive** (so you can plan the entry point without nudging
+  waypoints) — consistently across INAV / ArduPilot / PX4.
+- **Undo / redo for ArduPilot / PX4 missions.** Snapshot-based history (the equivalent of the INAV
+  mission undo): every add / move / edit / delete / path-insert and a whole survey-pattern append is one
+  undoable step, with toolbar buttons and Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y. Cleared to a fresh baseline on
+  load / download / import.
 - **3D Performance debug tab.** A new tab in the Debug Monitor live-tunes the running Cesium scene —
   fog / terrain LOD, sky passes, MSAA/FXAA, resolution scale, OIT/HDR full-screen passes — with an fps
   readout (and Cesium's overlay, forced to continuous rendering while open). Built to localise the
@@ -161,6 +174,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Physical USB/PCI ports are untouched (they keep their device descriptors).
 
 ### Fixed
+- **Airspace info bubble no longer pops while placing or editing waypoints.** The airspace-list map
+  click (and the airport/obstacle marker popups) were only suppressed during INAV edit mode — so placing
+  ArduPilot/PX4 waypoints, or editing a survey pattern, could open an airspace bubble (and the marker
+  even swallowed the placement click). Now suppressed during edit mode on **either** autopilot and while
+  the survey pattern generator is open.
 - **Blackbox-decode auto-download fixed on Linux/macOS.** The `.tar.zst` release holds two files named
   `blackbox_decode` — the real binary under `bin/` and a bash-completion script under
   `share/bash-completion/completions/` — and the extractor matched the first by name, installing the
