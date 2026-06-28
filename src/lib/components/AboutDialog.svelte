@@ -28,11 +28,8 @@
       <button class="about-x" onclick={close} title={$t('about.close')} aria-label={$t('about.close')}>×</button>
 
       <div class="about-head">
-        <img class="about-logo" src="/logo.svg" alt="" />
-        <div class="about-id">
-          <div class="about-name">{APP_NAME}</div>
-          <div class="about-tagline">{APP_TAGLINE}</div>
-        </div>
+        <img class="about-logo-full" src="/branding/kitegc-logo-full-light.svg" alt={APP_NAME} />
+        <div class="about-tagline">{APP_TAGLINE}</div>
       </div>
 
       <div class="about-rows">
@@ -109,10 +106,9 @@
   }
   .about-x:hover { color: #e0e0e0; background: rgba(255, 255, 255, 0.06); }
 
-  .about-head { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
-  .about-logo { width: 56px; height: 56px; flex: none; }
-  .about-name { font-size: 18px; font-weight: 700; color: #fff; }
-  .about-tagline { font-size: 12px; color: #949494; margin-top: 2px; }
+  .about-head { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-bottom: 16px; }
+  .about-logo-full { width: 340px; max-width: 100%; height: auto; display: block; }
+  .about-tagline { font-size: 12px; color: #949494; }
 
   .about-rows { display: flex; flex-direction: column; gap: 5px; padding-bottom: 14px; border-bottom: 1px solid #272727; }
   .about-row { display: grid; grid-template-columns: 84px 1fr; align-items: baseline; gap: 10px; font-size: 12px; }

@@ -133,7 +133,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <header class="toolbar" data-tauri-drag-region ondblclick={onTitlebarDblClick}>
   <div class="toolbar-left" data-tauri-drag-region>
-    <div class="logo" data-tauri-drag-region>{$t('app.brand')}</div>
+    <img class="logo" src="/branding/kitegc-wordmark-white.svg" alt={$t('app.brand')} draggable="false" data-tauri-drag-region />
     <span class="version" data-tauri-drag-region>v{appVersion}</span>
   </div>
   <div class="toolbar-center" data-tauri-drag-region>
@@ -297,10 +297,10 @@
   }
 
   .logo {
-    font-size: 20px;
-    font-weight: 700;
-    color: #37a8db;
-    letter-spacing: 0.5px;
+    display: block;
+    height: 36px;
+    width: auto;
+    user-select: none;
   }
 
   .version {

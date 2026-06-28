@@ -5,7 +5,7 @@
 // is captured at build time by Vite `define` (see vite.config.js) — no manual edit per build.
 
 export const APP_NAME = 'Kite Ground Control';
-export const APP_TAGLINE = 'INAV / MAVLink Ground Control Station';
+export const APP_TAGLINE = 'For INAV, ArduPilot and PX4 UAV Systems';
 export const APP_VERSION = __APP_VERSION__;
 export const GIT_COMMIT = __GIT_COMMIT__;
 export const BUILD_DATE = __BUILD_DATE__;
