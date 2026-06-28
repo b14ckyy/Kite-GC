@@ -147,8 +147,10 @@
 
   function buildCircleEditingMarkers(center: LngLat, radius: number) {
     const centerLL: L.LatLngExpression = [center.lat, center.lng];
-    // Place radius handle due North of center
-    const radiusLL: L.LatLngExpression = [center.lat + radius / 111320, center.lng];
+    // Place the radius handle due East (to the right) of the centre — more screen room on most
+    // displays and consistent with the geozone / geofence circle editors. Dragging it in any
+    // direction still just sets the radius (distance from centre).
+    const radiusLL: L.LatLngExpression = [center.lat, center.lng + radius / (111320 * Math.cos((center.lat * Math.PI) / 180))];
 
     if (!centerMarkerCircle) {
       centerMarkerCircle = L.marker(centerLL, {
@@ -320,10 +322,13 @@
         });
         m.on('dragend', () => {
           isDragging = false;
-          hideDeleteZone();
           const current = (activeSurveyPattern.config!.params as PolygonPatternParams).points;
+          // Check the delete zone BEFORE hiding it — a display:none element reports a zero-size rect,
+          // so hiding first would make the hit-test always fail (that was the delete-vertex bug).
+          const droppedOnDelete = isOverDeleteZone(m.getLatLng());
+          hideDeleteZone();
           // Delete if dropped on delete zone (minimum vertex count enforced)
-          if (isOverDeleteZone(m.getLatLng()) && current.length > MIN_POLYGON_VERTICES) {
+          if (droppedOnDelete && current.length > MIN_POLYGON_VERTICES) {
             applyPolygonDragUpdate({ points: current.filter((_, j) => j !== idx) });
             _polygonDragTempPoints = null;
             return;
