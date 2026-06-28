@@ -182,24 +182,45 @@ pub fn run() {
 
     builder
         .setup(|_app| {
-            // Linux/WebKitGTK: pin the WebView's page zoom at 1.0. A trackpad pinch (and Ctrl+wheel /
-            // Ctrl+/-) is handled natively by GTK and changes the WebView's zoom-level, ignoring any JS
-            // `preventDefault` — so the only place to stop the whole-frame zoom is here. We reset on every
-            // change to keep it pinned (the map keeps its own Leaflet/Cesium zoom; only the chrome zoom is
-            // suppressed). Windows/WebView2 + macOS use the JS guard in `+layout.svelte` instead.
+            // Linux/WebKitGTK: stop trackpad/keyboard gestures from zooming the whole WebView frame.
+            // WebKitGTK handles these natively in GTK and ignores any JS `preventDefault`, so they can
+            // only be suppressed here (Windows/WebView2 + macOS use the JS guard in `+layout.svelte`).
+            // There are TWO distinct zoom paths and each needs a different fix:
             #[cfg(target_os = "linux")]
             {
                 use tauri::Manager;
                 if let Some(window) = _app.get_webview_window("main") {
                     let _ = window.with_webview(|webview| {
                         use webkit2gtk::WebViewExt;
+                        use webkit2gtk::glib::gobject_ffi;
+                        use webkit2gtk::glib::prelude::ObjectExt;
+
                         let wv = webview.inner();
+
+                        // (1) Page zoom — Ctrl+wheel / Ctrl+(+/-) — goes through the `zoom-level`
+                        // property. Pin it at 1.0 (reset on every change keeps it pinned). The map
+                        // keeps its own Leaflet/Cesium zoom; only the chrome zoom is suppressed.
                         wv.set_zoom_level(1.0);
                         wv.connect_zoom_level_notify(|wv| {
                             if (wv.zoom_level() - 1.0).abs() > f64::EPSILON {
                                 wv.set_zoom_level(1.0);
                             }
                         });
+
+                        // (2) The touchpad PINCH is a *separate* visual zoom driven by a private
+                        // GtkGestureZoom that bypasses `zoom-level` (and JS) entirely — so (1) cannot
+                        // catch it. The only known way to disable it is to destroy the signal handlers
+                        // WebKit attached to that gesture. Private API (`wk-view-zoom-gesture` qdata),
+                        // GTK3-only (tao 0.34 uses GTK3); a no-op if the key is absent. We only DESTROY
+                        // handlers — we do NOT free the gesture data (that path is known to segfault).
+                        // Ref: tauri-apps/wry#544 (upstream has no setting; confirmed by WebKit devs).
+                        unsafe {
+                            if let Some(gesture) =
+                                wv.data::<gobject_ffi::GObject>("wk-view-zoom-gesture")
+                            {
+                                gobject_ffi::g_signal_handlers_destroy(gesture.as_ptr());
+                            }
+                        }
                     });
                 }
             }
