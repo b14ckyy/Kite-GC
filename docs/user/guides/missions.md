@@ -100,14 +100,89 @@ Each waypoint carries an altitude against a **reference**:
 - **Edit** a point (type, altitude, parameters) from its popup or the list.
 - **Multi-select**, **undo / redo** (**Ctrl+Z** / **Ctrl+Y**, or **Ctrl+Shift+Z** to redo), and
   **clear** are all available while editing.
-- **Survey patterns** — generate an area scan (a back-and-forth grid over a drawn region) instead of
-  placing every leg by hand.
+- **Survey patterns** — generate an area scan instead of placing every leg by hand (see
+  [Survey patterns](#survey-patterns) below).
 
 ![Editing a mission — the waypoint list and map](../assets/guides/missions/editing.png)
 /// caption
 Building a mission: the numbered waypoint list (main waypoints with indented modifiers) and the route
 on the map.
 ///
+
+## Survey patterns
+
+Instead of placing every leg by hand, the **Pattern Generator** fills an area with a flight pattern and
+**appends** it to the current mission. Turn on **Edit** mode, then click **Pattern**, pick a shape,
+position it on the map (drag the centre / corners / radius handle, or move the polygon vertices), set the
+parameters, and press **Generate & Append**.
+
+![The Pattern Generator panel and a shape on the map](../assets/guides/missions/pattern_generator.png)
+/// caption
+The Pattern Generator: pick a shape, shape it on the map, set spacing / altitude / actions, then Generate & Append.
+///
+
+| Shape | Pattern |
+|---|---|
+| **Rectangle** / **Polygon** | Back-and-forth zig-zag (lawn striping) across the area |
+| **Rectangle Lawnmower** / **Polygon Lawnmower** | Concentric inward loops following the outline |
+| **Circle** | Concentric rings, outer → inner |
+| **Spiral** | A single inward spiral |
+
+A concave polygon is handled automatically (the lawnmower splits it into convex pieces).
+
+### Defining the area on the map
+
+Most of the shaping happens directly on the map:
+
+- **Move the whole pattern** — drag the **centre handle**.
+- **Rectangle** — drag a **corner** to resize.
+- **Circle / Spiral** — drag the **radius handle**.
+- **Polygon** — drag a **yellow corner** to move a vertex; click a **grey midpoint** to **add** a vertex;
+  to **remove** one, drag a corner onto the red **"Drop here to delete vertex"** banner or **right-click**
+  it (a polygon keeps at least three corners). A self-intersecting shape snaps back.
+
+The pattern settings **persist**, so you can move the shape and press **Generate & Append** again to drop
+**another** copy elsewhere — each Generate appends to the current mission.
+
+### Key parameters
+
+- **Line spacing** — distance between adjacent legs (your camera footprint / desired overlap).
+- **Altitude** and **Speed** — applied to every generated waypoint.
+- **Orientation** — rotates the pattern; for zig-zags you can rotate the **scan lines** independently of
+  the shape.
+- **Turn distance** (line patterns) — extends each leg *beyond* the area so a fixed-wing aircraft has
+  room to turn and line up before the next leg. This is the only part that deliberately reaches outside
+  the area; the shape itself is never enlarged.
+- **Stay inside area** (polygon) — **off**: the scan crosses gaps in a concave area as one continuous
+  serpentine; **on**: it fills each connected sub-region without flying across the gaps.
+- Pattern-specific: **Ring points** (circle / spiral), **direction / start corner** (lawnmower).
+
+### Triggering actions along the pattern (cameras, servos, …)
+
+How you fire a camera (or a servo / relay) along the pattern depends on the flight stack, because the
+firmwares model it differently:
+
+| | INAV | ArduPilot / PX4 |
+|---|---|---|
+| **Mechanism** | **User Action** flags **UA 1–4** — a per-waypoint bitmask you program on the FC | **Action waypoints** — real `DO_` mission items inserted into the sequence |
+| **In the panel** | Tick UA 1–4 for each slot | Pick a command per slot from a dropdown |
+| **Choices** | Whatever you've mapped UA 1–4 to in INAV | **Camera Auto-Trigger**, **Take Photo**, **Aux Function**, **Set / Repeat Servo**, **Set / Repeat Relay** (PX4: its supported subset) |
+
+The **slots** are the same idea on both: **Line Start** / **Line End** for the zig-zag shapes (e.g. start
+the camera at the beginning of each scan leg, stop it at the end), and **Start** / **Track** / **End**
+for the loop / ring / spiral shapes (first waypoint / every waypoint / last waypoint).
+
+!!! tip "Mapping run on ArduPilot / PX4"
+    Set **Line Start → Camera Auto-Trigger** with your trigger distance, and **Line End → Camera
+    Auto-Trigger** with distance **0** (stop). The camera then fires along each leg and is off during the
+    turns and any gap.
+
+### While the generator is open
+
+The existing mission stays **visible but non-interactive** — you can see it to plan where the pattern
+attaches, but its waypoints can't be dragged or edited until you leave the generator (the same on all
+three stacks). Generating **appends** the pattern as a **single undo step**, so one **Ctrl+Z** removes
+the whole pattern. On INAV the 120-waypoint limit is checked, with the option to truncate.
 
 ## Sending it to the aircraft
 

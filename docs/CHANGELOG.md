@@ -174,6 +174,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Physical USB/PCI ports are untouched (they keep their device descriptors).
 
 ### Fixed
+- **Survey polygon: delete-a-vertex by drag now works.** Dragging a polygon corner onto the red "Drop
+  here to delete vertex" banner did nothing — the banner was hidden *before* the hit-test ran, and a
+  hidden element has a zero-size rect, so the drop never registered. (Right-click delete already worked.)
 - **Airspace info bubble no longer pops while placing or editing waypoints.** The airspace-list map
   click (and the airport/obstacle marker popups) were only suppressed during INAV edit mode — so placing
   ArduPilot/PX4 waypoints, or editing a survey pattern, could open an airspace bubble (and the marker
