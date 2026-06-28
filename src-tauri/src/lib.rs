@@ -181,6 +181,30 @@ pub fn run() {
     }
 
     builder
+        .setup(|_app| {
+            // Linux/WebKitGTK: pin the WebView's page zoom at 1.0. A trackpad pinch (and Ctrl+wheel /
+            // Ctrl+/-) is handled natively by GTK and changes the WebView's zoom-level, ignoring any JS
+            // `preventDefault` — so the only place to stop the whole-frame zoom is here. We reset on every
+            // change to keep it pinned (the map keeps its own Leaflet/Cesium zoom; only the chrome zoom is
+            // suppressed). Windows/WebView2 + macOS use the JS guard in `+layout.svelte` instead.
+            #[cfg(target_os = "linux")]
+            {
+                use tauri::Manager;
+                if let Some(window) = _app.get_webview_window("main") {
+                    let _ = window.with_webview(|webview| {
+                        use webkit2gtk::WebViewExt;
+                        let wv = webview.inner();
+                        wv.set_zoom_level(1.0);
+                        wv.connect_zoom_level_notify(|wv| {
+                            if (wv.zoom_level() - 1.0).abs() > f64::EPSILON {
+                                wv.set_zoom_level(1.0);
+                            }
+                        });
+                    });
+                }
+            }
+            Ok(())
+        })
         .manage(AppState::new())
         .manage(MissionStore::new())
         .manage(TerrainProvider::new())

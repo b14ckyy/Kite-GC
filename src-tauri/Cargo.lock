@@ -2461,6 +2461,7 @@ dependencies = [
  "tokio",
  "tzf-rs",
  "uuid",
+ "webkit2gtk",
  "windows",
  "winreg 0.52.0",
  "zip",

@@ -19,8 +19,10 @@
   // zoom: preventDefault() stops only the browser's page zoom; it does NOT stop propagation, so the
   // map's wheel/pinch handlers still receive the event and zoom the map.
   //   - Chromium / WebView2 (Windows): a trackpad pinch arrives as `wheel` with `ctrlKey` set.
-  //   - WebKitGTK (Linux): a trackpad pinch fires the WebKit `gesture*` events instead.
+  //   - macOS / WKWebView: a trackpad pinch fires the WebKit `gesture*` events.
   //   - Ctrl/Cmd +/-/0/= keyboard zoom.
+  // NOTE: Linux/WebKitGTK handles the pinch natively in GTK and ignores preventDefault entirely, so the
+  // frame zoom there is suppressed in the Rust setup hook (lib.rs, pins the WebView zoom-level at 1.0).
   onMount(() => {
     const onWheel = (e: WheelEvent) => { if (e.ctrlKey) e.preventDefault(); };
     const onKey = (e: KeyboardEvent) => {
