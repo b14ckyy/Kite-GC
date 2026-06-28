@@ -17,11 +17,110 @@
   import { channelValues } from "$lib/stores/rcEngine";
   import { fcChannels } from "$lib/stores/rcMirror";
   import { boxName } from "$lib/helpers/inavModes";
+  import { getPerf3dViewer, perf3dFps, perf3dForceContinuous } from "$lib/stores/perf3d";
 
   let { onclose }: { onclose: () => void } = $props();
 
-  type Tab = 'msp' | 'mavlink' | 'alerts' | 'telemetry' | 'rc';
+  type Tab = 'msp' | 'mavlink' | 'alerts' | 'telemetry' | 'rc' | 'performance';
   let tab = $state<Tab>('msp');
+
+  // ── 3D performance live-tuning (dev) — mutate the running Cesium scene to localise the
+  // Linux/WebKitGTK bottleneck. Values are loaded from the live scene when the tab opens; each
+  // edit writes straight back and forces a render (the scene runs in requestRenderMode). ──
+  let perfReady = $state(false);
+  let pFog = $state(true);
+  let pFogDensity = $state(2.5e-4);
+  let pFogSse = $state(2);
+  let pMaxSse = $state(2);
+  let pLighting = $state(false);
+  let pSkyAtmo = $state(true);
+  let pSkyBox = $state(true);
+  let pSun = $state(true);
+  let pMsaa = $state(1);
+  let pFxaa = $state(false);
+  let pResScale = $state(1);
+  let pShowGlobe = $state(true);
+  let pFpsOverlay = $state(false);
+  // Content-independent full-screen passes — prime suspects for the per-pixel idle cost.
+  let pOit = $state(true);
+  let pLogDepth = $state(true);
+  let pHdr = $state(false);
+
+  function loadPerf(): void {
+    const v = getPerf3dViewer();
+    if (!v) { perfReady = false; return; }
+    const s = v.scene;
+    pFog = s.fog.enabled;
+    pFogDensity = s.fog.density;
+    pFogSse = s.fog.screenSpaceErrorFactor;
+    pMaxSse = s.globe.maximumScreenSpaceError;
+    pLighting = s.globe.enableLighting;
+    pSkyAtmo = s.skyAtmosphere?.show ?? false;
+    // Cesium's SkyBox .d.ts is missing `show` (present at runtime) — narrow cast, not `any`.
+    pSkyBox = (s.skyBox as unknown as { show: boolean } | undefined)?.show ?? false;
+    pSun = s.sun?.show ?? false;
+    pMsaa = s.msaaSamples;
+    pFxaa = s.postProcessStages.fxaa.enabled;
+    pResScale = v.resolutionScale;
+    pShowGlobe = s.globe.show;
+    pFpsOverlay = s.debugShowFramesPerSecond;
+    pOit = s.orderIndependentTranslucency;
+    pLogDepth = s.logarithmicDepthBuffer;
+    pHdr = s.highDynamicRange;
+    perfReady = true;
+  }
+
+  function applyPerf(): void {
+    const v = getPerf3dViewer();
+    if (!v) { perfReady = false; return; }
+    const s = v.scene;
+    s.fog.enabled = pFog;
+    s.fog.density = pFogDensity;
+    s.fog.screenSpaceErrorFactor = pFogSse;
+    s.globe.maximumScreenSpaceError = pMaxSse;
+    s.globe.enableLighting = pLighting;
+    if (s.skyAtmosphere) s.skyAtmosphere.show = pSkyAtmo;
+    if (s.skyBox) (s.skyBox as unknown as { show: boolean }).show = pSkyBox;
+    if (s.sun) s.sun.show = pSun;
+    s.msaaSamples = pMsaa;
+    s.postProcessStages.fxaa.enabled = pFxaa;
+    v.resolutionScale = pResScale;
+    s.globe.show = pShowGlobe;
+    s.logarithmicDepthBuffer = pLogDepth;
+    s.highDynamicRange = pHdr;
+    s.debugShowFramesPerSecond = pFpsOverlay;
+    // While the fps overlay is on, force continuous rendering — otherwise requestRenderMode renders
+    // only on change, so the counter freezes when the map is idle and is skewed when it only ticks on
+    // a load/update. Set it directly for immediate effect AND flag it in the store so Map3D's own
+    // requestRenderMode reverters (alert/WP pulses, radar clear) keep honouring it. Restored when the
+    // overlay (or the panel) closes.
+    perf3dForceContinuous.set(pFpsOverlay);
+    s.requestRenderMode = !pFpsOverlay;
+    s.requestRender();
+  }
+
+  // OIT is a constructor-only option (read-only at runtime), so toggling it persists a dev flag that
+  // Map3D reads on creation and reloads the window to rebuild the viewer with the new setting.
+  function applyOit(): void {
+    localStorage.setItem('kite_perf_oit', pOit ? 'on' : 'off');
+    location.reload();
+  }
+
+  // Revert the dev render-mode override + overlay when the panel closes, so we don't leave the 3D
+  // view rendering continuously (battery/GPU) or an orphaned overlay the user can't toggle off.
+  function restorePerfRenderState(): void {
+    perf3dForceContinuous.set(false);
+    const v = getPerf3dViewer();
+    if (!v) return;
+    v.scene.debugShowFramesPerSecond = false;
+    v.scene.requestRenderMode = true;
+    v.scene.requestRender();
+  }
+
+  // Load live values whenever the Performance tab is opened.
+  $effect(() => {
+    if (tab === 'performance') loadPerf();
+  });
 
   // ── RC control (MSP) diagnostics ──
   let rcFc = $state<{
@@ -231,6 +330,7 @@
     if (unlistenTelem) unlistenTelem();
     if (unlistenGatt) unlistenGatt();
     if (unlistenGattData) unlistenGattData();
+    restorePerfRenderState();
   });
 
   function ledColor(status: string): string {
@@ -294,6 +394,7 @@
     <button class="tab" class:active={tab === 'telemetry'} onclick={() => tab = 'telemetry'}>{$t('debug.tabTelemetry')}</button>
     <button class="tab" class:active={tab === 'alerts'} onclick={() => tab = 'alerts'}>{$t('debug.tabAlerts')}</button>
     <button class="tab" class:active={tab === 'rc'} onclick={() => tab = 'rc'}>{$t('debug.tabRc')}</button>
+    <button class="tab" class:active={tab === 'performance'} onclick={() => tab = 'performance'}>{$t('debug.tabPerformance')}</button>
   </div>
 
   <div class="inject-row" class:on={inj.active}>
@@ -616,7 +717,7 @@
         <span class="cap-path">{$fcChannels.length ? $fcChannels.map((v, i) => `CH${i + 1}:${v}`).join('  ') : '—'}</span>
       </div>
     </div>
-  {:else}
+  {:else if tab === 'alerts'}
     <div class="debug-stats alerts-stats">
       {#if !alerts.uavValid}
         <span class="stat-warn">{$t('debug.alNoFix')}</span>
@@ -686,10 +787,77 @@
         </tbody>
       </table>
     </div>
+  {:else if tab === 'performance'}
+    <div class="perf-tab">
+      <div class="perf-head">
+        <div class="perf-fps">{$t('debug.perf.fps')}: <b>{$perf3dFps}</b></div>
+        <label class="perf-check"><input type="checkbox" bind:checked={pFpsOverlay} onchange={applyPerf} /> {$t('debug.perf.fpsOverlay')}</label>
+        <button class="perf-refresh" onclick={loadPerf}>{$t('debug.perf.refresh')}</button>
+      </div>
+
+      {#if !perfReady}
+        <div class="perf-empty">{$t('debug.perf.inactive')}</div>
+      {:else}
+        <div class="perf-section">{$t('debug.perf.secDistance')}</div>
+        <label class="perf-check"><input type="checkbox" bind:checked={pFog} onchange={applyPerf} /> {$t('debug.perf.fog')}</label>
+        <div class="perf-row"><span>{$t('debug.perf.fogDensity')}</span><input type="number" step="0.0001" min="0" bind:value={pFogDensity} onchange={applyPerf} /></div>
+        <div class="perf-row"><span>{$t('debug.perf.fogSse')}</span><input type="number" step="0.5" min="1" bind:value={pFogSse} onchange={applyPerf} /></div>
+        <div class="perf-row"><span>{$t('debug.perf.maxSse')}</span><input type="number" step="0.5" min="1" max="64" bind:value={pMaxSse} onchange={applyPerf} /></div>
+
+        <div class="perf-section">{$t('debug.perf.secScene')}</div>
+        <label class="perf-check"><input type="checkbox" bind:checked={pLighting} onchange={applyPerf} /> {$t('debug.perf.lighting')}</label>
+        <label class="perf-check"><input type="checkbox" bind:checked={pSkyAtmo} onchange={applyPerf} /> {$t('debug.perf.skyAtmo')}</label>
+        <label class="perf-check"><input type="checkbox" bind:checked={pSkyBox} onchange={applyPerf} /> {$t('debug.perf.skyBox')}</label>
+        <label class="perf-check"><input type="checkbox" bind:checked={pSun} onchange={applyPerf} /> {$t('debug.perf.sun')}</label>
+        <label class="perf-check"><input type="checkbox" bind:checked={pShowGlobe} onchange={applyPerf} /> {$t('debug.perf.showGlobe')}</label>
+
+        <div class="perf-section">{$t('debug.perf.secQuality')}</div>
+        <div class="perf-row"><span>{$t('debug.perf.msaa')}</span>
+          <select bind:value={pMsaa} onchange={applyPerf}>
+            <option value={0}>0</option><option value={1}>1</option><option value={2}>2</option><option value={4}>4</option><option value={8}>8</option>
+          </select>
+        </div>
+        <label class="perf-check"><input type="checkbox" bind:checked={pFxaa} onchange={applyPerf} /> {$t('debug.perf.fxaa')}</label>
+        <div class="perf-row"><span>{$t('debug.perf.resScale')}</span><input type="number" step="0.05" min="0.25" max="2" bind:value={pResScale} onchange={applyPerf} /></div>
+
+        <div class="perf-section">{$t('debug.perf.secPasses')}</div>
+        <label class="perf-check"><input type="checkbox" bind:checked={pOit} onchange={applyOit} /> {$t('debug.perf.oit')}</label>
+        <label class="perf-check"><input type="checkbox" bind:checked={pLogDepth} onchange={applyPerf} /> {$t('debug.perf.logDepth')}</label>
+        <label class="perf-check"><input type="checkbox" bind:checked={pHdr} onchange={applyPerf} /> {$t('debug.perf.hdr')}</label>
+
+        <div class="perf-hint">{$t('debug.perf.hint')}</div>
+      {/if}
+    </div>
   {/if}
 </div>
 
 <style>
+  .perf-tab { padding: 10px 12px; overflow-y: auto; font-size: 12px; }
+  .perf-head {
+    display: flex; align-items: center; gap: 14px;
+    padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid #272727;
+  }
+  .perf-fps { font-size: 13px; color: #949494; }
+  .perf-fps b { color: #37a8db; font-size: 16px; font-variant-numeric: tabular-nums; }
+  .perf-refresh {
+    margin-left: auto; padding: 3px 10px; font-size: 11px;
+    background: #434343; color: #e0e0e0; border: 1px solid #555; border-radius: 4px; cursor: pointer;
+  }
+  .perf-refresh:hover { background: #4f4f4f; }
+  .perf-section {
+    margin: 12px 0 4px; font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.5px; color: #37a8db;
+  }
+  .perf-row { display: flex; align-items: center; justify-content: space-between; padding: 3px 0; }
+  .perf-row span { color: #c0c0c0; }
+  .perf-row input, .perf-row select {
+    width: 110px; height: 24px; box-sizing: border-box; padding: 0 6px;
+    background: #434343; border: 1px solid #555; border-radius: 4px; color: #e0e0e0; font-size: 12px;
+  }
+  .perf-check { display: flex; align-items: center; gap: 7px; padding: 3px 0; color: #c0c0c0; cursor: pointer; }
+  .perf-empty { padding: 20px 4px; color: #949494; font-style: italic; }
+  .perf-hint { margin-top: 12px; padding-top: 8px; border-top: 1px solid #272727; color: #777; font-size: 11px; line-height: 1.4; }
+
   .debug-panel {
     position: absolute;
     top: 65px;

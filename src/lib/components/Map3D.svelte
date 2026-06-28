@@ -7,6 +7,7 @@
   import { onMount, onDestroy, untrack } from "svelte";
   import { get } from "svelte/store";
   import { invoke } from "@tauri-apps/api/core";
+  import { attachPerf3d, detachPerf3d, perf3dForceContinuous } from "$lib/stores/perf3d";
   import * as Cesium from "cesium";
   import "cesium/Build/Cesium/Widgets/widgets.css";
 
@@ -980,8 +981,14 @@
       // Rendering
       requestRenderMode: true,
       maximumRenderTimeChange: 0.0,
-      msaaSamples: 2,
+      // No MSAA — its per-frame full-screen resolve is costly on the Linux/WebKitGTK + Intel iGPU
+      // path (a measured ~3-4 fps). FXAA (enabled below) gives equivalent visual quality far cheaper.
+      msaaSamples: 0,
       scene3DOnly: true,
+      // Dev: the Performance tab can disable OIT (a per-frame full-screen pass) via a localStorage
+      // flag to measure its cost. OIT is a constructor-only option, so the panel reloads to apply.
+      orderIndependentTranslucency:
+        !(import.meta.env.DEV && typeof localStorage !== 'undefined' && localStorage.getItem('kite_perf_oit') === 'off'),
     });
 
     // Add overlay layers for hybrid providers (also cached)
@@ -1011,6 +1018,8 @@
     viewer.scene.fog.minimumBrightness = 0.1;
     // Limit tile cache to reduce RAM usage
     viewer.scene.globe.tileCacheSize = 100;   // default 100 tiles
+    // FXAA instead of MSAA (see msaaSamples: 0) — much cheaper anti-aliasing for the same look.
+    viewer.scene.postProcessStages.fxaa.enabled = true;
 
     // ── Camera input model ──────────────────────────────────────────────
     // Default Cesium binds TILT to the middle button (+ Ctrl+Left) and ZOOM to the right button —
@@ -1036,6 +1045,9 @@
     // always render; this only toggles the day/night terminator on the terrain.
     // (Night Mode ON forces this off for a flat ground — handled in updateNightDim3D.)
     viewer.scene.globe.enableLighting = lightingEnabled && nightModeSetting !== 'on';
+
+    // Dev: expose the live scene to the Debug Panel's Performance tab for live tuning + fps.
+    if (import.meta.env.DEV) attachPerf3d(viewer);
 
     // Initial camera: frame the SAME spot the 2D map currently shows (center + zoom),
     // positioned immediately — no fly-to sweep. Mirrors every later 2D→3D switch.
@@ -1381,6 +1393,7 @@
     unsubLiveTrack?.();
     unsubConnection?.();
     unsubFrameMission3d?.();
+    if (import.meta.env.DEV) detachPerf3d();
     if (viewer && !viewer.isDestroyed()) {
       // Clean up trail segments (they will be destroyed with viewer, but be explicit)
       viewer.entities.removeAll();
@@ -1423,7 +1436,8 @@
     // Destroy the pooled (hidden) bundles too — a clear means the scene is going away.
     for (const list of radar3dFree.values()) for (const b of list) for (const e of b.entities) viewer.entities.remove(e);
     radar3dFree.clear();
-    viewer.scene.requestRenderMode = true; // no contacts → back to on-demand rendering
+    // no contacts → back to on-demand rendering (unless the dev Performance tab forces continuous)
+    viewer.scene.requestRenderMode = !(import.meta.env.DEV && get(perf3dForceContinuous));
     viewer.scene.requestRender();
   }
 
@@ -3464,7 +3478,9 @@
     if (!viewer) return;
     let anyAlert = false;
     for (const rec of radar3dRecs.values()) if (rec.alertLevel) { anyAlert = true; break; }
-    viewer.scene.requestRenderMode = !(wpPulseActive || anyAlert);
+    // Dev: the Performance tab can force continuous rendering so the fps overlay keeps ticking.
+    const forceCont = import.meta.env.DEV && get(perf3dForceContinuous);
+    viewer.scene.requestRenderMode = !(wpPulseActive || anyAlert || forceCont);
   }
 
   // Overlay mission line — a depth-test-free Primitive so it stays visible through terrain (like the
@@ -4463,6 +4479,15 @@
 
   :global(.cesium-viewer) {
     font-family: 'Segoe UI', Tahoma, sans-serif;
+  }
+
+  /* Dev FPS overlay (scene.debugShowFramesPerSecond): move to bottom-left — the default top
+     position collides with the time control and the Debug Panel. */
+  :global(.cesium-performanceDisplay-defaultContainer) {
+    top: auto !important;
+    right: auto !important;
+    bottom: 8px;
+    left: 8px;
   }
 
   /* ── DEV-only time-of-day previewer (top-right) ── */
