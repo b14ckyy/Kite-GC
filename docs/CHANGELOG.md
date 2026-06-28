@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **3D Performance debug tab (dev only).** A new tab in the Debug Monitor live-tunes the running Cesium
+  scene — fog / terrain LOD, sky passes, MSAA/FXAA, resolution scale, OIT/HDR full-screen passes — with
+  an fps readout (and Cesium's overlay, forced to continuous rendering while open). Built to localise the
+  Linux/WebKitGTK 3D performance gap; kept for future tuning.
 - **INAV multi-mission upload/download.** Uploading now sends **all** of your mission slots to the
   flight controller as one combined sequence (each mission terminated correctly), and downloading
   **splits** the FC's combined list back into the separate mission tabs — so a multi-mission round-trips
@@ -155,6 +159,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Physical USB/PCI ports are untouched (they keep their device descriptors).
 
 ### Fixed
+- **Blackbox-decode auto-download fixed on Linux/macOS.** The `.tar.zst` release holds two files named
+  `blackbox_decode` — the real binary under `bin/` and a bash-completion script under
+  `share/bash-completion/completions/` — and the extractor matched the first by name, installing the
+  1.7 KB completion script instead of the binary. The download looked successful but no version showed.
+  It now picks the `bin/` entry. `version()` also logs (at the default level) when the decoder is present
+  but won't run, so a future wrong-arch/missing-lib failure is visible in a tester's log.
+- **Serial port list no longer shows phantom `/dev/ttyS*` stubs on Linux.** The 8250 driver registers
+  `ttyS0..31` even with no real UART behind them; they cluttered the list (one machine showed ~20).
+  Phantom stubs are now filtered via the `TIOCGSERIAL` ioctl (real ports keep a concrete UART type);
+  USB-serial and genuine hardware ports are untouched.
 - **UI scaling no longer shrinks the interface on Linux.** The 100/125/150 % UI scale used CSS `zoom`,
   which WebKitGTK (Linux) doesn't support — so instead of enlarging the chrome it left it at the
   reduced (`/scale`) size, smaller than the window. Switched the chrome scaler to `transform: scale()`
@@ -239,6 +253,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   INAV's codes (LOAD=18, SAVE=19); EEPROM save/load now round-trip.
 
 ### Changed
+- **3D anti-aliasing switched from MSAA to FXAA.** MSAA's per-frame full-screen resolve is costly on the
+  Linux/WebKitGTK + Intel iGPU path (a measured ~3-4 fps); FXAA gives equivalent visual quality far
+  cheaper. Same look, a few fps back on weak GPUs.
 - **Removed the CPU-load readout from the Raw Telemetry widget.** It never displayed a meaningful value;
   no telemetry is saved by dropping it (CPU load only rides inside the INAV status / MAVLink `SYS_STATUS`
   messages Kite already polls for arming, flight mode and sensor health).

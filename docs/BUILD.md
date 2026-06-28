@@ -12,6 +12,11 @@ This document describes how to set up the development environment and build the 
 
 ### All Platforms
 - **Node.js** LTS (v20 or v24 recommended)
+- **npm 11+** — keep it in sync across all your dev machines. Older npm (10.x) rewrites
+  `package-lock.json` on every install by **stripping the `libc` fields** of the optional native
+  deps (`@rollup/rollup-linux-*`, `@esbuild/linux-*`), while npm 11 writes them. Mixing versions makes
+  the lockfile flip-flop between machines. Upgrade with `npm install -g npm@latest` (Node 22.9+ / 24
+  already bundle npm 11).
 - **Rust** (installed via [rustup](https://rustup.rs/))
 - **[just](https://github.com/casey/just)** (task runner) — strongly recommended for development
 
