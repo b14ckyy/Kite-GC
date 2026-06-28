@@ -11,6 +11,7 @@
   import { connection, availablePorts, bleDevices } from "$lib/stores/connection";
   import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
+  import { isDebugMode } from "$lib/stores/debug";
   import { telemetry } from "$lib/stores/telemetry";
   import { startRadarListeners, configureRadar, setRadarCenter, setRadarNode } from "$lib/stores/radarTracking";
   import { startRadarAlerts } from "$lib/controllers/radarAlerts";
@@ -731,6 +732,9 @@
   void invoke<boolean>('is_debug_mode')
     .then((dbg) => {
       debugMode = !!dbg;
+      // Mirror the runtime debug flag into the shared store so non-page components (e.g. Map3D's
+      // Performance tab hooks) can gate on --debug without each fetching is_debug_mode themselves.
+      isDebugMode.set(import.meta.env.DEV || !!dbg);
       if (dbg) logLevel = 'debug'; // reflect the forced level in the Settings dropdown
       void invoke('set_log_level', { level: dbg ? 'debug' : savedLogLevel }).catch(() => {});
     })

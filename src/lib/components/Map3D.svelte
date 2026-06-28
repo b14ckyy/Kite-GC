@@ -8,6 +8,7 @@
   import { get } from "svelte/store";
   import { invoke } from "@tauri-apps/api/core";
   import { attachPerf3d, detachPerf3d, perf3dForceContinuous } from "$lib/stores/perf3d";
+  import { isDebugMode } from "$lib/stores/debug";
   import * as Cesium from "cesium";
   import "cesium/Build/Cesium/Widgets/widgets.css";
 
@@ -421,6 +422,7 @@
   // loiter ring sits at the downwind/approach altitude), so a terrain sample per safehome is needed.
   let safehomeEntities: Cesium.Entity[] = [];        // markers + rings + approach legs (all Entities)
   let unsubSafehome3d: (() => void) | undefined;
+  let unsubPerf3d: (() => void) | undefined;          // dev/--debug: Performance tab attach/detach
   let lastSafehomeArmed3d = false;                    // green ring is disarmed-only → redraw on arm change
   let safehome3dGen = 0;                              // race guard for the async terrain sample
   // Geozone overlay (INAV ≥8.0 FC config) — extruded volumes (circle → cylinder, polygon → hull).
@@ -985,10 +987,11 @@
       // path (a measured ~3-4 fps). FXAA (enabled below) gives equivalent visual quality far cheaper.
       msaaSamples: 0,
       scene3DOnly: true,
-      // Dev: the Performance tab can disable OIT (a per-frame full-screen pass) via a localStorage
-      // flag to measure its cost. OIT is a constructor-only option, so the panel reloads to apply.
+      // Debug: the Performance tab can disable OIT (a per-frame full-screen pass) via a localStorage
+      // flag to measure its cost. OIT is a constructor-only option, so the panel reloads to apply. The
+      // key is only ever written by the (debug-gated) panel, so reading it unconditionally is safe.
       orderIndependentTranslucency:
-        !(import.meta.env.DEV && typeof localStorage !== 'undefined' && localStorage.getItem('kite_perf_oit') === 'off'),
+        !(typeof localStorage !== 'undefined' && localStorage.getItem('kite_perf_oit') === 'off'),
     });
 
     // Add overlay layers for hybrid providers (also cached)
@@ -1046,8 +1049,13 @@
     // (Night Mode ON forces this off for a flat ground — handled in updateNightDim3D.)
     viewer.scene.globe.enableLighting = lightingEnabled && nightModeSetting !== 'on';
 
-    // Dev: expose the live scene to the Debug Panel's Performance tab for live tuning + fps.
-    if (import.meta.env.DEV) attachPerf3d(viewer);
+    // Dev / --debug: expose the live scene to the Debug Panel's Performance tab for live tuning + fps.
+    // Gated by the runtime debug flag (dev builds, or a release started with --debug). Subscribing
+    // (not a one-shot check) so it still attaches if the flag resolves after the 3D view has mounted.
+    unsubPerf3d = isDebugMode.subscribe((on) => {
+      if (on && viewer) attachPerf3d(viewer);
+      else detachPerf3d();
+    });
 
     // Initial camera: frame the SAME spot the 2D map currently shows (center + zoom),
     // positioned immediately — no fly-to sweep. Mirrors every later 2D→3D switch.
@@ -1393,7 +1401,8 @@
     unsubLiveTrack?.();
     unsubConnection?.();
     unsubFrameMission3d?.();
-    if (import.meta.env.DEV) detachPerf3d();
+    unsubPerf3d?.();
+    detachPerf3d();
     if (viewer && !viewer.isDestroyed()) {
       // Clean up trail segments (they will be destroyed with viewer, but be explicit)
       viewer.entities.removeAll();
@@ -1436,8 +1445,8 @@
     // Destroy the pooled (hidden) bundles too — a clear means the scene is going away.
     for (const list of radar3dFree.values()) for (const b of list) for (const e of b.entities) viewer.entities.remove(e);
     radar3dFree.clear();
-    // no contacts → back to on-demand rendering (unless the dev Performance tab forces continuous)
-    viewer.scene.requestRenderMode = !(import.meta.env.DEV && get(perf3dForceContinuous));
+    // no contacts → back to on-demand rendering (unless the Performance tab forces continuous)
+    viewer.scene.requestRenderMode = !get(perf3dForceContinuous);
     viewer.scene.requestRender();
   }
 
@@ -3478,8 +3487,8 @@
     if (!viewer) return;
     let anyAlert = false;
     for (const rec of radar3dRecs.values()) if (rec.alertLevel) { anyAlert = true; break; }
-    // Dev: the Performance tab can force continuous rendering so the fps overlay keeps ticking.
-    const forceCont = import.meta.env.DEV && get(perf3dForceContinuous);
+    // The Performance tab can force continuous rendering so the fps overlay keeps ticking.
+    const forceCont = get(perf3dForceContinuous);
     viewer.scene.requestRenderMode = !(wpPulseActive || anyAlert || forceCont);
   }
 

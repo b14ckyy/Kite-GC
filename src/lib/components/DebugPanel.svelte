@@ -17,7 +17,7 @@
   import { channelValues } from "$lib/stores/rcEngine";
   import { fcChannels } from "$lib/stores/rcMirror";
   import { boxName } from "$lib/helpers/inavModes";
-  import { getPerf3dViewer, perf3dFps, perf3dForceContinuous } from "$lib/stores/perf3d";
+  import { getPerf3dViewer, perf3dFps, perf3dForceContinuous, perf3dAttached } from "$lib/stores/perf3d";
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -117,9 +117,22 @@
     v.scene.requestRender();
   }
 
-  // Load live values whenever the Performance tab is opened.
+  // Load live values when the Performance tab is open, and RE-load whenever the 3D viewer attaches or
+  // detaches — the 3D view may mount after the tab was opened, so a one-shot load on tab-open would stay
+  // stuck on "3D not loaded". While the tab is open and 3D is attached, force continuous rendering so the
+  // fps readout (and overlay) tick live instead of freezing under requestRenderMode; restore on-demand
+  // rendering when leaving the tab (unless the user pinned the overlay on).
   $effect(() => {
-    if (tab === 'performance') loadPerf();
+    if (tab !== 'performance') return;
+    if (!$perf3dAttached) { perfReady = false; return; }
+    loadPerf();
+    const v = getPerf3dViewer();
+    if (v) {
+      perf3dForceContinuous.set(true);
+      v.scene.requestRenderMode = false;
+      v.scene.requestRender();
+    }
+    return () => { if (!pFpsOverlay) restorePerfRenderState(); };
   });
 
   // ── RC control (MSP) diagnostics ──
