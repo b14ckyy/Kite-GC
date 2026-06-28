@@ -8,10 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **3D Performance debug tab (dev only).** A new tab in the Debug Monitor live-tunes the running Cesium
-  scene — fog / terrain LOD, sky passes, MSAA/FXAA, resolution scale, OIT/HDR full-screen passes — with
-  an fps readout (and Cesium's overlay, forced to continuous rendering while open). Built to localise the
-  Linux/WebKitGTK 3D performance gap; kept for future tuning.
+- **3D Performance debug tab.** A new tab in the Debug Monitor live-tunes the running Cesium scene —
+  fog / terrain LOD, sky passes, MSAA/FXAA, resolution scale, OIT/HDR full-screen passes — with an fps
+  readout (and Cesium's overlay, forced to continuous rendering while open). Built to localise the
+  Linux/WebKitGTK 3D performance gap; kept for future tuning. Available in dev builds and in release
+  builds started with `--debug` (it ships in release rather than being compiled out, but stays dormant
+  unless `--debug` is passed); the tab auto-populates as soon as the 3D view is active.
 - **INAV multi-mission upload/download.** Uploading now sends **all** of your mission slots to the
   flight controller as one combined sequence (each mission terminated correctly), and downloading
   **splits** the FC's combined list back into the separate mission tabs — so a multi-mission round-trips
