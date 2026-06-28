@@ -263,18 +263,22 @@ export function arduMissionClear(): void {
   arduMission.set([]);
   arduSelectedWpIndex.set(-1);
   arduLoadedMissionId.set(null);
+  arduClearUndoHistory(); // a clear is a fresh baseline
 }
 
 export function arduAddWp(wp: ArduWaypoint): void {
+  arduRecordUndo();
   arduMission.update(wps => [...wps, wp]);
 }
 
 export function arduRemoveWp(index: number): void {
+  arduRecordUndo();
   arduMission.update(wps => wps.filter((_, i) => i !== index));
   arduSelectedWpIndex.update(i => (i >= index ? Math.max(-1, i - 1) : i));
 }
 
 export function arduUpdateWp(index: number, wp: ArduWaypoint): void {
+  arduRecordUndo();
   arduMission.update(wps => {
     const next = [...wps];
     next[index] = wp;
@@ -283,6 +287,7 @@ export function arduUpdateWp(index: number, wp: ArduWaypoint): void {
 }
 
 export function arduMoveWp(from: number, to: number): void {
+  arduRecordUndo();
   arduMission.update(wps => {
     if (from < 0 || to < 0 || from >= wps.length || to >= wps.length) return wps;
     const next = [...wps];
@@ -290,6 +295,73 @@ export function arduMoveWp(from: number, to: number): void {
     next.splice(to, 0, item);
     return next;
   });
+}
+
+// ── Undo / redo ────────────────────────────────────────────────────────────
+// Snapshot-based history of the (single) ArduPilot/PX4 mission — the equivalent of the INAV mission
+// history. The primitive mutators above record a snapshot BEFORE they change the array; multi-step
+// actions (a survey-pattern append, a marker drag) wrap their primitives in a begin/end group so the
+// whole action collapses into one undo step. Cleared on load/download/import (a fresh baseline).
+const ARDU_UNDO_LIMIT = 50;
+let arduUndoStack: ArduWaypoint[][] = [];
+let arduRedoStack: ArduWaypoint[][] = [];
+let arduUndoSuspend = 0;
+
+export const arduCanUndo = writable<boolean>(false);
+export const arduCanRedo = writable<boolean>(false);
+function arduSyncUndoFlags(): void {
+  arduCanUndo.set(arduUndoStack.length > 0);
+  arduCanRedo.set(arduRedoStack.length > 0);
+}
+const cloneWps = (wps: ArduWaypoint[]): ArduWaypoint[] => wps.map(w => ({ ...w }));
+
+/** Push the CURRENT mission onto the undo stack (call BEFORE a mutation). No-op while a group or a
+ *  restore is in progress. Clears the redo stack. */
+export function arduRecordUndo(): void {
+  if (arduUndoSuspend > 0) return;
+  arduUndoStack.push(cloneWps(get(arduMission)));
+  if (arduUndoStack.length > ARDU_UNDO_LIMIT) arduUndoStack.shift();
+  arduRedoStack = [];
+  arduSyncUndoFlags();
+}
+
+/** Begin a grouped action: one snapshot now, then suspend per-primitive recording until end. */
+export function arduBeginUndoGroup(): void {
+  arduRecordUndo();
+  arduUndoSuspend++;
+}
+export function arduEndUndoGroup(): void {
+  if (arduUndoSuspend > 0) arduUndoSuspend--;
+}
+
+export function arduUndo(): void {
+  if (arduUndoStack.length === 0) return;
+  arduRedoStack.push(cloneWps(get(arduMission)));
+  const snap = arduUndoStack.pop() as ArduWaypoint[];
+  arduUndoSuspend++;
+  arduMission.set(snap);
+  arduUndoSuspend--;
+  arduSelectedWpIndex.set(-1);
+  arduSyncUndoFlags();
+}
+
+export function arduRedo(): void {
+  if (arduRedoStack.length === 0) return;
+  arduUndoStack.push(cloneWps(get(arduMission)));
+  const snap = arduRedoStack.pop() as ArduWaypoint[];
+  arduUndoSuspend++;
+  arduMission.set(snap);
+  arduUndoSuspend--;
+  arduSelectedWpIndex.set(-1);
+  arduSyncUndoFlags();
+}
+
+/** Wipe the history (fresh baseline after a load / download / import / clear). */
+export function arduClearUndoHistory(): void {
+  arduUndoStack = [];
+  arduRedoStack = [];
+  arduUndoSuspend = 0;
+  arduSyncUndoFlags();
 }
 
 // ── .waypoints file format ────────────────────────────────────────────

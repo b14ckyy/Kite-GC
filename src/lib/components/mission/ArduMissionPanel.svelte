@@ -17,6 +17,7 @@
     arduMission, arduSelectedWpIndex, arduEditMode, arduLoadedMissionId,
     arduMissionClear, arduRemoveWp, groupArduMission, markArduMissionSynced,
     arduMissionFlags, arduMissionModified,
+    arduUndo, arduRedo, arduCanUndo, arduCanRedo, arduClearUndoHistory,
     arduVehicleClass, setArduVehicleClass,
     MAV_FRAME_GLOBAL, MAV_FRAME_GLOBAL_TERRAIN_ALT,
     serializeWaypoints, parseWaypoints,
@@ -57,6 +58,36 @@
 
   let currentVehicle  = $state<VehicleClass>(get(arduVehicleClass));
   let currentSystem   = $state<AutopilotSystem>(get(autopilotSystem));
+
+  // Survey pattern generator (shared with INAV; the panel only renders it + the entry button).
+  let showPatternPanel = $state(false);
+  function togglePattern() {
+    if (showPatternPanel) {
+      import('$lib/stores/surveyPattern.svelte').then(m => { m.exitPatternMode(); showPatternPanel = false; });
+    } else {
+      import('$lib/stores/surveyPattern.svelte').then(m => { m.enterPatternMode('rectangle'); showPatternPanel = true; });
+    }
+  }
+  // Leaving edit mode closes the pattern panel (mirror the INAV panel).
+  $effect(() => {
+    if (!currentEditing && showPatternPanel) {
+      showPatternPanel = false;
+      import('$lib/stores/surveyPattern.svelte').then(m => m.exitPatternMode());
+    }
+  });
+
+  // Keyboard: Ctrl+Z = undo, Ctrl+Y / Ctrl+Shift+Z = redo. Edit-mode only, not while in the pattern
+  // panel, and not while a text field is focused (so native input undo keeps working). Mirrors INAV.
+  function onKeydown(e: KeyboardEvent) {
+    if (!currentEditing || showPatternPanel) return;
+    if (!(e.ctrlKey || e.metaKey)) return;
+    const tgt = e.target as HTMLElement | null;
+    const tag = tgt?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tgt?.isContentEditable) return;
+    const k = e.key.toLowerCase();
+    if (k === 'z' && !e.shiftKey) { e.preventDefault(); arduUndo(); }
+    else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); arduRedo(); }
+  }
 
   const unsubMission  = arduMission.subscribe(m => { currentMission = m; });
   const unsubSelIdx   = arduSelectedWpIndex.subscribe(i => { currentSelIdx = i; });
@@ -123,6 +154,7 @@
       arduMission.set(wps);
       arduSelectedWpIndex.set(-1);
       arduLoadedMissionId.set(null); // fresh file → not yet a library mission
+      arduClearUndoHistory(); // loaded mission = fresh undo baseline
       markArduMissionSynced('file', wps);
       statusMessage = $t('mission.loaded', { values: { count: wps.length } });
       frameMissionOnMap();
@@ -146,6 +178,7 @@
       arduMission.set(wps);
       arduSelectedWpIndex.set(-1);
       arduLoadedMissionId.set(null); // fresh file → not yet a library mission
+      arduClearUndoHistory(); // loaded mission = fresh undo baseline
       markArduMissionSynced('file', wps);
       statusMessage = $t('mission.loadedFromFile', { values: { count: wps.length, file: file.name } });
       frameMissionOnMap();
@@ -237,6 +270,7 @@
       arduMission.set(wps);
       arduSelectedWpIndex.set(-1);
       arduLoadedMissionId.set(null); // downloaded from FC → not a library mission
+      arduClearUndoHistory(); // downloaded mission = fresh undo baseline
       markArduMissionSynced('fc', wps); // now in sync with the FC (gates Set-WP in the control panel)
       statusMessage = $t('mission.downloaded', { values: { count: wps.length } });
       frameMissionOnMap();
@@ -320,6 +354,13 @@
     <Button variant="mode" active={currentEditing} icon="edit" onclick={() => arduEditMode.update(v => !v)} title={$t('mission.toggleEdit')}>
       {currentEditing ? $t('mission.editing') : $t('mission.edit')}
     </Button>
+    {#if currentEditing}
+      <Button variant="mode" active={showPatternPanel} icon="map" onclick={togglePattern}>{$t('survey.pattern')}</Button>
+    {/if}
+    {#if currentEditing && !showPatternPanel}
+      <Button variant="standard" icon="undo" disabled={!$arduCanUndo} onclick={() => arduUndo()} title={$t('mission.undo')} />
+      <Button variant="standard" icon="redo" disabled={!$arduCanRedo} onclick={() => arduRedo()} title={$t('mission.redo')} />
+    {/if}
     {#if !currentEditing}
       <Button variant="standard" icon="library" onclick={() => missionManagerOpen.set(true)} title={$t('mission.missionManager')}>
         {$t('mission.missionManager')}
@@ -349,7 +390,15 @@
 {#snippet body()}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="miss-dropzone" class:drag-over={dragOver} ondragover={onDragOver} ondragleave={onDragLeave} ondrop={onDrop}>
-    {#if currentMission.length === 0}
+    {#if showPatternPanel}
+      {#await import('./SurveyPatternPanel.svelte')}
+        <div class="wp-empty">{$t('survey.loading')}</div>
+      {:then { default: SurveyPatternPanel }}
+        <SurveyPatternPanel ongenerate={() => { showPatternPanel = false; }} />
+      {:catch error}
+        <div class="wp-empty">⚠ {String(error)}</div>
+      {/await}
+    {:else if currentMission.length === 0}
       <div class="wp-empty">{currentEditing ? $t('mission.emptyEdit') : $t('mission.emptyView')}</div>
     {:else}
       <table class="wp-table">
@@ -450,6 +499,8 @@
     </PanelShell>
   </div>
 {/if}
+
+<svelte:window onkeydown={onKeydown} />
 
 <ConfirmDialog bind:this={confirmDialog} />
 <MissionSaveDialog bind:this={missionSaveDialog} />

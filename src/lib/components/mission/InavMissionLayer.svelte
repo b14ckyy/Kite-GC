@@ -536,7 +536,10 @@
   }
 
   function renderMission(m: Mission, selIdx: number, editing: boolean) {
-    const keepPopup = editing && editorPopup && editorPopupIdx === selIdx && selIdx >= 0;
+    // During the survey pattern generator the mission stays visible but its waypoints go
+    // non-interactive (no drag / popup / path-insert / map-add) — consistent with the Ardu layer.
+    const patternActive = activeSurveyPattern.isActive;
+    const keepPopup = editing && !patternActive && editorPopup && editorPopupIdx === selIdx && selIdx >= 0;
     missionGroup.clearLayers();
     wpMarkers = []; modifierLines = []; paramLabels = [];
 
@@ -598,7 +601,7 @@
         const isActiveWp = currentActiveWp > 0 && wp.number === currentActiveWp;
         const icon = iconForWp(wp, dn, inSel, isActiveWp);
         const marker = L.marker(latLng, {
-          icon, draggable: editing && !greyed, opacity: greyed ? 0.35 : 1.0,
+          icon, draggable: editing && !greyed && !patternActive, opacity: greyed ? 0.35 : 1.0,
           title: `WP${dn}: ${$t(WP_ACTION_KEYS[wp.action]) || 'Unknown'}`,
         }).addTo(missionGroup);
 
@@ -608,12 +611,13 @@
           else selectWpSingle(i);
         });
         marker.on('contextmenu', (e: L.LeafletMouseEvent) => {
+          if (activeSurveyPattern.isActive) return; // non-interactive while the pattern generator is open
           // Right-click on an unselected marker selects it; on a selected one
           // keeps the (multi-)selection so the menu can act on all of it.
           if (!currentSelSet.has(i)) selectWpSingle(i);
           openContextMenu(e.originalEvent.clientX, e.originalEvent.clientY, buildWaypointMenu());
         });
-        if (editing) {
+        if (editing && !patternActive) {
           marker.on('dragend', () => {
             const pos = marker.getLatLng();
             missionUpdateWp(i, { ...wp, lat: fromDeg(pos.lat), lon: fromDeg(pos.lng) });
@@ -634,7 +638,7 @@
           createParamLabel(wp, modifiers, latLng).addTo(missionGroup);
         }
 
-        if (editing && primaryForPopup && !greyed) {
+        if (editing && primaryForPopup && !greyed && !patternActive) {
           const htmlContent = buildEditorHtml(wp, i, m.waypoints.length, dn, modifiers, fbhChild);
           const doAttach = () => setTimeout(() => { if (editorPopup) attachEditorEvents(editorPopup, wp, i, modifiers, fbhChild); }, 50);
           if (keepPopup && editorPopup) {
@@ -761,7 +765,7 @@
           L.polyline(run.pts, { color: '#666', weight: editing ? 4 : 2, opacity: 0.4, dashArray: '6 4' }).addTo(missionGroup);
         } else {
           flightPath = L.polyline(run.pts, { color: '#37a8db', weight: editing ? 6 : 3, opacity: 0.7 }).addTo(missionGroup);
-          if (editing) flightPath.on('click', insertHandler);
+          if (editing && !patternActive) flightPath.on('click', insertHandler);
         }
       }
     }
@@ -882,7 +886,7 @@
   // svelte-ignore state_referenced_locally
   map.on('zoomend', onMapZoomRerender);
 
-  $effect(() => { void currentLaunch; void currentSelSet; void currentShowMission; void currentReplayActive; void currentActiveWp; renderMission(currentMission, currentSelIdx, currentEditing); });
+  $effect(() => { void currentLaunch; void currentSelSet; void currentShowMission; void currentReplayActive; void currentActiveWp; void activeSurveyPattern.isActive; renderMission(currentMission, currentSelIdx, currentEditing); });
 
   onDestroy(() => {
     unsubMission(); unsubSelIdx(); unsubSelSet(); unsubEditMode(); unsubShowMission(); unsubReplayActive(); unsubLaunch(); unsubHomeLocked(); unsubActiveWp();

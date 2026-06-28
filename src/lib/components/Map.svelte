@@ -39,7 +39,8 @@
   import { homePosition, homeMarkerShown } from "$lib/stores/home";
   import { editMode, geoWaypoints, launchPoint, replayActive, toDeg } from "$lib/stores/mission";
   import { autopilotSystem } from "$lib/stores/autopilotContext";
-  import { arduMission, arduVehicleClass } from "$lib/stores/missionArdupilot";
+  import { arduMission, arduVehicleClass, arduEditMode } from "$lib/stores/missionArdupilot";
+  import { activeSurveyPattern } from "$lib/stores/surveyPattern.svelte";
   import { guidedActive, repositionTo, type GuidedParams } from "$lib/controllers/vehicleControl";
   import GuidedTargetForm from "$lib/components/control/GuidedTargetForm.svelte";
   import { cmdHasLocation } from "$lib/helpers/arduCommandCatalog";
@@ -527,6 +528,10 @@
     const data = get(aeroData);
     const vis = get(settings).airspace.layers;
     const z = map.getZoom(); // zoom-density: each feature has a min-zoom by importance/size
+    // While editing a mission (either autopilot) or in the survey pattern generator, the aero point
+    // markers go click-through (no popup) so a click places/edits a waypoint instead of opening their
+    // info bubble — matching the airspace-list map handler, which is also suppressed then.
+    const editingNow = get(editMode) || get(arduEditMode) || activeSurveyPattern.isActive;
 
     drawnAirspaces = [];
     if (vis.airspaces.d2) {
@@ -560,9 +565,12 @@
         const m = L.marker([p.lat, p.lon], {
           icon: L.divIcon({ className: "aero-divicon", html: aeroPointIconHtml(p), iconSize: [20, 20], iconAnchor: [10, 10] }),
           bubblingMouseEvents: false, // keep marker clicks out of the airspace-list map handler
+          interactive: !editingNow,   // editing/pattern → clicks fall through to place a waypoint
         });
-        const info = aeroPointInfo(p);
-        m.bindPopup(`<b>${p.name || p.subtype || p.kind}</b>${info ? `<br>${info}` : ""}`);
+        if (!editingNow) {
+          const info = aeroPointInfo(p);
+          m.bindPopup(`<b>${p.name || p.subtype || p.kind}</b>${info ? `<br>${info}` : ""}`);
+        }
         group.addLayer(m);
         count++;
       }
@@ -1021,7 +1029,8 @@
    */
   function onAirspaceClick(e: L.LeafletMouseEvent) {
     if (!map || !$settings.airspace.enabled) return;
-    if (get(editMode)) return; // while editing waypoints, map clicks deselect WPs — don't pop the airspace list
+    if (get(editMode) || get(arduEditMode)) return; // editing waypoints (INAV or Ardu/PX4) → don't pop the airspace list
+    if (activeSurveyPattern.isActive) return; // the survey pattern generator owns map clicks
     if (get(guidedActive)) return; // Guided "fly here" owns the click → don't also pop the airspace list
     // Toggle: if the list popup is already open, a second map click just dismisses it.
     if (aeroPopup && aeroPopup.isOpen()) {
@@ -1117,7 +1126,7 @@
   $effect(() => { if (!$guidedActive) closeGuidedPopup(); });
 
   // Redraw on enable-toggle, new data, or visibility change (data/visibility via subscriptions below).
-  $effect(() => { void $settings.airspace.enabled; if (map) updateAirspace(); });
+  $effect(() => { void $settings.airspace.enabled; void $editMode; void $arduEditMode; void activeSurveyPattern.isActive; if (map) updateAirspace(); });
   $effect(() => { void $settings.showSafehomes; if (map) updateSafehome(); });
   // Geozones: redraw on layer-toggle / mission edit-mode / geozone edit-lock change (the last toggles
   // the editable markers).

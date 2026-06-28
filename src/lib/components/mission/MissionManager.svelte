@@ -26,7 +26,7 @@
     missionImportXml, missionLoadFile, applyMissionLaunchDefault, type Waypoint,
   } from '$lib/stores/mission';
   import {
-    arduMission, arduSelectedWpIndex, arduLoadedMissionId, markArduMissionSynced,
+    arduMission, arduSelectedWpIndex, arduLoadedMissionId, markArduMissionSynced, arduClearUndoHistory,
     parseWaypoints, type ArduWaypoint,
   } from '$lib/stores/missionArdupilot';
   import { frameMissionOnMap } from '$lib/stores/mapCamera';
@@ -253,6 +253,7 @@
         arduMission.set(wps);
         arduSelectedWpIndex.set(-1);
         arduLoadedMissionId.set(m.id);
+        arduClearUndoHistory(); // loaded mission = fresh undo baseline
         markArduMissionSynced('db', wps);
       }
       frameMissionOnMap(); // standalone library load → frame the mission (not a replay-linked attach)
@@ -354,6 +355,7 @@
       arduMission.set(wps);
       arduSelectedWpIndex.set(-1);
       arduLoadedMissionId.set(existingId);
+      arduClearUndoHistory(); // loaded mission = fresh undo baseline
       statusMessage = $t('missionMgr.loadedToMap');
     }
   }

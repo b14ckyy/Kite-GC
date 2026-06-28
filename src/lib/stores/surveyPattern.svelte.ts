@@ -9,6 +9,20 @@ export type { LngLat, AltMode };
 
 export type SurveyShape = 'rectangle' | 'rectangle-lawnmower' | 'polygon' | 'polygon-lawnmower' | 'circle' | 'spiral';
 
+/**
+ * ArduPilot / PX4 action waypoint inserted as a DO_ mission item at a pattern position.
+ * ArduPilot/PX4 have no per-WP "user action" bitmask like INAV — actions are separate command
+ * items (e.g. DO_SET_CAM_TRIGG_DIST) interleaved with the NAV waypoints. `command` is the MAV_CMD;
+ * params map to the MAVLink command params. Stored per action slot (null = no action).
+ */
+export interface ArduAction {
+  command: number;
+  param1: number;
+  param2: number;
+  param3: number;
+  param4: number;
+}
+
 export interface BasePatternParams {
   shapeOrientation: number;     // degrees, 0 = north, clockwise — rotates the shape
   baseAltitude: number;         // meters
@@ -27,6 +41,13 @@ export interface BasePatternParams {
   userActionStartFlags: number;     // bitmask for the very first waypoint (lawnmower)
   userActionTrackFlags: number;     // bitmask for all interior waypoints (lawnmower)
   userActionEndFlags: number;       // bitmask for the very last waypoint (lawnmower)
+  // ArduPilot / PX4 action waypoints (DO_ items) per slot — the cross-autopilot equivalent of the
+  // INAV UA flags above. Optional (undefined / null = no action) so the INAV defaults need no change.
+  arduActionStart?: ArduAction | null;     // after the very first NAV waypoint
+  arduActionTrack?: ArduAction | null;      // after every interior NAV waypoint
+  arduActionEnd?: ArduAction | null;        // after the very last NAV waypoint
+  arduActionLineStart?: ArduAction | null;  // after each coverage-leg entry (zigzag)
+  arduActionLineEnd?: ArduAction | null;    // after each coverage-leg exit (zigzag)
 }
 
 export interface RectanglePatternParams extends BasePatternParams {

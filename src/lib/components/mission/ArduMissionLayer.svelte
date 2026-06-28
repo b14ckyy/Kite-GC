@@ -16,12 +16,13 @@
   import { t } from 'svelte-i18n';
   import {
     arduMission, arduSelectedWpIndex, arduEditMode, arduVehicleClass,
-    arduUpdateWp, arduRemoveWp, arduAddWp,
+    arduUpdateWp, arduRemoveWp, arduAddWp, arduRecordUndo,
     groupArduMission, groupEndIndex, type ArduGroup,
     MAV_CMD_NAV_WAYPOINT,
     MAV_FRAME_GLOBAL, MAV_FRAME_GLOBAL_RELATIVE_ALT, MAV_FRAME_GLOBAL_TERRAIN_ALT,
     type ArduWaypoint, type MavFrame,
   } from '$lib/stores/missionArdupilot';
+  import { activeSurveyPattern } from '$lib/stores/surveyPattern.svelte';
   import {
     CMD,
     cmdDef, cmdName, cmdRawName, cmdHasLocation, cmdStandaloneCoordinate, cmdIsLoiter, cmdIsTakeoff,
@@ -424,6 +425,10 @@
 
     missionGroup.clearLayers(); // markers/lines only — the editor popup is a separate map layer
     if (wps.length === 0) { closeEditorPopup(map, popupState); return; }
+    // While the survey pattern generator is open the existing mission stays VISIBLE (so the operator
+    // can plan where the pattern attaches) but its waypoints go non-interactive — no drag / popup /
+    // path-insert / map-add. (See the gates below + onMapClick.)
+    const patternActive = activeSurveyPattern.isActive;
 
     const fpPositions: L.LatLng[] = [];
     const fpWpIndices: number[] = [];
@@ -444,7 +449,8 @@
         if (hasLoc) { fpPositions.push(latLng); fpWpIndices.push(i); }
 
         // Takeoff is draggable too while planning offline (a connected UAV locks it to its FC home).
-        const draggable = editing && (!isTakeoff || !conn);
+        // Non-interactive while the pattern generator is open.
+        const draggable = editing && !patternActive && (!isTakeoff || !conn);
         const marker = L.marker(latLng, {
           icon: iconForArduWp(wp, displayNum, i === selIdx, activeWp > 0 && displayNum === activeWp),
           draggable,
@@ -534,6 +540,7 @@
         }
         const updated = [...wps];
         updated.splice(bestInsertIdx, 0, newWaypointAt(e.latlng));
+        arduRecordUndo();
         arduMission.set(updated);
         arduSelectedWpIndex.set(bestInsertIdx);
       };
@@ -544,14 +551,14 @@
           color: '#37a8db', weight: editing ? 6 : 3, opacity: 0.7,
           ...(loose ? { dashArray: '8 6' } : {}),
         }).addTo(missionGroup);
-        if (editing) leg.on('click', insertOnPath);
+        if (editing && !patternActive) leg.on('click', insertOnPath);
       }
     }
 
     // Editor popup for the selected group (anchored on its primary waypoint) — shared framework with
     // the content-signature redraw guard, so live redraws don't close an open dropdown.
     const anchorLatLng = editing && selGroup?.anchor ? wpDisplayLatLng(selGroup.anchor, wps, home, conn) : null;
-    if (editing && selGroup?.anchor && anchorLatLng) {
+    if (editing && !patternActive && selGroup?.anchor && anchorLatLng) {
       const g = selGroup;
       renderEditorPopup(
         map, popupState, g.anchorIdx, anchorLatLng,
@@ -575,6 +582,7 @@
 
   function onMapClick(e: L.LeafletMouseEvent) {
     if (!currentEditing) return;
+    if (activeSurveyPattern.isActive) return; // the pattern generator owns the map while open
     if (currentSelIdx >= 0) { arduSelectedWpIndex.set(-1); return; }
     arduAddWp(newWaypointAt(e.latlng));
   }
@@ -582,7 +590,10 @@
   // svelte-ignore state_referenced_locally
   map.on('click', onMapClick);
 
-  $effect(() => { renderMission(currentWps, currentSelIdx, currentEditing, currentHome, currentVehicle, currentActiveWp, connected); });
+  $effect(() => {
+    void activeSurveyPattern.isActive; // re-render (clear / restore) when entering or leaving pattern mode
+    renderMission(currentWps, currentSelIdx, currentEditing, currentHome, currentVehicle, currentActiveWp, connected);
+  });
 
   onDestroy(() => {
     unsubMission(); unsubSelIdx(); unsubEditMode(); unsubHome(); unsubVehicle(); unsubActiveWp(); unsubSystem(); unsubConn();

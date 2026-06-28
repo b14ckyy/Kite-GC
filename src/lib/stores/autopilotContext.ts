@@ -10,6 +10,7 @@ import {
 } from './mission';
 import { arduMission, arduMissionClear, arduSelectedWpIndex } from './missionArdupilot';
 import { inavToArdu, arduToInav } from '../helpers/missionConverter';
+import { exitPatternMode } from './surveyPattern.svelte';
 
 export type AutopilotSystem = 'inav' | 'ardupilot' | 'px4';
 
@@ -87,6 +88,10 @@ export function cancelSystemSwitch(): void {
 }
 
 function _applySwitch(system: AutopilotSystem): void {
+  // A system switch cancels any in-progress survey pattern: the pattern panel + its map preview are
+  // per-system, so leaving `isActive` set would desync the freshly-mounted panel (normal WP list shown
+  // while editing stays "blocked") and leave a stale preview on the map.
+  exitPatternMode();
   _system.set(system);
   settings.patch({ lastAutopilotSystem: system });
 }

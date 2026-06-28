@@ -15,6 +15,8 @@
     type RectanglePatternParams,
     type CirclePatternParams,
     type PolygonPatternParams,
+    type BasePatternParams,
+    type ArduAction,
   } from '$lib/stores/surveyPattern.svelte';
   import { get } from 'svelte/store';
   import {
@@ -26,7 +28,15 @@
     generatePolygonZigzag,
     generatePolygonLawnmower,
     type SurveyWaypoint,
+    type SurveyPathSegment,
   } from '$lib/helpers/surveyPatterns';
+  import { autopilotSystem } from '$lib/stores/autopilotContext';
+  import {
+    arduMission, arduSelectedWpIndex, arduRecordUndo,
+    MAV_CMD_NAV_WAYPOINT, MAV_CMD_DO_CHANGE_SPEED,
+    type ArduWaypoint, type MavFrame,
+  } from '$lib/stores/missionArdupilot';
+  import SurveyArduAction from './SurveyArduAction.svelte';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import UnitStepper from '$lib/components/UnitStepper.svelte';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
@@ -39,6 +49,9 @@
     speedUnit: 'kmh', altitudeUnit: 'm', distanceUnit: 'metric', verticalSpeedUnit: 'ms', temperatureUnit: 'c',
   };
   const interfaceSettings = $derived($settings.interface ?? FALLBACK_INTERFACE);
+  // ArduPilot/PX4 use DO_ action waypoints instead of INAV's per-WP user-action bitmask.
+  const isArdu = $derived($autopilotSystem === 'ardupilot' || $autopilotSystem === 'px4');
+  const arduFw = $derived($autopilotSystem === 'px4' ? 'px4' : 'ardupilot');
   /** Length display in the user's distance unit (m/ft, no km/mi switch). */
   function fmtLen(m: number): string {
     const c = convertLength(m, interfaceSettings.distanceUnit);
@@ -168,10 +181,11 @@
     }
 
     let wps: SurveyWaypoint[] = [];
+    let segments: SurveyPathSegment[] = [];
 
         if (cfg.shape === 'rectangle') {
       const p = cfg.params as RectanglePatternParams;
-      const segments = generateRectangleZigzag(p);
+      segments = generateRectangleZigzag(p);
       // Only survey segments → extract start and end points in flight order
       const surveyPoints: SurveyWaypoint[] = [];
       for (const seg of segments) {
@@ -184,7 +198,7 @@
       wps = surveyPoints;
         } else if (cfg.shape === 'rectangle-lawnmower') {
       const p = cfg.params as RectanglePatternParams;
-      const segments = generateRectangleLawnmower(p);
+      segments = generateRectangleLawnmower(p);
       // Survey segments contain all waypoints in flight order (no duplicates)
       const surveyPoints: SurveyWaypoint[] = [];
       for (const seg of segments) {
@@ -198,7 +212,7 @@
       wps = surveyPoints;
     } else if (cfg.shape === 'circle') {
       const p = cfg.params as CirclePatternParams;
-      const segments = generateCircleStepped(p);
+      segments = generateCircleStepped(p);
       for (const seg of segments) {
         if (seg.kind === 'survey') {
           for (const pt of seg.points) wps.push(pt);
@@ -206,7 +220,7 @@
       }
     } else if (cfg.shape === 'polygon') {
       const p = cfg.params as PolygonPatternParams;
-      const segments = generatePolygonZigzag(p);
+      segments = generatePolygonZigzag(p);
       for (const seg of segments) {
         if (seg.kind === 'survey') {
           for (const pt of seg.points) wps.push(pt);
@@ -214,7 +228,7 @@
       }
     } else if (cfg.shape === 'polygon-lawnmower') {
       const p = cfg.params as PolygonPatternParams;
-      const segments = generatePolygonLawnmower(p);
+      segments = generatePolygonLawnmower(p);
       for (const seg of segments) {
         if (seg.kind === 'survey') {
           for (const pt of seg.points) wps.push(pt);
@@ -222,7 +236,7 @@
       }
     } else if (cfg.shape === 'spiral') {
       const p = cfg.params as CirclePatternParams;
-      const segments = generateSpiral(p);
+      segments = generateSpiral(p);
       for (const seg of segments) {
         if (seg.kind === 'survey') {
           for (const pt of seg.points) wps.push(pt);
@@ -232,6 +246,60 @@
 
     if (wps.length === 0) {
       exitPatternMode();
+      return;
+    }
+
+    const system = get(autopilotSystem);
+
+    // ── ArduPilot / PX4: NAV waypoints + DO_ action items (no per-WP user-action bitmask) ──
+    if (system === 'ardupilot' || system === 'px4') {
+      const a = cfg.params as BasePatternParams;
+      const frame: MavFrame = a.altMode === 'amsl' ? 0 : a.altMode === 'ground' ? 10 : 3;
+
+      // Flatten the survey legs into NAV waypoints, tagging each as a leg entry/exit so the
+      // line-start / line-end actions land on the right ones. Turn segments are connectors → skipped.
+      type Tag = { wp: SurveyWaypoint; legStart: boolean; legEnd: boolean };
+      const flat: Tag[] = [];
+      for (const seg of segments) {
+        if (seg.kind !== 'survey') continue;
+        const n = seg.points.length;
+        seg.points.forEach((pt, i) => flat.push({ wp: pt, legStart: i === 0, legEnd: i === n - 1 }));
+      }
+      if (flat.length === 0) { exitPatternMode(); return; }
+
+      const navWp = (pt: SurveyWaypoint): ArduWaypoint => ({
+        command: MAV_CMD_NAV_WAYPOINT, frame, param1: 0, param2: 0, param3: 0, param4: 0,
+        lat: Math.round(pt.lat * 1e7), lon: Math.round(pt.lng * 1e7), alt: pt.alt, autocontinue: true,
+      });
+      const doItem = (act: ArduAction): ArduWaypoint => ({
+        command: act.command, frame: 0,
+        param1: act.param1, param2: act.param2, param3: act.param3, param4: act.param4,
+        lat: 0, lon: 0, alt: 0, autocontinue: true,
+      });
+
+      const items: ArduWaypoint[] = [];
+      // Leading speed (ArduPilot/PX4 have no per-WP speed) — a groundspeed change to the survey base speed.
+      if (a.baseSpeed > 0) {
+        items.push({ command: MAV_CMD_DO_CHANGE_SPEED, frame: 0, param1: 1, param2: a.baseSpeed, param3: -1, param4: 0, lat: 0, lon: 0, alt: 0, autocontinue: true });
+      }
+      // Each NAV waypoint, with its DO_ action items appended right after (the cross-autopilot
+      // equivalent of INAV's per-WP UA flags). Order at a point: start → lineStart → track → lineEnd → end.
+      flat.forEach((tag, idx) => {
+        const isFirst = idx === 0, isLast = idx === flat.length - 1;
+        items.push(navWp(tag.wp));
+        if (isFirst && a.arduActionStart) items.push(doItem(a.arduActionStart));
+        if (tag.legStart && a.arduActionLineStart) items.push(doItem(a.arduActionLineStart));
+        if (!isFirst && !isLast && a.arduActionTrack) items.push(doItem(a.arduActionTrack));
+        if (tag.legEnd && a.arduActionLineEnd) items.push(doItem(a.arduActionLineEnd));
+        if (isLast && a.arduActionEnd) items.push(doItem(a.arduActionEnd));
+      });
+
+      arduRecordUndo(); // the whole append is one undo step
+      arduMission.update((cur) => [...cur, ...items]);
+      arduSelectedWpIndex.set(-1);
+      console.log(`[Pattern] Added ${items.length} ArduPilot/PX4 mission items for ${cfg.shape}`);
+      exitPatternMode();
+      ongenerate?.();
       return;
     }
 
@@ -451,6 +519,16 @@
             <!-- User Action Trigger -->
       <div class="section-label">{$t('survey.userActionTrigger')}</div>
 
+      {#if isArdu}
+        {#if activeSurveyPattern.config?.shape === 'rectangle-lawnmower'}
+          <SurveyArduAction label={$t('survey.actionStart')} firmware={arduFw} value={rectangleParams.arduActionStart ?? null} onchange={(v) => updateRectangleParams({ arduActionStart: v })} />
+          <SurveyArduAction label={$t('survey.actionTrack')} firmware={arduFw} value={rectangleParams.arduActionTrack ?? null} onchange={(v) => updateRectangleParams({ arduActionTrack: v })} />
+          <SurveyArduAction label={$t('survey.actionEnd')} firmware={arduFw} value={rectangleParams.arduActionEnd ?? null} onchange={(v) => updateRectangleParams({ arduActionEnd: v })} />
+        {:else}
+          <SurveyArduAction label={$t('survey.lineStart')} firmware={arduFw} value={rectangleParams.arduActionLineStart ?? null} onchange={(v) => updateRectangleParams({ arduActionLineStart: v })} />
+          <SurveyArduAction label={$t('survey.lineEnd')} firmware={arduFw} value={rectangleParams.arduActionLineEnd ?? null} onchange={(v) => updateRectangleParams({ arduActionLineEnd: v })} />
+        {/if}
+      {:else}
       {#if activeSurveyPattern.config?.shape === 'rectangle-lawnmower'}
         <!-- Lawnmower: Start / Track / End -->
         <div class="ua-grid">
@@ -515,6 +593,7 @@
           </div>
         </div>
       {/if}
+      {/if}
     {:else if activeSurveyPattern.config?.shape === 'circle' || activeSurveyPattern.config?.shape === 'spiral'}
 
       <!-- Radius + Ring Points -->
@@ -571,6 +650,11 @@
 
       <!-- User Action Triggers: Start / Track / End -->
       <div class="section-label">{$t('survey.userActionTrigger')}</div>
+      {#if isArdu}
+        <SurveyArduAction label={$t('survey.actionStart')} firmware={arduFw} value={circleParams.arduActionStart ?? null} onchange={(v) => updateCircleParams({ arduActionStart: v })} />
+        <SurveyArduAction label={$t('survey.actionTrack')} firmware={arduFw} value={circleParams.arduActionTrack ?? null} onchange={(v) => updateCircleParams({ arduActionTrack: v })} />
+        <SurveyArduAction label={$t('survey.actionEnd')} firmware={arduFw} value={circleParams.arduActionEnd ?? null} onchange={(v) => updateCircleParams({ arduActionEnd: v })} />
+      {:else}
       <div class="ua-grid">
         <div class="ua-col">
           <div class="ua-col-label">Start</div>
@@ -606,6 +690,7 @@
           </div>
         </div>
       </div>
+      {/if}
 
     {:else if activeSurveyPattern.config?.shape === 'polygon' || activeSurveyPattern.config?.shape === 'polygon-lawnmower'}
 
@@ -658,6 +743,16 @@
 
       <!-- User Action Triggers -->
       <div class="section-label">{$t('survey.userActionTrigger')}</div>
+      {#if isArdu}
+        {#if activeSurveyPattern.config?.shape === 'polygon-lawnmower'}
+          <SurveyArduAction label={$t('survey.actionStart')} firmware={arduFw} value={polygonParams.arduActionStart ?? null} onchange={(v) => updatePolygonParams({ arduActionStart: v })} />
+          <SurveyArduAction label={$t('survey.actionTrack')} firmware={arduFw} value={polygonParams.arduActionTrack ?? null} onchange={(v) => updatePolygonParams({ arduActionTrack: v })} />
+          <SurveyArduAction label={$t('survey.actionEnd')} firmware={arduFw} value={polygonParams.arduActionEnd ?? null} onchange={(v) => updatePolygonParams({ arduActionEnd: v })} />
+        {:else}
+          <SurveyArduAction label={$t('survey.lineStart')} firmware={arduFw} value={polygonParams.arduActionLineStart ?? null} onchange={(v) => updatePolygonParams({ arduActionLineStart: v })} />
+          <SurveyArduAction label={$t('survey.lineEnd')} firmware={arduFw} value={polygonParams.arduActionLineEnd ?? null} onchange={(v) => updatePolygonParams({ arduActionLineEnd: v })} />
+        {/if}
+      {:else}
       {#if activeSurveyPattern.config?.shape === 'polygon-lawnmower'}
         <!-- Lawnmower: Start / Track / End -->
         <div class="ua-grid">
@@ -721,6 +816,7 @@
             </div>
           </div>
         </div>
+      {/if}
       {/if}
 
     {/if}
