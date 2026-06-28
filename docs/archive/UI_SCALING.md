@@ -146,6 +146,18 @@ does **not** clobber Leaflet's own positioning transform (they inherit `--ui-sca
   the natural home for the future feature-description hint system too.
 - Not yet scaled: launch/home marker.
 
+## Iteration 4 — `zoom` → `transform: scale()` (Linux/WebKitGTK fix)
+The `.ui-scale` chrome scaler used CSS **`zoom`**, which **WebKitGTK (Linux) does not support** — so the
+layer stayed at its `/scale` size (smaller than the window) and the scale was unusable on Linux (Windows/
+WebView2 was fine). Switched `.ui-scale` from `zoom: var(--ui-scale)` to
+`transform: scale(var(--ui-scale)); transform-origin: 0 0` — **geometrically identical** (the box is
+still sized `100vw/scale` × `100vh/scale`, so origin-0,0 scaling maps logical→viewport by ×scale, exactly
+as `zoom` did), so both coordinate bridges (map offsets `× --ui-scale`, `mapFrameStyle × uiScale`) stay
+valid, and it works on both WebView2 and WebKitGTK. (The map-overlay elements already used
+`transform: scale()` — this just aligns the main chrome layer.) Note: `transform` makes `.ui-scale` a
+containing block for `position: fixed` descendants, but they sit inside the viewport-sized `.ui-scale`
+box so full-screen/centred overlays are unaffected.
+
 ## Implementation checklist
 - [ ] `AppSettings.uiScale: number` (default `1`) + persistence (settings store).
 - [ ] Settings → Language: a 100–200 % (25 % steps) `<select>`; i18n key in en + de.

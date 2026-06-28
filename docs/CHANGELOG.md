@@ -155,6 +155,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Physical USB/PCI ports are untouched (they keep their device descriptors).
 
 ### Fixed
+- **UI scaling no longer shrinks the interface on Linux.** The 100/125/150 % UI scale used CSS `zoom`,
+  which WebKitGTK (Linux) doesn't support — so instead of enlarging the chrome it left it at the
+  reduced (`/scale`) size, smaller than the window. Switched the chrome scaler to `transform: scale()`
+  (geometrically identical, but supported on both WebView2 and WebKitGTK). Windows is unaffected.
+- **Trackpad/touch gestures no longer zoom or scroll the whole window frame.** A two-finger pinch (or
+  Ctrl/Cmd +/−) used to zoom the entire WebView — scaling the widgets out of view — because the gesture
+  never reached the map. Frame-level zoom is now blocked app-wide (Chromium/WebView2 `ctrl+wheel`,
+  WebKitGTK `gesture*` events, and the keyboard zoom shortcuts) while the map keeps its own zoom; the
+  frame also no longer scroll-chains/bounces (`overscroll-behavior`). Touch double-tap/pinch page zoom
+  is disabled via the viewport.
 - **Bluetooth-SPP serial connect retries on open (Windows error 121).** Opening a paired BT-SPP COM
   port often failed the *first* attempt with "The semaphore timeout period has expired" — opening the
   port is what wakes/brings up the RFCOMM link, and if the remote is asleep or a previous owner (e.g.
