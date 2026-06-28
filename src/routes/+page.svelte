@@ -2853,7 +2853,13 @@
     left: 0;
     width: calc(100vw / var(--ui-scale, 1));
     height: calc(100vh / var(--ui-scale, 1));
-    zoom: var(--ui-scale, 1);
+    /* Scale the chrome up to fill the viewport (the box is sized /scale above, then scaled back from
+       the top-left corner). We use transform: scale() rather than `zoom` because WebKitGTK (Linux)
+       does not support CSS `zoom` — it left the chrome at the /scale size, i.e. SMALLER than the
+       window. transform is geometrically identical here (origin 0 0: logical→viewport = ×scale, same
+       mapping the offset/rect math relies on) and works on both WebView2 (Windows) and WebKitGTK. */
+    transform: scale(var(--ui-scale, 1));
+    transform-origin: 0 0;
     z-index: 1;
   }
 
