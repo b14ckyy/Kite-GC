@@ -161,10 +161,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (geometrically identical, but supported on both WebView2 and WebKitGTK). Windows is unaffected.
 - **Trackpad/touch gestures no longer zoom or scroll the whole window frame.** A two-finger pinch (or
   Ctrl/Cmd +/−) used to zoom the entire WebView — scaling the widgets out of view — because the gesture
-  never reached the map. Frame-level zoom is now blocked app-wide (Chromium/WebView2 `ctrl+wheel`,
-  WebKitGTK `gesture*` events, and the keyboard zoom shortcuts) while the map keeps its own zoom; the
-  frame also no longer scroll-chains/bounces (`overscroll-behavior`). Touch double-tap/pinch page zoom
-  is disabled via the viewport.
+  never reached the map. On Chromium/WebView2 (Windows) the pinch arrives as `ctrl+wheel` and is blocked
+  in the frontend. On **Linux/WebKitGTK** the pinch is handled natively by GTK and ignores any JS
+  `preventDefault`, so the WebView's page zoom is now pinned at 1.0 in the Rust setup hook (this also
+  catches `Ctrl+wheel` and the `Ctrl+/−` keyboard zoom on Linux). The map keeps its own zoom, and the
+  frame no longer scroll-chains/bounces (`overscroll-behavior`). Touch double-tap/pinch page zoom is
+  disabled via the viewport.
 - **Bluetooth-SPP serial connect retries on open (Windows error 121).** Opening a paired BT-SPP COM
   port often failed the *first* attempt with "The semaphore timeout period has expired" — opening the
   port is what wakes/brings up the RFCOMM link, and if the remote is asleep or a previous owner (e.g.
