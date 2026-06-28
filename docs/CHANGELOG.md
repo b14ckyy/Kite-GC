@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Official Kite Ground Control branding.** The app now carries its real logo (a kite/paraglider canopy
+  that doubles as a "K", in the existing theme blue / orange / anthracite): the white *KiteGC* wordmark in
+  the top bar, the full-colour kite-K as the application and installer icon, and the full logo (anthracite
+  inverted to light grey for the dark dialog) in the About window. The About tagline is now
+  **"For INAV, ArduPilot and PX4 UAV Systems"**. Brand sources live in `static/branding/`.
 - **Survey pattern generator for ArduPilot / PX4.** The pattern generator (all six shapes) now works on
   ArduPilot/PX4 missions, not just INAV — identical geometry, appended as MAVLink `NAV_WAYPOINT` items
   (plus a leading groundspeed change). These autopilots have no per-waypoint user-action bitmask like
