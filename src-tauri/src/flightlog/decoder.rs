@@ -81,14 +81,36 @@ pub fn version() -> Option<String> {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
-    let output = cmd.output().ok()?;
+    let output = match cmd.output() {
+        Ok(o) => o,
+        Err(e) => {
+            // The decoder is present but won't run. On Linux this is the usual post-download failure:
+            // a wrong-arch binary (Exec format error / ENOEXEC), a non-executable file or a `noexec`
+            // mount (Permission denied), or a missing shared library. Surface it at the default log
+            // level so a tester's log file shows *why* the version stays blank after a download.
+            log::warn!(
+                "blackbox_decode found at {} but could not be executed: {e}",
+                decoder.display()
+            );
+            return None;
+        }
+    };
     let text = if output.stdout.is_empty() {
         String::from_utf8_lossy(&output.stderr)
     } else {
         String::from_utf8_lossy(&output.stdout)
     };
-    let line = text.lines().next()?.trim();
-    (!line.is_empty()).then(|| line.to_string())
+    let line = text.lines().next().map(str::trim).unwrap_or("");
+    if line.is_empty() {
+        log::warn!(
+            "blackbox_decode at {} ran but returned no version (exit {:?}); stderr: {}",
+            decoder.display(),
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr).lines().next().unwrap_or("")
+        );
+        return None;
+    }
+    Some(line.to_string())
 }
 
 /// Download + extract `blackbox_decode` from the latest GitHub release into `install_dir()`, reporting
@@ -175,7 +197,6 @@ pub async fn download<F: FnMut(u8, &str)>(mut report: F) -> Result<PathBuf, Stri
 
     report(100, "Done");
     log::info!("blackbox_decode installed from {} -> {}", asset_name, target.display());
-    eprintln!("[BBX-DECODE] installed {} from {}", target.display(), asset_name);
     Ok(target)
 }
 
@@ -225,24 +246,43 @@ fn extract_from_tar_zst(archive_bytes: &[u8], target: &Path) -> Result<(), Strin
     let mut archive = tar::Archive::new(decoder);
     let want = binary_name();
 
+    // The archive contains TWO entries named `blackbox_decode`: the real ELF binary under `bin/`
+    // and a bash-completion script under `share/bash-completion/completions/`, which appears FIRST
+    // in tar order. Matching on the file name alone grabbed the completion script — a ~1.7 KB text
+    // file that runs as a no-op and prints no `--version`, so the install looked successful but the
+    // version stayed blank. Prefer the `bin/<name>` entry; keep the first plain name match only as a
+    // fallback for unexpected future layouts.
+    let mut fallback: Option<Vec<u8>> = None;
+
     for entry in archive.entries().map_err(|e| format!("Bad tar archive: {e}"))? {
         let mut entry = entry.map_err(|e| format!("Tar read error: {e}"))?;
-        let is_match = entry
+        let path = entry
             .path()
-            .ok()
-            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
-            .as_deref()
-            == Some(want);
-        if is_match {
-            let mut buf = Vec::new();
-            entry
-                .read_to_end(&mut buf)
-                .map_err(|e| format!("Tar extract error: {e}"))?;
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        let mut components = path.rsplit('/');
+        if components.next() != Some(want) {
+            continue;
+        }
+        let in_bin = components.next() == Some("bin");
+        let mut buf = Vec::new();
+        entry
+            .read_to_end(&mut buf)
+            .map_err(|e| format!("Tar extract error: {e}"))?;
+        if in_bin {
             std::fs::write(target, &buf)
                 .map_err(|e| format!("Cannot write {}: {e}", target.display()))?;
             make_executable(target);
             return Ok(());
         }
+        fallback.get_or_insert(buf);
+    }
+
+    if let Some(buf) = fallback {
+        std::fs::write(target, &buf)
+            .map_err(|e| format!("Cannot write {}: {e}", target.display()))?;
+        make_executable(target);
+        return Ok(());
     }
     Err(format!("'{}' was not found inside the downloaded archive", want))
 }
