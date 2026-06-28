@@ -1,5 +1,8 @@
 # Vehicle Database — Feature Plan
 
+> ARCHIVED (2026-06-28) — feature complete (Phases A–C shipped). On-device INAV validation is user-side;
+> not kept open.
+
 > STATUS: SHIPPED-LOCAL (2026-06-25), uncommitted-then-committed, **awaiting on-device INAV/SITL test**.
 > Phases A–C all implemented; `npm run check` 0/0, `cargo test --no-run` + `npm run build` green.
 > Mirrors the Battery DB architecture 1:1 (table + soft-link + manager panel + `.k*` export/import +

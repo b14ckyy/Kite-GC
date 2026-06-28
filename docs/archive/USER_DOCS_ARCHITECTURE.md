@@ -1,6 +1,9 @@
 # User Documentation — Architecture & Hosting Plan
 
-> STATUS: PLANNING (2026-06-25). Decides **how user docs are presented, authored, and hosted** before
+> ARCHIVED (2026-06-28) — realised: the MkDocs Material site shipped to master (2026-06-27). Kept for the
+> hosting/layout rationale and the deferred "For developers" section.
+>
+> STATUS: SHIPPED (2026-06-27). Decides **how user docs are presented, authored, and hosted** before
 > any user-facing content is written, so the source layout is ingested by the site generator from day
 > one. Dev-facing planning doc (lives in `docs/active/`); the published site is user-facing only.
 

@@ -1,5 +1,8 @@
 # ArduPilot / PX4 Geofence — Feature Plan
 
+> ARCHIVED (2026-06-28) — feature complete; full editor + geometric breach fallback shipped. ArduPilot
+> validated in SITL; PX4 / on-hardware validation is user-side and not kept open.
+
 > STATUS: shipped-local · 2026-06-23 (awaiting SITL verification). Third "Airspace Manager" safety
 > subsystem (Autoland → Geozones → **Geofence**). The MAVLink counterpart to the INAV geozone editor
 > ([[GEOZONES]]); much simpler (no per-zone altitude bands / actions — those are global params).

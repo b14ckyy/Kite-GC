@@ -1,5 +1,8 @@
 # Multi-Autopilot Mission Planning — Architecture Plan
 
+> ARCHIVED (2026-06-28) — Phases 1–4 complete (ArduPilot + PX4). INAV-over-MAVLink WON'T DO.
+> Real-PX4-hardware validation is user-side; not kept open.
+
 **Status:** Phases 1–4 complete for the **ArduPilot/PX4** path (autopilot context + locking,
 ArduPilot WP types/UI/conversion, MAVLink mission microprotocol, survey planner). **PX4 path
 completed 2026-06-18** — verified command subset, firmware-aware home-slot handling, MAV_TYPE-based

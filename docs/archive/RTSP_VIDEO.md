@@ -1,5 +1,8 @@
 # RTSP Video Input — Feature Plan
 
+> ARCHIVED (2026-06-28) — feature complete: live RTSP via go2rtc → WebRTC, OBS-verified. Real-source
+> (DJI / IP-cam) validation is user-side; not kept open.
+
 > STATUS: active · 2026-06-26. **Shipped (local, OBS-verified):** live RTSP video via go2rtc → WebRTC.
 > Awaiting a real-source test (DJI). The original ffmpeg→fMP4→`<video>` approach was abandoned (see
 > "Why WebRTC"); the discovery/download infra it introduced is reused for go2rtc.

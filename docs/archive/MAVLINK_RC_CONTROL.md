@@ -1,5 +1,8 @@
 # RC Control over MAVLink — ArduPilot + PX4 (cross-platform plan)
 
+> ARCHIVED (2026-06-28) — feature complete. ArduPilot SITL-verified; PX4 validation is user-side and
+> not kept open.
+
 > Status: **ArduPilot SHIPPED** (2026-06-21, SITL-verified) · **PX4 IMPLEMENTED, UNTESTED** (2026-06-21,
 > no PX4 SITL/hardware available here — needs validation). Extends the shipped INAV/MSP RC control to
 > MAVLink flight stacks. The **shared layer** (HID backend, profiles, engine, engage gate, deadman) is

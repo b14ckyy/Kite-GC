@@ -1,5 +1,8 @@
 # Multi-Battery (ArduPilot / PX4) — Feature Plan
 
+> ARCHIVED (2026-06-28) — feature complete (ADR-059), user-verified via QuadPlane DataFlash replay.
+> Live multi-monitor validation is user-side; not kept open.
+
 > STATUS: **shipped-local** · 2026-06-26 (verified by the user via QuadPlane DataFlash replay; live
 > path implemented, not SITL-tested). See **ADR-059**. Schema **v18** (`battery_records`). Decisions
 > taken: Schema **B** (dedicated table); AUTO = highest draw + hardcoded 1 A margin + 5 s hysteresis;

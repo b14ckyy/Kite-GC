@@ -1,6 +1,10 @@
 # INAV Geozones — Feature Plan
 
-> STATUS: P1 (display) + P2 (editor) + mission safety check SHIPPED · 2026-06-23. P3 (alerts) open.
+> ARCHIVED (2026-06-28) — fully shipped (P1 + P2 + P3). Kept for the byte-exact MSP + editor reasoning.
+>
+> STATUS: P1 (display) + P2 (editor) + mission safety check + P3 (in-flight breach toast) SHIPPED.
+> The P3 toast is GCS-computed geometry (commit `3f0e53b`) — INAV doesn't expose its geozone-avoidance
+> flight mode over MSP, so the planned mode-detection approach was dropped in favour of the geometric one.
 > Second of the three "Airspace Manager" safety subsystems
 > (Autoland → **Geozones** → Geofence). Distinct from the worldwide-NFZ idea (that one is generic
 > drone no-fly maps from external providers; see the future note). This is the **INAV FC geozone

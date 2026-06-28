@@ -16,7 +16,7 @@
 > - **Phase 5 (generic two-way MAVLink commands — arm/disarm/mode/param) was not pursued** —
 >   Kite GC is receive-only for live telemetry.
 > - The MAVLink **mission protocol** (the "Future" section) shipped separately — see
->   [MISSION_MULTIAUTOPILOT_PLAN.md](../active/MISSION_MULTIAUTOPILOT_PLAN.md).
+>   [MISSION_MULTIAUTOPILOT_PLAN.md](MISSION_MULTIAUTOPILOT_PLAN.md).
 >
 > **Archive candidate** (workstream done; remaining ideas tracked in ROADMAP).
 

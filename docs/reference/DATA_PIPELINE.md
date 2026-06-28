@@ -297,7 +297,7 @@ ADR-038, is a separate on-demand aeronautical-data fetch — not a live stream.)
 ### 9.2 RC control — outbound (uplink) injection
 
 The RC path is **outbound** and independent of inbound telemetry (RC over MSP archived in
-`../archive/MSP_RC_CONTROL.md`; MAVLink in [../active/MAVLINK_RC_CONTROL.md](../active/MAVLINK_RC_CONTROL.md)):
+`../archive/MSP_RC_CONTROL.md`; MAVLink in [../archive/MAVLINK_RC_CONTROL.md](../archive/MAVLINK_RC_CONTROL.md)):
 
 ```
 HID device → stores/hid.ts → rcEngine (channel methods) / rcManual (PX4 4-axis)

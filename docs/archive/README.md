@@ -47,3 +47,28 @@ are still perfectly fine; the doc simply isn't on the active work surface anymor
   dedup/preview/export + flight-link over the format-agnostic `missions` table. Phase 1 shipped. **Open
   (deferred):** Phase 2 provenance / fc-file-db sync chips for the AP store. (The broader ArduPilot
   WP-type/vehicle-class work stays active in `../active/ARDUPILOT_WAYPOINT_ARCHITECTURE.md`.)
+- **RADAR_ALERTS.md** — ADS-B conflict alerts (Plan C, ADR-035). C0 + C1 + C3 shipped: alert logic,
+  banner/audio/map highlight, and the user-tunable proximity/CPA thresholds.
+- **GEOZONES.md** — INAV FC geozone editor (Airspace Manager, byte-exact MSP). P1 display + P2 editor +
+  altitude-aware mission safety check + P3 in-flight breach toast (GCS-geometric) all shipped.
+- **GEOFENCE.md** — ArduPilot/PX4 FC geofence + rally points editor (Airspace Manager, `MAV_MISSION_TYPE_FENCE`).
+  Full editor + geometric breach fallback shipped; ArduPilot SITL-validated, PX4/on-hardware validation user-side.
+- **USER_DOCS_ARCHITECTURE.md** — User-docs hosting/layout plan. The MkDocs Material site (`docs/user/`)
+  shipped to master 2026-06-27; the "For developers" section is deferred post-release.
+- **VideoFeature.md** — Embedded video v1 (webcam/USB source, panel, dock + floating window, PiP,
+  persistence). Shipped; network streams (v2) tracked in `RTSP_VIDEO.md`.
+- **RTSP_VIDEO.md** — Live RTSP video via go2rtc → WebRTC. Shipped (OBS-verified); real-source
+  (DJI / IP-cam) validation is user-side.
+- **VEHICLE_CONTROL.md** — MAVLink command + guided-steering panel (ADR-052). V1 shipped, ArduPilot
+  SITL-verified (Copter/Plane/QuadPlane); PX4 hardware + INAV guided / HID RC deferred.
+- **VEHICLE_DB.md** — Vehicle database (mirrors the Battery DB: table + soft-link + manager + `.k*`
+  export/import + FC baseline). Phases A–C shipped; on-device INAV validation user-side.
+- **MAVLINK_RC_CONTROL.md** — RC control over MAVLink (ArduPilot + PX4); reuses the shared HID /
+  profile / engine layer (see `MSP_RC_CONTROL.md`). ArduPilot SITL-verified; PX4 user-side.
+- **MULTI_BATTERY.md** — Multi-battery for ArduPilot/PX4 (ADR-059, schema v18, up to 10 monitors).
+  Shipped, user-verified via QuadPlane DataFlash replay; live multi-monitor validation user-side.
+- **MISSION_MULTIAUTOPILOT_PLAN.md** — Multi-autopilot mission planning (autopilot context/locking,
+  AP WP types, MAVLink mission microprotocol, survey planner). Phases 1–4 (ArduPilot + PX4) shipped;
+  INAV-over-MAVLink won't-do; real-PX4-hardware validation user-side.
+- **MISSION_TRACKING_AND_PROVENANCE.md** — Mission FC/FILE/DB provenance flags + active-WP highlight
+  gating. Fully shipped (INAV + ArduPilot): flags, DB-integrate flow, and "upload all" multi-mission.

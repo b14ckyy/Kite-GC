@@ -1,5 +1,10 @@
 # Mission Tracking & Provenance — flag model + active-WP highlight gating
 
+> ARCHIVED (2026-06-28) — fully shipped (INAV + ArduPilot). The three former "Pending" items are all
+> done (verified in code 2026-06-28): ArduPilot mission-layer flags (`arduMissionFlags`), the DB-flag
+> integrate flow (`markMissionSynced('db')` from the library + logbook), and "upload all" multi-mission
+> (`assemble_multi_mission` / `mission_upload_multi`).
+
 **Status:** Implemented for **INAV** (2026-06-02): the 3-flag model, content-snapshot
 validity, the highlight trust gates, both "track?" popups, the connect prompt, and the flag
 labels in the mission panel, and the active-WP readout (`WP N/X`) in the Flight-Mode widget.

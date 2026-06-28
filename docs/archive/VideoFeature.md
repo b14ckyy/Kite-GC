@@ -1,5 +1,7 @@
 # Embedded Video — planning & design
 
+> ARCHIVED (2026-06-28) — v1 shipped; v2 (network streams RTSP/UDP) is tracked in `RTSP_VIDEO.md` (same folder).
+
 Status: **v1 complete.** Router + webcam/USB source, NavRail panel (live preview), 2×1 dock widget, snap/drag floating window, double-click map⇄video swap, native Picture-in-Picture, and persistence/auto-start are all built (see §3, all marked ✅). **Pending (v2):** network streams (RTSP/UDP), native `nokhwa` capture, snapshot/record.
 
 Goal: embed an FPV / camera feed in the GCS — local webcam & USB capture now, network streams (RTSP/UDP) later — cross-platform (Windows / Linux), modular, no hard dependency on a specific source.

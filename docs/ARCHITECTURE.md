@@ -1552,7 +1552,7 @@ kept-in-RAM viewer model.
 **Date**: 2026-06-07
 **Status**: Accepted
 **Related**: ADR-009 (frontend architecture — controllers/stores), ADR-031 (2D↔3D continuity), the radar
-plan docs (`docs/active/RADAR_TRACKING_*`, `RADAR_ALERTS.md`)
+plan docs (`docs/archive/RADAR_TRACKING_*`, `RADAR_ALERTS.md`)
 
 **Context**: The radar subsystem surfaces foreign vehicles (ADS-B first; FormationFlight / Radio later) on
 the 2D + 3D maps. Beyond "there is traffic", we wanted *smart* conflict alerts for the connected UAV —
@@ -2368,7 +2368,7 @@ flight-mode classification runs without box-ids (handshake-only); no reverse-geo
 
 **Status**: Accepted (Phase 1 shipped) · **Date**: 2026-06-15
 **Related**: ADR-045 (shared mission icon layer), the multi-autopilot plan
-(`docs/active/MISSION_MULTIAUTOPILOT_PLAN.md`), the archived INAV library
+(`docs/archive/MISSION_MULTIAUTOPILOT_PLAN.md`), the archived INAV library
 (`docs/archive/MISSION_LIBRARY_AND_DB.md`), MISSION_TRACKING_AND_PROVENANCE (provenance flags).
 **Detail**: `docs/active/ARDUPILOT_MISSION_LIBRARY.md`.
 
@@ -2450,7 +2450,7 @@ passive-sourced relays emit at the true data rate.
 ## ADR-052: Vehicle Control — GCS Command Panel (MAVLink, ArduPilot + PX4)
 
 **Status**: Accepted — V1 shipped (ArduPilot SITL-verified on Copter/Plane/QuadPlane; PX4 firmware-aware
-but **untested on hardware**). **Detail**: `docs/active/VEHICLE_CONTROL.md`.
+but **untested on hardware**). **Detail**: `docs/archive/VEHICLE_CONTROL.md`.
 **Related**: ADR-010 (multi-protocol), ADR-029 (panel framework), ADR-043 (MAVLink stream rates),
 ADR-044 (unified flight mode), ADR-046 (catalog-driven editor), ADR-039 (home reference), ADR-054 (the
 continuous-RC sibling).
@@ -2521,7 +2521,7 @@ build is needed; the probe is armed in the dev build).
 ## ADR-054: RC Control — Outbound RC Injection (GCS as Transmitter)
 
 **Status**: Accepted — INAV/MSP shipped (on-hardware); ArduPilot/MAVLink **SITL-verified**; PX4
-implemented but **untested**. **Detail**: `docs/archive/MSP_RC_CONTROL.md` + `docs/active/MAVLINK_RC_CONTROL.md`.
+implemented but **untested**. **Detail**: `docs/archive/MSP_RC_CONTROL.md` + `docs/archive/MAVLINK_RC_CONTROL.md`.
 **Related**: ADR-010 (the owning protocol thread streams the link), ADR-007 (MSP scheduler), ADR-052 (the
 discrete-command sibling — modes/arm stay there).
 
@@ -2695,7 +2695,7 @@ smoothed), not an FC value — recorded here so it is not mistaken for direct te
 ## ADR-059: Multi-Battery Telemetry Model (ArduPilot / PX4)
 
 **Status**: Accepted — shipped. **Related**: ADR-058 (throttle normalization); the telemetry pipeline;
-schema **v18** (`battery_records`); [docs/active/MULTI_BATTERY.md](active/MULTI_BATTERY.md).
+schema **v18** (`battery_records`); [docs/archive/MULTI_BATTERY.md](archive/MULTI_BATTERY.md).
 
 **Context**: ArduPilot/PX4 can run up to **10 independent battery monitors** at once (e.g. a QuadPlane
 with a big Li-Ion for the fixed-wing forward motor + a small LiPo for the VTOL lift). Kite collapsed

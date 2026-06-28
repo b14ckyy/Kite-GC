@@ -1,5 +1,8 @@
 # Vehicle Control — GCS Command & Guided Steering
 
+> ARCHIVED (2026-06-28) — V1 complete. ArduPilot SITL-verified (Copter / Plane / QuadPlane); PX4
+> on-hardware validation is user-side. INAV guided / HID RC remain deferred (§11).
+
 > Status: **V1 shipped** (2026-06-19) — MAVLink command panel (ArduPilot + PX4) on the `control`
 > nav-rail tab (shown only while connected via MAVLink). **SITL-verified on ArduPilot Copter / Plane /
 > QuadPlane** (modes, arm/disarm, takeoff, RTL, Guided + Fly-Here, change alt/speed, set home, abort

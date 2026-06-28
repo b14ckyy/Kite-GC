@@ -3,7 +3,7 @@
 > ARCHIVED (2026-06-21) — INAV/MSP RC control is shipped through Phase 4 (the live send pipeline);
 > only Phase 5 (takeover UI / arming policy) remains. This doc is preserved as the detailed MSP-side
 > reference. The **cross-platform** RC-control plan (platform gating + ArduPilot + PX4) now lives in
-> `docs/active/MAVLINK_RC_CONTROL.md`, which reuses the shared HID / mapping / profile / engine layer
+> `docs/archive/MAVLINK_RC_CONTROL.md`, which reuses the shared HID / mapping / profile / engine layer
 > described here.
 
 > Status: **PLAN** (2026-06-20) — not started. Large, safety-critical feature built incrementally.

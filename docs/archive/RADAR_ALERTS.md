@@ -1,6 +1,9 @@
 # Radar — Conflict Alerts (Plan C)
 
-> Status: **C0 + C1 shipped** (2026-06-07) — core logic, banner, audio, map highlight, settings. See
+> ARCHIVED (2026-06-28) — fully shipped (C0 + C1 + C3). Kept for the detailed alert-logic reasoning.
+>
+> Status: **C0 + C1 + C3 shipped** — core logic, banner, audio, map highlight, settings, and the
+> user-editable proximity/CPA thresholds (C3, commit `3f0e53b`). See
 > **ADR-035**. Smart proximity/conflict alerts for ADS-B vehicles vs the connected UAV, on top of the
 > [radar subsystem](RADAR_TRACKING_CORE.md) + [map](RADAR_TRACKING_PANEL_AND_MAP.md). **ADS-B only** —
 > FormationFlight / Radio-telemetry contacts are for monitoring / pilot-to-pilot awareness and never alert.
