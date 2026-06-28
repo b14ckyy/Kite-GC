@@ -67,6 +67,8 @@ features = ["Gaming_Input", "Foundation_Collections"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 evdev = "0.13"
+# TIOCGSERIAL probe to hide phantom 8250 /dev/ttyS* stubs from the port list (serial.rs).
+libc = "0.2"
 # Access the underlying WebKitGTK WebView to pin its page zoom at 1.0 (lib.rs setup). On Linux the
 # trackpad pinch / Ctrl+wheel zoom is handled natively by GTK and ignores any JS preventDefault, so the
 # whole-frame zoom can only be suppressed here. Version must match the one wry/tauri pulls (unified by Cargo).

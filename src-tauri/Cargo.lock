@@ -2441,6 +2441,7 @@ dependencies = [
  "dirs 5.0.1",
  "evdev",
  "futures",
+ "libc",
  "log",
  "mavlink",
  "num-traits",

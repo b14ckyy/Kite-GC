@@ -192,6 +192,46 @@ fn log_bthenum_tree() {
 
 /// List available serial ports on the system.
 ///
+/// Linux registers the legacy 8250 UARTs as `/dev/ttyS0..31` even when no real hardware sits behind
+/// them, so the raw enumeration is full of non-connectable phantom stubs (one machine showed ~20).
+/// Such stubs report `PORT_UNKNOWN` via the `TIOCGSERIAL` ioctl — exactly what `setserial` prints as
+/// "UART: unknown" — whereas a real port reports a concrete UART type. We probe ONLY `ttyS*` nodes:
+/// USB-serial (`ttyUSB*`/`ttyACM*`) doesn't implement `TIOCGSERIAL` meaningfully (it also reads as
+/// `PORT_UNKNOWN`) and is already trustworthy via its USB descriptor. If a node can't be opened or
+/// probed we keep it — better a stray entry than a hidden real port.
+#[cfg(target_os = "linux")]
+fn is_phantom_serial_stub(port_name: &str) -> bool {
+    use std::os::unix::fs::OpenOptionsExt;
+    use std::os::unix::io::AsRawFd;
+
+    // TIOCGSERIAL get-config ioctl; `struct serial_struct`'s first field is `int type`, PORT_UNKNOWN == 0.
+    const TIOCGSERIAL: libc::c_ulong = 0x541E;
+
+    let leaf = port_name.rsplit('/').next().unwrap_or(port_name);
+    if !leaf.starts_with("ttyS") {
+        return false; // not an 8250 node → never a phantom 8250 stub
+    }
+
+    let file = match std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .custom_flags(libc::O_NONBLOCK | libc::O_NOCTTY)
+        .open(port_name)
+    {
+        Ok(f) => f,
+        Err(_) => return false, // can't open (e.g. no permission) → don't hide it
+    };
+
+    // `serial_struct` is ~72 bytes; over-allocate so the kernel never writes past our buffer.
+    let mut serinfo = [0u8; 128];
+    let rc = unsafe { libc::ioctl(file.as_raw_fd(), TIOCGSERIAL, serinfo.as_mut_ptr()) };
+    if rc != 0 {
+        return false; // ioctl unsupported/failed → keep the port
+    }
+    let port_type = i32::from_ne_bytes([serinfo[0], serinfo[1], serinfo[2], serinfo[3]]);
+    port_type == 0 // PORT_UNKNOWN → phantom stub
+}
+
 /// On Windows, Bluetooth SPP ports are special-cased: the *incoming* (local server) port of each
 /// paired device is hidden, and the *outgoing* (client) port is tagged `bluetooth-spp` so the UI can
 /// offer a custom rename (the OS gives them no useful device descriptor). All other ports keep their
@@ -230,6 +270,13 @@ pub fn list_ports() -> Vec<PortInfo> {
                         label: p.port_name,
                         port_type: "bluetooth-spp".to_string(),
                     });
+                }
+
+                // Linux: drop phantom 8250 stubs (/dev/ttyS* with no real UART behind them) — they
+                // clutter the list with non-connectable entries. See is_phantom_serial_stub.
+                #[cfg(target_os = "linux")]
+                if is_phantom_serial_stub(&p.port_name) {
+                    return None;
                 }
 
                 let (label, port_type) = match &p.port_type {
