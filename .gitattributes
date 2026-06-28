@@ -1,0 +1,6 @@
+# core.autocrlf=true (Windows) keeps trying to convert LF files to CRLF, which makes
+# already-LF files like src-tauri/Cargo.toml show as perpetually "modified" with an empty
+# diff. Pin TOML to LF so the working copy matches what's stored and the noise goes away.
+# Scoped to *.toml on purpose — a global eol=lf would re-touch the ~195 files currently
+# checked out as CRLF.
+*.toml text eol=lf
