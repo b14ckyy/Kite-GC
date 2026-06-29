@@ -3,8 +3,6 @@
   ![Kite Ground Control](assets/branding/kitegc-logo-full-light.svg#only-dark){ width="480" }
 </p>
 
-# Kite Ground Control
-
 **Kite Ground Control (Kite GC)** is a modern, cross-platform ground control station for
 **INAV**, **ArduPilot**, and **PX4** aircraft — planes, multirotors, VTOL, helicopters, rovers and
 boats. It combines everything you expect from a GCS with a fast, intuitive interface and a few things
