@@ -11,7 +11,8 @@ import { writable, derived, get, type Readable } from 'svelte/store';
 import { telemetry } from '$lib/stores/telemetry';
 import { connection } from '$lib/stores/connection';
 import { autopilotSystem } from '$lib/stores/autopilotContext';
-import { arduVehicleClass } from '$lib/stores/missionArdupilot';
+import { arduVehicleClass, downloadArduMissionFromFc } from '$lib/stores/missionArdupilot';
+import { rcEngaged } from '$lib/stores/rcEngage';
 import { type MavMode, modesFor, guidedModeFor, matchActiveMode } from '$lib/helpers/mavModes';
 
 // ── Feedback (COMMAND_ACK surfacing) ────────────────────────────────────────
@@ -81,6 +82,15 @@ export const controlAvailable: Readable<boolean> = derived(
 export const rcLinkPresent: Readable<boolean> = derived(
   telemetry,
   (t) => t.link.rssiPercent != null && t.link.rssiPercent > 0,
+);
+
+/** Whether stick-flown modes are safe to select: there must be a usable RC source — either a physical
+ *  transmitter (the FC reports RC RSSI) OR Kite's own RC control is engaged, i.e. we're streaming the
+ *  sticks to the FC (ArduPilot RC_CHANNELS_OVERRIDE / PX4 MANUAL_CONTROL). Without one, a stick mode
+ *  would leave the vehicle with no control input, so the panel keeps those modes locked. */
+export const stickModesUnlocked: Readable<boolean> = derived(
+  [rcLinkPresent, rcEngaged],
+  ([rc, eng]) => rc || eng.on,
 );
 
 /** Armed state from the unified arming flags (bit 2 = armed, matches the recorder convention). */
@@ -229,6 +239,22 @@ export function missionStart(): Promise<boolean> {
 /** Rewind the mission to the first item (MP's "Restart Mission" = MISSION_SET_CURRENT(0)). */
 export function missionRestart(): Promise<boolean> {
   return runCommand('missionRestart', 'mav_mission_set_current', { seq: 0 });
+}
+
+/** Download the FC's mission into the working mission so the panel can command it (enables Set active
+ *  WP). Not a COMMAND_ACK action, so it manages busy/feedback directly instead of via runCommand. */
+export async function missionDownload(): Promise<boolean> {
+  busyAction.set('missionDownload');
+  try {
+    await downloadArduMissionFromFc();
+    lastFeedback.set({ action: 'missionDownload', ok: true, message: '', ts: Date.now() });
+    return true;
+  } catch (e) {
+    lastFeedback.set({ action: 'missionDownload', ok: false, message: String(e), ts: Date.now() });
+    return false;
+  } finally {
+    busyAction.set(null);
+  }
 }
 
 /** Set the FC's active mission item to `seq` (FC item index, home-slot aware — see the panel). */

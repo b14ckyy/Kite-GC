@@ -339,7 +339,7 @@
       "current": "Aktiver Modus"
     },
     "showAllModes": "Alle Modi anzeigen",
-    "rcLockHint": "Stick-gesteuerte Modi brauchen eine verbundene RC-Fernsteuerung.",
+    "rcLockHint": "Stick-gesteuerte Modi brauchen eine RC-Quelle — eine verbundene Fernsteuerung oder aktive RC-Control.",
     "noRcLink": "Keine RC-Verbindung",
     "takeoffAlt": "Starthöhe (m)",
     "alt": "Höhe (m)",
@@ -366,6 +366,7 @@
       "guided": "Guided",
       "missionStart": "Start",
       "missionRestart": "Neustart",
+      "missionDownload": "Mission laden",
       "setWp": "WP setzen",
       "changeAlt": "Höhe ändern",
       "setHeading": "Kurs setzen",

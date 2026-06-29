@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
 import { writable, derived, get } from 'svelte/store';
+import { invoke } from '@tauri-apps/api/core';
 import { connection } from './connection';
 import { settings } from './settings';
 import { CMD, cmdHasLocation, type VehicleClass } from '$lib/helpers/arduCommandCatalog';
@@ -362,6 +363,19 @@ export function arduClearUndoHistory(): void {
   arduRedoStack = [];
   arduUndoSuspend = 0;
   arduSyncUndoFlags();
+}
+
+/** Download the mission from the connected MAVLink FC (ArduPilot/PX4), replace the working mission and
+ *  mark it FC-synced (which gates "Set active WP"). Returns the waypoint count. Shared by the mission
+ *  panel and the Vehicle Control panel; camera framing stays with the caller (a UI concern). */
+export async function downloadArduMissionFromFc(): Promise<number> {
+  const wps = await invoke<ArduWaypoint[]>('ardu_mission_download');
+  arduMission.set(wps);
+  arduSelectedWpIndex.set(-1);
+  arduLoadedMissionId.set(null); // from the FC → not a library mission
+  arduClearUndoHistory();        // downloaded mission = fresh undo baseline
+  markArduMissionSynced('fc', wps);
+  return wps.length;
 }
 
 // ── .waypoints file format ────────────────────────────────────────────

@@ -328,7 +328,7 @@
       "current": "Mode actif"
     },
     "showAllModes": "Afficher tous les modes",
-    "rcLockHint": "Les modes au manche nécessitent une radiocommande connectée.",
+    "rcLockHint": "Les modes au manche nécessitent une source RC — une radiocommande connectée ou le contrôle RC actif.",
     "noRcLink": "Pas de liaison RC",
     "takeoffAlt": "Altitude de décollage (m)",
     "alt": "Alt (m)",
@@ -355,6 +355,7 @@
       "guided": "Guided",
       "missionStart": "Démarrer",
       "missionRestart": "Redémarrer",
+      "missionDownload": "Charger la mission",
       "setWp": "Définir WP",
       "changeAlt": "Changer altitude",
       "setHeading": "Définir cap",

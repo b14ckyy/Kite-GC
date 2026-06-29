@@ -16,7 +16,7 @@
   import {
     arduMission, arduSelectedWpIndex, arduEditMode, arduLoadedMissionId,
     arduMissionClear, arduRemoveWp, groupArduMission, markArduMissionSynced,
-    arduMissionFlags, arduMissionModified,
+    arduMissionFlags, arduMissionModified, downloadArduMissionFromFc,
     arduUndo, arduRedo, arduCanUndo, arduCanRedo, arduClearUndoHistory,
     arduVehicleClass, setArduVehicleClass,
     MAV_FRAME_GLOBAL, MAV_FRAME_GLOBAL_TERRAIN_ALT,
@@ -266,13 +266,8 @@
         : $t('mission.downloading');
     });
     try {
-      const wps = await invoke<ArduWaypoint[]>('ardu_mission_download');
-      arduMission.set(wps);
-      arduSelectedWpIndex.set(-1);
-      arduLoadedMissionId.set(null); // downloaded from FC → not a library mission
-      arduClearUndoHistory(); // downloaded mission = fresh undo baseline
-      markArduMissionSynced('fc', wps); // now in sync with the FC (gates Set-WP in the control panel)
-      statusMessage = $t('mission.downloaded', { values: { count: wps.length } });
+      const count = await downloadArduMissionFromFc();
+      statusMessage = $t('mission.downloaded', { values: { count } });
       frameMissionOnMap();
     } catch (e) {
       statusMessage = $t('mission.downloadFailed', { values: { error: String(e) } });

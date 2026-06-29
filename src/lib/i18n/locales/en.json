@@ -339,7 +339,7 @@
       "current": "Active mode"
     },
     "showAllModes": "Show all modes",
-    "rcLockHint": "Stick-flown modes need a connected RC transmitter.",
+    "rcLockHint": "Stick-flown modes need an RC source — a connected transmitter, or active RC control.",
     "noRcLink": "No RC link",
     "takeoffAlt": "Takeoff altitude (m)",
     "alt": "Alt (m)",
@@ -366,6 +366,7 @@
       "guided": "Guided",
       "missionStart": "Start",
       "missionRestart": "Restart",
+      "missionDownload": "Download Mission",
       "setWp": "Set WP",
       "changeAlt": "Change Alt",
       "setHeading": "Set Heading",

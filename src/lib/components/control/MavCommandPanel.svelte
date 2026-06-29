@@ -17,11 +17,12 @@
   import { arduVehicleClass, arduMission, arduMissionFcSynced, MAV_CMD_SHORT } from '$lib/stores/missionArdupilot';
   import { modesFor, type MavMode } from '$lib/helpers/mavModes';
   import {
-    controlAvailable, rcLinkPresent, isArmed, activeMode, busyAction, lastFeedback,
+    controlAvailable, stickModesUnlocked, isArmed, activeMode, busyAction, lastFeedback,
     guidedActive,
-    setMode, arm, disarm, takeoff, land, rtl, missionStart, missionRestart, missionSetCurrent, setGuided,
+    setMode, arm, disarm, takeoff, land, rtl, missionStart, missionRestart, missionDownload, missionSetCurrent, setGuided,
     changeAlt, changeSpeed, setLoiterRadius, setHomeHere, abortLanding, setHeading, vtolTransition,
   } from '$lib/controllers/vehicleControl';
+  import { frameMissionOnMap } from '$lib/stores/mapCamera';
 
   const sys = $derived($autopilotSystem);
   const cls = $derived($arduVehicleClass);
@@ -35,7 +36,7 @@
   const quickModes = $derived(safeModes.filter((m) => !DEDICATED.has(m.key)));
 
   let showAllModes = $state(false);
-  const stickUnlocked = $derived($rcLinkPresent); // stick modes selectable only with an RC link
+  const stickUnlocked = $derived($stickModesUnlocked); // RC transmitter OR engaged RC control
 
   let takeoffAlt = $state(50);
 
@@ -77,6 +78,12 @@
     const idx = setWpNum - 1;
     if (idx < 0 || idx >= wpCount) return;
     void missionSetCurrent(idx + homeSlot);
+  }
+
+  // Pull the FC's mission into the working mission so it can be commanded here (Start/Restart/Set WP).
+  // Frame it on the map on success, mirroring the mission panel's download.
+  async function handleMissionDownload() {
+    if (await missionDownload()) frameMissionOnMap();
   }
   function wpLabel(i: number): string {
     const wp = $arduMission[i];
@@ -245,6 +252,9 @@
         <!-- 7. Mission control -->
         <section class="cc-sec">
           <span class="cc-sec-title">{$t('control.section.mission')}</span>
+          <Button variant="data" icon="download" size="sm" full disabled={busy('missionDownload')} onclick={handleMissionDownload}>
+            {$t('control.action.missionDownload')}
+          </Button>
           <div class="cc-row">
             <Button variant="standard" full onclick={() => missionStart()}>{$t('control.action.missionStart')}</Button>
             <Button variant="standard" full onclick={() => missionRestart()}>{$t('control.action.missionRestart')}</Button>
