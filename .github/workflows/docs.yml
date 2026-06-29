@@ -15,6 +15,7 @@ on:
     paths:
       - docs/user/**
       - mkdocs.yml
+      - overrides/**
       - docs/requirements.txt
       - .github/workflows/docs.yml
   workflow_dispatch:

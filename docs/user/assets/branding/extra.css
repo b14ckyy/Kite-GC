@@ -1,0 +1,14 @@
+/* Kite Ground Control — brand colours for the docs site.
+   Pins the exact app accent (#37a8db) as the primary, with the brand orange
+   (#f5a623) as the interactive accent (link hover / active nav) — the blue+orange
+   pairing from the logo. Applied to both the light (default) and dark (slate) schemes. */
+
+:root,
+[data-md-color-scheme="default"],
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color:        #37a8db;
+  --md-primary-fg-color--light: #5cbbe5;
+  --md-primary-fg-color--dark:  #2e96c5;
+  --md-accent-fg-color:         #f5a623;
+  --md-accent-fg-color--transparent: rgba(245, 166, 35, 0.1);
+}

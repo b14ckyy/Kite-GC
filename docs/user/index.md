@@ -1,3 +1,8 @@
+<p align="center" markdown>
+  ![Kite Ground Control](assets/branding/kitegc-logo-full.svg#only-light){ width="480" }
+  ![Kite Ground Control](assets/branding/kitegc-logo-full-light.svg#only-dark){ width="480" }
+</p>
+
 # Kite Ground Control
 
 **Kite Ground Control (Kite GC)** is a modern, cross-platform ground control station for
