@@ -27,11 +27,10 @@ function Grab($pattern) {
     }
 }
 
-# Standalone executable + installers (NSIS setup + MSI).
+# Standalone executable + NSIS installer.
 $exe = Join-Path $rel 'kite-gc.exe'
 if (Test-Path $exe) { Copy-Item $exe -Destination $out -Force; $collected += 'kite-gc.exe' }
 Grab (Join-Path $bundle 'nsis\*-setup.exe')
-Grab (Join-Path $bundle 'msi\*.msi')
 
 Write-Host ''
 if ($collected.Count -eq 0) {
