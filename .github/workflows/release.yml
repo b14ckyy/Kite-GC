@@ -1,45 +1,60 @@
-# Kite Ground Control - Release Build
+# Kite Ground Control — Release build (manual)
 #
-# Runs when a tag matching v* is pushed (e.g. v0.1.0, v0.2.0).
-# Builds platform-specific bundles and uploads them as release artefacts.
+# Manually triggered only (Actions tab -> "Release build" -> Run workflow, or
+# `gh workflow run release.yml`). Builds the distributable artifacts on a pinned,
+# broadly-compatible base and uploads them as downloadable workflow artifacts —
+# download them from the run and attach them to a GitHub release by hand.
 #
-# Windows: NSIS installer (.exe)
-# Linux:   .deb package
+# Deliberately NOT triggered on push/tags: releases are cut on demand, not per commit.
+#
+# Linux is built on ubuntu-22.04 on purpose: its glibc / GTK / libgcrypt are old
+# enough that the bundled libraries (esp. the AppImage) run on 22.04, 24.04, Debian
+# 12/13 and newer. Building on a newer base (e.g. Debian 13) over-bundles newer libs
+# and breaks on older targets (e.g. the libgcrypt/libgpg-error symbol mismatch).
 
-name: Release
+name: Release build
 
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-    name: Build (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact_name: KiteGC-Setup-x64.exe
-            artifact_path: src-tauri/target/release/bundle/nsis/Kite\ Ground\ Control_*_x64-setup.exe
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact_name: kite-gc_amd64.deb
-            artifact_path: src-tauri/target/release/bundle/deb/kite-gc_*.deb
-
+  windows:
+    name: Build (Windows)
+    runs-on: windows-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Build Tauri bundle
+        run: npm run tauri build
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kite-gc-windows
+          if-no-files-found: error
+          path: |
+            src-tauri/target/release/kite-gc.exe
+            src-tauri/target/release/bundle/nsis/*-setup.exe
 
-      # --- Linux system dependencies ---
-      - name: Install Linux system dependencies
-        if: matrix.os == 'ubuntu-latest'
+  linux:
+    name: Build (Linux · ubuntu-22.04)
+    runs-on: ubuntu-22.04
+    env:
+      # Let appimagetool run without FUSE on the CI runner.
+      APPIMAGE_EXTRACT_AND_RUN: 1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -50,33 +65,27 @@ jobs:
             libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev \
             libudev-dev \
-            patchelf
-
-      # --- Frontend ---
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+            patchelf \
+            file \
+            libfuse2
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
-
-      - name: Install npm dependencies
-        run: npm ci
-
-      # --- Backend ---
-      - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo registry
-        uses: Swatinem/rust-cache@v2
+      - run: npm ci
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-
-      - name: Build Tauri bundle (${{ matrix.os }})
+      - name: Build Tauri bundle
         run: npm run tauri build
-
-      - name: Upload artefact to release
-        uses: softprops/action-gh-release@v2
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
         with:
-          files: |
-            ${{ matrix.artifact_path }}
-          generate_release_notes: true
+          name: kite-gc-linux
+          if-no-files-found: error
+          path: |
+            src-tauri/target/release/kite-gc
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/rpm/*.rpm
+            src-tauri/target/release/bundle/appimage/*.AppImage
