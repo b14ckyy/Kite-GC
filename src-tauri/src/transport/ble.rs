@@ -392,25 +392,50 @@ pub async fn connect_ble(device_id: &str) -> Result<BleTransport, String> {
 
         loop {
             tokio::select! {
-                // Forward BLE notifications → read channel
-                Some(notification) = notifications.next() => {
-                    if notification.uuid == read_char.uuid {
-                        let _ = read_tx.send(notification.value);
+                // Forward BLE notifications → read channel. `next()` yielding None means the GATT
+                // notification stream ENDED — the BLE link dropped (out of range, the OS Bluetooth stack
+                // tore it down, or the device reset). This arm is essential: without a `None` case
+                // tokio::select! silently disables the branch and the task spins forever holding `read_tx`
+                // alive, so the sync side never sees a disconnect — it just times out endlessly (the
+                // "poller stops, link goes red, no error in the log" bug). Breaking drops `read_tx` →
+                // read_bytes() returns Disconnected → the scheduler tears down and emits connection-lost.
+                maybe = notifications.next() => {
+                    match maybe {
+                        Some(notification) => {
+                            if notification.uuid == read_char.uuid {
+                                let _ = read_tx.send(notification.value);
+                            }
+                        }
+                        None => {
+                            log::warn!("BLE notification stream ended — link lost (device gone / out of range)");
+                            let _ = peripheral_clone.disconnect().await;
+                            break;
+                        }
                     }
                 }
-                // Handle write requests from sync side
+                // Handle write requests from sync side. A write error here is the *primary* disconnect
+                // signal on some adapters (e.g. CC2541/HC-04): BlueZ returns "Not connected" on write
+                // while the notification stream hasn't ended yet. Previously we only logged it and kept
+                // looping, so the FC stalled with no teardown. Treat it as link-lost: disconnect and break
+                // so read_tx drops → read_bytes() returns Disconnected → the scheduler tears down.
                 Some(data) = write_async_rx.recv() => {
+                    let mut write_err = None;
                     for chunk in data.chunks(BLE_WRITE_MTU) {
                         if let Err(e) = peripheral_clone
                             .write(&write_char, chunk, WriteType::WithoutResponse)
                             .await
                         {
-                            log::error!("BLE write failed: {}", e);
+                            write_err = Some(e);
                             break;
                         }
                         if !write_delay.is_zero() {
                             tokio::time::sleep(write_delay).await;
                         }
+                    }
+                    if let Some(e) = write_err {
+                        log::warn!("BLE write failed ({}) — link lost, disconnecting", e);
+                        let _ = peripheral_clone.disconnect().await;
+                        break;
                     }
                 }
                 // Stop signal
@@ -423,6 +448,7 @@ pub async fn connect_ble(device_id: &str) -> Result<BleTransport, String> {
         }
     });
 
+    log::info!("BLE connected: {} [{}]", device_name, profile_name);
     Ok(BleTransport {
         device_name,
         profile_name,
@@ -652,12 +678,23 @@ pub async fn connect_ble_listen(
         let mut notifications = notification_stream;
         loop {
             tokio::select! {
-                Some(n) = notifications.next() => {
-                    let _ = app_clone.emit("ble-gatt-char-data", GattCharData {
-                        uuid: n.uuid.to_string(),
-                        len: n.value.len(),
-                    });
-                    let _ = read_tx.send(n.value);
+                maybe = notifications.next() => {
+                    match maybe {
+                        Some(n) => {
+                            let _ = app_clone.emit("ble-gatt-char-data", GattCharData {
+                                uuid: n.uuid.to_string(),
+                                len: n.value.len(),
+                            });
+                            let _ = read_tx.send(n.value);
+                        }
+                        None => {
+                            // Stream ended — link dropped. Break so read_tx is dropped and the sync side
+                            // sees a clean disconnect instead of an endless silent timeout (see connect_ble).
+                            log::warn!("BLE listen: notification stream ended — link lost");
+                            let _ = peripheral_clone.disconnect().await;
+                            break;
+                        }
+                    }
                 }
                 Some(data) = write_async_rx.recv() => {
                     if write_chars.is_empty() {

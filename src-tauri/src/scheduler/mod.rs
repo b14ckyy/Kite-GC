@@ -249,6 +249,12 @@ fn scheduler_loop(
         if config.airspeed_enabled { "on" } else { "off" },
     );
 
+    // Stall watchdog: warn once at the default log level when the transport stays open but the FC/link
+    // stops replying (e.g. a BLE link that quietly stops delivering notifications). See the poll block.
+    const STALL_WARN_AFTER: Duration = Duration::from_secs(3);
+    let mut last_rx = Instant::now();
+    let mut stall_warned = false;
+
     loop {
         // 0. Bail out if the device is gone (fatal transport error — e.g. USB unplugged). A mere
         //    response timeout (OTA stall) does NOT set this, so we never tear down on a stalled link.
@@ -426,8 +432,26 @@ fn scheduler_loop(
             .map(|(i, _, _)| i);
 
         if let Some(idx) = most_overdue {
-            if let Some(ov) = poll_slot(&mut *transport, &mut slots[idx], &app_handle, &mut debug_tracker, &mut link_stats, &recorder, &box_ids, config.link_stats_enabled) {
+            let outcome = poll_slot(&mut *transport, &mut slots[idx], &app_handle, &mut debug_tracker, &mut link_stats, &recorder, &box_ids, config.link_stats_enabled);
+            if let Some(ov) = outcome.override_flag {
                 override_active = ov;
+            }
+            // Stall watchdog (default-log-level visibility): warn ONCE when the transport is still open
+            // but the FC/link stops replying — e.g. a BLE link that quietly stops delivering notifications
+            // without ending the stream (so the connection-lost teardown never fires). Resets + notes
+            // recovery when telemetry resumes.
+            if outcome.replied {
+                last_rx = Instant::now();
+                if stall_warned {
+                    log::warn!("Link recovered — telemetry resumed");
+                    stall_warned = false;
+                }
+            } else if !stall_warned && last_rx.elapsed() >= STALL_WARN_AFTER {
+                log::warn!(
+                    "Link stalled — no MSP reply for {:.0}s (transport still open; FC/link not responding)",
+                    last_rx.elapsed().as_secs_f32()
+                );
+                stall_warned = true;
             }
             debug_tracker.maybe_emit(&app_handle);
             link_stats.maybe_emit(&app_handle);
@@ -557,6 +581,14 @@ fn build_slots(config: &TelemetryConfig) -> Vec<TelemetrySlot> {
 /// Poll a single telemetry slot and emit events. Returns `Some(msp_rc_override)` when this poll decoded
 /// an INAV status frame — the RC injection gate uses it to decide whether RAW_RC takes effect.
 #[allow(clippy::too_many_arguments)] // per-slot poll helper; args carry the slot's full context
+/// Outcome of polling one telemetry slot. `override_flag` carries the MSP-RC-override status when a
+/// Status reply was seen; `replied` is true if at least one code in the slot got a reply (used by the
+/// scheduler's stall watchdog to tell "link alive" from "transport open but FC/link silent").
+struct PollOutcome {
+    override_flag: Option<bool>,
+    replied: bool,
+}
+
 fn poll_slot(
     transport: &mut dyn Transport,
     slot: &mut TelemetrySlot,
@@ -566,8 +598,9 @@ fn poll_slot(
     recorder: &Option<FlightRecorderHandle>,
     box_ids: &[u8],
     link_stats_enabled: bool,
-) -> Option<bool> {
+) -> PollOutcome {
     let mut override_flag = None;
+    let mut replied = false;
     // Mark poll time BEFORE the request — the interval measures request-to-request,
     // not reply-to-request. This prevents reply latency from artificially slowing
     // the poll rate. If the reply takes longer than the interval, the slot becomes
@@ -589,6 +622,7 @@ fn poll_slot(
         link_stats.on_tx(9);
         match transport.msp_request(code, &[]) {
             Ok(msg) => {
+                replied = true;
                 tracker.on_response(code, 9 + msg.payload.len());
                 link_stats.on_rx(9 + msg.payload.len());
                 let event_name = telemetry::event_name_for_code(code);
@@ -634,7 +668,7 @@ fn poll_slot(
             }
         }
     }
-    override_flag
+    PollOutcome { override_flag, replied }
 }
 
 /// Run a one-shot MSP request, recording it in the debug tracker so all MSP traffic shows up there.
