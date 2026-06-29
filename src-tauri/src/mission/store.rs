@@ -216,13 +216,8 @@ fn parse_xml_attrs(element: &str) -> Vec<(String, String)> {
     let mut attrs = Vec::new();
     let mut rest = element;
 
-    loop {
-        // Find next key="value"
-        let eq_pos = match rest.find('=') {
-            Some(p) => p,
-            None => break,
-        };
-
+    // Find next key="value"
+    while let Some(eq_pos) = rest.find('=') {
         // Extract key (word before =)
         let key_start = rest[..eq_pos]
             .rfind(|c: char| c.is_whitespace())

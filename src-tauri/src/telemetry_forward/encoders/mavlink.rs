@@ -51,10 +51,10 @@ impl Encoder for MavlinkEncoder {
     fn frame_set(&mut self, cache: &TelemetryCache) -> Vec<u8> {
         let mut out = Vec::with_capacity(128);
         let boot_ms = self.start.elapsed().as_millis() as u32;
-        let armed = cache.status.as_ref().map_or(false, |s| s.arming_flags & ARMED_FLAG != 0);
+        let armed = cache.status.as_ref().is_some_and(|s| s.arming_flags & ARMED_FLAG != 0);
 
         // HEARTBEAT, throttled to ~1 Hz (the pacer ticks faster).
-        let due = self.last_heartbeat.map_or(true, |t| t.elapsed().as_millis() >= HEARTBEAT_INTERVAL_MS);
+        let due = self.last_heartbeat.is_none_or(|t| t.elapsed().as_millis() >= HEARTBEAT_INTERVAL_MS);
         if due {
             self.last_heartbeat = Some(Instant::now());
             let msg = MavMessage::HEARTBEAT(HEARTBEAT_DATA {
@@ -144,7 +144,6 @@ impl Encoder for MavlinkEncoder {
                     throttle: 0,
                     alt,
                     climb,
-                    ..Default::default()
                 }),
                 &mut out,
             );

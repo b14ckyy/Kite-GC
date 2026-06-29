@@ -126,6 +126,7 @@ pub fn inav_read_stats(state: State<'_, AppState>) -> Result<InavStats, String> 
 /// MSP: Performs handshake + starts telemetry scheduler.
 /// MAVLink: Waits for HEARTBEAT + starts handler thread.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri command — args map to frontend invoke() params
 pub async fn connect(
     transport_type: TransportType,
     // Protocol selection ("msp" or "mavlink", defaults to "msp")
@@ -267,6 +268,7 @@ pub async fn connect(
 }
 
 /// MSP connection path: handshake → scheduler
+#[allow(clippy::too_many_arguments)] // mirrors the connect() command's parameter set
 fn connect_msp(
     byte_transport: Box<dyn ByteTransport>,
     attitude_rate_hz: Option<f64>,
@@ -649,8 +651,10 @@ fn connect_passive_telemetry(
     // Synthesize a minimal FcInfo so the frontend enters the connected state. Passive telemetry carries
     // no FC identity (no handshake) — leave firmware empty (shown as "N/A") and use the Generic platform
     // (255) so the map shows the generic arrow rather than defaulting to a multirotor.
-    let mut fc_info = FcInfo::default();
-    fc_info.platform_type = 255; // PLATFORM_GENERIC
+    let fc_info = FcInfo {
+        platform_type: 255, // PLATFORM_GENERIC
+        ..FcInfo::default()
+    };
 
     // Flight recorder (no raw byte log on this path — FrSky has no MSP raw stream).
     let flight_log_settings = FlightLogSettings {

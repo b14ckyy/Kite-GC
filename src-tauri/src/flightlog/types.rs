@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 /// Settings controlling flight recording behavior.
 /// Passed from frontend on connect.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct FlightLogSettings {
     /// Whether flight recording is enabled
     pub enabled: bool,
@@ -25,18 +26,6 @@ pub struct FlightLogSettings {
     pub raw_always: bool,
 }
 
-impl Default for FlightLogSettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            db_enabled: false,
-            db_path: String::new(),
-            raw_log_path: String::new(),
-            raw_enabled: false,
-            raw_always: false,
-        }
-    }
-}
 
 /// A single recorded flight (row in `flights` table)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -485,6 +474,8 @@ pub struct FlightSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
+// DuplicateDetected carries a full Flight; boxing would ripple through all match/construction sites
+#[allow(clippy::large_enum_variant)]
 pub enum BlackboxImportStatus {
     /// Import successful
     #[serde(rename = "success")]

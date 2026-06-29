@@ -127,10 +127,7 @@ impl DebugTracker {
 
         // Register handshake codes as inactive (already completed once)
         for &code in handshake_codes {
-            if !stats.contains_key(&code) {
-                stats.insert(
-                    code,
-                    CodeStats {
+            stats.entry(code).or_insert_with(|| CodeStats {
                         name: msp_code_name(code),
                         is_polling: false,
                         target_rate_hz: 0.0,
@@ -144,9 +141,7 @@ impl DebugTracker {
                         actual_rate_hz: 0.0,
                         last_request_at: None,
                         latency_ms: 0.0,
-                    },
-                );
-            }
+                    });
         }
         Self {
             stats,

@@ -36,6 +36,8 @@ const RC_READ_TIMEOUT_FAST: Duration = Duration::from_millis(10);
 const RC_READ_TIMEOUT_IDLE: Duration = Duration::from_millis(50);
 
 /// Commands sent to the handler thread via channel
+// SendMessage carries a MavMessage; boxing would ripple through all send sites in the handler
+#[allow(clippy::large_enum_variant)]
 pub enum MavlinkCommand {
     /// Stop the handler and return the transport
     Stop,
@@ -530,6 +532,7 @@ struct FusedPos {
 
 /// Dispatch a received MAVLink message to the same Tauri events as the MSP scheduler.
 /// This ensures widgets/store work identically regardless of protocol.
+#[allow(clippy::too_many_arguments)] // dispatch helper threading the handler's mutable decode state
 fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, app_handle: &AppHandle, analog: &mut AnalogState, batteries: &mut std::collections::BTreeMap<u8, BatteryInstanceData>, fused: &mut FusedPos, quadplane_seen: &mut bool, recorder: &Option<FlightRecorderHandle>) {
     match message {
         // ── HEARTBEAT → telemetry-status + telemetry-flightmode ─────

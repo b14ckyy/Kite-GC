@@ -164,9 +164,7 @@ pub async fn scan_ble_devices() -> Result<Vec<BleDeviceInfo>, String> {
         // Try to match a known profile from advertised service UUIDs
         let matched_profile = profiles.iter().find(|profile| {
             props
-                .services
-                .iter()
-                .any(|s| *s == profile.service_uuid)
+                .services.contains(&profile.service_uuid)
         });
 
         let profile_name = matched_profile
@@ -239,7 +237,7 @@ pub async fn run_scan_session(
                         let Some(name) = props.local_name.clone().filter(|n| !n.is_empty()) else { continue };
                         let matched = profiles
                             .iter()
-                            .find(|pr| props.services.iter().any(|s| *s == pr.service_uuid));
+                            .find(|pr| props.services.contains(&pr.service_uuid));
                         let _ = app.emit("ble-device", BleDeviceInfo {
                             id: peripheral.id().to_string(),
                             name,

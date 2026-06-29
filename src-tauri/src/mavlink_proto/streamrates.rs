@@ -120,9 +120,9 @@ pub fn apply_stream_rates(
     for &(msg_id, kind) in WANTED {
         // VFR_HUD (airspeed) and WIND each cost an extra message and are gated on their module — sent as
         // -1 when off (not skipped) because SET_MESSAGE_INTERVAL is sticky FC-side across sessions.
-        let interval = if msg_id == ID_VFR_HUD && !airspeed_enabled {
-            -1.0
-        } else if msg_id == ID_WIND && !wind_enabled {
+        let interval = if (msg_id == ID_VFR_HUD && !airspeed_enabled)
+            || (msg_id == ID_WIND && !wind_enabled)
+        {
             -1.0
         } else {
             hz_to_interval_us(rate_hz(kind, attitude_hz, position_hz))

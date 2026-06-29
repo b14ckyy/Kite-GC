@@ -177,6 +177,7 @@ pub fn start(
 }
 
 /// Main scheduler loop — runs until Stop command received
+#[allow(clippy::too_many_arguments)] // cohesive thread entry point; args carry the loop's full context
 fn scheduler_loop(
     mut transport: Box<dyn Transport>,
     config: TelemetryConfig,
@@ -555,6 +556,7 @@ fn build_slots(config: &TelemetryConfig) -> Vec<TelemetrySlot> {
 
 /// Poll a single telemetry slot and emit events. Returns `Some(msp_rc_override)` when this poll decoded
 /// an INAV status frame — the RC injection gate uses it to decide whether RAW_RC takes effect.
+#[allow(clippy::too_many_arguments)] // per-slot poll helper; args carry the slot's full context
 fn poll_slot(
     transport: &mut dyn Transport,
     slot: &mut TelemetrySlot,

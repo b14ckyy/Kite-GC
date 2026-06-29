@@ -41,8 +41,7 @@ fn dp_recurse<'a>(track: &[&'a TelemetryRecord], epsilon: f64) -> Vec<&'a Teleme
     let mut max_dist = 0.0f64;
     let mut max_idx = 0usize;
 
-    for i in 1..track.len() - 1 {
-        let r = track[i];
+    for (offset, r) in track[1..track.len() - 1].iter().enumerate() {
         let lat = r.lat.unwrap_or(0.0);
         let lon = r.lon.unwrap_or(0.0);
         let alt = best_alt_relative(r);
@@ -51,7 +50,7 @@ fn dp_recurse<'a>(track: &[&'a TelemetryRecord], epsilon: f64) -> Vec<&'a Teleme
         );
         if d > max_dist {
             max_dist = d;
-            max_idx = i;
+            max_idx = offset + 1;
         }
     }
 
@@ -68,6 +67,7 @@ fn dp_recurse<'a>(track: &[&'a TelemetryRecord], epsilon: f64) -> Vec<&'a Teleme
 
 /// Perpendicular distance from point P to the line segment A→B in approximate meters.
 /// Uses a local flat-earth approximation (good enough for short segments).
+#[allow(clippy::too_many_arguments)] // three 3D points (P, A, B) = 9 scalar coordinates
 fn point_to_line_distance_3d(
     plat: f64, plon: f64, palt: f64,
     alat: f64, alon: f64, aalt: f64,
@@ -137,9 +137,8 @@ fn remove_spikes<'a>(track: &[&'a TelemetryRecord]) -> Vec<&'a TelemetryRecord> 
     let mut result = Vec::with_capacity(track.len());
     result.push(track[0]);
 
-    for i in 1..track.len() {
+    for &cur in &track[1..] {
         let prev = result.last().unwrap();
-        let cur = track[i];
         let (lat0, lon0) = (prev.lat.unwrap_or(0.0), prev.lon.unwrap_or(0.0));
         let (lat1, lon1) = (cur.lat.unwrap_or(0.0), cur.lon.unwrap_or(0.0));
         let dt_s = (cur.timestamp_ms - prev.timestamp_ms).max(1) as f64 / 1000.0;

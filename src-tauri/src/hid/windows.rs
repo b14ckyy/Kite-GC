@@ -103,7 +103,7 @@ impl WgiBackend {
 
 impl super::HidBackend for WgiBackend {
     fn poll(&mut self) -> Vec<HidDevice> {
-        let due = self.last_scan.map_or(true, |t| t.elapsed() >= RESCAN_INTERVAL);
+        let due = self.last_scan.is_none_or(|t| t.elapsed() >= RESCAN_INTERVAL);
         if due {
             self.rescan();
             self.last_scan = Some(Instant::now());

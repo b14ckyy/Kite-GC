@@ -625,8 +625,8 @@ pub fn decode_to_normalized_csv(
     // Fallback: if there are GPS rows but no arm AND no disarm indicators
     // at all, the log was likely recorded entirely while armed (log-on-arm
     // without a clean disarm recorded).  Backfill everything.
-    if stats.arm_count == 0 && !rows.is_empty() {
-        if state.saw_raw_disarm || stats.disarm_count == 0 {
+    if stats.arm_count == 0 && !rows.is_empty()
+        && (state.saw_raw_disarm || stats.disarm_count == 0) {
             stats.arm_count = 1;
             if state.saw_raw_disarm && stats.disarm_count == 0 {
                 stats.disarm_count = 1;
@@ -638,7 +638,6 @@ pub fn decode_to_normalized_csv(
                 }
             }
         }
-    }
 
     write_normalized_csv(&rows, out_path)?;
 
@@ -706,8 +705,8 @@ where
     stats.fw_version = state.fw_version.clone();
 
     // ── Log-on-arm backfill ──────────────────────────────────────────
-    if stats.arm_count == 0 && !all_rows.is_empty() {
-        if state.saw_raw_disarm || stats.disarm_count == 0 {
+    if stats.arm_count == 0 && !all_rows.is_empty()
+        && (state.saw_raw_disarm || stats.disarm_count == 0) {
             stats.arm_count = 1;
             if state.saw_raw_disarm && stats.disarm_count == 0 {
                 stats.disarm_count = 1;
@@ -719,7 +718,6 @@ where
                 }
             }
         }
-    }
 
     if all_rows.is_empty() {
         return Err("ArduPilot import failed: no valid GPS rows found".into());

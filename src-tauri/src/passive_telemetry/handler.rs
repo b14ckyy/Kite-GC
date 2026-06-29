@@ -374,8 +374,8 @@ fn handler_loop(
             // Connection status-box protocol signal (primary + optional secondary), change-detected so
             // it fires on lock and again when ArduPilot passthrough turns up as a secondary protocol.
             if let Some(p) = detector.locked() {
-                let secondary = if frsky.as_ref().map_or(false, |d| d.ap_active())
-                    || crsf.as_ref().map_or(false, |d| d.ap_active())
+                let secondary = if frsky.as_ref().is_some_and(|d| d.ap_active())
+                    || crsf.as_ref().is_some_and(|d| d.ap_active())
                 {
                     Some("MAVLink".to_string())
                 } else {
@@ -394,7 +394,7 @@ fn handler_loop(
                     Protocol::Ltm => ltm.as_ref().and_then(|d| d.fc_age_ms()),
                     Protocol::Mavlink => None,
                 };
-                let alive = fc_age.map_or(true, |ms| ms < FC_STALE_MS);
+                let alive = fc_age.is_none_or(|ms| ms < FC_STALE_MS);
                 if last_fc_alive != Some(alive) {
                     let _ = app_handle.emit("telemetry-fc-link", FcLink { alive });
                     last_fc_alive = Some(alive);

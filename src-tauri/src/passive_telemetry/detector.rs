@@ -100,7 +100,7 @@ impl Detector {
             {
                 let total: u32 = self.hits.iter().sum();
                 let rest = total - winner;
-                if winner >= LOCK_MIN_HITS && winner >= rest * 2 + 1 {
+                if winner >= LOCK_MIN_HITS && winner > rest * 2 {
                     self.locked = Some(REGISTERED[idx]);
                 }
             }

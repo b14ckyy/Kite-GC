@@ -1361,17 +1361,14 @@ pub fn update_mission_meta(
 
 /// Fetch the mission linked to a flight (if any).
 pub fn get_mission_for_flight(conn: &Connection, flight_id: i64) -> SqlResult<Option<Mission>> {
-    let mission_id: Option<i64> = match conn
+    let mission_id: Option<i64> = conn
         .query_row(
             "SELECT mission_id FROM flights WHERE id = ?1",
             params![flight_id],
             |row| row.get::<_, Option<i64>>(0),
         )
         .optional()?
-    {
-        Some(inner) => inner,
-        None => None,
-    };
+        .unwrap_or_default();
     match mission_id {
         Some(id) => get_mission(conn, id),
         None => Ok(None),

@@ -61,6 +61,7 @@ pub fn mission_set(waypoints: Vec<Waypoint>, store: State<'_, MissionStore>) -> 
 
 /// Add a waypoint to the mission
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri command — args map to frontend invoke() params
 pub fn mission_add_wp(
     action: u8,
     lat: i32,
@@ -84,6 +85,7 @@ pub fn mission_add_wp(
 
 /// Insert a waypoint at a specific index
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri command — args map to frontend invoke() params
 pub fn mission_insert_wp(
     index: usize,
     action: u8,
@@ -115,6 +117,7 @@ pub fn mission_remove_wp(index: usize, store: State<'_, MissionStore>) -> Missio
 
 /// Update a waypoint at index
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri command — args map to frontend invoke() params
 pub fn mission_update_wp(
     index: usize,
     action: u8,

@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
 use source::{RadarSource, SourceHandle, SourceUpdate};
+use sources::formation_flight::NodePos;
 use vehicle::{TrackedVehicle, VehicleSource, VehicleSystem};
 
 /// Consolidated snapshot event name — same regardless of which sources are active.
@@ -415,7 +416,7 @@ fn make_ff(
     config: &RadarConfig,
     tx: &mpsc::Sender<SourceUpdate>,
     app: &AppHandle,
-    node_pos: &Arc<Mutex<Option<(f64, f64, f64)>>>,
+    node_pos: &NodePos,
     node_name: &Arc<Mutex<String>>,
 ) -> Option<FfRunning> {
     let ff = &config.formation_flight;
@@ -443,7 +444,7 @@ fn reconcile_ff(
     config: &RadarConfig,
     tx: &mpsc::Sender<SourceUpdate>,
     app: &AppHandle,
-    node_pos: &Arc<Mutex<Option<(f64, f64, f64)>>>,
+    node_pos: &NodePos,
     node_name: &Arc<Mutex<String>>,
 ) {
     let ff = &config.formation_flight;

@@ -363,7 +363,7 @@ fn parse_csv_rows(csv_output: &str) -> Result<Vec<ParsedRow>, String> {
         // Extract timestamp cheaply for time-based downsampling decision
         let timestamp_us = cols.time
             .and_then(|i| record.get(i))
-            .and_then(|v| parse_loose_i64(v))
+            .and_then(parse_loose_i64)
             .unwrap_or(raw_row_count as i64);
 
         // Keep first row always, then only if ≥ target_interval has elapsed
@@ -598,7 +598,7 @@ fn build_telemetry_record_indexed(
     let timestamp_us = cols
         .time
         .and_then(|i| record.get(i))
-        .and_then(|v| parse_loose_i64(v))
+        .and_then(parse_loose_i64)
         .unwrap_or(row_fallback);
 
     // Course over ground. blackbox_decode emits gps_ground_course in degrees (decimals preserved).
@@ -606,7 +606,7 @@ fn build_telemetry_record_indexed(
     let heading = cols
         .heading
         .and_then(|i| record.get(i))
-        .and_then(|v| parse_loose_f64(v))
+        .and_then(parse_loose_f64)
         .map(|v| if v > 360.0 { v / 10.0 } else { v });
 
     let alt = read_f64(cols.alt, record).map(|v| if v > 10_000.0 { v / 100.0 } else { v });

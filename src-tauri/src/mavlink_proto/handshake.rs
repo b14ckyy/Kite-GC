@@ -67,7 +67,7 @@ pub fn perform_handshake(transport: &mut dyn ByteTransport) -> Result<(FcInfo, u
         }
 
         // Send GCS heartbeat periodically during handshake (every ~2s)
-        if read_calls > 0 && read_calls % 2 == 0 {
+        if read_calls > 0 && read_calls.is_multiple_of(2) {
             let header = codec::gcs_header();
             let hb_msg = codec::gcs_heartbeat();
             let mut seq = codec::MavSequence::new();

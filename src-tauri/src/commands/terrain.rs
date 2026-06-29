@@ -65,6 +65,7 @@ pub async fn terrain_profile(
 /// `heading_deg` true bearing, fan spans ±`half_angle_deg`, out to `range_m`,
 /// `ang_cells` × `rad_cells` cells sampled at their centres.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri command — args map to frontend invoke() params
 pub async fn terrain_fan(
     lat: f64,
     lon: f64,

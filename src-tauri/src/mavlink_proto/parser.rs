@@ -306,7 +306,7 @@ mod tests {
 
         // Compute CRC
         let extra_crc = MavMessage::extra_crc(msg_id);
-        let crc = compute_crc(&header_bytes, &payload, extra_crc);
+        let crc = compute_crc(&header_bytes, payload, extra_crc);
 
         // Build complete frame
         let mut frame = vec![0xFD]; // STX v2

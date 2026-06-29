@@ -36,7 +36,7 @@ const ID_WAYPOINT: u16 = 0x500D;
 fn variant_from_frame_type(mav_type: u32) -> &'static str {
     match mav_type {
         1 => "plane",                         // FIXED_WING
-        19 | 20 | 21 | 22 | 23 | 24 | 25 => "plane", // VTOL variants
+        19..=25 => "plane", // VTOL variants
         _ => "copter",                        // quad/hexa/octo/heli/tri/... (rover unhandled → copter)
     }
 }

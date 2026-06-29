@@ -76,9 +76,9 @@ pub struct SafeHomeConfig {
 }
 
 /// Resolve the MSP scheduler handle, erroring for non-MSP / disconnected links.
-fn msp_handle<'a>(
-    proto: &'a Option<ActiveProtocol>,
-) -> Result<&'a SchedulerHandle, String> {
+fn msp_handle(
+    proto: &Option<ActiveProtocol>,
+) -> Result<&SchedulerHandle, String> {
     match proto.as_ref() {
         Some(ActiveProtocol::Msp(h)) => Ok(h),
         Some(_) => Err("FC is not running MSP (INAV)".into()),

@@ -388,6 +388,7 @@ pub type FlightRecorderHandle = Arc<Mutex<FlightRecorder>>;
 impl FlightRecorder {
     /// Create a new recorder. Returns None if logging is disabled.
     /// `protocol` should be "MSP" or "MAVLink".
+    #[allow(clippy::too_many_arguments)] // recorder construction context (settings + session metadata)
     pub fn new(
         settings: FlightLogSettings,
         fc_info: FcInfo,

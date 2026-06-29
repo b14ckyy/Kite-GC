@@ -164,8 +164,8 @@ impl RadarSource for AdsbOnlineSource {
                 // Per-provider status (counts / errors) for the panel.
                 let _ = self.app.emit(ADSB_STATUS_EVENT, &statuses);
 
-                if !vehicles.is_empty() {
-                    if tx
+                if !vehicles.is_empty()
+                    && tx
                         .send(SourceUpdate {
                             source: VehicleSource::AdsbOnline,
                             vehicles,
@@ -174,7 +174,6 @@ impl RadarSource for AdsbOnlineSource {
                     {
                         break; // aggregator gone
                     }
-                }
                 // Spacing is handled by the rate gate at the top of the loop (shared across restarts).
             }
         });

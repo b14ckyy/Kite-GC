@@ -362,7 +362,7 @@ mod tests {
     #[test]
     fn test_parser_multiple_frames() {
         let frame1 = MspCodec::encode_v2(MSP_API_VERSION, &[]);
-        let frame2 = MspCodec::encode_v2(MSP_FC_VARIANT, &[b'I', b'N', b'A', b'V']);
+        let frame2 = MspCodec::encode_v2(MSP_FC_VARIANT, b"INAV");
 
         let mut data = frame1;
         data.extend_from_slice(&frame2);

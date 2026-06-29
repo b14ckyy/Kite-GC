@@ -80,7 +80,7 @@ fn bt_spp_outgoing_ports() -> std::collections::HashSet<String> {
 fn bt_spp_is_outgoing(inst_name: &str) -> bool {
     let tail = inst_name.rsplit('&').next().unwrap_or("");
     let addr = tail.split('_').next().unwrap_or(tail);
-    !(!addr.is_empty() && addr.chars().all(|c| c == '0'))
+    addr.is_empty() || !addr.chars().all(|c| c == '0')
 }
 
 /// All Bluetooth SPP COM ports (outgoing + incoming), so we can drop the incoming ones from the list.

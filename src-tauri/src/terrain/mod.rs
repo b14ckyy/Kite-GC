@@ -278,6 +278,7 @@ impl TerrainProvider {
     /// Sample terrain over a forward fan (polar grid) for the terrain-radar widget.
     /// `heading_deg` is true bearing; the fan spans ±`half_angle_deg`. Each cell is
     /// sampled at its angular + radial centre. Row-major `[ang_cell][rad_cell]`.
+    #[allow(clippy::too_many_arguments)] // fan geometry params mirror the terrain_fan command
     pub async fn fan(
         &self,
         lat: f64,

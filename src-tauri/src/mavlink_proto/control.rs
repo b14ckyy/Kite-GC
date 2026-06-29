@@ -62,6 +62,7 @@ pub fn send_command_long(
 /// Send a `COMMAND_INT` and wait for its `COMMAND_ACK`. Used for commands carrying a global
 /// position (lat/lon as int32 × 1e7) — `DO_REPOSITION` — where COMMAND_LONG's f32 params would
 /// lose coordinate precision. `params` are param1..param4; `x`/`y` are lat/lon × 1e7; `z` is alt (m).
+#[allow(clippy::too_many_arguments)] // maps directly to COMMAND_INT's fixed field set
 pub fn send_command_int(
     cmd_tx: &mpsc::Sender<MavlinkCommand>,
     fc_sysid: u8,
