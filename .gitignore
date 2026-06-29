@@ -83,3 +83,9 @@ target/
 # private dev-docs location). The shareable, generalised version is published at
 # docs/dev/AI-ASSIST-RULES.md.
 /CLAUDE.md
+
+# =============================================================================
+# Collected build outputs — installers + standalone binary gathered here by the
+# build scripts (scripts/collect-release.*). Local per developer; never committed.
+# =============================================================================
+/release/

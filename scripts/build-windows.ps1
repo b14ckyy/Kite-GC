@@ -49,11 +49,6 @@ if ($LASTEXITCODE -ne 0) { Write-Host '[ERROR] Tauri build failed.' -ForegroundC
 
 Write-Host ''
 Write-Host '[4/4] Build completed successfully!' -ForegroundColor Green
-Write-Host ''
-Write-Host 'Output location:'
-if ($env:CARGO_TARGET_DIR) {
-    Write-Host "  $env:CARGO_TARGET_DIR\release\bundle\"
-} else {
-    Write-Host '  src-tauri\target\release\bundle\'
-}
-Write-Host '  (NSIS installer .exe + portable build)'
+
+# Gather the installers + standalone .exe into <repo>/release/ (git-ignored).
+& "$PSScriptRoot\collect-release.ps1"

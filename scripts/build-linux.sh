@@ -55,8 +55,6 @@ echo "[3/4] Building application with Tauri..."
 npm run tauri build
 
 echo "[4/4] Build completed successfully!"
-echo ""
-echo "Build output is in: src-tauri/target/release/bundle/"
-echo ""
-echo "You will find .deb, .AppImage and/or .rpm packages there."
-echo ""
+
+# Gather the standalone binary + packages into <repo>/release/ (git-ignored).
+bash "$(dirname "$0")/collect-release.sh"

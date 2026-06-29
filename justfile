@@ -24,9 +24,16 @@ dev:
 # Building
 # =============================================================================
 
-# Build for the current platform
+# Build for the current platform (then collect outputs into release/)
+[windows]
 build:
     npm run tauri build
+    @powershell -ExecutionPolicy Bypass -File scripts/collect-release.ps1
+
+[unix]
+build:
+    npm run tauri build
+    @bash scripts/collect-release.sh
 
 # Explicit Windows release build
 build-windows:
