@@ -75,3 +75,11 @@ target/
 /site/
 # Local Python virtualenv for the docs toolchain
 /.venv/
+
+# =============================================================================
+# Local AI-assistant instructions (CLAUDE.md)
+# =============================================================================
+# Kept local: contains personal/local references (language, machine paths, the
+# private dev-docs location). The shareable, generalised version is published at
+# docs/dev/AI-ASSIST-RULES.md.
+/CLAUDE.md

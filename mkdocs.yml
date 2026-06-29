@@ -91,3 +91,10 @@ nav:
       - Connection: troubleshooting/connection.md
       - Video: troubleshooting/video.md
       - Reporting a problem: troubleshooting/reporting-issues.md
+  - Changelog: changelog.md
+  - For developers:
+      - Overview: for-developers/index.md
+      - Architecture: for-developers/architecture.md
+      - Building from source: for-developers/building.md
+      - UI framework & theme: for-developers/ui-framework.md
+      - Contributing: for-developers/contributing.md

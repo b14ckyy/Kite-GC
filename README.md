@@ -104,6 +104,10 @@ public beta):
   [Logbook](docs/user/guides/logbook.md) · [Safety](docs/user/guides/safety.md) ·
   [3D map](docs/user/guides/map-3d.md) · [Video](docs/user/guides/video.md)
 - **Trouble connecting?** [Troubleshooting → Connection](docs/user/troubleshooting/connection.md)
+- **For developers:** [Overview](docs/user/for-developers/index.md) ·
+  [Architecture](docs/user/for-developers/architecture.md) ·
+  [Building from source](docs/user/for-developers/building.md) ·
+  [Contributing](docs/user/for-developers/contributing.md)
 
 ## Support development
 
@@ -120,7 +124,7 @@ support its development, a donation is hugely appreciated — thank you! 💛
 - [Node.js](https://nodejs.org/) LTS (v20 or v24)
 - [Rust](https://rustup.rs/) (via rustup)
 - [just](https://github.com/casey/just) — the primary task runner
-- Platform toolchain & system dependencies — see the [Build Guide](docs/BUILD.md)
+- Platform toolchain & system dependencies — see the [Build Guide](docs/user/for-developers/building.md)
 
 ### Develop
 ```bash
@@ -136,7 +140,9 @@ just build-linux     # Linux release (on Linux)
 ```
 
 > **Tip:** install `just` for the best developer experience (see the `justfile` in the project root).
-> More detail — setup, troubleshooting and CI — is in the [Build & Development Guide](docs/BUILD.md).
+> More detail — setup, troubleshooting and CI — is in the
+> [Building from source](docs/user/for-developers/building.md) guide, and the
+> [Architecture overview](docs/user/for-developers/architecture.md) explains how Kite fits together.
 
 ## Contributing
 
