@@ -24,6 +24,8 @@
   import CesiumKeyPrompt from "$lib/components/CesiumKeyPrompt.svelte";
   import LogPlayer from "$lib/components/logbook/LogPlayer.svelte";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
+  import UpdateDialog from "$lib/components/UpdateDialog.svelte";
+  import { runUpdateCheck } from "$lib/controllers/updateCheck";
   import ContextMenu from "$lib/components/ContextMenu.svelte";
   import BatchEditPopup from "$lib/components/mission/BatchEditPopup.svelte";
   import type { DialogButton, DialogOptions } from "$lib/components/ConfirmDialog.svelte";
@@ -2272,6 +2274,13 @@
 
   onMount(() => { void runStartupRecovery(); });
 
+  // Startup update check (GitHub releases). Deferred a few seconds so it never competes with launch work;
+  // failures are swallowed inside the controller — it must never disrupt the app.
+  onMount(() => {
+    const id = setTimeout(() => { void runUpdateCheck(); }, 4000);
+    return () => clearTimeout(id);
+  });
+
   // External links (e.g. the Leaflet/OSM map attribution) must open in the system browser — the
   // webview has no tabs/back, so navigating it to an external page traps the user with no way out.
   // Intercept clicks on absolute http(s) anchors (cross-origin) and hand them to the OS browser.
@@ -2480,6 +2489,7 @@
   <div class="ui-scale">
 
 <ConfirmDialog bind:this={confirmDialog} />
+<UpdateDialog />
 <CesiumKeyPrompt bind:open={cesiumKeyPromptOpen} onSave={cesiumKeySave} onRemindLater={cesiumKeyRemindLater} onIgnore={cesiumKeyIgnore} />
 <EndFlightDialog bind:this={endFlightDialog} {interfaceSettings} />
 <RecoveryPrompt bind:this={recoveryPrompt} />
@@ -2626,6 +2636,7 @@
         radar={radarSettings}
         airspace={airspaceSettings}
         rcControl={$settings.rcControl}
+        updateCheck={$settings.updateCheck}
         {isWidgetActive}
         {getWidgetPanelLabel}
         onPatch={applySettingsPatch}

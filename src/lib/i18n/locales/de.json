@@ -382,6 +382,16 @@
       "reposition": "Hierhin fliegen"
     }
   },
+  "update": {
+    "title": "Update verfügbar",
+    "body": "Eine neue Version von Kite Ground Control ist verfügbar.",
+    "latest": "Neueste:",
+    "current": "Installiert:",
+    "prerelease": "Pre-Release",
+    "openPage": "Release-Seite öffnen",
+    "later": "Später erinnern",
+    "skip": "Version überspringen"
+  },
   "airspace": {
     "title": "Airspace Manager",
     "nearby": "In der Nähe",
@@ -815,6 +825,12 @@
     "logDebug": "Debug (ausführlich)",
     "logFolder": "Log-Datei",
     "openLogFolder": "Ordner öffnen",
+    "updates": "Updates",
+    "updateCheck": "Auf Updates prüfen",
+    "updateDisabled": "Deaktiviert",
+    "updateRelease": "Stabile Releases",
+    "updatePrerelease": "Pre-Releases einschließen",
+    "updateHint": "Prüft beim Start auf GitHub auf eine neuere Version. Kein automatischer Download — du wirst zu den Release Notes geleitet.",
     "alertThresholdsHint": "Warnschwellen. 0 = deaktiviert.",
     "hudWidgets": "HUD Widgets",
     "rateHint": "Ratenänderungen gelten ab nächster Verbindung.",

@@ -13,10 +13,10 @@
   import { SUPPORTED_LOCALES } from '$lib/i18n';
   import { MAP_PROVIDERS } from '$lib/config/mapProviders';
   import { WIDGET_DEFS } from '$lib/config/widgetRegistry';
-  import { DEFAULT_RADAR, DEFAULT_AIRSPACE, DEFAULT_RC_CONTROL } from '$lib/stores/settings';
+  import { DEFAULT_RADAR, DEFAULT_AIRSPACE, DEFAULT_RC_CONTROL, DEFAULT_UPDATE_CHECK } from '$lib/stores/settings';
   import { panelState } from '$lib/stores/panelState';
   import { resetGcsManual, gcsManuallySet } from '$lib/stores/gcsLocation';
-  import type { AppSettings, InterfaceSettings, RadarSettings, GcsMode, AirspaceSettings, AirspaceProvider, SystemMessagesLevel, LogLevel, RcControlSettings } from '$lib/stores/settings';
+  import type { AppSettings, InterfaceSettings, RadarSettings, GcsMode, AirspaceSettings, AirspaceProvider, SystemMessagesLevel, LogLevel, RcControlSettings, UpdateCheckSettings, UpdateCheckMode } from '$lib/stores/settings';
   import { revealItemInDir } from '@tauri-apps/plugin-opener';
   import { blackboxDecoderVersion, downloadBlackboxDecode } from '$lib/stores/flightlog';
   import type { TileCacheStats } from '$lib/cache/tileCache';
@@ -68,6 +68,7 @@
     radar = DEFAULT_RADAR,
     airspace = DEFAULT_AIRSPACE,
     rcControl = DEFAULT_RC_CONTROL,
+    updateCheck = DEFAULT_UPDATE_CHECK,
     isWidgetActive = (_widgetId: string) => false,
     getWidgetPanelLabel = (_widgetId: string) => '',
     onPatch = (_patch: Partial<AppSettings>) => {},
@@ -118,6 +119,7 @@
     radar?: RadarSettings;
     airspace?: AirspaceSettings;
     rcControl?: RcControlSettings;
+    updateCheck?: UpdateCheckSettings;
     isWidgetActive?: (widgetId: string) => boolean;
     getWidgetPanelLabel?: (widgetId: string) => string;
     onPatch?: (patch: Partial<AppSettings>) => void;
@@ -623,6 +625,21 @@
         <span class="s-label">{$t('settings.logFolder')}</span>
         <Button variant="standard" size="sm" onclick={openLogFolder}>{$t('settings.openLogFolder')}</Button>
       </div>
+    </div>
+
+    <!-- ── Updates ───────────────────────────────────── -->
+    <div class="s-group">
+      <h4 class="s-head">{$t('settings.updates')}</h4>
+      <div class="s-row">
+        <span class="s-label">{$t('settings.updateCheck')}</span>
+        <select id="update-check" class="s-select" value={updateCheck.mode}
+          onchange={(e) => onPatch({ updateCheck: { ...updateCheck, mode: (e.target as HTMLSelectElement).value as UpdateCheckMode } })}>
+          <option value="disabled">{$t('settings.updateDisabled')}</option>
+          <option value="release">{$t('settings.updateRelease')}</option>
+          <option value="prerelease">{$t('settings.updatePrerelease')}</option>
+        </select>
+      </div>
+      <p class="cesium-hint">{$t('settings.updateHint')}</p>
     </div>
 
     <!-- ── Mission Control ───────────────────────────── -->

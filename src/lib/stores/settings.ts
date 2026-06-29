@@ -254,6 +254,22 @@ export const DEFAULT_RC_CONTROL: RcControlSettings = {
   platform: 'inav',
 };
 
+// ── Update check (GitHub releases — see controllers/updateCheck.ts) ─────────────────────────────────
+/** Update-check channel: off, stable releases only, or include pre-releases. Default `release`. */
+export type UpdateCheckMode = 'disabled' | 'release' | 'prerelease';
+
+export interface UpdateCheckSettings {
+  /** Which releases to check against on startup. */
+  mode: UpdateCheckMode;
+  /** A version the user chose to skip — suppressed until a *higher* version appears. Null = none. */
+  skippedVersion: string | null;
+}
+
+export const DEFAULT_UPDATE_CHECK: UpdateCheckSettings = {
+  mode: 'release',
+  skippedVersion: null,
+};
+
 /** FC system-message (STATUSTEXT) toast verbosity: off, errors only, warnings+errors, or everything. */
 export type SystemMessagesLevel = 'off' | 'error' | 'warning' | 'all';
 
@@ -355,6 +371,8 @@ export interface AppSettings {
   relays: RelayConfig[];
   /** RC Control (INAV RC over MSP) — HID device + channel mappings. */
   rcControl: RcControlSettings;
+  /** Startup update check (GitHub releases) — channel + skipped version. */
+  updateCheck: UpdateCheckSettings;
 }
 
 const STORAGE_KEY = 'kite-gc-settings';
@@ -426,6 +444,7 @@ const defaults: AppSettings = {
   airspace: DEFAULT_AIRSPACE,
   relays: [],
   rcControl: DEFAULT_RC_CONTROL,
+  updateCheck: DEFAULT_UPDATE_CHECK,
 };
 
 function load(): AppSettings {
@@ -488,6 +507,10 @@ function load(): AppSettings {
         rcControl: {
           ...DEFAULT_RC_CONTROL,
           ...(parsed.rcControl ?? {}),
+        },
+        updateCheck: {
+          ...DEFAULT_UPDATE_CHECK,
+          ...(parsed.updateCheck ?? {}),
         },
       };
     }

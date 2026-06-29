@@ -93,6 +93,7 @@ use commands::control::{
     mav_guided_change_heading, mav_guided_clear_heading, mav_condition_yaw,
     mav_vtol_transition,
 };
+use commands::update_check::check_for_update;
 use hid::HidManager;
 use mission::store::MissionStore;
 use state::AppState;
@@ -274,6 +275,7 @@ pub fn run() {
             mav_land,
             mav_rtl,
             mav_rc_release,
+            check_for_update,
             mav_reposition,
             mav_change_speed,
             mav_mission_start,
