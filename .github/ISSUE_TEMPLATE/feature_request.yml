@@ -1,0 +1,86 @@
+name: Feature request
+description: Suggest an idea or improvement for Kite Ground Control
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion! Please describe what you'd like and why. Check the
+        [documentation](https://b14ckyy.github.io/Kite-GC/) and the
+        [existing issues](https://github.com/b14ckyy/Kite-GC/issues) first, in case it's already planned.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before you start
+      options:
+        - label: I searched existing issues and this hasn't been requested yet
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: The motivation — what are you trying to do that's hard or impossible today?
+      placeholder: I'm always frustrated when ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What you'd like to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches or workarounds you've thought about.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of Kite does this touch?
+      options:
+        - Mission planning
+        - Telemetry & HUD / widgets
+        - 2D map
+        - 3D map
+        - Flight logbook / vehicles / batteries
+        - Video
+        - Radar & ADS-B
+        - Airspace & safety (geofence / geozone / safe home)
+        - RC control
+        - Telemetry relay / forwarding
+        - Connection / transport
+        - Other / multiple
+    validations:
+      required: false
+
+  - type: dropdown
+    id: autopilot
+    attributes:
+      label: Relevant autopilot(s)
+      multiple: true
+      options:
+        - INAV
+        - ArduPilot
+        - PX4
+        - All / not specific
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Mock-ups, links, or examples from other ground stations.
+    validations:
+      required: false

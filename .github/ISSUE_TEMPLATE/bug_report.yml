@@ -1,0 +1,126 @@
+name: Bug report
+description: Report a problem with Kite Ground Control
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please fill in the details below so we can reproduce
+        and fix it quickly. Check the [documentation](https://b14ckyy.github.io/Kite-GC/) and the
+        [existing issues](https://github.com/b14ckyy/Kite-GC/issues) first.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before you start
+      options:
+        - label: I searched existing issues and this hasn't been reported yet
+          required: true
+        - label: I'm on the latest version, or the version is stated below
+          required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug — what went wrong, and what you expected instead.
+      placeholder: When I ..., Kite ... . I expected ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Step-by-step so we can trigger it ourselves.
+      placeholder: |
+        1. Connect via ...
+        2. Open ...
+        3. Click ...
+        4. See the error
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Kite GC version
+      description: Shown in the About dialog (top bar → About), e.g. 1.0.0-b1.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows 11
+        - Windows 10
+        - Linux (Debian / Ubuntu, .deb)
+        - Linux (Fedora / openSUSE, .rpm)
+        - Linux (AppImage)
+        - Other (state in the description)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: autopilot
+    attributes:
+      label: Flight controller firmware
+      options:
+        - INAV
+        - ArduPilot
+        - PX4
+        - Not applicable / not connected
+    validations:
+      required: true
+
+  - type: input
+    id: fw-version
+    attributes:
+      label: Firmware version
+      description: e.g. INAV 8.0.1, ArduPlane 4.5, PX4 1.15. Leave blank if not connected.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: connection
+    attributes:
+      label: Connection type
+      options:
+        - USB / Serial
+        - Bluetooth (SPP)
+        - Bluetooth (BLE)
+        - TCP
+        - UDP
+        - Not applicable
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Diagnostic log
+      description: |
+        Please attach the log file — it makes most bugs far easier to fix.
+        In Kite: **Settings → Diagnostics**, set **Log Level** to **Debug (verbose)**, reproduce the
+        problem, then click **Open Folder** and attach `kite-gc.log`. Drag the file into this box.
+    validations:
+      required: false
+
+  - type: textarea
+    id: media
+    attributes:
+      label: Screenshots / video
+      description: Optional — drag images or a short clip here to show the problem.
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Anything else — vehicle type, what you were doing, how often it happens, etc.
+    validations:
+      required: false

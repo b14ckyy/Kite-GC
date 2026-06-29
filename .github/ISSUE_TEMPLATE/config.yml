@@ -1,0 +1,9 @@
+# Force the structured forms (no blank issues) and point common questions at the docs.
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://b14ckyy.github.io/Kite-GC/
+    about: User guides, getting started, and troubleshooting — please check here first.
+  - name: How to report a problem (logs, what to include)
+    url: https://b14ckyy.github.io/Kite-GC/troubleshooting/reporting-issues/
+    about: How to capture a diagnostic log and what details help us fix bugs fastest.
