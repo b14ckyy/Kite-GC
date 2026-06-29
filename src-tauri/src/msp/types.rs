@@ -35,28 +35,30 @@ pub const MSP_API_VERSION: u16 = 1;
 pub const MSP_FC_VARIANT: u16 = 2;
 pub const MSP_FC_VERSION: u16 = 3;
 pub const MSP_BOARD_INFO: u16 = 4;
-pub const MSP_BUILD_INFO: u16 = 5;
 pub const MSP_NAME: u16 = 10;
 pub const MSP_SET_NAME: u16 = 11;
-pub const MSP_STATUS: u16 = 101;
-pub const MSP_RAW_IMU: u16 = 102;
-pub const MSP_SERVO: u16 = 103;
-pub const MSP_MOTOR: u16 = 104;
 pub const MSP_RC: u16 = 105;
 pub const MSP_RAW_GPS: u16 = 106;
-pub const MSP_COMP_GPS: u16 = 107;
 pub const MSP_ATTITUDE: u16 = 108;
 pub const MSP_ALTITUDE: u16 = 109;
 pub const MSP_ANALOG: u16 = 110;
-pub const MSP_ACTIVEBOXES: u16 = 113;
-pub const MSP_STATUS_EX: u16 = 150;
 pub const MSP_SENSOR_STATUS: u16 = 151;
-pub const MSP_BATTERY_STATE: u16 = 130;
 pub const MSP_SET_REBOOT: u16 = 68;
 pub const MSP_EEPROM_WRITE: u16 = 250;
-pub const MSP_UID: u16 = 160;
-pub const MSP_GPS_SV_INFO: u16 = 164;
 pub const MSP_GPSSTATISTICS: u16 = 166;
+
+// --- Reference only: uncomment when needed (unused MSP message-id constants) ---
+// pub const MSP_BUILD_INFO: u16 = 5;
+// pub const MSP_STATUS: u16 = 101;
+// pub const MSP_RAW_IMU: u16 = 102;
+// pub const MSP_SERVO: u16 = 103;
+// pub const MSP_MOTOR: u16 = 104;
+// pub const MSP_COMP_GPS: u16 = 107;
+// pub const MSP_ACTIVEBOXES: u16 = 113;
+// pub const MSP_STATUS_EX: u16 = 150;
+// pub const MSP_BATTERY_STATE: u16 = 130;
+// pub const MSP_UID: u16 = 160;
+// pub const MSP_GPS_SV_INFO: u16 = 164;
 
 // ── Mission / Waypoint MSP v1 command codes ─────────────────────────
 // INAV: LOAD = 18 (load mission from NVRAM → RAM), SAVE = 19 (save RAM → NVRAM). These were previously
@@ -70,7 +72,9 @@ pub const MSP_WP: u16 = 118;
 pub const MSP_NAV_STATUS: u16 = 121;
 pub const MSP_SET_WP: u16 = 209;
 pub const MSP_MODE_RANGES: u16 = 34;
-pub const MSP_RX_CONFIG: u16 = 44;
+
+// --- Reference only: uncomment when needed ---
+// pub const MSP_RX_CONFIG: u16 = 44;
 
 // ── RC control over MSP (see msp/rc_encode.rs, docs/archive/MSP_RC_CONTROL.md) ──
 pub const MSP_SET_RAW_RC: u16 = 200;
@@ -98,9 +102,10 @@ pub const MSP2_INAV_SET_GEOZONE_VERTEX: u16 = 0x2213;
 // ── INAV MSP v2 command codes ───────────────────────────────────────
 pub const MSPV2_INAV_STATUS: u16 = 0x2000;
 pub const MSPV2_INAV_ANALOG: u16 = 0x2002;
-pub const MSPV2_INAV_MISC: u16 = 0x2003;
-pub const MSPV2_INAV_BATTERY_CONFIG: u16 = 0x2005;
 pub const MSPV2_INAV_AIR_SPEED: u16 = 0x2009;
+// --- Reference only: uncomment when needed ---
+// pub const MSPV2_INAV_MISC: u16 = 0x2003;
+// pub const MSPV2_INAV_BATTERY_CONFIG: u16 = 0x2005;
 pub const MSPV2_INAV_MIXER: u16 = 0x2010;
 /// INAV misc2: [uptime_s:u32, flight_time_s:u32, throttle_pct:u8, auto_throttle:u8] — INAV 2.x+.
 pub const MSP2_INAV_MISC2: u16 = 0x203A;

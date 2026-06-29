@@ -479,11 +479,7 @@ struct ColumnIndices {
     wind_d: Option<usize>,
     rc_data: Vec<usize>,
     rc_command: Vec<usize>,
-    nav_pos_north: Option<usize>,
-    nav_pos_east: Option<usize>,
     nav_pos_up: Option<usize>,
-    gps_home_lat: Option<usize>,
-    gps_home_lon: Option<usize>,
 }
 
 impl ColumnIndices {
@@ -534,11 +530,7 @@ impl ColumnIndices {
             wind_d: resolve_col(m, &["wind[2]", "wind2", "wind_d", "wind_d_ms"]),
             rc_data: resolve_indexed_channels(m, "rcdata"),
             rc_command: resolve_indexed_channels(m, "rccommand"),
-            nav_pos_north: resolve_col(m, &["navpos[0]", "navpos0"]),
-            nav_pos_east: resolve_col(m, &["navpos[1]", "navpos1"]),
             nav_pos_up: resolve_col(m, &["navpos[2]", "navpos2"]),
-            gps_home_lat: resolve_col(m, &["gps_home_lat"]),
-            gps_home_lon: resolve_col(m, &["gps_home_lon"]),
         }
     }
 }
@@ -726,10 +718,6 @@ fn normalize_header(value: &str) -> String {
         .filter(|ch| !ch.is_whitespace() && *ch != '[' && *ch != ']')
         .flat_map(|ch| ch.to_lowercase())
         .collect()
-}
-
-fn extract_header_metadata(file_data: &[u8]) -> HeaderMetadata {
-    extract_header_metadata_for_log(file_data, None)
 }
 
 /// Extract header metadata for a specific log index within a multi-log Blackbox file.

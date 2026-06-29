@@ -98,18 +98,6 @@ impl Feature {
             Feature::WindEstimate => InavVersion::new(10, 0, 0),
         }
     }
-
-    /// All known features
-    pub const ALL: &'static [Feature] = &[
-        Feature::CoreTelemetry,
-        Feature::AutolandConfig,
-        Feature::Geozones,
-        Feature::MspRc,
-        Feature::AuxRc,
-        Feature::AdsbMsp,
-        Feature::LinkStats,
-        Feature::WindEstimate,
-    ];
 }
 
 /// Set of features available for the connected FC version.
@@ -145,20 +133,6 @@ impl FeatureSet {
             adsb_msp: version.is_at_least(Feature::AdsbMsp.min_version()),
             link_stats: version.is_at_least(Feature::LinkStats.min_version()),
             wind_estimate: version.is_at_least(Feature::WindEstimate.min_version()),
-        }
-    }
-
-    /// Check if a specific feature is available
-    pub fn has(&self, feature: Feature) -> bool {
-        match feature {
-            Feature::CoreTelemetry => true,
-            Feature::AutolandConfig => self.autoland_config,
-            Feature::Geozones => self.geozones,
-            Feature::MspRc => self.msp_rc,
-            Feature::AuxRc => self.aux_rc,
-            Feature::AdsbMsp => self.adsb_msp,
-            Feature::LinkStats => self.link_stats,
-            Feature::WindEstimate => self.wind_estimate,
         }
     }
 }
@@ -216,44 +190,42 @@ mod tests {
     #[test]
     fn test_feature_set_inav_700() {
         let fs = FeatureSet::for_version(InavVersion::new(7, 0, 0));
-        assert!(fs.has(Feature::CoreTelemetry));
-        assert!(!fs.has(Feature::AutolandConfig));
-        assert!(!fs.has(Feature::Geozones));
-        assert!(!fs.has(Feature::MspRc));
-        assert!(!fs.has(Feature::AuxRc));
+        assert!(!fs.autoland_config);
+        assert!(!fs.geozones);
+        assert!(!fs.msp_rc);
+        assert!(!fs.aux_rc);
     }
 
     #[test]
     fn test_feature_set_inav_710() {
         let fs = FeatureSet::for_version(InavVersion::new(7, 1, 0));
-        assert!(fs.has(Feature::CoreTelemetry));
-        assert!(fs.has(Feature::AutolandConfig));
-        assert!(!fs.has(Feature::Geozones));
+        assert!(fs.autoland_config);
+        assert!(!fs.geozones);
     }
 
     #[test]
     fn test_feature_set_inav_800() {
         let fs = FeatureSet::for_version(InavVersion::new(8, 0, 0));
-        assert!(fs.has(Feature::AutolandConfig));
-        assert!(fs.has(Feature::Geozones));
-        assert!(fs.has(Feature::MspRc));
-        assert!(!fs.has(Feature::AuxRc));
+        assert!(fs.autoland_config);
+        assert!(fs.geozones);
+        assert!(fs.msp_rc);
+        assert!(!fs.aux_rc);
     }
 
     #[test]
     fn test_feature_set_inav_910() {
         let fs = FeatureSet::for_version(InavVersion::new(9, 1, 0));
-        assert!(fs.has(Feature::AuxRc));
-        assert!(fs.has(Feature::MspRc));
-        assert!(fs.has(Feature::Geozones));
-        assert!(fs.has(Feature::AutolandConfig));
-        assert!(fs.has(Feature::LinkStats));
+        assert!(fs.aux_rc);
+        assert!(fs.msp_rc);
+        assert!(fs.geozones);
+        assert!(fs.autoland_config);
+        assert!(fs.link_stats);
     }
 
     #[test]
     fn test_link_stats_gated_below_910() {
-        assert!(!FeatureSet::for_version(InavVersion::new(9, 0, 0)).has(Feature::LinkStats));
-        assert!(!FeatureSet::for_version(InavVersion::new(8, 0, 0)).has(Feature::LinkStats));
+        assert!(!FeatureSet::for_version(InavVersion::new(9, 0, 0)).link_stats);
+        assert!(!FeatureSet::for_version(InavVersion::new(8, 0, 0)).link_stats);
     }
 
     #[test]

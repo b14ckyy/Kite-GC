@@ -8,24 +8,6 @@ use super::types::*;
 pub struct MspCodec;
 
 impl MspCodec {
-    /// Encode an MSP v1 request frame
-    pub fn encode_v1(code: u16, payload: &[u8]) -> Vec<u8> {
-        let mut frame = Vec::with_capacity(6 + payload.len());
-        frame.push(b'$');
-        frame.push(b'M');
-        frame.push(b'<');
-        frame.push(payload.len() as u8);
-        frame.push(code as u8);
-
-        let mut checksum: u8 = payload.len() as u8 ^ code as u8;
-        for &byte in payload {
-            frame.push(byte);
-            checksum ^= byte;
-        }
-        frame.push(checksum);
-        frame
-    }
-
     /// Encode an MSP v1 **response** frame (direction `>`) — for emulating an FC (e.g. FormationFlight).
     pub fn encode_v1_response(code: u16, payload: &[u8]) -> Vec<u8> {
         let mut frame = Vec::with_capacity(6 + payload.len());
@@ -211,23 +193,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_v1_encode_decode_roundtrip() {
-        let frame = MspCodec::encode_v1(MSP_API_VERSION, &[]);
-        let (msg, consumed) = MspCodec::decode(&frame).expect("decode failed");
-        assert_eq!(consumed, frame.len());
-        assert_eq!(msg.code, MSP_API_VERSION);
-        assert_eq!(msg.version, MspVersion::V1);
-        assert_eq!(msg.direction, MspDirection::Request);
-        assert!(msg.payload.is_empty());
-    }
-
-    #[test]
     fn test_v2_encode_decode_roundtrip() {
         let payload = vec![1, 2, 3, 4];
-        let frame = MspCodec::encode_v2(MSP_STATUS, &payload);
+        let frame = MspCodec::encode_v2(MSPV2_INAV_STATUS, &payload);
         let (msg, consumed) = MspCodec::decode(&frame).expect("decode failed");
         assert_eq!(consumed, frame.len());
-        assert_eq!(msg.code, MSP_STATUS);
+        assert_eq!(msg.code, MSPV2_INAV_STATUS);
         assert_eq!(msg.version, MspVersion::V2);
         assert_eq!(msg.payload, payload);
     }

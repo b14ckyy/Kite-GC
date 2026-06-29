@@ -44,11 +44,6 @@ impl WpAction {
         )
     }
 
-    /// Whether this action is a modifier attached to a previous geo-WP
-    pub fn is_modifier(&self) -> bool {
-        matches!(self, Self::Jump | Self::Rth | Self::SetHead)
-    }
-
     /// XML action name (for MW mission file format interop)
     pub fn xml_name(&self) -> &'static str {
         match self {
@@ -85,10 +80,12 @@ pub const WP_FLAG_FBH: u8 = 0x48;
 
 /// P3 bitfield positions
 pub const P3_ALT_TYPE: u16 = 1 << 0;
-pub const P3_USER_ACTION_1: u16 = 1 << 1;
-pub const P3_USER_ACTION_2: u16 = 1 << 2;
-pub const P3_USER_ACTION_3: u16 = 1 << 3;
-pub const P3_USER_ACTION_4: u16 = 1 << 4;
+// --- Reference only: uncomment when needed ---
+// INAV per-waypoint user-action (UA) p3 bits (bits 1-4 of the p3 bitfield):
+// pub const P3_USER_ACTION_1: u16 = 1 << 1;
+// pub const P3_USER_ACTION_2: u16 = 1 << 2;
+// pub const P3_USER_ACTION_3: u16 = 1 << 3;
+// pub const P3_USER_ACTION_4: u16 = 1 << 4;
 
 /// Altitude reference mode (GCS-side). INAV itself only knows REL (p3 bit0=0)
 /// and AMSL (p3 bit0=1); AGL is a planning-only mode resolved to AMSL on export.
@@ -152,16 +149,6 @@ impl Waypoint {
         if self.is_alt_absolute() { ALT_MODE_AMSL } else { ALT_MODE_REL }
     }
 
-    /// Whether this is a FlyBy Home waypoint
-    pub fn is_fly_by_home(&self) -> bool {
-        self.flag == WP_FLAG_FBH || (self.lat == 0 && self.lon == 0 && self.action.has_location())
-    }
-
-    /// Whether this is the last waypoint in a mission
-    pub fn is_last(&self) -> bool {
-        self.flag == WP_FLAG_LAST
-    }
-
     /// Latitude as floating-point degrees
     pub fn lat_deg(&self) -> f64 {
         self.lat as f64 / 1e7
@@ -170,11 +157,6 @@ impl Waypoint {
     /// Longitude as floating-point degrees
     pub fn lon_deg(&self) -> f64 {
         self.lon as f64 / 1e7
-    }
-
-    /// Altitude in metres
-    pub fn alt_m(&self) -> f64 {
-        self.altitude as f64 / 100.0
     }
 }
 
@@ -291,32 +273,6 @@ impl Mission {
         }
     }
 
-    /// Get waypoints that have geographic positions (for map rendering)
-    pub fn geo_waypoints(&self) -> Vec<&Waypoint> {
-        self.waypoints.iter().filter(|wp| wp.action.has_location()).collect()
-    }
-
-    /// Total mission distance in metres (straight-line between geo-WPs)
-    pub fn total_distance_m(&self) -> f64 {
-        let geo: Vec<_> = self.geo_waypoints();
-        let mut total = 0.0;
-        for pair in geo.windows(2) {
-            total += haversine_m(pair[0].lat_deg(), pair[0].lon_deg(),
-                                 pair[1].lat_deg(), pair[1].lon_deg());
-        }
-        total
-    }
-}
-
-/// Haversine distance between two lat/lon points in metres
-fn haversine_m(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
-    let r = 6_371_000.0; // Earth radius in metres
-    let d_lat = (lat2 - lat1).to_radians();
-    let d_lon = (lon2 - lon1).to_radians();
-    let a = (d_lat / 2.0).sin().powi(2)
-        + lat1.to_radians().cos() * lat2.to_radians().cos() * (d_lon / 2.0).sin().powi(2);
-    let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
-    r * c
 }
 
 #[cfg(test)]
@@ -381,12 +337,5 @@ mod tests {
         assert_eq!(m.waypoints[0].number, 1);
         assert_eq!(m.waypoints[1].number, 2);
         assert_eq!(m.waypoints[1].flag, WP_FLAG_LAST);
-    }
-
-    #[test]
-    fn haversine_sanity() {
-        // ~111 km per degree of latitude at equator
-        let d = haversine_m(0.0, 0.0, 1.0, 0.0);
-        assert!((d - 111_195.0).abs() < 100.0);
     }
 }

@@ -56,11 +56,6 @@ pub fn find_ffmpeg() -> Option<PathBuf> {
     None
 }
 
-/// True when ffmpeg is present anywhere we look.
-pub fn available() -> bool {
-    find_ffmpeg().is_some()
-}
-
 /// First line of `ffmpeg -version` (e.g. "ffmpeg version n7.1 ..."), or None if absent/failed.
 pub fn version() -> Option<String> {
     let ff = find_ffmpeg()?;

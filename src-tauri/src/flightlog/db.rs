@@ -787,52 +787,6 @@ pub fn insert_flight(conn: &Connection, flight: &Flight) -> SqlResult<i64> {
     Ok(conn.last_insert_rowid())
 }
 
-/// Update a flight's end-time, duration, and statistics.
-pub fn finalize_flight(
-    conn: &Connection,
-    flight_id: i64,
-    end_time: DateTime<Utc>,
-    duration_sec: i64,
-    max_alt_m: Option<f64>,
-    max_speed_ms: Option<f64>,
-    max_distance_m: Option<f64>,
-    total_distance_m: Option<f64>,
-    battery_used_mah: Option<u32>,
-    location_name: Option<&str>,
-    weather_temp_c: Option<f64>,
-    weather_wind_ms: Option<f64>,
-    weather_wind_deg: Option<i32>,
-    weather_desc: Option<&str>,
-) -> SqlResult<()> {
-    conn.execute(
-        "UPDATE flights SET
-            end_time = ?1, duration_sec = ?2,
-            max_alt_m = ?3, max_speed_ms = ?4,
-            max_distance_m = ?5, total_distance_m = ?6,
-            battery_used_mah = ?7,
-            location_name = ?8,
-            weather_temp_c = ?9, weather_wind_ms = ?10,
-            weather_wind_deg = ?11, weather_desc = ?12
-        WHERE id = ?13",
-        params![
-            end_time.to_rfc3339(),
-            duration_sec,
-            max_alt_m,
-            max_speed_ms,
-            max_distance_m,
-            total_distance_m,
-            battery_used_mah,
-            location_name,
-            weather_temp_c,
-            weather_wind_ms,
-            weather_wind_deg,
-            weather_desc,
-            flight_id,
-        ],
-    )?;
-    Ok(())
-}
-
 /// Batch-insert telemetry records for a flight.
 pub fn insert_telemetry_batch(
     conn: &Connection,
@@ -2639,67 +2593,6 @@ mod tests {
         let loaded = get_flight(&conn, id).unwrap().unwrap();
         assert_eq!(loaded.craft_name, "TestCraft");
         assert_eq!(loaded.fc_variant, "INAV");
-    }
-
-    #[test]
-    fn test_finalize_and_list() {
-        let conn = test_db();
-        let now = Utc::now();
-        let flight = Flight {
-            id: 0,
-            start_time: now,
-            end_time: None,
-            duration_sec: None,
-            source: "live".into(),
-            craft_name: "Wing".into(),
-            fc_variant: "INAV".into(),
-            fc_version: "8.0.0".into(),
-            board_id: "SPRF".into(),
-            platform_type: 1,
-            protocol: "MSP".into(),
-            start_lat: None,
-            start_lon: None,
-            location_name: None,
-            weather_temp_c: None,
-            weather_wind_ms: None,
-            weather_wind_deg: None,
-            weather_desc: None,
-            max_alt_m: None,
-            max_speed_ms: None,
-            max_distance_m: None,
-            total_distance_m: None,
-            battery_used_mah: None,
-            notes: None,
-            linked_flight_id: None,
-            pilot_name: None,
-            pilot_id: None,
-            battery_serial: None,
-            utc_offset_min: None,
-        };
-        let id = insert_flight(&conn, &flight).unwrap();
-        finalize_flight(
-            &conn,
-            id,
-            Utc::now(),
-            120,
-            Some(50.0),
-            Some(15.0),
-            Some(200.0),
-            Some(800.0),
-            Some(450),
-            Some("Munich"),
-            Some(18.5),
-            Some(3.2),
-            Some(270),
-            Some("Partly cloudy"),
-        )
-        .unwrap();
-
-        let list = list_flights(&conn).unwrap();
-        assert_eq!(list.len(), 1);
-        assert_eq!(list[0].craft_name, "Wing");
-        assert_eq!(list[0].source, "live");
-        assert_eq!(list[0].max_alt_m, Some(50.0));
     }
 
     #[test]

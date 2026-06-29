@@ -84,7 +84,6 @@ pub struct AeroCache {
     pub key: String,
     pub layers: Vec<String>,
     pub center: (f64, f64),
-    pub radius_km: f64,
     pub data: AeroData,
     pub fetched_at_ms: u128,
 }

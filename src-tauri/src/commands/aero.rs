@@ -44,7 +44,6 @@ pub async fn aero_fetch(
             key: api_key,
             layers,
             center: (lat, lon),
-            radius_km,
             data: data.clone(),
             fetched_at_ms: now_ms(),
         });

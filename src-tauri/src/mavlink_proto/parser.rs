@@ -38,6 +38,8 @@ enum State {
 pub struct MavFrame {
     pub header: MavHeader,
     pub message: MavMessage,
+    /// MAVLink wire version (V1/V2) this frame was decoded from — parsed but not yet consumed.
+    #[allow(dead_code)]
     pub protocol_version: MavlinkVersion,
     /// Complete raw frame bytes (STX through CRC) for tlog recording
     pub raw_bytes: Vec<u8>,

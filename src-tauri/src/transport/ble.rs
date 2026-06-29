@@ -14,9 +14,6 @@ use super::{ByteTransport, TransportError};
 /// BLE write MTU — standard BLE 4.x limit for GATT writes
 const BLE_WRITE_MTU: usize = 20;
 
-/// Timeout waiting for an MSP response
-const MSP_RESPONSE_TIMEOUT_MS: u64 = 3000;
-
 /// Timeout for BLE scan
 const BLE_SCAN_TIMEOUT_MS: u64 = 8000;
 
@@ -97,8 +94,6 @@ pub struct BleTransport {
     stop_tx: tokio::sync::mpsc::UnboundedSender<()>,
     /// Buffered bytes from previous reads that haven't been fully consumed
     read_buffer: Vec<u8>,
-    /// Write delay between BLE chunks (device-specific)
-    write_delay: Duration,
 }
 
 /// Scan for BLE devices.
@@ -437,7 +432,6 @@ pub async fn connect_ble(device_id: &str) -> Result<BleTransport, String> {
         read_rx,
         stop_tx,
         read_buffer: Vec::new(),
-        write_delay,
     })
 }
 
@@ -699,7 +693,6 @@ pub async fn connect_ble_listen(
         read_rx,
         stop_tx,
         read_buffer: Vec::new(),
-        write_delay: Duration::from_millis(0),
     })
 }
 

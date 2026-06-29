@@ -518,15 +518,3 @@ pub struct BlackboxImportProgress {
     pub message: String,
 }
 
-/// Sort mode for the logbook
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub enum LogbookSortMode {
-    /// Aircraft → Location → Date
-    AircraftLocationDate,
-    /// Location → Date → Aircraft
-    LocationDateAircraft,
-    /// Date → Location → Aircraft
-    DateLocationAircraft,
-    /// Aircraft → Date → Location
-    AircraftDateLocation,
-}

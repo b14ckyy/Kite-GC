@@ -445,11 +445,6 @@ impl SerialConnection {
         ))
     }
 
-    /// Close the connection (port is closed on drop)
-    pub fn close(self) {
-        drop(self);
-    }
-
     /// Assert/deassert the DTR + RTS control lines. Some USB-serial devices (e.g. ADS-B receivers)
     /// only stream data once the host raises DTR/RTS — terminals do this by default, a bare
     /// `open()` may not. Best-effort: a failure is logged, not fatal.

@@ -40,8 +40,6 @@ pub struct MspParser {
     payload_length_expected: u16,
     payload_length_received: u16,
     payload: Vec<u8>,
-    checksum: u8,
-    packet_errors: u32,
 }
 
 impl MspParser {
@@ -55,8 +53,6 @@ impl MspParser {
             payload_length_expected: 0,
             payload_length_received: 0,
             payload: Vec::new(),
-            checksum: 0,
-            packet_errors: 0,
         }
     }
 
@@ -237,7 +233,6 @@ impl MspParser {
         if checksum == received_crc {
             Some(self.build_message())
         } else {
-            self.packet_errors += 1;
             None
         }
     }
@@ -257,7 +252,6 @@ impl MspParser {
         if crc == received_crc {
             Some(self.build_message())
         } else {
-            self.packet_errors += 1;
             None
         }
     }
@@ -284,15 +278,6 @@ impl MspParser {
         crc
     }
 
-    pub fn packet_errors(&self) -> u32 {
-        self.packet_errors
-    }
-
-    /// Reset the parser to idle state
-    pub fn reset(&mut self) {
-        self.state = DecoderState::Idle;
-        self.payload_length_received = 0;
-    }
 }
 
 #[cfg(test)]
@@ -320,7 +305,7 @@ mod tests {
 
     #[test]
     fn test_parser_v1_frame() {
-        let frame = MspCodec::encode_v1(MSP_FC_VARIANT, &[]);
+        let frame = MspCodec::encode_v1_response(MSP_FC_VARIANT, &[]);
         let mut parser = MspParser::new();
 
         let mut result = None;
@@ -412,6 +397,5 @@ mod tests {
         }
 
         assert!(result.is_none());
-        assert_eq!(parser.packet_errors(), 1);
     }
 }

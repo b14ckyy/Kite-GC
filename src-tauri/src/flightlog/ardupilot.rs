@@ -75,13 +75,6 @@ pub struct FmtDef {
     pub columns: Vec<String>,
 }
 
-impl FmtDef {
-    /// Byte count of the data section (after the 3-byte header).
-    pub fn data_len(&self) -> usize {
-        (self.record_length as usize).saturating_sub(3)
-    }
-}
-
 // ─── Decoded field value ──────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -124,7 +117,6 @@ impl DFValue {
 
 #[derive(Debug, Clone)]
 pub struct ParsedMsg {
-    pub type_id: u8,
     pub type_name: String,
     pub fields: Vec<(String, DFValue)>,
 }
@@ -222,7 +214,6 @@ impl<'a> DataFlashScanner<'a> {
                     }
 
                     let msg = ParsedMsg {
-                        type_id: FMT_TYPE_ID,
                         type_name: "FMT".to_string(),
                         fields: vec![
                             ("TypeID".to_string(), DFValue::UInt(fmt.type_id as u64)),
@@ -333,7 +324,6 @@ impl<'a> DataFlashScanner<'a> {
         }
 
         Some(ParsedMsg {
-            type_id: fmt.type_id,
             type_name: fmt.name.clone(),
             fields,
         })

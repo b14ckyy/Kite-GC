@@ -52,7 +52,7 @@ pub fn perform_handshake(transport: &mut dyn ByteTransport) -> Result<(FcInfo, u
     }
 
     // Wait for HEARTBEAT from the FC
-    let mut fc_sysid: u8 = 0;
+    let fc_sysid: u8;
     let mut fc_info = FcInfo::default();
     let mut total_bytes_read: usize = 0;
     let mut read_calls: u32 = 0;
