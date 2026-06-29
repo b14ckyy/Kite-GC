@@ -179,5 +179,5 @@ gives PX4 its own **manual-control editor** rather than the channel grid.
 
 ## Where to go next
 
-- Command modes, arm/disarm and guided flight: the **Control** tool (ArduPilot / PX4).
+- Command modes, arm/disarm and guided flight: **[Vehicle control](vehicle-control.md)** (ArduPilot / PX4).
 - Set up the link first: **[Connecting](connecting.md)**.

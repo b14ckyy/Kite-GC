@@ -80,6 +80,7 @@ nav:
       - Connecting: guides/connecting.md
       - Telemetry & display: guides/telemetry-and-display.md
       - Missions: guides/missions.md
+      - Vehicle control: guides/vehicle-control.md
       - Logbook:
           - guides/logbook.md
           - Vehicles: guides/vehicles.md

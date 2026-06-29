@@ -67,7 +67,7 @@ Everything you'd expect from a ground station:
   shading.
 - **Mission planning** — create, upload, download and edit missions; undo/redo; survey-pattern
   generator; terrain-following / AGL waypoints.
-- **Vehicle control** — arm/disarm, flight-mode changes, takeoff/RTL/loiter and more (ArduPilot/PX4).
+- **[Vehicle control](guides/vehicle-control.md)** — arm/disarm, flight-mode changes, takeoff/RTL/loiter and more (ArduPilot/PX4).
 - **Comfort** — a multi-language interface (English, German and French at launch; more to follow) and
   persistent window, layout and settings between sessions.
 
