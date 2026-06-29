@@ -71,6 +71,17 @@ just clean           # clean build artifacts
 
 The classic commands still work too (`npm install`, `npm run tauri dev`, `npm run tauri build`).
 
+### Build outputs
+
+Every build (`just build` / `build-windows` / `build-linux`) gathers its final artifacts into a
+**`release/`** folder at the repo root, so you don't have to dig through `target/release/bundle/`:
+
+- **Windows:** the standalone `kite-gc.exe`, the NSIS `*-setup.exe` installer and the `*.msi`.
+- **Linux:** the standalone `kite-gc` binary plus the `*.deb`, `*.AppImage` and `*.rpm` packages.
+
+The folder is refreshed on each build and is git-ignored (local to your machine). The raw outputs also
+remain in `src-tauri/target/release/` (and its `bundle/` subfolders) as usual.
+
 ## Quality checks
 
 ```bash
