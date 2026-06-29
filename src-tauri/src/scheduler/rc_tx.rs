@@ -112,6 +112,28 @@ pub fn override_channels(us: &[u16]) -> [u16; MAV_OVERRIDE_CHANNELS] {
     ch
 }
 
+/// The MAVLink "release this channel back to the RC radio" sentinel — distinct from the *ignore*
+/// sentinel: CH1–8 use 0, CH9–18 use 65534 (verified against the RC_CHANNELS_OVERRIDE field docs).
+#[inline]
+fn release_sentinel(idx0: usize) -> u16 {
+    if idx0 < 8 { 0 } else { 65534 }
+}
+
+/// Build an 18-channel RC_CHANNELS_OVERRIDE frame that *releases* every channel we were controlling
+/// (non-zero in `us`) back to the FC's RC radio, leaving channels we never touched ignored. Sent a few
+/// times on a **deliberate** disengage so ArduPilot hands control back immediately (revert to a real RX,
+/// or RC failsafe if the GCS was the sole RC source) instead of waiting out `RC_OVERRIDE_TIME`. This is
+/// the documented MAVLink convention (0 = release for CH1–8), as used by RC_CHANNELS_OVERRIDE-based GCS
+/// like Mission Planner. Involuntary loss (USB/link/deadman) still just stops streaming — see the handler.
+pub fn release_channels(us: &[u16]) -> [u16; MAV_OVERRIDE_CHANNELS] {
+    let mut ch = [0u16; MAV_OVERRIDE_CHANNELS];
+    for (i, slot) in ch.iter_mut().enumerate() {
+        let was_controlled = us.get(i).copied().unwrap_or(0) != 0;
+        *slot = if was_controlled { release_sentinel(i) } else { ignore_sentinel(i) };
+    }
+    ch
+}
+
 /// Pack the pending AUX changes into one 16-bit MSP2_INAV_SET_AUX_RC payload covering the minimal run
 /// from the lowest to the highest changed channel — channels in between that aren't pending are sent as
 /// 0 (skip, untouched). Full µs fidelity, smallest range. `None` if empty or the run is invalid.

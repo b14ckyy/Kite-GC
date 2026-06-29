@@ -121,6 +121,30 @@ pub fn set_param(
     }))
 }
 
+/// Send an explicit RC_CHANNELS_OVERRIDE **release** frame for the channels we were controlling
+/// (`controlled_us`: positional µs, non-zero = controlled), repeated `count` times at `interval`, to
+/// hand control back on a *deliberate* disengage (ArduPilot). Per the MAVLink field semantics a value of
+/// 0 (CH1–8) / 65534 (CH9–18) releases that channel back to the RC radio; channels we never touched stay
+/// ignored. Fire-and-forget (RC stream messages have no ACK). The caller must first disable the normal
+/// RC stream so the handler doesn't interleave live overrides with these release frames.
+pub fn send_rc_release(
+    cmd_tx: &mpsc::Sender<MavlinkCommand>,
+    fc_sysid: u8,
+    controlled_us: &[u16],
+    count: u8,
+    interval: Duration,
+) -> Result<(), String> {
+    let ch = crate::scheduler::rc_tx::release_channels(controlled_us);
+    let msg = super::handler::rc_override_msg(fc_sysid, &ch);
+    for i in 0..count {
+        send(cmd_tx, msg.clone())?;
+        if i + 1 < count {
+            std::thread::sleep(interval);
+        }
+    }
+    Ok(())
+}
+
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 fn register(cmd_tx: &mpsc::Sender<MavlinkCommand>) -> Result<mpsc::Receiver<MavMessage>, String> {

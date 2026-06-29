@@ -87,7 +87,7 @@ use commands::mission::{
     ardu_mission_download, ardu_mission_upload,
 };
 use commands::control::{
-    mav_set_mode, mav_arm, mav_takeoff, mav_land, mav_rtl, mav_reposition,
+    mav_set_mode, mav_arm, mav_takeoff, mav_land, mav_rtl, mav_rc_release, mav_reposition,
     mav_change_speed, mav_mission_start, mav_mission_pause, mav_mission_set_current,
     mav_set_home_here, mav_abort_landing, mav_set_param,
     mav_guided_change_heading, mav_guided_clear_heading, mav_condition_yaw,
@@ -273,6 +273,7 @@ pub fn run() {
             mav_takeoff,
             mav_land,
             mav_rtl,
+            mav_rc_release,
             mav_reposition,
             mav_change_speed,
             mav_mission_start,

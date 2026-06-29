@@ -269,9 +269,14 @@
     }
   });
 
-  // Disengage automatically when the link goes away or a safety lock trips.
+  // Disengage automatically on involuntary loss of control authority: the FC link goes away, a safety
+  // lock trips, or the input device disappears (USB unplugged / driver drop). Losing the gamepad MUST
+  // stop the stream — otherwise the rcStream pump keeps re-sending the last channel values (the backend
+  // deadman never trips) and the FC would hold frozen sticks instead of failsafing. This is an
+  // *involuntary* stop (no explicit release frame): we just stop streaming and let the FC's
+  // RC_OVERRIDE_TIME grace window run, which tolerates a brief device re-enumeration.
   $effect(() => {
-    if ($rcEngaged.on && (!rcConnected || safety.locked)) disengage();
+    if ($rcEngaged.on && (!rcConnected || safety.locked || !selectedDevice)) disengage();
   });
 
   // RAW_RC only takes effect on the FC while MSP-RC-OVERRIDE is active. Re-seed at the moment it turns
@@ -307,6 +312,13 @@
           buttons: [{ label: $t('rc.disengageArmedConfirm'), value: 'ok', danger: true }],
         });
         if (ans !== 'ok') return;
+      }
+      // Deliberate release: on ArduPilot (RC_CHANNELS_OVERRIDE) send an explicit release frame so the FC
+      // hands control back immediately (revert to a real RX, or RC failsafe if we were the sole source)
+      // instead of waiting out RC_OVERRIDE_TIME. PX4 (MANUAL_CONTROL) and INAV have no release frame —
+      // they just stop streaming. The backend stops the stream as part of the release.
+      if (connectedArdu) {
+        try { await invoke('mav_rc_release'); } catch (e) { console.warn('[rc] release failed', e); }
       }
       disengage();
     }

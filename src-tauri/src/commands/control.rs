@@ -10,6 +10,7 @@
 // packed `main`/`sub`) — the backend just forwards the params. See docs/active/VEHICLE_CONTROL.md.
 
 use std::sync::mpsc;
+use std::time::Duration;
 use tauri::State;
 
 use ::mavlink::ardupilotmega::{MavCmd, MavFrame};
@@ -20,6 +21,11 @@ use crate::state::{ActiveProtocol, AppState};
 
 /// ArduPilot's "force" magic for COMMAND_ARM_DISARM param2 — bypasses pre-arm checks.
 const ARM_FORCE_MAGIC: f32 = 21196.0;
+
+/// Deliberate-release burst: how many RC_CHANNELS_OVERRIDE release frames to send, and the spacing
+/// between them. A few frames over ~200 ms ride out a lossy OTA link so the FC reliably sees the release.
+const RC_RELEASE_FRAMES: u8 = 5;
+const RC_RELEASE_INTERVAL: Duration = Duration::from_millis(50);
 
 /// Resolve the active MAVLink handle to (command channel, FC system id), or an error if the active
 /// protocol is not MAVLink. Holds the protocol mutex only briefly; the command exchange runs after.
@@ -83,6 +89,31 @@ pub fn mav_land(state: State<'_, AppState>) -> Result<(), String> {
 pub fn mav_rtl(state: State<'_, AppState>) -> Result<(), String> {
     let (cmd_tx, fc_sysid) = mav_handle(&state)?;
     control::send_command_long(&cmd_tx, fc_sysid, MavCmd::MAV_CMD_NAV_RETURN_TO_LAUNCH, [0.0; 7])
+}
+
+/// Deliberate RC release (ArduPilot): stop the RC injection stream and send an explicit
+/// RC_CHANNELS_OVERRIDE release frame for the channels we were controlling, so the FC hands control back
+/// immediately instead of waiting out `RC_OVERRIDE_TIME`. Called by the RC panel only when the user
+/// consciously releases over MAVLink (RC_CHANNELS_OVERRIDE path); PX4 (MANUAL_CONTROL) and involuntary
+/// loss just stop streaming. No-op if nothing was being overridden.
+#[tauri::command(async)]
+pub fn mav_rc_release(state: State<'_, AppState>) -> Result<(), String> {
+    // Snapshot the controlled channels, then stop the normal stream first so the handler doesn't
+    // interleave live overrides with our release frames.
+    let controlled = {
+        let mut rc = state.rc_tx.lock().map_err(|e| e.to_string())?;
+        let us = rc.mav_override_us.clone();
+        rc.enabled = false;
+        rc.mav_override_us.clear();
+        rc.mav_manual = None;
+        rc.aux_pending.clear();
+        us
+    };
+    if controlled.iter().all(|&v| v == 0) {
+        return Ok(()); // nothing was being overridden → nothing to release
+    }
+    let (cmd_tx, fc_sysid) = mav_handle(&state)?;
+    control::send_rc_release(&cmd_tx, fc_sysid, &controlled, RC_RELEASE_FRAMES, RC_RELEASE_INTERVAL)
 }
 
 /// Guided "fly here" via `MAV_CMD_DO_REPOSITION` (COMMAND_INT for lat/lon precision). `lat`/`lon` are

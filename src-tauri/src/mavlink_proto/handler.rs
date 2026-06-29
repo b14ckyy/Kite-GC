@@ -402,8 +402,9 @@ fn handler_loop(
 }
 
 /// Build an `RC_CHANNELS_OVERRIDE` message (ArduPilot RC injection). `ch` is the 18-channel positional
-/// wire array already carrying the per-band ignore sentinels (see rc_tx::override_channels).
-fn rc_override_msg(fc_sysid: u8, ch: &[u16; rc_tx::MAV_OVERRIDE_CHANNELS]) -> MavMessage {
+/// wire array already carrying the per-band ignore sentinels (see rc_tx::override_channels). Also reused
+/// for the deliberate-disengage release frame (rc_tx::release_channels), hence `pub(crate)`.
+pub(crate) fn rc_override_msg(fc_sysid: u8, ch: &[u16; rc_tx::MAV_OVERRIDE_CHANNELS]) -> MavMessage {
     MavMessage::RC_CHANNELS_OVERRIDE(RC_CHANNELS_OVERRIDE_DATA {
         target_system: fc_sysid,
         target_component: 1, // MAV_COMP_ID_AUTOPILOT1
