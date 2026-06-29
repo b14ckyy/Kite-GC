@@ -81,6 +81,7 @@ nav:
       - Telemetry & display: guides/telemetry-and-display.md
       - Missions: guides/missions.md
       - Vehicle control: guides/vehicle-control.md
+      - RC control: guides/rc-control.md
       - Logbook:
           - guides/logbook.md
           - Vehicles: guides/vehicles.md
@@ -91,7 +92,6 @@ nav:
       - Airspace Manager: guides/airspace.md
       - 3D map: guides/map-3d.md
       - Relay & forwarding: guides/relay-and-forwarding.md
-      - RC control: guides/rc-control.md
   - Reference:
       - Settings: reference/settings.md
       - File formats: reference/file-formats.md
