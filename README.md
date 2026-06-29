@@ -9,6 +9,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: GPL-3.0-or-later" src="https://img.shields.io/badge/License-GPLv3-blue.svg"></a>
+  <a href="https://b14ckyy.github.io/Kite-GC/"><img alt="Documentation" src="https://img.shields.io/badge/docs-online-37a8db"></a>
   <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-555">
   <img alt="Status" src="https://img.shields.io/badge/status-public%20beta-f5a623">
   <a href="https://paypal.me/b14ckyy"><img alt="Donate via PayPal" src="https://img.shields.io/badge/Donate-PayPal-00457C?logo=paypal&logoColor=white"></a>
@@ -27,6 +28,12 @@ Built with [Tauri 2.0](https://tauri.app/) (Rust backend) and [Svelte 5](https:/
 
 <p align="center">
   <img alt="Kite Ground Control in 3D mode" src="docs/user/assets/main_interface_3d.png" width="820">
+</p>
+
+<p align="center">
+  <b><a href="https://b14ckyy.github.io/Kite-GC/">📖 Documentation</a></b>
+  &nbsp;·&nbsp;
+  <b><a href="https://github.com/b14ckyy/Kite-GC/releases">⬇️ Download</a></b>
 </p>
 
 ## Highlights
@@ -88,26 +95,26 @@ Everything you'd expect from a ground station:
 
 ## Download
 
-Grab the latest installer from the [**Releases**](https://github.com/b14ckyy/Kite-GC/releases) page
-(arriving with the public beta), or [build from source](#building-from-source) below.
+Grab the latest installer for your platform from the
+[**Releases**](https://github.com/b14ckyy/Kite-GC/releases) page, or [build from source](#building-from-source)
+below.
 
 ## Documentation
 
-User guides live under [`docs/user/`](docs/user/) (a searchable documentation site is coming with the
-public beta):
+Full documentation is online at **[b14ckyy.github.io/Kite-GC](https://b14ckyy.github.io/Kite-GC/)**:
 
-- **Getting started:** [Installation](docs/user/getting-started/installation.md) ·
-  [First connection](docs/user/getting-started/first-connection.md) ·
-  [Quick tour](docs/user/getting-started/quick-tour.md)
-- **Guides:** [Missions](docs/user/guides/missions.md) ·
-  [Telemetry & display](docs/user/guides/telemetry-and-display.md) ·
-  [Logbook](docs/user/guides/logbook.md) · [Safety](docs/user/guides/safety.md) ·
-  [3D map](docs/user/guides/map-3d.md) · [Video](docs/user/guides/video.md)
-- **Trouble connecting?** [Troubleshooting → Connection](docs/user/troubleshooting/connection.md)
-- **For developers:** [Overview](docs/user/for-developers/index.md) ·
-  [Architecture](docs/user/for-developers/architecture.md) ·
-  [Building from source](docs/user/for-developers/building.md) ·
-  [Contributing](docs/user/for-developers/contributing.md)
+- **Getting started:** [Installation](https://b14ckyy.github.io/Kite-GC/getting-started/installation/) ·
+  [First connection](https://b14ckyy.github.io/Kite-GC/getting-started/first-connection/) ·
+  [Quick tour](https://b14ckyy.github.io/Kite-GC/getting-started/quick-tour/)
+- **Guides:** [Missions](https://b14ckyy.github.io/Kite-GC/guides/missions/) ·
+  [Telemetry & display](https://b14ckyy.github.io/Kite-GC/guides/telemetry-and-display/) ·
+  [Logbook](https://b14ckyy.github.io/Kite-GC/guides/logbook/) · [Safety](https://b14ckyy.github.io/Kite-GC/guides/safety/) ·
+  [3D map](https://b14ckyy.github.io/Kite-GC/guides/map-3d/) · [Video](https://b14ckyy.github.io/Kite-GC/guides/video/)
+- **Trouble connecting?** [Troubleshooting → Connection](https://b14ckyy.github.io/Kite-GC/troubleshooting/connection/)
+- **For developers:** [Overview](https://b14ckyy.github.io/Kite-GC/for-developers/) ·
+  [Architecture](https://b14ckyy.github.io/Kite-GC/for-developers/architecture/) ·
+  [Building from source](https://b14ckyy.github.io/Kite-GC/for-developers/building/) ·
+  [Contributing](https://b14ckyy.github.io/Kite-GC/for-developers/contributing/)
 
 ## Support development
 
@@ -124,7 +131,7 @@ support its development, a donation is hugely appreciated — thank you! 💛
 - [Node.js](https://nodejs.org/) LTS (v20 or v24)
 - [Rust](https://rustup.rs/) (via rustup)
 - [just](https://github.com/casey/just) — the primary task runner
-- Platform toolchain & system dependencies — see the [Build Guide](docs/user/for-developers/building.md)
+- Platform toolchain & system dependencies — see the [Build Guide](https://b14ckyy.github.io/Kite-GC/for-developers/building/)
 
 ### Develop
 ```bash
@@ -141,8 +148,8 @@ just build-linux     # Linux release (on Linux)
 
 > **Tip:** install `just` for the best developer experience (see the `justfile` in the project root).
 > More detail — setup, troubleshooting and CI — is in the
-> [Building from source](docs/user/for-developers/building.md) guide, and the
-> [Architecture overview](docs/user/for-developers/architecture.md) explains how Kite fits together.
+> [Building from source](https://b14ckyy.github.io/Kite-GC/for-developers/building/) guide, and the
+> [Architecture overview](https://b14ckyy.github.io/Kite-GC/for-developers/architecture/) explains how Kite fits together.
 
 ## Contributing
 
