@@ -95,14 +95,16 @@ program, which Kite offers to **download automatically the first time you use th
 | Helper | Used for | Auto-download |
 |---|---|---|
 | `blackbox_decode` | Importing **INAV blackbox** logs | **Windows & Linux** |
-| `ffmpeg` | **Video** (fallback decoding for some RTSP sources) | **Windows** only |
-| `go2rtc` | **Video** (the RTSP → low-latency engine) | **Windows** only |
+| `ffmpeg` | **Video** (fallback decoding for some RTSP sources) | **Windows & Linux** |
+| `go2rtc` | **Video** (the RTSP → low-latency engine) | **Windows & Linux** |
 
 - Downloaded helpers are stored in Kite's tools folder (`…\kite-gc\bin`, or `data\bin` in portable
   mode) — they don't touch your system.
-- Kite finds a helper if it's **on your `PATH`**, **next to the app**, or in that tools folder. On a
-  platform without automatic download (e.g. ffmpeg/go2rtc on Linux), install the tool yourself and put
-  it on your `PATH` or next to the app — Kite will pick it up.
+  Linux auto-downloads cover the common 64-bit CPUs (Intel/AMD `x86_64` and ARM `aarch64`).
+- Kite finds a helper if it's **on your `PATH`**, **next to the app**, or in that tools folder. Where
+  automatic download isn't available (for example on macOS, or an unsupported CPU like 32-bit/armv7),
+  install the tool yourself — via your package manager (e.g. `brew install ffmpeg go2rtc`) or a manual
+  download — and put it on your `PATH` or next to the app; Kite will pick it up.
 - These downloads need **internet access**. The **map** also needs it: both **2D map tiles** and
   **3D terrain** are streamed on demand and cached after first view — there's no offline map download
   yet (it's under consideration for the future if there's enough demand). Connecting to your aircraft,
