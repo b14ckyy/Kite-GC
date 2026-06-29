@@ -3,7 +3,7 @@
 Found a bug, or something not working as described? Reports are very welcome — a good one gets it fixed
 much faster. Kite is developed openly on GitHub:
 
-[:material-github: Open an issue on GitHub](https://github.com/b14ckyy/Kite-GCS/issues){ .md-button }
+[:material-github: Open an issue on GitHub](https://github.com/b14ckyy/Kite-GC/issues){ .md-button }
 
 ## Before you file
 

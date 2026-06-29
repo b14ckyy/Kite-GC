@@ -25,7 +25,7 @@ This section is for people who want to **build Kite from source**, understand ho
 
 ## Source code
 
-The project lives on GitHub: **[b14ckyy/Kite-GCS](https://github.com/b14ckyy/Kite-GCS)**. Issues and
+The project lives on GitHub: **[b14ckyy/Kite-GC](https://github.com/b14ckyy/Kite-GC)**. Issues and
 pull requests are the best way to get involved.
 
 !!! note "Internal design notes"

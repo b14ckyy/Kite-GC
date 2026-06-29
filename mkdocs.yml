@@ -4,9 +4,9 @@
 
 site_name: Kite Ground Control
 site_description: User documentation for Kite Ground Control — an INAV / ArduPilot / PX4 ground control station.
-site_url: https://b14ckyy.github.io/Kite-GCS/
-repo_url: https://github.com/b14ckyy/Kite-GCS
-repo_name: b14ckyy/Kite-GCS
+site_url: https://b14ckyy.github.io/Kite-GC/
+repo_url: https://github.com/b14ckyy/Kite-GC
+repo_name: b14ckyy/Kite-GC
 edit_uri: edit/master/docs/user/
 docs_dir: docs/user
 site_dir: site

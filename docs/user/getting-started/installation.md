@@ -2,7 +2,7 @@
 
 Kite Ground Control is a small, self-contained desktop app (a few tens of MB — it uses your system's
 web view rather than bundling a whole browser). Grab the build for your platform from the
-[**Releases**](https://github.com/b14ckyy/Kite-GCS/releases) page and you're ready to connect.
+[**Releases**](https://github.com/b14ckyy/Kite-GC/releases) page and you're ready to connect.
 
 ## Downloads
 

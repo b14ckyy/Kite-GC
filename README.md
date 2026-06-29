@@ -88,7 +88,7 @@ Everything you'd expect from a ground station:
 
 ## Download
 
-Grab the latest installer from the [**Releases**](https://github.com/b14ckyy/Kite-GCS/releases) page
+Grab the latest installer from the [**Releases**](https://github.com/b14ckyy/Kite-GC/releases) page
 (arriving with the public beta), or [build from source](#building-from-source) below.
 
 ## Documentation

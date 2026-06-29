@@ -11,4 +11,4 @@ export const GIT_COMMIT = __GIT_COMMIT__;
 export const BUILD_DATE = __BUILD_DATE__;
 export const COPYRIGHT = '© 2026 Marc Hoffmann (b14ckyy)';
 export const LICENSE = 'GPL-3.0-or-later';
-export const REPO_URL = 'https://github.com/b14ckyy/Kite-GCS';
+export const REPO_URL = 'https://github.com/b14ckyy/Kite-GC';
