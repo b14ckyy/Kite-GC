@@ -85,10 +85,12 @@ struct TelemetrySlot {
     rotation_index: usize,
     /// Scheduling priority (higher = more important, polled first when overloaded)
     priority: u8,
+    /// Minimum poll rate (Hz) this slot is never scaled below under link congestion (adaptive floor).
+    floor_hz: f64,
 }
 
 impl TelemetrySlot {
-    fn new(group: TelemetryGroup, codes: Vec<u16>, rate_hz: f64, priority: u8) -> Self {
+    fn new(group: TelemetryGroup, codes: Vec<u16>, rate_hz: f64, priority: u8, floor_hz: f64) -> Self {
         Self {
             group,
             codes,
@@ -96,17 +98,29 @@ impl TelemetrySlot {
             last_poll: None,
             rotation_index: 0,
             priority,
+            floor_hz,
         }
     }
 
-    /// How long this slot is overdue (None if not yet due)
-    fn overdue(&self) -> Option<Duration> {
+    /// Effective poll interval after adaptive scaling: the configured interval stretched by `1/scale`
+    /// (slower when the link can't keep up with total demand), clamped so the rate never drops below the
+    /// slot's floor. `scale` is 1.0 when the link keeps up, smaller as it congests — so all slots back off
+    /// proportionally, hitting their floors only in the extreme.
+    fn effective_interval(&self, scale: f64) -> Duration {
+        let stretched = self.interval.as_secs_f64() / scale.clamp(0.01, 1.0);
+        let floor_interval = 1.0 / self.floor_hz; // slowest allowed
+        Duration::from_secs_f64(stretched.min(floor_interval))
+    }
+
+    /// How long this slot is overdue (None if not yet due), against its scaled effective interval.
+    fn overdue(&self, scale: f64) -> Option<Duration> {
+        let interval = self.effective_interval(scale);
         match self.last_poll {
             None => Some(Duration::from_secs(999)), // never polled = maximally overdue
             Some(last) => {
                 let elapsed = last.elapsed();
-                if elapsed >= self.interval {
-                    Some(elapsed - self.interval)
+                if elapsed >= interval {
+                    Some(elapsed - interval)
                 } else {
                     None
                 }
@@ -114,16 +128,17 @@ impl TelemetrySlot {
         }
     }
 
-    /// Time until next poll is due
-    fn time_until_due(&self) -> Duration {
+    /// Time until next poll is due, against its scaled effective interval.
+    fn time_until_due(&self, scale: f64) -> Duration {
+        let interval = self.effective_interval(scale);
         match self.last_poll {
             None => Duration::ZERO,
             Some(last) => {
                 let elapsed = last.elapsed();
-                if elapsed >= self.interval {
+                if elapsed >= interval {
                     Duration::ZERO
                 } else {
-                    self.interval - elapsed
+                    interval - elapsed
                 }
             }
         }
@@ -197,6 +212,14 @@ fn scheduler_loop(
     rc_tx: rc_tx::RcTxHandle,
 ) -> Option<Box<dyn Transport>> {
     let mut slots = build_slots(&config);
+    // Adaptive rate scaling: total desired poll rate (slots/sec) vs what the link actually sustains. When
+    // demand exceeds capacity we scale ALL slot rates down proportionally (toward their floors) so a slow
+    // link (e.g. mLRS 19 Hz LoRa ≈ 5 msg/s) doesn't let the top-priority slot starve the rest. `scale` is
+    // recomputed each cycle from the measured average successful-poll cost (EWMA). 1.0 = link keeps up.
+    let poll_demand_hz: f64 = slots.iter().map(|s| 1.0 / s.interval.as_secs_f64()).sum();
+    const SCALE_MIN: f64 = 0.05;
+    let mut avg_poll_cost: Option<f64> = None; // seconds per successful slot poll (EWMA)
+    let mut last_scale_log = Instant::now();
     let mut radar_last = Instant::now() - RADAR_MSP_INTERVAL;
     let mut rc_raw_last = Instant::now() - rc_tx::RC_RAW_DEFAULT_INTERVAL;
     let mut rc_aux_last = Instant::now() - RC_AUX_INTERVAL;
@@ -427,19 +450,34 @@ fn scheduler_loop(
             continue;
         }
 
-        // 2. Find most overdue telemetry slot (priority-based adaptive degradation:
-        //    when multiple slots are overdue, highest priority wins.
-        //    This naturally degrades low-priority groups first — GPS before Attitude.)
+        // 2. Adaptive rate scaling + most-overdue slot selection. `scale` (< 1 when the link can't
+        //    sustain total demand) shrinks every slot's effective rate proportionally toward its floor,
+        //    so a slow link doesn't let the top-priority slot (Attitude) starve everything else. Among
+        //    the due slots, highest priority still wins, then most overdue.
+        let scale = match avg_poll_cost {
+            Some(cost) if cost > 0.0 => ((1.0 / cost) / poll_demand_hz).clamp(SCALE_MIN, 1.0),
+            _ => 1.0,
+        };
+        if scale < 0.999 && last_scale_log.elapsed() >= Duration::from_secs(2) {
+            log::debug!(
+                "Adaptive poll scale {:.2} (link ~{:.1} msg/s vs demand {:.1} Hz) — rates scaled toward floors",
+                scale,
+                avg_poll_cost.map(|c| 1.0 / c).unwrap_or(0.0),
+                poll_demand_hz,
+            );
+            last_scale_log = Instant::now();
+        }
         let most_overdue = slots
             .iter()
             .enumerate()
-            .filter_map(|(i, slot)| slot.overdue().map(|d| (i, slot.priority, d)))
+            .filter_map(|(i, slot)| slot.overdue(scale).map(|d| (i, slot.priority, d)))
             .max_by(|(_, p1, d1), (_, p2, d2)| {
                 p1.cmp(p2).then_with(|| d1.cmp(d2))
             })
             .map(|(i, _, _)| i);
 
         if let Some(idx) = most_overdue {
+            let poll_started = Instant::now();
             let outcome = poll_slot(&mut *transport, &mut slots[idx], &app_handle, &mut debug_tracker, &mut link_stats, &recorder, &box_ids, config.link_stats_enabled);
             if let Some(ov) = outcome.override_flag {
                 override_active = ov;
@@ -450,6 +488,13 @@ fn scheduler_loop(
             // recovery when telemetry resumes.
             if outcome.replied {
                 last_rx = Instant::now();
+                // Feed the adaptive scaler: EWMA of this successful poll's round-trip cost (= the link's
+                // real per-poll time). 1/cost is the achievable msg/s that `scale` divides demand against.
+                let cost = poll_started.elapsed().as_secs_f64();
+                avg_poll_cost = Some(match avg_poll_cost {
+                    Some(prev) => prev * 0.8 + cost * 0.2,
+                    None => cost,
+                });
                 if stall_warned {
                     log::warn!("Link recovered — telemetry resumed");
                     stall_warned = false;
@@ -474,7 +519,7 @@ fn scheduler_loop(
         // 3. Nothing overdue — check for commands with short timeout
         let min_wait = slots
             .iter()
-            .map(|s| s.time_until_due())
+            .map(|s| s.time_until_due(scale))
             .min()
             .unwrap_or(Duration::from_millis(100));
 
@@ -537,36 +582,47 @@ fn build_slots(config: &TelemetryConfig) -> Vec<TelemetrySlot> {
         secondary_codes.push(MSP2_INAV_WIND);
     }
 
+    // Adaptive-degradation floors (Hz): the minimum rate each group keeps under a congested link.
+    // Attitude and position stay usable (1 Hz) for the horizon + map; everything else floors at 0.5 Hz.
+    const FLOOR_ATTITUDE: f64 = 1.0;
+    const FLOOR_POSITION: f64 = 1.0;
+    const FLOOR_LOW: f64 = 0.5;
+
     let mut slots = vec![
         TelemetrySlot::new(
             TelemetryGroup::Attitude,
             vec![MSP_ATTITUDE],
             config.attitude_rate_hz,
             5,
+            FLOOR_ATTITUDE,
         ),
         TelemetrySlot::new(
             TelemetryGroup::Analog,
             vec![MSPV2_INAV_ANALOG],
             1.0,
             3,
+            FLOOR_LOW,
         ),
         TelemetrySlot::new(
             TelemetryGroup::PositionPrimary,
             vec![MSP_RAW_GPS, MSP_GPSSTATISTICS],
             config.position_rate_hz,
             2,
+            FLOOR_POSITION,
         ),
         TelemetrySlot::new(
             TelemetryGroup::PositionSecondary,
             secondary_codes,
             config.position_rate_hz,
             1,
+            FLOOR_POSITION,
         ),
         TelemetrySlot::new(
             TelemetryGroup::Status,
             vec![MSPV2_INAV_STATUS, MSP_SENSOR_STATUS, MSP_NAV_STATUS],
             1.0,
             4,
+            FLOOR_LOW,
         ),
         // Throttle + timers (MSP2_INAV_MISC2): own slot at 2 Hz — small message, low priority so it
         // degrades first under load. Drives the Speed widget throttle bar.
@@ -575,6 +631,7 @@ fn build_slots(config: &TelemetryConfig) -> Vec<TelemetrySlot> {
             vec![MSP2_INAV_MISC2],
             2.0,
             1,
+            FLOOR_LOW,
         ),
     ];
 
@@ -585,6 +642,7 @@ fn build_slots(config: &TelemetryConfig) -> Vec<TelemetrySlot> {
             vec![MSP2_INAV_GET_LINK_STATS],
             1.0,
             1,
+            FLOOR_LOW,
         ));
     }
 
@@ -744,5 +802,42 @@ fn poll_radar_adsb(
                 &[radar::AdsbStatus { name: "UAV (MSP)".into(), count: 0, ok: false }],
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn slot(rate_hz: f64, floor_hz: f64) -> TelemetrySlot {
+        TelemetrySlot::new(TelemetryGroup::Attitude, vec![0], rate_hz, 5, floor_hz)
+    }
+
+    #[test]
+    fn effective_interval_full_scale_is_base() {
+        // scale 1.0 (link keeps up) → the configured interval is used unchanged.
+        let s = slot(5.0, 1.0); // 200 ms base
+        assert!((s.effective_interval(1.0).as_secs_f64() - 0.2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn effective_interval_scales_proportionally() {
+        // scale 0.5 → interval doubles (5 Hz → 2.5 Hz), still above the 1 Hz floor.
+        let s = slot(5.0, 1.0);
+        assert!((s.effective_interval(0.5).as_secs_f64() - 0.4).abs() < 1e-6);
+    }
+
+    #[test]
+    fn effective_interval_clamped_at_attitude_floor() {
+        // Extreme congestion would stretch 200 ms → 4 s, but the 1 Hz floor caps it at 1 s.
+        let s = slot(5.0, 1.0);
+        assert!((s.effective_interval(0.05).as_secs_f64() - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn effective_interval_low_prio_floor_is_half_hz() {
+        // Low-priority slots floor at 0.5 Hz → never slower than 2 s, even at minimum scale.
+        let s = slot(1.0, 0.5);
+        assert!((s.effective_interval(0.01).as_secs_f64() - 2.0).abs() < 1e-6);
     }
 }
