@@ -193,8 +193,9 @@ pub fn run() {
                 if let Some(window) = _app.get_webview_window("main") {
                     let _ = window.with_webview(|webview| {
                         use webkit2gtk::WebViewExt;
+                        use webkit2gtk::{SettingsExt, PermissionRequestExt};
                         use webkit2gtk::glib::gobject_ffi;
-                        use webkit2gtk::glib::prelude::ObjectExt;
+                        use webkit2gtk::glib::prelude::{ObjectExt, Cast};
 
                         let wv = webview.inner();
 
@@ -222,6 +223,27 @@ pub fn run() {
                                 gobject_ffi::g_signal_handlers_destroy(gesture.as_ptr());
                             }
                         }
+
+                        // (3) Permissions + media. WebKitGTK ships with getUserMedia
+                        // (`enable-media-stream`) OFF by default, and leaves permission requests to a
+                        // default that varies by distro/WebKit version — so the integrated camera and the
+                        // GCS geolocation both silently fail on some builds (e.g. Zorin OS) while working
+                        // on others (Debian). Enable the media engine and grant geolocation + camera/mic
+                        // requests ourselves; the real gate stays the OS-level Location/Camera toggle the
+                        // user controls. (`settings()` returns the always-present WebKitSettings; if a
+                        // future binding makes it `Option`, wrap in `if let Some`.)
+                        let settings = WebViewExt::settings(&wv);
+                        settings.set_enable_media_stream(true);
+                        wv.connect_permission_request(|_wv, req| {
+                            if req.downcast_ref::<webkit2gtk::GeolocationPermissionRequest>().is_some()
+                                || req.downcast_ref::<webkit2gtk::UserMediaPermissionRequest>().is_some()
+                            {
+                                req.allow();
+                                true // handled
+                            } else {
+                                false // leave anything else to the default
+                            }
+                        });
                     });
                 }
             }
