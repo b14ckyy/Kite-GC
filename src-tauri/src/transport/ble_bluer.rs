@@ -19,11 +19,14 @@ use std::str::FromStr;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use bluer::gatt::remote::{CharacteristicReader, CharacteristicWriter};
 use bluer::{Adapter, Address, Device, DeviceEvent, DeviceProperty, Session};
 use futures::StreamExt;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc::error::TryRecvError;
+
+// bluer's concrete CharacteristicReader/Writer are private, so the link is held as boxed trait objects.
+type BleReader = Box<dyn AsyncRead + Unpin + Send>;
+type BleWriter = Box<dyn AsyncWrite + Unpin + Send>;
 
 use super::{known_profiles, BleDeviceProfile, BleTransport};
 
@@ -50,7 +53,7 @@ async fn establish(
     adapter: &Adapter,
     addr: Address,
     profiles: &[BleDeviceProfile],
-) -> Result<(Device, CharacteristicReader, CharacteristicWriter, BleDeviceProfile), String> {
+) -> Result<(Device, BleReader, BleWriter, BleDeviceProfile, usize), String> {
     // A short discovery is cheap insurance that BlueZ knows the device (esp. after it re-advertised
     // following a power-cycle); drop the stream right after to stop discovery.
     {
@@ -85,7 +88,8 @@ async fn establish(
             // THE key bit: FD-socket GATT (AcquireNotify / AcquireWrite), not signal callbacks.
             let reader = r.notify_io().await.map_err(|e| format!("AcquireNotify: {e}"))?;
             let writer = w.write_io().await.map_err(|e| format!("AcquireWrite: {e}"))?;
-            return Ok((device, reader, writer, profile.clone()));
+            let write_mtu = writer.mtu().max(20); // informational (writes are capped at BLE_WRITE_CHUNK)
+            return Ok((device, Box::new(reader), Box::new(writer), profile.clone(), write_mtu));
         }
     }
     Err("No matching BLE serial profile/characteristics".to_string())
@@ -102,10 +106,9 @@ pub async fn connect_ble(device_id: &str) -> Result<BleTransport, String> {
 
     // First connection MUST succeed — that's what the caller (and the scheduler's one-time handshake)
     // see as "connected". A later drop is recovered transparently inside the task below.
-    let (device, reader, writer, profile) = establish(&adapter, addr, &profiles).await?;
+    let (device, reader, writer, profile, write_mtu) = establish(&adapter, addr, &profiles).await?;
     let device_name = device.name().await.ok().flatten().unwrap_or_else(|| "Unknown".to_string());
     let profile_name = profile.name.to_string();
-    let write_mtu = writer.mtu().max(20); // informational (writes are capped at BLE_WRITE_CHUNK)
     // Per-profile write throttle: the CC2541/HM-10 UART bridge drops data on back-to-back ATT writes.
     let write_delay = Duration::from_millis(profile.write_delay_ms);
 
@@ -118,8 +121,7 @@ pub async fn connect_ble(device_id: &str) -> Result<BleTransport, String> {
         let _session = session;
         let mut buf = vec![0u8; 512];
         // The live link for this serve cycle; `None` means "reconnect first".
-        let mut current: Option<(Device, CharacteristicReader, CharacteristicWriter)> =
-            Some((device, reader, writer));
+        let mut current: Option<(Device, BleReader, BleWriter)> = Some((device, reader, writer));
 
         loop {
             // ── Ensure we have a live link (reconnect with capped backoff on loss) ──
@@ -134,7 +136,7 @@ pub async fn connect_ble(device_id: &str) -> Result<BleTransport, String> {
                             _ => return,
                         }
                         match establish(&adapter, addr, &profiles).await {
-                            Ok((d, r, w, _p)) => {
+                            Ok((d, r, w, _p, _mtu)) => {
                                 log::info!("BLE(bluer): reconnected");
                                 break (d, r, w);
                             }
