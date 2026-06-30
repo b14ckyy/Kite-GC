@@ -230,10 +230,10 @@ pub fn run() {
                         // GCS geolocation both silently fail on some builds (e.g. Zorin OS) while working
                         // on others (Debian). Enable the media engine and grant geolocation + camera/mic
                         // requests ourselves; the real gate stays the OS-level Location/Camera toggle the
-                        // user controls. (`settings()` returns the always-present WebKitSettings; if a
-                        // future binding makes it `Option`, wrap in `if let Some`.)
-                        let settings = WebViewExt::settings(&wv);
-                        settings.set_enable_media_stream(true);
+                        // user controls. (`settings()` returns `Option<WebKitSettings>` in this binding.)
+                        if let Some(settings) = WebViewExt::settings(&wv) {
+                            settings.set_enable_media_stream(true);
+                        }
                         wv.connect_permission_request(|_wv, req| {
                             if req.downcast_ref::<webkit2gtk::GeolocationPermissionRequest>().is_some()
                                 || req.downcast_ref::<webkit2gtk::UserMediaPermissionRequest>().is_some()
