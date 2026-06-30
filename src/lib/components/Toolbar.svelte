@@ -13,6 +13,7 @@
   import ArmingIndicator from '$lib/components/ArmingIndicator.svelte';
   import BatteryIndicator from '$lib/components/BatteryIndicator.svelte';
   import type { PortInfo, BleDeviceInfo, TransportType, ProtocolType } from '$lib/stores/connection';
+  import { reconnectAttempt } from '$lib/stores/connection';
   import type { TelemetryData } from '$lib/stores/telemetry';
   import { settings } from '$lib/stores/settings';
 
@@ -158,7 +159,7 @@
   </div>
   <div class="toolbar-right" data-tauri-drag-region>
     <div class="port-controls">
-      {#if connStatus !== "connected"}
+      {#if connStatus !== "connected" && connStatus !== "reconnecting"}
         <!-- Protocol selector. The passive "Telemetry" mode is listen-only (auto-detect). -->
         <SegmentedToggle
           options={[{ value: 'msp', label: 'MSP' }, { value: 'mavlink', label: 'MAVLink' }, { value: 'telemetry', label: 'Telemetry' }]}
@@ -247,6 +248,11 @@
       {:else if connStatus === "connected"}
         <ConnectionStatusBox {telem} />
         <Button variant="danger" onclick={onConnect}>{$t('connection.disconnect')}</Button>
+      {:else if connStatus === "reconnecting"}
+        <!-- Auto-reconnect in progress: the button cancels it (= a normal disconnect). -->
+        <Button variant="warning" onclick={onConnect}>
+          {$reconnectAttempt > 0 ? $t('connection.reconnectingN', { values: { n: $reconnectAttempt } }) : $t('connection.reconnecting')}
+        </Button>
       {:else}
         <Button variant="data" onclick={onConnect}>{$t('connection.connect')}</Button>
       {/if}

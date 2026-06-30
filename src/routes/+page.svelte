@@ -54,7 +54,7 @@
   import { gcsLocation } from "$lib/stores/gcsLocation";
   import { fetchAero } from "$lib/stores/airspace";
   import { PlaybackController } from '$lib/controllers/playbackController';
-  import { refreshSerialPorts, connectFC, disconnectFC, startBleScan, stopBleScan, startBleDeviceListener, stopBleDeviceListener, clearBleDevices } from '$lib/controllers/connectionController';
+  import { refreshSerialPorts, connectFC, disconnectFC, attemptReconnect, reconnectWanted, startBleScan, stopBleScan, startBleDeviceListener, stopBleDeviceListener, clearBleDevices } from '$lib/controllers/connectionController';
   import * as logbookCtrl from '$lib/controllers/logbookController';
   import * as widgetCtrl from '$lib/controllers/widgetController';
   import { isValidGpsCoordinate, isArmed } from '$lib/helpers/telemetry';
@@ -1765,7 +1765,10 @@
   });
 
   async function handleConnect() {
-    if (connStatus === "connected") {
+    // 'reconnecting' counts as connected for the toggle: the button is a Cancel that stops the loop
+    // (disconnectFC clears the user-intent) and tears the link down. The armed-recording dialog below is
+    // skipped automatically because telemetry is stale during a reconnect (isArmed checks freshness).
+    if (connStatus === "connected" || connStatus === "reconnecting") {
       // Disconnect while a flight is being recorded (armed) → confirm first and let the user decide
       // what happens to the in-progress recording (ADR-042) — we do NOT disconnect immediately.
       const tnow = get(telemetry);
@@ -2360,10 +2363,12 @@
       'flight-recording-interrupted',
       (event) => { void onRecordingInterrupted(event.payload); },
     );
-    // The device vanished (fatal transport error) — the backend tore the scheduler down. Clean up the
-    // connection state so the UI shows disconnected and the user can simply reconnect.
+    // The device vanished (fatal transport error) — the backend tore the scheduler down. If the user
+    // still wants the link (didn't disconnect themselves), auto-reconnect endlessly to the same endpoint;
+    // otherwise just clean up to a disconnected state. See docs/active/AUTO_RECONNECT.md.
     void listen('connection-lost', () => {
-      void disconnectFC(selectedBaud).catch(() => {});
+      if (reconnectWanted()) void attemptReconnect();
+      else void disconnectFC(selectedBaud).catch(() => {});
     });
     void listen<BlackboxImportProgress>('flightlog-import-progress', (event) => {
       blackboxImportProgress = event.payload;

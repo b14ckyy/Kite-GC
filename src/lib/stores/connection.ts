@@ -6,7 +6,10 @@
 
 import { writable } from 'svelte/store';
 
-export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error';
+
+/** Auto-reconnect attempt counter (0 = not reconnecting). Drives the "Reconnecting… (N)" UI. */
+export const reconnectAttempt = writable<number>(0);
 
 export type TransportType = 'serial' | 'tcp' | 'udp' | 'ble';
 

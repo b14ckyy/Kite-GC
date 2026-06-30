@@ -6,7 +6,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { get } from 'svelte/store';
 import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from '$lib/stores/connection';
 import type { InavStats } from '$lib/stores/flightlogTypes';
-import { connection, connectionProtocol, fcLinkAlive, availablePorts, bleDevices } from '$lib/stores/connection';
+import { connection, connectionProtocol, fcLinkAlive, availablePorts, bleDevices, reconnectAttempt } from '$lib/stores/connection';
 import { startTelemetryListeners, stopTelemetryListeners, resetTelemetry } from '$lib/stores/telemetry';
 import { applyRelaysOnConnect, clearRelaysOnDisconnect } from '$lib/controllers/relayController';
 import { loadSafehomeConfig, clearSafehome } from '$lib/stores/safehome';
@@ -110,6 +110,56 @@ export interface ConnectParams {
   flightLogRawAlways: boolean;
 }
 
+// ── Auto-reconnect state ────────────────────────────────────────────────────
+// "Always try to get the link back unless the user said stop." A successful user connect records the
+// params + sets userWantsConnected; a user disconnect clears it. On an unexpected drop (connection-lost),
+// attemptReconnect() loops connectFC with the stored params until it succeeds or the user disconnects.
+// See docs/active/AUTO_RECONNECT.md. (A settings toggle to disable it is a trivial follow-up — endless-on
+// by default is what we want for the field.)
+let intended: ConnectParams | null = null;
+let userWantsConnected = false;
+let reconnectActive = false;
+
+/** Whether the user currently wants to be connected (i.e. an unexpected drop should auto-reconnect). */
+export function reconnectWanted(): boolean {
+  return userWantsConnected && intended != null;
+}
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * Reconnect loop after an unexpected drop. Tears the dead link down cleanly (without clearing the
+ * user-intent), then retries the stored connection endlessly with a small capped backoff until it
+ * reconnects or the user disconnects. Re-entrant-safe (a second connection-lost is ignored while a loop
+ * runs). No-op if the user never connected / already disconnected.
+ */
+export async function attemptReconnect(): Promise<void> {
+  if (reconnectActive || !userWantsConnected || !intended) return;
+  reconnectActive = true;
+  // The backend already tore the scheduler down on the drop; clean up the transport + frontend listeners
+  // so the retry starts from a known state — but DON'T touch userWantsConnected/intended.
+  try { await invoke('disconnect'); } catch { /* already gone */ }
+  stopTelemetryListeners();
+  resetTelemetry();
+  await clearRelaysOnDisconnect().catch(() => {});
+
+  let attempt = 0;
+  while (userWantsConnected && intended) {
+    attempt += 1;
+    reconnectAttempt.set(attempt);
+    connection.update((c) => ({ ...c, status: 'reconnecting', errorMessage: '' }));
+    try {
+      await connectFC(intended);
+      break; // success → connectFC set status 'connected'
+    } catch {
+      if (!userWantsConnected) break;
+      await sleep(attempt <= 2 ? 2000 : 5000); // 2s, 2s, then 5s cap
+    }
+  }
+  reconnectAttempt.set(0);
+  reconnectActive = false;
+}
+
 /**
  * Connect to the flight controller via Tauri, update stores, start listeners.
  */
@@ -150,6 +200,9 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
     secondary: null,
   });
   fcLinkAlive.set(true);
+  // Record the intent so an unexpected drop auto-reconnects to the same endpoint (see attemptReconnect).
+  intended = params;
+  userWantsConnected = true;
   await startTelemetryListeners();
   // Auto-start the saved telemetry relays (push telemetry → no handshake needed).
   await applyRelaysOnConnect();
@@ -173,6 +226,11 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
  * Disconnect from the flight controller, stop listeners, reset telemetry.
  */
 export async function disconnectFC(baudRate: number): Promise<void> {
+  // User-initiated (or recovery-driven) disconnect → stop wanting the link, so any in-flight reconnect
+  // loop exits and a drop during teardown never re-triggers one.
+  userWantsConnected = false;
+  intended = null;
+  reconnectAttempt.set(0);
   await clearRelaysOnDisconnect();
   clearSafehome();
   clearGeozones();

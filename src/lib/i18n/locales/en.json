@@ -43,6 +43,8 @@
     "connect": "Connect",
     "disconnect": "Disconnect",
     "connecting": "Connecting...",
+    "reconnecting": "Reconnecting…",
+    "reconnectingN": "Reconnecting… ({n})",
     "disconnected": "Disconnected",
     "noPortSelected": "No port selected",
     "noPortsFound": "No ports found",
