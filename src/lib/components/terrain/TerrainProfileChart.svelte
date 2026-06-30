@@ -78,6 +78,12 @@
   const plotH = $derived(Math.max(10, ch - PAD.t - PAD.b));
   const baselineY = $derived(PAD.t + plotH);
 
+  // Horizontal inset for the DATA (track + waypoints): the first/last WP and their number labels stay
+  // clear of the plot edges — no track is drawn in this margin. Background grid/axis stay full-width.
+  const X_INSET = 20;
+  const xOrigin = $derived(PAD.l + X_INSET);
+  const xWidth = $derived(Math.max(10, plotW - 2 * X_INSET));
+
   const xDomain = $derived.by(() => {
     const total = data?.totalDist ?? 1;
     let a = viewStart ?? 0;
@@ -124,13 +130,13 @@
   });
 
   function xS(d: number): number {
-    return PAD.l + ((d - xDomain.a) / (xDomain.b - xDomain.a)) * plotW;
+    return xOrigin + ((d - xDomain.a) / (xDomain.b - xDomain.a)) * xWidth;
   }
   function yS(v: number): number {
     return PAD.t + ((yDomain.max - v) / (yDomain.max - yDomain.min)) * plotH;
   }
   function distFromX(px: number): number {
-    return xDomain.a + ((px - PAD.l) / plotW) * (xDomain.b - xDomain.a);
+    return xDomain.a + ((px - xOrigin) / xWidth) * (xDomain.b - xDomain.a);
   }
 
   // ── Visible-range decimation ───────────────────────────────────────
@@ -273,12 +279,12 @@
     let worst: number | null = null;
     const emit = (band: number, w: number | null) => {
       out.push({
-        offset: Math.max(0, Math.min(1, (band * RF_BAND_PX) / plotW)),
+        offset: Math.max(0, Math.min(1, (band * RF_BAND_PX) / xWidth)),
         color: w != null ? rfColor(w) : 'transparent',
       });
     };
     for (let i = 0; i < d.length; i++) {
-      const band = Math.floor((xS(d[i].dist) - PAD.l) / RF_BAND_PX);
+      const band = Math.floor((xS(d[i].dist) - xOrigin) / RF_BAND_PX);
       if (band !== curBand) {
         if (curBand >= 0) emit(curBand, worst);
         curBand = band;
@@ -562,7 +568,7 @@
       if (Math.abs(e.clientX - dragClientX) > 4) dragMoved = true;
       if (live && follow) return; // no panning while following the live track
       const range = dragB - dragA;
-      const dDist = (-(e.clientX - dragClientX) / plotW) * range;
+      const dDist = (-(e.clientX - dragClientX) / xWidth) * range;
       let na = dragA + dDist;
       let nb = dragB + dDist;
       if (na < 0) {
@@ -578,7 +584,7 @@
       return;
     }
 
-    if (px < PAD.l || px > PAD.l + plotW) {
+    if (px < xOrigin || px > xOrigin + xWidth) {
       hoverIdx = null;
       emitHover();
       return;
@@ -614,7 +620,7 @@
     if (!dragMoved && data) {
       const rect = svgEl.getBoundingClientRect();
       const px = e.clientX - rect.left;
-      if (px >= PAD.l && px <= PAD.l + plotW) {
+      if (px >= xOrigin && px <= xOrigin + xWidth) {
         const s = display[nearestDisplayIdx(distFromX(px))];
         if (s) onpick?.({ lat: s.lat, lon: s.lon });
       }
@@ -626,7 +632,7 @@
     e.preventDefault();
     const rect = svgEl.getBoundingClientRect();
     const px = e.clientX - rect.left;
-    const cursorDist = distFromX(Math.min(Math.max(px, PAD.l), PAD.l + plotW));
+    const cursorDist = distFromX(Math.min(Math.max(px, xOrigin), xOrigin + xWidth));
     const range = xDomain.b - xDomain.a;
     const minRange = live ? 250 : 50; // smallest visible window (m)
     const factor = e.deltaY < 0 ? 0.85 : 1 / 0.85;
@@ -761,7 +767,7 @@
         <rect x={PAD.l} y={PAD.t} width={plotW} height={plotH} />
       </clipPath>
       {#if rfStops.length}
-        <linearGradient id="rfGrad" gradientUnits="userSpaceOnUse" x1={PAD.l} y1="0" x2={PAD.l + plotW} y2="0">
+        <linearGradient id="rfGrad" gradientUnits="userSpaceOnUse" x1={xOrigin} y1="0" x2={xOrigin + xWidth} y2="0">
           {#each rfStops as st}<stop offset={st.offset} stop-color={st.color} />{/each}
         </linearGradient>
       {/if}

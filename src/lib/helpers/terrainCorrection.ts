@@ -131,36 +131,56 @@ function raiseLeg(
   }
 
   const span = pb.dist - pa.dist || 1;
+  // Only ONE endpoint can move. The per-sample requirement `(T+c)·span / leverage` diverges for terrain
+  // near the FIXED endpoint (its leverage on the movable one → 0), which once raised a WP to ~12 km / a
+  // 230 m spike. Cap the movable endpoint at `max-terrain-on-leg + clearance` — raising it higher can't
+  // help (the line near the fixed endpoint is governed by that fixed altitude). If a sample still
+  // demanded more, the leg can't be cleared by moving one end → flag it unresolvable (the user raises
+  // the fixed WP, widens the range, or inserts a WP).
   if (a.correctable && !b.correctable) {
     // raise A so the line from A→B(fixed) clears: altA' ≥ ((T+c)(dB−dA) − altB(s−dA)) / (dB−s)
     let req = a.alt;
+    let maxTerr = -Infinity;
     for (let i = lowerBound(terrain, pa.dist); i < terrain.length && terrain[i].dist < pb.dist; i++) {
       const s = terrain[i];
-      if (s.elev == null || s.dist <= pa.dist + EPS) continue;
-      const need = ((s.elev + clearance) * span - b.alt * (s.dist - pa.dist)) / (pb.dist - s.dist);
+      if (s.elev == null) continue;
+      if (s.elev > maxTerr) maxTerr = s.elev;
+      const denom = pb.dist - s.dist;
+      if (s.dist <= pa.dist + EPS || denom <= EPS) continue;
+      const need = ((s.elev + clearance) * span - b.alt * (s.dist - pa.dist)) / denom;
       if (need > req) req = need;
     }
+    const cap = Math.max(a.alt, maxTerr + clearance);
+    let blocked = false;
+    if (req > cap + EPS) { req = cap; blocked = true; }
     if (req > a.alt + EPS) {
       a.alt = req;
-      return { changed: true, unresolvable: false };
+      return { changed: true, unresolvable: blocked };
     }
-    return { changed: false, unresolvable: false };
+    return { changed: false, unresolvable: blocked };
   }
 
   if (b.correctable && !a.correctable) {
     // symmetric: altB' ≥ ((T+c)(dB−dA) − altA(dB−s)) / (s−dA)
     let req = b.alt;
+    let maxTerr = -Infinity;
     for (let i = lowerBound(terrain, pa.dist); i < terrain.length && terrain[i].dist < pb.dist; i++) {
       const s = terrain[i];
-      if (s.elev == null || s.dist >= pb.dist - EPS) continue;
-      const need = ((s.elev + clearance) * span - a.alt * (pb.dist - s.dist)) / (s.dist - pa.dist);
+      if (s.elev == null) continue;
+      if (s.elev > maxTerr) maxTerr = s.elev;
+      const denom = s.dist - pa.dist;
+      if (s.dist >= pb.dist - EPS || denom <= EPS) continue;
+      const need = ((s.elev + clearance) * span - a.alt * (pb.dist - s.dist)) / denom;
       if (need > req) req = need;
     }
+    const cap = Math.max(b.alt, maxTerr + clearance);
+    let blocked = false;
+    if (req > cap + EPS) { req = cap; blocked = true; }
     if (req > b.alt + EPS) {
       b.alt = req;
-      return { changed: true, unresolvable: false };
+      return { changed: true, unresolvable: blocked };
     }
-    return { changed: false, unresolvable: false };
+    return { changed: false, unresolvable: blocked };
   }
 
   // both anchors → cannot fix

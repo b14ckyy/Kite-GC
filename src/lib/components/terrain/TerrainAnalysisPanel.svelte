@@ -37,8 +37,12 @@
     fromDeg,
   } from '$lib/stores/mission';
   import { autopilotSystem } from '$lib/stores/autopilotContext';
-  import { arduMission, MAV_CMD_NAV_TAKEOFF } from '$lib/stores/missionArdupilot';
-  import { arduToInav } from '$lib/helpers/missionConverter';
+  import {
+    arduMission, arduUpdateWp, arduRecordUndo, arduBeginUndoGroup, arduEndUndoGroup,
+    MAV_CMD_NAV_TAKEOFF, MAV_CMD_NAV_WAYPOINT, MAV_FRAME_GLOBAL, MAV_FRAME_GLOBAL_TERRAIN_ALT,
+    type ArduWaypoint,
+  } from '$lib/stores/missionArdupilot';
+  import { arduToInavIndexed } from '$lib/helpers/missionConverter';
   import { homePosition } from '$lib/stores/home';
   import {
     terrainAnalysis,
@@ -102,7 +106,11 @@
   // → alt_mode) with the FC home as the launch reference. Editing (correction APPLY / Add WP) stays
   // INAV-only for now — those write via the INAV mission store; the profile DISPLAY works for all.
   const isInav = $derived($autopilotSystem === 'inav');
-  const effWaypoints = $derived(isInav ? $mission.waypoints : arduToInav($arduMission));
+  // ArduPilot/PX4 missions are converted to the shared Waypoint shape for the profile. `srcIdx` maps each
+  // converted WP back to its arduMission index (commands are dropped on conversion), so an edit (terrain
+  // correction) can write to the right source waypoint.
+  const arduConv = $derived(isInav ? null : arduToInavIndexed($arduMission));
+  const effWaypoints = $derived(isInav ? $mission.waypoints : (arduConv?.waypoints ?? []));
   const effLaunch = $derived.by<{ lat: number; lng: number } | null>(() => {
     if (isInav) return $launchPoint ? { lat: $launchPoint.lat, lng: $launchPoint.lng } : null;
     const h = $homePosition;
@@ -134,6 +142,9 @@
     const wps = effWaypoints;
     const lp = effLaunch;
     const trk = track;
+    // ArduPilot/PX4: keep the original mission-item numbers for the markers (dropped DO_ commands leave
+    // gaps), so the analyzer numbering matches the mission panel. INAV uses the default geo-only count.
+    const markerNums = arduConv ? arduConv.srcIdx.map((i) => i + 1) : undefined;
     if (!st.open) return;
     const mode = st.viewMode;
     if (live && mode === 'track') return; // the live poll owns Track mode while connected
@@ -143,7 +154,7 @@
         ? `t:${trk.length}:${trk.length ? trk[trk.length - 1].timestamp_ms ?? '' : ''}`
         : `w:${wps.length}:${wps
             .map((w) => `${w.lat},${w.lon},${w.altitude},${w.alt_mode ?? ''}`)
-            .join('|')}:${lp ? `${lp.lat},${lp.lng}` : '-'}`;
+            .join('|')}:${lp ? `${lp.lat},${lp.lng}` : '-'}:n${markerNums ? markerNums.join(',') : '-'}`;
 
     const cached = profileCache.get(mode);
     if (cached && cached.sig === sig) {
@@ -163,7 +174,7 @@
           result = await buildTrackProfile(trk);
           kind = result ? 'none' : 'noTrack';
         } else {
-          result = await buildWaypointProfile(wps, lp ? { lat: lp.lat, lng: lp.lng } : null);
+          result = await buildWaypointProfile(wps, lp ? { lat: lp.lat, lng: lp.lng } : null, markerNums);
           kind = result ? 'none' : 'insufficient';
         }
         if (token === computeToken) {
@@ -342,9 +353,21 @@
   });
 
   // ── Terrain Correction (Waypoint mode) ─────────────────────────────
+  // WP-number bounds for the correction range. ArduPilot/PX4 numbers are non-contiguous (DO_ items leave
+  // gaps), so use the real min/max marker numbers, not 1..count.
   const maxWpNumber = $derived(
     data && data.markers.length ? Math.max(...data.markers.map((m) => m.number)) : 1,
   );
+  const minWpNumber = $derived(
+    data && data.markers.length ? Math.min(...data.markers.map((m) => m.number)) : 1,
+  );
+  // Range steppers bind to local inputs that mirror the store's *effective* range (0 = auto → full span).
+  // The store keeps 0 until the user narrows it, so the range always covers the whole mission by default
+  // and never goes stale when WP numbers shift (e.g. adding/removing a DO_ command).
+  let rangeStartInput = $state(1);
+  let rangeEndInput = $state(1);
+  $effect(() => { rangeStartInput = $terrainAnalysis.rangeStart > 0 ? $terrainAnalysis.rangeStart : minWpNumber; });
+  $effect(() => { rangeEndInput = $terrainAnalysis.rangeEnd > 0 ? $terrainAnalysis.rangeEnd : maxWpNumber; });
 
   const correction = $derived.by<CorrectionResult | null>(() => {
     const st = $terrainAnalysis;
@@ -362,10 +385,10 @@
   });
 
   const previewPath = $derived(correction ? correction.previewPath : null);
-  // Editing (Terrain Correction + Add WP) writes via the INAV mission store → INAV only for now. The
-  // profile/clearance/RF DISPLAY still works for ArduPilot/PX4 missions.
-  const showCorrection = $derived(isInav && $terrainAnalysis.viewMode === 'waypoint' && !$terrainAnalysis.compact);
-  const canAddWp = $derived(isInav && $terrainCursor.placed != null && placedDist != null && data != null);
+  // Terrain Correction / Check + Add WP work for ALL autopilots: edits write back to the active mission
+  // store (INAV → mission; ArduPilot/PX4 → arduMission via the srcIdx map).
+  const showCorrection = $derived($terrainAnalysis.viewMode === 'waypoint' && !$terrainAnalysis.compact);
+  const canAddWp = $derived($terrainCursor.placed != null && placedDist != null && data != null);
 
   // Combined 3-way correction control: 'off' disables it, 'follow'/'check' enable + set the mode
   // (and a default WP range on first enable). Default off.
@@ -377,18 +400,13 @@
       patchTerrainAnalysis({ correctionEnabled: false });
       return;
     }
-    const st = get(terrainAnalysis);
-    patchTerrainAnalysis({
-      correctionEnabled: true,
-      correctionMode: v,
-      rangeStart: st.rangeStart > 0 ? st.rangeStart : 1,
-      rangeEnd: st.rangeEnd > 0 ? st.rangeEnd : maxWpNumber,
-    });
+    // Leave rangeStart/rangeEnd at their stored values (0 = auto → full span); the user narrows them via
+    // the steppers. Baking concrete bounds here went stale when WP numbers later shifted.
+    patchTerrainAnalysis({ correctionEnabled: true, correctionMode: v });
   }
 
   let applying = $state(false);
   async function applyCorrection() {
-    if (!isInav) return; // editing writes via the INAV mission store (ArduPilot edit path is a follow-up)
     const c = correction;
     if (!c || c.changedCount === 0) return;
     if (confirm) {
@@ -400,21 +418,39 @@
       if (ans !== 'apply') return;
     }
     applying = true;
-    beginUndoGroup(); // whole terrain correction = one undo step
     try {
-      for (const ch of c.changes) {
-        const wp = get(mission).waypoints[ch.index];
-        if (!wp) continue;
-        await missionUpdateWp(ch.index, {
-          ...wp,
-          altitude: altFromM(ch.aglValue),
-          alt_mode: ALT_MODE_AGL,
-        });
+      if (isInav) {
+        beginUndoGroup(); // whole terrain correction = one undo step
+        try {
+          for (const ch of c.changes) {
+            const wp = get(mission).waypoints[ch.index];
+            if (!wp) continue;
+            await missionUpdateWp(ch.index, { ...wp, altitude: altFromM(ch.aglValue), alt_mode: ALT_MODE_AGL });
+          }
+        } finally {
+          endUndoGroup();
+        }
+      } else {
+        // ArduPilot/PX4: map the converted WP index back to the source mission item and write the
+        // corrected height in the terrain (AGL) frame — the same semantics as INAV's AGL write.
+        const map = arduConv?.srcIdx;
+        if (map) {
+          arduBeginUndoGroup();
+          try {
+            for (const ch of c.changes) {
+              const srcIdx = map[ch.index];
+              const wp = get(arduMission)[srcIdx];
+              if (!wp) continue;
+              arduUpdateWp(srcIdx, { ...wp, frame: MAV_FRAME_GLOBAL_TERRAIN_ALT, alt: ch.aglValue });
+            }
+          } finally {
+            arduEndUndoGroup();
+          }
+        }
       }
     } catch (e) {
       console.error('[terrain] apply correction failed', e);
     } finally {
-      endUndoGroup();
       applying = false;
     }
   }
@@ -436,16 +472,11 @@
     return m[m.length - 1].altMsl;
   }
 
-  // Manually add a waypoint at the pinned marker — exactly on the current track.
-  // Then the user re-runs Terrain Follow to adjust it.
+  // Manually add a waypoint at the pinned marker — exactly on the current path, at the interpolated
+  // altitude (AMSL). The user then re-runs Terrain Follow to adjust it. Works for all autopilots.
   async function addWaypointAtMarker() {
-    if (!isInav) return; // INAV mission store only (ArduPilot edit path is a follow-up)
     const p = get(terrainCursor).placed;
     if (!p || !data || placedDist == null) return;
-    if (getTotalWpCount() >= MAX_WAYPOINTS_TOTAL) {
-      if (confirm) await confirm({ title: $t('terrain.addWp'), message: $t('terrain.warnWpLimit') });
-      return;
-    }
     const m = data.markers;
     let leftIdx = -1;
     for (let i = 0; i < m.length - 1; i++) {
@@ -455,19 +486,34 @@
       }
     }
     if (leftIdx < 0) return;
-    const afterIndex = m[leftIdx].index;
     const altMsl = pathAltAtDist(placedDist) ?? m[leftIdx].altMsl;
-    await missionInsertWp(
-      afterIndex + 1,
-      WpAction.Waypoint,
-      fromDeg(p.lat),
-      fromDeg(p.lon),
-      altFromM(altMsl),
-      0,
-      0,
-      0,
-      ALT_MODE_AMSL,
-    );
+
+    if (isInav) {
+      if (getTotalWpCount() >= MAX_WAYPOINTS_TOTAL) {
+        if (confirm) await confirm({ title: $t('terrain.addWp'), message: $t('terrain.warnWpLimit') });
+        return;
+      }
+      const afterIndex = m[leftIdx].index;
+      await missionInsertWp(
+        afterIndex + 1, WpAction.Waypoint, fromDeg(p.lat), fromDeg(p.lon), altFromM(altMsl), 0, 0, 0, ALT_MODE_AMSL,
+      );
+    } else {
+      // ArduPilot/PX4: insert before the next geo WP (after the left WP's own modifiers), as an AMSL
+      // NAV_WAYPOINT at the interpolated path altitude. Map the converted index back to arduMission.
+      const map = arduConv?.srcIdx;
+      if (!map) return;
+      const insertAt = map[m[leftIdx + 1].index];
+      const newWp: ArduWaypoint = {
+        command: MAV_CMD_NAV_WAYPOINT, frame: MAV_FRAME_GLOBAL,
+        param1: 0, param2: 0, param3: 0, param4: 0,
+        lat: Math.round(p.lat * 1e7), lon: Math.round(p.lon * 1e7),
+        alt: altMsl, autocontinue: true,
+      };
+      const updated = [...get(arduMission)];
+      updated.splice(insertAt, 0, newWp);
+      arduRecordUndo();
+      arduMission.set(updated);
+    }
     clearTerrainPlaced();
   }
 
@@ -697,9 +743,15 @@
             <div class="ctrl">
               <span>{$t('terrain.range')}</span>
               <div class="range-row">
-                <NumberStepper bind:value={$terrainAnalysis.rangeStart} min={1} max={maxWpNumber} step={1} decimals={0} />
+                <NumberStepper
+                  bind:value={rangeStartInput} min={minWpNumber} max={maxWpNumber} step={1} decimals={0}
+                  onchange={() => patchTerrainAnalysis({ rangeStart: rangeStartInput })}
+                />
                 <span class="dash">–</span>
-                <NumberStepper bind:value={$terrainAnalysis.rangeEnd} min={1} max={maxWpNumber} step={1} decimals={0} />
+                <NumberStepper
+                  bind:value={rangeEndInput} min={minWpNumber} max={maxWpNumber} step={1} decimals={0}
+                  onchange={() => patchTerrainAnalysis({ rangeEnd: rangeEndInput })}
+                />
               </div>
             </div>
 

@@ -61,8 +61,17 @@ export function inavToArdu(wps: Waypoint[]): ArduWaypoint[] {
 // ── ArduPilot → INAV ──────────────────────────────────────────────────
 
 export function arduToInav(wps: ArduWaypoint[]): Waypoint[] {
+  return arduToInavIndexed(wps).waypoints;
+}
+
+/** Like {@link arduToInav}, but also returns `srcIdx`: for each emitted INAV waypoint, the index of its
+ *  source command in the input `wps`. Needed to write an edit (e.g. terrain correction) back to the
+ *  original ArduPilot/PX4 mission, since unsupported commands are dropped (so positions don't line up). */
+export function arduToInavIndexed(wps: ArduWaypoint[]): { waypoints: Waypoint[]; srcIdx: number[] } {
   const out: Waypoint[] = [];
-  for (const wp of wps) {
+  const srcIdx: number[] = [];
+  wps.forEach((wp, i) => {
+    const before = out.length;
     const base: Omit<Waypoint, 'action'> = {
       number: out.length + 1, // renumber after dropping unsupported commands
       lat: wp.lat,
@@ -105,6 +114,7 @@ export function arduToInav(wps: ArduWaypoint[]): Waypoint[] {
         // emit a phantom waypoint (these often carry no/zeroed coordinates).
         break;
     }
-  }
-  return out;
+    if (out.length > before) srcIdx.push(i); // each command emits at most one waypoint
+  });
+  return { waypoints: out, srcIdx };
 }

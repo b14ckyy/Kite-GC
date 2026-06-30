@@ -379,11 +379,14 @@ interface RouteEntry {
  * `4J2` (WP4 then jump to WP2) plots 4→2 (branch), a cut, then resumes 4→5 —
  * no duplicate WP dots, and the jump-back leg's terrain is covered.
  */
-function expandRoute(waypoints: Waypoint[]): RouteEntry[] {
+function expandRoute(waypoints: Waypoint[], markerNumbers?: number[]): RouteEntry[] {
+  // Display numbers default to a geo-only running count (INAV: modifiers aren't counted). A caller can
+  // override per-waypoint — ArduPilot/PX4 number *every* mission item, so a converted geo WP keeps its
+  // original item number (the dropped DO_ commands leave gaps), matching the mission panel.
   const numbers: number[] = new Array(waypoints.length).fill(0);
   let dn = 0;
   for (let i = 0; i < waypoints.length; i++) {
-    if (isGeoAction(waypoints[i].action)) numbers[i] = ++dn;
+    if (isGeoAction(waypoints[i].action)) numbers[i] = markerNumbers ? (markerNumbers[i] ?? ++dn) : ++dn;
   }
 
   const route: RouteEntry[] = [];
@@ -421,8 +424,9 @@ const CUT_GAP_M = 60;
 export async function buildWaypointProfile(
   waypoints: Waypoint[],
   launch: { lat: number; lng: number } | null,
+  markerNumbers?: number[],
 ): Promise<ProfileData | null> {
-  const route = expandRoute(waypoints);
+  const route = expandRoute(waypoints, markerNumbers);
   if (route.filter((e) => !e.repeat).length < 2) return null;
 
   // Split into continuous segments at jump cuts
