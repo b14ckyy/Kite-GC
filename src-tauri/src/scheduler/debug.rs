@@ -13,6 +13,11 @@ use std::time::Instant;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
+/// Per-code actual-rate measurement window (seconds). Wider than the 1 s TX/RX meter so low poll rates
+/// resolve: a 0.5 Hz slot sends a message every 2 s, which a 1 s window can't catch (reads 0 → shown as
+/// "—"). A ~4 s window captures ~2 messages → a clean 0.5 Hz readout.
+const RATE_WINDOW_SECS: f64 = 4.0;
+
 /// Status of the last MSP interaction for a given code
 #[derive(Clone, Copy)]
 enum MspActivity {
@@ -32,7 +37,8 @@ struct CodeStats {
     timeout_count: u64,
     /// Activity since last emit (reset after each snapshot)
     cycle_status: MspActivity,
-    // Actual-rate measurement over a rolling ~1 s window. We count requests AND responses separately and
+    // Actual-rate measurement over a rolling ~4 s window (RATE_WINDOW_SECS, wide enough to resolve
+    // sub-1 Hz slots). We count requests AND responses separately and
     // report max(req, resp): a request/response poll has req ≈ resp (the effective rate), while a
     // fire-and-forget send (MSP_SET_RAW_RC, no reply) only has requests — so its rate is the send cadence
     // rather than frozen at the last response. The window is rolled over time-based in `maybe_emit`, so a
@@ -61,7 +67,7 @@ pub struct MspCodeDebug {
     pub last_status: String,
     /// Configured target rate in Hz (0 for handshake/one-shot codes)
     pub target_rate_hz: f64,
-    /// Measured actual rate in Hz over the last second
+    /// Measured actual rate in Hz over the rolling rate window (~4 s, resolves sub-1 Hz slots)
     pub actual_rate_hz: f64,
     /// Last measured request→response round-trip in ms (0 = no response / fire-and-forget)
     pub latency_ms: f64,
@@ -241,7 +247,7 @@ impl DebugTracker {
                 // Per-code actual-rate rollover (time-based, so a quiet code decays to 0). max(req, resp):
                 // poll codes have req ≈ resp; a no-reply send (SET_RAW_RC) reports its request cadence.
                 let el = s.rate_window_start.elapsed().as_secs_f64();
-                if el >= 1.0 {
+                if el >= RATE_WINDOW_SECS {
                     s.actual_rate_hz = s.req_window_count.max(s.resp_window_count) as f64 / el;
                     s.req_window_count = 0;
                     s.resp_window_count = 0;
