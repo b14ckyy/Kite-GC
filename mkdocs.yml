@@ -87,6 +87,7 @@ nav:
           - Vehicles: guides/vehicles.md
           - Batteries: guides/batteries.md
       - Video: guides/video.md
+      - Terrain & RF analysis: guides/terrain-analysis.md
       - Safety: guides/safety.md
       - Radar & ADS-B: guides/radar-and-adsb.md
       - Airspace Manager: guides/airspace.md
