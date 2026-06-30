@@ -45,6 +45,7 @@ struct RecordingEndedEvent {
     max_alt_m: f64,
     max_speed_ms: f64,
     max_distance_m: f64,
+    total_distance_m: f64,
     battery_used_mah: Option<u32>,
 }
 
@@ -659,6 +660,7 @@ impl FlightRecorder {
             max_alt_m: session.flight.max_alt_m.unwrap_or(0.0),
             max_speed_ms: session.flight.max_speed_ms.unwrap_or(0.0),
             max_distance_m: session.flight.max_distance_m.unwrap_or(0.0),
+            total_distance_m: session.flight.total_distance_m.unwrap_or(0.0),
             battery_used_mah: session.flight.battery_used_mah,
         };
         if let Ok(mut slot) = self.pending.lock() {

@@ -361,8 +361,9 @@
   // Live flight-stats accumulator (armed period) — drives the End-Flight summary when there is
   // no DB recording (the recorded case reads the finalized stats from the flight row instead).
   let armStartMs = 0;
-  let accMaxAlt = 0, accMaxSpeed = 0, accMaxDist = 0, accMah = 0;
+  let accMaxAlt = 0, accMaxSpeed = 0, accMaxDist = 0, accMah = 0, accTotalDist = 0;
   let accStartLat: number | null = null, accStartLon: number | null = null;
+  let accLastLat: number | null = null, accLastLon: number | null = null;
   telemetry.subscribe((t) => {
     liveTelem = t;
     // Accumulate the live flown track (RAM) for the Terrain Analyzer
@@ -373,8 +374,8 @@
       clearLiveTrack();
       // reset the flight-stats accumulator for the new flight
       armStartMs = t.lastUpdate || Date.now();
-      accMaxAlt = 0; accMaxSpeed = 0; accMaxDist = 0; accMah = 0;
-      accStartLat = null; accStartLon = null;
+      accMaxAlt = 0; accMaxSpeed = 0; accMaxDist = 0; accMah = 0; accTotalDist = 0;
+      accStartLat = null; accStartLon = null; accLastLat = null; accLastLon = null;
       endFlightDialog?.close(); // re-arming dismisses a lingering End-Flight dialog
       // warm the Copernicus tile for the current area so it's ready
       if (isValidGpsCoordinate(t.lat, t.lon)) {
@@ -391,6 +392,9 @@
           const d = haversineDistance(accStartLat, accStartLon as number, t.lat, t.lon);
           if (d > accMaxDist) accMaxDist = d;
         }
+        // Total flown distance: sum of segments between consecutive fixes (matches the recorder).
+        if (accLastLat != null) accTotalDist += haversineDistance(accLastLat, accLastLon as number, t.lat, t.lon);
+        accLastLat = t.lat; accLastLon = t.lon;
       }
     }
     // Require a known flight mode before recording a track point: a GPS frame can arrive before the
@@ -445,6 +449,7 @@
           maxAltM: accMaxAlt || null,
           maxSpeedMs: accMaxSpeed || null,
           maxDistM: accMaxDist || null,
+          totalDistM: accTotalDist || null,
           batteryUsedMah: accMah || null,
         },
         recorded: false,
@@ -2326,7 +2331,7 @@
     });
     // Disarm → the summary dialog (stats arrive in the payload; no flight_id yet under deferred
     // commit). Save commits the pending session, Discard drops it.
-    void listen<{ duration_sec: number; max_alt_m: number; max_speed_ms: number; max_distance_m: number; battery_used_mah: number | null }>(
+    void listen<{ duration_sec: number; max_alt_m: number; max_speed_ms: number; max_distance_m: number; total_distance_m: number; battery_used_mah: number | null }>(
       'flight-recording-ended',
       (event) => {
         const p = event.payload;
@@ -2335,6 +2340,7 @@
           maxAltM: p.max_alt_m,
           maxSpeedMs: p.max_speed_ms,
           maxDistM: p.max_distance_m,
+          totalDistM: p.total_distance_m,
           batteryUsedMah: p.battery_used_mah,
         });
       },

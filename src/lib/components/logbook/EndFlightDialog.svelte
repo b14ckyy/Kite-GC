@@ -9,6 +9,7 @@
     maxAltM: number | null;
     maxSpeedMs: number | null;
     maxDistM: number | null;
+    totalDistM: number | null;
     batteryUsedMah: number | null;
     locationName?: string | null;
   }
@@ -157,6 +158,7 @@
 
       <div class="fc-info-grid">
         <span class="fc-label">{$t('logbook.duration')}</span><span class="fc-value">{formatDurationSec(stats.durationSec)}</span>
+        <span class="fc-label">{$t('logbook.totalDistance')}</span><span class="fc-value">{fmtDist(stats.totalDistM)}</span>
         <span class="fc-label">{$t('logbook.maxAlt')}</span><span class="fc-value">{fmtAlt(stats.maxAltM)}</span>
         <span class="fc-label">{$t('logbook.maxSpeed')}</span><span class="fc-value">{fmtSpeed(stats.maxSpeedMs)}</span>
         <span class="fc-label">{$t('logbook.maxDistance')}</span><span class="fc-value">{fmtDist(stats.maxDistM)}</span>
