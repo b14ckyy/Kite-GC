@@ -25,8 +25,8 @@ jobs:
     name: Build (Windows)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: '20'
           cache: 'npm'
@@ -38,7 +38,7 @@ jobs:
       - name: Build Tauri bundle
         run: npm run tauri build
       - name: Upload Windows artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: kite-gc-windows
           if-no-files-found: error
@@ -53,7 +53,7 @@ jobs:
       # Let appimagetool run without FUSE on the CI runner.
       APPIMAGE_EXTRACT_AND_RUN: 1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -68,7 +68,7 @@ jobs:
             patchelf \
             file \
             libfuse2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '20'
           cache: 'npm'
@@ -80,9 +80,56 @@ jobs:
       - name: Build Tauri bundle
         run: npm run tauri build
       - name: Upload Linux artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: kite-gc-linux
+          if-no-files-found: error
+          path: |
+            src-tauri/target/release/kite-gc
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/rpm/*.rpm
+            src-tauri/target/release/bundle/appimage/*.AppImage
+
+  # Native aarch64 build on GitHub's ARM64 Linux runner (free for public repos) — no cross-compile, so
+  # the Pi 5 (and other arm64 Linux) gets a ready binary/.deb/.AppImage without a local build env. Same
+  # ubuntu-22.04 base as the x86 Linux job (old enough glibc/GTK so we don't force users to upgrade).
+  linux-arm64:
+    name: Build (Linux ARM64 · ubuntu-22.04-arm)
+    runs-on: ubuntu-22.04-arm
+    env:
+      # Let appimagetool run without FUSE on the CI runner.
+      APPIMAGE_EXTRACT_AND_RUN: 1
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libudev-dev \
+            patchelf \
+            file \
+            libfuse2
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Build Tauri bundle
+        run: npm run tauri build
+      - name: Upload Linux ARM64 artifacts
+        uses: actions/upload-artifact@v5
+        with:
+          name: kite-gc-linux-arm64
           if-no-files-found: error
           path: |
             src-tauri/target/release/kite-gc
