@@ -348,6 +348,7 @@
     "guidedHint": "Enable Guided, then click the map to send the vehicle there.",
     "guidedClickHint": "Click the map to set the target.",
     "flyHere": "Fly Here",
+    "guidedTarget": "Guided target",
     "setWpHint": "Sync the mission with the FC (download/upload) to enable.",
     "ack": {
       "ok": "Accepted"

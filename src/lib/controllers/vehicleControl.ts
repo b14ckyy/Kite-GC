@@ -49,6 +49,11 @@ async function runCommand(action: string, cmd: string, args?: Record<string, unk
 /** Map-interaction "Guided" intent: when on, a map click opens the Fly-Here popup. */
 export const guidedActive = writable<boolean>(false);
 
+/** The active Guided "Fly Here" / loiter target (degrees), or null. Drives the map's loiter-target
+ *  marker — shown while Guided is active and a target has been set, cleared on a mode change / leaving
+ *  Guided. Protocol-agnostic (no MAVLink dependency) so INAV guided control can reuse it post-1.0. */
+export const guidedTarget = writable<{ lat: number; lon: number } | null>(null);
+
 export interface GuidedParams {
   /** Target altitude (m, relative to home). */
   alt: number;
@@ -107,7 +112,11 @@ export const activeMode: Readable<MavMode | undefined> = derived(
 /** Switch flight mode. Turns the Guided toggle on/off to match whether the target is the guided mode. */
 export async function setMode(mode: MavMode): Promise<boolean> {
   const ok = await runCommand('setMode', 'mav_set_mode', { main: mode.main, sub: mode.sub });
-  if (ok) { guidedActive.set(!!mode.guided); headingOverrideActive = false; } // mode re-entry clears the heading slew
+  if (ok) {
+    guidedActive.set(!!mode.guided);
+    guidedTarget.set(null); // a mode change abandons the previous Guided target
+    headingOverrideActive = false; // mode re-entry clears the heading slew
+  }
   return ok;
 }
 
@@ -126,6 +135,7 @@ export function disarm(force = false): Promise<boolean> {
  * NAV_TAKEOFF command directly.
  */
 export async function takeoff(altitude: number): Promise<boolean> {
+  guidedTarget.set(null); // fresh flight phase — no carried-over Guided target
   if (get(autopilotSystem) === 'ardupilot') {
     const g = guidedModeFor('ardupilot', get(arduVehicleClass));
     if (g && get(activeMode)?.key !== g.key) {
@@ -208,7 +218,7 @@ export async function vtolTransition(toFw: boolean): Promise<boolean> {
   const m = modesFor('ardupilot', 'quadplane').find((x) => x.key === key);
   if (!m) return false;
   const ok = await runCommand('vtolTransition', 'mav_set_mode', { main: m.main, sub: m.sub });
-  if (ok) { guidedActive.set(!!m.guided); headingOverrideActive = false; }
+  if (ok) { guidedActive.set(!!m.guided); guidedTarget.set(null); headingOverrideActive = false; }
   return ok;
 }
 
@@ -274,6 +284,7 @@ export function missionPause(pause: boolean): Promise<boolean> {
  * interaction, so the vehicle stays in its current mode (no mode churn on toggle-off).
  */
 export async function setGuided(on: boolean): Promise<boolean> {
+  guidedTarget.set(null); // entering or leaving Guided starts with no target
   if (!on) {
     guidedActive.set(false);
     return true;
@@ -297,7 +308,7 @@ export async function repositionTo(lat: number, lon: number, p: GuidedParams): P
     try { await invoke('mav_guided_clear_heading'); } catch { /* best effort */ }
     headingOverrideActive = false;
   }
-  return runCommand('reposition', 'mav_reposition', {
+  const ok = await runCommand('reposition', 'mav_reposition', {
     lat: Math.round(lat * 1e7),
     lon: Math.round(lon * 1e7),
     alt: p.alt,
@@ -305,4 +316,6 @@ export async function repositionTo(lat: number, lon: number, p: GuidedParams): P
     yaw: p.yaw,
     loiterRadius: p.loiterRadius,
   });
+  if (ok) guidedTarget.set({ lat, lon }); // drive the map's loiter-target marker
+  return ok;
 }

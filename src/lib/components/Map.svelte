@@ -41,7 +41,7 @@
   import { autopilotSystem } from "$lib/stores/autopilotContext";
   import { arduMission, arduVehicleClass, arduEditMode } from "$lib/stores/missionArdupilot";
   import { activeSurveyPattern } from "$lib/stores/surveyPattern.svelte";
-  import { guidedActive, repositionTo, type GuidedParams } from "$lib/controllers/vehicleControl";
+  import { guidedActive, guidedTarget, repositionTo, type GuidedParams } from "$lib/controllers/vehicleControl";
   import GuidedTargetForm from "$lib/components/control/GuidedTargetForm.svelte";
   import { cmdHasLocation } from "$lib/helpers/arduCommandCatalog";
   import { connection } from "$lib/stores/connection";
@@ -500,6 +500,9 @@
   let safehomeLayer: L.LayerGroup | undefined;
   let unsubSafehome: (() => void) | undefined;
   let lastSafehomeArmed = false;
+
+  // Guided "Fly Here" / loiter-target marker (ArduPilot/PX4; reused by INAV guided post-1.0).
+  let guidedTargetMarker: L.Marker | undefined;
   // Geozone overlay (INAV ≥8.0 FC config).
   let geozoneLayer: L.LayerGroup | undefined;
   let unsubGeozone: (() => void) | undefined;
@@ -587,6 +590,33 @@
     // x=10 → anchor there so the tip sits on the exact coordinate. box-sizing keeps the 20×20 exact.
     const html = `<div style="box-sizing:border-box;width:20px;height:20px;border:2px solid #000;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:${bg};box-shadow:0 0 3px rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center"><span style="transform:rotate(45deg);color:#fff;font-size:10px;font-weight:bold;line-height:1">H</span></div>`;
     return L.divIcon({ className: 'safehome-divicon', html, iconSize: [20, 20], iconAnchor: [10, 24] });
+  }
+
+  // ── Guided "Fly Here" / loiter-target marker (ArduPilot/PX4) ──────────────────────────────────
+  /** Green "G" teardrop for the active Guided target — same geometry/size as the safehome marker so the
+   *  two read consistently (green + "G" vs the safehome "H"). */
+  function createGuidedTargetIcon(): L.DivIcon {
+    const html = `<div style="box-sizing:border-box;width:20px;height:20px;border:2px solid #000;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:#59aa29;box-shadow:0 0 3px rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center"><span style="transform:rotate(45deg);color:#fff;font-size:10px;font-weight:bold;line-height:1">G</span></div>`;
+    return L.divIcon({ className: 'guided-target-divicon', html, iconSize: [20, 20], iconAnchor: [10, 24] });
+  }
+
+  /** Show/move/hide the Guided loiter-target marker. Visible only while connected, Guided is active, and a
+   *  target has been set (a successful reposition); the controller clears the target on a mode change /
+   *  leaving Guided, and we also hide on disconnect. */
+  function updateGuidedTarget() {
+    if (!map) return;
+    const tgt = get(guidedTarget);
+    if (!tgt || get(connection).status !== 'connected' || !get(guidedActive)) {
+      if (guidedTargetMarker) { guidedTargetMarker.remove(); guidedTargetMarker = undefined; }
+      return;
+    }
+    const ll: L.LatLngExpression = [tgt.lat, tgt.lon];
+    if (!guidedTargetMarker) {
+      guidedTargetMarker = L.marker(ll, { icon: createGuidedTargetIcon(), interactive: false, zIndexOffset: 470 }).addTo(map);
+      guidedTargetMarker.bindTooltip(get(t)('control.guidedTarget'), { direction: 'top', offset: [0, -18], opacity: 0.9 });
+    } else {
+      guidedTargetMarker.setLatLng(ll);
+    }
   }
 
   /** Redraw the safehome markers + radius rings (+ approach corridors). Source is the working copy so
@@ -1124,6 +1154,9 @@
   // Close the Guided target popup as soon as the Guided toggle is switched off in the panel — so a
   // reposition can't be sent while Guided is disabled in the UI.
   $effect(() => { if (!$guidedActive) closeGuidedPopup(); });
+
+  // Guided loiter-target marker follows the guided state + the set target (and hides on disconnect).
+  $effect(() => { void $guidedActive; void $guidedTarget; void $connection; if (map) updateGuidedTarget(); });
 
   // Redraw on enable-toggle, new data, or visibility change (data/visibility via subscriptions below).
   $effect(() => { void $settings.airspace.enabled; void $editMode; void $arduEditMode; void activeSurveyPattern.isActive; if (map) updateAirspace(); });
@@ -1920,6 +1953,7 @@
     unsubFrameMission?.();
     unsubConnForJump?.();
     unsubSafehome?.();
+    guidedTargetMarker?.remove();
     unsubGeozone?.();
     unsubGeozoneViol?.();
     unsubFence?.();

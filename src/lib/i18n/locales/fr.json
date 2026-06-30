@@ -337,6 +337,7 @@
     "guidedHint": "Activez Guided, puis cliquez sur la carte pour y envoyer le véhicule.",
     "guidedClickHint": "Cliquez sur la carte pour définir la cible.",
     "flyHere": "Voler ici",
+    "guidedTarget": "Cible Guided",
     "setWpHint": "Synchronisez la mission avec le FC (téléchargement) pour activer.",
     "ack": {
       "ok": "Accepté"

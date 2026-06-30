@@ -348,6 +348,7 @@
     "guidedHint": "Guided aktivieren, dann auf die Karte klicken, um das Fahrzeug dorthin zu senden.",
     "guidedClickHint": "Auf die Karte klicken, um das Ziel zu setzen.",
     "flyHere": "Hierhin fliegen",
+    "guidedTarget": "Guided-Ziel",
     "setWpHint": "Mission mit dem FC synchronisieren (Download/Upload), um zu aktivieren.",
     "ack": {
       "ok": "Angenommen"
