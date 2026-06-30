@@ -11,6 +11,15 @@ use std::time::Duration;
 
 use super::{ByteTransport, TransportError};
 
+// Linux: the FC BLE data path uses bluer (native BlueZ AcquireNotify/AcquireWrite) instead of btleplug,
+// which stalls on some BlueZ stacks (see docs/dev/BLE_LINUX_NATIVE_IMPL.md). Scan + listen stay btleplug.
+// `ble_bluer` is a child module of `ble` (via #[path]), so it can build BleTransport from its private fields.
+#[cfg(target_os = "linux")]
+#[path = "ble_bluer.rs"]
+mod ble_bluer;
+#[cfg(target_os = "linux")]
+pub use ble_bluer::connect_ble;
+
 /// BLE write MTU — standard BLE 4.x limit for GATT writes
 const BLE_WRITE_MTU: usize = 20;
 
@@ -258,6 +267,9 @@ pub async fn run_scan_session(
 
 /// Connect to a BLE device by its peripheral ID.
 /// Spawns a background thread that bridges async btleplug to sync channels.
+/// Linux uses the bluer implementation (see `ble_bluer::connect_ble`); this btleplug path serves
+/// Windows/macOS.
+#[cfg(not(target_os = "linux"))]
 pub async fn connect_ble(device_id: &str) -> Result<BleTransport, String> {
     use btleplug::api::{Central, Manager as _, Peripheral as _, WriteType, ScanFilter};
     use btleplug::platform::Manager;

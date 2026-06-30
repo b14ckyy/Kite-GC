@@ -46,7 +46,7 @@ zstd = "0.13"      # decompress those .tar.zst assets (C-backed, like rusqlite's
 btleplug = "0.11"
 uuid = { version = "1", features = ["serde"] }
 dirs = "5"
-tokio = { version = "1", features = ["time", "sync", "macros"] }
+tokio = { version = "1", features = ["time", "sync", "macros", "io-util"] }
 futures = "0.3"
 mavlink = { version = "0.17", default-features = false, features = ["std", "ardupilotmega", "emit-extensions"] }
 num-traits = "0.2"  # FromPrimitive for lossless MavCmd/MavFrame <-> int (mission codec round-trip)
@@ -69,6 +69,9 @@ features = ["Gaming_Input", "Foundation_Collections"]
 evdev = "0.13"
 # TIOCGSERIAL probe to hide phantom 8250 /dev/ttyS* stubs from the port list (serial.rs).
 libc = "0.2"
+# Native BlueZ GATT for the FC BLE data path (AcquireNotify/AcquireWrite FD sockets) — fixes the
+# btleplug notification stall on some Ubuntu/BlueZ stacks. Scan/listen stay on btleplug. See ble_bluer.rs.
+bluer = { version = "0.17", features = ["bluetoothd"] }
 # Access the underlying WebKitGTK WebView to pin its page zoom at 1.0 (lib.rs setup). On Linux the
 # trackpad pinch / Ctrl+wheel zoom is handled natively by GTK and ignores any JS preventDefault, so the
 # whole-frame zoom can only be suppressed here. Version must match the one wry/tauri pulls (unified by Cargo).
