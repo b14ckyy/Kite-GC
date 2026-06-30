@@ -67,7 +67,8 @@ jobs:
             libudev-dev \
             patchelf \
             file \
-            libfuse2
+            libfuse2 \
+            xdg-utils
       - uses: actions/setup-node@v5
         with:
           node-version: '20'
@@ -114,7 +115,8 @@ jobs:
             libudev-dev \
             patchelf \
             file \
-            libfuse2
+            libfuse2 \
+            xdg-utils
       - uses: actions/setup-node@v5
         with:
           node-version: '20'
