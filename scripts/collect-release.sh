@@ -22,8 +22,13 @@ collected=()
 grab() {
     for f in $1; do
         [ -e "$f" ] || continue
-        cp -f "$f" "$OUT/"
-        collected+=("$(basename "$f")")
+        # Strip spaces from distributable names: Tauri names the .deb/.AppImage after productName
+        # ("Kite Ground Control"), and a space breaks `sudo apt install <path>` (the path splits into
+        # two args). Spaces -> hyphens keeps the OS app/display name intact, only the file is renamed.
+        dest="$(basename "$f")"
+        dest="${dest// /-}"
+        cp -f "$f" "$OUT/$dest"
+        collected+=("$dest")
     done
 }
 

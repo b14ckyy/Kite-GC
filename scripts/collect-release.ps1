@@ -21,8 +21,11 @@ $collected = @()
 function Grab($pattern) {
     if (Test-Path $pattern) {
         Get-ChildItem $pattern | ForEach-Object {
-            Copy-Item $_.FullName -Destination $out -Force
-            $script:collected += $_.Name
+            # Strip spaces from distributable names (Tauri names installers after productName,
+            # "Kite Ground Control"); spaces in a path break CLI installs. OS display name is unaffected.
+            $dest = $_.Name -replace ' ', '-'
+            Copy-Item $_.FullName -Destination (Join-Path $out $dest) -Force
+            $script:collected += $dest
         }
     }
 }
