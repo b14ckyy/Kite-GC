@@ -83,7 +83,13 @@ pub async fn connect_ble(device_id: &str) -> Result<BleTransport, String> {
     // THE key bit: FD-socket GATT (AcquireNotify / AcquireWrite), not signal callbacks.
     let reader = read_char.notify_io().await.map_err(|e| format!("AcquireNotify: {e}"))?;
     let writer = write_char.write_io().await.map_err(|e| format!("AcquireWrite: {e}"))?;
+    // CC2541/HM-10-class serial modules negotiate a large ATT MTU on some stacks (e.g. ~185 on Ubuntu
+    // 26.04's newer BlueZ) but their firmware still only digests ~20-byte ATT writes — a larger write
+    // overflows the UART bridge and drops the link. So cap every write at 20 bytes regardless of the
+    // negotiated MTU (this matches MWPTools and our own btleplug path, transport/ble.rs `BLE_WRITE_MTU`).
+    // The negotiated MTU is kept only for the connect log.
     let write_mtu = writer.mtu().max(20);
+    const BLE_WRITE_CHUNK: usize = 20;
 
     let (write_tx, mut write_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
     let (read_tx, read_rx) = mpsc::channel::<Vec<u8>>();
@@ -109,11 +115,11 @@ pub async fn connect_ble(device_id: &str) -> Result<BleTransport, String> {
                     Ok(n) => { let _ = read_tx.send(buf[..n].to_vec()); }
                     Err(e) => { log::warn!("BLE(bluer): notify read error: {e} — link lost"); break; }
                 },
-                // Outgoing frames, chunked to the negotiated MTU (one ATT packet per write), throttled
-                // per profile (CC2541 needs spacing or its UART bridge drops bytes).
+                // Outgoing frames, chunked to a safe 20-byte ATT write (see BLE_WRITE_CHUNK above) and
+                // throttled per profile (CC2541 needs spacing or its UART bridge drops bytes).
                 Some(data) = write_rx.recv() => {
                     let mut failed = false;
-                    for chunk in data.chunks(write_mtu) {
+                    for chunk in data.chunks(BLE_WRITE_CHUNK) {
                         if let Err(e) = writer.write_all(chunk).await {
                             log::warn!("BLE(bluer): write failed: {e} — link lost");
                             failed = true;
