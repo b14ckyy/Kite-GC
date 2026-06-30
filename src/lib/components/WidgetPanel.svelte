@@ -112,8 +112,8 @@
 
       // Only source panel renders the visual drag ghost.
       if (payload.panelId === panelId) {
-        ghostX = e.clientX + 14;
-        ghostY = e.clientY + 14;
+        ghostX = e.clientX;
+        ghostY = e.clientY;
       }
 
       const inside = isPointInsidePanel(e.clientX, e.clientY);
@@ -647,6 +647,9 @@
 
   .drag-ghost {
     position: fixed;
+    /* left/top track the cursor; centre the ghost on it so the frame sits under the pointer (intuitive
+       placement) instead of hanging to the bottom-right. */
+    transform: translate(-50%, -50%);
     pointer-events: none;
     z-index: 1000;
     border: 1px solid rgba(55, 168, 219, 0.75);
