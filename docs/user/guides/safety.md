@@ -14,6 +14,7 @@ differently:
 | Divert / return locations | (uses safe homes) | **Rally points** |
 | Automatic landing | **Safe Home + fixed-wing autoland** (per-site editor) | via flight mode (Land / RTL) |
 | Terrain clearance preview | ✓ | ✓ |
+| Terrain correction (follow / check) | ✓ | ✓ |
 | Plan-vs-airspace check | ✓ | ✓ |
 
 The rest of this page walks through each.
@@ -40,6 +41,33 @@ any below-clearance stretches flagged.
 !!! note "Needs elevation data"
     Terrain sampling needs the online terrain source; out of coverage or fully offline it reports
     *terrain data unavailable*. This is a planning aid — it does not command the aircraft.
+
+### Terrain correction
+
+Beyond the read-only preview, the Terrain tool can **adjust your waypoint altitudes** to hold a chosen
+ground clearance — for **INAV, ArduPilot and PX4** alike (Waypoints mode). Set the **Ground Clearance**
+target, then pick a mode:
+
+- **Follow** — set every waypoint in range to the target above-ground height, then raise any leg that
+  would still clip the terrain.
+- **Check** — only **raise** waypoints that sit below the target; never lower them.
+
+A **green dashed line** previews the corrected path, with **Changed** (how many waypoints move) and the
+resulting **min clearance**. You can refine it:
+
+- **Range (WP)** — limit the correction to a waypoint-number range (default: the whole mission).
+- **Fixed-wing** — also cap the **climb / descent angle**, raising the lower end of any too-steep leg.
+- **+ Add WP** — click the chart to drop a marker on the path, then add a waypoint there (e.g. over a
+  ridge) and re-run the correction so it follows the terrain more tightly.
+
+Press **Apply** to write the new altitudes into the mission. If a leg between fixed waypoints can't be
+cleared — or the angle limit forces a waypoint above the target — Kite flags it rather than inventing an
+impossible climb.
+
+!!! note "How the corrected altitude is stored"
+    INAV stores corrected waypoints as **AGL** (resolved to an absolute height from the terrain when the
+    mission is uploaded). ArduPilot / PX4 store them in the **terrain** frame, so the aircraft follows
+    them as intended only with terrain following / a terrain database enabled on the flight controller.
 
 ---
 
