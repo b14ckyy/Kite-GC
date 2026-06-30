@@ -96,6 +96,61 @@ export function arduIsLoiter(cmd: number): boolean {
 
 export const arduMission        = writable<ArduWaypoint[]>([]);
 export const arduSelectedWpIndex = writable<number>(-1);
+
+/** Multi-selection of waypoint indices (edit-mode multi-select / batch ops). The primary
+ *  (`arduSelectedWpIndex`) is the sole member when size === 1, else -1. Mirrors the INAV model
+ *  (stores/mission.ts) so both stacks behave identically. */
+export const arduSelectedWpIndices = writable<Set<number>>(new Set());
+
+function syncArduPrimary(s: Set<number>): void {
+  arduSelectedWpIndex.set(s.size === 1 ? (s.values().next().value as number) : -1);
+}
+
+/** Replace the selection with a single WP (also the editor primary). */
+export function arduSelectWpSingle(i: number): void {
+  arduSelectedWpIndices.set(new Set([i]));
+  arduSelectedWpIndex.set(i);
+}
+
+/** Toggle a WP in/out of the multi-selection (Ctrl/⌘-click, badge tap). */
+export function arduToggleWpSelection(i: number): void {
+  arduSelectedWpIndices.update((s) => {
+    const n = new Set(s);
+    if (n.has(i)) n.delete(i);
+    else n.add(i);
+    syncArduPrimary(n);
+    return n;
+  });
+}
+
+/** Select an inclusive index range (Shift-click). */
+export function arduSelectWpRange(a: number, b: number): void {
+  const lo = Math.min(a, b);
+  const hi = Math.max(a, b);
+  const n = new Set<number>();
+  for (let i = lo; i <= hi; i++) n.add(i);
+  arduSelectedWpIndices.set(n);
+  syncArduPrimary(n);
+}
+
+/** Clear the entire selection. */
+export function arduClearWpSelection(): void {
+  arduSelectedWpIndices.set(new Set());
+  arduSelectedWpIndex.set(-1);
+}
+
+/** Batch-remove all selected waypoints (descending so indices stay valid), as one undo step. */
+export function arduRemoveSelectedWps(): void {
+  const ids = [...get(arduSelectedWpIndices)].sort((a, b) => b - a);
+  if (ids.length === 0) return;
+  arduBeginUndoGroup();
+  try {
+    for (const idx of ids) arduRemoveWp(idx);
+  } finally {
+    arduEndUndoGroup();
+  }
+  arduClearWpSelection();
+}
 export const arduEditMode       = writable<boolean>(false);
 
 /** DB id of the currently loaded/imported library mission (null = fresh / never saved).
@@ -262,7 +317,7 @@ export function groupEndIndex(g: ArduGroup): number {
 
 export function arduMissionClear(): void {
   arduMission.set([]);
-  arduSelectedWpIndex.set(-1);
+  arduClearWpSelection();
   arduLoadedMissionId.set(null);
   arduClearUndoHistory(); // a clear is a fresh baseline
 }
@@ -342,7 +397,7 @@ export function arduUndo(): void {
   arduUndoSuspend++;
   arduMission.set(snap);
   arduUndoSuspend--;
-  arduSelectedWpIndex.set(-1);
+  arduClearWpSelection();
   arduSyncUndoFlags();
 }
 
@@ -353,7 +408,7 @@ export function arduRedo(): void {
   arduUndoSuspend++;
   arduMission.set(snap);
   arduUndoSuspend--;
-  arduSelectedWpIndex.set(-1);
+  arduClearWpSelection();
   arduSyncUndoFlags();
 }
 
@@ -371,7 +426,7 @@ export function arduClearUndoHistory(): void {
 export async function downloadArduMissionFromFc(): Promise<number> {
   const wps = await invoke<ArduWaypoint[]>('ardu_mission_download');
   arduMission.set(wps);
-  arduSelectedWpIndex.set(-1);
+  arduClearWpSelection();
   arduLoadedMissionId.set(null); // from the FC → not a library mission
   arduClearUndoHistory();        // downloaded mission = fresh undo baseline
   markArduMissionSynced('fc', wps);

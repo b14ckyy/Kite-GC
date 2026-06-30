@@ -16,10 +16,13 @@
   } from '$lib/helpers/arduCommandCatalog';
   import type { ArduAction } from '$lib/stores/surveyPattern.svelte';
 
-  let { label, value = null, firmware = 'ardupilot', onchange }: {
+  let { label, value = null, firmware = 'ardupilot', commands, onchange }: {
     label: string;
     value: ArduAction | null;
     firmware?: 'ardupilot' | 'px4';
+    /** Override the offered command list (e.g. batch edit passes the full modifier set). Defaults to
+     *  the curated survey-trigger subset below. */
+    commands?: number[];
     onchange: (v: ArduAction | null) => void;
   } = $props();
 
@@ -28,7 +31,7 @@
     CMD.DO_SET_CAM_TRIGG_DIST, CMD.DO_DIGICAM_CONTROL, CMD.DO_AUX_FUNCTION,
     CMD.DO_SET_SERVO, CMD.DO_REPEAT_SERVO, CMD.DO_SET_RELAY, CMD.DO_REPEAT_RELAY,
   ];
-  const options = $derived(ACTION_CMDS.filter((id) => firmware !== 'px4' || cmdSupportedByPx4(id)));
+  const options = $derived((commands ?? ACTION_CMDS).filter((id) => firmware !== 'px4' || cmdSupportedByPx4(id)));
 
   // Local working copy — synced from the value prop, emitted on every edit.
   let cmd = $state(0);

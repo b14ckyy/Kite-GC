@@ -14,8 +14,9 @@
   import { invoke } from '@tauri-apps/api/core';
   import { t, locale } from 'svelte-i18n';
   import {
-    arduMission, arduSelectedWpIndex, arduEditMode, arduLoadedMissionId,
-    arduMissionClear, arduRemoveWp, groupArduMission, markArduMissionSynced,
+    arduMission, arduSelectedWpIndex, arduSelectedWpIndices, arduEditMode, arduLoadedMissionId,
+    arduMissionClear, arduSelectWpSingle, arduToggleWpSelection, arduSelectWpRange,
+    arduClearWpSelection, arduRemoveSelectedWps, groupArduMission, markArduMissionSynced,
     arduMissionFlags, arduMissionModified, downloadArduMissionFromFc,
     arduUndo, arduRedo, arduCanUndo, arduCanRedo, arduClearUndoHistory,
     arduVehicleClass, setArduVehicleClass,
@@ -25,6 +26,8 @@
   } from '$lib/stores/missionArdupilot';
   import { onMissionDownloadProgress } from '$lib/stores/mission';
   import { cmdName, cmdShort, cmdHasLocation, cmdDef, cmdValidForVehicle, cmdValidForPx4, enumLabel, type VehicleClass } from '$lib/helpers/arduCommandCatalog';
+  import { buildArduWaypointMenu } from '$lib/helpers/arduWaypointMenu';
+  import { contextMenu } from '$lib/actions/contextMenu';
   import { arduWpDetailLines } from '$lib/helpers/missionWpDetails';
   import { frameMissionOnMap } from '$lib/stores/mapCamera';
   import { connection } from '$lib/stores/connection';
@@ -43,6 +46,8 @@
 
   let currentMission  = $state<ArduWaypoint[]>(get(arduMission));
   let currentSelIdx   = $state<number>(get(arduSelectedWpIndex));
+  let currentSel      = $state<Set<number>>(get(arduSelectedWpIndices));
+  let selAnchor       = -1;
   let currentEditing  = $state<boolean>(get(arduEditMode));
   let currentConn     = $state(get(connection));
   let statusMessage   = $state('');
@@ -91,7 +96,11 @@
 
   const unsubMission  = arduMission.subscribe(m => { currentMission = m; });
   const unsubSelIdx   = arduSelectedWpIndex.subscribe(i => { currentSelIdx = i; });
-  const unsubEditMode = arduEditMode.subscribe(e => { currentEditing = e; });
+  const unsubSel      = arduSelectedWpIndices.subscribe(s => { currentSel = s; });
+  const unsubEditMode = arduEditMode.subscribe(e => {
+    currentEditing = e;
+    if (!e) arduClearWpSelection(); // multi-select is edit-mode only
+  });
   const unsubConn     = connection.subscribe(c => { currentConn = c; });
   const unsubVehicle  = arduVehicleClass.subscribe(v => { currentVehicle = v; });
   const unsubSystem   = autopilotSystem.subscribe(s => { currentSystem = s; });
@@ -124,7 +133,7 @@
     currentConn.status === 'connected' && currentConn.protocolType === 'mavlink'
   );
 
-  onDestroy(() => { unsubMission(); unsubSelIdx(); unsubEditMode(); unsubConn(); unsubVehicle(); unsubSystem(); });
+  onDestroy(() => { unsubMission(); unsubSelIdx(); unsubSel(); unsubEditMode(); unsubConn(); unsubVehicle(); unsubSystem(); });
 
   async function handleSaveFile() {
     try {
@@ -255,7 +264,35 @@
   }
 
   function handleClear() { arduMissionClear(); statusMessage = $t('mission.missionCleared'); }
-  function removeSelected() { if (currentSelIdx >= 0) arduRemoveWp(currentSelIdx); }
+  // List selection (mirrors the INAV panel). Plain click = single; Ctrl/⌘ = toggle; Shift = range; a tap
+  // on the number badge toggles. Multi-select gestures are edit-mode only.
+  function onRowClick(e: MouseEvent, i: number) {
+    if (currentEditing && e.shiftKey && selAnchor >= 0) {
+      arduSelectWpRange(selAnchor, i);
+    } else if (currentEditing && (e.ctrlKey || e.metaKey)) {
+      arduToggleWpSelection(i);
+      selAnchor = i;
+    } else if (!currentEditing && currentSelIdx === i) {
+      arduClearWpSelection();
+    } else {
+      arduSelectWpSingle(i);
+      selAnchor = i;
+    }
+  }
+  function onBadgeClick(e: MouseEvent, i: number) {
+    e.stopPropagation();
+    if (currentEditing) arduToggleWpSelection(i);
+    else if (currentSelIdx === i) arduClearWpSelection();
+    else arduSelectWpSingle(i);
+    selAnchor = i;
+  }
+  function removeSelected() { if (currentSel.size > 0) arduRemoveSelectedWps(); }
+  // Right-click / long-press a row → waypoint context menu (Batch Edit for a multi-selection). Selects
+  // the row first if it isn't part of the current selection, so the menu acts on the right target.
+  function wpMenuFor(i: number) {
+    if (!currentSel.has(i)) arduSelectWpSingle(i);
+    return buildArduWaypointMenu();
+  }
 
   async function handleFcDownload() {
     statusMessage = $t('arduMission.downloading');
@@ -375,7 +412,7 @@
         {/each}
       </select>
     {/if}
-    {#if currentEditing && currentSelIdx >= 0}
+    {#if currentEditing && currentSel.size > 0}
       <Button variant="danger" icon="close" onclick={removeSelected} title={$t('mission.removeWp')} />
     {/if}
     <Button variant="standard" icon="delete" onclick={handleClear} title={$t('mission.clearMission')} />
@@ -408,8 +445,10 @@
         <tbody>
           {#each groups as g}
             {#if g.anchor}
-              <tr class="wp-row" class:selected={g.anchorIdx === currentSelIdx} onclick={() => arduSelectedWpIndex.set(g.anchorIdx)}>
-                <td class="col-num"><span class="wp-num-badge">{g.anchorIdx + 1}</span></td>
+              <tr class="wp-row" class:selected={currentSel.has(g.anchorIdx)} onclick={(e) => onRowClick(e, g.anchorIdx)} use:contextMenu={() => wpMenuFor(g.anchorIdx)}>
+                <!-- svelte-ignore a11y_click_events_have_key_events -->
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <td class="col-num"><span class="wp-num-badge" onclick={(e) => onBadgeClick(e, g.anchorIdx)}>{g.anchorIdx + 1}</span></td>
                 <td class="col-type">
                   {cmdShort(g.anchor.command)}
                   {#if cmdInvalid(g.anchor.command)}<span class="wp-warn" title={$t('arduMission.cmdInvalidForVehicle')}>⚠</span>{/if}
@@ -419,8 +458,10 @@
               </tr>
             {/if}
             {#each g.modifiers as m}
-              <tr class="wp-row wp-mod-row" class:selected={m.idx === currentSelIdx} onclick={() => arduSelectedWpIndex.set(m.idx)}>
-                <td class="col-num"><span class="wp-num-badge mod">{m.idx + 1}</span></td>
+              <tr class="wp-row wp-mod-row" class:selected={currentSel.has(m.idx)} onclick={(e) => onRowClick(e, m.idx)} use:contextMenu={() => wpMenuFor(m.idx)}>
+                <!-- svelte-ignore a11y_click_events_have_key_events -->
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <td class="col-num"><span class="wp-num-badge mod" onclick={(e) => onBadgeClick(e, m.idx)}>{m.idx + 1}</span></td>
                 <td class="col-type">
                   {cmdShort(m.wp.command)}
                   {#if cmdInvalid(m.wp.command)}<span class="wp-warn" title={$t('arduMission.cmdInvalidForVehicle')}>⚠</span>{/if}

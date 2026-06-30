@@ -1023,7 +1023,10 @@
     "relAlt": "Variation rel.",
     "apply": "Appliquer",
     "altModeHint": "Référence d'altitude (convertit toute la sélection)",
-    "mixedAltWarn": "Une variation d'altitude absolue exige le même mode d'altitude."
+    "mixedAltWarn": "Une variation d'altitude absolue exige le même mode d'altitude.",
+    "frameHint": "Cadre d'altitude (s'applique à toute la sélection)",
+    "mixedFrameWarn": "Une variation d'altitude absolue exige le même cadre d'altitude.",
+    "addAction": "Ajouter une action"
   },
   "map": {
     "headingUp": "Passer en vue cap en haut",

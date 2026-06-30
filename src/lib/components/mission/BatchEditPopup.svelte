@@ -20,6 +20,8 @@
     ALT_MODE_REL, ALT_MODE_AMSL, beginUndoGroup, endUndoGroup, type Waypoint,
   } from '$lib/stores/mission';
   import { batchEdit, closeBatchEdit } from '$lib/stores/batchEdit';
+  import { autopilotSystem } from '$lib/stores/autopilotContext';
+  import { get } from 'svelte/store';
   import { convertAltCm } from '$lib/helpers/altConvert';
   import UnitStepper from '$lib/components/UnitStepper.svelte';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
@@ -92,6 +94,22 @@
   $effect(() => {
     if ($batchEdit && selWps.length === 0) closeBatchEdit();
   });
+
+  // Close when the autopilot system switches out from under the popup.
+  let lastSystem = get(autopilotSystem); // plain (not $state) → the effect only tracks the store
+  $effect(() => {
+    const s = $autopilotSystem;
+    if (s !== lastSystem) { lastSystem = s; closeBatchEdit(); }
+  });
+
+  // Click / tap anywhere outside the popup closes it (the opening context-menu click already fired its
+  // pointerdown before the popup existed, so it never self-closes).
+  let popupEl: HTMLDivElement | undefined = $state();
+  function onWinPointerDown(e: PointerEvent) {
+    if (!$batchEdit) return;
+    if (popupEl && e.target instanceof Node && popupEl.contains(e.target)) return;
+    closeBatchEdit();
+  }
 
   function cycleUa(b: number) {
     ua[b] = ua[b] === 'keep' ? 'on' : ua[b] === 'on' ? 'off' : 'keep';
@@ -172,11 +190,14 @@
   }
 </script>
 
-<svelte:window onkeydown={(e) => { if (e.key === 'Escape') closeBatchEdit(); }} />
+<svelte:window
+  onkeydown={(e) => { if (e.key === 'Escape') closeBatchEdit(); }}
+  onpointerdown={onWinPointerDown}
+/>
 
 {#if $batchEdit}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="batch-popup" style="left:{$batchEdit.x}px; top:{$batchEdit.y}px;">
+  <div class="batch-popup" bind:this={popupEl} style="left:{$batchEdit.x}px; top:{$batchEdit.y}px;">
     <div class="bp-header">
       <span class="bp-title">{$t('mission.batchEdit')} · {selWps.length}</span>
       <button class="bp-x" onclick={closeBatchEdit} title={$t('video.close')}>✕</button>

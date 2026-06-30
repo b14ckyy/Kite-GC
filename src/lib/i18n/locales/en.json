@@ -1066,7 +1066,10 @@
     "relAlt": "Rel. change",
     "apply": "Apply",
     "altModeHint": "Altitude reference (converts all selected)",
-    "mixedAltWarn": "Absolute altitude change requires the same altitude mode."
+    "mixedAltWarn": "Absolute altitude change requires the same altitude mode.",
+    "frameHint": "Altitude frame (applies to all selected)",
+    "mixedFrameWarn": "Absolute altitude change requires the same altitude frame.",
+    "addAction": "Add action"
   },
   "map": {
     "headingUp": "Switch to Heading-Up view",

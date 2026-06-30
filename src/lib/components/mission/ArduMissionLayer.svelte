@@ -15,13 +15,16 @@
   import { get } from 'svelte/store';
   import { t } from 'svelte-i18n';
   import {
-    arduMission, arduSelectedWpIndex, arduEditMode, arduVehicleClass,
+    arduMission, arduSelectedWpIndex, arduSelectedWpIndices, arduEditMode, arduVehicleClass,
+    arduSelectWpSingle, arduToggleWpSelection, arduClearWpSelection,
     arduUpdateWp, arduRemoveWp, arduAddWp, arduRecordUndo,
     groupArduMission, groupEndIndex, type ArduGroup,
     MAV_CMD_NAV_WAYPOINT,
     MAV_FRAME_GLOBAL, MAV_FRAME_GLOBAL_RELATIVE_ALT, MAV_FRAME_GLOBAL_TERRAIN_ALT,
     type ArduWaypoint, type MavFrame,
   } from '$lib/stores/missionArdupilot';
+  import { openContextMenu } from '$lib/stores/contextMenu';
+  import { buildArduWaypointMenu } from '$lib/helpers/arduWaypointMenu';
   import { activeSurveyPattern } from '$lib/stores/surveyPattern.svelte';
   import {
     CMD,
@@ -48,6 +51,7 @@
 
   let currentWps     = $state<ArduWaypoint[]>(get(arduMission));
   let currentSelIdx  = $state<number>(get(arduSelectedWpIndex));
+  let currentSelSet  = $state<Set<number>>(get(arduSelectedWpIndices));
   let currentEditing = $state<boolean>(get(arduEditMode));
   let currentHome    = $state<HomePosition>(get(homePosition));
   let currentVehicle = $state<VehicleClass>(get(arduVehicleClass));
@@ -58,6 +62,7 @@
 
   const unsubMission  = arduMission.subscribe(wps => { currentWps = wps; });
   const unsubSelIdx   = arduSelectedWpIndex.subscribe(i => { currentSelIdx = i; });
+  const unsubSelSet   = arduSelectedWpIndices.subscribe(s => { currentSelSet = s; });
   const unsubEditMode = arduEditMode.subscribe(e => { currentEditing = e; });
   const unsubHome     = homePosition.subscribe(h => { currentHome = h; });
   const unsubVehicle  = arduVehicleClass.subscribe(v => { currentVehicle = v; });
@@ -451,13 +456,27 @@
         // Takeoff is draggable too while planning offline (a connected UAV locks it to its FC home).
         // Non-interactive while the pattern generator is open.
         const draggable = editing && !patternActive && (!isTakeoff || !conn);
+        const inSel = currentSelSet.has(i); // any selected → red icon (matches the INAV layer)
         const marker = L.marker(latLng, {
-          icon: iconForArduWp(wp, displayNum, i === selIdx, activeWp > 0 && displayNum === activeWp),
+          icon: iconForArduWp(wp, displayNum, inSel, activeWp > 0 && displayNum === activeWp),
           draggable,
           title: `WP${displayNum}: ${cmdName(wp.command)}`,
         }).addTo(missionGroup);
 
-        marker.on('click', () => { arduSelectedWpIndex.set(i); });
+        // Edit mode: a plain tap toggles the WP in/out of the selection (touch-friendly multi-select,
+        // no modifier key) — mirrors the INAV layer. View mode: tap selects / re-tap deselects.
+        marker.on('click', () => {
+          if (editing) arduToggleWpSelection(i);
+          else if (currentSelIdx === i) arduClearWpSelection();
+          else arduSelectWpSingle(i);
+        });
+        marker.on('contextmenu', (e: L.LeafletMouseEvent) => {
+          if (patternActive) return; // non-interactive while the pattern generator is open
+          // Right-click on an unselected marker selects it; on a selected one keeps the
+          // (multi-)selection so the menu can act on all of it.
+          if (!currentSelSet.has(i)) arduSelectWpSingle(i);
+          openContextMenu(e.originalEvent.clientX, e.originalEvent.clientY, buildArduWaypointMenu());
+        });
         if (draggable) {
           marker.on('dragend', () => {
             const pos = marker.getLatLng();
@@ -581,9 +600,14 @@
   }
 
   function onMapClick(e: L.LeafletMouseEvent) {
-    if (!currentEditing) return;
+    if (!currentEditing) {
+      // Outside edit mode a tap on empty map deselects the current waypoint.
+      if (currentSelIdx >= 0 || currentSelSet.size > 0) arduClearWpSelection();
+      return;
+    }
     if (activeSurveyPattern.isActive) return; // the pattern generator owns the map while open
-    if (currentSelIdx >= 0) { arduSelectedWpIndex.set(-1); return; }
+    // A tap on empty map with an active selection clears it (instead of adding a WP) — mirrors INAV.
+    if (currentSelSet.size > 0) { arduClearWpSelection(); return; }
     arduAddWp(newWaypointAt(e.latlng));
   }
 
@@ -592,11 +616,12 @@
 
   $effect(() => {
     void activeSurveyPattern.isActive; // re-render (clear / restore) when entering or leaving pattern mode
+    void currentSelSet; // re-render when the multi-selection changes (red icons follow set membership)
     renderMission(currentWps, currentSelIdx, currentEditing, currentHome, currentVehicle, currentActiveWp, connected);
   });
 
   onDestroy(() => {
-    unsubMission(); unsubSelIdx(); unsubEditMode(); unsubHome(); unsubVehicle(); unsubActiveWp(); unsubSystem(); unsubConn();
+    unsubMission(); unsubSelIdx(); unsubSelSet(); unsubEditMode(); unsubHome(); unsubVehicle(); unsubActiveWp(); unsubSystem(); unsubConn();
     map.off('click', onMapClick);
     closeEditorPopup(map, popupState);
     missionGroup.clearLayers();

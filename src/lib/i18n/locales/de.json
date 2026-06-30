@@ -1066,7 +1066,10 @@
     "relAlt": "Rel. Änderung",
     "apply": "Anwenden",
     "altModeHint": "Höhenreferenz (konvertiert alle Selektierten)",
-    "mixedAltWarn": "Absolute Höhenänderung erfordert einheitlichen Höhenmodus."
+    "mixedAltWarn": "Absolute Höhenänderung erfordert einheitlichen Höhenmodus.",
+    "frameHint": "Höhenrahmen (gilt für alle Selektierten)",
+    "mixedFrameWarn": "Absolute Höhenänderung erfordert einheitlichen Höhenrahmen.",
+    "addAction": "Aktion hinzufügen"
   },
   "map": {
     "headingUp": "Zu Kurs-oben-Ansicht wechseln",

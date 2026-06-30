@@ -28,6 +28,7 @@
   import { runUpdateCheck } from "$lib/controllers/updateCheck";
   import ContextMenu from "$lib/components/ContextMenu.svelte";
   import BatchEditPopup from "$lib/components/mission/BatchEditPopup.svelte";
+  import ArduBatchEditPopup from "$lib/components/mission/ArduBatchEditPopup.svelte";
   import type { DialogButton, DialogOptions } from "$lib/components/ConfirmDialog.svelte";
   import Toolbar from "$lib/components/Toolbar.svelte";
   import RelayPanel from "$lib/components/RelayPanel.svelte";
@@ -2802,6 +2803,7 @@
        correct place; see docs/archive/UI_SCALING.md). -->
   <ContextMenu />
   <BatchEditPopup {interfaceSettings} />
+  <ArduBatchEditPopup />
 </div><!-- .ui-root -->
 
 <style>
