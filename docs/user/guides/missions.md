@@ -98,8 +98,19 @@ Each waypoint carries an altitude against a **reference**:
 
 - **Add** points by clicking on the map; **drag** a marker to move it; **reorder** in the list.
 - **Edit** a point (type, altitude, parameters) from its popup or the list.
-- **Multi-select**, **undo / redo** (**Ctrl+Z** / **Ctrl+Y**, or **Ctrl+Shift+Z** to redo), and
-  **clear** are all available while editing.
+- **Multi-select** (while **editing**) to act on several waypoints at once:
+    - In the **list**: **Ctrl/⌘-click** rows to toggle them, **Shift-click** for an inclusive range, or
+      tap a number **badge** to toggle a single one.
+    - On the **map**: **tap a marker** to toggle it in or out of the selection — no modifier key needed,
+      so it works on touchscreens. Tapping empty map clears the selection.
+    - With more than one selected, **right-click** (or long-press) a selected waypoint for **Batch
+      Edit**: change the **altitude** and its **reference / frame** for the whole selection at once, and
+      **attach an action** to every selected waypoint — an INAV **user-action** flag, or an
+      ArduPilot / PX4 **`DO_` command** (speed change, camera trigger, servo, relay, …) — the same set
+      as the single-waypoint editor's *Add modifier*. **Delete** the whole selection in one undoable step from the toolbar.
+    - Works the same on **INAV, ArduPilot and PX4**.
+- **Undo / redo** (**Ctrl+Z** / **Ctrl+Y**, or **Ctrl+Shift+Z** to redo) and **clear** are available
+  while editing.
 - **Survey patterns** — generate an area scan instead of placing every leg by hand (see
   [Survey patterns](#survey-patterns) below).
 
