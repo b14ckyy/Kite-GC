@@ -43,6 +43,7 @@
     "connect": "Verbinden",
     "disconnect": "Trennen",
     "connecting": "Verbinde...",
+    "reconnecting": "Verbinde neu…",
     "disconnected": "Getrennt",
     "noPortSelected": "Kein Port ausgewählt",
     "noPortsFound": "Keine Ports gefunden",

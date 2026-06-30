@@ -27,6 +27,14 @@ use crate::radar;
 use crate::radar::source::SourceUpdate;
 use crate::transport::Transport;
 
+/// Payload for the `telemetry-fc-link` event (status-icon liveness): `false` while the link is stalled
+/// (transport still open but no MSP replies — e.g. the BLE transport silently reconnecting underneath),
+/// `true` when telemetry resumes. Lets the UI show a "reconnecting" state without a teardown.
+#[derive(Clone, serde::Serialize)]
+struct FcLinkAlive {
+    alive: bool,
+}
+
 /// How often to poll ADS-B from the FC via MSP when enabled (bandwidth-heavy; lowest cadence).
 const RADAR_MSP_INTERVAL: Duration = Duration::from_millis(1000);
 /// Shared ingest channel + on/off flag for the scheduler-fed ADS-B-via-MSP source.
@@ -445,6 +453,8 @@ fn scheduler_loop(
                 if stall_warned {
                     log::warn!("Link recovered — telemetry resumed");
                     stall_warned = false;
+                    // Tell the status icon the link is live again (no teardown happened).
+                    let _ = app_handle.emit("telemetry-fc-link", FcLinkAlive { alive: true });
                 }
             } else if !stall_warned && last_rx.elapsed() >= STALL_WARN_AFTER {
                 log::warn!(
@@ -452,6 +462,9 @@ fn scheduler_loop(
                     last_rx.elapsed().as_secs_f32()
                 );
                 stall_warned = true;
+                // Surface the stall in the status icon ("reconnecting") without tearing the link down —
+                // the transport keeps trying (BLE silently reconnects); we just show it's not live.
+                let _ = app_handle.emit("telemetry-fc-link", FcLinkAlive { alive: false });
             }
             debug_tracker.maybe_emit(&app_handle);
             link_stats.maybe_emit(&app_handle);

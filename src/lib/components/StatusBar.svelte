@@ -6,6 +6,7 @@
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import type { FcInfo } from '$lib/stores/connection';
+  import { fcLinkAlive } from '$lib/stores/connection';
   import type { TelemetryData } from '$lib/stores/telemetry';
   import { isArmed } from '$lib/helpers/telemetry';
 
@@ -39,11 +40,14 @@
   <div class="statusbar-left">
     <span
       class="status-indicator"
-      class:connected={connStatus === "connected"}
+      class:connected={connStatus === "connected" && $fcLinkAlive}
+      class:reconnecting={connStatus === "connected" && !$fcLinkAlive}
       class:disconnected={connStatus !== "connected"}
     ></span>
     <span>
-      {#if connStatus === "connected" && fcInfo}
+      {#if connStatus === "connected" && !$fcLinkAlive}
+        {$t('connection.reconnecting')}
+      {:else if connStatus === "connected" && fcInfo}
         {$t('connection.connectedOn', { values: { variant: fcInfo.fc_variant, version: fcInfo.fc_version, port: connectionPort } })}
       {:else if connStatus === "connecting"}
         {$t('connection.connecting')}
@@ -97,6 +101,16 @@
   .status-indicator.disconnected {
     background: #d40000;
     box-shadow: 0 0 4px rgba(212, 0, 0, 0.5);
+  }
+
+  .status-indicator.reconnecting {
+    background: #f39c12;
+    box-shadow: 0 0 4px rgba(243, 156, 18, 0.6);
+    animation: reconnect-pulse 1s ease-in-out infinite;
+  }
+  @keyframes reconnect-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
   }
 
   .status-indicator.connected {

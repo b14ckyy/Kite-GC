@@ -37,6 +37,7 @@
     "connect": "Connecter",
     "disconnect": "Déconnecter",
     "connecting": "Connexion…",
+    "reconnecting": "Reconnexion…",
     "disconnected": "Déconnecté",
     "noPortSelected": "Aucun port sélectionné",
     "noPortsFound": "Aucun port trouvé",

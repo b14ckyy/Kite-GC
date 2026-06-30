@@ -385,64 +385,93 @@ pub async fn connect_ble(device_id: &str) -> Result<BleTransport, String> {
     let profile_name = matched_profile.name.to_string();
     let write_delay = Duration::from_millis(matched_profile.write_delay_ms);
 
-    // Spawn async task that handles BLE I/O
+    // Spawn async task that handles BLE I/O.
+    //
+    // Transparent reconnect: a dropped link (notification stream ended / write error) does NOT end the
+    // task — it keeps the read/write channels open and silently re-establishes the BLE connection
+    // underneath (endless, capped backoff). The scheduler therefore never sees `Disconnected` (only a
+    // stall, which it surfaces in the status icon without tearing down), keeps polling, and resumes when
+    // the link returns — no fresh FC handshake, just a time gap in the data. A full TX/BLE-endpoint
+    // power-cycle is just a longer gap. The task only ends (dropping `read_tx` → scheduler teardown) on an
+    // explicit stop (user disconnect).
     let peripheral_clone = peripheral.clone();
+    let adapter_clone = adapter.clone();
     tauri::async_runtime::spawn(async move {
+        use btleplug::api::Peripheral as _;
         let mut notifications = notification_stream;
 
-        loop {
-            tokio::select! {
-                // Forward BLE notifications → read channel. `next()` yielding None means the GATT
-                // notification stream ENDED — the BLE link dropped (out of range, the OS Bluetooth stack
-                // tore it down, or the device reset). This arm is essential: without a `None` case
-                // tokio::select! silently disables the branch and the task spins forever holding `read_tx`
-                // alive, so the sync side never sees a disconnect — it just times out endlessly (the
-                // "poller stops, link goes red, no error in the log" bug). Breaking drops `read_tx` →
-                // read_bytes() returns Disconnected → the scheduler tears down and emits connection-lost.
-                maybe = notifications.next() => {
-                    match maybe {
+        'session: loop {
+            // ── Serve the live link until it drops (break → reconnect) or stop is requested (return) ──
+            loop {
+                tokio::select! {
+                    maybe = notifications.next() => match maybe {
                         Some(notification) => {
                             if notification.uuid == read_char.uuid {
                                 let _ = read_tx.send(notification.value);
                             }
                         }
                         None => {
-                            log::warn!("BLE notification stream ended — link lost (device gone / out of range)");
-                            let _ = peripheral_clone.disconnect().await;
+                            log::warn!("BLE notification stream ended — link lost, reconnecting");
+                            break;
+                        }
+                    },
+                    // A write error is the *primary* disconnect signal on some adapters (CC2541/HC-04:
+                    // BlueZ returns "Not connected" on write before the notification stream ends).
+                    Some(data) = write_async_rx.recv() => {
+                        let mut write_err = None;
+                        for chunk in data.chunks(BLE_WRITE_MTU) {
+                            if let Err(e) = peripheral_clone
+                                .write(&write_char, chunk, WriteType::WithoutResponse)
+                                .await
+                            {
+                                write_err = Some(e);
+                                break;
+                            }
+                            if !write_delay.is_zero() {
+                                tokio::time::sleep(write_delay).await;
+                            }
+                        }
+                        if let Some(e) = write_err {
+                            log::warn!("BLE write failed ({e}) — link lost, reconnecting");
                             break;
                         }
                     }
-                }
-                // Handle write requests from sync side. A write error here is the *primary* disconnect
-                // signal on some adapters (e.g. CC2541/HC-04): BlueZ returns "Not connected" on write
-                // while the notification stream hasn't ended yet. Previously we only logged it and kept
-                // looping, so the FC stalled with no teardown. Treat it as link-lost: disconnect and break
-                // so read_tx drops → read_bytes() returns Disconnected → the scheduler tears down.
-                Some(data) = write_async_rx.recv() => {
-                    let mut write_err = None;
-                    for chunk in data.chunks(BLE_WRITE_MTU) {
-                        if let Err(e) = peripheral_clone
-                            .write(&write_char, chunk, WriteType::WithoutResponse)
-                            .await
-                        {
-                            write_err = Some(e);
-                            break;
-                        }
-                        if !write_delay.is_zero() {
-                            tokio::time::sleep(write_delay).await;
-                        }
-                    }
-                    if let Some(e) = write_err {
-                        log::warn!("BLE write failed ({}) — link lost, disconnecting", e);
+                    // Explicit stop (user disconnect) → end the task (drops read_tx → scheduler teardown).
+                    // This is the ONLY path that reports the link as gone.
+                    _ = stop_async_rx.recv() => {
+                        log::info!("BLE runtime stopping");
                         let _ = peripheral_clone.disconnect().await;
-                        break;
+                        return;
                     }
                 }
-                // Stop signal
-                _ = stop_async_rx.recv() => {
-                    log::info!("BLE runtime stopping");
-                    let _ = peripheral_clone.disconnect().await;
-                    break;
+            }
+
+            // The serve loop only breaks on link loss (a stop returns above) → reconnect.
+            {
+                let _ = peripheral_clone.disconnect().await; // clean slate before reconnecting
+                // ── Reconnect with capped backoff; abort on stop ──
+                let mut backoff_ms = 1000u64;
+                loop {
+                    match stop_async_rx.try_recv() {
+                        Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
+                        _ => return, // stop requested, or the transport was dropped
+                    }
+                    match ble_reconnect(&adapter_clone, &peripheral_clone, &read_char).await {
+                        Ok(s) => {
+                            notifications = s;
+                            while write_async_rx.try_recv().is_ok() {} // drop writes queued during the gap
+                            log::info!("BLE reconnected");
+                            continue 'session;
+                        }
+                        Err(e) => {
+                            log::warn!("BLE reconnect failed: {e} — retry in {backoff_ms}ms");
+                            tokio::select! {
+                                _ = tokio::time::sleep(Duration::from_millis(backoff_ms)) => {}
+                                _ = stop_async_rx.recv() => return,
+                            }
+                            backoff_ms = (backoff_ms * 2).min(5000);
+                        }
+                    }
                 }
             }
         }
@@ -457,6 +486,33 @@ pub async fn connect_ble(device_id: &str) -> Result<BleTransport, String> {
         stop_tx,
         read_buffer: Vec::new(),
     })
+}
+
+/// Re-establish a dropped BLE link in place: a brief scan (so a re-advertising device — e.g. after the
+/// user restarted their TX/BLE endpoint — is rediscovered), then (re-)connect, rediscover services,
+/// re-subscribe to the read characteristic and return a fresh notification stream. The read/write
+/// `Characteristic` handles are keyed by UUID so they stay valid across reconnects. Used by the I/O
+/// task's transparent-reconnect loop; failures are retried with backoff there.
+async fn ble_reconnect(
+    adapter: &btleplug::platform::Adapter,
+    peripheral: &btleplug::platform::Peripheral,
+    read_char: &btleplug::api::Characteristic,
+) -> Result<
+    std::pin::Pin<Box<dyn futures::Stream<Item = btleplug::api::ValueNotification> + Send>>,
+    String,
+> {
+    use btleplug::api::{Central, Peripheral as _, ScanFilter};
+    // Best-effort rediscovery; ignore scan errors (the device may already be cached/advertising).
+    let _ = adapter.start_scan(ScanFilter { services: vec![] }).await;
+    tokio::time::sleep(Duration::from_millis(2000)).await;
+    let _ = adapter.stop_scan().await;
+
+    if !peripheral.is_connected().await.unwrap_or(false) {
+        peripheral.connect().await.map_err(|e| format!("reconnect: {e}"))?;
+    }
+    peripheral.discover_services().await.map_err(|e| format!("rediscover: {e}"))?;
+    peripheral.subscribe(read_char).await.map_err(|e| format!("resubscribe: {e}"))?;
+    peripheral.notifications().await.map_err(|e| format!("renotify: {e}"))
 }
 
 // ── BLE GATT Explorer (dev) — listen-only auto-discovery ──────────────────────
