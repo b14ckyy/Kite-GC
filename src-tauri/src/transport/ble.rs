@@ -96,6 +96,11 @@ pub struct BleTransport {
     stop_tx: tokio::sync::mpsc::UnboundedSender<()>,
     /// Buffered bytes from previous reads that haven't been fully consumed
     read_buffer: Vec<u8>,
+    /// Idle timeout for `read_bytes` when no notification is queued. The pipelined MSP scheduler tightens
+    /// this (via `set_read_timeout`) so its drain/emit loop ticks fast (~100 Hz) instead of being paced by
+    /// a coarse blocking read — otherwise high-rate polls (Attitude) can't hit their interval. Default
+    /// 100 ms for the MAVLink/idle paths.
+    read_timeout: std::time::Duration,
 }
 
 /// Scan for BLE devices.
@@ -493,6 +498,7 @@ pub async fn connect_ble(device_id: &str) -> Result<BleTransport, String> {
         read_rx,
         stop_tx,
         read_buffer: Vec::new(),
+        read_timeout: Duration::from_millis(100),
     })
 }
 
@@ -792,6 +798,7 @@ pub async fn connect_ble_listen(
         read_rx,
         stop_tx,
         read_buffer: Vec::new(),
+        read_timeout: Duration::from_millis(100),
     })
 }
 
@@ -805,8 +812,9 @@ impl ByteTransport for BleTransport {
             return Ok(n);
         }
 
-        // Wait for new data from BLE notifications (100ms timeout to avoid blocking forever)
-        match self.read_rx.recv_timeout(Duration::from_millis(100)) {
+        // Wait for new data from a BLE notification, bounded by the (settable) idle timeout so a fast
+        // caller loop isn't paced by a coarse blocking read. Returns immediately when data is available.
+        match self.read_rx.recv_timeout(self.read_timeout) {
             Ok(data) => {
                 let n = std::cmp::min(buf.len(), data.len());
                 buf[..n].copy_from_slice(&data[..n]);
@@ -825,6 +833,10 @@ impl ByteTransport for BleTransport {
             .send(data.to_vec())
             .map_err(|_| TransportError::Disconnected)?;
         Ok(())
+    }
+
+    fn set_read_timeout(&mut self, timeout: std::time::Duration) {
+        self.read_timeout = timeout;
     }
 
     fn description(&self) -> String {
