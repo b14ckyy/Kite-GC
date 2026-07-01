@@ -105,6 +105,8 @@
     "notReady": "NOT READY",
     "readyHint": "Ready to arm",
     "reasons": {
+      "initialising": "Initialising (not ready yet)",
+      "armingBlocked": "Arming blocked",
       "geozone": "Geozone block",
       "failsafe": "Failsafe active",
       "notLevel": "Not level",

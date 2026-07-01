@@ -42,6 +42,9 @@ const FT_AP_CUSTOM_TELEM_LEGACY: u8 = 0x7F;
 
 /// INAV arming_flags bit 2 = ARMED (what the recorder + frontend look for).
 const ARMED_FLAG: u32 = 0x04;
+// Disarmed not-ready markers ("WAIT" = initialising, "!ERR" = blocked; INAV `telemetry/crsf.c`) — shared
+// with the S.Port decoder + mapped in the frontend. See flightmode::ARM_DISABLE_*.
+use crate::flightmode::{ARM_DISABLE_BLOCKED, ARM_DISABLE_INITIALISING};
 
 // ── INAV CRSF telemetry frame types ───────────────────────────────────────────
 const FT_GPS: u8 = 0x02;
@@ -165,12 +168,19 @@ fn hex(bytes: &[u8]) -> String {
     s
 }
 
-/// Map an INAV CRSF flight-mode string (frame 0x21) to `(armed, FlightModeState)`. Unlike S.Port (a
-/// decimal-packed bitmask), CRSF sends one dominant ASCII mode string. Disarmed sentinels are
-/// "OK"/"WAIT"/"!ERR"; any other string means armed. Strings from INAV `telemetry/crsf.c`. An unknown
-/// armed string is passed through lower-cased so the frontend registry can still surface it.
-fn classify_crsf_mode(text: &str) -> (bool, FlightModeState) {
+/// Map an INAV CRSF flight-mode string (frame 0x21) to `(armed, arming-disabled bits, FlightModeState)`.
+/// Unlike S.Port (a decimal-packed bitmask), CRSF sends one dominant ASCII mode string. Disarmed sentinels
+/// are "OK" (ready to arm), "WAIT" (still initialising) and "!ERR" (arming blocked); any other string means
+/// armed. The disabled bits let the toolbar show ready vs not-ready while disarmed (0 when armed or ready).
+/// Strings from INAV `telemetry/crsf.c`. An unknown armed string is passed through lower-cased so the
+/// frontend registry can still surface it.
+fn classify_crsf_mode(text: &str) -> (bool, u32, FlightModeState) {
     let armed = !matches!(text, "OK" | "WAIT" | "!ERR" | "");
+    let disable_bits = match text {
+        "WAIT" => ARM_DISABLE_INITIALISING,
+        "!ERR" => ARM_DISABLE_BLOCKED,
+        _ => 0,
+    };
     let primary = match text {
         "ANGL" | "ANGH" | "AH" => "angle",
         "HOR" => "horizon",
@@ -182,14 +192,14 @@ fn classify_crsf_mode(text: &str) -> (bool, FlightModeState) {
         "!FS!" => "failsafe",
         "ACRO" | "OK" | "WAIT" | "!ERR" => "acro",
         other => {
-            return (armed, FlightModeState { primary: other.to_ascii_lowercase(), modifiers: Vec::new() });
+            return (armed, disable_bits, FlightModeState { primary: other.to_ascii_lowercase(), modifiers: Vec::new() });
         }
     };
     let mut modifiers = Vec::new();
     if matches!(text, "ANGH" | "AH") {
         modifiers.push("althold".to_string());
     }
-    (armed, FlightModeState { primary: primary.to_string(), modifiers })
+    (armed, disable_bits, FlightModeState { primary: primary.to_string(), modifiers })
 }
 
 /// Accumulated decoded telemetry. Each event is only emitted once its fields have been seen, so the
@@ -224,6 +234,8 @@ struct State {
     seen_airspeed: bool,
 
     armed: bool,
+    /// Synthetic INAV "arming disabled" bits for the disarmed not-ready sentinels (0 when armed or ready).
+    arm_disable_bits: u32,
     mode: FlightModeState,
     seen_status: bool,
 
@@ -376,8 +388,9 @@ impl CrsfDecoder {
                 s.fresh_attitude = true;
             }
             Decoded::FlightMode { text } => {
-                let (armed, mode) = classify_crsf_mode(text);
+                let (armed, disable_bits, mode) = classify_crsf_mode(text);
                 s.armed = armed;
+                s.arm_disable_bits = disable_bits;
                 s.mode = mode;
                 s.seen_status = true;
                 s.fresh_status = true;
@@ -449,7 +462,7 @@ impl CrsfDecoder {
 
         if f_status && !ap_active {
             let status = StatusData {
-                arming_flags: if s.armed { ARMED_FLAG } else { 0 },
+                arming_flags: if s.armed { ARMED_FLAG } else { s.arm_disable_bits },
                 flight_mode_flags: 0, // CRSF carries a single mode string, not the raw INAV bitmask
                 cpu_load: 0,
                 sensor_status: 0,

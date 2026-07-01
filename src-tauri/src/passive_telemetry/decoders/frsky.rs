@@ -15,7 +15,7 @@ use std::time::Instant;
 use tauri::{AppHandle, Emitter};
 
 use crate::flightlog::recorder::FlightRecorderHandle;
-use crate::flightmode::{classify_inav, FlightModeState};
+use crate::flightmode::{classify_inav, FlightModeState, ARM_DISABLE_BLOCKED};
 use crate::scheduler::telemetry::{
     AirspeedData, AltitudeData, AnalogData, AttitudeData, GpsData, LinkStatsData, StatusData,
 };
@@ -71,9 +71,14 @@ const F_NAV_FW_AUTOLAND: u32 = 1 << 18;
 const ARMED_FLAG: u32 = 0x04;
 
 /// Decode INAV's decimal-column-packed flight-mode value (`frskyGetFlightMode`) into `(armed,
-/// normalized-flags)`. Mirrors smartport.c exactly.
-fn decode_modes(value: u32) -> (bool, u32) {
-    let armed = (value % 10) & 4 != 0;
+/// arming-disabled bits, normalized-flags)`. Mirrors smartport.c exactly. The ones column encodes readiness:
+/// +1 = arming enabled (ready), +2 = arming disabled (not ready), +4 = ARMED. We surface the "not ready"
+/// state as a synthetic disabled bit (shared with CRSF) so the toolbar shows ready vs not-ready — 0 when
+/// ready or armed.
+fn decode_modes(value: u32) -> (bool, u32, u32) {
+    let ones = value % 10;
+    let armed = ones & 4 != 0;
+    let arm_disable_bits = if ones & 2 != 0 { ARM_DISABLE_BLOCKED } else { 0 };
     let tens = (value / 10) % 10;
     let huns = (value / 100) % 10;
     let thous = (value / 1000) % 10;
@@ -98,7 +103,7 @@ fn decode_modes(value: u32) -> (bool, u32) {
     if hundk & 1 != 0 { f |= F_NAV_FW_AUTOLAND; }
     if hundk & 8 != 0 { f |= F_NAV_POSHOLD; } // POSHOLD (airplane)
     if mil & 1 != 0 { f |= F_NAV_RTH; } // WP-mission RTH
-    (armed, f)
+    (armed, arm_disable_bits, f)
 }
 
 #[derive(Default)]
@@ -137,6 +142,8 @@ struct State {
     seen_airspeed: bool,
 
     armed: bool,
+    /// Synthetic INAV "arming disabled" bit for the disarmed not-ready state (0 when armed or ready).
+    arm_disable_bits: u32,
     mode_flags: u32,
     seen_status: bool,
 
@@ -262,8 +269,9 @@ impl FrskyDecoder {
                 s.seen_gps = true;
             }
             ID_MODES | ID_LEGACY_MODES => {
-                let (armed, flags) = decode_modes(value);
+                let (armed, disable_bits, flags) = decode_modes(value);
                 s.armed = armed;
+                s.arm_disable_bits = disable_bits;
                 s.mode_flags = flags;
                 s.seen_status = true;
             }
@@ -325,7 +333,7 @@ impl FrskyDecoder {
         // Status first: drives the recorder's arm/disarm edge + the ARMED indicator.
         if f_status {
             let status = StatusData {
-                arming_flags: if s.armed { ARMED_FLAG } else { 0 },
+                arming_flags: if s.armed { ARMED_FLAG } else { s.arm_disable_bits },
                 flight_mode_flags: s.mode_flags,
                 cpu_load: 0,
                 sensor_status: 0,

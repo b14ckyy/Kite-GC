@@ -16,6 +16,11 @@ export const ARMED_BIT = 1 << 2;
 
 /** INAV armingFlag_e disable bits → i18n reason key (suffix under `arming.reasons.*`). */
 const INAV_DISABLE_FLAGS: { bit: number; key: string }[] = [
+  // Bits 0/1 are synthetic: real INAV armingFlag_e starts at ARMED (bit 2), so the MSP path never sets
+  // them. The passive CRSF/S.Port decoders set them to convey the disarmed not-ready sentinels (which
+  // carry no specific reason) so the toolbar can still show ready vs not-ready. See decoders/crsf.rs.
+  { bit: 0, key: 'initialising' },
+  { bit: 1, key: 'armingBlocked' },
   { bit: 6, key: 'geozone' },
   { bit: 7, key: 'failsafe' },
   { bit: 8, key: 'notLevel' },

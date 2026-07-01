@@ -24,6 +24,13 @@ impl FlightModeState {
     }
 }
 
+/// Synthetic INAV "arming disabled" bits the passive decoders (CRSF / S.Port) set on *disarmed* telemetry
+/// so the toolbar arming indicator can show ready vs not-ready — these links carry only a coarse mode
+/// signal, not INAV's real armingFlags bitfield. Real INAV MSP never uses bits 0/1 (armingFlag_e starts at
+/// ARMED = bit 2), so reusing them is safe; the frontend maps them to reasons in `helpers/arming.ts`.
+pub const ARM_DISABLE_INITIALISING: u32 = 1 << 0; // CRSF "WAIT" (still initialising)
+pub const ARM_DISABLE_BLOCKED: u32 = 1 << 1; // CRSF "!ERR" / S.Port arming-disabled
+
 // ── INAV (normalized FLIGHT_MODE bitmask from scheduler::telemetry) ──────────────────────────
 // Bit layout matches `box_id_to_flight_mode_bit` / `trackColors.ts` FLIGHT_MODE.
 const ANGLE: u32 = 1 << 0;

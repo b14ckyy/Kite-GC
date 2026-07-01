@@ -94,6 +94,8 @@
     "notReady": "PAS PRÊT",
     "readyHint": "Prêt à armer",
     "reasons": {
+      "initialising": "Initialisation (pas encore prêt)",
+      "armingBlocked": "Armement bloqué",
       "geozone": "Géozone bloquante",
       "failsafe": "Failsafe actif",
       "notLevel": "Pas à niveau",

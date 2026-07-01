@@ -105,6 +105,8 @@
     "notReady": "NICHT BEREIT",
     "readyHint": "Bereit zum Scharfschalten",
     "reasons": {
+      "initialising": "Initialisiert (noch nicht bereit)",
+      "armingBlocked": "Armieren blockiert",
       "geozone": "Geozone blockiert",
       "failsafe": "Failsafe aktiv",
       "notLevel": "Nicht waagerecht",
