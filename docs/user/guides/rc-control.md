@@ -156,6 +156,9 @@ Kite handles for you).
   sending a "release" frame), leaving the FC a few-second window to re-engage before its failsafe fires.
 - **`SYSID_MYGCS`** — ArduPilot only accepts overrides from its configured GCS system ID; a mismatch
   silently drops them.
+- **Flying with a physical receiver too?** The real RX and the GCS override compete — if a servo only
+  *twitches* instead of holding, see **[RC control troubleshooting](../troubleshooting/rc-control.md)** for
+  the ArduPilot settings (`RCx_OPTION` 46, `RC_OPTIONS`, `RC_OVERRIDE_TIME`) that let the GCS take over.
 - **Modes and arming** go through the **Control** tool (`DO_SET_MODE` / arm), not the override stream —
   though you can map a flight-mode channel if you prefer.
 

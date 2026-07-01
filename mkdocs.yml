@@ -98,6 +98,7 @@ nav:
       - File formats: reference/file-formats.md
   - Troubleshooting:
       - Connection: troubleshooting/connection.md
+      - RC control: troubleshooting/rc-control.md
       - Video: troubleshooting/video.md
       - Reporting a problem: troubleshooting/reporting-issues.md
   - Changelog: changelog.md
