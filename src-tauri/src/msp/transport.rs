@@ -27,9 +27,6 @@ pub struct MspTransport {
     /// Shared raw-serial log sink (ADR-049). Every outgoing frame ('o') and incoming read-chunk ('i')
     /// is captured here in mwptools' v2 format while the recorder has a logger open; otherwise a no-op.
     raw_sink: MspRawSink,
-    /// Distinct MSP codes of non-matching messages parsed during reads (unsolicited / fire-and-forget
-    /// ACKs). Drained by `take_unsolicited_codes` — see the RC AUX_RC confirmation path.
-    unsolicited: Vec<u16>,
 }
 
 impl MspTransport {
@@ -41,7 +38,6 @@ impl MspTransport {
             parser: MspParser::new(),
             connection_lost: false,
             raw_sink,
-            unsolicited: Vec::new(),
         }
     }
 
@@ -100,11 +96,9 @@ impl Transport for MspTransport {
                             if msg.code == code {
                                 return Ok(msg);
                             }
-                            // Non-matching message (unsolicited or out-of-order) — record its code so a
-                            // fire-and-forget ACK (e.g. SET_AUX_RC's 0x2230) can be observed, then drop it.
-                            if !self.unsolicited.contains(&msg.code) {
-                                self.unsolicited.push(msg.code);
-                            }
+                            // Non-matching frame (out-of-order/unsolicited) — drop it. This blocking path is
+                            // only used for the pre-scheduler handshake; the running scheduler drains and
+                            // matches all frames via `poll_incoming`.
                         }
                     }
                 }
@@ -132,8 +126,37 @@ impl Transport for MspTransport {
         self.write_frame(MspCodec::encode_v2_flagged(code, payload, 1))
     }
 
-    fn take_unsolicited_codes(&mut self) -> Vec<u16> {
-        std::mem::take(&mut self.unsolicited)
+    fn poll_incoming(&mut self) -> Result<Vec<MspMessage>, String> {
+        // One read, bounded by the inner transport's read timeout (the scheduler sets this short so its
+        // loop stays responsive). Parse every byte; return all complete frames for the scheduler to match
+        // by code. A partially-received frame stays buffered in the parser across calls.
+        let mut out = Vec::new();
+        let mut buf = [0u8; 512];
+        match self.inner.read_bytes(&mut buf) {
+            Ok(0) => {}
+            Ok(n) => {
+                log_to_sink(&self.raw_sink, DIR_IN, &buf[..n]);
+                for &byte in &buf[..n] {
+                    if let Some(msg) = self.parser.push(byte) {
+                        out.push(msg);
+                    }
+                }
+            }
+            Err(crate::transport::TransportError::Timeout) => {}
+            Err(crate::transport::TransportError::Disconnected) => {
+                self.connection_lost = true;
+                return Err("Transport disconnected".to_string());
+            }
+            Err(e) => {
+                self.connection_lost = true;
+                return Err(format!("MSP read error: {}", e));
+            }
+        }
+        Ok(out)
+    }
+
+    fn set_read_timeout(&mut self, timeout: Duration) {
+        self.inner.set_read_timeout(timeout);
     }
 
     fn description(&self) -> String {

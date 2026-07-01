@@ -20,6 +20,8 @@ pub enum TelemetryGroup {
     Status,
     LinkStats,
     Misc2,
+    /// GPS quality stats (MSP_GPSSTATISTICS) — HDOP / packet counts. Slow-changing, its own low-rate slot.
+    GpsStats,
 }
 
 /// User-configurable telemetry polling rates

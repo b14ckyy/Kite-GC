@@ -100,9 +100,9 @@ pub trait Transport: Send {
     }
 
     /// Send an MSP v2 frame **without** waiting for the reply (fire-and-forget). Used for the RC
-    /// injection stream (SET_RAW_RC / SET_AUX_RC), where blocking on each ACK would jitter the RC rate.
-    /// The FC's ACK arrives asynchronously and is surfaced via `take_unsolicited_codes`. Default:
-    /// delegate to `msp_request` and drop the reply.
+    /// injection stream (SET_RAW_RC / SET_AUX_RC), where blocking on each ACK would jitter the RC rate,
+    /// and by the pipelined scheduler for every request (the reply is matched later in `poll_incoming`).
+    /// Default: delegate to `msp_request` and drop the reply.
     fn msp_send(&mut self, code: u16, payload: &[u8]) -> Result<(), String> {
         self.msp_request(code, payload).map(|_| ())
     }
@@ -114,10 +114,20 @@ pub trait Transport: Send {
         self.msp_send(code, payload)
     }
 
-    /// Drain the MSP codes of unsolicited / out-of-order responses seen since the last call — e.g. the
-    /// echoed ACK of a fire-and-forget `msp_send` (a SET_AUX_RC confirmation). Default: none.
-    fn take_unsolicited_codes(&mut self) -> Vec<u16> {
-        Vec::new()
+    /// Read whatever bytes are currently available (one read, bounded by the transport's read timeout),
+    /// feed them through the MSP parser, and return every complete frame decoded — solicited *and*
+    /// unsolicited. The **pipelined** scheduler owns response↔request matching (by MSP code), so it sends
+    /// requests fire-and-forget via `msp_send` and drains replies here, keeping many requests in flight
+    /// instead of blocking one at a time in `msp_request`. Default: none (non-MSP transports).
+    fn poll_incoming(&mut self) -> Result<Vec<MspMessage>, String> {
+        Ok(Vec::new())
+    }
+
+    /// Set the read timeout for subsequent `poll_incoming` reads. The pipelined scheduler tightens this so
+    /// its drain/emit loop ticks fast (≈100 Hz) rather than being quantized by the coarse idle timeout.
+    /// Default: no-op.
+    fn set_read_timeout(&mut self, timeout: std::time::Duration) {
+        let _ = timeout;
     }
 
     /// Human-readable description of this transport (for logging)
