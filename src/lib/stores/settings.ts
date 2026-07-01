@@ -396,7 +396,7 @@ const defaults: AppSettings = {
   activeTab: 'uav-info',
   attitudeRateHz: 5,
   positionRateHz: 2,
-  airspeedEnabled: false,
+  airspeedEnabled: true,
   windEnabled: false,
   directionLines: true,
   showSafehomes: true,

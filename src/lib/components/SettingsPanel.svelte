@@ -46,7 +46,7 @@
     userLocation = null,
     attitudeRateHz = 5,
     positionRateHz = 2,
-    airspeedEnabled = false,
+    airspeedEnabled = true,
     windEnabled = false,
     directionLines = true,
     mavlinkFullTelemetry = false,

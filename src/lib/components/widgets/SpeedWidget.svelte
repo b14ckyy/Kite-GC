@@ -8,6 +8,7 @@
 <script lang="ts">
   import type { TelemetryData } from "$lib/stores/telemetry";
   import type { InterfaceSettings } from "$lib/stores/settings";
+  import { settings } from "$lib/stores/settings";
   import { convertSpeed } from "$lib/utils/units";
   import { t } from 'svelte-i18n';
 
@@ -22,8 +23,10 @@
   } = $props();
 
   // Airspeed is the primary readout when available (it's what matters for flight); ground speed then
-  // drops to the secondary line. Without airspeed, ground speed stays primary.
-  let hasAir = $derived(telem.lastUpdate && telem.airspeed > 0);
+  // drops to the secondary line. Without airspeed, ground speed stays primary. Disabling airspeed in
+  // Settings forces ground speed as the primary source even when airspeed data is still flowing (e.g. a
+  // passive/MAVLink link) — the data pipeline is untouched, only this widget's readout preference.
+  let hasAir = $derived($settings.airspeedEnabled && telem.lastUpdate && telem.airspeed > 0);
   let gsConv = $derived(convertSpeed(telem.groundSpeed, interfaceSettings.speedUnit));
   let asConv = $derived(convertSpeed(telem.airspeed, interfaceSettings.speedUnit));
 

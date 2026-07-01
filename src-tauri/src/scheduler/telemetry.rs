@@ -47,7 +47,7 @@ impl Default for TelemetryConfig {
         Self {
             attitude_rate_hz: 5.0,
             position_rate_hz: 2.0,
-            airspeed_enabled: false,
+            airspeed_enabled: true,
             link_stats_enabled: false,
             wind_enabled: false,
         }
@@ -763,7 +763,7 @@ mod tests {
         let config = TelemetryConfig::default();
         assert_eq!(config.attitude_rate_hz, 5.0);
         assert_eq!(config.position_rate_hz, 2.0);
-        assert!(!config.airspeed_enabled);
+        assert!(config.airspeed_enabled);
     }
 
     #[test]
