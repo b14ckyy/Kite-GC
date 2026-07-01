@@ -875,7 +875,7 @@
     position: absolute;
     top: 65px;
     right: 12px;
-    width: 480px;
+    width: 540px;
     max-height: calc(100vh - 53px - 24px - 30px);
     background: rgba(30, 30, 30, 0.95);
     border: 1px solid rgba(55, 168, 219, 0.4);
@@ -1188,10 +1188,11 @@
   }
 
   .col-rate {
-    width: 55px;
+    width: 64px;
     text-align: right;
     font-variant-numeric: tabular-nums;
     font-size: 10px;
+    white-space: nowrap; /* keep "141.7 ms" on one line so decimals don't jitter the row height */
   }
 
   th.col-rate {
