@@ -46,7 +46,9 @@ pub fn known_profiles() -> Vec<BleDeviceProfile> {
                 .unwrap(),
             read_characteristic: uuid::Uuid::parse_str("6e400003-b5a3-f393-e0a9-e50e24dcca9e")
                 .unwrap(),
-            write_delay_ms: 30,
+            // No pacing: ESP32/nRF have ample UART FIFO + KB-scale ring buffers (the SpeedyBee ESP32-C3
+            // profiles already run at 0). Only the tiny-buffered CC2541 keeps its inter-chunk delay.
+            write_delay_ms: 0,
         },
         BleDeviceProfile {
             name: "SpeedyBee Type 2",
@@ -419,16 +421,22 @@ pub async fn connect_ble(device_id: &str) -> Result<BleTransport, String> {
                     // BlueZ returns "Not connected" on write before the notification stream ends).
                     Some(data) = write_async_rx.recv() => {
                         let mut write_err = None;
-                        for chunk in data.chunks(BLE_WRITE_MTU) {
+                        for (i, chunk) in data.chunks(BLE_WRITE_MTU).enumerate() {
+                            // Pace only *between* chunks, never after the last: a single-chunk write
+                            // (every MSP telemetry request is 9 bytes = 1 chunk) then incurs no delay, so
+                            // it can't park the reply notification while this branch sleeps (tokio::select!
+                            // runs one branch to completion before re-polling `notifications.next()`). The
+                            // inter-chunk delay still protects a small-buffered peripheral (CC2541) from an
+                            // RX overrun on a multi-chunk upload.
+                            if i > 0 && !write_delay.is_zero() {
+                                tokio::time::sleep(write_delay).await;
+                            }
                             if let Err(e) = peripheral_clone
                                 .write(&write_char, chunk, WriteType::WithoutResponse)
                                 .await
                             {
                                 write_err = Some(e);
                                 break;
-                            }
-                            if !write_delay.is_zero() {
-                                tokio::time::sleep(write_delay).await;
                             }
                         }
                         if let Some(e) = write_err {
