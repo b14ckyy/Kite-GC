@@ -12,6 +12,7 @@
   import ConnectionStatusBox from '$lib/components/ConnectionStatusBox.svelte';
   import ArmingIndicator from '$lib/components/ArmingIndicator.svelte';
   import BatteryIndicator from '$lib/components/BatteryIndicator.svelte';
+  import { rcEngaged } from '$lib/stores/rcEngage';
   import type { PortInfo, BleDeviceInfo, TransportType, ProtocolType } from '$lib/stores/connection';
   import type { TelemetryData } from '$lib/stores/telemetry';
   import { settings } from '$lib/stores/settings';
@@ -35,6 +36,7 @@
     onConnect,
     relayOpen = false,
     onToggleRelay,
+    onOpenRc,
   }: {
     appVersion: string;
     telem: TelemetryData;
@@ -54,6 +56,8 @@
     onConnect: () => void;
     relayOpen?: boolean;
     onToggleRelay?: () => void;
+    /** Open the RC control panel (from the "RC control active" indicator). */
+    onOpenRc?: () => void;
   } = $props();
 
   // ── Bluetooth SPP port custom names ────────────────────────────────
@@ -137,6 +141,11 @@
     <span class="version" data-tauri-drag-region>v{appVersion}</span>
   </div>
   <div class="toolbar-center" data-tauri-drag-region>
+    {#if $rcEngaged.on}
+      <button class="rc-active-pill" onclick={onOpenRc} title={$t('rc.activeBadgeHint')}>
+        <span class="rc-active-dot"></span>{$t('rc.activeBadge')}
+      </button>
+    {/if}
     <ArmingIndicator {telem} />
     <div class="sensor-bar">
       {#each sensorTiles as s (s.key)}
@@ -317,6 +326,36 @@
     box-shadow: 0 2px 0 rgba(92, 92, 92, 0.5);
     overflow: hidden;
   }
+
+  /* RC-control-active indicator — engage persists across the app, so it lives here in the top bar
+     (left of the arming light) as an always-visible reminder + a click to jump back and release. */
+  .rc-active-pill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 26px; /* match the arming indicator so they sit on one line */
+    box-sizing: border-box;
+    padding: 0 12px;
+    border: 1px solid #d40000;
+    border-radius: 4px;
+    background: rgba(60, 12, 12, 0.92);
+    color: #ff5a5a;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .rc-active-pill:hover { border-color: #ff5a5a; color: #ff8080; }
+  .rc-active-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #ff3030;
+    box-shadow: 0 0 6px rgba(255, 48, 48, 0.9);
+    animation: rc-active-pulse 1.1s ease-in-out infinite;
+  }
+  @keyframes rc-active-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
 
   .sensor {
     padding: 6px 12px;

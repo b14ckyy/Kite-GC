@@ -19,6 +19,7 @@
   import PanelShell, { type PanelVariant } from '$lib/components/panel/PanelShell.svelte';
   import Button from '$lib/components/panel/Button.svelte';
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+  import HoldToConfirm from '$lib/components/panel/HoldToConfirm.svelte';
   import ChannelConfig from '$lib/components/control/ChannelConfig.svelte';
   import ChannelStates from '$lib/components/control/ChannelStates.svelte';
   import ManualConfig from '$lib/components/control/ManualConfig.svelte';
@@ -27,8 +28,6 @@
   import {
     hidDevices,
     hidSnapshot,
-    startHid,
-    stopHid,
     selectHidDevice,
     type HidDevice,
   } from '$lib/stores/hid';
@@ -49,7 +48,7 @@
   import { rcEngaged, engage, disengage } from '$lib/stores/rcEngage';
   import { syncFromFc } from '$lib/stores/rcMirror';
   import { rcManual, defaultManualMap } from '$lib/stores/rcManual';
-  import '$lib/stores/rcStream'; // self-initialising RC injection pump (engage-driven)
+  import { rcPanelOpen } from '$lib/stores/rcSession'; // global RC session (pump + HID + involuntary-loss)
   import { rcLayout } from '$lib/stores/rcLayout';
   import { rcPlatform, rcPlatformLocked, setOfflinePlatform, type RcPlatform } from '$lib/stores/rcPlatform';
   import { evaluateRcSafety } from '$lib/helpers/rcSafety';
@@ -248,6 +247,15 @@
   // handler). Drives the "still armed" confirmation before a manual release.
   const vehicleArmed = $derived(($telemetry.armingFlags & 0x04) !== 0);
 
+  // Lock the configuration while ARMED: re-mapping channels, switching profiles or the input device
+  // mid-flight is a footgun. Only the live monitor + the engage/disengage button stay usable. This forces
+  // the compact (monitor) view — which hides the whole config `detail` stage — and disables the remaining
+  // config controls (device / platform / rate) + the expand toggle. Disarm to edit again.
+  const armedLock = $derived(vehicleArmed);
+  $effect(() => {
+    if (armedLock) variant = 'compact';
+  });
+
   // ── Platform selection (offline dropdown; locked to the FC when connected) ──
   const PLATFORMS: { id: RcPlatform; label: string }[] = [
     { id: 'inav', label: 'INAV' },
@@ -269,15 +277,9 @@
     }
   });
 
-  // Disengage automatically on involuntary loss of control authority: the FC link goes away, a safety
-  // lock trips, or the input device disappears (USB unplugged / driver drop). Losing the gamepad MUST
-  // stop the stream — otherwise the rcStream pump keeps re-sending the last channel values (the backend
-  // deadman never trips) and the FC would hold frozen sticks instead of failsafing. This is an
-  // *involuntary* stop (no explicit release frame): we just stop streaming and let the FC's
-  // RC_OVERRIDE_TIME grace window run, which tolerates a brief device re-enumeration.
-  $effect(() => {
-    if ($rcEngaged.on && (!rcConnected || safety.locked || !selectedDevice)) disengage();
-  });
+  // Involuntary-loss disengage (link/FC gone, input device gone, INAV safety lock) lives in the GLOBAL
+  // session manager (stores/rcSession.ts) so it fires even when this panel is closed — an engaged session
+  // must survive app navigation and only stop on an explicit disengage or a genuine loss of authority.
 
   // RAW_RC only takes effect on the FC while MSP-RC-OVERRIDE is active. Re-seed at the moment it turns
   // on (while engaged) so the CH1–16 takeover continues from the FC's current state (no jump).
@@ -288,19 +290,9 @@
     rawTakingOver = on;
   });
 
-  // Manual long-press toggle (default OFF, both RX types) — engaging starts AUX streaming + (once
-  // override is active) the RAW takeover. Never auto-engages on connect/plug (anti-accidental).
+  // Long-press to engage/disengage (HoldToConfirm fills the button left→right over this duration, then
+  // fires toggleEngage). Never auto-engages on connect/plug (anti-accidental).
   const LONG_PRESS_MS = 600;
-  let lpTimer: ReturnType<typeof setTimeout> | null = null;
-  function lpDown(): void {
-    lpTimer = setTimeout(() => {
-      lpTimer = null;
-      void toggleEngage();
-    }, LONG_PRESS_MS);
-  }
-  function lpCancel(): void {
-    if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; }
-  }
   async function toggleEngage(): Promise<void> {
     if ($rcEngaged.on) {
       // Releasing control while the vehicle is ARMED hands flying back to the FC — with the GCS as the
@@ -345,7 +337,9 @@
   });
 
   onMount(() => {
-    void startHid();
+    rcPanelOpen.set(true); // the global session manager starts HID for config/preview (and keeps it alive
+                           // if we engage). NEVER disengage on unmount — an engaged session must survive
+                           // navigating away from this panel (config/initiator only). See stores/rcSession.
     void (async () => {
       await loadProfiles();
       dirPath = await profilesDir();
@@ -358,10 +352,8 @@
     })();
   });
   onDestroy(() => {
-    lpCancel();
-    disengage();
+    rcPanelOpen.set(false); // HID stops only if we're not engaged (rcSession reconciles). Engage persists.
     linkUnlisten?.();
-    void stopHid();
   });
 </script>
 
@@ -369,8 +361,9 @@
   {#snippet headerActions()}
     <button
       class="rc-expand"
+      disabled={armedLock}
       onclick={() => (variant = variant === 'advanced' ? 'compact' : 'advanced')}
-      title={$t(variant === 'advanced' ? 'rc.collapse' : 'rc.expand')}
+      title={armedLock ? $t('rc.armedLockHint') : $t(variant === 'advanced' ? 'rc.collapse' : 'rc.expand')}
     >
       {variant === 'advanced' ? '‹' : '›'}
     </button>
@@ -382,7 +375,7 @@
       {#if $hidDevices.length === 0}
         <span class="rc-nodev">{$t('rc.noDevice')}</span>
       {:else}
-        <select id="rc-dev" class="rc-dev" value={selectedDevice?.id ?? ''} onchange={onDevicePick}>
+        <select id="rc-dev" class="rc-dev" value={selectedDevice?.id ?? ''} onchange={onDevicePick} disabled={armedLock}>
           {#each $hidDevices as dev (dev.id)}
             <option value={dev.id}>{dev.name}</option>
           {/each}
@@ -394,8 +387,8 @@
         class="rc-platform"
         value={$rcPlatform}
         onchange={onPlatformPick}
-        disabled={$rcPlatformLocked}
-        title={$rcPlatformLocked ? $t('rc.platformLocked') : ''}
+        disabled={$rcPlatformLocked || armedLock}
+        title={armedLock ? $t('rc.armedLockHint') : $rcPlatformLocked ? $t('rc.platformLocked') : ''}
       >
         {#each PLATFORMS as p (p.id)}
           <option value={p.id}>{p.label}</option>
@@ -406,6 +399,12 @@
 
   <!-- Left (compact) stage: the live control surface — current channel outputs. -->
   {#snippet body()}
+    {#if armedLock}
+      <div class="rc-banner rc-banner-info">
+        <div class="rc-banner-title">🔒 {$t('rc.armedLockTitle')}</div>
+        <div class="rc-banner-hint">{$t('rc.armedLockHint')}</div>
+      </div>
+    {/if}
     {#if safety.blocks.length}
       <div class="rc-banner rc-banner-block">
         <div class="rc-banner-title">⛔ {$t('rc.lockTitle')}</div>
@@ -445,17 +444,16 @@
     {:else}
       {#if rcConnected}
         <div class="rc-engage" class:on={$rcEngaged.on}>
-          <button
-            class="rc-engage-btn"
-            class:on={$rcEngaged.on}
+          <HoldToConfirm
+            variant={$rcEngaged.on ? 'danger' : 'standard'}
+            duration={LONG_PRESS_MS}
             disabled={!$rcEngaged.on && safety.locked}
-            onpointerdown={lpDown}
-            onpointerup={lpCancel}
-            onpointerleave={lpCancel}
+            title={$rcEngaged.on ? $t('rc.disengageBtn') : $t('rc.engageBtn')}
+            onconfirm={toggleEngage}
           >
             {$rcEngaged.on ? $t('rc.disengageBtn') : $t('rc.engageBtn')}
             <span class="rc-engage-hold">{$t('rc.engageHoldHint')}</span>
-          </button>
+          </HoldToConfirm>
         </div>
         {#if $rcEngaged.on && connectedMsp}
           <!-- MSP-RC-OVERRIDE box state — INAV only (ArduPilot has no override-mode gate). -->
@@ -471,7 +469,7 @@
         {/if}
         <div class="rc-rate">
           <label class="rc-rate-label" for="rc-rate">{$t('rc.rawRate')}</label>
-          <select id="rc-rate" class="rc-rate-sel" value={rawRateHz} onchange={onRatePick}>
+          <select id="rc-rate" class="rc-rate-sel" value={rawRateHz} onchange={onRatePick} disabled={armedLock}>
             {#each RC_RATES as hz (hz)}<option value={hz}>{hz} Hz</option>{/each}
           </select>
         </div>
@@ -638,19 +636,9 @@
   .rc-fix-btn:hover:not(:disabled) { background: rgba(232, 163, 23, 0.32); }
   .rc-fix-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-  /* Engage gate */
+  /* Engage gate — the button itself is a HoldToConfirm (fills left→right on long-press). */
   .rc-engage { margin-bottom: 8px; }
-  .rc-engage-btn {
-    display: flex; align-items: baseline; gap: 8px; width: 100%; justify-content: center;
-    padding: 8px 12px; font-size: 12px; font-weight: 700; border-radius: 5px; cursor: pointer;
-    background: #2a2a2a; color: #cfcfcf; border: 1px solid #444; user-select: none;
-  }
-  .rc-engage-btn:hover:not(:disabled) { border-color: #37a8db; color: #37a8db; }
-  .rc-engage-btn.on {
-    background: rgba(89, 170, 41, 0.2); color: #7ec850; border-color: #59aa29;
-  }
-  .rc-engage-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-  .rc-engage-hold { font-size: 10px; font-weight: 400; color: #949494; }
+  .rc-engage-hold { font-size: 10px; font-weight: 400; opacity: 0.7; }
   .rc-engage-status {
     padding: 7px 10px; font-size: 11px; border-radius: 5px; line-height: 1.4;
     background: rgba(55, 168, 219, 0.1); border: 1px solid rgba(55, 168, 219, 0.3); color: #9fd4ec;

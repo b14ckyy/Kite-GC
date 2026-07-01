@@ -34,6 +34,7 @@
   import RelayPanel from "$lib/components/RelayPanel.svelte";
   import WindowResizeBorders from "$lib/components/WindowResizeBorders.svelte";
   import StatusBar from "$lib/components/StatusBar.svelte";
+  import "$lib/stores/rcSession"; // global RC session (keeps engage alive across navigation; involuntary-loss guard)
   import NavRail from "$lib/components/NavRail.svelte";
   import PanelPlayground from "$lib/components/panel/PanelPlayground.svelte";
   import UavInfoPanel from "$lib/components/UavInfoPanel.svelte";
@@ -2532,6 +2533,7 @@
     onConnect={handleConnect}
     relayOpen={relayPanelOpen}
     onToggleRelay={() => (relayPanelOpen = !relayPanelOpen)}
+    onOpenRc={() => selectTab('rc-control')}
   />
     <RelayPanel open={relayPanelOpen} />
   </div>
