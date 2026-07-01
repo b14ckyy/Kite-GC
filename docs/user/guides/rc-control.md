@@ -72,8 +72,15 @@ device or FC; you pick the active profile yourself, so you stay in control of wh
 
 ## Taking control (and the safety net)
 
-Control is **never** automatic. Streaming starts only when you **long-press "Take control"** and stops on
-**"Release control"**. Until then the panel just shows a **mapping preview** — nothing is sent.
+Control is **never** automatic. Streaming starts only when you **long-press "Take control"** (hold until
+the button's bar fills) and stops on **"Release control"**. Until then the panel just shows a **mapping
+preview** — nothing is sent.
+
+Once engaged, control **keeps running wherever you go in the app** — the RC panel is only a configuration
+and start point, so you can switch to the map, or the **Control** tool to change flight modes, while your
+joystick still flies the aircraft. A red **RC CONTROL ACTIVE** indicator stays in the top bar (next to the
+arming light) as the reminder; click it to jump straight back to the panel and release. Only an explicit
+**Release control**, or a genuine loss of authority (see the deadman below), ever stops it.
 
 - **Deadman** — the GCS continuously heartbeats the latest frame; if it stops (controller unplugged, UI
   frozen, link dropped, or you release control) Kite **stops streaming immediately** and never repeats the
@@ -84,6 +91,9 @@ Control is **never** automatic. Streaming starts only when you **long-press "Tak
   centre your sticks before engaging.
 - **Armed-disengage confirmation** — releasing control while the vehicle is **armed** pops a confirmation,
   because handing flying back to an FC with no other receiver triggers its failsafe (RTL / land / disarm).
+- **Config locked while armed** — while the vehicle is **armed**, the panel locks its configuration
+  (channel mapping, profiles, input device and platform) down to the **live monitor + take/release** only,
+  so you can't accidentally re-map a channel or switch profile mid-flight. Disarm to edit again.
 - **RC rate** — the stick stream rate is selectable (10–25 Hz). On **INAV**, Kite runs a quick
   **link-speed test** a couple of seconds after you engage and warns if the link can't keep up at the
   chosen rate (suggesting a lower RC or telemetry rate). This test is **INAV/MSP only** — there's no
