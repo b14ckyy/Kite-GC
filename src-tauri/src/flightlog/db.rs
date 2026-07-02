@@ -145,7 +145,9 @@ pub fn resolve_db_path(custom_path: &str, portable: bool) -> PathBuf {
                 .join("flights.db");
         }
     }
-    #[cfg(target_os = "macos")]
+    // macOS and iOS both resolve to Library/Application Support. On iOS `HOME` is the app's sandbox
+    // container root, so this stays inside the app's private, backed-up storage.
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
         if let Ok(home) = std::env::var("HOME") {
             return PathBuf::from(home)
