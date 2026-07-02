@@ -7,6 +7,7 @@
 /// Whether the host is currently running on battery (i.e. a battery is present and discharging).
 /// Returns false when on AC, fully charged, or there's no battery (desktop) — anything that isn't a
 /// clear "discharging" state. Detection failures also report false (treat as AC → no cap).
+#[cfg(not(target_os = "ios"))]
 #[tauri::command]
 pub fn system_on_battery() -> bool {
     let manager = match starship_battery::Manager::new() {
@@ -29,4 +30,12 @@ pub fn system_on_battery() -> bool {
         }
     }
     false
+}
+
+/// iOS has no starship-battery backend. An iPad is always battery-powered, so report `true` - the
+/// low-power 3D "auto" mode then caps the render frame rate, which is the right default on a tablet.
+#[cfg(target_os = "ios")]
+#[tauri::command]
+pub fn system_on_battery() -> bool {
+    true
 }

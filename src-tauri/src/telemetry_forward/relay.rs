@@ -12,7 +12,10 @@ use super::encoders::ltm::LtmEncoder;
 use super::encoders::mavlink::MavlinkEncoder;
 use super::encoders::smartport::SmartportEncoder;
 use super::encoders::Encoder;
+// Serial + BLE relay outputs are desktop-only (no serial/btleplug backend on iOS).
+#[cfg(not(target_os = "ios"))]
 use super::output::ble::BleSink;
+#[cfg(not(target_os = "ios"))]
 use super::output::serial::SerialSink;
 use super::output::tcp::TcpSink;
 use super::output::udp::UdpSink;
@@ -88,11 +91,13 @@ impl Relay {
             other => return Err(format!("Unsupported relay protocol: {}", other)),
         };
         let sink: Box<dyn OutputSink> = match cfg.output.kind.as_str() {
+            #[cfg(not(target_os = "ios"))]
             "serial" => {
                 let port = cfg.output.port.as_deref().filter(|p| !p.is_empty()).ok_or("serial relay needs a port")?;
                 let baud = cfg.output.baud.unwrap_or(115200);
                 Box::new(SerialSink::open(port, baud)?)
             }
+            #[cfg(not(target_os = "ios"))]
             "ble" => {
                 let id = cfg.output.ble_device_id.as_deref().filter(|s| !s.is_empty()).ok_or("ble relay needs a device")?;
                 Box::new(BleSink::open(id).await?)

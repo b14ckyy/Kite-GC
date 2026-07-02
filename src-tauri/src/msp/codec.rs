@@ -7,6 +7,9 @@ use super::types::*;
 
 pub struct MspCodec;
 
+// The response-encoders and decoders are used by the FormationFlight radar source and the MSP serial
+// path, both compiled out on iOS - so the codec is dead there. Suppress the lint on iOS only.
+#[cfg_attr(target_os = "ios", allow(dead_code))]
 impl MspCodec {
     /// Encode an MSP v1 **response** frame (direction `>`) — for emulating an FC (e.g. FormationFlight).
     pub fn encode_v1_response(code: u16, payload: &[u8]) -> Vec<u8> {

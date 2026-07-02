@@ -24,7 +24,10 @@ pub enum MspVersion {
 /// A decoded MSP message
 #[derive(Debug, Clone)]
 pub struct MspMessage {
+    // version + direction are only inspected by the FormationFlight source (iOS-excluded).
+    #[cfg_attr(target_os = "ios", allow(dead_code))]
     pub version: MspVersion,
+    #[cfg_attr(target_os = "ios", allow(dead_code))]
     pub direction: MspDirection,
     pub code: u16,
     pub payload: Vec<u8>,
@@ -41,6 +44,8 @@ pub const MSP_RC: u16 = 105;
 pub const MSP_RAW_GPS: u16 = 106;
 pub const MSP_ATTITUDE: u16 = 108;
 pub const MSP_ALTITUDE: u16 = 109;
+// Only referenced by the FormationFlight source (iOS-excluded).
+#[cfg_attr(target_os = "ios", allow(dead_code))]
 pub const MSP_ANALOG: u16 = 110;
 pub const MSP_SENSOR_STATUS: u16 = 151;
 pub const MSP_SET_REBOOT: u16 = 68;

@@ -8,9 +8,13 @@
 // 1. ByteTransport — protocol-agnostic byte-level I/O (read/write/close)
 // 2. Protocol layers (MspTransport, MavlinkHandler) — built on top of ByteTransport
 
+// Serial (serialport crate) and BLE (btleplug) have no iOS support; the iOS build uses Wi-Fi
+// (TCP/UDP) transports only. Both compile normally on every desktop target.
+#[cfg(not(target_os = "ios"))]
 pub mod serial;
 pub mod tcp;
 pub mod udp;
+#[cfg(not(target_os = "ios"))]
 pub mod ble;
 
 use std::fmt;
@@ -142,7 +146,9 @@ pub trait Transport: Send {
     }
 }
 
-/// Information about an available port/device
+/// Information about an available port/device. Constructed only by the serial port lister, which is
+/// compiled out on iOS.
+#[cfg_attr(target_os = "ios", allow(dead_code))]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PortInfo {
     pub path: String,
