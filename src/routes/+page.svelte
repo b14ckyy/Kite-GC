@@ -11,6 +11,7 @@
   import { connection, availablePorts, bleDevices } from "$lib/stores/connection";
   import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
+  import { isMobile } from "$lib/platform";
   import { isDebugMode } from "$lib/stores/debug";
   import { telemetry } from "$lib/stores/telemetry";
   import { startRadarListeners, configureRadar, setRadarCenter, setRadarNode } from "$lib/stores/radarTracking";
@@ -320,12 +321,14 @@
   const rightAvailUnits  = $derived(Math.max(0, (sideDockH - 2 * DOCK_PAD) / sidePxPerUnit));
 
   let appVersion = $state("...");
-  let selectedTransport = $state<TransportType>('serial');
-  let selectedProtocol = $state<ProtocolType>('msp');
+  // iOS has no serial/BLE, so the iPad build defaults to Wi-Fi MAVLink (UDP 14550, the MAVLink
+  // convention). Desktop keeps its serial/MSP defaults.
+  let selectedTransport = $state<TransportType>(isMobile ? 'udp' : 'serial');
+  let selectedProtocol = $state<ProtocolType>(isMobile ? 'mavlink' : 'msp');
   let selectedPort = $state("");
   let selectedBaud = $state(115200);
   let tcpHost = $state("192.168.1.1");
-  let tcpPort = $state(5761);
+  let tcpPort = $state(isMobile ? 14550 : 5761);
   let selectedBleDevice = $state("");
   let bleDeviceList = $state<BleDeviceInfo[]>([]);
   let isBleScanning = $state(false);
@@ -649,7 +652,8 @@
     allTabs.filter(t =>
       (t.id !== 'logbook' || flightLoggingEnabled) &&
       (t.id !== 'control' || isMavlinkConnected) && // control tab only when connected via MAVLink
-      (t.id !== 'rc-control' || rcTabAvailable) && // RC tab: master switch on + not telemetry-connected
+      (t.id !== 'rc-control' || (rcTabAvailable && !isMobile)) && // RC tab: master switch on + not telemetry-connected; needs joystick hardware, so desktop-only
+      (t.id !== 'video' || !isMobile) && // video uses go2rtc/ffmpeg, unavailable on iOS
       (t.id !== 'radar' || radarSettings.enabled) && // radar tab only when the master switch is on
       (t.id !== 'airspace' || airspaceSettings.enabled || geozonesAvailable || fenceAvailable || rallyAvailable) // airspace: master switch, or geozone (INAV) / fence+rally (MAVLink) capable FC
     )
@@ -699,8 +703,10 @@
   selectedPort = saved.lastPort;
   selectedBaud = saved.lastBaud;
   selectedProtocol = (saved.lastProtocol === 'mavlink' ? 'mavlink' : 'msp') as ProtocolType;
-  // Restore the full last-used connection path so nothing has to be re-entered.
-  if (saved.lastTransport === 'serial' || saved.lastTransport === 'tcp' || saved.lastTransport === 'udp' || saved.lastTransport === 'ble') {
+  // Restore the full last-used connection path so nothing has to be re-entered. On iOS only the Wi-Fi
+  // transports exist, so a serial/BLE value carried over from a synced desktop setting is ignored.
+  if (saved.lastTransport === 'tcp' || saved.lastTransport === 'udp'
+      || (!isMobile && (saved.lastTransport === 'serial' || saved.lastTransport === 'ble'))) {
     selectedTransport = saved.lastTransport;
   }
   if (saved.lastHost) tcpHost = saved.lastHost;

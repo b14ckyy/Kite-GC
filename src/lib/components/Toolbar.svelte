@@ -9,7 +9,7 @@
   import Button from '$lib/components/panel/Button.svelte';
   import SegmentedToggle from '$lib/components/panel/SegmentedToggle.svelte';
   import WindowControls from '$lib/components/WindowControls.svelte';
-  import { isMacOS } from '$lib/platform';
+  import { isMacOS, isMobile } from '$lib/platform';
   import ConnectionStatusBox from '$lib/components/ConnectionStatusBox.svelte';
   import ArmingIndicator from '$lib/components/ArmingIndicator.svelte';
   import BatteryIndicator from '$lib/components/BatteryIndicator.svelte';
@@ -191,10 +191,16 @@
             if (selectedTransport === 'udp' && tcpPort === 5761) tcpPort = 14550;
             else if (selectedTransport === 'tcp' && tcpPort === 14550) tcpPort = 5761;
           }}>
-          <option value="serial">Serial</option>
+          <!-- Serial + BLE are desktop-only (no serial/btleplug backend on iOS); the iPad build
+               connects over Wi-Fi (TCP/UDP) only. -->
+          {#if !isMobile}
+            <option value="serial">Serial</option>
+          {/if}
           <option value="tcp">TCP</option>
           <option value="udp">UDP</option>
-          <option value="ble">BLE</option>
+          {#if !isMobile}
+            <option value="ble">BLE</option>
+          {/if}
         </select>
 
         {#if selectedTransport === 'serial'}

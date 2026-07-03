@@ -9,8 +9,22 @@
 
 const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
 
-/** True when running inside the macOS WebView (WKWebView) — used to mirror native window-control placement. */
-export const isMacOS = /Macintosh|Mac OS X/i.test(ua);
+// iPadOS reports a desktop "Macintosh" user-agent (has done since iPadOS 13), so the UA alone cannot
+// tell an iPad from a Mac. A multi-touch pointer does: Macs have no touchscreen (maxTouchPoints 0),
+// iPads/iPhones report > 1. We use that to disambiguate.
+const hasTouch = typeof navigator !== 'undefined' && navigator.maxTouchPoints > 1;
+
+/** True on iOS / iPadOS (iPhone/iPod UA, or a touch-capable "Macintosh" which is really an iPad - this
+ *  also matches the iOS Simulator, whose WKWebView reports a "Macintosh" UA with a multi-touch pointer). */
+export const isIOS = /iPad|iPhone|iPod/i.test(ua) || (/Macintosh|Mac OS X/i.test(ua) && hasTouch);
+
+/** True on any mobile/tablet build. Currently iOS/iPadOS only; Android would extend this later. */
+export const isMobile = isIOS;
+
+/** True when running inside the macOS WebView (WKWebView) — used to mirror native window-control
+ *  placement and drive the native-capture backend (AVFoundation). Excludes iPadOS, which shares the
+ *  "Macintosh" user-agent. */
+export const isMacOS = /Macintosh|Mac OS X/i.test(ua) && !isIOS;
 
 /** True on the Windows WebView (WebView2) — drives the native-capture backend (DirectShow). */
 export const isWindows = /Windows/i.test(ua);

@@ -3,6 +3,8 @@
 
 // Widget registry — defines all available widgets, their classes, and metadata
 
+import { isMobile } from '$lib/platform';
+
 export type WidgetClass = 'large' | 'small' | 'wide';
 
 export interface WidgetDef {
@@ -13,7 +15,7 @@ export interface WidgetDef {
   widgetClass: WidgetClass;
 }
 
-export const WIDGET_DEFS: WidgetDef[] = [
+const ALL_WIDGET_DEFS: WidgetDef[] = [
   { id: 'ahi',          label: 'AHI',            labelKey: 'widgets.ahi',          widgetClass: 'large' },
   { id: 'speed',        label: 'Speed',          labelKey: 'widgets.speed',        widgetClass: 'small' },
   { id: 'altitude',     label: 'Altitude',       labelKey: 'widgets.altitude',     widgetClass: 'small' },
@@ -29,6 +31,9 @@ export const WIDGET_DEFS: WidgetDef[] = [
   { id: 'terrainRadar', label: 'Terrain Radar',  labelKey: 'widgets.terrainRadar', widgetClass: 'large' },
   { id: 'videoFeed',    label: 'Video',          labelKey: 'widgets.video',        widgetClass: 'wide' },
 ];
+
+// The video widget uses go2rtc/ffmpeg, which are unavailable on iOS - drop it from the mobile catalog.
+export const WIDGET_DEFS: WidgetDef[] = ALL_WIDGET_DEFS.filter(w => w.id !== 'videoFeed' || !isMobile);
 
 export const WIDGET_MAP = new Map(WIDGET_DEFS.map(w => [w.id, w]));
 
