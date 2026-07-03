@@ -16,6 +16,9 @@ pub mod tcp;
 pub mod udp;
 #[cfg(not(target_os = "ios"))]
 pub mod ble;
+// iOS BLE via CoreBluetooth (objc2) rather than btleplug, which has no iOS backend.
+#[cfg(target_os = "ios")]
+pub mod ble_ios;
 
 use std::fmt;
 

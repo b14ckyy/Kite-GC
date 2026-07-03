@@ -42,8 +42,6 @@ pub struct AppState {
     pub rc_tx: RcTxHandle,
     /// Stop handle for the live BLE scan session (Some while scanning). Dropping/replacing the
     /// sender ends the session — see `commands::connection::ble_scan_start` / `ble_scan_stop`.
-    /// Only touched by the BLE scan commands, which are compiled out on iOS.
-    #[cfg_attr(target_os = "ios", allow(dead_code))]
     pub ble_scan_stop: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
     /// Airspace Manager (aeronautical data) — last fetched region cached in RAM, or None.
     pub aero: Mutex<Option<AeroCache>>,

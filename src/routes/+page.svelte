@@ -709,10 +709,10 @@
   selectedPort = saved.lastPort;
   selectedBaud = saved.lastBaud;
   selectedProtocol = (saved.lastProtocol === 'mavlink' ? 'mavlink' : 'msp') as ProtocolType;
-  // Restore the full last-used connection path so nothing has to be re-entered. On iOS only the Wi-Fi
-  // transports exist, so a serial/BLE value carried over from a synced desktop setting is ignored.
-  if (saved.lastTransport === 'tcp' || saved.lastTransport === 'udp'
-      || (!isMobile && (saved.lastTransport === 'serial' || saved.lastTransport === 'ble'))) {
+  // Restore the full last-used connection path so nothing has to be re-entered. iOS has no serial, so
+  // a serial value carried over from a synced desktop setting is ignored; TCP/UDP/BLE are all valid.
+  if (saved.lastTransport === 'tcp' || saved.lastTransport === 'udp' || saved.lastTransport === 'ble'
+      || (!isMobile && saved.lastTransport === 'serial')) {
     selectedTransport = saved.lastTransport;
   }
   if (saved.lastHost) tcpHost = saved.lastHost;

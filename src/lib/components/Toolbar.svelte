@@ -191,16 +191,14 @@
             if (selectedTransport === 'udp' && tcpPort === 5761) tcpPort = 14550;
             else if (selectedTransport === 'tcp' && tcpPort === 14550) tcpPort = 5761;
           }}>
-          <!-- Serial + BLE are desktop-only (no serial/btleplug backend on iOS); the iPad build
-               connects over Wi-Fi (TCP/UDP) only. -->
+          <!-- Serial is desktop-only (no raw serial access on iOS). BLE works on iOS via
+               CoreBluetooth, so it stays available on mobile; TCP/UDP are cross-platform. -->
           {#if !isMobile}
             <option value="serial">Serial</option>
           {/if}
           <option value="tcp">TCP</option>
           <option value="udp">UDP</option>
-          {#if !isMobile}
-            <option value="ble">BLE</option>
-          {/if}
+          <option value="ble">BLE</option>
         </select>
 
         {#if selectedTransport === 'serial'}

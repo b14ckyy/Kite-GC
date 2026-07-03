@@ -21,10 +21,10 @@ mod terrain;
 mod transport;
 mod video;
 
-use commands::connection::{connect, disconnect, inav_set_craft_name, inav_read_stats};
-// Serial + BLE connection commands are desktop-only (no serial/btleplug backend on iOS).
+use commands::connection::{connect, disconnect, inav_set_craft_name, inav_read_stats, scan_ble_devices, ble_scan_start, ble_scan_stop};
+// Serial listing is desktop-only (no raw serial access on iOS). BLE works on both (CoreBluetooth on iOS).
 #[cfg(not(target_os = "ios"))]
-use commands::connection::{list_serial_ports, scan_ble_devices, ble_scan_start, ble_scan_stop};
+use commands::connection::list_serial_ports;
 use commands::flightlog::{
     flightlog_list, flightlog_get, flightlog_get_track, flightlog_get_battery_records, flightlog_delete,
     flightlog_update_notes, flightlog_update_craft_name, flightlog_update_platform_type, flightlog_update_pilot, flightlog_update_weather, flightlog_geocode, flightlog_fetch_weather,
@@ -274,11 +274,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             #[cfg(not(target_os = "ios"))]
             list_serial_ports,
-            #[cfg(not(target_os = "ios"))]
             scan_ble_devices,
-            #[cfg(not(target_os = "ios"))]
             ble_scan_start,
-            #[cfg(not(target_os = "ios"))]
             ble_scan_stop,
             inav_set_craft_name,
             inav_read_stats,

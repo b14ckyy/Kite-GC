@@ -25,8 +25,11 @@ use crate::transport::PortInfo;
 use crate::transport::serial::SerialConnection;
 use crate::transport::tcp::TcpTransport;
 use crate::transport::udp::UdpTransport;
+// BLE backend: btleplug on desktop, CoreBluetooth (objc2) on iOS. Same public surface either way.
 #[cfg(not(target_os = "ios"))]
-use crate::transport::ble::BleDeviceInfo;
+use crate::transport::ble::{self as ble_backend, BleDeviceInfo};
+#[cfg(target_os = "ios")]
+use crate::transport::ble_ios::{self as ble_backend, BleDeviceInfo};
 
 /// Home position pushed to the frontend (event `home-position`). Same shape/name regardless of
 /// protocol so MAVLink (HOME_POSITION) can emit it identically later.
@@ -49,15 +52,13 @@ pub fn list_serial_ports() -> Vec<PortInfo> {
 }
 
 /// Scan for BLE devices matching known serial profiles
-#[cfg(not(target_os = "ios"))]
 #[tauri::command]
 pub async fn scan_ble_devices() -> Result<Vec<BleDeviceInfo>, String> {
-    crate::transport::ble::scan_ble_devices().await
+    ble_backend::scan_ble_devices().await
 }
 
 /// Start a live BLE scan session. Discovered/updated devices are emitted as `ble-device` events
 /// for the frontend to populate in real time. Restarts any previous session.
-#[cfg(not(target_os = "ios"))]
 #[tauri::command]
 pub async fn ble_scan_start(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let (tx, rx) = tokio::sync::oneshot::channel::<()>();
@@ -67,7 +68,7 @@ pub async fn ble_scan_start(app: AppHandle, state: State<'_, AppState>) -> Resul
         *guard = Some(tx);
     }
     tauri::async_runtime::spawn(async move {
-        if let Err(e) = crate::transport::ble::run_scan_session(app, rx).await {
+        if let Err(e) = ble_backend::run_scan_session(app, rx).await {
             log::warn!("BLE scan session ended: {}", e);
         }
     });
@@ -75,7 +76,6 @@ pub async fn ble_scan_start(app: AppHandle, state: State<'_, AppState>) -> Resul
 }
 
 /// Stop the live BLE scan session (if any).
-#[cfg(not(target_os = "ios"))]
 #[tauri::command]
 pub fn ble_scan_stop(state: State<'_, AppState>) -> Result<(), String> {
     let mut guard = state.ble_scan_stop.lock().map_err(|e| e.to_string())?;
@@ -184,10 +184,9 @@ pub async fn connect(
         proto, transport_type, port, baud_rate, host, tcp_port, ble_device_id,
     );
 
-    // Open byte-level transport based on type. Serial and BLE are desktop-only (no raw serial or
-    // btleplug backend on iOS); on iOS those variants fall through to the catch-all and are rejected,
-    // leaving Wi-Fi (TCP/UDP MAVLink) as the supported link. On desktop all four arms are present, so
-    // the match is exhaustive and the catch-all does not exist.
+    // Open byte-level transport based on type. Serial is desktop-only (no raw serial access on iOS);
+    // on iOS the Serial variant falls through to the catch-all and is rejected. BLE works on both
+    // (btleplug on desktop, CoreBluetooth on iOS). TCP/UDP are platform-independent.
     let byte_transport: Box<dyn ByteTransport> = match transport_type {
         #[cfg(not(target_os = "ios"))]
         TransportType::Serial => {
@@ -205,19 +204,18 @@ pub async fn connect(
             let p = tcp_port.ok_or("UDP port required")?;
             Box::new(UdpTransport::connect(&h, p)?)
         }
-        #[cfg(not(target_os = "ios"))]
         TransportType::Ble => {
             let dev_id = ble_device_id.ok_or("BLE device ID required")?;
             if proto == "telemetry" {
                 // Passive mode: no known profile required — auto-discover + subscribe to all
                 // Notify/Indicate characteristics and dump the GATT table to the Debug Monitor.
-                Box::new(crate::transport::ble::connect_ble_listen(&dev_id, app_handle.clone()).await?)
+                Box::new(ble_backend::connect_ble_listen(&dev_id, app_handle.clone()).await?)
             } else {
-                Box::new(crate::transport::ble::connect_ble(&dev_id).await?)
+                Box::new(ble_backend::connect_ble(&dev_id).await?)
             }
         }
         #[cfg(target_os = "ios")]
-        _ => return Err("Only Wi-Fi (TCP/UDP) links are supported on iOS".into()),
+        _ => return Err("Serial is not available on iOS; use Wi-Fi (TCP/UDP) or BLE".into()),
     };
 
     log::info!("Transport opened, protocol={}", proto);

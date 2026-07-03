@@ -80,6 +80,14 @@ libc = "0.2"
 # whole-frame zoom can only be suppressed here. Version must match the one wry/tauri pulls (unified by Cargo).
 webkit2gtk = "2.0"
 
+# iOS BLE: btleplug has no iOS backend, so we talk to CoreBluetooth directly through the objc2
+# bindings (a Rust CBCentralManager/CBPeripheral delegate). Keeps the BLE transport in-crate - no
+# Swift, no Tauri plugin - so it survives `cargo tauri ios init` regeneration.
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSData", "NSDictionary", "NSString", "NSValue", "NSEnumerator", "NSObject"] }
+objc2-core-bluetooth = { version = "0.3", features = ["CBCentralManager", "CBPeripheral", "CBService", "CBCharacteristic", "CBAttribute", "CBPeer", "CBAdvertisementData", "CBManager", "CBError", "CBUUID"] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 # HID / joystick input backend (hid/macos.rs) reads RAW IOKit HID elements — axes/buttons/hat by
 # usage page/usage, no gamepad projection — matching the Windows (WGI) / Linux (evdev) backends. We
