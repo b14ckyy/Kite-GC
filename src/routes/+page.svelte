@@ -43,6 +43,7 @@
   import MissionPanel from "$lib/components/mission/MissionPanel.svelte";
   import MavCommandPanel from "$lib/components/control/MavCommandPanel.svelte";
   import RcControlPanel from "$lib/components/control/RcControlPanel.svelte";
+  import VirtualSticks from "$lib/components/control/VirtualSticks.svelte";
   import VideoPanel from "$lib/components/video/VideoPanel.svelte";
   import RadarPanel from "$lib/components/RadarPanel.svelte";
   import AirspaceManagerPanel from "$lib/components/AirspaceManagerPanel.svelte";
@@ -624,11 +625,16 @@
     $connection.status === 'connected' && $connection.protocolType === 'telemetry'
   );
   const rcTabAvailable = $derived($settings.rcControl.enabled && !isTelemetryConnected);
+  // On mobile there is no joystick, but the on-screen touch sticks (VirtualSticks) can drive RC over
+  // Wi-Fi. Offer the RC tab whenever a control-capable FC is connected (MSP or MAVLink, not telemetry).
+  const mobileRcAvailable = $derived(
+    isMobile && $connection.status === 'connected' && !isTelemetryConnected
+  );
 
   // If the RC tab is open when it becomes unavailable (e.g. a telemetry connection comes up), fall back
   // to the UAV-info tab so the now-hidden panel isn't left rendered.
   $effect(() => {
-    if (!rcTabAvailable && activeTab === 'rc-control') activeTab = 'uav-info';
+    if (!rcTabAvailable && !mobileRcAvailable && activeTab === 'rc-control') activeTab = 'uav-info';
   });
 
   const allTabs = [
@@ -652,7 +658,7 @@
     allTabs.filter(t =>
       (t.id !== 'logbook' || flightLoggingEnabled) &&
       (t.id !== 'control' || isMavlinkConnected) && // control tab only when connected via MAVLink
-      (t.id !== 'rc-control' || (rcTabAvailable && !isMobile)) && // RC tab: master switch on + not telemetry-connected; needs joystick hardware, so desktop-only
+      (t.id !== 'rc-control' || (rcTabAvailable && !isMobile) || mobileRcAvailable) && // RC tab: desktop needs the master switch + a joystick; mobile uses on-screen sticks when a FC is connected
       (t.id !== 'video' || !isMobile) && // video uses go2rtc/ffmpeg, unavailable on iOS
       (t.id !== 'radar' || radarSettings.enabled) && // radar tab only when the master switch is on
       (t.id !== 'airspace' || airspaceSettings.enabled || geozonesAvailable || fenceAvailable || rallyAvailable) // airspace: master switch, or geozone (INAV) / fence+rally (MAVLink) capable FC
@@ -2732,7 +2738,11 @@
     {:else if activeTab === 'control'}
       <MavCommandPanel />
     {:else if activeTab === 'rc-control'}
-      <RcControlPanel />
+      {#if isMobile}
+        <VirtualSticks />
+      {:else}
+        <RcControlPanel />
+      {/if}
     {:else if activeTab === 'radar'}
       <RadarPanel radar={radarSettings} {interfaceSettings} referencePoint={radarReference} mspSupported={mspAdsbSupported} onPatch={applySettingsPatch} />
     {:else if activeTab === 'airspace'}
