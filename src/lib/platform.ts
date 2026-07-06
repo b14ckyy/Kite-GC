@@ -31,3 +31,15 @@ export const isWindows = /Windows/i.test(ua);
 
 /** True on the Linux WebView (WebKitGTK; excludes Android) — drives the native-capture backend (V4L2). */
 export const isLinux = /Linux/i.test(ua) && !/Android/i.test(ua);
+
+// Tag the document root on mobile so global CSS can add bottom breathing room. The bottom edge is
+// crowded there: the on-screen RC sticks, the map zoom/compass buttons, the Leaflet attribution label
+// and the iPad home indicator all fight for the same strip. `--safe-bottom` exposes the device safe
+// area (needs viewport-fit=cover in the viewport meta) for those bottom-anchored overlays to lift by.
+if (typeof document !== 'undefined' && isMobile) {
+  document.documentElement.classList.add('is-mobile');
+  document.documentElement.style.setProperty('--safe-bottom', 'env(safe-area-inset-bottom, 0px)');
+  // `--safe-top` covers the status bar / notch strip so the toolbar and top-anchored map layers
+  // are not overlaid by the iOS status bar (clock, battery). Same viewport-fit=cover requirement.
+  document.documentElement.style.setProperty('--safe-top', 'env(safe-area-inset-top, 0px)');
+}

@@ -2103,6 +2103,20 @@
     gap: 8px;
   }
 
+  /* On mobile the zoom/compass buttons sit on top of the Leaflet attribution label at the very bottom.
+     Lift the button cluster above the label (and clear of the iPad home indicator), and push the
+     attribution to the bottom-left so the two no longer collide. */
+  :global(html.is-mobile) .map-controls-corner {
+    bottom: calc(34px + var(--safe-bottom, 0px));
+  }
+  :global(html.is-mobile) :global(.leaflet-control-attribution) {
+    margin-bottom: var(--safe-bottom, 0px);
+  }
+  :global(html.is-mobile) :global(.leaflet-bottom.leaflet-right) {
+    right: auto;
+    left: 0;
+  }
+
   .map-control-btn {
     box-sizing: border-box;
     width: 38px;

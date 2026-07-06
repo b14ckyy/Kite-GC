@@ -2537,6 +2537,7 @@
 
 <main
   class="app"
+  class:rc-sticks-active={isMobile && activeTab === 'rc-control'}
   style:--grid-bottom-height={gridBottomHeight}
   style:--grid-side-width={gridSideWidth}
 >
@@ -2976,6 +2977,26 @@
     z-index: 200;
   }
 
+  /* Mobile top safe-area: the iOS status bar (clock/battery/notch) overlays the toolbar. Grow the
+     toolbar grid row by the safe-area inset, pad the toolbar content down into the visible strip, and
+     push the top-anchored map/video/toast layers down to match so nothing hides under the status bar. */
+  :global(html.is-mobile) .app {
+    grid-template-rows: calc(53px + var(--safe-top, 0px)) 1fr var(--grid-bottom-height) 24px;
+  }
+  :global(html.is-mobile) .zone-toolbar {
+    padding-top: var(--safe-top, 0px);
+    box-sizing: border-box;
+  }
+  :global(html.is-mobile) .layer-map {
+    top: calc(53px * var(--ui-scale, 1) + var(--safe-top, 0px));
+  }
+  :global(html.is-mobile) .map-video-wrap {
+    top: calc(53px + var(--safe-top, 0px));
+  }
+  :global(html.is-mobile) .app-toasts {
+    top: var(--safe-top, 0px);
+  }
+
   /* Map layer — UNZOOMED overlay over the content area. The toolbar (53px) and status
      bar (24px) live in the zoomed `.ui-scale`, so their visual heights are *--ui-scale;
      the map offsets track that. z-index 0 keeps it behind the chrome normally. When the
@@ -3113,6 +3134,13 @@
 
   .zone-bottom-dock.panel-editing {
     pointer-events: auto;
+  }
+
+  /* When the on-screen RC sticks are up (mobile, rc-control tab) they cover the bottom ~46vh as a
+     fixed overlay. Lift the HUD dock above the sticks so HOME/SPD/ALT/GPS stay visible instead of
+     being obscured. VirtualSticks .vs-root is height: 46vh. */
+  .app.rc-sticks-active .zone-bottom-dock {
+    transform: translateY(calc(-46vh - 8px));
   }
 
   .zone-bottom-dock > * {
