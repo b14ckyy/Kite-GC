@@ -31,7 +31,12 @@
     "error": "erreur",
     "waiting": "en attente",
     "deviceMissing": "appareil absent",
-    "idle": "inactif"
+    "idle": "inactif",
+    "missionId": "ID de mission",
+    "missionIdRequired": "Un ID de mission est requis — sans lui, l'export JSON reste désactivé.",
+    "rateHint": "Fréquence de l'export JSON (Hz)",
+    "exposeLan": "LAN",
+    "exposeLanHint": "Exposer l'API sur le réseau local au lieu de cette machine uniquement. Toute personne sur le réseau pourra alors lire votre télémétrie."
   },
   "connection": {
     "connect": "Connecter",

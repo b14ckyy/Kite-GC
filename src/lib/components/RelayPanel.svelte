@@ -13,7 +13,15 @@
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { connection, connectionProtocol, availablePorts, bleDevices } from '$lib/stores/connection';
   import { settings } from '$lib/stores/settings';
-  import { relayStats, relayResults, newRelay, type RelayConfig } from '$lib/stores/relay';
+  import {
+    relayStats,
+    relayResults,
+    newRelay,
+    missionIdMissing,
+    DEFAULT_HTTP_PORT,
+    DEFAULT_JSON_RATE_HZ,
+    type RelayConfig,
+  } from '$lib/stores/relay';
   import { reconfigureRelays } from '$lib/controllers/relayController';
   import { startBleScan, stopBleScan, startBleDeviceListener, stopBleDeviceListener, refreshSerialPorts } from '$lib/controllers/connectionController';
 
@@ -56,11 +64,24 @@
     let changed = false;
     const fixed = cur.map((r) => {
       const o = r.output;
-      if (o.baud === undefined || o.bleDeviceId === undefined || o.listenPort === undefined || o.host === undefined || o.udpPort === undefined) {
+      const outStale =
+        o.baud === undefined || o.bleDeviceId === undefined || o.listenPort === undefined || o.host === undefined || o.udpPort === undefined || o.lan === undefined;
+      const relayStale = r.missionId === undefined || r.rateHz === undefined;
+      if (outStale || relayStale) {
         changed = true;
         return {
           ...r,
-          output: { ...o, baud: o.baud ?? 115200, bleDeviceId: o.bleDeviceId ?? '', listenPort: o.listenPort ?? 5760, host: o.host ?? '', udpPort: o.udpPort ?? 14550 },
+          missionId: r.missionId ?? '',
+          rateHz: r.rateHz ?? DEFAULT_JSON_RATE_HZ,
+          output: {
+            ...o,
+            baud: o.baud ?? 115200,
+            bleDeviceId: o.bleDeviceId ?? '',
+            listenPort: o.listenPort ?? 5760,
+            host: o.host ?? '',
+            udpPort: o.udpPort ?? 14550,
+            lan: o.lan ?? false,
+          },
         };
       }
       return r;
@@ -109,13 +130,17 @@
     void reconfigureRelays();
   }
   // ── Port guards ──────────────────────────────────────────────────────────────
-  // TCP listen ports are local binds → must be unique (a duplicate makes the 2nd relay fail to bind).
+  // TCP and HTTP listen ports are local binds → must be unique (a duplicate makes the 2nd relay fail to
+  // bind). They share ONE port space, so the check spans both kinds — a TCP relay and an HTTP relay on
+  // the same port would otherwise both be accepted here and only fail at runtime.
   // UDP targets must be a unique host:port pair (same port to different hosts is fine). We auto-bump to
   // the next free port so a duplicate can't be configured.
-  function nextFreeTcpPort(start: number, excludeId: string): number {
-    let p = Math.max(1, Math.min(65535, start || 5760));
+  const SERVER_KINDS: RelayConfig['output']['kind'][] = ['tcp', 'http'];
+
+  function nextFreeTcpPort(start: number, excludeId: string, fallback = 5760): number {
+    let p = Math.max(1, Math.min(65535, start || fallback));
     const used = (port: number) =>
-      relays.some((r) => r.id !== excludeId && r.output.kind === 'tcp' && r.output.listenPort === port);
+      relays.some((r) => r.id !== excludeId && SERVER_KINDS.includes(r.output.kind) && r.output.listenPort === port);
     while (used(p) && p < 65535) p++;
     return p;
   }
@@ -133,14 +158,42 @@
   // fallback) so the backend never sees a missing field, and that ports don't collide with other relays.
   function setKind(r: RelayConfig, kind: RelayConfig['output']['kind']) {
     const host = r.output.host ?? '';
+    // tcp and http both bind a listen port, so both must be de-duplicated against the shared port space.
+    // http defaults to 8080 rather than 5760 (that's a MAVLink-ish port, misleading for a JSON API).
+    const serverKind = SERVER_KINDS.includes(kind);
+    const portFallback = kind === 'http' ? DEFAULT_HTTP_PORT : 5760;
+    const listenPort = r.output.listenPort ?? portFallback;
     patchOutput(r.id, {
       kind,
       baud: r.output.baud ?? 115200,
       bleDeviceId: r.output.bleDeviceId ?? '',
       host,
-      listenPort: kind === 'tcp' ? nextFreeTcpPort(r.output.listenPort ?? 5760, r.id) : (r.output.listenPort ?? 5760),
+      lan: r.output.lan ?? false,
+      listenPort: serverKind ? nextFreeTcpPort(listenPort, r.id, portFallback) : listenPort,
       udpPort: kind === 'udp' ? nextFreeUdpPort(host, r.output.udpPort ?? 14550, r.id) : (r.output.udpPort ?? 14550),
     });
+  }
+
+  // Switching to the JSON protocol implies the HTTP output (that's the pairing the backend supports, and
+  // the only one an external service can consume). Switching away from JSON leaves the output alone — an
+  // HTTP output with a binary protocol is refused by the backend, and the row shows why.
+  // Done as ONE patch: two chained patches would each re-read `relays`, and the second would overwrite
+  // the first from a stale snapshot.
+  function setProtocol(r: RelayConfig, protocol: RelayConfig['protocol']) {
+    const patch: Partial<RelayConfig> = {
+      protocol,
+      missionId: r.missionId ?? '',
+      rateHz: r.rateHz ?? DEFAULT_JSON_RATE_HZ,
+    };
+    if (protocol === 'json' && r.output.kind !== 'http') {
+      patch.output = {
+        ...r.output,
+        kind: 'http',
+        lan: r.output.lan ?? false,
+        listenPort: nextFreeTcpPort(r.output.listenPort ?? DEFAULT_HTTP_PORT, r.id, DEFAULT_HTTP_PORT),
+      };
+    }
+    patchRelay(r.id, patch);
   }
 
   function addRelay() {
@@ -190,6 +243,7 @@
     {/if}
     {#each relays as r (r.id)}
       {@const st = rowState(r.id)}
+      {@const needsMissionId = missionIdMissing(r)}
       <div class="relay-row">
         <input
           type="checkbox"
@@ -198,17 +252,19 @@
           title={$t('relay.enable')}
           onchange={(e) => patchRelay(r.id, { enabled: e.currentTarget.checked })}
         />
-        <select class="r-select proto" value={r.protocol} onchange={(e) => patchRelay(r.id, { protocol: e.currentTarget.value as RelayConfig['protocol'] })}>
+        <select class="r-select proto" value={r.protocol} onchange={(e) => setProtocol(r, e.currentTarget.value as RelayConfig['protocol'])}>
           <option value="ltm">LTM</option>
           <option value="mavlink">MAVLink</option>
           <option value="crsf">CRSF</option>
           <option value="smartport">SmartPort</option>
+          <option value="json">JSON</option>
         </select>
         <select class="r-select kind" value={r.output.kind} onchange={(e) => setKind(r, e.currentTarget.value as RelayConfig['output']['kind'])}>
           <option value="serial">{$t('relay.serial')}</option>
           <option value="ble">{$t('relay.ble')}</option>
           <option value="tcp">TCP</option>
           <option value="udp">UDP</option>
+          <option value="http">HTTP</option>
         </select>
         {#if r.output.kind === 'serial'}
           <select class="r-select port" value={r.output.port ?? ''} onchange={(e) => patchOutput(r.id, { port: e.currentTarget.value, baud: r.output.baud ?? 115200 })}>
@@ -259,12 +315,59 @@
             value={r.output.udpPort ?? 14550}
             onchange={(e) => patchOutput(r.id, { udpPort: nextFreeUdpPort(r.output.host ?? '', Number(e.currentTarget.value), r.id) })}
           />
+        {:else if r.output.kind === 'http'}
+          <input
+            class="r-input port-num"
+            type="number"
+            min="1"
+            max="65535"
+            placeholder={$t('relay.listenPort')}
+            value={r.output.listenPort ?? DEFAULT_HTTP_PORT}
+            onchange={(e) => patchOutput(r.id, { listenPort: nextFreeTcpPort(Number(e.currentTarget.value), r.id, DEFAULT_HTTP_PORT) })}
+          />
+          <label class="chk" title={$t('relay.exposeLanHint')}>
+            <input
+              type="checkbox"
+              checked={r.output.lan ?? false}
+              onchange={(e) => patchOutput(r.id, { lan: e.currentTarget.checked })}
+            />
+            {$t('relay.exposeLan')}
+          </label>
         {/if}
         <span class="status {st.cls}" title={st.detail}>
           <span class="dot"></span>{st.label}{#if st.detail}<span class="detail">{st.detail}</span>{/if}
         </span>
         <button class="remove" title={$t('relay.remove')} onclick={() => removeRelay(r.id)}>✕</button>
       </div>
+
+      <!-- JSON export: the mission ID tags every frame and is REQUIRED — with none, the backend refuses
+           to start the relay, so no port is bound at all. -->
+      {#if r.protocol === 'json'}
+        <div class="relay-sub">
+          <input
+            class="r-input mission"
+            class:invalid={needsMissionId}
+            type="text"
+            placeholder={$t('relay.missionId')}
+            value={r.missionId ?? ''}
+            onchange={(e) => patchRelay(r.id, { missionId: e.currentTarget.value })}
+          />
+          <input
+            class="r-input rate"
+            type="number"
+            min="0.1"
+            max="50"
+            step="0.1"
+            title={$t('relay.rateHint')}
+            value={r.rateHz ?? DEFAULT_JSON_RATE_HZ}
+            onchange={(e) => patchRelay(r.id, { rateHz: Number(e.currentTarget.value) || DEFAULT_JSON_RATE_HZ })}
+          />
+          <span class="unit">Hz</span>
+        </div>
+        {#if needsMissionId}
+          <div class="sub-hint">{$t('relay.missionIdRequired')}</div>
+        {/if}
+      {/if}
     {/each}
     <button class="add" onclick={addRelay}>+ {$t('relay.addRelay')}</button>
   </div>
@@ -351,6 +454,37 @@
   .r-input.port-num { width: 84px; appearance: textfield; -moz-appearance: textfield; }
   .r-input.port-num::-webkit-inner-spin-button,
   .r-input.port-num::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+
+  /* JSON export sub-row: mission id (required) + emit rate, indented under its relay row. */
+  .relay-sub {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: -2px 0 6px 21px; /* 21px ≈ the enable checkbox + its gap, so it lines up with the protocol select */
+  }
+  .r-input.mission { flex: 1 1 auto; min-width: 0; }
+  .r-input.mission.invalid { border-color: #d40000; background: rgba(212, 0, 0, 0.08); }
+  .r-input.rate { width: 68px; appearance: textfield; -moz-appearance: textfield; }
+  .r-input.rate::-webkit-inner-spin-button,
+  .r-input.rate::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  .unit { font-size: 11px; color: #949494; }
+
+  .sub-hint {
+    font-size: 11px;
+    color: #d40000;
+    margin: -3px 0 6px 21px;
+  }
+
+  .chk {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: #cfcfcf;
+    white-space: nowrap;
+    flex: none;
+  }
+  .chk input { width: 13px; height: 13px; accent-color: #37a8db; }
 
   .status {
     display: inline-flex;

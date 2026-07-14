@@ -6,6 +6,7 @@
 //! BLE / TCP-server / UDP follow in Phase 2.
 
 pub mod ble;
+pub mod http;
 pub mod serial;
 pub mod tcp;
 pub mod udp;

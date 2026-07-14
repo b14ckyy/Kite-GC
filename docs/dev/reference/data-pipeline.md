@@ -190,6 +190,11 @@ These subsystems are independent of the inbound `TelemetryData` pipeline:
 - **Telemetry Relay — outbound transcode.** `telemetry_forward/` taps the live decoded telemetry,
   re-encodes it into LTM / MAVLink / CRSF / SmartPort and sends it out a chosen transport
   (Serial / BLE / TCP / UDP). Persisted relay configs auto-connect on primary connect.
+- **JSON export API — outbound, read-only.** A relay whose protocol is `json` and whose output is `http`
+  serves the same tapped telemetry as JSON over a small embedded HTTP server: a snapshot
+  (`GET /api/v1/telemetry`) and a live SSE stream (`GET /api/v1/stream`). Loopback-only unless LAN is
+  explicitly opted into, rate-limited independently of the source, and **gated on a mission ID** — with
+  none configured the relay is refused and no port is bound. See `docs/dev/active/JSON_TELEMETRY_API.md`.
 
 ## File index (telemetry pipeline)
 

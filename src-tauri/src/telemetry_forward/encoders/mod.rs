@@ -5,6 +5,7 @@
 //! unified telemetry cache into wire frames of its protocol.
 
 pub mod crsf;
+pub mod json;
 pub mod ltm;
 pub mod mavlink;
 pub mod smartport;

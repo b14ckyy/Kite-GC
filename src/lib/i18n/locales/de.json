@@ -37,7 +37,12 @@
     "error": "Fehler",
     "waiting": "wartet",
     "deviceMissing": "Gerät fehlt",
-    "idle": "inaktiv"
+    "idle": "inaktiv",
+    "missionId": "Missions-ID",
+    "missionIdRequired": "Eine Missions-ID ist erforderlich — ohne sie bleibt der JSON-Export aus.",
+    "rateHint": "JSON-Exportrate (Hz)",
+    "exposeLan": "LAN",
+    "exposeLanHint": "Die API im lokalen Netzwerk bereitstellen statt nur auf diesem Rechner. Jeder im Netzwerk kann dann deine Telemetrie mitlesen."
   },
   "connection": {
     "connect": "Verbinden",

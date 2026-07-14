@@ -37,7 +37,12 @@
     "error": "error",
     "waiting": "waiting",
     "deviceMissing": "device missing",
-    "idle": "idle"
+    "idle": "idle",
+    "missionId": "Mission ID",
+    "missionIdRequired": "A mission ID is required — the JSON export stays off without one.",
+    "rateHint": "JSON export rate (Hz)",
+    "exposeLan": "LAN",
+    "exposeLanHint": "Serve the API on the local network instead of this machine only. Anyone on the network can then read your telemetry."
   },
   "connection": {
     "connect": "Connect",

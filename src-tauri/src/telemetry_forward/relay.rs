@@ -8,11 +8,13 @@ use serde::{Deserialize, Serialize};
 
 use super::cache::TelemetryCache;
 use super::encoders::crsf::CrsfEncoder;
+use super::encoders::json::JsonEncoder;
 use super::encoders::ltm::LtmEncoder;
 use super::encoders::mavlink::MavlinkEncoder;
 use super::encoders::smartport::SmartportEncoder;
 use super::encoders::Encoder;
 use super::output::ble::BleSink;
+use super::output::http::HttpSink;
 use super::output::serial::SerialSink;
 use super::output::tcp::TcpSink;
 use super::output::udp::UdpSink;
@@ -24,12 +26,20 @@ use super::output::OutputSink;
 pub struct RelayConfig {
     pub id: String,
     pub enabled: bool,
-    /// Output protocol: "ltm" (more in later phases: "mavlink" / "crsf" / "smartport").
+    /// Output protocol: "ltm" / "mavlink" / "crsf" / "smartport" / "json".
     pub protocol: String,
+    /// Identifies the mission these samples belong to, stamped into every frame of the `json` export.
+    /// **Required** for `json` — without it that relay is refused (see `build`). Unused by the FC
+    /// protocols, which have no field to carry it.
+    pub mission_id: Option<String>,
+    /// Output rate for `json` (Hz). Absent → the encoder's default. Ignored by the FC protocols, which
+    /// pace themselves off the source.
+    pub rate_hz: Option<f32>,
     pub output: RelayOutput,
 }
 
-/// Output transport configuration. Supported `kind`: `serial` / `ble` / `tcp` (server) / `udp`.
+/// Output transport configuration. Supported `kind`: `serial` / `ble` / `tcp` (server) / `udp` /
+/// `http` (server).
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RelayOutput {
@@ -39,11 +49,14 @@ pub struct RelayOutput {
     pub baud: Option<u32>,
     /// ble (device id)
     pub ble_device_id: Option<String>,
-    /// tcp (server listen port)
+    /// tcp + http (server listen port)
     pub listen_port: Option<u16>,
     /// udp (send target)
     pub host: Option<String>,
     pub udp_port: Option<u16>,
+    /// http: bind `0.0.0.0` (LAN-reachable) instead of loopback. Off by default — a telemetry API
+    /// shouldn't be silently readable by everyone on a field network.
+    pub lan: Option<bool>,
 }
 
 /// Per-relay status snapshot pushed to the frontend (`relay-stats` event).
@@ -80,11 +93,20 @@ impl Relay {
     /// Build a live relay from config (opens the output transport — may fail if the device is missing).
     /// Async because the BLE output has to connect (scan + GATT); serial/tcp/udp are immediate.
     pub async fn build(cfg: &RelayConfig) -> Result<Self, String> {
+        // The JSON export is gated on a mission ID: without one there's nothing to attribute the samples
+        // to, so the relay must not come up at all. Resolved *before* the sink is built, so a missing id
+        // means no port is ever bound — the feature is genuinely off, not merely serving untagged data.
+        let mission_id = cfg.mission_id.as_deref().map(str::trim).filter(|s| !s.is_empty());
+
         let encoder: Box<dyn Encoder> = match cfg.protocol.as_str() {
             "ltm" => Box::new(LtmEncoder::new()),
             "mavlink" => Box::new(MavlinkEncoder::new()),
             "crsf" => Box::new(CrsfEncoder::new()),
             "smartport" => Box::new(SmartportEncoder::new()),
+            "json" => {
+                let id = mission_id.ok_or("JSON relay disabled: no mission ID configured")?;
+                Box::new(JsonEncoder::new(id.to_string(), cfg.rate_hz))
+            }
             other => return Err(format!("Unsupported relay protocol: {}", other)),
         };
         let sink: Box<dyn OutputSink> = match cfg.output.kind.as_str() {
@@ -105,6 +127,17 @@ impl Relay {
                 let host = cfg.output.host.as_deref().filter(|h| !h.is_empty()).ok_or("udp relay needs a host")?;
                 let port = cfg.output.udp_port.ok_or("udp relay needs a port")?;
                 Box::new(UdpSink::open(host, port)?)
+            }
+            "http" => {
+                // The sink wraps each frame as an SSE record, so it only makes sense for a text protocol.
+                // (JSON out a serial/tcp/udp sink is fine — newline-delimited — so the guard is one-way.)
+                if cfg.protocol != "json" {
+                    return Err("HTTP output requires the JSON protocol".to_string());
+                }
+                let port = cfg.output.listen_port.ok_or("http relay needs a listen port")?;
+                // Unreachable fallback: protocol == "json" already required a mission id above.
+                let id = mission_id.unwrap_or_default().to_string();
+                Box::new(HttpSink::open(port, cfg.output.lan.unwrap_or(false), id)?)
             }
             other => return Err(format!("Unsupported relay output kind: {}", other)),
         };
