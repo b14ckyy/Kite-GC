@@ -43,6 +43,25 @@ chmod +x KiteGC_Linux_*_standalone.AppImage
 ./KiteGC_Linux_*_standalone.AppImage
 ```
 
+!!! warning "Linux: your distribution needs to be reasonably current"
+    The Linux downloads are compiled on Ubuntu 24.04 and need **glibc 2.39 or newer** — Ubuntu 24.04+,
+    Debian 13 (Trixie), Raspberry Pi OS Trixie, Fedora 40+ or a current rolling release. On an older
+    system they refuse to start with a message like `version 'GLIBC_2.39' not found`. **Debian 12,
+    Raspberry Pi OS Bookworm and Ubuntu 22.04 are below that line.** It applies to every Linux
+    download, the AppImage included: an AppImage bundles the app's own libraries but never glibc,
+    which always comes from your system.
+
+    **On those same older systems, video has a problem we cannot package around.** They ship
+    WebKitGTK 2.50, and Kite runs inside that engine. In the 2.50 series a stopped video stream can
+    leave the engine spinning — we measured a permanently busy CPU core that only quits when the app
+    does. Debian 13 and Ubuntu 24.04 carry 2.52, where this does not happen. So an older distribution
+    is not merely unsupported by these downloads; it is a system on which Kite's video would misbehave
+    however you installed it.
+
+    You can still **[build Kite yourself](../for-developers/building.md)** on an older distribution and
+    everything else will work — but the video issue comes from your system's browser engine, so a
+    self-built copy has it too. The only real fix is a newer distribution.
+
 ## Installed vs portable mode
 
 You can run Kite two ways:

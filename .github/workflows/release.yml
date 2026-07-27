@@ -7,10 +7,21 @@
 #
 # Deliberately NOT triggered on push/tags: releases are cut on demand, not per commit.
 #
-# Linux is built on ubuntu-22.04 on purpose: its glibc / GTK / libgcrypt are old
-# enough that the bundled libraries (esp. the AppImage) run on 22.04, 24.04, Debian
-# 12/13 and newer. Building on a newer base (e.g. Debian 13) over-bundles newer libs
-# and breaks on older targets (e.g. the libgcrypt/libgpg-error symbol mismatch).
+# Linux is built on ubuntu-24.04, and the base decides two things at once.
+#
+# 1. The AppImage bundles the BUILD HOST's WebKitGTK (linuxdeploy takes what is installed), so the
+#    base picks the browser engine every AppImage user gets. jammy (22.04) is stuck on WebKitGTK
+#    2.50.4, which has a fault that pins ~300 % CPU forever after an RTSP/MJPEG feed is stopped —
+#    measured on a Debian laptop and a Raspberry Pi 4, and absent both from the .deb (system engine)
+#    and from a locally built AppImage, each on 2.52.5. noble (24.04) carries the 2.52 series.
+# 2. glibc is NOT bundled, so it comes from the target system and only ever works upwards: the
+#    highest GLIBC_* symbol in the binary is the floor. 22.04 gave 2.34 (ran on Debian 12 and
+#    Raspberry Pi OS Bookworm); 24.04 gives 2.39, so those systems now need a newer distribution
+#    or a local build. Accepted deliberately — an engine that burns a core forever is worse than a
+#    version floor, and a second "legacy" artifact was not wanted.
+#
+# Do NOT build on a rolling/newer base than the oldest target: it over-bundles newer libs and breaks
+# on older systems (e.g. the libgcrypt/libgpg-error symbol mismatch).
 
 name: Release build
 
@@ -81,10 +92,14 @@ jobs:
           path: release/*
 
   linux:
-    name: Build (Linux · ubuntu-22.04)
-    runs-on: ubuntu-22.04
+    name: Build (Linux · ubuntu-24.04)
+    runs-on: ubuntu-24.04
     env:
-      # Let appimagetool run without FUSE on the CI runner.
+      # Let appimagetool/linuxdeploy run without FUSE on the CI runner — they are AppImages
+      # themselves and would otherwise try to mount. This is also why no libfuse2 is installed:
+      # with this set it is genuinely unused (verified by building on a host that has neither the
+      # package nor the kernel module), and noble renamed it to libfuse2t64 anyway, so asking for
+      # the old name would fail the job outright.
       APPIMAGE_EXTRACT_AND_RUN: 1
     steps:
       - uses: actions/checkout@v5
@@ -101,7 +116,6 @@ jobs:
             libudev-dev \
             patchelf \
             file \
-            libfuse2 \
             xdg-utils \
             zip
       - uses: actions/setup-node@v5
@@ -126,12 +140,17 @@ jobs:
 
   # Native aarch64 build on GitHub's ARM64 Linux runner (free for public repos) — no cross-compile, so
   # the Pi 5 (and other arm64 Linux) gets a ready binary/.deb/.AppImage without a local build env. Same
-  # ubuntu-22.04 base as the x86 Linux job (old enough glibc/GTK so we don't force users to upgrade).
+  # ubuntu-24.04 base as the x86 Linux job, for the same two reasons (see the header): it decides the
+  # AppImage's bundled WebKitGTK, and with it the glibc floor.
   linux-arm64:
-    name: Build (Linux ARM64 · ubuntu-22.04-arm)
-    runs-on: ubuntu-22.04-arm
+    name: Build (Linux ARM64 · ubuntu-24.04-arm)
+    runs-on: ubuntu-24.04-arm
     env:
-      # Let appimagetool run without FUSE on the CI runner.
+      # Let appimagetool/linuxdeploy run without FUSE on the CI runner — they are AppImages
+      # themselves and would otherwise try to mount. This is also why no libfuse2 is installed:
+      # with this set it is genuinely unused (verified by building on a host that has neither the
+      # package nor the kernel module), and noble renamed it to libfuse2t64 anyway, so asking for
+      # the old name would fail the job outright.
       APPIMAGE_EXTRACT_AND_RUN: 1
     steps:
       - uses: actions/checkout@v5
@@ -148,7 +167,6 @@ jobs:
             libudev-dev \
             patchelf \
             file \
-            libfuse2 \
             xdg-utils \
             zip
       - uses: actions/setup-node@v5

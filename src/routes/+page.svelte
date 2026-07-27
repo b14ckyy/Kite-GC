@@ -85,7 +85,9 @@
   import WidgetPanel from "$lib/components/WidgetPanel.svelte";
   import { LARGE_BASE_VMIN } from "$lib/config/widgetRegistry";
   import FloatingVideoWindow from "$lib/components/video/FloatingVideoWindow.svelte";
-  import { initVideo, videoState, videoStream, bindVideoEl, setMapLocation, setFloatHeightFrac, setFloatPos, registerPiPElement } from "$lib/stores/video";
+  import { initVideo, videoState, videoStream, bindVideoEl, setMapLocation, setFloatHeightFrac, setFloatPos, registerPiPElement, reportMjpegError } from "$lib/stores/video";
+  import { lowPowerActive } from "$lib/stores/lowPower";
+  import { initPulseBlink } from "$lib/stores/pulseBlink";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import TerrainAnalysisPanel from "$lib/components/terrain/TerrainAnalysisPanel.svelte";
   import { editMode, replayActive, mission, missionFlags, missionDownload, missionUpload, missionFcInfo, markMissionSynced, loadedMissionId, missionSetWaypoints, launchPoint, hasLocation, toDeg, type Waypoint } from "$lib/stores/mission";
@@ -2321,6 +2323,15 @@
 
   onMount(() => { void runStartupRecovery(); });
 
+  // Keep the low-power state resolved for the whole app lifetime: the store mirrors it onto a root
+  // class that CSS gates the expensive widget-bar transitions off (see stores/lowPower.ts). It is a
+  // readable store, so it only runs while something subscribes — this is that subscription.
+  onMount(() => lowPowerActive.subscribe(() => {}));
+
+  // Hard-blink indicator mode on WebKitGTK — see stores/pulseBlink.ts for why a looping CSS
+  // animation there costs ~46 % of a core regardless of size or visibility. No-op elsewhere.
+  onMount(() => initPulseBlink());
+
   // Startup update check (GitHub releases). Deferred a few seconds so it never competes with launch work;
   // failures are swallowed inside the controller — it must never disrupt the app.
   onMount(() => {
@@ -2601,6 +2612,7 @@
           class:mirror={$videoState.mirror}
           src={$videoState.mjpegUrl}
           ondblclick={() => setMapLocation('main')}
+          onerror={reportMjpegError}
         />
       {:else}
         <!-- svelte-ignore a11y_no_static_element_interactions -->

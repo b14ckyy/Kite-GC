@@ -17,7 +17,7 @@
   import { panelState } from '$lib/stores/panelState';
   import { resetGcsManual, gcsManuallySet } from '$lib/stores/gcsLocation';
   import type { AppSettings, InterfaceSettings, RadarSettings, GcsMode, AirspaceSettings, AirspaceProvider, SystemMessagesLevel, LogLevel, RcControlSettings, UpdateCheckSettings, UpdateCheckMode } from '$lib/stores/settings';
-  import { revealItemInDir } from '@tauri-apps/plugin-opener';
+  import { revealItemInDir, openPath } from '@tauri-apps/plugin-opener';
   import { blackboxDecoderVersion, downloadBlackboxDecode } from '$lib/stores/flightlog';
   import type { TileCacheStats } from '$lib/cache/tileCache';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
@@ -179,11 +179,45 @@
   }
 
   // Reveal the backend diagnostic log file in the OS file manager (Settings → Diagnostics).
-  async function openLogFolder() {
+  // The path is also shown as plain text: on a minimal desktop (a Raspberry Pi was the case that
+  // exposed this) there may be no `org.freedesktop.FileManager1` service and no xdg-open at all, so
+  // "reveal" simply cannot work — and this is the one screen a stuck user is sent to. It must never
+  // fail silently, which is exactly what the old `catch {}` did.
+  let logPath = $state<string | null>(null);
+  let logOpenError = $state('');
+
+  async function loadLogPath(): Promise<void> {
     try {
-      const p = await invoke<string | null>('get_log_path');
-      if (p) await revealItemInDir(p);
-    } catch { /* logging unavailable — nothing to open */ }
+      logPath = await invoke<string | null>('get_log_path');
+    } catch {
+      logPath = null;
+    }
+  }
+  void loadLogPath();
+
+  async function openLogFolder() {
+    logOpenError = '';
+    if (!logPath) await loadLogPath();
+    const p = logPath;
+    if (!p) {
+      logOpenError = $t('settings.logUnavailable');
+      return;
+    }
+    try {
+      await revealItemInDir(p);
+      return;
+    } catch (e) {
+      console.warn('[settings] revealItemInDir failed', e);
+    }
+    // Second try: open the containing folder itself, which some file managers handle when "reveal"
+    // isn't wired up.
+    try {
+      await openPath(p.replace(/[\/][^\/]*$/, ''));
+      return;
+    } catch (e) {
+      console.warn('[settings] openPath failed', e);
+      logOpenError = e instanceof Error ? e.message : String(e);
+    }
   }
   // Refresh the terrain-cache size + blackbox_decode version whenever the Data tab is shown.
   $effect(() => {
@@ -625,6 +659,13 @@
         <span class="s-label">{$t('settings.logFolder')}</span>
         <Button variant="standard" size="sm" onclick={openLogFolder}>{$t('settings.openLogFolder')}</Button>
       </div>
+      {#if logPath}
+        <!-- Always visible: if nothing can open it, the user can still reach the file by hand. -->
+        <p class="log-path">{logPath}</p>
+      {/if}
+      {#if logOpenError}
+        <p class="s-err">{logOpenError}</p>
+      {/if}
     </div>
 
     <!-- ── Updates ───────────────────────────────────── -->
@@ -719,6 +760,14 @@
 
   .s-label { font-size: 12px; color: #e0e0e0; }
   .s-err { font-size: 11px; color: #d40000; }
+  /* Selectable so the path can be copied when nothing on the system can open it. */
+  .log-path {
+    font-size: 11px;
+    color: #949494;
+    margin: -4px 0 0;
+    word-break: break-all;
+    user-select: text;
+  }
   /* Read-only value display (not an input) — matches the locked-field look without being editable. */
   .s-readout {
     flex: 1 1 auto;

@@ -10,10 +10,14 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+#[cfg(target_os = "linux")]
+use std::process::Stdio;
+#[cfg(target_os = "linux")]
+use std::sync::OnceLock;
+#[cfg(target_os = "linux")]
+use std::time::{Duration, Instant};
 
-use serde_json::Value;
-
-const RELEASES_API: &str = "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest";
+const REPO: &str = "BtbN/FFmpeg-Builds";
 const RELEASES_PAGE: &str = "https://github.com/BtbN/FFmpeg-Builds/releases";
 const HTTP_USER_AGENT: &str = "Kite-GC ffmpeg-fetch";
 
@@ -61,6 +65,7 @@ pub fn version() -> Option<String> {
     let ff = find_ffmpeg()?;
     let mut cmd = std::process::Command::new(&ff);
     cmd.arg("-version");
+    crate::child_env::sanitize(&mut cmd);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -71,6 +76,203 @@ pub fn version() -> Option<String> {
         .lines()
         .next()
         .map(|l| l.trim().to_string())
+}
+
+/// Whether this host decodes H.264 through the kernel's V4L2 M2M interface — i.e. in hardware.
+/// True on a Raspberry Pi 3/4 and similar SoCs; false on a Pi 5, which has no H.264 decode block at
+/// all.
+///
+/// It matters only for the MJPEG fallback, and there it matters a lot: that path decodes **every**
+/// frame of the source before re-encoding it, and a board that needs hardware for 720p60 cannot do it
+/// any other way. go2rtc cannot arrange this for us — its `#hardware` option swaps the *encoder* for
+/// V4L2 M2M and never touches the input — so we select the decoder ourselves via a custom input
+/// template.
+///
+/// Probed by actually decoding a one-second clip, because the codec being listed proves nothing: every
+/// Linux ffmpeg build compiles `h264_v4l2m2m` in, device or no device. Cached for the process and
+/// logged once, so a tester's log states the verdict.
+/// ARM-only: V4L2 M2M is the SoC (Raspberry Pi class) interface. Desktop GPUs expose VAAPI instead —
+/// see `vaapi_mjpeg_transcode_available` — so probing this on x86 spawns two ffmpeg processes to
+/// answer a question whose answer is already known.
+#[cfg(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "arm")))]
+pub fn v4l2_h264_decode_available() -> bool {
+    static AVAILABLE: OnceLock<bool> = OnceLock::new();
+    *AVAILABLE.get_or_init(|| {
+        let ok = probe_v4l2_h264_decode();
+        log::warn!(
+            "[ffmpeg] V4L2 hardware H.264 decoding: {}",
+            if ok {
+                "available — used for the MJPEG transcode"
+            } else {
+                "unavailable — the MJPEG transcode decodes in software"
+            }
+        );
+        ok
+    })
+}
+
+#[cfg(not(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "arm"))))]
+pub fn v4l2_h264_decode_available() -> bool {
+    false
+}
+
+/// The DRM render node VAAPI runs on, if hardware H.264-decode **and** MJPEG-encode both work there.
+///
+/// Both halves are required together and that is the whole point: a half-hardware chain is *slower*
+/// than staying in software, because every decoded frame has to be copied back out of GPU memory for
+/// the software encoder. Measured on an 8th-gen Intel iGPU, 300 frames, CPU time:
+///
+/// | chain                        | 720p60 | 1080p60 |
+/// |------------------------------|--------|---------|
+/// | software decode + encode     | 5.52 s | 7.83 s  |
+/// | **VAAPI decode + encode**    | 0.79 s | 1.00 s  |
+/// | VAAPI decode + sw encode     | 6.47 s | 11.63 s |
+///
+/// So the readback penalty grows with frame size, and the answer is end-to-end or not at all.
+///
+/// Probed by actually transcoding a clip, because the encoder being listed proves nothing (every
+/// Linux ffmpeg build compiles `mjpeg_vaapi` in, GPU or no GPU). Cached for the process and logged
+/// once, so a tester's log states the verdict.
+#[cfg(target_os = "linux")]
+pub fn vaapi_render_node() -> Option<&'static str> {
+    static NODE: OnceLock<Option<String>> = OnceLock::new();
+    NODE.get_or_init(|| {
+        let found = probe_vaapi_render_node();
+        match &found {
+            Some(node) => log::warn!(
+                "[ffmpeg] VAAPI hardware H.264-decode + MJPEG-encode: available on {node} — used for the MJPEG transcode"
+            ),
+            None => log::warn!(
+                "[ffmpeg] VAAPI hardware H.264-decode + MJPEG-encode: unavailable — the MJPEG transcode runs in software"
+            ),
+        }
+        found
+    })
+    .as_deref()
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn vaapi_render_node() -> Option<&'static str> {
+    None
+}
+
+/// How long a single probe step may take before it is declared a failure and killed.
+///
+/// Generous on purpose — a cold static ffmpeg off an SD card needs a second or two just to start —
+/// but a hard ceiling, because the alternative is unbounded (see `run_probe`).
+#[cfg(target_os = "linux")]
+const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Run one probe step to completion, or kill it at `PROBE_TIMEOUT` and call it a failure.
+///
+/// Load-bearing: `Command::status()` waits forever, and these probes drive kernel media devices.
+/// `h264_v4l2m2m` parks in `VIDIOC_DQBUF` when the decoder is busy or wedged — a documented Pi
+/// failure mode — and VAAPI on a render node without a matching driver can stall in the DRM ioctl.
+/// A single such stall used to park the `OnceLock` initialiser below *and*, because
+/// `get_or_init` blocks every concurrent caller, every later start attempt with it: the stream stayed
+/// in "starting" forever and no Stop could reach the ffmpeg behind it, because nothing owns these
+/// children once `status()` is waiting on them. Bounded, a bad device costs one slow first start and
+/// then reads as "software", which is exactly what it is.
+#[cfg(target_os = "linux")]
+fn run_probe(ff: &Path, args: &[&str]) -> bool {
+    let mut cmd = Command::new(ff);
+    cmd.args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    crate::child_env::sanitize(&mut cmd);
+    let Ok(mut child) = cmd.spawn() else {
+        return false;
+    };
+    let deadline = Instant::now() + PROBE_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Err(_) => return false,
+            Ok(None) => {}
+        }
+        if Instant::now() >= deadline {
+            log::warn!(
+                "[ffmpeg] hardware probe did not finish within {}s — killing it and treating this host \
+                 as software-only",
+                PROBE_TIMEOUT.as_secs()
+            );
+            let _ = child.kill();
+            let _ = child.wait();
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// Try each `/dev/dri/renderD*` in turn (multi-GPU boxes number them 128, 129, …) and return the
+/// first that survives a real decode+encode round trip.
+#[cfg(target_os = "linux")]
+fn probe_vaapi_render_node() -> Option<String> {
+    let Some(ff) = find_ffmpeg() else {
+        return None;
+    };
+    let mut nodes: Vec<String> = std::fs::read_dir("/dev/dri")
+        .ok()?
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            name.starts_with("renderD").then(|| format!("/dev/dri/{name}"))
+        })
+        .collect();
+    nodes.sort();
+    nodes.into_iter().find(|node| probe_vaapi_transcode(&ff, node))
+}
+
+/// Encode a throwaway H.264 clip in software, then run it through the full VAAPI chain: hardware
+/// decode, frames kept in GPU memory (`-hwaccel_output_format vaapi`), hardware MJPEG encode. Any
+/// failure anywhere means "software".
+#[cfg(target_os = "linux")]
+fn probe_vaapi_transcode(ff: &Path, node: &str) -> bool {
+    let clip = std::env::temp_dir().join("kite-vaapi-probe.h264");
+    let clip_arg = clip.to_string_lossy().to_string();
+    let run = |args: &[&str]| -> bool { run_probe(ff, args) };
+    let made = run(&[
+        "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+        "testsrc=size=320x240:rate=10:duration=1", "-pix_fmt", "yuv420p", "-c:v", "libx264", "-f",
+        "h264", &clip_arg,
+    ]);
+    let ok = made
+        && run(&[
+            "-hide_banner", "-loglevel", "error", "-hwaccel", "vaapi", "-hwaccel_device", node,
+            "-hwaccel_output_format", "vaapi", "-i", &clip_arg, "-c:v", "mjpeg_vaapi", "-f", "null",
+            "-",
+        ]);
+    let _ = std::fs::remove_file(&clip);
+    ok
+}
+
+/// Encode a throwaway clip in software, then decode it back through `h264_v4l2m2m`. Both steps must
+/// succeed; anything else (no ffmpeg, no libx264, no decode device) means "software".
+#[cfg(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "arm")))]
+fn probe_v4l2_h264_decode() -> bool {
+    let Some(ff) = find_ffmpeg() else {
+        return false;
+    };
+    let clip = std::env::temp_dir().join("kite-hwdecode-probe.h264");
+    let clip_arg = clip.to_string_lossy().to_string();
+    let run = |args: &[&str]| -> bool { run_probe(&ff, args) };
+    // `-pix_fmt yuv420p` is load-bearing, not tidiness: `testsrc` emits rgb24 and libx264 then picks
+    // **yuv444p / High 4:4:4 Predictive**, which no hardware H.264 block decodes — the Pi's does 4:2:0
+    // only. Without it the probe failed on a Pi 4 whose decoder works perfectly for real streams, and
+    // the transcode silently stayed in software. The VAAPI probe hit the identical trap.
+    let made = run(&[
+        "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+        "testsrc=size=320x240:rate=10:duration=1", "-pix_fmt", "yuv420p", "-c:v", "libx264", "-f",
+        "h264", &clip_arg,
+    ]);
+    let ok = made
+        && run(&[
+            "-hide_banner", "-loglevel", "error", "-c:v", "h264_v4l2m2m", "-i", &clip_arg, "-f",
+            "null", "-",
+        ]);
+    let _ = std::fs::remove_file(&clip);
+    ok
 }
 
 /// BtbN asset selector for this OS+arch: (filename substring, archive extension), or None when we
@@ -106,42 +308,17 @@ fn manual_install_msg() -> String {
 pub async fn download<F: FnMut(u8, &str)>(mut report: F) -> Result<PathBuf, String> {
     let (want_substr, want_ext) = asset_match().ok_or_else(manual_install_msg)?;
 
-    report(5, "Querying latest ffmpeg release");
+    // Self-contained static GPL build for this platform (ffmpeg-master-latest-win64-gpl.zip /
+    // -linux64-gpl.tar.xz / -linuxarm64-gpl.tar.xz), NOT the -shared variant (needs separate libs).
+    // BtbN's names are fixed across releases, so this resolves through the CDN path instead of the
+    // rate-limited REST API (which 403s for everyone behind a shared IP — see `crate::github_release`).
+    let asset_name = format!("ffmpeg-master-latest-{want_substr}-gpl{want_ext}");
+    let url = crate::github_release::latest_asset_url(REPO, &asset_name);
+
     let client = reqwest::Client::builder()
         .user_agent(HTTP_USER_AGENT)
         .build()
         .map_err(|e| format!("HTTP client error: {e}"))?;
-
-    let release: Value = client
-        .get(RELEASES_API)
-        .send()
-        .await
-        .map_err(|e| format!("Release query failed: {e}"))?
-        .error_for_status()
-        .map_err(|e| format!("Release query failed: {e}"))?
-        .json()
-        .await
-        .map_err(|e| format!("Release JSON parse failed: {e}"))?;
-
-    let assets = release
-        .get("assets")
-        .and_then(Value::as_array)
-        .ok_or("Latest release has no downloadable assets")?;
-
-    // Self-contained static GPL build for this platform (e.g. ffmpeg-master-latest-win64-gpl.zip /
-    // -linux64-gpl.tar.xz / -linuxarm64-gpl.tar.xz), NOT the -shared variant (needs separate libs).
-    let (asset_name, url) = assets
-        .iter()
-        .find_map(|a| {
-            let name = a.get("name").and_then(Value::as_str)?;
-            let url = a.get("browser_download_url").and_then(Value::as_str)?;
-            (name.contains(want_substr)
-                && name.contains("-gpl")
-                && !name.contains("shared")
-                && name.ends_with(want_ext))
-            .then(|| (name.to_string(), url.to_string()))
-        })
-        .ok_or_else(|| format!("No {want_substr} GPL ffmpeg {want_ext} asset found in the latest release"))?;
 
     report(25, "Downloading ffmpeg (~80 MB)");
     let bytes = client
@@ -189,12 +366,10 @@ fn extract_from_tar_xz(bytes: &[u8], target: &Path, dir: &Path) -> Result<(), St
 
     // `-xJf` = extract + xz-decompress. Needs `tar` (and xz support) on the system — universal on
     // desktop distros, occasionally absent on minimal images.
-    let status = Command::new("tar")
-        .arg("-xJf")
-        .arg(&archive)
-        .arg("-C")
-        .arg(&out)
-        .status();
+    let mut tar = Command::new("tar");
+    tar.arg("-xJf").arg(&archive).arg("-C").arg(&out);
+    crate::child_env::sanitize(&mut tar);
+    let status = tar.status();
     let ok = match status {
         Ok(s) if s.success() => true,
         Ok(_) => false,

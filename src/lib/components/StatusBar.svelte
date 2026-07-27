@@ -112,6 +112,14 @@
     0%, 100% { opacity: 1; }
     50% { opacity: 0.35; }
   }
+  /* WebKitGTK → shared 1 Hz blink instead of a loop (see stores/pulseBlink.ts). */
+  :global(html.kite-blink-mode) .status-indicator.reconnecting {
+    animation: none;
+    opacity: 0.35;
+  }
+  :global(html.kite-blink-mode.kite-blink) .status-indicator.reconnecting {
+    opacity: 1;
+  }
 
   .status-indicator.connected {
     background: #59aa29;

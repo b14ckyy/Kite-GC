@@ -34,10 +34,30 @@ struct FileLogger {
     state: Mutex<LoggerState>,
 }
 
+/// Third-party crates whose Debug/Info output would bury ours. `reqwest`/`hyper` emit a line per HTTP
+/// connection, and Kite polls ADS-B, tiles and the video API continuously — a Debug-level log was
+/// ~90 % "starting new connection" noise, which is precisely the level a tester is asked to switch to.
+/// They stay fully visible from **Warn** upwards, so a real failure is never hidden.
+const NOISY_TARGETS: &[&str] = &[
+    "reqwest", "hyper", "hyper_util", "h2", "rustls", "tokio_util", "want", "mio",
+    "tao", "wry", "zbus", "tracing", "globset", "cranelift", "sqlx",
+];
+
+/// Is `target` one of `NOISY_TARGETS` (exact match or a `crate::module` child)?
+fn is_noisy(target: &str) -> bool {
+    NOISY_TARGETS.iter().any(|n| {
+        target.starts_with(n) && (target.len() == n.len() || target[n.len()..].starts_with("::"))
+    })
+}
+
 impl Log for FileLogger {
-    fn enabled(&self, _metadata: &Metadata) -> bool {
-        // The `log` macros already gate on `log::max_level()` before calling us, so the level filter
-        // is handled there. We accept anything that reaches this point.
+    fn enabled(&self, metadata: &Metadata) -> bool {
+        // The `log` macros already gate on `log::max_level()` before calling us, so the level filter is
+        // handled there. On top of that we drop sub-warning chatter from third-party crates (see
+        // `NOISY_TARGETS`) — the level the user picks is meant to control OUR verbosity.
+        if metadata.level() > Level::Warn && is_noisy(metadata.target()) {
+            return false;
+        }
         true
     }
 

@@ -173,6 +173,15 @@
     border: 2px solid #000;
     animation: warn-pulse 1s ease-in-out infinite;
   }
+  /* WebKitGTK → shared 1 Hz blink instead of a loop (see stores/pulseBlink.ts). The banner
+     is the loudest alert in the app, so it keeps a two-state change rather than going static. */
+  :global(html.kite-blink-mode) .banner.warning {
+    animation: none;
+    filter: brightness(0.82);
+  }
+  :global(html.kite-blink-mode.kite-blink) .banner.warning {
+    filter: brightness(1.1);
+  }
   .banner.warning .title,
   .banner.warning .action,
   .banner.warning .icon,

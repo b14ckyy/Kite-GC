@@ -312,6 +312,7 @@ fn run_decoder_capture_stdout(
 
 fn build_decoder_command(decoder: &Path, file_path: &Path, log_index: Option<u32>) -> Command {
     let mut command = Command::new(decoder);
+    crate::child_env::sanitize(&mut command);
     command
         .arg("--merge-gps")
         .arg("--datetime")

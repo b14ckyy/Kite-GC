@@ -26,3 +26,35 @@ pub fn get_log_path() -> Option<String> {
 pub fn log_session_settings(summary: String) {
     logging::log_session_settings(&summary);
 }
+
+/// Write a frontend diagnostic into the application log file.
+///
+/// Whole state machines live in the UI — the video source router and its RTSP reconnect loop above
+/// all — so the answer to "why did the stream abort?" was only ever a `console.warn` in DevTools. A
+/// tester on a Raspberry Pi has neither DevTools nor a console: a release build's stdout goes nowhere.
+/// This is the bridge, so those events land in the same file the Diagnostics page hands out.
+///
+/// `level` accepts "error" / "warn" / "info" / "debug" (anything else is treated as info). Records are
+/// tagged `ui::<area>` so a log reader can tell frontend lines from backend ones at a glance.
+#[tauri::command]
+pub fn log_frontend(level: String, area: String, message: String) {
+    let lvl = match level.to_ascii_lowercase().as_str() {
+        "error" => log::Level::Error,
+        "warn" | "warning" => log::Level::Warn,
+        "debug" => log::Level::Debug,
+        _ => log::Level::Info,
+    };
+    // `log!` needs a literal target, so build the record by hand — which also means applying the level
+    // gate ourselves (the macros normally do that before the logger is ever called).
+    if lvl > log::max_level() {
+        return;
+    }
+    let target = format!("ui::{area}");
+    log::logger().log(
+        &log::Record::builder()
+            .level(lvl)
+            .target(&target)
+            .args(format_args!("{message}"))
+            .build(),
+    );
+}

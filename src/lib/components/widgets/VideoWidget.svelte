@@ -15,7 +15,7 @@
   // tile underneath it.
   import { t } from 'svelte-i18n';
   import { onMount, onDestroy } from 'svelte';
-  import { videoStream, videoState, bindVideoEl, setMapLocation, setWidgetRect } from '$lib/stores/video';
+  import { videoStream, videoState, bindVideoEl, setMapLocation, setWidgetRect, reportMjpegError } from '$lib/stores/video';
   import VideoReconnectOverlay from '$lib/components/video/VideoReconnectOverlay.svelte';
 
   let { width = 300, height = 150 }: { width?: number; height?: number } = $props();
@@ -75,7 +75,7 @@
   {:else if $videoState.status === 'live' && $videoState.mjpegUrl}
     <!-- Native / MJPEG feed: an <img> multipart stream (no MediaStream). -->
     <!-- svelte-ignore a11y_missing_attribute -->
-    <img src={$videoState.mjpegUrl} class:mirror={$videoState.mirror} />
+    <img src={$videoState.mjpegUrl} class:mirror={$videoState.mirror} onerror={reportMjpegError} />
   {:else if $videoState.status === 'live'}
     <!-- svelte-ignore a11y_media_has_caption -->
     <video
@@ -118,6 +118,10 @@
   video,
   img {
     object-fit: cover; /* crop to fill the 2:1 tile */
+    /* Own compositing layer: a 60 fps feed then only re-rasters/uploads its own rect instead of
+       dirtying the shared content layer's tiles every frame (matters on WebKitGTK/Pi; <video> gets a
+       layer anyway, the MJPEG <img> does NOT unless promoted). */
+    will-change: transform;
   }
   video.mirror,
   img.mirror {

@@ -1,0 +1,53 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+
+// Hard-blink mode for the app's looping status indicators — WebKitGTK only.
+//
+// On WebKitGTK a looping CSS animation makes the compositor rebuild the whole window every frame. The
+// cost is per frame produced, not per pixel changed, so the GCS live dot — eight pixels — measured
+// ~46 % of a core, and stayed there when panned right out of the viewport. `will-change` changed
+// nothing, `steps()` changed nothing (it quantises the value, not the frame production), and CSS has
+// no frame-rate control at all. Measured on the same element: 60 Hz → 46 %, 5 Hz → 23 %, 2 Hz → 14 %,
+// 1 Hz → 6 %. Only producing fewer frames helps.
+//
+// So the indicators stop animating and follow this clock instead: one interval for the whole app,
+// toggling one class on the root element. That is deliberate — a frame carries every change at once,
+// so ten blinking indicators cost the same as one, and independent per-element timers would land in
+// separate frames and become additive. Verified on a Debian laptop: global system load with the GCS
+// dot live fell from 15-17 % to 3-4 %.
+//
+// A root class rather than component state because the map indicators are Leaflet divIcons built as
+// HTML strings — they cannot carry a Svelte class binding, but CSS reaches them fine.
+//
+// Not tied to power-save on purpose: that setting also caps the 3D view at 20 fps, which is a very
+// different trade (Cesium renders on the GPU). Nobody should have to accept a stuttering globe to get
+// sane indicator cost. Windows and macOS never enter this mode and keep the smooth pulses.
+
+import { isWebKitGtk } from '../platform';
+
+/** Set for the whole session on WebKitGTK; CSS gates `animation: none` on it. */
+const MODE_CLASS = 'kite-blink-mode';
+/** Toggled at BLINK_INTERVAL_MS; CSS gates the "bright" half of each indicator on it. */
+const BLINK_CLASS = 'kite-blink';
+/** Half-period — a full on/off cycle takes 2 s. Slow on purpose: cost scales with the flip rate, and
+ *  this is where it stops mattering while still reading as a live indicator rather than a glitch. */
+const BLINK_INTERVAL_MS = 1000;
+
+let timer: ReturnType<typeof setInterval> | undefined;
+
+/** Start the blink clock. No-op off WebKitGTK, and idempotent. Returns a teardown fn. */
+export function initPulseBlink(): () => void {
+  if (!isWebKitGtk || typeof document === 'undefined' || timer) return () => {};
+  const root = document.documentElement;
+  root.classList.add(MODE_CLASS, BLINK_CLASS);
+  let on = true;
+  timer = setInterval(() => {
+    on = !on;
+    root.classList.toggle(BLINK_CLASS, on);
+  }, BLINK_INTERVAL_MS);
+  return () => {
+    clearInterval(timer);
+    timer = undefined;
+    root.classList.remove(MODE_CLASS, BLINK_CLASS);
+  };
+}

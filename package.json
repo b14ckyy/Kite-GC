@@ -1,6 +1,6 @@
 {
   "name": "kite-gc",
-  "version": "1.0.0-b3",
+  "version": "1.0.0-rc1",
   "description": "Kite Ground Control — Universal Ground Control Station",
   "type": "module",
   "scripts": {

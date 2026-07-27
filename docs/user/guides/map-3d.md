@@ -101,8 +101,10 @@ In **Settings → Interface → Map**:
 - **Real Daytime and Lighting (3D)** — light the globe with the real sun position (day/night, shadows).
 - **Log Replay Time (3D)** — during replay, drive that lighting from the log's actual time of day, so a
   dusk flight looks like dusk.
-- **3D Power Saving** — cap the 3D frame rate to save battery: **Off (60 fps)**, **On (20 fps)** or
-  **Auto** (20 fps on battery). Helpful on laptops and tablets.
+- **Power Saving** — cap the 3D frame rate to save battery: **Off (60 fps)**, **On (20 fps)** or
+  **Auto** (20 fps on battery). Helpful on laptops and tablets. While active it also drops the smooth
+  bar animations in the speed and battery widgets (they jump straight to the current value), which
+  saves noticeable CPU during a flight — the readings are unchanged.
 
 ## Where to go next
 

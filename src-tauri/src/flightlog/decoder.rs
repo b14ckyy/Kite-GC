@@ -16,9 +16,7 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use serde_json::Value;
-
-const RELEASES_API: &str = "https://api.github.com/repos/iNavFlight/blackbox-tools/releases/latest";
+const REPO: &str = "iNavFlight/blackbox-tools";
 const RELEASES_PAGE: &str = "https://github.com/iNavFlight/blackbox-tools/releases";
 const HTTP_USER_AGENT: &str = "Kite-GC blackbox-decode-fetch";
 
@@ -85,6 +83,7 @@ pub fn version() -> Option<String> {
     let decoder = super::blackbox::find_decoder()?;
     let mut cmd = std::process::Command::new(&decoder);
     cmd.arg("--version");
+    crate::child_env::sanitize(&mut cmd);
     // Don't flash a console window on Windows (this runs whenever Settings is opened).
     #[cfg(windows)]
     {
@@ -142,27 +141,17 @@ pub async fn download<F: FnMut(u8, &str)>(mut report: F) -> Result<PathBuf, Stri
         ));
     };
 
+    // Resolved without the GitHub REST API (rate-limited per IP → 403 behind shared/CGNAT addresses):
+    // the `releases/latest` redirect gives the tag, the release page's own asset fragment gives the
+    // names. Unlike go2rtc/ffmpeg the names carry the version, so they can't be constructed up front.
     report(5, "Querying latest release");
+    let tag = crate::github_release::latest_tag(HTTP_USER_AGENT, REPO).await?;
+    let assets = crate::github_release::release_assets(HTTP_USER_AGENT, REPO, &tag).await?;
+
     let client = reqwest::Client::builder()
         .user_agent(HTTP_USER_AGENT)
         .build()
         .map_err(|e| format!("HTTP client error: {e}"))?;
-
-    let release: Value = client
-        .get(RELEASES_API)
-        .send()
-        .await
-        .map_err(|e| format!("Release query failed: {e}"))?
-        .error_for_status()
-        .map_err(|e| format!("Release query failed: {e}"))?
-        .json()
-        .await
-        .map_err(|e| format!("Release JSON parse failed: {e}"))?;
-
-    let assets = release
-        .get("assets")
-        .and_then(Value::as_array)
-        .ok_or("Latest release has no downloadable assets")?;
 
     // Match the asset by OS + arch + extension. Arch needs aliases: the release names the Linux x64
     // build "x64_64" (not "x86_64") and ARM as "aarch64". Prefer an arch match, then any OS asset.
@@ -171,18 +160,15 @@ pub async fn download<F: FnMut(u8, &str)>(mut report: F) -> Result<PathBuf, Stri
         "aarch64" => vec!["aarch64", "arm64"],
         other => vec![other],
     };
-    let pick = |pred: &dyn Fn(&str) -> bool| -> Option<(String, String)> {
-        assets.iter().find_map(|a| {
-            let name = a.get("name").and_then(Value::as_str)?;
-            let url = a.get("browser_download_url").and_then(Value::as_str)?;
-            pred(name).then(|| (name.to_string(), url.to_string()))
-        })
+    let pick = |pred: &dyn Fn(&str) -> bool| -> Option<String> {
+        assets.iter().find(|n| pred(n)).cloned()
     };
-    let (asset_name, url) = pick(&|n| {
+    let asset_name = pick(&|n| {
         n.contains(os_key) && n.ends_with(ext) && arch_aliases.iter().any(|a| n.contains(a))
     })
     .or_else(|| pick(&|n| n.contains(os_key) && n.ends_with(ext)))
-    .ok_or_else(|| format!("No blackbox_decode {os_key} asset found in the latest release"))?;
+    .ok_or_else(|| format!("No blackbox_decode {os_key} asset found in release {tag}"))?;
+    let url = crate::github_release::asset_url(REPO, &tag, &asset_name);
 
     report(25, "Downloading blackbox_decode");
     let bytes = client

@@ -23,6 +23,7 @@
     setVideoResolution,
     setCameraFps,
     setVideoMirror,
+    setDisableHwAccel,
     setVideoKind,
     setRtspUrl,
     setRtspTransport,
@@ -30,6 +31,7 @@
     updateRtspConnection,
     removeRtspConnection,
     selectRtspConnection,
+    reportMjpegError,
     type RtspTransport,
     toggleFloating,
     enterPiP,
@@ -41,8 +43,11 @@
     setNativeDevice,
     setNativeResolution,
     setNativeFramerate,
+    setNativeCodec,
   } from '$lib/stores/video';
   import {
+    codecsFor,
+    codecLabel,
     resolutionsFor,
     frameratesFor,
     resolutionLabel,
@@ -63,13 +68,20 @@
     bindVideoEl(videoEl, $videoStream);
   });
 
-  // Populate the device lists when the panel opens. The getUserMedia list is only consumed by the
-  // `camera` source; on Linux, enumerating it drives WebKit's GStreamer/pipewire stack, which can hang
-  // ~35 s on an unreachable pipewire and freeze the app — so there we enumerate it only when the camera
-  // source is actually selected. The native list comes from the Rust V4L2 backend (no pipewire).
+  // Populate the getUserMedia device list. It is only consumed by the `camera` source; on Linux,
+  // enumerating it drives WebKit's GStreamer/pipewire stack, which can hang ~35 s on an unreachable
+  // pipewire and freeze the app — so there we enumerate it only while the camera source is selected.
+  // (The native list comes from the Rust backend and is enumerated once on mount, below.)
+  //
+  // The condition MUST come through this narrow $derived: an effect that reads `$videoState` directly
+  // depends on the WHOLE store, and every enumeration writes back into it (devices / nativeDevices) —
+  // which re-triggers the effect forever. That hit Linux only, because there the `||` short-circuit
+  // does not skip the store read: a permanent enumerate → patch → enumerate loop (IPC + an ffmpeg
+  // probe process + a localStorage write per round, and a stream restart when the saved device is
+  // stale). A $derived boolean re-evaluates but only propagates when it actually flips.
+  const needCameraList = $derived(!isLinux || $videoState.kind === 'camera');
   $effect(() => {
-    if (!isLinux || $videoState.kind === 'camera') void enumerateVideoDevices();
-    void enumerateNativeDevices();
+    if (needCameraList) void enumerateVideoDevices();
   });
 
   // ── RTSP / V4L2 dependencies ──────────────────────────────────────────
@@ -139,6 +151,10 @@
   onMount(() => {
     void checkEngine();
     void checkFfmpeg();
+    // Native capture devices: enumerated once per panel open (the Rust backend reads V4L2 sysfs /
+    // DirectShow / AVFoundation). Deliberately NOT in an $effect — it writes `nativeDevices` back into
+    // the video store, which would make any store-reading effect re-trigger itself (see above).
+    void enumerateNativeDevices();
     const unlisteners: UnlistenFn[] = [];
     void listen<{ pct: number; msg: string }>('go2rtc-download-progress', (e) => {
       enginePct = e.payload.pct;
@@ -158,6 +174,18 @@
   let mjpegFps = $state(0);
   let _mjpegFrames = 0;
   let _mjpegLast = performance.now();
+  // Per-frame hook of the MJPEG <img>: count for the fps meter AND report the picture size. The
+  // <video> path gets width/height from onloadedmetadata, but an <img> feed never reported it — on
+  // Linux/RTSP the info line showed dashes and the floating window kept the default 16:9 aspect even
+  // for a 3:2 stream. naturalWidth is valid from the first displayed frame. (The fps half stays
+  // engine-dependent: WebKitGTK fires load only once for a multipart image, so no rate is measurable
+  // there — the resolution is, from that single event.)
+  function mjpegFrame(e: Event): void {
+    mjpegFrameTick();
+    const img = e.currentTarget as HTMLImageElement;
+    if (img.naturalWidth) reportVideoSize(img.naturalWidth, img.naturalHeight);
+  }
+
   function mjpegFrameTick(): void {
     _mjpegFrames++;
     const now = performance.now();
@@ -169,14 +197,18 @@
     }
   }
 
-  // Measured (real) frame rate via requestVideoFrameCallback.
+  // Measured (real) frame rate via requestVideoFrameCallback. The live flag goes through a $derived
+  // for the same reason as the enumeration above: reading `$videoState` inside the effect would make it
+  // depend on the whole store, so every unrelated patch (each reconnect-attempt tick, every widget-rect
+  // update) cancelled and re-registered the frame callback — resetting the counter each time.
   let measuredFps = $state(0);
+  const feedLive = $derived($videoState.status === 'live');
   $effect(() => {
     const el = videoEl as (HTMLVideoElement & {
       requestVideoFrameCallback?: (cb: (now: number) => void) => number;
       cancelVideoFrameCallback?: (h: number) => void;
     }) | null;
-    if (!el || $videoState.status !== 'live' || !el.requestVideoFrameCallback) {
+    if (!el || !feedLive || !el.requestVideoFrameCallback) {
       measuredFps = 0;
       return;
     }
@@ -197,14 +229,22 @@
     return () => el.cancelVideoFrameCallback?.(handle);
   });
 
-  const RESOLUTIONS: VideoResolution[] = ['auto', '720p', '1080p'];
+  const RESOLUTIONS: VideoResolution[] = ['auto', '480p', '720p', '1080p'];
   const CAMERA_FPS: CameraFps[] = ['auto', '30', '60'];
 
-  // Native-capture cascade, derived from the probed modes (curated ∩ device). Codec is not a control
-  // — getUserMedia (the primary path) picks it — so the cascade is resolution → framerate only.
-  const nativeResolutions = $derived(resolutionsFor($videoState.nativeModes));
+  // Native-capture cascade, derived from the device's real probed modes: Format (codec) → Resolution
+  // → Framerate. Each level lists exactly what the device reports for the level(s) above it.
+  const nativeCodecs = $derived(codecsFor($videoState.nativeModes));
+  const nativeResolutions = $derived(
+    resolutionsFor($videoState.nativeModes, $videoState.nativeSel.codec),
+  );
   const nativeFramerates = $derived(
-    frameratesFor($videoState.nativeModes, $videoState.nativeSel.width, $videoState.nativeSel.height),
+    frameratesFor(
+      $videoState.nativeModes,
+      $videoState.nativeSel.codec,
+      $videoState.nativeSel.width,
+      $videoState.nativeSel.height,
+    ),
   );
 
   // Info-line frame rate. The native getUserMedia path (and camera) show measured/negotiated; the
@@ -216,6 +256,37 @@
     const cur = s.mjpegUrl ? mjpegFps : measuredFps;
     const curStr = cur ? cur.toFixed(0) : '–';
     return s.frameRate ? `${curStr}/${Math.round(s.frameRate)}` : curStr;
+  });
+
+  // Diagnostic: what the LIVE feed actually does. Two independent questions, so two badges:
+  //   • transcode — reported by the backend for this stream (`activeTranscode`), never inferred from
+  //     what the host *could* do: an MJPEG camera is stream-copied and a user can force software, so
+  //     "this host has VAAPI" says nothing about the feed in front of you.
+  //   • surface   — `<video>` on a hardware overlay, or an `<img>` rastered with the rest of the page.
+  // A `<video>` feed transcodes nothing (the WebView decodes it), so it shows only the surface badge.
+  const TRANSCODE_LABEL: Record<string, string> = { vaapi: 'VAAPI', v4l2m2m: 'V4L2' };
+  const pipeline = $derived.by(():
+    | { method: string; transcode: string | null; transcodeHw: boolean; surfaceHw: boolean }
+    | null => {
+    const s = $videoState;
+    if (s.status !== 'live') return null;
+    if (s.mjpegUrl) {
+      const mode = s.activeTranscode;
+      const engine = mode ? TRANSCODE_LABEL[mode] : undefined;
+      const via = engine ?? (mode === 'copy' ? $t('video.pipeline.copy') : undefined);
+      return {
+        method: `${s.kind === 'rtsp' ? 'go2rtc' : 'ffmpeg'} → MJPEG${via ? ` (${via})` : ''}`,
+        transcode: mode,
+        // A stream copy is better than hardware — there is nothing to accelerate — so it counts as
+        // "not costing us anything", not as a software fallback.
+        transcodeHw: !!engine || mode === 'copy',
+        surfaceHw: false,
+      };
+    }
+    if (s.kind === 'rtsp') {
+      return { method: `go2rtc → WebRTC (${s.rtspEngine ?? 'native'})`, transcode: null, transcodeHw: true, surfaceHw: true };
+    }
+    return { method: 'getUserMedia', transcode: null, transcodeHw: true, surfaceHw: true };
   });
 </script>
 
@@ -239,7 +310,8 @@
           src={$videoState.mjpegUrl}
           alt="Live video"
           class:mirror={$videoState.mirror}
-          onload={mjpegFrameTick}
+          onload={mjpegFrame}
+          onerror={reportMjpegError}
         />
       {:else}
         <!-- svelte-ignore a11y_media_has_caption -->
@@ -276,6 +348,28 @@
         {$videoState.width ?? '–'}×{$videoState.height ?? '–'}
         · {fpsText} fps
       </div>
+      {#if pipeline}
+        <div class="pipeline-line" class:sw={!pipeline.transcodeHw}>
+          <span class="pl-dot"></span>
+          <span class="pl-method">{pipeline.method}</span>
+          <span class="pl-badges">
+            {#if pipeline.transcode}
+              <span class="pl-badge" class:sw={!pipeline.transcodeHw}>
+                {$t('video.pipeline.transcode')}:
+                {pipeline.transcode === 'copy'
+                  ? $t('video.pipeline.copy')
+                  : pipeline.transcodeHw
+                    ? $t('video.pipeline.hw')
+                    : $t('video.pipeline.sw')}
+              </span>
+            {/if}
+            <span class="pl-badge" class:sw={!pipeline.surfaceHw}>
+              {$t('video.pipeline.surface')}:
+              {pipeline.surfaceHw ? $t('video.pipeline.hw') : $t('video.pipeline.sw')}
+            </span>
+          </span>
+        </div>
+      {/if}
     {/if}
 
     <label class="field">
@@ -347,6 +441,18 @@
       {#if $videoState.nativeDevices.length === 0}
         <p class="hint">{$t('video.noNativeDevices')}</p>
       {:else}
+        <label class="field">
+          <span class="label">{$t('video.format')}</span>
+          <select
+            value={$videoState.nativeSel.codec}
+            onchange={(e) => void setNativeCodec((e.currentTarget as HTMLSelectElement).value)}
+          >
+            {#each nativeCodecs as c}
+              <option value={c}>{codecLabel(c)}</option>
+            {/each}
+          </select>
+        </label>
+
         <label class="field">
           <span class="label">{$t('video.resolution')}</span>
           <select
@@ -509,6 +615,18 @@
       <Toggle checked={$videoState.mirror} onchange={(c) => setVideoMirror(c)} id="vp-mirror" />
       <span class="label">{$t('video.mirror')}</span>
     </div>
+
+    <!-- Escape hatch: some driver/hardware combinations pass the backend probe but still misbehave on
+         a live feed. Hardware stays the default; this forces the software transcode. -->
+    <div class="field-row">
+      <Toggle
+        checked={$videoState.disableHwAccel}
+        onchange={(c) => void setDisableHwAccel(c)}
+        id="vp-no-hwaccel"
+      />
+      <span class="label">{$t('video.disableHwAccel')}</span>
+    </div>
+    <p class="hint">{$t('video.disableHwAccelHint')}</p>
   </div>
 {/snippet}
 
@@ -550,10 +668,12 @@
     align-items: center;
     justify-content: center;
   }
-  .preview video { width: 100%; height: 100%; object-fit: contain; display: block; }
+  /* will-change: own compositing layer — see VideoWidget: keeps the 60 fps MJPEG <img> from
+     dirtying shared layer tiles every frame on WebKitGTK. */
+  .preview video { width: 100%; height: 100%; object-fit: contain; display: block; will-change: transform; }
   .preview video.mirror { transform: scaleX(-1); }
   .preview video.hidden { visibility: hidden; }
-  .preview img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .preview img { width: 100%; height: 100%; object-fit: contain; display: block; will-change: transform; }
   .preview img.mirror { transform: scaleX(-1); }
   .preview-placeholder {
     position: absolute;
@@ -573,6 +693,31 @@
     margin-top: -6px;
     letter-spacing: 0.02em;
   }
+  /* Diagnostic pipeline readout: dot + method + a HW/SW badge. Green = hardware-composited <video>
+     (getUserMedia / go2rtc-WebRTC); amber = the software ffmpeg→MJPEG <img> fallback. */
+  .pipeline-line {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: #cfe6f2;
+    letter-spacing: 0.02em;
+  }
+  .pl-dot { width: 7px; height: 7px; border-radius: 50%; background: #4fc47a; flex: 0 0 auto; }
+  .pipeline-line.sw .pl-dot { background: #e0a53c; }
+  .pl-method { font-variant-numeric: tabular-nums; }
+  .pl-badges { margin-left: auto; display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+  .pl-badge {
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+    color: #4fc47a;
+    background: rgba(79, 196, 122, 0.14);
+  }
+  .pl-badge.sw { color: #e0a53c; background: rgba(224, 165, 60, 0.14); }
 
   .field { display: flex; flex-direction: column; gap: 4px; }
   .field-row { display: flex; align-items: center; gap: 8px; }

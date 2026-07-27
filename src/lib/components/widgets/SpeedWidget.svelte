@@ -234,6 +234,14 @@
   .vbar-fill.acc {
     transition: height 0.15s ease, bottom 0.15s ease, top 0.15s ease;
   }
+  /* Low-power mode: drop the bar smoothing. These transitions animate layout properties, so each
+     frame costs a reflow + repaint — and in flight the values change continuously, which makes the
+     transitions overlap into a permanent reflow at display rate. Snapping to the value is free and
+     the reading is identical. */
+  :global(html.kite-low-power) .vbar-fill.thr,
+  :global(html.kite-low-power) .vbar-fill.acc {
+    transition: none;
+  }
   .vbar-fill.acc.pos { background: #59aa29; } /* accelerating */
   .vbar-fill.acc.neg { background: #f5a623; } /* decelerating */
 </style>

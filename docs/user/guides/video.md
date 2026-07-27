@@ -18,6 +18,17 @@ is remembered between sessions.
   **transport**, and optionally **save the connection** to a list for one-click recall — see
   **[RTSP connections](#rtsp-connections-transport-and-auto-reconnect)** below.
 
+!!! info "Supported RTSP video codecs: H.264 and MJPEG"
+    Those two are what Kite officially supports and tests over RTSP today. **H.264** is the usual
+    choice and works everywhere. **MJPEG** costs more bandwidth but is passed through untouched — on
+    Linux that makes it the lightest option by a wide margin (see the
+    [platform notes](#platform-notes-what-to-expect-per-operating-system)).
+
+    Other codecs — **HEVC/H.265**, VP8, VP9, AV1 — are **not supported**. Some may happen to work on
+    some systems, but none is tested, and a stream Kite cannot play usually shows up as an endless
+    *"Reconnecting…"* rather than a clear error. If you need one of them, please open a request: the
+    limit is that we have no way to test it, not that it is impossible.
+
 ![The Video panel](../assets/guides/video/video_panel.png)
 /// caption
 The Video panel — source kind, device / RTSP URL, resolution, frame rate and mirror, with Start/Stop.
@@ -41,11 +52,19 @@ Native additionally reaches devices that only the capture engine can see.
 
 ### Resolution, frame rate and mirror
 
-- **Resolution** — Camera offers Auto / 720p / 1080p; Native offers the device-verified list.
+- **Resolution** — Camera offers Auto / 480p / 720p / 1080p; Native offers the device-verified list.
+- **Format** (Native only) — the capture format the device reports, e.g. MJPEG or a raw one. **MJPEG is
+  the efficient choice**: the picture is passed straight through with no conversion at all.
 - **Frame rate** — Camera offers Auto / 30 / 60 fps; Native offers the frame rates the device reports
-  for the chosen resolution.
+  for the chosen resolution and format.
 - **Mirror** — flip the image horizontally (handy for front-facing cameras). Applies to every place the
   feed is shown.
+- **Disable hardware acceleration** — force the CPU for any stream conversion. Only needed if the
+  picture is broken or unstable with hardware acceleration; the setting is remembered.
+
+While a feed is live the panel names the pipeline underneath the picture, with two labels:
+**Transcode** (`Copy` = nothing is converted · `Hardware` · `Software`) and **Surface** (how the
+picture reaches the screen). `Copy` is the cheapest possible case.
 
 ### RTSP connections, transport and auto-reconnect
 
@@ -87,8 +106,9 @@ The same feed can appear in several places at once (they all share one stream):
   dragging it to the **bottom-left corner snaps it there**, where it **displaces the bottom widget dock**
   to make room (the dock shrinks by the window's size). Drag it away from the corner to un-snap and
   free-float. The **top-right corner grip resizes** it (aspect-locked, touch-friendly).
-- **In a detached window** — a separate, free-floating **OS window** you can place anywhere, including
-  **outside the app** or on a second monitor. Opened from the Video panel; because it lives outside the
+- **In a detached window** (**Windows only** — see the [platform notes](#platform-notes-what-to-expect-per-operating-system);
+  the button is simply absent elsewhere) — a separate, free-floating **OS window** you can place anywhere,
+  including **outside the app** or on a second monitor. Opened from the Video panel; because it lives outside the
   app it's closed from the OS (not from inside Kite), and — unlike the floating window — it **can't host
   the map** (no swap). It's also the **lightest** option: the OS draws it directly, so on low-power
   systems using only the detached window keeps GPU load to a minimum.
@@ -117,6 +137,56 @@ How interactive the swapped-in **mini-map** is depends on where it landed:
 /// caption
 Swapped: the live video fills the background while the map rides in the smaller frame.
 ///
+
+## Platform notes: what to expect per operating system
+
+Video is the one part of Kite that depends heavily on components Kite does **not** ship: the operating
+system's built-in browser engine and its media plugins. That works out very differently per platform,
+and it is only fair to say so plainly.
+
+**Windows and macOS are the more predictable hosts for video.** Both ship a single, consistent media
+stack, so a network stream is played directly by the system's hardware-accelerated decoder. If a smooth,
+low-CPU, low-latency feed is important to you — and especially if you plan to fly with it — those are
+the platforms we can most confidently recommend.
+
+**On Linux, video support is provided as-is.** Kite runs in WebKitGTK there, which delegates all video
+work to GStreamer — and which plugins your distribution installs is entirely up to your distribution.
+There are hundreds of combinations of distro, desktop, graphics driver and plugin set, and we cannot
+test or support them all. Concretely, these are things Kite cannot fix from its side:
+
+- **Whether an RTSP stream can be played directly at all.** Many Linux systems — Raspberry Pi OS and
+  current Debian desktops among them — run a browser engine that does not expose the direct (WebRTC)
+  video path, and that cannot be installed after the fact. Kite then falls back to a **converted image
+  stream**. It works, but it adds a conversion and an extra hop, so **expect noticeably more latency
+  than on Windows or macOS** — this is the single biggest practical difference. If a smaller delay
+  matters more than resolution, **send a smaller or slower stream from the source** (e.g. 480p instead
+  of 720p, or 30 instead of 60 fps): that saves work at every stage at once.
+- **Whether that conversion uses your graphics hardware.** Kite tests your machine at start-up and uses
+  the GPU for the conversion when it can — on Intel and AMD desktop graphics via VAAPI, and on
+  Raspberry Pi 3/4 class boards via their built-in decoder. Where that works it is a large saving
+  (measured on an Intel laptop: roughly a seventh of the CPU load). But it depends entirely on your
+  driver stack: **NVIDIA cards are not specifically covered**, and any machine whose test fails simply
+  converts on the CPU instead. The Video panel names the path in use, and the diagnostic log records
+  the verdict (see **[Video troubleshooting](../troubleshooting/video.md)**).
+- **A camera that already delivers MJPEG is the best case on Linux.** Nothing is converted at all —
+  the picture is passed through unchanged, which costs almost nothing and gives the lowest delay
+  Linux can offer. If latency is your priority on Linux, prefer an MJPEG source. The Video panel shows
+  **Transcode: Copy** when this applies.
+- **You can force the CPU path.** If hardware conversion misbehaves on your machine, switch on
+  **Disable hardware acceleration** in the Video panel; the setting is remembered.
+- **Local camera quirks.** On Linux the system camera layer can be slow or unresponsive on some setups.
+  Kite works around the worst cases (it caps the automatic resolution and frame rate, and routes the
+  advanced capture path around that layer entirely), but a camera the system itself can't open cleanly
+  is out of reach.
+- **Picture-in-Picture** (the detached "Video Window") is a Windows-only feature — neither the Linux nor
+  the macOS browser engine offers the interface Kite would need for it. All the in-app surfaces
+  (panel, widget, floating window, full-screen swap) work everywhere.
+
+None of this means Linux is unusable — a well-equipped desktop distribution generally plays video fine,
+and it is a first-class platform for everything else Kite does. It only means that **if video is your
+priority, Linux is the platform where you may have to do some work yourself**, and we can't promise a
+particular result on a particular machine. In short: **Windows and macOS for maximum compatibility and
+the lowest delay; on Linux, an MJPEG source is the setup that gets closest.**
 
 ## Where to go next
 

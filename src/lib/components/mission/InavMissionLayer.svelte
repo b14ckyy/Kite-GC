@@ -920,6 +920,15 @@
     0%, 100% { filter: brightness(1)   drop-shadow(0 0 2px rgba(89,170,41,0.55)); }
     50%      { filter: brightness(1.6) drop-shadow(0 0 9px rgba(89,170,41,0.95)); }
   }
+  /* WebKitGTK → shared 1 Hz blink instead of a loop (see stores/pulseBlink.ts). Measured
+     ~109 % of a core while looping, and unchanged with the waypoint panned out of the viewport. */
+  :global(html.kite-blink-mode .mission-wp-active) {
+    animation: none;
+    filter: brightness(1) drop-shadow(0 0 2px rgba(89, 170, 41, 0.55));
+  }
+  :global(html.kite-blink-mode.kite-blink .mission-wp-active) {
+    filter: brightness(1.6) drop-shadow(0 0 9px rgba(89, 170, 41, 0.95));
+  }
   /* Jump repeat-count badge (↺N) pinned near the source waypoint — purple to match the jump line. */
   :global(.mission-jump-badge) {
     display: flex; align-items: center; justify-content: center;

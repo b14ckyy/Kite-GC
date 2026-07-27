@@ -54,6 +54,16 @@
     border-radius: 50%;
     animation: rc-spin 0.8s linear infinite;
   }
+  /* WebKitGTK → the shared 1 Hz blink instead of spinning (see stores/pulseBlink.ts). Included
+     despite looking transient: the RTSP reconnect loop retries indefinitely, so this can turn for
+     minutes while a link is down — and a spinner is a looping animation like any other. */
+  :global(html.kite-blink-mode) .rc-spinner {
+    animation: none;
+    opacity: 0.4;
+  }
+  :global(html.kite-blink-mode.kite-blink) .rc-spinner {
+    opacity: 1;
+  }
   .rc-text {
     color: #f5a623;
     font-size: 13px;

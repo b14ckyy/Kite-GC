@@ -47,6 +47,19 @@ sudo apt install -y \
     `libwebkit2gtk-4.1-dev` is the Tauri 2 / WebKitGTK 4.1 package — you need a distro new enough to
     ship 4.1 (Ubuntu 22.04+ / Debian 12+). Install Node.js, Rust and just via their official methods.
 
+!!! warning "Build on the oldest system you want to support"
+    Two things follow from the build host, and both reach the user.
+
+    **glibc is never bundled** — not even in the AppImage — so the highest `GLIBC_*` symbol in the
+    binary becomes a hard minimum for everyone running it. Building on Debian 13 produces something
+    that will not start on Ubuntu 22.04.
+
+    **The AppImage bundles the build host's WebKitGTK** (linuxdeploy takes what is installed), so the
+    build machine decides the browser engine every AppImage user gets. Avoid the **2.50 series**:
+    stopping a video stream can leave it spinning on a full CPU core until the app exits. 2.52 is
+    clean. That is why the release workflow builds on Ubuntu 24.04 rather than an older base — the
+    `.deb` and `.rpm` use the *system* engine and are unaffected either way, but they share the job.
+
 ### macOS
 
 1. **Xcode Command Line Tools** — `xcode-select --install` (compiler / linker + SDK).

@@ -170,6 +170,14 @@
   @keyframes bat-alert {
     50% { box-shadow: 0 0 calc(var(--ws) * 0.1) rgba(212, 0, 0, 0.85); }
   }
+  /* WebKitGTK → shared 1 Hz blink instead of a loop (see stores/pulseBlink.ts). Measured
+     ~120 % of a core while looping: it animates `box-shadow`, a paint property, on a blurred card. */
+  :global(html.kite-blink-mode) .widget-card.alert {
+    animation: none;
+  }
+  :global(html.kite-blink-mode.kite-blink) .widget-card.alert {
+    box-shadow: 0 0 calc(var(--ws) * 0.1) rgba(212, 0, 0, 0.85);
+  }
   .w-label {
     display: flex;
     align-items: center;
@@ -237,5 +245,11 @@
     height: 100%;
     border-radius: calc(var(--ws) * 0.03);
     transition: width 0.5s ease;
+  }
+  /* Low-power mode: no width smoothing — animating width reflows every frame, and the pack level
+     updates continuously in flight. The bar snaps to the current value instead. Gated on
+     `kite-low-power`, not the blink class: this saving is worth having on every platform. */
+  :global(html.kite-low-power) .bat-bar-fill {
+    transition: none;
   }
 </style>

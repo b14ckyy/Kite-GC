@@ -2284,6 +2284,9 @@
     border-radius: 50%;
     box-sizing: border-box;
     pointer-events: none;
+    /* Same reason as .gcs-live below: the pulse must ride on its own compositor layer, or each frame
+       repaints the full-screen map layer (and re-blurs everything backdrop-filtered above it). */
+    will-change: opacity, transform;
   }
   :global(.radar-alert-divicon .radar-alert-ring.caution) {
     border: 2px solid #f4c020;
@@ -2302,6 +2305,17 @@
   @keyframes radar-alert-warning {
     0%, 100% { opacity: 0.55; transform: translate(-50%, -50%) scale(0.85); }
     50% { opacity: 1; transform: translate(-50%, -50%) scale(1.15); }
+  }
+  /* WebKitGTK → shared 1 Hz blink instead of a loop (see stores/pulseBlink.ts). The rings
+     keep their scale pulse as a two-state change so the alert still reads as urgent. */
+  :global(html.kite-blink-mode .radar-alert-divicon .radar-alert-ring) {
+    animation: none;
+    opacity: 0.5;
+    transform: translate(-50%, -50%) scale(0.9);
+  }
+  :global(html.kite-blink-mode.kite-blink .radar-alert-divicon .radar-alert-ring) {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.1);
   }
   @media (prefers-reduced-motion: reduce) {
     :global(.radar-alert-divicon .radar-alert-ring) { animation: none !important; }
@@ -2326,7 +2340,13 @@
     cursor: move;
     border-style: dashed;
   }
-  /* Continuous: a small green "live" dot, top-right. */
+  /* Continuous: a small green "live" dot, top-right.
+     `will-change: opacity` is load-bearing, not a micro-optimisation: without it this infinite pulse
+     has no compositor layer of its own, so every frame invalidates the enclosing map layer — which is
+     full-screen, and sits under several backdrop-filter surfaces that must then re-sample and re-blur.
+     An 8px dot cost ~25 % CPU here and ~70 % on a weak laptop, permanently, even with the marker
+     scrolled far outside the viewport (the invalidated rect still lives in that layer). Promoted, the
+     animation is a pure layer-alpha change: no repaint, no re-blur. */
   :global(.gcs-icon .gcs-dot .gcs-live) {
     position: absolute;
     top: -1px;
@@ -2342,6 +2362,16 @@
   @keyframes gcs-live-pulse {
     0%, 100% { opacity: 0.5; }
     50% { opacity: 1; }
+  }
+  /* WebKitGTK → shared 1 Hz blink instead of a loop. This dot is the element the whole
+     measurement was done on: ~46 % of a core, unchanged by `will-change`, by `steps()`, or by panning
+     it right out of the viewport. See stores/pulseBlink.ts. */
+  :global(html.kite-blink-mode .gcs-icon .gcs-dot .gcs-live) {
+    animation: none;
+    opacity: 0.5;
+  }
+  :global(html.kite-blink-mode.kite-blink .gcs-icon .gcs-dot .gcs-live) {
+    opacity: 1;
   }
   @media (prefers-reduced-motion: reduce) {
     :global(.gcs-icon .gcs-dot .gcs-live) { animation: none; }

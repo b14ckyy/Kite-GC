@@ -18,10 +18,11 @@
   import { fcChannels } from "$lib/stores/rcMirror";
   import { boxName } from "$lib/helpers/inavModes";
   import { getPerf3dViewer, perf3dFps, perf3dForceContinuous, perf3dAttached } from "$lib/stores/perf3d";
+  import { videoState, videoRtcStats } from "$lib/stores/video";
 
   let { onclose }: { onclose: () => void } = $props();
 
-  type Tab = 'msp' | 'mavlink' | 'alerts' | 'telemetry' | 'rc' | 'performance';
+  type Tab = 'msp' | 'mavlink' | 'alerts' | 'telemetry' | 'rc' | 'performance' | 'video';
   let tab = $state<Tab>('msp');
 
   // ── 3D performance live-tuning (dev) — mutate the running Cesium scene to localise the
@@ -408,6 +409,7 @@
     <button class="tab" class:active={tab === 'alerts'} onclick={() => tab = 'alerts'}>{$t('debug.tabAlerts')}</button>
     <button class="tab" class:active={tab === 'rc'} onclick={() => tab = 'rc'}>{$t('debug.tabRc')}</button>
     <button class="tab" class:active={tab === 'performance'} onclick={() => tab = 'performance'}>{$t('debug.tabPerformance')}</button>
+    <button class="tab" class:active={tab === 'video'} onclick={() => tab = 'video'}>{$t('debug.tabVideo')}</button>
   </div>
 
   <div class="inject-row" class:on={inj.active}>
@@ -839,6 +841,59 @@
         <label class="perf-check"><input type="checkbox" bind:checked={pHdr} onchange={applyPerf} /> {$t('debug.perf.hdr')}</label>
 
         <div class="perf-hint">{$t('debug.perf.hint')}</div>
+      {/if}
+    </div>
+  {:else if tab === 'video'}
+    <!-- WebRTC inbound pipeline, one row per stage: what arrives from go2rtc (recv), what the decoder
+         manages (decoded/dropped) and what the playout reports (freezes/delay). Splitting the stages is
+         the whole point — it tells whether an unstable picture loses frames upstream of the WebView,
+         in the decoder, or only at presentation. -->
+    <div class="perf-tab">
+      <div class="debug-stats">
+        <div class="stat-group">
+          <span class="stat-label">{$t('debug.vidSource')}</span>
+          <span class="stat-value">{$videoState.kind}{$videoState.rtspEngine ? ` · ${$videoState.rtspEngine}` : ''}</span>
+          <span class="stat-sep">|</span>
+          <span class="stat-label">{$t('debug.vidStatus')}</span>
+          <span class="stat-value">{$videoState.status}</span>
+          <span class="stat-sep">|</span>
+          <span class="stat-label">{$t('debug.vidSize')}</span>
+          <span class="stat-value">{$videoState.width ? `${$videoState.width}×${$videoState.height}` : '—'}</span>
+        </div>
+      </div>
+      {#if $videoRtcStats}
+        {@const v = $videoRtcStats}
+        <div class="debug-stats">
+          <div class="stat-group">
+            <span class="stat-label">{$t('debug.vidRecv')}</span>
+            <span class="stat-value">{v.recvFps.toFixed(1)}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.vidDecoded')}</span>
+            <span class="stat-value">{v.decodeFps.toFixed(1)}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.vidEngineFps')}</span>
+            <span class="stat-value">{v.engineFps ?? '—'}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.vidDropped')}</span>
+            <span class="stat-value">{v.framesDropped}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.vidLost')}</span>
+            <span class="stat-value">{v.packetsLost}</span>
+          </div>
+          <div class="stat-group">
+            <span class="stat-label">{$t('debug.vidFreezes')}</span>
+            <span class="stat-value">{v.freezeCount ?? '—'}{v.freezeMs !== null ? ` (${Math.round(v.freezeMs)} ms)` : ''}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.vidJitter')}</span>
+            <span class="stat-value">{v.jitterMs !== null ? `${v.jitterMs.toFixed(1)} ms` : '—'}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.vidPlayout')}</span>
+            <span class="stat-value">{v.playoutDelayMs !== null ? `${v.playoutDelayMs.toFixed(0)} ms` : '—'}</span>
+          </div>
+        </div>
+        <div class="perf-hint">{$t('debug.vidHint')}</div>
+      {:else}
+        <div class="perf-empty">{$t('debug.vidInactive')}</div>
       {/if}
     </div>
   {/if}

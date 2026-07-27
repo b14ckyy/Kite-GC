@@ -370,7 +370,7 @@
       "setWp": "Définir WP",
       "changeAlt": "Changer altitude",
       "setHeading": "Définir cap",
-      "changeSpeed": "Changer vitesse",
+      "changeSpeed": "Vitesse",
       "setLoiterRadius": "Régler rayon loiter",
       "setHome": "Définir Home ici",
       "abortLanding": "Annuler atterrissage",
@@ -378,7 +378,6 @@
       "toHover": "Vol stationnaire",
       "missionPause": "Pause",
       "missionResume": "Reprendre",
-      "changeSpeed": "Vitesse",
       "reposition": "Voler ici"
     }
   },
@@ -653,7 +652,16 @@
     "close": "Fermer",
     "noDevices": "Aucune caméra détectée. Branchez une caméra ou un boîtier de capture USB.",
     "noNativeDevices": "Aucun périphérique de capture natif trouvé. Branchez un dongle HDMI USB ou une carte de capture.",
-    "ffmpegNativeMissing": "ffmpeg est requis pour la capture native — il accède directement au matériel (V4L2 / DirectShow / AVFoundation)."
+    "ffmpegNativeMissing": "ffmpeg est requis pour la capture native — il accède directement au matériel (V4L2 / DirectShow / AVFoundation).",
+    "pipeline": {
+      "hw": "Matériel",
+      "sw": "Logiciel",
+      "transcode": "Transcodage",
+      "surface": "Affichage",
+      "copy": "Copie"
+    },
+    "disableHwAccel": "Désactiver l'accélération matérielle",
+    "disableHwAccelHint": "Force le transcodage logiciel. Utile uniquement si l'image est défectueuse ou instable avec l'accélération matérielle."
   },
   "terrain": {
     "title": "Analyse du terrain",
@@ -731,7 +739,7 @@
     "nightModeOff": "Désactivé",
     "nightModeAuto": "Auto",
     "nightModeOn": "Activé",
-    "lowPower3D": "Économie d'énergie 3D",
+    "lowPower3D": "Économie d'énergie",
     "lowPower3DOff": "Désactivé (60 fps)",
     "lowPower3DOn": "Activé (20 fps)",
     "lowPower3DAuto": "Auto (20 fps sur batterie)",

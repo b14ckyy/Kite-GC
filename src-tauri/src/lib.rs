@@ -2,10 +2,12 @@
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
 mod aero;
+mod child_env;
 mod commands;
 mod debug_mode;
 mod flightlog;
 mod flightmode;
+mod github_release;
 mod hid;
 mod link_stats;
 mod logging;
@@ -75,7 +77,7 @@ use commands::video::{
     video_native_mjpeg_start, video_native_mjpeg_stop,
 };
 use video::{Go2Rtc, MjpegServer};
-use commands::logging::{set_log_level, get_log_path, log_session_settings};
+use commands::logging::{set_log_level, get_log_path, log_session_settings, log_frontend};
 use commands::tiles::fetch_tile;
 use commands::radar::{radar_configure, radar_set_center, radar_set_node_pos, radar_snapshot};
 use commands::terrain::{
@@ -115,10 +117,176 @@ pub fn is_portable() -> bool {
         .unwrap_or(false)
 }
 
+/// Log which of the GStreamer elements WebKitGTK depends on are actually installed.
+///
+/// WebKitGTK implements neither WebRTC nor video decoding itself — it delegates both to GStreamer.
+/// When `webrtcbin` is missing, `RTCPeerConnection` simply never appears: no error, no warning, and
+/// RTSP silently degrades to the far more expensive MJPEG transcode. Two different WebKit builds on the
+/// same Raspberry Pi produced the identical failure, which is the signature of a host-side plugin gap
+/// rather than a WebKit one — but confirming that meant asking the tester to run `gst-inspect-1.0` by
+/// hand and copy the output back, which on a remote-desktop session is genuinely awkward. The app can
+/// just say it.
+///
+/// Runs on a background thread (each `gst-inspect` call costs ~100 ms) and reports at warn level, since
+/// a missing element is a real, actionable degradation.
+#[cfg(target_os = "linux")]
+fn probe_gstreamer_support() {
+    std::thread::spawn(|| {
+        let run = |args: &[&str]| -> bool {
+            std::process::Command::new("gst-inspect-1.0")
+                .args(args)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .stdin(std::process::Stdio::null())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+        };
+        // `gst-inspect-1.0` ships separately (gstreamer1.0-tools) and is exactly the package a minimal
+        // install lacks — i.e. missing on the very systems where this diagnostic matters most. Fall back
+        // to looking for the plugin libraries themselves, which is what GStreamer would load anyway.
+        if !run(&["--version"]) {
+            let (webrtc, decoders) = probe_gstreamer_plugin_files();
+            log::warn!(
+                "[gstreamer] gst-inspect-1.0 not found (gstreamer1.0-tools); by plugin file: \
+                 webrtc={webrtc} · h264 plugins=[{}] — WebKitGTK needs the webrtc plugin for \
+                 RTCPeerConnection (gstreamer1.0-plugins-bad) and an H.264 decoder (gstreamer1.0-libav)",
+                decoders.join(", ")
+            );
+            return;
+        }
+        let webrtc = run(&["webrtcbin"]);
+        // Software (libav/openh264) plus the hardware decoders that matter in practice: V4L2 (Raspberry
+        // Pi 4, Rockchip), and Intel VA under both its plugin generations — `vah264dec` from the current
+        // `va` plugin and `vaapih264dec` from the older gstreamer-vaapi. Which of the two a distribution
+        // ships decides whether an Intel laptop decodes in hardware or silently on the CPU.
+        let decoders: Vec<&str> = [
+            "avdec_h264",
+            "openh264dec",
+            "v4l2h264dec",
+            "vah264dec",
+            "vaapih264dec",
+        ]
+        .into_iter()
+        .filter(|e| run(&[e]))
+        .collect();
+        log::warn!(
+            "[gstreamer] webrtcbin={} · h264 decoders=[{}] — WebKitGTK needs webrtcbin for RTCPeerConnection \
+             (gstreamer1.0-plugins-bad) and an H.264 decoder to play video (gstreamer1.0-libav)",
+            webrtc,
+            decoders.join(", ")
+        );
+    });
+}
+
+/// Raspberry Pi workaround: force the WebKit framebuffer to be reallocated once the UI is up.
+///
+/// With GPU acceleration enabled, the Pi's **first** framebuffer allocation is reliably broken — the
+/// window shows garbage until something makes WebKit allocate a new one. Any change of the drawing
+/// surface does that, so we perform the smallest one available for the window's current state and
+/// immediately undo it. The same workaround is in use on the maintainer's Pi dashboard project.
+///
+/// One nudge per run, triggered by `PageLoadEvent::Finished` (the DOM being ready is the earliest
+/// point at which there is a real frame to fix), plus a short settle delay because "document loaded"
+/// is not yet "first frame composited".
+#[cfg(target_os = "linux")]
+fn nudge_framebuffer_on_pi(window: tauri::Window) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    /// `on_page_load` also fires for reloads and in-app navigation; the surface only needs fixing once.
+    static DONE: AtomicBool = AtomicBool::new(false);
+
+    // `/proc/device-tree/model` is the canonical Pi identifier ("Raspberry Pi 5 Model B Rev 1.0"). It's
+    // absent on every non-device-tree machine, so this is a no-op on ordinary Linux desktops — the bug
+    // is specific to this GPU.
+    let model = std::fs::read_to_string("/proc/device-tree/model").unwrap_or_default();
+    if !model.contains("Raspberry Pi") {
+        return;
+    }
+    if DONE.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        // Long enough for the compositor to actually act on the change before we undo it.
+        let settle = std::time::Duration::from_millis(120);
+
+        // Each window state needs its own smallest possible disturbance: resizing a fullscreen or
+        // maximized window would fight the window manager (and was simply skipped before, which left
+        // exactly the full-screen case — the normal one on a Pi — unfixed).
+        if window.is_fullscreen().unwrap_or(false) {
+            let _ = window.set_fullscreen(false);
+            tokio::time::sleep(settle).await;
+            let _ = window.set_fullscreen(true);
+            log::info!("[gpu] Raspberry Pi framebuffer nudge: fullscreen off/on");
+        } else if window.is_maximized().unwrap_or(false) {
+            let _ = window.unmaximize();
+            tokio::time::sleep(settle).await;
+            let _ = window.maximize();
+            log::info!("[gpu] Raspberry Pi framebuffer nudge: unmaximize/maximize");
+        } else if let Ok(size) = window.inner_size() {
+            let _ = window.set_size(tauri::PhysicalSize::new(size.width, size.height + 1));
+            tokio::time::sleep(settle).await;
+            let _ = window.set_size(size);
+            log::info!("[gpu] Raspberry Pi framebuffer nudge: {}x{} +1px", size.width, size.height);
+        }
+    });
+}
+
 /// Detect portable mode: if a `.portable` marker file exists next to the
 /// executable, redirect all application data into a `data/` folder beside
 /// the exe.  Must be called **before** `run()` so the WebView picks up the
 /// environment variables.
+/// Look for GStreamer plugin **files** when `gst-inspect-1.0` isn't installed. Returns
+/// `(webrtc present, names of the H.264-capable plugins found)`.
+///
+/// Plugins live in `<libdir>/gstreamer-1.0/libgst<name>.so`; the multiarch libdir differs per
+/// architecture, and `GST_PLUGIN_PATH` can add more. This can't tell whether a plugin actually
+/// *registers* its elements (a broken driver may still fail), so it is reported as "by plugin file" —
+/// weaker evidence than `gst-inspect`, but the difference between an answer and none at all.
+#[cfg(target_os = "linux")]
+fn probe_gstreamer_plugin_files() -> (bool, Vec<&'static str>) {
+    // The _1_0/SYSTEM variants matter inside the AppImage: linuxdeploy's gstreamer hook points
+    // GST_PLUGIN_SYSTEM_PATH_1_0 at the bundled plugin set, which is exactly what WebKit sees there.
+    let mut dirs: Vec<std::path::PathBuf> = [
+        "GST_PLUGIN_PATH",
+        "GST_PLUGIN_PATH_1_0",
+        "GST_PLUGIN_SYSTEM_PATH",
+        "GST_PLUGIN_SYSTEM_PATH_1_0",
+    ]
+    .iter()
+    .filter_map(std::env::var_os)
+    .flat_map(|v| std::env::split_paths(&v).collect::<Vec<_>>())
+    .collect();
+    for base in [
+        "/usr/lib/aarch64-linux-gnu",
+        "/usr/lib/x86_64-linux-gnu",
+        "/usr/lib/arm-linux-gnueabihf",
+        "/usr/lib64",
+        "/usr/lib",
+        "/usr/local/lib",
+    ] {
+        dirs.push(std::path::Path::new(base).join("gstreamer-1.0"));
+    }
+    let has = |file: &str| dirs.iter().any(|d| d.join(file).is_file());
+
+    // libav covers avdec_h264, the `va`/`vaapi` plugins the Intel/AMD hardware paths, and
+    // video4linux2 the Raspberry Pi 4 / Rockchip stateful decoders.
+    let decoders = [
+        ("libav", "libgstlibav.so"),
+        ("openh264", "libgstopenh264.so"),
+        ("va", "libgstva.so"),
+        ("vaapi", "libgstvaapi.so"),
+        ("v4l2", "libgstvideo4linux2.so"),
+    ]
+    .into_iter()
+    .filter(|(_, file)| has(file))
+    .map(|(name, _)| name)
+    .collect();
+
+    (has("libgstwebrtc.so"), decoders)
+}
+
 pub fn setup_portable_mode() {
     let exe_dir = match std::env::current_exe()
         .ok()
@@ -256,6 +424,39 @@ pub fn run() {
                         // user controls. (`settings()` returns `Option<WebKitSettings>` in this binding.)
                         if let Some(settings) = WebViewExt::settings(&wv) {
                             settings.set_enable_media_stream(true);
+                            // WebRTC is a SEPARATE switch and it is **off by default** in WebKitGTK
+                            // ≥ 2.38 — without it `RTCPeerConnection` is undefined, the RTSP source
+                            // silently degrades to the MJPEG fallback, and that fallback then depends
+                            // on go2rtc transcoding (and on the WebView rendering multipart images at
+                            // all). Set by NAME rather than through `set_enable_webrtc()`: that setter
+                            // sits behind the crate's `v2_38` feature, which would raise our build-time
+                            // WebKitGTK requirement (CI deliberately builds against ubuntu-22.04). By
+                            // name it is simply a no-op on older runtimes that lack the property.
+                            //
+                            // Logged in full: a Pi field test showed `webrtc=false` in the frontend
+                            // even with this in place, and "property missing", "set but ignored" and
+                            // "set but GStreamer can't back it" are three different problems that look
+                            // identical from the outside. The runtime WebKitGTK version comes along
+                            // because it decides which of them is even possible — and because a Linux
+                            // bug report is worth little without it.
+                            let (major, minor, micro) = unsafe {
+                                (
+                                    webkit2gtk::ffi::webkit_get_major_version(),
+                                    webkit2gtk::ffi::webkit_get_minor_version(),
+                                    webkit2gtk::ffi::webkit_get_micro_version(),
+                                )
+                            };
+                            if settings.find_property("enable-webrtc").is_some() {
+                                settings.set_property("enable-webrtc", true);
+                                let now: bool = settings.property("enable-webrtc");
+                                log::warn!(
+                                    "[webkit] WebKitGTK {major}.{minor}.{micro} — enable-webrtc set, reads back as {now}"
+                                );
+                            } else {
+                                log::warn!(
+                                    "[webkit] WebKitGTK {major}.{minor}.{micro} — no 'enable-webrtc' property (needs ≥ 2.38); RTSP will fall back to MJPEG"
+                                );
+                            }
                         }
                         wv.connect_permission_request(|_wv, req| {
                             if req.downcast_ref::<webkit2gtk::GeolocationPermissionRequest>().is_some()
@@ -269,8 +470,17 @@ pub fn run() {
                         });
                     });
                 }
+                probe_gstreamer_support();
             }
             Ok(())
+        })
+        .on_page_load(|_webview, _payload| {
+            // The Pi's first framebuffer is garbage until the surface changes — do it once the page is
+            // actually up (see `nudge_framebuffer_on_pi`).
+            #[cfg(target_os = "linux")]
+            if _payload.event() == tauri::webview::PageLoadEvent::Finished {
+                nudge_framebuffer_on_pi(_webview.window());
+            }
         })
         .manage(AppState::new())
         .manage(MissionStore::new())
@@ -294,6 +504,7 @@ pub fn run() {
             set_log_level,
             get_log_path,
             log_session_settings,
+            log_frontend,
             fetch_tile,
             mission_get,
             mission_clear,
@@ -468,6 +679,17 @@ pub fn run() {
             rally_read_all,
             rally_write_all,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Kite Ground Control");
+        .build(tauri::generate_context!())
+        .expect("error while running Kite Ground Control")
+        .run(|app, event| {
+            // Tauri tears the process down without dropping managed state, so the video helpers must
+            // be stopped here. A surviving go2rtc keeps its spawned ffmpeg readers — and with them the
+            // RTSP session on the remote server — alive indefinitely (this is what wedged the UAV-Link
+            // Pi's shared media), and a surviving capture ffmpeg keeps holding the camera.
+            if matches!(event, tauri::RunEvent::Exit) {
+                use tauri::Manager;
+                app.state::<Go2Rtc>().stop();
+                app.state::<MjpegServer>().stop();
+            }
+        });
 }
