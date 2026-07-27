@@ -178,6 +178,14 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init());
 
+    // Mobile only: use native CoreLocation/Android location for the GCS position so the OS permission
+    // prompt is labelled with the app name instead of the WebView origin ("localhost"). Desktop keeps
+    // the browser `navigator.geolocation` path (WebKitGTK grants are handled in setup() below).
+    #[cfg(mobile)]
+    {
+        builder = builder.plugin(tauri_plugin_geolocation::init());
+    }
+
     // Persist + restore the main window's size/position/maximized state across launches.
     // The plugin saves to the OS app-config dir, which portable mode cannot redirect on
     // Windows (Known-Folder API, not env-driven) — so only enable it in installed mode.

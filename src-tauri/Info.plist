@@ -1,12 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  macOS-only Info.plist keys merged into the generated bundle by tauri-bundler.
-  Required so CoreBluetooth (btleplug BLE transport) is permitted: without a usage string modern
-  macOS denies Bluetooth central access. Mirrors the BLE capability Windows/Linux already have.
-  The camera usage string is required for the video panel's "Camera (device)" source: it uses
-  getUserMedia, which macOS blocks without a usage description. This covers USB/UVC capture devices
-  (e.g. an HDMI capture card fed from FPV goggles/VRX), the same webcam access Windows/Linux already have.
+  Info.plist keys merged into the generated macOS and iOS bundles by tauri (the iOS bundle picks
+  these up too, see gen/apple/kite-gc_iOS/Info.plist).
+  Bluetooth: required so CoreBluetooth (btleplug / native BLE transport) is permitted; without a usage
+  string Apple denies BLE central access. Mirrors the capability Windows/Linux already have.
+  Camera: required for the video panel's "Camera (device)" source (getUserMedia over a USB/UVC capture
+  device, e.g. an HDMI capture card fed from FPV goggles/VRX), the same webcam access desktop has.
+  Location (when-in-use): lets the WebView Geolocation API resolve the operator's position so the map
+  can open where the user is and the GCS marker is placed correctly. Coarse (city-level) is enough.
 -->
 <plist version="1.0">
 <dict>
@@ -16,5 +18,7 @@
     <string>Kite Ground Control uses Bluetooth to connect to your flight controller / telemetry link over BLE.</string>
     <key>NSCameraUsageDescription</key>
     <string>Kite Ground Control uses the camera to display an FPV video feed from a connected capture device.</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>Kite Ground Control uses your location to center the map on you and place the ground-station marker.</string>
 </dict>
 </plist>

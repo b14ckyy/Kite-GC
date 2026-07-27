@@ -88,6 +88,13 @@ objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSArray", "NSData", "NSDictionary", "NSString", "NSValue", "NSEnumerator", "NSObject"] }
 objc2-core-bluetooth = { version = "0.3", features = ["CBCentralManager", "CBPeripheral", "CBService", "CBCharacteristic", "CBAttribute", "CBPeer", "CBAdvertisementData", "CBManager", "CBError", "CBUUID"] }
 
+# Native location on mobile. WKWebView's Web geolocation prompt is labelled with the page origin
+# host ("localhost"); this plugin routes to CoreLocation (iOS) / Android location services instead,
+# so the OS permission dialog shows the app's own name + the Info.plist usage string. Desktop targets
+# are excluded and keep the `navigator.geolocation` path (see helpers/userLocation.ts).
+[target.'cfg(any(target_os = "ios", target_os = "android"))'.dependencies]
+tauri-plugin-geolocation = "2"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 # HID / joystick input backend (hid/macos.rs) reads RAW IOKit HID elements — axes/buttons/hat by
 # usage page/usage, no gamepad projection — matching the Windows (WGI) / Linux (evdev) backends. We
