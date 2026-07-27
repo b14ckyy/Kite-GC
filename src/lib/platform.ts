@@ -21,6 +21,16 @@ export const isIOS = /iPad|iPhone|iPod/i.test(ua) || (/Macintosh|Mac OS X/i.test
 /** True on any mobile/tablet build. Currently iOS/iPadOS only; Android would extend this later. */
 export const isMobile = isIOS;
 
+/** True on iPhone/iPod specifically (NOT iPad). iPad reports a "Macintosh" UA, so it never matches.
+ *  Used to gate iPhone-only layout that must NOT affect iPad, in any orientation (unlike a width media
+ *  query, which can't tell a landscape iPhone from a tablet). */
+export const isPhone = /iPhone|iPod/i.test(ua);
+
+/** True on a tablet (iPad, and any future Android tablet): mobile build that is not a phone. UA-based,
+ *  so it is orientation-independent — a landscape iPhone (wide viewport) never counts as a tablet. Used
+ *  to gate tablet-only layout that must NOT affect the phone. */
+export const isTablet = isMobile && !isPhone;
+
 /** True when running inside the macOS WebView (WKWebView) — used to mirror native window-control
  *  placement and drive the native-capture backend (AVFoundation). Excludes iPadOS, which shares the
  *  "Macintosh" user-agent. */
@@ -38,8 +48,16 @@ export const isLinux = /Linux/i.test(ua) && !/Android/i.test(ua);
 // area (needs viewport-fit=cover in the viewport meta) for those bottom-anchored overlays to lift by.
 if (typeof document !== 'undefined' && isMobile) {
   document.documentElement.classList.add('is-mobile');
+  // Separate iPhone tag so iPhone-only rules (that must not touch iPad) can key off it in any orientation.
+  if (isPhone) document.documentElement.classList.add('is-phone');
+  // Separate tablet tag (iPad, future Android tablets) for tablet-only rules that must not touch the phone.
+  else document.documentElement.classList.add('is-tablet');
   document.documentElement.style.setProperty('--safe-bottom', 'env(safe-area-inset-bottom, 0px)');
   // `--safe-top` covers the status bar / notch strip so the toolbar and top-anchored map layers
   // are not overlaid by the iOS status bar (clock, battery). Same viewport-fit=cover requirement.
   document.documentElement.style.setProperty('--safe-top', 'env(safe-area-inset-top, 0px)');
+  // In landscape the notch / Dynamic Island sits on a side edge, over the left-anchored nav rail and
+  // panels. `--safe-left` / `--safe-right` let those shift clear of it (both 0 in portrait).
+  document.documentElement.style.setProperty('--safe-left', 'env(safe-area-inset-left, 0px)');
+  document.documentElement.style.setProperty('--safe-right', 'env(safe-area-inset-right, 0px)');
 }

@@ -76,6 +76,30 @@
     left: 12px;
   }
 
+  /* Mobile, any orientation: shift the rail clear of a landscape side-notch / Dynamic Island. Harmless
+     on iPad and in portrait (--safe-left is 0 there), so it does not change those layouts. */
+  :global(html.is-mobile) .nav-rail,
+  :global(html.is-mobile) .nav-rail.open {
+    left: calc(12px + var(--safe-left, 0px));
+  }
+  /* iPhone: keep the rail (incl. the settings/close button) above the HUD dock so the tiles never
+     cover it. The dock is z-index 100; lift the rail over it. */
+  :global(html.is-phone) .nav-rail {
+    z-index: 120;
+  }
+  /* Portrait phone only: the toolbar collapses/expands, so the rail tracks its live height. iPad and
+     landscape phone keep the fixed top (their bar is a single row that the base 65px already clears). */
+  @media (max-width: 600px) {
+    :global(html.is-mobile) .nav-rail {
+      top: calc(var(--toolbar-h, 65px) + 8px);
+    }
+  }
+  /* Tablet (iPad): the toolbar is taller than the fixed 65px base (iOS status-bar + safe-top padding),
+     which pushed the rail's top buttons under the bar. Track the live bar height so they clear it. */
+  :global(html.is-tablet) .nav-rail {
+    top: calc(var(--toolbar-h, 65px) + 8px);
+  }
+
   .hamburger-btn {
     width: 42px;
     height: 42px;

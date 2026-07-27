@@ -30,6 +30,7 @@
     availableVmin = 80,
     maxWidgetVmin = Infinity,
     pxPerVmin = 1,
+    smallBoost = 1,
     telem,
     interfaceSettings = { speedUnit: 'kmh', altitudeUnit: 'm', distanceUnit: 'metric', verticalSpeedUnit: 'ms', temperatureUnit: 'c' },
     editing = false,
@@ -42,6 +43,9 @@
     availableVmin: number;
     maxWidgetVmin?: number;
     pxPerVmin?: number;
+    /** Multiplier applied to `small` widgets only (size + width units), so small tiles can be enlarged
+     *  without growing the large/circular widgets. 1 = unchanged (default). */
+    smallBoost?: number;
     telem: TelemetryData;
     interfaceSettings?: InterfaceSettings;
     editing: boolean;
@@ -243,7 +247,7 @@
     const items = widgetIds.map(id => {
       const def = WIDGET_MAP.get(id);
       const wclass: WidgetClass = def?.widgetClass ?? 'small';
-      const units = wclass === 'large' ? 1 : wclass === 'wide' ? wideUnits : smallRatio;
+      const units = wclass === 'large' ? 1 : wclass === 'wide' ? wideUnits : smallRatio * smallBoost;
       totalUnits += units;
       return { id, wclass, units };
     });
@@ -262,7 +266,7 @@
     return items.map(item => ({
       id: item.id,
       wclass: item.wclass,
-      size: (item.wclass === 'small' ? effectiveLargeBase * smallRatio : effectiveLargeBase) * scale,
+      size: (item.wclass === 'small' ? effectiveLargeBase * smallRatio * smallBoost : effectiveLargeBase) * scale,
     }));
   }
 
@@ -281,7 +285,7 @@
     for (const id of simIds) {
       const def = WIDGET_MAP.get(id);
       const wclass = def?.widgetClass ?? 'small';
-      totalUnits += wclass === 'large' ? 1 : wclass === 'wide' ? wideUnits : smallRatio;
+      totalUnits += wclass === 'large' ? 1 : wclass === 'wide' ? wideUnits : smallRatio * smallBoost;
     }
     const totalGaps = (simIds.length - 1) * 0.5;
     const usableVmin = availableVmin - totalGaps;
@@ -522,6 +526,23 @@
     flex-direction: row;
     align-items: flex-end;
     justify-content: center;
+  }
+
+  /* Phone portrait: the bottom HUD tiles do not fit one row, so let them wrap onto two rows (the dock
+     is sized for two rows in +page.svelte). Scoped to mobile so tablet/desktop keep the single row. */
+  @media (max-width: 600px) {
+    :global(html.is-mobile) .widget-panel.horizontal {
+      flex-wrap: wrap;
+      align-content: center;
+      justify-content: space-evenly;
+      width: 100%;
+      row-gap: 8px;
+    }
+    /* Right side dock: top-align the tiles so they sit just under the toolbar instead of being
+       centered in the tall column (which left a big gap above MODE). */
+    :global(html.is-mobile) .widget-panel.vertical {
+      justify-content: flex-start;
+    }
   }
 
   .widget-panel.vertical {

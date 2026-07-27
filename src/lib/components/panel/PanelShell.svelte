@@ -155,6 +155,50 @@
     height: auto;
     max-height: calc(100% - 53px - var(--grid-bottom-height) - 24px - 12px);
   }
+
+  /* Mobile, any orientation: shift panels clear of a landscape side-notch. Harmless on iPad / portrait
+     (--safe-left is 0), so it does not change those layouts. */
+  :global(html.is-mobile) .ps {
+    left: calc(62px + var(--safe-left, 0px));
+  }
+  /* Portrait phone only: the toolbar collapses/expands, so the panel tracks its live height. iPad and
+     landscape phone keep the fixed top (single-row bar). */
+  @media (max-width: 600px) {
+    :global(html.is-phone) .ps {
+      top: calc(var(--toolbar-h, 65px) + 8px);
+    }
+  }
+  /* Tablet (iPad): the toolbar is taller than the desktop default (iOS status-bar + safe-top padding),
+     so the fixed 65px top clipped the panel header under the bar. Track the live bar height, and size
+     the panel to the gap between the bar and the bottom dock (iPad keeps the above-dock layout, unlike
+     the phone which overlays the dock). */
+  :global(html.is-tablet) .ps {
+    top: calc(var(--toolbar-h, 65px) + 8px);
+  }
+  :global(html.is-tablet) .ps-compact,
+  :global(html.is-tablet) .ps-advanced {
+    height: calc(100% - var(--toolbar-h, 65px) - var(--grid-bottom-height) - 24px - 20px);
+  }
+  :global(html.is-tablet) .ps-info {
+    max-height: calc(100% - var(--toolbar-h, 65px) - var(--grid-bottom-height) - 24px - 20px);
+  }
+  /* iPhone (any orientation): the screen is small, so
+     - width is capped to the viewport (minus the rail + a margin) so the panel never clips off-screen;
+     - the panel is tall and OVERLAYS the HUD dock (it sits above it at z-index 150) instead of being
+       squeezed into the gap above it, so its content is reachable/scrollable. iPad keeps its layout. */
+  :global(html.is-phone) .ps-compact {
+    width: min(398px, calc(100vw - var(--safe-left, 0px) - 74px));
+  }
+  :global(html.is-phone) .ps-info {
+    max-width: min(360px, calc(100vw - var(--safe-left, 0px) - 74px));
+  }
+  :global(html.is-phone) .ps-compact,
+  :global(html.is-phone) .ps-advanced {
+    height: calc(100% - var(--toolbar-h, 53px) - var(--safe-bottom, 0px) - 12px);
+  }
+  :global(html.is-phone) .ps-info {
+    max-height: calc(100% - var(--toolbar-h, 53px) - var(--safe-bottom, 0px) - 12px);
+  }
   /* Widths are driven by the *field* size (the thin-framed working box), which the panel layouts
      were tuned against: 380px main field, 500px detail field. Panel width = field + the column's
      8px padding each side (+ the 1px shell border): 380 + 16 = 396, 500 + 16 = 516. */

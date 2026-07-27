@@ -11,7 +11,7 @@
   import { connection, availablePorts, bleDevices } from "$lib/stores/connection";
   import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
-  import { isMobile } from "$lib/platform";
+  import { isMobile, isTablet } from "$lib/platform";
   import { isDebugMode } from "$lib/stores/debug";
   import { telemetry } from "$lib/stores/telemetry";
   import { startRadarListeners, configureRadar, setRadarCenter, setRadarNode } from "$lib/stores/radarTracking";
@@ -108,9 +108,6 @@
   import { modeCategory } from "$lib/helpers/flightModeRegistry";
 
   // ── Layout zone CSS custom properties (driven by layout store) ──
-  const gridBottomHeight = $derived(
-    $layout.bottomDock.sizeOverride ?? GRID_DEFAULTS.bottomDockHeight
-  );
   const gridSideWidth = $derived(
     $layout.sideDock.sizeOverride ?? GRID_DEFAULTS.sideDockWidth
   );
@@ -183,6 +180,9 @@
   // Measured container dimensions (bind:clientWidth/Height on grid zones)
   let bottomDockW = $state(800);
   let bottomDockH = $state(200);
+  // Live toolbar height (exposed as --toolbar-h). The phone toolbar wraps/collapses so its height
+  // varies; the absolutely-positioned nav-rail + panels track this so they never hide under it.
+  let toolbarH = $state(53);
   let sideDockW = $state(200);
   let sideDockH = $state(400);
 
@@ -194,6 +194,17 @@
     $videoState.floating && $videoState.floatSnapped
       ? Math.min($videoState.floatHeightFrac * winH * ($videoState.aspect || 16 / 9), winW * 0.7) + 16
       : 0,
+  );
+
+  // Phone portrait: too narrow to fit the bottom HUD tiles in one row without clipping, so the dock
+  // wraps them onto two rows (see the sizing below + the flex-wrap rule in WidgetPanel). Tablets and
+  // desktop keep the single row. `winW`/`isMobile` are reactive so a rotate re-evaluates this.
+  const isPhone = $derived(isMobile && winW <= 600);
+  const bottomRows = $derived(isPhone ? 2 : 1);
+  // Phone gets a taller dock (room for two HUD rows); otherwise the layout store override or default.
+  const gridBottomHeight = $derived(
+    $layout.bottomDock.sizeOverride ??
+      (isPhone ? 'clamp(230px, 40vh, 380px)' : GRID_DEFAULTS.bottomDockHeight)
   );
 
   // Map-swap: the full-size video sink shown in the map zone when videoPrimary.
@@ -313,12 +324,16 @@
   // This fully decouples bottom dock and side dock scaling.
   // Subtract zone padding (6px each side) from cross-axis measurement.
   const DOCK_PAD = 6;
-  const bottomPxPerUnit = $derived((bottomDockH - 2 * DOCK_PAD) / LARGE_BASE_VMIN);
+  // On phone the dock is two rows tall, so a tile is sized to ONE row (dock height / rows). Desktop
+  // and tablet keep the full-height single-row tile.
+  const bottomPxPerUnit = $derived((bottomDockH / bottomRows - 2 * DOCK_PAD) / LARGE_BASE_VMIN);
   const sidePxPerUnit   = $derived((sideDockW  - 2 * DOCK_PAD) / LARGE_BASE_VMIN);
 
   // Available space expressed in abstract units (container px / pxPerUnit)
-  // Bottom: subtract edit button (28px) + wrapper gap (6px) + zone padding (12px)
-  const bottomAvailUnits = $derived(Math.max(0, (bottomDockW - 34 - 2 * DOCK_PAD - videoReserve) / bottomPxPerUnit));
+  // Bottom: subtract edit button (28px) + wrapper gap (6px) + zone padding (12px). Multiply by the row
+  // count so the sizing algorithm (which lays out in one line) budgets for two rows on phone and keeps
+  // the tiles a readable size; flex-wrap then splits them across the rows.
+  const bottomAvailUnits = $derived(Math.max(0, ((bottomDockW - 34 - 2 * DOCK_PAD - videoReserve) / bottomPxPerUnit) * bottomRows));
   const rightAvailUnits  = $derived(Math.max(0, (sideDockH - 2 * DOCK_PAD) / sidePxPerUnit));
 
   let appVersion = $state("...");
@@ -2434,7 +2449,7 @@
 
 <svelte:window bind:innerWidth={winW} bind:innerHeight={winH} />
 
-<div class="ui-root" style:--ui-scale={uiScale}>
+<div class="ui-root" style:--ui-scale={uiScale} style:--toolbar-h="{toolbarH}px">
   <!-- Window resize grips — outside `.ui-scale` so position:fixed stays viewport-relative.
        Re-adds edge resizing lost when the native decorations are disabled. -->
   <WindowResizeBorders />
@@ -2542,7 +2557,7 @@
   style:--grid-side-width={gridSideWidth}
 >
   <!-- ======= TOOLBAR ======= -->
-  <div class="zone-toolbar">
+  <div class="zone-toolbar" bind:clientHeight={toolbarH}>
     <Toolbar
     {appVersion}
     {telem}
@@ -2781,6 +2796,7 @@
         orientation="horizontal"
         availableVmin={bottomAvailUnits}
         pxPerVmin={bottomPxPerUnit}
+        smallBoost={isPhone ? 1.5 : isTablet ? 1.4 : 1}
         {telem}
         editing={widgetEditMode}
         {interfaceSettings}
@@ -2805,6 +2821,7 @@
       orientation="vertical"
       availableVmin={rightAvailUnits}
       pxPerVmin={sidePxPerUnit}
+      smallBoost={isTablet ? 1.4 : 1}
       {telem}
       editing={widgetEditMode}
       {interfaceSettings}
@@ -2988,13 +3005,58 @@
     box-sizing: border-box;
   }
   :global(html.is-mobile) .layer-map {
-    top: calc(53px * var(--ui-scale, 1) + var(--safe-top, 0px));
+    /* Track the live toolbar height (includes the status-bar inset) so the map starts exactly at the
+       bar's bottom edge, with no grey strip below the blue divider when the bar is collapsed/short. */
+    top: calc(var(--toolbar-h, 53px) * var(--ui-scale, 1));
+  }
+  /* Mobile (phone + tablet): hand all touch gestures on the map to Leaflet (pan + pinch). Without
+     touch-action:none the iOS WebView swallows the single-finger drag (only pinch/zoom-buttons work).
+     Scoped to the map so panel scrollers keep their native touch scrolling. */
+  :global(html.is-mobile) .layer-map,
+  :global(html.is-mobile) .layer-map :global(.leaflet-container) {
+    touch-action: none;
   }
   :global(html.is-mobile) .map-video-wrap {
-    top: calc(53px + var(--safe-top, 0px));
+    top: var(--toolbar-h, 53px);
   }
   :global(html.is-mobile) .app-toasts {
     top: var(--safe-top, 0px);
+  }
+
+  /* Phone portrait is too narrow to fit the toolbar on one row, so it wraps to multiple lines
+     (see Toolbar.svelte). Size the toolbar grid row to its content instead of the fixed one-row
+     height so the wrapped bar is never clipped and the nav-rail / panels below are pushed down
+     cleanly rather than tucked under it. Tablets keep the fixed row (wider screen fits one row). */
+  @media (max-width: 600px) {
+    :global(html.is-mobile) .app {
+      /* Bottom bar hidden on phone (redundant with the collapsed top strip; arming moves into it). The
+         last row is kept as a thin strip (home-indicator inset + room for the Leaflet label) so the HUD
+         sits above it and the label is not covered; the map runs full-height behind it. */
+      grid-template-rows: auto 1fr var(--grid-bottom-height) calc(var(--safe-bottom, 0px) + 20px);
+      /* Reclaim the left nav-rail column for the bottom dock (NavRail is absolutely positioned, so its
+         grid cell is empty): gives the HUD tiles the full left-to-right width on phone and uses the
+         empty space on the left. Map controls keep the right column. */
+      grid-template-areas:
+        "toolbar      toolbar      toolbar      toolbar"
+        "nav-rail     panel        side-dock    side-dock"
+        "bottom-dock  bottom-dock  bottom-dock  map-controls"
+        "status-bar   status-bar   status-bar   status-bar";
+    }
+    /* Redundant on phone (same status as the top strip); hidden. */
+    :global(html.is-mobile) .zone-status-bar {
+      display: none;
+    }
+    /* Map runs all the way to the bottom edge (behind the home indicator) so there is no grey strip. */
+    :global(html.is-mobile) .layer-map {
+      bottom: 0;
+    }
+    /* Top-align the right side dock so MODE sits just under the toolbar (the zone centered the whole
+       widget block vertically, leaving a big gap above it). The 8px top padding matches the panel/
+       nav-rail offset so MODE lines up with the UAV Info panel below the bar. */
+    :global(html.is-mobile) .zone-side-dock {
+      align-items: flex-start;
+      padding-top: 8px;
+    }
   }
 
   /* Map layer — UNZOOMED overlay over the content area. The toolbar (53px) and status
@@ -3190,6 +3252,19 @@
     align-items: flex-end;
     gap: 6px;
     pointer-events: auto;
+  }
+  /* Phone: stack the edit button ABOVE the HUD (not beside it) so the tiles get the full dock width
+     and use the empty left space. Button sits top-right, out of the way. */
+  @media (max-width: 600px) {
+    :global(html.is-mobile) .panel-bottom-wrap {
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
+      width: 100%;
+    }
+    :global(html.is-mobile) .panel-bottom-wrap > :global(.widget-panel) {
+      width: 100%;
+    }
   }
 
   /* --- Widget edit toggle button --- */

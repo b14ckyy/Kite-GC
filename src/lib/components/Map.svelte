@@ -70,6 +70,7 @@
   import { toTelemetryData } from "$lib/adapters/telemetryAdapter";
   import { sunAltitudeDeg, cesiumLikeBrightness } from "$lib/utils/sun";
   import { ensureUserLocation, resolveUserLocation, userGeoLocation } from "$lib/helpers/userLocation";
+  import { isMobile } from "$lib/platform";
   import { radarVehicles, radarSelection, enrichList, type RadarSnapshot, type EnrichedVehicle } from "$lib/stores/radarTracking";
   import { radarAlertLevels, type AlertLevel } from "$lib/controllers/radarAlerts";
   import { gcsLocation, gcsAccuracyM, setGcsManual } from "$lib/stores/gcsLocation";
@@ -220,6 +221,7 @@
   let nightDimFactor = 1.0;                    // current applied imagery brightness (1 = none)
   let nightTimer: ReturnType<typeof setInterval> | undefined; // auto re-check (live time drift)
   let unsubUserGeo: (() => void) | undefined;  // recompute when OS geolocation resolves
+  let unsubGeoCenter: (() => void) | undefined; // mobile-only one-shot: center map on first OS fix
 
   // Flight trail (colored segments by flight mode)
   let trailSegments: L.Polyline[] = [];
@@ -1726,6 +1728,26 @@
     // Auto night mode: physical location + re-check every minute so wall-clock drift fades day↔night.
     ensureUserLocation(); // OS geolocation (resolves async)
     unsubUserGeo = userGeoLocation.subscribe(() => recomputeNight()); // recompute once it resolves
+
+    // Mobile: open the map where the operator actually is. When the first OS geolocation fix resolves
+    // (and the user has not panned/zoomed away from the launch centre or started following a UAV yet),
+    // recenter there once. Desktop keeps its persisted centre. A manual pan/zoom cancels it so we never
+    // yank the view out from under the user.
+    if (isMobile) {
+      // Cancel the auto-center as soon as the user interacts with the map (drag/zoom), so we never yank
+      // the view once they've started navigating. NOT a position-diff check: invalidateSize() nudges the
+      // centre by sub-pixels on layout, which would falsely read as "user moved" and suppress centering.
+      let geoCentered = false;
+      const cancelGeoCenter = () => { geoCentered = true; };
+      map.once("dragstart", cancelGeoCenter);
+      map.once("zoomstart", cancelGeoCenter);
+      unsubGeoCenter = userGeoLocation.subscribe((g) => {
+        if (geoCentered || !g || !map) return;
+        if (viewMode !== "free") { geoCentered = true; return; }
+        geoCentered = true;
+        map.setView([g.lat, g.lon], Math.max(map.getZoom(), 13), { animate: true });
+      });
+    }
     nightTimer = setInterval(recomputeNight, 60_000);
     recomputeNight();
 
@@ -1940,6 +1962,7 @@
     if (followRaf != null) cancelAnimationFrame(followRaf);
     if (nightTimer) clearInterval(nightTimer);
     unsubUserGeo?.();
+    unsubGeoCenter?.();
     unsubRadar?.();
     unsubRadarSel?.();
     unsubRadarAlerts?.();

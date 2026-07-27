@@ -9,11 +9,12 @@
   import Button from '$lib/components/panel/Button.svelte';
   import SegmentedToggle from '$lib/components/panel/SegmentedToggle.svelte';
   import WindowControls from '$lib/components/WindowControls.svelte';
-  import { isMacOS, isMobile } from '$lib/platform';
+  import { isMacOS, isMobile, isPhone } from '$lib/platform';
   import ConnectionStatusBox from '$lib/components/ConnectionStatusBox.svelte';
   import ArmingIndicator from '$lib/components/ArmingIndicator.svelte';
   import BatteryIndicator from '$lib/components/BatteryIndicator.svelte';
   import { rcEngaged } from '$lib/stores/rcEngage';
+  import { isArmed } from '$lib/helpers/telemetry';
   import type { PortInfo, BleDeviceInfo, TransportType, ProtocolType } from '$lib/stores/connection';
   import type { TelemetryData } from '$lib/stores/telemetry';
   import { settings } from '$lib/stores/settings';
@@ -136,10 +137,32 @@
     if ((e.target as HTMLElement).closest('button, select, input, a')) return;
     void getCurrentWindow().toggleMaximize();
   }
+
+  // Phone-only collapsible toolbar: the full bar is tall on a narrow screen, so on phones it collapses
+  // to a slim status strip with a show/hide toggle, reclaiming map space. Starts expanded so the
+  // connection controls are reachable; the toggle and collapsed strip only render on phones (the CSS
+  // is width-gated, so tablets/desktop always show the full bar regardless of this flag).
+  let toolbarCollapsed = $state(false);
+  const connLabel = $derived(
+    connStatus === 'connected'
+      ? $t('connection.connected')
+      : isConnecting
+        ? $t('connection.connecting')
+        : $t('connection.disconnected'),
+  );
+  // Protocol shown next to the status in the collapsed strip so the essentials (state + link type)
+  // stay visible without expanding the bar.
+  const protoLabel = $derived(
+    selectedProtocol === 'mavlink' ? 'MAVLink' : selectedProtocol === 'telemetry' ? 'Telemetry' : 'MSP',
+  );
+  // Arming state for the collapsed strip (the bottom status bar is hidden on phone, so surface it here
+  // when connected). Only meaningful with a live link + telemetry.
+  const armedNow = $derived(connStatus === 'connected' && telem.lastUpdate > 0 && isArmed(telem.armingFlags, telem.lastUpdate));
+  const showArm = $derived(connStatus === 'connected' && telem.lastUpdate > 0);
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<header class="toolbar" data-tauri-drag-region ondblclick={onTitlebarDblClick}>
+<header class="toolbar" class:collapsed={toolbarCollapsed} data-tauri-drag-region ondblclick={onTitlebarDblClick}>
   {#if isMacOS}
     <!-- macOS: window controls live at top-left (native traffic-light placement). -->
     <WindowControls />
@@ -147,6 +170,15 @@
   <div class="toolbar-left" data-tauri-drag-region>
     <img class="logo" src="/branding/kitegc-wordmark-white.svg" alt={$t('app.brand')} draggable="false" data-tauri-drag-region />
     <span class="version" data-tauri-drag-region>v{appVersion}</span>
+    <!-- Phone collapsed state: slim connection-status strip shown in place of the full controls. -->
+    <span class="tb-collapsed-status">
+      <span class="tb-status-dot" class:connected={connStatus === 'connected'}></span>
+      {connLabel}
+      <span class="tb-collapsed-proto">· {protoLabel}</span>
+      {#if showArm}
+        <span class="tb-collapsed-arm" class:armed={armedNow}>· {armedNow ? $t('arming.armed') : $t('arming.disarmed')}</span>
+      {/if}
+    </span>
   </div>
   <div class="toolbar-center" data-tauri-drag-region>
     {#if $rcEngaged.on}
@@ -281,10 +313,17 @@
     >
       ⇅ {$t('relay.short')}
     </button>
-    {#if !isMacOS}
+    {#if !isMacOS && !isPhone}
       <WindowControls />
     {/if}
   </div>
+  <!-- Phone-only show/hide toggle (revealed by the phone media query in the style block). -->
+  <button
+    class="tb-collapse-toggle"
+    onclick={() => (toolbarCollapsed = !toolbarCollapsed)}
+    aria-label={toolbarCollapsed ? $t('connection.expandBar') : $t('connection.collapseBar')}
+    title={toolbarCollapsed ? $t('connection.expandBar') : $t('connection.collapseBar')}
+  >{toolbarCollapsed ? '⌄' : '⌃'}</button>
 </header>
 
 <style>
@@ -318,6 +357,105 @@
     align-items: center;
     align-self: stretch;
     gap: 8px;
+  }
+
+  /* Mobile: keep the toolbar content clear of the landscape notch / Dynamic Island on the left edge
+     (--safe-left is 0 in portrait, so this is a no-op there). */
+  :global(html.is-mobile) .toolbar {
+    padding-left: calc(16px + var(--safe-left, 0px));
+  }
+
+  /* Phone collapse toggle + collapsed status strip are hidden on desktop/tablet; the phone media
+     query below reveals them. Everything here is gated to narrow (<=600px) mobile screens so tablets
+     and desktop keep the normal single-row toolbar untouched. */
+  .tb-collapse-toggle,
+  .tb-collapsed-status {
+    display: none;
+  }
+
+  @media (max-width: 600px) {
+    /* Expanded phone bar: the controls do not fit one row, so wrap them onto extra lines instead of
+       clipping the right side off-screen. The grid toolbar row is auto-sized to match (+page.svelte). */
+    :global(html.is-mobile) .toolbar {
+      flex-wrap: wrap;
+      height: auto;
+      row-gap: 6px;
+      padding-top: 4px;
+      padding-bottom: 8px;
+      padding-right: 46px; /* clear the absolutely-positioned collapse toggle */
+      align-items: center;
+    }
+    /* Push the connection controls onto their own line(s) below the logo/indicators row. */
+    :global(html.is-mobile) .toolbar-right {
+      flex-basis: 100%;
+      justify-content: flex-start;
+    }
+    :global(html.is-mobile) .port-controls {
+      flex-wrap: wrap;
+    }
+
+    /* Show/hide toggle pinned to the top-right of the bar in both states. */
+    :global(html.is-mobile) .tb-collapse-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: absolute;
+      top: 6px;
+      right: 10px;
+      width: 30px;
+      height: 30px;
+      padding: 0;
+      font-size: 16px;
+      line-height: 1;
+      color: #e0e0e0;
+      background: #3a3a3a;
+      border: 1px solid #555;
+      border-radius: 6px;
+      cursor: pointer;
+      z-index: 1;
+    }
+
+    /* Collapsed: drop the full controls, show only the slim status strip so the map gets the space. */
+    :global(html.is-mobile) .toolbar.collapsed {
+      flex-wrap: nowrap;
+      padding-bottom: 4px;
+    }
+    :global(html.is-mobile) .toolbar.collapsed .toolbar-center,
+    :global(html.is-mobile) .toolbar.collapsed .toolbar-right {
+      display: none;
+    }
+  }
+
+  /* Connection status chip in the toolbar-left: shown on iPhone in BOTH states — collapsed (it is the
+     only content) and expanded (it fills the empty space on the logo row). */
+  :global(html.is-phone) .tb-collapsed-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 10px;
+    font-size: 13px;
+    color: #cfcfcf;
+  }
+  .tb-collapsed-proto {
+    color: #37a8db;
+    font-weight: 600;
+  }
+  .tb-collapsed-arm {
+    font-weight: 700;
+    color: #59aa29;
+  }
+  .tb-collapsed-arm.armed {
+    color: #ff4444;
+  }
+  .tb-status-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #d40000;
+    flex: none;
+  }
+  .tb-status-dot.connected {
+    background: #3fbf5f;
   }
 
   .logo {
