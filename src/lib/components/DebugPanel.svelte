@@ -19,6 +19,7 @@
   import { boxName } from "$lib/helpers/inavModes";
   import { getPerf3dViewer, perf3dFps, perf3dForceContinuous, perf3dAttached } from "$lib/stores/perf3d";
   import { videoState, videoRtcStats } from "$lib/stores/video";
+  import { mjpegStats, uiJankMs, startJankProbe, stopJankProbe } from "$lib/controllers/mjpegSink";
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -117,6 +118,13 @@
     v.scene.requestRenderMode = true;
     v.scene.requestRender();
   }
+
+  // The main-thread jank probe only ticks while its readout is on screen — see startJankProbe.
+  $effect(() => {
+    if (tab !== 'video') return;
+    startJankProbe();
+    return stopJankProbe;
+  });
 
   // Load live values when the Performance tab is open, and RE-load whenever the 3D viewer attaches or
   // detaches — the 3D view may mount after the tab was opened, so a one-shot load on tab-open would stay
@@ -863,7 +871,7 @@
       </div>
       {#if $videoRtcStats}
         {@const v = $videoRtcStats}
-        <div class="debug-stats">
+        <div class="debug-stats stats-rows">
           <div class="stat-group">
             <span class="stat-label">{$t('debug.vidRecv')}</span>
             <span class="stat-value">{v.recvFps.toFixed(1)}</span>
@@ -892,7 +900,49 @@
           </div>
         </div>
         <div class="perf-hint">{$t('debug.vidHint')}</div>
-      {:else}
+      {/if}
+      {#if $mjpegStats}
+        {@const m = $mjpegStats}
+        <!-- MJPEG reader (off-thread). `in` is what the server delivers, `drawn` what reached a
+             canvas: a gap between them means this machine cannot decode as fast as the source sends,
+             and `dropped` counts the frames deliberately skipped for it. -->
+        <div class="debug-stats stats-rows">
+          <!-- Throughput · decoder · pauses. The third row is the diagnostic triad: a visible freeze
+               is a large "gap drawn", and gap in / UI stall say on which side of us it was made. -->
+          <div class="stat-group">
+            <span class="stat-label">{$t('debug.vidMjpegIn')}</span>
+            <span class="stat-value">{m.fpsIn.toFixed(1)}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.vidMjpegDrawn')}</span>
+            <span class="stat-value">{m.fpsOut.toFixed(1)}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.vidMjpegRate')}</span>
+            <span class="stat-value">{(m.kbps / 1000).toFixed(1)} Mbit/s</span>
+          </div>
+          <div class="stat-group">
+            <span class="stat-label">{$t('debug.vidMjpegDropped')}</span>
+            <span class="stat-value">{m.dropped} ({m.droppedNow}/s)</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.vidMjpegCorrupt')}</span>
+            <span class="stat-value">{m.corrupt}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.vidMjpegDecode')}</span>
+            <span class="stat-value">{m.decodeAvgMs.toFixed(1)} / {m.decodeMaxMs.toFixed(0)} ms</span>
+          </div>
+          <div class="stat-group">
+            <span class="stat-label">{$t('debug.vidMjpegGapIn')}</span>
+            <span class="stat-value">{m.gapIn.toFixed(0)} ms</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.vidMjpegGapDraw')}</span>
+            <span class="stat-value">{m.gapDraw.toFixed(0)} ms</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.vidUiJank')}</span>
+            <span class="stat-value">{$uiJankMs !== null ? `${$uiJankMs.toFixed(0)} ms` : '—'}</span>
+          </div>
+        </div>
+        <div class="perf-hint">{$t('debug.vidMjpegHint')}</div>
+      {/if}
+      {#if !$videoRtcStats && !$mjpegStats}
         <div class="perf-empty">{$t('debug.vidInactive')}</div>
       {/if}
     </div>
@@ -1112,6 +1162,14 @@
     display: flex;
     align-items: center;
     gap: 6px;
+    white-space: nowrap; /* a figure like "17.1 Mbit/s" must never break across lines */
+  }
+
+  /* Several groups in one block: stack them instead of letting the flex row run off the panel. */
+  .stats-rows {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
   }
 
   .stat-label {

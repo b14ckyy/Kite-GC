@@ -11,10 +11,32 @@
 
 use tauri::{AppHandle, Emitter, State};
 
+use std::sync::Arc;
+
+use crate::video::mjpeg_server::{EndedHook, MjpegSource, RtspTranscode};
 use crate::video::{ffmpeg, go2rtc, native, Go2Rtc};
 
 /// Fixed go2rtc stream name for the single live feed.
 const STREAM_NAME: &str = "kite";
+
+/// Emitted when a running feed's source dies (ffmpeg exited, read error) — never on our own stop.
+///
+/// The `<img>` sink cannot report this itself on WebKit: measured on 2.52.5, a multipart `<img>`
+/// fires one `load` for the whole stream and then **no** `error` and no `abort` when the server
+/// closes mid-stream, leaving the element on a dead `src` with `complete` still true. That is the
+/// whole reconnect trigger for the image path, so it comes from the backend instead, where the fact
+/// is known for certain and identically on every platform.
+pub const MJPEG_ENDED_EVENT: &str = "video-mjpeg-ended";
+
+/// Turn the MJPEG server's runtime-agnostic "the source died" callback into that event. The server
+/// deliberately knows nothing about Tauri — see `EndedHook` for why that module has to stay linkable
+/// without the window runtime.
+fn ended_hook(app: &AppHandle) -> EndedHook {
+    let app = app.clone();
+    Arc::new(move || {
+        let _ = app.emit(MJPEG_ENDED_EVENT, ());
+    })
+}
 
 /// How long the MJPEG endpoint gets to produce its first byte before the stream copy is judged
 /// unusable. Generous — it covers spawning ffmpeg and the RTSP handshake — because it is paid once,
@@ -287,6 +309,7 @@ pub fn video_probe_device(id: String) -> Vec<native::CaptureMode> {
 /// requested mode used to leave the UI showing "live" over a black frame (see `MjpegServer::start`).
 #[tauri::command(async)]
 pub fn video_native_mjpeg_start(
+    app: AppHandle,
     id: String,
     codec: String,
     width: u32,
@@ -299,8 +322,63 @@ pub fn video_native_mjpeg_start(
     // to accelerate) and the raw-input case measured only ~21 % better on VAAPI because the upload
     // eats most of the gain, so it stays in software.
     let transcode = if native::needs_transcode(&spec.codec) { "software" } else { "copy" };
-    let port = mjpeg.start(&spec)?;
+    let port = mjpeg.start(ended_hook(&app), &MjpegSource::Device(&spec))?;
     Ok(serde_json::json!({ "url": format!("http://127.0.0.1:{port}/"), "transcode": transcode }))
+}
+
+/// Start the embedded MJPEG server on an RTSP source — the image path, **without go2rtc**.
+///
+/// go2rtc drives an `ffmpeg:` source by having ffmpeg publish back into it over RTSP/TCP, so a stream
+/// that already carries MJPEG is packetised into RTP/JPEG (RFC 2435), reassembled and repacked as
+/// HTTP multipart. Measured over the same 120 s against a UAV-Link: the source had **zero** arrival
+/// gaps above 200 ms and go2rtc's output had **69**, each ~338 ms — a fixed buffer flushing, and the
+/// cause of the freezes testers reported. Reading the source once and broadcasting `-f mpjpeg`
+/// measures as clean as the source itself. RFC 2435 also only carries baseline JPEG at 4:2:0/4:2:2,
+/// so this path additionally reaches MJPEG sources the republish rejected outright.
+///
+/// `require_copy` is the caller's way of saying "only take this path if the source really is MJPEG":
+/// after a failed WebRTC negotiation, settling for a transcode would be a permanent downgrade.
+#[tauri::command(async)]
+pub fn video_rtsp_mjpeg_start(
+    app: AppHandle,
+    url: String,
+    require_copy: bool,
+    allow_hw_decode: Option<bool>,
+    mjpeg: State<'_, crate::video::MjpegServer>,
+) -> Result<serde_json::Value, String> {
+    let reply = |port: u16, t: RtspTranscode| {
+        serde_json::json!({ "url": format!("http://127.0.0.1:{port}/"), "transcode": t.label() })
+    };
+
+    // Try the stream copy first. A source that already sends MJPEG is cheaper by a wide margin
+    // (measured on this very stream: 7.4 % of a core against 47.6 % for a transcode), and trying is
+    // the only way to know — the mpjpeg muxer rejects anything that isn't MJPEG, so the attempt costs
+    // a failed spawn rather than a probe.
+    let copy = MjpegSource::Rtsp { url: &url, transcode: RtspTranscode::Copy };
+    match mjpeg.start(ended_hook(&app), &copy) {
+        Ok(port) => {
+            log::info!("[video] RTSP source already carries MJPEG — stream-copied, no transcode");
+            return Ok(reply(port, RtspTranscode::Copy));
+        }
+        Err(e) if require_copy => return Err(format!("source does not carry MJPEG: {e}")),
+        Err(e) => log::debug!("[video] no MJPEG track in the source ({e}) — transcoding instead"),
+    }
+
+    // V4L2 M2M is the Pi-class path (hardware decode only, no MJPEG encoder exists for it); VAAPI is
+    // the desktop-GPU one and does the whole chain. Probed in that order — on a Raspberry Pi a render
+    // node exists with no VAAPI driver behind it, so asking there probes hardware that cannot answer.
+    let transcode = if !allow_hw_decode.unwrap_or(true) {
+        RtspTranscode::Software
+    } else if crate::video::ffmpeg::v4l2_h264_decode_available() {
+        RtspTranscode::V4l2m2m
+    } else if let Some(node) = crate::video::ffmpeg::vaapi_render_node() {
+        RtspTranscode::Vaapi(node)
+    } else {
+        RtspTranscode::Software
+    };
+    let port = mjpeg.start(ended_hook(&app), &MjpegSource::Rtsp { url: &url, transcode })?;
+    log::info!("[video] RTSP MJPEG transcode running ({})", transcode.label());
+    Ok(reply(port, transcode))
 }
 
 /// Stop the embedded MJPEG server if running. Async: kills ffmpeg and joins the broadcast threads,

@@ -265,18 +265,29 @@ impl Go2Rtc {
         // JSON is valid YAML — go2rtc parses it. A real file (not inline) so its config-patch on
         // PUT /api/streams succeeds. Point go2rtc at our bundled ffmpeg so the `ffmpeg:` source
         // fallback works for quirky RTSP servers go2rtc's native client can't read.
-        // Point go2rtc at ffmpeg by its resolved path, or — if not installed yet — at the path the
-        // guided download WILL write to. go2rtc spawns ffmpeg per-source on demand, so a later
-        // download is picked up on the next stream start without restarting go2rtc.
-        let ffmpeg_bin = super::ffmpeg::find_ffmpeg()
-            .unwrap_or_else(|| dir.join(super::ffmpeg::binary_name()));
+        //
+        // BY NAME, never by path: go2rtc splits `ffmpeg.bin` on whitespace, so any path containing a
+        // space is truncated at the first one — `C:\Program Files\ffmpeg\ffmpeg.exe` becomes
+        // `C:\Program`, and every `ffmpeg:` source dies with `executable file not found in %PATH%`.
+        // Quoting does not help; go2rtc hands the quotes through to exec verbatim (both measured).
+        // That made H.264 unplayable in every installed Windows build, because the default install
+        // path *is* `…\Programs\Kite Ground Control\…`, while a dev run — whose ffmpeg sits under
+        // `AppData\Roaming\kite-gc\bin`, no spaces — worked. The directory instead goes on the child's
+        // PATH below, where separators are `;`/`:` and spaces are unremarkable.
+        //
+        // Kept resolved-or-future: if ffmpeg isn't installed yet, the download target's directory is
+        // on the PATH anyway, and go2rtc spawns ffmpeg per source on demand — so a later download is
+        // picked up on the next stream start without restarting go2rtc.
+        let ffmpeg_dir = super::ffmpeg::find_ffmpeg()
+            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+            .unwrap_or_else(|| dir.clone());
         // Hardware transcode templates. They live HERE, as named `ffmpeg:` entries, rather than being
         // spelled out in the source string, because go2rtc rejects any source containing a space
         // ("source with spaces may be insecure" → HTTP 400 on PUT /api/streams). A named template is
         // referenced as `#input=NAME` / `#video=NAME`, so the source stays space-free while the
         // expansion carries as many arguments as it likes. See `commands::video::video_webrtc_start`.
         let mut ffmpeg_cfg = serde_json::Map::new();
-        ffmpeg_cfg.insert("bin".into(), ffmpeg_bin.to_string_lossy().into());
+        ffmpeg_cfg.insert("bin".into(), super::ffmpeg::binary_name().into());
         // Pi-class SoCs: hardware H.264 decode only (there is no V4L2 M2M MJPEG encoder), mirroring
         // go2rtc's own `rtsp/udp` input template so a stream that reads on one reads on the other.
         if super::ffmpeg::v4l2_h264_decode_available() {
@@ -305,7 +316,10 @@ impl Go2Rtc {
             ffmpeg_cfg.insert("kite_hw_mjpeg".into(), "-c:v mjpeg_vaapi -async_depth 1".into());
         }
         let cfg = serde_json::json!({
-            "api": { "listen": format!("127.0.0.1:{api_port}") },
+            // `origin: "*"` makes go2rtc send `Access-Control-Allow-Origin` on its API. The WebView
+            // reads `/api/stream.mjpeg` with `fetch` from a worker (off-thread MJPEG reader), and a
+            // cross-origin fetch without that header is blocked — an <img> never needed it.
+            "api": { "listen": format!("127.0.0.1:{api_port}"), "origin": "*" },
             "rtsp": { "listen": format!("127.0.0.1:{rtsp_port}") },
             "webrtc": {
                 "listen": format!("127.0.0.1:{webrtc_port}"),
@@ -321,6 +335,20 @@ impl Go2Rtc {
         cmd.arg("-config").arg(&cfg_path);
         // go2rtc spawns ffmpeg itself, so a poisoned environment here breaks the readers too.
         crate::child_env::sanitize(&mut cmd);
+        // This is how go2rtc finds the ffmpeg named in the config above — by name, because it cannot
+        // take a path with a space in it. Ours goes FIRST so a copy we manage wins over any other the
+        // system happens to carry, and because PATH is separated by `;`/`:`, the spaces that broke the
+        // `bin` setting are irrelevant here.
+        let mut search: Vec<std::path::PathBuf> = vec![ffmpeg_dir];
+        if let Some(existing) = std::env::var_os("PATH") {
+            search.extend(std::env::split_paths(&existing));
+        }
+        match std::env::join_paths(&search) {
+            Ok(joined) => {
+                cmd.env("PATH", joined);
+            }
+            Err(e) => log::warn!("[video] cannot extend go2rtc's PATH ({e}) — ffmpeg sources may fail"),
+        }
         cmd.stdout(Stdio::null()).stderr(Stdio::piped()).stdin(Stdio::null());
         #[cfg(windows)]
         {
@@ -596,8 +624,23 @@ fn free_loopback_port() -> Result<u16, String> {
 /// panics go2rtc on the first ICE operation. UDP first (that's the binding that must succeed), then
 /// TCP verified while the UDP socket is still held.
 fn free_loopback_webrtc_port() -> Result<u16, String> {
+    // Every rejected UDP socket is HELD until we are done, and the attempt count is far above the
+    // width of a reserved block. Both are needed on Windows, where Hyper-V/WSL/Docker reserve blocks
+    // of the dynamic range and a bind into one fails with a *permission* error (WSAEACCES 10013)
+    // rather than "in use". Those blocks are 100 ports wide and often adjacent — 200 in a row on the
+    // maintainer's machine, out of ~19 UDP and ~20 TCP ranges
+    // (`netsh interface ipv4 show excludedportrange protocol=tcp`).
+    //
+    // The old version asked ten times and released each socket immediately. Windows hands ephemeral
+    // ports out roughly sequentially, so once the allocator's cursor stood inside such a block every
+    // one of those ten draws came back from the same block and the whole RTSP start failed — an
+    // instant, self-repeating reconnect loop, and only on the H.264 path, since that is the only one
+    // that still needs go2rtc. Holding the sockets forces the cursor forward instead of letting it
+    // hand back the same number.
+    const ATTEMPTS: usize = 256;
+    let mut held = Vec::with_capacity(ATTEMPTS);
     let mut last = String::new();
-    for _ in 0..10 {
+    for _ in 0..ATTEMPTS {
         let udp = std::net::UdpSocket::bind(("127.0.0.1", 0))
             .map_err(|e| format!("Cannot allocate a WebRTC port: {e}"))?;
         let port = udp
@@ -606,10 +649,17 @@ fn free_loopback_webrtc_port() -> Result<u16, String> {
             .port();
         match std::net::TcpListener::bind(("127.0.0.1", port)) {
             Ok(_) => return Ok(port),
-            Err(e) => last = e.to_string(),
+            Err(e) => {
+                last = e.to_string();
+                held.push(udp);
+            }
         }
     }
-    Err(format!("Cannot find a port free for both UDP and TCP: {last}"))
+    Err(format!(
+        "Cannot find a port free for both UDP and TCP after {ATTEMPTS} attempts. \
+         On Windows this is usually a reserved port range — check \
+         `netsh interface ipv4 show excludedportrange protocol=tcp`. Last error: {last}"
+    ))
 }
 
 #[cfg(test)]

@@ -86,6 +86,7 @@
   import { LARGE_BASE_VMIN } from "$lib/config/widgetRegistry";
   import FloatingVideoWindow from "$lib/components/video/FloatingVideoWindow.svelte";
   import { initVideo, videoState, videoStream, bindVideoEl, setMapLocation, setFloatHeightFrac, setFloatPos, registerPiPElement, reportMjpegError } from "$lib/stores/video";
+  import { canvasSink, mjpegSink } from "$lib/controllers/mjpegSink";
   import { lowPowerActive } from "$lib/stores/lowPower";
   import { initPulseBlink } from "$lib/stores/pulseBlink";
   import { openUrl } from "@tauri-apps/plugin-opener";
@@ -2604,16 +2605,27 @@
          it scales to the window (full height/width) without distortion — bars where aspect differs. -->
     <div class="map-video-wrap">
       {#if $videoState.mjpegUrl}
-        <!-- Native / MJPEG feed: an <img> multipart stream (no MediaStream). -->
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <!-- svelte-ignore a11y_missing_attribute -->
-        <img
-          class="map-video"
-          class:mirror={$videoState.mirror}
-          src={$videoState.mjpegUrl}
-          ondblclick={() => setMapLocation('main')}
-          onerror={reportMjpegError}
-        />
+        <!-- Native / MJPEG feed (no MediaStream): drawn by the off-thread reader where the WebView
+             allows it, otherwise the plain <img> multipart stream. -->
+        {#if $canvasSink}
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <canvas
+            class="map-video"
+            class:mirror={$videoState.mirror}
+            use:mjpegSink
+            ondblclick={() => setMapLocation('main')}
+          ></canvas>
+        {:else}
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <!-- svelte-ignore a11y_missing_attribute -->
+          <img
+            class="map-video"
+            class:mirror={$videoState.mirror}
+            src={$videoState.mjpegUrl}
+            ondblclick={() => setMapLocation('main')}
+            onerror={reportMjpegError}
+          />
+        {/if}
       {:else}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <!-- svelte-ignore a11y_media_has_caption -->

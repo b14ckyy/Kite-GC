@@ -16,7 +16,8 @@
         "width": 1280,
         "height": 800,
         "dragDropEnabled": true,
-        "decorations": false
+        "decorations": false,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,WebRtcHideLocalIpsWithMdns"
       }
     ],
     "security": {

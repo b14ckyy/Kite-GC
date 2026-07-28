@@ -28,6 +28,7 @@
     toggleFloating,
     reportMjpegError,
   } from '$lib/stores/video';
+  import { canvasSink, mjpegSink } from '$lib/controllers/mjpegSink';
   import VideoReconnectOverlay from '$lib/components/video/VideoReconnectOverlay.svelte';
 
   // True while the map occupies this floating frame (so this window shows the map, not video).
@@ -271,9 +272,14 @@
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="fw-body" onpointerdown={onBodyPointerDown} ondblclick={() => setMapLocation('floating')}>
         {#if $videoState.status === 'live' && $videoState.mjpegUrl}
-          <!-- Native / MJPEG feed: an <img> multipart stream (no MediaStream). -->
-          <!-- svelte-ignore a11y_missing_attribute -->
-          <img src={$videoState.mjpegUrl} class:mirror={$videoState.mirror} onerror={reportMjpegError} />
+          <!-- Native / MJPEG feed (no MediaStream): drawn by the off-thread reader where the WebView
+               allows it, otherwise the plain <img> multipart stream. -->
+          {#if $canvasSink}
+            <canvas use:mjpegSink class:mirror={$videoState.mirror}></canvas>
+          {:else}
+            <!-- svelte-ignore a11y_missing_attribute -->
+            <img src={$videoState.mjpegUrl} class:mirror={$videoState.mirror} onerror={reportMjpegError} />
+          {/if}
         {:else if $videoState.status === 'live'}
           <!-- svelte-ignore a11y_media_has_caption -->
           <video bind:this={videoEl} autoplay muted playsinline class:mirror={$videoState.mirror}></video>
@@ -331,7 +337,8 @@
     cursor: grabbing;
   }
   .fw-body video,
-  .fw-body img {
+  .fw-body img,
+  .fw-body canvas {
     width: 100%;
     height: 100%;
     object-fit: cover;
@@ -341,7 +348,8 @@
     will-change: transform;
   }
   .fw-body video.mirror,
-  .fw-body img.mirror {
+  .fw-body img.mirror,
+  .fw-body canvas.mirror {
     transform: scaleX(-1);
   }
   .fw-ph {

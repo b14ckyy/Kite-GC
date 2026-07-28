@@ -15,6 +15,7 @@
   import {
     videoState,
     videoStream,
+    videoRtcStats,
     bindVideoEl,
     reportVideoSize,
     enumerateVideoDevices,
@@ -32,6 +33,7 @@
     removeRtspConnection,
     selectRtspConnection,
     reportMjpegError,
+    isWebrtcAvailable,
     type RtspTransport,
     toggleFloating,
     enterPiP,
@@ -45,6 +47,7 @@
     setNativeFramerate,
     setNativeCodec,
   } from '$lib/stores/video';
+  import { canvasSink, mjpegSink, mjpegStats } from '$lib/controllers/mjpegSink';
   import {
     codecsFor,
     codecLabel,
@@ -170,6 +173,11 @@
   // Native capture is available on every OS (Linux V4L2 / Windows DirectShow / macOS AVFoundation).
   const KINDS: VideoKind[] = ['camera', 'rtsp', 'native'];
 
+  // go2rtc is only needed for the WebRTC path. A WebView without it (WebKitGTK builds with WebRTC
+  // compiled out — Raspberry Pi OS among them) runs RTSP entirely on ffmpeg now, so demanding the
+  // engine there would block a machine that already has everything it needs.
+  const needsEngine = isWebrtcAvailable();
+
   // MJPEG FPS counter — onload fires per frame in multipart streams.
   let mjpegFps = $state(0);
   let _mjpegFrames = 0;
@@ -247,22 +255,57 @@
     ),
   );
 
-  // Info-line frame rate. The native getUserMedia path (and camera) show measured/negotiated; the
-  // native MJPEG fallback (<img> multipart) can't measure per-frame in WebView2 → show the configured
-  // rate instead of a stuck 0.
+  // Info-line frame rate — each path reports it from the stage that actually knows.
+  //
+  // `measuredFps` counts `requestVideoFrameCallback` on the <video>, which fires through the page's
+  // render loop: it reads 50–53 on a rock-steady 60 fps feed whenever the UI is busy, because it is
+  // measuring our own rendering, not the stream. So a WebRTC feed now takes the decoder's own rate
+  // from the inbound stats and only falls back to the sampled count where there are none (camera /
+  // getUserMedia). The MJPEG reader counts its own drawn frames, which is exact on every platform;
+  // the <img> fallback can only count where the WebView fires `load` per part (WebView2 does,
+  // WebKitGTK fires it once), hence the configured rate as a last resort.
   const fpsText = $derived.by(() => {
     const s = $videoState;
-    if (s.kind === 'native' && s.mjpegUrl) return String(s.nativeSel.fps);
-    const cur = s.mjpegUrl ? mjpegFps : measuredFps;
+    const drawn = $canvasSink ? ($mjpegStats?.fpsOut ?? 0) : mjpegFps;
+    if (s.kind === 'native' && s.mjpegUrl) return drawn ? drawn.toFixed(0) : String(s.nativeSel.fps);
+    const cur = s.mjpegUrl ? drawn : ($videoRtcStats?.decodeFps ?? measuredFps);
     const curStr = cur ? cur.toFixed(0) : '–';
     return s.frameRate ? `${curStr}/${Math.round(s.frameRate)}` : curStr;
+  });
+
+  // Codec + bitrate for a network stream, from whichever pipeline is carrying it. Both are facts
+  // about the feed the user is looking at, and neither was visible outside the Debug Monitor.
+  // On the image path this used to read "MJPEG" for every source, because MJPEG is what reaches the
+  // screen — true, and not what the user is asking. The transcode verdict answers the real question:
+  // the backend only gets `copy` when the mpjpeg muxer accepted the source's own packets, which no
+  // codec but MJPEG survives. Anything else was decoded and re-encoded, and the only other codec Kite
+  // supports over RTSP is H.264.
+  //
+  // Both ends are named on the transcode path, because the bitrate next to it is the MJPEG one and
+  // reading a source's codec beside the pipeline's output rate is how "3 Mbit H.264" turns into a
+  // puzzling 25 Mbit/s. The source's own bitrate is not on offer: ffmpeg reports what it writes, not
+  // what a live RTSP input costs.
+  const streamCodec = $derived.by(() => {
+    const s = $videoState;
+    if (s.kind !== 'rtsp' || s.status !== 'live') return null;
+    if (!s.mjpegUrl) return $videoRtcStats?.codec ?? null;
+    return s.activeTranscode === 'copy' ? 'MJPEG' : 'H.264 → MJPEG';
+  });
+  const streamBitrate = $derived.by(() => {
+    const s = $videoState;
+    if (s.kind !== 'rtsp' || s.status !== 'live') return null;
+    const kbps = s.mjpegUrl ? $mjpegStats?.kbps : $videoRtcStats?.kbps;
+    if (!kbps) return null;
+    return kbps >= 1000 ? `${(kbps / 1000).toFixed(1)} Mbit/s` : `${Math.round(kbps)} kbit/s`;
   });
 
   // Diagnostic: what the LIVE feed actually does. Two independent questions, so two badges:
   //   • transcode — reported by the backend for this stream (`activeTranscode`), never inferred from
   //     what the host *could* do: an MJPEG camera is stream-copied and a user can force software, so
   //     "this host has VAAPI" says nothing about the feed in front of you.
-  //   • surface   — `<video>` on a hardware overlay, or an `<img>` rastered with the rest of the page.
+  //   • surface   — `<video>` on a hardware overlay, or the image path: a JPEG decoded per frame and
+  //     drawn into a canvas. That canvas is its own compositing layer, but it is still not a hardware
+  //     video surface, which is what this badge is about.
   // A `<video>` feed transcodes nothing (the WebView decodes it), so it shows only the surface badge.
   const TRANSCODE_LABEL: Record<string, string> = { vaapi: 'VAAPI', v4l2m2m: 'V4L2' };
   const pipeline = $derived.by(():
@@ -275,7 +318,10 @@
       const engine = mode ? TRANSCODE_LABEL[mode] : undefined;
       const via = engine ?? (mode === 'copy' ? $t('video.pipeline.copy') : undefined);
       return {
-        method: `${s.kind === 'rtsp' ? 'go2rtc' : 'ffmpeg'} → MJPEG${via ? ` (${via})` : ''}`,
+        // Always ffmpeg: the image path reads the source itself and broadcasts `-f mpjpeg` through
+        // Kite's own server. It used to run through go2rtc, whose republish was measured as the
+        // cause of the freezes, and naming go2rtc here now would point at the wrong component.
+        method: `ffmpeg → MJPEG${via ? ` (${via})` : ''}`,
         transcode: mode,
         // A stream copy is better than hardware — there is nothing to accelerate — so it counts as
         // "not costing us anything", not as a software fallback.
@@ -293,7 +339,7 @@
 {#snippet headerActions()}
   <Button
     variant={$videoState.enabled ? 'danger' : 'data'}
-    disabled={!$videoState.enabled && $videoState.kind === 'rtsp' && engineChecked && !engineVer}
+    disabled={!$videoState.enabled && $videoState.kind === 'rtsp' && needsEngine && engineChecked && !engineVer}
     onclick={toggleVideo}
   >
     {$videoState.enabled ? $t('video.stop') : $t('video.start')}
@@ -304,15 +350,20 @@
   <div class="vp-body">
     <div class="preview" style="aspect-ratio: {$videoState.aspect};">
       {#if $videoState.mjpegUrl}
-        <!-- MJPEG: embedded ffmpeg server, each frame triggers onload -->
-        <!-- svelte-ignore a11y_missing_attribute -->
-        <img
-          src={$videoState.mjpegUrl}
-          alt="Live video"
-          class:mirror={$videoState.mirror}
-          onload={mjpegFrame}
-          onerror={reportMjpegError}
-        />
+        <!-- MJPEG multipart feed — off-thread reader where the WebView allows it, else an <img>
+             whose per-part `load` carries both the frame count and the picture size. -->
+        {#if $canvasSink}
+          <canvas use:mjpegSink class:mirror={$videoState.mirror}></canvas>
+        {:else}
+          <!-- svelte-ignore a11y_missing_attribute -->
+          <img
+            src={$videoState.mjpegUrl}
+            alt="Live video"
+            class:mirror={$videoState.mirror}
+            onload={mjpegFrame}
+            onerror={reportMjpegError}
+          />
+        {/if}
       {:else}
         <!-- svelte-ignore a11y_media_has_caption -->
         <video
@@ -347,6 +398,8 @@
       <div class="info-line">
         {$videoState.width ?? '–'}×{$videoState.height ?? '–'}
         · {fpsText} fps
+        {#if streamCodec}· {streamCodec}{/if}
+        {#if streamBitrate}· {streamBitrate}{/if}
       </div>
       {#if pipeline}
         <div class="pipeline-line" class:sw={!pipeline.transcodeHw}>
@@ -570,8 +623,8 @@
         </div>
       {/if}
 
-      {#if engineChecked && !engineVer}
-        <!-- go2rtc is required for any RTSP source. -->
+      {#if needsEngine && engineChecked && !engineVer}
+        <!-- go2rtc is required for the WebRTC path only — see `needsEngine`. -->
         <div class="ffmpeg-box">
           <p class="hint">{$t('video.engineMissing')}</p>
           {#if engineDownloading}
@@ -586,7 +639,9 @@
           {/if}
         </div>
       {:else if engineVer}
-        {#if $videoState.status === 'live' && $videoState.rtspEngine}
+        {#if $videoState.status === 'live' && $videoState.rtspEngine && !$videoState.mjpegUrl}
+          <!-- Which reader go2rtc uses — a WebRTC-path question. The image path does not go through
+               go2rtc at all, and the pipeline line above already names what it runs. -->
           <p class="hint">{$t(`video.via.${$videoState.rtspEngine}`)}</p>
         {:else}
           <p class="hint">{$t('video.engineReady')}</p>
@@ -673,8 +728,10 @@
   .preview video { width: 100%; height: 100%; object-fit: contain; display: block; will-change: transform; }
   .preview video.mirror { transform: scaleX(-1); }
   .preview video.hidden { visibility: hidden; }
-  .preview img { width: 100%; height: 100%; object-fit: contain; display: block; will-change: transform; }
-  .preview img.mirror { transform: scaleX(-1); }
+  .preview img,
+  .preview canvas { width: 100%; height: 100%; object-fit: contain; display: block; will-change: transform; }
+  .preview img.mirror,
+  .preview canvas.mirror { transform: scaleX(-1); }
   .preview-placeholder {
     position: absolute;
     inset: 0;

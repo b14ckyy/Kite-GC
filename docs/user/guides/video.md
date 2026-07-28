@@ -91,10 +91,11 @@ feed are given a few seconds to heal on their own before a full reconnect is for
 signal dips don't interrupt the stream unnecessarily.
 
 !!! note "Helpers download themselves"
-    **Camera (device)** needs nothing extra. **Native Capture** uses the bundled **ffmpeg** engine, and
-    **RTSP** uses **go2rtc** (with ffmpeg as a fallback reader for streams it can't read natively). Kite
-    downloads whichever it needs **automatically** the first time you use that source — no manual
-    install. On macOS these are shipped with the app.
+    **Camera (device)** needs nothing extra. **Native Capture** uses the bundled **ffmpeg** engine.
+    **RTSP** uses **go2rtc** for the direct video path and **ffmpeg** for the image path — a machine
+    whose browser engine offers no direct path (common on Linux) uses ffmpeg alone and never needs
+    go2rtc. Kite downloads whichever it needs **automatically** the first time you use that source — no
+    manual install. On macOS these are shipped with the app.
 
 ## Where the video shows
 
@@ -149,18 +150,23 @@ stack, so a network stream is played directly by the system's hardware-accelerat
 low-CPU, low-latency feed is important to you — and especially if you plan to fly with it — those are
 the platforms we can most confidently recommend.
 
-**On Linux, video support is provided as-is.** Kite runs in WebKitGTK there, which delegates all video
-work to GStreamer — and which plugins your distribution installs is entirely up to your distribution.
-There are hundreds of combinations of distro, desktop, graphics driver and plugin set, and we cannot
-test or support them all. Concretely, these are things Kite cannot fix from its side:
+**On Linux, video support is provided as-is.** Kite runs in WebKitGTK there, which hands video playback
+to GStreamer — and which plugins your distribution installs is entirely up to your distribution. There
+are hundreds of combinations of distro, desktop, graphics driver and plugin set, and we cannot test or
+support them all. Concretely, these are things Kite cannot fix from its side:
 
 - **Whether an RTSP stream can be played directly at all.** Many Linux systems — Raspberry Pi OS and
   current Debian desktops among them — run a browser engine that does not expose the direct (WebRTC)
   video path, and that cannot be installed after the fact. Kite then falls back to a **converted image
-  stream**. It works, but it adds a conversion and an extra hop, so **expect noticeably more latency
-  than on Windows or macOS** — this is the single biggest practical difference. If a smaller delay
-  matters more than resolution, **send a smaller or slower stream from the source** (e.g. 480p instead
-  of 720p, or 30 instead of 60 fps): that saves work at every stage at once.
+  stream**. It works, but it adds a conversion, so **expect noticeably more latency than on Windows or
+  macOS** — this is the single biggest practical difference. If a smaller delay matters more than
+  resolution, **send a smaller or slower stream from the source** (e.g. 480p instead of 720p, or 30
+  instead of 60 fps): that saves work at every stage at once.
+- **How much each frame costs to put on screen.** The image path decodes every frame for display, and
+  the Linux engine is markedly slower at that than the Windows one — measured on one laptop, the same
+  720×576 frame took about 13 ms against roughly 2 ms, and longer while the machine was busy. So a
+  frame rate that is effortless on Windows can be out of reach on comparable Linux hardware, whatever
+  the CPU says.
 - **Whether that conversion uses your graphics hardware.** Kite tests your machine at start-up and uses
   the GPU for the conversion when it can — on Intel and AMD desktop graphics via VAAPI, and on
   Raspberry Pi 3/4 class boards via their built-in decoder. Where that works it is a large saving

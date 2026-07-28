@@ -55,6 +55,17 @@ export const isLinux = /Linux/i.test(ua) && !/Android/i.test(ua);
  *  Neither WebView2 nor macOS shows this, so both keep the smooth animations. */
 export const isWebKitGtk = isLinux;
 
+/** True on any WebKit-based WebView — WebKitGTK on Linux and WKWebView on macOS, which are different
+ *  ports of the same WebCore and so share its resource loader.
+ *
+ *  Drives the `?raw=1` request of the off-thread MJPEG reader. WebKit handles
+ *  `multipart/x-mixed-replace` inside that loader and never exposes it to `fetch`: measured on
+ *  WebKitGTK 2.52.5 from a `tauri://localhost` page, the response headers arrive and the first
+ *  `reader.read()` fails with `Load failed` at zero bytes — main thread and worker alike, which is
+ *  what silently pushed Linux back onto the `<img>` sink. The identical bytes under another content
+ *  type stream perfectly. WebView2 reads multipart directly and is deliberately left untouched. */
+export const isWebKit = isLinux || isMacOS;
+
 // Tag the document root on mobile so global CSS can add bottom breathing room. The bottom edge is
 // crowded there: the on-screen RC sticks, the map zoom/compass buttons, the Leaflet attribution label
 // and the iPad home indicator all fight for the same strip. `--safe-bottom` exposes the device safe

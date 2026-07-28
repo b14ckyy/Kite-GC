@@ -16,6 +16,7 @@
   import { t } from 'svelte-i18n';
   import { onMount, onDestroy } from 'svelte';
   import { videoStream, videoState, bindVideoEl, setMapLocation, setWidgetRect, reportMjpegError } from '$lib/stores/video';
+  import { canvasSink, mjpegSink } from '$lib/controllers/mjpegSink';
   import VideoReconnectOverlay from '$lib/components/video/VideoReconnectOverlay.svelte';
 
   let { width = 300, height = 150 }: { width?: number; height?: number } = $props();
@@ -73,9 +74,14 @@
     <!-- The map is overlaid here by +page (top-level). Keep an empty sized tile underneath. -->
     <div class="placeholder map-here"></div>
   {:else if $videoState.status === 'live' && $videoState.mjpegUrl}
-    <!-- Native / MJPEG feed: an <img> multipart stream (no MediaStream). -->
-    <!-- svelte-ignore a11y_missing_attribute -->
-    <img src={$videoState.mjpegUrl} class:mirror={$videoState.mirror} onerror={reportMjpegError} />
+    <!-- Native / MJPEG feed (no MediaStream): drawn by the off-thread reader where the WebView
+         allows it, otherwise the plain <img> multipart stream. -->
+    {#if $canvasSink}
+      <canvas use:mjpegSink class:mirror={$videoState.mirror}></canvas>
+    {:else}
+      <!-- svelte-ignore a11y_missing_attribute -->
+      <img src={$videoState.mjpegUrl} class:mirror={$videoState.mirror} onerror={reportMjpegError} />
+    {/if}
   {:else if $videoState.status === 'live'}
     <!-- svelte-ignore a11y_media_has_caption -->
     <video
@@ -106,6 +112,7 @@
   }
   video,
   img,
+  canvas,
   .placeholder {
     width: 100%;
     height: 100%;
@@ -116,7 +123,8 @@
     box-sizing: border-box;
   }
   video,
-  img {
+  img,
+  canvas {
     object-fit: cover; /* crop to fill the 2:1 tile */
     /* Own compositing layer: a 60 fps feed then only re-rasters/uploads its own rect instead of
        dirtying the shared content layer's tiles every frame (matters on WebKitGTK/Pi; <video> gets a
@@ -124,7 +132,8 @@
     will-change: transform;
   }
   video.mirror,
-  img.mirror {
+  img.mirror,
+  canvas.mirror {
     transform: scaleX(-1);
   }
   .placeholder {
