@@ -28,6 +28,7 @@
   import { loadTileBytes } from "$lib/cache/tileLoader";
   import { isKnownUnavailable, isPlaceholderTile } from "$lib/cache/tileAvailability";
   import { isValidGpsCoordinate, MIN_FIX_SATELLITES } from "$lib/helpers/telemetry";
+  import { isRelativeAltitudeProtocol } from "$lib/helpers/altReference";
   import {
     segmentTrackByFlightMode,
     segmentTrackByAltitude,
@@ -88,6 +89,7 @@
     active = true,
     playbackTrack = [],
     playbackPoint = null,
+    playbackProtocol = null,
     replayStartEpochMs = null,
     trackColorMode = 'flightmode' as TrackColorMode,
     platformType = PLATFORM_MULTIROTOR as PlatformType,
@@ -104,6 +106,9 @@
     active?: boolean;
     playbackTrack?: TelemetryRecord[];
     playbackPoint?: TelemetryRecord | null;
+    /** Replayed flight's `protocol` label — decides whether its `alt_m` is true MSL or arming-relative
+     *  (see `helpers/altReference`). Null while live or before a flight is selected. */
+    playbackProtocol?: string | null;
     /** Absolute flight-start epoch (ms); playbackPoint.timestamp_ms is relative to this. */
     replayStartEpochMs?: number | null;
     trackColorMode?: TrackColorMode;
@@ -3048,10 +3053,20 @@
 
   $effect(() => {
     if (!viewer) return;
-    updatePlaybackTrack3D(playbackTrack, trackColorMode);
+    updatePlaybackTrack3D(playbackTrack, trackColorMode, playbackProtocol);
   });
 
-    async function updatePlaybackTrack3D(track: TelemetryRecord[], colorMode: TrackColorMode) {
+  /** Terrain MSL (m) at a coordinate, or null when the sample is unavailable (offline / no coverage). */
+  async function terrainGroundMsl(lat: number, lon: number): Promise<number | null> {
+    try {
+      return await invoke<number | null>('terrain_elevation', { lat, lon });
+    } catch (e) {
+      console.warn('[Map3D] terrain lookup failed', e);
+      return null;
+    }
+  }
+
+    async function updatePlaybackTrack3D(track: TelemetryRecord[], colorMode: TrackColorMode, protocol: string | null) {
     if (!viewer) return;
 
     // Mark a load in progress and drop the previous track reference up front: this function is async
@@ -3091,15 +3106,31 @@
 
     // Anchor: GPS MSL at the first fix (absolute reference for the relative, fused track altitude).
     // Includes any real height-above-ground at the start (e.g. tower/rooftop) — NOT snapped to ground.
+    //
+    // …unless the protocol never carried MSL in the first place. CRSF and LTM report altitude relative
+    // to the arming point, so their `alt_m` starts near zero and this anchor would place the whole
+    // track at sea level — i.e. buried by the local terrain elevation (issue #26: a flight at ~550 m
+    // rendered ~550 m underground). For those, take the anchor from terrain at the start point, which
+    // is what the relative altitude is measured against. Same reference the live path captures at the
+    // arm edge (`captureGroundAnchor` in stores/telemetry), and the same limitation: arming on a roof
+    // or tower shifts the whole track down by that height, because nothing in the stream records it.
     startMslGps = firstPt?.alt_m ?? 0;
+    if (isRelativeAltitudeProtocol(protocol) && firstPt) {
+      const ground = await terrainGroundMsl(firstPt.lat!, firstPt.lon!);
+      // No terrain sample (offline / gap in coverage) → keep the raw value rather than inventing one.
+      if (ground != null) startMslGps = ground;
+    }
 
     // Geoid offset for the track ellipsoid heights: N = cesiumGround_ellipsoid − copernicusGround_MSL at
     // the first point. Derived purely from terrain (NOT the UAV's GPS altitude), so it's the true
     // MSL→ellipsoid conversion regardless of arm height; must wait for Cesium World Terrain to load. Uses
     // the SAME single-flight path as the mission, so a linked mission loading moments later (see +page)
     // shares this exact computation and draws at the same height instead of racing it. Copernicus MSL is
-    // preferred; first-fix GPS MSL is the fallback ground.
-    if (firstPt) await computeGeoidOnce(firstPt.lat!, firstPt.lon!, firstPt.alt_m ?? undefined);
+    // preferred; the start anchor is the fallback ground. That anchor is the first fix's GPS MSL for a
+    // true-MSL protocol (unchanged), and the terrain sample above for a relative one — passing the raw
+    // `alt_m` there would hand the fallback a near-zero "ground" and skew the offset by the whole local
+    // elevation on exactly the flights this fix is about.
+    if (firstPt) await computeGeoidOnce(firstPt.lat!, firstPt.lon!, startMslGps);
 
     // Filter to valid GPS points and convert to Cartesian3 with geoid correction
     const validTrack = track.filter(

@@ -128,6 +128,101 @@
   // the active core; colour follows the estimator health.
   const ekfLabel = $derived(telem.ekfType === 2 ? 'EKF2' : telem.ekfType === 3 ? 'EKF3' : 'EKF');
 
+  // ── Progressive collapse ─────────────────────────────────────────────────────
+  // The toolbar is the title bar, so the window buttons must stay reachable at ANY window width.
+  // Nothing here shrinks on its own, so a narrow window used to push them out of the frame entirely
+  // (worst with a connected UAV, where the sensor bar adds ~200 px). Instead of clipping at random,
+  // the bar sheds content in a fixed order as it runs out of room:
+  //   1 = version   2 = wordmark → icon   3 = sensor bar   4 = connection controls onto a second row
+  // Level 4 only applies while disconnected — that's the only time those controls are wide.
+  // Past level 4 the centre group simply clips (see `.toolbar-center`), which is the last-resort
+  // guarantee: only the left and centre groups ever give way, so the window buttons stay put on both
+  // placements — inside the right-hand group on Windows/Linux, and as the toolbar's own first child
+  // (macOS traffic lights, which nothing can push leftwards out of the frame).
+  const COLLAPSE_MAX = 4;
+  let collapse = $state(0);
+  let headerEl = $state<HTMLElement>();
+
+  /** Width the bar needed while it was at level n, refreshed on every pass at the current level.
+   *  Restoring level n-1 is only safe once that much room is actually back, which is what keeps a
+   *  window dragged across a boundary from flickering between two levels. */
+  const need: number[] = [];
+  /** Extra room required before restoring, so a width sitting exactly on a boundary can't oscillate. */
+  const RESTORE_SLACK = 24;
+  /** Header padding. The window buttons bleed into the right half of it, so this errs slightly
+   *  towards collapsing early — imperceptible, and it keeps the check free of platform special cases. */
+  const H_PAD = 32;
+
+  /** Stable scalar: `sensorTiles` is rebuilt on every telemetry tick, but its length rarely changes,
+   *  and a `$derived` primitive only notifies when the value actually differs. */
+  const sensorCount = $derived(sensorTiles.length);
+  const showSensorBar = $derived(collapse < 3 && (sensorCount > 0 || telem.ekfStatus !== 0));
+  const connOnSecondRow = $derived(collapse >= COLLAPSE_MAX && connStatus !== 'connected');
+
+  /** One measurement pass. Returns true if the level changed, i.e. a re-measure is due. */
+  function fitOnce(): boolean {
+    if (!headerEl) return false;
+    // Sum the natural widths of the layout groups. `scrollWidth` reports content width even where a
+    // group clips itself, so this stays honest once the centre starts being cut off. The floating
+    // second row is positioned out of flow and must not count towards the row it left.
+    let needed = 0;
+    for (const child of headerEl.children) {
+      if (child.classList.contains('conn-row')) continue;
+      needed += (child as HTMLElement).scrollWidth;
+    }
+    const avail = headerEl.clientWidth - H_PAD;
+    need[collapse] = needed;
+
+    if (needed > avail && collapse < COLLAPSE_MAX) {
+      collapse += 1;
+      return true;
+    }
+    if (collapse > 0 && (need[collapse - 1] ?? 0) + RESTORE_SLACK <= avail) {
+      collapse -= 1;
+      return true;
+    }
+    return false;
+  }
+
+  // A level change re-renders the bar but does not resize the header, so the observer won't fire
+  // again — each pass schedules the next one until the layout settles (at most COLLAPSE_MAX steps).
+  let fitQueued = false;
+  function scheduleFit() {
+    if (fitQueued) return;
+    fitQueued = true;
+    requestAnimationFrame(() => {
+      fitQueued = false;
+      if (fitOnce()) scheduleFit();
+    });
+  }
+
+  $effect(() => {
+    if (!headerEl) return;
+    const ro = new ResizeObserver(scheduleFit);
+    ro.observe(headerEl);
+    return () => ro.disconnect();
+  });
+
+  $effect(() => {
+    // Connecting swaps the widest parts of the bar at once (connection controls out, sensor bar in),
+    // so the recorded widths describe a layout that no longer exists. Drop them; any re-flow rides
+    // along with the connection-state redraw that is happening anyway.
+    void connStatus;
+    need.length = 0;
+    scheduleFit();
+  });
+
+  $effect(() => {
+    // Smaller content changes only need a fresh measurement. The recorded widths are deliberately
+    // KEPT here: dropping them makes the next pass restore a level greedily, and the resulting
+    // re-render would tear down a control the user is working in — the transport select can be
+    // sitting on the second row while it fires this.
+    void selectedTransport;
+    void sensorCount;
+    void $rcEngaged.on;
+    scheduleFit();
+  });
+
   // Double-click the title bar to maximize/restore. Windows/macOS drag regions already do this
   // natively, so only Linux/GTK needs the manual handler (otherwise it would toggle twice).
   const isLinux = typeof navigator !== 'undefined' && navigator.userAgent.includes('Linux');
@@ -162,14 +257,22 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<header class="toolbar" class:collapsed={toolbarCollapsed} data-tauri-drag-region ondblclick={onTitlebarDblClick}>
+<header class="toolbar" class:collapsed={toolbarCollapsed} bind:this={headerEl} data-tauri-drag-region ondblclick={onTitlebarDblClick}>
   {#if isMacOS}
     <!-- macOS: window controls live at top-left (native traffic-light placement). -->
     <WindowControls />
   {/if}
   <div class="toolbar-left" data-tauri-drag-region>
-    <img class="logo" src="/branding/kitegc-wordmark-white.svg" alt={$t('app.brand')} draggable="false" data-tauri-drag-region />
-    <span class="version" data-tauri-drag-region>v{appVersion}</span>
+    <img
+      class="logo"
+      src={collapse >= 2 ? '/branding/kitegc-icon-white.svg' : '/branding/kitegc-wordmark-white.svg'}
+      alt={$t('app.brand')}
+      draggable="false"
+      data-tauri-drag-region
+    />
+    {#if collapse < 1}
+      <span class="version" data-tauri-drag-region>v{appVersion}</span>
+    {/if}
     <!-- Phone collapsed state: slim connection-status strip shown in place of the full controls. -->
     <span class="tb-collapsed-status">
       <span class="tb-status-dot" class:connected={connStatus === 'connected'}></span>
@@ -187,26 +290,30 @@
       </button>
     {/if}
     <ArmingIndicator {telem} />
-    <div class="sensor-bar">
-      {#each sensorTiles as s (s.key)}
-        <div class="sensor"
-          class:active={s.state === 1 && !s.warn}
-          class:warning={s.warn}
-          class:error={s.state >= 2}
-          title={s.tooltip}>{s.label}</div>
-      {/each}
-      {#if telem.ekfStatus !== 0}
-        <div class="sensor"
-          class:active={telem.ekfStatus === 1}
-          class:warning={telem.ekfStatus === 2}
-          class:error={telem.ekfStatus === 3}
-          title={$t('sensors.ekfTooltip')}>{ekfLabel}</div>
-      {/if}
-    </div>
+    {#if showSensorBar}
+      <div class="sensor-bar">
+        {#each sensorTiles as s (s.key)}
+          <div class="sensor"
+            class:active={s.state === 1 && !s.warn}
+            class:warning={s.warn}
+            class:error={s.state >= 2}
+            title={s.tooltip}>{s.label}</div>
+        {/each}
+        {#if telem.ekfStatus !== 0}
+          <div class="sensor"
+            class:active={telem.ekfStatus === 1}
+            class:warning={telem.ekfStatus === 2}
+            class:error={telem.ekfStatus === 3}
+            title={$t('sensors.ekfTooltip')}>{ekfLabel}</div>
+        {/if}
+      </div>
+    {/if}
     <BatteryIndicator {telem} />
   </div>
-  <div class="toolbar-right" data-tauri-drag-region>
-    <div class="port-controls">
+  <!-- Rendered either inline in the right-hand group or, once the bar is out of room, on the floating
+       second row below it — so the markup lives in one place. Declared as a direct child of <header>
+       so both render sites are in its scope. -->
+  {#snippet connectionControls()}
       {#if connStatus !== "connected"}
         <!-- Protocol selector. The passive "Telemetry" mode is listen-only (auto-detect). -->
         <SegmentedToggle
@@ -304,7 +411,12 @@
       {:else}
         <Button variant="data" onclick={onConnect}>{$t('connection.connect')}</Button>
       {/if}
-    </div>
+  {/snippet}
+
+  <div class="toolbar-right" data-tauri-drag-region>
+    {#if !connOnSecondRow}
+      <div class="port-controls">{@render connectionControls()}</div>
+    {/if}
     <button
       class="relay-toggle"
       class:open={relayOpen}
@@ -324,6 +436,12 @@
     aria-label={toolbarCollapsed ? $t('connection.expandBar') : $t('connection.collapseBar')}
     title={toolbarCollapsed ? $t('connection.expandBar') : $t('connection.collapseBar')}
   >{toolbarCollapsed ? '⌄' : '⌃'}</button>
+  {#if connOnSecondRow}
+    <!-- Floats below the bar rather than growing it: the app grid pins the toolbar row to 53 px and
+         the map/panel overlays offset against that same number, so a taller header would drag four
+         unrelated surfaces with it. Only ever visible while disconnected. -->
+    <div class="port-controls conn-row">{@render connectionControls()}</div>
+  {/if}
 </header>
 
 <style>
@@ -340,16 +458,30 @@
     z-index: 200;
   }
 
+  /* The left and centre groups give way; the right one never does. `min-width: 0` lets them shrink
+     below their content and `overflow: hidden` clips what no longer fits, which is the backstop that
+     keeps the window buttons inside the frame even past the last collapse level. */
   .toolbar-left {
     display: flex;
     align-items: center;
     gap: 12px;
+    min-width: 0;
+    overflow: hidden;
   }
 
   .toolbar-center {
     display: flex;
     align-items: center;
     gap: 10px;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  /* Keep every child at its natural size so the group clips as a whole instead of squeezing its
+     contents — squeezed children would also make the fit measurement read a width that isn't real. */
+  .toolbar-left > :global(*),
+  .toolbar-center > :global(*) {
+    flex: none;
   }
 
   .toolbar-right {
@@ -357,6 +489,22 @@
     align-items: center;
     align-self: stretch;
     gap: 8px;
+    flex: none;
+  }
+
+  /* Connection controls once they no longer fit on the bar: a strip hanging under the toolbar,
+     continuing its background and accent edge. Out of flow, so the 53 px title-bar row is unchanged. */
+  .conn-row {
+    position: absolute;
+    top: calc(100% + 3px); /* clear the toolbar's own accent border */
+    right: 0;
+    z-index: 1;
+    padding: 7px 16px 8px 12px;
+    background: #2e2e2e;
+    border-bottom: 3px solid #37a8db;
+    border-left: 1px solid #272727;
+    border-bottom-left-radius: 6px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.35);
   }
 
   /* Mobile: keep the toolbar content clear of the landscape notch / Dynamic Island on the left edge

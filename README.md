@@ -10,16 +10,23 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: GPL-3.0-or-later" src="https://img.shields.io/badge/License-GPLv3-blue.svg"></a>
   <a href="https://b14ckyy.github.io/Kite-GC/"><img alt="Documentation" src="https://img.shields.io/badge/docs-online-37a8db"></a>
-  <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-555">
-  <img alt="Status" src="https://img.shields.io/badge/status-public%20beta-f5a623">
+  <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-555">
+  <img alt="Status" src="https://img.shields.io/badge/status-release%20candidate-f5a623">
   <a href="https://paypal.me/b14ckyy"><img alt="Donate via PayPal" src="https://img.shields.io/badge/Donate-PayPal-00457C?logo=paypal&logoColor=white"></a>
 </p>
 
 ---
 ## Development State: 
 
-Kite is currently in **feature-freeze** state for the 1.0 release. 
-Only PRs for **bugfixes will be accepted** and merged (towards `master` branch) But new **features or functional changes will not be merged** until after the final 1.0 release is out. 
+Kite is currently in **feature-freeze** for the 1.0 release, so which branch you target matters:
+
+- **Bugfixes for 1.0** → pull request against **`master`**, the release line.
+- **New features or functional changes** → pull request against **`development`**, the integration
+  trunk. They are welcome there now, but will not reach `master` until after the final 1.0 release.
+
+Nobody commits to either branch directly — see
+**[Contributing](https://b14ckyy.github.io/Kite-GC/for-developers/contributing/)** for the full
+branching model.
 
 --- 
 **Kite Ground Control (Kite GC)** is a modern, cross-platform ground control station for **INAV**,
@@ -82,8 +89,8 @@ Everything you'd expect from a ground station:
 - **Safety suite** — geofences (ArduPilot/PX4), geozones (INAV), safe-home & fixed-wing autoland,
   airspace overlays (airports, controlled airspace, obstacles) and **foreign-vehicle radar** with
   ADS-B proximity & conflict alerts.
-- **Live video** — low-latency RTSP video shown alongside (or behind) the map, with one-click
-  map ⇄ video swapping.
+- **Live video** — a local capture device (webcam / USB capture card) or a low-latency RTSP stream,
+  shown alongside (or behind) the map, with one-click map ⇄ video swapping.
 - **Telemetry relay** — re-encode and forward live telemetry to other ground stations, handsets or an
   antenna tracker.
 - **RC control** — fly from the GCS with a gamepad/joystick (HID).
@@ -96,7 +103,8 @@ Everything you'd expect from a ground station:
 - **Connections:** USB / serial, Bluetooth (SPP & BLE), TCP, UDP.
 - **Link modes:** live control link, **passive** listen-only telemetry, or a **relay** that
   re-broadcasts to other ground stations.
-- **Platforms:** Windows (primary), Linux (x86 / ARM). Android is on hold.
+- **Platforms:** Windows, macOS (universal, unsigned) and Linux (x86-64 / ARM64). Android and iOS are
+  in development for a release after 1.0.
 
 ## Download
 
@@ -148,6 +156,7 @@ just dev         # start with hot reload  (alt: npm run tauri dev)
 ```bash
 just build           # current platform   (alt: npm run tauri build)
 just build-windows   # Windows release
+just build-macos     # macOS release (on macOS)
 just build-linux     # Linux release (on Linux)
 ```
 
@@ -158,8 +167,11 @@ just build-linux     # Linux release (on Linux)
 
 ## Contributing
 
-Issues and pull requests are welcome. CI runs automatically on push/PR (`cargo check` +
-`svelte-check`). Recommended IDE: [VS Code](https://code.visualstudio.com/) with the
+Issues and pull requests are welcome — see
+**[Contributing](https://b14ckyy.github.io/Kite-GC/for-developers/contributing/)** for the branching
+model and coding conventions. CI runs `svelte-check`, `cargo check`, clippy and the Rust tests on
+Windows, macOS and Linux for every pull request. Recommended IDE:
+[VS Code](https://code.visualstudio.com/) with the
 [Svelte](https://marketplace.visualstudio.com/items?itemName=svelte.svelte-vscode),
 [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) and
 [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer) extensions.

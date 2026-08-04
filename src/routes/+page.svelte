@@ -2008,6 +2008,10 @@
   // FC variant for the selected flight (used by mode widgets + map coloring)
   const replayFcVariant = $derived((selectedFlight as Flight | null)?.fc_variant ?? 'INAV');
 
+  // Recording protocol of the selected flight — the 3D map needs it to tell a true-MSL track from an
+  // arming-relative one (CRSF/LTM), which decides how its altitude anchor is derived.
+  const replayProtocol = $derived((selectedFlight as Flight | null)?.protocol ?? null);
+
   // Absolute flight-start epoch (ms) — telemetry timestamp_ms is flight-relative, so the
   // 3D sky clock needs this origin to reconstruct the real instant for sun positioning.
   const replayStartEpochMs = $derived.by(() => {
@@ -2506,6 +2510,7 @@
           active={mapViewMode === '3d'}
           playbackTrack={mapTrack}
           playbackPoint={playbackPoint}
+          playbackProtocol={replayProtocol}
           {replayStartEpochMs}
           {trackColorMode}
           platformType={mapPlatformType}

@@ -11,6 +11,7 @@
 
 import type { TelemetryData } from '$lib/stores/telemetry';
 import type { TelemetryRecord } from '$lib/stores/flightlog';
+import { ARMED_BIT } from '$lib/helpers/arming';
 
 /** Normalize a recorded raw RSSI to 0–100 %. The scale isn't stored, so infer it from the magnitude:
  *  ≤100 already a percentage, ≤255 the MAVLink 0–254 range, otherwise the INAV 0–1023 range. */
@@ -85,7 +86,12 @@ export function toTelemetryData(r: TelemetryRecord, fcVariant = 'INAV'): Telemet
     },
 
     // Status
-    armingFlags: r.state_flags ?? 0,
+    // `state_flags` is INAV's stateFlags bitfield and only blackbox imports populate it — the live
+    // recorder has no source for it (`recorder.rs`) and stores NULL, which left every replayed live
+    // flight looking permanently disarmed. Recover it from the recording itself: the recorder opens a
+    // flight on the arm edge and finalises it on disarm, so every sample in a flight row was taken
+    // while armed, and any sample carrying a flight mode proves telemetry was flowing at that moment.
+    armingFlags: r.state_flags ?? (r.mode_primary ? ARMED_BIT : 0),
     cpuLoad: r.cpu_load ?? 0,
     sensorStatus: r.hw_health_status ?? 0,
     flightModeFlags: 0, // raw custom_mode is live-only (vehicle control); not replayed from the DB

@@ -78,6 +78,9 @@
     display: flex;
     align-items: stretch;
     height: 100%;
+    /* Never shrink: these are the only way to close the window, so they keep their size no matter
+       how tight the toolbar around them gets (see the collapse logic in Toolbar.svelte). */
+    flex: none;
     margin-left: 4px;
     /* Pull into the toolbar's right padding so the buttons sit flush in the corner. */
     margin-right: -16px;
@@ -122,6 +125,9 @@
     gap: 8px;
     height: 100%;
     padding: 0 14px 0 12px;
+    /* Same reasoning as `.window-controls`. Here it also matters that this is the toolbar's FIRST
+       child — without it the dots would be squeezed under the logo as the bar fills up. */
+    flex: none;
   }
 
   .mac-dot {

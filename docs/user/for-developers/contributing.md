@@ -7,7 +7,40 @@ documentation are all welcome.
 
 1. Read **[Building from source](building.md)** and get a dev build running with `just dev`.
 2. For anything non-trivial, **open an issue first** to discuss the approach — it saves rework.
-3. Branch, make your change, run the checks, and open a pull request against `master`.
+3. Branch off `development`, make your change, run the checks, and open a pull request **against
+   `development`** (see the branching model below).
+
+## Branching model
+
+Kite uses two long-lived branches. Which one you target matters:
+
+| Branch | What it is | Push to it? |
+| --- | --- | --- |
+| **`development`** | The integration trunk — all new work lands here, and it is kept buildable. **This is what you branch from and what your PR targets.** | Only through a reviewed PR |
+| **`master`** | The release line. It carries what is released or about to be, and takes fixes for the current release only. Releases are cut from here as tags. | Only through a reviewed PR |
+| **`feat/<name>`** | Short-lived working branches, one per feature or fix, cut from `development` and deleted after the merge. Anything may be broken here. | Freely — it's yours |
+
+```
+feat/my-feature ──▶ development ──▶ master ──▶ tag (release)
+                         ▲              │
+                         └──────────────┘
+                        fixes flow back down
+```
+
+**Nobody commits to `master` or `development` directly** — not even the maintainer. Every change
+arrives as a pull request, so there is always a diff, a CI run and a place to comment.
+
+**Where your branch lives** depends on your access: maintainers create `feat/*` branches in the main
+repository, everyone else forks and opens the PR from the fork. The workflow is otherwise identical.
+
+**Fixes for an already-released version** go on `master` and are merged down into `development`
+afterwards, so nothing is lost. If a released version needs a patch after the trunk has moved on, the
+branch is cut from that version's **tag**, not from `master`.
+
+**Documentation is the one exception.** A change to these pages that touches no code — a correction, a
+clarification, a missing note — targets `master` directly, because the published site must always
+describe the released app. Documentation *for a new or changed feature* is not covered by this: it
+belongs in the same branch as the feature and reaches `master` together with it.
 
 ## Before you open a PR
 
@@ -17,7 +50,8 @@ Run the static checks — the project leans on them heavily:
 just check    # svelte-check + TypeScript + cargo check
 ```
 
-CI runs the same checks (plus clippy) on every push and PR. PRs should be green before review.
+CI runs the same checks (plus clippy) on Linux, Windows and macOS for every push to `development` /
+`master` and every PR targeting them. **PRs should be green before review.**
 
 ## Coding conventions
 

@@ -58,6 +58,28 @@ chmod +x KiteGC_Linux_*_standalone.AppImage
     is not merely unsupported by these downloads; it is a system on which Kite's video would misbehave
     however you installed it.
 
+!!! warning "AppImage: on a very new distribution you may get an empty window"
+    There is a limit at the other end too, and it affects **only the AppImage**. On **Ubuntu 26.04**
+    it starts, draws an empty grey or white window and never loads the interface; the terminal ends
+    with `Could not create default EGL display: EGL_BAD_PARAMETER. Aborting...`.
+
+    **Use the `.deb` instead — it works on the same system.** So does the `.rpm` on the Fedora side.
+
+    An AppImage carries the app's own GTK, GLib and WebKitGTK — here the versions from Ubuntu 24.04 —
+    while the graphics driver always comes from your system. On Ubuntu 26.04 the gap between those two
+    halves has grown too wide: the bundled browser engine can no longer create a display.
+
+    We looked for a packaging fix and did not find one. Bundling *less* makes it worse, because your
+    system's libraries then land on a GLib older than they need; bundling the graphics driver is not
+    an option either, since it has to match your kernel. Rebuilding on a newer base would fix the
+    AppImage and lock out every system below it — the `.deb` included — which is not a trade we are
+    willing to make.
+
+    Verified working: **Ubuntu 24.04**, **Debian 13**. Known broken: **Ubuntu 26.04**.
+
+    If you know AppImage packaging or WebKitGTK well and see something we missed, please say so in
+    [issue #29](https://github.com/b14ckyy/Kite-GC/issues/29) — we would rather be wrong about this.
+
     You can still **[build Kite yourself](../for-developers/building.md)** on an older distribution and
     everything else will work — but the video issue comes from your system's browser engine, so a
     self-built copy has it too. The only real fix is a newer distribution.
