@@ -414,10 +414,19 @@ impl SerialConnection {
                         eprintln!("[serial] {} opened on attempt {}/{}", port_name, attempt, OPEN_RETRY_ATTEMPTS);
                         log::info!("Serial port {} opened on attempt {}/{}", port_name, attempt, OPEN_RETRY_ATTEMPTS);
                     }
-                    return Ok(Self {
+                    let mut conn = Self {
                         port_name: port_name.to_string(),
                         port,
-                    });
+                    };
+                    // Raise DTR/RTS like every standard tool does on open (INAV Configurator, Mission
+                    // Planner, terminals). USB-CDC devices gate their device→host stream on DTR
+                    // (`tud_cdc_n_connected()`), so after a bare open() the device never sends a byte
+                    // and the link looks dead in exactly one direction. Best-effort: some virtual
+                    // ports (BT-SPP) don't implement the lines — log and continue.
+                    if let Err(e) = conn.set_control_signals(true, true) {
+                        log::warn!("Serial {}: raising DTR/RTS failed (continuing): {}", port_name, e);
+                    }
+                    return Ok(conn);
                 }
                 Err(e) => {
                     last_err = e.to_string();
