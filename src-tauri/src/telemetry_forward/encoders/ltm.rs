@@ -21,6 +21,7 @@ const FM_HEADING: u32 = 1 << 2;
 const FM_NAV_ALTHOLD: u32 = 1 << 3;
 const FM_NAV_RTH: u32 = 1 << 4;
 const FM_NAV_POSHOLD: u32 = 1 << 5;
+const FM_HEADFREE: u32 = 1 << 6;
 const FM_NAV_LAUNCH: u32 = 1 << 7;
 const FM_MANUAL: u32 = 1 << 8;
 const FM_FAILSAFE: u32 = 1 << 9;
@@ -123,34 +124,67 @@ fn s_frame(cache: &TelemetryCache) -> Vec<u8> {
     frame(b'S', &p)
 }
 
-/// Collapse the unified flight-mode bitfield into a single LTM mode number (`ltm_modes_e`). Inverse of
-/// `decoders::ltm::classify_ltm_mode`; ordered most-dominant first since LTM carries only one mode.
+/// Collapse the unified flight-mode bitfield into a single LTM mode number (`ltm_modes_e`). The chain is
+/// INAV's `ltm_sframe()` (`telemetry/ltm.c`) verbatim — same tests, same order — so a combined-mode flight
+/// reports exactly what INAV itself would send over LTM (e.g. launch during cruise = cruise, autoland
+/// during RTH = RTH).
 fn ltm_mode_from_flags(f: u32) -> u8 {
-    if f & FM_NAV_FW_AUTOLAND != 0 {
-        15 // RTH autoland
-    } else if f & FM_NAV_RTH != 0 {
-        13 // RTH
+    if f & FM_MANUAL != 0 {
+        0 // manual
     } else if f & FM_NAV_WP != 0 {
         10 // mission / waypoint
-    } else if f & FM_NAV_LAUNCH != 0 {
-        20 // launch
+    } else if f & FM_NAV_RTH != 0 {
+        13 // RTH
     } else if f & FM_NAV_POSHOLD != 0 {
         9 // GPS hold
     } else if f & FM_NAV_COURSE_HOLD != 0 {
         18 // cruise
-    } else if f & FM_NAV_ALTHOLD != 0 {
-        8 // alt hold (LTM: angle+althold)
+    } else if f & FM_NAV_LAUNCH != 0 {
+        20 // launch
     } else if f & FM_AUTO_TUNE != 0 {
         21 // autotune
-    } else if f & FM_MANUAL != 0 {
-        0 // manual
-    } else if f & FM_HEADING != 0 {
+    } else if f & FM_NAV_ALTHOLD != 0 {
+        8 // alt hold
+    } else if f & (FM_HEADFREE | FM_HEADING) != 0 {
         11 // heading hold
-    } else if f & FM_HORIZON != 0 {
-        3 // horizon
     } else if f & FM_ANGLE != 0 {
         2 // angle
+    } else if f & FM_HORIZON != 0 {
+        3 // horizon
+    } else if f & FM_NAV_FW_AUTOLAND != 0 {
+        15 // land
     } else {
-        4 // acro / rate fallback
+        1 // rate
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The collapse must match INAV's `ltm_sframe()` chain (`telemetry/ltm.c`) for combined modes.
+    #[test]
+    fn collapse_matches_inav_chain() {
+        let cases: &[(u32, u8)] = &[
+            (FM_MANUAL | FM_NAV_RTH, 0),                              // manual wins over everything
+            (FM_NAV_WP | FM_NAV_RTH, 10),                             // WP-mission RTH reports the mission
+            (FM_NAV_FW_AUTOLAND | FM_NAV_RTH | FM_ANGLE, 13),         // autoland during RTH reports RTH
+            (FM_NAV_LAUNCH | FM_NAV_COURSE_HOLD | FM_NAV_ALTHOLD, 18), // launch during cruise = cruise
+            (FM_NAV_POSHOLD | FM_NAV_COURSE_HOLD, 9),
+            (FM_NAV_LAUNCH | FM_ANGLE, 20),
+            (FM_AUTO_TUNE | FM_NAV_ALTHOLD, 21),                      // autotune before althold
+            (FM_ANGLE | FM_NAV_ALTHOLD, 8),                           // angle+althold = althold
+            (FM_HORIZON | FM_NAV_ALTHOLD, 8),                         // horizon+althold = althold
+            ((1 << 17) | FM_NAV_ALTHOLD, 8),                          // anglehold+althold = althold
+            (FM_HEADFREE, 11),                                        // headfree maps to headhold too
+            (FM_HEADING | FM_ANGLE, 11),
+            (FM_ANGLE | FM_HORIZON, 2),                               // angle before horizon
+            (FM_HORIZON, 3),
+            (FM_NAV_FW_AUTOLAND, 15),                                 // land, only without any nav mode
+            (0, 1),                                                   // INAV sends RATE (1), not ACRO (4)
+        ];
+        for &(flags, expected) in cases {
+            assert_eq!(ltm_mode_from_flags(flags), expected, "flags=0x{flags:X}");
+        }
     }
 }

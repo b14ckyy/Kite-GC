@@ -61,6 +61,8 @@ export const MODE_REGISTRY: Record<string, ModeDef> = {
   cruise:       { label: 'Cruise',       category: 'cruise' },
   angle:        { label: 'Angle',        category: 'stabilized' },
   horizon:      { label: 'Horizon',      category: 'stabilized' },
+  anglehold:    { label: 'AngleHold',    category: 'stabilized' },
+  turtle:       { label: 'Turtle',       category: 'other' },
   manual:       { label: 'Manual',       category: 'manual' },
   acro:         { label: 'Acro',         category: 'acro' },
 

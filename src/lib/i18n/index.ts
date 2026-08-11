@@ -10,6 +10,7 @@ register('en', () => import('./locales/en.json'));
 register('de', () => import('./locales/de.json'));
 // French — experimental / not on the mandatory dual-update list (see CLAUDE.md). Based on en.json.
 register('fr', () => import('./locales/fr.json'));
+register('zh', () => import('./locales/zh.json'));
 
 export function initI18n(locale?: string) {
   init({
@@ -22,4 +23,5 @@ export const SUPPORTED_LOCALES = [
   { code: 'en', label: 'English' },
   { code: 'de', label: 'Deutsch' },
   { code: 'fr', label: 'Français' },
+  { code: 'zh', label: '中文' },
 ] as const;

@@ -444,13 +444,14 @@ fn parse_active_modes(payload: &[u8], box_ids: &[u8]) -> u32 {
         for bit in 0..8usize {
             if byte & (1 << bit) != 0 {
                 let bit_index = byte_idx * 8 + bit;
-                // Translate bit index → permanent box ID using the MSP_BOXIDS mapping
-                let permanent_id = if bit_index < box_ids.len() {
-                    box_ids[bit_index] as usize
-                } else {
-                    // Fallback: no mapping available, treat index as permanent ID
-                    bit_index
-                };
+                // Translate bit index → permanent box ID using the MSP_BOXIDS mapping. Without the
+                // mapping (BOXIDS not received yet) a bit index is NOT a permanent ID — the old
+                // index-as-ID fallback produced confidently wrong modes (whatever box the pilot
+                // configured at that position), so we report no mode instead until BOXIDS arrives.
+                if bit_index >= box_ids.len() {
+                    continue;
+                }
+                let permanent_id = box_ids[bit_index] as usize;
                 active_box_ids.push(permanent_id);
                 if let Some(flag) = box_id_to_flight_mode_bit(permanent_id) {
                     flags |= flag;
@@ -458,7 +459,7 @@ fn parse_active_modes(payload: &[u8], box_ids: &[u8]) -> u32 {
             }
         }
     }
-    eprintln!("[MSP-MODES] payload_len={}, modes_bytes={}, active_box_ids={:?}, flags=0x{:05X}",
+    log::debug!("[MSP-MODES] payload_len={}, modes_bytes={}, active_box_ids={:?}, flags=0x{:05X}",
         payload.len(), modes_bytes.len(), active_box_ids, flags);
 
     // Mirror INAV firmware logic from processRcModes():
@@ -478,7 +479,7 @@ fn parse_active_modes(payload: &[u8], box_ids: &[u8]) -> u32 {
     let has_stab = flags & (ANGLE | HORIZON | MANUAL) != 0;
     if has_nav && !has_stab {
         flags |= ANGLE;
-        eprintln!("[MSP-MODES] Implicit ANGLE from NAV mode, flags=0x{:05X}", flags);
+        log::debug!("[MSP-MODES] Implicit ANGLE from NAV mode, flags=0x{:05X}", flags);
     }
 
     flags
@@ -500,12 +501,12 @@ fn box_active(payload: &[u8], box_ids: &[u8], target: usize) -> bool {
         for bit in 0..8usize {
             if byte & (1 << bit) != 0 {
                 let bit_index = byte_idx * 8 + bit;
-                let pid = if bit_index < box_ids.len() {
-                    box_ids[bit_index] as usize
-                } else {
-                    bit_index
-                };
-                if pid == target {
+                // Same rule as parse_active_modes: no BOXIDS mapping → no claim (a raw bit index is
+                // not a permanent ID, and a false OVERRIDE positive would start RC streaming).
+                if bit_index >= box_ids.len() {
+                    continue;
+                }
+                if box_ids[bit_index] as usize == target {
                     return true;
                 }
             }
@@ -871,5 +872,27 @@ mod tests {
             }
             _ => panic!("Expected SensorStatus"),
         }
+    }
+
+    #[test]
+    fn test_parse_active_modes_requires_boxids() {
+        // MSPV2_INAV_STATUS payload: 13 header bytes + activeModes bytes + mixerProfile.
+        let mut payload = vec![0u8; 13];
+        payload.push(0b0000_1010); // bit index 1 + 3 set
+        payload.push(0); // mixerProfile
+        // Without the BOXIDS mapping a bit index is not a permanent ID → no modes, never guessed ones.
+        assert_eq!(parse_active_modes(&payload, &[]), 0);
+        // With the mapping: index 1 → box 1 (ANGLE), index 3 → box 10 (NAV RTH).
+        let box_ids = [0u8, 1, 2, 10];
+        assert_eq!(parse_active_modes(&payload, &box_ids), (1 << 0) | (1 << 4));
+    }
+
+    #[test]
+    fn test_box_active_requires_boxids() {
+        let mut payload = vec![0u8; 13];
+        payload.push(0b0000_0100); // bit index 2 set
+        payload.push(0);
+        assert!(!box_active(&payload, &[], BOX_MSP_RC_OVERRIDE));
+        assert!(box_active(&payload, &[0, 1, 50], BOX_MSP_RC_OVERRIDE));
     }
 }

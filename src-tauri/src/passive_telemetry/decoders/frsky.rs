@@ -65,6 +65,8 @@ const F_AUTO_TUNE: u32 = 1 << 10;
 const F_NAV_WP: u32 = 1 << 11;
 const F_NAV_COURSE_HOLD: u32 = 1 << 12;
 const F_FLAPERON: u32 = 1 << 13;
+const F_TURTLE: u32 = 1 << 15;
+const F_ANGLEHOLD: u32 = 1 << 17;
 const F_NAV_FW_AUTOLAND: u32 = 1 << 18;
 
 /// INAV arming_flags bit 2 = ARMED (what the recorder + frontend look for).
@@ -75,7 +77,7 @@ const ARMED_FLAG: u32 = 0x04;
 /// +1 = arming enabled (ready), +2 = arming disabled (not ready), +4 = ARMED. We surface the "not ready"
 /// state as a synthetic disabled bit (shared with CRSF) so the toolbar shows ready vs not-ready — 0 when
 /// ready or armed.
-fn decode_modes(value: u32) -> (bool, u32, u32) {
+pub(crate) fn decode_modes(value: u32) -> (bool, u32, u32) {
     let ones = value % 10;
     let armed = ones & 4 != 0;
     let arm_disable_bits = if ones & 2 != 0 { ARM_DISABLE_BLOCKED } else { 0 };
@@ -101,8 +103,10 @@ fn decode_modes(value: u32) -> (bool, u32, u32) {
     if tenk & 4 != 0 { f |= F_FAILSAFE; }
     else if tenk & 2 != 0 { f |= F_AUTO_TUNE; }
     if hundk & 1 != 0 { f |= F_NAV_FW_AUTOLAND; }
+    if hundk & 2 != 0 { f |= F_TURTLE; }
     if hundk & 8 != 0 { f |= F_NAV_POSHOLD; } // POSHOLD (airplane)
     if mil & 1 != 0 { f |= F_NAV_RTH; } // WP-mission RTH
+    if mil & 2 != 0 { f |= F_ANGLEHOLD; }
     (armed, arm_disable_bits, f)
 }
 

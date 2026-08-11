@@ -34,14 +34,19 @@ const FM_HEADING: u32 = 1 << 2;
 const FM_NAV_ALTHOLD: u32 = 1 << 3;
 const FM_NAV_RTH: u32 = 1 << 4;
 const FM_NAV_POSHOLD: u32 = 1 << 5;
+const FM_HEADFREE: u32 = 1 << 6;
 const FM_MANUAL: u32 = 1 << 8;
 const FM_FAILSAFE: u32 = 1 << 9;
 const FM_AUTO_TUNE: u32 = 1 << 10;
 const FM_NAV_WP: u32 = 1 << 11;
 const FM_NAV_COURSE_HOLD: u32 = 1 << 12;
 const FM_FLAPERON: u32 = 1 << 13;
+const FM_TURTLE: u32 = 1 << 15;
+const FM_ANGLEHOLD: u32 = 1 << 17;
 const FM_NAV_FW_AUTOLAND: u32 = 1 << 18;
 const ARMED_FLAG: u32 = 0x04;
+/// INAV armingFlag_e: ARMING_DISABLED_* reasons live in bits 6..30 (mirrors `helpers/arming.ts`).
+const ARMING_DISABLED_MASK: u32 = !0x3F;
 
 #[derive(Default)]
 pub struct SmartportEncoder;
@@ -84,7 +89,7 @@ impl Encoder for SmartportEncoder {
             frame(ID_ASPD, (asp.airspeed / 0.514444).round() as u32, &mut out); // m/s → knots
         }
         if let Some(s) = cache.status.as_ref() {
-            frame(ID_MODES, encode_modes(s.flight_mode_flags, s.arming_flags & ARMED_FLAG != 0), &mut out);
+            frame(ID_MODES, encode_modes(s.flight_mode_flags, s.arming_flags), &mut out);
         }
         out
     }
@@ -142,28 +147,100 @@ fn latlong_value(deg: f64, is_lon: bool) -> u32 {
     v
 }
 
-/// Inverse of `decoders::frsky::decode_modes`: pack the unified flight-mode flags + armed into INAV's
-/// decimal-column format (`frskyGetFlightMode`).
-fn encode_modes(flags: u32, armed: bool) -> u32 {
-    let mut tens = 0u32;
-    if flags & FM_ANGLE != 0 { tens |= 1; }
-    if flags & FM_HORIZON != 0 { tens |= 2; }
-    if flags & FM_MANUAL != 0 { tens |= 4; }
-    let mut huns = 0u32;
-    if flags & FM_HEADING != 0 { huns |= 1; }
-    if flags & FM_NAV_ALTHOLD != 0 { huns |= 2; }
-    if flags & FM_NAV_POSHOLD != 0 { huns |= 4; }
-    let mut thous = 0u32;
-    if flags & FM_NAV_RTH != 0 { thous |= 1; }
-    if flags & FM_NAV_WP != 0 { thous |= 2; }
-    if flags & FM_NAV_COURSE_HOLD != 0 { thous |= 8; }
-    let mut tenk = 0u32;
-    if flags & FM_FLAPERON != 0 { tenk |= 1; }
-    if flags & FM_AUTO_TUNE != 0 { tenk |= 2; }
-    if flags & FM_FAILSAFE != 0 { tenk |= 4; }
-    let mut hundk = 0u32;
-    if flags & FM_NAV_FW_AUTOLAND != 0 { hundk |= 1; }
+/// Inverse of `decoders::frsky::decode_modes`: pack the unified flight-mode flags + arming state into
+/// INAV's decimal-column format — `frskyGetFlightMode()` (`telemetry/smartport.c`) verbatim, including
+/// the else-chains that keep every column a single decimal digit (our old independent ORs could push the
+/// thousands column past 9 and corrupt the neighbours). Not derivable from the unified flags: the
+/// POSHOLD-airplane split (hundreds vs the 800000 "LOTR" column — we always use the hundreds column,
+/// which every decoder reads as plain POSHOLD) and WP-mission RTH (millions column — we always use the
+/// thousands column).
+fn encode_modes(flags: u32, arming_flags: u32) -> u32 {
+    let mut v: u32 = 0;
+    // ones column: readiness + armed
+    if arming_flags & ARMING_DISABLED_MASK == 0 { v += 1; } else { v += 2; }
+    if arming_flags & ARMED_FLAG != 0 { v += 4; }
+    // tens column
+    if flags & FM_ANGLE != 0 { v += 10; }
+    if flags & FM_HORIZON != 0 { v += 20; }
+    if flags & FM_MANUAL != 0 { v += 40; }
+    // hundreds column
+    if flags & FM_HEADING != 0 { v += 100; }
+    if flags & FM_NAV_ALTHOLD != 0 { v += 200; }
+    if flags & FM_NAV_POSHOLD != 0 { v += 400; }
+    // thousands column
+    if flags & FM_NAV_RTH != 0 { v += 1000; }
+    if flags & FM_NAV_COURSE_HOLD != 0 {
+        v += 8000;
+    } else if flags & FM_NAV_WP != 0 {
+        v += 2000;
+    } else if flags & FM_HEADFREE != 0 {
+        v += 4000;
+    }
+    // ten-thousands column
+    if flags & FM_FLAPERON != 0 { v += 10_000; }
+    if flags & FM_FAILSAFE != 0 {
+        v += 40_000;
+    } else if flags & FM_AUTO_TUNE != 0 {
+        v += 20_000;
+    }
+    // hundred-thousands column
+    if flags & FM_NAV_FW_AUTOLAND != 0 { v += 100_000; }
+    if flags & FM_TURTLE != 0 { v += 200_000; }
+    // millions column
+    if flags & FM_ANGLEHOLD != 0 { v += 2_000_000; }
+    v
+}
 
-    let units = if armed { 4 } else { 0 };
-    units + tens * 10 + huns * 100 + thous * 1000 + tenk * 10_000 + hundk * 100_000
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::passive_telemetry::decoders::frsky::decode_modes;
+
+    /// Ready-to-arm + armed → ones column 5, like INAV.
+    const ARMED: u32 = ARMED_FLAG;
+
+    /// Every decimal column must stay a single digit even with every encodable flag set at once —
+    /// the INAV else-chains guarantee it (the old independent ORs could carry into the neighbour
+    /// column: RTH+WP+CRUZ made the thousands column 11).
+    #[test]
+    fn digits_never_overflow() {
+        let all = FM_ANGLE | FM_HORIZON | FM_HEADING | FM_NAV_ALTHOLD | FM_NAV_RTH | FM_NAV_POSHOLD
+            | FM_HEADFREE | FM_MANUAL | FM_FAILSAFE | FM_AUTO_TUNE | FM_NAV_WP | FM_NAV_COURSE_HOLD
+            | FM_FLAPERON | FM_TURTLE | FM_ANGLEHOLD | FM_NAV_FW_AUTOLAND;
+        // ones=5 tens=7 huns=7 thous=9 (RTH+course; WP/headfree suppressed) tenk=5 (flaperon+failsafe;
+        // autotune suppressed) hundk=3 mil=2
+        assert_eq!(encode_modes(all, ARMED), 2_359_775);
+    }
+
+    /// encode → decode must reproduce the flags exactly (cases chosen within INAV's lossless set).
+    #[test]
+    fn roundtrip_through_frsky_decoder() {
+        let cases: &[u32] = &[
+            FM_NAV_RTH | FM_NAV_FW_AUTOLAND | FM_ANGLE | FM_NAV_ALTHOLD, // RTH + autoland
+            FM_NAV_POSHOLD | FM_NAV_ALTHOLD | FM_ANGLE,
+            FM_NAV_COURSE_HOLD | FM_NAV_ALTHOLD | FM_ANGLE,              // cruise
+            FM_HEADFREE | FM_ANGLE,
+            FM_ANGLEHOLD | FM_NAV_ALTHOLD,
+            FM_TURTLE,
+            FM_MANUAL,
+            0,
+        ];
+        for &flags in cases {
+            let (armed, disable_bits, decoded) = decode_modes(encode_modes(flags, ARMED));
+            assert!(armed, "flags=0x{flags:X}");
+            assert_eq!(disable_bits, 0, "flags=0x{flags:X}");
+            assert_eq!(decoded, flags, "flags=0x{flags:X}");
+        }
+    }
+
+    /// The ones column carries readiness: 1 = ready, 2 = arming blocked (any ARMING_DISABLED_* bit).
+    #[test]
+    fn arming_state_columns() {
+        let (armed, disable, _) = decode_modes(encode_modes(0, 0));
+        assert!(!armed);
+        assert_eq!(disable, 0);
+        let (armed, disable, _) = decode_modes(encode_modes(0, 1 << 12)); // compass not calibrated
+        assert!(!armed);
+        assert_ne!(disable, 0);
+    }
 }

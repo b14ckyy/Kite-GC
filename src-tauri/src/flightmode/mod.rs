@@ -47,7 +47,9 @@ const AUTO_TUNE: u32 = 1 << 10;
 const NAV_WP: u32 = 1 << 11;
 const NAV_COURSE_HOLD: u32 = 1 << 12;
 const FLAPERON: u32 = 1 << 13;
+const TURTLE: u32 = 1 << 15;
 const SOARING: u32 = 1 << 16;
+const ANGLEHOLD: u32 = 1 << 17;
 const NAV_FW_AUTOLAND: u32 = 1 << 18;
 
 /// Classify the normalized INAV flight-mode bitmask into the canonical model.
@@ -74,6 +76,10 @@ pub fn classify_inav(flags: u32) -> FlightModeState {
         "horizon"
     } else if flags & MANUAL != 0 {
         "manual"
+    } else if flags & TURTLE != 0 {
+        "turtle"
+    } else if flags & ANGLEHOLD != 0 {
+        "anglehold"
     } else {
         "acro"
     };
