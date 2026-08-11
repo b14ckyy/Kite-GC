@@ -568,8 +568,13 @@
       flex-wrap: nowrap;
       padding-bottom: 4px;
     }
+    /* `.conn-row` is a direct child of the header (not inside .toolbar-right), and on a phone the
+       progressive collapse always reaches COLLAPSE_MAX — so while disconnected the connection controls
+       live there. Without it in this list the toggle would hide only the Relay button and leave the
+       connection row on screen. */
     :global(html.is-mobile) .toolbar.collapsed .toolbar-center,
-    :global(html.is-mobile) .toolbar.collapsed .toolbar-right {
+    :global(html.is-mobile) .toolbar.collapsed .toolbar-right,
+    :global(html.is-mobile) .toolbar.collapsed .conn-row {
       display: none;
     }
   }
