@@ -286,35 +286,6 @@ fn update_from_msp(code: u16, payload: &[u8], s: &mut Snap, armed: &mut bool, id
 
 // ── MAVLink (.tlog) ──────────────────────────────────────────────────────────
 
-/// Map a vehicle's autopilot + type to (fc_variant, platform_type) — mirrors the live MAVLink handshake
-/// (handshake.rs). The variant string drives the Plane-vs-Copter flight-mode table, so getting it right
-/// is what makes the imported flight's mode resolve (and the replay model match).
-fn ardu_type_info(autopilot: MavAutopilot, t: MavType) -> (String, u8) {
-    let variant = match autopilot {
-        MavAutopilot::MAV_AUTOPILOT_ARDUPILOTMEGA => match t {
-            MavType::MAV_TYPE_FIXED_WING => "ArduPlane",
-            MavType::MAV_TYPE_GROUND_ROVER => "ArduRover",
-            MavType::MAV_TYPE_SUBMARINE => "ArduSub",
-            _ => "ArduCopter",
-        }
-        .to_string(),
-        MavAutopilot::MAV_AUTOPILOT_PX4 => "PX4".to_string(),
-        other => format!("{:?}", other),
-    };
-    let platform = match t {
-        MavType::MAV_TYPE_FIXED_WING => 1,
-        MavType::MAV_TYPE_QUADROTOR
-        | MavType::MAV_TYPE_HEXAROTOR
-        | MavType::MAV_TYPE_OCTOROTOR
-        | MavType::MAV_TYPE_TRICOPTER => 2,
-        MavType::MAV_TYPE_HELICOPTER => 3,
-        MavType::MAV_TYPE_GROUND_ROVER => 10,
-        MavType::MAV_TYPE_SUBMARINE => 12,
-        _ => 0,
-    };
-    (variant, platform)
-}
-
 /// Decode a MAVLink tlog: a sequence of `[u64 BE µs][raw frame]`. Returns (samples, identity).
 fn decode_tlog(bytes: &[u8]) -> (Vec<Sample>, Identity) {
     let mut parser = MavParser::new();
@@ -360,7 +331,8 @@ fn decode_tlog(bytes: &[u8]) -> (Vec<Sample>, Identity) {
                     consume = fc_id == Some(id);
                     if consume {
                         // Vehicle identity → drives the mode table + flight model.
-                        let (v, p) = ardu_type_info(hb.autopilot, hb.mavtype);
+                        let (v, p) =
+                            crate::mavlink_proto::vehicle::identify(hb.autopilot, hb.mavtype);
                         variant = v;
                         platform = p;
                     }
