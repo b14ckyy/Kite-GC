@@ -12,6 +12,7 @@
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import { get } from 'svelte/store';
+  import { anyCase } from '$lib/helpers/fileFilters';
   import { save, open as openFileDialog } from '@tauri-apps/plugin-dialog';
   import { settings } from '$lib/stores/settings';
   import {
@@ -429,7 +430,7 @@
   // ── Import (.kbatt) ─────────────────────────────────────────────────
   async function handleImport() {
     try {
-      const path = await openFileDialog({ title: $t('batteryMgr.importTitle'), multiple: false, filters: [{ name: 'Battery', extensions: ['kbatt'] }] });
+      const path = await openFileDialog({ title: $t('batteryMgr.importTitle'), multiple: false, filters: [{ name: 'Battery', extensions: anyCase(['kbatt']) }] });
       if (!path || typeof path !== 'string') return;
       const file = await batteryFileRead(path);
       importFile = file;

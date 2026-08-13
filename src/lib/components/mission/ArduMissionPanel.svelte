@@ -27,6 +27,7 @@
   import { onMissionDownloadProgress, onMissionUploadProgress } from '$lib/stores/mission';
   import { cmdName, cmdShort, cmdHasLocation, cmdDef, cmdValidForVehicle, cmdValidForPx4, enumLabel, type VehicleClass } from '$lib/helpers/arduCommandCatalog';
   import { buildArduWaypointMenu } from '$lib/helpers/arduWaypointMenu';
+  import { anyCase } from '$lib/helpers/fileFilters';
   import { contextMenu } from '$lib/actions/contextMenu';
   import { arduWpDetailLines } from '$lib/helpers/missionWpDetails';
   import { frameMissionOnMap } from '$lib/stores/mapCamera';
@@ -155,7 +156,7 @@
       const path = await open({
         title: $t('mission.openMissionTitle'),
         multiple: false,
-        filters: [{ name: 'Waypoints', extensions: ['waypoints', 'txt'] }],
+        filters: [{ name: 'Waypoints', extensions: anyCase(['waypoints', 'txt']) }],
       });
       if (!path) return;
       const content = await invoke<string>('read_text_file', { path: typeof path === 'string' ? path : path });
