@@ -40,6 +40,7 @@
   import { missionDbSave, missionDbUpdate, missionDbGet, missionDbFindByHash, missionDbGeocode } from '$lib/stores/flightlog';
   import { locale } from 'svelte-i18n';
   import { isFlyByHome } from '$lib/helpers/missionGeometry';
+  import { anyCase } from '$lib/helpers/fileFilters';
   import { contextMenu } from '$lib/actions/contextMenu';
   import { buildWaypointMenu } from '$lib/helpers/waypointMenu';
   import { connection } from '$lib/stores/connection';
@@ -277,7 +278,7 @@
 
   async function handleOpenFile() {
     try {
-      const path = await open({ title: $t('mission.openMissionTitle'), multiple: false, filters: [{ name: 'Mission', extensions: ['mission'] }] });
+      const path = await open({ title: $t('mission.openMissionTitle'), multiple: false, filters: [{ name: 'Mission', extensions: anyCase(['mission']) }] });
       if (!path) return;
       const m = await missionLoadFile(typeof path === 'string' ? path : path);
       statusMessage = $t('mission.loaded', { values: { count: m.waypoints.length } });

@@ -61,6 +61,7 @@
   import * as logbookCtrl from '$lib/controllers/logbookController';
   import * as widgetCtrl from '$lib/controllers/widgetController';
   import { isValidGpsCoordinate, isArmed } from '$lib/helpers/telemetry';
+  import { anyCase } from '$lib/helpers/fileFilters';
   import { liveTrack, appendLivePoint, clearLiveTrack } from '$lib/stores/liveTrack';
   import { toTelemetryData } from '$lib/adapters/telemetryAdapter';
   import { activeWpNumber, replayWpTotal } from '$lib/stores/navStatus';
@@ -1324,7 +1325,7 @@
         filters: [
           {
             name: $t('logbook.allLogsFilter'),
-            extensions: ['txt', 'bbl', 'bfl', 'bin', 'kflight', 'rawmsp', 'tlog'],
+            extensions: anyCase(['txt', 'bbl', 'bfl', 'bin', 'kflight', 'rawmsp', 'tlog']),
           },
         ],
       });
