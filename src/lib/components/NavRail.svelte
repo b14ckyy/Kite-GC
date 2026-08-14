@@ -70,6 +70,24 @@
     gap: 0;
     z-index: 100;
     transition: left 0.3s ease;
+    /* Bound the rail to the space between the toolbar and the status bar and let it scroll, instead
+       of overflowing and being silently clipped by `.ui-root`'s `overflow: hidden`.
+       With every tab enabled the open rail is 42 + 4 + 10x38 + 9x2 = 444px, so it needs ~539 logical
+       pixels of height; at a UI scale of 1.5 that is 808 real pixels and at 2.0 it is 1078, and any
+       window shorter than that silently drops the last icons off the bottom edge with no scrollbar
+       and no other indication that they exist.
+       Expressed in the chrome's own logical pixels: `.ui-scale` is exactly `100vh / --ui-scale` tall,
+       so this stays correct at every UI scale without depending on which ancestor is the offset
+       parent (65px = toolbar 53 + 12 gap, 30px = status bar 24 + 6 gap). The scrollbar is hidden so
+       the rail keeps its exact 42px width and current look; it scrolls by wheel/drag. */
+    max-height: calc(100vh / var(--ui-scale, 1) - 65px - 30px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: none;
+  }
+
+  .nav-rail::-webkit-scrollbar {
+    display: none;
   }
 
   .nav-rail.open {
