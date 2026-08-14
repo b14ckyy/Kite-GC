@@ -222,9 +222,10 @@
   // Bottom reserve for the floating panels (PanelShell). Panels normally stop above the bottom
   // widget dock, but once that cap would make them shorter than the nav rail, they may overlay the
   // dock instead — the rail already scrolls past it, so the panel just follows. Logical px
-  // throughout, so the switch adapts to the UI scale.
+  // throughout, so the switch adapts to the UI scale. The 6px keeps the rail's visual gap above
+  // the status bar instead of sitting flush on it.
   const panelBottomReserve = $derived(
-    winH / uiScale - 53 - bottomDockH - 24 - 12 < NAV_RAIL_FULL_HEIGHT ? '0px' : gridBottomHeight
+    winH / uiScale - 53 - bottomDockH - 24 - 12 < NAV_RAIL_FULL_HEIGHT ? '6px' : gridBottomHeight
   );
 
   // Floating-window rect (must match FloatingVideoWindow's own computation) — used

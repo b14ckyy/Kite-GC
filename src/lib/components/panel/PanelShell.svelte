@@ -139,9 +139,9 @@
 
   /* Bounding height shared by compact/advanced (and as a cap for info): full panel area,
      i.e. below the toolbar, above the bottom dock + status bar. 100% = the (scaled) .app.
-     `--panel-bottom-reserve` is the dock height normally, but 0px on windows too short for the
-     capped panel to reach the nav rail's full height — the panel then overlays the dock
-     (see +page.svelte). Fallback for hosts without the var (PanelPlayground). */
+     `--panel-bottom-reserve` is the dock height normally, but shrinks to the rail's 6px status-bar
+     gap on windows too short for the capped panel to reach the nav rail's full height — the panel
+     then overlays the dock (see +page.svelte). Fallback for hosts without the var (PanelPlayground). */
   .ps-info,
   .ps-compact,
   .ps-advanced {
