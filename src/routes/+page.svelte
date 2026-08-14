@@ -216,6 +216,18 @@
   // (`.layer-map`) stays unzoomed/native. See docs/archive/UI_SCALING.md.
   let uiScale = $state(1);
 
+  // Fully populated nav rail in logical px: hamburger 44 + 4 top margin + 9 tabs ×40 + 8 gaps ×2
+  // (DEV excluded). A fixed reference on purpose — the live rail height varies with connection state.
+  const NAV_RAIL_FULL_HEIGHT = 424;
+  // Bottom reserve for the floating panels (PanelShell). Panels normally stop above the bottom
+  // widget dock, but once that cap would make them shorter than the nav rail, they may overlay the
+  // dock instead — the rail already scrolls past it, so the panel just follows. Logical px
+  // throughout, so the switch adapts to the UI scale. The 6px keeps the rail's visual gap above
+  // the status bar instead of sitting flush on it.
+  const panelBottomReserve = $derived(
+    winH / uiScale - 53 - bottomDockH - 24 - 12 < NAV_RAIL_FULL_HEIGHT ? '6px' : gridBottomHeight
+  );
+
   // Floating-window rect (must match FloatingVideoWindow's own computation) — used
   // to place the map inside the window's frame when the view is swapped. The window
   // lives in the zoomed `.ui-scale` layer but the map is unzoomed, so the visual rect
@@ -2556,6 +2568,7 @@
   class="app"
   style:--grid-bottom-height={gridBottomHeight}
   style:--grid-side-width={gridSideWidth}
+  style:--panel-bottom-reserve={panelBottomReserve}
 >
   <!-- ======= TOOLBAR ======= -->
   <div class="zone-toolbar">
