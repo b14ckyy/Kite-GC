@@ -39,6 +39,7 @@
     cesiumIonToken = '',
     altitudeCurtain3D = true,
     realLighting3D = false,
+    buildings3D = false,
     logReplayTime = false,
     nightMode2D = 'off',
     lowPower3D = 'auto',
@@ -90,6 +91,7 @@
     cesiumIonToken?: string;
     altitudeCurtain3D?: boolean;
     realLighting3D?: boolean;
+    buildings3D?: boolean;
     logReplayTime?: boolean;
     nightMode2D?: 'off' | 'auto' | 'on';
     lowPower3D?: 'off' | 'on' | 'auto';
@@ -328,6 +330,12 @@
       <div class="s-row">
         <label class="s-label" for="altitude-curtain">{$t('settings.altitudeCurtain')}</label>
         <Toggle checked={altitudeCurtain3D} id="altitude-curtain" onchange={(c) => onPatch({ altitudeCurtain3D: c })} />
+      </div>
+      <!-- Buildings come from Cesium Ion (the same account as World Terrain), so the toggle is dead
+           without a token — disabled rather than hidden, so it is discoverable and explains itself. -->
+      <div class="s-row">
+        <label class="s-label" for="buildings-3d" class:s-label-disabled={!cesiumIonToken}>{$t('settings.buildings3D')}</label>
+        <Toggle checked={!!cesiumIonToken && buildings3D} disabled={!cesiumIonToken} id="buildings-3d" onchange={(c) => onPatch({ buildings3D: c })} />
       </div>
       <div class="s-row">
         <label class="s-label" for="real-lighting">{$t('settings.realLighting')}</label>

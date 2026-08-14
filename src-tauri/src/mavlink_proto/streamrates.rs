@@ -34,6 +34,7 @@ const ID_BATTERY_STATUS: f32 = 147.0;
 const ID_EKF_STATUS_REPORT: f32 = 193.0;
 const ID_HOME_POSITION: f32 = 242.0;
 const ID_WIND: f32 = 168.0;
+const ID_POSITION_TARGET_GLOBAL_INT: f32 = 87.0;
 
 // Rate kinds for the wanted messages (resolved against the two settings at apply time).
 const R_ATTITUDE: u8 = 0;
@@ -58,6 +59,9 @@ const WANTED: &[(f32, u8)] = &[
     (ID_MISSION_CURRENT, R_FIXED_1HZ),
     (ID_EKF_STATUS_REPORT, R_FIXED_1HZ),
     (ID_HOME_POSITION, R_HOME_LOW),
+    // FC's active navigation target → the map's Guided marker (FC-confirmed, incl. external GCS
+    // changes). Small message; the frontend ignores it outside the guided mode.
+    (ID_POSITION_TARGET_GLOBAL_INT, R_FIXED_1HZ),
 ];
 
 // ── Ballast: high-rate messages no widget consumes — disabled (interval = -1) ────────────────

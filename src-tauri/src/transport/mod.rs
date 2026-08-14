@@ -147,6 +147,14 @@ pub trait Transport: Send {
     fn is_connection_lost(&self) -> bool {
         false
     }
+
+    /// The OS error that caused `is_connection_lost` to flip, verbatim. The distinction it carries is the
+    /// one a log reader needs and cannot otherwise get: a removed device ("device is not connected") reads
+    /// completely differently from a recoverable comm error we currently treat as fatal anyway (Windows
+    /// `ERROR_OPERATION_ABORTED` after a framing/overrun error). `None` before any failure.
+    fn connection_lost_reason(&self) -> Option<String> {
+        None
+    }
 }
 
 /// Information about an available port/device. Constructed only by the serial port lister, which is

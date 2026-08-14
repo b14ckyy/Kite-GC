@@ -386,6 +386,39 @@ fn log_bt_spp_diagnostics(target: &str) {
 #[cfg(not(target_os = "windows"))]
 fn log_bt_spp_diagnostics(_target: &str) {}
 
+/// USB vendor IDs of USB↔UART **bridge** chips. A port behind one of these is a real UART on the far
+/// side — a telemetry radio, an FTDI cable, an ESP32 dev board — not a flight controller's own USB
+/// device. Everything else on USB that presents a serial port is a native CDC/VCP implemented by the
+/// device's own USB stack (STM32 0x0483, RP2040 0x2E8A, Espressif 0x303A, …). Diagnostic only: a
+/// native CDC's OUT endpoint can NAK while its TX is busy (the Lucid H7 Wing write-stall case), so a
+/// tester's log should say which kind of port a session ran on. NOTE deliberately no behaviour is
+/// keyed off this — an ESP32 Kite-Link node is also a native CDC but bridges to a slow SiK air link,
+/// where narrowing the MSP pipeline would cripple the poll rate.
+const USB_UART_BRIDGE_VIDS: &[u16] = &[
+    0x0403, // FTDI
+    0x10C4, // Silicon Labs CP210x
+    0x067B, // Prolific PL2303
+    0x1A86, // WCH CH340/CH341
+    0x1A72, // Moxa
+    0x0557, // ATEN
+];
+
+/// True if `port_name` is a native USB CDC/VCP (the FC's own USB port) rather than a USB↔UART bridge
+/// or a non-USB port. Best-effort: if enumeration fails or the port isn't listed, returns false —
+/// the caller must treat "unknown" as "not a VCP" so nothing changes behaviour by accident.
+fn is_native_usb_cdc(port_name: &str) -> bool {
+    let Ok(ports) = serialport::available_ports() else {
+        return false;
+    };
+    let Some(p) = ports.iter().find(|p| p.port_name.eq_ignore_ascii_case(port_name)) else {
+        return false;
+    };
+    match &p.port_type {
+        serialport::SerialPortType::UsbPort(info) => !USB_UART_BRIDGE_VIDS.contains(&info.vid),
+        _ => false,
+    }
+}
+
 /// An active serial connection to a flight controller
 pub struct SerialConnection {
     port_name: String,
@@ -413,6 +446,9 @@ impl SerialConnection {
                     if attempt > 1 {
                         eprintln!("[serial] {} opened on attempt {}/{}", port_name, attempt, OPEN_RETRY_ATTEMPTS);
                         log::info!("Serial port {} opened on attempt {}/{}", port_name, attempt, OPEN_RETRY_ATTEMPTS);
+                    }
+                    if is_native_usb_cdc(port_name) {
+                        log::info!("Serial {}: native USB CDC/VCP (not behind a USB↔UART bridge)", port_name);
                     }
                     let mut conn = Self {
                         port_name: port_name.to_string(),
@@ -478,12 +514,15 @@ impl ByteTransport for SerialConnection {
     }
 
     fn write_bytes(&mut self, data: &[u8]) -> Result<(), TransportError> {
-        self.port
-            .write_all(data)
-            .map_err(|e| TransportError::Io(format!("Serial write failed: {}", e)))?;
-        self.port
-            .flush()
-            .map_err(|e| TransportError::Io(format!("Serial flush failed: {}", e)))?;
+        // Preserve the io error KIND instead of collapsing everything into `Io`: on Windows the port
+        // timeout (`set_timeout`) applies to WRITES as well (`WriteTotalTimeoutConstant`), and the
+        // scheduler sets it to a few ms for its read cadence. A USB-CDC device that momentarily NAKs
+        // its OUT endpoint (busy producing telemetry) then fails the write with ERROR_SEM_TIMEOUT
+        // (os error 121) → `TimedOut` → `TransportError::Timeout`. That is a retryable stall of a
+        // present device, NOT a removed one — the MSP layer must be able to tell the two apart
+        // (field case: TBS Lucid H7 Wing, teardown 20 ms after scheduler start).
+        self.port.write_all(data).map_err(TransportError::from)?;
+        self.port.flush().map_err(TransportError::from)?;
         Ok(())
     }
 

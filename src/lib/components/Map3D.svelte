@@ -169,6 +169,15 @@
   const BASE_FPS = 60;
   const LOW_POWER_FPS = 20;
 
+  // ── OSM buildings ──
+  // Cesium's global OpenStreetMap building tileset (Ion asset 96188), served from the same Ion
+  // account as World Terrain — so it is only available when a token is configured. Held here so the
+  // live settings watcher can add/remove it without rebuilding the viewer. `buildingsLoading` guards
+  // against a second toggle racing the first load, which would add the tileset twice.
+  let buildingsEnabled = false;                      // settings.buildings3D
+  let buildingsTileset: Cesium.Cesium3DTileset | undefined;
+  let buildingsLoading = false;
+
   // ── Sun / lighting ──
   let lightingEnabled = false;                       // settings.realLighting3D → globe sun-shading
   let replayTimeEnabled = false;                     // settings.logReplayTime → clock from log timestamp
@@ -817,6 +826,12 @@
     } catch (e) {
       console.warn('[Map3D] applyIonToken: failed to enable world terrain', e);
     }
+    // Buildings are an Ion asset too, so a token arriving now is what unblocks them. Without this a
+    // user whose `buildings3D` was already on — persisted from a session that had a token, or set
+    // before one was entered — would get terrain but no buildings, and the settings watcher would
+    // never fire to fix it because the value did not change. `applyBuildings` is a no-op when the
+    // setting is off, so this costs nothing in the ordinary case.
+    void applyBuildings();
   }
 
   export function getCamFocus(): { lat: number; lon: number; range: number; heading: number; pitch: number } | null {
@@ -923,6 +938,7 @@
       cacheMaxMB = s.mapCacheMaxMB || 0;
       curtainEnabled = s.altitudeCurtain3D ?? true;
       lightingEnabled = s.realLighting3D ?? false;
+      buildingsEnabled = s.buildings3D ?? false;
       replayTimeEnabled = s.logReplayTime ?? false;
       nightModeSetting = s.nightMode2D ?? 'off';
       hudSpeedUnit = s.interface?.speedUnit ?? 'kmh';
@@ -1006,6 +1022,9 @@
     if (ionToken) {
       viewer.scene.globe.depthTestAgainstTerrain = true;
     }
+
+    // OSM buildings, if the user asked for them and we have an Ion token to fetch them with.
+    void applyBuildings();
 
     // ── Performance: limit view distance ──
     // Fog hides distant terrain gradually; far clip plane caps geometry.
@@ -1206,6 +1225,11 @@
       if (lighting !== lightingEnabled) {
         lightingEnabled = lighting;
         updateNightDim3D(); // owns enableLighting + re-evaluates the night dim
+      }
+      const buildings = next.buildings3D ?? false;
+      if (buildings !== buildingsEnabled) {
+        buildingsEnabled = buildings;
+        void applyBuildings(); // loads on first enable, then just toggles `show`
       }
       const replayTime = next.logReplayTime ?? false;
       if (replayTime !== replayTimeEnabled) {
@@ -2566,6 +2590,49 @@
     const layers = viewer.imageryLayers;
     for (let i = 0; i < layers.length; i++) layers.get(i).brightness = factor;
     viewer.scene.requestRender();
+  }
+
+  /**
+   * Add, show or hide the OSM buildings tileset to match `buildingsEnabled`.
+   *
+   * Loaded lazily on first enable rather than at startup: it is a real network fetch and a real GPU
+   * cost, and the default is off. Once loaded it is kept and only its `show` flag is flipped, so
+   * toggling it during a flight does not re-download anything.
+   *
+   * Needs a Cesium Ion token — the tileset is an Ion asset, exactly like World Terrain. Without one
+   * the Settings toggle is disabled, but the token is checked here too rather than only at viewer
+   * creation: the viewer may well have started with no token, and `applyIonToken` can supply one
+   * later without a restart. That path calls back in here for exactly this reason.
+   */
+  async function applyBuildings() {
+    if (!viewer) return;
+
+    if (buildingsTileset) {
+      buildingsTileset.show = buildingsEnabled;
+      viewer.scene.requestRender();
+      return;
+    }
+    if (!buildingsEnabled || buildingsLoading) return;
+    if (!Cesium.Ion.defaultAccessToken) {
+      console.warn('[Map3D] 3D buildings need a Cesium Ion token — skipping');
+      return;
+    }
+
+    buildingsLoading = true;
+    try {
+      const tileset = await Cesium.createOsmBuildingsAsync();
+      // The user may have switched it off again, or torn the viewer down, while this was in flight.
+      if (!viewer || viewer.isDestroyed()) return;
+      buildingsTileset = viewer.scene.primitives.add(tileset) as Cesium.Cesium3DTileset;
+      buildingsTileset.show = buildingsEnabled;
+      viewer.scene.requestRender();
+    } catch (e) {
+      // Most likely an Ion token without access to the asset, or no network. Not fatal: the 3D map
+      // is fully usable without buildings, so warn and carry on rather than breaking the view.
+      console.warn('[Map3D] could not load OSM buildings:', e);
+    } finally {
+      buildingsLoading = false;
+    }
   }
 
   /**

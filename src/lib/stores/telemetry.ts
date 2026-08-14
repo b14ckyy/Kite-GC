@@ -83,6 +83,13 @@ export interface TelemetryData {
 
   // Status
   armingFlags: number;
+  /** True once at least one status event (the frame carrying `armingFlags`) has arrived this
+   *  connection. Distinguishes "no status yet" from "status says disarmed" — both read as
+   *  `armingFlags === 0`. The arm-edge detector must seed from a frame that actually carries the
+   *  armed state: attitude/GPS arrive at 5–10 Hz and beat the 1 Hz status/HEARTBEAT after a
+   *  (re)connect, so seeding on any first frame reads a false `disarmed` and a mid-flight reconnect
+   *  then fires a bogus arm edge (which used to overwrite Home with the aircraft's position). */
+  statusSeen: boolean;
   cpuLoad: number;
   sensorStatus: number;
   /** Raw flight-mode flags. For MAVLink this is the FC's `custom_mode` (used by the vehicle-control
@@ -141,7 +148,7 @@ const defaultTelemetry: TelemetryData = {
   throttle: 0,
   batteries: [],
   link: { rssiPercent: null, rssiDbm: null, lq: null, snrDb: null },
-  armingFlags: 0, cpuLoad: 0, sensorStatus: 0, flightModeFlags: 0, mspRcOverride: false,
+  armingFlags: 0, statusSeen: false, cpuLoad: 0, sensorStatus: 0, flightModeFlags: 0, mspRcOverride: false,
   sensorGyro: 0, sensorAcc: 0, sensorMag: 0, sensorBaro: 0,
   sensorGps: 0, sensorRangefinder: 0, sensorPitot: 0, sensorOpflow: 0, sensorRcReceiver: 0, prearmHealthy: 0,
   ekfStatus: 0, ekfType: 0,
@@ -386,6 +393,7 @@ export async function startTelemetryListeners() {
       telemetry.update((t) => ({
         ...t,
         armingFlags: event.payload.arming_flags,
+        statusSeen: true,
         cpuLoad: event.payload.cpu_load,
         sensorStatus: event.payload.sensor_status,
         flightModeFlags: event.payload.flight_mode_flags,

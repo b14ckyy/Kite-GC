@@ -355,6 +355,8 @@ export interface AppSettings {
   altitudeCurtain3D: boolean;
   /** Light the 3D globe with the real sun position (day/night terminator + shading). */
   realLighting3D: boolean;
+  /** Show OpenStreetMap building extrusions on the 3D map. Needs a Cesium Ion token. */
+  buildings3D: boolean;
   /** During replay, drive the 3D sun clock from the log's recorded timestamp (not wall-clock now). */
   logReplayTime: boolean;
   /** Dim the 2D Leaflet imagery for night: off / auto (sun below horizon) / on. */
@@ -436,6 +438,9 @@ const defaults: AppSettings = {
   lowPower3D: 'auto',
   altitudeCurtain3D: true,
   realLighting3D: true,
+  // Off by default: the tileset is a live download and real GPU work, and it is only useful close to
+  // the ground over a built-up area. Needs an Ion token, like World Terrain.
+  buildings3D: false,
   logReplayTime: true,
   nightMode2D: 'auto',
   gcsMode: 'continuous',

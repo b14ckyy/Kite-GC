@@ -68,6 +68,56 @@ export interface GuidedParams {
 /** Last-used Fly-Here values, remembered for the next click (session-scoped). */
 export const guidedParams = writable<GuidedParams>({ alt: 50, speed: null, yaw: null, loiterRadius: null });
 
+/** The FC's configured default loiter radius (m, magnitude — `WP_LOITER_RAD` / `NAV_LOITER_RAD`),
+ *  read once when Guided is activated. Drives the map's expected-loiter-track ring when no explicit
+ *  Fly-Here radius is set. null = unknown / not applicable (multirotor). */
+export const fcLoiterRadius = writable<number | null>(null);
+
+// One param read per connection (the ingest path retriggers at 1 Hz and must not spam
+// PARAM_REQUEST_READ, e.g. on a copter where the FC never reports WP_LOITER_RAD).
+let loiterRadiusRequested = false;
+connection.subscribe((c) => {
+  if (c.status !== 'connected') {
+    loiterRadiusRequested = false;
+    fcLoiterRadius.set(null); // never carry a stale radius into the next session
+  }
+});
+
+/** Read the FC's default loiter radius for the ring (fixed-wing only — a copter holds the point). */
+async function refreshFcLoiterRadius(): Promise<void> {
+  loiterRadiusRequested = true;
+  const cls = get(arduVehicleClass);
+  if (cls !== 'plane' && cls !== 'quadplane') {
+    fcLoiterRadius.set(null);
+    return;
+  }
+  const name = get(autopilotSystem) === 'px4' ? 'NAV_LOITER_RAD' : 'WP_LOITER_RAD';
+  try {
+    const v = await invoke<number | null>('mav_read_param', { name });
+    // Negative = counter-clockwise loiter; the ring only needs the magnitude.
+    fcLoiterRadius.set(v != null ? Math.abs(v) : null);
+  } catch {
+    fcLoiterRadius.set(null);
+  }
+}
+
+/**
+ * FC-confirmed navigation target (POSITION_TARGET_GLOBAL_INT, pushed at 1 Hz — see the `guided-target`
+ * listener in +page). Accepted only while the FC is in its guided mode: in AUTO/RTL the same message
+ * carries the current mission waypoint / home, which must not appear as a Guided marker. Keeps the
+ * marker on the FC's actual loiter/goto point — including targets set by another GCS.
+ */
+export function ingestFcGuidedTarget(lat: number, lon: number): void {
+  if (get(activeMode)?.guided !== true) return;
+  // Connected mid-flight to a vehicle already in guided → the toggle was never pressed, so fetch
+  // the loiter radius for the ring here (once per connection).
+  if (!loiterRadiusRequested) void refreshFcLoiterRadius();
+  const cur = get(guidedTarget);
+  // ~0.1 m dedup so the 1 Hz push doesn't churn every subscriber with sub-metre jitter.
+  if (cur && Math.abs(cur.lat - lat) < 1e-6 && Math.abs(cur.lon - lon) < 1e-6) return;
+  guidedTarget.set({ lat, lon });
+}
+
 // ArduPlane's GUIDED_CHANGE_HEADING sets a *sticky* heading override that bypasses waypoint nav and
 // is only cleared by a mode change (current firmware does not clear it on DO_REPOSITION). We track it
 // so a subsequent "Fly Here" can explicitly clear it first, otherwise the reposition is ignored.
@@ -198,9 +248,11 @@ export function changeAlt(alt: number): Promise<boolean> {
 
 /** Set the fixed-wing loiter radius (metres) via PARAM_SET. The parameter name is firmware-specific:
  *  ArduPilot `WP_LOITER_RAD`, PX4 `NAV_LOITER_RAD`. */
-export function setLoiterRadius(radius: number): Promise<boolean> {
+export async function setLoiterRadius(radius: number): Promise<boolean> {
   const name = get(autopilotSystem) === 'px4' ? 'NAV_LOITER_RAD' : 'WP_LOITER_RAD';
-  return runCommand('setLoiterRadius', 'mav_set_param', { name, value: radius });
+  const ok = await runCommand('setLoiterRadius', 'mav_set_param', { name, value: radius });
+  if (ok) fcLoiterRadius.set(Math.abs(radius)); // keep the map's loiter ring in sync with the write
+  return ok;
 }
 
 /** Set the home position to the vehicle's current location (DO_SET_HOME). */
@@ -305,6 +357,17 @@ export async function setGuided(on: boolean): Promise<boolean> {
   const ok = await runCommand('guided', 'mav_set_mode', { main: mode.main, sub: mode.sub });
   guidedActive.set(ok);
   headingOverrideActive = false; // re-entering guided clears any heading slew
+  if (ok) {
+    // Seed the target marker at the mode-entry point right away — ArduPlane loiters around the spot
+    // where GUIDED was entered, so this IS the initial target (MP shows nothing here, which testers
+    // read as "nothing happened"). The FC's 1 Hz POSITION_TARGET_GLOBAL_INT push then confirms or
+    // corrects it (ingestFcGuidedTarget).
+    const tel = get(telemetry);
+    if (tel.fixType >= 2 && (tel.lat !== 0 || tel.lon !== 0)) {
+      guidedTarget.set({ lat: tel.lat, lon: tel.lon });
+    }
+    void refreshFcLoiterRadius(); // for the expected-loiter-track ring
+  }
   return ok;
 }
 

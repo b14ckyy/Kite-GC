@@ -768,6 +768,7 @@
     "tileCache": "瓦片缓存",
     "terrainCache": "地形缓存",
     "altitudeCurtain": "高度幕帘 (3D)",
+    "buildings3D": "3D 建筑 (OSM)",
     "realLighting": "真实日光与照明 (3D)",
     "logReplayTime": "日志回放时间 (3D)",
     "nightMode": "夜间模式",

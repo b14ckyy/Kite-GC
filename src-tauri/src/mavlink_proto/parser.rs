@@ -194,8 +194,23 @@ impl MavParser {
             return None;
         }
 
-        // Parse message payload into typed enum
-        match MavMessage::parse(*version, msg_id, payload) {
+        // Parse message payload into typed enum.
+        //
+        // POSITION_TARGET_GLOBAL_INT (87): ArduPilot sets the undefined upper bits of `type_mask`
+        // (POSITION_TARGET_TYPEMASK_LAST_BYTE, 0xF000 — "for future use" in GCS_Common), and the
+        // mavlink crate's strict bitflags reject the whole message (`InvalidFlag`, observed live:
+        // 0xFDF8). Clear the undefined bits (type_mask = u16 at payload offset 48) and retry —
+        // we only consume the position fields, never the mask.
+        let parsed = MavMessage::parse(*version, msg_id, payload).or_else(|e| {
+            if msg_id == 87 && payload_len >= 50 {
+                let mut fixed = payload.to_vec();
+                fixed[49] &= 0x0F;
+                MavMessage::parse(*version, msg_id, &fixed).map_err(|_| e)
+            } else {
+                Err(e)
+            }
+        });
+        match parsed {
             Ok(message) => {
                 // Reconstruct full frame: STX + header + payload + CRC
                 let stx = match version {

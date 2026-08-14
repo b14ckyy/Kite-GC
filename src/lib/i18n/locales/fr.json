@@ -733,6 +733,7 @@
     "tileCache": "Cache de tuiles",
     "terrainCache": "Cache de terrain",
     "altitudeCurtain": "Rideau d'altitude (3D)",
+    "buildings3D": "Bâtiments 3D (OSM)",
     "realLighting": "Heure réelle et éclairage (3D)",
     "logReplayTime": "Heure du replay (3D)",
     "nightMode": "Mode nuit",

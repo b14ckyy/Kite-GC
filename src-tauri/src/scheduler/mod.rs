@@ -103,6 +103,16 @@ enum PendingKind {
 /// are exempt — they're the control path and always go out at max priority. Tune on-device; the INAV
 /// Configurator's implicit cap is ~100 Hz emission + per-code dedup.
 const MAX_IN_FLIGHT: usize = 8;
+
+/// Max MSP frames written per scheduler tick — the "soft lock", named after the INAV Configurator's
+/// queue (`js/serial_queue.js`), whose executor takes **exactly one** message per run behind a port
+/// lock released on write completion. We keep the pipeline: replies are still never waited for and up
+/// to `MAX_IN_FLIGHT` stay outstanding. What changes is that a drain (`poll_incoming`) now always runs
+/// *between* two writes instead of a whole tick's budget going out back to back, so replies are
+/// consumed as the FC produces them rather than piling up in its TX buffer. At the ~125 Hz tick rate
+/// (`SCHED_READ_TIMEOUT`) this still allows far more requests per second than any slot set asks for.
+/// RC frames are exempt — they're the control path and bypass this budget entirely.
+const MAX_WRITES_PER_TICK: usize = 1;
 /// Short transport read timeout so the pipelined drain/emit loop ticks ≈100 Hz (like Configurator's
 /// executor) instead of being quantized by the coarse idle read timeout.
 const SCHED_READ_TIMEOUT: Duration = Duration::from_millis(8);
@@ -328,7 +338,13 @@ fn scheduler_loop(
         // 0. Bail out if the device is gone (fatal transport error — e.g. USB unplugged). A mere
         //    response timeout (OTA stall) does NOT set this, so we never tear down on a stalled link.
         if transport.is_connection_lost() {
-            log::warn!("Scheduler: transport connection lost (device gone) — tearing down");
+            log::warn!(
+                "Scheduler: transport connection lost on {} — tearing down. Cause: {}",
+                transport.description(),
+                transport
+                    .connection_lost_reason()
+                    .unwrap_or_else(|| "unknown (no error recorded)".to_string()),
+            );
             if let Some(ref rec) = recorder {
                 if let Ok(mut r) = rec.lock() {
                     r.shutdown_lost();
@@ -339,6 +355,11 @@ fn scheduler_loop(
         }
 
         let now = Instant::now();
+
+        // Soft lock: MSP frames written so far in this tick (see `MAX_WRITES_PER_TICK`). Shared by the
+        // one-shot, radar and telemetry paths so "one write at a time" holds across all three; the RC
+        // stream is deliberately outside it.
+        let mut writes_this_tick = 0usize;
 
         // 1. Commands (non-blocking): stop, or a one-shot UI MSP request → send it and track it in flight
         //    (its reply comes back through the drain, matched by code, and is forwarded on the channel).
@@ -361,6 +382,7 @@ fn scheduler_loop(
                 link_stats.on_tx(9 + payload.len());
                 match transport.msp_send(code, &payload) {
                     Ok(()) => {
+                        writes_this_tick += 1;
                         in_flight.entry(code).or_default().push_back(Pending {
                             sent_at: now,
                             deadline: now + Duration::from_millis(MSP_ONESHOT_TIMEOUT_MS),
@@ -479,6 +501,7 @@ fn scheduler_loop(
         if radar_msp_enabled.load(Ordering::Relaxed)
             && radar_last.elapsed() >= RADAR_MSP_INTERVAL
             && tele_in_flight < MAX_IN_FLIGHT
+            && writes_this_tick < MAX_WRITES_PER_TICK
             && !in_flight
                 .get(&crate::msp::MSP2_ADSB_VEHICLE_LIST)
                 .map_or(false, |q| !q.is_empty())
@@ -489,6 +512,7 @@ fn scheduler_loop(
             debug_tracker.on_request(code, 9);
             link_stats.on_tx(9);
             if transport.msp_send(code, &[]).is_ok() {
+                writes_this_tick += 1;
                 in_flight.entry(code).or_default().push_back(Pending {
                     sent_at: now,
                     deadline: reply_deadline(now, rtt_ewma),
@@ -519,7 +543,12 @@ fn scheduler_loop(
         //    code). If the window is full while slots are still due, that's the saturation signal for the
         //    AIMD throttle (section 4) — it eases rates down next window so the pain spreads proportionally
         //    instead of the low-priority slots starving at the cap.
-        let mut budget = MAX_IN_FLIGHT.saturating_sub(tele_in_flight);
+        // Two independent limits: how many replies may be outstanding (`MAX_IN_FLIGHT`, the pipeline
+        // depth that keeps slow air links busy) and how many frames may be written before the next drain
+        // (`MAX_WRITES_PER_TICK`, the soft lock). The tighter of the two wins.
+        let mut budget = MAX_IN_FLIGHT
+            .saturating_sub(tele_in_flight)
+            .min(MAX_WRITES_PER_TICK.saturating_sub(writes_this_tick));
         let mut due: Vec<usize> = (0..slots.len())
             .filter(|&i| slots[i].overdue(scale).is_some())
             .collect();
@@ -566,6 +595,12 @@ fn scheduler_loop(
                     debug_tracker.on_request(code, 9);
                     link_stats.on_tx(9);
                     if transport.msp_send(code, &[]).is_ok() {
+                        // Kept accurate even though this is the tick's last write path — a future send
+                        // added after this block must see a truthful count, not a stale one.
+                        #[allow(unused_assignments)]
+                        {
+                            writes_this_tick += 1;
+                        }
                         in_flight.entry(code).or_default().push_back(Pending {
                             sent_at: now,
                             deadline: reply_deadline(now, rtt_ewma),

@@ -41,7 +41,7 @@
   import { autopilotSystem } from "$lib/stores/autopilotContext";
   import { arduMission, arduVehicleClass, arduEditMode } from "$lib/stores/missionArdupilot";
   import { activeSurveyPattern } from "$lib/stores/surveyPattern.svelte";
-  import { guidedActive, guidedTarget, repositionTo, type GuidedParams } from "$lib/controllers/vehicleControl";
+  import { guidedActive, guidedTarget, repositionTo, activeMode, guidedParams, fcLoiterRadius, type GuidedParams } from "$lib/controllers/vehicleControl";
   import GuidedTargetForm from "$lib/components/control/GuidedTargetForm.svelte";
   import { cmdHasLocation } from "$lib/helpers/arduCommandCatalog";
   import { connection } from "$lib/stores/connection";
@@ -505,6 +505,8 @@
 
   // Guided "Fly Here" / loiter-target marker (ArduPilot/PX4; reused by INAV guided post-1.0).
   let guidedTargetMarker: L.Marker | undefined;
+  // Dashed expected-loiter-track ring around the Guided target (fixed-wing only).
+  let guidedLoiterRing: L.Circle | undefined;
   // Geozone overlay (INAV ≥8.0 FC config).
   let geozoneLayer: L.LayerGroup | undefined;
   let unsubGeozone: (() => void) | undefined;
@@ -602,14 +604,21 @@
     return L.divIcon({ className: 'guided-target-divicon', html, iconSize: [20, 20], iconAnchor: [10, 24] });
   }
 
-  /** Show/move/hide the Guided loiter-target marker. Visible only while connected, Guided is active, and a
-   *  target has been set (a successful reposition); the controller clears the target on a mode change /
-   *  leaving Guided, and we also hide on disconnect. */
+  /** Show/move/hide the Guided target marker + the expected-loiter-track ring. Visible while connected
+   *  and the Guided interaction is armed OR the FC is actually in its guided mode (so a target set /
+   *  changed by another GCS still shows — the target itself is FC-confirmed via
+   *  POSITION_TARGET_GLOBAL_INT, see ingestFcGuidedTarget). Hidden on disconnect.
+   *
+   *  The ring (fixed-wing only) draws the loiter circle the aircraft will actually fly: the explicit
+   *  Fly-Here radius when one was set, else the FC's configured default (WP_LOITER_RAD /
+   *  NAV_LOITER_RAD). MP shows a meaningless dashed ring here — ours is the real expected track. */
   function updateGuidedTarget() {
     if (!map) return;
     const tgt = get(guidedTarget);
-    if (!tgt || get(connection).status !== 'connected' || !get(guidedActive)) {
+    const fcInGuided = get(activeMode)?.guided === true;
+    if (!tgt || get(connection).status !== 'connected' || !(get(guidedActive) || fcInGuided)) {
       if (guidedTargetMarker) { guidedTargetMarker.remove(); guidedTargetMarker = undefined; }
+      if (guidedLoiterRing) { guidedLoiterRing.remove(); guidedLoiterRing = undefined; }
       return;
     }
     const ll: L.LatLngExpression = [tgt.lat, tgt.lon];
@@ -618,6 +627,25 @@
       guidedTargetMarker.bindTooltip(get(t)('control.guidedTarget'), { direction: 'top', offset: [0, -18], opacity: 0.9 });
     } else {
       guidedTargetMarker.setLatLng(ll);
+    }
+    // Expected loiter track — fixed-wing only (a copter holds the point, no circle).
+    const cls = get(arduVehicleClass);
+    const fixedWing = cls === 'plane' || cls === 'quadplane';
+    const radius = get(guidedParams).loiterRadius ?? get(fcLoiterRadius);
+    if (fixedWing && radius != null && radius > 0) {
+      if (!guidedLoiterRing) {
+        guidedLoiterRing = L.circle(ll, {
+          radius,
+          color: '#59aa29', weight: 1.5, dashArray: '4 6', opacity: 0.85,
+          fill: false, interactive: false,
+        }).addTo(map);
+      } else {
+        guidedLoiterRing.setLatLng(ll);
+        guidedLoiterRing.setRadius(radius);
+      }
+    } else if (guidedLoiterRing) {
+      guidedLoiterRing.remove();
+      guidedLoiterRing = undefined;
     }
   }
 
@@ -1063,7 +1091,7 @@
     if (!map || !$settings.airspace.enabled) return;
     if (get(editMode) || get(arduEditMode)) return; // editing waypoints (INAV or Ardu/PX4) → don't pop the airspace list
     if (activeSurveyPattern.isActive) return; // the survey pattern generator owns map clicks
-    if (get(guidedActive)) return; // Guided "fly here" owns the click → don't also pop the airspace list
+    if (guidedClickArmed()) return; // Guided "fly here" owns the click → don't also pop the airspace list
     // Toggle: if the list popup is already open, a second map click just dismisses it.
     if (aeroPopup && aeroPopup.isOpen()) {
       map.closePopup(aeroPopup);
@@ -1101,13 +1129,25 @@
   let guidedPopup: L.Popup | undefined;
   let guidedForm: ReturnType<typeof mount> | undefined;
 
+  /** Fly-Here click is armed when the Guided toggle is on OR the FC is already in its guided mode —
+   *  a mid-flight connect to a vehicle sitting in GUIDED must be commandable without first toggling
+   *  the panel button (which would re-send the mode change). */
+  function guidedClickArmed(): boolean {
+    return get(guidedActive) || get(activeMode)?.guided === true;
+  }
+
   function closeGuidedPopup() {
     if (guidedForm) { void unmount(guidedForm); guidedForm = undefined; }
     if (guidedPopup) { map?.closePopup(guidedPopup); guidedPopup = undefined; }
   }
 
   function onGuidedClick(e: L.LeafletMouseEvent) {
-    if (!map || !get(guidedActive)) return;
+    if (!map || !guidedClickArmed()) return;
+    // The mission editors and the survey generator own map clicks while active — before, arming
+    // Guided was always an explicit button press, now it can be implicit (FC already in guided),
+    // so these guards must be explicit here too.
+    if (get(editMode) || get(arduEditMode)) return;
+    if (activeSurveyPattern.isActive) return;
     // Ignore clicks that originate inside an open popup (e.g. the "Fly Here" button) — they must not
     // open a second target popup at the cursor.
     const tgt = e.originalEvent?.target as HTMLElement | undefined;
@@ -1158,7 +1198,7 @@
   $effect(() => { if (!$guidedActive) closeGuidedPopup(); });
 
   // Guided loiter-target marker follows the guided state + the set target (and hides on disconnect).
-  $effect(() => { void $guidedActive; void $guidedTarget; void $connection; if (map) updateGuidedTarget(); });
+  $effect(() => { void $guidedActive; void $guidedTarget; void $connection; void $activeMode; void $guidedParams; void $fcLoiterRadius; if (map) updateGuidedTarget(); });
 
   // Redraw on enable-toggle, new data, or visibility change (data/visibility via subscriptions below).
   $effect(() => { void $settings.airspace.enabled; void $editMode; void $arduEditMode; void activeSurveyPattern.isActive; if (map) updateAirspace(); });

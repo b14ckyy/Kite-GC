@@ -92,6 +92,7 @@ export function toTelemetryData(r: TelemetryRecord, fcVariant = 'INAV'): Telemet
     // flight on the arm edge and finalises it on disarm, so every sample in a flight row was taken
     // while armed, and any sample carrying a flight mode proves telemetry was flowing at that moment.
     armingFlags: r.state_flags ?? (r.mode_primary ? ARMED_BIT : 0),
+    statusSeen: true, // replay rows always carry the recorded arming state
     cpuLoad: r.cpu_load ?? 0,
     sensorStatus: r.hw_health_status ?? 0,
     flightModeFlags: 0, // raw custom_mode is live-only (vehicle control); not replayed from the DB

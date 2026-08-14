@@ -240,6 +240,15 @@ pub fn mav_set_param(name: String, value: f32, state: State<'_, AppState>) -> Re
     control::set_param(&cmd_tx, fc_sysid, &name, value)
 }
 
+/// Read a single FC parameter by name (best-effort; `None` when the FC doesn't report it within the
+/// params_rt timeout). Used for the Guided loiter-radius ring (`WP_LOITER_RAD` / `NAV_LOITER_RAD`).
+#[tauri::command(async)]
+pub fn mav_read_param(name: String, state: State<'_, AppState>) -> Result<Option<f32>, String> {
+    let (cmd_tx, fc_sysid) = mav_handle(&state)?;
+    let map = crate::mavlink_proto::params_rt::read_params(&cmd_tx, fc_sysid, &[name.as_str()]);
+    Ok(map.get(&name).copied())
+}
+
 /// Set the Guided target course/heading for a fixed-wing via `MAV_CMD_GUIDED_CHANGE_HEADING` — the
 /// plane flies this bearing continuously (not an orbit). `heading` is degrees (0–359). We command
 /// course-over-ground (HEADING_TYPE 0), which is the direction the aircraft actually tracks.

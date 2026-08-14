@@ -78,6 +78,7 @@
   import { buildMissionInput } from '$lib/helpers/missionLibrary';
   import { buildArduMissionInput } from '$lib/helpers/missionLibraryArdu';
   import { homePosition } from '$lib/stores/home';
+  import { ingestFcGuidedTarget } from '$lib/controllers/vehicleControl';
   import { MAP_PROVIDERS } from "$lib/config/mapProviders";
   import { tileCacheStats, setCacheMaxMB, clearCache } from "$lib/cache/tileCache";
   import { weatherTempDisplayFromC, weatherWindDisplayFromMs, weatherTempCFromDisplay, weatherWindMsFromDisplay, canonicalWeatherDescription } from "$lib/helpers/weather";
@@ -393,8 +394,11 @@
     liveTelem = t;
     // Accumulate the live flown track (RAM) for the Terrain Analyzer
     const armed = isArmed(t.armingFlags, t.lastUpdate);
-    // Baseline the armed state on the first real frame after (re)connect → no false edge on reconnect.
-    if (!armEdgeInit && t.lastUpdate > 0) { armEdgeInit = true; prevArmed = armed; }
+    // Baseline the armed state on the first frame that actually CARRIES it (statusSeen) → no false
+    // edge on reconnect. Gating on any first frame (lastUpdate) raced: attitude/GPS at 5–10 Hz beat
+    // the 1 Hz status after a reconnect, seeding prevArmed=false from a frame without arming info —
+    // the first real status then looked like an arm edge and moved Home to wherever the aircraft was.
+    if (!armEdgeInit && t.statusSeen) { armEdgeInit = true; prevArmed = armed; }
     if (armed && !prevArmed) {
       clearLiveTrack();
       // reset the flight-stats accumulator for the new flight
@@ -433,7 +437,10 @@
     // reference once from the current fix (mirrored into a manual home below → the widget points to it).
     if (armed && !prevArmed && t.fixType >= 2 && isValidGpsCoordinate(t.lat, t.lon)) {
       if (get(connection).status === 'connected') {
-        homePosition.set({ lat: t.lat, lon: t.lon, alt: t.altitude, set: true, source: 'fc' });
+        // altMsl, NOT t.altitude (relative): Home consumers treat alt as AMSL (the HOME_POSITION /
+        // MSP_WP0 paths store AMSL, Map3D places the "H" absolutely) — the relative alt (~0 at a
+        // ground arm) sank the 3D marker below the terrain by the local elevation.
+        homePosition.set({ lat: t.lat, lon: t.lon, alt: t.altMsl, set: true, source: 'fc' });
         launchPoint.set({ lat: t.lat, lng: t.lon });
       } else if (get(homePosition).source !== 'fc') {
         launchPoint.set({ lat: t.lat, lng: t.lon });
@@ -523,6 +530,7 @@
   let cesiumIonToken = $state("");
   let altitudeCurtain3D = $state(true);
   let realLighting3D = $state(false);
+  let buildings3D = $state(false);
   let logReplayTime = $state(false);
   let nightMode2D = $state<'off' | 'auto' | 'on'>('off');
   let gcsMode = $state<GcsMode>('manual');
@@ -755,6 +763,7 @@
   cesiumIonToken = saved.cesiumIonToken ?? '';
   altitudeCurtain3D = saved.altitudeCurtain3D ?? true;
   realLighting3D = saved.realLighting3D ?? false;
+  buildings3D = saved.buildings3D ?? false;
   logReplayTime = saved.logReplayTime ?? false;
   nightMode2D = saved.nightMode2D ?? 'off';
   gcsMode = saved.gcsMode ?? 'manual';
@@ -1026,6 +1035,7 @@
     if (patch.cesiumIonToken != null) cesiumIonToken = patch.cesiumIonToken;
     if (patch.altitudeCurtain3D != null) altitudeCurtain3D = patch.altitudeCurtain3D;
     if (patch.realLighting3D != null) realLighting3D = patch.realLighting3D;
+    if (patch.buildings3D != null) buildings3D = patch.buildings3D;
     if (patch.logReplayTime != null) logReplayTime = patch.logReplayTime;
     if (patch.nightMode2D != null) nightMode2D = patch.nightMode2D;
     if (patch.gcsMode != null) gcsMode = patch.gcsMode;
@@ -2454,6 +2464,11 @@
       homePosition.set({ lat, lon, alt, set: true, source: 'fc' }); // authoritative → locked green "H"
       launchPoint.set({ lat, lng: lon }); // pin the planning reference to the real home
     });
+    // FC-confirmed Guided target (POSITION_TARGET_GLOBAL_INT, 1 Hz) — the controller gates it on the
+    // FC actually being in its guided mode (in AUTO/RTL the same message carries the mission WP/home).
+    void listen<{ lat: number; lon: number; alt: number }>('guided-target', (event) => {
+      ingestFcGuidedTarget(event.payload.lat, event.payload.lon);
+    });
   }
 
   onDestroy(() => {
@@ -2701,6 +2716,7 @@
         {cesiumIonToken}
         {altitudeCurtain3D}
         {realLighting3D}
+        {buildings3D}
         {logReplayTime}
         {nightMode2D}
         lowPower3D={$settings.lowPower3D}

@@ -495,6 +495,18 @@ struct HomeEvent {
     alt: f64,
 }
 
+/// The FC's active navigation target (`guided-target` event), from POSITION_TARGET_GLOBAL_INT —
+/// GCS_Common fills it from the vehicle's `get_target_location()` (ArduPlane: `next_WP_loc`, Copter:
+/// `flightmode->get_wp`). Only meaningful as the *guided* target while the FC is in its guided mode;
+/// in AUTO/RTL the same message carries the current mission WP / home, so the frontend gates on the
+/// active mode. `alt` is AMSL (GCS_Common sends frame GLOBAL).
+#[derive(serde::Serialize)]
+struct GuidedTargetEvent {
+    lat: f64,
+    lon: f64,
+    alt: f64,
+}
+
 /// Accumulated analog/battery state — MAVLink splits data across SYS_STATUS,
 /// BATTERY_STATUS, and RC_CHANNELS. We merge and emit a complete AnalogData.
 #[derive(Default)]
@@ -592,6 +604,18 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
                 alt: home.altitude as f64 / 1000.0, // mm AMSL → m
             };
             let _ = app_handle.emit("home-position", &data);
+        }
+
+        // ── POSITION_TARGET_GLOBAL_INT → guided-target ──────────────
+        // Requested at 1 Hz (SET_MESSAGE_INTERVAL) — keeps the map's Guided marker on the FC's
+        // actual loiter/goto point, including targets set by another GCS. See GuidedTargetEvent.
+        MavMessage::POSITION_TARGET_GLOBAL_INT(pt) => {
+            let data = GuidedTargetEvent {
+                lat: pt.lat_int as f64 / 1e7,
+                lon: pt.lon_int as f64 / 1e7,
+                alt: pt.alt as f64, // m AMSL
+            };
+            let _ = app_handle.emit("guided-target", &data);
         }
 
         // ── MISSION_CURRENT → telemetry-nav-status (active waypoint) ─

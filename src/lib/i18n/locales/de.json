@@ -771,6 +771,7 @@
     "tileCache": "Karten-Cache",
     "terrainCache": "Gelände-Cache",
     "altitudeCurtain": "Altitude Curtain (3D)",
+    "buildings3D": "3D-Gebäude (OSM)",
     "realLighting": "Echte Tageszeit und Beleuchtung (3D)",
     "logReplayTime": "Log-Replay-Zeit (3D)",
     "nightMode": "Nachtmodus",
