@@ -8,7 +8,7 @@
 use std::time::{Duration, Instant};
 
 use ::mavlink::ardupilotmega::{
-    MavAutopilot, MavCmd, MavMessage, MavType,
+    MavAutopilot, MavCmd, MavMessage,
     COMMAND_LONG_DATA,
 };
 use ::mavlink::Message;
@@ -133,41 +133,15 @@ pub fn perform_handshake(transport: &mut dyn ByteTransport) -> Result<(FcInfo, u
                             frame.header.system_id, frame.header.component_id, hb.autopilot,
                         );
 
-                        // Map autopilot (+ vehicle type) to fc_variant string. For ArduPilot the
-                        // variant is per-vehicle ("ArduPlane"/"ArduCopter"/...) because the frontend
-                        // picks the flight-mode name table from this string (Plane vs Copter mode
-                        // numbers differ entirely) — a generic "ArduPilot" would wrongly use Copter.
-                        fc_info.fc_variant = match hb.autopilot {
-                            MavAutopilot::MAV_AUTOPILOT_ARDUPILOTMEGA => match hb.mavtype {
-                                // Note: QuadPlane (VTOL_* types) also runs ArduPlane and uses the
-                                // Plane mode table — it currently falls back to "ArduCopter" naming;
-                                // refine the VTOL types here if QuadPlane support is needed.
-                                MavType::MAV_TYPE_FIXED_WING => "ArduPlane".into(),
-                                MavType::MAV_TYPE_GROUND_ROVER => "ArduRover".into(),
-                                MavType::MAV_TYPE_SUBMARINE => "ArduSub".into(),
-                                _ => "ArduCopter".into(),
-                            },
-                            MavAutopilot::MAV_AUTOPILOT_PX4 => "PX4".into(),
-                            MavAutopilot::MAV_AUTOPILOT_GENERIC => "Generic".into(),
-                            other => format!("{:?}", other),
-                        };
+                        // Shared with the tlog importer — see `vehicle::identify`.
+                        let (variant, platform_type) =
+                            crate::mavlink_proto::vehicle::identify(hb.autopilot, hb.mavtype);
+                        fc_info.fc_variant = variant;
+                        fc_info.platform_type = platform_type;
 
                         // Raw MAV_TYPE — the frontend uses it to detect QuadPlane (VTOL_* range), which
                         // the per-vehicle fc_variant string can't express (QuadPlane reports ArduPlane).
                         fc_info.mav_type = hb.mavtype as u8;
-
-                        // Map vehicle type to platform_type
-                        fc_info.platform_type = match hb.mavtype {
-                            MavType::MAV_TYPE_FIXED_WING => 1,
-                            MavType::MAV_TYPE_QUADROTOR
-                            | MavType::MAV_TYPE_HEXAROTOR
-                            | MavType::MAV_TYPE_OCTOROTOR
-                            | MavType::MAV_TYPE_TRICOPTER => 2,
-                            MavType::MAV_TYPE_HELICOPTER => 3,
-                            MavType::MAV_TYPE_GROUND_ROVER => 10,
-                            MavType::MAV_TYPE_SUBMARINE => 12,
-                            _ => 0,
-                        };
 
                         // Store custom_mode for later flight mode decoding
                         fc_info.mixer_preset = hb.custom_mode as i16;
