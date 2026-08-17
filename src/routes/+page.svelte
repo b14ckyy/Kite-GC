@@ -652,9 +652,12 @@
   );
   const rcTabAvailable = $derived($settings.rcControl.enabled && !isTelemetryConnected);
   // On mobile there is no joystick, but the on-screen touch sticks (VirtualSticks) can drive RC over
-  // Wi-Fi. Offer the RC tab whenever a control-capable FC is connected (MSP or MAVLink, not telemetry).
+  // Wi-Fi. RC is safety-relevant and barely field-tested, so touch control is opt-in behind the SAME
+  // master switch as the joystick path (`rcTabAvailable`) rather than appearing whenever an FC is
+  // connected — one switch governs both, no matter the input device. On top of that, mobile also needs a
+  // control-capable connection (MSP or MAVLink, not passive telemetry).
   const mobileRcAvailable = $derived(
-    isMobile && $connection.status === 'connected' && !isTelemetryConnected
+    isMobile && rcTabAvailable && $connection.status === 'connected'
   );
 
   // If the RC tab is open when it becomes unavailable (e.g. a telemetry connection comes up), fall back
