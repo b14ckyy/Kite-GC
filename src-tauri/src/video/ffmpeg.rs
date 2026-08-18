@@ -19,6 +19,8 @@ use std::time::{Duration, Instant};
 
 const REPO: &str = "BtbN/FFmpeg-Builds";
 const RELEASES_PAGE: &str = "https://github.com/BtbN/FFmpeg-Builds/releases";
+/// The pinned ffmpeg release branch (BtbN `n<branch>-latest` assets follow it). See `download`.
+const FFMPEG_BRANCH: &str = "9.0";
 const HTTP_USER_AGENT: &str = "Kite-GC ffmpeg-fetch";
 
 /// Filename of ffmpeg for the current platform.
@@ -307,11 +309,15 @@ fn manual_install_msg() -> String {
 pub async fn download<F: FnMut(u8, &str)>(mut report: F) -> Result<PathBuf, String> {
     let (want_substr, want_ext) = asset_match().ok_or_else(manual_install_msg)?;
 
-    // Self-contained static GPL build for this platform (ffmpeg-master-latest-win64-gpl.zip /
-    // -linux64-gpl.tar.xz / -linuxarm64-gpl.tar.xz), NOT the -shared variant (needs separate libs).
-    // BtbN's names are fixed across releases, so this resolves through the CDN path instead of the
-    // rate-limited REST API (which 403s for everyone behind a shared IP — see `crate::github_release`).
-    let asset_name = format!("ffmpeg-master-latest-{want_substr}-gpl{want_ext}");
+    // Self-contained static GPL build for this platform, NOT the -shared variant (needs separate
+    // libs). Pinned to the STABLE RELEASE BRANCH, not `master`: the old `ffmpeg-master-latest-…`
+    // names handed every user whatever nightly happened to be current that day, so no two installs
+    // ran the same build and no field report was reproducible. The `n9.0-latest` assets track the
+    // release/9.0 branch instead — today that is 9.0.1, and later downloads pick up 9.0.x patch
+    // fixes only, never a new major. BtbN's names are fixed across releases, so this still resolves
+    // through the CDN path instead of the rate-limited REST API (which 403s for everyone behind a
+    // shared IP — see `crate::github_release`). Bump `FFMPEG_BRANCH` deliberately, with a re-test.
+    let asset_name = format!("ffmpeg-n{FFMPEG_BRANCH}-latest-{want_substr}-gpl-{FFMPEG_BRANCH}{want_ext}");
     let url = crate::github_release::latest_asset_url(REPO, &asset_name);
 
     let client = reqwest::Client::builder()
