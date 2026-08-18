@@ -255,9 +255,8 @@ impl Go2Rtc {
         let api_port = free_loopback_port()?;
         let rtsp_port = free_loopback_port()?;
         // A guaranteed-free WebRTC port: if go2rtc's default (8555) is busy, pion's UDP mux stays nil
-        // and any ICE op panics the whole process (go2rtc #1851/#1855). Pin it + advertise the
-        // loopback host candidate so same-machine ICE connects directly.
-        let webrtc_port = free_loopback_webrtc_port()?;
+        // and any ICE op panics the whole process (go2rtc #1851/#1855).
+        let webrtc_port = free_webrtc_port()?;
         let dir = crate::flightlog::decoder::install_dir();
         std::fs::create_dir_all(&dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
         let cfg_path = dir.join("kite-go2rtc.yaml");
@@ -288,6 +287,27 @@ impl Go2Rtc {
         // expansion carries as many arguments as it likes. See `commands::video::video_webrtc_start`.
         let mut ffmpeg_cfg = serde_json::Map::new();
         ffmpeg_cfg.insert("bin".into(), super::ffmpeg::binary_name().into());
+        // Stream-copy H.264 into go2rtc **without output buffering**. go2rtc drives an `ffmpeg:`
+        // source by having ffmpeg publish back into it over RTSP/TCP, and the command it builds ends
+        // in a bare `-f rtsp <target>` — no flush flag anywhere. ffmpeg's muxer then holds packets
+        // and releases them in blocks.
+        //
+        // Measured at go2rtc's own RTSP output against the UAV-Link, 5 min at 60 fps: 42 gaps beyond
+        // 300 ms (319/329/317/334/332/321/323/321/328/309 ms — a near-constant duration, irregularly
+        // triggered), while the source itself had a worst gap of 49 ms over 10 minutes. Each of those
+        // gaps lines up to the second with a freeze counted by the WebView, in both count and total
+        // duration. It is the same fault, and the same signature (~338 ms), that `2856c40` measured
+        // and removed from the MJPEG path — which is why that path has been clean since and this one
+        // never was: the fix took MJPEG off go2rtc and left H.264 on it.
+        //
+        // A named template rather than inline arguments because go2rtc rejects any source string
+        // containing a space, and `#video=` expands **after** `-i`, i.e. into the output section
+        // where these flags belong. `muxdelay` is ffmpeg's own 0.7 s output delay, which has no
+        // purpose on a loopback publish.
+        ffmpeg_cfg.insert(
+            "kite_h264_copy".into(),
+            "-c:v copy -flush_packets 1 -muxdelay 0".into(),
+        );
         // Pi-class SoCs: hardware H.264 decode only (there is no V4L2 M2M MJPEG encoder), mirroring
         // go2rtc's own `rtsp/udp` input template so a stream that reads on one reads on the other.
         if super::ffmpeg::v4l2_h264_decode_available() {
@@ -321,9 +341,28 @@ impl Go2Rtc {
             // cross-origin fetch without that header is blocked — an <img> never needed it.
             "api": { "listen": format!("127.0.0.1:{api_port}"), "origin": "*" },
             "rtsp": { "listen": format!("127.0.0.1:{rtsp_port}") },
+            // NOT loopback, and that is the whole point. A browser never generates a `127.0.0.1` ICE
+            // candidate, and Windows drops a packet addressed to `127.0.0.1` that originates from any
+            // other interface — so a peer offering only the loopback candidate can never be paired
+            // with. Measured from a webrtc-internals dump: the loopback pair sent 23 STUN checks and
+            // received 0 answers, stuck in `in-progress` forever, while ICE fell through to a pair of
+            // STUN-discovered `srflx` candidates. All 57 MB of that session's video left the machine,
+            // went to the router and came back in by NAT hairpin — for a stream between two processes
+            // on the same host. Everything that stayed local (MJPEG over HTTP, MSE over WebSocket,
+            // ffplay) was clean; only this path stuttered.
+            //
+            // Binding every interface lets the browser reach go2rtc on the same LAN address it offers
+            // itself, which the kernel then routes internally. `ice_servers: []` is what keeps the
+            // detour from coming back: go2rtc's own default configures a public STUN server, and any
+            // `srflx` candidate it discovers is a route out of the machine that ICE may prefer.
+            //
+            // `candidates` is deliberately unset — pion enumerates the local interfaces itself, and
+            // every address it finds is reachable without leaving the host. The port stays random and
+            // a session still requires the ICE credentials from the SDP, which only ever travels over
+            // the loopback-bound API below.
             "webrtc": {
-                "listen": format!("127.0.0.1:{webrtc_port}"),
-                "candidates": [format!("127.0.0.1:{webrtc_port}")],
+                "listen": format!(":{webrtc_port}"),
+                "ice_servers": [],
             },
             "ffmpeg": serde_json::Value::Object(ffmpeg_cfg),
             "log": { "level": "warn" },
@@ -618,12 +657,16 @@ fn free_loopback_port() -> Result<u16, String> {
         .map_err(|e| format!("Cannot read allocated port: {e}"))
 }
 
-/// Grab a loopback port that is free for **both UDP and TCP** — go2rtc's WebRTC listener binds UDP for
-/// the ICE mux and also accepts TCP candidates on the same port. Probing only TCP (as this used to)
-/// can hand out a UDP-occupied port, which is exactly the case that leaves pion's UDP mux nil and
-/// panics go2rtc on the first ICE operation. UDP first (that's the binding that must succeed), then
-/// TCP verified while the UDP socket is still held.
-fn free_loopback_webrtc_port() -> Result<u16, String> {
+/// Grab a port that is free for **both UDP and TCP** — go2rtc's WebRTC listener binds UDP for the ICE
+/// mux and also accepts TCP candidates on the same port. Probing only TCP (as this used to) can hand
+/// out a UDP-occupied port, which is exactly the case that leaves pion's UDP mux nil and panics go2rtc
+/// on the first ICE operation. UDP first (that's the binding that must succeed), then TCP verified
+/// while the UDP socket is still held.
+///
+/// Probed on `0.0.0.0`, matching what go2rtc actually binds. Testing loopback alone would call a port
+/// free that another process already holds on a real interface, and the WebRTC listener would then
+/// fail to come up at all.
+fn free_webrtc_port() -> Result<u16, String> {
     // Every rejected UDP socket is HELD until we are done, and the attempt count is far above the
     // width of a reserved block. Both are needed on Windows, where Hyper-V/WSL/Docker reserve blocks
     // of the dynamic range and a bind into one fails with a *permission* error (WSAEACCES 10013)
@@ -641,13 +684,13 @@ fn free_loopback_webrtc_port() -> Result<u16, String> {
     let mut held = Vec::with_capacity(ATTEMPTS);
     let mut last = String::new();
     for _ in 0..ATTEMPTS {
-        let udp = std::net::UdpSocket::bind(("127.0.0.1", 0))
+        let udp = std::net::UdpSocket::bind(("0.0.0.0", 0))
             .map_err(|e| format!("Cannot allocate a WebRTC port: {e}"))?;
         let port = udp
             .local_addr()
             .map_err(|e| format!("Cannot read allocated WebRTC port: {e}"))?
             .port();
-        match std::net::TcpListener::bind(("127.0.0.1", port)) {
+        match std::net::TcpListener::bind(("0.0.0.0", port)) {
             Ok(_) => return Ok(port),
             Err(e) => {
                 last = e.to_string();

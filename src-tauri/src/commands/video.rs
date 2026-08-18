@@ -211,7 +211,10 @@ pub async fn video_webrtc_start(
     } else if mjpeg {
         format!("ffmpeg:{url}#input=rtsp/udp#video=mjpeg")
     } else if use_ffmpeg {
-        format!("ffmpeg:{url}#input=rtsp/udp#video=copy")
+        // `kite_h264_copy`, not the built-in `copy`: it is the same stream copy plus the flush flags
+        // go2rtc's own output section lacks — see `video::go2rtc` for the measurement that made this
+        // necessary.
+        format!("ffmpeg:{url}#input=rtsp/udp#video=kite_h264_copy")
     } else {
         url.clone()
     };
