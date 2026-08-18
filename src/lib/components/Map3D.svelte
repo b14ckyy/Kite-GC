@@ -139,13 +139,24 @@
   // Static full-track line segments — built once per track/color change.
   let playbackTrackParts: Cesium.Entity[] = [];
   // Progressive ground shadow + altitude curtain up to the current replay position — grows behind
-  // the UAV to show flown progress. Chunked into fixed-size colour runs: finalized chunks are
-  // created once and never touched (no flicker, bounded entity count); only the small in-progress
-  // chunk is recreated as it grows.
-  let decoFinalized: Cesium.Entity[] = [];          // completed chunks (shadow + curtain)
+  // the UAV to show flown progress. Finalized chunks are created once and never touched (no flicker);
+  // only the small in-progress chunk is recreated as it grows.
+  //
+  // The shadow and the curtain chunk INDEPENDENTLY. The shadow is always plain black, so tying it to
+  // colour runs only multiplied Cesium's most expensive primitive (`clampToGround` renders multi-pass
+  // over the terrain, and entities are never re-batched) — replay fps sank in step with the flown
+  // distance, long before the curtain came into it. The shadow now chunks by size alone, and small
+  // chunks are CONSOLIDATED into one entity per SHADOW_MERGE_POINTS, so an hour-long log ends at a
+  // couple of dozen ground primitives instead of hundreds (or, with per-point gradient colours,
+  // thousands). The curtain keeps colour-run chunking — the colour is the whole point of a wall —
+  // with the gradient quantized to 20 buckets (see `trackPointColorizer`) so runs stay long.
+  let decoFinalized: Cesium.Entity[] = [];          // merged shadow chunks + finalized curtain chunks
   let decoActiveShadow: Cesium.Entity | undefined;
   let decoActiveCurtain: Cesium.Entity | undefined;
-  let decoActivePos: Cesium.Cartesian3[] = [];      // in-progress chunk positions
+  let shadowActivePos: Cesium.Cartesian3[] = [];    // in-progress shadow chunk (size-bounded)
+  let shadowPending: { entity: Cesium.Entity; positions: Cesium.Cartesian3[] }[] = []; // awaiting merge
+  let shadowPendingPoints = 0;
+  let curtainActivePos: Cesium.Cartesian3[] = [];   // in-progress curtain chunk (colour run)
   let decoActiveColor = '';
   let decoValidTrack: TelemetryRecord[] = [];        // valid points of the loaded track
   let decoColorMode: TrackColorMode = 'flightmode';
@@ -158,6 +169,8 @@
   let decoLoading = false;                           // suppress deco growth during an (async) track load
   let curtainEnabled = true;                         // settings.altitudeCurtain3D
   const DECO_CHUNK_MAX = 150;                        // finalize a chunk at this many points
+  const SHADOW_MERGE_POINTS = 1200;                  // consolidate pending shadow chunks at this size
+  const TRACK_MIN_STEP_M = 2.5;                      // decimation: drop steps shorter than this (3D only)
 
   // ── 3D render frame-rate cap (settings.lowPower3D) ──
   // A 60fps baseline always applies (else Cesium renders at the display refresh — 120/144Hz panels
@@ -295,6 +308,22 @@
   let chaseCurrent = { lat: 0, lon: 0, alt: 0, heading: 0 };
   let chaseInited = false;
   const CHASE_SMOOTHING = 0.07; // 0..1 — lower = smoother (exponential lerp factor per frame)
+  /** Whether an exponential camera lerp has effectively reached its target (≈cm / centi-degree —
+   *  far below anything visible), so its rAF loop may go to sleep instead of rendering forever. */
+  function cameraLerpSettled(
+    cur: { lat: number; lon: number; alt: number; heading?: number },
+    tgt: { lat: number; lon: number; alt: number; heading?: number },
+  ): boolean {
+    const dHead = cur.heading != null && tgt.heading != null
+      ? Math.abs((((cur.heading - tgt.heading) % 360) + 540) % 360 - 180)
+      : 0;
+    return (
+      Math.abs(cur.lat - tgt.lat) < 1e-7 &&
+      Math.abs(cur.lon - tgt.lon) < 1e-7 &&
+      Math.abs(cur.alt - tgt.alt) < 0.05 &&
+      dHead < 0.05
+    );
+  }
 
   // Geoid undulation N = ellipsoid − MSL, derived from terrain (cesiumGround_ellipsoid −
   // copernicusGround_MSL) at the first track point — GPS-independent, so a tower/rooftop start isn't
@@ -987,6 +1016,10 @@
         !(typeof localStorage !== 'undefined' && localStorage.getItem('kite_perf_oit') === 'off'),
     });
 
+    // Wake the parked craft-smoothing loop when the craft may have scrolled back into view — see the
+    // off-screen gate at the smoothing state. Dies with the viewer, no explicit removal needed.
+    viewer.scene.preRender.addEventListener(wakeSmoothingIfVisible);
+
     // Add overlay layers for hybrid providers (also cached)
     if (baseProvider.overlays) {
       for (const ol of baseProvider.overlays) {
@@ -1390,6 +1423,7 @@
     unsubFrameMission3d?.();
     unsubPerf3d?.();
     detachPerf3d();
+    if (pulseTicker != null) { clearInterval(pulseTicker); pulseTicker = undefined; }
     if (viewer && !viewer.isDestroyed()) {
       // Clean up trail segments (they will be destroyed with viewer, but be explicit)
       viewer.entities.removeAll();
@@ -2697,6 +2731,32 @@
   };
   const cart = (lat: number, lon: number, alt: number) => Cesium.Cartesian3.fromDegrees(lon, lat, alt);
 
+  // ── Off-screen gate ──
+  // In the FREE camera, a craft outside the frustum still forced full-scene renders at display rate:
+  // the smoothing loop writes the entity and requests a render every rAF, and Cesium's request-render
+  // mode treats "an entity changed" as "the scene is dirty" — visible or not (measured: 100% GPU with
+  // the camera parked far away from a running replay). When the craft can't be seen, the loop parks
+  // instead; `wakeSmoothingIfVisible` runs on preRender — user camera motion is the only thing still
+  // rendering then, which is exactly the moment the craft could scroll back into view.
+  let smHidden = false;
+  const CRAFT_CULL_RADIUS_M = 60; // generous bound around the model + label
+  function craftInView(pos: Cesium.Cartesian3): boolean {
+    if (!viewer) return true;
+    const cam = viewer.camera;
+    const cv = cam.frustum.computeCullingVolume(cam.position, cam.direction, cam.up);
+    return cv.computeVisibility(new Cesium.BoundingSphere(pos, CRAFT_CULL_RADIUS_M)) !== Cesium.Intersect.OUTSIDE;
+  }
+  function wakeSmoothingIfVisible() {
+    if (!smHidden || !pHas) return;
+    if (!craftInView(cart(pToLat, pToLon, pToAlt))) return;
+    smHidden = false;
+    // Snap to the freshest targets — gliding in from a minutes-old position would fly the model
+    // across the scene.
+    pFromLat = pToLat; pFromLon = pToLon; pFromAlt = pToAlt;
+    if (aTo) { aFrom = aTo; aFromHead = aToHead; }
+    if (!smRaf) smRaf = requestAnimationFrame(smTick);
+  }
+
   function resetUavSmoothing() {
     if (smRaf) cancelAnimationFrame(smRaf);
     smRaf = 0; smEntity = undefined; pHas = false; aFrom = aTo = null;
@@ -2736,6 +2796,13 @@
   function smTick() {
     smRaf = 0;
     if (!viewer || !smEntity || !pHas || !aFrom || !aTo) return;
+    // Free camera + craft off-screen: park (no entity write, no render, no re-queue). Every feed
+    // tick still tries once, and the preRender hook wakes the loop when visibility can change.
+    if (cameraMode === 'free' && !craftInView(cart(pToLat, pToLon, pToAlt))) {
+      smHidden = true;
+      return;
+    }
+    smHidden = false;
     const now = performance.now();
     const pf = Math.min(1, ((now - pT0) / 1000) / pInt);
     const af = Math.min(1, ((now - aT0) / 1000) / aInt);
@@ -3148,12 +3215,27 @@
 
     // [lat, lon] → Cesium Cartesian3. Ellipsoid height = GPS-MSL start anchor + geoid undulation + the
     // point's relative fused altitude. Keeps the start at its true height (tower preserved), track smooth.
+    //
+    // DECIMATED on the way: consecutive positions closer than TRACK_MIN_STEP_M are dropped (first and
+    // last always kept). A long log carries a vertex every ~2 m — and every one of them rides through
+    // the outline material's shader forever after. Slow flight and hover phases pile hundreds of
+    // vertices onto the same spot for zero visual gain; at 5 width the line is visually identical
+    // with metre-level steps removed. Measured motivation: a 1.5 h log = 41k points, on an Intel iGPU
+    // the difference between a fluid replay and none.
     function segmentToPositions3D(points: [number, number][]): Cesium.Cartesian3[] {
-      return points.map(([lat, lon]) => {
+      const out: Cesium.Cartesian3[] = [];
+      for (let i = 0; i < points.length; i++) {
+        const [lat, lon] = points[i];
         const key = `${lat.toFixed(6)},${lon.toFixed(6)}`;
         const rel = relLookup.get(key) ?? 0;
-        return Cesium.Cartesian3.fromDegrees(lon, lat, startMslGps + geoidOffset + rel);
-      });
+        const pos = Cesium.Cartesian3.fromDegrees(lon, lat, startMslGps + geoidOffset + rel);
+        if (out.length > 0 && i < points.length - 1) {
+          const prev = out[out.length - 1];
+          if (Cesium.Cartesian3.distanceSquared(prev, pos) < TRACK_MIN_STEP_M * TRACK_MIN_STEP_M) continue;
+        }
+        out.push(pos);
+      }
+      return out;
     }
 
     // Static flight line for a segment: a coloured polyline with a black outline. The ground shadow +
@@ -3261,10 +3343,9 @@
     return Cesium.Cartesian3.fromDegrees(p.lon!, p.lat!, startMslGps + geoidOffset + rel);
   }
 
-  /** Create the shadow (+ optional curtain) entities for one chunk. */
-  function addShadowCurtain(positions: Cesium.Cartesian3[], cssColor: string): { shadow: Cesium.Entity; curtain?: Cesium.Entity } {
-    const color = Cesium.Color.fromCssColorString(cssColor);
-    const shadow = viewer!.entities.add({
+  /** One black ground-clamped shadow polyline. */
+  function addShadowChunk(positions: Cesium.Cartesian3[]): Cesium.Entity {
+    return viewer!.entities.add({
       polyline: {
         positions,
         width: 3,
@@ -3272,36 +3353,54 @@
         clampToGround: true,
       },
     });
-    let curtain: Cesium.Entity | undefined;
-    if (curtainEnabled) {
-      curtain = viewer!.entities.add({
-        wall: {
-          positions,
-          minimumHeights: positions.map(() => 0),
-          material: new Cesium.ColorMaterialProperty(color.withAlpha(0.22)),
-          outline: false,
-        },
-      });
-    }
-    return { shadow, curtain };
   }
 
-  /** Drop the in-progress chunk's entities (it gets recreated as it grows). */
+  /** One coloured altitude-curtain wall. */
+  function addCurtainChunk(positions: Cesium.Cartesian3[], cssColor: string): Cesium.Entity {
+    const color = Cesium.Color.fromCssColorString(cssColor);
+    return viewer!.entities.add({
+      wall: {
+        positions,
+        minimumHeights: positions.map(() => 0),
+        material: new Cesium.ColorMaterialProperty(color.withAlpha(0.22)),
+        outline: false,
+      },
+    });
+  }
+
+  /** Drop the in-progress chunks' entities (they get recreated as they grow). */
   function reopenActiveChunk() {
     if (!viewer) return;
     if (decoActiveShadow) { viewer.entities.remove(decoActiveShadow); decoActiveShadow = undefined; }
     if (decoActiveCurtain) { viewer.entities.remove(decoActiveCurtain); decoActiveCurtain = undefined; }
   }
 
-  /** Turn the current in-progress chunk positions into a permanent chunk. */
-  function finalizeActiveChunk() {
-    if (!viewer || decoActivePos.length < 2) return;
-    const { shadow, curtain } = addShadowCurtain([...decoActivePos], decoActiveColor);
-    decoFinalized.push(shadow);
-    if (curtain) decoFinalized.push(curtain);
+  /** Finalize the in-progress shadow chunk into the pending pool, consolidating the pool into a
+   *  single entity once it covers SHADOW_MERGE_POINTS. Chunks join on a shared point, so the merge
+   *  skips each subsequent chunk's first position — one continuous polyline, no zero-length legs. */
+  function finalizeActiveShadow() {
+    if (!viewer || shadowActivePos.length < 2) return;
+    const positions = [...shadowActivePos];
+    shadowPending.push({ entity: addShadowChunk(positions), positions });
+    shadowPendingPoints += positions.length;
+    if (shadowPendingPoints < SHADOW_MERGE_POINTS) return;
+    const merged: Cesium.Cartesian3[] = [];
+    for (const c of shadowPending) {
+      viewer.entities.remove(c.entity);
+      merged.push(...(merged.length ? c.positions.slice(1) : c.positions));
+    }
+    decoFinalized.push(addShadowChunk(merged));
+    shadowPending = [];
+    shadowPendingPoints = 0;
   }
 
-  /** Remove all deco (finalized + active) and reset the cursor. Also cancels any
+  /** Turn the current in-progress curtain colour run into a permanent chunk. */
+  function finalizeActiveCurtain() {
+    if (!viewer || !curtainEnabled || curtainActivePos.length < 2) return;
+    decoFinalized.push(addCurtainChunk([...curtainActivePos], decoActiveColor));
+  }
+
+  /** Remove all deco (finalized + pending + active) and reset the cursor. Also cancels any
    *  pending grow/rebuild timers so a stale timer can't repaint after a clear
    *  (e.g. a log switch drawing a chunk across the old + new track). */
   function clearDeco() {
@@ -3310,39 +3409,61 @@
     if (decoTrailingTimer != null) { clearTimeout(decoTrailingTimer); decoTrailingTimer = null; }
     for (const e of decoFinalized) viewer.entities.remove(e);
     decoFinalized = [];
+    for (const c of shadowPending) viewer.entities.remove(c.entity);
+    shadowPending = [];
+    shadowPendingPoints = 0;
     reopenActiveChunk();
-    decoActivePos = [];
+    shadowActivePos = [];
+    curtainActivePos = [];
     decoActiveColor = '';
     decoRenderedCount = 0;
   }
 
-  /** Append valid-track points [fromIdx, toIdx) to the deco, finalizing chunks
-   *  on colour change or when they reach DECO_CHUNK_MAX, then redraw the small
-   *  in-progress chunk. Existing finalized chunks are never touched. */
+  /** Append valid-track points [fromIdx, toIdx) to the deco — the shadow finalizing purely by size,
+   *  the curtain on colour change or size — then redraw the small in-progress chunks. Finalized
+   *  chunks are never touched. */
   function appendDeco(fromIdx: number, toIdx: number) {
     if (!viewer) return;
-    reopenActiveChunk(); // we'll recreate the in-progress chunk at the end
+    reopenActiveChunk(); // we'll recreate the in-progress chunks at the end
     for (let i = fromIdx; i < toIdx; i++) {
       const p = decoValidTrack[i];
       if (!p || p.lat == null || p.lon == null) continue;
       const pos = posFromRecord(p);
+
+      // Decimate exactly like the track line (TRACK_MIN_STEP_M): hover/slow phases pile hundreds of
+      // points onto the same spot, and every one of them would fatten the ground primitives and the
+      // walls. The range's last point is always taken so the deco tip stays at the craft.
+      const lastPos = shadowActivePos[shadowActivePos.length - 1];
+      if (
+        lastPos && i < toIdx - 1 &&
+        Cesium.Cartesian3.distanceSquared(lastPos, pos) < TRACK_MIN_STEP_M * TRACK_MIN_STEP_M
+      ) continue;
+
+      // Shadow: colour-blind, size-bounded.
+      if (shadowActivePos.length >= DECO_CHUNK_MAX) {
+        finalizeActiveShadow();
+        shadowActivePos = [shadowActivePos[shadowActivePos.length - 1]]; // overlap for continuity
+      }
+      shadowActivePos.push(pos);
+
+      // Curtain: colour runs (skipped entirely — including the colour lookup — when disabled).
+      if (!curtainEnabled) continue;
       const color = decoPointColor(p);
-      if (decoActivePos.length === 0) {
+      if (curtainActivePos.length === 0) {
         decoActiveColor = color;
-        decoActivePos = [pos];
+        curtainActivePos = [pos];
         continue;
       }
-      if (color !== decoActiveColor || decoActivePos.length >= DECO_CHUNK_MAX) {
-        finalizeActiveChunk();
-        decoActivePos = [decoActivePos[decoActivePos.length - 1]]; // overlap for continuity
+      if (color !== decoActiveColor || curtainActivePos.length >= DECO_CHUNK_MAX) {
+        finalizeActiveCurtain();
+        curtainActivePos = [curtainActivePos[curtainActivePos.length - 1]]; // overlap for continuity
         decoActiveColor = color;
       }
-      decoActivePos.push(pos);
+      curtainActivePos.push(pos);
     }
-    if (decoActivePos.length >= 2) {
-      const { shadow, curtain } = addShadowCurtain([...decoActivePos], decoActiveColor);
-      decoActiveShadow = shadow;
-      decoActiveCurtain = curtain;
+    if (shadowActivePos.length >= 2) decoActiveShadow = addShadowChunk([...shadowActivePos]);
+    if (curtainEnabled && curtainActivePos.length >= 2) {
+      decoActiveCurtain = addCurtainChunk([...curtainActivePos], decoActiveColor);
     }
     viewer.scene.requestRender();
   }
@@ -3391,15 +3512,20 @@
     if (decoRebuildTimer != null) { clearTimeout(decoRebuildTimer); decoRebuildTimer = null; }
     if (flownCount === decoRenderedCount) return;
 
-    // Throttle bursts; trailing call lands the exact extent on pause.
+    // Throttle bursts; trailing call lands the exact extent on pause. 450 ms, not the 90 ms this
+    // used to be: every deco growth tears down and recreates the in-progress GROUND-CLAMPED chunk,
+    // and each recreation is a full ground-geometry build (worker + terrain shadow volume). At 90 ms
+    // that ran ~11×/s for the whole replay — a constant drag that throttled an Intel iGPU to ~30 fps
+    // with almost nothing on screen. At 450 ms the churn is ~2/s and the deco tip still follows the
+    // craft closely enough to read as live growth.
     const now = performance.now();
     if (now < decoThrottleUntil) {
       if (decoTrailingTimer == null) {
-        decoTrailingTimer = setTimeout(() => { decoTrailingTimer = null; updateFlownDeco(); }, 90);
+        decoTrailingTimer = setTimeout(() => { decoTrailingTimer = null; updateFlownDeco(); }, 450);
       }
       return;
     }
-    decoThrottleUntil = now + 90;
+    decoThrottleUntil = now + 450;
     appendDeco(decoRenderedCount, flownCount); // forward → continue the chunks
     decoRenderedCount = flownCount;
   }
@@ -3476,15 +3602,26 @@
     missionEntities.push(ent);
   }
 
-  /** Continuous rendering is needed while a pulse animates (active-WP glow OR a radar alert); otherwise
-   *  fall back to on-demand (requestRenderMode) to spare the GPU. Both call sites use this so they agree. */
+  /** Keep the pulses (active-WP glow, radar alerts) animating WITHOUT continuous rendering: an
+   *  interval-driven requestRender at ~12 fps re-evaluates their CallbackProperties often enough for
+   *  a glow, at a fraction of display-rate full-scene renders. Holding requestRenderMode off for a
+   *  pulse meant a replay with a mission loaded sat at 100% GPU — even paused — for a soft blink
+   *  (measured on an Intel iGPU; the fps overlay toggle "fixing" it was this arbiter being
+   *  overridden). Only the Performance tab's fps overlay still forces true continuous rendering. */
+  let pulseTicker: ReturnType<typeof setInterval> | undefined;
   function syncContinuousRender() {
     if (!viewer) return;
     let anyAlert = false;
     for (const rec of radar3dRecs.values()) if (rec.alertLevel) { anyAlert = true; break; }
-    // The Performance tab can force continuous rendering so the fps overlay keeps ticking.
     const forceCont = get(perf3dForceContinuous);
-    viewer.scene.requestRenderMode = !(wpPulseActive || anyAlert || forceCont);
+    viewer.scene.requestRenderMode = !forceCont;
+    const pulsing = wpPulseActive || anyAlert;
+    if (pulsing && pulseTicker == null) {
+      pulseTicker = setInterval(() => viewer?.scene.requestRender(), 80);
+    } else if (!pulsing && pulseTicker != null) {
+      clearInterval(pulseTicker);
+      pulseTicker = undefined;
+    }
   }
 
   // Overlay mission line — a depth-test-free Primitive so it stays visible through terrain (like the
@@ -4056,6 +4193,10 @@
     chaseLastTarget = Cesium.Cartesian3.clone(target, chaseLastTarget);
     viewer.scene.requestRender();
 
+    // Sleep once converged. This loop used to re-queue itself unconditionally — display-rate full
+    // renders forever, even with the replay paused and the camera parked (measured: 100% GPU on an
+    // Intel iGPU doing nothing). The next target update (updateChaseCamera) restarts it.
+    if (cameraLerpSettled(chaseCurrent, chaseTarget)) { chaseLerpActive = false; return; }
     requestAnimationFrame(chaseAnimationLoop);
   }
 
@@ -4126,6 +4267,9 @@
     orbitLastCenter = Cesium.Cartesian3.clone(newCenter, orbitLastCenter);
     viewer.scene.requestRender();
 
+    // Sleep once converged (same reasoning as the chase loop above); the orbit target has no
+    // heading of its own, so position alone decides.
+    if (cameraLerpSettled(orbitCurrentPos, orbitTargetPos)) { orbitLerpActive = false; return; }
     requestAnimationFrame(orbitAnimationLoop);
   }
 
