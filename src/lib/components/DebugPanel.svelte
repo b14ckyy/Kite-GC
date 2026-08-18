@@ -18,7 +18,8 @@
   import { fcChannels } from "$lib/stores/rcMirror";
   import { boxName } from "$lib/helpers/inavModes";
   import { getPerf3dViewer, perf3dFps, perf3dForceContinuous, perf3dAttached } from "$lib/stores/perf3d";
-  import { videoState, videoRtcStats } from "$lib/stores/video";
+  import { videoState, videoRtcStats, rtspBufferFrames } from "$lib/stores/video";
+  import NumberStepper from "$lib/components/NumberStepper.svelte";
   import { mjpegStats, uiJankMs, startJankProbe, stopJankProbe } from "$lib/controllers/mjpegSink";
 
   let { onclose }: { onclose: () => void } = $props();
@@ -897,6 +898,16 @@
             <span class="stat-sep">|</span>
             <span class="stat-label">{$t('debug.vidPlayout')}</span>
             <span class="stat-value">{v.playoutDelayMs !== null ? `${v.playoutDelayMs.toFixed(0)} ms` : '—'}</span>
+          </div>
+          <!-- Smoothness experiment: buffer depth in frame times, applied live to the receiver
+               (`jitterBufferTarget`, no renegotiation). The target next to it is the derived ms
+               value; `Playout delay` above shows whether the engine actually honours it. -->
+          <div class="stat-group">
+            <span class="stat-label">{$t('debug.vidBuffer')}</span>
+            <NumberStepper bind:value={$rtspBufferFrames} min={0} max={3} step={1} />
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.vidBufferTarget')}</span>
+            <span class="stat-value">{v.bufferTargetMs !== null ? `${v.bufferTargetMs} ms` : $t('debug.vidBufferOff')}</span>
           </div>
         </div>
         <div class="perf-hint">{$t('debug.vidHint')}</div>

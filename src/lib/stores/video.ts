@@ -152,6 +152,7 @@ interface VideoPrefs {
   rtspUrl: string;
   rtspTransport: RtspTransport;
   rtspConnections: RtspConnection[];
+  rtspBufferFrames: number;
   nativeDevice: string | null;
   nativeCodec: string;
   nativeDeviceName: string | null;
@@ -176,6 +177,7 @@ const PREF_DEFAULTS: VideoPrefs = {
   rtspUrl: '',
   rtspTransport: 'auto',
   rtspConnections: [],
+  rtspBufferFrames: 0,
   nativeDevice: null,
   nativeCodec: 'mjpeg',
   nativeDeviceName: null,
@@ -208,6 +210,8 @@ function loadPrefs(): VideoPrefs {
         rtspUrl: p.rtspUrl ?? '',
         rtspTransport: p.rtspTransport ?? 'auto',
         rtspConnections: Array.isArray(p.rtspConnections) ? p.rtspConnections : [],
+        // Clamped to the stepper's range — a hand-edited pref must not park the buffer at 4000 ms.
+        rtspBufferFrames: Math.min(3, Math.max(0, Math.round(p.rtspBufferFrames ?? 0))),
         nativeDevice: p.nativeDevice ?? p.v4l2Device ?? null,
         nativeCodec: p.nativeCodec ?? 'mjpeg',
         nativeDeviceName: p.nativeDeviceName ?? null,
@@ -238,6 +242,7 @@ function savePrefs(): void {
         rtspUrl: s.rtspUrl,
         rtspTransport: s.rtspTransport,
         rtspConnections: s.rtspConnections,
+        rtspBufferFrames: get(rtspBufferFrames),
         nativeDevice: s.nativeDevice,
         nativeCodec: s.nativeSel.codec,
         nativeDeviceName: s.nativeDeviceName,
@@ -343,8 +348,104 @@ export interface VideoRtcStats {
   kbps: number;
   /** The negotiated video codec, prettified from the codec report's mime type (e.g. `H.264`). */
   codec: string | null;
+  /** The jitter-buffer target currently applied to the receiver, in ms (null = engine default). */
+  bufferTargetMs: number | null;
 }
 export const videoRtcStats = writable<VideoRtcStats | null>(null);
+
+// ── Jitter-buffer target (smoothness ↔ latency experiment) ───────────────────────────────────────
+// Chromium's receive-side jitter buffer runs at its adaptive minimum (~8–14 ms measured), which
+// passes arrival jitter straight to presentation as duplicate/skipped frames — the "rough" playback.
+// `RTCRtpReceiver.jitterBufferTarget` raises that floor at runtime, no renegotiation needed. The
+// knob is expressed in FRAME TIMES, not milliseconds, so the same setting means the same smoothing
+// at 30 and at 60 fps — the actual target is derived from the measured incoming rate below.
+
+/** Buffer depth in frame times (0 = off, engine default). Persisted with the video prefs; set from
+ *  the Video panel's RTSP section (and mirrored in the Debug Monitor with the live target/actual). */
+export const rtspBufferFrames = writable(boot.rtspBufferFrames);
+
+/** Rates a source plausibly sends. The measured arrival fps is snapped to the nearest of these —
+ *  a raw per-second count wobbles (a lone network hiccup reads as 55), and the buffer must not. */
+const STANDARD_FPS = [15, 24, 25, 30, 48, 50, 60, 90, 120];
+const FPS_CONFIRM_POLLS = 3;
+let fpsQuantized = 60;
+let fpsCandidate = 0;
+let fpsCandidateCount = 0;
+let appliedTargetMs: number | null = null;
+
+/** Learn the incoming frame rate from one stats poll. A new rate is adopted only after
+ *  `FPS_CONFIRM_POLLS` consecutive confirmations (hysteresis): an in-flight rate switch re-derives
+ *  the buffer within a few seconds, while a single bad second — a stall reads as a rate drop —
+ *  changes nothing. */
+function noteRecvFps(raw: number): void {
+  if (raw < 5) return; // a (re)connect or stall second carries no rate information
+  let q = STANDARD_FPS[0];
+  for (const f of STANDARD_FPS) if (Math.abs(raw - f) < Math.abs(raw - q)) q = f;
+  if (q === fpsQuantized) {
+    fpsCandidateCount = 0;
+    return;
+  }
+  if (q === fpsCandidate) {
+    if (++fpsCandidateCount >= FPS_CONFIRM_POLLS) {
+      fpsQuantized = q;
+      fpsCandidateCount = 0;
+      logVideo('info', `incoming frame rate is ${q} fps — re-deriving the jitter-buffer target`);
+      applyJitterTarget();
+    }
+  } else {
+    fpsCandidate = q;
+    fpsCandidateCount = 1;
+  }
+}
+
+/** Push the current frames×frame-time target onto the live receiver (no-op without a connection).
+ *
+ *  Detected via the PROTOTYPE, not by assigning and hoping: writing to a receiver that lacks the
+ *  property just creates a dead expando — no error, no effect — which is indistinguishable from
+ *  success. Chromium's current name is `jitterBufferTarget` (ms); its older one is
+ *  `playoutDelayHint` (SECONDS), kept as the fallback. */
+function applyJitterTarget(): void {
+  const pc = rtcConn;
+  const frames = get(rtspBufferFrames);
+  appliedTargetMs = frames > 0 ? Math.round((frames * 1000) / fpsQuantized) : null;
+  if (!pc) return;
+  const proto = RTCRtpReceiver.prototype as unknown as Record<string, unknown>;
+  const knob = 'jitterBufferTarget' in proto ? 'jitterBufferTarget'
+    : 'playoutDelayHint' in proto ? 'playoutDelayHint'
+    : null;
+  if (!knob) {
+    logVideo('warn', 'jitter-buffer target: this WebView supports neither jitterBufferTarget nor playoutDelayHint — the buffer knob has no effect here');
+    return;
+  }
+  for (const r of pc.getReceivers()) {
+    if (r.track?.kind !== 'video') continue;
+    const rr = r as RTCRtpReceiver & { jitterBufferTarget?: number | null; playoutDelayHint?: number | null };
+    try {
+      if (knob === 'jitterBufferTarget') rr.jitterBufferTarget = appliedTargetMs;
+      else rr.playoutDelayHint = appliedTargetMs === null ? null : appliedTargetMs / 1000;
+    } catch (e) {
+      logVideo('warn', `jitter-buffer target rejected by the engine: ${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
+  }
+  logVideo(
+    'info',
+    appliedTargetMs === null
+      ? `jitter-buffer target cleared (engine default, via ${knob})`
+      : `jitter-buffer target ${appliedTargetMs} ms (${frames} × ${fpsQuantized} fps frame time, via ${knob})`,
+  );
+}
+// Skip the subscription's synchronous initial call: it runs at module load, before `rtcConn` is
+// even declared (TDZ), and the boot value is applied per-track anyway (see `ontrack`).
+let bufferSubscribed = false;
+rtspBufferFrames.subscribe(() => {
+  if (!bufferSubscribed) {
+    bufferSubscribed = true;
+    return;
+  }
+  applyJitterTarget();
+  savePrefs();
+});
 
 function patch(p: Partial<VideoState>): void {
   videoState.update((s) => ({ ...s, ...p }));
@@ -693,6 +794,9 @@ async function negotiateWebrtc(url: string, transport: RtspTransport, useFfmpeg:
     const stream = e.streams[0] ?? new MediaStream([e.track]);
     videoStream.set(stream);
     patch({ status: 'live', error: null });
+    // A fresh receiver starts on the engine default — re-apply the chosen buffer depth so the
+    // setting survives reconnects.
+    applyJitterTarget();
   };
   pc.onconnectionstatechange = () => {
     // A genuine drop (failed) enters the infinite reconnect loop; 'closed' is our own teardown.
@@ -837,6 +941,12 @@ function startRtspStallMonitor(pc: RTCPeerConnection): void {
   let prevDecoded = 0;
   let prevBytes = 0;
   let prevAt = performance.now();
+  // Jitter-buffer counters are CUMULATIVE since connection start. The old lifetime average
+  // (`delay/emitted`) is useless for watching a runtime `jitterBufferTarget` change — after an hour
+  // at 12 ms it barely moves however hard the buffer actually rises. The per-interval delta below
+  // is the buffer's CURRENT depth.
+  let prevJbDelay = 0;
+  let prevJbEmitted = 0;
   let statTick = 0;
   videoRtcStats.set(null);
   rtspMonitor = setInterval(() => {
@@ -852,7 +962,9 @@ function startRtspStallMonitor(pc: RTCPeerConnection): void {
       let freezes: number | null = null;
       let freezeMs: number | null = null;
       let jitterMs: number | null = null;
-      let playoutMs: number | null = null;
+      let jbDelay: number | null = null;
+      let jbEmitted: number | null = null;
+      let playoutMs: number | null = null; // current interval's buffer depth, set below
       let codecId: string | undefined;
       let sawReport = false;
       stats.forEach((report) => {
@@ -886,8 +998,9 @@ function startRtspStallMonitor(pc: RTCPeerConnection): void {
         if (rr.freezeCount !== undefined) freezes = rr.freezeCount;
         if (rr.totalFreezesDuration !== undefined) freezeMs = rr.totalFreezesDuration * 1000;
         if (rr.jitter !== undefined) jitterMs = rr.jitter * 1000;
-        if (rr.jitterBufferDelay !== undefined && rr.jitterBufferEmittedCount) {
-          playoutMs = (rr.jitterBufferDelay / rr.jitterBufferEmittedCount) * 1000;
+        if (rr.jitterBufferDelay !== undefined && rr.jitterBufferEmittedCount !== undefined) {
+          jbDelay = rr.jitterBufferDelay;
+          jbEmitted = rr.jitterBufferEmittedCount;
         }
         if (rr.codecId) codecId = rr.codecId;
       });
@@ -909,8 +1022,18 @@ function startRtspStallMonitor(pc: RTCPeerConnection): void {
       if (prevFrames >= 0) {
         const dt = (now - prevAt) / 1000;
         if (dt > 0) {
+          const recvFps = Math.max(0, (frames - prevFrames) / dt);
+          noteRecvFps(recvFps);
+          // Current buffer depth: average dwell time of the frames emitted in THIS interval.
+          if (jbDelay !== null && jbEmitted !== null && jbEmitted > prevJbEmitted) {
+            playoutMs = ((jbDelay - prevJbDelay) / (jbEmitted - prevJbEmitted)) * 1000;
+          }
+          if (jbDelay !== null && jbEmitted !== null) {
+            prevJbDelay = jbDelay;
+            prevJbEmitted = jbEmitted;
+          }
           videoRtcStats.set({
-            recvFps: Math.max(0, (frames - prevFrames) / dt),
+            recvFps,
             decodeFps: Math.max(0, (decoded - prevDecoded) / dt),
             engineFps,
             framesDropped: dropped,
@@ -921,6 +1044,7 @@ function startRtspStallMonitor(pc: RTCPeerConnection): void {
             playoutDelayMs: playoutMs,
             kbps: Math.max(0, ((bytes - prevBytes) * 8) / 1000 / dt),
             codec: codecMime ? prettyCodec(codecMime) : null,
+            bufferTargetMs: appliedTargetMs,
           });
         }
       }

@@ -16,6 +16,7 @@
     videoState,
     videoStream,
     videoRtcStats,
+    rtspBufferFrames,
     bindVideoEl,
     reportVideoSize,
     enumerateVideoDevices,
@@ -57,6 +58,7 @@
   } from '$lib/helpers/videoCapabilities';
   import PanelShell from '$lib/components/panel/PanelShell.svelte';
   import Button from '$lib/components/panel/Button.svelte';
+  import NumberStepper from '$lib/components/NumberStepper.svelte';
   import Toggle from '$lib/components/panel/Toggle.svelte';
   import { isLinux } from '$lib/platform';
   import VideoReconnectOverlay from '$lib/components/video/VideoReconnectOverlay.svelte';
@@ -622,6 +624,15 @@
           {/each}
         </div>
       {/if}
+
+      <!-- Receive-buffer depth in frame times, applied live to the WebRTC receiver and persisted.
+           0 = minimal latency (engine default); each step trades one frame time of latency for
+           smoothing of arrival jitter. Expressed in frames so the same setting means the same
+           smoothing at 30 and 60 fps — the ms value is derived from the measured incoming rate. -->
+      <div class="field buffer-row" title={$t('video.bufferHint')}>
+        <span class="label">{$t('video.bufferLabel')}</span>
+        <NumberStepper bind:value={$rtspBufferFrames} min={0} max={3} step={1} />
+      </div>
 
       {#if needsEngine && engineChecked && !engineVer}
         <!-- MediaMTX is required for the WebRTC path only — see `needsEngine`. -->
