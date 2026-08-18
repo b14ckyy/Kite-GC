@@ -66,6 +66,41 @@ pub fn video_engine_status() -> Option<String> {
     mediamtx::status()
 }
 
+/// Linux only: whether the WebKitGTK `enable-webrtc` setting was applied at startup (set + read back
+/// true). Recorded from the webview-setup path in `lib.rs`; the reload-permit command below needs it
+/// to tell "the setting landed after this page's JS world was built" (a reload exposes
+/// `RTCPeerConnection`) from "this WebKit build cannot do WebRTC at all" (a reload would loop).
+#[cfg(target_os = "linux")]
+static WEBRTC_SETTING_APPLIED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(target_os = "linux")]
+pub fn note_webrtc_setting(applied: bool) {
+    WEBRTC_SETTING_APPLIED.store(applied, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// One-shot permit for the frontend's "reload once to expose RTCPeerConnection" repair (Linux /
+/// WebKitGTK). WebKit only installs the interface into JS worlds created AFTER `enable-webrtc` is on,
+/// and our native code sets it while the page is already loading — lose that race and the API stays
+/// hidden until the next navigation (Debian 13 / WebKitGTK 2.52: setting reads back true, API absent).
+/// Returns true exactly once per app run, and only when the setting was really applied; the
+/// process-level guard (not sessionStorage) makes a reload loop impossible by construction. Always
+/// false on Windows/macOS, where the WebView exposes WebRTC on its own.
+#[tauri::command]
+pub fn video_webrtc_reload_permit() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        if !WEBRTC_SETTING_APPLIED.load(Ordering::Relaxed) {
+            return false;
+        }
+        static USED: AtomicBool = AtomicBool::new(false);
+        return !USED.swap(true, Ordering::SeqCst);
+    }
+    #[allow(unreachable_code)]
+    false
+}
+
 /// Download the pinned MediaMTX into the app-data `bin/` dir. Emits `video-engine-download-progress`
 /// (`{ pct, msg }`). Returns the installed path.
 #[tauri::command]

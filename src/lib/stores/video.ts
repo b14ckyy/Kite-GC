@@ -773,6 +773,12 @@ async function startMjpegPath(url: string, requireCopy = false): Promise<boolean
     patch({ status: 'live', mjpegUrl: res.url, activeTranscode: res.transcode, error: null, rtspEngine: 'ffmpeg', reconnecting: false, reconnectAttempt: 0 });
     return true;
   } catch (e) {
+    // A start failure counts toward the hardware-decoder demotion too: the field case is a VAAPI
+    // driver that passes the backend's probe yet fails on the real stream ("Failed setup for format
+    // vaapi", Debian 13 / Intel iGPU). Without this only a died-after-start feed incremented the
+    // counter, so the reconnect loop retried the same broken hardware path forever and the
+    // documented 2-strikes fallback to the software transcode never engaged.
+    rtspMjpegFailures++;
     logVideo('warn', `RTSP (MJPEG path) failed: ${e instanceof Error ? e.message : String(e)}`);
     return false;
   }
@@ -1586,6 +1592,21 @@ function logWebViewMediaSupport(): void {
  * saved one is gone). Call once, client-side.
  */
 export async function initVideo(): Promise<void> {
+  // Linux/WebKitGTK: native code applies `enable-webrtc` while the page is already loading, and WebKit
+  // only installs `RTCPeerConnection` into JS worlds created AFTER the setting is on — lose that race
+  // and the API stays hidden until the next navigation (Debian 13 / WebKitGTK 2.52: setting reads back
+  // true, API absent, WebRTC compiled into Debian's builds since 2.40). One reload repairs it. The
+  // backend permit is granted once per app run and only when the setting really landed, so a WebKit
+  // build that truly lacks WebRTC cannot reload-loop; Windows/macOS always get `false` and the check
+  // is skipped entirely where the API already exists.
+  if (isLinux && !isWebrtcAvailable()) {
+    const permit = await invoke<boolean>('video_webrtc_reload_permit').catch(() => false);
+    if (permit) {
+      logVideo('warn', 'RTCPeerConnection missing although enable-webrtc is set — reloading once to expose it');
+      location.reload();
+      return;
+    }
+  }
   logWebViewMediaSupport();
   // The backend's word that a live MJPEG source died (`MJPEG_ENDED_EVENT` in `mjpeg_server.rs`).
   // The off-thread reader notices by itself because it reads the stream — the `<img>` fallback

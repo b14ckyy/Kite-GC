@@ -69,7 +69,7 @@ use commands::system::system_on_battery;
 use commands::video::{
     video_ffmpeg_status, video_ffmpeg_download,
     video_engine_status, video_engine_download, video_webrtc_start, video_webrtc_offer,
-    video_webrtc_stop,
+    video_webrtc_stop, video_webrtc_reload_permit,
     video_list_native_devices, video_probe_device,
     video_native_mjpeg_start, video_native_mjpeg_stop, video_rtsp_mjpeg_start,
 };
@@ -143,16 +143,26 @@ fn probe_gstreamer_support() {
         // install lacks — i.e. missing on the very systems where this diagnostic matters most. Fall back
         // to looking for the plugin libraries themselves, which is what GStreamer would load anyway.
         if !run(&["--version"]) {
-            let (webrtc, decoders) = probe_gstreamer_plugin_files();
+            let (webrtc, transport, decoders) = probe_gstreamer_plugin_files();
             log::warn!(
                 "[gstreamer] gst-inspect-1.0 not found (gstreamer1.0-tools); by plugin file: \
-                 webrtc={webrtc} · h264 plugins=[{}] — WebKitGTK needs the webrtc plugin for \
-                 RTCPeerConnection (gstreamer1.0-plugins-bad) and an H.264 decoder (gstreamer1.0-libav)",
+                 webrtc={webrtc} · transport plugins=[{}] · h264 plugins=[{}] — RTCPeerConnection \
+                 needs webrtc+dtls+srtp (gstreamer1.0-plugins-bad), nice (gstreamer1.0-nice) and \
+                 rtpmanager (gstreamer1.0-plugins-good); video decode needs an H.264 decoder \
+                 (gstreamer1.0-libav)",
+                transport.join(", "),
                 decoders.join(", ")
             );
             return;
         }
         let webrtc = run(&["webrtcbin"]);
+        // WebKit exposes RTCPeerConnection only when the WHOLE transport stack is loadable, not just
+        // webrtcbin: ICE comes from libnice's plugin (gstreamer1.0-nice — a separate package and the
+        // classic gap), DTLS/SRTP from plugins-bad, RTP session management from plugins-good.
+        let ice = run(&["nicesrc"]);
+        let dtls = run(&["dtlssrtpenc"]);
+        let srtp = run(&["srtpenc"]);
+        let rtp = run(&["rtpbin"]);
         // Software (libav/openh264) plus the hardware decoders that matter in practice: V4L2 (Raspberry
         // Pi 4, Rockchip), and Intel VA under both its plugin generations — `vah264dec` from the current
         // `va` plugin and `vaapih264dec` from the older gstreamer-vaapi. Which of the two a distribution
@@ -168,9 +178,10 @@ fn probe_gstreamer_support() {
         .filter(|e| run(&[e]))
         .collect();
         log::warn!(
-            "[gstreamer] webrtcbin={} · h264 decoders=[{}] — WebKitGTK needs webrtcbin for RTCPeerConnection \
-             (gstreamer1.0-plugins-bad) and an H.264 decoder to play video (gstreamer1.0-libav)",
-            webrtc,
+            "[gstreamer] webrtcbin={webrtc} · ice(nice)={ice} · dtls={dtls} · srtp={srtp} · rtpbin={rtp} \
+             · h264 decoders=[{}] — RTCPeerConnection needs every one of these (gstreamer1.0-plugins-bad, \
+             gstreamer1.0-nice, gstreamer1.0-plugins-good); video decode needs an H.264 decoder \
+             (gstreamer1.0-libav)",
             decoders.join(", ")
         );
     });
@@ -235,14 +246,15 @@ fn nudge_framebuffer_on_pi(window: tauri::Window) {
 /// the exe.  Must be called **before** `run()` so the WebView picks up the
 /// environment variables.
 /// Look for GStreamer plugin **files** when `gst-inspect-1.0` isn't installed. Returns
-/// `(webrtc present, names of the H.264-capable plugins found)`.
+/// `(webrtc present, names of the WebRTC transport plugins found, names of the H.264-capable
+/// plugins found)`.
 ///
 /// Plugins live in `<libdir>/gstreamer-1.0/libgst<name>.so`; the multiarch libdir differs per
 /// architecture, and `GST_PLUGIN_PATH` can add more. This can't tell whether a plugin actually
 /// *registers* its elements (a broken driver may still fail), so it is reported as "by plugin file" —
 /// weaker evidence than `gst-inspect`, but the difference between an answer and none at all.
 #[cfg(target_os = "linux")]
-fn probe_gstreamer_plugin_files() -> (bool, Vec<&'static str>) {
+fn probe_gstreamer_plugin_files() -> (bool, Vec<&'static str>, Vec<&'static str>) {
     // The _1_0/SYSTEM variants matter inside the AppImage: linuxdeploy's gstreamer hook points
     // GST_PLUGIN_SYSTEM_PATH_1_0 at the bundled plugin set, which is exactly what WebKit sees there.
     let mut dirs: Vec<std::path::PathBuf> = [
@@ -281,7 +293,21 @@ fn probe_gstreamer_plugin_files() -> (bool, Vec<&'static str>) {
     .map(|(name, _)| name)
     .collect();
 
-    (has("libgstwebrtc.so"), decoders)
+    // The transport stack RTCPeerConnection depends on beyond the webrtc plugin itself: ICE from
+    // libnice's plugin (gstreamer1.0-nice — a separate package and the classic gap), DTLS/SRTP from
+    // plugins-bad, RTP session management from plugins-good.
+    let transport = [
+        ("nice", "libgstnice.so"),
+        ("dtls", "libgstdtls.so"),
+        ("srtp", "libgstsrtp.so"),
+        ("rtpmanager", "libgstrtpmanager.so"),
+    ]
+    .into_iter()
+    .filter(|(_, file)| has(file))
+    .map(|(name, _)| name)
+    .collect();
+
+    (has("libgstwebrtc.so"), transport, decoders)
 }
 
 pub fn setup_portable_mode() {
@@ -433,6 +459,7 @@ pub fn run() {
                             if settings.find_property("enable-webrtc").is_some() {
                                 settings.set_property("enable-webrtc", true);
                                 let now: bool = settings.property("enable-webrtc");
+                                commands::video::note_webrtc_setting(now);
                                 log::warn!(
                                     "[webkit] WebKitGTK {major}.{minor}.{micro} — enable-webrtc set, reads back as {now}"
                                 );
@@ -626,6 +653,7 @@ pub fn run() {
             video_webrtc_start,
             video_webrtc_offer,
             video_webrtc_stop,
+            video_webrtc_reload_permit,
             video_list_native_devices,
             video_probe_device,
             video_native_mjpeg_start,
