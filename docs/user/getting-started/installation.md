@@ -153,7 +153,7 @@ program, which Kite offers to **download automatically the first time you use th
 |---|---|---|
 | `blackbox_decode` | Importing **INAV blackbox** logs | auto-download on **Windows & Linux** (macOS: install manually) |
 | `ffmpeg` | **Video** (native capture + fallback decoding for some RTSP sources) | auto-download on **Windows & Linux**; **bundled inside the app on macOS** |
-| `go2rtc` | **Video** (the RTSP → low-latency engine) | auto-download on **Windows, Linux & macOS** |
+| `mediamtx` | **Video** (the RTSP → low-latency engine) | auto-download on **Windows, Linux & macOS** |
 
 - Downloaded helpers are stored in Kite's tools folder (`…\kite-gc\bin`, or `data\bin` in portable
   mode) — they don't touch your system.

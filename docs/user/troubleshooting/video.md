@@ -19,9 +19,9 @@ place, see the **[Video guide](../guides/video.md)**.
 
 RTSP is played in one of two ways, and which one your machine uses decides what has to be installed:
 
-- **The direct path** uses a small bundled engine (**go2rtc**), which Kite downloads automatically the
+- **The direct path** uses a small bundled engine (**MediaMTX**), which Kite downloads automatically the
   first time you start an RTSP source. This is what Windows and macOS use.
-- **The image path** uses only the **ffmpeg** helper — no go2rtc at all. Kite falls back to it where the
+- **The image path** uses only the **ffmpeg** helper — no MediaMTX at all. Kite falls back to it where the
   browser engine offers no direct video path (common on Linux, see below), and always for a source that
   already sends **MJPEG**, which the direct path cannot carry.
 
@@ -30,14 +30,15 @@ If a stream won't come up:
 - **Let the helper download finish.** The Video panel shows the status of whichever helper your machine
   needs and offers the download if it's missing. If the download fails (no internet, or an unsupported
   CPU architecture), you'll get a hint to install it manually. On a machine that only ever uses the
-  image path, go2rtc is neither required nor offered.
+  image path, MediaMTX is neither required nor offered.
 - **Check the URL and reachability.** A typo, a camera that's off, a firewall, or a source on a different
   network will all stop it. Confirm the exact `rtsp://…` URL works in another player (e.g. VLC) from the
   same machine.
 - **Match the transport.** Some servers are **UDP-only** (they reject TCP clients) — set the connection's
-  **Transport** to **UDP** in the Video panel (needs the ffmpeg helper). Conversely, if UDP is blocked on
-  your network, try **TCP**. **Auto** tries the native reader first and falls back to ffmpeg. The setting
-  applies to the direct path; on the image path ffmpeg negotiates the transport itself and reads both.
+  **Transport** to **UDP** in the Video panel. Conversely, if UDP is blocked on your network, try **TCP**.
+  **Auto** lets the engine negotiate, and falls back to an ffmpeg reader for servers that refuse every
+  forced transport. The setting applies to the direct path; on the image path ffmpeg negotiates the
+  transport itself and reads both.
 
 ## The stream keeps showing "Reconnecting…" — check the codec first
 
@@ -97,20 +98,31 @@ help:
 
 ## A specific RTSP server gives a black screen
 
-Some servers (notably the **OBS RTSP server**) reject go2rtc's native reader. Kite automatically retries
-such sources through an **ffmpeg fallback** reader — but that needs **ffmpeg**, which is a separate
-optional download:
+Some servers (notably the **OBS RTSP server**) reject the engine's native reader. Kite automatically
+retries such sources through an **ffmpeg fallback** reader — but that needs **ffmpeg**, which is a
+separate optional download:
 
 - The Video panel offers an **ffmpeg (fallback)** download when it's missing. Install it and start the
   stream again.
-- The panel shows **which reader is live** (go2rtc native vs the ffmpeg fallback), so you can tell which
+- The panel shows **which reader is live** (native vs the ffmpeg fallback), so you can tell which
   path your source is using.
+
+## Playback looks uneven (micro-stutter, no real freezes)
+
+If the stream runs without dropouts but single frames look duplicated or skipped — most visible in
+smooth camera pans — the frames are arriving slightly unevenly (network jitter). Raise the
+**Smoothing buffer** in the Video panel's RTSP section one step at a time (see the
+[video guide](../guides/video.md#rtsp-connections-transport-and-auto-reconnect)); each step trades one
+frame time of latency for smoothing. On a clean local network the buffer usually makes no visible
+difference — leave it at **0** there.
 
 ## Latency is high
 
 With a sensibly-configured encoder, end-to-end latency is low (roughly a couple of hundred milliseconds).
 If it's much worse, the cause is usually the **source**: a large keyframe interval, a big encoder buffer,
-or a non-low-latency tuning. Tune the encoder/camera for low-latency streaming.
+or a non-low-latency tuning. Tune the encoder/camera for low-latency streaming. Also check the
+**Smoothing buffer** in the Video panel's RTSP section: every step above 0 deliberately adds latency —
+set it back to 0 for the minimum.
 
 ## Linux: high CPU load or a stuttering picture
 
@@ -207,5 +219,5 @@ workaround ran and which variant it used.
 ## Still stuck?
 
 Grab a **diagnostic log** (**Settings → Diagnostics → Log Level = Debug**, reproduce, then **Open Log
-Folder**) and attach it when reporting the problem — it records the go2rtc / ffmpeg startup and any error.
+Folder**) and attach it when reporting the problem — it records the engine / ffmpeg startup and any error.
 See the [connection troubleshooting](connection.md#getting-a-diagnostic-log) page for the log locations.
