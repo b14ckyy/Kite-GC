@@ -88,8 +88,8 @@
   });
 
   // ── RTSP / V4L2 dependencies ──────────────────────────────────────────
-  // go2rtc is required (the RTSP→WebRTC engine); ffmpeg is the optional fallback reader for sources
-  // go2rtc's native client can't read (e.g. obs-rtspserver), and the V4L2 path always uses it.
+  // MediaMTX is required (the RTSP→WebRTC engine); ffmpeg is the optional fallback reader for
+  // sources its native client can't pull (e.g. obs-rtspserver), and the V4L2 path always uses it.
   // Both are downloaded on demand.
   let engineVer = $state<string | null>(null);
   let engineChecked = $state(false);
@@ -105,7 +105,7 @@
 
   async function checkEngine(): Promise<void> {
     try {
-      engineVer = await invoke<string | null>('video_go2rtc_status');
+      engineVer = await invoke<string | null>('video_engine_status');
     } catch {
       engineVer = null;
     }
@@ -126,7 +126,7 @@
     enginePct = 0;
     engineMsg = '';
     try {
-      await invoke('video_go2rtc_download');
+      await invoke('video_engine_download');
       await checkEngine();
     } catch (e) {
       engineMsg = e instanceof Error ? e.message : String(e);
@@ -159,7 +159,7 @@
     // the video store, which would make any store-reading effect re-trigger itself (see above).
     void enumerateNativeDevices();
     const unlisteners: UnlistenFn[] = [];
-    void listen<{ pct: number; msg: string }>('go2rtc-download-progress', (e) => {
+    void listen<{ pct: number; msg: string }>('video-engine-download-progress', (e) => {
       enginePct = e.payload.pct;
       engineMsg = e.payload.msg;
     }).then((u) => unlisteners.push(u));
@@ -173,7 +173,7 @@
   // Native capture is available on every OS (Linux V4L2 / Windows DirectShow / macOS AVFoundation).
   const KINDS: VideoKind[] = ['camera', 'rtsp', 'native'];
 
-  // go2rtc is only needed for the WebRTC path. A WebView without it (WebKitGTK builds with WebRTC
+  // MediaMTX is only needed for the WebRTC path. A WebView without it (WebKitGTK builds with WebRTC
   // compiled out — Raspberry Pi OS among them) runs RTSP entirely on ffmpeg now, so demanding the
   // engine there would block a machine that already has everything it needs.
   const needsEngine = isWebrtcAvailable();
@@ -330,7 +330,7 @@
       };
     }
     if (s.kind === 'rtsp') {
-      return { method: `go2rtc → WebRTC (${s.rtspEngine ?? 'native'})`, transcode: null, transcodeHw: true, surfaceHw: true };
+      return { method: `MediaMTX → WebRTC (${s.rtspEngine ?? 'native'})`, transcode: null, transcodeHw: true, surfaceHw: true };
     }
     return { method: 'getUserMedia', transcode: null, transcodeHw: true, surfaceHw: true };
   });
@@ -534,7 +534,7 @@
         </label>
       {/if}
 
-      <!-- Native capture needs ffmpeg (no go2rtc). -->
+      <!-- Native capture needs ffmpeg (no engine). -->
       {#if ffmpegChecked && !ffmpegVer}
         <div class="ffmpeg-box">
           <p class="hint">{$t('video.ffmpegNativeMissing')}</p>
@@ -624,7 +624,7 @@
       {/if}
 
       {#if needsEngine && engineChecked && !engineVer}
-        <!-- go2rtc is required for the WebRTC path only — see `needsEngine`. -->
+        <!-- MediaMTX is required for the WebRTC path only — see `needsEngine`. -->
         <div class="ffmpeg-box">
           <p class="hint">{$t('video.engineMissing')}</p>
           {#if engineDownloading}
@@ -640,8 +640,8 @@
         </div>
       {:else if engineVer}
         {#if $videoState.status === 'live' && $videoState.rtspEngine && !$videoState.mjpegUrl}
-          <!-- Which reader go2rtc uses — a WebRTC-path question. The image path does not go through
-               go2rtc at all, and the pipeline line above already names what it runs. -->
+          <!-- Which reader the engine uses — a WebRTC-path question. The image path does not go
+               through the engine at all, and the pipeline line above already names what it runs. -->
           <p class="hint">{$t(`video.via.${$videoState.rtspEngine}`)}</p>
         {:else}
           <p class="hint">{$t('video.engineReady')}</p>
@@ -751,7 +751,7 @@
     letter-spacing: 0.02em;
   }
   /* Diagnostic pipeline readout: dot + method + a HW/SW badge. Green = hardware-composited <video>
-     (getUserMedia / go2rtc-WebRTC); amber = the software ffmpeg→MJPEG <img> fallback. */
+     (getUserMedia / engine-WebRTC); amber = the software ffmpeg→MJPEG <img> fallback. */
   .pipeline-line {
     display: flex;
     align-items: center;

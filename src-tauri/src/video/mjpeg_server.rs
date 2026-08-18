@@ -88,14 +88,15 @@ const HTTP_HEADERS_OCTET: &[u8] = b"HTTP/1.1 200 OK\r\n\
 pub enum MjpegSource<'a> {
     /// A local capture device, described by the mode the user picked.
     Device(&'a super::native::CaptureSpec),
-    /// A network stream, read directly rather than through go2rtc.
+    /// A network stream, read directly rather than through a republishing engine.
     ///
-    /// go2rtc drives an `ffmpeg:` source by having ffmpeg publish **back into go2rtc** over RTSP/TCP,
-    /// so a stream that is already MJPEG gets packetised into RTP/JPEG (RFC 2435), reassembled and
-    /// repacked as HTTP multipart. Measured over the same 120 s against a UAV-Link: the source had
-    /// **zero** arrival gaps above 200 ms, go2rtc's output had **69**, each of them ~338 ms — a fixed
-    /// buffer flushing, and the cause of the freezes testers reported for years. Reading the source
-    /// once and broadcasting `-f mpjpeg` measures as clean as the source itself.
+    /// The old go2rtc chain drove an `ffmpeg:` source by having ffmpeg publish **back into it** over
+    /// RTSP/TCP, so a stream that was already MJPEG got packetised into RTP/JPEG (RFC 2435),
+    /// reassembled and repacked as HTTP multipart. Measured over the same 120 s against a UAV-Link:
+    /// the source had **zero** arrival gaps above 200 ms, the engine's output had **69**, each of
+    /// them ~338 ms — the loopback TCP-publish stall, and the cause of the freezes testers reported
+    /// for years. Reading the source once and broadcasting `-f mpjpeg` measures as clean as the
+    /// source itself.
     Rtsp { url: &'a str, transcode: RtspTranscode },
 }
 

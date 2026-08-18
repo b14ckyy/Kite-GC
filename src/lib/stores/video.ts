@@ -3,7 +3,7 @@
 
 // Embedded video — source router with three kinds:
 //   • camera — local webcam / USB capture via getUserMedia (the zero-dependency default).
-//   • rtsp   — network stream via the go2rtc engine (WebRTC, MJPEG fallback).
+//   • rtsp   — network stream via the MediaMTX engine (WebRTC, MJPEG fallback).
 //   • native — the OS hardware capture layer via ffmpeg (Linux V4L2 / Windows DirectShow / macOS
 //              AVFoundation) → embedded MJPEG server, rendered in an <img>. The "Advanced" tier with
 //              device-verified codec/resolution/framerate control (see helpers/videoCapabilities.ts).
@@ -39,13 +39,13 @@ export type VideoStatus = 'off' | 'starting' | 'live' | 'error';
 export type VideoResolution = 'auto' | '480p' | '720p' | '1080p';
 /** getUserMedia framerate wish (the camera path can't enumerate modes, only hint a rate). */
 export type CameraFps = 'auto' | '30' | '60';
-/** Source kind: local camera (getUserMedia MediaStream), RTSP bridge (go2rtc), or native hardware
+/** Source kind: local camera (getUserMedia MediaStream), RTSP bridge (MediaMTX), or native hardware
  *  capture (V4L2 / DirectShow / AVFoundation → embedded MJPEG server). */
 export type VideoKind = 'camera' | 'rtsp' | 'native';
-/** Which go2rtc reader served the live RTSP feed: native client or the ffmpeg fallback. */
+/** Which reader served the live RTSP feed: the engine's native client or the ffmpeg fallback. */
 export type RtspEngine = 'native' | 'ffmpeg' | null;
-/** RTSP transport for a connection. 'udp' → ffmpeg reader (reads UDP-only servers like the UAV-Link
- *  Pi); 'tcp' → go2rtc's native RTP-over-TCP client; 'auto' → native first, then the ffmpeg fallback. */
+/** RTSP transport for a connection, passed through to the engine's native RTSP client ('auto' lets
+ *  it negotiate — and falls back to the ffmpeg reader for servers that refuse every forced transport). */
 export type RtspTransport = 'udp' | 'tcp' | 'auto';
 /** A saved, named RTSP connection the user can recall from the connection list (see VideoPanel). */
 export interface RtspConnection {
@@ -58,7 +58,7 @@ export interface RtspConnection {
 export type MapLocation = 'main' | 'floating' | 'widget';
 
 export interface VideoState {
-  /** Active source kind. `camera` → getUserMedia MediaStream; `rtsp` → go2rtc (WebRTC or MJPEG);
+  /** Active source kind. `camera` → getUserMedia MediaStream; `rtsp` → MediaMTX (WebRTC or MJPEG);
    *  `native` → embedded MJPEG server rendered in an `<img>`. */
   kind: VideoKind;
   /** User wants video on (source open). */
@@ -89,13 +89,13 @@ export interface VideoState {
   rtspTransport: RtspTransport;
   /** Saved, named RTSP connections the user can recall (explicit save — never auto-added). */
   rtspConnections: RtspConnection[];
-  /** Active RTSP reader once live (native go2rtc client vs ffmpeg fallback); runtime-only. */
+  /** Active RTSP reader once live (native engine client vs ffmpeg fallback); runtime-only. */
   rtspEngine: RtspEngine;
   /** Runtime-only: true while the infinite RTSP auto-reconnect loop is running (link dropped/stalled). */
   reconnecting: boolean;
   /** Runtime-only: current reconnect attempt number, shown in the on-video overlay. */
   reconnectAttempt: number;
-  /** go2rtc MJPEG HTTP URL for systems where RTCPeerConnection is unavailable. */
+  /** MJPEG HTTP URL (our own server) for systems where RTCPeerConnection is unavailable. */
   mjpegUrl: string | null;
   /** What the RUNNING feed actually does, as reported by the backend: 'copy' (stream-copied, nothing
    *  to accelerate), 'software', 'vaapi', 'v4l2m2m', 'none' (no transcode at all — WebRTC), or null
@@ -316,7 +316,7 @@ export const videoStream = writable<MediaStream | null>(null);
 
 /** Per-second snapshot of the WebRTC inbound video pipeline, published by the RTSP stall monitor
  *  (which polls `getStats()` once a second anyway). Splits an unstable picture into its stages:
- *  `recvFps` (frames arriving from go2rtc — a shortfall here is upstream of the WebView),
+ *  `recvFps` (frames arriving from the engine — a shortfall here is upstream of the WebView),
  *  `decodeFps`/`framesDropped` (decoder keeping up or not), and the engine's own playout counters
  *  (`freezeCount`, `playoutDelayMs`). Consumed by the Debug Monitor's Video tab; null when no
  *  WebRTC feed is running. */
@@ -407,7 +407,7 @@ export function isWebrtcAvailable(): boolean {
   return typeof RTCPeerConnection !== 'undefined';
 }
 
-/** Start a native device via the built-in ffmpeg→MJPEG server (no getUserMedia, no go2rtc). The chosen
+/** Start a native device via the built-in ffmpeg→MJPEG server (no getUserMedia, no engine). The chosen
  *  codec is the capture input format: MJPEG is stream-copied (`-c copy`, the camera's HW JPEG encoder
  *  does the work), raw/H.264 is transcoded to MJPEG for the `<img>` sink. */
 async function startNativeMjpeg(
@@ -531,8 +531,8 @@ function stopTracks(): void {
   closeRtc();
 }
 
-// ── RTSP via WebRTC (go2rtc) ─────────────────────────────────────────
-// go2rtc ingests the RTSP source and republishes it as WebRTC: the browser negotiates a
+// ── RTSP via WebRTC (MediaMTX) ───────────────────────────────────────
+// MediaMTX pulls the RTSP source itself and serves it as WebRTC (WHEP): the browser negotiates a
 // peer connection (SDP exchange proxied through Rust to avoid CORS) and gets a real, native,
 // low-latency MediaStream — which slots straight into the shared `videoStream` so every sink
 // renders it via srcObject exactly like the camera (no fMP4/MSE/captureStream gymnastics).
@@ -630,12 +630,13 @@ export async function startVideo(): Promise<void> {
  *  cannot be carried over WebRTC by any browser, so it needs this path even where WebRTC works.
  *  `requireCopy` is what makes that safe to try blindly — see the call site.
  *
- *  **Deliberately not through go2rtc.** go2rtc drives an `ffmpeg:` source by having ffmpeg publish
- *  back into it over RTSP/TCP, which for an already-MJPEG stream means packetising into RTP/JPEG,
- *  reassembling and repacking. Measured over the same 120 s: zero arrival gaps above 200 ms at the
- *  source, 69 of them (each ~338 ms) at go2rtc's output. That was the freeze. The transport choice is
- *  irrelevant here for the same reason it was before — ffmpeg negotiates it and reads UDP-only
- *  servers, which is why nothing forces `-rtsp_transport`. */
+ *  **Deliberately not through the streaming engine.** The old go2rtc chain re-packetised an
+ *  already-MJPEG stream into RTP/JPEG over a loopback RTSP/TCP publish and back; measured over the
+ *  same 120 s, the source had zero arrival gaps above 200 ms and the engine's output had 69, each
+ *  ~338 ms. That was the freeze, and it is the same TCP-publish stall that later killed the H.264
+ *  path — reading the source once and broadcasting `-f mpjpeg` measures as clean as the source. The
+ *  transport choice is irrelevant here — ffmpeg negotiates it and reads UDP-only servers, which is
+ *  why nothing forces `-rtsp_transport`. */
 async function startMjpegPath(url: string, requireCopy = false): Promise<boolean> {
   // The image path is ffmpeg's alone now, for the copy as much as for the transcode. Missing ffmpeg
   // is a dead end no reconnect fixes.
@@ -676,9 +677,10 @@ async function startMjpegPath(url: string, requireCopy = false): Promise<boolean
   }
 }
 
-/** Register the source with go2rtc and complete one WebRTC negotiation. Throws on failure. */
-async function negotiateWebrtc(url: string, useFfmpeg: boolean): Promise<void> {
-  await invoke('video_webrtc_start', { url, useFfmpeg, mjpeg: false });
+/** Bring the source up in MediaMTX and complete one WebRTC (WHEP) negotiation. Throws on failure —
+ *  including "the source is unreachable", which the backend reports from its readiness wait. */
+async function negotiateWebrtc(url: string, transport: RtspTransport, useFfmpeg: boolean): Promise<void> {
+  await invoke('video_webrtc_start', { url, transport, useFfmpeg });
 
   const pc = new RTCPeerConnection({ iceServers: [] });
   rtcConn = pc;
@@ -719,9 +721,9 @@ async function negotiateWebrtc(url: string, useFfmpeg: boolean): Promise<void> {
 }
 
 // ── ICE diagnostics ──────────────────────────────────────────────────────────────────────────────
-// Everything about go2rtc is logged; about our own peer connection, nothing was. When a stream came
+// Everything about the engine is logged; about our own peer connection, nothing was. When a stream came
 // up black with `peer connection failed` and no inbound-rtp, there was no way to tell whether the
-// browser had even produced a candidate able to reach go2rtc's loopback address — the failure looked
+// browser had even produced a candidate able to reach the engine's address — the failure looked
 // identical from outside whatever the cause.
 //
 // Level split: the per-negotiation lines are `debug` (one pair of them on every stream start would
@@ -986,26 +988,26 @@ function scheduleRtspReconnect(): void {
   rtspReconnectTimer = setTimeout(() => { void startRtsp({ reconnect: true }); }, RTSP_RECONNECT_BACKOFF_MS);
 }
 
-/** Negotiate the RTSP source honouring the connection's transport: udp → ffmpeg reader (reads
- *  UDP-only servers like the UAV-Link Pi); tcp → native go2rtc client; auto → native, then ffmpeg. */
+/** Negotiate the RTSP source honouring the connection's transport. All three ride MediaMTX' native
+ *  RTSP client now — unlike go2rtc's it reads UDP-only servers (the UAV-Link Pi) directly, which is
+ *  what made the ffmpeg middleman the default for `udp` before. ffmpeg remains only as the `auto`
+ *  fallback for quirky servers that refuse every forced transport (e.g. obs-rtspserver). */
 async function negotiateRtsp(url: string, transport: RtspTransport): Promise<void> {
-  if (transport === 'udp') {
-    await negotiateWebrtc(url, true);
-  } else if (transport === 'tcp') {
-    await negotiateWebrtc(url, false);
+  if (transport === 'udp' || transport === 'tcp') {
+    await negotiateWebrtc(url, transport, false);
   } else {
     try {
-      await negotiateWebrtc(url, false); // native go2rtc RTSP client
+      await negotiateWebrtc(url, 'auto', false); // native MediaMTX RTSP client
     } catch (nativeErr) {
-      logVideo('warn', `native go2rtc RTSP reader failed, retrying via ffmpeg: ${nativeErr instanceof Error ? nativeErr.message : String(nativeErr)}`);
+      logVideo('warn', `native RTSP pull failed, retrying via ffmpeg: ${nativeErr instanceof Error ? nativeErr.message : String(nativeErr)}`);
       closeRtc();
       if (get(videoState).kind !== 'rtsp' || !get(videoState).enabled) return; // stopped meanwhile
-      await negotiateWebrtc(url, true); // ffmpeg reader fallback
+      await negotiateWebrtc(url, 'auto', true); // ffmpeg reader fallback
     }
   }
 }
 
-/** Open (or re-open) the RTSP feed via go2rtc, honouring the active transport. Once live, a stall
+/** Open (or re-open) the RTSP feed via the engine, honouring the active transport. Once live, a stall
  *  monitor watches for frame timeouts; any failure/drop enters the infinite reconnect loop (until
  *  frames return or the user stops). `reconnect` distinguishes a loop retry from a fresh start. */
 export async function startRtsp(opts?: { reconnect?: boolean }): Promise<void> {
@@ -1034,14 +1036,14 @@ export async function startRtsp(opts?: { reconnect?: boolean }): Promise<void> {
   }
 
   // MJPEG fallback for webviews without RTCPeerConnection (rare in Tauri). Decided BEFORE the engine
-  // gate below: the image path is ffmpeg's alone now and never touches go2rtc, so demanding the
+  // gate below: the image path is ffmpeg's alone now and never touches the engine, so demanding the
   // engine here would block a machine that already has everything this path needs.
   if (!isWebrtcAvailable()) {
     // Degraded mode, and a silent one: it needs a WebView that renders the image path, and for an
     // H.264 source a transcode as well. Worth a warning every time, not just a console line.
     if (!reconnect) {
       logVideo('warn', 'WebRTC is unavailable in this WebView — falling back to the MJPEG image path');
-      logVideo('info', `RTSP start ${url} (transport=${transport}, webrtc=false, go2rtc not used)`);
+      logVideo('info', `RTSP start ${url} (transport=${transport}, webrtc=false, engine not used)`);
     }
     if (!(await startMjpegPath(url))) scheduleRtspReconnect();
     return;
@@ -1049,11 +1051,11 @@ export async function startRtsp(opts?: { reconnect?: boolean }): Promise<void> {
 
   if (!reconnect) {
     // A missing engine cannot be fixed by retrying, so it must not enter the loop: before this, an
-    // auto-start without go2rtc installed produced an endless "Reconnecting… (n)" with no explanation
+    // auto-start without the engine installed produced an endless "Reconnecting… (n)" with no explanation
     // (seen on the Pi). Checked once per fresh start — a reconnect attempt inherits the verdict.
-    const engine = await invoke<string | null>('video_go2rtc_status').catch(() => null);
+    const engine = await invoke<string | null>('video_engine_status').catch(() => null);
     if (!engine) {
-      logVideo('warn', 'RTSP start aborted: the go2rtc engine is not installed');
+      logVideo('warn', 'RTSP start aborted: the MediaMTX engine is not installed');
       patch({ status: 'error', error: get(t)('video.engineMissing'), reconnecting: false, reconnectAttempt: 0 });
       return;
     }
@@ -1063,7 +1065,7 @@ export async function startRtsp(opts?: { reconnect?: boolean }): Promise<void> {
   try {
     // Hard cap on one attempt: the backend invokes are bounded (10/15 s reqwest timeouts), but if
     // any path ever hangs anyway, the loop must keep cycling instead of freezing mid-"Reconnecting…"
-    // (a wedged RTSP server once parked go2rtc's answer indefinitely — observed with the UAV-Link Pi).
+    // (a wedged RTSP server once parked the engine's answer indefinitely — observed with the UAV-Link Pi).
     await Promise.race([
       negotiateRtsp(url, transport),
       new Promise<never>((_, reject) =>
@@ -1179,7 +1181,7 @@ export function startActive(): Promise<void> {
   return startVideo();
 }
 
-/** Stop the source and release the camera / go2rtc engine. */
+/** Stop the source and release the camera / streaming engine. */
 export function stopVideo(): void {
   const wasBackend = get(videoState).kind === 'rtsp' || get(videoState).kind === 'native';
   clearRtspTimers(); // end the RTSP reconnect loop on an explicit stop
@@ -1340,7 +1342,7 @@ export function setVideoMirror(mirror: boolean): void {
 
 /** Force the software transcode regardless of what the backend's hardware probe found. Restarts a
  *  live RTSP feed so the change takes effect immediately — the decision is made when the source is
- *  registered with go2rtc, not per frame. */
+ *  registered with the engine, not per frame. */
 export async function setDisableHwAccel(disableHwAccel: boolean): Promise<void> {
   if (get(videoState).disableHwAccel === disableHwAccel) return;
   patch({ disableHwAccel });

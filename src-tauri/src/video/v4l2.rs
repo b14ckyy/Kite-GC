@@ -6,8 +6,8 @@
 //! Reads `/sys/class/video4linux/` to discover USB capture devices that may
 //! not be exposed via the browser's `getUserMedia` API (e.g. HDMI capture
 //! dongles like MACROSILICON Hagibis). These devices ARE accessible via V4L2
-//! and can be ingested by ffmpeg (`ffmpeg -f v4l2 -i /dev/videoN …`) as a
-//! go2rtc `ffmpeg:` source — which then republishes as WebRTC to the browser.
+//! and are ingested by ffmpeg (`ffmpeg -f v4l2 -i /dev/videoN …`) into the
+//! embedded MJPEG server, which the sinks read directly.
 
 use serde::Serialize;
 

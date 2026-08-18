@@ -84,9 +84,8 @@ pub fn version() -> Option<String> {
 ///
 /// It matters only for the MJPEG fallback, and there it matters a lot: that path decodes **every**
 /// frame of the source before re-encoding it, and a board that needs hardware for 720p60 cannot do it
-/// any other way. go2rtc cannot arrange this for us — its `#hardware` option swaps the *encoder* for
-/// V4L2 M2M and never touches the input — so we select the decoder ourselves via a custom input
-/// template.
+/// any other way. No engine arranges this for us, so we select the decoder ourselves on the ffmpeg
+/// command line.
 ///
 /// Probed by actually decoding a one-second clip, because the codec being listed proves nothing: every
 /// Linux ffmpeg build compiles `h264_v4l2m2m` in, device or no device. Cached for the process and

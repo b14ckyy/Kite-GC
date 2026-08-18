@@ -652,13 +652,13 @@
     "rtspDone": "编辑完成",
     "reconnecting": "重新连接中…",
     "reconnectStop": "停止",
-    "engineMissing": "RTSP需要go2rtc流媒体引擎，尚未安装。",
-    "engineDownload": "下载 go2rtc",
-    "engineReady": "go2rtc 就绪",
-    "ffmpegFallbackMissing": "可选：ffmpeg 可为 go2rtc 无法原生读取的源提供备用读取器（例如某些OBS RTSP服务器）。",
+    "engineMissing": "RTSP需要MediaMTX流媒体引擎，尚未安装。",
+    "engineDownload": "下载 MediaMTX",
+    "engineReady": "MediaMTX 就绪",
+    "ffmpegFallbackMissing": "可选：ffmpeg 可为 MediaMTX 无法原生读取的源提供备用读取器（例如某些OBS RTSP服务器）。",
     "ffmpegFallbackDownload": "下载 ffmpeg（备用）",
     "via": {
-      "native": "流：go2rtc（原生）",
+      "native": "流：MediaMTX（原生）",
       "ffmpeg": "流：ffmpeg 备用"
     },
     "pipeline": {
@@ -1736,7 +1736,7 @@
     "vidFreezes": "冻结",
     "vidJitter": "抖动",
     "vidPlayout": "播放延迟",
-    "vidHint": "接收低于源速率 → 帧在WebView之前已丢失（go2rtc/读取器/网络）。接收稳定但丢弃或冻结增加 → 解码器或显示问题。注意：视频面板中的fps读数统计通过页面渲染循环采样的显示帧 — 只要UI繁忙就会偏低，即使流本身正常。",
+    "vidHint": "接收低于源速率 → 帧在WebView之前已丢失（引擎/读取器/网络）。接收稳定但丢弃或冻结增加 → 解码器或显示问题。注意：视频面板中的fps读数统计通过页面渲染循环采样的显示帧 — 只要UI繁忙就会偏低，即使流本身正常。",
     "vidInactive": "无视频流运行 — 播放流时显示统计。",
     "vidMjpegIn": "MJPEG输入",
     "vidMjpegDrawn": "已绘制",

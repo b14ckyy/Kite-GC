@@ -631,13 +631,13 @@
     "framerate": "Fréquence d'images",
     "auto": "Auto",
     "rtspUrl": "URL RTSP",
-    "engineMissing": "Le moteur de streaming go2rtc est requis pour RTSP et n'est pas encore installé.",
-    "engineDownload": "Télécharger go2rtc",
-    "engineReady": "go2rtc prêt",
-    "ffmpegFallbackMissing": "Optionnel : ffmpeg active un lecteur de secours pour les sources que go2rtc ne peut pas lire nativement (p. ex. certains serveurs RTSP OBS).",
+    "engineMissing": "Le moteur de streaming MediaMTX est requis pour RTSP et n'est pas encore installé.",
+    "engineDownload": "Télécharger MediaMTX",
+    "engineReady": "MediaMTX prêt",
+    "ffmpegFallbackMissing": "Optionnel : ffmpeg active un lecteur de secours pour les sources que MediaMTX ne peut pas lire nativement (p. ex. certains serveurs RTSP OBS).",
     "ffmpegFallbackDownload": "Télécharger ffmpeg (secours)",
     "via": {
-      "native": "Flux : go2rtc (natif)",
+      "native": "Flux : MediaMTX (natif)",
       "ffmpeg": "Flux : repli ffmpeg"
     },
     "mirror": "Miroir horizontal",

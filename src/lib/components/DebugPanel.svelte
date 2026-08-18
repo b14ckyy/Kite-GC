@@ -852,7 +852,7 @@
       {/if}
     </div>
   {:else if tab === 'video'}
-    <!-- WebRTC inbound pipeline, one row per stage: what arrives from go2rtc (recv), what the decoder
+    <!-- WebRTC inbound pipeline, one row per stage: what arrives from the engine (recv), what the decoder
          manages (decoded/dropped) and what the playout reports (freezes/delay). Splitting the stages is
          the whole point — it tells whether an unstable picture loses frames upstream of the WebView,
          in the decoder, or only at presentation. -->

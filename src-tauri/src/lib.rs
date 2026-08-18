@@ -68,12 +68,12 @@ use commands::info::{get_app_version, is_debug_mode};
 use commands::system::system_on_battery;
 use commands::video::{
     video_ffmpeg_status, video_ffmpeg_download,
-    video_go2rtc_status, video_go2rtc_download, video_webrtc_start, video_webrtc_offer,
-    video_webrtc_stop, video_go2rtc_port,
+    video_engine_status, video_engine_download, video_webrtc_start, video_webrtc_offer,
+    video_webrtc_stop,
     video_list_native_devices, video_probe_device,
     video_native_mjpeg_start, video_native_mjpeg_stop, video_rtsp_mjpeg_start,
 };
-use video::{Go2Rtc, MjpegServer};
+use video::{MediaMtx, MjpegServer};
 use commands::logging::{set_log_level, get_log_path, log_session_settings, log_frontend};
 use commands::tiles::fetch_tile;
 use commands::radar::{radar_configure, radar_set_center, radar_set_node_pos, radar_snapshot};
@@ -411,7 +411,7 @@ pub fn run() {
                             // WebRTC is a SEPARATE switch and it is **off by default** in WebKitGTK
                             // ≥ 2.38 — without it `RTCPeerConnection` is undefined, the RTSP source
                             // silently degrades to the MJPEG fallback, and that fallback then depends
-                            // on go2rtc transcoding (and on the WebView rendering multipart images at
+                            // on an ffmpeg transcode (and on the WebView rendering multipart images at
                             // all). Set by NAME rather than through `set_enable_webrtc()`: that setter
                             // sits behind the crate's `v2_38` feature, which would raise our build-time
                             // WebKitGTK requirement (CI deliberately builds against ubuntu-22.04). By
@@ -471,7 +471,9 @@ pub fn run() {
         .manage(TerrainProvider::new())
         .manage(RelayHub::new())
         .manage(HidManager::new())
-        .manage(Go2Rtc::new())
+        // As an `Arc` so the start command can hand it to a blocking task (process spawn +
+        // readiness poll) without pinning an async runtime thread.
+        .manage(std::sync::Arc::new(MediaMtx::new()))
         .manage(MjpegServer::new())
         .invoke_handler(tauri::generate_handler![
             list_serial_ports,
@@ -619,12 +621,11 @@ pub fn run() {
             system_on_battery,
             video_ffmpeg_status,
             video_ffmpeg_download,
-            video_go2rtc_status,
-            video_go2rtc_download,
+            video_engine_status,
+            video_engine_download,
             video_webrtc_start,
             video_webrtc_offer,
             video_webrtc_stop,
-            video_go2rtc_port,
             video_list_native_devices,
             video_probe_device,
             video_native_mjpeg_start,
@@ -668,12 +669,12 @@ pub fn run() {
         .expect("error while running Kite Ground Control")
         .run(|app, event| {
             // Tauri tears the process down without dropping managed state, so the video helpers must
-            // be stopped here. A surviving go2rtc keeps its spawned ffmpeg readers — and with them the
-            // RTSP session on the remote server — alive indefinitely (this is what wedged the UAV-Link
-            // Pi's shared media), and a surviving capture ffmpeg keeps holding the camera.
+            // be stopped here. A surviving engine (or its ffmpeg publisher) keeps the RTSP session on
+            // the remote server alive indefinitely (this is what wedged the UAV-Link Pi's shared
+            // media), and a surviving capture ffmpeg keeps holding the camera.
             if matches!(event, tauri::RunEvent::Exit) {
                 use tauri::Manager;
-                app.state::<Go2Rtc>().stop();
+                app.state::<std::sync::Arc<MediaMtx>>().stop();
                 app.state::<MjpegServer>().stop();
             }
         });

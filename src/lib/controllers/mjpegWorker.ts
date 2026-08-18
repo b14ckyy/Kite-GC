@@ -58,8 +58,8 @@ let abort: AbortController | null = null;
 let statsTimer: ReturnType<typeof setInterval> | undefined;
 let idleTimer: ReturnType<typeof setTimeout> | undefined;
 /** The feed we are meant to be showing, independent of whether we are currently connected: with no
- *  visible surface we disconnect entirely, exactly as the `<img>` sinks did — go2rtc then stops the
- *  transcode, which is the expensive half on a small board. */
+ *  visible surface we disconnect entirely, exactly as the `<img>` sinks did — the server then stops
+ *  the transcode, which is the expensive half on a small board. */
 let wantUrl: string | null = null;
 let everDrew = false;
 
@@ -117,7 +117,7 @@ function separatorOf(contentType: string | null): Uint8Array | null {
 
 /** Body length from a part's header block: the byte count, or -1 when the part carries no
  *  Content-Length (then the body runs to the next boundary). ffmpeg's mpjpeg muxer spells the header
- *  `Content-length`, go2rtc `Content-Length` — hence the case-insensitive match. */
+ *  `Content-length`, others `Content-Length` — hence the case-insensitive match. */
 function bodyLength(head: Uint8Array): number {
   const m = /content-length:\s*(\d+)/i.exec(HEADER_DECODER.decode(head));
   return m?.[1] ? Number(m[1]) : -1;
