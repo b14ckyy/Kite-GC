@@ -133,7 +133,7 @@ guide. The log tells you what your system offers. Restart Kite, start your strea
 
 ```
 [webkit]    WebKitGTK 2.xx.y — enable-webrtc set, reads back as true
-[gstreamer] webrtcbin=… · h264 decoders=[…]
+[gstreamer] webrtcbin=… · ice(nice)=… · dtls=… · srtp=… · rtpbin=… · h264 decoders=[…]
             WebRTC is unavailable in this WebView — falling back to the MJPEG image path
 ```
 
@@ -145,9 +145,13 @@ sustain. Two things are worth knowing:
   Raspberry Pi OS among them — ship a browser engine built *without* the direct video path, and it then
   stays unavailable no matter which media packages are present. On a Raspberry Pi 5 we measured the
   engine reporting the feature as enabled, all the expected media plugins installed, and it still wasn't
-  there. If `webrtcbin=false` appears in your log it is still worth installing
-  `gstreamer1.0-plugins-bad` (and `gstreamer1.0-libav` if the decoder list is empty) — that is a genuine
-  prerequisite — but do not expect it to be sufficient.
+  there. If any of `webrtcbin`, `ice(nice)`, `dtls`, `srtp` or `rtpbin` reads `false` in your log,
+  install the matching packages — `gstreamer1.0-plugins-bad`, `gstreamer1.0-nice`,
+  `gstreamer1.0-plugins-good`, plus `gstreamer1.0-libav` if the decoder list is empty. Every one of
+  them is a genuine prerequisite (recent Kite **.deb** packages request them automatically on
+  install), but do not expect them to be sufficient on every system. Kite also repairs one engine
+  quirk by itself: when the feature is switched on but the page came up without it, the app reloads
+  its UI once at start-up — a brief flicker, and the log then shows `reloading once to expose it`.
   Note that these package installs only affect the **system installation (.deb)**: the **AppImage**
   brings its own browser engine and does not use the system's media packages at all. If video matters
   to you on Linux, prefer the **.deb / system installation** — it uses your distribution's engine and
