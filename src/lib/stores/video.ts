@@ -28,7 +28,7 @@ import {
   type NativeSelection,
   validateSelection,
 } from '$lib/helpers/videoCapabilities';
-import { setMjpegSinkHandlers, startMjpegSink, stopMjpegSink } from '$lib/controllers/mjpegSink';
+import { setMjpegBuffer, setMjpegSinkHandlers, startMjpegSink, stopMjpegSink } from '$lib/controllers/mjpegSink';
 
 export interface VideoDevice {
   deviceId: string;
@@ -438,7 +438,11 @@ function applyJitterTarget(): void {
 // Skip the subscription's synchronous initial call: it runs at module load, before `rtcConn` is
 // even declared (TDZ), and the boot value is applied per-track anyway (see `ontrack`).
 let bufferSubscribed = false;
-rtspBufferFrames.subscribe(() => {
+rtspBufferFrames.subscribe((frames) => {
+  // The image path has no engine to hand a target to, so its reader gets the same number and builds
+  // the cushion itself. Sent on every change including the initial one — unlike `applyJitterTarget`
+  // this touches no module state that is still in its TDZ, and the reader may already be running.
+  setMjpegBuffer(frames);
   if (!bufferSubscribed) {
     bufferSubscribed = true;
     return;
@@ -749,17 +753,19 @@ async function startMjpegPath(url: string, requireCopy = false): Promise<boolean
     }
     return false;
   }
+  // Hardware H.264 decoding (Pi 3/4 class boards) is the backend's call — but only while this feed
+  // has actually been delivering. Two failures in a row and we ask for the software decoder, so a
+  // host that passes the backend's probe yet cannot hold a live stream on the hardware path still
+  // ends up with a picture instead of an endless reconnect loop. Three vetoes, any of which forces
+  // the software transcode: the user's explicit setting, a hardware failure ffmpeg already spelled
+  // out, and the automatic one after repeated failures. Read once, because the catch below needs to
+  // know whether this attempt even asked for hardware.
+  const allowHwDecode = !get(videoState).disableHwAccel && !rtspHwVetoed && rtspMjpegFailures < 2;
   try {
-    // Hardware H.264 decoding (Pi 3/4 class boards) is the backend's call — but only while this feed
-    // has actually been delivering. Two failures in a row and we ask for the software decoder, so a
-    // host that passes the backend's probe yet cannot hold a live stream on the hardware path still
-    // ends up with a picture instead of an endless reconnect loop.
     const res = await invoke<{ url: string; transcode: string }>('video_rtsp_mjpeg_start', {
       url,
       requireCopy,
-      // Two vetoes, either of which forces the software transcode: the user's explicit setting, and
-      // the automatic one after repeated failures.
-      allowHwDecode: !get(videoState).disableHwAccel && rtspMjpegFailures < 2,
+      allowHwDecode,
     });
     // Stopped while we were away? The awaits above straddle a Stop easily — the backend's hardware
     // probe alone can take seconds on a first start. Publishing 'live' + a URL regardless put the
@@ -773,13 +779,24 @@ async function startMjpegPath(url: string, requireCopy = false): Promise<boolean
     patch({ status: 'live', mjpegUrl: res.url, activeTranscode: res.transcode, error: null, rtspEngine: 'ffmpeg', reconnecting: false, reconnectAttempt: 0 });
     return true;
   } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
     // A start failure counts toward the hardware-decoder demotion too: the field case is a VAAPI
     // driver that passes the backend's probe yet fails on the real stream ("Failed setup for format
     // vaapi", Debian 13 / Intel iGPU). Without this only a died-after-start feed incremented the
     // counter, so the reconnect loop retried the same broken hardware path forever and the
     // documented 2-strikes fallback to the software transcode never engaged.
+    //
+    // And when ffmpeg names the hardware itself, one strike is enough. The second attempt would only
+    // ask the driver a question it has already answered, and it costs a full reconnect cycle of black
+    // screen to do it — measured on the Debian 13 / Intel box: two identical hardware failures before
+    // the software transcode was allowed, 14.2 s from start to first picture where one strike gets
+    // there in ~9 s.
     rtspMjpegFailures++;
-    logVideo('warn', `RTSP (MJPEG path) failed: ${e instanceof Error ? e.message : String(e)}`);
+    if (allowHwDecode && message.includes(HW_TRANSCODE_FAILED)) {
+      rtspHwVetoed = true;
+      logVideo('warn', 'the hardware transcode failed on the real stream — software for the rest of this run');
+    }
+    logVideo('warn', `RTSP (MJPEG path) failed: ${message}`);
     return false;
   }
 }
@@ -921,6 +938,18 @@ let rtspReconnectTimer: ReturnType<typeof setTimeout> | undefined;
 /** Consecutive MJPEG `<img>` failures on the RTSP feed; resets as soon as frames arrive. Used to
  *  give up on the hardware decoder rather than loop forever on a host it doesn't work on. */
 let rtspMjpegFailures = 0;
+/** ffmpeg named the hardware in a start failure → don't ask for it again this run. That is a verdict
+ *  from the driver, not bad luck, so it needs no second strike. Unlike the counter this survives a
+ *  decoded frame: the *software* transcode delivering pictures says nothing about the hardware path.
+ *  Cleared only by a deliberate (re)start. */
+let rtspHwVetoed = false;
+/** The backend's marker for "the hardware is what failed", kept in sync with `HW_FAILURE_PREFIX` in
+ *  `mjpeg_server.rs`. Deliberately not a match on ffmpeg's own prose: on a lossy source the decoder's
+ *  per-frame complaints reach the caller ahead of the real cause, so the identical VAAPI failure came
+ *  back with two different first lines on two consecutive attempts (Debian 13 / Intel, 2026-08-18) —
+ *  the veto fired on one and not the other. The backend scans every line and says so plainly. An
+ *  unreachable source never carries the marker, so it still costs the hardware path nothing. */
+const HW_TRANSCODE_FAILED = 'hardware transcode failed';
 
 /** `video/H264` → `H.264`. The RTP mime type is the only place the negotiated codec is named, and it
  *  spells the common ones without the dot everyone reads them with. */
@@ -1162,7 +1191,10 @@ export async function startRtsp(opts?: { reconnect?: boolean }): Promise<void> {
   });
   if (!reconnect) {
     savePrefs();
-    rtspMjpegFailures = 0; // a deliberate (re)start gets the hardware decoder another chance
+    // A deliberate (re)start gets the hardware decoder another chance: the URL may point somewhere
+    // else now, and a driver can be fixed between two runs.
+    rtspMjpegFailures = 0;
+    rtspHwVetoed = false;
   }
 
   // MJPEG fallback for webviews without RTCPeerConnection (rare in Tauri). Decided BEFORE the engine
@@ -1170,9 +1202,17 @@ export async function startRtsp(opts?: { reconnect?: boolean }): Promise<void> {
   // engine here would block a machine that already has everything this path needs.
   if (!isWebrtcAvailable()) {
     // Degraded mode, and a silent one: it needs a WebView that renders the image path, and for an
-    // H.264 source a transcode as well. Worth a warning every time, not just a console line.
+    // H.264 source a transcode as well. Worth a warning every time, not just a console line — and on
+    // Linux worth naming the cause, because the honest answer is "nothing to fix here": WebRTC is a
+    // compile-time option of WebKitGTK and a build without it cannot be repaired by installing
+    // anything (measured on Debian 13 / 2.52.5 — see the [gstreamer] line above).
     if (!reconnect) {
-      logVideo('warn', 'WebRTC is unavailable in this WebView — falling back to the MJPEG image path');
+      logVideo(
+        'warn',
+        isLinux
+          ? 'WebRTC is unavailable in this WebView — using the MJPEG image path. On Linux that is normally the WebKitGTK build itself (needs -DENABLE_WEB_RTC=ON); no package can add it afterwards.'
+          : 'WebRTC is unavailable in this WebView — falling back to the MJPEG image path',
+      );
       logVideo('info', `RTSP start ${url} (transport=${transport}, webrtc=false, engine not used)`);
     }
     if (!(await startMjpegPath(url))) scheduleRtspReconnect();
@@ -1592,21 +1632,6 @@ function logWebViewMediaSupport(): void {
  * saved one is gone). Call once, client-side.
  */
 export async function initVideo(): Promise<void> {
-  // Linux/WebKitGTK: native code applies `enable-webrtc` while the page is already loading, and WebKit
-  // only installs `RTCPeerConnection` into JS worlds created AFTER the setting is on — lose that race
-  // and the API stays hidden until the next navigation (Debian 13 / WebKitGTK 2.52: setting reads back
-  // true, API absent, WebRTC compiled into Debian's builds since 2.40). One reload repairs it. The
-  // backend permit is granted once per app run and only when the setting really landed, so a WebKit
-  // build that truly lacks WebRTC cannot reload-loop; Windows/macOS always get `false` and the check
-  // is skipped entirely where the API already exists.
-  if (isLinux && !isWebrtcAvailable()) {
-    const permit = await invoke<boolean>('video_webrtc_reload_permit').catch(() => false);
-    if (permit) {
-      logVideo('warn', 'RTCPeerConnection missing although enable-webrtc is set — reloading once to expose it');
-      location.reload();
-      return;
-    }
-  }
   logWebViewMediaSupport();
   // The backend's word that a live MJPEG source died (`MJPEG_ENDED_EVENT` in `mjpeg_server.rs`).
   // The off-thread reader notices by itself because it reads the stream — the `<img>` fallback

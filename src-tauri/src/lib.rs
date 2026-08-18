@@ -69,7 +69,7 @@ use commands::system::system_on_battery;
 use commands::video::{
     video_ffmpeg_status, video_ffmpeg_download,
     video_engine_status, video_engine_download, video_webrtc_start, video_webrtc_offer,
-    video_webrtc_stop, video_webrtc_reload_permit,
+    video_webrtc_stop,
     video_list_native_devices, video_probe_device,
     video_native_mjpeg_start, video_native_mjpeg_stop, video_rtsp_mjpeg_start,
 };
@@ -124,6 +124,13 @@ pub fn is_portable() -> bool {
 /// hand and copy the output back, which on a remote-desktop session is genuinely awkward. The app can
 /// just say it.
 ///
+/// These plugins are **necessary, not sufficient**, and the message says so: WebRTC is a compile-time
+/// option of WebKitGTK (`-DENABLE_WEB_RTC=ON`) and plenty of distributions build without it, where no
+/// package on earth will bring `RTCPeerConnection` back. Verified on Debian 13's 2.52.5 — every plugin
+/// below present, the library linking no `gstwebrtc` and carrying none of the implementation, and the
+/// API absent in a WebView whose setting was applied before its first load. Reading the old wording as
+/// a shopping list cost exactly that measurement to disprove, so it no longer reads like one.
+///
 /// Runs on a background thread (each `gst-inspect` call costs ~100 ms) and reports at warn level, since
 /// a missing element is a real, actionable degradation.
 #[cfg(target_os = "linux")]
@@ -146,10 +153,11 @@ fn probe_gstreamer_support() {
             let (webrtc, transport, decoders) = probe_gstreamer_plugin_files();
             log::warn!(
                 "[gstreamer] gst-inspect-1.0 not found (gstreamer1.0-tools); by plugin file: \
-                 webrtc={webrtc} · transport plugins=[{}] · h264 plugins=[{}] — RTCPeerConnection \
-                 needs webrtc+dtls+srtp (gstreamer1.0-plugins-bad), nice (gstreamer1.0-nice) and \
-                 rtpmanager (gstreamer1.0-plugins-good); video decode needs an H.264 decoder \
-                 (gstreamer1.0-libav)",
+                 webrtc={webrtc} · transport plugins=[{}] · h264 plugins=[{}] — RTCPeerConnection needs \
+                 webrtc+dtls+srtp (gstreamer1.0-plugins-bad), nice (gstreamer1.0-nice), rtpmanager \
+                 (gstreamer1.0-plugins-good) AND a WebKitGTK built with -DENABLE_WEB_RTC=ON, which \
+                 several distributions leave off and no package can add. Video decode always needs an \
+                 H.264 decoder (gstreamer1.0-libav)",
                 transport.join(", "),
                 decoders.join(", ")
             );
@@ -179,9 +187,11 @@ fn probe_gstreamer_support() {
         .collect();
         log::warn!(
             "[gstreamer] webrtcbin={webrtc} · ice(nice)={ice} · dtls={dtls} · srtp={srtp} · rtpbin={rtp} \
-             · h264 decoders=[{}] — RTCPeerConnection needs every one of these (gstreamer1.0-plugins-bad, \
-             gstreamer1.0-nice, gstreamer1.0-plugins-good); video decode needs an H.264 decoder \
-             (gstreamer1.0-libav)",
+             · h264 decoders=[{}] — RTCPeerConnection needs all five of those (gstreamer1.0-plugins-bad, \
+             gstreamer1.0-nice, gstreamer1.0-plugins-good) AND a WebKitGTK built with -DENABLE_WEB_RTC=ON. \
+             Several distributions build without it (measured: Debian 13 / WebKitGTK 2.52.5), and there no \
+             package can add it — the MJPEG path is the normal one. Video decode always needs an H.264 \
+             decoder (gstreamer1.0-libav)",
             decoders.join(", ")
         );
     });
@@ -449,6 +459,16 @@ pub fn run() {
                             // identical from the outside. The runtime WebKitGTK version comes along
                             // because it decides which of them is even possible — and because a Linux
                             // bug report is worth little without it.
+                            //
+                            // Note what the read-back does NOT prove: the setter only writes a
+                            // WebPreferences bool, so it reads back `true` even where WebKitGTK was
+                            // built without `ENABLE_WEB_RTC` and no implementation exists behind it.
+                            // Measured on Debian 13's 2.52.5: `RTCPeerConnection` stays undefined in a
+                            // freshly created WebView with the setting applied *before* the first load,
+                            // and the library links no gstwebrtc and carries none of the implementation
+                            // (`createOffer`, `addIceCandidate`, `setLocalDescription`). Only the
+                            // frontend's own `typeof RTCPeerConnection` is the verdict — which is why
+                            // there is no "reload once to expose it" repair here any more.
                             let (major, minor, micro) = unsafe {
                                 (
                                     webkit2gtk::ffi::webkit_get_major_version(),
@@ -459,7 +479,6 @@ pub fn run() {
                             if settings.find_property("enable-webrtc").is_some() {
                                 settings.set_property("enable-webrtc", true);
                                 let now: bool = settings.property("enable-webrtc");
-                                commands::video::note_webrtc_setting(now);
                                 log::warn!(
                                     "[webkit] WebKitGTK {major}.{minor}.{micro} — enable-webrtc set, reads back as {now}"
                                 );
@@ -653,7 +672,6 @@ pub fn run() {
             video_webrtc_start,
             video_webrtc_offer,
             video_webrtc_stop,
-            video_webrtc_reload_permit,
             video_list_native_devices,
             video_probe_device,
             video_native_mjpeg_start,

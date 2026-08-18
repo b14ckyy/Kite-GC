@@ -95,6 +95,14 @@ help:
 - Move closer to the access point, or onto a less crowded channel.
 - If the machine has to stay on Wi-Fi, turning off its power-saving mode for the wireless adapter is
   worth a try.
+- **Raise the smoothing buffer** (Video panel, below the connection list) if you have to live with the
+  link. It cannot bring back frames that never arrived, but it holds a small cushion of frames and
+  plays them out evenly, so a short pause in delivery no longer becomes a visible hitch. It works on
+  both video paths. The cost is exactly the latency you buy: one frame time per step, ~17 ms at 60 fps.
+  Match it to the gaps you measured — a pause of a tenth of a second needs about six frame times at
+  60 fps to be covered completely, so a setting that is too small will smooth part of the hitch and no
+  more. With the **Debug Monitor** open (Video stats), *Smoothing buffer held* shows what the cushion
+  actually contains: if it keeps falling to zero, the link's pauses are longer than the depth you chose.
 
 ## A specific RTSP server gives a black screen
 
@@ -141,21 +149,31 @@ guide. The log tells you what your system offers. Restart Kite, start your strea
 converts the stream frame by frame, which is what drives the CPU up and limits the resolution you can
 sustain. Two things are worth knowing:
 
-- **This is usually not something you can install your way out of.** Several Linux distributions —
-  Raspberry Pi OS among them — ship a browser engine built *without* the direct video path, and it then
-  stays unavailable no matter which media packages are present. On a Raspberry Pi 5 we measured the
-  engine reporting the feature as enabled, all the expected media plugins installed, and it still wasn't
-  there. If any of `webrtcbin`, `ice(nice)`, `dtls`, `srtp` or `rtpbin` reads `false` in your log,
-  install the matching packages — `gstreamer1.0-plugins-bad`, `gstreamer1.0-nice`,
-  `gstreamer1.0-plugins-good`, plus `gstreamer1.0-libav` if the decoder list is empty. Every one of
-  them is a genuine prerequisite (recent Kite **.deb** packages request them automatically on
-  install), but do not expect them to be sufficient on every system. Kite also repairs one engine
-  quirk by itself: when the feature is switched on but the page came up without it, the app reloads
-  its UI once at start-up — a brief flicker, and the log then shows `reloading once to expose it`.
-  Note that these package installs only affect the **system installation (.deb)**: the **AppImage**
-  brings its own browser engine and does not use the system's media packages at all. If video matters
-  to you on Linux, prefer the **.deb / system installation** — it uses your distribution's engine and
-  plugins, which you can at least influence.
+- **You cannot install your way out of this one.** The direct video path is a **compile-time option of
+  the browser engine**. If your distribution built WebKitGTK without it, it stays missing no matter
+  which media packages are present — there is no package that adds it, and the engine still reports the
+  feature as "enabled" because that switch only sets a preference with nothing behind it. Several
+  distributions build it that way. On **Debian 13** (engine 2.52.5) we verified it end to end: every
+  plugin present, the feature reading back as enabled, the library containing none of the actual
+  implementation, and the interface absent even in a freshly created window. A **Raspberry Pi 5**
+  behaved identically. You can check your own machine in a terminal (`strings` comes with `binutils`):
+
+    ```bash
+    strings /usr/lib/*/libwebkit2gtk-4.1.so.0 | grep -cw createOffer
+    ```
+
+    **0** — this engine has no WebRTC compiled in. Kite's image path is then the normal, expected path
+    on that machine and the log line above is not a fault to chase; skip to the points below, which are
+    the ones that actually help. **1 or more** — the engine can do it, and then the plugins do matter:
+    if any of `webrtcbin`, `ice(nice)`, `dtls`, `srtp` or `rtpbin` reads `false` in your log, install
+    `gstreamer1.0-plugins-bad`, `gstreamer1.0-nice`, `gstreamer1.0-plugins-good`, plus
+    `gstreamer1.0-libav` if the decoder list is empty (recent Kite **.deb** packages request these
+    automatically on install).
+
+    Either way, package installs only affect the **system installation (.deb)**: the **AppImage** brings
+    its own browser engine and does not use the system's media packages at all. If video matters to you
+    on Linux, prefer the **.deb / system installation** — it uses your distribution's engine and plugins,
+    which you can at least influence.
 - **Hardware conversion is used automatically where it exists.** Kite tests the machine once at
   start-up and writes the verdict to the log:
     - Desktop graphics (Intel and AMD, via VAAPI) can do **both halves** — decoding and re-encoding —

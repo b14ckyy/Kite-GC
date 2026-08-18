@@ -950,6 +950,15 @@
             <span class="stat-label">{$t('debug.vidUiJank')}</span>
             <span class="stat-value">{$uiJankMs !== null ? `${$uiJankMs.toFixed(0)} ms` : '—'}</span>
           </div>
+          {#if m.bufferFrames > 0}
+            <!-- Only with the smoothing buffer on, and then it is the number that decides the
+                 setting: held < asked means the cushion ran dry, i.e. the link's holes are longer
+                 than the depth chosen for them. -->
+            <div class="stat-group">
+              <span class="stat-label">{$t('debug.vidMjpegBuffer')}</span>
+              <span class="stat-value">{m.bufferedMs.toFixed(0)} ms ({m.bufferFrames} f)</span>
+            </div>
+          {/if}
         </div>
         <div class="perf-hint">{$t('debug.vidMjpegHint')}</div>
       {/if}

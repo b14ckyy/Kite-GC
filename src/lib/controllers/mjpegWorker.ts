@@ -36,11 +36,23 @@ type InMessage =
   // (measured — see `OFFSCREEN_DRAW` in mjpegSink.ts).
   | { type: 'attach'; id: number; canvas?: OffscreenCanvas }
   | { type: 'detach'; id: number }
+  | { type: 'buffer'; frames: number }
   | { type: 'drawn' };
 
 const CRLFCRLF = new Uint8Array([13, 10, 13, 10]);
 const STATS_INTERVAL_MS = 1000;
 const HEADER_DECODER = new TextDecoder();
+
+/** Rates a source plausibly sends. The measured arrival interval is snapped to the nearest of these
+ *  before it becomes the release cadence — a raw median wobbles, and a cadence that wobbles is the
+ *  very thing this buffer exists to remove. Same list and same reasoning as the WebRTC jitter target
+ *  in `stores/video.ts`. */
+const STANDARD_FPS = [15, 24, 25, 30, 48, 50, 60, 90, 120];
+/** Arrival intervals kept for that median (one second at 60 fps). */
+const INTERVAL_SAMPLES = 60;
+/** Upper bound for the knob, independent of what the panel currently offers — a value the UI cannot
+ *  produce must still not be able to park the picture minutes behind the drone. */
+const MAX_BUFFER_FRAMES = 30;
 
 /** Grace period before the last detached surface stops the stream. A map↔video swap destroys one
  *  canvas and creates another, which would otherwise tear the connection down and back up. */
@@ -68,6 +80,28 @@ let everDrew = false;
  *  frame rate instead of in latency. */
 let pending: Blob | null = null;
 let decoding = false;
+
+// ── Receive-side smoothing (the panel's "Smoothing buffer", in FRAME TIMES) ──────────────────────
+// The WebRTC path hands this knob to the engine's own jitter buffer; the image path has no engine, so
+// it is built here. A link that delivers the right number of frames but in bursts — the arrival trace
+// of a stuttering feed showed exactly 60.0 fps with 120–130 ms holes every ~12 s — looks broken
+// without one and fine with one, because a cushion of already-arrived frames covers the hole.
+//
+// At 0 (the default) NOTHING below runs: `emit` takes the old path, newest frame wins, nothing is
+// held. That is deliberate — the low-latency behaviour must stay byte-for-byte what it was.
+/** Cushion depth in frame times. */
+let bufferFrames = 0;
+/** Frames waiting for their release slot, oldest first. Empty while `bufferFrames` is 0. */
+const queue: Blob[] = [];
+let releaseTimer: ReturnType<typeof setTimeout> | undefined;
+/** When the next frame is due. Advanced by whole frame times so releases keep a steady cadence even
+ *  when arrivals do not — otherwise the burst after a hole would simply be replayed as a burst. */
+let nextReleaseAt = 0;
+/** False while the cushion is (re)filling: after a hole drains the queue there is nothing to smooth
+ *  with, so it builds up again before playback resumes. */
+let releasing = false;
+let intervalMs = 1000 / 60;
+const intervals: number[] = [];
 
 let frameW = 0;
 let frameH = 0;
@@ -126,15 +160,101 @@ function bodyLength(head: Uint8Array): number {
 function emit(view: Uint8Array): void {
   arrived++;
   const now = performance.now();
-  if (lastFrameAt) gapIn = Math.max(gapIn, now - lastFrameAt);
+  if (lastFrameAt) {
+    gapIn = Math.max(gapIn, now - lastFrameAt);
+    noteInterval(now - lastFrameAt);
+  }
   lastFrameAt = now;
+  const frame = new Blob([view], { type: 'image/jpeg' });
+  if (bufferFrames > 0) {
+    enqueue(frame, now);
+    return;
+  }
   if (pending) {
     // Superseded before it could be decoded — exactly what we want under load.
     dropped++;
     droppedNow++;
   }
-  pending = new Blob([view], { type: 'image/jpeg' });
+  pending = frame;
   if (!decoding) void drain();
+}
+
+/** Learn the source's frame interval from arrivals. A gap long enough to be a stall carries no rate
+ *  information and is ignored, so a hole cannot slow the cadence that is meant to paper over it. */
+function noteInterval(gap: number): void {
+  if (gap <= 0 || gap > 500) return;
+  intervals.push(gap);
+  if (intervals.length > INTERVAL_SAMPLES) intervals.shift();
+  if (intervals.length < 10 || intervals.length % 15 !== 0) return;
+  const median = [...intervals].sort((a, b) => a - b)[intervals.length >> 1];
+  let best = STANDARD_FPS[0];
+  for (const f of STANDARD_FPS) {
+    if (Math.abs(1000 / f - median) < Math.abs(1000 / best - median)) best = f;
+  }
+  intervalMs = 1000 / best;
+}
+
+function enqueue(frame: Blob, now: number): void {
+  queue.push(frame);
+  // Latency stays bounded by the cushion the user asked for, plus one frame of slack for a burst.
+  // Dropping the OLDEST here is what keeps the picture live: those frames are already late.
+  while (queue.length > bufferFrames + 1) {
+    queue.shift();
+    dropped++;
+    droppedNow++;
+  }
+  if (!releasing && queue.length > bufferFrames) {
+    releasing = true;
+    nextReleaseAt = now;
+    scheduleRelease(now);
+  }
+}
+
+function scheduleRelease(now: number): void {
+  if (releaseTimer !== undefined) return;
+  releaseTimer = setTimeout(release, Math.max(0, nextReleaseAt - now));
+}
+
+/** Hand the oldest queued frame to the decoder and book the next slot one frame time later. */
+function release(): void {
+  releaseTimer = undefined;
+  const frame = queue.shift();
+  if (!frame) {
+    releasing = false; // starved — refill the cushion before playing again
+    return;
+  }
+  if (pending) {
+    // The decoder is still busy with the previous slot (a long decode, or the main thread holding
+    // the last bitmap). Its frame is now the older one, so it is the one that goes.
+    dropped++;
+    droppedNow++;
+  }
+  pending = frame;
+  if (!decoding) void drain();
+  const now = performance.now();
+  if (nextReleaseAt < now) nextReleaseAt = now; // fell behind → resume from here, don't burst
+  nextReleaseAt += intervalMs;
+  scheduleRelease(now);
+}
+
+/** Apply the panel's setting. 0 restores the unbuffered path immediately, including for frames
+ *  already queued — the newest of them is worth keeping, the rest are by definition late. */
+function setBuffer(frames: number): void {
+  const next = Math.max(0, Math.min(MAX_BUFFER_FRAMES, Math.round(frames)));
+  if (next === bufferFrames) return;
+  bufferFrames = next;
+  if (bufferFrames > 0) return;
+  const newest = queue.pop();
+  dropped += queue.length;
+  droppedNow += queue.length;
+  queue.length = 0;
+  clearTimeout(releaseTimer);
+  releaseTimer = undefined;
+  releasing = false;
+  if (newest) {
+    pending = newest;
+    if (!decoding) void drain();
+  }
 }
 
 /** Hand a decoded frame to the main thread, which draws it into every surface and closes it. */
@@ -219,6 +339,10 @@ function postStats(): void {
     width: frameW,
     height: frameH,
     sinceFrameMs: lastFrameAt ? now - lastFrameAt : -1,
+    // What the smoothing buffer is actually holding right now — the number that answers "is the
+    // cushion deep enough for this link", which no other figure here can.
+    bufferedMs: queue.length * intervalMs,
+    bufferFrames,
   });
   arrived = 0;
   drawn = 0;
@@ -337,11 +461,16 @@ function disconnect(): void {
   }
   pending = null;
   inFlight = false;
+  queue.length = 0;
+  clearTimeout(releaseTimer);
+  releaseTimer = undefined;
+  releasing = false;
 }
 
 function connect(): void {
   if (!wantUrl || abort || sinks.size + remoteSinks.size === 0) return;
   inFlight = false;
+  intervals.length = 0;
   frameW = 0;
   frameH = 0;
   lastFrameAt = 0;
@@ -386,6 +515,9 @@ self.onmessage = (e: MessageEvent<InMessage>) => {
     case 'drawn':
       inFlight = false;
       if (!decoding) void drain();
+      break;
+    case 'buffer':
+      setBuffer(msg.frames);
       break;
     case 'start':
       disconnect();
