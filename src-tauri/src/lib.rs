@@ -68,12 +68,12 @@ use commands::info::{get_app_version, is_debug_mode};
 use commands::system::system_on_battery;
 use commands::video::{
     video_ffmpeg_status, video_ffmpeg_download,
-    video_go2rtc_status, video_go2rtc_download, video_webrtc_start, video_webrtc_offer,
-    video_webrtc_stop, video_go2rtc_port,
+    video_engine_status, video_engine_download, video_webrtc_start, video_webrtc_offer,
+    video_webrtc_stop,
     video_list_native_devices, video_probe_device,
     video_native_mjpeg_start, video_native_mjpeg_stop, video_rtsp_mjpeg_start,
 };
-use video::{Go2Rtc, MjpegServer};
+use video::{MediaMtx, MjpegServer};
 use commands::logging::{set_log_level, get_log_path, log_session_settings, log_frontend};
 use commands::tiles::fetch_tile;
 use commands::radar::{radar_configure, radar_set_center, radar_set_node_pos, radar_snapshot};
@@ -124,6 +124,13 @@ pub fn is_portable() -> bool {
 /// hand and copy the output back, which on a remote-desktop session is genuinely awkward. The app can
 /// just say it.
 ///
+/// These plugins are **necessary, not sufficient**, and the message says so: WebRTC is a compile-time
+/// option of WebKitGTK (`-DENABLE_WEB_RTC=ON`) and plenty of distributions build without it, where no
+/// package on earth will bring `RTCPeerConnection` back. Verified on Debian 13's 2.52.5 — every plugin
+/// below present, the library linking no `gstwebrtc` and carrying none of the implementation, and the
+/// API absent in a WebView whose setting was applied before its first load. Reading the old wording as
+/// a shopping list cost exactly that measurement to disprove, so it no longer reads like one.
+///
 /// Runs on a background thread (each `gst-inspect` call costs ~100 ms) and reports at warn level, since
 /// a missing element is a real, actionable degradation.
 #[cfg(target_os = "linux")]
@@ -143,16 +150,27 @@ fn probe_gstreamer_support() {
         // install lacks — i.e. missing on the very systems where this diagnostic matters most. Fall back
         // to looking for the plugin libraries themselves, which is what GStreamer would load anyway.
         if !run(&["--version"]) {
-            let (webrtc, decoders) = probe_gstreamer_plugin_files();
+            let (webrtc, transport, decoders) = probe_gstreamer_plugin_files();
             log::warn!(
                 "[gstreamer] gst-inspect-1.0 not found (gstreamer1.0-tools); by plugin file: \
-                 webrtc={webrtc} · h264 plugins=[{}] — WebKitGTK needs the webrtc plugin for \
-                 RTCPeerConnection (gstreamer1.0-plugins-bad) and an H.264 decoder (gstreamer1.0-libav)",
+                 webrtc={webrtc} · transport plugins=[{}] · h264 plugins=[{}] — RTCPeerConnection needs \
+                 webrtc+dtls+srtp (gstreamer1.0-plugins-bad), nice (gstreamer1.0-nice), rtpmanager \
+                 (gstreamer1.0-plugins-good) AND a WebKitGTK built with -DENABLE_WEB_RTC=ON, which \
+                 several distributions leave off and no package can add. Video decode always needs an \
+                 H.264 decoder (gstreamer1.0-libav)",
+                transport.join(", "),
                 decoders.join(", ")
             );
             return;
         }
         let webrtc = run(&["webrtcbin"]);
+        // WebKit exposes RTCPeerConnection only when the WHOLE transport stack is loadable, not just
+        // webrtcbin: ICE comes from libnice's plugin (gstreamer1.0-nice — a separate package and the
+        // classic gap), DTLS/SRTP from plugins-bad, RTP session management from plugins-good.
+        let ice = run(&["nicesrc"]);
+        let dtls = run(&["dtlssrtpenc"]);
+        let srtp = run(&["srtpenc"]);
+        let rtp = run(&["rtpbin"]);
         // Software (libav/openh264) plus the hardware decoders that matter in practice: V4L2 (Raspberry
         // Pi 4, Rockchip), and Intel VA under both its plugin generations — `vah264dec` from the current
         // `va` plugin and `vaapih264dec` from the older gstreamer-vaapi. Which of the two a distribution
@@ -168,9 +186,12 @@ fn probe_gstreamer_support() {
         .filter(|e| run(&[e]))
         .collect();
         log::warn!(
-            "[gstreamer] webrtcbin={} · h264 decoders=[{}] — WebKitGTK needs webrtcbin for RTCPeerConnection \
-             (gstreamer1.0-plugins-bad) and an H.264 decoder to play video (gstreamer1.0-libav)",
-            webrtc,
+            "[gstreamer] webrtcbin={webrtc} · ice(nice)={ice} · dtls={dtls} · srtp={srtp} · rtpbin={rtp} \
+             · h264 decoders=[{}] — RTCPeerConnection needs all five of those (gstreamer1.0-plugins-bad, \
+             gstreamer1.0-nice, gstreamer1.0-plugins-good) AND a WebKitGTK built with -DENABLE_WEB_RTC=ON. \
+             Several distributions build without it (measured: Debian 13 / WebKitGTK 2.52.5), and there no \
+             package can add it — the MJPEG path is the normal one. Video decode always needs an H.264 \
+             decoder (gstreamer1.0-libav)",
             decoders.join(", ")
         );
     });
@@ -235,14 +256,15 @@ fn nudge_framebuffer_on_pi(window: tauri::Window) {
 /// the exe.  Must be called **before** `run()` so the WebView picks up the
 /// environment variables.
 /// Look for GStreamer plugin **files** when `gst-inspect-1.0` isn't installed. Returns
-/// `(webrtc present, names of the H.264-capable plugins found)`.
+/// `(webrtc present, names of the WebRTC transport plugins found, names of the H.264-capable
+/// plugins found)`.
 ///
 /// Plugins live in `<libdir>/gstreamer-1.0/libgst<name>.so`; the multiarch libdir differs per
 /// architecture, and `GST_PLUGIN_PATH` can add more. This can't tell whether a plugin actually
 /// *registers* its elements (a broken driver may still fail), so it is reported as "by plugin file" —
 /// weaker evidence than `gst-inspect`, but the difference between an answer and none at all.
 #[cfg(target_os = "linux")]
-fn probe_gstreamer_plugin_files() -> (bool, Vec<&'static str>) {
+fn probe_gstreamer_plugin_files() -> (bool, Vec<&'static str>, Vec<&'static str>) {
     // The _1_0/SYSTEM variants matter inside the AppImage: linuxdeploy's gstreamer hook points
     // GST_PLUGIN_SYSTEM_PATH_1_0 at the bundled plugin set, which is exactly what WebKit sees there.
     let mut dirs: Vec<std::path::PathBuf> = [
@@ -281,7 +303,21 @@ fn probe_gstreamer_plugin_files() -> (bool, Vec<&'static str>) {
     .map(|(name, _)| name)
     .collect();
 
-    (has("libgstwebrtc.so"), decoders)
+    // The transport stack RTCPeerConnection depends on beyond the webrtc plugin itself: ICE from
+    // libnice's plugin (gstreamer1.0-nice — a separate package and the classic gap), DTLS/SRTP from
+    // plugins-bad, RTP session management from plugins-good.
+    let transport = [
+        ("nice", "libgstnice.so"),
+        ("dtls", "libgstdtls.so"),
+        ("srtp", "libgstsrtp.so"),
+        ("rtpmanager", "libgstrtpmanager.so"),
+    ]
+    .into_iter()
+    .filter(|(_, file)| has(file))
+    .map(|(name, _)| name)
+    .collect();
+
+    (has("libgstwebrtc.so"), transport, decoders)
 }
 
 pub fn setup_portable_mode() {
@@ -411,7 +447,7 @@ pub fn run() {
                             // WebRTC is a SEPARATE switch and it is **off by default** in WebKitGTK
                             // ≥ 2.38 — without it `RTCPeerConnection` is undefined, the RTSP source
                             // silently degrades to the MJPEG fallback, and that fallback then depends
-                            // on go2rtc transcoding (and on the WebView rendering multipart images at
+                            // on an ffmpeg transcode (and on the WebView rendering multipart images at
                             // all). Set by NAME rather than through `set_enable_webrtc()`: that setter
                             // sits behind the crate's `v2_38` feature, which would raise our build-time
                             // WebKitGTK requirement (CI deliberately builds against ubuntu-22.04). By
@@ -423,6 +459,16 @@ pub fn run() {
                             // identical from the outside. The runtime WebKitGTK version comes along
                             // because it decides which of them is even possible — and because a Linux
                             // bug report is worth little without it.
+                            //
+                            // Note what the read-back does NOT prove: the setter only writes a
+                            // WebPreferences bool, so it reads back `true` even where WebKitGTK was
+                            // built without `ENABLE_WEB_RTC` and no implementation exists behind it.
+                            // Measured on Debian 13's 2.52.5: `RTCPeerConnection` stays undefined in a
+                            // freshly created WebView with the setting applied *before* the first load,
+                            // and the library links no gstwebrtc and carries none of the implementation
+                            // (`createOffer`, `addIceCandidate`, `setLocalDescription`). Only the
+                            // frontend's own `typeof RTCPeerConnection` is the verdict — which is why
+                            // there is no "reload once to expose it" repair here any more.
                             let (major, minor, micro) = unsafe {
                                 (
                                     webkit2gtk::ffi::webkit_get_major_version(),
@@ -471,7 +517,9 @@ pub fn run() {
         .manage(TerrainProvider::new())
         .manage(RelayHub::new())
         .manage(HidManager::new())
-        .manage(Go2Rtc::new())
+        // As an `Arc` so the start command can hand it to a blocking task (process spawn +
+        // readiness poll) without pinning an async runtime thread.
+        .manage(std::sync::Arc::new(MediaMtx::new()))
         .manage(MjpegServer::new())
         .invoke_handler(tauri::generate_handler![
             list_serial_ports,
@@ -619,12 +667,11 @@ pub fn run() {
             system_on_battery,
             video_ffmpeg_status,
             video_ffmpeg_download,
-            video_go2rtc_status,
-            video_go2rtc_download,
+            video_engine_status,
+            video_engine_download,
             video_webrtc_start,
             video_webrtc_offer,
             video_webrtc_stop,
-            video_go2rtc_port,
             video_list_native_devices,
             video_probe_device,
             video_native_mjpeg_start,
@@ -668,12 +715,12 @@ pub fn run() {
         .expect("error while running Kite Ground Control")
         .run(|app, event| {
             // Tauri tears the process down without dropping managed state, so the video helpers must
-            // be stopped here. A surviving go2rtc keeps its spawned ffmpeg readers — and with them the
-            // RTSP session on the remote server — alive indefinitely (this is what wedged the UAV-Link
-            // Pi's shared media), and a surviving capture ffmpeg keeps holding the camera.
+            // be stopped here. A surviving engine (or its ffmpeg publisher) keeps the RTSP session on
+            // the remote server alive indefinitely (this is what wedged the UAV-Link Pi's shared
+            // media), and a surviving capture ffmpeg keeps holding the camera.
             if matches!(event, tauri::RunEvent::Exit) {
                 use tauri::Manager;
-                app.state::<Go2Rtc>().stop();
+                app.state::<std::sync::Arc<MediaMtx>>().stop();
                 app.state::<MjpegServer>().stop();
             }
         });

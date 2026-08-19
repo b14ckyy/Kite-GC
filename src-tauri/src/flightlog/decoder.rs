@@ -143,7 +143,7 @@ pub async fn download<F: FnMut(u8, &str)>(mut report: F) -> Result<PathBuf, Stri
 
     // Resolved without the GitHub REST API (rate-limited per IP → 403 behind shared/CGNAT addresses):
     // the `releases/latest` redirect gives the tag, the release page's own asset fragment gives the
-    // names. Unlike go2rtc/ffmpeg the names carry the version, so they can't be constructed up front.
+    // names. Unlike ffmpeg the names carry the version, so they can't be constructed up front.
     report(5, "Querying latest release");
     let tag = crate::github_release::latest_tag(HTTP_USER_AGENT, REPO).await?;
     let assets = crate::github_release::release_assets(HTTP_USER_AGENT, REPO, &tag).await?;

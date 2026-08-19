@@ -53,6 +53,23 @@ const FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(6);
 /// multipart answer, i.e. exactly what every client got before there was a choice.
 const REQUEST_READ_TIMEOUT: Duration = Duration::from_millis(500);
 
+/// ffmpeg's wording when the **hardware** decoder or encoder is what refused the stream.
+///
+/// Scanned across every stderr line, not just the first one, and that is the whole point: on a lossy
+/// source the decoder's per-frame complaints ("negative number of zero coeffs at 42 39") reach us
+/// first and would otherwise be reported as the cause. Measured on a Wi-Fi-fed 720p60 feed, where two
+/// consecutive attempts at the same broken VAAPI path reported two different first lines — so the
+/// caller's "was this the hardware?" verdict came out different each time.
+const HW_FAILURE_MARKERS: [&str; 3] = [
+    "Failed setup for format", // hwaccel decode init (VAAPI, V4L2)
+    "hwaccel initialisation",
+    "Could not open encoder", // mjpeg_vaapi / h264_v4l2m2m — checked only for a hardware attempt
+];
+
+/// Prefixed to a start failure the hardware caused, so the caller can tell a driver's verdict from an
+/// unreachable source without parsing ffmpeg's prose. Kept in sync with `stores/video.ts`.
+pub const HW_FAILURE_PREFIX: &str = "hardware transcode failed — ";
+
 /// The multipart HTTP response preamble sent once per client before the frame stream.
 /// `Access-Control-Allow-Origin` is required because the WebView reads this stream with `fetch` from
 /// a worker (the off-thread MJPEG reader) — a cross-origin fetch without it is blocked. An `<img>`,
@@ -88,14 +105,15 @@ const HTTP_HEADERS_OCTET: &[u8] = b"HTTP/1.1 200 OK\r\n\
 pub enum MjpegSource<'a> {
     /// A local capture device, described by the mode the user picked.
     Device(&'a super::native::CaptureSpec),
-    /// A network stream, read directly rather than through go2rtc.
+    /// A network stream, read directly rather than through a republishing engine.
     ///
-    /// go2rtc drives an `ffmpeg:` source by having ffmpeg publish **back into go2rtc** over RTSP/TCP,
-    /// so a stream that is already MJPEG gets packetised into RTP/JPEG (RFC 2435), reassembled and
-    /// repacked as HTTP multipart. Measured over the same 120 s against a UAV-Link: the source had
-    /// **zero** arrival gaps above 200 ms, go2rtc's output had **69**, each of them ~338 ms — a fixed
-    /// buffer flushing, and the cause of the freezes testers reported for years. Reading the source
-    /// once and broadcasting `-f mpjpeg` measures as clean as the source itself.
+    /// The old go2rtc chain drove an `ffmpeg:` source by having ffmpeg publish **back into it** over
+    /// RTSP/TCP, so a stream that was already MJPEG got packetised into RTP/JPEG (RFC 2435),
+    /// reassembled and repacked as HTTP multipart. Measured over the same 120 s against a UAV-Link:
+    /// the source had **zero** arrival gaps above 200 ms, the engine's output had **69**, each of
+    /// them ~338 ms — the loopback TCP-publish stall, and the cause of the freezes testers reported
+    /// for years. Reading the source once and broadcasting `-f mpjpeg` measures as clean as the
+    /// source itself.
     Rtsp { url: &'a str, transcode: RtspTranscode },
 }
 
@@ -197,6 +215,18 @@ impl MjpegServer {
                         // up SLOWER than software.
                         "-hwaccel_output_format".into(),
                         "vaapi".into(),
+                        // Without this the whole hardware path is unreachable for a large class of
+                        // FPV sources. They encode **plain Baseline** (profile_idc 66 with
+                        // constraint_set1 clear — the UAV-Link Pi among them), and Intel's iHD driver
+                        // advertises only ConstrainedBaseline/Main/High, so ffmpeg refuses before it
+                        // ever asks the GPU: "Codec h264 profile 66 not supported for hardware
+                        // decode". The frames themselves are a subset of what the decoder does every
+                        // day. Measured on that stream, 720p60, Debian 13 / Intel iGPU: 92 % of a
+                        // core in software against 10.8 % here, both at 58 fps and no drops. If a
+                        // driver really cannot decode it, the start fails the same way it does now
+                        // and the caller demotes to the software transcode on the first strike.
+                        "-hwaccel_flags".into(),
+                        "allow_profile_mismatch".into(),
                     ]),
                     RtspTranscode::Copy | RtspTranscode::Software => {}
                 }
@@ -260,9 +290,18 @@ impl MjpegServer {
         let shutdown = Arc::new(AtomicBool::new(false));
         let clients: Arc<Mutex<Vec<Client>>> = Arc::new(Mutex::new(Vec::new()));
         // First-frame signal + the first ffmpeg error line, so a failed capture can be reported to the
-        // caller instead of only reaching the log.
+        // caller instead of only reaching the log. `hw_err` collects the same for the hardware
+        // markers, whatever position they arrive in.
         let (first_tx, first_rx) = std::sync::mpsc::channel();
         let first_err: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let hw_err: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let hw_attempt = matches!(
+            source,
+            MjpegSource::Rtsp {
+                transcode: RtspTranscode::Vaapi(_) | RtspTranscode::V4l2m2m,
+                ..
+            }
+        );
 
         let accept = {
             let clients = clients.clone();
@@ -275,7 +314,8 @@ impl MjpegServer {
         };
         let stderr_thread = {
             let first_err = first_err.clone();
-            thread::spawn(move || log_ffmpeg_stderr(stderr, first_err))
+            let hw_err = hw_err.clone();
+            thread::spawn(move || log_ffmpeg_stderr(stderr, first_err, hw_err))
         };
 
         // Don't report success until the capture actually delivers. Previously `start()` returned as
@@ -289,10 +329,19 @@ impl MjpegServer {
             let _ = reader.join();
             let _ = accept.join();
             let _ = stderr_thread.join(); // stderr is at EOF now → the error line is recorded
-            let detail = first_err.lock().ok().and_then(|g| g.clone());
+            // A hardware marker outranks the first line: it is the one that explains the failure,
+            // where the first line may be a damaged macroblock the decoder shrugged off.
+            let hw_detail = hw_err.lock().ok().and_then(|g| g.clone()).filter(|_| hw_attempt);
+            let detail = hw_detail
+                .clone()
+                .or_else(|| first_err.lock().ok().and_then(|g| g.clone()));
             let msg = match detail {
                 Some(line) => format!("{reason}: {line}"),
                 None => reason,
+            };
+            let msg = match hw_detail {
+                Some(_) => format!("{HW_FAILURE_PREFIX}{msg}"),
+                None => msg,
             };
             let what = match source {
                 MjpegSource::Device(_) => "native capture",
@@ -613,14 +662,25 @@ fn broadcast_loop(
 /// Forward ffmpeg's stderr to the log. With `-loglevel error` these are genuine errors (device lost,
 /// corrupt frame, codec failure) → tester-relevant, so they go at the default-visible `warn` level.
 /// The **first** line is also recorded in `first_err` so a start-up failure can be reported to the UI
-/// with ffmpeg's own wording (e.g. "Selected video size is not supported by the device").
-fn log_ffmpeg_stderr(stderr: Option<ChildStderr>, first_err: Arc<Mutex<Option<String>>>) {
+/// with ffmpeg's own wording (e.g. "Selected video size is not supported by the device"), and the
+/// first line naming the hardware in `hw_err` — see `HW_FAILURE_MARKERS` for why that one cannot go
+/// by position.
+fn log_ffmpeg_stderr(
+    stderr: Option<ChildStderr>,
+    first_err: Arc<Mutex<Option<String>>>,
+    hw_err: Arc<Mutex<Option<String>>>,
+) {
     let Some(stderr) = stderr else { return };
     for line in BufReader::new(stderr).lines().map_while(Result::ok) {
         let line = line.trim();
         if !line.is_empty() {
             if let Ok(mut slot) = first_err.lock() {
                 slot.get_or_insert_with(|| line.to_string());
+            }
+            if HW_FAILURE_MARKERS.iter().any(|m| line.contains(m)) {
+                if let Ok(mut slot) = hw_err.lock() {
+                    slot.get_or_insert_with(|| line.to_string());
+                }
             }
             log::warn!("[video][ffmpeg] {line}");
         }
