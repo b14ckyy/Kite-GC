@@ -5,7 +5,11 @@
 //! telemetry out a *second* link. Phase 1 = serial (covers HC-05 / BT-SPP virtual COM, e.g. U360GTS);
 //! BLE / TCP-server / UDP follow in Phase 2.
 
+// Serial (serialport) and BLE (btleplug) relay outputs are desktop-only; iOS relays over Wi-Fi
+// (TCP/UDP) only. Compiled normally on every desktop target.
+#[cfg(not(target_os = "ios"))]
 pub mod ble;
+#[cfg(not(target_os = "ios"))]
 pub mod serial;
 pub mod tcp;
 pub mod udp;

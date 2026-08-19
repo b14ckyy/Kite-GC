@@ -485,7 +485,8 @@ fn resolve_terrain_cache_dir() -> PathBuf {
                 .join("terrain");
         }
     }
-    #[cfg(target_os = "macos")]
+    // iOS shares the macOS layout; `HOME` is the app sandbox container root there.
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
         if let Ok(home) = std::env::var("HOME") {
             return PathBuf::from(home)

@@ -17,11 +17,19 @@ use crate::msp::features::is_version_supported;
 use crate::scheduler;
 use crate::scheduler::TelemetryConfig;
 use crate::state::{ActiveProtocol, AppState};
-use crate::transport::{ByteTransport, PortInfo, Transport, TransportType};
+use crate::transport::{ByteTransport, Transport, TransportType};
+// PortInfo is only returned by list_serial_ports, which is desktop-only.
+#[cfg(not(target_os = "ios"))]
+use crate::transport::PortInfo;
+#[cfg(not(target_os = "ios"))]
 use crate::transport::serial::SerialConnection;
 use crate::transport::tcp::TcpTransport;
 use crate::transport::udp::UdpTransport;
-use crate::transport::ble::BleDeviceInfo;
+// BLE backend: btleplug on desktop, CoreBluetooth (objc2) on iOS. Same public surface either way.
+#[cfg(not(target_os = "ios"))]
+use crate::transport::ble::{self as ble_backend, BleDeviceInfo};
+#[cfg(target_os = "ios")]
+use crate::transport::ble_ios::{self as ble_backend, BleDeviceInfo};
 
 /// Home position pushed to the frontend (event `home-position`). Same shape/name regardless of
 /// protocol so MAVLink (HOME_POSITION) can emit it identically later.
@@ -32,7 +40,12 @@ struct HomeEvent {
     alt: f64,
 }
 
-/// List available serial ports
+/// List available serial ports.
+///
+/// Serial and BLE links are unavailable on iOS (no raw serial access, no btleplug backend), so the
+/// serial/BLE connection commands are compiled out there; the iOS build connects over Wi-Fi
+/// (TCP/UDP MAVLink) only. Every desktop target keeps them unchanged.
+#[cfg(not(target_os = "ios"))]
 #[tauri::command]
 pub fn list_serial_ports() -> Vec<PortInfo> {
     crate::transport::serial::list_ports()
@@ -41,7 +54,7 @@ pub fn list_serial_ports() -> Vec<PortInfo> {
 /// Scan for BLE devices matching known serial profiles
 #[tauri::command]
 pub async fn scan_ble_devices() -> Result<Vec<BleDeviceInfo>, String> {
-    crate::transport::ble::scan_ble_devices().await
+    ble_backend::scan_ble_devices().await
 }
 
 /// Start a live BLE scan session. Discovered/updated devices are emitted as `ble-device` events
@@ -55,7 +68,7 @@ pub async fn ble_scan_start(app: AppHandle, state: State<'_, AppState>) -> Resul
         *guard = Some(tx);
     }
     tauri::async_runtime::spawn(async move {
-        if let Err(e) = crate::transport::ble::run_scan_session(app, rx).await {
+        if let Err(e) = ble_backend::run_scan_session(app, rx).await {
             log::warn!("BLE scan session ended: {}", e);
         }
     });
@@ -171,8 +184,11 @@ pub async fn connect(
         proto, transport_type, port, baud_rate, host, tcp_port, ble_device_id,
     );
 
-    // Open byte-level transport based on type
+    // Open byte-level transport based on type. Serial is desktop-only (no raw serial access on iOS);
+    // on iOS the Serial variant falls through to the catch-all and is rejected. BLE works on both
+    // (btleplug on desktop, CoreBluetooth on iOS). TCP/UDP are platform-independent.
     let byte_transport: Box<dyn ByteTransport> = match transport_type {
+        #[cfg(not(target_os = "ios"))]
         TransportType::Serial => {
             let port_name = port.ok_or("Serial port name required")?;
             let baud = baud_rate.unwrap_or(115200);
@@ -193,11 +209,13 @@ pub async fn connect(
             if proto == "telemetry" {
                 // Passive mode: no known profile required — auto-discover + subscribe to all
                 // Notify/Indicate characteristics and dump the GATT table to the Debug Monitor.
-                Box::new(crate::transport::ble::connect_ble_listen(&dev_id, app_handle.clone()).await?)
+                Box::new(ble_backend::connect_ble_listen(&dev_id, app_handle.clone()).await?)
             } else {
-                Box::new(crate::transport::ble::connect_ble(&dev_id).await?)
+                Box::new(ble_backend::connect_ble(&dev_id).await?)
             }
         }
+        #[cfg(target_os = "ios")]
+        _ => return Err("Serial is not available on iOS; use Wi-Fi (TCP/UDP) or BLE".into()),
     };
 
     log::info!("Transport opened, protocol={}", proto);

@@ -22,8 +22,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
-use source::{RadarSource, SourceHandle, SourceUpdate};
-use sources::formation_flight::NodePos;
+use source::{NodePos, RadarSource, SourceHandle, SourceUpdate};
 use vehicle::{TrackedVehicle, VehicleSource, VehicleSystem};
 
 /// Consolidated snapshot event name — same regardless of which sources are active.
@@ -140,9 +139,12 @@ pub struct AdsbLocalSource {
     pub name: String,
     #[serde(default)]
     pub transport: String,
+    // port + baud are consumed only by the serial ADS-B source, which is compiled out on iOS.
     #[serde(default)]
+    #[cfg_attr(target_os = "ios", allow(dead_code))]
     pub port: String,
     #[serde(default)]
+    #[cfg_attr(target_os = "ios", allow(dead_code))]
     pub baud: u32,
     #[serde(default)]
     pub enabled: bool,
@@ -391,6 +393,8 @@ fn build_sources(
         for ls in config.adsb.local.iter().filter(|l| l.enabled) {
             let transport = if ls.transport.is_empty() { "serial" } else { ls.transport.as_str() };
             match transport {
+                // Serial ADS-B receivers are desktop-only (no serial backend on iOS).
+                #[cfg(not(target_os = "ios"))]
                 "serial" if !ls.port.is_empty() => {
                     let baud = if ls.baud > 0 { ls.baud } else { 57600 };
                     let src = Box::new(sources::adsb_mavlink::AdsbMavlinkSource::new(
@@ -423,18 +427,27 @@ fn make_ff(
     if !ff.enabled || ff.port.is_empty() {
         return None;
     }
-    let baud = ff_baud(config);
-    let src = Box::new(sources::formation_flight::FormationFlightSource::new(
-        "FormationFlight".to_string(),
-        ff.port.clone(),
-        baud,
-        node_name.clone(),
-        node_pos.clone(),
-        app.clone(),
-    ));
-    let handle = src.start(tx.clone());
-    eprintln!("[radar][ff] started on {} @ {}", ff.port, baud);
-    Some(FfRunning { handle, port: ff.port.clone(), baud })
+    // FormationFlight talks to the ESP32 module over a serial port, which iOS has no access to.
+    #[cfg(target_os = "ios")]
+    {
+        let _ = (tx, app, node_pos, node_name);
+        None
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let baud = ff_baud(config);
+        let src = Box::new(sources::formation_flight::FormationFlightSource::new(
+            "FormationFlight".to_string(),
+            ff.port.clone(),
+            baud,
+            node_name.clone(),
+            node_pos.clone(),
+            app.clone(),
+        ));
+        let handle = src.start(tx.clone());
+        eprintln!("[radar][ff] started on {} @ {}", ff.port, baud);
+        Some(FfRunning { handle, port: ff.port.clone(), baud })
+    }
 }
 
 /// Reconcile the FormationFlight source against a new config WITHOUT reopening its serial port unless the

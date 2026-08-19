@@ -11,6 +11,7 @@
   import { connection, availablePorts, bleDevices } from "$lib/stores/connection";
   import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
+  import { isMobile, isTablet } from "$lib/platform";
   import { isDebugMode } from "$lib/stores/debug";
   import { telemetry } from "$lib/stores/telemetry";
   import { startRadarListeners, configureRadar, setRadarCenter, setRadarNode } from "$lib/stores/radarTracking";
@@ -42,6 +43,7 @@
   import MissionPanel from "$lib/components/mission/MissionPanel.svelte";
   import MavCommandPanel from "$lib/components/control/MavCommandPanel.svelte";
   import RcControlPanel from "$lib/components/control/RcControlPanel.svelte";
+  import VirtualSticks from "$lib/components/control/VirtualSticks.svelte";
   import VideoPanel from "$lib/components/video/VideoPanel.svelte";
   import RadarPanel from "$lib/components/RadarPanel.svelte";
   import AirspaceManagerPanel from "$lib/components/AirspaceManagerPanel.svelte";
@@ -110,9 +112,6 @@
   import { modeCategory } from "$lib/helpers/flightModeRegistry";
 
   // ── Layout zone CSS custom properties (driven by layout store) ──
-  const gridBottomHeight = $derived(
-    $layout.bottomDock.sizeOverride ?? GRID_DEFAULTS.bottomDockHeight
-  );
   const gridSideWidth = $derived(
     $layout.sideDock.sizeOverride ?? GRID_DEFAULTS.sideDockWidth
   );
@@ -185,6 +184,9 @@
   // Measured container dimensions (bind:clientWidth/Height on grid zones)
   let bottomDockW = $state(800);
   let bottomDockH = $state(200);
+  // Live toolbar height (exposed as --toolbar-h). The phone toolbar wraps/collapses so its height
+  // varies; the absolutely-positioned nav-rail + panels track this so they never hide under it.
+  let toolbarH = $state(53);
   let sideDockW = $state(200);
   let sideDockH = $state(400);
 
@@ -196,6 +198,17 @@
     $videoState.floating && $videoState.floatSnapped
       ? Math.min($videoState.floatHeightFrac * winH * ($videoState.aspect || 16 / 9), winW * 0.7) + 16
       : 0,
+  );
+
+  // Phone portrait: too narrow to fit the bottom HUD tiles in one row without clipping, so the dock
+  // wraps them onto two rows (see the sizing below + the flex-wrap rule in WidgetPanel). Tablets and
+  // desktop keep the single row. `winW`/`isMobile` are reactive so a rotate re-evaluates this.
+  const isPhone = $derived(isMobile && winW <= 600);
+  const bottomRows = $derived(isPhone ? 2 : 1);
+  // Phone gets a taller dock (room for two HUD rows); otherwise the layout store override or default.
+  const gridBottomHeight = $derived(
+    $layout.bottomDock.sizeOverride ??
+      (isPhone ? 'clamp(230px, 40vh, 380px)' : GRID_DEFAULTS.bottomDockHeight)
   );
 
   // Map-swap: the full-size video sink shown in the map zone when videoPrimary.
@@ -315,21 +328,27 @@
   // This fully decouples bottom dock and side dock scaling.
   // Subtract zone padding (6px each side) from cross-axis measurement.
   const DOCK_PAD = 6;
-  const bottomPxPerUnit = $derived((bottomDockH - 2 * DOCK_PAD) / LARGE_BASE_VMIN);
+  // On phone the dock is two rows tall, so a tile is sized to ONE row (dock height / rows). Desktop
+  // and tablet keep the full-height single-row tile.
+  const bottomPxPerUnit = $derived((bottomDockH / bottomRows - 2 * DOCK_PAD) / LARGE_BASE_VMIN);
   const sidePxPerUnit   = $derived((sideDockW  - 2 * DOCK_PAD) / LARGE_BASE_VMIN);
 
   // Available space expressed in abstract units (container px / pxPerUnit)
-  // Bottom: subtract edit button (28px) + wrapper gap (6px) + zone padding (12px)
-  const bottomAvailUnits = $derived(Math.max(0, (bottomDockW - 34 - 2 * DOCK_PAD - videoReserve) / bottomPxPerUnit));
+  // Bottom: subtract edit button (28px) + wrapper gap (6px) + zone padding (12px). Multiply by the row
+  // count so the sizing algorithm (which lays out in one line) budgets for two rows on phone and keeps
+  // the tiles a readable size; flex-wrap then splits them across the rows.
+  const bottomAvailUnits = $derived(Math.max(0, ((bottomDockW - 34 - 2 * DOCK_PAD - videoReserve) / bottomPxPerUnit) * bottomRows));
   const rightAvailUnits  = $derived(Math.max(0, (sideDockH - 2 * DOCK_PAD) / sidePxPerUnit));
 
   let appVersion = $state("...");
-  let selectedTransport = $state<TransportType>('serial');
-  let selectedProtocol = $state<ProtocolType>('msp');
+  // iOS has no serial/BLE, so the iPad build defaults to Wi-Fi MAVLink (UDP 14550, the MAVLink
+  // convention). Desktop keeps its serial/MSP defaults.
+  let selectedTransport = $state<TransportType>(isMobile ? 'udp' : 'serial');
+  let selectedProtocol = $state<ProtocolType>(isMobile ? 'mavlink' : 'msp');
   let selectedPort = $state("");
   let selectedBaud = $state(115200);
   let tcpHost = $state("192.168.1.1");
-  let tcpPort = $state(5761);
+  let tcpPort = $state(isMobile ? 14550 : 5761);
   let selectedBleDevice = $state("");
   let bleDeviceList = $state<BleDeviceInfo[]>([]);
   let isBleScanning = $state(false);
@@ -632,11 +651,19 @@
     $connection.status === 'connected' && $connection.protocolType === 'telemetry'
   );
   const rcTabAvailable = $derived($settings.rcControl.enabled && !isTelemetryConnected);
+  // On mobile there is no joystick, but the on-screen touch sticks (VirtualSticks) can drive RC over
+  // Wi-Fi. RC is safety-relevant and barely field-tested, so touch control is opt-in behind the SAME
+  // master switch as the joystick path (`rcTabAvailable`) rather than appearing whenever an FC is
+  // connected — one switch governs both, no matter the input device. On top of that, mobile also needs a
+  // control-capable connection (MSP or MAVLink, not passive telemetry).
+  const mobileRcAvailable = $derived(
+    isMobile && rcTabAvailable && $connection.status === 'connected'
+  );
 
   // If the RC tab is open when it becomes unavailable (e.g. a telemetry connection comes up), fall back
   // to the UAV-info tab so the now-hidden panel isn't left rendered.
   $effect(() => {
-    if (!rcTabAvailable && activeTab === 'rc-control') activeTab = 'uav-info';
+    if (!rcTabAvailable && !mobileRcAvailable && activeTab === 'rc-control') activeTab = 'uav-info';
   });
 
   const allTabs = [
@@ -660,7 +687,8 @@
     allTabs.filter(t =>
       (t.id !== 'logbook' || flightLoggingEnabled) &&
       (t.id !== 'control' || isMavlinkConnected) && // control tab only when connected via MAVLink
-      (t.id !== 'rc-control' || rcTabAvailable) && // RC tab: master switch on + not telemetry-connected
+      (t.id !== 'rc-control' || (rcTabAvailable && !isMobile) || mobileRcAvailable) && // RC tab: desktop needs the master switch + a joystick; mobile uses on-screen sticks when a FC is connected
+      (t.id !== 'video' || !isMobile) && // video uses go2rtc/ffmpeg, unavailable on iOS
       (t.id !== 'radar' || radarSettings.enabled) && // radar tab only when the master switch is on
       (t.id !== 'airspace' || airspaceSettings.enabled || geozonesAvailable || fenceAvailable || rallyAvailable) // airspace: master switch, or geozone (INAV) / fence+rally (MAVLink) capable FC
     )
@@ -710,8 +738,10 @@
   selectedPort = saved.lastPort;
   selectedBaud = saved.lastBaud;
   selectedProtocol = (saved.lastProtocol === 'mavlink' ? 'mavlink' : 'msp') as ProtocolType;
-  // Restore the full last-used connection path so nothing has to be re-entered.
-  if (saved.lastTransport === 'serial' || saved.lastTransport === 'tcp' || saved.lastTransport === 'udp' || saved.lastTransport === 'ble') {
+  // Restore the full last-used connection path so nothing has to be re-entered. iOS has no serial, so
+  // a serial value carried over from a synced desktop setting is ignored; TCP/UDP/BLE are all valid.
+  if (saved.lastTransport === 'tcp' || saved.lastTransport === 'udp' || saved.lastTransport === 'ble'
+      || (!isMobile && saved.lastTransport === 'serial')) {
     selectedTransport = saved.lastTransport;
   }
   if (saved.lastHost) tcpHost = saved.lastHost;
@@ -2453,7 +2483,7 @@
 
 <svelte:window bind:innerWidth={winW} bind:innerHeight={winH} />
 
-<div class="ui-root" style:--ui-scale={uiScale}>
+<div class="ui-root" style:--ui-scale={uiScale} style:--toolbar-h="{toolbarH}px">
   <!-- Window resize grips — outside `.ui-scale` so position:fixed stays viewport-relative.
        Re-adds edge resizing lost when the native decorations are disabled. -->
   <WindowResizeBorders />
@@ -2557,11 +2587,12 @@
 
 <main
   class="app"
+  class:rc-sticks-active={isMobile && activeTab === 'rc-control'}
   style:--grid-bottom-height={gridBottomHeight}
   style:--grid-side-width={gridSideWidth}
 >
   <!-- ======= TOOLBAR ======= -->
-  <div class="zone-toolbar">
+  <div class="zone-toolbar" bind:clientHeight={toolbarH}>
     <Toolbar
     {appVersion}
     {telem}
@@ -2771,7 +2802,11 @@
     {:else if activeTab === 'control'}
       <MavCommandPanel />
     {:else if activeTab === 'rc-control'}
-      <RcControlPanel />
+      {#if isMobile}
+        <VirtualSticks />
+      {:else}
+        <RcControlPanel />
+      {/if}
     {:else if activeTab === 'radar'}
       <RadarPanel radar={radarSettings} {interfaceSettings} referencePoint={radarReference} mspSupported={mspAdsbSupported} onPatch={applySettingsPatch} />
     {:else if activeTab === 'airspace'}
@@ -2809,6 +2844,7 @@
         orientation="horizontal"
         availableVmin={bottomAvailUnits}
         pxPerVmin={bottomPxPerUnit}
+        smallBoost={isPhone ? 1.5 : isTablet ? 1.4 : 1}
         {telem}
         editing={widgetEditMode}
         {interfaceSettings}
@@ -2833,6 +2869,7 @@
       orientation="vertical"
       availableVmin={rightAvailUnits}
       pxPerVmin={sidePxPerUnit}
+      smallBoost={isTablet ? 1.4 : 1}
       {telem}
       editing={widgetEditMode}
       {interfaceSettings}
@@ -3005,6 +3042,71 @@
     z-index: 200;
   }
 
+  /* Mobile top safe-area: the iOS status bar (clock/battery/notch) overlays the toolbar. Grow the
+     toolbar grid row by the safe-area inset, pad the toolbar content down into the visible strip, and
+     push the top-anchored map/video/toast layers down to match so nothing hides under the status bar. */
+  :global(html.is-mobile) .app {
+    grid-template-rows: calc(53px + var(--safe-top, 0px)) 1fr var(--grid-bottom-height) 24px;
+  }
+  :global(html.is-mobile) .zone-toolbar {
+    padding-top: var(--safe-top, 0px);
+    box-sizing: border-box;
+  }
+  :global(html.is-mobile) .layer-map {
+    /* Track the live toolbar height (includes the status-bar inset) so the map starts exactly at the
+       bar's bottom edge, with no grey strip below the blue divider when the bar is collapsed/short. */
+    top: calc(var(--toolbar-h, 53px) * var(--ui-scale, 1));
+  }
+  /* Mobile (phone + tablet): hand all touch gestures on the map to Leaflet (pan + pinch). Without
+     touch-action:none the iOS WebView swallows the single-finger drag (only pinch/zoom-buttons work).
+     Scoped to the map so panel scrollers keep their native touch scrolling. */
+  :global(html.is-mobile) .layer-map,
+  :global(html.is-mobile) .layer-map :global(.leaflet-container) {
+    touch-action: none;
+  }
+  :global(html.is-mobile) .map-video-wrap {
+    top: var(--toolbar-h, 53px);
+  }
+  :global(html.is-mobile) .app-toasts {
+    top: var(--safe-top, 0px);
+  }
+
+  /* Phone portrait is too narrow to fit the toolbar on one row, so it wraps to multiple lines
+     (see Toolbar.svelte). Size the toolbar grid row to its content instead of the fixed one-row
+     height so the wrapped bar is never clipped and the nav-rail / panels below are pushed down
+     cleanly rather than tucked under it. Tablets keep the fixed row (wider screen fits one row). */
+  @media (max-width: 600px) {
+    :global(html.is-mobile) .app {
+      /* Bottom bar hidden on phone (redundant with the collapsed top strip; arming moves into it). The
+         last row is kept as a thin strip (home-indicator inset + room for the Leaflet label) so the HUD
+         sits above it and the label is not covered; the map runs full-height behind it. */
+      grid-template-rows: auto 1fr var(--grid-bottom-height) calc(var(--safe-bottom, 0px) + 20px);
+      /* Reclaim the left nav-rail column for the bottom dock (NavRail is absolutely positioned, so its
+         grid cell is empty): gives the HUD tiles the full left-to-right width on phone and uses the
+         empty space on the left. Map controls keep the right column. */
+      grid-template-areas:
+        "toolbar      toolbar      toolbar      toolbar"
+        "nav-rail     panel        side-dock    side-dock"
+        "bottom-dock  bottom-dock  bottom-dock  map-controls"
+        "status-bar   status-bar   status-bar   status-bar";
+    }
+    /* Redundant on phone (same status as the top strip); hidden. */
+    :global(html.is-mobile) .zone-status-bar {
+      display: none;
+    }
+    /* Map runs all the way to the bottom edge (behind the home indicator) so there is no grey strip. */
+    :global(html.is-mobile) .layer-map {
+      bottom: 0;
+    }
+    /* Top-align the right side dock so MODE sits just under the toolbar (the zone centered the whole
+       widget block vertically, leaving a big gap above it). The 8px top padding matches the panel/
+       nav-rail offset so MODE lines up with the UAV Info panel below the bar. */
+    :global(html.is-mobile) .zone-side-dock {
+      align-items: flex-start;
+      padding-top: 8px;
+    }
+  }
+
   /* Map layer — UNZOOMED overlay over the content area. The toolbar (53px) and status
      bar (24px) live in the zoomed `.ui-scale`, so their visual heights are *--ui-scale;
      the map offsets track that. z-index 0 keeps it behind the chrome normally. When the
@@ -3144,6 +3246,13 @@
     pointer-events: auto;
   }
 
+  /* When the on-screen RC sticks are up (mobile, rc-control tab) they cover the bottom ~46vh as a
+     fixed overlay. Lift the HUD dock above the sticks so HOME/SPD/ALT/GPS stay visible instead of
+     being obscured. VirtualSticks .vs-root is height: 46vh. */
+  .app.rc-sticks-active .zone-bottom-dock {
+    transform: translateY(calc(-46vh - 8px));
+  }
+
   .zone-bottom-dock > * {
     pointer-events: auto;
   }
@@ -3191,6 +3300,19 @@
     align-items: flex-end;
     gap: 6px;
     pointer-events: auto;
+  }
+  /* Phone: stack the edit button ABOVE the HUD (not beside it) so the tiles get the full dock width
+     and use the empty left space. Button sits top-right, out of the way. */
+  @media (max-width: 600px) {
+    :global(html.is-mobile) .panel-bottom-wrap {
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
+      width: 100%;
+    }
+    :global(html.is-mobile) .panel-bottom-wrap > :global(.widget-panel) {
+      width: 100%;
+    }
   }
 
   /* --- Widget edit toggle button --- */

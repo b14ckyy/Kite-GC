@@ -31,6 +31,7 @@
         <div class="msg-line {msg.level}">
           <span class="m-icon">{ICON[msg.level]}</span>
           <span class="m-text">{msg.text}</span>
+          {#if msg.repeats > 1}<span class="m-count">×{msg.repeats}</span>{/if}
         </div>
       {/each}
     </div>
@@ -61,6 +62,15 @@
     font-family: 'Segoe UI', Tahoma, sans-serif;
   }
 
+  /* Mobile: the phone toolbar wraps onto several rows while disconnected/expanded, so a fixed 56px
+     lands *inside* it and the messages cover the connection banner. Track the live bar height instead —
+     the same --toolbar-h the map layer and nav-rail follow. The parent .app-toasts layer is already
+     offset by --safe-top and --toolbar-h includes that same inset (the toolbar pads itself down into
+     the visible strip), so subtract it here or the status-bar strip is counted twice. */
+  :global(html.is-mobile) .msg-banner {
+    top: calc(var(--toolbar-h, 53px) - var(--safe-top, 0px) + 8px);
+  }
+
   .msg-lines {
     display: flex;
     flex-direction: column;
@@ -85,6 +95,8 @@
   }
   .m-icon { font-size: 11px; line-height: 1; flex: 0 0 auto; }
   .m-text { overflow: hidden; text-overflow: ellipsis; }
+  /* Repeat tally for a message the FC keeps re-sending — dimmed so it reads as metadata, not content. */
+  .m-count { flex: 0 0 auto; margin-left: auto; padding-left: 8px; font-size: 11px; opacity: 0.55; font-variant-numeric: tabular-nums; }
 
   .msg-line.info    { color: #cfe7f3; }
   .msg-line.info .m-icon { color: #37a8db; }

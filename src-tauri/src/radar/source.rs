@@ -8,8 +8,14 @@
 // See docs/active/RADAR_TRACKING_CORE.md §5.
 
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 
 use super::vehicle::{TrackedVehicle, VehicleSource, VehicleSystem};
+
+/// This radar node's own position `(lat, lon, alt)`, shared with sources that report positions
+/// relative to it (e.g. FormationFlight). Lives here rather than in a source module so it stays
+/// available on every target, including iOS where the serial-based sources are compiled out.
+pub type NodePos = Arc<Mutex<Option<(f64, f64, f64)>>>;
 
 /// A batch of vehicles reported by one source at one instant.
 pub struct SourceUpdate {
