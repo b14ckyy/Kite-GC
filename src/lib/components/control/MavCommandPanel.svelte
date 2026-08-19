@@ -217,7 +217,7 @@
           <span class="cc-sec-title">{$t('control.section.adjust')}</span>
           {#if hasAltitude && inGuided}
             <div class="cc-adjust">
-              <NumberStepper bind:value={changeAltVal} min={1} max={1000} step={5} unit="m" />
+              <NumberStepper bind:value={changeAltVal} min={1} max={5000} step={5} unit="m" />
               <Button variant="standard" size="sm" disabled={busy('changeAlt')} onclick={() => changeAlt(changeAltVal)}>{$t('control.action.changeAlt')}</Button>
             </div>
           {/if}
