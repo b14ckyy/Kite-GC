@@ -12,6 +12,7 @@
 -->
 <script lang="ts">
   import { t } from 'svelte-i18n';
+  import { anyCase } from '$lib/helpers/fileFilters';
   import { get } from 'svelte/store';
   import { save, open as openFileDialog } from '@tauri-apps/plugin-dialog';
   import { settings } from '$lib/stores/settings';
@@ -402,7 +403,7 @@
   // ── Import (.kvehicle) ──────────────────────────────────────────────
   async function handleImport() {
     try {
-      const path = await openFileDialog({ title: $t('vehicleMgr.importTitle'), multiple: false, filters: [{ name: 'Vehicle', extensions: ['kvehicle'] }] });
+      const path = await openFileDialog({ title: $t('vehicleMgr.importTitle'), multiple: false, filters: [{ name: 'Vehicle', extensions: anyCase(['kvehicle']) }] });
       if (!path || typeof path !== 'string') return;
       importFile = await vehicleFileRead(path);
       editing = false;

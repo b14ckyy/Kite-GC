@@ -19,9 +19,9 @@ place, see the **[Video guide](../guides/video.md)**.
 
 RTSP is played in one of two ways, and which one your machine uses decides what has to be installed:
 
-- **The direct path** uses a small bundled engine (**go2rtc**), which Kite downloads automatically the
+- **The direct path** uses a small bundled engine (**MediaMTX**), which Kite downloads automatically the
   first time you start an RTSP source. This is what Windows and macOS use.
-- **The image path** uses only the **ffmpeg** helper — no go2rtc at all. Kite falls back to it where the
+- **The image path** uses only the **ffmpeg** helper — no MediaMTX at all. Kite falls back to it where the
   browser engine offers no direct video path (common on Linux, see below), and always for a source that
   already sends **MJPEG**, which the direct path cannot carry.
 
@@ -30,14 +30,15 @@ If a stream won't come up:
 - **Let the helper download finish.** The Video panel shows the status of whichever helper your machine
   needs and offers the download if it's missing. If the download fails (no internet, or an unsupported
   CPU architecture), you'll get a hint to install it manually. On a machine that only ever uses the
-  image path, go2rtc is neither required nor offered.
+  image path, MediaMTX is neither required nor offered.
 - **Check the URL and reachability.** A typo, a camera that's off, a firewall, or a source on a different
   network will all stop it. Confirm the exact `rtsp://…` URL works in another player (e.g. VLC) from the
   same machine.
 - **Match the transport.** Some servers are **UDP-only** (they reject TCP clients) — set the connection's
-  **Transport** to **UDP** in the Video panel (needs the ffmpeg helper). Conversely, if UDP is blocked on
-  your network, try **TCP**. **Auto** tries the native reader first and falls back to ffmpeg. The setting
-  applies to the direct path; on the image path ffmpeg negotiates the transport itself and reads both.
+  **Transport** to **UDP** in the Video panel. Conversely, if UDP is blocked on your network, try **TCP**.
+  **Auto** lets the engine negotiate, and falls back to an ffmpeg reader for servers that refuse every
+  forced transport. The setting applies to the direct path; on the image path ffmpeg negotiates the
+  transport itself and reads both.
 
 ## The stream keeps showing "Reconnecting…" — check the codec first
 
@@ -94,23 +95,42 @@ help:
 - Move closer to the access point, or onto a less crowded channel.
 - If the machine has to stay on Wi-Fi, turning off its power-saving mode for the wireless adapter is
   worth a try.
+- **Raise the smoothing buffer** (Video panel, below the connection list) if you have to live with the
+  link. It cannot bring back frames that never arrived, but it holds a small cushion of frames and
+  plays them out evenly, so a short pause in delivery no longer becomes a visible hitch. It works on
+  both video paths. The cost is exactly the latency you buy: one frame time per step, ~17 ms at 60 fps.
+  Match it to the gaps you measured — a pause of a tenth of a second needs about six frame times at
+  60 fps to be covered completely, so a setting that is too small will smooth part of the hitch and no
+  more. With the **Debug Monitor** open (Video stats), *Smoothing buffer held* shows what the cushion
+  actually contains: if it keeps falling to zero, the link's pauses are longer than the depth you chose.
 
 ## A specific RTSP server gives a black screen
 
-Some servers (notably the **OBS RTSP server**) reject go2rtc's native reader. Kite automatically retries
-such sources through an **ffmpeg fallback** reader — but that needs **ffmpeg**, which is a separate
-optional download:
+Some servers (notably the **OBS RTSP server**) reject the engine's native reader. Kite automatically
+retries such sources through an **ffmpeg fallback** reader — but that needs **ffmpeg**, which is a
+separate optional download:
 
 - The Video panel offers an **ffmpeg (fallback)** download when it's missing. Install it and start the
   stream again.
-- The panel shows **which reader is live** (go2rtc native vs the ffmpeg fallback), so you can tell which
+- The panel shows **which reader is live** (native vs the ffmpeg fallback), so you can tell which
   path your source is using.
+
+## Playback looks uneven (micro-stutter, no real freezes)
+
+If the stream runs without dropouts but single frames look duplicated or skipped — most visible in
+smooth camera pans — the frames are arriving slightly unevenly (network jitter). Raise the
+**Smoothing buffer** in the Video panel's RTSP section one step at a time (see the
+[video guide](../guides/video.md#rtsp-connections-transport-and-auto-reconnect)); each step trades one
+frame time of latency for smoothing. On a clean local network the buffer usually makes no visible
+difference — leave it at **0** there.
 
 ## Latency is high
 
 With a sensibly-configured encoder, end-to-end latency is low (roughly a couple of hundred milliseconds).
 If it's much worse, the cause is usually the **source**: a large keyframe interval, a big encoder buffer,
-or a non-low-latency tuning. Tune the encoder/camera for low-latency streaming.
+or a non-low-latency tuning. Tune the encoder/camera for low-latency streaming. Also check the
+**Smoothing buffer** in the Video panel's RTSP section: every step above 0 deliberately adds latency —
+set it back to 0 for the minimum.
 
 ## Linux: high CPU load or a stuttering picture
 
@@ -121,7 +141,7 @@ guide. The log tells you what your system offers. Restart Kite, start your strea
 
 ```
 [webkit]    WebKitGTK 2.xx.y — enable-webrtc set, reads back as true
-[gstreamer] webrtcbin=… · h264 decoders=[…]
+[gstreamer] webrtcbin=… · ice(nice)=… · dtls=… · srtp=… · rtpbin=… · h264 decoders=[…]
             WebRTC is unavailable in this WebView — falling back to the MJPEG image path
 ```
 
@@ -129,17 +149,31 @@ guide. The log tells you what your system offers. Restart Kite, start your strea
 converts the stream frame by frame, which is what drives the CPU up and limits the resolution you can
 sustain. Two things are worth knowing:
 
-- **This is usually not something you can install your way out of.** Several Linux distributions —
-  Raspberry Pi OS among them — ship a browser engine built *without* the direct video path, and it then
-  stays unavailable no matter which media packages are present. On a Raspberry Pi 5 we measured the
-  engine reporting the feature as enabled, all the expected media plugins installed, and it still wasn't
-  there. If `webrtcbin=false` appears in your log it is still worth installing
-  `gstreamer1.0-plugins-bad` (and `gstreamer1.0-libav` if the decoder list is empty) — that is a genuine
-  prerequisite — but do not expect it to be sufficient.
-  Note that these package installs only affect the **system installation (.deb)**: the **AppImage**
-  brings its own browser engine and does not use the system's media packages at all. If video matters
-  to you on Linux, prefer the **.deb / system installation** — it uses your distribution's engine and
-  plugins, which you can at least influence.
+- **You cannot install your way out of this one.** The direct video path is a **compile-time option of
+  the browser engine**. If your distribution built WebKitGTK without it, it stays missing no matter
+  which media packages are present — there is no package that adds it, and the engine still reports the
+  feature as "enabled" because that switch only sets a preference with nothing behind it. Several
+  distributions build it that way. On **Debian 13** (engine 2.52.5) we verified it end to end: every
+  plugin present, the feature reading back as enabled, the library containing none of the actual
+  implementation, and the interface absent even in a freshly created window. A **Raspberry Pi 5**
+  behaved identically. You can check your own machine in a terminal (`strings` comes with `binutils`):
+
+    ```bash
+    strings /usr/lib/*/libwebkit2gtk-4.1.so.0 | grep -cw createOffer
+    ```
+
+    **0** — this engine has no WebRTC compiled in. Kite's image path is then the normal, expected path
+    on that machine and the log line above is not a fault to chase; skip to the points below, which are
+    the ones that actually help. **1 or more** — the engine can do it, and then the plugins do matter:
+    if any of `webrtcbin`, `ice(nice)`, `dtls`, `srtp` or `rtpbin` reads `false` in your log, install
+    `gstreamer1.0-plugins-bad`, `gstreamer1.0-nice`, `gstreamer1.0-plugins-good`, plus
+    `gstreamer1.0-libav` if the decoder list is empty (recent Kite **.deb** packages request these
+    automatically on install).
+
+    Either way, package installs only affect the **system installation (.deb)**: the **AppImage** brings
+    its own browser engine and does not use the system's media packages at all. If video matters to you
+    on Linux, prefer the **.deb / system installation** — it uses your distribution's engine and plugins,
+    which you can at least influence.
 - **Hardware conversion is used automatically where it exists.** Kite tests the machine once at
   start-up and writes the verdict to the log:
     - Desktop graphics (Intel and AMD, via VAAPI) can do **both halves** — decoding and re-encoding —
@@ -207,5 +241,5 @@ workaround ran and which variant it used.
 ## Still stuck?
 
 Grab a **diagnostic log** (**Settings → Diagnostics → Log Level = Debug**, reproduce, then **Open Log
-Folder**) and attach it when reporting the problem — it records the go2rtc / ffmpeg startup and any error.
+Folder**) and attach it when reporting the problem — it records the engine / ffmpeg startup and any error.
 See the [connection troubleshooting](connection.md#getting-a-diagnostic-log) page for the log locations.

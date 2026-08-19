@@ -27,6 +27,24 @@
   "bundle": {
     "active": true,
     "targets": ["nsis", "deb", "appimage", "rpm"],
+    "linux": {
+      "deb": {
+        "depends": [
+          "gstreamer1.0-plugins-good",
+          "gstreamer1.0-plugins-bad",
+          "gstreamer1.0-nice",
+          "gstreamer1.0-libav"
+        ],
+        "recommends": ["gstreamer1.0-tools"]
+      },
+      "rpm": {
+        "recommends": [
+          "gstreamer1-plugins-good",
+          "gstreamer1-plugins-bad-free",
+          "libnice-gstreamer1"
+        ]
+      }
+    },
     "macOS": {
       "entitlements": "Entitlements.plist",
       "minimumSystemVersion": "10.15"

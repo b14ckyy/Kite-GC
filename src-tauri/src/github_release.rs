@@ -3,7 +3,7 @@
 
 //! API-free GitHub release resolution for the on-demand helper binaries.
 //!
-//! All three sideloads (`blackbox_decode`, `ffmpeg`, `go2rtc`) used to resolve their download through
+//! The sideloads (`blackbox_decode`, `ffmpeg`, and formerly `go2rtc`) used to resolve their download through
 //! `api.github.com/repos/<repo>/releases/latest`. Unauthenticated, that endpoint allows **60 requests
 //! per hour per IP** and answers **HTTP 403** once the budget is gone — and the budget is shared by
 //! everyone behind the same NAT/CGNAT address. A Raspberry Pi on an LTE link can therefore fail on its
@@ -12,7 +12,7 @@
 //!
 //! The plain `github.com/<repo>/releases/…` paths are CDN-backed and not rate-limited, so we use those:
 //!
-//! * **fixed asset names** (go2rtc, BtbN ffmpeg) → `releases/latest/download/<name>` redirects straight
+//! * **fixed asset names** (BtbN ffmpeg) → `releases/latest/download/<name>` redirects straight
 //!   to that asset of the newest release. One request, nothing to parse.
 //! * **versioned asset names** (blackbox-tools ships `blackbox-tools-9.0.0_linux-aarch64.tar.zst`) →
 //!   `releases/latest` answers `302` with the tag in the `Location` header, and

@@ -77,6 +77,8 @@ struct Snap {
     hdop: Option<f64>,
     eph: Option<f64>,
     epv: Option<f64>,
+    wind_n: Option<f64>,
+    wind_e: Option<f64>,
 }
 
 /// Vehicle identity recovered from the log (MSP handshake frames, if captured — continuous mode — or
@@ -138,9 +140,9 @@ fn snap_to_record(s: &Snap, t_ms: i64) -> TelemetryRecord {
         rx_signal_received: None,
         hw_health_status: None,
         baro_temperature: None,
-        wind_n_ms: None,
-        wind_e_ms: None,
-        wind_d_ms: None,
+        wind_n_ms: s.wind_n,
+        wind_e_ms: s.wind_e,
+        wind_d_ms: None, // no column is fed from WIND.speed_z live either
         rc_data_json: None,
         rc_command_json: None,
         nav_lat: None,
@@ -284,35 +286,6 @@ fn update_from_msp(code: u16, payload: &[u8], s: &mut Snap, armed: &mut bool, id
 
 // ── MAVLink (.tlog) ──────────────────────────────────────────────────────────
 
-/// Map a vehicle's autopilot + type to (fc_variant, platform_type) — mirrors the live MAVLink handshake
-/// (handshake.rs). The variant string drives the Plane-vs-Copter flight-mode table, so getting it right
-/// is what makes the imported flight's mode resolve (and the replay model match).
-fn ardu_type_info(autopilot: MavAutopilot, t: MavType) -> (String, u8) {
-    let variant = match autopilot {
-        MavAutopilot::MAV_AUTOPILOT_ARDUPILOTMEGA => match t {
-            MavType::MAV_TYPE_FIXED_WING => "ArduPlane",
-            MavType::MAV_TYPE_GROUND_ROVER => "ArduRover",
-            MavType::MAV_TYPE_SUBMARINE => "ArduSub",
-            _ => "ArduCopter",
-        }
-        .to_string(),
-        MavAutopilot::MAV_AUTOPILOT_PX4 => "PX4".to_string(),
-        other => format!("{:?}", other),
-    };
-    let platform = match t {
-        MavType::MAV_TYPE_FIXED_WING => 1,
-        MavType::MAV_TYPE_QUADROTOR
-        | MavType::MAV_TYPE_HEXAROTOR
-        | MavType::MAV_TYPE_OCTOROTOR
-        | MavType::MAV_TYPE_TRICOPTER => 2,
-        MavType::MAV_TYPE_HELICOPTER => 3,
-        MavType::MAV_TYPE_GROUND_ROVER => 10,
-        MavType::MAV_TYPE_SUBMARINE => 12,
-        _ => 0,
-    };
-    (variant, platform)
-}
-
 /// Decode a MAVLink tlog: a sequence of `[u64 BE µs][raw frame]`. Returns (samples, identity).
 fn decode_tlog(bytes: &[u8]) -> (Vec<Sample>, Identity) {
     let mut parser = MavParser::new();
@@ -322,6 +295,8 @@ fn decode_tlog(bytes: &[u8]) -> (Vec<Sample>, Identity) {
     // Vehicle identity from the (continuously streamed) HEARTBEAT — defaults until the first one.
     let mut variant = "ArduCopter".to_string();
     let mut platform: u8 = 0;
+    // The autopilot's (system, component) id, locked onto the first HEARTBEAT that identifies one.
+    let mut fc_id: Option<(u8, u8)> = None;
     let mut i = 0usize;
 
     while i + 8 <= bytes.len() {
@@ -338,15 +313,31 @@ fn decode_tlog(bytes: &[u8]) -> (Vec<Sample>, Identity) {
             guard += 1;
             if let Some(frame) = parser.push(b) {
                 got = true;
-                // Vehicle identity (skip our own GCS heartbeat) → drives the mode table + flight model.
+                // A tlog carries every component on the link, not just the autopilot. Peripherals that
+                // share the vehicle's system id — a camera on component 100, a gimbal on 154 — publish
+                // their own HEARTBEATs with their own `custom_mode`, so consuming all of them makes the
+                // replayed flight mode flap between senders once a second, and lets a peripheral's
+                // `autopilot` field overwrite `variant`, which selects the mode table. Lock onto the
+                // autopilot the way the live handshake does and ignore heartbeats from anything else.
+                // Other message types stay unfiltered, matching the live handler.
+                let mut consume = true;
                 if let MavMessage::HEARTBEAT(hb) = &frame.message {
-                    if hb.mavtype != MavType::MAV_TYPE_GCS {
-                        let (v, p) = ardu_type_info(hb.autopilot, hb.mavtype);
+                    let id = (frame.header.system_id, frame.header.component_id);
+                    let is_autopilot = hb.mavtype != MavType::MAV_TYPE_GCS
+                        && (hb.autopilot != MavAutopilot::MAV_AUTOPILOT_INVALID || id.1 == 1);
+                    if fc_id.is_none() && is_autopilot {
+                        fc_id = Some(id);
+                    }
+                    consume = fc_id == Some(id);
+                    if consume {
+                        // Vehicle identity → drives the mode table + flight model.
+                        let (v, p) =
+                            crate::mavlink_proto::vehicle::identify(hb.autopilot, hb.mavtype);
                         variant = v;
                         platform = p;
                     }
                 }
-                if update_from_mav(&frame.message, &mut snap, &mut armed, &variant) {
+                if consume && update_from_mav(&frame.message, &mut snap, &mut armed, &variant) {
                     samples.push(Sample { t_ms, rec: snap_to_record(&snap, t_ms), armed });
                 }
             }
@@ -364,7 +355,8 @@ fn decode_tlog(bytes: &[u8]) -> (Vec<Sample>, Identity) {
 fn update_from_mav(msg: &MavMessage, s: &mut Snap, armed: &mut bool, variant: &str) -> bool {
     match msg {
         MavMessage::HEARTBEAT(hb) => {
-            // Ignore our own GCS heartbeat (it would flap `armed` false) — only the vehicle's counts.
+            // The caller already restricts heartbeats to the locked autopilot component; this keeps the
+            // GCS guard as a second line (our own heartbeat would flap `armed` false).
             if hb.mavtype != MavType::MAV_TYPE_GCS {
                 *armed = hb.base_mode.bits() & MavModeFlag::MAV_MODE_FLAG_SAFETY_ARMED.bits() != 0;
                 s.flight_mode_flags = Some(hb.custom_mode);
@@ -385,8 +377,15 @@ fn update_from_mav(msg: &MavMessage, s: &mut Snap, armed: &mut bool, variant: &s
             s.lon = Some(g.lon as f64 / 1e7);
             s.alt_gps = Some(g.alt as f64 / 1000.0);
             s.alt_baro = Some(g.relative_alt as f64 / 1000.0);
-            if g.hdg != u16::MAX {
-                s.heading = Some(g.hdg as f64 / 100.0);
+            // `heading` is the course-over-ground column (see `TelemetryRecord`); the FC's own heading
+            // is stored separately as `yaw` from ATTITUDE. `g.hdg` is the vehicle HEADING, not the
+            // course — writing it here made a replayed flight report a course identical to its heading,
+            // so the compass showed no crab angle while the map model, rotated by `yaw`, correctly drew
+            // one. Derive the course from the fused velocity like the live handler does; below walking
+            // pace that is just atan2 of velocity noise, so hold the previous value.
+            let ground_speed = ((g.vx as f64).powi(2) + (g.vy as f64).powi(2)).sqrt() / 100.0;
+            if ground_speed > 0.5 {
+                s.heading = Some((g.vy as f64).atan2(g.vx as f64).to_degrees().rem_euclid(360.0));
             }
             true
         }
@@ -410,6 +409,16 @@ fn update_from_mav(msg: &MavMessage, s: &mut Snap, armed: &mut bool, variant: &s
         MavMessage::VFR_HUD(h) => {
             s.speed = Some(h.groundspeed as f64);
             s.vario = Some(h.climb as f64);
+            false
+        }
+        MavMessage::WIND(w) => {
+            // ArduPilot's EKF wind estimate: `direction` is the bearing the wind blows FROM. Store the
+            // vector it blows TOWARD as north/east components, matching what the live recorder writes
+            // (`Recorder::on_wind`), so an imported flight drives the compass exactly like a recorded
+            // one. `speed_z` has no column, same as live.
+            let toward = (w.direction as f64 + 180.0).to_radians();
+            s.wind_n = Some(w.speed as f64 * toward.cos());
+            s.wind_e = Some(w.speed as f64 * toward.sin());
             false
         }
         MavMessage::SYS_STATUS(sys) => {
@@ -655,4 +664,104 @@ pub fn import_raw_log_with_progress<F: Fn(u8, &str, &str)>(
 
     emit(100, "done", "Raw log import complete.");
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use ::mavlink::ardupilotmega::{
+        MavState, ATTITUDE_DATA, GLOBAL_POSITION_INT_DATA, HEARTBEAT_DATA, WIND_DATA,
+    };
+    use ::mavlink::MavHeader;
+
+    use crate::mavlink_proto::codec::{serialize_v2, MavSequence};
+
+    fn heartbeat(mavtype: MavType, autopilot: MavAutopilot, custom_mode: u32) -> MavMessage {
+        MavMessage::HEARTBEAT(HEARTBEAT_DATA {
+            custom_mode,
+            mavtype,
+            autopilot,
+            base_mode: MavModeFlag::MAV_MODE_FLAG_SAFETY_ARMED,
+            system_status: MavState::MAV_STATE_ACTIVE,
+            mavlink_version: 3,
+        })
+    }
+
+    /// Wrap frames in the tlog container: `[u64 BE µs][frame]`, one second apart.
+    fn tlog(frames: Vec<(u8, u8, MavMessage)>) -> Vec<u8> {
+        let mut seq = MavSequence::new();
+        let mut out = Vec::new();
+        for (n, (system_id, component_id, msg)) in frames.into_iter().enumerate() {
+            out.extend_from_slice(&((n as u64 + 1) * 1_000_000).to_be_bytes());
+            let header = MavHeader { system_id, component_id, sequence: 0 };
+            out.extend_from_slice(&serialize_v2(&header, &msg, &mut seq));
+        }
+        out
+    }
+
+    /// A SIYI-style link publishes HEARTBEATs from a camera and a gimbal under the vehicle's own
+    /// system id. Only the autopilot's may drive the flight mode and the vehicle identity — otherwise
+    /// the replayed mode flaps between all three senders once a second, and the peripherals'
+    /// `MAV_AUTOPILOT_INVALID` overwrites the variant that selects the mode table.
+    #[test]
+    fn peripheral_heartbeats_do_not_drive_mode_or_identity() {
+        let log = tlog(vec![
+            // ArduPlane in GUIDED (plane custom_mode 15).
+            (1, 1, heartbeat(MavType::MAV_TYPE_FIXED_WING, MavAutopilot::MAV_AUTOPILOT_ARDUPILOTMEGA, 15)),
+            // Gimbal: custom_mode 0, which a copter table would read as "stabilize".
+            (1, 154, heartbeat(MavType::MAV_TYPE_GIMBAL, MavAutopilot::MAV_AUTOPILOT_INVALID, 0)),
+            // Camera: custom_mode 65535, which matches no mode at all.
+            (1, 100, heartbeat(MavType::MAV_TYPE_CAMERA, MavAutopilot::MAV_AUTOPILOT_INVALID, 65535)),
+            // Our own GCS heartbeat, echoed back into the log by the link.
+            (255, 190, heartbeat(MavType::MAV_TYPE_GCS, MavAutopilot::MAV_AUTOPILOT_INVALID, 0)),
+            // ATTITUDE emits the sample that carries the mode.
+            (1, 1, MavMessage::ATTITUDE(ATTITUDE_DATA::default())),
+        ]);
+
+        let (samples, identity) = decode_tlog(&log);
+
+        assert_eq!(identity.fc_variant.as_deref(), Some("ArduPlane"));
+        assert_eq!(identity.platform_type, 1);
+        let sample = samples.last().expect("ATTITUDE should emit a sample");
+        assert_eq!(sample.rec.mode_primary.as_deref(), Some("guided"));
+        assert!(sample.armed, "the autopilot heartbeat is armed");
+    }
+
+    /// The `heading` column is course over ground, not the vehicle heading — `GLOBAL_POSITION_INT.hdg`
+    /// is the latter, so deriving the course from the fused velocity is what keeps a replayed crab
+    /// angle honest. WIND rides along here because both are read off the same message stream.
+    #[test]
+    fn course_comes_from_velocity_and_wind_is_captured() {
+        // Heading due east, but travelling due north: a 90° crab that `hdg` alone would hide.
+        let gpi = MavMessage::GLOBAL_POSITION_INT(GLOBAL_POSITION_INT_DATA {
+            time_boot_ms: 0,
+            lat: 42_700_000,
+            lon: 22_880_000,
+            alt: 200_000,
+            relative_alt: 100_000,
+            vx: 1500, // cm/s north
+            vy: 0,
+            vz: 0,
+            hdg: 9000, // 90.00° heading
+        });
+        let wind = MavMessage::WIND(WIND_DATA { direction: 60.0, speed: 6.0, speed_z: 0.0 });
+
+        let log = tlog(vec![
+            (1, 1, heartbeat(MavType::MAV_TYPE_FIXED_WING, MavAutopilot::MAV_AUTOPILOT_ARDUPILOTMEGA, 15)),
+            (1, 1, wind),
+            (1, 1, gpi),
+        ]);
+
+        let (samples, _) = decode_tlog(&log);
+        let rec = &samples.last().expect("GLOBAL_POSITION_INT should emit a sample").rec;
+
+        let course = rec.heading.expect("course recorded");
+        assert!(course < 0.5 || course > 359.5, "course should follow the velocity (0°), got {course}");
+
+        // Wind blows FROM 60°, so the vector points TOWARD 240°: north −3.0, east −5.196.
+        let (n, e) = (rec.wind_n_ms.expect("wind north"), rec.wind_e_ms.expect("wind east"));
+        assert!((n - -3.0).abs() < 0.01, "wind north {n}");
+        assert!((e - -5.196).abs() < 0.01, "wind east {e}");
+    }
 }

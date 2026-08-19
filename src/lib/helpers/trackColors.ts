@@ -269,22 +269,27 @@ export function trackPointColorizer(
   if (colorMode === 'flightmode') {
     return (r) => modeColor(r.mode_primary ?? '');
   }
+  // The gradient modes QUANTIZE to the same GRADIENT_STEPS buckets the 2D segmenter uses. Continuous
+  // per-point colours were the 3D replay's downfall: the consumer chunks the flown-track deco into
+  // colour RUNS, and a colour that changes on almost every point (241 possible hues) finalizes a
+  // ground-clamped primitive every 1–3 points — thousands of them over a long log, and Cesium never
+  // re-batches entities. Bucketed values produce the long runs the chunking was designed around.
   if (colorMode === 'altitude') {
     const getV = (r: TelemetryRecord) => r.baro_alt_m ?? r.alt_m;
     const [, trackMax] = fieldRange(track, getV);
     const max = warnAltitudeM > 0 ? warnAltitudeM : trackMax;
-    return (r) => getGradientColor(getV(r) ?? 0, 0, max);
+    return (r) => getGradientColor(quantize(getV(r) ?? 0, 0, max, GRADIENT_STEPS) + 0.5, 0, GRADIENT_STEPS);
   }
   if (colorMode === 'speed') {
     const getV = (r: TelemetryRecord) => r.speed_ms;
     const [, trackMax] = fieldRange(track, getV);
-    return (r) => getGradientColor(getV(r) ?? 0, 0, trackMax);
+    return (r) => getGradientColor(quantize(getV(r) ?? 0, 0, trackMax, GRADIENT_STEPS) + 0.5, 0, GRADIENT_STEPS);
   }
   if (colorMode === 'signal') {
     const hasLQ = track.some((r) => r.link_quality != null && r.link_quality > 0);
     const getV: (r: TelemetryRecord) => number | null = hasLQ ? (r) => r.link_quality : (r) => r.rssi;
     const [lo, hi] = fieldRange(track, getV);
-    return (r) => getSignalGradientColor(getV(r) ?? lo, lo, hi);
+    return (r) => getSignalGradientColor(quantize(getV(r) ?? lo, lo, hi, GRADIENT_STEPS) + 0.5, 0, GRADIENT_STEPS);
   }
   return () => '#f5a623';
 }

@@ -2462,6 +2462,7 @@ dependencies = [
  "csv",
  "dirs 5.0.1",
  "evdev",
+ "flate2",
  "futures",
  "libc",
  "log",

@@ -138,7 +138,10 @@
   }
 
   /* Bounding height shared by compact/advanced (and as a cap for info): full panel area,
-     i.e. below the toolbar, above the bottom dock + status bar. 100% = the (scaled) .app. */
+     i.e. below the toolbar, above the bottom dock + status bar. 100% = the (scaled) .app.
+     `--panel-bottom-reserve` is the dock height normally, but shrinks to the rail's 6px status-bar
+     gap on windows too short for the capped panel to reach the nav rail's full height — the panel
+     then overlays the dock (see +page.svelte). Fallback for hosts without the var (PanelPlayground). */
   .ps-info,
   .ps-compact,
   .ps-advanced {
@@ -146,14 +149,14 @@
   }
   .ps-compact,
   .ps-advanced {
-    height: calc(100% - 53px - var(--grid-bottom-height) - 24px - 12px);
+    height: calc(100% - 53px - var(--panel-bottom-reserve, var(--grid-bottom-height)) - 24px - 12px);
   }
 
   .ps-info {
     width: max-content;
     max-width: 360px;
     height: auto;
-    max-height: calc(100% - 53px - var(--grid-bottom-height) - 24px - 12px);
+    max-height: calc(100% - 53px - var(--panel-bottom-reserve, var(--grid-bottom-height)) - 24px - 12px);
   }
 
   /* Mobile, any orientation: shift panels clear of a landscape side-notch. Harmless on iPad / portrait

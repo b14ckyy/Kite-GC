@@ -36,6 +36,7 @@
   } from '$lib/stores/autopilotContext';
   import { missionManagerSelectedId, requestOpenFlightId } from '$lib/stores/missionManager';
   import { buildMissionInput, findLibraryMissionId } from '$lib/helpers/missionLibrary';
+  import { anyCase } from '$lib/helpers/fileFilters';
   import { buildArduMissionInput, findArduLibraryMissionId } from '$lib/helpers/missionLibraryArdu';
   import { convertAltitude, convertDistance, formatConverted } from '$lib/utils/units';
   import PanelShell, { type PanelVariant } from '$lib/components/panel/PanelShell.svelte';
@@ -362,7 +363,7 @@
 
   async function handleImportButton() {
     try {
-      const path = await open({ title: $t('missionMgr.openTitle'), multiple: false, filters: [{ name: 'Mission', extensions: ['mission', 'waypoints', 'txt'] }] });
+      const path = await open({ title: $t('missionMgr.openTitle'), multiple: false, filters: [{ name: 'Mission', extensions: anyCase(['mission', 'waypoints', 'txt']) }] });
       if (!path || typeof path !== 'string') return;
       const stem = path.replace(/^.*[\\/]/, '').replace(/\.[^.]+$/, '');
       const lower = path.toLowerCase();

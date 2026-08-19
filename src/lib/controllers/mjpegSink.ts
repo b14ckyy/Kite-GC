@@ -31,6 +31,10 @@ export interface MjpegStats {
   height: number;
   /** Milliseconds since the last frame arrived, or -1 before the first one. */
   sinceFrameMs: number;
+  /** What the smoothing buffer holds right now, and the depth it was asked for. Both 0 with the
+   *  buffer off — which is what says whether a chosen cushion is deep enough for this link. */
+  bufferedMs: number;
+  bufferFrames: number;
 }
 
 export const mjpegStats = writable<MjpegStats | null>(null);
@@ -194,6 +198,17 @@ function ensureWorker(): Worker | null {
   return w;
 }
 
+/** Cushion depth in frame times, mirrored here because the worker outlives no setting: a reader that
+ *  starts later, or restarts after a reconnect, has to be told again. */
+let bufferFrames = 0;
+
+/** The panel's smoothing buffer, applied to the image path (the WebRTC path hands the same number to
+ *  the engine's own jitter buffer instead — see `applyJitterTarget` in the video store). */
+export function setMjpegBuffer(frames: number): void {
+  bufferFrames = frames;
+  worker?.postMessage({ type: 'buffer', frames });
+}
+
 export function startMjpegSink(url: string): void {
   if (!get(canvasSink)) {
     handlers.onLog?.('warn', 'MJPEG sink: <img> (this WebView cannot run the off-thread reader)');
@@ -201,7 +216,9 @@ export function startMjpegSink(url: string): void {
   }
   const target = readerUrl(url);
   handlers.onLog?.('info', `MJPEG sink: off-thread reader (${target})`);
-  ensureWorker()?.postMessage({ type: 'start', url: target });
+  const w = ensureWorker();
+  w?.postMessage({ type: 'buffer', frames: bufferFrames });
+  w?.postMessage({ type: 'start', url: target });
 }
 
 export function stopMjpegSink(): void {

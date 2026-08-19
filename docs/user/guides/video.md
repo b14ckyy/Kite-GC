@@ -72,16 +72,21 @@ The RTSP source has a small **connection manager** built in:
 
 - **Direct connect** — type the `rtsp://…` URL and press Start. Next to the URL sits the **transport**
   selector:
-    - **Auto** (default) — tries the engine's native reader first, then the ffmpeg fallback. Right for
-      most sources.
-    - **UDP** — lowest latency; **required for UDP-only servers** (some FPV / air-unit streamers). Uses
-      the ffmpeg helper.
+    - **Auto** (default) — lets the engine negotiate the transport, and falls back to an ffmpeg
+      reader for the rare server that refuses every forced transport. Right for most sources.
+    - **UDP** — lowest latency; **required for UDP-only servers** (some FPV / air-unit streamers).
     - **TCP** — for sources that only speak interleaved TCP, or when UDP is blocked by the network.
 - **Save it** — the **💾 button** stores the current URL + transport as a named entry (named after the
   host; rename it via ✎). Connections are **only saved when you press the button** — never
   automatically.
 - **The list** — each saved connection is a one-line entry: **click it to load and connect**, ✎ edits
   name / URL / transport inline, ✕ removes it. The entry matching the current URL is highlighted.
+- **Smoothing buffer (frames)** — below the connection list. **0** (the default) plays with the lowest
+  possible latency; each step up buffers **one frame time** more on the receiving side (at 60 fps:
+  ~17 ms per step, derived automatically from the stream's actual frame rate). Raise it if playback
+  looks uneven — duplicated or skipped single frames — on a jittery link such as cellular; every step
+  costs exactly that much extra latency, so leave it at 0 when the picture is already smooth. The
+  setting takes effect immediately on the running stream and is remembered.
 
 **Auto-reconnect:** if a running RTSP feed drops or stalls — a radio hole on a cellular link, the
 source restarting, a network change — Kite **reconnects automatically and keeps trying indefinitely**
@@ -92,10 +97,10 @@ signal dips don't interrupt the stream unnecessarily.
 
 !!! note "Helpers download themselves"
     **Camera (device)** needs nothing extra. **Native Capture** uses the bundled **ffmpeg** engine.
-    **RTSP** uses **go2rtc** for the direct video path and **ffmpeg** for the image path — a machine
+    **RTSP** uses **MediaMTX** for the direct video path and **ffmpeg** for the image path — a machine
     whose browser engine offers no direct path (common on Linux) uses ffmpeg alone and never needs
-    go2rtc. Kite downloads whichever it needs **automatically** the first time you use that source — no
-    manual install. On macOS these are shipped with the app.
+    MediaMTX. Kite downloads whichever it needs **automatically** the first time you use that source — no
+    manual install. On macOS ffmpeg is shipped with the app.
 
 ## Where the video shows
 

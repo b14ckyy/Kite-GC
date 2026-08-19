@@ -15,11 +15,11 @@
 //!
 //! To Kite that looks exactly like "ffmpeg is not installed" — and since the MJPEG fallback is the
 //! only RTSP path on a WebView without WebRTC, video stops working entirely. It also detonates at a
-//! distance: go2rtc is our child, so the ffmpeg *it* starts inherits the same broken environment.
+//! distance: every helper we spawn inherits the same broken environment.
 //! The trigger is a host library update (the symbol above appeared when newer `libva` arrived), so
 //! an AppImage that worked yesterday can break without anything in Kite changing.
 //!
-//! Our helpers (`ffmpeg`, `go2rtc`, `blackbox_decode`) and the system tools we call (`tar`, `ps`)
+//! Our helpers (`ffmpeg`, `mediamtx`, `blackbox_decode`) and the system tools we call (`tar`, `ps`)
 //! are all self-contained or system-linked: none of them wants the AppImage's libraries. Stripping
 //! the loader variables is therefore always the right call — outside an AppImage it is a no-op.
 
