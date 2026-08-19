@@ -2118,6 +2118,10 @@
     width: 100%;
     height: 100%;
     transition: none;
+    /* Override Leaflet's light default (#ddd): it shines through every antialiased tile seam as a
+       WHITE hairline (issue #52) and flashes bright while tiles load. Dark, so whatever still
+       peeks through reads as part of the imagery. */
+    background: #2e2e2e;
   }
 
   /* Heading-up: container size set via inline styles (JS),
