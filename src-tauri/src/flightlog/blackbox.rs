@@ -696,9 +696,11 @@ fn build_telemetry_record_indexed(
         rx_signal_received: read_u8(cols.rx_signal_received, record),
         hw_health_status: read_i64(cols.hw_health_status, record),
         baro_temperature: read_f64(cols.baro_temperature, record),
-        wind_n_ms: read_f64(cols.wind_n, record),
-        wind_e_ms: read_f64(cols.wind_e, record),
-        wind_d_ms: read_f64(cols.wind_d, record),
+        // INAV's wind estimator keeps its vectors in cm/s (wind_estimator.c) → m/s, matching the
+        // live MSP2_INAV_WIND path which already scales the same way.
+        wind_n_ms: read_f64(cols.wind_n, record).map(|v| v / 100.0),
+        wind_e_ms: read_f64(cols.wind_e, record).map(|v| v / 100.0),
+        wind_d_ms: read_f64(cols.wind_d, record).map(|v| v / 100.0),
         rc_data_json: read_json_array(&cols.rc_data, record),
         rc_command_json: read_json_array(&cols.rc_command, record),
         // navPos[0,1] are local-frame NE offsets in cm — NOT useful as geographic coords.
@@ -814,18 +816,30 @@ fn extract_header_metadata_for_log(file_data: &[u8], log_index: Option<u32>) -> 
     }
 }
 
-/// Heuristic platform type for INAV blackbox: there is no explicit platform header, but the
-/// logged field set differs by airframe — fixed-wing logs a single `motor[0]` plus `servo[...]`
-/// control surfaces, while multirotors log several `motor[N]`. We read the highest motor index
-/// (and servo presence) from the `H Field ... name:` definition lines.
+/// Platform type for INAV blackbox: there is no explicit platform header, but the navigation PID
+/// fields are logged under mutually exclusive conditions (blackbox.c):
+///   `fwAlt*`/`fwPos*` → `STATE(FIXED_WING_LEGACY) && BLACKBOX_FEATURE_NAV_PID`
+///   `mcPos*`/`mcVel*`/`mcSurface*` → `!STATE(FIXED_WING_LEGACY) && BLACKBOX_FEATURE_NAV_PID`
+/// so either group settles it outright. With nav-PID logging switched off neither appears and the
+/// motor/servo shape is all that is left — a weak signal, because a fixed wing may well run several
+/// motors (differential thrust, twin): counting motors alone declared every such log a multirotor.
 /// Returns 0 = multirotor (default / unknown), 1 = airplane. Display-only; no functional impact.
 fn parse_platform_type(text: &str) -> u8 {
+    const FIXED_WING_NAV_FIELDS: [&str; 2] = ["fwAlt", "fwPos"];
+    const MULTIROTOR_NAV_FIELDS: [&str; 3] = ["mcPos", "mcVel", "mcSurface"];
+
     let mut max_motor: i32 = -1;
     let mut has_servo = false;
     for line in text.lines() {
         let l = line.trim();
         if !l.starts_with("H Field") {
             continue;
+        }
+        if FIXED_WING_NAV_FIELDS.iter().any(|f| l.contains(f)) {
+            return 1;
+        }
+        if MULTIROTOR_NAV_FIELDS.iter().any(|f| l.contains(f)) {
+            return 0;
         }
         if l.contains("servo[") {
             has_servo = true;

@@ -7,7 +7,7 @@
 <script lang="ts">
   import type { TelemetryData } from "$lib/stores/telemetry";
   import type { InterfaceSettings } from "$lib/stores/settings";
-  import { convertAltitude, convertSpeed, convertVerticalSpeed, formatConverted } from "$lib/utils/units";
+  import { convertAltitude, convertSpeed, convertVerticalSpeed, formatConverted, speedDigits } from "$lib/utils/units";
   import { t } from 'svelte-i18n';
 
   let {
@@ -21,7 +21,7 @@
   } = $props();
 
   let altText = $derived(formatConverted(convertAltitude(telem.altitude, interfaceSettings.altitudeUnit), 1));
-  let speedText = $derived(formatConverted(convertSpeed(telem.groundSpeed, interfaceSettings.speedUnit), 0));
+  let speedText = $derived(formatConverted(convertSpeed(telem.groundSpeed, interfaceSettings.speedUnit), speedDigits(interfaceSettings.speedUnit)));
   let varioText = $derived(() => {
     const converted = convertVerticalSpeed(telem.vario, interfaceSettings.verticalSpeedUnit);
     return `${telem.vario >= 0 ? '+' : ''}${converted.value.toFixed(1)} ${converted.unit}`;
