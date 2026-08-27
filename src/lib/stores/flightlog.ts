@@ -495,6 +495,11 @@ export async function importBlackboxLog(
   });
 }
 
+/** Number of flight logs inside a Blackbox file (a flash download holds one per arm/disarm cycle). */
+export async function blackboxLogCount(filePath: string): Promise<number> {
+  return invoke<number>('flightlog_blackbox_log_count', { filePath });
+}
+
 /** True when blackbox_decode is available (PATH, exe dir, or the auto-download dir). */
 export async function blackboxDecoderAvailable(): Promise<boolean> {
   return invoke<boolean>('blackbox_decoder_available');
