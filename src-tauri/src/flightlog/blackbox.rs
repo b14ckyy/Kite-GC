@@ -6,7 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use chrono::{DateTime, Duration, NaiveDateTime, TimeZone, Utc};
+use chrono::{DateTime, Datelike, Duration, NaiveDateTime, TimeZone, Utc};
 use csv::StringRecord;
 use rusqlite::Connection;
 use serde_json::json;
@@ -16,6 +16,20 @@ use super::types::{BlackboxImportStatus, Flight, TelemetryRecord};
 
 const WINDOWS_BINARY: &str = "blackbox_decode.exe";
 const UNIX_BINARY: &str = "blackbox_decode";
+
+/// Every log inside a Blackbox file starts with this banner — the same marker `blackbox_decode`
+/// splits on, so our indices line up with its `--index`.
+const LOG_START_MARKER: &[u8] = b"H Product:Blackbox flight data recorder";
+
+/// A log's header lines never reach this far, so only this much of a block is decoded to text.
+const HEADER_SCAN_BYTES: usize = 64 * 1024;
+
+/// INAV writes the RTC into `Log start datetime`, and the RTC comes from GPS. Without a fix the
+/// driver default `0000-01-01T00:00:00` is logged, and HITL targets log a synthetic far-future date;
+/// both are stored verbatim today and would fix the flight to a nonsense date. Outside this range the
+/// timestamp counts as absent.
+const MIN_PLAUSIBLE_YEAR: i32 = 2010;
+const MAX_PLAUSIBLE_YEAR: i32 = 2040;
 
 struct ParsedRow {
     timestamp_us: i64,
@@ -79,7 +93,7 @@ where
                 .to_string_lossy()
                 .to_string()
         });
-    let start_time = resolve_start_time(&header, file_path);
+    let (start_time, start_time_from_header) = resolve_start_time(&header, file_path);
     eprintln!("[BBX-HEADER] craft={:?}, header_start_time={:?}, resolved_start_time={}", craft_name, header.start_time, start_time.to_rfc3339());
 
     // NOTE: the duplicate check runs *after* decode + the UTC correction below, not here. The stored
@@ -107,6 +121,15 @@ where
     let last_us = rows.last().map(|row| row.timestamp_us).unwrap_or(0);
     let duration_us = (last_us - first_us).max(0);
     let duration_sec = Some((duration_us / 1_000_000).max(0));
+
+    // Without a header time every log in a file falls back to the same instant, and each import after
+    // the first would be blocked as a duplicate of it. The frame clock runs on across a session's
+    // logs, so it spaces them by the gap they actually had.
+    let start_time = if start_time_from_header {
+        start_time
+    } else {
+        start_time + Duration::microseconds(first_us)
+    };
 
     let mut start_lat = None;
     let mut start_lon = None;
@@ -272,6 +295,10 @@ where
         .map_err(|e| format!("Failed to store Blackbox rows: {}", e))?;
 
     report(96, "archive", "Archiving original Blackbox file...");
+    // Only this log's bytes: a flash download holds every flight, so archiving the whole file per log
+    // would store it once per flight. The slice is a valid standalone log — it is cut exactly where
+    // blackbox_decode splits — so exporting a flight hands back just that flight.
+    let archived_range = log_byte_range(&file_data, log_index);
     db::insert_blackbox_file(
         conn,
         flight_id,
@@ -280,7 +307,7 @@ where
             .unwrap_or_default()
             .to_string_lossy(),
         log_index.unwrap_or(0),
-        &file_data,
+        &file_data[archived_range],
     )
     .map_err(|e| format!("Failed to archive original Blackbox file: {}", e))?;
 
@@ -721,50 +748,61 @@ fn normalize_header(value: &str) -> String {
         .collect()
 }
 
-/// Extract header metadata for a specific log index within a multi-log Blackbox file.
-/// Each log starts with a new set of `H ...` header lines.
-/// If log_index is None or 0, reads the first header block.
+/// Byte offset of every log in a (possibly multi-log) Blackbox file.
+fn log_start_offsets(file_data: &[u8]) -> Vec<usize> {
+    let mut offsets = Vec::new();
+    let mut from = 0usize;
+    while let Some(pos) = file_data[from..]
+        .windows(LOG_START_MARKER.len())
+        .position(|window| window == LOG_START_MARKER)
+    {
+        offsets.push(from + pos);
+        from += pos + LOG_START_MARKER.len();
+    }
+    offsets
+}
+
+/// How many flight logs a Blackbox file holds. A Configurator flash download contains one per
+/// arm/disarm cycle, and `blackbox_decode --stdout` can only ever emit one of them, so the importer
+/// has to walk them by index. Files without the marker report 1 and import as a single log.
+pub fn count_logs(file_path: &Path) -> Result<u32, String> {
+    let file_data = fs::read(file_path)
+        .map_err(|e| format!("Failed to read Blackbox file {}: {}", file_path.display(), e))?;
+    Ok(log_start_offsets(&file_data).len().max(1) as u32)
+}
+
+/// Byte range of one log inside the file. Splitting on the product banner rather than on "lines
+/// starting with `H `" matters because the data between headers is binary and can produce such a line
+/// by chance. Single-log files (and files without the banner) return the whole thing, which keeps
+/// their handling byte-identical to before. An out-of-range index falls back to the first log.
+fn log_byte_range(file_data: &[u8], log_index: Option<u32>) -> std::ops::Range<usize> {
+    let offsets = log_start_offsets(file_data);
+    if offsets.len() < 2 {
+        return 0..file_data.len();
+    }
+    let start = offsets
+        .get(log_index.unwrap_or(0) as usize)
+        .copied()
+        .unwrap_or(offsets[0]);
+    let end = offsets
+        .iter()
+        .find(|&&offset| offset > start)
+        .copied()
+        .unwrap_or(file_data.len());
+    start..end
+}
+
+/// Extract header metadata for one log index within a multi-log Blackbox file.
 fn extract_header_metadata_for_log(file_data: &[u8], log_index: Option<u32>) -> HeaderMetadata {
-    let text = String::from_utf8_lossy(file_data);
-    let target_idx = log_index.unwrap_or(0) as usize;
+    let range = log_byte_range(file_data, log_index);
+    let scan_end = range.end.min(range.start + HEADER_SCAN_BYTES);
 
-    // Find all header block start positions.
-    // Each log begins with a sequence of "H " lines. The first non-header line after
-    // a header block marks the start of data. The next "H " block is the next log.
-    let mut header_blocks: Vec<(usize, usize)> = Vec::new();
-    let mut block_start: Option<usize> = None;
-    let mut last_header_end: usize = 0;
-
-    for (offset, line) in text.lines().enumerate() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("H ") {
-            if block_start.is_none() {
-                block_start = Some(offset);
-            }
-            last_header_end = offset;
-        } else if block_start.is_some() {
-            // Non-header line after header block — close this block
-            header_blocks.push((block_start.unwrap(), last_header_end));
-            block_start = None;
-        }
-    }
-    // Close final block if file ends with header lines
-    if let Some(start) = block_start {
-        header_blocks.push((start, last_header_end));
-    }
-
-    // Collect lines from the target header block
-    let lines: Vec<&str> = text.lines().collect();
-    let header_text = if target_idx < header_blocks.len() {
-        let (start, end) = header_blocks[target_idx];
-        lines[start..=end].join("\n")
-    } else if !header_blocks.is_empty() {
-        // Fallback to first block
-        let (start, end) = header_blocks[0];
-        lines[start..=end].join("\n")
-    } else {
-        text.to_string()
-    };
+    let block = String::from_utf8_lossy(&file_data[range.start..scan_end]);
+    let header_text = block
+        .lines()
+        .filter(|line| line.starts_with("H "))
+        .collect::<Vec<_>>()
+        .join("\n");
 
     HeaderMetadata {
         craft_name: find_header_value(&header_text, &["Craft name", "Pilot name", "Name"]),
@@ -843,7 +881,14 @@ fn find_header_datetime(text: &str) -> Option<DateTime<Utc>> {
             eprintln!("[BBX-DATETIME] raw header '{}' = {:?}", label, value);
             if let Some(parsed) = parse_header_datetime(&value) {
                 eprintln!("[BBX-DATETIME] parsed = {}", parsed.to_rfc3339());
-                return Some(parsed);
+                if (MIN_PLAUSIBLE_YEAR..=MAX_PLAUSIBLE_YEAR).contains(&parsed.year()) {
+                    return Some(parsed);
+                }
+                log::warn!(
+                    "Blackbox header '{label}' is {value} (year {}) — outside {MIN_PLAUSIBLE_YEAR}..={MAX_PLAUSIBLE_YEAR}, \
+                     treating the log as having no start time",
+                    parsed.year()
+                );
             }
         }
     }
@@ -867,16 +912,18 @@ fn parse_header_datetime(raw: &str) -> Option<DateTime<Utc>> {
         .map(|value| value.with_timezone(&Utc))
 }
 
-fn resolve_start_time(header: &HeaderMetadata, file_path: &Path) -> DateTime<Utc> {
+/// Flight start time, plus whether it came from the log's own header. A header time is per-log; the
+/// fallbacks are per-FILE, so the caller has to space multi-log fallbacks apart itself.
+fn resolve_start_time(header: &HeaderMetadata, file_path: &Path) -> (DateTime<Utc>, bool) {
     if let Some(start_time) = header.start_time {
-        return start_time;
+        return (start_time, true);
     }
     if let Ok(metadata) = fs::metadata(file_path) {
         if let Ok(modified) = metadata.modified() {
-            return DateTime::<Utc>::from(modified);
+            return (DateTime::<Utc>::from(modified), false);
         }
     }
-    Utc::now()
+    (Utc::now(), false)
 }
 
 /// Locate `blackbox_decode`: next to the app executable, in our auto-download install dir, or on PATH.

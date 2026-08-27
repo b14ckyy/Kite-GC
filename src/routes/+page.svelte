@@ -1250,7 +1250,27 @@
     } else if (ext === 'rawmsp' || ext === 'tlog') {
       await performRawImport(filePath); // raw serial log (ADR-049)
     } else {
-      await performImport(filePath, undefined, false); // INAV Blackbox text (.txt/.bbl/.bfl)
+      await performBlackboxImport(filePath); // INAV Blackbox text (.txt/.bbl/.bfl)
+    }
+  }
+
+  /** A Configurator flash download holds one log per arm/disarm cycle, and `blackbox_decode --stdout`
+   *  refuses such a file without `--index`. Import every log as its own flight; a single-log file
+   *  keeps passing no index at all. */
+  async function performBlackboxImport(filePath: string) {
+    const logCount = await logbookCtrl.countBlackboxLogs(filePath);
+    if (logCount <= 1) {
+      await performImport(filePath, undefined, false);
+      return;
+    }
+    const answer = await showDialog({
+      title: $t('logbook.multiLogTitle'),
+      message: $t('logbook.multiLogMessage', { values: { count: logCount } }),
+      buttons: [{ label: $t('logbook.multiLogImportAll'), value: 'all', primary: true }],
+    });
+    if (answer !== 'all') return;
+    for (let index = 0; index < logCount; index++) {
+      await performImport(filePath, index, false);
     }
   }
 
