@@ -67,7 +67,7 @@
   import { sunAltitudeDeg, cesiumLikeBrightness } from "$lib/utils/sun";
   import { ensureUserLocation, resolveUserLocation, userGeoLocation } from "$lib/helpers/userLocation";
   import FpvHud from "$lib/components/FpvHud.svelte";
-  import { convertSpeed, convertAltitude, convertDistance, convertVerticalSpeed, formatConverted } from "$lib/utils/units";
+  import { convertSpeed, convertAltitude, convertDistance, convertVerticalSpeed, formatConverted, speedDigits } from "$lib/utils/units";
   import { haversineDistance, bearing, destinationPoint } from "$lib/utils/geo";
   import type { SpeedUnit, AltitudeUnit, RadarMapSettings, GcsMode } from "$lib/stores/settings";
   import { radarVehicles, radarSelection, type RadarSnapshot } from "$lib/stores/radarTracking";
@@ -1618,7 +1618,7 @@
     }
     const ui = get(settings).interface;
     const alt = formatConverted(convertAltitude(rec.altM, ui.altitudeUnit), 0);
-    const spd = rec.groundSpeedMs == null ? '—' : formatConverted(convertSpeed(rec.groundSpeedMs, ui.speedUnit), 0);
+    const spd = rec.groundSpeedMs == null ? '—' : formatConverted(convertSpeed(rec.groundSpeedMs, ui.speedUnit), speedDigits(ui.speedUnit));
     let vs = '';
     if (rec.verticalSpeedMs != null && Math.abs(rec.verticalSpeedMs) >= 0.5) {
       const a = formatConverted(convertVerticalSpeed(Math.abs(rec.verticalSpeedMs), ui.verticalSpeedUnit), 1);
@@ -4530,6 +4530,7 @@
       roll={hud.roll}
       speed={sp.value}
       speedUnit={sp.unit}
+      speedDigits={speedDigits(hudSpeedUnit)}
       speedLabel={hud.speedIsAir ? 'ASPD' : 'SPD'}
       altitude={al.value}
       altitudeUnit={al.unit}

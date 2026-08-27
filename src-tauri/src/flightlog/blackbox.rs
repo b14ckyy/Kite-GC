@@ -496,6 +496,9 @@ struct ColumnIndices {
     gps_epv: Option<usize>,
     active_wp_number: Option<usize>,
     active_flight_mode_flags: Option<usize>,
+    /// `flightModeFlags` — the RC *box* mask, decoded to names ("ARM|ANGLE"). Only read when
+    /// `activeFlightModeFlags` is missing; see `flight_mode_bits_from_names`.
+    flight_mode_boxes: Option<usize>,
     state_flags: Option<usize>,
     nav_state: Option<usize>,
     nav_flags: Option<usize>,
@@ -547,6 +550,7 @@ impl ColumnIndices {
             gps_epv: resolve_col(m, &["gps_epv"]),
             active_wp_number: resolve_col(m, &["activewpnumber", "active_wp_number"]),
             active_flight_mode_flags: resolve_col(m, &["activeflightmodeflags", "active_flight_mode_flags"]),
+            flight_mode_boxes: resolve_col(m, &["flightmodeflags", "flight_mode_flags"]),
             state_flags: resolve_col(m, &["stateflags", "state_flags"]),
             nav_state: resolve_col(m, &["navstate", "nav_state"]),
             nav_flags: resolve_col(m, &["navflags", "nav_flags"]),
@@ -600,6 +604,90 @@ fn read_u8(cols: Option<usize>, record: &StringRecord) -> Option<u8> {
     read_f64(cols, record).map(|v| v.round() as u8)
 }
 
+/// Normalized FLIGHT_MODE bits from `blackbox_decode`'s decoded box names ("ARM|ANGLE|MIXERPROFILE").
+///
+/// Used only for logs predating `activeFlightModeFlags` (INAV 8 and older), whose sole mode signal is
+/// `flightModeFlags` = `rcModeActivationMask`. The raw value there is a `boxId_e` **enum ordinal**
+/// mask, and those ordinals shift between releases — ordinal 53 is MIXERPROFILE in a 9.0 log but the
+/// permanent id the live path maps is NAVCRUISE — so the names the decoder already resolved are the
+/// version-robust way in. Names that are not flight modes (ARM, LIGHTS, MIXERPROFILE, …) contribute
+/// nothing, which is what leaves an armed craft with no mode box as acro.
+///
+/// Caveat this cannot fix: a box mask says which mode the pilot *selected*, not which one the FC
+/// actually entered — a NAV box without a GPS fix never engages, yet shows here.
+fn flight_mode_bits_from_names(names: &str) -> u32 {
+    let mut bits = 0u32;
+    for name in names.split('|') {
+        bits |= match name.trim() {
+            "ANGLE" => 1 << 0,
+            "HORIZON" => 1 << 1,
+            "HEADINGHOLD" => 1 << 2,
+            "NAVALTHOLD" => 1 << 3,
+            "NAVRTH" => 1 << 4,
+            "NAVPOSHOLD" => 1 << 5,
+            "HEADFREE" => 1 << 6,
+            "NAVLAUNCH" => 1 << 7,
+            "MANUAL" => 1 << 8,
+            "FAILSAFE" => 1 << 9,
+            "AUTOTUNE" => 1 << 10,
+            "NAVWP" => 1 << 11,
+            // Cruise = course hold + althold; the live box table folds both onto the same bit.
+            "NAVCOURSEHOLD" | "NAVCRUISE" => 1 << 12,
+            "FLAPERON" => 1 << 13,
+            "TURTLE" => 1 << 15,
+            "SOARING" => 1 << 16,
+            "ANGLEHOLD" => 1 << 17,
+            _ => 0,
+        };
+    }
+    bits
+}
+
+/// INAV `stateFlags_t` bits from `blackbox_decode`'s decoded names ("GPS_FIX_HOME|GPS_FIX|…").
+///
+/// The decoder renders this field as names by default, so the numeric read always failed and every
+/// imported row stored a null — the column was write-only in practice. Bit positions are
+/// `runtime_config.h`, confirmed against 574k decoded rows by pairing the name output with the same
+/// logs decoded under `--unit-flags raw` (zero disagreements).
+fn state_flag_bits_from_names(names: &str) -> u32 {
+    let mut bits = 0u32;
+    for name in names.split('|') {
+        bits |= match name.trim() {
+            "GPS_FIX_HOME" => 1 << 0,
+            "GPS_FIX" => 1 << 1,
+            "CALIBRATE_MAG" => 1 << 2,
+            "SMALL_ANGLE" => 1 << 3,
+            "FIXED_WING_LEGACY" => 1 << 4,
+            "ANTI_WINDUP" => 1 << 5,
+            "FLAPERON_AVAILABLE" => 1 << 6,
+            "NAV_MOTOR_STOP_OR_IDLE" => 1 << 7,
+            "COMPASS_CALIBRATED" => 1 << 8,
+            "ACCELEROMETER_CALIBRATED" => 1 << 9,
+            "GPS_ESTIMATED_FIX" => 1 << 10,
+            "NAV_CRUISE_BRAKING" => 1 << 11,
+            "NAV_CRUISE_BRAKING_BOOST" => 1 << 12,
+            "NAV_CRUISE_BRAKING_LOCKED" => 1 << 13,
+            "NAV_EXTRA_ARMING_SAFETY_BYPASSED" => 1 << 14,
+            "AIRMODE_ACTIVE" => 1 << 15,
+            "ESC_SENSOR_ENABLED" => 1 << 16,
+            "AIRPLANE" => 1 << 17,
+            "MULTIROTOR" => 1 << 18,
+            "ROVER" => 1 << 19,
+            "BOAT" => 1 << 20,
+            "ALTITUDE_CONTROL" => 1 << 21,
+            "MOVE_FORWARD_ONLY" => 1 << 22,
+            "SET_REVERSIBLE_MOTORS_FORWARD" => 1 << 23,
+            "FW_HEADING_USE_YAW" => 1 << 24,
+            "ANTI_WINDUP_DEACTIVATED" => 1 << 25,
+            "LANDING_DETECTED" => 1 << 26,
+            "IN_FLIGHT_EMERG_REARM" => 1 << 27,
+            "TAILSITTER" => 1 << 28,
+            _ => 0,
+        };
+    }
+    bits
+}
+
 fn read_json_array(indices: &[usize], record: &StringRecord) -> Option<String> {
     if indices.is_empty() {
         return None;
@@ -650,7 +738,14 @@ fn build_telemetry_record_indexed(
     let lon = read_f64(cols.lon, record).map(|v| if v.abs() > 180.0 { v / 1e7 } else { v });
 
     // Canonical flight mode from the logged INAV flightModeFlags (same bit layout as classify_inav).
-    let mode_flags = read_i64(cols.active_flight_mode_flags, record);
+    // INAV 8 and older never logged that field — fall back to the decoded box names there, which is
+    // all those logs carry (see flight_mode_bits_from_names).
+    let mode_flags = read_i64(cols.active_flight_mode_flags, record).or_else(|| {
+        cols.flight_mode_boxes
+            .and_then(|i| record.get(i))
+            .filter(|names| !names.trim().is_empty())
+            .map(|names| flight_mode_bits_from_names(names) as i64)
+    });
     let (mode_primary, mode_modifiers) = match mode_flags {
         Some(f) => {
             let fm = crate::flightmode::classify_inav(f as u32);
@@ -690,15 +785,23 @@ fn build_telemetry_record_indexed(
         gps_epv: read_f64(cols.gps_epv, record),
         active_wp_number: read_i32(cols.active_wp_number, record),
         active_flight_mode_flags: mode_flags,
-        state_flags: read_i64(cols.state_flags, record),
+        // Decoded to names by default, so the numeric read never resolved (see the helper).
+        state_flags: read_i64(cols.state_flags, record).or_else(|| {
+            cols.state_flags
+                .and_then(|i| record.get(i))
+                .filter(|names| !names.trim().is_empty())
+                .map(|names| state_flag_bits_from_names(names) as i64)
+        }),
         nav_state: read_i32(cols.nav_state, record),
         nav_flags: read_i64(cols.nav_flags, record),
         rx_signal_received: read_u8(cols.rx_signal_received, record),
         hw_health_status: read_i64(cols.hw_health_status, record),
         baro_temperature: read_f64(cols.baro_temperature, record),
-        wind_n_ms: read_f64(cols.wind_n, record),
-        wind_e_ms: read_f64(cols.wind_e, record),
-        wind_d_ms: read_f64(cols.wind_d, record),
+        // INAV's wind estimator keeps its vectors in cm/s (wind_estimator.c) → m/s, matching the
+        // live MSP2_INAV_WIND path which already scales the same way.
+        wind_n_ms: read_f64(cols.wind_n, record).map(|v| v / 100.0),
+        wind_e_ms: read_f64(cols.wind_e, record).map(|v| v / 100.0),
+        wind_d_ms: read_f64(cols.wind_d, record).map(|v| v / 100.0),
         rc_data_json: read_json_array(&cols.rc_data, record),
         rc_command_json: read_json_array(&cols.rc_command, record),
         // navPos[0,1] are local-frame NE offsets in cm — NOT useful as geographic coords.
@@ -814,18 +917,30 @@ fn extract_header_metadata_for_log(file_data: &[u8], log_index: Option<u32>) -> 
     }
 }
 
-/// Heuristic platform type for INAV blackbox: there is no explicit platform header, but the
-/// logged field set differs by airframe — fixed-wing logs a single `motor[0]` plus `servo[...]`
-/// control surfaces, while multirotors log several `motor[N]`. We read the highest motor index
-/// (and servo presence) from the `H Field ... name:` definition lines.
+/// Platform type for INAV blackbox: there is no explicit platform header, but the navigation PID
+/// fields are logged under mutually exclusive conditions (blackbox.c):
+///   `fwAlt*`/`fwPos*` → `STATE(FIXED_WING_LEGACY) && BLACKBOX_FEATURE_NAV_PID`
+///   `mcPos*`/`mcVel*`/`mcSurface*` → `!STATE(FIXED_WING_LEGACY) && BLACKBOX_FEATURE_NAV_PID`
+/// so either group settles it outright. With nav-PID logging switched off neither appears and the
+/// motor/servo shape is all that is left — a weak signal, because a fixed wing may well run several
+/// motors (differential thrust, twin): counting motors alone declared every such log a multirotor.
 /// Returns 0 = multirotor (default / unknown), 1 = airplane. Display-only; no functional impact.
 fn parse_platform_type(text: &str) -> u8 {
+    const FIXED_WING_NAV_FIELDS: [&str; 2] = ["fwAlt", "fwPos"];
+    const MULTIROTOR_NAV_FIELDS: [&str; 3] = ["mcPos", "mcVel", "mcSurface"];
+
     let mut max_motor: i32 = -1;
     let mut has_servo = false;
     for line in text.lines() {
         let l = line.trim();
         if !l.starts_with("H Field") {
             continue;
+        }
+        if FIXED_WING_NAV_FIELDS.iter().any(|f| l.contains(f)) {
+            return 1;
+        }
+        if MULTIROTOR_NAV_FIELDS.iter().any(|f| l.contains(f)) {
+            return 0;
         }
         if l.contains("servo[") {
             has_servo = true;

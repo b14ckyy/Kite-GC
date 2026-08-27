@@ -81,7 +81,7 @@
   import { t } from "svelte-i18n";
   import { contactColor, ffContactColor, contactVisibleOnMap, relevanceFactor } from "$lib/helpers/radarMap";
   import { pickShape, buildContactIconHtml } from "$lib/helpers/radarIcons";
-  import { convertAltitude, convertSpeed, convertDistance, convertVerticalSpeed, formatConverted } from "$lib/utils/units";
+  import { convertAltitude, convertSpeed, convertDistance, convertVerticalSpeed, formatConverted, speedDigits } from "$lib/utils/units";
 
   let {
     playbackTrack = [],
@@ -296,7 +296,7 @@
     const ui = get(settings).interface;
     const name = v.callsign?.trim() || v.id;
     const alt = v.altM == null ? '—' : formatConverted(convertAltitude(v.altM, ui.altitudeUnit), 0);
-    const spd = v.groundSpeedMs == null ? '—' : formatConverted(convertSpeed(v.groundSpeedMs, ui.speedUnit), 0);
+    const spd = v.groundSpeedMs == null ? '—' : formatConverted(convertSpeed(v.groundSpeedMs, ui.speedUnit), speedDigits(ui.speedUnit));
     const dist = v.distanceM == null
       ? '—'
       : formatConverted(convertDistance(v.distanceM, ui.distanceUnit), v.distanceM < 10000 ? 1 : 0);
