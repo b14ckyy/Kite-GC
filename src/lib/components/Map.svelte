@@ -36,6 +36,7 @@
   import { MAP_PROVIDERS, getProviderById, type MapProvider } from "$lib/config/mapProviders";
   import { cachedTileLayer } from "$lib/cache/CachedTileLayer";
   import { initTileCache } from "$lib/cache/tileCache";
+  import { isWebKitGtk } from "$lib/platform";
   import { homePosition, homeMarkerShown } from "$lib/stores/home";
   import { editMode, geoWaypoints, launchPoint, replayActive, toDeg } from "$lib/stores/mission";
   import { autopilotSystem } from "$lib/stores/autopilotContext";
@@ -2023,7 +2024,7 @@
 </script>
 
 <div class="map-wrapper">
-  <div bind:this={mapContainer} class="map" style="--map-rotation: 0deg"></div>
+  <div bind:this={mapContainer} class="map" class:tile-overlap={isWebKitGtk} style="--map-rotation: 0deg"></div>
 
   <div class="map-controls-corner">
     {#if !miniControls}
@@ -2122,6 +2123,14 @@
        WHITE hairline (issue #52) and flashes bright while tiles load. Dark, so whatever still
        peeks through reads as part of the imagery. */
     background: #2e2e2e;
+  }
+
+  /* WebKitGTK only: stretch every 256px tile by half a px so neighbors overlap — OS-level
+     fractional display scaling still puts tile edges on subpixel boundaries after the #52
+     rounding, and WebKitGTK antialiases the gap. !important beats Leaflet's inline size. */
+  :global(.map.tile-overlap img.leaflet-tile) {
+    width: 256.5px !important;
+    height: 256.5px !important;
   }
 
   /* Heading-up: container size set via inline styles (JS),
