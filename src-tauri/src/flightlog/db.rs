@@ -2001,6 +2001,19 @@ pub fn get_flight_track(
     conn: &Connection,
     flight_id: i64,
 ) -> SqlResult<Vec<TelemetryRecord>> {
+    // Flights recorded before the unified flight-mode model (f8e5699, 2026-06-14) stored the raw
+    // mode flags but no canonical mode, and replay them as N/A. An import can be repeated, a live
+    // recording cannot, so the mode is derived here from the flags that are already in the row.
+    // `active_flight_mode_flags` holds INAV's bitmask or MAVLink's custom_mode depending on the
+    // source, which is what the variant selects between.
+    let fc_variant: Option<String> = conn
+        .query_row(
+            "SELECT fc_variant FROM flights WHERE id = ?1",
+            params![flight_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+
     let mut stmt = conn.prepare(
         "SELECT id, flight_id, timestamp_ms, lat, lon, alt_m, speed_ms,
                 heading, vario_ms, voltage, current_a, mah_drawn, rssi, battery_percentage,
@@ -2019,6 +2032,18 @@ pub fn get_flight_track(
     )?;
 
     let rows = stmt.query_map(params![flight_id], |row| {
+        let mode_flags: Option<i64> = row.get(26)?;
+        let stored_primary: Option<String> = row.get(41)?;
+        let stored_modifiers: Option<String> = row.get(42)?;
+        let derived = match (&stored_primary, mode_flags, fc_variant.as_deref()) {
+            (None, Some(flags), Some(variant)) => Some(if variant.eq_ignore_ascii_case("INAV") {
+                crate::flightmode::classify_inav(flags as u32)
+            } else {
+                crate::flightmode::classify_mavlink(flags as u32, variant)
+            }),
+            _ => None,
+        };
+
         Ok(TelemetryRecord {
             id: row.get(0)?,
             flight_id: row.get(1)?,
@@ -2061,8 +2086,13 @@ pub fn get_flight_track(
             nav_lat: row.get(38)?,
             nav_lon: row.get(39)?,
             nav_alt_m: row.get(40)?,
-            mode_primary: row.get(41)?,
-            mode_modifiers: row.get(42)?,
+            mode_primary: stored_primary.or_else(|| derived.as_ref().map(|m| m.primary.clone())),
+            mode_modifiers: stored_modifiers.or_else(|| {
+                derived
+                    .as_ref()
+                    .filter(|m| !m.modifiers.is_empty())
+                    .map(|m| m.modifiers.join(","))
+            }),
             link_snr: row.get(43)?,
             link_rssi_dbm: row.get(44)?,
             airspeed_ms: row.get(45)?,
