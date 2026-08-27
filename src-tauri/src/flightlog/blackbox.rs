@@ -643,6 +643,51 @@ fn flight_mode_bits_from_names(names: &str) -> u32 {
     bits
 }
 
+/// INAV `stateFlags_t` bits from `blackbox_decode`'s decoded names ("GPS_FIX_HOME|GPS_FIX|…").
+///
+/// The decoder renders this field as names by default, so the numeric read always failed and every
+/// imported row stored a null — the column was write-only in practice. Bit positions are
+/// `runtime_config.h`, confirmed against 574k decoded rows by pairing the name output with the same
+/// logs decoded under `--unit-flags raw` (zero disagreements).
+fn state_flag_bits_from_names(names: &str) -> u32 {
+    let mut bits = 0u32;
+    for name in names.split('|') {
+        bits |= match name.trim() {
+            "GPS_FIX_HOME" => 1 << 0,
+            "GPS_FIX" => 1 << 1,
+            "CALIBRATE_MAG" => 1 << 2,
+            "SMALL_ANGLE" => 1 << 3,
+            "FIXED_WING_LEGACY" => 1 << 4,
+            "ANTI_WINDUP" => 1 << 5,
+            "FLAPERON_AVAILABLE" => 1 << 6,
+            "NAV_MOTOR_STOP_OR_IDLE" => 1 << 7,
+            "COMPASS_CALIBRATED" => 1 << 8,
+            "ACCELEROMETER_CALIBRATED" => 1 << 9,
+            "GPS_ESTIMATED_FIX" => 1 << 10,
+            "NAV_CRUISE_BRAKING" => 1 << 11,
+            "NAV_CRUISE_BRAKING_BOOST" => 1 << 12,
+            "NAV_CRUISE_BRAKING_LOCKED" => 1 << 13,
+            "NAV_EXTRA_ARMING_SAFETY_BYPASSED" => 1 << 14,
+            "AIRMODE_ACTIVE" => 1 << 15,
+            "ESC_SENSOR_ENABLED" => 1 << 16,
+            "AIRPLANE" => 1 << 17,
+            "MULTIROTOR" => 1 << 18,
+            "ROVER" => 1 << 19,
+            "BOAT" => 1 << 20,
+            "ALTITUDE_CONTROL" => 1 << 21,
+            "MOVE_FORWARD_ONLY" => 1 << 22,
+            "SET_REVERSIBLE_MOTORS_FORWARD" => 1 << 23,
+            "FW_HEADING_USE_YAW" => 1 << 24,
+            "ANTI_WINDUP_DEACTIVATED" => 1 << 25,
+            "LANDING_DETECTED" => 1 << 26,
+            "IN_FLIGHT_EMERG_REARM" => 1 << 27,
+            "TAILSITTER" => 1 << 28,
+            _ => 0,
+        };
+    }
+    bits
+}
+
 fn read_json_array(indices: &[usize], record: &StringRecord) -> Option<String> {
     if indices.is_empty() {
         return None;
@@ -740,7 +785,13 @@ fn build_telemetry_record_indexed(
         gps_epv: read_f64(cols.gps_epv, record),
         active_wp_number: read_i32(cols.active_wp_number, record),
         active_flight_mode_flags: mode_flags,
-        state_flags: read_i64(cols.state_flags, record),
+        // Decoded to names by default, so the numeric read never resolved (see the helper).
+        state_flags: read_i64(cols.state_flags, record).or_else(|| {
+            cols.state_flags
+                .and_then(|i| record.get(i))
+                .filter(|names| !names.trim().is_empty())
+                .map(|names| state_flag_bits_from_names(names) as i64)
+        }),
         nav_state: read_i32(cols.nav_state, record),
         nav_flags: read_i64(cols.nav_flags, record),
         rx_signal_received: read_u8(cols.rx_signal_received, record),
