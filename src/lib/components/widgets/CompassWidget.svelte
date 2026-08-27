@@ -7,7 +7,7 @@
 <script lang="ts">
   import type { TelemetryData } from "$lib/stores/telemetry";
   import type { InterfaceSettings } from "$lib/stores/settings";
-  import { convertSpeed } from "$lib/utils/units";
+  import { convertSpeed, speedDigits } from "$lib/utils/units";
   import { t } from 'svelte-i18n';
 
   let {
@@ -111,7 +111,7 @@
     {#if windShown}
       <text x="100" y="128" text-anchor="middle" dominant-baseline="middle"
             fill="#7fd4ff" font-size="15" font-weight="600" font-family="sans-serif"
-            style="font-variant-numeric: tabular-nums">{windSpeedConv.value.toFixed(0)} {windSpeedConv.unit}</text>
+            style="font-variant-numeric: tabular-nums">{windSpeedConv.value.toFixed(speedDigits(interfaceSettings.speedUnit))} {windSpeedConv.unit}</text>
     {/if}
 
     <!-- Bezel ring -->

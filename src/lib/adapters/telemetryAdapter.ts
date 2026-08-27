@@ -86,12 +86,14 @@ export function toTelemetryData(r: TelemetryRecord, fcVariant = 'INAV'): Telemet
     },
 
     // Status
-    // `state_flags` is INAV's stateFlags bitfield and only blackbox imports populate it — the live
-    // recorder has no source for it (`recorder.rs`) and stores NULL, which left every replayed live
-    // flight looking permanently disarmed. Recover it from the recording itself: the recorder opens a
-    // flight on the arm edge and finalises it on disarm, so every sample in a flight row was taken
-    // while armed, and any sample carrying a flight mode proves telemetry was flowing at that moment.
-    armingFlags: r.state_flags ?? (r.mode_primary ? ARMED_BIT : 0),
+    // Derived, never read from `state_flags`: that column holds INAV's stateFlags, a different
+    // bitfield whose bit 2 is CALIBRATE_MAG, not armingFlags' ARMED — feeding it in here would read
+    // an armed flight as disarmed. Nothing records armingFlags: the live recorder has no source for
+    // it (`recorder.rs`) and a blackbox log never carries it. Recover it from the recording instead:
+    // the recorder opens a flight on the arm edge and finalises it on disarm, so every sample in a
+    // flight row was taken while armed, and any sample carrying a flight mode proves telemetry was
+    // flowing at that moment.
+    armingFlags: r.mode_primary ? ARMED_BIT : 0,
     statusSeen: true, // replay rows always carry the recorded arming state
     cpuLoad: r.cpu_load ?? 0,
     sensorStatus: r.hw_health_status ?? 0,

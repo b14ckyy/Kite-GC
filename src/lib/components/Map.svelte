@@ -36,6 +36,7 @@
   import { MAP_PROVIDERS, getProviderById, type MapProvider } from "$lib/config/mapProviders";
   import { cachedTileLayer } from "$lib/cache/CachedTileLayer";
   import { initTileCache } from "$lib/cache/tileCache";
+  import { isWebKitGtk } from "$lib/platform";
   import { homePosition, homeMarkerShown } from "$lib/stores/home";
   import { editMode, geoWaypoints, launchPoint, replayActive, toDeg } from "$lib/stores/mission";
   import { autopilotSystem } from "$lib/stores/autopilotContext";
@@ -81,7 +82,7 @@
   import { t } from "svelte-i18n";
   import { contactColor, ffContactColor, contactVisibleOnMap, relevanceFactor } from "$lib/helpers/radarMap";
   import { pickShape, buildContactIconHtml } from "$lib/helpers/radarIcons";
-  import { convertAltitude, convertSpeed, convertDistance, convertVerticalSpeed, formatConverted } from "$lib/utils/units";
+  import { convertAltitude, convertSpeed, convertDistance, convertVerticalSpeed, formatConverted, speedDigits } from "$lib/utils/units";
 
   let {
     playbackTrack = [],
@@ -297,7 +298,7 @@
     const ui = get(settings).interface;
     const name = v.callsign?.trim() || v.id;
     const alt = v.altM == null ? '—' : formatConverted(convertAltitude(v.altM, ui.altitudeUnit), 0);
-    const spd = v.groundSpeedMs == null ? '—' : formatConverted(convertSpeed(v.groundSpeedMs, ui.speedUnit), 0);
+    const spd = v.groundSpeedMs == null ? '—' : formatConverted(convertSpeed(v.groundSpeedMs, ui.speedUnit), speedDigits(ui.speedUnit));
     const dist = v.distanceM == null
       ? '—'
       : formatConverted(convertDistance(v.distanceM, ui.distanceUnit), v.distanceM < 10000 ? 1 : 0);
@@ -2046,7 +2047,7 @@
 </script>
 
 <div class="map-wrapper">
-  <div bind:this={mapContainer} class="map" style="--map-rotation: 0deg"></div>
+  <div bind:this={mapContainer} class="map" class:tile-overlap={isWebKitGtk} style="--map-rotation: 0deg"></div>
 
   <div class="map-controls-corner">
     {#if !miniControls}
@@ -2141,6 +2142,18 @@
     width: 100%;
     height: 100%;
     transition: none;
+    /* Override Leaflet's light default (#ddd): it shines through every antialiased tile seam as a
+       WHITE hairline (issue #52) and flashes bright while tiles load. Dark, so whatever still
+       peeks through reads as part of the imagery. */
+    background: #2e2e2e;
+  }
+
+  /* WebKitGTK only: stretch every 256px tile by half a px so neighbors overlap — OS-level
+     fractional display scaling still puts tile edges on subpixel boundaries after the #52
+     rounding, and WebKitGTK antialiases the gap. !important beats Leaflet's inline size. */
+  :global(.map.tile-overlap img.leaflet-tile) {
+    width: 256.5px !important;
+    height: 256.5px !important;
   }
 
   /* Heading-up: container size set via inline styles (JS),

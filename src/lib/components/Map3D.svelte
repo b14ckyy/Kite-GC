@@ -67,7 +67,7 @@
   import { sunAltitudeDeg, cesiumLikeBrightness } from "$lib/utils/sun";
   import { ensureUserLocation, resolveUserLocation, userGeoLocation } from "$lib/helpers/userLocation";
   import FpvHud from "$lib/components/FpvHud.svelte";
-  import { convertSpeed, convertAltitude, convertDistance, convertVerticalSpeed, formatConverted } from "$lib/utils/units";
+  import { convertSpeed, convertAltitude, convertDistance, convertVerticalSpeed, formatConverted, speedDigits } from "$lib/utils/units";
   import { haversineDistance, bearing, destinationPoint } from "$lib/utils/geo";
   import type { SpeedUnit, AltitudeUnit, RadarMapSettings, GcsMode } from "$lib/stores/settings";
   import { radarVehicles, radarSelection, type RadarSnapshot } from "$lib/stores/radarTracking";
@@ -279,6 +279,7 @@
   const FPV_FOV_MIN = 30;            // narrowest "lens" (deg, horizontal)
   const FPV_FOV_MAX = 120;           // widest "lens"
   const FPV_EYE_HEIGHT_M = 0.5;      // raise the eye slightly above the track to avoid trail clipping
+  const FPV_MIN_CLEARANCE_M = 1.5;   // never let the eye dip below the loaded terrain surface (#51)
   const FPV_TRACK_ALPHA = 0.4;       // flight track is dimmed so it doesn't fill the view
   let fpvFov = $state(60);           // horizontal field of view (deg), the FPV "zoom"
   let fpvWheelHandler: Cesium.ScreenSpaceEventHandler | undefined;
@@ -289,6 +290,7 @@
   const fpvScratchM3 = new Cesium.Matrix3();
   const fpvScratchDir = new Cesium.Cartesian3();
   const fpvScratchUp = new Cesium.Cartesian3();
+  const fpvScratchCarto = new Cesium.Cartographic();
 
   // Range (meters to target) for follow and orbit modes. Updated by zoom buttons and
   // mouse-wheel zoom. Separate from free mode which uses Cesium's native zoom.
@@ -1640,7 +1642,7 @@
     }
     const ui = get(settings).interface;
     const alt = formatConverted(convertAltitude(rec.altM, ui.altitudeUnit), 0);
-    const spd = rec.groundSpeedMs == null ? '—' : formatConverted(convertSpeed(rec.groundSpeedMs, ui.speedUnit), 0);
+    const spd = rec.groundSpeedMs == null ? '—' : formatConverted(convertSpeed(rec.groundSpeedMs, ui.speedUnit), speedDigits(ui.speedUnit));
     let vs = '';
     if (rec.verticalSpeedMs != null && Math.abs(rec.verticalSpeedMs) >= 0.5) {
       const a = formatConverted(convertVerticalSpeed(Math.abs(rec.verticalSpeedMs), ui.verticalSpeedUnit), 1);
@@ -4399,7 +4401,15 @@
     const rot = Cesium.Matrix3.fromQuaternion(quat, fpvScratchM3);
     const dir = Cesium.Matrix3.getColumn(rot, 0, fpvScratchDir); // nose / forward axis
     const up = Cesium.Matrix3.getColumn(rot, 2, fpvScratchUp);   // body up (so bank tilts the view)
-    const dest = Cesium.Cartesian3.fromDegrees(lon, lat, alt + FPV_EYE_HEIGHT_M);
+    // Cesium discards the sky for any frame whose camera sits below the LOADED tile mesh
+    // (GlobeTranslucencyState.isEnvironmentVisible) — logged altitudes do dip below it (#51).
+    // getHeight() is the surface that check consults; undefined = tiles not loaded, keep raw alt.
+    let eye = alt + FPV_EYE_HEIGHT_M;
+    const ground = viewer.scene.globe.getHeight(
+      Cesium.Cartographic.fromDegrees(lon, lat, 0, fpvScratchCarto),
+    );
+    if (ground !== undefined) eye = Math.max(eye, ground + FPV_MIN_CLEARANCE_M);
+    const dest = Cesium.Cartesian3.fromDegrees(lon, lat, eye);
     viewer.camera.setView({ destination: dest, orientation: { direction: dir, up } });
   }
 
@@ -4587,6 +4597,7 @@
       roll={hud.roll}
       speed={sp.value}
       speedUnit={sp.unit}
+      speedDigits={speedDigits(hudSpeedUnit)}
       speedLabel={hud.speedIsAir ? 'ASPD' : 'SPD'}
       altitude={al.value}
       altitudeUnit={al.unit}

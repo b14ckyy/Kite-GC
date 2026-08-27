@@ -682,6 +682,12 @@ pub fn flightlog_default_raw_log_path() -> String {
         .to_string()
 }
 
+/// How many flight logs a Blackbox file holds, so the importer can walk them by index.
+#[tauri::command]
+pub fn flightlog_blackbox_log_count(file_path: String) -> Result<u32, String> {
+    crate::flightlog::blackbox::count_logs(std::path::Path::new(&file_path))
+}
+
 #[tauri::command]
 pub async fn flightlog_import_blackbox(
     file_path: String,

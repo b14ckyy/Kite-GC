@@ -12,7 +12,7 @@
   import { radarAlerts, type ContactAlert } from '$lib/controllers/radarAlerts';
   import { radarSelection } from '$lib/stores/radarTracking';
   import { contactTypeKey } from '$lib/helpers/radar3d';
-  import { convertSpeed, convertAltitude, convertDistance, formatConverted } from '$lib/utils/units';
+  import { convertSpeed, convertAltitude, convertDistance, formatConverted, speedDigits } from '$lib/utils/units';
   import type { InterfaceSettings } from '$lib/stores/settings';
 
   let { interfaceSettings }: { interfaceSettings: InterfaceSettings } = $props();
@@ -26,7 +26,7 @@
   const compass = (deg: number) => COMPASS[Math.round(deg / 45) % 8];
 
   const fmtSpeed = (ms: number | null) =>
-    ms == null ? '—' : formatConverted(convertSpeed(ms, interfaceSettings.speedUnit), 0);
+    ms == null ? '—' : formatConverted(convertSpeed(ms, interfaceSettings.speedUnit), speedDigits(interfaceSettings.speedUnit));
   const fmtDist = (m: number | null) => {
     if (m == null) return '—';
     const d = convertDistance(m, interfaceSettings.distanceUnit);

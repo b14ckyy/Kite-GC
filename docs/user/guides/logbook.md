@@ -77,7 +77,9 @@ Use **Import** to pull in logs from outside Kite (one file or a batch). Supporte
 | **Kite flight** (`.kflight`) | a flight exported from another Kite install |
 
 A progress bar tracks the import. INAV Blackbox needs the **`blackbox_decode`** helper, which Kite
-fetches automatically the first time you import one. Imported telemetry logs (`.tlog` / `.rawmsp`) are
+fetches automatically the first time you import one. A `.bbl` pulled from the flight controller's
+flash usually holds **several flights** — one per arm / disarm cycle. Kite detects that and offers to
+import them all, each as its own logbook entry. Imported telemetry logs (`.tlog` / `.rawmsp`) are
 treated as telemetry recordings and **split into separate flights on the arm / disarm markers** in the
 log, the same way a live recording is.
 
@@ -86,7 +88,8 @@ log, the same way a live recording is.
 - **`.kflight`** — export selected flights (multi-select supported) as Kite's portable flight file, to
   move them to another install.
 - **Original log file** — re-export the onboard log stored with the flight: an INAV Blackbox
-  (`.bbl` / `.txt`) or ArduPilot Dataflash (`.bin`). Imported `.tlog` / `.rawmsp` telemetry is parsed
+  (`.bbl` / `.txt`) or ArduPilot Dataflash (`.bin`). For a flight that came out of a multi-flight
+  `.bbl`, this is that flight's own log, not the whole download. Imported `.tlog` / `.rawmsp` telemetry is parsed
   straight in (not kept as a file), so there's nothing to re-export for those.
 - **Track** — export a flight's path as **KMZ / KML** (Google Earth), **GPX** or **CSV**.
 

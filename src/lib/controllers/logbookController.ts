@@ -14,6 +14,7 @@ import {
   geocodeFlight,
   fetchFlightWeather,
   importBlackboxLog,
+  blackboxLogCount,
   importArdupilotLog,
   importRawLog,
   type RawImportResult,
@@ -187,6 +188,11 @@ export async function importBlackbox(
   locale: string,
 ) {
   return importBlackboxLog(filePath, dbPath, logIndex, forceImport, locale);
+}
+
+/** How many flight logs a Blackbox file holds. */
+export async function countBlackboxLogs(filePath: string) {
+  return blackboxLogCount(filePath);
 }
 
 /**

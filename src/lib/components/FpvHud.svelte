@@ -21,6 +21,7 @@
     roll = 0,      // deg, + = right wing down
     speed = 0,     // already in display unit
     speedUnit = 'm/s',
+    speedDigits = 0, // decimals for the speed readout (m/s needs one, the coarser units don't)
     speedLabel = 'SPD', // 'SPD' (ground speed) or 'ASPD' (airspeed, when available)
     altitude = 0,  // already in display unit
     altitudeUnit = 'm',
@@ -34,6 +35,7 @@
     roll?: number;
     speed?: number;
     speedUnit?: string;
+    speedDigits?: number;
     speedLabel?: string;
     altitude?: number;
     altitudeUnit?: string;
@@ -104,7 +106,8 @@
     }),
   );
 
-  const fmt = (n: number) => (Math.abs(n) >= 100 ? Math.round(n).toString() : n.toFixed(0));
+  const fmt = (n: number, digits = 0) =>
+    Math.abs(n) >= 100 ? Math.round(n).toString() : n.toFixed(digits);
 
   // ── Flight-path marker (velocity vector) ────────────────────────────
   // Conformal (same projection + FOV scaling as the pitch ladder), body-frame / pilot's view: vertical
@@ -200,7 +203,7 @@
   <g>
     <text class="hud-text small dim" x={CX - 430} y={CY - 34} text-anchor="middle">{speedLabel} {speedUnit}</text>
     <rect class="hud-box" x={CX - 490} y={CY - 18} width="120" height="36" />
-    <text class="hud-text big" x={CX - 430} y={CY} text-anchor="middle" dominant-baseline="central">{fmt(speed)}</text>
+    <text class="hud-text big" x={CX - 430} y={CY} text-anchor="middle" dominant-baseline="central">{fmt(speed, speedDigits)}</text>
   </g>
 
   <!-- Altitude (right) -->
