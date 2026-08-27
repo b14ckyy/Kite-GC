@@ -9,7 +9,7 @@
   import type { TelemetryData } from "$lib/stores/telemetry";
   import type { InterfaceSettings } from "$lib/stores/settings";
   import { settings } from "$lib/stores/settings";
-  import { convertSpeed } from "$lib/utils/units";
+  import { convertSpeed, speedDigits } from "$lib/utils/units";
   import { t } from 'svelte-i18n';
 
   let {
@@ -32,10 +32,11 @@
 
   let label = $derived(hasAir ? $t('widgetLabels.aspd') : $t('widgetLabels.spd'));
   let primaryConv = $derived(hasAir ? asConv : gsConv);
-  let speed = $derived(telem.lastUpdate ? primaryConv.value.toFixed(0) : '—');
+  let digits = $derived(speedDigits(interfaceSettings.speedUnit));
+  let speed = $derived(telem.lastUpdate ? primaryConv.value.toFixed(digits) : '—');
   let secondary = $derived(
     hasAir
-      ? $t('widgetLabels.gs', { values: { value: `${gsConv.value.toFixed(0)} ${gsConv.unit}` } })
+      ? $t('widgetLabels.gs', { values: { value: `${gsConv.value.toFixed(digits)} ${gsConv.unit}` } })
       : null
   );
 

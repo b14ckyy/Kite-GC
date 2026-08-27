@@ -21,7 +21,7 @@
   import { panelState } from '$lib/stores/panelState';
   import type { AppSettings, RadarSettings, InterfaceSettings } from '$lib/stores/settings';
   import type { PortInfo } from '$lib/stores/connection';
-  import { convertSpeed, convertAltitude, convertDistance, formatConverted } from '$lib/utils/units';
+  import { convertSpeed, convertAltitude, convertDistance, formatConverted, speedDigits } from '$lib/utils/units';
   import { RELATIVE_LEGEND_STOPS, LEGEND_LEVEL_PCT } from '$lib/helpers/radarMap';
 
   let { radar, interfaceSettings, referencePoint = null, mspSupported = false, onPatch = (_p: Partial<AppSettings>) => {} }: {
@@ -135,7 +135,7 @@
     return formatConverted(d, d.value < 10 ? 1 : 0);
   };
   const fmtSpeed = (ms: number | null) =>
-    ms == null ? '—' : formatConverted(convertSpeed(ms, interfaceSettings.speedUnit), 0);
+    ms == null ? '—' : formatConverted(convertSpeed(ms, interfaceSettings.speedUnit), speedDigits(interfaceSettings.speedUnit));
   const fmtAlt = (m: number | null) =>
     m == null ? '—' : formatConverted(convertAltitude(m, interfaceSettings.altitudeUnit), 0);
   const fmtBrg = (b: number | null) => (b == null ? '—' : `${Math.round(b)}°`);

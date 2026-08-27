@@ -30,6 +30,15 @@ export function convertSpeed(ms: number, unit: SpeedUnit): ConvertedValue {
   }
 }
 
+/**
+ * Decimals for a speed readout. m/s is by far the coarsest of the offered units — one step is
+ * 3.6 km/h, 1.9 kt — so a whole number hides most of the resolution the FC actually sends (cm/s on
+ * both INAV and ArduPilot). The others are fine-grained enough to read as integers.
+ */
+export function speedDigits(unit: SpeedUnit): number {
+  return unit === 'ms' ? 1 : 0;
+}
+
 export function convertAltitude(meters: number, unit: AltitudeUnit): ConvertedValue {
   if (unit === 'ft') {
     return { value: meters * 3.280839895, unit: 'ft' };

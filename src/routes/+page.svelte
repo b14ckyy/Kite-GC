@@ -259,17 +259,29 @@
   // floating window frame, `widget` → the video-widget tile (its published rect). Every other surface
   // shows video. `main` (default) = the normal full-screen map.
   const mapInFrame = $derived($videoState.mapLocation !== 'main' && $videoState.status === 'live');
+  // Full-screen map box, rounded to whole px (issue #52): the CSS fallback `calc(53px * scale)`
+  // lands on fractions at uiScale 1.25/1.5 (66.25px / 79.5px), which is what leaked tile seams —
+  // see mapFrameStyle above for the mechanism. The map sliding ≤ half a px under the toolbar edge
+  // is invisible (chrome z1 covers map z0); Map.svelte's ResizeObserver re-invalidates on the
+  // resulting size change by itself.
+  const mapLayerStyle = $derived(`top:${Math.round(53 * uiScale)}px; bottom:${Math.round(24 * uiScale)}px;`);
   const mapFloating = $derived($videoState.mapLocation === 'floating');
   const mapInWidget = $derived($videoState.mapLocation === 'widget');
+  // Rounded to whole px, here and everywhere the unzoomed map layer is placed (issue #52): a
+  // fractional box origin (floatLeft × 1.25 …) puts every 256px tile edge on a subpixel boundary,
+  // and WebKitGTK antialiases each tile as its own composited layer — hairline seams between tiles,
+  // shimmering during heading-follow rotation. Chromium snaps layers to device pixels, which is why
+  // Windows never showed it. The frame drawn by the zoomed chrome may sit up to half a px off the
+  // rounded map rect — invisible, and .miniframe-ctl uses this same string so it stays aligned.
   const mapFrameStyle = $derived(
-    `left:${floatLeft * uiScale}px; top:${floatTop * uiScale}px; width:${floatW * uiScale}px; height:${floatH * uiScale}px;`,
+    `left:${Math.round(floatLeft * uiScale)}px; top:${Math.round(floatTop * uiScale)}px; width:${Math.round(floatW * uiScale)}px; height:${Math.round(floatH * uiScale)}px;`,
   );
   // The rect the in-frame map is positioned into (screen px): the floating frame, or the widget tile.
   const inFrameStyle = $derived(
     mapFloating
       ? mapFrameStyle
       : $videoState.widgetRect
-        ? `left:${$videoState.widgetRect.x}px; top:${$videoState.widgetRect.y}px; width:${$videoState.widgetRect.w}px; height:${$videoState.widgetRect.h}px;`
+        ? `left:${Math.round($videoState.widgetRect.x)}px; top:${Math.round($videoState.widgetRect.y)}px; width:${Math.round($videoState.widgetRect.w)}px; height:${Math.round($videoState.widgetRect.h)}px;`
         : '',
   );
 
@@ -1271,7 +1283,27 @@
     } else if (ext === 'rawmsp' || ext === 'tlog') {
       await performRawImport(filePath); // raw serial log (ADR-049)
     } else {
-      await performImport(filePath, undefined, false); // INAV Blackbox text (.txt/.bbl/.bfl)
+      await performBlackboxImport(filePath); // INAV Blackbox text (.txt/.bbl/.bfl)
+    }
+  }
+
+  /** A Configurator flash download holds one log per arm/disarm cycle, and `blackbox_decode --stdout`
+   *  refuses such a file without `--index`. Import every log as its own flight; a single-log file
+   *  keeps passing no index at all. */
+  async function performBlackboxImport(filePath: string) {
+    const logCount = await logbookCtrl.countBlackboxLogs(filePath);
+    if (logCount <= 1) {
+      await performImport(filePath, undefined, false);
+      return;
+    }
+    const answer = await showDialog({
+      title: $t('logbook.multiLogTitle'),
+      message: $t('logbook.multiLogMessage', { values: { count: logCount } }),
+      buttons: [{ label: $t('logbook.multiLogImportAll'), value: 'all', primary: true }],
+    });
+    if (answer !== 'all') return;
+    for (let index = 0; index < logCount; index++) {
+      await performImport(filePath, index, false);
     }
   }
 
@@ -2510,7 +2542,7 @@
   <div
     class="layer-map"
     class:in-frame={mapInFrame}
-    style={mapInFrame ? inFrameStyle : ''}
+    style={mapInFrame ? inFrameStyle : mapLayerStyle}
     onclick={minimizeLogbook}
   >
     {#if mapViewMode === '2d'}
@@ -3128,6 +3160,10 @@
      uses the inline rect (already *--ui-scale in mapFrameStyle). */
   .layer-map {
     position: absolute;
+    /* top/bottom only as the no-JS fallback: the inline `mapLayerStyle` overrides them with the
+       same values rounded to whole px — a fractional box origin (53px × 1.25 = 66.25px) put every
+       tile edge on a subpixel boundary and WebKitGTK rendered hairline seams between the tiles
+       (issue #52). */
     top: calc(53px * var(--ui-scale, 1));
     left: 0;
     right: 0;
