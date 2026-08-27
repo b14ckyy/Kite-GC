@@ -496,6 +496,9 @@ struct ColumnIndices {
     gps_epv: Option<usize>,
     active_wp_number: Option<usize>,
     active_flight_mode_flags: Option<usize>,
+    /// `flightModeFlags` — the RC *box* mask, decoded to names ("ARM|ANGLE"). Only read when
+    /// `activeFlightModeFlags` is missing; see `flight_mode_bits_from_names`.
+    flight_mode_boxes: Option<usize>,
     state_flags: Option<usize>,
     nav_state: Option<usize>,
     nav_flags: Option<usize>,
@@ -547,6 +550,7 @@ impl ColumnIndices {
             gps_epv: resolve_col(m, &["gps_epv"]),
             active_wp_number: resolve_col(m, &["activewpnumber", "active_wp_number"]),
             active_flight_mode_flags: resolve_col(m, &["activeflightmodeflags", "active_flight_mode_flags"]),
+            flight_mode_boxes: resolve_col(m, &["flightmodeflags", "flight_mode_flags"]),
             state_flags: resolve_col(m, &["stateflags", "state_flags"]),
             nav_state: resolve_col(m, &["navstate", "nav_state"]),
             nav_flags: resolve_col(m, &["navflags", "nav_flags"]),
@@ -600,6 +604,45 @@ fn read_u8(cols: Option<usize>, record: &StringRecord) -> Option<u8> {
     read_f64(cols, record).map(|v| v.round() as u8)
 }
 
+/// Normalized FLIGHT_MODE bits from `blackbox_decode`'s decoded box names ("ARM|ANGLE|MIXERPROFILE").
+///
+/// Used only for logs predating `activeFlightModeFlags` (INAV 8 and older), whose sole mode signal is
+/// `flightModeFlags` = `rcModeActivationMask`. The raw value there is a `boxId_e` **enum ordinal**
+/// mask, and those ordinals shift between releases — ordinal 53 is MIXERPROFILE in a 9.0 log but the
+/// permanent id the live path maps is NAVCRUISE — so the names the decoder already resolved are the
+/// version-robust way in. Names that are not flight modes (ARM, LIGHTS, MIXERPROFILE, …) contribute
+/// nothing, which is what leaves an armed craft with no mode box as acro.
+///
+/// Caveat this cannot fix: a box mask says which mode the pilot *selected*, not which one the FC
+/// actually entered — a NAV box without a GPS fix never engages, yet shows here.
+fn flight_mode_bits_from_names(names: &str) -> u32 {
+    let mut bits = 0u32;
+    for name in names.split('|') {
+        bits |= match name.trim() {
+            "ANGLE" => 1 << 0,
+            "HORIZON" => 1 << 1,
+            "HEADINGHOLD" => 1 << 2,
+            "NAVALTHOLD" => 1 << 3,
+            "NAVRTH" => 1 << 4,
+            "NAVPOSHOLD" => 1 << 5,
+            "HEADFREE" => 1 << 6,
+            "NAVLAUNCH" => 1 << 7,
+            "MANUAL" => 1 << 8,
+            "FAILSAFE" => 1 << 9,
+            "AUTOTUNE" => 1 << 10,
+            "NAVWP" => 1 << 11,
+            // Cruise = course hold + althold; the live box table folds both onto the same bit.
+            "NAVCOURSEHOLD" | "NAVCRUISE" => 1 << 12,
+            "FLAPERON" => 1 << 13,
+            "TURTLE" => 1 << 15,
+            "SOARING" => 1 << 16,
+            "ANGLEHOLD" => 1 << 17,
+            _ => 0,
+        };
+    }
+    bits
+}
+
 fn read_json_array(indices: &[usize], record: &StringRecord) -> Option<String> {
     if indices.is_empty() {
         return None;
@@ -650,7 +693,14 @@ fn build_telemetry_record_indexed(
     let lon = read_f64(cols.lon, record).map(|v| if v.abs() > 180.0 { v / 1e7 } else { v });
 
     // Canonical flight mode from the logged INAV flightModeFlags (same bit layout as classify_inav).
-    let mode_flags = read_i64(cols.active_flight_mode_flags, record);
+    // INAV 8 and older never logged that field — fall back to the decoded box names there, which is
+    // all those logs carry (see flight_mode_bits_from_names).
+    let mode_flags = read_i64(cols.active_flight_mode_flags, record).or_else(|| {
+        cols.flight_mode_boxes
+            .and_then(|i| record.get(i))
+            .filter(|names| !names.trim().is_empty())
+            .map(|names| flight_mode_bits_from_names(names) as i64)
+    });
     let (mode_primary, mode_modifiers) = match mode_flags {
         Some(f) => {
             let fm = crate::flightmode::classify_inav(f as u32);
