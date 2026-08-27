@@ -719,6 +719,19 @@ where
             }
         }
 
+    // ── Opening-mode backfill ────────────────────────────────────────
+    // ArduPilot writes MODE only when the mode changes, so rows logged before the first one carry no
+    // mode and replayed as N/A — on a log-on-arm file that is the opening frames of the flight. The
+    // vehicle was in that mode all along; only the message had yet to be written.
+    if let Some(first_mode) = all_rows.iter().find_map(|r| r.custom_mode) {
+        for r in all_rows.iter_mut() {
+            if r.custom_mode.is_some() {
+                break;
+            }
+            r.custom_mode = Some(first_mode);
+        }
+    }
+
     if all_rows.is_empty() {
         return Err("ArduPilot import failed: no valid GPS rows found".into());
     }
