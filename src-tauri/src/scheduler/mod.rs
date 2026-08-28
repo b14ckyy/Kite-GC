@@ -131,6 +131,10 @@ struct TelemetrySlot {
     last_poll: Option<Instant>,
     /// For groups with rotating secondary codes, track current index
     rotation_index: usize,
+    /// Next code to send in a multi-code slot. The write budget can cut a slot off mid-list, and
+    /// without a cursor the next turn would restart at codes[0] — permanently starving everything
+    /// behind it (see the poll loop).
+    code_cursor: usize,
     /// Scheduling priority (higher = more important, polled first when overloaded)
     priority: u8,
     /// Minimum poll rate (Hz) this slot is never scaled below under link congestion (adaptive floor).
@@ -145,6 +149,7 @@ impl TelemetrySlot {
             interval: Duration::from_secs_f64(1.0 / rate_hz),
             last_poll: None,
             rotation_index: 0,
+            code_cursor: 0,
             priority,
             floor_hz,
         }
@@ -575,20 +580,28 @@ fn scheduler_loop(
                 if budget == 0 {
                     break;
                 }
-                // Rotating secondaries poll one code per turn; every other slot polls all its codes.
-                let codes: Vec<u16> = match slots[i].group {
-                    TelemetryGroup::PositionSecondary => {
-                        let code = slots[i].codes[slots[i].rotation_index % slots[i].codes.len()];
-                        slots[i].rotation_index = slots[i].rotation_index.wrapping_add(1);
-                        vec![code]
-                    }
-                    _ => slots[i].codes.clone(),
+                // Rotating secondaries poll one code per turn; every other slot works through all of
+                // its codes — but across ticks, resuming at `code_cursor`. MAX_WRITES_PER_TICK is 1, so
+                // a slot that restarted its list every turn could only ever emit codes[0]: everything
+                // behind it was starved for the whole session. That is what silently killed
+                // MSP_SENSOR_STATUS and MSP_NAV_STATUS behind MSPV2_INAV_STATUS in the Status slot,
+                // and with NAV_STATUS the active-waypoint highlight. The slot counts as polled (and
+                // its interval restarts) only once the cursor has been all the way round.
+                let rotating = matches!(slots[i].group, TelemetryGroup::PositionSecondary);
+                let codes: Vec<u16> = if rotating {
+                    let code = slots[i].codes[slots[i].rotation_index % slots[i].codes.len()];
+                    slots[i].rotation_index = slots[i].rotation_index.wrapping_add(1);
+                    vec![code]
+                } else {
+                    slots[i].codes[slots[i].code_cursor..].to_vec()
                 };
                 let mut emitted = false;
+                let mut advanced = 0usize;
                 for code in codes {
                     if budget == 0 {
                         break;
                     }
+                    advanced += 1;
                     if in_flight.get(&code).map_or(false, |q| !q.is_empty()) {
                         continue; // dedup: this code is already outstanding
                     }
@@ -610,8 +623,16 @@ fn scheduler_loop(
                         emitted = true;
                     }
                 }
-                if emitted {
-                    slots[i].last_poll = Some(now);
+                if rotating {
+                    if emitted {
+                        slots[i].last_poll = Some(now);
+                    }
+                } else {
+                    slots[i].code_cursor += advanced;
+                    if slots[i].code_cursor >= slots[i].codes.len() {
+                        slots[i].code_cursor = 0;
+                        slots[i].last_poll = Some(now);
+                    }
                 }
             }
         }
