@@ -55,8 +55,8 @@ Kite is already a full-featured GCS. Broadly, what works today:
 
 **Platform**
 
-- Windows, macOS and Linux (x86 / ARM), a multi-language UI (English, German, French, Chinese), global
-  UI scaling, and persistent layout/settings.
+- Windows, macOS and Linux (x86 / ARM), a multi-language UI (English, German, French, Chinese,
+  Bulgarian), global UI scaling, and persistent layout/settings.
 
 ## Toward 1.0
 

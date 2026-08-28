@@ -80,12 +80,13 @@ CI runs the same checks (plus clippy) on Linux, Windows and macOS for every push
 
 ## Internationalisation
 
-Kite ships in English, German and French. For contributions:
+Kite ships in English, German, French, Chinese and Bulgarian. For contributions:
 
 - **`en.json` is the source of truth and is required** — every new or changed UI string must have its
   English key.
-- **Other locales (`de.json`, `fr.json`) are optional but very welcome.** Keeping them in sync is
-  appreciated; an AI assistant makes this quick and is the recommended way to fill in translations.
+- **Other locales (`de.json`, `fr.json`, `zh.json`, `bg.json`) are optional but very welcome.** Keeping
+  them in sync is appreciated; an AI assistant makes this quick and is the recommended way to fill in
+  translations. Chinese and Bulgarian came in exactly that way, as community contributions.
 - Use **named placeholders** (`{name}`) for parameters, passed as an object.
 
 Missing non-English keys fall back gracefully, so an English-only PR is fine — a maintainer (or you, with

@@ -14,7 +14,7 @@ decision record (ADRs) is kept internally.
 | 3D globe | [CesiumJS](https://cesium.com/platform/cesiumjs/) |
 | Database | SQLite via `rusqlite` (bundled) |
 | Serial | `serialport` (Rust) |
-| i18n | `svelte-i18n` (ICU Message Format) — English, German, French |
+| i18n | `svelte-i18n` (ICU Message Format) — English, German, French, Chinese, Bulgarian |
 
 The frontend (WebView) and the Rust backend communicate through **Tauri commands** (frontend → backend
 calls returning `Result<T, String>`) and **events** (backend → frontend streams). A deliberate rule:
