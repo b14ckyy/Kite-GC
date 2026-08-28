@@ -7,6 +7,10 @@
   The camera usage string is required for the video panel's "Camera (device)" source: it uses
   getUserMedia, which macOS blocks without a usage description. This covers USB/UVC capture devices
   (e.g. an HDMI capture card fed from FPV goggles/VRX), the same webcam access Windows/Linux already have.
+  The local-network string covers everything Kite talks to on the LAN — an RTSP video source on a
+  companion computer, MAVLink over UDP/TCP from a Wi-Fi telemetry bridge. macOS 15 gates that behind a
+  consent prompt; without this key the prompt carries a generic system text instead of saying what
+  Kite actually wants the network for. (Loopback, i.e. our own MediaMTX, is exempt from the gate.)
 -->
 <plist version="1.0">
 <dict>
@@ -16,5 +20,7 @@
     <string>Kite Ground Control uses Bluetooth to connect to your flight controller / telemetry link over BLE.</string>
     <key>NSCameraUsageDescription</key>
     <string>Kite Ground Control uses the camera to display an FPV video feed from a connected capture device.</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Kite Ground Control connects to devices on your local network — a video stream from an onboard companion computer, or telemetry from a flight controller over Wi-Fi.</string>
 </dict>
 </plist>
