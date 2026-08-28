@@ -47,7 +47,7 @@
     },
     "macOS": {
       "entitlements": "Entitlements.plist",
-      "minimumSystemVersion": "10.15"
+      "minimumSystemVersion": "13.0"
     },
     "icon": [
       "icons/32x32.png",
