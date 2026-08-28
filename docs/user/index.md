@@ -68,7 +68,8 @@ Everything you'd expect from a ground station:
 - **Mission planning** — create, upload, download and edit missions; undo/redo; survey-pattern
   generator; terrain-following / AGL waypoints.
 - **[Vehicle control](guides/vehicle-control.md)** — arm/disarm, flight-mode changes, takeoff/RTL/loiter and more (ArduPilot/PX4).
-- **Comfort** — a multi-language interface (English, German and French at launch; more to follow) and
+- **Comfort** — a multi-language interface (English, German, French, Chinese and Bulgarian; more
+  community translations welcome) and
   persistent window, layout and settings between sessions.
 
 ## What makes Kite special
