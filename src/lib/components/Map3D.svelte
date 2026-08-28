@@ -3,6 +3,31 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
+<script lang="ts" module>
+  // ── OffscreenCanvas guard ──────────────────────────────────────────────────
+  // Some WKWebView configurations expose no OffscreenCanvas global — observed on a macOS 26 machine
+  // (Discord report 2026-08-04; Lockdown Mode suspected, unconfirmed), while macOS 13–15 all have it.
+  // Cesium 1.131+ type-checks material uniforms with a bare `instanceof OffscreenCanvas`
+  // (CesiumGS/cesium#12558, unguarded as of 1.140), and an instanceof against a missing global throws —
+  // which killed CesiumWidget construction outright ("Can't find variable: OffscreenCanvas"). A marker
+  // class makes every such instanceof answer false instead. Nothing ever constructs it: Cesium only
+  // type-checks, and the MJPEG sink's detection (mjpegSink.ts) calls getContext() on a probe instance
+  // and cleanly bails on the null. On engines with the real API this block does nothing.
+  // Module scope: runs once per app; the marker keeps the label honest if dev HMR re-evaluates.
+  class OffscreenCanvasShim {
+    static readonly kiteShim = true;
+    getContext(): null { return null; }
+  }
+
+  const offscreenCanvasState: 'native' | 'shimmed' = (() => {
+    if (typeof OffscreenCanvas === 'undefined') {
+      (globalThis as Record<string, unknown>).OffscreenCanvas = OffscreenCanvasShim;
+      return 'shimmed';
+    }
+    return (OffscreenCanvas as unknown as { kiteShim?: boolean }).kiteShim ? 'shimmed' : 'native';
+  })();
+</script>
+
 <script lang="ts">
   import { onMount, onDestroy, untrack } from "svelte";
   import { get } from "svelte/store";
@@ -84,6 +109,30 @@
   import { rallyWorking } from "$lib/stores/rally";
   import { t } from "svelte-i18n";
   import { buildApproachGeometry } from "$lib/helpers/autolandGeometry";
+
+  /** Route 3D diagnostics into the file logger (Settings → Diagnostics). A remote tester's release
+   *  build has no console — the macOS 26 report arrived as a *photo* of Cesium's error panel because
+   *  nothing else ever captured the failure. Mirrors logVideo in stores/video.ts. */
+  function log3d(level: 'warn' | 'debug', message: string): void {
+    if (level === 'warn') console.warn(`[Map3D] ${message}`);
+    else console.log(`[Map3D] ${message}`);
+    void invoke('log_frontend', { level, area: '3d', message }).catch(() => {});
+  }
+
+  /** Capability fingerprint for remote diagnosis. Cesium needs WebGL2; the OffscreenCanvas state and
+   *  the UA (which carries the WebKit build) tell the rest of the story from a single log line. */
+  function probe3dCapabilities(): { healthy: boolean; summary: string } {
+    const c = document.createElement('canvas');
+    let webgl2 = false;
+    let webgl1 = false;
+    try { webgl2 = !!c.getContext('webgl2'); } catch { /* treated as absent */ }
+    try { webgl1 = webgl2 || !!c.getContext('webgl'); } catch { /* treated as absent */ }
+    const summary =
+      `webgl2=${webgl2} webgl1=${webgl1} offscreenCanvas=${offscreenCanvasState} ` +
+      `dpr=${typeof window !== 'undefined' ? window.devicePixelRatio : '?'} ` +
+      `ua="${typeof navigator !== 'undefined' ? navigator.userAgent : '?'}"`;
+    return { healthy: webgl2 && offscreenCanvasState === 'native', summary };
+  }
 
   let {
     active = true,
@@ -978,7 +1027,7 @@
     // Build the base imagery provider from the selected map provider
     const baseProvider = getProviderById(mapProviderId);
 
-    viewer = new Cesium.Viewer(cesiumContainer, {
+    const viewerOptions: Cesium.Viewer.ConstructorOptions = {
       // Disable all default widgets for clean embedding
       animation: false,
       timeline: false,
@@ -1016,7 +1065,23 @@
       // written by the (debug-gated) panel, so reading it unconditionally is safe.
       orderIndependentTranslucency:
         !(typeof localStorage !== 'undefined' && localStorage.getItem('kite_perf_oit') === 'off'),
-    });
+    };
+
+    // One fingerprint line per 3D entry: warn when something is off (default log level → it reaches
+    // the diagnostics file a tester can send), debug when healthy.
+    const caps = probe3dCapabilities();
+    log3d(caps.healthy ? 'debug' : 'warn', `capabilities: ${caps.summary}`);
+
+    // CesiumWidget paints construction errors into its own DOM panel, but that panel was the ONLY
+    // record — the macOS 26 report reached us as a photo of the screen. Capture the real error into
+    // the diagnostics log, then stop cleanly: the rest of the app runs on without 3D.
+    try {
+      viewer = new Cesium.Viewer(cesiumContainer, viewerOptions);
+    } catch (e) {
+      const detail = e instanceof Error ? `${e.name}: ${e.message}\n${e.stack ?? ''}` : String(e);
+      log3d('warn', `CesiumWidget construction failed — 3D unavailable: ${detail}`);
+      return;
+    }
 
     // Wake the parked craft-smoothing loop when the craft may have scrolled back into view — see the
     // off-screen gate at the smoothing state. Dies with the viewer, no explicit removal needed.
