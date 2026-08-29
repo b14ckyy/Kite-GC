@@ -71,10 +71,128 @@ notarize-macos` signs + notarizes it for distribution without a Gatekeeper promp
 Developer account, credentials read from your environment / keychain — never committed).
 
 ### Android
-Mobile (Tauri Mobile) is **not part of the 1.0 line**. An iOS / iPadOS port lives on `development`
-and an Android port is in review; both need their own UI tier and build pipeline, and both target a
-release after 1.0. Nothing mobile builds from `master` — don't run `tauri android init` or
-`tauri ios init` against a 1.0 checkout.
+
+Mobile is **not part of the 1.0 line** — nothing mobile builds from `master`, and both mobile ports
+target a release after 1.0. The iOS / iPadOS port lives on `development` (see the iOS notes above);
+Android is described here.
+
+Android is **experimental**. The app builds and installs, and connects over **USB serial** (OTG) or
+**UDP / TCP**. Bluetooth LE is **not implemented** there yet (see
+[What does not work yet](#what-does-not-work-yet-on-android)), and the interface is still the desktop
+one: it fits a tablet in landscape, and is cramped on a phone.
+
+USB serial goes through the Android USB Host API, so the driver lives in Kotlin
+(`gen/android/app/src/main/java/com/kitegc/app/UsbSerial.kt`) with a JNI shim in front of it
+(`src-tauri/src/transport/serial_android.rs`). Two device families are driven:
+
+| Family | Covers |
+| --- | --- |
+| **CDC-ACM** | INAV / Betaflight / ArduPilot flight controllers over USB, ESP32-S2/S3/C3 native USB |
+| **CP210x** | Silicon Labs bridges — most SiK telemetry radios |
+
+FTDI (RFD900) and CH340 are **not** driven yet; both slot in as another `SerialDriver` in that Kotlin
+file. Android grants USB access per device and per session: plugging the cable in and picking Kite
+from the system dialog grants it up front, otherwise the first connect raises the permission prompt.
+
+#### Getting an APK without building one
+
+The **Android** workflow in GitHub Actions builds the APK and uploads it as a run artifact — Actions →
+Android → *Run workflow*. That is the recommended route: the runner already has the SDK, the JDK and
+`sdkmanager`, so nothing has to be installed locally.
+
+#### Signing
+
+Release builds are signed with the **debug** keystore unless you supply a real one, because an APK
+with no signature at all cannot be installed — Android rejects it as an invalid package. That is
+enough to sideload, and not enough to publish.
+
+⚠️ **The debug keystore is generated per machine, and a CI runner is a fresh machine every run.** So
+consecutive CI builds have *different* signatures, and Android refuses to install one over the other
+("package conflicts with an existing package"). Updating then means uninstalling — which erases the
+flight database. Supply a real key and the problem disappears for good.
+
+**For CI**, add four repository secrets and the workflow signs every build with the same key:
+
+```bash
+keytool -genkey -v -keystore kite.jks -alias kite -keyalg RSA -keysize 2048 -validity 10000
+base64 -w0 kite.jks     # → KEYSTORE_B64
+```
+
+| Secret | Value |
+| --- | --- |
+| `KEYSTORE_B64` | base64 of the `.jks` |
+| `KEYSTORE_PASSWORD` | store password |
+| `KEY_ALIAS` | key alias (`kite` above) |
+| `KEY_PASSWORD` | key password |
+
+With none set the build still succeeds — it just warns and uses the throwaway key. Keep the `.jks`
+and its passwords somewhere safe: lose them and you can never update an installed app again, only
+replace it.
+
+To sign with a real key, drop a `key.properties` next to `gen/android/app/build.gradle.kts`:
+
+```properties
+storeFile=/absolute/path/to/keystore.jks
+storePassword=…
+keyAlias=…
+keyPassword=…
+```
+
+It is gitignored, so the key never lands in the repository.
+
+#### Building locally
+
+1. **JDK 17** — `sudo apt install openjdk-17-jdk` (or Temurin on Windows/macOS).
+2. **Android SDK** — Android Studio, or just the command-line tools. Set `ANDROID_HOME`.
+3. **NDK r27** — `sdkmanager --install "ndk;27.2.12479018"`, then point `NDK_HOME` at it.
+4. **Rust targets** — `rustup target add aarch64-linux-android` (add `armv7-linux-androideabi`,
+   `i686-linux-android`, `x86_64-linux-android` only if you need those ABIs; arm64 covers every
+   Android phone and tablet made in the last decade).
+
+```bash
+npm ci
+npm run tauri android build -- --apk --target aarch64   # APK in src-tauri/gen/android/app/build/outputs/apk
+npm run tauri android dev                               # on-device dev build with hot reload
+```
+
+`src-tauri/gen/android` is **committed** — it is the Android app project (manifest, Gradle build,
+icons, the Rust Gradle plugin), edited by hand. Do **not** run `tauri android init`: it would
+regenerate the project and overwrite the manifest's permissions and the landscape orientation.
+
+To type-check the Rust side for Android without a full Gradle build, use `just check-android`, or by
+hand:
+
+```bash
+BIN="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+export CC_aarch64_linux_android="$BIN/aarch64-linux-android24-clang"
+export AR_aarch64_linux_android="$BIN/llvm-ar"
+export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$CC_aarch64_linux_android"
+cargo check --manifest-path src-tauri/Cargo.toml --target aarch64-linux-android --lib
+```
+
+Those variables are not optional: `cc-rs` looks for an `aarch64-linux-android-clang` that the NDK does
+not ship — its compilers are API-versioned (`…android24-clang`, matching `minSdk`) — so without them
+the C dependencies (`ring`, bundled SQLite, `zstd`) fail to configure. `tauri android build` sets this
+up itself, so only the bare `cargo check` needs it. (On Windows the prebuilt directory is
+`windows-x86_64` and the compilers are `.cmd` wrappers.)
+
+#### What does not work yet on Android
+
+| Feature | State | Why |
+| --- | --- | --- |
+| UDP / TCP links | ✅ works | Plain sockets. |
+| USB serial (CDC-ACM, CP210x) | ✅ works | Android USB Host API, driver in `UsbSerial.kt`. Needs an OTG cable. |
+| USB serial (FTDI, CH340) | ❌ not implemented | Those two chips need their own driver; the devices are not listed as ports. |
+| Flight log, missions, fleet & battery manager | ✅ works | SQLite in app-private storage (`android::app_data_dir`). |
+| Maps, terrain, weather | ✅ works | Network + the same tile cache as desktop. |
+| Bluetooth LE | ❌ not implemented | `btleplug`'s Android backend needs a companion Java library the Gradle project does not ship. A scan finds nothing. |
+| Joystick / HID RC control | ❌ not implemented | The backend is per-OS (WGI / evdev / IOKit); Android has none, so no device is ever listed. |
+| Blackbox import | ❌ impossible | Needs the external `blackbox_decode` tool, and Android forbids executing a downloaded binary. Import on a desktop and bring flights over as `.kflight`. |
+| Video (RTSP via MediaMTX, MJPEG, native capture) | ❌ not implemented | Every video path spawns a bundled helper (`mediamtx` / `ffmpeg`), which an Android app cannot do. |
+| Exports to `Documents/` | ⚠️ different | Scoped storage makes Documents a MediaStore collection, not a path — exports go to app-private storage instead. |
+
+Where a feature is missing the backend returns a clear message rather than failing to build, so the
+rest of the app is unaffected.
 
 ## Workflow
 
