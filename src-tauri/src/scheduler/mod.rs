@@ -822,11 +822,6 @@ fn build_slots(config: &TelemetryConfig) -> Vec<TelemetrySlot> {
     if config.airspeed_enabled {
         secondary_codes.push(MSPV2_INAV_AIR_SPEED);
     }
-    // Wind estimate (INAV 10.0+) — opt-in extra poll, already version-gated in TelemetryConfig.
-    if config.wind_enabled {
-        secondary_codes.push(MSP2_INAV_WIND);
-    }
-
     // Adaptive-degradation floors (Hz): the minimum rate each group keeps under a congested link.
     // Attitude and position stay usable (1 Hz) for the horizon + map; everything else floors at 0.5 Hz.
     const FLOOR_ATTITUDE: f64 = 1.0;
@@ -889,6 +884,19 @@ fn build_slots(config: &TelemetryConfig) -> Vec<TelemetrySlot> {
             FLOOR_LOW,
         ),
     ];
+
+    // Wind estimate (INAV 10.0+) — opt-in extra poll, already version-gated in TelemetryConfig. Own
+    // 0.5 Hz slot: the estimate shifts over minutes, and riding the rotating secondary slot would have
+    // cost altitude a third of its rate for a value that barely moves.
+    if config.wind_enabled {
+        slots.push(TelemetrySlot::new(
+            TelemetryGroup::Wind,
+            vec![MSP2_INAV_WIND],
+            0.5,
+            1,
+            FLOOR_LOW,
+        ));
+    }
 
     // RC link stats (INAV 9.1+) — own 1 Hz slot, low priority (degrades first under load).
     if config.link_stats_enabled {
