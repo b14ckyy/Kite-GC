@@ -832,7 +832,8 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
 
         // ── WIND → telemetry-wind ──────────────────────────────────
         // ArduPilot's EKF wind estimate. `direction` is the bearing the wind blows FROM (deg);
-        // `speed` is horizontal m/s. INAV has no live wind MSP message (blackbox/replay only).
+        // `speed` is horizontal m/s. PX4 sends the same estimate as WIND_COV below, and INAV has its
+        // own MSP2_INAV_WIND from 10.0 on.
         MavMessage::WIND(w) => {
             let wind = WindData {
                 direction_from_deg: w.direction as f64,
@@ -842,6 +843,26 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
 
             if let Some(ref rec) = recorder {
                 if let Ok(mut r) = rec.lock() { r.on_wind(&wind); }
+            }
+        }
+
+        // ── WIND_COV → telemetry-wind ──────────────────────────────────
+        // PX4's wind estimate (it has no WIND, just as ArduPilot has no WIND_COV). `wind_x`/`wind_y`
+        // are the north/east components of the wind *velocity* — the direction the air moves TOWARD —
+        // so the bearing is turned around into the FROM convention `WindData` carries. Either field
+        // reads NaN while the estimate is unknown.
+        MavMessage::WIND_COV(w) => {
+            let (north, east) = (w.wind_x as f64, w.wind_y as f64);
+            if north.is_finite() && east.is_finite() {
+                let wind = WindData {
+                    direction_from_deg: (east.atan2(north).to_degrees() + 180.0).rem_euclid(360.0),
+                    speed_ms: north.hypot(east),
+                };
+                let _ = app_handle.emit("telemetry-wind", &wind);
+
+                if let Some(ref rec) = recorder {
+                    if let Ok(mut r) = rec.lock() { r.on_wind(&wind); }
+                }
             }
         }
 

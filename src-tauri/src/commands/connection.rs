@@ -550,10 +550,12 @@ fn connect_mavlink(
     // Configure telemetry stream rates (ADR-043) — mirrors the MSP poll-rate knobs. Skipped when
     // "Full MAVLink Telemetry" is on, so the FC streams purely per its own SRn_* params (.tlog gets
     // everything). Applied here, before the handler thread starts, while we still own the transport.
+    // Which of the two wind messages this FC speaks — WIND on ArduPilot, WIND_COV on PX4.
+    let is_px4 = fc_info.fc_variant == "PX4";
     if mavlink_full_telemetry.unwrap_or(false) {
         // SET_MESSAGE_INTERVAL is sticky on the FC until reboot, so a prior reduced session would
         // otherwise keep the link narrow. Reset our managed messages to the FC's SRn defaults.
-        mavlink_proto::streamrates::reset_stream_rates(&mut *byte_transport, fc_sysid);
+        mavlink_proto::streamrates::reset_stream_rates(&mut *byte_transport, fc_sysid, is_px4);
     } else {
         mavlink_proto::streamrates::apply_stream_rates(
             &mut *byte_transport,
@@ -562,6 +564,7 @@ fn connect_mavlink(
             position_rate_hz.unwrap_or(2.0),
             airspeed_enabled.unwrap_or(false),
             wind_enabled.unwrap_or(false),
+            is_px4,
         );
     }
 
