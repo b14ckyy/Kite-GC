@@ -18,18 +18,12 @@ use crate::scheduler;
 use crate::scheduler::TelemetryConfig;
 use crate::state::{ActiveProtocol, AppState};
 use crate::transport::{ByteTransport, Transport, TransportType};
-// PortInfo is only returned by list_serial_ports, which is desktop-only.
-#[cfg(not(target_os = "ios"))]
 use crate::transport::PortInfo;
-#[cfg(not(target_os = "ios"))]
 use crate::transport::serial::SerialConnection;
 use crate::transport::tcp::TcpTransport;
 use crate::transport::udp::UdpTransport;
-// BLE backend: btleplug on desktop, CoreBluetooth (objc2) on iOS. Same public surface either way.
-#[cfg(not(target_os = "ios"))]
+// `transport::ble` resolves per platform behind one name (btleplug on desktop, CoreBluetooth on iOS).
 use crate::transport::ble::{self as ble_backend, BleDeviceInfo};
-#[cfg(target_os = "ios")]
-use crate::transport::ble_ios::{self as ble_backend, BleDeviceInfo};
 
 /// Home position pushed to the frontend (event `home-position`). Same shape/name regardless of
 /// protocol so MAVLink (HOME_POSITION) can emit it identically later.
@@ -40,12 +34,8 @@ struct HomeEvent {
     alt: f64,
 }
 
-/// List available serial ports.
-///
-/// Serial and BLE links are unavailable on iOS (no raw serial access, no btleplug backend), so the
-/// serial/BLE connection commands are compiled out there; the iOS build connects over Wi-Fi
-/// (TCP/UDP MAVLink) only. Every desktop target keeps them unchanged.
-#[cfg(not(target_os = "ios"))]
+/// List available serial ports. On iOS this is always empty — `transport::serial` resolves to the
+/// stand-in there (no serial access exists), and the UI hides serial on mobile anyway.
 #[tauri::command]
 pub fn list_serial_ports() -> Vec<PortInfo> {
     crate::transport::serial::list_ports()
@@ -184,11 +174,10 @@ pub async fn connect(
         proto, transport_type, port, baud_rate, host, tcp_port, ble_device_id,
     );
 
-    // Open byte-level transport based on type. Serial is desktop-only (no raw serial access on iOS);
-    // on iOS the Serial variant falls through to the catch-all and is rejected. BLE works on both
-    // (btleplug on desktop, CoreBluetooth on iOS). TCP/UDP are platform-independent.
+    // Open byte-level transport based on type. Every variant is handled on every platform — the
+    // platform differences live behind `transport::serial` / `transport::ble` (on iOS a serial open
+    // fails with a clear runtime error; BLE is CoreBluetooth there). TCP/UDP are platform-independent.
     let byte_transport: Box<dyn ByteTransport> = match transport_type {
-        #[cfg(not(target_os = "ios"))]
         TransportType::Serial => {
             let port_name = port.ok_or("Serial port name required")?;
             let baud = baud_rate.unwrap_or(115200);
@@ -214,8 +203,6 @@ pub async fn connect(
                 Box::new(ble_backend::connect_ble(&dev_id).await?)
             }
         }
-        #[cfg(target_os = "ios")]
-        _ => return Err("Serial is not available on iOS; use Wi-Fi (TCP/UDP) or BLE".into()),
     };
 
     log::info!("Transport opened, protocol={}", proto);

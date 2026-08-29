@@ -8,17 +8,25 @@
 // 1. ByteTransport — protocol-agnostic byte-level I/O (read/write/close)
 // 2. Protocol layers (MspTransport, MavlinkHandler) — built on top of ByteTransport
 
-// Serial (serialport crate) and BLE (btleplug) have no iOS support; the iOS build uses Wi-Fi
-// (TCP/UDP) transports only. Both compile normally on every desktop target.
+// Platform seam. Each transport module exists on EVERY target under one name, and this block is the
+// only place that picks an implementation — callers use `transport::serial` / `transport::ble` and
+// never carry a target cfg of their own (the same way video/ keeps its per-OS backends internal).
+//   serial: serialport-backed on desktop. iOS has no serial access of any kind, so it gets a
+//           stand-in with the same surface — opens fail cleanly, the port list is empty. Android
+//           (future) has a real serial route (USB host API) and slots in here.
+//   ble:    btleplug on desktop, CoreBluetooth (objc2) on iOS — same public surface either way.
 #[cfg(not(target_os = "ios"))]
+pub mod serial;
+#[cfg(target_os = "ios")]
+#[path = "serial_ios.rs"]
 pub mod serial;
 pub mod tcp;
 pub mod udp;
 #[cfg(not(target_os = "ios"))]
 pub mod ble;
-// iOS BLE via CoreBluetooth (objc2) rather than btleplug, which has no iOS backend.
 #[cfg(target_os = "ios")]
-pub mod ble_ios;
+#[path = "ble_ios.rs"]
+pub mod ble;
 
 use std::fmt;
 
@@ -157,9 +165,7 @@ pub trait Transport: Send {
     }
 }
 
-/// Information about an available port/device. Constructed only by the serial port lister, which is
-/// compiled out on iOS.
-#[cfg_attr(target_os = "ios", allow(dead_code))]
+/// Information about an available port/device (returned by the serial port lister).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PortInfo {
     pub path: String,
