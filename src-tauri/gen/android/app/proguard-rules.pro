@@ -31,3 +31,9 @@
 # Keep the class and every member. `init` is reached from MainActivity and would
 # survive on its own; nothing else would.
 -keep class com.kitegc.app.UsbSerial { *; }
+
+# Same JNI-only story for the storage bridge (android/storage.rs → StorageAccess):
+# pickFolder/getLastError/syncDirToTree have no Kotlin caller, so R8 strips them and
+# the folder picker dies with a NoSuchMethodError only in RELEASE builds — the debug
+# build does not minify, which is exactly how this trap stayed invisible in testing.
+-keep class com.kitegc.app.StorageAccess { *; }
