@@ -22,6 +22,8 @@ pub enum TelemetryGroup {
     Misc2,
     /// GPS quality stats (MSP_GPSSTATISTICS) — HDOP / packet counts. Slow-changing, its own low-rate slot.
     GpsStats,
+    /// Wind estimate (MSP2_INAV_WIND) — INAV 10.0+, opt-in. Shifts over minutes, so its own very slow slot.
+    Wind,
 }
 
 /// User-configurable telemetry polling rates
@@ -560,14 +562,24 @@ fn decode_airspeed(payload: &[u8]) -> TelemetryPayload {
 }
 
 /// MSP2_INAV_WIND (0x2231): [speed:u16 cm/s, angle:u16 deg, flags:u8] — INAV 10.0+ (PR #11611).
-/// `angle` is taken as the bearing the wind blows FROM (to match ArduPilot WIND.direction — verify on
-/// real INAV 10 firmware). speed is reported as 0 when the estimate is invalid (flags bit0 = 0).
+/// `angle` is the bearing the air moves TOWARD: `getEstimatedHorizontalWindSpeed()` takes `atan2` over
+/// the earth-frame wind *velocity* vector (X = north, Y = east) and the OSD arrow points that way
+/// unchanged. Everything here — like ArduPilot's WIND.direction — speaks the meteorological FROM
+/// bearing, so it is turned around. Speed reads 0 while the estimate is invalid (flags bit 0 clear).
 fn decode_wind(payload: &[u8]) -> TelemetryPayload {
-    let valid = payload.len() > 4 && (payload[4] & 0x01) != 0;
     TelemetryPayload::Wind(WindData {
-        direction_from_deg: read_u16(payload, 2) as f64,
-        speed_ms: if valid { read_u16(payload, 0) as f64 / 100.0 } else { 0.0 },
+        direction_from_deg: (read_u16(payload, 2) as f64 + 180.0) % 360.0,
+        speed_ms: if wind_estimate_valid(payload) {
+            read_u16(payload, 0) as f64 / 100.0
+        } else {
+            0.0
+        },
     })
+}
+
+/// Bit 0 of the MSP2_INAV_WIND flags byte — the FC's `isEstimatedWindSpeedValid()`.
+fn wind_estimate_valid(payload: &[u8]) -> bool {
+    payload.len() > 4 && (payload[4] & 0x01) != 0
 }
 
 /// MSP2_INAV_MISC2 (0x203A): [uptime_s:u32, flight_time_s:u32, throttle_pct:u8, auto_throttle:u8].
@@ -659,11 +671,12 @@ pub fn feed_recorder(code: u16, payload: &[u8], recorder: &mut FlightRecorder, b
             }
         }
         MSP2_INAV_WIND => {
-            if payload.len() > 4 && (payload[4] & 0x01) != 0 {
-                recorder.on_wind(&WindData {
-                    direction_from_deg: read_u16(payload, 2) as f64,
-                    speed_ms: read_u16(payload, 0) as f64 / 100.0,
-                });
+            // Only a valid estimate is worth storing: an invalid one decodes to 0 m/s, which would read
+            // back on replay as a measured dead calm.
+            if wind_estimate_valid(payload) {
+                if let TelemetryPayload::Wind(data) = decode_wind(payload) {
+                    recorder.on_wind(&data);
+                }
             }
         }
         MSP_NAV_STATUS => {
@@ -698,6 +711,28 @@ pub fn feed_recorder(code: u16, payload: &[u8], recorder: &mut FlightRecorder, b
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wind_angle_is_turned_from_inav_toward_into_a_from_bearing() {
+        // 3.20 m/s (320 cm/s) blowing toward 090° → the wind comes FROM 270°.
+        let payload = [0x40, 0x01, 0x5A, 0x00, 0x01];
+        match decode_telemetry(MSP2_INAV_WIND, &payload, &[]) {
+            TelemetryPayload::Wind(w) => {
+                assert!((w.speed_ms - 3.2).abs() < 1e-9, "speed {}", w.speed_ms);
+                assert!((w.direction_from_deg - 270.0).abs() < 1e-9, "dir {}", w.direction_from_deg);
+            }
+            other => panic!("expected Wind, got {other:?}"),
+        }
+        // Wrap, and an invalid estimate: toward 200° → from 020°, speed suppressed.
+        let payload = [0x00, 0x00, 0xC8, 0x00, 0x00];
+        match decode_telemetry(MSP2_INAV_WIND, &payload, &[]) {
+            TelemetryPayload::Wind(w) => {
+                assert_eq!(w.speed_ms, 0.0, "invalid estimate must not report a speed");
+                assert!((w.direction_from_deg - 20.0).abs() < 1e-9, "dir {}", w.direction_from_deg);
+            }
+            other => panic!("expected Wind, got {other:?}"),
+        }
+    }
 
     #[test]
     fn test_decode_attitude() {
