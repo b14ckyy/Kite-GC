@@ -109,3 +109,62 @@ jobs:
         working-directory: src-tauri
         run: cargo test --verbose
 
+  # --- Android target check ---
+  # The Android counterpart of the iOS lane above: the per-PR signal that shared-code changes keep
+  # compiling for the mobile crate. Its own job because it needs the NDK, which only the Linux runner
+  # sets up cheaply; the full APK build stays in android.yml (manual / Android-file-triggered) — this
+  # only type-checks, needing neither Gradle nor a device.
+  check-android:
+    name: Check (android)
+    runs-on: ubuntu-latest
+    env:
+      # Same pin as android.yml: the NDK is the C toolchain the cross-build links against, and a bump
+      # should be a visible commit, not a silent difference between runs.
+      NDK_VERSION: '27.2.12479018'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK ${{ env.NDK_VERSION }}
+        run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+
+      # cc-rs looks for an `aarch64-linux-android-clang` the NDK does not ship (its compilers are
+      # API-versioned and off PATH), so the C dependencies fail to configure without these.
+      - name: Export the Android toolchain
+        run: |
+          NDK="$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}"
+          BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          test -x "$BIN/aarch64-linux-android24-clang" || {
+            echo "::error::NDK toolchain not found at $BIN"; ls -la "$BIN" || true; exit 1;
+          }
+          {
+            echo "NDK_HOME=$NDK"
+            echo "CC_aarch64_linux_android=$BIN/aarch64-linux-android24-clang"
+            echo "AR_aarch64_linux_android=$BIN/llvm-ar"
+            echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$BIN/aarch64-linux-android24-clang"
+          } >> "$GITHUB_ENV"
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: android-check
+
+      - name: Run cargo check for Android
+        working-directory: src-tauri
+        run: cargo check --target aarch64-linux-android --lib
+
