@@ -189,7 +189,8 @@ up itself, so only the bare `cargo check` needs it. (On Windows the prebuilt dir
 | Joystick / HID RC control | ❌ not implemented | The backend is per-OS (WGI / evdev / IOKit); Android has none, so no device is ever listed. |
 | Blackbox import | ❌ impossible | Needs the external `blackbox_decode` tool, and Android forbids executing a downloaded binary. Import on a desktop and bring flights over as `.kflight`. |
 | Video (RTSP via MediaMTX, MJPEG, native capture) | ❌ not implemented | Every video path spawns a bundled helper (`mediamtx` / `ffmpeg`), which an Android app cannot do. |
-| Exports to `Documents/` | ⚠️ different | Scoped storage makes Documents a MediaStore collection, not a path — exports go to app-private storage instead. |
+| Custom database / raw-log folder | ✅ mirror | Browse grants ONE folder via the system picker (scoped storage — no permission). The app keeps working app-private (SQLite and the raw writers need real paths, which a SAF grant cannot provide) and **mirrors into the folder at session end**: raw logs as files, the database as an atomic snapshot. That copy survives an uninstall. |
+| Exports to `Documents/` | ⚠️ different | Scoped storage makes Documents a MediaStore collection, not a path — exports go through the system share/save dialog instead. |
 
 Where a feature is missing the backend returns a clear message rather than failing to build, so the
 rest of the app is unaffected.
