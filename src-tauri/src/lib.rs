@@ -71,6 +71,7 @@ use commands::fence::{fence_read_all, fence_write_all};
 use commands::rally::{rally_read_all, rally_write_all};
 use commands::info::{get_app_version, is_debug_mode};
 use commands::system::system_on_battery;
+use commands::storage::storage_pick_folder;
 use commands::video::{
     video_ffmpeg_status, video_ffmpeg_download,
     video_engine_status, video_engine_download, video_webrtc_start, video_webrtc_offer,
@@ -686,6 +687,7 @@ pub fn run() {
             terrain_cache_stats,
             terrain_cache_clear,
             system_on_battery,
+            storage_pick_folder,
             video_ffmpeg_status,
             video_ffmpeg_download,
             video_engine_status,

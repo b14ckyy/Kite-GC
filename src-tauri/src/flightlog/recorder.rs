@@ -1089,6 +1089,7 @@ impl FlightRecorder {
             }
         }
         self.close_continuous_loggers();
+        self.mirror_to_shared_folders();
     }
 
     /// Connection lost (device gone — e.g. USB unplugged), detected by the scheduler. Like `shutdown`,
@@ -1114,6 +1115,19 @@ impl FlightRecorder {
             }
         }
         self.close_continuous_loggers();
+        self.mirror_to_shared_folders();
+    }
+
+    /// Mirror the session's artefacts into user-granted shared folders where the settings name one
+    /// (Android SAF tree URIs) — no-op everywhere else. Lives in `user_file`, the module that owns
+    /// user-storage platform differences; called on both teardown paths so a lost link mirrors too.
+    fn mirror_to_shared_folders(&self) {
+        crate::user_file::mirror_session(
+            &self.db_file_path,
+            &self.raw_log_dir,
+            &self.settings.db_path,
+            &self.settings.raw_log_path,
+        );
     }
 
     /// Close the continuous (pre-arm) raw/tlog loggers on disconnect.

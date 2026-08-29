@@ -6,6 +6,7 @@ import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -14,11 +15,19 @@ class MainActivity : TauriActivity() {
   /** Timestamp of the last back press, for the confirm-to-exit guard below. 0 = none pending. */
   private var lastBackPress = 0L
 
+  /** System folder picker for the custom database / raw-log locations. A field initializer on
+   *  purpose: activity-result contracts must be registered before the activity reaches STARTED. */
+  private val folderPicker =
+    registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+      StorageAccess.onFolderPicked(uri)
+    }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     // Before super.onCreate, which is what starts Tauri and therefore the Rust side: the USB-serial
     // bridge has no Context of its own and the first port enumeration can arrive as soon as the
     // frontend is up.
     UsbSerial.init(this)
+    StorageAccess.init(this, folderPicker)
 
     enableEdgeToEdge()
 

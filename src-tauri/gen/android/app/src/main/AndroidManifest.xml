@@ -9,6 +9,13 @@
     <!-- A telemetry bridge is usually a soft-AP the tablet joins; this reads which network that is. -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
 
+    <!-- No storage permission on purpose. The custom database / raw-log folders (Settings → Flight
+         Logbook) use a SAF tree grant: the user picks ONE folder in the system picker and Kite holds
+         a persistable grant on exactly that folder — the scoped-storage model. The app itself keeps
+         writing app-private (SQLite and the raw writers need real POSIX paths, which SAF does not
+         provide); a session-end mirror copies the artefacts into the granted folder, which is what
+         makes them survive an uninstall. -->
+
     <!-- The GCS's own position: "my location" on the map, the home-position helper and the distance /
          bearing readouts. Coarse is declared alongside fine because Android 12+ lets the user grant
          only the approximate one, and the app must keep working (less precisely) when they do. -->

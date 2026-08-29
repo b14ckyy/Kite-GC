@@ -18,6 +18,14 @@ const hasTouch = typeof navigator !== 'undefined' && navigator.maxTouchPoints > 
  *  also matches the iOS Simulator, whose WKWebView reports a "Macintosh" UA with a multi-touch pointer). */
 export const isIOS = /iPad|iPhone|iPod/i.test(ua) || (/Macintosh|Mac OS X/i.test(ua) && hasTouch);
 
+/** True in the Android WebView ("Mozilla/5.0 (Linux; Android 14; …)" — which is why the Linux flag
+ *  below excludes Android explicitly). Capability routing only for now: it deliberately does NOT
+ *  feed `isMobile`, because the mobile tier still gates things Android actually has — the serial UI
+ *  above all (USB serial works there; iOS has none) — and widening `isMobile` before that gating is
+ *  capability-based would silently switch them off. The tier reconciliation is the feature-scope
+ *  round's job (ANDROID_SUPPORT.md, Phase B/D). */
+export const isAndroid = /Android/i.test(ua);
+
 /** True on any mobile/tablet build. Currently iOS/iPadOS only; Android would extend this later. */
 export const isMobile = isIOS;
 

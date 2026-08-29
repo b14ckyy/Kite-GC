@@ -17,6 +17,66 @@
 
 use std::path::{Path, PathBuf};
 
+/// Mirror a finished session's artefacts into user-granted shared folders, where the settings name
+/// one — the Android half of the custom database / raw-log location settings. On Android those
+/// settings hold SAF **tree URIs** (`content://…`): the app itself always works app-private,
+/// because SQLite and the raw-log writers need real POSIX paths, which a SAF grant cannot provide.
+/// This copies the results out at session end instead — which is exactly what makes them survive
+/// an uninstall, the reason a user picks a folder at all.
+///
+/// The raw-log staging dir is mirrored file-by-file (same-size files skipped — raw logs never
+/// change after close). The database is snapshotted first with `VACUUM INTO` — an atomic,
+/// consistent copy even while other connections hold the live file — and the snapshot dir is then
+/// mirrored the same way.
+///
+/// Never fails the teardown: every problem is logged and swallowed. On every non-Android target
+/// the settings never hold a `content://` value and this is a no-op.
+pub fn mirror_session(db_path: &Path, raw_log_dir: &Path, db_setting: &str, raw_setting: &str) {
+    #[cfg(target_os = "android")]
+    {
+        if raw_setting.starts_with("content://") {
+            match crate::android::storage::sync_dir_to_tree(
+                raw_setting,
+                &raw_log_dir.to_string_lossy(),
+            ) {
+                Ok(()) => log::info!("Raw logs mirrored to the shared folder"),
+                Err(e) => log::warn!("Raw-log mirror failed: {e}"),
+            }
+        }
+        if db_setting.starts_with("content://") {
+            let snap_dir = crate::android::app_data_dir().join("db-mirror");
+            if let Err(e) = std::fs::create_dir_all(&snap_dir) {
+                log::warn!("Database mirror: cannot create the snapshot dir: {e}");
+                return;
+            }
+            let snap = snap_dir.join("flights.db");
+            // VACUUM INTO refuses an existing destination; the previous snapshot is disposable.
+            let _ = std::fs::remove_file(&snap);
+            let result = rusqlite::Connection::open(db_path)
+                .map_err(|e| e.to_string())
+                .and_then(|conn| {
+                    conn.execute("VACUUM INTO ?1", [snap.to_string_lossy().as_ref()])
+                        .map(|_| ())
+                        .map_err(|e| e.to_string())
+                });
+            match result {
+                Ok(()) => match crate::android::storage::sync_dir_to_tree(
+                    db_setting,
+                    &snap_dir.to_string_lossy(),
+                ) {
+                    Ok(()) => log::info!("Database snapshot mirrored to the shared folder"),
+                    Err(e) => log::warn!("Database mirror failed: {e}"),
+                },
+                Err(e) => log::warn!("Database snapshot (VACUUM INTO) failed: {e}"),
+            }
+        }
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (db_path, raw_log_dir, db_setting, raw_setting);
+    }
+}
+
 /// Run `f` with a real path to write to, then deliver the result to `dest`.
 ///
 /// `dest` is whatever the save dialog returned. `f` must have finished writing (and dropped any

@@ -13,6 +13,7 @@ pub mod fence;
 pub mod flightlog;
 pub mod geozone;
 pub mod hid;
+pub mod storage;
 pub mod info;
 pub mod logging;
 pub mod mission;

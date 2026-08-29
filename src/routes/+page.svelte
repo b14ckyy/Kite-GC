@@ -11,7 +11,7 @@
   import { connection, availablePorts, bleDevices } from "$lib/stores/connection";
   import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
-  import { isMobile, isTablet } from "$lib/platform";
+  import { isAndroid, isMobile, isTablet } from "$lib/platform";
   import { isDebugMode } from "$lib/stores/debug";
   import { telemetry } from "$lib/stores/telemetry";
   import { startRadarListeners, configureRadar, setRadarCenter, setRadarNode } from "$lib/stores/radarTracking";
@@ -1121,14 +1121,23 @@
     }
   }
 
+  /** Folder picker for the storage-location settings. Desktop: the dialog plugin, a real path.
+   *  Android: the system tree picker — the user grants ONE folder (scoped storage, no permission),
+   *  the setting stores the grant's content:// tree URI, and a session-end mirror copies the
+   *  artefacts into it (the app itself keeps writing app-private; SQLite and the raw writers need
+   *  real paths, which a SAF grant does not provide). */
+  async function pickStorageFolder(defaultPath?: string): Promise<string | null> {
+    if (isAndroid) {
+      return await invoke<string | null>('storage_pick_folder');
+    }
+    const selected = await open({ directory: true, multiple: false, defaultPath });
+    return typeof selected === 'string' && selected.length > 0 ? selected : null;
+  }
+
   async function chooseFlightLogPath() {
     try {
-      const selected = await open({
-        directory: true,
-        multiple: false,
-        defaultPath: flightLogDbPath || defaultFlightLogPath || undefined,
-      });
-      if (typeof selected === 'string' && selected.length > 0) {
+      const selected = await pickStorageFolder(flightLogDbPath || defaultFlightLogPath || undefined);
+      if (selected) {
         flightLogDbPath = selected;
         settings.patch({ flightLogDbPath });
       }
@@ -1144,12 +1153,8 @@
 
   async function chooseRawLogPath() {
     try {
-      const selected = await open({
-        directory: true,
-        multiple: false,
-        defaultPath: flightLogRawPath || defaultRawLogPath || undefined,
-      });
-      if (typeof selected === 'string' && selected.length > 0) {
+      const selected = await pickStorageFolder(flightLogRawPath || defaultRawLogPath || undefined);
+      if (selected) {
         flightLogRawPath = selected;
         settings.patch({ flightLogRawPath });
       }
