@@ -29,11 +29,12 @@ pub fn binary_name() -> &'static str {
     }
 }
 
-/// True where the decoder can never work: Android forbids executing a file from writable app storage
-/// (W^X, API 29+), so a downloaded `blackbox_decode` is a dead file there. Checked in the backend —
-/// the guard must not depend on the frontend remembering to hide a button.
+/// True where the decoder can never work: both mobile systems forbid executing a downloaded binary
+/// (Android by W^X on writable app storage since API 29, iOS by codesigning outright), so a
+/// downloaded `blackbox_decode` is a dead file there. Checked in the backend — the guard must not
+/// depend on the frontend remembering to hide a button.
 fn decoder_impossible() -> bool {
-    cfg!(target_os = "android")
+    cfg!(any(target_os = "android", target_os = "ios"))
 }
 
 /// Writable directory we install the downloaded decoder into. Portable → `<exe>/data/bin`, else the
@@ -138,7 +139,8 @@ pub fn version() -> Option<String> {
 pub async fn download<F: FnMut(u8, &str)>(mut report: F) -> Result<PathBuf, String> {
     if decoder_impossible() {
         return Err(
-            "blackbox_decode cannot run on Android: the system forbids executing a downloaded              binary. Import Blackbox logs on a desktop and bring the flights over as .kflight."
+            "blackbox_decode cannot run on this device: the system forbids executing a downloaded \
+             binary. Import Blackbox logs on a desktop and bring the flights over as .kflight."
                 .into(),
         );
     }

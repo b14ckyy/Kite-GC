@@ -858,6 +858,7 @@
     "logWarning": "警告",
     "logDebug": "调试（详细）",
     "logFolder": "日志文件",
+    "shareLog": "分享日志文件",
     "openLogFolder": "打开文件夹",
     "logUnavailable": "无日志文件 — 日志初始化失败。",
     "updates": "更新",

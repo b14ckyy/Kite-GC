@@ -861,6 +861,7 @@
     "logWarning": "Warnungen",
     "logDebug": "Debug (ausführlich)",
     "logFolder": "Log-Datei",
+    "shareLog": "Logdatei teilen",
     "openLogFolder": "Ordner öffnen",
     "logUnavailable": "Keine Logdatei — die Protokollierung konnte nicht gestartet werden.",
     "updates": "Updates",

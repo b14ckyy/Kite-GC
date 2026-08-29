@@ -48,6 +48,36 @@ pub fn pick_folder() -> Result<Option<String>, String> {
     Ok(Some(path))
 }
 
+/// Hand a file to the system share sheet (mail, messengers, a text editor…). Fire-and-forget —
+/// the sheet is the user's from there on.
+pub fn share_file(path: &str, mime: &str) -> Result<(), String> {
+    let mut env = jvm::env()?;
+    let class = jvm::app_class(&mut env, BRIDGE)?;
+    let j_path = env
+        .new_string(path)
+        .map_err(|e| format!("building the path string: {e}"))?;
+    let j_mime = env
+        .new_string(mime)
+        .map_err(|e| format!("building the mime string: {e}"))?;
+    let r = env
+        .call_static_method(
+            &class,
+            "shareFile",
+            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            &[(&j_path).into(), (&j_mime).into()],
+        )
+        .and_then(|v| v.l());
+    let err = jvm::check(&mut env, r, "StorageAccess.shareFile")?;
+    if err.is_null() {
+        return Ok(());
+    }
+    let msg = env
+        .get_string(&JString::from(err))
+        .map(String::from)
+        .map_err(|e| format!("reading the share error: {e}"))?;
+    Err(msg)
+}
+
 /// Mirror every regular file in `src_dir` into the granted tree at `tree_uri` — files already
 /// present with the same size are skipped, everything else is created or rewritten through the
 /// ContentResolver. Flat (no subdirectories), which matches the raw-log staging dir and the DB

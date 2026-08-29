@@ -7,6 +7,7 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.activity.result.ActivityResultLauncher
+import androidx.core.content.FileProvider
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -99,6 +100,32 @@ object StorageAccess {
     /** The error behind the last null result, if any — same fetch-after-failure contract as UsbSerial. */
     @JvmStatic
     fun getLastError(): String? = lastError
+
+    /**
+     * Hand [path] to the system share sheet (mail, messengers, "save to Files", a text editor…).
+     * The file travels as a FileProvider URI — app-private paths are meaningless to other apps, and
+     * since API 24 a raw file:// URI in an intent throws outright. Returns null on success, the
+     * error message otherwise.
+     */
+    @JvmStatic
+    fun shareFile(path: String, mime: String): String? {
+        return try {
+            val f = File(path)
+            if (!f.isFile) return "file not found: $path"
+            val uri = FileProvider.getUriForFile(activity, activity.packageName + ".fileprovider", f)
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = mime
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            activity.runOnUiThread {
+                activity.startActivity(Intent.createChooser(send, f.name))
+            }
+            null
+        } catch (e: Exception) {
+            "share failed: ${e.message}"
+        }
+    }
 
     /**
      * Mirror every regular file in [srcDir] into the granted tree at [treeUri]. A file already

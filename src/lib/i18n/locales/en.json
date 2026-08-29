@@ -861,6 +861,7 @@
     "logWarning": "Warnings",
     "logDebug": "Debug (verbose)",
     "logFolder": "Log File",
+    "shareLog": "Share log file",
     "openLogFolder": "Open Folder",
     "logUnavailable": "No log file — logging could not be initialized.",
     "updates": "Updates",

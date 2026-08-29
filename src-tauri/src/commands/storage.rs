@@ -8,6 +8,22 @@
 // the setting stores that grant's tree URI, and the session-end mirror copies artefacts into it —
 // see `StorageAccess.kt` and `user_file::mirror_session` for the two halves.
 
+/// Hand a file to the platform share sheet (Android). Desktop has no share sheet and no need for
+/// one — files live on paths the user can reach, and the frontend offers "open folder" there
+/// instead — so this answers with that pointer rather than a dead end.
+#[tauri::command]
+pub fn share_file(path: String, mime: String) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        return crate::android::storage::share_file(&path, &mime);
+    }
+    #[allow(unreachable_code)]
+    {
+        let _ = (path, mime);
+        Err("share_file is Android-only — desktop reveals the file in its folder instead".into())
+    }
+}
+
 /// Open the platform folder picker. On Android this returns the granted **tree URI** (`content://…`)
 /// to store as the setting value (`Ok(None)` = cancelled); on desktop the frontend uses the dialog
 /// plugin directly, so this answers with a pointer rather than a dead end.
