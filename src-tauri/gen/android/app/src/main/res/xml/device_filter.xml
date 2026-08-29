@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Which USB devices offer to open Kite when they are plugged in.
+
+  Matching here is what lets the user grant access from the system's "open with" dialog at attach
+  time, which also grants the USB permission — so the in-app permission prompt never has to appear.
+  Keep this in step with the drivers in UsbSerial.kt: offering to open Kite for a device it cannot
+  drive is worse than not offering at all.
+-->
+<resources>
+    <!-- CDC-ACM. Class 2 (communications) is declared at the device level by simple CDC devices and
+         at the interface level by composite ones, so both forms are listed. Subclass/protocol are
+         left open because flight controllers vary and the driver probes the descriptors anyway. -->
+    <usb-device class="2" />
+    <usb-device class="2" subclass="2" />
+    <!-- Composite devices declare class 0 at the device level (the real class is per interface);
+         this is what an FC exposing CDC alongside MSC or DFU looks like. -->
+    <usb-device class="0" />
+
+    <!-- Silicon Labs CP210x (0x10C4 = 4292), the bridge in most SiK telemetry radios. Vendor-wide
+         rather than per product id: CP2102, CP2104 and CP2105 all speak the same control protocol. -->
+    <usb-device vendor-id="4292" />
+</resources>

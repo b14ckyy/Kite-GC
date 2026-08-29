@@ -152,7 +152,15 @@ fn resolve_log_dir(portable: bool) -> PathBuf {
                 .join("kite-gc");
         }
     }
+    // Android: app-private storage — see `android::app_data_dir`. This runs before Tauri exists
+    // (the logger is installed first thing in `run()`), which is why that path is derived rather
+    // than requested from an `AppHandle`.
+    #[cfg(target_os = "android")]
+    {
+        return crate::android::app_data_dir();
+    }
 
+    #[allow(unreachable_code)]
     PathBuf::from(".")
 }
 

@@ -2,6 +2,8 @@
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
 mod aero;
+#[cfg(target_os = "android")]
+mod android;
 mod child_env;
 mod commands;
 mod debug_mode;
@@ -21,6 +23,7 @@ mod state;
 mod telemetry_forward;
 mod terrain;
 mod transport;
+mod user_file;
 mod video;
 
 use commands::connection::{connect, disconnect, inav_set_craft_name, inav_read_stats, scan_ble_devices, ble_scan_start, ble_scan_stop};
@@ -406,6 +409,11 @@ pub fn run() {
 
     builder
         .setup(|_app| {
+            // Android: record where app data actually landed, and flag any disagreement with Tauri's
+            // own idea of it (see `android::log_resolved_dirs`).
+            #[cfg(target_os = "android")]
+            android::log_resolved_dirs(_app.handle());
+
             // Linux/WebKitGTK: stop trackpad/keyboard gestures from zooming the whole WebView frame.
             // WebKitGTK handles these natively in GTK and ignores any JS `preventDefault`, so they can
             // only be suppressed here (Windows/WebView2 + macOS use the JS guard in `+layout.svelte`).

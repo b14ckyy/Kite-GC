@@ -12,6 +12,13 @@ use std::path::PathBuf;
 
 /// Resolve (and create) `Documents/KiteGC/HID-Profiles`. Mirrors the flight-log DB dir logic.
 fn profiles_dir() -> Result<PathBuf, String> {
+    // Android: `dirs::document_dir()` returns None there (no XDG, no path-addressable Documents), which
+    // would make every profile call fail on the resolve rather than on the missing joystick. Profiles
+    // themselves are perfectly usable on Android — they are plain JSON, editable and importable — so
+    // they get the same app-private Documents root as the raw flight logs.
+    #[cfg(target_os = "android")]
+    let base = crate::android::app_documents_dir();
+    #[cfg(not(target_os = "android"))]
     let base = dirs::document_dir()
         .or_else(|| dirs::home_dir().map(|h| h.join("Documents")))
         .ok_or_else(|| "could not resolve the Documents directory".to_string())?;

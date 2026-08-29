@@ -496,6 +496,13 @@ fn resolve_terrain_cache_dir() -> PathBuf {
                 .join("terrain");
         }
     }
+    // Android: app-private storage — see `android::app_data_dir`. The DEM tile cache is the largest
+    // thing Kite writes, and app-private storage is also what gets cleared by "Clear cache" / uninstall.
+    #[cfg(target_os = "android")]
+    {
+        return crate::android::app_data_dir().join("terrain");
+    }
+    #[allow(unreachable_code)]
     PathBuf::from("terrain")
 }
 

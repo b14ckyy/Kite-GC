@@ -1,6 +1,50 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Telemetry links. UDP/TCP to a WiFi telemetry bridge, an ESP32 link or a relaying GCS is the
+         supported way to reach a flight controller from Android; the map, terrain and weather layers
+         also fetch over the network. ACCESS_NETWORK_STATE lets the link layer tell "no network" apart
+         from "nothing answering at that address". -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- A telemetry bridge is usually a soft-AP the tablet joins; this reads which network that is. -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+
+    <!-- The GCS's own position: "my location" on the map, the home-position helper and the distance /
+         bearing readouts. Coarse is declared alongside fine because Android 12+ lets the user grant
+         only the approximate one, and the app must keep working (less precisely) when they do. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- No WAKE_LOCK here on purpose: the screen is kept awake with the window flag
+         FLAG_KEEP_SCREEN_ON (MainActivity), which needs no permission, is scoped to this window and
+         is released the moment the app leaves the foreground. -->
+
+    <!-- Camera/mic for the video panel's local capture source (getUserMedia in the WebView). -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- USB serial needs no <uses-permission>: access is granted per device at runtime, either by the
+         system dialog UsbSerial.open() raises or by the user picking Kite from the attach dialog that
+         the intent filter below produces.
+
+         BLE is declared but NOT yet implemented (see `transport/ble_android.rs`) and is not requested
+         at runtime today; the entries are here so the manifest matches the intended feature set.
+         BLUETOOTH_SCAN carries neverForLocation because a BLE-serial adapter is a link, not a
+         positioning source — without it Android 12+ would force the location grant on the user too. -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <!-- Hardware is optional across the board: Kite runs fine as a network-only GCS on a device with
+         no USB host port, no Bluetooth radio and no camera, so none of these may gate installation. -->
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+    <!-- A GCS is a landscape, two-handed, tablet-first app, but nothing about it needs a touchscreen
+         specifically — this also keeps it installable on Android TV / desktop-mode devices. -->
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
@@ -11,17 +55,28 @@
         android:theme="@style/Theme.kite_gc"
         android:usesCleartextTraffic="${usesCleartextTraffic}">
         <activity
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|density"
             android:launchMode="singleTask"
             android:label="@string/main_activity_title"
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:screenOrientation="sensorLandscape">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
                 <!-- AndroidTV support -->
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
+
+            <!-- Offer Kite when a USB-serial device is plugged in. Choosing it here grants the USB
+                 permission for that device, so the in-app prompt never appears. `device_filter.xml`
+                 lists exactly what UsbSerial.kt can actually drive. -->
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/device_filter" />
         </activity>
 
         <provider

@@ -28,7 +28,6 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
-tauri-plugin-window-state = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_repr = "0.1"
@@ -51,14 +50,30 @@ mavlink = { version = "0.17", default-features = false, features = ["std", "ardu
 num-traits = "0.2"  # FromPrimitive for lossless MavCmd/MavFrame <-> int (mission codec round-trip)
 tiff = "0.9"  # decode Copernicus GLO-30 GeoTIFF DEM tiles (Float32, DEFLATE, predictor 3)
 
-# Desktop-only dependencies. iOS has no serial port access, no btleplug backend, and no
-# starship-battery backend, so these are excluded there; the iOS build talks to the vehicle over
-# Wi-Fi (TCP/UDP MAVLink) only. On every desktop target `cfg(not(target_os = "ios"))` is true, so
-# Windows/Linux/macOS resolve these exactly as before.
-[target.'cfg(not(target_os = "ios"))'.dependencies]
+# Desktop-only dependencies — each mobile target swaps in its own implementation behind the
+# transport/ seam (transport/mod.rs) or a platform stand-in:
+#   serialport                — no backend on iOS at all; on Android an unrooted app may not open
+#                               /dev/tty*, so USB serial goes through the USB Host API instead
+#                               (UsbSerial.kt + transport/serial_android.rs).
+#   btleplug                  — no iOS backend (CoreBluetooth via objc2 instead); its Android backend
+#                               needs the droidplug Java companion the Gradle project does not ship.
+#   starship-battery          — no mobile targets; iOS reports always-on-battery, Android reads the
+#                               power-supply class from sysfs (commands/system.rs).
+#   tauri-plugin-window-state — desktop window geometry; mobile is a single full-screen surface.
+# On every desktop target this cfg is true, so Windows/Linux/macOS resolve these exactly as before.
+[target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 serialport = "4"
 btleplug = "0.11"
 starship-battery = "0.10"  # cross-platform AC/battery state (Windows + Linux + macOS) for the low-power 3D auto mode
+tauri-plugin-window-state = "2"
+
+# USB serial on Android runs through the platform's USB Host API, which only exists in Java — the
+# driver is `UsbSerial.kt` in the Android app module and `transport/serial_android.rs` is the JNI shim
+# in front of it. `ndk-context` supplies the JavaVM + Activity that tao publishes when the WebView
+# starts; `jni` is already in the tree via tao/wry, so this adds no new compilation.
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+ndk-context = "0.1"
 
 # HID / joystick input for GCS RC control (docs/archive/MSP_RC_CONTROL.md). Native per-OS backends read
 # RAW axes/buttons/hats (no gamepad projection) so flight hardware / RC transmitters map correctly:

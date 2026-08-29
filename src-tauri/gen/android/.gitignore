@@ -17,3 +17,10 @@ key.properties
 
 /.tauri
 /tauri.settings.gradle
+
+# Signing material. `key.properties` is written by hand locally or by the CI signing step; the
+# keystore itself is decoded next to it at build time. Neither may ever be committed — this repo is
+# public, and a leaked signing key lets anyone publish an APK that Android treats as an update to
+# this one.
+*.jks
+*.keystore

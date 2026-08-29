@@ -13,6 +13,17 @@ val tauriProperties = Properties().apply {
     }
 }
 
+// Optional real signing key. Drop a `key.properties` next to this file with storeFile,
+// storePassword, keyAlias and keyPassword to sign releases for distribution; it is gitignored, so a
+// private key never lands in the repository. Without it, release builds fall back to the debug
+// signing config below — see the `release` build type.
+val keystoreProperties = Properties().apply {
+    val propFile = file("key.properties")
+    if (propFile.exists()) {
+        propFile.inputStream().use { load(it) }
+    }
+}
+
 android {
     compileSdk = 36
     namespace = "com.kitegc.app"
@@ -23,6 +34,16 @@ android {
         targetSdk = 36
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+    }
+    signingConfigs {
+        keystoreProperties.getProperty("storeFile")?.let { storePath ->
+            create("release") {
+                storeFile = file(storePath)
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
     }
     buildTypes {
         getByName("debug") {
@@ -37,6 +58,16 @@ android {
             }
         }
         getByName("release") {
+            // An APK with no signature cannot be installed at all — Android rejects it outright as an
+            // invalid package, which is what an unconfigured release build produces. Use the real key
+            // when `key.properties` supplies one, otherwise fall back to the debug config so that a
+            // plain `tauri android build --apk` still yields something installable.
+            //
+            // Debug-signed builds are for testing only: they cannot go on Play, and because the debug
+            // keystore is generated per machine, a build from CI and a build from your laptop have
+            // different signatures — Android then refuses to install one over the other until the old
+            // copy is uninstalled.
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
             isMinifyEnabled = true
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }

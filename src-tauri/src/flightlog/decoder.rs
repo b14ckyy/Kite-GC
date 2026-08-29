@@ -29,6 +29,13 @@ pub fn binary_name() -> &'static str {
     }
 }
 
+/// True where the decoder can never work: Android forbids executing a file from writable app storage
+/// (W^X, API 29+), so a downloaded `blackbox_decode` is a dead file there. Checked in the backend —
+/// the guard must not depend on the frontend remembering to hide a button.
+fn decoder_impossible() -> bool {
+    cfg!(target_os = "android")
+}
+
 /// Writable directory we install the downloaded decoder into. Portable → `<exe>/data/bin`, else the
 /// platform AppData (`<AppData>/kite-gc/bin` on Windows). `blackbox::find_decoder` searches this too,
 /// so a once-downloaded decoder is found on every later run.
@@ -72,6 +79,9 @@ pub fn install_dir() -> PathBuf {
 
 /// True when the decoder is already present anywhere we look (PATH, exe dir, or our install dir).
 pub fn available() -> bool {
+    if decoder_impossible() {
+        return false;
+    }
     super::blackbox::find_decoder().is_some()
 }
 
@@ -126,6 +136,12 @@ pub fn version() -> Option<String> {
 /// Download + extract `blackbox_decode` from the latest GitHub release into `install_dir()`, reporting
 /// coarse progress (0..100) via the callback. Returns the installed binary path.
 pub async fn download<F: FnMut(u8, &str)>(mut report: F) -> Result<PathBuf, String> {
+    if decoder_impossible() {
+        return Err(
+            "blackbox_decode cannot run on Android: the system forbids executing a downloaded              binary. Import Blackbox logs on a desktop and bring the flights over as .kflight."
+                .into(),
+        );
+    }
     // Per-OS release packaging: Windows ships a .zip (bin/blackbox_decode.exe); Linux/macOS/FreeBSD
     // ship a .tar.zst (bin/blackbox_decode). Android isn't supported (no blackbox import there).
     let (os_key, ext, is_zip) = if cfg!(target_os = "windows") {

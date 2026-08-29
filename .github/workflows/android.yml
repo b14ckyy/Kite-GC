@@ -1,0 +1,221 @@
+# Kite Ground Control - Android APK
+#
+# Builds the Android app and uploads the APK as a workflow artifact. Run it from the Actions tab
+# ("Run workflow"); it also runs on its own when one of the Android-only files changes (see `on:`).
+#
+# Signing: if the repository has a KEYSTORE_B64 secret the APK is signed with that key, so every build
+# installs over the last one. Without it the build falls back to a debug keystore that the runner
+# regenerates each time — installable, but never *updatable*, since the signature changes every run.
+# Either way this is a sideload build, not a Play Store one: you need "install unknown apps" allowed
+# for whatever app you download it with.
+#
+# Why CI and not a local build: the Android SDK + NDK are ~6 GB, and the runner image already has the
+# SDK, the JDK and `sdkmanager` installed. `cargo tauri android build` drives Gradle, which
+# cross-compiles the Rust lib into `jniLibs/` and packages it — so the whole thing is one command once
+# the toolchain is in place.
+name: Android
+
+# Manual by default. An APK build costs ~15 minutes of a runner and produces an artifact nobody looks
+# at unless they asked for one, so it is not something every push to `src/` should pay for — the
+# desktop workflows are what gate ordinary changes.
+#
+# The push trigger is deliberately limited to files that exist *only* for the Android build: the
+# generated Gradle project, the Android-only Rust modules, and this workflow. Those cannot break
+# anything else, and nothing else can break them without also failing `cargo check` on desktop — so a
+# change that touches them is exactly the change worth spending a runner on automatically.
+#
+# Not listed, on purpose: `src/**`, `src-tauri/src/**` in general, and `Cargo.toml`. A dependency bump
+# or a shared-code change *can* break the mobile target, but it does so rarely enough that catching it
+# is worth a manual run rather than a build on every commit. Use "Run workflow" when in doubt.
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: 'Target ABI'
+        required: false
+        default: 'aarch64'
+        type: choice
+        options: [aarch64, armv7, i686, x86_64, all]
+  push:
+    branches: [master, main, development]
+    paths:
+      - 'src-tauri/gen/android/**'
+      - 'src-tauri/src/android.rs'
+      - 'src-tauri/src/android/**'
+      - 'src-tauri/src/transport/serial_android.rs'
+      - 'src-tauri/src/transport/ble_android.rs'
+      - '.github/workflows/android.yml'
+
+# One APK build per branch at a time. Besides not paying for two builds of the same branch, this is the
+# escape hatch when a run gets stuck: a run whose runner is reclaimed mid-build can be left wedged in
+# "in_progress" on GitHub's side, refusing both re-run ("already running") and cancel — and blocking
+# every later attempt. Starting a new run then clears it instead of needing a support ticket.
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Lifted to workflow level so the signing steps can test it in their `if:` — a step's own `env:`
+  # block is not visible to that step's condition, which would make the test silently always-false.
+  KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+  # Pinned rather than "latest": the NDK is the C toolchain the Rust cross-build links against, and an
+  # NDK bump is exactly the kind of change that should be a visible commit rather than a silent
+  # difference between two runs of the same workflow. r27 is the current LTS.
+  NDK_VERSION: '27.2.12479018'
+
+jobs:
+  apk:
+    name: Build APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      # --- Android toolchain ---
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK ${{ env.NDK_VERSION }}
+        run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+
+      # `cargo tauri android build` only needs NDK_HOME — it derives the per-ABI toolchain itself.
+      # A bare `cargo check --target aarch64-linux-android` does not: `cc-rs` shells out to
+      # `aarch64-linux-android-clang` on PATH, and the NDK ships no such name. Its compilers are
+      # API-versioned (`aarch64-linux-android24-clang`, matching `minSdk = 24` in app/build.gradle.kts)
+      # and live in a directory that is not on PATH, so the C dependencies (ring, rusqlite's bundled
+      # SQLite, zstd) fail to configure. Point cc-rs and the linker at them explicitly.
+      - name: Export the Android toolchain
+        run: |
+          NDK="$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}"
+          BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          test -x "$BIN/aarch64-linux-android24-clang" || {
+            echo "::error::NDK toolchain not found at $BIN"; ls -la "$BIN" || true; exit 1;
+          }
+          {
+            echo "NDK_HOME=$NDK"
+            echo "CC_aarch64_linux_android=$BIN/aarch64-linux-android24-clang"
+            echo "AR_aarch64_linux_android=$BIN/llvm-ar"
+            echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$BIN/aarch64-linux-android24-clang"
+          } >> "$GITHUB_ENV"
+          echo "$BIN" >> "$GITHUB_PATH"
+
+      # A stable signing key, if the repository provides one.
+      #
+      # Without this, `release` falls back to the debug keystore — and a GitHub runner is ephemeral, so
+      # Gradle generates a *fresh* one on every run. Every build then carries a different signature and
+      # Android refuses to install it over the previous one ("package conflicts with an existing
+      # package"), which means an uninstall and the loss of the flight database on every single update.
+      #
+      # Set four repository secrets to fix that permanently:
+      #   KEYSTORE_B64       base64 of a .jks  (base64 -w0 kite.jks)
+      #   KEYSTORE_PASSWORD  its store password
+      #   KEY_ALIAS          the key alias inside it
+      #   KEY_PASSWORD       that key's password
+      # With none set the build still works exactly as before — just with the throwaway debug key.
+      - name: Configure signing key
+        if: ${{ env.KEYSTORE_B64 != '' }}
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          APP_DIR=src-tauri/gen/android/app
+          echo "$KEYSTORE_B64" | base64 -d > "$APP_DIR/release.jks"
+          # storeFile is resolved relative to the module directory by build.gradle.kts.
+          {
+            echo "storeFile=release.jks"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > "$APP_DIR/key.properties"
+          echo "Signing with the repository keystore."
+
+      - name: Note the signing key in use
+        if: ${{ env.KEYSTORE_B64 == '' }}
+        run: |
+          echo "::warning::No KEYSTORE_B64 secret — signing with a throwaway debug key. This APK will \
+          NOT install over a previous build; updating requires an uninstall, which erases app data."
+
+      # --- Frontend ---
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      # --- Rust ---
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # One target per ABI. The full set is what the "all" input builds; a single arm64 APK covers
+      # every Android phone and tablet made in the last decade and is the default for that reason.
+      - name: Add Rust Android targets
+        run: |
+          if [ "${{ inputs.arch }}" = "all" ]; then
+            rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
+          else
+            rustup target add aarch64-linux-android
+          fi
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: android
+
+      # Type-checks the crate for Android before the much slower Gradle build, so a cfg mistake in the
+      # mobile stand-ins (transport/serial_android.rs, transport/ble_android.rs, commands/system.rs)
+      # fails in a minute with a readable error instead of inside a Gradle task log.
+      - name: Check the crate for the Android target
+        working-directory: src-tauri
+        run: cargo check --target aarch64-linux-android --lib
+
+      # --- Build ---
+      # "all" means every ABI, which is what omitting --target does; anything else is a single ABI.
+      - name: Build APK
+        run: |
+          if [ "${{ inputs.arch }}" = "all" ]; then
+            npm run tauri android build -- --apk
+          else
+            npm run tauri android build -- --apk --target "${{ inputs.arch || 'aarch64' }}"
+          fi
+
+      # Path depends on the ABI flavour Gradle produced (arm64/universal/...), so collect whatever
+      # landed rather than hardcoding one name. `*-unsigned.apk` is skipped explicitly: Gradle leaves
+      # the pre-signing intermediate behind, and it cannot be installed.
+      - name: Collect APKs
+        run: |
+          mkdir -p dist-android
+          find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' \
+            -not -name '*-unsigned.apk' -exec cp {} dist-android/ \;
+          ls -la dist-android
+          test -n "$(ls -A dist-android)" || { echo "::error::no signed APK was produced"; exit 1; }
+
+      # An unsigned APK installs nowhere — Android rejects it as an invalid package, and the only clue
+      # is a filename ending in `-unsigned`. Catch that here rather than on someone's phone.
+      - name: Verify the APKs are signed
+        run: |
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
+          test -x "$APKSIGNER" || { echo "::error::apksigner not found in the SDK"; exit 1; }
+          for apk in dist-android/*.apk; do
+            echo "== $apk"
+            "$APKSIGNER" verify --verbose "$apk"
+          done
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: kite-gc-android-${{ inputs.arch || 'aarch64' }}
+          path: dist-android/*.apk
+          if-no-files-found: error
