@@ -24,8 +24,6 @@ mod transport;
 mod video;
 
 use commands::connection::{connect, disconnect, inav_set_craft_name, inav_read_stats, scan_ble_devices, ble_scan_start, ble_scan_stop};
-// Serial listing is desktop-only (no raw serial access on iOS). BLE works on both (CoreBluetooth on iOS).
-#[cfg(not(target_os = "ios"))]
 use commands::connection::list_serial_ports;
 use commands::flightlog::{
     flightlog_list, flightlog_get, flightlog_get_track, flightlog_get_battery_records, flightlog_delete,
@@ -376,9 +374,6 @@ pub fn run() {
     let log_level = if debug_flag { log::LevelFilter::Debug } else { log::LevelFilter::Warn };
     logging::init(log_level, is_portable());
 
-    // `mut` is only used by the desktop window-state block below; iOS has no desktop window to
-    // persist, so that block is compiled out there and the binding is never reassigned.
-    #[cfg_attr(target_os = "ios", allow(unused_mut))]
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init());
@@ -395,8 +390,8 @@ pub fn run() {
     // The plugin saves to the OS app-config dir, which portable mode cannot redirect on
     // Windows (Known-Folder API, not env-driven) — so only enable it in installed mode.
     // Portable builds trade window-geometry persistence for a clean, system-path-free runtime.
-    // Desktop only: there is no free-floating window to persist on iOS.
-    #[cfg(not(target_os = "ios"))]
+    // Desktop only: there is no free-floating window to persist on mobile.
+    #[cfg(desktop)]
     if !is_portable() {
         use tauri_plugin_window_state::StateFlags;
         // Persist everything EXCEPT the decorations flag: we run with a custom titlebar
@@ -539,7 +534,6 @@ pub fn run() {
         .manage(std::sync::Arc::new(MediaMtx::new()))
         .manage(MjpegServer::new())
         .invoke_handler(tauri::generate_handler![
-            #[cfg(not(target_os = "ios"))]
             list_serial_ports,
             scan_ble_devices,
             ble_scan_start,
