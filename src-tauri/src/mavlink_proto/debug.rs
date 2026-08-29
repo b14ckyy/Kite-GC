@@ -249,6 +249,7 @@ fn mavlink_msg_name(id: u32) -> String {
         178 => "AHRS2".into(),
         182 => "AHRS3".into(),
         193 => "EKF_STATUS_REPORT".into(),
+        231 => "WIND_COV".into(),
         241 => "VIBRATION".into(),
         242 => "HOME_POSITION".into(),
         244 => "MESSAGE_INTERVAL".into(),

@@ -2545,7 +2545,9 @@
     style={mapInFrame ? inFrameStyle : mapLayerStyle}
     onclick={minimizeLogbook}
   >
-    {#if mapViewMode === '2d'}
+    <!-- 2D stays mounted (hidden) exactly like 3D below: the live track lives in Leaflet layers
+         inside the component, so unmounting it on every switch to 3D threw the trail away. -->
+    <div class="map2d-layer" class:active={mapViewMode === '2d'}>
       <Map
         playbackTrack={mapTrack}
         playbackPoint={playbackPoint}
@@ -2564,7 +2566,7 @@
         {radarReference}
         {radarRefAltM}
       />
-    {/if}
+    </div>
     <!-- 3D stays mounted (hidden) once opened, so toggling back is instant. -->
     {#if map3dEverOpened}
       <div class="map3d-layer" class:active={mapViewMode === '3d'}>
@@ -3171,12 +3173,14 @@
     z-index: 0;
     overflow: hidden;
   }
-  /* 3D map overlay — kept mounted but hidden (visibility, not display, so Cesium
-     keeps a sized canvas) while 2D is shown. */
+  /* Both map overlays stay mounted and hide with visibility, not display: that keeps their box
+     size, so Leaflet and Cesium come back without a resize dance. */
+  .map2d-layer,
   .map3d-layer {
     position: absolute;
     inset: 0;
   }
+  .map2d-layer:not(.active),
   .map3d-layer:not(.active) {
     visibility: hidden;
     pointer-events: none;

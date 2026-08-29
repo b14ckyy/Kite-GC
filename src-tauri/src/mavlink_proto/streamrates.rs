@@ -34,6 +34,7 @@ const ID_BATTERY_STATUS: f32 = 147.0;
 const ID_EKF_STATUS_REPORT: f32 = 193.0;
 const ID_HOME_POSITION: f32 = 242.0;
 const ID_WIND: f32 = 168.0;
+const ID_WIND_COV: f32 = 231.0;
 const ID_POSITION_TARGET_GLOBAL_INT: f32 = 87.0;
 
 // Rate kinds for the wanted messages (resolved against the two settings at apply time).
@@ -53,6 +54,9 @@ const WANTED: &[(f32, u8)] = &[
     (ID_VFR_HUD, R_POSITION),
     // WIND (ArduPilot EKF wind estimate) — gated on the wind module (see apply_stream_rates).
     (ID_WIND, R_FIXED_1HZ),
+    // WIND_COV carries the same estimate on PX4. Only one of the two is ever requested per FC (see
+    // `skip_foreign_wind`); both are gated on the wind module.
+    (ID_WIND_COV, R_FIXED_1HZ),
     (ID_SYS_STATUS, R_FIXED_1HZ),
     (ID_BATTERY_STATUS, R_FIXED_1HZ),
     (ID_RC_CHANNELS, R_FIXED_1HZ), // RSSI (link quality)
@@ -87,6 +91,14 @@ const BALLAST_IDS: &[f32] = &[
     241.0, // VIBRATION
 ];
 
+/// The wind estimate arrives as WIND (168) on ArduPilot and as WIND_COV (231) on PX4 — neither
+/// firmware implements the other's message. Asking an FC for one it does not have earns a "No
+/// ap_message for mavlink id" complaint back on connect (the same reason AHRS3 is kept out of the
+/// ballast list), so the foreign id is skipped outright rather than sent as a disable.
+fn skip_foreign_wind(msg_id: f32, is_px4: bool) -> bool {
+    (msg_id == ID_WIND && is_px4) || (msg_id == ID_WIND_COV && !is_px4)
+}
+
 /// Resolve a rate kind to Hz against the two settings.
 fn rate_hz(kind: u8, attitude_hz: f64, position_hz: f64) -> f32 {
     match kind {
@@ -116,16 +128,21 @@ pub fn apply_stream_rates(
     position_hz: f64,
     airspeed_enabled: bool,
     wind_enabled: bool,
+    is_px4: bool,
 ) {
     let header = codec::gcs_header();
     let mut seq = MavSequence::new();
 
     let mut sent = 0usize;
     for &(msg_id, kind) in WANTED {
-        // VFR_HUD (airspeed) and WIND each cost an extra message and are gated on their module — sent as
-        // -1 when off (not skipped) because SET_MESSAGE_INTERVAL is sticky FC-side across sessions.
+        if skip_foreign_wind(msg_id, is_px4) {
+            continue;
+        }
+        // VFR_HUD (airspeed) and the wind estimate each cost an extra message and are gated on their
+        // module — sent as -1 when off (not skipped) because SET_MESSAGE_INTERVAL is sticky FC-side
+        // across sessions.
         let interval = if (msg_id == ID_VFR_HUD && !airspeed_enabled)
-            || (msg_id == ID_WIND && !wind_enabled)
+            || ((msg_id == ID_WIND || msg_id == ID_WIND_COV) && !wind_enabled)
         {
             -1.0
         } else {
@@ -150,12 +167,15 @@ pub fn apply_stream_rates(
 /// Reset every managed message back to its FC SRn default (interval = 0) — used for Full-telemetry
 /// mode. Because SET_MESSAGE_INTERVAL is sticky on the FC, a link previously narrowed by Kite would
 /// otherwise stay narrow until the FC reboots; this undoes it so the operator's full stream returns.
-pub fn reset_stream_rates(transport: &mut dyn ByteTransport, fc_sysid: u8) {
+pub fn reset_stream_rates(transport: &mut dyn ByteTransport, fc_sysid: u8, is_px4: bool) {
     let header = codec::gcs_header();
     let mut seq = MavSequence::new();
 
     let mut sent = 0usize;
     for &(msg_id, _) in WANTED {
+        if skip_foreign_wind(msg_id, is_px4) {
+            continue;
+        }
         if send_set_interval(transport, &header, &mut seq, fc_sysid, msg_id, 0.0) {
             sent += 1;
         }

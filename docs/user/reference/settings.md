@@ -73,7 +73,7 @@ how smooth the instruments feel; the rest is automatic.
 | **Attitude** | Attitude (AHI / compass) update rate — 1–5 Hz. Higher is smoother but uses more link bandwidth. | 5 Hz |
 | **GPS / Position** | Position / speed / altitude update rate — 1–5 Hz. | 2 Hz |
 | **Airspeed** | Request airspeed telemetry (when the aircraft has an airspeed sensor). | Off |
-| **Wind** | Request wind-estimate telemetry (shown on the compass widget). | Off |
+| **Wind** | Request wind-estimate telemetry (shown on the compass widget). Live wind needs **ArduPilot** or **PX4**, or **INAV 10.0+** — on older INAV the toggle stays without effect. Replay always shows the wind a log recorded. | Off |
 | **Direction indicators** | Draw the heading / course / predicted-turn lines at the aircraft on the map. | On |
 | **Full MAVLink Telemetry** | MAVLink only — hand rate control to the flight controller (streams everything at its own rates, ignoring the two rates above). For fast links / full `.tlog` capture. See **[Telemetry & display](../guides/telemetry-and-display.md)**. | Off |
 | **Radar tracking** | Master switch for foreign-vehicle radar, with per-system enables (**ADS-B**, **FormationFlight**). See **[Radar & ADS-B](../guides/radar-and-adsb.md)**. | On (ADS-B on) |

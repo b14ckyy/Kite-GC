@@ -84,6 +84,18 @@ Toggle **Guided** on, then **click the map** to send the vehicle to that point a
 and speed. The toggle turns itself off automatically if the FC leaves the guided mode (for example you
 pick another mode here or on the transmitter), so the map interaction always matches the FC.
 
+You don't have to press the toggle first if the vehicle is **already** in its guided mode — after a
+mid-flight connect, or when another ground station put it there. Clicking the map works straight away
+in that case, so Kite never has to re-send a mode change just to let you command a point. (While a
+mission editor or the survey generator is open, those own the map click instead.)
+
+**What you see on the 2D map:** the target is marked where the flight controller says it is, not merely
+where you clicked — Kite reads it back from the FC once per second, so a target set or moved by another
+ground station shows up too. For a **fixed-wing** vehicle a dashed green circle around it draws the
+loiter track the aircraft will actually fly: the radius you set for this Fly Here, or the firmware's
+configured default (`WP_LOITER_RAD` / `NAV_LOITER_RAD`) when you didn't set one. A copter simply holds
+the point, so it gets no circle. Both disappear when the FC leaves guided or the link drops.
+
 !!! note "Why there's no 'set heading' for planes"
     Set Heading is offered for **ArduCopter in Guided only** (it simply yaws the nose). It is
     **intentionally not exposed for fixed-wing / Cruise**: ArduPlane's guided heading change sets a

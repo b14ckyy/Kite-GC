@@ -7,6 +7,10 @@
   string Apple denies BLE central access. Mirrors the capability Windows/Linux already have.
   Camera: required for the video panel's "Camera (device)" source (getUserMedia over a USB/UVC capture
   device, e.g. an HDMI capture card fed from FPV goggles/VRX), the same webcam access desktop has.
+  Local network: covers everything Kite talks to on the LAN — an RTSP video source on a companion
+  computer, MAVLink over UDP/TCP from a Wi-Fi telemetry bridge. macOS 15 gates that behind a consent
+  prompt; without this key the prompt carries a generic system text instead of saying what Kite
+  actually wants the network for. (Loopback, i.e. our own MediaMTX, is exempt from the gate.)
   Location (when-in-use): lets the WebView Geolocation API resolve the operator's position so the map
   can open where the user is and the GCS marker is placed correctly. Coarse (city-level) is enough.
 -->
@@ -18,6 +22,8 @@
     <string>Kite Ground Control uses Bluetooth to connect to your flight controller / telemetry link over BLE.</string>
     <key>NSCameraUsageDescription</key>
     <string>Kite Ground Control uses the camera to display an FPV video feed from a connected capture device.</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Kite Ground Control connects to devices on your local network — a video stream from an onboard companion computer, or telemetry from a flight controller over Wi-Fi.</string>
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>Kite Ground Control uses your location to center the map on you and place the ground-station marker.</string>
 </dict>

@@ -29,6 +29,10 @@ grabbing:
     ```
     After the first launch it opens normally.
 
+!!! warning "macOS 13 (Ventura) or newer"
+    The macOS build targets **macOS 13**. Older systems are not supported — on macOS 11 or 12 the app
+    installs but does not start.
+
 ### Linux quick install
 
 ```bash

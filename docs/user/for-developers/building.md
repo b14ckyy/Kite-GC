@@ -71,8 +71,10 @@ notarize-macos` signs + notarizes it for distribution without a Gatekeeper promp
 Developer account, credentials read from your environment / keychain — never committed).
 
 ### Android
-Android support (Tauri Mobile) was experimented with but is **on hold** — it needs a separate UI and
-build pipeline. Don't run `tauri android init`; it isn't supported right now.
+Mobile (Tauri Mobile) is **not part of the 1.0 line**. An iOS / iPadOS port lives on `development`
+and an Android port is in review; both need their own UI tier and build pipeline, and both target a
+release after 1.0. Nothing mobile builds from `master` — don't run `tauri android init` or
+`tauri ios init` against a 1.0 checkout.
 
 ## Workflow
 
@@ -141,9 +143,12 @@ are not run in CI.
 
 These are things to know when **running** the packaged Linux app (not build errors):
 
-- **`blackbox_decode` is an external runtime dependency** (not bundled). Blackbox *import* shells out to
-  INAV's `blackbox_decode`; the app looks for it next to the executable, then on `PATH`. Without it, only
-  Blackbox import is affected — live recording and replay still work.
+- **Three helpers are fetched at runtime, not bundled**: `blackbox_decode` (Blackbox import shells out
+  to INAV's decoder), `ffmpeg` (the video image path) and `mediamtx` (the RTSP → WebRTC engine). Kite
+  looks for each next to the executable, then in its own app-data `bin/` directory, then on `PATH`, and
+  offers to download it on first use. Each failure is local to its feature — without `blackbox_decode`
+  only Blackbox import is affected, live recording and replay still work. On macOS `ffmpeg` is bundled
+  as a universal sidecar instead; the other two are fetched the same way as everywhere else.
 - **Serial permissions:** add yourself to the `dialout` group (`sudo usermod -aG dialout "$USER"`, then
   log out/in). Some distros use `uucp`.
 - **Blank 3D globe / WebView (WebKitGTK):** the 3D map runs in WebKitGTK, which is more fragile than

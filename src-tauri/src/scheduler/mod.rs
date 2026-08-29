@@ -97,6 +97,8 @@ enum PendingKind {
     Radar,
     /// A link-speed probe RAW_RC (sent WITH reply during the post-engage window) — times the ACK.
     RcProbe,
+    /// A retried MSP_BOXIDS query — its reply installs the index→permanent-ID mapping.
+    BoxIds,
 }
 
 /// Max telemetry/one-shot/radar requests in flight at once (protects the FC's MSP RX buffer). RC frames
@@ -113,6 +115,12 @@ const MAX_IN_FLIGHT: usize = 8;
 /// (`SCHED_READ_TIMEOUT`) this still allows far more requests per second than any slot set asks for.
 /// RC frames are exempt — they're the control path and bypass this budget entirely.
 const MAX_WRITES_PER_TICK: usize = 1;
+/// How long to wait before asking for MSP_BOXIDS again while we still have no mapping. Without it the
+/// activeModes bitmask cannot be decoded at all (`parse_active_modes` refuses to guess), so the whole
+/// session shows no flight mode and MSP RC OVERRIDE is never detected — for the price of one 9-byte
+/// frame every few seconds we simply keep asking until the FC answers.
+const BOXIDS_RETRY_INTERVAL: Duration = Duration::from_secs(3);
+
 /// Short transport read timeout so the pipelined drain/emit loop ticks ≈100 Hz (like Configurator's
 /// executor) instead of being quantized by the coarse idle read timeout.
 const SCHED_READ_TIMEOUT: Duration = Duration::from_millis(8);
@@ -131,6 +139,10 @@ struct TelemetrySlot {
     last_poll: Option<Instant>,
     /// For groups with rotating secondary codes, track current index
     rotation_index: usize,
+    /// Next code to send in a multi-code slot. The write budget can cut a slot off mid-list, and
+    /// without a cursor the next turn would restart at codes[0] — permanently starving everything
+    /// behind it (see the poll loop).
+    code_cursor: usize,
     /// Scheduling priority (higher = more important, polled first when overloaded)
     priority: u8,
     /// Minimum poll rate (Hz) this slot is never scaled below under link congestion (adaptive floor).
@@ -145,6 +157,7 @@ impl TelemetrySlot {
             interval: Duration::from_secs_f64(1.0 / rate_hz),
             last_poll: None,
             rotation_index: 0,
+            code_cursor: 0,
             priority,
             floor_hz,
         }
@@ -269,20 +282,28 @@ fn scheduler_loop(
     let mut rc_probe_timeout: u32 = 0;
     let mut rc_probe_lat = Duration::ZERO;
 
-    // Query MSP_BOXIDS once at startup to get the index→permanent_id mapping.
+    // Query MSP_BOXIDS at startup to get the index→permanent_id mapping.
     // INAV's activeModes bitmask uses INDEX-based packing, not permanent box IDs.
     // Without this mapping, we can't correctly decode which modes are active.
-    let box_ids: Vec<u8> = match transport.msp_request(crate::msp::MSP_BOXIDS, &[]) {
+    //
+    // This attempt is only the fast path — one 2 s request, no retry. Losing it on a lossy air link
+    // (mLRS/ELRS right at connect) used to cost the flight modes for the WHOLE session, silently:
+    // `parse_active_modes` deliberately reports nothing rather than guessing without the mapping, and
+    // `box_active` therefore never sees MSP RC OVERRIDE either. A miss here is no longer terminal —
+    // the loop keeps re-asking (see `BOXIDS_RETRY_INTERVAL`) until the FC answers.
+    let mut box_ids: Vec<u8> = match transport.msp_request(crate::msp::MSP_BOXIDS, &[]) {
         Ok(msg) => {
-            eprintln!("[MSP-BOXIDS] Received {} box IDs: {:?}", msg.payload.len(), msg.payload);
+            log::info!("MSP_BOXIDS: received {} box IDs", msg.payload.len());
+            log::debug!("MSP_BOXIDS payload: {:?}", msg.payload);
             msg.payload
         }
         Err(e) => {
-            log::warn!("Failed to query MSP_BOXIDS: {} — flight mode detection may be inaccurate", e);
-            eprintln!("[MSP-BOXIDS] Query FAILED: {} — using empty mapping", e);
+            log::warn!("MSP_BOXIDS query failed ({e}) — retrying from the scheduler loop; flight modes stay blank until it answers");
             Vec::new()
         }
     };
+    // Paced from here, so the first retry lands one interval after the failed attempt, not instantly.
+    let mut boxids_last_try = Instant::now();
 
     // Pipelined I/O: tighten the transport read timeout so the drain/emit loop cycles fast (≈100 Hz).
     // (The BOXIDS query above still ran through the blocking `msp_request` handshake path — fine, it's
@@ -312,6 +333,7 @@ fn scheduler_loop(
                 crate::msp::MSP_FC_VERSION,
                 crate::msp::MSP_BOARD_INFO,
                 crate::msp::MSPV2_INAV_MIXER,
+                crate::msp::MSP_BOXIDS,
             ],
         )
     };
@@ -521,6 +543,31 @@ fn scheduler_loop(
             }
         }
 
+        // 3b. Re-ask for MSP_BOXIDS while we still have no mapping. Cheap (one 9-byte frame per
+        //     interval), stops the moment a usable reply lands, and shares the same in-flight window
+        //     and write budget as everything else, so it can never crowd out telemetry.
+        if box_ids.is_empty()
+            && boxids_last_try.elapsed() >= BOXIDS_RETRY_INTERVAL
+            && tele_in_flight < MAX_IN_FLIGHT
+            && writes_this_tick < MAX_WRITES_PER_TICK
+            && !in_flight
+                .get(&crate::msp::MSP_BOXIDS)
+                .map_or(false, |q| !q.is_empty())
+        {
+            boxids_last_try = now;
+            let code = crate::msp::MSP_BOXIDS;
+            debug_tracker.on_request(code, 9);
+            link_stats.on_tx(9);
+            if transport.msp_send(code, &[]).is_ok() {
+                writes_this_tick += 1;
+                in_flight.entry(code).or_default().push_back(Pending {
+                    sent_at: now,
+                    deadline: reply_deadline(now, rtt_ewma),
+                    kind: PendingKind::BoxIds,
+                });
+            }
+        }
+
         // 4. Adjust the adaptive scale (AIMD) once per window from the saturation observed since the last
         //    adjust: multiplicative back-off when the link was saturated, gentle additive recovery when it
         //    had headroom. `scale` then stretches every due slot's interval toward its floor (section 5).
@@ -575,20 +622,28 @@ fn scheduler_loop(
                 if budget == 0 {
                     break;
                 }
-                // Rotating secondaries poll one code per turn; every other slot polls all its codes.
-                let codes: Vec<u16> = match slots[i].group {
-                    TelemetryGroup::PositionSecondary => {
-                        let code = slots[i].codes[slots[i].rotation_index % slots[i].codes.len()];
-                        slots[i].rotation_index = slots[i].rotation_index.wrapping_add(1);
-                        vec![code]
-                    }
-                    _ => slots[i].codes.clone(),
+                // Rotating secondaries poll one code per turn; every other slot works through all of
+                // its codes — but across ticks, resuming at `code_cursor`. MAX_WRITES_PER_TICK is 1, so
+                // a slot that restarted its list every turn could only ever emit codes[0]: everything
+                // behind it was starved for the whole session. That is what silently killed
+                // MSP_SENSOR_STATUS and MSP_NAV_STATUS behind MSPV2_INAV_STATUS in the Status slot,
+                // and with NAV_STATUS the active-waypoint highlight. The slot counts as polled (and
+                // its interval restarts) only once the cursor has been all the way round.
+                let rotating = matches!(slots[i].group, TelemetryGroup::PositionSecondary);
+                let codes: Vec<u16> = if rotating {
+                    let code = slots[i].codes[slots[i].rotation_index % slots[i].codes.len()];
+                    slots[i].rotation_index = slots[i].rotation_index.wrapping_add(1);
+                    vec![code]
+                } else {
+                    slots[i].codes[slots[i].code_cursor..].to_vec()
                 };
                 let mut emitted = false;
+                let mut advanced = 0usize;
                 for code in codes {
                     if budget == 0 {
                         break;
                     }
+                    advanced += 1;
                     if in_flight.get(&code).map_or(false, |q| !q.is_empty()) {
                         continue; // dedup: this code is already outstanding
                     }
@@ -610,8 +665,16 @@ fn scheduler_loop(
                         emitted = true;
                     }
                 }
-                if emitted {
-                    slots[i].last_poll = Some(now);
+                if rotating {
+                    if emitted {
+                        slots[i].last_poll = Some(now);
+                    }
+                } else {
+                    slots[i].code_cursor += advanced;
+                    if slots[i].code_cursor >= slots[i].codes.len() {
+                        slots[i].code_cursor = 0;
+                        slots[i].last_poll = Some(now);
+                    }
                 }
             }
         }
@@ -660,6 +723,20 @@ fn scheduler_loop(
                                         rc_probe_slow += 1;
                                     }
                                 }
+                                PendingKind::BoxIds => {
+                                    // An empty payload is no mapping — keep asking rather than
+                                    // locking in a state that decodes every mode as absent.
+                                    if msg.payload.is_empty() {
+                                        log::warn!("MSP_BOXIDS answered with an empty payload — still retrying");
+                                    } else {
+                                        log::warn!(
+                                            "MSP_BOXIDS recovered on retry: {} box IDs — flight modes are live",
+                                            msg.payload.len()
+                                        );
+                                        log::debug!("MSP_BOXIDS payload: {:?}", msg.payload);
+                                        box_ids = msg.payload;
+                                    }
+                                }
                             }
                         }
                         None => {
@@ -706,6 +783,8 @@ fn scheduler_loop(
                         rc_probe_timeout += 1;
                         rc_probe_lat += Duration::from_millis(RC_PROBE_TIMEOUT_MS);
                     }
+                    // Lapsed retry — the next interval simply asks again.
+                    PendingKind::BoxIds => debug_tracker.on_timeout(code),
                 }
             }
         }
@@ -743,11 +822,6 @@ fn build_slots(config: &TelemetryConfig) -> Vec<TelemetrySlot> {
     if config.airspeed_enabled {
         secondary_codes.push(MSPV2_INAV_AIR_SPEED);
     }
-    // Wind estimate (INAV 10.0+) — opt-in extra poll, already version-gated in TelemetryConfig.
-    if config.wind_enabled {
-        secondary_codes.push(MSP2_INAV_WIND);
-    }
-
     // Adaptive-degradation floors (Hz): the minimum rate each group keeps under a congested link.
     // Attitude and position stay usable (1 Hz) for the horizon + map; everything else floors at 0.5 Hz.
     const FLOOR_ATTITUDE: f64 = 1.0;
@@ -810,6 +884,19 @@ fn build_slots(config: &TelemetryConfig) -> Vec<TelemetrySlot> {
             FLOOR_LOW,
         ),
     ];
+
+    // Wind estimate (INAV 10.0+) — opt-in extra poll, already version-gated in TelemetryConfig. Own
+    // 0.5 Hz slot: the estimate shifts over minutes, and riding the rotating secondary slot would have
+    // cost altitude a third of its rate for a value that barely moves.
+    if config.wind_enabled {
+        slots.push(TelemetrySlot::new(
+            TelemetryGroup::Wind,
+            vec![MSP2_INAV_WIND],
+            0.5,
+            1,
+            FLOOR_LOW,
+        ));
+    }
 
     // RC link stats (INAV 9.1+) — own 1 Hz slot, low priority (degrades first under load).
     if config.link_stats_enabled {
