@@ -813,7 +813,7 @@
     "optionalModules": "可选模块",
     "airspeed": "空速",
     "wind": "风速估算",
-    "windHint": "轮询实时风速估算（额外消息）。ArduPilot仅实时；INAV需要10.0+。黑盒子/回放始终显示风速。",
+    "windHint": "轮询实时风速估算（额外消息）。ArduPilot和PX4支持实时；INAV需要10.0+。黑盒子/回放始终显示风速。",
     "directionLines": "方向指示器",
     "directionLinesHint": "地图上飞行器的航向、地面航向和预测转弯线",
     "mavlinkFullTelemetry": "完整MAVLink遥测",

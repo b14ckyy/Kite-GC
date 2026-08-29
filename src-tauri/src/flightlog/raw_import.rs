@@ -421,6 +421,16 @@ fn update_from_mav(msg: &MavMessage, s: &mut Snap, armed: &mut bool, variant: &s
             s.wind_e = Some(w.speed as f64 * toward.sin());
             false
         }
+        MavMessage::WIND_COV(w) => {
+            // PX4's wind estimate. `wind_x`/`wind_y` are already the north/east components of the
+            // vector the air moves TOWARD — exactly what this column pair holds — so they go in
+            // unchanged. Either field reads NaN while the estimate is unknown.
+            if w.wind_x.is_finite() && w.wind_y.is_finite() {
+                s.wind_n = Some(w.wind_x as f64);
+                s.wind_e = Some(w.wind_y as f64);
+            }
+            false
+        }
         MavMessage::SYS_STATUS(sys) => {
             s.voltage = Some(sys.voltage_battery as f64 / 1000.0);
             if sys.current_battery >= 0 {
@@ -671,7 +681,7 @@ mod tests {
     use super::*;
 
     use ::mavlink::ardupilotmega::{
-        MavState, ATTITUDE_DATA, GLOBAL_POSITION_INT_DATA, HEARTBEAT_DATA, WIND_DATA,
+        MavState, ATTITUDE_DATA, GLOBAL_POSITION_INT_DATA, HEARTBEAT_DATA, WIND_COV_DATA, WIND_DATA,
     };
     use ::mavlink::MavHeader;
 
@@ -760,6 +770,31 @@ mod tests {
         assert!(course < 0.5 || course > 359.5, "course should follow the velocity (0°), got {course}");
 
         // Wind blows FROM 60°, so the vector points TOWARD 240°: north −3.0, east −5.196.
+        let (n, e) = (rec.wind_n_ms.expect("wind north"), rec.wind_e_ms.expect("wind east"));
+        assert!((n - -3.0).abs() < 0.01, "wind north {n}");
+        assert!((e - -5.196).abs() < 0.01, "wind east {e}");
+    }
+
+    /// PX4 has no WIND: its estimate arrives as WIND_COV, whose `wind_x`/`wind_y` are already the
+    /// north/east components of the vector the air moves toward — the same thing these two columns
+    /// hold. They must land unchanged, not be turned around a second time as the ArduPilot bearing is.
+    #[test]
+    fn px4_wind_cov_lands_as_the_toward_vector() {
+        let wind = MavMessage::WIND_COV(WIND_COV_DATA {
+            wind_x: -3.0,
+            wind_y: -5.196,
+            ..Default::default()
+        });
+
+        let log = tlog(vec![
+            (1, 1, heartbeat(MavType::MAV_TYPE_FIXED_WING, MavAutopilot::MAV_AUTOPILOT_PX4, 0)),
+            (1, 1, wind),
+            (1, 1, MavMessage::ATTITUDE(ATTITUDE_DATA::default())),
+        ]);
+
+        let (samples, _) = decode_tlog(&log);
+        let rec = &samples.last().expect("ATTITUDE should emit a sample").rec;
+
         let (n, e) = (rec.wind_n_ms.expect("wind north"), rec.wind_e_ms.expect("wind east"));
         assert!((n - -3.0).abs() < 0.01, "wind north {n}");
         assert!((e - -5.196).abs() < 0.01, "wind east {e}");
