@@ -191,6 +191,7 @@ up itself, so only the bare `cargo check` needs it. (On Windows the prebuilt dir
 | USB serial (FTDI, CH340) | ❌ not implemented | Those two chips need their own driver; the devices are not listed as ports. |
 | Flight log, missions, fleet & battery manager | ✅ works | SQLite in app-private storage (`android::app_data_dir`). |
 | Maps, terrain, weather | ✅ works | Network + the same tile cache as desktop. |
+| Screen stays on while connected | ✅ works | Like a navigation app: the display does not time out while a telemetry link is active; disconnected, the normal OS timeout applies. |
 | Bluetooth LE | ✅ works | Native GATT via `BleSerial.kt`; the same serial profiles as desktop. Listen-only mode (the GATT dump) is not implemented yet. |
 | Joystick / HID RC control | ❌ not implemented | The backend is per-OS (WGI / evdev / IOKit); Android has none, so no device is ever listed. |
 | Log import (.kflight / .rawmsp / .tlog) | ✅ works | Parsed in-process. A `.kflight` brings the flight, its track and its records; the archived original log files inside it (INAV blackbox, ArduPilot dataflash) are left behind — the mobile database never stores originals. ArduPilot `.bin` import is desktop-only. |
