@@ -193,10 +193,10 @@ up itself, so only the bare `cargo check` needs it. (On Windows the prebuilt dir
 | Maps, terrain, weather | ✅ works | Network + the same tile cache as desktop. |
 | Bluetooth LE | ✅ works | Native GATT via `BleSerial.kt`; the same serial profiles as desktop. Listen-only mode (the GATT dump) is not implemented yet. |
 | Joystick / HID RC control | ❌ not implemented | The backend is per-OS (WGI / evdev / IOKit); Android has none, so no device is ever listed. |
-| Log import (.kflight / .rawmsp / .tlog / .bin) | ✅ works | Parsed in-process; the Import button offers these formats. |
+| Log import (.kflight / .rawmsp / .tlog) | ✅ works | Parsed in-process. A `.kflight` brings the flight, its track and its records; the archived original log files inside it (INAV blackbox, ArduPilot dataflash) are left behind — the mobile database never stores originals. ArduPilot `.bin` import is desktop-only. |
 | Blackbox import (.txt / .bbl / .bfl) | ❌ impossible | Needs the external `blackbox_decode` tool, and Android forbids executing a downloaded binary. Import on a desktop and bring flights over as `.kflight`. |
 | Video: camera / OTG capture device | ✅ works (tablets) | The WebView's own capture path (`getUserMedia`), no helper involved. Hidden on phones until the phone UI decides. |
-| Video: RTSP / MJPEG | ❌ not yet | Both need the video engine (`mediamtx` / `ffmpeg`), which an Android app cannot spawn; the app refuses the download with the reason. RTSP on mobile is planned via WHEP at the source. |
+| Video: RTSP / MJPEG | ❌ placeholder | The RTSP kind is listed but cannot start: both paths need the video engine (`mediamtx` / `ffmpeg`), which an Android app cannot spawn. A device-native route is planned. Native capture (also ffmpeg) is not offered — the OS's own capture devices arrive through the camera kind. |
 | Custom database / raw-log folder | ✅ mirror | Browse grants ONE folder via the system picker (scoped storage — no permission). The app keeps working app-private (SQLite and the raw writers need real paths, which a SAF grant cannot provide) and **mirrors into the folder at session end**: raw logs as files, the database as an atomic snapshot. That copy survives an uninstall. |
 | Exports to `Documents/` | ⚠️ different | Scoped storage makes Documents a MediaStore collection, not a path — exports go through the system share/save dialog instead. |
 
