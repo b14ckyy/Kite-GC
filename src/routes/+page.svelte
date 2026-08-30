@@ -11,7 +11,7 @@
   import { connection, availablePorts, bleDevices } from "$lib/stores/connection";
   import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
-  import { isAndroid, isMobile, isTablet } from "$lib/platform";
+  import { isAndroid, isMobile, isTablet, isPhone as isPhoneDevice, hasSerialPorts } from "$lib/platform";
   import { isDebugMode } from "$lib/stores/debug";
   import { telemetry } from "$lib/stores/telemetry";
   import { startRadarListeners, configureRadar, setRadarCenter, setRadarNode } from "$lib/stores/radarTracking";
@@ -713,7 +713,7 @@
       (t.id !== 'logbook' || flightLoggingEnabled) &&
       (t.id !== 'control' || isMavlinkConnected) && // control tab only when connected via MAVLink
       (t.id !== 'rc-control' || (rcTabAvailable && !isMobile) || mobileRcAvailable) && // RC tab: desktop needs the master switch + a joystick; mobile uses on-screen sticks when a FC is connected
-      (t.id !== 'video' || !isMobile) && // video uses go2rtc/ffmpeg, unavailable on iOS
+      (t.id !== 'video' || !isPhoneDevice) && // video stays on tablets (camera / OTG capture works natively; RTSP is the Phase E item) — phones decide with the phone UI
       (t.id !== 'radar' || radarSettings.enabled) && // radar tab only when the master switch is on
       (t.id !== 'airspace' || airspaceSettings.enabled || geozonesAvailable || fenceAvailable || rallyAvailable) // airspace: master switch, or geozone (INAV) / fence+rally (MAVLink) capable FC
     )
@@ -763,10 +763,11 @@
   selectedPort = saved.lastPort;
   selectedBaud = saved.lastBaud;
   selectedProtocol = (saved.lastProtocol === 'mavlink' ? 'mavlink' : 'msp') as ProtocolType;
-  // Restore the full last-used connection path so nothing has to be re-entered. iOS has no serial, so
-  // a serial value carried over from a synced desktop setting is ignored; TCP/UDP/BLE are all valid.
+  // Restore the full last-used connection path so nothing has to be re-entered. A serial value is only
+  // honoured where serial ports exist (iOS has none — a value synced over from a desktop is ignored);
+  // TCP/UDP/BLE are valid everywhere.
   if (saved.lastTransport === 'tcp' || saved.lastTransport === 'udp' || saved.lastTransport === 'ble'
-      || (!isMobile && saved.lastTransport === 'serial')) {
+      || (hasSerialPorts && saved.lastTransport === 'serial')) {
     selectedTransport = saved.lastTransport;
   }
   if (saved.lastHost) tcpHost = saved.lastHost;
@@ -1362,11 +1363,36 @@
     }
   }
 
+  /** The INAV blackbox formats — the only ones that need the external `blackbox_decode`. Everything
+   *  else the importer accepts (.kflight archives, .rawmsp, .tlog, ArduPilot .bin) is parsed
+   *  in-process by the Rust backend and works on every platform. */
+  const BLACKBOX_EXTS = /\.(txt|bbl|bfl)$/i;
+  /** Extensions offered in the file picker / accepted from a drop. Mobile drops the three blackbox
+   *  ones: `blackbox_decode` is a separate native executable, and neither mobile OS allows running a
+   *  downloaded binary (the backend refuses too — decoder_impossible). The rest of the Logbook —
+   *  recording, replay, export, importing a .kflight from a desktop — is unaffected. */
+  const IMPORT_EXTS = isMobile
+    ? ['bin', 'kflight', 'rawmsp', 'tlog']
+    : ['txt', 'bbl', 'bfl', 'bin', 'kflight', 'rawmsp', 'tlog'];
+
   /** Import a batch of files, isolating each so one bad/corrupt/non-log file doesn't abort the rest;
    *  failures (with the per-importer reason) are collected and surfaced together. */
   async function importFiles(files: string[]) {
+    // Second line of defence for mobile: the picker no longer offers blackbox formats, but a file can
+    // still arrive by another route (a drop, a picker that ignores the filter). Say why rather than
+    // letting it fail somewhere in the decoder lookup.
+    if (isMobile) {
+      const rejected = files.filter((f) => BLACKBOX_EXTS.test(f));
+      files = files.filter((f) => !BLACKBOX_EXTS.test(f));
+      if (rejected.length > 0) {
+        errorMsg = $t('logbook.blackboxUnsupportedMobile', {
+          values: { files: rejected.map(baseName).join(', ') },
+        });
+      }
+      if (files.length === 0) return;
+    }
     // INAV blackbox text logs (.txt/.bbl/.bfl) need blackbox_decode — ensure it once before the batch.
-    if (files.some((f) => /\.(txt|bbl|bfl)$/i.test(f)) && !(await ensureBlackboxDecoder())) {
+    if (files.some((f) => BLACKBOX_EXTS.test(f)) && !(await ensureBlackboxDecoder())) {
       return;
     }
     blackboxImporting = true;
@@ -1395,7 +1421,7 @@
         filters: [
           {
             name: $t('logbook.allLogsFilter'),
-            extensions: anyCase(['txt', 'bbl', 'bfl', 'bin', 'kflight', 'rawmsp', 'tlog']),
+            extensions: anyCase(IMPORT_EXTS),
           },
         ],
       });
@@ -1418,7 +1444,7 @@
 
     console.log('[IMPORT] importDroppedFiles called with', paths.length, 'files');
 
-    const supported = paths.filter((p) => /\.(txt|bbl|bfl|bin|kflight|rawmsp|tlog)$/i.test(p));
+    const supported = paths.filter((p) => new RegExp(`\\.(${IMPORT_EXTS.join('|')})$`, 'i').test(p));
     if (supported.length === 0) return;
     await importFiles(supported);
   }
@@ -2535,8 +2561,11 @@
 
 <div class="ui-root" style:--ui-scale={uiScale} style:--toolbar-h="{toolbarH}px">
   <!-- Window resize grips — outside `.ui-scale` so position:fixed stays viewport-relative.
-       Re-adds edge resizing lost when the native decorations are disabled. -->
-  <WindowResizeBorders />
+       Re-adds edge resizing lost when the native decorations are disabled. Desktop only: a mobile
+       build fills the screen and `startResizeDragging` has nothing to resize. -->
+  {#if !isMobile}
+    <WindowResizeBorders />
+  {/if}
 
   <!-- ======= MAP LAYER — unzoomed / native resolution (see docs/archive/UI_SCALING.md) =======
        The map must stay crisp, so it lives OUTSIDE the zoomed `.ui-scale` layer. It is the

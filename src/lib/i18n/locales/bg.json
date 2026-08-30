@@ -998,6 +998,7 @@
     "import": "Импортирай",
     "importing": "Импортиране...",
     "importErrors": "Някои файлове не можаха да бъдат импортирани:\n{errors}",
+    "blackboxUnsupportedMobile": "Blackbox логове (.txt/.bbl/.bfl) не могат да се импортират на това устройство: нуждаят се от външния инструмент blackbox_decode, който мобилните системи не позволяват да се изпълнява. Пропуснати: {files}",
     "decoderMissingTitle": "blackbox_decode не е намерен",
     "decoderMissingMsg": "Регистрационните файлове на INAV Blackbox се нуждаят от външния инструмент „blackbox_decode“, който не е инсталиран. Да го изтеглите ли автоматично от официалните версии на iNavFlight?",
     "decoderDownload": "Изтегляне",

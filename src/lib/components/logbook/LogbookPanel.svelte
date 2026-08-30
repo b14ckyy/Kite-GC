@@ -13,7 +13,6 @@
   // reusing the same stores/controllers — only the chrome moves onto PanelShell.
   import { untrack } from 'svelte';
   import { t } from 'svelte-i18n';
-  import { isMobile } from '$lib/platform';
   import type { InterfaceSettings } from '$lib/stores/settings';
   import {
     buildFlightTree,
@@ -280,12 +279,12 @@
 
 {#snippet importGroup()}
   <div class="tb-right">
-    <!-- Blackbox import runs the native blackbox_decode binary, which can't execute on iOS. -->
-    {#if !isMobile}
-      <Button variant="data" icon="import" disabled={blackboxImporting} onclick={onImport}>
-        {blackboxImporting ? $t('logbook.importing') : $t('logbook.import')}
-      </Button>
-    {/if}
+    <!-- Import is for every platform: .kflight / .rawmsp / .tlog / .bin parse in-process. Only the
+         INAV blackbox formats need the external decoder, and the picker drops those on mobile (see
+         IMPORT_EXTS in +page.svelte) rather than hiding the whole button. -->
+    <Button variant="data" icon="import" disabled={blackboxImporting} onclick={onImport}>
+      {blackboxImporting ? $t('logbook.importing') : $t('logbook.import')}
+    </Button>
   </div>
 {/snippet}
 

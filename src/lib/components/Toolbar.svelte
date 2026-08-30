@@ -9,7 +9,7 @@
   import Button from '$lib/components/panel/Button.svelte';
   import SegmentedToggle from '$lib/components/panel/SegmentedToggle.svelte';
   import WindowControls from '$lib/components/WindowControls.svelte';
-  import { isMacOS, isMobile, isPhone } from '$lib/platform';
+  import { isLinux, isMacOS, isMobile, hasSerialPorts } from '$lib/platform';
   import ConnectionStatusBox from '$lib/components/ConnectionStatusBox.svelte';
   import ArmingIndicator from '$lib/components/ArmingIndicator.svelte';
   import BatteryIndicator from '$lib/components/BatteryIndicator.svelte';
@@ -225,7 +225,8 @@
 
   // Double-click the title bar to maximize/restore. Windows/macOS drag regions already do this
   // natively, so only Linux/GTK needs the manual handler (otherwise it would toggle twice).
-  const isLinux = typeof navigator !== 'undefined' && navigator.userAgent.includes('Linux');
+  // `isLinux` comes from $lib/platform rather than a local user-agent test: Android's user-agent
+  // contains "Linux" too, and a local test armed this on a device with no window to maximize.
   function onTitlebarDblClick(e: MouseEvent) {
     if (!isLinux) return;
     // Ignore double-clicks that land on interactive controls (buttons, selects, the window buttons).
@@ -330,9 +331,9 @@
             if (selectedTransport === 'udp' && tcpPort === 5761) tcpPort = 14550;
             else if (selectedTransport === 'tcp' && tcpPort === 14550) tcpPort = 5761;
           }}>
-          <!-- Serial is desktop-only (no raw serial access on iOS). BLE works on iOS via
-               CoreBluetooth, so it stays available on mobile; TCP/UDP are cross-platform. -->
-          {#if !isMobile}
+          <!-- Serial is a capability, not a form factor: desktop and Android (USB host / OTG) have
+               it, iOS does not. BLE and TCP/UDP exist everywhere. -->
+          {#if hasSerialPorts}
             <option value="serial">Serial</option>
           {/if}
           <option value="tcp">TCP</option>
@@ -425,7 +426,10 @@
     >
       ⇅ {$t('relay.short')}
     </button>
-    {#if !isMacOS && !isPhone}
+    <!-- No window chrome on any mobile build: neither a tablet nor a phone has a window to
+         minimize, maximize or close, and the component's mount effect would call the Tauri window
+         API for one that does not exist. -->
+    {#if !isMacOS && !isMobile}
       <WindowControls />
     {/if}
   </div>

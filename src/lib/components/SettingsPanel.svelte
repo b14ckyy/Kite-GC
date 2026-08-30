@@ -245,7 +245,7 @@
     if (tab !== 'interface') {
       void loadTerrainCache();
       // No decoder row on mobile (see below) — nothing to load a version for.
-      if (!isMobile && !isAndroid) void loadBbVersion();
+      if (!isMobile) void loadBbVersion();
     }
   });
 
@@ -661,7 +661,7 @@
       <!-- Desktop only: blackbox_decode is a separate native executable, and both mobile systems
            forbid executing a downloaded binary (the backend refuses too — decoder_impossible in
            flightlog/decoder.rs — this just spares the user a row that could never work). -->
-      {#if !isMobile && !isAndroid}
+      {#if !isMobile}
         <div class="s-row s-row-stack">
           <span class="s-label">{$t('settings.blackboxDecoder')}</span>
           <div class="path-picker-row">

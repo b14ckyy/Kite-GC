@@ -1005,6 +1005,7 @@
     "multiLogTitle": "Multiple flight logs",
     "multiLogMessage": "This file contains {count} flight logs — one per arm/disarm cycle. Each one is imported as its own flight.",
     "multiLogImportAll": "Import all",
+    "blackboxUnsupportedMobile": "Blackbox logs (.txt/.bbl/.bfl) cannot be imported on this device: they need the external blackbox_decode tool, which mobile systems do not allow to run. Skipped: {files}",
     "decoderMissingTitle": "blackbox_decode not found",
     "decoderMissingMsg": "INAV Blackbox logs need the external 'blackbox_decode' tool, which isn't installed. Download it automatically from the official iNavFlight releases?",
     "decoderDownload": "Download",

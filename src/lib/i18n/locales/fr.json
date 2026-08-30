@@ -947,6 +947,7 @@
     "exportTrackTitle": "Export de la trace terminé",
     "exportTrackSuccess": "Trace de vol exportée avec succès.",
     "importKflight": "Importer .kflight",
+    "blackboxUnsupportedMobile": "Les journaux Blackbox (.txt/.bbl/.bfl) ne peuvent pas être importés sur cet appareil : ils nécessitent l'outil externe blackbox_decode, que les systèmes mobiles n'autorisent pas à s'exécuter. Ignorés : {files}",
     "decoderMissingTitle": "blackbox_decode introuvable",
     "decoderMissingMsg": "Les journaux Blackbox INAV nécessitent l'outil externe « blackbox_decode », qui n'est pas installé. Le télécharger automatiquement depuis les releases officielles iNavFlight ?",
     "decoderDownload": "Télécharger",
