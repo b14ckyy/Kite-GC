@@ -1,4 +1,8 @@
 <resources>
     <string name="app_name">Kite Ground Control</string>
     <string name="main_activity_title">Kite Ground Control</string>
+    <!-- Shown on the first back press; a second press within two seconds closes the app.
+         Deliberately not translated through svelte-i18n: this is native Android UI shown by
+         MainActivity, outside the WebView and before any frontend locale is known. -->
+    <string name="back_to_exit">Press back again to close Kite</string>
 </resources>

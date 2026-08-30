@@ -113,6 +113,13 @@ pub fn compact_database(conn: &Connection) -> SqlResult<()> {
 /// - Empty db_path + normal mode → <AppData>/kite-gc/flights.db
 /// - Non-empty db_path → <db_path>/flights.db
 pub fn resolve_db_path(custom_path: &str, portable: bool) -> PathBuf {
+    // Android: a user-chosen location is a SAF tree URI, not a path. The database cannot live there
+    // (SQLite needs POSIX open/seek/lock for the journal), so the live DB stays on the platform
+    // default below and the session-end mirror copies a snapshot into the granted tree
+    // (user_file::mirror_session).
+    #[cfg(target_os = "android")]
+    let custom_path = if custom_path.starts_with("content://") { "" } else { custom_path };
+
     if !custom_path.is_empty() {
         return PathBuf::from(custom_path).join("flights.db");
     }
@@ -158,7 +165,15 @@ pub fn resolve_db_path(custom_path: &str, portable: bool) -> PathBuf {
         }
     }
 
+    // Android: app-private storage. Not a fallback — the working directory of an Android process is
+    // `/`, so the generic fallback below would try to create the database on a read-only filesystem.
+    #[cfg(target_os = "android")]
+    {
+        return crate::android::app_data_dir().join("flights.db");
+    }
+
     // Fallback: current directory
+    #[allow(unreachable_code)]
     PathBuf::from("flights.db")
 }
 
@@ -167,6 +182,11 @@ pub fn resolve_db_path(custom_path: &str, portable: bool) -> PathBuf {
 /// to the user's Documents (`Documents/KiteGC`) where they are easy to find / hand to Mission Planner.
 /// `custom_path` (empty = use default) overrides it; both are configurable independently in Settings.
 pub fn resolve_raw_log_dir(custom_path: &str, portable: bool) -> PathBuf {
+    // Android: same as resolve_db_path — a SAF tree URI cannot be written through std::fs, so the
+    // writers stay in the app-private staging dir below and the mirror copies finished files out.
+    #[cfg(target_os = "android")]
+    let custom_path = if custom_path.starts_with("content://") { "" } else { custom_path };
+
     if !custom_path.is_empty() {
         return PathBuf::from(custom_path);
     }
@@ -180,8 +200,16 @@ pub fn resolve_raw_log_dir(custom_path: &str, portable: bool) -> PathBuf {
         }
     }
 
+    // Android has no path-addressable Documents folder (scoped storage makes it a MediaStore
+    // collection), so raw logs go to app-private storage and are shared out explicitly instead.
+    #[cfg(target_os = "android")]
+    {
+        return crate::android::app_documents_dir().join("KiteGC");
+    }
+
     // Default: the user's Documents folder → Documents/KiteGC (Windows honours OneDrive relocation,
     // Linux uses XDG_DOCUMENTS_DIR). Falls back to ~/Documents, then the current dir.
+    #[allow(unreachable_code)]
     if let Some(docs) = dirs::document_dir() {
         return docs.join("KiteGC");
     }

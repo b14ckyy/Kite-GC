@@ -42,6 +42,11 @@ export const CachedTileLayer = L.TileLayer.extend({
     const tile = document.createElement("img");
     tile.alt = "";
     tile.setAttribute("role", "presentation");
+    // Decode off the paint path: after a zoom, 20-40 fresh tiles land at once, and without this the
+    // engine may decode them synchronously in the frame that first paints them - which on a weak SoC
+    // is 3-8 ms per tile and reads as the whole interface stalling right after the gesture. With it,
+    // decoding happens on the raster workers and each tile appears when its pixels are ready.
+    tile.decoding = "async";
     const url = this.getTileUrl(coords);
 
     getCachedTile(url).then((blobUrl) => {
@@ -153,6 +158,9 @@ export const CachedTileLayer = L.TileLayer.extend({
     const BLEED = 1;
     const img = document.createElement("img");
     img.alt = "";
+    // Same off-the-paint-path decode as the regular tiles in createTile - the ancestor image is
+    // scale-many times larger on screen, so a synchronous decode here would stall even harder.
+    img.decoding = "async";
     img.style.position = "absolute";
     img.style.width = `${ts.x * scale + 2 * BLEED}px`;
     img.style.height = `${ts.y * scale + 2 * BLEED}px`;

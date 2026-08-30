@@ -18,6 +18,7 @@
   import { resetGcsManual, gcsManuallySet } from '$lib/stores/gcsLocation';
   import type { AppSettings, InterfaceSettings, RadarSettings, GcsMode, AirspaceSettings, AirspaceProvider, SystemMessagesLevel, LogLevel, RcControlSettings, UpdateCheckSettings, UpdateCheckMode } from '$lib/stores/settings';
   import { revealItemInDir, openPath } from '@tauri-apps/plugin-opener';
+  import { isAndroid, isMobile } from '$lib/platform';
   import { blackboxDecoderVersion, downloadBlackboxDecode } from '$lib/stores/flightlog';
   import type { TileCacheStats } from '$lib/cache/tileCache';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
@@ -221,11 +222,30 @@
       logOpenError = e instanceof Error ? e.message : String(e);
     }
   }
+  /** Share the diagnostics log through the system sheet — the Android replacement for "open
+   *  folder": an app-private path is unreachable in any file manager, so opening it on the device
+   *  is useless, while sharing reaches mail, messengers or a text editor directly. */
+  async function shareLogFile() {
+    logOpenError = '';
+    if (!logPath) await loadLogPath();
+    const p = logPath;
+    if (!p) {
+      logOpenError = $t('settings.logUnavailable');
+      return;
+    }
+    try {
+      await invoke('share_file', { path: p, mime: 'text/plain' });
+    } catch (e) {
+      logOpenError = e instanceof Error ? e.message : String(e);
+    }
+  }
+
   // Refresh the terrain-cache size + blackbox_decode version whenever the Data tab is shown.
   $effect(() => {
     if (tab !== 'interface') {
       void loadTerrainCache();
-      void loadBbVersion();
+      // No decoder row on mobile (see below) — nothing to load a version for.
+      if (!isMobile) void loadBbVersion();
     }
   });
 
@@ -638,16 +658,21 @@
           <Button variant="standard" size="sm" onclick={onResetRawLogPath}>{$t('settings.useDefault')}</Button>
         </div>
       </div>
-      <div class="s-row s-row-stack">
-        <span class="s-label">{$t('settings.blackboxDecoder')}</span>
-        <div class="path-picker-row">
-          <span class="s-readout">{bbVersion ?? $t('settings.bbDecoderMissing')}</span>
-          <Button variant="standard" size="sm" disabled={bbBusy} onclick={updateBbDecoder}>
-            {bbBusy ? $t('settings.bbDecoderBusy') : bbVersion ? $t('settings.bbDecoderUpdate') : $t('settings.bbDecoderDownload')}
-          </Button>
+      <!-- Desktop only: blackbox_decode is a separate native executable, and both mobile systems
+           forbid executing a downloaded binary (the backend refuses too — decoder_impossible in
+           flightlog/decoder.rs — this just spares the user a row that could never work). -->
+      {#if !isMobile}
+        <div class="s-row s-row-stack">
+          <span class="s-label">{$t('settings.blackboxDecoder')}</span>
+          <div class="path-picker-row">
+            <span class="s-readout">{bbVersion ?? $t('settings.bbDecoderMissing')}</span>
+            <Button variant="standard" size="sm" disabled={bbBusy} onclick={updateBbDecoder}>
+              {bbBusy ? $t('settings.bbDecoderBusy') : bbVersion ? $t('settings.bbDecoderUpdate') : $t('settings.bbDecoderDownload')}
+            </Button>
+          </div>
+          {#if bbError}<span class="s-err">{bbError}</span>{/if}
         </div>
-        {#if bbError}<span class="s-err">{bbError}</span>{/if}
-      </div>
+      {/if}
     </div>
 
     <!-- ── Diagnostics ───────────────────────────────── -->
@@ -665,7 +690,12 @@
       </div>
       <div class="s-row">
         <span class="s-label">{$t('settings.logFolder')}</span>
-        <Button variant="standard" size="sm" onclick={openLogFolder}>{$t('settings.openLogFolder')}</Button>
+        {#if isAndroid}
+          <!-- App-private path — no file manager can reach it, so "open" is useless there. -->
+          <Button variant="standard" size="sm" onclick={shareLogFile}>{$t('settings.shareLog')}</Button>
+        {:else}
+          <Button variant="standard" size="sm" onclick={openLogFolder}>{$t('settings.openLogFolder')}</Button>
+        {/if}
       </div>
       {#if logPath}
         <!-- Always visible: if nothing can open it, the user can still reach the file by hand. -->

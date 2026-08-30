@@ -60,7 +60,7 @@
   import Button from '$lib/components/panel/Button.svelte';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import Toggle from '$lib/components/panel/Toggle.svelte';
-  import { isLinux } from '$lib/platform';
+  import { isLinux, isMobile } from '$lib/platform';
   import VideoReconnectOverlay from '$lib/components/video/VideoReconnectOverlay.svelte';
 
   let videoEl = $state<HTMLVideoElement | null>(null);
@@ -172,8 +172,11 @@
     return () => unlisteners.forEach((u) => u());
   });
 
-  // Native capture is available on every OS (Linux V4L2 / Windows DirectShow / macOS AVFoundation).
-  const KINDS: VideoKind[] = ['camera', 'rtsp', 'native'];
+  // Native capture is available on every desktop OS (Linux V4L2 / Windows DirectShow / macOS
+  // AVFoundation) — all through ffmpeg, which cannot run on mobile. There, the OS's own capture
+  // devices (USB/OTG included) already arrive through the camera kind (getUserMedia), so the native
+  // kind would add nothing and is not offered.
+  const KINDS: VideoKind[] = isMobile ? ['camera', 'rtsp'] : ['camera', 'rtsp', 'native'];
 
   // MediaMTX is only needed for the WebRTC path. A WebView without it (WebKitGTK builds with WebRTC
   // compiled out — Raspberry Pi OS among them) runs RTSP entirely on ffmpeg now, so demanding the
@@ -341,7 +344,7 @@
 {#snippet headerActions()}
   <Button
     variant={$videoState.enabled ? 'danger' : 'data'}
-    disabled={!$videoState.enabled && $videoState.kind === 'rtsp' && needsEngine && engineChecked && !engineVer}
+    disabled={($videoState.kind === 'rtsp' && isMobile) || (!$videoState.enabled && $videoState.kind === 'rtsp' && needsEngine && engineChecked && !engineVer)}
     onclick={toggleVideo}
   >
     {$videoState.enabled ? $t('video.stop') : $t('video.start')}
@@ -634,7 +637,13 @@
         <NumberStepper bind:value={$rtspBufferFrames} min={0} max={3} step={1} />
       </div>
 
-      {#if needsEngine && engineChecked && !engineVer}
+      {#if isMobile}
+        <!-- RTSP is a placeholder on mobile: the engine cannot run there, and the device-native route
+             (ANDROID_SUPPORT.md §5b) is not built yet. No downloader, no start — just say so. -->
+        <div class="ffmpeg-box">
+          <p class="hint">{$t('video.rtspMobilePlaceholder')}</p>
+        </div>
+      {:else if needsEngine && engineChecked && !engineVer}
         <!-- MediaMTX is required for the WebRTC path only — see `needsEngine`. -->
         <div class="ffmpeg-box">
           <p class="hint">{$t('video.engineMissing')}</p>

@@ -13,20 +13,29 @@
 // never carry a target cfg of their own (the same way video/ keeps its per-OS backends internal).
 //   serial: serialport-backed on desktop. iOS has no serial access of any kind, so it gets a
 //           stand-in with the same surface — opens fail cleanly, the port list is empty. Android
-//           (future) has a real serial route (USB host API) and slots in here.
-//   ble:    btleplug on desktop, CoreBluetooth (objc2) on iOS — same public surface either way.
-#[cfg(not(target_os = "ios"))]
+//           talks USB serial through the platform's USB Host API (UsbSerial.kt + the JNI shim).
+//   ble:    btleplug on desktop, CoreBluetooth (objc2) on iOS, the platform GATT stack via a
+//           Kotlin bridge on Android (BleSerial.kt) — same public surface on all three.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod serial;
 #[cfg(target_os = "ios")]
 #[path = "serial_ios.rs"]
 pub mod serial;
+#[cfg(target_os = "android")]
+#[path = "serial_android.rs"]
+pub mod serial;
 pub mod tcp;
 pub mod udp;
-#[cfg(not(target_os = "ios"))]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod ble;
 #[cfg(target_os = "ios")]
 #[path = "ble_ios.rs"]
 pub mod ble;
+#[cfg(target_os = "android")]
+#[path = "ble_android.rs"]
+pub mod ble;
+/// The BLE-serial profile table, shared by the desktop and Android BLE backends.
+pub mod ble_profiles;
 
 use std::fmt;
 

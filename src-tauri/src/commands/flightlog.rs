@@ -840,11 +840,9 @@ pub fn flightlog_export_track(
         .ok_or_else(|| "Flight not found".to_string())?;
     let track = db::get_flight_track(&conn, flight_id)
         .map_err(|e| format!("DB error: {}", e))?;
-    crate::flightlog::track_export::export_track(
-        &flight,
-        &track,
-        std::path::Path::new(&output_path),
-    )
+    crate::user_file::with_write_path(&output_path, |p| {
+        crate::flightlog::track_export::export_track(&flight, &track, p)
+    })
 }
 
 /// Export the raw blackbox binary file for a flight
@@ -858,8 +856,9 @@ pub fn flightlog_export_blackbox(
     let (filename, data) = db::get_blackbox_file(&conn, flight_id)
         .map_err(|e| format!("DB error: {}", e))?
         .ok_or_else(|| "No blackbox file attached to this flight".to_string())?;
-    std::fs::write(&output_path, &data)
-        .map_err(|e| format!("Failed to write file: {}", e))?;
+    crate::user_file::with_write_path(&output_path, |p| {
+        std::fs::write(p, &data).map_err(|e| format!("Failed to write file: {}", e))
+    })?;
     Ok(filename)
 }
 
@@ -916,7 +915,9 @@ pub fn flightlog_export(
     db_path: Option<String>,
 ) -> Result<usize, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
-    exchange::export_flights(&conn, &flight_ids, std::path::Path::new(&output_path))
+    crate::user_file::with_write_path(&output_path, |p| {
+        exchange::export_flights(&conn, &flight_ids, p)
+    })
 }
 
 /// Import flights from a .kflight file into the main database
@@ -926,7 +927,7 @@ pub fn flightlog_import_kflight(
     db_path: Option<String>,
 ) -> Result<exchange::ImportResult, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
-    exchange::import_flights(&conn, std::path::Path::new(&file_path))
+    crate::user_file::with_read_path(&file_path, |p| exchange::import_flights(&conn, p))
 }
 
 /// List flights contained in a .kflight file (for preview / offline replay)

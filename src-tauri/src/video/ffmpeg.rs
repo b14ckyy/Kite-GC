@@ -307,6 +307,12 @@ fn manual_install_msg() -> String {
 /// (self-contained GPL `.zip`) + Linux x86_64/aarch64 (static GPL `.tar.xz`, unpacked via the system
 /// `tar`). Other platforms/arches return a manual-install hint. Returns the binary path.
 pub async fn download<F: FnMut(u8, &str)>(mut report: F) -> Result<PathBuf, String> {
+    // Same platform rule as MediaMTX: a downloaded binary can never execute on either mobile OS.
+    if cfg!(any(target_os = "android", target_os = "ios")) {
+        return Err("ffmpeg cannot run on this device: mobile systems forbid executing a downloaded \
+                    binary. Camera and capture-device sources work without it."
+            .into());
+    }
     let (want_substr, want_ext) = asset_match().ok_or_else(manual_install_msg)?;
 
     // Self-contained static GPL build for this platform, NOT the -shared variant (needs separate

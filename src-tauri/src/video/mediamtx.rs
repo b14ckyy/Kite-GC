@@ -138,6 +138,15 @@ fn manual_install_msg() -> String {
 
 /// Download the pinned MediaMTX into the app-data `bin/` dir. Returns the path.
 pub async fn download<F: FnMut(u8, &str)>(mut report: F) -> Result<PathBuf, String> {
+    // Both mobile systems forbid executing a downloaded binary (Android by W^X on writable app
+    // storage, iOS by codesigning), so the engine can never run there — refuse up front with the
+    // reason instead of downloading a file that then fails to spawn. Camera / capture sources need
+    // no engine and work; RTSP on mobile is the Phase E item (ANDROID_SUPPORT.md §5b).
+    if cfg!(any(target_os = "android", target_os = "ios")) {
+        return Err("The RTSP video engine cannot run on this device: mobile systems forbid executing \
+                    a downloaded binary. Camera and capture-device sources work without it."
+            .into());
+    }
     let asset_name = release_asset_name().ok_or_else(manual_install_msg)?;
     let url = format!("{REPO_RELEASES}/download/{VERSION}/{asset_name}");
 

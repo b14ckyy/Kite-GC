@@ -18,18 +18,29 @@ const hasTouch = typeof navigator !== 'undefined' && navigator.maxTouchPoints > 
  *  also matches the iOS Simulator, whose WKWebView reports a "Macintosh" UA with a multi-touch pointer). */
 export const isIOS = /iPad|iPhone|iPod/i.test(ua) || (/Macintosh|Mac OS X/i.test(ua) && hasTouch);
 
-/** True on any mobile/tablet build. Currently iOS/iPadOS only; Android would extend this later. */
-export const isMobile = isIOS;
+/** True in the Android WebView ("Mozilla/5.0 (Linux; Android 14; …)" — which is why the Linux flag
+ *  below excludes Android explicitly). */
+export const isAndroid = /Android/i.test(ua);
 
-/** True on iPhone/iPod specifically (NOT iPad). iPad reports a "Macintosh" UA, so it never matches.
- *  Used to gate iPhone-only layout that must NOT affect iPad, in any orientation (unlike a width media
- *  query, which can't tell a landscape iPhone from a tablet). */
-export const isPhone = /iPhone|iPod/i.test(ua);
+/** True on any mobile build — iOS/iPadOS or Android. This drives the FORM-FACTOR tier only (touch
+ *  layout, safe areas, on-screen sticks, mobile connection defaults). It must never gate a
+ *  capability: what a platform can do is a separate question — see the `has*` flags below — because
+ *  the two mobile OSes differ (Android has USB serial; iOS has none). */
+export const isMobile = isIOS || isAndroid;
 
-/** True on a tablet (iPad, and any future Android tablet): mobile build that is not a phone. UA-based,
- *  so it is orientation-independent — a landscape iPhone (wide viewport) never counts as a tablet. Used
- *  to gate tablet-only layout that must NOT affect the phone. */
+/** True on a phone: iPhone/iPod, or Android carrying the "Mobile" UA token (Chromium sets it on
+ *  phones and omits it on tablets). UA-based, so orientation-independent — a landscape phone never
+ *  becomes a tablet. Used to gate phone-only layout that must NOT affect tablets. */
+export const isPhone = /iPhone|iPod/i.test(ua) || (isAndroid && /Mobile/i.test(ua));
+
+/** True on a tablet (iPad, Android tablets): a mobile build that is not a phone. */
 export const isTablet = isMobile && !isPhone;
+
+// ── Capabilities — what the platform can do, independent of its form factor ───────────────────
+
+/** Serial ports exist: every desktop OS, and Android through the USB host API (OTG). iOS is the one
+ *  platform where the serial transport is genuinely absent — not hidden, absent. */
+export const hasSerialPorts = !isIOS;
 
 /** True when running inside the macOS WebView (WKWebView) — used to mirror native window-control
  *  placement and drive the native-capture backend (AVFoundation). Excludes iPadOS, which shares the

@@ -31,20 +31,19 @@ vite.config.ts.timestamp-*
 .tauri/
 *.log
 
-# Android / Mobile specific Tauri configuration files
-# Currently not used (Android development is paused).
-# These can be un-ignored later when mobile support is resumed.
-tauri.android.conf.json
-src-tauri/tauri.android.conf.json
 
 # =============================================================================
 # Rust / Tauri
 # =============================================================================
 src-tauri/target/
 
-# Tauri generated code (especially from Android / mobile development)
-# This folder can become very large and should never be committed.
-src-tauri/gen/
+# Tauri generated code. `gen/apple` and anything else `tauri <platform> init` produces stays out of
+# the repository, but `gen/android` is the Android app project itself — the manifest, the Gradle build,
+# the icons and the Rust plugin — and is edited by hand and required to build the APK, so it is tracked.
+# Its own gen/android/.gitignore excludes the parts Tauri really does regenerate (tauri.build.gradle.kts,
+# tauri.settings.gradle, tauri.properties, the built .so files and the copied tauri.conf.json).
+src-tauri/gen/*
+!src-tauri/gen/android/
 
 # Custom cargo target directory (used on Windows to avoid OneDrive spaces)
 # See src-tauri/.cargo/config.toml
@@ -92,10 +91,3 @@ target/
 
 # Bundled macOS ffmpeg sidecars — fetched at build time by scripts/fetch-ffmpeg-macos.sh
 src-tauri/binaries/
-
-# =============================================================================
-# AI assistant config
-# =============================================================================
-.agents
-.claude
-skills-lock.json

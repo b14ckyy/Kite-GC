@@ -3,7 +3,7 @@
 
 // Widget registry — defines all available widgets, their classes, and metadata
 
-import { isMobile } from '$lib/platform';
+import { isPhone } from '$lib/platform';
 
 export type WidgetClass = 'large' | 'small' | 'wide';
 
@@ -32,8 +32,9 @@ const ALL_WIDGET_DEFS: WidgetDef[] = [
   { id: 'videoFeed',    label: 'Video',          labelKey: 'widgets.video',        widgetClass: 'wide' },
 ];
 
-// The video widget uses go2rtc/ffmpeg, which are unavailable on iOS - drop it from the mobile catalog.
-export const WIDGET_DEFS: WidgetDef[] = ALL_WIDGET_DEFS.filter(w => w.id !== 'videoFeed' || !isMobile);
+// Video stays on tablets (camera / OTG capture works natively there; RTSP is the Phase E item) and is
+// dropped from the phone catalog until the phone UI decides how to fit it.
+export const WIDGET_DEFS: WidgetDef[] = ALL_WIDGET_DEFS.filter(w => w.id !== 'videoFeed' || !isPhone);
 
 export const WIDGET_MAP = new Map(WIDGET_DEFS.map(w => [w.id, w]));
 

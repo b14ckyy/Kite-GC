@@ -10,7 +10,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: GPL-3.0-or-later" src="https://img.shields.io/badge/License-GPLv3-blue.svg"></a>
   <a href="https://b14ckyy.github.io/Kite-GC/"><img alt="Documentation" src="https://img.shields.io/badge/docs-online-37a8db"></a>
-  <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-555">
+  <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Android%20(experimental)-555">
   <img alt="Status" src="https://img.shields.io/badge/status-release%20candidate-f5a623">
   <a href="https://paypal.me/b14ckyy"><img alt="Donate via PayPal" src="https://img.shields.io/badge/Donate-PayPal-00457C?logo=paypal&logoColor=white"></a>
 </p>
@@ -103,8 +103,11 @@ Everything you'd expect from a ground station:
 - **Connections:** USB / serial, Bluetooth (SPP & BLE), TCP, UDP.
 - **Link modes:** live control link, **passive** listen-only telemetry, or a **relay** that
   re-broadcasts to other ground stations.
-- **Platforms:** Windows, macOS (universal, unsigned) and Linux (x86-64 / ARM64). Android and iOS are
-  in development for a release after 1.0.
+- **Platforms:** Windows, macOS (universal, unsigned) and Linux (x86-64 / ARM64). **Android is
+  experimental** — it builds, installs and flies over USB serial (OTG), Bluetooth LE or UDP/TCP, but
+  the interface is still the desktop one (tablet-sized, landscape). See the
+  [Build Guide](https://b14ckyy.github.io/Kite-GC/for-developers/building/#android) for what works.
+  An iOS / iPadOS port lives on `development`. Both target a release after 1.0.
 
 ## Download
 
