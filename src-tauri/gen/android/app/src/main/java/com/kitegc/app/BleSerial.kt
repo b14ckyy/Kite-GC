@@ -363,6 +363,13 @@ object BleSerial {
         } else {
             BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
         }
+        // The two numbers that make one device's BLE link behave differently from another's — worth
+        // a logcat line whenever a link comes up, so a field comparison needs no extra build.
+        android.util.Log.i(
+            TAG,
+            "link $handle up: mtu=${link.mtu} writeType=" +
+                (if (link.writeType == BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) "no-response" else "acknowledged")
+        )
         return true
     }
 
