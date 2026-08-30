@@ -76,10 +76,9 @@ Mobile is **not part of the 1.0 line** — nothing mobile builds from `master`, 
 target a release after 1.0. The iOS / iPadOS port lives on `development` (see the iOS notes above);
 Android is described here.
 
-Android is **experimental**. The app builds and installs, and connects over **USB serial** (OTG) or
-**UDP / TCP**. Bluetooth LE is **not implemented** there yet (see
-[What does not work yet](#what-does-not-work-yet-on-android)), and the interface is still the desktop
-one: it fits a tablet in landscape, and is cramped on a phone.
+Android is **experimental**. The app builds and installs, and connects over **USB serial** (OTG),
+**Bluetooth LE** or **UDP / TCP**. The interface is still the desktop one: it fits a tablet in
+landscape, and is cramped on a phone.
 
 USB serial goes through the Android USB Host API, so the driver lives in Kotlin
 (`gen/android/app/src/main/java/com/kitegc/app/UsbSerial.kt`) with a JNI shim in front of it
@@ -93,6 +92,13 @@ USB serial goes through the Android USB Host API, so the driver lives in Kotlin
 FTDI (RFD900) and CH340 are **not** driven yet; both slot in as another `SerialDriver` in that Kotlin
 file. Android grants USB access per device and per session: plugging the cable in and picking Kite
 from the system dialog grants it up front, otherwise the first connect raises the permission prompt.
+
+Bluetooth LE follows the same shape on the platform's own GATT stack (`BleSerial.kt` with
+`src-tauri/src/transport/ble_android.rs` in front of it) — the desktop's `btleplug` has no usable
+Android backend without a companion Java library. The known BLE-serial profiles (CC2541 / HM-10,
+Nordic UART, SpeedyBee) live in `src-tauri/src/transport/ble_profiles.rs`, shared with the desktop
+backend, so a new adapter family is a one-line Rust change. The first scan raises the system's
+"nearby devices" permission prompt (Android 12+; location before that).
 
 #### Getting an APK without building one
 
@@ -185,7 +191,7 @@ up itself, so only the bare `cargo check` needs it. (On Windows the prebuilt dir
 | USB serial (FTDI, CH340) | ❌ not implemented | Those two chips need their own driver; the devices are not listed as ports. |
 | Flight log, missions, fleet & battery manager | ✅ works | SQLite in app-private storage (`android::app_data_dir`). |
 | Maps, terrain, weather | ✅ works | Network + the same tile cache as desktop. |
-| Bluetooth LE | ❌ not implemented | `btleplug`'s Android backend needs a companion Java library the Gradle project does not ship. A scan finds nothing. |
+| Bluetooth LE | ✅ works | Native GATT via `BleSerial.kt`; the same serial profiles as desktop. Listen-only mode (the GATT dump) is not implemented yet. |
 | Joystick / HID RC control | ❌ not implemented | The backend is per-OS (WGI / evdev / IOKit); Android has none, so no device is ever listed. |
 | Blackbox import | ❌ impossible | Needs the external `blackbox_decode` tool, and Android forbids executing a downloaded binary. Import on a desktop and bring flights over as `.kflight`. |
 | Video (RTSP via MediaMTX, MJPEG, native capture) | ❌ not implemented | Every video path spawns a bundled helper (`mediamtx` / `ffmpeg`), which an Android app cannot do. |
