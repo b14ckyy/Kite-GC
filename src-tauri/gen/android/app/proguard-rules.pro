@@ -37,3 +37,6 @@
 # the folder picker dies with a NoSuchMethodError only in RELEASE builds — the debug
 # build does not minify, which is exactly how this trap stayed invisible in testing.
 -keep class com.kitegc.app.StorageAccess { *; }
+
+# And the BLE bridge (transport/ble_android.rs → BleSerial) — JNI-only, same rule.
+-keep class com.kitegc.app.BleSerial { *; }

@@ -14,9 +14,8 @@
 //   serial: serialport-backed on desktop. iOS has no serial access of any kind, so it gets a
 //           stand-in with the same surface — opens fail cleanly, the port list is empty. Android
 //           talks USB serial through the platform's USB Host API (UsbSerial.kt + the JNI shim).
-//   ble:    btleplug on desktop, CoreBluetooth (objc2) on iOS. Android is a stand-in until the
-//           droidplug-vs-native-Kotlin decision falls (ANDROID_SUPPORT.md, Phase C) — scans come
-//           back empty and opens fail cleanly.
+//   ble:    btleplug on desktop, CoreBluetooth (objc2) on iOS, the platform GATT stack via a
+//           Kotlin bridge on Android (BleSerial.kt) — same public surface on all three.
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod serial;
 #[cfg(target_os = "ios")]
@@ -35,6 +34,8 @@ pub mod ble;
 #[cfg(target_os = "android")]
 #[path = "ble_android.rs"]
 pub mod ble;
+/// The BLE-serial profile table, shared by the desktop and Android BLE backends.
+pub mod ble_profiles;
 
 use std::fmt;
 

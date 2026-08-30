@@ -34,14 +34,17 @@
          system dialog UsbSerial.open() raises or by the user picking Kite from the attach dialog that
          the intent filter below produces.
 
-         BLE is declared but NOT yet implemented (see `transport/ble_android.rs`) and is not requested
-         at runtime today; the entries are here so the manifest matches the intended feature set.
-         BLUETOOTH_SCAN carries neverForLocation because a BLE-serial adapter is a link, not a
-         positioning source — without it Android 12+ would force the location grant on the user too. -->
+         BLE-serial (BleSerial.kt + transport/ble_android.rs) requests these at runtime on first
+         use. BLUETOOTH_SCAN carries neverForLocation because a BLE-serial adapter is a link, not a
+         positioning source — without it Android 12+ would force the location grant on the user too.
+         Before Android 12 the Bluetooth permissions are install-time and scanning needs the (already
+         declared) fine-location grant instead. -->
     <uses-permission
         android:name="android.permission.BLUETOOTH_SCAN"
         android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
 
     <!-- Hardware is optional across the board: Kite runs fine as a network-only GCS on a device with
          no USB host port, no Bluetooth radio and no camera, so none of these may gate installation. -->

@@ -22,12 +22,20 @@ class MainActivity : TauriActivity() {
       StorageAccess.onFolderPicked(uri)
     }
 
+  /** Runtime permissions for BLE (scan + connect on Android 12+, location before that). Same
+   *  field-initializer rule as the folder picker. */
+  private val blePermissions =
+    registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+      BleSerial.onPermissionResult(result)
+    }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     // Before super.onCreate, which is what starts Tauri and therefore the Rust side: the USB-serial
     // bridge has no Context of its own and the first port enumeration can arrive as soon as the
     // frontend is up.
     UsbSerial.init(this)
     StorageAccess.init(this, folderPicker)
+    BleSerial.init(this, blePermissions)
 
     enableEdgeToEdge()
 
