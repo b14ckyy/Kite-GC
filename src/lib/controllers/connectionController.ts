@@ -58,24 +58,58 @@ export async function stopBleScan(): Promise<void> {
 
 /** Clear the discovered-device list (e.g. before a fresh scan). */
 export function clearBleDevices(): void {
+  dropPendingBleDevices();
   bleDevices.set([]);
 }
 
 let bleUnlisten: UnlistenFn | null = null;
-/** Subscribe to live BLE discovery events and upsert them into the bleDevices store. Idempotent. */
+
+// Discovery events are batched before they reach the store. Devices arrive one event at a time —
+// a burst of them in the first seconds of a scan, then RSSI/name updates from backends that report
+// those (desktop) — and every store write re-renders the device <select>. On Android that tears the
+// native picker popup down and rebuilds it per event, which reads as flicker while it is open; on
+// desktop it is merely wasted renders. One write per window, and only when something changed.
+const BLE_FLUSH_MS = 600;
+let blePending = new Map<string, BleDeviceInfo>();
+let bleFlushTimer: ReturnType<typeof setTimeout> | null = null;
+
+function dropPendingBleDevices(): void {
+  blePending = new Map();
+  if (bleFlushTimer) {
+    clearTimeout(bleFlushTimer);
+    bleFlushTimer = null;
+  }
+}
+
+function flushBleDevices(): void {
+  bleFlushTimer = null;
+  if (blePending.size === 0) return;
+  const incoming = blePending;
+  blePending = new Map();
+  bleDevices.update((list) => {
+    let changed = false;
+    const next = [...list];
+    for (const dev of incoming.values()) {
+      const i = next.findIndex((d) => d.id === dev.id);
+      if (i < 0) {
+        next.push(dev);
+        changed = true;
+      } else if (next[i].name !== dev.name || next[i].profile !== dev.profile || next[i].rssi !== dev.rssi) {
+        next[i] = dev;
+        changed = true;
+      }
+    }
+    return changed ? next : list;
+  });
+}
+
+/** Subscribe to live BLE discovery events and upsert them into the bleDevices store — batched, see
+ *  above. Idempotent. */
 export async function startBleDeviceListener(): Promise<void> {
   if (bleUnlisten) return;
   bleUnlisten = await listen<BleDeviceInfo>("ble-device", (e) => {
-    const dev = e.payload;
-    bleDevices.update((list) => {
-      const i = list.findIndex((d) => d.id === dev.id);
-      if (i >= 0) {
-        const next = [...list];
-        next[i] = dev;
-        return next;
-      }
-      return [...list, dev];
-    });
+    blePending.set(e.payload.id, e.payload);
+    if (!bleFlushTimer) bleFlushTimer = setTimeout(flushBleDevices, BLE_FLUSH_MS);
   });
 }
 
@@ -83,6 +117,7 @@ export async function startBleDeviceListener(): Promise<void> {
 export function stopBleDeviceListener(): void {
   bleUnlisten?.();
   bleUnlisten = null;
+  dropPendingBleDevices();
 }
 
 export interface ConnectParams {
