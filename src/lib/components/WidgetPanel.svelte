@@ -98,20 +98,27 @@
     };
   });
 
-  // Mouse-based fallback DnD (independent from HTML5 drag events).
+  // Pointer-based DnD (independent from HTML5 drag events). Pointer events, not mouse events, on
+  // purpose: a finger never fires mousemove/mouseup, so the mouse-only version could start a drag
+  // on touch (mousedown is synthesised from a tap) and then never move or drop it — the widgets
+  // simply refused to move on a tablet. Pointer events cover mouse, pen and touch with one path.
   $effect(() => {
-    const onWindowMouseMove = (e: MouseEvent) => {
+    // This panel's own drag visuals (index highlight, insert marker, ghost) — never the global
+    // payload, which belongs to whichever panel consumes the drop.
+    const resetLocalDrag = () => {
+      dragIdx = -1;
+      insertIdx = -1;
+      externalDragOver = false;
+      activeDragPayload = null;
+      clearGhost();
+    };
+
+    const onWindowPointerMove = (e: PointerEvent) => {
       if (!editing) return;
       const payload = getGlobalDragPayload();
       if (!payload) {
         // Another panel may have consumed the drop; clear stale local drag visuals.
-        if (dragIdx !== -1 || insertIdx !== -1 || externalDragOver) {
-          dragIdx = -1;
-          insertIdx = -1;
-          externalDragOver = false;
-          activeDragPayload = null;
-          clearGhost();
-        }
+        if (dragIdx !== -1 || insertIdx !== -1 || externalDragOver) resetLocalDrag();
         return;
       }
 
@@ -124,49 +131,61 @@
       const inside = isPointInsidePanel(e.clientX, e.clientY);
       externalDragOver = inside;
       insertIdx = inside ? computeInsertIdxFromPoint(e.clientX, e.clientY) : -1;
-      if (DND_DEBUG) console.log('[WIDGET-DND] mousemove', { panelId, inside, insertIdx, payload });
+      if (DND_DEBUG) console.log('[WIDGET-DND] pointermove', { panelId, inside, insertIdx, payload });
     };
 
-    const onWindowMouseUp = (e: MouseEvent) => {
+    const onWindowPointerUp = (e: PointerEvent) => {
       if (!editing) return;
       const payload = getGlobalDragPayload();
-      if (!payload) return;
+      if (!payload) {
+        // The other panel's listener ran first and consumed the drop. With a mouse the next move
+        // would have cleared our leftovers; a lifted finger sends no further event, so do it here.
+        resetLocalDrag();
+        return;
+      }
       const inside = isPointInsidePanel(e.clientX, e.clientY);
       if (inside) {
         const dropAt = computeInsertIdxFromPoint(e.clientX, e.clientY);
-        if (DND_DEBUG) console.log('[WIDGET-DND] mouseup drop', { panelId, dropAt, payload });
+        if (DND_DEBUG) console.log('[WIDGET-DND] pointerup drop', { panelId, dropAt, payload });
         executeDrop(payload, dropAt);
         setGlobalDragPayload(null);
-        dragIdx = -1;
-        insertIdx = -1;
-        externalDragOver = false;
-        activeDragPayload = null;
-        clearGhost();
+        resetLocalDrag();
         return;
       }
 
-      // Important for cross-panel moves: if source panel sees mouseup first while cursor is
-      // over another widget panel, do NOT clear global payload yet.
+      // Released outside this panel. Our visuals end with the pointer either way — the ghost must
+      // not outlive the finger (on touch nothing else would ever clear it). Only the global payload
+      // is kept alive, and only while another widget panel sits under the pointer and will consume
+      // it in its own listener (cross-panel move); over anything else the drag is cancelled.
       if (payload.panelId === panelId) {
+        resetLocalDrag();
         const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
         const overWidgetPanel = !!el?.closest('.widget-panel');
         if (!overWidgetPanel) {
-          if (DND_DEBUG) console.log('[WIDGET-DND] mouseup cancel outside panels', { panelId, payload });
+          if (DND_DEBUG) console.log('[WIDGET-DND] pointerup cancel outside panels', { panelId, payload });
           setGlobalDragPayload(null);
-          dragIdx = -1;
-          insertIdx = -1;
-          externalDragOver = false;
-          activeDragPayload = null;
-          clearGhost();
         }
       }
     };
 
-    window.addEventListener('mousemove', onWindowMouseMove, true);
-    window.addEventListener('mouseup', onWindowMouseUp, true);
+    // pointercancel matters on touch specifically: Android fires it when the system takes the
+    // gesture over (a back swipe, a notification pull, the WebView deciding it is a scroll after
+    // all). Without it the payload and the ghost would be left behind and the panel would look
+    // permanently mid-drag.
+    const onWindowPointerCancel = () => {
+      if (!getGlobalDragPayload()) return;
+      if (DND_DEBUG) console.log('[WIDGET-DND] pointercancel', { panelId });
+      setGlobalDragPayload(null);
+      resetLocalDrag();
+    };
+
+    window.addEventListener('pointermove', onWindowPointerMove, true);
+    window.addEventListener('pointerup', onWindowPointerUp, true);
+    window.addEventListener('pointercancel', onWindowPointerCancel, true);
     return () => {
-      window.removeEventListener('mousemove', onWindowMouseMove, true);
-      window.removeEventListener('mouseup', onWindowMouseUp, true);
+      window.removeEventListener('pointermove', onWindowPointerMove, true);
+      window.removeEventListener('pointerup', onWindowPointerUp, true);
+      window.removeEventListener('pointercancel', onWindowPointerCancel, true);
     };
   });
 
@@ -320,7 +339,8 @@
     }
   }
 
-  function handlePointerDown(e: MouseEvent, idx: number) {
+  function handlePointerDown(e: PointerEvent, idx: number) {
+    // button is 0 for a touch contact and the primary mouse button alike.
     if (!editing || e.button !== 0) return;
     e.preventDefault();
     dragIdx = idx;
@@ -333,7 +353,7 @@
     const rect = el.getBoundingClientRect();
     ghostW = Math.max(100, Math.round(rect.width));
     ghostH = Math.max(100, Math.round(rect.height));
-    if (DND_DEBUG) console.log('[WIDGET-DND] mousedown start', activeDragPayload);
+    if (DND_DEBUG) console.log('[WIDGET-DND] pointerdown start', activeDragPayload);
   }
 
   function parseDropPayload(e: DragEvent): DragPayload | null {
@@ -457,7 +477,7 @@
       class:insert-before={showInsert && insertIdx === idx}
       class:insert-after={showInsert && insertIdx === widgetIds.length && idx === widgetIds.length - 1}
       draggable={false}
-      onmousedown={(e) => handlePointerDown(e, idx)}
+      onpointerdown={(e) => handlePointerDown(e, idx)}
     >
       {#if editing}
         <div class="drag-handle">⠿</div>
@@ -604,6 +624,10 @@
 
   .widget-panel.editing .widget-slot {
     cursor: grab;
+    /* Touch: claim the gesture so the browser does not read the drag as a pan/scroll and cancel
+       the pointer stream. Scoped to edit mode, so ordinary use keeps native scrolling and the
+       widgets stay interactive. */
+    touch-action: none;
   }
 
   .widget-panel.editing .widget-slot:active {
