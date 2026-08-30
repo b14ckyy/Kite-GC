@@ -1367,12 +1367,14 @@
    *  else the importer accepts (.kflight archives, .rawmsp, .tlog, ArduPilot .bin) is parsed
    *  in-process by the Rust backend and works on every platform. */
   const BLACKBOX_EXTS = /\.(txt|bbl|bfl)$/i;
-  /** Extensions offered in the file picker / accepted from a drop. Mobile drops the three blackbox
-   *  ones: `blackbox_decode` is a separate native executable, and neither mobile OS allows running a
-   *  downloaded binary (the backend refuses too — decoder_impossible). The rest of the Logbook —
-   *  recording, replay, export, importing a .kflight from a desktop — is unaffected. */
+  /** Extensions offered in the file picker / accepted from a drop. Mobile keeps what the device can
+   *  produce itself or receive from a desktop — .kflight archives and the raw links (.rawmsp / .tlog)
+   *  — and drops the rest: the three INAV blackbox formats need `blackbox_decode`, a separate native
+   *  executable neither mobile OS allows to run (the backend refuses too — decoder_impossible), and
+   *  ArduPilot dataflash (.bin) runs to hundreds of megabytes for a tablet database that never
+   *  archives originals (ANDROID_SUPPORT.md §4). Recording, replay and export are unaffected. */
   const IMPORT_EXTS = isMobile
-    ? ['bin', 'kflight', 'rawmsp', 'tlog']
+    ? ['kflight', 'rawmsp', 'tlog']
     : ['txt', 'bbl', 'bfl', 'bin', 'kflight', 'rawmsp', 'tlog'];
 
   /** Import a batch of files, isolating each so one bad/corrupt/non-log file doesn't abort the rest;

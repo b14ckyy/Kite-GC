@@ -392,8 +392,16 @@ fn copy_flight(
     // 4. Copy blackbox records
     copy_blackbox_records(src, dst, flight_id, new_id)?;
 
-    // 5. Copy blackbox files (BLOBs)
-    copy_blackbox_files(src, dst, flight_id, new_id)?;
+    // 5. Copy blackbox files (BLOBs) — the archived originals (INAV blackbox logs, ArduPilot
+    //    dataflash). Not on mobile: the mobile database never archives originals (ANDROID_SUPPORT.md
+    //    §4 — nothing there could decode them, and dataflash alone runs to hundreds of megabytes), so
+    //    an imported .kflight brings the flight, its track and its records and leaves the blobs
+    //    behind. The desktop copy it came from still has them.
+    if cfg!(any(target_os = "android", target_os = "ios")) {
+        log::info!("Import: flight {flight_id} — archived original log files are not stored on mobile");
+    } else {
+        copy_blackbox_files(src, dst, flight_id, new_id)?;
+    }
 
     Ok(new_id)
 }

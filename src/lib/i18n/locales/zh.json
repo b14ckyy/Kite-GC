@@ -654,6 +654,7 @@
     "rtspDone": "编辑完成",
     "reconnecting": "重新连接中…",
     "reconnectStop": "停止",
+    "rtspMobilePlaceholder": "RTSP 在此设备上尚不可用——流媒体引擎无法在移动设备上运行，设备原生的 RTSP 方案仍在计划中。",
     "engineMissing": "RTSP需要MediaMTX流媒体引擎，尚未安装。",
     "engineDownload": "下载 MediaMTX",
     "engineReady": "MediaMTX 就绪",

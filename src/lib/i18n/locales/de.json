@@ -657,6 +657,7 @@
     "rtspDone": "Bearbeiten fertig",
     "reconnecting": "Verbinde neu…",
     "reconnectStop": "Stopp",
+    "rtspMobilePlaceholder": "RTSP ist auf diesem Gerät noch nicht verfügbar — die Streaming-Engine kann auf Mobilgeräten nicht laufen, ein gerätespezifischer RTSP-Weg kommt noch.",
     "engineMissing": "Die Streaming-Engine MediaMTX wird für RTSP benötigt und ist noch nicht installiert.",
     "engineDownload": "MediaMTX herunterladen",
     "engineReady": "MediaMTX bereit",
