@@ -516,6 +516,7 @@ fn connect_msp(
         let mut proto = state.protocol.lock().map_err(|e| e.to_string())?;
         *proto = Some(ActiveProtocol::Msp(handle));
     }
+    crate::link_presence::link_active(true);
     {
         let mut info = state.fc_info.lock().map_err(|e| e.to_string())?;
         *info = Some(fc_info.clone());
@@ -635,6 +636,7 @@ fn connect_mavlink(
         let mut proto = state.protocol.lock().map_err(|e| e.to_string())?;
         *proto = Some(ActiveProtocol::Mavlink(handle));
     }
+    crate::link_presence::link_active(true);
     {
         let mut info = state.fc_info.lock().map_err(|e| e.to_string())?;
         *info = Some(fc_info.clone());
@@ -706,6 +708,7 @@ fn connect_passive_telemetry(
         let mut proto = state.protocol.lock().map_err(|e| e.to_string())?;
         *proto = Some(ActiveProtocol::PassiveTelemetry(handle));
     }
+    crate::link_presence::link_active(true);
     {
         let mut info = state.fc_info.lock().map_err(|e| e.to_string())?;
         *info = Some(fc_info.clone());
@@ -743,6 +746,7 @@ pub async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
     let mut info = state.fc_info.lock().map_err(|e| e.to_string())?;
     *info = None;
 
+    crate::link_presence::link_active(false);
     log::info!("Disconnected");
     Ok(())
 }

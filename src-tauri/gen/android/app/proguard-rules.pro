@@ -40,3 +40,4 @@
 
 # And the BLE bridge (transport/ble_android.rs → BleSerial) — JNI-only, same rule.
 -keep class com.kitegc.app.BleSerial { *; }
+-keep class com.kitegc.app.ScreenLock { *; }

@@ -17,6 +17,7 @@
 
 pub mod content;
 pub mod jvm;
+pub mod screen;
 pub mod storage;
 
 use std::path::{Path, PathBuf};

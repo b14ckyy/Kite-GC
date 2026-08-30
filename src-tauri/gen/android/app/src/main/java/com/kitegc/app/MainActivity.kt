@@ -36,6 +36,7 @@ class MainActivity : TauriActivity() {
     UsbSerial.init(this)
     StorageAccess.init(this, folderPicker)
     BleSerial.init(this, blePermissions)
+    ScreenLock.init(this)
 
     enableEdgeToEdge()
 
@@ -56,12 +57,9 @@ class MainActivity : TauriActivity() {
 
     hideSystemBars()
 
-    // Keep the display awake while the GCS is in the foreground. A ground station is watched, not
-    // interacted with — minutes can pass between touches during a mission — and the screen blanking
-    // mid-flight is exactly when the telemetry matters most. FLAG_KEEP_SCREEN_ON is scoped to this
-    // window and released automatically when the app leaves the foreground, so it needs no WAKE_LOCK
-    // permission and cannot keep the device awake in the background.
-    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    // The display stays on only while a telemetry link is active — nav-app behaviour, driven from
+    // Rust through ScreenLock on connect / disconnect / lost link. Unconnected, the normal screen
+    // timeout applies.
 
     // Require a deliberate double-press to leave. The default back behaviour finishes the activity
     // immediately, which on a gesture-navigation device means an edge swipe — easy to trigger by

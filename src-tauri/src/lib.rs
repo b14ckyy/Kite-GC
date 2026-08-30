@@ -11,6 +11,7 @@ mod flightlog;
 mod flightmode;
 mod github_release;
 mod hid;
+mod link_presence;
 mod link_stats;
 mod logging;
 mod mavlink_proto;

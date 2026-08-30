@@ -373,6 +373,7 @@ fn scheduler_loop(
                 }
             }
             let _ = app_handle.emit("connection-lost", ());
+            crate::link_presence::link_active(false);
             return Some(transport);
         }
 

@@ -23,8 +23,9 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <!-- No WAKE_LOCK here on purpose: the screen is kept awake with the window flag
-         FLAG_KEEP_SCREEN_ON (MainActivity), which needs no permission, is scoped to this window and
-         is released the moment the app leaves the foreground. -->
+         FLAG_KEEP_SCREEN_ON (ScreenLock, only while a telemetry link is active), which needs no
+         permission, is scoped to this window and is released the moment the app leaves the
+         foreground. -->
 
     <!-- Camera/mic for the video panel's local capture source (getUserMedia in the WebView). -->
     <uses-permission android:name="android.permission.CAMERA" />
