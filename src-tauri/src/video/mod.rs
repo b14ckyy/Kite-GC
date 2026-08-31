@@ -15,6 +15,7 @@ pub mod native;
 #[cfg(target_os = "linux")]
 pub mod v4l2;
 pub mod mjpeg_server;
+pub mod rtsp;
 
 pub use mediamtx::MediaMtx;
 pub use mjpeg_server::MjpegServer;
