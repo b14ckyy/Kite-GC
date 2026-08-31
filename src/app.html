@@ -12,6 +12,12 @@
       /* The app is a full-screen cockpit, not a scrollable page: never let trackpad/touch gestures
          scroll-chain or bounce the whole frame (the per-panel scrollers handle their own overflow). */
       html, body { overscroll-behavior: none; }
+
+      /* Touch: the long-press text selection and the tap flash are mouse-era idioms that only get
+         in the way of dragging a widget or a waypoint. Panning/zooming is deliberately NOT blocked
+         here — the panels scroll themselves and the map handles its own gestures. No effect on a
+         desktop WebView. */
+      body { -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; }
     </style>
     <title>Tauri + SvelteKit + Typescript App</title>
     %sveltekit.head%
