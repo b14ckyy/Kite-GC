@@ -189,12 +189,16 @@
     const el = document.querySelector('.vp-body .preview');
     const r = el?.getBoundingClientRect() ?? new DOMRect(200, 200, 480, 270);
     const s = window.devicePixelRatio || 1;
-    const style = document.createElement('style');
-    style.textContent =
-      '*, *::before, *::after { background: transparent !important; backdrop-filter: none !important; } ' +
-      'img, canvas, video { visibility: hidden !important; }';
-    document.head.appendChild(style);
-    setTimeout(() => style.remove(), 5000);
+    // Reveal the layers beneath — only for the below-variant; the control must show the
+    // app UNCHANGED (an opaque page over a working hole punch looks exactly like normal).
+    if (!topmost) {
+      const style = document.createElement('style');
+      style.textContent =
+        '*, *::before, *::after { background: transparent !important; backdrop-filter: none !important; } ' +
+        'img, canvas, video { visibility: hidden !important; }';
+      document.head.appendChild(style);
+      setTimeout(() => style.remove(), 5000);
+    }
     try {
       spikeResult = await invoke<string>('video_holepunch_spike', {
         x: Math.round(r.x * s),
