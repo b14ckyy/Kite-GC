@@ -16,6 +16,7 @@ pub mod native;
 pub mod v4l2;
 pub mod mjpeg_server;
 pub mod rtsp;
+pub mod rtsp_native;
 
 pub use mediamtx::MediaMtx;
 pub use mjpeg_server::MjpegServer;

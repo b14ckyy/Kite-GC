@@ -27,5 +27,4 @@ mod mjpeg;
 mod rtp;
 mod sdp;
 
-pub use client::{run_rtsp, RtspConfig, RtspStats, RtspTransport, VideoCodec, VideoFrame};
-pub use rtp::RtpStats;
+pub use client::{run_rtsp, RtspConfig, RtspTransport};

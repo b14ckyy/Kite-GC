@@ -29,6 +29,7 @@
     setVideoKind,
     setRtspUrl,
     setRtspTransport,
+    setRtspNativeClient,
     saveRtspConnection,
     updateRtspConnection,
     removeRtspConnection,
@@ -181,7 +182,8 @@
   // MediaMTX is only needed for the WebRTC path. A WebView without it (WebKitGTK builds with WebRTC
   // compiled out — Raspberry Pi OS among them) runs RTSP entirely on ffmpeg now, so demanding the
   // engine there would block a machine that already has everything it needs.
-  const needsEngine = isWebrtcAvailable();
+  // …and not at all when the experimental in-process native RTSP client is active.
+  const needsEngine = $derived(isWebrtcAvailable() && !$videoState.rtspNativeClient);
 
   // MJPEG FPS counter — onload fires per frame in multipart streams.
   let mjpegFps = $state(0);
@@ -326,7 +328,9 @@
         // Always ffmpeg: the image path reads the source itself and broadcasts `-f mpjpeg` through
         // Kite's own server. It used to run through go2rtc, whose republish was measured as the
         // cause of the freezes, and naming go2rtc here now would point at the wrong component.
-        method: `ffmpeg → MJPEG${via ? ` (${via})` : ''}`,
+        method: s.rtspEngine === 'kite'
+          ? 'Kite RTSP client → MJPEG'
+          : `ffmpeg → MJPEG${via ? ` (${via})` : ''}`,
         transcode: mode,
         // A stream copy is better than hardware — there is nothing to accelerate — so it counts as
         // "not costing us anything", not as a software fallback.
@@ -586,6 +590,20 @@
           >💾</button>
         </div>
       </div>
+
+      <!-- Experimental: Kite's own in-process RTSP client (MOBILE_RTSP.md) — no MediaMTX, no
+           ffmpeg. MJPEG sources only until the native decode sinks land (P2.1). -->
+      <div class="field-row">
+        <Toggle
+          checked={$videoState.rtspNativeClient}
+          onchange={(c) => void setRtspNativeClient(c)}
+          id="vp-native-rtsp"
+        />
+        <span class="label">{$t('video.nativeClient')}</span>
+      </div>
+      {#if $videoState.rtspNativeClient}
+        <p class="hint">{$t('video.nativeClientHint')}</p>
+      {/if}
 
       <!-- Saved connections: single-line rows, selectable / editable / deletable (ADS-B-provider style). -->
       {#if $videoState.rtspConnections.length}

@@ -643,6 +643,8 @@
     "framerate": "Честота на опресняване",
     "auto": "Авто",
     "rtspUrl": "RTSP URL",
+    "nativeClient": "Собствен RTSP клиент (експериментално)",
+    "nativeClientHint": "Вграденият RTSP клиент на Kite — не изисква MediaMTX или ffmpeg. Засега само MJPEG източници; първо UDP с автоматичен TCP резервен вариант.",
     "rtspTransportHint": "Транспорт: UDP (най-ниска латентност, напр. UAV-Link), TCP или автоматично (опитайте и двете)",
     "rtspAuto": "Авто",
     "rtspSave": "Запази връзката в списъка",

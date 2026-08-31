@@ -267,3 +267,30 @@ pub fn video_native_mjpeg_stop(mjpeg: State<'_, crate::video::MjpegServer>) -> R
     mjpeg.stop();
     Ok(())
 }
+
+// ── Native RTSP client (Kite's own, in-process — MOBILE_RTSP.md P1) ───────────
+
+/// Start the in-process native RTSP client on `url` and serve its frames over the local
+/// multipart MJPEG port — no MediaMTX, no ffmpeg. MJPEG sources only until the P2.1 decode
+/// sinks; an H264/HEVC source fails with a message saying so. `transport`: udp | tcp |
+/// auto (UDP first, automatic TCP-interleaved fallback when no RTP arrives).
+#[tauri::command(async)]
+pub fn video_rtsp_native_start(
+    app: AppHandle,
+    url: String,
+    transport: String,
+    native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
+) -> Result<serde_json::Value, String> {
+    let port = native_rtsp.start(ended_hook(&app), &url, &transport)?;
+    // "copy" is the honest verdict: the frames pass through untouched, nothing transcodes.
+    Ok(serde_json::json!({ "url": format!("http://127.0.0.1:{port}/"), "transcode": "copy" }))
+}
+
+/// Stop the in-process native RTSP client if running. Idempotent.
+#[tauri::command(async)]
+pub fn video_rtsp_native_stop(
+    native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
+) -> Result<(), String> {
+    native_rtsp.stop();
+    Ok(())
+}

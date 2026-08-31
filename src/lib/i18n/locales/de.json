@@ -647,6 +647,8 @@
     "auto": "Auto",
     "rtspUrl": "RTSP-URL",
     "rtspTransportHint": "Transport: UDP (niedrigste Latenz, z. B. UAV-Link), TCP oder Auto (beide versuchen)",
+    "nativeClient": "Nativer RTSP-Client (experimentell)",
+    "nativeClientHint": "Kites eigener eingebauter RTSP-Client — benötigt kein MediaMTX und kein ffmpeg. Vorerst nur MJPEG-Quellen; verbindet zuerst per UDP mit automatischem TCP-Fallback.",
     "rtspAuto": "Auto",
     "rtspSave": "Verbindung in der Liste speichern",
     "bufferLabel": "Glättungspuffer (Frames)",

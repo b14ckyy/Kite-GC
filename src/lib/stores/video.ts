@@ -42,8 +42,9 @@ export type CameraFps = 'auto' | '30' | '60';
 /** Source kind: local camera (getUserMedia MediaStream), RTSP bridge (MediaMTX), or native hardware
  *  capture (V4L2 / DirectShow / AVFoundation → embedded MJPEG server). */
 export type VideoKind = 'camera' | 'rtsp' | 'native';
-/** Which reader served the live RTSP feed: the engine's native client or the ffmpeg fallback. */
-export type RtspEngine = 'native' | 'ffmpeg' | null;
+/** Which reader served the live RTSP feed: the engine's native client, the ffmpeg fallback, or
+ *  Kite's own in-process RTSP client ('kite'). */
+export type RtspEngine = 'native' | 'ffmpeg' | 'kite' | null;
 /** RTSP transport for a connection, passed through to the engine's native RTSP client ('auto' lets
  *  it negotiate — and falls back to the ffmpeg reader for servers that refuse every forced transport). */
 export type RtspTransport = 'udp' | 'tcp' | 'auto';
@@ -89,6 +90,9 @@ export interface VideoState {
   rtspTransport: RtspTransport;
   /** Saved, named RTSP connections the user can recall (explicit save — never auto-added). */
   rtspConnections: RtspConnection[];
+  /** Experimental: use Kite's own in-process RTSP client — no MediaMTX, no ffmpeg (MJPEG
+   *  sources only until the P2.1 native decode sinks land). Persisted. */
+  rtspNativeClient: boolean;
   /** Active RTSP reader once live (native engine client vs ffmpeg fallback); runtime-only. */
   rtspEngine: RtspEngine;
   /** Runtime-only: true while the infinite RTSP auto-reconnect loop is running (link dropped/stalled). */
@@ -153,6 +157,7 @@ interface VideoPrefs {
   rtspTransport: RtspTransport;
   rtspConnections: RtspConnection[];
   rtspBufferFrames: number;
+  rtspNativeClient: boolean;
   nativeDevice: string | null;
   nativeCodec: string;
   nativeDeviceName: string | null;
@@ -178,6 +183,7 @@ const PREF_DEFAULTS: VideoPrefs = {
   rtspTransport: 'auto',
   rtspConnections: [],
   rtspBufferFrames: 0,
+  rtspNativeClient: false,
   nativeDevice: null,
   nativeCodec: 'mjpeg',
   nativeDeviceName: null,
@@ -212,6 +218,7 @@ function loadPrefs(): VideoPrefs {
         rtspConnections: Array.isArray(p.rtspConnections) ? p.rtspConnections : [],
         // Clamped to the stepper's range — a hand-edited pref must not park the buffer at 4000 ms.
         rtspBufferFrames: Math.min(3, Math.max(0, Math.round(p.rtspBufferFrames ?? 0))),
+        rtspNativeClient: p.rtspNativeClient ?? false,
         nativeDevice: p.nativeDevice ?? p.v4l2Device ?? null,
         nativeCodec: p.nativeCodec ?? 'mjpeg',
         nativeDeviceName: p.nativeDeviceName ?? null,
@@ -243,6 +250,7 @@ function savePrefs(): void {
         rtspTransport: s.rtspTransport,
         rtspConnections: s.rtspConnections,
         rtspBufferFrames: get(rtspBufferFrames),
+        rtspNativeClient: s.rtspNativeClient,
         nativeDevice: s.nativeDevice,
         nativeCodec: s.nativeSel.codec,
         nativeDeviceName: s.nativeDeviceName,
@@ -286,6 +294,7 @@ const INITIAL: VideoState = {
   rtspUrl: boot.rtspUrl,
   rtspTransport: boot.rtspTransport,
   rtspConnections: boot.rtspConnections,
+  rtspNativeClient: boot.rtspNativeClient,
   rtspEngine: null,
   reconnecting: false,
   reconnectAttempt: 0,
@@ -801,6 +810,41 @@ async function startMjpegPath(url: string, requireCopy = false): Promise<boolean
   }
 }
 
+/** Stop the in-process native RTSP client (idempotent, fire-and-forget). */
+function stopKiteRtsp(): void {
+  void invoke('video_rtsp_native_stop').catch(() => {});
+}
+
+/** Bring the feed up on Kite's own in-process RTSP client (MOBILE_RTSP.md P1): our RTSP/RTP stack
+ *  reads the source itself (UDP first, automatic TCP fallback) and broadcasts the MJPEG on the same
+ *  local multipart port the ffmpeg path uses — every sink and the reconnect wiring work unchanged.
+ *  Returns 'live', 'retry' (enter the reconnect loop) or 'fatal' (a retry cannot fix it). */
+async function startKiteRtspPath(url: string, transport: RtspTransport): Promise<'live' | 'retry' | 'fatal'> {
+  try {
+    const res = await invoke<{ url: string; transcode: string }>('video_rtsp_native_start', {
+      url,
+      transport,
+    });
+    // Stopped while we were away? (The backend waits for the first frame — seconds, easily.)
+    if (get(videoState).kind !== 'rtsp' || !get(videoState).enabled) {
+      stopKiteRtsp();
+      return 'live'; // not a failure — the user stopped it
+    }
+    patch({ status: 'live', mjpegUrl: res.url, activeTranscode: res.transcode, error: null, rtspEngine: 'kite', reconnecting: false, reconnectAttempt: 0 });
+    return 'live';
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    logVideo('warn', `RTSP (native client) failed: ${message}`);
+    // A source with no MJPEG track will not grow one by retrying — that is a hard stop until the
+    // P2.1 H264/HEVC decode sinks. Everything else (unreachable, timeout) enters the loop.
+    if (message.includes('No MJPEG video track') || message.includes('No video track')) {
+      patch({ status: 'error', error: message, reconnecting: false, reconnectAttempt: 0 });
+      return 'fatal';
+    }
+    return 'retry';
+  }
+}
+
 /** Bring the source up in MediaMTX and complete one WebRTC (WHEP) negotiation. Throws on failure —
  *  including "the source is unreachable", which the backend reports from its readiness wait. */
 async function negotiateWebrtc(url: string, transport: RtspTransport, useFfmpeg: boolean): Promise<void> {
@@ -1136,6 +1180,7 @@ function scheduleRtspReconnect(): void {
   // Release the image path too. Its ffmpeg holds the source open, and a WebRTC-capable host retries
   // WebRTC on every cycle — without this, each attempt stacked a second reader on the same stream.
   void stopNativeMjpeg();
+  stopKiteRtsp();
   videoStream.set(null);
   patch({
     reconnecting: true,
@@ -1195,6 +1240,14 @@ export async function startRtsp(opts?: { reconnect?: boolean }): Promise<void> {
     // else now, and a driver can be fixed between two runs.
     rtspMjpegFailures = 0;
     rtspHwVetoed = false;
+  }
+
+  // Experimental in-process native RTSP client (MOBILE_RTSP.md): no engine, no ffmpeg — Kite's
+  // own RTSP/RTP stack straight onto the multipart port. MJPEG sources only until P2.1.
+  if (st.rtspNativeClient) {
+    if (!reconnect) logVideo('info', `RTSP start ${url} (transport=${transport}, engine=kite-native)`);
+    if ((await startKiteRtspPath(url, transport)) === 'retry') scheduleRtspReconnect();
+    return;
   }
 
   // MJPEG fallback for webviews without RTCPeerConnection (rare in Tauri). Decided BEFORE the engine
@@ -1359,6 +1412,7 @@ export function stopVideo(): void {
   if (wasBackend) {
     void invoke('video_webrtc_stop').catch(() => {});
     void stopNativeMjpeg();
+    stopKiteRtsp();
   }
   patch({ enabled: false, status: 'off', error: null, rtspEngine: null, mjpegUrl: null, activeTranscode: null, reconnecting: false, reconnectAttempt: 0 });
   savePrefs();
@@ -1387,6 +1441,15 @@ export function setRtspUrl(rtspUrl: string): void {
 /** Set the active RTSP transport (udp/tcp/auto); restart if currently on a live RTSP feed. */
 export async function setRtspTransport(transport: RtspTransport): Promise<void> {
   patch({ rtspTransport: transport });
+  savePrefs();
+  const st = get(videoState);
+  if (st.enabled && st.kind === 'rtsp') await startRtsp();
+}
+
+/** Toggle the experimental in-process RTSP client (no MediaMTX/ffmpeg; MJPEG sources only for
+ *  now); restarts a live RTSP feed so the choice applies immediately. */
+export async function setRtspNativeClient(on: boolean): Promise<void> {
+  patch({ rtspNativeClient: on });
   savePrefs();
   const st = get(videoState);
   if (st.enabled && st.kind === 'rtsp') await startRtsp();
