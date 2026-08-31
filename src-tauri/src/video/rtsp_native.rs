@@ -21,7 +21,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use super::mjpeg_server::{accept_loop, broadcast_loop, Client, EndedHook};
-use super::rtsp::{run_rtsp, RtspConfig, RtspTransport};
+use super::rtsp::{run_rtsp, RtspConfig, RtspTransport, VideoCodec};
 
 /// How long `start()` waits for the first frame: RTSP negotiation (incl. a possible 2 s
 /// UDP→TCP fallback) plus the first JPEG.
@@ -117,6 +117,9 @@ impl NativeRtsp {
                 "tcp" => RtspTransport::Tcp,
                 _ => RtspTransport::Auto,
             },
+            // MJPEG only until the native decode sinks land — an H264/H265 source fails
+            // stream selection with a message naming what it offers instead.
+            accept: vec![VideoCodec::Mjpeg],
             ..Default::default()
         };
 

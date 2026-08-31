@@ -20,6 +20,8 @@ use std::time::{Duration, Instant};
 
 use md5::{Digest, Md5};
 
+use super::h264::H264Depacketizer;
+use super::h265::H265Depacketizer;
 use super::mjpeg::MjpegDepacketizer;
 use super::rtp::{self, Reorderer, RtpPacket, RtpStats};
 use super::sdp::{self, MediaSection, Sdp};
@@ -42,6 +44,9 @@ pub struct RtspConfig {
     /// UDP → TCP fallback trigger: no RTP within this window after PLAY.
     pub first_packet_timeout: Duration,
     pub user_agent: String,
+    /// Codecs the caller can consume — stream selection refuses sources offering none of
+    /// them (e.g. the MJPEG-only bridge until the native decode sinks land).
+    pub accept: Vec<VideoCodec>,
 }
 
 impl Default for RtspConfig {
@@ -52,6 +57,7 @@ impl Default for RtspConfig {
             connect_timeout: Duration::from_secs(5),
             first_packet_timeout: Duration::from_secs(2),
             user_agent: "Kite-GC".into(),
+            accept: vec![VideoCodec::Mjpeg, VideoCodec::H264, VideoCodec::H265],
         }
     }
 }
@@ -66,7 +72,7 @@ pub enum VideoCodec {
 #[derive(Debug)]
 pub struct VideoFrame {
     pub codec: VideoCodec,
-    /// MJPEG: one complete JFIF image.
+    /// MJPEG: one complete JFIF image. H264/H265: one Annex-B access unit.
     pub data: Vec<u8>,
     pub rtp_timestamp: u32,
 }
@@ -471,7 +477,10 @@ fn base64(data: &[u8]) -> String {
 
 // ─── Stream selection ────────────────────────────────────────────────────────
 
-fn pick_video(sdp_doc: &Sdp) -> Result<(&MediaSection, VideoCodec, u8), String> {
+fn pick_video<'a>(
+    sdp_doc: &'a Sdp,
+    accept: &[VideoCodec],
+) -> Result<(&'a MediaSection, VideoCodec, u8), String> {
     let mut offered: Vec<String> = Vec::new();
     for m in sdp_doc.media.iter().filter(|m| m.kind == "video") {
         for &pt in &m.payload_types {
@@ -479,9 +488,15 @@ fn pick_video(sdp_doc: &Sdp) -> Result<(&MediaSection, VideoCodec, u8), String> 
                 .encoding_of(pt)
                 .map(str::to_string)
                 .unwrap_or_else(|| if pt == 26 { "JPEG".into() } else { format!("PT{pt}") });
-            match enc.as_str() {
-                "JPEG" => return Ok((m, VideoCodec::Mjpeg, pt)),
-                other => offered.push(other.to_string()),
+            let codec = match enc.as_str() {
+                "JPEG" => Some(VideoCodec::Mjpeg),
+                "H264" => Some(VideoCodec::H264),
+                "H265" | "HEVC" => Some(VideoCodec::H265),
+                _ => None,
+            };
+            match codec {
+                Some(c) if accept.contains(&c) => return Ok((m, c, pt)),
+                _ => offered.push(enc),
             }
         }
     }
@@ -489,7 +504,7 @@ fn pick_video(sdp_doc: &Sdp) -> Result<(&MediaSection, VideoCodec, u8), String> 
         Err("No video track in the RTSP stream description".into())
     } else {
         Err(format!(
-            "No MJPEG video track — the stream offers {} (H264/HEVC decoding lands with the native sinks, P2.1)",
+            "No supported video track for this path — the stream offers {}",
             offered.join("/")
         ))
     }
@@ -602,7 +617,8 @@ fn run_once(
         .unwrap_or(&target.request_url)
         .to_string();
     let sdp_doc = sdp::parse(&String::from_utf8_lossy(&resp.body));
-    let (media, codec, pt) = pick_video(&sdp_doc).map_err(RunErr::Msg)?;
+    let (media, codec, pt) = pick_video(&sdp_doc, &cfg.accept).map_err(RunErr::Msg)?;
+    let mut depack = Depack::new(codec, media.fmtp_of(pt));
     let setup_url = join_control(&base, media.control.as_deref());
     let aggregate_url = join_control(&base, sdp_doc.session_control.as_deref());
     log::info!(
@@ -659,7 +675,7 @@ fn run_once(
             &rtp_sock,
             &rtcp_sock,
             server_rtp_port.map(|p| (server_ip, p)),
-            codec,
+            &mut depack,
             stop,
             on_frame,
         );
@@ -683,23 +699,75 @@ fn run_once(
         if resp.status != 200 {
             return Err(RunErr::Msg(format!("PLAY failed: status {}", resp.status)));
         }
-        let result = tcp_loop(cfg, &mut ctl, has_get_parameter, &aggregate_url, codec, stop, on_frame);
+        let result =
+            tcp_loop(cfg, &mut ctl, has_get_parameter, &aggregate_url, &mut depack, stop, on_frame);
         ctl.teardown(&aggregate_url);
         result
     }
 }
 
-/// Deliver in-order packets through the depacketizer to the frame callback.
-fn deliver(
-    ordered: &mut Vec<RtpPacket>,
-    depack: &mut MjpegDepacketizer,
-    codec: VideoCodec,
-    on_frame: &mut dyn FnMut(VideoFrame),
-) {
-    for p in ordered.drain(..) {
-        if let Some(jpeg) = depack.push(&p) {
-            on_frame(VideoFrame { codec, data: jpeg, rtp_timestamp: p.timestamp });
+/// Codec-dispatching facade over the three per-codec depacketizers.
+enum Depack {
+    Mjpeg(MjpegDepacketizer),
+    H264(H264Depacketizer),
+    H265(H265Depacketizer),
+}
+
+impl Depack {
+    fn new(codec: VideoCodec, fmtp: Option<&str>) -> Self {
+        match codec {
+            VideoCodec::Mjpeg => Depack::Mjpeg(MjpegDepacketizer::new()),
+            VideoCodec::H264 => Depack::H264(H264Depacketizer::new(fmtp)),
+            VideoCodec::H265 => Depack::H265(H265Depacketizer::new(fmtp)),
         }
+    }
+
+    fn push(&mut self, pkt: &RtpPacket, on_frame: &mut dyn FnMut(VideoFrame)) {
+        match self {
+            Depack::Mjpeg(d) => {
+                if let Some(jpeg) = d.push(pkt) {
+                    on_frame(VideoFrame {
+                        codec: VideoCodec::Mjpeg,
+                        data: jpeg,
+                        rtp_timestamp: pkt.timestamp,
+                    });
+                }
+            }
+            Depack::H264(d) => {
+                for au in d.push(pkt) {
+                    on_frame(VideoFrame {
+                        codec: VideoCodec::H264,
+                        data: au,
+                        rtp_timestamp: pkt.timestamp,
+                    });
+                }
+            }
+            Depack::H265(d) => {
+                for au in d.push(pkt) {
+                    on_frame(VideoFrame {
+                        codec: VideoCodec::H265,
+                        data: au,
+                        rtp_timestamp: pkt.timestamp,
+                    });
+                }
+            }
+        }
+    }
+
+    /// (complete frames/AUs delivered, damaged ones dropped)
+    fn totals(&self) -> (u64, u64) {
+        match self {
+            Depack::Mjpeg(d) => (d.frames, d.dropped_frames),
+            Depack::H264(d) => (d.aus, d.damaged_aus),
+            Depack::H265(d) => (d.aus, d.damaged_aus),
+        }
+    }
+}
+
+/// Deliver in-order packets through the depacketizer to the frame callback.
+fn deliver(ordered: &mut Vec<RtpPacket>, depack: &mut Depack, on_frame: &mut dyn FnMut(VideoFrame)) {
+    for p in ordered.drain(..) {
+        depack.push(&p, on_frame);
     }
 }
 
@@ -712,7 +780,7 @@ fn udp_loop(
     rtp_sock: &UdpSocket,
     rtcp_sock: &UdpSocket,
     server: Option<(IpAddr, u16)>,
-    codec: VideoCodec,
+    depack: &mut Depack,
     stop: &AtomicBool,
     on_frame: &mut dyn FnMut(VideoFrame),
 ) -> Result<RtspStats, RunErr> {
@@ -724,7 +792,6 @@ fn udp_loop(
     ctl.stream.set_read_timeout(Some(Duration::from_millis(1))).ok();
 
     let mut reorder = Reorderer::new();
-    let mut depack = MjpegDepacketizer::new();
     let mut ordered: Vec<RtpPacket> = Vec::new();
     let mut buf = vec![0u8; 65536];
     let started = Instant::now();
@@ -742,7 +809,7 @@ fn udp_loop(
                 }
                 if let Some(pkt) = rtp::parse(&buf[..n]) {
                     reorder.push(pkt, &mut ordered);
-                    deliver(&mut ordered, &mut depack, codec, on_frame);
+                    deliver(&mut ordered, depack, on_frame);
                 }
             }
             Err(e) if is_timeout(&e) => {
@@ -767,11 +834,12 @@ fn udp_loop(
         }
     }
 
+    let (frames, dropped_frames) = depack.totals();
     Ok(RtspStats {
         transport: RtspTransport::Udp,
         rtp: reorder.stats.clone(),
-        frames: depack.frames,
-        dropped_frames: depack.dropped_frames,
+        frames,
+        dropped_frames,
     })
 }
 
@@ -780,14 +848,13 @@ fn tcp_loop(
     ctl: &mut Control,
     has_get_parameter: bool,
     keepalive_url: &str,
-    codec: VideoCodec,
+    depack: &mut Depack,
     stop: &AtomicBool,
     on_frame: &mut dyn FnMut(VideoFrame),
 ) -> Result<RtspStats, RunErr> {
     ctl.stream.set_read_timeout(Some(Duration::from_millis(100))).ok();
 
     let mut reorder = Reorderer::new();
-    let mut depack = MjpegDepacketizer::new();
     let mut ordered: Vec<RtpPacket> = Vec::new();
     let mut chunk = [0u8; 8192];
     let started = Instant::now();
@@ -834,7 +901,7 @@ fn tcp_loop(
                     }
                 }
                 ctl.pending.drain(..4 + len);
-                deliver(&mut ordered, &mut depack, codec, on_frame);
+                deliver(&mut ordered, depack, on_frame);
                 continue;
             }
             match find_subslice(&ctl.pending, b"\r\n\r\n") {
@@ -870,11 +937,12 @@ fn tcp_loop(
         }
     }
 
+    let (frames, dropped_frames) = depack.totals();
     Ok(RtspStats {
         transport: RtspTransport::Tcp,
         rtp: reorder.stats.clone(),
-        frames: depack.frames,
-        dropped_frames: depack.dropped_frames,
+        frames,
+        dropped_frames,
     })
 }
 
@@ -941,13 +1009,16 @@ mod tests {
 
     #[test]
     fn picks_mjpeg_and_reports_unsupported() {
+        let all = [VideoCodec::Mjpeg, VideoCodec::H264, VideoCodec::H265];
         let s = sdp::parse("m=video 0 RTP/AVP 26\r\na=control:t1\r\n");
-        let (_, codec, pt) = pick_video(&s).unwrap();
+        let (_, codec, pt) = pick_video(&s, &all).unwrap();
         assert_eq!(codec, VideoCodec::Mjpeg);
         assert_eq!(pt, 26);
 
         let s = sdp::parse("m=video 0 RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\n");
-        let err = pick_video(&s).unwrap_err();
+        let (_, codec, _) = pick_video(&s, &all).unwrap();
+        assert_eq!(codec, VideoCodec::H264, "H264 picked when accepted");
+        let err = pick_video(&s, &[VideoCodec::Mjpeg]).unwrap_err();
         assert!(err.contains("H264"), "{err}");
     }
 
@@ -991,5 +1062,53 @@ mod tests {
             stats.dropped_frames,
         );
         assert!(frames > 0, "no MJPEG frames received");
+    }
+
+    /// Codec-agnostic live capture: writes every received frame/AU concatenated to
+    /// KITE_RTSP_DUMP — an H264/H265 dump is a decodable Annex-B stream, validated with
+    /// `ffmpeg -f h264 -i <dump> -f null NUL`.
+    #[test]
+    #[ignore]
+    fn dumps_access_units_from_a_real_server() {
+        let Ok(url) = std::env::var("KITE_RTSP_URL") else {
+            eprintln!("KITE_RTSP_URL not set — skipping");
+            return;
+        };
+        let transport = match std::env::var("KITE_RTSP_TRANSPORT").as_deref() {
+            Ok("tcp") => RtspTransport::Tcp,
+            Ok("udp") => RtspTransport::Udp,
+            _ => RtspTransport::Auto,
+        };
+        let cfg = RtspConfig { url, transport, ..Default::default() };
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+        {
+            let stop = stop.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_secs(8));
+                stop.store(true, Ordering::Relaxed);
+            });
+        }
+        let mut frames = 0u64;
+        let mut codec = None;
+        let mut dump: Vec<u8> = Vec::new();
+        let stats = run_rtsp(&cfg, &stop, &mut |f| {
+            frames += 1;
+            codec = Some(f.codec);
+            dump.extend_from_slice(&f.data);
+        })
+        .expect("stream");
+        eprintln!(
+            "codec={codec:?} frames={frames} bytes={} transport={:?} rtp: recv={} lost={} frames_dropped={}",
+            dump.len(),
+            stats.transport,
+            stats.rtp.received,
+            stats.rtp.lost,
+            stats.dropped_frames,
+        );
+        if let Ok(path) = std::env::var("KITE_RTSP_DUMP") {
+            std::fs::write(&path, &dump).expect("write dump");
+            eprintln!("dumped to {path}");
+        }
+        assert!(frames > 0, "no frames received");
     }
 }

@@ -14,6 +14,8 @@ pub struct MediaSection {
     pub control: Option<String>,
     /// (payload type, encoding name UPPERCASED, clock rate)
     pub rtpmap: Vec<(u8, String, u32)>,
+    /// (payload type, raw fmtp parameter string) — sprop parameter sets et al.
+    pub fmtp: Vec<(u8, String)>,
 }
 
 impl MediaSection {
@@ -22,6 +24,10 @@ impl MediaSection {
             .iter()
             .find(|(p, _, _)| *p == pt)
             .map(|(_, name, _)| name.as_str())
+    }
+
+    pub fn fmtp_of(&self, pt: u8) -> Option<&str> {
+        self.fmtp.iter().find(|(p, _)| *p == pt).map(|(_, f)| f.as_str())
     }
 }
 
@@ -66,6 +72,14 @@ pub fn parse(text: &str) -> Sdp {
                     }
                 }
             }
+        } else if let Some(rest) = line.strip_prefix("a=fmtp:") {
+            if let Some(m) = current.as_mut() {
+                if let Some((pt, params)) = rest.split_once(' ') {
+                    if let Ok(pt) = pt.parse::<u8>() {
+                        m.fmtp.push((pt, params.trim().to_string()));
+                    }
+                }
+            }
         }
     }
     if let Some(m) = current.take() {
@@ -87,6 +101,7 @@ mod tests {
                     a=control:*\r\n\
                     m=video 0 RTP/AVP 96\r\n\
                     a=rtpmap:96 H264/90000\r\n\
+                    a=fmtp:96 packetization-mode=1;sprop-parameter-sets=Zg==,aA==\r\n\
                     a=control:streamid=0\r\n\
                     m=audio 0 RTP/AVP 97\r\n\
                     a=rtpmap:97 mpeg4-generic/44100/2\r\n\
@@ -99,6 +114,7 @@ mod tests {
         assert_eq!(v.payload_types, vec![96]);
         assert_eq!(v.control.as_deref(), Some("streamid=0"));
         assert_eq!(v.encoding_of(96), Some("H264"));
+        assert!(v.fmtp_of(96).unwrap().contains("sprop-parameter-sets"));
         assert_eq!(sdp.media[1].encoding_of(97), Some("MPEG4-GENERIC"));
     }
 

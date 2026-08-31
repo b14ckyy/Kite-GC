@@ -18,13 +18,15 @@
 //!   headers the RFC strips (quant tables scaled from Q or taken inline, standard Annex-K
 //!   Huffman tables).
 //!
-//! P0 handles MJPEG only (P1 feeds it to `mjpeg_server` → `<img>`, zero native code on any
-//! platform). The H264 (RFC 6184) / HEVC (RFC 7798) depacketizers arrive with the Windows
-//! Media Foundation sink (P2.1). No audio — this is a GCS.
+//! MJPEG feeds `mjpeg_server` → `<img>` with zero native code on any platform (P1).
+//! H264 (RFC 6184, `h264`) and HEVC (RFC 7798, `h265`) are depacketized into Annex-B
+//! access units for the native decode sinks (P2.1+). No audio — this is a GCS.
 
 mod client;
+mod h264;
+mod h265;
 mod mjpeg;
 mod rtp;
 mod sdp;
 
-pub use client::{run_rtsp, RtspConfig, RtspTransport};
+pub use client::{run_rtsp, RtspConfig, RtspTransport, VideoCodec};

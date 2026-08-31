@@ -837,7 +837,7 @@ async function startKiteRtspPath(url: string, transport: RtspTransport): Promise
     logVideo('warn', `RTSP (native client) failed: ${message}`);
     // A source with no MJPEG track will not grow one by retrying — that is a hard stop until the
     // P2.1 H264/HEVC decode sinks. Everything else (unreachable, timeout) enters the loop.
-    if (message.includes('No MJPEG video track') || message.includes('No video track')) {
+    if (message.includes('video track')) {
       patch({ status: 'error', error: message, reconnecting: false, reconnectAttempt: 0 });
       return 'fatal';
     }
