@@ -645,6 +645,8 @@
     "rtspUrl": "RTSP URL",
     "nativeClient": "原生 RTSP 客户端（实验性）",
     "nativeClientHint": "Kite 内置的 RTSP 客户端——无需 MediaMTX 或 ffmpeg。目前仅支持 MJPEG 源；优先使用 UDP，自动回退到 TCP。",
+    "spikeBottom": "测试：WebView 之下",
+    "spikeTop": "测试：置顶（对照）",
     "rtspTransportHint": "传输：UDP（最低延迟，如无人机链路）、TCP 或自动（尝试两者）",
     "rtspAuto": "自动",
     "bufferLabel": "平滑缓冲（帧）",

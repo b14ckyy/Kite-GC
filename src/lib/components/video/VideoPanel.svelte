@@ -179,6 +179,36 @@
   // kind would add nothing and is not offered.
   const KINDS: VideoKind[] = isMobile ? ['camera', 'rtsp'] : ['camera', 'rtsp', 'native'];
 
+  // ── P2.1 hole-punch spike (dev-only, Windows — see MOBILE_RTSP.md) ────
+  // Strips every CSS background for 5 s and parks a magenta native child window at the
+  // preview rect: below the WebView (real test — visible only if transparency composits
+  // through) or on top (control). Removed once the native video sink lands.
+  const DEV = import.meta.env.DEV;
+  let spikeResult = $state('');
+  async function holepunchSpike(topmost: boolean): Promise<void> {
+    const el = document.querySelector('.vp-body .preview');
+    const r = el?.getBoundingClientRect() ?? new DOMRect(200, 200, 480, 270);
+    const s = window.devicePixelRatio || 1;
+    const style = document.createElement('style');
+    style.textContent =
+      '*, *::before, *::after { background: transparent !important; backdrop-filter: none !important; } ' +
+      'img, canvas, video { visibility: hidden !important; }';
+    document.head.appendChild(style);
+    setTimeout(() => style.remove(), 5000);
+    try {
+      spikeResult = await invoke<string>('video_holepunch_spike', {
+        x: Math.round(r.x * s),
+        y: Math.round(r.y * s),
+        w: Math.round(r.width * s),
+        h: Math.round(r.height * s),
+        topmost,
+        seconds: 5,
+      });
+    } catch (e) {
+      spikeResult = e instanceof Error ? e.message : String(e);
+    }
+  }
+
   // MediaMTX is only needed for the WebRTC path. A WebView without it (WebKitGTK builds with WebRTC
   // compiled out — Raspberry Pi OS among them) runs RTSP entirely on ffmpeg now, so demanding the
   // engine there would block a machine that already has everything it needs.
@@ -603,6 +633,16 @@
       </div>
       {#if $videoState.rtspNativeClient}
         <p class="hint">{$t('video.nativeClientHint')}</p>
+      {/if}
+      {#if DEV}
+        <!-- dev-only P2.1 spike triggers; gone once the native sink lands -->
+        <div class="field-row">
+          <Button variant="data" onclick={() => void holepunchSpike(false)}>{$t('video.spikeBottom')}</Button>
+          <Button variant="data" onclick={() => void holepunchSpike(true)}>{$t('video.spikeTop')}</Button>
+        </div>
+        {#if spikeResult}
+          <p class="hint">{spikeResult}</p>
+        {/if}
       {/if}
 
       <!-- Saved connections: single-line rows, selectable / editable / deletable (ADS-B-provider style). -->

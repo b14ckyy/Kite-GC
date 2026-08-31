@@ -286,6 +286,30 @@ pub fn video_rtsp_native_start(
     Ok(serde_json::json!({ "url": format!("http://127.0.0.1:{port}/"), "transcode": "copy" }))
 }
 
+/// DEV-ONLY (Windows): the P2.1 hole-punch spike — parks a magenta native child window at
+/// a rect inside the main window, below the WebView2 sibling (`topmost=false`, the real
+/// test) or on top (control). See `video::holepunch`. Release/other-OS builds refuse.
+#[tauri::command(async)]
+pub fn video_holepunch_spike(
+    app: AppHandle,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    topmost: bool,
+    seconds: u64,
+) -> Result<String, String> {
+    #[cfg(all(target_os = "windows", debug_assertions))]
+    {
+        crate::video::holepunch::spawn(&app, x, y, w, h, topmost, seconds)
+    }
+    #[cfg(not(all(target_os = "windows", debug_assertions)))]
+    {
+        let _ = (app, x, y, w, h, topmost, seconds);
+        Err("hole-punch spike is available in Windows dev builds only".into())
+    }
+}
+
 /// Stop the in-process native RTSP client if running. Idempotent.
 #[tauri::command(async)]
 pub fn video_rtsp_native_stop(

@@ -86,7 +86,19 @@ winreg = "0.52"
 
 [target.'cfg(target_os = "windows")'.dependencies.windows]
 version = "0.61"
-features = ["Gaming_Input", "Foundation_Collections"]
+features = [
+    "Gaming_Input",
+    "Foundation_Collections",
+    # Hole-punch spike / native video sink (P2.1): raw child windows under the WebView.
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_LibraryLoader",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 evdev = "0.13"

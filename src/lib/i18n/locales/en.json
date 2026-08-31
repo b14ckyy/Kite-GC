@@ -649,6 +649,8 @@
     "rtspTransportHint": "Transport: UDP (lowest latency, e.g. UAV-Link), TCP, or Auto (try both)",
     "nativeClient": "Native RTSP client (experimental)",
     "nativeClientHint": "Kite's own built-in RTSP client — needs no MediaMTX and no ffmpeg. MJPEG sources only for now; connects via UDP first with automatic TCP fallback.",
+    "spikeBottom": "Spike: below WebView",
+    "spikeTop": "Spike: on top (control)",
     "rtspAuto": "Auto",
     "rtspSave": "Save connection to the list",
     "bufferLabel": "Smoothing buffer (frames)",

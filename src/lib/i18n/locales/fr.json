@@ -636,6 +636,8 @@
     "rtspUrl": "URL RTSP",
     "nativeClient": "Client RTSP natif (expérimental)",
     "nativeClientHint": "Le client RTSP intégré de Kite — sans MediaMTX ni ffmpeg. Sources MJPEG uniquement pour l'instant ; connexion UDP d'abord avec repli TCP automatique.",
+    "spikeBottom": "Spike : sous la WebView",
+    "spikeTop": "Spike : au-dessus (contrôle)",
     "bufferLabel": "Tampon de lissage (images)",
     "bufferHint": "0 = latence minimale. Chaque cran ajoute une durée d'image de mise en mémoire tampon — lecture plus fluide sur les liaisons instables, au prix de la latence.",
     "rtspMobilePlaceholder": "RTSP n'est pas encore disponible sur cet appareil — le moteur de streaming ne peut pas fonctionner sur mobile ; une voie RTSP native à l'appareil reste à venir.",
