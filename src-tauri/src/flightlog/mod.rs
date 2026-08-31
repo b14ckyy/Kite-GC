@@ -18,4 +18,5 @@ pub mod timezone;
 pub mod tlog_logger;
 pub mod track_export;
 pub mod types;
+pub mod ulog;
 pub mod weather;

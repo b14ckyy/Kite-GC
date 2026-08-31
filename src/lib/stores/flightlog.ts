@@ -530,6 +530,20 @@ export async function importArdupilotLog(
   });
 }
 
+export async function importUlogLog(
+  filePath: string,
+  dbPath: string,
+  forceImport: boolean = false,
+  lang?: string,
+): Promise<BlackboxImportStatus> {
+  return invoke<BlackboxImportStatus>('flightlog_import_ulog', {
+    filePath,
+    dbPath: dbPath || undefined,
+    forceImport,
+    lang,
+  });
+}
+
 /** Result of parsing a recorded raw log (.rawmsp / .tlog) into the logbook (ADR-049). */
 export interface RawImportResult {
   imported: number;
