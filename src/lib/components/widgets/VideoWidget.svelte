@@ -17,6 +17,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { videoStream, videoState, bindVideoEl, setMapLocation, setWidgetRect, reportMjpegError } from '$lib/stores/video';
   import { canvasSink, mjpegSink } from '$lib/controllers/mjpegSink';
+  import { nativeSurface, activeNativeSurface } from '$lib/controllers/nativeVideo';
   import VideoReconnectOverlay from '$lib/components/video/VideoReconnectOverlay.svelte';
 
   let { width = 300, height = 150 }: { width?: number; height?: number } = $props();
@@ -69,10 +70,17 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <!-- svelte-ignore a11y_click_events_have_key_events -->
-<div bind:this={cardEl} class="widget-card" style="width:{width}px; height:{height}px;" ondblclick={swapHere}>
+<div bind:this={cardEl} class="widget-card" data-nv-clip style="width:{width}px; height:{height}px;" ondblclick={swapHere}>
   {#if mapHere}
     <!-- The map is overlaid here by +page (top-level). Keep an empty sized tile underneath. -->
     <div class="placeholder map-here"></div>
+  {:else if $videoState.status === 'live' && $videoState.nativeSink}
+    <!-- Native decode sink (hole punch): the video is a hardware layer BELOW the WebView; this
+         div is the transparent hole it shows through (the surface router clips the card + map
+         behind it). Only one surface at a time can hold the hole — see controllers/nativeVideo. -->
+    <div class="native-hole" class:armed={$activeNativeSurface === 'widget'} use:nativeSurface={'widget'}>
+      {#if $activeNativeSurface !== 'widget'}<span>{$t('video.sinkElsewhere')}</span>{/if}
+    </div>
   {:else if $videoState.status === 'live' && $videoState.mjpegUrl}
     <!-- Native / MJPEG feed (no MediaStream): drawn by the off-thread reader where the WebView
          allows it, otherwise the plain <img> multipart stream. -->
@@ -145,5 +153,24 @@
   }
   .placeholder.map-here {
     color: #555; /* faint — the map is drawn on top of this tile */
+  }
+  /* Native-sink hole: transparent while this tile holds the hardware video layer (the frame
+     border stays as the bezel), an opaque placeholder while another surface has it. */
+  .native-hole {
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    border-radius: 5px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #888;
+    font-size: 12px;
+    text-align: center;
+  }
+  .native-hole.armed {
+    background: transparent;
   }
 </style>

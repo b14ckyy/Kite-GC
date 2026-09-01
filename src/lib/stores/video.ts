@@ -29,6 +29,7 @@ import {
   validateSelection,
 } from '$lib/helpers/videoCapabilities';
 import { setMjpegBuffer, setMjpegSinkHandlers, startMjpegSink, stopMjpegSink } from '$lib/controllers/mjpegSink';
+import { startNativeSurfaceRouter, stopNativeSurfaceRouter } from '$lib/controllers/nativeVideo';
 
 export interface VideoDevice {
   deviceId: string;
@@ -95,6 +96,10 @@ export interface VideoState {
   rtspNativeClient: boolean;
   /** Active RTSP reader once live (native engine client vs ffmpeg fallback); runtime-only. */
   rtspEngine: RtspEngine;
+  /** Runtime-only: the in-process client decodes this feed natively (H264 → hole-punch
+   *  sink below the WebView). The DOM surfaces render a transparent hole instead of media —
+   *  see controllers/nativeVideo.ts. */
+  nativeSink: boolean;
   /** Runtime-only: true while the infinite RTSP auto-reconnect loop is running (link dropped/stalled). */
   reconnecting: boolean;
   /** Runtime-only: current reconnect attempt number, shown in the on-video overlay. */
@@ -296,6 +301,7 @@ const INITIAL: VideoState = {
   rtspConnections: boot.rtspConnections,
   rtspNativeClient: boot.rtspNativeClient,
   rtspEngine: null,
+  nativeSink: false,
   reconnecting: false,
   reconnectAttempt: 0,
   mjpegUrl: null,
@@ -810,18 +816,80 @@ async function startMjpegPath(url: string, requireCopy = false): Promise<boolean
   }
 }
 
-/** Stop the in-process native RTSP client (idempotent, fire-and-forget). */
+/** Stop the in-process native RTSP client (idempotent, fire-and-forget) and undo the
+ *  decode-sink surface state (hole clips, router, monitor) if that route was active. */
 function stopKiteRtsp(): void {
+  stopSinkMonitor();
+  stopNativeSurfaceRouter();
+  if (get(videoState).nativeSink) patch({ nativeSink: false });
   void invoke('video_rtsp_native_stop').catch(() => {});
 }
 
-/** Bring the feed up on Kite's own in-process RTSP client (MOBILE_RTSP.md P1): our RTSP/RTP stack
- *  reads the source itself (UDP first, automatic TCP fallback) and broadcasts the MJPEG on the same
- *  local multipart port the ffmpeg path uses — every sink and the reconnect wiring work unchanged.
+/** Presented-fps readout of the native decode sink (updated by the 1 Hz monitor below);
+ *  0 while that route isn't running. Consumed by the panel's info line. */
+export const nativeSinkFps = writable(0);
+
+/** Watch the native decode sink: picture size (→ aspect for the surfaces), the fps readout,
+ *  fatal decoder errors and a frame-stall — the sink has no WebRTC stats and no multipart
+ *  reader, so this poll is its only health signal besides the backend's ended event. */
+let sinkMonitor: ReturnType<typeof setInterval> | undefined;
+function startSinkMonitor(): void {
+  stopSinkMonitor();
+  let lastPresented = -1;
+  let lastChange = performance.now();
+  let lastPollAt = performance.now();
+  sinkMonitor = setInterval(() => {
+    void invoke<{ active: boolean; presented?: number; width?: number | null; height?: number | null; error?: string | null }>(
+      'video_rtsp_native_sink_stats',
+    )
+      .then((s) => {
+        const st = get(videoState);
+        if (!st.nativeSink || !st.enabled) return;
+        if (!s.active) return; // teardown race — the reconnect/stop path already runs
+        if (s.error) {
+          logVideo('warn', `native decode sink failed: ${s.error} — reconnecting`);
+          scheduleRtspReconnect();
+          return;
+        }
+        if (s.width && s.height) reportVideoSize(s.width, s.height);
+        const now = performance.now();
+        const presented = s.presented ?? 0;
+        if (presented !== lastPresented) {
+          if (lastPresented >= 0) {
+            nativeSinkFps.set(Math.max(0, (presented - lastPresented) / ((now - lastPollAt) / 1000)));
+          }
+          lastPresented = presented;
+          lastChange = now;
+        } else if (now - lastChange > RTSP_STALL_LIVE_MS) {
+          logVideo(
+            'warn',
+            `native decode sink stalled after ${((now - lastChange) / 1000).toFixed(1)}s without a new frame — reconnecting`,
+          );
+          scheduleRtspReconnect();
+        }
+        lastPollAt = now;
+      })
+      .catch(() => {});
+  }, 1000);
+}
+function stopSinkMonitor(): void {
+  if (sinkMonitor) {
+    clearInterval(sinkMonitor);
+    sinkMonitor = undefined;
+  }
+  nativeSinkFps.set(0);
+}
+
+/** Bring the feed up on Kite's own in-process RTSP client (MOBILE_RTSP.md): our RTSP/RTP stack
+ *  reads the source itself (UDP first, automatic TCP fallback). An MJPEG source is broadcast on
+ *  the same local multipart port the ffmpeg path uses — every sink and the reconnect wiring work
+ *  unchanged. An H264 source (Windows) decodes natively into the hole-punch sink below the
+ *  WebView; the surfaces then render a transparent hole and the surface router keeps the native
+ *  layer's rect in sync (controllers/nativeVideo.ts).
  *  Returns 'live', 'retry' (enter the reconnect loop) or 'fatal' (a retry cannot fix it). */
 async function startKiteRtspPath(url: string, transport: RtspTransport): Promise<'live' | 'retry' | 'fatal'> {
   try {
-    const res = await invoke<{ url: string; transcode: string }>('video_rtsp_native_start', {
+    const res = await invoke<{ mode?: string; url?: string; transcode: string }>('video_rtsp_native_start', {
       url,
       transport,
     });
@@ -830,13 +898,19 @@ async function startKiteRtspPath(url: string, transport: RtspTransport): Promise
       stopKiteRtsp();
       return 'live'; // not a failure — the user stopped it
     }
-    patch({ status: 'live', mjpegUrl: res.url, activeTranscode: res.transcode, error: null, rtspEngine: 'kite', reconnecting: false, reconnectAttempt: 0 });
+    if (res.mode === 'sink') {
+      patch({ status: 'live', mjpegUrl: null, nativeSink: true, activeTranscode: res.transcode, error: null, rtspEngine: 'kite', reconnecting: false, reconnectAttempt: 0 });
+      startNativeSurfaceRouter();
+      startSinkMonitor();
+      return 'live';
+    }
+    patch({ status: 'live', mjpegUrl: res.url ?? null, activeTranscode: res.transcode, error: null, rtspEngine: 'kite', reconnecting: false, reconnectAttempt: 0 });
     return 'live';
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     logVideo('warn', `RTSP (native client) failed: ${message}`);
-    // A source with no MJPEG track will not grow one by retrying — that is a hard stop until the
-    // P2.1 H264/HEVC decode sinks. Everything else (unreachable, timeout) enters the loop.
+    // A source whose codec we cannot take (an HEVC track until that decode path works) will not
+    // change by retrying — hard stop. Everything else (unreachable, timeout) enters the loop.
     if (message.includes('video track')) {
       patch({ status: 'error', error: message, reconnecting: false, reconnectAttempt: 0 });
       return 'fatal';
@@ -1322,9 +1396,16 @@ export async function startRtsp(opts?: { reconnect?: boolean }): Promise<void> {
  *  an error. Idempotent — every sink fires it, and the first one to arrive does the work. */
 export function reportMjpegError(): void {
   const st = get(videoState);
-  if (!st.enabled || !st.mjpegUrl) return;
+  // The backend's ended event covers the native decode sink too (its RTSP thread ending
+  // drops the broadcast sender either way), so a dead sink feed re-enters the loop here.
+  if (!st.enabled || (!st.mjpegUrl && !st.nativeSink)) return;
   if (st.kind === 'rtsp') {
-    logVideo('warn', `MJPEG image failed to load (${st.mjpegUrl}) — reconnecting`);
+    logVideo(
+      'warn',
+      st.mjpegUrl
+        ? `MJPEG image failed to load (${st.mjpegUrl}) — reconnecting`
+        : 'native video feed ended — reconnecting',
+    );
     rtspMjpegFailures++;
     scheduleRtspReconnect();
     return;

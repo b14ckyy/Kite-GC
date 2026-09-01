@@ -270,10 +270,12 @@ pub fn video_native_mjpeg_stop(mjpeg: State<'_, crate::video::MjpegServer>) -> R
 
 // ── Native RTSP client (Kite's own, in-process — MOBILE_RTSP.md P1) ───────────
 
-/// Start the in-process native RTSP client on `url` and serve its frames over the local
-/// multipart MJPEG port — no MediaMTX, no ffmpeg. MJPEG sources only until the P2.1 decode
-/// sinks; an H264/HEVC source fails with a message saying so. `transport`: udp | tcp |
-/// auto (UDP first, automatic TCP-interleaved fallback when no RTP arrives).
+/// Start the in-process native RTSP client on `url` — no MediaMTX, no ffmpeg. An MJPEG
+/// source is served over the local multipart MJPEG port (`mode: "mjpeg"` + `url`); an
+/// H264 source decodes natively into the hole-punch sink on Windows (`mode: "sink"`, no
+/// URL — the frontend cuts the CSS hole and syncs the rect via the sink commands below).
+/// An HEVC source fails with a message saying what the stream offers. `transport`:
+/// udp | tcp | auto (UDP first, automatic TCP-interleaved fallback when no RTP arrives).
 #[tauri::command(async)]
 pub fn video_rtsp_native_start(
     app: AppHandle,
@@ -281,9 +283,69 @@ pub fn video_rtsp_native_start(
     transport: String,
     native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
 ) -> Result<serde_json::Value, String> {
-    let port = native_rtsp.start(ended_hook(&app), &url, &transport)?;
-    // "copy" is the honest verdict: the frames pass through untouched, nothing transcodes.
-    Ok(serde_json::json!({ "url": format!("http://127.0.0.1:{port}/"), "transcode": "copy" }))
+    // The decode sink renders into a child window of the main window, below the WebView.
+    #[cfg(target_os = "windows")]
+    let parent = {
+        use tauri::Manager;
+        app.get_webview_window("main")
+            .and_then(|w| w.hwnd().ok())
+            .map(|h| h.0 as isize)
+    };
+    #[cfg(not(target_os = "windows"))]
+    let parent: Option<isize> = None;
+    match native_rtsp.start(ended_hook(&app), &url, &transport, parent)? {
+        crate::video::rtsp_native::Started::Mjpeg { port } => Ok(serde_json::json!({
+            "mode": "mjpeg",
+            "url": format!("http://127.0.0.1:{port}/"),
+            // "copy" is the honest verdict: the frames pass through untouched.
+            "transcode": "copy",
+        })),
+        crate::video::rtsp_native::Started::Sink => Ok(serde_json::json!({
+            // "none": nothing transcodes anywhere — AUs go straight into the HW decoder.
+            "mode": "sink",
+            "transcode": "none",
+        })),
+    }
+}
+
+/// Push the on-screen video rect (PHYSICAL px, main-window client coords) to the native
+/// decode sink. Cheap (an mpsc send); no-op while no sink runs.
+#[tauri::command]
+pub fn video_rtsp_native_sink_rect(
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
+) {
+    native_rtsp.sink_rect(x, y, w, h);
+}
+
+/// Show/hide the native decode sink's layer (no DOM surface displays the video right now).
+#[tauri::command]
+pub fn video_rtsp_native_sink_visible(
+    visible: bool,
+    native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
+) {
+    native_rtsp.sink_visible(visible);
+}
+
+/// Live counters of the native decode sink: `{active, presented, width, height, error}`.
+/// Polled by the frontend for aspect ratio, the fps readout and stall detection.
+#[tauri::command]
+pub fn video_rtsp_native_sink_stats(
+    native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
+) -> serde_json::Value {
+    match native_rtsp.sink_stats() {
+        Some((presented, size, error)) => serde_json::json!({
+            "active": true,
+            "presented": presented,
+            "width": size.map(|s| s.0),
+            "height": size.map(|s| s.1),
+            "error": error,
+        }),
+        None => serde_json::json!({ "active": false }),
+    }
 }
 
 /// DEV-ONLY (Windows): the P2.1 hole-punch spike — parks a magenta native child window at

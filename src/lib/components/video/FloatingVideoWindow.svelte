@@ -29,6 +29,7 @@
     reportMjpegError,
   } from '$lib/stores/video';
   import { canvasSink, mjpegSink } from '$lib/controllers/mjpegSink';
+  import { nativeSurface, activeNativeSurface } from '$lib/controllers/nativeVideo';
   import VideoReconnectOverlay from '$lib/components/video/VideoReconnectOverlay.svelte';
 
   // True while the map occupies this floating frame (so this window shows the map, not video).
@@ -264,14 +265,25 @@
   <!-- No z-index on the wrapper → no stacking context; layers compose with the top-level map. -->
   <div bind:this={floatWinEl} class="float-win" style="left:{left}px; top:{top}px; width:{width}px; height:{height}px;">
     <!-- frame background (behind) — border + shadow only; the video/map covers it (object-fit: cover) -->
-    <div class="fw-bg"></div>
+    <div class="fw-bg" class:nv-active={$activeNativeSurface === 'floating'}></div>
 
     <!-- content: the video. When the map is in this frame, it's rendered (top-level) by +page here
          instead, and the body is omitted. Double-click the video → the map jumps into this frame. -->
     {#if !mapHere}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <div class="fw-body" onpointerdown={onBodyPointerDown} ondblclick={() => setMapLocation('floating')}>
-        {#if $videoState.status === 'live' && $videoState.mjpegUrl}
+      <div
+        class="fw-body"
+        class:nv-active={$activeNativeSurface === 'floating'}
+        onpointerdown={onBodyPointerDown}
+        ondblclick={() => setMapLocation('floating')}
+      >
+        {#if $videoState.status === 'live' && $videoState.nativeSink}
+          <!-- Native decode sink (hole punch): the video is a hardware layer BELOW the WebView;
+               this div is the transparent hole it shows through. See controllers/nativeVideo. -->
+          <div class="native-hole" class:armed={$activeNativeSurface === 'floating'} use:nativeSurface={'floating'}>
+            {#if $activeNativeSurface !== 'floating'}<span>{$t('video.sinkElsewhere')}</span>{/if}
+          </div>
+        {:else if $videoState.status === 'live' && $videoState.mjpegUrl}
           <!-- Native / MJPEG feed (no MediaStream): drawn by the off-thread reader where the WebView
                allows it, otherwise the plain <img> multipart stream. -->
           {#if $canvasSink}
@@ -335,6 +347,29 @@
   }
   .fw-body:active {
     cursor: grabbing;
+  }
+  /* Native-sink hole: while this window holds the hardware video layer, both its own black body
+     and the frame background must stop painting (the native layer shows through transparent DOM). */
+  .fw-bg.nv-active,
+  .fw-body.nv-active {
+    background: transparent;
+  }
+  .native-hole {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #888;
+    font-size: 12px;
+    text-align: center;
+    background: #000;
+    /* Matches the frame's rounding — the surface router reads this radius and cuts the
+       hole with rounded corners, so the map behind caps the native layer's square edges. */
+    border-radius: 8px;
+  }
+  .native-hole.armed {
+    background: transparent;
   }
   .fw-body video,
   .fw-body img,

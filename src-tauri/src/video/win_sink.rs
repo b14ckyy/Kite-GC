@@ -757,11 +757,23 @@ impl SinkState {
 
 fn letterbox(in_w: u32, in_h: u32, out_w: u32, out_h: u32) -> RECT {
     if in_w == 0 || in_h == 0 || out_w == 0 || out_h == 0 {
-        return RECT { left: 0, top: 0, right: out_w as i32, bottom: out_h as i32 };
+        return RECT { left: 0, top: 0, right: out_w.max(1) as i32, bottom: out_h.max(1) as i32 };
     }
     let scale = (out_w as f64 / in_w as f64).min(out_h as f64 / in_h as f64);
-    let w = (in_w as f64 * scale) as i32;
-    let h = (in_h as f64 * scale) as i32;
+    // Never a zero-area dest rect: the sink starts on a 1×1 placeholder window until the
+    // frontend pushes the real surface rect, and VideoProcessorBlt rejects an empty
+    // destination outright (E_INVALIDARG — found by the rtsp_native H264 bench).
+    let mut w = ((in_w as f64 * scale).round() as i32).max(1);
+    let mut h = ((in_h as f64 * scale).round() as i32).max(1);
+    // The surfaces size themselves to the stream's aspect, so the fit lands within a
+    // rounding pixel of the full box — snap that, or the leftover backbuffer column shows
+    // as a hairline black edge on the picture (user-visible on the floating window).
+    if out_w as i32 - w <= 2 {
+        w = out_w as i32;
+    }
+    if out_h as i32 - h <= 2 {
+        h = out_h as i32;
+    }
     let x = (out_w as i32 - w) / 2;
     let y = (out_h as i32 - h) / 2;
     RECT { left: x, top: y, right: x + w, bottom: y + h }

@@ -50,6 +50,8 @@
     setNativeCodec,
   } from '$lib/stores/video';
   import { canvasSink, mjpegSink, mjpegStats } from '$lib/controllers/mjpegSink';
+  import { nativeSurface, activeNativeSurface } from '$lib/controllers/nativeVideo';
+  import { nativeSinkFps } from '$lib/stores/video';
   import {
     codecsFor,
     codecLabel,
@@ -307,6 +309,8 @@
   // WebKitGTK fires it once), hence the configured rate as a last resort.
   const fpsText = $derived.by(() => {
     const s = $videoState;
+    // Native decode sink: the backend counts what it actually presents (1 Hz poll).
+    if (s.nativeSink) return $nativeSinkFps ? $nativeSinkFps.toFixed(0) : '–';
     const drawn = $canvasSink ? ($mjpegStats?.fpsOut ?? 0) : mjpegFps;
     if (s.kind === 'native' && s.mjpegUrl) return drawn ? drawn.toFixed(0) : String(s.nativeSel.fps);
     const cur = s.mjpegUrl ? drawn : ($videoRtcStats?.decodeFps ?? measuredFps);
@@ -329,6 +333,8 @@
   const streamCodec = $derived.by(() => {
     const s = $videoState;
     if (s.kind !== 'rtsp' || s.status !== 'live') return null;
+    // The decode-sink route only ever selects H.264 (HEVC parked — MOBILE_RTSP.md).
+    if (s.nativeSink) return 'H.264';
     if (!s.mjpegUrl) return $videoRtcStats?.codec ?? null;
     return s.activeTranscode === 'copy' ? 'MJPEG' : 'H.264 → MJPEG';
   });
@@ -354,6 +360,10 @@
     | null => {
     const s = $videoState;
     if (s.status !== 'live') return null;
+    if (s.nativeSink) {
+      // The whole chain is hardware: RTP → depacketizer → MF decoder (DXVA) → D3D layer.
+      return { method: 'Kite RTSP client → native decode', transcode: null, transcodeHw: true, surfaceHw: true };
+    }
     if (s.mjpegUrl) {
       const mode = s.activeTranscode;
       const engine = mode ? TRANSCODE_LABEL[mode] : undefined;
@@ -391,8 +401,15 @@
 
 {#snippet body()}
   <div class="vp-body">
-    <div class="preview" style="aspect-ratio: {$videoState.aspect};">
-      {#if $videoState.mjpegUrl}
+    <div class="preview" class:nv-active={$activeNativeSurface === 'preview'} style="aspect-ratio: {$videoState.aspect};">
+      {#if $videoState.nativeSink && $videoState.status === 'live'}
+        <!-- Native decode sink (hole punch): the video is a hardware layer BELOW the WebView; this
+             div is the transparent hole it shows through. Lowest surface priority — a flight
+             surface (floating window / widget) takes the picture over this preview. -->
+        <div class="native-hole" class:armed={$activeNativeSurface === 'preview'} use:nativeSurface={'preview'}>
+          {#if $activeNativeSurface !== 'preview'}<span>{$t('video.sinkElsewhere')}</span>{/if}
+        </div>
+      {:else if $videoState.mjpegUrl}
         <!-- MJPEG multipart feed — off-thread reader where the WebView allows it, else an <img>
              whose per-part `load` carries both the frame count and the picture size. -->
         {#if $canvasSink}
@@ -814,6 +831,22 @@
   .preview canvas { width: 100%; height: 100%; object-fit: contain; display: block; will-change: transform; }
   .preview img.mirror,
   .preview canvas.mirror { transform: scaleX(-1); }
+  /* Native-sink hole: the preview stops painting while it holds the hardware video layer. */
+  .preview.nv-active { background: transparent; }
+  .native-hole {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #888;
+    font-size: 12px;
+    text-align: center;
+    background: #000;
+    /* Matches .preview's rounding — the surface router cuts the hole with this radius. */
+    border-radius: 6px;
+  }
+  .native-hole.armed { background: transparent; }
   .preview-placeholder {
     position: absolute;
     inset: 0;

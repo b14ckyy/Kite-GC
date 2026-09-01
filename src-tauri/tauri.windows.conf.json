@@ -9,6 +9,7 @@
         "dragDropEnabled": true,
         "decorations": false,
         "transparent": true,
+        "visible": false,
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,WebRtcHideLocalIpsWithMdns"
       }
     ]

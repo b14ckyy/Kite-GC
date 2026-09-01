@@ -80,6 +80,7 @@ use commands::video::{
     video_list_native_devices, video_probe_device,
     video_native_mjpeg_start, video_native_mjpeg_stop, video_rtsp_mjpeg_start,
     video_rtsp_native_start, video_rtsp_native_stop, video_holepunch_spike,
+    video_rtsp_native_sink_rect, video_rtsp_native_sink_visible, video_rtsp_native_sink_stats,
 };
 use video::{MediaMtx, MjpegServer};
 use commands::logging::{set_log_level, get_log_path, log_session_settings, log_frontend};
@@ -710,6 +711,9 @@ pub fn run() {
             video_rtsp_mjpeg_start,
             video_rtsp_native_start,
             video_rtsp_native_stop,
+            video_rtsp_native_sink_rect,
+            video_rtsp_native_sink_visible,
+            video_rtsp_native_sink_stats,
             video_holepunch_spike,
             video_native_mjpeg_stop,
             radar_configure,
