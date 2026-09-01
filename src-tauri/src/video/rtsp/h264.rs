@@ -70,6 +70,11 @@ pub struct H264Depacketizer {
     au_timestamp: u32,
     au_open: bool,
     au_damaged: bool,
+    /// The AU holds at least one VCL NAL (a slice, types 1..=5) — the marker bit only
+    /// closes an AU that actually carries picture data. Some servers set the marker on
+    /// prefix packets too (AUD/SEI — measured on obs-rtspserver's H265 twin), which
+    /// would split every frame in two; the timestamp change stays as the backstop.
+    au_has_vcl: bool,
     frag: Vec<u8>,
     frag_open: bool,
     last_seq: Option<u16>,
@@ -95,6 +100,7 @@ impl H264Depacketizer {
             au_timestamp: 0,
             au_open: false,
             au_damaged: false,
+            au_has_vcl: false,
             frag: Vec::new(),
             frag_open: false,
             last_seq: None,
@@ -186,7 +192,7 @@ impl H264Depacketizer {
             }
         }
 
-        if pkt.marker {
+        if pkt.marker && self.au_has_vcl {
             self.flush_au(&mut out);
         }
         out
@@ -195,6 +201,9 @@ impl H264Depacketizer {
     fn append_nal(&mut self, nal: &[u8]) {
         if nal.is_empty() {
             return;
+        }
+        if (1..=5).contains(&(nal[0] & 0x1F)) {
+            self.au_has_vcl = true;
         }
         self.au.extend_from_slice(&START_CODE);
         self.au.extend_from_slice(nal);
@@ -208,6 +217,7 @@ impl H264Depacketizer {
             self.au_damaged = true;
         }
         self.au_open = false;
+        self.au_has_vcl = false;
         if self.au.is_empty() {
             self.au_damaged = false;
             return;
@@ -254,6 +264,21 @@ mod tests {
         assert_eq!(base64_decode("Z2QA").unwrap(), vec![0x67, 0x64, 0x00]);
         assert_eq!(base64_decode("aO4=").unwrap(), vec![0x68, 0xEE]);
         assert!(base64_decode("!!").is_none());
+    }
+
+    #[test]
+    fn marker_on_a_prefix_packet_does_not_split_the_frame() {
+        // Some servers set the marker on prefix packets (SEI/AUD) too — the AU must stay
+        // open until picture data (a VCL NAL) arrived, else every frame splits in two.
+        let mut d = H264Depacketizer::new(None);
+        let sei = vec![0x06, 5, 1, 2, 3]; // SEI (type 6)
+        assert!(d.push(&pkt(1, 1000, true, sei.clone())).is_empty());
+        let slice = vec![0x41, 9, 9, 9]; // non-IDR slice (type 1)
+        assert_eq!(
+            d.push(&pkt(2, 1000, true, slice.clone())),
+            vec![annexb(&[&sei, &slice])]
+        );
+        assert_eq!(d.aus, 1);
     }
 
     #[test]

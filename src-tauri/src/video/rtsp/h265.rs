@@ -36,6 +36,11 @@ pub struct H265Depacketizer {
     au_timestamp: u32,
     au_open: bool,
     au_damaged: bool,
+    /// The AU holds at least one VCL NAL (a slice, type < 32) — the marker bit only
+    /// closes an AU that actually carries picture data. Some servers (obs-rtspserver
+    /// measured) set the marker on prefix packets too (AUD/SEI), which used to split
+    /// every frame into two "AUs"; the timestamp change stays as the boundary backstop.
+    au_has_vcl: bool,
     frag: Vec<u8>,
     frag_open: bool,
     last_seq: Option<u16>,
@@ -65,6 +70,7 @@ impl H265Depacketizer {
             au_timestamp: 0,
             au_open: false,
             au_damaged: false,
+            au_has_vcl: false,
             frag: Vec::new(),
             frag_open: false,
             last_seq: None,
@@ -151,7 +157,7 @@ impl H265Depacketizer {
             }
         }
 
-        if pkt.marker {
+        if pkt.marker && self.au_has_vcl {
             self.flush_au(&mut out);
         }
         out
@@ -160,6 +166,9 @@ impl H265Depacketizer {
     fn append_nal(&mut self, nal: &[u8]) {
         if nal.len() < 2 {
             return;
+        }
+        if nal_type(nal[0]) < 32 {
+            self.au_has_vcl = true;
         }
         self.au.extend_from_slice(&START_CODE);
         self.au.extend_from_slice(nal);
@@ -172,6 +181,7 @@ impl H265Depacketizer {
             self.au_damaged = true;
         }
         self.au_open = false;
+        self.au_has_vcl = false;
         if self.au.is_empty() {
             self.au_damaged = false;
             return;
@@ -218,6 +228,21 @@ mod tests {
         let mut n = vec![0x02, 0x01];
         n.extend_from_slice(data);
         n
+    }
+
+    #[test]
+    fn marker_on_a_prefix_packet_does_not_split_the_frame() {
+        // obs-rtspserver sets the marker on prefix packets (AUD/SEI) too — the AU must
+        // stay open until picture data (a VCL NAL) arrived, else every frame splits in two.
+        let mut d = H265Depacketizer::new(None);
+        let aud = vec![35u8 << 1, 0x01, 0x50]; // AUD (type 35)
+        assert!(d.push(&pkt(1, 90_000, true, aud.clone())).is_empty());
+        let slice = trail(&[9, 9, 9]);
+        assert_eq!(
+            d.push(&pkt(2, 90_000, true, slice.clone())),
+            vec![annexb(&[&aud, &slice])]
+        );
+        assert_eq!(d.aus, 1);
     }
 
     #[test]
