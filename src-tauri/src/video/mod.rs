@@ -23,6 +23,12 @@ pub mod win_sink;
 /// Android H264/HEVC MediaCodec sink for the same hole-punch surface (MOBILE_RTSP.md P2.2).
 #[cfg(target_os = "android")]
 pub mod android_sink;
+/// Linux GTK host for the hole-punch surface below the WebKitWebView (MOBILE_RTSP.md P2.3).
+#[cfg(target_os = "linux")]
+pub mod linux_host;
+/// Linux GStreamer H264/HEVC sink into that host (MOBILE_RTSP.md P2.3).
+#[cfg(target_os = "linux")]
+pub mod linux_sink;
 
 pub use mediamtx::MediaMtx;
 pub use mjpeg_server::MjpegServer;

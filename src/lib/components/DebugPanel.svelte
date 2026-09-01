@@ -18,7 +18,9 @@
   import { fcChannels } from "$lib/stores/rcMirror";
   import { boxName } from "$lib/helpers/inavModes";
   import { getPerf3dViewer, perf3dFps, perf3dForceContinuous, perf3dAttached } from "$lib/stores/perf3d";
-  import { videoState, videoRtcStats, nativeRtspStats, rtspBufferFrames } from "$lib/stores/video";
+  import { videoState, videoRtcStats, nativeRtspStats, rtspBufferFrames, debugLinuxHoleSpike } from "$lib/stores/video";
+  import { nativeHoleDebug } from "$lib/controllers/nativeVideo";
+  import { isLinux } from "$lib/platform";
   import NumberStepper from "$lib/components/NumberStepper.svelte";
   import { mjpegStats, uiJankMs, startJankProbe, stopJankProbe } from "$lib/controllers/mjpegSink";
 
@@ -26,6 +28,13 @@
 
   type Tab = 'msp' | 'mavlink' | 'alerts' | 'telemetry' | 'rc' | 'performance' | 'video';
   let tab = $state<Tab>('msp');
+
+  // Linux hole-punch spike (dev, MOBILE_RTSP.md P2.3 stage A) — coloured stand-in below the DOM hole.
+  let spikeOn = $state(false);
+  async function toggleSpike(): Promise<void> {
+    spikeOn = !spikeOn;
+    await debugLinuxHoleSpike(spikeOn);
+  }
 
   // ── 3D performance live-tuning (dev) — mutate the running Cesium scene to localise the
   // Linux/WebKitGTK bottleneck. Values are loaded from the live scene when the tab opens; each
@@ -1013,6 +1022,30 @@
       {/if}
       {#if !$videoRtcStats && !$mjpegStats && !$nativeRtspStats}
         <div class="perf-empty">{$t('debug.vidInactive')}</div>
+      {/if}
+      {#if import.meta.env.DEV && $nativeHoleDebug}
+        {@const hd = $nativeHoleDebug}
+        <div class="debug-stats stats-rows">
+          <div class="stat-group">
+            <span class="stat-label">{$t('debug.vidHole')}</span>
+            <span class="stat-value">{hd.id}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">r</span>
+            <span class="stat-value">{hd.radius}px</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">cut</span>
+            <span class="stat-value">{hd.cut}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">clip L/T/R/B</span>
+            <span class="stat-value">{hd.clip}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">by</span>
+            <span class="stat-value">{hd.by}</span>
+          </div>
+        </div>
+      {/if}
+      {#if import.meta.env.DEV && isLinux}
+        <button class="dbg-btn" onclick={toggleSpike}>{$t('debug.vidLinuxSpike')} {spikeOn ? '●' : '○'}</button>
       {/if}
     </div>
   {/if}

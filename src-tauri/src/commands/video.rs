@@ -382,3 +382,20 @@ pub fn video_rtsp_native_stop(
     native_rtsp.stop();
     Ok(())
 }
+
+/// Dev-only (Linux debug builds): put a coloured stand-in into the hole-punch host so the
+/// window transparency, hole geometry and scroll-clip can be verified without a decoder
+/// (MOBILE_RTSP.md P2.3 stage A). Elsewhere: not available.
+#[tauri::command]
+pub fn video_linux_hole_spike(on: bool) -> Result<(), String> {
+    #[cfg(all(target_os = "linux", debug_assertions))]
+    {
+        crate::video::linux_host::spike(on);
+        Ok(())
+    }
+    #[cfg(not(all(target_os = "linux", debug_assertions)))]
+    {
+        let _ = on;
+        Err("not available on this build".to_string())
+    }
+}
