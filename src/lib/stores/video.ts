@@ -21,7 +21,7 @@ import { writable, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { t } from 'svelte-i18n';
-import { isLinux } from '$lib/platform';
+import { isLinux, isAndroid } from '$lib/platform';
 import {
   type NativeDevice,
   type CaptureMode,
@@ -285,6 +285,10 @@ function savePrefs(): void {
 }
 
 const boot = loadPrefs();
+// Android has no MediaMTX/ffmpeg (sidecars don't ship on mobile) — the Kite RTSP client is the
+// ONLY route, not a choice. Forced here so every startRtsp() takes the kite path regardless of
+// what an old pref says; the panel hides the toggle there.
+if (isAndroid) boot.rtspNativeClient = true;
 
 const INITIAL: VideoState = {
   kind: boot.kind,

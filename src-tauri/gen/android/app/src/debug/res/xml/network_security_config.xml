@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug override (source-set precedence beats main/): `tauri android dev` loads the frontend
+     from the dev machine over plain http on the LAN, so debug builds keep cleartext fully open —
+     the same policy the old `usesCleartextTraffic=true` debug placeholder expressed. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

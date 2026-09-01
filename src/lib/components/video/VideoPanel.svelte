@@ -64,7 +64,7 @@
   import Button from '$lib/components/panel/Button.svelte';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import Toggle from '$lib/components/panel/Toggle.svelte';
-  import { isLinux, isMobile } from '$lib/platform';
+  import { isLinux, isMobile, isAndroid, isIOS } from '$lib/platform';
   import VideoReconnectOverlay from '$lib/components/video/VideoReconnectOverlay.svelte';
 
   let videoEl = $state<HTMLVideoElement | null>(null);
@@ -358,7 +358,7 @@
 {#snippet headerActions()}
   <Button
     variant={$videoState.enabled ? 'danger' : 'data'}
-    disabled={($videoState.kind === 'rtsp' && isMobile) || (!$videoState.enabled && $videoState.kind === 'rtsp' && needsEngine && engineChecked && !engineVer)}
+    disabled={($videoState.kind === 'rtsp' && isIOS) || (!$videoState.enabled && $videoState.kind === 'rtsp' && needsEngine && engineChecked && !engineVer)}
     onclick={toggleVideo}
   >
     {$videoState.enabled ? $t('video.stop') : $t('video.start')}
@@ -609,15 +609,19 @@
       </div>
 
       <!-- Experimental: Kite's own in-process RTSP client (MOBILE_RTSP.md) — no MediaMTX, no
-           ffmpeg. MJPEG on the multipart path; H.264/HEVC decode in hardware (Windows). -->
-      <div class="field-row" title={$t('video.nativeClientHint')}>
-        <Toggle
-          checked={$videoState.rtspNativeClient}
-          onchange={(c) => void setRtspNativeClient(c)}
-          id="vp-native-rtsp"
-        />
-        <span class="label">{$t('video.nativeClient')}</span>
-      </div>
+           ffmpeg. MJPEG on the multipart path; H.264/HEVC decode in hardware (Windows).
+           On Android it is the ONLY route (no sidecars on mobile) — forced on in the store,
+           nothing to toggle. -->
+      {#if !isAndroid}
+        <div class="field-row" title={$t('video.nativeClientHint')}>
+          <Toggle
+            checked={$videoState.rtspNativeClient}
+            onchange={(c) => void setRtspNativeClient(c)}
+            id="vp-native-rtsp"
+          />
+          <span class="label">{$t('video.nativeClient')}</span>
+        </div>
+      {/if}
 
       <!-- Saved connections: single-line rows, selectable / editable / deletable (ADS-B-provider style). -->
       {#if $videoState.rtspConnections.length}
@@ -670,9 +674,9 @@
         <NumberStepper bind:value={$rtspBufferFrames} min={0} max={3} step={1} />
       </div>
 
-      {#if isMobile}
-        <!-- RTSP is a placeholder on mobile: the engine cannot run there, and the device-native route
-             (ANDROID_SUPPORT.md §5b) is not built yet. No downloader, no start — just say so. -->
+      {#if isIOS}
+        <!-- RTSP is a placeholder on iOS only: the engine cannot run there, and the Kite-client
+             route arrives with MOBILE_RTSP P3. Android runs the Kite client (forced above). -->
         <div class="ffmpeg-box">
           <p class="hint">{$t('video.rtspMobilePlaceholder')}</p>
         </div>
