@@ -22,8 +22,11 @@
 // layer behind it shows the DESKTOP through the transparent app window (spike finding).
 //
 // Layers opt in: elements carrying `data-nv-clip` are clipped wherever they intersect the
-// hole (the unzoomed map layer, the video widget's card). The active surface's PanelShell
-// ancestor (`.ps`, glass + backdrop-filter) is picked up automatically for the panel preview.
+// hole (the unzoomed map layer). The active surface's PanelShell ancestor (`.ps`, glass +
+// backdrop-filter) is picked up automatically for the panel preview. The video widget's
+// card is deliberately NOT a clip target: per-frame clip churn on its backdrop-filtered
+// glass flickered during window resizes — the armed tile paints its bezel with ring-only
+// properties instead (see VideoWidget.svelte).
 // The page ground (`body`'s background) cannot be clipped directly — clip-path on `body`
 // would clip the whole app — so while the router runs, the body background moves onto an
 // injected fixed div behind everything, and THAT gets the hole.
@@ -56,7 +59,10 @@ let raf = 0;
 let lastRectKey = '';
 let lastVisible: boolean | null = null;
 let groundEl: HTMLDivElement | null = null;
-const clipped = new Set<HTMLElement>();
+/** Elements currently carrying a hole clip → the exact clip string applied. Writing style
+ *  only on change matters: a same-value write still invalidates style every frame, and on
+ *  backdrop-filtered layers that churn is visible. */
+const clipped = new Map<HTMLElement, string>();
 
 /** Svelte action: register `el` as a native-video surface candidate while it is mounted.
  *  Mount it only in the branch that would show the video (mirrors the MJPEG conditions). */
@@ -195,15 +201,17 @@ function applyClips(surfaceEl: HTMLElement, hole: DOMRect, radius: number): void
   for (const el of targets) {
     const path = holePath(el, hole, radius);
     if (path) {
-      el.style.clipPath = path;
-      clipped.add(el);
+      if (clipped.get(el) !== path) {
+        el.style.clipPath = path;
+        clipped.set(el, path);
+      }
     } else if (clipped.has(el)) {
       el.style.clipPath = '';
       clipped.delete(el);
     }
   }
   // Layers that left the target set (unmounted branch, panel closed) keep no stale clip.
-  for (const el of [...clipped]) {
+  for (const el of [...clipped.keys()]) {
     if (!targets.has(el)) {
       el.style.clipPath = '';
       clipped.delete(el);
@@ -212,7 +220,7 @@ function applyClips(surfaceEl: HTMLElement, hole: DOMRect, radius: number): void
 }
 
 function clearClips(): void {
-  for (const el of clipped) el.style.clipPath = '';
+  for (const el of clipped.keys()) el.style.clipPath = '';
   clipped.clear();
 }
 

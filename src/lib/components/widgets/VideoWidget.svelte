@@ -70,7 +70,18 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <!-- svelte-ignore a11y_click_events_have_key_events -->
-<div bind:this={cardEl} class="widget-card" data-nv-clip style="width:{width}px; height:{height}px;" ondblclick={swapHere}>
+<!-- Deliberately NOT a data-nv-clip target: the card has a backdrop-filter, and per-frame
+     clip-path churn on a backdrop-filtered element made the whole tile flicker during window
+     resizes (and stick invisible on a settled hairline overlap). While this tile holds the
+     native video, its glass is switched off and the bezel is painted by ring-only properties
+     (border + box-shadow) instead of a clipped background — nothing paints behind the hole. -->
+<div
+  bind:this={cardEl}
+  class="widget-card"
+  class:nv-armed={$activeNativeSurface === 'widget'}
+  style="width:{width}px; height:{height}px;"
+  ondblclick={swapHere}
+>
   {#if mapHere}
     <!-- The map is overlaid here by +page (top-level). Keep an empty sized tile underneath. -->
     <div class="placeholder map-here"></div>
@@ -172,5 +183,14 @@
   }
   .native-hole.armed {
     background: transparent;
+    /* Opaque ring in the card's 3 px padding gap — box-shadow paints only OUTSIDE the
+       border box, so the hole itself stays transparent. Replaces the card's glass. */
+    box-shadow: 0 0 0 3px rgba(30, 30, 30, 0.9);
+  }
+  /* While this tile holds the native video: no glass — the background would paint behind the
+     transparent hole, and clipping it (the old approach) flickered (see markup comment). */
+  .widget-card.nv-armed {
+    background: transparent;
+    backdrop-filter: none;
   }
 </style>
