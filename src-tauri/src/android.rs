@@ -17,6 +17,7 @@
 
 pub mod content;
 pub mod jvm;
+pub mod native_video;
 pub mod screen;
 pub mod storage;
 

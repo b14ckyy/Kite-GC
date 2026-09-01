@@ -75,6 +75,9 @@ tauri-plugin-window-state = "2"
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"
 ndk-context = "0.1"
+# MediaCodec hardware video decode + ANativeWindow for the native RTSP sink (MOBILE_RTSP P2.2):
+# the safe wrappers over the NDK's AMediaCodec/AMediaFormat C API (video/android_sink.rs).
+ndk = { version = "0.9", default-features = false, features = ["media", "api-level-30"] }
 
 # HID / joystick input for GCS RC control (docs/archive/MSP_RC_CONTROL.md). Native per-OS backends read
 # RAW axes/buttons/hats (no gamepad projection) so flight hardware / RC transmitters map correctly:

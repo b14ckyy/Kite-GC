@@ -37,6 +37,7 @@ class MainActivity : TauriActivity() {
     StorageAccess.init(this, folderPicker)
     BleSerial.init(this, blePermissions)
     ScreenLock.init(this)
+    NativeVideo.init(this)
 
     enableEdgeToEdge()
 
@@ -75,6 +76,12 @@ class MainActivity : TauriActivity() {
         }
       }
     })
+  }
+
+  /** Hand the WebView to the native-video host: it must go transparent while the hole-punch
+   *  video layer below it is visible (see NativeVideo). */
+  override fun onWebViewCreate(webView: android.webkit.WebView) {
+    NativeVideo.attachWebView(webView)
   }
 
   /**

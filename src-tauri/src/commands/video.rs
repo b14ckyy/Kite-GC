@@ -310,16 +310,23 @@ pub fn video_rtsp_native_start(
 }
 
 /// Push the on-screen video rect (PHYSICAL px, main-window client coords) to the native
-/// decode sink. Cheap (an mpsc send); no-op while no sink runs.
+/// decode sink: `x/y/w/h` is the surface's FULL box (video layout / aspect fit),
+/// `cx/cy/cw/ch` the VISIBLE part after scroll-container clipping — the sink cuts the
+/// video at that edge instead of shrinking it. Cheap; no-op while no sink runs.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn video_rtsp_native_sink_rect(
     x: i32,
     y: i32,
     w: i32,
     h: i32,
+    cx: i32,
+    cy: i32,
+    cw: i32,
+    ch: i32,
     native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
 ) {
-    native_rtsp.sink_rect(x, y, w, h);
+    native_rtsp.sink_rect(x, y, w, h, cx, cy, cw, ch);
 }
 
 /// Show/hide the native decode sink's layer (no DOM surface displays the video right now).

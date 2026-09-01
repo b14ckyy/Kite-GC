@@ -28,8 +28,17 @@ use std::time::{Duration, Instant};
 
 use super::mjpeg_server::{accept_loop, broadcast_loop, Client, EndedHook};
 use super::rtsp::{run_rtsp, LiveRtspStats, RtspConfig, RtspTransport, VideoCodec};
+#[cfg(target_os = "android")]
+use super::android_sink::AndroidVideoSink;
 #[cfg(target_os = "windows")]
 use super::win_sink::{SinkCodec, WinVideoSink};
+
+/// The per-OS decode sink behind the shared routing below — same method surface on both
+/// (start's signature differs and is branched at the one call site).
+#[cfg(target_os = "windows")]
+type PlatformSink = WinVideoSink;
+#[cfg(target_os = "android")]
+type PlatformSink = AndroidVideoSink;
 
 /// How long `start()` waits for the first frame: RTSP negotiation (incl. a possible 2 s
 /// UDP→TCP fallback) plus the first JPEG.
@@ -86,14 +95,14 @@ pub enum Started {
 }
 
 /// RTP 32-bit timestamp → monotonic 64-bit 90 kHz ticks for the sink's sample times.
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "android"))]
 #[derive(Default)]
 struct SinkTs {
     unwrapped: u64,
     last: Option<u32>,
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "android"))]
 impl SinkTs {
     fn unwrap(&mut self, ts: u32) -> u64 {
         if let Some(prev) = self.last {
@@ -110,10 +119,10 @@ pub struct NativeRtsp {
     /// The active decode sink, when the stream selected that route. Lives on `self` (not
     /// in `Running`) so the rect/visibility commands can reach it without teardown
     /// plumbing; cleared together with the stream.
-    #[cfg(target_os = "windows")]
-    sink: Arc<Mutex<Option<WinVideoSink>>>,
+    #[cfg(any(target_os = "windows", target_os = "android"))]
+    sink: Arc<Mutex<Option<PlatformSink>>>,
     /// Which codec the active sink decodes ("H.264"/"H.265"), for the start verdict.
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "android"))]
     sink_codec: Arc<Mutex<Option<&'static str>>>,
     /// Live counters of the running stream (fresh per start) — the Debug Monitor's feed.
     live: Mutex<Option<Arc<LiveRtspStats>>>,
@@ -172,7 +181,13 @@ impl NativeRtsp {
         } else {
             vec![VideoCodec::Mjpeg]
         };
-        #[cfg(not(target_os = "windows"))]
+        // Android needs no window handle — the sink reaches its SurfaceView host over JNI.
+        #[cfg(target_os = "android")]
+        let accept = {
+            let _ = parent_hwnd;
+            vec![VideoCodec::Mjpeg, VideoCodec::H264, VideoCodec::H265]
+        };
+        #[cfg(not(any(target_os = "windows", target_os = "android")))]
         let accept = {
             let _ = parent_hwnd;
             vec![VideoCodec::Mjpeg]
@@ -218,15 +233,15 @@ impl NativeRtsp {
         let rtsp = {
             let stop = stop.clone();
             let error_slot = error_slot.clone();
-            #[cfg(target_os = "windows")]
+            #[cfg(any(target_os = "windows", target_os = "android"))]
             let sink_slot = self.sink.clone();
-            #[cfg(target_os = "windows")]
+            #[cfg(any(target_os = "windows", target_os = "android"))]
             let sink_codec_slot = self.sink_codec.clone();
             thread::spawn(move || {
                 let mut first = true;
-                #[cfg(not(target_os = "windows"))]
+                #[cfg(not(any(target_os = "windows", target_os = "android")))]
                 let _ = &sink_first;
-                #[cfg(target_os = "windows")]
+                #[cfg(any(target_os = "windows", target_os = "android"))]
                 let mut sink_ts: Option<SinkTs> = None;
                 let stop_flag = stop.clone();
                 let result = run_rtsp(&cfg, &stop, &mut |frame| match frame.codec {
@@ -235,18 +250,28 @@ impl NativeRtsp {
                         first = false;
                         let _ = frame_tx.send(part);
                     }
-                    #[cfg(target_os = "windows")]
+                    #[cfg(any(target_os = "windows", target_os = "android"))]
                     VideoCodec::H264 | VideoCodec::H265 => {
                         if sink_ts.is_none() {
                             // First AU decides the route: bring the decode sink up. It
-                            // starts as a 1×1 child — invisible until the frontend cuts
+                            // starts as a 1×1 layer — invisible until the frontend cuts
                             // the CSS hole and pushes the real rect.
-                            let Some(parent) = parent_hwnd else { return };
-                            let (sink_codec, codec_name) = match frame.codec {
-                                VideoCodec::H265 => (SinkCodec::H265, "H.265"),
-                                _ => (SinkCodec::H264, "H.264"),
+                            let codec_name = match frame.codec {
+                                VideoCodec::H265 => "H.265",
+                                _ => "H.264",
                             };
-                            match WinVideoSink::start(parent, (0, 0, 1, 1), sink_codec) {
+                            #[cfg(target_os = "windows")]
+                            let started_sink = {
+                                let Some(parent) = parent_hwnd else { return };
+                                let sink_codec = match frame.codec {
+                                    VideoCodec::H265 => SinkCodec::H265,
+                                    _ => SinkCodec::H264,
+                                };
+                                WinVideoSink::start(parent, (0, 0, 1, 1), sink_codec)
+                            };
+                            #[cfg(target_os = "android")]
+                            let started_sink = AndroidVideoSink::start(frame.codec);
+                            match started_sink {
                                 Ok(sink) => {
                                     *sink_slot.lock().unwrap() = Some(sink);
                                     *sink_codec_slot.lock().unwrap() = Some(codec_name);
@@ -277,7 +302,7 @@ impl NativeRtsp {
                         }
                     }
                     // Not on the accept list — the client never selects such a track.
-                    #[cfg(not(target_os = "windows"))]
+                    #[cfg(not(any(target_os = "windows", target_os = "android")))]
                     _ => {}
                 });
                 match result {
@@ -325,7 +350,7 @@ impl NativeRtsp {
         };
         if let Some(mut msg) = failure {
             teardown(Running { stop, shutdown, rtsp, broadcast, accept });
-            #[cfg(target_os = "windows")]
+            #[cfg(any(target_os = "windows", target_os = "android"))]
             drop(self.sink.lock().unwrap().take());
             // The RTSP thread may have written the real reason while we were giving up.
             if let Some(e) = error_slot.lock().ok().and_then(|s| s.clone()) {
@@ -336,7 +361,7 @@ impl NativeRtsp {
         }
 
         let started = {
-            #[cfg(target_os = "windows")]
+            #[cfg(any(target_os = "windows", target_os = "android"))]
             {
                 if self.sink.lock().unwrap().is_some() {
                     Started::Sink {
@@ -346,7 +371,7 @@ impl NativeRtsp {
                     Started::Mjpeg { port }
                 }
             }
-            #[cfg(not(target_os = "windows"))]
+            #[cfg(not(any(target_os = "windows", target_os = "android")))]
             Started::Mjpeg { port }
         };
         match &started {
@@ -372,7 +397,7 @@ impl NativeRtsp {
             log::info!("[video] native RTSP client stopped");
         }
         // After the joins: the RTSP thread pushed into the sink, so it must be gone first.
-        #[cfg(target_os = "windows")]
+        #[cfg(any(target_os = "windows", target_os = "android"))]
         {
             drop(self.sink.lock().unwrap().take());
             *self.sink_codec.lock().unwrap() = None;
@@ -392,7 +417,7 @@ impl NativeRtsp {
             _ => None,
         };
         let sink = {
-            #[cfg(target_os = "windows")]
+            #[cfg(any(target_os = "windows", target_os = "android"))]
             {
                 self.sink.lock().unwrap().as_ref().map(|s| {
                     let size = s.picture_size();
@@ -405,7 +430,7 @@ impl NativeRtsp {
                     })
                 })
             }
-            #[cfg(not(target_os = "windows"))]
+            #[cfg(not(any(target_os = "windows", target_os = "android")))]
             None::<serde_json::Value>
         };
         Some(serde_json::json!({
@@ -423,50 +448,54 @@ impl NativeRtsp {
     }
 
     /// Forward the on-screen video rect (PHYSICAL px, main-window client coords) to the
-    /// active decode sink. No-op without one (MJPEG route, non-Windows, stopped).
-    pub fn sink_rect(&self, x: i32, y: i32, w: i32, h: i32) {
-        #[cfg(target_os = "windows")]
+    /// active decode sink: full box `x/y/w/h` for the video layout, visible part
+    /// `cx/cy/cw/ch` after scroll-container clipping — both sinks lay the video out in
+    /// the full box and CUT it at the visible edge (a scrolled panel crops the picture,
+    /// it never shrinks it). No-op without a sink (MJPEG route, other OS, stopped).
+    #[allow(clippy::too_many_arguments)]
+    pub fn sink_rect(&self, x: i32, y: i32, w: i32, h: i32, cx: i32, cy: i32, cw: i32, ch: i32) {
+        #[cfg(any(target_os = "windows", target_os = "android"))]
         if let Some(s) = self.sink.lock().unwrap().as_ref() {
-            s.set_rect(x, y, w, h);
+            s.set_rect(x, y, w, h, cx, cy, cw, ch);
         }
-        #[cfg(not(target_os = "windows"))]
-        let _ = (x, y, w, h);
+        #[cfg(not(any(target_os = "windows", target_os = "android")))]
+        let _ = (x, y, w, h, cx, cy, cw, ch);
     }
 
     /// Show/hide the decode sink's native layer (no DOM surface wants it right now).
     pub fn sink_visible(&self, visible: bool) {
-        #[cfg(target_os = "windows")]
+        #[cfg(any(target_os = "windows", target_os = "android"))]
         if let Some(s) = self.sink.lock().unwrap().as_ref() {
             s.set_visible(visible);
         }
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(not(any(target_os = "windows", target_os = "android")))]
         let _ = visible;
     }
 
     /// Smoothing-buffer depth for the decode sink (frames, 0 = present on decode).
     pub fn sink_buffer(&self, frames: u32) {
-        #[cfg(target_os = "windows")]
+        #[cfg(any(target_os = "windows", target_os = "android"))]
         if let Some(s) = self.sink.lock().unwrap().as_ref() {
             s.set_buffer(frames);
         }
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(not(any(target_os = "windows", target_os = "android")))]
         let _ = frames;
     }
 
     /// Horizontal mirror / 180° rotation of the decode sink's picture.
     pub fn sink_orient(&self, mirror: bool, rotate180: bool) {
-        #[cfg(target_os = "windows")]
+        #[cfg(any(target_os = "windows", target_os = "android"))]
         if let Some(s) = self.sink.lock().unwrap().as_ref() {
             s.set_orient(mirror, rotate180);
         }
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(not(any(target_os = "windows", target_os = "android")))]
         let _ = (mirror, rotate180);
     }
 
     /// `(frames_presented, picture_size, error)` of the active decode sink; `None` while
     /// no sink runs. The frontend polls this for aspect ratio, fps and stall detection.
     pub fn sink_stats(&self) -> Option<(u64, Option<(u32, u32)>, Option<String>)> {
-        #[cfg(target_os = "windows")]
+        #[cfg(any(target_os = "windows", target_os = "android"))]
         {
             self.sink
                 .lock()
@@ -474,7 +503,7 @@ impl NativeRtsp {
                 .as_ref()
                 .map(|s| (s.frames_presented(), s.picture_size(), s.error()))
         }
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(not(any(target_os = "windows", target_os = "android")))]
         None
     }
 }
@@ -606,7 +635,7 @@ mod tests {
             matches!(started, Started::Sink { .. }),
             "expected the H264 decode-sink route for this source"
         );
-        server.sink_rect(40, 40, 640, 400);
+        server.sink_rect(40, 40, 640, 400, 40, 40, 640, 400);
         std::thread::sleep(Duration::from_secs(6));
         let (presented, size, err) = server.sink_stats().expect("sink stats");
         eprintln!("presented={presented} size={size:?} err={err:?}");
