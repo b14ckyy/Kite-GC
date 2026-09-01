@@ -287,14 +287,14 @@
           <!-- Native / MJPEG feed (no MediaStream): drawn by the off-thread reader where the WebView
                allows it, otherwise the plain <img> multipart stream. -->
           {#if $canvasSink}
-            <canvas use:mjpegSink class:mirror={$videoState.mirror}></canvas>
+            <canvas use:mjpegSink class:mirror={$videoState.mirror} class:rot180={$videoState.rotate180}></canvas>
           {:else}
             <!-- svelte-ignore a11y_missing_attribute -->
-            <img src={$videoState.mjpegUrl} class:mirror={$videoState.mirror} onerror={reportMjpegError} />
+            <img src={$videoState.mjpegUrl} class:mirror={$videoState.mirror} class:rot180={$videoState.rotate180} onerror={reportMjpegError} />
           {/if}
         {:else if $videoState.status === 'live'}
           <!-- svelte-ignore a11y_media_has_caption -->
-          <video bind:this={videoEl} autoplay muted playsinline class:mirror={$videoState.mirror}></video>
+          <video bind:this={videoEl} autoplay muted playsinline class:mirror={$videoState.mirror} class:rot180={$videoState.rotate180}></video>
         {:else}
           <div class="fw-ph">{$videoState.status === 'starting' ? $t('video.starting') : $t('video.off')}</div>
         {/if}
@@ -386,6 +386,16 @@
   .fw-body img.mirror,
   .fw-body canvas.mirror {
     transform: scaleX(-1);
+  }
+  .fw-body video.rot180,
+  .fw-body img.rot180,
+  .fw-body canvas.rot180 {
+    transform: rotate(180deg);
+  }
+  .fw-body video.mirror.rot180,
+  .fw-body img.mirror.rot180,
+  .fw-body canvas.mirror.rot180 {
+    transform: scaleY(-1);
   }
   .fw-ph {
     position: absolute;

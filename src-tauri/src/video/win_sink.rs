@@ -21,11 +21,12 @@
 //! through the swapchain — never GDI — because the transparent Tauri window makes the DWM
 //! honour surface alpha.
 
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, Once};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use windows::core::Interface;
 use windows::core::w;
@@ -33,7 +34,7 @@ use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
 use windows::Win32::Graphics::Direct3D11::{
     D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Multithread, ID3D11Resource,
-    ID3D11Texture2D, ID3D11VideoContext, ID3D11VideoDevice, ID3D11VideoProcessor,
+    ID3D11Texture2D, ID3D11VideoContext, ID3D11VideoContext1, ID3D11VideoDevice, ID3D11VideoProcessor,
     ID3D11VideoProcessorEnumerator, ID3D11VideoProcessorInputView,
     ID3D11VideoProcessorOutputView, D3D11_BIND_DECODER, D3D11_CPU_ACCESS_WRITE,
     D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_VIDEO_SUPPORT, D3D11_MAPPED_SUBRESOURCE, D3D11_MAP_WRITE_DISCARD,
@@ -86,6 +87,12 @@ enum Cmd {
     Frame(Vec<u8>, u64),
     Rect(i32, i32, i32, i32),
     Visible(bool),
+    /// Smoothing-buffer depth in frames (0 = present on decode, the latency-first
+    /// default). See `SinkState::pump_queue`.
+    Buffer(u32),
+    /// Horizontal mirror / 180° rotation, pre-combined into the two flip axes the video
+    /// processor takes (mirror = flip-H; rotate180 = flip-H+flip-V; both = flip-V).
+    Orient { flip_h: bool, flip_v: bool },
     Stop,
 }
 
@@ -142,6 +149,17 @@ impl WinVideoSink {
 
     pub fn set_visible(&self, visible: bool) {
         let _ = self.tx.send(Cmd::Visible(visible));
+    }
+
+    /// Smoothing-buffer depth in frames (0 = present on decode). Capped small — the DXVA
+    /// decoder's surface pool is finite and held frames come out of it.
+    pub fn set_buffer(&self, frames: u32) {
+        let _ = self.tx.send(Cmd::Buffer(frames.min(3)));
+    }
+
+    /// Horizontal mirror / 180° rotation of the presented picture.
+    pub fn set_orient(&self, mirror: bool, rotate180: bool) {
+        let _ = self.tx.send(Cmd::Orient { flip_h: mirror != rotate180, flip_v: rotate180 });
     }
 
     pub fn frames_presented(&self) -> u64 {
@@ -233,8 +251,18 @@ fn run_sink(
             Ok(Cmd::Visible(v)) => unsafe {
                 let _ = ShowWindow(state.hwnd, if v { SW_SHOWNA } else { SW_HIDE });
             },
+            Ok(Cmd::Buffer(frames)) => state.buffer_frames = frames as usize,
+            Ok(Cmd::Orient { flip_h, flip_v }) => unsafe { state.set_orient(flip_h, flip_v) },
             Ok(Cmd::Stop) | Err(RecvTimeoutError::Disconnected) => break,
             Err(RecvTimeoutError::Timeout) => {}
+        }
+        // Paced presentation of buffered frames (no-op at depth 0 — those present on
+        // decode). Runs every loop pass, i.e. at worst every 5 ms.
+        if shared.error.lock().unwrap().is_none() {
+            if let Err(e) = unsafe { state.pump_queue(&shared) } {
+                log::warn!("[video] sink present error: {e}");
+                *shared.error.lock().unwrap() = Some(e);
+            }
         }
     }
 
@@ -279,6 +307,15 @@ struct SinkState {
     display: Option<(i32, i32, i32, i32)>,
     client: (i32, i32),
     sample_index: u64,
+    /// Decoded frames awaiting presentation (media time in 100 ns units). Only used when
+    /// `buffer_frames` > 0 — the default path presents on decode. Held samples come out
+    /// of the DXVA surface pool, which is why the depth is capped small.
+    queue: VecDeque<(IMFSample, i64)>,
+    buffer_frames: usize,
+    /// When + at which media time the last frame was presented — the pacing anchor.
+    last_present: Option<(Instant, i64)>,
+    flip_h: bool,
+    flip_v: bool,
 }
 
 impl SinkState {
@@ -366,6 +403,11 @@ impl SinkState {
                 display: None,
                 client: (rect.2.max(1), rect.3.max(1)),
                 sample_index: 0,
+                queue: VecDeque::new(),
+                buffer_frames: 0,
+                last_present: None,
+                flip_h: false,
+                flip_v: false,
             })
         }
     }
@@ -546,7 +588,12 @@ impl SinkState {
                 match result {
                     Ok(()) => {
                         if let Some(sample) = sample {
-                            self.render(&sample, shared)?;
+                            if self.buffer_frames == 0 && self.queue.is_empty() {
+                                self.render(&sample, shared)?;
+                            } else {
+                                let ts = sample.GetSampleTime().unwrap_or(0);
+                                self.queue.push_back((sample, ts));
+                            }
                         }
                     }
                     Err(e) if e.code() == MF_E_TRANSFORM_NEED_MORE_INPUT => return Ok(()),
@@ -668,6 +715,70 @@ impl SinkState {
                     info.dwFlags & MFT_OUTPUT_STREAM_PROVIDES_SAMPLES.0 as u32 != 0;
             }
             Ok(())
+        }
+    }
+
+    /// Paced presentation of buffered frames. Depth 0 presents on decode (`drain_outputs`)
+    /// and this is a no-op. With a depth: the queue is hard-capped at it (arrivals beyond
+    /// present immediately — latency stays bounded), and the front frame goes out when its
+    /// media-time distance from the previously presented one has elapsed on the wall
+    /// clock — arrival jitter inside the cushion no longer reaches presentation.
+    unsafe fn pump_queue(&mut self, shared: &Shared) -> Result<(), String> {
+        while self.queue.len() > self.buffer_frames {
+            self.present_front(shared)?;
+        }
+        if self.buffer_frames == 0 || self.queue.is_empty() {
+            return Ok(());
+        }
+        let ts = self.queue.front().map(|(_, t)| *t).unwrap_or(0);
+        let due = match self.last_present {
+            // Cap the pacing step: after a loss gap the media-time delta can be huge, and
+            // holding the recovered picture back would just add a second freeze.
+            Some((at, lts)) => {
+                at + Duration::from_nanos(((ts - lts).max(0) as u64) * 100)
+                    .min(Duration::from_millis(100))
+            }
+            None => Instant::now(),
+        };
+        if Instant::now() >= due {
+            self.present_front(shared)?;
+        }
+        Ok(())
+    }
+
+    unsafe fn present_front(&mut self, shared: &Shared) -> Result<(), String> {
+        let Some((sample, ts)) = self.queue.pop_front() else {
+            return Ok(());
+        };
+        unsafe { self.render(&sample, shared)? };
+        self.last_present = Some((Instant::now(), ts));
+        Ok(())
+    }
+
+    /// Horizontal/vertical flip of the presented picture (mirror / 180° rotation),
+    /// applied to the live video processor and re-applied whenever it is rebuilt.
+    unsafe fn set_orient(&mut self, flip_h: bool, flip_v: bool) {
+        if (flip_h, flip_v) == (self.flip_h, self.flip_v) {
+            return;
+        }
+        self.flip_h = flip_h;
+        self.flip_v = flip_v;
+        unsafe { self.apply_orient() };
+    }
+
+    unsafe fn apply_orient(&self) {
+        let Some((_, processor, _)) = &self.vp else { return };
+        // ID3D11VideoContext1 (D3D11.1, Win8+) — always present on the Win10+ targets.
+        if let Ok(ctx1) = self.video_context.cast::<ID3D11VideoContext1>() {
+            unsafe {
+                ctx1.VideoProcessorSetStreamMirror(
+                    processor,
+                    0,
+                    self.flip_h || self.flip_v,
+                    self.flip_h,
+                    self.flip_v,
+                );
+            }
         }
     }
 
@@ -812,6 +923,7 @@ impl SinkState {
                         .VideoProcessorSetStreamSourceRect(&processor, 0, true, Some(&src));
                 }
                 self.vp = Some((enumerator, processor, key));
+                self.apply_orient(); // a rebuilt processor starts unmirrored
             }
             let (enumerator, processor, _) = self.vp.as_ref().unwrap();
 

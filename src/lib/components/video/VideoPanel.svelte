@@ -25,6 +25,7 @@
     setVideoResolution,
     setCameraFps,
     setVideoMirror,
+    setVideoRotate180,
     setDisableHwAccel,
     setVideoKind,
     setRtspUrl,
@@ -180,40 +181,6 @@
   // devices (USB/OTG included) already arrive through the camera kind (getUserMedia), so the native
   // kind would add nothing and is not offered.
   const KINDS: VideoKind[] = isMobile ? ['camera', 'rtsp'] : ['camera', 'rtsp', 'native'];
-
-  // ── P2.1 hole-punch spike (dev-only, Windows — see MOBILE_RTSP.md) ────
-  // Strips every CSS background for 5 s and parks a magenta native child window at the
-  // preview rect: below the WebView (real test — visible only if transparency composits
-  // through) or on top (control). Removed once the native video sink lands.
-  const DEV = import.meta.env.DEV;
-  let spikeResult = $state('');
-  async function holepunchSpike(topmost: boolean): Promise<void> {
-    const el = document.querySelector('.vp-body .preview');
-    const r = el?.getBoundingClientRect() ?? new DOMRect(200, 200, 480, 270);
-    const s = window.devicePixelRatio || 1;
-    // Reveal the layers beneath — only for the below-variant; the control must show the
-    // app UNCHANGED (an opaque page over a working hole punch looks exactly like normal).
-    if (!topmost) {
-      const style = document.createElement('style');
-      style.textContent =
-        '*, *::before, *::after { background: transparent !important; backdrop-filter: none !important; } ' +
-        'img, canvas, video { visibility: hidden !important; }';
-      document.head.appendChild(style);
-      setTimeout(() => style.remove(), 5000);
-    }
-    try {
-      spikeResult = await invoke<string>('video_holepunch_spike', {
-        x: Math.round(r.x * s),
-        y: Math.round(r.y * s),
-        w: Math.round(r.width * s),
-        h: Math.round(r.height * s),
-        topmost,
-        seconds: 5,
-      });
-    } catch (e) {
-      spikeResult = e instanceof Error ? e.message : String(e);
-    }
-  }
 
   // MediaMTX is only needed for the WebRTC path. A WebView without it (WebKitGTK builds with WebRTC
   // compiled out — Raspberry Pi OS among them) runs RTSP entirely on ffmpeg now, so demanding the
@@ -412,13 +379,13 @@
         <!-- MJPEG multipart feed — off-thread reader where the WebView allows it, else an <img>
              whose per-part `load` carries both the frame count and the picture size. -->
         {#if $canvasSink}
-          <canvas use:mjpegSink class:mirror={$videoState.mirror}></canvas>
+          <canvas use:mjpegSink class:mirror={$videoState.mirror} class:rot180={$videoState.rotate180}></canvas>
         {:else}
           <!-- svelte-ignore a11y_missing_attribute -->
           <img
             src={$videoState.mjpegUrl}
             alt="Live video"
-            class:mirror={$videoState.mirror}
+            class:mirror={$videoState.mirror} class:rot180={$videoState.rotate180}
             onload={mjpegFrame}
             onerror={reportMjpegError}
           />
@@ -430,7 +397,7 @@
           autoplay
           muted
           playsinline
-          class:mirror={$videoState.mirror}
+          class:mirror={$videoState.mirror} class:rot180={$videoState.rotate180}
           class:hidden={$videoState.status !== 'live'}
           onloadedmetadata={(e) => reportVideoSize(e.currentTarget.videoWidth, e.currentTarget.videoHeight)}
           onerror={() => console.error('[video] element error', videoEl?.error?.code, videoEl?.error?.message)}
@@ -642,8 +609,8 @@
       </div>
 
       <!-- Experimental: Kite's own in-process RTSP client (MOBILE_RTSP.md) — no MediaMTX, no
-           ffmpeg. MJPEG sources only until the native decode sinks land (P2.1). -->
-      <div class="field-row">
+           ffmpeg. MJPEG on the multipart path; H.264/HEVC decode in hardware (Windows). -->
+      <div class="field-row" title={$t('video.nativeClientHint')}>
         <Toggle
           checked={$videoState.rtspNativeClient}
           onchange={(c) => void setRtspNativeClient(c)}
@@ -651,19 +618,6 @@
         />
         <span class="label">{$t('video.nativeClient')}</span>
       </div>
-      {#if $videoState.rtspNativeClient}
-        <p class="hint">{$t('video.nativeClientHint')}</p>
-      {/if}
-      {#if DEV}
-        <!-- dev-only P2.1 spike triggers; gone once the native sink lands -->
-        <div class="field-row">
-          <Button variant="data" onclick={() => void holepunchSpike(false)}>{$t('video.spikeBottom')}</Button>
-          <Button variant="data" onclick={() => void holepunchSpike(true)}>{$t('video.spikeTop')}</Button>
-        </div>
-        {#if spikeResult}
-          <p class="hint">{spikeResult}</p>
-        {/if}
-      {/if}
 
       <!-- Saved connections: single-line rows, selectable / editable / deletable (ADS-B-provider style). -->
       {#if $videoState.rtspConnections.length}
@@ -706,10 +660,11 @@
         </div>
       {/if}
 
-      <!-- Receive-buffer depth in frame times, applied live to the WebRTC receiver and persisted.
-           0 = minimal latency (engine default); each step trades one frame time of latency for
-           smoothing of arrival jitter. Expressed in frames so the same setting means the same
-           smoothing at 30 and 60 fps — the ms value is derived from the measured incoming rate. -->
+      <!-- Receive-buffer depth in frame times, applied live and persisted — to the WebRTC
+           receiver, the MJPEG reader's cushion, or the native decode sink's paced
+           presentation queue. 0 = minimal latency (present on arrival/decode); each step
+           trades one frame time of latency for smoothing of arrival jitter. Expressed in
+           frames so the same setting means the same smoothing at 30 and 60 fps. -->
       <div class="field buffer-row" title={$t('video.bufferHint')}>
         <span class="label">{$t('video.bufferLabel')}</span>
         <NumberStepper bind:value={$rtspBufferFrames} min={0} max={3} step={1} />
@@ -736,7 +691,7 @@
             {#if engineMsg}<p class="hint err">{engineMsg}</p>{/if}
           {/if}
         </div>
-      {:else if engineVer}
+      {:else if engineVer && !$videoState.rtspNativeClient}
         {#if $videoState.status === 'live' && $videoState.rtspEngine && !$videoState.mjpegUrl}
           <!-- Which reader the engine uses — a WebRTC-path question. The image path does not go
                through the engine at all, and the pipeline line above already names what it runs. -->
@@ -769,17 +724,26 @@
       <span class="label">{$t('video.mirror')}</span>
     </div>
 
-    <!-- Escape hatch: some driver/hardware combinations pass the backend probe but still misbehave on
-         a live feed. Hardware stays the default; this forces the software transcode. -->
     <div class="field-row">
-      <Toggle
-        checked={$videoState.disableHwAccel}
-        onchange={(c) => void setDisableHwAccel(c)}
-        id="vp-no-hwaccel"
-      />
-      <span class="label">{$t('video.disableHwAccel')}</span>
+      <Toggle checked={$videoState.rotate180} onchange={(c) => setVideoRotate180(c)} id="vp-rot180" />
+      <span class="label">{$t('video.rotate180')}</span>
     </div>
-    <p class="hint">{$t('video.disableHwAccelHint')}</p>
+
+    <!-- Escape hatch: some driver/hardware combinations pass the backend probe but still misbehave on
+         a live feed. Hardware stays the default; this forces the software transcode. It only steers
+         the ffmpeg transcode path — the native RTSP client decodes through the OS (Media Foundation),
+         where this switch has no say, so it is hidden there. -->
+    {#if !($videoState.kind === 'rtsp' && $videoState.rtspNativeClient)}
+      <div class="field-row">
+        <Toggle
+          checked={$videoState.disableHwAccel}
+          onchange={(c) => void setDisableHwAccel(c)}
+          id="vp-no-hwaccel"
+        />
+        <span class="label">{$t('video.disableHwAccel')}</span>
+      </div>
+      <p class="hint">{$t('video.disableHwAccelHint')}</p>
+    {/if}
   </div>
 {/snippet}
 
@@ -825,11 +789,17 @@
      dirtying shared layer tiles every frame on WebKitGTK. */
   .preview video { width: 100%; height: 100%; object-fit: contain; display: block; will-change: transform; }
   .preview video.mirror { transform: scaleX(-1); }
+  .preview video.rot180 { transform: rotate(180deg); }
+  .preview video.mirror.rot180 { transform: scaleY(-1); }
   .preview video.hidden { visibility: hidden; }
   .preview img,
   .preview canvas { width: 100%; height: 100%; object-fit: contain; display: block; will-change: transform; }
   .preview img.mirror,
   .preview canvas.mirror { transform: scaleX(-1); }
+  .preview img.rot180,
+  .preview canvas.rot180 { transform: rotate(180deg); }
+  .preview img.mirror.rot180,
+  .preview canvas.mirror.rot180 { transform: scaleY(-1); }
   /* Native-sink hole: the preview stops painting while it holds the hardware video layer. */
   .preview.nv-active { background: transparent; }
   .native-hole {

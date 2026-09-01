@@ -45,8 +45,12 @@ pub struct RtspConfig {
     pub first_packet_timeout: Duration,
     pub user_agent: String,
     /// Codecs the caller can consume — stream selection refuses sources offering none of
-    /// them (e.g. the MJPEG-only bridge until the native decode sinks land).
+    /// them (e.g. the MJPEG-only bridge on platforms without a native decode sink).
     pub accept: Vec<VideoCodec>,
+    /// Optional live-counter sink, published ~4×/s from the receive loop — the Debug
+    /// Monitor's data source. `run_rtsp`'s final `RtspStats` stays the authoritative
+    /// end-of-stream summary.
+    pub live: Option<std::sync::Arc<LiveRtspStats>>,
 }
 
 impl Default for RtspConfig {
@@ -58,8 +62,40 @@ impl Default for RtspConfig {
             first_packet_timeout: Duration::from_secs(2),
             user_agent: "Kite-GC".into(),
             accept: vec![VideoCodec::Mjpeg, VideoCodec::H264, VideoCodec::H265],
+            live: None,
         }
     }
+}
+
+/// Live counters of a running stream (atomics — read from any thread without touching the
+/// receive loop). Absolute totals since stream start; rate math is the consumer's job.
+#[derive(Debug, Default)]
+pub struct LiveRtspStats {
+    /// 0 = not streaming yet, 1 = UDP, 2 = TCP-interleaved.
+    pub transport: std::sync::atomic::AtomicU8,
+    pub rtp_received: std::sync::atomic::AtomicU64,
+    pub rtp_lost: std::sync::atomic::AtomicU64,
+    pub rtp_reordered: std::sync::atomic::AtomicU64,
+    pub rtp_late: std::sync::atomic::AtomicU64,
+    /// Complete frames/AUs delivered to the consumer.
+    pub frames: std::sync::atomic::AtomicU64,
+    /// Damaged frames/AUs dropped whole (loss policy).
+    pub frames_dropped: std::sync::atomic::AtomicU64,
+    /// Raw received bytes (RTP payloads incl. headers) — the link-bitrate proxy.
+    pub bytes: std::sync::atomic::AtomicU64,
+}
+
+fn publish_live(live: &LiveRtspStats, transport: u8, rtp: &RtpStats, depack: &Depack, bytes: u64) {
+    use std::sync::atomic::Ordering::Relaxed;
+    let (frames, dropped) = depack.totals();
+    live.transport.store(transport, Relaxed);
+    live.rtp_received.store(rtp.received, Relaxed);
+    live.rtp_lost.store(rtp.lost, Relaxed);
+    live.rtp_reordered.store(rtp.reordered, Relaxed);
+    live.rtp_late.store(rtp.late_dropped, Relaxed);
+    live.frames.store(frames, Relaxed);
+    live.frames_dropped.store(dropped, Relaxed);
+    live.bytes.store(bytes, Relaxed);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -799,6 +835,8 @@ fn udp_loop(
     let keepalive_every = (ctl.session_timeout / 2).max(Duration::from_secs(5));
     let mut last_keepalive = Instant::now();
     let mut last_rr = Instant::now();
+    let mut bytes: u64 = 0;
+    let mut last_live = Instant::now();
 
     while !stop.load(Ordering::Relaxed) {
         match rtp_sock.recv(&mut buf) {
@@ -807,6 +845,7 @@ fn udp_loop(
                     got_first = true;
                     log::info!("RTSP: first RTP packet after {} ms (UDP)", started.elapsed().as_millis());
                 }
+                bytes += n as u64;
                 if let Some(pkt) = rtp::parse(&buf[..n]) {
                     reorder.push(pkt, &mut ordered);
                     deliver(&mut ordered, depack, on_frame);
@@ -818,6 +857,13 @@ fn udp_loop(
                 }
             }
             Err(e) => return Err(RunErr::Msg(format!("RTP receive error: {e}"))),
+        }
+
+        if let Some(live) = &cfg.live {
+            if last_live.elapsed() >= Duration::from_millis(250) {
+                last_live = Instant::now();
+                publish_live(live, 1, &reorder.stats, depack, bytes);
+            }
         }
 
         while rtcp_sock.recv(&mut buf).is_ok() {} // sender reports — contents unused
@@ -862,6 +908,8 @@ fn tcp_loop(
     let mut got_first = false;
     let keepalive_every = (ctl.session_timeout / 2).max(Duration::from_secs(5));
     let mut last_keepalive = Instant::now();
+    let mut bytes: u64 = 0;
+    let mut last_live = Instant::now();
 
     while !stop.load(Ordering::Relaxed) {
         match ctl.stream.read(&mut chunk) {
@@ -872,6 +920,13 @@ fn tcp_loop(
             }
             Err(e) if is_timeout(&e) => {}
             Err(e) => return Err(RunErr::Msg(format!("RTSP read error: {e}"))),
+        }
+
+        if let Some(live) = &cfg.live {
+            if last_live.elapsed() >= Duration::from_millis(250) {
+                last_live = Instant::now();
+                publish_live(live, 2, &reorder.stats, depack, bytes);
+            }
         }
 
         // Consume every complete message in the buffer: `$`-framed RTP/RTCP, or inline
@@ -889,6 +944,7 @@ fn tcp_loop(
                     break;
                 }
                 if ctl.pending[1] == 0 {
+                    bytes += len as u64;
                     if let Some(pkt) = rtp::parse(&ctl.pending[4..4 + len]) {
                         if !got_first {
                             got_first = true;

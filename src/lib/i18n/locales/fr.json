@@ -639,8 +639,6 @@
     "sinkElsewhere": "La vidéo s'affiche sur une autre surface",
     "rtspUnicastRefused": "Le serveur refuse la diffusion unicast (RTSP 461) — p. ex. une source multicast uniquement. Vérifiez le réglage unicast/multicast du serveur.",
     "webrtcCodecUnsupported": "Le codec de ce flux ne peut pas transiter par WebRTC (p. ex. HEVC). Activez plutôt le client RTSP natif.",
-    "spikeBottom": "Spike : sous la WebView",
-    "spikeTop": "Spike : au-dessus (contrôle)",
     "bufferLabel": "Tampon de lissage (images)",
     "bufferHint": "0 = latence minimale. Chaque cran ajoute une durée d'image de mise en mémoire tampon — lecture plus fluide sur les liaisons instables, au prix de la latence.",
     "rtspMobilePlaceholder": "RTSP n'est pas encore disponible sur cet appareil — le moteur de streaming ne peut pas fonctionner sur mobile ; une voie RTSP native à l'appareil reste à venir.",
@@ -654,6 +652,7 @@
       "ffmpeg": "Flux : repli ffmpeg"
     },
     "mirror": "Miroir horizontal",
+    "rotate180": "Pivoter de 180° (caméra tête en bas)",
     "codec": "Codec",
     "floatingWindow": "Fenêtre flottante",
     "videoWindow": "Fenêtre vidéo (détacher)",
@@ -1722,7 +1721,15 @@
     "injLat": "Lat",
     "injLon": "Lon",
     "injAlt": "Alt m",
-    "injFromView": "Depuis le centre de la carte"
+    "injFromView": "Depuis le centre de la carte",
+    "vidNatTransport": "Transport",
+    "vidNatFrames": "Images reçues",
+    "vidNatRtp": "RTP reçus",
+    "vidNatReordered": "Réordonnés",
+    "vidNatLate": "En retard",
+    "vidNatPresented": "Présentées",
+    "vidNatCodec": "Codec",
+    "vidNatHint": "Le client RTSP propre à Kite. « Images reçues » compte ce que livre le dépaquetiseur (les unités d'accès H.264/HEVC peuvent arriver scindées — « Présentées » est la vraie cadence) ; « Perdues » compte les images entièrement rejetées après perte de paquets. RTP reçus/Perdus/Réordonnés/En retard viennent directement de la boucle de réception. Sur le chemin de décodage matériel, « Présentées » est ce que la couche D3D a réellement affiché."
   },
   "statusBar": {
     "debug": "Débogage"

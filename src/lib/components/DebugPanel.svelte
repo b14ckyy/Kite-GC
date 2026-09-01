@@ -18,7 +18,7 @@
   import { fcChannels } from "$lib/stores/rcMirror";
   import { boxName } from "$lib/helpers/inavModes";
   import { getPerf3dViewer, perf3dFps, perf3dForceContinuous, perf3dAttached } from "$lib/stores/perf3d";
-  import { videoState, videoRtcStats, rtspBufferFrames } from "$lib/stores/video";
+  import { videoState, videoRtcStats, nativeRtspStats, rtspBufferFrames } from "$lib/stores/video";
   import NumberStepper from "$lib/components/NumberStepper.svelte";
   import { mjpegStats, uiJankMs, startJankProbe, stopJankProbe } from "$lib/controllers/mjpegSink";
 
@@ -861,7 +861,9 @@
       <div class="debug-stats">
         <div class="stat-group">
           <span class="stat-label">{$t('debug.vidSource')}</span>
-          <span class="stat-value">{$videoState.kind}{$videoState.rtspEngine ? ` · ${$videoState.rtspEngine}` : ''}</span>
+          <!-- Historic internal value: rtspEngine 'native' means MediaMTX' own RTSP reader —
+               shown by its real name so it can't be confused with Kite's native client. -->
+          <span class="stat-value">{$videoState.kind}{$videoState.rtspEngine ? ` · ${{ native: 'MediaMTX', ffmpeg: 'ffmpeg', kite: 'Kite' }[$videoState.rtspEngine]}` : ''}</span>
           <span class="stat-sep">|</span>
           <span class="stat-label">{$t('debug.vidStatus')}</span>
           <span class="stat-value">{$videoState.status}</span>
@@ -962,7 +964,54 @@
         </div>
         <div class="perf-hint">{$t('debug.vidMjpegHint')}</div>
       {/if}
-      {#if !$videoRtcStats && !$mjpegStats}
+      {#if $nativeRtspStats}
+        {@const n = $nativeRtspStats}
+        <!-- Kite's own in-process RTSP client (both routes): transport + RTP health straight from
+             the receive loop, and the decode sink's presentation numbers when H.264/HEVC plays
+             natively. On the MJPEG route the reader block above carries the drawing side. -->
+        <div class="debug-stats stats-rows">
+          <div class="stat-group">
+            <span class="stat-label">{$t('debug.vidNatTransport')}</span>
+            <span class="stat-value">{n.transport ? n.transport.toUpperCase() : '—'}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.vidNatFrames')}</span>
+            <span class="stat-value">{n.framesPerSec.toFixed(1)}/s</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.vidDropped')}</span>
+            <span class="stat-value">{n.framesDropped}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.vidMjpegRate')}</span>
+            <span class="stat-value">{(n.kbps / 1000).toFixed(1)} Mbit/s</span>
+          </div>
+          <div class="stat-group">
+            <span class="stat-label">{$t('debug.vidNatRtp')}</span>
+            <span class="stat-value">{n.rtpReceived}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.vidLost')}</span>
+            <span class="stat-value">{n.rtpLost}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.vidNatReordered')}</span>
+            <span class="stat-value">{n.rtpReordered}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.vidNatLate')}</span>
+            <span class="stat-value">{n.rtpLate}</span>
+          </div>
+          {#if n.sink}
+            <div class="stat-group">
+              <span class="stat-label">{$t('debug.vidNatPresented')}</span>
+              <span class="stat-value">{n.sink.presentedFps.toFixed(1)} fps</span>
+              <span class="stat-sep">|</span>
+              <span class="stat-label">{$t('debug.vidSize')}</span>
+              <span class="stat-value">{n.sink.width ? `${n.sink.width}×${n.sink.height}` : '—'}</span>
+              <span class="stat-sep">|</span>
+              <span class="stat-label">{$t('debug.vidNatCodec')}</span>
+              <span class="stat-value">{n.sink.codec ?? '—'}</span>
+            </div>
+          {/if}
+        </div>
+        <div class="perf-hint">{$t('debug.vidNatHint')}</div>
+      {/if}
+      {#if !$videoRtcStats && !$mjpegStats && !$nativeRtspStats}
         <div class="perf-empty">{$t('debug.vidInactive')}</div>
       {/if}
     </div>

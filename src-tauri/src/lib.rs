@@ -79,8 +79,9 @@ use commands::video::{
     video_webrtc_stop,
     video_list_native_devices, video_probe_device,
     video_native_mjpeg_start, video_native_mjpeg_stop, video_rtsp_mjpeg_start,
-    video_rtsp_native_start, video_rtsp_native_stop, video_holepunch_spike,
-    video_rtsp_native_sink_rect, video_rtsp_native_sink_visible, video_rtsp_native_sink_stats,
+    video_rtsp_native_start, video_rtsp_native_stop,
+    video_rtsp_native_sink_rect, video_rtsp_native_sink_visible, video_rtsp_native_stats,
+    video_rtsp_native_sink_buffer, video_rtsp_native_sink_orient,
 };
 use video::{MediaMtx, MjpegServer};
 use commands::logging::{set_log_level, get_log_path, log_session_settings, log_frontend};
@@ -413,11 +414,6 @@ pub fn run() {
 
     builder
         .setup(|_app| {
-            // DEV-only P2.1 hole-punch auto spike (KITE_SPIKE_AUTO=top|bottom) — lets a
-            // screenshot loop drive the probe without clicking the panel buttons.
-            #[cfg(all(target_os = "windows", debug_assertions))]
-            video::holepunch::auto_spike_if_requested(_app.handle());
-
             // Android: record where app data actually landed, and flag any disagreement with Tauri's
             // own idea of it (see `android::log_resolved_dirs`).
             #[cfg(target_os = "android")]
@@ -713,8 +709,9 @@ pub fn run() {
             video_rtsp_native_stop,
             video_rtsp_native_sink_rect,
             video_rtsp_native_sink_visible,
-            video_rtsp_native_sink_stats,
-            video_holepunch_spike,
+            video_rtsp_native_stats,
+            video_rtsp_native_sink_buffer,
+            video_rtsp_native_sink_orient,
             video_native_mjpeg_stop,
             radar_configure,
             radar_set_center,

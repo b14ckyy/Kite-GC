@@ -20,9 +20,6 @@ pub mod rtsp_native;
 /// Windows H264/HEVC decode + render sink for the hole-punch surface (MOBILE_RTSP.md P2.1).
 #[cfg(target_os = "windows")]
 pub mod win_sink;
-/// DEV-only P2.1 hole-punch spike (see MOBILE_RTSP.md) — removed once the native sink lands.
-#[cfg(all(target_os = "windows", debug_assertions))]
-pub mod holepunch;
 
 pub use mediamtx::MediaMtx;
 pub use mjpeg_server::MjpegServer;

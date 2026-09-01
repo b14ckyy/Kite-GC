@@ -29,4 +29,4 @@ mod mjpeg;
 mod rtp;
 mod sdp;
 
-pub use client::{run_rtsp, RtspConfig, RtspTransport, VideoCodec};
+pub use client::{run_rtsp, LiveRtspStats, RtspConfig, RtspTransport, VideoCodec};

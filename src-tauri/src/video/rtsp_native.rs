@@ -27,7 +27,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use super::mjpeg_server::{accept_loop, broadcast_loop, Client, EndedHook};
-use super::rtsp::{run_rtsp, RtspConfig, RtspTransport, VideoCodec};
+use super::rtsp::{run_rtsp, LiveRtspStats, RtspConfig, RtspTransport, VideoCodec};
 #[cfg(target_os = "windows")]
 use super::win_sink::{SinkCodec, WinVideoSink};
 
@@ -115,6 +115,8 @@ pub struct NativeRtsp {
     /// Which codec the active sink decodes ("H.264"/"H.265"), for the start verdict.
     #[cfg(target_os = "windows")]
     sink_codec: Arc<Mutex<Option<&'static str>>>,
+    /// Live counters of the running stream (fresh per start) — the Debug Monitor's feed.
+    live: Mutex<Option<Arc<LiveRtspStats>>>,
 }
 
 struct Running {
@@ -176,6 +178,9 @@ impl NativeRtsp {
             vec![VideoCodec::Mjpeg]
         };
 
+        let live = Arc::new(LiveRtspStats::default());
+        *self.live.lock().unwrap() = Some(live.clone());
+
         let cfg = RtspConfig {
             url: url.to_string(),
             transport: match transport {
@@ -184,6 +189,7 @@ impl NativeRtsp {
                 _ => RtspTransport::Auto,
             },
             accept,
+            live: Some(live),
             ..Default::default()
         };
 
@@ -371,6 +377,49 @@ impl NativeRtsp {
             drop(self.sink.lock().unwrap().take());
             *self.sink_codec.lock().unwrap() = None;
         }
+        *self.live.lock().unwrap() = None;
+    }
+
+    /// Snapshot of the running stream's live counters for the Debug Monitor: the client
+    /// side always, plus the decode sink's numbers when that route is active. `None`
+    /// while nothing runs.
+    pub fn debug_stats(&self) -> Option<serde_json::Value> {
+        let live = self.live.lock().unwrap().as_ref().cloned()?;
+        use std::sync::atomic::Ordering::Relaxed;
+        let transport = match live.transport.load(Relaxed) {
+            1 => Some("udp"),
+            2 => Some("tcp"),
+            _ => None,
+        };
+        let sink = {
+            #[cfg(target_os = "windows")]
+            {
+                self.sink.lock().unwrap().as_ref().map(|s| {
+                    let size = s.picture_size();
+                    serde_json::json!({
+                        "presented": s.frames_presented(),
+                        "width": size.map(|v| v.0),
+                        "height": size.map(|v| v.1),
+                        "error": s.error(),
+                        "codec": *self.sink_codec.lock().unwrap(),
+                    })
+                })
+            }
+            #[cfg(not(target_os = "windows"))]
+            None::<serde_json::Value>
+        };
+        Some(serde_json::json!({
+            "active": true,
+            "transport": transport,
+            "rtpReceived": live.rtp_received.load(Relaxed),
+            "rtpLost": live.rtp_lost.load(Relaxed),
+            "rtpReordered": live.rtp_reordered.load(Relaxed),
+            "rtpLate": live.rtp_late.load(Relaxed),
+            "frames": live.frames.load(Relaxed),
+            "framesDropped": live.frames_dropped.load(Relaxed),
+            "bytes": live.bytes.load(Relaxed),
+            "sink": sink,
+        }))
     }
 
     /// Forward the on-screen video rect (PHYSICAL px, main-window client coords) to the
@@ -392,6 +441,26 @@ impl NativeRtsp {
         }
         #[cfg(not(target_os = "windows"))]
         let _ = visible;
+    }
+
+    /// Smoothing-buffer depth for the decode sink (frames, 0 = present on decode).
+    pub fn sink_buffer(&self, frames: u32) {
+        #[cfg(target_os = "windows")]
+        if let Some(s) = self.sink.lock().unwrap().as_ref() {
+            s.set_buffer(frames);
+        }
+        #[cfg(not(target_os = "windows"))]
+        let _ = frames;
+    }
+
+    /// Horizontal mirror / 180° rotation of the decode sink's picture.
+    pub fn sink_orient(&self, mirror: bool, rotate180: bool) {
+        #[cfg(target_os = "windows")]
+        if let Some(s) = self.sink.lock().unwrap().as_ref() {
+            s.set_orient(mirror, rotate180);
+        }
+        #[cfg(not(target_os = "windows"))]
+        let _ = (mirror, rotate180);
     }
 
     /// `(frames_presented, picture_size, error)` of the active decode sink; `None` while

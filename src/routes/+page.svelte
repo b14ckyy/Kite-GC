@@ -2744,7 +2744,7 @@
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <canvas
             class="map-video"
-            class:mirror={$videoState.mirror}
+            class:mirror={$videoState.mirror} class:rot180={$videoState.rotate180}
             use:mjpegSink
             ondblclick={() => setMapLocation('main')}
           ></canvas>
@@ -2753,7 +2753,7 @@
           <!-- svelte-ignore a11y_missing_attribute -->
           <img
             class="map-video"
-            class:mirror={$videoState.mirror}
+            class:mirror={$videoState.mirror} class:rot180={$videoState.rotate180}
             src={$videoState.mjpegUrl}
             ondblclick={() => setMapLocation('main')}
             onerror={reportMjpegError}
@@ -2764,7 +2764,7 @@
         <!-- svelte-ignore a11y_media_has_caption -->
         <video
           class="map-video"
-          class:mirror={$videoState.mirror}
+          class:mirror={$videoState.mirror} class:rot180={$videoState.rotate180}
           bind:this={mapVideoEl}
           autoplay
           muted
@@ -3351,6 +3351,12 @@
   }
   .map-video.mirror {
     transform: scaleX(-1);
+  }
+  .map-video.rot180 {
+    transform: rotate(180deg);
+  }
+  .map-video.mirror.rot180 {
+    transform: scaleY(-1);
   }
   /* PiP source: rendered + playing but visually out of the way (must not be
      display:none, or it produces no frames for Picture-in-Picture). */

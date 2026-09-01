@@ -331,46 +331,40 @@ pub fn video_rtsp_native_sink_visible(
     native_rtsp.sink_visible(visible);
 }
 
-/// Live counters of the native decode sink: `{active, presented, width, height, error}`.
-/// Polled by the frontend for aspect ratio, the fps readout and stall detection.
+/// Smoothing-buffer depth for the native decode sink (frames, 0 = present on decode —
+/// the latency-first default). Shares the panel's "Smoothing buffer" stepper with the
+/// WebRTC/MJPEG paths; no-op while no sink runs.
 #[tauri::command]
-pub fn video_rtsp_native_sink_stats(
+pub fn video_rtsp_native_sink_buffer(
+    frames: u32,
     native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
-) -> serde_json::Value {
-    match native_rtsp.sink_stats() {
-        Some((presented, size, error)) => serde_json::json!({
-            "active": true,
-            "presented": presented,
-            "width": size.map(|s| s.0),
-            "height": size.map(|s| s.1),
-            "error": error,
-        }),
-        None => serde_json::json!({ "active": false }),
-    }
+) {
+    native_rtsp.sink_buffer(frames);
 }
 
-/// DEV-ONLY (Windows): the P2.1 hole-punch spike — parks a magenta native child window at
-/// a rect inside the main window, below the WebView2 sibling (`topmost=false`, the real
-/// test) or on top (control). See `video::holepunch`. Release/other-OS builds refuse.
-#[tauri::command(async)]
-pub fn video_holepunch_spike(
-    app: AppHandle,
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
-    topmost: bool,
-    seconds: u64,
-) -> Result<String, String> {
-    #[cfg(all(target_os = "windows", debug_assertions))]
-    {
-        crate::video::holepunch::spawn(&app, x, y, w, h, topmost, seconds)
-    }
-    #[cfg(not(all(target_os = "windows", debug_assertions)))]
-    {
-        let _ = (app, x, y, w, h, topmost, seconds);
-        Err("hole-punch spike is available in Windows dev builds only".into())
-    }
+/// Horizontal mirror / 180° rotation of the native decode sink's picture (the DOM sinks
+/// do this with a CSS transform, which cannot touch the native layer).
+#[tauri::command]
+pub fn video_rtsp_native_sink_orient(
+    mirror: bool,
+    rotate180: bool,
+    native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
+) {
+    native_rtsp.sink_orient(mirror, rotate180);
+}
+
+/// Live counters of the running native RTSP stream: client side (transport, RTP
+/// received/lost/reordered/late, frames/dropped, bytes) plus the decode sink's numbers
+/// (`sink: {presented, width, height, error, codec}`) when that route is active.
+/// `{active: false}` while nothing runs. Polled 1 Hz by the frontend for the Debug
+/// Monitor, the fps readout, aspect ratio and sink stall detection.
+#[tauri::command]
+pub fn video_rtsp_native_stats(
+    native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
+) -> serde_json::Value {
+    native_rtsp
+        .debug_stats()
+        .unwrap_or_else(|| serde_json::json!({ "active": false }))
 }
 
 /// Stop the in-process native RTSP client if running. Idempotent.
