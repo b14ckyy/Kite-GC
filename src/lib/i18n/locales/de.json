@@ -648,7 +648,7 @@
     "rtspUrl": "RTSP-URL",
     "rtspTransportHint": "Transport: UDP (niedrigste Latenz, z. B. UAV-Link), TCP oder Auto (beide versuchen)",
     "nativeClient": "Nativer RTSP-Client (experimentell)",
-    "nativeClientHint": "Kites eigener eingebauter RTSP-Client — benötigt kein MediaMTX und kein ffmpeg. MJPEG-, H.264- und HEVC-Quellen (H.264/HEVC werden in Hardware dekodiert, Windows); verbindet zuerst per UDP mit automatischem TCP-Fallback.",
+    "nativeClientHint": "Kites eigener integrierter RTSP-Client — braucht weder MediaMTX noch ffmpeg. MJPEG-, H.264- und HEVC-Quellen (H.264/HEVC-Dekodierung in Hardware auf Windows, Android und Linux); verbindet zuerst per UDP mit automatischem TCP-Fallback.",
     "sinkElsewhere": "Video läuft auf einer anderen Fläche",
     "rtspUnicastRefused": "Der Server verweigert Unicast-Streaming (RTSP 461) — z. B. eine reine Multicast-Quelle. Prüfe die Unicast/Multicast-Einstellung des Servers.",
     "webrtcCodecUnsupported": "Der Codec dieses Streams kann nicht über WebRTC übertragen werden (z. B. HEVC). Aktiviere stattdessen den nativen RTSP-Client.",

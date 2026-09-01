@@ -644,7 +644,7 @@
     "auto": "Авто",
     "rtspUrl": "RTSP URL",
     "nativeClient": "Собствен RTSP клиент (експериментално)",
-    "nativeClientHint": "Вграденият RTSP клиент на Kite — не изисква MediaMTX или ffmpeg. MJPEG, H.264 и HEVC източници (H.264/HEVC се декодират хардуерно, Windows); първо UDP с автоматичен TCP резервен вариант.",
+    "nativeClientHint": "Собственият вграден RTSP клиент на Kite — не изисква MediaMTX или ffmpeg. MJPEG, H.264 и HEVC източници (хардуерно декодиране на H.264/HEVC под Windows, Android и Linux); свързва се първо по UDP с автоматичен TCP резервен вариант.",
     "sinkElsewhere": "Видеото се показва на друга повърхност",
     "rtspUnicastRefused": "Сървърът отказва unicast поточно предаване (RTSP 461) — напр. източник само с multicast. Проверете настройката unicast/multicast на сървъра.",
     "webrtcCodecUnsupported": "Кодекът на този поток не може да се пренася през WebRTC (напр. HEVC). Активирайте вместо това собствения RTSP клиент.",
