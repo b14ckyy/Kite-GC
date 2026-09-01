@@ -11,9 +11,12 @@
 //  - continuous: follows the OS location API live; the marker only moves on a > 20 m change (anti-jitter).
 
 import { writable, get } from 'svelte/store';
+import { invoke } from '@tauri-apps/api/core';
 import { settings, type GcsMode } from '$lib/stores/settings';
 import { userGeoLocation, userGeoAccuracyM, type LatLon } from '$lib/helpers/userLocation';
+import { videoState } from '$lib/stores/video';
 import { haversineDistance } from '$lib/utils/geo';
+import { isAndroid } from '$lib/platform';
 
 /** Current GCS position, or null (mode off / not yet resolved). */
 export const gcsLocation = writable<LatLon | null>(null);
@@ -50,8 +53,23 @@ function recompute() {
   }
 }
 
+/** True while continuous updates are paused for a running RTSP stream over Wi-Fi (Android):
+ *  each fused-location fix triggers a Wi-Fi scan (~every 10 s), every scan takes the radio
+ *  off-channel, and the resulting RTP loss bursts corrupt the video until the next keyframe
+ *  (measured on the Teclast M11). The marker freezes at its last position and the watch
+ *  resumes the moment the stream stops. Streams over cellular/Ethernet are unaffected. */
+let pausedForVideo = false;
+
+function setPausedForVideo(on: boolean) {
+  if (pausedForVideo === on) return;
+  pausedForVideo = on;
+  console.log(`[gcs] continuous location updates ${on ? 'paused (RTSP over Wi-Fi)' : 'resumed'}`);
+  applyGcsMode(get(settings).gcsMode);
+}
+
 function startContinuous() {
   clearWatch();
+  if (pausedForVideo) return; // frozen at the last position — see setPausedForVideo
   if (typeof navigator === 'undefined' || !navigator.geolocation) return;
   watchId = navigator.geolocation.watchPosition(
     (pos) => {
@@ -98,6 +116,30 @@ settings.subscribe((s) => {
     applyGcsMode(s.gcsMode);
   }
 });
+
+// Android: pause the continuous watch while an RTSP stream runs over Wi-Fi (see
+// setPausedForVideo). The transport is checked once per stream start; a stream over
+// cellular (or Ethernet) keeps live updates. An unknown route (some VPNs) counts as
+// Wi-Fi — pausing needlessly is the safer error.
+if (isAndroid) {
+  let streamActive = false;
+  videoState.subscribe((v) => {
+    const active = v.enabled && v.kind === 'rtsp';
+    if (active === streamActive) return;
+    streamActive = active;
+    if (!active) {
+      setPausedForVideo(false);
+      return;
+    }
+    invoke<boolean>('system_active_net_is_wifi')
+      .then((wifi) => {
+        if (wifi && streamActive) setPausedForVideo(true);
+      })
+      .catch(() => {
+        if (streamActive) setPausedForVideo(true);
+      });
+  });
+}
 // In manual mode (no override), the GCS follows the resolved OS location + its accuracy.
 userGeoLocation.subscribe(() => recompute());
 userGeoAccuracyM.subscribe(() => recompute());

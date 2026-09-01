@@ -38,6 +38,7 @@ class MainActivity : TauriActivity() {
     BleSerial.init(this, blePermissions)
     ScreenLock.init(this)
     NativeVideo.init(this)
+    NetInfo.init(this)
 
     enableEdgeToEdge()
 
