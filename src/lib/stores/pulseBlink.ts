@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-// Hard-blink mode for the app's looping status indicators — WebKitGTK and Android.
+// Hard-blink mode for the app's looping status indicators — WebKitGTK and mobile.
 //
 // On WebKitGTK a looping CSS animation makes the compositor rebuild the whole window every frame. The
 // cost is per frame produced, not per pixel changed, so the GCS live dot — eight pixels — measured
@@ -15,6 +15,9 @@
 // the Mali driver marshals a full composition pass) is what a mobile GPU cannot hide. Measured on the
 // Teclast M11 (1920×1200): the same 8 px dot alone = ~150 % of a core (RenderThread 74 % + Mali
 // driver 54 % + Viz 26 %); dot hidden = ~4 %. Same defect economics as WebKitGTK, same cure.
+// iOS is gated precautionarily (user decision, unmeasured): a mobile GPU paying a fixed price per
+// composited frame is the expected economics there too, and nobody has a device on hand to prove
+// otherwise — better a hard blink than a hot tablet.
 //
 // So the indicators stop animating and follow this clock instead: one interval for the whole app,
 // toggling one class on the root element. That is deliberate — a frame carries every change at once,
@@ -29,9 +32,9 @@
 // different trade (Cesium renders on the GPU). Nobody should have to accept a stuttering globe to get
 // sane indicator cost. Windows and macOS never enter this mode and keep the smooth pulses.
 
-import { isAndroid, isWebKitGtk } from '../platform';
+import { isMobile, isWebKitGtk } from '../platform';
 
-/** Set for the whole session on WebKitGTK/Android; CSS gates `animation: none` on it. */
+/** Set for the whole session on WebKitGTK/mobile; CSS gates `animation: none` on it. */
 const MODE_CLASS = 'kite-blink-mode';
 /** Toggled at BLINK_INTERVAL_MS; CSS gates the "bright" half of each indicator on it. */
 const BLINK_CLASS = 'kite-blink';
@@ -41,9 +44,9 @@ const BLINK_INTERVAL_MS = 1000;
 
 let timer: ReturnType<typeof setInterval> | undefined;
 
-/** Start the blink clock. No-op outside WebKitGTK/Android, and idempotent. Returns a teardown fn. */
+/** Start the blink clock. No-op outside WebKitGTK/mobile, and idempotent. Returns a teardown fn. */
 export function initPulseBlink(): () => void {
-  if ((!isWebKitGtk && !isAndroid) || typeof document === 'undefined' || timer) return () => {};
+  if ((!isWebKitGtk && !isMobile) || typeof document === 'undefined' || timer) return () => {};
   const root = document.documentElement;
   root.classList.add(MODE_CLASS, BLINK_CLASS);
   let on = true;
