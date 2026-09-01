@@ -333,8 +333,7 @@
   const streamCodec = $derived.by(() => {
     const s = $videoState;
     if (s.kind !== 'rtsp' || s.status !== 'live') return null;
-    // The decode-sink route only ever selects H.264 (HEVC parked — MOBILE_RTSP.md).
-    if (s.nativeSink) return 'H.264';
+    if (s.nativeSink) return s.nativeSinkCodec ?? 'H.264';
     if (!s.mjpegUrl) return $videoRtcStats?.codec ?? null;
     return s.activeTranscode === 'copy' ? 'MJPEG' : 'H.264 → MJPEG';
   });

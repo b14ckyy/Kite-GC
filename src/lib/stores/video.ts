@@ -96,10 +96,13 @@ export interface VideoState {
   rtspNativeClient: boolean;
   /** Active RTSP reader once live (native engine client vs ffmpeg fallback); runtime-only. */
   rtspEngine: RtspEngine;
-  /** Runtime-only: the in-process client decodes this feed natively (H264 → hole-punch
-   *  sink below the WebView). The DOM surfaces render a transparent hole instead of media —
-   *  see controllers/nativeVideo.ts. */
+  /** Runtime-only: the in-process client decodes this feed natively (H264/HEVC →
+   *  hole-punch sink below the WebView). The DOM surfaces render a transparent hole
+   *  instead of media — see controllers/nativeVideo.ts. */
   nativeSink: boolean;
+  /** Runtime-only: the codec the native decode sink plays ('H.264'/'H.265'), for the
+   *  panel's info line. Null while the sink route isn't active. */
+  nativeSinkCodec: string | null;
   /** Runtime-only: true while the infinite RTSP auto-reconnect loop is running (link dropped/stalled). */
   reconnecting: boolean;
   /** Runtime-only: current reconnect attempt number, shown in the on-video overlay. */
@@ -302,6 +305,7 @@ const INITIAL: VideoState = {
   rtspNativeClient: boot.rtspNativeClient,
   rtspEngine: null,
   nativeSink: false,
+  nativeSinkCodec: null,
   reconnecting: false,
   reconnectAttempt: 0,
   mjpegUrl: null,
@@ -821,7 +825,7 @@ async function startMjpegPath(url: string, requireCopy = false): Promise<boolean
 function stopKiteRtsp(): void {
   stopSinkMonitor();
   stopNativeSurfaceRouter();
-  if (get(videoState).nativeSink) patch({ nativeSink: false });
+  if (get(videoState).nativeSink) patch({ nativeSink: false, nativeSinkCodec: null });
   void invoke('video_rtsp_native_stop').catch(() => {});
 }
 
@@ -889,7 +893,7 @@ function stopSinkMonitor(): void {
  *  Returns 'live', 'retry' (enter the reconnect loop) or 'fatal' (a retry cannot fix it). */
 async function startKiteRtspPath(url: string, transport: RtspTransport): Promise<'live' | 'retry' | 'fatal'> {
   try {
-    const res = await invoke<{ mode?: string; url?: string; transcode: string }>('video_rtsp_native_start', {
+    const res = await invoke<{ mode?: string; url?: string; transcode: string; codec?: string }>('video_rtsp_native_start', {
       url,
       transport,
     });
@@ -899,7 +903,7 @@ async function startKiteRtspPath(url: string, transport: RtspTransport): Promise
       return 'live'; // not a failure — the user stopped it
     }
     if (res.mode === 'sink') {
-      patch({ status: 'live', mjpegUrl: null, nativeSink: true, activeTranscode: res.transcode, error: null, rtspEngine: 'kite', reconnecting: false, reconnectAttempt: 0 });
+      patch({ status: 'live', mjpegUrl: null, nativeSink: true, nativeSinkCodec: res.codec ?? null, activeTranscode: res.transcode, error: null, rtspEngine: 'kite', reconnecting: false, reconnectAttempt: 0 });
       startNativeSurfaceRouter();
       startSinkMonitor();
       return 'live';
@@ -909,10 +913,19 @@ async function startKiteRtspPath(url: string, transport: RtspTransport): Promise
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     logVideo('warn', `RTSP (native client) failed: ${message}`);
-    // A source whose codec we cannot take (an HEVC track until that decode path works) will not
-    // change by retrying — hard stop. Everything else (unreachable, timeout) enters the loop.
+    // A source whose codec this platform cannot take (H264/HEVC without a native decode
+    // sink — every non-Windows platform until P2.2/P3) will not change by retrying —
+    // hard stop. Everything else (unreachable, timeout) enters the loop.
     if (message.includes('video track')) {
       patch({ status: 'error', error: message, reconnecting: false, reconnectAttempt: 0 });
+      return 'fatal';
+    }
+    // RTSP 461 on SETUP is the server's verdict on our transport capabilities (seen in
+    // the field: an OBS RTSP server in multicast-only mode refuses unicast UDP and TCP
+    // alike) — retrying forever cannot change it, and the raw status line explains
+    // nothing, so this is a hard stop with a readable message.
+    if (message.includes('status 461')) {
+      patch({ status: 'error', error: get(t)('video.rtspUnicastRefused'), reconnecting: false, reconnectAttempt: 0 });
       return 'fatal';
     }
     return 'retry';
@@ -1277,7 +1290,12 @@ async function negotiateRtsp(url: string, transport: RtspTransport): Promise<voi
     try {
       await negotiateWebrtc(url, 'auto', false); // native MediaMTX RTSP client
     } catch (nativeErr) {
-      logVideo('warn', `native RTSP pull failed, retrying via ffmpeg: ${nativeErr instanceof Error ? nativeErr.message : String(nativeErr)}`);
+      const msg = nativeErr instanceof Error ? nativeErr.message : String(nativeErr);
+      // A WHEP codec verdict cannot be fixed by switching the reader — ffmpeg would
+      // publish the same codec and get the same answer, burning a full engine restart
+      // against the caller's 20 s negotiation budget. Straight to the caller's hard stop.
+      if (msg.includes('codecs not supported')) throw nativeErr;
+      logVideo('warn', `native RTSP pull failed, retrying via ffmpeg: ${msg}`);
       closeRtc();
       if (get(videoState).kind !== 'rtsp' || !get(videoState).enabled) return; // stopped meanwhile
       await negotiateWebrtc(url, 'auto', true); // ffmpeg reader fallback
@@ -1373,7 +1391,10 @@ export async function startRtsp(opts?: { reconnect?: boolean }): Promise<void> {
     patch({ reconnecting: false, reconnectAttempt: 0 });
     if (rtcConn) startRtspStallMonitor(rtcConn);
   } catch (err) {
-    logVideo('warn', `RTSP connect failed: ${err instanceof Error ? err.message : String(err)}`);
+    // Tauri invoke rejects with plain STRINGS for backend errors — normalize before any
+    // message matching (an `instanceof Error` guard here silently never matched them).
+    const message = err instanceof Error ? err.message : String(err);
+    logVideo('warn', `RTSP connect failed: ${message}`);
     // An MJPEG source cannot travel over WebRTC at all — its video codecs are H.264/VP8/VP9/AV1 — so
     // even a WebRTC-capable WebView has to use the image path for one, and negotiation failing is the
     // first moment we could know. `requireCopy` keeps this honest: the image path is accepted only if
@@ -1382,6 +1403,15 @@ export async function startRtsp(opts?: { reconnect?: boolean }): Promise<void> {
     // silently settling for a transcode would be a permanent downgrade — so that keeps reconnecting.
     if (await startMjpegPath(url, true)) {
       logVideo('warn', 'source is MJPEG, which WebRTC cannot carry — switched to the image path');
+      return;
+    }
+    // The engine's WHEP answer "codecs not supported by client" is a codec verdict, not a
+    // connectivity failure: WebRTC can never carry this stream (HEVC being the field case
+    // — see the H.265 decision history) and the MJPEG copy above was already refused, so
+    // reconnecting forever would just repeat both answers. Hard stop, pointing at the
+    // native client, which decodes H.264/HEVC in hardware on Windows.
+    if (message.includes('codecs not supported')) {
+      patch({ status: 'error', error: get(t)('video.webrtcCodecUnsupported'), reconnecting: false, reconnectAttempt: 0 });
       return;
     }
     scheduleRtspReconnect();
