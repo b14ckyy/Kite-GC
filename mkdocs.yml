@@ -1,6 +1,9 @@
 # MkDocs config for the Kite Ground Control user documentation site.
 # Source = docs/user/ only (dev docs under docs/ are NOT published). See
 # docs/active/USER_DOCS_ARCHITECTURE.md. Local preview: `mkdocs serve` (http://localhost:8000).
+#
+# The published site is VERSIONED with mike (one entry per minor release + "Dev" for the master
+# tip) — see .github/workflows/docs.yml for the deployment model.
 
 site_name: Kite Ground Control
 site_description: User documentation for Kite Ground Control — an INAV / ArduPilot / PX4 ground control station.
@@ -51,6 +54,12 @@ plugins:
 
 extra_css:
   - assets/branding/extra.css
+
+extra:
+  # Header version dropdown (Material's native mike support): reads the versions.json that mike
+  # maintains on the gh-pages branch. Old versions get the "outdated" banner (overrides/main.html).
+  version:
+    provider: mike
 
 markdown_extensions:
   - admonition

@@ -3,3 +3,4 @@
 #   python -m venv .venv && .venv/bin/pip install -r docs/requirements.txt        (Linux/macOS)
 # Then: mkdocs serve   (http://localhost:8000)   ·   mkdocs build --strict
 mkdocs-material>=9.5
+mike>=2.1  # docs versioning (gh-pages subfolders + versions.json); used by .github/workflows/docs.yml
