@@ -18,16 +18,19 @@ is remembered between sessions.
   **transport**, and optionally **save the connection** to a list for one-click recall — see
   **[RTSP connections](#rtsp-connections-transport-and-auto-reconnect)** below.
 
-!!! info "Supported RTSP video codecs: H.264 and MJPEG"
-    Those two are what Kite officially supports and tests over RTSP today. **H.264** is the usual
-    choice and works everywhere. **MJPEG** costs more bandwidth but is passed through untouched — on
-    Linux that makes it the lightest option by a wide margin (see the
+!!! info "Supported RTSP video codecs"
+    **H.264** and **MJPEG** are supported and tested everywhere. **H.264** is the usual choice;
+    **MJPEG** costs more bandwidth but is passed through untouched — the lightest option wherever
+    nothing should be converted (see the
     [platform notes](#platform-notes-what-to-expect-per-operating-system)).
+    **HEVC/H.265** plays wherever the **Kite RTSP client** does the decoding: always on **Android**,
+    and on **Windows** and **Linux** with the *Native RTSP client* toggle on (hardware decode; Windows
+    additionally needs the free "HEVC Video Extensions" from the Microsoft Store). On macOS, HEVC is
+    not available.
 
-    Other codecs — **HEVC/H.265**, VP8, VP9, AV1 — are **not supported**. Some may happen to work on
-    some systems, but none is tested, and a stream Kite cannot play usually shows up as an endless
-    *"Reconnecting…"* rather than a clear error. If you need one of them, please open a request: the
-    limit is that we have no way to test it, not that it is impossible.
+    Other codecs — VP8, VP9, AV1 — are **not supported**. A stream Kite cannot play usually shows up
+    as an endless *"Reconnecting…"* rather than a clear error. If you need one of them, please open a
+    request: the limit is that we have no way to test it, not that it is impossible.
 
 ![The Video panel](../assets/guides/video/video_panel.png)
 /// caption
@@ -87,6 +90,11 @@ The RTSP source has a small **connection manager** built in:
   looks uneven — duplicated or skipped single frames — on a jittery link such as cellular; every step
   costs exactly that much extra latency, so leave it at 0 when the picture is already smooth. The
   setting takes effect immediately on the running stream and is remembered.
+- **Native RTSP client (experimental)** — Kite's own built-in stream client: no helper downloads,
+  UDP-first connection with automatic TCP fallback, and native hardware H.264/HEVC decode on Windows
+  and Linux (Android always uses it; there is no toggle there). Recommended on Linux — see the
+  [platform notes](#platform-notes-what-to-expect-per-operating-system). If a particular source
+  misbehaves with it, switch it off to fall back to the classic engine path.
 
 **Auto-reconnect:** if a running RTSP feed drops or stalls — a radio hole on a cellular link, the
 source restarting, a network change — Kite **reconnects automatically and keeps trying indefinitely**
@@ -96,11 +104,13 @@ feed are given a few seconds to heal on their own before a full reconnect is for
 signal dips don't interrupt the stream unnecessarily.
 
 !!! note "Helpers download themselves"
-    **Camera (device)** needs nothing extra. **Native Capture** uses the bundled **ffmpeg** engine.
-    **RTSP** uses **MediaMTX** for the direct video path and **ffmpeg** for the image path — a machine
-    whose browser engine offers no direct path (common on Linux) uses ffmpeg alone and never needs
-    MediaMTX. Kite downloads whichever it needs **automatically** the first time you use that source — no
-    manual install. On macOS ffmpeg is shipped with the app.
+    **Camera (device)** needs nothing extra, and **RTSP with the Native RTSP client** toggle on needs
+    no helper either (on Android that is always the case). **Native Capture** uses the bundled
+    **ffmpeg** engine. Classic-path **RTSP** (toggle off) uses **MediaMTX** for the direct video path
+    and **ffmpeg** for the image path — a machine whose browser engine offers no direct path (common
+    on Linux) uses ffmpeg alone and never needs MediaMTX. Kite downloads whichever it needs
+    **automatically** the first time you use that source — no manual install. On macOS ffmpeg is
+    shipped with the app.
 
 ## Where the video shows
 
@@ -153,12 +163,31 @@ and it is only fair to say so plainly.
 **Windows and macOS are the more predictable hosts for video.** Both ship a single, consistent media
 stack, so a network stream is played directly by the system's hardware-accelerated decoder. If a smooth,
 low-CPU, low-latency feed is important to you — and especially if you plan to fly with it — those are
-the platforms we can most confidently recommend.
+the platforms we can most confidently recommend. For RTSP network streams, Linux joins them once
+the **Native RTSP client** is switched on — see below.
 
-**On Linux, video support is provided as-is.** Kite runs in WebKitGTK there, which hands video playback
-to GStreamer — and which plugins your distribution installs is entirely up to your distribution. There
-are hundreds of combinations of distro, desktop, graphics driver and plugin set, and we cannot test or
-support them all. Concretely, these are things Kite cannot fix from its side:
+**On Linux, switch on the *Native RTSP client* for network streams.** With that toggle (Video panel →
+RTSP section) Kite plays RTSP itself: **H.264 and HEVC go straight into the machine's hardware
+decoder** — Intel/AMD graphics via VA-API, the Raspberry Pi 4's H.264 block via V4L2, with an
+automatic software fallback — and the picture is composited natively behind the interface instead of
+being converted frame by frame. Measured on one laptop, a 720p60 HEVC stream plays at a stable 60 fps
+for roughly a third of one CPU core where the classic path burned more than two cores and still could
+not hold 50 fps. MJPEG sources are passed through untouched, as always. The client uses the
+distribution's GStreamer plugins (the **.deb** installs them automatically; elsewhere:
+`gstreamer1.0-plugins-base`, `…-good`, `…-bad`, `gstreamer1.0-gtk3` and `gstreamer1.0-libav`, or your
+distro's equivalents) — if one is missing, Kite reports which GStreamer element it could not find.
+
+!!! warning "AppImage: video does not work there"
+    The AppImage build cannot play video on either path — the AppImage's launcher environment hides
+    the system's GStreamer plugins from every process inside it. Use the **.deb**, **.rpm** or the
+    **portable build** instead; the AppImage is provided for a quick look at everything else and is
+    planned to be retired.
+
+**With the Native RTSP client off, video support is provided as-is.** Kite then runs video through
+WebKitGTK, which hands playback to GStreamer — and which plugins your distribution installs is
+entirely up to your distribution. There are hundreds of combinations of distro, desktop, graphics
+driver and plugin set, and we cannot test or support them all. Concretely, these are things Kite
+cannot fix from its side on that classic path:
 
 - **Whether an RTSP stream can be played directly at all.** Many Linux systems — Raspberry Pi OS and
   current Debian desktops among them — run a browser engine that does not expose the direct (WebRTC)
@@ -193,11 +222,10 @@ support them all. Concretely, these are things Kite cannot fix from its side:
   the macOS browser engine offers the interface Kite would need for it. All the in-app surfaces
   (panel, widget, floating window, full-screen swap) work everywhere.
 
-None of this means Linux is unusable — a well-equipped desktop distribution generally plays video fine,
-and it is a first-class platform for everything else Kite does. It only means that **if video is your
-priority, Linux is the platform where you may have to do some work yourself**, and we can't promise a
-particular result on a particular machine. In short: **Windows and macOS for maximum compatibility and
-the lowest delay; on Linux, an MJPEG source is the setup that gets closest.**
+None of this means Linux is unusable — with the **Native RTSP client** it is a first-class platform
+for network video, and a well-equipped desktop distribution generally plays the classic path fine
+too. In short: **on Linux, try the Native RTSP client first for RTSP; an MJPEG source is the lightest
+choice either way.**
 
 **On Android, RTSP runs entirely through Kite's own built-in stream client** — there is nothing to
 download and no engine choice: H.264 and HEVC are decoded by the device's hardware decoder, and MJPEG

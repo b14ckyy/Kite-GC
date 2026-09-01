@@ -42,10 +42,12 @@ If a stream won't come up:
 
 ## The stream keeps showing "Reconnecting…" — check the codec first
 
-Before chasing the network: **Kite supports H.264 and MJPEG over RTSP**, and nothing else. A stream
-in **HEVC/H.265**, VP8, VP9 or AV1 typically fails in exactly this way — it retries forever instead
-of reporting a codec problem, because from Kite's side an unplayable stream and an unreachable one
-look much alike.
+Before chasing the network: over RTSP Kite supports **H.264 and MJPEG** everywhere, and
+**HEVC/H.265** only where the **Kite RTSP client** decodes (Android always; Windows and Linux with
+the *Native RTSP client* toggle on — Windows additionally needs the "HEVC Video Extensions"). A
+stream in an unsupported codec — HEVC elsewhere, VP8, VP9 or AV1 — typically fails in exactly this
+way: it retries forever instead of reporting a codec problem, because from Kite's side an unplayable
+stream and an unreachable one look much alike.
 
 If another player shows your stream fine while Kite only reconnects, the codec is the first thing to
 check at the source. Switching it to **H.264** is the quickest test. (Codec support is limited by
@@ -133,6 +135,11 @@ or a non-low-latency tuning. Tune the encoder/camera for low-latency streaming. 
 set it back to 0 for the minimum.
 
 ## Linux: high CPU load or a stuttering picture
+
+First: if the stream is H.264 or HEVC, switch on the **Native RTSP client** (Video panel → RTSP
+section). It takes the browser engine out of the picture entirely and decodes in hardware where the
+machine can — on the reference laptop that cut the total video load to roughly a third of one core at
+a stable 60 fps. Everything below applies to the **classic path**, with that toggle off.
 
 On Linux, Kite depends on your distribution's browser-engine build for video — see the
 **[platform notes](../guides/video.md#platform-notes-what-to-expect-per-operating-system)** in the
