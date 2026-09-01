@@ -1,0 +1,2111 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="User documentation for Kite Ground Control — an INAV / ArduPilot / PX4 ground control station.">
+      
+      
+      
+        <link rel="canonical" href="https://b14ckyy.github.io/Kite-GC/1.0/guides/video/">
+      
+      
+        <link rel="prev" href="../batteries/">
+      
+      
+        <link rel="next" href="../terrain-analysis/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/branding/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Video - Kite Ground Control</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/branding/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="light-blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#video" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+        <aside class="md-banner">
+          <div class="md-banner__inner md-grid md-typeset">
+            
+              <button class="md-banner__button md-icon" aria-label="Don't show this again">
+                
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+              </button>
+            
+            
+  Kite Ground Control is in <strong>public beta</strong> — your
+  <a href="https://github.com/b14ckyy/Kite-GC/issues">feedback &amp; bug reports</a> are very welcome.
+
+          </div>
+          
+            <script>var el=document.querySelector("[data-md-component=announce]");if(el){var content=el.querySelector(".md-typeset");__md_hash(content.innerHTML)===__md_get("__announce")&&(el.hidden=!0)}</script>
+          
+        </aside>
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+          <aside class="md-banner md-banner--warning">
+            <div class="md-banner__inner md-grid md-typeset">
+              
+  You are not reading the documentation for the latest release.
+  <a href="../../..">
+    <strong>Switch to the latest release.</strong>
+  </a>
+
+            </div>
+            <script>var el=document.querySelector("[data-md-component=outdated]"),base=new URL("../.."),outdated=__md_get("__outdated",sessionStorage,base);!0===outdated&&el&&(el.hidden=!1)</script>
+          </aside>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Kite Ground Control" class="md-header__button md-logo" aria-label="Kite Ground Control" data-md-component="logo">
+      
+  <img src="../../assets/branding/kitegc-icon-white.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Kite Ground Control
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Video
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/b14ckyy/Kite-GC" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    b14ckyy/Kite-GC
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Kite Ground Control" class="md-nav__button md-logo" aria-label="Kite Ground Control" data-md-component="logo">
+      
+  <img src="../../assets/branding/kitegc-icon-white.svg" alt="logo">
+
+    </a>
+    Kite Ground Control
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/b14ckyy/Kite-GC" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    b14ckyy/Kite-GC
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/first-connection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    First connection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/quick-tour/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick tour
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connecting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connecting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../telemetry-and-display/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telemetry & display
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../missions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Missions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vehicle-control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vehicle control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rc-control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RC control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_6" id="__nav_3_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Logbook
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Logbook
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../logbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Flight logbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vehicles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vehicles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../batteries/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Batteries
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Video
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Video
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#choosing-a-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choosing a source
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Choosing a source">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#camera-device-vs-native-capture-which-should-i-use" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Camera (device) vs Native Capture — which should I use?
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#resolution-frame-rate-and-mirror" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resolution, frame rate and mirror
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rtsp-connections-transport-and-auto-reconnect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RTSP connections, transport and auto-reconnect
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-the-video-shows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where the video shows
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#map-video-swap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Map ↔ video swap
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#platform-notes-what-to-expect-per-operating-system" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Platform notes: what to expect per operating system
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-to-go-next" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where to go next
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../terrain-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Terrain & RF analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../safety/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Safety
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../radar-and-adsb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Radar & ADS-B
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../airspace/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Airspace Manager
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../map-3d/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    3D map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../relay-and-forwarding/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Relay & forwarding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/file-formats/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    File formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Troubleshooting
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/connection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/rc-control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RC control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/video/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Video
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/reporting-issues/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reporting a problem
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    For developers
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    For developers
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../for-developers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../for-developers/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../for-developers/building/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building from source
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../for-developers/ui-framework/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    UI framework & theme
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../for-developers/contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#choosing-a-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choosing a source
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Choosing a source">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#camera-device-vs-native-capture-which-should-i-use" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Camera (device) vs Native Capture — which should I use?
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#resolution-frame-rate-and-mirror" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resolution, frame rate and mirror
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rtsp-connections-transport-and-auto-reconnect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RTSP connections, transport and auto-reconnect
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-the-video-shows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where the video shows
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#map-video-swap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Map ↔ video swap
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#platform-notes-what-to-expect-per-operating-system" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Platform notes: what to expect per operating system
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-to-go-next" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where to go next
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/b14ckyy/Kite-GC/edit/master/docs/user/guides/video.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="video">Video<a class="headerlink" href="#video" title="Permanent link">&para;</a></h1>
+<p>Kite can show a live video feed alongside (or behind) the map — a <strong>local capture device</strong> such as a
+webcam or USB capture card, or an <strong>RTSP stream</strong> from a network video source. Open it from the
+<strong>Video</strong> tool on the navigation rail.</p>
+<h2 id="choosing-a-source">Choosing a source<a class="headerlink" href="#choosing-a-source" title="Permanent link">&para;</a></h2>
+<p>Pick the <strong>source kind</strong> from the dropdown, set it up, then <strong>Start</strong> / <strong>Stop</strong> the feed. Your choice
+is remembered between sessions.</p>
+<ul>
+<li><strong>Camera (device)</strong> — a local capture device opened the simple way, through the system's built-in
+  camera access. Choose a device from the dropdown (webcams and capture cards the system exposes are
+  listed automatically). No extra downloads.</li>
+<li><strong>Native Capture (Advanced)</strong> — a local capture device opened via Kite's capture engine for <strong>more
+  control and wider device support</strong>. See the comparison below.</li>
+<li><strong>RTSP (network)</strong> — enter the stream URL (e.g. from your video receiver or an RTSP server), pick a
+  <strong>transport</strong>, and optionally <strong>save the connection</strong> to a list for one-click recall — see
+  <strong><a href="#rtsp-connections-transport-and-auto-reconnect">RTSP connections</a></strong> below.</li>
+</ul>
+<div class="admonition info">
+<p class="admonition-title">Supported RTSP video codecs: H.264 and MJPEG</p>
+<p>Those two are what Kite officially supports and tests over RTSP today. <strong>H.264</strong> is the usual
+choice and works everywhere. <strong>MJPEG</strong> costs more bandwidth but is passed through untouched — on
+Linux that makes it the lightest option by a wide margin (see the
+<a href="#platform-notes-what-to-expect-per-operating-system">platform notes</a>).</p>
+<p>Other codecs — <strong>HEVC/H.265</strong>, VP8, VP9, AV1 — are <strong>not supported</strong>. Some may happen to work on
+some systems, but none is tested, and a stream Kite cannot play usually shows up as an endless
+<em>"Reconnecting…"</em> rather than a clear error. If you need one of them, please open a request: the
+limit is that we have no way to test it, not that it is impossible.</p>
+</div>
+<figure>
+<p><img alt="The Video panel" src="../../assets/guides/video/video_panel.png" /></p>
+<figcaption>
+<p>The Video panel — source kind, device / RTSP URL, resolution, frame rate and mirror, with Start/Stop.</p>
+</figcaption>
+</figure>
+<h3 id="camera-device-vs-native-capture-which-should-i-use">Camera (device) vs Native Capture — which should I use?<a class="headerlink" href="#camera-device-vs-native-capture-which-should-i-use" title="Permanent link">&para;</a></h3>
+<p>Both play a local capture device; they differ in <strong>how</strong> they open it.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th><strong>Camera (device)</strong></th>
+<th><strong>Native Capture (Advanced)</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Setup</td>
+<td>Nothing to install</td>
+<td>Needs the <strong>ffmpeg</strong> helper (downloaded automatically)</td>
+</tr>
+<tr>
+<td>Device list</td>
+<td>What the system exposes to apps</td>
+<td>Read directly from the capture hardware — <strong>can find devices the Camera list doesn't show</strong> (e.g. some USB HDMI capture dongles)</td>
+</tr>
+<tr>
+<td>Resolution / frame rate</td>
+<td>A <strong>request</strong> — Auto / 720p / 1080p and an optional 30 / 60 fps wish; the camera picks the closest mode it supports</td>
+<td><strong>Device-verified</strong> — only the resolutions and frame rates your device actually reports (from a curated FPV set: SD PAL/NTSC, 480p, 720p, 1080p, 1440p)</td>
+</tr>
+<tr>
+<td>Codec</td>
+<td>Chosen automatically</td>
+<td>Chosen automatically to hit the selected resolution/frame rate</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Start with Camera (device).</strong> Switch to <strong>Native Capture (Advanced)</strong> if your device isn't listed
+under Camera, or when you want to pin an exact resolution / frame rate that the device confirms it
+supports. Both deliver the same smooth, hardware-accelerated picture for devices the system can open;
+Native additionally reaches devices that only the capture engine can see.</p>
+<h3 id="resolution-frame-rate-and-mirror">Resolution, frame rate and mirror<a class="headerlink" href="#resolution-frame-rate-and-mirror" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Resolution</strong> — Camera offers Auto / 480p / 720p / 1080p; Native offers the device-verified list.</li>
+<li><strong>Format</strong> (Native only) — the capture format the device reports, e.g. MJPEG or a raw one. <strong>MJPEG is
+  the efficient choice</strong>: the picture is passed straight through with no conversion at all.</li>
+<li><strong>Frame rate</strong> — Camera offers Auto / 30 / 60 fps; Native offers the frame rates the device reports
+  for the chosen resolution and format.</li>
+<li><strong>Mirror</strong> — flip the image horizontally (handy for front-facing cameras). Applies to every place the
+  feed is shown.</li>
+<li><strong>Disable hardware acceleration</strong> — force the CPU for any stream conversion. Only needed if the
+  picture is broken or unstable with hardware acceleration; the setting is remembered.</li>
+</ul>
+<p>While a feed is live the panel names the pipeline underneath the picture, with two labels:
+<strong>Transcode</strong> (<code>Copy</code> = nothing is converted · <code>Hardware</code> · <code>Software</code>) and <strong>Surface</strong> (how the
+picture reaches the screen). <code>Copy</code> is the cheapest possible case.</p>
+<h3 id="rtsp-connections-transport-and-auto-reconnect">RTSP connections, transport and auto-reconnect<a class="headerlink" href="#rtsp-connections-transport-and-auto-reconnect" title="Permanent link">&para;</a></h3>
+<p>The RTSP source has a small <strong>connection manager</strong> built in:</p>
+<ul>
+<li><strong>Direct connect</strong> — type the <code>rtsp://…</code> URL and press Start. Next to the URL sits the <strong>transport</strong>
+  selector:<ul>
+<li><strong>Auto</strong> (default) — lets the engine negotiate the transport, and falls back to an ffmpeg
+  reader for the rare server that refuses every forced transport. Right for most sources.</li>
+<li><strong>UDP</strong> — lowest latency; <strong>required for UDP-only servers</strong> (some FPV / air-unit streamers).</li>
+<li><strong>TCP</strong> — for sources that only speak interleaved TCP, or when UDP is blocked by the network.</li>
+</ul>
+</li>
+<li><strong>Save it</strong> — the <strong>💾 button</strong> stores the current URL + transport as a named entry (named after the
+  host; rename it via ✎). Connections are <strong>only saved when you press the button</strong> — never
+  automatically.</li>
+<li><strong>The list</strong> — each saved connection is a one-line entry: <strong>click it to load and connect</strong>, ✎ edits
+  name / URL / transport inline, ✕ removes it. The entry matching the current URL is highlighted.</li>
+<li><strong>Smoothing buffer (frames)</strong> — below the connection list. <strong>0</strong> (the default) plays with the lowest
+  possible latency; each step up buffers <strong>one frame time</strong> more on the receiving side (at 60 fps:
+  ~17 ms per step, derived automatically from the stream's actual frame rate). Raise it if playback
+  looks uneven — duplicated or skipped single frames — on a jittery link such as cellular; every step
+  costs exactly that much extra latency, so leave it at 0 when the picture is already smooth. The
+  setting takes effect immediately on the running stream and is remembered.</li>
+</ul>
+<p><strong>Auto-reconnect:</strong> if a running RTSP feed drops or stalls — a radio hole on a cellular link, the
+source restarting, a network change — Kite <strong>reconnects automatically and keeps trying indefinitely</strong>
+until the feed returns or you stop it. While it retries, every video surface shows a
+<strong>"Reconnecting… (n)"</strong> overlay with the attempt count and a <strong>Stop</strong> button. Brief dropouts on a live
+feed are given a few seconds to heal on their own before a full reconnect is forced, so momentary
+signal dips don't interrupt the stream unnecessarily.</p>
+<div class="admonition note">
+<p class="admonition-title">Helpers download themselves</p>
+<p><strong>Camera (device)</strong> needs nothing extra. <strong>Native Capture</strong> uses the bundled <strong>ffmpeg</strong> engine.
+<strong>RTSP</strong> uses <strong>MediaMTX</strong> for the direct video path and <strong>ffmpeg</strong> for the image path — a machine
+whose browser engine offers no direct path (common on Linux) uses ffmpeg alone and never needs
+MediaMTX. Kite downloads whichever it needs <strong>automatically</strong> the first time you use that source — no
+manual install. On macOS ffmpeg is shipped with the app.</p>
+</div>
+<h2 id="where-the-video-shows">Where the video shows<a class="headerlink" href="#where-the-video-shows" title="Permanent link">&para;</a></h2>
+<p>The same feed can appear in several places at once (they all share one stream):</p>
+<ul>
+<li><strong>In the panel</strong> — a preview right in the Video panel.</li>
+<li><strong>As a widget</strong> — the <strong>Video</strong> widget in a dock, sized to the stream's aspect ratio.</li>
+<li><strong>In a floating window</strong> — a movable video frame over the map. <strong>Drag the video body</strong> to move it;
+  dragging it to the <strong>bottom-left corner snaps it there</strong>, where it <strong>displaces the bottom widget dock</strong>
+  to make room (the dock shrinks by the window's size). Drag it away from the corner to un-snap and
+  free-float. The <strong>top-right corner grip resizes</strong> it (aspect-locked, touch-friendly).</li>
+<li><strong>In a detached window</strong> (<strong>Windows only</strong> — see the <a href="#platform-notes-what-to-expect-per-operating-system">platform notes</a>;
+  the button is simply absent elsewhere) — a separate, free-floating <strong>OS window</strong> you can place anywhere,
+  including <strong>outside the app</strong> or on a second monitor. Opened from the Video panel; because it lives outside the
+  app it's closed from the OS (not from inside Kite), and — unlike the floating window — it <strong>can't host
+  the map</strong> (no swap). It's also the <strong>lightest</strong> option: the OS draws it directly, so on low-power
+  systems using only the detached window keeps GPU load to a minimum.</li>
+</ul>
+<figure>
+<p><img alt="The floating video window and the video widget" src="../../assets/guides/video/video_floating_widget.png" /></p>
+<figcaption>
+<p>The floating video window (over the map) and the dockable Video widget — both showing the same feed.</p>
+</figcaption>
+</figure>
+<h2 id="map-video-swap">Map ↔ video swap<a class="headerlink" href="#map-video-swap" title="Permanent link">&para;</a></h2>
+<p><strong>Double-click a video surface</strong> (the Video widget or the floating window) to <strong>swap it with the map</strong>:
+the map jumps <em>into</em> the surface you clicked and the video moves out to the full-screen background — so
+you get <strong>video as your main view with the map in the small frame</strong>. Double-click again to send the map
+back to the full-screen background.</p>
+<p>How interactive the swapped-in <strong>mini-map</strong> is depends on where it landed:</p>
+<ul>
+<li><strong>In the widget</strong> — deliberately limited by space: <strong>2D only</strong> and <strong>heading-follow only</strong>, but you
+  <strong>can zoom</strong>.</li>
+<li><strong>In the floating window</strong> — fully interactive: pan and zoom normally (left-drag / single-touch). To
+  <strong>move the floating frame itself</strong> while it holds the map, drag with the <strong>right mouse button</strong>
+  (desktop) or <strong>two fingers</strong> (touchscreen).</li>
+</ul>
+<figure>
+<p><img alt="The map swapped into the video — mini-map over a full-screen feed" src="../../assets/guides/video/video_map_swap.png" /></p>
+<figcaption>
+<p>Swapped: the live video fills the background while the map rides in the smaller frame.</p>
+</figcaption>
+</figure>
+<h2 id="platform-notes-what-to-expect-per-operating-system">Platform notes: what to expect per operating system<a class="headerlink" href="#platform-notes-what-to-expect-per-operating-system" title="Permanent link">&para;</a></h2>
+<p>Video is the one part of Kite that depends heavily on components Kite does <strong>not</strong> ship: the operating
+system's built-in browser engine and its media plugins. That works out very differently per platform,
+and it is only fair to say so plainly.</p>
+<p><strong>Windows and macOS are the more predictable hosts for video.</strong> Both ship a single, consistent media
+stack, so a network stream is played directly by the system's hardware-accelerated decoder. If a smooth,
+low-CPU, low-latency feed is important to you — and especially if you plan to fly with it — those are
+the platforms we can most confidently recommend.</p>
+<p><strong>On Linux, video support is provided as-is.</strong> Kite runs in WebKitGTK there, which hands video playback
+to GStreamer — and which plugins your distribution installs is entirely up to your distribution. There
+are hundreds of combinations of distro, desktop, graphics driver and plugin set, and we cannot test or
+support them all. Concretely, these are things Kite cannot fix from its side:</p>
+<ul>
+<li><strong>Whether an RTSP stream can be played directly at all.</strong> Many Linux systems — Raspberry Pi OS and
+  current Debian desktops among them — run a browser engine that does not expose the direct (WebRTC)
+  video path, and that cannot be installed after the fact. Kite then falls back to a <strong>converted image
+  stream</strong>. It works, but it adds a conversion, so <strong>expect noticeably more latency than on Windows or
+  macOS</strong> — this is the single biggest practical difference. If a smaller delay matters more than
+  resolution, <strong>send a smaller or slower stream from the source</strong> (e.g. 480p instead of 720p, or 30
+  instead of 60 fps): that saves work at every stage at once.</li>
+<li><strong>How much each frame costs to put on screen.</strong> The image path decodes every frame for display, and
+  the Linux engine is markedly slower at that than the Windows one — measured on one laptop, the same
+  720×576 frame took about 13 ms against roughly 2 ms, and longer while the machine was busy. So a
+  frame rate that is effortless on Windows can be out of reach on comparable Linux hardware, whatever
+  the CPU says.</li>
+<li><strong>Whether that conversion uses your graphics hardware.</strong> Kite tests your machine at start-up and uses
+  the GPU for the conversion when it can — on Intel and AMD desktop graphics via VAAPI, and on
+  Raspberry Pi 3/4 class boards via their built-in decoder. Where that works it is a large saving
+  (measured on an Intel laptop: roughly a seventh of the CPU load). But it depends entirely on your
+  driver stack: <strong>NVIDIA cards are not specifically covered</strong>, and any machine whose test fails simply
+  converts on the CPU instead. The Video panel names the path in use, and the diagnostic log records
+  the verdict (see <strong><a href="../../troubleshooting/video/">Video troubleshooting</a></strong>).</li>
+<li><strong>A camera that already delivers MJPEG is the best case on Linux.</strong> Nothing is converted at all —
+  the picture is passed through unchanged, which costs almost nothing and gives the lowest delay
+  Linux can offer. If latency is your priority on Linux, prefer an MJPEG source. The Video panel shows
+  <strong>Transcode: Copy</strong> when this applies.</li>
+<li><strong>You can force the CPU path.</strong> If hardware conversion misbehaves on your machine, switch on
+  <strong>Disable hardware acceleration</strong> in the Video panel; the setting is remembered.</li>
+<li><strong>Local camera quirks.</strong> On Linux the system camera layer can be slow or unresponsive on some setups.
+  Kite works around the worst cases (it caps the automatic resolution and frame rate, and routes the
+  advanced capture path around that layer entirely), but a camera the system itself can't open cleanly
+  is out of reach.</li>
+<li><strong>Picture-in-Picture</strong> (the detached "Video Window") is a Windows-only feature — neither the Linux nor
+  the macOS browser engine offers the interface Kite would need for it. All the in-app surfaces
+  (panel, widget, floating window, full-screen swap) work everywhere.</li>
+</ul>
+<p>None of this means Linux is unusable — a well-equipped desktop distribution generally plays video fine,
+and it is a first-class platform for everything else Kite does. It only means that <strong>if video is your
+priority, Linux is the platform where you may have to do some work yourself</strong>, and we can't promise a
+particular result on a particular machine. In short: <strong>Windows and macOS for maximum compatibility and
+the lowest delay; on Linux, an MJPEG source is the setup that gets closest.</strong></p>
+<h2 id="where-to-go-next">Where to go next<a class="headerlink" href="#where-to-go-next" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Put the Video widget in a dock: <strong><a href="../telemetry-and-display/">Telemetry &amp; display</a></strong>.</li>
+<li>Trouble getting a stream? <strong><a href="../../troubleshooting/video/">Video troubleshooting</a></strong>.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; Marc Hoffmann (b14ckyy) — GPL-3.0-or-later
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["announce.dismiss", "navigation.sections", "navigation.top", "navigation.instant", "navigation.tracking", "toc.follow", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

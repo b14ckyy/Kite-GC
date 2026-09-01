@@ -1,0 +1,2213 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="User documentation for Kite Ground Control — an INAV / ArduPilot / PX4 ground control station.">
+      
+      
+      
+        <link rel="canonical" href="https://b14ckyy.github.io/Kite-GC/1.0/guides/safety/">
+      
+      
+        <link rel="prev" href="../terrain-analysis/">
+      
+      
+        <link rel="next" href="../radar-and-adsb/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/branding/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Safety - Kite Ground Control</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/branding/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="light-blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#safety" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+        <aside class="md-banner">
+          <div class="md-banner__inner md-grid md-typeset">
+            
+              <button class="md-banner__button md-icon" aria-label="Don't show this again">
+                
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+              </button>
+            
+            
+  Kite Ground Control is in <strong>public beta</strong> — your
+  <a href="https://github.com/b14ckyy/Kite-GC/issues">feedback &amp; bug reports</a> are very welcome.
+
+          </div>
+          
+            <script>var el=document.querySelector("[data-md-component=announce]");if(el){var content=el.querySelector(".md-typeset");__md_hash(content.innerHTML)===__md_get("__announce")&&(el.hidden=!0)}</script>
+          
+        </aside>
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+          <aside class="md-banner md-banner--warning">
+            <div class="md-banner__inner md-grid md-typeset">
+              
+  You are not reading the documentation for the latest release.
+  <a href="../../..">
+    <strong>Switch to the latest release.</strong>
+  </a>
+
+            </div>
+            <script>var el=document.querySelector("[data-md-component=outdated]"),base=new URL("../.."),outdated=__md_get("__outdated",sessionStorage,base);!0===outdated&&el&&(el.hidden=!1)</script>
+          </aside>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Kite Ground Control" class="md-header__button md-logo" aria-label="Kite Ground Control" data-md-component="logo">
+      
+  <img src="../../assets/branding/kitegc-icon-white.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Kite Ground Control
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Safety
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/b14ckyy/Kite-GC" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    b14ckyy/Kite-GC
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Kite Ground Control" class="md-nav__button md-logo" aria-label="Kite Ground Control" data-md-component="logo">
+      
+  <img src="../../assets/branding/kitegc-icon-white.svg" alt="logo">
+
+    </a>
+    Kite Ground Control
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/b14ckyy/Kite-GC" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    b14ckyy/Kite-GC
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/first-connection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    First connection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/quick-tour/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick tour
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connecting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connecting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../telemetry-and-display/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telemetry & display
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../missions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Missions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vehicle-control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vehicle control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rc-control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RC control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_6" id="__nav_3_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Logbook
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Logbook
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../logbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Flight logbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vehicles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vehicles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../batteries/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Batteries
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../video/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Video
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../terrain-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Terrain & RF analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Safety
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Safety
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#terrain-clearance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Terrain clearance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#keep-in-keep-out-areas" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keep-in &amp; keep-out areas
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Keep-in &amp; keep-out areas">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#inav-geozones" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        INAV — Geozones
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ardupilot-px4-geofence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ArduPilot / PX4 — Geofence
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rally-points-ardupilot-px4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rally points (ArduPilot / PX4)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#automatic-landing-safe-home-autoland-inav" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Automatic landing — Safe Home &amp; Autoland (INAV)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Automatic landing — Safe Home &amp; Autoland (INAV)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-safe-home-slots" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The safe-home slots
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-autoland-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The autoland configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#on-the-map" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        On the map
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#saving" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Saving
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#plan-vs-airspace-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Plan-vs-airspace check
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-to-go-next" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where to go next
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../radar-and-adsb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Radar & ADS-B
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../airspace/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Airspace Manager
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../map-3d/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    3D map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../relay-and-forwarding/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Relay & forwarding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/file-formats/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    File formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Troubleshooting
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/connection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/rc-control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RC control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/video/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Video
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/reporting-issues/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reporting a problem
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    For developers
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    For developers
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../for-developers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../for-developers/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../for-developers/building/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building from source
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../for-developers/ui-framework/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    UI framework & theme
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../for-developers/contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#terrain-clearance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Terrain clearance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#keep-in-keep-out-areas" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keep-in &amp; keep-out areas
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Keep-in &amp; keep-out areas">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#inav-geozones" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        INAV — Geozones
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ardupilot-px4-geofence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ArduPilot / PX4 — Geofence
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rally-points-ardupilot-px4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rally points (ArduPilot / PX4)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#automatic-landing-safe-home-autoland-inav" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Automatic landing — Safe Home &amp; Autoland (INAV)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Automatic landing — Safe Home &amp; Autoland (INAV)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-safe-home-slots" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The safe-home slots
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-autoland-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The autoland configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#on-the-map" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        On the map
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#saving" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Saving
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#plan-vs-airspace-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Plan-vs-airspace check
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-to-go-next" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where to go next
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/b14ckyy/Kite-GC/edit/master/docs/user/guides/safety.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="safety">Safety<a class="headerlink" href="#safety" title="Permanent link">&para;</a></h1>
+<p>Kite groups the features that keep an aircraft out of trouble — <strong>terrain clearance</strong>, <strong>no-fly /
+keep-in areas</strong>, and <strong>automatic landing / return</strong> — into one place in this guide. Most of them are
+<em>editors</em> for settings that live on the flight controller itself: Kite reads them, lets you change them
+on the map, and writes them back. The FC does the actual enforcing in flight.</p>
+<p>Which tools you get depends on the connected stack, because the three firmwares model safety quite
+differently:</p>
+<table>
+<thead>
+<tr>
+<th>Capability</th>
+<th>INAV</th>
+<th>ArduPilot / PX4</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Keep-in / keep-out areas</td>
+<td><strong>Geozones</strong> (per-zone altitude band + action)</td>
+<td><strong>Geofence</strong> (geometry only; one global action)</td>
+</tr>
+<tr>
+<td>Divert / return locations</td>
+<td>(uses safe homes)</td>
+<td><strong>Rally points</strong></td>
+</tr>
+<tr>
+<td>Automatic landing</td>
+<td><strong>Safe Home + fixed-wing autoland</strong> (per-site editor)</td>
+<td>via flight mode (Land / RTL)</td>
+</tr>
+<tr>
+<td>Terrain clearance preview</td>
+<td>✓</td>
+<td>✓</td>
+</tr>
+<tr>
+<td>Terrain correction (follow / check)</td>
+<td>✓</td>
+<td>✓</td>
+</tr>
+<tr>
+<td>Plan-vs-airspace check</td>
+<td>✓</td>
+<td>✓</td>
+</tr>
+</tbody>
+</table>
+<p>The rest of this page walks through each.</p>
+<hr />
+<h2 id="terrain-clearance">Terrain clearance<a class="headerlink" href="#terrain-clearance" title="Permanent link">&para;</a></h2>
+<p>Before any of the airspace tools, the simplest safety check is <strong>"will I hit the ground?"</strong> The
+<strong>Terrain</strong> tool (navigation rail) plots the elevation of the ground beneath a route or a flown track
+so you can sanity-check your above-ground clearance.</p>
+<ul>
+<li><strong>Waypoints mode</strong> profiles your <em>planned</em> mission; <strong>Track</strong> mode profiles a live or loaded flight.</li>
+<li>It draws your <strong>flight path</strong> against the sampled <strong>terrain</strong>, with a <strong>clearance floor</strong> line; any
+  stretch that drops <strong>below the floor</strong> is highlighted.</li>
+<li>It reports <strong>min clearance</strong>, <strong>max climb</strong> and distance, in <strong>MSL</strong> or <strong>AGL</strong>.</li>
+</ul>
+<figure>
+<p><img alt="Terrain analysis — flight path over the sampled ground profile" src="../../assets/guides/safety/terrain_analysis.png" /></p>
+<figcaption>
+<p>The Terrain tool: your route (or track) plotted over the ground beneath it, with the clearance floor and
+any below-clearance stretches flagged.</p>
+</figcaption>
+</figure>
+<div class="admonition note">
+<p class="admonition-title">Needs elevation data</p>
+<p>Terrain sampling needs the online terrain source; out of coverage or fully offline it reports
+<em>terrain data unavailable</em>. This is a planning aid — it does not command the aircraft.</p>
+</div>
+<p>The same tool can also <strong>correct waypoint altitudes</strong> to hold your clearance target (Terrain Follow /
+Clearance Check), analyse the <strong>radio link</strong> against the terrain, and profile a <strong>flown track</strong>. See the
+dedicated <strong><a href="../terrain-analysis/">Terrain &amp; RF analysis</a></strong> guide for the full feature.</p>
+<hr />
+<h2 id="keep-in-keep-out-areas">Keep-in &amp; keep-out areas<a class="headerlink" href="#keep-in-keep-out-areas" title="Permanent link">&para;</a></h2>
+<p>Both firmware families let you define areas the aircraft should stay inside (<strong>inclusion / flight
+zones</strong>) or out of (<strong>exclusion / no-fly zones</strong>). Kite edits them on the map and uploads them, but the
+two models differ enough to be worth understanding.</p>
+<p>Throughout Kite, the colours are consistent: <strong>inclusion = blue</strong>, <strong>exclusion = amber</strong>.</p>
+<h3 id="inav-geozones">INAV — Geozones<a class="headerlink" href="#inav-geozones" title="Permanent link">&para;</a></h3>
+<p>Geozones are INAV's onboard airspace fences (firmware <strong>8.0+</strong>). Edit them from the <strong>Airspace</strong> tool;
+they show as the <strong>Geozones</strong> layer (toggle it in the panel, default on — and they're always shown while
+you're editing a mission).</p>
+<p>What a geozone carries:</p>
+<ul>
+<li><strong>Shape</strong> — <strong>circle</strong> or <strong>polygon</strong>.</li>
+<li><strong>Type</strong> — <strong>Inclusive</strong> (flight zone, keep in) or <strong>Exclusive</strong> (no-fly zone, keep out).</li>
+<li><strong>Altitude band</strong> — a per-zone <strong>lower</strong> and <strong>upper</strong> altitude (upper <code>0</code> = no limit), referenced to
+  <strong>AGL</strong> (above launch) or <strong>AMSL</strong>.</li>
+<li><strong>Breach action</strong> — what the FC does at the boundary: <strong>None</strong>, <strong>Avoid</strong>, <strong>Position hold</strong> or
+  <strong>RTH</strong>. The map even reflects the action in the line: dashed/thin for <em>None</em>, solid for <em>Avoid</em>,
+  solid-thick for <em>Position hold / RTH</em>, with a translucent fill on enforcing zones.</li>
+</ul>
+<p>In flight INAV enforces these itself — it steers around no-fly zones autonomously in self-levelling
+modes and even <strong>plans an RTH path that avoids them</strong>. Up to <strong>63 zones</strong> (sharing a pool of 126
+vertices) fit on the FC.</p>
+<figure>
+<p><img alt="The Geozones editor and zones on the map" src="../../assets/guides/safety/geozones.png" /></p>
+<figcaption>
+<p>Geozones in the Airspace Manager: the zone list (type, altitude band, action) and the blue inclusion /
+amber exclusion areas on the map.</p>
+</figcaption>
+</figure>
+<p>Editing is <strong>map-first</strong>, just like the mission planner: add a circle or polygon, drag its handles,
+click an edge to insert a vertex, or type exact coordinates in the popup. The panel sets the type,
+altitude band, reference and action. Editing is <strong>locked while armed</strong>.</p>
+<p><strong>Saving</strong> writes every zone to the FC, stores it to EEPROM and <strong>reboots</strong> the flight controller —
+geozones only take effect after a restart, so the link drops and reconnects. Kite checks your zones
+first (valid shapes, vertex/zone limits, sensible altitude band) and fixes polygon winding for you.</p>
+<h3 id="ardupilot-px4-geofence">ArduPilot / PX4 — Geofence<a class="headerlink" href="#ardupilot-px4-geofence" title="Permanent link">&para;</a></h3>
+<p>ArduPilot and PX4 expose a geofence over MAVLink. Edit it from the same <strong>Airspace</strong> tool (<strong>Geofence</strong>
+layer). The geometry concept is the same — <strong>inclusion / exclusion</strong> × <strong>polygon / circle</strong>, plus an
+optional <strong>return point</strong> (ArduPilot) — and the on-map editing reuses the geozone UX exactly (drag
+handles, vertex insert, coordinate popup, armed-lock).</p>
+<p>The difference is in the model: on ArduPilot/PX4 the <strong>altitude limits and the breach action are not
+part of each zone</strong> — they're a single set of <strong>global parameters</strong> that apply to the whole fence. Kite
+reads and writes the core ones in the panel's <strong>Fence parameters</strong> block, choosing the right names for
+the connected autopilot:</p>
+<ul>
+<li><strong>ArduPilot</strong> — fence <strong>enable</strong>, <strong>breach action</strong>, <strong>max altitude</strong>, <strong>home radius</strong> (and min
+  altitude / margin).</li>
+<li><strong>PX4</strong> — fence <strong>action</strong>, <strong>max horizontal</strong> and <strong>max vertical</strong> distance.</li>
+</ul>
+<p>Saving uploads the fence and writes the changed parameters; no reboot is needed.</p>
+<div class="admonition tip">
+<p class="admonition-title">Two ways to express the same idea</p>
+<p>INAV carries each zone's <strong>altitude band</strong> and <strong>breach action</strong> with the zone itself, so different
+areas can have different ceilings and reactions — a finer-grained model than the single global action
+ArduPilot and PX4 apply across the whole fence. If you fly both, plan around that: on the MAVLink
+side a fence is <em>geometry plus one global rule</em>.</p>
+</div>
+<h3 id="rally-points-ardupilot-px4">Rally points (ArduPilot / PX4)<a class="headerlink" href="#rally-points-ardupilot-px4" title="Permanent link">&para;</a></h3>
+<p>ArduPilot and PX4 also support <strong>rally points</strong> — alternate return/divert locations the FC can use
+instead of home (e.g. for RTL). Kite edits them on the same <strong>Airspace</strong> panel: green <strong>R</strong> markers you
+drag on the map, each with a lat/lon and altitude, plus the rally parameters (use limit, include home).
+They load on connect and upload on save. INAV has no separate rally concept — it returns to home or to a
+<strong>safe home</strong> (below).</p>
+<hr />
+<h2 id="automatic-landing-safe-home-autoland-inav">Automatic landing — Safe Home &amp; Autoland (INAV)<a class="headerlink" href="#automatic-landing-safe-home-autoland-inav" title="Permanent link">&para;</a></h2>
+<p>This is an INAV-only system, and one of its more sophisticated ones. A <strong>safe home</strong> is a stored
+landing site (lat/lon); for fixed wings, INAV (<strong>7.1+</strong>) can fly a complete <strong>wind-aware automatic
+landing</strong> there on RTH — loiter, downwind, base, final, glide and flare. Kite gives you the editor for
+both. (On ArduPilot and PX4 it works differently: multirotors and VTOLs land automatically on a Land /
+RTL command, while fixed wings autoland only as part of a preloaded mission — so there's no separate
+per-site landing editor like this one.)</p>
+<p>Open it from the <strong>Mission</strong> tool: the INAV mission panel has a <strong>home</strong> button that opens the <strong>Safe
+Home Manager</strong>.</p>
+<ul>
+<li><strong>Display</strong> works on any connected INAV — safe homes and their guard rings are downloaded on every
+  connect and drawn on the map.</li>
+<li><strong>Editing + autoland configuration</strong> needs <strong>INAV 7.1+</strong> (validated through 9.1; newer shows a hint).</li>
+</ul>
+<figure>
+<p><img alt="The Safe Home Manager" src="../../assets/guides/safety/safe_home_manager.png" /></p>
+<figcaption>
+<p>The Safe Home Manager: the collapsible autoland configuration on top and the eight safe-home slots
+below, each with its own approach settings.</p>
+</figcaption>
+</figure>
+<h3 id="the-safe-home-slots">The safe-home slots<a class="headerlink" href="#the-safe-home-slots" title="Permanent link">&para;</a></h3>
+<p>Up to <strong>eight</strong> slots. Each holds a <strong>position</strong> (set it by dragging on the map, typing coordinates, or
+<strong>Set here</strong> to drop it at the map centre) and, when autoland is available, a per-site <strong>approach</strong>:</p>
+<ul>
+<li><strong>Approach / land altitude</strong> — the pattern entry height and the touchdown height.</li>
+<li><strong>Approach turn</strong> — left or right circuit.</li>
+<li><strong>Heading 1 / 2</strong> — the allowed landing directions. Each can be <strong>bidirectional</strong> (the opposite
+  heading is allowed too) or marked <strong>exclusive</strong> (that direction only); <code>0</code> disables it. INAV picks the
+  one most into wind.</li>
+<li><strong>Sea-level reference</strong> — interpret this site's altitudes as <strong>AMSL</strong> instead of relative; toggling it
+  re-converts the values using the terrain elevation at the point.</li>
+</ul>
+<p>A per-slot <strong>Clear</strong> empties a slot. Use the toolbar's <strong>Show on map</strong> toggle to hide/show the overlay.</p>
+<h3 id="the-autoland-configuration">The autoland configuration<a class="headerlink" href="#the-autoland-configuration" title="Permanent link">&para;</a></h3>
+<p>The collapsible <strong>Autoland Config</strong> box holds the global approach parameters: <strong>approach length</strong>,
+<strong>pitch-to-throttle modifier</strong>, <strong>glide altitude / pitch</strong>, and — only if the aircraft has a
+<strong>rangefinder</strong> — <strong>flare altitude / pitch</strong> (no rangefinder, no flare phase).</p>
+<h3 id="on-the-map">On the map<a class="headerlink" href="#on-the-map" title="Permanent link">&para;</a></h3>
+<p>For each enabled safe home Kite draws:</p>
+<ul>
+<li>the <strong>safe-home marker</strong> (a green/grey "H" teardrop),</li>
+<li>a <strong>green max-distance ring</strong> (the <code>safehome_max_distance</code> guard) — shown <strong>only while disarmed</strong>,</li>
+<li>a <strong>yellow loiter ring</strong> at the approach altitude, and</li>
+<li>the <strong>approach path</strong> itself, drawn as a real descent in 3D: level downwind, a ~⅓ step-down on base,
+  then a linear final to the ground at the touchdown point (blue downwind/base, orange final).</li>
+</ul>
+<p>This renders on <strong>both</strong> the 2D and 3D maps.</p>
+<h3 id="saving">Saving<a class="headerlink" href="#saving" title="Permanent link">&para;</a></h3>
+<p>Edits build up in a working copy — nothing is live until you press <strong>Save to FC</strong>, which writes the
+whole package (safe homes + approaches + autoland settings) to the FC and saves it to EEPROM in one go.
+<strong>Revert</strong> drops your unsaved changes.</p>
+<hr />
+<h2 id="plan-vs-airspace-check">Plan-vs-airspace check<a class="headerlink" href="#plan-vs-airspace-check" title="Permanent link">&para;</a></h2>
+<p>When you have geozones (INAV) or a geofence (ArduPilot/PX4) set, Kite checks your <strong>planned mission</strong>
+against them automatically and flags trouble — these are <strong>hints, never a blocker</strong>:</p>
+<ul>
+<li>A warning bar above the waypoint list (e.g. <em>launch/home is inside a no-fly zone</em>, <em>mission path may
+  cross a no-fly zone</em>, <em>mission path leaves the inclusion zone</em>).</li>
+<li>The <strong>offending legs are drawn red</strong> on both the 2D and 3D maps.</li>
+</ul>
+<p>The check is <strong>altitude-aware</strong>: a leg that passes <em>over</em> a zone's ceiling, or <em>under</em> an exclusion
+zone, isn't flagged. Inclusion zones are only enforced when your launch/home actually sits inside one
+(matching how INAV behaves).</p>
+<figure>
+<p><img alt="A mission flagged against a no-fly zone" src="../../assets/guides/safety/mission_check.png" /></p>
+<figcaption>
+<p>The plan-vs-airspace check: a warning bar and red legs where the route would breach a zone.</p>
+</figcaption>
+</figure>
+<div class="admonition warning">
+<p class="admonition-title">These are previews, not the last word</p>
+<p>Kite's checks help you catch mistakes before you fly, but the flight controller is what actually
+enforces fences, geozones and landings. Always confirm the configuration on the FC and test
+conservatively.</p>
+</div>
+<h2 id="where-to-go-next">Where to go next<a class="headerlink" href="#where-to-go-next" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Plan a route that respects all this: <strong><a href="../missions/">Missions</a></strong>.</li>
+<li>See the approach and zones in 3D: <strong><a href="../map-3d/">3D map</a></strong>.</li>
+<li>Aeronautical airspace (airports, obstacles) lives in the same panel: <strong><a href="../radar-and-adsb/">Radar &amp; ADS-B</a></strong>.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; Marc Hoffmann (b14ckyy) — GPL-3.0-or-later
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["announce.dismiss", "navigation.sections", "navigation.top", "navigation.instant", "navigation.tracking", "toc.follow", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
