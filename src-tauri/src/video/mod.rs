@@ -15,6 +15,11 @@ pub mod native;
 #[cfg(target_os = "linux")]
 pub mod v4l2;
 pub mod mjpeg_server;
+pub mod rtsp;
+pub mod rtsp_native;
+/// Windows H264/HEVC decode + render sink for the hole-punch surface (MOBILE_RTSP.md P2.1).
+#[cfg(target_os = "windows")]
+pub mod win_sink;
 
 pub use mediamtx::MediaMtx;
 pub use mjpeg_server::MjpegServer;

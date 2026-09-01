@@ -475,7 +475,7 @@ fn read_request(stream: &mut TcpStream) -> String {
 /// to 43 fps with 121 gaps over 50 ms and a *median* spacing of 0.5 ms, i.e. frames delivered in
 /// bursts and nothing in between. Frame-wise and non-blocking, the same fast client holds 60.1 fps
 /// with a 16.1 ms median and one gap — indistinguishable from having no slow client at all.
-struct Client {
+pub(super) struct Client {
     sock: TcpStream,
     /// Remainder of a part the socket would not take in one go. While this is non-empty the client
     /// is behind, and new frames are dropped for it rather than queued.
@@ -523,7 +523,7 @@ impl Client {
 /// Accept clients and register them for broadcast. Each gets the response preamble matching what it
 /// asked for and `TCP_NODELAY` (no Nagle bunching on localhost); the socket then goes non-blocking
 /// for the broadcast. Exits when `shutdown` is set.
-fn accept_loop(listener: TcpListener, clients: Arc<Mutex<Vec<Client>>>, shutdown: Arc<AtomicBool>) {
+pub(super) fn accept_loop(listener: TcpListener, clients: Arc<Mutex<Vec<Client>>>, shutdown: Arc<AtomicBool>) {
     loop {
         if shutdown.load(Ordering::SeqCst) {
             break;
@@ -559,7 +559,7 @@ fn accept_loop(listener: TcpListener, clients: Arc<Mutex<Vec<Client>>>, shutdown
 /// pipe. Exits on EOF (ffmpeg died) or shutdown, and **closes every client on the way out**: a
 /// consumer whose socket stays open with no data has no way to tell a dead feed from a quiet one, so
 /// leaving them connected left a permanently frozen picture instead of triggering a reconnect.
-fn broadcast_loop(
+pub(super) fn broadcast_loop(
     mut stdout: impl Read,
     clients: Arc<Mutex<Vec<Client>>>,
     shutdown: Arc<AtomicBool>,

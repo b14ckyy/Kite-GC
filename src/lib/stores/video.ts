@@ -29,6 +29,7 @@ import {
   validateSelection,
 } from '$lib/helpers/videoCapabilities';
 import { setMjpegBuffer, setMjpegSinkHandlers, startMjpegSink, stopMjpegSink } from '$lib/controllers/mjpegSink';
+import { startNativeSurfaceRouter, stopNativeSurfaceRouter } from '$lib/controllers/nativeVideo';
 
 export interface VideoDevice {
   deviceId: string;
@@ -42,8 +43,9 @@ export type CameraFps = 'auto' | '30' | '60';
 /** Source kind: local camera (getUserMedia MediaStream), RTSP bridge (MediaMTX), or native hardware
  *  capture (V4L2 / DirectShow / AVFoundation → embedded MJPEG server). */
 export type VideoKind = 'camera' | 'rtsp' | 'native';
-/** Which reader served the live RTSP feed: the engine's native client or the ffmpeg fallback. */
-export type RtspEngine = 'native' | 'ffmpeg' | null;
+/** Which reader served the live RTSP feed: the engine's native client, the ffmpeg fallback, or
+ *  Kite's own in-process RTSP client ('kite'). */
+export type RtspEngine = 'native' | 'ffmpeg' | 'kite' | null;
 /** RTSP transport for a connection, passed through to the engine's native RTSP client ('auto' lets
  *  it negotiate — and falls back to the ffmpeg reader for servers that refuse every forced transport). */
 export type RtspTransport = 'udp' | 'tcp' | 'auto';
@@ -89,8 +91,18 @@ export interface VideoState {
   rtspTransport: RtspTransport;
   /** Saved, named RTSP connections the user can recall (explicit save — never auto-added). */
   rtspConnections: RtspConnection[];
+  /** Experimental: use Kite's own in-process RTSP client — no MediaMTX, no ffmpeg (MJPEG
+   *  sources only until the P2.1 native decode sinks land). Persisted. */
+  rtspNativeClient: boolean;
   /** Active RTSP reader once live (native engine client vs ffmpeg fallback); runtime-only. */
   rtspEngine: RtspEngine;
+  /** Runtime-only: the in-process client decodes this feed natively (H264/HEVC →
+   *  hole-punch sink below the WebView). The DOM surfaces render a transparent hole
+   *  instead of media — see controllers/nativeVideo.ts. */
+  nativeSink: boolean;
+  /** Runtime-only: the codec the native decode sink plays ('H.264'/'H.265'), for the
+   *  panel's info line. Null while the sink route isn't active. */
+  nativeSinkCodec: string | null;
   /** Runtime-only: true while the infinite RTSP auto-reconnect loop is running (link dropped/stalled). */
   reconnecting: boolean;
   /** Runtime-only: current reconnect attempt number, shown in the on-video overlay. */
@@ -108,6 +120,8 @@ export interface VideoState {
   disableHwAccel: boolean;
   /** Mirror horizontally (front-facing cams) — applied by the display sinks. */
   mirror: boolean;
+  /** Rotate the picture 180° (upside-down camera mounts) — applied by the display sinks. */
+  rotate180: boolean;
   /** Source aspect ratio (w/h); drives the widget / floating-window sizing. */
   aspect: number;
   /** Negotiated track settings (for the info line); null until live. */
@@ -153,6 +167,7 @@ interface VideoPrefs {
   rtspTransport: RtspTransport;
   rtspConnections: RtspConnection[];
   rtspBufferFrames: number;
+  rtspNativeClient: boolean;
   nativeDevice: string | null;
   nativeCodec: string;
   nativeDeviceName: string | null;
@@ -161,6 +176,7 @@ interface VideoPrefs {
   nativeFps: number;
   disableHwAccel: boolean;
   mirror: boolean;
+  rotate180: boolean;
   floating: boolean;
   floatSnapped: boolean;
   floatX: number;
@@ -178,6 +194,7 @@ const PREF_DEFAULTS: VideoPrefs = {
   rtspTransport: 'auto',
   rtspConnections: [],
   rtspBufferFrames: 0,
+  rtspNativeClient: false,
   nativeDevice: null,
   nativeCodec: 'mjpeg',
   nativeDeviceName: null,
@@ -186,6 +203,7 @@ const PREF_DEFAULTS: VideoPrefs = {
   nativeFps: 30,
   disableHwAccel: false,
   mirror: false,
+  rotate180: false,
   floating: false,
   floatSnapped: true,
   floatX: 16,
@@ -212,6 +230,7 @@ function loadPrefs(): VideoPrefs {
         rtspConnections: Array.isArray(p.rtspConnections) ? p.rtspConnections : [],
         // Clamped to the stepper's range — a hand-edited pref must not park the buffer at 4000 ms.
         rtspBufferFrames: Math.min(3, Math.max(0, Math.round(p.rtspBufferFrames ?? 0))),
+        rtspNativeClient: p.rtspNativeClient ?? false,
         nativeDevice: p.nativeDevice ?? p.v4l2Device ?? null,
         nativeCodec: p.nativeCodec ?? 'mjpeg',
         nativeDeviceName: p.nativeDeviceName ?? null,
@@ -243,6 +262,7 @@ function savePrefs(): void {
         rtspTransport: s.rtspTransport,
         rtspConnections: s.rtspConnections,
         rtspBufferFrames: get(rtspBufferFrames),
+        rtspNativeClient: s.rtspNativeClient,
         nativeDevice: s.nativeDevice,
         nativeCodec: s.nativeSel.codec,
         nativeDeviceName: s.nativeDeviceName,
@@ -251,6 +271,7 @@ function savePrefs(): void {
         nativeFps: s.nativeSel.fps,
         disableHwAccel: s.disableHwAccel,
         mirror: s.mirror,
+        rotate180: s.rotate180,
         floating: s.floating,
         floatSnapped: s.floatSnapped,
         floatX: s.floatX,
@@ -286,13 +307,17 @@ const INITIAL: VideoState = {
   rtspUrl: boot.rtspUrl,
   rtspTransport: boot.rtspTransport,
   rtspConnections: boot.rtspConnections,
+  rtspNativeClient: boot.rtspNativeClient,
   rtspEngine: null,
+  nativeSink: false,
+  nativeSinkCodec: null,
   reconnecting: false,
   reconnectAttempt: 0,
   mjpegUrl: null,
   activeTranscode: null,
   disableHwAccel: boot.disableHwAccel,
   mirror: boot.mirror,
+  rotate180: boot.rotate180,
   aspect: 16 / 9,
   width: null,
   height: null,
@@ -443,6 +468,9 @@ rtspBufferFrames.subscribe((frames) => {
   // the cushion itself. Sent on every change including the initial one — unlike `applyJitterTarget`
   // this touches no module state that is still in its TDZ, and the reader may already be running.
   setMjpegBuffer(frames);
+  // The native decode sink paces its presentation queue with the same number (0 = present
+  // on decode). Fire-and-forget — the backend no-ops while no sink runs.
+  void invoke('video_rtsp_native_sink_buffer', { frames }).catch(() => {});
   if (!bufferSubscribed) {
     bufferSubscribed = true;
     return;
@@ -801,6 +829,179 @@ async function startMjpegPath(url: string, requireCopy = false): Promise<boolean
   }
 }
 
+/** Stop the in-process native RTSP client (idempotent, fire-and-forget) and undo the
+ *  decode-sink surface state (hole clips, router, monitor) if that route was active. */
+function stopKiteRtsp(): void {
+  stopKiteStatsMonitor();
+  stopNativeSurfaceRouter();
+  if (get(videoState).nativeSink) patch({ nativeSink: false, nativeSinkCodec: null });
+  void invoke('video_rtsp_native_stop').catch(() => {});
+}
+
+/** Presented-fps readout of the native decode sink (updated by the 1 Hz monitor below);
+ *  0 while that route isn't running. Consumed by the panel's info line. */
+export const nativeSinkFps = writable(0);
+
+/** Per-second snapshot of the in-process RTSP client (both routes), for the Debug
+ *  Monitor's Video tab: transport in use, RTP loss/reorder counters, delivered frame/AU
+ *  rate, link bitrate — plus the decode sink's presentation numbers when that route is
+ *  active. Null while the native client isn't running. */
+export interface NativeRtspStats {
+  transport: string | null;
+  /** Frames/AUs delivered by the depacketizer per second (H264/HEVC can split an access
+   *  unit — the sink's presented rate is the true picture rate). */
+  framesPerSec: number;
+  framesDropped: number;
+  rtpReceived: number;
+  rtpLost: number;
+  rtpReordered: number;
+  rtpLate: number;
+  /** Received link bitrate over the last poll interval, kbit/s. */
+  kbps: number;
+  sink: { presentedFps: number; width: number | null; height: number | null; codec: string | null } | null;
+}
+export const nativeRtspStats = writable<NativeRtspStats | null>(null);
+
+interface NativeStatsReply {
+  active: boolean;
+  transport?: string | null;
+  rtpReceived?: number;
+  rtpLost?: number;
+  rtpReordered?: number;
+  rtpLate?: number;
+  frames?: number;
+  framesDropped?: number;
+  bytes?: number;
+  sink?: { presented: number; width: number | null; height: number | null; error: string | null; codec: string | null } | null;
+}
+
+/** Watch the in-process RTSP client (1 Hz, both routes): publishes the Debug Monitor
+ *  snapshot, and for the decode-sink route also the picture size (→ aspect for the
+ *  surfaces), the fps readout, fatal decoder errors and a frame-stall — the sink has no
+ *  WebRTC stats and no multipart reader, so this poll is its only health signal besides
+ *  the backend's ended event. */
+let kiteStatsMonitor: ReturnType<typeof setInterval> | undefined;
+function startKiteStatsMonitor(): void {
+  stopKiteStatsMonitor();
+  let lastPresented = -1;
+  let lastFrames = -1;
+  let lastBytes = 0;
+  let lastChange = performance.now();
+  let lastPollAt = performance.now();
+  kiteStatsMonitor = setInterval(() => {
+    void invoke<NativeStatsReply>('video_rtsp_native_stats')
+      .then((s) => {
+        const st = get(videoState);
+        if (!st.enabled || st.rtspEngine !== 'kite') return;
+        if (!s.active) return; // teardown race — the reconnect/stop path already runs
+        const now = performance.now();
+        const dt = (now - lastPollAt) / 1000;
+        const frames = s.frames ?? 0;
+        const bytes = s.bytes ?? 0;
+        const presented = s.sink?.presented ?? 0;
+        const presentedFps = lastPresented >= 0 && dt > 0 ? Math.max(0, (presented - lastPresented) / dt) : 0;
+        nativeRtspStats.set({
+          transport: s.transport ?? null,
+          framesPerSec: lastFrames >= 0 && dt > 0 ? Math.max(0, (frames - lastFrames) / dt) : 0,
+          framesDropped: s.framesDropped ?? 0,
+          rtpReceived: s.rtpReceived ?? 0,
+          rtpLost: s.rtpLost ?? 0,
+          rtpReordered: s.rtpReordered ?? 0,
+          rtpLate: s.rtpLate ?? 0,
+          kbps: dt > 0 ? Math.max(0, ((bytes - lastBytes) * 8) / 1000 / dt) : 0,
+          sink: s.sink
+            ? { presentedFps, width: s.sink.width, height: s.sink.height, codec: s.sink.codec }
+            : null,
+        });
+        lastFrames = frames;
+        lastBytes = bytes;
+        lastPollAt = now;
+
+        // Decode-sink health (the MJPEG route has the multipart reader + ended event).
+        if (st.nativeSink && s.sink) {
+          if (s.sink.error) {
+            logVideo('warn', `native decode sink failed: ${s.sink.error} — reconnecting`);
+            scheduleRtspReconnect();
+            return;
+          }
+          if (s.sink.width && s.sink.height) reportVideoSize(s.sink.width, s.sink.height);
+          if (presented !== lastPresented) {
+            if (lastPresented >= 0) nativeSinkFps.set(presentedFps);
+            lastPresented = presented;
+            lastChange = now;
+          } else if (now - lastChange > RTSP_STALL_LIVE_MS) {
+            logVideo(
+              'warn',
+              `native decode sink stalled after ${((now - lastChange) / 1000).toFixed(1)}s without a new frame — reconnecting`,
+            );
+            scheduleRtspReconnect();
+          }
+        }
+      })
+      .catch(() => {});
+  }, 1000);
+}
+function stopKiteStatsMonitor(): void {
+  if (kiteStatsMonitor) {
+    clearInterval(kiteStatsMonitor);
+    kiteStatsMonitor = undefined;
+  }
+  nativeSinkFps.set(0);
+  nativeRtspStats.set(null);
+}
+
+/** Bring the feed up on Kite's own in-process RTSP client (MOBILE_RTSP.md): our RTSP/RTP stack
+ *  reads the source itself (UDP first, automatic TCP fallback). An MJPEG source is broadcast on
+ *  the same local multipart port the ffmpeg path uses — every sink and the reconnect wiring work
+ *  unchanged. An H264 source (Windows) decodes natively into the hole-punch sink below the
+ *  WebView; the surfaces then render a transparent hole and the surface router keeps the native
+ *  layer's rect in sync (controllers/nativeVideo.ts).
+ *  Returns 'live', 'retry' (enter the reconnect loop) or 'fatal' (a retry cannot fix it). */
+async function startKiteRtspPath(url: string, transport: RtspTransport): Promise<'live' | 'retry' | 'fatal'> {
+  try {
+    const res = await invoke<{ mode?: string; url?: string; transcode: string; codec?: string }>('video_rtsp_native_start', {
+      url,
+      transport,
+    });
+    // Stopped — or switched to the classic path — while we were away? (The backend waits
+    // for the first frame — seconds, easily.)
+    if (get(videoState).kind !== 'rtsp' || !get(videoState).enabled || !get(videoState).rtspNativeClient) {
+      stopKiteRtsp();
+      return 'live'; // not a failure — the user stopped or rerouted it
+    }
+    if (res.mode === 'sink') {
+      patch({ status: 'live', mjpegUrl: null, nativeSink: true, nativeSinkCodec: res.codec ?? null, activeTranscode: res.transcode, error: null, rtspEngine: 'kite', reconnecting: false, reconnectAttempt: 0 });
+      startNativeSurfaceRouter();
+      // A fresh sink starts unflipped and unbuffered — apply the persisted settings.
+      syncNativeSinkOrient();
+      void invoke('video_rtsp_native_sink_buffer', { frames: get(rtspBufferFrames) }).catch(() => {});
+    } else {
+      patch({ status: 'live', mjpegUrl: res.url ?? null, activeTranscode: res.transcode, error: null, rtspEngine: 'kite', reconnecting: false, reconnectAttempt: 0 });
+    }
+    startKiteStatsMonitor(); // both routes — the Debug Monitor's client-side counters
+    return 'live';
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    logVideo('warn', `RTSP (native client) failed: ${message}`);
+    // A source whose codec this platform cannot take (H264/HEVC without a native decode
+    // sink — every non-Windows platform until P2.2/P3) will not change by retrying —
+    // hard stop. Everything else (unreachable, timeout) enters the loop.
+    if (message.includes('video track')) {
+      patch({ status: 'error', error: message, reconnecting: false, reconnectAttempt: 0 });
+      return 'fatal';
+    }
+    // RTSP 461 on SETUP is the server's verdict on our transport capabilities (seen in
+    // the field: an OBS RTSP server in multicast-only mode refuses unicast UDP and TCP
+    // alike) — retrying forever cannot change it, and the raw status line explains
+    // nothing, so this is a hard stop with a readable message.
+    if (message.includes('status 461')) {
+      patch({ status: 'error', error: get(t)('video.rtspUnicastRefused'), reconnecting: false, reconnectAttempt: 0 });
+      return 'fatal';
+    }
+    return 'retry';
+  }
+}
+
 /** Bring the source up in MediaMTX and complete one WebRTC (WHEP) negotiation. Throws on failure —
  *  including "the source is unreachable", which the backend reports from its readiness wait. */
 async function negotiateWebrtc(url: string, transport: RtspTransport, useFfmpeg: boolean): Promise<void> {
@@ -1136,6 +1337,7 @@ function scheduleRtspReconnect(): void {
   // Release the image path too. Its ffmpeg holds the source open, and a WebRTC-capable host retries
   // WebRTC on every cycle — without this, each attempt stacked a second reader on the same stream.
   void stopNativeMjpeg();
+  stopKiteRtsp();
   videoStream.set(null);
   patch({
     reconnecting: true,
@@ -1158,7 +1360,12 @@ async function negotiateRtsp(url: string, transport: RtspTransport): Promise<voi
     try {
       await negotiateWebrtc(url, 'auto', false); // native MediaMTX RTSP client
     } catch (nativeErr) {
-      logVideo('warn', `native RTSP pull failed, retrying via ffmpeg: ${nativeErr instanceof Error ? nativeErr.message : String(nativeErr)}`);
+      const msg = nativeErr instanceof Error ? nativeErr.message : String(nativeErr);
+      // A WHEP codec verdict cannot be fixed by switching the reader — ffmpeg would
+      // publish the same codec and get the same answer, burning a full engine restart
+      // against the caller's 20 s negotiation budget. Straight to the caller's hard stop.
+      if (msg.includes('codecs not supported')) throw nativeErr;
+      logVideo('warn', `native RTSP pull failed, retrying via ffmpeg: ${msg}`);
       closeRtc();
       if (get(videoState).kind !== 'rtsp' || !get(videoState).enabled) return; // stopped meanwhile
       await negotiateWebrtc(url, 'auto', true); // ffmpeg reader fallback
@@ -1196,6 +1403,22 @@ export async function startRtsp(opts?: { reconnect?: boolean }): Promise<void> {
     rtspMjpegFailures = 0;
     rtspHwVetoed = false;
   }
+
+  // In-process native RTSP client (MOBILE_RTSP.md): no engine, no ffmpeg — Kite's own
+  // RTSP/RTP stack (MJPEG → multipart, H264/HEVC → hardware decode sink).
+  if (st.rtspNativeClient) {
+    // Toggled over from the classic path mid-run? The engine would keep pulling the
+    // source in the background (a second client on it) — release it first.
+    void invoke('video_webrtc_stop').catch(() => {});
+    if (!reconnect) logVideo('info', `RTSP start ${url} (transport=${transport}, engine=kite-native)`);
+    if ((await startKiteRtspPath(url, transport)) === 'retry') scheduleRtspReconnect();
+    return;
+  }
+  // Classic path from here. Toggled over from the native client mid-run? Its stream (and
+  // the decode sink's picture, hole included) would simply keep running underneath the
+  // new negotiation — the field symptom was "switching the toggle off reconnects native
+  // until a full stop/start". Idempotent, and a no-op on plain reconnect cycles.
+  stopKiteRtsp();
 
   // MJPEG fallback for webviews without RTCPeerConnection (rare in Tauri). Decided BEFORE the engine
   // gate below: the image path is ffmpeg's alone now and never touches the engine, so demanding the
@@ -1242,11 +1465,20 @@ export async function startRtsp(opts?: { reconnect?: boolean }): Promise<void> {
         setTimeout(() => reject(new Error('RTSP negotiation timeout')), 20_000),
       ),
     ]);
-    if (get(videoState).kind !== 'rtsp' || !get(videoState).enabled) return; // stopped during negotiation
+    // Stopped — or rerouted to the native client — during negotiation: that run owns the
+    // stream now, this one must neither publish 'live' nor start a stall monitor.
+    if (get(videoState).kind !== 'rtsp' || !get(videoState).enabled || get(videoState).rtspNativeClient) return;
     patch({ reconnecting: false, reconnectAttempt: 0 });
     if (rtcConn) startRtspStallMonitor(rtcConn);
   } catch (err) {
-    logVideo('warn', `RTSP connect failed: ${err instanceof Error ? err.message : String(err)}`);
+    // Tauri invoke rejects with plain STRINGS for backend errors — normalize before any
+    // message matching (an `instanceof Error` guard here silently never matched them).
+    const message = err instanceof Error ? err.message : String(err);
+    // Rerouted to the native client while this classic negotiation was in flight (the
+    // route switch stops the engine under it, so a late failure here is expected): the
+    // native run owns the stream — this one must not fall back or schedule reconnects.
+    if (get(videoState).rtspNativeClient) return;
+    logVideo('warn', `RTSP connect failed: ${message}`);
     // An MJPEG source cannot travel over WebRTC at all — its video codecs are H.264/VP8/VP9/AV1 — so
     // even a WebRTC-capable WebView has to use the image path for one, and negotiation failing is the
     // first moment we could know. `requireCopy` keeps this honest: the image path is accepted only if
@@ -1255,6 +1487,15 @@ export async function startRtsp(opts?: { reconnect?: boolean }): Promise<void> {
     // silently settling for a transcode would be a permanent downgrade — so that keeps reconnecting.
     if (await startMjpegPath(url, true)) {
       logVideo('warn', 'source is MJPEG, which WebRTC cannot carry — switched to the image path');
+      return;
+    }
+    // The engine's WHEP answer "codecs not supported by client" is a codec verdict, not a
+    // connectivity failure: WebRTC can never carry this stream (HEVC being the field case
+    // — see the H.265 decision history) and the MJPEG copy above was already refused, so
+    // reconnecting forever would just repeat both answers. Hard stop, pointing at the
+    // native client, which decodes H.264/HEVC in hardware on Windows.
+    if (message.includes('codecs not supported')) {
+      patch({ status: 'error', error: get(t)('video.webrtcCodecUnsupported'), reconnecting: false, reconnectAttempt: 0 });
       return;
     }
     scheduleRtspReconnect();
@@ -1269,9 +1510,16 @@ export async function startRtsp(opts?: { reconnect?: boolean }): Promise<void> {
  *  an error. Idempotent — every sink fires it, and the first one to arrive does the work. */
 export function reportMjpegError(): void {
   const st = get(videoState);
-  if (!st.enabled || !st.mjpegUrl) return;
+  // The backend's ended event covers the native decode sink too (its RTSP thread ending
+  // drops the broadcast sender either way), so a dead sink feed re-enters the loop here.
+  if (!st.enabled || (!st.mjpegUrl && !st.nativeSink)) return;
   if (st.kind === 'rtsp') {
-    logVideo('warn', `MJPEG image failed to load (${st.mjpegUrl}) — reconnecting`);
+    logVideo(
+      'warn',
+      st.mjpegUrl
+        ? `MJPEG image failed to load (${st.mjpegUrl}) — reconnecting`
+        : 'native video feed ended — reconnecting',
+    );
     rtspMjpegFailures++;
     scheduleRtspReconnect();
     return;
@@ -1359,6 +1607,7 @@ export function stopVideo(): void {
   if (wasBackend) {
     void invoke('video_webrtc_stop').catch(() => {});
     void stopNativeMjpeg();
+    stopKiteRtsp();
   }
   patch({ enabled: false, status: 'off', error: null, rtspEngine: null, mjpegUrl: null, activeTranscode: null, reconnecting: false, reconnectAttempt: 0 });
   savePrefs();
@@ -1387,6 +1636,15 @@ export function setRtspUrl(rtspUrl: string): void {
 /** Set the active RTSP transport (udp/tcp/auto); restart if currently on a live RTSP feed. */
 export async function setRtspTransport(transport: RtspTransport): Promise<void> {
   patch({ rtspTransport: transport });
+  savePrefs();
+  const st = get(videoState);
+  if (st.enabled && st.kind === 'rtsp') await startRtsp();
+}
+
+/** Toggle the experimental in-process RTSP client (no MediaMTX/ffmpeg; MJPEG sources only for
+ *  now); restarts a live RTSP feed so the choice applies immediately. */
+export async function setRtspNativeClient(on: boolean): Promise<void> {
+  patch({ rtspNativeClient: on });
   savePrefs();
   const st = get(videoState);
   if (st.enabled && st.kind === 'rtsp') await startRtsp();
@@ -1508,6 +1766,23 @@ export async function setVideoResolution(resolution: VideoResolution): Promise<v
 export function setVideoMirror(mirror: boolean): void {
   patch({ mirror });
   savePrefs();
+  syncNativeSinkOrient();
+}
+
+/** Rotate the picture 180° (upside-down camera mounts). DOM sinks apply a CSS transform;
+ *  the native decode sink flips in the video processor. */
+export function setVideoRotate180(rotate180: boolean): void {
+  patch({ rotate180 });
+  savePrefs();
+  syncNativeSinkOrient();
+}
+
+/** Push the current mirror/rotation onto the native decode sink (no-op without one —
+ *  the DOM sinks read the store directly). */
+function syncNativeSinkOrient(): void {
+  const s = get(videoState);
+  if (!s.nativeSink) return;
+  void invoke('video_rtsp_native_sink_orient', { mirror: s.mirror, rotate180: s.rotate180 }).catch(() => {});
 }
 
 /** Force the software transcode regardless of what the backend's hardware probe found. Restarts a

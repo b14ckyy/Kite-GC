@@ -79,6 +79,9 @@ use commands::video::{
     video_webrtc_stop,
     video_list_native_devices, video_probe_device,
     video_native_mjpeg_start, video_native_mjpeg_stop, video_rtsp_mjpeg_start,
+    video_rtsp_native_start, video_rtsp_native_stop,
+    video_rtsp_native_sink_rect, video_rtsp_native_sink_visible, video_rtsp_native_stats,
+    video_rtsp_native_sink_buffer, video_rtsp_native_sink_orient,
 };
 use video::{MediaMtx, MjpegServer};
 use commands::logging::{set_log_level, get_log_path, log_session_settings, log_frontend};
@@ -543,6 +546,7 @@ pub fn run() {
         // readiness poll) without pinning an async runtime thread.
         .manage(std::sync::Arc::new(MediaMtx::new()))
         .manage(MjpegServer::new())
+        .manage(video::rtsp_native::NativeRtsp::new())
         .invoke_handler(tauri::generate_handler![
             list_serial_ports,
             scan_ble_devices,
@@ -701,6 +705,13 @@ pub fn run() {
             video_probe_device,
             video_native_mjpeg_start,
             video_rtsp_mjpeg_start,
+            video_rtsp_native_start,
+            video_rtsp_native_stop,
+            video_rtsp_native_sink_rect,
+            video_rtsp_native_sink_visible,
+            video_rtsp_native_stats,
+            video_rtsp_native_sink_buffer,
+            video_rtsp_native_sink_orient,
             video_native_mjpeg_stop,
             radar_configure,
             radar_set_center,
@@ -747,6 +758,7 @@ pub fn run() {
                 use tauri::Manager;
                 app.state::<std::sync::Arc<MediaMtx>>().stop();
                 app.state::<MjpegServer>().stop();
+                app.state::<video::rtsp_native::NativeRtsp>().stop();
             }
         });
 }

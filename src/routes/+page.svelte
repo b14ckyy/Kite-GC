@@ -89,6 +89,7 @@
   import FloatingVideoWindow from "$lib/components/video/FloatingVideoWindow.svelte";
   import { initVideo, videoState, videoStream, bindVideoEl, setMapLocation, setFloatHeightFrac, setFloatPos, registerPiPElement, reportMjpegError } from "$lib/stores/video";
   import { canvasSink, mjpegSink } from "$lib/controllers/mjpegSink";
+  import { nativeSurface, activeNativeSurface } from "$lib/controllers/nativeVideo";
   import { lowPowerActive } from "$lib/stores/lowPower";
   import { initPulseBlink } from "$lib/stores/pulseBlink";
   import { openUrl } from "@tauri-apps/plugin-opener";
@@ -2419,6 +2420,17 @@
 
   onMount(() => { void runStartupRecovery(); });
 
+  // The Windows main window starts hidden (`visible: false` in tauri.windows.conf.json): it is
+  // `transparent: true` for the native-video hole punch, so before the WebView's first paint the
+  // whole app area was see-through to the desktop with only the frame visible. Show it once the
+  // UI is actually mounted. No-op on platforms whose window starts visible.
+  onMount(() => {
+    void import('@tauri-apps/api/webviewWindow').then(({ getCurrentWebviewWindow }) => {
+      const win = getCurrentWebviewWindow();
+      void win.show().then(() => win.setFocus()).catch(() => {});
+    });
+  });
+
   // Keep the low-power state resolved for the whole app lifetime: the store mirrors it onto a root
   // class that CSS gates the expensive widget-bar transitions off (see stores/lowPower.ts). It is a
   // readable store, so it only runs while something subscribes — this is that subscription.
@@ -2578,6 +2590,7 @@
   <div
     class="layer-map"
     class:in-frame={mapInFrame}
+    data-nv-clip={mapInFrame ? undefined : true}
     style={mapInFrame ? inFrameStyle : mapLayerStyle}
     onclick={minimizeLogbook}
   >
@@ -2710,15 +2723,28 @@
   {#if mapInFrame}
     <!-- Wrapper carries the inset + black backdrop; the video fills it with object-fit: contain so
          it scales to the window (full height/width) without distortion — bars where aspect differs. -->
-    <div class="map-video-wrap">
-      {#if $videoState.mjpegUrl}
+    <div class="map-video-wrap" class:nv-active={$activeNativeSurface === 'main'}>
+      {#if $videoState.nativeSink}
+        <!-- Native decode sink (hole punch): the video is a hardware layer BELOW the WebView; this
+             div is the transparent hole it shows through. Highest surface priority — full-screen
+             video beats every other surface. See controllers/nativeVideo. -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          class="native-hole"
+          class:armed={$activeNativeSurface === 'main'}
+          use:nativeSurface={'main'}
+          ondblclick={() => setMapLocation('main')}
+        >
+          {#if $activeNativeSurface !== 'main'}<span>{$t('video.sinkElsewhere')}</span>{/if}
+        </div>
+      {:else if $videoState.mjpegUrl}
         <!-- Native / MJPEG feed (no MediaStream): drawn by the off-thread reader where the WebView
              allows it, otherwise the plain <img> multipart stream. -->
         {#if $canvasSink}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <canvas
             class="map-video"
-            class:mirror={$videoState.mirror}
+            class:mirror={$videoState.mirror} class:rot180={$videoState.rotate180}
             use:mjpegSink
             ondblclick={() => setMapLocation('main')}
           ></canvas>
@@ -2727,7 +2753,7 @@
           <!-- svelte-ignore a11y_missing_attribute -->
           <img
             class="map-video"
-            class:mirror={$videoState.mirror}
+            class:mirror={$videoState.mirror} class:rot180={$videoState.rotate180}
             src={$videoState.mjpegUrl}
             ondblclick={() => setMapLocation('main')}
             onerror={reportMjpegError}
@@ -2738,7 +2764,7 @@
         <!-- svelte-ignore a11y_media_has_caption -->
         <video
           class="map-video"
-          class:mirror={$videoState.mirror}
+          class:mirror={$videoState.mirror} class:rot180={$videoState.rotate180}
           bind:this={mapVideoEl}
           autoplay
           muted
@@ -3295,6 +3321,24 @@
     background: #000;
     z-index: 0;
   }
+  /* Native-sink hole: the wrapper stops painting while it holds the hardware video layer
+     (the sink letterboxes on its own black backbuffer). */
+  .map-video-wrap.nv-active {
+    background: transparent;
+  }
+  .map-video-wrap .native-hole {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #888;
+    font-size: 12px;
+    background: #000;
+  }
+  .map-video-wrap .native-hole.armed {
+    background: transparent;
+  }
   /* width/height 100% (not auto) so the replaced <video> stretches to the wrapper instead of using
      its intrinsic stream resolution; object-fit: contain keeps the aspect ratio (letterbox bars). */
   .map-video {
@@ -3307,6 +3351,12 @@
   }
   .map-video.mirror {
     transform: scaleX(-1);
+  }
+  .map-video.rot180 {
+    transform: rotate(180deg);
+  }
+  .map-video.mirror.rot180 {
+    transform: scaleY(-1);
   }
   /* PiP source: rendered + playing but visually out of the way (must not be
      display:none, or it produces no frames for Picture-in-Picture). */

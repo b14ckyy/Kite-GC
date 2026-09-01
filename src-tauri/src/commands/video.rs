@@ -267,3 +267,111 @@ pub fn video_native_mjpeg_stop(mjpeg: State<'_, crate::video::MjpegServer>) -> R
     mjpeg.stop();
     Ok(())
 }
+
+// ── Native RTSP client (Kite's own, in-process — MOBILE_RTSP.md P1) ───────────
+
+/// Start the in-process native RTSP client on `url` — no MediaMTX, no ffmpeg. An MJPEG
+/// source is served over the local multipart MJPEG port (`mode: "mjpeg"` + `url`); an
+/// H264/HEVC source decodes natively into the hole-punch sink on Windows (`mode: "sink"`
+/// + `codec`, no URL — the frontend cuts the CSS hole and syncs the rect via the sink
+/// commands below). `transport`: udp | tcp | auto (UDP first, automatic TCP-interleaved
+/// fallback when no RTP arrives).
+#[tauri::command(async)]
+pub fn video_rtsp_native_start(
+    app: AppHandle,
+    url: String,
+    transport: String,
+    native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
+) -> Result<serde_json::Value, String> {
+    // The decode sink renders into a child window of the main window, below the WebView.
+    #[cfg(target_os = "windows")]
+    let parent = {
+        use tauri::Manager;
+        app.get_webview_window("main")
+            .and_then(|w| w.hwnd().ok())
+            .map(|h| h.0 as isize)
+    };
+    #[cfg(not(target_os = "windows"))]
+    let parent: Option<isize> = None;
+    match native_rtsp.start(ended_hook(&app), &url, &transport, parent)? {
+        crate::video::rtsp_native::Started::Mjpeg { port } => Ok(serde_json::json!({
+            "mode": "mjpeg",
+            "url": format!("http://127.0.0.1:{port}/"),
+            // "copy" is the honest verdict: the frames pass through untouched.
+            "transcode": "copy",
+        })),
+        crate::video::rtsp_native::Started::Sink { codec } => Ok(serde_json::json!({
+            // "none": nothing transcodes anywhere — AUs go straight into the HW decoder.
+            "mode": "sink",
+            "transcode": "none",
+            "codec": codec,
+        })),
+    }
+}
+
+/// Push the on-screen video rect (PHYSICAL px, main-window client coords) to the native
+/// decode sink. Cheap (an mpsc send); no-op while no sink runs.
+#[tauri::command]
+pub fn video_rtsp_native_sink_rect(
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
+) {
+    native_rtsp.sink_rect(x, y, w, h);
+}
+
+/// Show/hide the native decode sink's layer (no DOM surface displays the video right now).
+#[tauri::command]
+pub fn video_rtsp_native_sink_visible(
+    visible: bool,
+    native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
+) {
+    native_rtsp.sink_visible(visible);
+}
+
+/// Smoothing-buffer depth for the native decode sink (frames, 0 = present on decode —
+/// the latency-first default). Shares the panel's "Smoothing buffer" stepper with the
+/// WebRTC/MJPEG paths; no-op while no sink runs.
+#[tauri::command]
+pub fn video_rtsp_native_sink_buffer(
+    frames: u32,
+    native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
+) {
+    native_rtsp.sink_buffer(frames);
+}
+
+/// Horizontal mirror / 180° rotation of the native decode sink's picture (the DOM sinks
+/// do this with a CSS transform, which cannot touch the native layer).
+#[tauri::command]
+pub fn video_rtsp_native_sink_orient(
+    mirror: bool,
+    rotate180: bool,
+    native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
+) {
+    native_rtsp.sink_orient(mirror, rotate180);
+}
+
+/// Live counters of the running native RTSP stream: client side (transport, RTP
+/// received/lost/reordered/late, frames/dropped, bytes) plus the decode sink's numbers
+/// (`sink: {presented, width, height, error, codec}`) when that route is active.
+/// `{active: false}` while nothing runs. Polled 1 Hz by the frontend for the Debug
+/// Monitor, the fps readout, aspect ratio and sink stall detection.
+#[tauri::command]
+pub fn video_rtsp_native_stats(
+    native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
+) -> serde_json::Value {
+    native_rtsp
+        .debug_stats()
+        .unwrap_or_else(|| serde_json::json!({ "active": false }))
+}
+
+/// Stop the in-process native RTSP client if running. Idempotent.
+#[tauri::command(async)]
+pub fn video_rtsp_native_stop(
+    native_rtsp: State<'_, crate::video::rtsp_native::NativeRtsp>,
+) -> Result<(), String> {
+    native_rtsp.stop();
+    Ok(())
+}
