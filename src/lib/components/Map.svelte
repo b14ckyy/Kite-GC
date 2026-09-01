@@ -74,7 +74,7 @@
   import { isMobile } from "$lib/platform";
   import { radarVehicles, radarSelection, enrichList, type RadarSnapshot, type EnrichedVehicle } from "$lib/stores/radarTracking";
   import { radarAlertLevels, type AlertLevel } from "$lib/controllers/radarAlerts";
-  import { gcsLocation, gcsAccuracyM, setGcsManual } from "$lib/stores/gcsLocation";
+  import { gcsLocation, gcsAccuracyM, gcsWatchPaused, setGcsManual } from "$lib/stores/gcsLocation";
   import { aeroData, aeroFocus, type AeroPoint, type Airspace } from "$lib/stores/airspace";
   import { airspaceStyle, aeroPointIconHtml, aeroPointInfo, airspaceMinZoom, airportMinZoom, obstacleMinZoom, RC_MIN_ZOOM, airspaceContainsPoint, airspaceIsRelevant, isAirspaceHidden } from "$lib/helpers/airspaceStyle";
   import { type RadarMapSettings, type GcsMode } from "$lib/stores/settings";
@@ -416,7 +416,9 @@
   let unsubHome2d: (() => void) | undefined;
   const gcsMode = $derived<GcsMode>($settings.gcsMode);
 
-  /** Satellite-dish marker on a dark translucent disc; mode tweaks the affordance (drag ring / live dot). */
+  /** Satellite-dish marker on a dark translucent disc; mode tweaks the affordance (drag ring / live
+   *  dot). The live pulse hides while continuous updates are paused for a Wi-Fi video stream
+   *  (gcsWatchPaused) — a blinking "live" dot on a frozen position would lie. */
   function createGcsIcon(mode: GcsMode): L.DivIcon {
     return L.divIcon({
       className: "gcs-icon",
@@ -426,7 +428,7 @@
           <path d="M4 10a7.31 7.31 0 0 0 10 10Z"/><path d="m9 15 3-3"/>
           <path d="M17 13a6 6 0 0 0-6-6"/><path d="M21 13A10 10 0 0 0 11 3"/>
         </svg>
-        ${mode === "continuous" ? '<span class="gcs-live"></span>' : ""}
+        ${mode === "continuous" && !get(gcsWatchPaused) ? '<span class="gcs-live"></span>' : ""}
       </div>`,
       iconSize: [30, 30],
       iconAnchor: [15, 15],
@@ -483,8 +485,9 @@
     updateGcsAccuracyCircle();
   }
 
-  // Rebuild the GCS marker when the mode changes (location/accuracy handled by their subscriptions).
-  $effect(() => { gcsMode; if (map) updateGcsMarker(); });
+  // Rebuild the GCS marker when the mode or the video-pause state changes (location/accuracy
+  // handled by their subscriptions).
+  $effect(() => { gcsMode; $gcsWatchPaused; if (map) updateGcsMarker(); });
 
   /** Right-click on the empty map → "Set GCS here" (manual mode only). */
   function onMapContextMenu(e: L.LeafletMouseEvent) {
@@ -2393,13 +2396,12 @@
     cursor: move;
     border-style: dashed;
   }
-  /* Continuous: a small green "live" dot, top-right.
-     `will-change: opacity` is load-bearing, not a micro-optimisation: without it this infinite pulse
-     has no compositor layer of its own, so every frame invalidates the enclosing map layer — which is
-     full-screen, and sits under several backdrop-filter surfaces that must then re-sample and re-blur.
-     An 8px dot cost ~25 % CPU here and ~70 % on a weak laptop, permanently, even with the marker
-     scrolled far outside the viewport (the invalidated rect still lives in that layer). Promoted, the
-     animation is a pure layer-alpha change: no repaint, no re-blur. */
+  /* Continuous: a small green "live" dot, top-right. Chromium runs the opacity loop on the
+     compositor thread by itself (`will-change` measured as a no-op and was removed, d95e1e4) —
+     the remaining cost is per produced FRAME (backdrop-filter re-sampling + GPU submission),
+     which desktop GPUs hide and WebKitGTK/Android do not: on the Teclast M11 this dot alone
+     measured ~150 % of a core. Those platforms run the shared 1 Hz blink instead (below,
+     stores/pulseBlink.ts). */
   :global(.gcs-icon .gcs-dot .gcs-live) {
     position: absolute;
     top: -1px;

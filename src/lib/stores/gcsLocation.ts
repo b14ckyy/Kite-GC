@@ -13,7 +13,7 @@
 import { writable, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { settings, type GcsMode } from '$lib/stores/settings';
-import { userGeoLocation, userGeoAccuracyM, type LatLon } from '$lib/helpers/userLocation';
+import { userGeoLocation, userGeoAccuracyM, requestUserLocation, type LatLon } from '$lib/helpers/userLocation';
 import { videoState } from '$lib/stores/video';
 import { haversineDistance } from '$lib/utils/geo';
 import { isAndroid } from '$lib/platform';
@@ -24,6 +24,9 @@ export const gcsLocation = writable<LatLon | null>(null);
 export const gcsAccuracyM = writable<number | null>(null);
 /** True while a manual override is active (enables the Reset button). */
 export const gcsManuallySet = writable(false);
+/** True while continuous updates are paused for a running RTSP stream over Wi-Fi (Android)
+ *  — the map hides the marker's "live" pulse dot then, since nothing is live. */
+export const gcsWatchPaused = writable(false);
 
 const GEO_OPTS: PositionOptions = { enableHighAccuracy: true, timeout: 10_000, maximumAge: 0 };
 const CONT_MIN_MOVE_M = 20; // continuous: ignore sub-20 m jitter
@@ -36,7 +39,9 @@ function clearWatch() {
   watchId = null;
 }
 
-/** Recompute the GCS position for off / manual (continuous is driven by the watch). */
+/** Recompute the GCS position for off / manual (continuous is driven by the watch — except
+ *  while paused for video, where the marker falls back to the one-shot OS fix if the watch
+ *  never delivered, e.g. an RTSP stream auto-starting with the app). */
 function recompute() {
   const mode = get(settings).gcsMode;
   if (mode === 'off') {
@@ -50,6 +55,11 @@ function recompute() {
       gcsLocation.set(get(userGeoLocation));
       gcsAccuracyM.set(get(userGeoAccuracyM));
     }
+  } else if (mode === 'continuous' && pausedForVideo && !get(gcsLocation)) {
+    // Paused before the watch ever produced a fix: show the session's one-shot OS location
+    // so the marker exists at all. A position the watch DID deliver stays frozen instead.
+    gcsLocation.set(get(userGeoLocation));
+    gcsAccuracyM.set(get(userGeoAccuracyM));
   }
 }
 
@@ -63,7 +73,12 @@ let pausedForVideo = false;
 function setPausedForVideo(on: boolean) {
   if (pausedForVideo === on) return;
   pausedForVideo = on;
+  gcsWatchPaused.set(on);
   console.log(`[gcs] continuous location updates ${on ? 'paused (RTSP over Wi-Fi)' : 'resumed'}`);
+  // Entering the pause with no location at all (stream auto-started with the app): run the
+  // usual ONE-SHOT OS check — a single fix costs a single Wi-Fi scan blip, and without it
+  // the marker would be missing for the whole stream.
+  if (on && !get(userGeoLocation)) requestUserLocation();
   applyGcsMode(get(settings).gcsMode);
 }
 
@@ -87,7 +102,7 @@ function startContinuous() {
 
 function applyGcsMode(mode: GcsMode) {
   clearWatch();
-  if (mode === 'continuous') startContinuous();
+  if (mode === 'continuous' && !pausedForVideo) startContinuous();
   else recompute();
 }
 
