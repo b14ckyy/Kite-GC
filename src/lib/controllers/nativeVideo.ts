@@ -106,11 +106,47 @@ function chosen(): { id: NativeSurfaceId; el: HTMLElement; rect: DOMRect } | nul
   return null;
 }
 
+/** The part of `rect` that is actually visible: intersected with every overflow-clipping
+ *  ancestor of `el`. A scrolling container (the video panel's body on a small screen)
+ *  clips the hole div in the DOM — but its bounding rect still reaches outside, and using
+ *  it raw cuts the hole into the panel's HEADER and paints the native layer over it (found
+ *  on the Android tablet; the same bug was latent on Windows, where the panel never
+ *  scrolls). Null when the box is clipped away entirely. */
+function visibleRect(el: HTMLElement, rect: DOMRect): DOMRect | null {
+  let x1 = rect.left;
+  let y1 = rect.top;
+  let x2 = rect.right;
+  let y2 = rect.bottom;
+  const clips = (v: string) => v === 'auto' || v === 'scroll' || v === 'hidden' || v === 'clip';
+  for (let node = el.parentElement; node; node = node.parentElement) {
+    const cs = getComputedStyle(node);
+    if (clips(cs.overflowX) || clips(cs.overflowY)) {
+      // Overflow clips at the CLIENT box (inside the border, minus scrollbars) — the
+      // border box would let the video slide over the container's frame line and the
+      // scrollbar gutter. client* are layout px; map to visual px through the element's
+      // own layout-vs-visual ratio (--ui-scale).
+      const b = node.getBoundingClientRect();
+      const sx = node.offsetWidth ? b.width / node.offsetWidth : 1;
+      const sy = node.offsetHeight ? b.height / node.offsetHeight : 1;
+      const left = b.left + node.clientLeft * sx;
+      const top = b.top + node.clientTop * sy;
+      x1 = Math.max(x1, left);
+      y1 = Math.max(y1, top);
+      x2 = Math.min(x2, left + node.clientWidth * sx);
+      y2 = Math.min(y2, top + node.clientHeight * sy);
+      if (x2 <= x1 || y2 <= y1) return null;
+    }
+  }
+  return new DOMRect(x1, y1, x2 - x1, y2 - y1);
+}
+
 function tick(): void {
   if (!running) return;
   const c = chosen();
   if (get(activeNativeSurface) !== (c?.id ?? null)) activeNativeSurface.set(c?.id ?? null);
-  if (!c) {
+  const vis = c ? visibleRect(c.el, c.rect) : null;
+  if (!c || !vis) {
+    // No surface — or the active one is scrolled entirely out of its container.
     if (lastVisible !== false) {
       lastVisible = false;
       void invoke('video_rtsp_native_sink_visible', { visible: false }).catch(() => {});
@@ -118,35 +154,61 @@ function tick(): void {
     clearClips();
     lastRectKey = '';
   } else {
-    const hole = c.rect;
+    // Two rects go to the sink: the surface's FULL box for video layout (aspect fit), and
+    // the VISIBLE part as a clip — a scroll-clipped surface then shows a video cut at the
+    // container edge (like scrolled DOM content), not one shrunk into the remainder.
+    const hole = vis;
     const dpr = window.devicePixelRatio || 1;
     const phys = {
-      x: Math.round(hole.x * dpr),
-      y: Math.round(hole.y * dpr),
-      w: Math.round(hole.width * dpr),
-      h: Math.round(hole.height * dpr),
+      x: Math.round(c.rect.x * dpr),
+      y: Math.round(c.rect.y * dpr),
+      w: Math.round(c.rect.width * dpr),
+      h: Math.round(c.rect.height * dpr),
+      cx: Math.round(hole.x * dpr),
+      cy: Math.round(hole.y * dpr),
+      cw: Math.round(hole.width * dpr),
+      ch: Math.round(hole.height * dpr),
     };
     if (lastVisible !== true) {
       lastVisible = true;
       void invoke('video_rtsp_native_sink_visible', { visible: true }).catch(() => {});
     }
-    const key = `${phys.x},${phys.y},${phys.w},${phys.h}`;
+    const key = `${phys.x},${phys.y},${phys.w},${phys.h},${phys.cx},${phys.cy},${phys.cw},${phys.ch}`;
     if (key !== lastRectKey) {
       lastRectKey = key;
       void invoke('video_rtsp_native_sink_rect', phys).catch(() => {});
     }
-    // Clip with the rect the NATIVE window actually got (device-pixel-snapped): a hole a
+    // Clip with the rect the NATIVE layer actually got (device-pixel-snapped): a hole a
     // fraction wider than the native layer exposes a hairline of whatever is behind it.
-    const snapped = new DOMRect(phys.x / dpr, phys.y / dpr, phys.w / dpr, phys.h / dpr);
+    const snapped = new DOMRect(phys.cx / dpr, phys.cy / dpr, phys.cw / dpr, phys.ch / dpr);
     // The surface's corner rounding, in viewport px (the hole div declares it in CSS; the
     // chrome layer may be scaled by --ui-scale). The hole is cut with these corners
     // rounded, so the layers behind keep painting the corner caps over the native layer's
-    // square corners — the frame looks exactly like the DOM-rendered video did.
+    // square corners — the frame looks exactly like the DOM-rendered video did. A corner
+    // produced by scroll-CLIPPING is not a real corner: the video slides under the
+    // container edge there, so that edge stays square.
     const surfScale = c.el.offsetWidth ? c.rect.width / c.el.offsetWidth : 1;
     const radius = (parseFloat(getComputedStyle(c.el).borderTopLeftRadius) || 0) * surfScale;
-    applyClips(c.el, snapped, radius);
+    const cutTop = hole.top > c.rect.top + 0.5;
+    const cutLeft = hole.left > c.rect.left + 0.5;
+    const cutRight = hole.right < c.rect.right - 0.5;
+    const cutBottom = hole.bottom < c.rect.bottom - 0.5;
+    applyClips(c.el, snapped, {
+      tl: cutTop || cutLeft ? 0 : radius,
+      tr: cutTop || cutRight ? 0 : radius,
+      bl: cutBottom || cutLeft ? 0 : radius,
+      br: cutBottom || cutRight ? 0 : radius,
+    });
   }
   raf = requestAnimationFrame(tick);
+}
+
+/** Per-corner rounding of the hole, viewport px (0 = square corner). */
+export interface HoleRadii {
+  tl: number;
+  tr: number;
+  bl: number;
+  br: number;
 }
 
 /** Build the hole clip for `el` as an SVG `path()`: outer ring clockwise, inner (the hole,
@@ -154,10 +216,10 @@ function tick(): void {
  *  intersection with `hole` unpainted. Coordinates are the element's LOCAL layout px:
  *  clip-path applies before CSS transforms, and the chrome layer is scaled by --ui-scale,
  *  so viewport px must be mapped back through the element's own layout-vs-visual ratio.
- *  `radius` is the hole's corner rounding in viewport px (0 = square; an SVG arc with zero
- *  radii degrades to a line per spec, so no special case is needed). Null when the element
- *  doesn't intersect the hole. */
-function holePath(el: HTMLElement, hole: DOMRect, radius: number): string | null {
+ *  `radii` is the hole's per-corner rounding in viewport px (0 = square; an SVG arc with
+ *  zero radii degrades to a line per spec, so no special case is needed). Null when the
+ *  element doesn't intersect the hole. */
+function holePath(el: HTMLElement, hole: DOMRect, radii: HoleRadii): string | null {
   const b = el.getBoundingClientRect();
   if (b.width <= 0 || b.height <= 0) return null;
   const x1 = Math.max(hole.left, b.left);
@@ -173,25 +235,35 @@ function holePath(el: HTMLElement, hole: DOMRect, radius: number): string | null
   const hy1 = (y1 - b.top) / sy;
   const hx2 = (x2 - b.left) / sx;
   const hy2 = (y2 - b.top) / sy;
-  const rx = Math.min(radius / sx, (hx2 - hx1) / 2);
-  const ry = Math.min(radius / sy, (hy2 - hy1) / 2);
+  const cap = (r: number, axisScale: number, span: number) =>
+    Math.min(r / axisScale, span / 2);
+  const r = {
+    tlx: cap(radii.tl, sx, hx2 - hx1),
+    tly: cap(radii.tl, sy, hy2 - hy1),
+    trx: cap(radii.tr, sx, hx2 - hx1),
+    try_: cap(radii.tr, sy, hy2 - hy1),
+    blx: cap(radii.bl, sx, hx2 - hx1),
+    bly: cap(radii.bl, sy, hy2 - hy1),
+    brx: cap(radii.br, sx, hx2 - hx1),
+    bry: cap(radii.br, sy, hy2 - hy1),
+  };
   const f = (v: number) => v.toFixed(2);
-  const arc = `A ${f(rx)} ${f(ry)} 0 0 0`;
+  const arc = (rx: number, ry: number) => `A ${f(rx)} ${f(ry)} 0 0 0`;
   return (
     `path('M0 0H${f(w)}V${f(h)}H0Z` +
-    ` M${f(hx1 + rx)} ${f(hy1)}` +
-    ` ${arc} ${f(hx1)} ${f(hy1 + ry)}` +
-    ` V${f(hy2 - ry)}` +
-    ` ${arc} ${f(hx1 + rx)} ${f(hy2)}` +
-    ` H${f(hx2 - rx)}` +
-    ` ${arc} ${f(hx2)} ${f(hy2 - ry)}` +
-    ` V${f(hy1 + ry)}` +
-    ` ${arc} ${f(hx2 - rx)} ${f(hy1)}` +
+    ` M${f(hx1 + r.tlx)} ${f(hy1)}` +
+    ` ${arc(r.tlx, r.tly)} ${f(hx1)} ${f(hy1 + r.tly)}` +
+    ` V${f(hy2 - r.bly)}` +
+    ` ${arc(r.blx, r.bly)} ${f(hx1 + r.blx)} ${f(hy2)}` +
+    ` H${f(hx2 - r.brx)}` +
+    ` ${arc(r.brx, r.bry)} ${f(hx2)} ${f(hy2 - r.bry)}` +
+    ` V${f(hy1 + r.try_)}` +
+    ` ${arc(r.trx, r.try_)} ${f(hx2 - r.trx)} ${f(hy1)}` +
     `Z')`
   );
 }
 
-function applyClips(surfaceEl: HTMLElement, hole: DOMRect, radius: number): void {
+function applyClips(surfaceEl: HTMLElement, hole: DOMRect, radius: HoleRadii): void {
   const targets = new Set<HTMLElement>();
   for (const el of document.querySelectorAll<HTMLElement>('[data-nv-clip]')) targets.add(el);
   // The panel preview sits on a glass PanelShell — clip that instance too.

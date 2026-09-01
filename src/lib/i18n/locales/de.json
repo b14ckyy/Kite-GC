@@ -680,6 +680,7 @@
       "copy": "Direkt"
     },
     "mirror": "Horizontal spiegeln",
+    "mirrorNativeAndroid": "Bei Hardware-Videodecodierung auf Android nicht verfügbar — das decodierte Bild kann dort nicht gespiegelt werden. MJPEG- und Kameraquellen spiegeln normal.",
     "rotate180": "Um 180° drehen (Kamera kopfüber)",
     "codec": "Codec",
     "floatingWindow": "Schwebendes Fenster",

@@ -199,6 +199,19 @@ priority, Linux is the platform where you may have to do some work yourself**, a
 particular result on a particular machine. In short: **Windows and macOS for maximum compatibility and
 the lowest delay; on Linux, an MJPEG source is the setup that gets closest.**
 
+**On Android, RTSP runs entirely through Kite's own built-in stream client** — there is nothing to
+download and no engine choice: H.264 and HEVC are decoded by the device's hardware decoder, and MJPEG
+streams are shown directly. (On iOS, RTSP is not available yet.)
+
+- **Location updates pause during a Wi-Fi stream.** Every live location fix makes Android scan for
+  Wi-Fi networks, and each scan takes the Wi-Fi radio off your network's channel for a moment — with
+  an RTSP stream running over that same Wi-Fi, this shows up as a brief dropout roughly every ten
+  seconds. Kite therefore pauses the **continuous** GCS-marker location mode automatically while an
+  RTSP stream is playing over Wi-Fi: the GCS marker freezes at its last position and updates resume
+  the moment the stream stops. Streams received over **mobile data** (or Ethernet) are not affected,
+  and neither is a manually placed GCS marker. When Kite cannot tell which way the stream travels
+  (some VPN setups), it pauses to be safe.
+
 ## Where to go next
 
 - Put the Video widget in a dock: **[Telemetry & display](telemetry-and-display.md)**.

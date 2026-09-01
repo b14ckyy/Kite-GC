@@ -2436,8 +2436,9 @@
   // readable store, so it only runs while something subscribes — this is that subscription.
   onMount(() => lowPowerActive.subscribe(() => {}));
 
-  // Hard-blink indicator mode on WebKitGTK — see stores/pulseBlink.ts for why a looping CSS
-  // animation there costs ~46 % of a core regardless of size or visibility. No-op elsewhere.
+  // Hard-blink indicator mode on WebKitGTK and Android — see stores/pulseBlink.ts for why a looping
+  // CSS animation costs a large fraction of a core there (per-frame fixed cost, not per pixel).
+  // No-op elsewhere.
   onMount(() => initPulseBlink());
 
   // Startup update check (GitHub releases). Deferred a few seconds so it never competes with launch work;

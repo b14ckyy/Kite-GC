@@ -2469,6 +2469,7 @@ dependencies = [
  "log",
  "mavlink",
  "md-5",
+ "ndk",
  "ndk-context",
  "num-traits",
  "objc2 0.6.4",

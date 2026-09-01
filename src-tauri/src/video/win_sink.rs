@@ -85,7 +85,10 @@ pub enum SinkCodec {
 enum Cmd {
     /// One Annex-B access unit + its (unwrapped) RTP timestamp in 90 kHz ticks.
     Frame(Vec<u8>, u64),
-    Rect(i32, i32, i32, i32),
+    /// `full` = the surface's whole box (video layout / aspect fit), `clip` = the visible
+    /// part after scroll-container clipping — the window sits at `clip` and the picture is
+    /// shifted + source-cropped so it gets CUT at the container edge, never shrunk.
+    Rect { full: (i32, i32, i32, i32), clip: (i32, i32, i32, i32) },
     Visible(bool),
     /// Smoothing-buffer depth in frames (0 = present on decode, the latency-first
     /// default). See `SinkState::pump_queue`.
@@ -143,8 +146,10 @@ impl WinVideoSink {
         let _ = self.tx.send(Cmd::Frame(au, rtp_ts_90k));
     }
 
-    pub fn set_rect(&self, x: i32, y: i32, w: i32, h: i32) {
-        let _ = self.tx.send(Cmd::Rect(x, y, w, h));
+    /// Full box `x/y/w/h` for the video layout, visible part `cx/cy/cw/ch` for the clip.
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_rect(&self, x: i32, y: i32, w: i32, h: i32, cx: i32, cy: i32, cw: i32, ch: i32) {
+        let _ = self.tx.send(Cmd::Rect { full: (x, y, w, h), clip: (cx, cy, cw, ch) });
     }
 
     pub fn set_visible(&self, visible: bool) {
@@ -247,7 +252,7 @@ fn run_sink(
                     *shared.error.lock().unwrap() = Some(e);
                 }
             }
-            Ok(Cmd::Rect(x, y, w, h)) => unsafe { state.set_rect(x, y, w, h) },
+            Ok(Cmd::Rect { full, clip }) => unsafe { state.set_rect(full, clip) },
             Ok(Cmd::Visible(v)) => unsafe {
                 let _ = ShowWindow(state.hwnd, if v { SW_SHOWNA } else { SW_HIDE });
             },
@@ -306,6 +311,11 @@ struct SinkState {
     /// crop the padding rows would show as garbage at the picture's edge.
     display: Option<(i32, i32, i32, i32)>,
     client: (i32, i32),
+    /// The surface's FULL box relative to the (clip-sized) window, and its size — the
+    /// video is aspect-fitted into the full box and the window bounds cut it (a scrolled
+    /// panel crops the picture at its edge instead of shrinking it).
+    full_off: (i32, i32),
+    full_size: (i32, i32),
     sample_index: u64,
     /// Decoded frames awaiting presentation (media time in 100 ns units). Only used when
     /// `buffer_frames` > 0 — the default path presents on decode. Held samples come out
@@ -402,6 +412,8 @@ impl SinkState {
                 picture: (0, 0),
                 display: None,
                 client: (rect.2.max(1), rect.3.max(1)),
+                full_off: (0, 0),
+                full_size: (rect.2.max(1), rect.3.max(1)),
                 sample_index: 0,
                 queue: VecDeque::new(),
                 buffer_frames: 0,
@@ -412,19 +424,24 @@ impl SinkState {
         }
     }
 
-    unsafe fn set_rect(&mut self, x: i32, y: i32, w: i32, h: i32) {
+    unsafe fn set_rect(&mut self, full: (i32, i32, i32, i32), clip: (i32, i32, i32, i32)) {
         unsafe {
+            let (cx, cy, cw, ch) = clip;
             let _ = SetWindowPos(
                 self.hwnd,
                 None,
-                x,
-                y,
-                w.max(1),
-                h.max(1),
+                cx,
+                cy,
+                cw.max(1),
+                ch.max(1),
                 SWP_NOZORDER | SWP_NOACTIVATE,
             );
-            if (w.max(1), h.max(1)) != (self.client.0, self.client.1) {
-                self.client = (w.max(1), h.max(1));
+            // Where the FULL box sits relative to the (clip-sized) window, and its size —
+            // the blit lays the video out in the full box and lets the window bounds cut it.
+            self.full_off = (full.0 - cx, full.1 - cy);
+            self.full_size = (full.2.max(1), full.3.max(1));
+            if (cw.max(1), ch.max(1)) != (self.client.0, self.client.1) {
+                self.client = (cw.max(1), ch.max(1));
                 self.vp = None; // output size changed → rebuild the processor
                 let _ = self.swapchain.ResizeBuffers(
                     0,
@@ -905,27 +922,55 @@ impl SinkState {
                     .video_device
                     .CreateVideoProcessor(&enumerator, 0)
                     .map_err(|e| format!("CreateVideoProcessor: {e}"))?;
-                // Letterbox from the DISPLAY size (aperture crop), not the coded size —
-                // HEVC pads to CTU multiples and the padding must neither show nor skew
-                // the aspect ratio.
-                let (disp_w, disp_h) = self
-                    .display
-                    .map(|(_, _, w, h)| (w as u32, h as u32))
-                    .unwrap_or((in_w, in_h));
-                let dest = letterbox(disp_w, disp_h, out_w, out_h);
                 self.video_context
                     .VideoProcessorSetStreamFrameFormat(&processor, 0, D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE);
-                self.video_context
-                    .VideoProcessorSetStreamDestRect(&processor, 0, true, Some(&dest));
-                if let Some((x, y, w, h)) = self.display {
-                    let src = RECT { left: x, top: y, right: x + w, bottom: y + h };
-                    self.video_context
-                        .VideoProcessorSetStreamSourceRect(&processor, 0, true, Some(&src));
-                }
                 self.vp = Some((enumerator, processor, key));
                 self.apply_orient(); // a rebuilt processor starts unmirrored
             }
             let (enumerator, processor, _) = self.vp.as_ref().unwrap();
+
+            // Geometry, per frame (cheap stream state): letterbox from the DISPLAY size
+            // (aperture crop — HEVC pads to CTU multiples and the padding must neither
+            // show nor skew the aspect), laid out in the surface's FULL box, shifted into
+            // this (clip-sized) window. What the window bounds cut away is mapped back into
+            // the source rect, so a scrolled panel CROPS the picture at its edge — same
+            // geometry contract as the Android sink.
+            let (disp_w, disp_h) = self
+                .display
+                .map(|(_, _, w, h)| (w as u32, h as u32))
+                .unwrap_or((in_w, in_h));
+            let (fw, fh) = (self.full_size.0 as u32, self.full_size.1 as u32);
+            let fit = letterbox(disp_w, disp_h, fw.max(1), fh.max(1));
+            let dest = RECT {
+                left: fit.left + self.full_off.0,
+                top: fit.top + self.full_off.1,
+                right: fit.right + self.full_off.0,
+                bottom: fit.bottom + self.full_off.1,
+            };
+            let vis = RECT {
+                left: dest.left.max(0),
+                top: dest.top.max(0),
+                right: dest.right.min(out_w as i32),
+                bottom: dest.bottom.min(out_h as i32),
+            };
+            if vis.right <= vis.left || vis.bottom <= vis.top {
+                return Ok(()); // nothing of the video inside the window — skip the frame
+            }
+            let (ax, ay, aw, ah) = self.display.unwrap_or((0, 0, in_w as i32, in_h as i32));
+            let dw = (dest.right - dest.left) as f64;
+            let dh = (dest.bottom - dest.top) as f64;
+            let sx = |v: i32| ax as f64 + (v - dest.left) as f64 / dw * aw as f64;
+            let sy = |v: i32| ay as f64 + (v - dest.top) as f64 / dh * ah as f64;
+            let src = RECT {
+                left: sx(vis.left).floor() as i32,
+                top: sy(vis.top).floor() as i32,
+                right: sx(vis.right).ceil() as i32,
+                bottom: sy(vis.bottom).ceil() as i32,
+            };
+            self.video_context
+                .VideoProcessorSetStreamDestRect(processor, 0, true, Some(&vis));
+            self.video_context
+                .VideoProcessorSetStreamSourceRect(processor, 0, true, Some(&src));
 
             let backbuffer: ID3D11Texture2D = self
                 .swapchain

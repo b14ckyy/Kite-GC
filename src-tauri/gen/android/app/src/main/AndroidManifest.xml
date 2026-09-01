@@ -60,10 +60,14 @@
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
 
+    <!-- networkSecurityConfig replaces the usesCleartextTraffic switch (which Android ignores once
+         a config is present): release allows cleartext ONLY to loopback (the Kite RTSP client's
+         in-process MJPEG server), debug stays fully open for the dev server (res/xml override). -->
     <application
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:theme="@style/Theme.kite_gc"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:usesCleartextTraffic="${usesCleartextTraffic}">
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|density"

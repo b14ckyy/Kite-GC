@@ -71,7 +71,7 @@ use commands::geozone::{geozone_read_all, geozone_write_all};
 use commands::fence::{fence_read_all, fence_write_all};
 use commands::rally::{rally_read_all, rally_write_all};
 use commands::info::{get_app_version, is_debug_mode};
-use commands::system::system_on_battery;
+use commands::system::{system_active_net_is_wifi, system_on_battery};
 use commands::storage::{share_file, storage_pick_folder};
 use commands::video::{
     video_ffmpeg_status, video_ffmpeg_download,
@@ -692,6 +692,7 @@ pub fn run() {
             terrain_cache_stats,
             terrain_cache_clear,
             system_on_battery,
+            system_active_net_is_wifi,
             storage_pick_folder,
             share_file,
             video_ffmpeg_status,

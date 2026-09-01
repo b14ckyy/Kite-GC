@@ -64,7 +64,7 @@
   import Button from '$lib/components/panel/Button.svelte';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import Toggle from '$lib/components/panel/Toggle.svelte';
-  import { isLinux, isMobile } from '$lib/platform';
+  import { isLinux, isMobile, isAndroid, isIOS } from '$lib/platform';
   import VideoReconnectOverlay from '$lib/components/video/VideoReconnectOverlay.svelte';
 
   let videoEl = $state<HTMLVideoElement | null>(null);
@@ -187,6 +187,9 @@
   // engine there would block a machine that already has everything it needs.
   // …and not at all when the experimental in-process native RTSP client is active.
   const needsEngine = $derived(isWebrtcAvailable() && !$videoState.rtspNativeClient);
+
+  // Mirror can't reach Android's hardware-decoded surface (see the toggle row's comment).
+  const mirrorUnavailable = $derived(isAndroid && $videoState.nativeSink);
 
   // MJPEG FPS counter — onload fires per frame in multipart streams.
   let mjpegFps = $state(0);
@@ -358,7 +361,7 @@
 {#snippet headerActions()}
   <Button
     variant={$videoState.enabled ? 'danger' : 'data'}
-    disabled={($videoState.kind === 'rtsp' && isMobile) || (!$videoState.enabled && $videoState.kind === 'rtsp' && needsEngine && engineChecked && !engineVer)}
+    disabled={($videoState.kind === 'rtsp' && isIOS) || (!$videoState.enabled && $videoState.kind === 'rtsp' && needsEngine && engineChecked && !engineVer)}
     onclick={toggleVideo}
   >
     {$videoState.enabled ? $t('video.stop') : $t('video.start')}
@@ -609,15 +612,19 @@
       </div>
 
       <!-- Experimental: Kite's own in-process RTSP client (MOBILE_RTSP.md) — no MediaMTX, no
-           ffmpeg. MJPEG on the multipart path; H.264/HEVC decode in hardware (Windows). -->
-      <div class="field-row" title={$t('video.nativeClientHint')}>
-        <Toggle
-          checked={$videoState.rtspNativeClient}
-          onchange={(c) => void setRtspNativeClient(c)}
-          id="vp-native-rtsp"
-        />
-        <span class="label">{$t('video.nativeClient')}</span>
-      </div>
+           ffmpeg. MJPEG on the multipart path; H.264/HEVC decode in hardware (Windows).
+           On Android it is the ONLY route (no sidecars on mobile) — forced on in the store,
+           nothing to toggle. -->
+      {#if !isAndroid}
+        <div class="field-row" title={$t('video.nativeClientHint')}>
+          <Toggle
+            checked={$videoState.rtspNativeClient}
+            onchange={(c) => void setRtspNativeClient(c)}
+            id="vp-native-rtsp"
+          />
+          <span class="label">{$t('video.nativeClient')}</span>
+        </div>
+      {/if}
 
       <!-- Saved connections: single-line rows, selectable / editable / deletable (ADS-B-provider style). -->
       {#if $videoState.rtspConnections.length}
@@ -670,9 +677,9 @@
         <NumberStepper bind:value={$rtspBufferFrames} min={0} max={3} step={1} />
       </div>
 
-      {#if isMobile}
-        <!-- RTSP is a placeholder on mobile: the engine cannot run there, and the device-native route
-             (ANDROID_SUPPORT.md §5b) is not built yet. No downloader, no start — just say so. -->
+      {#if isIOS}
+        <!-- RTSP is a placeholder on iOS only: the engine cannot run there, and the Kite-client
+             route arrives with MOBILE_RTSP P3. Android runs the Kite client (forced above). -->
         <div class="ffmpeg-box">
           <p class="hint">{$t('video.rtspMobilePlaceholder')}</p>
         </div>
@@ -719,9 +726,17 @@
       {/if}
     {/if}
 
-    <div class="field-row">
-      <Toggle checked={$videoState.mirror} onchange={(c) => setVideoMirror(c)} id="vp-mirror" />
-      <span class="label">{$t('video.mirror')}</span>
+    <!-- Mirror is unavailable on Android's HARDWARE decode path (no MediaCodec key, and both
+         view and buffer transforms were tried and measurably don't reach the surface — see
+         android_sink.rs); the DOM-rendered routes (MJPEG, camera) mirror fine there. -->
+    <div class="field-row" title={mirrorUnavailable ? $t('video.mirrorNativeAndroid') : undefined}>
+      <Toggle
+        checked={$videoState.mirror}
+        disabled={mirrorUnavailable}
+        onchange={(c) => setVideoMirror(c)}
+        id="vp-mirror"
+      />
+      <span class="label" class:muted={mirrorUnavailable}>{$t('video.mirror')}</span>
     </div>
 
     <div class="field-row">
@@ -863,6 +878,7 @@
   .field { display: flex; flex-direction: column; gap: 4px; }
   .field-row { display: flex; align-items: center; gap: 8px; }
   .label { font-size: 12px; color: #aaa; }
+  .label.muted { color: #666; }
   /* Match the framework form-control height (md button = 28px). */
   .field select {
     height: 28px;
