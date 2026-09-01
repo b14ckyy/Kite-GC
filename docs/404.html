@@ -1,0 +1,70 @@
+<!doctype html>
+<!--
+  Root-level GitHub Pages 404 handler for the VERSIONED docs site. Source of truth lives here
+  (docs/404.html, NOT part of the MkDocs build - docs_dir is docs/user); the docs workflow
+  copies it to the root of the gh-pages branch, which is the one 404 page GitHub Pages serves
+  for the whole project site.
+
+  Why: before the site was versioned (PR #86), pages lived at /Kite-GC/<page>/; they now live
+  at /Kite-GC/<version>/<page>/. Old bookmarks and search-engine hits therefore 404 at the old
+  root paths - this page forwards them to the same path under latest/. A path that already
+  carries a version prefix (latest / dev / x.y) is a genuinely missing page and gets a plain
+  404 message instead (no redirect loop).
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Kite Ground Control &mdash; page not found</title>
+  <script>
+    (function () {
+      var base = '/Kite-GC/';
+      var path = window.location.pathname;
+      if (path.indexOf(base) === 0) {
+        var rest = path.slice(base.length);
+        var seg = rest.split('/')[0];
+        var versioned = seg === 'latest' || seg === 'dev' || /^\d+\.\d+$/.test(seg);
+        if (rest && !versioned) {
+          // Pre-versioning deep link: same page, current release.
+          window.location.replace(base + 'latest/' + rest + window.location.search + window.location.hash);
+          return;
+        }
+      }
+      // Genuinely missing page: reveal the 404 UI (kept hidden so it never flashes mid-redirect).
+      document.documentElement.setAttribute('data-notfound', '');
+    })();
+  </script>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #1e2129;
+      color: #eceff4;
+      font-family: 'Segoe UI', Tahoma, sans-serif;
+      text-align: center;
+    }
+    main { display: none; padding: 2rem; }
+    html[data-notfound] main { display: block; }
+    h1 { font-size: 1.6rem; font-weight: 600; }
+    p { color: #a8adb8; }
+    a { color: #37a8db; }
+    noscript { display: block; padding: 2rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>404 &mdash; page not found</h1>
+    <p>This page does not exist in this version of the documentation.</p>
+    <p><a href="/Kite-GC/">Go to the latest documentation</a></p>
+  </main>
+  <noscript>
+    <p>This page has moved with the versioned documentation.</p>
+    <p><a href="/Kite-GC/">Go to the latest documentation</a></p>
+  </noscript>
+</body>
+</html>

@@ -23,6 +23,7 @@ on:
     branches: [master, main]
     paths:
       - docs/user/**
+      - docs/404.html
       - mkdocs.yml
       - overrides/**
       - docs/requirements.txt
@@ -66,3 +67,16 @@ jobs:
         run: mike deploy --push --title Dev dev
       - name: Point the site root at the latest release
         run: mike set-default --push latest
+      # GitHub Pages serves exactly ONE 404 page for the whole site: /404.html at the gh-pages
+      # root. mike only manages version folders, so publish it in a throwaway worktree. It
+      # forwards pre-versioning deep links (old bookmarks) to the same path under latest/.
+      - name: Publish the root 404 redirect
+        run: |
+          git worktree add "$RUNNER_TEMP/ghp" gh-pages
+          cp docs/404.html "$RUNNER_TEMP/ghp/404.html"
+          cd "$RUNNER_TEMP/ghp"
+          git add 404.html
+          if ! git diff --cached --quiet; then
+            git commit -m "Publish the root 404 redirect"
+            git push origin gh-pages
+          fi
