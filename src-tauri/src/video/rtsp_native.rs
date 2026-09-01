@@ -79,9 +79,10 @@ impl Read for ChannelRead {
 pub enum Started {
     /// MJPEG broadcast on the local multipart port (the P1 image path).
     Mjpeg { port: u16 },
-    /// H264 into the native decode sink (Windows) — no local HTTP leg; the frontend cuts
-    /// the CSS hole and keeps the sink rect in sync.
-    Sink,
+    /// H264/HEVC into the native decode sink (Windows) — no local HTTP leg; the frontend
+    /// cuts the CSS hole and keeps the sink rect in sync. `codec` names what plays, for
+    /// the panel's info line.
+    Sink { codec: &'static str },
 }
 
 /// RTP 32-bit timestamp → monotonic 64-bit 90 kHz ticks for the sink's sample times.
@@ -106,11 +107,14 @@ impl SinkTs {
 #[derive(Default)]
 pub struct NativeRtsp {
     inner: Mutex<Option<Running>>,
-    /// The active H264 decode sink, when the stream selected that route. Lives on `self`
-    /// (not in `Running`) so the rect/visibility commands can reach it without teardown
+    /// The active decode sink, when the stream selected that route. Lives on `self` (not
+    /// in `Running`) so the rect/visibility commands can reach it without teardown
     /// plumbing; cleared together with the stream.
     #[cfg(target_os = "windows")]
     sink: Arc<Mutex<Option<WinVideoSink>>>,
+    /// Which codec the active sink decodes ("H.264"/"H.265"), for the start verdict.
+    #[cfg(target_os = "windows")]
+    sink_codec: Arc<Mutex<Option<&'static str>>>,
 }
 
 struct Running {
@@ -160,10 +164,9 @@ impl NativeRtsp {
             .map_err(|e| format!("set_nonblocking: {e}"))?;
         let port = listener.local_addr().map_err(|e| format!("addr: {e}"))?.port();
 
-        // H265 stays off the list until the HEVC decode path works (MOBILE_RTSP.md).
         #[cfg(target_os = "windows")]
         let accept = if parent_hwnd.is_some() {
-            vec![VideoCodec::Mjpeg, VideoCodec::H264]
+            vec![VideoCodec::Mjpeg, VideoCodec::H264, VideoCodec::H265]
         } else {
             vec![VideoCodec::Mjpeg]
         };
@@ -211,6 +214,8 @@ impl NativeRtsp {
             let error_slot = error_slot.clone();
             #[cfg(target_os = "windows")]
             let sink_slot = self.sink.clone();
+            #[cfg(target_os = "windows")]
+            let sink_codec_slot = self.sink_codec.clone();
             thread::spawn(move || {
                 let mut first = true;
                 #[cfg(not(target_os = "windows"))]
@@ -225,15 +230,20 @@ impl NativeRtsp {
                         let _ = frame_tx.send(part);
                     }
                     #[cfg(target_os = "windows")]
-                    VideoCodec::H264 => {
+                    VideoCodec::H264 | VideoCodec::H265 => {
                         if sink_ts.is_none() {
                             // First AU decides the route: bring the decode sink up. It
                             // starts as a 1×1 child — invisible until the frontend cuts
                             // the CSS hole and pushes the real rect.
                             let Some(parent) = parent_hwnd else { return };
-                            match WinVideoSink::start(parent, (0, 0, 1, 1), SinkCodec::H264) {
+                            let (sink_codec, codec_name) = match frame.codec {
+                                VideoCodec::H265 => (SinkCodec::H265, "H.265"),
+                                _ => (SinkCodec::H264, "H.264"),
+                            };
+                            match WinVideoSink::start(parent, (0, 0, 1, 1), sink_codec) {
                                 Ok(sink) => {
                                     *sink_slot.lock().unwrap() = Some(sink);
+                                    *sink_codec_slot.lock().unwrap() = Some(codec_name);
                                     sink_ts = Some(SinkTs::default());
                                     let _ = sink_first.send(());
                                 }
@@ -260,8 +270,8 @@ impl NativeRtsp {
                             }
                         }
                     }
-                    // Not on the accept list (H265 until its decode path works) — the
-                    // client never selects such a track, so nothing arrives here.
+                    // Not on the accept list — the client never selects such a track.
+                    #[cfg(not(target_os = "windows"))]
                     _ => {}
                 });
                 match result {
@@ -323,7 +333,9 @@ impl NativeRtsp {
             #[cfg(target_os = "windows")]
             {
                 if self.sink.lock().unwrap().is_some() {
-                    Started::Sink
+                    Started::Sink {
+                        codec: self.sink_codec.lock().unwrap().unwrap_or("H.264"),
+                    }
                 } else {
                     Started::Mjpeg { port }
                 }
@@ -335,7 +347,9 @@ impl NativeRtsp {
             Started::Mjpeg { .. } => {
                 log::info!("[video] native RTSP client live on 127.0.0.1:{port}")
             }
-            Started::Sink => log::info!("[video] native RTSP client live on the H264 decode sink"),
+            Started::Sink { codec } => {
+                log::info!("[video] native RTSP client live on the {codec} decode sink")
+            }
         }
         self.inner
             .lock()
@@ -353,7 +367,10 @@ impl NativeRtsp {
         }
         // After the joins: the RTSP thread pushed into the sink, so it must be gone first.
         #[cfg(target_os = "windows")]
-        drop(self.sink.lock().unwrap().take());
+        {
+            drop(self.sink.lock().unwrap().take());
+            *self.sink_codec.lock().unwrap() = None;
+        }
     }
 
     /// Forward the on-screen video rect (PHYSICAL px, main-window client coords) to the
@@ -517,7 +534,7 @@ mod tests {
             .start(Arc::new(|| {}), &url, "auto", Some(host))
             .expect("start");
         assert!(
-            matches!(started, Started::Sink),
+            matches!(started, Started::Sink { .. }),
             "expected the H264 decode-sink route for this source"
         );
         server.sink_rect(40, 40, 640, 400);

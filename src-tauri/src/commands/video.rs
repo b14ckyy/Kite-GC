@@ -272,10 +272,10 @@ pub fn video_native_mjpeg_stop(mjpeg: State<'_, crate::video::MjpegServer>) -> R
 
 /// Start the in-process native RTSP client on `url` — no MediaMTX, no ffmpeg. An MJPEG
 /// source is served over the local multipart MJPEG port (`mode: "mjpeg"` + `url`); an
-/// H264 source decodes natively into the hole-punch sink on Windows (`mode: "sink"`, no
-/// URL — the frontend cuts the CSS hole and syncs the rect via the sink commands below).
-/// An HEVC source fails with a message saying what the stream offers. `transport`:
-/// udp | tcp | auto (UDP first, automatic TCP-interleaved fallback when no RTP arrives).
+/// H264/HEVC source decodes natively into the hole-punch sink on Windows (`mode: "sink"`
+/// + `codec`, no URL — the frontend cuts the CSS hole and syncs the rect via the sink
+/// commands below). `transport`: udp | tcp | auto (UDP first, automatic TCP-interleaved
+/// fallback when no RTP arrives).
 #[tauri::command(async)]
 pub fn video_rtsp_native_start(
     app: AppHandle,
@@ -300,10 +300,11 @@ pub fn video_rtsp_native_start(
             // "copy" is the honest verdict: the frames pass through untouched.
             "transcode": "copy",
         })),
-        crate::video::rtsp_native::Started::Sink => Ok(serde_json::json!({
+        crate::video::rtsp_native::Started::Sink { codec } => Ok(serde_json::json!({
             // "none": nothing transcodes anywhere — AUs go straight into the HW decoder.
             "mode": "sink",
             "transcode": "none",
+            "codec": codec,
         })),
     }
 }
