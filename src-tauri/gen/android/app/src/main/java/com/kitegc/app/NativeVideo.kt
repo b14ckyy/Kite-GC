@@ -125,6 +125,10 @@ object NativeVideo {
     activity.runOnUiThread { clipBox?.translationX = if (visible) 0f else OFFSCREEN }
   }
 
+  // (No orientation here: view transforms do NOT reach a SurfaceView's surface content —
+  // tried and visually disproven on the M11. Mirror/rotation live in the Rust sink as
+  // ANativeWindow buffer transforms instead.)
+
   /** The decoded video's pixel size, from the decoder's output format — drives the
    *  aspect-fit. (No holder.setFixedSize: with MediaCodec as the surface's producer the
    *  buffer geometry is the decoder's, and the compositor scales it to the view bounds.) */

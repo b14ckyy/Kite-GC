@@ -5,9 +5,13 @@
 //! counterpart of `win_sink`: H.264/HEVC access units from the RTSP client go into the
 //! platform decoder (`AMediaCodec`, NDK C API — no Kotlin in the decode path) and render
 //! straight onto the hole-punch SurfaceView below the WebView (`android/native_video.rs`,
-//! `NativeVideo.kt`). One decode thread owns codec + surface; presentation is
-//! render-on-release (the low-latency default — no pacing queue on Android yet, the panel's
-//! smoothing-buffer stepper is a no-op here).
+//! `NativeVideo.kt`). One decode thread owns codec + surface.
+//!
+//! Presentation: with the smoothing buffer at 0 (the latency-first default) every decoded
+//! frame renders on release. Depths 1–3 use `releaseOutputBufferAtTime` instead — the frame
+//! is scheduled `depth × frame-interval` behind its media timeline and SurfaceFlinger does
+//! the pacing (no queue of our own, unlike the Windows sink; the held frames sit in the
+//! surface's buffer queue, which is why the depth stays capped small).
 //!
 //! Surface lifecycle: the codec's lifetime is keyed to the view host's surface GENERATION
 //! (bumped on surfaceCreated/surfaceDestroyed), NOT to activity pause — PiP keeps a paused
@@ -15,10 +19,13 @@
 //! decoder tears down, waits for the next surface, rebuilds, and drops frames until the next
 //! IDR/IRAP so the fresh decoder never starts mid-GOP.
 //!
-//! Orientation: 180° rotation maps to MediaFormat `rotation-degrees` and needs a decoder
-//! (re)build — it applies on the next session (connect/reconnect). Mirroring has no
-//! MediaCodec/SurfaceView equivalent (view transforms don't touch surface content); the
-//! sink ignores it with a debug note.
+//! Orientation: 180° rotation maps to the decoder format's `rotation-degrees` — a toggle
+//! rebuilds the decoder (short blackout, resumes on the next IDR/IRAP). Mirroring is NOT
+//! available on this path, and that is measured, not assumed: view transforms do not reach
+//! a SurfaceView's surface content, and an `ANativeWindow_setBuffersTransform` on the
+//! decode window gets overwritten by MediaCodec's own per-buffer transform state (both
+//! visually disproven on the M11). The remaining route — a GL intermediary — is out of all
+//! proportion for a niche toggle; the DOM-rendered MJPEG route mirrors fine on Android.
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
@@ -43,7 +50,7 @@ const FIRST_SURFACE_TIMEOUT: Duration = Duration::from_secs(10);
 enum Cmd {
     /// One access unit (Annex-B, in-band parameter sets) + its unwrapped 90 kHz timestamp.
     Frame(Vec<u8>, u64),
-    Orient { rotate180: bool },
+    Orient { mirror: bool, rotate180: bool },
     Stop,
 }
 
@@ -53,6 +60,9 @@ struct Shared {
     presented: AtomicU64,
     width: AtomicU32,
     height: AtomicU32,
+    /// Smoothing-buffer depth in frames (0 = render on release). Written by the panel
+    /// stepper, read by the decode loop per frame.
+    buffer_frames: AtomicU32,
     stopping: AtomicBool,
 }
 
@@ -119,19 +129,15 @@ impl AndroidVideoSink {
         }
     }
 
-    /// Pacing queue not built on Android (render-on-release is the latency-first default);
-    /// accepted so the shared panel stepper stays wired, applied as a no-op.
+    /// Smoothing-buffer depth in frames (0 = render on release — the latency-first
+    /// default). Capped small: scheduled frames occupy the surface's finite buffer queue.
     pub fn set_buffer(&self, frames: u32) {
-        if frames > 0 {
-            log::debug!("[video] android sink: smoothing buffer not implemented (asked for {frames})");
-        }
+        self.shared.buffer_frames.store(frames.min(3), Ordering::Relaxed);
     }
 
+    /// Mirror / 180° rotation — applied live as a buffer transform on the decode window.
     pub fn set_orient(&self, mirror: bool, rotate180: bool) {
-        if mirror {
-            log::debug!("[video] android sink: mirror is not supported on the Android decode path");
-        }
-        let _ = self.tx.send(Cmd::Orient { rotate180 });
+        let _ = self.tx.send(Cmd::Orient { mirror, rotate180 });
     }
 
     pub fn frames_presented(&self) -> u64 {
@@ -159,14 +165,16 @@ impl Drop for AndroidVideoSink {
 /// The decode thread: (re)acquire surface → build decoder → pump AUs until stop or surface
 /// loss. One iteration of the outer loop = one decoder session on one surface.
 fn decode_loop(mime: &'static str, rx: &Receiver<Cmd>, shared: &Shared) {
-    let mut rotate180 = false;
     // A resumed session starts clean on the next IDR/IRAP; the very first session takes the
     // stream as it comes (the depacketizer prepends parameter sets and the client starts
     // delivery on an intra frame where the source provides one).
     let mut wait_for_idr = false;
+    // Current orientation, kept across decoder sessions (the frontend syncs it right after
+    // the sink starts, so it can arrive while we still wait for the first surface).
+    let mut orient = (false, false);
 
     'session: loop {
-        let window = match wait_for_surface(rx, shared, &mut rotate180) {
+        let window = match wait_for_surface(rx, shared, &mut orient) {
             Some(w) => w,
             None => return, // stopped (or initial timeout — error already recorded)
         };
@@ -184,7 +192,7 @@ fn decode_loop(mime: &'static str, rx: &Receiver<Cmd>, shared: &Shared) {
         format.set_i32("height", 720);
         // Best effort (API 30+ decoders; unknown keys are ignored elsewhere).
         format.set_i32("low-latency", 1);
-        if rotate180 {
+        if orient.1 {
             format.set_i32("rotation-degrees", 180);
         }
         if let Err(e) = codec.configure(&format, Some(&window), MediaCodecDirection::Decoder) {
@@ -200,6 +208,7 @@ fn decode_loop(mime: &'static str, rx: &Receiver<Cmd>, shared: &Shared) {
             mime,
             codec.name().unwrap_or_else(|_| "?".into())
         );
+        let mut pacing = Pacing::default();
 
         loop {
             // Surface gone (app background, view destroyed)? End this decoder session and
@@ -216,12 +225,17 @@ fn decode_loop(mime: &'static str, rx: &Receiver<Cmd>, shared: &Shared) {
                     let _ = codec.stop();
                     return;
                 }
-                Ok(Cmd::Orient { rotate180: r }) => {
-                    if r != rotate180 {
-                        rotate180 = r;
-                        log::debug!(
-                            "[video] android sink: rotation change applies on the next decoder session"
-                        );
+                Ok(Cmd::Orient { mirror, rotate180 }) => {
+                    if mirror && !orient.0 {
+                        log::debug!("[video] android sink: mirror is not available on the hardware decode path");
+                    }
+                    orient.0 = mirror;
+                    if rotate180 != orient.1 {
+                        orient.1 = rotate180;
+                        log::info!("[video] android sink: rotation changed — rebuilding the decoder");
+                        let _ = codec.stop();
+                        wait_for_idr = true;
+                        continue 'session;
                     }
                 }
                 Ok(Cmd::Frame(au, ts90k)) => {
@@ -238,7 +252,7 @@ fn decode_loop(mime: &'static str, rx: &Receiver<Cmd>, shared: &Shared) {
                 Err(RecvTimeoutError::Timeout) => {}
             }
 
-            if let Err(e) = drain(&codec, shared) {
+            if let Err(e) = drain(&codec, shared, &mut pacing) {
                 shared.fail(e);
                 let _ = codec.stop();
                 return;
@@ -247,12 +261,32 @@ fn decode_loop(mime: &'static str, rx: &Receiver<Cmd>, shared: &Shared) {
     }
 }
 
+/// Presentation pacing for smoothing-buffer depths > 0: frames are scheduled on the
+/// compositor clock `depth × frame-interval` behind their media timeline, absorbing that
+/// much arrival jitter. `anchor` maps media time onto CLOCK_MONOTONIC; a timeline jump
+/// (loss gap, seek-like discontinuity) or a changed depth re-anchors.
+#[derive(Default)]
+struct Pacing {
+    /// (monotonic ns, media µs) of the anchor frame, plus the depth it was built for.
+    anchor: Option<(i64, i64, u32)>,
+    /// EMA of the media-time frame interval (µs); seeds at 60 fps until measured.
+    interval_us: i64,
+    last_pts_us: Option<i64>,
+}
+
+fn monotonic_ns() -> i64 {
+    let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+    // SAFETY: plain out-parameter syscall; CLOCK_MONOTONIC always exists on Android.
+    unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) };
+    ts.tv_sec as i64 * 1_000_000_000 + ts.tv_nsec as i64
+}
+
 /// Wait for a live surface, draining (and dropping) queued frames meanwhile so a stop is
 /// never missed and the channel never balloons. Returns `None` on stop or initial timeout.
 fn wait_for_surface(
     rx: &Receiver<Cmd>,
     shared: &Shared,
-    rotate180: &mut bool,
+    orient: &mut (bool, bool),
 ) -> Option<NativeWindow> {
     let started = Instant::now();
     let mut reported_first_timeout = false;
@@ -279,7 +313,7 @@ fn wait_for_surface(
         }
         match rx.recv_timeout(Duration::from_millis(50)) {
             Ok(Cmd::Stop) | Err(RecvTimeoutError::Disconnected) => return None,
-            Ok(Cmd::Orient { rotate180: r }) => *rotate180 = r,
+            Ok(Cmd::Orient { mirror, rotate180 }) => *orient = (mirror, rotate180),
             Ok(Cmd::Frame(..)) => {} // dropped — nothing to decode onto yet
             Err(RecvTimeoutError::Timeout) => {}
         }
@@ -318,15 +352,55 @@ fn feed(codec: &MediaCodec, au: &[u8], ts90k: u64) -> Result<(), String> {
     }
 }
 
-/// Render every decoded frame that is ready (render-on-release; the compositor scales onto
-/// the aspect-fitted view) and track output-format changes for size/aspect.
-fn drain(codec: &MediaCodec, shared: &Shared) -> Result<(), String> {
+/// Render every decoded frame that is ready (immediately at depth 0, scheduled on the
+/// compositor clock otherwise — see [`Pacing`]) and track output-format changes.
+fn drain(codec: &MediaCodec, shared: &Shared, pacing: &mut Pacing) -> Result<(), String> {
     loop {
         match codec.dequeue_output_buffer(Duration::ZERO) {
             Ok(DequeuedOutputBufferInfoResult::Buffer(ob)) => {
-                codec
-                    .release_output_buffer(ob, true)
-                    .map_err(|e| format!("releaseOutputBuffer: {e:?}"))?;
+                let depth = shared.buffer_frames.load(Ordering::Relaxed);
+                if depth == 0 {
+                    codec
+                        .release_output_buffer(ob, true)
+                        .map_err(|e| format!("releaseOutputBuffer: {e:?}"))?;
+                } else {
+                    let pts_us = ob.info().presentation_time_us();
+                    // Track the media frame interval (EMA, clamped to sane frame times).
+                    if pacing.interval_us == 0 {
+                        pacing.interval_us = 16_667; // seed: 60 fps
+                    }
+                    if let Some(last) = pacing.last_pts_us {
+                        let delta = pts_us - last;
+                        if (5_000..=100_000).contains(&delta) {
+                            pacing.interval_us += (delta - pacing.interval_us) / 8;
+                        }
+                    }
+                    pacing.last_pts_us = Some(pts_us);
+
+                    let now = monotonic_ns();
+                    let lead_ns = depth as i64 * pacing.interval_us * 1_000;
+                    let target = match pacing.anchor {
+                        Some((a_ns, a_us, a_depth)) if a_depth == depth => {
+                            a_ns + (pts_us - a_us) * 1_000
+                        }
+                        _ => {
+                            pacing.anchor = Some((now + lead_ns, pts_us, depth));
+                            now + lead_ns
+                        }
+                    };
+                    // A timeline jump (loss gap) or drift beyond the cushion: re-anchor so
+                    // the schedule never runs away — same 100 ms-style cap as the Windows
+                    // sink's pacing after gaps.
+                    let target = if target < now || target > now + lead_ns + 100_000_000 {
+                        pacing.anchor = Some((now + lead_ns, pts_us, depth));
+                        now + lead_ns
+                    } else {
+                        target
+                    };
+                    codec
+                        .release_output_buffer_at_time(ob, target)
+                        .map_err(|e| format!("releaseOutputBufferAtTime: {e:?}"))?;
+                }
                 shared.presented.fetch_add(1, Ordering::Relaxed);
             }
             Ok(DequeuedOutputBufferInfoResult::OutputFormatChanged) => {

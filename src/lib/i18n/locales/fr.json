@@ -652,6 +652,7 @@
       "ffmpeg": "Flux : repli ffmpeg"
     },
     "mirror": "Miroir horizontal",
+    "mirrorNativeAndroid": "Indisponible avec le décodage vidéo matériel sur Android — l'image décodée ne peut pas y être inversée. Les sources MJPEG et caméra s'inversent normalement.",
     "rotate180": "Pivoter de 180° (caméra tête en bas)",
     "codec": "Codec",
     "floatingWindow": "Fenêtre flottante",

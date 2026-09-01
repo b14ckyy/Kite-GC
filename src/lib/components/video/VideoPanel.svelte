@@ -188,6 +188,9 @@
   // …and not at all when the experimental in-process native RTSP client is active.
   const needsEngine = $derived(isWebrtcAvailable() && !$videoState.rtspNativeClient);
 
+  // Mirror can't reach Android's hardware-decoded surface (see the toggle row's comment).
+  const mirrorUnavailable = $derived(isAndroid && $videoState.nativeSink);
+
   // MJPEG FPS counter — onload fires per frame in multipart streams.
   let mjpegFps = $state(0);
   let _mjpegFrames = 0;
@@ -723,9 +726,17 @@
       {/if}
     {/if}
 
-    <div class="field-row">
-      <Toggle checked={$videoState.mirror} onchange={(c) => setVideoMirror(c)} id="vp-mirror" />
-      <span class="label">{$t('video.mirror')}</span>
+    <!-- Mirror is unavailable on Android's HARDWARE decode path (no MediaCodec key, and both
+         view and buffer transforms were tried and measurably don't reach the surface — see
+         android_sink.rs); the DOM-rendered routes (MJPEG, camera) mirror fine there. -->
+    <div class="field-row" title={mirrorUnavailable ? $t('video.mirrorNativeAndroid') : undefined}>
+      <Toggle
+        checked={$videoState.mirror}
+        disabled={mirrorUnavailable}
+        onchange={(c) => setVideoMirror(c)}
+        id="vp-mirror"
+      />
+      <span class="label" class:muted={mirrorUnavailable}>{$t('video.mirror')}</span>
     </div>
 
     <div class="field-row">
@@ -867,6 +878,7 @@
   .field { display: flex; flex-direction: column; gap: 4px; }
   .field-row { display: flex; align-items: center; gap: 8px; }
   .label { font-size: 12px; color: #aaa; }
+  .label.muted { color: #666; }
   /* Match the framework form-control height (md button = 28px). */
   .field select {
     height: 28px;
