@@ -81,6 +81,7 @@ use commands::video::{
     video_native_mjpeg_start, video_native_mjpeg_stop, video_rtsp_mjpeg_start,
     video_rtsp_native_start, video_rtsp_native_stop,
     video_rtsp_native_sink_rect, video_rtsp_native_sink_visible, video_rtsp_native_stats,
+    video_linux_hole_spike,
     video_rtsp_native_sink_buffer, video_rtsp_native_sink_orient,
 };
 use video::{MediaMtx, MjpegServer};
@@ -419,6 +420,11 @@ pub fn run() {
             #[cfg(target_os = "android")]
             android::log_resolved_dirs(_app.handle());
 
+            // Linux: re-host the WebView over the native video layer (hole-punch decode sink,
+            // MOBILE_RTSP.md P2.3). Needs the transparent window from tauri.linux.conf.json.
+            #[cfg(target_os = "linux")]
+            video::linux_host::install(_app.handle());
+
             // Linux/WebKitGTK: stop trackpad/keyboard gestures from zooming the whole WebView frame.
             // WebKitGTK handles these natively in GTK and ignores any JS `preventDefault`, so they can
             // only be suppressed here (Windows/WebView2 + macOS use the JS guard in `+layout.svelte`).
@@ -710,6 +716,7 @@ pub fn run() {
             video_rtsp_native_stop,
             video_rtsp_native_sink_rect,
             video_rtsp_native_sink_visible,
+            video_linux_hole_spike,
             video_rtsp_native_stats,
             video_rtsp_native_sink_buffer,
             video_rtsp_native_sink_orient,

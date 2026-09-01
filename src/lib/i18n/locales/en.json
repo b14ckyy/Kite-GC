@@ -1771,6 +1771,8 @@
     "vidMjpegDecode": "Decode avg/max",
     "vidUiJank": "UI stall",
     "vidMjpegHint": "MJPEG is read, decoded and drawn off the main thread. In below the source rate → the loss is upstream (server, network, transcode). In steady but Drawn below it → this machine cannot decode fast enough and skips frames on purpose, which costs frame rate but never stalls the picture. The gaps are the longest pause in the last second: a visible freeze IS a large Gap drawn, and whether Gap in matches it says whether the pause came with the stream or was made here. UI stall measures the main thread, which draws nothing of this feed — a large value beside small gaps means the picture is fine and the app is stalling.",
+    "vidLinuxSpike": "Linux hole-punch spike",
+    "vidHole": "Native hole",
     "vidNatTransport": "Transport",
     "vidNatFrames": "Frames in",
     "vidNatRtp": "RTP recv",

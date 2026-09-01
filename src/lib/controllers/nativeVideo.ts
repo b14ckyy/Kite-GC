@@ -52,6 +52,19 @@ const PRIORITY: NativeSurfaceId[] = ['main', 'floating', 'widget', 'preview'];
  *  render their transparent hole only while THEY are active, a placeholder otherwise. */
 export const activeNativeSurface = writable<NativeSurfaceId | null>(null);
 
+/** Live geometry of the active hole for the Debug Monitor: how far the visible rect was
+ *  clipped on each side (viewport px), the radius read from the surface's CSS, and which
+ *  corner-cut flags fired — the numbers behind a square-corner complaint. */
+export interface NativeHoleDebug {
+  id: NativeSurfaceId;
+  radius: number;
+  cut: string;
+  clip: string;
+  /** Which ancestor set each clipped edge (L|T|R|B) — empty side = unclipped. */
+  by: string;
+}
+export const nativeHoleDebug = writable<NativeHoleDebug | null>(null);
+
 const regs = new Map<NativeSurfaceId, HTMLElement>();
 
 let running = false;
@@ -117,6 +130,11 @@ function visibleRect(el: HTMLElement, rect: DOMRect): DOMRect | null {
   let y1 = rect.top;
   let x2 = rect.right;
   let y2 = rect.bottom;
+  let byL = '';
+  let byT = '';
+  let byR = '';
+  let byB = '';
+  const tag = (n: Element) => n.tagName.toLowerCase() + (n.classList[0] ? `.${n.classList[0]}` : '');
   const clips = (v: string) => v === 'auto' || v === 'scroll' || v === 'hidden' || v === 'clip';
   for (let node = el.parentElement; node; node = node.parentElement) {
     const cs = getComputedStyle(node);
@@ -130,15 +148,32 @@ function visibleRect(el: HTMLElement, rect: DOMRect): DOMRect | null {
       const sy = node.offsetHeight ? b.height / node.offsetHeight : 1;
       const left = b.left + node.clientLeft * sx;
       const top = b.top + node.clientTop * sy;
-      x1 = Math.max(x1, left);
-      y1 = Math.max(y1, top);
-      x2 = Math.min(x2, left + node.clientWidth * sx);
-      y2 = Math.min(y2, top + node.clientHeight * sy);
+      if (left > x1) { x1 = left; byL = tag(node); }
+      if (top > y1) { y1 = top; byT = tag(node); }
+      const right = left + node.clientWidth * sx;
+      const bottom = top + node.clientHeight * sy;
+      if (right < x2) { x2 = right; byR = tag(node); }
+      if (bottom < y2) { y2 = bottom; byB = tag(node); }
       if (x2 <= x1 || y2 <= y1) return null;
     }
   }
+  // client* are integers: a fractional layout size (any --ui-scale ≠ 1 produces them) rounds
+  // the computed client edge by up to half a layout px — enough to read as a scroll-clip in
+  // `tick` (which then squares the corner caps on that side) although nothing is clipped.
+  // Anything within a px of the surface's own edge is that rounding, not a cut.
+  // (Measured on Linux at uiScale 1.25: symmetric ~1.7 px "clips" top+bottom from integer
+  // client sizes — a real scroll-clip moves in whole wheel steps, far past 3 px.)
+  const SNAP = 3;
+  if (Math.abs(x1 - rect.left) < SNAP) { x1 = rect.left; byL = ''; }
+  if (Math.abs(y1 - rect.top) < SNAP) { y1 = rect.top; byT = ''; }
+  if (Math.abs(x2 - rect.right) < SNAP) { x2 = rect.right; byR = ''; }
+  if (Math.abs(y2 - rect.bottom) < SNAP) { y2 = rect.bottom; byB = ''; }
+  if (import.meta.env.DEV) lastClipBy = [byL, byT, byR, byB].join('|');
   return new DOMRect(x1, y1, x2 - x1, y2 - y1);
 }
+
+/** Dev diagnostics: which ancestor produced each clipped edge in the last visibleRect. */
+let lastClipBy = '';
 
 function tick(): void {
   if (!running) return;
@@ -193,6 +228,20 @@ function tick(): void {
     const cutLeft = hole.left > c.rect.left + 0.5;
     const cutRight = hole.right < c.rect.right - 0.5;
     const cutBottom = hole.bottom < c.rect.bottom - 0.5;
+    if (import.meta.env.DEV) {
+      const f = (v: number) => (Math.round(v * 100) / 100).toString();
+      const dbg: NativeHoleDebug = {
+        id: c.id,
+        radius: Math.round(radius * 100) / 100,
+        cut: [cutTop && 'T', cutLeft && 'L', cutRight && 'R', cutBottom && 'B'].filter(Boolean).join('') || '—',
+        clip: `${f(hole.left - c.rect.left)}/${f(hole.top - c.rect.top)}/${f(c.rect.right - hole.right)}/${f(c.rect.bottom - hole.bottom)}`,
+        by: lastClipBy,
+      };
+      const prev = get(nativeHoleDebug);
+      if (!prev || prev.id !== dbg.id || prev.radius !== dbg.radius || prev.cut !== dbg.cut || prev.clip !== dbg.clip || prev.by !== dbg.by) {
+        nativeHoleDebug.set(dbg);
+      }
+    }
     applyClips(c.el, snapped, {
       tl: cutTop || cutLeft ? 0 : radius,
       tr: cutTop || cutRight ? 0 : radius,

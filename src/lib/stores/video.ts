@@ -1789,6 +1789,21 @@ function syncNativeSinkOrient(): void {
   void invoke('video_rtsp_native_sink_orient', { mirror: s.mirror, rotate180: s.rotate180 }).catch(() => {});
 }
 
+/** Dev-only (Linux hole-punch spike, MOBILE_RTSP.md P2.3 stage A): fake a live native sink so
+ *  every surface mounts its hole and the real router drives the backend's coloured stand-in
+ *  layer — no stream, no decoder. Removed with the Linux sink wiring. */
+export async function debugLinuxHoleSpike(on: boolean): Promise<void> {
+  if (on) {
+    await invoke('video_linux_hole_spike', { on: true });
+    patch({ enabled: true, kind: 'rtsp', status: 'live', nativeSink: true, nativeSinkCodec: 'spike', mjpegUrl: null, error: null });
+    startNativeSurfaceRouter();
+  } else {
+    stopNativeSurfaceRouter();
+    patch({ enabled: false, status: 'off', nativeSink: false, nativeSinkCodec: null });
+    await invoke('video_linux_hole_spike', { on: false });
+  }
+}
+
 /** Force the software transcode regardless of what the backend's hardware probe found. Restarts a
  *  live RTSP feed so the change takes effect immediately — the decision is made when the source is
  *  registered with the engine, not per frame. */
