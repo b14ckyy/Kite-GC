@@ -700,7 +700,14 @@ fn free_loopback_udp_pair() -> Result<(u16, u16), String> {
             .local_addr()
             .map_err(|e| format!("Cannot read allocated UDP port: {e}"))?
             .port();
-        if port == u16::MAX {
+        // MediaMTX validates the RTP port as EVEN (RTP/RTCP convention: RTP even, RTCP =
+        // RTP+1) and EXITS otherwise — the API never comes up and the start fails as
+        // "did not become ready". Windows hands ephemeral ports out roughly sequentially
+        // (see free_webrtc_port), so one odd allocation used to wedge EVERY subsequent
+        // engine start on the next odd port: video dead until an app restart moved the
+        // cursor (field report 2026-09-01). Hold the odd socket so the cursor advances.
+        // `u16::MAX` is odd, so the +1 overflow case is covered by the same check.
+        if port % 2 != 0 {
             held.push(first);
             continue;
         }

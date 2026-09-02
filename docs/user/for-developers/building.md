@@ -40,12 +40,15 @@ sudo apt update
 sudo apt install -y \
     build-essential pkg-config curl wget file \
     libssl-dev libgtk-3-dev libwebkit2gtk-4.1-dev \
-    libayatana-appindicator3-dev librsvg2-dev libxdo-dev
+    libayatana-appindicator3-dev librsvg2-dev libxdo-dev \
+    libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
 ```
 
 !!! note
     `libwebkit2gtk-4.1-dev` is the Tauri 2 / WebKitGTK 4.1 package — you need a distro new enough to
-    ship 4.1 (Ubuntu 22.04+ / Debian 12+). Install Node.js, Rust and just via their official methods.
+    ship 4.1 (Ubuntu 22.04+ / Debian 12+). The two GStreamer dev packages are required by the native
+    RTSP video sink (the app links the system GStreamer at build time). Install Node.js, Rust and just
+    via their official methods.
 
 !!! warning "Build on the oldest system you want to support"
     Two things follow from the build host, and both reach the user.
@@ -198,7 +201,7 @@ up itself, so only the bare `cargo check` needs it. (On Windows the prebuilt dir
 | Log import (.kflight / .rawmsp / .tlog) | ✅ works | Parsed in-process. A `.kflight` brings the flight, its track and its records; the archived original log files inside it (INAV blackbox, ArduPilot dataflash) are left behind — the mobile database never stores originals. ArduPilot `.bin` and PX4 `.ulg` import are desktop-only. |
 | Blackbox import (.txt / .bbl / .bfl) | ❌ impossible | Needs the external `blackbox_decode` tool, and Android forbids executing a downloaded binary. Import on a desktop and bring flights over as `.kflight`. |
 | Video: camera / OTG capture device | ✅ works (tablets) | The WebView's own capture path (`getUserMedia`), no helper involved. Hidden on phones until the phone UI decides. |
-| Video: RTSP / MJPEG | ❌ placeholder | The RTSP kind is listed but cannot start: both paths need the video engine (`mediamtx` / `ffmpeg`), which an Android app cannot spawn. A device-native route is planned. Native capture (also ffmpeg) is not offered — the OS's own capture devices arrive through the camera kind. |
+| Video: RTSP (MJPEG / H.264 / HEVC) | ✅ works | Runs entirely on Kite's built-in RTSP client — no engine helpers (an Android app cannot spawn them, so the desktop engines are not offered). H.264/HEVC decode in device hardware onto a native surface below the WebView; MJPEG rides the multipart path. Native capture (ffmpeg) is not offered — the OS's own capture devices arrive through the camera kind. |
 | Custom database / raw-log folder | ✅ mirror | Browse grants ONE folder via the system picker (scoped storage — no permission). The app keeps working app-private (SQLite and the raw writers need real paths, which a SAF grant cannot provide) and **mirrors into the folder at session end**: raw logs as files, the database as an atomic snapshot. That copy survives an uninstall. |
 | Exports to `Documents/` | ⚠️ different | Scoped storage makes Documents a MediaStore collection, not a path — exports go through the system share/save dialog instead. |
 
@@ -273,7 +276,8 @@ are not run in CI.
 These are things to know when **running** the packaged Linux app (not build errors):
 
 - **Three helpers are fetched at runtime, not bundled**: `blackbox_decode` (Blackbox import shells out
-  to INAV's decoder), `ffmpeg` (the video image path) and `mediamtx` (the RTSP → WebRTC engine). Kite
+  to INAV's decoder), `ffmpeg` (the classic video image path) and `mediamtx` (the classic RTSP → WebRTC
+  engine) — the native RTSP client needs neither. Kite
   looks for each next to the executable, then in its own app-data `bin/` directory, then on `PATH`, and
   offers to download it on first use. Each failure is local to its feature — without `blackbox_decode`
   only Blackbox import is affected, live recording and replay still work. On macOS `ffmpeg` is bundled
@@ -288,7 +292,9 @@ These are things to know when **running** the packaged Linux app (not build erro
   ```
 - **Which package to test:** `tauri build` produces `.deb`, `.AppImage` and `.rpm` in
   `src-tauri/target/release/bundle/`. The `.deb` (or the raw binary in `…/release/`) is usually the most
-  reliable first smoke test; AppImage adds its own FUSE/sandbox layer.
+  reliable first smoke test; AppImage adds its own FUSE/sandbox layer — and **video does not work
+  inside the AppImage at all** (its launcher environment hides the system GStreamer plugins; see the
+  user guide's platform notes).
 - **Data locations:** installed mode stores the flight DB + terrain cache under `~/.local/share/kite-gc/`.
   A **portable** build (a `.portable` marker file next to the binary) keeps everything in a `data/` folder
   beside the binary.

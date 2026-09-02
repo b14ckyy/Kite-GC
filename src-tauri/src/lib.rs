@@ -71,7 +71,7 @@ use commands::geozone::{geozone_read_all, geozone_write_all};
 use commands::fence::{fence_read_all, fence_write_all};
 use commands::rally::{rally_read_all, rally_write_all};
 use commands::info::{get_app_version, is_debug_mode};
-use commands::system::system_on_battery;
+use commands::system::{system_active_net_is_wifi, system_on_battery};
 use commands::storage::{share_file, storage_pick_folder};
 use commands::video::{
     video_ffmpeg_status, video_ffmpeg_download,
@@ -79,6 +79,10 @@ use commands::video::{
     video_webrtc_stop,
     video_list_native_devices, video_probe_device,
     video_native_mjpeg_start, video_native_mjpeg_stop, video_rtsp_mjpeg_start,
+    video_rtsp_native_start, video_rtsp_native_stop,
+    video_rtsp_native_sink_rect, video_rtsp_native_sink_visible, video_rtsp_native_stats,
+    video_linux_hole_spike,
+    video_rtsp_native_sink_buffer, video_rtsp_native_sink_orient,
 };
 use video::{MediaMtx, MjpegServer};
 use commands::logging::{set_log_level, get_log_path, log_session_settings, log_frontend};
@@ -416,6 +420,11 @@ pub fn run() {
             #[cfg(target_os = "android")]
             android::log_resolved_dirs(_app.handle());
 
+            // Linux: re-host the WebView over the native video layer (hole-punch decode sink,
+            // MOBILE_RTSP.md P2.3). Needs the transparent window from tauri.linux.conf.json.
+            #[cfg(target_os = "linux")]
+            video::linux_host::install(_app.handle());
+
             // Linux/WebKitGTK: stop trackpad/keyboard gestures from zooming the whole WebView frame.
             // WebKitGTK handles these natively in GTK and ignores any JS `preventDefault`, so they can
             // only be suppressed here (Windows/WebView2 + macOS use the JS guard in `+layout.svelte`).
@@ -543,6 +552,7 @@ pub fn run() {
         // readiness poll) without pinning an async runtime thread.
         .manage(std::sync::Arc::new(MediaMtx::new()))
         .manage(MjpegServer::new())
+        .manage(video::rtsp_native::NativeRtsp::new())
         .invoke_handler(tauri::generate_handler![
             list_serial_ports,
             scan_ble_devices,
@@ -689,6 +699,7 @@ pub fn run() {
             terrain_cache_stats,
             terrain_cache_clear,
             system_on_battery,
+            system_active_net_is_wifi,
             storage_pick_folder,
             share_file,
             video_ffmpeg_status,
@@ -702,6 +713,14 @@ pub fn run() {
             video_probe_device,
             video_native_mjpeg_start,
             video_rtsp_mjpeg_start,
+            video_rtsp_native_start,
+            video_rtsp_native_stop,
+            video_rtsp_native_sink_rect,
+            video_rtsp_native_sink_visible,
+            video_linux_hole_spike,
+            video_rtsp_native_stats,
+            video_rtsp_native_sink_buffer,
+            video_rtsp_native_sink_orient,
             video_native_mjpeg_stop,
             radar_configure,
             radar_set_center,
@@ -748,6 +767,7 @@ pub fn run() {
                 use tauri::Manager;
                 app.state::<std::sync::Arc<MediaMtx>>().stop();
                 app.state::<MjpegServer>().stop();
+                app.state::<video::rtsp_native::NativeRtsp>().stop();
             }
         });
 }

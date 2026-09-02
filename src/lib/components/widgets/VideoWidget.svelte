@@ -17,6 +17,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { videoStream, videoState, bindVideoEl, setMapLocation, setWidgetRect, reportMjpegError } from '$lib/stores/video';
   import { canvasSink, mjpegSink } from '$lib/controllers/mjpegSink';
+  import { nativeSurface, activeNativeSurface } from '$lib/controllers/nativeVideo';
   import VideoReconnectOverlay from '$lib/components/video/VideoReconnectOverlay.svelte';
 
   let { width = 300, height = 150 }: { width?: number; height?: number } = $props();
@@ -69,18 +70,36 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <!-- svelte-ignore a11y_click_events_have_key_events -->
-<div bind:this={cardEl} class="widget-card" style="width:{width}px; height:{height}px;" ondblclick={swapHere}>
+<!-- Deliberately NOT a data-nv-clip target: the card has a backdrop-filter, and per-frame
+     clip-path churn on a backdrop-filtered element made the whole tile flicker during window
+     resizes (and stick invisible on a settled hairline overlap). While this tile holds the
+     native video, its glass is switched off and the bezel is painted by ring-only properties
+     (border + box-shadow) instead of a clipped background — nothing paints behind the hole. -->
+<div
+  bind:this={cardEl}
+  class="widget-card"
+  class:nv-armed={$activeNativeSurface === 'widget'}
+  style="width:{width}px; height:{height}px;"
+  ondblclick={swapHere}
+>
   {#if mapHere}
     <!-- The map is overlaid here by +page (top-level). Keep an empty sized tile underneath. -->
     <div class="placeholder map-here"></div>
+  {:else if $videoState.status === 'live' && $videoState.nativeSink}
+    <!-- Native decode sink (hole punch): the video is a hardware layer BELOW the WebView; this
+         div is the transparent hole it shows through (the surface router clips the card + map
+         behind it). Only one surface at a time can hold the hole — see controllers/nativeVideo. -->
+    <div class="native-hole" class:armed={$activeNativeSurface === 'widget'} use:nativeSurface={'widget'}>
+      {#if $activeNativeSurface !== 'widget'}<span>{$t('video.sinkElsewhere')}</span>{/if}
+    </div>
   {:else if $videoState.status === 'live' && $videoState.mjpegUrl}
     <!-- Native / MJPEG feed (no MediaStream): drawn by the off-thread reader where the WebView
          allows it, otherwise the plain <img> multipart stream. -->
     {#if $canvasSink}
-      <canvas use:mjpegSink class:mirror={$videoState.mirror}></canvas>
+      <canvas use:mjpegSink class:mirror={$videoState.mirror} class:rot180={$videoState.rotate180}></canvas>
     {:else}
       <!-- svelte-ignore a11y_missing_attribute -->
-      <img src={$videoState.mjpegUrl} class:mirror={$videoState.mirror} onerror={reportMjpegError} />
+      <img src={$videoState.mjpegUrl} class:mirror={$videoState.mirror} class:rot180={$videoState.rotate180} onerror={reportMjpegError} />
     {/if}
   {:else if $videoState.status === 'live'}
     <!-- svelte-ignore a11y_media_has_caption -->
@@ -89,7 +108,7 @@
       autoplay
       muted
       playsinline
-      class:mirror={$videoState.mirror}
+      class:mirror={$videoState.mirror} class:rot180={$videoState.rotate180}
     ></video>
   {:else}
     <div class="placeholder">
@@ -136,6 +155,16 @@
   canvas.mirror {
     transform: scaleX(-1);
   }
+  video.rot180,
+  img.rot180,
+  canvas.rot180 {
+    transform: rotate(180deg);
+  }
+  video.mirror.rot180,
+  img.mirror.rot180,
+  canvas.mirror.rot180 {
+    transform: scaleY(-1);
+  }
   .placeholder {
     display: flex;
     align-items: center;
@@ -145,5 +174,33 @@
   }
   .placeholder.map-here {
     color: #555; /* faint — the map is drawn on top of this tile */
+  }
+  /* Native-sink hole: transparent while this tile holds the hardware video layer (the frame
+     border stays as the bezel), an opaque placeholder while another surface has it. */
+  .native-hole {
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    border-radius: 5px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #888;
+    font-size: 12px;
+    text-align: center;
+  }
+  .native-hole.armed {
+    background: transparent;
+    /* Opaque ring in the card's 3 px padding gap — box-shadow paints only OUTSIDE the
+       border box, so the hole itself stays transparent. Replaces the card's glass. */
+    box-shadow: 0 0 0 3px rgba(30, 30, 30, 0.9);
+  }
+  /* While this tile holds the native video: no glass — the background would paint behind the
+     transparent hole, and clipping it (the old approach) flickered (see markup comment). */
+  .widget-card.nv-armed {
+    background: transparent;
+    backdrop-filter: none;
   }
 </style>

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "app": {
+    "windows": [
+      {
+        "title": "Kite Ground Control",
+        "width": 1280,
+        "height": 800,
+        "dragDropEnabled": true,
+        "decorations": false,
+        "transparent": true,
+        "visible": false,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,WebRtcHideLocalIpsWithMdns"
+      }
+    ]
+  }
+}

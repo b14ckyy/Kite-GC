@@ -53,6 +53,22 @@ pub fn system_on_battery() -> bool {
 /// vendor name), so scan the class directory for the first supply of type `Battery` rather than hardcoding
 /// one path. Anything unreadable reports false — same "treat as AC, don't cap" fallback as the desktop
 /// path, since a wrongly capped frame rate is worse than a missed optimisation.
+/// Whether the device's ACTIVE network runs over Wi-Fi (Android: ConnectivityManager, VPN
+/// underlays included where the system exposes them; unknown → true, the safe default for
+/// the one caller). Used to pause continuous GCS location updates while an RTSP stream
+/// runs — fused location's periodic Wi-Fi scans take the radio off-channel and burst-drop
+/// RTP every ~10 s (measured on the Teclast M11). Non-Android platforms report false: the
+/// pause only exists there.
+#[tauri::command]
+pub fn system_active_net_is_wifi() -> bool {
+    #[cfg(target_os = "android")]
+    {
+        crate::android::net::active_net_is_wifi().unwrap_or(true)
+    }
+    #[cfg(not(target_os = "android"))]
+    false
+}
+
 #[cfg(target_os = "android")]
 #[tauri::command]
 pub fn system_on_battery() -> bool {

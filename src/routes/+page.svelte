@@ -86,10 +86,12 @@
   import { weatherTempDisplayFromC, weatherWindDisplayFromMs, weatherTempCFromDisplay, weatherWindMsFromDisplay, canonicalWeatherDescription } from "$lib/helpers/weather";
   import type { TileCacheStats } from "$lib/cache/tileCache";
   import WidgetPanel from "$lib/components/WidgetPanel.svelte";
+  import VideoBackdropMap from "$lib/components/video/VideoBackdropMap.svelte";
   import { LARGE_BASE_VMIN } from "$lib/config/widgetRegistry";
   import FloatingVideoWindow from "$lib/components/video/FloatingVideoWindow.svelte";
   import { initVideo, videoState, videoStream, bindVideoEl, setMapLocation, setFloatHeightFrac, setFloatPos, registerPiPElement, reportMjpegError } from "$lib/stores/video";
   import { canvasSink, mjpegSink } from "$lib/controllers/mjpegSink";
+  import { nativeSurface, activeNativeSurface } from "$lib/controllers/nativeVideo";
   import { lowPowerActive } from "$lib/stores/lowPower";
   import { initPulseBlink } from "$lib/stores/pulseBlink";
   import { openUrl } from "@tauri-apps/plugin-opener";
@@ -628,6 +630,43 @@
   };
   let panels = $state<PanelConfig>(defaultPanels);
   let widgetEditMode = $state(false);
+
+  // Unobstructed fullscreen (Video panel toggle): the map-swap video box retreats from the
+  // nav-rail column (always, in this mode) and from OCCUPIED widget panels, so widgets never
+  // overlay the picture. A panel counts as occupied only while visible AND holding widgets —
+  // an empty or hidden panel contributes 0 and the video keeps that edge. Values are logical
+  // px (the wrapper lives in the zoomed .app layer); the measured dock sizes (clientWidth/
+  // clientHeight binds above) track user resizes and the phone/tablet overrides for free.
+  const ufActive = $derived($videoState.unobstructedFullscreen && mapInFrame);
+  const ufRight = $derived(
+    ufActive && $layout.sideDock.visible && panels.right.length > 0 ? sideDockW : 0
+  );
+  const ufBottomExtra = $derived(
+    ufActive && $layout.bottomDock.visible && panels.bottom.length > 0 ? bottomDockH : 0
+  );
+  // The wrapper itself stays FULL-SIZE (so the blurred backdrop map fills the whole zone,
+  // widgets and nav rail float on it); the reserves only shrink the AVAILABLE AREA the
+  // video box is fitted into: 62px nav-rail column left (always in this mode), the occupied
+  // docks right/bottom. Inside that area the box is cut to the stream's aspect ratio and
+  // centred — no letterbox bars at all (the native sink's own black letterbox never becomes
+  // visible because box = picture). Null until the wrapper is measured (or when the mode is
+  // off) — the box then falls back to filling the wrapper via CSS.
+  let ufWrapW = $state(0);
+  let ufWrapH = $state(0);
+  const ufBox = $derived.by(() => {
+    if (!ufActive) return null;
+    const availW = ufWrapW - 62 - ufRight;
+    const availH = ufWrapH - ufBottomExtra;
+    if (availW <= 0 || availH <= 0) return null;
+    const aspect = $videoState.aspect || 16 / 9;
+    const w = Math.min(availW, availH * aspect);
+    return {
+      left: Math.round(62 + (availW - w) / 2),
+      top: Math.round((availH - w / aspect) / 2),
+      w: Math.round(w),
+      h: Math.round(w / aspect),
+    };
+  });
 
   // Cache stats subscription
   let cacheStats = $state<TileCacheStats>({ usedBytes: 0, maxBytes: 0, tileCount: 0 });
@@ -2086,6 +2125,15 @@
       : null,
   );
   const showPlayer = $derived(playbackActive && !isPrimaryConnected && selectedFlight != null);
+  // Blackbox-replay position for the video-backdrop map — a replayed model is a valid UAV
+  // position, so the backdrop follows it exactly like the mini map does. Null outside a
+  // replay or when the record carries no usable coordinates (the track is already
+  // GPS-filtered above, so the null checks are belt-and-braces).
+  const ufReplayPos = $derived(
+    playbackPoint != null && playbackPoint.lat != null && playbackPoint.lon != null
+      ? { lat: playbackPoint.lat, lon: playbackPoint.lon }
+      : null
+  );
   // Mirror replay-mode state to the store so the map layers can gate mission
   // visibility (replay → follow the MISSION toggle; planning/live → always show).
   $effect(() => { replayActive.set(showPlayer); });
@@ -2438,13 +2486,25 @@
 
   onMount(() => { void runStartupRecovery(); });
 
+  // The Windows main window starts hidden (`visible: false` in tauri.windows.conf.json): it is
+  // `transparent: true` for the native-video hole punch, so before the WebView's first paint the
+  // whole app area was see-through to the desktop with only the frame visible. Show it once the
+  // UI is actually mounted. No-op on platforms whose window starts visible.
+  onMount(() => {
+    void import('@tauri-apps/api/webviewWindow').then(({ getCurrentWebviewWindow }) => {
+      const win = getCurrentWebviewWindow();
+      void win.show().then(() => win.setFocus()).catch(() => {});
+    });
+  });
+
   // Keep the low-power state resolved for the whole app lifetime: the store mirrors it onto a root
   // class that CSS gates the expensive widget-bar transitions off (see stores/lowPower.ts). It is a
   // readable store, so it only runs while something subscribes — this is that subscription.
   onMount(() => lowPowerActive.subscribe(() => {}));
 
-  // Hard-blink indicator mode on WebKitGTK — see stores/pulseBlink.ts for why a looping CSS
-  // animation there costs ~46 % of a core regardless of size or visibility. No-op elsewhere.
+  // Hard-blink indicator mode on WebKitGTK and Android — see stores/pulseBlink.ts for why a looping
+  // CSS animation costs a large fraction of a core there (per-frame fixed cost, not per pixel).
+  // No-op elsewhere.
   onMount(() => initPulseBlink());
 
   // Startup update check (GitHub releases). Deferred a few seconds so it never competes with launch work;
@@ -2597,6 +2657,7 @@
   <div
     class="layer-map"
     class:in-frame={mapInFrame}
+    data-nv-clip={mapInFrame ? undefined : true}
     style={mapInFrame ? inFrameStyle : mapLayerStyle}
     onclick={minimizeLogbook}
   >
@@ -2729,15 +2790,46 @@
   {#if mapInFrame}
     <!-- Wrapper carries the inset + black backdrop; the video fills it with object-fit: contain so
          it scales to the window (full height/width) without distortion — bars where aspect differs. -->
-    <div class="map-video-wrap">
-      {#if $videoState.mjpegUrl}
+    <div
+      class="map-video-wrap"
+      class:nv-active={$activeNativeSurface === 'main'}
+      class:unobstructed={ufActive}
+      bind:clientWidth={ufWrapW}
+      bind:clientHeight={ufWrapH}
+    >
+      {#if ufActive}
+        <!-- Thematic backdrop: a blurred, bare second map following the UAV — fills the area
+             around the video box. Carries data-nv-clip, so the native-sink hole is cut into
+             it like into the main map layer. -->
+        <VideoBackdropMap replayPos={ufReplayPos} />
+      {/if}
+      <!-- Aspect-exact inner box: in unobstructed mode this is cut to the stream's aspect and
+           centred (no letterbox bars — see ufBox); otherwise it just fills the wrapper. -->
+      <div
+        class="map-video-box"
+        style={ufBox ? `left:${ufBox.left}px;top:${ufBox.top}px;width:${ufBox.w}px;height:${ufBox.h}px;` : ''}
+      >
+      {#if $videoState.nativeSink}
+        <!-- Native decode sink (hole punch): the video is a hardware layer BELOW the WebView; this
+             div is the transparent hole it shows through. Highest surface priority — full-screen
+             video beats every other surface. See controllers/nativeVideo. -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          class="native-hole"
+          class:armed={$activeNativeSurface === 'main'}
+          use:nativeSurface={'main'}
+          ondblclick={() => setMapLocation('main')}
+        >
+          {#if $activeNativeSurface !== 'main'}<span>{$t('video.sinkElsewhere')}</span>{/if}
+        </div>
+      {:else if $videoState.mjpegUrl}
         <!-- Native / MJPEG feed (no MediaStream): drawn by the off-thread reader where the WebView
              allows it, otherwise the plain <img> multipart stream. -->
         {#if $canvasSink}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <canvas
             class="map-video"
-            class:mirror={$videoState.mirror}
+            class:mirror={$videoState.mirror} class:rot180={$videoState.rotate180}
             use:mjpegSink
             ondblclick={() => setMapLocation('main')}
           ></canvas>
@@ -2746,7 +2838,7 @@
           <!-- svelte-ignore a11y_missing_attribute -->
           <img
             class="map-video"
-            class:mirror={$videoState.mirror}
+            class:mirror={$videoState.mirror} class:rot180={$videoState.rotate180}
             src={$videoState.mjpegUrl}
             ondblclick={() => setMapLocation('main')}
             onerror={reportMjpegError}
@@ -2757,7 +2849,7 @@
         <!-- svelte-ignore a11y_media_has_caption -->
         <video
           class="map-video"
-          class:mirror={$videoState.mirror}
+          class:mirror={$videoState.mirror} class:rot180={$videoState.rotate180}
           bind:this={mapVideoEl}
           autoplay
           muted
@@ -2765,6 +2857,7 @@
           ondblclick={() => setMapLocation('main')}
         ></video>
       {/if}
+      </div>
     </div>
   {/if}
 
@@ -3314,6 +3407,55 @@
     background: #000;
     z-index: 0;
   }
+  /* Native-sink hole: the wrapper stops painting while it holds the hardware video layer
+     (the sink letterboxes on its own black backbuffer). */
+  .map-video-wrap.nv-active {
+    background: transparent;
+  }
+  /* Unobstructed fullscreen (Video panel toggle): the wrapper KEEPS its full-zone box (the
+     blurred backdrop map inside it fills everything — widgets, docks and nav rail float on
+     it); the video box alone retreats from the reserves, computed in ufBox. The wrapper only
+     stops painting its own black so the backdrop (or the app ground, without a position)
+     shows through. */
+  .map-video-wrap.unobstructed {
+    background: transparent;
+  }
+  /* Inner video box: fills the wrapper normally; in unobstructed mode the inline style from
+     ufBox cuts it to the stream's aspect (left+width beat the inset's right, top+height its
+     bottom) and it reads as a deliberately framed surface — panel-style accent border, black
+     only behind the picture itself (≤1px rounding slivers). border-box keeps the frame inside
+     the aspect-exact rect. */
+  .map-video-box {
+    position: absolute;
+    inset: 0;
+  }
+  .map-video-wrap.unobstructed .map-video-box {
+    background: #000;
+    border: 1px solid rgba(55, 168, 219, 0.35);
+    box-sizing: border-box;
+    /* Drop shadow — near-black right at the frame, fading out wide and soft: lifts the
+       framed video clearly off the blurred backdrop map. */
+    box-shadow: 0 0 6px rgba(0, 0, 0, 1), 0 6px 28px rgba(0, 0, 0, 0.85);
+  }
+  /* Native sink: the box must not paint either, or its black would sit ON TOP of the
+     hardware layer below the WebView (same rule as .nv-active on the wrapper). The hole
+     child handles its own armed/unarmed background; the border stays. */
+  .map-video-wrap.unobstructed.nv-active .map-video-box {
+    background: transparent;
+  }
+  .map-video-wrap .native-hole {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #888;
+    font-size: 12px;
+    background: #000;
+  }
+  .map-video-wrap .native-hole.armed {
+    background: transparent;
+  }
   /* width/height 100% (not auto) so the replaced <video> stretches to the wrapper instead of using
      its intrinsic stream resolution; object-fit: contain keeps the aspect ratio (letterbox bars). */
   .map-video {
@@ -3326,6 +3468,12 @@
   }
   .map-video.mirror {
     transform: scaleX(-1);
+  }
+  .map-video.rot180 {
+    transform: rotate(180deg);
+  }
+  .map-video.mirror.rot180 {
+    transform: scaleY(-1);
   }
   /* PiP source: rendered + playing but visually out of the way (must not be
      display:none, or it produces no frames for Picture-in-Picture). */

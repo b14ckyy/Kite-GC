@@ -25,6 +25,7 @@ tauri-build = { version = "2", features = [] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
 
 [dependencies]
+md-5 = "0.10"
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
@@ -74,6 +75,12 @@ tauri-plugin-window-state = "2"
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"
 ndk-context = "0.1"
+# MediaCodec hardware video decode + ANativeWindow for the native RTSP sink (MOBILE_RTSP P2.2):
+# the safe wrappers over the NDK's AMediaCodec/AMediaFormat C API (video/android_sink.rs).
+ndk = { version = "0.9", default-features = false, features = ["media", "api-level-30"] }
+# CLOCK_MONOTONIC in raw ns for MediaCodec's releaseOutputBufferAtTime pacing (the framework
+# compares the render timestamp against System.nanoTime, which std::time::Instant can't expose).
+libc = "0.2"
 
 # HID / joystick input for GCS RC control (docs/archive/MSP_RC_CONTROL.md). Native per-OS backends read
 # RAW axes/buttons/hats (no gamepad projection) so flight hardware / RC transmitters map correctly:
@@ -85,7 +92,21 @@ winreg = "0.52"
 
 [target.'cfg(target_os = "windows")'.dependencies.windows]
 version = "0.61"
-features = ["Gaming_Input", "Foundation_Collections"]
+features = [
+    "Gaming_Input",
+    "Foundation_Collections",
+    # Hole-punch spike / native video sink (P2.1): raw child windows under the WebView.
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_LibraryLoader",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Media_MediaFoundation",
+    "Win32_System_Com",
+]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 evdev = "0.13"
@@ -95,6 +116,15 @@ libc = "0.2"
 # trackpad pinch / Ctrl+wheel zoom is handled natively by GTK and ignores any JS preventDefault, so the
 # whole-frame zoom can only be suppressed here. Version must match the one wry/tauri pulls (unified by Cargo).
 webkit2gtk = "2.0"
+# The GTK widget tree under the WebView: hosts the native video layer for the hole-punch sink
+# (video/linux_host.rs). Same 0.18 series tao/webkit2gtk use, so widgets cross module borders as-is.
+gtk = "0.18"
+# H.264/HEVC decode + render for the native sink (video/linux_sink.rs): appsrc → decodebin3 →
+# gtkglsink. 0.21 is the series on glib 0.18 (one glib in the binary; the sink widget is a plain
+# gtk::Widget for the host). Needs system GStreamer ≥ 1.14 at build time (libgstreamer1.0-dev,
+# libgstreamer-plugins-base1.0-dev); the plugins come from the distro at run time.
+gst = { package = "gstreamer", version = "0.21" }
+gst_app = { package = "gstreamer-app", version = "0.21" }
 
 # iOS BLE: btleplug has no iOS backend, so we talk to CoreBluetooth directly through the objc2
 # bindings (a Rust CBCentralManager/CBPeripheral delegate). Keeps the BLE transport in-crate - no

@@ -41,3 +41,9 @@
 # And the BLE bridge (transport/ble_android.rs → BleSerial) — JNI-only, same rule.
 -keep class com.kitegc.app.BleSerial { *; }
 -keep class com.kitegc.app.ScreenLock { *; }
+
+# Native-video layer host (android/native_video.rs → NativeVideo) — JNI-only, same rule.
+-keep class com.kitegc.app.NativeVideo { *; }
+
+# Active-network transport lookup (android/net.rs → NetInfo) — JNI-only, same rule.
+-keep class com.kitegc.app.NetInfo { *; }
