@@ -154,6 +154,24 @@ How interactive the swapped-in **mini-map** is depends on where it landed:
 Swapped: the live video fills the background while the map rides in the smaller frame.
 ///
 
+### Unobstructed fullscreen
+
+By default the swapped-in video fills the whole content area edge to edge — widgets, docks and the
+nav rail float **on top of the picture**. If you prefer the picture fully visible, turn on
+**Unobstructed fullscreen** in the Video panel (below *Rotate 180°*):
+
+- The video becomes a **framed box** that keeps clear of the UI: the nav-rail column on the left is
+  always kept free, and the right widget panel and the bottom widget dock are kept free **while they
+  hold widgets**. An empty (or hidden) panel releases its edge, and the video grows into that space —
+  as far as the stream's aspect ratio allows.
+- The box is cut **exactly to the stream's aspect ratio**, so there are no letterbox bars.
+- The area around the box shows a **softly blurred map** of the surroundings that follows your
+  aircraft — the live UAV position when there is a GPS fix, the replayed model during a blackbox
+  replay, or the ground-station location otherwise. With no position available the background stays
+  plain.
+
+The switch is remembered; turn it off to get the edge-to-edge fullscreen back.
+
 ## Platform notes: what to expect per operating system
 
 Video is the one part of Kite that depends heavily on components Kite does **not** ship: the operating
