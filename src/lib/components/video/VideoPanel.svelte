@@ -26,6 +26,7 @@
     setCameraFps,
     setVideoMirror,
     setVideoRotate180,
+    setUnobstructedFullscreen,
     setDisableHwAccel,
     setVideoKind,
     setRtspUrl,
@@ -742,6 +743,18 @@
     <div class="field-row">
       <Toggle checked={$videoState.rotate180} onchange={(c) => setVideoRotate180(c)} id="vp-rot180" />
       <span class="label">{$t('video.rotate180')}</span>
+    </div>
+
+    <!-- Unobstructed fullscreen: the map-swap video shrinks so occupied widget panels and the
+         nav rail stay clear of the picture; an empty/hidden panel releases its edge. Off = the
+         video fills the whole map zone as before. Layout math lives in +page.svelte. -->
+    <div class="field-row" title={$t('video.unobstructedHint')}>
+      <Toggle
+        checked={$videoState.unobstructedFullscreen}
+        onchange={(c) => setUnobstructedFullscreen(c)}
+        id="vp-unobstructed"
+      />
+      <span class="label">{$t('video.unobstructed')}</span>
     </div>
 
     <!-- Escape hatch: some driver/hardware combinations pass the backend probe but still misbehave on

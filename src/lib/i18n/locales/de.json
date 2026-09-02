@@ -682,6 +682,8 @@
     "mirror": "Horizontal spiegeln",
     "mirrorNativeAndroid": "Bei Hardware-Videodecodierung auf Android nicht verfügbar — das decodierte Bild kann dort nicht gespiegelt werden. MJPEG- und Kameraquellen spiegeln normal.",
     "rotate180": "Um 180° drehen (Kamera kopfüber)",
+    "unobstructed": "Unverdecktes Vollbild",
+    "unobstructedHint": "Im Vollbild (Kartentausch) wird das Video verkleinert, damit belegte Widget-Leisten und die Navigationsleiste das Bild nicht überdecken. Leere Leisten geben ihre Kante frei.",
     "codec": "Codec",
     "floatingWindow": "Schwebendes Fenster",
     "videoWindow": "Video-Fenster (ablösen)",
