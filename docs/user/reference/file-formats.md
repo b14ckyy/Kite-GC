@@ -9,6 +9,7 @@ Kite can save/export it.
 |---|---|---|---|
 | **INAV mission** | `.mission` | R / W | MultiWii XML, compatible with the INAV Configurator and MWPTools. |
 | **ArduPilot / PX4 mission** | `.waypoints` | R / W | QGroundControl-compatible plain text. |
+| **QGroundControl plan** | `.plan` | R | QGC's JSON plan — the format QGC saves (PX4 workflows). Mission waypoints only: QGC pattern items (Survey, Corridor Scan, …) are refused with a clear message, and the plan's geofence/rally sections are ignored — manage those in Kite's own Airspace tools. |
 
 You can also drag a mission file straight onto the map. See **[Missions](../guides/missions.md)**.
 
