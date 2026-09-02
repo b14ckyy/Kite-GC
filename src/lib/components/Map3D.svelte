@@ -3799,11 +3799,14 @@
     // Build the protocol-neutral model (only async part: terrain sampling). Replay → follow the MISSION
     // toggle; planning/live → always shown.
     const visible = !curReplayActive || curShowMission;
+    // 'inav' is the discriminator, NOT 'ardupilot': PX4 is its own system value and uses the
+    // ArduPilot mission stack — testing for 'ardupilot' silently routed PX4 into the (empty)
+    // INAV model and the 3D overlay rendered nothing for PX4 missions.
     const model = !visible
       ? null
-      : curAutopilotSystem === 'ardupilot'
-        ? await buildArduModel(token)
-        : await buildInavModel(token);
+      : curAutopilotSystem === 'inav'
+        ? await buildInavModel(token)
+        : await buildArduModel(token);
     if (token !== missionRenderToken || !viewer) return; // superseded while building
 
     // The mission sits at `altMsl + geoidOffset`, so the offset must be ready before we draw.
