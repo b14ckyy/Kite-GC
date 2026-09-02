@@ -97,6 +97,19 @@ PX4 ULog note: PX4 doesn't log a throttle *output*, so a replayed `.ulg` flight 
   straight in (not kept as a file), so there's nothing to re-export for those.
 - **Track** — export a flight's path as **KMZ / KML** (Google Earth), **GPX** or **CSV**.
 
+## The database, updates and the automatic backup
+
+All flights live in a single SQLite database (`flights.db`, folder configurable in Settings). When a
+Kite update needs to **upgrade the database format**, Kite first writes a **full backup** next to the
+database file (`flights.pre-migration-backup.db`) — automatically, before anything is changed. Only
+the **latest** backup is kept (with blackbox logs the file can be several GB), and Settings shows it
+with its size and a **Delete** button once it exists. To keep a copy permanently, move the file
+somewhere else yourself.
+
+If you ever **downgrade** Kite after such an upgrade, the older version refuses to touch the newer
+database: the logbook shows a notice (and the database stays untouched) until you either install the
+newer Kite again or restore a matching backup.
+
 ## Vehicles & batteries
 
 From the logbook toolbar you can open the two libraries that flights link to:
