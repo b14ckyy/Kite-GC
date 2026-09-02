@@ -11,6 +11,7 @@
   import { showMission, geoWaypoints } from '$lib/stores/mission';
   import StickOverlay from '$lib/components/sticks/StickOverlay.svelte';
   import { computeStickData } from '$lib/helpers/stickInput';
+  import SegmentedToggle, { type SegOption } from '$lib/components/panel/SegmentedToggle.svelte';
 
   let {
     showPlayer = false,
@@ -38,6 +39,11 @@
     replaySource = 'live' as 'live' | 'blackbox',
     hasLinkedPartner = false,
     onSwitchSource = (_source: 'live' | 'blackbox') => {},
+    hiresAvailable = false,
+    hiresActive = false,
+    hiresParsing = false,
+    onHiresToggle = (_active: boolean) => {},
+    hiresRecord = null as TelemetryRecord | null,
   }: {
     showPlayer?: boolean;
     selectedFlight?: Flight | null;
@@ -64,6 +70,13 @@
     replaySource?: 'live' | 'blackbox';
     hasLinkedPartner?: boolean;
     onSwitchSource?: (source: 'live' | 'blackbox') => void;
+    /** Hi-res replay (HIRES_REPLAY plan): the toggle only shows when an archived log is parseable. */
+    hiresAvailable?: boolean;
+    hiresActive?: boolean;
+    hiresParsing?: boolean;
+    onHiresToggle?: (active: boolean) => void;
+    /** Latest full-rate sample while hi-res is on — drives the stick overlay at tick rate. */
+    hiresRecord?: TelemetryRecord | null;
   } = $props();
 
   const COLOR_MODES: { value: TrackColorMode; labelKey: string }[] = [
@@ -133,12 +146,43 @@
     onScrub(Number(target.value));
   }
 
+  // REC/BBX as one SegmentedToggle (its own header names this switch as the intended use):
+  // both live for a linked pair, otherwise the missing source is a disabled segment.
+  const sourceOptions = $derived.by((): SegOption[] => {
+    if (hasLinkedPartner) {
+      return [
+        { value: 'live', label: 'REC' },
+        { value: 'blackbox', label: 'BBX' },
+      ];
+    }
+    if (selectedFlight?.source === 'blackbox') {
+      return [
+        { value: 'live', label: 'REC', disabled: true },
+        { value: 'blackbox', label: 'BBX' },
+      ];
+    }
+    return [
+      { value: 'live', label: 'REC' },
+      { value: 'blackbox', label: 'BBX', disabled: true, title: $t('player.bbxNotAvailable') },
+    ];
+  });
+  const sourceValue = $derived(
+    hasLinkedPartner ? replaySource : selectedFlight?.source === 'blackbox' ? 'blackbox' : 'live',
+  );
+
+  const hiresOptions = $derived.by((): SegOption[] => [
+    { value: 'std', label: '10 Hz', title: $t('player.hiresStandardTitle') },
+    { value: 'hires', label: 'HI-RES', title: $t('player.hiresTitle') },
+  ]);
+
   // Stick overlay (replay-only): normalize the current sample's recorded RC channels. Null when the
-  // log has no RC (e.g. .tlog / live-recorded flights) → the overlay is hidden.
+  // log has no RC (e.g. .tlog / live-recorded flights) → the overlay is hidden. While hi-res is on,
+  // the full-rate sample drives the sticks so they move at tick rate, not 10 Hz.
   const currentRecord = $derived(
-    playbackTrack.length > 0
-      ? playbackTrack[Math.min(playbackIndex, playbackTrack.length - 1)]
-      : null,
+    hiresRecord ??
+      (playbackTrack.length > 0
+        ? playbackTrack[Math.min(playbackIndex, playbackTrack.length - 1)]
+        : null),
   );
   const stickData = $derived(
     currentRecord
@@ -154,15 +198,22 @@
   <div class="log-player" bind:clientHeight={barHeight}>
     <div class="log-player-top">
       <div class="log-player-source">
-        {#if hasLinkedPartner}
-          <button class="log-player-source-btn" class:active={replaySource === 'live'} onclick={() => onSwitchSource('live')}>REC</button>
-          <button class="log-player-source-btn" class:active={replaySource === 'blackbox'} onclick={() => onSwitchSource('blackbox')}>BBX</button>
-        {:else if selectedFlight?.source === 'blackbox'}
-          <button class="log-player-source-btn" disabled>REC</button>
-          <button class="log-player-source-btn active">BBX</button>
-        {:else}
-          <button class="log-player-source-btn active">REC</button>
-          <button class="log-player-source-btn" disabled title={$t('player.bbxNotAvailable')}>BBX</button>
+        <SegmentedToggle
+          size="sm"
+          options={sourceOptions}
+          value={sourceValue}
+          onchange={(v) => onSwitchSource(v as 'live' | 'blackbox')}
+        />
+        {#if hiresAvailable}
+          <span class="log-player-hires">
+            <SegmentedToggle
+              size="sm"
+              options={hiresOptions}
+              value={hiresActive ? 'hires' : 'std'}
+              disabled={hiresParsing}
+              onchange={(v) => onHiresToggle(v === 'hires')}
+            />
+          </span>
         {/if}
         {#if $geoWaypoints.length > 0}
           <button
@@ -293,8 +344,15 @@
 
   .log-player-source {
     display: flex;
+    align-items: center;
     gap: 2px;
     flex-shrink: 0;
+  }
+
+  /* Set the resolution switch apart from the REC/BBX source group. */
+  .log-player-hires {
+    display: inline-flex;
+    margin-left: 8px;
   }
 
   .log-player-source-btn {
@@ -313,11 +371,6 @@
     background: #37a8db;
     color: #fff;
     border-color: #339cc1;
-  }
-
-  .log-player-source-btn:disabled {
-    opacity: 0.35;
-    cursor: not-allowed;
   }
 
   /* Mission visibility toggle — set apart from the REC/BBX source group. */
