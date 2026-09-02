@@ -97,8 +97,51 @@ pub fn open_database(path: &Path) -> SqlResult<Connection> {
         conn.execute_batch("VACUUM;")?;
     }
 
+    // Migration safety net (Dev-Docs active/DB_MIGRATIONS.md): when schema steps are pending on an
+    // EXISTING database, snapshot it first — flight archives are irreplaceable. Exactly ONE backup
+    // is kept (the file is multi-GB with blackbox blobs); each upgrade replaces the previous one.
+    // A fresh DB (v0) has nothing to lose and gets none. If the snapshot fails (disk full, …) the
+    // open fails too — migrating without the safety copy is not acceptable.
+    let version = get_user_version(&conn)?;
+    if version > 0 && version < CURRENT_SCHEMA_VERSION {
+        backup_before_migration(&conn, path, version)?;
+    }
+
     migrate(&conn)?;
     Ok(conn)
+}
+
+/// Sibling file of the DB holding the single pre-migration backup — it lives next to `flights.db`
+/// on purpose, so it follows the user-configured DB folder and can be moved/kept manually.
+pub fn backup_path_for(db_path: &Path) -> PathBuf {
+    db_path.with_file_name("flights.pre-migration-backup.db")
+}
+
+/// WAL-consistent snapshot of the whole DB via `VACUUM INTO` a temp file, then renamed over the
+/// previous backup — the old backup survives until the new snapshot is complete.
+fn backup_before_migration(conn: &Connection, db_path: &Path, from_version: u32) -> SqlResult<()> {
+    let target = backup_path_for(db_path);
+    let tmp = db_path.with_file_name("flights.pre-migration-backup.db.tmp");
+    let _ = std::fs::remove_file(&tmp);
+    log::warn!(
+        "[flightlog] schema upgrade v{from_version} -> v{CURRENT_SCHEMA_VERSION} pending — backing up the database to {}",
+        target.display()
+    );
+    if let Err(e) = conn.execute("VACUUM INTO ?1", [tmp.to_string_lossy().as_ref()]) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    let _ = std::fs::remove_file(&target); // single-backup policy: replaced by the new snapshot
+    std::fs::rename(&tmp, &target).map_err(|e| {
+        rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_IOERR),
+            Some(format!(
+                "could not finalize the pre-migration backup at {}: {e}",
+                target.display()
+            )),
+        )
+    })?;
+    Ok(())
 }
 
 /// Full defragmenting VACUUM — rebuilds the whole DB file to squeeze out fragmentation. Expensive
@@ -229,79 +272,60 @@ fn set_user_version(conn: &Connection, version: u32) -> SqlResult<()> {
     conn.execute_batch(&format!("PRAGMA user_version = {};", version))
 }
 
+/// Error for a DB written by a NEWER Kite (user downgraded the app). The `db-newer:` prefix is a
+/// STABLE marker the frontend matches on to disable the logbook with a targeted message instead of
+/// a generic failure — change it in lockstep with stores/flightlog.ts.
+fn db_newer_error(found: u32) -> rusqlite::Error {
+    rusqlite::Error::SqliteFailure(
+        rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
+        Some(format!(
+            "db-newer: flight database schema is v{found}, this Kite build supports up to v{CURRENT_SCHEMA_VERSION}"
+        )),
+    )
+}
+
 fn migrate(conn: &Connection) -> SqlResult<()> {
     let current = get_user_version(conn)?;
 
-    if current < 1 {
-        migrate_v0_to_v1(conn)?;
+    // Downgrade guard: never touch (let alone migrate "up" to an OLDER schema) a DB written by a
+    // newer Kite — refuse with the marker error and leave the file byte-identical.
+    if current > CURRENT_SCHEMA_VERSION {
+        return Err(db_newer_error(current));
     }
 
-    if current < 2 {
-        migrate_v1_to_v2(conn)?;
-    }
-
-    if current < 3 {
-        migrate_v2_to_v3(conn)?;
-    }
-
-    if current < 4 {
-        migrate_v3_to_v4(conn)?;
-    }
-
-    if current < 5 {
-        migrate_v4_to_v5(conn)?;
-    }
-
-    if current < 6 {
-        migrate_v5_to_v6(conn)?;
-    }
-
-    if current < 7 {
-        migrate_v6_to_v7(conn)?;
-    }
-
-    if current < 8 {
-        migrate_v7_to_v8(conn)?;
-    }
-
-    if current < 9 {
-        migrate_v8_to_v9(conn)?;
-    }
-
-    if current < 10 {
-        migrate_v9_to_v10(conn)?;
-    }
-
-    if current < 11 {
-        migrate_v10_to_v11(conn)?;
-    }
-
-    if current < 12 {
-        migrate_v11_to_v12(conn)?;
-    }
-
-    if current < 13 {
-        migrate_v12_to_v13(conn)?;
-    }
-
-    if current < 14 {
-        migrate_v13_to_v14(conn)?;
-    }
-
-    if current < 15 {
-        migrate_v14_to_v15(conn)?;
-    }
-
-    if current < 16 {
-        migrate_v15_to_v16(conn)?;
-    }
-
-    if current < 17 {
-        migrate_v16_to_v17(conn)?;
-    }
-
-    if current < 18 {
-        migrate_v17_to_v18(conn)?;
+    // Every step runs in its OWN transaction: its schema objects and its version stamp commit
+    // together or not at all. A failing step rolls back and leaves the DB cleanly on the last
+    // reached version (the stamps are literal per-step targets for the same reason — a historical
+    // stamp-to-CURRENT once produced a "newest version, missing objects" DB; the ensure_* block
+    // below still self-heals that legacy case). PRAGMA user_version is transactional in SQLite.
+    // None of the steps may contain VACUUM or its own BEGIN/COMMIT.
+    const STEPS: [(u32, fn(&Connection) -> SqlResult<()>); 18] = [
+        (1, migrate_v0_to_v1),
+        (2, migrate_v1_to_v2),
+        (3, migrate_v2_to_v3),
+        (4, migrate_v3_to_v4),
+        (5, migrate_v4_to_v5),
+        (6, migrate_v5_to_v6),
+        (7, migrate_v6_to_v7),
+        (8, migrate_v7_to_v8),
+        (9, migrate_v8_to_v9),
+        (10, migrate_v9_to_v10),
+        (11, migrate_v10_to_v11),
+        (12, migrate_v11_to_v12),
+        (13, migrate_v12_to_v13),
+        (14, migrate_v13_to_v14),
+        (15, migrate_v14_to_v15),
+        (16, migrate_v15_to_v16),
+        (17, migrate_v16_to_v17),
+        (18, migrate_v17_to_v18),
+    ];
+    for (target, step) in STEPS {
+        if current < target {
+            let tx = conn.unchecked_transaction()?;
+            step(&tx)?;
+            tx.commit()?;
+            log::info!("[flightlog] db schema migrated to v{target}");
+        }
     }
 
     // Self-heal: ensure the latest schema actually exists even if a prior version bump left it
@@ -452,7 +476,7 @@ fn ensure_v11_schema(conn: &Connection) -> SqlResult<()> {
 
 fn migrate_v10_to_v11(conn: &Connection) -> SqlResult<()> {
     ensure_v11_schema(conn)?;
-    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    set_user_version(conn, 11)?;
     Ok(())
 }
 
@@ -471,7 +495,7 @@ fn ensure_v12_schema(conn: &Connection) -> SqlResult<()> {
 
 fn migrate_v11_to_v12(conn: &Connection) -> SqlResult<()> {
     ensure_v12_schema(conn)?;
-    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    set_user_version(conn, 12)?;
     Ok(())
 }
 
@@ -487,7 +511,7 @@ fn ensure_v13_schema(conn: &Connection) -> SqlResult<()> {
 
 fn migrate_v12_to_v13(conn: &Connection) -> SqlResult<()> {
     ensure_v13_schema(conn)?;
-    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    set_user_version(conn, 13)?;
     Ok(())
 }
 
@@ -506,7 +530,7 @@ fn ensure_v14_schema(conn: &Connection) -> SqlResult<()> {
 
 fn migrate_v13_to_v14(conn: &Connection) -> SqlResult<()> {
     ensure_v14_schema(conn)?;
-    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    set_user_version(conn, 14)?;
     Ok(())
 }
 
@@ -521,7 +545,7 @@ fn ensure_v15_schema(conn: &Connection) -> SqlResult<()> {
 
 fn migrate_v14_to_v15(conn: &Connection) -> SqlResult<()> {
     ensure_v15_schema(conn)?;
-    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    set_user_version(conn, 15)?;
     Ok(())
 }
 
@@ -593,7 +617,7 @@ fn ensure_v16_schema(conn: &Connection) -> SqlResult<()> {
 
 fn migrate_v15_to_v16(conn: &Connection) -> SqlResult<()> {
     ensure_v16_schema(conn)?;
-    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    set_user_version(conn, 16)?;
     Ok(())
 }
 
@@ -608,7 +632,7 @@ fn ensure_v17_schema(conn: &Connection) -> SqlResult<()> {
 
 fn migrate_v16_to_v17(conn: &Connection) -> SqlResult<()> {
     ensure_v17_schema(conn)?;
-    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    set_user_version(conn, 17)?;
     Ok(())
 }
 
@@ -626,7 +650,7 @@ fn ensure_v18_schema(conn: &Connection) -> SqlResult<()> {
 
 fn migrate_v17_to_v18(conn: &Connection) -> SqlResult<()> {
     ensure_v18_schema(conn)?;
-    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    set_user_version(conn, 18)?;
     Ok(())
 }
 
@@ -634,7 +658,7 @@ fn migrate_v6_to_v7(conn: &Connection) -> SqlResult<()> {
     conn.execute_batch(
         "ALTER TABLE telemetry_records ADD COLUMN battery_percentage INTEGER;",
     )?;
-    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    set_user_version(conn, 7)?;
     Ok(())
 }
 
@@ -676,7 +700,7 @@ fn migrate_v5_to_v6(conn: &Connection) -> SqlResult<()> {
     conn.execute_batch(
         "ALTER TABLE flights ADD COLUMN linked_flight_id INTEGER REFERENCES flights(id);",
     )?;
-    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    set_user_version(conn, 6)?;
     Ok(())
 }
 
@@ -684,7 +708,7 @@ fn migrate_v2_to_v3(conn: &Connection) -> SqlResult<()> {
     conn.execute_batch(
         "ALTER TABLE telemetry_records ADD COLUMN link_quality INTEGER;",
     )?;
-    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    set_user_version(conn, 3)?;
     Ok(())
 }
 
@@ -742,7 +766,7 @@ fn migrate_v0_to_v1(conn: &Connection) -> SqlResult<()> {
             ON telemetry_records(flight_id, timestamp_ms);",
     )?;
 
-    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    set_user_version(conn, 1)?;
     Ok(())
 }
 
@@ -774,7 +798,7 @@ fn migrate_v1_to_v2(conn: &Connection) -> SqlResult<()> {
             ON blackbox_files(flight_id);",
     )?;
 
-    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    set_user_version(conn, 2)?;
     Ok(())
 }
 
@@ -2619,6 +2643,102 @@ mod tests {
     fn test_schema_creation() {
         let conn = test_db();
         assert_eq!(get_user_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn migrate_is_reentrant() {
+        let conn = test_db(); // already migrated once
+        migrate(&conn).unwrap(); // a second pass must be a clean no-op
+        assert_eq!(get_user_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
+    }
+
+    /// Unique on-disk DB path (backup/guard logic needs real files, not :memory:).
+    fn temp_db_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("kite-db-test-{name}-{}.db", std::process::id()))
+    }
+
+    fn cleanup(path: &Path) {
+        for p in [
+            path.to_path_buf(),
+            PathBuf::from(format!("{}-wal", path.display())),
+            PathBuf::from(format!("{}-shm", path.display())),
+            backup_path_for(path),
+        ] {
+            let _ = std::fs::remove_file(p);
+        }
+    }
+
+    #[test]
+    fn downgrade_guard_refuses_newer_db() {
+        let path = temp_db_path("downgrade");
+        cleanup(&path);
+        drop(open_database(&path).unwrap()); // fresh, v = CURRENT
+        {
+            let conn = Connection::open(&path).unwrap();
+            set_user_version(&conn, CURRENT_SCHEMA_VERSION + 1).unwrap();
+        }
+        let err = open_database(&path).unwrap_err().to_string();
+        assert!(err.contains("db-newer"), "expected the db-newer marker, got: {err}");
+        // The file must be untouched: still stamped as the newer version, no backup made.
+        let conn = Connection::open(&path).unwrap();
+        assert_eq!(get_user_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION + 1);
+        assert!(!backup_path_for(&path).exists());
+        drop(conn);
+        cleanup(&path);
+    }
+
+    #[test]
+    fn backup_created_before_pending_migration_only() {
+        let path = temp_db_path("backup");
+        cleanup(&path);
+        // Fresh DB (v0): full chain runs, but there is nothing to back up.
+        drop(open_database(&path).unwrap());
+        assert!(!backup_path_for(&path).exists(), "fresh DB must not create a backup");
+        // Roll the stamp back one version (the v17→v18 step is idempotent) → reopen must
+        // snapshot BEFORE migrating and land on CURRENT again.
+        {
+            let conn = Connection::open(&path).unwrap();
+            set_user_version(&conn, CURRENT_SCHEMA_VERSION - 1).unwrap();
+        }
+        let conn = open_database(&path).unwrap();
+        assert_eq!(get_user_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
+        let backup = backup_path_for(&path);
+        assert!(backup.exists(), "pending migration must create the backup");
+        // The snapshot is a valid SQLite DB stamped with the PRE-migration version.
+        let bconn = Connection::open(&backup).unwrap();
+        assert_eq!(get_user_version(&bconn).unwrap(), CURRENT_SCHEMA_VERSION - 1);
+        drop((conn, bconn));
+        cleanup(&path);
+    }
+
+    /// Full open/migrate pass over a COPY of a real flight database (Marc's RC2 archive,
+    /// F:\DEVELOPMENT\Kite-GC-testdata\flights-real.db — outside the repo).
+    /// `KITE_TEST_DB=<path> cargo test migrates_the_real_database -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn migrates_the_real_database() {
+        let Ok(src) = std::env::var("KITE_TEST_DB") else {
+            eprintln!("KITE_TEST_DB not set — skipping");
+            return;
+        };
+        let src = PathBuf::from(src);
+        // Work on a sibling copy so the fixture keeps its original schema version for reruns.
+        let work = src.with_extension("test-copy.db");
+        let _ = std::fs::remove_file(&work);
+        let _ = std::fs::remove_file(backup_path_for(&work));
+        std::fs::copy(&src, &work).expect("copy fixture");
+        let conn = open_database(&work).expect("open + migrate the real DB");
+        assert_eq!(get_user_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
+        let flights: i64 =
+            conn.query_row("SELECT COUNT(*) FROM flights", [], |r| r.get(0)).unwrap();
+        let telemetry: i64 =
+            conn.query_row("SELECT COUNT(*) FROM telemetry_records", [], |r| r.get(0)).unwrap();
+        eprintln!("real DB: {flights} flights, {telemetry} telemetry rows");
+        assert!(flights > 0, "expected flights in the real archive");
+        assert!(telemetry > 0, "expected telemetry in the real archive");
+        drop(conn);
+        let _ = std::fs::remove_file(&work);
+        let _ = std::fs::remove_file(backup_path_for(&work));
     }
 
     #[test]
