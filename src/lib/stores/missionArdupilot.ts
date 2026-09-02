@@ -476,3 +476,69 @@ export function parseWaypoints(text: string): ArduWaypoint[] {
   }
   return wps;
 }
+
+// ── QGroundControl .plan file format (PX4 ecosystem) ──────────────────
+// A QGC "Plan" is a JSON container: `mission.items[]` of SimpleItems (command / frame /
+// params[7] / autoContinue — exactly the ArduWaypoint fields, with lat/lon/alt riding in
+// params[4..6]), plus a plannedHomePosition and geoFence/rallyPoints sections. QGC saves
+// ONLY this format since v3.2 (it still *imports* .waypoints), so missions coming out of
+// the PX4 ecosystem arrive as .plan files. Import scope for 1.0:
+//  * ComplexItems (Survey, Corridor Scan, …) are QGC-computed patterns that only QGC can
+//    expand into waypoints → refuse the whole file with a readable error rather than
+//    silently dropping flight path.
+//  * geoFence / rallyPoints sections are ignored — Kite handles fence and rally as
+//    separate subsystems; a .plan EXPORT that bundles them is a planned 1.1 feature.
+//  * plannedHomePosition is ignored — like the MAVLink path, the working mission holds
+//    only real waypoints (ArduPilot's home slot 0 is synthesized on upload, PX4 has no
+//    home slot at all; see `reserve_home` in mavlink_proto/mission.rs).
+//  * null params (QGC's "no preference", typically yaw) become 0 — the same value
+//    Kite-authored missions carry in those fields. NaN cannot cross the Tauri IPC
+//    boundary (JSON has no NaN; the Rust side deserializes plain f32).
+
+export function parsePlanFile(text: string): ArduWaypoint[] {
+  let root: unknown;
+  try {
+    root = JSON.parse(text);
+  } catch {
+    throw new Error('Not a valid .plan file (broken JSON)');
+  }
+  const plan = root as { fileType?: string; mission?: { items?: unknown[] } };
+  if (plan?.fileType !== 'Plan' || !Array.isArray(plan.mission?.items)) {
+    throw new Error('Not a QGroundControl .plan file');
+  }
+  const wps: ArduWaypoint[] = [];
+  for (const raw of plan.mission.items) {
+    const item = raw as {
+      type?: string;
+      command?: number;
+      frame?: number;
+      autoContinue?: boolean;
+      params?: (number | null)[];
+    };
+    if (item?.type !== 'SimpleItem') {
+      throw new Error(
+        `unsupported "${item?.type ?? 'unknown'}" item — pattern items (Survey, Corridor Scan, …) exist only inside QGroundControl`,
+      );
+    }
+    if (typeof item.command !== 'number' || !Array.isArray(item.params) || item.params.length < 7) {
+      throw new Error('malformed mission item in .plan file');
+    }
+    const p = (i: number): number => {
+      const v = item.params?.[i];
+      return typeof v === 'number' && Number.isFinite(v) ? v : 0;
+    };
+    wps.push({
+      command: item.command,
+      frame: (item.frame ?? MAV_FRAME_GLOBAL_RELATIVE_ALT) as MavFrame,
+      param1: p(0),
+      param2: p(1),
+      param3: p(2),
+      param4: p(3),
+      lat: Math.round(p(4) * 1e7),
+      lon: Math.round(p(5) * 1e7),
+      alt: p(6),
+      autocontinue: item.autoContinue !== false,
+    });
+  }
+  return wps;
+}

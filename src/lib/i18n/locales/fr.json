@@ -1567,8 +1567,8 @@
     "delay": "Délai",
     "downloading": "Téléchargement de la mission depuis le FC…",
     "uploading": "Téléversement de la mission vers le FC…",
-    "dropHint": "Déposez un fichier .waypoints ici",
-    "onlyWaypointsFiles": "Seuls les fichiers .waypoints sont pris en charge"
+    "dropHint": "Déposez un fichier .waypoints ou .plan ici",
+    "onlyWaypointsFiles": "Seuls les fichiers .waypoints et .plan sont pris en charge"
   },
   "wpAction": {
     "waypoint": "Waypoint",
