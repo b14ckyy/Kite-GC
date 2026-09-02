@@ -70,11 +70,11 @@ the bundled ffmpeg for you, then builds the `.app` + `.dmg`. The result is **uns
 notarize-macos` signs + notarizes it for distribution without a Gatekeeper prompt (needs an Apple
 Developer account, credentials read from your environment / keychain — never committed).
 
-### Android
-Mobile (Tauri Mobile) is **not part of the 1.0 line**. An iOS / iPadOS port lives on `development`
-and an Android port is in review; both need their own UI tier and build pipeline, and both target a
-release after 1.0. Nothing mobile builds from `master` — don't run `tauri android init` or
-`tauri ios init` against a 1.0 checkout.
+### Android / iOS
+Mobile (Tauri Mobile) is **not part of the 1.0 line**. The Android and iOS / iPadOS ports are both
+merged on `development` (each with its own UI tier and build pipeline) and target a release after
+1.0. Nothing mobile builds from `master` — don't run `tauri android init` or `tauri ios init`
+against a 1.0 checkout.
 
 ## Workflow
 

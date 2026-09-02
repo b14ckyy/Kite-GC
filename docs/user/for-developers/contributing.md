@@ -53,6 +53,10 @@ just check    # svelte-check + TypeScript + cargo check
 CI runs the same checks (plus clippy) on Linux, Windows and macOS for every push to `development` /
 `master` and every PR targeting them. **PRs should be green before review.**
 
+For a **bug-fix PR**, please state in the description whether the bug exists in the **released
+version** or was **introduced since** (and by what, if you know). Only the first kind belongs in the
+release notes, so this one line saves the archaeology at release time.
+
 ## Coding conventions
 
 **Frontend (Svelte 5 / TypeScript)**
