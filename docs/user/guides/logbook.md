@@ -71,7 +71,8 @@ Use **Import** to pull in logs from outside Kite (one file or a batch). Supporte
 | Format | From |
 |---|---|
 | **INAV Blackbox** (`.bbl`, `.txt`) | INAV onboard flash (`.bbl`) or SD-card (`.txt`) blackbox |
-| **ArduPilot Dataflash** (`.bin`) | ArduPilot / PX4 onboard logs |
+| **ArduPilot Dataflash** (`.bin`) | ArduPilot onboard logs |
+| **PX4 ULog** (`.ulg`) | PX4 onboard flash / SD-card logs |
 | **MAVLink telemetry** (`.tlog`) | a MAVLink ground-station recording |
 | **MWPTools raw-MSP** (`.rawmsp`) | mwp's raw telemetry capture |
 | **Kite flight** (`.kflight`) | a flight exported from another Kite install |
@@ -83,12 +84,15 @@ import them all, each as its own logbook entry. Imported telemetry logs (`.tlog`
 treated as telemetry recordings and **split into separate flights on the arm / disarm markers** in the
 log, the same way a live recording is.
 
+PX4 ULog note: PX4 doesn't log a throttle *output*, so a replayed `.ulg` flight shows the FC's
+**thrust setpoint** as the throttle value.
+
 ## Exporting
 
 - **`.kflight`** — export selected flights (multi-select supported) as Kite's portable flight file, to
   move them to another install.
 - **Original log file** — re-export the onboard log stored with the flight: an INAV Blackbox
-  (`.bbl` / `.txt`) or ArduPilot Dataflash (`.bin`). For a flight that came out of a multi-flight
+  (`.bbl` / `.txt`), ArduPilot Dataflash (`.bin`) or PX4 ULog (`.ulg`). For a flight that came out of a multi-flight
   `.bbl`, this is that flight's own log, not the whole download. Imported `.tlog` / `.rawmsp` telemetry is parsed
   straight in (not kept as a file), so there's nothing to re-export for those.
 - **Track** — export a flight's path as **KMZ / KML** (Google Earth), **GPX** or **CSV**.

@@ -1100,6 +1100,78 @@ pub async fn flightlog_import_ardupilot(
     Ok(result)
 }
 
+/// Import a PX4 ULog .ulg flash log (native decoder: `flightlog::ulog`).
+#[tauri::command]
+pub async fn flightlog_import_ulog(
+    file_path: String,
+    db_path: Option<String>,
+    force_import: bool,
+    lang: Option<String>,
+    app_handle: tauri::AppHandle,
+) -> Result<BlackboxImportStatus, String> {
+    let db_path = db_path.unwrap_or_default();
+    let db_path_for_import = db_path.clone();
+
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let emit_progress = |progress: u8, stage: &str, message: &str| {
+            let _ = app_handle.emit(
+                "flightlog-import-progress",
+                BlackboxImportProgress {
+                    stage: stage.to_string(),
+                    progress,
+                    message: message.to_string(),
+                },
+            );
+        };
+
+        emit_progress(0, "start", "Preparing PX4 ULog import...");
+        let conn = open_db(&db_path_for_import)?;
+        crate::flightlog::ulog::import_ulog_log_with_progress(
+            &conn,
+            std::path::Path::new(&file_path),
+            force_import,
+            emit_progress,
+        )
+    })
+    .await
+    .map_err(|e| format!("ULog import task failed: {}", e))??;
+
+    // Auto-geocode on successful import + offer linking against a live MAVLink recording
+    // (same post-processing as the ArduPilot import).
+    if let BlackboxImportStatus::Success { flight_id, rows_imported } = &result {
+        let conn = open_db(&db_path)?;
+        if let Some(flight) = db::get_flight(&conn, *flight_id)
+            .map_err(|e| format!("Query error: {}", e))?
+        {
+            if flight.location_name.as_deref().unwrap_or("").trim().is_empty() {
+                if let (Some(lat), Some(lon)) = (flight.start_lat, flight.start_lon) {
+                    if let Some(name) = crate::flightlog::geocode::reverse_geocode(
+                        lat, lon,
+                        lang.as_deref().unwrap_or("en"),
+                    ).await {
+                        conn.execute(
+                            "UPDATE flights SET location_name = ?1 WHERE id = ?2",
+                            rusqlite::params![name, flight_id],
+                        )
+                        .map_err(|e| format!("Update error: {}", e))?;
+                    }
+                }
+            }
+
+            if let Ok(Some(linkable)) = db::find_linkable_live_flight(&conn, &flight.craft_name, flight.start_time, flight.duration_sec.unwrap_or(0)) {
+                log::info!("[LINK-AUTO] Found linkable live flight {} for ULog import {}", linkable.id, flight_id);
+                return Ok(BlackboxImportStatus::SuccessLinkable {
+                    flight_id: *flight_id,
+                    rows_imported: *rows_imported,
+                    linkable_flight_id: linkable.id,
+                });
+            }
+        }
+    }
+
+    Ok(result)
+}
+
 // --- Flight Linking Commands -------------------------------------------------
 
 /// Link two flights together (live recording ? blackbox import).

@@ -70,6 +70,7 @@
   import { missionManagerOpen, missionManagerSelectedId, requestOpenFlightId, requestOpenMissionId } from '$lib/stores/missionManager';
   import { batteryManagerOpen, batteryManagerCreateSerial, normalizeSerial } from '$lib/stores/batteryManager';
   import { vehicleManagerOpen, vehicleManagerCreateCraft } from '$lib/stores/vehicleManager';
+  import type { BlackboxImportStatus } from '$lib/stores/flightlog';
   import { missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode, flightSetBatterySerial, updateFlightNotes, getFlight, flightlogCommitPending, flightlogDiscardPending, flightlogContinuePending, scanOrphanSessions, recoverDiscard, recoverSaveIncomplete, recoverContinue, batteryDbFindBySerial, batteryDbAddUsage, vehicleDbFindByCraftName, blackboxDecoderAvailable, downloadBlackboxDecode } from '$lib/stores/flightlog';
   import EndFlightDialog from "$lib/components/logbook/EndFlightDialog.svelte";
   import type { EndFlightStats } from "$lib/components/logbook/EndFlightDialog.svelte";
@@ -1323,6 +1324,8 @@
     const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
     if (ext === 'bin') {
       await performArdupilotImport(filePath, false); // ArduPilot DataFlash
+    } else if (ext === 'ulg') {
+      await performUlogImport(filePath, false); // PX4 ULog
     } else if (ext === 'kflight') {
       await performKflightImport(filePath); // KiteGC exchange file
     } else if (ext === 'rawmsp' || ext === 'tlog') {
@@ -1403,18 +1406,18 @@
   }
 
   /** The INAV blackbox formats — the only ones that need the external `blackbox_decode`. Everything
-   *  else the importer accepts (.kflight archives, .rawmsp, .tlog, ArduPilot .bin) is parsed
+   *  else the importer accepts (.kflight archives, .rawmsp, .tlog, ArduPilot .bin, PX4 .ulg) is parsed
    *  in-process by the Rust backend and works on every platform. */
   const BLACKBOX_EXTS = /\.(txt|bbl|bfl)$/i;
   /** Extensions offered in the file picker / accepted from a drop. Mobile keeps what the device can
    *  produce itself or receive from a desktop — .kflight archives and the raw links (.rawmsp / .tlog)
    *  — and drops the rest: the three INAV blackbox formats need `blackbox_decode`, a separate native
    *  executable neither mobile OS allows to run (the backend refuses too — decoder_impossible), and
-   *  ArduPilot dataflash (.bin) runs to hundreds of megabytes for a tablet database that never
+   *  ArduPilot dataflash (.bin) and PX4 ULog (.ulg) grow to tens or hundreds of megabytes for a tablet database that never
    *  archives originals (ANDROID_SUPPORT.md §4). Recording, replay and export are unaffected. */
   const IMPORT_EXTS = isMobile
     ? ['kflight', 'rawmsp', 'tlog']
-    : ['txt', 'bbl', 'bfl', 'bin', 'kflight', 'rawmsp', 'tlog'];
+    : ['txt', 'bbl', 'bfl', 'bin', 'ulg', 'kflight', 'rawmsp', 'tlog'];
 
   /** Import a batch of files, isolating each so one bad/corrupt/non-log file doesn't abort the rest;
    *  failures (with the per-importer reason) are collected and surfaced together. */
@@ -1646,8 +1649,14 @@
     }
   }
 
-  async function performArdupilotImport(filePath: string, forceImport: boolean) {
-    const result = await logbookCtrl.importArdupilot(filePath, flightLogDbPath, forceImport, $locale ?? 'en');
+  /** Shared import flow for the self-describing binary flash logs (ArduPilot .bin, PX4 .ulg):
+   *  duplicate-confirm -> force re-run, then offer linking against a live recording. */
+  async function performBinaryLogImport(
+    filePath: string,
+    forceImport: boolean,
+    importer: (fp: string, force: boolean) => Promise<BlackboxImportStatus>,
+  ) {
+    const result = await importer(filePath, forceImport);
     
     if (result.type === 'duplicate') {
       const answer = await showDialog({
@@ -1662,7 +1671,7 @@
       });
       
       if (answer === 'force') {
-        await performArdupilotImport(filePath, true);
+        await performBinaryLogImport(filePath, true, importer);
       }
     } else {
       if (result.type === 'success_linkable') {
@@ -1678,6 +1687,16 @@
       await loadLogbook();
       await selectFlight(result.flight_id);
     }
+  }
+
+  async function performArdupilotImport(filePath: string, forceImport: boolean) {
+    await performBinaryLogImport(filePath, forceImport, (fp, force) =>
+      logbookCtrl.importArdupilot(fp, flightLogDbPath, force, $locale ?? 'en'));
+  }
+
+  async function performUlogImport(filePath: string, forceImport: boolean) {
+    await performBinaryLogImport(filePath, forceImport, (fp, force) =>
+      logbookCtrl.importUlog(fp, flightLogDbPath, force, $locale ?? 'en'));
   }
 
   async function selectFlight(flightId: number) {
