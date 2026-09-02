@@ -1568,10 +1568,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#android" class="md-nav__link">
+  <a href="#android-ios" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Android
+        Android / iOS
       
     </span>
   </a>
@@ -1799,10 +1799,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#android" class="md-nav__link">
+  <a href="#android-ios" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Android
+        Android / iOS
       
     </span>
   </a>
@@ -1967,11 +1967,11 @@ clean. That is why the release workflow builds on Ubuntu 24.04 rather than an ol
 the bundled ffmpeg for you, then builds the <code>.app</code> + <code>.dmg</code>. The result is <strong>unsigned</strong>; <code>just
 notarize-macos</code> signs + notarizes it for distribution without a Gatekeeper prompt (needs an Apple
 Developer account, credentials read from your environment / keychain — never committed).</p>
-<h3 id="android">Android<a class="headerlink" href="#android" title="Permanent link">&para;</a></h3>
-<p>Mobile (Tauri Mobile) is <strong>not part of the 1.0 line</strong>. An iOS / iPadOS port lives on <code>development</code>
-and an Android port is in review; both need their own UI tier and build pipeline, and both target a
-release after 1.0. Nothing mobile builds from <code>master</code> — don't run <code>tauri android init</code> or
-<code>tauri ios init</code> against a 1.0 checkout.</p>
+<h3 id="android-ios">Android / iOS<a class="headerlink" href="#android-ios" title="Permanent link">&para;</a></h3>
+<p>Mobile (Tauri Mobile) is <strong>not part of the 1.0 line</strong>. The Android and iOS / iPadOS ports are both
+merged on <code>development</code> (each with its own UI tier and build pipeline) and target a release after
+1.0. Nothing mobile builds from <code>master</code> — don't run <code>tauri android init</code> or <code>tauri ios init</code>
+against a 1.0 checkout.</p>
 <h2 id="workflow">Workflow<a class="headerlink" href="#workflow" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>just<span class="w"> </span>install<span class="w">      </span><span class="c1"># install frontend dependencies (npm install)</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>just<span class="w"> </span>dev<span class="w">          </span><span class="c1"># start development mode with hot reload</span>

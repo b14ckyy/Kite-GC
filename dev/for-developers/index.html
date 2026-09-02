@@ -1685,10 +1685,12 @@ This section is for people who want to <strong>build Kite from source</strong>, 
 <ul>
 <li><strong><a href="architecture/">Architecture overview</a></strong> — the tech stack and how the backend, frontend and
   protocol layers fit together.</li>
-<li><strong><a href="building/">Building from source</a></strong> — prerequisites and the build/run workflow on Windows and
-  Linux.</li>
-<li><strong><a href="contributing/">Contributing</a></strong> — coding conventions, the i18n and licensing rules, and how to
-  submit changes.</li>
+<li><strong><a href="building/">Building from source</a></strong> — prerequisites and the build/run workflow on Windows,
+  Linux and macOS.</li>
+<li><strong><a href="ui-framework/">UI framework &amp; theme</a></strong> — the shared UI building blocks and the dark theme
+  every panel uses.</li>
+<li><strong><a href="contributing/">Contributing</a></strong> — the branching model, coding conventions, the i18n and
+  licensing rules, and how to submit changes.</li>
 </ul>
 <h2 id="at-a-glance">At a glance<a class="headerlink" href="#at-a-glance" title="Permanent link">&para;</a></h2>
 <ul>
@@ -1700,7 +1702,8 @@ This section is for people who want to <strong>build Kite from source</strong>, 
   telemetry decoding.</li>
 <li><strong>Storage:</strong> a local SQLite database (via <code>rusqlite</code>) for the flight log, vehicle and battery
   libraries.</li>
-<li><strong>Platforms:</strong> Windows (primary) and Linux (x86 / ARM).</li>
+<li><strong>Platforms:</strong> Windows (primary), Linux (x86 / ARM) and macOS (universal). Android and
+  iOS / iPadOS ports live on <code>development</code> for a release after 1.0.</li>
 </ul>
 <h2 id="source-code">Source code<a class="headerlink" href="#source-code" title="Permanent link">&para;</a></h2>
 <p>The project lives on GitHub: <strong><a href="https://github.com/b14ckyy/Kite-GC">b14ckyy/Kite-GC</a></strong>. Issues and
