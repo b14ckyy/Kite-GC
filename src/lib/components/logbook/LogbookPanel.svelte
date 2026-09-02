@@ -37,6 +37,7 @@
 
   let {
     flightLoggingEnabled,
+    dbIncompatible = null,
     logbookMinimized,
     logbookLoading,
     blackboxImporting,
@@ -69,6 +70,10 @@
     onExportTrack,
   }: {
     flightLoggingEnabled: boolean;
+    /** Set when the flight DB was written by a NEWER Kite (the `db-newer:` open error) — the
+     *  logbook is disabled until a matching Kite version is installed; the raw error rides
+     *  along as the technical detail line. */
+    dbIncompatible?: string | null;
     logbookMinimized: boolean;
     logbookLoading: boolean;
     blackboxImporting: boolean;
@@ -279,7 +284,7 @@
 
 {#snippet importGroup()}
   <div class="tb-right">
-    <Button variant="data" icon="import" disabled={blackboxImporting} onclick={onImport}>
+    <Button variant="data" icon="import" disabled={blackboxImporting || !!dbIncompatible} onclick={onImport}>
       {blackboxImporting ? $t('logbook.importing') : $t('logbook.import')}
     </Button>
   </div>
@@ -335,7 +340,15 @@
 
 <!-- Main field: progress + empty states + flight tree. -->
 {#snippet mainBody()}
-  {#if !flightLoggingEnabled}
+  {#if dbIncompatible}
+    <!-- The flight DB is from a NEWER Kite (downgrade guard, `db-newer:` marker) — nothing is
+         read or written until a matching version is installed; the file stays untouched. -->
+    <div class="panel-empty">
+      <span class="panel-empty-icon">⊘</span>
+      <span>{$t('logbook.dbNewer')}</span>
+      <span class="db-newer-detail">{dbIncompatible}</span>
+    </div>
+  {:else if !flightLoggingEnabled}
     <div class="panel-empty">
       <span class="panel-empty-icon">⊘</span>
       <span>{$t('logbook.disabled')}</span>
@@ -533,6 +546,15 @@
   .panel-empty-icon {
     font-size: 28px;
     opacity: 0.4;
+  }
+
+  /* Technical detail under the db-newer notice (the raw open error, incl. both versions). */
+  .db-newer-detail {
+    color: #777;
+    font-size: 10px;
+    max-width: 90%;
+    text-align: center;
+    word-break: break-word;
   }
 
   .logbook-search-input {

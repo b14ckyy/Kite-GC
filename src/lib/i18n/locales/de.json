@@ -885,6 +885,9 @@
   "logbook": {
     "title": "Flug-Logbuch",
     "disabled": "Flugaufzeichnung ist deaktiviert. In den Einstellungen aktivieren und neu verbinden.",
+    "dbNewer": "Diese Flug-Datenbank stammt aus einer neueren Kite-Version. Das Logbuch bleibt deaktiviert, bis eine passende oder neuere Kite-Version installiert ist — die Datenbank wird nicht verändert.",
+    "dbNewerTitle": "Flug-Datenbank aus neuerer Version",
+    "dbNewerPopup": "Diese Flug-Datenbank wurde von einer neueren Kite-Version erstellt und kann mit dieser Version nicht verwendet werden. Die Datenbank wird NICHT verändert.\n\nSpiele eine Sicherung der alten Datenbank ein (oder wähle einen kompatiblen Datenbank-Pfad) — sonst steht das Logbuch nicht zur Verfügung. Alternativ die neuere Kite-Version wieder installieren.",
     "sortMode": "Sortierung",
     "sortAircraftLocationDate": "Fluggerät -> Ort -> Datum",
     "sortLocationDateAircraft": "Ort -> Datum -> Fluggerät",
