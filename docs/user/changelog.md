@@ -1,9 +1,7 @@
 # Changelog
 
-Notable, user-facing changes to Kite Ground Control, starting from the **1.0** release. Each release
-is a collapsible section — the version you are reading the docs for is expanded, older ones are
-folded. The format follows [Keep a Changelog](https://keepachangelog.com/) and the project uses
-[Semantic Versioning](https://semver.org/).
+What's new in each Kite Ground Control release — the big features up top, the full list of changes
+below. The release you are reading the docs for is expanded; click an older version to unfold it.
 
 ???+ note "1.1.0 — in development"
 
