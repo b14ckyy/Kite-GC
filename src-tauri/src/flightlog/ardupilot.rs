@@ -665,28 +665,10 @@ fn is_valid_gps_coord(lat: f64, lon: f64) -> bool {
         && !(lat == 0.0 && lon == 0.0)
 }
 
-/// Decode a DataFlash file directly to DB records and import them.
-///
-/// This is the ArduPilot equivalent of `blackbox::import_blackbox_log_with_progress`.
-/// It decodes the binary → NormalizedRecords → filters armed segments →
-/// downsamples to 10 Hz → maps to TelemetryRecord → inserts into DB.
-pub fn import_ardupilot_log_with_progress<F>(
-    conn: &Connection,
-    file_path: &Path,
-    force_import: bool,
-    mut report: F,
-) -> Result<BlackboxImportStatus, String>
-where
-    F: FnMut(u8, &str, &str),
-{
-    report(5, "prepare", "Reading ArduPilot DataFlash file...");
-    let file_data = std::fs::read(file_path)
-        .map_err(|e| format!("Failed to read file '{}': {}", file_path.display(), e))?;
-
-    report(10, "decode", "Decoding DataFlash binary...");
-
-    // ── Full decode pass ─────────────────────────────────────────────
-    let mut scanner = DataFlashScanner::new(&file_data);
+/// Decode every DataFlash message into full-rate `NormalizedRecord`s, with the log-on-arm and
+/// opening-mode backfills applied. Shared by the 10 Hz importer and the hi-res replay parse.
+fn decode_all_rows(file_data: &[u8]) -> (Vec<NormalizedRecord>, DecodeStats) {
+    let mut scanner = DataFlashScanner::new(file_data);
     let mut state = DecoderState::default();
     let mut all_rows: Vec<NormalizedRecord> = Vec::new();
     let mut stats = DecodeStats::default();
@@ -732,6 +714,122 @@ where
         }
     }
 
+    (all_rows, stats)
+}
+
+/// Map one full-rate `NormalizedRecord` to the DB row shape. Shared by the 10 Hz importer and the
+/// hi-res replay parse so the two can never drift apart field-wise.
+fn normalized_to_telemetry(r: &NormalizedRecord, timestamp_ms: i64, fc_variant: &str) -> TelemetryRecord {
+    // RC data as JSON array [ch1,ch2,ch3,ch4]
+    let rc_data_json = r.rc_data.map(|[a, b, c, d]| {
+        format!("[{},{},{},{}]", a, b, c, d)
+    });
+
+    // Canonical flight mode from the logged ArduPilot custom_mode (+ the vehicle variant).
+    let (mode_primary, mode_modifiers) = match r.custom_mode {
+        Some(m) => (Some(crate::flightmode::classify_ardupilot(m as u32, fc_variant).primary), None),
+        None => (None, None),
+    };
+
+    TelemetryRecord {
+        id: 0,
+        flight_id: 0, // set by the caller
+        timestamp_ms,
+        lat: r.lat,
+        lon: r.lon,
+        alt_m: r.gps_alt_m,
+        speed_ms: r.speed_ms,
+        heading: r.ground_course_deg,
+        // Prefer baro climb rate (positive = up, correct sign).
+        // Fallback: GPS VZ is NED (positive = down) → negate.
+        vario_ms: r.baro_climb_rate_ms.or(r.gps_vz_ms.map(|v| -v)),
+        voltage: r.voltage_v,
+        current_a: r.current_a,
+        mah_drawn: r.mah_drawn.map(|v| v as u32),
+        rssi: None,
+        // Primary monitor RemPct (BAT.RemPct) → so the toolbar uses the FC's % on replay, matching
+        // the widget (instead of falling back to a per-cell voltage estimate). 0/absent = unknown.
+        battery_percentage: r.battery_pct.map(|p| p.clamp(0.0, 100.0) as u8),
+        roll: r.roll_deg,
+        pitch: r.pitch_deg,
+        yaw: r.yaw_deg,
+        fix_type: r.fix_type,
+        num_sat: r.num_sat,
+        cpu_load: None,
+        link_quality: None,
+        baro_alt_m: r.baro_alt_m,
+        gps_hdop: r.hdop,
+        gps_eph: None,
+        gps_epv: None,
+        active_wp_number: r.active_wp_number.map(|v| v as i32),
+        active_flight_mode_flags: r.custom_mode.map(|v| v as i64),
+        state_flags: None,
+        nav_state: None,
+        nav_flags: None,
+        rx_signal_received: None,
+        hw_health_status: None,
+        baro_temperature: r.baro_temp_c,
+        wind_n_ms: r.wind_n_ms,
+        wind_e_ms: r.wind_e_ms,
+        wind_d_ms: None,
+        rc_data_json,
+        rc_command_json: None,
+        nav_lat: None,
+        nav_lon: None,
+        nav_alt_m: r.nav_alt_m,
+        mode_primary,
+        mode_modifiers,
+        link_snr: None,
+        link_rssi_dbm: None,
+        airspeed_ms: r.airspeed_ms,
+        throttle_pct: r.throttle_pct,
+    }
+}
+
+/// Full-rate telemetry rows for the hi-res replay cache (Dev-Docs active/HIRES_REPLAY.md): same
+/// decode, armed filter and timestamp basis as the importer, but no 10 Hz decimation — so the
+/// hi-res rows and the stored 10 Hz track share one clock.
+pub fn hires_telemetry_rows(file_data: &[u8]) -> Result<Vec<TelemetryRecord>, String> {
+    let (all_rows, stats) = decode_all_rows(file_data);
+    if all_rows.is_empty() {
+        return Err("No valid GPS rows found in DataFlash log".into());
+    }
+    let fc_variant = stats.vehicle_type.clone().unwrap_or_else(|| "ArduPilot".into());
+    let first_us = all_rows.first().map(|r| r.timestamp_us).unwrap_or(0);
+    let rows: Vec<TelemetryRecord> = all_rows
+        .iter()
+        .filter(|r| r.armed)
+        .map(|r| normalized_to_telemetry(r, ((r.timestamp_us - first_us) / 1000) as i64, &fc_variant))
+        .collect();
+    if rows.is_empty() {
+        return Err("No armed rows found in DataFlash log".into());
+    }
+    Ok(rows)
+}
+
+/// Decode a DataFlash file directly to DB records and import them.
+///
+/// This is the ArduPilot equivalent of `blackbox::import_blackbox_log_with_progress`.
+/// It decodes the binary → NormalizedRecords → filters armed segments →
+/// downsamples to 10 Hz → maps to TelemetryRecord → inserts into DB.
+pub fn import_ardupilot_log_with_progress<F>(
+    conn: &Connection,
+    file_path: &Path,
+    force_import: bool,
+    mut report: F,
+) -> Result<BlackboxImportStatus, String>
+where
+    F: FnMut(u8, &str, &str),
+{
+    report(5, "prepare", "Reading ArduPilot DataFlash file...");
+    let file_data = std::fs::read(file_path)
+        .map_err(|e| format!("Failed to read file '{}': {}", file_path.display(), e))?;
+
+    report(10, "decode", "Decoding DataFlash binary...");
+
+    // ── Full decode pass (shared with the hi-res replay parse) ───────
+    let (all_rows, stats) = decode_all_rows(&file_data);
+
     if all_rows.is_empty() {
         return Err("ArduPilot import failed: no valid GPS rows found".into());
     }
@@ -745,9 +843,9 @@ where
         .to_string_lossy()
         .to_string();
 
-    let fc_variant = state.vehicle_type.clone().unwrap_or_else(|| "ArduPilot".into());
-    let fc_version = state.fw_version.clone().unwrap_or_default();
-    let platform_type = platform_type_from_vehicle(state.vehicle_type.as_deref());
+    let fc_variant = stats.vehicle_type.clone().unwrap_or_else(|| "ArduPilot".into());
+    let fc_version = stats.fw_version.clone().unwrap_or_default();
+    let platform_type = platform_type_from_vehicle(stats.vehicle_type.as_deref());
 
     // Use UTC time from GPS for start_time
     let start_time = all_rows
@@ -842,70 +940,7 @@ where
             max_mah = Some(max_mah.map_or(mah_u32, |c: u32| c.max(mah_u32)));
         }
 
-        // RC data as JSON array [ch1,ch2,ch3,ch4]
-        let rc_data_json = r.rc_data.map(|[a, b, c, d]| {
-            format!("[{},{},{},{}]", a, b, c, d)
-        });
-
-        // Canonical flight mode from the logged ArduPilot custom_mode (+ the vehicle variant).
-        let (mode_primary, mode_modifiers) = match r.custom_mode {
-            Some(m) => (Some(crate::flightmode::classify_ardupilot(m as u32, &fc_variant).primary), None),
-            None => (None, None),
-        };
-
-        telemetry_rows.push(TelemetryRecord {
-            id: 0,
-            flight_id: 0, // set after insert_flight
-            timestamp_ms,
-            lat: r.lat,
-            lon: r.lon,
-            alt_m: r.gps_alt_m,
-            speed_ms: r.speed_ms,
-            heading: r.ground_course_deg,
-            // Prefer baro climb rate (positive = up, correct sign).
-            // Fallback: GPS VZ is NED (positive = down) → negate.
-            vario_ms: r.baro_climb_rate_ms.or(r.gps_vz_ms.map(|v| -v)),
-            voltage: r.voltage_v,
-            current_a: r.current_a,
-            mah_drawn: r.mah_drawn.map(|v| v as u32),
-            rssi: None,
-            // Primary monitor RemPct (BAT.RemPct) → so the toolbar uses the FC's % on replay, matching
-            // the widget (instead of falling back to a per-cell voltage estimate). 0/absent = unknown.
-            battery_percentage: r.battery_pct.map(|p| p.clamp(0.0, 100.0) as u8),
-            roll: r.roll_deg,
-            pitch: r.pitch_deg,
-            yaw: r.yaw_deg,
-            fix_type: r.fix_type,
-            num_sat: r.num_sat,
-            cpu_load: None,
-            link_quality: None,
-            baro_alt_m: r.baro_alt_m,
-            gps_hdop: r.hdop,
-            gps_eph: None,
-            gps_epv: None,
-            active_wp_number: r.active_wp_number.map(|v| v as i32),
-            active_flight_mode_flags: r.custom_mode.map(|v| v as i64),
-            state_flags: None,
-            nav_state: None,
-            nav_flags: None,
-            rx_signal_received: None,
-            hw_health_status: None,
-            baro_temperature: r.baro_temp_c,
-            wind_n_ms: r.wind_n_ms,
-            wind_e_ms: r.wind_e_ms,
-            wind_d_ms: None,
-            rc_data_json,
-            rc_command_json: None,
-            nav_lat: None,
-            nav_lon: None,
-            nav_alt_m: r.nav_alt_m,
-            mode_primary,
-            mode_modifiers,
-            link_snr: None,
-            link_rssi_dbm: None,
-            airspeed_ms: r.airspeed_ms,
-            throttle_pct: r.throttle_pct,
-        });
+        telemetry_rows.push(normalized_to_telemetry(r, timestamp_ms, &fc_variant));
 
         // Per-instance battery rows for this same timestamp (multi-battery; empty for single battery).
         for b in &r.batteries {

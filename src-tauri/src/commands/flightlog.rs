@@ -1323,6 +1323,106 @@ fn sessions_dir(custom: &str) -> std::path::PathBuf {
         .join("sessions")
 }
 
+// ── Hi-res replay cache (Dev-Docs active/HIRES_REPLAY.md) ────────────────────────────────
+
+/// Sibling of `sessions/`: the DB folder is where the user provisioned space for flight data, so
+/// the disposable full-rate caches live there too (and follow a configured DB folder).
+fn hires_cache_dir(custom: &str) -> std::path::PathBuf {
+    resolve_main_db_path(custom)
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .join("hires-cache")
+}
+
+/// Gates the HI-RES toggle in the replay player and feeds the parse popup's size estimate.
+#[derive(serde::Serialize)]
+pub struct HiresInfo {
+    /// An archived original log exists (partner fallback included) and its format is parseable.
+    pub available: bool,
+    pub filename: Option<String>,
+    /// Size of the archived original (the cache will be roughly 5–6× this).
+    pub blob_size_bytes: Option<i64>,
+    /// A cache file from an earlier toggle already exists → re-enabling skips the parse.
+    pub cache_path: Option<String>,
+}
+
+#[tauri::command]
+pub fn flightlog_hires_info(flight_id: i64, db_path: Option<String>) -> Result<HiresInfo, String> {
+    let custom = db_path.unwrap_or_default();
+    let conn = open_db(&custom)?;
+    let info = db::blackbox_file_info(&conn, flight_id).map_err(|e| format!("Query error: {}", e))?;
+    match info {
+        Some((filename, size)) if crate::flightlog::hires::supported_extension(&filename) => {
+            let cache = crate::flightlog::hires::cache_path_for(&hires_cache_dir(&custom), flight_id);
+            Ok(HiresInfo {
+                available: true,
+                filename: Some(filename),
+                blob_size_bytes: Some(size),
+                cache_path: cache.exists().then(|| cache.to_string_lossy().to_string()),
+            })
+        }
+        _ => Ok(HiresInfo { available: false, filename: None, blob_size_bytes: None, cache_path: None }),
+    }
+}
+
+/// Re-parse the flight's archived log at full rate into the per-flight cache DB. Emits
+/// `flightlog-hires-progress` (own event — a hi-res parse must not fight the import bar).
+#[tauri::command]
+pub async fn flightlog_hires_parse(
+    flight_id: i64,
+    db_path: Option<String>,
+    app_handle: tauri::AppHandle,
+) -> Result<crate::flightlog::hires::HiresParseOutcome, String> {
+    let custom = db_path.unwrap_or_default();
+    tauri::async_runtime::spawn_blocking(move || {
+        let emit_progress = |progress: u8, stage: &str, message: &str| {
+            let _ = app_handle.emit(
+                "flightlog-hires-progress",
+                BlackboxImportProgress {
+                    stage: stage.to_string(),
+                    progress,
+                    message: message.to_string(),
+                },
+            );
+        };
+        let conn = open_db(&custom)?;
+        crate::flightlog::hires::parse_to_cache(&conn, flight_id, &hires_cache_dir(&custom), emit_progress)
+    })
+    .await
+    .map_err(|e| format!("Hi-res parse task failed: {}", e))?
+}
+
+/// Latest hi-res row at or before `timestamp_ms` — the per-tick value source while HI-RES is on.
+/// `None` before the first row (the player falls back to the 10 Hz sample).
+#[tauri::command]
+pub fn flightlog_hires_sample(
+    cache_path: String,
+    timestamp_ms: i64,
+) -> Result<Option<TelemetryRecord>, String> {
+    let conn = rusqlite::Connection::open_with_flags(
+        std::path::Path::new(&cache_path),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .map_err(|e| format!("Cannot open hi-res cache: {}", e))?;
+    db::get_hires_sample(&conn, timestamp_ms).map_err(|e| format!("Hi-res sample error: {}", e))
+}
+
+/// Delete a flight's hi-res cache (flight deselected / player closed). Toggling HI-RES off keeps it.
+#[tauri::command]
+pub fn flightlog_hires_drop(flight_id: i64, db_path: Option<String>) {
+    let cache = crate::flightlog::hires::cache_path_for(
+        &hires_cache_dir(&db_path.unwrap_or_default()),
+        flight_id,
+    );
+    db::remove_temp_session(&cache);
+}
+
+/// Startup cleanup: wipe crash leftovers from the cache dir (every cache is reproducible on demand).
+#[tauri::command]
+pub fn flightlog_hires_cleanup(db_path: Option<String>) {
+    crate::flightlog::hires::cleanup_cache_dir(&hires_cache_dir(&db_path.unwrap_or_default()));
+}
+
 /// Scan `<db_dir>/sessions/*.ktmp` for an orphan session left by a crash/close. Empty temp files
 /// (no telemetry) are deleted in passing; the newest non-empty one is returned for the recovery
 /// prompt. There should be at most one (the single-temp invariant); a straggler is simply offered

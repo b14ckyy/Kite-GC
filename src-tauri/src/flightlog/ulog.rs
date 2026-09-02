@@ -881,6 +881,90 @@ fn is_valid_gps_coord(lat: f64, lon: f64) -> bool {
 /// archive the original file. PX4's default is one log file per arm session, so a file
 /// maps to one flight (multiple arm cycles in a log-from-boot file merge into one entry,
 /// matching the ArduPilot importer's behaviour).
+/// Map one full-rate `NormalizedRow` to the DB row shape. Shared by the 10 Hz importer and the
+/// hi-res replay parse so the two can never drift apart field-wise.
+fn normalized_to_telemetry(r: &NormalizedRow, timestamp_ms: i64) -> TelemetryRecord {
+    let rc_data_json = r
+        .rc_data
+        .map(|[a, b, c, d]| format!("[{},{},{},{}]", a, b, c, d));
+
+    let (mode_primary, mode_modifiers) = match r.nav_state {
+        Some(ns) => (
+            Some(crate::flightmode::classify_px4_nav_state(ns).primary),
+            None,
+        ),
+        None => (None, None),
+    };
+
+    TelemetryRecord {
+        id: 0,
+        flight_id: 0, // set by the caller
+        timestamp_ms,
+        lat: r.lat,
+        lon: r.lon,
+        alt_m: r.gps_alt_m,
+        speed_ms: r.speed_ms,
+        heading: r.course_deg,
+        vario_ms: r.vario_ms,
+        voltage: r.voltage_v,
+        current_a: r.current_a,
+        mah_drawn: r.mah_drawn.map(|v| v.max(0.0) as u32),
+        rssi: None,
+        battery_percentage: r.battery_pct.map(|p| p.clamp(0.0, 100.0) as u8),
+        roll: r.roll_deg,
+        pitch: r.pitch_deg,
+        yaw: r.yaw_deg,
+        fix_type: r.fix_type,
+        num_sat: r.num_sat,
+        cpu_load: None,
+        link_quality: r.link_quality,
+        baro_alt_m: r.baro_alt_m,
+        gps_hdop: r.hdop,
+        gps_eph: r.eph,
+        gps_epv: r.epv,
+        active_wp_number: r.active_wp_number.map(|v| v as i32),
+        // Forensic raw value = the logged NAVIGATION_STATE (also mirrored in nav_state).
+        active_flight_mode_flags: r.nav_state.map(|v| v as i64),
+        state_flags: None,
+        nav_state: r.nav_state.map(|v| v as i32),
+        nav_flags: None,
+        rx_signal_received: None,
+        hw_health_status: None,
+        baro_temperature: r.baro_temp_c,
+        wind_n_ms: r.wind_n_ms,
+        wind_e_ms: r.wind_e_ms,
+        wind_d_ms: None,
+        rc_data_json,
+        rc_command_json: None,
+        nav_lat: None,
+        nav_lon: None,
+        nav_alt_m: r.nav_alt_m,
+        mode_primary,
+        mode_modifiers,
+        link_snr: None,
+        link_rssi_dbm: None,
+        airspeed_ms: r.airspeed_ms,
+        throttle_pct: r.throttle_pct,
+    }
+}
+
+/// Full-rate telemetry rows for the hi-res replay cache (Dev-Docs active/HIRES_REPLAY.md): same
+/// decode, armed filter and first-armed timestamp rebase as the importer, but no 10 Hz decimation —
+/// so the hi-res rows and the stored 10 Hz track share one clock.
+pub fn hires_telemetry_rows(file_data: &[u8]) -> Result<Vec<TelemetryRecord>, String> {
+    let (all_rows, _meta) = decode_ulog(file_data)?;
+    let first_armed_us = all_rows
+        .iter()
+        .find(|r| r.armed)
+        .map(|r| r.timestamp_us)
+        .ok_or_else(|| "No armed rows found in ULog".to_string())?;
+    Ok(all_rows
+        .iter()
+        .filter(|r| r.armed)
+        .map(|r| normalized_to_telemetry(r, (r.timestamp_us.saturating_sub(first_armed_us) / 1000) as i64))
+        .collect())
+}
+
 pub fn import_ulog_log_with_progress<F>(
     conn: &Connection,
     file_path: &Path,
@@ -1014,68 +1098,7 @@ where
             last_mah = Some(mah);
         }
 
-        let rc_data_json = r
-            .rc_data
-            .map(|[a, b, c, d]| format!("[{},{},{},{}]", a, b, c, d));
-
-        let (mode_primary, mode_modifiers) = match r.nav_state {
-            Some(ns) => (
-                Some(crate::flightmode::classify_px4_nav_state(ns).primary),
-                None,
-            ),
-            None => (None, None),
-        };
-
-        telemetry_rows.push(TelemetryRecord {
-            id: 0,
-            flight_id: 0, // set after insert_flight
-            timestamp_ms,
-            lat: r.lat,
-            lon: r.lon,
-            alt_m: r.gps_alt_m,
-            speed_ms: r.speed_ms,
-            heading: r.course_deg,
-            vario_ms: r.vario_ms,
-            voltage: r.voltage_v,
-            current_a: r.current_a,
-            mah_drawn: r.mah_drawn.map(|v| v.max(0.0) as u32),
-            rssi: None,
-            battery_percentage: r.battery_pct.map(|p| p.clamp(0.0, 100.0) as u8),
-            roll: r.roll_deg,
-            pitch: r.pitch_deg,
-            yaw: r.yaw_deg,
-            fix_type: r.fix_type,
-            num_sat: r.num_sat,
-            cpu_load: None,
-            link_quality: r.link_quality,
-            baro_alt_m: r.baro_alt_m,
-            gps_hdop: r.hdop,
-            gps_eph: r.eph,
-            gps_epv: r.epv,
-            active_wp_number: r.active_wp_number.map(|v| v as i32),
-            // Forensic raw value = the logged NAVIGATION_STATE (also mirrored in nav_state).
-            active_flight_mode_flags: r.nav_state.map(|v| v as i64),
-            state_flags: None,
-            nav_state: r.nav_state.map(|v| v as i32),
-            nav_flags: None,
-            rx_signal_received: None,
-            hw_health_status: None,
-            baro_temperature: r.baro_temp_c,
-            wind_n_ms: r.wind_n_ms,
-            wind_e_ms: r.wind_e_ms,
-            wind_d_ms: None,
-            rc_data_json,
-            rc_command_json: None,
-            nav_lat: None,
-            nav_lon: None,
-            nav_alt_m: r.nav_alt_m,
-            mode_primary,
-            mode_modifiers,
-            link_snr: None,
-            link_rssi_dbm: None,
-            airspeed_ms: r.airspeed_ms,
-            throttle_pct: r.throttle_pct,
-        });
+        telemetry_rows.push(normalized_to_telemetry(r, timestamp_ms));
 
         for b in &r.batteries {
             battery_rows.push(BatteryRecord {

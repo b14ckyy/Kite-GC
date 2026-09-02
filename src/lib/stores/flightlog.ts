@@ -405,6 +405,49 @@ export async function recoverContinue(tempPath: string, dbPath: string): Promise
   await invoke('flightlog_recover_continue', { tempPath, dbPath: dbPath || undefined });
 }
 
+// ── Hi-res replay cache (Dev-Docs active/HIRES_REPLAY.md) ─────────────────────────────────
+
+/** Gates the HI-RES toggle in the replay player. */
+export interface HiresInfo {
+  available: boolean;
+  filename: string | null;
+  /** Size of the archived original log (the cache will be roughly 5–6× this). */
+  blob_size_bytes: number | null;
+  /** Existing cache from an earlier toggle → re-enabling skips the parse. */
+  cache_path: string | null;
+}
+
+export interface HiresParseOutcome {
+  cache_path: string;
+  rows: number;
+  size_bytes: number;
+  rate_hz: number;
+}
+
+export async function hiresInfo(flightId: number, dbPath: string): Promise<HiresInfo> {
+  return invoke<HiresInfo>('flightlog_hires_info', { flightId, dbPath: dbPath || undefined });
+}
+
+/** Full-rate re-parse of the archived log; progress arrives via `flightlog-hires-progress`. */
+export async function hiresParse(flightId: number, dbPath: string): Promise<HiresParseOutcome> {
+  return invoke<HiresParseOutcome>('flightlog_hires_parse', { flightId, dbPath: dbPath || undefined });
+}
+
+/** Latest hi-res row at or before the timestamp; null before the first row. */
+export async function hiresSample(cachePath: string, timestampMs: number): Promise<TelemetryRecord | null> {
+  return invoke<TelemetryRecord | null>('flightlog_hires_sample', { cachePath, timestampMs });
+}
+
+/** Delete a flight's hi-res cache (deselect/close — toggling off keeps it). */
+export async function hiresDrop(flightId: number, dbPath: string): Promise<void> {
+  await invoke('flightlog_hires_drop', { flightId, dbPath: dbPath || undefined });
+}
+
+/** Startup cleanup: wipe crash leftovers from the hi-res cache dir. */
+export async function hiresCleanup(dbPath: string): Promise<void> {
+  await invoke('flightlog_hires_cleanup', { dbPath: dbPath || undefined });
+}
+
 export async function updateFlightNotes(id: number, notes: string, dbPath: string): Promise<void> {
   return invoke('flightlog_update_notes', {
     flightId: id,

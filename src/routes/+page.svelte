@@ -24,6 +24,7 @@
   import Map3D from "$lib/components/Map3D.svelte";
   import CesiumKeyPrompt from "$lib/components/CesiumKeyPrompt.svelte";
   import LogPlayer from "$lib/components/logbook/LogPlayer.svelte";
+  import HiresParseModal from "$lib/components/logbook/HiresParseModal.svelte";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import UpdateDialog from "$lib/components/UpdateDialog.svelte";
   import { runUpdateCheck } from "$lib/controllers/updateCheck";
@@ -71,7 +72,7 @@
   import { batteryManagerOpen, batteryManagerCreateSerial, normalizeSerial } from '$lib/stores/batteryManager';
   import { vehicleManagerOpen, vehicleManagerCreateCraft } from '$lib/stores/vehicleManager';
   import type { BlackboxImportStatus } from '$lib/stores/flightlog';
-  import { missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode, flightSetBatterySerial, updateFlightNotes, getFlight, flightlogCommitPending, flightlogDiscardPending, flightlogContinuePending, scanOrphanSessions, recoverDiscard, recoverSaveIncomplete, recoverContinue, batteryDbFindBySerial, batteryDbAddUsage, vehicleDbFindByCraftName, blackboxDecoderAvailable, downloadBlackboxDecode } from '$lib/stores/flightlog';
+  import { missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode, flightSetBatterySerial, updateFlightNotes, getFlight, flightlogCommitPending, flightlogDiscardPending, flightlogContinuePending, scanOrphanSessions, recoverDiscard, recoverSaveIncomplete, recoverContinue, batteryDbFindBySerial, batteryDbAddUsage, vehicleDbFindByCraftName, blackboxDecoderAvailable, downloadBlackboxDecode, hiresInfo, hiresParse, hiresSample, hiresDrop, hiresCleanup } from '$lib/stores/flightlog';
   import EndFlightDialog from "$lib/components/logbook/EndFlightDialog.svelte";
   import type { EndFlightStats } from "$lib/components/logbook/EndFlightDialog.svelte";
   import RecoveryPrompt from "$lib/components/logbook/RecoveryPrompt.svelte";
@@ -607,6 +608,19 @@
   let replaySource = $state<'live' | 'blackbox'>('live');
   // Track for the linked partner (loaded on demand)
   let linkedPartnerTrack = $state<TelemetryRecord[]>([]);
+
+  // ── Hi-res replay (Dev-Docs active/HIRES_REPLAY.md) ──────────────────────────────────────
+  // Full-rate re-parse of the archived log into a disposable cache DB. The 10 Hz track stays the
+  // master timeline (scrubber/map/index); hi-res only overrides the sampled instrument values.
+  let hiresAvailable = $state(false); // archived blob exists + format parseable
+  let hiresActive = $state(false);
+  let hiresParsing = $state(false);
+  let hiresProgress = $state<BlackboxImportProgress | null>(null);
+  let hiresCachePath = $state<string | null>(null);
+  let hiresEstimateBytes = $state<number | null>(null);
+  let hiresSamplePoint = $state<TelemetryRecord | null>(null);
+  let hiresVirtualMs = $state<number | null>(null); // continuous playback clock (onTime callback)
+  let hiresOwnerFlightId: number | null = null; // whose cache file exists (for the drop on switch)
 
   // Shared in-app dialog (replaces all native confirm/alert calls)
   let confirmDialog: ReturnType<typeof ConfirmDialog>;
@@ -1283,6 +1297,9 @@
       playbackSpeed,
       (idx) => { playbackIndex = idx; },
       () => { playbackPlaying = false; },
+      // Hi-res: drive the clock at screen refresh (rAF) and expose the continuous virtual time so
+      // the sampler can pull sub-100ms values; the 10 Hz index ticks stay the master timeline.
+      { raf: hiresActive, onTime: (t) => { hiresVirtualMs = t; } },
     );
   }
 
@@ -1316,6 +1333,7 @@
 
   function closePlayer() {
     resetPlayback();
+    resetHires(true);
     homePosition.set({ lat: 0, lon: 0, alt: 0, set: false, source: 'manual' });
     selectedFlight = null;
     selectedFlightTrack = [];
@@ -1772,6 +1790,7 @@
     replaySource = 'live';
     linkedPartnerTrack = [];
     resetPlayback();
+    resetHires(true); // a different flight's cache is stale — drop it
 
     // While connected to a UAV, selecting a logbook entry shows DETAILS ONLY — nothing is loaded
     // onto the map (no mission, home, launch or playback), so the live FC mission/home stay
@@ -1836,6 +1855,20 @@
       linkedPartnerTrack = partnerTrack;
     }
 
+    // Hi-res availability: an archived original log in a parseable format (partner fallback
+    // included, so a linked REC flight still finds the BBX blob).
+    try {
+      const info = await hiresInfo(flightId, flightLogDbPath);
+      hiresAvailable = info.available;
+      hiresCachePath = info.cache_path;
+      if (info.cache_path) hiresOwnerFlightId = flightId;
+      // The cache is roughly 5–6× the archived log (measured on real INAV blackbox CSV decodes).
+      hiresEstimateBytes = info.blob_size_bytes != null ? info.blob_size_bytes * 6 : null;
+    } catch (e) {
+      console.warn('[hires] info failed', e);
+      hiresAvailable = false;
+    }
+
     // Set home position for replay (used by HomeWidget)
     if (data.flight?.start_lat != null && data.flight?.start_lon != null) {
       homePosition.set({ lat: data.flight.start_lat, lon: data.flight.start_lon, alt: 0, set: true, source: 'replay' });
@@ -1847,9 +1880,103 @@
   function switchReplaySource(source: 'live' | 'blackbox') {
     if (source === replaySource) return;
     replaySource = source;
+    // Hi-res rows share the blackbox track's clock — on the live track they would be misaligned,
+    // so switching to REC turns hi-res off (the cache file stays for a later re-enable).
+    if (source === 'live' && hiresActive) {
+      hiresActive = false;
+      hiresSamplePoint = null;
+    }
     resetPlayback();
     if (activeReplayTrack.length > 0) playbackActive = true;
   }
+
+  // ── Hi-res replay (Dev-Docs active/HIRES_REPLAY.md) ──────────────────────────────────────
+
+  /** Deactivate hi-res; `drop = true` also deletes the cache file (deselect/close). */
+  function resetHires(drop: boolean) {
+    hiresActive = false;
+    hiresSamplePoint = null;
+    hiresVirtualMs = null;
+    if (drop) {
+      if (hiresOwnerFlightId != null) void hiresDrop(hiresOwnerFlightId, flightLogDbPath);
+      hiresOwnerFlightId = null;
+      hiresCachePath = null;
+      hiresAvailable = false;
+      hiresEstimateBytes = null;
+    }
+  }
+
+  async function toggleHires(active: boolean) {
+    if (!active) {
+      // Toggle off: back to the 10 Hz samples; the cache file stays for an instant re-enable.
+      if (!hiresActive) return;
+      hiresActive = false;
+      hiresSamplePoint = null;
+      if (playbackPlaying) { stopPlayback(); startPlayback(); } // leave the rAF clock
+      return;
+    }
+    if (hiresActive || hiresParsing || selectedFlightId == null) return;
+    if (!hiresCachePath) {
+      const fid = selectedFlightId; // guard against a flight switch while the parse runs
+      hiresParsing = true;
+      hiresProgress = null;
+      try {
+        const out = await hiresParse(fid, flightLogDbPath);
+        if (fid !== selectedFlightId) {
+          void hiresDrop(fid, flightLogDbPath); // stale — the user moved on mid-parse
+          return;
+        }
+        hiresCachePath = out.cache_path;
+        hiresOwnerFlightId = fid;
+        console.log(`[hires] cache ready: ${out.rows} rows @ ${out.rate_hz.toFixed(0)} Hz, ${out.size_bytes} bytes`);
+      } catch (e) {
+        console.warn('[hires] parse failed', e);
+        void showInfo($t('player.hiresFailedTitle'), String(e));
+        return;
+      } finally {
+        hiresParsing = false;
+        hiresProgress = null;
+      }
+    }
+    hiresActive = true;
+    if (playbackPlaying) { stopPlayback(); startPlayback(); } // switch the clock to rAF
+  }
+
+  // Per-tick sampler: pull the hi-res row nearest the playhead. Serialized — one IPC call in
+  // flight, the latest requested timestamp wins (a slow query never queues up a backlog).
+  let hiresFetchBusy = false;
+  let hiresPendingTs: number | null = null;
+  async function fetchHiresSample(ts: number) {
+    if (hiresFetchBusy) {
+      hiresPendingTs = ts;
+      return;
+    }
+    hiresFetchBusy = true;
+    try {
+      const path = hiresCachePath;
+      if (path) {
+        const rec = await hiresSample(path, Math.round(ts));
+        if (hiresActive) hiresSamplePoint = rec;
+      }
+    } catch (e) {
+      console.warn('[hires] sample failed', e);
+    } finally {
+      hiresFetchBusy = false;
+      if (hiresPendingTs != null) {
+        const next = hiresPendingTs;
+        hiresPendingTs = null;
+        void fetchHiresSample(next);
+      }
+    }
+  }
+
+  // While hi-res is on: sample at the continuous clock when playing, at the scrub/seek position
+  // otherwise. The write goes to hiresSamplePoint (not read here), so no effect self-loop.
+  $effect(() => {
+    if (!hiresActive) return;
+    const ts = playbackPlaying ? hiresVirtualMs : playbackPoint?.timestamp_ms;
+    if (ts != null) void fetchHiresSample(ts);
+  });
 
   async function saveSelectedFlightNotes() {
     if (!selectedFlightId) return;
@@ -2237,10 +2364,18 @@
     return Number.isFinite(t) ? t : null;
   });
 
-  // Unified telemetry: live data when connected, playback data when replaying
+  // Hi-res only aligns with the blackbox track's clock — a linked pair must have BBX selected,
+  // a blackbox-only flight always replays its own track (HIRES_REPLAY plan).
+  const hiresAllowed = $derived(
+    hiresAvailable &&
+      (replaySource === 'blackbox' || (selectedFlight as Flight | null)?.source === 'blackbox'),
+  );
+
+  // Unified telemetry: live data when connected, playback data when replaying. While hi-res is
+  // active the full-rate sample overrides the 10 Hz row (same shape, same clock, denser rows).
   const telem = $derived(
     playbackActive && !isPrimaryConnected && playbackPoint
-      ? toTelemetryData(playbackPoint, replayFcVariant)
+      ? toTelemetryData(hiresActive && hiresSamplePoint ? hiresSamplePoint : playbackPoint, replayFcVariant)
       : liveTelem,
   );
 
@@ -2524,6 +2659,8 @@
 
   // Startup recovery (ADR-042): if a crash/close left an orphan temp session, prompt for it.
   async function runStartupRecovery(): Promise<void> {
+    // Hi-res caches left by a crash are worthless (always reproducible) — wipe them in passing.
+    void hiresCleanup(flightLogDbPath).catch(() => {});
     try {
       const orphan = await scanOrphanSessions(flightLogDbPath);
       if (!orphan) return;
@@ -2659,6 +2796,10 @@
     });
     void listen<BlackboxImportProgress>('flightlog-import-progress', (event) => {
       blackboxImportProgress = event.payload;
+    });
+    // Hi-res replay parse (own event — it must not fight the import bar over shared state).
+    void listen<BlackboxImportProgress>('flightlog-hires-progress', (event) => {
+      hiresProgress = event.payload;
     });
     void listen<{ paths: string[] }>('tauri://drag-drop', (event) => {
       const paths = event.payload.paths ?? [];
@@ -2950,7 +3091,16 @@
     {replaySource}
     hasLinkedPartner={selectedFlight?.linked_flight_id != null && linkedPartnerTrack.length > 0}
     onSwitchSource={switchReplaySource}
+    hiresAvailable={hiresAllowed}
+    {hiresActive}
+    {hiresParsing}
+    onHiresToggle={(active) => { void toggleHires(active); }}
+    hiresRecord={hiresActive ? hiresSamplePoint : null}
   />
+
+  {#if hiresParsing}
+    <HiresParseModal progress={hiresProgress} estimateBytes={hiresEstimateBytes} />
+  {/if}
 
   <!-- ======= FLOATING NAV PANEL SYSTEM ======= -->
   <!-- The rail lives here in .app; the panels themselves render in the panels layer AFTER

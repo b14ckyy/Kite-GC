@@ -2068,93 +2068,98 @@ pub fn get_flight_track(
         )
         .optional()?;
 
-    let mut stmt = conn.prepare(
-        "SELECT id, flight_id, timestamp_ms, lat, lon, alt_m, speed_ms,
-                heading, vario_ms, voltage, current_a, mah_drawn, rssi, battery_percentage,
-            roll, pitch, yaw, fix_type, num_sat, cpu_load, link_quality,
-            baro_alt_m, gps_hdop, gps_eph, gps_epv,
-            active_wp_number, active_flight_mode_flags, state_flags, nav_state, nav_flags,
-            rx_signal_received, hw_health_status, baro_temperature,
-            wind_n_ms, wind_e_ms, wind_d_ms,
-            rc_data_json, rc_command_json,
-            nav_lat, nav_lon, nav_alt_m,
-            mode_primary, mode_modifiers,
-            link_snr, link_rssi_dbm, airspeed_ms, throttle_pct
-         FROM telemetry_records
-         WHERE flight_id = ?1
-         ORDER BY timestamp_ms ASC",
-    )?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT id, {TELEMETRY_COLS} FROM telemetry_records \
+         WHERE flight_id = ?1 ORDER BY timestamp_ms ASC"
+    ))?;
 
-    let rows = stmt.query_map(params![flight_id], |row| {
-        let mode_flags: Option<i64> = row.get(26)?;
-        let stored_primary: Option<String> = row.get(41)?;
-        let stored_modifiers: Option<String> = row.get(42)?;
-        let derived = match (&stored_primary, mode_flags, fc_variant.as_deref()) {
-            (None, Some(flags), Some(variant)) => Some(if variant.eq_ignore_ascii_case("INAV") {
-                crate::flightmode::classify_inav(flags as u32)
-            } else {
-                crate::flightmode::classify_mavlink(flags as u32, variant)
-            }),
-            _ => None,
-        };
+    let rows = stmt.query_map(params![flight_id], read_telemetry_record)?;
+    let mut out = Vec::new();
+    for rec in rows {
+        let mut rec = rec?;
+        if rec.mode_primary.is_none() {
+            if let (Some(flags), Some(variant)) = (rec.active_flight_mode_flags, fc_variant.as_deref())
+            {
+                let derived = if variant.eq_ignore_ascii_case("INAV") {
+                    crate::flightmode::classify_inav(flags as u32)
+                } else {
+                    crate::flightmode::classify_mavlink(flags as u32, variant)
+                };
+                rec.mode_primary = Some(derived.primary.clone());
+                if rec.mode_modifiers.is_none() && !derived.modifiers.is_empty() {
+                    rec.mode_modifiers = Some(derived.modifiers.join(","));
+                }
+            }
+        }
+        out.push(rec);
+    }
+    Ok(out)
+}
 
-        Ok(TelemetryRecord {
-            id: row.get(0)?,
-            flight_id: row.get(1)?,
-            timestamp_ms: row.get(2)?,
-            lat: row.get(3)?,
-            lon: row.get(4)?,
-            alt_m: row.get(5)?,
-            speed_ms: row.get(6)?,
-            heading: row.get(7)?,
-            vario_ms: row.get(8)?,
-            voltage: row.get(9)?,
-            current_a: row.get(10)?,
-            mah_drawn: row.get(11)?,
-            rssi: row.get(12)?,
-            battery_percentage: row.get(13)?,
-            roll: row.get(14)?,
-            pitch: row.get(15)?,
-            yaw: row.get(16)?,
-            fix_type: row.get(17)?,
-            num_sat: row.get(18)?,
-            cpu_load: row.get(19)?,
-            link_quality: row.get(20)?,
-            baro_alt_m: row.get(21)?,
-            gps_hdop: row.get(22)?,
-            gps_eph: row.get(23)?,
-            gps_epv: row.get(24)?,
-            active_wp_number: row.get(25)?,
-            active_flight_mode_flags: row.get(26)?,
-            state_flags: row.get(27)?,
-            nav_state: row.get(28)?,
-            nav_flags: row.get(29)?,
-            rx_signal_received: row.get(30)?,
-            hw_health_status: row.get(31)?,
-            baro_temperature: row.get(32)?,
-            wind_n_ms: row.get(33)?,
-            wind_e_ms: row.get(34)?,
-            wind_d_ms: row.get(35)?,
-            rc_data_json: row.get(36)?,
-            rc_command_json: row.get(37)?,
-            nav_lat: row.get(38)?,
-            nav_lon: row.get(39)?,
-            nav_alt_m: row.get(40)?,
-            mode_primary: stored_primary.or_else(|| derived.as_ref().map(|m| m.primary.clone())),
-            mode_modifiers: stored_modifiers.or_else(|| {
-                derived
-                    .as_ref()
-                    .filter(|m| !m.modifiers.is_empty())
-                    .map(|m| m.modifiers.join(","))
-            }),
-            link_snr: row.get(43)?,
-            link_rssi_dbm: row.get(44)?,
-            airspeed_ms: row.get(45)?,
-            throttle_pct: row.get(46)?,
-        })
-    })?;
+/// Map one `SELECT id, {TELEMETRY_COLS}` row to a `TelemetryRecord` (stored values only — the
+/// legacy mode fix-up in `get_flight_track` post-processes the record where it applies).
+fn read_telemetry_record(row: &rusqlite::Row) -> SqlResult<TelemetryRecord> {
+    Ok(TelemetryRecord {
+        id: row.get(0)?,
+        flight_id: row.get(1)?,
+        timestamp_ms: row.get(2)?,
+        lat: row.get(3)?,
+        lon: row.get(4)?,
+        alt_m: row.get(5)?,
+        speed_ms: row.get(6)?,
+        heading: row.get(7)?,
+        vario_ms: row.get(8)?,
+        voltage: row.get(9)?,
+        current_a: row.get(10)?,
+        mah_drawn: row.get(11)?,
+        rssi: row.get(12)?,
+        battery_percentage: row.get(13)?,
+        roll: row.get(14)?,
+        pitch: row.get(15)?,
+        yaw: row.get(16)?,
+        fix_type: row.get(17)?,
+        num_sat: row.get(18)?,
+        cpu_load: row.get(19)?,
+        link_quality: row.get(20)?,
+        baro_alt_m: row.get(21)?,
+        gps_hdop: row.get(22)?,
+        gps_eph: row.get(23)?,
+        gps_epv: row.get(24)?,
+        active_wp_number: row.get(25)?,
+        active_flight_mode_flags: row.get(26)?,
+        state_flags: row.get(27)?,
+        nav_state: row.get(28)?,
+        nav_flags: row.get(29)?,
+        rx_signal_received: row.get(30)?,
+        hw_health_status: row.get(31)?,
+        baro_temperature: row.get(32)?,
+        wind_n_ms: row.get(33)?,
+        wind_e_ms: row.get(34)?,
+        wind_d_ms: row.get(35)?,
+        rc_data_json: row.get(36)?,
+        rc_command_json: row.get(37)?,
+        nav_lat: row.get(38)?,
+        nav_lon: row.get(39)?,
+        nav_alt_m: row.get(40)?,
+        mode_primary: row.get(41)?,
+        mode_modifiers: row.get(42)?,
+        link_snr: row.get(43)?,
+        link_rssi_dbm: row.get(44)?,
+        airspeed_ms: row.get(45)?,
+        throttle_pct: row.get(46)?,
+    })
+}
 
-    rows.collect()
+/// Latest hi-res row at or before `timestamp_ms` from a hi-res cache DB (HIRES_REPLAY plan).
+/// The cache holds exactly one flight (`flight_id` 0) and its rows always carry `mode_primary`
+/// (set at parse time), so no `flights`-table fix-up is needed — the file has no such table.
+pub fn get_hires_sample(conn: &Connection, timestamp_ms: i64) -> SqlResult<Option<TelemetryRecord>> {
+    let mut stmt = conn.prepare_cached(&format!(
+        "SELECT id, {TELEMETRY_COLS} FROM telemetry_records \
+         WHERE timestamp_ms <= ?1 ORDER BY timestamp_ms DESC LIMIT 1"
+    ))?;
+    stmt.query_row(params![timestamp_ms], read_telemetry_record)
+        .optional()
 }
 
 /// Check for duplicate flights based on craft_name and start_time (±10s).
@@ -2709,6 +2714,28 @@ mod tests {
         assert_eq!(get_user_version(&bconn).unwrap(), CURRENT_SCHEMA_VERSION - 1);
         drop((conn, bconn));
         cleanup(&path);
+    }
+
+    /// Hi-res cache sampling (HIRES_REPLAY): nearest row at-or-before the timestamp, None before
+    /// the first row (the player then falls back to the 10 Hz sample).
+    #[test]
+    fn hires_sample_picks_row_at_or_before_timestamp() {
+        let path = temp_db_path("hires-sample");
+        cleanup(&path);
+        let conn = open_temp_session(&path).unwrap();
+        for ts in [0i64, 100, 200] {
+            conn.execute(
+                "INSERT INTO telemetry_records (flight_id, timestamp_ms) VALUES (0, ?1)",
+                params![ts],
+            )
+            .unwrap();
+        }
+        assert!(get_hires_sample(&conn, -1).unwrap().is_none());
+        assert_eq!(get_hires_sample(&conn, 0).unwrap().unwrap().timestamp_ms, 0);
+        assert_eq!(get_hires_sample(&conn, 150).unwrap().unwrap().timestamp_ms, 100);
+        assert_eq!(get_hires_sample(&conn, 99_999).unwrap().unwrap().timestamp_ms, 200);
+        drop(conn);
+        remove_temp_session(&path);
     }
 
     /// Full open/migrate pass over a COPY of a real flight database (Marc's RC2 archive,
