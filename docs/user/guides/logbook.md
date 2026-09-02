@@ -64,6 +64,21 @@ the **[3D map](map-3d.md)**.
 Replaying a recorded flight — the player (play / pause, timeline, speed) drives the same instruments and map.
 ///
 
+### High-resolution replay
+
+Flights are stored at 10 samples per second — plenty for the map, but an onboard log usually
+contains far more. When a flight has its **original log stored** (INAV Blackbox, ArduPilot
+Dataflash or PX4 ULog), the player offers a **HI-RES** switch: Kite re-decodes the stored log at
+its **full rate** into a temporary file and drives the instruments, horizon and stick overlay from
+it — updates then run at your screen's refresh rate instead of 10 Hz. Combined with the
+**slow-motion speeds** (0.25× / 0.5×) this is the way to study a manoeuvre frame by frame.
+
+The first switch to HI-RES shows a short **preparation popup** (re-decoding a big log can take a
+moment on slower machines). The decoded file lives in a `hires-cache` folder next to the flight
+database, is reused while the flight stays open, and is **deleted automatically** when you close
+the flight — nothing accumulates. The map track and timeline stay at 10 Hz by design; high-res
+feeds the live values.
+
 ## Importing logs
 
 Use **Import** to pull in logs from outside Kite (one file or a batch). Supported formats:
