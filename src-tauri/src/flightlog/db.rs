@@ -199,8 +199,27 @@ fn set_user_version(conn: &Connection, version: u32) -> SqlResult<()> {
     conn.execute_batch(&format!("PRAGMA user_version = {};", version))
 }
 
+/// Error for a DB written by a NEWER Kite (the user downgraded the app). The `db-newer:` prefix is
+/// a STABLE marker the frontend matches on to disable the logbook with a targeted message instead
+/// of a generic failure — change it in lockstep with the loadLogbook handler in +page.svelte.
+fn db_newer_error(found: u32) -> rusqlite::Error {
+    rusqlite::Error::SqliteFailure(
+        rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
+        Some(format!(
+            "db-newer: flight database schema is v{found}, this Kite build supports up to v{CURRENT_SCHEMA_VERSION}"
+        )),
+    )
+}
+
 fn migrate(conn: &Connection) -> SqlResult<()> {
     let current = get_user_version(conn)?;
+
+    // Downgrade guard: never touch (let alone "migrate" with older code) a DB written by a newer
+    // Kite — refuse with the marker error and leave the file byte-identical. Fires ONLY on a real
+    // schema mismatch; every other open error stays a generic failure.
+    if current > CURRENT_SCHEMA_VERSION {
+        return Err(db_newer_error(current));
+    }
 
     if current < 1 {
         migrate_v0_to_v1(conn)?;
@@ -2589,6 +2608,34 @@ mod tests {
     fn test_schema_creation() {
         let conn = test_db();
         assert_eq!(get_user_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn downgrade_guard_refuses_newer_db() {
+        let path = std::env::temp_dir()
+            .join(format!("kite-db-test-downgrade-{}.db", std::process::id()));
+        let cleanup = |p: &Path| {
+            for f in [
+                p.to_path_buf(),
+                PathBuf::from(format!("{}-wal", p.display())),
+                PathBuf::from(format!("{}-shm", p.display())),
+            ] {
+                let _ = std::fs::remove_file(f);
+            }
+        };
+        cleanup(&path);
+        drop(open_database(&path).unwrap()); // fresh, v = CURRENT
+        {
+            let conn = Connection::open(&path).unwrap();
+            set_user_version(&conn, CURRENT_SCHEMA_VERSION + 1).unwrap();
+        }
+        let err = open_database(&path).unwrap_err().to_string();
+        assert!(err.contains("db-newer"), "expected the db-newer marker, got: {err}");
+        // The file must be untouched: still stamped as the newer version.
+        let conn = Connection::open(&path).unwrap();
+        assert_eq!(get_user_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION + 1);
+        drop(conn);
+        cleanup(&path);
     }
 
     #[test]

@@ -836,6 +836,9 @@
   "logbook": {
     "title": "Carnet de vol",
     "disabled": "La journalisation des vols est désactivée. Activez-la dans les paramètres et reconnectez-vous.",
+    "dbNewer": "Cette base de données de vols provient d'une version de Kite plus récente. Le carnet de vol reste désactivé jusqu'à l'installation d'une version de Kite égale ou plus récente — la base n'est pas modifiée.",
+    "dbNewerTitle": "Base de données d'une version plus récente",
+    "dbNewerPopup": "Cette base de données de vols a été créée par une version de Kite plus récente et ne peut pas être utilisée avec cette version. La base n'est PAS modifiée.\n\nRestaurez une sauvegarde de l'ancienne base (ou pointez le chemin de base vers une copie compatible) — sinon le carnet de vol reste indisponible. Vous pouvez aussi réinstaller la version de Kite plus récente.",
     "sortMode": "Mode de tri",
     "sortAircraftLocationDate": "Appareil -> Lieu -> Date",
     "sortLocationDateAircraft": "Lieu -> Date -> Appareil",

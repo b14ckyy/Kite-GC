@@ -1131,6 +1131,15 @@
     settings.patch({ flightLogRawPath: '' });
   }
 
+  // Set when the flight DB was written by a NEWER Kite (downgrade guard, `db-newer:` marker from
+  // the backend) — the logbook shows a targeted "restore a backup or update Kite" notice instead
+  // of a generic error and stays disabled; the DB file is never touched. Cleared on a successful
+  // load (e.g. after the user pointed the DB path at a compatible copy). The explanatory popup
+  // fires ONCE per session, and ONLY on a real schema mismatch — every other DB error keeps the
+  // generic error bar.
+  let logbookDbIncompatible = $state<string | null>(null);
+  let dbNewerPopupShown = false;
+
   async function loadLogbook() {
     if (!flightLoggingEnabled) {
       resetPlayback();
@@ -1145,6 +1154,7 @@
     logbookLoading = true;
     try {
       flightSummaries = await logbookCtrl.loadFlights(flightLogDbPath);
+      logbookDbIncompatible = null;
       if (selectedFlightId != null) {
         const found = flightSummaries.find((f) => f.id === selectedFlightId);
         if (!found) {
@@ -1154,7 +1164,17 @@
         }
       }
     } catch (e) {
-      errorMsg = String(e);
+      const msg = String(e);
+      if (msg.includes('db-newer:')) {
+        logbookDbIncompatible = msg;
+        flightSummaries = [];
+        if (!dbNewerPopupShown) {
+          dbNewerPopupShown = true;
+          void showInfo($t('logbook.dbNewerTitle'), $t('logbook.dbNewerPopup'));
+        }
+      } else {
+        errorMsg = msg;
+      }
     } finally {
       logbookLoading = false;
     }
@@ -2917,6 +2937,7 @@
         {:else if activeTab === 'logbook'}
           <LogbookPanel
             {flightLoggingEnabled}
+            dbIncompatible={logbookDbIncompatible}
             {logbookMinimized}
             {logbookLoading}
             {blackboxImporting}
