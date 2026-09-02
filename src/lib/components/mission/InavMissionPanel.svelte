@@ -15,7 +15,6 @@
     mission, selectedWpIndex, selectedWpIndices, editMode,
     selectWpSingle, toggleWpSelection, selectWpRange, clearWpSelection, removeSelectedWps,
     missionDownload, missionUpload,
-    missionImportXml,
     missionSaveFile, missionLoadFile,
     activeMissionIndex, missionCount,
     switchMission, addMission, removeMission, getTotalWpCount,
@@ -117,7 +116,6 @@
     const id = setTimeout(() => { statusMessage = ''; }, 10000);
     return () => clearTimeout(id);
   });
-  let dragOver = $state(false);
   let currentTelem = $state<TelemetryData>(get(telemetry));
   const unsubTelem = telemetry.subscribe(t => { currentTelem = t; });
 
@@ -287,24 +285,9 @@
     }
   }
 
-  function onDragOver(e: DragEvent) { if (get(missionManagerOpen)) return; e.preventDefault(); dragOver = true; }
-  function onDragLeave() { dragOver = false; }
-  async function onDrop(e: DragEvent) {
-    if (get(missionManagerOpen)) return;
-    e.preventDefault(); dragOver = false;
-    const files = e.dataTransfer?.files;
-    if (!files || files.length === 0) return;
-    const file = files[0];
-    if (!file.name.endsWith('.mission')) { statusMessage = $t('mission.onlyMissionFiles'); return; }
-    try {
-      const xml = await file.text();
-      if (!xml.includes('<mission')) { statusMessage = $t('mission.invalidMissionFile'); return; }
-      const m = await missionImportXml(xml);
-      statusMessage = $t('mission.loadedFromFile', { values: { count: m.waypoints.length, file: file.name } });
-    } catch (e) {
-      statusMessage = $t('mission.importFailed', { values: { error: String(e) } });
-    }
-  }
+  // No DOM drop zone here: with Tauri's dragDropEnabled the WebView never receives DOM drop
+  // events — file drops arrive as the native `tauri://drag-drop` event, routed in +page.svelte
+  // (mission files import from anywhere over the app).
 
   async function handleClear() {
     if (currentMission.waypoints.length > 0) {
@@ -475,7 +458,7 @@
 
 {#snippet body()}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="miss-dropzone" class:drag-over={dragOver} ondragover={onDragOver} ondragleave={onDragLeave} ondrop={onDrop}>
+  <div class="miss-dropzone">
     {#if $geozoneMissionResult.active}
       {#if $geozoneMissionResult.nfzLaunchInside}
         <div class="gz-warn gz-warn-red">{$t('geozone.warnNfzLaunch')}</div>
@@ -552,7 +535,6 @@
       </table>
     {/if}
 
-    {#if dragOver}<div class="drop-overlay">{$t('mission.dropHint')}</div>{/if}
   </div>
 {/snippet}
 
@@ -636,7 +618,6 @@
   .tb-spacer { flex: 1; }
 
   .miss-dropzone { position: relative; min-height: 100%; }
-  .miss-dropzone.drag-over { outline: 2px dashed #37a8db; outline-offset: -2px; border-radius: 4px; }
 
   /* Geozone safety-check warnings (above the mission tabs/WP list). */
   .gz-warn { padding: 4px 8px; font-size: 11.5px; font-weight: 600; border-radius: 4px; margin-bottom: 4px; }
@@ -693,5 +674,4 @@
   .prov-fc { background: #37a8db; }
   .prov-file { background: #6c7a89; }
   .prov-db { background: #59aa29; }
-  .drop-overlay { position: absolute; inset: 0; background: rgba(55,168,219,0.15); border: 2px dashed #37a8db; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #37a8db; font-size: 13px; font-weight: bold; z-index: 10; pointer-events: none; }
 </style>

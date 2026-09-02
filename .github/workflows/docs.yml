@@ -1,11 +1,20 @@
-# Build + deploy the user documentation site (MkDocs Material) to GitHub Pages.
+# Build + deploy the VERSIONED user documentation site (MkDocs Material + mike) to GitHub Pages.
 #
-# DORMANT until the repository is public AND Pages is enabled:
-#   Repo → Settings → Pages → Build and deployment → Source = "GitHub Actions".
-# GitHub Pages on a PRIVATE repo requires GitHub Pro/Team, so until then this workflow simply has
-# nothing to publish to. The build job still validates the docs on every push (mkdocs build --strict).
+# mike (https://github.com/jimporter/mike) commits every deployed version as a subfolder of the
+# gh-pages branch and maintains a versions.json there; the Material theme renders the header
+# version dropdown from it. Pages must serve that branch:
+#   Repo → Settings → Pages → Build and deployment → Source = "Deploy from a branch: gh-pages /(root)".
 #
-# Local preview needs no CI: `mkdocs serve` (see docs/requirements.txt).
+# Versioning model — ONE docs version per MINOR release (x.y.1 patches never change features):
+#   push to master → redeploy "<major.minor>" (from package.json) with the alias "latest",
+#                    then redeploy "Dev" (the master tip). The site root redirects to "latest".
+#   release merge  → bumps package.json, so the same job creates the next minor's dropdown entry
+#                    and moves "latest" onto it; older minors stay frozen on gh-pages as-is.
+#   docs-only fix  → lands on master (see contributing.md) and redeploys the current minor,
+#                    keeping the published release docs correct between releases.
+#
+# Local preview needs no CI: `mkdocs serve` (single version, see docs/requirements.txt) or
+# `mike serve` (the full versioned site from a local gh-pages branch).
 
 name: docs
 
@@ -14,42 +23,60 @@ on:
     branches: [master, main]
     paths:
       - docs/user/**
+      - docs/404.html
       - mkdocs.yml
       - overrides/**
       - docs/requirements.txt
       - .github/workflows/docs.yml
+      - package.json # a release merge must (re)deploy even when it changes no docs file
+
   workflow_dispatch:
 
+# mike pushes the built site to the gh-pages branch.
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
-# Allow only one concurrent deployment.
+# Allow only one concurrent deployment — parallel gh-pages pushes would race.
 concurrency:
   group: pages
   cancel-in-progress: false
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # mike appends commits to the existing gh-pages history
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: pip install -r docs/requirements.txt
+      # Validate before any deploy — mike's own builds are not strict.
       - run: mkdocs build --strict
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Resolve the release minor from package.json
+        id: ver
+        run: echo "minor=$(node -p "require('./package.json').version.split('.').slice(0,2).join('.')")" >> "$GITHUB_OUTPUT"
+      - name: Author the gh-pages commits as the Actions bot
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Deploy the release docs (${{ steps.ver.outputs.minor }} = latest)
+        run: mike deploy --push --update-aliases "${{ steps.ver.outputs.minor }}" latest
+      - name: Deploy the development docs (Dev = master tip)
+        run: mike deploy --push --title Dev dev
+      - name: Point the site root at the latest release
+        run: mike set-default --push latest
+      # GitHub Pages serves exactly ONE 404 page for the whole site: /404.html at the gh-pages
+      # root. mike only manages version folders, so publish it in a throwaway worktree. It
+      # forwards pre-versioning deep links (old bookmarks) to the same path under latest/.
+      - name: Publish the root 404 redirect
+        run: |
+          git worktree add "$RUNNER_TEMP/ghp" gh-pages
+          cp docs/404.html "$RUNNER_TEMP/ghp/404.html"
+          cd "$RUNNER_TEMP/ghp"
+          git add 404.html
+          if ! git diff --cached --quiet; then
+            git commit -m "Publish the root 404 redirect"
+            git push origin gh-pages
+          fi

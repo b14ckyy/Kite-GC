@@ -1208,7 +1208,6 @@
     "statClimbDescent": "各航段总爬升/下降",
     "statTime": "飞行时间（根据航点巡航速度）",
     "infiniteRepeatTip": "任务无限循环（无限JUMP循环）— 显示的距离/时间为单次完整通过",
-    "dropHint": "将 .mission 文件拖放到此处",
     "notConnected": "未连接",
     "downloaded": "已下载 {count} 个航点",
     "downloading": "正在下载航点…",
@@ -1229,8 +1228,6 @@
     "openMissionTitle": "打开任务",
     "loaded": "已加载 {count} 个航点",
     "openFailed": "打开失败：{error}",
-    "onlyMissionFiles": "仅支持 .mission 文件",
-    "invalidMissionFile": "无效的任务文件",
     "loadedFromFile": "从 {file} 加载了 {count} 个航点",
     "importFailed": "导入失败：{error}",
     "missionCleared": "任务已清除",
@@ -1270,8 +1267,6 @@
     "created": "创建时间",
     "linkedFlights": "使用此任务的飞行",
     "noFlights": "无关联飞行",
-    "dropHint": "拖放 .mission 或 .waypoints 文件导入",
-    "onlyMission": "仅可导入 .mission 和 .waypoints 文件",
     "systemLocked": "已连接到不同的自驾仪 — 断开连接以加载此任务",
     "filterByFormat": "按任务格式筛选",
     "filterAll": "全部",
@@ -1666,9 +1661,7 @@
     "throttle": "油门（−1=保持）",
     "delay": "延迟",
     "downloading": "正在从飞控下载任务…",
-    "uploading": "正在上传任务到飞控…",
-    "dropHint": "将 .waypoints 文件拖放到此处",
-    "onlyWaypointsFiles": "仅支持 .waypoints 文件"
+    "uploading": "正在上传任务到飞控…"
   },
   "wpAction": {
     "waypoint": "航点",

@@ -96,9 +96,10 @@
   import { initPulseBlink } from "$lib/stores/pulseBlink";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import TerrainAnalysisPanel from "$lib/components/terrain/TerrainAnalysisPanel.svelte";
-  import { editMode, replayActive, mission, missionFlags, missionDownload, missionUpload, missionFcInfo, markMissionSynced, loadedMissionId, missionSetWaypoints, launchPoint, hasLocation, toDeg, type Waypoint } from "$lib/stores/mission";
-  import { pendingSystemSwitch, autopilotSystem, setAutopilotSystem, confirmSystemSwitch } from "$lib/stores/autopilotContext";
-  import { arduMission, arduSelectedWpIndex, arduLoadedMissionId, type ArduWaypoint } from "$lib/stores/missionArdupilot";
+  import { editMode, replayActive, mission, missionFlags, missionDownload, missionUpload, missionFcInfo, markMissionSynced, loadedMissionId, missionSetWaypoints, missionImportXml, launchPoint, hasLocation, toDeg, type Waypoint } from "$lib/stores/mission";
+  import { pendingSystemSwitch, autopilotSystem, autopilotLocked, setAutopilotSystem, confirmSystemSwitch } from "$lib/stores/autopilotContext";
+  import { arduMission, arduSelectedWpIndex, arduLoadedMissionId, parseWaypoints, parsePlanFile, planFirmwareTarget, loadArduMissionFromFile, type ArduWaypoint } from "$lib/stores/missionArdupilot";
+  import { frameMissionOnMap } from "$lib/stores/mapCamera";
   import { terrainAnalysis, patchTerrainAnalysis } from "$lib/stores/terrainAnalysis";
   import { DEFAULT_RADAR, DEFAULT_AIRSPACE, BUILTIN_ADSB_PROVIDERS } from "$lib/stores/settings";
   import type { AppSettings, InterfaceSettings, PanelConfig, RadarSettings, GcsMode, AirspaceSettings, SystemMessagesLevel, LogLevel } from "$lib/stores/settings";
@@ -1493,6 +1494,43 @@
     await importFiles(supported);
   }
 
+  /** Import a mission file dropped anywhere over the app (the docs' "drag a mission file onto the
+   *  map") — the ONLY working drop path is Tauri's native drag-drop event: with `dragDropEnabled`
+   *  the WebView never sees DOM drop events, so element-scoped drop zones cannot exist. Routed by
+   *  extension: .mission → INAV, .plan/.waypoints → the ArduPilot/PX4 stack. `.txt` stays with the
+   *  logbook (SD blackbox logs use it too). If the file belongs to the other mission family, the
+   *  editor switches — with 'keep': INAV and Ardu keep separate stores, so nothing is lost — unless
+   *  a connected FC locks the system, which reports instead of silently importing into a hidden
+   *  store. */
+  async function importDroppedMission(path: string): Promise<void> {
+    console.log('[IMPORT] mission file dropped:', path);
+    try {
+      const content = await invoke<string>('read_text_file', { path });
+      if (/\.mission$/i.test(path)) {
+        if (get(autopilotSystem) !== 'inav') {
+          if (get(autopilotLocked)) { errorMsg = $t('missionMgr.systemLocked'); return; }
+          setAutopilotSystem('inav');
+          if (get(pendingSystemSwitch)) confirmSystemSwitch('keep');
+          if (get(autopilotSystem) !== 'inav') return;
+        }
+        await missionImportXml(content);
+      } else {
+        const isPlan = /\.plan$/i.test(path);
+        const wps = isPlan ? parsePlanFile(content) : parseWaypoints(content);
+        if (get(autopilotSystem) === 'inav') {
+          if (get(autopilotLocked)) { errorMsg = $t('missionMgr.systemLocked'); return; }
+          setAutopilotSystem(isPlan ? planFirmwareTarget(content) : 'ardupilot');
+          if (get(pendingSystemSwitch)) confirmSystemSwitch('keep');
+          if (get(autopilotSystem) === 'inav') return;
+        }
+        loadArduMissionFromFile(wps);
+      }
+      frameMissionOnMap();
+    } catch (e) {
+      errorMsg = $t('mission.importFailed', { values: { error: String(e) } });
+    }
+  }
+
   async function exportFlightsToKflight(flightIds: number[]) {
     if (flightIds.length === 0) return;
     try {
@@ -2603,9 +2641,16 @@
       blackboxImportProgress = event.payload;
     });
     void listen<{ paths: string[] }>('tauri://drag-drop', (event) => {
-      if (activeTab === 'logbook' && event.payload.paths?.length) {
-        importDroppedFiles(event.payload.paths);
+      const paths = event.payload.paths ?? [];
+      if (!paths.length) return;
+      // Mission files import from anywhere (see importDroppedMission); everything else keeps the
+      // logbook-tab gate. `.txt` deliberately stays on the logbook side (SD blackbox collision).
+      const missionFile = paths.find((p) => /\.(mission|plan|waypoints)$/i.test(p));
+      if (missionFile) {
+        void importDroppedMission(missionFile);
+        return;
       }
+      if (activeTab === 'logbook') importDroppedFiles(paths);
     });
     // Home from the FC (MSP_WP 0), pushed once at connect — recovers Home on a mid-flight connect /
     // app restart. The live arm-transition path (Map.svelte) overwrites it on the next arm.
@@ -2737,12 +2782,8 @@
   <!-- ======= UI CHROME LAYER — zoomed by --ui-scale ======= -->
   <div class="ui-scale">
 
-<ConfirmDialog bind:this={confirmDialog} />
-<UpdateDialog />
-<CesiumKeyPrompt bind:open={cesiumKeyPromptOpen} onSave={cesiumKeySave} onRemindLater={cesiumKeyRemindLater} onIgnore={cesiumKeyIgnore} />
-<EndFlightDialog bind:this={endFlightDialog} {interfaceSettings} />
-<RecoveryPrompt bind:this={recoveryPrompt} />
-<DisconnectArmedDialog bind:this={disconnectArmedDialog} />
+<!-- Dialogs render in the panels layer below — as .ui-scale children their z-index could
+     never beat the in-frame mini-map either (same stacking-context wall as the panels). -->
 
 {#if awaitingResumeReconnect}
   <div class="resume-banner">{$t('recovery.waitingBanner')}</div>
@@ -2892,6 +2933,8 @@
   />
 
   <!-- ======= FLOATING NAV PANEL SYSTEM ======= -->
+  <!-- The rail lives here in .app; the panels themselves render in the panels layer AFTER
+       .ui-scale so they stack above the in-frame mini-map — see that layer's comment. -->
   <NavRail
     open={navPanelOpen}
     activeTab={railActiveTab}
@@ -2899,129 +2942,6 @@
     onToggle={toggleNavPanel}
     onSelectTab={selectTab}
   />
-
-  <!-- Floating panels — all on the panel framework (docs/active/PANEL_FRAMEWORK.md). Each is a
-       self-positioned PanelShell; terrain is its own overlay below. -->
-  {#if navPanelOpen && !terrainOpen}
-    {#if activeTab === 'uav-info'}
-      <UavInfoPanel {connStatus} {fcInfo} />
-    {:else if activeTab === 'settings'}
-      <SettingsPanel
-        localeValue={$locale ?? 'en'}
-        {uiScale}
-        {mapProvider}
-        {mapCacheMaxMB}
-        {cacheStats}
-        {cesiumIonToken}
-        {altitudeCurtain3D}
-        {realLighting3D}
-        {buildings3D}
-        {logReplayTime}
-        {nightMode2D}
-        lowPower3D={$settings.lowPower3D}
-        {gcsMode}
-        userLocation={$userGeoLocation}
-        onGeoCheck={requestUserLocation}
-        {attitudeRateHz}
-        {positionRateHz}
-        {airspeedEnabled}
-        {windEnabled}
-        directionLines={$settings.directionLines}
-        {mavlinkFullTelemetry}
-        {flightLoggingEnabled}
-        {flightRecordingEnabled}
-        {flightLogRawEnabled}
-        {flightLogRawAlways}
-        {flightLogDbPath}
-        {defaultFlightLogPath}
-        {flightLogRawPath}
-        {defaultRawLogPath}
-        {defaultWpAltitudeM}
-        {defaultPhTimeSec}
-        {warnAltitudeM}
-        batteryAlertPct={$settings.batteryAlertPct}
-        {systemMessages}
-        {logLevel}
-        {interfaceSettings}
-        radar={radarSettings}
-        airspace={airspaceSettings}
-        rcControl={$settings.rcControl}
-        updateCheck={$settings.updateCheck}
-        {isWidgetActive}
-        {getWidgetPanelLabel}
-        onPatch={applySettingsPatch}
-        onSetCacheMaxMB={setCacheMaxMB}
-        onClearCache={clearCache}
-        onCompactDb={compactDb}
-        onChooseFlightLogPath={chooseFlightLogPath}
-        onResetFlightLogPath={resetFlightLogPath}
-        onChooseRawLogPath={chooseRawLogPath}
-        onResetRawLogPath={resetRawLogPath}
-        onToggleWidget={toggleWidget}
-      />
-    {:else if activeTab === 'logbook'}
-      <LogbookPanel
-        {flightLoggingEnabled}
-        {logbookMinimized}
-        {logbookLoading}
-        {blackboxImporting}
-        {blackboxImportProgress}
-        {flightSummaries}
-        {selectedFlight}
-        {selectedFlightId}
-        {selectedFlightTrackCount}
-        {interfaceSettings}
-        bind:selectedFlightNotes
-        bind:weatherTempC
-        bind:weatherWindMs
-        bind:weatherWindDir
-        bind:weatherDesc
-        bind:weatherEditing
-        onExpand={expandLogbook}
-        onLoadLogbook={loadLogbook}
-        onImport={importFlightLog}
-        onSelectFlight={selectFlight}
-        onSaveNotes={saveSelectedFlightNotes}
-        onSaveWeather={saveSelectedFlightWeather}
-        onSaveCraftName={saveSelectedFlightCraftName}
-        onSavePlatformType={saveSelectedFlightPlatformType}
-        onSavePilot={saveSelectedFlightPilot}
-        onDeleteFlight={removeSelectedFlight}
-        onExportFlights={exportFlightsToKflight}
-        onExportBlackbox={exportBlackbox}
-        onDeleteBlackbox={deleteBlackbox}
-        {blackboxFileInfo}
-        onExportTrack={exportTrack}
-      />
-    {:else if activeTab === 'mission'}
-      <MissionPanel />
-    {:else if activeTab === 'control'}
-      <MavCommandPanel />
-    {:else if activeTab === 'rc-control'}
-      {#if isMobile}
-        <VirtualSticks />
-      {:else}
-        <RcControlPanel />
-      {/if}
-    {:else if activeTab === 'radar'}
-      <RadarPanel radar={radarSettings} {interfaceSettings} referencePoint={radarReference} mspSupported={mspAdsbSupported} onPatch={applySettingsPatch} />
-    {:else if activeTab === 'airspace'}
-      <!-- Re-init the panel on connect/disconnect + when the FC's geozone/fence capability resolves
-           (loaded async after connect) so an already-open panel reflects the new FC without a tab switch. -->
-      {#key `${$connection.status}-${geozonesAvailable}-${fenceAvailable}-${rallyAvailable}`}
-        <AirspaceManagerPanel reference={radarReference} distanceUnit={interfaceSettings.distanceUnit} />
-      {/key}
-    {:else if activeTab === 'video'}
-      <VideoPanel />
-    {:else if DEV_MODE && activeTab === 'dev-playground'}
-      <PanelPlayground initial="compact" label="DEV Playground" />
-    {/if}
-  {/if}
-
-  <!-- ======= TERRAIN ANALYSIS OVERLAY ======= -->
-  {#if terrainOpen}
-    <TerrainAnalysisPanel track={selectedTrackWithPosition} live={isPrimaryConnected} {interfaceSettings} confirm={showDialog} />
-  {/if}
 
   <!-- ======= BOTTOM WIDGET PANEL ======= -->
   <div class="zone-bottom-dock" class:zone-hidden={!$layout.bottomDock.visible} class:panel-editing={widgetEditMode} bind:clientWidth={bottomDockW} bind:clientHeight={bottomDockH} style:padding-left="{videoReserve}px">
@@ -3106,6 +3026,150 @@
   </div>
 </main>
   </div><!-- .ui-scale -->
+
+  <!-- ======= FLOATING PANELS LAYER — scaled like .ui-scale, ABOVE the in-frame mini-map ======= -->
+  <!-- .ui-scale is one stacking context (its transform), so nothing inside it can stack over the
+       unzoomed in-frame map (z2) / its corner controls (z3). The floating panels + modal dialogs
+       therefore live in this second, identically-scaled layer (z4) — panels cover the mini-map
+       exactly like they cover the floating video window. The host replicates .app's positioning
+       context and grid vars so PanelShell geometry is untouched. -->
+  <div class="ui-scale panels-layer">
+    <div
+      class="panels-host"
+      style:--grid-bottom-height={gridBottomHeight}
+      style:--grid-side-width={gridSideWidth}
+      style:--panel-bottom-reserve={panelBottomReserve}
+    >
+      <!-- Floating panels — all on the panel framework (docs/active/PANEL_FRAMEWORK.md). Each is a
+           self-positioned PanelShell; terrain is its own overlay below. -->
+      {#if navPanelOpen && !terrainOpen}
+        {#if activeTab === 'uav-info'}
+          <UavInfoPanel {connStatus} {fcInfo} />
+        {:else if activeTab === 'settings'}
+          <SettingsPanel
+            localeValue={$locale ?? 'en'}
+            {uiScale}
+            {mapProvider}
+            {mapCacheMaxMB}
+            {cacheStats}
+            {cesiumIonToken}
+            {altitudeCurtain3D}
+            {realLighting3D}
+            {buildings3D}
+            {logReplayTime}
+            {nightMode2D}
+            lowPower3D={$settings.lowPower3D}
+            {gcsMode}
+            userLocation={$userGeoLocation}
+            onGeoCheck={requestUserLocation}
+            {attitudeRateHz}
+            {positionRateHz}
+            {airspeedEnabled}
+            {windEnabled}
+            directionLines={$settings.directionLines}
+            {mavlinkFullTelemetry}
+            {flightLoggingEnabled}
+            {flightRecordingEnabled}
+            {flightLogRawEnabled}
+            {flightLogRawAlways}
+            {flightLogDbPath}
+            {defaultFlightLogPath}
+            {flightLogRawPath}
+            {defaultRawLogPath}
+            {defaultWpAltitudeM}
+            {defaultPhTimeSec}
+            {warnAltitudeM}
+            batteryAlertPct={$settings.batteryAlertPct}
+            {systemMessages}
+            {logLevel}
+            {interfaceSettings}
+            radar={radarSettings}
+            airspace={airspaceSettings}
+            rcControl={$settings.rcControl}
+            updateCheck={$settings.updateCheck}
+            {isWidgetActive}
+            {getWidgetPanelLabel}
+            onPatch={applySettingsPatch}
+            onSetCacheMaxMB={setCacheMaxMB}
+            onClearCache={clearCache}
+            onCompactDb={compactDb}
+            onChooseFlightLogPath={chooseFlightLogPath}
+            onResetFlightLogPath={resetFlightLogPath}
+            onChooseRawLogPath={chooseRawLogPath}
+            onResetRawLogPath={resetRawLogPath}
+            onToggleWidget={toggleWidget}
+          />
+        {:else if activeTab === 'logbook'}
+          <LogbookPanel
+            {flightLoggingEnabled}
+            {logbookMinimized}
+            {logbookLoading}
+            {blackboxImporting}
+            {blackboxImportProgress}
+            {flightSummaries}
+            {selectedFlight}
+            {selectedFlightId}
+            {selectedFlightTrackCount}
+            {interfaceSettings}
+            bind:selectedFlightNotes
+            bind:weatherTempC
+            bind:weatherWindMs
+            bind:weatherWindDir
+            bind:weatherDesc
+            bind:weatherEditing
+            onExpand={expandLogbook}
+            onLoadLogbook={loadLogbook}
+            onImport={importFlightLog}
+            onSelectFlight={selectFlight}
+            onSaveNotes={saveSelectedFlightNotes}
+            onSaveWeather={saveSelectedFlightWeather}
+            onSaveCraftName={saveSelectedFlightCraftName}
+            onSavePlatformType={saveSelectedFlightPlatformType}
+            onSavePilot={saveSelectedFlightPilot}
+            onDeleteFlight={removeSelectedFlight}
+            onExportFlights={exportFlightsToKflight}
+            onExportBlackbox={exportBlackbox}
+            onDeleteBlackbox={deleteBlackbox}
+            {blackboxFileInfo}
+            onExportTrack={exportTrack}
+          />
+        {:else if activeTab === 'mission'}
+          <MissionPanel />
+        {:else if activeTab === 'control'}
+          <MavCommandPanel />
+        {:else if activeTab === 'rc-control'}
+          {#if isMobile}
+            <VirtualSticks />
+          {:else}
+            <RcControlPanel />
+          {/if}
+        {:else if activeTab === 'radar'}
+          <RadarPanel radar={radarSettings} {interfaceSettings} referencePoint={radarReference} mspSupported={mspAdsbSupported} onPatch={applySettingsPatch} />
+        {:else if activeTab === 'airspace'}
+          <!-- Re-init the panel on connect/disconnect + when the FC's geozone/fence capability resolves
+               (loaded async after connect) so an already-open panel reflects the new FC without a tab switch. -->
+          {#key `${$connection.status}-${geozonesAvailable}-${fenceAvailable}-${rallyAvailable}`}
+            <AirspaceManagerPanel reference={radarReference} distanceUnit={interfaceSettings.distanceUnit} />
+          {/key}
+        {:else if activeTab === 'video'}
+          <VideoPanel />
+        {:else if DEV_MODE && activeTab === 'dev-playground'}
+          <PanelPlayground initial="compact" label="DEV Playground" />
+        {/if}
+      {/if}
+
+      <!-- ======= TERRAIN ANALYSIS OVERLAY ======= -->
+      {#if terrainOpen}
+        <TerrainAnalysisPanel track={selectedTrackWithPosition} live={isPrimaryConnected} {interfaceSettings} confirm={showDialog} />
+      {/if}
+    </div>
+    <ConfirmDialog bind:this={confirmDialog} />
+    <UpdateDialog />
+    <CesiumKeyPrompt bind:open={cesiumKeyPromptOpen} onSave={cesiumKeySave} onRemindLater={cesiumKeyRemindLater} onIgnore={cesiumKeyIgnore} />
+    <EndFlightDialog bind:this={endFlightDialog} {interfaceSettings} />
+    <RecoveryPrompt bind:this={recoveryPrompt} />
+    <DisconnectArmedDialog bind:this={disconnectArmedDialog} />
+  </div>
 
   <!-- Cursor-positioned overlays stay OUTSIDE the zoom so their fixed clientX/clientY
        coordinates are not multiplied by --ui-scale (they render unscaled but in the
@@ -3193,6 +3257,22 @@
     transform: scale(var(--ui-scale, 1));
     transform-origin: 0 0;
     z-index: 1;
+  }
+  /* Second scaled layer for the floating panels + modal dialogs: above the in-frame mini-map
+     (z2) and its top-level corner controls (z3) — see the template comment at the layer. */
+  .ui-scale.panels-layer {
+    z-index: 4;
+  }
+  /* The host mirrors .app: a full-size positioning context for the self-positioned PanelShells
+     that must NOT eat pointer events itself, or the map/chrome below would go dead. */
+  .panels-layer .panels-host {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+  }
+  .panels-host > :global(*) {
+    pointer-events: auto;
   }
 
   .app {

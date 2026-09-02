@@ -26,11 +26,12 @@
   // X (total): in replay use the flown mission's count (linked library mission or Blackbox
   // header); live uses the loaded planner mission's length.
   // X (total): replay → flown mission count; live → the loaded planner mission length, from the
-  // ArduPilot store when ArduPilot is active, otherwise the INAV store.
+  // INAV store on INAV, otherwise the ArduPilot store (which PX4 shares — 'px4' is its own
+  // system value, so discriminate on 'inav', never on 'ardupilot').
   let wpTotal = $derived(
     $replayActive ? ($replayWpTotal ?? 0)
-    : $autopilotSystem === 'ardupilot' ? $arduMission.length
-    : $mission.waypoints.length,
+    : $autopilotSystem === 'inav' ? $mission.waypoints.length
+    : $arduMission.length,
   );
   let wpText = $derived.by(() => {
     if (!inMission) return null;

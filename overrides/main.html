@@ -5,3 +5,13 @@
   Kite Ground Control is in <strong>public beta</strong> — your
   <a href="https://github.com/b14ckyy/Kite-GC/issues">feedback &amp; bug reports</a> are very welcome.
 {% endblock %}
+
+<!-- Shown by the theme on every version whose aliases do NOT include the site default ("latest"),
+     i.e. on old releases and on "Dev". ../<base_url> climbs out of the version folder to the site
+     root, which redirects to the latest release. -->
+{% block outdated %}
+  You are not reading the documentation for the latest release.
+  <a href="{{ '../' ~ base_url }}">
+    <strong>Switch to the latest release.</strong>
+  </a>
+{% endblock %}

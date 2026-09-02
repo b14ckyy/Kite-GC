@@ -27,7 +27,7 @@
   } from '$lib/stores/mission';
   import {
     arduMission, arduSelectedWpIndex, arduLoadedMissionId, markArduMissionSynced, arduClearUndoHistory,
-    parseWaypoints, type ArduWaypoint,
+    parseWaypoints, parsePlanFile, type ArduWaypoint,
   } from '$lib/stores/missionArdupilot';
   import { frameMissionOnMap } from '$lib/stores/mapCamera';
   import {
@@ -61,7 +61,6 @@
   });
   let nameDraft = $state('');
   let notesDraft = $state('');
-  let dragOver = $state(false);
 
   const UNKNOWN = ''; // sorts first; rendered as the localized "unknown" label
 
@@ -363,11 +362,15 @@
 
   async function handleImportButton() {
     try {
-      const path = await open({ title: $t('missionMgr.openTitle'), multiple: false, filters: [{ name: 'Mission', extensions: anyCase(['mission', 'waypoints', 'txt']) }] });
+      const path = await open({ title: $t('missionMgr.openTitle'), multiple: false, filters: [{ name: 'Mission', extensions: anyCase(['mission', 'waypoints', 'txt', 'plan']) }] });
       if (!path || typeof path !== 'string') return;
       const stem = path.replace(/^.*[\\/]/, '').replace(/\.[^.]+$/, '');
       const lower = path.toLowerCase();
-      if (lower.endsWith('.waypoints') || lower.endsWith('.txt')) {
+      if (lower.endsWith('.plan')) {
+        // QGroundControl JSON plan (the PX4 ecosystem's mission file) → the ArduPilot/PX4 stack.
+        const text = await invoke<string>('read_text_file', { path });
+        await importArduMission(parsePlanFile(text), stem || autoName());
+      } else if (lower.endsWith('.waypoints') || lower.endsWith('.txt')) {
         const text = await invoke<string>('read_text_file', { path });
         await importArduMission(parseWaypoints(text), stem || autoName());
       } else {
@@ -385,30 +388,9 @@
     return `New Mission - ${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
   }
 
-  function onDragOver(e: DragEvent) { e.preventDefault(); e.stopPropagation(); dragOver = true; }
-  function onDragLeave() { dragOver = false; }
-  async function onDrop(e: DragEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    dragOver = false;
-    const file = e.dataTransfer?.files?.[0];
-    const name = file?.name.toLowerCase() ?? '';
-    if (!file || !(name.endsWith('.mission') || name.endsWith('.waypoints') || name.endsWith('.txt'))) {
-      statusMessage = $t('missionMgr.onlyMission'); return;
-    }
-    try {
-      const text = await file.text();
-      const stem = file.name.replace(/\.[^.]+$/, '');
-      if (name.endsWith('.waypoints') || name.endsWith('.txt')) {
-        await importArduMission(parseWaypoints(text), stem || autoName());
-      } else {
-        const m = await missionImportXml(text);
-        await importMission(m.waypoints, stem || autoName());
-      }
-    } catch (err) {
-      statusMessage = $t('missionMgr.importFailed', { values: { error: String(err) } });
-    }
-  }
+  // No DOM drop zone here: with Tauri's dragDropEnabled the WebView never receives DOM drop
+  // events — file drops arrive as the native `tauri://drag-drop` event, routed in +page.svelte
+  // (a dropped mission file loads to the MAP; importing into the library stays on the button).
 
   // ── Formatters ─────────────────────────────────────────────────────
   function fmtDist(m: number | null): string {
@@ -472,7 +454,7 @@
 
 {#snippet body()}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="mmv2-dropzone" class:drag-over={dragOver} ondragover={onDragOver} ondragleave={onDragLeave} ondrop={onDrop}>
+  <div class="mmv2-dropzone">
     {#if missions.length === 0}
       <div class="panel-empty">
         <span class="panel-empty-icon">🗂</span>
@@ -503,7 +485,6 @@
         </div>
       {/each}
     {/if}
-    {#if dragOver}<div class="drop-overlay">{$t('missionMgr.dropHint')}</div>{/if}
   </div>
 {/snippet}
 
@@ -587,7 +568,6 @@
   .section-heading { margin: 8px 0 6px 0; font-size: 11px; font-weight: 600; color: #37a8db; text-transform: uppercase; letter-spacing: 0.5px; }
 
   .mmv2-dropzone { position: relative; min-height: 100%; }
-  .mmv2-dropzone.drag-over { outline: 2px dashed #37a8db; outline-offset: -2px; border-radius: 4px; }
 
   .panel-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 40px 0; color: #555; font-size: 12px; }
   .panel-empty-icon { font-size: 28px; opacity: 0.4; }
@@ -628,7 +608,6 @@
   .flight-meta { color: #888; flex-shrink: 0; }
   .flight-none { color: #777; font-size: 12px; padding: 4px 0; }
 
-  .drop-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(55, 168, 219, 0.18); border: 2px dashed #37a8db; border-radius: 6px; color: #fff; font-weight: 600; pointer-events: none; z-index: 10; }
 
   .mmv2-status { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); z-index: 1001; padding: 6px 12px; font-size: 11px; color: #f39c12; background: rgba(0, 0, 0, 0.8); border-radius: 6px; }
 </style>

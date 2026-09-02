@@ -1214,7 +1214,6 @@
     "statClimbDescent": "Total climb / descent across the legs",
     "statTime": "Flight time (from the waypoint cruise speeds)",
     "infiniteRepeatTip": "Mission repeats forever (infinite JUMP loop) — distance/time shown are for one full pass",
-    "dropHint": "Drop .mission file here",
     "notConnected": "Not connected",
     "downloaded": "Downloaded {count} WPs",
     "downloading": "Downloading waypoints…",
@@ -1235,8 +1234,6 @@
     "openMissionTitle": "Open Mission",
     "loaded": "Loaded {count} WPs",
     "openFailed": "Open failed: {error}",
-    "onlyMissionFiles": "Only .mission files supported",
-    "invalidMissionFile": "Invalid mission file",
     "loadedFromFile": "Loaded {count} WPs from {file}",
     "importFailed": "Import failed: {error}",
     "missionCleared": "Mission cleared",
@@ -1276,8 +1273,6 @@
     "created": "Created",
     "linkedFlights": "Flights with this mission",
     "noFlights": "No flights linked",
-    "dropHint": "Drop a .mission or .waypoints file to import",
-    "onlyMission": "Only .mission and .waypoints files can be imported",
     "systemLocked": "Connected to a different autopilot — disconnect to load this mission",
     "filterByFormat": "Filter by mission format",
     "filterAll": "All",
@@ -1672,9 +1667,7 @@
     "throttle": "Throttle (−1=keep)",
     "delay": "Delay",
     "downloading": "Downloading mission from FC…",
-    "uploading": "Uploading mission to FC…",
-    "dropHint": "Drop .waypoints file here",
-    "onlyWaypointsFiles": "Only .waypoints files supported"
+    "uploading": "Uploading mission to FC…"
   },
   "wpAction": {
     "waypoint": "Waypoint",

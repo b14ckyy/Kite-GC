@@ -1214,7 +1214,6 @@
     "statClimbDescent": "Gesamter Anstieg / Abstieg über die Strecken",
     "statTime": "Flugzeit (aus den Wegpunkt-Geschwindigkeiten)",
     "infiniteRepeatTip": "Mission wiederholt sich endlos (unendliche JUMP-Schleife) — Distanz/Zeit gelten für einen kompletten Durchlauf",
-    "dropHint": ".mission Datei hier ablegen",
     "notConnected": "Nicht verbunden",
     "downloaded": "{count} WPs heruntergeladen",
     "downloading": "Wegpunkte werden heruntergeladen…",
@@ -1235,8 +1234,6 @@
     "openMissionTitle": "Mission öffnen",
     "loaded": "{count} WPs geladen",
     "openFailed": "Öffnen fehlgeschlagen: {error}",
-    "onlyMissionFiles": "Nur .mission Dateien unterstützt",
-    "invalidMissionFile": "Ungültige Missionsdatei",
     "loadedFromFile": "{count} WPs aus {file} geladen",
     "importFailed": "Import fehlgeschlagen: {error}",
     "missionCleared": "Mission gelöscht",
@@ -1276,8 +1273,6 @@
     "created": "Erstellt",
     "linkedFlights": "Flüge mit dieser Mission",
     "noFlights": "Keine Flüge verlinkt",
-    "dropHint": "Eine .mission- oder .waypoints-Datei zum Importieren ablegen",
-    "onlyMission": "Nur .mission- und .waypoints-Dateien können importiert werden",
     "systemLocked": "Mit einem anderen Autopiloten verbunden — zum Laden dieser Mission trennen",
     "filterByFormat": "Nach Missionsformat filtern",
     "filterAll": "Alle",
@@ -1672,9 +1667,7 @@
     "throttle": "Drossel (−1=beibehalten)",
     "delay": "Verzögerung",
     "downloading": "Mission vom FC wird heruntergeladen…",
-    "uploading": "Mission wird zum FC hochgeladen…",
-    "dropHint": ".waypoints-Datei hier ablegen",
-    "onlyWaypointsFiles": "Nur .waypoints-Dateien unterstützt"
+    "uploading": "Mission wird zum FC hochgeladen…"
   },
   "wpAction": {
     "waypoint": "Wegpunkt",
