@@ -1140,7 +1140,6 @@
     "statClimbDescent": "Montée / descente totale sur les segments",
     "statTime": "Temps de vol (d'après les vitesses des waypoints)",
     "infiniteRepeatTip": "La mission se répète indéfiniment (boucle JUMP infinie) — distance/temps affichés pour un passage complet",
-    "dropHint": "Déposez un fichier .mission ici",
     "notConnected": "Non connecté",
     "downloaded": "{count} WP téléchargés",
     "downloadFailed": "Échec du téléchargement : {error}",
@@ -1159,8 +1158,6 @@
     "openMissionTitle": "Ouvrir une mission",
     "loaded": "{count} WP chargés",
     "openFailed": "Échec de l'ouverture : {error}",
-    "onlyMissionFiles": "Seuls les fichiers .mission sont pris en charge",
-    "invalidMissionFile": "Fichier de mission invalide",
     "loadedFromFile": "{count} WP chargés depuis {file}",
     "importFailed": "Échec de l'importation : {error}",
     "missionCleared": "Mission effacée",
@@ -1200,8 +1197,6 @@
     "created": "Créée",
     "linkedFlights": "Vols avec cette mission",
     "noFlights": "Aucun vol lié",
-    "dropHint": "Déposez un fichier .mission pour l'importer",
-    "onlyMission": "Seuls les fichiers .mission peuvent être importés",
     "importTitle": "Importer une mission",
     "importMsg": "Importer cette mission dans la bibliothèque (et la charger sur la carte), ou seulement la charger sur la carte ?",
     "importMapOnly": "Charger sur la carte seulement",
@@ -1566,9 +1561,7 @@
     "throttle": "Gaz (−1=garder)",
     "delay": "Délai",
     "downloading": "Téléchargement de la mission depuis le FC…",
-    "uploading": "Téléversement de la mission vers le FC…",
-    "dropHint": "Déposez un fichier .waypoints ou .plan ici",
-    "onlyWaypointsFiles": "Seuls les fichiers .waypoints et .plan sont pris en charge"
+    "uploading": "Téléversement de la mission vers le FC…"
   },
   "wpAction": {
     "waypoint": "Waypoint",

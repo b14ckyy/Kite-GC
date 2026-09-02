@@ -91,9 +91,10 @@
   import { initPulseBlink } from "$lib/stores/pulseBlink";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import TerrainAnalysisPanel from "$lib/components/terrain/TerrainAnalysisPanel.svelte";
-  import { editMode, replayActive, mission, missionFlags, missionDownload, missionUpload, missionFcInfo, markMissionSynced, loadedMissionId, missionSetWaypoints, launchPoint, hasLocation, toDeg, type Waypoint } from "$lib/stores/mission";
-  import { pendingSystemSwitch, autopilotSystem, setAutopilotSystem, confirmSystemSwitch } from "$lib/stores/autopilotContext";
-  import { arduMission, arduSelectedWpIndex, arduLoadedMissionId, type ArduWaypoint } from "$lib/stores/missionArdupilot";
+  import { editMode, replayActive, mission, missionFlags, missionDownload, missionUpload, missionFcInfo, markMissionSynced, loadedMissionId, missionSetWaypoints, missionImportXml, launchPoint, hasLocation, toDeg, type Waypoint } from "$lib/stores/mission";
+  import { pendingSystemSwitch, autopilotSystem, autopilotLocked, setAutopilotSystem, confirmSystemSwitch } from "$lib/stores/autopilotContext";
+  import { arduMission, arduSelectedWpIndex, arduLoadedMissionId, parseWaypoints, parsePlanFile, planFirmwareTarget, loadArduMissionFromFile, type ArduWaypoint } from "$lib/stores/missionArdupilot";
+  import { frameMissionOnMap } from "$lib/stores/mapCamera";
   import { terrainAnalysis, patchTerrainAnalysis } from "$lib/stores/terrainAnalysis";
   import { DEFAULT_RADAR, DEFAULT_AIRSPACE, BUILTIN_ADSB_PROVIDERS } from "$lib/stores/settings";
   import type { AppSettings, InterfaceSettings, PanelConfig, RadarSettings, GcsMode, AirspaceSettings, SystemMessagesLevel, LogLevel } from "$lib/stores/settings";
@@ -1385,6 +1386,43 @@
     await importFiles(supported);
   }
 
+  /** Import a mission file dropped anywhere over the app (the docs' "drag a mission file onto the
+   *  map") — the ONLY working drop path is Tauri's native drag-drop event: with `dragDropEnabled`
+   *  the WebView never sees DOM drop events, so element-scoped drop zones cannot exist. Routed by
+   *  extension: .mission → INAV, .plan/.waypoints → the ArduPilot/PX4 stack. `.txt` stays with the
+   *  logbook (SD blackbox logs use it too). If the file belongs to the other mission family, the
+   *  editor switches — with 'keep': INAV and Ardu keep separate stores, so nothing is lost — unless
+   *  a connected FC locks the system, which reports instead of silently importing into a hidden
+   *  store. */
+  async function importDroppedMission(path: string): Promise<void> {
+    console.log('[IMPORT] mission file dropped:', path);
+    try {
+      const content = await invoke<string>('read_text_file', { path });
+      if (/\.mission$/i.test(path)) {
+        if (get(autopilotSystem) !== 'inav') {
+          if (get(autopilotLocked)) { errorMsg = $t('missionMgr.systemLocked'); return; }
+          setAutopilotSystem('inav');
+          if (get(pendingSystemSwitch)) confirmSystemSwitch('keep');
+          if (get(autopilotSystem) !== 'inav') return;
+        }
+        await missionImportXml(content);
+      } else {
+        const isPlan = /\.plan$/i.test(path);
+        const wps = isPlan ? parsePlanFile(content) : parseWaypoints(content);
+        if (get(autopilotSystem) === 'inav') {
+          if (get(autopilotLocked)) { errorMsg = $t('missionMgr.systemLocked'); return; }
+          setAutopilotSystem(isPlan ? planFirmwareTarget(content) : 'ardupilot');
+          if (get(pendingSystemSwitch)) confirmSystemSwitch('keep');
+          if (get(autopilotSystem) === 'inav') return;
+        }
+        loadArduMissionFromFile(wps);
+      }
+      frameMissionOnMap();
+    } catch (e) {
+      errorMsg = $t('mission.importFailed', { values: { error: String(e) } });
+    }
+  }
+
   async function exportFlightsToKflight(flightIds: number[]) {
     if (flightIds.length === 0) return;
     try {
@@ -2458,9 +2496,16 @@
       blackboxImportProgress = event.payload;
     });
     void listen<{ paths: string[] }>('tauri://drag-drop', (event) => {
-      if (activeTab === 'logbook' && event.payload.paths?.length) {
-        importDroppedFiles(event.payload.paths);
+      const paths = event.payload.paths ?? [];
+      if (!paths.length) return;
+      // Mission files import from anywhere (see importDroppedMission); everything else keeps the
+      // logbook-tab gate. `.txt` deliberately stays on the logbook side (SD blackbox collision).
+      const missionFile = paths.find((p) => /\.(mission|plan|waypoints)$/i.test(p));
+      if (missionFile) {
+        void importDroppedMission(missionFile);
+        return;
       }
+      if (activeTab === 'logbook') importDroppedFiles(paths);
     });
     // Home from the FC (MSP_WP 0), pushed once at connect — recovers Home on a mid-flight connect /
     // app restart. The live arm-transition path (Map.svelte) overwrites it on the next arm.

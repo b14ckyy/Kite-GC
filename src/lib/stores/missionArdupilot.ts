@@ -495,6 +495,29 @@ export function parseWaypoints(text: string): ArduWaypoint[] {
 //    Kite-authored missions carry in those fields. NaN cannot cross the Tauri IPC
 //    boundary (JSON has no NaN; the Rust side deserializes plain f32).
 
+/** Which system a .plan targets: `mission.firmwareType` 12 (MAV_AUTOPILOT_PX4) → px4, everything
+ *  else (3 = ArduPilotMega, absent, unparseable) → ardupilot. Both share the mission stack — this
+ *  only steers which family tab the global drag-drop router activates. */
+export function planFirmwareTarget(text: string): 'ardupilot' | 'px4' {
+  try {
+    const fw = (JSON.parse(text) as { mission?: { firmwareType?: number } })?.mission?.firmwareType;
+    return fw === 12 ? 'px4' : 'ardupilot';
+  } catch {
+    return 'ardupilot';
+  }
+}
+
+/** Replace the working mission with waypoints loaded from a file — the shared post-parse sequence
+ *  of every file-import path (panel dialog, global drag-drop): fresh selection, not a library
+ *  mission, fresh undo baseline, FILE provenance. */
+export function loadArduMissionFromFile(wps: ArduWaypoint[]): void {
+  arduMission.set(wps);
+  arduSelectedWpIndex.set(-1);
+  arduLoadedMissionId.set(null);
+  arduClearUndoHistory();
+  markArduMissionSynced('file', wps);
+}
+
 export function parsePlanFile(text: string): ArduWaypoint[] {
   let root: unknown;
   try {

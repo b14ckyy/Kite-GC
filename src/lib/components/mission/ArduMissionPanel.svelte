@@ -21,7 +21,7 @@
     arduUndo, arduRedo, arduCanUndo, arduCanRedo, arduClearUndoHistory,
     arduVehicleClass, setArduVehicleClass,
     MAV_FRAME_GLOBAL, MAV_FRAME_GLOBAL_TERRAIN_ALT,
-    serializeWaypoints, parseWaypoints, parsePlanFile,
+    serializeWaypoints, parseWaypoints, parsePlanFile, loadArduMissionFromFile,
     type ArduWaypoint,
   } from '$lib/stores/missionArdupilot';
   import { onMissionDownloadProgress, onMissionUploadProgress } from '$lib/stores/mission';
@@ -52,7 +52,6 @@
   let currentEditing  = $state<boolean>(get(arduEditMode));
   let currentConn     = $state(get(connection));
   let statusMessage   = $state('');
-  let dragOver        = $state(false);
   let confirmDialog: ReturnType<typeof ConfirmDialog>;
   let missionSaveDialog: ReturnType<typeof MissionSaveDialog>;
   // Auto-clear the transient status line after 10s — persistent state is shown by the flags.
@@ -163,11 +162,7 @@
       if (!path) return;
       const content = await invoke<string>('read_text_file', { path: typeof path === 'string' ? path : path });
       const wps = parseMissionFile(String(path), content);
-      arduMission.set(wps);
-      arduSelectedWpIndex.set(-1);
-      arduLoadedMissionId.set(null); // fresh file → not yet a library mission
-      arduClearUndoHistory(); // loaded mission = fresh undo baseline
-      markArduMissionSynced('file', wps);
+      loadArduMissionFromFile(wps); // fresh selection/undo, FILE provenance, not a library mission
       statusMessage = $t('mission.loaded', { values: { count: wps.length } });
       frameMissionOnMap();
     } catch (e) {
@@ -180,29 +175,9 @@
     return /\.plan$/i.test(name) ? parsePlanFile(content) : parseWaypoints(content);
   }
 
-  function onDragOver(e: DragEvent) { e.preventDefault(); dragOver = true; }
-  function onDragLeave() { dragOver = false; }
-  async function onDrop(e: DragEvent) {
-    e.preventDefault(); dragOver = false;
-    const files = e.dataTransfer?.files;
-    if (!files || files.length === 0) return;
-    const file = files[0];
-    if (!/\.(waypoints|txt|plan)$/i.test(file.name)) {
-      statusMessage = $t('arduMission.onlyWaypointsFiles'); return;
-    }
-    try {
-      const wps = parseMissionFile(file.name, await file.text());
-      arduMission.set(wps);
-      arduSelectedWpIndex.set(-1);
-      arduLoadedMissionId.set(null); // fresh file → not yet a library mission
-      arduClearUndoHistory(); // loaded mission = fresh undo baseline
-      markArduMissionSynced('file', wps);
-      statusMessage = $t('mission.loadedFromFile', { values: { count: wps.length, file: file.name } });
-      frameMissionOnMap();
-    } catch (e) {
-      statusMessage = $t('mission.importFailed', { values: { error: String(e) } });
-    }
-  }
+  // No DOM drop zone here: with Tauri's dragDropEnabled the WebView never receives DOM drop
+  // events — file drops arrive as the native `tauri://drag-drop` event, routed in +page.svelte
+  // (mission files import from anywhere over the app).
 
   /** Auto-name for fresh missions: "New Mission - YYYY-MM-DD HH:MM". */
   function autoMissionName(): string {
@@ -435,7 +410,7 @@
 
 {#snippet body()}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="miss-dropzone" class:drag-over={dragOver} ondragover={onDragOver} ondragleave={onDragLeave} ondrop={onDrop}>
+  <div class="miss-dropzone">
     {#if showPatternPanel}
       {#await import('./SurveyPatternPanel.svelte')}
         <div class="wp-empty">{$t('survey.loading')}</div>
@@ -488,7 +463,6 @@
         </tbody>
       </table>
     {/if}
-    {#if dragOver}<div class="drop-overlay">{$t('arduMission.dropHint')}</div>{/if}
   </div>
 {/snippet}
 
@@ -573,7 +547,6 @@
   .ap-vehicle-select:disabled { opacity: 0.55; cursor: not-allowed; color: #f39c12; }
 
   .miss-dropzone { position: relative; min-height: 100%; }
-  .miss-dropzone.drag-over { outline: 2px dashed #37a8db; outline-offset: -2px; border-radius: 4px; }
 
   .wp-empty { padding: 16px; text-align: center; color: #888; font-size: 13px; }
   .wp-table { width: 100%; border-collapse: collapse; font-size: 12px; }
@@ -614,5 +587,4 @@
   .prov-file { background: #6c7a89; }
   .prov-db { background: #59aa29; }
   .wp-warn { color: #f39c12; margin-left: 3px; cursor: help; }
-  .drop-overlay { position: absolute; inset: 0; background: rgba(55,168,219,0.15); border: 2px dashed #37a8db; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #37a8db; font-size: 13px; font-weight: bold; z-index: 10; pointer-events: none; }
 </style>
