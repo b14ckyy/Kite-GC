@@ -1588,17 +1588,57 @@
 
 
 <h1 id="changelog">Changelog<a class="headerlink" href="#changelog" title="Permanent link">&para;</a></h1>
-<p>Notable, user-facing changes to Kite Ground Control, starting from the <strong>1.0</strong> release.</p>
-<div class="admonition info">
-<p class="admonition-title">Coming with 1.0</p>
-<p>Kite is currently in <strong>public beta</strong>. This page will list released versions and their changes from
-the <strong>1.0 final release</strong> onward. During the beta, follow changes via the
-<a href="https://github.com/b14ckyy/Kite-GC/releases">GitHub releases</a> and the
-<a href="https://github.com/b14ckyy/Kite-GC/commits/master">commit history</a>.</p>
-</div>
-<p>The format follows <a href="https://keepachangelog.com/">Keep a Changelog</a> and the project uses
-<a href="https://semver.org/">Semantic Versioning</a>.</p>
-<!-- Release entries are added here from 1.0 onward, newest first. -->
+<p>What's new in each Kite Ground Control release — the big features up top, the full list of changes
+below. The release you are reading the docs for is expanded; click an older version to unfold it.</p>
+<details class="note" open="open">
+<summary>1.1.0 — in development</summary>
+<p><strong>Highlights</strong></p>
+<details class="info">
+<summary>Kite goes mobile — Android, iPhone and iPad</summary>
+<p>Kite now runs natively on <strong>Android</strong> tablets and phones (USB serial, Bluetooth LE and Wi-Fi
+links, touch-friendly layout, shared storage folders) and on <strong>iPhone / iPad</strong> (native build
+with phone and tablet layouts, touch RC, BLE and Wi-Fi MAVLink — contributed by Sebastian
+Kumor). Features a device can't provide are hidden by capability, so the mobile app stays
+clean instead of half-working. <a href="https://github.com/b14ckyy/Kite-GC/pull/16">#79</a></p>
+</details>
+<details class="info">
+<summary>Native RTSP video client with hardware decode</summary>
+<p>RTSP video no longer needs the external video engine: Kite ships its <strong>own RTSP client</strong> and
+decodes H.264/H.265 with the <strong>operating system's hardware decoder</strong> on Windows, Android and
+Linux — lower latency, a fraction of the CPU load, and rock-solid reconnects. <a href="https://github.com/b14ckyy/Kite-GC/pull/88">#85</a> <a href="https://github.com/b14ckyy/Kite-GC/pull/89">#89</a></p>
+</details>
+<details class="info">
+<summary>Unobstructed fullscreen video</summary>
+<p>Fullscreen video now keeps its exact aspect ratio in a clean box, with a blurred, slowly
+following map as the backdrop instead of black bars — and the floating panels stay on top
+where they belong. <a href="https://github.com/b14ckyy/Kite-GC/pull/90">#90</a></p>
+</details>
+<p><strong>Added</strong></p>
+<ul>
+<li><strong>Android support</strong> — native app with USB serial, Bluetooth LE and Wi-Fi links, touch layout
+  and scoped storage folders. <a href="https://github.com/b14ckyy/Kite-GC/pull/79">#79</a></li>
+<li><strong>iPhone &amp; iPad support</strong> — native iOS/iPadOS build: phone/tablet layout, touch RC, BLE,
+  Wi-Fi MAVLink. Contributed by Sebastian Kumor. <a href="https://github.com/b14ckyy/Kite-GC/pull/16">#16</a></li>
+<li><strong>Native RTSP video client</strong> — Kite's own RTSP client with OS hardware decode (H.264/H.265)
+  on Windows <a href="https://github.com/b14ckyy/Kite-GC/pull/85">#85</a>, Android <a href="https://github.com/b14ckyy/Kite-GC/pull/88">#88</a> and Linux <a href="https://github.com/b14ckyy/Kite-GC/pull/89">#89</a>.</li>
+<li><strong>Unobstructed fullscreen video</strong> — aspect-exact video box with a blurred follow-map
+  backdrop. <a href="https://github.com/b14ckyy/Kite-GC/pull/90">#90</a></li>
+<li><strong>PX4 ULog import</strong> — the logbook imports <code>.ulg</code> flash/SD logs, split into flights like any
+  other log. <a href="https://github.com/b14ckyy/Kite-GC/pull/82">#82</a></li>
+<li><strong>3D buildings</strong> — optional OpenStreetMap building extrusions on the 3D map. <a href="https://github.com/b14ckyy/Kite-GC/pull/48">#48</a></li>
+<li><strong>Automatic database backup</strong> — before a Kite update upgrades the flight database, a full
+  backup is written next to it; Settings shows it with size and a delete button. <a href="https://github.com/b14ckyy/Kite-GC/pull/96">#96</a></li>
+</ul>
+</details>
+<details class="note">
+<summary>1.0.0 — Initial release</summary>
+<p>The first stable release of <strong>Kite Ground Control</strong>: a cross-platform ground station for
+<strong>INAV</strong>, <strong>ArduPilot</strong> and <strong>PX4</strong> — live telemetry over serial, Bluetooth and network links,
+mission planning on 2D and 3D maps, safety subsystems (safe homes, geozones, geofence), a full
+flight logbook with replay, FPV video, radar / airspace awareness and telemetry relaying.</p>
+<p>Everything this version contains is covered by the regular documentation — start with the
+<a href="../getting-started/quick-tour/">quick tour</a> or the <a href="https://github.com/b14ckyy/Kite-GC/releases">GitHub release</a>.</p>
+</details>
 
 
 
