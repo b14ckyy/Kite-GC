@@ -1195,7 +1195,6 @@
     "statClimbDescent": "Общо изкачване/спускане по отсечките",
     "statTime": "Време на полет (от крейсерските скорости на точката)",
     "infiniteRepeatTip": "Мисията се повтаря завинаги (безкраен JUMP цикъл) — показаното разстояние/време са за едно пълно преминаване",
-    "dropHint": "Пуснете .mission файл тук",
     "notConnected": "Не е свързан",
     "downloaded": "Изтеглени {count} WPs",
     "downloading": "Изтегляне на маршрутни точки…",
@@ -1216,8 +1215,6 @@
     "openMissionTitle": "Отворена мисия",
     "loaded": "Заредени {count} WPs",
     "openFailed": "Неуспешно отваряне: {error}",
-    "onlyMissionFiles": "Поддържат се само .mission файлове",
-    "invalidMissionFile": "Невалиден файл на мисията",
     "loadedFromFile": "Заредени {count} WP от {file}",
     "importFailed": "Неуспешно импортиране: {error}",
     "missionCleared": "Мисията е разрешена",
@@ -1257,8 +1254,6 @@
     "created": "Създаден",
     "linkedFlights": "Полети с тази мисия",
     "noFlights": "Няма свързани полети",
-    "dropHint": "Пуснете файл .mission или .waypoints за импортиране",
-    "onlyMission": "Могат да се импортират само .mission и .waypoints файлове",
     "systemLocked": "Свързан с различен автопилот — прекъснете връзката, за да заредите тази мисия",
     "filterByFormat": "Филтрирай по формат на мисията",
     "filterAll": "Всички",
@@ -1653,9 +1648,7 @@
     "throttle": "Газ (−1=запазване)",
     "delay": "Закъснение",
     "downloading": "Изтегля се мисия от FC…",
-    "uploading": "Качване на мисия във FC…",
-    "dropHint": "Пуснете файл .waypoints или .plan тук",
-    "onlyWaypointsFiles": "Поддържат се само .waypoints и .plan файлове"
+    "uploading": "Качване на мисия във FC…"
   },
   "wpAction": {
     "waypoint": "Маршрутна точка",
