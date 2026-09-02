@@ -21,7 +21,7 @@
     arduUndo, arduRedo, arduCanUndo, arduCanRedo, arduClearUndoHistory,
     arduVehicleClass, setArduVehicleClass,
     MAV_FRAME_GLOBAL, MAV_FRAME_GLOBAL_TERRAIN_ALT,
-    serializeWaypoints, parseWaypoints,
+    serializeWaypoints, parseWaypoints, parsePlanFile,
     type ArduWaypoint,
   } from '$lib/stores/missionArdupilot';
   import { onMissionDownloadProgress, onMissionUploadProgress } from '$lib/stores/mission';
@@ -156,11 +156,13 @@
       const path = await open({
         title: $t('mission.openMissionTitle'),
         multiple: false,
-        filters: [{ name: 'Waypoints', extensions: anyCase(['waypoints', 'txt']) }],
+        // .plan = QGroundControl's JSON plan (the only format QGC saves — the PX4 ecosystem's
+        // mission files); .waypoints/.txt = the QGC WPL 110 text format (Mission Planner et al).
+        filters: [{ name: 'Missions', extensions: anyCase(['waypoints', 'txt', 'plan']) }],
       });
       if (!path) return;
       const content = await invoke<string>('read_text_file', { path: typeof path === 'string' ? path : path });
-      const wps = parseWaypoints(content);
+      const wps = parseMissionFile(String(path), content);
       arduMission.set(wps);
       arduSelectedWpIndex.set(-1);
       arduLoadedMissionId.set(null); // fresh file → not yet a library mission
@@ -173,6 +175,11 @@
     }
   }
 
+  /** Route by extension: .plan → the QGC JSON plan parser, everything else → QGC WPL text. */
+  function parseMissionFile(name: string, content: string): ArduWaypoint[] {
+    return /\.plan$/i.test(name) ? parsePlanFile(content) : parseWaypoints(content);
+  }
+
   function onDragOver(e: DragEvent) { e.preventDefault(); dragOver = true; }
   function onDragLeave() { dragOver = false; }
   async function onDrop(e: DragEvent) {
@@ -180,11 +187,11 @@
     const files = e.dataTransfer?.files;
     if (!files || files.length === 0) return;
     const file = files[0];
-    if (!file.name.endsWith('.waypoints') && !file.name.endsWith('.txt')) {
+    if (!/\.(waypoints|txt|plan)$/i.test(file.name)) {
       statusMessage = $t('arduMission.onlyWaypointsFiles'); return;
     }
     try {
-      const wps = parseWaypoints(await file.text());
+      const wps = parseMissionFile(file.name, await file.text());
       arduMission.set(wps);
       arduSelectedWpIndex.set(-1);
       arduLoadedMissionId.set(null); // fresh file → not yet a library mission

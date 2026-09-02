@@ -1657,8 +1657,8 @@
     "delay": "Verzögerung",
     "downloading": "Mission vom FC wird heruntergeladen…",
     "uploading": "Mission wird zum FC hochgeladen…",
-    "dropHint": ".waypoints-Datei hier ablegen",
-    "onlyWaypointsFiles": "Nur .waypoints-Dateien unterstützt"
+    "dropHint": ".waypoints- oder .plan-Datei hier ablegen",
+    "onlyWaypointsFiles": "Nur .waypoints- und .plan-Dateien unterstützt"
   },
   "wpAction": {
     "waypoint": "Wegpunkt",

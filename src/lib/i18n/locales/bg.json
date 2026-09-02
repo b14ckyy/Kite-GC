@@ -1654,8 +1654,8 @@
     "delay": "Закъснение",
     "downloading": "Изтегля се мисия от FC…",
     "uploading": "Качване на мисия във FC…",
-    "dropHint": "Пуснете файла .waypoints тук",
-    "onlyWaypointsFiles": "Поддържат се само .waypoints файлове"
+    "dropHint": "Пуснете файл .waypoints или .plan тук",
+    "onlyWaypointsFiles": "Поддържат се само .waypoints и .plan файлове"
   },
   "wpAction": {
     "waypoint": "Маршрутна точка",

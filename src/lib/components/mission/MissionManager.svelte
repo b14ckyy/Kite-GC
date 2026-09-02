@@ -27,7 +27,7 @@
   } from '$lib/stores/mission';
   import {
     arduMission, arduSelectedWpIndex, arduLoadedMissionId, markArduMissionSynced, arduClearUndoHistory,
-    parseWaypoints, type ArduWaypoint,
+    parseWaypoints, parsePlanFile, type ArduWaypoint,
   } from '$lib/stores/missionArdupilot';
   import { frameMissionOnMap } from '$lib/stores/mapCamera';
   import {
@@ -363,11 +363,15 @@
 
   async function handleImportButton() {
     try {
-      const path = await open({ title: $t('missionMgr.openTitle'), multiple: false, filters: [{ name: 'Mission', extensions: anyCase(['mission', 'waypoints', 'txt']) }] });
+      const path = await open({ title: $t('missionMgr.openTitle'), multiple: false, filters: [{ name: 'Mission', extensions: anyCase(['mission', 'waypoints', 'txt', 'plan']) }] });
       if (!path || typeof path !== 'string') return;
       const stem = path.replace(/^.*[\\/]/, '').replace(/\.[^.]+$/, '');
       const lower = path.toLowerCase();
-      if (lower.endsWith('.waypoints') || lower.endsWith('.txt')) {
+      if (lower.endsWith('.plan')) {
+        // QGroundControl JSON plan (the PX4 ecosystem's mission file) → the ArduPilot/PX4 stack.
+        const text = await invoke<string>('read_text_file', { path });
+        await importArduMission(parsePlanFile(text), stem || autoName());
+      } else if (lower.endsWith('.waypoints') || lower.endsWith('.txt')) {
         const text = await invoke<string>('read_text_file', { path });
         await importArduMission(parseWaypoints(text), stem || autoName());
       } else {
@@ -393,13 +397,15 @@
     dragOver = false;
     const file = e.dataTransfer?.files?.[0];
     const name = file?.name.toLowerCase() ?? '';
-    if (!file || !(name.endsWith('.mission') || name.endsWith('.waypoints') || name.endsWith('.txt'))) {
+    if (!file || !(name.endsWith('.mission') || name.endsWith('.waypoints') || name.endsWith('.txt') || name.endsWith('.plan'))) {
       statusMessage = $t('missionMgr.onlyMission'); return;
     }
     try {
       const text = await file.text();
       const stem = file.name.replace(/\.[^.]+$/, '');
-      if (name.endsWith('.waypoints') || name.endsWith('.txt')) {
+      if (name.endsWith('.plan')) {
+        await importArduMission(parsePlanFile(text), stem || autoName());
+      } else if (name.endsWith('.waypoints') || name.endsWith('.txt')) {
         await importArduMission(parseWaypoints(text), stem || autoName());
       } else {
         const m = await missionImportXml(text);

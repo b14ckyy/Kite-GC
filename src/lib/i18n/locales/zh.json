@@ -1654,8 +1654,8 @@
     "delay": "延迟",
     "downloading": "正在从飞控下载任务…",
     "uploading": "正在上传任务到飞控…",
-    "dropHint": "将 .waypoints 文件拖放到此处",
-    "onlyWaypointsFiles": "仅支持 .waypoints 文件"
+    "dropHint": "将 .waypoints 或 .plan 文件拖放到此处",
+    "onlyWaypointsFiles": "仅支持 .waypoints 和 .plan 文件"
   },
   "wpAction": {
     "waypoint": "航点",
