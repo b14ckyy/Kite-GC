@@ -268,6 +268,35 @@
   function handleUiScaleChange(event: Event) {
     onPatch({ uiScale: Number((event.target as HTMLSelectElement).value) });
   }
+
+  // ── Pre-migration DB backup (Dev-Docs active/DB_MIGRATIONS.md) ──────
+  // Exactly ONE backup exists (created automatically before a schema upgrade, next to the DB
+  // file — multi-GB with blackbox logs, hence no rotation). Shown with its size + a delete
+  // button; anyone wanting a permanent copy moves the file elsewhere themselves.
+  let dbBackup = $state<{ path: string; size_bytes: number } | null>(null);
+  async function loadDbBackup(): Promise<void> {
+    try {
+      dbBackup = await invoke<{ path: string; size_bytes: number } | null>('flightlog_backup_info', {
+        dbPath: flightLogDbPath,
+      });
+    } catch {
+      dbBackup = null;
+    }
+  }
+  void loadDbBackup();
+  async function deleteDbBackup(): Promise<void> {
+    try {
+      await invoke('flightlog_backup_delete', { dbPath: flightLogDbPath });
+    } catch {
+      /* refresh below shows the truth either way */
+    }
+    await loadDbBackup();
+  }
+  function fmtBackupSize(bytes: number): string {
+    return bytes >= 1024 ** 3
+      ? `${(bytes / 1024 ** 3).toFixed(2)} GB`
+      : `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`;
+  }
   function handleMapProviderChange(event: Event) {
     onPatch({ mapProvider: (event.target as HTMLSelectElement).value });
   }
@@ -650,6 +679,16 @@
         <span class="s-label" title={$t('settings.compactDbHint')}>{$t('settings.compactDb')}</span>
         <Button variant="standard" size="sm" onclick={onCompactDb} title={$t('settings.compactDbHint')}>{$t('settings.compactDbBtn')}</Button>
       </div>
+      {#if dbBackup}
+        <div class="s-row" title={dbBackup.path}>
+          <span class="s-label" title={$t('settings.dbBackupHint')}>
+            {$t('settings.dbBackup')} · {fmtBackupSize(dbBackup.size_bytes)}
+          </span>
+          <Button variant="standard" size="sm" onclick={deleteDbBackup} title={$t('settings.dbBackupHint')}>
+            {$t('settings.dbBackupDelete')}
+          </Button>
+        </div>
+      {/if}
       <div class="s-row s-row-stack">
         <span class="s-label">{$t('settings.rawLogPath')}</span>
         <div class="path-picker-row">

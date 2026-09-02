@@ -13,15 +13,44 @@ use crate::flightlog::types::{
     VehicleAggregate, VehicleFile, VehicleInput,
 };
 
+/// Whether the app runs in portable mode (`.portable` marker next to the executable).
+fn portable_mode() -> bool {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.join(".portable").exists()))
+        .unwrap_or(false)
+}
+
 /// Resolve the database path and open a connection.
 /// Uses the provided custom path, or falls back to defaults.
 fn open_db(custom_path: &str) -> Result<rusqlite::Connection, String> {
-    let portable = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|p| p.join(".portable").exists()))
-        .unwrap_or(false);
-    let path = db::resolve_db_path(custom_path, portable);
+    let path = db::resolve_db_path(custom_path, portable_mode());
     db::open_database(&path).map_err(|e| format!("Database error: {}", e))
+}
+
+// ── Pre-migration backup (Settings → maintenance row; Dev-Docs active/DB_MIGRATIONS.md) ──
+
+/// Metadata of the single pre-migration backup file, or absent when none exists.
+#[derive(serde::Serialize)]
+pub struct DbBackupInfo {
+    pub path: String,
+    pub size_bytes: u64,
+}
+
+#[tauri::command]
+pub fn flightlog_backup_info(db_path: Option<String>) -> Option<DbBackupInfo> {
+    let backup =
+        db::backup_path_for(&db::resolve_db_path(&db_path.unwrap_or_default(), portable_mode()));
+    let meta = std::fs::metadata(&backup).ok()?;
+    Some(DbBackupInfo { path: backup.to_string_lossy().into_owned(), size_bytes: meta.len() })
+}
+
+/// Delete the pre-migration backup (explicit user action — it can be multi-GB).
+#[tauri::command]
+pub fn flightlog_backup_delete(db_path: Option<String>) -> Result<(), String> {
+    let backup =
+        db::backup_path_for(&db::resolve_db_path(&db_path.unwrap_or_default(), portable_mode()));
+    std::fs::remove_file(&backup).map_err(|e| format!("could not delete {}: {e}", backup.display()))
 }
 
 #[inline]
