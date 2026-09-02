@@ -2380,7 +2380,11 @@ the aircraft will fly.</p>
 <h2 id="files-the-mission-library">Files &amp; the mission library<a class="headerlink" href="#files-the-mission-library" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Save / load files</strong> — INAV uses <code>.mission</code> (MultiWii XML); ArduPilot and PX4 use <code>.waypoints</code>
-  (the QGroundControl-compatible plain-text format). You can also drag a file onto the map.</li>
+  (the QGroundControl-compatible plain-text format). Kite also <strong>imports QGroundControl <code>.plan</code>
+  files</strong> (the only format modern QGC saves, so the usual hand-off in PX4 workflows) — mission
+  waypoints only: QGC pattern items (Survey, Corridor Scan, …) can't be expanded outside QGC and are
+  refused with a clear message, and a plan's embedded geofence/rally sections are ignored. Saving
+  from Kite produces <code>.waypoints</code>, which QGC can open. You can also drag a file onto the map.</li>
 <li><strong>Provenance badges</strong> tell you where the loaded plan came from — <strong>FC</strong> (downloaded), <strong>FILE</strong> (opened
   from disk) or <strong>DB</strong> (from the library) — plus a <strong>Modified</strong> badge once you've edited it. Shown for
   all three stacks.</li>
