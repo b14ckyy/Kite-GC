@@ -679,6 +679,8 @@
     "mirror": "水平镜像",
     "mirrorNativeAndroid": "在 Android 上使用硬件视频解码时不可用——解码后的画面无法镜像。MJPEG 和摄像头源可正常镜像。",
     "rotate180": "旋转 180°（倒装相机）",
+    "unobstructed": "无遮挡全屏",
+    "unobstructedHint": "全屏（与地图互换）时视频会缩小，使已放置小部件的面板和导航栏不会遮挡画面。空面板会释放其边缘。",
     "codec": "编解码器",
     "floatingWindow": "浮动窗口",
     "videoWindow": "视频窗口（分离）",

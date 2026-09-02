@@ -682,6 +682,8 @@
     "mirror": "Mirror horizontally",
     "mirrorNativeAndroid": "Not available with hardware video decoding on Android — the decoded picture cannot be mirrored there. MJPEG and camera sources mirror normally.",
     "rotate180": "Rotate 180° (upside-down camera)",
+    "unobstructed": "Unobstructed fullscreen",
+    "unobstructedHint": "In fullscreen (map swap) the video shrinks so occupied widget panels and the nav rail don't cover the picture. Empty panels release their edge.",
     "codec": "Codec",
     "floatingWindow": "Floating window",
     "videoWindow": "Video window (detach)",

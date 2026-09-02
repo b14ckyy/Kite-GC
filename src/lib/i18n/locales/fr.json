@@ -654,6 +654,8 @@
     "mirror": "Miroir horizontal",
     "mirrorNativeAndroid": "Indisponible avec le décodage vidéo matériel sur Android — l'image décodée ne peut pas y être inversée. Les sources MJPEG et caméra s'inversent normalement.",
     "rotate180": "Pivoter de 180° (caméra tête en bas)",
+    "unobstructed": "Plein écran dégagé",
+    "unobstructedHint": "En plein écran (échange avec la carte), la vidéo est réduite pour que les panneaux de widgets occupés et la barre de navigation ne couvrent pas l'image. Les panneaux vides libèrent leur bord.",
     "codec": "Codec",
     "floatingWindow": "Fenêtre flottante",
     "videoWindow": "Fenêtre vidéo (détacher)",

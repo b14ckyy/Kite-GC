@@ -142,6 +142,10 @@ export interface VideoState {
   floatY: number;
   /** Window height as a fraction of the viewport height (0.1…0.3); width = height·aspect. */
   floatHeightFrac: number;
+  /** Unobstructed fullscreen: the map-swap video shrinks so occupied widget panels and the
+   *  nav rail stay clear of the picture (an empty/hidden panel releases its edge). Off =
+   *  the video fills the whole map zone as before. Persisted. */
+  unobstructedFullscreen: boolean;
   /** Where the single map instance currently lives (transient, not persisted). `main` = the normal
    *  full-screen map; `floating`/`widget` = the map jumped into that video surface (which double-
    *  clicked), and every other surface shows video. Double-clicking a video moves the map there. */
@@ -182,6 +186,7 @@ interface VideoPrefs {
   floatX: number;
   floatY: number;
   floatHeightFrac: number;
+  unobstructedFullscreen: boolean;
 }
 
 const PREF_DEFAULTS: VideoPrefs = {
@@ -209,6 +214,7 @@ const PREF_DEFAULTS: VideoPrefs = {
   floatX: 16,
   floatY: 80,
   floatHeightFrac: 0.2,
+  unobstructedFullscreen: false,
 };
 
 function loadPrefs(): VideoPrefs {
@@ -277,6 +283,7 @@ function savePrefs(): void {
         floatX: s.floatX,
         floatY: s.floatY,
         floatHeightFrac: s.floatHeightFrac,
+        unobstructedFullscreen: s.unobstructedFullscreen,
       }),
     );
   } catch {
@@ -333,6 +340,7 @@ const INITIAL: VideoState = {
   floatX: boot.floatX,
   floatY: boot.floatY,
   floatHeightFrac: boot.floatHeightFrac,
+  unobstructedFullscreen: boot.unobstructedFullscreen,
   mapLocation: 'main',
   widgetRect: null,
 };
@@ -1779,6 +1787,12 @@ export function setVideoRotate180(rotate180: boolean): void {
   patch({ rotate180 });
   savePrefs();
   syncNativeSinkOrient();
+}
+
+/** Unobstructed fullscreen on/off — the map-swap video's layout reacts via the store. */
+export function setUnobstructedFullscreen(on: boolean): void {
+  patch({ unobstructedFullscreen: on });
+  savePrefs();
 }
 
 /** Push the current mirror/rotation onto the native decode sink (no-op without one —
