@@ -12,12 +12,12 @@ below. The release you are reading the docs for is expanded; click an older vers
         links, touch-friendly layout, shared storage folders) and on **iPhone / iPad** (native build
         with phone and tablet layouts, touch RC, BLE and Wi-Fi MAVLink — contributed by Sebastian
         Kumor). Features a device can't provide are hidden by capability, so the mobile app stays
-        clean instead of half-working. [#79] [#16]
+        clean instead of half-working. [#79] · [#16]
 
     ??? info "Native RTSP video client with hardware decode"
         RTSP video no longer needs the external video engine: Kite ships its **own RTSP client** and
         decodes H.264/H.265 with the **operating system's hardware decoder** on Windows, Android and
-        Linux — lower latency, a fraction of the CPU load, and rock-solid reconnects. [#85] [#88] [#89]
+        Linux — lower latency, a fraction of the CPU load, and rock-solid reconnects. [#85] · [#88] · [#89]
 
     ??? info "Unobstructed fullscreen video"
         Fullscreen video now keeps its exact aspect ratio in a clean box, with a blurred, slowly
@@ -30,7 +30,7 @@ below. The release you are reading the docs for is expanded; click an older vers
         rate, with new **slow-motion speeds** (0.25× / 0.5×) to study a manoeuvre frame by frame.
         And you no longer need to import a log to look at it — **drop it on the map** (or use the
         Logbook's new **Open** button) while disconnected, replay it exactly like a logbook flight,
-        and import it for real only if you want to keep it. [#97] [#99]
+        and import it for real only if you want to keep it. [#97] · [#99]
 
     **Added**
 
