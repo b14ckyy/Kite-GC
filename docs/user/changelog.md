@@ -52,6 +52,12 @@ below. The release you are reading the docs for is expanded; click an older vers
     - **Open a log without importing it** — drop an onboard log on the map or use the Logbook's
       Open button to replay it straight from the file; import it afterwards if you like. [#99]
 
+    **Improved**
+
+    - **Replay player folds away while playing** — a slim strip (craft, time, progress) replaces
+      the panel; hover or tap the area to unfold it, paused = always open. Clicking anywhere
+      outside the Logbook collapses it to its info card. [#100]
+
 ??? note "1.0.0 — Initial release"
 
     The first stable release of **Kite Ground Control**: a cross-platform ground station for
@@ -73,3 +79,4 @@ below. The release you are reading the docs for is expanded; click an older vers
 [#96]: https://github.com/b14ckyy/Kite-GC/pull/96
 [#97]: https://github.com/b14ckyy/Kite-GC/pull/97
 [#99]: https://github.com/b14ckyy/Kite-GC/pull/99
+[#100]: https://github.com/b14ckyy/Kite-GC/pull/100
