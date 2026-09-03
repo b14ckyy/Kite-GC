@@ -1108,7 +1108,10 @@
     "off": "Off",
     "editLayout": "Edit widget layout",
     "exitEdit": "Exit edit mode",
-    "resize": "Resize widget"
+    "resize": "Resize widget",
+    "phonePage": "Page {n}",
+    "phoneNoSpaceTitle": "No free slot",
+    "phoneNoSpace": "The widget grid is full on both pages. Shrink or switch off another widget first."
   },
   "widgetLabels": {
     "spd": "SPD",

@@ -1102,7 +1102,10 @@
     "off": "关闭",
     "editLayout": "编辑小部件布局",
     "exitEdit": "退出编辑模式",
-    "resize": "调整小组件大小"
+    "resize": "调整小组件大小",
+    "phonePage": "第 {n} 页",
+    "phoneNoSpaceTitle": "没有空位",
+    "phoneNoSpace": "两页的小组件网格均已满。请先缩小或关闭另一个小组件。"
   },
   "widgetLabels": {
     "spd": "速度",

@@ -1041,7 +1041,10 @@
     "off": "Off",
     "editLayout": "Modifier la disposition des widgets",
     "exitEdit": "Quitter le mode édition",
-    "resize": "Redimensionner le widget"
+    "resize": "Redimensionner le widget",
+    "phonePage": "Page {n}",
+    "phoneNoSpaceTitle": "Aucun emplacement libre",
+    "phoneNoSpace": "La grille de widgets est pleine sur les deux pages. Réduisez ou désactivez d'abord un autre widget."
   },
   "widgetLabels": {
     "spd": "SPD",

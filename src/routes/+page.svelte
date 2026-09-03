@@ -68,6 +68,8 @@
   import { refreshSerialPorts, connectFC, disconnectFC, startBleScan, stopBleScan, startBleDeviceListener, stopBleDeviceListener, clearBleDevices } from '$lib/controllers/connectionController';
   import * as logbookCtrl from '$lib/controllers/logbookController';
   import * as widgetCtrl from '$lib/controllers/widgetController';
+  import * as phoneCtrl from '$lib/controllers/phoneWidgetController';
+  import type { PhoneWidgetsConfig } from '$lib/controllers/phoneWidgetController';
   import { isValidGpsCoordinate, isArmed } from '$lib/helpers/telemetry';
   import { anyCase } from '$lib/helpers/fileFilters';
   import { liveTrack, appendLivePoint, clearLiveTrack } from '$lib/stores/liveTrack';
@@ -938,6 +940,11 @@
   };
   // Sanitised: a stored layout may still name a widget the registry no longer has.
   panels = widgetCtrl.sanitizePanels(saved.panels ?? defaultPanels);
+  if (phoneUi) {
+    // Same for the phone grid: registry drift, sizes, overflow → deactivate.
+    const normalized = phoneCtrl.normalizePhoneWidgets(saved.phoneWidgets ?? phoneCtrl.DEFAULT_PHONE_WIDGETS);
+    if (normalized !== saved.phoneWidgets) settings.patch({ phoneWidgets: normalized });
+  }
 
   // ── Radar (foreign-vehicle tracking) — independent of the main connection ──
   /** Free-look: cap the query centre's offset from the camera nadir (and the radius) at 150 km. */
@@ -2545,16 +2552,36 @@
     settings.patch({ panels });
   }
 
+  // ── Phone widget grid (Dev-Docs active/PHONE_UI.md D13) — its own config, its own rules ──
+  const phoneWidgets = $derived($settings.phoneWidgets);
+  function patchPhoneWidgets(next: PhoneWidgetsConfig) {
+    if (next !== $settings.phoneWidgets) settings.patch({ phoneWidgets: next });
+  }
+
   function toggleWidget(widgetId: string) {
+    if (phoneUi) {
+      const next = phoneCtrl.togglePhoneWidget(phoneWidgets, widgetId);
+      if (next === null) {
+        void showInfo($t('widgets.phoneNoSpaceTitle'), $t('widgets.phoneNoSpace'));
+        return;
+      }
+      patchPhoneWidgets(next);
+      return;
+    }
     panels = widgetCtrl.toggleWidgetVisibility(panels, widgetId);
     settings.patch({ panels });
   }
 
   function isWidgetActive(widgetId: string): boolean {
+    if (phoneUi) return phoneCtrl.isPhoneWidgetActive(phoneWidgets, widgetId);
     return widgetCtrl.isWidgetActive(panels, widgetId);
   }
 
   function getWidgetPanelLabel(widgetId: string): string {
+    if (phoneUi) {
+      const page = phoneCtrl.phoneWidgetPage(phoneWidgets, widgetId);
+      return page == null ? $t('widgets.off') : $t('widgets.phonePage', { values: { n: page + 1 } });
+    }
     const panel = widgetCtrl.getWidgetPanel(panels, widgetId);
     if (panel === 'bottom') return $t('widgets.bottom');
     if (panel === 'right') return $t('widgets.right');
@@ -3271,7 +3298,7 @@
     />
   </div>
   <div class="zone-phone-widgets">
-    <PhoneWidgetPanel bind:widthPx={phonePanelW} />
+    <PhoneWidgetPanel config={phoneWidgets} {telem} {interfaceSettings} bind:widthPx={phonePanelW} />
   </div>
   <div class="phone-strip">
     <PhoneStatusStrip
@@ -4149,7 +4176,11 @@
      width the panel reports (--phone-panel-w). No toolbar, no docks, no status bar. Declared
      after the is-mobile rules so it wins at equal specificity. */
   :global(html.is-phone) .app {
-    grid-template-rows: 1fr;
+    /* minmax(0, 1fr): a grid row's default min-height is its CONTENT — the widget column's
+       two pages are 2× the panel height, so a plain 1fr row grew with them, the panel measured
+       the taller row, the slot grew, the pages grew … (measured: slot 419 840 px, the screen
+       flickering). The row must be the viewport, never the content. */
+    grid-template-rows: minmax(0, 1fr);
     grid-template-columns: 1fr var(--phone-panel-w, 0px);
     grid-template-areas: "main phone-widgets";
   }
@@ -4157,6 +4188,9 @@
     grid-area: phone-widgets;
     z-index: 100;
     min-width: 0;
+    min-height: 0;
+    height: 100%;
+    overflow: hidden;
     pointer-events: none;
   }
   .zone-phone-widgets > :global(*) {
