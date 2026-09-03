@@ -244,6 +244,21 @@
     width: calc(100% - 62px - var(--grid-side-width) - 54px - 6px);
     height: max(20vh, 160px);
   }
+  /* Phone (PHONE_UI.md): no toolbar / status bar / side dock — the fullscreen panel spans from the
+     top safe inset to the bottom one and from the rail to the widget column. The 62px desktop
+     inset left a band at the bottom (the space the status bar used to take). */
+  :global(html.is-phone) .ps-fullscreen,
+  :global(html.is-phone) .ps-wide-compact {
+    top: calc(8px + var(--safe-top, 0px));
+    left: calc(62px + var(--safe-left, 0px));
+  }
+  :global(html.is-phone) .ps-fullscreen {
+    width: calc(100% - 62px - var(--safe-left, 0px) - var(--phone-panel-w, 0px) - 8px);
+    height: calc(100% - 16px - var(--safe-top, 0px) - var(--safe-bottom, 0px));
+  }
+  :global(html.is-phone) .ps-wide-compact {
+    width: calc(100% - 62px - var(--safe-left, 0px) - var(--phone-panel-w, 0px) - 8px);
+  }
 
   /* ── Columns (compact = 1, advanced = 1:2; right wider for previews/maps) ── */
   .ps-col {
