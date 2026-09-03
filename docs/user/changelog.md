@@ -14,6 +14,12 @@ below. The release you are reading the docs for is expanded; click an older vers
         Kumor). Features a device can't provide are hidden by capability, so the mobile app stays
         clean instead of half-working. [#79] · [#16]
 
+        **Phones got their own interface.** In landscape the map fills the whole screen: no bars, a
+        chain-link button opens the connection pop-out, and the instruments live in a frosted-glass
+        **widget column** on the right edge with two swipeable pages — the map keeps running
+        underneath it. Long-press a widget to rearrange or resize it; the others shift live to show
+        where they will land. Pinch to zoom, 2D/3D and follow next to the column. [#102]
+
     ??? info "Native RTSP video client with hardware decode"
         RTSP video no longer needs the external video engine: Kite ships its **own RTSP client** and
         decodes H.264/H.265 with the **operating system's hardware decoder** on Windows, Android and
@@ -63,6 +69,8 @@ below. The release you are reading the docs for is expanded; click an older vers
       Video, switched with a corner button in edit mode; docks adapt to their largest widget. [#101]
     - **Raw telemetry view** — the **≡ Raw** button next to Relay lists every telemetry value with
       its raw unit; replaces the Raw Telemetry widget. [#101]
+    - **Phone layout** — landscape interface for phones: full-screen map, connection pop-out,
+      widget column with two pages and long-press editing. [#102]
 
     **Improved**
 
@@ -71,6 +79,12 @@ below. The release you are reading the docs for is expanded; click an older vers
       outside the Logbook collapses it to its info card. [#100]
     - **Live AGL projected flight line is smoother** — the glide path is low-pass filtered instead
       of following every vario wobble; compass and horizon now share the widgets' blurred glass. [#101]
+    - **Park a panel with a second click** — clicking the active tool's rail icon again slides the
+      panel off the map without losing its state (a mission stays in edit mode); click once more to
+      bring it back. [#102]
+    - **Replay player is narrower** — the times moved under the buttons, which now share the full
+      width. [#102]
+    - **Android launcher icon** fills its circle instead of floating small in it. [#102]
 
 ??? note "1.0.0 — Initial release"
 
@@ -95,3 +109,4 @@ below. The release you are reading the docs for is expanded; click an older vers
 [#99]: https://github.com/b14ckyy/Kite-GC/pull/99
 [#100]: https://github.com/b14ckyy/Kite-GC/pull/100
 [#101]: https://github.com/b14ckyy/Kite-GC/pull/101
+[#102]: https://github.com/b14ckyy/Kite-GC/pull/102
