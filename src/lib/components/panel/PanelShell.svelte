@@ -133,8 +133,15 @@
        (Chromium 129+ / WebView2) lets width/height animate even to/from the `info` variant's
        intrinsic `max-content` / `auto` sizes. */
     interpolate-size: allow-keywords;
-    transition: width 0.25s ease, height 0.25s ease, top 0.25s ease;
+    transition: width 0.25s ease, height 0.25s ease, top 0.25s ease, transform 0.25s ease, opacity 0.25s ease;
     animation: ps-in 0.18s ease-out;
+  }
+  /* Parked: the rail's active button was clicked again — the panel slides out to the left with
+     its state intact (+page sets .panels-hidden on the host); the next click slides it back. */
+  :global(.panels-hidden) .ps {
+    transform: translateX(calc(-100% - 80px));
+    opacity: 0;
+    pointer-events: none;
   }
 
   /* Bounding height shared by compact/advanced (and as a cap for info): full panel area,

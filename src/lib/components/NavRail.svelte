@@ -15,12 +15,15 @@
   let {
     open,
     activeTab,
+    activeHidden = false,
     tabs,
     onToggle,
     onSelectTab,
   }: {
     open: boolean;
     activeTab: string;
+    /** The active panel is slid out of view (re-click of its button) — shown dimmed. */
+    activeHidden?: boolean;
     tabs: Tab[];
     onToggle: () => void;
     onSelectTab: (tabId: string) => void;
@@ -47,6 +50,7 @@
           <button
             class="tab-btn"
             class:active={activeTab === tab.id}
+            class:hidden-panel={activeTab === tab.id && activeHidden}
             onclick={() => onSelectTab(tab.id)}
             title={tab.label()}
           >
@@ -211,6 +215,11 @@
     background: rgba(0, 0, 0, 0.5);
     border-color: #37a8db;
     color: #37a8db;
+  }
+  /* Active but slid out of view: still the selected tab, just parked. */
+  .tab-btn.active.hidden-panel {
+    border-style: dashed;
+    color: rgba(55, 168, 219, 0.6);
   }
 
   .tab-icon {

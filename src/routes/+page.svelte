@@ -406,6 +406,8 @@
   let errorMsg = $state("");
   let navPanelOpen = $state(false);
   let activeTab = $state("uav-info");
+  /** The active panel is slid out of view (state intact) — re-click of its rail button. */
+  let panelHidden = $state(false);
   // Telemetry Relay dropdown (under the connection bar).
   let relayPanelOpen = $state(false);
 
@@ -1123,6 +1125,7 @@
 
   function toggleNavPanel() {
     navPanelOpen = !navPanelOpen;
+    panelHidden = false;
     // The X hides all panels — including the terrain overlay
     if (!navPanelOpen) {
       editMode.set(false);
@@ -1216,10 +1219,18 @@
   }
 
   function selectTab(tabId: string) {
+    // Re-clicking the ACTIVE tab's button hides its panel without touching its state (the mission
+    // edit mode stays armed, a half-typed form survives): the panel slides out to the left and the
+    // map gets the whole screen; the next click brings it back. Only switching to another tab or
+    // closing the rail (the hamburger X) deactivates as before. Same for the terrain overlay.
+    const isActive = terrainOpen ? tabId === 'terrain' : tabId === activeTab;
+    if (navPanelOpen && isActive) {
+      panelHidden = !panelHidden;
+      setTimeout(() => window.dispatchEvent(new Event("resize")), 320);
+      return;
+    }
+    panelHidden = false;
     // Terrain Analysis is a full-width overlay shown in place of the panel content.
-    // Like every other nav-rail button it only ever OPENS/selects (re-clicking the active
-    // button does not close it) — closing happens by closing the whole nav rail (the
-    // hamburger X) or by selecting another tab.
     if (tabId === 'terrain') {
       patchTerrainAnalysis({ open: true });
       return;
@@ -3238,7 +3249,7 @@
   <!-- --toast-dock-inset = the open left-docked panel's right edge (0 when none); the system-message
        toasts read it to centre in the free area beside the panel (issue #10). The radar banner ignores
        it and stays frame-centred + on top. -->
-  <div class="app-toasts" style:--toast-dock-inset="{$panelDockRight}px">
+  <div class="app-toasts" style:--toast-dock-inset="{panelHidden ? 0 : $panelDockRight}px">
     <!-- Conflict-alert banner (renders nothing when idle). -->
     <RadarAlertBanner {interfaceSettings} />
     <!-- FC system messages (MAVLink STATUSTEXT) as top-edge toasts (renders nothing when idle). -->
@@ -3473,6 +3484,7 @@
   <NavRail
     open={navPanelOpen}
     activeTab={railActiveTab}
+    activeHidden={panelHidden}
     tabs={railTabs}
     onToggle={toggleNavPanel}
     onSelectTab={selectTab}
@@ -3581,6 +3593,7 @@
   <div class="ui-scale panels-layer">
     <div
       class="panels-host"
+      class:panels-hidden={panelHidden}
       style:--grid-bottom-height={gridBottomHeight}
       style:--grid-side-width={gridSideWidth}
       style:--panel-bottom-reserve={panelBottomReserve}
