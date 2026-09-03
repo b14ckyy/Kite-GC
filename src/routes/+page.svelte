@@ -3298,7 +3298,14 @@
     />
   </div>
   <div class="zone-phone-widgets">
-    <PhoneWidgetPanel config={phoneWidgets} {telem} {interfaceSettings} bind:widthPx={phonePanelW} />
+    <PhoneWidgetPanel
+      config={phoneWidgets}
+      {telem}
+      {interfaceSettings}
+      onresize={(id) => patchPhoneWidgets(phoneCtrl.cyclePhoneWidgetSize(phoneWidgets, id))}
+      onmove={(id, page, row, col) => patchPhoneWidgets(phoneCtrl.movePhoneWidget(phoneWidgets, id, page, row, col))}
+      bind:widthPx={phonePanelW}
+    />
   </div>
   <div class="phone-strip">
     <PhoneStatusStrip

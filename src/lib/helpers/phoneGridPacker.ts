@@ -108,30 +108,40 @@ export function packPhoneGrid(entries: PhoneWidgetEntry[], geom: PhoneGridGeomet
     const w = Math.min(span.w, cols); // a 2-wide span can't exist in a 1-column panel (rule 5)
     const h = span.h;
     const col = w > 1 ? 0 : Math.min(Math.max(0, Math.trunc(e.col) || 0), cols - 1);
-    // No position yet ((re)activation) → the earliest free slot anywhere: scan from the top.
-    const startLinear = e.page == null || e.row == null ? 0 : Math.min(linear(e), END - 1);
-    let hit: { page: number; row: number } | null = null;
-    // Rule 2a: own position, else downward from it.
-    for (let l = startLinear; l < END && !hit; l++) {
-      const page = Math.floor(l / geom.rows);
-      const row = l % geom.rows;
-      if (free(page, row, col, w, h)) hit = { page, row };
+    let hit: { page: number; row: number; col: number } | null = null;
+    const tryRows = (page: number, from: number, to: number, c: number) => {
+      for (let row = from; row < to && !hit; row++) if (free(page, row, c, w, h)) hit = { page, row, col: c };
+    };
+    // Own column first; a 1×1 tile may fall back to the other column(s) — that is what turns a
+    // drop onto an occupied slot into a swap (the displaced tile takes the vacated slot).
+    const otherCols = w > 1 ? [] : Array.from({ length: cols }, (_, c) => c).filter((c) => c !== col);
+    if (e.page == null || e.row == null) {
+      // No position yet ((re)activation) → the earliest free slot anywhere, scanned from the top.
+      for (let page = 0; page < geom.pages && !hit; page++) for (const c of [col, ...otherCols]) tryRows(page, 0, geom.rows, c);
+    } else {
+      // Rule 2: own position, else the first fit BELOW it on the same page, else anywhere on the
+      // same page (own column, then the other), else the later pages, else the earlier ones.
+      const ownPage = Math.min(e.page, geom.pages - 1);
+      const ownRow = Math.min(e.row, geom.rows - 1);
+      tryRows(ownPage, ownRow, geom.rows, col);
+      tryRows(ownPage, 0, ownRow, col);
+      for (const c of otherCols) tryRows(ownPage, 0, geom.rows, c);
+      for (let page = ownPage + 1; page < geom.pages && !hit; page++) for (const c of [col, ...otherCols]) tryRows(page, 0, geom.rows, c);
+      for (let page = ownPage - 1; page >= 0 && !hit; page--) for (const c of [col, ...otherCols]) tryRows(page, 0, geom.rows, c);
     }
-    // Rule 2b: nothing at/below → first fit anywhere.
-    for (let l = 0; l < startLinear && !hit; l++) {
-      const page = Math.floor(l / geom.rows);
-      const row = l % geom.rows;
-      if (free(page, row, col, w, h)) hit = { page, row };
-    }
-    if (!hit) {
+    // (`hit` is written inside `tryRows`; TS's flow analysis can't see closure writes, hence the
+    // re-typed alias.)
+    const found = hit as { page: number; row: number; col: number } | null;
+    if (!found) {
       overflow.push(e.id);
       continue;
     }
     // Rule 3: gravity — rise within the page while the row above the span is free.
-    let { page, row } = hit;
-    while (row > 0 && free(page, row - 1, col, w, 1)) row--;
-    take(page, row, col, w, h);
-    const p: Placement = { id: e.id, size: e.size, page, row, col, w, h };
+    const { page, col: hitCol } = found;
+    let row = found.row;
+    while (row > 0 && free(page, row - 1, hitCol, w, 1)) row--;
+    take(page, row, hitCol, w, h);
+    const p: Placement = { id: e.id, size: e.size, page, row, col: hitCol, w, h };
     placements.push(p);
     settledById.set(e.id, p);
   }
