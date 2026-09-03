@@ -6,6 +6,7 @@
 
 import { writable } from 'svelte/store';
 import type { RelayConfig } from '$lib/stores/relay';
+import type { WidgetSize } from '$lib/config/widgetRegistry';
 
 export interface MapState {
   center: [number, number];
@@ -17,6 +18,9 @@ export interface PanelConfig {
   right: string[];  // widget IDs in display order
   /** Remembers last panel assignment per widget so toggle off/on restores position */
   positions?: Record<string, 'bottom' | 'right'>;
+  /** Per-widget size state (edit-mode resize button); a missing entry = the widget's default size.
+   *  See config/widgetRegistry.ts. */
+  sizes?: Record<string, WidgetSize>;
 }
 
 export type SpeedUnit = 'kmh' | 'mph' | 'ms' | 'fts' | 'kt';
@@ -428,8 +432,8 @@ const defaults: AppSettings = {
     temperatureUnit: 'c',
   },
   panels: {
-    bottom: ['home', 'speed', 'ahi', 'altitude', 'gps', 'compass'],
-    right: ['flightMode', 'battery'],
+    bottom: ['battery', 'speed', 'ahi', 'altitude', 'compass'],
+    right: ['home', 'rcLink', 'gps'],
   },
   locale: 'en',
   uiScale: 1,

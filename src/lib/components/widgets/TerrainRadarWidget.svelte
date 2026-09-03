@@ -25,10 +25,13 @@
     telem,
     interfaceSettings = { speedUnit: 'kmh', altitudeUnit: 'm', distanceUnit: 'metric', verticalSpeedUnit: 'ms', temperatureUnit: 'c' },
     size = 200,
+    editing = false,
   }: {
     telem: TelemetryData;
     interfaceSettings?: InterfaceSettings;
     size?: number;
+    /** Dock edit mode: the range / mode buttons show only then (they distract in flight). */
+    editing?: boolean;
   } = $props();
 
   interface FanData { ang_cells: number; rad_cells: number; range_m: number; elev: (number | null)[] }
@@ -181,6 +184,8 @@
   // The fan fills the square vertically; its wide flanks (±60°) overflow the
   // left/right edges and are clipped by the card — no dead space at the bottom.
   const fsVal = $derived(Math.max(8, Math.min(16, size * 0.06)));
+  // Range / mode buttons (edit mode only) scale with the tile — generous, they overlay the fan.
+  const fsBtn = $derived(Math.max(11, Math.min(20, size * 0.09)));
   const cx = $derived(size / 2);
   const ringR = $derived(Math.max(5, size * 0.035));
   const apexY = $derived(size - ringR - 3); // UAV sits just above the bottom edge
@@ -343,12 +348,15 @@
       <circle class="uav-dot" cx={cx} cy={apexY} r={Math.max(2, size * 0.014)} />
     </svg>
 
-    <button class="mode left" onclick={cycleScale} title="Clearance colour scale (total range)">
-      {scaleLabel}
-    </button>
-    <button class="mode right" onclick={toggleMode} title="Colouring reference: current altitude vs sink-angle prediction">
-      {predictive ? 'PRED' : 'REL'}
-    </button>
+    {#if editing}
+      <!-- Edit mode only. pointerdown stays here so the dock's slot DnD never starts from a tap. -->
+      <button class="mode left" style="font-size:{fsBtn}px;" onpointerdown={(e) => e.stopPropagation()} onclick={cycleScale} title="Clearance colour scale (total range)">
+        {scaleLabel}
+      </button>
+      <button class="mode right" style="font-size:{fsBtn}px;" onpointerdown={(e) => e.stopPropagation()} onclick={toggleMode} title="Colouring reference: current altitude vs sink-angle prediction">
+        {predictive ? 'PRED' : 'REL'}
+      </button>
+    {/if}
   {:else}
     <div class="placeholder">Terrain Radar — no GPS</div>
   {/if}
@@ -399,8 +407,8 @@
   .mode {
     position: absolute;
     top: 4px;
-    padding: 2px 10px;
-    font-size: 18px;
+    z-index: 30; /* above the dock's edit-mode drag overlay */
+    padding: 0.1em 0.55em; /* em: follows the inline font-size */
     font-weight: 700;
     letter-spacing: 0.05em;
     color: #37a8db;
