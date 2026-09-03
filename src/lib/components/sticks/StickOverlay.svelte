@@ -14,7 +14,8 @@
   import GimbalStick from './GimbalStick.svelte';
   import type { StickData } from '$lib/helpers/stickInput';
 
-  let { data, barHeight = 0 }: { data: StickData; barHeight?: number } = $props();
+  // `compact`: the player is collapsed to its strip — pads stay, the legend goes.
+  let { data, barHeight = 0, compact = false }: { data: StickData; barHeight?: number; compact?: boolean } = $props();
 </script>
 
 <div class="stick-overlay">
@@ -22,15 +23,13 @@
     <GimbalStick
       primary={data.primary.left}
       secondary={data.secondary?.left ?? null}
-      label={$t('player.stickThrottleYaw')}
     />
     <GimbalStick
       primary={data.primary.right}
       secondary={data.secondary?.right ?? null}
-      label={$t('player.stickPitchRoll')}
     />
   </div>
-  {#if data.secondary}
+  {#if data.secondary && !compact}
     <div class="stick-legend">
       <span class="leg"><span class="leg-dot leg-primary"></span>{$t('player.stickCommand')}</span>
       <span class="leg"><span class="leg-dot leg-secondary"></span>{$t('player.stickRaw')}</span>

@@ -1105,6 +1105,21 @@
     }
   }
 
+  // Collapse-anywhere (Dev-Docs active/REPLAY_PANEL_COMPACT.md): a click/tap on any surface other
+  // than the logbook itself or a dialog collapses the flight view to its info card — the mini-map
+  // click used to be the only way, awkward in fullscreen video. Capture phase, so a surface that
+  // stops propagation still counts. The handler reads state at event time (not tracked).
+  $effect(() => {
+    const onDown = (e: PointerEvent) => {
+      if (!logbookHasFlightOnMap || logbookMinimized) return;
+      const target = e.target as Element | null;
+      if (target?.closest('.logbook-host, .dialog-backdrop')) return;
+      minimizeLogbook();
+    };
+    window.addEventListener('pointerdown', onDown, true);
+    return () => window.removeEventListener('pointerdown', onDown, true);
+  });
+
   function expandLogbook() {
     if (logbookMinimized) {
       logbookMinimized = false;
@@ -3509,6 +3524,8 @@
             onToggleWidget={toggleWidget}
           />
         {:else if activeTab === 'logbook'}
+          <!-- .logbook-host: the collapse-anywhere hit-test's notion of "inside the logbook". -->
+          <div class="logbook-host" style="display: contents">
           <LogbookPanel
             {flightLoggingEnabled}
             dbIncompatible={logbookDbIncompatible}
@@ -3551,6 +3568,7 @@
             onImportOpenedFlight={(id) => { void importOpenedFlight(id); }}
             onDismissOpenedFlight={(id) => { void dismissOpenedFlight(id); }}
           />
+          </div>
         {:else if activeTab === 'mission'}
           <MissionPanel />
         {:else if activeTab === 'control'}

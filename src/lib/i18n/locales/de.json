@@ -1067,8 +1067,6 @@
     "hiresParsingSize": "Erwartete Cache-Größe: {size}.",
     "hiresFailedTitle": "Hochauflösendes Replay fehlgeschlagen",
     "toggleMission": "Geladene Mission auf der Karte ein-/ausblenden",
-    "stickThrottleYaw": "Gas / Gier",
-    "stickPitchRoll": "Nick / Roll",
     "stickCommand": "Kommando",
     "stickRaw": "Roh-RC",
     "trackFlightMode": "Flugmodus",

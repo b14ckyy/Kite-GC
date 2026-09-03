@@ -1060,8 +1060,6 @@
     "hiresParsingSize": "Очакван размер на кеша: {size}.",
     "hiresFailedTitle": "Възпроизвеждането с висока резолюция се провали",
     "toggleMission": "Показване/скриване на заредената мисия на картата",
-    "stickThrottleYaw": "Газ / Рискаене",
-    "stickPitchRoll": "Тангаж / Крен",
     "stickCommand": "Команда",
     "stickRaw": "Необработен RC",
     "trackFlightMode": "Режим полет",

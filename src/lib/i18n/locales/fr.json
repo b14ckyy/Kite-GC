@@ -1000,8 +1000,6 @@
     "hiresParsingSize": "Taille de cache attendue : {size}.",
     "hiresFailedTitle": "Échec de la relecture haute résolution",
     "toggleMission": "Afficher/masquer la mission chargée sur la carte",
-    "stickThrottleYaw": "Gaz / Lacet",
-    "stickPitchRoll": "Tangage / Roulis",
     "stickCommand": "Commande",
     "stickRaw": "RC brut",
     "trackFlightMode": "Mode de vol",
