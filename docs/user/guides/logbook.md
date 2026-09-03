@@ -79,20 +79,23 @@ database, is reused while the flight stays open, and is **deleted automatically*
 the flight — nothing accumulates. The map track and timeline stay at 10 Hz by design; high-res
 feeds the live values.
 
-### Opening a log without importing it
+### Opening logs without importing them
 
-You don't have to import a log to look at it. On the desktop, with **no UAV connected**, **drop an
-onboard log onto the map** (INAV Blackbox `.bbl` / `.txt`, ArduPilot `.bin`, PX4 `.ulg`, or a
-`.tlog` / `.rawmsp` telemetry log) — or use the **Open** button in the Logbook toolbar — and Kite
-parses it into a temporary store and replays it exactly like a logbook flight: same track, same
-player, HI-RES included. The Logbook panel shows the file's flights (a flash download with several
-logs lists them all) with their details **read-only**; nothing is linked, edited or checked for
-duplicates, and the location name is looked up but no weather (weather is only fetched for live
-recordings). A file dropped **onto the Logbook panel itself** is imported as before.
+You don't have to import a log to look at it. On the desktop, with **no UAV connected**, **drop one
+or more onboard logs onto the map** (INAV Blackbox `.bbl` / `.txt`, ArduPilot `.bin`, PX4 `.ulg`, or
+a `.tlog` / `.rawmsp` telemetry log) — or use the **Open** button in the Logbook toolbar — and Kite
+parses them into a temporary store and replays them exactly like logbook flights: same track, same
+player, HI-RES included. Files dropped later join the same list, and a flash download with several
+logs lists them all. The Logbook panel shows those flights with their details **read-only**; nothing
+is linked, edited or checked for duplicates, the location name is looked up but no weather (weather
+is only fetched for live recordings). A file dropped **onto the Logbook panel itself** is imported
+as before.
 
-Liked what you saw? **Import into logbook** runs the normal import of the same file — duplicate
-check, multi-log prompt and linking included. **Close file** discards the temporary store; it is
-also cleared automatically when you open another file or restart Kite.
+Liked what you saw? In the detail view, **Import** runs the normal import of just that flight —
+duplicate check and linking included — and drops it from the temporary list, while **Dismiss**
+simply removes it. **Import Logs** in the toolbar imports every opened file at once, **Close**
+discards them all; both return you to the regular logbook, as does dismissing the last opened
+flight. The temporary store is also cleared when you restart Kite.
 
 ## Importing logs
 
