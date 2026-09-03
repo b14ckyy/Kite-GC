@@ -32,7 +32,7 @@
   import { onMount, onDestroy, untrack } from "svelte";
   import { get } from "svelte/store";
   import { invoke } from "@tauri-apps/api/core";
-  import { attachPerf3d, detachPerf3d, perf3dForceContinuous } from "$lib/stores/perf3d";
+  import { attachPerf3d, detachPerf3d, perf3dForceContinuous, perf3dTimeOverride } from "$lib/stores/perf3d";
   import { isDebugMode } from "$lib/stores/debug";
   import * as Cesium from "cesium";
   import "cesium/Build/Cesium/Widgets/widgets.css";
@@ -153,8 +153,10 @@
     radarReference = null,
     centerInsetRight = 0,
   }: {
-    /** Width (css px) of an overlay covering the map's RIGHT edge (the phone's widget column) — the
-     *  corner controls move left by it. (The 3D camera centre is not offset yet: PHONE_UI.md D14.) */
+    /** Width (css px) of an overlay covering the map's RIGHT edge (the phone's widget column): the
+     *  corner controls move left by it and the camera's projection is shifted (`frustum.xOffset`,
+     *  see applyCenterInset) so whatever the camera looks at — the craft in follow / orbit / FPV —
+     *  sits in the middle of the UNCOVERED area, not of the screen (PHONE_UI.md D16). */
     centerInsetRight?: number;
     active?: boolean;
     playbackTrack?: TelemetryRecord[];
@@ -248,9 +250,16 @@
   let lightingEnabled = false;                       // settings.realLighting3D → globe sun-shading
   let replayTimeEnabled = false;                     // settings.logReplayTime → clock from log timestamp
   let nightModeSetting: 'off' | 'auto' | 'on' = 'off'; // settings.nightMode2D (also applies to 3D)
-  // Dev tool: override the sky clock with a manual time-of-day to preview lighting.
-  let devTimeActive = $state(false);                 // slider overrides clock when on
-  let devTimeMin = $state(12 * 60);                  // minutes since midnight (local solar at view lon)
+  // Dev tool: override the sky clock with a manual time-of-day to preview lighting — driven from the
+  // Debug Monitor's Performance tab (stores/perf3d `perf3dTimeOverride`), mirrored here on change.
+  let devTimeActive = false;                         // override active
+  let devTimeMin = 12 * 60;                          // minutes since midnight (local solar at view lon)
+  $effect(() => {
+    const o = $perf3dTimeOverride;
+    devTimeActive = o.active;
+    devTimeMin = o.minutes;
+    untrack(applyClockTime);
+  });
   // Night dimming: Cesium's own night side is ×0.3; we darken ONLY the imagery layers to match
   // (entities/sky stay bright, like 2D). Applied as the darker of the two sources — never stacked
   // on top of the real-lighting night shading.
@@ -959,6 +968,36 @@
     };
   }
 
+  /** Shift the projection so the camera axis lands in the middle of the uncovered area (the screen
+   *  minus `centerInsetRight`). A frustum `xOffset` moves the projection WINDOW, not the camera:
+   *  lookAt / setView / FPV keep aiming at the craft, the picture just slides left by half the inset.
+   *  In near-plane units the visible half-width is `right = aspect · near · tan(fovy / 2)`, and a
+   *  window shift of `inset / 2` px on a canvas `W` px wide is `right · inset / W` (a positive
+   *  xOffset moves the scene left). Cesium's projection and culling honour xOffset; its screen→ray
+   *  helpers (getPickRay / pickEllipsoid) do NOT — the only caller here, getCamFocus, asks for the
+   *  camera axis at the SCREEN centre, which is exactly where the un-offset ray still is. */
+  function applyCenterInset() {
+    if (!viewer) return;
+    const f = viewer.camera.frustum;
+    if (!(f instanceof Cesium.PerspectiveFrustum)) return;
+    const w = viewer.canvas.clientWidth;
+    if (!w || centerInsetRight <= 0) {
+      if (f.xOffset !== 0) f.xOffset = 0;
+      return;
+    }
+    const aspect = f.aspectRatio;
+    if (aspect === undefined) return; // not configured yet (very first frame)
+    let fovy: number | undefined;
+    try { fovy = f.fovy; } catch { return; }
+    if (fovy === undefined || !isFinite(fovy) || fovy <= 0) return;
+    const right = aspect * f.near * Math.tan(fovy / 2);
+    f.xOffset = (right * centerInsetRight) / w;
+  }
+  $effect(() => {
+    void centerInsetRight;
+    viewer?.scene.requestRender(); // a changed inset must re-project even while nothing else moves
+  });
+
   /** True when the 3D camera is in free-look (not locked to the UAV in follow/orbit/fpv). */
   export function isFreeLook(): boolean {
     return cameraMode === 'free';
@@ -1106,6 +1145,9 @@
     // Wake the parked craft-smoothing loop when the craft may have scrolled back into view — see the
     // off-screen gate at the smoothing state. Dies with the viewer, no explicit removal needed.
     viewer.scene.preRender.addEventListener(wakeSmoothingIfVisible);
+    // Off-centre projection for a covered right edge (phone widget column) — per frame, because the
+    // offset depends on the live fov / aspect / near (FPV lens, resize). No-op at inset 0.
+    viewer.scene.preRender.addEventListener(applyCenterInset);
 
     // Add overlay layers for hybrid providers (also cached)
     if (baseProvider.overlays) {
@@ -4731,32 +4773,6 @@
     <button class="map-control-btn map-zoom-btn" onclick={() => zoom3D(-1)} title="Zoom out" aria-label="Zoom out">-</button>
   </div>
 
-  {#if import.meta.env.DEV}
-    <!-- DEV-only sun/time previewer: drag to scrub the time-of-day and watch the lighting. -->
-    <div class="dev-time-tool">
-      <label class="dev-time-row">
-        <input
-          type="checkbox"
-          bind:checked={devTimeActive}
-          onchange={() => applyClockTime()}
-        />
-        <span class="dev-time-label">Time override</span>
-        <span class="dev-time-clock">
-          {Math.floor(devTimeMin / 60).toString().padStart(2, '0')}:{(devTimeMin % 60).toString().padStart(2, '0')}
-        </span>
-      </label>
-      <input
-        class="dev-time-slider"
-        type="range"
-        min="0"
-        max="1439"
-        step="1"
-        bind:value={devTimeMin}
-        disabled={!devTimeActive}
-        oninput={() => applyClockTime()}
-      />
-    </div>
-  {/if}
 </div>
 
 <style>
@@ -4782,52 +4798,6 @@
     right: auto !important;
     bottom: 8px;
     left: 8px;
-  }
-
-  /* ── DEV-only time-of-day previewer (top-right) ── */
-  .dev-time-tool {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    z-index: 10000;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    width: 200px;
-    padding: 8px 10px;
-    background: rgba(46, 46, 46, 0.9);
-    border: 1px solid rgba(55, 168, 219, 0.5);
-    border-radius: 6px;
-    backdrop-filter: blur(8px);
-    pointer-events: all;
-    font-family: 'Segoe UI', Tahoma, sans-serif;
-  }
-  .dev-time-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    cursor: pointer;
-    user-select: none;
-  }
-  .dev-time-label {
-    color: #c7dfe8;
-    font-size: 12px;
-  }
-  .dev-time-clock {
-    margin-left: auto;
-    color: #37a8db;
-    font-variant-numeric: tabular-nums;
-    font-weight: 700;
-    font-size: 13px;
-  }
-  .dev-time-slider {
-    width: 100%;
-    accent-color: #37a8db;
-    cursor: pointer;
-  }
-  .dev-time-slider:disabled {
-    cursor: default;
-    opacity: 0.45;
   }
 
   /* ── Controls corner — identical layout to Map.svelte ── */
@@ -4869,12 +4839,14 @@
     line-height: 1;
     font-weight: 700;
   }
-  /* Phone (PHONE_UI.md D11): pinch zooms, no buttons; the cluster clears the bottom status row. */
+  /* Phone (PHONE_UI.md D11): pinch zooms, no buttons; the cluster clears the bottom chip row and
+     rides along when the widget column slides aside for the replay player (see Map.svelte). */
   :global(html.is-phone) .map-zoom-btn {
     display: none;
   }
   :global(html.is-phone) .map-controls-corner {
-    bottom: calc(30px + var(--safe-bottom, 0px));
+    bottom: calc(42px + var(--safe-bottom, 0px));
+    transition: right 0.3s ease;
   }
 
   .map-mode-btn {

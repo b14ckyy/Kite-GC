@@ -2227,23 +2227,26 @@
   :global(html.is-mobile) :global(.leaflet-control-attribution) {
     margin-bottom: var(--safe-bottom, 0px);
   }
-  /* Phone (Dev-Docs active/PHONE_UI.md D5/D11): no zoom buttons (pinch), the corner cluster sits at
-     the very bottom-right of the map area (leaning on the widget column), and the attribution
-     moves right next to the bottom-left status strip (its width is published as --phone-strip-w). */
+  /* Phone (Dev-Docs archive/PHONE_UI.md D5/D11): no zoom buttons (pinch), the corner cluster sits
+     at the very bottom-right of the map area, leaning on the widget column and riding along when
+     the column slides aside for the replay player (the inset already carries the shift). The
+     attribution starts right after the bottom-left chip row (arming / sensors / Debug), whose
+     right edge PhoneBottomChips publishes as --phone-bottom-w. */
   :global(html.is-phone) .map-zoom-btn {
     display: none;
   }
   :global(html.is-phone) .map-controls-corner {
-    /* above the attribution row (the strip + Leaflet label share the bottom edge) */
-    bottom: calc(30px + var(--safe-bottom, 0px));
+    /* above the attribution row (the chips + Leaflet label share the bottom edge) */
+    bottom: calc(42px + var(--safe-bottom, 0px));
+    transition: right 0.3s ease;
   }
   :global(html.is-mobile) :global(.leaflet-bottom.leaflet-right) {
     right: auto;
     left: 0;
   }
-  /* Phone: the attribution starts right after the bottom-left status strip (PHONE_UI.md D5). */
   :global(html.is-phone) :global(.leaflet-bottom.leaflet-right) {
-    left: var(--phone-strip-w, 0px);
+    left: calc(var(--phone-bottom-w, 0px) + var(--phone-debug-w, 0px) + 8px);
+    margin-bottom: 8px;
   }
 
   .map-control-btn {

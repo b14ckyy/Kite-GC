@@ -33,6 +33,7 @@
     onScrubEnd = () => {},
     trackColorMode = 'flightmode' as TrackColorMode,
     onTrackColorModeChange = (_mode: TrackColorMode) => {},
+    onExpandedChange = (_expanded: boolean) => {},
     modelOverride = 'auto' as UavModelOverride,
     onModelOverrideChange = (_v: UavModelOverride) => {},
     playbackTrack = [] as TelemetryRecord[],
@@ -64,6 +65,8 @@
     onScrubEnd?: () => void;
     trackColorMode?: TrackColorMode;
     onTrackColorModeChange?: (mode: TrackColorMode) => void;
+    /** The full panel is showing (player open and paused / pinned) — the phone slides its widget column aside for it. */
+    onExpandedChange?: (expanded: boolean) => void;
     modelOverride?: UavModelOverride;
     onModelOverrideChange?: (v: UavModelOverride) => void;
     playbackTrack?: TelemetryRecord[];
@@ -276,6 +279,10 @@
     hoverInZone = false;
   });
 
+  $effect(() => {
+    onExpandedChange(showPlayer && selectedFlight != null && expanded);
+  });
+
   // Compact strip content: craft · type, elapsed, progress, total.
   const PLATFORM_KEYS: Record<number, string> = {
     0: 'platform.multirotor', 1: 'platform.airplane', 2: 'platform.helicopter',
@@ -466,14 +473,19 @@
     visibility: hidden;
   }
 
-  /* Phone (Dev-Docs active/PHONE_UI.md D14): no top bar — the player hangs from the top safe inset,
-     centred over the MAP AREA (the screen minus the widget column, --phone-panel-w from +page) and
-     never wider than it. Same for the hover zone and the compact strip. */
+  /* Phone (Dev-Docs archive/PHONE_UI.md D14, revised 2026-09-04): no top bar — the player hangs
+     from the top safe inset, centred in the GAP between the nav-rail burger (12 + 42 + 8 from the
+     left) and the chain-link button (8 + 42 + 8 from the widget column), never wider than that gap
+     minus 8px on each side. The compact strip shrinks into the gap the same way. While the full
+     panel is showing, +page slides the widget column (and the button) right by --phone-shift when
+     the gap is too narrow for the panel's full width, so the player keeps its size. */
   :global(html.is-phone) .log-player,
   :global(html.is-phone) .log-player-zone,
   :global(html.is-phone) .log-player-compact {
-    left: calc((100vw - var(--phone-panel-w, 0px)) / 2);
-    max-width: calc(100vw - var(--phone-panel-w, 0px) - 16px);
+    --phone-gap-l: calc(62px + var(--safe-left, 0px));
+    --phone-gap-r: calc(100vw - var(--phone-panel-w, 0px) - 58px + var(--phone-shift, 0px));
+    left: calc((var(--phone-gap-l) + var(--phone-gap-r)) / 2);
+    max-width: calc(var(--phone-gap-r) - var(--phone-gap-l) - 16px);
   }
   :global(html.is-phone) .log-player {
     top: calc(8px + var(--safe-top, 0px));

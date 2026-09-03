@@ -22,6 +22,11 @@ export const perf3dFps = writable<number>(0);
  *  alert/WP pulses), so this flag is folded into its own logic rather than set from the panel. */
 export const perf3dForceContinuous = writable<boolean>(false);
 
+/** Dev: sky-clock override from the Performance tab — `active` pins the Cesium clock to `minutes`
+ *  (local solar time-of-day at the viewed longitude, 0…1439) to preview the lighting; Map3D
+ *  subscribes and re-applies its clock source. Off = replay time / wall clock as usual. */
+export const perf3dTimeOverride = writable<{ active: boolean; minutes: number }>({ active: false, minutes: 12 * 60 });
+
 /** True while a live 3D viewer is published. Reactive so the Performance tab can auto-(re)load when
  *  the 3D view mounts AFTER the tab was opened — otherwise a one-shot load on tab-open would stay
  *  stuck on "3D not loaded" even once 3D is active. */

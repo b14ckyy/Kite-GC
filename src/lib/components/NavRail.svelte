@@ -104,12 +104,14 @@
   :global(html.is-mobile) .nav-rail.open {
     left: calc(12px + var(--safe-left, 0px));
   }
-  /* Phone: no toolbar (Dev-Docs active/PHONE_UI.md D3) — the burger IS the top-left corner. Lifted
-     above the widget column (z-index 100) so the open rail never hides behind it. */
+  /* Phone: no toolbar (Dev-Docs archive/PHONE_UI.md D3) — the burger IS the top-left corner. Lifted
+     above the widget column (z-index 100) so the open rail never hides behind it. The rail stops
+     above the bottom-left chip row (arming / sensors / Debug: 26px + 8px margin + 8px gap) and
+     scrolls when the tabs need more. */
   :global(html.is-phone) .nav-rail {
     z-index: 120;
     top: calc(8px + var(--safe-top, 0px));
-    max-height: calc(100vh - 16px - var(--safe-top, 0px) - var(--safe-bottom, 0px));
+    max-height: calc(100vh - 16px - 42px - var(--safe-top, 0px) - var(--safe-bottom, 0px));
   }
   /* Portrait phone only: the toolbar collapses/expands, so the rail tracks its live height. iPad and
      landscape phone keep the fixed top (their bar is a single row that the base 65px already clears). */

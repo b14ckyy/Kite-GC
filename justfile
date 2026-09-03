@@ -54,8 +54,17 @@ notarize-macos:
 
 # Android APK, arm64 (EXPERIMENTAL — needs ANDROID_HOME + NDK_HOME; see the Build Guide).
 # Prefer the "Android" GitHub Actions workflow, which needs nothing installed locally.
+# The APK is collected into release/ under the unified name (KiteGC_Android_arm64_<version>_installer.apk)
+# WITHOUT wiping desktop outputs already there (`-Keep` / `--keep`).
+[windows]
 build-android:
     npm run tauri android build -- --apk --target aarch64
+    @powershell -ExecutionPolicy Bypass -File scripts/collect-release.ps1 -Keep
+
+[unix]
+build-android:
+    npm run tauri android build -- --apk --target aarch64
+    @bash scripts/collect-release.sh --keep
 
 # Android dev build on a connected device / emulator, with hot reload
 dev-android:

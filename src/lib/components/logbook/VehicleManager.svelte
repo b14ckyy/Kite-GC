@@ -572,7 +572,7 @@
 <!-- Detail (right) column toolbar: Export flush right. -->
 {#snippet detailToolbar()}
   <div class="vmv-detail-actions">
-    <Button variant="data" icon="export" onclick={exportVehicle}>{$t('vehicleMgr.export')}</Button>
+    <Button variant="data" icon="export" onclick={exportVehicle} title={$t('vehicleMgr.export')} />
   </div>
 {/snippet}
 
@@ -682,7 +682,7 @@
       <div class="det-flights">
         <div class="vmv-veh-actions">
           <Button variant="standard" icon="edit" onclick={startEdit}>{$t('vehicleMgr.edit')}</Button>
-          <Button variant="danger" icon="delete" onclick={deleteVehicle}>{$t('vehicleMgr.delete')}</Button>
+          <Button variant="danger" icon="delete" onclick={deleteVehicle} title={$t('vehicleMgr.delete')} />
         </div>
         <div class="section-heading">{$t('vehicleMgr.linkedFlights')} ({linkedFlights.length})</div>
         {#each linkedFlights as f (f.id)}

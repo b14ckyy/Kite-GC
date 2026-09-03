@@ -100,6 +100,8 @@ if (typeof document !== 'undefined' && isMobile) {
 // Replay player width — one variable read by LogPlayer (panel, hover zone, compact strip) and the
 // stick overlay that anchors to the panel's right edge. The phone's map area is ~760 css px, so
 // the panel must stay narrow there; on the desktop the same width squeezed the controls (Marc).
+// +page reads the number too: on a phone too narrow for it, the widget column slides aside.
+export const logPlayerWidth = isPhone ? 480 : 640;
 if (typeof document !== 'undefined') {
-  document.documentElement.style.setProperty('--log-player-w', isPhone ? '480px' : '640px');
+  document.documentElement.style.setProperty('--log-player-w', `${logPlayerWidth}px`);
 }

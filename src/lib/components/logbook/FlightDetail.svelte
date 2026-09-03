@@ -722,12 +722,16 @@
   </div>
 
   {#if !minimized}
-    <div class="setting-row">
+    <!-- Save Notes on the left; Export Track + Delete are one group that wraps to a second row as a
+         unit when the detail column is too narrow (phone) — the row never scrolls sideways. -->
+    <div class="setting-row actions-row">
       {#if editable}<Button variant="standard" icon="save" onclick={onSaveNotes}>{$t('logbook.saveNotes')}</Button>{/if}
       {#if readOnly && onImportOpenedFlight}<Button variant="data" icon="import" onclick={onImportOpenedFlight}>{$t('logbook.importOpenedFlight')}</Button>{/if}
-      <Button variant="data" icon="export" onclick={onExportTrack}>{$t('logbook.exportTrack')}</Button>
-      {#if editable}<Button variant="danger" icon="delete" onclick={onDeleteFlight}>{$t('logbook.deleteFlight')}</Button>{/if}
-      {#if readOnly && onDismissOpenedFlight}<Button variant="danger" icon="close" onclick={onDismissOpenedFlight}>{$t('logbook.dismissOpenedFlight')}</Button>{/if}
+      <div class="actions-group">
+        <Button variant="data" icon="export" onclick={onExportTrack}>{$t('logbook.exportTrack')}</Button>
+        {#if editable}<Button variant="danger" icon="delete" onclick={onDeleteFlight} title={$t('logbook.deleteFlight')} />{/if}
+        {#if readOnly && onDismissOpenedFlight}<Button variant="danger" icon="close" onclick={onDismissOpenedFlight}>{$t('logbook.dismissOpenedFlight')}</Button>{/if}
+      </div>
     </div>
   {/if}
 </div>
@@ -901,6 +905,16 @@
     flex-direction: column;
     align-items: stretch;
     gap: 6px;
+  }
+  .actions-row {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .actions-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
   }
 
   .setting-label {

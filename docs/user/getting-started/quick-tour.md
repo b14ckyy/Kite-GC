@@ -278,8 +278,8 @@ On a **phone** (Android or iPhone) Kite uses its own **landscape** layout, built
 room for either the map or a widget, rarely both. Tablets keep the desktop layout described above.
 
 - **No top bar, no status bar, no bottom dock.** The map fills the whole screen; the navigation rail's
-  **☰** button sits in the top-left corner, with the **arming state** next to it and a **sensor
-  warning** chip that only appears while a sensor is amber or red.
+  **☰** button sits in the top-left corner. The **arming state** sits in the bottom-left corner, with a
+  **sensor warning** chip next to it that only appears while a sensor is amber or red.
 - **Connecting** happens in a pop-out: tap the **🔗 chain-link** button at the top-right of the map for
   protocol and transport on the first row, the port / host / device on the second, **Connect** — and
   **Relay**, which extends the pop-out with the relay entries. Tap anywhere else to close it.
@@ -292,8 +292,12 @@ room for either the map or a widget, rarely both. Tablets keep the desktop layou
   it to move it — the others shift live to show where they will settle; a quick flick still turns the
   page. Tap the corner button to step through the sizes. Tap the map to leave edit mode.
 - **Map controls**: pinch to zoom (no zoom buttons); the **2D / 3D** and **follow** buttons sit at the
-  bottom-right of the map, next to the widget column. The connection status and the map credits share a
-  small strip in the bottom-left corner.
+  bottom-right of the map, next to the widget column. The map credits follow the arming chip along the
+  bottom edge.
+- **Panels and the replay player** get the room they need: the wider panels (logbook, missions and
+  the like) may extend over the widget column to the right screen edge, and when the replay player's
+  full controls are showing on a narrow phone, the widget column slides aside until playback runs and
+  the player folds into its compact strip.
 - **Not on the phone**: the video panel and widget, the raw-telemetry popup, and the stick overlay
   beside the replay player.
 

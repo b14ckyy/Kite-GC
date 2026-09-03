@@ -180,7 +180,7 @@
     top: 48px;
     right: 0;
     width: max-content;
-    max-width: min(560px, calc(100vw - var(--phone-panel-w, 0px) - 24px));
+    max-width: min(560px, calc(100vw - var(--phone-panel-w, 0px) + var(--phone-shift, 0px) - 24px));
     background: rgba(46, 46, 46, 0.97);
     border: 1px solid #272727;
     border-top: 2px solid #37a8db;
