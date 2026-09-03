@@ -171,6 +171,11 @@ It's covered in its own guide: **[Relay & forwarding](relay-and-forwarding.md)**
 Next to it, **≡ Raw** appears while you are connected: a read-only popup with every raw telemetry value
 the app holds — see **[Raw telemetry](telemetry-and-display.md#raw-telemetry)**.
 
+!!! note "On a phone"
+    The phone layout has no connection bar: tap the **🔗 chain-link** button at the top-right of the map
+    instead. The pop-out holds the same controls (protocol and transport, then port / host / device,
+    **Connect**) plus the **Relay** button; the raw-telemetry popup is not available on the phone.
+
 ## After you connect
 
 - The button becomes **Disconnect**; the top bar shows arming readiness, per-sensor health, battery and

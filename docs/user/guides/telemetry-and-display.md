@@ -70,6 +70,9 @@ along the bottom. Each widget is self-contained and updates live.
   Video widget always **crops to fill** its tile, whatever its size.
 - Widgets scale to fit the dock, and your layout (which dock each widget sits in, and its size) is
   **remembered between sessions**.
+- **On a phone** the docks are replaced by a widget column on the right edge with two swipeable pages;
+  long-press a widget to rearrange or resize — see **Kite on a phone** in the
+  **[Quick tour](../getting-started/quick-tour.md#kite-on-a-phone)**.
 
 ![A widget dock in edit mode](../assets/guides/telemetry/widget_edit_mode.png)
 /// caption
