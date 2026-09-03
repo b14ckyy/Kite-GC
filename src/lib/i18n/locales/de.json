@@ -61,7 +61,8 @@
     "renameBtPort": "Diesen Bluetooth-Port umbenennen",
     "btNamePlaceholder": "Eigener Name",
     "btNameSave": "Name speichern",
-    "btNameCancel": "Abbrechen"
+    "btNameCancel": "Abbrechen",
+    "panelTitle": "Verbindung"
   },
   "cesiumKey": {
     "title": "3D-Terrain benötigt einen Cesium-Ion-Key",

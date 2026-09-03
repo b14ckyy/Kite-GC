@@ -55,7 +55,8 @@
     "renameBtPort": "Renommer ce port Bluetooth",
     "btNamePlaceholder": "Nom personnalisé",
     "btNameSave": "Enregistrer le nom",
-    "btNameCancel": "Annuler"
+    "btNameCancel": "Annuler",
+    "panelTitle": "Connexion"
   },
   "cesiumKey": {
     "title": "Le relief 3D nécessite une clé Cesium Ion",

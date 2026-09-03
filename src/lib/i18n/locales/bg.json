@@ -58,7 +58,8 @@
     "renameBtPort": "Преименувай този Bluetooth порт",
     "btNamePlaceholder": "Персонализирано име",
     "btNameSave": "Запази името",
-    "btNameCancel": "Отказ"
+    "btNameCancel": "Отказ",
+    "panelTitle": "Връзка"
   },
   "cesiumKey": {
     "title": "За 3D терена е необходим API ключ за Cesium Ion",

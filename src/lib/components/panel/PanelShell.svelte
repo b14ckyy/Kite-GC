@@ -189,18 +189,24 @@
      - width is capped to the viewport (minus the rail + a margin) so the panel never clips off-screen;
      - the panel is tall and OVERLAYS the HUD dock (it sits above it at z-index 150) instead of being
        squeezed into the gap above it, so its content is reachable/scrollable. iPad keeps its layout. */
+  /* Phone layout (Dev-Docs active/PHONE_UI.md): no toolbar, so the panel starts at the top safe
+     inset and may use the full height; its width is bounded by the map area — the rail on the left
+     (74px) and the widget column on the right (--phone-panel-w, published by +page). */
+  :global(html.is-phone) .ps {
+    top: calc(8px + var(--safe-top, 0px));
+  }
   :global(html.is-phone) .ps-compact {
-    width: min(398px, calc(100vw - var(--safe-left, 0px) - 74px));
+    width: min(398px, calc(100vw - var(--safe-left, 0px) - 74px - var(--phone-panel-w, 0px) - 8px));
   }
   :global(html.is-phone) .ps-info {
-    max-width: min(360px, calc(100vw - var(--safe-left, 0px) - 74px));
+    max-width: min(360px, calc(100vw - var(--safe-left, 0px) - 74px - var(--phone-panel-w, 0px) - 8px));
   }
   :global(html.is-phone) .ps-compact,
   :global(html.is-phone) .ps-advanced {
-    height: calc(100% - var(--toolbar-h, 53px) - var(--safe-bottom, 0px) - 12px);
+    height: calc(100% - 16px - var(--safe-top, 0px) - var(--safe-bottom, 0px));
   }
   :global(html.is-phone) .ps-info {
-    max-height: calc(100% - var(--toolbar-h, 53px) - var(--safe-bottom, 0px) - 12px);
+    max-height: calc(100% - 16px - var(--safe-top, 0px) - var(--safe-bottom, 0px));
   }
   /* Widths are driven by the *field* size (the thin-framed working box), which the panel layouts
      were tuned against: 380px main field, 500px detail field. Panel width = field + the column's

@@ -26,6 +26,10 @@
   import LogPlayer from "$lib/components/logbook/LogPlayer.svelte";
   import HiresParseModal from "$lib/components/logbook/HiresParseModal.svelte";
   import RawTelemetryModal from "$lib/components/RawTelemetryModal.svelte";
+  import PhoneTopChips from "$lib/components/phone/PhoneTopChips.svelte";
+  import ConnectionPopout from "$lib/components/phone/ConnectionPopout.svelte";
+  import PhoneStatusStrip from "$lib/components/phone/PhoneStatusStrip.svelte";
+  import PhoneWidgetPanel from "$lib/components/phone/PhoneWidgetPanel.svelte";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import UpdateDialog from "$lib/components/UpdateDialog.svelte";
   import { runUpdateCheck } from "$lib/controllers/updateCheck";
@@ -193,7 +197,12 @@
   let bottomDockH = $state(200);
   // Live toolbar height (exposed as --toolbar-h). The phone toolbar wraps/collapses so its height
   // varies; the absolutely-positioned nav-rail + panels track this so they never hide under it.
-  let toolbarH = $state(53);
+  // The phone has no toolbar at all (Dev-Docs active/PHONE_UI.md): its chrome is the burger + chips,
+  // the connection popout, the right-hand widget column and a bottom-left status strip.
+  const phoneUi = isPhoneDevice;
+  let toolbarH = $state(phoneUi ? 0 : 53);
+  /** Rendered width of the phone widget column (reported by PhoneWidgetPanel) → the grid column. */
+  let phonePanelW = $state(0);
   let sideDockW = $state(200);
   let sideDockH = $state(400);
   // Each dock panel's own cross-axis extent (its largest widget), reported by WidgetPanel — the dock
@@ -274,7 +283,11 @@
   // see mapFrameStyle above for the mechanism. The map sliding ≤ half a px under the toolbar edge
   // is invisible (chrome z1 covers map z0); Map.svelte's ResizeObserver re-invalidates on the
   // resulting size change by itself.
-  const mapLayerStyle = $derived(`top:${Math.round(53 * uiScale)}px; bottom:${Math.round(24 * uiScale)}px;`);
+  const mapLayerStyle = $derived(
+    phoneUi
+      ? 'top:0; bottom:0;' // the whole screen — the map runs on under the widget column's glass
+      : `top:${Math.round(53 * uiScale)}px; bottom:${Math.round(24 * uiScale)}px;`,
+  );
   const mapFloating = $derived($videoState.mapLocation === 'floating');
   const mapInWidget = $derived($videoState.mapLocation === 'widget');
   // Rounded to whole px, here and everywhere the unzoomed map layer is placed (issue #52): a
@@ -3157,6 +3170,7 @@
         onToggleMapView={toggleMapView}
         bind:viewMode={map2dViewMode}
         miniControls={mapInWidget}
+        centerInsetRight={phoneUi ? phonePanelW : 0}
         radarActive={radarSettings.enabled}
         radarMapSettings={radarSettings.map}
         {radarReference}
@@ -3167,6 +3181,7 @@
     {#if map3dEverOpened}
       <div class="map3d-layer" class:active={mapViewMode === '3d'}>
         <Map3D
+          centerInsetRight={phoneUi ? phonePanelW : 0}
           bind:this={map3dRef}
           active={mapViewMode === '3d'}
           playbackTrack={mapTrack}
@@ -3230,7 +3245,44 @@
   style:--grid-bottom-height={gridBottomHeight}
   style:--grid-side-width={gridSideWidth}
   style:--panel-bottom-reserve={panelBottomReserve}
+  style:--phone-panel-w="{phonePanelW}px"
 >
+  {#if phoneUi}
+  <!-- ======= PHONE CHROME (Dev-Docs active/PHONE_UI.md) ======= -->
+  <div class="phone-top-chips"><PhoneTopChips {telem} /></div>
+  <div class="phone-conn">
+    <ConnectionPopout
+      {telem}
+      {ports}
+      {bleDeviceList}
+      {isBleScanning}
+      {connStatus}
+      {isConnecting}
+      bind:selectedTransport
+      bind:selectedProtocol
+      bind:selectedPort
+      bind:selectedBaud
+      bind:tcpHost
+      bind:tcpPort
+      bind:selectedBleDevice
+      {baudRates}
+      onConnect={handleConnect}
+      onRescanBle={bleScanWindow}
+    />
+  </div>
+  <div class="zone-phone-widgets">
+    <PhoneWidgetPanel bind:widthPx={phonePanelW} />
+  </div>
+  <div class="phone-strip">
+    <PhoneStatusStrip
+      {connStatus}
+      {fcInfo}
+      connectionPort={$connection.port}
+      devMode={DEV_MODE}
+      bind:debugOpen
+    />
+  </div>
+  {:else}
   <!-- ======= TOOLBAR ======= -->
   <div class="zone-toolbar" bind:clientHeight={toolbarH}>
     <Toolbar
@@ -3258,6 +3310,7 @@
   />
     <RelayPanel open={relayPanelOpen} />
   </div>
+  {/if}
 
   <!-- ======= MAP (always fullscreen behind everything) ======= -->
   <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -3391,6 +3444,7 @@
     onSelectTab={selectTab}
   />
 
+  {#if !phoneUi}
   <!-- ======= BOTTOM WIDGET PANEL ======= -->
   <div class="zone-bottom-dock" class:zone-hidden={!$layout.bottomDock.visible} class:panel-editing={widgetEditMode} bind:clientWidth={bottomDockW} bind:clientHeight={bottomDockH} style:padding-left="{videoReserve}px">
     <div class="panel-bottom-wrap">
@@ -3453,6 +3507,7 @@
   <div class="zone-map-controls">
     <!-- reserved for map control buttons (zoom, 3D toggle etc.) -->
   </div>
+  {/if}
 
   <!-- ======= DEBUG PANEL (dev only) ======= -->
   {#if DEV_MODE && debugOpen && DebugPanelCmp}
@@ -3468,6 +3523,7 @@
   {/if}
 
   <!-- ======= STATUS BAR ======= -->
+  {#if !phoneUi}
   <div class="zone-status-bar">
     <StatusBar
       {connStatus}
@@ -3478,6 +3534,7 @@
       bind:debugOpen
     />
   </div>
+  {/if}
 </main>
   </div><!-- .ui-scale -->
 
@@ -4084,6 +4141,46 @@
   .zone-map-controls {
     grid-area: map-controls;
     z-index: 90;
+    pointer-events: none;
+  }
+
+  /* ── Phone chrome (Dev-Docs active/PHONE_UI.md) ──────────────────────────────────────────
+     One row: the map area (everything floats over it) and the full-height widget column whose
+     width the panel reports (--phone-panel-w). No toolbar, no docks, no status bar. Declared
+     after the is-mobile rules so it wins at equal specificity. */
+  :global(html.is-phone) .app {
+    grid-template-rows: 1fr;
+    grid-template-columns: 1fr var(--phone-panel-w, 0px);
+    grid-template-areas: "main phone-widgets";
+  }
+  .zone-phone-widgets {
+    grid-area: phone-widgets;
+    z-index: 100;
+    min-width: 0;
+    pointer-events: none;
+  }
+  .zone-phone-widgets > :global(*) {
+    pointer-events: auto;
+  }
+  /* Burger (NavRail, 42px at left 12px + safe-left) → chips right of it. */
+  .phone-top-chips {
+    position: absolute;
+    top: calc(8px + var(--safe-top, 0px));
+    left: calc(12px + 42px + 8px + var(--safe-left, 0px));
+    z-index: 110;
+    pointer-events: none;
+  }
+  .phone-conn {
+    position: absolute;
+    top: calc(8px + var(--safe-top, 0px));
+    right: calc(var(--phone-panel-w, 0px) + 8px);
+    z-index: 110;
+  }
+  .phone-strip {
+    position: absolute;
+    left: 0;
+    bottom: var(--safe-bottom, 0px);
+    z-index: 110;
     pointer-events: none;
   }
 

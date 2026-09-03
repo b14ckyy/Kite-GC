@@ -97,6 +97,7 @@
     onToggleMapView,
     miniControls = false,
     viewMode = $bindable<'free' | 'follow' | 'heading-follow'>('free'),
+    centerInsetRight = 0,
     radarActive = false,
     radarMapSettings = null,
     radarReference = null,
@@ -117,6 +118,11 @@
     miniControls?: boolean;
     /** 2D follow state, lifted so it persists across 2D↔3D remounts (bound by the parent). */
     viewMode?: 'free' | 'follow' | 'heading-follow';
+    /** Width (css px) of an overlay covering the map's RIGHT edge (the phone's widget column,
+     *  Dev-Docs active/PHONE_UI.md): the map keeps running underneath it (visible through the glass),
+     *  but every "centre" — follow, heading-up pivot, explicit centring — refers to the middle of the
+     *  uncovered area. The corner controls move left by the same amount. */
+    centerInsetRight?: number;
     /** Radar master enable (renders nothing when off). */
     radarActive?: boolean;
     /** Map rendering controls for radar contacts, or null to render none. */
@@ -1327,6 +1333,27 @@
     followRaf = requestAnimationFrame(followLoop);
   }
 
+  /** How far (container px, x) the VISUAL centre sits left of Leaflet's container centre. Only the
+   *  plain (unrotated) container needs it: in heading-up mode the oversized square is itself centred
+   *  on the visual centre (see applyHeadingUpSize), so Leaflet's centre already is the pivot. */
+  function centerOffsetX(): number {
+    return mapContainer?.classList.contains('heading-up') ? 0 : centerInsetRight / 2;
+  }
+
+  /** setView that puts `ll` at the VISUAL centre (the middle of the uncovered map area), not at the
+   *  container centre — identical to map.setView when nothing covers the map. Pixel math at the
+   *  target zoom, so the result doesn't depend on the current view. */
+  function centerOn(ll: L.LatLngExpression, zoom: number, options?: L.ZoomPanOptions) {
+    if (!map) return;
+    const dx = centerOffsetX();
+    if (dx === 0) {
+      map.setView(ll, zoom, options);
+      return;
+    }
+    const target = map.unproject(map.project(L.latLng(ll), zoom).add(L.point(dx, 0)), zoom);
+    map.setView(target, zoom, options);
+  }
+
   /** Apply the eased frame: move + redraw the active marker always, recenter (+rotate) the map
    *  only while following. */
   function applyFollowFrame() {
@@ -1340,7 +1367,7 @@
     // Don't fight an in-progress zoom animation (would snap mid-zoom).
     if (viewMode !== 'free' && !(map as unknown as { _animatingZoom?: boolean })._animatingZoom) {
       followDrivingView = true;
-      map.setView(ll, map.getZoom(), { animate: false }); // fires moveend synchronously → saveMapState (guarded)
+      centerOn(ll, map.getZoom(), { animate: false }); // fires moveend synchronously → saveMapState (guarded)
       followDrivingView = false;
       if (viewMode === 'heading-follow') {
         mapHeading = followCurrent.heading;
@@ -1764,7 +1791,7 @@
     unsubFence = fenceWorking.subscribe(() => updateFence());
     // Rally-points overlay follows the working copy.
     unsubRally = rallyWorking.subscribe(() => updateRally());
-    unsubAeroFocus = aeroFocus.subscribe((f) => { if (f && map) map.setView([f.lat, f.lon], Math.max(map.getZoom(), 11)); });
+    unsubAeroFocus = aeroFocus.subscribe((f) => { if (f && map) centerOn([f.lat, f.lon], Math.max(map.getZoom(), 11)); });
     map.on("moveend", updateAirspace);
     map.on("click", onGuidedClick); // Guided "fly here" target popup (vehicle control)
     map.on("click", onAirspaceClick); // click empty map / airspace fill → list all airspaces there
@@ -1789,7 +1816,7 @@
         if (geoCentered || !g || !map) return;
         if (viewMode !== "free") { geoCentered = true; return; }
         geoCentered = true;
-        map.setView([g.lat, g.lon], Math.max(map.getZoom(), 13), { animate: true });
+        centerOn([g.lat, g.lon], Math.max(map.getZoom(), 13), { animate: true });
       });
     }
     nightTimer = setInterval(recomputeNight, 60_000);
@@ -1830,7 +1857,7 @@
         // Go-to-UAV on connect: jump once to the craft at a sensible zoom, deferred to the first 3D fix
         // (no fix ⇒ no UAV rendered). Free pan only; following already centres on the UAV.
         if (pendingUavJump && viewMode === 'free' && !get(replayActive) && t.fixType >= 3 && t.numSat >= MIN_FIX_SATELLITES && isValidGpsCoordinate(t.lat, t.lon)) {
-          map?.setView([t.lat, t.lon], 16);
+          centerOn([t.lat, t.lon], 16);
           pendingUavJump = false;
         }
 
@@ -1899,19 +1926,21 @@
     if (!mapContainer) return;
     const wrapper = mapContainer.parentElement;
     if (enable && wrapper) {
-      // Make container a square with side = diagonal of the wrapper.
-      // A rotated square with side = diagonal always fully covers the
-      // original rectangle, no matter the rotation angle.
+      // Make the container a square centred on the VISUAL centre (the wrapper centre, shifted left
+      // by half of a right-edge overlay — `centerInsetRight`) whose side is twice the distance from
+      // that pivot to the farthest wrapper corner: a square that size, rotated about its own centre,
+      // covers the whole wrapper at any angle. With no inset this is the wrapper's diagonal.
       const w = wrapper.clientWidth;
       const h = wrapper.clientHeight;
-      const diag = Math.ceil(Math.sqrt(w * w + h * h));
-      const offX = Math.round((diag - w) / 2);
-      const offY = Math.round((diag - h) / 2);
-      mapContainer.style.width = `${diag}px`;
-      mapContainer.style.height = `${diag}px`;
+      const px = w / 2 - centerInsetRight / 2;
+      const py = h / 2;
+      const reach = Math.sqrt(Math.max(px, w - px) ** 2 + Math.max(py, h - py) ** 2);
+      const side = Math.ceil(2 * reach);
+      mapContainer.style.width = `${side}px`;
+      mapContainer.style.height = `${side}px`;
       mapContainer.style.position = 'absolute';
-      mapContainer.style.top = `-${offY}px`;
-      mapContainer.style.left = `-${offX}px`;
+      mapContainer.style.top = `${Math.round(py - side / 2)}px`;
+      mapContainer.style.left = `${Math.round(px - side / 2)}px`;
       mapContainer.classList.add('heading-up');
     } else {
       mapContainer.style.width = '';
@@ -1924,6 +1953,13 @@
     // Leaflet must recalculate container size
     setTimeout(() => map?.invalidateSize(), 50);
   }
+
+  // A changed right-edge inset moves the visual centre: re-square the heading-up container (the
+  // follow loop re-centres on its next frame by itself).
+  $effect(() => {
+    void centerInsetRight;
+    if (map && viewMode === 'heading-follow') applyHeadingUpSize(true);
+  });
 
   // Apply the side-effects for a view mode (idempotent): heading-up container sizing, panning enable/
   // disable, zoom anchor, and an immediate follow-frame. Must run for EXTERNAL viewMode changes too
@@ -2049,7 +2085,7 @@
   });
 </script>
 
-<div class="map-wrapper">
+<div class="map-wrapper" style="--map-inset-right: {centerInsetRight}px">
   <div bind:this={mapContainer} class="map" class:tile-overlap={isWebKitGtk} style="--map-rotation: 0deg"></div>
 
   <div class="map-controls-corner">
@@ -2175,7 +2211,7 @@
   .map-controls-corner {
     position: absolute;
     bottom: 8px;
-    right: 8px;
+    right: calc(8px + var(--map-inset-right, 0px)); /* clear of a right-edge overlay (phone) */
     z-index: 1000;
     display: flex;
     flex-direction: column;
@@ -2191,9 +2227,23 @@
   :global(html.is-mobile) :global(.leaflet-control-attribution) {
     margin-bottom: var(--safe-bottom, 0px);
   }
+  /* Phone (Dev-Docs active/PHONE_UI.md D5/D11): no zoom buttons (pinch), the corner cluster sits at
+     the very bottom-right of the map area (leaning on the widget column), and the attribution
+     moves right next to the bottom-left status strip (its width is published as --phone-strip-w). */
+  :global(html.is-phone) .map-zoom-btn {
+    display: none;
+  }
+  :global(html.is-phone) .map-controls-corner {
+    /* above the attribution row (the strip + Leaflet label share the bottom edge) */
+    bottom: calc(30px + var(--safe-bottom, 0px));
+  }
   :global(html.is-mobile) :global(.leaflet-bottom.leaflet-right) {
     right: auto;
     left: 0;
+  }
+  /* Phone: the attribution starts right after the bottom-left status strip (PHONE_UI.md D5). */
+  :global(html.is-phone) :global(.leaflet-bottom.leaflet-right) {
+    left: var(--phone-strip-w, 0px);
   }
 
   .map-control-btn {

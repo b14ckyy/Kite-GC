@@ -61,7 +61,8 @@
     "renameBtPort": "Rename this Bluetooth port",
     "btNamePlaceholder": "Custom name",
     "btNameSave": "Save name",
-    "btNameCancel": "Cancel"
+    "btNameCancel": "Cancel",
+    "panelTitle": "Connection"
   },
   "cesiumKey": {
     "title": "3D Terrain Needs a Cesium Ion Key",

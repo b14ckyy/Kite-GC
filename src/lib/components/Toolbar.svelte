@@ -6,18 +6,16 @@
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import { getCurrentWindow } from '@tauri-apps/api/window';
-  import Button from '$lib/components/panel/Button.svelte';
-  import SegmentedToggle from '$lib/components/panel/SegmentedToggle.svelte';
   import WindowControls from '$lib/components/WindowControls.svelte';
-  import { isLinux, isMacOS, isMobile, hasSerialPorts } from '$lib/platform';
-  import ConnectionStatusBox from '$lib/components/ConnectionStatusBox.svelte';
+  import ConnectionControls from '$lib/components/ConnectionControls.svelte';
+  import { isLinux, isMacOS, isMobile } from '$lib/platform';
   import ArmingIndicator from '$lib/components/ArmingIndicator.svelte';
   import BatteryIndicator from '$lib/components/BatteryIndicator.svelte';
   import { rcEngaged } from '$lib/stores/rcEngage';
   import { isArmed } from '$lib/helpers/telemetry';
+  import { sensorTiles as sensorTilesOf, ekfLabel as ekfLabelOf } from '$lib/helpers/sensorHealth';
   import type { PortInfo, BleDeviceInfo, TransportType, ProtocolType } from '$lib/stores/connection';
   import type { TelemetryData } from '$lib/stores/telemetry';
-  import { settings } from '$lib/stores/settings';
 
   let {
     appVersion,
@@ -68,68 +66,10 @@
     onRescanBle?: () => void;
   } = $props();
 
-  // ── Bluetooth SPP port custom names ────────────────────────────────
-  // Outgoing BT SPP ports (tagged `bluetooth-spp` by the backend) get no useful OS descriptor, so the
-  // user can rename them; the name is stored per COM path in settings and appended to "COMx".
-  function portLabel(p: PortInfo): string {
-    if (p.port_type !== 'bluetooth-spp') return p.label;
-    const name = $settings.btPortNames[p.path];
-    return name ? `${p.path} — ${name}` : `${p.path} — ${$t('connection.bluetooth')}`;
-  }
-  const selectedIsBtSpp = $derived(
-    ports.some((p) => p.path === selectedPort && p.port_type === 'bluetooth-spp'),
-  );
-
-  let editingBt = $state(false);
-  let btNameDraft = $state('');
-
-  function openBtEdit() {
-    btNameDraft = $settings.btPortNames[selectedPort] ?? '';
-    editingBt = true;
-  }
-  function saveBtName() {
-    const name = btNameDraft.trim();
-    settings.update((s) => {
-      const map = { ...s.btPortNames };
-      if (name) map[selectedPort] = name;
-      else delete map[selectedPort];
-      return { ...s, btPortNames: map };
-    });
-    editingBt = false;
-  }
-  // Close the editor when the selection changes (or leaves BT SPP / serial).
-  $effect(() => {
-    void selectedPort;
-    void selectedTransport;
-    editingBt = false;
-  });
-
-  function getGpsFixLabel(): string {
-    if (!telem.lastUpdate || telem.fixType === 0) return $t('gps.noFix');
-    const types: Record<number, string> = { 1: $t('gps.fix2d'), 2: $t('gps.fix3d'), 3: $t('gps.fix3dDgps') };
-    return types[telem.fixType] || `FIX:${telem.fixType}`;
-  }
-
-  // Sensor-health bar: one tile per sensor, shown only when present (state !== 0), so the bar adapts
-  // to the airframe (rangefinder/pitot appear only when equipped). State 0=NONE / 1=OK / 2|3=fault.
-  // GPS additionally goes amber while the fix is below 3D. Fed by SYS_STATUS (MAVLink) or
-  // MSP_SENSOR_STATUS (INAV) — both land in the same telemetry fields.
-  type SensorTile = { key: string; state: number; label: string; tooltip: string; warn: boolean };
-  const sensorTiles = $derived<SensorTile[]>(
-    [
-      { key: 'gyro', state: telem.sensorGyro, label: $t('sensors.gyro'), tooltip: $t('sensors.gyroTooltip'), warn: false },
-      { key: 'acc', state: telem.sensorAcc, label: $t('sensors.acc'), tooltip: $t('sensors.accTooltip'), warn: false },
-      { key: 'mag', state: telem.sensorMag, label: $t('sensors.mag'), tooltip: $t('sensors.magTooltip'), warn: false },
-      { key: 'baro', state: telem.sensorBaro, label: $t('sensors.baro'), tooltip: $t('sensors.baroTooltip'), warn: false },
-      { key: 'gps', state: telem.sensorGps, label: $t('sensors.gps'), tooltip: `GPS: ${getGpsFixLabel()} ${telem.numSat}S`, warn: telem.sensorGps === 1 && telem.fixType < 2 },
-      { key: 'rangefinder', state: telem.sensorRangefinder, label: $t('sensors.rangefinder'), tooltip: $t('sensors.rangefinderTooltip'), warn: false },
-      { key: 'pitot', state: telem.sensorPitot, label: $t('sensors.pitot'), tooltip: $t('sensors.pitotTooltip'), warn: false },
-    ].filter((s) => s.state !== 0)
-  );
-
-  // EKF estimator tile (ArduPilot only — INAV never sets ekfStatus, so it stays hidden). Label shows
-  // the active core; colour follows the estimator health.
-  const ekfLabel = $derived(telem.ekfType === 2 ? 'EKF2' : telem.ekfType === 3 ? 'EKF3' : 'EKF');
+  // Sensor-health bar: one tile per sensor the airframe reports (helpers/sensorHealth.ts — shared
+  // with the phone's warning chip). EKF tile is ArduPilot only (INAV never sets ekfStatus).
+  const sensorTiles = $derived(sensorTilesOf(telem, $t));
+  const ekfLabel = $derived(ekfLabelOf(telem));
 
   // ── Progressive collapse ─────────────────────────────────────────────────────
   // The toolbar is the title bar, so the window buttons must stay reachable at ANY window width.
@@ -318,103 +258,24 @@
        second row below it — so the markup lives in one place. Declared as a direct child of <header>
        so both render sites are in its scope. -->
   {#snippet connectionControls()}
-      {#if connStatus !== "connected"}
-        <!-- Protocol selector. The passive "Telemetry" mode is listen-only (auto-detect). -->
-        <SegmentedToggle
-          options={[{ value: 'msp', label: 'MSP' }, { value: 'mavlink', label: 'MAVLink' }, { value: 'telemetry', label: 'Telemetry' }]}
-          value={selectedProtocol}
-          onchange={(v) => (selectedProtocol = v as ProtocolType)}
-        />
-
-        <!-- Transport type selector. Switching between TCP/UDP flips the port between the two known
-             defaults (TCP 5761 ⇄ UDP 14550 = the MAVLink convention) — a custom port (e.g. SITL 5762)
-             is left untouched. Protocol-independent (MSP has no standard network port). -->
-        <select class="tb-select transport-select" bind:value={selectedTransport}
-          onchange={() => {
-            if (selectedTransport === 'udp' && tcpPort === 5761) tcpPort = 14550;
-            else if (selectedTransport === 'tcp' && tcpPort === 14550) tcpPort = 5761;
-          }}>
-          <!-- Serial is a capability, not a form factor: desktop and Android (USB host / OTG) have
-               it, iOS does not. BLE and TCP/UDP exist everywhere. -->
-          {#if hasSerialPorts}
-            <option value="serial">Serial</option>
-          {/if}
-          <option value="tcp">TCP</option>
-          <option value="udp">UDP</option>
-          <option value="ble">BLE</option>
-        </select>
-
-        {#if selectedTransport === 'serial'}
-          <select class="tb-select port-select" bind:value={selectedPort}>
-            {#if ports.length === 0}
-              <option value="">{$t('connection.noPortsFound')}</option>
-            {:else}
-              {#each ports as port}
-                <option value={port.path}>{portLabel(port)}</option>
-              {/each}
-            {/if}
-          </select>
-          {#if selectedIsBtSpp}
-            {#if editingBt}
-              <input
-                class="tb-input bt-name-input"
-                type="text"
-                bind:value={btNameDraft}
-                placeholder={$t('connection.btNamePlaceholder')}
-                onkeydown={(e) => {
-                  if (e.key === 'Enter') saveBtName();
-                  else if (e.key === 'Escape') (editingBt = false);
-                }}
-              />
-              <button class="bt-edit" onclick={saveBtName} title={$t('connection.btNameSave')}>✓</button>
-              <button class="bt-edit" onclick={() => (editingBt = false)} title={$t('connection.btNameCancel')}>✕</button>
-            {:else}
-              <button class="bt-edit" onclick={openBtEdit} title={$t('connection.renameBtPort')}>✎</button>
-            {/if}
-          {/if}
-          <select class="tb-select baud-select" bind:value={selectedBaud}>
-            {#each baudRates as baud}
-              <option value={baud}>{baud}</option>
-            {/each}
-          </select>
-        {:else if selectedTransport === 'tcp' || selectedTransport === 'udp'}
-          <input
-            class="tb-input host-input"
-            type="text"
-            bind:value={tcpHost}
-            placeholder="Host (z.B. 192.168.1.1)"
-          />
-          <input
-            class="tb-input port-input"
-            type="number"
-            bind:value={tcpPort}
-            placeholder="Port"
-            min="1"
-            max="65535"
-          />
-        {:else if selectedTransport === 'ble'}
-          <select class="tb-select ble-select" bind:value={selectedBleDevice}
-            onmousedown={() => onRescanBle?.()} onfocus={() => onRescanBle?.()}>
-            {#if bleDeviceList.length === 0}
-              <option value="">{isBleScanning ? $t('connection.bleScanning') : $t('connection.noBleDevices')}</option>
-            {:else}
-              {#each bleDeviceList as device}
-                <option value={device.id}>
-                  {device.name} ({device.profile}{device.rssi != null ? `, ${device.rssi} dBm` : ''})
-                </option>
-              {/each}
-            {/if}
-          </select>
-        {/if}
-      {/if}
-      {#if isConnecting}
-        <Button variant="warning" disabled>{$t('connection.connecting')}</Button>
-      {:else if connStatus === "connected"}
-        <ConnectionStatusBox {telem} />
-        <Button variant="danger" onclick={onConnect}>{$t('connection.disconnect')}</Button>
-      {:else}
-        <Button variant="data" onclick={onConnect}>{$t('connection.connect')}</Button>
-      {/if}
+    <ConnectionControls
+      {telem}
+      {ports}
+      {bleDeviceList}
+      {isBleScanning}
+      {connStatus}
+      {isConnecting}
+      bind:selectedTransport
+      bind:selectedProtocol
+      bind:selectedPort
+      bind:selectedBaud
+      bind:tcpHost
+      bind:tcpPort
+      bind:selectedBleDevice
+      {baudRates}
+      {onConnect}
+      {onRescanBle}
+    />
   {/snippet}
 
   <div class="toolbar-right" data-tauri-drag-region>
@@ -752,67 +613,4 @@
     color: #37a8db;
   }
 
-  /* Unified toolbar form controls — match the control-library height (28px), so selects, inputs,
-     the SegmentedToggle and the <Button> all align on one line (see docs/active/PANEL_FRAMEWORK.md). */
-  .tb-select,
-  .tb-input {
-    height: 28px;
-    box-sizing: border-box;
-    padding: 0 8px;
-    background: #434343;
-    border: 1px solid #555;
-    border-radius: 4px;
-    color: #e0e0e0;
-    font-size: 12px;
-  }
-
-  /* Fixed widths + ellipsis so long device names never stretch the bar. */
-  .transport-select { width: 90px; }
-  .baud-select { width: 92px; }
-  .port-select {
-    width: 180px;
-    text-overflow: ellipsis;
-  }
-  .ble-select {
-    width: 220px;
-    text-overflow: ellipsis;
-  }
-  .host-input { width: 150px; }
-  .port-input { width: 72px; }
-  .bt-name-input { width: 130px; }
-
-  /* Small square icon button for the Bluetooth-port rename (✎ / ✓ / ✕). */
-  .bt-edit {
-    height: 28px;
-    width: 28px;
-    box-sizing: border-box;
-    padding: 0;
-    background: #434343;
-    border: 1px solid #555;
-    border-radius: 4px;
-    color: #cfcfcf;
-    font-size: 13px;
-    cursor: pointer;
-    transition: background-color 0.2s, color 0.2s, border-color 0.2s;
-  }
-  .bt-edit:hover {
-    background: rgba(55, 168, 219, 0.18);
-    color: #37a8db;
-    border-color: #37a8db;
-  }
-
-  /* Drop the native number spinner — the up/down arrows are clutter in the toolbar. */
-  .port-input {
-    appearance: textfield;
-    -moz-appearance: textfield;
-  }
-  .port-input::-webkit-inner-spin-button,
-  .port-input::-webkit-outer-spin-button {
-    -webkit-appearance: none;
-    margin: 0;
-  }
-
-  .tb-input::placeholder {
-    color: #777;
-  }
 </style>

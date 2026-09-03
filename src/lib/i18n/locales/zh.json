@@ -58,7 +58,8 @@
     "renameBtPort": "重命名此蓝牙端口",
     "btNamePlaceholder": "自定义名称",
     "btNameSave": "保存名称",
-    "btNameCancel": "取消"
+    "btNameCancel": "取消",
+    "panelTitle": "连接"
   },
   "cesiumKey": {
     "title": "3D地形需要Cesium Ion密钥",
