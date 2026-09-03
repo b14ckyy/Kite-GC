@@ -38,6 +38,7 @@
     onConnect,
     relayOpen = false,
     onToggleRelay,
+    onOpenRaw,
     onOpenRc,
     onRescanBle,
   }: {
@@ -59,6 +60,8 @@
     onConnect: () => void;
     relayOpen?: boolean;
     onToggleRelay?: () => void;
+    /** Open the raw-telemetry popup (button shown while connected, next to Relay). */
+    onOpenRaw?: () => void;
     /** Open the RC control panel (from the "RC control active" indicator). */
     onOpenRc?: () => void;
     /** Trigger a fresh bounded BLE scan window — called when the device dropdown is opened. */
@@ -426,6 +429,16 @@
     >
       ⇅ {$t('relay.short')}
     </button>
+    {#if connStatus === 'connected'}
+      <!-- Raw telemetry popup — every pipeline value with its raw unit (WIDGET_OVERHAUL.md §6). -->
+      <button
+        class="relay-toggle"
+        onclick={() => onOpenRaw?.()}
+        title={$t('rawTelemetry.tip')}
+      >
+        ≡ {$t('rawTelemetry.short')}
+      </button>
+    {/if}
     <!-- No window chrome on any mobile build: neither a tablet nor a phone has a window to
          minimize, maximize or close, and the component's mount effect would call the Tauri window
          API for one that does not exist. -->

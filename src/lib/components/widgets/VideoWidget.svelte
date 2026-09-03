@@ -4,10 +4,12 @@
 -->
 
 <script lang="ts">
-  // Video widget (2×1 wide) — a router sink showing the shared video feed.
-  // Crop-to-fill (object-fit: cover) so the 2:1 tile is always full (too small
-  // to read OSD anyway). Standard widget card with a thin rounded frame around
-  // the video. No settings — the NavRail Video panel owns all control.
+  // Video widget (wide 2:1, or square in its L/S size states) — a router sink showing the shared
+  // video feed. ALWAYS crop-to-fill, centred (object-fit: cover; the native sink via a `data-nv-cover`
+  // full box, see controllers/nativeVideo.ts): the tile is too small to read an OSD anyway, it is the
+  // quick way to swap the feed into the background — never bars (WIDGET_OVERHAUL.md D2). Standard
+  // widget card with a thin rounded frame around the video. No settings — the NavRail Video panel
+  // owns all control.
   //
   // Double-click swaps: the single map instance jumps INTO this tile (locked to a 2D heading-follow
   // nav view by +page), and the other surfaces show video. To do that, +page overlays the top-level
@@ -89,7 +91,13 @@
     <!-- Native decode sink (hole punch): the video is a hardware layer BELOW the WebView; this
          div is the transparent hole it shows through (the surface router clips the card + map
          behind it). Only one surface at a time can hold the hole — see controllers/nativeVideo. -->
-    <div class="native-hole" class:armed={$activeNativeSurface === 'widget'} use:nativeSurface={'widget'}>
+    <div
+      class="native-hole"
+      class:armed={$activeNativeSurface === 'widget'}
+      use:nativeSurface={'widget'}
+      data-nv-cover
+      data-nv-aspect={$videoState.aspect || 16 / 9}
+    >
       {#if $activeNativeSurface !== 'widget'}<span>{$t('video.sinkElsewhere')}</span>{/if}
     </div>
   {:else if $videoState.status === 'live' && $videoState.mjpegUrl}
@@ -144,7 +152,7 @@
   video,
   img,
   canvas {
-    object-fit: cover; /* crop to fill the 2:1 tile */
+    object-fit: cover; /* crop to fill the tile, in every size state (D2) */
     /* Own compositing layer: a 60 fps feed then only re-rasters/uploads its own rect instead of
        dirtying the shared content layer's tiles every frame (matters on WebKitGTK/Pi; <video> gets a
        layer anyway, the MJPEG <img> does NOT unless promoted). */

@@ -175,6 +175,19 @@ function visibleRect(el: HTMLElement, rect: DOMRect): DOMRect | null {
 /** Dev diagnostics: which ancestor produced each clipped edge in the last visibleRect. */
 let lastClipBy = '';
 
+/** The sink's FULL (layout) box for a surface: the surface rect itself, or — for a
+ *  `data-nv-cover` surface — the smallest box of the stream's aspect ratio
+ *  (`data-nv-aspect`, w/h) that covers the rect, centred on it. */
+function coverBox(el: HTMLElement, rect: DOMRect): DOMRect {
+  if (el.dataset.nvCover === undefined) return rect;
+  const aspect = parseFloat(el.dataset.nvAspect ?? '') || 16 / 9;
+  if (rect.width <= 0 || rect.height <= 0) return rect;
+  const scale = Math.max(rect.width / aspect, rect.height); // box height that covers both axes
+  const h = scale;
+  const w = scale * aspect;
+  return new DOMRect(rect.x + (rect.width - w) / 2, rect.y + (rect.height - h) / 2, w, h);
+}
+
 function tick(): void {
   if (!running) return;
   const c = chosen();
@@ -192,13 +205,18 @@ function tick(): void {
     // Two rects go to the sink: the surface's FULL box for video layout (aspect fit), and
     // the VISIBLE part as a clip — a scroll-clipped surface then shows a video cut at the
     // container edge (like scrolled DOM content), not one shrunk into the remainder.
+    // A `data-nv-cover` surface (the video widget tile) wants crop-to-fill instead of a
+    // letterbox: its full box is the aspect box that COVERS the tile, centred on it, and the
+    // tile stays the visible part — the sink lays the picture out in the full box and cuts it
+    // at the tile edge, the very path a scrolled panel uses. No sink-side change.
     const hole = vis;
+    const full = coverBox(c.el, c.rect);
     const dpr = window.devicePixelRatio || 1;
     const phys = {
-      x: Math.round(c.rect.x * dpr),
-      y: Math.round(c.rect.y * dpr),
-      w: Math.round(c.rect.width * dpr),
-      h: Math.round(c.rect.height * dpr),
+      x: Math.round(full.x * dpr),
+      y: Math.round(full.y * dpr),
+      w: Math.round(full.width * dpr),
+      h: Math.round(full.height * dpr),
       cx: Math.round(hole.x * dpr),
       cy: Math.round(hole.y * dpr),
       cw: Math.round(hole.width * dpr),

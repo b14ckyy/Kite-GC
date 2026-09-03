@@ -25,6 +25,7 @@
   import CesiumKeyPrompt from "$lib/components/CesiumKeyPrompt.svelte";
   import LogPlayer from "$lib/components/logbook/LogPlayer.svelte";
   import HiresParseModal from "$lib/components/logbook/HiresParseModal.svelte";
+  import RawTelemetryModal from "$lib/components/RawTelemetryModal.svelte";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import UpdateDialog from "$lib/components/UpdateDialog.svelte";
   import { runUpdateCheck } from "$lib/controllers/updateCheck";
@@ -195,6 +196,10 @@
   let toolbarH = $state(53);
   let sideDockW = $state(200);
   let sideDockH = $state(400);
+  // Each dock panel's own cross-axis extent (its largest widget), reported by WidgetPanel — the dock
+  // zone stays the reference that defines the L unit, the panel inside hugs the screen edge.
+  let bottomPanelCrossPx = $state(0);
+  let sidePanelCrossPx = $state(0);
 
   // Viewport size (for the snapped floating-video reserve)
   let winW = $state(typeof window !== 'undefined' ? window.innerWidth : 1280);
@@ -653,11 +658,13 @@
 
   // Widget panel state
   const defaultPanels: PanelConfig = {
-    bottom: ['home', 'battery', 'speed', 'ahi', 'altitude', 'gps', 'compass'],
-    right: ['rawTelemetry'],
+    bottom: ['battery', 'speed', 'ahi', 'altitude', 'compass'],
+    right: ['home', 'rcLink', 'gps'],
   };
   let panels = $state<PanelConfig>(defaultPanels);
   let widgetEditMode = $state(false);
+  // Raw telemetry popup (toolbar button next to Relay; connected only).
+  let rawTelemetryOpen = $state(false);
 
   // Unobstructed fullscreen (Video panel toggle): the map-swap video box retreats from the
   // nav-rail column (always, in this mode) and from OCCUPIED widget panels, so widgets never
@@ -665,12 +672,19 @@
   // an empty or hidden panel contributes 0 and the video keeps that edge. Values are logical
   // px (the wrapper lives in the zoomed .app layer); the measured dock sizes (clientWidth/
   // clientHeight binds above) track user resizes and the phone/tablet overrides for free.
+  // The reserve is the panel's OWN extent (its largest widget + the zone padding), not the whole
+  // dock zone: a dock of small tiles hugs the screen edge and the video gets the rest
+  // (WIDGET_OVERHAUL.md D7). Capped at the zone in case a bind lags a frame.
   const ufActive = $derived($videoState.unobstructedFullscreen && mapInFrame);
   const ufRight = $derived(
-    ufActive && $layout.sideDock.visible && panels.right.length > 0 ? sideDockW : 0
+    ufActive && $layout.sideDock.visible && panels.right.length > 0
+      ? Math.min(sideDockW, sidePanelCrossPx + 2 * DOCK_PAD)
+      : 0
   );
   const ufBottomExtra = $derived(
-    ufActive && $layout.bottomDock.visible && panels.bottom.length > 0 ? bottomDockH : 0
+    ufActive && $layout.bottomDock.visible && panels.bottom.length > 0
+      ? Math.min(bottomDockH, bottomPanelCrossPx + 2 * DOCK_PAD)
+      : 0
   );
   // The wrapper itself stays FULL-SIZE (so the blurred backdrop map fills the whole zone,
   // widgets and nav rail float on it); the reserves only shrink the AVAILABLE AREA the
@@ -909,7 +923,8 @@
     verticalSpeedUnit: 'ms',
     temperatureUnit: 'c',
   };
-  panels = saved.panels ?? defaultPanels;
+  // Sanitised: a stored layout may still name a widget the registry no longer has.
+  panels = widgetCtrl.sanitizePanels(saved.panels ?? defaultPanels);
 
   // ── Radar (foreign-vehicle tracking) — independent of the main connection ──
   /** Free-look: cap the query centre's offset from the camera nadir (and the radius) at 150 km. */
@@ -2512,6 +2527,11 @@
     settings.patch({ panels });
   }
 
+  function handleResize(widgetId: string) {
+    panels = widgetCtrl.cycleWidgetSize(panels, widgetId);
+    settings.patch({ panels });
+  }
+
   function toggleWidget(widgetId: string) {
     panels = widgetCtrl.toggleWidgetVisibility(panels, widgetId);
     settings.patch({ panels });
@@ -3232,6 +3252,7 @@
     onConnect={handleConnect}
     relayOpen={relayPanelOpen}
     onToggleRelay={() => (relayPanelOpen = !relayPanelOpen)}
+    onOpenRaw={() => (rawTelemetryOpen = true)}
     onOpenRc={() => selectTab('rc-control')}
     onRescanBle={bleScanWindow}
   />
@@ -3355,6 +3376,9 @@
   {#if hiresParsing}
     <HiresParseModal progress={hiresProgress} estimateBytes={hiresEstimateBytes} />
   {/if}
+  {#if rawTelemetryOpen && connStatus === 'connected'}
+    <RawTelemetryModal {telem} onclose={() => (rawTelemetryOpen = false)} />
+  {/if}
 
   <!-- ======= FLOATING NAV PANEL SYSTEM ======= -->
   <!-- The rail lives here in .app; the panels themselves render in the panels layer AFTER
@@ -3385,11 +3409,14 @@
         availableVmin={bottomAvailUnits}
         pxPerVmin={bottomPxPerUnit}
         smallBoost={isPhone ? 1.5 : isTablet ? 1.4 : 1}
+        sizes={panels.sizes ?? {}}
+        bind:crossPx={bottomPanelCrossPx}
         {telem}
         editing={widgetEditMode}
         {interfaceSettings}
         onreorder={handleReorder}
         onreceive={handleReceive}
+        onresize={handleResize}
         panelId="bottom"
       />
     </div>
@@ -3410,11 +3437,14 @@
       availableVmin={rightAvailUnits}
       pxPerVmin={sidePxPerUnit}
       smallBoost={isTablet ? 1.4 : 1}
+      sizes={panels.sizes ?? {}}
+      bind:crossPx={sidePanelCrossPx}
       {telem}
       editing={widgetEditMode}
       {interfaceSettings}
       onreorder={handleReorder}
       onreceive={handleReceive}
+      onresize={handleResize}
       panelId="right"
     />
   </div>
@@ -4009,7 +4039,9 @@
     z-index: 100;
     display: flex;
     justify-content: center;
-    align-items: center;
+    /* The panel hugs the bottom edge: a dock of small tiles frees the space ABOVE it, next to the
+       map/video (WIDGET_OVERHAUL.md D7). The zone's own height stays the L-unit reference. */
+    align-items: flex-end;
     pointer-events: none;
     overflow: hidden;
     padding: 6px 0;
