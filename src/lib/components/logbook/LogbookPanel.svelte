@@ -68,6 +68,12 @@
     onDeleteBlackbox,
     blackboxFileInfo = null,
     onExportTrack,
+    dbPath,
+    fileMode = null,
+    canOpenLog = false,
+    onOpenLog = () => {},
+    onImportOpened = () => {},
+    onCloseOpened = () => {},
   }: {
     flightLoggingEnabled: boolean;
     /** Set when the flight DB was written by a NEWER Kite (the `db-newer:` open error) — the
@@ -106,6 +112,18 @@
      *  presence supplied by the parent. Gates the export button + the inline delete button/size. */
     blackboxFileInfo?: BlackboxFileInfo | null;
     onExportTrack: () => void;
+    /** Flight DB directory the detail view's lookups run against (main DB, or the scratch dir of an
+     *  opened file). */
+    dbPath: string;
+    /** A log opened WITHOUT import (Dev-Docs active/OPEN_LOG_WITHOUT_IMPORT.md): the panel shows
+     *  that file's flights read-only, with Import-into-logbook / Close instead of the normal
+     *  import/export groups. */
+    fileMode?: { fileName: string } | null;
+    /** Desktop only — the Open button (mobile stores no originals and cannot run the decoder). */
+    canOpenLog?: boolean;
+    onOpenLog?: () => void;
+    onImportOpened?: () => void;
+    onCloseOpened?: () => void;
   } = $props();
 
   let logbookSortMode = $state<LogbookSortMode>('aircraft-location-date');
@@ -284,23 +302,41 @@
 
 {#snippet importGroup()}
   <div class="tb-right">
-    <!-- Import is for every platform: .kflight / .rawmsp / .tlog / .bin parse in-process. Only the
-         INAV blackbox formats need the external decoder, and the picker drops those on mobile (see
-         IMPORT_EXTS in +page.svelte) rather than hiding the whole button. -->
-    <Button variant="data" icon="import" disabled={blackboxImporting || !!dbIncompatible} onclick={onImport}>
-      {blackboxImporting ? $t('logbook.importing') : $t('logbook.import')}
-    </Button>
+    {#if fileMode}
+      <!-- Opened-file mode: the real import runs the standard parser from the raw file into the
+           main DB (duplicate check + linking apply there), Close discards the scratch store. -->
+      <Button variant="data" icon="import" disabled={blackboxImporting || !!dbIncompatible} onclick={onImportOpened}>
+        {blackboxImporting ? $t('logbook.importing') : $t('logbook.importOpened')}
+      </Button>
+      <Button variant="standard" icon="close" disabled={blackboxImporting} onclick={onCloseOpened}>
+        {$t('logbook.closeOpened')}
+      </Button>
+    {:else}
+      {#if canOpenLog}
+        <Button variant="standard" icon="folder" disabled={blackboxImporting || !!dbIncompatible} onclick={onOpenLog} title={$t('logbook.openLogTip')}>
+          {$t('logbook.openLog')}
+        </Button>
+      {/if}
+      <!-- Import is for every platform: .kflight / .rawmsp / .tlog / .bin parse in-process. Only the
+           INAV blackbox formats need the external decoder, and the picker drops those on mobile (see
+           IMPORT_EXTS in +page.svelte) rather than hiding the whole button. -->
+      <Button variant="data" icon="import" disabled={blackboxImporting || !!dbIncompatible} onclick={onImport}>
+        {blackboxImporting ? $t('logbook.importing') : $t('logbook.import')}
+      </Button>
+    {/if}
   </div>
 {/snippet}
 
 {#snippet exportGroup()}
   <div class="tb-right">
-    <Button variant="data" icon="export" disabled={!hasBlackboxFile} onclick={onExportBlackbox}>
-      {$t('logbook.exportBlackbox')}
-    </Button>
-    <Button variant="data" icon="export" disabled={getExportIds().length === 0} onclick={() => onExportFlights(getExportIds())}>
-      {$t('logbook.exportKflight')}{#if hasMultiSelection} ({multiSelectedIds.size}){/if}
-    </Button>
+    {#if !fileMode}
+      <Button variant="data" icon="export" disabled={!hasBlackboxFile} onclick={onExportBlackbox}>
+        {$t('logbook.exportBlackbox')}
+      </Button>
+      <Button variant="data" icon="export" disabled={getExportIds().length === 0} onclick={() => onExportFlights(getExportIds())}>
+        {$t('logbook.exportKflight')}{#if hasMultiSelection} ({multiSelectedIds.size}){/if}
+      </Button>
+    {/if}
   </div>
 {/snippet}
 
@@ -457,6 +493,8 @@
         {onSavePilot}
         {onDeleteFlight}
         {onExportTrack}
+        {dbPath}
+        readOnly={fileMode != null}
       />
     {/if}
   </div>
@@ -485,6 +523,8 @@
         {onExportTrack}
         blackboxFile={hasMultiSelection ? null : blackboxFileInfo}
         {onDeleteBlackbox}
+        {dbPath}
+        readOnly={fileMode != null}
       />
     {/if}
   </div>
@@ -498,7 +538,7 @@
   <div class="lbv2">
     <PanelShell
       {variant}
-      title={$t('logbook.title')}
+      title={fileMode ? fileMode.fileName : $t('logbook.title')}
       body={variant === 'info' ? infoBody : mainBody}
       toolbar={variant === 'info' ? undefined : mainToolbar}
       detail={flightDetailColumn ? flightDetail : undefined}

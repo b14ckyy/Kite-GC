@@ -9,7 +9,6 @@
   import { formatDurationSec, formatFlightDateTime, flightTzLabel, missionDbForFlight, flightLoggedWpCount, flightLinkMission, flightUnlinkMission, missionDbSave, missionDbFindByHash, missionDbGeocode, flightSetBatterySerial, batteryDbFindBySerial, batteryDbList, vehicleDbList } from '$lib/stores/flightlog';
   import type { Flight, LibraryMission, BatteryPack, Vehicle } from '$lib/stores/flightlogTypes';
   import type { InterfaceSettings } from '$lib/stores/settings';
-  import { settings } from '$lib/stores/settings';
   import { mission, missionFlags, loadedMissionId, markMissionSynced } from '$lib/stores/mission';
   import { arduMission, arduLoadedMissionId } from '$lib/stores/missionArdupilot';
   import { autopilotSystem } from '$lib/stores/autopilotContext';
@@ -44,6 +43,8 @@
     onExportTrack,
     blackboxFile = null,
     onDeleteBlackbox,
+    dbPath,
+    readOnly = false,
   }: {
     flight: Flight;
     trackCount: number;
@@ -66,7 +67,15 @@
      *  Source line, or null when none is stored. */
     blackboxFile?: { filename: string; size_bytes: number } | null;
     onDeleteBlackbox?: () => void;
+    /** Flight DB directory every lookup/link runs against (main DB, or the scratch dir of a log
+     *  opened without import — Dev-Docs active/OPEN_LOG_WITHOUT_IMPORT.md). */
+    dbPath: string;
+    /** Opened-file mode: everything displays, nothing edits/links/deletes. */
+    readOnly?: boolean;
   } = $props();
+
+  // Edit affordances exist only in the full (non-minimized) card and never in read-only mode.
+  const editable = $derived(!minimized && !readOnly);
 
   /** Human-readable file size for the raw-log size badge. */
   function formatBytes(bytes: number): string {
@@ -122,7 +131,7 @@
 
   async function loadBatteries() {
     try {
-      batteries = await batteryDbList(get(settings).flightLogDbPath);
+      batteries = await batteryDbList(dbPath);
     } catch {
       batteries = [];
     }
@@ -156,7 +165,6 @@
   let missionWpCount = $derived(linkedMission?.wp_count ?? loggedWpCount);
 
   async function refreshLink(flightId: number) {
-    const dbPath = get(settings).flightLogDbPath;
     try {
       linkedMission = await missionDbForFlight(flightId, dbPath);
       loggedWpCount = await flightLoggedWpCount(flightId, dbPath);
@@ -183,7 +191,6 @@
   async function linkMission() {
     if (linkBusy || !canLink) return;
     linkBusy = true;
-    const dbPath = get(settings).flightLogDbPath;
     const lang = get(locale) ?? 'en';
     try {
       let missionId: number | null;
@@ -221,7 +228,6 @@
   async function unlinkMission() {
     if (linkBusy) return;
     linkBusy = true;
-    const dbPath = get(settings).flightLogDbPath;
     try {
       await flightUnlinkMission(flight.id, dbPath);
       await refreshLink(flight.id);
@@ -237,7 +243,6 @@
   async function refreshBattery(serialList: string) {
     const tokens = serialTokens(serialList);
     if (!tokens.length) { batteryLinks = []; return; }
-    const dbPath = get(settings).flightLogDbPath;
     const out: { serial: string; pack: BatteryPack | null }[] = [];
     for (const s of tokens) {
       let pack: BatteryPack | null = null;
@@ -265,7 +270,6 @@
     if (batteryBusy) return;
     const serial = normalizeSerialList(batterySerialDraft); // comma-separated list (may be several packs)
     batteryBusy = true;
-    const dbPath = get(settings).flightLogDbPath;
     try {
       await flightSetBatterySerial(flight.id, serial, dbPath);
       batterySerial = serial;
@@ -295,7 +299,6 @@
   async function unlinkBattery() {
     if (batteryBusy) return;
     batteryBusy = true;
-    const dbPath = get(settings).flightLogDbPath;
     try {
       await flightSetBatterySerial(flight.id, '', dbPath);
       batterySerial = '';
@@ -310,7 +313,7 @@
   // Load the vehicle library (once) + resolve the match for the current flight's craft name.
   async function loadVehicles() {
     try {
-      vehicles = await vehicleDbList(get(settings).flightLogDbPath);
+      vehicles = await vehicleDbList(dbPath);
     } catch {
       vehicles = [];
     }
@@ -512,13 +515,13 @@
         </span>
       {:else if flight.craft_name && vehicleMatch}
         <Button variant="compact" icon="drone" onclick={openVehicle} title={$t('logbook.openVehicle')}>{vehicleMatch.name}</Button>
-        {#if !minimized}<button class="weather-edit-btn" onclick={startCraftNameEdit} title={$t('logbook.editCraftName')}>✎</button>{/if}
+        {#if editable}<button class="weather-edit-btn" onclick={startCraftNameEdit} title={$t('logbook.editCraftName')}>✎</button>{/if}
       {:else}
         <span>{flight.craft_name || $t('logbook.unnamedCraft')}</span>
-        {#if flight.craft_name && !minimized}
+        {#if flight.craft_name && editable}
           <Button variant="compact" icon="add" onclick={createVehicleFromCraft} title={$t('logbook.createVehicleTip')}>{$t('logbook.createVehicle')}</Button>
         {/if}
-        <button class="weather-edit-btn" onclick={startCraftNameEdit} title={$t('logbook.editCraftName')}>✎</button>
+        {#if editable}<button class="weather-edit-btn" onclick={startCraftNameEdit} title={$t('logbook.editCraftName')}>✎</button>{/if}
       {/if}
     </span>
     <span class="fc-label">{$t('logbook.type')}</span>
@@ -531,7 +534,7 @@
         </select>
       {:else}
         <span>{platformLabel(flight.platform_type)}</span>
-        {#if !minimized}<button class="weather-edit-btn" onclick={() => (platformEditing = true)} title={$t('logbook.editType')}>✎</button>{/if}
+        {#if editable}<button class="weather-edit-btn" onclick={() => (platformEditing = true)} title={$t('logbook.editType')}>✎</button>{/if}
       {/if}
     </span>
     <span class="fc-label">{$t('logbook.pilot')}</span>
@@ -547,7 +550,7 @@
         />
       {:else}
         <span>{flight.pilot_name || $t('logbook.pilotNone')}</span>
-        {#if !minimized}<button class="weather-edit-btn" onclick={startPilotEdit} title={$t('logbook.editPilot')}>✎</button>{/if}
+        {#if editable}<button class="weather-edit-btn" onclick={startPilotEdit} title={$t('logbook.editPilot')}>✎</button>{/if}
       {/if}
     </span>
     <span class="fc-label">{$t('logbook.pilotId')}</span>
@@ -574,11 +577,13 @@
       {formatFlightSource(flight.source)}
       {#if !minimized}<span class="flight-id-tag">#{flight.id}</span>{/if}
       {#if flight.linked_flight_id} 🔗 #{flight.linked_flight_id}{/if}
-      {#if !minimized && blackboxFile && onDeleteBlackbox}
+      {#if !minimized && blackboxFile}
         <span class="raw-size" title={blackboxFile.filename}>{formatBytes(blackboxFile.size_bytes)}</span>
-        <button class="raw-del-btn" onclick={onDeleteBlackbox} title={$t('logbook.deleteBlackboxTitle')}>
-          🗑 {$t('logbook.deleteBlackbox')}
-        </button>
+        {#if editable && onDeleteBlackbox}
+          <button class="raw-del-btn" onclick={onDeleteBlackbox} title={$t('logbook.deleteBlackboxTitle')}>
+            🗑 {$t('logbook.deleteBlackbox')}
+          </button>
+        {/if}
       {/if}
     </span>
     <span class="fc-label">{$t('logbook.mission')}</span>
@@ -588,7 +593,7 @@
       {:else}
         <span>{$t('logbook.missionNone')}</span>
       {/if}
-      {#if !minimized}
+      {#if editable}
         {#if linkedMission}
           <Button variant="compact" icon="close" onclick={unlinkMission} disabled={linkBusy} title={$t('logbook.unlinkMission')} />
         {:else}
@@ -642,13 +647,13 @@
             <span class="battery-missing">{$t('logbook.batteryNotInLibrary')}</span>
           {/if}
         {/each}
-        {#if !minimized}
+        {#if editable}
           <Button variant="compact" icon="edit" onclick={startBatteryEdit} title={$t('logbook.batteryEdit')} />
           <Button variant="compact" icon="close" onclick={unlinkBattery} disabled={batteryBusy} title={$t('logbook.batteryUnlink')} />
         {/if}
       {:else}
         <span>{$t('logbook.missionNone')}</span>
-        {#if !minimized}<Button variant="compact" icon="battery" onclick={startBatteryEdit} title={$t('logbook.linkBatteryTip')}>{$t('logbook.linkBattery')}</Button>{/if}
+        {#if editable}<Button variant="compact" icon="battery" onclick={startBatteryEdit} title={$t('logbook.linkBatteryTip')}>{$t('logbook.linkBattery')}</Button>{/if}
       {/if}
     </span>
     <span class="fc-label">{$t('logbook.started')}</span>
@@ -681,13 +686,13 @@
           {$t('logbook.weatherUnavailable')}
         {/if}
       </span>
-      {#if !minimized}
+      {#if editable}
         <button class="weather-edit-btn" onclick={() => { weatherEditing = !weatherEditing; }} title={$t('logbook.editWeather')}>✎</button>
       {/if}
     </span>
   </div>
 
-  {#if !minimized && weatherEditing}
+  {#if editable && weatherEditing}
     <WeatherEditor
       bind:weatherTempC
       bind:weatherWindMs
@@ -704,18 +709,18 @@
     <textarea
       class="setting-input notes-input notes-input-auto"
       rows="2"
-      readonly={minimized}
+      readonly={!editable}
       bind:value={notes}
-      oninput={minimized ? undefined : (e: Event) => autoResizeNotes(e.target as HTMLTextAreaElement)}
+      oninput={!editable ? undefined : (e: Event) => autoResizeNotes(e.target as HTMLTextAreaElement)}
       use:notesAutoSize
     ></textarea>
   </div>
 
   {#if !minimized}
     <div class="setting-row">
-      <Button variant="standard" icon="save" onclick={onSaveNotes}>{$t('logbook.saveNotes')}</Button>
+      {#if editable}<Button variant="standard" icon="save" onclick={onSaveNotes}>{$t('logbook.saveNotes')}</Button>{/if}
       <Button variant="data" icon="export" onclick={onExportTrack}>{$t('logbook.exportTrack')}</Button>
-      <Button variant="danger" icon="delete" onclick={onDeleteFlight}>{$t('logbook.deleteFlight')}</Button>
+      {#if editable}<Button variant="danger" icon="delete" onclick={onDeleteFlight}>{$t('logbook.deleteFlight')}</Button>{/if}
     </div>
   {/if}
 </div>
