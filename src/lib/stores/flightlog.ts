@@ -443,6 +443,19 @@ export async function hiresDrop(flightId: number, dbPath: string): Promise<void>
   await invoke('flightlog_hires_drop', { flightId, dbPath: dbPath || undefined });
 }
 
+// ── Scratch store: open a log WITHOUT importing it (Dev-Docs active/OPEN_LOG_WITHOUT_IMPORT.md) ──
+
+/** The throwaway `<db_dir>/scratch/` directory — passed as `dbPath` to the ordinary importers and
+ *  logbook commands while a file is open without being imported. */
+export async function scratchDir(dbPath: string): Promise<string> {
+  return invoke<string>('flightlog_scratch_dir', { dbPath: dbPath || undefined });
+}
+
+/** Wipe the scratch directory (open/close/app start). */
+export async function scratchClear(dbPath: string): Promise<void> {
+  await invoke('flightlog_scratch_clear', { dbPath: dbPath || undefined });
+}
+
 /** Startup cleanup: wipe crash leftovers from the hi-res cache dir. */
 export async function hiresCleanup(dbPath: string): Promise<void> {
   await invoke('flightlog_hires_cleanup', { dbPath: dbPath || undefined });

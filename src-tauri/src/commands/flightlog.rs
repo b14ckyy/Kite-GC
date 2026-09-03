@@ -1423,6 +1423,37 @@ pub fn flightlog_hires_cleanup(db_path: Option<String>) {
     crate::flightlog::hires::cleanup_cache_dir(&hires_cache_dir(&db_path.unwrap_or_default()));
 }
 
+// ── Scratch store: open a log WITHOUT importing it (Dev-Docs active/OPEN_LOG_WITHOUT_IMPORT.md) ──
+//
+// `<db_dir>/scratch/` is a throwaway flight-DB directory. The frontend hands it to the ordinary
+// importers as their `db_path`, so an opened file becomes a normal flight there (10 Hz track,
+// archived blob, its own `hires-cache/`) and every logbook/replay command works unchanged. It is
+// wiped before each open, on close, and at app start (crash leftovers) — nothing in it is precious.
+
+fn scratch_dir(custom: &str) -> std::path::PathBuf {
+    resolve_main_db_path(custom)
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .join("scratch")
+}
+
+/// The scratch directory to pass as `db_path` for an opened (not imported) log.
+#[tauri::command]
+pub fn flightlog_scratch_dir(db_path: Option<String>) -> String {
+    scratch_dir(&db_path.unwrap_or_default()).to_string_lossy().to_string()
+}
+
+/// Delete the scratch directory (flight DB, its hires cache, everything).
+#[tauri::command]
+pub fn flightlog_scratch_clear(db_path: Option<String>) {
+    let dir = scratch_dir(&db_path.unwrap_or_default());
+    if dir.exists() {
+        if let Err(e) = std::fs::remove_dir_all(&dir) {
+            log::warn!("Failed to clear scratch dir {}: {}", dir.display(), e);
+        }
+    }
+}
+
 /// Scan `<db_dir>/sessions/*.ktmp` for an orphan session left by a crash/close. Empty temp files
 /// (no telemetry) are deleted in passing; the newest non-empty one is returned for the recovery
 /// prompt. There should be at most one (the single-temp invariant); a straggler is simply offered
