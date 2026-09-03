@@ -4,6 +4,7 @@
 -->
 
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { t } from 'svelte-i18n';
   import type { Flight, TelemetryRecord } from '$lib/stores/flightlog';
   import { getUsedFlightModes, segmentTrackByAltitude, segmentTrackBySpeed, segmentTrackBySignal, type TrackColorMode, type FlightModeInfo, type GradientResult } from '$lib/helpers/trackColors';
@@ -190,12 +191,103 @@
       : null,
   );
 
-  // Measured player-bar height so the stick overlay sits flush (top + bottom) beside it.
+  // Measured player-bar height so the stick overlay sits flush (top + bottom) beside it. Measured
+  // on the FULL panel and kept while it is collapsed (a transform doesn't change clientHeight), so
+  // the sticks keep their size and position in compact mode.
   let barHeight = $state(0);
+
+  // ── Compact mode (Dev-Docs active/REPLAY_PANEL_COMPACT.md) ────────────────────────────
+  // While playback runs the full panel collapses into a non-interactive strip under the top bar,
+  // so it hides as little of the picture as possible. It is expanded whenever playback is PAUSED
+  // (configuring speed/colours or scrubbing must never fight a collapsing panel), while the mouse
+  // is inside the zone the full panel occupies, or while a touch tap has pinned it open.
+  //   • Mouse: the zone is hit-tested from the full panel's last measured rect on window
+  //     pointermove — no invisible overlay, so the map under the zone stays fully usable. While a
+  //     button is held (a map drag) the test is deferred; the pointerup decides.
+  //   • Touch/pen (no hover): a tap inside the zone pins, a tap anywhere else unpins.
+  //   Per-event pointerType, never a device flag — hybrids behave right per input.
+  let hoverInZone = $state(false);
+  let touchPinned = $state(false);
+  const expanded = $derived(!playbackPlaying || hoverInZone || touchPinned);
+  let zoneEl = $state<HTMLDivElement>();
+  let zoneRect: DOMRect | null = null;
+
+  // The zone is measured from an invisible, NON-animated sibling laid out exactly like the full
+  // panel (same top/left/width, height = the panel's measured height). Measuring the panel itself
+  // was wrong: it is mid-transition (still translated up) right when a hover expands it, and that
+  // stale rect became a hard-to-hit sliver under the top bar.
+  function measureZone() {
+    if (zoneEl) zoneRect = zoneEl.getBoundingClientRect();
+  }
+  function inZone(x: number, y: number): boolean {
+    const r = zoneRect;
+    if (r == null || x < r.left || x > r.right || y < r.top || y > r.bottom) return false;
+    // A surface lying OVER the zone (a side panel, a dialog, the floating video window) blocks
+    // it: only the map — or the player itself — under the pointer counts. The compact strip and
+    // the stick overlay are pointer-events:none, so they never show up here.
+    const el = document.elementFromPoint(x, y);
+    return el != null && (el.closest('.layer-map') != null || el.closest('.log-player') != null);
+  }
+
+  $effect(() => {
+    if (!zoneEl) return;
+    const ro = new ResizeObserver(() => measureZone());
+    ro.observe(zoneEl);
+    untrack(measureZone);
+    return () => ro.disconnect();
+  });
+
+  $effect(() => {
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerType !== 'mouse') return;
+      measureZone();
+      if (e.buttons !== 0) return; // dragging the map — decide on release
+      hoverInZone = inZone(e.clientX, e.clientY);
+    };
+    const onUp = (e: PointerEvent) => {
+      if (e.pointerType !== 'mouse') return;
+      hoverInZone = inZone(e.clientX, e.clientY);
+    };
+    const onDown = (e: PointerEvent) => {
+      if (e.pointerType === 'mouse') return;
+      touchPinned = inZone(e.clientX, e.clientY);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointerdown', onDown, true);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointerdown', onDown, true);
+    };
+  });
+
+  // A new flight starts expanded and unpinned.
+  $effect(() => {
+    void selectedFlight?.id;
+    touchPinned = false;
+    hoverInZone = false;
+  });
+
+  // Compact strip content: craft · type, elapsed, progress, total.
+  const PLATFORM_KEYS: Record<number, string> = {
+    0: 'platform.multirotor', 1: 'platform.airplane', 2: 'platform.helicopter',
+    3: 'platform.tricopter', 4: 'platform.rover', 5: 'platform.boat', 6: 'platform.other',
+    7: 'platform.vtol', 255: 'platform.generic',
+  };
+  const compactType = $derived.by(() => {
+    const pt = selectedFlight?.platform_type;
+    return pt != null && PLATFORM_KEYS[pt] ? $t(PLATFORM_KEYS[pt]) : '';
+  });
+  const progressPct = $derived(
+    trackLength > 1 ? (Math.min(playbackIndex, trackLength - 1) / (trackLength - 1)) * 100 : 0,
+  );
 </script>
 
 {#if showPlayer && selectedFlight}
-  <div class="log-player" bind:clientHeight={barHeight}>
+  <!-- Hover/tap zone: invisible twin of the full panel's box, never animated, never interactive. -->
+  <div class="log-player-zone" bind:this={zoneEl} style:height={barHeight ? `${barHeight + 9}px` : undefined}></div>
+  <div class="log-player" class:collapsed={!expanded} bind:clientHeight={barHeight}>
     <div class="log-player-top">
       <div class="log-player-source">
         <SegmentedToggle
@@ -310,8 +402,19 @@
   </div>
 
   {#if stickData}
-    <StickOverlay data={stickData} {barHeight} />
+    <StickOverlay data={stickData} {barHeight} compact={!expanded} />
   {/if}
+
+  <!-- Compact strip: slides out from under the top bar while the full panel is collapsed. Never
+       interactive — pointer events pass through to whatever is underneath. -->
+  <div class="log-player-compact" class:shown={!expanded} aria-hidden={expanded}>
+    <span class="lpc-craft">
+      {selectedFlight.craft_name || $t('logbook.unknownCraft')}{#if compactType}<span class="lpc-type"> · {compactType}</span>{/if}
+    </span>
+    <span class="lpc-time">{formatPlaybackTime(playbackCurrentMs)}</span>
+    <div class="lpc-bar"><div class="lpc-fill" style="width: {progressPct}%"></div></div>
+    <span class="lpc-time">{formatPlaybackTime(playbackTotalMs)}</span>
+  </div>
 {/if}
 
 <style>
@@ -334,6 +437,92 @@
     flex-direction: column;
     gap: 4px;
     user-select: none;
+    transition: transform 0.2s ease, opacity 0.2s ease;
+  }
+
+  /* Starts at the top bar's bottom edge (53px), so the 9px gap above the panel counts too — that is
+     exactly where the collapsed strip hangs and where users instinctively aim. */
+  .log-player-zone {
+    position: absolute;
+    top: 53px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 800px;
+    max-width: calc(100vw - 40px);
+    pointer-events: none;
+    visibility: hidden;
+  }
+
+  /* Collapsed: the full panel slides up under the top bar and fades; it stays in the DOM (its
+     measured height keeps the stick overlay in place) but takes no pointer events. */
+  .log-player.collapsed {
+    transform: translate(-50%, -120%);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  /* Compact strip — one readable line, framed, rounded at the bottom only (it "hangs" from the
+     top bar). Starts hidden under the bar and slides down while the full panel is collapsed. */
+  .log-player-compact {
+    position: absolute;
+    top: 53px;
+    left: 50%;
+    width: 700px;
+    max-width: calc(100vw - 40px);
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 7px 18px 8px;
+    background: rgba(46, 46, 46, 0.92);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(55, 168, 219, 0.35);
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    font-size: 16px;
+    color: #e0e0e0;
+    user-select: none;
+    pointer-events: none;
+    transform: translate(-50%, -110%);
+    opacity: 0;
+    transition: transform 0.2s ease, opacity 0.2s ease;
+  }
+  .log-player-compact.shown {
+    transform: translate(-50%, 0);
+    opacity: 1;
+  }
+  .lpc-craft {
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 40%;
+    flex-shrink: 1;
+  }
+  .lpc-type {
+    font-weight: 400;
+    color: #949494;
+  }
+  .lpc-time {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 15px;
+    color: #949494;
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+  }
+  .lpc-bar {
+    flex: 1;
+    height: 8px;
+    background: #434343;
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .lpc-fill {
+    height: 100%;
+    background: #37a8db;
+    border-radius: 3px;
   }
 
   .log-player-top {

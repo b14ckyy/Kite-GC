@@ -1067,8 +1067,6 @@
     "hiresParsingSize": "Expected cache size: {size}.",
     "hiresFailedTitle": "High-resolution replay failed",
     "toggleMission": "Show/hide the loaded mission on the map",
-    "stickThrottleYaw": "Thr / Yaw",
-    "stickPitchRoll": "Pitch / Roll",
     "stickCommand": "Command",
     "stickRaw": "Raw RC",
     "trackFlightMode": "Flight Mode",

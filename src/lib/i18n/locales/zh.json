@@ -1061,8 +1061,6 @@
     "hiresParsingSize": "预计缓存大小：{size}。",
     "hiresFailedTitle": "高分辨率回放失败",
     "toggleMission": "在地图上显示/隐藏加载的任务",
-    "stickThrottleYaw": "油门/偏航",
-    "stickPitchRoll": "俯仰/横滚",
     "stickCommand": "指令",
     "stickRaw": "原始RC",
     "trackFlightMode": "飞行模式",

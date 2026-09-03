@@ -9,15 +9,14 @@
      `secondary` (orange, rendered behind, dimmed) is a second layer (e.g. RAW TX vs FC command).
      Pure presentation — all values are normalized −1…+1 (+y = up) and passed as props, so this can be
      reused anywhere (replay overlay now, live HUD / dual-pilot later).
-     Usage: <GimbalStick primary={{x,y}} secondary={{x,y}} label="Thr / Yaw" />
+     Usage: <GimbalStick primary={{x,y}} secondary={{x,y}} />
 -->
 <script lang="ts">
   import type { StickPos } from '$lib/helpers/stickInput';
 
-  let { primary, secondary = null, label = '' }: {
+  let { primary, secondary = null }: {
     primary: StickPos;
     secondary?: StickPos | null;
-    label?: string;
   } = $props();
 
   // Normalized −1…+1 → 0…100 % box coordinate; y inverted so +1 sits at the top.
@@ -34,18 +33,16 @@
     {/if}
     <span class="dot dot-primary" style="left:{px(primary.x)}%; top:{py(primary.y)}%"></span>
   </div>
-  {#if label}<span class="gimbal-label">{label}</span>{/if}
 </div>
 
 <style>
   .gimbal {
     display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;  /* centre the field + label in the stretched (bar-height) panel */
-    gap: 3px;
-    /* height comes from the parent row (= measured bar height) via align-items:stretch → flush */
-    padding: 4px 8px;
+    align-items: stretch;
+    /* Height comes from the parent row (= measured bar height) via align-items:stretch → flush;
+       the frame is square and hugs the stick field (no labels — Marc, 2026-09-03). */
+    aspect-ratio: 1 / 1;
+    padding: 6px;
     box-sizing: border-box;
     /* Widget-style glass, a touch more transparent. */
     background: rgba(30, 30, 30, 0.5);
@@ -57,12 +54,11 @@
     user-select: none;
   }
 
-  /* Fixed square stick field (compact label keeps it the dominant element). */
+  /* The stick field fills the square frame. */
   .gimbal-box {
     position: relative;
-    width: 82px;
-    height: 82px;
-    flex-shrink: 0;
+    flex: 1;
+    min-width: 0;
     background: rgba(15, 15, 15, 0.35);
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 6px;
@@ -99,12 +95,4 @@
     z-index: 1;
   }
 
-  .gimbal-label {
-    font-size: 10px;
-    line-height: 1.1;
-    color: #949494;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    white-space: nowrap;
-  }
 </style>
