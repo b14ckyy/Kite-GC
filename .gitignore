@@ -99,3 +99,9 @@ src-tauri/binaries/
 .agents
 .claude
 skills-lock.json
+
+# =============================================================================
+# Python bytecode (mkdocs hooks under docs/hooks/)
+# =============================================================================
+__pycache__/
+*.pyc
