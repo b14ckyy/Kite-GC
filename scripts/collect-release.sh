@@ -4,16 +4,22 @@
 # Renames Tauri's outputs to a unified scheme and drops them in <repo>/release/:
 #
 #     KiteGC_<OS>_<Arch>_<Version>_<Type>.<ext>
+#     KiteGC_Android_<abi>_<Version>_installer.apk      (when an Android release build exists)
 #
-#   Type = installer   (.deb / .rpm / .dmg)
+#   Type = installer   (.deb / .rpm / .dmg; the Android .apk)
 #        | standalone  (.AppImage / .app-as-zip — self-contained runnable app)
 #        | portable     (the bare CLI binary, zipped with an empty `.portable` marker so the
 #                        download keeps its data in a data/ folder next to the executable)
 #
 # One naming source shared by local builds (`just build*`) AND the GitHub release workflow, so the
-# filenames are identical everywhere. The release/ folder is git-ignored (fresh each run).
+# filenames are identical everywhere. The release/ folder is git-ignored and refreshed on every
+# run — `--keep` adds to it instead (the Android build runs separately from the desktop one and
+# must not wipe its outputs).
 # ============================================================
 set -e
+
+KEEP=0
+[ "${1:-}" = "--keep" ] && KEEP=1
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION="$(grep '"version"' "$ROOT/package.json" | head -1 | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
@@ -39,7 +45,7 @@ fi
 
 name() { printf '%s_%s_%s_%s_%s.%s' "$APP" "$OS" "$ARCH" "$VERSION" "$1" "$2"; }
 
-rm -rf "$OUT"
+[ "$KEEP" = 1 ] || rm -rf "$OUT"
 mkdir -p "$OUT"
 collected=()
 
@@ -104,6 +110,22 @@ if [ ${#collected[@]} -gt 0 ]; then
         rm -rf "$BUNDLE/deb" "$BUNDLE/rpm" "$BUNDLE/appimage"
     fi
 fi
+
+# Android: `tauri android build --apk` leaves one release APK per ABI folder under the Gradle
+# outputs (universal / arm64 / armv7 / x86_64 / x86). Same rules as above: newest file per folder,
+# then the raw output is deleted so a stale APK can't be re-collected under a newer version.
+APK_ROOT="$ROOT/src-tauri/gen/android/app/build/outputs/apk"
+for abi_dir in "$APK_ROOT"/*/; do
+    [ -d "$abi_dir" ] || continue
+    apk="$(ls -1dt "$abi_dir"release/*.apk 2>/dev/null | head -n1)"
+    [ -n "$apk" ] && [ -e "$apk" ] || continue
+    abi="$(basename "$abi_dir")"
+    case "$abi" in x86_64) abi="x64" ;; esac
+    dest="${APP}_Android_${abi}_${VERSION}_installer.apk"
+    cp -f "$apk" "$OUT/$dest"
+    rm -rf "${abi_dir}release"
+    collected+=("$dest")
+done
 
 echo ""
 if [ ${#collected[@]} -eq 0 ]; then

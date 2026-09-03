@@ -17,7 +17,7 @@
   import { channelValues } from "$lib/stores/rcEngine";
   import { fcChannels } from "$lib/stores/rcMirror";
   import { boxName } from "$lib/helpers/inavModes";
-  import { getPerf3dViewer, perf3dFps, perf3dForceContinuous, perf3dAttached } from "$lib/stores/perf3d";
+  import { getPerf3dViewer, perf3dFps, perf3dForceContinuous, perf3dAttached, perf3dTimeOverride } from "$lib/stores/perf3d";
   import { videoState, videoRtcStats, nativeRtspStats, rtspBufferFrames, debugLinuxHoleSpike } from "$lib/stores/video";
   import { nativeHoleDebug } from "$lib/controllers/nativeVideo";
   import { isLinux } from "$lib/platform";
@@ -57,6 +57,17 @@
   let pOit = $state(true);
   let pLogDepth = $state(true);
   let pHdr = $state(false);
+
+  // Sky-clock override (time-of-day previewer, moved here from the 3D view's dev overlay): local
+  // state mirrors the store so the slider scrubs live; Map3D re-applies its clock on every change.
+  let pTimeActive = $state(get(perf3dTimeOverride).active);
+  let pTimeMin = $state(get(perf3dTimeOverride).minutes);
+  function applyTimeOverride(): void {
+    perf3dTimeOverride.set({ active: pTimeActive, minutes: pTimeMin });
+  }
+  const pTimeClock = $derived(
+    `${Math.floor(pTimeMin / 60).toString().padStart(2, '0')}:${(pTimeMin % 60).toString().padStart(2, '0')}`,
+  );
 
   function loadPerf(): void {
     const v = getPerf3dViewer();
@@ -853,6 +864,23 @@
         <label class="perf-check"><input type="checkbox" bind:checked={pFxaa} onchange={applyPerf} /> {$t('debug.perf.fxaa')}</label>
         <div class="perf-row"><span>{$t('debug.perf.resScale')}</span><input type="number" step="0.05" min="0.25" max="2" bind:value={pResScale} onchange={applyPerf} /></div>
 
+        <div class="perf-section">{$t('debug.perf.secTime')}</div>
+        <label class="perf-check">
+          <input type="checkbox" bind:checked={pTimeActive} onchange={applyTimeOverride} />
+          {$t('debug.perf.timeOverride')} <b class="perf-clock">{pTimeClock}</b>
+        </label>
+        <input
+          class="perf-slider"
+          type="range"
+          min="0"
+          max="1439"
+          step="1"
+          bind:value={pTimeMin}
+          disabled={!pTimeActive}
+          oninput={applyTimeOverride}
+          aria-label={$t('debug.perf.timeOverride')}
+        />
+
         <div class="perf-section">{$t('debug.perf.secPasses')}</div>
         <label class="perf-check"><input type="checkbox" bind:checked={pOit} onchange={applyOit} /> {$t('debug.perf.oit')}</label>
         <label class="perf-check"><input type="checkbox" bind:checked={pLogDepth} onchange={applyPerf} /> {$t('debug.perf.logDepth')}</label>
@@ -1075,6 +1103,9 @@
     background: #434343; border: 1px solid #555; border-radius: 4px; color: #e0e0e0; font-size: 12px;
   }
   .perf-check { display: flex; align-items: center; gap: 7px; padding: 3px 0; color: #c0c0c0; cursor: pointer; }
+  .perf-clock { margin-left: auto; color: #37a8db; font-variant-numeric: tabular-nums; }
+  .perf-slider { width: 100%; accent-color: #37a8db; cursor: pointer; }
+  .perf-slider:disabled { cursor: default; opacity: 0.45; }
   .perf-empty { padding: 20px 4px; color: #949494; font-style: italic; }
   .perf-hint { margin-top: 12px; padding-top: 8px; border-top: 1px solid #272727; color: #777; font-size: 11px; line-height: 1.4; }
 

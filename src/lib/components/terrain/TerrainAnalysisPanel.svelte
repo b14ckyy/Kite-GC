@@ -893,11 +893,27 @@
     flex: 1;
   }
 
-  /* Params slot content (PanelShell .ps-params provides width/padding/border/scroll). */
+  /* Params slot content (PanelShell .ps-params provides width/padding/border/scroll). The column
+     is 240px (Marc, 2026-09-04: the segmented controls and their spacing dictated the width —
+     tightened so the profile chart gets the room): the band / correction segments and the RF
+     method buttons use a slimmer padding here than elsewhere. */
   .controls {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 12px;
+  }
+  .rf-section :global(.seg-btn),
+  .correction :global(.seg-btn) {
+    padding: 0 6px;
+  }
+  .rf-methods :global(.kbtn) {
+    padding: 0 8px;
+  }
+  /* Two steppers side by side (WP range, climb / descent angle) in a 220px inner column: the
+     stepper's default 74px field is sized for 4-digit values, these hold 2–3 digits. */
+  .range-row :global(.ns-stepper input),
+  .ctrl-2col :global(.ns-stepper input) {
+    width: 46px;
   }
   .ctrl {
     display: flex;
@@ -970,9 +986,9 @@
   .rf-section {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
     border-top: 1px solid rgba(255, 255, 255, 0.08);
-    padding-top: 11px;
+    padding-top: 8px;
   }
   .rf-head {
     font-size: 12px;
@@ -998,9 +1014,9 @@
   .correction {
     display: flex;
     flex-direction: column;
-    gap: 9px;
+    gap: 6px;
     border-top: 1px solid rgba(255, 255, 255, 0.08);
-    padding-top: 11px;
+    padding-top: 8px;
   }
   .corr-check {
     display: flex;

@@ -659,7 +659,7 @@
 <!-- Detail (right) column toolbar: Export flush right (mirrors the flight view's export toolbar). -->
 {#snippet detailToolbar()}
   <div class="bmv2-detail-actions">
-    <Button variant="data" icon="export" onclick={exportBattery}>{$t('batteryMgr.export')}</Button>
+    <Button variant="data" icon="export" onclick={exportBattery} title={$t('batteryMgr.export')} />
   </div>
 {/snippet}
 
@@ -710,7 +710,7 @@
         <div class="bmv2-pack-actions">
           <Button variant="standard" icon="edit" onclick={startEdit}>{$t('batteryMgr.edit')}</Button>
           <Button variant="standard" icon="add" onclick={startUsage}>{$t('batteryMgr.addUsage')}</Button>
-          <Button variant="danger" icon="delete" onclick={deleteBattery}>{$t('batteryMgr.delete')}</Button>
+          <Button variant="danger" icon="delete" onclick={deleteBattery} title={$t('batteryMgr.delete')} />
         </div>
         <div class="section-heading">{$t('batteryMgr.linkedFlights')} ({linkedFlights.length})</div>
         {#each linkedFlights as f (f.id)}

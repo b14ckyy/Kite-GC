@@ -553,7 +553,7 @@
       <div class="rc-profile-actions">
         <Button variant="data" icon="save" disabled={!activeProfile} onclick={onSave}>{$t('rc.save')}</Button>
         <Button variant="standard" icon="add" onclick={openNew}>{$t('rc.new')}</Button>
-        <Button variant="danger" icon="delete" disabled={!activeProfile} onclick={onDelete}>{$t('rc.delete')}</Button>
+        <Button variant="danger" icon="delete" disabled={!activeProfile} onclick={onDelete} title={$t('rc.delete')} />
       </div>
       {#if dirPath}
         <div class="rc-dir" title={dirPath}>{$t('rc.profilesPathHint')} <span class="rc-dir-path">{dirPath}</span></div>

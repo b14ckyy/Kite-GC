@@ -491,8 +491,8 @@
 {#snippet detailToolbar()}
   <div class="mmv2-detail-actions">
     <Button variant="data" icon="map" onclick={() => selected && loadToMap(selected)}>{$t('missionMgr.loadToMap')}</Button>
-    <Button variant="data" icon="export" onclick={() => selected && exportMission(selected)}>{$t('missionMgr.export')}</Button>
-    <Button variant="danger" icon="delete" onclick={() => selected && deleteMission(selected)}>{$t('missionMgr.delete')}</Button>
+    <Button variant="data" icon="export" onclick={() => selected && exportMission(selected)} title={$t('missionMgr.export')} />
+    <Button variant="danger" icon="delete" onclick={() => selected && deleteMission(selected)} title={$t('missionMgr.delete')} />
   </div>
 {/snippet}
 

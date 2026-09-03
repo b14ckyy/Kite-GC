@@ -11,7 +11,7 @@
   import { connection, availablePorts, bleDevices } from "$lib/stores/connection";
   import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
-  import { isAndroid, isMobile, isTablet, isPhone as isPhoneDevice, hasSerialPorts } from "$lib/platform";
+  import { isAndroid, isMobile, isTablet, isPhone as isPhoneDevice, hasSerialPorts, logPlayerWidth } from "$lib/platform";
   import { isDebugMode } from "$lib/stores/debug";
   import { telemetry } from "$lib/stores/telemetry";
   import { startRadarListeners, configureRadar, setRadarCenter, setRadarNode } from "$lib/stores/radarTracking";
@@ -26,9 +26,9 @@
   import LogPlayer from "$lib/components/logbook/LogPlayer.svelte";
   import HiresParseModal from "$lib/components/logbook/HiresParseModal.svelte";
   import RawTelemetryModal from "$lib/components/RawTelemetryModal.svelte";
-  import PhoneTopChips from "$lib/components/phone/PhoneTopChips.svelte";
+  import PhoneBottomChips from "$lib/components/phone/PhoneBottomChips.svelte";
+  import PhoneDebugButton from "$lib/components/phone/PhoneDebugButton.svelte";
   import ConnectionPopout from "$lib/components/phone/ConnectionPopout.svelte";
-  import PhoneStatusStrip from "$lib/components/phone/PhoneStatusStrip.svelte";
   import PhoneWidgetPanel from "$lib/components/phone/PhoneWidgetPanel.svelte";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import UpdateDialog from "$lib/components/UpdateDialog.svelte";
@@ -215,6 +215,20 @@
   // Viewport size (for the snapped floating-video reserve)
   let winW = $state(typeof window !== 'undefined' ? window.innerWidth : 1280);
   let winH = $state(typeof window !== 'undefined' ? window.innerHeight : 720);
+
+  /** The replay player's full panel is showing (paused / pinned) — reported by LogPlayer. */
+  let playerExpanded = $state(false);
+  // Phone: the full player must fit between the burger (12 + 42 + 8) and the chain-link button
+  // (8 + 42 + 8 from the column) with 8px on each side. Whatever is missing slides the widget
+  // column (and the button) out to the right — never further than the column is wide. 0 on wide
+  // phones (21:9) and whenever the player is collapsed or closed, so the column is anchored while
+  // a replay runs.
+  const PHONE_PLAYER_CHROME_PX = 62 + 58 + 16;
+  const phoneShift = $derived(
+    phoneUi && playerExpanded
+      ? Math.min(phonePanelW, Math.max(0, Math.round(logPlayerWidth + PHONE_PLAYER_CHROME_PX + phonePanelW - winW)))
+      : 0,
+  );
   // Width the bottom dock must yield to the bottom-left snapped video window.
   const videoReserve = $derived(
     $videoState.floating && $videoState.floatSnapped
@@ -3171,7 +3185,13 @@
 
 <svelte:window bind:innerWidth={winW} bind:innerHeight={winH} />
 
-<div class="ui-root" style:--ui-scale={uiScale} style:--toolbar-h="{toolbarH}px">
+<div
+  class="ui-root"
+  style:--ui-scale={uiScale}
+  style:--toolbar-h="{toolbarH}px"
+  style:--phone-panel-w="{phonePanelW}px"
+  style:--phone-shift="{phoneShift}px"
+>
   <!-- Window resize grips — outside `.ui-scale` so position:fixed stays viewport-relative.
        Re-adds edge resizing lost when the native decorations are disabled. Desktop only: a mobile
        build fills the screen and `startResizeDragging` has nothing to resize. -->
@@ -3208,7 +3228,7 @@
         onToggleMapView={toggleMapView}
         bind:viewMode={map2dViewMode}
         miniControls={mapInWidget}
-        centerInsetRight={phoneUi ? phonePanelW : 0}
+        centerInsetRight={phoneUi ? phonePanelW - phoneShift : 0}
         radarActive={radarSettings.enabled}
         radarMapSettings={radarSettings.map}
         {radarReference}
@@ -3219,7 +3239,7 @@
     {#if map3dEverOpened}
       <div class="map3d-layer" class:active={mapViewMode === '3d'}>
         <Map3D
-          centerInsetRight={phoneUi ? phonePanelW : 0}
+          centerInsetRight={phoneUi ? phonePanelW - phoneShift : 0}
           bind:this={map3dRef}
           active={mapViewMode === '3d'}
           playbackTrack={mapTrack}
@@ -3283,11 +3303,9 @@
   style:--grid-bottom-height={gridBottomHeight}
   style:--grid-side-width={gridSideWidth}
   style:--panel-bottom-reserve={panelBottomReserve}
-  style:--phone-panel-w="{phonePanelW}px"
 >
   {#if phoneUi}
   <!-- ======= PHONE CHROME (Dev-Docs active/PHONE_UI.md) ======= -->
-  <div class="phone-top-chips"><PhoneTopChips {telem} /></div>
   <div class="phone-conn">
     <ConnectionPopout
       {telem}
@@ -3318,14 +3336,8 @@
       bind:widthPx={phonePanelW}
     />
   </div>
-  <div class="phone-strip">
-    <PhoneStatusStrip
-      {connStatus}
-      {fcInfo}
-      connectionPort={$connection.port}
-      devMode={DEV_MODE}
-      bind:debugOpen
-    />
+  <div class="phone-bottom-chips">
+    <PhoneBottomChips {telem} />
   </div>
   {:else}
   <!-- ======= TOOLBAR ======= -->
@@ -3457,6 +3469,7 @@
     onScrubEnd={scrubEnd}
     {trackColorMode}
     onTrackColorModeChange={(mode) => { trackColorMode = mode; }}
+    onExpandedChange={(v) => { playerExpanded = v; }}
     {modelOverride}
     onModelOverrideChange={(v) => { modelOverride = v; }}
     playbackTrack={mapTrack}
@@ -3733,6 +3746,14 @@
         <TerrainAnalysisPanel track={selectedTrackWithPosition} live={isPrimaryConnected} {interfaceSettings} confirm={showDialog} />
       {/if}
     </div>
+    <!-- Phone: the dev Debug toggle lives in the PANELS layer so it stays reachable over an open
+         panel (a developer tool); the arming / sensor chips stay in .app under the panels (Marc:
+         a panel may cover them, they still peek out left of it). Dialogs keep their higher z-index. -->
+    {#if phoneUi && DEV_MODE}
+      <div class="phone-debug-btn">
+        <PhoneDebugButton bind:debugOpen />
+      </div>
+    {/if}
     <ConfirmDialog bind:this={confirmDialog} />
     <UpdateDialog />
     <CesiumKeyPrompt bind:open={cesiumKeyPromptOpen} onSave={cesiumKeySave} onRemindLater={cesiumKeyRemindLater} onIgnore={cesiumKeyIgnore} />
@@ -4216,26 +4237,37 @@
   .zone-phone-widgets > :global(*) {
     pointer-events: auto;
   }
-  /* Burger (NavRail, 42px at left 12px + safe-left) → chips right of it. */
-  .phone-top-chips {
-    position: absolute;
-    top: calc(8px + var(--safe-top, 0px));
-    left: calc(12px + 42px + 8px + var(--safe-left, 0px));
-    z-index: 110;
-    pointer-events: none;
+  /* The widget column slides out to the right by --phone-shift (set on .ui-root) while the full
+     replay player needs more room than the gap between the burger and the chain-link button offers
+     (narrow 16:9 phones); the chain-link button rides along so the gap really grows. The grid
+     column itself stays put — a transform only, so the packer and the map centre are untouched. */
+  .zone-phone-widgets {
+    transform: translateX(var(--phone-shift, 0px));
+    transition: transform 0.3s ease;
   }
   .phone-conn {
     position: absolute;
     top: calc(8px + var(--safe-top, 0px));
-    right: calc(var(--phone-panel-w, 0px) + 8px);
+    right: calc(var(--phone-panel-w, 0px) + 8px - var(--phone-shift, 0px));
     z-index: 110;
+    transition: right 0.3s ease;
   }
-  .phone-strip {
+  /* Bottom-left corner: arming + sensor chips (under the panels — they peek out left of an open
+     panel), then the dev Debug button in the panels layer (over them), then the Leaflet
+     attribution (--phone-bottom-w / --phone-debug-w, published by the two components); the nav
+     rail stops above the row. */
+  .phone-bottom-chips {
     position: absolute;
-    left: 0;
-    bottom: var(--safe-bottom, 0px);
+    left: calc(12px + var(--safe-left, 0px));
+    bottom: calc(8px + var(--safe-bottom, 0px));
     z-index: 110;
     pointer-events: none;
+  }
+  .phone-debug-btn {
+    position: absolute;
+    left: calc(var(--phone-bottom-w, 0px) + 8px);
+    bottom: calc(8px + var(--safe-bottom, 0px));
+    z-index: 170; /* over every panel (150 / 160), under the dialogs */
   }
 
   .zone-status-bar {

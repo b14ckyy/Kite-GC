@@ -196,17 +196,23 @@
      - width is capped to the viewport (minus the rail + a margin) so the panel never clips off-screen;
      - the panel is tall and OVERLAYS the HUD dock (it sits above it at z-index 150) instead of being
        squeezed into the gap above it, so its content is reachable/scrollable. iPad keeps its layout. */
-  /* Phone layout (Dev-Docs active/PHONE_UI.md): no toolbar, so the panel starts at the top safe
-     inset and may use the full height; its width is bounded by the map area — the rail on the left
-     (74px) and the widget column on the right (--phone-panel-w, published by +page). */
+  /* Phone layout (Dev-Docs archive/PHONE_UI.md): no toolbar, so the panel starts at the top safe
+     inset and may use the full height. Width: every variant keeps the width it asks for on the
+     desktop and is bounded by the SCREEN only — the rail on the left (62px) and an 8px margin on
+     the right. Panels may cover the widget column (z-index 150+ over the column's 100): on a
+     phone the map area alone is too narrow for the advanced two-column layouts (the detail column
+     scrolled sideways even on a 21:9 screen), and a parked panel gives the column back anyway. */
   :global(html.is-phone) .ps {
     top: calc(8px + var(--safe-top, 0px));
   }
   :global(html.is-phone) .ps-compact {
-    width: min(398px, calc(100vw - var(--safe-left, 0px) - 74px - var(--phone-panel-w, 0px) - 8px));
+    width: min(398px, calc(100vw - var(--safe-left, 0px) - 62px - 8px));
   }
   :global(html.is-phone) .ps-info {
-    max-width: min(360px, calc(100vw - var(--safe-left, 0px) - 74px - var(--phone-panel-w, 0px) - 8px));
+    max-width: min(360px, calc(100vw - var(--safe-left, 0px) - 62px - 8px));
+  }
+  :global(html.is-phone) .ps-advanced {
+    max-width: calc(100vw - var(--safe-left, 0px) - 62px - 8px);
   }
   :global(html.is-phone) .ps-compact,
   :global(html.is-phone) .ps-advanced {
@@ -252,19 +258,20 @@
     height: max(20vh, 160px);
   }
   /* Phone (PHONE_UI.md): no toolbar / status bar / side dock — the fullscreen panel spans from the
-     top safe inset to the bottom one and from the rail to the widget column. The 62px desktop
-     inset left a band at the bottom (the space the status bar used to take). */
+     top safe inset to the bottom one and from the rail to the right screen edge (over the widget
+     column, see above). The 62px desktop inset left a band at the bottom (the space the status bar
+     used to take). */
   :global(html.is-phone) .ps-fullscreen,
   :global(html.is-phone) .ps-wide-compact {
     top: calc(8px + var(--safe-top, 0px));
     left: calc(62px + var(--safe-left, 0px));
   }
   :global(html.is-phone) .ps-fullscreen {
-    width: calc(100% - 62px - var(--safe-left, 0px) - var(--phone-panel-w, 0px) - 8px);
+    width: calc(100% - 62px - var(--safe-left, 0px) - 8px);
     height: calc(100% - 16px - var(--safe-top, 0px) - var(--safe-bottom, 0px));
   }
   :global(html.is-phone) .ps-wide-compact {
-    width: calc(100% - 62px - var(--safe-left, 0px) - var(--phone-panel-w, 0px) - 8px);
+    width: calc(100% - 62px - var(--safe-left, 0px) - 8px);
   }
 
   /* ── Columns (compact = 1, advanced = 1:2; right wider for previews/maps) ── */
@@ -377,7 +384,7 @@
     min-height: 0;
   }
   .ps-params {
-    width: 280px;
+    width: 240px; /* 280 → 240 (2026-09-04): the terrain controls fit with tighter spacing, the graph gets the rest */
     flex-shrink: 0;
     overflow: auto;
     padding: 10px;
