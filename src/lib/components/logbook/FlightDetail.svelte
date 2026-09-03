@@ -45,6 +45,8 @@
     onDeleteBlackbox,
     dbPath,
     readOnly = false,
+    onImportOpenedFlight = undefined,
+    onDismissOpenedFlight = undefined,
   }: {
     flight: Flight;
     trackCount: number;
@@ -72,6 +74,9 @@
     dbPath: string;
     /** Opened-file mode: everything displays, nothing edits/links/deletes. */
     readOnly?: boolean;
+    /** Opened-file mode actions on this one flight (shown instead of Save/Delete). */
+    onImportOpenedFlight?: () => void;
+    onDismissOpenedFlight?: () => void;
   } = $props();
 
   // Edit affordances exist only in the full (non-minimized) card and never in read-only mode.
@@ -719,8 +724,10 @@
   {#if !minimized}
     <div class="setting-row">
       {#if editable}<Button variant="standard" icon="save" onclick={onSaveNotes}>{$t('logbook.saveNotes')}</Button>{/if}
+      {#if readOnly && onImportOpenedFlight}<Button variant="data" icon="import" onclick={onImportOpenedFlight}>{$t('logbook.importOpenedFlight')}</Button>{/if}
       <Button variant="data" icon="export" onclick={onExportTrack}>{$t('logbook.exportTrack')}</Button>
       {#if editable}<Button variant="danger" icon="delete" onclick={onDeleteFlight}>{$t('logbook.deleteFlight')}</Button>{/if}
+      {#if readOnly && onDismissOpenedFlight}<Button variant="danger" icon="close" onclick={onDismissOpenedFlight}>{$t('logbook.dismissOpenedFlight')}</Button>{/if}
     </div>
   {/if}
 </div>

@@ -74,6 +74,8 @@
     onOpenLog = () => {},
     onImportOpened = () => {},
     onCloseOpened = () => {},
+    onImportOpenedFlight = (_id: number) => {},
+    onDismissOpenedFlight = (_id: number) => {},
   }: {
     flightLoggingEnabled: boolean;
     /** Set when the flight DB was written by a NEWER Kite (the `db-newer:` open error) — the
@@ -118,13 +120,25 @@
     /** A log opened WITHOUT import (Dev-Docs active/OPEN_LOG_WITHOUT_IMPORT.md): the panel shows
      *  that file's flights read-only, with Import-into-logbook / Close instead of the normal
      *  import/export groups. */
-    fileMode?: { fileName: string } | null;
+    fileMode?: { fileNames: string[] } | null;
     /** Desktop only — the Open button (mobile stores no originals and cannot run the decoder). */
     canOpenLog?: boolean;
     onOpenLog?: () => void;
     onImportOpened?: () => void;
     onCloseOpened?: () => void;
+    /** Detail-view actions on ONE opened flight: real import of just that one / dismiss it. */
+    onImportOpenedFlight?: (id: number) => void;
+    onDismissOpenedFlight?: (id: number) => void;
   } = $props();
+
+  // Panel title in opened-file mode: the one file name, or "N files".
+  const fileModeTitle = $derived(
+    fileMode
+      ? fileMode.fileNames.length === 1
+        ? fileMode.fileNames[0]
+        : $t('logbook.openedFiles', { values: { count: fileMode.fileNames.length } })
+      : $t('logbook.title'),
+  );
 
   let logbookSortMode = $state<LogbookSortMode>('aircraft-location-date');
   let logbookTreeOpenTop = $state<Set<string>>(new Set());
@@ -525,6 +539,8 @@
         {onDeleteBlackbox}
         {dbPath}
         readOnly={fileMode != null}
+        onImportOpenedFlight={() => onImportOpenedFlight(selectedFlight.id)}
+        onDismissOpenedFlight={() => onDismissOpenedFlight(selectedFlight.id)}
       />
     {/if}
   </div>
@@ -538,7 +554,7 @@
   <div class="lbv2">
     <PanelShell
       {variant}
-      title={fileMode ? fileMode.fileName : $t('logbook.title')}
+      title={fileModeTitle}
       body={variant === 'info' ? infoBody : mainBody}
       toolbar={variant === 'info' ? undefined : mainToolbar}
       detail={flightDetailColumn ? flightDetail : undefined}

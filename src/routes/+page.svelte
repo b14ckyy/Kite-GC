@@ -553,8 +553,15 @@
   // Open a log WITHOUT importing it (Dev-Docs active/OPEN_LOG_WITHOUT_IMPORT.md): the file is parsed
   // by the ordinary importers into a throwaway scratch DB dir; while one is open, every logbook /
   // replay READ goes there instead of the main DB (writes are unreachable — the panel is read-only).
-  let openedLog = $state<{ dir: string; sourcePath: string; fileName: string } | null>(null);
-  const activeDbPath = $derived(openedLog?.dir ?? flightLogDbPath);
+  // Several files can be open at once (a multi-file drop, or files dropped one after another): the
+  // scratch DB collects them, each scratch flight remembers its source file (+ log index inside a
+  // multi-log flash dump) so it can be imported for real on its own.
+  type OpenedFlight = { id: number; sourcePath: string; logIndex?: number };
+  let openedLogs = $state<{ dir: string; flights: OpenedFlight[] } | null>(null);
+  const activeDbPath = $derived(openedLogs?.dir ?? flightLogDbPath);
+  const openedFileNames = $derived(
+    openedLogs ? [...new Set(openedLogs.flights.map((f) => baseName(f.sourcePath)))] : [],
+  );
   let flightLogRawPath = $state("");
   let flightLogRawEnabled = $state(false);
   let flightLogRawAlways = $state(false);
@@ -1363,98 +1370,209 @@
     if (wasPlayingBeforeScrub) startPlayback();
   }
 
-  // ── Open a log WITHOUT importing it (Dev-Docs active/OPEN_LOG_WITHOUT_IMPORT.md) ──────────
-  // Desktop only, and only while nothing is connected (the player is replay-only anyway). The file
-  // runs through the ordinary importer into the scratch dir — force_import (a fresh DB has nothing
-  // to be a duplicate of), no linking prompt (no live flights there), a multi-log .bbl imports all
-  // its logs without the prompt. `.kflight` stays import-only: it IS a logbook export.
+  // ── Open logs WITHOUT importing them (Dev-Docs active/OPEN_LOG_WITHOUT_IMPORT.md) ──────────
+  // Desktop only, and only while nothing is connected (the player is replay-only anyway). Files run
+  // through the ordinary importers into the scratch dir — force_import (nothing there to be a
+  // duplicate of), no linking prompt (no live flights there), a multi-log .bbl imports all its logs
+  // without the prompt. `.kflight` stays import-only: it IS a logbook export.
   const OPEN_EXTS = ['txt', 'bbl', 'bfl', 'bin', 'ulg', 'rawmsp', 'tlog'];
   const canOpenLogFile = $derived(!isMobile && flightLoggingEnabled);
+  const isOpenableLog = (p: string) => new RegExp(`\\.(${OPEN_EXTS.join('|')})$`, 'i').test(p);
 
-  async function openLogFile(filePath: string) {
+  /** Parse one file into the scratch dir; returns the scratch flights it produced. */
+  async function parseIntoScratch(filePath: string, dir: string): Promise<OpenedFlight[]> {
+    const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
+    const lang = $locale ?? 'en';
+    const idOf = (r: BlackboxImportStatus) => (r.type === 'duplicate' ? null : r.flight_id);
+    const out: OpenedFlight[] = [];
+    if (ext === 'bin') {
+      const id = idOf(await logbookCtrl.importArdupilot(filePath, dir, true, lang));
+      if (id != null) out.push({ id, sourcePath: filePath });
+    } else if (ext === 'ulg') {
+      const id = idOf(await logbookCtrl.importUlog(filePath, dir, true, lang));
+      if (id != null) out.push({ id, sourcePath: filePath });
+    } else if (ext === 'rawmsp' || ext === 'tlog') {
+      for (const id of (await logbookCtrl.importRaw(filePath, dir)).flightIds) out.push({ id, sourcePath: filePath });
+    } else {
+      const logCount = await logbookCtrl.countBlackboxLogs(filePath);
+      if (logCount <= 1) {
+        const id = idOf(await logbookCtrl.importBlackbox(filePath, dir, undefined, true, lang));
+        if (id != null) out.push({ id, sourcePath: filePath });
+      } else {
+        for (let index = 0; index < logCount; index++) {
+          const id = idOf(await logbookCtrl.importBlackbox(filePath, dir, index, true, lang));
+          if (id != null) out.push({ id, sourcePath: filePath, logIndex: index });
+        }
+      }
+    }
+    return out;
+  }
+
+  /** Open one or more log files for replay. Appends to an already open set; a selected main-DB
+   *  flight gives way. Failures are collected per file, the rest still opens. */
+  async function openLogFiles(paths: string[]) {
     if (!canOpenLogFile || blackboxImporting) return;
     if (connStatus === 'connected') {
       errorMsg = $t('logbook.openLogConnected');
       return;
     }
-    const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
-    if (!OPEN_EXTS.includes(ext)) {
-      errorMsg = $t('logbook.openLogUnsupported', { values: { file: baseName(filePath) } });
-      return;
+    const files = paths.filter(isOpenableLog);
+    const rejected = paths.filter((p) => !isOpenableLog(p));
+    if (rejected.length > 0) {
+      errorMsg = $t('logbook.openLogUnsupported', { values: { file: rejected.map(baseName).join(', ') } });
     }
-    if (BLACKBOX_EXTS.test(filePath) && !(await ensureBlackboxDecoder())) return;
+    if (files.length === 0) return;
+    if (files.some((f) => BLACKBOX_EXTS.test(f)) && !(await ensureBlackboxDecoder())) return;
 
-    // A previously opened file (or a selected DB flight) gives way to the new one.
-    await closeOpenedLog(false);
-    const dir = await scratchDir(flightLogDbPath);
-    await scratchClear(flightLogDbPath);
-    const idOf = (r: BlackboxImportStatus) => (r.type === 'duplicate' ? null : r.flight_id);
-    const lang = $locale ?? 'en';
+    if (selectedFlight != null) closePlayer();
+    const dir = openedLogs?.dir ?? (await scratchDir(flightLogDbPath));
+    if (!openedLogs) await scratchClear(flightLogDbPath); // fresh set → start from an empty scratch
     blackboxImporting = true;
+    const failures: string[] = [];
+    const added: OpenedFlight[] = [];
     try {
-      const ids: number[] = [];
-      if (ext === 'bin') {
-        const id = idOf(await logbookCtrl.importArdupilot(filePath, dir, true, lang));
-        if (id != null) ids.push(id);
-      } else if (ext === 'ulg') {
-        const id = idOf(await logbookCtrl.importUlog(filePath, dir, true, lang));
-        if (id != null) ids.push(id);
-      } else if (ext === 'rawmsp' || ext === 'tlog') {
-        ids.push(...(await logbookCtrl.importRaw(filePath, dir)).flightIds);
-      } else {
-        const logCount = await logbookCtrl.countBlackboxLogs(filePath);
-        if (logCount <= 1) {
-          const id = idOf(await logbookCtrl.importBlackbox(filePath, dir, undefined, true, lang));
-          if (id != null) ids.push(id);
-        } else {
-          for (let index = 0; index < logCount; index++) {
-            const id = idOf(await logbookCtrl.importBlackbox(filePath, dir, index, true, lang));
-            if (id != null) ids.push(id);
-          }
+      for (const filePath of files) {
+        try {
+          added.push(...(await parseIntoScratch(filePath, dir)));
+        } catch (e) {
+          failures.push(`${baseName(filePath)}: ${String(e)}`);
         }
       }
-      if (ids.length === 0) throw new Error('no flights found in file');
-      openedLog = { dir, sourcePath: filePath, fileName: baseName(filePath) };
-      activeTab = 'logbook';
-      await loadLogbook();
-      await selectFlight(ids[0]);
-    } catch (e) {
-      errorMsg = $t('logbook.importErrors', { values: { errors: `${baseName(filePath)}: ${String(e)}` } });
-      openedLog = null;
-      void scratchClear(flightLogDbPath).catch(() => {});
+      if (added.length > 0) {
+        openedLogs = { dir, flights: [...(openedLogs?.flights ?? []), ...added] };
+        activeTab = 'logbook';
+        await loadLogbook();
+        await selectFlight(added[0].id);
+      } else if (!openedLogs) {
+        void scratchClear(flightLogDbPath).catch(() => {});
+      }
     } finally {
+      blackboxImporting = false;
+      blackboxImportProgress = null;
+    }
+    if (failures.length > 0) {
+      errorMsg = $t('logbook.importErrors', { values: { errors: failures.join('\n') } });
+    }
+  }
+
+  /** Leave opened-file mode entirely: drop the player/selection, wipe the scratch dir, back to the
+   *  main DB. */
+  async function closeOpenedLog(reload = true) {
+    if (selectedFlight != null) closePlayer();
+    if (!openedLogs) return;
+    openedLogs = null;
+    await scratchClear(flightLogDbPath).catch(() => {});
+    if (reload) await loadLogbook();
+  }
+
+  /** Dismiss one opened flight (no import): remove it from the scratch DB and the list; the last one
+   *  going closes the set. */
+  async function dismissOpenedFlight(id: number) {
+    if (!openedLogs || blackboxImporting) return;
+    if (selectedFlightId === id) closePlayer();
+    try {
+      await logbookCtrl.removeFlight(id, openedLogs.dir);
+    } catch (e) {
+      console.warn('[open-log] dismiss failed', e);
+    }
+    const remaining = openedLogs.flights.filter((f) => f.id !== id);
+    if (remaining.length === 0) {
+      await closeOpenedLog();
+      return;
+    }
+    openedLogs = { dir: openedLogs.dir, flights: remaining };
+    await loadLogbook();
+    await selectFlight(remaining[0].id);
+  }
+
+  // Real imports out of the opened set. The standard import flows (performImport & co.) end in
+  // afterRealImport(); these two flags tell it whether the import came from the opened set.
+  let openedImportSingle: number | null = null;   // scratch flight id being imported on its own
+  let openedImportBatch: number[] | null = null;  // main-DB ids collected during "Import Logs"
+
+  /** Every successful real import lands here (instead of the plain reload+select). */
+  async function afterRealImport(flightId: number) {
+    if (openedImportBatch) {
+      openedImportBatch.push(flightId); // the batch decides what to do once it is through
+      return;
+    }
+    if (openedImportSingle != null && openedLogs) {
+      // The single flight is in the main DB now → drop it from the opened set, stay in the set
+      // while anything is left in it.
+      const id = openedImportSingle;
+      openedImportSingle = null;
+      try {
+        await logbookCtrl.removeFlight(id, openedLogs.dir);
+      } catch (e) {
+        console.warn('[open-log] remove imported scratch flight failed', e);
+      }
+      const remaining = openedLogs.flights.filter((f) => f.id !== id);
+      if (remaining.length > 0) {
+        openedLogs = { dir: openedLogs.dir, flights: remaining };
+        if (selectedFlightId === id) closePlayer();
+        await loadLogbook();
+        await selectFlight(remaining[0].id);
+        return;
+      }
+      await closeOpenedLog(false);
+    }
+    await loadLogbook();
+    await selectFlight(flightId);
+  }
+
+  /** "Import" in the detail view: the standard import (duplicate check, linking dialog) of just the
+   *  selected opened flight — its own log index for a flash dump. */
+  async function importOpenedFlight(id: number) {
+    if (!openedLogs || blackboxImporting) return;
+    const entry = openedLogs.flights.find((f) => f.id === id);
+    if (!entry) return;
+    if (BLACKBOX_EXTS.test(entry.sourcePath) && !(await ensureBlackboxDecoder())) return;
+    const ext = entry.sourcePath.split('.').pop()?.toLowerCase() ?? '';
+    openedImportSingle = id;
+    blackboxImporting = true;
+    try {
+      if (ext === 'bin') await performArdupilotImport(entry.sourcePath, false);
+      else if (ext === 'ulg') await performUlogImport(entry.sourcePath, false);
+      else if (ext === 'rawmsp' || ext === 'tlog') await performRawImport(entry.sourcePath);
+      else await performImport(entry.sourcePath, entry.logIndex, false);
+    } catch (e) {
+      errorMsg = $t('logbook.importErrors', { values: { errors: `${baseName(entry.sourcePath)}: ${String(e)}` } });
+    } finally {
+      openedImportSingle = null; // a cancelled duplicate prompt leaves the opened set as it was
       blackboxImporting = false;
       blackboxImportProgress = null;
     }
   }
 
-  /** Leave opened-file mode: drop the player/selection, wipe the scratch dir, back to the main DB. */
-  async function closeOpenedLog(reload = true) {
-    if (selectedFlight != null) closePlayer();
-    if (!openedLog) return;
-    openedLog = null;
-    await scratchClear(flightLogDbPath).catch(() => {});
-    if (reload) await loadLogbook();
-  }
-
-  /** "Import Logs": the standard import of the raw file into the main DB — duplicate check,
-   *  multi-log prompt and linking dialog all apply. The opened file stays open until an import
-   *  actually SUCCEEDS (see the success branches of performImport & co., which close it before
-   *  reloading the main logbook); a cancelled duplicate/multi-log prompt leaves it as it was. */
-  async function importOpenedLog() {
-    if (!openedLog || blackboxImporting) return;
-    await importFiles([openedLog.sourcePath]);
+  /** "Import Logs": the standard import of every opened file into the main DB — duplicate check,
+   *  multi-log prompt and linking dialog all apply. Once at least one import succeeded the opened
+   *  set is closed and the logbook switches to the main DB; if everything was cancelled it stays. */
+  async function importOpenedLogs() {
+    if (!openedLogs || blackboxImporting) return;
+    const paths = [...new Set(openedLogs.flights.map((f) => f.sourcePath))];
+    openedImportBatch = [];
+    try {
+      await importFiles(paths);
+    } finally {
+      const imported = openedImportBatch;
+      openedImportBatch = null;
+      if (imported && imported.length > 0) {
+        await closeOpenedLog(false);
+        await loadLogbook();
+        await selectFlight(imported[imported.length - 1]);
+      }
+    }
   }
 
   async function openLogFileDialog() {
     if (!canOpenLogFile || blackboxImporting) return;
     try {
       const selected = await open({
-        multiple: false,
+        multiple: true,
         filters: [{ name: $t('logbook.allLogsFilter'), extensions: anyCase(OPEN_EXTS) }],
       });
       if (!selected) return;
-      await openLogFile(Array.isArray(selected) ? selected[0] : selected);
+      await openLogFiles(Array.isArray(selected) ? selected : [selected]);
     } catch (e) {
       errorMsg = String(e);
     }
@@ -1499,10 +1617,10 @@
 
   async function performRawImport(filePath: string) {
     const result = await logbookCtrl.importRaw(filePath, flightLogDbPath);
-    await closeOpenedLog(false); // an opened file that just got imported for real → main DB now
-    await loadLogbook();
     if (result.flightIds.length > 0) {
-      await selectFlight(result.flightIds[result.flightIds.length - 1]);
+      await afterRealImport(result.flightIds[result.flightIds.length - 1]);
+    } else {
+      await loadLogbook();
     }
   }
 
@@ -1824,9 +1942,7 @@
           await logbookCtrl.linkFlights(result.flight_id, result.linkable_flight_id, flightLogDbPath);
         }
       }
-      await closeOpenedLog(false); // an opened file that just got imported for real → main DB now
-      await loadLogbook();
-      await selectFlight(result.flight_id);
+      await afterRealImport(result.flight_id);
     }
   }
 
@@ -1865,9 +1981,7 @@
           await logbookCtrl.linkFlights(result.flight_id, result.linkable_flight_id, flightLogDbPath);
         }
       }
-      await closeOpenedLog(false); // an opened file that just got imported for real → main DB now
-      await loadLogbook();
-      await selectFlight(result.flight_id);
+      await afterRealImport(result.flight_id);
     }
   }
 
@@ -2936,8 +3050,7 @@
         return;
       }
       if (!canOpenLogFile) return;
-      const logFile = paths.find((p) => new RegExp(`\\.(${OPEN_EXTS.join('|')})$`, 'i').test(p));
-      if (logFile) void openLogFile(logFile);
+      if (paths.some(isOpenableLog)) void openLogFiles(paths);
     });
     // Home from the FC (MSP_WP 0), pushed once at connect — recovers Home on a mid-flight connect /
     // app restart. The live arm-transition path (Map.svelte) overwrites it on the next arm.
@@ -3430,11 +3543,13 @@
             {blackboxFileInfo}
             onExportTrack={exportTrack}
             dbPath={activeDbPath}
-            fileMode={openedLog ? { fileName: openedLog.fileName } : null}
+            fileMode={openedLogs ? { fileNames: openedFileNames } : null}
             canOpenLog={canOpenLogFile}
             onOpenLog={() => { void openLogFileDialog(); }}
-            onImportOpened={() => { void importOpenedLog(); }}
+            onImportOpened={() => { void importOpenedLogs(); }}
             onCloseOpened={() => { void closeOpenedLog(); }}
+            onImportOpenedFlight={(id) => { void importOpenedFlight(id); }}
+            onDismissOpenedFlight={(id) => { void dismissOpenedFlight(id); }}
           />
         {:else if activeTab === 'mission'}
           <MissionPanel />
