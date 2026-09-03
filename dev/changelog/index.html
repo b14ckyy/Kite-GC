@@ -1600,6 +1600,11 @@ links, touch-friendly layout, shared storage folders) and on <strong>iPhone / iP
 with phone and tablet layouts, touch RC, BLE and Wi-Fi MAVLink — contributed by Sebastian
 Kumor). Features a device can't provide are hidden by capability, so the mobile app stays
 clean instead of half-working. <a href="https://github.com/b14ckyy/Kite-GC/pull/79">#79</a> · <a href="https://github.com/b14ckyy/Kite-GC/pull/16">#16</a></p>
+<p><strong>Phones got their own interface.</strong> In landscape the map fills the whole screen: no bars, a
+chain-link button opens the connection pop-out, and the instruments live in a frosted-glass
+<strong>widget column</strong> on the right edge with two swipeable pages — the map keeps running
+underneath it. Long-press a widget to rearrange or resize it; the others shift live to show
+where they will land. Pinch to zoom, 2D/3D and follow next to the column. <a href="https://github.com/b14ckyy/Kite-GC/pull/102">#102</a></p>
 </details>
 <details class="info">
 <summary>Native RTSP video client with hardware decode</summary>
@@ -1654,6 +1659,8 @@ top bar: one popup with <strong>every</strong> value the telemetry link delivers
   Video, switched with a corner button in edit mode; docks adapt to their largest widget. <a href="https://github.com/b14ckyy/Kite-GC/pull/101">#101</a></li>
 <li><strong>Raw telemetry view</strong> — the <strong>≡ Raw</strong> button next to Relay lists every telemetry value with
   its raw unit; replaces the Raw Telemetry widget. <a href="https://github.com/b14ckyy/Kite-GC/pull/101">#101</a></li>
+<li><strong>Phone layout</strong> — landscape interface for phones: full-screen map, connection pop-out,
+  widget column with two pages and long-press editing. <a href="https://github.com/b14ckyy/Kite-GC/pull/102">#102</a></li>
 </ul>
 <p><strong>Improved</strong></p>
 <ul>
@@ -1662,6 +1669,12 @@ top bar: one popup with <strong>every</strong> value the telemetry link delivers
   outside the Logbook collapses it to its info card. <a href="https://github.com/b14ckyy/Kite-GC/pull/100">#100</a></li>
 <li><strong>Live AGL projected flight line is smoother</strong> — the glide path is low-pass filtered instead
   of following every vario wobble; compass and horizon now share the widgets' blurred glass. <a href="https://github.com/b14ckyy/Kite-GC/pull/101">#101</a></li>
+<li><strong>Park a panel with a second click</strong> — clicking the active tool's rail icon again slides the
+  panel off the map without losing its state (a mission stays in edit mode); click once more to
+  bring it back. <a href="https://github.com/b14ckyy/Kite-GC/pull/102">#102</a></li>
+<li><strong>Replay player is narrower</strong> — the times moved under the buttons, which now share the full
+  width. <a href="https://github.com/b14ckyy/Kite-GC/pull/102">#102</a></li>
+<li><strong>Android launcher icon</strong> fills its circle instead of floating small in it. <a href="https://github.com/b14ckyy/Kite-GC/pull/102">#102</a></li>
 </ul>
 </details>
 <details class="note">
