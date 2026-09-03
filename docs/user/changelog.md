@@ -32,6 +32,14 @@ below. The release you are reading the docs for is expanded; click an older vers
         Logbook's new **Open** button) while disconnected, replay it exactly like a logbook flight,
         and import it for real only if you want to keep it. [#97] · [#99]
 
+    ??? info "Resizable widgets and a raw telemetry view"
+        Every flight widget now has **two or three sizes**: in the dock's edit mode a corner button
+        steps it from small to large (and, for the wide Live AGL and Video tiles, to a square).
+        The docks shrink to their largest widget, so a row of small tiles hands the freed space back
+        to the map or the fullscreen video. The compass and horizon picked up the frosted-glass look
+        of the other widgets, and the old Raw Telemetry widget gave way to a **≡ Raw** button in the
+        top bar: one popup with **every** value the telemetry link delivers, in its raw unit. [#101]
+
     **Added**
 
     - **Android support** — native app with USB serial, Bluetooth LE and Wi-Fi links, touch layout
@@ -51,12 +59,18 @@ below. The release you are reading the docs for is expanded; click an older vers
       rate for fluid instruments; slow-motion speeds 0.25× / 0.5×. [#97]
     - **Open a log without importing it** — drop an onboard log on the map or use the Logbook's
       Open button to replay it straight from the file; import it afterwards if you like. [#99]
+    - **Resizable widgets** — small/large for square widgets, wide/large/small for Live AGL and
+      Video, switched with a corner button in edit mode; docks adapt to their largest widget. [#101]
+    - **Raw telemetry view** — the **≡ Raw** button next to Relay lists every telemetry value with
+      its raw unit; replaces the Raw Telemetry widget. [#101]
 
     **Improved**
 
     - **Replay player folds away while playing** — a slim strip (craft, time, progress) replaces
       the panel; hover or tap the area to unfold it, paused = always open. Clicking anywhere
       outside the Logbook collapses it to its info card. [#100]
+    - **Live AGL projected flight line is smoother** — the glide path is low-pass filtered instead
+      of following every vario wobble; compass and horizon now share the widgets' blurred glass. [#101]
 
 ??? note "1.0.0 — Initial release"
 
@@ -80,3 +94,4 @@ below. The release you are reading the docs for is expanded; click an older vers
 [#97]: https://github.com/b14ckyy/Kite-GC/pull/97
 [#99]: https://github.com/b14ckyy/Kite-GC/pull/99
 [#100]: https://github.com/b14ckyy/Kite-GC/pull/100
+[#101]: https://github.com/b14ckyy/Kite-GC/pull/101
