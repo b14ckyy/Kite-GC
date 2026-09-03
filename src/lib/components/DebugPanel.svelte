@@ -1078,6 +1078,13 @@
   .perf-empty { padding: 20px 4px; color: #949494; font-style: italic; }
   .perf-hint { margin-top: 12px; padding-top: 8px; border-top: 1px solid #272727; color: #777; font-size: 11px; line-height: 1.4; }
 
+  /* Phone: no top/status bar; keep clear of the widget column. */
+  :global(html.is-phone) .debug-panel {
+    top: calc(8px + var(--safe-top, 0px));
+    right: calc(var(--phone-panel-w, 0px) + 8px);
+    width: min(540px, calc(100vw - var(--phone-panel-w, 0px) - 74px));
+    max-height: calc(100vh - 16px - var(--safe-top, 0px) - var(--safe-bottom, 0px));
+  }
   .debug-panel {
     position: absolute;
     top: 65px;
