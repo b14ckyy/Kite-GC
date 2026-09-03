@@ -64,6 +64,14 @@ the **[3D map](map-3d.md)**.
 Replaying a recorded flight — the player (play / pause, timeline, speed) drives the same instruments and map.
 ///
 
+While playback **runs**, the player folds into a slim strip under the top bar — craft and type,
+elapsed time, progress, total — so it hides as little of the picture as possible. Move the mouse
+into the area the full player occupies (or tap it on a touch screen) and it unfolds; leave the area
+(or tap anywhere else) and it folds again. While playback is **paused** the full player always stays
+open, so changing the speed, the track colouring or scrubbing never fights a folding panel. A map
+drag that ends in that area doesn't unfold it — only releasing the button there does. Clicking or
+tapping anywhere outside the Logbook panel collapses it to its info card, giving the map the room.
+
 ### High-resolution replay
 
 Flights are stored at 10 samples per second — plenty for the map, but an onboard log usually
