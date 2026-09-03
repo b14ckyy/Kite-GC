@@ -61,7 +61,8 @@
     "renameBtPort": "Diesen Bluetooth-Port umbenennen",
     "btNamePlaceholder": "Eigener Name",
     "btNameSave": "Name speichern",
-    "btNameCancel": "Abbrechen"
+    "btNameCancel": "Abbrechen",
+    "panelTitle": "Verbindung"
   },
   "cesiumKey": {
     "title": "3D-Terrain benötigt einen Cesium-Ion-Key",
@@ -1107,7 +1108,10 @@
     "off": "Aus",
     "editLayout": "Widget-Layout bearbeiten",
     "exitEdit": "Bearbeitungsmodus beenden",
-    "resize": "Widgetgröße ändern"
+    "resize": "Widgetgröße ändern",
+    "phonePage": "Seite {n}",
+    "phoneNoSpaceTitle": "Kein freier Platz",
+    "phoneNoSpace": "Das Widget-Raster ist auf beiden Seiten voll. Verkleinere oder deaktiviere zuerst ein anderes Widget."
   },
   "widgetLabels": {
     "spd": "SPD",

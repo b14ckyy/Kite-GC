@@ -38,18 +38,24 @@
 </div>
 
 <style>
-  /* Anchored to the LogPlayer (centred, 800px wide): sit just right of its right edge. */
+  /* Anchored to the LogPlayer (centred, --log-player-w wide — the same variable LogPlayer uses):
+     sit just right of its right edge. */
   .stick-overlay {
     position: absolute;
     top: 62px;
     left: 50%;
-    transform: translateX(calc(400px + 28px)); /* clear gap to the right of the centred 800px bar */
+    transform: translateX(calc(var(--log-player-w, 640px) / 2 + 28px));
     z-index: 50;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 4px;
     pointer-events: none; /* purely informational — never steal clicks from the map/player */
+  }
+
+  /* Phone: the map area is barely wider than the player itself — no room beside it. */
+  :global(html.is-phone) .stick-overlay {
+    display: none;
   }
 
   .sticks-row {

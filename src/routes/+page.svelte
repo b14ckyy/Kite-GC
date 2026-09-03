@@ -26,6 +26,10 @@
   import LogPlayer from "$lib/components/logbook/LogPlayer.svelte";
   import HiresParseModal from "$lib/components/logbook/HiresParseModal.svelte";
   import RawTelemetryModal from "$lib/components/RawTelemetryModal.svelte";
+  import PhoneTopChips from "$lib/components/phone/PhoneTopChips.svelte";
+  import ConnectionPopout from "$lib/components/phone/ConnectionPopout.svelte";
+  import PhoneStatusStrip from "$lib/components/phone/PhoneStatusStrip.svelte";
+  import PhoneWidgetPanel from "$lib/components/phone/PhoneWidgetPanel.svelte";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import UpdateDialog from "$lib/components/UpdateDialog.svelte";
   import { runUpdateCheck } from "$lib/controllers/updateCheck";
@@ -64,6 +68,8 @@
   import { refreshSerialPorts, connectFC, disconnectFC, startBleScan, stopBleScan, startBleDeviceListener, stopBleDeviceListener, clearBleDevices } from '$lib/controllers/connectionController';
   import * as logbookCtrl from '$lib/controllers/logbookController';
   import * as widgetCtrl from '$lib/controllers/widgetController';
+  import * as phoneCtrl from '$lib/controllers/phoneWidgetController';
+  import type { PhoneWidgetsConfig } from '$lib/controllers/phoneWidgetController';
   import { isValidGpsCoordinate, isArmed } from '$lib/helpers/telemetry';
   import { anyCase } from '$lib/helpers/fileFilters';
   import { liveTrack, appendLivePoint, clearLiveTrack } from '$lib/stores/liveTrack';
@@ -193,7 +199,12 @@
   let bottomDockH = $state(200);
   // Live toolbar height (exposed as --toolbar-h). The phone toolbar wraps/collapses so its height
   // varies; the absolutely-positioned nav-rail + panels track this so they never hide under it.
-  let toolbarH = $state(53);
+  // The phone has no toolbar at all (Dev-Docs active/PHONE_UI.md): its chrome is the burger + chips,
+  // the connection popout, the right-hand widget column and a bottom-left status strip.
+  const phoneUi = isPhoneDevice;
+  let toolbarH = $state(phoneUi ? 0 : 53);
+  /** Rendered width of the phone widget column (reported by PhoneWidgetPanel) → the grid column. */
+  let phonePanelW = $state(0);
   let sideDockW = $state(200);
   let sideDockH = $state(400);
   // Each dock panel's own cross-axis extent (its largest widget), reported by WidgetPanel — the dock
@@ -274,7 +285,11 @@
   // see mapFrameStyle above for the mechanism. The map sliding ≤ half a px under the toolbar edge
   // is invisible (chrome z1 covers map z0); Map.svelte's ResizeObserver re-invalidates on the
   // resulting size change by itself.
-  const mapLayerStyle = $derived(`top:${Math.round(53 * uiScale)}px; bottom:${Math.round(24 * uiScale)}px;`);
+  const mapLayerStyle = $derived(
+    phoneUi
+      ? 'top:0; bottom:0;' // the whole screen — the map runs on under the widget column's glass
+      : `top:${Math.round(53 * uiScale)}px; bottom:${Math.round(24 * uiScale)}px;`,
+  );
   const mapFloating = $derived($videoState.mapLocation === 'floating');
   const mapInWidget = $derived($videoState.mapLocation === 'widget');
   // Rounded to whole px, here and everywhere the unzoomed map layer is placed (issue #52): a
@@ -391,6 +406,8 @@
   let errorMsg = $state("");
   let navPanelOpen = $state(false);
   let activeTab = $state("uav-info");
+  /** The active panel is slid out of view (state intact) — re-click of its rail button. */
+  let panelHidden = $state(false);
   // Telemetry Relay dropdown (under the connection bar).
   let relayPanelOpen = $state(false);
 
@@ -925,6 +942,11 @@
   };
   // Sanitised: a stored layout may still name a widget the registry no longer has.
   panels = widgetCtrl.sanitizePanels(saved.panels ?? defaultPanels);
+  if (phoneUi) {
+    // Same for the phone grid: registry drift, sizes, overflow → deactivate.
+    const normalized = phoneCtrl.normalizePhoneWidgets(saved.phoneWidgets ?? phoneCtrl.DEFAULT_PHONE_WIDGETS);
+    if (normalized !== saved.phoneWidgets) settings.patch({ phoneWidgets: normalized });
+  }
 
   // ── Radar (foreign-vehicle tracking) — independent of the main connection ──
   /** Free-look: cap the query centre's offset from the camera nadir (and the radius) at 150 km. */
@@ -1103,6 +1125,7 @@
 
   function toggleNavPanel() {
     navPanelOpen = !navPanelOpen;
+    panelHidden = false;
     // The X hides all panels — including the terrain overlay
     if (!navPanelOpen) {
       editMode.set(false);
@@ -1196,10 +1219,18 @@
   }
 
   function selectTab(tabId: string) {
+    // Re-clicking the ACTIVE tab's button hides its panel without touching its state (the mission
+    // edit mode stays armed, a half-typed form survives): the panel slides out to the left and the
+    // map gets the whole screen; the next click brings it back. Only switching to another tab or
+    // closing the rail (the hamburger X) deactivates as before. Same for the terrain overlay.
+    const isActive = terrainOpen ? tabId === 'terrain' : tabId === activeTab;
+    if (navPanelOpen && isActive) {
+      panelHidden = !panelHidden;
+      setTimeout(() => window.dispatchEvent(new Event("resize")), 320);
+      return;
+    }
+    panelHidden = false;
     // Terrain Analysis is a full-width overlay shown in place of the panel content.
-    // Like every other nav-rail button it only ever OPENS/selects (re-clicking the active
-    // button does not close it) — closing happens by closing the whole nav rail (the
-    // hamburger X) or by selecting another tab.
     if (tabId === 'terrain') {
       patchTerrainAnalysis({ open: true });
       return;
@@ -2532,16 +2563,36 @@
     settings.patch({ panels });
   }
 
+  // ── Phone widget grid (Dev-Docs active/PHONE_UI.md D13) — its own config, its own rules ──
+  const phoneWidgets = $derived($settings.phoneWidgets);
+  function patchPhoneWidgets(next: PhoneWidgetsConfig) {
+    if (next !== $settings.phoneWidgets) settings.patch({ phoneWidgets: next });
+  }
+
   function toggleWidget(widgetId: string) {
+    if (phoneUi) {
+      const next = phoneCtrl.togglePhoneWidget(phoneWidgets, widgetId);
+      if (next === null) {
+        void showInfo($t('widgets.phoneNoSpaceTitle'), $t('widgets.phoneNoSpace'));
+        return;
+      }
+      patchPhoneWidgets(next);
+      return;
+    }
     panels = widgetCtrl.toggleWidgetVisibility(panels, widgetId);
     settings.patch({ panels });
   }
 
   function isWidgetActive(widgetId: string): boolean {
+    if (phoneUi) return phoneCtrl.isPhoneWidgetActive(phoneWidgets, widgetId);
     return widgetCtrl.isWidgetActive(panels, widgetId);
   }
 
   function getWidgetPanelLabel(widgetId: string): string {
+    if (phoneUi) {
+      const page = phoneCtrl.phoneWidgetPage(phoneWidgets, widgetId);
+      return page == null ? $t('widgets.off') : $t('widgets.phonePage', { values: { n: page + 1 } });
+    }
     const panel = widgetCtrl.getWidgetPanel(panels, widgetId);
     if (panel === 'bottom') return $t('widgets.bottom');
     if (panel === 'right') return $t('widgets.right');
@@ -3157,6 +3208,7 @@
         onToggleMapView={toggleMapView}
         bind:viewMode={map2dViewMode}
         miniControls={mapInWidget}
+        centerInsetRight={phoneUi ? phonePanelW : 0}
         radarActive={radarSettings.enabled}
         radarMapSettings={radarSettings.map}
         {radarReference}
@@ -3167,6 +3219,7 @@
     {#if map3dEverOpened}
       <div class="map3d-layer" class:active={mapViewMode === '3d'}>
         <Map3D
+          centerInsetRight={phoneUi ? phonePanelW : 0}
           bind:this={map3dRef}
           active={mapViewMode === '3d'}
           playbackTrack={mapTrack}
@@ -3196,7 +3249,7 @@
   <!-- --toast-dock-inset = the open left-docked panel's right edge (0 when none); the system-message
        toasts read it to centre in the free area beside the panel (issue #10). The radar banner ignores
        it and stays frame-centred + on top. -->
-  <div class="app-toasts" style:--toast-dock-inset="{$panelDockRight}px">
+  <div class="app-toasts" style:--toast-dock-inset="{panelHidden ? 0 : $panelDockRight}px">
     <!-- Conflict-alert banner (renders nothing when idle). -->
     <RadarAlertBanner {interfaceSettings} />
     <!-- FC system messages (MAVLink STATUSTEXT) as top-edge toasts (renders nothing when idle). -->
@@ -3230,7 +3283,51 @@
   style:--grid-bottom-height={gridBottomHeight}
   style:--grid-side-width={gridSideWidth}
   style:--panel-bottom-reserve={panelBottomReserve}
+  style:--phone-panel-w="{phonePanelW}px"
 >
+  {#if phoneUi}
+  <!-- ======= PHONE CHROME (Dev-Docs active/PHONE_UI.md) ======= -->
+  <div class="phone-top-chips"><PhoneTopChips {telem} /></div>
+  <div class="phone-conn">
+    <ConnectionPopout
+      {telem}
+      {ports}
+      {bleDeviceList}
+      {isBleScanning}
+      {connStatus}
+      {isConnecting}
+      bind:selectedTransport
+      bind:selectedProtocol
+      bind:selectedPort
+      bind:selectedBaud
+      bind:tcpHost
+      bind:tcpPort
+      bind:selectedBleDevice
+      {baudRates}
+      onConnect={handleConnect}
+      onRescanBle={bleScanWindow}
+    />
+  </div>
+  <div class="zone-phone-widgets">
+    <PhoneWidgetPanel
+      config={phoneWidgets}
+      {telem}
+      {interfaceSettings}
+      onresize={(id) => patchPhoneWidgets(phoneCtrl.cyclePhoneWidgetSize(phoneWidgets, id))}
+      onmove={(id, page, row, col) => patchPhoneWidgets(phoneCtrl.movePhoneWidget(phoneWidgets, id, page, row, col))}
+      bind:widthPx={phonePanelW}
+    />
+  </div>
+  <div class="phone-strip">
+    <PhoneStatusStrip
+      {connStatus}
+      {fcInfo}
+      connectionPort={$connection.port}
+      devMode={DEV_MODE}
+      bind:debugOpen
+    />
+  </div>
+  {:else}
   <!-- ======= TOOLBAR ======= -->
   <div class="zone-toolbar" bind:clientHeight={toolbarH}>
     <Toolbar
@@ -3258,6 +3355,7 @@
   />
     <RelayPanel open={relayPanelOpen} />
   </div>
+  {/if}
 
   <!-- ======= MAP (always fullscreen behind everything) ======= -->
   <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -3386,11 +3484,13 @@
   <NavRail
     open={navPanelOpen}
     activeTab={railActiveTab}
+    activeHidden={panelHidden}
     tabs={railTabs}
     onToggle={toggleNavPanel}
     onSelectTab={selectTab}
   />
 
+  {#if !phoneUi}
   <!-- ======= BOTTOM WIDGET PANEL ======= -->
   <div class="zone-bottom-dock" class:zone-hidden={!$layout.bottomDock.visible} class:panel-editing={widgetEditMode} bind:clientWidth={bottomDockW} bind:clientHeight={bottomDockH} style:padding-left="{videoReserve}px">
     <div class="panel-bottom-wrap">
@@ -3453,6 +3553,7 @@
   <div class="zone-map-controls">
     <!-- reserved for map control buttons (zoom, 3D toggle etc.) -->
   </div>
+  {/if}
 
   <!-- ======= DEBUG PANEL (dev only) ======= -->
   {#if DEV_MODE && debugOpen && DebugPanelCmp}
@@ -3468,6 +3569,7 @@
   {/if}
 
   <!-- ======= STATUS BAR ======= -->
+  {#if !phoneUi}
   <div class="zone-status-bar">
     <StatusBar
       {connStatus}
@@ -3478,6 +3580,7 @@
       bind:debugOpen
     />
   </div>
+  {/if}
 </main>
   </div><!-- .ui-scale -->
 
@@ -3490,6 +3593,7 @@
   <div class="ui-scale panels-layer">
     <div
       class="panels-host"
+      class:panels-hidden={panelHidden}
       style:--grid-bottom-height={gridBottomHeight}
       style:--grid-side-width={gridSideWidth}
       style:--panel-bottom-reserve={panelBottomReserve}
@@ -4084,6 +4188,53 @@
   .zone-map-controls {
     grid-area: map-controls;
     z-index: 90;
+    pointer-events: none;
+  }
+
+  /* ── Phone chrome (Dev-Docs active/PHONE_UI.md) ──────────────────────────────────────────
+     One row: the map area (everything floats over it) and the full-height widget column whose
+     width the panel reports (--phone-panel-w). No toolbar, no docks, no status bar. Declared
+     after the is-mobile rules so it wins at equal specificity. */
+  :global(html.is-phone) .app {
+    /* minmax(0, 1fr): a grid row's default min-height is its CONTENT — the widget column's
+       two pages are 2× the panel height, so a plain 1fr row grew with them, the panel measured
+       the taller row, the slot grew, the pages grew … (measured: slot 419 840 px, the screen
+       flickering). The row must be the viewport, never the content. */
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-columns: 1fr var(--phone-panel-w, 0px);
+    grid-template-areas: "main phone-widgets";
+  }
+  .zone-phone-widgets {
+    grid-area: phone-widgets;
+    z-index: 100;
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .zone-phone-widgets > :global(*) {
+    pointer-events: auto;
+  }
+  /* Burger (NavRail, 42px at left 12px + safe-left) → chips right of it. */
+  .phone-top-chips {
+    position: absolute;
+    top: calc(8px + var(--safe-top, 0px));
+    left: calc(12px + 42px + 8px + var(--safe-left, 0px));
+    z-index: 110;
+    pointer-events: none;
+  }
+  .phone-conn {
+    position: absolute;
+    top: calc(8px + var(--safe-top, 0px));
+    right: calc(var(--phone-panel-w, 0px) + 8px);
+    z-index: 110;
+  }
+  .phone-strip {
+    position: absolute;
+    left: 0;
+    bottom: var(--safe-bottom, 0px);
+    z-index: 110;
     pointer-events: none;
   }
 

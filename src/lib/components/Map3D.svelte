@@ -151,7 +151,11 @@
     radarMapSettings = null,
     radarRefAltM = null,
     radarReference = null,
+    centerInsetRight = 0,
   }: {
+    /** Width (css px) of an overlay covering the map's RIGHT edge (the phone's widget column) — the
+     *  corner controls move left by it. (The 3D camera centre is not offset yet: PHONE_UI.md D14.) */
+    centerInsetRight?: number;
     active?: boolean;
     playbackTrack?: TelemetryRecord[];
     playbackPoint?: TelemetryRecord | null;
@@ -4653,7 +4657,7 @@
   );
 </script>
 
-<div class="map3d-wrapper">
+<div class="map3d-wrapper" style="--map-inset-right: {centerInsetRight}px">
   <div class="cesium-container" bind:this={cesiumContainer}></div>
 
   {#if cameraMode === 'fpv'}
@@ -4830,7 +4834,7 @@
   .map-controls-corner {
     position: absolute;
     bottom: 8px;
-    right: 8px;
+    right: calc(8px + var(--map-inset-right, 0px)); /* clear of a right-edge overlay (phone) */
     z-index: 10000;
     display: flex;
     flex-direction: column;
@@ -4864,6 +4868,13 @@
     font-size: 23px;
     line-height: 1;
     font-weight: 700;
+  }
+  /* Phone (PHONE_UI.md D11): pinch zooms, no buttons; the cluster clears the bottom status row. */
+  :global(html.is-phone) .map-zoom-btn {
+    display: none;
+  }
+  :global(html.is-phone) .map-controls-corner {
+    bottom: calc(30px + var(--safe-bottom, 0px));
   }
 
   .map-mode-btn {

@@ -8,19 +8,7 @@
   import { t } from 'svelte-i18n';
   import type { TelemetryData } from "$lib/stores/telemetry";
   import { WIDGET_MAP, LARGE_BASE_VMIN, SMALL_BASE_VMIN, MIN_SCALE, effectiveWidgetSize, type WidgetSize } from "$lib/config/widgetRegistry";
-  import AHI from "./widgets/AHI.svelte";
-  import SpeedWidget from "./widgets/SpeedWidget.svelte";
-  import AltWidget from "./widgets/AltWidget.svelte";
-  import BatteryWidget from "./widgets/BatteryWidget.svelte";
-  import GpsWidget from "./widgets/GpsWidget.svelte";
-  import RcLinkWidget from "./widgets/RcLinkWidget.svelte";
-  import CompassWidget from "./widgets/CompassWidget.svelte";
-  import HomeWidget from "./widgets/HomeWidget.svelte";
-  import FlightModeWidget from "./widgets/FlightModeWidget.svelte";
-  import LiveAglWidget from "./widgets/LiveAglWidget.svelte";
-  import TerrainRadarWidget from "./widgets/TerrainRadarWidget.svelte";
-  import VideoWidget from "./widgets/VideoWidget.svelte";
-  import { isPhone } from "$lib/platform";
+  import WidgetRenderer from "./WidgetRenderer.svelte";
   import type { InterfaceSettings } from "$lib/stores/settings";
 
   let {
@@ -522,33 +510,7 @@
         </button>
       {/if}
       <div class="widget-content">
-        {#if item.id === 'ahi'}
-          <AHI {telem} size={item.sizePx} />
-        {:else if item.id === 'speed'}
-          <SpeedWidget {telem} size={item.sizePx} {interfaceSettings} />
-        {:else if item.id === 'altitude'}
-          <AltWidget {telem} size={item.sizePx} {interfaceSettings} />
-        {:else if item.id === 'battery'}
-          <BatteryWidget {telem} size={item.sizePx} widgetId="battery" />
-        {:else if item.id === 'battery2'}
-          <BatteryWidget {telem} size={item.sizePx} widgetId="battery2" />
-        {:else if item.id === 'gps'}
-          <GpsWidget {telem} size={item.sizePx} />
-        {:else if item.id === 'rcLink'}
-          <RcLinkWidget {telem} size={item.sizePx} />
-        {:else if item.id === 'compass'}
-          <CompassWidget {telem} size={item.sizePx} {interfaceSettings} />
-        {:else if item.id === 'home'}
-          <HomeWidget {telem} size={item.sizePx} {interfaceSettings} />
-        {:else if item.id === 'flightMode'}
-          <FlightModeWidget {telem} size={item.sizePx} />
-        {:else if item.id === 'liveAgl'}
-          <LiveAglWidget {telem} {interfaceSettings} width={item.wPx} height={item.hPx} />
-        {:else if item.id === 'terrainRadar'}
-          <TerrainRadarWidget {telem} {interfaceSettings} size={item.sizePx} {editing} />
-        {:else if item.id === 'videoFeed' && !isPhone}
-          <VideoWidget width={item.wPx} height={item.hPx} />
-        {/if}
+        <WidgetRenderer id={item.id} {telem} {interfaceSettings} sizePx={item.sizePx} wPx={item.wPx} hPx={item.hPx} {editing} />
       </div>
     </div>
   {/each}

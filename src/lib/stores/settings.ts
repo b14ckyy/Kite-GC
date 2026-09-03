@@ -7,6 +7,7 @@
 import { writable } from 'svelte/store';
 import type { RelayConfig } from '$lib/stores/relay';
 import type { WidgetSize } from '$lib/config/widgetRegistry';
+import { DEFAULT_PHONE_WIDGETS, type PhoneWidgetsConfig } from '$lib/controllers/phoneWidgetController';
 
 export interface MapState {
   center: [number, number];
@@ -345,6 +346,9 @@ export interface AppSettings {
   interface: InterfaceSettings;
   // Widget panel layout
   panels: PanelConfig;
+  /** Phone widget grid (order / size / column / active) — separate from the desktop docks
+   *  (Dev-Docs active/PHONE_UI.md D13). */
+  phoneWidgets: PhoneWidgetsConfig;
   // Locale / language
   locale: string;
   /** Global UI scale factor (1 = 100%, up to 2 = 200%); zooms the chrome, not the map. */
@@ -435,6 +439,7 @@ const defaults: AppSettings = {
     bottom: ['battery', 'speed', 'ahi', 'altitude', 'compass'],
     right: ['home', 'rcLink', 'gps'],
   },
+  phoneWidgets: DEFAULT_PHONE_WIDGETS,
   locale: 'en',
   uiScale: 1,
   cesiumIonToken: '',

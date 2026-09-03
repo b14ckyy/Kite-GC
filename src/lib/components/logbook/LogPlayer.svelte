@@ -223,10 +223,15 @@
     const r = zoneRect;
     if (r == null || x < r.left || x > r.right || y < r.top || y > r.bottom) return false;
     // A surface lying OVER the zone (a side panel, a dialog, the floating video window) blocks
-    // it: only the map — or the player itself — under the pointer counts. The compact strip and
-    // the stick overlay are pointer-events:none, so they never show up here.
+    // it: only the map, the player itself or the compact strip under the pointer counts. The
+    // strip is pointer-events:none, but elementFromPoint still reports it on Android's WebView
+    // (and the desktop's top rows behaved the same) — the strip IS the thing the user aims for,
+    // so it counts as in-zone explicitly instead of being read as a blocking surface.
     const el = document.elementFromPoint(x, y);
-    return el != null && (el.closest('.layer-map') != null || el.closest('.log-player') != null);
+    return (
+      el != null &&
+      (el.closest('.layer-map') != null || el.closest('.log-player') != null || el.closest('.log-player-compact') != null)
+    );
   }
 
   $effect(() => {
@@ -250,6 +255,8 @@
     };
     const onDown = (e: PointerEvent) => {
       if (e.pointerType === 'mouse') return;
+      measureZone(); // a moved (not resized) zone is invisible to the ResizeObserver — the phone's
+                     // widget column shifts it after the first layout
       touchPinned = inZone(e.clientX, e.clientY);
     };
     window.addEventListener('pointermove', onMove);
@@ -329,7 +336,6 @@
     </div>
 
     <div class="log-player-controls">
-      <span class="log-player-time">{formatPlaybackTime(playbackCurrentMs)}</span>
       <div class="log-player-buttons">
         <button class="log-player-btn" onclick={onSeekToStart} title={$t('player.toStart')}>|&lt;</button>
         <button class="log-player-btn" onclick={() => onSeek(-300000)} title="-5min">-5m</button>
@@ -345,6 +351,11 @@
           {playbackSpeed}x
         </button>
       </div>
+    </div>
+    <!-- Times on their own line under the buttons (the panel auto-hides now, so height is cheap and
+         the buttons get the full width — the panel is 640 px wide on the desktop, 480 on the phone, not 800). -->
+    <div class="log-player-times">
+      <span class="log-player-time">{formatPlaybackTime(playbackCurrentMs)}</span>
       <span class="log-player-time">{formatPlaybackTime(playbackTotalMs)}</span>
     </div>
 
@@ -423,8 +434,9 @@
     top: 62px;
     left: 50%;
     transform: translateX(-50%);
-    width: 800px;
+    width: var(--log-player-w, 640px);
     max-width: calc(100vw - 40px);
+    box-sizing: border-box;
     z-index: 50;
     background: rgba(46, 46, 46, 0.92);
     backdrop-filter: blur(12px);
@@ -447,10 +459,28 @@
     top: 53px;
     left: 50%;
     transform: translateX(-50%);
-    width: 800px;
+    width: var(--log-player-w, 640px);
     max-width: calc(100vw - 40px);
+    box-sizing: border-box;
     pointer-events: none;
     visibility: hidden;
+  }
+
+  /* Phone (Dev-Docs active/PHONE_UI.md D14): no top bar — the player hangs from the top safe inset,
+     centred over the MAP AREA (the screen minus the widget column, --phone-panel-w from +page) and
+     never wider than it. Same for the hover zone and the compact strip. */
+  :global(html.is-phone) .log-player,
+  :global(html.is-phone) .log-player-zone,
+  :global(html.is-phone) .log-player-compact {
+    left: calc((100vw - var(--phone-panel-w, 0px)) / 2);
+    max-width: calc(100vw - var(--phone-panel-w, 0px) - 16px);
+  }
+  :global(html.is-phone) .log-player {
+    top: calc(8px + var(--safe-top, 0px));
+  }
+  :global(html.is-phone) .log-player-zone,
+  :global(html.is-phone) .log-player-compact {
+    top: var(--safe-top, 0px);
   }
 
   /* Collapsed: the full panel slides up under the top bar and fades; it stays in the DOM (its
@@ -467,8 +497,9 @@
     position: absolute;
     top: 53px;
     left: 50%;
-    width: 700px;
+    width: var(--log-player-w, 640px);
     max-width: calc(100vw - 40px);
+    box-sizing: border-box;
     z-index: 50;
     display: flex;
     align-items: center;
@@ -619,30 +650,35 @@
     gap: 8px;
   }
 
+  .log-player-times {
+    display: flex;
+    justify-content: space-between;
+    padding: 0 2px;
+  }
   .log-player-time {
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
     font-size: 12px;
     color: #949494;
-    min-width: 60px;
-    text-align: center;
-    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
   }
 
   .log-player-buttons {
     display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 2px;
+    align-items: stretch;
+    gap: 4px;
     flex: 1;
+    min-width: 0;
   }
 
   .log-player-btn {
+    flex: 1 1 0;
+    min-width: 0;
     background: #434343;
     border: 1px solid #555;
     color: #e0e0e0;
-    font-size: 11px;
-    padding: 4px 7px;
-    border-radius: 3px;
+    font-size: 12px;
+    padding: 7px 2px;
+    border-radius: 4px;
     cursor: pointer;
     line-height: 1;
     transition: background 0.2s ease, border-color 0.2s ease;
@@ -655,7 +691,8 @@
 
   .log-player-btn.play-btn {
     font-size: 14px;
-    padding: 4px 10px;
+    padding: 6px 2px;
+    flex-grow: 1.4; /* the one button you aim for most */
     background: #37a8db;
     color: #fff;
     border-color: #339cc1;

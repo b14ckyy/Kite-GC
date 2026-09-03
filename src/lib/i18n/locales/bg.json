@@ -58,7 +58,8 @@
     "renameBtPort": "Преименувай този Bluetooth порт",
     "btNamePlaceholder": "Персонализирано име",
     "btNameSave": "Запази името",
-    "btNameCancel": "Отказ"
+    "btNameCancel": "Отказ",
+    "panelTitle": "Връзка"
   },
   "cesiumKey": {
     "title": "За 3D терена е необходим API ключ за Cesium Ion",
@@ -1100,7 +1101,10 @@
     "off": "Изключено",
     "editLayout": "Редактирай оформлението",
     "exitEdit": "Излез от режима на редактиране",
-    "resize": "Промяна на размера на уиджета"
+    "resize": "Промяна на размера на уиджета",
+    "phonePage": "Страница {n}",
+    "phoneNoSpaceTitle": "Няма свободно място",
+    "phoneNoSpace": "Мрежата с уиджети е пълна и на двете страници. Първо намалете или изключете друг уиджет."
   },
   "widgetLabels": {
     "spd": "SPD",

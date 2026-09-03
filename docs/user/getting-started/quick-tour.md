@@ -39,10 +39,13 @@ The command centre. From left to right:
 
 ## 2 · Navigation rail & panels
 
-The strip down the **left edge** is the navigation rail. Click an icon to open its **panel**; click it
-again (or the rail's toggle) to close. Only one panel is open at a time, and the map stays live behind
-it. Some tools appear **only when relevant** (e.g. *Control* only on an ArduPilot/PX4 link), so the rail
-stays uncluttered.
+The strip down the **left edge** is the navigation rail. Click an icon to open its **panel**. Click the
+**same icon again** to **park** the panel: it slides out to the left and the map gets the whole screen,
+but nothing is lost — a mission you are editing stays in edit mode, a half-filled form keeps its values,
+and the next click brings the panel straight back (the icon shows a dashed frame while it is parked).
+Switching to another tool or closing the rail with its toggle closes the panel for real. Only one panel
+is open at a time, and the map stays live behind it. Some tools appear **only when relevant** (e.g.
+*Control* only on an ArduPilot/PX4 link), so the rail stays uncluttered.
 
 Each tool, at a glance — expand for a quick description and the link to its full guide:
 
@@ -268,6 +271,31 @@ The thin strip along the very **bottom**:
 - **Left** — a connection dot (green = connected, red = not) and, once connected, the firmware variant,
   version and port (e.g. *INAV 8.0.0 on COM7*).
 - **Right** — the **arming state** (ARMED / DISARMED) while connected.
+
+## Kite on a phone
+
+On a **phone** (Android or iPhone) Kite uses its own **landscape** layout, built for a screen that has
+room for either the map or a widget, rarely both. Tablets keep the desktop layout described above.
+
+- **No top bar, no status bar, no bottom dock.** The map fills the whole screen; the navigation rail's
+  **☰** button sits in the top-left corner, with the **arming state** next to it and a **sensor
+  warning** chip that only appears while a sensor is amber or red.
+- **Connecting** happens in a pop-out: tap the **🔗 chain-link** button at the top-right of the map for
+  protocol and transport on the first row, the port / host / device on the second, **Connect** — and
+  **Relay**, which extends the pop-out with the relay entries. Tap anywhere else to close it.
+- **Widgets** live in a **frosted-glass column** on the right edge, on a grid of 4 rows and up to 2
+  columns, with **two pages** — swipe up or down to switch. The map runs on underneath the glass. A
+  small widget takes one cell, a large one 2 × 2, the wide Live AGL 2 × 1; the column narrows to one
+  cell when only small widgets are active. Widgets that no longer fit are switched off automatically,
+  and **Settings → HUD widgets** tells you when the grid is full.
+- **Rearranging widgets**: **long-press** a widget to enter edit mode. Hold a widget briefly and drag
+  it to move it — the others shift live to show where they will settle; a quick flick still turns the
+  page. Tap the corner button to step through the sizes. Tap the map to leave edit mode.
+- **Map controls**: pinch to zoom (no zoom buttons); the **2D / 3D** and **follow** buttons sit at the
+  bottom-right of the map, next to the widget column. The connection status and the map credits share a
+  small strip in the bottom-left corner.
+- **Not on the phone**: the video panel and widget, the raw-telemetry popup, and the stick overlay
+  beside the replay player.
 
 ## Where to go next
 

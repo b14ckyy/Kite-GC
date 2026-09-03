@@ -133,8 +133,15 @@
        (Chromium 129+ / WebView2) lets width/height animate even to/from the `info` variant's
        intrinsic `max-content` / `auto` sizes. */
     interpolate-size: allow-keywords;
-    transition: width 0.25s ease, height 0.25s ease, top 0.25s ease;
+    transition: width 0.25s ease, height 0.25s ease, top 0.25s ease, transform 0.25s ease, opacity 0.25s ease;
     animation: ps-in 0.18s ease-out;
+  }
+  /* Parked: the rail's active button was clicked again — the panel slides out to the left with
+     its state intact (+page sets .panels-hidden on the host); the next click slides it back. */
+  :global(.panels-hidden) .ps {
+    transform: translateX(calc(-100% - 80px));
+    opacity: 0;
+    pointer-events: none;
   }
 
   /* Bounding height shared by compact/advanced (and as a cap for info): full panel area,
@@ -189,18 +196,24 @@
      - width is capped to the viewport (minus the rail + a margin) so the panel never clips off-screen;
      - the panel is tall and OVERLAYS the HUD dock (it sits above it at z-index 150) instead of being
        squeezed into the gap above it, so its content is reachable/scrollable. iPad keeps its layout. */
+  /* Phone layout (Dev-Docs active/PHONE_UI.md): no toolbar, so the panel starts at the top safe
+     inset and may use the full height; its width is bounded by the map area — the rail on the left
+     (74px) and the widget column on the right (--phone-panel-w, published by +page). */
+  :global(html.is-phone) .ps {
+    top: calc(8px + var(--safe-top, 0px));
+  }
   :global(html.is-phone) .ps-compact {
-    width: min(398px, calc(100vw - var(--safe-left, 0px) - 74px));
+    width: min(398px, calc(100vw - var(--safe-left, 0px) - 74px - var(--phone-panel-w, 0px) - 8px));
   }
   :global(html.is-phone) .ps-info {
-    max-width: min(360px, calc(100vw - var(--safe-left, 0px) - 74px));
+    max-width: min(360px, calc(100vw - var(--safe-left, 0px) - 74px - var(--phone-panel-w, 0px) - 8px));
   }
   :global(html.is-phone) .ps-compact,
   :global(html.is-phone) .ps-advanced {
-    height: calc(100% - var(--toolbar-h, 53px) - var(--safe-bottom, 0px) - 12px);
+    height: calc(100% - 16px - var(--safe-top, 0px) - var(--safe-bottom, 0px));
   }
   :global(html.is-phone) .ps-info {
-    max-height: calc(100% - var(--toolbar-h, 53px) - var(--safe-bottom, 0px) - 12px);
+    max-height: calc(100% - 16px - var(--safe-top, 0px) - var(--safe-bottom, 0px));
   }
   /* Widths are driven by the *field* size (the thin-framed working box), which the panel layouts
      were tuned against: 380px main field, 500px detail field. Panel width = field + the column's
@@ -237,6 +250,21 @@
   .ps-wide-compact {
     width: calc(100% - 62px - var(--grid-side-width) - 54px - 6px);
     height: max(20vh, 160px);
+  }
+  /* Phone (PHONE_UI.md): no toolbar / status bar / side dock — the fullscreen panel spans from the
+     top safe inset to the bottom one and from the rail to the widget column. The 62px desktop
+     inset left a band at the bottom (the space the status bar used to take). */
+  :global(html.is-phone) .ps-fullscreen,
+  :global(html.is-phone) .ps-wide-compact {
+    top: calc(8px + var(--safe-top, 0px));
+    left: calc(62px + var(--safe-left, 0px));
+  }
+  :global(html.is-phone) .ps-fullscreen {
+    width: calc(100% - 62px - var(--safe-left, 0px) - var(--phone-panel-w, 0px) - 8px);
+    height: calc(100% - 16px - var(--safe-top, 0px) - var(--safe-bottom, 0px));
+  }
+  :global(html.is-phone) .ps-wide-compact {
+    width: calc(100% - 62px - var(--safe-left, 0px) - var(--phone-panel-w, 0px) - 8px);
   }
 
   /* ── Columns (compact = 1, advanced = 1:2; right wider for previews/maps) ── */
