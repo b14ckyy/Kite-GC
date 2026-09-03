@@ -24,6 +24,14 @@ below. The release you are reading the docs for is expanded; click an older vers
         following map as the backdrop instead of black bars — and the floating panels stay on top
         where they belong. [#90]
 
+    ??? info "High-resolution replay and instant log preview"
+        The replay player gained a **HI-RES** switch: the stored onboard log is re-decoded at its
+        **full rate** and drives the horizon, instruments and stick overlay at your screen's refresh
+        rate, with new **slow-motion speeds** (0.25× / 0.5×) to study a manoeuvre frame by frame.
+        And you no longer need to import a log to look at it — **drop it on the map** (or use the
+        Logbook's new **Open** button) while disconnected, replay it exactly like a logbook flight,
+        and import it for real only if you want to keep it. [#97] [#99]
+
     **Added**
 
     - **Android support** — native app with USB serial, Bluetooth LE and Wi-Fi links, touch layout
@@ -39,6 +47,10 @@ below. The release you are reading the docs for is expanded; click an older vers
     - **3D buildings** — optional OpenStreetMap building extrusions on the 3D map. [#48]
     - **Automatic database backup** — before a Kite update upgrades the flight database, a full
       backup is written next to it; Settings shows it with size and a delete button. [#96]
+    - **High-resolution replay** — HI-RES switch in the player re-decodes the stored log at full
+      rate for fluid instruments; slow-motion speeds 0.25× / 0.5×. [#97]
+    - **Open a log without importing it** — drop an onboard log on the map or use the Logbook's
+      Open button to replay it straight from the file; import it afterwards if you like. [#99]
 
 ??? note "1.0.0 — Initial release"
 
@@ -59,3 +71,5 @@ below. The release you are reading the docs for is expanded; click an older vers
 [#89]: https://github.com/b14ckyy/Kite-GC/pull/89
 [#90]: https://github.com/b14ckyy/Kite-GC/pull/90
 [#96]: https://github.com/b14ckyy/Kite-GC/pull/96
+[#97]: https://github.com/b14ckyy/Kite-GC/pull/97
+[#99]: https://github.com/b14ckyy/Kite-GC/pull/99
