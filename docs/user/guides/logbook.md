@@ -79,6 +79,21 @@ database, is reused while the flight stays open, and is **deleted automatically*
 the flight — nothing accumulates. The map track and timeline stay at 10 Hz by design; high-res
 feeds the live values.
 
+### Opening a log without importing it
+
+You don't have to import a log to look at it. On the desktop, with **no UAV connected**, **drop an
+onboard log onto the map** (INAV Blackbox `.bbl` / `.txt`, ArduPilot `.bin`, PX4 `.ulg`, or a
+`.tlog` / `.rawmsp` telemetry log) — or use the **Open** button in the Logbook toolbar — and Kite
+parses it into a temporary store and replays it exactly like a logbook flight: same track, same
+player, HI-RES included. The Logbook panel shows the file's flights (a flash download with several
+logs lists them all) with their details **read-only**; nothing is linked, edited or checked for
+duplicates, and the location name is looked up but no weather (weather is only fetched for live
+recordings). A file dropped **onto the Logbook panel itself** is imported as before.
+
+Liked what you saw? **Import into logbook** runs the normal import of the same file — duplicate
+check, multi-log prompt and linking included. **Close file** discards the temporary store; it is
+also cleared automatically when you open another file or restart Kite.
+
 ## Importing logs
 
 Use **Import** to pull in logs from outside Kite (one file or a batch). Supported formats:
