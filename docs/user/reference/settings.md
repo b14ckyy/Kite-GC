@@ -47,8 +47,8 @@ These are **global** — every widget, map read-out and panel follows them. See
 ### HUD widgets
 
 Toggle each **widget** on or off; the indicator shows which dock it currently lives in. For what each
-widget shows, see the **[Quick tour](../getting-started/quick-tour.md)**. By default AHI, Speed, Altitude,
-GPS, Compass, Home, Flight Mode and Battery are shown; the rest are off.
+widget shows, see the **[Quick tour](../getting-started/quick-tour.md)**. By default Battery, Speed, AHI,
+Altitude and Compass sit in the bottom dock and Home, RC Link and GPS in the right dock; the rest are off.
 
 ## Data tab
 

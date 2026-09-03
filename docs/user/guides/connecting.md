@@ -168,6 +168,9 @@ The **⇅ Relay** button in the top bar is **not** a connection — it re-encode
 re-broadcasts it to other ground stations, handsets, or an antenna tracker, over a separate output.
 It's covered in its own guide: **[Relay & forwarding](relay-and-forwarding.md)**.
 
+Next to it, **≡ Raw** appears while you are connected: a read-only popup with every raw telemetry value
+the app holds — see **[Raw telemetry](telemetry-and-display.md#raw-telemetry)**.
+
 ## After you connect
 
 - The button becomes **Disconnect**; the top bar shows arming readiness, per-sensor health, battery and

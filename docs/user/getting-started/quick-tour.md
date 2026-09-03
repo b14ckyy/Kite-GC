@@ -133,8 +133,11 @@ Two docks hold your **flight widgets** (attitude, altitude, speed, compass, and 
 dock** (3) down the side, and the **bottom dock** (4) along the bottom.
 
 Click the **✎ (edit) button** by a dock to enter **edit mode**, then drag widgets to rearrange them or
-move them between docks. Choose which widgets appear in **Settings → Interface**. Widgets scale to fit
-the dock, and your layout (including which dock each sits in) is remembered between sessions. Every widget
+move them between docks. In edit mode every widget also shows a **resize button** in its corner: each tap
+steps it to its next size — square widgets toggle between small and large, the wide ones (Live AGL,
+Video) go wide → large square → small square. The aspect ratio never changes, and a dock shrinks to its
+largest widget. Choose which widgets appear in **Settings → Interface**. Widgets scale to fit the dock,
+and your layout (which dock each sits in and its size) is remembered between sessions. Every widget
 follows your global units and works the same **live** and in **[replay](../guides/logbook.md)**.
 
 Each widget, at a glance — expand for what it shows and how it works:
@@ -219,12 +222,6 @@ Each widget, at a glance — expand for what it shows and how it works:
 
     ![The Flight Mode widget](../assets/getting-started/widgets/flightmode.png)
 
-??? note "Raw Telemetry"
-    A compact numeric dump for when you want the raw figures at a glance: altitude, speed, vario, heading,
-    roll, pitch, voltage, current, mAh, satellites and RSSI.
-
-    ![The Raw Telemetry widget](../assets/getting-started/widgets/rawtelemetry.png)
-
 ??? note "Live AGL"
     A forward-looking **terrain-profile HUD** (a wide widget). The left third shows the terrain you've
     flown over with the aircraft riding at its current height; the right two-thirds shows the
@@ -239,7 +236,8 @@ Each widget, at a glance — expand for what it shows and how it works:
     coloured by **clearance** against your altitude (red = at/above you → green = well below). Two
     independent ranges — the **fan distance** scales with speed, and a separate **clearance colour scale**
     (60 / 120 / 250 m, left button). A **REL / PRED** button (right) switches the reference between your
-    current altitude and a sink-rate-predicted one.
+    current altitude and a sink-rate-predicted one. Both buttons appear only while the dock is in
+    **edit mode** (✎), so they don't clutter the display in flight.
 
     ![The Terrain Radar widget](../assets/getting-started/widgets/terrainradar.png)
 
