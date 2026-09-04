@@ -21,10 +21,21 @@
     onchange?: (checked: boolean) => void;
   } = $props();
 
+  // The switch shows the APP's state, not the click. A parent may REFUSE the change (the phone
+  // widget grid has no room, PHONE_UI.md D8) — it then leaves `checked` where it was, while the
+  // browser has already flipped the checkbox: the switch would lie, and the next click would send
+  // the same (refused) request again instead of the opposite one (Marc, 2026-09-04).
   function handle(e: Event) {
-    const c = (e.currentTarget as HTMLInputElement).checked;
-    checked = c;
-    onchange?.(c);
+    const el = e.currentTarget as HTMLInputElement;
+    const want = el.checked;
+    el.checked = checked; // back to the rendered state; an accepting parent re-renders it forward
+    checked = want; // bindable: propagates to a `bind:checked` parent
+    onchange?.(want);
+    // Nothing re-rendered us → the change was refused; follow the DOM so the local copy and the
+    // switch agree again.
+    queueMicrotask(() => {
+      if (el.isConnected && el.checked !== checked) checked = el.checked;
+    });
   }
 </script>
 
