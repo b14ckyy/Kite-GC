@@ -3,6 +3,14 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
+<script lang="ts" module>
+  /** Live (non-ghost) tiles mounted right now. The phone grid re-creates the tile when a drag
+   *  carries it across a page edge (create-new-then-destroy-old), and the drag ghost is a second
+   *  instance: the "tile gone → send the map home" guard must only fire when the LAST real tile
+   *  goes, or a drop would bounce the map out of the widget every time. */
+  let liveTiles = 0;
+</script>
+
 <script lang="ts">
   // Video widget (wide 2:1, or square in its L/S size states) — a router sink showing the shared
   // video feed. ALWAYS crop-to-fill, centred (object-fit: cover; the native sink via a `data-nv-cover`
@@ -20,24 +28,47 @@
   import { videoStream, videoState, bindVideoEl, setMapLocation, setWidgetRect, reportMjpegError } from '$lib/stores/video';
   import { canvasSink, mjpegSink } from '$lib/controllers/mjpegSink';
   import { nativeSurface, activeNativeSurface } from '$lib/controllers/nativeVideo';
+  import { doubleTap, mouseDoubleClick } from '$lib/helpers/doubleTap';
   import VideoReconnectOverlay from '$lib/components/video/VideoReconnectOverlay.svelte';
 
-  let { width = 300, height = 150 }: { width?: number; height?: number } = $props();
+  let {
+    width = 300,
+    height = 150,
+    /** Visual copy only (the phone grid's drag ghost): renders a blank tile, registers no native
+     *  surface, binds no stream, publishes no rect — a second live instance fought the real tile
+     *  for the map's position and the sink's surface. */
+    ghost = false,
+  }: { width?: number; height?: number; ghost?: boolean } = $props();
 
   const mapHere = $derived($videoState.mapLocation === 'widget');
 
   let cardEl = $state<HTMLDivElement | null>(null);
   let videoEl = $state<HTMLVideoElement | null>(null);
   $effect(() => {
+    if (ghost) return;
     bindVideoEl(videoEl, $videoStream);
   });
 
   // Publish the tile's screen rect so +page can overlay the map on it in `widget` mode.
   function measure() {
-    if (!cardEl) return;
+    if (!cardEl || ghost) return;
     const r = cardEl.getBoundingClientRect();
     setWidgetRect({ x: r.left, y: r.top, w: r.width, h: r.height });
   }
+  // The phone grid MOVES the tile without resizing it (page scroll, a re-pack after an activation
+  // settles with a transition, an edit-mode drag) — a rect measured mid-motion landed the map half
+  // a tile off. While the map is here, track the tile per frame (one rect read; setWidgetRect is a
+  // no-op when nothing moved), so the map rides along with a scroll or a drag without lag.
+  $effect(() => {
+    if (!mapHere || ghost) return;
+    let raf = 0;
+    const loop = () => {
+      measure();
+      raf = requestAnimationFrame(loop);
+    };
+    loop();
+    return () => cancelAnimationFrame(raf);
+  });
   // Re-measure when the tile's size changes (dock reflow / UI scale come through the width/height
   // props). MUST NOT read $videoState here — measure() writes it (widgetRect), which would re-trigger
   // this effect and loop. Position-only moves are caught by the ResizeObserver + window resize below.
@@ -47,6 +78,7 @@
     measure();
   });
   onMount(() => {
+    if (!ghost) liveTiles++;
     measure();
     let ro: ResizeObserver | undefined;
     if (cardEl && typeof ResizeObserver !== 'undefined') {
@@ -60,6 +92,9 @@
     };
   });
   onDestroy(() => {
+    if (ghost) return; // a visual copy never owned the map or the rect
+    liveTiles--;
+    if (liveTiles > 0) return; // a successor tile is mounted (page move) — it carries on
     setWidgetRect(null);
     if (mapHere) setMapLocation('main'); // tile gone → don't strand the map
   });
@@ -82,10 +117,12 @@
   class="widget-card"
   class:nv-armed={$activeNativeSurface === 'widget'}
   style="width:{width}px; height:{height}px;"
-  ondblclick={swapHere}
+  ondblclick={mouseDoubleClick(swapHere)}
+  use:doubleTap={swapHere}
 >
-  {#if mapHere}
-    <!-- The map is overlaid here by +page (top-level). Keep an empty sized tile underneath. -->
+  {#if ghost || mapHere}
+    <!-- The map is overlaid here by +page (top-level). Keep an empty sized tile underneath.
+         The drag ghost shows the same blank tile — it must not host a surface. -->
     <div class="placeholder map-here"></div>
   {:else if $videoState.status === 'live' && $videoState.nativeSink}
     <!-- Native decode sink (hole punch): the video is a hardware layer BELOW the WebView; this

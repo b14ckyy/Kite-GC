@@ -870,7 +870,9 @@ export interface NativeRtspStats {
   rtpLate: number;
   /** Received link bitrate over the last poll interval, kbit/s. */
   kbps: number;
-  sink: { presentedFps: number; width: number | null; height: number | null; codec: string | null } | null;
+  /** `droppedHidden`: frames decoded but released unrendered while no surface was on screen
+   *  (the Android sink's off-screen mode, PHONE_VIDEO.md D7) — 0 on the other sinks. */
+  sink: { presentedFps: number; droppedHidden: number; width: number | null; height: number | null; codec: string | null } | null;
 }
 export const nativeRtspStats = writable<NativeRtspStats | null>(null);
 
@@ -884,7 +886,7 @@ interface NativeStatsReply {
   frames?: number;
   framesDropped?: number;
   bytes?: number;
-  sink?: { presented: number; width: number | null; height: number | null; error: string | null; codec: string | null } | null;
+  sink?: { presented: number; droppedHidden?: number; width: number | null; height: number | null; error: string | null; codec: string | null } | null;
 }
 
 /** Watch the in-process RTSP client (1 Hz, both routes): publishes the Debug Monitor
@@ -896,6 +898,7 @@ let kiteStatsMonitor: ReturnType<typeof setInterval> | undefined;
 function startKiteStatsMonitor(): void {
   stopKiteStatsMonitor();
   let lastPresented = -1;
+  let lastDecoded = -1;
   let lastFrames = -1;
   let lastBytes = 0;
   let lastChange = performance.now();
@@ -911,6 +914,10 @@ function startKiteStatsMonitor(): void {
         const frames = s.frames ?? 0;
         const bytes = s.bytes ?? 0;
         const presented = s.sink?.presented ?? 0;
+        // Liveness = DECODED frames: while no surface is on screen the sink decodes but drops
+        // (PHONE_VIDEO.md D7), so `presented` stands still without anything being wrong. The fps
+        // readout stays presented-based — 0 while hidden is the honest number.
+        const decoded = presented + (s.sink?.droppedHidden ?? 0);
         const presentedFps = lastPresented >= 0 && dt > 0 ? Math.max(0, (presented - lastPresented) / dt) : 0;
         nativeRtspStats.set({
           transport: s.transport ?? null,
@@ -922,7 +929,7 @@ function startKiteStatsMonitor(): void {
           rtpLate: s.rtpLate ?? 0,
           kbps: dt > 0 ? Math.max(0, ((bytes - lastBytes) * 8) / 1000 / dt) : 0,
           sink: s.sink
-            ? { presentedFps, width: s.sink.width, height: s.sink.height, codec: s.sink.codec }
+            ? { presentedFps, droppedHidden: s.sink.droppedHidden ?? 0, width: s.sink.width, height: s.sink.height, codec: s.sink.codec }
             : null,
         });
         lastFrames = frames;
@@ -940,6 +947,9 @@ function startKiteStatsMonitor(): void {
           if (presented !== lastPresented) {
             if (lastPresented >= 0) nativeSinkFps.set(presentedFps);
             lastPresented = presented;
+          }
+          if (decoded !== lastDecoded) {
+            lastDecoded = decoded;
             lastChange = now;
           } else if (now - lastChange > RTSP_STALL_LIVE_MS) {
             logVideo(

@@ -650,6 +650,10 @@
     "rtspTransportHint": "Transport: UDP (niedrigste Latenz, z. B. UAV-Link), TCP oder Auto (beide versuchen)",
     "nativeClient": "Nativer RTSP-Client (experimentell)",
     "nativeClientHint": "Kites eigener integrierter RTSP-Client — braucht weder MediaMTX noch ffmpeg. MJPEG-, H.264- und HEVC-Quellen (H.264/HEVC-Dekodierung in Hardware auf Windows, Android und Linux); verbindet zuerst per UDP mit automatischem TCP-Fallback.",
+    "dockShow": "Video einblenden",
+    "dockHide": "Video ausblenden",
+    "dockMapShow": "Karte einblenden",
+    "dockMapHide": "Karte ausblenden",
     "sinkElsewhere": "Video läuft auf einer anderen Fläche",
     "rtspUnicastRefused": "Der Server verweigert Unicast-Streaming (RTSP 461) — z. B. eine reine Multicast-Quelle. Prüfe die Unicast/Multicast-Einstellung des Servers.",
     "webrtcCodecUnsupported": "Der Codec dieses Streams kann nicht über WebRTC übertragen werden (z. B. HEVC). Aktiviere stattdessen den nativen RTSP-Client.",
@@ -1795,6 +1799,7 @@
     "vidNatLate": "Verspätet",
     "vidNatPresented": "Präsentiert",
     "vidNatCodec": "Codec",
+    "vidNatDroppedHidden": "Verworfen (unsichtbar)",
     "vidNatHint": "Kites eigener RTSP-Client. „Frames ein“ zählt, was der Depacketizer liefert (H.264/HEVC-Access-Units können geteilt ankommen — „Präsentiert“ ist die echte Bildrate); „Verworfen“ zählt nach Paketverlust komplett verworfene Frames. RTP empf./Verloren/Umsortiert/Verspätet kommen direkt aus der Empfangsschleife: Verloren kam nie an, Umsortiert wurde vom 16-Paket-Fenster repariert, Verspätet kam zu spät. Auf dem Hardware-Decode-Pfad ist „Präsentiert“, was der D3D-Layer tatsächlich angezeigt hat.",
     "perf": {
       "fps": "FPS",

@@ -30,19 +30,29 @@ param(
   [switch]$Shot,
   [string]$ShotPath = ''
 )
+$serial = ''
 
 $sdk = Join-Path $env:LOCALAPPDATA 'Android\Sdk'
 $emu = Join-Path $sdk 'emulator\emulator.exe'
 $adb = Join-Path $sdk 'platform-tools\adb.exe'
 $repo = Split-Path -Parent $PSScriptRoot
 
+# Every adb call is pinned to ONE serial: with a phone on the cable next to the emulator, a bare
+# `adb shell` answers "more than one device" and a boot-wait loop on it never ends.
+function Get-Serial([bool]$wantEmulator) {
+  $rows = (& $adb devices) | Where-Object { $_ -match "`tdevice$" } | ForEach-Object { ($_ -split "\s+")[0] }
+  if ($wantEmulator) { return ($rows | Where-Object { $_ -like 'emulator-*' } | Select-Object -First 1) }
+  return ($rows | Where-Object { $_ -notlike 'emulator-*' } | Select-Object -First 1)
+}
+
 function Wait-Boot {
-  & $adb wait-for-device | Out-Null
-  Write-Host 'waiting for Android to finish booting ...'
+  Write-Host 'waiting for the emulator to come up ...'
+  do { Start-Sleep -Seconds 2; $script:serial = Get-Serial $true } while (-not $script:serial)
+  Write-Host "waiting for Android ($script:serial) to finish booting ..."
   do {
     Start-Sleep -Seconds 2
-    $booted = (& $adb shell getprop sys.boot_completed 2>$null).Trim()
-  } while ($booted -ne '1')
+    $booted = (& $adb -s $script:serial shell getprop sys.boot_completed 2>$null)
+  } while ("$booted".Trim() -ne '1')
 }
 
 function Save-Shot {
@@ -74,13 +84,12 @@ if (-not $Device) {
     Write-Host 'an emulator is already running — using it'
   }
   Wait-Boot
-  if ($Landscape) {
-    & $adb shell settings put system accelerometer_rotation 0
-    & $adb shell settings put system user_rotation 1
-  } else {
-    & $adb shell settings put system accelerometer_rotation 0
-    & $adb shell settings put system user_rotation 0
-  }
+  $rot = if ($Landscape) { 1 } else { 0 }
+  & $adb -s $serial shell settings put system accelerometer_rotation 0
+  & $adb -s $serial shell settings put system user_rotation $rot
+} else {
+  $serial = Get-Serial $false
+  if (-not $serial) { Write-Host 'no USB device attached'; exit 1 }
 }
 
 # Dev server over the adb bridge, NOT over the network: the CLI's default is the host's LAN IP,
@@ -88,7 +97,7 @@ if (-not $Device) {
 # (grey screen). `adb reverse` maps the device's own 127.0.0.1:1420 to the host, `--host 127.0.0.1`
 # makes Tauri point the WebView (via its dev proxy) at exactly that. Works for USB devices too, no
 # Wi-Fi involved. The reverse mapping lives until the device/emulator disconnects.
-& $adb reverse tcp:1420 tcp:1420 | Out-Null
+& $adb -s $serial reverse tcp:1420 tcp:1420 | Out-Null
 Set-Location $repo
 if ($Device) {
   npx tauri android dev --host 127.0.0.1

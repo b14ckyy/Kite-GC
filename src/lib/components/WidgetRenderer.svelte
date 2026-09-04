@@ -9,7 +9,6 @@
 <script lang="ts">
   import type { TelemetryData } from '$lib/stores/telemetry';
   import type { InterfaceSettings } from '$lib/stores/settings';
-  import { isPhone } from '$lib/platform';
   import AHI from './widgets/AHI.svelte';
   import SpeedWidget from './widgets/SpeedWidget.svelte';
   import AltWidget from './widgets/AltWidget.svelte';
@@ -31,6 +30,7 @@
     wPx,
     hPx,
     editing = false,
+    ghost = false,
   }: {
     id: string;
     telem: TelemetryData;
@@ -41,6 +41,9 @@
     wPx: number;
     hPx: number;
     editing?: boolean;
+    /** A visual copy (the phone grid's drag ghost): no side effects — the video widget must not
+     *  register a native surface or publish its rect from here. */
+    ghost?: boolean;
   } = $props();
 </script>
 
@@ -68,6 +71,6 @@
   <LiveAglWidget {telem} {interfaceSettings} width={wPx} height={hPx} />
 {:else if id === 'terrainRadar'}
   <TerrainRadarWidget {telem} {interfaceSettings} size={sizePx} {editing} />
-{:else if id === 'videoFeed' && !isPhone}
-  <VideoWidget width={wPx} height={hPx} />
+{:else if id === 'videoFeed'}
+  <VideoWidget width={wPx} height={hPx} {ghost} />
 {/if}

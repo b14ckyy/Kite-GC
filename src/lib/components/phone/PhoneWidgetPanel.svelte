@@ -19,7 +19,7 @@
      flips the page instead of grabbing. A tap anywhere outside the panel ends edit mode. -->
 <script lang="ts">
   import { t } from 'svelte-i18n';
-  import { PHONE_GRID_ROWS, PHONE_GRID_PAGES } from '$lib/config/phoneGrid';
+  import { PHONE_GRID_ROWS, PHONE_GRID_PAGES, PHONE_GRID_PAD } from '$lib/config/phoneGrid';
   import { movePhoneWidget, packPhone, type PhoneWidgetsConfig } from '$lib/controllers/phoneWidgetController';
   import WidgetRenderer from '$lib/components/WidgetRenderer.svelte';
   import type { TelemetryData } from '$lib/stores/telemetry';
@@ -44,7 +44,7 @@
     widthPx?: number;
   } = $props();
 
-  const PAD = 4;
+  const PAD = PHONE_GRID_PAD;
   // Android's own long-press haptic fires at ~500 ms; arming later than that reads as "press
   // longer than the buzz" (Marc) — so arm exactly there.
   const LONG_PRESS_MS = 500;
@@ -125,6 +125,12 @@
     pressTimer = null;
     pressId = null;
   }
+  // Published on the root for layers outside the panel: the swapped-in mini map goes touch-free
+  // while a widget is being rearranged (+page CSS `html.phone-editing`).
+  $effect(() => {
+    document.documentElement.classList.toggle('phone-editing', editing);
+    return () => document.documentElement.classList.remove('phone-editing');
+  });
   function clearEdge() {
     if (edgeTimer) clearTimeout(edgeTimer);
     edgeTimer = null;
@@ -143,8 +149,24 @@
     return { page: p, row, col };
   }
 
+  /** The grid cell under a viewport point, looking THROUGH layers above the panel (the swapped-in
+   *  mini map sits over its tile) — the tile's own pointerdown never fires then. */
+  function cellElAt(x: number, y: number): HTMLElement | null {
+    if (!rootEl) return null;
+    return (
+      (document.elementsFromPoint(x, y).find((el) => el.classList.contains('cell') && rootEl!.contains(el)) as
+        | HTMLElement
+        | undefined) ?? null
+    );
+  }
+
   function onCellPointerDown(e: PointerEvent, id: string) {
     if (e.button !== 0) return;
+    // A second finger (pinch on the mini map) is never a press.
+    if (!e.isPrimary) {
+      clearPress();
+      return;
+    }
     pressX = e.clientX;
     pressY = e.clientY;
     if (editing) {
@@ -173,7 +195,7 @@
   }
 
   function startDrag(e: PointerEvent, id: string) {
-    const cell = (e.target as HTMLElement).closest<HTMLElement>('.cell');
+    const cell = (e.target as HTMLElement).closest<HTMLElement>('.cell') ?? cellElAt(e.clientX, e.clientY);
     const r = cell?.getBoundingClientRect();
     grabDx = r ? e.clientX - r.left : 0;
     grabDy = r ? e.clientY - r.top : 0;
@@ -255,8 +277,17 @@
       if (dragId) endDrag(false);
     };
     // Tap outside the panel → leave edit mode (capture, so a surface that stops propagation counts).
+    // A touch on the swapped-in mini map (a layer OVER one of our tiles, outside the panel's DOM)
+    // is relayed to that tile as a press, so a long-press there still enters edit mode; in edit
+    // mode the map layer is touch-free (html.phone-editing) and the tile gets the events itself.
     const onDown = (e: PointerEvent) => {
-      if (editing && rootEl && !rootEl.contains(e.target as Node)) editing = false;
+      const target = e.target as HTMLElement | null;
+      if (!editing && e.pointerType !== 'mouse' && target?.closest('.layer-map.in-frame')) {
+        const cell = cellElAt(e.clientX, e.clientY);
+        if (cell?.dataset.id) onCellPointerDown(e, cell.dataset.id);
+        return;
+      }
+      if (editing && rootEl && !rootEl.contains(target as Node)) editing = false;
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
@@ -282,6 +313,11 @@
   style="--slot:{slot}px; --pad:{PAD}px; --cols:{cols}; --page-h:{pageH}px"
   oncontextmenu={(e) => e.preventDefault()}
 >
+  <!-- The glass is its OWN layer under the tiles, and it is the one that opts into the native
+       sink's hole (data-nv-clip). A clip-path also removes an element from hit-testing inside the
+       cut, so clipping the panel root would let touches on the video tile fall through to the map
+       below (edit mode died, double-tap never arrived); the tiles above stay unclipped. -->
+  <div class="glass" data-nv-clip></div>
   <div class="pages" class:dragging={!!dragId} bind:this={scroller} onscroll={onScroll}>
     {#each pages as p (p)}
       <div class="page">
@@ -289,6 +325,7 @@
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
             class="cell"
+            data-id={pl.id}
             class:lifted={pl.id === dragId}
             style="left:{pl.col * slot}px; top:{pl.row * slot}px; width:{pl.w * slot}px; height:{pl.h * slot}px;"
             onpointerdown={(e) => onCellPointerDown(e, pl.id)}
@@ -337,6 +374,7 @@
         sizePx={dragPlacement.h * slot}
         wPx={dragPlacement.w * slot}
         hPx={dragPlacement.h * slot}
+        ghost
       />
     </div>
   {/if}
@@ -356,23 +394,31 @@
     height: 100%;
     box-sizing: border-box;
     padding: var(--pad) calc(var(--pad) + var(--safe-right, 0px)) var(--pad) var(--pad);
-    background: rgba(30, 30, 30, 0.75);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border-left: 1px solid rgba(255, 255, 255, 0.08);
     pointer-events: auto;
     overflow: hidden;
     user-select: none;
     -webkit-user-select: none;
     -webkit-touch-callout: none;
   }
-  .pwp.editing {
+  .glass {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    background: rgba(30, 30, 30, 0.75);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-left: 1px solid rgba(255, 255, 255, 0.08);
+    pointer-events: none;
+  }
+  .pwp.editing .glass {
     border-left-color: rgba(55, 168, 219, 0.6);
   }
 
   /* Vertical page scroller with snap — one page = the usable height. While a widget is dragged
      the finger must not scroll the pages (the edge-hover flips them instead). */
   .pages {
+    position: relative;
+    z-index: 1;
     height: 100%;
     overflow-y: auto;
     overflow-x: hidden;

@@ -4845,7 +4845,7 @@
     display: none;
   }
   :global(html.is-phone) .map-controls-corner {
-    bottom: calc(42px + var(--safe-bottom, 0px));
+    bottom: calc(8px + var(--safe-bottom, 0px));
     transition: right 0.3s ease;
   }
 

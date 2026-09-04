@@ -65,7 +65,7 @@
   import Button from '$lib/components/panel/Button.svelte';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import Toggle from '$lib/components/panel/Toggle.svelte';
-  import { isLinux, isMobile, isAndroid, isIOS } from '$lib/platform';
+  import { isLinux, isMobile, isAndroid, isIOS, isPhone } from '$lib/platform';
   import VideoReconnectOverlay from '$lib/components/video/VideoReconnectOverlay.svelte';
 
   let videoEl = $state<HTMLVideoElement | null>(null);
@@ -371,6 +371,9 @@
 
 {#snippet body()}
   <div class="vp-body">
+    <!-- Phone (PHONE_VIDEO.md D1): no preview in the panel — the docked window / widget is the
+         picture; the panel is settings only. -->
+    {#if !isPhone}
     <div class="preview" class:nv-active={$activeNativeSurface === 'preview'} style="aspect-ratio: {$videoState.aspect};">
       {#if $videoState.nativeSink && $videoState.status === 'live'}
         <!-- Native decode sink (hole punch): the video is a hardware layer BELOW the WebView; this
@@ -423,6 +426,7 @@
       {/if}
       <VideoReconnectOverlay />
     </div>
+    {/if}
 
     {#if $videoState.status === 'live'}
       <div class="info-line">
@@ -748,14 +752,17 @@
     <!-- Unobstructed fullscreen: the map-swap video shrinks so occupied widget panels and the
          nav rail stay clear of the picture; an empty/hidden panel releases its edge. Off = the
          video fills the whole map zone as before. Layout math lives in +page.svelte. -->
-    <div class="field-row" title={$t('video.unobstructedHint')}>
-      <Toggle
-        checked={$videoState.unobstructedFullscreen}
-        onchange={(c) => setUnobstructedFullscreen(c)}
-        id="vp-unobstructed"
-      />
-      <span class="label">{$t('video.unobstructed')}</span>
-    </div>
+    {#if !isPhone}
+      <!-- Not on the phone: no docks to retreat from, four corner buttons at most (PHONE_VIDEO.md). -->
+      <div class="field-row" title={$t('video.unobstructedHint')}>
+        <Toggle
+          checked={$videoState.unobstructedFullscreen}
+          onchange={(c) => setUnobstructedFullscreen(c)}
+          id="vp-unobstructed"
+        />
+        <span class="label">{$t('video.unobstructed')}</span>
+      </div>
+    {/if}
 
     <!-- Escape hatch: some driver/hardware combinations pass the backend probe but still misbehave on
          a live feed. Hardware stays the default; this forces the software transcode. It only steers
@@ -777,10 +784,13 @@
 
 {#snippet footer()}
   <div class="vp-footer">
-    <!-- Floating window: a mode button (active = on) — can be toggled off from here. -->
-    <Button variant="mode" active={$videoState.floating} onclick={() => toggleFloating()}>
-      {$t('video.floatingWindow')}
-    </Button>
+    <!-- Floating window: a mode button (active = on) — can be toggled off from here. Not on the
+         phone: the docked window has its own button next to the map controls (PHONE_VIDEO.md D3). -->
+    {#if !isPhone}
+      <Button variant="mode" active={$videoState.floating} onclick={() => toggleFloating()}>
+        {$t('video.floatingWindow')}
+      </Button>
+    {/if}
     <!-- Detached PiP window: a one-way action (can't be closed from inside the app) → plain button.
          PiP is bound to a <video>/MediaStream, so it can't carry an MJPEG (<img>) feed → disabled then. -->
     {#if pipSupported}
