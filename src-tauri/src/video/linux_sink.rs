@@ -10,9 +10,11 @@
 //!
 //! and the gtkglsink's GtkGLArea widget is what `linux_host` places below the WebView.
 //! decodebin3 picks the decoder the machine has — VA-API (`vah264dec`/`vah265dec`, Intel/
-//! AMD), V4L2 stateful (Pi 4 H264, Pi 5 HEVC) or software (`avdec_*`) — and the GL leg
-//! imports DMABuf output without a copy where the decoder offers it. When the GL sink
-//! can't come up (no usable GL context) the cairo path `videoconvert → videoflip →
+//! AMD), V4L2 (Pi 4 H264 stateful, Pi 5 HEVC stateless `v4l2slh265dec`) or software
+//! (`avdec_*`) — and the GL leg imports DMABuf output without a copy where the decoder
+//! offers it. That import needs a GLES context (`lib.rs` asks GDK for one: a desktop-GL
+//! context cannot take the Pi 5's tiled `NV12_128C8` and gst-gl aborts on it). When the GL
+//! sink can't come up (no usable GL context) the cairo path `videoconvert → videoflip →
 //! gtksink` takes over for the rest of the process.
 //!
 //! Presentation: smoothing buffer 0 (the latency-first default) = `sync=false`, every
@@ -20,6 +22,11 @@
 //! PTS scheduled `depth × frame-interval` behind their arrival timeline (same pacing model
 //! as the Android sink: one anchor maps media time onto the pipeline clock, a timeline jump
 //! or drift beyond the cushion re-anchors), so each step adds ONE frame time of cushion.
+//! The cushion is measured at the SINK — after decode and GL upload — so those get a fixed
+//! allowance on top (`PROCESSING_ALLOWANCE_NS`), a frame may reach the sink a little late
+//! and still show (`LATE_TOLERANCE_NS`), and the sink never sends QoS upstream: a decoder
+//! that skips frames on QoS breaks the reference chain, and artefacts are worse than a
+//! repeated picture.
 //!
 //! Threads: `push` runs on the RTSP thread (appsrc is thread-safe), decode and render on
 //! GStreamer's own streaming threads, GL drawing on the GTK main thread through the
@@ -41,6 +48,18 @@ const ATTACH_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Sticky: once the GL sink failed to start, every later sink in this process goes cairo.
 static GL_UNAVAILABLE: AtomicBool = AtomicBool::new(false);
+
+/// Paced mode: what decode + GL upload may take on top of the user's `depth × frame-interval`
+/// cushion, since the cushion is judged at the sink. Measured on a Pi 5: software H.264 720p
+/// decodes in ~10 ms plus the upload. Without it a one-frame cushion at 60 fps (16 ms) was
+/// spent before the frame reached the sink — every frame late and dropped, and the sink's QoS
+/// events made the decoder skip on top: a 1 fps slideshow at 30–40 % CPU in the field.
+const PROCESSING_ALLOWANCE_NS: u64 = 20_000_000;
+
+/// Paced mode: how late a frame may reach the sink and still be shown. gtkglsink's default is
+/// 5 ms — tighter than one display refresh. A frame 15 ms late is still the newest picture
+/// there is; dropping it only lengthens the previous one.
+const LATE_TOLERANCE_NS: i64 = 20_000_000;
 
 /// The GL displays of every sink this process ran, kept alive on purpose. gtkglsink's
 /// widget wraps GDK's EGLDisplay in a GstGLDisplayEGL it considers its OWN
@@ -135,6 +154,18 @@ impl LinuxVideoSink {
         appsrc.set_property_from_str("leaky-type", "downstream");
         let parse = make(parser)?;
         let decode = make("decodebin3")?;
+        // Name the decoder decodebin3 settles on — the one line that tells a Pi log whether the
+        // hardware block (`v4l2slh265dec`) or software (`avdec_*`) does the work.
+        if let Some(bin) = decode.downcast_ref::<gst::Bin>() {
+            bin.connect_deep_element_added(|_, _, el| {
+                if let Some(f) = el.factory() {
+                    let klass = f.metadata(gst::ELEMENT_METADATA_KLASS).unwrap_or("");
+                    if klass.contains("Decoder") && klass.contains("Video") {
+                        log::info!("[video] linux sink: decoder {}", f.name());
+                    }
+                }
+            });
+        }
 
         // The post-decode leg: GL (zero-copy import where the decoder offers DMABuf) or cairo.
         let (chain, flip, sink) = if gl {
@@ -151,6 +182,9 @@ impl LinuxVideoSink {
         };
         // Latency first: render on decode. `set_buffer` flips this for the paced depths.
         sink.set_property("sync", false);
+        // Paced mode only (no effect while unsynced): see the two constants above.
+        sink.set_property("max-lateness", LATE_TOLERANCE_NS);
+        sink.set_property("qos", false);
 
         pipeline
             .add_many([appsrc.upcast_ref::<gst::Element>(), &parse, &decode])
@@ -273,7 +307,7 @@ impl LinuxVideoSink {
         p.last_media = Some(media_ns);
 
         let now = self.running_time();
-        let lead = depth as u64 * p.interval;
+        let lead = if depth > 0 { depth as u64 * p.interval + PROCESSING_ALLOWANCE_NS } else { 0 };
         let target = match p.anchor {
             Some((a_run, a_media, a_depth)) if a_depth == depth => {
                 (a_run as i64 + (media_ns as i64 - a_media as i64)).max(0) as u64

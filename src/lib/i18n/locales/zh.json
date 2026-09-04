@@ -666,6 +666,7 @@
     "reconnectStop": "停止",
     "rtspMobilePlaceholder": "RTSP 在此设备上尚不可用——流媒体引擎无法在移动设备上运行，设备原生的 RTSP 方案仍在计划中。",
     "engineMissing": "RTSP需要MediaMTX流媒体引擎，尚未安装。",
+    "invalidRtspUrl": "这不是 RTSP 地址——必须以 rtsp://（或 rtsps://）开头。",
     "engineDownload": "下载 MediaMTX",
     "engineReady": "MediaMTX 就绪",
     "ffmpegFallbackMissing": "可选：ffmpeg 可为 MediaMTX 无法原生读取的源提供备用读取器（例如某些OBS RTSP服务器）。",
