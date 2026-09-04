@@ -3283,7 +3283,6 @@
         {radarRefAltM}
       />
     </div>
-  </div>
     <!-- 3D stays mounted (hidden) once opened, so toggling back is instant. -->
     {#if map3dEverOpened}
       <div class="map3d-layer" class:active={mapViewMode === '3d'}>
@@ -3311,6 +3310,7 @@
     {/if}
 
   </div>
+  </div><!-- .map-clip -->
 
   <!-- Toasts & alerts pinned to the MAIN APP FRAME (not the map): the map can shrink into the
        floating window or a widget tile, and map-bound banners would then cover that tiny tile. This

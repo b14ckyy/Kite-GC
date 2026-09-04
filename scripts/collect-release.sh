@@ -13,13 +13,23 @@
 #
 # One naming source shared by local builds (`just build*`) AND the GitHub release workflow, so the
 # filenames are identical everywhere. The release/ folder is git-ignored and refreshed on every
-# run — `--keep` adds to it instead (the Android build runs separately from the desktop one and
-# must not wipe its outputs).
+# run — `--keep` adds to it instead.
+#
+# `--android-only` collects the APKs alone (implies --keep). `just build-android` uses it: an
+# Android build leaves the DESKTOP outputs of an earlier build untouched in target/release, and
+# collecting them would republish a stale binary under the current version number (found on the
+# Windows side 2026-09-04: a 1.0.0-rc2 kite-gc.exe came out as a 1.1.0-dev portable zip).
 # ============================================================
 set -e
 
 KEEP=0
-[ "${1:-}" = "--keep" ] && KEEP=1
+ANDROID_ONLY=0
+for arg in "$@"; do
+    case "$arg" in
+        --keep)         KEEP=1 ;;
+        --android-only) ANDROID_ONLY=1; KEEP=1 ;;
+    esac
+done
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION="$(grep '"version"' "$ROOT/package.json" | head -1 | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
@@ -78,7 +88,9 @@ zip_portable() { # <binary-path> <name-in-zip>
     collected+=("$dest")
 }
 
-if [ "$OS" = "macOS" ]; then
+if [ "$ANDROID_ONLY" = 1 ]; then
+    : # desktop outputs are skipped — see --android-only in the header
+elif [ "$OS" = "macOS" ]; then
     BUNDLE="$TARGET/universal-apple-darwin/release/bundle"
     grab_file "$BUNDLE/dmg/*.dmg" installer dmg
     # .app is a bundle (directory) → zip with ditto so the bundle structure/symlinks stay intact.
@@ -103,7 +115,7 @@ fi
 # lets stale, wrongly-versioned artifacts accumulate and get mis-collected next time. Removing
 # them (both the packages and Tauri's staging dirs beside them) keeps the source clean. The bare
 # CLI binary at $REL/kite-gc is a cargo output, not a bundle artifact — it stays.
-if [ ${#collected[@]} -gt 0 ]; then
+if [ ${#collected[@]} -gt 0 ] && [ "$ANDROID_ONLY" != 1 ]; then
     if [ "$OS" = "macOS" ]; then
         rm -rf "$BUNDLE/dmg" "$BUNDLE/macos"
     else
@@ -129,7 +141,11 @@ done
 
 echo ""
 if [ ${#collected[@]} -eq 0 ]; then
-    echo "[collect-release] No build outputs found under $TARGET — did the build succeed?"
+    if [ "$ANDROID_ONLY" = 1 ]; then
+        echo "[collect-release] No APK found under $APK_ROOT — did the build succeed?"
+    else
+        echo "[collect-release] No build outputs found under $TARGET — did the build succeed?"
+    fi
 else
     echo "[collect-release] Collected into $OUT :"
     for c in "${collected[@]}"; do echo "  - $c"; done

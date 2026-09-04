@@ -52,19 +52,22 @@ build-macos:
 notarize-macos:
     @bash scripts/notarize-macos.sh
 
-# Android APK, arm64 (EXPERIMENTAL — needs ANDROID_HOME + NDK_HOME; see the Build Guide).
-# Prefer the "Android" GitHub Actions workflow, which needs nothing installed locally.
-# The APK is collected into release/ under the unified name (KiteGC_Android_arm64_<version>_installer.apk)
-# WITHOUT wiping desktop outputs already there (`-Keep` / `--keep`).
+# Needs ANDROID_HOME + NDK_HOME (see the Build Guide); prefer the "Android" GitHub Actions
+# workflow, which needs nothing installed locally. The APK lands in release/ under the unified name
+# (KiteGC_Android_<abi>_<version>_installer.apk). `-AndroidOnly` / `--android-only` keeps whatever
+# desktop outputs are already in release/ and collects NOTHING but the APK: an earlier desktop
+# build's binaries still sit in target/release, and collecting them here would republish a stale
+# one under the current version number.
+# Android APK, arm64 (EXPERIMENTAL)
 [windows]
 build-android:
     npm run tauri android build -- --apk --target aarch64
-    @powershell -ExecutionPolicy Bypass -File scripts/collect-release.ps1 -Keep
+    @powershell -ExecutionPolicy Bypass -File scripts/collect-release.ps1 -AndroidOnly
 
 [unix]
 build-android:
     npm run tauri android build -- --apk --target aarch64
-    @bash scripts/collect-release.sh --keep
+    @bash scripts/collect-release.sh --android-only
 
 # Android dev build on a connected device / emulator, with hot reload
 dev-android:

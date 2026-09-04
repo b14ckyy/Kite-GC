@@ -245,9 +245,10 @@ KiteGC_<OS>_<arch>_<version>_<type>.<ext>
 - The naming logic lives in `scripts/collect-release.*` and is shared by local builds and the GitHub
   release workflow (`.github/workflows/release.yml`), so filenames match everywhere.
 - `just build-android` drops its APK into the same folder as `KiteGC_Android_<abi>_<version>_installer.apk`
-  (one file per ABI folder Gradle produced, e.g. `arm64` or `universal`) **without** clearing the desktop
-  outputs already there; a desktop build also picks up any Android release APK that is still lying in the
-  Gradle outputs.
+  (one file per ABI folder Gradle produced, e.g. `arm64` or `universal`). It collects **only** the APK and
+  leaves the desktop outputs already in `release/` alone — an earlier desktop build's binaries still sit in
+  `target/release/`, and collecting those here would republish a stale one under the current version number.
+  A desktop build, in turn, also picks up any Android release APK still lying in the Gradle outputs.
 
 The folder is refreshed on each desktop build and is git-ignored (local to your machine). The raw
 desktop outputs also remain in `src-tauri/target/release/` (and its `bundle/` subfolders) as usual; the
