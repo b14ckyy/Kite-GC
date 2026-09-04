@@ -610,4 +610,13 @@
 
 
   .mmv2-status { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); z-index: 1001; padding: 6px 12px; font-size: 11px; color: #f39c12; background: rgba(0, 0, 0, 0.8); border-radius: 6px; }
+  /* Phone: centre on the map area — a screen-centred pill runs under the widget column. */
+  :global(html.is-phone) .mmv2-status {
+    left: calc((100vw - var(--phone-panel-w, 0px) + var(--phone-shift, 0px)) / 2);
+    max-width: calc(100vw - var(--phone-panel-w, 0px) + var(--phone-shift, 0px) - 24px);
+    box-sizing: border-box;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 </style>

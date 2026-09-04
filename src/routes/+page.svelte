@@ -4389,6 +4389,54 @@
     bottom: calc(8px + var(--safe-bottom, 0px));
     z-index: 170; /* over every panel (150 / 160), under the dialogs */
   }
+  /* Toasts and alerts live in the TOP band between the burger (12 + 42 + 8) and the chain-link
+     button (panel-w + 8 + 42 + 8 from the right) — the same gap the replay player uses. The
+     container already sits at --safe-top (is-mobile rule), so its children start 8px down, in
+     the buttons' row; the right edge rides along when the widget column slides out. */
+  :global(html.is-phone) .app-toasts {
+    left: calc(62px + var(--safe-left, 0px));
+    right: calc(var(--phone-panel-w, 0px) - var(--phone-shift, 0px) + 58px);
+    transition: right 0.3s ease;
+    /* The system-message banner takes this off --toast-dock-inset (a viewport x) to centre in
+       the free band beside an open panel, as it does on the desktop. */
+    --toast-band-left: calc(62px + var(--safe-left, 0px));
+  }
+  /* BOTTOM band: between the chip row (+ Debug) and the map-control column (38 + 8 + 8 from the
+     map area's right edge). The error bar sits in the chip row itself, centred and capped to the
+     band instead of spanning the screen; a long message ellipsizes, the ✕ stays. */
+  :global(html.is-phone) .error-bar {
+    left: calc(var(--phone-bottom-w, 0px) + var(--phone-debug-w, 0px) + 8px);
+    right: calc(var(--phone-panel-w, 0px) - var(--phone-shift, 0px) + 54px);
+    bottom: calc(8px + var(--safe-bottom, 0px));
+    margin-inline: auto;
+    width: max-content;
+    max-width: calc(100% - var(--phone-bottom-w, 0px) - var(--phone-debug-w, 0px) - var(--phone-panel-w, 0px) + var(--phone-shift, 0px) - 62px);
+    box-sizing: border-box;
+    gap: 8px;
+    border-radius: 6px;
+    transition: right 0.3s ease;
+  }
+  :global(html.is-phone) .error-bar > span {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* The resume banner goes one row up (the chip row may hold the error bar at the same time — a
+     failed reconnect attempt while waiting for one), centred between the nav rail and the map
+     controls and capped to that gap. */
+  :global(html.is-phone) .resume-banner {
+    --band-l: calc(62px + var(--safe-left, 0px));
+    --band-r: calc(100vw - var(--phone-panel-w, 0px) + var(--phone-shift, 0px) - 54px);
+    left: calc((var(--band-l) + var(--band-r)) / 2);
+    bottom: calc(46px + var(--safe-bottom, 0px));
+    max-width: calc(var(--band-r) - var(--band-l) - 16px);
+    box-sizing: border-box;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: left 0.3s ease;
+  }
 
   .zone-status-bar {
     grid-area: status-bar;
