@@ -118,6 +118,12 @@
   :global(html.is-mobile) .alert-stack {
     top: calc(var(--toolbar-h, 53px) - var(--safe-top, 0px) + 8px);
   }
+  /* Phone: the parent .app-toasts is the band between the corner buttons at --safe-top — start in
+     the buttons' row and never grow past the band (the rows wrap; an alert is not ellipsized). */
+  :global(html.is-phone) .alert-stack {
+    top: 8px;
+    max-width: calc(100% - 16px);
+  }
 
   .banner {
     pointer-events: auto;
