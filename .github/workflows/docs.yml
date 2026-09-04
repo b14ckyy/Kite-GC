@@ -63,6 +63,9 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
       - name: Deploy the release docs (${{ steps.ver.outputs.minor }} = latest)
         run: mike deploy --push --update-aliases "${{ steps.ver.outputs.minor }}" latest
+        env:
+          # Release channel: the changelog hides "in development" sections (docs/hooks/changelog_channel.py).
+          KITE_DOCS_CHANNEL: release
       - name: Deploy the development docs (Dev = master tip)
         run: mike deploy --push --title Dev dev
       - name: Point the site root at the latest release

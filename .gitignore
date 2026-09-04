@@ -61,6 +61,8 @@ target/
 # AI assistant config — kept local (not everyone uses Claude; the shareable rules live in
 # docs/dev/AI-ASSIST-RULES.md). Ignore the whole .claude/ directory.
 .claude/
+.agents
+skills-lock.json
 
 # =============================================================================
 # just task runner (if user installs it locally)
@@ -91,3 +93,9 @@ target/
 
 # Bundled macOS ffmpeg sidecars — fetched at build time by scripts/fetch-ffmpeg-macos.sh
 src-tauri/binaries/
+
+# =============================================================================
+# Python bytecode (mkdocs hooks under docs/hooks/)
+# =============================================================================
+__pycache__/
+*.pyc

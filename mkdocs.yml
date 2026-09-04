@@ -52,6 +52,10 @@ theme:
 plugins:
   - search
 
+# Release channel filter for the changelog (see the hook's docstring + docs.yml).
+hooks:
+  - docs/hooks/changelog_channel.py
+
 extra_css:
   - assets/branding/extra.css
 
