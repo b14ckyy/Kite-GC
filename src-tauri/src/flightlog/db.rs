@@ -272,9 +272,9 @@ fn set_user_version(conn: &Connection, version: u32) -> SqlResult<()> {
     conn.execute_batch(&format!("PRAGMA user_version = {};", version))
 }
 
-/// Error for a DB written by a NEWER Kite (user downgraded the app). The `db-newer:` prefix is a
-/// STABLE marker the frontend matches on to disable the logbook with a targeted message instead of
-/// a generic failure — change it in lockstep with stores/flightlog.ts.
+/// Error for a DB written by a NEWER Kite (the user downgraded the app). The `db-newer:` prefix is
+/// a STABLE marker the frontend matches on to disable the logbook with a targeted message instead
+/// of a generic failure — change it in lockstep with the loadLogbook handler in +page.svelte.
 fn db_newer_error(found: u32) -> rusqlite::Error {
     rusqlite::Error::SqliteFailure(
         rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
@@ -288,7 +288,8 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
     let current = get_user_version(conn)?;
 
     // Downgrade guard: never touch (let alone migrate "up" to an OLDER schema) a DB written by a
-    // newer Kite — refuse with the marker error and leave the file byte-identical.
+    // newer Kite — refuse with the marker error and leave the file byte-identical. Fires ONLY
+    // on a real schema mismatch; every other open error stays a generic failure.
     if current > CURRENT_SCHEMA_VERSION {
         return Err(db_newer_error(current));
     }

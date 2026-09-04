@@ -6,10 +6,12 @@ This section is for people who want to **build Kite from source**, understand ho
 
 - **[Architecture overview](architecture.md)** — the tech stack and how the backend, frontend and
   protocol layers fit together.
-- **[Building from source](building.md)** — prerequisites and the build/run workflow on Windows and
-  Linux.
-- **[Contributing](contributing.md)** — coding conventions, the i18n and licensing rules, and how to
-  submit changes.
+- **[Building from source](building.md)** — prerequisites and the build/run workflow on Windows,
+  Linux and macOS.
+- **[UI framework & theme](ui-framework.md)** — the shared UI building blocks and the dark theme
+  every panel uses.
+- **[Contributing](contributing.md)** — the branching model, coding conventions, the i18n and
+  licensing rules, and how to submit changes.
 
 ## At a glance
 
@@ -21,7 +23,8 @@ This section is for people who want to **build Kite from source**, understand ho
   telemetry decoding.
 - **Storage:** a local SQLite database (via `rusqlite`) for the flight log, vehicle and battery
   libraries.
-- **Platforms:** Windows (primary) and Linux (x86 / ARM).
+- **Platforms:** Windows (primary), Linux (x86 / ARM) and macOS (universal). Android and
+  iOS / iPadOS ports live on `development` for a release after 1.0.
 
 ## Source code
 
