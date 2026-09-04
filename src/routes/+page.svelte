@@ -69,6 +69,7 @@
   import * as logbookCtrl from '$lib/controllers/logbookController';
   import * as widgetCtrl from '$lib/controllers/widgetController';
   import * as phoneCtrl from '$lib/controllers/phoneWidgetController';
+  import { PHONE_GRID_PAD } from '$lib/config/phoneGrid';
   import type { PhoneWidgetsConfig } from '$lib/controllers/phoneWidgetController';
   import { isValidGpsCoordinate, isArmed } from '$lib/helpers/telemetry';
   import { anyCase } from '$lib/helpers/fileFilters';
@@ -97,6 +98,9 @@
   import VideoBackdropMap from "$lib/components/video/VideoBackdropMap.svelte";
   import { LARGE_BASE_VMIN } from "$lib/config/widgetRegistry";
   import FloatingVideoWindow from "$lib/components/video/FloatingVideoWindow.svelte";
+  import PhoneVideoDock from "$lib/components/phone/PhoneVideoDock.svelte";
+  import { setNativeRightBound } from "$lib/controllers/nativeVideo";
+  import { doubleTap, mouseDoubleClick } from "$lib/helpers/doubleTap";
   import { initVideo, videoState, videoStream, bindVideoEl, setMapLocation, setFloatHeightFrac, setFloatPos, registerPiPElement, reportMjpegError } from "$lib/stores/video";
   import { canvasSink, mjpegSink } from "$lib/controllers/mjpegSink";
   import { nativeSurface, activeNativeSurface } from "$lib/controllers/nativeVideo";
@@ -284,16 +288,37 @@
   // Must match FloatingVideoWindow's geometry exactly (incl. the 200px min-height floor that keeps
   // the mini-map's 4 control buttons from overflowing) so the in-frame map aligns with the frame.
   const FLOAT_MIN_H = 200;
+  // Phone (PHONE_VIDEO.md D2): the DOCKED frame instead — the stream aspect fitted into 40 % of the
+  // map-area height / 50 % of its width, whichever binds; bottom-right of the map area, left of the
+  // corner-control column (8 + 38 + 8), bottom-aligned with the chip row (8 px; the safe inset is
+  // 0 on Android, iPhone has no video). Same numbers drive PhoneVideoDock and the in-frame map.
+  const phoneMapW = $derived(winW - phonePanelW + phoneShift);
+  const dockH = $derived.by(() => {
+    const aspect = $videoState.aspect || 16 / 9;
+    return Math.round(Math.min(0.4 * winH, (0.5 * phoneMapW) / aspect));
+  });
+  const dockW = $derived(Math.round(dockH * ($videoState.aspect || 16 / 9)));
+  const dockLeft = $derived(phoneMapW - 8 - 38 - 8 - dockW);
+  const dockTop = $derived(winH - 8 - dockH);
   const floatH = $derived(
-    Math.min(Math.round(0.3 * winH), Math.max(FLOAT_MIN_H, Math.round($videoState.floatHeightFrac * winH))),
+    phoneUi ? dockH : Math.min(Math.round(0.3 * winH), Math.max(FLOAT_MIN_H, Math.round($videoState.floatHeightFrac * winH))),
   );
-  const floatW = $derived(Math.min(Math.round(floatH * ($videoState.aspect || 16 / 9)), Math.round(winW * 0.7)));
-  const floatLeft = $derived($videoState.floatSnapped ? 8 : $videoState.floatX);
-  const floatTop = $derived($videoState.floatSnapped ? winH - floatH - 30 : $videoState.floatY);
+  const floatW = $derived(phoneUi ? dockW : Math.min(Math.round(floatH * ($videoState.aspect || 16 / 9)), Math.round(winW * 0.7)));
+  const floatLeft = $derived(phoneUi ? dockLeft : $videoState.floatSnapped ? 8 : $videoState.floatX);
+  const floatTop = $derived(phoneUi ? dockTop : $videoState.floatSnapped ? winH - floatH - 30 : $videoState.floatY);
+  // The phone's widget column overlays the map: no native surface may show through it (the docked
+  // frame parks behind it) — the surface router clips at its edge.
+  $effect(() => {
+    setNativeRightBound(phoneUi ? phoneMapW : null);
+  });
   // The single map jumps to whichever video surface was double-clicked: `floating` → the chromeless
   // floating window frame, `widget` → the video-widget tile (its published rect). Every other surface
   // shows video. `main` (default) = the normal full-screen map.
   const mapInFrame = $derived($videoState.mapLocation !== 'main' && $videoState.status === 'live');
+  // Map centre offset for the covered right edge (PHONE_UI.md D16) — only while the map is the
+  // full-screen layer. In the docked frame / widget tile nothing covers it: a shifted centre put
+  // the follow anchor on the frame's left edge (Marc, 2026-09-04).
+  const phoneMapInset = $derived(phoneUi && !mapInFrame ? phonePanelW - phoneShift : 0);
   // Full-screen map box, rounded to whole px (issue #52): the CSS fallback `calc(53px * scale)`
   // lands on fractions at uiScale 1.25/1.5 (66.25px / 79.5px), which is what leaked tile seams —
   // see mapFrameStyle above for the mechanism. The map sliding ≤ half a px under the toolbar edge
@@ -366,12 +391,15 @@
   }
 
   // The WIDGET mini-map is locked to a clean nav view: 2D + heading-follow, zoom-only (3D/mode buttons
-  // hidden via `miniControls`). The FLOATING map stays fully operational. Restore the view on release.
+  // hidden via `miniControls`). The FLOATING map stays fully operational on the desktop; on the phone
+  // the docked frame is a mini map too and takes the same lock (PHONE_VIDEO.md D6). Restore the view
+  // on release.
+  const miniMapLocked = $derived(mapInWidget || (phoneUi && mapFloating));
   let miniLockActive = false;
   let savedMapViewMode: '2d' | '3d' = '2d';
   let savedMode2d: 'free' | 'follow' | 'heading-follow' = 'free';
   $effect(() => {
-    const lock = mapInWidget && $videoState.status === 'live';
+    const lock = miniMapLocked && $videoState.status === 'live';
     untrack(() => {
       if (lock && !miniLockActive) {
         miniLockActive = true;
@@ -706,7 +734,8 @@
   // The reserve is the panel's OWN extent (its largest widget + the zone padding), not the whole
   // dock zone: a dock of small tiles hugs the screen edge and the video gets the rest
   // (WIDGET_OVERHAUL.md D7). Capped at the zone in case a bind lags a frame.
-  const ufActive = $derived($videoState.unobstructedFullscreen && mapInFrame);
+  // Not on the phone: there is no dock to retreat from, the video runs under the widget column.
+  const ufActive = $derived($videoState.unobstructedFullscreen && mapInFrame && !phoneUi);
   const ufRight = $derived(
     ufActive && $layout.sideDock.visible && panels.right.length > 0
       ? Math.min(sideDockW, sidePanelCrossPx + 2 * DOCK_PAD)
@@ -826,7 +855,6 @@
       (t.id !== 'logbook' || flightLoggingEnabled) &&
       (t.id !== 'control' || isMavlinkConnected) && // control tab only when connected via MAVLink
       (t.id !== 'rc-control' || (rcTabAvailable && !isMobile) || mobileRcAvailable) && // RC tab: desktop needs the master switch + a joystick; mobile uses on-screen sticks when a FC is connected
-      (t.id !== 'video' || !isPhoneDevice) && // video stays on tablets (camera / OTG capture works natively; RTSP is the Phase E item) — phones decide with the phone UI
       (t.id !== 'radar' || radarSettings.enabled) && // radar tab only when the master switch is on
       (t.id !== 'airspace' || airspaceSettings.enabled || geozonesAvailable || fenceAvailable || rallyAvailable) // airspace: master switch, or geozone (INAV) / fence+rally (MAVLink) capable FC
     )
@@ -3203,11 +3231,22 @@
        The map must stay crisp, so it lives OUTSIDE the zoomed `.ui-scale` layer. It is the
        same single Map/Map3D instance (no re-mount). Normally it sits behind the chrome; when
        video is primary it flips above the chrome into the floating window's body (.in-frame). -->
+  <!-- Phone: the swapped-in mini map is clipped to the box of the frame it sits in — the map area
+       (docked frame: it parks BEHIND the widget column like the video does) or the column's tile
+       area (widget: it scrolls out with the page instead of hanging over the glass). Desktop: a
+       transparent, non-clipping wrapper. Same coordinate system as before (inset 0). -->
+  <div
+    class="map-clip"
+    class:clip-map-area={phoneUi && mapFloating}
+    class:clip-column={phoneUi && mapInWidget}
+    style:--phone-pad="{PHONE_GRID_PAD}px"
+  >
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="layer-map"
     class:in-frame={mapInFrame}
+    class:parked={phoneUi && mapFloating && !$videoState.floating}
     data-nv-clip={mapInFrame ? undefined : true}
     style={mapInFrame ? inFrameStyle : mapLayerStyle}
     onclick={minimizeLogbook}
@@ -3227,19 +3266,20 @@
         {mapViewMode}
         onToggleMapView={toggleMapView}
         bind:viewMode={map2dViewMode}
-        miniControls={mapInWidget}
-        centerInsetRight={phoneUi ? phonePanelW - phoneShift : 0}
+        miniControls={miniMapLocked}
+        centerInsetRight={phoneMapInset}
         radarActive={radarSettings.enabled}
         radarMapSettings={radarSettings.map}
         {radarReference}
         {radarRefAltM}
       />
     </div>
+  </div>
     <!-- 3D stays mounted (hidden) once opened, so toggling back is instant. -->
     {#if map3dEverOpened}
       <div class="map3d-layer" class:active={mapViewMode === '3d'}>
         <Map3D
-          centerInsetRight={phoneUi ? phonePanelW - phoneShift : 0}
+          centerInsetRight={phoneMapInset}
           bind:this={map3dRef}
           active={mapViewMode === '3d'}
           playbackTrack={mapTrack}
@@ -3279,7 +3319,7 @@
   <!-- Floating-frame map controls — top-level/unzoomed so they sit ABOVE the in-frame map (z2); the
        float-win's own corners live in .ui-scale (z1) and would be hidden behind it. Only for the
        floating frame (resizable); the widget tile is sized by the dock. ✕ sends the map back to main. -->
-  {#if mapFloating && $videoState.status === 'live'}
+  {#if mapFloating && $videoState.status === 'live' && !phoneUi}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="miniframe-ctl" style={mapFrameStyle}>
       <button class="mf-corner mf-close" onclick={() => setMapLocation('main')} title={$t('video.close')}>✕</button>
@@ -3326,6 +3366,8 @@
       onRescanBle={bleScanWindow}
     />
   </div>
+  <!-- The column's glass layer (inside PhoneWidgetPanel) carries data-nv-clip for the video
+       widget's hole — not this zone: a clip on the hit-testable root would let touches fall through. -->
   <div class="zone-phone-widgets">
     <PhoneWidgetPanel
       config={phoneWidgets}
@@ -3339,6 +3381,14 @@
   <div class="phone-bottom-chips">
     <PhoneBottomChips {telem} />
   </div>
+  <!-- Docked video window + its toggle (PHONE_VIDEO.md) — the phone's floating window. -->
+  <PhoneVideoDock
+    left={dockLeft}
+    top={dockTop}
+    width={dockW}
+    height={dockH}
+    widgetActive={phoneCtrl.isPhoneWidgetActive(phoneWidgets, 'videoFeed')}
+  />
   {:else}
   <!-- ======= TOOLBAR ======= -->
   <div class="zone-toolbar" bind:clientHeight={toolbarH}>
@@ -3405,7 +3455,8 @@
           class="native-hole"
           class:armed={$activeNativeSurface === 'main'}
           use:nativeSurface={'main'}
-          ondblclick={() => setMapLocation('main')}
+          ondblclick={mouseDoubleClick(() => setMapLocation('main'))}
+          use:doubleTap={() => setMapLocation('main')}
         >
           {#if $activeNativeSurface !== 'main'}<span>{$t('video.sinkElsewhere')}</span>{/if}
         </div>
@@ -3418,7 +3469,8 @@
             class="map-video"
             class:mirror={$videoState.mirror} class:rot180={$videoState.rotate180}
             use:mjpegSink
-            ondblclick={() => setMapLocation('main')}
+            ondblclick={mouseDoubleClick(() => setMapLocation('main'))}
+          use:doubleTap={() => setMapLocation('main')}
           ></canvas>
         {:else}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -3427,7 +3479,8 @@
             class="map-video"
             class:mirror={$videoState.mirror} class:rot180={$videoState.rotate180}
             src={$videoState.mjpegUrl}
-            ondblclick={() => setMapLocation('main')}
+            ondblclick={mouseDoubleClick(() => setMapLocation('main'))}
+          use:doubleTap={() => setMapLocation('main')}
             onerror={reportMjpegError}
           />
         {/if}
@@ -3441,7 +3494,8 @@
           autoplay
           muted
           playsinline
-          ondblclick={() => setMapLocation('main')}
+          ondblclick={mouseDoubleClick(() => setMapLocation('main'))}
+          use:doubleTap={() => setMapLocation('main')}
         ></video>
       {/if}
       </div>
@@ -3933,6 +3987,58 @@
   }
   :global(html.is-mobile) .map-video-wrap {
     top: var(--toolbar-h, 53px);
+  }
+  /* Phone: no toolbar / status bar — the swapped-in video fills the MAP AREA (it ends at the widget
+     column and rides along when the replay player pushes the column aside), so the picture is
+     centred in the uncovered area like the map's follow target, not on the screen. */
+  :global(html.is-phone) .map-video-wrap {
+    top: 0;
+    bottom: 0;
+    right: calc(var(--phone-panel-w, 0px) - var(--phone-shift, 0px));
+    transition: right 0.3s ease;
+  }
+  /* Phone, video primary: the mini map in the docked frame parks with it — off to the right,
+     behind the column and out (the frame itself unmounts; the map layer is +page's, so it moves).
+     Touches: the mini map takes them (pinch zoom — Leaflet's dragging and double-tap zoom are off
+     in mini mode, D6) and relays a long-press to the tile underneath (PhoneWidgetPanel); while the
+     grid is in EDIT mode (html.phone-editing) the layer goes touch-free so the tile can be dragged. */
+  :global(html.is-phone) .layer-map.in-frame {
+    transition: transform 0.3s ease;
+  }
+  :global(html.phone-editing) .layer-map.in-frame,
+  :global(html.phone-editing) .layer-map.in-frame :global(*) {
+    pointer-events: none !important;
+  }
+  :global(html.is-phone) .layer-map.in-frame.parked {
+    transform: translateX(100vw);
+  }
+  /* The clipping wrapper: transparent on the desktop; on the phone it bounds the mini map to the
+     map area (docked frame — the map slides out BEHIND the column, like the video) or to the
+     column's tile box (widget — the map leaves with its page instead of hanging over the glass).
+     pointer-events is inherited: the wrapper takes none, the map layer opts back in. */
+  .map-clip {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+  .map-clip > .layer-map {
+    pointer-events: auto;
+  }
+  /* clip-path, NOT a smaller box: the map layer's inline left/top are viewport coordinates, and a
+     wrapper with its own offset would move their origin. clip-path creates a stacking context, so
+     the wrapper takes the in-frame layer's z-index (2, above .ui-scale) while it clips. */
+  :global(html.is-phone) .map-clip.clip-map-area {
+    clip-path: inset(0 calc(var(--phone-panel-w, 0px) - var(--phone-shift, 0px)) 0 0);
+    z-index: 2;
+  }
+  :global(html.is-phone) .map-clip.clip-column {
+    clip-path: inset(
+      var(--phone-pad, 4px)
+      calc(var(--phone-pad, 4px) + var(--safe-right, 0px))
+      var(--phone-pad, 4px)
+      calc(100vw - var(--phone-panel-w, 0px) + var(--phone-shift, 0px) + var(--phone-pad, 4px))
+    );
+    z-index: 2;
   }
   :global(html.is-mobile) .app-toasts {
     top: var(--safe-top, 0px);

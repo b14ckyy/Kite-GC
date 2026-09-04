@@ -1043,6 +1043,9 @@
               <span class="stat-sep">|</span>
               <span class="stat-label">{$t('debug.vidNatCodec')}</span>
               <span class="stat-value">{n.sink.codec ?? '—'}</span>
+              <span class="stat-sep">|</span>
+              <span class="stat-label">{$t('debug.vidNatDroppedHidden')}</span>
+              <span class="stat-value">{n.sink.droppedHidden}</span>
             </div>
           {/if}
         </div>

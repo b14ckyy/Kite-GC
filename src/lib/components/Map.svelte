@@ -71,7 +71,7 @@
   import { toTelemetryData } from "$lib/adapters/telemetryAdapter";
   import { sunAltitudeDeg, cesiumLikeBrightness } from "$lib/utils/sun";
   import { ensureUserLocation, resolveUserLocation, userGeoLocation } from "$lib/helpers/userLocation";
-  import { isMobile } from "$lib/platform";
+  import { isMobile, isPhone } from "$lib/platform";
   import { radarVehicles, radarSelection, enrichList, type RadarSnapshot, type EnrichedVehicle } from "$lib/stores/radarTracking";
   import { radarAlertLevels, type AlertLevel } from "$lib/controllers/radarAlerts";
   import { gcsLocation, gcsAccuracyM, gcsWatchPaused, setGcsManual } from "$lib/stores/gcsLocation";
@@ -1757,6 +1757,10 @@
       zoomControl: false,
       attributionControl: true,
     });
+    // Only the tile provider's credit (its licence asks for it). Leaflet's own prefix — a link with
+    // a flag since 1.9 — is a courtesy the BSD licence does not require; a GCS carries no third-party
+    // statements (Marc, PHONE_VIDEO.md D8).
+    map.attributionControl.setPrefix(false);
 
     // Initialize tile cache with persisted size limit
     initTileCache(s.mapCacheMaxMB);
@@ -1837,6 +1841,10 @@
       mapResizeObs = new ResizeObserver(() => {
         if (viewMode === 'heading-follow') applyHeadingUpSize(true);
         map?.invalidateSize();
+        // A follow target is re-centred only by the next follow frame — a static one (the GCS with
+        // no UAV, a paused replay) never sends one, and after a swap into a small frame the target
+        // sat wherever the old size had put it (Marc: "the anchor is off to the north-west").
+        if (viewMode !== 'free') applyFollowFrame();
       });
       mapResizeObs.observe(mapContainer.parentElement);
     }
@@ -1959,6 +1967,14 @@
   $effect(() => {
     void centerInsetRight;
     if (map && viewMode === 'heading-follow') applyHeadingUpSize(true);
+  });
+  // Phone mini map (docked frame / widget tile, PHONE_VIDEO.md D6): pinch zooms, but a double-tap
+  // must not zoom — it is the swap gesture on the surfaces around it, and the mini map relays
+  // touches to the tile underneath. Dragging is already off (follow modes).
+  $effect(() => {
+    if (!map || !isPhone) return;
+    if (miniControls) map.doubleClickZoom.disable();
+    else map.doubleClickZoom.enable();
   });
 
   // Apply the side-effects for a view mode (idempotent): heading-up container sizing, panning enable/
@@ -2227,6 +2243,15 @@
   :global(html.is-mobile) :global(.leaflet-control-attribution) {
     margin-bottom: var(--safe-bottom, 0px);
   }
+  /* Provider credit in the app's dark theme (every platform) instead of Leaflet's white box. */
+  :global(.leaflet-control-attribution) {
+    background: rgba(46, 46, 46, 0.85);
+    color: #949494;
+    font-size: 10px;
+  }
+  :global(.leaflet-control-attribution a) {
+    color: #37a8db;
+  }
   /* Phone (Dev-Docs archive/PHONE_UI.md D5/D11): no zoom buttons (pinch), the corner cluster sits
      at the very bottom-right of the map area, leaning on the widget column and riding along when
      the column slides aside for the replay player (the inset already carries the shift). The
@@ -2236,17 +2261,27 @@
     display: none;
   }
   :global(html.is-phone) .map-controls-corner {
-    /* above the attribution row (the chips + Leaflet label share the bottom edge) */
-    bottom: calc(42px + var(--safe-bottom, 0px));
+    /* bottom-aligned with the chip row (PHONE_VIDEO.md D8) — may cover the credit, accepted */
+    bottom: calc(8px + var(--safe-bottom, 0px));
     transition: right 0.3s ease;
   }
   :global(html.is-mobile) :global(.leaflet-bottom.leaflet-right) {
     right: auto;
     left: 0;
   }
+  /* Phone: the credit lies on the bottom edge, flush against the widget column (the inset carries
+     the column's slide for the replay player); Leaflet's own control margins are dropped. */
   :global(html.is-phone) :global(.leaflet-bottom.leaflet-right) {
-    left: calc(var(--phone-bottom-w, 0px) + var(--phone-debug-w, 0px) + 8px);
-    margin-bottom: 8px;
+    left: auto;
+    right: var(--map-inset-right, 0px);
+    transition: right 0.3s ease;
+  }
+  :global(html.is-phone) :global(.leaflet-bottom.leaflet-right .leaflet-control-attribution) {
+    margin: 0 0 var(--safe-bottom, 0px) 0;
+    max-width: calc(100vw - var(--map-inset-right, 0px) - var(--phone-bottom-w, 0px) - var(--phone-debug-w, 0px) - 8px);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .map-control-btn {

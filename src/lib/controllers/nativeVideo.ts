@@ -65,7 +65,11 @@ export interface NativeHoleDebug {
 }
 export const nativeHoleDebug = writable<NativeHoleDebug | null>(null);
 
-const regs = new Map<NativeSurfaceId, HTMLElement>();
+// One SET of elements per id, not one element: the phone grid re-creates the video widget when a
+// drag carries it across a page edge, and a transient instance (the drag preview) can mount and
+// unmount while the surviving one is alive. A single slot was overwritten by the transient and then
+// deleted with it — the live tile ended up unregistered ("video runs elsewhere" until a swap).
+const regs = new Map<NativeSurfaceId, Set<HTMLElement>>();
 
 let running = false;
 let raf = 0;
@@ -77,13 +81,33 @@ let groundEl: HTMLDivElement | null = null;
  *  backdrop-filtered layers that churn is visible. */
 const clipped = new Map<HTMLElement, string>();
 
+// Dev: the registry as seen from the DevTools console (which surfaces exist, connected, sized).
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  (window as unknown as { __kiteNvRegs?: () => string }).__kiteNvRegs = () =>
+    [...regs.entries()]
+      .flatMap(([id, els]) =>
+        [...els].map((el) => {
+          const r = el.getBoundingClientRect();
+          return `${id}:${el.isConnected ? 'on' : 'OFF'}:${Math.round(r.width)}x${Math.round(r.height)}@${Math.round(r.left)},${Math.round(r.top)}`;
+        }),
+      )
+      .join(' ');
+}
+
 /** Svelte action: register `el` as a native-video surface candidate while it is mounted.
  *  Mount it only in the branch that would show the video (mirrors the MJPEG conditions). */
 export function nativeSurface(el: HTMLElement, id: NativeSurfaceId): { destroy(): void } {
-  regs.set(id, el);
+  let set = regs.get(id);
+  if (!set) {
+    set = new Set();
+    regs.set(id, set);
+  }
+  if (import.meta.env.DEV) console.debug(`[nv] register ${id} (others=${set.size}, connected=${el.isConnected})`);
+  set.add(el);
   return {
     destroy() {
-      if (regs.get(id) === el) regs.delete(id);
+      if (import.meta.env.DEV) console.debug(`[nv] destroy ${id} (left=${(regs.get(id)?.size ?? 1) - 1})`);
+      regs.get(id)?.delete(el);
     },
   };
 }
@@ -111,10 +135,13 @@ export function stopNativeSurfaceRouter(): void {
  *  surface (collapsed dock, display:none ancestor) must not win and blank the video. */
 function chosen(): { id: NativeSurfaceId; el: HTMLElement; rect: DOMRect } | null {
   for (const id of PRIORITY) {
-    const el = regs.get(id);
-    if (!el || !el.isConnected) continue;
-    const rect = el.getBoundingClientRect();
-    if (rect.width > 0 && rect.height > 0) return { id, el, rect };
+    const els = regs.get(id);
+    if (!els) continue;
+    for (const el of els) {
+      if (!el.isConnected) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) return { id, el, rect };
+    }
   }
   return null;
 }
@@ -125,7 +152,7 @@ function chosen(): { id: NativeSurfaceId; el: HTMLElement; rect: DOMRect } | nul
  *  it raw cuts the hole into the panel's HEADER and paints the native layer over it (found
  *  on the Android tablet; the same bug was latent on Windows, where the panel never
  *  scrolls). Null when the box is clipped away entirely. */
-function visibleRect(el: HTMLElement, rect: DOMRect): DOMRect | null {
+function visibleRect(el: HTMLElement, rect: DOMRect, id: NativeSurfaceId): DOMRect | null {
   let x1 = rect.left;
   let y1 = rect.top;
   let x2 = rect.right;
@@ -164,6 +191,14 @@ function visibleRect(el: HTMLElement, rect: DOMRect): DOMRect | null {
   // (Measured on Linux at uiScale 1.25: symmetric ~1.7 px "clips" top+bottom from integer
   // client sizes — a real scroll-clip moves in whole wheel steps, far past 3 px.)
   const SNAP = 3;
+  // Phone: the widget column is an OVERLAY, not an ancestor — a surface sliding under it (the
+  // docked window parking, PHONE_VIDEO.md D3) must lose its picture at the column's edge, not
+  // shine through the glass. The bound clips like a scroll container: full box stays, the
+  // visible part shrinks, the sink cuts the picture at the edge without rescaling it. Surfaces
+  // that live INSIDE the column (the widget tile) are exempt — the column's own overflow clips
+  // them, and the bound would blank them entirely.
+  if (rightBound != null && id !== 'widget' && x2 > rightBound) { x2 = rightBound; byR = 'bound'; }
+  if (x2 <= x1) return null;
   if (Math.abs(x1 - rect.left) < SNAP) { x1 = rect.left; byL = ''; }
   if (Math.abs(y1 - rect.top) < SNAP) { y1 = rect.top; byT = ''; }
   if (Math.abs(x2 - rect.right) < SNAP) { x2 = rect.right; byR = ''; }
@@ -174,6 +209,13 @@ function visibleRect(el: HTMLElement, rect: DOMRect): DOMRect | null {
 
 /** Dev diagnostics: which ancestor produced each clipped edge in the last visibleRect. */
 let lastClipBy = '';
+
+/** Viewport-x (css px) beyond which no surface is visible — the phone's widget column edge; null
+ *  = no bound. Set by +page (it owns the column width and its replay-player slide). */
+let rightBound: number | null = null;
+export function setNativeRightBound(px: number | null): void {
+  rightBound = px;
+}
 
 /** The sink's FULL (layout) box for a surface: the surface rect itself, or — for a
  *  `data-nv-cover` surface — the smallest box of the stream's aspect ratio
@@ -192,7 +234,7 @@ function tick(): void {
   if (!running) return;
   const c = chosen();
   if (get(activeNativeSurface) !== (c?.id ?? null)) activeNativeSurface.set(c?.id ?? null);
-  const vis = c ? visibleRect(c.el, c.rect) : null;
+  const vis = c ? visibleRect(c.el, c.rect, c.id) : null;
   if (!c || !vis) {
     // No surface — or the active one is scrolled entirely out of its container.
     if (lastVisible !== false) {
@@ -201,6 +243,7 @@ function tick(): void {
     }
     clearClips();
     lastRectKey = '';
+    if (import.meta.env.DEV) nativeHoleDebug.set(null); // no hole → no stale readout
   } else {
     // Two rects go to the sink: the surface's FULL box for video layout (aspect fit), and
     // the VISIBLE part as a clip — a scroll-clipped surface then shows a video cut at the

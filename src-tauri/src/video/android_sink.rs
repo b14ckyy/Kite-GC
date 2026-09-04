@@ -64,6 +64,13 @@ struct Shared {
     /// stepper, read by the decode loop per frame.
     buffer_frames: AtomicU32,
     stopping: AtomicBool,
+    /// No surface on screen (frontend `set_visible(false)`: the docked window parked, the
+    /// widget on the other grid page). The decoder keeps running — stopping it would cost a
+    /// keyframe wait on return — but decoded frames are released WITHOUT rendering
+    /// (PHONE_VIDEO.md D7): no surface queue, no composition for a picture nobody sees.
+    hidden: AtomicBool,
+    /// Frames released unrendered while hidden (Debug Monitor readout).
+    dropped_hidden: AtomicU64,
 }
 
 impl Shared {
@@ -124,9 +131,15 @@ impl AndroidVideoSink {
     }
 
     pub fn set_visible(&self, visible: bool) {
+        self.shared.hidden.store(!visible, Ordering::Relaxed);
         if let Err(e) = view_host::set_visible(visible) {
             log::debug!("[video] android sink: set_visible: {e}");
         }
+    }
+
+    /// Frames decoded but released unrendered while no surface was on screen.
+    pub fn frames_dropped_hidden(&self) -> u64 {
+        self.shared.dropped_hidden.load(Ordering::Relaxed)
     }
 
     /// Smoothing-buffer depth in frames (0 = render on release — the latency-first
@@ -358,6 +371,17 @@ fn drain(codec: &MediaCodec, shared: &Shared, pacing: &mut Pacing) -> Result<(),
     loop {
         match codec.dequeue_output_buffer(Duration::ZERO) {
             Ok(DequeuedOutputBufferInfoResult::Buffer(ob)) => {
+                if shared.hidden.load(Ordering::Relaxed) {
+                    // Off screen: decode (reference chain intact for an instant return), don't
+                    // render. The pacing anchor is dropped so the schedule re-anchors on return
+                    // instead of chasing a timeline that ran on while nothing was shown.
+                    codec
+                        .release_output_buffer(ob, false)
+                        .map_err(|e| format!("releaseOutputBuffer(hidden): {e:?}"))?;
+                    pacing.anchor = None;
+                    shared.dropped_hidden.fetch_add(1, Ordering::Relaxed);
+                    continue;
+                }
                 let depth = shared.buffer_frames.load(Ordering::Relaxed);
                 if depth == 0 {
                     codec

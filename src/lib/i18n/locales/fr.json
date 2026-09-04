@@ -637,6 +637,10 @@
     "rtspUrl": "URL RTSP",
     "nativeClient": "Client RTSP natif (expérimental)",
     "nativeClientHint": "Le client RTSP intégré de Kite — sans MediaMTX ni ffmpeg. Sources MJPEG, H.264 et HEVC (décodage matériel H.264/HEVC sous Windows, Android et Linux) ; connexion d'abord en UDP avec repli TCP automatique.",
+    "dockShow": "Afficher la vidéo",
+    "dockHide": "Masquer la vidéo",
+    "dockMapShow": "Afficher la carte",
+    "dockMapHide": "Masquer la carte",
     "sinkElsewhere": "La vidéo s'affiche sur une autre surface",
     "rtspUnicastRefused": "Le serveur refuse la diffusion unicast (RTSP 461) — p. ex. une source multicast uniquement. Vérifiez le réglage unicast/multicast du serveur.",
     "webrtcCodecUnsupported": "Le codec de ce flux ne peut pas transiter par WebRTC (p. ex. HEVC). Activez plutôt le client RTSP natif.",
@@ -1745,6 +1749,7 @@
     "vidNatLate": "En retard",
     "vidNatPresented": "Présentées",
     "vidNatCodec": "Codec",
+    "vidNatDroppedHidden": "Ignorées (hors écran)",
     "vidNatHint": "Le client RTSP propre à Kite. « Images reçues » compte ce que livre le dépaquetiseur (les unités d'accès H.264/HEVC peuvent arriver scindées — « Présentées » est la vraie cadence) ; « Perdues » compte les images entièrement rejetées après perte de paquets. RTP reçus/Perdus/Réordonnés/En retard viennent directement de la boucle de réception. Sur le chemin de décodage matériel, « Présentées » est ce que la couche D3D a réellement affiché."
   },
   "statusBar": {

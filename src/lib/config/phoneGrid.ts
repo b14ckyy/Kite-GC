@@ -12,3 +12,7 @@ export const PHONE_GRID_ROWS = 4;
 export const PHONE_GRID_MAX_COLS = 2;
 /** Widget pages the panel scrolls through (vertical swipe, snap). */
 export const PHONE_GRID_PAGES = 2;
+
+/** Padding (css px) between the column's glass edge and the tile area — the column panel lays
+ *  the tiles out with it, and +page clips the swapped-in mini map to the same box. */
+export const PHONE_GRID_PAD = 4;

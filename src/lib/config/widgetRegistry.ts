@@ -3,7 +3,6 @@
 
 // Widget registry — defines all available widgets, their shape family, default size and metadata
 
-import { isPhone } from '$lib/platform';
 
 /** Shape family: `square` tiles keep 1:1, `wide` ones are 2:1 in their wide state. */
 export type WidgetShape = 'square' | 'wide';
@@ -38,9 +37,9 @@ const ALL_WIDGET_DEFS: WidgetDef[] = [
   { id: 'videoFeed',    label: 'Video',          labelKey: 'widgets.video',        shape: 'wide',   defaultSize: 'W' },
 ];
 
-// Video stays on tablets (camera / OTG capture works natively there; RTSP is the Phase E item) and is
-// dropped from the phone catalog until the phone UI decides how to fit it.
-export const WIDGET_DEFS: WidgetDef[] = ALL_WIDGET_DEFS.filter(w => w.id !== 'videoFeed' || !isPhone);
+// Every platform, the phone included since PHONE_VIDEO.md D5 (the video widget is off by default
+// there and takes a W = 2×1 slot, crop-to-fill).
+export const WIDGET_DEFS: WidgetDef[] = ALL_WIDGET_DEFS;
 
 export const WIDGET_MAP = new Map(WIDGET_DEFS.map(w => [w.id, w]));
 

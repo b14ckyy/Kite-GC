@@ -122,6 +122,10 @@ The same feed can appear in several places at once (they all share one stream):
   dragging it to the **bottom-left corner snaps it there**, where it **displaces the bottom widget dock**
   to make room (the dock shrinks by the window's size). Drag it away from the corner to un-snap and
   free-float. The **top-right corner grip resizes** it (aspect-locked, touch-friendly).
+  **On a phone** there is a **docked window** instead: fixed to the bottom-right of the map, sized to
+  the stream (at most 40 % of the map height or half its width), no dragging or resizing. A **camera
+  button** above the map buttons slides it off-screen to the right and back — it appears once a source
+  runs and hides while the Video widget is active. The panel on the phone has no preview.
 - **In a detached window** (**Windows only** — see the [platform notes](#platform-notes-what-to-expect-per-operating-system);
   the button is simply absent elsewhere) — a separate, free-floating **OS window** you can place anywhere,
   including **outside the app** or on a second monitor. Opened from the Video panel; because it lives outside the
@@ -148,6 +152,10 @@ How interactive the swapped-in **mini-map** is depends on where it landed:
 - **In the floating window** — fully interactive: pan and zoom normally (left-drag / single-touch). To
   **move the floating frame itself** while it holds the map, drag with the **right mouse button**
   (desktop) or **two fingers** (touchscreen).
+- **On a phone** (docked window or widget) — the widget's limits apply: 2D, heading-follow, no panning.
+  Double-tap swaps. With the video full-screen, the corner button becomes a **map button** that hides
+  and shows the small map; double-tap the full-screen video to send the map back. Unobstructed
+  fullscreen does not exist on the phone — the video fills the map area next to the widget column.
 
 ![The map swapped into the video — mini-map over a full-screen feed](../assets/guides/video/video_map_swap.png)
 /// caption

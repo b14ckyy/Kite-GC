@@ -428,8 +428,15 @@ impl NativeRtsp {
             {
                 self.sink.lock().unwrap().as_ref().map(|s| {
                     let size = s.picture_size();
+                    // Frames decoded but released unrendered while no surface was on screen —
+                    // the Android sink's off-screen mode (PHONE_VIDEO.md D7); 0 elsewhere.
+                    #[cfg(target_os = "android")]
+                    let dropped_hidden = s.frames_dropped_hidden();
+                    #[cfg(not(target_os = "android"))]
+                    let dropped_hidden = 0u64;
                     serde_json::json!({
                         "presented": s.frames_presented(),
+                        "droppedHidden": dropped_hidden,
                         "width": size.map(|v| v.0),
                         "height": size.map(|v| v.1),
                         "error": s.error(),

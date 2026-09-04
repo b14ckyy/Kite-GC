@@ -650,6 +650,10 @@
     "rtspTransportHint": "Transport: UDP (lowest latency, e.g. UAV-Link), TCP, or Auto (try both)",
     "nativeClient": "Native RTSP client (experimental)",
     "nativeClientHint": "Kite's own built-in RTSP client — needs no MediaMTX and no ffmpeg. MJPEG, H.264 and HEVC sources (hardware H.264/HEVC decode on Windows, Android and Linux); connects via UDP first with automatic TCP fallback.",
+    "dockShow": "Show video",
+    "dockHide": "Hide video",
+    "dockMapShow": "Show map",
+    "dockMapHide": "Hide map",
     "sinkElsewhere": "Video is shown on another surface",
     "rtspUnicastRefused": "The server refuses unicast streaming (RTSP 461) — e.g. a multicast-only source. Check the server's unicast/multicast setting.",
     "webrtcCodecUnsupported": "This stream's codec cannot be carried over WebRTC (e.g. HEVC). Enable the native RTSP client instead.",
@@ -1795,6 +1799,7 @@
     "vidNatLate": "Late",
     "vidNatPresented": "Presented",
     "vidNatCodec": "Codec",
+    "vidNatDroppedHidden": "Dropped (off-screen)",
     "vidNatHint": "Kite's own RTSP client. Frames in counts what the depacketizer delivers (H.264/HEVC access units can arrive split — Presented is the true picture rate); Dropped counts frames discarded whole after packet loss. RTP recv/Lost/Reordered/Late come straight from the receive loop: Lost never arrived, Reordered were repaired by the 16-packet window, Late arrived too late to use. On the hardware-decode path, Presented is what the D3D layer actually put on screen.",
     "perf": {
       "fps": "FPS",
