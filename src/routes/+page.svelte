@@ -143,7 +143,14 @@
   $effect(() => { if (mapViewMode === '3d') map3dEverOpened = true; });
   // Waypoints can only be edited on the 2D map → entering edit mode forces 2D (untracked read/write so
   // toggling the view later doesn't re-trigger this; it reacts to the edit-mode transition only).
-  $effect(() => { if ($editMode) untrack(() => { if (mapViewMode === '3d') mapViewMode = '2d'; }); });
+  // Mission edit mode needs the full map: leave 3D, and bring the map back from a mini frame (the
+  // widget tile / the phone's docked frame take no waypoint interaction — Marc, 2026-09-04).
+  $effect(() => {
+    if ($editMode) untrack(() => {
+      if (mapViewMode === '3d') mapViewMode = '2d';
+      if (mapInFrame) setMapLocation('main');
+    });
+  });
   // Map3D instance handle — used to read the 3D camera focus on a 3D→2D switch so
   // the 2D map can re-centre on the same spot (keeping its own zoom).
   let map3dRef: {
@@ -394,12 +401,14 @@
   // hidden via `miniControls`). The FLOATING map stays fully operational on the desktop; on the phone
   // the docked frame is a mini map too and takes the same lock (PHONE_VIDEO.md D6). Restore the view
   // on release.
-  const miniMapLocked = $derived(mapInWidget || (phoneUi && mapFloating));
+  // Only while the map is actually in a frame (mapInFrame includes `status === 'live'`): a stale
+  // mapLocation with the video off must not put the FULL map into mini mode (half-size markers).
+  const miniMapLocked = $derived(mapInFrame && (mapInWidget || phoneUi));
   let miniLockActive = false;
   let savedMapViewMode: '2d' | '3d' = '2d';
   let savedMode2d: 'free' | 'follow' | 'heading-follow' = 'free';
   $effect(() => {
-    const lock = miniMapLocked && $videoState.status === 'live';
+    const lock = miniMapLocked;
     untrack(() => {
       if (lock && !miniLockActive) {
         miniLockActive = true;
@@ -4039,6 +4048,11 @@
       calc(100vw - var(--phone-panel-w, 0px) + var(--phone-shift, 0px) + var(--phone-pad, 4px))
     );
     z-index: 2;
+  }
+  /* Editing the grid: the mini map drops UNDER the column (dimmed through the glass) so the tile's
+     own edit chrome — the resize button — is on top and reachable. */
+  :global(html.phone-editing) .map-clip.clip-column {
+    z-index: 0;
   }
   :global(html.is-mobile) .app-toasts {
     top: var(--safe-top, 0px);

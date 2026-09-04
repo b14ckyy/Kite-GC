@@ -117,6 +117,8 @@
   let pressY = 0;
   /** Edit mode: a touch that moved before the hold elapsed is a page flick, tracked here. */
   let flickY: number | null = null;
+  /** The current press was relayed from the swapped-in mini map (a layer over a tile). */
+  let relayedPress = false;
   let edgeTimer: ReturnType<typeof setTimeout> | null = null;
   let edgeDir = 0;
 
@@ -256,13 +258,17 @@
       if (flickY != null) return; // page flick in progress — decided on release
       if (pressId && Math.hypot(e.clientX - pressX, e.clientY - pressY) > DRAG_SLOP_PX) {
         // Moved before the hold elapsed: not a pickup. In edit mode the cells block native
-        // scrolling (touch-action none), so the flick is ours to turn into a page change.
+        // scrolling (touch-action none), so the flick is ours to turn into a page change — and so
+        // is a swipe that started on the swapped-in mini map (a layer outside the scroller, which
+        // never sees it; the video tile scrolls natively, the map tile must match).
+        const relayed = relayedPress;
         clearPress();
-        if (editing) flickY = pressY;
+        if (editing || relayed) flickY = pressY;
       }
     };
     const onUp = (e: PointerEvent) => {
       clearPress();
+      relayedPress = false;
       if (dragId) endDrag(true);
       if (flickY != null) {
         const dy = e.clientY - flickY;
@@ -273,6 +279,7 @@
     };
     const onCancel = () => {
       clearPress();
+      relayedPress = false;
       flickY = null;
       if (dragId) endDrag(false);
     };
@@ -284,19 +291,25 @@
       const target = e.target as HTMLElement | null;
       if (!editing && e.pointerType !== 'mouse' && target?.closest('.layer-map.in-frame')) {
         const cell = cellElAt(e.clientX, e.clientY);
-        if (cell?.dataset.id) onCellPointerDown(e, cell.dataset.id);
+        if (cell?.dataset.id) {
+          relayedPress = true;
+          onCellPointerDown(e, cell.dataset.id);
+        }
         return;
       }
       if (editing && rootEl && !rootEl.contains(target as Node)) editing = false;
     };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onCancel);
+    // All in the CAPTURE phase: the mini map swallows pointer events on its container (zoom-only
+    // map), which would otherwise hide a release from us — the relayed press then ran into its
+    // long-press timer and a short tap on a waypoint popup opened edit mode.
+    window.addEventListener('pointermove', onMove, true);
+    window.addEventListener('pointerup', onUp, true);
+    window.addEventListener('pointercancel', onCancel, true);
     window.addEventListener('pointerdown', onDown, true);
     return () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onCancel);
+      window.removeEventListener('pointermove', onMove, true);
+      window.removeEventListener('pointerup', onUp, true);
+      window.removeEventListener('pointercancel', onCancel, true);
       window.removeEventListener('pointerdown', onDown, true);
       clearPress();
       clearEdge();
