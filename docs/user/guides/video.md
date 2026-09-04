@@ -148,7 +148,9 @@ back to the full-screen background.
 How interactive the swapped-in **mini-map** is depends on where it landed:
 
 - **In the widget** — deliberately limited by space: **2D only** and **heading-follow only**, but you
-  **can zoom**.
+  **can zoom**. Nothing else on that little map reacts (no waypoint placing or dragging, no context
+  menu), and its markers are drawn at half size. Switching the mission editor on brings the map back
+  to full screen automatically.
 - **In the floating window** — fully interactive: pan and zoom normally (left-drag / single-touch). To
   **move the floating frame itself** while it holds the map, drag with the **right mouse button**
   (desktop) or **two fingers** (touchscreen).

@@ -71,7 +71,7 @@
   import { toTelemetryData } from "$lib/adapters/telemetryAdapter";
   import { sunAltitudeDeg, cesiumLikeBrightness } from "$lib/utils/sun";
   import { ensureUserLocation, resolveUserLocation, userGeoLocation } from "$lib/helpers/userLocation";
-  import { isMobile, isPhone } from "$lib/platform";
+  import { isMobile } from "$lib/platform";
   import { radarVehicles, radarSelection, enrichList, type RadarSnapshot, type EnrichedVehicle } from "$lib/stores/radarTracking";
   import { radarAlertLevels, type AlertLevel } from "$lib/controllers/radarAlerts";
   import { gcsLocation, gcsAccuracyM, gcsWatchPaused, setGcsManual } from "$lib/stores/gcsLocation";
@@ -1968,13 +1968,30 @@
     void centerInsetRight;
     if (map && viewMode === 'heading-follow') applyHeadingUpSize(true);
   });
-  // Phone mini map (docked frame / widget tile, PHONE_VIDEO.md D6): pinch zooms, but a double-tap
-  // must not zoom — it is the swap gesture on the surfaces around it, and the mini map relays
-  // touches to the tile underneath. Dragging is already off (follow modes).
+  // Mini map (the widget tile everywhere, the docked frame on the phone — `miniControls`): ZOOM
+  // only. Wheel and pinch reach Leaflet as before; every click / double-click / context menu /
+  // single-pointer press is swallowed in the CAPTURE phase on the container, before Leaflet, the
+  // mission layers (add / drag a waypoint), the GCS context menu or the geozone handles see it
+  // (Marc, 2026-09-04: the widget map placed and moved waypoints). Dragging is already off in
+  // the follow modes; Leaflet's double-click zoom goes too — a double-tap is the swap gesture on
+  // the surfaces around the frame, and the phone relays touches to the tile underneath.
   $effect(() => {
-    if (!map || !isPhone) return;
-    if (miniControls) map.doubleClickZoom.disable();
-    else map.doubleClickZoom.enable();
+    if (!map || !mapContainer) return;
+    if (!miniControls) {
+      map.doubleClickZoom.enable();
+      return;
+    }
+    map.doubleClickZoom.disable();
+    const swallow = (e: Event) => {
+      e.stopImmediatePropagation();
+      if (e.type === 'contextmenu') e.preventDefault(); // pointer events stay uncancelled: pinch = touch events
+    };
+    const el = mapContainer;
+    const types = ['click', 'dblclick', 'contextmenu', 'mousedown', 'mouseup', 'pointerdown', 'pointerup'];
+    for (const t of types) el.addEventListener(t, swallow, true);
+    return () => {
+      for (const t of types) el.removeEventListener(t, swallow, true);
+    };
   });
 
   // Apply the side-effects for a view mode (idempotent): heading-up container sizing, panning enable/
@@ -2102,7 +2119,7 @@
 </script>
 
 <div class="map-wrapper" style="--map-inset-right: {centerInsetRight}px">
-  <div bind:this={mapContainer} class="map" class:tile-overlap={isWebKitGtk} style="--map-rotation: 0deg"></div>
+  <div bind:this={mapContainer} class="map" class:tile-overlap={isWebKitGtk} class:mini={miniControls} style="--map-rotation: 0deg"></div>
 
   <div class="map-controls-corner">
     {#if !miniControls}
@@ -2216,6 +2233,30 @@
   :global(.map.heading-up) {
     transform: rotate(var(--map-rotation, 0deg));
     transform-origin: center center;
+  }
+
+  /* Mini map (the video-swap frame / widget tile, `miniControls`): every marker at half size, in
+     proportion to the little frame. Leaflet positions the marker root itself (its transform is
+     Leaflet's), so the CHILD — the icon's own root element — is scaled around the icon centre;
+     centre-anchored icons keep their anchor exactly, bottom-anchored ones move by a few px. */
+  .map.mini {
+    --marker-scale: 0.5;
+  }
+  .map.mini :global(.leaflet-marker-icon:not(.mission-wp-icon):not(.mission-fbh-icon) > *) {
+    transform: scale(var(--marker-scale));
+    transform-origin: 50% 50%;
+  }
+  /* Mission waypoint icons (INAV + ArduPilot layers): the SVG child is scaled — Leaflet's own
+     positioning transform on the marker root stays untouched — by the UI scale × a global 0.85
+     (a touch smaller everywhere, Marc 2026-09-04) × the map's --marker-scale. transform-origin
+     keeps the on-coordinate anchor fixed (teardrops anchor bottom-centre, circles centre). */
+  :global(.mission-wp-icon > svg),
+  :global(.mission-fbh-icon > svg) {
+    transform: scale(calc(var(--ui-scale, 1) * 0.85 * var(--marker-scale, 1)));
+    transform-origin: 50% 50%;
+  }
+  :global(.mission-wp-icon.wp-anchor-bottom > svg) {
+    transform-origin: 50% 100%;
   }
 
   /* Counter-rotate Leaflet controls so they stay readable */
