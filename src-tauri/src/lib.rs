@@ -386,6 +386,19 @@ pub fn run() {
     let log_level = if debug_flag { log::LevelFilter::Debug } else { log::LevelFilter::Warn };
     logging::init(log_level, is_portable());
 
+    // Linux: the GStreamer decode sink renders through gtkglsink, whose GL context is GDK's — and
+    // GTK3 creates a DESKTOP GL context by default (measured on a Pi 5: OpenGL 3.1, legacy). Such a
+    // context has no direct DMABuf import (`GL_OES_EGL_image_external`), so a hardware decoder's
+    // tiled output — the Pi 5 HEVC block's `NV12_128C8` — goes down gst-gl's per-plane path and
+    // ABORTS the process in `gst_gl_format_from_video_info` ("code should not be reached", twice in
+    // the field on 2026-09-04). A GLES context imports it directly (measured there: zero-copy at
+    // 60 fps). Nothing else in the process uses GDK's GL — WebKitGTK renders through its own EGL,
+    // wry/tao draw nothing — so ask GTK for GLES before it initializes; a user-set value wins.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("GDK_GL").is_none() {
+        std::env::set_var("GDK_GL", "gles");
+    }
+
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init());

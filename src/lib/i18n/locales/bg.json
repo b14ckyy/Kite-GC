@@ -666,6 +666,7 @@
     "reconnectStop": "Спри",
     "rtspMobilePlaceholder": "RTSP все още не е наличен на това устройство — стрийминг машината не може да работи на мобилни устройства, а специфичен за устройството RTSP път предстои.",
     "engineMissing": "Механизмът за поточно предаване MediaMTX е необходим за RTSP и все още не е инсталиран.",
+    "invalidRtspUrl": "Това не е RTSP адрес — трябва да започва с rtsp:// (или rtsps://).",
     "engineDownload": "Изтегли MediaMTX",
     "engineReady": "MediaMTX готов",
     "ffmpegFallbackMissing": "По избор: ffmpeg позволява резервен четец за източници, които MediaMTX не може да чете директно (напр. някои OBS RTSP сървъри).",

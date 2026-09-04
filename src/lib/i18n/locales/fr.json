@@ -648,6 +648,7 @@
     "bufferHint": "0 = latence minimale. Chaque cran ajoute une durée d'image de mise en mémoire tampon — lecture plus fluide sur les liaisons instables, au prix de la latence.",
     "rtspMobilePlaceholder": "RTSP n'est pas encore disponible sur cet appareil — le moteur de streaming ne peut pas fonctionner sur mobile ; une voie RTSP native à l'appareil reste à venir.",
     "engineMissing": "Le moteur de streaming MediaMTX est requis pour RTSP et n'est pas encore installé.",
+    "invalidRtspUrl": "Ce n'est pas une adresse RTSP — elle doit commencer par rtsp:// (ou rtsps://).",
     "engineDownload": "Télécharger MediaMTX",
     "engineReady": "MediaMTX prêt",
     "ffmpegFallbackMissing": "Optionnel : ffmpeg active un lecteur de secours pour les sources que MediaMTX ne peut pas lire nativement (p. ex. certains serveurs RTSP OBS).",

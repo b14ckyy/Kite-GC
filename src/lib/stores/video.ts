@@ -1395,6 +1395,12 @@ async function negotiateRtsp(url: string, transport: RtspTransport): Promise<voi
   }
 }
 
+/** Trim, and repair the one typo that is unmistakable: a single slash after the scheme
+ *  (`rtsp:/host` → `rtsp://host`). Anything else is left for the validity check. */
+function normalizeRtspUrl(raw: string): string {
+  return raw.trim().replace(/^(rtsps?):\/(?!\/)/i, '$1://');
+}
+
 /** Open (or re-open) the RTSP feed via the engine, honouring the active transport. Once live, a stall
  *  monitor watches for frame timeouts; any failure/drop enters the infinite reconnect loop (until
  *  frames return or the user stops). `reconnect` distinguishes a loop retry from a fresh start. */
@@ -1403,12 +1409,21 @@ export async function startRtsp(opts?: { reconnect?: boolean }): Promise<void> {
   clearRtspTimers();
   stopTracks(); // release the camera / previous peer connection
   const st = get(videoState);
-  const url = st.rtspUrl.trim();
+  const url = normalizeRtspUrl(st.rtspUrl);
   const transport = st.rtspTransport;
   if (!url) {
     patch({ kind: 'rtsp', enabled: true, status: 'error', error: 'No RTSP URL', reconnecting: false, reconnectAttempt: 0 });
     return;
   }
+  // Not an RTSP address at all: a dead end no reconnect can fix, so it must not enter the loop
+  // (the field case was `rtsp:/host` — the backend refused it and the loop retried it forever,
+  // which read as "the stream never comes up").
+  if (!/^rtsps?:\/\//i.test(url)) {
+    logVideo('warn', `RTSP start refused — not an RTSP URL: ${url}`);
+    patch({ kind: 'rtsp', enabled: true, status: 'error', error: get(t)('video.invalidRtspUrl'), reconnecting: false, reconnectAttempt: 0 });
+    return;
+  }
+  if (url !== st.rtspUrl) patch({ rtspUrl: url }); // the repaired form is what the field shows
   patch({
     kind: 'rtsp',
     enabled: true,
@@ -1430,8 +1445,12 @@ export async function startRtsp(opts?: { reconnect?: boolean }): Promise<void> {
   // RTSP/RTP stack (MJPEG → multipart, H264/HEVC → hardware decode sink).
   if (st.rtspNativeClient) {
     // Toggled over from the classic path mid-run? The engine would keep pulling the
-    // source in the background (a second client on it) — release it first.
+    // source in the background (a second client on it) — release it first. And the image
+    // path's ffmpeg with it: on a WebView without WebRTC (Linux) the classic path IS that
+    // transcode, and it kept running under the native client — a second RTSP session on the
+    // source and two software decodes on one small board (the Pi 5 field report: artefacts).
     void invoke('video_webrtc_stop').catch(() => {});
+    void stopNativeMjpeg();
     if (!reconnect) logVideo('info', `RTSP start ${url} (transport=${transport}, engine=kite-native)`);
     if ((await startKiteRtspPath(url, transport)) === 'retry') scheduleRtspReconnect();
     return;
