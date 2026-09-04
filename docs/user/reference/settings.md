@@ -104,6 +104,17 @@ See **[Flight logbook](../guides/logbook.md)** for how these are used.
 | **Log level** | How much Kite writes to its diagnostic log file — Off / Error / Warning / Debug. Raise it when reporting a problem. | Warning |
 | **Open log folder** | Open the folder containing the diagnostic log in your file manager. | — |
 
+### Updates
+
+| Setting | What it does | Default |
+|---|---|---|
+| **Check for updates** | Whether Kite asks GitHub for a newer version when it starts — **Disabled**, **Stable releases**, or **Include pre-releases** (betas and release candidates). | Stable releases |
+
+Kite never downloads or installs an update on its own. When a newer version exists you get a notice
+with the version you have, the one that is available, and three choices: **Open Release Page** to read
+what changed, **Remind me later**, or **Skip this version** — which suppresses the notice for that one
+version only.
+
 ### Mission Control
 
 | Setting | What it does | Default |
