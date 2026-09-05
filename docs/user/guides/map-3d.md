@@ -83,8 +83,9 @@ telemetry in real time. The same models are used for the chase/orbit views and a
 
 ![The five aircraft models: fixed-wing, multirotor, tricopter, VTOL and the generic arrow](../assets/guides/map-3d/uav_models.png)
 /// caption
-Kite picks the model from the platform type the flight controller reports (multirotor, tricopter,
-fixed-wing); an unknown type — passive telemetry, for instance — gets the generic arrow. Red marks the
+Kite picks the model from the vehicle type the flight controller reports — multirotor, tricopter,
+fixed-wing, and VTOL for ArduPilot QuadPlanes and PX4 VTOL airframes; an unknown type (passive
+telemetry, for instance) gets the generic arrow. Red marks the
 left side, green the right, the yellow spike the nose; the same model draws the 2D map icon.
 ///
 
