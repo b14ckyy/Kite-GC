@@ -45,4 +45,4 @@ keep it centred on the origin.
 `NORMAL` per primitive, **uint16 indices** (so < 65 536 vertices per primitive), no `byteStride`, one
 flat `baseColorFactor` material per colour. Winding must be consistent and outward — the 2D renderer
 culls back faces. The current set was generated procedurally (trimesh), then post-processed: winding
-fixed, vertex normals written, indices converted to uint16, kept at the generated size (about 2.3× the previous set — the 2D icon radius and the 3D scale may need a follow-up).
+fixed, vertex normals written, indices converted to uint16, scaled by 0.66 = 1.5× the previous size class (`MODEL_RADIUS` 0.98 in the 2D renderer, `minimumPixelSize` 146 in 3D). Prop guards without a nav colour are light grey and bodies near-white: the flight-mode tint is no longer mixed into the model (2D and 3D), the trail carries the mode colour.
