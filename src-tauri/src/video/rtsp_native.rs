@@ -267,17 +267,16 @@ impl NativeRtsp {
                         // earlier AUs are undecodable anyway), bounded so a set-less stream
                         // still gets a sink.
                         #[cfg(target_os = "linux")]
-                        let needs_crop = if sink_ts.is_none() && frame.codec == VideoCodec::H265 {
-                            match super::rtsp::au_needs_crop(&frame.data) {
-                                Some(v) => Some(v),
-                                None if aus_without_sps < SPS_WAIT_AUS => {
+                        let sps = if sink_ts.is_none() && frame.codec == VideoCodec::H265 {
+                            match super::rtsp::probe_au(&frame.data) {
+                                super::rtsp::SpsProbe::NoSps if aus_without_sps < SPS_WAIT_AUS => {
                                     aus_without_sps += 1;
                                     return;
                                 }
-                                None => None,
+                                p => p,
                             }
                         } else {
-                            None
+                            super::rtsp::SpsProbe::NoSps
                         };
                         if sink_ts.is_none() {
                             // First AU decides the route: bring the decode sink up. It
@@ -299,7 +298,7 @@ impl NativeRtsp {
                             #[cfg(target_os = "android")]
                             let started_sink = AndroidVideoSink::start(frame.codec);
                             #[cfg(target_os = "linux")]
-                            let started_sink = LinuxVideoSink::start(frame.codec, needs_crop);
+                            let started_sink = LinuxVideoSink::start(frame.codec, sps);
                             match started_sink {
                                 Ok(sink) => {
                                     *sink_slot.lock().unwrap() = Some(sink);

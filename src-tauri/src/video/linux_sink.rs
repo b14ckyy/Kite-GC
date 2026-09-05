@@ -15,12 +15,17 @@
 //! offers it. That import needs a GLES context (`lib.rs` asks GDK for one: a desktop-GL
 //! context cannot take the Pi 5's tiled `NV12_128C8` and gst-gl aborts on it). When the GL
 //! sink can't come up (no usable GL context) the cairo path `videoconvert → videoflip →
-//! gtksink` takes over for the rest of the process. The cairo path is also chosen per
-//! stream when the V4L2 stateless HEVC decoder would COPY its frames: a conformance-window
-//! crop (coded 1280×736 shown as 720, every 1080p) makes it convert each picture into a
-//! system-memory buffer that still carries DMABuf caps, and gst-gl aborts on that too
-//! (Pi 5, OBS/NVENC, 2026-09-05). Copied frames cost the same on either path; only the
-//! cairo one survives them.
+//! gtksink` takes over for the rest of the process.
+//!
+//! Conformance windows (`rtsp::h265_sps`): the V4L2 stateless HEVC decoder (Pi 5) COPIES
+//! every frame when the SPS crops the coded picture (NVENC 720p = coded 736, every 1080p),
+//! into a system-memory buffer that still carries DMABuf caps — gst-gl aborts on it. So for
+//! that decoder the sink strips the window from every SPS it pushes (the decoder then hands
+//! the full coded frame out zero-copy) and lays the widget out for the CODED picture such
+//! that the display part fills the aspect-fitted rect and the padding rows lie outside the
+//! visible box, hidden under the WebView. Measured on the Pi 5: 60 fps at ~23 % of one core
+//! either way; the copy path was 45–57 fps at a full core. Only an SPS that does not parse
+//! still goes cairo (the one route that survives a copied frame).
 //!
 //! Presentation: smoothing buffer 0 (the latency-first default) = `sync=false`, every
 //! decoded frame renders as soon as it exists. Depths 1–3 = `sync=true` with the frames'
@@ -45,7 +50,7 @@ use std::time::Duration;
 use gst::prelude::*;
 
 use super::linux_host;
-use super::rtsp::VideoCodec;
+use super::rtsp::{strip_window, SpsProbe, VideoCodec, Window};
 
 /// The host places the widget one main-thread hop away; the GL sink needs it there before
 /// it starts (its GL context comes from the realized GtkGLArea).
@@ -114,40 +119,59 @@ pub struct LinuxVideoSink {
     shared: Arc<Shared>,
     pacing: Mutex<Pacing>,
     bus_thread: Option<JoinHandle<()>>,
+    /// Conformance window stripped from this stream's SPS (module docs), if any.
+    window: Option<Window>,
+    geom: Mutex<Geom>,
 }
 
-/// The V4L2 stateless HEVC decoder (Pi 5) copies every frame when the SPS crops the coded
-/// picture; that copy cannot be imported by gst-gl (module docs).
-fn hw_decoder_copies_cropped_frames(codec: VideoCodec, needs_crop: Option<bool>) -> bool {
-    matches!(codec, VideoCodec::H265)
-        && needs_crop == Some(true)
-        && gst::ElementFactory::find("v4l2slh265dec").is_some()
+/// Last rect and orientation from the frontend — re-laid out when either changes.
+#[derive(Default)]
+struct Geom {
+    rect: Option<[i32; 8]>,
+    mirror: bool,
+    rotate180: bool,
 }
 
 impl LinuxVideoSink {
     /// Bring the sink up for `codec`: build the pipeline, hand its widget to the host and
     /// start decoding. GL first, cairo fallback. Decode problems after this surface through
-    /// [`Self::error`] — the same contract as the other sinks. `needs_crop` is the stream's
-    /// SPS verdict (`rtsp::au_needs_crop`); `None` = unknown, treated as no crop.
-    pub fn start(codec: VideoCodec, needs_crop: Option<bool>) -> Result<Self, String> {
+    /// [`Self::error`] — the same contract as the other sinks. `sps` is the stream's SPS
+    /// verdict (`rtsp::probe_au`); see the module docs for what a window means here.
+    pub fn start(codec: VideoCodec, sps: SpsProbe) -> Result<Self, String> {
         gst::init().map_err(|e| format!("gstreamer init: {e}"))?;
+        let v4l2_hevc = matches!(codec, VideoCodec::H265)
+            && gst::ElementFactory::find("v4l2slh265dec").is_some();
         let mut gl = !GL_UNAVAILABLE.load(Ordering::Relaxed);
-        if gl && hw_decoder_copies_cropped_frames(codec, needs_crop) {
-            log::warn!("[video] linux sink: the V4L2 HEVC decoder copies cropped frames — using the cairo sink for this stream");
-            gl = false;
+        let mut window = None;
+        match sps {
+            SpsProbe::Window(w) if v4l2_hevc => {
+                log::info!(
+                    "[video] linux sink: conformance window {}x{} -> {}x{} stripped for the V4L2 decoder; padding hidden under the WebView",
+                    w.coded_w,
+                    w.coded_h,
+                    w.display_w(),
+                    w.display_h()
+                );
+                window = Some(w);
+            }
+            SpsProbe::Unparsed if v4l2_hevc && gl => {
+                log::warn!("[video] linux sink: SPS did not parse — cairo sink for this stream (the V4L2 decoder may copy)");
+                gl = false;
+            }
+            _ => {}
         }
-        match Self::build(codec, gl) {
+        match Self::build(codec, gl, window) {
             Ok(sink) => Ok(sink),
             Err(e) if gl => {
                 log::warn!("[video] linux sink: GL sink unavailable ({e}) — using the cairo sink");
                 GL_UNAVAILABLE.store(true, Ordering::Relaxed);
-                Self::build(codec, false)
+                Self::build(codec, false, window)
             }
             Err(e) => Err(e),
         }
     }
 
-    fn build(codec: VideoCodec, gl: bool) -> Result<Self, String> {
+    fn build(codec: VideoCodec, gl: bool, window: Option<Window>) -> Result<Self, String> {
         let (parser, caps) = match codec {
             VideoCodec::H265 => ("h265parse", "video/x-h265,stream-format=byte-stream,alignment=au"),
             _ => ("h264parse", "video/x-h264,stream-format=byte-stream,alignment=au"),
@@ -295,11 +319,17 @@ impl LinuxVideoSink {
             shared,
             pacing: Mutex::new(Pacing::default()),
             bus_thread,
+            window,
+            geom: Mutex::new(Geom::default()),
         })
     }
 
     /// Queue one access unit (Annex-B) with its unwrapped 90 kHz timestamp.
     pub fn push(&self, au: Vec<u8>, ts90k: u64) {
+        let au = match self.window {
+            Some(_) => strip_window(&au).unwrap_or(au),
+            None => au,
+        };
         let media_ns = ts90k * 100_000 / 9; // 90 kHz → ns
         let pts = self.schedule(media_ns);
         let mut buffer = gst::Buffer::from_mut_slice(au);
@@ -364,7 +394,42 @@ impl LinuxVideoSink {
     /// host lays the widget out in the full box and clips it at the visible edge.
     #[allow(clippy::too_many_arguments)]
     pub fn set_rect(&self, x: i32, y: i32, w: i32, h: i32, cx: i32, cy: i32, cw: i32, ch: i32) {
-        linux_host::set_rect(x, y, w, h, cx, cy, cw, ch);
+        self.geom.lock().unwrap().rect = Some([x, y, w, h, cx, cy, cw, ch]);
+        self.apply_rect();
+    }
+
+    /// Lay the widget out. With a stripped window the DISPLAY picture is aspect-fitted into
+    /// the full box and the widget grown to the CODED picture around it, so the padding rows
+    /// fall outside the visible box; the visible box is also clipped to the fitted picture
+    /// (a letterboxed box would otherwise show the padding in its bars).
+    fn apply_rect(&self) {
+        let g = self.geom.lock().unwrap();
+        let Some([x, y, w, h, cx, cy, cw, ch]) = g.rect else { return };
+        let Some(win) = self.window else {
+            linux_host::set_rect(x, y, w, h, cx, cy, cw, ch);
+            return;
+        };
+        let (dw, dh) = (win.display_w().max(1) as f64, win.display_h().max(1) as f64);
+        let scale = (w as f64 / dw).min(h as f64 / dh);
+        let (fw, fh) = (dw * scale, dh * scale);
+        let (fx, fy) = (x as f64 + (w as f64 - fw) / 2.0, y as f64 + (h as f64 - fh) / 2.0);
+        // Flips move the padding: `horiz` and `180` swap left/right, `180` and `vert` swap
+        // top/bottom (see set_orient).
+        let left = if g.mirror != g.rotate180 { win.right } else { win.left } as f64;
+        let top = if g.rotate180 { win.bottom } else { win.top } as f64;
+        let (vx, vy) = ((cx as f64).max(fx), (cy as f64).max(fy));
+        let (vx2, vy2) = (((cx + cw) as f64).min(fx + fw), ((cy + ch) as f64).min(fy + fh));
+        let r = |v: f64| v.round() as i32;
+        linux_host::set_rect(
+            r(fx - left * scale),
+            r(fy - top * scale),
+            r(win.coded_w as f64 * scale),
+            r(win.coded_h as f64 * scale),
+            r(vx),
+            r(vy),
+            r((vx2 - vx).max(1.0)),
+            r((vy2 - vy).max(1.0)),
+        );
     }
 
     pub fn set_visible(&self, visible: bool) {
@@ -389,6 +454,14 @@ impl LinuxVideoSink {
             (true, true) => "vert", // mirror + 180° = vertical flip
         };
         self.flip.set_property_from_str("video-direction", direction);
+        {
+            let mut g = self.geom.lock().unwrap();
+            g.mirror = mirror;
+            g.rotate180 = rotate180;
+        }
+        if self.window.is_some() {
+            self.apply_rect();
+        }
     }
 
     pub fn frames_presented(&self) -> u64 {
@@ -399,7 +472,11 @@ impl LinuxVideoSink {
     pub fn picture_size(&self) -> Option<(u32, u32)> {
         let w = self.shared.width.load(Ordering::Relaxed);
         let h = self.shared.height.load(Ordering::Relaxed);
-        (w > 0 && h > 0).then_some((w, h))
+        if w == 0 || h == 0 {
+            return None;
+        }
+        // A stripped window: the decoder reports the coded size, the picture is the window.
+        Some(self.window.map_or((w, h), |win| (win.display_w(), win.display_h())))
     }
 }
 

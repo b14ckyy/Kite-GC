@@ -32,6 +32,6 @@ mod rtp;
 mod sdp;
 
 #[cfg(target_os = "linux")]
-pub use h265_sps::au_needs_crop;
+pub use h265_sps::{probe_au, strip_window, SpsProbe, Window};
 
 pub use client::{run_rtsp, LiveRtspStats, RtspConfig, RtspTransport, VideoCodec};

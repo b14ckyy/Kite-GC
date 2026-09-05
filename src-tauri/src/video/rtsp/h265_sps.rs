@@ -1,16 +1,86 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! H.265 SPS probe: does the sequence carry a conformance-window crop? (Coded 1280×736
-//! shown as 1280×720, every 1080p stream.) The Linux sink needs to know before it builds
-//! the pipeline — see `linux_sink` for why.
+//! H.265 SPS conformance window: probe it, and strip it. An encoder that pads the picture
+//! to its block size (NVENC 720p → coded 1280×736, every 1080p → 1088) declares the visible
+//! part as a window; the Pi 5's V4L2 decoder implements that crop as a CPU copy the GL path
+//! cannot take (see `linux_sink`). Without the window the decoder hands the full coded frame
+//! out zero-copy and the sink hides the padding under the WebView instead.
 
 const START_CODE: [u8; 4] = [0, 0, 0, 1];
 const NAL_SPS: u8 = 33;
 
-/// `Some(true)` when the SPS in this Annex-B access unit crops the coded picture,
-/// `Some(false)` when it does not, `None` without a parseable SPS.
-pub fn au_needs_crop(annexb: &[u8]) -> Option<bool> {
+/// Conformance window of a sequence, in luma pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Window {
+    pub coded_w: u32,
+    pub coded_h: u32,
+    pub left: u32,
+    pub top: u32,
+    pub right: u32,
+    pub bottom: u32,
+}
+
+impl Window {
+    pub fn display_w(&self) -> u32 {
+        self.coded_w.saturating_sub(self.left + self.right)
+    }
+    pub fn display_h(&self) -> u32 {
+        self.coded_h.saturating_sub(self.top + self.bottom)
+    }
+}
+
+/// What an access unit's SPS says about cropping.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SpsProbe {
+    /// No SPS in this AU.
+    NoSps,
+    /// An SPS is there but did not parse — treat the stream as unknown.
+    Unparsed,
+    /// The coded picture is the picture.
+    NoWindow,
+    /// The SPS crops the coded picture.
+    Window(Window),
+}
+
+/// Probe the first SPS of an Annex-B access unit.
+pub fn probe_au(annexb: &[u8]) -> SpsProbe {
+    let Some((start, end)) = find_sps(annexb) else { return SpsProbe::NoSps };
+    match parse_sps(&annexb[start..end]) {
+        Some(p) if p.window_flag_bit.is_some() => match p.window {
+            Some(w) if w.left | w.top | w.right | w.bottom != 0 => SpsProbe::Window(w),
+            _ => SpsProbe::NoWindow,
+        },
+        Some(_) => SpsProbe::NoWindow,
+        None => SpsProbe::Unparsed,
+    }
+}
+
+/// The AU with every SPS rewritten to declare no conformance window (the coded size becomes
+/// the picture size). `None` when the AU carries no SPS — push it unchanged.
+pub fn strip_window(annexb: &[u8]) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(annexb.len());
+    let mut pos = 0;
+    let mut touched = false;
+    while let Some((start, end)) = find_sps(&annexb[pos..]) {
+        let (start, end) = (pos + start, pos + end);
+        out.extend_from_slice(&annexb[pos..start]);
+        match rewrite_sps(&annexb[start..end]) {
+            Some(nal) => out.extend_from_slice(&nal),
+            None => out.extend_from_slice(&annexb[start..end]),
+        }
+        touched = true;
+        pos = end;
+    }
+    if !touched {
+        return None;
+    }
+    out.extend_from_slice(&annexb[pos..]);
+    Some(out)
+}
+
+/// Byte range of the first SPS NAL (header included, start code excluded).
+fn find_sps(annexb: &[u8]) -> Option<(usize, usize)> {
     let start = annexb
         .windows(5)
         .position(|w| w[..4] == START_CODE && (w[4] >> 1) & 0x3F == NAL_SPS)?
@@ -21,11 +91,20 @@ pub fn au_needs_crop(annexb: &[u8]) -> Option<bool> {
         .position(|w| w == [0, 0, 1])
         .map(|p| p.saturating_sub(1))
         .unwrap_or(rest.len());
-    sps_needs_crop(&rest[..end])
+    Some((start, start + end))
+}
+
+struct ParsedSps {
+    rbsp: Vec<u8>,
+    /// Bit offset of `conformance_window_flag`, if the header parsed that far.
+    window_flag_bit: Option<usize>,
+    /// Bit offset right after the four window offsets (or after a zero flag).
+    after_window_bit: usize,
+    window: Option<Window>,
 }
 
 /// `nal` = the SPS NAL including its two header bytes.
-fn sps_needs_crop(nal: &[u8]) -> Option<bool> {
+fn parse_sps(nal: &[u8]) -> Option<ParsedSps> {
     let rbsp = strip_emulation(nal.get(2..)?);
     let mut r = BitReader::new(&rbsp);
     r.bits(4)?; // sps_video_parameter_set_id
@@ -33,16 +112,60 @@ fn sps_needs_crop(nal: &[u8]) -> Option<bool> {
     r.bits(1)?; // sps_temporal_id_nesting_flag
     profile_tier_level(&mut r, max_sub_layers_minus1)?;
     r.ue()?; // sps_seq_parameter_set_id
-    if r.ue()? == 3 {
+    let chroma_format_idc = r.ue()?;
+    if chroma_format_idc == 3 {
         r.bits(1)?; // separate_colour_plane_flag
     }
-    r.ue()?; // pic_width_in_luma_samples
-    r.ue()?; // pic_height_in_luma_samples
-    if r.bits(1)? == 0 {
-        return Some(false);
+    let coded_w = r.ue()?;
+    let coded_h = r.ue()?;
+    let window_flag_bit = r.pos;
+    let mut window = None;
+    if r.bits(1)? == 1 {
+        let (sub_w, sub_h) = match chroma_format_idc {
+            1 => (2, 2),
+            2 => (2, 1),
+            _ => (1, 1),
+        };
+        let (left, right, top, bottom) = (r.ue()?, r.ue()?, r.ue()?, r.ue()?);
+        window = Some(Window {
+            coded_w,
+            coded_h,
+            left: left * sub_w,
+            right: right * sub_w,
+            top: top * sub_h,
+            bottom: bottom * sub_h,
+        });
     }
-    let offsets = [r.ue()?, r.ue()?, r.ue()?, r.ue()?];
-    Some(offsets.iter().any(|&o| o != 0))
+    let after_window_bit = r.pos;
+    Some(ParsedSps { rbsp, window_flag_bit: Some(window_flag_bit), after_window_bit, window })
+}
+
+/// The SPS NAL with `conformance_window_flag = 0` and the offsets removed; `None` when it
+/// has no window or does not parse.
+fn rewrite_sps(nal: &[u8]) -> Option<Vec<u8>> {
+    let p = parse_sps(nal)?;
+    p.window?;
+    let flag = p.window_flag_bit?;
+    let total = p.rbsp.len() * 8;
+    // rbsp_trailing_bits: the stop bit is the last 1 in the payload.
+    let stop = (0..total).rev().find(|&i| bit(&p.rbsp, i) == 1)?;
+    if p.after_window_bit > stop {
+        return None;
+    }
+    let mut bits: Vec<u8> = (0..flag).map(|i| bit(&p.rbsp, i)).collect();
+    bits.push(0);
+    bits.extend((p.after_window_bit..=stop).map(|i| bit(&p.rbsp, i)));
+    while bits.len() % 8 != 0 {
+        bits.push(0);
+    }
+    let body: Vec<u8> = bits.chunks(8).map(|c| c.iter().fold(0u8, |acc, &b| (acc << 1) | b)).collect();
+    let mut out = nal[..2].to_vec();
+    out.extend(add_emulation(&body));
+    Some(out)
+}
+
+fn bit(data: &[u8], i: usize) -> u8 {
+    (data[i / 8] >> (7 - i % 8)) & 1
 }
 
 fn profile_tier_level(r: &mut BitReader, max_sub_layers_minus1: usize) -> Option<()> {
@@ -75,6 +198,21 @@ fn strip_emulation(data: &[u8]) -> Vec<u8> {
         if zeros >= 2 && b == 3 {
             zeros = 0;
             continue;
+        }
+        out.push(b);
+        zeros = if b == 0 { zeros + 1 } else { 0 };
+    }
+    out
+}
+
+/// Emulation-prevention insertion: `00 00 {00..03}` → `00 00 03 {..}`.
+fn add_emulation(data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(data.len() + 4);
+    let mut zeros = 0usize;
+    for &b in data {
+        if zeros >= 2 && b <= 3 {
+            out.push(3);
+            zeros = 0;
         }
         out.push(b);
         zeros = if b == 0 { zeros + 1 } else { 0 };
@@ -139,31 +277,51 @@ mod tests {
         au
     }
 
-    // OBS (NVENC) 1280×720: coded 1280×736, conformance window bottom offset.
+    // OBS (NVENC) 1280×720: coded 1280×736, window bottom 16.
     const OBS_SPS: &str = "420101016000000300900000030000030078a00280802e1f1396554a4211917543016a02020208000003000800000301e3002ef2880006acfc0000989682";
+    // The same SPS without the window (independent Python bit surgery, ffprobe-verified 1280×736).
+    const OBS_SPS_STRIPPED: &str = "420101016000000300900000030000030078a00280802e16595529084645d50c05a80808082000000300200000078c00bbca20001ab3f00002625a08";
     // x265 1280×720 — coded size equals the picture, no window.
     const X265_720_SPS: &str = "420101016000000300900000030000030078a00280802d165ba4a4c2f0168080000003008000001e04";
-    // x265 1280×730 — coded 736, window crops 6 rows.
+    // x265 1280×730 — coded 736, window bottom 6.
     const X265_730_SPS: &str = "420101016000000300900000030000030078a00280802e1f265ba4a4c2f0168080000003008000001e04";
+    const X265_730_SPS_STRIPPED: &str = "420101016000000300900000030000030078a00280802e165ba4a4c2f0168080000003008000001e04";
 
     #[test]
     fn real_encoders() {
-        assert_eq!(au_needs_crop(&au_with(&hex(OBS_SPS))), Some(true));
-        assert_eq!(au_needs_crop(&au_with(&hex(X265_720_SPS))), Some(false));
-        assert_eq!(au_needs_crop(&au_with(&hex(X265_730_SPS))), Some(true));
+        let obs = Window { coded_w: 1280, coded_h: 736, left: 0, top: 0, right: 0, bottom: 16 };
+        assert_eq!(probe_au(&au_with(&hex(OBS_SPS))), SpsProbe::Window(obs));
+        assert_eq!((obs.display_w(), obs.display_h()), (1280, 720));
+        assert_eq!(probe_au(&au_with(&hex(X265_720_SPS))), SpsProbe::NoWindow);
+        assert_eq!(
+            probe_au(&au_with(&hex(X265_730_SPS))),
+            SpsProbe::Window(Window { coded_w: 1280, coded_h: 736, left: 0, top: 0, right: 0, bottom: 6 })
+        );
     }
 
     #[test]
-    fn no_sps_or_truncated_is_unknown() {
-        assert_eq!(au_needs_crop(&[0, 0, 0, 1, 0x26, 0x01, 0xaf]), None);
+    fn strip_matches_the_reference_bytes_and_reprobes_as_no_window() {
+        for (sps, stripped) in [(OBS_SPS, OBS_SPS_STRIPPED), (X265_730_SPS, X265_730_SPS_STRIPPED)] {
+            let au = strip_window(&au_with(&hex(sps))).expect("has an SPS");
+            assert_eq!(au, au_with(&hex(stripped)));
+            assert_eq!(probe_au(&au), SpsProbe::NoWindow);
+        }
+        // No window → bytes untouched; no SPS → None.
+        let plain = au_with(&hex(X265_720_SPS));
+        assert_eq!(strip_window(&plain), Some(plain.clone()));
+        assert_eq!(strip_window(&[0, 0, 0, 1, 0x26, 0x01, 0xaf]), None);
+    }
+
+    #[test]
+    fn no_sps_or_truncated() {
+        assert_eq!(probe_au(&[0, 0, 0, 1, 0x26, 0x01, 0xaf]), SpsProbe::NoSps);
         let mut short = hex(OBS_SPS);
         short.truncate(14); // ends inside profile_tier_level
-        assert_eq!(au_needs_crop(&au_with(&short)), None);
+        assert_eq!(probe_au(&au_with(&short)), SpsProbe::Unparsed);
     }
 
     #[test]
-    fn a_window_with_zero_offsets_is_no_crop() {
-        // Hand-built SPS, one sub-layer: window flag set, all four offsets zero.
+    fn a_window_with_zero_offsets_is_no_window() {
         let mut w = BitWriter::default();
         w.bits(0x42 << 8 | 0x01, 16); // NAL header
         w.bits(0, 4);
@@ -179,7 +337,7 @@ mod tests {
             w.ue(0);
         }
         w.bits(1, 1); // rbsp trailing
-        assert_eq!(au_needs_crop(&au_with(&w.emulated())), Some(false));
+        assert_eq!(probe_au(&au_with(&w.emulated())), SpsProbe::NoWindow);
     }
 
     #[derive(Default)]
@@ -199,27 +357,13 @@ mod tests {
             self.bits(0, len - 1);
             self.bits(x, len);
         }
-        /// Bytes with emulation-prevention inserted, as an encoder would.
         fn emulated(&self) -> Vec<u8> {
-            let mut raw = Vec::new();
-            for chunk in self.bits.chunks(8) {
-                let mut b = 0u8;
-                for (i, bit) in chunk.iter().enumerate() {
-                    b |= (*bit as u8) << (7 - i);
-                }
-                raw.push(b);
-            }
-            let mut out = Vec::new();
-            let mut zeros = 0;
-            for b in raw {
-                if zeros >= 2 && b <= 3 {
-                    out.push(3);
-                    zeros = 0;
-                }
-                out.push(b);
-                zeros = if b == 0 { zeros + 1 } else { 0 };
-            }
-            out
+            let raw: Vec<u8> = self
+                .bits
+                .chunks(8)
+                .map(|c| c.iter().enumerate().fold(0u8, |acc, (i, b)| acc | ((*b as u8) << (7 - i))))
+                .collect();
+            add_emulation(&raw)
         }
     }
 }
