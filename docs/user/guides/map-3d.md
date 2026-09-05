@@ -81,6 +81,13 @@ The aircraft is a **3D model** chosen for its type, oriented to its real **attit
 and motion-smoothed so it moves cleanly. In replay it flies along the recorded track; live it follows
 telemetry in real time. The same models are used for the chase/orbit views and are hidden in FPV.
 
+![The five aircraft models: fixed-wing, multirotor, tricopter, VTOL and the generic arrow](../assets/guides/map-3d/uav_models.png)
+/// caption
+Kite picks the model from the platform type the flight controller reports (multirotor, tricopter,
+fixed-wing); an unknown type — passive telemetry, for instance — gets the generic arrow. Red marks the
+left side, green the right, the yellow spike the nose; the same model draws the 2D map icon.
+///
+
 ## Everything else, in 3D too
 
 The 3D map mirrors the rest of Kite's overlays, each placed at real altitude:

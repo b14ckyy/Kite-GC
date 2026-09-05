@@ -115,6 +115,13 @@ UAV's altitude with a fix, else the ground at your GCS):
 A legend in the Map tab shows the scale. In **3D**, near-level contacts also get a drop-line to the
 ground and a footprint circle so you can judge where they are.
 
+![The contact models by ADS-B category](../assets/guides/radar/adsb_models.png)
+/// caption
+In 3D each contact is drawn as a model chosen by its ADS-B emitter category; contacts without a heading
+become a flat ring, FormationFlight peers the generic UAV arrow. The model's own colour never shows —
+the altitude scale replaces it.
+///
+
 Map controls (Map tab):
 
 - **Show all** — ignore the relevance filters and draw everything.

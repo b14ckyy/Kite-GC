@@ -15,7 +15,7 @@ import type { UavMesh } from './uavMesh';
 const DEG = Math.PI / 180;
 const AMBIENT = 0.5, DIFFUSE = 0.6; // a bit more directional so the side light reveals the attitude
 const FIT = 0.66;                    // model fits this fraction of the icon (leaves room for the soft shadow)
-const MODEL_RADIUS = 0.65;
+const MODEL_RADIUS = 0.98;           // the current set is 1.5× the old size class (plane wingspan radius ≈ 0.95)
 // Light from the south (screen-down = −Z) + overhead (+Y): gives side shading so roll/pitch read.
 const LIGHT = norm3(0.1, 0.55, -0.66);
 // Attitude sign mapping — flip if a manoeuvre reads inverted (top-down ≠ the 3D ENU projection).
@@ -104,7 +104,7 @@ export function renderUavTopDown(
   // with no hard edge. Visible on street + satellite maps.
   const SH = 1.3, push = size, oy = size * 0.02;
   ctx.save();
-  ctx.shadowColor = 'rgba(0,0,0,0.72)';
+  ctx.shadowColor = 'rgba(0,0,0,1)';
   ctx.shadowBlur = size * 0.12;
   ctx.shadowOffsetX = push;
   ctx.shadowOffsetY = oy;
@@ -116,6 +116,9 @@ export function renderUavTopDown(
     ctx.lineTo(cx + (tr.x[2] - cx) * SH - push, cy + (tr.y[2] - cy) * SH);
     ctx.closePath();
   }
+  // Two passes: a blurred shadow thins out towards its edge, the second pass doubles its density
+  // — the contrast under a bright model on a bright satellite map.
+  ctx.fill();
   ctx.fill();
   ctx.restore();
 

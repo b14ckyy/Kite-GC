@@ -1077,6 +1077,7 @@
     // the diagnostics log, then stop cleanly: the rest of the app runs on without 3D.
     try {
       viewer = new Cesium.Viewer(cesiumContainer, viewerOptions);
+      attachCameraLight();
     } catch (e) {
       const detail = e instanceof Error ? `${e.name}: ${e.message}\n${e.stack ?? ''}` : String(e);
       log3d('warn', `CesiumWidget construction failed — 3D unavailable: ${detail}`);
@@ -2759,15 +2760,29 @@
     );
     return Cesium.Quaternion.fromRotationMatrix(m, new Cesium.Quaternion());
   }
+  /** Models are lit from the camera, not by the sun: Cesium lights models from the ephemeris sun at
+   *  the scene clock (the flight time) whatever the globe's lighting setting, so an evening flight put
+   *  the UAV model in shadow whatever its colour. */
+  function attachCameraLight() {
+    if (!viewer) return;
+    const light = new Cesium.DirectionalLight({ direction: new Cesium.Cartesian3(0, 0, -1) });
+    viewer.scene.light = light;
+    viewer.scene.preRender.addEventListener(() => {
+      if (viewer) Cesium.Cartesian3.clone(viewer.scene.camera.directionWC, light.direction);
+    });
+  }
+
   function uavModelGraphics(tint: Cesium.Color, uri: string) {
     return {
       uri,
-      minimumPixelSize: 73,
+      minimumPixelSize: 146, // doubled for the slimmer low-poly set — reads at a distance again
       maximumScale: 4000,
       scale: 5.2,
       color: tint,
+      // No mode tint on the model: it muddied the nav lights and the body (Marc, 2026-09-06);
+      // the trail and the mode chip carry the flight-mode colour.
       colorBlendMode: Cesium.ColorBlendMode.MIX,
-      colorBlendAmount: 0.2,
+      colorBlendAmount: 0,
       heightReference: Cesium.HeightReference.NONE,
     };
   }
