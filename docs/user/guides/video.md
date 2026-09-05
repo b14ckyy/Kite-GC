@@ -213,6 +213,11 @@ distro's equivalents) — if one is missing, Kite reports which GStreamer elemen
     Kite instead lets the decoder deliver the full padded picture and hides the padding rows under the
     interface, so these streams stay zero-copy as well.
 
+    The Pi 5's decoder also cannot paper over a lost picture: a picture whose reference never arrived
+    stalls it, and the Pi's kernel driver then hangs until a reboot. Kite therefore holds the video
+    after any lost packet until the next keyframe arrives — a short pause instead of a frozen decoder.
+    A **short keyframe interval** at the encoder (1 s) keeps that pause short.
+
 !!! warning "AppImage: video does not work there"
     The AppImage build cannot play video on either path — the AppImage's launcher environment hides
     the system's GStreamer plugins from every process inside it. Use the **.deb**, **.rpm** or the
