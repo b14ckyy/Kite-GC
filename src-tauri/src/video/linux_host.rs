@@ -52,7 +52,7 @@ thread_local! {
 
 /// The clip paints the letterbox: everything in the hole that the video doesn't cover
 /// must be opaque, or the desktop shows through the transparent window.
-const CSS: &str = ".kite-video-clip { background-color: #000; }";
+const CSS: &str = ".kite-video-clip, .kite-video-base { background-color: #000; }";
 
 /// Re-host the main window's WebView inside a GtkOverlay above the video layer. Call once
 /// from Tauri's setup (the WebView exists by then). Failure leaves the window as it was and
@@ -99,6 +99,9 @@ pub(crate) fn install_tree(
     }
 
     let base = gtk::Layout::new(None::<&gtk::Adjustment>, None::<&gtk::Adjustment>);
+    // Black under the whole hole: letterbox bars outside the clip layer must not show the
+    // window theme colour.
+    base.style_context().add_class("kite-video-base");
     let clip = gtk::Layout::new(None::<&gtk::Adjustment>, None::<&gtk::Adjustment>);
     clip.style_context().add_class("kite-video-clip");
     clip.set_size_request(1, 1);

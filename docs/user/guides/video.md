@@ -206,6 +206,18 @@ distribution's GStreamer plugins (the **.deb** installs them automatically; else
 `gstreamer1.0-plugins-base`, `…-good`, `…-bad`, `gstreamer1.0-gtk3` and `gstreamer1.0-libav`, or your
 distro's equivalents) — if one is missing, Kite reports which GStreamer element it could not find.
 
+!!! note "Raspberry Pi 5 and HEVC"
+    Encoders that pad the picture height to their block size — NVENC at 720p codes 736 rows, every
+    1080p stream codes 1088 — declare the visible part in the stream header. The Pi 5's decoder path in
+    GStreamer would copy every picture to apply that crop, which the zero-copy display cannot take.
+    Kite instead lets the decoder deliver the full padded picture and hides the padding rows under the
+    interface, so these streams stay zero-copy as well.
+
+    The Pi 5's decoder also cannot paper over a lost picture: a picture whose reference never arrived
+    stalls it, and the Pi's kernel driver then hangs until a reboot. Kite therefore holds the video
+    after any lost packet until the next keyframe arrives — a short pause instead of a frozen decoder.
+    A **short keyframe interval** at the encoder (1 s) keeps that pause short.
+
 !!! warning "AppImage: video does not work there"
     The AppImage build cannot play video on either path — the AppImage's launcher environment hides
     the system's GStreamer plugins from every process inside it. Use the **.deb**, **.rpm** or the

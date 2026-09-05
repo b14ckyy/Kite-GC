@@ -46,8 +46,14 @@ pub struct H265Depacketizer {
     last_seq: Option<u16>,
     /// VPS+SPS+PPS from the sprop-* attributes, Annex-B framed. Empty when absent.
     param_sets: Vec<u8>,
+    /// After lost data, hold every AU until the next IRAP (stateless hardware decoders —
+    /// the Pi 5 — hang on a picture whose reference never arrived; see `linux_sink`).
+    resync_on_loss: bool,
+    awaiting_irap: bool,
     pub aus: u64,
     pub damaged_aus: u64,
+    /// AUs held back while waiting for an IRAP after a loss.
+    pub resynced_aus: u64,
 }
 
 impl H265Depacketizer {
@@ -75,8 +81,24 @@ impl H265Depacketizer {
             frag_open: false,
             last_seq: None,
             param_sets,
+            resync_on_loss: false,
+            awaiting_irap: false,
             aus: 0,
             damaged_aus: 0,
+            resynced_aus: 0,
+        }
+    }
+
+    /// Hold pictures until the next IRAP whenever data was lost (`resync_on_loss`).
+    pub fn with_resync(mut self, on: bool) -> Self {
+        self.resync_on_loss = on;
+        self
+    }
+
+    fn note_loss(&mut self) {
+        if self.resync_on_loss && !self.awaiting_irap {
+            self.awaiting_irap = true;
+            log::warn!("[video] H.265: data lost — holding pictures until the next keyframe");
         }
     }
 
@@ -97,6 +119,8 @@ impl H265Depacketizer {
                 if self.au_open {
                     self.au_damaged = true;
                 }
+                // A gap between AUs is a whole lost picture — no AU gets flagged for it.
+                self.note_loss();
             }
         }
         self.last_seq = Some(pkt.sequence);
@@ -190,11 +214,24 @@ impl H265Depacketizer {
         if self.au_damaged {
             self.au_damaged = false;
             self.damaged_aus += 1;
+            self.note_loss();
             return;
         }
         let has_irap = au
             .windows(5)
             .any(|w| w[..4] == START_CODE && is_irap(nal_type(w[4])));
+        if self.awaiting_irap {
+            if has_irap {
+                self.awaiting_irap = false;
+                log::info!(
+                    "[video] H.265: keyframe reached, {} pictures held back",
+                    self.resynced_aus
+                );
+            } else {
+                self.resynced_aus += 1;
+                return;
+            }
+        }
         let has_sps = contains_nal_type(&au, 33);
         let mut emit = Vec::with_capacity(self.param_sets.len() + au.len());
         if has_irap && !has_sps && !self.param_sets.is_empty() {
@@ -243,6 +280,43 @@ mod tests {
             vec![annexb(&[&aud, &slice])]
         );
         assert_eq!(d.aus, 1);
+    }
+
+    /// IDR_W_RADL slice (type 19): header [0x26, 0x01].
+    fn idr(data: &[u8]) -> Vec<u8> {
+        let mut n = vec![0x26, 0x01];
+        n.extend_from_slice(data);
+        n
+    }
+
+    #[test]
+    fn resync_holds_pictures_until_the_next_irap_after_a_loss() {
+        let mut d = H265Depacketizer::new(None).with_resync(true);
+        let p = trail(&[1]);
+        assert_eq!(d.push(&pkt(1, 10, true, p.clone())).len(), 1);
+        // seq 2 lost between AUs: a whole picture is missing → hold until an IRAP.
+        assert!(d.push(&pkt(3, 20, true, p.clone())).is_empty());
+        assert!(d.push(&pkt(4, 30, true, p.clone())).is_empty());
+        let k = idr(&[7]);
+        assert_eq!(d.push(&pkt(5, 40, true, k.clone())), vec![annexb(&[&k])]);
+        assert_eq!(d.push(&pkt(6, 50, true, p.clone())), vec![annexb(&[&p])]);
+        assert_eq!((d.aus, d.damaged_aus, d.resynced_aus), (3, 0, 2));
+
+        // A torn AU (gap inside it) is dropped AND starts the hold.
+        assert!(d.push(&pkt(7, 60, false, p.clone())).is_empty());
+        assert!(d.push(&pkt(9, 60, true, p.clone())).is_empty());
+        assert!(d.push(&pkt(10, 70, true, p.clone())).is_empty());
+        assert_eq!(d.push(&pkt(11, 80, true, k.clone())), vec![annexb(&[&k])]);
+        assert_eq!((d.damaged_aus, d.resynced_aus), (1, 3));
+    }
+
+    #[test]
+    fn without_resync_a_loss_only_drops_the_torn_au() {
+        let mut d = H265Depacketizer::new(None);
+        let p = trail(&[1]);
+        assert_eq!(d.push(&pkt(1, 10, true, p.clone())).len(), 1);
+        assert_eq!(d.push(&pkt(3, 20, true, p.clone())).len(), 1); // gap between AUs: delivered
+        assert_eq!(d.resynced_aus, 0);
     }
 
     #[test]

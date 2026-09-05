@@ -25,8 +25,13 @@
 mod client;
 mod h264;
 mod h265;
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+mod h265_sps;
 mod mjpeg;
 mod rtp;
 mod sdp;
+
+#[cfg(target_os = "linux")]
+pub use h265_sps::{probe_au, strip_window, SpsProbe, Window};
 
 pub use client::{run_rtsp, LiveRtspStats, RtspConfig, RtspTransport, VideoCodec};
