@@ -373,7 +373,7 @@ fn scheduler_loop(
                 }
             }
             let _ = app_handle.emit("connection-lost", ());
-            crate::link_presence::link_active(false);
+            crate::link_presence::link_down();
             return Some(transport);
         }
 
@@ -940,6 +940,13 @@ fn dispatch_telemetry(
     if let Err(e) = app_handle.emit(&event_name, &payload) {
         log::warn!("Failed to emit {}: {}", event_name, e);
     }
+    // The OS-facing link status (notification + track backfill) — independent of the recorder.
+    match payload {
+        telemetry::TelemetryPayload::Gps(ref d) => crate::link_status::on_gps(d),
+        telemetry::TelemetryPayload::Analog(ref a) => crate::link_status::on_analog(a),
+        telemetry::TelemetryPayload::Status(ref s) => crate::link_status::on_status(s),
+        _ => {}
+    }
 
     // Flight mode: classify the INAV status bitmask into the canonical model and emit the
     // protocol-agnostic event (+ feed the recorder). The raw flags stay in StatusData as a
@@ -948,6 +955,7 @@ fn dispatch_telemetry(
         *override_active = s.msp_rc_override;
         let fm = crate::flightmode::classify_inav(s.flight_mode_flags);
         let _ = app_handle.emit("telemetry-flightmode", &fm);
+        crate::link_status::on_flightmode(&fm);
         if let Some(ref rec) = recorder {
             if let Ok(mut r) = rec.lock() { r.on_flightmode(&fm); }
         }

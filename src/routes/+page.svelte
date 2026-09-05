@@ -73,7 +73,7 @@
   import type { PhoneWidgetsConfig } from '$lib/controllers/phoneWidgetController';
   import { isValidGpsCoordinate, isArmed } from '$lib/helpers/telemetry';
   import { anyCase } from '$lib/helpers/fileFilters';
-  import { liveTrack, appendLivePoint, clearLiveTrack } from '$lib/stores/liveTrack';
+  import { liveTrack, appendLivePoint, clearLiveTrack, backfillLivePoints } from '$lib/stores/liveTrack';
   import { toTelemetryData } from '$lib/adapters/telemetryAdapter';
   import { activeWpNumber, replayWpTotal } from '$lib/stores/navStatus';
   import { missionManagerOpen, missionManagerSelectedId, requestOpenFlightId, requestOpenMissionId } from '$lib/stores/missionManager';
@@ -153,6 +153,12 @@
   });
   // Map3D instance handle — used to read the 3D camera focus on a 3D→2D switch so
   // the 2D map can re-centre on the same spot (keeping its own zoom).
+  /** 2D map instance — for the trail backfill after the page was hidden (BACKGROUND_TELEMETRY.md). */
+  let mapRef: { appendTrailPoints?: (points: { lat: number; lon: number; mode: string }[]) => void } | undefined = $state();
+  // `connection-lost` while hidden → one reconnect attempt on return (unless the recording-interrupted
+  // prompt took over). Not a loop.
+  let lostWhileHidden = false;
+
   let map3dRef: {
     getCamFocus?: () => { lat: number; lon: number; range: number } | null;
     getCamSubpoint?: () => { lat: number; lon: number } | null;
@@ -2482,6 +2488,37 @@
     };
   });
 
+  function onVisibilityChange(): void {
+    if (document.hidden) return;
+    void resyncTrack();
+    if (lostWhileHidden) {
+      lostWhileHidden = false;
+      if (connStatus === 'disconnected' && !isConnecting) void handleConnect();
+    }
+  }
+
+  /** Pull the track points the backend buffered since our last one and merge them into the map
+   *  trail and `liveTrack` — a no-op when nothing was missed. */
+  async function resyncTrack(): Promise<void> {
+    if (connStatus !== 'connected') return;
+    const cur = get(liveTrack);
+    const sinceMs = cur.length > 0 ? cur[cur.length - 1].timestamp_ms : 0;
+    try {
+      const res = await invoke<{ flight_start_ms: number; points: { lat: number; lon: number; alt_msl: number; mode: string; ts_ms: number }[] }>(
+        'telemetry_track_since', { sinceMs },
+      );
+      if (res.points.length === 0) return;
+      console.log(`[track] backfilled ${res.points.length} points after the page was hidden`);
+      backfillLivePoints(
+        res.points.map((p) => ({ lat: p.lat, lon: p.lon, alt_m: p.alt_msl, mode_primary: p.mode, timestamp_ms: p.ts_ms })),
+        res.flight_start_ms,
+      );
+      mapRef?.appendTrailPoints?.(res.points.map((p) => ({ lat: p.lat, lon: p.lon, mode: p.mode })));
+    } catch (e) {
+      console.warn('[track] backfill failed', e);
+    }
+  }
+
   async function handleConnect() {
     if (connStatus === "connected") {
       // Disconnect while a flight is being recorded (armed) → confirm first and let the user decide
@@ -3148,13 +3185,17 @@
     // Connection lost while recording (device gone, e.g. USB unplugged) → recovery prompt.
     void listen<{ temp_path: string; craft_name: string; start_time: string; duration_sec: number; sample_count: number }>(
       'flight-recording-interrupted',
-      (event) => { void onRecordingInterrupted(event.payload); },
+      (event) => { lostWhileHidden = false; void onRecordingInterrupted(event.payload); },
     );
     // The device vanished (fatal transport error) — the backend tore the scheduler down. Clean up the
     // connection state so the UI shows disconnected and the user can simply reconnect.
     void listen('connection-lost', () => {
+      if (document.hidden) lostWhileHidden = true;
       void disconnectFC(selectedBaud).catch(() => {});
     });
+    // Back in front: close the trail gap from the backend's buffer, reconnect once if the link was
+    // lost meanwhile (BACKGROUND_TELEMETRY.md).
+    document.addEventListener('visibilitychange', onVisibilityChange);
     void listen<BlackboxImportProgress>('flightlog-import-progress', (event) => {
       blackboxImportProgress = event.payload;
     });
@@ -3264,6 +3305,7 @@
          inside the component, so unmounting it on every switch to 3D threw the trail away. -->
     <div class="map2d-layer" class:active={mapViewMode === '2d'}>
       <Map
+        bind:this={mapRef}
         playbackTrack={mapTrack}
         playbackPoint={playbackPoint}
         {nightMode2D}

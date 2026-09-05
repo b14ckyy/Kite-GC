@@ -47,3 +47,5 @@
 
 # Active-network transport lookup (android/net.rs → NetInfo) — JNI-only, same rule.
 -keep class com.kitegc.app.NetInfo { *; }
+# Link foreground-service bridge (android/link_service.rs → LinkService) — JNI-only, same rule.
+-keep class com.kitegc.app.LinkService { *; }

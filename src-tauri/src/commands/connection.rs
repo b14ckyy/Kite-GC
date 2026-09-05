@@ -177,6 +177,9 @@ pub async fn connect(
     // Open byte-level transport based on type. Every variant is handled on every platform — the
     // platform differences live behind `transport::serial` / `transport::ble` (on iOS a serial open
     // fails with a clear runtime error; BLE is CoreBluetooth there). TCP/UDP are platform-independent.
+    // The OS-facing link status names the transport ("MSP over Serial"); the protocol paths
+    // below only know their protocol.
+    crate::link_status::set_transport(&transport_type.to_string());
     let byte_transport: Box<dyn ByteTransport> = match transport_type {
         TransportType::Serial => {
             let port_name = port.ok_or("Serial port name required")?;
@@ -432,6 +435,7 @@ fn connect_msp(
                     alt: alt_cm as f64 / 100.0,
                 };
                 log::info!("Home from FC (MSP_WP 0): {:.7}, {:.7}", home.lat, home.lon);
+                crate::link_status::on_home(home.lat, home.lon);
                 let _ = app_handle.emit("home-position", home);
             } else {
                 log::info!("MSP_WP(0): no home set on FC yet");
@@ -516,7 +520,7 @@ fn connect_msp(
         let mut proto = state.protocol.lock().map_err(|e| e.to_string())?;
         *proto = Some(ActiveProtocol::Msp(handle));
     }
-    crate::link_presence::link_active(true);
+    crate::link_presence::link_up(&fc_info, "MSP");
     {
         let mut info = state.fc_info.lock().map_err(|e| e.to_string())?;
         *info = Some(fc_info.clone());
@@ -636,7 +640,7 @@ fn connect_mavlink(
         let mut proto = state.protocol.lock().map_err(|e| e.to_string())?;
         *proto = Some(ActiveProtocol::Mavlink(handle));
     }
-    crate::link_presence::link_active(true);
+    crate::link_presence::link_up(&fc_info, "MAVLink");
     {
         let mut info = state.fc_info.lock().map_err(|e| e.to_string())?;
         *info = Some(fc_info.clone());
@@ -708,7 +712,7 @@ fn connect_passive_telemetry(
         let mut proto = state.protocol.lock().map_err(|e| e.to_string())?;
         *proto = Some(ActiveProtocol::PassiveTelemetry(handle));
     }
-    crate::link_presence::link_active(true);
+    crate::link_presence::link_up(&fc_info, "Telemetry");
     {
         let mut info = state.fc_info.lock().map_err(|e| e.to_string())?;
         *info = Some(fc_info.clone());
@@ -746,7 +750,7 @@ pub async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
     let mut info = state.fc_info.lock().map_err(|e| e.to_string())?;
     *info = None;
 
-    crate::link_presence::link_active(false);
+    crate::link_presence::link_down();
     log::info!("Disconnected");
     Ok(())
 }

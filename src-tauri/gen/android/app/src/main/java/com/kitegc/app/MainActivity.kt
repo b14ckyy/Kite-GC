@@ -29,6 +29,12 @@ class MainActivity : TauriActivity() {
       BleSerial.onPermissionResult(result)
     }
 
+  /** Notification permission (Android 13+) for the link's foreground service. Same rule. */
+  private val notificationPermission =
+    registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+      LinkService.onPermissionResult(granted)
+    }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     // Before super.onCreate, which is what starts Tauri and therefore the Rust side: the USB-serial
     // bridge has no Context of its own and the first port enumeration can arrive as soon as the
@@ -37,6 +43,7 @@ class MainActivity : TauriActivity() {
     StorageAccess.init(this, folderPicker)
     BleSerial.init(this, blePermissions)
     ScreenLock.init(this)
+    LinkService.init(this, notificationPermission)
     NativeVideo.init(this)
     NetInfo.init(this)
 

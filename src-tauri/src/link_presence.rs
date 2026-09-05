@@ -3,36 +3,49 @@
 
 //! "A link is active" — the one thing the host OS is told about the connection state.
 //!
-//! What the OS does with it is platform-owned and lives here, so the connection code calls one
-//! function and carries no target cfg:
+//! Android: keep the display on (window flag, no WAKE_LOCK) and run the foreground service with
+//! the notification for the life of the link (Dev-Docs active/BACKGROUND_TELEMETRY.md). Screen-off
+//! is not held open — a Doze-dropped link is an ordinary lost link. iOS: out of scope, no-op.
+//! Desktop: nothing.
 //!
-//! - **Android**: keep the display on while a link is up, back to the normal screen timeout once
-//!   it is down — nav-app behaviour. A ground station is watched, not touched: minutes pass between
-//!   interactions, and the screen blanking mid-flight is exactly when the telemetry matters most. It
-//!   is the window flag (`FLAG_KEEP_SCREEN_ON`), scoped to the app's own window, released the moment
-//!   the app leaves the foreground — no WAKE_LOCK permission, nothing kept awake in the background.
-//! - **iOS**: the same idea is `UIApplication.isIdleTimerDisabled`. Not wired yet — UIKit is
-//!   main-thread-only and `objc2-ui-kit` is not in the dependency set; it belongs to the iOS pass
-//!   with hardware to test on. Until then the call is a no-op there.
-//! - **Desktop**: nothing — the OS screensaver is the user's business, and a GCS on a laptop is not
-//!   the only thing on that screen.
-//!
-//! "Active" means a transport is open, whether or not bytes arrive: an idle link is still the link
-//! the operator is waiting on. Called on every connect, on the user's disconnect, and on a lost link.
+//! "Active" = a transport is open, bytes or not. `link_up` on every connect, `link_down` on the
+//! user's disconnect and on a lost link.
 
-pub fn link_active(active: bool) {
+use crate::msp::types::FcInfo;
+
+/// A link came up on `protocol` ("MSP" / "MAVLink" / "Telemetry"); the transport label was
+/// registered by `connect()` through `link_status::set_transport`.
+pub fn link_up(fc: &FcInfo, protocol: &str) {
+    crate::link_status::on_link_up(fc, protocol);
     #[cfg(target_os = "android")]
     {
-        if let Err(e) = crate::android::screen::keep_on(active) {
-            log::warn!("[screen] keep-on({active}) failed: {e}");
+        if let Err(e) = crate::android::screen::keep_on(true) {
+            log::warn!("[screen] keep-on(true) failed: {e}");
+        }
+        if let Err(e) = crate::android::link_service::start() {
+            log::warn!("[link-service] start failed: {e}");
         }
     }
     #[cfg(target_os = "ios")]
     {
-        log::debug!("[screen] link active = {active} (idle-timer control not wired on iOS yet)");
+        log::debug!("[screen] link up on {protocol} (not wired on iOS)");
     }
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+}
+
+/// The link is gone — user disconnect or lost.
+pub fn link_down() {
+    crate::link_status::on_link_down();
+    #[cfg(target_os = "android")]
     {
-        let _ = active;
+        if let Err(e) = crate::android::link_service::stop() {
+            log::warn!("[link-service] stop failed: {e}");
+        }
+        if let Err(e) = crate::android::screen::keep_on(false) {
+            log::warn!("[screen] keep-on(false) failed: {e}");
+        }
+    }
+    #[cfg(target_os = "ios")]
+    {
+        log::debug!("[screen] link down (not wired on iOS)");
     }
 }

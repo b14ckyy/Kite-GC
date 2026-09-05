@@ -2658,19 +2658,17 @@ mod tests {
         assert_eq!(get_user_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
     }
 
-    /// Unique on-disk DB path (backup/guard logic needs real files, not :memory:).
+    /// Unique on-disk DB path (backup/guard logic needs real files, not :memory:). One directory per
+    /// test: `backup_path_for` is a fixed sibling name, so DBs sharing a folder would race on it.
     fn temp_db_path(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("kite-db-test-{name}-{}.db", std::process::id()))
+        let dir = std::env::temp_dir().join(format!("kite-db-test-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("flights.db")
     }
 
     fn cleanup(path: &Path) {
-        for p in [
-            path.to_path_buf(),
-            PathBuf::from(format!("{}-wal", path.display())),
-            PathBuf::from(format!("{}-shm", path.display())),
-            backup_path_for(path),
-        ] {
-            let _ = std::fs::remove_file(p);
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::remove_dir_all(dir);
         }
     }
 

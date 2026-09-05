@@ -5,6 +5,12 @@
          also fetch over the network. ACCESS_NETWORK_STATE lets the link layer tell "no network" apart
          from "nothing answering at that address". -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Foreground service for the life of a telemetry link (TelemetryService). CHANGE_NETWORK_STATE
+         is the Android 14 prerequisite of the connectedDevice type for a non-BLE/USB link. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- A telemetry bridge is usually a soft-AP the tablet joins; this reads which network that is. -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
@@ -93,6 +99,11 @@
                 android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
                 android:resource="@xml/device_filter" />
         </activity>
+
+        <service
+            android:name=".TelemetryService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
 
         <provider
           android:name="androidx.core.content.FileProvider"

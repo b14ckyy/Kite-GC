@@ -585,6 +585,8 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
             // Flight mode (canonical, protocol-agnostic). See docs/active/FLIGHT_MODE_UNIFIED.md.
             let fm = crate::flightmode::classify_mavlink(hb.custom_mode, fc_variant);
             let _ = app_handle.emit("telemetry-flightmode", &fm);
+            crate::link_status::on_status(&data);
+            crate::link_status::on_flightmode(&fm);
 
             if let Some(ref rec) = recorder {
                 if let Ok(mut r) = rec.lock() {
@@ -603,6 +605,7 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
                 lon: home.longitude as f64 / 1e7,
                 alt: home.altitude as f64 / 1000.0, // mm AMSL → m
             };
+            crate::link_status::on_home(data.lat, data.lon);
             let _ = app_handle.emit("home-position", &data);
         }
 
@@ -670,6 +673,7 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
                 course: fused.course,
             };
             let _ = app_handle.emit("telemetry-gps", &gps);
+            crate::link_status::on_gps(&gps);
 
             let alt = AltitudeData {
                 altitude: gpi.relative_alt as f64 / 1000.0, // mm → m (relative = baro-like)
@@ -765,6 +769,7 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
             }
 
             let _ = app_handle.emit("telemetry-analog", &analog.to_analog_data());
+            crate::link_status::on_analog(&analog.to_analog_data());
             if let Some(ref rec) = recorder {
                 if let Ok(mut r) = rec.lock() { r.on_analog(&analog.to_analog_data()); }
             }
@@ -882,6 +887,7 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
             // rssi is 0–254 in RC_CHANNELS (255 = invalid), map to 0–1023 like INAV
             analog.rssi = (rc.rssi as u16) * 4;
             let _ = app_handle.emit("telemetry-analog", &analog.to_analog_data());
+            crate::link_status::on_analog(&analog.to_analog_data());
             if let Some(ref rec) = recorder {
                 if let Ok(mut r) = rec.lock() { r.on_analog(&analog.to_analog_data()); }
             }
@@ -931,6 +937,7 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
                     analog.battery_percentage = pct;
                 }
                 let _ = app_handle.emit("telemetry-analog", &analog.to_analog_data());
+            crate::link_status::on_analog(&analog.to_analog_data());
             }
 
             if let Some(ref rec) = recorder {

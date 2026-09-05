@@ -6,6 +6,7 @@
 
 import { writable } from 'svelte/store';
 import type { RelayConfig } from '$lib/stores/relay';
+import { isMobile } from '$lib/platform';
 import type { WidgetSize } from '$lib/config/widgetRegistry';
 import { DEFAULT_PHONE_WIDGETS, type PhoneWidgetsConfig } from '$lib/controllers/phoneWidgetController';
 
@@ -359,6 +360,8 @@ export interface AppSettings {
   cesiumKeyPromptDismissed: boolean;
   /** Low-power 3D render cap: off = uncapped · on = always 20fps · auto = 20fps only while on battery. */
   lowPower3D: 'off' | 'on' | 'auto';
+  /** 3D globe at native pixel density (on) or half of it (off). Default: on for desktop, off for mobile. */
+  highRes3D: boolean;
   /** Show the vertical altitude curtain (wall down to ground) under the 3D track. */
   altitudeCurtain3D: boolean;
   /** Light the 3D globe with the real sun position (day/night terminator + shading). */
@@ -445,6 +448,7 @@ const defaults: AppSettings = {
   cesiumIonToken: '',
   cesiumKeyPromptDismissed: false,
   lowPower3D: 'auto',
+  highRes3D: !isMobile,
   altitudeCurtain3D: true,
   realLighting3D: true,
   // Off by default: the tileset is a live download and real GPU work, and it is only useful close to

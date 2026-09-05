@@ -13,6 +13,7 @@ mod github_release;
 mod hid;
 mod link_presence;
 mod link_stats;
+mod link_status;
 mod logging;
 mod mavlink_proto;
 mod mission;
@@ -580,6 +581,7 @@ pub fn run() {
             disconnect,
             get_app_version,
             is_debug_mode,
+            link_status::telemetry_track_since,
             set_log_level,
             get_log_path,
             log_session_settings,

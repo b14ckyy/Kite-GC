@@ -20,6 +20,16 @@ below. The release you are reading the docs for is expanded; click an older vers
         underneath it. Long-press a widget to rearrange or resize it; the others shift live to show
         where they will land. Pinch to zoom, 2D/3D and follow next to the column. [#102]
 
+        **Video on the phone** sits in a docked window at the bottom-right of the map — a camera
+        button parks it off-screen and brings it back instantly — or in the Video widget of the
+        column; double-tap swaps map and video. [#105] The 3D view centres on the visible map area
+        next to the column. [#103] · [#111]
+
+        **The link keeps running in the background.** While connected, Android shows a notification
+        with the aircraft, battery, flight mode and distance to home; minimising Kite or switching
+        apps no longer stops telemetry or the recording, and the trail catches up when you come
+        back. [#111]
+
     ??? info "Native RTSP video client with hardware decode"
         RTSP video no longer needs the external video engine: Kite ships its **own RTSP client** and
         decodes H.264/H.265 with the **operating system's hardware decoder** on Windows, Android and
@@ -71,6 +81,12 @@ below. The release you are reading the docs for is expanded; click an older vers
       its raw unit; replaces the Raw Telemetry widget. [#101]
     - **Phone layout** — landscape interface for phones: full-screen map, connection pop-out,
       widget column with two pages and long-press editing. [#102]
+    - **Phone video** — docked window with a park button, the Video widget in the column, map ⇄
+      video swap with a locked mini map; off-screen video is not rendered but keeps its stream. [#105]
+    - **Background telemetry on Android** — a foreground service with a live notification keeps
+      the link, the recording and the track running while Kite is minimised. [#111]
+    - **High-Resolution 3D** — the globe at native pixel density (sharp on phones, tablets and
+      high-DPI screens) or at half resolution for weak GPUs; Settings → Interface → Map. [#111]
 
     **Improved**
 
@@ -85,6 +101,7 @@ below. The release you are reading the docs for is expanded; click an older vers
     - **Replay player is narrower** — the times moved under the buttons, which now share the full
       width. [#102]
     - **Android launcher icon** fills its circle instead of floating small in it. [#102]
+    - **3D mission markers** match the 2D marker size and are sharp on high-DPI screens. [#111]
 
 ??? note "1.0.0 — Initial release"
 
@@ -110,3 +127,6 @@ below. The release you are reading the docs for is expanded; click an older vers
 [#100]: https://github.com/b14ckyy/Kite-GC/pull/100
 [#101]: https://github.com/b14ckyy/Kite-GC/pull/101
 [#102]: https://github.com/b14ckyy/Kite-GC/pull/102
+[#103]: https://github.com/b14ckyy/Kite-GC/pull/103
+[#105]: https://github.com/b14ckyy/Kite-GC/pull/105
+[#111]: https://github.com/b14ckyy/Kite-GC/pull/111

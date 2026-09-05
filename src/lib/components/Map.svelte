@@ -1527,6 +1527,12 @@
     }
   }
 
+  /** Trail points the backend buffered while the page was hidden — through the live path, so the
+   *  per-mode segments come out as if live. */
+  export function appendTrailPoints(points: { lat: number; lon: number; mode: string }[]): void {
+    for (const p of points) updateTrail(p.lat, p.lon, p.mode);
+  }
+
   /** Thin plain black trail of GPS movement while disarmed (monitoring only). */
   function updatePreArmTrail(lat: number, lon: number) {
     if (!map) return;
