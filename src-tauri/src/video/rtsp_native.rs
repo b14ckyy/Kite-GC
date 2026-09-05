@@ -47,9 +47,11 @@ type PlatformSink = LinuxVideoSink;
 /// How long `start()` waits for the first frame: RTSP negotiation (incl. a possible 2 s
 /// UDP→TCP fallback) plus the first JPEG.
 const FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(12);
-/// Linux/HEVC: AUs to wait for an SPS before starting the sink without a verdict.
+/// Linux/HEVC: AUs to wait for an SPS before starting the sink without a verdict. Nothing
+/// decodes before the first IRAP anyway (the sets ride with it), so this only caps a
+/// set-less stream — it must outlast any keyframe interval (120 was one OBS GOP: a race).
 #[cfg(target_os = "linux")]
-const SPS_WAIT_AUS: u32 = 120;
+const SPS_WAIT_AUS: u32 = 3600;
 
 /// One JPEG as an mpjpeg part — byte-compatible with ffmpeg's muxer output (`--ffmpeg`
 /// boundary, `Content-length` on every part), which is what the broadcast framing and all
