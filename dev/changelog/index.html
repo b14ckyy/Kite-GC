@@ -1605,6 +1605,14 @@ chain-link button opens the connection pop-out, and the instruments live in a fr
 <strong>widget column</strong> on the right edge with two swipeable pages — the map keeps running
 underneath it. Long-press a widget to rearrange or resize it; the others shift live to show
 where they will land. Pinch to zoom, 2D/3D and follow next to the column. <a href="https://github.com/b14ckyy/Kite-GC/pull/102">#102</a></p>
+<p><strong>Video on the phone</strong> sits in a docked window at the bottom-right of the map — a camera
+button parks it off-screen and brings it back instantly — or in the Video widget of the
+column; double-tap swaps map and video. <a href="https://github.com/b14ckyy/Kite-GC/pull/105">#105</a> The 3D view centres on the visible map area
+next to the column. <a href="https://github.com/b14ckyy/Kite-GC/pull/103">#103</a> · <a href="https://github.com/b14ckyy/Kite-GC/pull/111">#111</a></p>
+<p><strong>The link keeps running in the background.</strong> While connected, Android shows a notification
+with the aircraft, battery, flight mode and distance to home; minimising Kite or switching
+apps no longer stops telemetry or the recording, and the trail catches up when you come
+back. <a href="https://github.com/b14ckyy/Kite-GC/pull/111">#111</a></p>
 </details>
 <details class="info">
 <summary>Native RTSP video client with hardware decode</summary>
@@ -1661,6 +1669,12 @@ top bar: one popup with <strong>every</strong> value the telemetry link delivers
   its raw unit; replaces the Raw Telemetry widget. <a href="https://github.com/b14ckyy/Kite-GC/pull/101">#101</a></li>
 <li><strong>Phone layout</strong> — landscape interface for phones: full-screen map, connection pop-out,
   widget column with two pages and long-press editing. <a href="https://github.com/b14ckyy/Kite-GC/pull/102">#102</a></li>
+<li><strong>Phone video</strong> — docked window with a park button, the Video widget in the column, map ⇄
+  video swap with a locked mini map; off-screen video is not rendered but keeps its stream. <a href="https://github.com/b14ckyy/Kite-GC/pull/105">#105</a></li>
+<li><strong>Background telemetry on Android</strong> — a foreground service with a live notification keeps
+  the link, the recording and the track running while Kite is minimised. <a href="https://github.com/b14ckyy/Kite-GC/pull/111">#111</a></li>
+<li><strong>High-Resolution 3D</strong> — the globe at native pixel density (sharp on phones, tablets and
+  high-DPI screens) or at half resolution for weak GPUs; Settings → Interface → Map. <a href="https://github.com/b14ckyy/Kite-GC/pull/111">#111</a></li>
 </ul>
 <p><strong>Improved</strong></p>
 <ul>
@@ -1675,6 +1689,12 @@ top bar: one popup with <strong>every</strong> value the telemetry link delivers
 <li><strong>Replay player is narrower</strong> — the times moved under the buttons, which now share the full
   width. <a href="https://github.com/b14ckyy/Kite-GC/pull/102">#102</a></li>
 <li><strong>Android launcher icon</strong> fills its circle instead of floating small in it. <a href="https://github.com/b14ckyy/Kite-GC/pull/102">#102</a></li>
+<li><strong>3D mission markers</strong> match the 2D marker size and are sharp on high-DPI screens. <a href="https://github.com/b14ckyy/Kite-GC/pull/111">#111</a></li>
+<li><strong>Raspberry Pi 5 HEVC</strong> — the native RTSP client no longer aborts on streams whose picture is
+  padded to the encoder's block size (NVENC 720p, every 1080p): the padding is decoded zero-copy
+  and hidden under the interface. Start-up no longer drops the frames right after the keyframe,
+  and after any packet loss the video pauses until the next keyframe instead of freezing the
+  Pi's hardware decoder. Kernel-side report: raspberrypi/linux#7609. <a href="https://github.com/b14ckyy/Kite-GC/pull/112">#112</a></li>
 </ul>
 </details>
 <details class="note">
