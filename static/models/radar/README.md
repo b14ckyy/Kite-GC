@@ -20,14 +20,14 @@ Resolved in `src/lib/helpers/radar3d.ts` (`contactModelClass()` → `radarModelU
 | `adsb-arrow.glb`    | arrow    | B‑, B3, B4, B6 (UAV), B7 · Radio · no category received     | flat block arrow    |
 | `adsb-ground.glb`   | ground   | C1 (emergency vehicle), C2 (service vehicle)               | pickup truck        |
 | `adsb-dot.glb`      | dot      | **any contact with no heading** (non-directional)         | flat ring           |
-| `ff-uav.glb`        | ff       | **FormationFlight peers** (INAV-Radar / ESP32)                  | small multirotor    |
+| `ff-uav.glb`        | ff       | **FormationFlight peers** (INAV-Radar / ESP32)                  | generic UAV arrow (copy of `../uav-arrow.glb`) |
 
 **Resolution order:** FormationFlight → `ff`; no heading → `dot`; Radio → `arrow`; otherwise by ADS-B
 emitter category (above). Unmapped powered/unpowered (B‑/B3/B4/B6/B7, B5 reserved) falls through to `arrow`.
 
 > **FormationFlight colour:** unlike ADS-B (altitude scale), FF peers are tinted by **state** — armed =
-> dark blue, disarmed = grey, lost = grey with a red outline (2D) / red tint (3D). `ff-uav.glb` is a
-> small multirotor; a paper-plane model of the same name would read as "peer" more clearly.
+> dark blue, disarmed = grey, lost = grey with a red outline (2D) / red tint (3D). `ff-uav.glb` is the
+> generic UAV arrow (same file as `../uav-arrow.glb`) — the tint carries the state, so the shape only has to read "UAV".
 
 **Hidden entirely — not on the map, not in the list** (`isHiddenCategory()` in `radar3d.ts`): obstacles
 and reserved/unspecified ground — **C‑** (unspecified ground), **C3** (fixed/tethered obstruction),
