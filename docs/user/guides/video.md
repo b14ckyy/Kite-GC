@@ -196,7 +196,8 @@ the **Native RTSP client** is switched on — see below.
 
 **On Linux, switch on the *Native RTSP client* for network streams.** With that toggle (Video panel →
 RTSP section) Kite plays RTSP itself: **H.264 and HEVC go straight into the machine's hardware
-decoder** — Intel/AMD graphics via VA-API, the Raspberry Pi 4's H.264 block via V4L2, with an
+decoder** — Intel/AMD graphics via VA-API, the Raspberry Pi 4's H.264 and the Pi 5's HEVC block via
+V4L2, with an
 automatic software fallback — and the picture is composited natively behind the interface instead of
 being converted frame by frame. Measured on one laptop, a 720p60 HEVC stream plays at a stable 60 fps
 for roughly a third of one CPU core where the classic path burned more than two cores and still could

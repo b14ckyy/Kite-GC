@@ -176,6 +176,14 @@ the app holds — see **[Raw telemetry](telemetry-and-display.md#raw-telemetry)*
     instead. The pop-out holds the same controls (protocol and transport, then port / host / device,
     **Connect**) plus the **Relay** button; the raw-telemetry popup is not available on the phone.
 
+!!! note "Android: the link keeps running in the background"
+    While Kite is connected, Android shows a persistent notification with the aircraft, battery,
+    flight mode and distance to home (Android 13+ asks for notification permission on the first
+    connect — refusing only hides the notification). Minimising Kite or switching to another app
+    keeps telemetry, the flight recording and the track running; when you come back the trail is
+    complete. Switching the **screen off** is not held open: the link may drop, and on your return
+    Kite either offers the usual recording prompt (continue / discard / save) or reconnects once.
+
 ## After you connect
 
 - The button becomes **Disconnect**; the top bar shows arming readiness, per-sensor health, battery and

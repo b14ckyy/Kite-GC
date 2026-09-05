@@ -79,9 +79,10 @@ Mobile is **not part of the 1.0 line** — nothing mobile builds from `master`, 
 target a release after 1.0. The iOS / iPadOS port lives on `development` (see the iOS notes above);
 Android is described here.
 
-Android is **experimental**. The app builds and installs, and connects over **USB serial** (OTG),
-**Bluetooth LE** or **UDP / TCP**. The interface is still the desktop one: it fits a tablet in
-landscape, and is cramped on a phone.
+Android runs the full app: tablets use the desktop layout, phones a dedicated landscape layout
+(widget column, connection pop-out, docked video). Links: **USB serial** (OTG), **Bluetooth LE**
+and **UDP / TCP**. While a link is up a foreground service keeps the process alive in the
+background (`TelemetryService.kt`, driven from `link_presence` over JNI).
 
 USB serial goes through the Android USB Host API, so the driver lives in Kotlin
 (`gen/android/app/src/main/java/com/kitegc/app/UsbSerial.kt`) with a JNI shim in front of it
