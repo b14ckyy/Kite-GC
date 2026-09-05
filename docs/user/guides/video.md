@@ -207,12 +207,11 @@ distribution's GStreamer plugins (the **.deb** installs them automatically; else
 distro's equivalents) — if one is missing, Kite reports which GStreamer element it could not find.
 
 !!! note "Raspberry Pi 5 and HEVC"
-    The Pi 5's hardware block hands its pictures to the display without a copy only when the stream's
-    coded size equals the picture size. Encoders that pad the height — NVENC at 720p (coded 736
-    rows), every 1080p stream (coded 1088) — make the decoder copy each picture; Kite detects that from
-    the stream and renders such streams through its software compositing path instead (still
-    hardware-decoded, at a higher CPU cost). Streams without padding, e.g. x265 at 720p, keep the
-    zero-copy path.
+    Encoders that pad the picture height to their block size — NVENC at 720p codes 736 rows, every
+    1080p stream codes 1088 — declare the visible part in the stream header. The Pi 5's decoder path in
+    GStreamer would copy every picture to apply that crop, which the zero-copy display cannot take.
+    Kite instead lets the decoder deliver the full padded picture and hides the padding rows under the
+    interface, so these streams stay zero-copy as well.
 
 !!! warning "AppImage: video does not work there"
     The AppImage build cannot play video on either path — the AppImage's launcher environment hides
