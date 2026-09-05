@@ -286,6 +286,9 @@ mod tests {
     // x265 1280×730 — coded 736, window bottom 6.
     const X265_730_SPS: &str = "420101016000000300900000030000030078a00280802e1f265ba4a4c2f0168080000003008000001e04";
     const X265_730_SPS_STRIPPED: &str = "420101016000000300900000030000030078a00280802e165ba4a4c2f0168080000003008000001e04";
+    // OBS/NVENC 1280×720 with B-frames off (2026-09-05 evening stream), Python reference.
+    const OBS2_SPS: &str = "420101016000000300900000030000030078a00280802e1f13965d29084645d50c05a80808082000000300200000078c00bbca20001ab3f00002625a08";
+    const OBS2_SPS_STRIPPED: &str = "420101016000000300900000030000030078a00280802e165974a4211917543016a020202080000003008000001e3002ef2880006acfc00009896820";
 
     #[test]
     fn real_encoders() {
@@ -301,7 +304,11 @@ mod tests {
 
     #[test]
     fn strip_matches_the_reference_bytes_and_reprobes_as_no_window() {
-        for (sps, stripped) in [(OBS_SPS, OBS_SPS_STRIPPED), (X265_730_SPS, X265_730_SPS_STRIPPED)] {
+        for (sps, stripped) in [
+            (OBS_SPS, OBS_SPS_STRIPPED),
+            (OBS2_SPS, OBS2_SPS_STRIPPED),
+            (X265_730_SPS, X265_730_SPS_STRIPPED),
+        ] {
             let au = strip_window(&au_with(&hex(sps))).expect("has an SPS");
             assert_eq!(au, au_with(&hex(stripped)));
             assert_eq!(probe_au(&au), SpsProbe::NoWindow);

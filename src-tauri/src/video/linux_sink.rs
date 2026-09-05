@@ -190,9 +190,13 @@ impl LinuxVideoSink {
         appsrc.set_format(gst::Format::Time);
         appsrc.set_is_live(true);
         appsrc.set_do_timestamp(false);
-        // A decoder that can't keep up drops the OLDEST queued AUs instead of building a
-        // latency backlog (the client's frame counters make that visible).
-        appsrc.set_property("max-buffers", 8u64);
+        // Bounded: a decoder that can't keep up drops the OLDEST queued AUs instead of
+        // building a latency backlog. The bound must cover the START-UP burst — device open
+        // and negotiation take 100–150 ms, at 60 fps that is 6–9 AUs queued before the first
+        // decode; with 8 the second frame was dropped and the stateless V4L2 decoder hung on
+        // its missing reference (Pi 5, 2026-09-05). A stateless decoder never conceals a
+        // dropped AU; 120 AUs (2 s at 60 fps) only trips on a sustained overload.
+        appsrc.set_property("max-buffers", 120u64);
         appsrc.set_property_from_str("leaky-type", "downstream");
         let parse = make(parser)?;
         let decode = make("decodebin3")?;
