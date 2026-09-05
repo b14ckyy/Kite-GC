@@ -47,6 +47,9 @@ type PlatformSink = LinuxVideoSink;
 /// How long `start()` waits for the first frame: RTSP negotiation (incl. a possible 2 s
 /// UDP→TCP fallback) plus the first JPEG.
 const FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(12);
+/// Linux/HEVC: AUs to wait for an SPS before starting the sink without a verdict.
+#[cfg(target_os = "linux")]
+const SPS_WAIT_AUS: u32 = 120;
 
 /// One JPEG as an mpjpeg part — byte-compatible with ffmpeg's muxer output (`--ffmpeg`
 /// boundary, `Content-length` on every part), which is what the broadcast framing and all
@@ -248,6 +251,8 @@ impl NativeRtsp {
                 let _ = &sink_first;
                 #[cfg(any(target_os = "windows", target_os = "android", target_os = "linux"))]
                 let mut sink_ts: Option<SinkTs> = None;
+                #[cfg(target_os = "linux")]
+                let mut aus_without_sps = 0u32;
                 let stop_flag = stop.clone();
                 let result = run_rtsp(&cfg, &stop, &mut |frame| match frame.codec {
                     VideoCodec::Mjpeg => {
@@ -257,6 +262,23 @@ impl NativeRtsp {
                     }
                     #[cfg(any(target_os = "windows", target_os = "android", target_os = "linux"))]
                     VideoCodec::H264 | VideoCodec::H265 => {
+                        // Linux decides its HEVC route from the SPS: hold the start until an
+                        // AU carries one (the depacketizer prepends the sets before an IRAP;
+                        // earlier AUs are undecodable anyway), bounded so a set-less stream
+                        // still gets a sink.
+                        #[cfg(target_os = "linux")]
+                        let needs_crop = if sink_ts.is_none() && frame.codec == VideoCodec::H265 {
+                            match super::rtsp::au_needs_crop(&frame.data) {
+                                Some(v) => Some(v),
+                                None if aus_without_sps < SPS_WAIT_AUS => {
+                                    aus_without_sps += 1;
+                                    return;
+                                }
+                                None => None,
+                            }
+                        } else {
+                            None
+                        };
                         if sink_ts.is_none() {
                             // First AU decides the route: bring the decode sink up. It
                             // starts as a 1×1 layer — invisible until the frontend cuts
@@ -277,7 +299,7 @@ impl NativeRtsp {
                             #[cfg(target_os = "android")]
                             let started_sink = AndroidVideoSink::start(frame.codec);
                             #[cfg(target_os = "linux")]
-                            let started_sink = LinuxVideoSink::start(frame.codec);
+                            let started_sink = LinuxVideoSink::start(frame.codec, needs_crop);
                             match started_sink {
                                 Ok(sink) => {
                                     *sink_slot.lock().unwrap() = Some(sink);

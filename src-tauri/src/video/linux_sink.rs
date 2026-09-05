@@ -15,7 +15,12 @@
 //! offers it. That import needs a GLES context (`lib.rs` asks GDK for one: a desktop-GL
 //! context cannot take the Pi 5's tiled `NV12_128C8` and gst-gl aborts on it). When the GL
 //! sink can't come up (no usable GL context) the cairo path `videoconvert → videoflip →
-//! gtksink` takes over for the rest of the process.
+//! gtksink` takes over for the rest of the process. The cairo path is also chosen per
+//! stream when the V4L2 stateless HEVC decoder would COPY its frames: a conformance-window
+//! crop (coded 1280×736 shown as 720, every 1080p) makes it convert each picture into a
+//! system-memory buffer that still carries DMABuf caps, and gst-gl aborts on that too
+//! (Pi 5, OBS/NVENC, 2026-09-05). Copied frames cost the same on either path; only the
+//! cairo one survives them.
 //!
 //! Presentation: smoothing buffer 0 (the latency-first default) = `sync=false`, every
 //! decoded frame renders as soon as it exists. Depths 1–3 = `sync=true` with the frames'
@@ -111,13 +116,26 @@ pub struct LinuxVideoSink {
     bus_thread: Option<JoinHandle<()>>,
 }
 
+/// The V4L2 stateless HEVC decoder (Pi 5) copies every frame when the SPS crops the coded
+/// picture; that copy cannot be imported by gst-gl (module docs).
+fn hw_decoder_copies_cropped_frames(codec: VideoCodec, needs_crop: Option<bool>) -> bool {
+    matches!(codec, VideoCodec::H265)
+        && needs_crop == Some(true)
+        && gst::ElementFactory::find("v4l2slh265dec").is_some()
+}
+
 impl LinuxVideoSink {
     /// Bring the sink up for `codec`: build the pipeline, hand its widget to the host and
     /// start decoding. GL first, cairo fallback. Decode problems after this surface through
-    /// [`Self::error`] — the same contract as the other sinks.
-    pub fn start(codec: VideoCodec) -> Result<Self, String> {
+    /// [`Self::error`] — the same contract as the other sinks. `needs_crop` is the stream's
+    /// SPS verdict (`rtsp::au_needs_crop`); `None` = unknown, treated as no crop.
+    pub fn start(codec: VideoCodec, needs_crop: Option<bool>) -> Result<Self, String> {
         gst::init().map_err(|e| format!("gstreamer init: {e}"))?;
-        let gl = !GL_UNAVAILABLE.load(Ordering::Relaxed);
+        let mut gl = !GL_UNAVAILABLE.load(Ordering::Relaxed);
+        if gl && hw_decoder_copies_cropped_frames(codec, needs_crop) {
+            log::warn!("[video] linux sink: the V4L2 HEVC decoder copies cropped frames — using the cairo sink for this stream");
+            gl = false;
+        }
         match Self::build(codec, gl) {
             Ok(sink) => Ok(sink),
             Err(e) if gl => {
@@ -176,6 +194,9 @@ impl LinuxVideoSink {
             (vec![upload, convert, flip.clone(), sink.clone()], flip, sink)
         } else {
             let convert = make("videoconvert")?;
+            // All cores: single-threaded the Pi 5 converts a cropped 720p60 HEVC at 45 fps,
+            // with threads 57 (then the decoder's own copy is the limit).
+            convert.set_property("n-threads", 0u32);
             let flip = make("videoflip")?;
             let sink = make("gtksink")?;
             (vec![convert, flip.clone(), sink.clone()], flip, sink)
