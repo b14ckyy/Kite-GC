@@ -20,7 +20,7 @@ Resolved in `src/lib/helpers/radar3d.ts` (`contactModelClass()` → `radarModelU
 | `adsb-arrow.glb`    | arrow    | B‑, B3, B4, B6 (UAV), B7 · Radio · no category received     | flat block arrow    |
 | `adsb-ground.glb`   | ground   | C1 (emergency vehicle), C2 (service vehicle)               | pickup truck        |
 | `adsb-dot.glb`      | dot      | **any contact with no heading** (non-directional)         | flat ring           |
-| `ff-uav.glb`        | ff       | **FormationFlight peers** (INAV-Radar / ESP32) — a paper-plane | small multirotor    |
+| `ff-uav.glb`        | ff       | **FormationFlight peers** (INAV-Radar / ESP32)                  | small multirotor    |
 
 **Resolution order:** FormationFlight → `ff`; no heading → `dot`; Radio → `arrow`; otherwise by ADS-B
 emitter category (above). Unmapped powered/unpowered (B‑/B3/B4/B6/B7, B5 reserved) falls through to `arrow`.
