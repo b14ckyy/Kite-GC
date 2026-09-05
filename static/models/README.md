@@ -40,3 +40,9 @@ colours. So:
 
 **Size:** drawn with `minimumPixelSize` 73 + `scale` 5.2 on the map — model at a small real-world size;
 keep it centred on the origin.
+
+**File format (the 2D loader is deliberately minimal):** one `.glb` with a single BIN buffer, `POSITION` +
+`NORMAL` per primitive, **uint16 indices** (so < 65 536 vertices per primitive), no `byteStride`, one
+flat `baseColorFactor` material per colour. Winding must be consistent and outward — the 2D renderer
+culls back faces. The current set was generated procedurally (trimesh), then post-processed: winding
+fixed, vertex normals written, indices converted to uint16, scaled by 0.44 into this size class.
