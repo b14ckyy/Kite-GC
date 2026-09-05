@@ -194,6 +194,8 @@ impl ApPassthroughDecoder {
             let fm: FlightModeState = classify_ardupilot(s.custom_mode, variant);
             let _ = app.emit("telemetry-status", &status);
             let _ = app.emit("telemetry-flightmode", &fm);
+            crate::link_status::on_status(&status);
+            crate::link_status::on_flightmode(&fm);
             // EKF health for the header indicator (passthrough has only a bad/ok flag, no variances).
             let _ = app.emit(
                 "telemetry-ekf-status",

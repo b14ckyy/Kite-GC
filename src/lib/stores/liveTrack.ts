@@ -6,7 +6,7 @@
 // new arm. Independent of the map trail (which keeps lat/lon only) and of the
 // flight-log DB (this exists regardless of the recording setting).
 
-import { writable } from 'svelte/store';
+import { get, writable } from 'svelte/store';
 
 export interface LiveTrackPoint {
   lat: number;
@@ -46,4 +46,14 @@ export function appendLivePoint(lat: number, lon: number, alt_m: number, mode_pr
 
 export function clearLiveTrack(): void {
   liveTrack.set([]);
+}
+
+/** Close the gap after the page was hidden (Dev-Docs active/BACKGROUND_TELEMETRY.md): points the
+ *  backend buffered since our last one, in order, through the same spacing gate. A buffered flight
+ *  that started after our last point is a NEW flight (an arm edge we never saw) — start over. */
+export function backfillLivePoints(points: LiveTrackPoint[], flightStartMs: number): void {
+  if (points.length === 0) return;
+  const cur = get(liveTrack);
+  if (cur.length > 0 && cur[cur.length - 1].timestamp_ms < flightStartMs) clearLiveTrack();
+  for (const p of points) appendLivePoint(p.lat, p.lon, p.alt_m, p.mode_primary, p.timestamp_ms);
 }

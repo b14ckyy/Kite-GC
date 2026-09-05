@@ -453,6 +453,8 @@ impl LtmDecoder {
             };
             let _ = app.emit("telemetry-status", &status);
             let _ = app.emit("telemetry-flightmode", &s.mode);
+            crate::link_status::on_status(&status);
+            crate::link_status::on_flightmode(&s.mode);
             if let Some(rec) = recorder {
                 if let Ok(mut r) = rec.lock() {
                     r.on_status(&status);
@@ -480,6 +482,7 @@ impl LtmDecoder {
                 course: s.course, // synthesized from GPS fixes (LTM carries no COG)
             };
             let _ = app.emit("telemetry-gps", &gps);
+            crate::link_status::on_gps(&gps);
             if let Some(rec) = recorder {
                 if let Ok(mut r) = rec.lock() { r.on_gps(&gps); }
             }
@@ -505,6 +508,7 @@ impl LtmDecoder {
                 cell_count: 0,
             };
             let _ = app.emit("telemetry-analog", &analog);
+            crate::link_status::on_analog(&analog);
             if let Some(rec) = recorder {
                 if let Ok(mut r) = rec.lock() { r.on_analog(&analog); }
             }
