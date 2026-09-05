@@ -1527,9 +1527,8 @@
     }
   }
 
-  /** Backfill trail points the backend buffered while the page was hidden (Dev-Docs
-   *  active/BACKGROUND_TELEMETRY.md) — through the live path, so the per-mode colour
-   *  segments come out exactly as if the points had arrived live. */
+  /** Trail points the backend buffered while the page was hidden — through the live path, so the
+   *  per-mode segments come out as if live. */
   export function appendTrailPoints(points: { lat: number; lon: number; mode: string }[]): void {
     for (const p of points) updateTrail(p.lat, p.lon, p.mode);
   }

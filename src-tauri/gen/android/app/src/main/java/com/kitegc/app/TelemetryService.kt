@@ -17,20 +17,10 @@ import androidx.core.app.NotificationCompat
 
 /**
  * Foreground service for the life of a telemetry link (Dev-Docs active/BACKGROUND_TELEMETRY.md).
- *
- * It does no work of its own — the link, the recorder and the track live in the Rust threads of
- * this same process. Its only job is to BE a foreground service: that is what keeps Android from
- * freezing (App Freezer, 12+) or reaping the process once the activity is no longer in front.
- * The notification is the price of that, so it is made useful: [LinkService] re-delivers the
- * start intent with fresh texts whenever the values changed.
- *
- * Type `connectedDevice`: the link IS a connected device (USB, BLE) or a network peer, and unlike
- * `dataSync` it has no 6-hour cap on Android 14+. The Android 14 prerequisite for that type is
- * met by the manifest's `CHANGE_NETWORK_STATE` declaration (a normal permission — a granted
- * `BLUETOOTH_CONNECT` would do as well, but a TCP-only user may never have granted it).
- *
- * `START_NOT_STICKY`: a service restarted by the system after a kill would have no link to
- * report — the process is gone, the Rust side with it.
+ * It does no work itself — being a foreground service is what keeps Android from freezing or
+ * reaping the process while the activity is not in front. Type `connectedDevice` (no 6-hour cap,
+ * unlike `dataSync`; the manifest's CHANGE_NETWORK_STATE is its Android 14 prerequisite).
+ * `START_NOT_STICKY`: a restart after a kill would have no link to report.
  */
 class TelemetryService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
@@ -51,8 +41,7 @@ class TelemetryService : Service() {
                 startForeground(NOTIFICATION_ID, notification)
             }
         } catch (e: Exception) {
-            // Refused (a background start on 12+, a missing prerequisite on 14+): the link still
-            // runs, only without the foreground guarantee. Say so; do not take the process down.
+            // Refused: the link still runs, only without the foreground guarantee.
             Log.w(TAG, "startForeground refused: $e")
         }
         return START_NOT_STICKY

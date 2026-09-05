@@ -12,14 +12,9 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.core.content.ContextCompat
 
 /**
- * The Rust side's handle on [TelemetryService] — start it with a notification, refresh the
- * notification, stop it. Driven over JNI from `link_presence` (connect / disconnect / lost link)
- * and the 1 Hz notification ticker; every call hops to the main thread here, the callers are Rust
- * worker threads.
- *
- * The notification permission (Android 13+) is asked for once per process, on the first start.
- * A refusal changes nothing about the service — it runs either way, the notification is simply
- * not shown — so the request never blocks the connect.
+ * The Rust side's handle on [TelemetryService] (JNI from `link_presence` and the notification
+ * ticker); every call hops to the main thread. The notification permission (13+) is asked once
+ * per process; a refusal only hides the notification.
  */
 object LinkService {
     private const val TAG = "KiteLink"
@@ -36,7 +31,7 @@ object LinkService {
         this.permissionLauncher = launcher
     }
 
-    /** The permission dialog's answer (main thread). Informational only. */
+    /** The permission dialog's answer. Informational only. */
     fun onPermissionResult(granted: Boolean) {
         if (!granted) Log.w(TAG, "Notification permission refused — the link service runs without a visible notification")
     }
@@ -49,7 +44,7 @@ object LinkService {
         }
     }
 
-    /** Re-deliver the intent: [TelemetryService.onStartCommand] re-notifies with the new texts. */
+    /** Re-delivers the intent; [TelemetryService.onStartCommand] re-notifies. */
     @JvmStatic
     fun update(title: String, text: String) {
         activity.runOnUiThread {

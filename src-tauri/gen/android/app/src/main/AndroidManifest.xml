@@ -5,11 +5,8 @@
          also fetch over the network. ACCESS_NETWORK_STATE lets the link layer tell "no network" apart
          from "nothing answering at that address". -->
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- Foreground service for the life of a telemetry link (TelemetryService / Dev-Docs
-         active/BACKGROUND_TELEMETRY.md): keeps the process alive while the app is minimised.
-         Type connectedDevice; CHANGE_NETWORK_STATE (a normal permission) is its Android 14
-         prerequisite for a link that is neither BLE nor USB. POST_NOTIFICATIONS is asked for
-         on the first connect (13+); refused, the service still runs, unseen. -->
+    <!-- Foreground service for the life of a telemetry link (TelemetryService). CHANGE_NETWORK_STATE
+         is the Android 14 prerequisite of the connectedDevice type for a non-BLE/USB link. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />

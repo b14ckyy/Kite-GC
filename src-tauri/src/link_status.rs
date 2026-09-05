@@ -1,18 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! What the OS layer knows about the link while the app is not in front (Dev-Docs
-//! active/BACKGROUND_TELEMETRY.md): a platform-neutral aggregate of the values the Android
-//! foreground-service notification shows — vehicle, battery, flight mode, distance to home —
-//! plus the current flight's track points, so the frontend can close the gap in its trail when
-//! it comes back (`telemetry_track_since`).
-//!
-//! Fed with one-line calls next to the recorder feeds in every protocol path (MSP scheduler,
-//! MAVLink handler, the passive decoders). Deliberately NOT inside the recorder: a recorder only
-//! exists while flight logging is enabled, and the notification must not depend on that setting.
-//!
-//! Everything is a plain `Mutex` behind free functions — the callers are the protocol threads,
-//! the readers are the Android ticker thread and one Tauri command.
+//! Link state for the OS layer (Dev-Docs active/BACKGROUND_TELEMETRY.md): the values the Android
+//! foreground-service notification shows, plus the current flight's track points so the frontend
+//! can close its trail gap after being hidden (`telemetry_track_since`). Fed next to the recorder
+//! feeds in every protocol path — not inside the recorder, which only exists while logging is on.
 
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -23,16 +15,13 @@ use crate::flightmode::FlightModeState;
 use crate::msp::types::FcInfo;
 use crate::scheduler::telemetry::{AnalogData, GpsData, StatusData};
 
-/// INAV `armingFlags` ARMED bit (bit 2 — `armingFlag_e` starts there; the passive decoders and
-/// the MAVLink handler map their armed state onto the same bit).
+/// INAV `armingFlags` ARMED bit; MAVLink and the passive decoders map onto the same bit.
 const ARMED_FLAG: u32 = 1 << 2;
 
-/// Track-point spacing (m) — the recorder's and the frontend `liveTrack`'s gate, so a backfilled
-/// trail looks like a live one.
+/// Track-point spacing (m) — the same gate as the recorder and the frontend `liveTrack`.
 const MIN_TRACK_SPACING_M: f64 = 5.0;
 
-/// Cap on buffered points for the CURRENT flight — ~hours at 5 m spacing; the flight-log DB is
-/// the archive, this is only the gap filler. The oldest points go first.
+/// Current flight only (the DB is the archive); the oldest points go first.
 const MAX_TRACK_POINTS: usize = 20_000;
 
 /// One flown point, as the frontend's `liveTrack` wants it.
@@ -101,8 +90,7 @@ fn valid_fix(d: &GpsData) -> bool {
     d.fix_type >= 2 && (d.lat != 0.0 || d.lon != 0.0) && d.lat.abs() <= 90.0 && d.lon.abs() <= 180.0
 }
 
-/// The transport the connection is being made over — set by `connect()` before the protocol
-/// path runs, so `on_link_up` can name it without every inner function carrying the label.
+/// Set by `connect()` before the protocol path runs — the inner functions know only the protocol.
 pub fn set_transport(transport: &str) {
     lock().transport = transport.to_string();
 }
@@ -121,8 +109,7 @@ pub fn on_link_up(fc: &FcInfo, protocol: &str) {
     };
 }
 
-/// The link is gone (user disconnect or lost). The track stays readable until the next link —
-/// a frontend coming back after the loss still wants to close its gap.
+/// The link is gone. The track stays readable until the next link (a frontend may still backfill).
 pub fn on_link_down() {
     let mut s = lock();
     s.armed = false;
@@ -134,8 +121,7 @@ pub fn on_status(d: &StatusData) {
     let armed = d.arming_flags & ARMED_FLAG != 0;
     let mut s = lock();
     if armed && !s.armed {
-        // Arm edge: a new flight. The FC sets home at launch, so whatever home we knew is stale
-        // unless the FC keeps pushing it (MAVLink HOME_POSITION overrides again within seconds).
+        // Arm edge = new flight; the FC sets home at launch, so a known home is stale.
         s.track.clear();
         s.flight_start_ms = now_ms();
         s.home = None;
@@ -173,8 +159,7 @@ pub fn on_gps(d: &GpsData) {
     if !s.armed {
         return;
     }
-    // First fix of an armed flight without an FC-reported home = the launch point (the frontend's
-    // own fallback, in miniature).
+    // First armed fix without an FC home = the launch point (the frontend's fallback).
     if s.home.is_none() {
         s.home = Some((d.lat, d.lon));
     }
@@ -191,8 +176,7 @@ pub fn on_gps(d: &GpsData) {
     s.track.push(TrackPoint { lat: d.lat, lon: d.lon, alt_msl: d.alt_msl, mode, ts_ms: now_ms() });
 }
 
-/// Notification (title, text). Title = vehicle · link; text = the values, metric units, only what
-/// the link actually carries. Called at 1 Hz by the Android ticker; cheap by design.
+/// Notification (title, text): vehicle · link, then the values the link carries (metric).
 pub fn notification() -> (String, String) {
     let s = lock();
     let vehicle = if s.vehicle.is_empty() { "Kite Ground Control".to_string() } else { s.vehicle.clone() };
@@ -224,22 +208,19 @@ pub fn notification() -> (String, String) {
     (title, parts.join(" · "))
 }
 
-/// Answer to `telemetry_track_since`: the buffered flight's arm time (so the frontend can tell a
-/// new flight from a continuation) and its points after `since_ms`.
+/// The buffered flight's arm time (new flight vs continuation) and its points after `since_ms`.
 #[derive(Serialize)]
 pub struct TrackSince {
     pub flight_start_ms: i64,
     pub points: Vec<TrackPoint>,
 }
 
-/// Points of the current flight newer than `since_ms` — the frontend asks on
-/// `visibilitychange → visible` with the timestamp of its last live-track point.
+/// Points newer than `since_ms` — asked on `visibilitychange → visible` with the last point's time.
 #[tauri::command]
 pub fn telemetry_track_since(since_ms: i64) -> TrackSince {
     let s = lock();
     let points: Vec<TrackPoint> = s.track.iter().filter(|p| p.ts_ms > since_ms).cloned().collect();
-    // Info, not debug: a release WebView forwards no console output to logcat, so this line is the
-    // only trace of how much the frontend missed while the page was hidden.
+    // Info: the only trace of what the frontend missed (a release WebView logs no console output).
     log::info!(
         "[track] backfill: {} of {} buffered points newer than {since_ms} (flight start {})",
         points.len(),
@@ -267,7 +248,7 @@ mod tests {
         }
     }
 
-    /// Serialised through one lock: the tests share the process-wide state.
+    /// The tests share the process-wide state.
     static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]

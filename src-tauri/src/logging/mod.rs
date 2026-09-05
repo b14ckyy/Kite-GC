@@ -78,6 +78,10 @@ impl Log for FileLogger {
                 let _ = w.flush();
             }
         }
+        // Android: mirror to stderr → logcat (`RustStdoutStderr`); adb cannot read the app-private
+        // log file of a release build.
+        #[cfg(target_os = "android")]
+        eprint!("{line}");
     }
 
     fn flush(&self) {

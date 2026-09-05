@@ -47,7 +47,5 @@
 
 # Active-network transport lookup (android/net.rs → NetInfo) — JNI-only, same rule.
 -keep class com.kitegc.app.NetInfo { *; }
-# Link foreground service bridge (android/link_service.rs → LinkService): start/update/stop are
-# JNI-only, same rule. Found the usual way — NoSuchMethodError in the release build only
-# (TelemetryService itself is reached from the manifest and survives on its own).
+# Link foreground-service bridge (android/link_service.rs → LinkService) — JNI-only, same rule.
 -keep class com.kitegc.app.LinkService { *; }

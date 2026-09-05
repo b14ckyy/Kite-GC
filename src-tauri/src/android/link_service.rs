@@ -1,14 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! JNI shim in front of `LinkService.kt` — the foreground service that keeps the process alive
-//! while a link is up, and its notification (Dev-Docs active/BACKGROUND_TELEMETRY.md). Same
-//! boundary contract as the other bridges: primitives across, the Kotlin side owns the Android
-//! objects and hops to the main thread itself.
-//!
-//! `start` also spawns the 1 Hz ticker that re-renders the notification from `link_status`
-//! whenever its text changed; `stop` ends the ticker first, then the service — so a notification
-//! can never be refreshed after the service was told to go.
+//! JNI shim in front of `LinkService.kt` — the foreground service for the life of a link and its
+//! notification (Dev-Docs active/BACKGROUND_TELEMETRY.md). `start` also runs the 1 Hz ticker that
+//! refreshes the notification from `link_status` on change; `stop` ends the ticker first.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -21,8 +16,7 @@ use super::jvm;
 
 const BRIDGE: &str = "com.kitegc.app.LinkService";
 
-/// Notification refresh cadence. The values change at telemetry rate; the notification does not
-/// need to — and every update is a Binder call.
+/// Notification refresh cadence (every update is a Binder call).
 const TICK: Duration = Duration::from_secs(1);
 
 static TICKER: Mutex<Option<(Arc<AtomicBool>, JoinHandle<()>)>> = Mutex::new(None);
@@ -52,7 +46,7 @@ fn call_texts(method: &str, title: &str, text: &str) -> Result<(), String> {
     jvm::check(&mut env, r, &format!("LinkService.{method}"))
 }
 
-/// Start the foreground service with the current notification and begin refreshing it.
+/// Start the service with the current notification and the refresh ticker.
 pub fn start() -> Result<(), String> {
     let (title, text) = crate::link_status::notification();
     call_texts("start", &title, &text)?;

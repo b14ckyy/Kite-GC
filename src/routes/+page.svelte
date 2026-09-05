@@ -155,9 +155,8 @@
   // the 2D map can re-centre on the same spot (keeping its own zoom).
   /** 2D map instance — for the trail backfill after the page was hidden (BACKGROUND_TELEMETRY.md). */
   let mapRef: { appendTrailPoints?: (points: { lat: number; lon: number; mode: string }[]) => void } | undefined = $state();
-  // A `connection-lost` that arrived while the page was hidden (the app minimised, the screen off):
-  // on return, one reconnect attempt with the last parameters — unless a recording-interrupted
-  // prompt took over, which the user answers first (Marc, 2026-09-05). Not a loop.
+  // `connection-lost` while hidden → one reconnect attempt on return (unless the recording-interrupted
+  // prompt took over). Not a loop.
   let lostWhileHidden = false;
 
   let map3dRef: {
@@ -3194,10 +3193,8 @@
       if (document.hidden) lostWhileHidden = true;
       void disconnectFC(selectedBaud).catch(() => {});
     });
-    // The page comes back to the front (the app was minimised / another app was in front): close
-    // the trail gap from the backend's buffer, and take the one reconnect attempt if the link was
-    // lost meanwhile. Nothing to do on hide — the Rust side keeps the link, the recorder and the
-    // buffer going; on Android the foreground service keeps the process (BACKGROUND_TELEMETRY.md).
+    // Back in front: close the trail gap from the backend's buffer, reconnect once if the link was
+    // lost meanwhile (BACKGROUND_TELEMETRY.md).
     document.addEventListener('visibilitychange', onVisibilityChange);
     void listen<BlackboxImportProgress>('flightlog-import-progress', (event) => {
       blackboxImportProgress = event.payload;

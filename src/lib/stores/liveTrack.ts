@@ -48,9 +48,8 @@ export function clearLiveTrack(): void {
   liveTrack.set([]);
 }
 
-/** Close the gap after the page was hidden (Dev-Docs active/BACKGROUND_TELEMETRY.md): points the
- *  backend buffered since our last one, in order, through the same spacing gate. A buffered flight
- *  that started after our last point is a NEW flight (an arm edge we never saw) — start over. */
+/** Points the backend buffered while the page was hidden (BACKGROUND_TELEMETRY.md). A buffered
+ *  flight that began after our last point is a new flight — start over. */
 export function backfillLivePoints(points: LiveTrackPoint[], flightStartMs: number): void {
   if (points.length === 0) return;
   const cur = get(liveTrack);
