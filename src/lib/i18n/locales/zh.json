@@ -797,6 +797,8 @@
     "lowPower3DOff": "关闭 (60 fps)",
     "lowPower3DOn": "开启 (20 fps)",
     "lowPower3DAuto": "自动 (电池时 20 fps)",
+    "highRes3D": "高分辨率 3D",
+    "highRes3DHint": "以显示器的原生像素密度渲染 3D 地球；关闭时以一半密度渲染以节省 GPU 和电量。默认：桌面开启，手机和平板关闭。",
     "userLocation": "你的位置",
     "locationNone": "未设置",
     "detectLocation": "检测",

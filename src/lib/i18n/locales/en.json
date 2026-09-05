@@ -800,6 +800,8 @@
     "lowPower3DOff": "Off (60 fps)",
     "lowPower3DOn": "On (20 fps)",
     "lowPower3DAuto": "Auto (20 fps on battery)",
+    "highRes3D": "High-Resolution 3D",
+    "highRes3DHint": "Render the 3D globe at the display's native pixel density; off renders at half of it to save GPU and battery. Default: on for desktop, off for phones and tablets.",
     "userLocation": "Your Location",
     "locationNone": "not set",
     "detectLocation": "Detect",

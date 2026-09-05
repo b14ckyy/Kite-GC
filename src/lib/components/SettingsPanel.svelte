@@ -44,6 +44,7 @@
     logReplayTime = false,
     nightMode2D = 'off',
     lowPower3D = 'auto',
+    highRes3D = false,
     gcsMode = 'manual',
     userLocation = null,
     attitudeRateHz = 5,
@@ -96,6 +97,7 @@
     logReplayTime?: boolean;
     nightMode2D?: 'off' | 'auto' | 'on';
     lowPower3D?: 'off' | 'on' | 'auto';
+    highRes3D?: boolean;
     gcsMode?: GcsMode;
     userLocation?: { lat: number; lon: number } | null;
     attitudeRateHz?: number;
@@ -409,6 +411,10 @@
           <option value="on">{$t('settings.lowPower3DOn')}</option>
           <option value="auto">{$t('settings.lowPower3DAuto')}</option>
         </select>
+      </div>
+      <div class="s-row" title={$t('settings.highRes3DHint')}>
+        <span class="s-label">{$t('settings.highRes3D')}</span>
+        <Toggle checked={highRes3D} id="high-res-3d" onchange={(c) => onPatch({ highRes3D: c })} />
       </div>
       <div class="s-row">
         <span class="s-label">{$t('settings.userLocation')}</span>

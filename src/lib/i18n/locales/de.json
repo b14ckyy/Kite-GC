@@ -800,6 +800,8 @@
     "lowPower3DOff": "Aus (60 fps)",
     "lowPower3DOn": "Ein (20 fps)",
     "lowPower3DAuto": "Auto (20 fps im Akkubetrieb)",
+    "highRes3D": "Hochauflösendes 3D",
+    "highRes3DHint": "Rendert den 3D-Globus in der nativen Pixeldichte des Displays; aus rendert mit der halben, um GPU und Akku zu schonen. Standard: an am Desktop, aus auf Phone und Tablet.",
     "userLocation": "Dein Standort",
     "locationNone": "nicht gesetzt",
     "detectLocation": "Ermitteln",

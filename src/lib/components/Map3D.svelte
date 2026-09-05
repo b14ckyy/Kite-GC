@@ -232,6 +232,7 @@
   // waste GPU/battery for no benefit on a map). Low-power drops to 20fps:
   //   off = 60fps · on = always 20fps · auto = 20fps only while on battery (queried from the backend).
   let lowPower3DSetting: 'off' | 'on' | 'auto' = 'off';
+  let highRes3DSetting = false;
   let onBattery = false;
   let batteryPollId: ReturnType<typeof setInterval> | undefined;
   const BASE_FPS = 60;
@@ -976,6 +977,33 @@
    *  xOffset moves the scene left). Cesium's projection and culling honour xOffset; its screen→ray
    *  helpers (getPickRay / pickEllipsoid) do NOT — the only caller here, getCamFocus, asks for the
    *  camera axis at the SCREEN centre, which is exactly where the un-offset ray still is. */
+  /** settings.highRes3D: native pixel density, or half of it (Cesium's own default was CSS pixels —
+   *  native on a DPR-1 desktop, a third of the pixels on the Sony). */
+  function applyRenderResolution() {
+    if (!viewer) return;
+    viewer.resolutionScale = highRes3DSetting ? 1 : 0.5;
+    viewer.scene.requestRender();
+  }
+
+  /** Cesium 24's `PerspectiveFrustum.clone()` drops xOffset/yOffset, and the scene renders through
+   *  a clone of the camera frustum — the inset reached culling but not the picture (screen-centred
+   *  cams, black wedges at the left edge). Once per process. */
+  function patchFrustumCloneForOffsets() {
+    const proto = Cesium.PerspectiveFrustum.prototype as unknown as {
+      clone: (result?: Cesium.PerspectiveFrustum) => Cesium.PerspectiveFrustum;
+      __kiteOffsetClone?: boolean;
+    };
+    if (proto.__kiteOffsetClone) return;
+    const orig = proto.clone;
+    proto.clone = function (this: Cesium.PerspectiveFrustum, result?: Cesium.PerspectiveFrustum) {
+      const r = orig.call(this, result);
+      r.xOffset = this.xOffset;
+      r.yOffset = this.yOffset;
+      return r;
+    };
+    proto.__kiteOffsetClone = true;
+  }
+
   function applyCenterInset() {
     if (!viewer) return;
     const f = viewer.camera.frustum;
@@ -1067,6 +1095,7 @@
       hudSpeedUnit = s.interface?.speedUnit ?? 'kmh';
       hudAltUnit = s.interface?.altitudeUnit ?? 'm';
       lowPower3DSetting = s.lowPower3D ?? 'off';
+      highRes3DSetting = s.highRes3D ?? false;
     });
     unsubSettings(); // read once, unsubscribe
 
@@ -1118,6 +1147,7 @@
       // which breaks the translucent render pass on some drivers — the replay track line + altitude
       // curtain vanish while the clamp-to-ground shadow (a separate pass) stays. FXAA (below) does the AA.
       msaaSamples: 1,
+      useBrowserRecommendedResolution: false, // native density; applyRenderResolution scales it
       scene3DOnly: true,
       // Debug: the Performance tab can disable OIT (a per-frame full-screen pass) via a localStorage flag
       // to measure its cost. OIT is constructor-only, so the panel reloads to apply. The key is only ever
@@ -1134,8 +1164,10 @@
     // CesiumWidget paints construction errors into its own DOM panel, but that panel was the ONLY
     // record — the macOS 26 report reached us as a photo of the screen. Capture the real error into
     // the diagnostics log, then stop cleanly: the rest of the app runs on without 3D.
+    patchFrustumCloneForOffsets();
     try {
       viewer = new Cesium.Viewer(cesiumContainer, viewerOptions);
+      applyRenderResolution();
     } catch (e) {
       const detail = e instanceof Error ? `${e.name}: ${e.message}\n${e.stack ?? ''}` : String(e);
       log3d('warn', `CesiumWidget construction failed — 3D unavailable: ${detail}`);
@@ -1394,6 +1426,11 @@
         lowPower3DSetting = lowPower;
         applyFrameRateCap();
         void refreshBattery(); // auto mode → fetch battery state + re-apply
+      }
+      const highRes = next.highRes3D ?? false;
+      if (highRes !== highRes3DSetting) {
+        highRes3DSetting = highRes;
+        applyRenderResolution();
       }
       const aspEnabledChg = next.airspace.enabled !== airspaceEnabled;
       if (aspEnabledChg || next.airspace.layers.obstacles.d3 !== obstacleD3 || next.airspace.obstacleDistanceKm !== obstacleDistKm) {
@@ -3728,13 +3765,25 @@
     <path d="M16 44 C16 44 2 24 2 16 A14 14 0 1 1 30 16 C30 24 16 44 16 44Z" fill="#f39c12" stroke="#fff" stroke-width="2"/>
     <text x="16" y="20" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold" font-family="sans-serif">L</text></svg>`;
 
+  /** Same size factor as the 2D markers (Map.svelte `.mission-wp-icon`). */
+  const WP_3D_SCALE = 0.85;
+  /** Raster the icon SVG at the display's pixel density: Cesium rasterizes a data-URI SVG at its
+   *  intrinsic width/height and draws billboards in CSS px, so a 48 px icon was 126 blurry device
+   *  px on the Sony. */
+  function sharpSvg(svg: string): string {
+    const k = Math.min(3, Math.max(1, Math.ceil(window.devicePixelRatio || 1)));
+    if (k === 1) return svg;
+    return svg.replace(/width="(\d+)" height="(\d+)"/, (_m, w, h) => `width="${Number(w) * k}" height="${Number(h) * k}"`);
+  }
+
   function missionBillboard(lon: number, lat: number, height: number, svg: string, w: number, h: number, ax: number, ay: number, alpha = 1) {
+    const f = WP_3D_SCALE;
     const ent = viewer!.entities.add({
       position: Cesium.Cartesian3.fromDegrees(lon, lat, height),
       billboard: {
-        image: 'data:image/svg+xml,' + encodeURIComponent(svg),
-        width: w, height: h,
-        pixelOffset: new Cesium.Cartesian2(w / 2 - ax, h / 2 - ay),
+        image: 'data:image/svg+xml,' + encodeURIComponent(sharpSvg(svg)),
+        width: w * f, height: h * f,
+        pixelOffset: new Cesium.Cartesian2((w / 2 - ax) * f, (h / 2 - ay) * f),
         disableDepthTestDistance: Number.POSITIVE_INFINITY, // overlay, never occluded
         color: alpha < 1 ? Cesium.Color.WHITE.withAlpha(alpha) : Cesium.Color.WHITE,
       },
@@ -3764,8 +3813,8 @@
     // CENTER origin + a fixed pixelOffset keeps the glow on the head (billboards are screen-space, so the
     // offset tracks the marker at any zoom) and lets the scale pulse grow symmetrically from it.
     const bottomAnchored = spec.anchorY >= spec.height - 1;
-    const headUpPx = bottomAnchored ? spec.height * 0.64 : spec.height / 2 - spec.anchorY;
-    const d = spec.width * 1.3; // ≈ the head diameter + halo bleed
+    const headUpPx = (bottomAnchored ? spec.height * 0.64 : spec.height / 2 - spec.anchorY) * WP_3D_SCALE;
+    const d = spec.width * 1.3 * WP_3D_SCALE; // ≈ the head diameter + halo bleed
     const ent = viewer!.entities.add({
       position: Cesium.Cartesian3.fromDegrees(lon, lat, height),
       billboard: {
