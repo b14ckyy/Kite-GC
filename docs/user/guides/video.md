@@ -206,6 +206,14 @@ distribution's GStreamer plugins (the **.deb** installs them automatically; else
 `gstreamer1.0-plugins-base`, `…-good`, `…-bad`, `gstreamer1.0-gtk3` and `gstreamer1.0-libav`, or your
 distro's equivalents) — if one is missing, Kite reports which GStreamer element it could not find.
 
+!!! note "Raspberry Pi 5 and HEVC"
+    The Pi 5's hardware block hands its pictures to the display without a copy only when the stream's
+    coded size equals the picture size. Encoders that pad the height — NVENC at 720p (coded 736
+    rows), every 1080p stream (coded 1088) — make the decoder copy each picture; Kite detects that from
+    the stream and renders such streams through its software compositing path instead (still
+    hardware-decoded, at a higher CPU cost). Streams without padding, e.g. x265 at 720p, keep the
+    zero-copy path.
+
 !!! warning "AppImage: video does not work there"
     The AppImage build cannot play video on either path — the AppImage's launcher environment hides
     the system's GStreamer plugins from every process inside it. Use the **.deb**, **.rpm** or the
