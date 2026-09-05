@@ -51,6 +51,9 @@ pub struct RtspConfig {
     /// Monitor's data source. `run_rtsp`'s final `RtspStats` stays the authoritative
     /// end-of-stream summary.
     pub live: Option<std::sync::Arc<LiveRtspStats>>,
+    /// H.265: after lost data hold pictures until the next IRAP — for a stateless hardware
+    /// decoder that hangs on a missing reference (Pi 5). Concealing decoders leave it off.
+    pub resync_on_loss: bool,
 }
 
 impl Default for RtspConfig {
@@ -63,6 +66,7 @@ impl Default for RtspConfig {
             user_agent: "Kite-GC".into(),
             accept: vec![VideoCodec::Mjpeg, VideoCodec::H264, VideoCodec::H265],
             live: None,
+            resync_on_loss: false,
         }
     }
 }
@@ -654,7 +658,7 @@ fn run_once(
         .to_string();
     let sdp_doc = sdp::parse(&String::from_utf8_lossy(&resp.body));
     let (media, codec, pt) = pick_video(&sdp_doc, &cfg.accept).map_err(RunErr::Msg)?;
-    let mut depack = Depack::new(codec, media.fmtp_of(pt));
+    let mut depack = Depack::new(codec, media.fmtp_of(pt), cfg.resync_on_loss);
     let setup_url = join_control(&base, media.control.as_deref());
     let aggregate_url = join_control(&base, sdp_doc.session_control.as_deref());
     log::info!(
@@ -750,11 +754,11 @@ enum Depack {
 }
 
 impl Depack {
-    fn new(codec: VideoCodec, fmtp: Option<&str>) -> Self {
+    fn new(codec: VideoCodec, fmtp: Option<&str>, resync_on_loss: bool) -> Self {
         match codec {
             VideoCodec::Mjpeg => Depack::Mjpeg(MjpegDepacketizer::new()),
             VideoCodec::H264 => Depack::H264(H264Depacketizer::new(fmtp)),
-            VideoCodec::H265 => Depack::H265(H265Depacketizer::new(fmtp)),
+            VideoCodec::H265 => Depack::H265(H265Depacketizer::new(fmtp).with_resync(resync_on_loss)),
         }
     }
 

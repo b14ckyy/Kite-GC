@@ -215,6 +215,8 @@ impl NativeRtsp {
             },
             accept,
             live: Some(live),
+            #[cfg(target_os = "linux")]
+            resync_on_loss: super::linux_sink::hevc_decoder_is_stateless(),
             ..Default::default()
         };
 

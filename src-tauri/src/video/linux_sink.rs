@@ -124,6 +124,13 @@ pub struct LinuxVideoSink {
     geom: Mutex<Geom>,
 }
 
+/// The machine decodes HEVC on a stateless V4L2 decoder (Pi 5): it cannot conceal a
+/// missing reference — a picture after lost data stalls it, and the stop then hangs the
+/// kernel driver. The RTSP client holds pictures until the next IRAP for such a decoder.
+pub fn hevc_decoder_is_stateless() -> bool {
+    gst::init().is_ok() && gst::ElementFactory::find("v4l2slh265dec").is_some()
+}
+
 /// Last rect and orientation from the frontend — re-laid out when either changes.
 #[derive(Default)]
 struct Geom {
