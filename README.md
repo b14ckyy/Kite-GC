@@ -11,18 +11,19 @@
   <a href="LICENSE"><img alt="License: GPL-3.0-or-later" src="https://img.shields.io/badge/License-GPLv3-blue.svg"></a>
   <a href="https://b14ckyy.github.io/Kite-GC/"><img alt="Documentation" src="https://img.shields.io/badge/docs-online-37a8db"></a>
   <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-555">
-  <img alt="Status" src="https://img.shields.io/badge/status-release%20candidate-f5a623">
+  <a href="https://github.com/b14ckyy/Kite-GC/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/b14ckyy/Kite-GC?label=release&color=59aa29"></a>
   <a href="https://paypal.me/b14ckyy"><img alt="Donate via PayPal" src="https://img.shields.io/badge/Donate-PayPal-00457C?logo=paypal&logoColor=white"></a>
 </p>
 
 ---
-## Development State: 
+## Development state
 
-Kite is currently in **feature-freeze** for the 1.0 release, so which branch you target matters:
+**Kite 1.0 is released** — the first stable version, after a summer of betas and release candidates.
+Work on 1.1 (mobile, native video decode, and more) continues on the integration trunk:
 
-- **Bugfixes for 1.0** → pull request against **`master`**, the release line.
-- **New features or functional changes** → pull request against **`development`**, the integration
-  trunk. They are welcome there now, but will not reach `master` until after the final 1.0 release.
+- **All changes** → pull request against **`development`**. Features and fixes alike land there and
+  reach `master` with the next release.
+- **A patch for the released 1.0** is cut from the `v1.0.0` tag when one is needed.
 
 Nobody commits to either branch directly — see
 **[Contributing](https://b14ckyy.github.io/Kite-GC/for-developers/contributing/)** for the full
@@ -70,8 +71,8 @@ Everything you'd expect from a ground station:
 - **Mission planning** — create, upload, download and edit missions; undo/redo; a survey-pattern
   generator; terrain-following / AGL waypoints.
 - **Vehicle control** — arm/disarm, flight-mode changes, takeoff/RTL/loiter and more (ArduPilot/PX4).
-- **Comfort** — a multi-language interface (English, German, French at launch) with persistent window,
-  layout and settings between sessions.
+- **Comfort** — a multi-language interface (English, German, French, Bulgarian and Chinese) with persistent
+  window, layout and settings between sessions.
 
 ## What makes Kite special
 
@@ -103,8 +104,8 @@ Everything you'd expect from a ground station:
 - **Connections:** USB / serial, Bluetooth (SPP & BLE), TCP, UDP.
 - **Link modes:** live control link, **passive** listen-only telemetry, or a **relay** that
   re-broadcasts to other ground stations.
-- **Platforms:** Windows, macOS (universal, unsigned) and Linux (x86-64 / ARM64). Android and iOS are
-  in development for a release after 1.0.
+- **Platforms:** Windows, macOS (universal, signed and notarized) and Linux (x86-64 / ARM64).
+  Android and iOS / iPadOS are in development on `development` and target the 1.1 release.
 
 ## Download
 
