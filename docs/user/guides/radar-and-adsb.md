@@ -61,7 +61,10 @@ Top to bottom, the ADS-B tab is organized into:
 - **Local sources** — your hardware receivers, with **Add receiver**.
 
 Every source row has its own **on/off toggle** and a **status badge** — a green number is the live
-contact count from that feed, a red ✕ means it errored — so you can mute a feed without deleting it. An
+contact count from that feed, a red ✕ means it errored — so you can mute a feed without deleting it. A
+feed that fails (typically a provider's rate limit, HTTP 429) is **backed off automatically**: Kite doubles
+the spacing of that feed's requests after every failed attempt, up to one minute, and returns to your
+poll interval as soon as a request succeeds again. The other feeds keep their normal rate. An
 **enabled** row collapses to a single line (name · count · toggle); a **disabled** row expands to show
 its fields (URL / API key for online, port / baud for a receiver) and a **delete** button. New rows
 start disabled so you can fill them in first. A serial port already used by another source is shown as
