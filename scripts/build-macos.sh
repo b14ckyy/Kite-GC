@@ -50,6 +50,19 @@ npm install
 bash "$(dirname "$0")/fetch-ffmpeg-macos.sh"
 
 echo "[3/4] Building universal application with Tauri..."
+# The bundler signs the .app itself (hardened runtime + the entitlements from tauri.conf.json) when
+# it finds APPLE_SIGNING_IDENTITY, and only then wraps it in the .dmg. That order is what makes
+# notarization possible at all: Apple inspects the app inside the image, so signing has to happen
+# here, before the .dmg exists, not afterwards. Say which kind of build this is, because the two
+# look identical on disk and an unsigned one only reveals itself on someone else's Mac.
+if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
+    echo "[INFO] Signing identity found in the environment: the bundle will be SIGNED."
+    echo "       Run 'just notarize-macos' afterwards to notarize + staple it."
+else
+    echo "[INFO] No APPLE_SIGNING_IDENTITY set: the bundle will be UNSIGNED (fine for local use)."
+    echo "       For a distributable build, export it BEFORE this script and re-run:"
+    echo "         export APPLE_SIGNING_IDENTITY=\"Developer ID Application: Your Name (TEAMID)\""
+fi
 npm run tauri build -- --target universal-apple-darwin --bundles app dmg
 
 echo "[4/4] Collecting outputs into release/ (unified naming) ..."
