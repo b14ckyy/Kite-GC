@@ -18,6 +18,7 @@ export interface StatusTextMsg {
   level: StatusTextLevel; // collapsed for colour/sound
   text: string;
   expiresAt: number;     // epoch ms when this line fades out (per-message lifetime)
+  repeats: number;       // how many times this identical text has arrived while on screen (1 = once)
 }
 
 const MAX_BUFFER = 12;          // lines kept (the banner shows a few and scrolls to the newest)
@@ -70,7 +71,6 @@ function trackPrearm(text: string): void {
 let nextId = 1;
 let sweepTimer: ReturnType<typeof setTimeout> | null = null;
 let lastSoundAt = 0;
-let lastText = '';
 let unlisten: UnlistenFn | null = null;
 
 /** Drop every message whose per-line lifetime has elapsed, then re-arm for the next-earliest expiry.
@@ -99,19 +99,26 @@ function push(severity: number, text: string): void {
   if (!levelAllowed(level)) return; // filtered out by the "System Messages" setting
 
   const expiresAt = Date.now() + CLEAR_AFTER_MS;
+  let repeated = false;
   statusTexts.update((list) => {
-    // Light de-dup: a repeated identical last line just refreshes its own lifetime, no duplicate row.
-    if (list.length && list[list.length - 1].text === clean) {
+    // De-dup against the WHOLE buffer, not just the last line. An FC that nags with two alternating
+    // messages (INAV's "UNABLE TO ARM" / "WAITING FOR GPS FIX" while it waits for a fix) never repeats
+    // its *last* line, so a last-line-only check appends a fresh row for every nag and fills the banner
+    // within seconds. A repeat instead refreshes the existing line's lifetime and bumps its counter,
+    // keeping its position so the banner doesn't reshuffle while you're reading it.
+    const idx = list.findIndex((m) => m.text === clean);
+    if (idx !== -1) {
+      repeated = true;
       const refreshed = [...list];
-      refreshed[refreshed.length - 1] = { ...refreshed[refreshed.length - 1], expiresAt };
+      refreshed[idx] = { ...refreshed[idx], severity, level, expiresAt, repeats: refreshed[idx].repeats + 1 };
       return refreshed;
     }
-    return [...list, { id: nextId++, severity, level, text: clean, expiresAt }].slice(-MAX_BUFFER);
+    return [...list, { id: nextId++, severity, level, text: clean, expiresAt, repeats: 1 }].slice(-MAX_BUFFER);
   });
   scheduleSweep();
 
-  if (clean !== lastText || level !== 'info') playTone(level); // always cue errors; rate-limit info
-  lastText = clean;
+  // Always cue errors/warnings; an INFO line already on screen never re-cues, so a nag loop stays silent.
+  if (!repeated || level !== 'info') playTone(level);
 }
 
 // ── Audio cue (Web Audio) — gentle for info, discreetly alarming for warnings/errors ──
@@ -182,5 +189,4 @@ export function stopStatusText(): void {
   prearmLines = [];
   statusTexts.set([]);
   prearmReason.set(null);
-  lastText = '';
 }

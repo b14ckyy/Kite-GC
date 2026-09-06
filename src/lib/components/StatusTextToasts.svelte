@@ -31,6 +31,7 @@
         <div class="msg-line {msg.level}">
           <span class="m-icon">{ICON[msg.level]}</span>
           <span class="m-text">{msg.text}</span>
+          {#if msg.repeats > 1}<span class="m-count">×{msg.repeats}</span>{/if}
         </div>
       {/each}
     </div>
@@ -85,6 +86,8 @@
   }
   .m-icon { font-size: 11px; line-height: 1; flex: 0 0 auto; }
   .m-text { overflow: hidden; text-overflow: ellipsis; }
+  /* Repeat tally for a message the FC keeps re-sending. Dimmed so it reads as metadata, not content. */
+  .m-count { flex: 0 0 auto; margin-left: auto; padding-left: 8px; font-size: 11px; opacity: 0.55; font-variant-numeric: tabular-nums; }
 
   .msg-line.info    { color: #cfe7f3; }
   .msg-line.info .m-icon { color: #37a8db; }
