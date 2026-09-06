@@ -1964,33 +1964,42 @@ clean. That is why the release workflow builds on Ubuntu 24.04 rather than an ol
 <li>Node.js, Rust and just via their official installers (e.g. <code>brew install node just</code>, Rust from rustup).</li>
 </ol>
 <p>The macOS build is <strong>universal</strong> (arm64 + x86_64). <code>just build-macos</code> adds both Rust targets and fetches
-the bundled ffmpeg for you, then builds the <code>.app</code> + <code>.dmg</code>. The result is <strong>unsigned</strong>; <code>just
-notarize-macos</code> signs + notarizes it for distribution without a Gatekeeper prompt (needs an Apple
-Developer account, credentials read from your environment / keychain — never committed).</p>
+the bundled ffmpeg for you, then builds the <code>.app</code> + <code>.dmg</code>. The result is <strong>unsigned</strong> unless you
+export a signing identity first.</p>
+<p>For a distributable build, signing happens during the build and notarizing after it, in that order.
+The <code>.dmg</code> has to wrap an already-signed <code>.app</code>, because Apple inspects the app inside the image:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">APPLE_SIGNING_IDENTITY</span><span class="o">=</span><span class="s2">"Developer ID Application: Your Name (TEAMID)"</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>just<span class="w"> </span>build-macos<span class="w">      </span><span class="c1"># the bundler signs the .app, then builds the .dmg around it</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>just<span class="w"> </span>notarize-macos<span class="w">   </span><span class="c1"># notarize + staple, so there is no Gatekeeper prompt</span>
+</code></pre></div>
+<p>Both steps need an Apple Developer account, and specifically a <strong>Developer ID Application</strong>
+certificate: an "Apple Development" certificate cannot notarize. Credentials are read from your
+environment / keychain and never committed. List your identities with
+<code>security find-identity -v -p codesigning</code>.</p>
 <h3 id="android-ios">Android / iOS<a class="headerlink" href="#android-ios" title="Permanent link">&para;</a></h3>
 <p>Mobile (Tauri Mobile) is <strong>not part of the 1.0 line</strong>. The Android and iOS / iPadOS ports are both
 merged on <code>development</code> (each with its own UI tier and build pipeline) and target a release after
 1.0. Nothing mobile builds from <code>master</code> — don't run <code>tauri android init</code> or <code>tauri ios init</code>
 against a 1.0 checkout.</p>
 <h2 id="workflow">Workflow<a class="headerlink" href="#workflow" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>just<span class="w"> </span>install<span class="w">      </span><span class="c1"># install frontend dependencies (npm install)</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>just<span class="w"> </span>dev<span class="w">          </span><span class="c1"># start development mode with hot reload</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>just<span class="w"> </span>install<span class="w">      </span><span class="c1"># install frontend dependencies (npm install)</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>just<span class="w"> </span>dev<span class="w">          </span><span class="c1"># start development mode with hot reload</span>
 </code></pre></div>
 <p>Other useful commands:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>just<span class="w"> </span>--list<span class="w">          </span><span class="c1"># list all commands</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>just<span class="w"> </span>check<span class="w">           </span><span class="c1"># svelte-check + cargo check</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>just<span class="w"> </span>build<span class="w">           </span><span class="c1"># production build for the current platform</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>just<span class="w"> </span>build-windows<span class="w">   </span><span class="c1"># explicit Windows release build</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>just<span class="w"> </span>build-linux<span class="w">     </span><span class="c1"># explicit Linux release build</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>just<span class="w"> </span>build-macos<span class="w">     </span><span class="c1"># explicit macOS universal build (unsigned; adds mac targets + ffmpeg)</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>just<span class="w"> </span>clean<span class="w">           </span><span class="c1"># clean build artifacts</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>just<span class="w"> </span>--list<span class="w">          </span><span class="c1"># list all commands</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>just<span class="w"> </span>check<span class="w">           </span><span class="c1"># svelte-check + cargo check</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>just<span class="w"> </span>build<span class="w">           </span><span class="c1"># production build for the current platform</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>just<span class="w"> </span>build-windows<span class="w">   </span><span class="c1"># explicit Windows release build</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>just<span class="w"> </span>build-linux<span class="w">     </span><span class="c1"># explicit Linux release build</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>just<span class="w"> </span>build-macos<span class="w">     </span><span class="c1"># explicit macOS universal build (unsigned; adds mac targets + ffmpeg)</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>just<span class="w"> </span>clean<span class="w">           </span><span class="c1"># clean build artifacts</span>
 </code></pre></div>
 <p>The classic commands still work too (<code>npm install</code>, <code>npm run tauri dev</code>, <code>npm run tauri build</code>).</p>
 <h3 id="build-outputs">Build outputs<a class="headerlink" href="#build-outputs" title="Permanent link">&para;</a></h3>
 <p>Every build (<code>just build</code> / <code>build-windows</code> / <code>build-linux</code> / <code>build-macos</code>) gathers its final artifacts
 into a <strong><code>release/</code></strong> folder at the repo root, renamed to a unified scheme so local builds match the CI
 release builds:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>KiteGC_&lt;OS&gt;_&lt;arch&gt;_&lt;version&gt;_&lt;type&gt;.&lt;ext&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>KiteGC_&lt;OS&gt;_&lt;arch&gt;_&lt;version&gt;_&lt;type&gt;.&lt;ext&gt;
 </code></pre></div>
 <ul>
 <li><strong>Type</strong> = <code>installer</code> (<code>.exe</code> / <code>.deb</code> / <code>.rpm</code> / <code>.dmg</code>), <code>standalone</code> (<code>.AppImage</code>, or the macOS
@@ -2001,7 +2010,7 @@ release builds:</p>
 <p>The folder is refreshed on each build and is git-ignored (local to your machine). The raw outputs also
 remain in <code>src-tauri/target/release/</code> (and its <code>bundle/</code> subfolders) as usual.</p>
 <h2 id="quality-checks">Quality checks<a class="headerlink" href="#quality-checks" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>just<span class="w"> </span>check
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>just<span class="w"> </span>check
 </code></pre></div>
 <p>runs <code>npm run check</code> (svelte-check + TypeScript) and <code>cargo check</code>. <code>just check</code> / <code>just clean</code> have
 platform-specific variants (via just's <code>[windows]</code> / <code>[unix]</code> attributes) and pick the right one
@@ -2035,8 +2044,8 @@ Installer.</p>
   log out/in). Some distros use <code>uucp</code>.</li>
 <li><strong>Blank 3D globe / WebView (WebKitGTK):</strong> the 3D map runs in WebKitGTK, which is more fragile than
   Windows' WebView2 (notably on some Nvidia setups). Try launching with the DMA-BUF renderer disabled:
-  <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nv">WEBKIT_DISABLE_DMABUF_RENDERER</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>./kite-gc<span class="w">      </span><span class="c1"># most common fix</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nv">WEBKIT_DISABLE_COMPOSITING_MODE</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>./kite-gc<span class="w">     </span><span class="c1"># if compositing misbehaves</span>
+  <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nv">WEBKIT_DISABLE_DMABUF_RENDERER</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>./kite-gc<span class="w">      </span><span class="c1"># most common fix</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nv">WEBKIT_DISABLE_COMPOSITING_MODE</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>./kite-gc<span class="w">     </span><span class="c1"># if compositing misbehaves</span>
 </code></pre></div></li>
 <li><strong>Which package to test:</strong> <code>tauri build</code> produces <code>.deb</code>, <code>.AppImage</code> and <code>.rpm</code> in
   <code>src-tauri/target/release/bundle/</code>. The <code>.deb</code> (or the raw binary in <code>…/release/</code>) is usually the most
