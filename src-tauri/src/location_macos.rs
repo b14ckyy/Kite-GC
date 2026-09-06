@@ -160,6 +160,16 @@ pub fn location_os_last() -> Option<OsFix> {
     *LAST_FIX.lock().unwrap()
 }
 
+/// Start (or retry starting) CoreLocation from the frontend, behind the "Detect my location" button.
+///
+/// Needed because `start()` gives up when Location Services are off system-wide, and app setup is the
+/// only other caller: a user who enables Location Services or grants the permission after launch
+/// would otherwise have to restart the app. `start()` is idempotent, so this is free once running.
+#[tauri::command]
+pub fn location_os_start(app: AppHandle) {
+    start(&app);
+}
+
 /// Start CoreLocation and request authorisation. Idempotent: a second call is a no-op, so this is
 /// safe to call from app setup and again from a manual "detect my location" button.
 ///

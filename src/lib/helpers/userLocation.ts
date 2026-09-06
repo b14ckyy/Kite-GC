@@ -45,6 +45,10 @@ export function setUserLocation(lat: number, lon: number, source: string, accura
  *  only source, and it pushes an `os-location` event as well for the live updates. */
 async function runGeoCheckMacOs(): Promise<void> {
   try {
+    // Start first, and on every manual check. The backend gives up when Location Services are off
+    // system-wide, so without this a user who turns them on (or grants the permission) after launch
+    // would have to restart the app to get a marker. The call is idempotent once running.
+    await invoke('location_os_start');
     const fix = await invoke<{ lat: number; lon: number; accuracy_m: number | null } | null>(
       'location_os_last',
     );

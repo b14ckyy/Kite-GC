@@ -13,3 +13,7 @@
 pub fn location_os_last() -> Option<()> {
     None
 }
+
+/// No-op off macOS. Only the macOS build has a native location source to (re)start.
+#[tauri::command]
+pub fn location_os_start() {}

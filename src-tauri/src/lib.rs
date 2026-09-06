@@ -539,6 +539,7 @@ pub fn run() {
         .manage(MjpegServer::new())
         .invoke_handler(tauri::generate_handler![
             location::location_os_last,
+            location::location_os_start,
             list_serial_ports,
             scan_ble_devices,
             ble_scan_start,
