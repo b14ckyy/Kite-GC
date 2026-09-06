@@ -77,6 +77,7 @@ how smooth the instruments feel; the rest is automatic.
 | **Wind** | Request wind-estimate telemetry (shown on the compass widget). Live wind needs **ArduPilot** or **PX4**, or **INAV 10.0+** — on older INAV the toggle stays without effect. Replay always shows the wind a log recorded. | Off |
 | **Direction indicators** | Draw the heading / course / predicted-turn lines at the aircraft on the map. | On |
 | **Full MAVLink Telemetry** | MAVLink only — hand rate control to the flight controller (streams everything at its own rates, ignoring the two rates above). For fast links / full `.tlog` capture. See **[Telemetry & display](../guides/telemetry-and-display.md)**. | Off |
+| **Telemetry API** | Serve the live telemetry to other programs as JSON, read-only: a **TCP stream** (port 27300), an **HTTP snapshot** (port 27301) and/or **UDP subscribers** (port 27300, a client subscribes by sending the word `subscribe`); **Reachable on the network** switches the listeners from loopback to all interfaces; **Update rate** 1–10 Hz. The status line shows the endpoints and connected clients. Full contract: **[Telemetry API](telemetry-api.md)**. | Off |
 | **Radar tracking** | Master switch for foreign-vehicle radar, with per-system enables (**ADS-B**, **FormationFlight**). See **[Radar & ADS-B](../guides/radar-and-adsb.md)**. | On (ADS-B on) |
 | **RC Control** | Enable GCS RC control (reveals the RC tool). See **[RC control](../guides/rc-control.md)**. | Off |
 

@@ -23,6 +23,15 @@
   const int = (v: number | null | undefined): string => (v == null ? NONE : String(Math.trunc(v)));
   const bits = (v: number): string => `${v} (0x${(v >>> 0).toString(16).toUpperCase()})`;
   const bool = (v: boolean): string => (v ? '1' : '0');
+  // Epoch ms → local wall clock with milliseconds + age, e.g. "18:31:14.073 (0.2 s)". The raw epoch
+  // value is what the Telemetry API exposes; here a human reads it.
+  const stamp = (ms: number): string => {
+    if (!ms) return NONE;
+    const d = new Date(ms);
+    const hms = d.toLocaleTimeString(undefined, { hour12: false });
+    const age = Math.max(0, (Date.now() - ms) / 1000);
+    return `${hms}.${String(ms % 1000).padStart(3, '0')} (${age.toFixed(1)} s)`;
+  };
 
   const groups = $derived.by((): Group[] => {
     const g: Group[] = [
@@ -107,7 +116,7 @@
         { key: 'ekfStatus', value: int(telem.ekfStatus), unit: '' },
         { key: 'ekfType', value: int(telem.ekfType), unit: '' },
         { key: 'fcVariant', value: telem.fcVariant || NONE, unit: '' },
-        { key: 'lastUpdate', value: int(telem.lastUpdate), unit: 'ms' },
+        { key: 'lastUpdate', value: stamp(telem.lastUpdate), unit: '' },
       ] },
     );
     return g;

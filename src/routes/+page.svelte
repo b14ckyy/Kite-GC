@@ -62,7 +62,7 @@
   import { panelDockRight } from "$lib/stores/panelDock";
   import SettingsPanel from "$lib/components/SettingsPanel.svelte";
   import { ensureUserLocation, requestUserLocation, userGeoLocation } from "$lib/helpers/userLocation";
-  import { gcsLocation } from "$lib/stores/gcsLocation";
+  import { gcsLocation, gcsAccuracyM } from "$lib/stores/gcsLocation";
   import { fetchAero } from "$lib/stores/airspace";
   import { PlaybackController } from '$lib/controllers/playbackController';
   import { refreshSerialPorts, connectFC, disconnectFC, startBleScan, stopBleScan, startBleDeviceListener, stopBleDeviceListener, clearBleDevices } from '$lib/controllers/connectionController';
@@ -1175,6 +1175,20 @@
     const g = $gcsLocation;
     if (!g) return;
     void setRadarNode(g.lat, g.lon, gcsGroundAltM ?? 0);
+  });
+
+  // Telemetry API (Dev-Docs active/TELEMETRY_API.md): push the persisted config on start + every change;
+  // the backend reconfigures in place (unchanged config = no restart, clients keep their stream).
+  $effect(() => {
+    const cfg = $settings.telemetryApi;
+    void invoke('telemetry_api_configure', { config: cfg }).catch((e) => console.warn('[telemetry-api] configure failed:', e));
+  });
+  // ...and the one value only the frontend knows: the resolved GCS marker position (null = marker off).
+  $effect(() => {
+    const g = $gcsLocation;
+    const acc = $gcsAccuracyM;
+    const alt = gcsGroundAltM;
+    void invoke('telemetry_api_set_gcs', { gcs: g ? { lat: g.lat, lon: g.lon, altMsl: alt, accuracyM: acc } : null }).catch(() => {});
   });
 
   // Auto-start video with the last settings if it was running at last close.
@@ -3762,6 +3776,7 @@
             radar={radarSettings}
             airspace={airspaceSettings}
             rcControl={$settings.rcControl}
+            telemetryApi={$settings.telemetryApi}
             updateCheck={$settings.updateCheck}
             {isWidgetActive}
             {getWidgetPanelLabel}

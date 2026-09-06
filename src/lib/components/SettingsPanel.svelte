@@ -13,10 +13,10 @@
   import { SUPPORTED_LOCALES } from '$lib/i18n';
   import { MAP_PROVIDERS } from '$lib/config/mapProviders';
   import { WIDGET_DEFS } from '$lib/config/widgetRegistry';
-  import { DEFAULT_RADAR, DEFAULT_AIRSPACE, DEFAULT_RC_CONTROL, DEFAULT_UPDATE_CHECK } from '$lib/stores/settings';
+  import { DEFAULT_RADAR, DEFAULT_AIRSPACE, DEFAULT_RC_CONTROL, DEFAULT_UPDATE_CHECK, DEFAULT_TELEMETRY_API } from '$lib/stores/settings';
   import { panelState } from '$lib/stores/panelState';
   import { resetGcsManual, gcsManuallySet } from '$lib/stores/gcsLocation';
-  import type { AppSettings, InterfaceSettings, RadarSettings, GcsMode, AirspaceSettings, AirspaceProvider, SystemMessagesLevel, LogLevel, RcControlSettings, UpdateCheckSettings, UpdateCheckMode } from '$lib/stores/settings';
+  import type { AppSettings, InterfaceSettings, RadarSettings, GcsMode, AirspaceSettings, AirspaceProvider, SystemMessagesLevel, LogLevel, RcControlSettings, TelemetryApiSettings, UpdateCheckSettings, UpdateCheckMode } from '$lib/stores/settings';
   import { revealItemInDir, openPath } from '@tauri-apps/plugin-opener';
   import { isAndroid, isMobile } from '$lib/platform';
   import { blackboxDecoderVersion, downloadBlackboxDecode } from '$lib/stores/flightlog';
@@ -71,6 +71,7 @@
     radar = DEFAULT_RADAR,
     airspace = DEFAULT_AIRSPACE,
     rcControl = DEFAULT_RC_CONTROL,
+    telemetryApi = DEFAULT_TELEMETRY_API,
     updateCheck = DEFAULT_UPDATE_CHECK,
     isWidgetActive = (_widgetId: string) => false,
     getWidgetPanelLabel = (_widgetId: string) => '',
@@ -124,6 +125,7 @@
     radar?: RadarSettings;
     airspace?: AirspaceSettings;
     rcControl?: RcControlSettings;
+    telemetryApi?: TelemetryApiSettings;
     updateCheck?: UpdateCheckSettings;
     isWidgetActive?: (widgetId: string) => boolean;
     getWidgetPanelLabel?: (widgetId: string) => string;
@@ -258,6 +260,24 @@
   function patchRcControl(partial: Partial<RcControlSettings>) {
     onPatch({ rcControl: { ...rcControl, ...partial } });
   }
+  /** Patch the nested Telemetry API settings (whole object, onPatch merges shallowly). */
+  function patchTelemetryApi(partial: Partial<TelemetryApiSettings>) {
+    onPatch({ telemetryApi: { ...telemetryApi, ...partial } });
+  }
+  // Live status of the API server (endpoints, client count, bind error) — polled while it is enabled.
+  type ApiStatus = { running: boolean; tcpEndpoint: string | null; httpEndpoint: string | null; udpEndpoint: string | null; clients: number; error: string | null };
+  let apiStatus = $state<ApiStatus | null>(null);
+  $effect(() => {
+    if (!telemetryApi.enabled) { apiStatus = null; return; }
+    let alive = true;
+    const poll = async () => {
+      try { const st = await invoke<ApiStatus>('telemetry_api_status'); if (alive) apiStatus = st; }
+      catch (e) { console.warn('[telemetry-api] status failed:', e); }
+    };
+    void poll();
+    const id = setInterval(() => void poll(), 2000);
+    return () => { alive = false; clearInterval(id); };
+  });
   function patchAirspace(partial: Partial<AirspaceSettings>) {
     onPatch({ airspace: { ...airspace, ...partial } });
   }
@@ -621,6 +641,52 @@
         <Toggle checked={mavlinkFullTelemetry} id="mav-full-telem" onchange={(c) => onPatch({ mavlinkFullTelemetry: c })} />
       </div>
 
+      <!-- Telemetry API: read-only live telemetry for external programs (Dev-Docs active/TELEMETRY_API.md).
+           Backend-served so it also runs on the phone; fixed ports, loopback unless "on the network". -->
+      <div class="s-row" title={$t('settings.telemetryApiHint')}>
+        <label class="s-label" for="telemetry-api-enabled">{$t('settings.telemetryApi')}</label>
+        <Toggle checked={telemetryApi.enabled} id="telemetry-api-enabled" onchange={(c) => patchTelemetryApi({ enabled: c })} />
+      </div>
+      <div class="s-row s-indent" class:s-disabled={!telemetryApi.enabled}>
+        <label class="s-label" for="telemetry-api-tcp">{$t('settings.telemetryApiTcp')}</label>
+        <Toggle checked={telemetryApi.tcp} id="telemetry-api-tcp" disabled={!telemetryApi.enabled} onchange={(c) => patchTelemetryApi({ tcp: c })} />
+      </div>
+      <div class="s-row s-indent" class:s-disabled={!telemetryApi.enabled}>
+        <label class="s-label" for="telemetry-api-http">{$t('settings.telemetryApiHttp')}</label>
+        <Toggle checked={telemetryApi.http} id="telemetry-api-http" disabled={!telemetryApi.enabled} onchange={(c) => patchTelemetryApi({ http: c })} />
+      </div>
+      <div class="s-row s-indent" class:s-disabled={!telemetryApi.enabled}>
+        <label class="s-label" for="telemetry-api-udp">{$t('settings.telemetryApiUdp')}</label>
+        <Toggle checked={telemetryApi.udp} id="telemetry-api-udp" disabled={!telemetryApi.enabled} onchange={(c) => patchTelemetryApi({ udp: c })} />
+      </div>
+      <div class="s-row s-indent" class:s-disabled={!telemetryApi.enabled} title={$t('settings.telemetryApiLanHint')}>
+        <label class="s-label" for="telemetry-api-lan">{$t('settings.telemetryApiLan')}</label>
+        <Toggle checked={telemetryApi.lan} id="telemetry-api-lan" disabled={!telemetryApi.enabled} onchange={(c) => patchTelemetryApi({ lan: c })} />
+      </div>
+      <div class="s-row s-indent" class:s-disabled={!telemetryApi.enabled}>
+        <label class="s-label" for="telemetry-api-rate">{$t('settings.telemetryApiRate')}</label>
+        <select id="telemetry-api-rate" class="s-select" value={telemetryApi.rateHz} disabled={!telemetryApi.enabled} onchange={(e) => patchTelemetryApi({ rateHz: Number((e.target as HTMLSelectElement).value) })}>
+          <option value={1}>1 Hz</option>
+          <option value={2}>2 Hz</option>
+          <option value={5}>5 Hz</option>
+          <option value={10}>10 Hz</option>
+        </select>
+      </div>
+      {#if telemetryApi.enabled}
+        <div class="s-row s-indent api-status" class:api-error={!!apiStatus?.error}>
+          {#if apiStatus?.error}
+            <span class="s-hint">{$t('settings.telemetryApiError', { values: { error: apiStatus.error } })}</span>
+          {:else if apiStatus?.running}
+            <span class="s-hint">
+              {[apiStatus.tcpEndpoint && `tcp://${apiStatus.tcpEndpoint}`, apiStatus.httpEndpoint && `http://${apiStatus.httpEndpoint}/api/v1/telemetry`, apiStatus.udpEndpoint && `udp://${apiStatus.udpEndpoint}`].filter(Boolean).join(' · ')}
+              · {$t('settings.telemetryApiClients', { values: { n: apiStatus.clients } })}
+            </span>
+          {:else}
+            <span class="s-hint">{$t('settings.telemetryApiStarting')}</span>
+          {/if}
+        </div>
+      {/if}
+
       <!-- Radar (foreign-vehicle tracking) — master + per-system enables. -->
       <div class="s-row">
         <label class="s-label" for="radar-enabled">{$t('settings.radarTracking')}</label>
@@ -906,4 +972,7 @@
 
   .widget-toggle-group { display: flex; align-items: center; gap: 8px; }
   .widget-panel-indicator { font-size: 9px; color: #888; min-width: 38px; text-align: right; }
+  .api-status { flex-wrap: wrap; }
+  .api-status .s-hint { font-family: Consolas, 'Courier New', monospace; font-size: 0.78em; color: #949494; word-break: break-all; }
+  .api-status.api-error .s-hint { color: #d40000; }
 </style>
