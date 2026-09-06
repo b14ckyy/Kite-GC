@@ -264,14 +264,9 @@
   function patchTelemetryApi(partial: Partial<TelemetryApiSettings>) {
     onPatch({ telemetryApi: { ...telemetryApi, ...partial } });
   }
-  function patchTelemetryApiUdp(partial: Partial<TelemetryApiSettings['udp']>) {
-    patchTelemetryApi({ udp: { ...telemetryApi.udp, ...partial } });
-  }
   // Live status of the API server (endpoints, client count, bind error) — polled while it is enabled.
-  type ApiStatus = { running: boolean; tcpEndpoint: string | null; httpEndpoint: string | null; udpTarget: string | null; clients: number; error: string | null };
+  type ApiStatus = { running: boolean; tcpEndpoint: string | null; httpEndpoint: string | null; udpEndpoint: string | null; clients: number; error: string | null };
   let apiStatus = $state<ApiStatus | null>(null);
-  let apiUdpPort = $state(DEFAULT_TELEMETRY_API.udp.port);
-  $effect(() => { apiUdpPort = telemetryApi.udp.port; });
   $effect(() => {
     if (!telemetryApi.enabled) { apiStatus = null; return; }
     let alive = true;
@@ -662,25 +657,8 @@
       </div>
       <div class="s-row s-indent" class:s-disabled={!telemetryApi.enabled}>
         <label class="s-label" for="telemetry-api-udp">{$t('settings.telemetryApiUdp')}</label>
-        <Toggle checked={telemetryApi.udp.enabled} id="telemetry-api-udp" disabled={!telemetryApi.enabled} onchange={(c) => patchTelemetryApiUdp({ enabled: c })} />
+        <Toggle checked={telemetryApi.udp} id="telemetry-api-udp" disabled={!telemetryApi.enabled} onchange={(c) => patchTelemetryApi({ udp: c })} />
       </div>
-      {#if telemetryApi.udp.enabled}
-        <div class="s-row s-indent" class:s-disabled={!telemetryApi.enabled}>
-          <label class="s-label" for="telemetry-api-udp-host">{$t('settings.telemetryApiUdpHost')}</label>
-          <input
-            id="telemetry-api-udp-host"
-            class="s-input"
-            type="text"
-            value={telemetryApi.udp.host}
-            disabled={!telemetryApi.enabled}
-            onchange={(e) => patchTelemetryApiUdp({ host: (e.target as HTMLInputElement).value.trim() || '127.0.0.1' })}
-          />
-        </div>
-        <div class="s-row s-indent" class:s-disabled={!telemetryApi.enabled}>
-          <span class="s-label">{$t('settings.telemetryApiUdpPort')}</span>
-          <NumberStepper bind:value={apiUdpPort} min={1} max={65535} step={1} decimals={0} disabled={!telemetryApi.enabled} onchange={() => patchTelemetryApiUdp({ port: Math.round(apiUdpPort) })} />
-        </div>
-      {/if}
       <div class="s-row s-indent" class:s-disabled={!telemetryApi.enabled} title={$t('settings.telemetryApiLanHint')}>
         <label class="s-label" for="telemetry-api-lan">{$t('settings.telemetryApiLan')}</label>
         <Toggle checked={telemetryApi.lan} id="telemetry-api-lan" disabled={!telemetryApi.enabled} onchange={(c) => patchTelemetryApi({ lan: c })} />
@@ -700,7 +678,7 @@
             <span class="s-hint">{$t('settings.telemetryApiError', { values: { error: apiStatus.error } })}</span>
           {:else if apiStatus?.running}
             <span class="s-hint">
-              {[apiStatus.tcpEndpoint && `tcp://${apiStatus.tcpEndpoint}`, apiStatus.httpEndpoint && `http://${apiStatus.httpEndpoint}/api/v1/telemetry`, apiStatus.udpTarget].filter(Boolean).join(' · ')}
+              {[apiStatus.tcpEndpoint && `tcp://${apiStatus.tcpEndpoint}`, apiStatus.httpEndpoint && `http://${apiStatus.httpEndpoint}/api/v1/telemetry`, apiStatus.udpEndpoint && `udp://${apiStatus.udpEndpoint}`].filter(Boolean).join(' · ')}
               · {$t('settings.telemetryApiClients', { values: { n: apiStatus.clients } })}
             </span>
           {:else}

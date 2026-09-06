@@ -14,16 +14,18 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
 use crate::state::{ActiveProtocol, AppState};
-use crate::telemetry_forward::output::{udp::UdpSink, OutputSink};
 
 use super::frame::{Frame, Hello, LinkInfo, Protocol, GROUPS, SCHEMA_VERSION};
 use super::http::{HttpServer, Shared};
 use super::state::ApiState;
 use super::tcp::TcpServer;
+use super::udp::UdpServer;
 use super::ApiConfig;
 
-/// Fixed ports (documented; not user-configurable so a consumer never has to guess).
+/// Fixed ports (documented; not user-configurable so a consumer never has to guess). TCP and UDP
+/// share the number — different protocols, no clash.
 pub const TCP_PORT: u16 = 27300;
+pub const UDP_PORT: u16 = 27300;
 pub const HTTP_PORT: u16 = 27301;
 
 /// Health document served on `/api/v1/health`.
@@ -42,13 +44,14 @@ struct Health {
 pub struct Running {
     pub config: ApiConfig,
     tcp: Option<Arc<TcpServer>>,
+    udp: Option<Arc<UdpServer>>,
     http: Option<HttpServer>,
     shared: Arc<Mutex<Shared>>,
     stop: Arc<AtomicBool>,
     ticker: Option<JoinHandle<()>>,
     pub tcp_addr: Option<String>,
     pub http_addr: Option<String>,
-    pub udp_target: Option<String>,
+    pub udp_addr: Option<String>,
 }
 
 impl Running {
@@ -58,11 +61,15 @@ impl Running {
         let bind = if cfg.lan { "0.0.0.0" } else { "127.0.0.1" };
         let rate_hz = cfg.rate_hz.clamp(1.0, 10.0);
 
+        let hello = serde_json::to_string(&Hello { schema: SCHEMA_VERSION, hello: true, groups: GROUPS, rate_hz })
+            .map_err(|e| e.to_string())?;
         let tcp = if cfg.tcp {
-            let hello = serde_json::to_string(&Hello { schema: SCHEMA_VERSION, hello: true, groups: GROUPS, rate_hz })
-                .map_err(|e| e.to_string())?
-                + "\n";
-            Some(Arc::new(TcpServer::open(bind, TCP_PORT, hello).map_err(|e| format!("TCP stream: {e}"))?))
+            Some(Arc::new(TcpServer::open(bind, TCP_PORT, format!("{hello}\n")).map_err(|e| format!("TCP stream: {e}"))?))
+        } else {
+            None
+        };
+        let udp = if cfg.udp {
+            Some(Arc::new(UdpServer::open(bind, UDP_PORT, hello).map_err(|e| format!("UDP: {e}"))?))
         } else {
             None
         };
@@ -72,19 +79,15 @@ impl Running {
         } else {
             None
         };
-        let mut udp = if cfg.udp.enabled {
-            Some(UdpSink::open(&cfg.udp.host, cfg.udp.port).map_err(|e| format!("UDP: {e}"))?)
-        } else {
-            None
-        };
         let tcp_addr = tcp.as_ref().map(|t| t.addr().to_string());
         let http_addr = http.as_ref().map(|h| h.addr().to_string());
-        let udp_target = udp.as_ref().map(|u| u.description());
+        let udp_addr = udp.as_ref().map(|u| u.addr().to_string());
 
         let stop = Arc::new(AtomicBool::new(false));
         let ticker = {
             let stop = stop.clone();
             let tcp = tcp.clone();
+            let udp = udp.clone();
             let shared = shared.clone();
             let period = Duration::from_secs_f64(1.0 / rate_hz);
             thread::spawn(move || {
@@ -107,7 +110,8 @@ impl Running {
                         let frame = Frame::build(&st, &link, seq, ts);
                         serde_json::to_string(&frame).unwrap_or_default()
                     };
-                    let clients = tcp.as_ref().map(|t| t.client_count()).unwrap_or(0);
+                    let clients = tcp.as_ref().map(|t| t.client_count()).unwrap_or(0)
+                        + udp.as_ref().map(|u| u.client_count()).unwrap_or(0);
                     {
                         let mut sh = shared.lock().unwrap();
                         sh.last_frame = Some(line.clone());
@@ -125,10 +129,8 @@ impl Running {
                     if let Some(t) = &tcp {
                         t.broadcast(format!("{line}\n").as_bytes());
                     }
-                    if let Some(u) = udp.as_mut() {
-                        if let Err(e) = u.write(line.as_bytes()) {
-                            log::debug!("[telemetry-api] {e}");
-                        }
+                    if let Some(u) = &udp {
+                        u.broadcast(line.as_bytes());
                     }
                     // Fixed-phase sleep so the rate does not drift with frame build time.
                     let now = Instant::now();
@@ -141,11 +143,12 @@ impl Running {
             })
         };
 
-        Ok(Self { config: cfg, tcp, http, shared, stop, ticker: Some(ticker), tcp_addr, http_addr, udp_target })
+        Ok(Self { config: cfg, tcp, udp, http, shared, stop, ticker: Some(ticker), tcp_addr, http_addr, udp_addr })
     }
 
     pub fn clients(&self) -> usize {
         self.tcp.as_ref().map(|t| t.client_count()).unwrap_or(0)
+            + self.udp.as_ref().map(|u| u.client_count()).unwrap_or(0)
     }
 
     /// The newest frame, for a one-shot read without a transport.

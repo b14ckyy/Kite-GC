@@ -4,8 +4,8 @@
 //! Telemetry API — Kite's read-only live-telemetry feed for external programs.
 //!
 //! Serves everything the unified telemetry model holds (the Raw Telemetry popup's content) as JSON:
-//! an NDJSON stream over TCP (port 27300), one datagram per frame over UDP (configured target), and
-//! HTTP GET snapshots (port 27301). Backend-only by decision (Dev-Docs `active/TELEMETRY_API.md`): it
+//! an NDJSON stream over TCP (port 27300), datagrams to UDP subscribers (a client sends any datagram to
+//! UDP 27300 and is fed while it keeps sending), and HTTP GET snapshots (port 27301). Backend-only by decision (Dev-Docs `active/TELEMETRY_API.md`): it
 //! keeps serving on Android while the WebView is paused, and it needs no frontend to be open.
 //!
 //! Tap: like the relay hub, the API registers backend listeners for the `telemetry-*` events the
@@ -18,6 +18,7 @@ pub mod http;
 pub mod server;
 pub mod state;
 pub mod tcp;
+pub mod udp;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -38,19 +39,12 @@ pub struct ApiConfig {
     pub tcp: bool,
     /// GET snapshot/health server on TCP 27301.
     pub http: bool,
-    pub udp: UdpTarget,
+    /// Subscription server on UDP 27300 (a client subscribes by sending a datagram, keepalive ≤ 10 s).
+    pub udp: bool,
     /// Bind the TCP listeners on all interfaces (LAN) instead of loopback only.
     pub lan: bool,
     /// Frames per second, 1–10.
     pub rate_hz: f64,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UdpTarget {
-    pub enabled: bool,
-    pub host: String,
-    pub port: u16,
 }
 
 /// What the settings row shows.
@@ -60,7 +54,7 @@ pub struct ApiStatus {
     pub running: bool,
     pub tcp_endpoint: Option<String>,
     pub http_endpoint: Option<String>,
-    pub udp_target: Option<String>,
+    pub udp_endpoint: Option<String>,
     pub clients: usize,
     pub error: Option<String>,
 }
@@ -153,7 +147,7 @@ impl TelemetryApi {
                     "[telemetry-api] started: tcp={} http={} udp={}",
                     r.tcp_addr.as_deref().unwrap_or("off"),
                     r.http_addr.as_deref().unwrap_or("off"),
-                    r.udp_target.as_deref().unwrap_or("off"),
+                    r.udp_addr.as_deref().unwrap_or("off"),
                 );
                 *self.last_error.lock().unwrap() = None;
                 *running = Some(r);
@@ -172,7 +166,7 @@ impl TelemetryApi {
                 running: true,
                 tcp_endpoint: r.tcp_addr.clone(),
                 http_endpoint: r.http_addr.clone(),
-                udp_target: r.udp_target.clone(),
+                udp_endpoint: r.udp_addr.clone(),
                 clients: r.clients(),
                 error: None,
             },
