@@ -1,13 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-//! UDP subscription server — Kite listens on UDP 27300; a consumer subscribes by sending any datagram
-//! there and keeps receiving frames as long as it sends one at least every `SUBSCRIPTION_TTL`.
+//! UDP subscription server — Kite listens on UDP 27300; a consumer subscribes by sending the
+//! `SUBSCRIBE` word there and keeps receiving frames as long as it repeats it at least every
+//! `SUBSCRIPTION_TTL`.
 //!
 //! Same shape as the TCP stream from the client's side (the client initiates, Kite needs no target
-//! configured, several clients at once), with UDP's fire-and-forget delivery. The first datagram from
+//! configured, several clients at once), with UDP's fire-and-forget delivery. The first subscribe from
 //! a new address is answered with the `hello` record so the client can confirm the subscription and
 //! the schema; a subscriber that goes quiet simply ages out — no explicit unsubscribe.
+//!
+//! Why a fixed word and not "any datagram": the payload is never parsed, so there is nothing to
+//! inject — but a server that answers *anything* turns every port scan or spoofed-source packet into
+//! ten seconds of frames sent to an address that never asked (a small amplification vector once the
+//! API is reachable on the network). Requiring the word, and capping the subscriber table, closes
+//! that cheaply. Everything else is dropped silently.
 
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
@@ -16,9 +23,12 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-/// A subscriber is dropped when it has not sent anything for this long. Consumers send a keepalive
-/// every few seconds (an empty datagram is enough).
+/// A subscriber is dropped when it has not repeated the subscribe word for this long.
 pub const SUBSCRIPTION_TTL: Duration = Duration::from_secs(10);
+/// The only payload that subscribes (or keeps a subscription alive); surrounding whitespace is ignored.
+pub const SUBSCRIBE: &[u8] = b"subscribe";
+/// Hard cap on simultaneous subscribers — the table can't be grown by a scan of spoofed sources.
+pub const MAX_SUBSCRIBERS: usize = 16;
 
 pub struct UdpServer {
     addr: String,
@@ -44,8 +54,18 @@ impl UdpServer {
             let mut buf = [0u8; 1500];
             while r.load(Ordering::Relaxed) {
                 match rx.recv_from(&mut buf) {
-                    Ok((_, peer)) => {
-                        let is_new = c.lock().unwrap().insert(peer, Instant::now()).is_none();
+                    Ok((n, peer)) => {
+                        if buf[..n].trim_ascii() != SUBSCRIBE {
+                            continue; // not a subscriber — say nothing, send nothing
+                        }
+                        let is_new = {
+                            let mut table = c.lock().unwrap();
+                            if !table.contains_key(&peer) && table.len() >= MAX_SUBSCRIBERS {
+                                log::warn!("[telemetry-api udp] subscriber {peer} refused: {MAX_SUBSCRIBERS} already");
+                                continue;
+                            }
+                            table.insert(peer, Instant::now()).is_none()
+                        };
                         if is_new {
                             log::info!("[telemetry-api udp] subscriber: {peer}");
                             let _ = rx.send_to(hello.as_bytes(), peer);
@@ -108,9 +128,14 @@ mod tests {
         drop(probe);
         let srv = UdpServer::open("127.0.0.1", port, "{\"hello\":true}".into()).unwrap();
         let client = UdpSocket::bind("127.0.0.1:0").unwrap();
-        client.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
-        client.send_to(b"hi", ("127.0.0.1", port)).unwrap();
+        client.set_read_timeout(Some(Duration::from_millis(700))).unwrap();
         let mut buf = [0u8; 256];
+        // A stray datagram must be ignored: no hello, no subscription.
+        client.send_to(b"hi", ("127.0.0.1", port)).unwrap();
+        assert!(client.recv_from(&mut buf).is_err(), "non-subscribe payload must get no reply");
+        assert_eq!(srv.client_count(), 0);
+        client.send_to(b"subscribe
+", ("127.0.0.1", port)).unwrap();
         let (n, _) = client.recv_from(&mut buf).unwrap();
         assert_eq!(&buf[..n], b"{\"hello\":true}");
         for _ in 0..50 {
