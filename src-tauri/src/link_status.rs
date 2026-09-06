@@ -177,6 +177,9 @@ pub fn on_gps(d: &GpsData) {
 }
 
 /// Notification (title, text): vehicle · link, then the values the link carries (metric).
+/// Consumed by the Android foreground service (`android/link_service.rs`); desktop builds only
+/// exercise it in tests.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
 pub fn notification() -> (String, String) {
     let s = lock();
     let vehicle = if s.vehicle.is_empty() { "Kite Ground Control".to_string() } else { s.vehicle.clone() };

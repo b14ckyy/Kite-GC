@@ -10,11 +10,9 @@
 
 #[derive(Debug, Clone)]
 pub struct RtpPacket {
-    pub payload_type: u8,
     pub marker: bool,
     pub sequence: u16,
     pub timestamp: u32,
-    pub ssrc: u32,
     pub payload: Vec<u8>,
 }
 
@@ -32,10 +30,10 @@ pub fn parse(buf: &[u8]) -> Option<RtpPacket> {
     let has_extension = b0 & 0x10 != 0;
     let csrc_count = (b0 & 0x0F) as usize;
     let marker = buf[1] & 0x80 != 0;
-    let payload_type = buf[1] & 0x7F;
     let sequence = u16::from_be_bytes([buf[2], buf[3]]);
     let timestamp = u32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]);
-    let ssrc = u32::from_be_bytes([buf[8], buf[9], buf[10], buf[11]]);
+    // Payload type and SSRC (bytes 1 and 8–11) are not carried: the session negotiates one payload
+    // type per stream and nothing downstream keys on SSRC yet.
 
     let mut offset = 12 + csrc_count * 4;
     if has_extension {
@@ -57,11 +55,9 @@ pub fn parse(buf: &[u8]) -> Option<RtpPacket> {
         return None;
     }
     Some(RtpPacket {
-        payload_type,
         marker,
         sequence,
         timestamp,
-        ssrc,
         payload: buf[offset..end].to_vec(),
     })
 }
@@ -173,11 +169,9 @@ mod tests {
 
     fn pkt(seq: u16) -> RtpPacket {
         RtpPacket {
-            payload_type: 26,
             marker: false,
             sequence: seq,
             timestamp: 0,
-            ssrc: 1,
             payload: vec![0u8; 10],
         }
     }
@@ -192,7 +186,6 @@ mod tests {
         raw.extend_from_slice(b"data");
         let p = parse(&raw).expect("parse");
         assert!(p.marker);
-        assert_eq!(p.payload_type, 26);
         assert_eq!(p.sequence, 0x1234);
         assert_eq!(p.payload, b"data");
     }

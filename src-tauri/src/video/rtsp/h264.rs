@@ -247,7 +247,7 @@ mod tests {
     use super::*;
 
     fn pkt(seq: u16, ts: u32, marker: bool, payload: Vec<u8>) -> RtpPacket {
-        RtpPacket { payload_type: 96, marker, sequence: seq, timestamp: ts, ssrc: 1, payload }
+        RtpPacket { marker, sequence: seq, timestamp: ts, payload }
     }
 
     fn annexb(nals: &[&[u8]]) -> Vec<u8> {
