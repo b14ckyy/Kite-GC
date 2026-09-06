@@ -23,7 +23,7 @@ transports selected underneath:
 | --- | --- | --- |
 | **TCP stream (port 27300)** | Kite listens on TCP 27300; each client that connects receives a continuous stream, one JSON object per line. | On |
 | **HTTP snapshot (port 27301)** | Kite answers `GET` requests on TCP 27301 with the newest frame, or a health document. For `curl`, scripts and browser dashboards. | On |
-| **UDP subscribers (port 27300)** | Kite listens on UDP 27300. A client **subscribes by sending any datagram** there and receives one datagram per frame for as long as it keeps sending one at least every 10 s. | Off |
+| **UDP subscribers (port 27300)** | Kite listens on UDP 27300. A client **subscribes by sending the word `subscribe`** there and receives one datagram per frame for as long as it repeats it at least every 10 s. | Off |
 | **Reachable on the network** | Off: the TCP listeners bind to `127.0.0.1`, so only programs on this computer can connect. On: they bind to all interfaces and any device on the network can read the telemetry. | Off |
 | **Update rate** | Frames per second — **1, 2, 5 or 10 Hz**. This is the API's own clock: a link that updates faster is sampled, a slower one is repeated (the frame's `seq` still increments, `telemetry.lastUpdate` does not). | 5 Hz |
 
@@ -67,11 +67,13 @@ returns `405`, unknown paths `404`.
 
 ### UDP — port 27300, subscribe by sending
 
-Send **any datagram** (an empty one is fine) to UDP 27300 and Kite answers with the **hello** record,
-then sends one datagram per frame — the same JSON as a TCP line, without the newline — to the address
-and port you sent from. Keep sending a datagram at least every **10 seconds**; a subscriber that goes
-quiet is forgotten. Several subscribers at once are fine. UDP is fire-and-forget: a frame that cannot be
-delivered is dropped, never delayed, and there is no back-pressure on Kite's side.
+Send the word **`subscribe`** (ASCII, a trailing newline is fine) to UDP 27300 and Kite answers with the
+**hello** record, then sends one datagram per frame — the same JSON as a TCP line, without the newline —
+to the address and port you sent from. Repeat `subscribe` at least every **10 seconds**; a subscriber
+that goes quiet is forgotten. Any other payload is ignored without a reply, and at most 16 subscribers
+are served at once — so a port scan or a packet with a forged sender cannot make Kite stream to an
+address that never asked. UDP is fire-and-forget: a frame that cannot be delivered is dropped, never
+delayed, and there is no back-pressure on Kite's side.
 
 ## The frame
 
@@ -304,7 +306,7 @@ with socket.create_connection(("127.0.0.1", 27300)) as s:
             print("upload failed:", e)
 ```
 
-**UDP subscriber in Python** — one datagram subscribes, a keepalive every few seconds stays subscribed:
+**UDP subscriber in Python** — `subscribe` once, then every few seconds to stay subscribed:
 
 ```python
 import json, socket, time
@@ -312,11 +314,11 @@ import json, socket, time
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 s.settimeout(1.0)
 kite = ("127.0.0.1", 27300)
-s.sendto(b"", kite)                 # subscribe
+s.sendto(b"subscribe", kite)        # subscribe
 last_keepalive = time.time()
 while True:
     if time.time() - last_keepalive > 5:
-        s.sendto(b"", kite); last_keepalive = time.time()
+        s.sendto(b"subscribe", kite); last_keepalive = time.time()
     try:
         data, _ = s.recvfrom(65535)
     except socket.timeout:

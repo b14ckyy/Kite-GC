@@ -37,7 +37,7 @@ below. The release you are reading the docs for is expanded; click an older vers
 
     ??? info "Telemetry API — live telemetry for other programs"
         Kite can now **serve its live telemetry as JSON** to anything that can read it: an NDJSON
-        stream over TCP (port 27300), an HTTP snapshot (port 27301) and UDP subscribers (send a datagram, get
+        stream over TCP (port 27300), an HTTP snapshot (port 27301) and UDP subscribers (send `subscribe`, get
         fed).
         Read-only, everything the Raw telemetry popup shows — position, attitude, battery, link, flight
         mode, sensors, home and the ground-station position — the same for INAV, ArduPilot, PX4 and
