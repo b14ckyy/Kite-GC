@@ -812,6 +812,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Replaying a flight">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#high-resolution-replay" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        High-resolution replay
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#opening-logs-without-importing-them" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Opening logs without importing them
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -830,6 +858,17 @@
     <span class="md-ellipsis">
       
         Exporting
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-database-updates-and-the-automatic-backup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The database, updates and the automatic backup
       
     </span>
   </a>
@@ -1741,6 +1780,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Replaying a flight">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#high-resolution-replay" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        High-resolution replay
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#opening-logs-without-importing-them" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Opening logs without importing them
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1759,6 +1826,17 @@
     <span class="md-ellipsis">
       
         Exporting
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-database-updates-and-the-automatic-backup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The database, updates and the automatic backup
       
     </span>
   </a>
@@ -1871,6 +1949,40 @@ the <strong><a href="../map-3d/">3D map</a></strong>.</p>
 <p>Replaying a recorded flight — the player (play / pause, timeline, speed) drives the same instruments and map.</p>
 </figcaption>
 </figure>
+<p>While playback <strong>runs</strong>, the player folds into a slim strip under the top bar — craft and type,
+elapsed time, progress, total — so it hides as little of the picture as possible. Move the mouse
+into the area the full player occupies (or tap it on a touch screen) and it unfolds; leave the area
+(or tap anywhere else) and it folds again. While playback is <strong>paused</strong> the full player always stays
+open, so changing the speed, the track colouring or scrubbing never fights a folding panel. A map
+drag that ends in that area doesn't unfold it — only releasing the button there does. Clicking or
+tapping anywhere outside the Logbook panel collapses it to its info card, giving the map the room.</p>
+<h3 id="high-resolution-replay">High-resolution replay<a class="headerlink" href="#high-resolution-replay" title="Permanent link">&para;</a></h3>
+<p>Flights are stored at 10 samples per second — plenty for the map, but an onboard log usually
+contains far more. When a flight has its <strong>original log stored</strong> (INAV Blackbox, ArduPilot
+Dataflash or PX4 ULog), the player offers a <strong>HI-RES</strong> switch: Kite re-decodes the stored log at
+its <strong>full rate</strong> into a temporary file and drives the instruments, horizon and stick overlay from
+it — updates then run at your screen's refresh rate instead of 10 Hz. Combined with the
+<strong>slow-motion speeds</strong> (0.25× / 0.5×) this is the way to study a manoeuvre frame by frame.</p>
+<p>The first switch to HI-RES shows a short <strong>preparation popup</strong> (re-decoding a big log can take a
+moment on slower machines). The decoded file lives in a <code>hires-cache</code> folder next to the flight
+database, is reused while the flight stays open, and is <strong>deleted automatically</strong> when you close
+the flight — nothing accumulates. The map track and timeline stay at 10 Hz by design; high-res
+feeds the live values.</p>
+<h3 id="opening-logs-without-importing-them">Opening logs without importing them<a class="headerlink" href="#opening-logs-without-importing-them" title="Permanent link">&para;</a></h3>
+<p>You don't have to import a log to look at it. On the desktop, with <strong>no UAV connected</strong>, <strong>drop one
+or more onboard logs onto the map</strong> (INAV Blackbox <code>.bbl</code> / <code>.txt</code>, ArduPilot <code>.bin</code>, PX4 <code>.ulg</code>, or
+a <code>.tlog</code> / <code>.rawmsp</code> telemetry log) — or use the <strong>Open</strong> button in the Logbook toolbar — and Kite
+parses them into a temporary store and replays them exactly like logbook flights: same track, same
+player, HI-RES included. Files dropped later join the same list, and a flash download with several
+logs lists them all. The Logbook panel shows those flights with their details <strong>read-only</strong>; nothing
+is linked, edited or checked for duplicates, the location name is looked up but no weather (weather
+is only fetched for live recordings). A file dropped <strong>onto the Logbook panel itself</strong> is imported
+as before.</p>
+<p>Liked what you saw? In the detail view, <strong>Import</strong> runs the normal import of just that flight —
+duplicate check and linking included — and drops it from the temporary list, while <strong>Dismiss</strong>
+simply removes it. <strong>Import Logs</strong> in the toolbar imports every opened file at once, <strong>Close</strong>
+discards them all; both return you to the regular logbook, as does dismissing the last opened
+flight. The temporary store is also cleared when you restart Kite.</p>
 <h2 id="importing-logs">Importing logs<a class="headerlink" href="#importing-logs" title="Permanent link">&para;</a></h2>
 <p>Use <strong>Import</strong> to pull in logs from outside Kite (one file or a batch). Supported formats:</p>
 <table>
@@ -1887,7 +1999,11 @@ the <strong><a href="../map-3d/">3D map</a></strong>.</p>
 </tr>
 <tr>
 <td><strong>ArduPilot Dataflash</strong> (<code>.bin</code>)</td>
-<td>ArduPilot / PX4 onboard logs</td>
+<td>ArduPilot onboard logs</td>
+</tr>
+<tr>
+<td><strong>PX4 ULog</strong> (<code>.ulg</code>)</td>
+<td>PX4 onboard flash / SD-card logs</td>
 </tr>
 <tr>
 <td><strong>MAVLink telemetry</strong> (<code>.tlog</code>)</td>
@@ -1909,16 +2025,28 @@ flash usually holds <strong>several flights</strong> — one per arm / disarm cy
 import them all, each as its own logbook entry. Imported telemetry logs (<code>.tlog</code> / <code>.rawmsp</code>) are
 treated as telemetry recordings and <strong>split into separate flights on the arm / disarm markers</strong> in the
 log, the same way a live recording is.</p>
+<p>PX4 ULog note: PX4 doesn't log a throttle <em>output</em>, so a replayed <code>.ulg</code> flight shows the FC's
+<strong>thrust setpoint</strong> as the throttle value.</p>
 <h2 id="exporting">Exporting<a class="headerlink" href="#exporting" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong><code>.kflight</code></strong> — export selected flights (multi-select supported) as Kite's portable flight file, to
   move them to another install.</li>
 <li><strong>Original log file</strong> — re-export the onboard log stored with the flight: an INAV Blackbox
-  (<code>.bbl</code> / <code>.txt</code>) or ArduPilot Dataflash (<code>.bin</code>). For a flight that came out of a multi-flight
+  (<code>.bbl</code> / <code>.txt</code>), ArduPilot Dataflash (<code>.bin</code>) or PX4 ULog (<code>.ulg</code>). For a flight that came out of a multi-flight
   <code>.bbl</code>, this is that flight's own log, not the whole download. Imported <code>.tlog</code> / <code>.rawmsp</code> telemetry is parsed
   straight in (not kept as a file), so there's nothing to re-export for those.</li>
 <li><strong>Track</strong> — export a flight's path as <strong>KMZ / KML</strong> (Google Earth), <strong>GPX</strong> or <strong>CSV</strong>.</li>
 </ul>
+<h2 id="the-database-updates-and-the-automatic-backup">The database, updates and the automatic backup<a class="headerlink" href="#the-database-updates-and-the-automatic-backup" title="Permanent link">&para;</a></h2>
+<p>All flights live in a single SQLite database (<code>flights.db</code>, folder configurable in Settings). When a
+Kite update needs to <strong>upgrade the database format</strong>, Kite first writes a <strong>full backup</strong> next to the
+database file (<code>flights.pre-migration-backup.db</code>) — automatically, before anything is changed. Only
+the <strong>latest</strong> backup is kept (with blackbox logs the file can be several GB), and Settings shows it
+with its size and a <strong>Delete</strong> button once it exists. To keep a copy permanently, move the file
+somewhere else yourself.</p>
+<p>If you ever <strong>downgrade</strong> Kite after such an upgrade, the older version refuses to touch the newer
+database: the logbook shows a notice (and the database stays untouched) until you either install the
+newer Kite again or restore a matching backup.</p>
 <h2 id="vehicles-batteries">Vehicles &amp; batteries<a class="headerlink" href="#vehicles-batteries" title="Permanent link">&para;</a></h2>
 <p>From the logbook toolbar you can open the two libraries that flights link to:</p>
 <ul>

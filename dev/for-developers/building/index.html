@@ -1568,13 +1568,63 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#android-ios" class="md-nav__link">
+  <a href="#android" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Android / iOS
+        Android
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Android">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#getting-an-apk-without-building-one" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Getting an APK without building one
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#signing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Signing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#building-locally" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Building locally
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-does-not-work-yet-on-android" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What does not work yet on Android
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
         
@@ -1799,13 +1849,63 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#android-ios" class="md-nav__link">
+  <a href="#android" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Android / iOS
+        Android
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Android">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#getting-an-apk-without-building-one" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Getting an APK without building one
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#signing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Signing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#building-locally" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Building locally
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-does-not-work-yet-on-android" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What does not work yet on Android
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
         
@@ -1939,12 +2039,15 @@ are picked up. A blank terminal that "can't find just/cargo/node" is almost alwa
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>sudo<span class="w"> </span>apt<span class="w"> </span>install<span class="w"> </span>-y<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span>build-essential<span class="w"> </span>pkg-config<span class="w"> </span>curl<span class="w"> </span>wget<span class="w"> </span>file<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span>libssl-dev<span class="w"> </span>libgtk-3-dev<span class="w"> </span>libwebkit2gtk-4.1-dev<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">    </span>libayatana-appindicator3-dev<span class="w"> </span>librsvg2-dev<span class="w"> </span>libxdo-dev
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">    </span>libayatana-appindicator3-dev<span class="w"> </span>librsvg2-dev<span class="w"> </span>libxdo-dev<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">    </span>libgstreamer1.0-dev<span class="w"> </span>libgstreamer-plugins-base1.0-dev
 </code></pre></div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p><code>libwebkit2gtk-4.1-dev</code> is the Tauri 2 / WebKitGTK 4.1 package — you need a distro new enough to
-ship 4.1 (Ubuntu 22.04+ / Debian 12+). Install Node.js, Rust and just via their official methods.</p>
+ship 4.1 (Ubuntu 22.04+ / Debian 12+). The two GStreamer dev packages are required by the native
+RTSP video sink (the app links the system GStreamer at build time). Install Node.js, Rust and just
+via their official methods.</p>
 </div>
 <div class="admonition warning">
 <p class="admonition-title">Build on the oldest system you want to support</p>
@@ -1976,41 +2079,252 @@ The <code>.dmg</code> has to wrap an already-signed <code>.app</code>, because A
 certificate: an "Apple Development" certificate cannot notarize. Credentials are read from your
 environment / keychain and never committed. List your identities with
 <code>security find-identity -v -p codesigning</code>.</p>
-<h3 id="android-ios">Android / iOS<a class="headerlink" href="#android-ios" title="Permanent link">&para;</a></h3>
-<p>Mobile (Tauri Mobile) is <strong>not part of the 1.0 line</strong>. The Android and iOS / iPadOS ports are both
-merged on <code>development</code> (each with its own UI tier and build pipeline) and target a release after
-1.0. Nothing mobile builds from <code>master</code> — don't run <code>tauri android init</code> or <code>tauri ios init</code>
-against a 1.0 checkout.</p>
+<h3 id="android">Android<a class="headerlink" href="#android" title="Permanent link">&para;</a></h3>
+<p>Mobile is <strong>not part of the 1.0 line</strong> — nothing mobile builds from <code>master</code>, and both mobile ports
+target a release after 1.0. The iOS / iPadOS port lives on <code>development</code> (see the iOS notes above);
+Android is described here.</p>
+<p>Android runs the full app: tablets use the desktop layout, phones a dedicated landscape layout
+(widget column, connection pop-out, docked video). Links: <strong>USB serial</strong> (OTG), <strong>Bluetooth LE</strong>
+and <strong>UDP / TCP</strong>. While a link is up a foreground service keeps the process alive in the
+background (<code>TelemetryService.kt</code>, driven from <code>link_presence</code> over JNI).</p>
+<p>USB serial goes through the Android USB Host API, so the driver lives in Kotlin
+(<code>gen/android/app/src/main/java/com/kitegc/app/UsbSerial.kt</code>) with a JNI shim in front of it
+(<code>src-tauri/src/transport/serial_android.rs</code>). Two device families are driven:</p>
+<table>
+<thead>
+<tr>
+<th>Family</th>
+<th>Covers</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>CDC-ACM</strong></td>
+<td>INAV / Betaflight / ArduPilot flight controllers over USB, ESP32-S2/S3/C3 native USB</td>
+</tr>
+<tr>
+<td><strong>CP210x</strong></td>
+<td>Silicon Labs bridges — most SiK telemetry radios</td>
+</tr>
+</tbody>
+</table>
+<p>FTDI (RFD900) and CH340 are <strong>not</strong> driven yet; both slot in as another <code>SerialDriver</code> in that Kotlin
+file. Android grants USB access per device and per session: plugging the cable in and picking Kite
+from the system dialog grants it up front, otherwise the first connect raises the permission prompt.</p>
+<p>Bluetooth LE follows the same shape on the platform's own GATT stack (<code>BleSerial.kt</code> with
+<code>src-tauri/src/transport/ble_android.rs</code> in front of it) — the desktop's <code>btleplug</code> has no usable
+Android backend without a companion Java library. The known BLE-serial profiles (CC2541 / HM-10,
+Nordic UART, SpeedyBee) live in <code>src-tauri/src/transport/ble_profiles.rs</code>, shared with the desktop
+backend, so a new adapter family is a one-line Rust change. The first scan raises the system's
+"nearby devices" permission prompt (Android 12+; location before that).</p>
+<h4 id="getting-an-apk-without-building-one">Getting an APK without building one<a class="headerlink" href="#getting-an-apk-without-building-one" title="Permanent link">&para;</a></h4>
+<p>The <strong>Android</strong> workflow in GitHub Actions builds the APK and uploads it as a run artifact — Actions →
+Android → <em>Run workflow</em>. That is the recommended route: the runner already has the SDK, the JDK and
+<code>sdkmanager</code>, so nothing has to be installed locally.</p>
+<h4 id="signing">Signing<a class="headerlink" href="#signing" title="Permanent link">&para;</a></h4>
+<p>Release builds are signed with the <strong>debug</strong> keystore unless you supply a real one, because an APK
+with no signature at all cannot be installed — Android rejects it as an invalid package. That is
+enough to sideload, and not enough to publish.</p>
+<p>⚠️ <strong>The debug keystore is generated per machine, and a CI runner is a fresh machine every run.</strong> So
+consecutive CI builds have <em>different</em> signatures, and Android refuses to install one over the other
+("package conflicts with an existing package"). Updating then means uninstalling — which erases the
+flight database. Supply a real key and the problem disappears for good.</p>
+<p><strong>For CI</strong>, add four repository secrets and the workflow signs every build with the same key:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>keytool<span class="w"> </span>-genkey<span class="w"> </span>-v<span class="w"> </span>-keystore<span class="w"> </span>kite.jks<span class="w"> </span>-alias<span class="w"> </span>kite<span class="w"> </span>-keyalg<span class="w"> </span>RSA<span class="w"> </span>-keysize<span class="w"> </span><span class="m">2048</span><span class="w"> </span>-validity<span class="w"> </span><span class="m">10000</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>base64<span class="w"> </span>-w0<span class="w"> </span>kite.jks<span class="w">     </span><span class="c1"># → KEYSTORE_B64</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Secret</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>KEYSTORE_B64</code></td>
+<td>base64 of the <code>.jks</code></td>
+</tr>
+<tr>
+<td><code>KEYSTORE_PASSWORD</code></td>
+<td>store password</td>
+</tr>
+<tr>
+<td><code>KEY_ALIAS</code></td>
+<td>key alias (<code>kite</code> above)</td>
+</tr>
+<tr>
+<td><code>KEY_PASSWORD</code></td>
+<td>key password</td>
+</tr>
+</tbody>
+</table>
+<p>With none set the build still succeeds — it just warns and uses the throwaway key. Keep the <code>.jks</code>
+and its passwords somewhere safe: lose them and you can never update an installed app again, only
+replace it.</p>
+<p>To sign with a real key, drop a <code>key.properties</code> next to <code>gen/android/app/build.gradle.kts</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="na">storeFile</span><span class="o">=</span><span class="s">/absolute/path/to/keystore.jks</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="na">storePassword</span><span class="o">=</span><span class="s">…</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="na">keyAlias</span><span class="o">=</span><span class="s">…</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="na">keyPassword</span><span class="o">=</span><span class="s">…</span>
+</code></pre></div>
+<p>It is gitignored, so the key never lands in the repository.</p>
+<h4 id="building-locally">Building locally<a class="headerlink" href="#building-locally" title="Permanent link">&para;</a></h4>
+<ol>
+<li><strong>JDK 17</strong> — <code>sudo apt install openjdk-17-jdk</code> (or Temurin on Windows/macOS).</li>
+<li><strong>Android SDK</strong> — Android Studio, or just the command-line tools. Set <code>ANDROID_HOME</code>.</li>
+<li><strong>NDK r27</strong> — <code>sdkmanager --install "ndk;27.2.12479018"</code>, then point <code>NDK_HOME</code> at it.</li>
+<li><strong>Rust targets</strong> — <code>rustup target add aarch64-linux-android</code> (add <code>armv7-linux-androideabi</code>,
+   <code>i686-linux-android</code>, <code>x86_64-linux-android</code> only if you need those ABIs; arm64 covers every
+   Android phone and tablet made in the last decade).</li>
+</ol>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>npm<span class="w"> </span>ci
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>npm<span class="w"> </span>run<span class="w"> </span>tauri<span class="w"> </span>android<span class="w"> </span>build<span class="w"> </span>--<span class="w"> </span>--apk<span class="w"> </span>--target<span class="w"> </span>aarch64<span class="w">   </span><span class="c1"># APK in src-tauri/gen/android/app/build/outputs/apk</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>npm<span class="w"> </span>run<span class="w"> </span>tauri<span class="w"> </span>android<span class="w"> </span>dev<span class="w">                               </span><span class="c1"># on-device dev build with hot reload</span>
+</code></pre></div>
+<p><code>src-tauri/gen/android</code> is <strong>committed</strong> — it is the Android app project (manifest, Gradle build,
+icons, the Rust Gradle plugin), edited by hand. Do <strong>not</strong> run <code>tauri android init</code>: it would
+regenerate the project and overwrite the manifest's permissions and the landscape orientation.</p>
+<p>To type-check the Rust side for Android without a full Gradle build, use <code>just check-android</code>, or by
+hand:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nv">BIN</span><span class="o">=</span><span class="s2">"</span><span class="nv">$NDK_HOME</span><span class="s2">/toolchains/llvm/prebuilt/linux-x86_64/bin"</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">CC_aarch64_linux_android</span><span class="o">=</span><span class="s2">"</span><span class="nv">$BIN</span><span class="s2">/aarch64-linux-android24-clang"</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">AR_aarch64_linux_android</span><span class="o">=</span><span class="s2">"</span><span class="nv">$BIN</span><span class="s2">/llvm-ar"</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="nb">export</span><span class="w"> </span><span class="nv">CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER</span><span class="o">=</span><span class="s2">"</span><span class="nv">$CC_aarch64_linux_android</span><span class="s2">"</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>cargo<span class="w"> </span>check<span class="w"> </span>--manifest-path<span class="w"> </span>src-tauri/Cargo.toml<span class="w"> </span>--target<span class="w"> </span>aarch64-linux-android<span class="w"> </span>--lib
+</code></pre></div>
+<p>Those variables are not optional: <code>cc-rs</code> looks for an <code>aarch64-linux-android-clang</code> that the NDK does
+not ship — its compilers are API-versioned (<code>…android24-clang</code>, matching <code>minSdk</code>) — so without them
+the C dependencies (<code>ring</code>, bundled SQLite, <code>zstd</code>) fail to configure. <code>tauri android build</code> sets this
+up itself, so only the bare <code>cargo check</code> needs it. (On Windows the prebuilt directory is
+<code>windows-x86_64</code> and the compilers are <code>.cmd</code> wrappers.)</p>
+<h4 id="what-does-not-work-yet-on-android">What does not work yet on Android<a class="headerlink" href="#what-does-not-work-yet-on-android" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>State</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>UDP / TCP links</td>
+<td>✅ works</td>
+<td>Plain sockets.</td>
+</tr>
+<tr>
+<td>USB serial (CDC-ACM, CP210x)</td>
+<td>✅ works</td>
+<td>Android USB Host API, driver in <code>UsbSerial.kt</code>. Needs an OTG cable.</td>
+</tr>
+<tr>
+<td>USB serial (FTDI, CH340)</td>
+<td>❌ not implemented</td>
+<td>Those two chips need their own driver; the devices are not listed as ports.</td>
+</tr>
+<tr>
+<td>Flight log, missions, fleet &amp; battery manager</td>
+<td>✅ works</td>
+<td>SQLite in app-private storage (<code>android::app_data_dir</code>).</td>
+</tr>
+<tr>
+<td>Maps, terrain, weather</td>
+<td>✅ works</td>
+<td>Network + the same tile cache as desktop.</td>
+</tr>
+<tr>
+<td>Widget layout editing by touch</td>
+<td>✅ works</td>
+<td>Drag widgets between the docks with a finger in edit mode, same as with a mouse on desktop.</td>
+</tr>
+<tr>
+<td>Screen stays on while connected</td>
+<td>✅ works</td>
+<td>Like a navigation app: the display does not time out while a telemetry link is active; disconnected, the normal OS timeout applies.</td>
+</tr>
+<tr>
+<td>Bluetooth LE</td>
+<td>✅ works</td>
+<td>Native GATT via <code>BleSerial.kt</code>; the same serial profiles as desktop. Listen-only mode (the GATT dump) is not implemented yet.</td>
+</tr>
+<tr>
+<td>Joystick / HID RC control</td>
+<td>❌ not implemented</td>
+<td>The backend is per-OS (WGI / evdev / IOKit); Android has none, so no device is ever listed.</td>
+</tr>
+<tr>
+<td>Log import (.kflight / .rawmsp / .tlog)</td>
+<td>✅ works</td>
+<td>Parsed in-process. A <code>.kflight</code> brings the flight, its track and its records; the archived original log files inside it (INAV blackbox, ArduPilot dataflash) are left behind — the mobile database never stores originals. ArduPilot <code>.bin</code> and PX4 <code>.ulg</code> import are desktop-only.</td>
+</tr>
+<tr>
+<td>Blackbox import (.txt / .bbl / .bfl)</td>
+<td>❌ impossible</td>
+<td>Needs the external <code>blackbox_decode</code> tool, and Android forbids executing a downloaded binary. Import on a desktop and bring flights over as <code>.kflight</code>.</td>
+</tr>
+<tr>
+<td>Video: camera / OTG capture device</td>
+<td>✅ works (tablets)</td>
+<td>The WebView's own capture path (<code>getUserMedia</code>), no helper involved. Hidden on phones until the phone UI decides.</td>
+</tr>
+<tr>
+<td>Video: RTSP (MJPEG / H.264 / HEVC)</td>
+<td>✅ works</td>
+<td>Runs entirely on Kite's built-in RTSP client — no engine helpers (an Android app cannot spawn them, so the desktop engines are not offered). H.264/HEVC decode in device hardware onto a native surface below the WebView; MJPEG rides the multipart path. Native capture (ffmpeg) is not offered — the OS's own capture devices arrive through the camera kind.</td>
+</tr>
+<tr>
+<td>Custom database / raw-log folder</td>
+<td>✅ mirror</td>
+<td>Browse grants ONE folder via the system picker (scoped storage — no permission). The app keeps working app-private (SQLite and the raw writers need real paths, which a SAF grant cannot provide) and <strong>mirrors into the folder at session end</strong>: raw logs as files, the database as an atomic snapshot. That copy survives an uninstall.</td>
+</tr>
+<tr>
+<td>Exports to <code>Documents/</code></td>
+<td>⚠️ different</td>
+<td>Scoped storage makes Documents a MediaStore collection, not a path — exports go through the system share/save dialog instead.</td>
+</tr>
+</tbody>
+</table>
+<p>Where a feature is missing the backend returns a clear message rather than failing to build, so the
+rest of the app is unaffected.</p>
 <h2 id="workflow">Workflow<a class="headerlink" href="#workflow" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>just<span class="w"> </span>install<span class="w">      </span><span class="c1"># install frontend dependencies (npm install)</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>just<span class="w"> </span>dev<span class="w">          </span><span class="c1"># start development mode with hot reload</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>just<span class="w"> </span>install<span class="w">      </span><span class="c1"># install frontend dependencies (npm install)</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>just<span class="w"> </span>dev<span class="w">          </span><span class="c1"># start development mode with hot reload</span>
 </code></pre></div>
 <p>Other useful commands:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>just<span class="w"> </span>--list<span class="w">          </span><span class="c1"># list all commands</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>just<span class="w"> </span>check<span class="w">           </span><span class="c1"># svelte-check + cargo check</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>just<span class="w"> </span>build<span class="w">           </span><span class="c1"># production build for the current platform</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>just<span class="w"> </span>build-windows<span class="w">   </span><span class="c1"># explicit Windows release build</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>just<span class="w"> </span>build-linux<span class="w">     </span><span class="c1"># explicit Linux release build</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>just<span class="w"> </span>build-macos<span class="w">     </span><span class="c1"># explicit macOS universal build (unsigned; adds mac targets + ffmpeg)</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>just<span class="w"> </span>clean<span class="w">           </span><span class="c1"># clean build artifacts</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>just<span class="w"> </span>--list<span class="w">          </span><span class="c1"># list all commands</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>just<span class="w"> </span>check<span class="w">           </span><span class="c1"># svelte-check + cargo check</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>just<span class="w"> </span>build<span class="w">           </span><span class="c1"># production build for the current platform</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>just<span class="w"> </span>build-windows<span class="w">   </span><span class="c1"># explicit Windows release build</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>just<span class="w"> </span>build-linux<span class="w">     </span><span class="c1"># explicit Linux release build</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>just<span class="w"> </span>build-macos<span class="w">     </span><span class="c1"># explicit macOS universal build (unsigned; adds mac targets + ffmpeg)</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>just<span class="w"> </span>clean<span class="w">           </span><span class="c1"># clean build artifacts</span>
 </code></pre></div>
 <p>The classic commands still work too (<code>npm install</code>, <code>npm run tauri dev</code>, <code>npm run tauri build</code>).</p>
 <h3 id="build-outputs">Build outputs<a class="headerlink" href="#build-outputs" title="Permanent link">&para;</a></h3>
 <p>Every build (<code>just build</code> / <code>build-windows</code> / <code>build-linux</code> / <code>build-macos</code>) gathers its final artifacts
 into a <strong><code>release/</code></strong> folder at the repo root, renamed to a unified scheme so local builds match the CI
 release builds:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>KiteGC_&lt;OS&gt;_&lt;arch&gt;_&lt;version&gt;_&lt;type&gt;.&lt;ext&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>KiteGC_&lt;OS&gt;_&lt;arch&gt;_&lt;version&gt;_&lt;type&gt;.&lt;ext&gt;
 </code></pre></div>
 <ul>
-<li><strong>Type</strong> = <code>installer</code> (<code>.exe</code> / <code>.deb</code> / <code>.rpm</code> / <code>.dmg</code>), <code>standalone</code> (<code>.AppImage</code>, or the macOS
-  <code>.app</code> zipped), or <code>portable</code> (the bare executable zipped <strong>with an empty <code>.portable</code> marker</strong>).</li>
+<li><strong>Type</strong> = <code>installer</code> (<code>.exe</code> / <code>.deb</code> / <code>.rpm</code> / <code>.dmg</code>, and the Android <code>.apk</code>), <code>standalone</code>
+  (<code>.AppImage</code>, or the macOS <code>.app</code> zipped), or <code>portable</code> (the bare executable zipped <strong>with an empty
+  <code>.portable</code> marker</strong>).</li>
 <li>The naming logic lives in <code>scripts/collect-release.*</code> and is shared by local builds and the GitHub
   release workflow (<code>.github/workflows/release.yml</code>), so filenames match everywhere.</li>
+<li><code>just build-android</code> drops its APK into the same folder as <code>KiteGC_Android_&lt;abi&gt;_&lt;version&gt;_installer.apk</code>
+  (one file per ABI folder Gradle produced, e.g. <code>arm64</code> or <code>universal</code>). It collects <strong>only</strong> the APK and
+  leaves the desktop outputs already in <code>release/</code> alone — an earlier desktop build's binaries still sit in
+  <code>target/release/</code>, and collecting those here would republish a stale one under the current version number.
+  A desktop build, in turn, also picks up any Android release APK still lying in the Gradle outputs.</li>
 </ul>
-<p>The folder is refreshed on each build and is git-ignored (local to your machine). The raw outputs also
-remain in <code>src-tauri/target/release/</code> (and its <code>bundle/</code> subfolders) as usual.</p>
+<p>The folder is refreshed on each desktop build and is git-ignored (local to your machine). The raw
+desktop outputs also remain in <code>src-tauri/target/release/</code> (and its <code>bundle/</code> subfolders) as usual; the
+consumed installer bundles and APKs are removed so a stale file can never be re-collected under a newer
+version.</p>
 <h2 id="quality-checks">Quality checks<a class="headerlink" href="#quality-checks" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>just<span class="w"> </span>check
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>just<span class="w"> </span>check
 </code></pre></div>
 <p>runs <code>npm run check</code> (svelte-check + TypeScript) and <code>cargo check</code>. <code>just check</code> / <code>just clean</code> have
 platform-specific variants (via just's <code>[windows]</code> / <code>[unix]</code> attributes) and pick the right one
@@ -2035,7 +2349,8 @@ Installer.</p>
 <p>These are things to know when <strong>running</strong> the packaged Linux app (not build errors):</p>
 <ul>
 <li><strong>Three helpers are fetched at runtime, not bundled</strong>: <code>blackbox_decode</code> (Blackbox import shells out
-  to INAV's decoder), <code>ffmpeg</code> (the video image path) and <code>mediamtx</code> (the RTSP → WebRTC engine). Kite
+  to INAV's decoder), <code>ffmpeg</code> (the classic video image path) and <code>mediamtx</code> (the classic RTSP → WebRTC
+  engine) — the native RTSP client needs neither. Kite
   looks for each next to the executable, then in its own app-data <code>bin/</code> directory, then on <code>PATH</code>, and
   offers to download it on first use. Each failure is local to its feature — without <code>blackbox_decode</code>
   only Blackbox import is affected, live recording and replay still work. On macOS <code>ffmpeg</code> is bundled
@@ -2044,12 +2359,14 @@ Installer.</p>
   log out/in). Some distros use <code>uucp</code>.</li>
 <li><strong>Blank 3D globe / WebView (WebKitGTK):</strong> the 3D map runs in WebKitGTK, which is more fragile than
   Windows' WebView2 (notably on some Nvidia setups). Try launching with the DMA-BUF renderer disabled:
-  <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nv">WEBKIT_DISABLE_DMABUF_RENDERER</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>./kite-gc<span class="w">      </span><span class="c1"># most common fix</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nv">WEBKIT_DISABLE_COMPOSITING_MODE</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>./kite-gc<span class="w">     </span><span class="c1"># if compositing misbehaves</span>
+  <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nv">WEBKIT_DISABLE_DMABUF_RENDERER</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>./kite-gc<span class="w">      </span><span class="c1"># most common fix</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="nv">WEBKIT_DISABLE_COMPOSITING_MODE</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>./kite-gc<span class="w">     </span><span class="c1"># if compositing misbehaves</span>
 </code></pre></div></li>
 <li><strong>Which package to test:</strong> <code>tauri build</code> produces <code>.deb</code>, <code>.AppImage</code> and <code>.rpm</code> in
   <code>src-tauri/target/release/bundle/</code>. The <code>.deb</code> (or the raw binary in <code>…/release/</code>) is usually the most
-  reliable first smoke test; AppImage adds its own FUSE/sandbox layer.</li>
+  reliable first smoke test; AppImage adds its own FUSE/sandbox layer — and <strong>video does not work
+  inside the AppImage at all</strong> (its launcher environment hides the system GStreamer plugins; see the
+  user guide's platform notes).</li>
 <li><strong>Data locations:</strong> installed mode stores the flight DB + terrain cache under <code>~/.local/share/kite-gc/</code>.
   A <strong>portable</strong> build (a <code>.portable</code> marker file next to the binary) keeps everything in a <code>data/</code> folder
   beside the binary.</li>

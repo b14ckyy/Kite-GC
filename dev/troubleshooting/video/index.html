@@ -1960,10 +1960,12 @@ place, see the <strong><a href="../../guides/video/">Video guide</a></strong>.</
   transport itself and reads both.</li>
 </ul>
 <h2 id="the-stream-keeps-showing-reconnecting-check-the-codec-first">The stream keeps showing "Reconnecting…" — check the codec first<a class="headerlink" href="#the-stream-keeps-showing-reconnecting-check-the-codec-first" title="Permanent link">&para;</a></h2>
-<p>Before chasing the network: <strong>Kite supports H.264 and MJPEG over RTSP</strong>, and nothing else. A stream
-in <strong>HEVC/H.265</strong>, VP8, VP9 or AV1 typically fails in exactly this way — it retries forever instead
-of reporting a codec problem, because from Kite's side an unplayable stream and an unreachable one
-look much alike.</p>
+<p>Before chasing the network: over RTSP Kite supports <strong>H.264 and MJPEG</strong> everywhere, and
+<strong>HEVC/H.265</strong> only where the <strong>Kite RTSP client</strong> decodes (Android always; Windows and Linux with
+the <em>Native RTSP client</em> toggle on — Windows additionally needs the "HEVC Video Extensions"). A
+stream in an unsupported codec — HEVC elsewhere, VP8, VP9 or AV1 — typically fails in exactly this
+way: it retries forever instead of reporting a codec problem, because from Kite's side an unplayable
+stream and an unreachable one look much alike.</p>
 <p>If another player shows your stream fine while Kite only reconnects, the codec is the first thing to
 check at the source. Switching it to <strong>H.264</strong> is the quickest test. (Codec support is limited by
 what we can test, not by what is possible — a request is welcome.)</p>
@@ -2034,6 +2036,10 @@ or a non-low-latency tuning. Tune the encoder/camera for low-latency streaming. 
 <strong>Smoothing buffer</strong> in the Video panel's RTSP section: every step above 0 deliberately adds latency —
 set it back to 0 for the minimum.</p>
 <h2 id="linux-high-cpu-load-or-a-stuttering-picture">Linux: high CPU load or a stuttering picture<a class="headerlink" href="#linux-high-cpu-load-or-a-stuttering-picture" title="Permanent link">&para;</a></h2>
+<p>First: if the stream is H.264 or HEVC, switch on the <strong>Native RTSP client</strong> (Video panel → RTSP
+section). It takes the browser engine out of the picture entirely and decodes in hardware where the
+machine can — on the reference laptop that cut the total video load to roughly a third of one core at
+a stable 60 fps. Everything below applies to the <strong>classic path</strong>, with that toggle off.</p>
 <p>On Linux, Kite depends on your distribution's browser-engine build for video — see the
 <strong><a href="../../guides/video/#platform-notes-what-to-expect-per-operating-system">platform notes</a></strong> in the
 guide. The log tells you what your system offers. Restart Kite, start your stream, then open the log

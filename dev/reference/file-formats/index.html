@@ -1854,7 +1854,12 @@ Kite can save/export it.</p>
 <tr>
 <td><strong>ArduPilot Dataflash</strong></td>
 <td><code>.bin</code></td>
-<td>ArduPilot / PX4 onboard logs.</td>
+<td>ArduPilot onboard logs.</td>
+</tr>
+<tr>
+<td><strong>PX4 ULog</strong></td>
+<td><code>.ulg</code></td>
+<td>PX4 onboard flash / SD-card logs. PX4 logs no throttle output, so replayed throttle shows the thrust setpoint.</td>
 </tr>
 <tr>
 <td><strong>MAVLink telemetry</strong></td>
@@ -1892,8 +1897,8 @@ markers, the same as a live recording.</p>
 </tr>
 <tr>
 <td><strong>Original log file</strong></td>
-<td><code>.bbl</code> / <code>.txt</code> / <code>.bin</code></td>
-<td>Re-export the onboard log stored with a flight (Blackbox or Dataflash). Imported <code>.tlog</code> / <code>.rawmsp</code> is parsed straight in and <strong>not</strong> kept as a file, so there's nothing to re-export there.</td>
+<td><code>.bbl</code> / <code>.txt</code> / <code>.bin</code> / <code>.ulg</code></td>
+<td>Re-export the onboard log stored with a flight (Blackbox, Dataflash or ULog). Imported <code>.tlog</code> / <code>.rawmsp</code> is parsed straight in and <strong>not</strong> kept as a file, so there's nothing to re-export there.</td>
 </tr>
 <tr>
 <td><strong>Track</strong></td>

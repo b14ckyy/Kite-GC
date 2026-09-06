@@ -1283,6 +1283,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Network (TCP/UDP) links">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#no-data-from-an-elrs-backpack-mavlink-over-wifi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        No data from an ELRS backpack (MAVLink over WiFi)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1739,6 +1756,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Network (TCP/UDP) links">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#no-data-from-an-elrs-backpack-mavlink-over-wifi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        No data from an ELRS backpack (MAVLink over WiFi)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1845,6 +1879,35 @@ may still hit:</p>
 <li>Make sure the bridge/router/simulator is actually <strong>running and reachable</strong> (firewall, same network),
   and that the <strong>protocol</strong> matches what it speaks.</li>
 </ul>
+<div class="admonition tip">
+<p class="admonition-title"><code>read 0 bytes … parser errors=0</code> in the log</p>
+<p>A MAVLink handshake timeout that reports <strong>0 bytes read and 0 parser errors</strong> means <em>nothing arrived
+at all</em> — it is never a baud, dialect or framing problem. Look at the source and the network, not at
+Kite's decoding.</p>
+</div>
+<h3 id="no-data-from-an-elrs-backpack-mavlink-over-wifi">No data from an ELRS backpack (MAVLink over WiFi)<a class="headerlink" href="#no-data-from-an-elrs-backpack-mavlink-over-wifi" title="Permanent link">&para;</a></h3>
+<p>An ExpressLRS TX backpack forwarding MAVLink over UDP has three settings that must all line up. Any one
+of them missing gives the same symptom: the handshake times out having read <strong>0 bytes</strong>.</p>
+<ul>
+<li><strong>Telemetry must be set to WiFi from the handset</strong>, under the ELRS <strong>Backpack</strong> menu. Enabling WiFi
+  manually (<em>WiFi Connectivity → Enable Backpack WiFi</em>) starts <strong>firmware-update mode</strong>, which does
+  <em>not</em> forward MAVLink.</li>
+<li><strong>Re-check the MAVLink ports after switching modes.</strong> Changing the backpack's telemetry mode can reset
+  its <strong>Send Port</strong> and <strong>Listen Port</strong> to <code>0</code>, which silently forwards nowhere. Open the backpack's web
+  page, set both back to <strong>14550</strong>, and <strong>Save Configuration</strong>.</li>
+<li><strong>Use the right address.</strong> <code>10.0.0.1</code> is the backpack's own access-point address. If the backpack joins
+  your home network instead (STA mode), use the <strong>LAN IP it was given</strong> by your router.</li>
+</ul>
+<p>The backpack won't send anything until it knows where to send: its page shows <strong>GCS IP: IP UNSET</strong> until
+a ground station speaks to it first. Kite's initial GCS <strong>HEARTBEAT</strong> is what sets it, so simply pressing
+<strong>Connect</strong> is enough — there's nothing to configure on Kite's side.</p>
+<div class="admonition note">
+<p class="admonition-title">Checking the backpack directly</p>
+<p>Most backpack firmware exposes its state as JSON at <code>http://&lt;backpack-ip&gt;/mavlink</code>. A healthy,
+forwarding backpack reports <code>"enabled":true</code>, non-zero <code>listen</code>/<code>send</code> ports, a climbing
+<code>packets_down</code>, and a real address in <code>ip.gcs</code> once a GCS has connected — a quick way to tell a
+backpack problem from a Kite problem.</p>
+</div>
 <h2 id="the-link-drops-shortly-after-connecting">The link drops shortly after connecting<a class="headerlink" href="#the-link-drops-shortly-after-connecting" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Power.</strong> A board running only off USB may brown out when GPS/peripherals draw current — power the

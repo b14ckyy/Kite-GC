@@ -2115,6 +2115,23 @@ telemetry, so passively monitored flights land in your <strong><a href="../logbo
 <p>The <strong>⇅ Relay</strong> button in the top bar is <strong>not</strong> a connection — it re-encodes your <em>live</em> telemetry and
 re-broadcasts it to other ground stations, handsets, or an antenna tracker, over a separate output.
 It's covered in its own guide: <strong><a href="../relay-and-forwarding/">Relay &amp; forwarding</a></strong>.</p>
+<p>Next to it, <strong>≡ Raw</strong> appears while you are connected: a read-only popup with every raw telemetry value
+the app holds — see <strong><a href="../telemetry-and-display/#raw-telemetry">Raw telemetry</a></strong>.</p>
+<div class="admonition note">
+<p class="admonition-title">On a phone</p>
+<p>The phone layout has no connection bar: tap the <strong>🔗 chain-link</strong> button at the top-right of the map
+instead. The pop-out holds the same controls (protocol and transport, then port / host / device,
+<strong>Connect</strong>) plus the <strong>Relay</strong> button; the raw-telemetry popup is not available on the phone.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Android: the link keeps running in the background</p>
+<p>While Kite is connected, Android shows a persistent notification with the aircraft, battery,
+flight mode and distance to home (Android 13+ asks for notification permission on the first
+connect — refusing only hides the notification). Minimising Kite or switching to another app
+keeps telemetry, the flight recording and the track running; when you come back the trail is
+complete. Switching the <strong>screen off</strong> is not held open: the link may drop, and on your return
+Kite either offers the usual recording prompt (continue / discard / save) or reconnects once.</p>
+</div>
 <h2 id="after-you-connect">After you connect<a class="headerlink" href="#after-you-connect" title="Permanent link">&para;</a></h2>
 <ul>
 <li>The button becomes <strong>Disconnect</strong>; the top bar shows arming readiness, per-sensor health, battery and

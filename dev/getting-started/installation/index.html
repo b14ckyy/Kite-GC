@@ -449,6 +449,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#android" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Android
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#linux-quick-install" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1705,6 +1716,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#android" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Android
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#linux-quick-install" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1835,6 +1857,12 @@ grabbing:</p>
 <td><code>..._standalone.zip</code> (the <code>.app</code>)</td>
 <td>—</td>
 </tr>
+<tr>
+<td><strong>Android</strong> (arm64)</td>
+<td><code>KiteGC_Android_universal_&lt;version&gt;_installer.apk</code></td>
+<td>—</td>
+<td>—</td>
+</tr>
 </tbody>
 </table>
 <ul>
@@ -1854,6 +1882,16 @@ beta or release candidate, replace it with the release build.</p>
 <p>The macOS build targets <strong>macOS 13</strong>. Older systems are not supported — on macOS 11 or 12 the app
 installs but does not start.</p>
 </div>
+<h3 id="android">Android<a class="headerlink" href="#android" title="Permanent link">&para;</a></h3>
+<p>Download the <code>.apk</code> on the device and open it; Android asks once to allow installs from that browser
+or file manager. Phones get a dedicated landscape layout, tablets the desktop one. Links: <strong>USB serial</strong>
+over an OTG cable (Android asks per device — pick Kite in the dialog when you plug the cable in),
+<strong>Bluetooth LE</strong> (the first scan asks for the <em>Nearby devices</em> permission) and <strong>Wi-Fi</strong> (UDP / TCP).
+Data lives in the app's private storage; <strong>Settings → Data</strong> can point the flight database and raw
+logs at a shared folder instead. See <a href="../../guides/connecting/">Connecting</a> for what happens while
+Kite is in the background.</p>
+<p><strong>iPhone / iPad</strong>: no public download yet — the app builds from source (see
+<a href="../../for-developers/building/">Building from source</a>).</p>
 <h3 id="linux-quick-install">Linux quick install<a class="headerlink" href="#linux-quick-install" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Debian / Ubuntu</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>sudo<span class="w"> </span>dpkg<span class="w"> </span>-i<span class="w"> </span>KiteGC_Linux_*_installer.deb

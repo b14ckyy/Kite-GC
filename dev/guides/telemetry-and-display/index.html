@@ -691,6 +691,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#raw-telemetry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Raw telemetry
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1815,6 +1826,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#raw-telemetry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Raw telemetry
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1933,8 +1955,16 @@ along the bottom. Each widget is self-contained and updates live.</p>
 <li><strong>Choose which widgets appear</strong> in <strong><a href="../../reference/settings/">Settings</a></strong> — toggle each on or off.</li>
 <li><strong>Rearrange them</strong>: click the <strong>✎ (edit)</strong> button by a dock to enter <strong>edit mode</strong>, then drag
   widgets to reorder them or move them between the two docks.</li>
-<li>Widgets scale to fit the dock, and your layout (including which dock each widget sits in) is
+<li><strong>Resize them</strong>: in edit mode each widget shows a <strong>resize button</strong> in its corner. Every tap steps
+  it to its next size — square widgets toggle <strong>small ↔ large</strong>, the wide ones (Live AGL, Video) cycle
+  <strong>wide → large square → small square</strong>. The aspect ratio never changes (a widget is only rescaled),
+  and a dock shrinks to its largest widget, so a row of small tiles frees the space above it. The
+  Video widget always <strong>crops to fill</strong> its tile, whatever its size.</li>
+<li>Widgets scale to fit the dock, and your layout (which dock each widget sits in, and its size) is
   <strong>remembered between sessions</strong>.</li>
+<li><strong>On a phone</strong> the docks are replaced by a widget column on the right edge with two swipeable pages;
+  long-press a widget to rearrange or resize — see <strong>Kite on a phone</strong> in the
+  <strong><a href="../../getting-started/quick-tour/#kite-on-a-phone">Quick tour</a></strong>.</li>
 </ul>
 <figure>
 <p><img alt="A widget dock in edit mode" src="../../assets/guides/telemetry/widget_edit_mode.png" /></p>
@@ -1988,16 +2018,12 @@ along the bottom. Each widget is self-contained and updates live.</p>
 <td>Link quality — shows whatever the active protocol provides and hides the rest (CRSF / SmartPort / INAV 9.1+ give LQ + RSSI %/dBm + SNR; MAVLink, LTM and INAV before 9.1 give RSSI only).</td>
 </tr>
 <tr>
-<td><strong>Raw Telemetry</strong></td>
-<td>A compact numeric dump: altitude, speed, vario, heading, roll, pitch, voltage, current, mAh, satellites and RSSI.</td>
-</tr>
-<tr>
 <td><strong>Live AGL</strong></td>
 <td>A forward-looking terrain-profile HUD: flown terrain on the left, <strong>estimated</strong> terrain ahead on the right, with a projected flight line that warns of a ground intersection.</td>
 </tr>
 <tr>
 <td><strong>Terrain Radar</strong></td>
-<td>A top-down, track-up terrain-awareness display (EGPWS-style): a forward fan coloured by clearance against your altitude, with a <strong>range</strong> and <strong>REL / PRED</strong> mode button.</td>
+<td>A top-down, track-up terrain-awareness display (EGPWS-style): a forward fan coloured by clearance against your altitude, with a <strong>range</strong> and <strong>REL / PRED</strong> mode button (shown in dock edit mode).</td>
 </tr>
 <tr>
 <td><strong>Video</strong></td>
@@ -2010,6 +2036,13 @@ along the bottom. Each widget is self-contained and updates live.</p>
 <p>Speed, altitude, distance, vertical speed and temperature units come from <strong><a href="../../reference/settings/">Settings</a></strong>
 and apply everywhere — every widget and map read-out follows them.</p>
 </div>
+<h3 id="raw-telemetry">Raw telemetry<a class="headerlink" href="#raw-telemetry" title="Permanent link">&para;</a></h3>
+<p>For the unconverted figures, click <strong>≡ Raw</strong> in the top bar (it appears next to <strong>⇅ Relay</strong> while you
+are connected). A popup lists <strong>every value the telemetry pipeline holds</strong> — GPS, attitude, altitude
+and speeds, wind, battery (per pack on multi-battery aircraft), RC link, status and flight-mode flags,
+sensor health, EKF and flight-controller identity — each with its name and <strong>raw unit</strong> (metres, m/s,
+degrees, volts, the FC's own RSSI scale). Bitfields are shown as decimal and hex. It is read-only and
+updates live; close it with the ✕, Escape, or a click outside.</p>
 <h2 id="how-smooth-it-looks-telemetry-rates">How smooth it looks: telemetry rates<a class="headerlink" href="#how-smooth-it-looks-telemetry-rates" title="Permanent link">&para;</a></h2>
 <p>How often the instruments update depends on the <strong>telemetry rates</strong> in <strong><a href="../../reference/settings/">Settings</a></strong>
 — chiefly the <strong>attitude</strong> rate (drives AHI / compass responsiveness) and the <strong>position</strong> rate (map
