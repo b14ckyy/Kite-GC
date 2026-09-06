@@ -31,6 +31,7 @@ mod passive_telemetry;
 mod radar;
 mod scheduler;
 mod state;
+mod telemetry_api;
 mod telemetry_forward;
 mod terrain;
 mod transport;
@@ -126,6 +127,7 @@ use commands::update_check::check_for_update;
 use hid::HidManager;
 use mission::store::MissionStore;
 use state::AppState;
+use telemetry_api::{telemetry_api_configure, telemetry_api_set_gcs, telemetry_api_status, TelemetryApi};
 use telemetry_forward::{relay_configure, relay_clear, RelayHub};
 
 /// True when a `.portable` marker file sits next to the executable. Used both to
@@ -579,6 +581,7 @@ pub fn run() {
         .manage(MissionStore::new())
         .manage(TerrainProvider::new())
         .manage(RelayHub::new())
+        .manage(TelemetryApi::new())
         .manage(HidManager::new())
         // As an `Arc` so the start command can hand it to a blocking task (process spawn +
         // readiness poll) without pinning an async runtime thread.
@@ -775,6 +778,9 @@ pub fn run() {
             aero_cache_clear,
             relay_configure,
             relay_clear,
+            telemetry_api_configure,
+            telemetry_api_status,
+            telemetry_api_set_gcs,
             hid_start,
             hid_stop,
             hid_select_device,

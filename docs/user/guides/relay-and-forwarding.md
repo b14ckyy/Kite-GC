@@ -100,5 +100,8 @@ link in → **MAVLink** out for a MAVLink ground station.
 
 ## Where to go next
 
+- Software that just wants the numbers as JSON — a dashboard, a script, a web service — does not need a
+  flight-controller protocol: see the **[Telemetry API](../reference/telemetry-api.md)**.
+
 - Set up the incoming link first: **[Connecting](connecting.md)**.
 - What the telemetry contains: **[Telemetry & display](telemetry-and-display.md)**.

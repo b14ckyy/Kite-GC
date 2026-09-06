@@ -35,6 +35,16 @@ below. The release you are reading the docs for is expanded; click an older vers
         decodes H.264/H.265 with the **operating system's hardware decoder** on Windows, Android and
         Linux — lower latency, a fraction of the CPU load, and rock-solid reconnects. [#85] · [#88] · [#89]
 
+    ??? info "Telemetry API — live telemetry for other programs"
+        Kite can now **serve its live telemetry as JSON** to anything that can read it: an NDJSON
+        stream over TCP (port 27300), an HTTP snapshot (port 27301) and UDP subscribers (send `subscribe`, get
+        fed).
+        Read-only, everything the Raw telemetry popup shows — position, attitude, battery, link, flight
+        mode, sensors, home and the ground-station position — the same for INAV, ArduPilot, PX4 and
+        passive links, and it keeps running in the background, also on Android. Loopback by default,
+        one switch for the network. The full contract with every field and copy-paste examples is in
+        the **[Telemetry API](reference/telemetry-api.md)** reference. [#123]
+
     ??? info "Unobstructed fullscreen video"
         Fullscreen video now keeps its exact aspect ratio in a clean box, with a blurred, slowly
         following map as the backdrop instead of black bars — and the floating panels stay on top
@@ -136,3 +146,4 @@ below. The release you are reading the docs for is expanded; click an older vers
 [#105]: https://github.com/b14ckyy/Kite-GC/pull/105
 [#111]: https://github.com/b14ckyy/Kite-GC/pull/111
 [#112]: https://github.com/b14ckyy/Kite-GC/pull/112
+[#123]: https://github.com/b14ckyy/Kite-GC/pull/123
