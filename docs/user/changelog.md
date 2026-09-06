@@ -42,7 +42,7 @@ below. The release you are reading the docs for is expanded; click an older vers
         mode, sensors, home and the ground-station position — the same for INAV, ArduPilot, PX4 and
         passive links, and it keeps running in the background, also on Android. Loopback by default,
         one switch for the network. The full contract with every field and copy-paste examples is in
-        the **[Telemetry API](reference/telemetry-api.md)** reference.
+        the **[Telemetry API](reference/telemetry-api.md)** reference. [#123]
 
     ??? info "Unobstructed fullscreen video"
         Fullscreen video now keeps its exact aspect ratio in a clean box, with a blurred, slowly
@@ -145,3 +145,4 @@ below. The release you are reading the docs for is expanded; click an older vers
 [#105]: https://github.com/b14ckyy/Kite-GC/pull/105
 [#111]: https://github.com/b14ckyy/Kite-GC/pull/111
 [#112]: https://github.com/b14ckyy/Kite-GC/pull/112
+[#123]: https://github.com/b14ckyy/Kite-GC/pull/123
