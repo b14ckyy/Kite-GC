@@ -37,6 +37,24 @@ const FT_TO_M: f64 = 0.3048;
 const KT_TO_MS: f64 = 0.514_444;
 const FPM_TO_MS: f64 = 0.00508;
 const POLL_GRANULARITY: Duration = Duration::from_millis(200);
+/// Cap for the per-provider failure backoff (poll interval × 2^n, never beyond this).
+const MAX_BACKOFF: Duration = Duration::from_secs(60);
+
+/// Per-provider failure backoff. A failed fetch doubles the provider's spacing (in poll cycles) up to
+/// `MAX_BACKOFF`; a success resets it. Providers back off independently, so a rate-limited adsb.lol
+/// never slows down adsb.fi.
+struct Backoff {
+    /// Current spacing multiplier in poll cycles (1 = every cycle).
+    mult: u32,
+    /// Cycles still to sit out before the next attempt.
+    skip: u32,
+    /// Cycles skipped since the failure began (for the recovery log line).
+    skipped: u32,
+}
+
+impl Default for Backoff {
+    fn default() -> Self { Self { mult: 1, skip: 0, skipped: 0 } }
+}
 
 pub struct AdsbOnlineSource {
     providers: Vec<AdsbOnlineProvider>,
@@ -90,11 +108,20 @@ impl RadarSource for AdsbOnlineSource {
         let stop_task = stop.clone();
 
         let handle = tauri::async_runtime::spawn(async move {
+            // No connection reuse: adsb.lol rate-limits a persistent (HTTP/2) connection far harder
+            // than fresh ones — measured at a 5 s poll, every second request on a kept-alive connection
+            // came back 429 while a new TLS connection per request never did (same IP, same minute).
+            // One handshake per poll is nothing next to the JSON payload.
             let client = reqwest::Client::builder()
                 .user_agent("Kite-GC/0.5 radar")
                 .timeout(Duration::from_secs(10))
+                .pool_max_idle_per_host(0)
                 .build()
                 .unwrap_or_else(|_| reqwest::Client::new());
+            // Per-provider rate-limit backoff state, index-aligned with `self.providers`.
+            let mut backoff: Vec<Backoff> = self.providers.iter().map(|_| Backoff::default()).collect();
+            // Longest backoff in poll cycles: never more than a minute between attempts.
+            let max_mult = ((MAX_BACKOFF.as_secs_f64() / self.poll.as_secs_f64()).floor() as u32).max(1);
 
             loop {
                 if stop_task.load(Ordering::Relaxed) {
@@ -139,7 +166,14 @@ impl RadarSource for AdsbOnlineSource {
                 let mut vehicles: Vec<TrackedVehicle> = Vec::new();
                 let mut statuses: Vec<AdsbProviderStatus> = Vec::with_capacity(self.providers.len());
 
-                for p in self.providers.iter() {
+                for (p, b) in self.providers.iter().zip(backoff.iter_mut()) {
+                    // Backing off after a failure: sit this cycle out (the panel keeps the error dot).
+                    if b.skip > 0 {
+                        b.skip -= 1;
+                        b.skipped += 1;
+                        statuses.push(AdsbProviderStatus { name: p.name.clone(), count: 0, ok: false });
+                        continue;
+                    }
                     let url = p
                         .url
                         .replace("{lat}", &format!("{:.5}", clat))
@@ -152,11 +186,30 @@ impl RadarSource for AdsbOnlineSource {
                             let before = vehicles.len();
                             parse_into(&root, now, &mut vehicles);
                             statuses.push(AdsbProviderStatus { name: p.name.clone(), count: vehicles.len() - before, ok: true });
+                            if b.mult > 1 {
+                                log::info!(
+                                    "[radar][adsb] {} recovered after {} skipped cycle(s), back to the {:.0} s interval",
+                                    p.name, b.skipped, self.poll.as_secs_f64()
+                                );
+                            }
+                            *b = Backoff::default();
                         }
                         Err(e) => {
-                            // A rate-limit / fetch failure is tester-relevant → default-level warn so it
-                            // lands in the file log the tester sends.
-                            log::warn!("[radar][adsb] {} fetch failed: {}", p.name, e);
+                            // Back off this provider: double the spacing per consecutive failure (capped at
+                            // MAX_BACKOFF). Both a 429 and a network error mean "leave it alone for a while";
+                            // adsb.fi even counts 429 replies towards a temporary IP ban, so hammering on
+                            // regardless is the one thing not to do.
+                            let first = b.mult == 1;
+                            b.mult = (b.mult * 2).min(max_mult);
+                            b.skip = b.mult - 1;
+                            let wait = self.poll.as_secs_f64() * b.mult as f64;
+                            if first {
+                                // Tester-relevant → default-level warn, but only on the transition so a
+                                // rate-limited provider doesn't fill the log once per cycle.
+                                log::warn!("[radar][adsb] {} fetch failed: {} — backing off (next try in {:.0} s)", p.name, e, wait);
+                            } else {
+                                log::debug!("[radar][adsb] {} still failing: {} — next try in {:.0} s", p.name, e, wait);
+                            }
                             statuses.push(AdsbProviderStatus { name: p.name.clone(), count: 0, ok: false });
                         }
                     }

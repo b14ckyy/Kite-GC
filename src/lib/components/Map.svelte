@@ -141,7 +141,7 @@
   let uavMeshToken = 0;                       // guards out-of-order async loads
   const MODEL_REAL_SPAN_M = 14;              // real-world span the model represents (zoom-scaled)
   const MODEL_MIN_PX = 100, MODEL_MAX_PX = 200;
-  const MODEL_TINT = 0.28;                    // flight-mode colour mix (a bit stronger on the white base)
+  const MODEL_TINT = 0; // no mode tint on the model (same as 3D); the trail carries the mode colour
 
   // (Re)load the mesh whenever the resolved model kind changes (platform type or override).
   $effect(() => {

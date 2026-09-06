@@ -104,7 +104,7 @@
   }
   .m-icon { font-size: 11px; line-height: 1; flex: 0 0 auto; }
   .m-text { overflow: hidden; text-overflow: ellipsis; }
-  /* Repeat tally for a message the FC keeps re-sending — dimmed so it reads as metadata, not content. */
+  /* Repeat tally for a message the FC keeps re-sending. Dimmed so it reads as metadata, not content. */
   .m-count { flex: 0 0 auto; margin-left: auto; padding-left: 8px; font-size: 11px; opacity: 0.55; font-variant-numeric: tabular-nums; }
 
   .msg-line.info    { color: #cfe7f3; }

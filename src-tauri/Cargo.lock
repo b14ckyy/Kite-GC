@@ -2584,6 +2584,7 @@ dependencies = [
  "num-traits",
  "objc2 0.6.4",
  "objc2-core-bluetooth 0.3.2",
+ "objc2-core-location",
  "objc2-foundation 0.3.2",
  "reqwest 0.12.28",
  "rusqlite",
@@ -3173,6 +3174,16 @@ dependencies = [
  "objc2 0.6.4",
  "objc2-core-foundation",
  "objc2-io-surface",
+]
+
+[[package]]
+name = "objc2-core-location"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ca347214e24bc973fc025fd0d36ebb179ff30536ed1f80252706db19ee452009"
+dependencies = [
+ "objc2 0.6.4",
+ "objc2-foundation 0.3.2",
 ]
 
 [[package]]

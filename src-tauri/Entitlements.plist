@@ -5,6 +5,9 @@
   Bluetooth is required for the BLE transport under the hardened runtime; without this entitlement a
   notarized build cannot open a CoreBluetooth central. Camera is required for the video panel's
   "Camera (device)" source (getUserMedia over a USB/UVC capture device) under the hardened runtime.
+  Location pairs with the Info.plist usage string for the GCS marker, which reads the operator's
+  position through native CoreLocation on macOS (location_macos.rs): the hardened runtime denies
+  CoreLocation without this entitlement even when the usage description is present.
   The app is NOT sandboxed (it needs raw serial / IOKit-HID / local-network access like the
   Windows/Linux builds), so no App Sandbox key is set.
 -->
@@ -13,6 +16,8 @@
     <key>com.apple.security.device.bluetooth</key>
     <true/>
     <key>com.apple.security.device.camera</key>
+    <true/>
+    <key>com.apple.security.personal-information.location</key>
     <true/>
 </dict>
 </plist>

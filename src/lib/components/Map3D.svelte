@@ -1168,6 +1168,7 @@
     try {
       viewer = new Cesium.Viewer(cesiumContainer, viewerOptions);
       applyRenderResolution();
+      attachCameraLight();
     } catch (e) {
       const detail = e instanceof Error ? `${e.name}: ${e.message}\n${e.stack ?? ''}` : String(e);
       log3d('warn', `CesiumWidget construction failed — 3D unavailable: ${detail}`);
@@ -1675,9 +1676,13 @@
         minimumPixelSize: RADAR_MODEL_MIN_PX,
         maximumScale: 4000,
         scale: 5.2,
-        // REPLACE (not MIX): the contact takes the EXACT altitude colour regardless of the glb's own
-        // colours — so any model (even white) shows the true height-scale colour without washing out.
-        colorBlendMode: Cesium.ColorBlendMode.REPLACE,
+        // HIGHLIGHT, not REPLACE: Cesium applies the model colour AFTER the lighting stage, so REPLACE
+        // overwrote the lit surface with one flat colour and every contact rendered as a shadeless
+        // silhouette. HIGHLIGHT multiplies the lit surface with the colour instead; the ADS-B glbs are
+        // pure white, so a fully lit face shows the exact altitude colour and turned-away faces darken.
+        // FF peers keep REPLACE: their state colour (dark blue / grey) multiplied into the arrow's red and
+        // green nav tips would turn those near-black.
+        colorBlendMode: modelClass === 'ff' ? Cesium.ColorBlendMode.REPLACE : Cesium.ColorBlendMode.HIGHLIGHT,
         heightReference: Cesium.HeightReference.NONE,
       },
       // Floating info label under the model: callsign + altitude, slightly transparent.
@@ -2909,15 +2914,47 @@
     );
     return Cesium.Quaternion.fromRotationMatrix(m, new Cesium.Quaternion());
   }
+  /** Key-light offset from the view axis, in camera-frame units (view direction = 1). */
+  const KEY_LIGHT_DOWN = 0.7;
+  const KEY_LIGHT_SIDE = 0.4;
+  /** Models are lit from the camera, not by the sun: Cesium lights models from the ephemeris sun at
+   *  the scene clock (the flight time) whatever the globe's lighting setting, so an evening flight put
+   *  the UAV model in shadow whatever its colour.
+   *
+   *  The light is a KEY light offset from the view axis, not the view axis itself: a light travelling
+   *  exactly along the view direction lights every face that points at the camera identically, so a
+   *  top-down view of a plane (all upper faces parallel) shows no relief at all. Tilted down and to
+   *  the right in the camera frame (light from above-left, as in a studio setup) the rounded and
+   *  turned-away faces darken and the shape reads from every angle. */
+  function attachCameraLight() {
+    if (!viewer) return;
+    const light = new Cesium.DirectionalLight({ direction: new Cesium.Cartesian3(0, 0, -1) });
+    viewer.scene.light = light;
+    const down = new Cesium.Cartesian3();
+    const side = new Cesium.Cartesian3();
+    const dir = new Cesium.Cartesian3();
+    viewer.scene.preRender.addEventListener(() => {
+      if (!viewer) return;
+      const cam = viewer.scene.camera;
+      Cesium.Cartesian3.multiplyByScalar(cam.upWC, -KEY_LIGHT_DOWN, down);
+      Cesium.Cartesian3.multiplyByScalar(cam.rightWC, KEY_LIGHT_SIDE, side);
+      Cesium.Cartesian3.add(cam.directionWC, down, dir);
+      Cesium.Cartesian3.add(dir, side, dir);
+      Cesium.Cartesian3.normalize(dir, light.direction);
+    });
+  }
+
   function uavModelGraphics(tint: Cesium.Color, uri: string) {
     return {
       uri,
-      minimumPixelSize: 73,
+      minimumPixelSize: 146, // doubled for the slimmer low-poly set — reads at a distance again
       maximumScale: 4000,
       scale: 5.2,
       color: tint,
+      // No mode tint on the model: it muddied the nav lights and the body (Marc, 2026-09-06);
+      // the trail and the mode chip carry the flight-mode colour.
       colorBlendMode: Cesium.ColorBlendMode.MIX,
-      colorBlendAmount: 0.2,
+      colorBlendAmount: 0,
       heightReference: Cesium.HeightReference.NONE,
     };
   }

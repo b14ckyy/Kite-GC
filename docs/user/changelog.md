@@ -102,6 +102,11 @@ below. The release you are reading the docs for is expanded; click an older vers
       width. [#102]
     - **Android launcher icon** fills its circle instead of floating small in it. [#102]
     - **3D mission markers** match the 2D marker size and are sharp on high-DPI screens. [#111]
+    - **Raspberry Pi 5 HEVC** — the native RTSP client no longer aborts on streams whose picture is
+      padded to the encoder's block size (NVENC 720p, every 1080p): the padding is decoded zero-copy
+      and hidden under the interface. Start-up no longer drops the frames right after the keyframe,
+      and after any packet loss the video pauses until the next keyframe instead of freezing the
+      Pi's hardware decoder. Kernel-side report: raspberrypi/linux#7609. [#112]
 
 ??? note "1.0.0 — Initial release"
 
@@ -130,3 +135,4 @@ below. The release you are reading the docs for is expanded; click an older vers
 [#103]: https://github.com/b14ckyy/Kite-GC/pull/103
 [#105]: https://github.com/b14ckyy/Kite-GC/pull/105
 [#111]: https://github.com/b14ckyy/Kite-GC/pull/111
+[#112]: https://github.com/b14ckyy/Kite-GC/pull/112

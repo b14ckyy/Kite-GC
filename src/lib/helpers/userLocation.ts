@@ -5,14 +5,20 @@
 // precise — city-level is plenty. Sources, in order: a persisted last-known value (restored on
 // launch), an OS/browser geo check (on start + a manual button), and a connected UAV's GPS fix.
 // It deliberately never tracks the live map/camera — orbiting the globe must not change it.
+//
+// The OS check is per-platform: Windows (WebView2) and Linux (WebKitGTK) use the Web Geolocation
+// API, while macOS goes through native CoreLocation (location_macos.rs) because WKWebView ships no
+// Geolocation API at all, so `navigator.geolocation` can never resolve there.
 
 import { writable, get } from 'svelte/store';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { telemetry } from '$lib/stores/telemetry';
 import { homePosition } from '$lib/stores/home';
 import { connection } from '$lib/stores/connection';
 import { settings } from '$lib/stores/settings';
 import { isValidGpsCoordinate } from '$lib/helpers/telemetry';
-import { isMobile } from '$lib/platform';
+import { isMobile, isMacOS } from '$lib/platform';
 
 export interface LatLon { lat: number; lon: number; }
 
@@ -59,11 +65,33 @@ async function runGeoCheckNative(): Promise<void> {
   }
 }
 
+/** macOS: read the newest CoreLocation fix from the backend (location_macos.rs). WKWebView has no
+ *  Geolocation API at all, so the Web path below can never resolve there. The native module is the
+ *  only source, and it pushes an `os-location` event as well for the live updates. */
+async function runGeoCheckMacOs(): Promise<void> {
+  try {
+    // Start first, and on every manual check. The backend gives up when Location Services are off
+    // system-wide, so without this a user who turns them on (or grants the permission) after launch
+    // would have to restart the app to get a marker. The call is idempotent once running.
+    await invoke('location_os_start');
+    const fix = await invoke<{ lat: number; lon: number; accuracy_m: number | null } | null>(
+      'location_os_last',
+    );
+    if (fix) setUserLocation(fix.lat, fix.lon, 'os-corelocation', fix.accuracy_m);
+    // No fix yet is normal, not an error: CoreLocation is still resolving, or the permission prompt
+    // is unanswered. The event listener below delivers it whenever it arrives.
+  } catch (err) {
+    console.warn('[geo] CoreLocation read failed, keeping last known:', err);
+  }
+}
+
 function runGeoCheck(): void {
   // On mobile the vehicle's own GPS is the primary source (see the telemetry subscription below); the OS
   // check is a best-effort head start before a UAV connects. Route it through the native plugin so the
   // permission dialog carries the app's name.
   if (isMobile) { void runGeoCheckNative(); return; }
+  // macOS desktop (isMacOS excludes iOS): native CoreLocation, see runGeoCheckMacOs.
+  if (isMacOS) { void runGeoCheckMacOs(); return; }
   if (typeof navigator === 'undefined' || !navigator.geolocation) {
     console.warn('[geo] navigator.geolocation unavailable');
     return;
@@ -89,6 +117,16 @@ export function ensureUserLocation(): void {
 /** Manual trigger (settings button) — always runs a fresh OS geo check. */
 export function requestUserLocation(): void {
   runGeoCheck();
+}
+
+// ── macOS: live CoreLocation updates ──
+// The native module emits on every fix that moved more than its jitter threshold, which is what makes
+// `gcsMode: continuous` track on macOS, where there is no watchPosition to drive it. Subscribed at
+// import; the backend only emits when it has an authorised, valid fix.
+if (isMacOS) {
+  void listen<{ lat: number; lon: number; accuracy_m: number | null }>('os-location', (e) => {
+    setUserLocation(e.payload.lat, e.payload.lon, 'os-corelocation', e.payload.accuracy_m);
+  });
 }
 
 // ── Auto-update from a connected UAV's GPS (coarse is fine) ──

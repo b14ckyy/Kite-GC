@@ -14,6 +14,15 @@ mod hid;
 mod link_presence;
 mod link_stats;
 mod link_status;
+/// macOS operator location via CoreLocation. macOS is the one desktop target with no Web Geolocation
+/// API, so `navigator.geolocation` cannot resolve there and the GCS marker needs a native source.
+/// Every other target keeps the WebView path and compiles the stub instead.
+#[cfg(target_os = "macos")]
+#[path = "location_macos.rs"]
+mod location;
+#[cfg(not(target_os = "macos"))]
+#[path = "location_stub.rs"]
+mod location;
 mod logging;
 mod mavlink_proto;
 mod mission;
@@ -550,6 +559,12 @@ pub fn run() {
                 }
                 probe_gstreamer_support();
             }
+            // macOS: start CoreLocation for the GCS marker. Kicked off here rather than lazily so
+            // the authorisation prompt lands once, at launch, instead of mid-flight. A denial or
+            // disabled Location Services just logs and leaves the marker on its vehicle-GPS
+            // fallback, so this can never block start-up.
+            #[cfg(target_os = "macos")]
+            location::start(_app.handle());
             Ok(())
         })
         .on_page_load(|_webview, _payload| {
@@ -571,6 +586,8 @@ pub fn run() {
         .manage(MjpegServer::new())
         .manage(video::rtsp_native::NativeRtsp::new())
         .invoke_handler(tauri::generate_handler![
+            location::location_os_last,
+            location::location_os_start,
             list_serial_ports,
             scan_ble_devices,
             ble_scan_start,

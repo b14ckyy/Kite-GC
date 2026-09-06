@@ -149,4 +149,17 @@ tauri-plugin-geolocation = "2"
 # used to build the device-matching dictionaries and read device properties.
 core-foundation = "0.10"
 core-foundation-sys = "0.8"
+# Native CoreLocation for the GCS marker (location_macos.rs). WKWebView ships no Geolocation API at
+# all (wry implements the permission prompt only for its Android backend, and
+# tauri-plugin-geolocation's desktop backend is a stub that returns a default position), so
+# `navigator.geolocation` can never resolve on macOS and the marker had no source but the vehicle's
+# own GPS. We drive CLLocationManager through the objc2 bindings instead, in-crate and without Swift,
+# the same way the IOKit HID backend above talks to its C API. Only the features for the types used.
+# The 0.6 / 0.3 generation is the one tauri, wry and tao already pull in, so this adds no second
+# objc2 to the binary (btleplug's older 0.5 copy is pre-existing and unrelated).
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSString", "NSEnumerator", "NSError"] }
+# default-features = false on purpose: the crate's default set drags in objc2-contacts (CNPostalAddress,
+# for CLPlacemark geocoding) which a GCS has no business linking.
+objc2-core-location = { version = "0.3", default-features = false, features = ["std", "CLLocation", "CLLocationManager", "CLLocationManagerDelegate", "CLError"] }
 
