@@ -46,8 +46,24 @@ echo "[1/4] Ensuring both macOS Rust targets are installed..."
 rustup target add aarch64-apple-darwin x86_64-apple-darwin
 
 echo "[2/4] Installing npm dependencies + fetching bundled ffmpeg..."
-npm install
+# `npm ci`, not `npm install`: install rewrites package-lock.json (it drops "peer" markers, among
+# other churn), which makes the tree dirty and stamps the About dialog "<hash>-dirty" for a build
+# that changed nothing. ci installs exactly what the lockfile pins, never writes it, and fails loudly
+# if the lockfile and package.json disagree, all of which is what a release build wants. It is also
+# what the CI workflows already use.
+npm ci
 bash "$(dirname "$0")/fetch-ffmpeg-macos.sh"
+
+# Anything still modified or untracked at this point is the maintainer's own, and it will be stamped
+# into the About dialog as "-dirty". Say so now rather than letting it ship unnoticed: a released
+# build carrying that suffix cannot be tied back to a commit anyone else can check out.
+if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+    echo ""
+    echo "[WARN] The working tree is not clean, so this build will be stamped <hash>-dirty:"
+    git status --short | sed 's/^/       /'
+    echo "       Stash or commit these first if this is a build you intend to distribute."
+    echo ""
+fi
 
 echo "[3/4] Building universal application with Tauri..."
 # The bundler signs the .app itself (hardened runtime + the entitlements from tauri.conf.json) when
