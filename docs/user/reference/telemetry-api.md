@@ -23,7 +23,7 @@ transports selected underneath:
 | --- | --- | --- |
 | **TCP stream (port 27300)** | Kite listens on TCP 27300; each client that connects receives a continuous stream, one JSON object per line. | On |
 | **HTTP snapshot (port 27301)** | Kite answers `GET` requests on TCP 27301 with the newest frame, or a health document. For `curl`, scripts and browser dashboards. | On |
-| **UDP to a target** | Kite *sends* one datagram per frame to the **UDP host / port** you enter. Unicast or a broadcast address. | Off |
+| **UDP subscribers (port 27300)** | Kite listens on UDP 27300. A client **subscribes by sending any datagram** there and receives one datagram per frame for as long as it keeps sending one at least every 10 s. | Off |
 | **Reachable on the network** | Off: the TCP listeners bind to `127.0.0.1`, so only programs on this computer can connect. On: they bind to all interfaces and any device on the network can read the telemetry. | Off |
 | **Update rate** | Frames per second — **1, 2, 5 or 10 Hz**. This is the API's own clock: a link that updates faster is sampled, a slower one is repeated (the frame's `seq` still increments, `telemetry.lastUpdate` does not). | 5 Hz |
 
@@ -36,7 +36,8 @@ the reason if the server could not start (typically another program holding one 
     authentication in this version.
 
 The ports are **fixed** on purpose — a consumer never has to guess or be configured — and were chosen
-outside the ranges common tools use (MAVLink 14550, MediaMTX 8554, SITL 5760, …).
+outside the ranges common tools use (MAVLink 14550, MediaMTX 8554, SITL 5760, …). TCP and UDP share
+27300 — different protocols, no clash.
 
 ## Transports
 
@@ -64,12 +65,13 @@ Responses carry `Cache-Control: no-store`, `Access-Control-Allow-Origin: *` (a b
 same machine may poll it directly) and `Connection: close`. Only `GET` is served; anything else
 returns `405`, unknown paths `404`.
 
-### UDP — your target
+### UDP — port 27300, subscribe by sending
 
-One datagram per frame, same JSON as a TCP line without the trailing newline, no hello. The target
-may be a unicast address or a broadcast address (`255.255.255.255`, or your subnet's). UDP is
-fire-and-forget: Kite does not know whether anyone listens, and a datagram is dropped rather than
-delayed.
+Send **any datagram** (an empty one is fine) to UDP 27300 and Kite answers with the **hello** record,
+then sends one datagram per frame — the same JSON as a TCP line, without the newline — to the address
+and port you sent from. Keep sending a datagram at least every **10 seconds**; a subscriber that goes
+quiet is forgotten. Several subscribers at once are fine. UDP is fire-and-forget: a frame that cannot be
+delivered is dropped, never delayed, and there is no back-pressure on Kite's side.
 
 ## The frame
 
@@ -300,6 +302,29 @@ with socket.create_connection(("127.0.0.1", 27300)) as s:
             urllib.request.urlopen(req, timeout=2)
         except Exception as e:          # keep reading; the stream does not wait for you
             print("upload failed:", e)
+```
+
+**UDP subscriber in Python** — one datagram subscribes, a keepalive every few seconds stays subscribed:
+
+```python
+import json, socket, time
+
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.settimeout(1.0)
+kite = ("127.0.0.1", 27300)
+s.sendto(b"", kite)                 # subscribe
+last_keepalive = time.time()
+while True:
+    if time.time() - last_keepalive > 5:
+        s.sendto(b"", kite); last_keepalive = time.time()
+    try:
+        data, _ = s.recvfrom(65535)
+    except socket.timeout:
+        continue
+    msg = json.loads(data)
+    if msg.get("hello"):
+        continue
+    print(msg["seq"], msg["connected"], msg["telemetry"]["gps"])
 ```
 
 **Browser dashboard on the same machine** — the HTTP route allows cross-origin reads:
