@@ -532,7 +532,8 @@ impl NativeRtsp {
     }
 
     /// `(frames_presented, picture_size, error)` of the active decode sink; `None` while
-    /// no sink runs. The frontend polls this for aspect ratio, fps and stall detection.
+    /// no sink runs. Test hook for the sink end-to-end tests — nothing in the app polls it.
+    #[cfg(test)]
     pub fn sink_stats(&self) -> Option<(u64, Option<(u32, u32)>, Option<String>)> {
         #[cfg(any(target_os = "windows", target_os = "android", target_os = "linux"))]
         {

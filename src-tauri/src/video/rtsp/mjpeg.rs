@@ -266,7 +266,7 @@ mod tests {
         payload.extend_from_slice(&[jpeg_type, q, 64 / 8, 48 / 8]); // 64x48
         payload.extend_from_slice(extra_header);
         payload.extend_from_slice(scan);
-        RtpPacket { payload_type: 26, marker, sequence: seq, timestamp: 0, ssrc: 1, payload }
+        RtpPacket { marker, sequence: seq, timestamp: 0, payload }
     }
 
     /// Walk the produced JPEG's marker segments up to (and including) SOS.
