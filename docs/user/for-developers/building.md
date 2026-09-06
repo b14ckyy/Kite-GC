@@ -69,9 +69,22 @@ sudo apt install -y \
 2. Node.js, Rust and just via their official installers (e.g. `brew install node just`, Rust from rustup).
 
 The macOS build is **universal** (arm64 + x86_64). `just build-macos` adds both Rust targets and fetches
-the bundled ffmpeg for you, then builds the `.app` + `.dmg`. The result is **unsigned**; `just
-notarize-macos` signs + notarizes it for distribution without a Gatekeeper prompt (needs an Apple
-Developer account, credentials read from your environment / keychain — never committed).
+the bundled ffmpeg for you, then builds the `.app` + `.dmg`. The result is **unsigned** unless you
+export a signing identity first.
+
+For a distributable build, signing happens during the build and notarizing after it, in that order.
+The `.dmg` has to wrap an already-signed `.app`, because Apple inspects the app inside the image:
+
+```bash
+export APPLE_SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)"
+just build-macos      # the bundler signs the .app, then builds the .dmg around it
+just notarize-macos   # notarize + staple, so there is no Gatekeeper prompt
+```
+
+Both steps need an Apple Developer account, and specifically a **Developer ID Application**
+certificate: an "Apple Development" certificate cannot notarize. Credentials are read from your
+environment / keychain and never committed. List your identities with
+`security find-identity -v -p codesigning`.
 
 ### Android
 
