@@ -108,6 +108,7 @@ nav:
       - Relay & forwarding: guides/relay-and-forwarding.md
   - Reference:
       - Settings: reference/settings.md
+      - Telemetry API: reference/telemetry-api.md
       - File formats: reference/file-formats.md
   - Troubleshooting:
       - Connection: troubleshooting/connection.md
