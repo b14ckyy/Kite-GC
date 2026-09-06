@@ -12,6 +12,10 @@
 #                    and moves "latest" onto it; older minors stay frozen on gh-pages as-is.
 #   docs-only fix  → lands on master (see contributing.md) and redeploys the current minor,
 #                    keeping the published release docs correct between releases.
+#   pre-release    → while package.json carries a pre-release suffix ("1.1.0-dev"), master is the
+#                    NEXT line, not a released one: only "Dev" is deployed and "latest" stays on the
+#                    last released minor. A docs fix for that released minor is deployed from its
+#                    tag / release branch via workflow_dispatch (pick the ref in the Actions UI).
 #
 # Local preview needs no CI: `mkdocs serve` (single version, see docs/requirements.txt) or
 # `mike serve` (the full versioned site from a local gh-pages branch).
@@ -56,12 +60,16 @@ jobs:
       - run: mkdocs build --strict
       - name: Resolve the release minor from package.json
         id: ver
-        run: echo "minor=$(node -p "require('./package.json').version.split('.').slice(0,2).join('.')")" >> "$GITHUB_OUTPUT"
+        run: |
+          v="$(node -p "require('./package.json').version")"
+          echo "minor=$(echo "$v" | cut -d. -f1,2)" >> "$GITHUB_OUTPUT"
+          case "$v" in *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;; *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;; esac
       - name: Author the gh-pages commits as the Actions bot
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
       - name: Deploy the release docs (${{ steps.ver.outputs.minor }} = latest)
+        if: steps.ver.outputs.prerelease == 'false'
         run: mike deploy --push --update-aliases "${{ steps.ver.outputs.minor }}" latest
         env:
           # Release channel: the changelog hides "in development" sections (docs/hooks/changelog_channel.py).
@@ -69,6 +77,7 @@ jobs:
       - name: Deploy the development docs (Dev = master tip)
         run: mike deploy --push --title Dev dev
       - name: Point the site root at the latest release
+        if: steps.ver.outputs.prerelease == 'false'
         run: mike set-default --push latest
       # GitHub Pages serves exactly ONE 404 page for the whole site: /404.html at the gh-pages
       # root. mike only manages version folders, so publish it in a throwaway worktree. It
