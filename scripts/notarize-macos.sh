@@ -51,10 +51,36 @@ fi
 # Refuse early rather than burning a notary submission on a payload Apple will reject.
 # The signature lives on the .app INSIDE the image, so mount it read-only and check there.
 echo "[1/5] Checking the app inside the .dmg is signed for distribution..."
-MNT="$(mktemp -d)"
-cleanup() { hdiutil detach "$MNT" -quiet 2>/dev/null || true; rmdir "$MNT" 2>/dev/null || true; }
+# An image can only be attached once, so a maintainer who already opened the .dmg in Finder would
+# otherwise hit a bare "hdiutil: attach failed" and, under set -e, a silent exit. Reuse the existing
+# mount instead, and only detach what this script attached itself.
+# hdiutil info prints "image-path : <path>" then tab-separated "/dev/diskNsM <uuid> <mountpoint>"
+# lines for that image. Split on tabs, not spaces: volume names contain them ("Kite Ground Control"),
+# so a last-field match would only ever see the final word.
+MNT="$(hdiutil info | awk -F'\t' -v dmg="$(cd "$(dirname "$DMG")" && pwd)/$(basename "$DMG")" '
+    /^image-path/ { p = $0; sub(/^image-path[[:space:]]*:[[:space:]]*/, "", p); mine = (p == dmg) }
+    mine && $1 ~ /^\/dev\/disk/ && $3 ~ /^\/Volumes\// { print $3; exit }')"
+OURS=0
+# Leave a mount we did not create alone: ejecting Finder's copy out from under the user would be
+# rude, and detaching is only our business when we attached it.
+cleanup() {
+    [ "$OURS" = 1 ] || return 0
+    hdiutil detach "$MNT" -quiet 2>/dev/null || true
+    rmdir "$MNT" 2>/dev/null || true
+    OURS=0
+}
 trap cleanup EXIT
-hdiutil attach "$DMG" -mountpoint "$MNT" -nobrowse -readonly -quiet
+
+if [ -n "$MNT" ]; then
+    echo "       (already mounted at $MNT, reusing it)"
+else
+    MNT="$(mktemp -d)"
+    OURS=1
+    if ! hdiutil attach "$DMG" -mountpoint "$MNT" -nobrowse -readonly -quiet; then
+        echo "[notarize] Could not mount $DMG. If it is open in Finder, eject it and re-run."
+        exit 1
+    fi
+fi
 
 APP="$(ls -d "$MNT"/*.app 2>/dev/null | head -1 || true)"
 if [ -z "$APP" ]; then
@@ -81,7 +107,11 @@ echo "       OK: $AUTHORITY"
 
 # The hardened runtime is a notarization requirement, and the bundler only applies it while
 # signing. Catch a bundle signed by hand without it before Apple does.
-if ! codesign -d --verbose=4 "$APP" 2>&1 | grep -q 'flags=.*runtime'; then
+# Capture first, then match: piping codesign straight into `grep -q` makes grep exit on the first
+# hit, codesign die of SIGPIPE, and `set -o pipefail` report the whole pipeline as failed, which
+# inverts the test and rejects a perfectly good bundle.
+APP_FLAGS="$(codesign -d --verbose=4 "$APP" 2>&1 || true)"
+if ! printf '%s' "$APP_FLAGS" | grep -q 'flags=.*runtime'; then
     echo "[notarize] The app is signed but WITHOUT the hardened runtime, which notarization requires."
     echo "           Rebuild via 'just build-macos' so the bundler signs it (--options runtime)."
     exit 1
@@ -94,7 +124,8 @@ trap - EXIT
 # bundler already signed it depends on the Tauri version, so check rather than assume: signing the
 # wrapper is idempotent and never touches the payload, unlike re-signing the app.
 echo "[2/5] Checking the .dmg wrapper signature..."
-if codesign -dvv "$DMG" 2>&1 | grep -q '^Authority=Developer ID Application'; then
+DMG_SIG="$(codesign -dvv "$DMG" 2>&1 || true)"   # captured, not piped: see the SIGPIPE note above
+if printf '%s' "$DMG_SIG" | grep -q '^Authority=Developer ID Application'; then
     echo "       Already signed by the bundler, leaving it alone."
 elif [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
     echo "       Unsigned, signing the image with APPLE_SIGNING_IDENTITY..."
