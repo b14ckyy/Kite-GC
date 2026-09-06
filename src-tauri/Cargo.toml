@@ -92,7 +92,7 @@ core-foundation-sys = "0.8"
 # The 0.6 / 0.3 generation is the one tauri, wry and tao already pull in, so this adds no second
 # objc2 to the binary (btleplug's older 0.5 copy is pre-existing and unrelated).
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSArray", "NSString", "NSEnumerator"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSString", "NSEnumerator", "NSError"] }
 # default-features = false on purpose: the crate's default set drags in objc2-contacts (CNPostalAddress,
 # for CLPlacemark geocoding) which a GCS has no business linking.
 objc2-core-location = { version = "0.3", default-features = false, features = ["std", "CLLocation", "CLLocationManager", "CLLocationManagerDelegate", "CLError"] }
