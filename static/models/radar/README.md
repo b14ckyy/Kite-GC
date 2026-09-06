@@ -2,7 +2,8 @@
 
 3D models for foreign-vehicle (radar) contacts in the 3D map. **Separate from the UAV models** in
 `../` so they can be replaced independently. Each ADS-B class has its own low-poly model (procedurally
-generated, one grey material — the colour is replaced on the map anyway). Replace any file with a
+generated, one pure-white material — the 3D map multiplies the lit surface with the altitude colour
+(Cesium HIGHLIGHT blend), so any grey in the file would darken the colour scale). Replace any file with a
 better model of the same name; no code change needed.
 
 Resolved in `src/lib/helpers/radar3d.ts` (`contactModelClass()` → `radarModelUri()`); rendered in
