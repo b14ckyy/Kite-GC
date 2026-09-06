@@ -17,59 +17,8 @@ const BLE_WRITE_MTU: usize = 20;
 /// Timeout for BLE scan
 const BLE_SCAN_TIMEOUT_MS: u64 = 8000;
 
-/// Known BLE serial device profiles
-#[derive(Debug, Clone)]
-pub struct BleDeviceProfile {
-    pub name: &'static str,
-    pub service_uuid: uuid::Uuid,
-    pub write_characteristic: uuid::Uuid,
-    pub read_characteristic: uuid::Uuid,
-    pub write_delay_ms: u64,
-}
-
-/// All known BLE serial profiles (from INAV Configurator)
-pub fn known_profiles() -> Vec<BleDeviceProfile> {
-    vec![
-        BleDeviceProfile {
-            name: "CC2541 based",
-            service_uuid: uuid::Uuid::parse_str("0000ffe0-0000-1000-8000-00805f9b34fb").unwrap(),
-            write_characteristic: uuid::Uuid::parse_str("0000ffe1-0000-1000-8000-00805f9b34fb")
-                .unwrap(),
-            read_characteristic: uuid::Uuid::parse_str("0000ffe1-0000-1000-8000-00805f9b34fb")
-                .unwrap(),
-            write_delay_ms: 30,
-        },
-        BleDeviceProfile {
-            name: "Nordic NRF (NUS)",
-            service_uuid: uuid::Uuid::parse_str("6e400001-b5a3-f393-e0a9-e50e24dcca9e").unwrap(),
-            write_characteristic: uuid::Uuid::parse_str("6e400002-b5a3-f393-e0a9-e50e24dcca9e")
-                .unwrap(),
-            read_characteristic: uuid::Uuid::parse_str("6e400003-b5a3-f393-e0a9-e50e24dcca9e")
-                .unwrap(),
-            // No pacing: ESP32/nRF have ample UART FIFO + KB-scale ring buffers (the SpeedyBee ESP32-C3
-            // profiles already run at 0). Only the tiny-buffered CC2541 keeps its inter-chunk delay.
-            write_delay_ms: 0,
-        },
-        BleDeviceProfile {
-            name: "SpeedyBee Type 2",
-            service_uuid: uuid::Uuid::parse_str("0000abf0-0000-1000-8000-00805f9b34fb").unwrap(),
-            write_characteristic: uuid::Uuid::parse_str("0000abf1-0000-1000-8000-00805f9b34fb")
-                .unwrap(),
-            read_characteristic: uuid::Uuid::parse_str("0000abf2-0000-1000-8000-00805f9b34fb")
-                .unwrap(),
-            write_delay_ms: 0,
-        },
-        BleDeviceProfile {
-            name: "SpeedyBee Type 1",
-            service_uuid: uuid::Uuid::parse_str("00001000-0000-1000-8000-00805f9b34fb").unwrap(),
-            write_characteristic: uuid::Uuid::parse_str("00001001-0000-1000-8000-00805f9b34fb")
-                .unwrap(),
-            read_characteristic: uuid::Uuid::parse_str("00001002-0000-1000-8000-00805f9b34fb")
-                .unwrap(),
-            write_delay_ms: 0,
-        },
-    ]
-}
+// The profile table lives in `ble_profiles.rs`, shared with the Android backend.
+use super::ble_profiles::known_profiles;
 
 /// Information about a discovered BLE device
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

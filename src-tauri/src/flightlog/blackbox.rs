@@ -111,7 +111,7 @@ where
     let csv_output = run_decoder_capture_stdout(&decoder, file_path, log_index)?;
 
     report(55, "parse", "Parsing decoded CSV...");
-    let rows = parse_csv_rows(&csv_output)?;
+    let rows = parse_csv_rows(&csv_output, 100_000)?;
     if rows.is_empty() {
         return Err("Blackbox import failed: decoder produced no rows".into());
     }
@@ -318,6 +318,31 @@ where
     })
 }
 
+/// Full-rate telemetry rows for the hi-res replay cache (Dev-Docs active/HIRES_REPLAY.md): run an
+/// archived log slice through blackbox_decode and the same CSV parser as the importer, but with no
+/// 10 Hz decimation. `scratch_path` is where the blob is spilled first — blackbox_decode is an
+/// external process and can only read a real file; the spill is removed before returning.
+pub fn hires_telemetry_rows(
+    file_data: &[u8],
+    scratch_path: &Path,
+) -> Result<Vec<TelemetryRecord>, String> {
+    fs::write(scratch_path, file_data)
+        .map_err(|e| format!("Failed to write hi-res scratch file: {}", e))?;
+    let result = (|| {
+        let decoder = find_decoder().ok_or_else(|| {
+            "blackbox_decode not found. Place it next to the application executable or add it to PATH."
+                .to_string()
+        })?;
+        // The archived blob is the per-flight slice of the original file (exactly one log), so no
+        // --index is needed.
+        let csv_output = run_decoder_capture_stdout(&decoder, scratch_path, None)?;
+        let rows = parse_csv_rows(&csv_output, 0)?;
+        Ok(rows.into_iter().map(|r| r.telemetry).collect::<Vec<_>>())
+    })();
+    let _ = fs::remove_file(scratch_path);
+    result
+}
+
 fn run_decoder_capture_stdout(
     decoder: &Path,
     file_path: &Path,
@@ -358,12 +383,10 @@ fn build_decoder_command(decoder: &Path, file_path: &Path, log_index: Option<u32
     command
 }
 
-fn parse_csv_rows(csv_output: &str) -> Result<Vec<ParsedRow>, String> {
-    // Target 10 Hz output regardless of raw blackbox rate.
-    // Use time-based filtering (not row-count) because blackbox_decode --merge-gps
-    // may output at a different rate than the raw header suggests.
-    let target_interval_us: i64 = 100_000; // 10 Hz = 100ms
-
+/// `target_interval_us` = minimum spacing between kept rows (time-based, not row-count, because
+/// blackbox_decode --merge-gps may output at a different rate than the raw header suggests).
+/// The importer passes 100_000 (10 Hz); the hi-res replay parse passes 0 (keep every row).
+fn parse_csv_rows(csv_output: &str, target_interval_us: i64) -> Result<Vec<ParsedRow>, String> {
     let mut reader = csv::ReaderBuilder::new()
         .flexible(true)
         .from_reader(csv_output.as_bytes());

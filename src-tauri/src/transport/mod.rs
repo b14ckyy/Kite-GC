@@ -8,10 +8,34 @@
 // 1. ByteTransport — protocol-agnostic byte-level I/O (read/write/close)
 // 2. Protocol layers (MspTransport, MavlinkHandler) — built on top of ByteTransport
 
+// Platform seam. Each transport module exists on EVERY target under one name, and this block is the
+// only place that picks an implementation — callers use `transport::serial` / `transport::ble` and
+// never carry a target cfg of their own (the same way video/ keeps its per-OS backends internal).
+//   serial: serialport-backed on desktop. iOS has no serial access of any kind, so it gets a
+//           stand-in with the same surface — opens fail cleanly, the port list is empty. Android
+//           talks USB serial through the platform's USB Host API (UsbSerial.kt + the JNI shim).
+//   ble:    btleplug on desktop, CoreBluetooth (objc2) on iOS, the platform GATT stack via a
+//           Kotlin bridge on Android (BleSerial.kt) — same public surface on all three.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod serial;
+#[cfg(target_os = "ios")]
+#[path = "serial_ios.rs"]
+pub mod serial;
+#[cfg(target_os = "android")]
+#[path = "serial_android.rs"]
 pub mod serial;
 pub mod tcp;
 pub mod udp;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod ble;
+#[cfg(target_os = "ios")]
+#[path = "ble_ios.rs"]
+pub mod ble;
+#[cfg(target_os = "android")]
+#[path = "ble_android.rs"]
+pub mod ble;
+/// The BLE-serial profile table, shared by the desktop and Android BLE backends.
+pub mod ble_profiles;
 
 use std::fmt;
 
@@ -150,7 +174,7 @@ pub trait Transport: Send {
     }
 }
 
-/// Information about an available port/device
+/// Information about an available port/device (returned by the serial port lister).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PortInfo {
     pub path: String,

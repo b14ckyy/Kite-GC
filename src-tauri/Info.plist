@@ -1,23 +1,22 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  macOS-only Info.plist keys merged into the generated bundle by tauri-bundler.
-  Required so CoreBluetooth (btleplug BLE transport) is permitted: without a usage string modern
-  macOS denies Bluetooth central access. Mirrors the BLE capability Windows/Linux already have.
-  The camera usage string is required for the video panel's "Camera (device)" source: it uses
-  getUserMedia, which macOS blocks without a usage description. This covers USB/UVC capture devices
-  (e.g. an HDMI capture card fed from FPV goggles/VRX), the same webcam access Windows/Linux already have.
-  The local-network string covers everything Kite talks to on the LAN — an RTSP video source on a
-  companion computer, MAVLink over UDP/TCP from a Wi-Fi telemetry bridge. macOS 15 gates that behind a
-  consent prompt; without this key the prompt carries a generic system text instead of saying what
-  Kite actually wants the network for. (Loopback, i.e. our own MediaMTX, is exempt from the gate.)
-  The location (when-in-use) string is required for the GCS marker: macOS will not authorise
-  CoreLocation for an app that ships no usage description, and cannot even show the consent prompt.
-  On macOS the marker is fed by native CoreLocation (location_macos.rs) rather than the WebView,
-  because WKWebView ships no Geolocation API at all: wry implements the permission prompt only for
-  its Android backend, and tauri-plugin-geolocation's desktop backend is a stub. Windows/WebView2 and
-  Linux/WebKitGTK use the Web API and iOS goes through the native plugin, so neither needs this key
-  on their side. Coarse, city-level accuracy is all the marker needs.
+  Info.plist keys merged into the generated macOS and iOS bundles by tauri (the iOS bundle picks
+  these up too, see gen/apple/kite-gc_iOS/Info.plist).
+  Bluetooth: required so CoreBluetooth (btleplug / native BLE transport) is permitted; without a usage
+  string Apple denies BLE central access. Mirrors the capability Windows/Linux already have.
+  Camera: required for the video panel's "Camera (device)" source (getUserMedia over a USB/UVC capture
+  device, e.g. an HDMI capture card fed from FPV goggles/VRX), the same webcam access desktop has.
+  Local network: covers everything Kite talks to on the LAN — an RTSP video source on a companion
+  computer, MAVLink over UDP/TCP from a Wi-Fi telemetry bridge. macOS 15 gates that behind a consent
+  prompt; without this key the prompt carries a generic system text instead of saying what Kite
+  actually wants the network for. (Loopback, i.e. our own MediaMTX, is exempt from the gate.)
+  Location (when-in-use): required for the GCS marker. On macOS the marker is fed by native
+  CoreLocation (location_macos.rs) rather than the WebView, because WKWebView ships no Geolocation API
+  at all (wry implements the permission prompt only for its Android backend, and
+  tauri-plugin-geolocation's desktop backend is a stub); macOS will not authorise CoreLocation for an
+  app without a usage description. iOS goes through the native plugin and reads the same key. Coarse,
+  city-level accuracy is all the marker needs.
 -->
 <plist version="1.0">
 <dict>

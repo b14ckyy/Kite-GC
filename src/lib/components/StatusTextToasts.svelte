@@ -62,6 +62,24 @@
     font-family: 'Segoe UI', Tahoma, sans-serif;
   }
 
+  /* Mobile: the phone toolbar wraps onto several rows while disconnected/expanded, so a fixed 56px
+     lands *inside* it and the messages cover the connection banner. Track the live bar height instead —
+     the same --toolbar-h the map layer and nav-rail follow. The parent .app-toasts layer is already
+     offset by --safe-top and --toolbar-h includes that same inset (the toolbar pads itself down into
+     the visible strip), so subtract it here or the status-bar strip is counted twice. */
+  :global(html.is-mobile) .msg-banner {
+    top: calc(var(--toolbar-h, 53px) - var(--safe-top, 0px) + 8px);
+  }
+  /* Phone: the parent .app-toasts IS the band between the corner buttons and already sits at
+     --safe-top, so start in the buttons' row and let the band — not the viewport — cap the width.
+     --toast-dock-inset is a viewport x; the band's own left edge (--toast-band-left) comes off it
+     first, so a banner beside an open panel still centres in what is left of the band. */
+  :global(html.is-phone) .msg-banner {
+    top: 8px;
+    left: calc(max(var(--toast-dock-inset, 0px) - var(--toast-band-left, 0px), 0px) + 8px);
+    max-width: min(640px, calc(100% - max(var(--toast-dock-inset, 0px) - var(--toast-band-left, 0px), 0px) - 16px));
+  }
+
   .msg-lines {
     display: flex;
     flex-direction: column;

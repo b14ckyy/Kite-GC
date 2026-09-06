@@ -461,7 +461,9 @@ pub async fn mission_save_file(
         resolved.home = Some(HomePt { lat, lon });
     }
     let xml = mission_to_xml(&resolved);
-    std::fs::write(&path, xml).map_err(|e| format!("Failed to save: {e}"))?;
+    crate::user_file::with_write_path(&path, |p| {
+        std::fs::write(p, &xml).map_err(|e| format!("Failed to save: {e}"))
+    })?;
     store.mark_clean();
     Ok(())
 }
@@ -469,7 +471,9 @@ pub async fn mission_save_file(
 /// Load mission from a .mission file
 #[tauri::command]
 pub fn mission_load_file(path: String, store: State<'_, MissionStore>) -> Result<Mission, String> {
-    let xml = std::fs::read_to_string(&path).map_err(|e| format!("Failed to read: {e}"))?;
+    let xml = crate::user_file::with_read_path(&path, |p| {
+        std::fs::read_to_string(p).map_err(|e| format!("Failed to read: {e}"))
+    })?;
     let mission = mission_from_xml(&xml)?;
     store.set(mission.clone());
     Ok(mission)
@@ -543,13 +547,17 @@ pub fn ardu_mission_upload(
 /// Read a text file from disk (used for .waypoints and similar formats)
 #[tauri::command]
 pub fn read_text_file(path: String) -> Result<String, String> {
-    std::fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {e}"))
+    crate::user_file::with_read_path(&path, |p| {
+        std::fs::read_to_string(p).map_err(|e| format!("Failed to read file: {e}"))
+    })
 }
 
 /// Write text content to a file (used for .waypoints and similar formats)
 #[tauri::command]
 pub fn write_text_file(path: String, content: String) -> Result<(), String> {
-    std::fs::write(&path, content).map_err(|e| format!("Failed to write file: {e}"))
+    crate::user_file::with_write_path(&path, |p| {
+        std::fs::write(p, &content).map_err(|e| format!("Failed to write file: {e}"))
+    })
 }
 
 #[cfg(test)]

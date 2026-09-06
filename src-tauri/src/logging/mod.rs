@@ -78,6 +78,10 @@ impl Log for FileLogger {
                 let _ = w.flush();
             }
         }
+        // Android: mirror to stderr → logcat (`RustStdoutStderr`); adb cannot read the app-private
+        // log file of a release build.
+        #[cfg(target_os = "android")]
+        eprint!("{line}");
     }
 
     fn flush(&self) {
@@ -142,7 +146,8 @@ fn resolve_log_dir(portable: bool) -> PathBuf {
             return PathBuf::from(home).join(".local").join("share").join("kite-gc");
         }
     }
-    #[cfg(target_os = "macos")]
+    // iOS shares the macOS layout; `HOME` is the app sandbox container root there.
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
         if let Ok(home) = std::env::var("HOME") {
             return PathBuf::from(home)
@@ -151,7 +156,15 @@ fn resolve_log_dir(portable: bool) -> PathBuf {
                 .join("kite-gc");
         }
     }
+    // Android: app-private storage — see `android::app_data_dir`. This runs before Tauri exists
+    // (the logger is installed first thing in `run()`), which is why that path is derived rather
+    // than requested from an `AppHandle`.
+    #[cfg(target_os = "android")]
+    {
+        return crate::android::app_data_dir();
+    }
 
+    #[allow(unreachable_code)]
     PathBuf::from(".")
 }
 

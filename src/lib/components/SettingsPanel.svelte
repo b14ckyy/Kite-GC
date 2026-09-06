@@ -18,6 +18,7 @@
   import { resetGcsManual, gcsManuallySet } from '$lib/stores/gcsLocation';
   import type { AppSettings, InterfaceSettings, RadarSettings, GcsMode, AirspaceSettings, AirspaceProvider, SystemMessagesLevel, LogLevel, RcControlSettings, UpdateCheckSettings, UpdateCheckMode } from '$lib/stores/settings';
   import { revealItemInDir, openPath } from '@tauri-apps/plugin-opener';
+  import { isAndroid, isMobile } from '$lib/platform';
   import { blackboxDecoderVersion, downloadBlackboxDecode } from '$lib/stores/flightlog';
   import type { TileCacheStats } from '$lib/cache/tileCache';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
@@ -39,9 +40,11 @@
     cesiumIonToken = '',
     altitudeCurtain3D = true,
     realLighting3D = false,
+    buildings3D = false,
     logReplayTime = false,
     nightMode2D = 'off',
     lowPower3D = 'auto',
+    highRes3D = false,
     gcsMode = 'manual',
     userLocation = null,
     attitudeRateHz = 5,
@@ -90,9 +93,11 @@
     cesiumIonToken?: string;
     altitudeCurtain3D?: boolean;
     realLighting3D?: boolean;
+    buildings3D?: boolean;
     logReplayTime?: boolean;
     nightMode2D?: 'off' | 'auto' | 'on';
     lowPower3D?: 'off' | 'on' | 'auto';
+    highRes3D?: boolean;
     gcsMode?: GcsMode;
     userLocation?: { lat: number; lon: number } | null;
     attitudeRateHz?: number;
@@ -219,11 +224,30 @@
       logOpenError = e instanceof Error ? e.message : String(e);
     }
   }
+  /** Share the diagnostics log through the system sheet — the Android replacement for "open
+   *  folder": an app-private path is unreachable in any file manager, so opening it on the device
+   *  is useless, while sharing reaches mail, messengers or a text editor directly. */
+  async function shareLogFile() {
+    logOpenError = '';
+    if (!logPath) await loadLogPath();
+    const p = logPath;
+    if (!p) {
+      logOpenError = $t('settings.logUnavailable');
+      return;
+    }
+    try {
+      await invoke('share_file', { path: p, mime: 'text/plain' });
+    } catch (e) {
+      logOpenError = e instanceof Error ? e.message : String(e);
+    }
+  }
+
   // Refresh the terrain-cache size + blackbox_decode version whenever the Data tab is shown.
   $effect(() => {
     if (tab !== 'interface') {
       void loadTerrainCache();
-      void loadBbVersion();
+      // No decoder row on mobile (see below) — nothing to load a version for.
+      if (!isMobile) void loadBbVersion();
     }
   });
 
@@ -245,6 +269,35 @@
   }
   function handleUiScaleChange(event: Event) {
     onPatch({ uiScale: Number((event.target as HTMLSelectElement).value) });
+  }
+
+  // ── Pre-migration DB backup (Dev-Docs active/DB_MIGRATIONS.md) ──────
+  // Exactly ONE backup exists (created automatically before a schema upgrade, next to the DB
+  // file — multi-GB with blackbox logs, hence no rotation). Shown with its size + a delete
+  // button; anyone wanting a permanent copy moves the file elsewhere themselves.
+  let dbBackup = $state<{ path: string; size_bytes: number } | null>(null);
+  async function loadDbBackup(): Promise<void> {
+    try {
+      dbBackup = await invoke<{ path: string; size_bytes: number } | null>('flightlog_backup_info', {
+        dbPath: flightLogDbPath,
+      });
+    } catch {
+      dbBackup = null;
+    }
+  }
+  void loadDbBackup();
+  async function deleteDbBackup(): Promise<void> {
+    try {
+      await invoke('flightlog_backup_delete', { dbPath: flightLogDbPath });
+    } catch {
+      /* refresh below shows the truth either way */
+    }
+    await loadDbBackup();
+  }
+  function fmtBackupSize(bytes: number): string {
+    return bytes >= 1024 ** 3
+      ? `${(bytes / 1024 ** 3).toFixed(2)} GB`
+      : `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`;
   }
   function handleMapProviderChange(event: Event) {
     onPatch({ mapProvider: (event.target as HTMLSelectElement).value });
@@ -329,6 +382,12 @@
         <label class="s-label" for="altitude-curtain">{$t('settings.altitudeCurtain')}</label>
         <Toggle checked={altitudeCurtain3D} id="altitude-curtain" onchange={(c) => onPatch({ altitudeCurtain3D: c })} />
       </div>
+      <!-- Buildings come from Cesium Ion (the same account as World Terrain), so the toggle is dead
+           without a token — disabled rather than hidden, so it is discoverable and explains itself. -->
+      <div class="s-row">
+        <label class="s-label" for="buildings-3d" class:s-label-disabled={!cesiumIonToken}>{$t('settings.buildings3D')}</label>
+        <Toggle checked={!!cesiumIonToken && buildings3D} disabled={!cesiumIonToken} id="buildings-3d" onchange={(c) => onPatch({ buildings3D: c })} />
+      </div>
       <div class="s-row">
         <label class="s-label" for="real-lighting">{$t('settings.realLighting')}</label>
         <Toggle checked={realLighting3D} id="real-lighting" onchange={(c) => onPatch({ realLighting3D: c })} />
@@ -352,6 +411,10 @@
           <option value="on">{$t('settings.lowPower3DOn')}</option>
           <option value="auto">{$t('settings.lowPower3DAuto')}</option>
         </select>
+      </div>
+      <div class="s-row" title={$t('settings.highRes3DHint')}>
+        <span class="s-label">{$t('settings.highRes3D')}</span>
+        <Toggle checked={highRes3D} id="high-res-3d" onchange={(c) => onPatch({ highRes3D: c })} />
       </div>
       <div class="s-row">
         <span class="s-label">{$t('settings.userLocation')}</span>
@@ -622,6 +685,16 @@
         <span class="s-label" title={$t('settings.compactDbHint')}>{$t('settings.compactDb')}</span>
         <Button variant="standard" size="sm" onclick={onCompactDb} title={$t('settings.compactDbHint')}>{$t('settings.compactDbBtn')}</Button>
       </div>
+      {#if dbBackup}
+        <div class="s-row" title={dbBackup.path}>
+          <span class="s-label" title={$t('settings.dbBackupHint')}>
+            {$t('settings.dbBackup')} · {fmtBackupSize(dbBackup.size_bytes)}
+          </span>
+          <Button variant="standard" size="sm" onclick={deleteDbBackup} title={$t('settings.dbBackupHint')}>
+            {$t('settings.dbBackupDelete')}
+          </Button>
+        </div>
+      {/if}
       <div class="s-row s-row-stack">
         <span class="s-label">{$t('settings.rawLogPath')}</span>
         <div class="path-picker-row">
@@ -630,16 +703,21 @@
           <Button variant="standard" size="sm" onclick={onResetRawLogPath}>{$t('settings.useDefault')}</Button>
         </div>
       </div>
-      <div class="s-row s-row-stack">
-        <span class="s-label">{$t('settings.blackboxDecoder')}</span>
-        <div class="path-picker-row">
-          <span class="s-readout">{bbVersion ?? $t('settings.bbDecoderMissing')}</span>
-          <Button variant="standard" size="sm" disabled={bbBusy} onclick={updateBbDecoder}>
-            {bbBusy ? $t('settings.bbDecoderBusy') : bbVersion ? $t('settings.bbDecoderUpdate') : $t('settings.bbDecoderDownload')}
-          </Button>
+      <!-- Desktop only: blackbox_decode is a separate native executable, and both mobile systems
+           forbid executing a downloaded binary (the backend refuses too — decoder_impossible in
+           flightlog/decoder.rs — this just spares the user a row that could never work). -->
+      {#if !isMobile}
+        <div class="s-row s-row-stack">
+          <span class="s-label">{$t('settings.blackboxDecoder')}</span>
+          <div class="path-picker-row">
+            <span class="s-readout">{bbVersion ?? $t('settings.bbDecoderMissing')}</span>
+            <Button variant="standard" size="sm" disabled={bbBusy} onclick={updateBbDecoder}>
+              {bbBusy ? $t('settings.bbDecoderBusy') : bbVersion ? $t('settings.bbDecoderUpdate') : $t('settings.bbDecoderDownload')}
+            </Button>
+          </div>
+          {#if bbError}<span class="s-err">{bbError}</span>{/if}
         </div>
-        {#if bbError}<span class="s-err">{bbError}</span>{/if}
-      </div>
+      {/if}
     </div>
 
     <!-- ── Diagnostics ───────────────────────────────── -->
@@ -657,7 +735,12 @@
       </div>
       <div class="s-row">
         <span class="s-label">{$t('settings.logFolder')}</span>
-        <Button variant="standard" size="sm" onclick={openLogFolder}>{$t('settings.openLogFolder')}</Button>
+        {#if isAndroid}
+          <!-- App-private path — no file manager can reach it, so "open" is useless there. -->
+          <Button variant="standard" size="sm" onclick={shareLogFile}>{$t('settings.shareLog')}</Button>
+        {:else}
+          <Button variant="standard" size="sm" onclick={openLogFolder}>{$t('settings.openLogFolder')}</Button>
+        {/if}
       </div>
       {#if logPath}
         <!-- Always visible: if nothing can open it, the user can still reach the file by hand. -->

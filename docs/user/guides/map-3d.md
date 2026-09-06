@@ -113,6 +113,10 @@ In **Settings → Interface → Map**:
   **Auto** (20 fps on battery). Helpful on laptops and tablets. While active it also drops the smooth
   bar animations in the speed and battery widgets (they jump straight to the current value), which
   saves noticeable CPU during a flight — the readings are unchanged.
+- **High-Resolution 3D** — render the globe at the display's native pixel density (on) or at half
+  of it (off). On by default on the desktop, off on phones and tablets; switch it on for a sharp
+  globe on a high-DPI screen, off to give a weak integrated GPU room (one laptop went from 30 to
+  55 fps with video running).
 
 ## Where to go next
 

@@ -572,7 +572,7 @@
 <!-- Detail (right) column toolbar: Export flush right. -->
 {#snippet detailToolbar()}
   <div class="vmv-detail-actions">
-    <Button variant="data" icon="export" onclick={exportVehicle}>{$t('vehicleMgr.export')}</Button>
+    <Button variant="data" icon="export" onclick={exportVehicle} title={$t('vehicleMgr.export')} />
   </div>
 {/snippet}
 
@@ -682,7 +682,7 @@
       <div class="det-flights">
         <div class="vmv-veh-actions">
           <Button variant="standard" icon="edit" onclick={startEdit}>{$t('vehicleMgr.edit')}</Button>
-          <Button variant="danger" icon="delete" onclick={deleteVehicle}>{$t('vehicleMgr.delete')}</Button>
+          <Button variant="danger" icon="delete" onclick={deleteVehicle} title={$t('vehicleMgr.delete')} />
         </div>
         <div class="section-heading">{$t('vehicleMgr.linkedFlights')} ({linkedFlights.length})</div>
         {#each linkedFlights as f (f.id)}
@@ -1050,6 +1050,15 @@
   .modal-card { box-sizing: border-box; background: #2e2e2e; border: 1px solid rgba(55, 168, 219, 0.35); border-radius: 8px; padding: 14px; width: min(600px, 94vw); max-height: 90vh; overflow-y: auto; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5); }
 
   .veh-status { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); z-index: 1001; padding: 6px 12px; font-size: 11px; color: #f39c12; background: rgba(0, 0, 0, 0.8); border-radius: 6px; }
+  /* Phone: centre on the map area — a screen-centred pill runs under the widget column. */
+  :global(html.is-phone) .veh-status {
+    left: calc((100vw - var(--phone-panel-w, 0px) + var(--phone-shift, 0px)) / 2);
+    max-width: calc(100vw - var(--phone-panel-w, 0px) + var(--phone-shift, 0px) - 24px);
+    box-sizing: border-box;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 
   @media (max-width: 760px) {
     .form-grid, .vmv-sensor-grid { grid-template-columns: 1fr; }

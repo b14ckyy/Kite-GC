@@ -18,7 +18,7 @@ import { homePosition } from '$lib/stores/home';
 import { connection } from '$lib/stores/connection';
 import { settings } from '$lib/stores/settings';
 import { isValidGpsCoordinate } from '$lib/helpers/telemetry';
-import { isMacOS } from '$lib/platform';
+import { isMobile, isMacOS } from '$lib/platform';
 
 export interface LatLon { lat: number; lon: number; }
 
@@ -38,6 +38,31 @@ export function setUserLocation(lat: number, lon: number, source: string, accura
   userGeoAccuracyM.set(accuracyM);
   settings.patch({ userLocation: { lat, lon } });
   console.log(`[geo] user location set via ${source}: ${lat.toFixed(3)}, ${lon.toFixed(3)}`);
+}
+
+/** Mobile (iOS/Android): native CoreLocation/Android location via the Tauri plugin. The OS permission
+ *  prompt is labelled with the app name + Info.plist usage string, not the WebView origin ("localhost"
+ *  is all the Web geolocation prompt can show). Loaded lazily so the plugin JS never reaches the desktop
+ *  bundle's startup path. */
+async function runGeoCheckNative(): Promise<void> {
+  try {
+    const geo = await import('@tauri-apps/plugin-geolocation');
+    let perm = await geo.checkPermissions();
+    if (perm.location !== 'granted') perm = await geo.requestPermissions(['location']);
+    if (perm.location !== 'granted') {
+      console.warn('[geo] native location permission not granted:', perm.location);
+      return;
+    }
+    // The plugin's PositionOptions has no optional fields, so pass an explicit literal (same values
+    // as GEO_OPTS: coarse fix, 8 s timeout, up to a 1 h cached position).
+    const pos = await geo.getCurrentPosition({ enableHighAccuracy: false, timeout: 8000, maximumAge: 3_600_000 });
+    setUserLocation(
+      pos.coords.latitude, pos.coords.longitude, 'os-geolocation-native',
+      Number.isFinite(pos.coords.accuracy) ? pos.coords.accuracy : null,
+    );
+  } catch (err) {
+    console.warn('[geo] native geolocation failed, keeping last known:', err);
+  }
 }
 
 /** macOS: read the newest CoreLocation fix from the backend (location_macos.rs). WKWebView has no
@@ -61,6 +86,11 @@ async function runGeoCheckMacOs(): Promise<void> {
 }
 
 function runGeoCheck(): void {
+  // On mobile the vehicle's own GPS is the primary source (see the telemetry subscription below); the OS
+  // check is a best-effort head start before a UAV connects. Route it through the native plugin so the
+  // permission dialog carries the app's name.
+  if (isMobile) { void runGeoCheckNative(); return; }
+  // macOS desktop (isMacOS excludes iOS): native CoreLocation, see runGeoCheckMacOs.
   if (isMacOS) { void runGeoCheckMacOs(); return; }
   if (typeof navigator === 'undefined' || !navigator.geolocation) {
     console.warn('[geo] navigator.geolocation unavailable');

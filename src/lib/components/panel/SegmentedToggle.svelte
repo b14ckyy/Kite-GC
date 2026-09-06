@@ -5,7 +5,15 @@
 
 <script lang="ts" module>
   import type { ButtonIcon } from './Button.svelte';
-  export type SegOption = { value: string; label: string; icon?: ButtonIcon };
+  export type SegOption = {
+    value: string;
+    label: string;
+    icon?: ButtonIcon;
+    /** Disable just this segment (shown dimmed, not clickable) — e.g. a source that doesn't exist. */
+    disabled?: boolean;
+    /** Tooltip override (defaults to the label) — e.g. why a segment is disabled. */
+    title?: string;
+  };
 </script>
 
 <script lang="ts">
@@ -65,7 +73,7 @@
 <div class="seg seg-{size}" class:full class:disabled bind:this={segEl}>
   <div class="seg-ind" style="left:{indLeft}px; width:{indWidth}px"></div>
   {#each options as o, i}
-    <button bind:this={btnEls[i]} class="seg-btn" class:active={i === idx} type="button" {disabled} title={o.label} onclick={() => onchange?.(o.value)}>
+    <button bind:this={btnEls[i]} class="seg-btn" class:active={i === idx} type="button" disabled={disabled || o.disabled} title={o.title ?? o.label} onclick={() => onchange?.(o.value)}>
       {#if o.icon}<span class="seg-icon">{@html iconSvg(o.icon)}</span>{/if}
       <span class="seg-label">{o.label}</span>
     </button>
@@ -121,8 +129,10 @@
     font-family: inherit;
     transition: color 0.15s;
   }
-  .seg-btn:hover:not(.active) { color: #e0e0e0; }
+  .seg-btn:hover:not(.active):not(:disabled) { color: #e0e0e0; }
   .seg-btn.active { color: #37a8db; }
+  /* Per-option disabled: dim just this segment (whole-control disabled is handled below). */
+  .seg-btn:disabled { color: #5a5a5a; cursor: not-allowed; }
   /* Read-only: dim the whole control and show a not-allowed cursor; the active segment stays marked. */
   .seg.disabled { opacity: 0.55; }
   .seg.disabled .seg-btn { cursor: not-allowed; }

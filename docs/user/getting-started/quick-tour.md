@@ -39,10 +39,13 @@ The command centre. From left to right:
 
 ## 2 · Navigation rail & panels
 
-The strip down the **left edge** is the navigation rail. Click an icon to open its **panel**; click it
-again (or the rail's toggle) to close. Only one panel is open at a time, and the map stays live behind
-it. Some tools appear **only when relevant** (e.g. *Control* only on an ArduPilot/PX4 link), so the rail
-stays uncluttered.
+The strip down the **left edge** is the navigation rail. Click an icon to open its **panel**. Click the
+**same icon again** to **park** the panel: it slides out to the left and the map gets the whole screen,
+but nothing is lost — a mission you are editing stays in edit mode, a half-filled form keeps its values,
+and the next click brings the panel straight back (the icon shows a dashed frame while it is parked).
+Switching to another tool or closing the rail with its toggle closes the panel for real. Only one panel
+is open at a time, and the map stays live behind it. Some tools appear **only when relevant** (e.g.
+*Control* only on an ArduPilot/PX4 link), so the rail stays uncluttered.
 
 Each tool, at a glance — expand for a quick description and the link to its full guide:
 
@@ -133,8 +136,11 @@ Two docks hold your **flight widgets** (attitude, altitude, speed, compass, and 
 dock** (3) down the side, and the **bottom dock** (4) along the bottom.
 
 Click the **✎ (edit) button** by a dock to enter **edit mode**, then drag widgets to rearrange them or
-move them between docks. Choose which widgets appear in **Settings → Interface**. Widgets scale to fit
-the dock, and your layout (including which dock each sits in) is remembered between sessions. Every widget
+move them between docks. In edit mode every widget also shows a **resize button** in its corner: each tap
+steps it to its next size — square widgets toggle between small and large, the wide ones (Live AGL,
+Video) go wide → large square → small square. The aspect ratio never changes, and a dock shrinks to its
+largest widget. Choose which widgets appear in **Settings → Interface**. Widgets scale to fit the dock,
+and your layout (which dock each sits in and its size) is remembered between sessions. Every widget
 follows your global units and works the same **live** and in **[replay](../guides/logbook.md)**.
 
 Each widget, at a glance — expand for what it shows and how it works:
@@ -219,12 +225,6 @@ Each widget, at a glance — expand for what it shows and how it works:
 
     ![The Flight Mode widget](../assets/getting-started/widgets/flightmode.png)
 
-??? note "Raw Telemetry"
-    A compact numeric dump for when you want the raw figures at a glance: altitude, speed, vario, heading,
-    roll, pitch, voltage, current, mAh, satellites and RSSI.
-
-    ![The Raw Telemetry widget](../assets/getting-started/widgets/rawtelemetry.png)
-
 ??? note "Live AGL"
     A forward-looking **terrain-profile HUD** (a wide widget). The left third shows the terrain you've
     flown over with the aircraft riding at its current height; the right two-thirds shows the
@@ -239,7 +239,8 @@ Each widget, at a glance — expand for what it shows and how it works:
     coloured by **clearance** against your altitude (red = at/above you → green = well below). Two
     independent ranges — the **fan distance** scales with speed, and a separate **clearance colour scale**
     (60 / 120 / 250 m, left button). A **REL / PRED** button (right) switches the reference between your
-    current altitude and a sink-rate-predicted one.
+    current altitude and a sink-rate-predicted one. Both buttons appear only while the dock is in
+    **edit mode** (✎), so they don't clutter the display in flight.
 
     ![The Terrain Radar widget](../assets/getting-started/widgets/terrainradar.png)
 
@@ -270,6 +271,45 @@ The thin strip along the very **bottom**:
 - **Left** — a connection dot (green = connected, red = not) and, once connected, the firmware variant,
   version and port (e.g. *INAV 8.0.0 on COM7*).
 - **Right** — the **arming state** (ARMED / DISARMED) while connected.
+
+## Kite on a phone
+
+On a **phone** (Android or iPhone) Kite uses its own **landscape** layout, built for a screen that has
+room for either the map or a widget, rarely both. Tablets keep the desktop layout described above.
+
+- **No top bar, no status bar, no bottom dock.** The map fills the whole screen; the navigation rail's
+  **☰** button sits in the top-left corner. The **arming state** sits in the bottom-left corner, with a
+  **sensor warning** chip next to it that only appears while a sensor is amber or red.
+- **Connecting** happens in a pop-out: tap the **🔗 chain-link** button at the top-right of the map for
+  protocol and transport on the first row, the port / host / device on the second, **Connect** — and
+  **Relay**, which extends the pop-out with the relay entries. Tap anywhere else to close it.
+- **Widgets** live in a **frosted-glass column** on the right edge, on a grid of 4 rows and up to 2
+  columns, with **two pages** — swipe up or down to switch. The map runs on underneath the glass. A
+  small widget takes one cell, a large one 2 × 2, the wide Live AGL 2 × 1; the column narrows to one
+  cell when only small widgets are active. Widgets that no longer fit are switched off automatically,
+  and **Settings → HUD widgets** tells you when the grid is full.
+- **Rearranging widgets**: **long-press** a widget to enter edit mode. Hold a widget briefly and drag
+  it to move it — the others shift live to show where they will settle; a quick flick still turns the
+  page. Tap the corner button to step through the sizes. Tap the map to leave edit mode.
+- **Map controls**: pinch to zoom (no zoom buttons); the **2D / 3D** and **follow** buttons sit at the
+  bottom-right of the map, next to the widget column. The map credits follow the arming chip along the
+  bottom edge.
+- **Panels and the replay player** get the room they need: the wider panels (logbook, missions and
+  the like) may extend over the widget column to the right screen edge, and when the replay player's
+  full controls are showing on a narrow phone, the widget column slides aside until playback runs and
+  the player folds into its compact strip.
+- **Video** has no floating window on the phone. Once a source runs (Video panel → Start), a
+  **camera button** appears above the map buttons: it slides a **docked video window** into the
+  bottom-right corner of the map, and slides it out again — behind the widget column and off the
+  screen — so the picture is one tap away and never in the way. Double-tap the window to swap video
+  and map: the video fills the map area and the small window holds a plain follow map (2D,
+  heading-up, no panning). In that mode the button turns into a **map button** in the bottom-right
+  corner that hides and shows the small map; double-tap the full-screen video to bring the map back.
+  The **video widget** works as on the desktop (double-tap swaps there too); while it is active, the
+  docked window and its button stay hidden. Whatever is off-screen — a parked window, a widget on the
+  other page — is not rendered, but the stream keeps running, so it is back instantly.
+- **Not on the phone**: the video preview inside the Video panel, the raw-telemetry popup, and the
+  stick overlay beside the replay player.
 
 ## Where to go next
 

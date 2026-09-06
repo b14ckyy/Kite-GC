@@ -2,6 +2,8 @@
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
 mod aero;
+#[cfg(target_os = "android")]
+mod android;
 mod child_env;
 mod commands;
 mod debug_mode;
@@ -9,7 +11,9 @@ mod flightlog;
 mod flightmode;
 mod github_release;
 mod hid;
+mod link_presence;
 mod link_stats;
+mod link_status;
 /// macOS operator location via CoreLocation. macOS is the one desktop target with no Web Geolocation
 /// API, so `navigator.geolocation` cannot resolve there and the GCS marker needs a native source.
 /// Every other target keeps the WebView path and compiles the stub instead.
@@ -30,24 +34,29 @@ mod state;
 mod telemetry_forward;
 mod terrain;
 mod transport;
+mod user_file;
 mod video;
 
-use commands::connection::{connect, disconnect, list_serial_ports, scan_ble_devices, ble_scan_start, ble_scan_stop, inav_set_craft_name, inav_read_stats};
+use commands::connection::{connect, disconnect, inav_set_craft_name, inav_read_stats, scan_ble_devices, ble_scan_start, ble_scan_stop};
+use commands::connection::list_serial_ports;
 use commands::flightlog::{
     flightlog_list, flightlog_get, flightlog_get_track, flightlog_get_battery_records, flightlog_delete,
     flightlog_update_notes, flightlog_update_craft_name, flightlog_update_platform_type, flightlog_update_pilot, flightlog_update_weather, flightlog_geocode, flightlog_fetch_weather,
     flightlog_default_db_path, flightlog_default_raw_log_path, flightlog_import_blackbox,
     flightlog_blackbox_log_count,
     flightlog_export, flightlog_export_blackbox, flightlog_blackbox_file_info, flightlog_delete_blackbox_file, flightlog_compact_db, flightlog_export_track, flightlog_import_kflight,
+    flightlog_backup_info, flightlog_backup_delete,
     flightlog_kflight_list, flightlog_kflight_get, flightlog_kflight_track,
     flightlog_probe_ardupilot, flightlog_decode_ardupilot_csv,
-    flightlog_import_ardupilot, flightlog_import_raw,
+    flightlog_import_ardupilot, flightlog_import_raw, flightlog_import_ulog,
     blackbox_decoder_available, blackbox_decoder_version, download_blackbox_decode,
     flightlog_link_flights, flightlog_unlink_flight, flightlog_find_linkable,
     flightlog_commit_pending_session, flightlog_discard_pending_session,
     flightlog_continue_pending_session,
     flightlog_scan_orphan_sessions, flightlog_recover_discard, flightlog_recover_save_incomplete,
     flightlog_recover_continue,
+    flightlog_hires_info, flightlog_hires_parse, flightlog_hires_sample, flightlog_hires_drop,
+    flightlog_hires_cleanup, flightlog_scratch_dir, flightlog_scratch_clear,
     mission_db_save, mission_db_get, mission_db_for_flight, flight_link_mission,
     flight_logged_wp_count, mission_db_geocode, mission_db_find_by_hash, mission_db_update,
     flight_unlink_mission, mission_db_delete, mission_db_flights, mission_db_list,
@@ -75,13 +84,18 @@ use commands::geozone::{geozone_read_all, geozone_write_all};
 use commands::fence::{fence_read_all, fence_write_all};
 use commands::rally::{rally_read_all, rally_write_all};
 use commands::info::{get_app_version, is_debug_mode};
-use commands::system::system_on_battery;
+use commands::system::{system_active_net_is_wifi, system_on_battery};
+use commands::storage::{share_file, storage_pick_folder};
 use commands::video::{
     video_ffmpeg_status, video_ffmpeg_download,
     video_engine_status, video_engine_download, video_webrtc_start, video_webrtc_offer,
     video_webrtc_stop,
     video_list_native_devices, video_probe_device,
     video_native_mjpeg_start, video_native_mjpeg_stop, video_rtsp_mjpeg_start,
+    video_rtsp_native_start, video_rtsp_native_stop,
+    video_rtsp_native_sink_rect, video_rtsp_native_sink_visible, video_rtsp_native_stats,
+    video_linux_hole_spike,
+    video_rtsp_native_sink_buffer, video_rtsp_native_sink_orient,
 };
 use video::{MediaMtx, MjpegServer};
 use commands::logging::{set_log_level, get_log_path, log_session_settings, log_frontend};
@@ -382,14 +396,37 @@ pub fn run() {
     let log_level = if debug_flag { log::LevelFilter::Debug } else { log::LevelFilter::Warn };
     logging::init(log_level, is_portable());
 
+    // Linux: the GStreamer decode sink renders through gtkglsink, whose GL context is GDK's — and
+    // GTK3 creates a DESKTOP GL context by default (measured on a Pi 5: OpenGL 3.1, legacy). Such a
+    // context has no direct DMABuf import (`GL_OES_EGL_image_external`), so a hardware decoder's
+    // tiled output — the Pi 5 HEVC block's `NV12_128C8` — goes down gst-gl's per-plane path and
+    // ABORTS the process in `gst_gl_format_from_video_info` ("code should not be reached", twice in
+    // the field on 2026-09-04). A GLES context imports it directly (measured there: zero-copy at
+    // 60 fps). Nothing else in the process uses GDK's GL — WebKitGTK renders through its own EGL,
+    // wry/tao draw nothing — so ask GTK for GLES before it initializes; a user-set value wins.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("GDK_GL").is_none() {
+        std::env::set_var("GDK_GL", "gles");
+    }
+
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init());
+
+    // Mobile only: use native CoreLocation/Android location for the GCS position so the OS permission
+    // prompt is labelled with the app name instead of the WebView origin ("localhost"). Desktop keeps
+    // the browser `navigator.geolocation` path (WebKitGTK grants are handled in setup() below).
+    #[cfg(mobile)]
+    {
+        builder = builder.plugin(tauri_plugin_geolocation::init());
+    }
 
     // Persist + restore the main window's size/position/maximized state across launches.
     // The plugin saves to the OS app-config dir, which portable mode cannot redirect on
     // Windows (Known-Folder API, not env-driven) — so only enable it in installed mode.
     // Portable builds trade window-geometry persistence for a clean, system-path-free runtime.
+    // Desktop only: there is no free-floating window to persist on mobile.
+    #[cfg(desktop)]
     if !is_portable() {
         use tauri_plugin_window_state::StateFlags;
         // Persist everything EXCEPT the decorations flag: we run with a custom titlebar
@@ -404,6 +441,16 @@ pub fn run() {
 
     builder
         .setup(|_app| {
+            // Android: record where app data actually landed, and flag any disagreement with Tauri's
+            // own idea of it (see `android::log_resolved_dirs`).
+            #[cfg(target_os = "android")]
+            android::log_resolved_dirs(_app.handle());
+
+            // Linux: re-host the WebView over the native video layer (hole-punch decode sink,
+            // MOBILE_RTSP.md P2.3). Needs the transparent window from tauri.linux.conf.json.
+            #[cfg(target_os = "linux")]
+            video::linux_host::install(_app.handle());
+
             // Linux/WebKitGTK: stop trackpad/keyboard gestures from zooming the whole WebView frame.
             // WebKitGTK handles these natively in GTK and ignores any JS `preventDefault`, so they can
             // only be suppressed here (Windows/WebView2 + macOS use the JS guard in `+layout.svelte`).
@@ -537,6 +584,7 @@ pub fn run() {
         // readiness poll) without pinning an async runtime thread.
         .manage(std::sync::Arc::new(MediaMtx::new()))
         .manage(MjpegServer::new())
+        .manage(video::rtsp_native::NativeRtsp::new())
         .invoke_handler(tauri::generate_handler![
             location::location_os_last,
             location::location_os_start,
@@ -550,6 +598,7 @@ pub fn run() {
             disconnect,
             get_app_version,
             is_debug_mode,
+            link_status::telemetry_track_since,
             set_log_level,
             get_log_path,
             log_session_settings,
@@ -655,6 +704,8 @@ pub fn run() {
             flightlog_blackbox_file_info,
             flightlog_delete_blackbox_file,
             flightlog_compact_db,
+            flightlog_backup_info,
+            flightlog_backup_delete,
             flightlog_export_track,
             flightlog_import_kflight,
             flightlog_kflight_list,
@@ -664,6 +715,7 @@ pub fn run() {
             flightlog_decode_ardupilot_csv,
             flightlog_import_ardupilot,
             flightlog_import_raw,
+            flightlog_import_ulog,
             blackbox_decoder_available,
             blackbox_decoder_version,
             download_blackbox_decode,
@@ -674,6 +726,13 @@ pub fn run() {
             flightlog_discard_pending_session,
             flightlog_continue_pending_session,
             flightlog_scan_orphan_sessions,
+            flightlog_hires_info,
+            flightlog_hires_parse,
+            flightlog_hires_sample,
+            flightlog_hires_drop,
+            flightlog_hires_cleanup,
+            flightlog_scratch_dir,
+            flightlog_scratch_clear,
             flightlog_recover_discard,
             flightlog_recover_save_incomplete,
             flightlog_recover_continue,
@@ -684,6 +743,9 @@ pub fn run() {
             terrain_cache_stats,
             terrain_cache_clear,
             system_on_battery,
+            system_active_net_is_wifi,
+            storage_pick_folder,
+            share_file,
             video_ffmpeg_status,
             video_ffmpeg_download,
             video_engine_status,
@@ -695,6 +757,14 @@ pub fn run() {
             video_probe_device,
             video_native_mjpeg_start,
             video_rtsp_mjpeg_start,
+            video_rtsp_native_start,
+            video_rtsp_native_stop,
+            video_rtsp_native_sink_rect,
+            video_rtsp_native_sink_visible,
+            video_linux_hole_spike,
+            video_rtsp_native_stats,
+            video_rtsp_native_sink_buffer,
+            video_rtsp_native_sink_orient,
             video_native_mjpeg_stop,
             radar_configure,
             radar_set_center,
@@ -741,6 +811,7 @@ pub fn run() {
                 use tauri::Manager;
                 app.state::<std::sync::Arc<MediaMtx>>().stop();
                 app.state::<MjpegServer>().stop();
+                app.state::<video::rtsp_native::NativeRtsp>().stop();
             }
         });
 }

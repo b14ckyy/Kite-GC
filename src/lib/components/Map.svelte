@@ -71,9 +71,10 @@
   import { toTelemetryData } from "$lib/adapters/telemetryAdapter";
   import { sunAltitudeDeg, cesiumLikeBrightness } from "$lib/utils/sun";
   import { ensureUserLocation, resolveUserLocation, userGeoLocation } from "$lib/helpers/userLocation";
+  import { isMobile } from "$lib/platform";
   import { radarVehicles, radarSelection, enrichList, type RadarSnapshot, type EnrichedVehicle } from "$lib/stores/radarTracking";
   import { radarAlertLevels, type AlertLevel } from "$lib/controllers/radarAlerts";
-  import { gcsLocation, gcsAccuracyM, setGcsManual } from "$lib/stores/gcsLocation";
+  import { gcsLocation, gcsAccuracyM, gcsWatchPaused, setGcsManual } from "$lib/stores/gcsLocation";
   import { aeroData, aeroFocus, type AeroPoint, type Airspace } from "$lib/stores/airspace";
   import { airspaceStyle, aeroPointIconHtml, aeroPointInfo, airspaceMinZoom, airportMinZoom, obstacleMinZoom, RC_MIN_ZOOM, airspaceContainsPoint, airspaceIsRelevant, isAirspaceHidden } from "$lib/helpers/airspaceStyle";
   import { type RadarMapSettings, type GcsMode } from "$lib/stores/settings";
@@ -96,6 +97,7 @@
     onToggleMapView,
     miniControls = false,
     viewMode = $bindable<'free' | 'follow' | 'heading-follow'>('free'),
+    centerInsetRight = 0,
     radarActive = false,
     radarMapSettings = null,
     radarReference = null,
@@ -116,6 +118,11 @@
     miniControls?: boolean;
     /** 2D follow state, lifted so it persists across 2D↔3D remounts (bound by the parent). */
     viewMode?: 'free' | 'follow' | 'heading-follow';
+    /** Width (css px) of an overlay covering the map's RIGHT edge (the phone's widget column,
+     *  Dev-Docs active/PHONE_UI.md): the map keeps running underneath it (visible through the glass),
+     *  but every "centre" — follow, heading-up pivot, explicit centring — refers to the middle of the
+     *  uncovered area. The corner controls move left by the same amount. */
+    centerInsetRight?: number;
     /** Radar master enable (renders nothing when off). */
     radarActive?: boolean;
     /** Map rendering controls for radar contacts, or null to render none. */
@@ -221,6 +228,7 @@
   let nightDimFactor = 1.0;                    // current applied imagery brightness (1 = none)
   let nightTimer: ReturnType<typeof setInterval> | undefined; // auto re-check (live time drift)
   let unsubUserGeo: (() => void) | undefined;  // recompute when OS geolocation resolves
+  let unsubGeoCenter: (() => void) | undefined; // mobile-only one-shot: center map on first OS fix
 
   // Flight trail (colored segments by flight mode)
   let trailSegments: L.Polyline[] = [];
@@ -414,7 +422,9 @@
   let unsubHome2d: (() => void) | undefined;
   const gcsMode = $derived<GcsMode>($settings.gcsMode);
 
-  /** Satellite-dish marker on a dark translucent disc; mode tweaks the affordance (drag ring / live dot). */
+  /** Satellite-dish marker on a dark translucent disc; mode tweaks the affordance (drag ring / live
+   *  dot). The live pulse hides while continuous updates are paused for a Wi-Fi video stream
+   *  (gcsWatchPaused) — a blinking "live" dot on a frozen position would lie. */
   function createGcsIcon(mode: GcsMode): L.DivIcon {
     return L.divIcon({
       className: "gcs-icon",
@@ -424,7 +434,7 @@
           <path d="M4 10a7.31 7.31 0 0 0 10 10Z"/><path d="m9 15 3-3"/>
           <path d="M17 13a6 6 0 0 0-6-6"/><path d="M21 13A10 10 0 0 0 11 3"/>
         </svg>
-        ${mode === "continuous" ? '<span class="gcs-live"></span>' : ""}
+        ${mode === "continuous" && !get(gcsWatchPaused) ? '<span class="gcs-live"></span>' : ""}
       </div>`,
       iconSize: [30, 30],
       iconAnchor: [15, 15],
@@ -481,8 +491,9 @@
     updateGcsAccuracyCircle();
   }
 
-  // Rebuild the GCS marker when the mode changes (location/accuracy handled by their subscriptions).
-  $effect(() => { gcsMode; if (map) updateGcsMarker(); });
+  // Rebuild the GCS marker when the mode or the video-pause state changes (location/accuracy
+  // handled by their subscriptions).
+  $effect(() => { gcsMode; $gcsWatchPaused; if (map) updateGcsMarker(); });
 
   /** Right-click on the empty map → "Set GCS here" (manual mode only). */
   function onMapContextMenu(e: L.LeafletMouseEvent) {
@@ -1322,6 +1333,27 @@
     followRaf = requestAnimationFrame(followLoop);
   }
 
+  /** How far (container px, x) the VISUAL centre sits left of Leaflet's container centre. Only the
+   *  plain (unrotated) container needs it: in heading-up mode the oversized square is itself centred
+   *  on the visual centre (see applyHeadingUpSize), so Leaflet's centre already is the pivot. */
+  function centerOffsetX(): number {
+    return mapContainer?.classList.contains('heading-up') ? 0 : centerInsetRight / 2;
+  }
+
+  /** setView that puts `ll` at the VISUAL centre (the middle of the uncovered map area), not at the
+   *  container centre — identical to map.setView when nothing covers the map. Pixel math at the
+   *  target zoom, so the result doesn't depend on the current view. */
+  function centerOn(ll: L.LatLngExpression, zoom: number, options?: L.ZoomPanOptions) {
+    if (!map) return;
+    const dx = centerOffsetX();
+    if (dx === 0) {
+      map.setView(ll, zoom, options);
+      return;
+    }
+    const target = map.unproject(map.project(L.latLng(ll), zoom).add(L.point(dx, 0)), zoom);
+    map.setView(target, zoom, options);
+  }
+
   /** Apply the eased frame: move + redraw the active marker always, recenter (+rotate) the map
    *  only while following. */
   function applyFollowFrame() {
@@ -1335,7 +1367,7 @@
     // Don't fight an in-progress zoom animation (would snap mid-zoom).
     if (viewMode !== 'free' && !(map as unknown as { _animatingZoom?: boolean })._animatingZoom) {
       followDrivingView = true;
-      map.setView(ll, map.getZoom(), { animate: false }); // fires moveend synchronously → saveMapState (guarded)
+      centerOn(ll, map.getZoom(), { animate: false }); // fires moveend synchronously → saveMapState (guarded)
       followDrivingView = false;
       if (viewMode === 'heading-follow') {
         mapHeading = followCurrent.heading;
@@ -1493,6 +1525,12 @@
         activeTrailLine = L.polyline(trailCurrentPositions, { color, weight: 2, opacity: 0.7 }).addTo(map);
       }
     }
+  }
+
+  /** Trail points the backend buffered while the page was hidden — through the live path, so the
+   *  per-mode segments come out as if live. */
+  export function appendTrailPoints(points: { lat: number; lon: number; mode: string }[]): void {
+    for (const p of points) updateTrail(p.lat, p.lon, p.mode);
   }
 
   /** Thin plain black trail of GPS movement while disarmed (monitoring only). */
@@ -1725,6 +1763,10 @@
       zoomControl: false,
       attributionControl: true,
     });
+    // Only the tile provider's credit (its licence asks for it). Leaflet's own prefix — a link with
+    // a flag since 1.9 — is a courtesy the BSD licence does not require; a GCS carries no third-party
+    // statements (Marc, PHONE_VIDEO.md D8).
+    map.attributionControl.setPrefix(false);
 
     // Initialize tile cache with persisted size limit
     initTileCache(s.mapCacheMaxMB);
@@ -1759,7 +1801,7 @@
     unsubFence = fenceWorking.subscribe(() => updateFence());
     // Rally-points overlay follows the working copy.
     unsubRally = rallyWorking.subscribe(() => updateRally());
-    unsubAeroFocus = aeroFocus.subscribe((f) => { if (f && map) map.setView([f.lat, f.lon], Math.max(map.getZoom(), 11)); });
+    unsubAeroFocus = aeroFocus.subscribe((f) => { if (f && map) centerOn([f.lat, f.lon], Math.max(map.getZoom(), 11)); });
     map.on("moveend", updateAirspace);
     map.on("click", onGuidedClick); // Guided "fly here" target popup (vehicle control)
     map.on("click", onAirspaceClick); // click empty map / airspace fill → list all airspaces there
@@ -1767,6 +1809,26 @@
     // Auto night mode: physical location + re-check every minute so wall-clock drift fades day↔night.
     ensureUserLocation(); // OS geolocation (resolves async)
     unsubUserGeo = userGeoLocation.subscribe(() => recomputeNight()); // recompute once it resolves
+
+    // Mobile: open the map where the operator actually is. When the first OS geolocation fix resolves
+    // (and the user has not panned/zoomed away from the launch centre or started following a UAV yet),
+    // recenter there once. Desktop keeps its persisted centre. A manual pan/zoom cancels it so we never
+    // yank the view out from under the user.
+    if (isMobile) {
+      // Cancel the auto-center as soon as the user interacts with the map (drag/zoom), so we never yank
+      // the view once they've started navigating. NOT a position-diff check: invalidateSize() nudges the
+      // centre by sub-pixels on layout, which would falsely read as "user moved" and suppress centering.
+      let geoCentered = false;
+      const cancelGeoCenter = () => { geoCentered = true; };
+      map.once("dragstart", cancelGeoCenter);
+      map.once("zoomstart", cancelGeoCenter);
+      unsubGeoCenter = userGeoLocation.subscribe((g) => {
+        if (geoCentered || !g || !map) return;
+        if (viewMode !== "free") { geoCentered = true; return; }
+        geoCentered = true;
+        centerOn([g.lat, g.lon], Math.max(map.getZoom(), 13), { animate: true });
+      });
+    }
     nightTimer = setInterval(recomputeNight, 60_000);
     recomputeNight();
 
@@ -1785,6 +1847,10 @@
       mapResizeObs = new ResizeObserver(() => {
         if (viewMode === 'heading-follow') applyHeadingUpSize(true);
         map?.invalidateSize();
+        // A follow target is re-centred only by the next follow frame — a static one (the GCS with
+        // no UAV, a paused replay) never sends one, and after a swap into a small frame the target
+        // sat wherever the old size had put it (Marc: "the anchor is off to the north-west").
+        if (viewMode !== 'free') applyFollowFrame();
       });
       mapResizeObs.observe(mapContainer.parentElement);
     }
@@ -1805,7 +1871,7 @@
         // Go-to-UAV on connect: jump once to the craft at a sensible zoom, deferred to the first 3D fix
         // (no fix ⇒ no UAV rendered). Free pan only; following already centres on the UAV.
         if (pendingUavJump && viewMode === 'free' && !get(replayActive) && t.fixType >= 3 && t.numSat >= MIN_FIX_SATELLITES && isValidGpsCoordinate(t.lat, t.lon)) {
-          map?.setView([t.lat, t.lon], 16);
+          centerOn([t.lat, t.lon], 16);
           pendingUavJump = false;
         }
 
@@ -1874,19 +1940,21 @@
     if (!mapContainer) return;
     const wrapper = mapContainer.parentElement;
     if (enable && wrapper) {
-      // Make container a square with side = diagonal of the wrapper.
-      // A rotated square with side = diagonal always fully covers the
-      // original rectangle, no matter the rotation angle.
+      // Make the container a square centred on the VISUAL centre (the wrapper centre, shifted left
+      // by half of a right-edge overlay — `centerInsetRight`) whose side is twice the distance from
+      // that pivot to the farthest wrapper corner: a square that size, rotated about its own centre,
+      // covers the whole wrapper at any angle. With no inset this is the wrapper's diagonal.
       const w = wrapper.clientWidth;
       const h = wrapper.clientHeight;
-      const diag = Math.ceil(Math.sqrt(w * w + h * h));
-      const offX = Math.round((diag - w) / 2);
-      const offY = Math.round((diag - h) / 2);
-      mapContainer.style.width = `${diag}px`;
-      mapContainer.style.height = `${diag}px`;
+      const px = w / 2 - centerInsetRight / 2;
+      const py = h / 2;
+      const reach = Math.sqrt(Math.max(px, w - px) ** 2 + Math.max(py, h - py) ** 2);
+      const side = Math.ceil(2 * reach);
+      mapContainer.style.width = `${side}px`;
+      mapContainer.style.height = `${side}px`;
       mapContainer.style.position = 'absolute';
-      mapContainer.style.top = `-${offY}px`;
-      mapContainer.style.left = `-${offX}px`;
+      mapContainer.style.top = `${Math.round(py - side / 2)}px`;
+      mapContainer.style.left = `${Math.round(px - side / 2)}px`;
       mapContainer.classList.add('heading-up');
     } else {
       mapContainer.style.width = '';
@@ -1899,6 +1967,38 @@
     // Leaflet must recalculate container size
     setTimeout(() => map?.invalidateSize(), 50);
   }
+
+  // A changed right-edge inset moves the visual centre: re-square the heading-up container (the
+  // follow loop re-centres on its next frame by itself).
+  $effect(() => {
+    void centerInsetRight;
+    if (map && viewMode === 'heading-follow') applyHeadingUpSize(true);
+  });
+  // Mini map (the widget tile everywhere, the docked frame on the phone — `miniControls`): ZOOM
+  // only. Wheel and pinch reach Leaflet as before; every click / double-click / context menu /
+  // single-pointer press is swallowed in the CAPTURE phase on the container, before Leaflet, the
+  // mission layers (add / drag a waypoint), the GCS context menu or the geozone handles see it
+  // (Marc, 2026-09-04: the widget map placed and moved waypoints). Dragging is already off in
+  // the follow modes; Leaflet's double-click zoom goes too — a double-tap is the swap gesture on
+  // the surfaces around the frame, and the phone relays touches to the tile underneath.
+  $effect(() => {
+    if (!map || !mapContainer) return;
+    if (!miniControls) {
+      map.doubleClickZoom.enable();
+      return;
+    }
+    map.doubleClickZoom.disable();
+    const swallow = (e: Event) => {
+      e.stopImmediatePropagation();
+      if (e.type === 'contextmenu') e.preventDefault(); // pointer events stay uncancelled: pinch = touch events
+    };
+    const el = mapContainer;
+    const types = ['click', 'dblclick', 'contextmenu', 'mousedown', 'mouseup', 'pointerdown', 'pointerup'];
+    for (const t of types) el.addEventListener(t, swallow, true);
+    return () => {
+      for (const t of types) el.removeEventListener(t, swallow, true);
+    };
+  });
 
   // Apply the side-effects for a view mode (idempotent): heading-up container sizing, panning enable/
   // disable, zoom anchor, and an immediate follow-frame. Must run for EXTERNAL viewMode changes too
@@ -1981,6 +2081,7 @@
     if (followRaf != null) cancelAnimationFrame(followRaf);
     if (nightTimer) clearInterval(nightTimer);
     unsubUserGeo?.();
+    unsubGeoCenter?.();
     unsubRadar?.();
     unsubRadarSel?.();
     unsubRadarAlerts?.();
@@ -2023,8 +2124,8 @@
   });
 </script>
 
-<div class="map-wrapper">
-  <div bind:this={mapContainer} class="map" class:tile-overlap={isWebKitGtk} style="--map-rotation: 0deg"></div>
+<div class="map-wrapper" style="--map-inset-right: {centerInsetRight}px">
+  <div bind:this={mapContainer} class="map" class:tile-overlap={isWebKitGtk} class:mini={miniControls} style="--map-rotation: 0deg"></div>
 
   <div class="map-controls-corner">
     {#if !miniControls}
@@ -2140,6 +2241,30 @@
     transform-origin: center center;
   }
 
+  /* Mini map (the video-swap frame / widget tile, `miniControls`): every marker at half size, in
+     proportion to the little frame. Leaflet positions the marker root itself (its transform is
+     Leaflet's), so the CHILD — the icon's own root element — is scaled around the icon centre;
+     centre-anchored icons keep their anchor exactly, bottom-anchored ones move by a few px. */
+  .map.mini {
+    --marker-scale: 0.5;
+  }
+  .map.mini :global(.leaflet-marker-icon:not(.mission-wp-icon):not(.mission-fbh-icon) > *) {
+    transform: scale(var(--marker-scale));
+    transform-origin: 50% 50%;
+  }
+  /* Mission waypoint icons (INAV + ArduPilot layers): the SVG child is scaled — Leaflet's own
+     positioning transform on the marker root stays untouched — by the UI scale × a global 0.85
+     (a touch smaller everywhere, Marc 2026-09-04) × the map's --marker-scale. transform-origin
+     keeps the on-coordinate anchor fixed (teardrops anchor bottom-centre, circles centre). */
+  :global(.mission-wp-icon > svg),
+  :global(.mission-fbh-icon > svg) {
+    transform: scale(calc(var(--ui-scale, 1) * 0.85 * var(--marker-scale, 1)));
+    transform-origin: 50% 50%;
+  }
+  :global(.mission-wp-icon.wp-anchor-bottom > svg) {
+    transform-origin: 50% 100%;
+  }
+
   /* Counter-rotate Leaflet controls so they stay readable */
   :global(.map.heading-up .leaflet-control-zoom),
   :global(.map.heading-up .leaflet-control-attribution) {
@@ -2149,11 +2274,61 @@
   .map-controls-corner {
     position: absolute;
     bottom: 8px;
-    right: 8px;
+    right: calc(8px + var(--map-inset-right, 0px)); /* clear of a right-edge overlay (phone) */
     z-index: 1000;
     display: flex;
     flex-direction: column;
     gap: 8px;
+  }
+
+  /* On mobile the zoom/compass buttons sit on top of the Leaflet attribution label at the very bottom.
+     Lift the button cluster above the label (and clear of the iPad home indicator), and push the
+     attribution to the bottom-left so the two no longer collide. */
+  :global(html.is-mobile) .map-controls-corner {
+    bottom: calc(34px + var(--safe-bottom, 0px));
+  }
+  :global(html.is-mobile) :global(.leaflet-control-attribution) {
+    margin-bottom: var(--safe-bottom, 0px);
+  }
+  /* Provider credit in the app's dark theme (every platform) instead of Leaflet's white box. */
+  :global(.leaflet-control-attribution) {
+    background: rgba(46, 46, 46, 0.85);
+    color: #949494;
+    font-size: 10px;
+  }
+  :global(.leaflet-control-attribution a) {
+    color: #37a8db;
+  }
+  /* Phone (Dev-Docs archive/PHONE_UI.md D5/D11): no zoom buttons (pinch), the corner cluster sits
+     at the very bottom-right of the map area, leaning on the widget column and riding along when
+     the column slides aside for the replay player (the inset already carries the shift). The
+     attribution starts right after the bottom-left chip row (arming / sensors / Debug), whose
+     right edge PhoneBottomChips publishes as --phone-bottom-w. */
+  :global(html.is-phone) .map-zoom-btn {
+    display: none;
+  }
+  :global(html.is-phone) .map-controls-corner {
+    /* bottom-aligned with the chip row (PHONE_VIDEO.md D8) — may cover the credit, accepted */
+    bottom: calc(8px + var(--safe-bottom, 0px));
+    transition: right 0.3s ease;
+  }
+  :global(html.is-mobile) :global(.leaflet-bottom.leaflet-right) {
+    right: auto;
+    left: 0;
+  }
+  /* Phone: the credit lies on the bottom edge, flush against the widget column (the inset carries
+     the column's slide for the replay player); Leaflet's own control margins are dropped. */
+  :global(html.is-phone) :global(.leaflet-bottom.leaflet-right) {
+    left: auto;
+    right: var(--map-inset-right, 0px);
+    transition: right 0.3s ease;
+  }
+  :global(html.is-phone) :global(.leaflet-bottom.leaflet-right .leaflet-control-attribution) {
+    margin: 0 0 var(--safe-bottom, 0px) 0;
+    max-width: calc(100vw - var(--map-inset-right, 0px) - var(--phone-bottom-w, 0px) - var(--phone-debug-w, 0px) - 8px);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .map-control-btn {
@@ -2356,13 +2531,12 @@
     cursor: move;
     border-style: dashed;
   }
-  /* Continuous: a small green "live" dot, top-right.
-     `will-change: opacity` is load-bearing, not a micro-optimisation: without it this infinite pulse
-     has no compositor layer of its own, so every frame invalidates the enclosing map layer — which is
-     full-screen, and sits under several backdrop-filter surfaces that must then re-sample and re-blur.
-     An 8px dot cost ~25 % CPU here and ~70 % on a weak laptop, permanently, even with the marker
-     scrolled far outside the viewport (the invalidated rect still lives in that layer). Promoted, the
-     animation is a pure layer-alpha change: no repaint, no re-blur. */
+  /* Continuous: a small green "live" dot, top-right. Chromium runs the opacity loop on the
+     compositor thread by itself (`will-change` measured as a no-op and was removed, d95e1e4) —
+     the remaining cost is per produced FRAME (backdrop-filter re-sampling + GPU submission),
+     which desktop GPUs hide and WebKitGTK/Android do not: on the Teclast M11 this dot alone
+     measured ~150 % of a core. Those platforms run the shared 1 Hz blink instead (below,
+     stores/pulseBlink.ts). */
   :global(.gcs-icon .gcs-dot .gcs-live) {
     position: absolute;
     top: -1px;

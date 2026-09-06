@@ -119,6 +119,8 @@ jobs:
             librsvg2-dev \
             libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
             libudev-dev \
             patchelf \
             file \
@@ -176,6 +178,8 @@ jobs:
             librsvg2-dev \
             libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
             libudev-dev \
             patchelf \
             file \

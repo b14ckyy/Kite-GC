@@ -25,10 +25,13 @@
     setVideoResolution,
     setCameraFps,
     setVideoMirror,
+    setVideoRotate180,
+    setUnobstructedFullscreen,
     setDisableHwAccel,
     setVideoKind,
     setRtspUrl,
     setRtspTransport,
+    setRtspNativeClient,
     saveRtspConnection,
     updateRtspConnection,
     removeRtspConnection,
@@ -49,6 +52,8 @@
     setNativeCodec,
   } from '$lib/stores/video';
   import { canvasSink, mjpegSink, mjpegStats } from '$lib/controllers/mjpegSink';
+  import { nativeSurface, activeNativeSurface } from '$lib/controllers/nativeVideo';
+  import { nativeSinkFps } from '$lib/stores/video';
   import {
     codecsFor,
     codecLabel,
@@ -60,7 +65,7 @@
   import Button from '$lib/components/panel/Button.svelte';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import Toggle from '$lib/components/panel/Toggle.svelte';
-  import { isLinux } from '$lib/platform';
+  import { isLinux, isMobile, isAndroid, isIOS, isPhone } from '$lib/platform';
   import VideoReconnectOverlay from '$lib/components/video/VideoReconnectOverlay.svelte';
 
   let videoEl = $state<HTMLVideoElement | null>(null);
@@ -172,13 +177,20 @@
     return () => unlisteners.forEach((u) => u());
   });
 
-  // Native capture is available on every OS (Linux V4L2 / Windows DirectShow / macOS AVFoundation).
-  const KINDS: VideoKind[] = ['camera', 'rtsp', 'native'];
+  // Native capture is available on every desktop OS (Linux V4L2 / Windows DirectShow / macOS
+  // AVFoundation) — all through ffmpeg, which cannot run on mobile. There, the OS's own capture
+  // devices (USB/OTG included) already arrive through the camera kind (getUserMedia), so the native
+  // kind would add nothing and is not offered.
+  const KINDS: VideoKind[] = isMobile ? ['camera', 'rtsp'] : ['camera', 'rtsp', 'native'];
 
   // MediaMTX is only needed for the WebRTC path. A WebView without it (WebKitGTK builds with WebRTC
   // compiled out — Raspberry Pi OS among them) runs RTSP entirely on ffmpeg now, so demanding the
   // engine there would block a machine that already has everything it needs.
-  const needsEngine = isWebrtcAvailable();
+  // …and not at all when the experimental in-process native RTSP client is active.
+  const needsEngine = $derived(isWebrtcAvailable() && !$videoState.rtspNativeClient);
+
+  // Mirror can't reach Android's hardware-decoded surface (see the toggle row's comment).
+  const mirrorUnavailable = $derived(isAndroid && $videoState.nativeSink);
 
   // MJPEG FPS counter — onload fires per frame in multipart streams.
   let mjpegFps = $state(0);
@@ -268,6 +280,8 @@
   // WebKitGTK fires it once), hence the configured rate as a last resort.
   const fpsText = $derived.by(() => {
     const s = $videoState;
+    // Native decode sink: the backend counts what it actually presents (1 Hz poll).
+    if (s.nativeSink) return $nativeSinkFps ? $nativeSinkFps.toFixed(0) : '–';
     const drawn = $canvasSink ? ($mjpegStats?.fpsOut ?? 0) : mjpegFps;
     if (s.kind === 'native' && s.mjpegUrl) return drawn ? drawn.toFixed(0) : String(s.nativeSel.fps);
     const cur = s.mjpegUrl ? drawn : ($videoRtcStats?.decodeFps ?? measuredFps);
@@ -290,6 +304,7 @@
   const streamCodec = $derived.by(() => {
     const s = $videoState;
     if (s.kind !== 'rtsp' || s.status !== 'live') return null;
+    if (s.nativeSink) return s.nativeSinkCodec ?? 'H.264';
     if (!s.mjpegUrl) return $videoRtcStats?.codec ?? null;
     return s.activeTranscode === 'copy' ? 'MJPEG' : 'H.264 → MJPEG';
   });
@@ -315,6 +330,10 @@
     | null => {
     const s = $videoState;
     if (s.status !== 'live') return null;
+    if (s.nativeSink) {
+      // The whole chain is hardware: RTP → depacketizer → MF decoder (DXVA) → D3D layer.
+      return { method: 'Kite RTSP client → native decode', transcode: null, transcodeHw: true, surfaceHw: true };
+    }
     if (s.mjpegUrl) {
       const mode = s.activeTranscode;
       const engine = mode ? TRANSCODE_LABEL[mode] : undefined;
@@ -323,7 +342,9 @@
         // Always ffmpeg: the image path reads the source itself and broadcasts `-f mpjpeg` through
         // Kite's own server. It used to run through go2rtc, whose republish was measured as the
         // cause of the freezes, and naming go2rtc here now would point at the wrong component.
-        method: `ffmpeg → MJPEG${via ? ` (${via})` : ''}`,
+        method: s.rtspEngine === 'kite'
+          ? 'Kite RTSP client → MJPEG'
+          : `ffmpeg → MJPEG${via ? ` (${via})` : ''}`,
         transcode: mode,
         // A stream copy is better than hardware — there is nothing to accelerate — so it counts as
         // "not costing us anything", not as a software fallback.
@@ -341,7 +362,7 @@
 {#snippet headerActions()}
   <Button
     variant={$videoState.enabled ? 'danger' : 'data'}
-    disabled={!$videoState.enabled && $videoState.kind === 'rtsp' && needsEngine && engineChecked && !engineVer}
+    disabled={($videoState.kind === 'rtsp' && isIOS) || (!$videoState.enabled && $videoState.kind === 'rtsp' && needsEngine && engineChecked && !engineVer)}
     onclick={toggleVideo}
   >
     {$videoState.enabled ? $t('video.stop') : $t('video.start')}
@@ -350,18 +371,28 @@
 
 {#snippet body()}
   <div class="vp-body">
-    <div class="preview" style="aspect-ratio: {$videoState.aspect};">
-      {#if $videoState.mjpegUrl}
+    <!-- Phone (PHONE_VIDEO.md D1): no preview in the panel — the docked window / widget is the
+         picture; the panel is settings only. -->
+    {#if !isPhone}
+    <div class="preview" class:nv-active={$activeNativeSurface === 'preview'} style="aspect-ratio: {$videoState.aspect};">
+      {#if $videoState.nativeSink && $videoState.status === 'live'}
+        <!-- Native decode sink (hole punch): the video is a hardware layer BELOW the WebView; this
+             div is the transparent hole it shows through. Lowest surface priority — a flight
+             surface (floating window / widget) takes the picture over this preview. -->
+        <div class="native-hole" class:armed={$activeNativeSurface === 'preview'} use:nativeSurface={'preview'}>
+          {#if $activeNativeSurface !== 'preview'}<span>{$t('video.sinkElsewhere')}</span>{/if}
+        </div>
+      {:else if $videoState.mjpegUrl}
         <!-- MJPEG multipart feed — off-thread reader where the WebView allows it, else an <img>
              whose per-part `load` carries both the frame count and the picture size. -->
         {#if $canvasSink}
-          <canvas use:mjpegSink class:mirror={$videoState.mirror}></canvas>
+          <canvas use:mjpegSink class:mirror={$videoState.mirror} class:rot180={$videoState.rotate180}></canvas>
         {:else}
           <!-- svelte-ignore a11y_missing_attribute -->
           <img
             src={$videoState.mjpegUrl}
             alt="Live video"
-            class:mirror={$videoState.mirror}
+            class:mirror={$videoState.mirror} class:rot180={$videoState.rotate180}
             onload={mjpegFrame}
             onerror={reportMjpegError}
           />
@@ -373,7 +404,7 @@
           autoplay
           muted
           playsinline
-          class:mirror={$videoState.mirror}
+          class:mirror={$videoState.mirror} class:rot180={$videoState.rotate180}
           class:hidden={$videoState.status !== 'live'}
           onloadedmetadata={(e) => reportVideoSize(e.currentTarget.videoWidth, e.currentTarget.videoHeight)}
           onerror={() => console.error('[video] element error', videoEl?.error?.code, videoEl?.error?.message)}
@@ -395,6 +426,7 @@
       {/if}
       <VideoReconnectOverlay />
     </div>
+    {/if}
 
     {#if $videoState.status === 'live'}
       <div class="info-line">
@@ -584,6 +616,21 @@
         </div>
       </div>
 
+      <!-- Experimental: Kite's own in-process RTSP client (MOBILE_RTSP.md) — no MediaMTX, no
+           ffmpeg. MJPEG on the multipart path; H.264/HEVC decode in hardware (Windows).
+           On Android it is the ONLY route (no sidecars on mobile) — forced on in the store,
+           nothing to toggle. -->
+      {#if !isAndroid}
+        <div class="field-row" title={$t('video.nativeClientHint')}>
+          <Toggle
+            checked={$videoState.rtspNativeClient}
+            onchange={(c) => void setRtspNativeClient(c)}
+            id="vp-native-rtsp"
+          />
+          <span class="label">{$t('video.nativeClient')}</span>
+        </div>
+      {/if}
+
       <!-- Saved connections: single-line rows, selectable / editable / deletable (ADS-B-provider style). -->
       {#if $videoState.rtspConnections.length}
         <div class="rtsp-list">
@@ -625,16 +672,23 @@
         </div>
       {/if}
 
-      <!-- Receive-buffer depth in frame times, applied live to the WebRTC receiver and persisted.
-           0 = minimal latency (engine default); each step trades one frame time of latency for
-           smoothing of arrival jitter. Expressed in frames so the same setting means the same
-           smoothing at 30 and 60 fps — the ms value is derived from the measured incoming rate. -->
+      <!-- Receive-buffer depth in frame times, applied live and persisted — to the WebRTC
+           receiver, the MJPEG reader's cushion, or the native decode sink's paced
+           presentation queue. 0 = minimal latency (present on arrival/decode); each step
+           trades one frame time of latency for smoothing of arrival jitter. Expressed in
+           frames so the same setting means the same smoothing at 30 and 60 fps. -->
       <div class="field buffer-row" title={$t('video.bufferHint')}>
         <span class="label">{$t('video.bufferLabel')}</span>
         <NumberStepper bind:value={$rtspBufferFrames} min={0} max={3} step={1} />
       </div>
 
-      {#if needsEngine && engineChecked && !engineVer}
+      {#if isIOS}
+        <!-- RTSP is a placeholder on iOS only: the engine cannot run there, and the Kite-client
+             route arrives with MOBILE_RTSP P3. Android runs the Kite client (forced above). -->
+        <div class="ffmpeg-box">
+          <p class="hint">{$t('video.rtspMobilePlaceholder')}</p>
+        </div>
+      {:else if needsEngine && engineChecked && !engineVer}
         <!-- MediaMTX is required for the WebRTC path only — see `needsEngine`. -->
         <div class="ffmpeg-box">
           <p class="hint">{$t('video.engineMissing')}</p>
@@ -649,7 +703,7 @@
             {#if engineMsg}<p class="hint err">{engineMsg}</p>{/if}
           {/if}
         </div>
-      {:else if engineVer}
+      {:else if engineVer && !$videoState.rtspNativeClient}
         {#if $videoState.status === 'live' && $videoState.rtspEngine && !$videoState.mjpegUrl}
           <!-- Which reader the engine uses — a WebRTC-path question. The image path does not go
                through the engine at all, and the pipeline line above already names what it runs. -->
@@ -677,31 +731,66 @@
       {/if}
     {/if}
 
-    <div class="field-row">
-      <Toggle checked={$videoState.mirror} onchange={(c) => setVideoMirror(c)} id="vp-mirror" />
-      <span class="label">{$t('video.mirror')}</span>
+    <!-- Mirror is unavailable on Android's HARDWARE decode path (no MediaCodec key, and both
+         view and buffer transforms were tried and measurably don't reach the surface — see
+         android_sink.rs); the DOM-rendered routes (MJPEG, camera) mirror fine there. -->
+    <div class="field-row" title={mirrorUnavailable ? $t('video.mirrorNativeAndroid') : undefined}>
+      <Toggle
+        checked={$videoState.mirror}
+        disabled={mirrorUnavailable}
+        onchange={(c) => setVideoMirror(c)}
+        id="vp-mirror"
+      />
+      <span class="label" class:muted={mirrorUnavailable}>{$t('video.mirror')}</span>
     </div>
 
-    <!-- Escape hatch: some driver/hardware combinations pass the backend probe but still misbehave on
-         a live feed. Hardware stays the default; this forces the software transcode. -->
     <div class="field-row">
-      <Toggle
-        checked={$videoState.disableHwAccel}
-        onchange={(c) => void setDisableHwAccel(c)}
-        id="vp-no-hwaccel"
-      />
-      <span class="label">{$t('video.disableHwAccel')}</span>
+      <Toggle checked={$videoState.rotate180} onchange={(c) => setVideoRotate180(c)} id="vp-rot180" />
+      <span class="label">{$t('video.rotate180')}</span>
     </div>
-    <p class="hint">{$t('video.disableHwAccelHint')}</p>
+
+    <!-- Unobstructed fullscreen: the map-swap video shrinks so occupied widget panels and the
+         nav rail stay clear of the picture; an empty/hidden panel releases its edge. Off = the
+         video fills the whole map zone as before. Layout math lives in +page.svelte. -->
+    {#if !isPhone}
+      <!-- Not on the phone: no docks to retreat from, four corner buttons at most (PHONE_VIDEO.md). -->
+      <div class="field-row" title={$t('video.unobstructedHint')}>
+        <Toggle
+          checked={$videoState.unobstructedFullscreen}
+          onchange={(c) => setUnobstructedFullscreen(c)}
+          id="vp-unobstructed"
+        />
+        <span class="label">{$t('video.unobstructed')}</span>
+      </div>
+    {/if}
+
+    <!-- Escape hatch: some driver/hardware combinations pass the backend probe but still misbehave on
+         a live feed. Hardware stays the default; this forces the software transcode. It only steers
+         the ffmpeg transcode path — the native RTSP client decodes through the OS (Media Foundation),
+         where this switch has no say, so it is hidden there. -->
+    {#if !($videoState.kind === 'rtsp' && $videoState.rtspNativeClient)}
+      <div class="field-row">
+        <Toggle
+          checked={$videoState.disableHwAccel}
+          onchange={(c) => void setDisableHwAccel(c)}
+          id="vp-no-hwaccel"
+        />
+        <span class="label">{$t('video.disableHwAccel')}</span>
+      </div>
+      <p class="hint">{$t('video.disableHwAccelHint')}</p>
+    {/if}
   </div>
 {/snippet}
 
 {#snippet footer()}
   <div class="vp-footer">
-    <!-- Floating window: a mode button (active = on) — can be toggled off from here. -->
-    <Button variant="mode" active={$videoState.floating} onclick={() => toggleFloating()}>
-      {$t('video.floatingWindow')}
-    </Button>
+    <!-- Floating window: a mode button (active = on) — can be toggled off from here. Not on the
+         phone: the docked window has its own button next to the map controls (PHONE_VIDEO.md D3). -->
+    {#if !isPhone}
+      <Button variant="mode" active={$videoState.floating} onclick={() => toggleFloating()}>
+        {$t('video.floatingWindow')}
+      </Button>
+    {/if}
     <!-- Detached PiP window: a one-way action (can't be closed from inside the app) → plain button.
          PiP is bound to a <video>/MediaStream, so it can't carry an MJPEG (<img>) feed → disabled then. -->
     {#if pipSupported}
@@ -738,11 +827,33 @@
      dirtying shared layer tiles every frame on WebKitGTK. */
   .preview video { width: 100%; height: 100%; object-fit: contain; display: block; will-change: transform; }
   .preview video.mirror { transform: scaleX(-1); }
+  .preview video.rot180 { transform: rotate(180deg); }
+  .preview video.mirror.rot180 { transform: scaleY(-1); }
   .preview video.hidden { visibility: hidden; }
   .preview img,
   .preview canvas { width: 100%; height: 100%; object-fit: contain; display: block; will-change: transform; }
   .preview img.mirror,
   .preview canvas.mirror { transform: scaleX(-1); }
+  .preview img.rot180,
+  .preview canvas.rot180 { transform: rotate(180deg); }
+  .preview img.mirror.rot180,
+  .preview canvas.mirror.rot180 { transform: scaleY(-1); }
+  /* Native-sink hole: the preview stops painting while it holds the hardware video layer. */
+  .preview.nv-active { background: transparent; }
+  .native-hole {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #888;
+    font-size: 12px;
+    text-align: center;
+    background: #000;
+    /* Matches .preview's rounding — the surface router cuts the hole with this radius. */
+    border-radius: 6px;
+  }
+  .native-hole.armed { background: transparent; }
   .preview-placeholder {
     position: absolute;
     inset: 0;
@@ -790,6 +901,7 @@
   .field { display: flex; flex-direction: column; gap: 4px; }
   .field-row { display: flex; align-items: center; gap: 8px; }
   .label { font-size: 12px; color: #aaa; }
+  .label.muted { color: #666; }
   /* Match the framework form-control height (md button = 28px). */
   .field select {
     height: 28px;

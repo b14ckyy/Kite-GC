@@ -10,10 +10,16 @@
 //!
 //! Default: `true` in debug builds (so `tauri dev` behaves exactly as before, no flag needed), `false`
 //! in release (until `--debug` flips it on). The value never changes after startup.
+//!
+//! Mobile has no command line, so a release APK could never reach `--debug`. For local test
+//! builds pushed over ADB, compiling with the environment variable `KITE_DEBUG_UI` set (any
+//! value) bakes debug mode in: `KITE_DEBUG_UI=1 tauri android build`. CI/release builds don't
+//! set it, so tester/sideload builds keep the release default.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-static ENABLED: AtomicBool = AtomicBool::new(cfg!(debug_assertions));
+static ENABLED: AtomicBool =
+    AtomicBool::new(cfg!(debug_assertions) || option_env!("KITE_DEBUG_UI").is_some());
 
 /// Enable debug mode (called once at startup when `--debug` is present). Idempotent.
 pub fn set(on: bool) {

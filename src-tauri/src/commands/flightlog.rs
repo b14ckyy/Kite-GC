@@ -13,15 +13,44 @@ use crate::flightlog::types::{
     VehicleAggregate, VehicleFile, VehicleInput,
 };
 
+/// Whether the app runs in portable mode (`.portable` marker next to the executable).
+fn portable_mode() -> bool {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.join(".portable").exists()))
+        .unwrap_or(false)
+}
+
 /// Resolve the database path and open a connection.
 /// Uses the provided custom path, or falls back to defaults.
 fn open_db(custom_path: &str) -> Result<rusqlite::Connection, String> {
-    let portable = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|p| p.join(".portable").exists()))
-        .unwrap_or(false);
-    let path = db::resolve_db_path(custom_path, portable);
+    let path = db::resolve_db_path(custom_path, portable_mode());
     db::open_database(&path).map_err(|e| format!("Database error: {}", e))
+}
+
+// ── Pre-migration backup (Settings → maintenance row; Dev-Docs active/DB_MIGRATIONS.md) ──
+
+/// Metadata of the single pre-migration backup file, or absent when none exists.
+#[derive(serde::Serialize)]
+pub struct DbBackupInfo {
+    pub path: String,
+    pub size_bytes: u64,
+}
+
+#[tauri::command]
+pub fn flightlog_backup_info(db_path: Option<String>) -> Option<DbBackupInfo> {
+    let backup =
+        db::backup_path_for(&db::resolve_db_path(&db_path.unwrap_or_default(), portable_mode()));
+    let meta = std::fs::metadata(&backup).ok()?;
+    Some(DbBackupInfo { path: backup.to_string_lossy().into_owned(), size_bytes: meta.len() })
+}
+
+/// Delete the pre-migration backup (explicit user action — it can be multi-GB).
+#[tauri::command]
+pub fn flightlog_backup_delete(db_path: Option<String>) -> Result<(), String> {
+    let backup =
+        db::backup_path_for(&db::resolve_db_path(&db_path.unwrap_or_default(), portable_mode()));
+    std::fs::remove_file(&backup).map_err(|e| format!("could not delete {}: {e}", backup.display()))
 }
 
 #[inline]
@@ -840,11 +869,9 @@ pub fn flightlog_export_track(
         .ok_or_else(|| "Flight not found".to_string())?;
     let track = db::get_flight_track(&conn, flight_id)
         .map_err(|e| format!("DB error: {}", e))?;
-    crate::flightlog::track_export::export_track(
-        &flight,
-        &track,
-        std::path::Path::new(&output_path),
-    )
+    crate::user_file::with_write_path(&output_path, |p| {
+        crate::flightlog::track_export::export_track(&flight, &track, p)
+    })
 }
 
 /// Export the raw blackbox binary file for a flight
@@ -858,8 +885,9 @@ pub fn flightlog_export_blackbox(
     let (filename, data) = db::get_blackbox_file(&conn, flight_id)
         .map_err(|e| format!("DB error: {}", e))?
         .ok_or_else(|| "No blackbox file attached to this flight".to_string())?;
-    std::fs::write(&output_path, &data)
-        .map_err(|e| format!("Failed to write file: {}", e))?;
+    crate::user_file::with_write_path(&output_path, |p| {
+        std::fs::write(p, &data).map_err(|e| format!("Failed to write file: {}", e))
+    })?;
     Ok(filename)
 }
 
@@ -916,7 +944,9 @@ pub fn flightlog_export(
     db_path: Option<String>,
 ) -> Result<usize, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
-    exchange::export_flights(&conn, &flight_ids, std::path::Path::new(&output_path))
+    crate::user_file::with_write_path(&output_path, |p| {
+        exchange::export_flights(&conn, &flight_ids, p)
+    })
 }
 
 /// Import flights from a .kflight file into the main database
@@ -926,7 +956,7 @@ pub fn flightlog_import_kflight(
     db_path: Option<String>,
 ) -> Result<exchange::ImportResult, String> {
     let conn = open_db(&db_path.unwrap_or_default())?;
-    exchange::import_flights(&conn, std::path::Path::new(&file_path))
+    crate::user_file::with_read_path(&file_path, |p| exchange::import_flights(&conn, p))
 }
 
 /// List flights contained in a .kflight file (for preview / offline replay)
@@ -1099,6 +1129,78 @@ pub async fn flightlog_import_ardupilot(
     Ok(result)
 }
 
+/// Import a PX4 ULog .ulg flash log (native decoder: `flightlog::ulog`).
+#[tauri::command]
+pub async fn flightlog_import_ulog(
+    file_path: String,
+    db_path: Option<String>,
+    force_import: bool,
+    lang: Option<String>,
+    app_handle: tauri::AppHandle,
+) -> Result<BlackboxImportStatus, String> {
+    let db_path = db_path.unwrap_or_default();
+    let db_path_for_import = db_path.clone();
+
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let emit_progress = |progress: u8, stage: &str, message: &str| {
+            let _ = app_handle.emit(
+                "flightlog-import-progress",
+                BlackboxImportProgress {
+                    stage: stage.to_string(),
+                    progress,
+                    message: message.to_string(),
+                },
+            );
+        };
+
+        emit_progress(0, "start", "Preparing PX4 ULog import...");
+        let conn = open_db(&db_path_for_import)?;
+        crate::flightlog::ulog::import_ulog_log_with_progress(
+            &conn,
+            std::path::Path::new(&file_path),
+            force_import,
+            emit_progress,
+        )
+    })
+    .await
+    .map_err(|e| format!("ULog import task failed: {}", e))??;
+
+    // Auto-geocode on successful import + offer linking against a live MAVLink recording
+    // (same post-processing as the ArduPilot import).
+    if let BlackboxImportStatus::Success { flight_id, rows_imported } = &result {
+        let conn = open_db(&db_path)?;
+        if let Some(flight) = db::get_flight(&conn, *flight_id)
+            .map_err(|e| format!("Query error: {}", e))?
+        {
+            if flight.location_name.as_deref().unwrap_or("").trim().is_empty() {
+                if let (Some(lat), Some(lon)) = (flight.start_lat, flight.start_lon) {
+                    if let Some(name) = crate::flightlog::geocode::reverse_geocode(
+                        lat, lon,
+                        lang.as_deref().unwrap_or("en"),
+                    ).await {
+                        conn.execute(
+                            "UPDATE flights SET location_name = ?1 WHERE id = ?2",
+                            rusqlite::params![name, flight_id],
+                        )
+                        .map_err(|e| format!("Update error: {}", e))?;
+                    }
+                }
+            }
+
+            if let Ok(Some(linkable)) = db::find_linkable_live_flight(&conn, &flight.craft_name, flight.start_time, flight.duration_sec.unwrap_or(0)) {
+                log::info!("[LINK-AUTO] Found linkable live flight {} for ULog import {}", linkable.id, flight_id);
+                return Ok(BlackboxImportStatus::SuccessLinkable {
+                    flight_id: *flight_id,
+                    rows_imported: *rows_imported,
+                    linkable_flight_id: linkable.id,
+                });
+            }
+        }
+    }
+
+    Ok(result)
+}
+
 // --- Flight Linking Commands -------------------------------------------------
 
 /// Link two flights together (live recording ? blackbox import).
@@ -1219,6 +1321,137 @@ fn sessions_dir(custom: &str) -> std::path::PathBuf {
         .parent()
         .unwrap_or(std::path::Path::new("."))
         .join("sessions")
+}
+
+// ── Hi-res replay cache (Dev-Docs active/HIRES_REPLAY.md) ────────────────────────────────
+
+/// Sibling of `sessions/`: the DB folder is where the user provisioned space for flight data, so
+/// the disposable full-rate caches live there too (and follow a configured DB folder).
+fn hires_cache_dir(custom: &str) -> std::path::PathBuf {
+    resolve_main_db_path(custom)
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .join("hires-cache")
+}
+
+/// Gates the HI-RES toggle in the replay player and feeds the parse popup's size estimate.
+#[derive(serde::Serialize)]
+pub struct HiresInfo {
+    /// An archived original log exists (partner fallback included) and its format is parseable.
+    pub available: bool,
+    pub filename: Option<String>,
+    /// Size of the archived original (the cache will be roughly 5–6× this).
+    pub blob_size_bytes: Option<i64>,
+    /// A cache file from an earlier toggle already exists → re-enabling skips the parse.
+    pub cache_path: Option<String>,
+}
+
+#[tauri::command]
+pub fn flightlog_hires_info(flight_id: i64, db_path: Option<String>) -> Result<HiresInfo, String> {
+    let custom = db_path.unwrap_or_default();
+    let conn = open_db(&custom)?;
+    let info = db::blackbox_file_info(&conn, flight_id).map_err(|e| format!("Query error: {}", e))?;
+    match info {
+        Some((filename, size)) if crate::flightlog::hires::supported_extension(&filename) => {
+            let cache = crate::flightlog::hires::cache_path_for(&hires_cache_dir(&custom), flight_id);
+            Ok(HiresInfo {
+                available: true,
+                filename: Some(filename),
+                blob_size_bytes: Some(size),
+                cache_path: cache.exists().then(|| cache.to_string_lossy().to_string()),
+            })
+        }
+        _ => Ok(HiresInfo { available: false, filename: None, blob_size_bytes: None, cache_path: None }),
+    }
+}
+
+/// Re-parse the flight's archived log at full rate into the per-flight cache DB. Emits
+/// `flightlog-hires-progress` (own event — a hi-res parse must not fight the import bar).
+#[tauri::command]
+pub async fn flightlog_hires_parse(
+    flight_id: i64,
+    db_path: Option<String>,
+    app_handle: tauri::AppHandle,
+) -> Result<crate::flightlog::hires::HiresParseOutcome, String> {
+    let custom = db_path.unwrap_or_default();
+    tauri::async_runtime::spawn_blocking(move || {
+        let emit_progress = |progress: u8, stage: &str, message: &str| {
+            let _ = app_handle.emit(
+                "flightlog-hires-progress",
+                BlackboxImportProgress {
+                    stage: stage.to_string(),
+                    progress,
+                    message: message.to_string(),
+                },
+            );
+        };
+        let conn = open_db(&custom)?;
+        crate::flightlog::hires::parse_to_cache(&conn, flight_id, &hires_cache_dir(&custom), emit_progress)
+    })
+    .await
+    .map_err(|e| format!("Hi-res parse task failed: {}", e))?
+}
+
+/// Latest hi-res row at or before `timestamp_ms` — the per-tick value source while HI-RES is on.
+/// `None` before the first row (the player falls back to the 10 Hz sample).
+#[tauri::command]
+pub fn flightlog_hires_sample(
+    cache_path: String,
+    timestamp_ms: i64,
+) -> Result<Option<TelemetryRecord>, String> {
+    let conn = rusqlite::Connection::open_with_flags(
+        std::path::Path::new(&cache_path),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .map_err(|e| format!("Cannot open hi-res cache: {}", e))?;
+    db::get_hires_sample(&conn, timestamp_ms).map_err(|e| format!("Hi-res sample error: {}", e))
+}
+
+/// Delete a flight's hi-res cache (flight deselected / player closed). Toggling HI-RES off keeps it.
+#[tauri::command]
+pub fn flightlog_hires_drop(flight_id: i64, db_path: Option<String>) {
+    let cache = crate::flightlog::hires::cache_path_for(
+        &hires_cache_dir(&db_path.unwrap_or_default()),
+        flight_id,
+    );
+    db::remove_temp_session(&cache);
+}
+
+/// Startup cleanup: wipe crash leftovers from the cache dir (every cache is reproducible on demand).
+#[tauri::command]
+pub fn flightlog_hires_cleanup(db_path: Option<String>) {
+    crate::flightlog::hires::cleanup_cache_dir(&hires_cache_dir(&db_path.unwrap_or_default()));
+}
+
+// ── Scratch store: open a log WITHOUT importing it (Dev-Docs active/OPEN_LOG_WITHOUT_IMPORT.md) ──
+//
+// `<db_dir>/scratch/` is a throwaway flight-DB directory. The frontend hands it to the ordinary
+// importers as their `db_path`, so an opened file becomes a normal flight there (10 Hz track,
+// archived blob, its own `hires-cache/`) and every logbook/replay command works unchanged. It is
+// wiped before each open, on close, and at app start (crash leftovers) — nothing in it is precious.
+
+fn scratch_dir(custom: &str) -> std::path::PathBuf {
+    resolve_main_db_path(custom)
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .join("scratch")
+}
+
+/// The scratch directory to pass as `db_path` for an opened (not imported) log.
+#[tauri::command]
+pub fn flightlog_scratch_dir(db_path: Option<String>) -> String {
+    scratch_dir(&db_path.unwrap_or_default()).to_string_lossy().to_string()
+}
+
+/// Delete the scratch directory (flight DB, its hires cache, everything).
+#[tauri::command]
+pub fn flightlog_scratch_clear(db_path: Option<String>) {
+    let dir = scratch_dir(&db_path.unwrap_or_default());
+    if dir.exists() {
+        if let Err(e) = std::fs::remove_dir_all(&dir) {
+            log::warn!("Failed to clear scratch dir {}: {}", dir.display(), e);
+        }
+    }
 }
 
 /// Scan `<db_dir>/sessions/*.ktmp` for an orphan session left by a crash/close. Empty temp files

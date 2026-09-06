@@ -659,7 +659,7 @@
 <!-- Detail (right) column toolbar: Export flush right (mirrors the flight view's export toolbar). -->
 {#snippet detailToolbar()}
   <div class="bmv2-detail-actions">
-    <Button variant="data" icon="export" onclick={exportBattery}>{$t('batteryMgr.export')}</Button>
+    <Button variant="data" icon="export" onclick={exportBattery} title={$t('batteryMgr.export')} />
   </div>
 {/snippet}
 
@@ -710,7 +710,7 @@
         <div class="bmv2-pack-actions">
           <Button variant="standard" icon="edit" onclick={startEdit}>{$t('batteryMgr.edit')}</Button>
           <Button variant="standard" icon="add" onclick={startUsage}>{$t('batteryMgr.addUsage')}</Button>
-          <Button variant="danger" icon="delete" onclick={deleteBattery}>{$t('batteryMgr.delete')}</Button>
+          <Button variant="danger" icon="delete" onclick={deleteBattery} title={$t('batteryMgr.delete')} />
         </div>
         <div class="section-heading">{$t('batteryMgr.linkedFlights')} ({linkedFlights.length})</div>
         {#each linkedFlights as f (f.id)}
@@ -1010,6 +1010,15 @@
   .modal-card { box-sizing: border-box; background: #2e2e2e; border: 1px solid rgba(55, 168, 219, 0.35); border-radius: 8px; padding: 14px; width: min(540px, 92vw); max-height: 88vh; overflow-y: auto; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5); }
 
   .bat-status { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); z-index: 1001; padding: 6px 12px; font-size: 11px; color: #f39c12; background: rgba(0, 0, 0, 0.8); border-radius: 6px; }
+  /* Phone: centre on the map area — a screen-centred pill runs under the widget column. */
+  :global(html.is-phone) .bat-status {
+    left: calc((100vw - var(--phone-panel-w, 0px) + var(--phone-shift, 0px)) / 2);
+    max-width: calc(100vw - var(--phone-panel-w, 0px) + var(--phone-shift, 0px) - 24px);
+    box-sizing: border-box;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 
   @media (max-width: 760px) {
     .form-grid { grid-template-columns: 1fr; }

@@ -223,10 +223,13 @@
     filter: drop-shadow(0 0 2px rgba(60, 255, 140, 0.55))
             drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.9));
   }
-  /* Conformal AHI fills the viewport (full vertical FOV ↔ full height). */
+  /* Conformal AHI fills the viewport (full vertical FOV ↔ full height). The viewport ends where a
+     right-edge overlay begins (--map-inset-right, the phone's widget column; 0 elsewhere) — the 3D
+     projection is shifted the same way, so the HUD centre and the camera axis coincide. */
   .fpv-ahi {
     inset: 0;
-    width: 100%;
+    /* an <svg> is a replaced element: `right` would be ignored, the width must be explicit */
+    width: calc(100% - var(--map-inset-right, 0px));
     height: 100%;
   }
   /* The conformal AHI uses much finer lines/digits than the instrument cluster (≈1/3 weight):
@@ -239,7 +242,7 @@
   /* Instrument cluster: centred, never larger than half the viewport. */
   .fpv-instruments {
     top: 50%;
-    left: 50%;
+    left: calc((100% - var(--map-inset-right, 0px)) / 2);
     transform: translate(-50%, -50%);
     width: 100%;
     height: 100%;

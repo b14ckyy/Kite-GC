@@ -14,7 +14,8 @@
   import GimbalStick from './GimbalStick.svelte';
   import type { StickData } from '$lib/helpers/stickInput';
 
-  let { data, barHeight = 0 }: { data: StickData; barHeight?: number } = $props();
+  // `compact`: the player is collapsed to its strip — pads stay, the legend goes.
+  let { data, barHeight = 0, compact = false }: { data: StickData; barHeight?: number; compact?: boolean } = $props();
 </script>
 
 <div class="stick-overlay">
@@ -22,15 +23,13 @@
     <GimbalStick
       primary={data.primary.left}
       secondary={data.secondary?.left ?? null}
-      label={$t('player.stickThrottleYaw')}
     />
     <GimbalStick
       primary={data.primary.right}
       secondary={data.secondary?.right ?? null}
-      label={$t('player.stickPitchRoll')}
     />
   </div>
-  {#if data.secondary}
+  {#if data.secondary && !compact}
     <div class="stick-legend">
       <span class="leg"><span class="leg-dot leg-primary"></span>{$t('player.stickCommand')}</span>
       <span class="leg"><span class="leg-dot leg-secondary"></span>{$t('player.stickRaw')}</span>
@@ -39,18 +38,24 @@
 </div>
 
 <style>
-  /* Anchored to the LogPlayer (centred, 800px wide): sit just right of its right edge. */
+  /* Anchored to the LogPlayer (centred, --log-player-w wide — the same variable LogPlayer uses):
+     sit just right of its right edge. */
   .stick-overlay {
     position: absolute;
     top: 62px;
     left: 50%;
-    transform: translateX(calc(400px + 28px)); /* clear gap to the right of the centred 800px bar */
+    transform: translateX(calc(var(--log-player-w, 640px) / 2 + 28px));
     z-index: 50;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 4px;
     pointer-events: none; /* purely informational — never steal clicks from the map/player */
+  }
+
+  /* Phone: the map area is barely wider than the player itself — no room beside it. */
+  :global(html.is-phone) .stick-overlay {
+    display: none;
   }
 
   .sticks-row {

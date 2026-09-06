@@ -152,6 +152,37 @@ fn px4_mode_id(main_mode: u8, sub_mode: u8) -> Option<&'static str> {
     })
 }
 
+/// Classify a PX4 ULog `vehicle_status.nav_state` into the canonical model (no modifiers).
+/// ULog flash logs carry the commander's NAVIGATION_STATE_* enum, NOT the MAVLink
+/// `px4_custom_mode` union the HEARTBEAT uses, so the .ulg importer needs its own table.
+/// Ids map onto the same canonical set as `px4_mode_id`, so the frontend registry and
+/// translations cover them already. Values from PX4 msg/versioned/VehicleStatus.msg (v1.14+);
+/// a few pre-1.14 states occupied the gaps (6-9, 16) and fall through to the raw-id form.
+pub fn classify_px4_nav_state(nav_state: u8) -> FlightModeState {
+    let id = match nav_state {
+        0 => "manual",            // MANUAL
+        1 => "px4_altitude",      // ALTCTL
+        2 => "px4_position",      // POSCTL
+        3 => "mission",           // AUTO_MISSION
+        4 => "px4_hold",          // AUTO_LOITER -> "Hold"
+        5 => "px4_return",        // AUTO_RTL -> "Return"
+        6 => "px4_position",      // POSITION_SLOW
+        10 => "acro",             // ACRO
+        12 => "land",             // DESCEND
+        13 => "px4_termination",  // TERMINATION
+        14 => "px4_offboard",     // OFFBOARD
+        15 => "px4_stabilized",   // STAB
+        17 => "takeoff",          // AUTO_TAKEOFF
+        18 => "land",             // AUTO_LAND
+        19 => "px4_follow_me",    // AUTO_FOLLOW_TARGET
+        20 => "px4_precland",     // AUTO_PRECLAND
+        21 => "px4_orbit",        // ORBIT
+        22 => "px4_vtol_takeoff", // AUTO_VTOL_TAKEOFF
+        n => return FlightModeState::primary(&format!("px4_nav_{}", n)),
+    };
+    FlightModeState::primary(id)
+}
+
 /// Classify an ArduPilot HEARTBEAT custom_mode into the canonical model (no modifiers). The id set
 /// mirrors the old frontend `ARDU_PLANE_MODES` / `ARDU_COPTER_MODES` tables; the registry resolves
 /// label + category. Plane vs Copter is selected from the fc_variant string.

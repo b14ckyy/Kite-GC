@@ -110,15 +110,27 @@
     return yaw;
   }
 
-  // Climb rate: the FC's own vario (baro/nav-filtered, smooth — same source the
-  // Vario widget shows), lightly averaged. Differencing GPS-MSL over the sparse
-  // history points was coarse and made the forward angle snap in big steps.
-  const VARIO_AVG = 5;
-  const varioBuf: number[] = [];
-  function avgVario(v: number): number {
-    varioBuf.push(v);
-    if (varioBuf.length > VARIO_AVG) varioBuf.shift();
-    return varioBuf.reduce((a, b) => a + b, 0) / varioBuf.length;
+  // Glide-path slope (the FC's own vario / ground speed — differencing GPS-MSL over the sparse
+  // history points was coarse and made the forward angle snap in big steps), smoothed with a
+  // time-based PT1 low-pass: fc = 0.2 Hz → τ ≈ 0.8 s, ~2.5 s to settle. The raw ratio swung the
+  // projected line up and down on every vario/speed wobble. dt comes from the telemetry
+  // timestamps, so the filter is sample-rate independent; a discontinuity (new flight,
+  // scrub-back) resets it (see `accumulate`).
+  const GLIDE_LPF_HZ = 0.2;
+  const GLIDE_TAU_S = 1 / (2 * Math.PI * GLIDE_LPF_HZ);
+  let slopeFilt: number | null = null;
+  let slopeTs = 0;
+  function filterSlope(raw: number, ts: number): number {
+    if (slopeFilt == null) {
+      slopeFilt = raw;
+      slopeTs = ts;
+      return raw;
+    }
+    if (ts <= slopeTs) return slopeFilt; // same telemetry frame — nothing new to integrate
+    const dt = Math.min(5, (ts - slopeTs) / 1000);
+    slopeTs = ts;
+    slopeFilt += (raw - slopeFilt) * (1 - Math.exp(-dt / GLIDE_TAU_S));
+    return slopeFilt;
   }
 
   // ── State ──────────────────────────────────────────────────────────
@@ -157,7 +169,7 @@
     const jumped = !!prev && haversineM(prev.lat, prev.lon, t.lat, t.lon) > HIST_RESET_DIST;
     if (ts < lastTs || jumped) {
       histBuf.length = 0;
-      varioBuf.length = 0;
+      slopeFilt = null;
       profiler.reset();
     }
     lastTs = ts;
@@ -179,7 +191,7 @@
       accumulate(t);
       const speed = t.groundSpeed || 0;
       const heading = currentHeading(histBuf, speed, t.yaw || 0);
-      const vario = avgVario(t.vario || 0);
+      const vario = t.vario || 0;
 
       step = nextStep(speed, step);
       const fwdDistM = (step * 2) / 3;
@@ -214,7 +226,7 @@
       mslValid = tm != null;
       curAltMsl = tm ?? t.altMsl;
       terrainAtUav = forward.length ? forward[0].elev : null;
-      slope = speed > SPEED_FILTER ? vario / speed : 0;
+      slope = filterSlope(speed > SPEED_FILTER ? vario / speed : 0, t.lastUpdate);
 
       // Vertical auto-fit over the visible window (expand fast, shrink slow)
       let tMin = Infinity;
@@ -270,12 +282,23 @@
   });
 
   // ── Render geometry ────────────────────────────────────────────────
-  // Readout font size scales with the widget (like the other instrument widgets).
-  const fsVal = $derived(Math.max(11, Math.min(30, height * 0.13)));
+  // Readout font size scales with the widget (like the other instrument widgets). Bounded by the
+  // WIDTH too: in the square size states (L/S) the two readouts share half the room they have in
+  // the wide tile, so the height-only rule made them collide.
+  // The AGL readout is left-aligned (not centred over the marker), so the two readouts split the
+  // width cleanly and the font can use it: 0.08 × width is the wide tile's old value and a readable
+  // size in the squares.
+  const fsVal = $derived(Math.max(9, Math.min(30, height * 0.13, width * 0.08)));
   const fsLabel = $derived(fsVal * 0.72);
-  // left pad for the relative-altitude axis, bottom pad for the distance axis,
-  // top pad sized so the (altitude-tracking) UAV marker can't reach the AGL text
-  const PAD = $derived({ l: 34, r: 8, t: Math.ceil(fsVal * 1.25) + 12, b: 18 });
+  const fsAxis = $derived(Math.round(Math.max(9, Math.min(13, fsVal * 0.8))));
+  // Pads follow the axis font: left = room for a 3-digit relative-altitude label, bottom = one
+  // distance-label line. Top pad sized so the (altitude-tracking) UAV marker can't reach the AGL text.
+  const PAD = $derived({
+    l: Math.round(fsAxis * 2.2) + 5,
+    r: 6,
+    t: Math.ceil(fsVal * 1.25) + 12,
+    b: fsAxis + 6,
+  });
   const plotW = $derived(Math.max(10, width - PAD.l - PAD.r));
   const plotH = $derived(Math.max(10, height - PAD.t - PAD.b));
   const histDist = $derived(step / 3);
@@ -396,7 +419,7 @@
   const aheadWarn = $derived(minAheadM != null && minAheadM < 0);
 </script>
 
-<div class="widget-card" style="width:{width}px; height:{height}px;">
+<div class="widget-card" style="width:{width}px; height:{height}px; --axis-fs:{fsAxis}px;">
   {#if hasData}
     <svg {width} {height} viewBox="0 0 {width} {height}">
       <defs>
@@ -414,7 +437,7 @@
       <!-- distance axis (0 under the UAV, positive both ways) -->
       {#each distTicks as tx}
         <line class="grid" x1={tx.x} y1={PAD.t} x2={tx.x} y2={baselineY} />
-        <text class="axis-label" x={tx.x} y={baselineY + 13} text-anchor="middle">{tx.label}</text>
+        <text class="axis-label" x={tx.x} y={baselineY + fsAxis} text-anchor="middle">{tx.label}</text>
       {/each}
 
       <!-- terrain (history + estimated ahead) -->
@@ -437,7 +460,7 @@
       <rect class="plot-border" x={PAD.l} y={PAD.t} width={plotW} height={plotH} />
     </svg>
 
-    <div class="readout agl" style="left:{markerX}px;">
+    <div class="readout agl" style="left:{PAD.l}px;">
       <span class="r-label" style="font-size:{fsLabel}px;">AGL</span>
       <span class="r-val" style="font-size:{fsVal}px;">{aglLabel}</span>
     </div>
@@ -510,7 +533,7 @@
   }
   .axis-label {
     fill: #949494;
-    font-size: 13px;
+    font-size: var(--axis-fs, 13px);
   }
   /* readouts — overlay, widget typography */
   .readout {
@@ -523,11 +546,10 @@
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
     white-space: nowrap;
   }
-  .readout.agl {
-    transform: translateX(-50%); /* centered over the UAV marker (left set inline) */
-  }
+  /* .readout.agl is left-aligned with the plot (left set inline) — a centred-over-marker readout
+     collided with the forward one in the square size states. */
   .readout.fwd {
-    right: 8px;
+    right: 6px;
   }
   .r-label {
     font-weight: 600;

@@ -97,8 +97,51 @@ pub fn open_database(path: &Path) -> SqlResult<Connection> {
         conn.execute_batch("VACUUM;")?;
     }
 
+    // Migration safety net (Dev-Docs active/DB_MIGRATIONS.md): when schema steps are pending on an
+    // EXISTING database, snapshot it first — flight archives are irreplaceable. Exactly ONE backup
+    // is kept (the file is multi-GB with blackbox blobs); each upgrade replaces the previous one.
+    // A fresh DB (v0) has nothing to lose and gets none. If the snapshot fails (disk full, …) the
+    // open fails too — migrating without the safety copy is not acceptable.
+    let version = get_user_version(&conn)?;
+    if version > 0 && version < CURRENT_SCHEMA_VERSION {
+        backup_before_migration(&conn, path, version)?;
+    }
+
     migrate(&conn)?;
     Ok(conn)
+}
+
+/// Sibling file of the DB holding the single pre-migration backup — it lives next to `flights.db`
+/// on purpose, so it follows the user-configured DB folder and can be moved/kept manually.
+pub fn backup_path_for(db_path: &Path) -> PathBuf {
+    db_path.with_file_name("flights.pre-migration-backup.db")
+}
+
+/// WAL-consistent snapshot of the whole DB via `VACUUM INTO` a temp file, then renamed over the
+/// previous backup — the old backup survives until the new snapshot is complete.
+fn backup_before_migration(conn: &Connection, db_path: &Path, from_version: u32) -> SqlResult<()> {
+    let target = backup_path_for(db_path);
+    let tmp = db_path.with_file_name("flights.pre-migration-backup.db.tmp");
+    let _ = std::fs::remove_file(&tmp);
+    log::warn!(
+        "[flightlog] schema upgrade v{from_version} -> v{CURRENT_SCHEMA_VERSION} pending — backing up the database to {}",
+        target.display()
+    );
+    if let Err(e) = conn.execute("VACUUM INTO ?1", [tmp.to_string_lossy().as_ref()]) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    let _ = std::fs::remove_file(&target); // single-backup policy: replaced by the new snapshot
+    std::fs::rename(&tmp, &target).map_err(|e| {
+        rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_IOERR),
+            Some(format!(
+                "could not finalize the pre-migration backup at {}: {e}",
+                target.display()
+            )),
+        )
+    })?;
+    Ok(())
 }
 
 /// Full defragmenting VACUUM — rebuilds the whole DB file to squeeze out fragmentation. Expensive
@@ -113,6 +156,13 @@ pub fn compact_database(conn: &Connection) -> SqlResult<()> {
 /// - Empty db_path + normal mode → <AppData>/kite-gc/flights.db
 /// - Non-empty db_path → <db_path>/flights.db
 pub fn resolve_db_path(custom_path: &str, portable: bool) -> PathBuf {
+    // Android: a user-chosen location is a SAF tree URI, not a path. The database cannot live there
+    // (SQLite needs POSIX open/seek/lock for the journal), so the live DB stays on the platform
+    // default below and the session-end mirror copies a snapshot into the granted tree
+    // (user_file::mirror_session).
+    #[cfg(target_os = "android")]
+    let custom_path = if custom_path.starts_with("content://") { "" } else { custom_path };
+
     if !custom_path.is_empty() {
         return PathBuf::from(custom_path).join("flights.db");
     }
@@ -145,7 +195,9 @@ pub fn resolve_db_path(custom_path: &str, portable: bool) -> PathBuf {
                 .join("flights.db");
         }
     }
-    #[cfg(target_os = "macos")]
+    // macOS and iOS both resolve to Library/Application Support. On iOS `HOME` is the app's sandbox
+    // container root, so this stays inside the app's private, backed-up storage.
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
         if let Ok(home) = std::env::var("HOME") {
             return PathBuf::from(home)
@@ -156,7 +208,15 @@ pub fn resolve_db_path(custom_path: &str, portable: bool) -> PathBuf {
         }
     }
 
+    // Android: app-private storage. Not a fallback — the working directory of an Android process is
+    // `/`, so the generic fallback below would try to create the database on a read-only filesystem.
+    #[cfg(target_os = "android")]
+    {
+        return crate::android::app_data_dir().join("flights.db");
+    }
+
     // Fallback: current directory
+    #[allow(unreachable_code)]
     PathBuf::from("flights.db")
 }
 
@@ -165,6 +225,11 @@ pub fn resolve_db_path(custom_path: &str, portable: bool) -> PathBuf {
 /// to the user's Documents (`Documents/KiteGC`) where they are easy to find / hand to Mission Planner.
 /// `custom_path` (empty = use default) overrides it; both are configurable independently in Settings.
 pub fn resolve_raw_log_dir(custom_path: &str, portable: bool) -> PathBuf {
+    // Android: same as resolve_db_path — a SAF tree URI cannot be written through std::fs, so the
+    // writers stay in the app-private staging dir below and the mirror copies finished files out.
+    #[cfg(target_os = "android")]
+    let custom_path = if custom_path.starts_with("content://") { "" } else { custom_path };
+
     if !custom_path.is_empty() {
         return PathBuf::from(custom_path);
     }
@@ -178,8 +243,16 @@ pub fn resolve_raw_log_dir(custom_path: &str, portable: bool) -> PathBuf {
         }
     }
 
+    // Android has no path-addressable Documents folder (scoped storage makes it a MediaStore
+    // collection), so raw logs go to app-private storage and are shared out explicitly instead.
+    #[cfg(target_os = "android")]
+    {
+        return crate::android::app_documents_dir().join("KiteGC");
+    }
+
     // Default: the user's Documents folder → Documents/KiteGC (Windows honours OneDrive relocation,
     // Linux uses XDG_DOCUMENTS_DIR). Falls back to ~/Documents, then the current dir.
+    #[allow(unreachable_code)]
     if let Some(docs) = dirs::document_dir() {
         return docs.join("KiteGC");
     }
@@ -214,83 +287,46 @@ fn db_newer_error(found: u32) -> rusqlite::Error {
 fn migrate(conn: &Connection) -> SqlResult<()> {
     let current = get_user_version(conn)?;
 
-    // Downgrade guard: never touch (let alone "migrate" with older code) a DB written by a newer
-    // Kite — refuse with the marker error and leave the file byte-identical. Fires ONLY on a real
-    // schema mismatch; every other open error stays a generic failure.
+    // Downgrade guard: never touch (let alone migrate "up" to an OLDER schema) a DB written by a
+    // newer Kite — refuse with the marker error and leave the file byte-identical. Fires ONLY
+    // on a real schema mismatch; every other open error stays a generic failure.
     if current > CURRENT_SCHEMA_VERSION {
         return Err(db_newer_error(current));
     }
 
-    if current < 1 {
-        migrate_v0_to_v1(conn)?;
-    }
-
-    if current < 2 {
-        migrate_v1_to_v2(conn)?;
-    }
-
-    if current < 3 {
-        migrate_v2_to_v3(conn)?;
-    }
-
-    if current < 4 {
-        migrate_v3_to_v4(conn)?;
-    }
-
-    if current < 5 {
-        migrate_v4_to_v5(conn)?;
-    }
-
-    if current < 6 {
-        migrate_v5_to_v6(conn)?;
-    }
-
-    if current < 7 {
-        migrate_v6_to_v7(conn)?;
-    }
-
-    if current < 8 {
-        migrate_v7_to_v8(conn)?;
-    }
-
-    if current < 9 {
-        migrate_v8_to_v9(conn)?;
-    }
-
-    if current < 10 {
-        migrate_v9_to_v10(conn)?;
-    }
-
-    if current < 11 {
-        migrate_v10_to_v11(conn)?;
-    }
-
-    if current < 12 {
-        migrate_v11_to_v12(conn)?;
-    }
-
-    if current < 13 {
-        migrate_v12_to_v13(conn)?;
-    }
-
-    if current < 14 {
-        migrate_v13_to_v14(conn)?;
-    }
-
-    if current < 15 {
-        migrate_v14_to_v15(conn)?;
-    }
-
-    if current < 16 {
-        migrate_v15_to_v16(conn)?;
-    }
-
-    if current < 17 {
-        migrate_v16_to_v17(conn)?;
-    }
-
-    if current < 18 {
-        migrate_v17_to_v18(conn)?;
+    // Every step runs in its OWN transaction: its schema objects and its version stamp commit
+    // together or not at all. A failing step rolls back and leaves the DB cleanly on the last
+    // reached version (the stamps are literal per-step targets for the same reason — a historical
+    // stamp-to-CURRENT once produced a "newest version, missing objects" DB; the ensure_* block
+    // below still self-heals that legacy case). PRAGMA user_version is transactional in SQLite.
+    // None of the steps may contain VACUUM or its own BEGIN/COMMIT.
+    const STEPS: [(u32, fn(&Connection) -> SqlResult<()>); 18] = [
+        (1, migrate_v0_to_v1),
+        (2, migrate_v1_to_v2),
+        (3, migrate_v2_to_v3),
+        (4, migrate_v3_to_v4),
+        (5, migrate_v4_to_v5),
+        (6, migrate_v5_to_v6),
+        (7, migrate_v6_to_v7),
+        (8, migrate_v7_to_v8),
+        (9, migrate_v8_to_v9),
+        (10, migrate_v9_to_v10),
+        (11, migrate_v10_to_v11),
+        (12, migrate_v11_to_v12),
+        (13, migrate_v12_to_v13),
+        (14, migrate_v13_to_v14),
+        (15, migrate_v14_to_v15),
+        (16, migrate_v15_to_v16),
+        (17, migrate_v16_to_v17),
+        (18, migrate_v17_to_v18),
+    ];
+    for (target, step) in STEPS {
+        if current < target {
+            let tx = conn.unchecked_transaction()?;
+            step(&tx)?;
+            tx.commit()?;
+            log::info!("[flightlog] db schema migrated to v{target}");
+        }
     }
 
     // Self-heal: ensure the latest schema actually exists even if a prior version bump left it
@@ -441,7 +477,7 @@ fn ensure_v11_schema(conn: &Connection) -> SqlResult<()> {
 
 fn migrate_v10_to_v11(conn: &Connection) -> SqlResult<()> {
     ensure_v11_schema(conn)?;
-    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    set_user_version(conn, 11)?;
     Ok(())
 }
 
@@ -460,7 +496,7 @@ fn ensure_v12_schema(conn: &Connection) -> SqlResult<()> {
 
 fn migrate_v11_to_v12(conn: &Connection) -> SqlResult<()> {
     ensure_v12_schema(conn)?;
-    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    set_user_version(conn, 12)?;
     Ok(())
 }
 
@@ -476,7 +512,7 @@ fn ensure_v13_schema(conn: &Connection) -> SqlResult<()> {
 
 fn migrate_v12_to_v13(conn: &Connection) -> SqlResult<()> {
     ensure_v13_schema(conn)?;
-    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    set_user_version(conn, 13)?;
     Ok(())
 }
 
@@ -495,7 +531,7 @@ fn ensure_v14_schema(conn: &Connection) -> SqlResult<()> {
 
 fn migrate_v13_to_v14(conn: &Connection) -> SqlResult<()> {
     ensure_v14_schema(conn)?;
-    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    set_user_version(conn, 14)?;
     Ok(())
 }
 
@@ -510,7 +546,7 @@ fn ensure_v15_schema(conn: &Connection) -> SqlResult<()> {
 
 fn migrate_v14_to_v15(conn: &Connection) -> SqlResult<()> {
     ensure_v15_schema(conn)?;
-    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    set_user_version(conn, 15)?;
     Ok(())
 }
 
@@ -582,7 +618,7 @@ fn ensure_v16_schema(conn: &Connection) -> SqlResult<()> {
 
 fn migrate_v15_to_v16(conn: &Connection) -> SqlResult<()> {
     ensure_v16_schema(conn)?;
-    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    set_user_version(conn, 16)?;
     Ok(())
 }
 
@@ -597,7 +633,7 @@ fn ensure_v17_schema(conn: &Connection) -> SqlResult<()> {
 
 fn migrate_v16_to_v17(conn: &Connection) -> SqlResult<()> {
     ensure_v17_schema(conn)?;
-    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    set_user_version(conn, 17)?;
     Ok(())
 }
 
@@ -615,7 +651,7 @@ fn ensure_v18_schema(conn: &Connection) -> SqlResult<()> {
 
 fn migrate_v17_to_v18(conn: &Connection) -> SqlResult<()> {
     ensure_v18_schema(conn)?;
-    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    set_user_version(conn, 18)?;
     Ok(())
 }
 
@@ -623,7 +659,7 @@ fn migrate_v6_to_v7(conn: &Connection) -> SqlResult<()> {
     conn.execute_batch(
         "ALTER TABLE telemetry_records ADD COLUMN battery_percentage INTEGER;",
     )?;
-    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    set_user_version(conn, 7)?;
     Ok(())
 }
 
@@ -665,7 +701,7 @@ fn migrate_v5_to_v6(conn: &Connection) -> SqlResult<()> {
     conn.execute_batch(
         "ALTER TABLE flights ADD COLUMN linked_flight_id INTEGER REFERENCES flights(id);",
     )?;
-    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    set_user_version(conn, 6)?;
     Ok(())
 }
 
@@ -673,7 +709,7 @@ fn migrate_v2_to_v3(conn: &Connection) -> SqlResult<()> {
     conn.execute_batch(
         "ALTER TABLE telemetry_records ADD COLUMN link_quality INTEGER;",
     )?;
-    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    set_user_version(conn, 3)?;
     Ok(())
 }
 
@@ -731,7 +767,7 @@ fn migrate_v0_to_v1(conn: &Connection) -> SqlResult<()> {
             ON telemetry_records(flight_id, timestamp_ms);",
     )?;
 
-    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    set_user_version(conn, 1)?;
     Ok(())
 }
 
@@ -763,7 +799,7 @@ fn migrate_v1_to_v2(conn: &Connection) -> SqlResult<()> {
             ON blackbox_files(flight_id);",
     )?;
 
-    set_user_version(conn, CURRENT_SCHEMA_VERSION)?;
+    set_user_version(conn, 2)?;
     Ok(())
 }
 
@@ -2033,93 +2069,98 @@ pub fn get_flight_track(
         )
         .optional()?;
 
-    let mut stmt = conn.prepare(
-        "SELECT id, flight_id, timestamp_ms, lat, lon, alt_m, speed_ms,
-                heading, vario_ms, voltage, current_a, mah_drawn, rssi, battery_percentage,
-            roll, pitch, yaw, fix_type, num_sat, cpu_load, link_quality,
-            baro_alt_m, gps_hdop, gps_eph, gps_epv,
-            active_wp_number, active_flight_mode_flags, state_flags, nav_state, nav_flags,
-            rx_signal_received, hw_health_status, baro_temperature,
-            wind_n_ms, wind_e_ms, wind_d_ms,
-            rc_data_json, rc_command_json,
-            nav_lat, nav_lon, nav_alt_m,
-            mode_primary, mode_modifiers,
-            link_snr, link_rssi_dbm, airspeed_ms, throttle_pct
-         FROM telemetry_records
-         WHERE flight_id = ?1
-         ORDER BY timestamp_ms ASC",
-    )?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT id, {TELEMETRY_COLS} FROM telemetry_records \
+         WHERE flight_id = ?1 ORDER BY timestamp_ms ASC"
+    ))?;
 
-    let rows = stmt.query_map(params![flight_id], |row| {
-        let mode_flags: Option<i64> = row.get(26)?;
-        let stored_primary: Option<String> = row.get(41)?;
-        let stored_modifiers: Option<String> = row.get(42)?;
-        let derived = match (&stored_primary, mode_flags, fc_variant.as_deref()) {
-            (None, Some(flags), Some(variant)) => Some(if variant.eq_ignore_ascii_case("INAV") {
-                crate::flightmode::classify_inav(flags as u32)
-            } else {
-                crate::flightmode::classify_mavlink(flags as u32, variant)
-            }),
-            _ => None,
-        };
+    let rows = stmt.query_map(params![flight_id], read_telemetry_record)?;
+    let mut out = Vec::new();
+    for rec in rows {
+        let mut rec = rec?;
+        if rec.mode_primary.is_none() {
+            if let (Some(flags), Some(variant)) = (rec.active_flight_mode_flags, fc_variant.as_deref())
+            {
+                let derived = if variant.eq_ignore_ascii_case("INAV") {
+                    crate::flightmode::classify_inav(flags as u32)
+                } else {
+                    crate::flightmode::classify_mavlink(flags as u32, variant)
+                };
+                rec.mode_primary = Some(derived.primary.clone());
+                if rec.mode_modifiers.is_none() && !derived.modifiers.is_empty() {
+                    rec.mode_modifiers = Some(derived.modifiers.join(","));
+                }
+            }
+        }
+        out.push(rec);
+    }
+    Ok(out)
+}
 
-        Ok(TelemetryRecord {
-            id: row.get(0)?,
-            flight_id: row.get(1)?,
-            timestamp_ms: row.get(2)?,
-            lat: row.get(3)?,
-            lon: row.get(4)?,
-            alt_m: row.get(5)?,
-            speed_ms: row.get(6)?,
-            heading: row.get(7)?,
-            vario_ms: row.get(8)?,
-            voltage: row.get(9)?,
-            current_a: row.get(10)?,
-            mah_drawn: row.get(11)?,
-            rssi: row.get(12)?,
-            battery_percentage: row.get(13)?,
-            roll: row.get(14)?,
-            pitch: row.get(15)?,
-            yaw: row.get(16)?,
-            fix_type: row.get(17)?,
-            num_sat: row.get(18)?,
-            cpu_load: row.get(19)?,
-            link_quality: row.get(20)?,
-            baro_alt_m: row.get(21)?,
-            gps_hdop: row.get(22)?,
-            gps_eph: row.get(23)?,
-            gps_epv: row.get(24)?,
-            active_wp_number: row.get(25)?,
-            active_flight_mode_flags: row.get(26)?,
-            state_flags: row.get(27)?,
-            nav_state: row.get(28)?,
-            nav_flags: row.get(29)?,
-            rx_signal_received: row.get(30)?,
-            hw_health_status: row.get(31)?,
-            baro_temperature: row.get(32)?,
-            wind_n_ms: row.get(33)?,
-            wind_e_ms: row.get(34)?,
-            wind_d_ms: row.get(35)?,
-            rc_data_json: row.get(36)?,
-            rc_command_json: row.get(37)?,
-            nav_lat: row.get(38)?,
-            nav_lon: row.get(39)?,
-            nav_alt_m: row.get(40)?,
-            mode_primary: stored_primary.or_else(|| derived.as_ref().map(|m| m.primary.clone())),
-            mode_modifiers: stored_modifiers.or_else(|| {
-                derived
-                    .as_ref()
-                    .filter(|m| !m.modifiers.is_empty())
-                    .map(|m| m.modifiers.join(","))
-            }),
-            link_snr: row.get(43)?,
-            link_rssi_dbm: row.get(44)?,
-            airspeed_ms: row.get(45)?,
-            throttle_pct: row.get(46)?,
-        })
-    })?;
+/// Map one `SELECT id, {TELEMETRY_COLS}` row to a `TelemetryRecord` (stored values only — the
+/// legacy mode fix-up in `get_flight_track` post-processes the record where it applies).
+fn read_telemetry_record(row: &rusqlite::Row) -> SqlResult<TelemetryRecord> {
+    Ok(TelemetryRecord {
+        id: row.get(0)?,
+        flight_id: row.get(1)?,
+        timestamp_ms: row.get(2)?,
+        lat: row.get(3)?,
+        lon: row.get(4)?,
+        alt_m: row.get(5)?,
+        speed_ms: row.get(6)?,
+        heading: row.get(7)?,
+        vario_ms: row.get(8)?,
+        voltage: row.get(9)?,
+        current_a: row.get(10)?,
+        mah_drawn: row.get(11)?,
+        rssi: row.get(12)?,
+        battery_percentage: row.get(13)?,
+        roll: row.get(14)?,
+        pitch: row.get(15)?,
+        yaw: row.get(16)?,
+        fix_type: row.get(17)?,
+        num_sat: row.get(18)?,
+        cpu_load: row.get(19)?,
+        link_quality: row.get(20)?,
+        baro_alt_m: row.get(21)?,
+        gps_hdop: row.get(22)?,
+        gps_eph: row.get(23)?,
+        gps_epv: row.get(24)?,
+        active_wp_number: row.get(25)?,
+        active_flight_mode_flags: row.get(26)?,
+        state_flags: row.get(27)?,
+        nav_state: row.get(28)?,
+        nav_flags: row.get(29)?,
+        rx_signal_received: row.get(30)?,
+        hw_health_status: row.get(31)?,
+        baro_temperature: row.get(32)?,
+        wind_n_ms: row.get(33)?,
+        wind_e_ms: row.get(34)?,
+        wind_d_ms: row.get(35)?,
+        rc_data_json: row.get(36)?,
+        rc_command_json: row.get(37)?,
+        nav_lat: row.get(38)?,
+        nav_lon: row.get(39)?,
+        nav_alt_m: row.get(40)?,
+        mode_primary: row.get(41)?,
+        mode_modifiers: row.get(42)?,
+        link_snr: row.get(43)?,
+        link_rssi_dbm: row.get(44)?,
+        airspeed_ms: row.get(45)?,
+        throttle_pct: row.get(46)?,
+    })
+}
 
-    rows.collect()
+/// Latest hi-res row at or before `timestamp_ms` from a hi-res cache DB (HIRES_REPLAY plan).
+/// The cache holds exactly one flight (`flight_id` 0) and its rows always carry `mode_primary`
+/// (set at parse time), so no `flights`-table fix-up is needed — the file has no such table.
+pub fn get_hires_sample(conn: &Connection, timestamp_ms: i64) -> SqlResult<Option<TelemetryRecord>> {
+    let mut stmt = conn.prepare_cached(&format!(
+        "SELECT id, {TELEMETRY_COLS} FROM telemetry_records \
+         WHERE timestamp_ms <= ?1 ORDER BY timestamp_ms DESC LIMIT 1"
+    ))?;
+    stmt.query_row(params![timestamp_ms], read_telemetry_record)
+        .optional()
 }
 
 /// Check for duplicate flights based on craft_name and start_time (±10s).
@@ -2611,18 +2652,29 @@ mod tests {
     }
 
     #[test]
+    fn migrate_is_reentrant() {
+        let conn = test_db(); // already migrated once
+        migrate(&conn).unwrap(); // a second pass must be a clean no-op
+        assert_eq!(get_user_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
+    }
+
+    /// Unique on-disk DB path (backup/guard logic needs real files, not :memory:). One directory per
+    /// test: `backup_path_for` is a fixed sibling name, so DBs sharing a folder would race on it.
+    fn temp_db_path(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("kite-db-test-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("flights.db")
+    }
+
+    fn cleanup(path: &Path) {
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
     fn downgrade_guard_refuses_newer_db() {
-        let path = std::env::temp_dir()
-            .join(format!("kite-db-test-downgrade-{}.db", std::process::id()));
-        let cleanup = |p: &Path| {
-            for f in [
-                p.to_path_buf(),
-                PathBuf::from(format!("{}-wal", p.display())),
-                PathBuf::from(format!("{}-shm", p.display())),
-            ] {
-                let _ = std::fs::remove_file(f);
-            }
-        };
+        let path = temp_db_path("downgrade");
         cleanup(&path);
         drop(open_database(&path).unwrap()); // fresh, v = CURRENT
         {
@@ -2631,11 +2683,88 @@ mod tests {
         }
         let err = open_database(&path).unwrap_err().to_string();
         assert!(err.contains("db-newer"), "expected the db-newer marker, got: {err}");
-        // The file must be untouched: still stamped as the newer version.
+        // The file must be untouched: still stamped as the newer version, no backup made.
         let conn = Connection::open(&path).unwrap();
         assert_eq!(get_user_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION + 1);
+        assert!(!backup_path_for(&path).exists());
         drop(conn);
         cleanup(&path);
+    }
+
+    #[test]
+    fn backup_created_before_pending_migration_only() {
+        let path = temp_db_path("backup");
+        cleanup(&path);
+        // Fresh DB (v0): full chain runs, but there is nothing to back up.
+        drop(open_database(&path).unwrap());
+        assert!(!backup_path_for(&path).exists(), "fresh DB must not create a backup");
+        // Roll the stamp back one version (the v17→v18 step is idempotent) → reopen must
+        // snapshot BEFORE migrating and land on CURRENT again.
+        {
+            let conn = Connection::open(&path).unwrap();
+            set_user_version(&conn, CURRENT_SCHEMA_VERSION - 1).unwrap();
+        }
+        let conn = open_database(&path).unwrap();
+        assert_eq!(get_user_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
+        let backup = backup_path_for(&path);
+        assert!(backup.exists(), "pending migration must create the backup");
+        // The snapshot is a valid SQLite DB stamped with the PRE-migration version.
+        let bconn = Connection::open(&backup).unwrap();
+        assert_eq!(get_user_version(&bconn).unwrap(), CURRENT_SCHEMA_VERSION - 1);
+        drop((conn, bconn));
+        cleanup(&path);
+    }
+
+    /// Hi-res cache sampling (HIRES_REPLAY): nearest row at-or-before the timestamp, None before
+    /// the first row (the player then falls back to the 10 Hz sample).
+    #[test]
+    fn hires_sample_picks_row_at_or_before_timestamp() {
+        let path = temp_db_path("hires-sample");
+        cleanup(&path);
+        let conn = open_temp_session(&path).unwrap();
+        for ts in [0i64, 100, 200] {
+            conn.execute(
+                "INSERT INTO telemetry_records (flight_id, timestamp_ms) VALUES (0, ?1)",
+                params![ts],
+            )
+            .unwrap();
+        }
+        assert!(get_hires_sample(&conn, -1).unwrap().is_none());
+        assert_eq!(get_hires_sample(&conn, 0).unwrap().unwrap().timestamp_ms, 0);
+        assert_eq!(get_hires_sample(&conn, 150).unwrap().unwrap().timestamp_ms, 100);
+        assert_eq!(get_hires_sample(&conn, 99_999).unwrap().unwrap().timestamp_ms, 200);
+        drop(conn);
+        remove_temp_session(&path);
+    }
+
+    /// Full open/migrate pass over a COPY of a real flight database (Marc's RC2 archive,
+    /// F:\DEVELOPMENT\Kite-GC-testdata\flights-real.db — outside the repo).
+    /// `KITE_TEST_DB=<path> cargo test migrates_the_real_database -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn migrates_the_real_database() {
+        let Ok(src) = std::env::var("KITE_TEST_DB") else {
+            eprintln!("KITE_TEST_DB not set — skipping");
+            return;
+        };
+        let src = PathBuf::from(src);
+        // Work on a sibling copy so the fixture keeps its original schema version for reruns.
+        let work = src.with_extension("test-copy.db");
+        let _ = std::fs::remove_file(&work);
+        let _ = std::fs::remove_file(backup_path_for(&work));
+        std::fs::copy(&src, &work).expect("copy fixture");
+        let conn = open_database(&work).expect("open + migrate the real DB");
+        assert_eq!(get_user_version(&conn).unwrap(), CURRENT_SCHEMA_VERSION);
+        let flights: i64 =
+            conn.query_row("SELECT COUNT(*) FROM flights", [], |r| r.get(0)).unwrap();
+        let telemetry: i64 =
+            conn.query_row("SELECT COUNT(*) FROM telemetry_records", [], |r| r.get(0)).unwrap();
+        eprintln!("real DB: {flights} flights, {telemetry} telemetry rows");
+        assert!(flights > 0, "expected flights in the real archive");
+        assert!(telemetry > 0, "expected telemetry in the real archive");
+        drop(conn);
+        let _ = std::fs::remove_file(&work);
+        let _ = std::fs::remove_file(backup_path_for(&work));
     }
 
     #[test]

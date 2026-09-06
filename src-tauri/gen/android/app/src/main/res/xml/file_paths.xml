@@ -2,4 +2,7 @@
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
   <external-path name="my_images" path="." />
   <cache-path name="my_cache_images" path="." />
+  <!-- App-private files/ — the diagnostics log (and anything else Kite shares out via the system
+       share sheet, see StorageAccess.shareFile). Without this entry FileProvider refuses the URI. -->
+  <files-path name="files" path="." />
 </paths>

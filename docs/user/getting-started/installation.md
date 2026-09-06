@@ -14,6 +14,7 @@ grabbing:
 | **Windows** (x64) | `..._installer.exe` (NSIS — install for you or all users) | — | `..._portable.zip` |
 | **Linux** (x64 / arm64) | `..._installer.deb` (Debian/Ubuntu) or `..._installer.rpm` (Fedora/openSUSE) | `..._standalone.AppImage` | `..._portable.zip` |
 | **macOS** (universal) | `..._installer.dmg` | `..._standalone.zip` (the `.app`) | — |
+| **Android** (arm64) | `KiteGC_Android_universal_<version>_installer.apk` | — | — |
 
 - **Installer** — integrates with your system (Start menu / app launcher, uninstaller).
 - **Standalone** — one self-contained runnable file (Linux `.AppImage`, macOS `.app`); no install.
@@ -28,6 +29,19 @@ grabbing:
 !!! warning "macOS 13 (Ventura) or newer"
     The macOS build targets **macOS 13**. Older systems are not supported — on macOS 11 or 12 the app
     installs but does not start.
+
+### Android
+
+Download the `.apk` on the device and open it; Android asks once to allow installs from that browser
+or file manager. Phones get a dedicated landscape layout, tablets the desktop one. Links: **USB serial**
+over an OTG cable (Android asks per device — pick Kite in the dialog when you plug the cable in),
+**Bluetooth LE** (the first scan asks for the *Nearby devices* permission) and **Wi-Fi** (UDP / TCP).
+Data lives in the app's private storage; **Settings → Data** can point the flight database and raw
+logs at a shared folder instead. See [Connecting](../guides/connecting.md) for what happens while
+Kite is in the background.
+
+**iPhone / iPad**: no public download yet — the app builds from source (see
+[Building from source](../for-developers/building.md)).
 
 ### Linux quick install
 

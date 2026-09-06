@@ -7,20 +7,8 @@
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import type { TelemetryData } from "$lib/stores/telemetry";
-  import { WIDGET_MAP, LARGE_BASE_VMIN, SMALL_BASE_VMIN, MIN_SCALE, type WidgetClass } from "$lib/config/widgetRegistry";
-  import AHI from "./widgets/AHI.svelte";
-  import SpeedWidget from "./widgets/SpeedWidget.svelte";
-  import AltWidget from "./widgets/AltWidget.svelte";
-  import BatteryWidget from "./widgets/BatteryWidget.svelte";
-  import GpsWidget from "./widgets/GpsWidget.svelte";
-  import RcLinkWidget from "./widgets/RcLinkWidget.svelte";
-  import CompassWidget from "./widgets/CompassWidget.svelte";
-  import HomeWidget from "./widgets/HomeWidget.svelte";
-  import FlightModeWidget from "./widgets/FlightModeWidget.svelte";
-  import RawTelemetryWidget from "./widgets/RawTelemetryWidget.svelte";
-  import LiveAglWidget from "./widgets/LiveAglWidget.svelte";
-  import TerrainRadarWidget from "./widgets/TerrainRadarWidget.svelte";
-  import VideoWidget from "./widgets/VideoWidget.svelte";
+  import { WIDGET_MAP, LARGE_BASE_VMIN, SMALL_BASE_VMIN, MIN_SCALE, effectiveWidgetSize, type WidgetSize } from "$lib/config/widgetRegistry";
+  import WidgetRenderer from "./WidgetRenderer.svelte";
   import type { InterfaceSettings } from "$lib/stores/settings";
 
   let {
@@ -29,11 +17,15 @@
     availableVmin = 80,
     maxWidgetVmin = Infinity,
     pxPerVmin = 1,
+    smallBoost = 1,
+    sizes = {},
+    crossPx = $bindable(0),
     telem,
     interfaceSettings = { speedUnit: 'kmh', altitudeUnit: 'm', distanceUnit: 'metric', verticalSpeedUnit: 'ms', temperatureUnit: 'c' },
     editing = false,
     onreorder,
     onreceive,
+    onresize,
     panelId,
   }: {
     widgetIds: string[];
@@ -41,11 +33,22 @@
     availableVmin: number;
     maxWidgetVmin?: number;
     pxPerVmin?: number;
+    /** Multiplier applied to `S`-state widgets only (size + width units), so small tiles can be
+     *  enlarged without growing the large/circular widgets. 1 = unchanged (default). */
+    smallBoost?: number;
+    /** Per-widget size state (PanelConfig.sizes); a missing entry = the widget's default size. */
+    sizes?: Record<string, WidgetSize>;
+    /** OUT: the panel's cross-axis extent in px (height in the bottom dock, width in the side dock) =
+     *  its largest widget. The dock adapts to it (WIDGET_OVERHAUL.md D7) and the unobstructed
+     *  fullscreen video reserves exactly this much. */
+    crossPx?: number;
     telem: TelemetryData;
     interfaceSettings?: InterfaceSettings;
     editing: boolean;
     onreorder: (panelId: string, widgetIds: string[]) => void;
     onreceive: (targetPanel: string, widgetId: string, index: number) => void;
+    /** Edit-mode resize button: step this widget to its next size state. */
+    onresize?: (widgetId: string) => void;
     panelId: string;
   } = $props();
 
@@ -245,25 +248,32 @@
     };
   });
 
+  // ── Size model (Dev-Docs active/WIDGET_OVERHAUL.md) ──
+  // Every widget has a size STATE (S / L / W, from `sizes` or its registry default). The state
+  // decides its main-axis "units" (a large square = 1) and its cross-axis fill: S = 0.6 (× smallBoost),
+  // L and W fill the cross axis; W is 2:1 along the dock's main axis (2 units in the horizontal dock,
+  // 0.5 in the vertical one). The aspect ratio never changes — a widget is only rescaled by height.
+  const smallRatio = SMALL_BASE_VMIN / LARGE_BASE_VMIN; // 0.6
+
+  function unitsFor(state: WidgetSize): number {
+    if (state === 'W') return orientation === 'horizontal' ? 2 : 0.5;
+    return state === 'S' ? smallRatio * smallBoost : 1;
+  }
+  const crossFactor = (state: WidgetSize) => (state === 'S' ? smallRatio * smallBoost : 1);
+
   // Compute widget sizes based on available space
-  function computeSizes(): { id: string; size: number; wclass: WidgetClass }[] {
+  function computeSizes(): { id: string; state: WidgetSize; size: number }[] {
     if (widgetIds.length === 0) return [];
 
     // Cross-axis determines the target large widget size (fill dock height/width).
     // Cap at LARGE_BASE_VMIN so widgets don't grow beyond their designed max.
     const effectiveLargeBase = Math.min(maxWidgetVmin, LARGE_BASE_VMIN);
-    const smallRatio = SMALL_BASE_VMIN / LARGE_BASE_VMIN; // 0.6
 
-    // Calculate total "units" of main-axis space (large=1, small=smallRatio,
-    // wide=2:1 → 2 units in the horizontal dock, 0.5 units in the vertical dock).
-    const wideUnits = orientation === 'horizontal' ? 2 : 0.5;
     let totalUnits = 0;
     const items = widgetIds.map(id => {
-      const def = WIDGET_MAP.get(id);
-      const wclass: WidgetClass = def?.widgetClass ?? 'small';
-      const units = wclass === 'large' ? 1 : wclass === 'wide' ? wideUnits : smallRatio;
-      totalUnits += units;
-      return { id, wclass, units };
+      const state = effectiveWidgetSize(id, sizes);
+      totalUnits += unitsFor(state);
+      return { id, state };
     });
 
     // Gap between widgets in vmin
@@ -276,32 +286,38 @@
     const scale = baseTotal <= usableVmin ? 1 : Math.max(MIN_SCALE, usableVmin / baseTotal);
 
     // `size` = the cross-axis fill (height in horizontal dock, width in vertical).
-    // large + wide fill the cross axis; small is 0.6×.
     return items.map(item => ({
-      id: item.id,
-      wclass: item.wclass,
-      size: (item.wclass === 'small' ? effectiveLargeBase * smallRatio : effectiveLargeBase) * scale,
+      ...item,
+      size: effectiveLargeBase * crossFactor(item.state) * scale,
     }));
   }
 
-  // Convert vmin sizes → px for container-relative rendering
-  let sizes = $derived(computeSizes().map(s => ({ ...s, sizePx: s.size * pxPerVmin })));
+  // Convert vmin sizes → px for container-relative rendering. `sizePx` is the cross-axis extent;
+  // `wPx`/`hPx` the widget's own box (squares are sizePx², a W tile is 2:1 along the main axis).
+  let items = $derived(computeSizes().map(s => {
+    const sizePx = s.size * pxPerVmin;
+    const wide = s.state === 'W';
+    return {
+      ...s,
+      sizePx,
+      wPx: wide && orientation === 'vertical' ? sizePx : wide ? sizePx * 2 : sizePx,
+      hPx: wide && orientation === 'vertical' ? sizePx / 2 : sizePx,
+    };
+  }));
   const gapPx = $derived(0.5 * pxPerVmin);
 
-  // Check if panel can accept one more widget
-  function canAcceptMore(): boolean {
-    // Simulate adding a small widget
-    const simIds = [...widgetIds, '_test'];
+  // Report the cross-axis extent (= the largest widget) — see the `crossPx` prop.
+  $effect(() => {
+    const max = items.reduce((m, it) => Math.max(m, it.sizePx), 0);
+    if (max !== crossPx) crossPx = max;
+  });
+
+  // Check if panel can accept `widgetId` (in its current size state) as one more widget
+  function canAcceptMore(widgetId: string): boolean {
     const effBase = Math.min(maxWidgetVmin, LARGE_BASE_VMIN);
-    const smallRatio = SMALL_BASE_VMIN / LARGE_BASE_VMIN;
-    const wideUnits = orientation === 'horizontal' ? 2 : 0.5;
-    let totalUnits = 0;
-    for (const id of simIds) {
-      const def = WIDGET_MAP.get(id);
-      const wclass = def?.widgetClass ?? 'small';
-      totalUnits += wclass === 'large' ? 1 : wclass === 'wide' ? wideUnits : smallRatio;
-    }
-    const totalGaps = (simIds.length - 1) * 0.5;
+    let totalUnits = unitsFor(effectiveWidgetSize(widgetId, sizes));
+    for (const id of widgetIds) totalUnits += unitsFor(effectiveWidgetSize(id, sizes));
+    const totalGaps = widgetIds.length * 0.5;
     const usableVmin = availableVmin - totalGaps;
     const baseTotal = totalUnits * effBase;
     const scale = baseTotal <= usableVmin ? 1 : usableVmin / baseTotal;
@@ -429,7 +445,7 @@
         onreorder(panelId, newIds);
       } else {
         // Cross-panel move
-        if (canAcceptMore()) {
+        if (canAcceptMore(data.widgetId)) {
           onreceive(panelId, data.widgetId, dropAt);
         }
       }
@@ -462,7 +478,7 @@
   class:drag-hover={externalDragOver}
   style="gap: {gapPx}px;"
 >
-  {#each sizes as item, idx (item.id)}
+  {#each items as item, idx (item.id)}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="widget-slot"
@@ -477,45 +493,24 @@
       {#if editing}
         <div class="drag-handle">⠿</div>
         <div class="drag-overlay"></div>
+        <!-- Resize: one tap steps the widget to its next size state (S↔L, or W→L→S). Sits above the
+             drag overlay and swallows pointerdown so the slot's pointer DnD never starts from it. -->
+        <button
+          class="resize-btn"
+          type="button"
+          title={$t('widgets.resize')}
+          aria-label={$t('widgets.resize')}
+          onpointerdown={(e) => e.stopPropagation()}
+          onclick={() => onresize?.(item.id)}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="3" y="3" width="18" height="18" rx="1.5" />
+            <rect x="6" y="11" width="9" height="7" rx="1" />
+          </svg>
+        </button>
       {/if}
       <div class="widget-content">
-        {#if item.id === 'ahi'}
-          <AHI {telem} size={item.sizePx} />
-        {:else if item.id === 'speed'}
-          <SpeedWidget {telem} size={item.sizePx} {interfaceSettings} />
-        {:else if item.id === 'altitude'}
-          <AltWidget {telem} size={item.sizePx} {interfaceSettings} />
-        {:else if item.id === 'battery'}
-          <BatteryWidget {telem} size={item.sizePx} widgetId="battery" />
-        {:else if item.id === 'battery2'}
-          <BatteryWidget {telem} size={item.sizePx} widgetId="battery2" />
-        {:else if item.id === 'gps'}
-          <GpsWidget {telem} size={item.sizePx} />
-        {:else if item.id === 'rcLink'}
-          <RcLinkWidget {telem} size={item.sizePx} />
-        {:else if item.id === 'compass'}
-          <CompassWidget {telem} size={item.sizePx} {interfaceSettings} />
-        {:else if item.id === 'home'}
-          <HomeWidget {telem} size={item.sizePx} {interfaceSettings} />
-        {:else if item.id === 'flightMode'}
-          <FlightModeWidget {telem} size={item.sizePx} />
-        {:else if item.id === 'rawTelemetry'}
-          <RawTelemetryWidget {telem} size={item.sizePx} {interfaceSettings} />
-        {:else if item.id === 'liveAgl'}
-          <LiveAglWidget
-            {telem}
-            {interfaceSettings}
-            width={orientation === 'horizontal' ? item.sizePx * 2 : item.sizePx}
-            height={orientation === 'horizontal' ? item.sizePx : item.sizePx / 2}
-          />
-        {:else if item.id === 'terrainRadar'}
-          <TerrainRadarWidget {telem} {interfaceSettings} size={item.sizePx} />
-        {:else if item.id === 'videoFeed'}
-          <VideoWidget
-            width={orientation === 'horizontal' ? item.sizePx * 2 : item.sizePx}
-            height={orientation === 'horizontal' ? item.sizePx : item.sizePx / 2}
-          />
-        {/if}
+        <WidgetRenderer id={item.id} {telem} {interfaceSettings} sizePx={item.sizePx} wPx={item.wPx} hPx={item.hPx} {editing} />
       </div>
     </div>
   {/each}
@@ -541,6 +536,23 @@
     flex-direction: row;
     align-items: flex-end;
     justify-content: center;
+  }
+
+  /* Phone portrait: the bottom HUD tiles do not fit one row, so let them wrap onto two rows (the dock
+     is sized for two rows in +page.svelte). Scoped to mobile so tablet/desktop keep the single row. */
+  @media (max-width: 600px) {
+    :global(html.is-mobile) .widget-panel.horizontal {
+      flex-wrap: wrap;
+      align-content: center;
+      justify-content: space-evenly;
+      width: 100%;
+      row-gap: 8px;
+    }
+    /* Right side dock: top-align the tiles so they sit just under the toolbar instead of being
+       centered in the tall column (which left a big gap above MODE). */
+    :global(html.is-mobile) .widget-panel.vertical {
+      justify-content: flex-start;
+    }
   }
 
   .widget-panel.vertical {
@@ -598,6 +610,38 @@
 
   .drag-overlay:active {
     cursor: grabbing;
+  }
+
+  /* Edit-mode resize button — bottom-right corner, over the content (we are in edit mode). Above the
+     drag overlay (5) and the insert markers (20). */
+  .resize-btn {
+    position: absolute;
+    right: 4px;
+    bottom: 4px;
+    width: 26px;
+    height: 26px;
+    padding: 3px;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(55, 168, 219, 0.6);
+    border-radius: 6px;
+    background: rgba(30, 30, 30, 0.8);
+    color: #37a8db;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .resize-btn:hover {
+    background: rgba(55, 168, 219, 0.25);
+  }
+  .resize-btn svg {
+    width: 100%;
+    height: 100%;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linejoin: round;
   }
 
   .widget-panel.editing .widget-slot {

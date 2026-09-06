@@ -30,8 +30,10 @@
     "linux": {
       "deb": {
         "depends": [
+          "gstreamer1.0-plugins-base",
           "gstreamer1.0-plugins-good",
           "gstreamer1.0-plugins-bad",
+          "gstreamer1.0-gtk3",
           "gstreamer1.0-nice",
           "gstreamer1.0-libav"
         ],
@@ -48,6 +50,9 @@
     "macOS": {
       "entitlements": "Entitlements.plist",
       "minimumSystemVersion": "13.0"
+    },
+    "iOS": {
+      "minimumSystemVersion": "16.0"
     },
     "icon": [
       "icons/32x32.png",

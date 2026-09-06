@@ -6,6 +6,9 @@
 
 import { writable } from 'svelte/store';
 import type { RelayConfig } from '$lib/stores/relay';
+import { isMobile } from '$lib/platform';
+import type { WidgetSize } from '$lib/config/widgetRegistry';
+import { DEFAULT_PHONE_WIDGETS, type PhoneWidgetsConfig } from '$lib/controllers/phoneWidgetController';
 
 export interface MapState {
   center: [number, number];
@@ -17,6 +20,9 @@ export interface PanelConfig {
   right: string[];  // widget IDs in display order
   /** Remembers last panel assignment per widget so toggle off/on restores position */
   positions?: Record<string, 'bottom' | 'right'>;
+  /** Per-widget size state (edit-mode resize button); a missing entry = the widget's default size.
+   *  See config/widgetRegistry.ts. */
+  sizes?: Record<string, WidgetSize>;
 }
 
 export type SpeedUnit = 'kmh' | 'mph' | 'ms' | 'fts' | 'kt';
@@ -341,6 +347,9 @@ export interface AppSettings {
   interface: InterfaceSettings;
   // Widget panel layout
   panels: PanelConfig;
+  /** Phone widget grid (order / size / column / active) — separate from the desktop docks
+   *  (Dev-Docs active/PHONE_UI.md D13). */
+  phoneWidgets: PhoneWidgetsConfig;
   // Locale / language
   locale: string;
   /** Global UI scale factor (1 = 100%, up to 2 = 200%); zooms the chrome, not the map. */
@@ -351,10 +360,14 @@ export interface AppSettings {
   cesiumKeyPromptDismissed: boolean;
   /** Low-power 3D render cap: off = uncapped · on = always 20fps · auto = 20fps only while on battery. */
   lowPower3D: 'off' | 'on' | 'auto';
+  /** 3D globe at native pixel density (on) or half of it (off). Default: on for desktop, off for mobile. */
+  highRes3D: boolean;
   /** Show the vertical altitude curtain (wall down to ground) under the 3D track. */
   altitudeCurtain3D: boolean;
   /** Light the 3D globe with the real sun position (day/night terminator + shading). */
   realLighting3D: boolean;
+  /** Show OpenStreetMap building extrusions on the 3D map. Needs a Cesium Ion token. */
+  buildings3D: boolean;
   /** During replay, drive the 3D sun clock from the log's recorded timestamp (not wall-clock now). */
   logReplayTime: boolean;
   /** Dim the 2D Leaflet imagery for night: off / auto (sun below horizon) / on. */
@@ -426,16 +439,21 @@ const defaults: AppSettings = {
     temperatureUnit: 'c',
   },
   panels: {
-    bottom: ['home', 'speed', 'ahi', 'altitude', 'gps', 'compass'],
-    right: ['flightMode', 'battery'],
+    bottom: ['battery', 'speed', 'ahi', 'altitude', 'compass'],
+    right: ['home', 'rcLink', 'gps'],
   },
+  phoneWidgets: DEFAULT_PHONE_WIDGETS,
   locale: 'en',
   uiScale: 1,
   cesiumIonToken: '',
   cesiumKeyPromptDismissed: false,
   lowPower3D: 'auto',
+  highRes3D: !isMobile,
   altitudeCurtain3D: true,
   realLighting3D: true,
+  // Off by default: the tileset is a live download and real GPU work, and it is only useful close to
+  // the ground over a built-up area. Needs an Ion token, like World Terrain.
+  buildings3D: false,
   logReplayTime: true,
   nightMode2D: 'auto',
   gcsMode: 'continuous',

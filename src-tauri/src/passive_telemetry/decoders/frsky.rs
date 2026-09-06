@@ -346,6 +346,8 @@ impl FrskyDecoder {
             let fm: FlightModeState = classify_inav(s.mode_flags);
             let _ = app.emit("telemetry-status", &status);
             let _ = app.emit("telemetry-flightmode", &fm);
+            crate::link_status::on_status(&status);
+            crate::link_status::on_flightmode(&fm);
             if let Some(rec) = recorder {
                 if let Ok(mut r) = rec.lock() {
                     r.on_status(&status);
@@ -374,6 +376,7 @@ impl FrskyDecoder {
                 course: s.course,
             };
             let _ = app.emit("telemetry-gps", &gps);
+            crate::link_status::on_gps(&gps);
             if let Some(rec) = recorder {
                 if let Ok(mut r) = rec.lock() { r.on_gps(&gps); }
             }
@@ -398,6 +401,7 @@ impl FrskyDecoder {
                 cell_count: 0,
             };
             let _ = app.emit("telemetry-analog", &analog);
+            crate::link_status::on_analog(&analog);
             if let Some(rec) = recorder {
                 if let Ok(mut r) = rec.lock() { r.on_analog(&analog); }
             }

@@ -133,8 +133,15 @@
        (Chromium 129+ / WebView2) lets width/height animate even to/from the `info` variant's
        intrinsic `max-content` / `auto` sizes. */
     interpolate-size: allow-keywords;
-    transition: width 0.25s ease, height 0.25s ease, top 0.25s ease;
+    transition: width 0.25s ease, height 0.25s ease, top 0.25s ease, transform 0.25s ease, opacity 0.25s ease;
     animation: ps-in 0.18s ease-out;
+  }
+  /* Parked: the rail's active button was clicked again — the panel slides out to the left with
+     its state intact (+page sets .panels-hidden on the host); the next click slides it back. */
+  :global(.panels-hidden) .ps {
+    transform: translateX(calc(-100% - 80px));
+    opacity: 0;
+    pointer-events: none;
   }
 
   /* Bounding height shared by compact/advanced (and as a cap for info): full panel area,
@@ -157,6 +164,62 @@
     max-width: 360px;
     height: auto;
     max-height: calc(100% - 53px - var(--panel-bottom-reserve, var(--grid-bottom-height)) - 24px - 12px);
+  }
+
+  /* Mobile, any orientation: shift panels clear of a landscape side-notch. Harmless on iPad / portrait
+     (--safe-left is 0), so it does not change those layouts. */
+  :global(html.is-mobile) .ps {
+    left: calc(62px + var(--safe-left, 0px));
+  }
+  /* Portrait phone only: the toolbar collapses/expands, so the panel tracks its live height. iPad and
+     landscape phone keep the fixed top (single-row bar). */
+  @media (max-width: 600px) {
+    :global(html.is-phone) .ps {
+      top: calc(var(--toolbar-h, 65px) + 8px);
+    }
+  }
+  /* Tablet (iPad): the toolbar is taller than the desktop default (iOS status-bar + safe-top padding),
+     so the fixed 65px top clipped the panel header under the bar. Track the live bar height, and size
+     the panel to the gap between the bar and the bottom dock (iPad keeps the above-dock layout, unlike
+     the phone which overlays the dock). */
+  :global(html.is-tablet) .ps {
+    top: calc(var(--toolbar-h, 65px) + 8px);
+  }
+  :global(html.is-tablet) .ps-compact,
+  :global(html.is-tablet) .ps-advanced {
+    height: calc(100% - var(--toolbar-h, 65px) - var(--grid-bottom-height) - 24px - 20px);
+  }
+  :global(html.is-tablet) .ps-info {
+    max-height: calc(100% - var(--toolbar-h, 65px) - var(--grid-bottom-height) - 24px - 20px);
+  }
+  /* iPhone (any orientation): the screen is small, so
+     - width is capped to the viewport (minus the rail + a margin) so the panel never clips off-screen;
+     - the panel is tall and OVERLAYS the HUD dock (it sits above it at z-index 150) instead of being
+       squeezed into the gap above it, so its content is reachable/scrollable. iPad keeps its layout. */
+  /* Phone layout (Dev-Docs archive/PHONE_UI.md): no toolbar, so the panel starts at the top safe
+     inset and may use the full height. Width: every variant keeps the width it asks for on the
+     desktop and is bounded by the SCREEN only — the rail on the left (62px) and an 8px margin on
+     the right. Panels may cover the widget column (z-index 150+ over the column's 100): on a
+     phone the map area alone is too narrow for the advanced two-column layouts (the detail column
+     scrolled sideways even on a 21:9 screen), and a parked panel gives the column back anyway. */
+  :global(html.is-phone) .ps {
+    top: calc(8px + var(--safe-top, 0px));
+  }
+  :global(html.is-phone) .ps-compact {
+    width: min(398px, calc(100vw - var(--safe-left, 0px) - 62px - 8px));
+  }
+  :global(html.is-phone) .ps-info {
+    max-width: min(360px, calc(100vw - var(--safe-left, 0px) - 62px - 8px));
+  }
+  :global(html.is-phone) .ps-advanced {
+    max-width: calc(100vw - var(--safe-left, 0px) - 62px - 8px);
+  }
+  :global(html.is-phone) .ps-compact,
+  :global(html.is-phone) .ps-advanced {
+    height: calc(100% - 16px - var(--safe-top, 0px) - var(--safe-bottom, 0px));
+  }
+  :global(html.is-phone) .ps-info {
+    max-height: calc(100% - 16px - var(--safe-top, 0px) - var(--safe-bottom, 0px));
   }
   /* Widths are driven by the *field* size (the thin-framed working box), which the panel layouts
      were tuned against: 380px main field, 500px detail field. Panel width = field + the column's
@@ -193,6 +256,22 @@
   .ps-wide-compact {
     width: calc(100% - 62px - var(--grid-side-width) - 54px - 6px);
     height: max(20vh, 160px);
+  }
+  /* Phone (PHONE_UI.md): no toolbar / status bar / side dock — the fullscreen panel spans from the
+     top safe inset to the bottom one and from the rail to the right screen edge (over the widget
+     column, see above). The 62px desktop inset left a band at the bottom (the space the status bar
+     used to take). */
+  :global(html.is-phone) .ps-fullscreen,
+  :global(html.is-phone) .ps-wide-compact {
+    top: calc(8px + var(--safe-top, 0px));
+    left: calc(62px + var(--safe-left, 0px));
+  }
+  :global(html.is-phone) .ps-fullscreen {
+    width: calc(100% - 62px - var(--safe-left, 0px) - 8px);
+    height: calc(100% - 16px - var(--safe-top, 0px) - var(--safe-bottom, 0px));
+  }
+  :global(html.is-phone) .ps-wide-compact {
+    width: calc(100% - 62px - var(--safe-left, 0px) - 8px);
   }
 
   /* ── Columns (compact = 1, advanced = 1:2; right wider for previews/maps) ── */
@@ -305,7 +384,7 @@
     min-height: 0;
   }
   .ps-params {
-    width: 280px;
+    width: 240px; /* 280 → 240 (2026-09-04): the terrain controls fit with tighter spacing, the graph gets the rest */
     flex-shrink: 0;
     overflow: auto;
     padding: 10px;

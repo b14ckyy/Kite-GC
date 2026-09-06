@@ -22,8 +22,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
-use source::{RadarSource, SourceHandle, SourceUpdate};
-use sources::formation_flight::NodePos;
+use source::{NodePos, RadarSource, SourceHandle, SourceUpdate};
 use vehicle::{TrackedVehicle, VehicleSource, VehicleSystem};
 
 /// Consolidated snapshot event name — same regardless of which sources are active.

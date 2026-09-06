@@ -20,7 +20,8 @@ You can also drag a mission file straight onto the map. See **[Missions](../guid
 | Format | Extension | Notes |
 |---|---|---|
 | **INAV Blackbox** | `.bbl`, `.txt` | Onboard-flash (`.bbl`) or SD-card (`.txt`) blackbox. Needs the `blackbox_decode` helper, which Kite fetches automatically on first use. |
-| **ArduPilot Dataflash** | `.bin` | ArduPilot / PX4 onboard logs. |
+| **ArduPilot Dataflash** | `.bin` | ArduPilot onboard logs. |
+| **PX4 ULog** | `.ulg` | PX4 onboard flash / SD-card logs. PX4 logs no throttle output, so replayed throttle shows the thrust setpoint. |
 | **MAVLink telemetry** | `.tlog` | A MAVLink ground-station recording. |
 | **MWPTools raw-MSP** | `.rawmsp` | mwp's raw telemetry capture. |
 | **Kite flight** | `.kflight` | A flight exported from another Kite install. |
@@ -33,7 +34,7 @@ markers, the same as a live recording.
 | Format | Extension | Notes |
 |---|---|---|
 | **Kite flight** | `.kflight` | Kite's portable flight file — export selected flights to move them to another install. |
-| **Original log file** | `.bbl` / `.txt` / `.bin` | Re-export the onboard log stored with a flight (Blackbox or Dataflash). Imported `.tlog` / `.rawmsp` is parsed straight in and **not** kept as a file, so there's nothing to re-export there. |
+| **Original log file** | `.bbl` / `.txt` / `.bin` / `.ulg` | Re-export the onboard log stored with a flight (Blackbox, Dataflash or ULog). Imported `.tlog` / `.rawmsp` is parsed straight in and **not** kept as a file, so there's nothing to re-export there. |
 | **Track** | `.kmz` / `.kml` / `.gpx` / `.csv` | A flight's path for Google Earth, GPS tools or a spreadsheet. |
 
 See **[Flight logbook](../guides/logbook.md)**.

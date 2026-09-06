@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
 import type { PanelConfig } from '$lib/stores/settings';
+import { WIDGET_MAP, effectiveWidgetSize, nextWidgetSize } from '$lib/config/widgetRegistry';
 
 /** Reorder widgets within a single panel. Returns the new config. */
 export function reorderPanel(
@@ -42,6 +43,7 @@ export function toggleWidgetVisibility(
   if (allAssigned.includes(widgetId)) {
     const currentPanel = panels.bottom.includes(widgetId) ? 'bottom' : 'right';
     return {
+      ...panels,
       bottom: panels.bottom.filter((id) => id !== widgetId),
       right: panels.right.filter((id) => id !== widgetId),
       positions: {
@@ -52,6 +54,38 @@ export function toggleWidgetVisibility(
   }
   const target = panels.positions?.[widgetId] ?? 'bottom';
   return { ...panels, [target]: [...panels[target], widgetId] };
+}
+
+/** Step a widget to its next size state (edit-mode resize button). Returns the new config. */
+export function cycleWidgetSize(
+  panels: PanelConfig,
+  widgetId: string,
+): PanelConfig {
+  const def = WIDGET_MAP.get(widgetId);
+  if (!def) return panels;
+  const next = nextWidgetSize(def.shape, effectiveWidgetSize(widgetId, panels.sizes));
+  return { ...panels, sizes: { ...panels.sizes, [widgetId]: next } };
+}
+
+/** Drop every id the registry no longer knows (a removed widget, a platform-filtered one) from a
+ *  stored layout — an unknown id would otherwise render as an empty slot. Returns the same object
+ *  when nothing had to change. */
+export function sanitizePanels(panels: PanelConfig): PanelConfig {
+  const known = (id: string) => WIDGET_MAP.has(id);
+  const bottom = panels.bottom.filter(known);
+  const right = panels.right.filter(known);
+  const pickKnown = <T>(rec: Record<string, T> | undefined): Record<string, T> | undefined =>
+    rec && Object.fromEntries(Object.entries(rec).filter(([id]) => known(id)));
+  const positions = pickKnown(panels.positions);
+  const sizes = pickKnown(panels.sizes);
+  const unchanged =
+    bottom.length === panels.bottom.length &&
+    right.length === panels.right.length &&
+    Object.keys(positions ?? {}).length === Object.keys(panels.positions ?? {}).length &&
+    Object.keys(sizes ?? {}).length === Object.keys(panels.sizes ?? {}).length;
+  if (unchanged) return panels;
+  console.log('[widgets] layout sanitised — dropped unknown widget ids');
+  return { ...panels, bottom, right, positions, sizes };
 }
 
 /** Check whether a widget is currently assigned to any panel. */

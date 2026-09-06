@@ -15,12 +15,15 @@
   let {
     open,
     activeTab,
+    activeHidden = false,
     tabs,
     onToggle,
     onSelectTab,
   }: {
     open: boolean;
     activeTab: string;
+    /** The active panel is slid out of view (re-click of its button) — shown dimmed. */
+    activeHidden?: boolean;
     tabs: Tab[];
     onToggle: () => void;
     onSelectTab: (tabId: string) => void;
@@ -47,6 +50,7 @@
           <button
             class="tab-btn"
             class:active={activeTab === tab.id}
+            class:hidden-panel={activeTab === tab.id && activeHidden}
             onclick={() => onSelectTab(tab.id)}
             title={tab.label()}
           >
@@ -92,6 +96,34 @@
 
   .nav-rail.open {
     left: 12px;
+  }
+
+  /* Mobile, any orientation: shift the rail clear of a landscape side-notch / Dynamic Island. Harmless
+     on iPad and in portrait (--safe-left is 0 there), so it does not change those layouts. */
+  :global(html.is-mobile) .nav-rail,
+  :global(html.is-mobile) .nav-rail.open {
+    left: calc(12px + var(--safe-left, 0px));
+  }
+  /* Phone: no toolbar (Dev-Docs archive/PHONE_UI.md D3) — the burger IS the top-left corner. Lifted
+     above the widget column (z-index 100) so the open rail never hides behind it. The rail stops
+     above the bottom-left chip row (arming / sensors / Debug: 26px + 8px margin + 8px gap) and
+     scrolls when the tabs need more. */
+  :global(html.is-phone) .nav-rail {
+    z-index: 120;
+    top: calc(8px + var(--safe-top, 0px));
+    max-height: calc(100vh - 16px - 42px - var(--safe-top, 0px) - var(--safe-bottom, 0px));
+  }
+  /* Portrait phone only: the toolbar collapses/expands, so the rail tracks its live height. iPad and
+     landscape phone keep the fixed top (their bar is a single row that the base 65px already clears). */
+  @media (max-width: 600px) {
+    :global(html.is-mobile) .nav-rail {
+      top: calc(var(--toolbar-h, 65px) + 8px);
+    }
+  }
+  /* Tablet (iPad): the toolbar is taller than the fixed 65px base (iOS status-bar + safe-top padding),
+     which pushed the rail's top buttons under the bar. Track the live bar height so they clear it. */
+  :global(html.is-tablet) .nav-rail {
+    top: calc(var(--toolbar-h, 65px) + 8px);
   }
 
   .hamburger-btn {
@@ -185,6 +217,11 @@
     background: rgba(0, 0, 0, 0.5);
     border-color: #37a8db;
     color: #37a8db;
+  }
+  /* Active but slid out of view: still the selected tab, just parked. */
+  .tab-btn.active.hidden-panel {
+    border-style: dashed;
+    color: rgba(55, 168, 219, 0.6);
   }
 
   .tab-icon {

@@ -63,8 +63,16 @@ along the bottom. Each widget is self-contained and updates live.
 - **Choose which widgets appear** in **[Settings](../reference/settings.md)** — toggle each on or off.
 - **Rearrange them**: click the **✎ (edit)** button by a dock to enter **edit mode**, then drag
   widgets to reorder them or move them between the two docks.
-- Widgets scale to fit the dock, and your layout (including which dock each widget sits in) is
+- **Resize them**: in edit mode each widget shows a **resize button** in its corner. Every tap steps
+  it to its next size — square widgets toggle **small ↔ large**, the wide ones (Live AGL, Video) cycle
+  **wide → large square → small square**. The aspect ratio never changes (a widget is only rescaled),
+  and a dock shrinks to its largest widget, so a row of small tiles frees the space above it. The
+  Video widget always **crops to fill** its tile, whatever its size.
+- Widgets scale to fit the dock, and your layout (which dock each widget sits in, and its size) is
   **remembered between sessions**.
+- **On a phone** the docks are replaced by a widget column on the right edge with two swipeable pages;
+  long-press a widget to rearrange or resize — see **Kite on a phone** in the
+  **[Quick tour](../getting-started/quick-tour.md#kite-on-a-phone)**.
 
 ![A widget dock in edit mode](../assets/guides/telemetry/widget_edit_mode.png)
 /// caption
@@ -84,14 +92,22 @@ Edit mode — drag widgets to reorder them or move them between the docks.
 | **Battery** | A charge bar (FC % when reported), voltage, current and **power (V × A)**, plus charge drawn. On multi-battery aircraft (ArduPilot / PX4) it follows the highest-draw pack automatically, with manual pinning; add a second **Battery 2** widget to watch two packs at once — see **[Batteries](batteries.md)**. |
 | **Flight Mode** | The current flight mode as a colour-coded badge — colour by mode category (shared with the track colours), with sub-mode modifier chips and waypoint progress during a mission. |
 | **RC Link** | Link quality — shows whatever the active protocol provides and hides the rest (CRSF / SmartPort / INAV 9.1+ give LQ + RSSI %/dBm + SNR; MAVLink, LTM and INAV before 9.1 give RSSI only). |
-| **Raw Telemetry** | A compact numeric dump: altitude, speed, vario, heading, roll, pitch, voltage, current, mAh, satellites and RSSI. |
 | **Live AGL** | A forward-looking terrain-profile HUD: flown terrain on the left, **estimated** terrain ahead on the right, with a projected flight line that warns of a ground intersection. |
-| **Terrain Radar** | A top-down, track-up terrain-awareness display (EGPWS-style): a forward fan coloured by clearance against your altitude, with a **range** and **REL / PRED** mode button. |
+| **Terrain Radar** | A top-down, track-up terrain-awareness display (EGPWS-style): a forward fan coloured by clearance against your altitude, with a **range** and **REL / PRED** mode button (shown in dock edit mode). |
 | **Video** | A live video feed embedded as a widget — an RTSP stream or a local capture device / camera (e.g. a USB capture card). See **[Video](video.md)**. |
 
 !!! tip "Units are global"
     Speed, altitude, distance, vertical speed and temperature units come from **[Settings](../reference/settings.md)**
     and apply everywhere — every widget and map read-out follows them.
+
+### Raw telemetry
+
+For the unconverted figures, click **≡ Raw** in the top bar (it appears next to **⇅ Relay** while you
+are connected). A popup lists **every value the telemetry pipeline holds** — GPS, attitude, altitude
+and speeds, wind, battery (per pack on multi-battery aircraft), RC link, status and flight-mode flags,
+sensor health, EKF and flight-controller identity — each with its name and **raw unit** (metres, m/s,
+degrees, volts, the FC's own RSSI scale). Bitfields are shown as decimal and hex. It is read-only and
+updates live; close it with the ✕, Escape, or a click outside.
 
 ## How smooth it looks: telemetry rates
 

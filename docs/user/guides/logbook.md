@@ -64,6 +64,47 @@ the **[3D map](map-3d.md)**.
 Replaying a recorded flight — the player (play / pause, timeline, speed) drives the same instruments and map.
 ///
 
+While playback **runs**, the player folds into a slim strip under the top bar — craft and type,
+elapsed time, progress, total — so it hides as little of the picture as possible. Move the mouse
+into the area the full player occupies (or tap it on a touch screen) and it unfolds; leave the area
+(or tap anywhere else) and it folds again. While playback is **paused** the full player always stays
+open, so changing the speed, the track colouring or scrubbing never fights a folding panel. A map
+drag that ends in that area doesn't unfold it — only releasing the button there does. Clicking or
+tapping anywhere outside the Logbook panel collapses it to its info card, giving the map the room.
+
+### High-resolution replay
+
+Flights are stored at 10 samples per second — plenty for the map, but an onboard log usually
+contains far more. When a flight has its **original log stored** (INAV Blackbox, ArduPilot
+Dataflash or PX4 ULog), the player offers a **HI-RES** switch: Kite re-decodes the stored log at
+its **full rate** into a temporary file and drives the instruments, horizon and stick overlay from
+it — updates then run at your screen's refresh rate instead of 10 Hz. Combined with the
+**slow-motion speeds** (0.25× / 0.5×) this is the way to study a manoeuvre frame by frame.
+
+The first switch to HI-RES shows a short **preparation popup** (re-decoding a big log can take a
+moment on slower machines). The decoded file lives in a `hires-cache` folder next to the flight
+database, is reused while the flight stays open, and is **deleted automatically** when you close
+the flight — nothing accumulates. The map track and timeline stay at 10 Hz by design; high-res
+feeds the live values.
+
+### Opening logs without importing them
+
+You don't have to import a log to look at it. On the desktop, with **no UAV connected**, **drop one
+or more onboard logs onto the map** (INAV Blackbox `.bbl` / `.txt`, ArduPilot `.bin`, PX4 `.ulg`, or
+a `.tlog` / `.rawmsp` telemetry log) — or use the **Open** button in the Logbook toolbar — and Kite
+parses them into a temporary store and replays them exactly like logbook flights: same track, same
+player, HI-RES included. Files dropped later join the same list, and a flash download with several
+logs lists them all. The Logbook panel shows those flights with their details **read-only**; nothing
+is linked, edited or checked for duplicates, the location name is looked up but no weather (weather
+is only fetched for live recordings). A file dropped **onto the Logbook panel itself** is imported
+as before.
+
+Liked what you saw? In the detail view, **Import** runs the normal import of just that flight —
+duplicate check and linking included — and drops it from the temporary list, while **Dismiss**
+simply removes it. **Import Logs** in the toolbar imports every opened file at once, **Close**
+discards them all; both return you to the regular logbook, as does dismissing the last opened
+flight. The temporary store is also cleared when you restart Kite.
+
 ## Importing logs
 
 Use **Import** to pull in logs from outside Kite (one file or a batch). Supported formats:
@@ -71,7 +112,8 @@ Use **Import** to pull in logs from outside Kite (one file or a batch). Supporte
 | Format | From |
 |---|---|
 | **INAV Blackbox** (`.bbl`, `.txt`) | INAV onboard flash (`.bbl`) or SD-card (`.txt`) blackbox |
-| **ArduPilot Dataflash** (`.bin`) | ArduPilot / PX4 onboard logs |
+| **ArduPilot Dataflash** (`.bin`) | ArduPilot onboard logs |
+| **PX4 ULog** (`.ulg`) | PX4 onboard flash / SD-card logs |
 | **MAVLink telemetry** (`.tlog`) | a MAVLink ground-station recording |
 | **MWPTools raw-MSP** (`.rawmsp`) | mwp's raw telemetry capture |
 | **Kite flight** (`.kflight`) | a flight exported from another Kite install |
@@ -83,15 +125,31 @@ import them all, each as its own logbook entry. Imported telemetry logs (`.tlog`
 treated as telemetry recordings and **split into separate flights on the arm / disarm markers** in the
 log, the same way a live recording is.
 
+PX4 ULog note: PX4 doesn't log a throttle *output*, so a replayed `.ulg` flight shows the FC's
+**thrust setpoint** as the throttle value.
+
 ## Exporting
 
 - **`.kflight`** — export selected flights (multi-select supported) as Kite's portable flight file, to
   move them to another install.
 - **Original log file** — re-export the onboard log stored with the flight: an INAV Blackbox
-  (`.bbl` / `.txt`) or ArduPilot Dataflash (`.bin`). For a flight that came out of a multi-flight
+  (`.bbl` / `.txt`), ArduPilot Dataflash (`.bin`) or PX4 ULog (`.ulg`). For a flight that came out of a multi-flight
   `.bbl`, this is that flight's own log, not the whole download. Imported `.tlog` / `.rawmsp` telemetry is parsed
   straight in (not kept as a file), so there's nothing to re-export for those.
 - **Track** — export a flight's path as **KMZ / KML** (Google Earth), **GPX** or **CSV**.
+
+## The database, updates and the automatic backup
+
+All flights live in a single SQLite database (`flights.db`, folder configurable in Settings). When a
+Kite update needs to **upgrade the database format**, Kite first writes a **full backup** next to the
+database file (`flights.pre-migration-backup.db`) — automatically, before anything is changed. Only
+the **latest** backup is kept (with blackbox logs the file can be several GB), and Settings shows it
+with its size and a **Delete** button once it exists. To keep a copy permanently, move the file
+somewhere else yourself.
+
+If you ever **downgrade** Kite after such an upgrade, the older version refuses to touch the newer
+database: the logbook shows a notice (and the database stays untouched) until you either install the
+newer Kite again or restore a matching backup.
 
 ## Vehicles & batteries
 

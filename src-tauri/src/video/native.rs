@@ -17,13 +17,21 @@
 //! (probe returns empty → the UI offers sensible defaults).
 
 use serde::Serialize;
+// Only the desktop enumeration/probe paths spawn ffmpeg; on Android nothing below the
+// `list_devices` / `probe` dispatch is compiled in (see `run_ffmpeg_stderr`).
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 use std::process::{Command, Stdio};
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 use std::time::Duration;
 
 /// Hard cap on a device-enumeration / probe call. ffmpeg normally answers in well under a second;
 /// a wedged capture driver (DirectShow and AVFoundation both do this) can block **forever**, and this
 /// used to be an unbounded `Command::output()`. Bounded + killed, so a bad device costs one slow
 /// dropdown instead of a stuck helper process.
+///
+/// Desktop only, like `run_ffmpeg_stderr` below: Android ships no ffmpeg binary and cannot spawn one,
+/// so the enumeration/probe path there is the `Vec::new()` fallback and never reaches either.
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 const QUERY_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// A discovered native capture device. `id` is what ffmpeg addresses the device by on this OS:
@@ -206,6 +214,10 @@ pub fn needs_transcode(codec: &str) -> bool {
 ///
 /// The read happens on a helper thread so the wait can be bounded (`std::process` has no
 /// wait-with-timeout): stderr reaches EOF when ffmpeg exits, so a value on the channel means "done".
+///
+/// Desktop only — every caller sits behind a Linux/Windows/macOS `cfg`, and there is no bundled
+/// ffmpeg to launch on Android.
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 fn run_ffmpeg_stderr(args: &[&str]) -> Option<String> {
     let bin = super::ffmpeg::find_ffmpeg()?;
     let mut cmd = Command::new(&bin);

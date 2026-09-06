@@ -111,6 +111,20 @@
     pointer-events: none;
   }
 
+  /* Mobile: the phone toolbar wraps onto several rows, so the fixed offset above lands inside it and
+     the alert covers the connection bar. Track the live bar height (same --toolbar-h the map layer and
+     nav-rail follow); the parent .app-toasts layer is already offset by --safe-top, which --toolbar-h
+     also includes, so subtract it to avoid counting the status-bar strip twice. */
+  :global(html.is-mobile) .alert-stack {
+    top: calc(var(--toolbar-h, 53px) - var(--safe-top, 0px) + 8px);
+  }
+  /* Phone: the parent .app-toasts is the band between the corner buttons at --safe-top — start in
+     the buttons' row and never grow past the band (the rows wrap; an alert is not ellipsized). */
+  :global(html.is-phone) .alert-stack {
+    top: 8px;
+    max-width: calc(100% - 16px);
+  }
+
   .banner {
     pointer-events: auto;
     border-radius: 8px;

@@ -28,6 +28,7 @@ The Settings panel — the Interface and Data tabs, each grouped into labelled s
 | **Log Replay Time (3D)** | During replay, drive that lighting from the log's actual time of day (needs the option above). | On |
 | **Night Mode** | Dim the 2D map at night — Off / Auto (by local time) / On. | Auto |
 | **Power Saving** | Cap the 3D frame rate to save battery — Off (60 fps) / On (20 fps) / Auto (20 fps on battery). While active it also drops the smooth bar animations in the speed and battery widgets, so those read the current value directly. | Auto |
+| **High-Resolution 3D** | Render the 3D globe at the display's native pixel density (on) or at half of it (off) to save GPU and battery. Sharpest on high-DPI phones and tablets; a laptop with a weak integrated GPU may prefer it off. | On (desktop) · Off (phone / tablet) |
 | **Your Location** | Your detected position (used as a fallback reference). **Detect** re-runs OS geolocation. | — |
 | **GCS Location** | How the ground-station position is sourced — Off / Manual (set once) / Continuous (live). Used as the reference when no aircraft fix is available. | Continuous |
 
@@ -47,8 +48,8 @@ These are **global** — every widget, map read-out and panel follows them. See
 ### HUD widgets
 
 Toggle each **widget** on or off; the indicator shows which dock it currently lives in. For what each
-widget shows, see the **[Quick tour](../getting-started/quick-tour.md)**. By default AHI, Speed, Altitude,
-GPS, Compass, Home, Flight Mode and Battery are shown; the rest are off.
+widget shows, see the **[Quick tour](../getting-started/quick-tour.md)**. By default Battery, Speed, AHI,
+Altitude and Compass sit in the bottom dock and Home, RC Link and GPS in the right dock; the rest are off.
 
 ## Data tab
 

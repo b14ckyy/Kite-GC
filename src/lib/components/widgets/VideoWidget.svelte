@@ -3,11 +3,21 @@
   Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 -->
 
+<script lang="ts" module>
+  /** Live (non-ghost) tiles mounted right now. The phone grid re-creates the tile when a drag
+   *  carries it across a page edge (create-new-then-destroy-old), and the drag ghost is a second
+   *  instance: the "tile gone → send the map home" guard must only fire when the LAST real tile
+   *  goes, or a drop would bounce the map out of the widget every time. */
+  let liveTiles = 0;
+</script>
+
 <script lang="ts">
-  // Video widget (2×1 wide) — a router sink showing the shared video feed.
-  // Crop-to-fill (object-fit: cover) so the 2:1 tile is always full (too small
-  // to read OSD anyway). Standard widget card with a thin rounded frame around
-  // the video. No settings — the NavRail Video panel owns all control.
+  // Video widget (wide 2:1, or square in its L/S size states) — a router sink showing the shared
+  // video feed. ALWAYS crop-to-fill, centred (object-fit: cover; the native sink via a `data-nv-cover`
+  // full box, see controllers/nativeVideo.ts): the tile is too small to read an OSD anyway, it is the
+  // quick way to swap the feed into the background — never bars (WIDGET_OVERHAUL.md D2). Standard
+  // widget card with a thin rounded frame around the video. No settings — the NavRail Video panel
+  // owns all control.
   //
   // Double-click swaps: the single map instance jumps INTO this tile (locked to a 2D heading-follow
   // nav view by +page), and the other surfaces show video. To do that, +page overlays the top-level
@@ -17,24 +27,48 @@
   import { onMount, onDestroy } from 'svelte';
   import { videoStream, videoState, bindVideoEl, setMapLocation, setWidgetRect, reportMjpegError } from '$lib/stores/video';
   import { canvasSink, mjpegSink } from '$lib/controllers/mjpegSink';
+  import { nativeSurface, activeNativeSurface } from '$lib/controllers/nativeVideo';
+  import { doubleTap, mouseDoubleClick } from '$lib/helpers/doubleTap';
   import VideoReconnectOverlay from '$lib/components/video/VideoReconnectOverlay.svelte';
 
-  let { width = 300, height = 150 }: { width?: number; height?: number } = $props();
+  let {
+    width = 300,
+    height = 150,
+    /** Visual copy only (the phone grid's drag ghost): renders a blank tile, registers no native
+     *  surface, binds no stream, publishes no rect — a second live instance fought the real tile
+     *  for the map's position and the sink's surface. */
+    ghost = false,
+  }: { width?: number; height?: number; ghost?: boolean } = $props();
 
   const mapHere = $derived($videoState.mapLocation === 'widget');
 
   let cardEl = $state<HTMLDivElement | null>(null);
   let videoEl = $state<HTMLVideoElement | null>(null);
   $effect(() => {
+    if (ghost) return;
     bindVideoEl(videoEl, $videoStream);
   });
 
   // Publish the tile's screen rect so +page can overlay the map on it in `widget` mode.
   function measure() {
-    if (!cardEl) return;
+    if (!cardEl || ghost) return;
     const r = cardEl.getBoundingClientRect();
     setWidgetRect({ x: r.left, y: r.top, w: r.width, h: r.height });
   }
+  // The phone grid MOVES the tile without resizing it (page scroll, a re-pack after an activation
+  // settles with a transition, an edit-mode drag) — a rect measured mid-motion landed the map half
+  // a tile off. While the map is here, track the tile per frame (one rect read; setWidgetRect is a
+  // no-op when nothing moved), so the map rides along with a scroll or a drag without lag.
+  $effect(() => {
+    if (!mapHere || ghost) return;
+    let raf = 0;
+    const loop = () => {
+      measure();
+      raf = requestAnimationFrame(loop);
+    };
+    loop();
+    return () => cancelAnimationFrame(raf);
+  });
   // Re-measure when the tile's size changes (dock reflow / UI scale come through the width/height
   // props). MUST NOT read $videoState here — measure() writes it (widgetRect), which would re-trigger
   // this effect and loop. Position-only moves are caught by the ResizeObserver + window resize below.
@@ -44,6 +78,7 @@
     measure();
   });
   onMount(() => {
+    if (!ghost) liveTiles++;
     measure();
     let ro: ResizeObserver | undefined;
     if (cardEl && typeof ResizeObserver !== 'undefined') {
@@ -57,6 +92,9 @@
     };
   });
   onDestroy(() => {
+    if (ghost) return; // a visual copy never owned the map or the rect
+    liveTiles--;
+    if (liveTiles > 0) return; // a successor tile is mounted (page move) — it carries on
     setWidgetRect(null);
     if (mapHere) setMapLocation('main'); // tile gone → don't strand the map
   });
@@ -69,18 +107,44 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <!-- svelte-ignore a11y_click_events_have_key_events -->
-<div bind:this={cardEl} class="widget-card" style="width:{width}px; height:{height}px;" ondblclick={swapHere}>
-  {#if mapHere}
-    <!-- The map is overlaid here by +page (top-level). Keep an empty sized tile underneath. -->
+<!-- Deliberately NOT a data-nv-clip target: the card has a backdrop-filter, and per-frame
+     clip-path churn on a backdrop-filtered element made the whole tile flicker during window
+     resizes (and stick invisible on a settled hairline overlap). While this tile holds the
+     native video, its glass is switched off and the bezel is painted by ring-only properties
+     (border + box-shadow) instead of a clipped background — nothing paints behind the hole. -->
+<div
+  bind:this={cardEl}
+  class="widget-card"
+  class:nv-armed={$activeNativeSurface === 'widget'}
+  style="width:{width}px; height:{height}px;"
+  ondblclick={mouseDoubleClick(swapHere)}
+  use:doubleTap={swapHere}
+>
+  {#if ghost || mapHere}
+    <!-- The map is overlaid here by +page (top-level). Keep an empty sized tile underneath.
+         The drag ghost shows the same blank tile — it must not host a surface. -->
     <div class="placeholder map-here"></div>
+  {:else if $videoState.status === 'live' && $videoState.nativeSink}
+    <!-- Native decode sink (hole punch): the video is a hardware layer BELOW the WebView; this
+         div is the transparent hole it shows through (the surface router clips the card + map
+         behind it). Only one surface at a time can hold the hole — see controllers/nativeVideo. -->
+    <div
+      class="native-hole"
+      class:armed={$activeNativeSurface === 'widget'}
+      use:nativeSurface={'widget'}
+      data-nv-cover
+      data-nv-aspect={$videoState.aspect || 16 / 9}
+    >
+      {#if $activeNativeSurface !== 'widget'}<span>{$t('video.sinkElsewhere')}</span>{/if}
+    </div>
   {:else if $videoState.status === 'live' && $videoState.mjpegUrl}
     <!-- Native / MJPEG feed (no MediaStream): drawn by the off-thread reader where the WebView
          allows it, otherwise the plain <img> multipart stream. -->
     {#if $canvasSink}
-      <canvas use:mjpegSink class:mirror={$videoState.mirror}></canvas>
+      <canvas use:mjpegSink class:mirror={$videoState.mirror} class:rot180={$videoState.rotate180}></canvas>
     {:else}
       <!-- svelte-ignore a11y_missing_attribute -->
-      <img src={$videoState.mjpegUrl} class:mirror={$videoState.mirror} onerror={reportMjpegError} />
+      <img src={$videoState.mjpegUrl} class:mirror={$videoState.mirror} class:rot180={$videoState.rotate180} onerror={reportMjpegError} />
     {/if}
   {:else if $videoState.status === 'live'}
     <!-- svelte-ignore a11y_media_has_caption -->
@@ -89,7 +153,7 @@
       autoplay
       muted
       playsinline
-      class:mirror={$videoState.mirror}
+      class:mirror={$videoState.mirror} class:rot180={$videoState.rotate180}
     ></video>
   {:else}
     <div class="placeholder">
@@ -125,7 +189,7 @@
   video,
   img,
   canvas {
-    object-fit: cover; /* crop to fill the 2:1 tile */
+    object-fit: cover; /* crop to fill the tile, in every size state (D2) */
     /* Own compositing layer: a 60 fps feed then only re-rasters/uploads its own rect instead of
        dirtying the shared content layer's tiles every frame (matters on WebKitGTK/Pi; <video> gets a
        layer anyway, the MJPEG <img> does NOT unless promoted). */
@@ -136,6 +200,16 @@
   canvas.mirror {
     transform: scaleX(-1);
   }
+  video.rot180,
+  img.rot180,
+  canvas.rot180 {
+    transform: rotate(180deg);
+  }
+  video.mirror.rot180,
+  img.mirror.rot180,
+  canvas.mirror.rot180 {
+    transform: scaleY(-1);
+  }
   .placeholder {
     display: flex;
     align-items: center;
@@ -145,5 +219,33 @@
   }
   .placeholder.map-here {
     color: #555; /* faint — the map is drawn on top of this tile */
+  }
+  /* Native-sink hole: transparent while this tile holds the hardware video layer (the frame
+     border stays as the bezel), an opaque placeholder while another surface has it. */
+  .native-hole {
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    border-radius: 5px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #888;
+    font-size: 12px;
+    text-align: center;
+  }
+  .native-hole.armed {
+    background: transparent;
+    /* Opaque ring in the card's 3 px padding gap — box-shadow paints only OUTSIDE the
+       border box, so the hole itself stays transparent. Replaces the card's glass. */
+    box-shadow: 0 0 0 3px rgba(30, 30, 30, 0.9);
+  }
+  /* While this tile holds the native video: no glass — the background would paint behind the
+     transparent hole, and clipping it (the old approach) flickered (see markup comment). */
+  .widget-card.nv-armed {
+    background: transparent;
+    backdrop-filter: none;
   }
 </style>

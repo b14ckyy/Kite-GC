@@ -16,6 +16,7 @@ import {
   importBlackboxLog,
   blackboxLogCount,
   importArdupilotLog,
+  importUlogLog,
   importRawLog,
   type RawImportResult,
   linkFlights as linkFlightsStore,
@@ -205,6 +206,18 @@ export async function importArdupilot(
   locale: string,
 ) {
   return importArdupilotLog(filePath, dbPath, forceImport, locale);
+}
+
+/**
+ * Import a PX4 ULog .ulg file.
+ */
+export async function importUlog(
+  filePath: string,
+  dbPath: string,
+  forceImport: boolean,
+  locale: string,
+) {
+  return importUlogLog(filePath, dbPath, forceImport, locale);
 }
 
 /** Parse a recorded raw serial log (.rawmsp / .tlog) into the logbook as LIVE flights (ADR-049). */

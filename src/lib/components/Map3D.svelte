@@ -32,7 +32,7 @@
   import { onMount, onDestroy, untrack } from "svelte";
   import { get } from "svelte/store";
   import { invoke } from "@tauri-apps/api/core";
-  import { attachPerf3d, detachPerf3d, perf3dForceContinuous } from "$lib/stores/perf3d";
+  import { attachPerf3d, detachPerf3d, perf3dForceContinuous, perf3dTimeOverride } from "$lib/stores/perf3d";
   import { isDebugMode } from "$lib/stores/debug";
   import * as Cesium from "cesium";
   import "cesium/Build/Cesium/Widgets/widgets.css";
@@ -151,7 +151,13 @@
     radarMapSettings = null,
     radarRefAltM = null,
     radarReference = null,
+    centerInsetRight = 0,
   }: {
+    /** Width (css px) of an overlay covering the map's RIGHT edge (the phone's widget column): the
+     *  corner controls move left by it and the camera's projection is shifted (`frustum.xOffset`,
+     *  see applyCenterInset) so whatever the camera looks at — the craft in follow / orbit / FPV —
+     *  sits in the middle of the UNCOVERED area, not of the screen (PHONE_UI.md D16). */
+    centerInsetRight?: number;
     active?: boolean;
     playbackTrack?: TelemetryRecord[];
     playbackPoint?: TelemetryRecord | null;
@@ -226,18 +232,35 @@
   // waste GPU/battery for no benefit on a map). Low-power drops to 20fps:
   //   off = 60fps · on = always 20fps · auto = 20fps only while on battery (queried from the backend).
   let lowPower3DSetting: 'off' | 'on' | 'auto' = 'off';
+  let highRes3DSetting = false;
   let onBattery = false;
   let batteryPollId: ReturnType<typeof setInterval> | undefined;
   const BASE_FPS = 60;
   const LOW_POWER_FPS = 20;
 
+  // ── OSM buildings ──
+  // Cesium's global OpenStreetMap building tileset (Ion asset 96188), served from the same Ion
+  // account as World Terrain — so it is only available when a token is configured. Held here so the
+  // live settings watcher can add/remove it without rebuilding the viewer. `buildingsLoading` guards
+  // against a second toggle racing the first load, which would add the tileset twice.
+  let buildingsEnabled = false;                      // settings.buildings3D
+  let buildingsTileset: Cesium.Cesium3DTileset | undefined;
+  let buildingsLoading = false;
+
   // ── Sun / lighting ──
   let lightingEnabled = false;                       // settings.realLighting3D → globe sun-shading
   let replayTimeEnabled = false;                     // settings.logReplayTime → clock from log timestamp
   let nightModeSetting: 'off' | 'auto' | 'on' = 'off'; // settings.nightMode2D (also applies to 3D)
-  // Dev tool: override the sky clock with a manual time-of-day to preview lighting.
-  let devTimeActive = $state(false);                 // slider overrides clock when on
-  let devTimeMin = $state(12 * 60);                  // minutes since midnight (local solar at view lon)
+  // Dev tool: override the sky clock with a manual time-of-day to preview lighting — driven from the
+  // Debug Monitor's Performance tab (stores/perf3d `perf3dTimeOverride`), mirrored here on change.
+  let devTimeActive = false;                         // override active
+  let devTimeMin = 12 * 60;                          // minutes since midnight (local solar at view lon)
+  $effect(() => {
+    const o = $perf3dTimeOverride;
+    devTimeActive = o.active;
+    devTimeMin = o.minutes;
+    untrack(applyClockTime);
+  });
   // Night dimming: Cesium's own night side is ×0.3; we darken ONLY the imagery layers to match
   // (entities/sky stay bright, like 2D). Applied as the darker of the two sources — never stacked
   // on top of the real-lighting night shading.
@@ -897,6 +920,12 @@
     } catch (e) {
       console.warn('[Map3D] applyIonToken: failed to enable world terrain', e);
     }
+    // Buildings are an Ion asset too, so a token arriving now is what unblocks them. Without this a
+    // user whose `buildings3D` was already on — persisted from a session that had a token, or set
+    // before one was entered — would get terrain but no buildings, and the settings watcher would
+    // never fire to fix it because the value did not change. `applyBuildings` is a no-op when the
+    // setting is off, so this costs nothing in the ordinary case.
+    void applyBuildings();
   }
 
   export function getCamFocus(): { lat: number; lon: number; range: number; heading: number; pitch: number } | null {
@@ -939,6 +968,63 @@
       headingDeg: Cesium.Math.toDegrees(viewer.camera.heading),
     };
   }
+
+  /** Shift the projection so the camera axis lands in the middle of the uncovered area (the screen
+   *  minus `centerInsetRight`). A frustum `xOffset` moves the projection WINDOW, not the camera:
+   *  lookAt / setView / FPV keep aiming at the craft, the picture just slides left by half the inset.
+   *  In near-plane units the visible half-width is `right = aspect · near · tan(fovy / 2)`, and a
+   *  window shift of `inset / 2` px on a canvas `W` px wide is `right · inset / W` (a positive
+   *  xOffset moves the scene left). Cesium's projection and culling honour xOffset; its screen→ray
+   *  helpers (getPickRay / pickEllipsoid) do NOT — the only caller here, getCamFocus, asks for the
+   *  camera axis at the SCREEN centre, which is exactly where the un-offset ray still is. */
+  /** settings.highRes3D: native pixel density, or half of it (Cesium's own default was CSS pixels —
+   *  native on a DPR-1 desktop, a third of the pixels on the Sony). */
+  function applyRenderResolution() {
+    if (!viewer) return;
+    viewer.resolutionScale = highRes3DSetting ? 1 : 0.5;
+    viewer.scene.requestRender();
+  }
+
+  /** Cesium 24's `PerspectiveFrustum.clone()` drops xOffset/yOffset, and the scene renders through
+   *  a clone of the camera frustum — the inset reached culling but not the picture (screen-centred
+   *  cams, black wedges at the left edge). Once per process. */
+  function patchFrustumCloneForOffsets() {
+    const proto = Cesium.PerspectiveFrustum.prototype as unknown as {
+      clone: (result?: Cesium.PerspectiveFrustum) => Cesium.PerspectiveFrustum;
+      __kiteOffsetClone?: boolean;
+    };
+    if (proto.__kiteOffsetClone) return;
+    const orig = proto.clone;
+    proto.clone = function (this: Cesium.PerspectiveFrustum, result?: Cesium.PerspectiveFrustum) {
+      const r = orig.call(this, result);
+      r.xOffset = this.xOffset;
+      r.yOffset = this.yOffset;
+      return r;
+    };
+    proto.__kiteOffsetClone = true;
+  }
+
+  function applyCenterInset() {
+    if (!viewer) return;
+    const f = viewer.camera.frustum;
+    if (!(f instanceof Cesium.PerspectiveFrustum)) return;
+    const w = viewer.canvas.clientWidth;
+    if (!w || centerInsetRight <= 0) {
+      if (f.xOffset !== 0) f.xOffset = 0;
+      return;
+    }
+    const aspect = f.aspectRatio;
+    if (aspect === undefined) return; // not configured yet (very first frame)
+    let fovy: number | undefined;
+    try { fovy = f.fovy; } catch { return; }
+    if (fovy === undefined || !isFinite(fovy) || fovy <= 0) return;
+    const right = aspect * f.near * Math.tan(fovy / 2);
+    f.xOffset = (right * centerInsetRight) / w;
+  }
+  $effect(() => {
+    void centerInsetRight;
+    viewer?.scene.requestRender(); // a changed inset must re-project even while nothing else moves
+  });
 
   /** True when the 3D camera is in free-look (not locked to the UAV in follow/orbit/fpv). */
   export function isFreeLook(): boolean {
@@ -1003,11 +1089,13 @@
       cacheMaxMB = s.mapCacheMaxMB || 0;
       curtainEnabled = s.altitudeCurtain3D ?? true;
       lightingEnabled = s.realLighting3D ?? false;
+      buildingsEnabled = s.buildings3D ?? false;
       replayTimeEnabled = s.logReplayTime ?? false;
       nightModeSetting = s.nightMode2D ?? 'off';
       hudSpeedUnit = s.interface?.speedUnit ?? 'kmh';
       hudAltUnit = s.interface?.altitudeUnit ?? 'm';
       lowPower3DSetting = s.lowPower3D ?? 'off';
+      highRes3DSetting = s.highRes3D ?? false;
     });
     unsubSettings(); // read once, unsubscribe
 
@@ -1059,6 +1147,7 @@
       // which breaks the translucent render pass on some drivers — the replay track line + altitude
       // curtain vanish while the clamp-to-ground shadow (a separate pass) stays. FXAA (below) does the AA.
       msaaSamples: 1,
+      useBrowserRecommendedResolution: false, // native density; applyRenderResolution scales it
       scene3DOnly: true,
       // Debug: the Performance tab can disable OIT (a per-frame full-screen pass) via a localStorage flag
       // to measure its cost. OIT is constructor-only, so the panel reloads to apply. The key is only ever
@@ -1075,8 +1164,10 @@
     // CesiumWidget paints construction errors into its own DOM panel, but that panel was the ONLY
     // record — the macOS 26 report reached us as a photo of the screen. Capture the real error into
     // the diagnostics log, then stop cleanly: the rest of the app runs on without 3D.
+    patchFrustumCloneForOffsets();
     try {
       viewer = new Cesium.Viewer(cesiumContainer, viewerOptions);
+      applyRenderResolution();
       attachCameraLight();
     } catch (e) {
       const detail = e instanceof Error ? `${e.name}: ${e.message}\n${e.stack ?? ''}` : String(e);
@@ -1087,6 +1178,9 @@
     // Wake the parked craft-smoothing loop when the craft may have scrolled back into view — see the
     // off-screen gate at the smoothing state. Dies with the viewer, no explicit removal needed.
     viewer.scene.preRender.addEventListener(wakeSmoothingIfVisible);
+    // Off-centre projection for a covered right edge (phone widget column) — per frame, because the
+    // offset depends on the live fov / aspect / near (FPV lens, resize). No-op at inset 0.
+    viewer.scene.preRender.addEventListener(applyCenterInset);
 
     // Add overlay layers for hybrid providers (also cached)
     if (baseProvider.overlays) {
@@ -1107,6 +1201,9 @@
     if (ionToken) {
       viewer.scene.globe.depthTestAgainstTerrain = true;
     }
+
+    // OSM buildings, if the user asked for them and we have an Ion token to fetch them with.
+    void applyBuildings();
 
     // ── Performance: limit view distance ──
     // Fog hides distant terrain gradually; far clip plane caps geometry.
@@ -1308,6 +1405,11 @@
         lightingEnabled = lighting;
         updateNightDim3D(); // owns enableLighting + re-evaluates the night dim
       }
+      const buildings = next.buildings3D ?? false;
+      if (buildings !== buildingsEnabled) {
+        buildingsEnabled = buildings;
+        void applyBuildings(); // loads on first enable, then just toggles `show`
+      }
       const replayTime = next.logReplayTime ?? false;
       if (replayTime !== replayTimeEnabled) {
         replayTimeEnabled = replayTime;
@@ -1325,6 +1427,11 @@
         lowPower3DSetting = lowPower;
         applyFrameRateCap();
         void refreshBattery(); // auto mode → fetch battery state + re-apply
+      }
+      const highRes = next.highRes3D ?? false;
+      if (highRes !== highRes3DSetting) {
+        highRes3DSetting = highRes;
+        applyRenderResolution();
       }
       const aspEnabledChg = next.airspace.enabled !== airspaceEnabled;
       if (aspEnabledChg || next.airspace.layers.obstacles.d3 !== obstacleD3 || next.airspace.obstacleDistanceKm !== obstacleDistKm) {
@@ -2675,6 +2782,49 @@
   }
 
   /**
+   * Add, show or hide the OSM buildings tileset to match `buildingsEnabled`.
+   *
+   * Loaded lazily on first enable rather than at startup: it is a real network fetch and a real GPU
+   * cost, and the default is off. Once loaded it is kept and only its `show` flag is flipped, so
+   * toggling it during a flight does not re-download anything.
+   *
+   * Needs a Cesium Ion token — the tileset is an Ion asset, exactly like World Terrain. Without one
+   * the Settings toggle is disabled, but the token is checked here too rather than only at viewer
+   * creation: the viewer may well have started with no token, and `applyIonToken` can supply one
+   * later without a restart. That path calls back in here for exactly this reason.
+   */
+  async function applyBuildings() {
+    if (!viewer) return;
+
+    if (buildingsTileset) {
+      buildingsTileset.show = buildingsEnabled;
+      viewer.scene.requestRender();
+      return;
+    }
+    if (!buildingsEnabled || buildingsLoading) return;
+    if (!Cesium.Ion.defaultAccessToken) {
+      console.warn('[Map3D] 3D buildings need a Cesium Ion token — skipping');
+      return;
+    }
+
+    buildingsLoading = true;
+    try {
+      const tileset = await Cesium.createOsmBuildingsAsync();
+      // The user may have switched it off again, or torn the viewer down, while this was in flight.
+      if (!viewer || viewer.isDestroyed()) return;
+      buildingsTileset = viewer.scene.primitives.add(tileset) as Cesium.Cesium3DTileset;
+      buildingsTileset.show = buildingsEnabled;
+      viewer.scene.requestRender();
+    } catch (e) {
+      // Most likely an Ion token without access to the asset, or no network. Not fatal: the 3D map
+      // is fully usable without buildings, so warn and carry on rather than breaking the view.
+      console.warn('[Map3D] could not load OSM buildings:', e);
+    } finally {
+      buildingsLoading = false;
+    }
+  }
+
+  /**
    * Night dimming as the *darker of two continuous brightness curves*, never stacked:
    *  - cesiumFactor: real-lighting day/night shading at the VIEWED location & clock time (smooth 1.0→0.3
    *    across the terminator; 1.0 if real lighting is off).
@@ -3652,13 +3802,25 @@
     <path d="M16 44 C16 44 2 24 2 16 A14 14 0 1 1 30 16 C30 24 16 44 16 44Z" fill="#f39c12" stroke="#fff" stroke-width="2"/>
     <text x="16" y="20" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold" font-family="sans-serif">L</text></svg>`;
 
+  /** Same size factor as the 2D markers (Map.svelte `.mission-wp-icon`). */
+  const WP_3D_SCALE = 0.85;
+  /** Raster the icon SVG at the display's pixel density: Cesium rasterizes a data-URI SVG at its
+   *  intrinsic width/height and draws billboards in CSS px, so a 48 px icon was 126 blurry device
+   *  px on the Sony. */
+  function sharpSvg(svg: string): string {
+    const k = Math.min(3, Math.max(1, Math.ceil(window.devicePixelRatio || 1)));
+    if (k === 1) return svg;
+    return svg.replace(/width="(\d+)" height="(\d+)"/, (_m, w, h) => `width="${Number(w) * k}" height="${Number(h) * k}"`);
+  }
+
   function missionBillboard(lon: number, lat: number, height: number, svg: string, w: number, h: number, ax: number, ay: number, alpha = 1) {
+    const f = WP_3D_SCALE;
     const ent = viewer!.entities.add({
       position: Cesium.Cartesian3.fromDegrees(lon, lat, height),
       billboard: {
-        image: 'data:image/svg+xml,' + encodeURIComponent(svg),
-        width: w, height: h,
-        pixelOffset: new Cesium.Cartesian2(w / 2 - ax, h / 2 - ay),
+        image: 'data:image/svg+xml,' + encodeURIComponent(sharpSvg(svg)),
+        width: w * f, height: h * f,
+        pixelOffset: new Cesium.Cartesian2((w / 2 - ax) * f, (h / 2 - ay) * f),
         disableDepthTestDistance: Number.POSITIVE_INFINITY, // overlay, never occluded
         color: alpha < 1 ? Cesium.Color.WHITE.withAlpha(alpha) : Cesium.Color.WHITE,
       },
@@ -3688,8 +3850,8 @@
     // CENTER origin + a fixed pixelOffset keeps the glow on the head (billboards are screen-space, so the
     // offset tracks the marker at any zoom) and lets the scale pulse grow symmetrically from it.
     const bottomAnchored = spec.anchorY >= spec.height - 1;
-    const headUpPx = bottomAnchored ? spec.height * 0.64 : spec.height / 2 - spec.anchorY;
-    const d = spec.width * 1.3; // ≈ the head diameter + halo bleed
+    const headUpPx = (bottomAnchored ? spec.height * 0.64 : spec.height / 2 - spec.anchorY) * WP_3D_SCALE;
+    const d = spec.width * 1.3 * WP_3D_SCALE; // ≈ the head diameter + halo bleed
     const ent = viewer!.entities.add({
       position: Cesium.Cartesian3.fromDegrees(lon, lat, height),
       billboard: {
@@ -4623,7 +4785,7 @@
   );
 </script>
 
-<div class="map3d-wrapper">
+<div class="map3d-wrapper" style="--map-inset-right: {centerInsetRight}px">
   <div class="cesium-container" bind:this={cesiumContainer}></div>
 
   {#if cameraMode === 'fpv'}
@@ -4697,32 +4859,6 @@
     <button class="map-control-btn map-zoom-btn" onclick={() => zoom3D(-1)} title="Zoom out" aria-label="Zoom out">-</button>
   </div>
 
-  {#if import.meta.env.DEV}
-    <!-- DEV-only sun/time previewer: drag to scrub the time-of-day and watch the lighting. -->
-    <div class="dev-time-tool">
-      <label class="dev-time-row">
-        <input
-          type="checkbox"
-          bind:checked={devTimeActive}
-          onchange={() => applyClockTime()}
-        />
-        <span class="dev-time-label">Time override</span>
-        <span class="dev-time-clock">
-          {Math.floor(devTimeMin / 60).toString().padStart(2, '0')}:{(devTimeMin % 60).toString().padStart(2, '0')}
-        </span>
-      </label>
-      <input
-        class="dev-time-slider"
-        type="range"
-        min="0"
-        max="1439"
-        step="1"
-        bind:value={devTimeMin}
-        disabled={!devTimeActive}
-        oninput={() => applyClockTime()}
-      />
-    </div>
-  {/if}
 </div>
 
 <style>
@@ -4750,57 +4886,11 @@
     left: 8px;
   }
 
-  /* ── DEV-only time-of-day previewer (top-right) ── */
-  .dev-time-tool {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    z-index: 10000;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    width: 200px;
-    padding: 8px 10px;
-    background: rgba(46, 46, 46, 0.9);
-    border: 1px solid rgba(55, 168, 219, 0.5);
-    border-radius: 6px;
-    backdrop-filter: blur(8px);
-    pointer-events: all;
-    font-family: 'Segoe UI', Tahoma, sans-serif;
-  }
-  .dev-time-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    cursor: pointer;
-    user-select: none;
-  }
-  .dev-time-label {
-    color: #c7dfe8;
-    font-size: 12px;
-  }
-  .dev-time-clock {
-    margin-left: auto;
-    color: #37a8db;
-    font-variant-numeric: tabular-nums;
-    font-weight: 700;
-    font-size: 13px;
-  }
-  .dev-time-slider {
-    width: 100%;
-    accent-color: #37a8db;
-    cursor: pointer;
-  }
-  .dev-time-slider:disabled {
-    cursor: default;
-    opacity: 0.45;
-  }
-
   /* ── Controls corner — identical layout to Map.svelte ── */
   .map-controls-corner {
     position: absolute;
     bottom: 8px;
-    right: 8px;
+    right: calc(8px + var(--map-inset-right, 0px)); /* clear of a right-edge overlay (phone) */
     z-index: 10000;
     display: flex;
     flex-direction: column;
@@ -4834,6 +4924,15 @@
     font-size: 23px;
     line-height: 1;
     font-weight: 700;
+  }
+  /* Phone (PHONE_UI.md D11): pinch zooms, no buttons; the cluster clears the bottom chip row and
+     rides along when the widget column slides aside for the replay player (see Map.svelte). */
+  :global(html.is-phone) .map-zoom-btn {
+    display: none;
+  }
+  :global(html.is-phone) .map-controls-corner {
+    bottom: calc(8px + var(--safe-bottom, 0px));
+    transition: right 0.3s ease;
   }
 
   .map-mode-btn {

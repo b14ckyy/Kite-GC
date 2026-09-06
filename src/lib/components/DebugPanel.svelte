@@ -17,8 +17,10 @@
   import { channelValues } from "$lib/stores/rcEngine";
   import { fcChannels } from "$lib/stores/rcMirror";
   import { boxName } from "$lib/helpers/inavModes";
-  import { getPerf3dViewer, perf3dFps, perf3dForceContinuous, perf3dAttached } from "$lib/stores/perf3d";
-  import { videoState, videoRtcStats, rtspBufferFrames } from "$lib/stores/video";
+  import { getPerf3dViewer, perf3dFps, perf3dForceContinuous, perf3dAttached, perf3dTimeOverride } from "$lib/stores/perf3d";
+  import { videoState, videoRtcStats, nativeRtspStats, rtspBufferFrames, debugLinuxHoleSpike } from "$lib/stores/video";
+  import { nativeHoleDebug } from "$lib/controllers/nativeVideo";
+  import { isLinux } from "$lib/platform";
   import NumberStepper from "$lib/components/NumberStepper.svelte";
   import { mjpegStats, uiJankMs, startJankProbe, stopJankProbe } from "$lib/controllers/mjpegSink";
 
@@ -26,6 +28,13 @@
 
   type Tab = 'msp' | 'mavlink' | 'alerts' | 'telemetry' | 'rc' | 'performance' | 'video';
   let tab = $state<Tab>('msp');
+
+  // Linux hole-punch spike (dev, MOBILE_RTSP.md P2.3 stage A) — coloured stand-in below the DOM hole.
+  let spikeOn = $state(false);
+  async function toggleSpike(): Promise<void> {
+    spikeOn = !spikeOn;
+    await debugLinuxHoleSpike(spikeOn);
+  }
 
   // ── 3D performance live-tuning (dev) — mutate the running Cesium scene to localise the
   // Linux/WebKitGTK bottleneck. Values are loaded from the live scene when the tab opens; each
@@ -48,6 +57,17 @@
   let pOit = $state(true);
   let pLogDepth = $state(true);
   let pHdr = $state(false);
+
+  // Sky-clock override (time-of-day previewer, moved here from the 3D view's dev overlay): local
+  // state mirrors the store so the slider scrubs live; Map3D re-applies its clock on every change.
+  let pTimeActive = $state(get(perf3dTimeOverride).active);
+  let pTimeMin = $state(get(perf3dTimeOverride).minutes);
+  function applyTimeOverride(): void {
+    perf3dTimeOverride.set({ active: pTimeActive, minutes: pTimeMin });
+  }
+  const pTimeClock = $derived(
+    `${Math.floor(pTimeMin / 60).toString().padStart(2, '0')}:${(pTimeMin % 60).toString().padStart(2, '0')}`,
+  );
 
   function loadPerf(): void {
     const v = getPerf3dViewer();
@@ -844,6 +864,23 @@
         <label class="perf-check"><input type="checkbox" bind:checked={pFxaa} onchange={applyPerf} /> {$t('debug.perf.fxaa')}</label>
         <div class="perf-row"><span>{$t('debug.perf.resScale')}</span><input type="number" step="0.05" min="0.25" max="2" bind:value={pResScale} onchange={applyPerf} /></div>
 
+        <div class="perf-section">{$t('debug.perf.secTime')}</div>
+        <label class="perf-check">
+          <input type="checkbox" bind:checked={pTimeActive} onchange={applyTimeOverride} />
+          {$t('debug.perf.timeOverride')} <b class="perf-clock">{pTimeClock}</b>
+        </label>
+        <input
+          class="perf-slider"
+          type="range"
+          min="0"
+          max="1439"
+          step="1"
+          bind:value={pTimeMin}
+          disabled={!pTimeActive}
+          oninput={applyTimeOverride}
+          aria-label={$t('debug.perf.timeOverride')}
+        />
+
         <div class="perf-section">{$t('debug.perf.secPasses')}</div>
         <label class="perf-check"><input type="checkbox" bind:checked={pOit} onchange={applyOit} /> {$t('debug.perf.oit')}</label>
         <label class="perf-check"><input type="checkbox" bind:checked={pLogDepth} onchange={applyPerf} /> {$t('debug.perf.logDepth')}</label>
@@ -861,7 +898,9 @@
       <div class="debug-stats">
         <div class="stat-group">
           <span class="stat-label">{$t('debug.vidSource')}</span>
-          <span class="stat-value">{$videoState.kind}{$videoState.rtspEngine ? ` · ${$videoState.rtspEngine}` : ''}</span>
+          <!-- Historic internal value: rtspEngine 'native' means MediaMTX' own RTSP reader —
+               shown by its real name so it can't be confused with Kite's native client. -->
+          <span class="stat-value">{$videoState.kind}{$videoState.rtspEngine ? ` · ${{ native: 'MediaMTX', ffmpeg: 'ffmpeg', kite: 'Kite' }[$videoState.rtspEngine]}` : ''}</span>
           <span class="stat-sep">|</span>
           <span class="stat-label">{$t('debug.vidStatus')}</span>
           <span class="stat-value">{$videoState.status}</span>
@@ -962,8 +1001,82 @@
         </div>
         <div class="perf-hint">{$t('debug.vidMjpegHint')}</div>
       {/if}
-      {#if !$videoRtcStats && !$mjpegStats}
+      {#if $nativeRtspStats}
+        {@const n = $nativeRtspStats}
+        <!-- Kite's own in-process RTSP client (both routes): transport + RTP health straight from
+             the receive loop, and the decode sink's presentation numbers when H.264/HEVC plays
+             natively. On the MJPEG route the reader block above carries the drawing side. -->
+        <div class="debug-stats stats-rows">
+          <div class="stat-group">
+            <span class="stat-label">{$t('debug.vidNatTransport')}</span>
+            <span class="stat-value">{n.transport ? n.transport.toUpperCase() : '—'}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.vidNatFrames')}</span>
+            <span class="stat-value">{n.framesPerSec.toFixed(1)}/s</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.vidDropped')}</span>
+            <span class="stat-value">{n.framesDropped}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.vidMjpegRate')}</span>
+            <span class="stat-value">{(n.kbps / 1000).toFixed(1)} Mbit/s</span>
+          </div>
+          <div class="stat-group">
+            <span class="stat-label">{$t('debug.vidNatRtp')}</span>
+            <span class="stat-value">{n.rtpReceived}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.vidLost')}</span>
+            <span class="stat-value">{n.rtpLost}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.vidNatReordered')}</span>
+            <span class="stat-value">{n.rtpReordered}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.vidNatLate')}</span>
+            <span class="stat-value">{n.rtpLate}</span>
+          </div>
+          {#if n.sink}
+            <div class="stat-group">
+              <span class="stat-label">{$t('debug.vidNatPresented')}</span>
+              <span class="stat-value">{n.sink.presentedFps.toFixed(1)} fps</span>
+              <span class="stat-sep">|</span>
+              <span class="stat-label">{$t('debug.vidSize')}</span>
+              <span class="stat-value">{n.sink.width ? `${n.sink.width}×${n.sink.height}` : '—'}</span>
+              <span class="stat-sep">|</span>
+              <span class="stat-label">{$t('debug.vidNatCodec')}</span>
+              <span class="stat-value">{n.sink.codec ?? '—'}</span>
+              <span class="stat-sep">|</span>
+              <span class="stat-label">{$t('debug.vidNatDroppedHidden')}</span>
+              <span class="stat-value">{n.sink.droppedHidden}</span>
+            </div>
+          {/if}
+        </div>
+        <div class="perf-hint">{$t('debug.vidNatHint')}</div>
+      {/if}
+      {#if !$videoRtcStats && !$mjpegStats && !$nativeRtspStats}
         <div class="perf-empty">{$t('debug.vidInactive')}</div>
+      {/if}
+      {#if import.meta.env.DEV && $nativeHoleDebug}
+        {@const hd = $nativeHoleDebug}
+        <div class="debug-stats stats-rows">
+          <div class="stat-group">
+            <span class="stat-label">{$t('debug.vidHole')}</span>
+            <span class="stat-value">{hd.id}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">r</span>
+            <span class="stat-value">{hd.radius}px</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">cut</span>
+            <span class="stat-value">{hd.cut}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">clip L/T/R/B</span>
+            <span class="stat-value">{hd.clip}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">by</span>
+            <span class="stat-value">{hd.by}</span>
+          </div>
+        </div>
+      {/if}
+      {#if import.meta.env.DEV && isLinux}
+        <button class="dbg-btn" onclick={toggleSpike}>{$t('debug.vidLinuxSpike')} {spikeOn ? '●' : '○'}</button>
       {/if}
     </div>
   {/if}
@@ -993,9 +1106,19 @@
     background: #434343; border: 1px solid #555; border-radius: 4px; color: #e0e0e0; font-size: 12px;
   }
   .perf-check { display: flex; align-items: center; gap: 7px; padding: 3px 0; color: #c0c0c0; cursor: pointer; }
+  .perf-clock { margin-left: auto; color: #37a8db; font-variant-numeric: tabular-nums; }
+  .perf-slider { width: 100%; accent-color: #37a8db; cursor: pointer; }
+  .perf-slider:disabled { cursor: default; opacity: 0.45; }
   .perf-empty { padding: 20px 4px; color: #949494; font-style: italic; }
   .perf-hint { margin-top: 12px; padding-top: 8px; border-top: 1px solid #272727; color: #777; font-size: 11px; line-height: 1.4; }
 
+  /* Phone: no top/status bar; keep clear of the widget column. */
+  :global(html.is-phone) .debug-panel {
+    top: calc(8px + var(--safe-top, 0px));
+    right: calc(var(--phone-panel-w, 0px) + 8px);
+    width: min(540px, calc(100vw - var(--phone-panel-w, 0px) - 74px));
+    max-height: calc(100vh - 16px - var(--safe-top, 0px) - var(--safe-bottom, 0px));
+  }
   .debug-panel {
     position: absolute;
     top: 65px;

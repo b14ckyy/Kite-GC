@@ -4,16 +4,32 @@
 # Renames Tauri's outputs to a unified scheme and drops them in <repo>/release/:
 #
 #     KiteGC_<OS>_<Arch>_<Version>_<Type>.<ext>
+#     KiteGC_Android_<abi>_<Version>_installer.apk      (when an Android release build exists)
 #
-#   Type = installer   (.deb / .rpm / .dmg)
+#   Type = installer   (.deb / .rpm / .dmg; the Android .apk)
 #        | standalone  (.AppImage / .app-as-zip — self-contained runnable app)
 #        | portable     (the bare CLI binary, zipped with an empty `.portable` marker so the
 #                        download keeps its data in a data/ folder next to the executable)
 #
 # One naming source shared by local builds (`just build*`) AND the GitHub release workflow, so the
-# filenames are identical everywhere. The release/ folder is git-ignored (fresh each run).
+# filenames are identical everywhere. The release/ folder is git-ignored and refreshed on every
+# run — `--keep` adds to it instead.
+#
+# `--android-only` collects the APKs alone (implies --keep). `just build-android` uses it: an
+# Android build leaves the DESKTOP outputs of an earlier build untouched in target/release, and
+# collecting them would republish a stale binary under the current version number (found on the
+# Windows side 2026-09-04: a 1.0.0-rc2 kite-gc.exe came out as a 1.1.0-dev portable zip).
 # ============================================================
 set -e
+
+KEEP=0
+ANDROID_ONLY=0
+for arg in "$@"; do
+    case "$arg" in
+        --keep)         KEEP=1 ;;
+        --android-only) ANDROID_ONLY=1; KEEP=1 ;;
+    esac
+done
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION="$(grep '"version"' "$ROOT/package.json" | head -1 | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
@@ -39,7 +55,7 @@ fi
 
 name() { printf '%s_%s_%s_%s_%s.%s' "$APP" "$OS" "$ARCH" "$VERSION" "$1" "$2"; }
 
-rm -rf "$OUT"
+[ "$KEEP" = 1 ] || rm -rf "$OUT"
 mkdir -p "$OUT"
 collected=()
 
@@ -72,7 +88,9 @@ zip_portable() { # <binary-path> <name-in-zip>
     collected+=("$dest")
 }
 
-if [ "$OS" = "macOS" ]; then
+if [ "$ANDROID_ONLY" = 1 ]; then
+    : # desktop outputs are skipped — see --android-only in the header
+elif [ "$OS" = "macOS" ]; then
     BUNDLE="$TARGET/universal-apple-darwin/release/bundle"
     grab_file "$BUNDLE/dmg/*.dmg" installer dmg
     # .app is a bundle (directory) → zip with ditto so the bundle structure/symlinks stay intact.
@@ -97,7 +115,7 @@ fi
 # lets stale, wrongly-versioned artifacts accumulate and get mis-collected next time. Removing
 # them (both the packages and Tauri's staging dirs beside them) keeps the source clean. The bare
 # CLI binary at $REL/kite-gc is a cargo output, not a bundle artifact — it stays.
-if [ ${#collected[@]} -gt 0 ]; then
+if [ ${#collected[@]} -gt 0 ] && [ "$ANDROID_ONLY" != 1 ]; then
     if [ "$OS" = "macOS" ]; then
         rm -rf "$BUNDLE/dmg" "$BUNDLE/macos"
     else
@@ -105,9 +123,29 @@ if [ ${#collected[@]} -gt 0 ]; then
     fi
 fi
 
+# Android: `tauri android build --apk` leaves one release APK per ABI folder under the Gradle
+# outputs (universal / arm64 / armv7 / x86_64 / x86). Same rules as above: newest file per folder,
+# then the raw output is deleted so a stale APK can't be re-collected under a newer version.
+APK_ROOT="$ROOT/src-tauri/gen/android/app/build/outputs/apk"
+for abi_dir in "$APK_ROOT"/*/; do
+    [ -d "$abi_dir" ] || continue
+    apk="$(ls -1dt "$abi_dir"release/*.apk 2>/dev/null | head -n1)"
+    [ -n "$apk" ] && [ -e "$apk" ] || continue
+    abi="$(basename "$abi_dir")"
+    case "$abi" in x86_64) abi="x64" ;; esac
+    dest="${APP}_Android_${abi}_${VERSION}_installer.apk"
+    cp -f "$apk" "$OUT/$dest"
+    rm -rf "${abi_dir}release"
+    collected+=("$dest")
+done
+
 echo ""
 if [ ${#collected[@]} -eq 0 ]; then
-    echo "[collect-release] No build outputs found under $TARGET — did the build succeed?"
+    if [ "$ANDROID_ONLY" = 1 ]; then
+        echo "[collect-release] No APK found under $APK_ROOT — did the build succeed?"
+    else
+        echo "[collect-release] No build outputs found under $TARGET — did the build succeed?"
+    fi
 else
     echo "[collect-release] Collected into $OUT :"
     for c in "${collected[@]}"; do echo "  - $c"; done

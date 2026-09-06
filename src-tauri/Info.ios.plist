@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  iOS-only Info.plist keys merged into the generated bundle by the Tauri iOS build.
+  iOS 14+ blocks every local-network connection (even to a plain IP:port) until the user grants the
+  Local Network permission, and it only shows the prompt if this usage string is present. The iPad
+  build talks to the vehicle over Wi-Fi (TCP/UDP MAVLink) on the local network, so without this the
+  connection fails silently.
+-->
+<plist version="1.0">
+<dict>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Kite Ground Control connects to your flight controller or telemetry link over Wi-Fi on your local network (MAVLink over TCP/UDP).</string>
+    <!-- Required for the CoreBluetooth serial (BLE) transport; iOS blocks Bluetooth without it. -->
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>Kite Ground Control uses Bluetooth to connect to your flight controller or telemetry link over BLE.</string>
+</dict>
+</plist>

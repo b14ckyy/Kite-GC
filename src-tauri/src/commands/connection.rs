@@ -17,11 +17,13 @@ use crate::msp::features::is_version_supported;
 use crate::scheduler;
 use crate::scheduler::TelemetryConfig;
 use crate::state::{ActiveProtocol, AppState};
-use crate::transport::{ByteTransport, PortInfo, Transport, TransportType};
+use crate::transport::{ByteTransport, Transport, TransportType};
+use crate::transport::PortInfo;
 use crate::transport::serial::SerialConnection;
 use crate::transport::tcp::TcpTransport;
 use crate::transport::udp::UdpTransport;
-use crate::transport::ble::BleDeviceInfo;
+// `transport::ble` resolves per platform behind one name (btleplug on desktop, CoreBluetooth on iOS).
+use crate::transport::ble::{self as ble_backend, BleDeviceInfo};
 
 /// Home position pushed to the frontend (event `home-position`). Same shape/name regardless of
 /// protocol so MAVLink (HOME_POSITION) can emit it identically later.
@@ -32,7 +34,8 @@ struct HomeEvent {
     alt: f64,
 }
 
-/// List available serial ports
+/// List available serial ports. On iOS this is always empty — `transport::serial` resolves to the
+/// stand-in there (no serial access exists), and the UI hides serial on mobile anyway.
 #[tauri::command]
 pub fn list_serial_ports() -> Vec<PortInfo> {
     crate::transport::serial::list_ports()
@@ -41,7 +44,7 @@ pub fn list_serial_ports() -> Vec<PortInfo> {
 /// Scan for BLE devices matching known serial profiles
 #[tauri::command]
 pub async fn scan_ble_devices() -> Result<Vec<BleDeviceInfo>, String> {
-    crate::transport::ble::scan_ble_devices().await
+    ble_backend::scan_ble_devices().await
 }
 
 /// Start a live BLE scan session. Discovered/updated devices are emitted as `ble-device` events
@@ -55,7 +58,7 @@ pub async fn ble_scan_start(app: AppHandle, state: State<'_, AppState>) -> Resul
         *guard = Some(tx);
     }
     tauri::async_runtime::spawn(async move {
-        if let Err(e) = crate::transport::ble::run_scan_session(app, rx).await {
+        if let Err(e) = ble_backend::run_scan_session(app, rx).await {
             log::warn!("BLE scan session ended: {}", e);
         }
     });
@@ -171,7 +174,12 @@ pub async fn connect(
         proto, transport_type, port, baud_rate, host, tcp_port, ble_device_id,
     );
 
-    // Open byte-level transport based on type
+    // Open byte-level transport based on type. Every variant is handled on every platform — the
+    // platform differences live behind `transport::serial` / `transport::ble` (on iOS a serial open
+    // fails with a clear runtime error; BLE is CoreBluetooth there). TCP/UDP are platform-independent.
+    // The OS-facing link status names the transport ("MSP over Serial"); the protocol paths
+    // below only know their protocol.
+    crate::link_status::set_transport(&transport_type.to_string());
     let byte_transport: Box<dyn ByteTransport> = match transport_type {
         TransportType::Serial => {
             let port_name = port.ok_or("Serial port name required")?;
@@ -193,9 +201,9 @@ pub async fn connect(
             if proto == "telemetry" {
                 // Passive mode: no known profile required — auto-discover + subscribe to all
                 // Notify/Indicate characteristics and dump the GATT table to the Debug Monitor.
-                Box::new(crate::transport::ble::connect_ble_listen(&dev_id, app_handle.clone()).await?)
+                Box::new(ble_backend::connect_ble_listen(&dev_id, app_handle.clone()).await?)
             } else {
-                Box::new(crate::transport::ble::connect_ble(&dev_id).await?)
+                Box::new(ble_backend::connect_ble(&dev_id).await?)
             }
         }
     };
@@ -427,6 +435,7 @@ fn connect_msp(
                     alt: alt_cm as f64 / 100.0,
                 };
                 log::info!("Home from FC (MSP_WP 0): {:.7}, {:.7}", home.lat, home.lon);
+                crate::link_status::on_home(home.lat, home.lon);
                 let _ = app_handle.emit("home-position", home);
             } else {
                 log::info!("MSP_WP(0): no home set on FC yet");
@@ -511,6 +520,7 @@ fn connect_msp(
         let mut proto = state.protocol.lock().map_err(|e| e.to_string())?;
         *proto = Some(ActiveProtocol::Msp(handle));
     }
+    crate::link_presence::link_up(&fc_info, "MSP");
     {
         let mut info = state.fc_info.lock().map_err(|e| e.to_string())?;
         *info = Some(fc_info.clone());
@@ -630,6 +640,7 @@ fn connect_mavlink(
         let mut proto = state.protocol.lock().map_err(|e| e.to_string())?;
         *proto = Some(ActiveProtocol::Mavlink(handle));
     }
+    crate::link_presence::link_up(&fc_info, "MAVLink");
     {
         let mut info = state.fc_info.lock().map_err(|e| e.to_string())?;
         *info = Some(fc_info.clone());
@@ -701,6 +712,7 @@ fn connect_passive_telemetry(
         let mut proto = state.protocol.lock().map_err(|e| e.to_string())?;
         *proto = Some(ActiveProtocol::PassiveTelemetry(handle));
     }
+    crate::link_presence::link_up(&fc_info, "Telemetry");
     {
         let mut info = state.fc_info.lock().map_err(|e| e.to_string())?;
         *info = Some(fc_info.clone());
@@ -738,6 +750,7 @@ pub async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
     let mut info = state.fc_info.lock().map_err(|e| e.to_string())?;
     *info = None;
 
+    crate::link_presence::link_down();
     log::info!("Disconnected");
     Ok(())
 }

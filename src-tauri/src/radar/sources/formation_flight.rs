@@ -27,7 +27,7 @@ use crate::msp::types::{
     MSP_FC_VERSION, MSP_NAME, MSP_RAW_GPS,
 };
 use crate::radar::now_ms;
-use crate::radar::source::{RadarSource, SourceHandle, SourceUpdate};
+use crate::radar::source::{NodePos, RadarSource, SourceHandle, SourceUpdate};
 use crate::radar::vehicle::{AltRef, TrackedVehicle, VehicleSource, VehicleSystem};
 use crate::transport::serial::SerialConnection;
 use crate::transport::{ByteTransport, TransportError};
@@ -51,9 +51,6 @@ const RECONNECT_DELAY: Duration = Duration::from_secs(2);
 /// Resync guard: if the accumulator grows past this without yielding a frame, drop the leading byte.
 const MAX_ACC: usize = 1024;
 
-/// Live GCS node position (lat, lon, alt_m) we advertise as the "FC". Shared with the manager so it can
-/// follow the resolved GCS location without restarting the source. `None` ⇒ we report no GPS fix.
-pub type NodePos = Arc<Mutex<Option<(f64, f64, f64)>>>;
 /// Live craft name we report via MSP_NAME. Shared so a name change never restarts the source (which would
 /// reopen the serial port and reset the ESP32).
 pub type NodeName = Arc<Mutex<String>>;

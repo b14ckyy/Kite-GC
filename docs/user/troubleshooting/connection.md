@@ -57,6 +57,35 @@ may still hit:
 - Make sure the bridge/router/simulator is actually **running and reachable** (firewall, same network),
   and that the **protocol** matches what it speaks.
 
+!!! tip "`read 0 bytes … parser errors=0` in the log"
+    A MAVLink handshake timeout that reports **0 bytes read and 0 parser errors** means *nothing arrived
+    at all* — it is never a baud, dialect or framing problem. Look at the source and the network, not at
+    Kite's decoding.
+
+### No data from an ELRS backpack (MAVLink over WiFi)
+
+An ExpressLRS TX backpack forwarding MAVLink over UDP has three settings that must all line up. Any one
+of them missing gives the same symptom: the handshake times out having read **0 bytes**.
+
+- **Telemetry must be set to WiFi from the handset**, under the ELRS **Backpack** menu. Enabling WiFi
+  manually (*WiFi Connectivity → Enable Backpack WiFi*) starts **firmware-update mode**, which does
+  *not* forward MAVLink.
+- **Re-check the MAVLink ports after switching modes.** Changing the backpack's telemetry mode can reset
+  its **Send Port** and **Listen Port** to `0`, which silently forwards nowhere. Open the backpack's web
+  page, set both back to **14550**, and **Save Configuration**.
+- **Use the right address.** `10.0.0.1` is the backpack's own access-point address. If the backpack joins
+  your home network instead (STA mode), use the **LAN IP it was given** by your router.
+
+The backpack won't send anything until it knows where to send: its page shows **GCS IP: IP UNSET** until
+a ground station speaks to it first. Kite's initial GCS **HEARTBEAT** is what sets it, so simply pressing
+**Connect** is enough — there's nothing to configure on Kite's side.
+
+!!! note "Checking the backpack directly"
+    Most backpack firmware exposes its state as JSON at `http://<backpack-ip>/mavlink`. A healthy,
+    forwarding backpack reports `"enabled":true`, non-zero `listen`/`send` ports, a climbing
+    `packets_down`, and a real address in `ip.gcs` once a GCS has connected — a quick way to tell a
+    backpack problem from a Kite problem.
+
 ## The link drops shortly after connecting
 
 - **Power.** A board running only off USB may brown out when GPS/peripherals draw current — power the

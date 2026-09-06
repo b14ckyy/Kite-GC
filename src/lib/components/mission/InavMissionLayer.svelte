@@ -902,13 +902,8 @@
 <style>
   :global(.mission-wp-icon) { background: none !important; border: none !important; }
   :global(.mission-fbh-icon) { background: none !important; border: none !important; }
-  /* Scale the marker SVG with the global UI scale (--ui-scale inherits from .ui-root).
-     The transform is on the SVG child, not on the Leaflet-positioned `.leaflet-marker-icon`,
-     so Leaflet's positioning transform is untouched. transform-origin keeps the on-coordinate
-     anchor fixed (teardrops anchor bottom-centre, circles centre). */
-  :global(.mission-wp-icon > svg),
-  :global(.mission-fbh-icon > svg) { transform: scale(var(--ui-scale, 1)); transform-origin: 50% 50%; }
-  :global(.mission-wp-icon.wp-anchor-bottom > svg) { transform-origin: 50% 100%; }
+  /* The waypoint SVG scale (UI scale × global size × the map's --marker-scale) lives in Map.svelte
+     so it applies to every mission layer (INAV and ArduPilot alike). */
   /* Active target waypoint: the icon itself pulses in brightness + a green glow, at
      0.5 Hz (2 s period). Only `filter` is animated, so it never fights Leaflet's
      positioning transform on the marker element. */

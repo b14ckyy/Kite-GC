@@ -46,6 +46,8 @@ jobs:
             librsvg2-dev \
             libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
             libudev-dev \
             patchelf
 
@@ -85,6 +87,22 @@ jobs:
         working-directory: src-tauri
         run: cargo check --verbose
 
+      # --- iOS target check (macOS runner only) ---
+      # The iOS build swaps whole dependency sets (CoreBluetooth via objc2 instead of btleplug; no
+      # serialport, no starship-battery — see the target cfg blocks in Cargo.toml), so a green desktop
+      # check proves nothing about it, and nobody maintaining this repo owns a Mac. This is the only
+      # signal that a desktop change did not break the mobile crate. `--lib` because mobile consumes
+      # the staticlib through the generated Xcode project; that project (gen/apple) is not tracked, so
+      # a full `tauri ios build` is not possible here — the Rust crate is the part CI can hold green.
+      - name: Add the iOS Rust target
+        if: matrix.os == 'macos-latest'
+        run: rustup target add aarch64-apple-ios
+
+      - name: Run cargo check for iOS
+        if: matrix.os == 'macos-latest'
+        working-directory: src-tauri
+        run: cargo check --target aarch64-apple-ios --lib
+
       - name: Run clippy (warnings allowed — informational only)
         working-directory: src-tauri
         run: cargo clippy
@@ -92,4 +110,63 @@ jobs:
       - name: Run Rust unit tests
         working-directory: src-tauri
         run: cargo test --verbose
+
+  # --- Android target check ---
+  # The Android counterpart of the iOS lane above: the per-PR signal that shared-code changes keep
+  # compiling for the mobile crate. Its own job because it needs the NDK, which only the Linux runner
+  # sets up cheaply; the full APK build stays in android.yml (manual / Android-file-triggered) — this
+  # only type-checks, needing neither Gradle nor a device.
+  check-android:
+    name: Check (android)
+    runs-on: ubuntu-latest
+    env:
+      # Same pin as android.yml: the NDK is the C toolchain the cross-build links against, and a bump
+      # should be a visible commit, not a silent difference between runs.
+      NDK_VERSION: '27.2.12479018'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK ${{ env.NDK_VERSION }}
+        run: sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
+
+      # cc-rs looks for an `aarch64-linux-android-clang` the NDK does not ship (its compilers are
+      # API-versioned and off PATH), so the C dependencies fail to configure without these.
+      - name: Export the Android toolchain
+        run: |
+          NDK="$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}"
+          BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          test -x "$BIN/aarch64-linux-android24-clang" || {
+            echo "::error::NDK toolchain not found at $BIN"; ls -la "$BIN" || true; exit 1;
+          }
+          {
+            echo "NDK_HOME=$NDK"
+            echo "CC_aarch64_linux_android=$BIN/aarch64-linux-android24-clang"
+            echo "AR_aarch64_linux_android=$BIN/llvm-ar"
+            echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$BIN/aarch64-linux-android24-clang"
+          } >> "$GITHUB_ENV"
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: android-check
+
+      - name: Run cargo check for Android
+        working-directory: src-tauri
+        run: cargo check --target aarch64-linux-android --lib
 
