@@ -20,14 +20,10 @@ grabbing:
 - **Portable** — the bare executable, zipped **with an empty `.portable` marker** already inside, so all
   data stays in a `data/` folder next to it (see [Installed vs portable mode](#installed-vs-portable-mode)).
 
-!!! warning "macOS: first launch (unsigned build)"
-    The macOS build is **universal** (Apple Silicon + Intel) but **not signed / notarized** yet, so
-    Gatekeeper quarantines it on first launch. Open it once via **right-click → Open**, then **Open** in
-    the dialog — or clear the quarantine flag from a terminal:
-    ```bash
-    xattr -dr com.apple.quarantine "/Applications/Kite Ground Control.app"
-    ```
-    After the first launch it opens normally.
+!!! note "macOS: signed and notarized"
+    The macOS build is **universal** (Apple Silicon + Intel), **signed and notarized** since 1.0.0, so it
+    opens like any other app — no Gatekeeper warning, no right-click → Open. If you are still running a
+    beta or release candidate, replace it with the release build.
 
 !!! warning "macOS 13 (Ventura) or newer"
     The macOS build targets **macOS 13**. Older systems are not supported — on macOS 11 or 12 the app
