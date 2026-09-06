@@ -45,7 +45,14 @@ fi
 
 echo "[1/5] Code-signing the app bundle (hardened runtime)..."
 # --options runtime is required for notarization; --deep signs nested frameworks/helpers.
+# --entitlements is NOT optional here: codesign only embeds the entitlements it is handed, and
+# --force replaces whatever signature the bundler left behind. Signing without it produces a
+# hardened-runtime binary with an EMPTY entitlement set, and the hardened runtime then denies the
+# resources Kite declares in Entitlements.plist: the BLE transport cannot open a CoreBluetooth
+# central, the "Camera (device)" video source gets no device, and the GCS marker gets no location.
+# None of that reproduces in an unsigned local build, so it only ever breaks the released .dmg.
 codesign --force --deep --options runtime --timestamp \
+    --entitlements "$ROOT/src-tauri/Entitlements.plist" \
     --sign "$APPLE_SIGNING_IDENTITY" "$APP"
 
 echo "[2/5] Signing the .dmg..."

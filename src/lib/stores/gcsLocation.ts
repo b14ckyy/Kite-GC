@@ -9,6 +9,8 @@
 //  - manual:     the resolved OS location, which the user may override by dragging / "set GCS here";
 //                "Reset" clears the override and snaps back to the OS location (no re-detect).
 //  - continuous: follows the OS location API live; the marker only moves on a > 20 m change (anti-jitter).
+//                Falls back to the last known position while the watch has delivered nothing, so a
+//                platform that denies or lacks the Geolocation API still shows a marker.
 
 import { writable, get } from 'svelte/store';
 import { settings, type GcsMode } from '$lib/stores/settings';
@@ -27,13 +29,18 @@ const CONT_MIN_MOVE_M = 20; // continuous: ignore sub-20 m jitter
 
 let manualOverride: LatLon | null = null; // session-only hand placement (drag / "set GCS here")
 let watchId: number | null = null;
+/** True once the Web watch has delivered at least one position, i.e. it owns the marker from here on.
+ *  While false, continuous follows `userGeoLocation` instead (see recompute()). */
+let watchDelivered = false;
 
 function clearWatch() {
   if (watchId != null && typeof navigator !== 'undefined') navigator.geolocation.clearWatch(watchId);
   watchId = null;
+  watchDelivered = false;
 }
 
-/** Recompute the GCS position for off / manual (continuous is driven by the watch). */
+/** Recompute the GCS position for off / manual, and drive continuous while its watch has produced
+ *  nothing yet (see the fallback rationale below). */
 function recompute() {
   const mode = get(settings).gcsMode;
   if (mode === 'off') {
@@ -47,6 +54,22 @@ function recompute() {
       gcsLocation.set(get(userGeoLocation));
       gcsAccuracyM.set(get(userGeoAccuracyM));
     }
+  } else if (mode === 'continuous' && !watchDelivered) {
+    // Continuous normally owns the marker through its watch, but the watch can never deliver on a
+    // platform where the Geolocation API is denied or unimplemented. `continuous` is also the DEFAULT
+    // mode, so the marker was then missing for the whole session even though `userGeoLocation` already
+    // held a position: a one-shot OS fix, the value persisted from the last session, the connected
+    // UAV's own GPS fix, or on macOS every fix from native CoreLocation (see helpers/userLocation.ts).
+    // Follow that position until the watch delivers its first fix, which is what makes continuous
+    // actually track on macOS. Gating on `watchDelivered` rather than on an empty marker matters: a
+    // null check stops after the first seed, leaving the marker frozen wherever the operator happened
+    // to be when it arrived. Same 20 m anti-jitter gate as the watch below.
+    const next = get(userGeoLocation);
+    const cur = get(gcsLocation);
+    if (next && (!cur || haversineDistance(cur.lat, cur.lon, next.lat, next.lon) > CONT_MIN_MOVE_M)) {
+      gcsLocation.set(next);
+    }
+    gcsAccuracyM.set(get(userGeoAccuracyM));
   }
 }
 
@@ -55,6 +78,7 @@ function startContinuous() {
   if (typeof navigator === 'undefined' || !navigator.geolocation) return;
   watchId = navigator.geolocation.watchPosition(
     (pos) => {
+      watchDelivered = true; // the watch owns the marker from here; recompute() stops driving it
       const next = { lat: pos.coords.latitude, lon: pos.coords.longitude };
       const cur = get(gcsLocation);
       if (!cur || haversineDistance(cur.lat, cur.lon, next.lat, next.lon) > CONT_MIN_MOVE_M) {
@@ -70,7 +94,10 @@ function startContinuous() {
 function applyGcsMode(mode: GcsMode) {
   clearWatch();
   if (mode === 'continuous') startContinuous();
-  else recompute();
+  // recompute() runs for continuous too, not just off/manual: it is what seeds the marker from the
+  // last known position while the watch has produced nothing (off → continuous clears the marker,
+  // and on a platform without a working Geolocation API the watch never refills it).
+  recompute();
 }
 
 /** Manual placement (drag end / "Set GCS here") — overrides the OS location until Reset. */
