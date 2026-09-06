@@ -9,6 +9,8 @@
 //  - manual:     the resolved OS location, which the user may override by dragging / "set GCS here";
 //                "Reset" clears the override and snaps back to the OS location (no re-detect).
 //  - continuous: follows the OS location API live; the marker only moves on a > 20 m change (anti-jitter).
+//                Falls back to the last known position while the watch has delivered nothing, so a
+//                platform that denies or lacks the Geolocation API still shows a marker.
 
 import { writable, get } from 'svelte/store';
 import { settings, type GcsMode } from '$lib/stores/settings';
@@ -33,7 +35,8 @@ function clearWatch() {
   watchId = null;
 }
 
-/** Recompute the GCS position for off / manual (continuous is driven by the watch). */
+/** Recompute the GCS position for off / manual, and seed continuous when its watch has produced
+ *  nothing yet (see the fallback rationale below). */
 function recompute() {
   const mode = get(settings).gcsMode;
   if (mode === 'off') {
@@ -47,6 +50,15 @@ function recompute() {
       gcsLocation.set(get(userGeoLocation));
       gcsAccuracyM.set(get(userGeoAccuracyM));
     }
+  } else if (mode === 'continuous' && !get(gcsLocation)) {
+    // Continuous normally owns the marker through its watch, but the watch can never deliver on a
+    // platform where the Geolocation API is denied or unimplemented. `continuous` is also the DEFAULT
+    // mode, so the marker was then missing for the whole session even though `userGeoLocation` already
+    // held a position: a one-shot OS fix, the value persisted from the last session, or the connected
+    // UAV's own GPS fix (see helpers/userLocation.ts). Seed from it so the marker exists at all; the
+    // first real watch fix overwrites this, and a position the watch DID deliver is left alone.
+    gcsLocation.set(get(userGeoLocation));
+    gcsAccuracyM.set(get(userGeoAccuracyM));
   }
 }
 
@@ -70,7 +82,10 @@ function startContinuous() {
 function applyGcsMode(mode: GcsMode) {
   clearWatch();
   if (mode === 'continuous') startContinuous();
-  else recompute();
+  // recompute() runs for continuous too, not just off/manual: it is what seeds the marker from the
+  // last known position while the watch has produced nothing (off → continuous clears the marker,
+  // and on a platform without a working Geolocation API the watch never refills it).
+  recompute();
 }
 
 /** Manual placement (drag end / "Set GCS here") — overrides the OS location until Reset. */
