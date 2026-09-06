@@ -840,6 +840,19 @@
     "directionLinesHint": "Heading-, Kurs- und Turn-Linien am Flugzeug auf der Karte",
     "mavlinkFullTelemetry": "Volle MAVLink-Telemetrie",
     "mavlinkFullTelemetryHint": "Nur MAVLink: streamt alles, was der FC mit seinen eigenen konfigurierten Raten sendet (ignoriert die Fluglage-/GPS-Rate-Einstellungen). Für Highspeed-Links und vollständige Aufzeichnung im .tlog. Standard aus — Kite fordert ein reduziertes Rate-Set an, das auf langsame RC-Links passt.",
+    "telemetryApi": "Telemetrie-API",
+    "telemetryApiHint": "Stellt Kites Live-Telemetrie anderen Programmen als JSON bereit — nur lesend. TCP-Stream auf Port 27300, HTTP-Abfrage auf Port 27301, optional UDP. Läuft im Hintergrund, auch auf dem Handy. Siehe Telemetrie-API-Referenz in der Doku.",
+    "telemetryApiTcp": "TCP-Stream (Port 27300)",
+    "telemetryApiHttp": "HTTP-Abfrage (Port 27301)",
+    "telemetryApiUdp": "UDP an ein Ziel",
+    "telemetryApiUdpHost": "UDP-Host",
+    "telemetryApiUdpPort": "UDP-Port",
+    "telemetryApiLan": "Im Netzwerk erreichbar",
+    "telemetryApiLanHint": "Aus: nur Programme auf diesem Rechner können verbinden (127.0.0.1). An: jedes Gerät im Netzwerk kann die Telemetrie lesen — in fremden WLANs nur einschalten, wenn nötig.",
+    "telemetryApiRate": "Aktualisierungsrate",
+    "telemetryApiClients": "{n} Client(s)",
+    "telemetryApiStarting": "startet…",
+    "telemetryApiError": "Läuft nicht: {error}",
     "flightLogging": "Flugbuch",
     "enableFlightLogging": "Flugbuch aktivieren",
     "enableFlightRecording": "Flugaufzeichnung aktivieren",
@@ -1994,7 +2007,7 @@
       "ekfStatus": "EKF-Status",
       "ekfType": "EKF-Typ",
       "fcVariant": "FC-Variante",
-      "lastUpdate": "Letztes Update (Epoch)"
+      "lastUpdate": "Letztes Update"
     }
   }
 }

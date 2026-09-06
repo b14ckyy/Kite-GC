@@ -260,6 +260,31 @@ export const DEFAULT_RC_CONTROL: RcControlSettings = {
   platform: 'inav',
 };
 
+// ── Telemetry API (read-only live telemetry for external programs — see Dev-Docs active/TELEMETRY_API.md) ──
+/** `settings.telemetryApi`: pushed to the backend on every change (`telemetry_api_configure`). Ports are
+ *  fixed (TCP stream 27300, HTTP 27301) so a consumer never has to guess; only the UDP target is free. */
+export interface TelemetryApiSettings {
+  enabled: boolean;
+  /** NDJSON stream server on TCP 27300. */
+  tcp: boolean;
+  /** GET snapshot / health on TCP 27301. */
+  http: boolean;
+  udp: { enabled: boolean; host: string; port: number };
+  /** Bind on all interfaces (reachable on the network) instead of loopback only. */
+  lan: boolean;
+  /** Frames per second, 1–10. */
+  rateHz: number;
+}
+
+export const DEFAULT_TELEMETRY_API: TelemetryApiSettings = {
+  enabled: false,
+  tcp: true,
+  http: true,
+  udp: { enabled: false, host: '127.0.0.1', port: 27300 },
+  lan: false,
+  rateHz: 5,
+};
+
 // ── Update check (GitHub releases — see controllers/updateCheck.ts) ─────────────────────────────────
 /** Update-check channel: off, stable releases only, or include pre-releases. Default `release`. */
 export type UpdateCheckMode = 'disabled' | 'release' | 'prerelease';
@@ -386,6 +411,7 @@ export interface AppSettings {
   rcControl: RcControlSettings;
   /** Startup update check (GitHub releases) — channel + skipped version. */
   updateCheck: UpdateCheckSettings;
+  telemetryApi: TelemetryApiSettings;
 }
 
 const STORAGE_KEY = 'kite-gc-settings';
@@ -463,6 +489,7 @@ const defaults: AppSettings = {
   relays: [],
   rcControl: DEFAULT_RC_CONTROL,
   updateCheck: DEFAULT_UPDATE_CHECK,
+  telemetryApi: DEFAULT_TELEMETRY_API,
 };
 
 function load(): AppSettings {
@@ -529,6 +556,11 @@ function load(): AppSettings {
         updateCheck: {
           ...DEFAULT_UPDATE_CHECK,
           ...(parsed.updateCheck ?? {}),
+        },
+        telemetryApi: {
+          ...DEFAULT_TELEMETRY_API,
+          ...(parsed.telemetryApi ?? {}),
+          udp: { ...DEFAULT_TELEMETRY_API.udp, ...(parsed.telemetryApi?.udp ?? {}) },
         },
       };
     }
