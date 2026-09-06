@@ -1,12 +1,16 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-"""Radar / ADS-B contact models for Kite-GC (static/models/radar/). Colour is irrelevant (REPLACE blend) —
-only silhouette + orientation matter. Frame: nose=+Z, up=+Y, port=+X.
+"""Radar / ADS-B contact models for Kite-GC (static/models/radar/). Bodies are pure WHITE: the 3D map
+tints contacts with Cesium's HIGHLIGHT blend (lit surface × altitude colour), so any grey in the material
+would darken the colour scale. Only silhouette + orientation matter otherwise. Frame: nose=+Z, up=+Y, port=+X.
 Run:  uv run --with trimesh --with numpy --with scipy python generate_adsb.py <outdir> [names...]"""
 import sys, os, numpy as np
+import kitemodels
 from kitemodels import *
 from generate_uav import scaled
+
+BODY = kitemodels.BODY = (255, 255, 255, 255)   # see the module note (HIGHLIGHT blend)
 
 N = 10   # ring resolution for these simpler models
 
