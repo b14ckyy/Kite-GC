@@ -40,8 +40,10 @@ if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
 Write-Host "[1/4] Node.js version: $(node -v)"
 
 Write-Host '[2/4] Installing npm dependencies...'
-npm install
-if ($LASTEXITCODE -ne 0) { Write-Host '[ERROR] npm install failed.' -ForegroundColor Red; exit 1 }
+# `npm ci`, not `npm install`: install rewrites package-lock.json, which makes the tree dirty and
+# stamps the About dialog "<hash>-dirty" for a build that changed nothing. See build-macos.sh.
+npm ci
+if ($LASTEXITCODE -ne 0) { Write-Host '[ERROR] npm ci failed.' -ForegroundColor Red; exit 1 }
 
 Write-Host '[3/4] Building application with Tauri...'
 npm run tauri build

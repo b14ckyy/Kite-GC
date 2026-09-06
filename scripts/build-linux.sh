@@ -49,7 +49,19 @@ echo "[1/4] Checking Node.js version..."
 node -v
 
 echo "[2/4] Installing npm dependencies..."
-npm install
+# `npm ci`, not `npm install`: install rewrites package-lock.json, which makes the tree dirty and
+# stamps the About dialog "<hash>-dirty" for a build that changed nothing. See build-macos.sh.
+npm ci
+
+# Anything still modified or untracked here is the maintainer's own and gets stamped into the About
+# dialog, so a released build could not be tied back to a commit anyone else can check out.
+if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+    echo ""
+    echo "[WARN] The working tree is not clean, so this build will be stamped <hash>-dirty:"
+    git status --short | sed 's/^/       /'
+    echo "       Stash or commit these first if this is a build you intend to distribute."
+    echo ""
+fi
 
 echo "[3/4] Building application with Tauri..."
 npm run tauri build
