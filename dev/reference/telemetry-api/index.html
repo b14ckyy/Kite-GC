@@ -1,0 +1,2974 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="User documentation for Kite Ground Control — an INAV / ArduPilot / PX4 ground control station.">
+      
+      
+      
+        <link rel="canonical" href="https://b14ckyy.github.io/Kite-GC/dev/reference/telemetry-api/">
+      
+      
+        <link rel="prev" href="../settings/">
+      
+      
+        <link rel="next" href="../file-formats/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/branding/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Telemetry API - Kite Ground Control</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/branding/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="light-blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#telemetry-api" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+        <aside class="md-banner">
+          <div class="md-banner__inner md-grid md-typeset">
+            
+              <button class="md-banner__button md-icon" aria-label="Don't show this again">
+                
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+              </button>
+            
+            
+  Kite Ground Control is in <strong>public beta</strong> — your
+  <a href="https://github.com/b14ckyy/Kite-GC/issues">feedback &amp; bug reports</a> are very welcome.
+
+          </div>
+          
+            <script>var el=document.querySelector("[data-md-component=announce]");if(el){var content=el.querySelector(".md-typeset");__md_hash(content.innerHTML)===__md_get("__announce")&&(el.hidden=!0)}</script>
+          
+        </aside>
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+          <aside class="md-banner md-banner--warning">
+            <div class="md-banner__inner md-grid md-typeset">
+              
+  You are not reading the documentation for the latest release.
+  <a href="../../..">
+    <strong>Switch to the latest release.</strong>
+  </a>
+
+            </div>
+            <script>var el=document.querySelector("[data-md-component=outdated]"),base=new URL("../.."),outdated=__md_get("__outdated",sessionStorage,base);!0===outdated&&el&&(el.hidden=!1)</script>
+          </aside>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Kite Ground Control" class="md-header__button md-logo" aria-label="Kite Ground Control" data-md-component="logo">
+      
+  <img src="../../assets/branding/kitegc-icon-white.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Kite Ground Control
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Telemetry API
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="light-blue"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/b14ckyy/Kite-GC" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    b14ckyy/Kite-GC
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Kite Ground Control" class="md-nav__button md-logo" aria-label="Kite Ground Control" data-md-component="logo">
+      
+  <img src="../../assets/branding/kitegc-icon-white.svg" alt="logo">
+
+    </a>
+    Kite Ground Control
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/b14ckyy/Kite-GC" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    b14ckyy/Kite-GC
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/first-connection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    First connection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/quick-tour/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick tour
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/connecting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connecting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/telemetry-and-display/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telemetry & display
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/missions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Missions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/vehicle-control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vehicle control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/rc-control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RC control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_6" id="__nav_3_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Logbook
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Logbook
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/logbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Flight logbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/vehicles/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vehicles
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/batteries/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Batteries
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/video/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Video
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/terrain-analysis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Terrain & RF analysis
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/safety/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Safety
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/radar-and-adsb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Radar & ADS-B
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/airspace/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Airspace Manager
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/map-3d/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    3D map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/relay-and-forwarding/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Relay & forwarding
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telemetry API
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telemetry API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#enabling-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enabling it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#transports" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Transports
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Transports">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tcp-stream-port-27300" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TCP stream — port 27300
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#http-port-27301" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP — port 27301
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#udp-port-27300-subscribe-by-sending" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UDP — port 27300, subscribe by sending
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-frame" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The frame
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The frame">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#top-level" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Top level
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#telemetry-groups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        telemetry groups
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="telemetry groups">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#gps-sources-msp-mavlink-passive-ltm-crsf-sport" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gps — sources: MSP, MAVLink, passive (LTM / CRSF / S.Port)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#attitude-sources-all" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        attitude — sources: all
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#altitude-sources-all" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        altitude — sources: all
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#altref-sources-passive-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        altRef — sources: passive only
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#wind-sources-mavlink-ardupilot-px4-msp-inav-100-needs-wind-enabled-in-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        wind — sources: MAVLink (ArduPilot, PX4), MSP (INAV 10.0+); needs Wind enabled in Settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#battery-sources-all-fields-vary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        battery — sources: all (fields vary)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#batteries-sources-mavlink-battery_status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        batteries — sources: MAVLink (BATTERY_STATUS)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#link-sources-crsf-sport-ltm-inav-91-mavlink-radio_status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        link — sources: CRSF, S.Port, LTM, INAV 9.1+, MAVLink RADIO_STATUS
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#status-sources-msp-mavlink-passive-links-fill-armed-flags-coarsely" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        status — sources: MSP, MAVLink (passive links fill armed / flags coarsely)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sensors-sources-msp-inav-mavlink-sys_status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sensors — sources: MSP (INAV), MAVLink (SYS_STATUS)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flightmode-sources-all" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        flightMode — sources: all
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nav-sources-msp-inav-mavlink-mission_current" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        nav — sources: MSP (INAV), MAVLink (MISSION_CURRENT)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ekf-sources-mavlink-ardupilot-ekf_status_report-ahrs_ekf_type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ekf — sources: MAVLink (ArduPilot EKF_STATUS_REPORT, AHRS_EKF_TYPE)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#misc-sources-msp-inav-misc2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        misc — sources: MSP (INAV MISC2)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#vehicle-sources-mavlink-ardupilot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        vehicle — sources: MAVLink (ArduPilot)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#passiveprotocol-sources-passive-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        passiveProtocol — sources: passive only
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lastupdate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lastUpdate
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Examples
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#good-to-know" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Good to know
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../file-formats/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    File formats
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Troubleshooting
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/connection/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connection
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/rc-control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RC control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/video/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Video
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/reporting-issues/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reporting a problem
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    FAQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    For developers
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    For developers
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../for-developers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../for-developers/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../for-developers/building/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building from source
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../for-developers/ui-framework/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    UI framework & theme
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../for-developers/contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#enabling-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enabling it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#transports" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Transports
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Transports">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tcp-stream-port-27300" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TCP stream — port 27300
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#http-port-27301" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP — port 27301
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#udp-port-27300-subscribe-by-sending" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UDP — port 27300, subscribe by sending
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-frame" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The frame
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The frame">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#top-level" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Top level
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#telemetry-groups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        telemetry groups
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="telemetry groups">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#gps-sources-msp-mavlink-passive-ltm-crsf-sport" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gps — sources: MSP, MAVLink, passive (LTM / CRSF / S.Port)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#attitude-sources-all" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        attitude — sources: all
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#altitude-sources-all" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        altitude — sources: all
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#altref-sources-passive-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        altRef — sources: passive only
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#wind-sources-mavlink-ardupilot-px4-msp-inav-100-needs-wind-enabled-in-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        wind — sources: MAVLink (ArduPilot, PX4), MSP (INAV 10.0+); needs Wind enabled in Settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#battery-sources-all-fields-vary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        battery — sources: all (fields vary)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#batteries-sources-mavlink-battery_status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        batteries — sources: MAVLink (BATTERY_STATUS)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#link-sources-crsf-sport-ltm-inav-91-mavlink-radio_status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        link — sources: CRSF, S.Port, LTM, INAV 9.1+, MAVLink RADIO_STATUS
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#status-sources-msp-mavlink-passive-links-fill-armed-flags-coarsely" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        status — sources: MSP, MAVLink (passive links fill armed / flags coarsely)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sensors-sources-msp-inav-mavlink-sys_status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sensors — sources: MSP (INAV), MAVLink (SYS_STATUS)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#flightmode-sources-all" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        flightMode — sources: all
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nav-sources-msp-inav-mavlink-mission_current" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        nav — sources: MSP (INAV), MAVLink (MISSION_CURRENT)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ekf-sources-mavlink-ardupilot-ekf_status_report-ahrs_ekf_type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ekf — sources: MAVLink (ArduPilot EKF_STATUS_REPORT, AHRS_EKF_TYPE)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#misc-sources-msp-inav-misc2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        misc — sources: MSP (INAV MISC2)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#vehicle-sources-mavlink-ardupilot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        vehicle — sources: MAVLink (ArduPilot)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#passiveprotocol-sources-passive-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        passiveProtocol — sources: passive only
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lastupdate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lastUpdate
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Examples
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#good-to-know" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Good to know
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/b14ckyy/Kite-GC/edit/master/docs/user/reference/telemetry-api.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="telemetry-api">Telemetry API<a class="headerlink" href="#telemetry-api" title="Permanent link">&para;</a></h1>
+<p>Kite can serve its <strong>live telemetry to other programs</strong> — a dashboard on the same computer, a script
+that logs to a database, a web service that shows the flight on a map, or anything else that can read
+JSON. The API is <strong>read-only</strong>: nothing can be sent to the aircraft through it, and it never changes
+what Kite does.</p>
+<p>Everything in the frames below is what Kite itself holds in its unified telemetry model — the same
+values the <strong>Raw telemetry</strong> popup (toolbar, next to Relay) lists — regardless of whether the aircraft
+speaks <strong>MSP</strong> (INAV), <strong>MAVLink</strong> (ArduPilot, PX4) or a <strong>passive</strong> link (CRSF, S.Port, LTM). A field
+a protocol does not provide is <code>null</code>, never a made-up zero.</p>
+<div class="admonition note">
+<p class="admonition-title">Where it runs</p>
+<p>The API is served by Kite's backend, not by the user interface: it keeps running while Kite is
+minimised, and on Android while the app is in the background with the link alive.</p>
+</div>
+<h2 id="enabling-it">Enabling it<a class="headerlink" href="#enabling-it" title="Permanent link">&para;</a></h2>
+<p><strong>Settings → Data → Telemetry → Telemetry API.</strong> The master toggle starts the server with the
+transports selected underneath:</p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>What it does</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>TCP stream (port 27300)</strong></td>
+<td>Kite listens on TCP 27300; each client that connects receives a continuous stream, one JSON object per line.</td>
+<td>On</td>
+</tr>
+<tr>
+<td><strong>HTTP snapshot (port 27301)</strong></td>
+<td>Kite answers <code>GET</code> requests on TCP 27301 with the newest frame, or a health document. For <code>curl</code>, scripts and browser dashboards.</td>
+<td>On</td>
+</tr>
+<tr>
+<td><strong>UDP subscribers (port 27300)</strong></td>
+<td>Kite listens on UDP 27300. A client <strong>subscribes by sending the word <code>subscribe</code></strong> there and receives one datagram per frame for as long as it repeats it at least every 10 s.</td>
+<td>Off</td>
+</tr>
+<tr>
+<td><strong>Reachable on the network</strong></td>
+<td>Off: the TCP listeners bind to <code>127.0.0.1</code>, so only programs on this computer can connect. On: they bind to all interfaces and any device on the network can read the telemetry.</td>
+<td>Off</td>
+</tr>
+<tr>
+<td><strong>Update rate</strong></td>
+<td>Frames per second — <strong>1, 2, 5 or 10 Hz</strong>. This is the API's own clock: a link that updates faster is sampled, a slower one is repeated (the frame's <code>seq</code> still increments, <code>telemetry.lastUpdate</code> does not).</td>
+<td>5 Hz</td>
+</tr>
+</tbody>
+</table>
+<p>The status line under the settings shows the live endpoints, the number of connected TCP clients, and
+the reason if the server could not start (typically another program holding one of the ports).</p>
+<div class="admonition warning">
+<p class="admonition-title">Keep it on loopback unless you need the network</p>
+<p>The feed carries the aircraft's position, home and the ground station's position. On a shared
+field Wi-Fi, <em>Reachable on the network</em> means everyone on that network can read it. There is no
+authentication in this version.</p>
+</div>
+<p>The ports are <strong>fixed</strong> on purpose — a consumer never has to guess or be configured — and were chosen
+outside the ranges common tools use (MAVLink 14550, MediaMTX 8554, SITL 5760, …). TCP and UDP share
+27300 — different protocols, no clash.</p>
+<h2 id="transports">Transports<a class="headerlink" href="#transports" title="Permanent link">&para;</a></h2>
+<h3 id="tcp-stream-port-27300">TCP stream — port 27300<a class="headerlink" href="#tcp-stream-port-27300" title="Permanent link">&para;</a></h3>
+<p>Connect, and Kite first sends one <strong>hello</strong> line, then a <strong>frame</strong> line at the configured rate.
+Every line is one complete JSON object terminated by <code>\n</code> (NDJSON). Read line by line; do not assume
+a fixed size.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="p">{</span><span class="nt">"schema"</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span><span class="nt">"hello"</span><span class="p">:</span><span class="kc">true</span><span class="p">,</span><span class="nt">"groups"</span><span class="p">:[</span><span class="s2">"gps"</span><span class="p">,</span><span class="s2">"attitude"</span><span class="p">,</span><span class="s2">"altitude"</span><span class="p">,</span><span class="s2">"altRef"</span><span class="p">,</span><span class="s2">"wind"</span><span class="p">,</span><span class="s2">"battery"</span><span class="p">,</span><span class="s2">"batteries"</span><span class="p">,</span><span class="s2">"link"</span><span class="p">,</span><span class="s2">"status"</span><span class="p">,</span><span class="s2">"sensors"</span><span class="p">,</span><span class="s2">"flightMode"</span><span class="p">,</span><span class="s2">"nav"</span><span class="p">,</span><span class="s2">"ekf"</span><span class="p">,</span><span class="s2">"misc"</span><span class="p">,</span><span class="s2">"vehicle"</span><span class="p">,</span><span class="s2">"passiveProtocol"</span><span class="p">,</span><span class="s2">"lastUpdate"</span><span class="p">],</span><span class="nt">"rateHz"</span><span class="p">:</span><span class="mi">5</span><span class="p">}</span>
+</code></pre></div>
+<p>A client that stops reading is disconnected after 200 ms of back-pressure, so one stuck consumer
+cannot delay the others. Reconnect at any time; the stream has no state to resume.</p>
+<h3 id="http-port-27301">HTTP — port 27301<a class="headerlink" href="#http-port-27301" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Route</th>
+<th>Response</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET /api/v1/telemetry</code></td>
+<td><code>200</code> with the newest frame as <code>application/json</code>. <code>503</code> until the first frame exists (a few hundred milliseconds after enabling).</td>
+</tr>
+<tr>
+<td><code>GET /api/v1/health</code></td>
+<td><code>200</code> with <code>{ "ok": true, "schema": 1, "connected": …, "protocol": …, "clients": …, "rateHz": …, "seq": … }</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>Responses carry <code>Cache-Control: no-store</code>, <code>Access-Control-Allow-Origin: *</code> (a browser page on the
+same machine may poll it directly) and <code>Connection: close</code>. Only <code>GET</code> is served; anything else
+returns <code>405</code>, unknown paths <code>404</code>.</p>
+<h3 id="udp-port-27300-subscribe-by-sending">UDP — port 27300, subscribe by sending<a class="headerlink" href="#udp-port-27300-subscribe-by-sending" title="Permanent link">&para;</a></h3>
+<p>Send the word <strong><code>subscribe</code></strong> (ASCII, a trailing newline is fine) to UDP 27300 and Kite answers with the
+<strong>hello</strong> record, then sends one datagram per frame — the same JSON as a TCP line, without the newline —
+to the address and port you sent from. Repeat <code>subscribe</code> at least every <strong>10 seconds</strong>; a subscriber
+that goes quiet is forgotten. Any other payload is ignored without a reply, and at most 16 subscribers
+are served at once — so a port scan or a packet with a forged sender cannot make Kite stream to an
+address that never asked. UDP is fire-and-forget: a frame that cannot be delivered is dropped, never
+delayed, and there is no back-pressure on Kite's side.</p>
+<h2 id="the-frame">The frame<a class="headerlink" href="#the-frame" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">"schema"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">"ts"</span><span class="p">:</span><span class="w"> </span><span class="mi">1788700000000</span><span class="p">,</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">"seq"</span><span class="p">:</span><span class="w"> </span><span class="mi">4711</span><span class="p">,</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span><span class="nt">"connected"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span><span class="nt">"protocol"</span><span class="p">:</span><span class="w"> </span><span class="s2">"msp"</span><span class="p">,</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">  </span><span class="nt">"fcVariant"</span><span class="p">:</span><span class="w"> </span><span class="s2">"INAV"</span><span class="p">,</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">  </span><span class="nt">"telemetry"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">    </span><span class="nt">"gps"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"lat"</span><span class="p">:</span><span class="w"> </span><span class="mf">51.4923</span><span class="p">,</span><span class="w"> </span><span class="nt">"lon"</span><span class="p">:</span><span class="w"> </span><span class="mf">11.9263</span><span class="p">,</span><span class="w"> </span><span class="nt">"altMsl"</span><span class="p">:</span><span class="w"> </span><span class="mf">143.2</span><span class="p">,</span><span class="w"> </span><span class="nt">"groundSpeed"</span><span class="p">:</span><span class="w"> </span><span class="mf">18.4</span><span class="p">,</span><span class="w"> </span><span class="nt">"course"</span><span class="p">:</span><span class="w"> </span><span class="mf">271.5</span><span class="p">,</span><span class="w"> </span><span class="nt">"numSat"</span><span class="p">:</span><span class="w"> </span><span class="mi">14</span><span class="p">,</span><span class="w"> </span><span class="nt">"fixType"</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="nt">"hdop"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.9</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">    </span><span class="nt">"attitude"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"roll"</span><span class="p">:</span><span class="w"> </span><span class="mf">-2.1</span><span class="p">,</span><span class="w"> </span><span class="nt">"pitch"</span><span class="p">:</span><span class="w"> </span><span class="mf">3.4</span><span class="p">,</span><span class="w"> </span><span class="nt">"yaw"</span><span class="p">:</span><span class="w"> </span><span class="mf">271.0</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">    </span><span class="nt">"altitude"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"altitude"</span><span class="p">:</span><span class="w"> </span><span class="mf">120.5</span><span class="p">,</span><span class="w"> </span><span class="nt">"vario"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.8</span><span class="p">,</span><span class="w"> </span><span class="nt">"airspeed"</span><span class="p">:</span><span class="w"> </span><span class="mf">19.2</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">    </span><span class="nt">"altRef"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"msl"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="w">    </span><span class="nt">"wind"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"directionFromDeg"</span><span class="p">:</span><span class="w"> </span><span class="mf">250.0</span><span class="p">,</span><span class="w"> </span><span class="nt">"speedMs"</span><span class="p">:</span><span class="w"> </span><span class="mf">4.2</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">    </span><span class="nt">"battery"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"voltage"</span><span class="p">:</span><span class="w"> </span><span class="mf">15.8</span><span class="p">,</span><span class="w"> </span><span class="nt">"current"</span><span class="p">:</span><span class="w"> </span><span class="mf">6.4</span><span class="p">,</span><span class="w"> </span><span class="nt">"power"</span><span class="p">:</span><span class="w"> </span><span class="mf">101.1</span><span class="p">,</span><span class="w"> </span><span class="nt">"mahDrawn"</span><span class="p">:</span><span class="w"> </span><span class="mi">1210</span><span class="p">,</span><span class="w"> </span><span class="nt">"percentage"</span><span class="p">:</span><span class="w"> </span><span class="mi">62</span><span class="p">,</span><span class="w"> </span><span class="nt">"cellCount"</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="nt">"throttle"</span><span class="p">:</span><span class="w"> </span><span class="mi">48</span><span class="p">,</span><span class="w"> </span><span class="nt">"rssi"</span><span class="p">:</span><span class="w"> </span><span class="mi">987</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="w">    </span><span class="nt">"batteries"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">"voltage"</span><span class="p">:</span><span class="w"> </span><span class="mf">15.8</span><span class="p">,</span><span class="w"> </span><span class="nt">"current"</span><span class="p">:</span><span class="w"> </span><span class="mf">6.4</span><span class="p">,</span><span class="w"> </span><span class="nt">"mahDrawn"</span><span class="p">:</span><span class="w"> </span><span class="mi">1210</span><span class="p">,</span><span class="w"> </span><span class="nt">"percentage"</span><span class="p">:</span><span class="w"> </span><span class="mi">62</span><span class="p">,</span><span class="w"> </span><span class="nt">"cellCount"</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="nt">"temperature"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">],</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="w">    </span><span class="nt">"link"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"rssiPercent"</span><span class="p">:</span><span class="w"> </span><span class="mf">96.0</span><span class="p">,</span><span class="w"> </span><span class="nt">"rssiDbm"</span><span class="p">:</span><span class="w"> </span><span class="mi">-58</span><span class="p">,</span><span class="w"> </span><span class="nt">"lq"</span><span class="p">:</span><span class="w"> </span><span class="mi">100</span><span class="p">,</span><span class="w"> </span><span class="nt">"snrDb"</span><span class="p">:</span><span class="w"> </span><span class="mi">12</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="w">    </span><span class="nt">"status"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"armed"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w"> </span><span class="nt">"armingFlags"</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="nt">"flightModeFlags"</span><span class="p">:</span><span class="w"> </span><span class="mi">1026</span><span class="p">,</span><span class="w"> </span><span class="nt">"cpuLoad"</span><span class="p">:</span><span class="w"> </span><span class="mi">12</span><span class="p">,</span><span class="w"> </span><span class="nt">"sensorStatus"</span><span class="p">:</span><span class="w"> </span><span class="mi">63</span><span class="p">,</span><span class="w"> </span><span class="nt">"mspRcOverride"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span><span class="w"> </span><span class="nt">"fcAlive"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="w">    </span><span class="nt">"sensors"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"gyro"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">"acc"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">"mag"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">"baro"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">"gps"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">"rangefinder"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">"pitot"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">"opflow"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">"prearm"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">"rcReceiver"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="w">    </span><span class="nt">"flightMode"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"primary"</span><span class="p">:</span><span class="w"> </span><span class="s2">"cruise"</span><span class="p">,</span><span class="w"> </span><span class="nt">"modifiers"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"althold"</span><span class="p">]</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a><span class="w">    </span><span class="nt">"nav"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"navState"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">"activeWp"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a><span class="w">    </span><span class="nt">"ekf"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a><span class="w">    </span><span class="nt">"misc"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"autoThrottle"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span><span class="w"> </span><span class="nt">"uptimeS"</span><span class="p">:</span><span class="w"> </span><span class="mi">812</span><span class="p">,</span><span class="w"> </span><span class="nt">"flightTimeS"</span><span class="p">:</span><span class="w"> </span><span class="mi">415</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a><span class="w">    </span><span class="nt">"vehicle"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a><span class="w">    </span><span class="nt">"passiveProtocol"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a><span class="w">    </span><span class="nt">"lastUpdate"</span><span class="p">:</span><span class="w"> </span><span class="mi">1788699999870</span>
+<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a><span class="w">  </span><span class="p">},</span>
+<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a><span class="w">  </span><span class="nt">"home"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"lat"</span><span class="p">:</span><span class="w"> </span><span class="mf">51.4901</span><span class="p">,</span><span class="w"> </span><span class="nt">"lon"</span><span class="p">:</span><span class="w"> </span><span class="mf">11.9200</span><span class="p">,</span><span class="w"> </span><span class="nt">"altMsl"</span><span class="p">:</span><span class="w"> </span><span class="mf">141.0</span><span class="p">,</span><span class="w"> </span><span class="nt">"set"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a><span class="w">  </span><span class="nt">"gcs"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"lat"</span><span class="p">:</span><span class="w"> </span><span class="mf">51.4902</span><span class="p">,</span><span class="w"> </span><span class="nt">"lon"</span><span class="p">:</span><span class="w"> </span><span class="mf">11.9199</span><span class="p">,</span><span class="w"> </span><span class="nt">"altMsl"</span><span class="p">:</span><span class="w"> </span><span class="mf">141.0</span><span class="p">,</span><span class="w"> </span><span class="nt">"accuracyM"</span><span class="p">:</span><span class="w"> </span><span class="mf">12.5</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a><span class="p">}</span>
+</code></pre></div>
+<h3 id="top-level">Top level<a class="headerlink" href="#top-level" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>schema</code></td>
+<td>int</td>
+<td>Contract version of this document. Bumped only when an existing field changes meaning or disappears; new fields may appear without a bump.</td>
+</tr>
+<tr>
+<td><code>ts</code></td>
+<td>int</td>
+<td>Time the frame was built, Unix epoch <strong>milliseconds</strong> (Kite's clock).</td>
+</tr>
+<tr>
+<td><code>seq</code></td>
+<td>int</td>
+<td>Frame counter since the server started. A gap means you missed frames.</td>
+</tr>
+<tr>
+<td><code>connected</code></td>
+<td>bool</td>
+<td>A vehicle link is active. When <code>false</code>, <code>telemetry</code> holds the last known values (or all <code>null</code> after start) and <code>protocol</code> is <code>null</code>.</td>
+</tr>
+<tr>
+<td><code>protocol</code></td>
+<td><code>"msp"</code> · <code>"mavlink"</code> · <code>"passive"</code> · null</td>
+<td>Which input path the link uses.</td>
+</tr>
+<tr>
+<td><code>fcVariant</code></td>
+<td>string · null</td>
+<td>Firmware identifier: <code>"INAV"</code> (MSP), <code>"ArduPlane"</code> / <code>"ArduCopter"</code> / <code>"ArduRover"</code> / <code>"ArduSub"</code> / <code>"PX4"</code> / <code>"Generic"</code> (MAVLink, from the autopilot + vehicle type).</td>
+</tr>
+<tr>
+<td><code>telemetry</code></td>
+<td>object</td>
+<td>The groups below. Each group is <code>null</code> until the link has delivered it once.</td>
+</tr>
+<tr>
+<td><code>home</code></td>
+<td>object · null</td>
+<td>The flight controller's home position — INAV <code>MSP_WP 0</code>, MAVLink <code>HOME_POSITION</code>. Changes rarely and is kept between updates. <code>altMsl</code> in metres. <code>set</code> is always <code>true</code> when present.</td>
+</tr>
+<tr>
+<td><code>gcs</code></td>
+<td>object · null</td>
+<td>The ground-station marker as resolved in Kite (see <em>Radar &amp; ADS-B</em>): <code>lat</code>, <code>lon</code>, <code>altMsl</code> (terrain height at that point, may be <code>null</code>), <code>accuracyM</code> (the OS fix's accuracy radius, may be <code>null</code>). <code>null</code> when the GCS marker is <strong>Off</strong>.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="telemetry-groups"><code>telemetry</code> groups<a class="headerlink" href="#telemetry-groups" title="Permanent link">&para;</a></h3>
+<p>Units are Kite's canonical raw units: <strong>degrees, metres, m/s, V, A, W, mAh, %</strong>. Bitfields are plain
+integers. <strong>Sources</strong> lists which links fill the group; a field the source does not carry is <code>null</code>.</p>
+<h4 id="gps-sources-msp-mavlink-passive-ltm-crsf-sport"><code>gps</code> — sources: MSP, MAVLink, passive (LTM / CRSF / S.Port)<a class="headerlink" href="#gps-sources-msp-mavlink-passive-ltm-crsf-sport" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Unit / meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>lat</code>, <code>lon</code></td>
+<td>float</td>
+<td>Decimal degrees, WGS-84.</td>
+</tr>
+<tr>
+<td><code>altMsl</code></td>
+<td>float</td>
+<td>Metres above mean sea level as the GPS reports it.</td>
+</tr>
+<tr>
+<td><code>groundSpeed</code></td>
+<td>float</td>
+<td>m/s.</td>
+</tr>
+<tr>
+<td><code>course</code></td>
+<td>float</td>
+<td>Course over ground, degrees 0–360.</td>
+</tr>
+<tr>
+<td><code>numSat</code></td>
+<td>int</td>
+<td>Satellites used.</td>
+</tr>
+<tr>
+<td><code>fixType</code></td>
+<td>int</td>
+<td>0 none · 1 dead reckoning · 2 = 2D · 3 = 3D (INAV/MAVLink <code>GPS_FIX_TYPE</code> values).</td>
+</tr>
+<tr>
+<td><code>hdop</code></td>
+<td>float · null</td>
+<td>Horizontal dilution of precision. MSP (INAV) and MAVLink; <code>null</code> on passive links.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="attitude-sources-all"><code>attitude</code> — sources: all<a class="headerlink" href="#attitude-sources-all" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Unit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>roll</code></td>
+<td>float</td>
+<td>Degrees, ±180, right wing down positive.</td>
+</tr>
+<tr>
+<td><code>pitch</code></td>
+<td>float</td>
+<td>Degrees, ±90, nose up positive.</td>
+</tr>
+<tr>
+<td><code>yaw</code></td>
+<td>float</td>
+<td>Heading, degrees 0–360.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="altitude-sources-all"><code>altitude</code> — sources: all<a class="headerlink" href="#altitude-sources-all" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Unit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>altitude</code></td>
+<td>float</td>
+<td>Metres. Baro/fused altitude; <strong>whether it is MSL or relative to home depends on the link</strong> — see <code>altRef</code>.</td>
+</tr>
+<tr>
+<td><code>vario</code></td>
+<td>float</td>
+<td>Vertical speed, m/s, positive up.</td>
+</tr>
+<tr>
+<td><code>airspeed</code></td>
+<td>float · null</td>
+<td>m/s from a pitot sensor, when the FC reports it and <em>Airspeed</em> is enabled in Settings.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="altref-sources-passive-only"><code>altRef</code> — sources: passive only<a class="headerlink" href="#altref-sources-passive-only" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>msl</code></td>
+<td>bool</td>
+<td><code>true</code> when the passive link's <code>altitude</code> is above sea level, <code>false</code> when it is relative to the ground reference. MSP and MAVLink links leave this group <code>null</code> (their altitude is defined by the protocol).</td>
+</tr>
+</tbody>
+</table>
+<h4 id="wind-sources-mavlink-ardupilot-px4-msp-inav-100-needs-wind-enabled-in-settings"><code>wind</code> — sources: MAVLink (ArduPilot, PX4), MSP (INAV 10.0+); needs <em>Wind</em> enabled in Settings<a class="headerlink" href="#wind-sources-mavlink-ardupilot-px4-msp-inav-100-needs-wind-enabled-in-settings" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Unit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>directionFromDeg</code></td>
+<td>float</td>
+<td>Bearing the wind blows <strong>from</strong>, degrees.</td>
+</tr>
+<tr>
+<td><code>speedMs</code></td>
+<td>float</td>
+<td>Horizontal wind speed, m/s (0 = no estimate).</td>
+</tr>
+</tbody>
+</table>
+<h4 id="battery-sources-all-fields-vary"><code>battery</code> — sources: all (fields vary)<a class="headerlink" href="#battery-sources-all-fields-vary" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Unit / meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>voltage</code></td>
+<td>float</td>
+<td>V, pack voltage.</td>
+</tr>
+<tr>
+<td><code>current</code></td>
+<td>float</td>
+<td>A.</td>
+</tr>
+<tr>
+<td><code>power</code></td>
+<td>float</td>
+<td>W. Reported by the FC where available, otherwise <code>voltage × current</code>.</td>
+</tr>
+<tr>
+<td><code>mahDrawn</code></td>
+<td>int</td>
+<td>mAh consumed since power-on.</td>
+</tr>
+<tr>
+<td><code>percentage</code></td>
+<td>int</td>
+<td>0–100, the FC's own estimate.</td>
+</tr>
+<tr>
+<td><code>cellCount</code></td>
+<td>int</td>
+<td>Detected cells (0 = unknown).</td>
+</tr>
+<tr>
+<td><code>throttle</code></td>
+<td>int · null</td>
+<td>0–100 %, from INAV <code>MISC2</code> / MAVLink <code>VFR_HUD</code>; <code>null</code> when the link does not carry it.</td>
+</tr>
+<tr>
+<td><code>rssi</code></td>
+<td>int</td>
+<td>Raw RSSI as the source protocol reports it (INAV: 0–1023). Use <code>link</code> for a normalised value.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="batteries-sources-mavlink-battery_status"><code>batteries</code> — sources: MAVLink (<code>BATTERY_STATUS</code>)<a class="headerlink" href="#batteries-sources-mavlink-battery_status" title="Permanent link">&para;</a></h4>
+<p>Array, one object per battery instance: <code>id</code>, <code>voltage</code> (V), <code>current</code> (A), <code>mahDrawn</code>, <code>percentage</code>,
+<code>cellCount</code>, <code>temperature</code> (°C or <code>null</code>). Single-battery setups still get one entry. <code>null</code> on INAV
+and passive links — use <code>battery</code> there.</p>
+<h4 id="link-sources-crsf-sport-ltm-inav-91-mavlink-radio_status"><code>link</code> — sources: CRSF, S.Port, LTM, INAV 9.1+, MAVLink <code>RADIO_STATUS</code><a class="headerlink" href="#link-sources-crsf-sport-ltm-inav-91-mavlink-radio_status" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Unit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rssiPercent</code></td>
+<td>float · null</td>
+<td>0–100, normalised across protocols.</td>
+</tr>
+<tr>
+<td><code>rssiDbm</code></td>
+<td>int · null</td>
+<td>Raw dBm (negative), where the protocol reports it.</td>
+</tr>
+<tr>
+<td><code>lq</code></td>
+<td>int · null</td>
+<td>Link quality, 0–100.</td>
+</tr>
+<tr>
+<td><code>snrDb</code></td>
+<td>int · null</td>
+<td>Signal-to-noise ratio, dB.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="status-sources-msp-mavlink-passive-links-fill-armed-flags-coarsely"><code>status</code> — sources: MSP, MAVLink (passive links fill <code>armed</code> / flags coarsely)<a class="headerlink" href="#status-sources-msp-mavlink-passive-links-fill-armed-flags-coarsely" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>armed</code></td>
+<td>bool</td>
+<td>Derived from <code>armingFlags</code> bit 2 — the one field almost every consumer wants.</td>
+</tr>
+<tr>
+<td><code>armingFlags</code></td>
+<td>int</td>
+<td>INAV <code>armingFlag_e</code> bitfield; MAVLink links map the heartbeat's armed bit onto bit 2. Other bits are arming blockers (INAV).</td>
+</tr>
+<tr>
+<td><code>flightModeFlags</code></td>
+<td>int</td>
+<td>Raw mode bitfield (INAV boxes) / raw custom mode (MAVLink). Prefer <code>flightMode</code>.</td>
+</tr>
+<tr>
+<td><code>cpuLoad</code></td>
+<td>int</td>
+<td>%, INAV.</td>
+</tr>
+<tr>
+<td><code>sensorStatus</code></td>
+<td>int</td>
+<td>INAV sensor-present bitfield. Prefer <code>sensors</code>.</td>
+</tr>
+<tr>
+<td><code>mspRcOverride</code></td>
+<td>bool</td>
+<td>INAV's <em>MSP RC Override</em> box is active (Kite RC control engaged).</td>
+</tr>
+<tr>
+<td><code>fcAlive</code></td>
+<td>bool · null</td>
+<td>The flight controller itself is talking; <code>false</code> while the link carrier is up but the FC went quiet.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="sensors-sources-msp-inav-mavlink-sys_status"><code>sensors</code> — sources: MSP (INAV), MAVLink (<code>SYS_STATUS</code>)<a class="headerlink" href="#sensors-sources-msp-inav-mavlink-sys_status" title="Permanent link">&para;</a></h4>
+<p>Per-sensor health, INAV <code>hardwareSensorStatus_e</code> values: <strong>0</strong> none/absent · <strong>1</strong> OK · <strong>2</strong>
+unavailable · <strong>3</strong> unhealthy. Fields: <code>gyro</code>, <code>acc</code>, <code>mag</code>, <code>baro</code>, <code>gps</code>, <code>rangefinder</code>, <code>pitot</code>,
+<code>opflow</code>. MAVLink-only extras: <code>prearm</code> (0 unknown · 1 ready · 2 blocked) and <code>rcReceiver</code> (0 absent ·
+1 OK · 3 unhealthy); INAV leaves both 0.</p>
+<h4 id="flightmode-sources-all"><code>flightMode</code> — sources: all<a class="headerlink" href="#flightmode-sources-all" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>primary</code></td>
+<td>string</td>
+<td>Kite's canonical mode id — the same ids the flight-mode widget shows (INAV <code>"manual"</code>, <code>"acro"</code>, <code>"angle"</code>, <code>"althold"</code>, <code>"poshold"</code>, <code>"cruise"</code>, <code>"rth"</code>, <code>"mission"</code>, <code>"failsafe"</code>; ArduPilot <code>"stabilize"</code>, <code>"loiter"</code>, <code>"ardu_auto"</code>, <code>"rtl"</code>, <code>"qloiter"</code>; PX4 <code>"px4_position"</code>, <code>"px4_return"</code>, …). Protocol-agnostic: an INAV box set and an ArduPilot custom mode both arrive as one id.</td>
+</tr>
+<tr>
+<td><code>modifiers</code></td>
+<td>string[]</td>
+<td>Active modifier modes stacked on the primary (INAV style: <code>"althold"</code>, <code>"turnassist"</code>, …). Empty for single-mode protocols.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="nav-sources-msp-inav-mavlink-mission_current"><code>nav</code> — sources: MSP (INAV), MAVLink (<code>MISSION_CURRENT</code>)<a class="headerlink" href="#nav-sources-msp-inav-mavlink-mission_current" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>navState</code></td>
+<td>int</td>
+<td>INAV <code>navState</code> (0 when not navigating; ArduPilot always 0).</td>
+</tr>
+<tr>
+<td><code>activeWp</code></td>
+<td>int</td>
+<td>The FC's current target waypoint, 0 = not flying a mission.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="ekf-sources-mavlink-ardupilot-ekf_status_report-ahrs_ekf_type"><code>ekf</code> — sources: MAVLink (ArduPilot <code>EKF_STATUS_REPORT</code>, <code>AHRS_EKF_TYPE</code>)<a class="headerlink" href="#ekf-sources-mavlink-ardupilot-ekf_status_report-ahrs_ekf_type" title="Permanent link">&para;</a></h4>
+<p><code>status</code> (Kite's collapsed 0–3 health level), <code>maxVariance</code>, <code>flags</code> (raw <code>EKF_STATUS_FLAGS</code>),
+<code>ekfType</code> (2 = EKF2, 3 = EKF3). <code>null</code> on INAV and passive links.</p>
+<h4 id="misc-sources-msp-inav-misc2"><code>misc</code> — sources: MSP (INAV <code>MISC2</code>)<a class="headerlink" href="#misc-sources-msp-inav-misc2" title="Permanent link">&para;</a></h4>
+<p><code>autoThrottle</code> (navigation controls the throttle), <code>uptimeS</code> (seconds since boot), <code>flightTimeS</code>
+(seconds since first arm).</p>
+<h4 id="vehicle-sources-mavlink-ardupilot"><code>vehicle</code> — sources: MAVLink (ArduPilot)<a class="headerlink" href="#vehicle-sources-mavlink-ardupilot" title="Permanent link">&para;</a></h4>
+<p><code>quadplane</code>: <code>true</code> when ArduPlane reports <code>Q_ENABLE = 1</code>. <code>null</code> otherwise.</p>
+<h4 id="passiveprotocol-sources-passive-only"><code>passiveProtocol</code> — sources: passive only<a class="headerlink" href="#passiveprotocol-sources-passive-only" title="Permanent link">&para;</a></h4>
+<p><code>primary</code>: the carrier Kite locked onto (<code>"CRSF"</code>, <code>"SmartPort"</code>, <code>"LTM"</code>, …); <code>secondary</code>: a protocol
+tunneled inside it (<code>"MAVLink"</code> for ArduPilot passthrough), or <code>null</code>.</p>
+<h4 id="lastupdate"><code>lastUpdate</code><a class="headerlink" href="#lastupdate" title="Permanent link">&para;</a></h4>
+<p>Unix epoch milliseconds of the last telemetry event of any group. Compare with <code>ts</code> to see how stale
+the vehicle data is: on a healthy link the difference stays below the link's slowest update interval.</p>
+<h2 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h2>
+<p><strong>Watch the stream</strong> (any OS with netcat; on Windows <code>ncat</code> from Nmap works):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>nc<span class="w"> </span><span class="m">127</span>.0.0.1<span class="w"> </span><span class="m">27300</span>
+</code></pre></div>
+<p><strong>One snapshot</strong>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>http://127.0.0.1:27301/api/v1/telemetry<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">'.telemetry.gps, .telemetry.status.armed'</span>
+</code></pre></div>
+<p><strong>Python, read the stream and print position + battery</strong> (standard library only):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">json</span><span class="o">,</span><span class="w"> </span><span class="nn">socket</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="k">with</span> <span class="n">socket</span><span class="o">.</span><span class="n">create_connection</span><span class="p">((</span><span class="s2">"127.0.0.1"</span><span class="p">,</span> <span class="mi">27300</span><span class="p">))</span> <span class="k">as</span> <span class="n">s</span><span class="p">:</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>    <span class="n">f</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">makefile</span><span class="p">(</span><span class="s2">"r"</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">"utf-8"</span><span class="p">)</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>    <span class="n">hello</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">f</span><span class="o">.</span><span class="n">readline</span><span class="p">())</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    <span class="k">assert</span> <span class="n">hello</span><span class="p">[</span><span class="s2">"schema"</span><span class="p">]</span> <span class="o">==</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">"unexpected API schema"</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>    <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">f</span><span class="p">:</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>        <span class="n">frame</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">line</span><span class="p">)</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>        <span class="n">t</span> <span class="o">=</span> <span class="n">frame</span><span class="p">[</span><span class="s2">"telemetry"</span><span class="p">]</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">frame</span><span class="p">[</span><span class="s2">"connected"</span><span class="p">]</span> <span class="ow">or</span> <span class="n">t</span><span class="p">[</span><span class="s2">"gps"</span><span class="p">]</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>            <span class="k">continue</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>        <span class="n">g</span><span class="p">,</span> <span class="n">b</span> <span class="o">=</span> <span class="n">t</span><span class="p">[</span><span class="s2">"gps"</span><span class="p">],</span> <span class="n">t</span><span class="p">[</span><span class="s2">"battery"</span><span class="p">]</span>
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">'</span><span class="si">{</span><span class="n">g</span><span class="p">[</span><span class="s2">"lat"</span><span class="p">]</span><span class="si">:</span><span class="s1">.6f</span><span class="si">}</span><span class="s1"> </span><span class="si">{</span><span class="n">g</span><span class="p">[</span><span class="s2">"lon"</span><span class="p">]</span><span class="si">:</span><span class="s1">.6f</span><span class="si">}</span><span class="s1"> </span><span class="si">{</span><span class="n">g</span><span class="p">[</span><span class="s2">"altMsl"</span><span class="p">]</span><span class="si">:</span><span class="s1">.0f</span><span class="si">}</span><span class="s1"> m  '</span>
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>              <span class="sa">f</span><span class="s1">'</span><span class="si">{</span><span class="n">b</span><span class="p">[</span><span class="s2">"voltage"</span><span class="p">]</span><span class="si">:</span><span class="s1">.1f</span><span class="si">}</span><span class="s1"> V  armed=</span><span class="si">{</span><span class="n">t</span><span class="p">[</span><span class="s2">"status"</span><span class="p">][</span><span class="s2">"armed"</span><span class="p">]</span><span class="si">}</span><span class="s1">'</span><span class="p">)</span>
+</code></pre></div>
+<p><strong>Forward each frame to a web service</strong> — a 20-line bridge is all an external platform needs; Kite
+stays the program that <em>serves</em> telemetry and never holds anyone's credentials:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">json</span><span class="o">,</span><span class="w"> </span><span class="nn">socket</span><span class="o">,</span><span class="w"> </span><span class="nn">urllib.request</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">URL</span> <span class="o">=</span> <span class="s2">"https://example.com/ingest"</span>   <span class="c1"># your endpoint</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="k">with</span> <span class="n">socket</span><span class="o">.</span><span class="n">create_connection</span><span class="p">((</span><span class="s2">"127.0.0.1"</span><span class="p">,</span> <span class="mi">27300</span><span class="p">))</span> <span class="k">as</span> <span class="n">s</span><span class="p">:</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="n">f</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">makefile</span><span class="p">(</span><span class="s2">"r"</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">"utf-8"</span><span class="p">)</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>    <span class="n">f</span><span class="o">.</span><span class="n">readline</span><span class="p">()</span>                       <span class="c1"># hello</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>    <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">f</span><span class="p">:</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>        <span class="n">req</span> <span class="o">=</span> <span class="n">urllib</span><span class="o">.</span><span class="n">request</span><span class="o">.</span><span class="n">Request</span><span class="p">(</span><span class="n">URL</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="n">line</span><span class="o">.</span><span class="n">encode</span><span class="p">(),</span> <span class="n">method</span><span class="o">=</span><span class="s2">"PUT"</span><span class="p">,</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>                                     <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s2">"Content-Type"</span><span class="p">:</span> <span class="s2">"application/json"</span><span class="p">})</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>        <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>            <span class="n">urllib</span><span class="o">.</span><span class="n">request</span><span class="o">.</span><span class="n">urlopen</span><span class="p">(</span><span class="n">req</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>          <span class="c1"># keep reading; the stream does not wait for you</span>
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>            <span class="nb">print</span><span class="p">(</span><span class="s2">"upload failed:"</span><span class="p">,</span> <span class="n">e</span><span class="p">)</span>
+</code></pre></div>
+<p><strong>UDP subscriber in Python</strong> — <code>subscribe</code> once, then every few seconds to stay subscribed:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">json</span><span class="o">,</span><span class="w"> </span><span class="nn">socket</span><span class="o">,</span><span class="w"> </span><span class="nn">time</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">s</span> <span class="o">=</span> <span class="n">socket</span><span class="o">.</span><span class="n">socket</span><span class="p">(</span><span class="n">socket</span><span class="o">.</span><span class="n">AF_INET</span><span class="p">,</span> <span class="n">socket</span><span class="o">.</span><span class="n">SOCK_DGRAM</span><span class="p">)</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="n">s</span><span class="o">.</span><span class="n">settimeout</span><span class="p">(</span><span class="mf">1.0</span><span class="p">)</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="n">kite</span> <span class="o">=</span> <span class="p">(</span><span class="s2">"127.0.0.1"</span><span class="p">,</span> <span class="mi">27300</span><span class="p">)</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="n">s</span><span class="o">.</span><span class="n">sendto</span><span class="p">(</span><span class="sa">b</span><span class="s2">"subscribe"</span><span class="p">,</span> <span class="n">kite</span><span class="p">)</span>        <span class="c1"># subscribe</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="n">last_keepalive</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>    <span class="k">if</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">last_keepalive</span> <span class="o">&gt;</span> <span class="mi">5</span><span class="p">:</span>
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>        <span class="n">s</span><span class="o">.</span><span class="n">sendto</span><span class="p">(</span><span class="sa">b</span><span class="s2">"subscribe"</span><span class="p">,</span> <span class="n">kite</span><span class="p">);</span> <span class="n">last_keepalive</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>    <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>        <span class="n">data</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">recvfrom</span><span class="p">(</span><span class="mi">65535</span><span class="p">)</span>
+<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>    <span class="k">except</span> <span class="n">socket</span><span class="o">.</span><span class="n">timeout</span><span class="p">:</span>
+<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>        <span class="k">continue</span>
+<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>    <span class="n">msg</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+<a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>    <span class="k">if</span> <span class="n">msg</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"hello"</span><span class="p">):</span>
+<a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>        <span class="k">continue</span>
+<a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a>    <span class="nb">print</span><span class="p">(</span><span class="n">msg</span><span class="p">[</span><span class="s2">"seq"</span><span class="p">],</span> <span class="n">msg</span><span class="p">[</span><span class="s2">"connected"</span><span class="p">],</span> <span class="n">msg</span><span class="p">[</span><span class="s2">"telemetry"</span><span class="p">][</span><span class="s2">"gps"</span><span class="p">])</span>
+</code></pre></div>
+<p><strong>Browser dashboard on the same machine</strong> — the HTTP route allows cross-origin reads:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nx">setInterval</span><span class="p">(</span><span class="k">async</span><span class="w"> </span><span class="p">()</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">f</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="p">(</span><span class="k">await</span><span class="w"> </span><span class="nx">fetch</span><span class="p">(</span><span class="s1">'http://127.0.0.1:27301/api/v1/telemetry'</span><span class="p">)).</span><span class="nx">json</span><span class="p">();</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span><span class="nb">document</span><span class="p">.</span><span class="nx">title</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">f</span><span class="p">.</span><span class="nx">connected</span><span class="w"> </span><span class="o">?</span><span class="w"> </span><span class="sb">`</span><span class="si">${</span><span class="nx">f</span><span class="p">.</span><span class="nx">telemetry</span><span class="p">.</span><span class="nx">altitude</span><span class="o">?</span><span class="p">.</span><span class="nx">altitude</span><span class="w"> </span><span class="o">??</span><span class="w"> </span><span class="s1">'–'</span><span class="si">}</span><span class="sb"> m`</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="s1">'no link'</span><span class="p">;</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="p">},</span><span class="w"> </span><span class="mf">500</span><span class="p">);</span>
+</code></pre></div>
+<h2 id="good-to-know">Good to know<a class="headerlink" href="#good-to-know" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Rate and pacing.</strong> The frame rate is Kite's, not the aircraft's. Two frames can carry the same
+  vehicle data (same <code>telemetry.lastUpdate</code>); a 10 Hz MAVLink attitude stream is sampled at the API
+  rate. If you need every sample, record a <code>.tlog</code> or Blackbox log instead.</li>
+<li><strong>Reconnects.</strong> When a new vehicle link comes up, the telemetry groups start from <code>null</code> again —
+  no values from the previous aircraft leak into the new session. <code>home</code> follows the FC; <code>gcs</code> is
+  Kite's own and stays.</li>
+<li><strong>Replay is not served.</strong> The API reflects the live link only; playing back a logbook flight does
+  not feed it.</li>
+<li><strong>Versioning.</strong> Check <code>schema</code> in the hello line or the health route. Within schema 1, fields are only
+  ever added.</li>
+<li><strong>Relay vs. API.</strong> The <strong>Relay</strong> re-encodes telemetry into flight-controller protocols (LTM, MAVLink,
+  CRSF, S.Port) for antenna trackers and other ground stations. The API is for software that just
+  wants the numbers as JSON. Both can run at the same time.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; Marc Hoffmann (b14ckyy) — GPL-3.0-or-later
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["announce.dismiss", "navigation.sections", "navigation.top", "navigation.instant", "navigation.tracking", "toc.follow", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

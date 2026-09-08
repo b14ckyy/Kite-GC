@@ -16,7 +16,7 @@
         <link rel="prev" href="../../guides/relay-and-forwarding/">
       
       
-        <link rel="next" href="../file-formats/">
+        <link rel="next" href="../telemetry-api/">
       
       
         
@@ -1297,6 +1297,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../telemetry-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telemetry API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../file-formats/" class="md-nav__link">
         
   
@@ -2174,6 +2202,11 @@ how smooth the instruments feel; the rest is automatic.</p>
 <tr>
 <td><strong>Full MAVLink Telemetry</strong></td>
 <td>MAVLink only — hand rate control to the flight controller (streams everything at its own rates, ignoring the two rates above). For fast links / full <code>.tlog</code> capture. See <strong><a href="../../guides/telemetry-and-display/">Telemetry &amp; display</a></strong>.</td>
+<td>Off</td>
+</tr>
+<tr>
+<td><strong>Telemetry API</strong></td>
+<td>Serve the live telemetry to other programs as JSON, read-only: a <strong>TCP stream</strong> (port 27300), an <strong>HTTP snapshot</strong> (port 27301) and/or <strong>UDP subscribers</strong> (port 27300, a client subscribes by sending the word <code>subscribe</code>); <strong>Reachable on the network</strong> switches the listeners from loopback to all interfaces; <strong>Update rate</strong> 1–10 Hz. The status line shows the endpoints and connected clients. Full contract: <strong><a href="../telemetry-api/">Telemetry API</a></strong>.</td>
 <td>Off</td>
 </tr>
 <tr>
