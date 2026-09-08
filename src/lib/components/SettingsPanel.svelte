@@ -18,7 +18,7 @@
   import { resetGcsManual, gcsManuallySet } from '$lib/stores/gcsLocation';
   import type { AppSettings, InterfaceSettings, RadarSettings, GcsMode, AirspaceSettings, AirspaceProvider, SystemMessagesLevel, LogLevel, RcControlSettings, TelemetryApiSettings, UpdateCheckSettings, UpdateCheckMode, DefaultProtocol } from '$lib/stores/settings';
   import { revealItemInDir, openPath } from '@tauri-apps/plugin-opener';
-  import { isAndroid, isMobile } from '$lib/platform';
+  import { isAndroid, isMobile, isPhone } from '$lib/platform';
   import { blackboxDecoderVersion, downloadBlackboxDecode } from '$lib/stores/flightlog';
   import type { TileCacheStats } from '$lib/cache/tileCache';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
@@ -381,14 +381,19 @@
           {#each SUPPORTED_LOCALES as loc}<option value={loc.code}>{loc.label}</option>{/each}
         </select>
       </div>
-      <div class="s-row">
-        <label class="s-label" for="ui-scale">{$t('settings.uiScale')}</label>
-        <select id="ui-scale" class="s-select" value={uiScale} onchange={handleUiScaleChange}>
-          <option value={1}>100%</option>
-          <option value={1.25}>125%</option>
-          <option value={1.5}>150%</option>
-        </select>
-      </div>
+      <!-- Not on the phone: its chrome is laid out in viewport px (nav rail, widget column, map
+           clip) and +page pins the scale to 1 there — a saved 125 % from a tablet session would
+           only clip the edges (see the phone note at `uiScale` in +page). -->
+      {#if !isPhone}
+        <div class="s-row">
+          <label class="s-label" for="ui-scale">{$t('settings.uiScale')}</label>
+          <select id="ui-scale" class="s-select" value={uiScale} onchange={handleUiScaleChange}>
+            <option value={1}>100%</option>
+            <option value={1.25}>125%</option>
+            <option value={1.5}>150%</option>
+          </select>
+        </div>
+      {/if}
     </div>
 
     <!-- ── Map ───────────────────────────────────────── -->

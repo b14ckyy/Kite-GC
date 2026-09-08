@@ -90,6 +90,9 @@ class MainActivity : TauriActivity() {
    *  video layer below it is visible (see NativeVideo). */
   override fun onWebViewCreate(webView: android.webkit.WebView) {
     NativeVideo.attachWebView(webView)
+    // Before the first navigation (wry calls this hook before it loads the URL): the frontend reads
+    // the device profile from the user-agent at module load, so the token must already be there.
+    DeviceProfile.tagUserAgent(webView)
   }
 
   /**

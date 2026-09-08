@@ -58,6 +58,7 @@
     "bleScanning": "Suche...",
     "bleScan": "Nach BLE-Geräten suchen",
     "bluetooth": "Bluetooth",
+    "internalUart": "Interner UART (ELRS-Modul)",
     "renameBtPort": "Diesen Bluetooth-Port umbenennen",
     "btNamePlaceholder": "Eigener Name",
     "btNameSave": "Name speichern",
@@ -544,6 +545,7 @@
     "license": "Lizenz",
     "source": "Quellcode",
     "supportedFirmware": "Unterstützte Autopilot-Firmware",
+    "runtime": "Laufzeit",
     "thirdParty": "Drittanbieter-Lizenzen",
     "thirdPartyNote": "Eingebundene Komponenten und ihre Lizenzen. Transitive Abhängigkeiten stehen unter kompatiblen permissiven Lizenzen.",
     "close": "Schließen"

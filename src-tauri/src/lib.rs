@@ -452,6 +452,10 @@ pub fn run() {
             // own idea of it (see `android::log_resolved_dirs`).
             #[cfg(target_os = "android")]
             android::log_resolved_dirs(_app.handle());
+            // Which known hardware this is (RadioMaster AX12, …): logged here so every Android log
+            // carries the answer from its first lines, not only once a serial port is listed.
+            #[cfg(target_os = "android")]
+            android::device::profile();
 
             // Linux: re-host the WebView over the native video layer (hole-punch decode sink,
             // MOBILE_RTSP.md P2.3). Needs the transparent window from tauri.linux.conf.json.

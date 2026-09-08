@@ -16,6 +16,7 @@
 //! it against Tauri's own answer once the app is up.
 
 pub mod content;
+pub mod device;
 pub mod jvm;
 pub mod link_service;
 pub mod native_video;

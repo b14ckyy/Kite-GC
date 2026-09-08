@@ -11,7 +11,7 @@
   import { connection, availablePorts, bleDevices, defaultNetPort } from "$lib/stores/connection";
   import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
-  import { isAndroid, isMobile, isTablet, isPhone as isPhoneDevice, hasSerialPorts, logPlayerWidth } from "$lib/platform";
+  import { isAndroid, isMobile, isTablet, isPhone as isPhoneDevice, hasSerialPorts, logPlayerWidth, deviceProfile } from "$lib/platform";
   import { isDebugMode } from "$lib/stores/debug";
   import { telemetry } from "$lib/stores/telemetry";
   import { startRadarListeners, configureRadar, setRadarCenter, setRadarNode } from "$lib/stores/radarTracking";
@@ -598,6 +598,17 @@
       }
     }
   });
+  // A transmitter's built-in UART runs at whatever its radio module is set to — the AX12's ELRS
+  // module at 460800 — so picking that port sets the baud once, on the transition onto it. A
+  // deliberate change afterwards sticks (the effect only fires when the selection moves onto it).
+  const INTERNAL_UART_BAUD = 460800;
+  let onInternalUart = $state(false);
+  $effect(() => {
+    const internal = ports.some((p) => p.path === selectedPort && p.port_type === 'internal-uart');
+    const was = untrack(() => onInternalUart);
+    if (internal && !was) selectedBaud = INTERNAL_UART_BAUD;
+    if (internal !== was) onInternalUart = internal;
+  });
   bleDevices.subscribe((d) => {
     bleDeviceList = d;
     // Auto-select the first discovered device while scanning (no manual pick yet).
@@ -995,10 +1006,20 @@
       flightLog: s.flightLoggingEnabled, rawLog: s.flightLogRawEnabled,
       batteryAlertPct: s.batteryAlertPct, mapProvider: s.mapProvider,
       uiScale: s.uiScale, logLevel: savedLogLevel,
+      // Runtime facts a layout report needs (the same line the About dialog shows): which engine,
+      // the css viewport and its density, and the hardware profile if the device is a known one.
+      device: deviceProfile, viewport: `${window.innerWidth}x${window.innerHeight}@${window.devicePixelRatio}`,
+      ua: navigator.userAgent,
     });
     void invoke('log_session_settings', { summary }).catch(() => {});
   }
-  uiScale = saved.uiScale ?? 1;
+  // Pinned to 1 on the phone: its chrome — nav rail height, widget column, map clip, the docked
+  // video frame — is laid out in viewport px on the assumption that logical = real px (the rail's
+  // phone max-height is a plain 100vh, so any scale > 1 clips it at the bottom). A scale saved from
+  // a tablet session survives the flip to the phone layout (the same device can show either, see
+  // `isAx12` in platform.ts) and is the prime suspect for the clipped rail + widget column seen on
+  // an AX12 (2026-09-08, unverified). The setting is hidden there too (SettingsPanel).
+  uiScale = phoneUi ? 1 : (saved.uiScale ?? 1);
   interfaceSettings = saved.interface ?? {
     speedUnit: 'kmh',
     altitudeUnit: 'm',
@@ -1290,7 +1311,7 @@
       logLevel = patch.logLevel;
       void invoke('set_log_level', { level: patch.logLevel }).catch(() => {});
     }
-    if (patch.uiScale != null) uiScale = patch.uiScale;
+    if (patch.uiScale != null && !phoneUi) uiScale = patch.uiScale;
     if (patch.interface != null) {
       interfaceSettings = { ...interfaceSettings, ...patch.interface };
       if (selectedFlight) {

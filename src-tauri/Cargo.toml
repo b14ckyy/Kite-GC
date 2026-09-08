@@ -75,6 +75,11 @@ tauri-plugin-window-state = "2"
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"
 ndk-context = "0.1"
+# The tty backend of the Android serial transport: RC transmitters that run Android (RadioMaster
+# AX12) expose their internal flight-controller UART as a plain, app-accessible `/dev/ttyS1`, which
+# is a POSIX serial port like any other — the crate's posix backend covers it. USB devices still go
+# through the USB Host API above; the desktop's udev enumeration is left off (no udev on Android).
+serialport = { version = "4", default-features = false }
 # MediaCodec hardware video decode + ANativeWindow for the native RTSP sink (MOBILE_RTSP P2.2):
 # the safe wrappers over the NDK's AMediaCodec/AMediaFormat C API (video/android_sink.rs).
 ndk = { version = "0.9", default-features = false, features = ["media", "api-level-30"] }

@@ -12,8 +12,50 @@
     APP_NAME, APP_TAGLINE, APP_VERSION, GIT_COMMIT, BUILD_DATE, COPYRIGHT, LICENSE, REPO_URL,
   } from '$lib/buildInfo';
   import { THIRD_PARTY_LICENSES, SUPPORTED_FIRMWARE } from '$lib/config/thirdPartyLicenses';
+  import { deviceProfile } from '$lib/platform';
 
   let { open = $bindable(false) }: { open?: boolean } = $props();
+
+  // ── Runtime line ──
+  // The facts a layout report from an unknown device needs and a screenshot of this dialog can
+  // carry: the WebView engine and version, the css viewport with its density, the root font size
+  // (Android scales it with the system font setting), the safe-area insets the chrome keeps clear
+  // of, and the hardware profile when the device is a known one. Technical on purpose — it is read
+  // by whoever debugs, not by the pilot — so the values are not translated.
+  function engineLabel(): string {
+    const ua = navigator.userAgent;
+    const chrome = /Chrome\/(\d+)/.exec(ua);
+    if (chrome) return `${/Android/.test(ua) ? 'Android WebView' : 'Chromium'} ${chrome[1]}`;
+    const webkit = /AppleWebKit\/([\d.]+)/.exec(ua);
+    if (webkit) return `WebKit ${webkit[1]}`;
+    return 'unknown engine';
+  }
+  /** `env(safe-area-inset-*)` cannot be read back as a number from a custom property — the computed
+   *  value of `--safe-top` is the literal `env(…)` text — so a hidden probe box wears the insets as
+   *  padding and is measured. Same order as CSS shorthands: top / right / bottom / left. */
+  function safeInsets(): string {
+    const probe = document.createElement('div');
+    probe.style.cssText =
+      'position:fixed;visibility:hidden;pointer-events:none;width:0;height:0;' +
+      'padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) ' +
+      'env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)';
+    document.body.appendChild(probe);
+    const cs = getComputedStyle(probe);
+    const px = (v: string) => Math.round(parseFloat(v) || 0);
+    const out = `${px(cs.paddingTop)}/${px(cs.paddingRight)}/${px(cs.paddingBottom)}/${px(cs.paddingLeft)}`;
+    probe.remove();
+    return out;
+  }
+  function runtimeLine(): string {
+    const w = window.innerWidth, h = window.innerHeight;
+    const dpr = Math.round(window.devicePixelRatio * 100) / 100;
+    const rem = Math.round(parseFloat(getComputedStyle(document.documentElement).fontSize) * 10) / 10;
+    const parts = [engineLabel(), `${w}×${h} @${dpr}`, `${rem}px`, `insets ${safeInsets()}`];
+    if (deviceProfile) parts.push(deviceProfile);
+    return parts.join(' · ');
+  }
+  // Re-read each time the dialog opens (a rotate between two openings changes the viewport).
+  const runtime = $derived(open ? runtimeLine() : '');
 
   function close() { open = false; }
   function onKeydown(e: KeyboardEvent) { if (e.key === 'Escape') close(); }
@@ -44,6 +86,10 @@
         <div class="about-row">
           <span class="about-k">{$t('about.source')}</span>
           <button class="about-link" onclick={() => openExt(REPO_URL)}>{REPO_URL}</button>
+        </div>
+        <div class="about-row">
+          <span class="about-k">{$t('about.runtime')}</span>
+          <span class="about-v about-mono">{runtime}</span>
         </div>
       </div>
 

@@ -49,3 +49,6 @@
 -keep class com.kitegc.app.NetInfo { *; }
 # Link foreground-service bridge (android/link_service.rs → LinkService) — JNI-only, same rule.
 -keep class com.kitegc.app.LinkService { *; }
+# Device profile (android/device.rs → DeviceProfile): profile/internalSerialPorts are JNI-only,
+# same rule.
+-keep class com.kitegc.app.DeviceProfile { *; }
