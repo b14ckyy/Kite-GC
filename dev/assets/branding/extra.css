@@ -12,3 +12,28 @@
   --md-accent-fg-color:         #f5a623;
   --md-accent-fg-color--transparent: rgba(245, 166, 35, 0.1);
 }
+
+/* ── Sidebar navigation ─────────────────────────────────────────────────────────────────
+   Sections are collapsible (no navigation.sections); the JS in assets/nav.js keeps the first one
+   ("Getting started") open. Section labels read as headers, their pages are indented under a
+   thin guide line. Desktop sidebar only — the mobile drawer keeps Material's slide-in layout. */
+@media screen and (min-width: 76.25em) {
+  .md-nav--primary > .md-nav__list > .md-nav__item--nested > .md-nav__link {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--md-default-fg-color);
+    margin-top: 0.9em;
+  }
+  .md-nav--primary > .md-nav__list > .md-nav__item--nested > .md-nav__link:hover {
+    color: var(--md-accent-fg-color);
+  }
+  .md-nav--primary .md-nav__item--nested > .md-nav > .md-nav__list {
+    margin-left: 0.35rem;
+    padding-left: 0.85rem;
+    border-left: 1px solid var(--md-default-fg-color--lightest);
+  }
+  /* Nested sections (e.g. Guides → Logbook) stay at page size, just bold. */
+  .md-nav--primary .md-nav__item--nested .md-nav__item--nested > .md-nav__link {
+    font-weight: 700;
+  }
+}
