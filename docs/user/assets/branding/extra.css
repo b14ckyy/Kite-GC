@@ -37,3 +37,24 @@
     font-weight: 700;
   }
 }
+
+/* Changelog: a patch release is a sub-segment inside its feature release's box. `.kite-patch` is
+   the patch version label, `.kite-badge` the status pill next to it ("in development" until the
+   patch ships, then replaced by the release date). Both are attr_list classes on inline text. */
+.kite-patch {
+  font-size: 1.15em;
+}
+.kite-badge {
+  display: inline-block;
+  margin-left: 0.35em;
+  padding: 0.05em 0.6em;
+  border-radius: 1em;
+  background: var(--md-accent-fg-color);
+  color: var(--md-accent-bg-color);
+  font-size: 0.68em;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: 0.15em;
+}
