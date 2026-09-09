@@ -1784,6 +1784,24 @@ button any more; click outside the docks or press Escape to finish. <a href="htt
 </ul>
 </details>
 <details class="note">
+<summary>1.0.1 — patch release</summary>
+<p><strong>Fixed</strong></p>
+<ul>
+<li><strong>HDOP on INAV showed the wrong figure.</strong> The GPS tile read the position-error field instead
+  of HDOP, because the first field of INAV's GPS statistics message is 16 bits and Kite decoded
+  it as 32. The recorder stored the same two values one field out. <a href="https://github.com/b14ckyy/Kite-GC/pull/143">#143</a></li>
+<li><strong>"Fly Here" opened with an empty radius field</strong> on fixed wing, which reads as "no radius"
+  while the vehicle would in fact use its configured one. The field now shows the aircraft's own
+  loiter radius. Leave it alone and the aircraft keeps using that setting, turn direction
+  included; type a value and yours wins. <a href="https://github.com/b14ckyy/Kite-GC/pull/143">#143</a></li>
+<li><strong>The radius stepper was clipped</strong> by the edge of the "Fly Here" popup, so its "+" button
+  could not be reached. <a href="https://github.com/b14ckyy/Kite-GC/pull/143">#143</a></li>
+<li><strong>A saved Telemetry connection came back as MSP.</strong> Restoring the last-used protocol mapped
+  everything that was not MAVLink onto MSP, so the passive Telemetry choice was silently
+  rewritten. <a href="https://github.com/b14ckyy/Kite-GC/pull/143">#143</a></li>
+</ul>
+</details>
+<details class="note">
 <summary>1.0.0 — Initial release · Live</summary>
 <p>The first stable release of <strong>Kite Ground Control</strong>: a cross-platform ground station for
 <strong>INAV</strong>, <strong>ArduPilot</strong> and <strong>PX4</strong> — live telemetry over serial, Bluetooth and network links,
