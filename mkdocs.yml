@@ -118,6 +118,7 @@ nav:
       - Reporting a problem: troubleshooting/reporting-issues.md
   - FAQ: faq.md
   - Changelog: changelog.md
+  - Release support: release-support.md
   - For developers:
       - Overview: for-developers/index.md
       - Architecture: for-developers/architecture.md

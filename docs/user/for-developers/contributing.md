@@ -37,6 +37,12 @@ repository, everyone else forks and opens the PR from the fork. The workflow is 
 afterwards, so nothing is lost. If a released version needs a patch after the trunk has moved on, the
 branch is cut from that version's **tag**, not from `master`.
 
+Maintenance branches are long-lived: a release line receives patches until the **second** feature
+release after it has shipped (1.0.x until 1.2.0 — see [Release support](../release-support.md)), and
+its branch stays open until then. Two lines are maintained side by side, so a bug that exists in both
+gets a fix on each maintenance branch. That is why the regression marker below matters: it tells us at
+a glance which lines a fix belongs to.
+
 **Documentation is the one exception.** A change to these pages that touches no code — a correction, a
 clarification, a missing note — targets `master` directly, because the published site must always
 describe the released app. Documentation *for a new or changed feature* is not covered by this: it
