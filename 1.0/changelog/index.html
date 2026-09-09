@@ -16,7 +16,7 @@
         <link rel="prev" href="../faq/">
       
       
-        <link rel="next" href="../for-developers/">
+        <link rel="next" href="../release-support/">
       
       
         
@@ -1329,6 +1329,33 @@
   
   
   
+    <li class="md-nav__item">
+      <a href="../release-support/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release support
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
     
     
     
@@ -1338,10 +1365,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
         
           
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
             
   
   
@@ -1359,8 +1386,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_8">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1563,10 +1590,28 @@
 <h1 id="changelog">Changelog<a class="headerlink" href="#changelog" title="Permanent link">&para;</a></h1>
 <p>What's new in each Kite Ground Control release — the big features up top, the full list of changes
 below. The release you are reading the docs for is expanded; click an older version to unfold it.</p>
+<p>Each version heading ends with the line's support status — <strong>Live</strong>, <strong>Maintenance</strong> or <strong>EOL</strong> — as
+defined on the <a href="../release-support/">release support</a> page. Patch releases (1.0.1, 1.0.2, …) are listed
+inside the box of the feature release they belong to, so the notes for one release line stay together.</p>
 <details class="note" open="open">
-<summary>1.0.1 — patch release</summary>
+<summary>1.0 — Initial release · Live</summary>
+<p>The first stable release of <strong>Kite Ground Control</strong>: a cross-platform ground station for
+<strong>INAV</strong>, <strong>ArduPilot</strong> and <strong>PX4</strong> — live telemetry over serial, Bluetooth and network links,
+mission planning on 2D and 3D maps, safety subsystems (safe homes, geozones, geofence), a full
+flight logbook with replay, FPV video, radar / airspace awareness and telemetry relaying.</p>
+<p>Everything this version contains is covered by the regular documentation — start with the
+<a href="../getting-started/quick-tour/">quick tour</a> or the <a href="https://github.com/b14ckyy/Kite-GC/releases">GitHub release</a>.</p>
+<hr />
+<p><strong class="kite-patch">1.0.1</strong> <em class="kite-badge">in development</em></p>
 <p><strong>Fixed</strong></p>
 <ul>
+<li><strong>The 3D live view stuttered more the longer a flight went on.</strong> The live trail was rebuilt
+  on every frame, so its cost grew with the length of the track, and the hidden 2D map kept
+  re-centring and drawing the aircraft underneath. Both now cost the same on every frame. <a href="https://github.com/b14ckyy/Kite-GC/pull/140">#140</a></li>
+<li><strong>"Incomplete recording found" came back on every start.</strong> When unfinished temp logs had piled
+  up (the app killed mid-recording, for example by the operating system), the prompt offered them
+  one per launch and Discard removed only that one. Discard now clears every leftover, and a
+  recording in progress is never touched. <a href="https://github.com/b14ckyy/Kite-GC/pull/145">#145</a></li>
 <li><strong>HDOP on INAV showed the wrong figure.</strong> The GPS tile read the position-error field instead
   of HDOP, because the first field of INAV's GPS statistics message is 16 bits and Kite decoded
   it as 32. The recorder stored the same two values one field out. <a href="https://github.com/b14ckyy/Kite-GC/pull/143">#143</a></li>
@@ -1579,16 +1624,8 @@ below. The release you are reading the docs for is expanded; click an older vers
 <li><strong>A saved Telemetry connection came back as MSP.</strong> Restoring the last-used protocol mapped
   everything that was not MAVLink onto MSP, so the passive Telemetry choice was silently
   rewritten. <a href="https://github.com/b14ckyy/Kite-GC/pull/143">#143</a></li>
+<li><strong>Bulgarian translation corrected</strong> — 26 strings, contributed by teodoryantcheff. <a href="https://github.com/b14ckyy/Kite-GC/pull/141">#141</a></li>
 </ul>
-</details>
-<details class="note">
-<summary>1.0.0 — Initial release</summary>
-<p>The first stable release of <strong>Kite Ground Control</strong>: a cross-platform ground station for
-<strong>INAV</strong>, <strong>ArduPilot</strong> and <strong>PX4</strong> — live telemetry over serial, Bluetooth and network links,
-mission planning on 2D and 3D maps, safety subsystems (safe homes, geozones, geofence), a full
-flight logbook with replay, FPV video, radar / airspace awareness and telemetry relaying.</p>
-<p>Everything this version contains is covered by the regular documentation — start with the
-<a href="../getting-started/quick-tour/">quick tour</a> or the <a href="https://github.com/b14ckyy/Kite-GC/releases">GitHub release</a>.</p>
 </details>
 
 

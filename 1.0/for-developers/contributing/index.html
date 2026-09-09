@@ -1315,6 +1315,33 @@
       
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../../release-support/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release support
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
     
   
   
@@ -1328,10 +1355,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" checked>
         
           
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
             
   
   
@@ -1349,8 +1376,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_8">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_9">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1809,6 +1836,11 @@ repository, everyone else forks and opens the PR from the fork. The workflow is 
 <p><strong>Fixes for an already-released version</strong> go on <code>master</code> and are merged down into <code>development</code>
 afterwards, so nothing is lost. If a released version needs a patch after the trunk has moved on, the
 branch is cut from that version's <strong>tag</strong>, not from <code>master</code>.</p>
+<p>Maintenance branches are long-lived: a release line receives patches until the <strong>second</strong> feature
+release after it has shipped (1.0.x until 1.2.0 — see <a href="../../release-support/">Release support</a>), and
+its branch stays open until then. Two lines are maintained side by side, so a bug that exists in both
+gets a fix on each maintenance branch. That is why the regression marker below matters: it tells us at
+a glance which lines a fix belongs to.</p>
 <p><strong>Documentation is the one exception.</strong> A change to these pages that touches no code — a correction, a
 clarification, a missing note — targets <code>master</code> directly, because the published site must always
 describe the released app. Documentation <em>for a new or changed feature</em> is not covered by this: it
