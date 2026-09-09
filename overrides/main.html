@@ -1,8 +1,10 @@
 {% extends "base.html" %}
 
-<!-- Public-beta announcement bar (dismissible via the announce.dismiss feature). -->
+<!-- Announcement bar. announce.dismiss (mkdocs.yml) hides it once the reader clicks the X and
+     remembers that in localStorage, keyed by a hash of this text — so it stays hidden across visits
+     and versions until the text changes. Change the text = show it once more to everyone. -->
 {% block announce %}
-  Kite Ground Control is in <strong>public beta</strong> — your
+  <strong>Kite Ground Control 1.0 is released.</strong> Your
   <a href="https://github.com/b14ckyy/Kite-GC/issues">feedback &amp; bug reports</a> are very welcome.
 {% endblock %}
 
