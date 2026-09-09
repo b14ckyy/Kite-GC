@@ -39,7 +39,6 @@ theme:
         name: Switch to dark mode
   features:
     - announce.dismiss
-    - navigation.sections
     - navigation.top
     - navigation.instant
     - navigation.tracking
@@ -58,6 +57,9 @@ hooks:
 
 extra_css:
   - assets/branding/extra.css
+
+extra_javascript:
+  - assets/nav.js # keeps the "Getting started" section expanded (see the file)
 
 extra:
   # Header version dropdown (Material's native mike support): reads the versions.json that mike
