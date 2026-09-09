@@ -77,6 +77,10 @@ pub struct PendingSession {
 /// Shared, connection-independent slot for the one pending session (see `state::AppState`).
 pub type PendingSessionHandle = Arc<Mutex<Option<PendingSession>>>;
 
+/// Path of the temp `.ktmp` the recorder is writing right now, mirrored into app-state so the
+/// recovery scan and the discard sweeps never touch a live session (`None` while not recording).
+pub type ActiveTempPathHandle = Arc<Mutex<Option<PathBuf>>>;
+
 /// Commit a pending session into the main DB: insert the finalized flight, copy the temp
 /// `telemetry_records`, remove the temp file, and spawn weather/geocode enrichment. Returns the new
 /// flight id. Shared by the Save command and the recorder's grace-lapsed re-arm path.
@@ -378,6 +382,8 @@ pub struct FlightRecorder {
     /// A recovered session the user chose to continue on reconnect (ADR-042), consulted once on the
     /// first polled status of this connection (armed → resume; disarmed → finalize).
     resume: PendingSessionHandle,
+    /// Mirror of the active session's temp path for the command layer (see `ActiveTempPathHandle`).
+    active_path: ActiveTempPathHandle,
     /// Whether the first polled status has been seen on this connection (the trustworthy point to
     /// evaluate the continue-on-reconnect decision — past any handshake residual flags).
     first_status_seen: bool,
@@ -398,6 +404,7 @@ impl FlightRecorder {
         app_handle: AppHandle,
         pending: PendingSessionHandle,
         resume: PendingSessionHandle,
+        active_path: ActiveTempPathHandle,
         msp_raw_sink: MspRawSink,
     ) -> Result<Self, String> {
         let db_path = db::resolve_db_path(&settings.db_path, portable);
@@ -425,8 +432,17 @@ impl FlightRecorder {
             app_handle,
             pending,
             resume,
+            active_path,
             first_status_seen: false,
         })
+    }
+
+    /// Publish (or clear) the active session's temp path for the command layer.
+    fn publish_active_path(&self) {
+        let path = self.active_flight.as_ref().and_then(|f| f.temp_path.clone());
+        if let Ok(mut slot) = self.active_path.lock() {
+            *slot = path;
+        }
     }
 
     /// Update the protocol label (recorded in the flight metadata). Passive telemetry detects its
@@ -732,6 +748,7 @@ impl FlightRecorder {
             last_lon: None,
             start_mah: p.start_mah,
         });
+        self.publish_active_path();
         if let Err(e) = self.app_handle.emit("flight-recording-resumed", ()) {
             log::warn!("Failed to emit flight-recording-resumed: {}", e);
         }
@@ -820,6 +837,7 @@ impl FlightRecorder {
             last_lon: None,
             start_mah: self.snapshot.mah_drawn,
         });
+        self.publish_active_path();
 
         log::info!("Flight recording started (db={})", self.settings.db_enabled);
 
@@ -838,6 +856,7 @@ impl FlightRecorder {
     /// lifecycle event they then emit.
     fn take_active_as_pending(&mut self) -> Option<(PendingSession, i64)> {
         let mut flight = self.active_flight.take()?;
+        self.publish_active_path();
         let end_time = Utc::now();
         let duration = flight.start_instant.elapsed().as_secs() as i64;
         let last_timestamp_ms = flight.start_instant.elapsed().as_millis() as i64;

@@ -1270,7 +1270,15 @@ pub fn flightlog_discard_pending_session(
         .map_err(|_| "Pending-session lock poisoned".to_string())?
         .take();
     if let Some(session) = session {
+        let dir = session.temp_path.parent().map(|p| p.to_path_buf());
         crate::flightlog::recorder::discard_pending_session(session);
+        // Discard means "no temp log left": sweep any straggler from an earlier crash as well.
+        if let Some(dir) = dir {
+            let swept = db::sweep_temp_sessions(&dir, &protected_temp_paths(&state));
+            if swept > 0 {
+                log::info!("Discard: swept {} leftover temp session(s)", swept);
+            }
+        }
     }
     Ok(())
 }
@@ -1454,34 +1462,79 @@ pub fn flightlog_scratch_clear(db_path: Option<String>) {
     }
 }
 
-/// Scan `<db_dir>/sessions/*.ktmp` for an orphan session left by a crash/close. Empty temp files
-/// (no telemetry) are deleted in passing; the newest non-empty one is returned for the recovery
-/// prompt. There should be at most one (the single-temp invariant); a straggler is simply offered
-/// on a later launch.
+/// Temp sessions that belong to a live workflow in this process — the one the connected recorder is
+/// writing, the pending (awaiting Save/Discard) one and the continue-on-reconnect one. The orphan
+/// scan and the discard sweeps must never touch these.
+fn protected_temp_paths(state: &crate::state::AppState) -> Vec<std::path::PathBuf> {
+    let mut keep = Vec::new();
+    if let Ok(slot) = state.active_temp_path.lock() {
+        keep.extend(slot.clone());
+    }
+    for handle in [&state.pending_session, &state.resume_pending] {
+        if let Ok(slot) = handle.lock() {
+            keep.extend(slot.as_ref().map(|s| s.temp_path.clone()));
+        }
+    }
+    keep
+}
+
+/// An empty temp session younger than this is not a leftover: a previous instance of the app may
+/// still be shutting down and filling it (Windows keeps the process alive for a few seconds after
+/// the window closes, and a second instance can already be up by then).
+const EMPTY_TEMP_GRACE: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Scan `<db_dir>/sessions/*.ktmp` for an orphan session left by a crash/close. Sessions that are
+/// live in this process (recording / pending / continue-on-reconnect) are skipped; stale empty temp
+/// files (no telemetry) are deleted in passing; the newest non-empty one is returned for the
+/// recovery prompt. The frontend scans again after Save / Continue, and Discard sweeps every
+/// leftover, so a pile of stragglers is settled in one launch instead of resurfacing one per start.
 #[tauri::command]
-pub fn flightlog_scan_orphan_sessions(db_path: Option<String>) -> Result<Option<OrphanInfo>, String> {
+pub fn flightlog_scan_orphan_sessions(
+    db_path: Option<String>,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<Option<OrphanInfo>, String> {
     let dir = sessions_dir(&db_path.unwrap_or_default());
     let entries = match std::fs::read_dir(&dir) {
         Ok(e) => e,
         Err(_) => return Ok(None), // no sessions dir yet → nothing to recover
     };
+    let keep = protected_temp_paths(&state);
+    let mut candidates = 0usize;
     let mut best: Option<OrphanInfo> = None;
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("ktmp") {
+        if path.extension().and_then(|e| e.to_str()) != Some("ktmp") || keep.contains(&path) {
             continue;
         }
+        candidates += 1;
         let conn = match db::open_temp_session(&path) {
             Ok(c) => c,
             Err(e) => {
-                log::warn!("Orphan scan: cannot open {}: {}", path.display(), e);
+                log::warn!("Orphan scan: cannot open {}: {} — left alone", path.display(), e);
                 continue;
             }
         };
-        let count = db::temp_session_row_count(&conn).unwrap_or(0);
+        // A read failure is not "empty": never delete what could not be inspected.
+        let count = match db::temp_session_row_count(&conn) {
+            Ok(c) => c,
+            Err(e) => {
+                log::warn!("Orphan scan: cannot read {}: {} — left alone", path.display(), e);
+                continue;
+            }
+        };
         if count == 0 {
             drop(conn);
-            db::remove_temp_session(&path); // empty → worthless
+            let age = entry.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok());
+            match age {
+                Some(a) if a < EMPTY_TEMP_GRACE => log::info!(
+                    "Orphan scan: {} is empty but only {}s old — left alone (another instance may still be writing it)",
+                    path.display(), a.as_secs(),
+                ),
+                _ => {
+                    log::info!("Orphan scan: removing empty temp session {}", path.display());
+                    db::remove_temp_session(&path);
+                }
+            }
             continue;
         }
         let meta = db::read_session_meta(&conn).ok().flatten();
@@ -1505,13 +1558,34 @@ pub fn flightlog_scan_orphan_sessions(db_path: Option<String>) -> Result<Option<
             _ => Some(info),
         };
     }
+    match &best {
+        Some(b) => log::info!(
+            "Orphan scan: {} candidate(s) in {}, offering {} ({} samples)",
+            candidates, dir.display(), b.temp_path, b.sample_count,
+        ),
+        None => log::debug!("Orphan scan: nothing to recover in {}", dir.display()),
+    }
     Ok(best)
 }
 
-/// Recovery prompt → **Discard**: delete the orphan temp file; nothing reaches the main DB.
+/// Recovery prompt → **Discard**: delete the orphan temp file AND every other leftover in the
+/// sessions dir (live/pending/resume sessions excepted) — "discard" means no temp log remains,
+/// so a pile of stragglers cannot come back one per launch. Nothing reaches the main DB.
 #[tauri::command]
-pub fn flightlog_recover_discard(temp_path: String) -> Result<(), String> {
-    db::remove_temp_session(std::path::Path::new(&temp_path));
+pub fn flightlog_recover_discard(
+    temp_path: String,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<(), String> {
+    let path = std::path::PathBuf::from(&temp_path);
+    db::remove_temp_session(&path);
+    let swept = path
+        .parent()
+        .map(|dir| db::sweep_temp_sessions(dir, &protected_temp_paths(&state)))
+        .unwrap_or(0);
+    log::info!(
+        "Recovery: discarded {} and swept {} further leftover temp session(s)",
+        path.display(), swept,
+    );
     Ok(())
 }
 

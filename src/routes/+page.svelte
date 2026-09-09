@@ -882,7 +882,13 @@
   const saved = get(settings);
   selectedPort = saved.lastPort;
   selectedBaud = saved.lastBaud;
-  selectedProtocol = (saved.lastProtocol === 'mavlink' ? 'mavlink' : 'msp') as ProtocolType;
+  // Honour any protocol we actually support. The old form mapped everything that was not 'mavlink'
+  // onto 'msp', which silently rewrote a stored 'telemetry' choice: a user who last connected in
+  // passive Telemetry mode came back to MSP selected. MSP stays the fallback for an unrecognised or
+  // missing value, so a fresh install is unchanged.
+  selectedProtocol = (saved.lastProtocol === 'mavlink' || saved.lastProtocol === 'telemetry'
+    ? saved.lastProtocol
+    : 'msp') as ProtocolType;
   // Restore the full last-used connection path so nothing has to be re-entered. A serial value is only
   // honoured where serial ports exist (iOS has none — a value synced over from a desktop is ignored);
   // TCP/UDP/BLE are valid everywhere.
@@ -3048,24 +3054,30 @@
     }
   }
 
-  // Startup recovery (ADR-042): if a crash/close left an orphan temp session, prompt for it.
+  // Startup recovery (ADR-042): if a crash/close left an orphan temp session, prompt for it. A pile
+  // of stragglers is settled in this one launch: Discard sweeps them all in the backend, and after
+  // Save / Continue the scan runs again (the handled session is excluded by then) until nothing is
+  // left — no more "one prompt per start" for the same pile. Bounded so a failing action cannot spin.
   async function runStartupRecovery(): Promise<void> {
     // Hi-res caches and the opened-file scratch store left by a crash are worthless (always
     // reproducible) — wipe them in passing.
     void hiresCleanup(flightLogDbPath).catch(() => {});
     void scratchClear(flightLogDbPath).catch(() => {});
     try {
-      const orphan = await scanOrphanSessions(flightLogDbPath);
-      if (!orphan) return;
-      const choice = await recoveryPrompt.show(orphan);
-      if (choice === 'discard') {
-        await recoverDiscard(orphan.temp_path);
-      } else if (choice === 'save') {
-        await recoverSaveIncomplete(orphan.temp_path, flightLogDbPath);
-        void loadLogbook();
-      } else if (choice === 'continue') {
-        await recoverContinue(orphan.temp_path, flightLogDbPath);
-        awaitingResumeReconnect = true; // resolved by the next connection's first poll
+      for (let round = 0; round < 10; round++) {
+        const orphan = await scanOrphanSessions(flightLogDbPath);
+        if (!orphan) return;
+        const choice = await recoveryPrompt.show(orphan);
+        if (choice === 'discard') {
+          await recoverDiscard(orphan.temp_path); // drops every leftover, not just this one
+          return;
+        } else if (choice === 'save') {
+          await recoverSaveIncomplete(orphan.temp_path, flightLogDbPath);
+          void loadLogbook();
+        } else if (choice === 'continue') {
+          await recoverContinue(orphan.temp_path, flightLogDbPath);
+          awaitingResumeReconnect = true; // resolved by the next connection's first poll
+        }
       }
     } catch (e) {
       console.warn('[recovery] startup recovery failed', e);

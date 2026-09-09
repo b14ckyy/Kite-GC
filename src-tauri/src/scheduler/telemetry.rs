@@ -593,16 +593,20 @@ fn decode_misc2(payload: &[u8]) -> TelemetryPayload {
     })
 }
 
-/// MSP_GPSSTATISTICS (166): [lastDt:u32, errors:u32, timeouts:u32, packetCount:u32,
-///                            hdop:u16, eph:u16, epv:u16]
+/// MSP_GPSSTATISTICS (166): [lastMessageDt:u16, errors:u32, timeouts:u32, packetCount:u32,
+///                            hdop:u16, eph:u16, epv:u16, hwVersion:u8]
 /// HDOP is a raw u16, scaled * 100 by INAV (e.g. 100 = HDOP 1.00).
+///
+/// `lastMessageDt` is a **u16**, not a u32 (INAV `src/main/fc/fc_msp.c`, unchanged from 7.0 to
+/// master, which only appends `hwVersion`). Reading it as 32 bits shifted every later field by two
+/// bytes, so `eph` was reported as the HDOP.
 fn decode_gps_statistics(payload: &[u8]) -> TelemetryPayload {
-    let hdop_raw = read_u16(payload, 16); // bytes 16–17
+    let hdop_raw = read_u16(payload, 14); // bytes 14–15
     let hdop = hdop_raw as f64 / 100.0;
-    // eph (18–19) / epv (20–21) ride along in the same message — captured for the recorder.
-    let eph = if payload.len() >= 20 { Some(read_u16(payload, 18) as f64) } else { None };
-    let epv = if payload.len() >= 22 { Some(read_u16(payload, 20) as f64) } else { None };
-    eprintln!("[GPS-STATS] hdop_raw={} hdop={:.2} eph={:?} epv={:?}", hdop_raw, hdop, eph, epv);
+    // eph (16–17) / epv (18–19) ride along in the same message — captured for the recorder.
+    let eph = if payload.len() >= 18 { Some(read_u16(payload, 16) as f64) } else { None };
+    let epv = if payload.len() >= 20 { Some(read_u16(payload, 18) as f64) } else { None };
+    log::debug!("[GPS-STATS] hdop_raw={} hdop={:.2} eph={:?} epv={:?}", hdop_raw, hdop, eph, epv);
     TelemetryPayload::GpsStats(GpsStatsData { hdop, eph, epv })
 }
 

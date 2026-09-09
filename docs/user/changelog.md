@@ -167,6 +167,23 @@ inside the box of the feature release they belong to, so the notes for one relea
       and after any packet loss the video pauses until the next keyframe instead of freezing the
       Pi's hardware decoder. Kernel-side report: raspberrypi/linux#7609. [#112]
 
+??? note "1.0.1 — patch release"
+
+    **Fixed**
+
+    - **HDOP on INAV showed the wrong figure.** The GPS tile read the position-error field instead
+      of HDOP, because the first field of INAV's GPS statistics message is 16 bits and Kite decoded
+      it as 32. The recorder stored the same two values one field out. [#143]
+    - **"Fly Here" opened with an empty radius field** on fixed wing, which reads as "no radius"
+      while the vehicle would in fact use its configured one. The field now shows the aircraft's own
+      loiter radius. Leave it alone and the aircraft keeps using that setting, turn direction
+      included; type a value and yours wins. [#143]
+    - **The radius stepper was clipped** by the edge of the "Fly Here" popup, so its "+" button
+      could not be reached. [#143]
+    - **A saved Telemetry connection came back as MSP.** Restoring the last-used protocol mapped
+      everything that was not MAVLink onto MSP, so the passive Telemetry choice was silently
+      rewritten. [#143]
+
 ??? note "1.0.0 — Initial release · Live"
 
     The first stable release of **Kite Ground Control**: a cross-platform ground station for
@@ -202,3 +219,4 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#130]: https://github.com/b14ckyy/Kite-GC/pull/130
 [#132]: https://github.com/b14ckyy/Kite-GC/pull/132
 [#133]: https://github.com/b14ckyy/Kite-GC/pull/133
+[#143]: https://github.com/b14ckyy/Kite-GC/pull/143
