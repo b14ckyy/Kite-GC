@@ -4956,6 +4956,11 @@
     bottom: calc(8px + var(--safe-bottom, 0px));
     transition: right 0.3s ease;
   }
+  /* In the floating frame (+page's .layer-map.in-frame): no zoom buttons — wheel, touchpad and
+     pinch cover it, and four buttons did not fit a small frame (see Map.svelte). */
+  :global(.layer-map.in-frame) .map-zoom-btn {
+    display: none;
+  }
 
   .map-mode-btn {
     font-size: 13px;

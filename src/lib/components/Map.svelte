@@ -2418,6 +2418,16 @@
     bottom: calc(8px + var(--safe-bottom, 0px));
     transition: right 0.3s ease;
   }
+  /* In the floating frame / widget tile (+page's .layer-map.in-frame): no zoom buttons — wheel,
+     touchpad, pinch and the mini map's one-finger slide cover it, and four buttons did not fit a
+     small frame (the top one stuck out of it, Marc 2026-09-10 on the tablet). The mobile lift
+     above clears the attribution, which the frame hides — back to the plain 8 px there. */
+  :global(.layer-map.in-frame) .map-zoom-btn {
+    display: none;
+  }
+  :global(html.is-mobile) :global(.layer-map.in-frame) .map-controls-corner {
+    bottom: 8px;
+  }
   :global(html.is-mobile) :global(.leaflet-bottom.leaflet-right) {
     right: auto;
     left: 0;
