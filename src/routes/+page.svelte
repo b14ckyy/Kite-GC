@@ -103,7 +103,7 @@
   import { setNativeRightBound } from "$lib/controllers/nativeVideo";
   import { doubleTap, mouseDoubleClick } from "$lib/helpers/doubleTap";
   import { startFloatMove, startFloatResize } from "$lib/helpers/floatWindowGestures";
-  import { initVideo, videoState, videoStream, bindVideoEl, setMapLocation, reportMjpegError, setVideoWidgetActive, floatFrameRect, FLOAT_BEZEL_PX, FLOAT_MARGIN_PX, FLOAT_BTN_PX, FLOAT_BTN_GAP_PX } from "$lib/stores/video";
+  import { initVideo, videoState, videoStream, bindVideoEl, setMapLocation, reportMjpegError, setVideoWidgetActive, floatFrameRect, togglePhoneDockCompact, PHONE_DOCK_COMPACT, FLOAT_BEZEL_PX, FLOAT_MARGIN_PX, FLOAT_BTN_PX, FLOAT_BTN_GAP_PX } from "$lib/stores/video";
   import { canvasSink, mjpegSink } from "$lib/controllers/mjpegSink";
   import { nativeSurface, activeNativeSurfaces } from "$lib/controllers/nativeVideo";
   import { lowPowerActive } from "$lib/stores/lowPower";
@@ -290,13 +290,15 @@
   const logicalH = $derived(winH / uiScale);
   const floatFrame = $derived(floatFrameRect($videoState, logicalW, logicalH));
   // Phone (PHONE_VIDEO.md D2): the DOCKED frame instead — the stream aspect fitted into 40 % of the
-  // map-area height / 50 % of its width, whichever binds; bottom-right of the map area, left of the
-  // corner-control column (8 + 38 + 8), bottom-aligned with the chip row (8 px; the safe inset is
-  // 0 on Android, iPhone has no video). Same numbers drive PhoneVideoDock and the in-frame map.
+  // map-area height / 50 % of its width, whichever binds — or 2/3 of that with the frame's corner
+  // toggle (`phoneDockCompact`); bottom-right of the map area, left of the corner-control column
+  // (8 + 38 + 8), bottom-aligned with the chip row (8 px; the safe inset is 0 on Android, iPhone
+  // has no video). Same numbers drive PhoneVideoDock and the in-frame map.
   const phoneMapW = $derived(winW - phonePanelW + phoneShift);
   const dockH = $derived.by(() => {
     const aspect = $videoState.aspect || 16 / 9;
-    return Math.round(Math.min(0.4 * winH, (0.5 * phoneMapW) / aspect));
+    const scale = $videoState.phoneDockCompact ? PHONE_DOCK_COMPACT : 1;
+    return Math.round(Math.min(0.4 * winH, (0.5 * phoneMapW) / aspect) * scale);
   });
   const dockW = $derived(Math.round(dockH * ($videoState.aspect || 16 / 9)));
   const dockLeft = $derived(phoneMapW - 8 - 38 - 8 - dockW);
@@ -3403,6 +3405,23 @@
       </div>
     </div>
   {/if}
+  <!-- Phone: the docked frame's size toggle, redrawn above the swapped-in map in the frame's
+       top-left corner (PhoneVideoDock draws it in video mode — same corner, same look). -->
+  {#if mapFloating && $videoState.status === 'live' && phoneUi && $videoState.floating}
+    <div class="miniframe-ctl" style={mapFrameStyle}>
+      <button
+        class="mf-corner mf-size"
+        style="top:{4 * uiScale}px; left:{4 * uiScale}px; width:{26 * uiScale}px; height:{26 * uiScale}px; padding:{2 * uiScale}px 0 0 {2 * uiScale}px; border-width:{4 * uiScale}px 0 0 {4 * uiScale}px; border-top-left-radius:{8 * uiScale}px;"
+        onclick={togglePhoneDockCompact}
+        title={$t('video.dockSize')}
+        aria-label={$t('video.dockSize')}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M6 6l12 12M6 6h6M6 6v6M18 18h-6M18 18v-6" />
+        </svg>
+      </button>
+    </div>
+  {/if}
 
   <!-- ======= UI CHROME LAYER — zoomed by --ui-scale ======= -->
   <div class="ui-scale">
@@ -4258,6 +4277,30 @@
     cursor: grabbing;
   }
   .mf-move svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  /* Same look as PhoneVideoDock's .dw-size: the L in the top-left with the diagonal double arrow
+     (box, border and padding inline, scaled). */
+  .mf-size {
+    left: 0;
+    background: transparent;
+    border-style: solid;
+    border-color: rgba(190, 190, 190, 0.4);
+    color: rgba(190, 190, 190, 0.4);
+    cursor: pointer;
+  }
+  .mf-size:hover {
+    border-color: rgba(190, 190, 190, 0.6);
+    color: rgba(190, 190, 190, 0.6);
+  }
+  .mf-size svg {
     display: block;
     width: 100%;
     height: 100%;

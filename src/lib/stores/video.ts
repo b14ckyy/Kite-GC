@@ -158,6 +158,10 @@ export interface VideoState {
    *  nav rail stay clear of the picture (an empty/hidden panel releases its edge). Off =
    *  the video fills the whole map zone as before. Persisted. */
   unobstructedFullscreen: boolean;
+  /** Phone docked window at its compact size (2/3 of the normal 40 %-of-height / 50 %-of-width
+   *  fit) — the corner toggle on the frame flips it, for video and the swapped-in map alike.
+   *  Persisted. */
+  phoneDockCompact: boolean;
   /** The picture is in the DETACHED video window — its own OS window, outside the app (D1/D11).
    *  Mutually exclusive with the in-app floating window: while this is set the floating frame and
    *  its show/park button are gone, because there is nothing in the app to park. Persisted, so a
@@ -206,6 +210,7 @@ interface VideoPrefs {
   floatY: number;
   floatHeightFrac: number;
   unobstructedFullscreen: boolean;
+  phoneDockCompact: boolean;
   undocked: boolean;
   detachBox: DetachBox | null;
 }
@@ -238,6 +243,7 @@ const PREF_DEFAULTS: VideoPrefs = {
   floatY: 80,
   floatHeightFrac: 0.2,
   unobstructedFullscreen: false,
+  phoneDockCompact: false,
   undocked: false,
   detachBox: null,
 };
@@ -311,6 +317,7 @@ function savePrefs(): void {
         floatY: s.floatY,
         floatHeightFrac: s.floatHeightFrac,
         unobstructedFullscreen: s.unobstructedFullscreen,
+        phoneDockCompact: s.phoneDockCompact,
         undocked: s.undocked,
         detachBox: s.detachBox,
       }),
@@ -370,6 +377,7 @@ const INITIAL: VideoState = {
   floatY: boot.floatY,
   floatHeightFrac: boot.floatHeightFrac,
   unobstructedFullscreen: boot.unobstructedFullscreen,
+  phoneDockCompact: boot.phoneDockCompact,
   undocked: boot.undocked,
   detachBox: boot.detachBox,
   mapLocation: 'main',
@@ -1924,6 +1932,19 @@ export function setVideoRotate180(rotate180: boolean): void {
 export function setUnobstructedFullscreen(on: boolean): void {
   patch({ unobstructedFullscreen: on });
   savePrefs();
+}
+
+/** The phone docked window's compact size relative to the normal fit (Marc, 2026-09-10: "2/3"). */
+export const PHONE_DOCK_COMPACT = 2 / 3;
+
+/** Phone docked window: flip between the normal size and the compact one. The swapped-in map
+ *  follows its layer's ResizeObserver; the resize event covers everything else that measures. */
+export function togglePhoneDockCompact(): void {
+  patch({ phoneDockCompact: !get(videoState).phoneDockCompact });
+  savePrefs();
+  if (typeof window !== 'undefined') {
+    setTimeout(() => window.dispatchEvent(new Event('resize')), 60);
+  }
 }
 
 /** Push the current mirror/rotation onto the native decode sink (no-op without one —

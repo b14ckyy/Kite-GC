@@ -656,6 +656,7 @@
     "dockMapHide": "Hide map",
     "resizeWindow": "Resize window",
     "moveWindow": "Move window",
+    "dockSize": "Toggle window size",
     "detach": "Detach video window",
     "detachedClose": "Dock the video back into the app",
     "detachedFullscreen": "Fullscreen",
