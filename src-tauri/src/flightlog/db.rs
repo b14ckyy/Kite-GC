@@ -15,7 +15,7 @@ use super::types::{
     MissionInput, TelemetryRecord, Vehicle, VehicleAggregate, VehicleInput,
 };
 
-const CURRENT_SCHEMA_VERSION: u32 = 18;
+const CURRENT_SCHEMA_VERSION: u32 = 19;
 
 /// Column list (excluding the autoincrement `id`) for `telemetry_records`, shared by the temp-session
 /// copy so the SELECT and INSERT column orders can never drift apart. `flight_id` is first so the
@@ -300,7 +300,7 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
     // stamp-to-CURRENT once produced a "newest version, missing objects" DB; the ensure_* block
     // below still self-heals that legacy case). PRAGMA user_version is transactional in SQLite.
     // None of the steps may contain VACUUM or its own BEGIN/COMMIT.
-    const STEPS: [(u32, fn(&Connection) -> SqlResult<()>); 18] = [
+    const STEPS: [(u32, fn(&Connection) -> SqlResult<()>); 19] = [
         (1, migrate_v0_to_v1),
         (2, migrate_v1_to_v2),
         (3, migrate_v2_to_v3),
@@ -319,6 +319,7 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
         (16, migrate_v15_to_v16),
         (17, migrate_v16_to_v17),
         (18, migrate_v17_to_v18),
+        (19, migrate_v18_to_v19),
     ];
     for (target, step) in STEPS {
         if current < target {
@@ -344,12 +345,13 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
     ensure_v16_schema(conn)?;
     ensure_v17_schema(conn)?;
     ensure_v18_schema(conn)?;
+    ensure_v19_schema(conn)?;
 
     Ok(())
 }
 
 /// Whether `table` has a column named `column` (via PRAGMA table_info).
-fn column_exists(conn: &Connection, table: &str, column: &str) -> SqlResult<bool> {
+pub(crate) fn column_exists(conn: &Connection, table: &str, column: &str) -> SqlResult<bool> {
     // `table` is always a hardcoded literal here, so the format! is injection-safe.
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", table))?;
     let mut rows = stmt.query([])?;
@@ -655,6 +657,24 @@ fn migrate_v17_to_v18(conn: &Connection) -> SqlResult<()> {
     Ok(())
 }
 
+/// v19: the FC hardware id (`fc_uid`) on flights and vehicles — MSP_UID / MAVLink AUTOPILOT_VERSION
+/// uid, informational only (flights keep linking to vehicles by craft name). Additive + idempotent.
+fn ensure_v19_schema(conn: &Connection) -> SqlResult<()> {
+    if !column_exists(conn, "flights", "fc_uid")? {
+        conn.execute_batch("ALTER TABLE flights ADD COLUMN fc_uid TEXT;")?;
+    }
+    if !column_exists(conn, "vehicles", "fc_uid")? {
+        conn.execute_batch("ALTER TABLE vehicles ADD COLUMN fc_uid TEXT;")?;
+    }
+    Ok(())
+}
+
+fn migrate_v18_to_v19(conn: &Connection) -> SqlResult<()> {
+    ensure_v19_schema(conn)?;
+    set_user_version(conn, 19)?;
+    Ok(())
+}
+
 fn migrate_v6_to_v7(conn: &Connection) -> SqlResult<()> {
     conn.execute_batch(
         "ALTER TABLE telemetry_records ADD COLUMN battery_percentage INTEGER;",
@@ -814,10 +834,10 @@ pub fn insert_flight(conn: &Connection, flight: &Flight) -> SqlResult<i64> {
             start_lat, start_lon, location_name,
             weather_temp_c, weather_wind_ms, weather_wind_deg, weather_desc,
             max_alt_m, max_speed_ms, max_distance_m, total_distance_m,
-            battery_used_mah, notes, pilot_name, pilot_id, battery_serial, utc_offset_min
+            battery_used_mah, notes, pilot_name, pilot_id, battery_serial, utc_offset_min, fc_uid
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-            ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27
+            ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28
         )",
         params![
             flight.start_time.to_rfc3339(),
@@ -847,6 +867,7 @@ pub fn insert_flight(conn: &Connection, flight: &Flight) -> SqlResult<i64> {
             flight.pilot_id,
             flight.battery_serial.as_deref().map(normalize_serial_list).filter(|s| !s.is_empty()),
             flight.utc_offset_min,
+            flight.fc_uid,
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -1024,11 +1045,16 @@ pub fn open_temp_session(path: &Path) -> SqlResult<Connection> {
             platform_type INTEGER,
             protocol      TEXT,
             start_lat     REAL,
-            start_lon     REAL
+            start_lon     REAL,
+            fc_uid        TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_session_telemetry
             ON telemetry_records(timestamp_ms);",
     )?;
+    // A `.ktmp` written before v19 (crash recovery of an old session) predates the column.
+    if !column_exists(&conn, "session_meta", "fc_uid")? {
+        conn.execute_batch("ALTER TABLE session_meta ADD COLUMN fc_uid TEXT;")?;
+    }
     Ok(conn)
 }
 
@@ -1042,6 +1068,7 @@ pub fn write_session_meta(
     fc_version: &str,
     board_id: &str,
     platform_type: u8,
+    fc_uid: Option<&str>,
     protocol: &str,
     start_lat: Option<f64>,
     start_lon: Option<f64>,
@@ -1049,8 +1076,8 @@ pub fn write_session_meta(
     conn.execute(
         "INSERT OR REPLACE INTO session_meta
             (id, start_time, craft_name, fc_variant, fc_version, board_id, platform_type,
-             protocol, start_lat, start_lon)
-         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+             protocol, start_lat, start_lon, fc_uid)
+         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             start_time.to_rfc3339(),
             craft_name,
@@ -1061,7 +1088,17 @@ pub fn write_session_meta(
             protocol,
             start_lat,
             start_lon,
+            fc_uid,
         ],
+    )?;
+    Ok(())
+}
+
+/// Live platform-type override while a temp session is open (UAV Info panel dropdown).
+pub fn update_session_meta_platform_type(conn: &Connection, platform_type: u8) -> SqlResult<()> {
+    conn.execute(
+        "UPDATE session_meta SET platform_type = ?1 WHERE id = 1",
+        params![platform_type],
     )?;
     Ok(())
 }
@@ -1077,13 +1114,14 @@ pub struct SessionMetaRow {
     pub protocol: String,
     pub start_lat: Option<f64>,
     pub start_lon: Option<f64>,
+    pub fc_uid: Option<String>,
 }
 
 /// Read the single `session_meta` row of a temp session (None if absent — e.g. a malformed file).
 pub fn read_session_meta(conn: &Connection) -> SqlResult<Option<SessionMetaRow>> {
     conn.query_row(
         "SELECT start_time, craft_name, fc_variant, fc_version, board_id, platform_type, \
-                protocol, start_lat, start_lon FROM session_meta WHERE id = 1",
+                protocol, start_lat, start_lon, fc_uid FROM session_meta WHERE id = 1",
         [],
         |row| {
             Ok(SessionMetaRow {
@@ -1096,6 +1134,7 @@ pub fn read_session_meta(conn: &Connection) -> SqlResult<Option<SessionMetaRow>>
                 protocol: row.get::<_, Option<String>>(6)?.unwrap_or_else(|| "MSP".into()),
                 start_lat: row.get(7)?,
                 start_lon: row.get(8)?,
+                fc_uid: row.get(9)?,
             })
         },
     )
@@ -1238,7 +1277,7 @@ pub fn get_flight(conn: &Connection, flight_id: i64) -> SqlResult<Option<Flight>
                 weather_temp_c, weather_wind_ms, weather_wind_deg, weather_desc,
                 max_alt_m, max_speed_ms, max_distance_m, total_distance_m,
                 battery_used_mah, notes, linked_flight_id, pilot_name, pilot_id, battery_serial,
-                utc_offset_min
+                utc_offset_min, fc_uid
          FROM flights WHERE id = ?1",
     )?;
 
@@ -1285,6 +1324,7 @@ pub fn get_flight(conn: &Connection, flight_id: i64) -> SqlResult<Option<Flight>
             pilot_id: row.get(26)?,
             battery_serial: row.get(27)?,
             utc_offset_min: row.get(28)?,
+            fc_uid: row.get(29)?,
         })
     })?;
 
@@ -1785,7 +1825,7 @@ const VEHICLE_COLS: &str = "id, name, craft_name, vehicle_type, status, image, n
     sensor_airspeed, sensor_rangefinder, sensor_optical_flow, sensor_gps, sensor_rtk, sensor_compass, \
     fc_model, fc_manufacturer, fc_firmware, fc_firmware_version, blackbox_available, \
     base_flight_count, base_total_time_s, base_total_dist_m, base_total_energy, \
-    created_at, updated_at";
+    created_at, updated_at, fc_uid";
 
 fn row_to_vehicle(row: &rusqlite::Row) -> SqlResult<Vehicle> {
     Ok(Vehicle {
@@ -1828,6 +1868,7 @@ fn row_to_vehicle(row: &rusqlite::Row) -> SqlResult<Vehicle> {
         base_total_energy: row.get(36)?,
         created_at: row.get(37)?,
         updated_at: row.get(38)?,
+        fc_uid: row.get(39)?,
     })
 }
 
@@ -1854,10 +1895,10 @@ pub fn create_vehicle(conn: &Connection, v: &VehicleInput) -> SqlResult<i64> {
             motors, props, esc, recommended_cells, recommended_capacity_mah,
             rx, vtx, camera, gimbal_camera, datalink,
             sensor_airspeed, sensor_rangefinder, sensor_optical_flow, sensor_gps, sensor_rtk, sensor_compass,
-            fc_model, fc_manufacturer, fc_firmware, fc_firmware_version, blackbox_available
+            fc_model, fc_manufacturer, fc_firmware, fc_firmware_version, blackbox_available, fc_uid
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-            ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32
+            ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33
         )",
         params![
             v.name, craft, v.vehicle_type, v.status, v.image, v.notes,
@@ -1866,6 +1907,7 @@ pub fn create_vehicle(conn: &Connection, v: &VehicleInput) -> SqlResult<i64> {
             v.rx, v.vtx, v.camera, v.gimbal_camera, v.datalink,
             v.sensor_airspeed, v.sensor_rangefinder, v.sensor_optical_flow, v.sensor_gps, v.sensor_rtk, v.sensor_compass,
             v.fc_model, v.fc_manufacturer, v.fc_firmware, v.fc_firmware_version, v.blackbox_available,
+            v.fc_uid,
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -1883,7 +1925,7 @@ pub fn update_vehicle(conn: &Connection, id: i64, v: &VehicleInput) -> SqlResult
             sensor_airspeed = ?22, sensor_rangefinder = ?23, sensor_optical_flow = ?24,
             sensor_gps = ?25, sensor_rtk = ?26, sensor_compass = ?27,
             fc_model = ?28, fc_manufacturer = ?29, fc_firmware = ?30, fc_firmware_version = ?31,
-            blackbox_available = ?32, updated_at = datetime('now')
+            blackbox_available = ?32, fc_uid = ?34, updated_at = datetime('now')
          WHERE id = ?33",
         params![
             v.name, craft, v.vehicle_type, v.status, v.image, v.notes,
@@ -1892,9 +1934,29 @@ pub fn update_vehicle(conn: &Connection, id: i64, v: &VehicleInput) -> SqlResult
             v.rx, v.vtx, v.camera, v.gimbal_camera, v.datalink,
             v.sensor_airspeed, v.sensor_rangefinder, v.sensor_optical_flow, v.sensor_gps, v.sensor_rtk, v.sensor_compass,
             v.fc_model, v.fc_manufacturer, v.fc_firmware, v.fc_firmware_version, v.blackbox_available, id,
+            v.fc_uid,
         ],
     )?;
     Ok(())
+}
+
+/// Find a vehicle by FC hardware id (the UAV Info panel's "already in the library" check — works for
+/// crafts without a name, e.g. ArduPilot). Exact match on the stored string; newest wins on a tie.
+pub fn find_vehicle_by_fc_uid(conn: &Connection, fc_uid: &str) -> SqlResult<Option<Vehicle>> {
+    let uid = fc_uid.trim();
+    if uid.is_empty() {
+        return Ok(None);
+    }
+    conn.query_row(
+        &format!(
+            "SELECT {} FROM vehicles WHERE TRIM(fc_uid) = ?1 COLLATE NOCASE \
+             ORDER BY created_at DESC LIMIT 1",
+            VEHICLE_COLS
+        ),
+        params![uid],
+        row_to_vehicle,
+    )
+    .optional()
 }
 
 /// List all vehicles (newest first).
@@ -2271,6 +2333,7 @@ pub fn find_duplicate_flight(
                     pilot_id: None,
                     battery_serial: None,
                     utc_offset_min: None,
+                    fc_uid: None,
                 })
             },
         )
@@ -2805,6 +2868,7 @@ mod tests {
             fc_version: "7.1.2".into(),
             board_id: "MATF".into(),
             platform_type: 0,
+            fc_uid: None,
             protocol: "MSP".into(),
             start_lat: Some(48.1234),
             start_lon: Some(11.5678),
@@ -2845,6 +2909,7 @@ mod tests {
             fc_version: "7.1.2".into(),
             board_id: "MATF".into(),
             platform_type: 0,
+            fc_uid: None,
             protocol: "MSP".into(),
             start_lat: None,
             start_lon: None,
@@ -2940,6 +3005,7 @@ mod tests {
             fc_version: "7.0.0".into(),
             board_id: "TEST".into(),
             platform_type: 0,
+            fc_uid: None,
             protocol: "MSP".into(),
             start_lat: None,
             start_lon: None,
@@ -3033,6 +3099,7 @@ mod tests {
             fc_version: "9.0.0".into(),
             board_id: "TEST".into(),
             platform_type: 0,
+            fc_uid: None,
             protocol: "BLACKBOX".into(),
             start_lat: None,
             start_lon: None,

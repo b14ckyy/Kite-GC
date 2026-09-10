@@ -60,6 +60,12 @@ export interface FcInfo {
   /** MAVLink HEARTBEAT MAV_TYPE (ArduPilot/PX4 only; 0 for MSP). The only reliable QuadPlane signal
    *  (a QuadPlane reports fc_variant "ArduPlane" but a VTOL_* MAV_TYPE). */
   mav_type: number;
+  /** FC hardware id (INAV MSP_UID / MAVLink AUTOPILOT_VERSION uid), null for passive telemetry.
+   *  Informational — reconnect identity for the session's platform-type override. */
+  fc_uid: string | null;
+  /** Blackbox / dataflash logging enabled on the FC (INAV from the handshake; ArduPilot / PX4 once the
+   *  LOG_BACKEND_TYPE / SDLOG_MODE reply arrives via `telemetry-vehicle`). null = unknown. */
+  blackbox: boolean | null;
 }
 
 export interface PortInfo {
@@ -94,6 +100,10 @@ export const connection = writable<ConnectionInfo>({
   errorMessage: '',
   fcInfo: null,
 });
+
+/** Platform type the handshake detected for the current link — `fcInfo.platform_type` diverges from it
+ *  once the user overrides the type in the UAV Info panel (the panel shows the detected one as a hint). */
+export const detectedPlatformType = writable<number>(0);
 
 /// Active protocol for the connection status box: the primary protocol name (MSP / MAVLink / SmartPort /
 /// CRSF / LTM) and an optional secondary tunneled inside it (e.g. ArduPilot passthrough → "MAVLink").

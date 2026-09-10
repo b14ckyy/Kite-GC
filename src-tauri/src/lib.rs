@@ -38,7 +38,7 @@ mod transport;
 mod user_file;
 mod video;
 
-use commands::connection::{connect, disconnect, inav_set_craft_name, inav_read_stats, scan_ble_devices, ble_scan_start, ble_scan_stop};
+use commands::connection::{connect, disconnect, set_platform_type, inav_set_craft_name, inav_read_stats, scan_ble_devices, ble_scan_start, ble_scan_stop};
 use commands::connection::list_serial_ports;
 use commands::flightlog::{
     flightlog_list, flightlog_get, flightlog_get_track, flightlog_get_battery_records, flightlog_delete,
@@ -67,7 +67,7 @@ use commands::flightlog::{
     battery_db_flights, flight_set_battery_serial, battery_db_set_baseline,
     battery_file_write, battery_file_read,
     vehicle_db_create, vehicle_db_update, vehicle_db_list, vehicle_db_get,
-    vehicle_db_find_by_craft_name, vehicle_db_delete, vehicle_db_aggregate, vehicle_db_flights,
+    vehicle_db_find_by_craft_name, vehicle_db_find_by_fc_uid, vehicle_db_delete, vehicle_db_aggregate, vehicle_db_flights,
     vehicle_db_set_baseline, vehicle_file_write, vehicle_file_read,
 };
 use commands::aero::{aero_fetch, aero_cache_stats, aero_cache_clear};
@@ -608,6 +608,7 @@ pub fn run() {
             inav_read_stats,
             connect,
             disconnect,
+            set_platform_type,
             get_app_version,
             is_debug_mode,
             link_status::telemetry_track_since,
@@ -694,6 +695,7 @@ pub fn run() {
             vehicle_db_list,
             vehicle_db_get,
             vehicle_db_find_by_craft_name,
+            vehicle_db_find_by_fc_uid,
             vehicle_db_delete,
             vehicle_db_aggregate,
             vehicle_db_flights,

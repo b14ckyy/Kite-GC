@@ -6,13 +6,17 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { get } from 'svelte/store';
 import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from '$lib/stores/connection';
 import type { InavStats } from '$lib/stores/flightlogTypes';
-import { connection, connectionProtocol, fcLinkAlive, availablePorts, bleDevices } from '$lib/stores/connection';
+import { connection, connectionProtocol, fcLinkAlive, availablePorts, bleDevices, detectedPlatformType } from '$lib/stores/connection';
 import { startTelemetryListeners, stopTelemetryListeners, resetTelemetry } from '$lib/stores/telemetry';
 import { applyRelaysOnConnect, clearRelaysOnDisconnect } from '$lib/controllers/relayController';
 import { loadSafehomeConfig, clearSafehome } from '$lib/stores/safehome';
 import { loadGeozoneConfig, clearGeozones } from '$lib/stores/geozone';
 import { loadFenceConfig, clearFence } from '$lib/stores/fence';
 import { loadRallyConfig, clearRally } from '$lib/stores/rally';
+
+/** Session-only memory of the platform-type override, keyed by the FC hardware id (MSP / MAVLink).
+ *  RAM only by design: a Kite restart forgets it; passive telemetry has no id and never lands here. */
+const platformOverrides = new Map<string, number>();
 
 /**
  * Refresh the list of serial ports via Tauri and return the port that should be selected.
@@ -169,6 +173,17 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
     flightLogRaw: params.flightLogRaw,
     flightLogRawAlways: params.flightLogRawAlways,
   });
+  // Re-apply the override chosen earlier this session for the same FC (see `platformOverrides`).
+  detectedPlatformType.set(info.platform_type);
+  const remembered = info.fc_uid ? platformOverrides.get(info.fc_uid) : undefined;
+  if (remembered !== undefined && remembered !== info.platform_type) {
+    try {
+      await invoke('set_platform_type', { platformType: remembered });
+      info.platform_type = remembered;
+    } catch (e) {
+      console.warn('[connect] restoring the platform-type override failed', e);
+    }
+  }
   connection.set({
     status: "connected",
     protocolType: params.protocolType,
@@ -233,6 +248,16 @@ export async function disconnectFC(baudRate: number): Promise<void> {
  *  other links. Used post-flight to push a newly chosen craft name so future flights auto-link. */
 export async function setInavCraftName(name: string): Promise<void> {
   await invoke("inav_set_craft_name", { name });
+}
+
+/** Live platform-type override (UAV Info panel dropdown). Applied to the backend (FC info + the flight
+ *  recorder, so the flights of this link are stored with the chosen type), mirrored into the store, and
+ *  remembered per FC hardware id for a reconnect within this session. Never persisted. */
+export async function setLivePlatformType(platformType: number): Promise<void> {
+  await invoke('set_platform_type', { platformType });
+  connection.update((c) => (c.fcInfo ? { ...c, fcInfo: { ...c.fcInfo, platform_type: platformType } } : c));
+  const uid = get(connection).fcInfo?.fc_uid;
+  if (uid) platformOverrides.set(uid, platformType);
 }
 
 /** Read the INAV lifetime flight statistics from the FC `stats` settings (INAV/MSP only). */

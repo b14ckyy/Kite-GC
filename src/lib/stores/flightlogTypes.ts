@@ -157,6 +157,8 @@ export interface Vehicle {
   fc_firmware: string | null;
   fc_firmware_version: string | null;
   blackbox_available: boolean;
+  /** FC hardware id (prefilled from the connected FC; editable; informational). */
+  fc_uid: string | null;
   // Persistent lifetime baseline (adopted on request from the INAV FC `stats` feature).
   base_flight_count: number;
   base_total_time_s: number;
@@ -256,6 +258,8 @@ export interface Flight {
   battery_serial: string | null;
   /** Local UTC offset (minutes, east-positive) at the flight location; null → display in UTC (ADR-048). */
   utc_offset_min: number | null;
+  /** FC hardware id that flew (MSP_UID / MAVLink uid); informational, never a link key. */
+  fc_uid: string | null;
 }
 
 export interface TelemetryRecord {

@@ -220,7 +220,8 @@ fn create_export_db(path: &Path) -> Result<Connection, String> {
             pilot_name      TEXT,
             pilot_id        TEXT,
             battery_serial  TEXT,
-            utc_offset_min  INTEGER
+            utc_offset_min  INTEGER,
+            fc_uid          TEXT
         );
 
         CREATE TABLE IF NOT EXISTS telemetry_records (
@@ -509,6 +510,10 @@ pub fn import_flights(
 
     if !has_flights {
         return Err("Not a valid .kflight file: missing flights table".into());
+    }
+    // A `.kflight` exported before v19 lacks `fc_uid`; add it so the shared row reader applies.
+    if !db::column_exists(&src, "flights", "fc_uid").unwrap_or(true) {
+        let _ = src.execute_batch("ALTER TABLE flights ADD COLUMN fc_uid TEXT;");
     }
 
     // List all flights in the source file

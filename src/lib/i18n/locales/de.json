@@ -771,6 +771,10 @@
     "warnClimbForced": "Steigwinkel-Limit hebt einige Wegpunkte über die Ziel-Clearance",
     "warnUnresolvable": "Ein Leg zwischen festen Wegpunkten bleibt unter Clearance"
   },
+  "fcUid": {
+    "copy": "Vollständige FC-ID kopieren",
+    "copied": "Kopiert"
+  },
   "uavInfo": {
     "flightController": "Flugsteuerung",
     "craftName": "Modellname",
@@ -788,7 +792,14 @@
     "mspRc": "MSP-RC",
     "auxRc": "AUX-RC",
     "adsb": "ADS-B",
-    "notConnected": "Nicht verbunden"
+    "notConnected": "Nicht verbunden",
+    "uid": "FC-ID",
+    "typeHint": "Überschreibt den erkannten Typ für diese Sitzung — Kartenmodell und aufgezeichnete Flüge folgen ihm",
+    "typeDetected": "erkannt: {type}",
+    "saveToLibrary": "In Fahrzeugbibliothek speichern",
+    "viewInLibrary": "In Fahrzeugbibliothek anzeigen",
+    "savedToLibrary": "Gespeichert — in Fahrzeugbibliothek anzeigen",
+    "saveFailed": "Speichern fehlgeschlagen: {error}"
   },
   "settings": {
     "map": "Karte",
@@ -950,6 +961,7 @@
     "craft": "Fluggerät",
     "type": "Typ",
     "editType": "Plattformtyp bearbeiten",
+    "fcUid": "FC-ID",
     "firmware": "Firmware",
     "protocol": "Protokoll",
     "notAvailable": "N/A",
@@ -1418,6 +1430,7 @@
     "fcManufacturer": "Hersteller",
     "fcFirmware": "Firmware",
     "fcFirmwareVersion": "Firmware-Version",
+    "fcUid": "FC-Hardware-ID",
     "blackbox": "Blackbox / Dataflash",
     "yes": "Ja",
     "no": "Nein",
