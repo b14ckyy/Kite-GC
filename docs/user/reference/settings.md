@@ -62,6 +62,12 @@ Altitude and Compass sit in the bottom dock and Home, RC Link and GPS in the rig
 | **Cesium Ion Token** | Your free Cesium Ion token, which enables real-world 3D terrain. See **[3D map](../guides/map-3d.md)**. | (none) |
 | **Airspace Manager** | Enable the aeronautical overlay, pick the **provider** (OpenAIP) and enter its **API key**. See **[Airspace Manager](../guides/airspace.md)**. | On, no provider set |
 
+### Connection
+
+| Setting | What it does | Default |
+|---|---|---|
+| **Default Protocol** | Which protocol the connection bar starts on. **Last used** restores whatever you connected with last time, which is what Kite has always done. Pin it to **MSP**, **MAVLink** or **Telemetry** and that choice wins on every launch, whatever the last session used. Kite still remembers the last-used protocol, so switching back to **Last used** picks up where you left off. | Last used |
+
 ### Telemetry
 
 Kite polls the link at just **two** configurable rates — **Attitude** and **GPS / Position**. Everything

@@ -8,7 +8,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { open, save } from "@tauri-apps/plugin-dialog";
-  import { connection, availablePorts, bleDevices } from "$lib/stores/connection";
+  import { connection, availablePorts, bleDevices, defaultNetPort } from "$lib/stores/connection";
   import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
   import { isAndroid, isMobile, isTablet, isPhone as isPhoneDevice, hasSerialPorts, logPlayerWidth } from "$lib/platform";
@@ -414,12 +414,20 @@
   let appVersion = $state("...");
   // iOS has no serial/BLE, so the iPad build defaults to Wi-Fi MAVLink (UDP 14550, the MAVLink
   // convention). Desktop keeps its serial/MSP defaults.
-  let selectedTransport = $state<TransportType>(isMobile ? 'udp' : 'serial');
+  const INITIAL_TRANSPORT: TransportType = isMobile ? 'udp' : 'serial';
+  let selectedTransport = $state<TransportType>(INITIAL_TRANSPORT);
   let selectedProtocol = $state<ProtocolType>(isMobile ? 'mavlink' : 'msp');
   let selectedPort = $state("");
   let selectedBaud = $state(115200);
   let tcpHost = $state("192.168.1.1");
-  let tcpPort = $state(isMobile ? 14550 : 5761);
+  /** Port a fresh profile starts on: the MAVLink GCS convention on mobile (Wi-Fi links only),
+   *  INAV SITL's MSP port on the desktop. */
+  const INITIAL_NET_PORT = isMobile ? 14550 : 5761;
+  let tcpPort = $state(INITIAL_NET_PORT);
+  /** Is the port still one Kite filled in (so the protocol / transport selectors may move it), or one
+   *  the pilot typed? Owned here rather than in ConnectionControls so the toolbar and the phone
+   *  popout cannot end up with two different answers. Set from the restored connection below. */
+  let portIsAuto = $state(true);
   let selectedBleDevice = $state("");
   let bleDeviceList = $state<BleDeviceInfo[]>([]);
   let isBleScanning = $state(false);
@@ -878,26 +886,45 @@
   // One geolocation check at app start (refreshes the persisted user location for Night-Mode auto).
   ensureUserLocation();
 
+  /** Protocol the connection bar starts on. Settings → Connection owns the choice: "Last used"
+   *  (the default, and the behaviour Kite has always had) restores the stored protocol, while a
+   *  fixed value wins over that store on every launch. Only a protocol we actually support is
+   *  honoured, with MSP as the fallback: the old form mapped everything that was not MAVLink onto
+   *  MSP, which silently rewrote a stored `telemetry` choice, so a pilot who last connected in
+   *  passive Telemetry mode came back to MSP selected. */
+  function resolveStartupProtocol(s: AppSettings): ProtocolType {
+    const wanted = s.defaultProtocol === 'last' ? s.lastProtocol : s.defaultProtocol;
+    return wanted === 'mavlink' || wanted === 'telemetry' ? wanted : 'msp';
+  }
+
   // Restore persisted settings
   const saved = get(settings);
   selectedPort = saved.lastPort;
   selectedBaud = saved.lastBaud;
-  // Honour any protocol we actually support. The old form mapped everything that was not 'mavlink'
-  // onto 'msp', which silently rewrote a stored 'telemetry' choice: a user who last connected in
-  // passive Telemetry mode came back to MSP selected. MSP stays the fallback for an unrecognised or
-  // missing value, so a fresh install is unchanged.
-  selectedProtocol = (saved.lastProtocol === 'mavlink' || saved.lastProtocol === 'telemetry'
-    ? saved.lastProtocol
-    : 'msp') as ProtocolType;
+  const startupProtocol = resolveStartupProtocol(saved);
+  selectedProtocol = startupProtocol;
   // Restore the full last-used connection path so nothing has to be re-entered. A serial value is only
   // honoured where serial ports exist (iOS has none — a value synced over from a desktop is ignored);
   // TCP/UDP/BLE are valid everywhere.
-  if (saved.lastTransport === 'tcp' || saved.lastTransport === 'udp' || saved.lastTransport === 'ble'
-      || (hasSerialPorts && saved.lastTransport === 'serial')) {
-    selectedTransport = saved.lastTransport;
-  }
+  const startupTransport = saved.lastTransport === 'tcp' || saved.lastTransport === 'udp'
+    || saved.lastTransport === 'ble' || (hasSerialPorts && saved.lastTransport === 'serial')
+    ? saved.lastTransport : INITIAL_TRANSPORT;
+  selectedTransport = startupTransport;
   if (saved.lastHost) tcpHost = saved.lastHost;
-  if (saved.lastTcpPort) tcpPort = saved.lastTcpPort;
+  const storedPort = saved.lastTcpPort || INITIAL_NET_PORT;
+  // Whether the port is Kite's or the pilot's is stored alongside it. A profile written before that
+  // field existed has to be guessed at once, from the stored port against the stored protocol and
+  // transport: equal to the standard port (or a transport that has no port at all) means Kite's.
+  const storedPortDefault = defaultNetPort(saved.lastProtocol, saved.lastTransport);
+  const startupPortIsAuto = saved.lastPortIsAuto
+    ?? (storedPortDefault === undefined || storedPort === storedPortDefault);
+  portIsAuto = startupPortIsAuto;
+  // A Default Protocol that overrides the stored choice has to move the port with it, otherwise
+  // pinning MAVLink after an MSP/TCP session comes up as MAVLink on 5761, which reaches nothing until
+  // the pilot nudges a selector. A port the pilot typed is restored exactly as it was.
+  tcpPort = startupPortIsAuto
+    ? defaultNetPort(startupProtocol, startupTransport) ?? storedPort
+    : storedPort;
   if (saved.lastBleDevice) selectedBleDevice = saved.lastBleDevice;
   navPanelOpen = saved.navPanelOpen;
   // Drop any legacy "-v2" suffix from a persisted tab (the migration scaffolding is gone now).
@@ -2577,7 +2604,7 @@
     isConnecting = true;
     errorMsg = "";
     connection.update((c) => ({ ...c, status: "connecting" }));
-    settings.patch({ lastPort: selectedPort, lastBaud: selectedBaud, lastProtocol: selectedProtocol, lastTransport: selectedTransport, lastHost: tcpHost, lastTcpPort: tcpPort, lastBleDevice: selectedBleDevice, flightLoggingEnabled, flightRecordingEnabled, flightLogDbPath, flightLogRawPath, flightLogRawEnabled, flightLogRawAlways });
+    settings.patch({ lastPort: selectedPort, lastBaud: selectedBaud, lastProtocol: selectedProtocol, lastTransport: selectedTransport, lastHost: tcpHost, lastTcpPort: tcpPort, lastPortIsAuto: portIsAuto, lastBleDevice: selectedBleDevice, flightLoggingEnabled, flightRecordingEnabled, flightLogDbPath, flightLogRawPath, flightLogRawEnabled, flightLogRawAlways });
 
     try {
       await connectFC({
@@ -3426,6 +3453,7 @@
       bind:selectedBaud
       bind:tcpHost
       bind:tcpPort
+      bind:portIsAuto
       bind:selectedBleDevice
       {baudRates}
       onConnect={handleConnect}
@@ -3472,6 +3500,7 @@
     bind:selectedBaud
     bind:tcpHost
     bind:tcpPort
+    bind:portIsAuto
     bind:selectedBleDevice
     {baudRates}
     onConnect={handleConnect}
@@ -3742,6 +3771,7 @@
             {gcsMode}
             userLocation={$userGeoLocation}
             onGeoCheck={requestUserLocation}
+            defaultProtocol={$settings.defaultProtocol}
             {attitudeRateHz}
             {positionRateHz}
             {airspeedEnabled}

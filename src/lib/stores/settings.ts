@@ -286,6 +286,12 @@ export const DEFAULT_TELEMETRY_API: TelemetryApiSettings = {
   rateHz: 5,
 };
 
+// ── Connection ─────────────────────────────────────────────────────────────────────────────────────
+/** Which protocol the connection bar starts on. `last` restores the last-used one, which is the
+ *  historic behaviour and stays the default; a fixed value overrides that stored choice on every
+ *  launch, for a pilot who always flies the same link and does not want a stray session to decide. */
+export type DefaultProtocol = 'last' | 'msp' | 'mavlink' | 'telemetry';
+
 // ── Update check (GitHub releases — see controllers/updateCheck.ts) ─────────────────────────────────
 /** Update-check channel: off, stable releases only, or include pre-releases. Default `release`. */
 export type UpdateCheckMode = 'disabled' | 'release' | 'prerelease';
@@ -313,10 +319,16 @@ export interface AppSettings {
   lastPort: string;
   lastBaud: number;
   lastProtocol: string;
+  /** Startup protocol preference (Settings → Connection). `last` = restore `lastProtocol`. */
+  defaultProtocol: DefaultProtocol;
   // Full last-used connection path (restored on startup so nothing has to be re-entered)
   lastTransport: string;
   lastHost: string;
   lastTcpPort: number;
+  /** Was `lastTcpPort` filled in by Kite (so the protocol / transport selectors may move it), or
+   *  typed by the pilot? Optional on purpose: absent means a profile written before this existed,
+   *  and startup infers it from the stored port instead of assuming. */
+  lastPortIsAuto?: boolean;
   lastBleDevice: string;
   /** User-assigned names for Bluetooth SPP COM ports, keyed by COM path (e.g. "COM7" → "Goggles").
    *  Only outgoing BT SPP ports are renameable; physical ports keep their device descriptors. */
@@ -421,6 +433,7 @@ const defaults: AppSettings = {
   lastPort: '',
   lastBaud: 115200,
   lastProtocol: 'msp',
+  defaultProtocol: 'last',
   lastTransport: 'serial',
   lastHost: '192.168.1.1',
   lastTcpPort: 5761,
