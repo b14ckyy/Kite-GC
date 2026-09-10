@@ -1013,13 +1013,7 @@
     });
     void invoke('log_session_settings', { summary }).catch(() => {});
   }
-  // Pinned to 1 on the phone: its chrome — nav rail height, widget column, map clip, the docked
-  // video frame — is laid out in viewport px on the assumption that logical = real px (the rail's
-  // phone max-height is a plain 100vh, so any scale > 1 clips it at the bottom). A scale saved from
-  // a tablet session survives the flip to the phone layout (the same device can show either, see
-  // `isAx12` in platform.ts) and is the prime suspect for the clipped rail + widget column seen on
-  // an AX12 (2026-09-08, unverified). The setting is hidden there too (SettingsPanel).
-  uiScale = phoneUi ? 1 : (saved.uiScale ?? 1);
+  uiScale = saved.uiScale ?? 1;
   interfaceSettings = saved.interface ?? {
     speedUnit: 'kmh',
     altitudeUnit: 'm',
