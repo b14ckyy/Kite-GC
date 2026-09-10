@@ -36,7 +36,7 @@
   import { MAP_PROVIDERS, getProviderById, type MapProvider } from "$lib/config/mapProviders";
   import { cachedTileLayer } from "$lib/cache/CachedTileLayer";
   import { initTileCache } from "$lib/cache/tileCache";
-  import { isWebKitGtk } from "$lib/platform";
+  import { isWebKitGtk, isAndroid } from "$lib/platform";
   import { homePosition, homeMarkerShown } from "$lib/stores/home";
   import { editMode, geoWaypoints, launchPoint, replayActive, toDeg } from "$lib/stores/mission";
   import { autopilotSystem } from "$lib/stores/autopilotContext";
@@ -2231,7 +2231,7 @@
 </script>
 
 <div class="map-wrapper" style="--map-inset-right: {centerInsetRight}px">
-  <div bind:this={mapContainer} class="map" class:tile-overlap={isWebKitGtk} class:mini={miniControls} style="--map-rotation: 0deg"></div>
+  <div bind:this={mapContainer} class="map" class:tile-overlap={isWebKitGtk} class:tile-snap={isAndroid} class:mini={miniControls} style="--map-rotation: 0deg"></div>
 
   <div class="map-controls-corner">
     {#if !miniControls}
@@ -2338,6 +2338,23 @@
   :global(.map.tile-overlap img.leaflet-tile) {
     width: 256.5px !important;
     height: 256.5px !important;
+  }
+
+  /* Android (Chromium WebView): every tile is its own composited layer and cc snaps each layer's
+     origin to whole device pixels. At a fractional device pixel ratio (1.67 on a 1280×720 / 267 dpi
+     screen: a 256px tile is 427.26 device px) the shared edge of two tiles therefore rounds UP at one
+     boundary — a 1px gap, dark hairline — and DOWN at the next — a 1px overlap. Leaflet's own remedy
+     for Chromium, `mix-blend-mode: plus-lighter` on every tile, turns that overlap into a BRIGHT
+     hairline (the sum of both tiles), which is also why the WebKitGTK half-pixel stretch above made
+     the phone worse. Fix: a full-pixel stretch so neighbours always overlap, drawn with normal
+     blending so the overlap is simply the upper tile. Covers the over-zoom placeholder tiles (div)
+     too. Reproduced + verified on the API 28 emulator at 1280×720 / 267 dpi (2026-09-10); the Sony
+     at DPR 2.625 only showed it while the map moved. Windows (WebView2) at 125 % scaling is the same
+     engine and untested. */
+  :global(.map.tile-snap .leaflet-tile) {
+    mix-blend-mode: normal;
+    width: 257px !important;
+    height: 257px !important;
   }
 
   /* Heading-up: container size set via inline styles (JS),
