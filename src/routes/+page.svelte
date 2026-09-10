@@ -1305,7 +1305,7 @@
       logLevel = patch.logLevel;
       void invoke('set_log_level', { level: patch.logLevel }).catch(() => {});
     }
-    if (patch.uiScale != null && !phoneUi) uiScale = patch.uiScale;
+    if (patch.uiScale != null) uiScale = patch.uiScale;
     if (patch.interface != null) {
       interfaceSettings = { ...interfaceSettings, ...patch.interface };
       if (selectedFlight) {
