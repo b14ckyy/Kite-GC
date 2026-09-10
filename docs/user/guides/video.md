@@ -123,9 +123,11 @@ The same feed can appear in several places at once (they all share one stream):
   window's size). Drag it away from the corner to un-snap and free-float. The **top-right corner grip
   resizes** it (aspect-locked, touch-friendly).
   **On a phone** there is a **docked window** instead: fixed to the bottom-right of the map, sized to
-  the stream (at most 40 % of the map height or half its width), no dragging or resizing. A **camera
-  button** above the map buttons slides it off-screen to the right and back — it appears once a source
-  runs and hides while the Video widget is active.
+  the stream (at most 40 % of the map height or half its width), no dragging. The **corner marker in
+  its top-left** toggles between that size and a compact one (two thirds), for the video and the
+  swapped-in map alike; the choice is remembered. A **camera button** above the map buttons slides the
+  window off-screen to the right and back — it appears once a source runs and hides while the Video
+  widget is active.
 - **In a detached window** — the floating window taken **out of the app** into its own window, which
   you can put anywhere: beside Kite, or on a second monitor that then becomes your video screen. It
   **stays on top of other applications** and looks exactly like the frame inside the app.
