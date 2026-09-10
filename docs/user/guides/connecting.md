@@ -93,14 +93,24 @@ forwarding to your PC.
    bridge's LAN address).
 3. **Port** — the network port.
 
-Kite fills in the usual MAVLink defaults and swaps them when you flip between TCP and UDP:
+Kite fills in the usual default and swaps it when you change either the protocol or the transport:
 
-| Transport | Default port | Typical use |
-|---|---|---|
-| **TCP** | `5761` | Local MAVLink endpoint |
-| **UDP** | `14550` | The standard MAVLink GCS port |
+| Protocol | Transport | Default port | Typical use |
+|---|---|---|---|
+| **MAVLink** | **UDP** | `14550` | The standard MAVLink GCS port |
+| **MAVLink** | **TCP** | `5760` | ArduPilot SITL's MAVLink port |
+| **MSP** | **TCP** | `5761` | INAV SITL's MSP port |
+| **MSP** | **UDP** | `14550` | No standard MSP port exists, so this is only a starting point |
 
-A custom port you've typed (for example **SITL on `5762`**) is left untouched when you switch transport.
+**Telemetry** is passive and has no port of its own, so choosing it leaves the port alone.
+
+A custom port you've typed (for example a second **SITL on `5762`**) is left untouched by both
+selectors, and stays yours across restarts: Kite remembers that you typed it rather than going by the
+number. Type the standard port for the current selection and it goes back to following the
+selectors, so there is always a way back.
+
+If **Settings → Connection → Default Protocol** is pinned, the port follows it at startup, the same
+way it follows the selectors.
 
 !!! note "Protocol still applies"
     Choose the matching **protocol** for a network link too — **MAVLink** for an ArduPilot/PX4
@@ -195,6 +205,10 @@ the app holds — see **[Raw telemetry](telemetry-and-display.md#raw-telemetry)*
 
 Kite remembers your last **protocol, transport, port/host, baud, and BLE device**, so reconnecting is
 usually a single click on **Connect**. To drop the link, click **Disconnect**.
+
+If you always fly the same link and would rather not have a stray session decide, set
+**Settings → Connection → Default Protocol** to that protocol: it then wins on every launch. Leave it
+on **Last used** for the behaviour described above.
 
 ## Trouble connecting?
 

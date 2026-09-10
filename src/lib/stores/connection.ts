@@ -12,6 +12,23 @@ export type TransportType = 'serial' | 'tcp' | 'udp' | 'ble';
 
 export type ProtocolType = 'msp' | 'mavlink' | 'telemetry';
 
+/** Standard network port per protocol + transport, the way the baud rate has a standard per protocol.
+ *  MAVLink is UDP 14550 by GCS convention or TCP 5760 (ArduPilot SITL); MSP over TCP is INAV SITL's
+ *  5761. There is no standard MSP UDP port, so that entry is only a starting point. `telemetry` is
+ *  passive and has no port of its own, which is why it is absent: `defaultNetPort` then returns
+ *  undefined and callers leave the port alone. */
+const NET_PORT_DEFAULTS: Record<string, number> = {
+  'mavlink:udp': 14550,
+  'mavlink:tcp': 5760,
+  'msp:udp': 14550,
+  'msp:tcp': 5761,
+};
+
+/** The port Kite would fill in for this selection, or undefined if it has no standard one. */
+export function defaultNetPort(protocol: string, transport: string): number | undefined {
+  return NET_PORT_DEFAULTS[`${protocol}:${transport}`];
+}
+
 export interface InavVersion {
   major: number;
   minor: number;

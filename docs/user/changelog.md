@@ -138,6 +138,9 @@ inside the box of the feature release they belong to, so the notes for one relea
       Video panel replaces its preview with a status block (state, resolution, fps, codec, bitrate). [#127]
     - **Long-press widget editing on the desktop** — hold a widget (mouse or touch) to enter edit
       mode and drag it right away; the ✎ button is gone. Click outside the docks or Escape to leave. [#127]
+    - **Default protocol** in Settings → Connection. It stays on **Last used**, which is what Kite
+      has always done, and can be pinned to MSP, MAVLink or Telemetry instead, so the app opens on
+      the link you actually fly no matter what the last session happened to use. [#151]
 
     **Removed**
 
@@ -166,6 +169,9 @@ inside the box of the feature release they belong to, so the notes for one relea
       and hidden under the interface. Start-up no longer drops the frames right after the keyframe,
       and after any packet loss the video pauses until the next keyframe instead of freezing the
       Pi's hardware decoder. Kernel-side report: raspberrypi/linux#7609. [#112]
+    - **The network port follows the protocol**, not just the transport. MAVLink offers UDP 14550 or
+      TCP 5760 and MSP offers TCP 5761, instead of the MSP port showing up for a MAVLink connection.
+      A port you typed yourself is never touched. [#151]
 
 ??? note "1.0.1 — patch release"
 
@@ -220,3 +226,4 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#132]: https://github.com/b14ckyy/Kite-GC/pull/132
 [#133]: https://github.com/b14ckyy/Kite-GC/pull/133
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143
+[#151]: https://github.com/b14ckyy/Kite-GC/pull/151

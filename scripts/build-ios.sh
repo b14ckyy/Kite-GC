@@ -57,16 +57,16 @@ rustup target add aarch64-apple-ios
 echo "[2/4] Installing npm dependencies..."
 npm install
 
-if [ ! -d "gen/apple" ] || [ "${FORCE_INIT:-0}" = "1" ]; then
-    echo "[3/4] Generating the Xcode project (tauri ios init)..."
-    npm run tauri ios init
-else
-    echo "[3/4] gen/apple already present — skipping init (FORCE_INIT=1 to redo)."
-fi
+# Xcode-project plumbing (project generation + the libapp.a bundle fix) is shared with
+# scripts/run-ipad.sh.
+source "$ROOT/scripts/lib/ios-project.sh"
+
+echo "[3/4] Preparing the Xcode project..."
+ios_prepare_project
 
 echo "[4/4] Building signed release .ipa with Tauri..."
 npm run tauri ios build
 
 echo ""
 echo "[build-ios] Done. Look for the .ipa under:"
-echo "  gen/apple/build/arm64/  (and the Xcode archive/export path Tauri prints above)"
+echo "  $GEN_APPLE/build/arm64/  (and the Xcode archive/export path Tauri prints above)"

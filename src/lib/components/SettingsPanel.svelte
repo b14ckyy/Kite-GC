@@ -16,7 +16,7 @@
   import { DEFAULT_RADAR, DEFAULT_AIRSPACE, DEFAULT_RC_CONTROL, DEFAULT_UPDATE_CHECK, DEFAULT_TELEMETRY_API } from '$lib/stores/settings';
   import { panelState } from '$lib/stores/panelState';
   import { resetGcsManual, gcsManuallySet } from '$lib/stores/gcsLocation';
-  import type { AppSettings, InterfaceSettings, RadarSettings, GcsMode, AirspaceSettings, AirspaceProvider, SystemMessagesLevel, LogLevel, RcControlSettings, TelemetryApiSettings, UpdateCheckSettings, UpdateCheckMode } from '$lib/stores/settings';
+  import type { AppSettings, InterfaceSettings, RadarSettings, GcsMode, AirspaceSettings, AirspaceProvider, SystemMessagesLevel, LogLevel, RcControlSettings, TelemetryApiSettings, UpdateCheckSettings, UpdateCheckMode, DefaultProtocol } from '$lib/stores/settings';
   import { revealItemInDir, openPath } from '@tauri-apps/plugin-opener';
   import { isAndroid, isMobile } from '$lib/platform';
   import { blackboxDecoderVersion, downloadBlackboxDecode } from '$lib/stores/flightlog';
@@ -47,6 +47,7 @@
     highRes3D = false,
     gcsMode = 'manual',
     userLocation = null,
+    defaultProtocol = 'last',
     attitudeRateHz = 5,
     positionRateHz = 2,
     airspeedEnabled = true,
@@ -101,6 +102,7 @@
     highRes3D?: boolean;
     gcsMode?: GcsMode;
     userLocation?: { lat: number; lon: number } | null;
+    defaultProtocol?: DefaultProtocol;
     attitudeRateHz?: number;
     positionRateHz?: number;
     airspeedEnabled?: boolean;
@@ -600,6 +602,23 @@
           </p>
         {/if}
       {/if}
+    </div>
+
+    <!-- ── Connection ────────────────────────────────── -->
+    <div class="s-group">
+      <h4 class="s-head">{$t('settings.groupConnection')}</h4>
+      <!-- Which protocol the connection bar starts on. "Last used" is the historic behaviour and
+           stays the default; a fixed choice overrides the stored one on every launch. -->
+      <div class="s-row" title={$t('settings.defaultProtocolHint')}>
+        <label class="s-label" for="default-protocol">{$t('settings.defaultProtocol')}</label>
+        <select id="default-protocol" class="s-select" value={defaultProtocol}
+          onchange={(e) => onPatch({ defaultProtocol: (e.target as HTMLSelectElement).value as DefaultProtocol })}>
+          <option value="last">{$t('settings.defaultProtocolLast')}</option>
+          <option value="msp">MSP</option>
+          <option value="mavlink">MAVLink</option>
+          <option value="telemetry">Telemetry</option>
+        </select>
+      </div>
     </div>
 
     <!-- ── Telemetry ─────────────────────────────────── -->
