@@ -43,7 +43,7 @@ inside the box of the feature release they belong to, so the notes for one relea
     ??? info "Video in two places at once — and on a screen of its own"
         With Kite's own RTSP client the picture now runs in the **Video widget and a large surface at
         the same time** — the floating window or the fullscreen swap — the way the other sources
-        always did. One decode feeds both — on Windows, macOS and Linux. [#129] · [#132] · [#133]
+        always did. One decode feeds both — on Windows, macOS and Linux. [#129] · [#132] · [#135]
 
         **And it can leave the app.** Hover the floating window and a **broken-chain button** appears
         in its top-left corner: the frame moves out into its own window, **always on top**, framed
@@ -132,7 +132,7 @@ inside the box of the feature release they belong to, so the notes for one relea
       client, Windows and macOS. [#130] · [#132]
     - **The video shows in two places at once** — with Kite's own RTSP client the picture now runs
       in the Video widget **and** the floating window (or the fullscreen swap) at the same time,
-      as it always did with the other sources. One decode feeds both. [#129] · [#132] · [#133]
+      as it always did with the other sources. One decode feeds both. [#129] · [#132] · [#135]
     - **Desktop video window with a park button** — Start slides the window in, the camera button
       beside it parks and recalls it while the source runs; glass bezel, resize corner, no ✕. The
       Video panel replaces its preview with a status block (state, resolution, fps, codec, bitrate). [#127]
@@ -141,6 +141,17 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **Default protocol** in Settings → Connection. It stays on **Last used**, which is what Kite
       has always done, and can be pinned to MSP, MAVLink or Telemetry instead, so the app opens on
       the link you actually fly no matter what the last session happened to use. [#151]
+    - **Mini-map gestures** — the small map in the video frame or widget tile stays follow-locked, but
+      a tap on it toggles heading-up ⇄ north-up (remembered) and sliding one finger up or down zooms
+      in or out; a second finger hands over to pinch. [#152]
+    - **Phone docked window in two sizes** — a corner marker in the frame's top-left toggles between
+      the full size and a compact one, for the video and the swapped-in map alike. [#152]
+    - **Vehicle type override in the UAV Info panel** — the Type row is a dropdown: Kite fills in the
+      detected type, you can change it for the session, and the map model and the recorded flights
+      follow it. The panel also shows the flight controller's hardware **FC ID** (with a copy button)
+      and gains **Save to vehicle library**, which creates the library entry from the connected craft —
+      name, type, board, firmware, FC ID, the reported sensors and the blackbox state — or jumps to the
+      entry that already carries this FC ID. [#157]
 
     **Removed**
 
@@ -172,6 +183,16 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **The network port follows the protocol**, not just the transport. MAVLink offers UDP 14550 or
       TCP 5760 and MSP offers TCP 5761, instead of the MSP port showing up for a MAVLink connection.
       A port you typed yourself is never touched. [#151]
+    - **Floating video window moves by its handle** — a small four-way-arrow handle in the picture's
+      bottom-left corner moves the window; dragging the picture, the right mouse button and two
+      fingers now go to the map in the frame (3D tilt, pinch). Both corner handles are translucent. [#152]
+    - **No zoom buttons on the map in a frame** — the floating window and the widget tile hide the
+      + / − buttons that did not fit at larger UI scales; wheel, pinch and the mini-map slide zoom
+      there. [#152]
+    - **iPad panels fit the screen** — the tool panels respect the toolbar and the widget dock height
+      on tablets, so their content no longer runs under the dock. [#153]
+    - **Chinese and Bulgarian** — the connection-status and toolbar strings that fell back to English
+      are translated. [#154] · [#156]
 
 ??? note "1.0.1 — patch release"
 
@@ -224,6 +245,11 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#129]: https://github.com/b14ckyy/Kite-GC/pull/129
 [#130]: https://github.com/b14ckyy/Kite-GC/pull/130
 [#132]: https://github.com/b14ckyy/Kite-GC/pull/132
-[#133]: https://github.com/b14ckyy/Kite-GC/pull/133
+[#135]: https://github.com/b14ckyy/Kite-GC/pull/135
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143
 [#151]: https://github.com/b14ckyy/Kite-GC/pull/151
+[#152]: https://github.com/b14ckyy/Kite-GC/pull/152
+[#153]: https://github.com/b14ckyy/Kite-GC/pull/153
+[#154]: https://github.com/b14ckyy/Kite-GC/pull/154
+[#156]: https://github.com/b14ckyy/Kite-GC/pull/156
+[#157]: https://github.com/b14ckyy/Kite-GC/pull/157
