@@ -46,6 +46,7 @@ pub const MSP_SENSOR_STATUS: u16 = 151;
 pub const MSP_SET_REBOOT: u16 = 68;
 pub const MSP_EEPROM_WRITE: u16 = 250;
 pub const MSP_GPSSTATISTICS: u16 = 166;
+pub const MSP_BLACKBOX_CONFIG: u16 = 80;
 
 // --- Reference only: uncomment when needed (unused MSP message-id constants) ---
 // pub const MSP_BUILD_INFO: u16 = 5;
@@ -153,4 +154,9 @@ pub struct FcInfo {
     /// FC and is stored with each flight — linking stays on the craft name.
     #[serde(default)]
     pub fc_uid: Option<String>,
+    /// Whether the FC logs to a blackbox / dataflash: INAV `MSP_BLACKBOX_CONFIG` device != NONE (set in
+    /// the handshake), ArduPilot `LOG_BACKEND_TYPE` != 0 / PX4 `SDLOG_MODE` >= 0 (filled in by the
+    /// handler once the param reply arrives). `None` = not known. Seeds the vehicle library entry.
+    #[serde(default)]
+    pub blackbox: Option<bool>,
 }

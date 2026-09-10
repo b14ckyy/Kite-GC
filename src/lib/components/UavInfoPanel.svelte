@@ -14,6 +14,7 @@
   import { detectedPlatformType } from '$lib/stores/connection';
   import { setLivePlatformType } from '$lib/controllers/connectionController';
   import { settings } from '$lib/stores/settings';
+  import { telemetry } from '$lib/stores/telemetry';
   import { vehicleDbCreate, vehicleDbFindByCraftName, vehicleDbFindByFcUid } from '$lib/stores/flightlog';
   import { vehicleLibraryChanged } from '$lib/stores/vehicleManager';
   import type { VehicleInput } from '$lib/stores/flightlogTypes';
@@ -115,6 +116,10 @@
     const craft = fcInfo.craft_name.trim();
     // MAVLink has no craft name and no board target (board_id = "MAVLink") → variant as the name.
     const mavlink = fcInfo.board_id === 'MAVLink';
+    // Sensors as the FC reports them right now (MSP_SENSOR_STATUS / SYS_STATUS present bits): any
+    // non-zero state — OK, unavailable, unhealthy — means the sensor is configured on this craft. RTK
+    // is only visible through the fix type (RTK float / fixed), so it needs an RTK fix at click time.
+    const tel = get(telemetry);
     const input: VehicleInput = {
       name: craft || fcInfo.fc_variant,
       craft_name: craft || null,
@@ -127,13 +132,17 @@
       motors: null, props: null, esc: null,
       recommended_cells: null, recommended_capacity_mah: null,
       rx: null, vtx: null, camera: null, gimbal_camera: null, datalink: null,
-      sensor_airspeed: false, sensor_rangefinder: false, sensor_optical_flow: false,
-      sensor_gps: false, sensor_rtk: false, sensor_compass: false,
+      sensor_airspeed: tel.sensorPitot !== 0,
+      sensor_rangefinder: tel.sensorRangefinder !== 0,
+      sensor_optical_flow: tel.sensorOpflow !== 0,
+      sensor_gps: tel.sensorGps !== 0,
+      sensor_rtk: tel.fixType >= 5,
+      sensor_compass: tel.sensorMag !== 0,
       fc_model: mavlink ? null : fcInfo.board_id || null,
       fc_manufacturer: null,
       fc_firmware: firmwareFor(fcInfo.fc_variant),
       fc_firmware_version: fcInfo.fc_version || null,
-      blackbox_available: false,
+      blackbox_available: fcInfo.blackbox ?? false,
       fc_uid: fcInfo.fc_uid,
     };
     try {

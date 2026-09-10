@@ -10,7 +10,7 @@ use crate::flightlog::recorder::FlightRecorder;
 use crate::flightlog::types::{FlightLogSettings, InavStats};
 use crate::mavlink_proto;
 use crate::msp::{
-    FcInfo, FeatureSet, InavVersion, MspTransport, MSP_API_VERSION, MSP_BOARD_INFO, MSP_EEPROM_WRITE,
+    FcInfo, FeatureSet, InavVersion, MspTransport, MSP_API_VERSION, MSP_BLACKBOX_CONFIG, MSP_BOARD_INFO, MSP_EEPROM_WRITE,
     MSP_FC_VARIANT, MSP_FC_VERSION, MSP_NAME, MSP_SET_NAME, MSP_UID, MSP_WP, MSPV2_INAV_MIXER,
 };
 use crate::msp::features::is_version_supported;
@@ -427,6 +427,16 @@ fn connect_msp(
         Err(e) => log::warn!("Failed to query MSP_UID: {}", e),
     }
 
+    // 6c) MSP_BLACKBOX_CONFIG → [supported, device, …]; device 0 = NONE. Seeds the vehicle library's
+    // "blackbox available" flag when the craft is saved from the UAV Info panel.
+    match transport.msp_request(MSP_BLACKBOX_CONFIG, &[]) {
+        Ok(resp) if resp.payload.len() >= 2 => {
+            fc_info.blackbox = Some(resp.payload[0] != 0 && resp.payload[1] != 0);
+        }
+        Ok(_) => log::debug!("MSP_BLACKBOX_CONFIG: short reply"),
+        Err(e) => log::debug!("MSP_BLACKBOX_CONFIG not answered: {}", e),
+    }
+
     // 7) Home position — MSP_WP #0 is INAV's RTH home (GPS_home, lat/lon in deg·1e7). One-shot at
     //    connect so a mid-flight connect / app restart recovers Home; the live arm-transition path
     //    only sets it when we actually witness the arm. Raw-parse the 21-byte WP payload (the home
@@ -602,6 +612,15 @@ fn connect_mavlink(
     // vehicle class can't be told from the HEARTBEAT alone). Copter/Rover/Sub lack the param → no reply.
     if fc_info.fc_variant.starts_with("Ardu") {
         mavlink_proto::params::request_quadplane_flag(&mut *byte_transport, fc_sysid);
+    }
+
+    // Logging backend for the vehicle library's "blackbox available" flag: ArduPilot LOG_BACKEND_TYPE
+    // (bitmask, 0 = none), PX4 SDLOG_MODE (-1 = disabled). The reply lands in the handler, which
+    // updates the stored FC info and emits `telemetry-vehicle { blackbox }`.
+    if fc_info.fc_variant.starts_with("Ardu") {
+        mavlink_proto::params::request_param(&mut *byte_transport, fc_sysid, "LOG_BACKEND_TYPE");
+    } else if fc_info.fc_variant.contains("PX4") {
+        mavlink_proto::params::request_param(&mut *byte_transport, fc_sysid, "SDLOG_MODE");
     }
 
     // ── Flight recorder setup ────────────────────────────────────────────

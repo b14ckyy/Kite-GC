@@ -63,6 +63,9 @@ export interface FcInfo {
   /** FC hardware id (INAV MSP_UID / MAVLink AUTOPILOT_VERSION uid), null for passive telemetry.
    *  Informational — reconnect identity for the session's platform-type override. */
   fc_uid: string | null;
+  /** Blackbox / dataflash logging enabled on the FC (INAV from the handshake; ArduPilot / PX4 once the
+   *  LOG_BACKEND_TYPE / SDLOG_MODE reply arrives via `telemetry-vehicle`). null = unknown. */
+  blackbox: boolean | null;
 }
 
 export interface PortInfo {
