@@ -324,6 +324,9 @@ export interface AppSettings {
   map: MapState;
   mapProvider: string;
   mapCacheMaxMB: number;
+  /** The swapped-in mini map (video frame / widget tile) follows the aircraft heading-up (true) or
+   *  north-up (false); a tap on it toggles (Map.svelte). Remembered across swaps and restarts. */
+  miniMapHeadingUp: boolean;
   navPanelOpen: boolean;
   activeTab: string;
   // Telemetry poll rates
@@ -432,6 +435,7 @@ const defaults: AppSettings = {
   },
   mapProvider: 'esri-hybrid',
   mapCacheMaxMB: 200,
+  miniMapHeadingUp: true,
   navPanelOpen: true,
   activeTab: 'uav-info',
   attitudeRateHz: 5,

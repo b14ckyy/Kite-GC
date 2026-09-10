@@ -1998,7 +1998,11 @@
       mapContainer.style.left = '';
       mapContainer.classList.remove('heading-up');
     }
-    // Leaflet must recalculate container size
+    // Leaflet must recalculate the container size — NOW, before the follow frame that follows this
+    // call recentres: with the stale size it centred the aircraft in the old box, one frame of
+    // visible offset on every heading-up ⇄ north-up switch (Marc, 2026-09-10, the mini map's tap
+    // toggle). The delayed pass catches a layout that is still settling (column transition).
+    map?.invalidateSize({ animate: false });
     setTimeout(() => map?.invalidateSize(), 50);
   }
 
@@ -2015,21 +2019,86 @@
   // (Marc, 2026-09-04: the widget map placed and moved waypoints). Dragging is already off in
   // the follow modes; Leaflet's double-click zoom goes too — a double-tap is the swap gesture on
   // the surfaces around the frame, and the phone relays touches to the tile underneath.
+  // Two gestures of its own (Marc, 2026-09-09/10), read from the same pointer stream before it is
+  // swallowed: a TAP toggles heading-up ⇄ north-up (the frame stays follow-locked either way — no
+  // free mode, no panning), and a one-finger SLIDE up / down zooms in / out — the phone has no zoom
+  // buttons and a pinch needs room the little frame does not have. A second finger hands over to
+  // Leaflet's pinch; the mouse keeps wheel + buttons and only taps. The slide steps through WHOLE
+  // levels with Leaflet's normal zoom animation, exactly like the +/- buttons: an unanimated
+  // setZoom is a hard reset that throws the old tiles away before the new ones exist (Marc,
+  // 2026-09-10: a dark-grey flash on every step), the animation scales them until then. Leaflet
+  // drops a setZoom that arrives mid-animation, so the target is kept and re-issued on zoomend.
+  const MINI_TAP_MS = 350;
+  const MINI_TAP_PX = 8;
+  const MINI_SLIDE_PX_PER_LEVEL = 60;
   $effect(() => {
     if (!map || !mapContainer) return;
     if (!miniControls) {
       map.doubleClickZoom.enable();
       return;
     }
-    map.doubleClickZoom.disable();
+    const m = map;
+    m.doubleClickZoom.disable();
+    let gesture: { id: number; x: number; y: number; t: number; zoom: number; touch: boolean; sliding: boolean } | null = null;
+    let slideTarget: number | null = null;
+    const chaseTarget = () => {
+      if (slideTarget == null) return;
+      if (m.getZoom() === slideTarget) slideTarget = null;
+      else m.setZoom(slideTarget);
+    };
+    const onDown = (e: PointerEvent) => {
+      if (!e.isPrimary || e.button !== 0) {
+        gesture = null; // a second finger: pinch, Leaflet's from here on
+        slideTarget = null;
+        return;
+      }
+      gesture = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now(), zoom: m.getZoom(), touch: e.pointerType !== 'mouse', sliding: false };
+    };
+    const onMove = (e: PointerEvent) => {
+      const g = gesture;
+      if (!g || e.pointerId !== g.id) return;
+      if (!g.sliding) {
+        if (!g.touch || Math.abs(e.clientY - g.y) < MINI_TAP_PX) return;
+        g.sliding = true;
+      }
+      const raw = Math.round(g.zoom + (g.y - e.clientY) / MINI_SLIDE_PX_PER_LEVEL);
+      const target = Math.max(m.getMinZoom(), Math.min(m.getMaxZoom(), raw));
+      if (target !== slideTarget) {
+        slideTarget = target;
+        chaseTarget();
+      }
+    };
+    const onUp = (e: PointerEvent) => {
+      const g = gesture;
+      if (!g || e.pointerId !== g.id) return;
+      if (!g.sliding && performance.now() - g.t < MINI_TAP_MS && Math.hypot(e.clientX - g.x, e.clientY - g.y) < MINI_TAP_PX) {
+        viewMode = viewMode === 'heading-follow' ? 'follow' : 'heading-follow';
+      }
+      gesture = null;
+    };
+    const onCancel = () => {
+      gesture = null;
+      slideTarget = null;
+    };
+    m.on('zoomend', chaseTarget);
     const swallow = (e: Event) => {
       e.stopImmediatePropagation();
       if (e.type === 'contextmenu') e.preventDefault(); // pointer events stay uncancelled: pinch = touch events
     };
     const el = mapContainer;
+    // Gesture listeners first: they must run before the swallow stops the pointerdown / pointerup.
+    el.addEventListener('pointerdown', onDown, true);
+    el.addEventListener('pointermove', onMove, true);
+    el.addEventListener('pointerup', onUp, true);
+    el.addEventListener('pointercancel', onCancel, true);
     const types = ['click', 'dblclick', 'contextmenu', 'mousedown', 'mouseup', 'pointerdown', 'pointerup'];
     for (const t of types) el.addEventListener(t, swallow, true);
     return () => {
+      m.off('zoomend', chaseTarget);
+      el.removeEventListener('pointerdown', onDown, true);
+      el.removeEventListener('pointermove', onMove, true);
+      el.removeEventListener('pointerup', onUp, true);
+      el.removeEventListener('pointercancel', onCancel, true);
       for (const t of types) el.removeEventListener(t, swallow, true);
     };
   });
@@ -2281,6 +2350,9 @@
      centre-anchored icons keep their anchor exactly, bottom-anchored ones move by a few px. */
   .map.mini {
     --marker-scale: 0.5;
+    /* The one-finger slide zoom (see the miniControls effect) must keep its pointer stream: no
+       browser pan may claim the touch. Leaflet's pinch runs on touch events and is not affected. */
+    touch-action: none;
   }
   .map.mini :global(.leaflet-marker-icon:not(.mission-wp-icon):not(.mission-fbh-icon) > *) {
     transform: scale(var(--marker-scale));

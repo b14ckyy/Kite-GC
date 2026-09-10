@@ -367,10 +367,11 @@
     }
   });
 
-  // The WIDGET mini-map is locked to a clean nav view: 2D + heading-follow, zoom-only (3D/mode buttons
-  // hidden via `miniControls`). The FLOATING map stays fully operational on the desktop; on the phone
-  // the docked frame is a mini map too and takes the same lock (PHONE_VIDEO.md D6). Restore the view
-  // on release.
+  // The WIDGET mini-map is locked to a clean nav view: 2D + follow, zoom-only (3D/mode buttons hidden
+  // via `miniControls`). Heading-up or north-up is the one choice left — a tap on the mini map
+  // toggles it (Map.svelte) and the choice is remembered in the settings. The FLOATING map stays
+  // fully operational on the desktop; on the phone the docked frame is a mini map too and takes the
+  // same lock (PHONE_VIDEO.md D6). Restore the view on release.
   // Only while the map is actually in a frame (mapInFrame includes `status === 'live'`): a stale
   // mapLocation with the video off must not put the FULL map into mini mode (half-size markers).
   const miniMapLocked = $derived(mapInFrame && (mapInWidget || phoneUi));
@@ -385,12 +386,19 @@
         savedMapViewMode = mapViewMode;
         savedMode2d = map2dViewMode;
         mapViewMode = '2d';
-        map2dViewMode = 'heading-follow';
+        map2dViewMode = $settings.miniMapHeadingUp ? 'heading-follow' : 'follow';
       } else if (!lock && miniLockActive) {
         miniLockActive = false;
         mapViewMode = savedMapViewMode;
         map2dViewMode = savedMode2d;
       }
+    });
+  });
+  // The mini map's tap toggle arrives through the binding: remember heading-up vs north-up.
+  $effect(() => {
+    const m = map2dViewMode;
+    untrack(() => {
+      if (miniLockActive && m !== 'free') settings.patch({ miniMapHeadingUp: m === 'heading-follow' });
     });
   });
 
