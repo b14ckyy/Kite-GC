@@ -161,8 +161,9 @@ How interactive the swapped-in **mini-map** is depends on where it landed:
   (no waypoint placing or dragging, no context menu), and its markers are drawn at half size.
   Switching the mission editor on brings the map back to full screen automatically.
 - **In the floating window** — fully interactive: pan, zoom, tilt and rotate exactly as on the big map
-  (right-drag and two fingers reach the map). To **move the floating frame itself**, drag the **square
-  handle in its bottom-left corner**, the same one as in video mode.
+  (right-drag and two fingers reach the map). The zoom buttons are hidden there to save room — use the
+  mouse wheel, the touchpad or a pinch. To **move the floating frame itself**, drag the **square handle
+  in its bottom-left corner**, the same one as in video mode.
 - **On a phone** (docked window or widget) — the widget's limits apply: 2D, follow, no panning. Tap
   the small map to switch heading-up / north-up, slide a finger up or down on it to zoom (or pinch).
   Double-tap swaps. With the video full-screen, the corner button becomes a **map button** that hides
