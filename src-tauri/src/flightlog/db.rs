@@ -1171,6 +1171,29 @@ pub fn remove_temp_session(temp_path: &Path) {
     }
 }
 
+/// Delete every temp `.ktmp` session in `dir` except the ones in `keep` (the live, pending and
+/// continue-on-reconnect sessions). Enforces the single-temp invariant whenever the user discards:
+/// stragglers from earlier crashes must not resurface one per launch. Returns the number removed.
+pub fn sweep_temp_sessions(dir: &Path, keep: &[PathBuf]) -> usize {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return 0,
+    };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("ktmp") || keep.contains(&path) {
+            continue;
+        }
+        log::info!("Sweeping leftover temp session {}", path.display());
+        remove_temp_session(&path);
+        if !path.exists() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
 /// List flight summaries ordered by start_time DESC.
 pub fn list_flights(conn: &Connection) -> SqlResult<Vec<FlightSummary>> {
     let mut stmt = conn.prepare(
@@ -3043,5 +3066,27 @@ mod tests {
 
         assert_eq!(blackbox_count, 1);
         assert_eq!(file_count, 1);
+    }
+
+    #[test]
+    fn sweep_temp_sessions_keeps_protected_and_removes_the_rest() {
+        let dir = std::env::temp_dir().join(format!("kite-sweep-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let live = dir.join("active_live.ktmp");
+        let old_a = dir.join("active_old_a.ktmp");
+        let old_b = dir.join("active_old_b.ktmp");
+        for p in [&live, &old_a, &old_b] {
+            drop(open_temp_session(p).unwrap());
+        }
+        std::fs::write(dir.join("notes.txt"), b"unrelated").unwrap();
+
+        let removed = sweep_temp_sessions(&dir, std::slice::from_ref(&live));
+
+        assert_eq!(removed, 2);
+        assert!(live.exists(), "the protected live session must survive the sweep");
+        assert!(!old_a.exists() && !old_b.exists(), "stragglers must be gone");
+        assert!(dir.join("notes.txt").exists(), "only .ktmp files are touched");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

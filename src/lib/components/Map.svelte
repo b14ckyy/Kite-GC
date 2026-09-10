@@ -1196,7 +1196,10 @@
       },
     });
 
-    guidedPopup = L.popup({ maxWidth: 240, closeOnClick: false, className: "guided-popup-wrap" })
+    // 240 was too narrow for the two-field (alt + loiter radius) fixed-wing form: each
+    // NumberStepper is a fixed ~132 px (24 px button + 74 px input + padding + 24 px button), so the
+    // pair plus their gap needs ~274 px and the second field's "+" was clipped by the popup edge.
+    guidedPopup = L.popup({ maxWidth: 300, closeOnClick: false, className: "guided-popup-wrap" })
       .setLatLng(e.latlng)
       .setContent(el)
       .openOn(map);

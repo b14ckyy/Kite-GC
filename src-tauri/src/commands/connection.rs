@@ -484,7 +484,7 @@ fn connect_msp(
             .and_then(|p| p.parent().map(|p| p.join(".portable").exists()))
             .unwrap_or(false);
 
-        match FlightRecorder::new(flight_log_settings, fc_info.clone(), "MSP", portable, app_handle.clone(), state.pending_session.clone(), state.resume_pending.clone(), msp_raw_sink.clone()) {
+        match FlightRecorder::new(flight_log_settings, fc_info.clone(), "MSP", portable, app_handle.clone(), state.pending_session.clone(), state.resume_pending.clone(), state.active_temp_path.clone(), msp_raw_sink.clone()) {
             Ok(mut rec) => {
                 rec.start_continuous_log();
                 let handle = std::sync::Arc::new(std::sync::Mutex::new(rec));
@@ -611,7 +611,7 @@ fn connect_mavlink(
 
         // MAVLink records via .tlog; the MSP raw sink is unused here (kept empty).
         let msp_raw_sink: MspRawSink = std::sync::Arc::new(std::sync::Mutex::new(None));
-        match FlightRecorder::new(flight_log_settings, fc_info.clone(), "MAVLink", portable, app_handle.clone(), state.pending_session.clone(), state.resume_pending.clone(), msp_raw_sink) {
+        match FlightRecorder::new(flight_log_settings, fc_info.clone(), "MAVLink", portable, app_handle.clone(), state.pending_session.clone(), state.resume_pending.clone(), state.active_temp_path.clone(), msp_raw_sink) {
             Ok(mut rec) => {
                 rec.start_continuous_log();
                 let handle = std::sync::Arc::new(std::sync::Mutex::new(rec));
@@ -691,7 +691,7 @@ fn connect_passive_telemetry(
             .and_then(|p| p.parent().map(|p| p.join(".portable").exists()))
             .unwrap_or(false);
         let msp_raw_sink: MspRawSink = std::sync::Arc::new(std::sync::Mutex::new(None));
-        match FlightRecorder::new(flight_log_settings, fc_info.clone(), "Telemetry", portable, app_handle.clone(), state.pending_session.clone(), state.resume_pending.clone(), msp_raw_sink) {
+        match FlightRecorder::new(flight_log_settings, fc_info.clone(), "Telemetry", portable, app_handle.clone(), state.pending_session.clone(), state.resume_pending.clone(), state.active_temp_path.clone(), msp_raw_sink) {
             Ok(mut rec) => {
                 rec.start_continuous_log();
                 log::info!("Flight recorder initialized (passive telemetry)");
