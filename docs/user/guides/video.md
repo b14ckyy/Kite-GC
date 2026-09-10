@@ -117,14 +117,17 @@ signal dips don't interrupt the stream unnecessarily.
 The same feed can appear in several places at once (they all share one stream):
 
 - **As a widget** — the **Video** widget in a dock, sized to the stream's aspect ratio.
-- **In a floating window** — a movable video frame over the map. **Drag the video body** to move it;
-  dragging it to the **bottom-left corner snaps it there**, where it **displaces the bottom widget dock**
-  to make room (the dock shrinks by the window's size). Drag it away from the corner to un-snap and
-  free-float. The **top-right corner grip resizes** it (aspect-locked, touch-friendly).
+- **In a floating window** — a movable video frame over the map. **Drag the small square handle in its
+  bottom-left corner** (the four-way arrow) to move it; dragging it to the **bottom-left screen corner
+  snaps it there**, where it **displaces the bottom widget dock** to make room (the dock shrinks by the
+  window's size). Drag it away from the corner to un-snap and free-float. The **top-right corner grip
+  resizes** it (aspect-locked, touch-friendly).
   **On a phone** there is a **docked window** instead: fixed to the bottom-right of the map, sized to
-  the stream (at most 40 % of the map height or half its width), no dragging or resizing. A **camera
-  button** above the map buttons slides it off-screen to the right and back — it appears once a source
-  runs and hides while the Video widget is active.
+  the stream (at most 40 % of the map height or half its width), no dragging. The **corner marker in
+  its top-left** toggles between that size and a compact one (two thirds), for the video and the
+  swapped-in map alike; the choice is remembered. A **camera button** above the map buttons slides the
+  window off-screen to the right and back — it appears once a source runs and hides while the Video
+  widget is active.
 - **In a detached window** — the floating window taken **out of the app** into its own window, which
   you can put anywhere: beside Kite, or on a second monitor that then becomes your video screen. It
   **stays on top of other applications** and looks exactly like the frame inside the app.
@@ -154,14 +157,17 @@ back to the full-screen background.
 
 How interactive the swapped-in **mini-map** is depends on where it landed:
 
-- **In the widget** — deliberately limited by space: **2D only** and **heading-follow only**, but you
-  **can zoom**. Nothing else on that little map reacts (no waypoint placing or dragging, no context
-  menu), and its markers are drawn at half size. Switching the mission editor on brings the map back
-  to full screen automatically.
-- **In the floating window** — fully interactive: pan and zoom normally (left-drag / single-touch). To
-  **move the floating frame itself** while it holds the map, drag with the **right mouse button**
-  (desktop) or **two fingers** (touchscreen).
-- **On a phone** (docked window or widget) — the widget's limits apply: 2D, heading-follow, no panning.
+- **In the widget** — deliberately limited by space: **2D only** and **follow only** — a **tap** on
+  the little map switches between **heading-up** and **north-up** (remembered), and you **can zoom**:
+  mouse wheel or pinch, or **slide one finger up / down** on a touchscreen. Nothing else on it reacts
+  (no waypoint placing or dragging, no context menu), and its markers are drawn at half size.
+  Switching the mission editor on brings the map back to full screen automatically.
+- **In the floating window** — fully interactive: pan, zoom, tilt and rotate exactly as on the big map
+  (right-drag and two fingers reach the map). The zoom buttons are hidden there to save room — use the
+  mouse wheel, the touchpad or a pinch. To **move the floating frame itself**, drag the **square handle
+  in its bottom-left corner**, the same one as in video mode.
+- **On a phone** (docked window or widget) — the widget's limits apply: 2D, follow, no panning. Tap
+  the small map to switch heading-up / north-up, slide a finger up or down on it to zoom (or pinch).
   Double-tap swaps. With the video full-screen, the corner button becomes a **map button** that hides
   and shows the small map; double-tap the full-screen video to send the map back. Unobstructed
   fullscreen does not exist on the phone — the video fills the map area next to the widget column.

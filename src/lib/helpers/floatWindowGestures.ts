@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 
-/** The floating video window's gestures — MOVE (drag the window body; right mouse / two fingers
- *  when the map is in the frame) and RESIZE (the bezel's top-right corner, aspect-locked, bottom
- *  edge anchored). Shared by FloatingVideoWindow and the corner +page draws on the mini-map frame,
- *  which sits ABOVE the window when the map is swapped in (the map layer covers the chrome).
+/** The floating video window's gestures — MOVE (the bottom-left corner handle, the only way to
+ *  move it) and RESIZE (the bezel's top-right corner, aspect-locked, bottom edge anchored). Shared
+ *  by FloatingVideoWindow and the corners +page draws on the mini-map frame, which sit ABOVE the
+ *  window when the map is swapped in (the map layer covers the chrome). A body drag and a right
+ *  mouse / two-finger grab on the map used to move it too; both went (Marc, 2026-09-10) so the 3D
+ *  map keeps its tilt button and a touchscreen keeps pinch and tilt.
  *
  *  Geometry in the chrome layer's logical px (`vw`/`vh` = viewport / uiScale); pointer positions
  *  arrive in viewport px and are scaled here. Move: the first real movement un-snaps, a drop near
@@ -39,7 +41,7 @@ function scaleOf(frame: FloatFrame): number {
 }
 
 /** A move session started at viewport point (cx, cy): feed it the pointer, end it on release. */
-export function beginFloatMove(cx: number, cy: number, frame: FloatFrame): { moveTo(cx: number, cy: number): void; end(): void } {
+function beginFloatMove(cx: number, cy: number, frame: FloatFrame): { moveTo(cx: number, cy: number): void; end(): void } {
   const { left, top, width, height, vw, vh } = frame;
   const scale = scaleOf(frame);
   let moved = false;
@@ -67,10 +69,11 @@ export function beginFloatMove(cx: number, cy: number, frame: FloatFrame): { mov
   };
 }
 
-/** Left-button drag of the window body: a move session on window listeners. No preventDefault —
- *  the body's double-click (map swap) must keep working. */
+/** Left-button / single-touch drag of the move handle: a move session on window listeners. */
 export function startFloatMove(e: PointerEvent, frame: FloatFrame): void {
   if (e.button !== 0) return;
+  e.preventDefault();
+  e.stopPropagation();
   const session = beginFloatMove(e.clientX, e.clientY, frame);
   const onMove = (ev: PointerEvent) => session.moveTo(ev.clientX, ev.clientY);
   const onUp = () => {

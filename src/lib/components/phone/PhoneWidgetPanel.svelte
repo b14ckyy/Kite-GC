@@ -117,8 +117,6 @@
   let pressY = 0;
   /** Edit mode: a touch that moved before the hold elapsed is a page flick, tracked here. */
   let flickY: number | null = null;
-  /** The current press was relayed from the swapped-in mini map (a layer over a tile). */
-  let relayedPress = false;
   let edgeTimer: ReturnType<typeof setTimeout> | null = null;
   let edgeDir = 0;
 
@@ -258,17 +256,15 @@
       if (flickY != null) return; // page flick in progress — decided on release
       if (pressId && Math.hypot(e.clientX - pressX, e.clientY - pressY) > DRAG_SLOP_PX) {
         // Moved before the hold elapsed: not a pickup. In edit mode the cells block native
-        // scrolling (touch-action none), so the flick is ours to turn into a page change — and so
-        // is a swipe that started on the swapped-in mini map (a layer outside the scroller, which
-        // never sees it; the video tile scrolls natively, the map tile must match).
-        const relayed = relayedPress;
+        // scrolling (touch-action none), so the flick is ours to turn into a page change. A swipe
+        // that started on the swapped-in mini map is NOT one: it zooms that map (Map.svelte, the
+        // one-finger slide) — the page turns from any other tile.
         clearPress();
-        if (editing || relayed) flickY = pressY;
+        if (editing) flickY = pressY;
       }
     };
     const onUp = (e: PointerEvent) => {
       clearPress();
-      relayedPress = false;
       if (dragId) endDrag(true);
       if (flickY != null) {
         const dy = e.clientY - flickY;
@@ -279,7 +275,6 @@
     };
     const onCancel = () => {
       clearPress();
-      relayedPress = false;
       flickY = null;
       if (dragId) endDrag(false);
     };
@@ -291,10 +286,7 @@
       const target = e.target as HTMLElement | null;
       if (!editing && e.pointerType !== 'mouse' && target?.closest('.layer-map.in-frame')) {
         const cell = cellElAt(e.clientX, e.clientY);
-        if (cell?.dataset.id) {
-          relayedPress = true;
-          onCellPointerDown(e, cell.dataset.id);
-        }
+        if (cell?.dataset.id) onCellPointerDown(e, cell.dataset.id);
         return;
       }
       if (editing && rootEl && !rootEl.contains(target as Node)) editing = false;

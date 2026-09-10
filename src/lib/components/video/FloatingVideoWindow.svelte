@@ -14,8 +14,11 @@
   //    is snapped and swipes back to the bottom-left screen corner when the window parks or is moved.
   //    Visible as long as a source is active (started: starting / live / error).
   //  • thin glass bezel like the video widget; no ✕ (the toggle is the only show/hide)
-  //  • drag the video body to move (away from the corner un-snaps; dropping near the corner
-  //    re-snaps); with the map in the frame, the right mouse button / two fingers move it
+  //  • the BOTTOM-LEFT corner handle (a rounded square with a four-way arrow) moves the window —
+  //    the only way to move it (away from the corner un-snaps; dropping near the corner re-snaps).
+  //    It used to be a body drag, and right mouse / two fingers with the map in the frame: that
+  //    took the right button from the 3D map's tilt and the second finger from pinch and tilt on a
+  //    touchscreen (Marc, 2026-09-10) — both now reach the map, and neither does anything on video
   //  • the bezel's lighter TOP-RIGHT corner resizes (aspect-locked, 10–30 % of vh, touch-sized hit
   //    area, drawn only in the bezel so it never covers the picture)
   //  • double-click the video to swap it with the map (→ video primary); parking with the map in
@@ -25,7 +28,8 @@
   // — one computation for the window, the swapped-in map and the dock reserve. Layering: separate
   // absolutely-positioned layers share the page stacking context (the .float-win wrapper has no
   // z-index). The map (rendered top-level in +page when swapped) composes between the glass frame
-  // (z 60) and the grip (z 62), so the mini-map stays interactive while the grip stays usable.
+  // (z 60) and the corner handles (z 62), so the mini-map stays interactive while they stay usable
+  // — with the map in the frame +page draws both handles above it (`.miniframe-ctl`).
   import { t } from 'svelte-i18n';
   import {
     videoStream,
@@ -46,7 +50,7 @@
   import { isMobile } from '$lib/platform';
   import { nativeSurface, activeNativeSurfaces } from '$lib/controllers/nativeVideo';
   import { doubleTap, mouseDoubleClick } from '$lib/helpers/doubleTap';
-  import { beginFloatMove, startFloatMove, startFloatResize } from '$lib/helpers/floatWindowGestures';
+  import { startFloatMove, startFloatResize } from '$lib/helpers/floatWindowGestures';
   import VideoReconnectOverlay from '$lib/components/video/VideoReconnectOverlay.svelte';
 
   let {
@@ -118,92 +122,14 @@
     bindVideoEl(videoEl, $videoStream);
   });
 
-  // ── Gestures (helpers/floatWindowGestures — +page's mini-frame corner shares the resize) ──
+  // ── Gestures (helpers/floatWindowGestures — +page's mini-frame corners share both) ──
   const frame = () => ({ left, top, width, height, vw, vh });
-  function onBodyPointerDown(e: PointerEvent) {
+  function onMovePointerDown(e: PointerEvent) {
     startFloatMove(e, frame());
   }
   function onGripPointerDown(e: PointerEvent) {
     startFloatResize(e, frame());
   }
-
-  // ── Mini-map move (videoPrimary) — right mouse / two-finger ─────────
-  // In primary mode the frame holds the interactive map, so left-drag/single-touch pan the map. To
-  // MOVE the frame we grab with the right mouse button (desktop) or two fingers (touch); pinch-zoom
-  // is sacrificed there (the zoom buttons + follow mode cover it). Window-level capture so we run
-  // before Leaflet and can stop it seeing the gesture.
-  let fm: ReturnType<typeof beginFloatMove> | null = null;
-  function pointInFrame(cx: number, cy: number): boolean {
-    const r = frameEl?.getBoundingClientRect();
-    return !!r && cx >= r.left && cx <= r.right && cy >= r.top && cy <= r.bottom;
-  }
-  function frameMoveEnd() {
-    fm?.end();
-    fm = null;
-  }
-  // Narrow $derived, deliberately not a raw `$videoState` read inside the effect: the handlers write
-  // to the store (setFloatPos / setFloatSnapped), which would tear down and re-register all seven
-  // window listeners on every pointermove of a drag.
-  const gestureCapture = $derived(open && mapHere);
-  $effect(() => {
-    if (!gestureCapture) return;
-    const mid = (t: TouchList) => ({
-      x: (t[0].clientX + t[1].clientX) / 2,
-      y: (t[0].clientY + t[1].clientY) / 2,
-    });
-    const onCtx = (e: MouseEvent) => {
-      if (pointInFrame(e.clientX, e.clientY)) e.preventDefault(); // no context menu over the frame
-    };
-    const onPD = (e: PointerEvent) => {
-      if (e.button === 2 && pointInFrame(e.clientX, e.clientY)) {
-        e.preventDefault();
-        e.stopPropagation();
-        fm = beginFloatMove(e.clientX, e.clientY, frame());
-      }
-    };
-    const onPM = (e: PointerEvent) => {
-      fm?.moveTo(e.clientX, e.clientY);
-    };
-    const onPU = () => frameMoveEnd();
-    const onTS = (e: TouchEvent) => {
-      if (e.touches.length === 2) {
-        const m = mid(e.touches);
-        if (pointInFrame(m.x, m.y)) {
-          e.preventDefault();
-          e.stopPropagation();
-          fm = beginFloatMove(m.x, m.y, frame());
-        }
-      }
-    };
-    const onTM = (e: TouchEvent) => {
-      if (fm && e.touches.length >= 2) {
-        e.preventDefault();
-        e.stopPropagation();
-        const m = mid(e.touches);
-        fm.moveTo(m.x, m.y);
-      }
-    };
-    const onTE = (e: TouchEvent) => {
-      if (fm && e.touches.length < 2) frameMoveEnd();
-    };
-    window.addEventListener('contextmenu', onCtx, true);
-    window.addEventListener('pointerdown', onPD, true);
-    window.addEventListener('pointermove', onPM, true);
-    window.addEventListener('pointerup', onPU, true);
-    window.addEventListener('touchstart', onTS, { capture: true, passive: false });
-    window.addEventListener('touchmove', onTM, { capture: true, passive: false });
-    window.addEventListener('touchend', onTE, true);
-    return () => {
-      window.removeEventListener('contextmenu', onCtx, true);
-      window.removeEventListener('pointerdown', onPD, true);
-      window.removeEventListener('pointermove', onPM, true);
-      window.removeEventListener('pointerup', onPU, true);
-      window.removeEventListener('touchstart', onTS, true);
-      window.removeEventListener('touchmove', onTM, true);
-      window.removeEventListener('touchend', onTE, true);
-      fm = null;
-    };
-  });
 </script>
 
 {#if active}
@@ -260,7 +186,6 @@
         class="fw-body"
         class:nv-active={$activeNativeSurfaces.has('floating')}
         data-nv-clip={$activeNativeSurfaces.has('floating') ? 'floating' : undefined}
-        onpointerdown={onBodyPointerDown}
         ondblclick={mouseDoubleClick(() => setMapLocation('floating'))}
         use:doubleTap={() => setMapLocation('floating')}
       >
@@ -314,12 +239,20 @@
       </div>
     {/if}
 
-    <!-- Resize corner: the lighter L just inside the picture's top-right corner. Video mode only —
-         with the map in the frame its layer covers the chrome, so +page draws the same corner
+    <!-- Corner handles: the lighter L just inside the picture's top-right corner resizes, the
+         rounded square with the four-way arrow in the bottom-left corner moves. Video mode only —
+         with the map in the frame its layer covers the chrome, so +page draws the same corners
          above the map. -->
     {#if !mapHere}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="fw-grip" onpointerdown={onGripPointerDown} title={$t('video.resizeWindow')}></div>
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="fw-move" onpointerdown={onMovePointerDown} title={$t('video.moveWindow')}>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 3v18M3 12h18" />
+          <path d="M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3" />
+        </svg>
+      </div>
     {/if}
   </div>
 {/if}
@@ -392,11 +325,7 @@
     overflow: hidden;
     border-radius: 5px;
     border: 1px solid rgba(255, 255, 255, 0.12);
-    cursor: grab;
-    touch-action: none; /* let pointer-drag move the window instead of scrolling/panning */
-  }
-  .fw-body:active {
-    cursor: grabbing;
+    touch-action: none; /* nothing to scroll or pan on the picture */
   }
   /* Native-sink hole: while this window holds the hardware video layer, the glass must stop
      painting (the native layer shows through transparent DOM); the bezel is painted as an opaque
@@ -505,10 +434,11 @@
     padding: 0 10px;
   }
 
-  /* Resize corner — an L a shade lighter than the glass, set INSIDE the picture rather than drawn
-     into the bezel: it reads better there, and it is the same corner the detached window shows
-     (DetachedVideoFrame's `.dv-grip`). 7 px = the bezel's 4 px plus the 3 px inset both use. The
-     box is the hit area. */
+  /* Resize corner — a translucent light L, set INSIDE the picture rather than drawn into the
+     bezel: it reads better there, and it is the same corner the detached window shows
+     (DetachedVideoFrame's `.dv-grip`, still opaque grey). Translucent so it marks the corner
+     without sitting on the picture (Marc, 2026-09-10). 7 px = the bezel's 4 px plus the 3 px
+     inset both use. The box is the hit area. */
   .fw-grip {
     position: absolute;
     top: 7px;
@@ -519,13 +449,49 @@
     pointer-events: auto;
     box-sizing: border-box;
     background: transparent;
-    border-top: 4px solid #5e5e5e;
-    border-right: 4px solid #5e5e5e;
+    border-top: 4px solid rgba(190, 190, 190, 0.4);
+    border-right: 4px solid rgba(190, 190, 190, 0.4);
     border-top-right-radius: 8px;
     cursor: nesw-resize;
     touch-action: none;
   }
   .fw-grip:hover {
-    border-color: #727272;
+    border-color: rgba(190, 190, 190, 0.6);
+  }
+  /* Move handle — the resize corner's colour and weight as a rounded square in the bottom-left
+     corner, a four-way arrow filling it; the only thing that moves the window (see the header). */
+  .fw-move {
+    position: absolute;
+    bottom: 7px;
+    left: 7px;
+    width: 26px;
+    height: 26px;
+    z-index: 62;
+    pointer-events: auto;
+    box-sizing: border-box;
+    padding: 1px;
+    background: transparent;
+    border: 4px solid rgba(190, 190, 190, 0.4);
+    border-radius: 8px;
+    color: rgba(190, 190, 190, 0.4);
+    cursor: grab;
+    touch-action: none;
+  }
+  .fw-move:hover {
+    border-color: rgba(190, 190, 190, 0.6);
+    color: rgba(190, 190, 190, 0.6);
+  }
+  .fw-move:active {
+    cursor: grabbing;
+  }
+  .fw-move svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
 </style>

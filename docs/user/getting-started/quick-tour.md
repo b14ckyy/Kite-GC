@@ -301,9 +301,11 @@ room for either the map or a widget, rarely both. Tablets keep the desktop layou
 - **Video** has no floating window on the phone. Once a source runs (Video panel → Start), a
   **camera button** appears above the map buttons: it slides a **docked video window** into the
   bottom-right corner of the map, and slides it out again — behind the widget column and off the
-  screen — so the picture is one tap away and never in the way. Double-tap the window to swap video
-  and map: the video fills the map area and the small window holds a plain follow map (2D,
-  heading-up, no panning). In that mode the button turns into a **map button** in the bottom-right
+  screen — so the picture is one tap away and never in the way. The corner marker in the window's
+  top-left toggles between its normal and a compact size. Double-tap the window to swap video
+  and map: the video fills the map area and the small window holds a plain follow map (2D, no
+  panning — tap it to switch heading-up / north-up, slide a finger up or down on it to zoom). In
+  that mode the button turns into a **map button** in the bottom-right
   corner that hides and shows the small map; double-tap the full-screen video to bring the map back.
   The **video widget** works as on the desktop (double-tap swaps there too); while it is active, the
   docked window and its button stay hidden. Whatever is off-screen — a parked window, a widget on the

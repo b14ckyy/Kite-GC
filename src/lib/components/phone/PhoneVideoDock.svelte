@@ -14,7 +14,7 @@
      it) and passes it down. -->
 <script lang="ts">
   import { t } from 'svelte-i18n';
-  import { videoStream, videoState, bindVideoEl, setMapLocation, toggleFloating, reportMjpegError, reportImgSize, fpsProbe } from '$lib/stores/video';
+  import { videoStream, videoState, bindVideoEl, setMapLocation, toggleFloating, togglePhoneDockCompact, reportMjpegError, reportImgSize, fpsProbe } from '$lib/stores/video';
   import { canvasSink, mjpegSink } from '$lib/controllers/mjpegSink';
   import { nativeSurface, activeNativeSurfaces } from '$lib/controllers/nativeVideo';
   import { doubleTap, mouseDoubleClick } from '$lib/helpers/doubleTap';
@@ -144,6 +144,15 @@
         {/if}
         <VideoReconnectOverlay />
       </div>
+      <!-- Size toggle: the grey corner marker (the desktop frame's resize-corner look, mirrored to
+           the top-left) with a diagonal double arrow — a tap flips the window between its normal
+           and its compact size. Video mode only: with the map in the frame its layer covers the
+           chrome, so +page draws the same corner above the map. -->
+      <button class="dw-size" onclick={togglePhoneDockCompact} title={$t('video.dockSize')} aria-label={$t('video.dockSize')}>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M6 6l12 12M6 6h6M6 6v6M18 18h-6M18 18v-6" />
+        </svg>
+      </button>
     {/if}
   </div>
 {/if}
@@ -260,5 +269,40 @@
   .dw-body img.mirror.rot180,
   .dw-body canvas.mirror.rot180 {
     transform: scaleY(-1);
+  }
+  /* Size toggle — the translucent L of the desktop frame's resize corner, in the top-left, with
+     the diagonal double arrow inside. Above the body (z 61); the box is the hit area. */
+  .dw-size {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    width: 26px;
+    height: 26px;
+    z-index: 62;
+    pointer-events: auto;
+    box-sizing: border-box;
+    padding: 2px 0 0 2px;
+    background: transparent;
+    border: 0;
+    border-top: 4px solid rgba(190, 190, 190, 0.4);
+    border-left: 4px solid rgba(190, 190, 190, 0.4);
+    border-top-left-radius: 8px;
+    color: rgba(190, 190, 190, 0.4);
+    cursor: pointer;
+    touch-action: none;
+  }
+  .dw-size:hover {
+    border-color: rgba(190, 190, 190, 0.6);
+    color: rgba(190, 190, 190, 0.6);
+  }
+  .dw-size svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
 </style>
