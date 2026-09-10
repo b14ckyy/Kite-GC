@@ -133,6 +133,23 @@ The **UAV Info** tool on the navigation rail is a quick read-out of *what you're
   AUX-RC, ADS-B), lit when your INAV version supports them. These are version-dependent and INAV-specific,
   so the section appears only on an INAV link.
 
+The **vehicle type** row is a dropdown. Kite fills it with the type it detected during the handshake (the
+INAV mixer platform, or the MAVLink vehicle type plus the QuadPlane check), and you can change it at any
+time — when the flight controller's platform setting does not match the airframe, or on a telemetry-only
+link where Kite can only say *Generic*. The map and the 3D model follow your choice, and the flight
+recorder stores it with the flight, including a flight that is already being recorded. The override is
+not saved: it lasts for the session, and after a reconnect it comes back only when Kite recognises the
+same flight controller. INAV and MAVLink links report a hardware ID for that, shown as **FC ID**
+(shortened, with a copy button for the full value) and stored with each flight; telemetry-only links
+have none and start from *Generic* again.
+
+**Save to vehicle library** creates a [vehicle library](vehicles.md) entry from the connected craft in
+one click — name and craft name, the vehicle type, the board as FC model, firmware and version, and the
+FC ID. It appears on INAV and MAVLink links only. When a vehicle already carries this FC ID the button
+reads **View in vehicle library** instead and jumps straight to that entry. After swapping the flight
+controller of an existing vehicle, copy the new FC ID from here into the vehicle's build sheet and the
+button finds it again.
+
 ![The UAV Info panel](../assets/guides/telemetry/uav_info.png)
 /// caption
 The UAV Info panel on an INAV link — flight-controller identity and the version-gated feature badges.
