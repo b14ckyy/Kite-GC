@@ -102,7 +102,7 @@
   import PhoneVideoDock from "$lib/components/phone/PhoneVideoDock.svelte";
   import { setNativeRightBound } from "$lib/controllers/nativeVideo";
   import { doubleTap, mouseDoubleClick } from "$lib/helpers/doubleTap";
-  import { startFloatResize } from "$lib/helpers/floatWindowGestures";
+  import { startFloatMove, startFloatResize } from "$lib/helpers/floatWindowGestures";
   import { initVideo, videoState, videoStream, bindVideoEl, setMapLocation, reportMjpegError, setVideoWidgetActive, floatFrameRect, FLOAT_BEZEL_PX, FLOAT_MARGIN_PX, FLOAT_BTN_PX, FLOAT_BTN_GAP_PX } from "$lib/stores/video";
   import { canvasSink, mjpegSink } from "$lib/controllers/mjpegSink";
   import { nativeSurface, activeNativeSurfaces } from "$lib/controllers/nativeVideo";
@@ -3371,12 +3371,13 @@
     <StatusTextToasts />
   </div>
 
-  <!-- Floating-frame map control — top-level/unzoomed so it sits ABOVE the in-frame map (z2); the
-       float-win's own chrome lives in .ui-scale (z1) and would be hidden behind it. ✕ sends the map
-       back to main. Not while the frame is parked (the map slides out with it). -->
+  <!-- Floating-frame map controls — top-level/unzoomed so they sit ABOVE the in-frame map (z2); the
+       float-win's own chrome lives in .ui-scale (z1) and would be hidden behind it. Only the two
+       corner handles: the map goes back to main by double-clicking the full-screen video (a ✕ here
+       did the same and was dropped, Marc 2026-09-10). Not while the frame is parked (the map slides
+       out with it). -->
   {#if mapFloating && $videoState.status === 'live' && !phoneUi && $videoState.floating}
     <div class="miniframe-ctl" style={mapFrameStyle}>
-      <button class="mf-corner mf-close" style="border-top-left-radius:{5 * uiScale}px;" onclick={() => setMapLocation('main')} title={$t('video.close')}>✕</button>
       <!-- The window's resize corner, redrawn above the map just inside the picture's top-right
            corner (this layer is unzoomed and sits at the inner box, hence the scale offsets). -->
       <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -3386,6 +3387,20 @@
         onpointerdown={(e) => startFloatResize(e, { left: floatLeft, top: floatTop, width: floatW, height: floatH, vw: logicalW, vh: logicalH })}
         title={$t('video.resizeWindow')}
       ></div>
+      <!-- The window's move handle, redrawn above the map in the picture's bottom-left corner — the
+           only way to move the frame (a right-button / two-finger drag reaches the map instead). -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div
+        class="mf-corner mf-move"
+        style="bottom:{3 * uiScale}px; left:{3 * uiScale}px; width:{26 * uiScale}px; height:{26 * uiScale}px; padding:{uiScale}px; border-width:{floatBezel * uiScale}px; border-radius:{8 * uiScale}px;"
+        onpointerdown={(e) => startFloatMove(e, { left: floatLeft, top: floatTop, width: floatW, height: floatH, vw: logicalW, vh: logicalH })}
+        title={$t('video.moveWindow')}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 3v18M3 12h18" />
+          <path d="M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3" />
+        </svg>
+      </div>
     </div>
   {/if}
 
@@ -4212,36 +4227,45 @@
     box-sizing: border-box;
     touch-action: none;
   }
-  .mf-close {
-    left: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 13px;
-    line-height: 1;
-    color: #e0e0e0;
-    background: rgba(0, 0, 0, 0.5);
-    border: none;
-    /* Outer corner = the frame's inner box (5 px, scaled inline), inner corner 8 px. */
-    border-radius: 5px 0 8px 0;
-    cursor: pointer;
-  }
-  .mf-close:hover {
-    background: rgba(212, 0, 0, 0.7);
-    color: #fff;
-  }
   /* Same look as FloatingVideoWindow's .fw-grip: an L in the bezel (widths inline, scaled). */
   .mf-grip {
     right: 0;
     background: transparent;
     border-style: solid;
-    border-color: #5e5e5e;
+    border-color: rgba(190, 190, 190, 0.4);
     border-left: none;
     border-bottom: none;
     cursor: nesw-resize;
   }
   .mf-grip:hover {
-    border-color: #727272;
+    border-color: rgba(190, 190, 190, 0.6);
+  }
+  /* Same look as FloatingVideoWindow's .fw-move: the rounded square with the four-way arrow in
+     the bottom-left corner (box, border and padding inline, scaled). */
+  .mf-move {
+    top: auto;
+    background: transparent;
+    border-style: solid;
+    border-color: rgba(190, 190, 190, 0.4);
+    color: rgba(190, 190, 190, 0.4);
+    cursor: grab;
+  }
+  .mf-move:hover {
+    border-color: rgba(190, 190, 190, 0.6);
+    color: rgba(190, 190, 190, 0.6);
+  }
+  .mf-move:active {
+    cursor: grabbing;
+  }
+  .mf-move svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
   /* Full-size video shown in the content area when swapped (videoPrimary). The wrapper holds the
      chrome inset + black backdrop; the video fills it. */

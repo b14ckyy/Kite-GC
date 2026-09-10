@@ -655,6 +655,7 @@
     "dockMapShow": "Karte einblenden",
     "dockMapHide": "Karte ausblenden",
     "resizeWindow": "Fenstergröße ändern",
+    "moveWindow": "Fenster verschieben",
     "detach": "Videofenster abkoppeln",
     "detachedClose": "Video zurück in die App holen",
     "detachedFullscreen": "Vollbild",
