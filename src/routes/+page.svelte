@@ -251,12 +251,12 @@
   // Phone portrait: too narrow to fit the bottom HUD tiles in one row without clipping, so the dock
   // wraps them onto two rows (see the sizing below + the flex-wrap rule in WidgetPanel). Tablets and
   // desktop keep the single row. `winW`/`isMobile` are reactive so a rotate re-evaluates this.
-  const isPhone = $derived(isMobile && winW <= 600);
-  const bottomRows = $derived(isPhone ? 2 : 1);
+  const isPhonePortrait = $derived(isMobile && winW <= 600);
+  const bottomRows = $derived(isPhonePortrait ? 2 : 1);
   // Phone gets a taller dock (room for two HUD rows); otherwise the layout store override or default.
   const gridBottomHeight = $derived(
     $layout.bottomDock.sizeOverride ??
-      (isPhone ? 'clamp(230px, 40vh, 380px)' : GRID_DEFAULTS.bottomDockHeight)
+      (isPhonePortrait ? 'clamp(230px, 40vh, 380px)' : GRID_DEFAULTS.bottomDockHeight)
   );
 
   // Map-swap: the full-size video sink shown in the map zone when videoPrimary.
@@ -276,9 +276,11 @@
   // widget dock, but once that cap would make them shorter than the nav rail, they may overlay the
   // dock instead — the rail already scrolls past it, so the panel just follows. Logical px
   // throughout, so the switch adapts to the UI scale. The 6px keeps the rail's visual gap above
-  // the status bar instead of sitting flush on it.
+  // the status bar instead of sitting flush on it. `toolbarH` is the live bar height (53 on the
+  // desktop, taller on the iPad where the bar carries the status-bar inset), so the tablet uses the
+  // same rule (PanelShell's tablet block reads the reserve too).
   const panelBottomReserve = $derived(
-    winH / uiScale - 53 - bottomDockH - 24 - 12 < NAV_RAIL_FULL_HEIGHT ? '6px' : gridBottomHeight
+    winH / uiScale - toolbarH - bottomDockH - 24 - 12 < NAV_RAIL_FULL_HEIGHT ? '6px' : gridBottomHeight
   );
 
   // Floating-window rect — ONE computation (`floatFrameRect`, store) for the window itself (it gets
@@ -3705,7 +3707,7 @@
         orientation="horizontal"
         availableVmin={bottomAvailUnits}
         pxPerVmin={bottomPxPerUnit}
-        smallBoost={isPhone ? 1.5 : isTablet ? 1.4 : 1}
+        smallBoost={isPhonePortrait ? 1.5 : isTablet ? 1.4 : 1}
         sizes={panels.sizes ?? {}}
         bind:crossPx={bottomPanelCrossPx}
         {telem}

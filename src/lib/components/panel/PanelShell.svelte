@@ -181,16 +181,17 @@
   /* Tablet (iPad): the toolbar is taller than the desktop default (iOS status-bar + safe-top padding),
      so the fixed 65px top clipped the panel header under the bar. Track the live bar height, and size
      the panel to the gap between the bar and the bottom dock (iPad keeps the above-dock layout, unlike
-     the phone which overlays the dock). */
+     the phone which overlays the dock). Same `--panel-bottom-reserve` rule as the desktop: on a
+     window too short for the nav rail the panel may overlay the dock instead of being squeezed. */
   :global(html.is-tablet) .ps {
     top: calc(var(--toolbar-h, 65px) + 8px);
   }
   :global(html.is-tablet) .ps-compact,
   :global(html.is-tablet) .ps-advanced {
-    height: calc(100% - var(--toolbar-h, 65px) - var(--grid-bottom-height) - 24px - 20px);
+    height: calc(100% - var(--toolbar-h, 65px) - var(--panel-bottom-reserve, var(--grid-bottom-height)) - 24px - 20px);
   }
   :global(html.is-tablet) .ps-info {
-    max-height: calc(100% - var(--toolbar-h, 65px) - var(--grid-bottom-height) - 24px - 20px);
+    max-height: calc(100% - var(--toolbar-h, 65px) - var(--panel-bottom-reserve, var(--grid-bottom-height)) - 24px - 20px);
   }
   /* iPhone (any orientation): the screen is small, so
      - width is capped to the viewport (minus the rail + a margin) so the panel never clips off-screen;
