@@ -144,8 +144,10 @@ same flight controller. INAV and MAVLink links report a hardware ID for that, sh
 have none and start from *Generic* again.
 
 **Save to vehicle library** creates a [vehicle library](vehicles.md) entry from the connected craft in
-one click — name and craft name, the vehicle type, the board as FC model, firmware and version, and the
-FC ID. It appears on INAV and MAVLink links only. When a vehicle already carries this FC ID the button
+one click — name and craft name, the vehicle type, the board as FC model, firmware and version, the FC
+ID, the sensors the flight controller reports (GPS, compass, airspeed, rangefinder, optical flow; RTK only
+while the GPS has an RTK fix at that moment) and whether blackbox / dataflash logging is enabled. It
+appears on INAV and MAVLink links only. When a vehicle already carries this FC ID the button
 reads **View in vehicle library** instead and jumps straight to that entry. After swapping the flight
 controller of an existing vehicle, copy the new FC ID from here into the vehicle's build sheet and the
 button finds it again.
