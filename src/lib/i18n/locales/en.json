@@ -771,6 +771,10 @@
     "warnClimbForced": "Climb-angle limit forces some waypoints above the target clearance",
     "warnUnresolvable": "A leg between fixed waypoints stays below clearance"
   },
+  "fcUid": {
+    "copy": "Copy the full FC ID",
+    "copied": "Copied"
+  },
   "uavInfo": {
     "flightController": "Flight Controller",
     "craftName": "Craft Name",
@@ -788,7 +792,14 @@
     "mspRc": "MSP-RC",
     "auxRc": "AUX-RC",
     "adsb": "ADS-B",
-    "notConnected": "Not connected"
+    "notConnected": "Not connected",
+    "uid": "FC ID",
+    "typeHint": "Overrides the detected type for this session — the map model and the recorded flights follow it",
+    "typeDetected": "detected: {type}",
+    "saveToLibrary": "Save to vehicle library",
+    "viewInLibrary": "View in vehicle library",
+    "savedToLibrary": "Saved — view in vehicle library",
+    "saveFailed": "Save failed: {error}"
   },
   "settings": {
     "map": "Map",
@@ -950,6 +961,7 @@
     "craft": "Craft",
     "type": "Type",
     "editType": "Edit platform type",
+    "fcUid": "FC ID",
     "firmware": "Firmware",
     "protocol": "Protocol",
     "notAvailable": "N/A",
@@ -1418,6 +1430,7 @@
     "fcManufacturer": "Manufacturer",
     "fcFirmware": "Firmware",
     "fcFirmwareVersion": "Firmware version",
+    "fcUid": "FC hardware ID",
     "blackbox": "Blackbox / Dataflash",
     "yes": "Yes",
     "no": "No",

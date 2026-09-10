@@ -78,7 +78,7 @@
   import { activeWpNumber, replayWpTotal } from '$lib/stores/navStatus';
   import { missionManagerOpen, missionManagerSelectedId, requestOpenFlightId, requestOpenMissionId } from '$lib/stores/missionManager';
   import { batteryManagerOpen, batteryManagerCreateSerial, normalizeSerial } from '$lib/stores/batteryManager';
-  import { vehicleManagerOpen, vehicleManagerCreateCraft } from '$lib/stores/vehicleManager';
+  import { vehicleManagerOpen, vehicleManagerCreateCraft, vehicleManagerSelectedId } from '$lib/stores/vehicleManager';
   import type { BlackboxImportStatus } from '$lib/stores/flightlog';
   import { missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode, flightSetBatterySerial, updateFlightNotes, getFlight, flightlogCommitPending, flightlogDiscardPending, flightlogContinuePending, scanOrphanSessions, recoverDiscard, recoverSaveIncomplete, recoverContinue, batteryDbFindBySerial, batteryDbAddUsage, vehicleDbFindByCraftName, blackboxDecoderAvailable, downloadBlackboxDecode, hiresInfo, hiresParse, hiresSample, hiresDrop, hiresCleanup, scratchDir, scratchClear } from '$lib/stores/flightlog';
   import EndFlightDialog from "$lib/components/logbook/EndFlightDialog.svelte";
@@ -3795,7 +3795,16 @@
            self-positioned PanelShell; terrain is its own overlay below. -->
       {#if navPanelOpen && !terrainOpen}
         {#if activeTab === 'uav-info'}
-          <UavInfoPanel {connStatus} {fcInfo} />
+          <UavInfoPanel
+            {connStatus}
+            {fcInfo}
+            onOpenVehicle={(id) => {
+              activeTab = 'logbook';
+              settings.patch({ activeTab: 'logbook' });
+              vehicleManagerOpen.set(true);
+              vehicleManagerSelectedId.set(id);
+            }}
+          />
         {:else if activeTab === 'settings'}
           <SettingsPanel
             localeValue={$locale ?? 'en'}

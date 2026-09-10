@@ -11,7 +11,7 @@ use crate::flightlog::types::{FlightLogSettings, InavStats};
 use crate::mavlink_proto;
 use crate::msp::{
     FcInfo, FeatureSet, InavVersion, MspTransport, MSP_API_VERSION, MSP_BOARD_INFO, MSP_EEPROM_WRITE,
-    MSP_FC_VARIANT, MSP_FC_VERSION, MSP_NAME, MSP_SET_NAME, MSP_WP, MSPV2_INAV_MIXER,
+    MSP_FC_VARIANT, MSP_FC_VERSION, MSP_NAME, MSP_SET_NAME, MSP_UID, MSP_WP, MSPV2_INAV_MIXER,
 };
 use crate::msp::features::is_version_supported;
 use crate::scheduler;
@@ -417,6 +417,16 @@ fn connect_msp(
         }
     }
 
+    // 6b) MSP_UID → the MCU's 96-bit unique id (three little-endian u32 words), rendered as 24 hex
+    // chars. Informational: reconnect identity for the platform-type override, stored per flight.
+    match transport.msp_request(MSP_UID, &[]) {
+        Ok(resp) if resp.payload.len() >= 12 => {
+            fc_info.fc_uid = Some(resp.payload[..12].iter().map(|b| format!("{:02X}", b)).collect());
+        }
+        Ok(_) => log::warn!("MSP_UID: short reply"),
+        Err(e) => log::warn!("Failed to query MSP_UID: {}", e),
+    }
+
     // 7) Home position — MSP_WP #0 is INAV's RTH home (GPS_home, lat/lon in deg·1e7). One-shot at
     //    connect so a mid-flight connect / app restart recovers Home; the live arm-transition path
     //    only sets it when we actually witness the arm. Raw-parse the 21-byte WP payload (the home
@@ -505,6 +515,7 @@ fn connect_msp(
         *rc = crate::scheduler::rc_tx::RcTxState::default();
     }
 
+    store_recorder(&state, &recorder_handle);
     let handle = scheduler::start(
         Box::new(transport),
         config,
@@ -633,6 +644,7 @@ fn connect_mavlink(
     }
 
     // Start the MAVLink handler thread
+    store_recorder(&state, &recorder_handle);
     let handle = mavlink_proto::handler::start(byte_transport, fc_sysid, fc_compid, fc_info.fc_variant.clone(), app_handle, recorder_handle, state.rc_tx.clone());
 
     // Store MAVLink handle and FC info
@@ -706,6 +718,7 @@ fn connect_passive_telemetry(
         None
     };
 
+    store_recorder(&state, &recorder_handle);
     let handle = crate::passive_telemetry::start(byte_transport, app_handle, recorder_handle);
 
     {
@@ -746,11 +759,44 @@ pub async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
         None => {}
     }
 
-    // Clear FC info
+    // Clear FC info + the recorder handle
     let mut info = state.fc_info.lock().map_err(|e| e.to_string())?;
     *info = None;
+    if let Ok(mut rec) = state.recorder.lock() {
+        *rec = None;
+    }
 
     crate::link_presence::link_down();
     log::info!("Disconnected");
+    Ok(())
+}
+
+/// Publish the connection's recorder handle for the command layer (cleared again on disconnect).
+fn store_recorder(state: &State<'_, AppState>, rec: &Option<crate::flightlog::recorder::FlightRecorderHandle>) {
+    if let Ok(mut slot) = state.recorder.lock() {
+        *slot = rec.clone();
+    }
+}
+
+/// Override the platform type of the connected vehicle for this session (UAV Info panel dropdown).
+/// Updates the stored FC info and the recorder, so the flight being recorded — and any flight started
+/// later on this link — is saved with the chosen type. RAM only; nothing is persisted.
+#[tauri::command]
+pub fn set_platform_type(platform_type: u8, state: State<'_, AppState>) -> Result<(), String> {
+    {
+        let mut info = state.fc_info.lock().map_err(|e| e.to_string())?;
+        match info.as_mut() {
+            Some(i) => i.platform_type = platform_type,
+            None => return Err("Not connected".into()),
+        }
+    }
+    if let Ok(slot) = state.recorder.lock() {
+        if let Some(rec) = slot.as_ref() {
+            if let Ok(mut r) = rec.lock() {
+                r.set_platform_type(platform_type);
+            }
+        }
+    }
+    log::info!("Platform type override: {}", platform_type);
     Ok(())
 }

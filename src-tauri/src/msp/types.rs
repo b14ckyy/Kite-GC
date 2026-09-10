@@ -57,7 +57,7 @@ pub const MSP_GPSSTATISTICS: u16 = 166;
 // pub const MSP_ACTIVEBOXES: u16 = 113;
 // pub const MSP_STATUS_EX: u16 = 150;
 // pub const MSP_BATTERY_STATE: u16 = 130;
-// pub const MSP_UID: u16 = 160;
+pub const MSP_UID: u16 = 160;
 // pub const MSP_GPS_SV_INFO: u16 = 164;
 
 // ── Mission / Waypoint MSP v1 command codes ─────────────────────────
@@ -147,4 +147,10 @@ pub struct FcInfo {
     /// a QuadPlane reports fc_variant "ArduPlane" but a VTOL_* MAV_TYPE.
     #[serde(default)]
     pub mav_type: u8,
+    /// Hardware identity of the flight controller where the protocol exposes one: INAV = MSP_UID (the
+    /// 96-bit MCU serial, 24 hex chars), MAVLink = AUTOPILOT_VERSION uid2 (or uid). `None` for passive
+    /// telemetry. Informational: lets the live platform-type override survive a reconnect to the same
+    /// FC and is stored with each flight — linking stays on the craft name.
+    #[serde(default)]
+    pub fc_uid: Option<String>,
 }

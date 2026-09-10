@@ -265,6 +265,11 @@ export async function vehicleDbFindByCraftName(craftName: string, dbPath: string
   return invoke<Vehicle | null>('vehicle_db_find_by_craft_name', { craftName, dbPath: dbPath || undefined });
 }
 
+/** Vehicle carrying this FC hardware id (UAV Info panel: "in library" check → "View in library"). */
+export async function vehicleDbFindByFcUid(fcUid: string, dbPath: string): Promise<Vehicle | null> {
+  return invoke<Vehicle | null>('vehicle_db_find_by_fc_uid', { fcUid, dbPath: dbPath || undefined });
+}
+
 /** Delete a vehicle (flights keep their craft name → "not in library"). */
 export async function vehicleDbDelete(id: number, dbPath: string): Promise<void> {
   return invoke<void>('vehicle_db_delete', { id, dbPath: dbPath || undefined });

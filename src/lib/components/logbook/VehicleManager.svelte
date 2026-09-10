@@ -24,10 +24,11 @@
   } from '$lib/stores/flightlog';
   import type { Vehicle, VehicleInput, VehicleAggregate, VehicleFile, FlightSummary, InavStats } from '$lib/stores/flightlogTypes';
   import {
-    vehicleManagerSelectedId, vehicleSearchQuery, vehicleManagerCreateCraft, normalizeCraftName,
+    vehicleManagerSelectedId, vehicleSearchQuery, vehicleManagerCreateCraft, normalizeCraftName, vehicleLibraryChanged,
   } from '$lib/stores/vehicleManager';
   import { requestOpenFlightId } from '$lib/stores/missionManager';
   import { connection } from '$lib/stores/connection';
+  import FcUidChip from '../FcUidChip.svelte';
   import { autopilotSystem } from '$lib/stores/autopilotContext';
   import { telemetry } from '$lib/stores/telemetry';
   import { setInavCraftName, readInavStats } from '$lib/controllers/connectionController';
@@ -63,7 +64,7 @@
     sensorAirspeed: boolean; sensorRangefinder: boolean; sensorOpticalFlow: boolean;
     sensorGps: boolean; sensorRtk: boolean; sensorCompass: boolean;
     fcModel: string; fcManufacturer: string; fcFirmware: string; fcFirmwareVersion: string;
-    blackboxAvailable: boolean;
+    blackboxAvailable: boolean; fcUid: string;
   }
   let editing = $state(false);
   let isCreate = $state(false);
@@ -103,6 +104,7 @@
       sensorAirspeed: false, sensorRangefinder: false, sensorOpticalFlow: false,
       sensorGps: false, sensorRtk: false, sensorCompass: false,
       fcModel: '', fcManufacturer: '', fcFirmware: '', fcFirmwareVersion: '', blackboxAvailable: false,
+      fcUid: '',
     };
   }
 
@@ -143,6 +145,7 @@
       fc_firmware: strOrNull(form.fcFirmware),
       fc_firmware_version: strOrNull(form.fcFirmwareVersion),
       blackbox_available: form.blackboxAvailable,
+      fc_uid: strOrNull(form.fcUid),
     };
   }
 
@@ -182,7 +185,12 @@
     }
   }
 
+  // Vehicle whose details are loaded — lets the effect below tell an external selection change
+  // (UAV Info "View in library" while the Manager is mounted) from the paths that load themselves.
+  let detailsFor: number | null = null;
+
   async function loadDetails(v: Vehicle) {
+    detailsFor = v.id;
     if (!v.craft_name) { aggregate = null; linkedFlights = []; return; }
     try {
       aggregate = await vehicleDbAggregate(v.craft_name, dbPath());
@@ -193,10 +201,10 @@
     }
   }
 
+  // Details load through the selection effect below.
   function select(v: Vehicle) {
-    vehicleManagerSelectedId.set(v.id);
     editing = false;
-    void loadDetails(v);
+    vehicleManagerSelectedId.set(v.id);
   }
 
   function toggleGroup(key: string) {
@@ -228,6 +236,7 @@
       sensorGps: v.sensor_gps, sensorRtk: v.sensor_rtk, sensorCompass: v.sensor_compass,
       fcModel: v.fc_model ?? '', fcManufacturer: v.fc_manufacturer ?? '', fcFirmware: v.fc_firmware ?? '',
       fcFirmwareVersion: v.fc_firmware_version ?? '', blackboxAvailable: v.blackbox_available,
+      fcUid: v.fc_uid ?? '',
     };
     formBaseline = null;
     isCreate = false;
@@ -500,6 +509,28 @@
     vehicleManagerCreateCraft.set(null);
   });
 
+  // Selection set from outside while mounted → load its details (no-op for the in-Manager paths,
+  // which load themselves and mark `detailsFor` first).
+  $effect(() => {
+    const id = $vehicleManagerSelectedId;
+    if (id == null || id === detailsFor) return;
+    const v = vehicles.find((x) => x.id === id);
+    if (v) {
+      editing = false;
+      void loadDetails(v);
+    }
+  });
+
+  // The library changed outside the Manager (UAV Info panel save) → reload. The first run only
+  // records the current counter.
+  let seenLibraryChange = 0;
+  $effect(() => {
+    const n = $vehicleLibraryChanged;
+    if (n === seenLibraryChange) return;
+    seenLibraryChange = n;
+    void reload();
+  });
+
   // Init once: load + restore selection.
   let didInit = false;
   $effect(() => {
@@ -643,12 +674,13 @@
         </div>
       {/if}
 
-      {#if any(v.fc_model, v.fc_manufacturer, v.fc_firmware, v.fc_firmware_version, v.blackbox_available)}
+      {#if any(v.fc_model, v.fc_manufacturer, v.fc_firmware, v.fc_firmware_version, v.blackbox_available, v.fc_uid)}
         <div class="section-heading">{$t('vehicleMgr.flightController')}</div>
         <div class="fc-info-grid">
           {#if v.fc_model}<span class="fc-label">{$t('vehicleMgr.fcModel')}</span><span class="fc-value">{v.fc_model}</span>{/if}
           {#if v.fc_manufacturer}<span class="fc-label">{$t('vehicleMgr.fcManufacturer')}</span><span class="fc-value">{v.fc_manufacturer}</span>{/if}
           {#if v.fc_firmware}<span class="fc-label">{$t('vehicleMgr.fcFirmware')}</span><span class="fc-value">{v.fc_firmware}{v.fc_firmware_version ? ` ${v.fc_firmware_version}` : ''}</span>{/if}
+          {#if v.fc_uid}<span class="fc-label">{$t('vehicleMgr.fcUid')}</span><span class="fc-value"><FcUidChip uid={v.fc_uid} /></span>{/if}
           <span class="fc-label">{$t('vehicleMgr.blackbox')}</span><span class="fc-value">{v.blackbox_available ? $t('vehicleMgr.yes') : $t('vehicleMgr.no')}</span>
         </div>
       {/if}
@@ -910,6 +942,9 @@
     </label>
     <label class="fld"><span class="fld-label">{$t('vehicleMgr.fcFirmwareVersion')}</span>
       <input class="fld-input" type="text" bind:value={form.fcFirmwareVersion} />
+    </label>
+    <label class="fld"><span class="fld-label">{$t('vehicleMgr.fcUid')}</span>
+      <input class="fld-input" type="text" bind:value={form.fcUid} />
     </label>
     <label class="vmv-sensor vmv-sensor-fc"><Toggle bind:checked={form.blackboxAvailable} /><span>{$t('vehicleMgr.blackbox')}</span></label>
   </div>

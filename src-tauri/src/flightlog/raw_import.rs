@@ -631,6 +631,7 @@ pub fn import_raw_log_with_progress<F: Fn(u8, &str, &str)>(
             fc_version: id.fc_version.clone(),
             board_id: id.board.clone(),
             platform_type: id.platform_type,
+            fc_uid: None,
             protocol: protocol.to_string(),
             start_lat,
             start_lon,
