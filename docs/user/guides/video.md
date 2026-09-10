@@ -154,14 +154,16 @@ back to the full-screen background.
 
 How interactive the swapped-in **mini-map** is depends on where it landed:
 
-- **In the widget** — deliberately limited by space: **2D only** and **heading-follow only**, but you
-  **can zoom**. Nothing else on that little map reacts (no waypoint placing or dragging, no context
-  menu), and its markers are drawn at half size. Switching the mission editor on brings the map back
-  to full screen automatically.
+- **In the widget** — deliberately limited by space: **2D only** and **follow only** — a **tap** on
+  the little map switches between **heading-up** and **north-up** (remembered), and you **can zoom**:
+  mouse wheel or pinch, or **slide one finger up / down** on a touchscreen. Nothing else on it reacts
+  (no waypoint placing or dragging, no context menu), and its markers are drawn at half size.
+  Switching the mission editor on brings the map back to full screen automatically.
 - **In the floating window** — fully interactive: pan and zoom normally (left-drag / single-touch). To
   **move the floating frame itself** while it holds the map, drag with the **right mouse button**
   (desktop) or **two fingers** (touchscreen).
-- **On a phone** (docked window or widget) — the widget's limits apply: 2D, heading-follow, no panning.
+- **On a phone** (docked window or widget) — the widget's limits apply: 2D, follow, no panning. Tap
+  the small map to switch heading-up / north-up, slide a finger up or down on it to zoom (or pinch).
   Double-tap swaps. With the video full-screen, the corner button becomes a **map button** that hides
   and shows the small map; double-tap the full-screen video to send the map back. Unobstructed
   fullscreen does not exist on the phone — the video fills the map area next to the widget column.
