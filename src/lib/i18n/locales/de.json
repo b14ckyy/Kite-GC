@@ -543,6 +543,7 @@
     "button": "Über",
     "license": "Lizenz",
     "source": "Quellcode",
+    "privacy": "Datenschutz",
     "supportedFirmware": "Unterstützte Autopilot-Firmware",
     "thirdParty": "Drittanbieter-Lizenzen",
     "thirdPartyNote": "Eingebundene Komponenten und ihre Lizenzen. Transitive Abhängigkeiten stehen unter kompatiblen permissiven Lizenzen.",

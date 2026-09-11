@@ -12,3 +12,6 @@ export const BUILD_DATE = __BUILD_DATE__;
 export const COPYRIGHT = '© 2026 Marc Hoffmann (b14ckyy)';
 export const LICENSE = 'GPL-3.0-or-later';
 export const REPO_URL = 'https://github.com/b14ckyy/Kite-GC';
+/** Published user docs (MkDocs site); `latest` is the released minor's docs. */
+export const DOCS_URL = 'https://b14ckyy.github.io/Kite-GC/latest/';
+export const PRIVACY_URL = `${DOCS_URL}privacy/`;
