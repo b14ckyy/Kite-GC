@@ -529,6 +529,7 @@
     "license": "Licence",
     "source": "Code source",
     "privacy": "Confidentialité",
+    "community": "Communauté",
     "supportedFirmware": "Firmware d'autopilote prise en charge",
     "thirdParty": "Licences tierces",
     "thirdPartyNote": "Composants intégrés et leurs licences. Les dépendances transitives sont sous licences permissives compatibles.",

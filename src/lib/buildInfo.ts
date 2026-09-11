@@ -15,3 +15,5 @@ export const REPO_URL = 'https://github.com/b14ckyy/Kite-GC';
 /** Published user docs (MkDocs site); `latest` is the released minor's docs. */
 export const DOCS_URL = 'https://b14ckyy.github.io/Kite-GC/latest/';
 export const PRIVACY_URL = `${DOCS_URL}privacy/`;
+/** The community Discord — the permanent invite, lands in #rules. */
+export const DISCORD_URL = 'https://discord.gg/3FM7EWhkg9';
