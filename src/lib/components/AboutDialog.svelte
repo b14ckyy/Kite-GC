@@ -10,6 +10,7 @@
   import { openUrl } from '@tauri-apps/plugin-opener';
   import {
     APP_NAME, APP_TAGLINE, APP_VERSION, GIT_COMMIT, BUILD_DATE, COPYRIGHT, LICENSE, REPO_URL, PRIVACY_URL,
+    DISCORD_URL,
   } from '$lib/buildInfo';
   import { THIRD_PARTY_LICENSES, SUPPORTED_FIRMWARE } from '$lib/config/thirdPartyLicenses';
 
@@ -48,6 +49,10 @@
         <div class="about-row">
           <span class="about-k">{$t('about.privacy')}</span>
           <button class="about-link" onclick={() => openExt(PRIVACY_URL)}>{PRIVACY_URL}</button>
+        </div>
+        <div class="about-row">
+          <span class="about-k">{$t('about.community')}</span>
+          <button class="about-link" onclick={() => openExt(DISCORD_URL)}>{DISCORD_URL}</button>
         </div>
       </div>
 

@@ -552,6 +552,7 @@
     "license": "许可证",
     "source": "源代码",
     "privacy": "隐私政策",
+    "community": "社区",
     "supportedFirmware": "支持的飞控固件",
     "thirdParty": "第三方许可证",
     "thirdPartyNote": "捆绑组件及其许可证。传递依赖带有兼容的宽松许可证。",
