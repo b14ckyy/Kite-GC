@@ -124,3 +124,7 @@ Kite Ground Control is licensed under **[GPL-3.0-or-later](https://www.gnu.org/l
 Use the **[GitHub issue tracker](https://github.com/b14ckyy/Kite-GC/issues)**. For bug reports, the
 in-app diagnostics log (Settings → Diagnostics) and your OS / autopilot / firmware versions help a lot —
 see **[Reporting a problem](../troubleshooting/reporting-issues.md)**.
+
+For questions and discussion there is the **[Kite Discord](https://discord.gg/3FM7EWhkg9)** (English): `#help` for
+user questions, `#ideas` for feature ideas before they become issues, `#development` for
+contributors — PRs, translations, architecture.

@@ -103,6 +103,15 @@ Everything you'd expect from a ground station:
   **[quick tour](getting-started/quick-tour.md)**.
 - Having trouble connecting? See **[Troubleshooting → Connection](troubleshooting/connection.md)**.
 
+## Community
+
+Questions, setups, flight videos — the Kite community meets on Discord (English):
+
+[:fontawesome-brands-discord: Join the Kite Discord](https://discord.gg/3FM7EWhkg9){ .md-button .md-button--primary }
+
+Bugs and feature ideas go to [GitHub](https://github.com/b14ckyy/Kite-GC/issues) — see
+**[Reporting a problem](troubleshooting/reporting-issues.md)** for what to include.
+
 ---
 
 Kite GC is free, open-source software (GPL-3.0-or-later).
