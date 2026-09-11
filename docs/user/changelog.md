@@ -215,6 +215,13 @@ inside the box of the feature release they belong to, so the notes for one relea
 
 ??? note "1.0.1 — patch release"
 
+    **Added**
+
+    - **Community link in About.** The About dialog links to the Kite Discord
+      (https://discord.gg/3FM7EWhkg9) next to the source repository. [#163]
+    - **Privacy policy in About.** The About dialog links to the published privacy policy, so it
+      is reachable from inside the app. [#160]
+
     **Fixed**
 
     - **HDOP on INAV showed the wrong figure.** The GPS tile read the position-error field instead
@@ -272,4 +279,6 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#154]: https://github.com/b14ckyy/Kite-GC/pull/154
 [#156]: https://github.com/b14ckyy/Kite-GC/pull/156
 [#157]: https://github.com/b14ckyy/Kite-GC/pull/157
+[#160]: https://github.com/b14ckyy/Kite-GC/pull/160
 [#162]: https://github.com/b14ckyy/Kite-GC/pull/162
+[#163]: https://github.com/b14ckyy/Kite-GC/pull/163
