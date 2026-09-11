@@ -254,8 +254,14 @@ KiteGC_<OS>_<arch>_<version>_<type>.<ext>
 ```
 
 - **Type** = `installer` (`.exe` / `.deb` / `.rpm` / `.dmg`, and the Android `.apk`), `standalone`
-  (`.AppImage`, or the macOS `.app` zipped), or `portable` (the bare executable zipped **with an empty
-  `.portable` marker**).
+  (`.AppImage`, or the macOS `.app` zipped), `portable` (the bare executable zipped **with an empty
+  `.portable` marker**), or `update` (macOS only: the `.app` as `.tar.gz`, what the in-app updater
+  downloads).
+- **In-app updates** (*Update and Restart* in the update notice) need a `.sig` beside each installer
+  and a `latest.json` manifest on the GitHub release. Both are produced by the maintainer over the
+  collected `release/` folder (`just update-manifest`, i.e. `scripts/make-update-manifest.sh`) with a
+  signing key that is not in the repository — a local build works without it, it just cannot be
+  offered as an update.
 - The naming logic lives in `scripts/collect-release.*` and is shared by local builds and the GitHub
   release workflow (`.github/workflows/release.yml`), so filenames match everywhere.
 - `just build-android` drops its APK into the same folder as `KiteGC_Android_<abi>_<version>_installer.apk`

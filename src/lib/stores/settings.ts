@@ -293,8 +293,9 @@ export const DEFAULT_TELEMETRY_API: TelemetryApiSettings = {
 export type DefaultProtocol = 'last' | 'msp' | 'mavlink' | 'telemetry';
 
 // ── Update check (GitHub releases — see controllers/updateCheck.ts) ─────────────────────────────────
-/** Update-check channel: off, stable releases only, or include pre-releases. Default `release`. */
-export type UpdateCheckMode = 'disabled' | 'release' | 'prerelease';
+/** Update-check channel: off, stable releases, patch releases of the running minor only, or include
+ *  pre-releases. Default `release`. */
+export type UpdateCheckMode = 'disabled' | 'release' | 'patch' | 'prerelease';
 
 export interface UpdateCheckSettings {
   /** Which releases to check against on startup. */

@@ -92,6 +92,19 @@ inside the box of the feature release they belong to, so the notes for one relea
         preview. Widgets are rearranged by **long-pressing** them — mouse or finger — with no edit
         button any more; click outside the docks or press Escape to finish. [#127]
 
+    ??? info "Kite updates itself"
+        The update notice now shows the **release notes** right in the dialog, and next to *Open
+        Release Page* there is **Update and Restart**: Kite downloads the new version, installs it
+        and starts again — on Windows and Linux through the installer of the package you have
+        (a `.deb`/`.rpm` asks for your password), on macOS by swapping the app bundle, and a
+        **portable** copy replaces its own executable. Nothing is downloaded until you press the
+        button; *Remind me later* and *Skip this version* work as before. Android and iOS open
+        their app store instead.
+
+        **Patch releases only.** A new choice under Settings → Updates keeps you on the bug-fix
+        line of the version you run: 1.1.0 is told about 1.1.1, never about 1.2.0. The default stays
+        *Stable releases*. [#162]
+
     **Added**
 
     - **Android support** — native app with USB serial, Bluetooth LE and Wi-Fi links, touch layout
@@ -152,6 +165,12 @@ inside the box of the feature release they belong to, so the notes for one relea
       and gains **Save to vehicle library**, which creates the library entry from the connected craft —
       name, type, board, firmware, FC ID, the reported sensors and the blackbox state — or jumps to the
       entry that already carries this FC ID. [#157]
+
+    - **Update and Restart** — the update notice installs the new version in place (installer,
+      app bundle or portable executable) and restarts Kite; the release notes are shown in the
+      dialog. [#162]
+    - **Patch releases only** — update-check channel that offers bug-fix releases of the running
+      version only (1.1.0 → 1.1.1, never 1.2.0). [#162]
 
     **Removed**
 
@@ -253,3 +272,4 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#154]: https://github.com/b14ckyy/Kite-GC/pull/154
 [#156]: https://github.com/b14ckyy/Kite-GC/pull/156
 [#157]: https://github.com/b14ckyy/Kite-GC/pull/157
+[#162]: https://github.com/b14ckyy/Kite-GC/pull/162

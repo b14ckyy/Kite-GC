@@ -116,12 +116,18 @@ See **[Flight logbook](../guides/logbook.md)** for how these are used.
 
 | Setting | What it does | Default |
 |---|---|---|
-| **Check for updates** | Whether Kite asks GitHub for a newer version when it starts — **Disabled**, **Stable releases**, or **Include pre-releases** (betas and release candidates). | Stable releases |
+| **Check for updates** | Whether Kite asks GitHub for a newer version when it starts — **Disabled**, **Stable releases**, **Patch releases only** (bug-fix releases of the version you run, e.g. 1.1.0 → 1.1.1, never 1.2.0), or **Include pre-releases** (betas and release candidates). | Stable releases |
 
-Kite never downloads or installs an update on its own. When a newer version exists you get a notice
-with the version you have, the one that is available, and three choices: **Open Release Page** to read
-what changed, **Remind me later**, or **Skip this version** — which suppresses the notice for that one
-version only.
+Kite never downloads anything on its own. When a newer version exists you get a notice with the
+version you have, the one that is available, and the release notes, plus four choices:
+
+- **Update and Restart** downloads the new version, installs it and restarts Kite. On Windows and
+  Linux this runs the installer of the package you installed (a `.deb`/`.rpm` asks for your password);
+  on macOS the app bundle is replaced in place. A **portable** copy replaces its own executable and
+  restarts. On Android and iOS the button opens the app store instead.
+- **Open Release Page** shows the release on GitHub in your browser, with every download.
+- **Remind me later** asks again at the next start.
+- **Skip this version** suppresses the notice for that one version only.
 
 ### Mission Control
 

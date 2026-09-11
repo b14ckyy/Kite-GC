@@ -401,7 +401,15 @@
     "prerelease": "pre-release",
     "openPage": "Open Release Page",
     "later": "Remind me later",
-    "skip": "Skip this version"
+    "skip": "Skip this version",
+    "install": "Update and Restart",
+    "playStore": "Open in Play Store",
+    "appStore": "Open in App Store",
+    "notes": "What's new",
+    "downloading": "Downloading… {pct}%",
+    "installing": "Installing…",
+    "failed": "Update failed: {error}",
+    "portableNote": "Portable build: the executable is replaced in place and Kite restarts."
   },
   "airspace": {
     "title": "Airspace Manager",
@@ -919,8 +927,9 @@
     "updateCheck": "Check for updates",
     "updateDisabled": "Disabled",
     "updateRelease": "Stable releases",
+    "updatePatch": "Patch releases only",
     "updatePrerelease": "Include pre-releases",
-    "updateHint": "Checks GitHub for a newer version on startup. No automatic download — you'll be pointed to the release notes.",
+    "updateHint": "Checks GitHub for a newer version on startup. Nothing is downloaded until you choose Update and Restart.",
     "alertThresholdsHint": "Alert thresholds. 0 = disabled.",
     "hudWidgets": "HUD Widgets",
     "rateHint": "Rate changes take effect on next connect.",

@@ -845,6 +845,7 @@
           onchange={(e) => onPatch({ updateCheck: { ...updateCheck, mode: (e.target as HTMLSelectElement).value as UpdateCheckMode } })}>
           <option value="disabled">{$t('settings.updateDisabled')}</option>
           <option value="release">{$t('settings.updateRelease')}</option>
+          <option value="patch">{$t('settings.updatePatch')}</option>
           <option value="prerelease">{$t('settings.updatePrerelease')}</option>
         </select>
       </div>

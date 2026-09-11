@@ -390,7 +390,15 @@
     "prerelease": "pré-version",
     "openPage": "Ouvrir la page de version",
     "later": "Me rappeler plus tard",
-    "skip": "Ignorer cette version"
+    "skip": "Ignorer cette version",
+    "install": "Mettre à jour et redémarrer",
+    "playStore": "Ouvrir dans le Play Store",
+    "appStore": "Ouvrir dans l'App Store",
+    "notes": "Nouveautés",
+    "downloading": "Téléchargement… {pct}%",
+    "installing": "Installation…",
+    "failed": "Échec de la mise à jour : {error}",
+    "portableNote": "Version portable : l'exécutable est remplacé sur place, puis Kite redémarre."
   },
   "airspace": {
     "title": "Gestionnaire d'espace aérien",
@@ -840,8 +848,9 @@
     "updateCheck": "Rechercher des mises à jour",
     "updateDisabled": "Désactivé",
     "updateRelease": "Versions stables",
+    "updatePatch": "Correctifs uniquement",
     "updatePrerelease": "Inclure les pré-versions",
-    "updateHint": "Vérifie au démarrage s'il existe une version plus récente sur GitHub. Pas de téléchargement automatique — vous serez dirigé vers les notes de version.",
+    "updateHint": "Vérifie au démarrage s'il existe une version plus récente sur GitHub. Rien n'est téléchargé avant que vous choisissiez « Mettre à jour et redémarrer ».",
     "missionControl": "Contrôle de mission",
     "defaultWpAlt": "Altitude WP par défaut",
     "defaultPhTime": "Durée PH par défaut",
