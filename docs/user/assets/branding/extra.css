@@ -58,3 +58,28 @@
   text-transform: uppercase;
   vertical-align: 0.15em;
 }
+
+/* ── Header: Discord icon in front of the repository link ──────────────────────────────────────
+   overrides/partials/source.html adds a second link into the header's source box, so on desktop the
+   box becomes a row: the icon keeps Material's 2rem icon cell, the repository link takes the rest,
+   and the box grows by the icon's width so the repo name is not cut. Material hides the box below
+   60em and shows the same partial in the drawer instead; there the icon is dropped (the footer has
+   it) so the drawer keeps its stock layout. */
+@media screen and (min-width: 60em) {
+  .md-header__source {
+    display: flex;
+    align-items: center;
+    width: 13.7rem;
+    max-width: 13.7rem;
+  }
+  .md-header__source .kite-header-discord {
+    flex: 0 0 auto;
+  }
+  .md-header__source .md-source[data-md-component="source"] {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+}
+.md-nav__source .kite-header-discord {
+  display: none;
+}
