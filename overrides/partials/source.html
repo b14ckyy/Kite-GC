@@ -1,0 +1,23 @@
+{#-
+  Kite: the header's repository block gets a Discord icon in front of the GitHub link. The icon
+  reuses the Discord entry of `extra.social` (mkdocs.yml), so the invite is defined once. Everything
+  after it is Material's own partials/source.html (9.7), copied unchanged — check it against the
+  theme after a Material upgrade. In the mobile drawer the icon is hidden (extra.css); the footer
+  carries it there.
+-#}
+{% for link in config.extra.social if link.icon == "fontawesome/brands/discord" %}
+<a href="{{ link.link }}" title="{{ link.name }}" class="md-source kite-header-discord" target="_blank" rel="noopener">
+  <div class="md-source__icon md-icon">
+    {% include ".icons/" ~ link.icon ~ ".svg" %}
+  </div>
+</a>
+{% endfor %}
+<a href="{{ config.repo_url }}" title="{{ lang.t('source') }}" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    {% set icon = config.theme.icon.repo or "fontawesome/brands/git-alt" %}
+    {% include ".icons/" ~ icon ~ ".svg" %}
+  </div>
+  <div class="md-source__repository">
+    {{ config.repo_name }}
+  </div>
+</a>
