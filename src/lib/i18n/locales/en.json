@@ -540,6 +540,7 @@
     "license": "License",
     "source": "Source",
     "privacy": "Privacy policy",
+    "community": "Community",
     "supportedFirmware": "Supported autopilot firmware",
     "thirdParty": "Third-party licenses",
     "thirdPartyNote": "Bundled components and their licenses. Transitive dependencies carry compatible permissive licenses.",

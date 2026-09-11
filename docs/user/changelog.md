@@ -126,6 +126,13 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     **1.0.1**{ .kite-patch } *in development*{ .kite-badge }
 
+    **Added**
+
+    - **Community link in About.** The About dialog links to the Kite Discord
+      (https://discord.gg/3FM7EWhkg9) next to the source repository. [#163]
+    - **Privacy policy in About.** The About dialog links to the published privacy policy, so it
+      is reachable from inside the app. [#160]
+
     **Fixed**
 
     - **The 3D live view stuttered more the longer a flight went on.** The live trail was rebuilt
@@ -171,3 +178,5 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#141]: https://github.com/b14ckyy/Kite-GC/pull/141
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143
 [#145]: https://github.com/b14ckyy/Kite-GC/pull/145
+[#160]: https://github.com/b14ckyy/Kite-GC/pull/160
+[#163]: https://github.com/b14ckyy/Kite-GC/pull/163
