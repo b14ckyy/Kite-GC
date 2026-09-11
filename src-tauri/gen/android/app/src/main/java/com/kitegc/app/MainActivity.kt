@@ -7,6 +7,8 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.graphics.Insets
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -65,6 +67,21 @@ class MainActivity : TauriActivity() {
     super.onCreate(savedInstanceState)
 
     hideSystemBars()
+
+    // The bars are hidden, but Android 9 (the RadioMaster AX12, the API 28 emulator) keeps reporting
+    // them as system-window insets - 40 px top, 80 px right in landscape - and the WebView turns those
+    // into `env(safe-area-inset-*)`: the phone chrome then pads itself off the screen (widget column
+    // cut at the right edge, rail and buttons pushed down) while the page itself fills the display.
+    // Strip the system-bar insets before the view tree sees them; the display cutout stays, which is
+    // the one thing the safe-area rules exist for. Android 14 already reports 0 here, so this is a
+    // no-op on current devices.
+    ViewCompat.setOnApplyWindowInsetsListener(window.decorView) { v, insets ->
+      val stripped = WindowInsetsCompat.Builder(insets)
+        .setInsets(WindowInsetsCompat.Type.systemBars(), Insets.NONE)
+        .setInsetsIgnoringVisibility(WindowInsetsCompat.Type.systemBars(), Insets.NONE)
+        .build()
+      ViewCompat.onApplyWindowInsets(v, stripped)
+    }
 
     // The display stays on only while a telemetry link is active — nav-app behaviour, driven from
     // Rust through ScreenLock on connect / disconnect / lost link. Unconnected, the normal screen
