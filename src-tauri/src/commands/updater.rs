@@ -102,9 +102,6 @@ async fn install_bundle(app: &AppHandle, tag: &str) -> Result<(), String> {
         .updater_builder()
         .endpoints(vec![manifest])
         .map_err(|e| format!("Updater setup failed: {e}"))?
-        // TEST ONLY: accept the release even when it is not newer than the running app, so the whole
-        // path can be exercised against the current release. Remove before the final commit.
-        .version_comparator(|_current, _remote| true)
         .build()
         .map_err(|e| format!("Updater setup failed: {e}"))?;
     let update = updater

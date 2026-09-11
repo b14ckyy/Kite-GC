@@ -57,9 +57,6 @@ export const updateKind = writable<UpdateKind>('installer');
 
 export const installState = writable<InstallState>({ phase: 'idle', percent: null, error: '' });
 
-/** TEST ONLY — see runUpdateCheck. Delete with the bypass. */
-const TEST_ALWAYS_OFFER = true;
-
 /** The running app version (for the dialog's "you have …" line). */
 export const currentVersion = APP_VERSION;
 
@@ -79,11 +76,7 @@ export async function runUpdateCheck(): Promise<void> {
   if (!info) return;
 
   // Only newer than what we run.
-  // TEST ONLY: the comparison is bypassed so the channel's release is always offered — including the one
-  // already installed, and from a 1.1.0-dev build the published 1.0.x — so the whole path can be
-  // exercised. Restore `if (compareVersions(info.version, APP_VERSION) <= 0) return;` before the final
-  // commit.
-  if (compareVersions(info.version, APP_VERSION) <= 0 && !TEST_ALWAYS_OFFER) return;
+  if (compareVersions(info.version, APP_VERSION) <= 0) return;
   // Respect a skipped version — but resurface once something higher than it ships.
   if (cfg.skippedVersion && compareVersions(info.version, cfg.skippedVersion) <= 0) return;
 
