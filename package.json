@@ -18,7 +18,9 @@
     "@tauri-apps/plugin-geolocation": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "cesium": "^1.140.0",
+    "dompurify": "^3.4.15",
     "leaflet": "^1.9.4",
+    "marked": "^18.0.12",
     "svelte-i18n": "^4.0.1"
   },
   "devDependencies": {

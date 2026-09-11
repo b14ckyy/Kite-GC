@@ -10,6 +10,10 @@
 #        | standalone  (.AppImage / .app-as-zip — self-contained runnable app)
 #        | portable     (the bare CLI binary, zipped with an empty `.portable` marker so the
 #                        download keeps its data in a data/ folder next to the executable)
+#        | update       (macOS only: the .app as .tar.gz — what the in-app updater downloads)
+#
+# Updater signatures (`<unified name>.sig`) are NOT produced here: the maintainer signs the collected
+# artifacts locally with scripts/make-update-manifest.sh, so the signing key never leaves his machines.
 #
 # One naming source shared by local builds (`just build*`) AND the GitHub release workflow, so the
 # filenames are identical everywhere. The release/ folder is git-ignored and refreshed on every
@@ -99,6 +103,13 @@ elif [ "$OS" = "macOS" ]; then
     if [ -n "$app" ] && [ -e "$app" ]; then
         dest="$(name standalone zip)"
         (cd "$(dirname "$app")" && ditto -c -k --keepParent "$(basename "$app")" "$OUT/$dest")
+        collected+=("$dest")
+        # The updater archive: the same .app as a .tar.gz with the bundle at the top level — the
+        # layout the Tauri updater expects (and the bundler's own updater artifact has). Built here so
+        # a signed build from Sebastian's machine produces it without any updater key; the signature
+        # is added on the maintainer's machine (scripts/make-update-manifest.sh).
+        dest="$(name update tar.gz)"
+        tar -czf "$OUT/$dest" -C "$(dirname "$app")" "$(basename "$app")"
         collected+=("$dest")
     fi
 else

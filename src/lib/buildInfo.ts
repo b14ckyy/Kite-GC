@@ -15,3 +15,7 @@ export const REPO_URL = 'https://github.com/b14ckyy/Kite-GC';
 /** Published user docs (MkDocs site); `latest` is the released minor's docs. */
 export const DOCS_URL = 'https://b14ckyy.github.io/Kite-GC/latest/';
 export const PRIVACY_URL = `${DOCS_URL}privacy/`;
+/** Store listings for the mobile builds — empty until the listings exist; the update dialog then falls
+ *  back to the GitHub release page. */
+export const PLAY_STORE_URL = '';
+export const APP_STORE_URL = '';

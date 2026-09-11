@@ -125,6 +125,7 @@ use commands::control::{
     mav_vtol_transition,
 };
 use commands::update_check::check_for_update;
+use commands::updater::{install_update, update_kind};
 use hid::HidManager;
 use mission::store::MissionStore;
 use state::AppState;
@@ -412,9 +413,22 @@ pub fn run() {
         std::env::set_var("GDK_GL", "gles");
     }
 
+    // A portable update parks the previous executable as `<exe>.old` (Windows cannot overwrite a running
+    // binary) — clear it now that we are the new one.
+    #[cfg(desktop)]
+    commands::updater::remove_stale_executable();
+
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init());
+
+    // "Update and Restart" for installed copies (commands/updater.rs drives it; the frontend never calls
+    // the plugin's JS API, so no capability entry is needed). Desktop only — the plugin has no mobile
+    // backend, and the stores handle updates there.
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
 
     // Mobile only: use native CoreLocation/Android location for the GCS position so the OS permission
     // prompt is labelled with the app name instead of the WebView origin ("localhost"). Desktop keeps
@@ -646,6 +660,8 @@ pub fn run() {
             mav_rtl,
             mav_rc_release,
             check_for_update,
+            update_kind,
+            install_update,
             mav_reposition,
             mav_change_speed,
             mav_mission_start,

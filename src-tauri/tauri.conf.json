@@ -25,6 +25,15 @@
       "csp": null
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkyRTI4OTQ0Rjg5NUI0QTUKUldTbHRKWDRSSW5pa2g0SmVXOUZPeFdTYnh3Vkl2UjBjZU1GbGZnVjJPS3prRkZ3RUVaajIzeEUK",
+      "endpoints": ["https://github.com/b14ckyy/Kite-GC/releases/latest/download/latest.json"],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": ["nsis", "deb", "appimage", "rpm"],

@@ -401,7 +401,15 @@
     "prerelease": "预发布",
     "openPage": "打开发布页面",
     "later": "稍后提醒",
-    "skip": "跳过此版本"
+    "skip": "跳过此版本",
+    "install": "更新并重启",
+    "playStore": "在 Play 商店中打开",
+    "appStore": "在 App Store 中打开",
+    "notes": "新版本内容",
+    "downloading": "正在下载… {pct}%",
+    "installing": "正在安装…",
+    "failed": "更新失败：{error}",
+    "portableNote": "便携版：可执行文件将被就地替换，然后 Kite 重新启动。"
   },
   "airspace": {
     "title": "空域管理器",
@@ -895,8 +903,9 @@
     "updateCheck": "检查更新",
     "updateDisabled": "禁用",
     "updateRelease": "稳定版",
+    "updatePatch": "仅补丁版本",
     "updatePrerelease": "包含预发布版",
-    "updateHint": "启动时检查GitHub是否有新版本。不会自动下载 — 你将看到发布说明链接。",
+    "updateHint": "启动时检查GitHub是否有新版本。在你选择“更新并重启”之前不会下载任何内容。",
     "alertThresholdsHint": "警报阈值。0 = 禁用。",
     "hudWidgets": "HUD 小部件",
     "rateHint": "速率更改在下次连接时生效。",

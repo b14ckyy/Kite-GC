@@ -52,6 +52,11 @@ build-macos:
 notarize-macos:
     @bash scripts/notarize-macos.sh
 
+# Sign the collected release artifacts + write release/latest.json for the in-app updater (maintainer
+# only; needs TAURI_SIGNING_PRIVATE_KEY_PATH → Dev-Docs/keys/kite-updater.key). Run before `gh release create`.
+update-manifest tag="":
+    @bash scripts/make-update-manifest.sh {{tag}}
+
 # Needs ANDROID_HOME + NDK_HOME (see the Build Guide); prefer the "Android" GitHub Actions
 # workflow, which needs nothing installed locally. The APK lands in release/ under the unified name
 # (KiteGC_Android_<abi>_<version>_installer.apk). `-AndroidOnly` / `--android-only` keeps whatever
