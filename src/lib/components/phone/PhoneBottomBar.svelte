@@ -350,6 +350,9 @@
     right: var(--phone-panel-w, 0px);
     z-index: 50; /* over the map, under the docked video (60+), the chips (110) and the panels */
     pointer-events: none;
+    /* A layer of its own, permanently: the bar got promoted the moment the docked video window
+       started to slide (it overlaps the bar), and that rebuilt the layers stacked above it. */
+    will-change: transform;
     box-sizing: border-box;
     padding: var(--safe-top, 0px) 0 var(--safe-bottom, 0px) var(--safe-left, 0px);
     user-select: none;

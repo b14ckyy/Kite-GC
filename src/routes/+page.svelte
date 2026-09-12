@@ -4566,6 +4566,14 @@
     height: 100%;
     overflow: hidden;
     pointer-events: none;
+    /* A compositor layer of its own, permanently. The docked video window slides in and out BEHIND
+       this column; while it animates it overlaps the column, and Chromium then promoted the column
+       to a layer (overlap with an animating layer), squashed the glass into it and rasterised the
+       lot again — at the end of the slide the reverse. Every element squashed with the glass (the
+       hamburger, the connection button, the arming chip, the dock toggle) vanished for a frame at
+       both ends of every slide (Sony, 2026-09-13, traced with the CDP LayerTree). With the layer
+       fixed there is nothing to promote or demote. */
+    will-change: transform;
   }
   .zone-phone-widgets > :global(*) {
     pointer-events: auto;
