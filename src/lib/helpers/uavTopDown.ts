@@ -101,11 +101,13 @@ export function renderUavTopDown(
   // Shadow: show ONLY the soft (blurred) shadow — a canvas fill always has a hard edge, so we draw
   // the sharp silhouette OFF-canvas (translated left by `push`) and use shadowOffsetX = push to land
   // its blurred shadow back on the model, scaled slightly larger → a soft dark patch rings the model
-  // with no hard edge. Visible on street + satellite maps.
-  const SH = 1.3, push = size, oy = size * 0.02;
+  // with no hard edge. Visible on street + satellite maps. Kept tight (Marc, 2026-09-12: 1.3× with
+  // a 12 % blur looked massive and was clipped at the icon edge on long-armed models such as the
+  // tricopter — the model fits FIT of the icon, so silhouette × SH plus the blur must stay inside).
+  const SH = 1.15, push = size, oy = size * 0.02;
   ctx.save();
   ctx.shadowColor = 'rgba(0,0,0,1)';
-  ctx.shadowBlur = size * 0.12;
+  ctx.shadowBlur = size * 0.08;
   ctx.shadowOffsetX = push;
   ctx.shadowOffsetY = oy;
   ctx.fillStyle = '#000';

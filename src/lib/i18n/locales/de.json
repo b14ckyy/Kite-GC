@@ -1160,6 +1160,9 @@
     "off": "Aus",
     "resize": "Widgetgröße ändern",
     "phonePage": "Seite {n}",
+    "bottomLeft": "Unten links",
+    "bottomCentre": "Unten Mitte",
+    "bottomRight": "Unten rechts",
     "phoneNoSpaceTitle": "Kein freier Platz",
     "phoneNoSpace": "Das Widget-Raster ist auf beiden Seiten voll. Verkleinere oder deaktiviere zuerst ein anderes Widget."
   },

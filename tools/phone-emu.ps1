@@ -18,6 +18,14 @@
 #   Kite_5in_16x9   5.0"  1080×1920  16:9    (pixel profile)
 #   Kite_6in_20x9   6.4"  1080×2400  20:9    (pixel_6 profile)
 #   Kite_21x9       6.0"  1080×2520  21:9    (Xperia-style, custom lcd override)
+#   Kite_AX12_A9    5.5"  1280×720   API 28  (RadioMaster AX12 stand-in: Android 9 + WebView 138 sideloaded
+#                                            after removing the system WebViewStub with -writable-system)
+#   Kite_AX12       5.5"  1280×720   API 34  (same panel, current Android — geometry only)
+# Kite_AX12_A9 MUST boot with -writable-system: its WebView 138 lives beside a system overlay that is
+# only active with the flag. Booted without it, the stock WebViewStub (Chrome 69) returns and Android's
+# package manager DROPS the sideloaded WebView (signature mismatch) — the dev build then dies with
+# "SyntaxError: Unexpected token ?" (2026-09-12). Restore: install the APKMirror APK from F:\Downloads
+# again and `adb shell cmd webviewupdate set-webview-implementation com.google.android.webview`.
 # Data inside the emulator: no USB serial / BLE, but network — the host is 10.0.2.2 (SITL over
 # TCP, MAVLink UDP), or import a .kflight and replay it.
 # Stop: Ctrl+C in this terminal ends tauri dev + vite; close the emulator window separately.
@@ -79,7 +87,10 @@ if (-not $Device) {
   $running = (& $adb devices) -match '^emulator-'
   if (-not $running) {
     Write-Host "booting emulator $Avd ..."
-    Start-Process -FilePath $emu -ArgumentList @('-avd', $Avd, '-gpu', 'host', '-no-snapshot-load', '-no-boot-anim')
+    $emuArgs = @('-avd', $Avd, '-gpu', 'host', '-no-snapshot-load', '-no-boot-anim')
+    # See the AVD list above: the AX12 stand-in keeps its sideloaded WebView only with the flag.
+    if ($Avd -eq 'Kite_AX12_A9') { $emuArgs += '-writable-system' }
+    Start-Process -FilePath $emu -ArgumentList $emuArgs
   } else {
     Write-Host 'an emulator is already running — using it'
   }

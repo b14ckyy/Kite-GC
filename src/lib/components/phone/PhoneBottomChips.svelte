@@ -11,7 +11,10 @@
      The chips sit BELOW the panel layer (a panel may cover them; they still peek out left of it),
      the dev Debug button (PhoneDebugButton) floats right of them above the panels. The row
      publishes its right edge as `--phone-bottom-w` on the root, so the Debug button and the
-     Leaflet attribution can line up after it. -->
+     Leaflet attribution can line up after it, and the arming pill's own right edge as
+     `--phone-arming-w` for the bottom widget slots (PhoneBottomBar, B4/B5): while a slot is filled
+     (`html.phone-bar`) the sensor chip stacks ABOVE the tiles instead of sitting beside the pill,
+     so a sensor turning amber in flight never changes the tiles' room. -->
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import ArmingIndicator from '$lib/components/ArmingIndicator.svelte';
@@ -25,17 +28,25 @@
 
   let rowEl = $state<HTMLDivElement>();
   let widthPx = $state(0);
-  // Right edge in viewport px (left offset + width), re-read on every size change: the arming
+  // Right edges in viewport px (left offset + width), re-read on every size change: the arming
   // label and the sensor chip come and go with the telemetry.
   $effect(() => {
     void widthPx;
+    const root = document.documentElement.style;
     const right = rowEl ? Math.ceil(rowEl.getBoundingClientRect().right) : 0;
-    document.documentElement.style.setProperty('--phone-bottom-w', `${right}px`);
-    return () => document.documentElement.style.removeProperty('--phone-bottom-w');
+    root.setProperty('--phone-bottom-w', `${right}px`);
+    const pill = rowEl?.querySelector('.arming');
+    root.setProperty('--phone-arming-w', `${pill ? Math.ceil(pill.getBoundingClientRect().right) : right}px`);
+    return () => {
+      root.removeProperty('--phone-bottom-w');
+      root.removeProperty('--phone-arming-w');
+    };
   });
 </script>
 
 <div class="chips" bind:this={rowEl} bind:clientWidth={widthPx}>
+  <!-- The row is a flex row; while the bottom slots are in use the sensor chip leaves the flow
+       and sits above the tiles (html.phone-bar), so the row's width is the pill's alone. -->
   <ArmingIndicator {telem} />
   {#if problems.length > 0 || ekfProblem}
     <div class="sensor-chip">
@@ -51,10 +62,16 @@
 
 <style>
   .chips {
+    position: relative;
     display: inline-flex;
     align-items: center;
     gap: 8px;
     pointer-events: auto;
+  }
+  :global(html.phone-bar) .sensor-chip {
+    position: absolute;
+    left: 0;
+    bottom: var(--phone-bar-lift, 0px);
   }
   /* The arming pill is styled for the toolbar's solid background; over the map it gets a backing. */
   .chips > :global(.arming) {

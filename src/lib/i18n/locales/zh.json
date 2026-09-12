@@ -1132,6 +1132,9 @@
     "off": "关闭",
     "resize": "调整小组件大小",
     "phonePage": "第 {n} 页",
+    "bottomLeft": "底部左侧",
+    "bottomCentre": "底部中间",
+    "bottomRight": "底部右侧",
     "phoneNoSpaceTitle": "没有空位",
     "phoneNoSpace": "两页的小组件网格均已满。请先缩小或关闭另一个小组件。"
   },

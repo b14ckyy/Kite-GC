@@ -16,11 +16,23 @@
      finger — consistent for 2×2 wherever it is grabbed), and while it is dragged the OTHER widgets
      already show where the packer would settle them for that drop (live preview = the same packer
      the commit uses); holding near the panel's top/bottom edge flips the page. A quicker flick
-     flips the page instead of grabbing. A tap anywhere outside the panel ends edit mode. -->
+     flips the page instead of grabbing. A tap anywhere outside the panel ends edit mode.
+
+     Edit mode and the drag session are SHARED with the bottom slots (stores/phoneEdit.svelte.ts,
+     Dev-Docs active/PHONE_BOTTOM_WIDGETS.md B6): a widget dragged out of the column can be dropped
+     on a bottom slot, a slotted widget dragged by PhoneBottomBar can land in a cell here — the
+     column previews that drop too. The ghost lives at the root (PhoneDragGhost). -->
 <script lang="ts">
   import { t } from 'svelte-i18n';
   import { PHONE_GRID_ROWS, PHONE_GRID_PAGES, PHONE_GRID_PAD } from '$lib/config/phoneGrid';
-  import { movePhoneWidget, packPhone, type PhoneWidgetsConfig } from '$lib/controllers/phoneWidgetController';
+  import {
+    movePhoneWidget,
+    movePhoneWidgetToBottom,
+    packPhone,
+    type PhoneBottomSlot,
+    type PhoneWidgetsConfig,
+  } from '$lib/controllers/phoneWidgetController';
+  import { phoneEdit, phoneHitTests, bottomSlotAt, sameTarget, type PhoneDragTarget } from '$lib/stores/phoneEdit.svelte';
   import WidgetRenderer from '$lib/components/WidgetRenderer.svelte';
   import type { TelemetryData } from '$lib/stores/telemetry';
   import type { InterfaceSettings } from '$lib/stores/settings';
@@ -31,6 +43,7 @@
     interfaceSettings,
     onresize,
     onmove,
+    onmovetobottom,
     widthPx = $bindable(0),
   }: {
     config: PhoneWidgetsConfig;
@@ -40,6 +53,8 @@
     onresize?: (id: string) => void;
     /** Edit mode: the user dropped the widget at (page, row, col). */
     onmove?: (id: string, page: number, row: number, col: number) => void;
+    /** Edit mode: the user dropped the widget on a bottom slot. */
+    onmovetobottom?: (id: string, slot: PhoneBottomSlot) => void;
     /** OUT: the panel's rendered width in css px. */
     widthPx?: number;
   } = $props();
@@ -64,14 +79,12 @@
   const pageH = $derived(Math.max(0, Math.min(heightPx, viewportH || heightPx) - 2 * PAD));
   const slot = $derived(Math.max(40, Math.floor(pageH / PHONE_GRID_ROWS)));
 
-  // ── Edit mode + drag state ──
-  let editing = $state(false);
-  let dragId = $state<string | null>(null);
-  /** Where the dragged widget currently hovers (the drop the preview is computed for). */
-  let dragTarget = $state<{ page: number; row: number; col: number } | null>(null);
-  /** Pointer position (panel-relative css px) for the ghost. */
-  let dragX = $state(0);
-  let dragY = $state(0);
+  // ── Edit mode + drag state (shared, stores/phoneEdit.svelte.ts) ──
+  const editing = $derived(phoneEdit.editing);
+  /** The widget being dragged — ours or the bottom bar's (previewed here either way). */
+  const dragId = $derived(phoneEdit.drag?.id ?? null);
+  const dragTarget = $derived(phoneEdit.drag?.target ?? null);
+  const ownDrag = $derived(phoneEdit.drag?.owner === 'column');
   /** Offset from the widget's top-left to the finger, so the ghost doesn't jump on pickup. */
   let grabDx = 0;
   let grabDy = 0;
@@ -81,10 +94,17 @@
   let grabSlotRow = 0;
   let grabSlotCol = 0;
 
-  // The layout on screen: the committed config, or — mid-drag — the preview of the hovered drop.
-  const shownConfig = $derived(
-    dragId && dragTarget ? movePhoneWidget(config, dragId, dragTarget.page, dragTarget.row, dragTarget.col) : config,
-  );
+  // The layout on screen: the committed config, or — mid-drag — the preview of the hovered drop
+  // (a drop on a bottom slot previews the column WITHOUT the widget; the same controller calls the
+  // commit makes, so the preview is what the drop will give).
+  const shownConfig = $derived.by(() => {
+    if (!dragId || !dragTarget) return config;
+    const next =
+      dragTarget.kind === 'column'
+        ? movePhoneWidget(config, dragId, dragTarget.page, dragTarget.row, dragTarget.col)
+        : movePhoneWidgetToBottom(config, dragId, dragTarget.slot);
+    return next ?? config;
+  });
   const packed = $derived(packPhone(shownConfig));
   const cols = $derived(packed.cols);
   $effect(() => {
@@ -94,7 +114,6 @@
 
   const pages = $derived(Array.from({ length: PHONE_GRID_PAGES }, (_, p) => p));
   const onPage = (p: number) => packed.placements.filter((x) => x.page === p);
-  const dragPlacement = $derived(dragId ? packed.placements.find((p) => p.id === dragId) ?? null : null);
 
   // Current page for the dots: derived from the scroll position (snap → whole pages).
   let rootEl = $state<HTMLDivElement>();
@@ -130,6 +149,17 @@
   $effect(() => {
     document.documentElement.classList.toggle('phone-editing', editing);
     return () => document.documentElement.classList.remove('phone-editing');
+  });
+  // The bottom bar's drags land in our cells through this (only while the point is over the column).
+  $effect(() => {
+    phoneHitTests.column = (x, y) => {
+      const r = rootEl?.getBoundingClientRect();
+      if (!r || x < r.left || x > r.right || y < r.top || y > r.bottom) return null;
+      return cellAt(x, y);
+    };
+    return () => {
+      phoneHitTests.column = null;
+    };
   });
   function clearEdge() {
     if (edgeTimer) clearTimeout(edgeTimer);
@@ -184,7 +214,7 @@
     pressId = id;
     pressTimer = setTimeout(() => {
       pressTimer = null;
-      editing = true;
+      phoneEdit.editing = true;
       try {
         navigator.vibrate?.(30);
       } catch {
@@ -201,8 +231,16 @@
     grabDy = r ? e.clientY - r.top : 0;
     grabSlotCol = slot > 0 ? Math.max(0, Math.floor(grabDx / slot)) : 0;
     grabSlotRow = slot > 0 ? Math.max(0, Math.floor(grabDy / slot)) : 0;
-    dragId = id;
-    dragTarget = null;
+    const pl = packed.placements.find((p) => p.id === id);
+    phoneEdit.drag = {
+      id,
+      owner: 'column',
+      target: null,
+      x: e.clientX - grabDx,
+      y: e.clientY - grabDy,
+      w: (pl?.w ?? 1) * slot,
+      h: (pl?.h ?? 1) * slot,
+    };
     console.log('[phoneGrid] drag start', id, Math.round(e.clientX), Math.round(e.clientY));
     updateDrag(e.clientX, e.clientY);
     // No pointer capture on purpose: the widget under the finger re-renders while the preview
@@ -211,18 +249,22 @@
   }
 
   function updateDrag(clientX: number, clientY: number) {
-    if (!rootEl || !scroller) return;
-    const rr = rootEl.getBoundingClientRect();
-    dragX = clientX - rr.left - grabDx;
-    dragY = clientY - rr.top - grabDy;
-    // The slot under the FINGER minus the slot the finger grabbed within the widget.
-    const under = cellAt(clientX, clientY);
-    const c = under
-      ? { page: under.page, row: Math.max(0, under.row - grabSlotRow), col: Math.max(0, under.col - grabSlotCol) }
-      : null;
-    if (c && (!dragTarget || c.page !== dragTarget.page || c.row !== dragTarget.row || c.col !== dragTarget.col)) {
-      dragTarget = c;
+    const d = phoneEdit.drag;
+    if (!rootEl || !scroller || !d) return;
+    d.x = clientX - grabDx;
+    d.y = clientY - grabDy;
+    // A bottom slot under the finger wins; otherwise the cell under the FINGER minus the slot the
+    // finger grabbed within the widget (clamped to the grid — a finger just past the column's
+    // edge still targets the nearest cell).
+    const bottom = bottomSlotAt(clientX, clientY);
+    let c: PhoneDragTarget | null = bottom ? { kind: 'bottom', slot: bottom } : null;
+    if (!c) {
+      const under = cellAt(clientX, clientY);
+      c = under
+        ? { kind: 'column', page: under.page, row: Math.max(0, under.row - grabSlotRow), col: Math.max(0, under.col - grabSlotCol) }
+        : null;
     }
+    if (c && !sameTarget(c, d.target)) d.target = c;
     // Edge hover flips the page.
     const sr = scroller.getBoundingClientRect();
     const dir = clientY < sr.top + EDGE_FLIP_PX ? -1 : clientY > sr.bottom - EDGE_FLIP_PX ? 1 : 0;
@@ -241,16 +283,19 @@
 
   function endDrag(commit: boolean) {
     clearEdge();
-    console.log('[phoneGrid] drop', dragId, dragTarget, commit ? 'commit' : 'cancel');
-    if (dragId && dragTarget && commit) onmove?.(dragId, dragTarget.page, dragTarget.row, dragTarget.col);
-    dragId = null;
-    dragTarget = null;
+    const d = phoneEdit.drag;
+    console.log('[phoneGrid] drop', d?.id, $state.snapshot(d?.target), commit ? 'commit' : 'cancel');
+    if (d?.target && commit) {
+      if (d.target.kind === 'column') onmove?.(d.id, d.target.page, d.target.row, d.target.col);
+      else onmovetobottom?.(d.id, d.target.slot);
+    }
+    phoneEdit.drag = null;
   }
 
   $effect(() => {
     const onMove = (e: PointerEvent) => {
-      if (dragId) {
-        updateDrag(e.clientX, e.clientY);
+      if (phoneEdit.drag) {
+        if (ownDrag) updateDrag(e.clientX, e.clientY);
         return;
       }
       if (flickY != null) return; // page flick in progress — decided on release
@@ -265,7 +310,10 @@
     };
     const onUp = (e: PointerEvent) => {
       clearPress();
-      if (dragId) endDrag(true);
+      if (phoneEdit.drag) {
+        if (ownDrag) endDrag(true);
+        return;
+      }
       if (flickY != null) {
         const dy = e.clientY - flickY;
         flickY = null;
@@ -276,7 +324,7 @@
     const onCancel = () => {
       clearPress();
       flickY = null;
-      if (dragId) endDrag(false);
+      if (phoneEdit.drag && ownDrag) endDrag(false);
     };
     // Tap outside the panel → leave edit mode (capture, so a surface that stops propagation counts).
     // A touch on the swapped-in mini map (a layer OVER one of our tiles, outside the panel's DOM)
@@ -289,7 +337,8 @@
         if (cell?.dataset.id) onCellPointerDown(e, cell.dataset.id);
         return;
       }
-      if (editing && rootEl && !rootEl.contains(target as Node)) editing = false;
+      // Both edit surfaces (the column and the bottom slots) carry data-phone-edit-zone.
+      if (editing && !target?.closest('[data-phone-edit-zone]')) phoneEdit.editing = false;
     };
     // All in the CAPTURE phase: the mini map swallows pointer events on its container (zoom-only
     // map), which would otherwise hide a release from us — the relayed press then ran into its
@@ -313,6 +362,7 @@
 <div
   class="pwp"
   class:editing
+  data-phone-edit-zone
   bind:this={rootEl}
   bind:clientHeight={heightPx}
   style="--slot:{slot}px; --pad:{PAD}px; --cols:{cols}; --page-h:{pageH}px"
@@ -366,23 +416,8 @@
     {/each}
   </div>
 
-  <!-- Ghost of the dragged widget under the finger (the real cell shows its preview slot). -->
-  {#if dragId && dragPlacement}
-    <div
-      class="ghost"
-      style="left:{dragX}px; top:{dragY}px; width:{dragPlacement.w * slot}px; height:{dragPlacement.h * slot}px;"
-    >
-      <WidgetRenderer
-        id={dragId}
-        {telem}
-        {interfaceSettings}
-        sizePx={dragPlacement.h * slot}
-        wPx={dragPlacement.w * slot}
-        hPx={dragPlacement.h * slot}
-        ghost
-      />
-    </div>
-  {/if}
+  <!-- The drag ghost is drawn at the root (PhoneDragGhost): this panel clips its overflow, and a
+       widget on its way to a bottom slot leaves the column. -->
 
   {#if PHONE_GRID_PAGES > 1}
     <div class="dots" aria-hidden="true">
@@ -503,28 +538,6 @@
     stroke: currentColor;
     stroke-width: 2;
     stroke-linejoin: round;
-  }
-
-  .ghost {
-    position: absolute;
-    z-index: 40;
-    pointer-events: none;
-    opacity: 0.9;
-    border: 1px solid rgba(55, 168, 219, 0.8);
-    background: rgba(30, 30, 30, 0.6);
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-  }
-  .ghost :global(.widget-card) {
-    background: transparent;
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    border-color: transparent;
-    border-radius: 0;
-    box-shadow: none;
   }
 
   .dots {

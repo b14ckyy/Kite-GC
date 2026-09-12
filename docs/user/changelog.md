@@ -109,6 +109,9 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     - **Android support** — native app with USB serial, Bluetooth LE and Wi-Fi links, touch layout
       and scoped storage folders. [#79]
+    - **Bottom widget slots on the phone** — three centred slots on the map's bottom edge (a larger
+      middle one, two smaller beside it), filled by dragging widgets out of the column in edit mode;
+      the follow centre moves up so the aircraft stays in the free map. [#173]
     - **iPhone & iPad support** — native iOS/iPadOS build: phone/tablet layout, touch RC, BLE,
       Wi-Fi MAVLink. Contributed by Sebastian Kumor. [#16]
     - **Native RTSP video client** — Kite's own RTSP client with OS hardware decode (H.264/H.265)
@@ -288,3 +291,4 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#162]: https://github.com/b14ckyy/Kite-GC/pull/162
 [#163]: https://github.com/b14ckyy/Kite-GC/pull/163
 [#168]: https://github.com/b14ckyy/Kite-GC/issues/168
+[#173]: https://github.com/b14ckyy/Kite-GC/pull/173
