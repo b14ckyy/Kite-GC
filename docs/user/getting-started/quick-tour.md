@@ -291,6 +291,16 @@ room for either the map or a widget, rarely both. Tablets keep the desktop layou
 - **Rearranging widgets**: **long-press** a widget to enter edit mode. Hold a widget briefly and drag
   it to move it — the others shift live to show where they will settle; a quick flick still turns the
   page. Tap the corner button to step through the sizes. Tap the map to leave edit mode.
+- **Three widget slots on the bottom edge** of the map, centred: a larger one in the middle (30 % of
+  the screen height, square — or 2:1 wide for Live AGL) and a smaller one on each side (20 %, square).
+  In edit mode the three slots show as dashed frames; drag a widget from the column into a slot, or
+  drag it back. Outside edit mode only the widgets you placed are visible, with their normal card and
+  no bar behind them — an empty middle slot takes no room, so two side widgets sit together in the
+  middle. The widgets keep clear of the arming chip and the map buttons (they shrink a little when all
+  three are in use on a small screen), and the map's follow centre moves up so the aircraft stays in
+  the free part of the map. The docked video window lies over the slots: park it with its button, or
+  use the Video widget in the column when you want both. The Video widget itself cannot go into a
+  slot.
 - **Map controls**: pinch to zoom (no zoom buttons); the **2D / 3D** and **follow** buttons sit at the
   bottom-right of the map, next to the widget column. The map credits follow the arming chip along the
   bottom edge.
