@@ -81,6 +81,21 @@
   $effect(() => {
     bindVideoEl(videoEl, $videoStream);
   });
+
+  /** Where the native hole comes to rest (NativeSurfaceSpec.rest): the frame's box without the
+   *  slide transform — the layer is placed there before the frame moves, the hole follows the frame
+   *  and uncovers the standing picture (Marc, 2026-09-12: "the video is already in position and does
+   *  not move"). The transform is on the frame, the hole div only inherits it; the matrix is in the
+   *  frame's layout px, the box in viewport px (--ui-scale). */
+  function restRect(el: HTMLElement): DOMRect | null {
+    const r = el.getBoundingClientRect();
+    if (!frameEl) return r;
+    const t = getComputedStyle(frameEl).transform;
+    if (!t || t === 'none') return r;
+    const m = new DOMMatrix(t);
+    const s = frameEl.offsetWidth ? frameEl.getBoundingClientRect().width / frameEl.offsetWidth : 1;
+    return new DOMRect(r.left - m.e * s, r.top - m.f * s, r.width, r.height);
+  }
 </script>
 
 {#if showButton}
@@ -118,7 +133,10 @@
     class:parked
     style="left:{left}px; top:{top}px; width:{width}px; height:{height}px;"
   >
-    <div class="dw-bg" class:nv-active={$activeNativeSurfaces.has('floating')}></div>
+    <!-- The frame keeps its ground while the hardware layer shows (data-nv-clip: the router cuts the
+         hole out of it) — the part of a sliding frame that is not over the resting layer yet shows
+         the frame, not the map underneath. -->
+    <div class="dw-bg" data-nv-clip></div>
     {#if !mapHere}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
@@ -128,7 +146,7 @@
         use:doubleTap={() => setMapLocation('floating')}
       >
         {#if live && $videoState.nativeSink}
-          <div class="native-hole" class:armed={$activeNativeSurfaces.has('floating')} use:nativeSurface={'floating'}>
+          <div class="native-hole" class:armed={$activeNativeSurfaces.has('floating')} use:nativeSurface={{ id: 'floating', rest: restRect }}>
             {#if !$activeNativeSurfaces.has('floating')}<span>{$t('video.sinkElsewhere')}</span>{/if}
           </div>
         {:else if live && $videoState.mjpegUrl}
@@ -174,13 +192,13 @@
     border-radius: 6px;
     color: #37a8db;
     cursor: pointer;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: var(--glass-blur, blur(6px));
+    -webkit-backdrop-filter: var(--glass-blur, blur(6px));
     transition: right 0.3s ease, background 0.2s, border-color 0.2s;
     pointer-events: auto;
   }
   .dock-btn.open {
-    background: rgba(55, 168, 219, 0.25);
+    background: var(--btn-active-bg);
     border-color: #37a8db;
   }
   /* Video primary: the 2D/3D + follow buttons are hidden (mini map), the map toggle takes their
@@ -227,7 +245,6 @@
     border-radius: 8px;
     touch-action: none;
   }
-  .dw-bg.nv-active,
   .dw-body.nv-active {
     background: transparent;
   }

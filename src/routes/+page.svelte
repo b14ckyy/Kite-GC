@@ -3377,6 +3377,7 @@
     class:parked={mapFloating && !$videoState.floating}
     class:edit-passive={widgetEditMode && mapInWidget}
     data-nv-clip={mapInFrame ? undefined : true}
+    data-nv-opaque={mapInFrame ? undefined : true}
     style={mapInFrame ? inFrameStyle : mapLayerStyle}
     onclick={minimizeLogbook}
   >
