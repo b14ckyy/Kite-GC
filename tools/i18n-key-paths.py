@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Teodor Yantcheff
 # This script reads the English locale JSON file, builds a dictionary of nested paths for all keys, and writes
 # the result to an output JSON file -- locales/xx.json.
 #
