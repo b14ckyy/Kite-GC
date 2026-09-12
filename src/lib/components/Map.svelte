@@ -82,7 +82,11 @@
   import { t } from "svelte-i18n";
   import { contactColor, ffContactColor, contactVisibleOnMap, relevanceFactor } from "$lib/helpers/radarMap";
   import { pickShape, buildContactIconHtml } from "$lib/helpers/radarIcons";
+  import { installUprightOverlays } from "$lib/helpers/leafletUpright";
   import { convertAltitude, convertSpeed, convertDistance, convertVerticalSpeed, formatConverted, speedDigits } from "$lib/utils/units";
+
+  // Heading-up: markers, popups and tooltips counter-rotate about their anchor (see leafletUpright.ts).
+  installUprightOverlays();
 
   let {
     playbackTrack = [],
@@ -2395,6 +2399,23 @@
   :global(.map.heading-up .leaflet-control-zoom),
   :global(.map.heading-up .leaflet-control-attribution) {
     transform: rotate(calc(-1 * var(--map-rotation, 0deg)));
+  }
+
+  /* Heading-up: everything we draw onto the map keeps its geographic anchor but stays upright —
+     marker icons, popups and tooltips carry `rotate(var(--kite-upright))` in their inline transform
+     (leafletUpright.ts), pivoting on the anchor point. Defined here so a heading change is a single
+     CSS-variable write; outside heading-up the variable is unset and the rotation falls back to 0. */
+  :global(.map.heading-up) {
+    --kite-upright: calc(-1 * var(--map-rotation, 0deg));
+  }
+  /* Exception — the UAV model is drawn with its heading; the map rotation is what makes it point up. */
+  :global(.map.heading-up .uav-model-icon) {
+    --kite-upright: 0deg;
+  }
+  /* Radar contacts: the icon stands upright (callsign label readable, below the symbol), but the
+     silhouette itself points along the contact's track, so it turns back with the map. */
+  :global(.map.heading-up .radar-divicon .radar-icon > svg) {
+    transform: rotate(var(--map-rotation, 0deg));
   }
 
   .map-controls-corner {
