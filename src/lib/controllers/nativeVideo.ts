@@ -558,32 +558,37 @@ function holeRing(hole: DOMRect, radii: HoleRadii, b: DOMRect, sx: number, sy: n
  *  stacking is the reverse of the surface priority (the widget dock paints over the floating window,
  *  which paints over the fullscreen swap), so "above me" is "later in PRIORITY". A surface must
  *  never be cut by its OWN hole — its overlays and its bezel live exactly there. */
-function holesFor(el: HTMLElement, holes: Hole[]): Hole[] {
-  const own = el.dataset.nvClip as NativeSurfaceId | undefined;
-  const rank = own ? PRIORITY.indexOf(own) : -1;
+function holesFor(own: string | undefined, holes: Hole[]): Hole[] {
+  const rank = own ? PRIORITY.indexOf(own as NativeSurfaceId) : -1;
   if (rank < 0) return holes;
   return holes.filter((h) => PRIORITY.indexOf(h.id) > rank);
 }
 
+/** A clip that cuts nothing — deliberately NOT "no clip". On Chromium a `path()` clip is a mask on
+ *  the layer's render surface, and adding or removing that mask rebuilds the compositor layers
+ *  underneath: every map tile rasterises again, one or two frames of dark map while they trickle
+ *  back (the Sony, 2026-09-12: docking or parking the video window blanked the tiles both ways, a
+ *  visible flash each time). A mask that merely CHANGES costs nothing visible, so while the router
+ *  runs every target keeps one — between holes this ring with a one-pixel hole outside the
+ *  element's box. A plain rectangle is not enough: Chromium turns that back into a rect clip, no
+ *  mask, and the rebuild happens on the way back to a real hole (measured). */
+function idlePath(el: HTMLElement): string {
+  const m = OUTER_MARGIN_PX;
+  const w = el.offsetWidth;
+  const h = el.offsetHeight;
+  return `path('M${-m} ${-m}H${w + m}V${h + m}H${-m}Z M${1 - m} ${1 - m}h1v1h-1Z')`;
+}
+
 function applyClips(holes: Hole[]): void {
-  if (holes.length === 0) {
-    clearClips();
-    return;
-  }
   const targets = new Set<HTMLElement>();
   for (const el of document.querySelectorAll<HTMLElement>('[data-nv-clip]')) targets.add(el);
   targets.add(ensureGround());
   for (const el of targets) {
-    const mine = holesFor(el, holes);
-    const path = mine.length > 0 ? holePath(el, mine) : null;
-    if (path) {
-      if (clipped.get(el) !== path) {
-        el.style.clipPath = path;
-        clipped.set(el, path);
-      }
-    } else if (clipped.has(el)) {
-      el.style.clipPath = '';
-      clipped.delete(el);
+    const mine = holesFor(el.dataset.nvClip, holes);
+    const path = (mine.length > 0 ? holePath(el, mine) : null) ?? idlePath(el);
+    if (clipped.get(el) !== path) {
+      el.style.clipPath = path;
+      clipped.set(el, path);
     }
   }
   // Layers that left the target set (unmounted branch, panel closed) keep no stale clip.
@@ -593,11 +598,78 @@ function applyClips(holes: Hole[]): void {
       clipped.delete(el);
     }
   }
+  applyInsets(holes);
 }
 
 function clearClips(): void {
   for (const el of clipped.keys()) el.style.clipPath = '';
   clipped.clear();
+  for (const el of insetClipped.keys()) el.style.clipPath = '';
+  insetClipped.clear();
+}
+
+/** Elements carrying `data-nv-inset` → the applied `inset()` clip (written on change only). */
+const insetClipped = new Map<HTMLElement, string>();
+
+/** `data-nv-inset` elements are cut with a RECTANGULAR clip instead of a mask: the band of the
+ *  element under a hole — right, left, bottom or top, the smallest one that covers the whole overlap
+ *  — is removed with `inset()`. A plain clip needs no render surface, so the backdrop-filter glass
+ *  of the widgets INSIDE keeps blurring the map behind them; under a mask (`data-nv-clip`) that
+ *  glass would only see the masked subtree, i.e. nothing. The price: a hole that ends inside the
+ *  element cuts the whole band, not an L — the phone's bottom widget tiles, the one user, are never
+ *  taller than the docked video window they meet, so the band is exact there. The value means what
+ *  it means on `data-nv-clip` (only the holes of surfaces painted above the element). */
+function applyInsets(holes: Hole[]): void {
+  for (const el of document.querySelectorAll<HTMLElement>('[data-nv-inset]')) {
+    const clip = insetPath(el, holesFor(el.dataset.nvInset, holes));
+    if (clip) {
+      if (insetClipped.get(el) !== clip) {
+        el.style.clipPath = clip;
+        insetClipped.set(el, clip);
+      }
+    } else if (insetClipped.has(el)) {
+      el.style.clipPath = '';
+      insetClipped.delete(el);
+    }
+  }
+  for (const el of [...insetClipped.keys()]) {
+    if (!el.isConnected) insetClipped.delete(el);
+  }
+}
+
+function insetPath(el: HTMLElement, holes: Hole[]): string | null {
+  if (holes.length === 0) return null;
+  const b = el.getBoundingClientRect();
+  if (b.width <= 0 || b.height <= 0) return null;
+  // The bounding box of every overlap (viewport px) — one band must cover them all.
+  let x1 = Infinity;
+  let y1 = Infinity;
+  let x2 = -Infinity;
+  let y2 = -Infinity;
+  for (const { rect: h } of holes) {
+    const ix1 = Math.max(b.left, h.left);
+    const iy1 = Math.max(b.top, h.top);
+    const ix2 = Math.min(b.right, h.right);
+    const iy2 = Math.min(b.bottom, h.bottom);
+    if (ix2 - ix1 < 0.5 || iy2 - iy1 < 0.5) continue;
+    x1 = Math.min(x1, ix1);
+    y1 = Math.min(y1, iy1);
+    x2 = Math.max(x2, ix2);
+    y2 = Math.max(y2, iy2);
+  }
+  if (x1 === Infinity) return null;
+  // inset(top right bottom left) in the element's own layout px (it may sit in the scaled chrome).
+  const sx = b.width / (el.offsetWidth || b.width);
+  const sy = b.height / (el.offsetHeight || b.height);
+  const f = (v: number) => v.toFixed(2);
+  const bands = [
+    { area: (b.right - x1) * b.height, css: `0 ${f((b.right - x1) / sx)}px 0 0` },
+    { area: (x2 - b.left) * b.height, css: `0 0 0 ${f((x2 - b.left) / sx)}px` },
+    { area: (y2 - b.top) * b.width, css: `${f((y2 - b.top) / sy)}px 0 0 0` },
+    { area: (b.bottom - y1) * b.width, css: `0 0 ${f((b.bottom - y1) / sy)}px 0` },
+  ];
+  bands.sort((p, q) => p.area - q.area);
+  return `inset(${bands[0].css})`;
 }
 
 /** Move the page ground off `body` onto a clip-able fixed div (see module docs). */
