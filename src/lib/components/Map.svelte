@@ -2643,13 +2643,13 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    backdrop-filter: blur(8px);
+    backdrop-filter: var(--glass-blur, blur(6px));
     transition: background 0.2s, border-color 0.2s, color 0.2s;
     padding: 0;
   }
 
   .map-control-btn:hover {
-    background: rgba(55, 168, 219, 0.25);
+    background: var(--btn-active-bg);
     border-color: #37a8db;
   }
 
@@ -2669,7 +2669,7 @@
     background: rgba(46, 46, 46, 0.45);
     border-color: rgba(55, 168, 219, 0.45);
     color: rgba(199, 223, 232, 0.95);
-    backdrop-filter: blur(4px);
+    backdrop-filter: var(--glass-blur, blur(6px));
   }
 
   .map-heading-btn.mode-follow,
@@ -2677,7 +2677,7 @@
     background: rgba(46, 46, 46, 0.92);
     border-color: rgba(55, 168, 219, 0.7);
     color: #37a8db;
-    backdrop-filter: blur(8px);
+    backdrop-filter: var(--glass-blur, blur(6px));
   }
 
   .map-heading-btn.mode-free:hover {
