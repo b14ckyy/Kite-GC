@@ -271,13 +271,13 @@
     border-radius: 6px;
     color: #37a8db;
     cursor: pointer;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: var(--glass-blur, blur(6px));
+    -webkit-backdrop-filter: var(--glass-blur, blur(6px));
     transition: left 0.3s ease, top 0.3s ease, background 0.2s, border-color 0.2s;
     pointer-events: auto;
   }
   .fw-toggle.open {
-    background: rgba(55, 168, 219, 0.25);
+    background: var(--btn-active-bg);
     border-color: #37a8db;
   }
   .fw-toggle svg {
@@ -309,8 +309,8 @@
     pointer-events: none;
     box-sizing: border-box;
     background: rgba(30, 30, 30, 0.75);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: var(--glass-blur, blur(6px));
+    -webkit-backdrop-filter: var(--glass-blur, blur(6px));
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 8px;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
@@ -413,7 +413,7 @@
     pointer-events: auto;
   }
   .fw-unplug:hover {
-    background: rgba(55, 168, 219, 0.3);
+    background: var(--btn-active-bg);
   }
   .fw-unplug svg {
     width: 100%;

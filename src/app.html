@@ -34,6 +34,28 @@
         background-size: 10px 6px !important;
       }
       select:disabled { opacity: 0.5; }
+
+      /* Glass blur — two switches, the radii stay at the elements as the var() fallback.
+         Every backdrop-filter in the components reads `var(--glass-blur, blur(6px))` (everything that
+         lies on the map: widget cards, buttons, chips, the widget column's glass, toasts, menus) or
+         `var(--panel-blur, blur(10px))` (the panel shells and the popups of their kind — large,
+         contiguous surfaces where the blur earns its keep for readability). A backdrop-filter is a
+         readback of the framebuffer under the element plus a blur pass, per element and per frame
+         while the map moves — some twenty of them on the phone. A Chromium trace on the Sony
+         (2026-09-12) put them at 13–15 ms of a ~30 ms frame with video, 7 of ~21 without; the radius
+         made no measurable difference, the count does (Dev-Docs CHANGELOG). Hence: no map blur on
+         any mobile device (Android / iOS, phone and tablet UI alike), and the low-power mode
+         (Settings → lowPower3D, `auto` = on battery) switches both off on every platform. */
+      html.is-mobile { --glass-blur: none; }
+
+      /* The pressed / active / hovered fill of the glass buttons on the map (map corner controls,
+         hamburger, the video window's toggles, the widget dock's resize handle): the accent at less
+         than half brightness, nearly opaque. It used to be the accent at 25 % alpha alone — over a
+         blurred dark map a dull blue, over a bright map without the blur barely there (Marc,
+         2026-09-12: the camera toggle disappeared on light terrain). Buttons inside panels keep
+         their own subtler tints; those sit on a dark ground. */
+      :root { --btn-active-bg: rgba(39, 78, 96, 0.92); }
+      html.kite-low-power { --glass-blur: none; --panel-blur: none; }
     </style>
     <title>Tauri + SvelteKit + Typescript App</title>
     %sveltekit.head%

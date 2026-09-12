@@ -721,7 +721,7 @@
     touch-action: manipulation;
   }
   .resize-btn:hover {
-    background: rgba(55, 168, 219, 0.25);
+    background: var(--btn-active-bg);
   }
   .resize-btn svg {
     width: 100%;
@@ -811,7 +811,7 @@
     border: 1px solid rgba(55, 168, 219, 0.75);
     border-radius: 8px;
     background: rgba(30, 30, 30, 0.48);
-    backdrop-filter: blur(4px);
+    backdrop-filter: var(--glass-blur, blur(6px));
     box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
     display: flex;
     align-items: center;

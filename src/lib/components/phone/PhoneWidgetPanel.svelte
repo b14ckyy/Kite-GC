@@ -445,8 +445,8 @@
     inset: 0;
     z-index: 0;
     background: rgba(30, 30, 30, 0.75);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: var(--glass-blur, blur(6px));
+    -webkit-backdrop-filter: var(--glass-blur, blur(6px));
     border-left: 1px solid rgba(255, 255, 255, 0.08);
     pointer-events: none;
   }

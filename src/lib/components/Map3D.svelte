@@ -4942,13 +4942,13 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    backdrop-filter: blur(8px);
+    backdrop-filter: var(--glass-blur, blur(6px));
     transition: background 0.2s, border-color 0.2s, color 0.2s;
     padding: 0;
   }
 
   .map-control-btn:hover {
-    background: rgba(55, 168, 219, 0.25);
+    background: var(--btn-active-bg);
     border-color: #37a8db;
   }
 
@@ -5007,7 +5007,7 @@
   }
 
   .map-cam-btn:hover {
-    background: rgba(55, 168, 219, 0.25) !important;
+    background: var(--btn-active-bg) !important;
     border-color: #37a8db !important;
     color: #37a8db !important;
   }

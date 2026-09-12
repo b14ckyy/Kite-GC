@@ -147,8 +147,8 @@
     border-radius: 6px;
     color: #cfcfcf;
     cursor: pointer;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: var(--glass-blur, blur(6px));
+    -webkit-backdrop-filter: var(--glass-blur, blur(6px));
     transition: background-color 0.2s, color 0.2s;
   }
   .cp-btn svg {
