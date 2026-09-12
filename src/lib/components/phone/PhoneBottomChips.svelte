@@ -76,8 +76,8 @@
   /* The arming pill is styled for the toolbar's solid background; over the map it gets a backing. */
   .chips > :global(.arming) {
     background-color: rgba(46, 46, 46, 0.92);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: var(--glass-blur, blur(6px));
+    -webkit-backdrop-filter: var(--glass-blur, blur(6px));
   }
 
   .sensor-chip {
@@ -89,8 +89,8 @@
     background: rgba(46, 46, 46, 0.92);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 6px;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: var(--glass-blur, blur(6px));
+    -webkit-backdrop-filter: var(--glass-blur, blur(6px));
   }
   .sensor {
     padding: 2px 6px;

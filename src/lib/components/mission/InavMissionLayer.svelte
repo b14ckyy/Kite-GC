@@ -938,9 +938,9 @@
   /* The map (and thus this Leaflet popup) is unzoomed, so scale the editor box to match
      the global UI scale. Origin bottom-centre keeps the popup anchored over the WP (tip
      stays put, box grows upward). --ui-scale is inherited from .ui-root. */
-  :global(.wp-editor-popup-container .leaflet-popup-content-wrapper) { background: rgba(30,30,30,0.82); backdrop-filter: blur(10px); color: #ccc; border: 1px solid rgba(55,168,219,0.35); border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,0.5); padding: 0; transform: scale(var(--ui-scale, 1)); transform-origin: bottom center; }
+  :global(.wp-editor-popup-container .leaflet-popup-content-wrapper) { background: rgba(30,30,30,0.82); backdrop-filter: var(--glass-blur, blur(6px)); color: #ccc; border: 1px solid rgba(55,168,219,0.35); border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,0.5); padding: 0; transform: scale(var(--ui-scale, 1)); transform-origin: bottom center; }
   :global(.wp-editor-popup-container .leaflet-popup-content) { margin: 0; width: auto !important; }
-  :global(.wp-editor-popup-container .leaflet-popup-tip) { background: rgba(30,30,30,0.82); backdrop-filter: blur(10px); border: 1px solid rgba(55,168,219,0.35); }
+  :global(.wp-editor-popup-container .leaflet-popup-tip) { background: rgba(30,30,30,0.82); backdrop-filter: var(--glass-blur, blur(6px)); border: 1px solid rgba(55,168,219,0.35); }
   :global(.wp-editor-popup) { padding: 10px; font-size: 13px; min-width: 190px; }
   :global(.wpe-header) { display: flex; align-items: center; gap: 6px; font-weight: bold; font-size: 14px; color: #37a8db; margin-bottom: 6px; border-bottom: 1px solid #444; padding-bottom: 4px; }
   :global(.wpe-num) { flex-shrink: 0; }

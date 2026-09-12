@@ -183,6 +183,15 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     **Improved**
 
+    - **Power Saving also drops the glass blur** — with the mode active (or on battery in *Auto*),
+      panels and widgets lose their frosted-glass blur: every blurred surface is re-rendered on each
+      frame while the map moves, and on the phone that was the single biggest rendering cost. On
+      phones and tablets the blur of the widgets, buttons and chips over the map is always off; only
+      the panels keep it. The pressed / active fill of the map's glass buttons is a touch darker, so
+      an open video toggle stays visible over light terrain. [#174]
+    - **Radar contacts cost less** — a contact's icon is rebuilt only when it visibly changes
+      (heading, colour, size, label), not on every position update; with many ADS-B contacts that
+      was a steady stream of DOM rebuilds. [#174]
     - **Floating video window at UI scale above 100 %** — the snapped window landed past the bottom
       edge of the screen; its geometry is now computed in the scaled layer's own units. [#127]
     - **Replay player folds away while playing** — a slim strip (craft, time, progress) replaces
@@ -292,3 +301,4 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#163]: https://github.com/b14ckyy/Kite-GC/pull/163
 [#168]: https://github.com/b14ckyy/Kite-GC/issues/168
 [#173]: https://github.com/b14ckyy/Kite-GC/pull/173
+[#174]: https://github.com/b14ckyy/Kite-GC/pull/174

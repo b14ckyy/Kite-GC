@@ -171,7 +171,7 @@
     border-radius: 50%;
     /* Same glass as the card widgets — only the outer rim outside the horizon disc shows it. */
     background: rgba(30, 30, 30, 0.6);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: var(--glass-blur, blur(6px));
+    -webkit-backdrop-filter: var(--glass-blur, blur(6px));
   }
 </style>

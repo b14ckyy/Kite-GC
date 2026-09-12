@@ -48,7 +48,7 @@
   import { canvasSink, mjpegSink } from '$lib/controllers/mjpegSink';
   import { detachVideo } from '$lib/controllers/detachedVideo';
   import { isMobile } from '$lib/platform';
-  import { nativeSurface, activeNativeSurfaces } from '$lib/controllers/nativeVideo';
+  import { nativeSurface, activeNativeSurfaces, openNativeSurfaces } from '$lib/controllers/nativeVideo';
   import { doubleTap, mouseDoubleClick } from '$lib/helpers/doubleTap';
   import { startFloatMove, startFloatResize } from '$lib/helpers/floatWindowGestures';
   import VideoReconnectOverlay from '$lib/components/video/VideoReconnectOverlay.svelte';
@@ -75,6 +75,23 @@
    *  Every desktop platform serves it now, each in its own way: a child window on Windows, a second
    *  AppKit host on macOS, a second GStreamer pipeline on Linux. */
   const canDetach = $derived(!isMobile && live && $videoState.nativeSink);
+  /** The hardware layer is positioned and shown for this window (the router's ack). */
+  const armed = $derived($activeNativeSurfaces.has('floating'));
+  /** …and the hole is actually cut: on mobile only once the frame stands still. */
+  const holeOpen = $derived($openNativeSurfaces.has('floating'));
+
+  /** Where the native hole comes to rest: the frame's box without the slide transform. The
+   *  transform is on the frame, the hole div only inherits it; the matrix is in the frame's layout
+   *  px, the box in viewport px (--ui-scale). */
+  function restRect(el: HTMLElement): DOMRect | null {
+    const r = el.getBoundingClientRect();
+    if (!frameEl) return r;
+    const t = getComputedStyle(frameEl).transform;
+    if (!t || t === 'none') return r;
+    const m = new DOMMatrix(t);
+    const s = frameEl.offsetWidth ? frameEl.getBoundingClientRect().width / frameEl.offsetWidth : 1;
+    return new DOMRect(r.left - m.e * s, r.top - m.f * s, r.width, r.height);
+  }
   /** Narrow derived, not a raw store read in the effect below (that would re-run it on every
    *  telemetry patch): detaching must skip the slide-out — see there. */
   const detached = $derived($videoState.undocked);
@@ -97,6 +114,11 @@
       // frame's surface published for the length of the animation, and the sink serves two
       // surfaces — the third (the new window's) would be dropped and its hole would stand empty.
       if (detached || !frameEl) { mounted = false; return; }
+      // Mobile, native sink: parked stays mounted, off screen (the phone dock's pattern) — the
+      // native layer stays where it is and a park / recall is nothing but the hole leaving and
+      // returning. A DOM video (MJPEG, camera) would keep decoding off screen, so not for those;
+      // the desktop keeps unmounting (it rasters within the frame, Marc sees no flash there).
+      if (isMobile && active && $videoState.nativeSink) return;
       const el = frameEl;
       const done = () => { el.removeEventListener('transitionend', done); if (parked) mounted = false; };
       el.addEventListener('transitionend', done);
@@ -170,8 +192,8 @@
          a clip target too — that outline was what still crossed the widget's picture. -->
     <div
       class="fw-frame"
-      class:nv-active={$activeNativeSurfaces.has('floating')}
-      data-nv-clip={$activeNativeSurfaces.has('floating') ? 'floating' : undefined}
+      class:nv-active={holeOpen}
+      data-nv-clip={armed ? 'floating' : undefined}
     ></div>
 
     <!-- content: the video. When the map is in this frame, it's rendered (top-level) by +page here
@@ -184,16 +206,22 @@
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
         class="fw-body"
-        class:nv-active={$activeNativeSurfaces.has('floating')}
-        data-nv-clip={$activeNativeSurfaces.has('floating') ? 'floating' : undefined}
+        class:nv-active={holeOpen}
+        data-nv-clip={armed ? 'floating' : undefined}
         ondblclick={mouseDoubleClick(() => setMapLocation('floating'))}
         use:doubleTap={() => setMapLocation('floating')}
       >
         {#if live && $videoState.nativeSink}
           <!-- Native decode sink (hole punch): the video is a hardware layer BELOW the WebView;
                this div is the transparent hole it shows through. See controllers/nativeVideo. -->
-          <div class="native-hole" class:armed={$activeNativeSurfaces.has('floating')} use:nativeSurface={'floating'}>
-            {#if !$activeNativeSurfaces.has('floating')}<span>{$t('video.sinkElsewhere')}</span>{/if}
+          <!-- Mobile: the window tells the router where it comes to rest (its box without the slide
+               transform), the layer is placed there once and the hole is cut in one step when the frame
+               stands still — the phone dock's pattern (nativeVideo.ts, NativeSurfaceSpec). The desktop
+               keeps the hole following a drag. The frame and body stay opaque until the hole is open
+               (`holeOpen`), so a sliding frame shows its ground, not the map; the placeholder text only
+               when the sink really serves another surface, not while this one is being armed. -->
+          <div class="native-hole" class:armed={holeOpen} use:nativeSurface={isMobile ? { id: 'floating', rest: restRect } : 'floating'}>
+            {#if $activeNativeSurfaces.size > 0 && !armed}<span>{$t('video.sinkElsewhere')}</span>{/if}
           </div>
         {:else if live && $videoState.mjpegUrl}
           <!-- Native / MJPEG feed (no MediaStream): drawn by the off-thread reader where the WebView
@@ -271,13 +299,13 @@
     border-radius: 6px;
     color: #37a8db;
     cursor: pointer;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: var(--glass-blur, blur(6px));
+    -webkit-backdrop-filter: var(--glass-blur, blur(6px));
     transition: left 0.3s ease, top 0.3s ease, background 0.2s, border-color 0.2s;
     pointer-events: auto;
   }
   .fw-toggle.open {
-    background: rgba(55, 168, 219, 0.25);
+    background: var(--btn-active-bg);
     border-color: #37a8db;
   }
   .fw-toggle svg {
@@ -295,6 +323,7 @@
     pointer-events: none; /* layers opt back in individually */
     transform: translateX(0);
     transition: transform 0.3s ease;
+    will-change: transform; /* its own layer at rest too — no promotion when the slide starts */
   }
   /* Parked: past the screen's left edge. */
   .float-win.parked {
@@ -309,8 +338,8 @@
     pointer-events: none;
     box-sizing: border-box;
     background: rgba(30, 30, 30, 0.75);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: var(--glass-blur, blur(6px));
+    -webkit-backdrop-filter: var(--glass-blur, blur(6px));
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 8px;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
@@ -413,7 +442,7 @@
     pointer-events: auto;
   }
   .fw-unplug:hover {
-    background: rgba(55, 168, 219, 0.3);
+    background: var(--btn-active-bg);
   }
   .fw-unplug svg {
     width: 100%;

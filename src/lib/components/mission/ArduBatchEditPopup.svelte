@@ -252,7 +252,7 @@
     width: 290px;
     padding: 8px;
     background: rgba(30, 30, 30, 0.82);
-    backdrop-filter: blur(10px);
+    backdrop-filter: var(--panel-blur, blur(10px));
     border: 1px solid rgba(55, 168, 219, 0.35);
     border-radius: 8px;
     box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);

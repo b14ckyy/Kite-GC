@@ -1133,7 +1133,7 @@
     display: flex;
     flex-direction: column;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(12px);
+    backdrop-filter: var(--panel-blur, blur(10px));
     animation: debug-slide-in 0.2s ease-out;
     overflow: hidden;
     font-family: "Consolas", "JetBrains Mono", "Fira Code", monospace;

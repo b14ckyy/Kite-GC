@@ -127,7 +127,7 @@
     border: 1px solid rgba(55, 168, 219, 0.35);
     border-radius: 8px;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
-    backdrop-filter: blur(12px);
+    backdrop-filter: var(--panel-blur, blur(10px));
     /* Live variant transitions + smooth panel switch (the shell instance persists across rail
        switches, so width/height/top animate between any two variants). `interpolate-size`
        (Chromium 129+ / WebView2) lets width/height animate even to/from the `info` variant's
@@ -248,7 +248,7 @@
     border: 1px solid rgba(55, 168, 219, 0.4);
     background: rgba(40, 40, 40, 0.96);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.55);
-    backdrop-filter: blur(14px);
+    backdrop-filter: var(--panel-blur, blur(10px));
   }
   .ps-fullscreen {
     width: calc(100% - 124px);

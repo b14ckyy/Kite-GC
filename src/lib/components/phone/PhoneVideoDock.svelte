@@ -41,10 +41,14 @@
   const showButton = $derived(live && !widgetActive);
   const open = $derived($videoState.floating && live && !widgetActive);
 
-  // Mounted lags `open` by one slide: on close the frame stays in the DOM (class `parked`) until its
-  // transform transition ends, then unmounts; on open it mounts parked and un-parks a frame later so
-  // the slide-in animates. Parking with the map in the frame swaps the map back first — a parked
-  // frame must never hold the map.
+  // Mounted once the frame has been opened while a source is live, and with the native sink it stays
+  // mounted while parked (class `parked`, off screen behind the widget column): the native layer then stays where it is,
+  // covered by the opaque map, and a park / recall is nothing but the hole leaving and returning.
+  // Hiding and showing the Android SurfaceView on every toggle re-cut the window's transparent
+  // region each time, and that blanked the map for a few frames (Marc, 2026-09-13). Only a source
+  // going away (or the widget taking the picture) unmounts. On open it mounts parked and un-parks a
+  // frame later so the slide-in animates. Parking with the map in the frame swaps the map back
+  // first — a parked frame must never hold the map.
   let mounted = $state(false);
   let parked = $state(true);
   let frameEl = $state<HTMLDivElement | null>(null);
@@ -55,6 +59,9 @@
     } else {
       parked = true;
       if (!mounted) return;
+      // Parked: stays mounted (see above) — with the native sink only; a DOM video (MJPEG, camera)
+      // would keep decoding off screen.
+      if (live && !widgetActive && $videoState.nativeSink) return;
       if (!frameEl) { mounted = false; return; }
       const el = frameEl;
       const done = () => { el.removeEventListener('transitionend', done); if (parked) mounted = false; };
@@ -81,6 +88,22 @@
   $effect(() => {
     bindVideoEl(videoEl, $videoStream);
   });
+
+  /** Where the native hole comes to rest (NativeSurfaceSpec.rest): the frame's box without the
+   *  slide transform — the layer is placed there before the frame moves (Marc, 2026-09-12: "the
+   *  video is already in position and does not move"), and the router cuts the hole once the frame
+   *  has arrived; during the slide the frame shows its own ground. The transform is on the frame,
+   *  the hole div only inherits it; the matrix is in the frame's layout px, the box in viewport px
+   *  (--ui-scale). */
+  function restRect(el: HTMLElement): DOMRect | null {
+    const r = el.getBoundingClientRect();
+    if (!frameEl) return r;
+    const t = getComputedStyle(frameEl).transform;
+    if (!t || t === 'none') return r;
+    const m = new DOMMatrix(t);
+    const s = frameEl.offsetWidth ? frameEl.getBoundingClientRect().width / frameEl.offsetWidth : 1;
+    return new DOMRect(r.left - m.e * s, r.top - m.f * s, r.width, r.height);
+  }
 </script>
 
 {#if showButton}
@@ -118,19 +141,24 @@
     class:parked
     style="left:{left}px; top:{top}px; width:{width}px; height:{height}px;"
   >
-    <div class="dw-bg" class:nv-active={$activeNativeSurfaces.has('floating')}></div>
+    <!-- The frame keeps its ground while the hardware layer shows (data-nv-clip: the router cuts the
+         hole out of it once the frame stands still) — a sliding frame shows its ground, not the map
+         underneath, and the picture appears when it has arrived. -->
+    <div class="dw-bg" data-nv-clip></div>
     {#if !mapHere}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
         class="dw-body"
-        class:nv-active={$activeNativeSurfaces.has('floating')}
+        class:nv-active={live && $videoState.nativeSink}
         ondblclick={mouseDoubleClick(() => setMapLocation('floating'))}
         use:doubleTap={() => setMapLocation('floating')}
       >
         {#if live && $videoState.nativeSink}
-          <div class="native-hole" class:armed={$activeNativeSurfaces.has('floating')} use:nativeSurface={'floating'}>
-            {#if !$activeNativeSurfaces.has('floating')}<span>{$t('video.sinkElsewhere')}</span>{/if}
-          </div>
+          <!-- Nothing of its own: no placeholder ground, no text. Until the backend has armed the layer
+               the frame's ground (.dw-bg, opaque, no hole yet) covers the map; the moment the hole is
+               cut the picture is there. A placeholder that vanished at that moment was one more
+               layer change in the frame that blanked the map (Marc, 2026-09-13). -->
+          <div class="native-hole" use:nativeSurface={{ id: 'floating', rest: restRect }}></div>
         {:else if live && $videoState.mjpegUrl}
           {#if $canvasSink}
             <canvas use:mjpegSink class:mirror={$videoState.mirror} class:rot180={$videoState.rotate180}></canvas>
@@ -174,13 +202,13 @@
     border-radius: 6px;
     color: #37a8db;
     cursor: pointer;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: var(--glass-blur, blur(6px));
+    -webkit-backdrop-filter: var(--glass-blur, blur(6px));
     transition: right 0.3s ease, background 0.2s, border-color 0.2s;
     pointer-events: auto;
   }
   .dock-btn.open {
-    background: rgba(55, 168, 219, 0.25);
+    background: var(--btn-active-bg);
     border-color: #37a8db;
   }
   /* Video primary: the 2D/3D + follow buttons are hidden (mini map), the map toggle takes their
@@ -202,6 +230,7 @@
     pointer-events: none;
     transform: translateX(0);
     transition: transform 0.3s ease;
+    will-change: transform; /* its own layer at rest too — no promotion when the slide starts */
   }
   /* Parked: behind the widget column and past the screen's right edge (100vw covers both). */
   .dock-win.parked {
@@ -227,24 +256,17 @@
     border-radius: 8px;
     touch-action: none;
   }
-  .dw-bg.nv-active,
+  /* Native sink: transparent from the start (the frame's ground covers the map until the hole is
+     cut), not from the moment the layer is armed — that switch was a paint change in the frame at
+     the very frame the masks change. */
   .dw-body.nv-active {
     background: transparent;
   }
   .native-hole {
     position: absolute;
     inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #888;
-    font-size: 12px;
-    text-align: center;
-    background: #000;
-    border-radius: 8px; /* read by the surface router — the hole is cut with these corners */
-  }
-  .native-hole.armed {
     background: transparent;
+    border-radius: 8px; /* read by the surface router — the hole is cut with these corners */
   }
   .dw-body video,
   .dw-body img,

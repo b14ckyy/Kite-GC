@@ -27,7 +27,7 @@ The Settings panel — the Interface and Data tabs, each grouped into labelled s
 | **Real Daytime and Lighting (3D)** | Light the 3D globe with the real sun position (day / night, shadows). | On |
 | **Log Replay Time (3D)** | During replay, drive that lighting from the log's actual time of day (needs the option above). | On |
 | **Night Mode** | Dim the 2D map at night — Off / Auto (by local time) / On. | Auto |
-| **Power Saving** | Cap the 3D frame rate to save battery — Off (60 fps) / On (20 fps) / Auto (20 fps on battery). While active it also drops the smooth bar animations in the speed and battery widgets, so those read the current value directly. | Auto |
+| **Power Saving** | Cap the 3D frame rate to save battery — Off (60 fps) / On (20 fps) / Auto (20 fps on battery). While active it also drops the smooth bar animations in the speed and battery widgets, so those read the current value directly, and the frosted-glass blur behind panels and widgets. On phones and tablets the glass blur over the map is always off; only the panels keep it. | Auto |
 | **High-Resolution 3D** | Render the 3D globe at the display's native pixel density (on) or at half of it (off) to save GPU and battery. Sharpest on high-DPI phones and tablets; a laptop with a weak integrated GPU may prefer it off. | On (desktop) · Off (phone / tablet) |
 | **Your Location** | Your detected position (used as a fallback reference). **Detect** re-runs OS geolocation. | — |
 | **GCS Location** | How the ground-station position is sourced — Off / Manual (set once) / Continuous (live). Used as the reference when no aircraft fix is available. | Continuous |

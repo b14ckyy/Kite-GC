@@ -290,6 +290,10 @@
   // ── Foreign-vehicle (radar) contacts — isolated layer, diffed by id ──
   let radarLayer: L.LayerGroup | undefined;
   const radarMarkers = new Map<string, L.Marker>();
+  /** The icon each contact marker currently shows (its HTML + size), so a snapshot that changed nothing
+   *  visible does not rebuild it: Leaflet's setIcon replaces the icon's inner HTML and its classes —
+   *  with ADS-B online that was ~35 DOM rebuilds a second in the marker pane on the phone. */
+  const radarIconKeys = new Map<string, string>();
   // Conflict-alert pulse rings are SEPARATE persistent markers (not part of the contact icon): the
   // contact icon is re-set on every position/heading update, which would restart the CSS pulse and make
   // it jitter. As their own markers they only re-`setIcon` on a level change; position uses setLatLng,
@@ -342,6 +346,7 @@
       if (radarMarkers.size || radarAlertMarkers.size) {
         radarLayer.clearLayers();
         radarMarkers.clear();
+        radarIconKeys.clear();
         radarAlertMarkers.clear();
         radarAlertRendered.clear();
       }
@@ -357,15 +362,17 @@
       // FormationFlight icons render 20% larger than ADS-B.
       const sizeMul = v.system === 'formationFlight' ? 1.2 : 1;
       const size = Math.max(RADAR_MIN_PX, Math.round(RADAR_BASE_PX * (uiScale || 1) * (0.6 + 0.4 * rel) * sizeMul));
+      // Whole degrees and 1/20 opacity steps: the icon is rebuilt only when its HTML changes (below),
+      // and a heading or relevance that drifts in the fourth decimal is not a visible change.
       const html = buildContactIconHtml({
         shape: pickShape(v.system, v.category, v.headingDeg != null),
-        heading: v.headingDeg,
+        heading: v.headingDeg != null ? Math.round(v.headingDeg) : v.headingDeg,
         // FormationFlight uses a state colour (armed/disarmed/lost); ADS-B uses the altitude scale.
         color: v.system === 'formationFlight'
           ? ffContactColor(v.extra?.ffState)
           : contactColor(v.altM, radarRefAltM),
         sizePx: size,
-        opacity: rel,
+        opacity: Math.round(rel * 20) / 20,
         selected: v.id === radarSelectedId,
         label: v.callsign?.trim() || undefined,
         badgeLabel: v.system === 'formationFlight', // big single-letter id badge
@@ -373,19 +380,25 @@
         // every icon update — keep it OUT of the contact icon.
         alertLevel: null,
       });
-      const icon = L.divIcon({ className: 'radar-divicon', html, iconSize: [size, size], iconAnchor: [size / 2, size / 2] });
+      const iconKey = `${size}|${html}`;
       const existing = radarMarkers.get(v.id);
       if (existing) {
         existing.setLatLng([v.lat, v.lon]);
-        existing.setIcon(icon);
-        existing.setTooltipContent(radarTooltip(v));
+        if (radarIconKeys.get(v.id) !== iconKey) {
+          existing.setIcon(L.divIcon({ className: 'radar-divicon', html, iconSize: [size, size], iconAnchor: [size / 2, size / 2] }));
+          radarIconKeys.set(v.id, iconKey);
+        }
+        const tip = radarTooltip(v);
+        if (existing.getTooltip()?.getContent() !== tip) existing.setTooltipContent(tip);
       } else {
         const id = v.id;
+        const icon = L.divIcon({ className: 'radar-divicon', html, iconSize: [size, size], iconAnchor: [size / 2, size / 2] });
         const m = L.marker([v.lat, v.lon], { icon, zIndexOffset: 400 });
         m.bindTooltip(radarTooltip(v), { direction: 'top', offset: [0, -size / 2], opacity: 0.95 });
         m.on('click', () => radarSelection.update((cur) => (cur === id ? null : id)));
         m.addTo(radarLayer);
         radarMarkers.set(id, m);
+        radarIconKeys.set(id, iconKey);
       }
 
       // Conflict-alert ring — own persistent marker (fixed size, relevance-independent) so the CSS
@@ -412,7 +425,7 @@
       }
     }
     for (const [id, m] of radarMarkers) {
-      if (!seen.has(id)) { radarLayer.removeLayer(m); radarMarkers.delete(id); }
+      if (!seen.has(id)) { radarLayer.removeLayer(m); radarMarkers.delete(id); radarIconKeys.delete(id); }
     }
     for (const [id, am] of radarAlertMarkers) {
       if (!seen.has(id)) { radarLayer.removeLayer(am); radarAlertMarkers.delete(id); radarAlertRendered.delete(id); }
@@ -1358,6 +1371,9 @@
     if (dist < 0.5 && Math.abs(dh) < 0.3 && Math.abs(followTarget.pitch - followCurrent.pitch) < 0.3 && Math.abs(dr) < 0.3 && Math.abs(dc) < 0.3 && Math.abs(followTarget.turnRate - followCurrent.turnRate) < 0.3) {
       followCurrent = { ...followTarget }; // settled — snap exactly + stop until next target
       applyFollowFrame();
+      followDrivingView = true;
+      followMoveEnd(); // the rationed moveend (panToVisualCentre) — the listeners see the final view
+      followDrivingView = false;
       followRaf = null;
       return;
     }
@@ -1414,16 +1430,117 @@
       }
     }
     redrawDirLines();
-    // Don't fight an in-progress zoom animation (would snap mid-zoom).
+    // Heading-up rotation is a CSS variable on the container, independent of Leaflet's view: it
+    // keeps turning through a zoom animation or a pinch (a frozen heading jumped by the turn's
+    // worth when the gesture ended).
+    if (viewMode === 'heading-follow') {
+      mapHeading = followCurrent.heading;
+      mapContainer?.style.setProperty('--map-rotation', `${-mapHeading}deg`);
+    }
+    // Don't fight an in-progress zoom animation (would snap mid-zoom; the animation itself heads for
+    // the aircraft, see the zoomanim hook in onMount). A pinch in flight is anchored instead of panned.
     if (viewMode !== 'free' && !(map as unknown as { _animatingZoom?: boolean })._animatingZoom) {
       followDrivingView = true;
-      centerOn(ll, map.getZoom(), { animate: false }); // fires moveend synchronously → saveMapState (guarded)
+      if (pinching()) anchorPinch(ll);
+      else panToVisualCentre(ll); // fires moveend synchronously → saveMapState (guarded)
       followDrivingView = false;
-      if (viewMode === 'heading-follow') {
-        mapHeading = followCurrent.heading;
-        mapContainer?.style.setProperty('--map-rotation', `${-mapHeading}deg`);
-      }
     }
+  }
+
+  /** Leaflet's touch-zoom handler, the fields the follow modes lean on (1.9.4 privates — they are
+   *  what the handler itself runs on, so a Leaflet upgrade must revisit `anchorPinch`). */
+  interface PinchHandler {
+    _zooming?: boolean;
+    _startLatLng?: L.LatLng;
+    _center?: L.LatLng;
+  }
+  interface MapInternals {
+    _animatingZoom?: boolean;
+    _animateToCenter?: L.LatLng;
+    _move(center: L.LatLng, zoom: number, data: { pinch: boolean; round: boolean }): void;
+  }
+
+  function pinching(): boolean {
+    return (map?.touchZoom as unknown as PinchHandler | undefined)?._zooming === true;
+  }
+
+  /** The latlng that, placed at Leaflet's container centre at `zoom`, puts `ll` at the VISUAL centre
+   *  (the middle of the uncovered map area, see centerOffsetX/Y). */
+  function containerCentreFor(m: L.Map, ll: L.LatLngExpression, zoom: number): L.LatLng {
+    return m.unproject(m.project(L.latLng(ll), zoom).add(L.point(centerOffsetX(), centerOffsetY())), zoom);
+  }
+
+  /** Follow frame while two fingers pinch: the handler zooms around the container centre and
+   *  re-places its `_startLatLng` there on every touchmove (touchZoom 'center', setZoomAnchor), so a
+   *  pan of ours would be undone a frame later — and on the phone the aircraft sits left of / above
+   *  that centre (the widget column, the bottom slots): it drifted outwards while the fingers
+   *  spread, then jumped back when they lifted. Instead the frame hands the handler the centre
+   *  that keeps the aircraft at the visual centre at the pinch's current (fractional) zoom, and
+   *  applies it the way the handler does between touchmoves (a resting pair of fingers sends no
+   *  event, the aircraft keeps moving). No tiles are touched: a pinch `_move` only retransforms the
+   *  tile levels. */
+  function anchorPinch(ll: L.LatLngExpression) {
+    if (!map) return;
+    const tz = map.touchZoom as unknown as PinchHandler;
+    const zoom = map.getZoom();
+    const c = containerCentreFor(map, ll, zoom);
+    tz._startLatLng = c;
+    tz._center = c;
+    (map as unknown as MapInternals)._move(c, zoom, { pinch: true, round: false });
+  }
+
+  /** The per-frame follow recentre: a raw pan that puts `ll` at the visual centre — never setView.
+   *  setView(ll, map.getZoom(), {animate:false}) looked equivalent, but while a pinch is in flight
+   *  the map's zoom is fractional and setView snaps it to zoomSnap first — a zoom "change" it
+   *  cannot animate with animate:false, so it fell through to _resetView, and the tile layer answers
+   *  that ('viewprereset') by throwing EVERY tile away. Sixty times a second for the whole pinch:
+   *  the map stayed grey through the gesture and for seconds after it, while the ~1000 re-requested
+   *  tiles drained through the cache queue (Sony, 2026-09-12: 600 tiles removed, 1152 re-created by
+   *  one pinch in follow mode). panBy is exactly what setView does when the zoom is unchanged, minus
+   *  that trap; a jump larger than the viewport (a snap to a far target) still resets, as it should. */
+  function panToVisualCentre(ll: L.LatLngExpression) {
+    if (!map) return;
+    const size = map.getSize();
+    const target = L.point(size.x / 2 - centerOffsetX(), size.y / 2 - centerOffsetY());
+    const offset = map.latLngToContainerPoint(ll).subtract(target).round();
+    if (!offset.x && !offset.y) return;
+    if (!size.contains(offset)) {
+      // A jump past the viewport (a snap to a far target): the full reset, as panBy would do it.
+      followMoveEnd();
+      map.setView(containerCentreFor(map, ll, map.getZoom()), map.getZoom(), { animate: false });
+      return;
+    }
+    // The pan itself is what panBy does without animation — the map pane moves, nothing else. The
+    // events are rationed (see followMoveEnd): panBy fired movestart/move/moveend on every frame,
+    // and each moveend made Leaflet's SVG renderers re-place their box (a new viewBox on a layer
+    // the size of the whole map, in heading-up 17 megapixels) — a full repaint of every vector
+    // layer, sixty times a second, for a pan of a pixel or two.
+    const pane = map.getPane('mapPane');
+    if (!pane) return;
+    if (!followMoving) {
+      followMoving = true;
+      map.fire('movestart');
+    }
+    L.DomUtil.setPosition(pane, L.DomUtil.getPosition(pane).subtract(offset));
+    map.fire('move');
+    if (performance.now() - followMoveEndAt >= FOLLOW_MOVEEND_MS) followMoveEnd();
+  }
+
+  /** How often the follow pan fires `moveend` while the aircraft keeps moving. Everything on
+   *  moveend is a "settle" action — the SVG renderers re-place their box, the tile layer prunes,
+   *  the airspace overlay and the night check re-evaluate — and none of it needs 60 Hz; the tile
+   *  layer loads from `move` anyway (its own 200 ms throttle). 250 ms keeps a vector layer's box
+   *  well within its 10 % padding at any flying speed. */
+  const FOLLOW_MOVEEND_MS = 250;
+  let followMoveEndAt = 0;
+  let followMoving = false;
+
+  /** Close the current run of follow pans with the one moveend the listeners are waiting for. */
+  function followMoveEnd() {
+    followMoveEndAt = performance.now();
+    if (!followMoving || !map) return;
+    followMoving = false;
+    map.fire('moveend');
   }
 
   /** Redraw the HDG/COG nose lines from the SMOOTHED follow state (so they track the UAV stably, the
@@ -1444,14 +1561,21 @@
         pane.style.pointerEvents = 'none';
       }
       dirLayer = L.layerGroup().addTo(map);
+      // A canvas renderer of their own, not the pane's default SVG: the six lines move on EVERY follow
+      // frame, and a changed SVG path re-rasterises the compositor tiles under it — on a layer the
+      // size of the whole map (the oversized heading-up square), that was well over a hundred raster
+      // tasks a second for six lines, each a GPU round trip. A canvas is one texture the lines are
+      // drawn into; Leaflet redraws only the changed region, nothing is rasterised behind it.
+      const dirRenderer = L.canvas({ pane: 'dirLines' });
       // Add order = draw order: the turn arc first (bottom, under the H/B lines), then dark casings,
       // then the coloured H/B lines on top. All in the dirLines pane → above the track, below the UAV.
-      turnCasing = L.polyline([], { pane: 'dirLines', color: '#000', weight: 3.5, opacity: 0.3, lineCap: 'round', interactive: false }).addTo(dirLayer);
-      turnLine = L.polyline([], { pane: 'dirLines', color: '#fff', weight: 1.5, opacity: 0.95, lineCap: 'round', interactive: false }).addTo(dirLayer);
-      hdgCasing = L.polyline([], { pane: 'dirLines', color: '#000', weight: 6, opacity: 0.3, lineCap: 'round', interactive: false }).addTo(dirLayer);
-      cogCasing = L.polyline([], { pane: 'dirLines', color: '#000', weight: 6, opacity: 0.3, lineCap: 'round', interactive: false }).addTo(dirLayer);
-      hdgLine = L.polyline([], { pane: 'dirLines', color: '#37a8db', weight: 3, opacity: 1, lineCap: 'round', interactive: false }).addTo(dirLayer);
-      cogLine = L.polyline([], { pane: 'dirLines', color: '#f5a623', weight: 3, opacity: 1, dashArray: '6 5', lineCap: 'round', interactive: false }).addTo(dirLayer);
+      const r = { pane: 'dirLines', renderer: dirRenderer, lineCap: 'round' as const, interactive: false };
+      turnCasing = L.polyline([], { ...r, color: '#000', weight: 3.5, opacity: 0.3 }).addTo(dirLayer);
+      turnLine = L.polyline([], { ...r, color: '#fff', weight: 1.5, opacity: 0.95 }).addTo(dirLayer);
+      hdgCasing = L.polyline([], { ...r, color: '#000', weight: 6, opacity: 0.3 }).addTo(dirLayer);
+      cogCasing = L.polyline([], { ...r, color: '#000', weight: 6, opacity: 0.3 }).addTo(dirLayer);
+      hdgLine = L.polyline([], { ...r, color: '#37a8db', weight: 3, opacity: 1 }).addTo(dirLayer);
+      cogLine = L.polyline([], { ...r, color: '#f5a623', weight: 3, opacity: 1, dashArray: '6 5' }).addTo(dirLayer);
     }
     const { lat, lon, heading, course, speed } = followCurrent;
     const len = speed * DIR_LEAD_S; // 15 s of travel → the lines represent ground speed
@@ -1733,9 +1857,14 @@
     currentOverlays = [];
 
     // Add base layer
+    // updateWhenIdle: Leaflet's default is TRUE on mobile — tiles for a dragged map load only once
+    // the finger lets go (moveend), the map looks sluggish while it is pulled along (Marc, 2026-09-13).
+    // The desktop default is false: tiles load during the drag, throttled to updateInterval (200 ms).
+    // With the tile cache in front of the network the mobile saving is not worth the feel.
     currentBase = cachedTileLayer(provider.url, {
       attribution: provider.attribution,
       maxZoom: provider.maxZoom,
+      updateWhenIdle: false,
       // Enable over-zoom placeholder detection on flagged base layers (ESRI sat).
       providerId: provider.detectPlaceholders ? provider.id : undefined,
     }).addTo(map);
@@ -1746,6 +1875,7 @@
         const layer = cachedTileLayer(ol.url, {
           attribution: ol.attribution,
           maxZoom: ol.maxZoom,
+          updateWhenIdle: false,
           pane: "overlayPane",
         }).addTo(map);
         currentOverlays.push(layer);
@@ -1823,6 +1953,20 @@
 
     // Apply the persisted (or default) map provider
     applyProvider(getProviderById(s.mapProvider));
+
+    // Every zoom ANIMATION in a follow mode heads for the aircraft: the fingers lifting off a pinch,
+    // the mini map's slide, a wheel step — Leaflet animates them around the container centre, which
+    // on the phone is not where the aircraft is (centerInsetRight/Bottom), so the aircraft slid
+    // outwards for 250 ms and snapped back on the first follow frame after. The hook rewrites the
+    // animation's centre to the one that keeps the aircraft at the visual centre at the target zoom.
+    // Registered BEFORE any layer: listeners run in registration order and the tile levels, markers
+    // and vector renderers all read `e.center` when they set up their transition.
+    map.on('zoomanim', (e) => {
+      if (viewMode === 'free' || !followCurrent || !map) return;
+      const c = containerCentreFor(map, [followCurrent.lat, followCurrent.lon], e.zoom);
+      e.center = c;
+      (map as unknown as MapInternals)._animateToCenter = c;
+    });
 
     map.on("moveend", saveMapState);
     map.on("zoomend", saveMapState);
@@ -2146,6 +2290,7 @@
       applyHeadingUpSize(false);
       map.dragging.enable();
       setZoomAnchor('cursor');
+      followMoveEnd(); // a run of follow pans may still be open — its listeners get their moveend
     }
   }
 
@@ -2372,11 +2517,17 @@
     height: 257px !important;
   }
 
-  /* Heading-up: container size set via inline styles (JS),
-     CSS handles only rotation. */
+  /* Heading-up: container size set via inline styles (JS), CSS handles only rotation.
+     will-change: the rotation is driven per frame from JS (a CSS-variable write per follow frame),
+     and without its own compositor layer every step is a repaint of the whole oversized square —
+     hundreds of (empty, solid-colour) raster tasks per second that saturated the GPU thread on the
+     phone (Chromium trace on the Sony, 2026-09-12). With the layer the rotation is a compositor-only
+     transform update; the container paints nothing but its background, so the layer costs no
+     texture. */
   :global(.map.heading-up) {
     transform: rotate(var(--map-rotation, 0deg));
     transform-origin: center center;
+    will-change: transform;
   }
 
   /* Mini map (the video-swap frame / widget tile, `miniControls`): every marker at half size, in
@@ -2511,13 +2662,13 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    backdrop-filter: blur(8px);
+    backdrop-filter: var(--glass-blur, blur(6px));
     transition: background 0.2s, border-color 0.2s, color 0.2s;
     padding: 0;
   }
 
   .map-control-btn:hover {
-    background: rgba(55, 168, 219, 0.25);
+    background: var(--btn-active-bg);
     border-color: #37a8db;
   }
 
@@ -2537,7 +2688,7 @@
     background: rgba(46, 46, 46, 0.45);
     border-color: rgba(55, 168, 219, 0.45);
     color: rgba(199, 223, 232, 0.95);
-    backdrop-filter: blur(4px);
+    backdrop-filter: var(--glass-blur, blur(6px));
   }
 
   .map-heading-btn.mode-follow,
@@ -2545,7 +2696,7 @@
     background: rgba(46, 46, 46, 0.92);
     border-color: rgba(55, 168, 219, 0.7);
     color: #37a8db;
-    backdrop-filter: blur(8px);
+    backdrop-filter: var(--glass-blur, blur(6px));
   }
 
   .map-heading-btn.mode-free:hover {

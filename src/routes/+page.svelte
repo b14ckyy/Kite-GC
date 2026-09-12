@@ -3377,6 +3377,7 @@
     class:parked={mapFloating && !$videoState.floating}
     class:edit-passive={widgetEditMode && mapInWidget}
     data-nv-clip={mapInFrame ? undefined : true}
+    data-nv-opaque={mapInFrame ? undefined : true}
     style={mapInFrame ? inFrameStyle : mapLayerStyle}
     onclick={minimizeLogbook}
   >
@@ -4565,6 +4566,14 @@
     height: 100%;
     overflow: hidden;
     pointer-events: none;
+    /* A compositor layer of its own, permanently. The docked video window slides in and out BEHIND
+       this column; while it animates it overlaps the column, and Chromium then promoted the column
+       to a layer (overlap with an animating layer), squashed the glass into it and rasterised the
+       lot again — at the end of the slide the reverse. Every element squashed with the glass (the
+       hamburger, the connection button, the arming chip, the dock toggle) vanished for a frame at
+       both ends of every slide (Sony, 2026-09-13, traced with the CDP LayerTree). With the layer
+       fixed there is nothing to promote or demote. */
+    will-change: transform;
   }
   .zone-phone-widgets > :global(*) {
     pointer-events: auto;
@@ -4650,6 +4659,20 @@
     transition: left 0.3s ease;
   }
 
+  /* Mobile: the layout zones around the map are compositor layers of their own, permanently.
+     The floating video window mounts and slides over them; Chromium promoted every zone it
+     overlaps to a layer for the duration (toolbar, both docks, nav rail, map controls, status bar)
+     and demoted them again afterwards — each flip rasterises the zone anew, and almost the whole
+     chrome vanished for a frame on the tablet when the window was switched on (Teclast M11,
+     2026-09-13, CDP LayerTree). Mobile only: on the desktop the same flips happen but the raster is
+     back within the frame, and the layers would cost texture memory on a 4K screen. */
+  :global(html.is-mobile) .zone-toolbar,
+  :global(html.is-mobile) .zone-bottom-dock,
+  :global(html.is-mobile) .zone-side-dock,
+  :global(html.is-mobile) .zone-map-controls,
+  :global(html.is-mobile) .zone-status-bar {
+    will-change: transform;
+  }
   .zone-status-bar {
     grid-area: status-bar;
     z-index: 200;
