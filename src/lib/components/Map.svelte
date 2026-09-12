@@ -1857,9 +1857,14 @@
     currentOverlays = [];
 
     // Add base layer
+    // updateWhenIdle: Leaflet's default is TRUE on mobile — tiles for a dragged map load only once
+    // the finger lets go (moveend), the map looks sluggish while it is pulled along (Marc, 2026-09-13).
+    // The desktop default is false: tiles load during the drag, throttled to updateInterval (200 ms).
+    // With the tile cache in front of the network the mobile saving is not worth the feel.
     currentBase = cachedTileLayer(provider.url, {
       attribution: provider.attribution,
       maxZoom: provider.maxZoom,
+      updateWhenIdle: false,
       // Enable over-zoom placeholder detection on flagged base layers (ESRI sat).
       providerId: provider.detectPlaceholders ? provider.id : undefined,
     }).addTo(map);
@@ -1870,6 +1875,7 @@
         const layer = cachedTileLayer(ol.url, {
           attribution: ol.attribution,
           maxZoom: ol.maxZoom,
+          updateWhenIdle: false,
           pane: "overlayPane",
         }).addTo(map);
         currentOverlays.push(layer);
