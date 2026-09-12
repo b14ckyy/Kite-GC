@@ -290,6 +290,10 @@
   // ── Foreign-vehicle (radar) contacts — isolated layer, diffed by id ──
   let radarLayer: L.LayerGroup | undefined;
   const radarMarkers = new Map<string, L.Marker>();
+  /** The icon each contact marker currently shows (its HTML + size), so a snapshot that changed nothing
+   *  visible does not rebuild it: Leaflet's setIcon replaces the icon's inner HTML and its classes —
+   *  with ADS-B online that was ~35 DOM rebuilds a second in the marker pane on the phone. */
+  const radarIconKeys = new Map<string, string>();
   // Conflict-alert pulse rings are SEPARATE persistent markers (not part of the contact icon): the
   // contact icon is re-set on every position/heading update, which would restart the CSS pulse and make
   // it jitter. As their own markers they only re-`setIcon` on a level change; position uses setLatLng,
@@ -342,6 +346,7 @@
       if (radarMarkers.size || radarAlertMarkers.size) {
         radarLayer.clearLayers();
         radarMarkers.clear();
+        radarIconKeys.clear();
         radarAlertMarkers.clear();
         radarAlertRendered.clear();
       }
@@ -357,15 +362,17 @@
       // FormationFlight icons render 20% larger than ADS-B.
       const sizeMul = v.system === 'formationFlight' ? 1.2 : 1;
       const size = Math.max(RADAR_MIN_PX, Math.round(RADAR_BASE_PX * (uiScale || 1) * (0.6 + 0.4 * rel) * sizeMul));
+      // Whole degrees and 1/20 opacity steps: the icon is rebuilt only when its HTML changes (below),
+      // and a heading or relevance that drifts in the fourth decimal is not a visible change.
       const html = buildContactIconHtml({
         shape: pickShape(v.system, v.category, v.headingDeg != null),
-        heading: v.headingDeg,
+        heading: v.headingDeg != null ? Math.round(v.headingDeg) : v.headingDeg,
         // FormationFlight uses a state colour (armed/disarmed/lost); ADS-B uses the altitude scale.
         color: v.system === 'formationFlight'
           ? ffContactColor(v.extra?.ffState)
           : contactColor(v.altM, radarRefAltM),
         sizePx: size,
-        opacity: rel,
+        opacity: Math.round(rel * 20) / 20,
         selected: v.id === radarSelectedId,
         label: v.callsign?.trim() || undefined,
         badgeLabel: v.system === 'formationFlight', // big single-letter id badge
@@ -373,19 +380,25 @@
         // every icon update — keep it OUT of the contact icon.
         alertLevel: null,
       });
-      const icon = L.divIcon({ className: 'radar-divicon', html, iconSize: [size, size], iconAnchor: [size / 2, size / 2] });
+      const iconKey = `${size}|${html}`;
       const existing = radarMarkers.get(v.id);
       if (existing) {
         existing.setLatLng([v.lat, v.lon]);
-        existing.setIcon(icon);
-        existing.setTooltipContent(radarTooltip(v));
+        if (radarIconKeys.get(v.id) !== iconKey) {
+          existing.setIcon(L.divIcon({ className: 'radar-divicon', html, iconSize: [size, size], iconAnchor: [size / 2, size / 2] }));
+          radarIconKeys.set(v.id, iconKey);
+        }
+        const tip = radarTooltip(v);
+        if (existing.getTooltip()?.getContent() !== tip) existing.setTooltipContent(tip);
       } else {
         const id = v.id;
+        const icon = L.divIcon({ className: 'radar-divicon', html, iconSize: [size, size], iconAnchor: [size / 2, size / 2] });
         const m = L.marker([v.lat, v.lon], { icon, zIndexOffset: 400 });
         m.bindTooltip(radarTooltip(v), { direction: 'top', offset: [0, -size / 2], opacity: 0.95 });
         m.on('click', () => radarSelection.update((cur) => (cur === id ? null : id)));
         m.addTo(radarLayer);
         radarMarkers.set(id, m);
+        radarIconKeys.set(id, iconKey);
       }
 
       // Conflict-alert ring — own persistent marker (fixed size, relevance-independent) so the CSS
@@ -412,7 +425,7 @@
       }
     }
     for (const [id, m] of radarMarkers) {
-      if (!seen.has(id)) { radarLayer.removeLayer(m); radarMarkers.delete(id); }
+      if (!seen.has(id)) { radarLayer.removeLayer(m); radarMarkers.delete(id); radarIconKeys.delete(id); }
     }
     for (const [id, am] of radarAlertMarkers) {
       if (!seen.has(id)) { radarLayer.removeLayer(am); radarAlertMarkers.delete(id); radarAlertRendered.delete(id); }
