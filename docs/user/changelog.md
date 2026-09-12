@@ -155,6 +155,11 @@ inside the box of the feature release they belong to, so the notes for one relea
       everything that was not MAVLink onto MSP, so the passive Telemetry choice was silently
       rewritten. [#143]
     - **Bulgarian translation corrected** — 26 strings, contributed by teodoryantcheff. [#141]
+    - **Markers and pop-ups turned with the map in heading-up mode.** Waypoint markers, labels,
+      the "Fly Here" pop-up and the waypoint editor rotated together with the map tiles, so they
+      were unreadable while the map followed the aircraft's heading. They now stay bound to their
+      position but upright; the aircraft symbol and radar contacts keep pointing along their
+      track. [#168]
 
 [#16]: https://github.com/b14ckyy/Kite-GC/pull/16
 [#48]: https://github.com/b14ckyy/Kite-GC/pull/48
@@ -180,3 +185,4 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#145]: https://github.com/b14ckyy/Kite-GC/pull/145
 [#160]: https://github.com/b14ckyy/Kite-GC/pull/160
 [#163]: https://github.com/b14ckyy/Kite-GC/pull/163
+[#168]: https://github.com/b14ckyy/Kite-GC/issues/168
