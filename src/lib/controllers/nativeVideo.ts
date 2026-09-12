@@ -55,6 +55,12 @@ const MAX_SURFACES = 2;
  *  list that contains it (see `ackedKeys`) — so a hole never opens over a layer that is not there. */
 export const activeNativeSurfaces = writable<Set<NativeSurfaceId>>(new Set());
 
+/** The surfaces whose hole is CUT right now — armed AND, for a resting-position surface, standing
+ *  still (see `boxSettled`). A frame that keeps its own ground opaque until the picture can show
+ *  (the tablet's floating window) switches on this, not on `activeNativeSurfaces`: between the ack
+ *  and the end of the slide the layer is armed but nothing is transparent yet. */
+export const openNativeSurfaces = writable<Set<NativeSurfaceId>>(new Set());
+
 /** Live geometry of the active hole for the Debug Monitor: how far the visible rect was
  *  clipped on each side (viewport px), the radius read from the surface's CSS, and which
  *  corner-cut flags fired — the numbers behind a square-corner complaint. */
@@ -149,6 +155,7 @@ export function stopNativeSurfaceRouter(): void {
   clearClips();
   removeGround();
   activeNativeSurfaces.set(new Set());
+  openNativeSurfaces.set(new Set());
   ackedKeys = new Set();
 }
 
@@ -440,6 +447,8 @@ function tick(): void {
   }
   // Topmost surface first (DOM stacking is the reverse of the priority order): the one that owns
   // the shared pixels keeps its hole whole, the ones below it are trimmed around it.
+  const open = new Set(holes.map((h) => h.id));
+  if (!setsEqual(get(openNativeSurfaces), open)) openNativeSurfaces.set(open);
   applyClips(disjoint([...holes].reverse()));
   if (import.meta.env.DEV) {
     const prev = get(nativeHoleDebug);
