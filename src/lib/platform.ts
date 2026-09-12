@@ -93,7 +93,10 @@ if (typeof document !== 'undefined' && isMobile) {
   document.documentElement.style.setProperty('--safe-top', 'env(safe-area-inset-top, 0px)');
   // In landscape the notch / Dynamic Island sits on a side edge, over the left-anchored nav rail and
   // panels. `--safe-left` / `--safe-right` let those shift clear of it (both 0 in portrait).
-  document.documentElement.style.setProperty('--safe-left', 'env(safe-area-inset-left, 0px)');
+  // Android reports a camera punch-hole as a left inset too (52 css px on a 21:9 phone) — for a
+  // few millimetres of hole the whole rail moved right and the row lost that width. Ignored on
+  // Android for now (Marc, 2026-09-12); the hidden-bar insets top/right stay (AX12, PR #159).
+  document.documentElement.style.setProperty('--safe-left', isAndroid ? '0px' : 'env(safe-area-inset-left, 0px)');
   document.documentElement.style.setProperty('--safe-right', 'env(safe-area-inset-right, 0px)');
 }
 

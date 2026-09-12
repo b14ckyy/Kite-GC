@@ -100,6 +100,8 @@
   import FloatingVideoWindow from "$lib/components/video/FloatingVideoWindow.svelte";
   import { startDetachedVideo, stopDetachedVideo } from "$lib/controllers/detachedVideo";
   import PhoneVideoDock from "$lib/components/phone/PhoneVideoDock.svelte";
+  import PhoneBottomBar from "$lib/components/phone/PhoneBottomBar.svelte";
+  import PhoneDragGhost from "$lib/components/phone/PhoneDragGhost.svelte";
   import { setNativeRightBound } from "$lib/controllers/nativeVideo";
   import { doubleTap, mouseDoubleClick } from "$lib/helpers/doubleTap";
   import { startFloatMove, startFloatResize } from "$lib/helpers/floatWindowGestures";
@@ -334,6 +336,10 @@
   // full-screen layer. In the docked frame / widget tile nothing covers it: a shifted centre put
   // the follow anchor on the frame's left edge (Marc, 2026-09-04).
   const phoneMapInset = $derived(phoneUi && !mapInFrame ? phonePanelW - phoneShift : 0);
+  // …and for the bottom widget slots (PHONE_BOTTOM_WIDGETS.md B7): the tallest filled tile plus its
+  // 8 px edge margin, published by PhoneBottomBar; 0 while every slot is empty.
+  let phoneBarH = $state(0);
+  const phoneMapInsetBottom = $derived(phoneUi && !mapInFrame && phoneBarH > 0 ? phoneBarH + 8 : 0);
   // Full-screen map box, rounded to whole px (issue #52): the CSS fallback `calc(53px * scale)`
   // lands on fractions at uiScale 1.25/1.5 (66.25px / 79.5px), which is what leaked tile seams —
   // see mapFrameStyle above for the mechanism. The map sliding ≤ half a px under the toolbar edge
@@ -2687,6 +2693,25 @@
   function patchPhoneWidgets(next: PhoneWidgetsConfig) {
     if (next !== $settings.phoneWidgets) settings.patch({ phoneWidgets: next });
   }
+  /** A drop in a column cell (from the column or out of a bottom slot); refused when the column has
+   *  no room for a widget coming back from a slot. */
+  function phoneMoveToColumn(id: string, page: number, row: number, col: number) {
+    const next = phoneCtrl.movePhoneWidget(phoneWidgets, id, page, row, col);
+    if (next === null) {
+      void showInfo($t('widgets.phoneNoSpaceTitle'), $t('widgets.phoneNoSpace'));
+      return;
+    }
+    patchPhoneWidgets(next);
+  }
+  /** A drop on a bottom slot; refused when the widget it displaces has no room in the column. */
+  function phoneMoveToBottom(id: string, slot: phoneCtrl.PhoneBottomSlot) {
+    const next = phoneCtrl.movePhoneWidgetToBottom(phoneWidgets, id, slot);
+    if (next === null) {
+      void showInfo($t('widgets.phoneNoSpaceTitle'), $t('widgets.phoneNoSpace'));
+      return;
+    }
+    patchPhoneWidgets(next);
+  }
   // The video store learns whether a Video widget is on screen (dock or phone grid): Start then
   // leaves the floating window parked — the widget is the picture.
   $effect(() => {
@@ -2718,6 +2743,10 @@
 
   function getWidgetPanelLabel(widgetId: string): string {
     if (phoneUi) {
+      const slot = phoneCtrl.bottomSlotOf(phoneWidgets, widgetId);
+      if (slot === 'left') return $t('widgets.bottomLeft');
+      if (slot === 'centre') return $t('widgets.bottomCentre');
+      if (slot === 'right') return $t('widgets.bottomRight');
       const page = phoneCtrl.phoneWidgetPage(phoneWidgets, widgetId);
       return page == null ? $t('widgets.off') : $t('widgets.phonePage', { values: { n: page + 1 } });
     }
@@ -3366,6 +3395,7 @@
         bind:viewMode={map2dViewMode}
         miniControls={miniMapLocked}
         centerInsetRight={phoneMapInset}
+        centerInsetBottom={phoneMapInsetBottom}
         radarActive={radarSettings.enabled}
         radarMapSettings={radarSettings.map}
         {radarReference}
@@ -3377,6 +3407,7 @@
       <div class="map3d-layer" class:active={mapViewMode === '3d'}>
         <Map3D
           centerInsetRight={phoneMapInset}
+          centerInsetBottom={phoneMapInsetBottom}
           bind:this={map3dRef}
           active={mapViewMode === '3d'}
           playbackTrack={mapTrack}
@@ -3512,10 +3543,24 @@
       {telem}
       {interfaceSettings}
       onresize={(id) => patchPhoneWidgets(phoneCtrl.cyclePhoneWidgetSize(phoneWidgets, id))}
-      onmove={(id, page, row, col) => patchPhoneWidgets(phoneCtrl.movePhoneWidget(phoneWidgets, id, page, row, col))}
+      onmove={phoneMoveToColumn}
+      onmovetobottom={phoneMoveToBottom}
       bind:widthPx={phonePanelW}
     />
   </div>
+  <!-- Bottom widget slots (PHONE_BOTTOM_WIDGETS.md) — under the chips and the docked video window
+       in the stacking order; the drag ghost shared with the column sits over everything. -->
+  <PhoneBottomBar
+    config={phoneWidgets}
+    {telem}
+    {interfaceSettings}
+    frameShift={phoneShift}
+    onmovetobottom={phoneMoveToBottom}
+    onmovetocolumn={phoneMoveToColumn}
+    ontogglewide={() => patchPhoneWidgets(phoneCtrl.togglePhoneBottomWide(phoneWidgets))}
+    bind:barH={phoneBarH}
+  />
+  <PhoneDragGhost {telem} {interfaceSettings} />
   <div class="phone-bottom-chips">
     <PhoneBottomChips {telem} />
   </div>
@@ -4570,7 +4615,7 @@
   :global(html.is-phone) .error-bar {
     left: calc(var(--phone-bottom-w, 0px) + var(--phone-debug-w, 0px) + 8px);
     right: calc(var(--phone-panel-w, 0px) - var(--phone-shift, 0px) + 54px);
-    bottom: calc(8px + var(--safe-bottom, 0px));
+    bottom: calc(8px + var(--safe-bottom, 0px) + var(--phone-bar-lift, 0px));
     margin-inline: auto;
     width: max-content;
     max-width: calc(100% - var(--phone-bottom-w, 0px) - var(--phone-debug-w, 0px) - var(--phone-panel-w, 0px) + var(--phone-shift, 0px) - 62px);
@@ -4592,7 +4637,7 @@
     --band-l: calc(62px + var(--safe-left, 0px));
     --band-r: calc(100vw - var(--phone-panel-w, 0px) + var(--phone-shift, 0px) - 54px);
     left: calc((var(--band-l) + var(--band-r)) / 2);
-    bottom: calc(46px + var(--safe-bottom, 0px));
+    bottom: calc(46px + var(--safe-bottom, 0px) + var(--phone-bar-lift, 0px));
     max-width: calc(var(--band-r) - var(--band-l) - 16px);
     box-sizing: border-box;
     white-space: nowrap;

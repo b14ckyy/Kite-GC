@@ -102,6 +102,7 @@
     miniControls = false,
     viewMode = $bindable<'free' | 'follow' | 'heading-follow'>('free'),
     centerInsetRight = 0,
+    centerInsetBottom = 0,
     radarActive = false,
     radarMapSettings = null,
     radarReference = null,
@@ -127,6 +128,9 @@
      *  but every "centre" — follow, heading-up pivot, explicit centring — refers to the middle of the
      *  uncovered area. The corner controls move left by the same amount. */
     centerInsetRight?: number;
+    /** Height (css px) of an overlay on the map's BOTTOM edge (the phone's bottom widget slots,
+     *  PHONE_BOTTOM_WIDGETS.md B7): every centre moves up by half of it, like `centerInsetRight`. */
+    centerInsetBottom?: number;
     /** Radar master enable (renders nothing when off). */
     radarActive?: boolean;
     /** Map rendering controls for radar contacts, or null to render none. */
@@ -1360,11 +1364,15 @@
     followRaf = requestAnimationFrame(followLoop);
   }
 
-  /** How far (container px, x) the VISUAL centre sits left of Leaflet's container centre. Only the
-   *  plain (unrotated) container needs it: in heading-up mode the oversized square is itself centred
-   *  on the visual centre (see applyHeadingUpSize), so Leaflet's centre already is the pivot. */
+  /** How far (container px, x / y) the VISUAL centre sits left of / above Leaflet's container
+   *  centre. Only the plain (unrotated) container needs it: in heading-up mode the oversized square
+   *  is itself centred on the visual centre (see applyHeadingUpSize), so Leaflet's centre already is
+   *  the pivot. */
   function centerOffsetX(): number {
     return mapContainer?.classList.contains('heading-up') ? 0 : centerInsetRight / 2;
+  }
+  function centerOffsetY(): number {
+    return mapContainer?.classList.contains('heading-up') ? 0 : centerInsetBottom / 2;
   }
 
   /** setView that puts `ll` at the VISUAL centre (the middle of the uncovered map area), not at the
@@ -1373,11 +1381,12 @@
   function centerOn(ll: L.LatLngExpression, zoom: number, options?: L.ZoomPanOptions) {
     if (!map) return;
     const dx = centerOffsetX();
-    if (dx === 0) {
+    const dy = centerOffsetY();
+    if (dx === 0 && dy === 0) {
       map.setView(ll, zoom, options);
       return;
     }
-    const target = map.unproject(map.project(L.latLng(ll), zoom).add(L.point(dx, 0)), zoom);
+    const target = map.unproject(map.project(L.latLng(ll), zoom).add(L.point(dx, dy)), zoom);
     map.setView(target, zoom, options);
   }
 
@@ -1982,13 +1991,14 @@
     const wrapper = mapContainer.parentElement;
     if (enable && wrapper) {
       // Make the container a square centred on the VISUAL centre (the wrapper centre, shifted left
-      // by half of a right-edge overlay — `centerInsetRight`) whose side is twice the distance from
-      // that pivot to the farthest wrapper corner: a square that size, rotated about its own centre,
-      // covers the whole wrapper at any angle. With no inset this is the wrapper's diagonal.
+      // by half of a right-edge overlay — `centerInsetRight` — and up by half of a bottom-edge one —
+      // `centerInsetBottom`) whose side is twice the distance from that pivot to the farthest
+      // wrapper corner: a square that size, rotated about its own centre, covers the whole wrapper
+      // at any angle. With no inset this is the wrapper's diagonal.
       const w = wrapper.clientWidth;
       const h = wrapper.clientHeight;
       const px = w / 2 - centerInsetRight / 2;
-      const py = h / 2;
+      const py = h / 2 - centerInsetBottom / 2;
       const reach = Math.sqrt(Math.max(px, w - px) ** 2 + Math.max(py, h - py) ** 2);
       const side = Math.ceil(2 * reach);
       mapContainer.style.width = `${side}px`;
@@ -2013,10 +2023,11 @@
     setTimeout(() => map?.invalidateSize(), 50);
   }
 
-  // A changed right-edge inset moves the visual centre: re-square the heading-up container (the
-  // follow loop re-centres on its next frame by itself).
+  // A changed inset moves the visual centre: re-square the heading-up container (the follow loop
+  // re-centres on its next frame by itself).
   $effect(() => {
     void centerInsetRight;
+    void centerInsetBottom;
     if (map && viewMode === 'heading-follow') applyHeadingUpSize(true);
   });
   // Mini map (the widget tile everywhere, the docked frame on the phone — `miniControls`): ZOOM

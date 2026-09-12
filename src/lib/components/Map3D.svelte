@@ -152,12 +152,16 @@
     radarRefAltM = null,
     radarReference = null,
     centerInsetRight = 0,
+    centerInsetBottom = 0,
   }: {
     /** Width (css px) of an overlay covering the map's RIGHT edge (the phone's widget column): the
      *  corner controls move left by it and the camera's projection is shifted (`frustum.xOffset`,
      *  see applyCenterInset) so whatever the camera looks at — the craft in follow / orbit / FPV —
      *  sits in the middle of the UNCOVERED area, not of the screen (PHONE_UI.md D16). */
     centerInsetRight?: number;
+    /** Height (css px) of an overlay on the map's BOTTOM edge (the phone's bottom widget slots,
+     *  PHONE_BOTTOM_WIDGETS.md B7): the projection slides up by half of it (`frustum.yOffset`). */
+    centerInsetBottom?: number;
     active?: boolean;
     playbackTrack?: TelemetryRecord[];
     playbackPoint?: TelemetryRecord | null;
@@ -1017,8 +1021,10 @@
     const f = viewer.camera.frustum;
     if (!(f instanceof Cesium.PerspectiveFrustum)) return;
     const w = viewer.canvas.clientWidth;
-    if (!w || centerInsetRight <= 0) {
+    const h = viewer.canvas.clientHeight;
+    if (!w || !h || (centerInsetRight <= 0 && centerInsetBottom <= 0)) {
       if (f.xOffset !== 0) f.xOffset = 0;
+      if (f.yOffset !== 0) f.yOffset = 0;
       return;
     }
     const aspect = f.aspectRatio;
@@ -1026,11 +1032,15 @@
     let fovy: number | undefined;
     try { fovy = f.fovy; } catch { return; }
     if (fovy === undefined || !isFinite(fovy) || fovy <= 0) return;
-    const right = aspect * f.near * Math.tan(fovy / 2);
+    const top = f.near * Math.tan(fovy / 2);
+    const right = aspect * top;
     f.xOffset = (right * centerInsetRight) / w;
+    // The bottom inset is the mirror image: the window moves DOWN, the scene slides up by half.
+    f.yOffset = -(top * centerInsetBottom) / h;
   }
   $effect(() => {
     void centerInsetRight;
+    void centerInsetBottom;
     viewer?.scene.requestRender(); // a changed inset must re-project even while nothing else moves
   });
 
