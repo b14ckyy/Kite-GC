@@ -339,6 +339,9 @@
   // …and for the bottom widget slots (PHONE_BOTTOM_WIDGETS.md B7): the tallest filled tile plus its
   // 8 px edge margin, published by PhoneBottomBar; 0 while every slot is empty.
   let phoneBarH = $state(0);
+  /** The open nav rail's right edge on the phone: 12 px offset + 42 px buttons (NavRail.svelte); the
+   *  bottom tiles keep clear of it (PHONE_BOTTOM_WIDGETS.md B4). */
+  const NAV_RAIL_RIGHT_PX = 54;
   const phoneMapInsetBottom = $derived(phoneUi && !mapInFrame && phoneBarH > 0 ? phoneBarH + 8 : 0);
   // Full-screen map box, rounded to whole px (issue #52): the CSS fallback `calc(53px * scale)`
   // lands on fractions at uiScale 1.25/1.5 (66.25px / 79.5px), which is what leaked tile seams —
@@ -3555,6 +3558,7 @@
     {telem}
     {interfaceSettings}
     frameShift={phoneShift}
+    leftReserve={navPanelOpen ? NAV_RAIL_RIGHT_PX : 0}
     onmovetobottom={phoneMoveToBottom}
     onmovetocolumn={phoneMoveToColumn}
     ontogglewide={() => patchPhoneWidgets(phoneCtrl.togglePhoneBottomWide(phoneWidgets))}

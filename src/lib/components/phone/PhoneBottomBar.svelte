@@ -10,9 +10,10 @@
      is centred on the CENTRE slot, whose width collapses to zero while it is empty outside edit
      mode, so two side widgets close up around the middle line (B3).
 
-     The tiles must fit between the arming pill (+ clearance) and the map corner controls on either
-     side of the middle line; when they don't, all three scale down by the missing factor (B4). Only
-     the arming pill counts (its widest state seen, so arming never resizes the tiles); the sensor
+     The tiles must fit between the arming pill — or the open nav rail, whichever reaches further
+     right — plus clearance, and the map corner controls on either side of the middle line; when they
+     don't, all three scale down by the missing factor (B4). Of the chip row only the arming pill
+     counts (its widest state seen, so arming never resizes the tiles); the sensor
      chip stacks above the tiles while a slot is filled (`html.phone-bar`, B5), as do the other
      bottom-band elements (`--phone-bar-lift`).
 
@@ -47,6 +48,7 @@
     telem,
     interfaceSettings,
     frameShift = 0,
+    leftReserve = 0,
     onmovetobottom,
     onmovetocolumn,
     ontogglewide,
@@ -57,6 +59,9 @@
     interfaceSettings: InterfaceSettings;
     /** `--phone-shift`: how far the widget column has slid out (the map frame grows by it). */
     frameShift?: number;
+    /** Right edge (css px) of a left-edge overlay the tiles must clear besides the arming pill — the
+     *  open nav rail (Marc, 2026-09-12: its lower buttons reach into the tiles' band). 0 = none. */
+    leftReserve?: number;
     /** Edit mode: the user dropped a widget on a slot. */
     onmovetobottom?: (id: string, slot: PhoneBottomSlot) => void;
     /** Edit mode: the user dropped a slotted widget in a column cell. */
@@ -131,7 +136,7 @@
   const scale = $derived.by(() => {
     const extL = extent(present.left);
     const extR = extent(present.right);
-    const freeL = cx - (armingRight + PHONE_BOTTOM_CLEARANCE);
+    const freeL = cx - (Math.max(armingRight, leftReserve) + PHONE_BOTTOM_CLEARANCE);
     const freeR = frameW - CORNER_CONTROLS_PX - cx;
     let k = 1;
     if (extL > 0) k = Math.min(k, freeL / extL);
