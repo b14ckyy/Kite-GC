@@ -41,8 +41,8 @@
   const showButton = $derived(live && !widgetActive);
   const open = $derived($videoState.floating && live && !widgetActive);
 
-  // Mounted once the frame has been opened while a source is live, and it stays mounted while parked
-  // (class `parked`, off screen behind the widget column): the native layer then stays where it is,
+  // Mounted once the frame has been opened while a source is live, and with the native sink it stays
+  // mounted while parked (class `parked`, off screen behind the widget column): the native layer then stays where it is,
   // covered by the opaque map, and a park / recall is nothing but the hole leaving and returning.
   // Hiding and showing the Android SurfaceView on every toggle re-cut the window's transparent
   // region each time, and that blanked the map for a few frames (Marc, 2026-09-13). Only a source
@@ -59,7 +59,9 @@
     } else {
       parked = true;
       if (!mounted) return;
-      if (live && !widgetActive) return; // parked: stays mounted, see above
+      // Parked: stays mounted (see above) — with the native sink only; a DOM video (MJPEG, camera)
+      // would keep decoding off screen.
+      if (live && !widgetActive && $videoState.nativeSink) return;
       if (!frameEl) { mounted = false; return; }
       const el = frameEl;
       const done = () => { el.removeEventListener('transitionend', done); if (parked) mounted = false; };

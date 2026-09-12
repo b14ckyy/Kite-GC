@@ -295,6 +295,7 @@
     pointer-events: none; /* layers opt back in individually */
     transform: translateX(0);
     transition: transform 0.3s ease;
+    will-change: transform; /* its own layer at rest too — no promotion when the slide starts */
   }
   /* Parked: past the screen's left edge. */
   .float-win.parked {

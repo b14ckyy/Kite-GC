@@ -65,6 +65,11 @@
 </div>
 
 <style>
+  /* Mobile: its own compositor layer, permanently — see the zone rule in +page.svelte (the floating
+     video window slides past it and would promote / demote it, a frame without the rail). */
+  :global(html.is-mobile) .nav-rail {
+    will-change: transform;
+  }
   .nav-rail {
     position: absolute;
     top: 65px;
