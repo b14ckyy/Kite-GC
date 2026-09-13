@@ -12,6 +12,7 @@
   <a href="https://b14ckyy.github.io/Kite-GC/"><img alt="Documentation" src="https://img.shields.io/badge/docs-online-37a8db"></a>
   <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-555">
   <a href="https://github.com/b14ckyy/Kite-GC/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/b14ckyy/Kite-GC?label=release&color=59aa29"></a>
+  <a href="https://discord.gg/3FM7EWhkg9"><img alt="Discord" src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white"></a>
   <a href="https://paypal.me/b14ckyy"><img alt="Donate via PayPal" src="https://img.shields.io/badge/Donate-PayPal-00457C?logo=paypal&logoColor=white"></a>
 </p>
 
@@ -51,6 +52,8 @@ Built with [Tauri 2.0](https://tauri.app/) (Rust backend) and [Svelte 5](https:/
   <b><a href="https://b14ckyy.github.io/Kite-GC/">📖 Documentation</a></b>
   &nbsp;·&nbsp;
   <b><a href="https://github.com/b14ckyy/Kite-GC/releases">⬇️ Download</a></b>
+  &nbsp;·&nbsp;
+  <b><a href="https://discord.gg/3FM7EWhkg9">💬 Discord</a></b>
 </p>
 
 ## Highlights
@@ -134,6 +137,19 @@ Full documentation is online at **[b14ckyy.github.io/Kite-GC](https://b14ckyy.gi
   [Building from source](https://b14ckyy.github.io/Kite-GC/for-developers/building/) ·
   [Contributing](https://b14ckyy.github.io/Kite-GC/for-developers/contributing/)
 
+## Community
+
+Questions, setups, flight videos, or just want to talk ground stations? The Kite community meets on
+Discord (English):
+
+<p align="center">
+  <a href="https://discord.gg/3FM7EWhkg9"><img alt="Join the Kite Discord" src="https://img.shields.io/badge/Discord-join%20the%20Kite%20server-5865F2?logo=discord&logoColor=white&style=for-the-badge"></a>
+</p>
+
+Ask in `#help` when something does not work — a confirmed bug then becomes a
+[GitHub issue](https://github.com/b14ckyy/Kite-GC/issues) (see
+[Reporting a problem](https://b14ckyy.github.io/Kite-GC/troubleshooting/reporting-issues/) for what to include).
+
 ## Support development
 
 Kite GC is free, open-source software built in my spare time. If it's useful to you and you'd like to
@@ -180,6 +196,7 @@ Windows, macOS and Linux for every pull request. Recommended IDE:
 [Svelte](https://marketplace.visualstudio.com/items?itemName=svelte.svelte-vscode),
 [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) and
 [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer) extensions.
+Contributors meet in `#development` on the [Discord](https://discord.gg/3FM7EWhkg9).
 
 ## License
 
