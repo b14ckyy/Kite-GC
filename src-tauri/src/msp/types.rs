@@ -46,6 +46,7 @@ pub const MSP_SENSOR_STATUS: u16 = 151;
 pub const MSP_SET_REBOOT: u16 = 68;
 pub const MSP_EEPROM_WRITE: u16 = 250;
 pub const MSP_GPSSTATISTICS: u16 = 166;
+pub const MSP_BLACKBOX_CONFIG: u16 = 80;
 
 // --- Reference only: uncomment when needed (unused MSP message-id constants) ---
 // pub const MSP_BUILD_INFO: u16 = 5;
@@ -57,7 +58,7 @@ pub const MSP_GPSSTATISTICS: u16 = 166;
 // pub const MSP_ACTIVEBOXES: u16 = 113;
 // pub const MSP_STATUS_EX: u16 = 150;
 // pub const MSP_BATTERY_STATE: u16 = 130;
-// pub const MSP_UID: u16 = 160;
+pub const MSP_UID: u16 = 160;
 // pub const MSP_GPS_SV_INFO: u16 = 164;
 
 // ── Mission / Waypoint MSP v1 command codes ─────────────────────────
@@ -147,4 +148,15 @@ pub struct FcInfo {
     /// a QuadPlane reports fc_variant "ArduPlane" but a VTOL_* MAV_TYPE.
     #[serde(default)]
     pub mav_type: u8,
+    /// Hardware identity of the flight controller where the protocol exposes one: INAV = MSP_UID (the
+    /// 96-bit MCU serial, 24 hex chars), MAVLink = AUTOPILOT_VERSION uid2 (or uid). `None` for passive
+    /// telemetry. Informational: lets the live platform-type override survive a reconnect to the same
+    /// FC and is stored with each flight — linking stays on the craft name.
+    #[serde(default)]
+    pub fc_uid: Option<String>,
+    /// Whether the FC logs to a blackbox / dataflash: INAV `MSP_BLACKBOX_CONFIG` device != NONE (set in
+    /// the handshake), ArduPilot `LOG_BACKEND_TYPE` != 0 / PX4 `SDLOG_MODE` >= 0 (filled in by the
+    /// handler once the param reply arrives). `None` = not known. Seeds the vehicle library entry.
+    #[serde(default)]
+    pub blackbox: Option<bool>,
 }

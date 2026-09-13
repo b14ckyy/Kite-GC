@@ -59,14 +59,15 @@ rustup target add aarch64-apple-ios aarch64-apple-ios-sim
 echo "[2/4] Installing npm dependencies..."
 npm install
 
-# gen/apple is gitignored + regenerable. Create it on first run, or when
-# FORCE_INIT=1 (e.g. after changing the min deployment target in the config).
-if [ ! -d "gen/apple" ] || [ "${FORCE_INIT:-0}" = "1" ]; then
-    echo "[3/4] Generating the Xcode project (tauri ios init)..."
-    npm run tauri ios init
-else
-    echo "[3/4] gen/apple already present — skipping init (FORCE_INIT=1 to redo)."
-fi
+# src-tauri/gen/apple is gitignored + regenerable. Created on first run, or when FORCE_INIT=1
+# (e.g. after changing the min deployment target in the config). The plumbing, including the fix
+# that keeps libapp.a out of the app bundle, is shared with scripts/build-ios.sh: a dev run that
+# generated the project without it leaves a pbxproj that copies the library in, which later breaks
+# a release archive and, once several copies of libapp.a exist, the build itself.
+source "$ROOT/scripts/lib/ios-project.sh"
+
+echo "[3/4] Preparing the Xcode project..."
+ios_prepare_project
 
 echo "[4/4] Building + launching on device (live reload)..."
 echo ""

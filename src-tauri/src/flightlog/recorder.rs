@@ -189,6 +189,7 @@ pub fn summarize_temp_session(
         fc_version: meta.fc_version,
         board_id: meta.board_id,
         platform_type: meta.platform_type,
+        fc_uid: meta.fc_uid,
         protocol: meta.protocol,
         start_lat,
         start_lon,
@@ -561,6 +562,18 @@ impl FlightRecorder {
         self.fc_info.platform_type = 7; // PLATFORM_VTOL (matches the frontend platform table)
     }
 
+    /// Live platform-type override (UAV Info panel): applies to the flight being recorded — its temp
+    /// session meta too, so a crash-recovered session keeps it — and to every later flight on this
+    /// link. Session-only; the value lives nowhere but in the recorded flights.
+    pub fn set_platform_type(&mut self, platform_type: u8) {
+        self.fc_info.platform_type = platform_type;
+        if let Some(conn) = self.active_flight.as_ref().and_then(|f| f.temp_db.as_ref()) {
+            if let Err(e) = db::update_session_meta_platform_type(conn, platform_type) {
+                log::warn!("Failed to update session_meta platform type: {}", e);
+            }
+        }
+    }
+
     /// Feed airspeed data from the scheduler
     pub fn on_airspeed(&mut self, data: &AirspeedData) {
         self.snapshot.airspeed = Some(data.airspeed);
@@ -779,6 +792,7 @@ impl FlightRecorder {
                         &self.fc_info.fc_version,
                         &self.fc_info.board_id,
                         self.fc_info.platform_type,
+                        self.fc_info.fc_uid.as_deref(),
                         &self.protocol,
                         self.snapshot.lat,
                         self.snapshot.lon,
@@ -906,6 +920,7 @@ impl FlightRecorder {
             fc_version: self.fc_info.fc_version.clone(),
             board_id: self.fc_info.board_id.clone(),
             platform_type: self.fc_info.platform_type,
+            fc_uid: self.fc_info.fc_uid.clone(),
             protocol: self.protocol.clone(),
             start_lat: flight.start_lat,
             start_lon: flight.start_lon,

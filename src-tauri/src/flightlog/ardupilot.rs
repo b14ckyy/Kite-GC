@@ -980,6 +980,7 @@ where
         fc_version,
         board_id: String::new(),
         platform_type,
+        fc_uid: None,
         protocol: "DATAFLASH".into(),
         start_lat,
         start_lon,

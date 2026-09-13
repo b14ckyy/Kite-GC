@@ -246,6 +246,7 @@ where
         fc_version: header.fc_version.unwrap_or_default(),
         board_id: header.board_id.unwrap_or_default(),
         platform_type: header.platform_type,
+        fc_uid: None,
         protocol: "BLACKBOX".into(),
         start_lat,
         start_lon,

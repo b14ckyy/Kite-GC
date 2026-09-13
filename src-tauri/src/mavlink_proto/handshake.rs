@@ -246,6 +246,14 @@ pub fn perform_handshake(transport: &mut dyn ByteTransport) -> Result<(FcInfo, u
                             fc_info.hardware_revision = ver.board_version as u16;
                         }
 
+                        // Hardware identity: uid2 (MAVLink 2 extension — the MCU serial on ArduPilot /
+                        // PX4) preferred, else the legacy 64-bit uid. All-zero = not provided.
+                        if ver.uid2.iter().any(|b| *b != 0) {
+                            fc_info.fc_uid = Some(ver.uid2.iter().map(|b| format!("{:02X}", b)).collect());
+                        } else if ver.uid != 0 {
+                            fc_info.fc_uid = Some(format!("{:016X}", ver.uid));
+                        }
+
                         log::info!(
                             "AUTOPILOT_VERSION: {} v{} (sw=0x{:08X}, board={})",
                             fc_info.fc_variant,

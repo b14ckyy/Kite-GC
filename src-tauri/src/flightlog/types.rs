@@ -73,6 +73,10 @@ pub struct Flight {
     /// `start_time` is always true UTC; this offset shifts it to flight-local time for display.
     /// `None` (old rows / no GPS) → display in UTC.
     pub utc_offset_min: Option<i32>,
+    /// Hardware id of the FC that flew (MSP_UID / MAVLink AUTOPILOT_VERSION uid). Informational only —
+    /// flights link to vehicles by craft name, never by this. `None` for imports and passive telemetry.
+    #[serde(default)]
+    pub fc_uid: Option<String>,
 }
 
 /// A reusable mission stored in the library (row in `missions` table).
@@ -264,6 +268,9 @@ pub struct Vehicle {
     pub fc_firmware: Option<String>,
     pub fc_firmware_version: Option<String>,
     pub blackbox_available: bool,
+    /// FC hardware id (see `Flight::fc_uid`) — prefilled when the vehicle is created from the connected
+    /// FC, freely editable, never used for linking.
+    pub fc_uid: Option<String>,
     // Persistent lifetime baseline (adopted on request from the INAV FC `stats` feature). Additive to
     // the logged flights — the displayed lifetime = baseline + Σ(linked flights). Never auto-updated.
     pub base_flight_count: i64,
@@ -310,6 +317,8 @@ pub struct VehicleInput {
     pub fc_firmware: Option<String>,
     pub fc_firmware_version: Option<String>,
     pub blackbox_available: bool,
+    #[serde(default)]
+    pub fc_uid: Option<String>,
 }
 
 /// A single vehicle exported to a `.kvehicle` file (one vehicle per file). Self-contained

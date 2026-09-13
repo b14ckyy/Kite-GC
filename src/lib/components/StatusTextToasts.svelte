@@ -53,7 +53,7 @@
     width: max-content;
     max-width: min(640px, calc(100vw - var(--toast-dock-inset, 0px) - 32px));
     background: rgba(30, 30, 30, 0.82);
-    backdrop-filter: blur(10px);
+    backdrop-filter: var(--glass-blur, blur(6px));
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 6px;
     box-shadow: 0 3px 12px rgba(0, 0, 0, 0.5);

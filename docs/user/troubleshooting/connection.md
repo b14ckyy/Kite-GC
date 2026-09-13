@@ -52,8 +52,9 @@ may still hit:
 
 ## Network (TCP/UDP) links
 
-- **Host and port** must match your endpoint. Kite defaults to **TCP 5761** and **UDP 14550**; a
-  simulator or router may use something else (e.g. **SITL on 5762**).
+- **Host and port** must match your endpoint. Kite's default follows the protocol and the transport
+  (**MAVLink** UDP 14550 or TCP 5760, **MSP** TCP 5761); a simulator or router may use something else
+  (e.g. a second **SITL on 5762**).
 - Make sure the bridge/router/simulator is actually **running and reachable** (firewall, same network),
   and that the **protocol** matches what it speaks.
 

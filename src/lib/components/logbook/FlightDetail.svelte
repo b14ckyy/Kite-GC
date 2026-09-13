@@ -14,6 +14,7 @@
   import { autopilotSystem } from '$lib/stores/autopilotContext';
   import { batteryManagerOpen, batteryManagerSelectedId, normalizeSerial, normalizeSerialInput, normalizeSerialList, serialTokens } from '$lib/stores/batteryManager';
   import { vehicleManagerOpen, vehicleManagerSelectedId, vehicleManagerCreateCraft, normalizeCraftName } from '$lib/stores/vehicleManager';
+  import FcUidChip from '../FcUidChip.svelte';
   import { requestOpenMissionId } from '$lib/stores/missionManager';
   import { replayWpTotal } from '$lib/stores/navStatus';
   import { buildMissionInput } from '$lib/helpers/missionLibrary';
@@ -575,6 +576,10 @@
     </span>
     <span class="fc-label">{$t('logbook.firmware')}</span>
     <span class="fc-value">{(flight.fc_variant || flight.fc_version) ? `${flight.fc_variant} ${flight.fc_version}`.trim() : $t('logbook.notAvailable')}</span>
+    {#if flight.fc_uid}
+      <span class="fc-label">{$t('logbook.fcUid')}</span>
+      <span class="fc-value"><FcUidChip uid={flight.fc_uid} /></span>
+    {/if}
     <span class="fc-label">{$t('logbook.protocol')}</span>
     <span class="fc-value">{flight.protocol || $t('logbook.notAvailable')}</span>
     <span class="fc-label">{$t('logbook.source')}</span>

@@ -43,7 +43,7 @@ inside the box of the feature release they belong to, so the notes for one relea
     ??? info "Video in two places at once — and on a screen of its own"
         With Kite's own RTSP client the picture now runs in the **Video widget and a large surface at
         the same time** — the floating window or the fullscreen swap — the way the other sources
-        always did. One decode feeds both — on Windows, macOS and Linux. [#129] · [#132] · [#133]
+        always did. One decode feeds both — on Windows, macOS and Linux. [#129] · [#132] · [#135]
 
         **And it can leave the app.** Hover the floating window and a **broken-chain button** appears
         in its top-left corner: the frame moves out into its own window, **always on top**, framed
@@ -92,10 +92,26 @@ inside the box of the feature release they belong to, so the notes for one relea
         preview. Widgets are rearranged by **long-pressing** them — mouse or finger — with no edit
         button any more; click outside the docks or press Escape to finish. [#127]
 
+    ??? info "Kite updates itself"
+        The update notice now shows the **release notes** right in the dialog, and next to *Open
+        Release Page* there is **Update and Restart**: Kite downloads the new version, installs it
+        and starts again — on Windows and Linux through the installer of the package you have
+        (a `.deb`/`.rpm` asks for your password), on macOS by swapping the app bundle, and a
+        **portable** copy replaces its own executable. Nothing is downloaded until you press the
+        button; *Remind me later* and *Skip this version* work as before. Android and iOS open
+        their app store instead.
+
+        **Patch releases only.** A new choice under Settings → Updates keeps you on the bug-fix
+        line of the version you run: 1.1.0 is told about 1.1.1, never about 1.2.0. The default stays
+        *Stable releases*. [#162]
+
     **Added**
 
     - **Android support** — native app with USB serial, Bluetooth LE and Wi-Fi links, touch layout
       and scoped storage folders. [#79]
+    - **Bottom widget slots on the phone** — three centred slots on the map's bottom edge (a larger
+      middle one, two smaller beside it), filled by dragging widgets out of the column in edit mode;
+      the follow centre moves up so the aircraft stays in the free map. [#173]
     - **iPhone & iPad support** — native iOS/iPadOS build: phone/tablet layout, touch RC, BLE,
       Wi-Fi MAVLink. Contributed by Sebastian Kumor. [#16]
     - **Native RTSP video client** — Kite's own RTSP client with OS hardware decode (H.264/H.265)
@@ -132,12 +148,32 @@ inside the box of the feature release they belong to, so the notes for one relea
       client, Windows and macOS. [#130] · [#132]
     - **The video shows in two places at once** — with Kite's own RTSP client the picture now runs
       in the Video widget **and** the floating window (or the fullscreen swap) at the same time,
-      as it always did with the other sources. One decode feeds both. [#129] · [#132] · [#133]
+      as it always did with the other sources. One decode feeds both. [#129] · [#132] · [#135]
     - **Desktop video window with a park button** — Start slides the window in, the camera button
       beside it parks and recalls it while the source runs; glass bezel, resize corner, no ✕. The
       Video panel replaces its preview with a status block (state, resolution, fps, codec, bitrate). [#127]
     - **Long-press widget editing on the desktop** — hold a widget (mouse or touch) to enter edit
       mode and drag it right away; the ✎ button is gone. Click outside the docks or Escape to leave. [#127]
+    - **Default protocol** in Settings → Connection. It stays on **Last used**, which is what Kite
+      has always done, and can be pinned to MSP, MAVLink or Telemetry instead, so the app opens on
+      the link you actually fly no matter what the last session happened to use. [#151]
+    - **Mini-map gestures** — the small map in the video frame or widget tile stays follow-locked, but
+      a tap on it toggles heading-up ⇄ north-up (remembered) and sliding one finger up or down zooms
+      in or out; a second finger hands over to pinch. [#152]
+    - **Phone docked window in two sizes** — a corner marker in the frame's top-left toggles between
+      the full size and a compact one, for the video and the swapped-in map alike. [#152]
+    - **Vehicle type override in the UAV Info panel** — the Type row is a dropdown: Kite fills in the
+      detected type, you can change it for the session, and the map model and the recorded flights
+      follow it. The panel also shows the flight controller's hardware **FC ID** (with a copy button)
+      and gains **Save to vehicle library**, which creates the library entry from the connected craft —
+      name, type, board, firmware, FC ID, the reported sensors and the blackbox state — or jumps to the
+      entry that already carries this FC ID. [#157]
+
+    - **Update and Restart** — the update notice installs the new version in place (installer,
+      app bundle or portable executable) and restarts Kite; the release notes are shown in the
+      dialog. [#162]
+    - **Patch releases only** — update-check channel that offers bug-fix releases of the running
+      version only (1.1.0 → 1.1.1, never 1.2.0). [#162]
 
     **Removed**
 
@@ -147,6 +183,15 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     **Improved**
 
+    - **Power Saving also drops the glass blur** — with the mode active (or on battery in *Auto*),
+      panels and widgets lose their frosted-glass blur: every blurred surface is re-rendered on each
+      frame while the map moves, and on the phone that was the single biggest rendering cost. On
+      phones and tablets the blur of the widgets, buttons and chips over the map is always off; only
+      the panels keep it. The pressed / active fill of the map's glass buttons is a touch darker, so
+      an open video toggle stays visible over light terrain. [#174]
+    - **Radar contacts cost less** — a contact's icon is rebuilt only when it visibly changes
+      (heading, colour, size, label), not on every position update; with many ADS-B contacts that
+      was a steady stream of DOM rebuilds. [#174]
     - **Floating video window at UI scale above 100 %** — the snapped window landed past the bottom
       edge of the screen; its geometry is now computed in the scaled layer's own units. [#127]
     - **Replay player folds away while playing** — a slim strip (craft, time, progress) replaces
@@ -166,6 +211,19 @@ inside the box of the feature release they belong to, so the notes for one relea
       and hidden under the interface. Start-up no longer drops the frames right after the keyframe,
       and after any packet loss the video pauses until the next keyframe instead of freezing the
       Pi's hardware decoder. Kernel-side report: raspberrypi/linux#7609. [#112]
+    - **The network port follows the protocol**, not just the transport. MAVLink offers UDP 14550 or
+      TCP 5760 and MSP offers TCP 5761, instead of the MSP port showing up for a MAVLink connection.
+      A port you typed yourself is never touched. [#151]
+    - **Floating video window moves by its handle** — a small four-way-arrow handle in the picture's
+      bottom-left corner moves the window; dragging the picture, the right mouse button and two
+      fingers now go to the map in the frame (3D tilt, pinch). Both corner handles are translucent. [#152]
+    - **No zoom buttons on the map in a frame** — the floating window and the widget tile hide the
+      + / − buttons that did not fit at larger UI scales; wheel, pinch and the mini-map slide zoom
+      there. [#152]
+    - **iPad panels fit the screen** — the tool panels respect the toolbar and the widget dock height
+      on tablets, so their content no longer runs under the dock. [#153]
+    - **Chinese and Bulgarian** — the connection-status and toolbar strings that fell back to English
+      are translated. [#154] · [#156]
 
 ??? note "1.0 — Initial release · Live"
 
@@ -179,7 +237,14 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     ---
 
-    **1.0.1**{ .kite-patch } *in development*{ .kite-badge }
+    **1.0.1**{ .kite-patch } *2026-09-13*{ .kite-badge }
+
+    **Added**
+
+    - **Community link in About.** The About dialog links to the Kite Discord
+      (https://discord.gg/3FM7EWhkg9) next to the source repository. [#163]
+    - **Privacy policy in About.** The About dialog links to the published privacy policy, so it
+      is reachable from inside the app. [#160]
 
     **Fixed**
 
@@ -203,6 +268,16 @@ inside the box of the feature release they belong to, so the notes for one relea
       everything that was not MAVLink onto MSP, so the passive Telemetry choice was silently
       rewritten. [#143]
     - **Bulgarian translation corrected** — 26 strings, contributed by teodoryantcheff. [#141]
+    - **Markers and pop-ups turned with the map in heading-up mode.** Waypoint markers, labels,
+      the "Fly Here" pop-up and the waypoint editor rotated together with the map tiles, so they
+      were unreadable while the map followed the aircraft's heading. They now stay bound to their
+      position but upright; the aircraft symbol and radar contacts keep pointing along their
+      track. [#168]
+    - **The 3D view was stuck in daylight.** Since 1.0.0 the globe and the sky ignored the real
+      sun: the terrain stayed bright and the sky blue wherever you looked and at any time of day,
+      and a replay's flight time changed nothing either. The lighting that keeps the aircraft model
+      readable had taken over the whole scene's light. The model keeps its own lighting; the globe,
+      the sky and the day/night line follow the real sun again. [#175]
 
 [#16]: https://github.com/b14ckyy/Kite-GC/pull/16
 [#48]: https://github.com/b14ckyy/Kite-GC/pull/48
@@ -228,8 +303,21 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#129]: https://github.com/b14ckyy/Kite-GC/pull/129
 [#130]: https://github.com/b14ckyy/Kite-GC/pull/130
 [#132]: https://github.com/b14ckyy/Kite-GC/pull/132
-[#133]: https://github.com/b14ckyy/Kite-GC/pull/133
+[#135]: https://github.com/b14ckyy/Kite-GC/pull/135
 [#140]: https://github.com/b14ckyy/Kite-GC/pull/140
 [#141]: https://github.com/b14ckyy/Kite-GC/pull/141
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143
 [#145]: https://github.com/b14ckyy/Kite-GC/pull/145
+[#151]: https://github.com/b14ckyy/Kite-GC/pull/151
+[#152]: https://github.com/b14ckyy/Kite-GC/pull/152
+[#153]: https://github.com/b14ckyy/Kite-GC/pull/153
+[#154]: https://github.com/b14ckyy/Kite-GC/pull/154
+[#156]: https://github.com/b14ckyy/Kite-GC/pull/156
+[#157]: https://github.com/b14ckyy/Kite-GC/pull/157
+[#160]: https://github.com/b14ckyy/Kite-GC/pull/160
+[#162]: https://github.com/b14ckyy/Kite-GC/pull/162
+[#163]: https://github.com/b14ckyy/Kite-GC/pull/163
+[#168]: https://github.com/b14ckyy/Kite-GC/issues/168
+[#173]: https://github.com/b14ckyy/Kite-GC/pull/173
+[#174]: https://github.com/b14ckyy/Kite-GC/pull/174
+[#175]: https://github.com/b14ckyy/Kite-GC/pull/175

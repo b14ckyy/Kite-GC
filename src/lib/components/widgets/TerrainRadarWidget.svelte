@@ -367,7 +367,7 @@
     position: relative;
     box-sizing: border-box;
     background: rgba(30, 30, 30, 0.75);
-    backdrop-filter: blur(10px);
+    backdrop-filter: var(--glass-blur, blur(6px));
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 8px;
     overflow: hidden;

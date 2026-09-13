@@ -36,7 +36,7 @@
   import { MAP_PROVIDERS, getProviderById, type MapProvider } from "$lib/config/mapProviders";
   import { cachedTileLayer } from "$lib/cache/CachedTileLayer";
   import { initTileCache } from "$lib/cache/tileCache";
-  import { isWebKitGtk } from "$lib/platform";
+  import { isWebKitGtk, isAndroid } from "$lib/platform";
   import { homePosition, homeMarkerShown } from "$lib/stores/home";
   import { editMode, geoWaypoints, launchPoint, replayActive, toDeg } from "$lib/stores/mission";
   import { autopilotSystem } from "$lib/stores/autopilotContext";
@@ -82,7 +82,11 @@
   import { t } from "svelte-i18n";
   import { contactColor, ffContactColor, contactVisibleOnMap, relevanceFactor } from "$lib/helpers/radarMap";
   import { pickShape, buildContactIconHtml } from "$lib/helpers/radarIcons";
+  import { installUprightOverlays } from "$lib/helpers/leafletUpright";
   import { convertAltitude, convertSpeed, convertDistance, convertVerticalSpeed, formatConverted, speedDigits } from "$lib/utils/units";
+
+  // Heading-up: markers, popups and tooltips counter-rotate about their anchor (see leafletUpright.ts).
+  installUprightOverlays();
 
   let {
     playbackTrack = [],
@@ -98,6 +102,7 @@
     miniControls = false,
     viewMode = $bindable<'free' | 'follow' | 'heading-follow'>('free'),
     centerInsetRight = 0,
+    centerInsetBottom = 0,
     radarActive = false,
     radarMapSettings = null,
     radarReference = null,
@@ -123,6 +128,9 @@
      *  but every "centre" — follow, heading-up pivot, explicit centring — refers to the middle of the
      *  uncovered area. The corner controls move left by the same amount. */
     centerInsetRight?: number;
+    /** Height (css px) of an overlay on the map's BOTTOM edge (the phone's bottom widget slots,
+     *  PHONE_BOTTOM_WIDGETS.md B7): every centre moves up by half of it, like `centerInsetRight`. */
+    centerInsetBottom?: number;
     /** Radar master enable (renders nothing when off). */
     radarActive?: boolean;
     /** Map rendering controls for radar contacts, or null to render none. */
@@ -282,6 +290,10 @@
   // ── Foreign-vehicle (radar) contacts — isolated layer, diffed by id ──
   let radarLayer: L.LayerGroup | undefined;
   const radarMarkers = new Map<string, L.Marker>();
+  /** The icon each contact marker currently shows (its HTML + size), so a snapshot that changed nothing
+   *  visible does not rebuild it: Leaflet's setIcon replaces the icon's inner HTML and its classes —
+   *  with ADS-B online that was ~35 DOM rebuilds a second in the marker pane on the phone. */
+  const radarIconKeys = new Map<string, string>();
   // Conflict-alert pulse rings are SEPARATE persistent markers (not part of the contact icon): the
   // contact icon is re-set on every position/heading update, which would restart the CSS pulse and make
   // it jitter. As their own markers they only re-`setIcon` on a level change; position uses setLatLng,
@@ -334,6 +346,7 @@
       if (radarMarkers.size || radarAlertMarkers.size) {
         radarLayer.clearLayers();
         radarMarkers.clear();
+        radarIconKeys.clear();
         radarAlertMarkers.clear();
         radarAlertRendered.clear();
       }
@@ -349,15 +362,17 @@
       // FormationFlight icons render 20% larger than ADS-B.
       const sizeMul = v.system === 'formationFlight' ? 1.2 : 1;
       const size = Math.max(RADAR_MIN_PX, Math.round(RADAR_BASE_PX * (uiScale || 1) * (0.6 + 0.4 * rel) * sizeMul));
+      // Whole degrees and 1/20 opacity steps: the icon is rebuilt only when its HTML changes (below),
+      // and a heading or relevance that drifts in the fourth decimal is not a visible change.
       const html = buildContactIconHtml({
         shape: pickShape(v.system, v.category, v.headingDeg != null),
-        heading: v.headingDeg,
+        heading: v.headingDeg != null ? Math.round(v.headingDeg) : v.headingDeg,
         // FormationFlight uses a state colour (armed/disarmed/lost); ADS-B uses the altitude scale.
         color: v.system === 'formationFlight'
           ? ffContactColor(v.extra?.ffState)
           : contactColor(v.altM, radarRefAltM),
         sizePx: size,
-        opacity: rel,
+        opacity: Math.round(rel * 20) / 20,
         selected: v.id === radarSelectedId,
         label: v.callsign?.trim() || undefined,
         badgeLabel: v.system === 'formationFlight', // big single-letter id badge
@@ -365,19 +380,25 @@
         // every icon update — keep it OUT of the contact icon.
         alertLevel: null,
       });
-      const icon = L.divIcon({ className: 'radar-divicon', html, iconSize: [size, size], iconAnchor: [size / 2, size / 2] });
+      const iconKey = `${size}|${html}`;
       const existing = radarMarkers.get(v.id);
       if (existing) {
         existing.setLatLng([v.lat, v.lon]);
-        existing.setIcon(icon);
-        existing.setTooltipContent(radarTooltip(v));
+        if (radarIconKeys.get(v.id) !== iconKey) {
+          existing.setIcon(L.divIcon({ className: 'radar-divicon', html, iconSize: [size, size], iconAnchor: [size / 2, size / 2] }));
+          radarIconKeys.set(v.id, iconKey);
+        }
+        const tip = radarTooltip(v);
+        if (existing.getTooltip()?.getContent() !== tip) existing.setTooltipContent(tip);
       } else {
         const id = v.id;
+        const icon = L.divIcon({ className: 'radar-divicon', html, iconSize: [size, size], iconAnchor: [size / 2, size / 2] });
         const m = L.marker([v.lat, v.lon], { icon, zIndexOffset: 400 });
         m.bindTooltip(radarTooltip(v), { direction: 'top', offset: [0, -size / 2], opacity: 0.95 });
         m.on('click', () => radarSelection.update((cur) => (cur === id ? null : id)));
         m.addTo(radarLayer);
         radarMarkers.set(id, m);
+        radarIconKeys.set(id, iconKey);
       }
 
       // Conflict-alert ring — own persistent marker (fixed size, relevance-independent) so the CSS
@@ -404,7 +425,7 @@
       }
     }
     for (const [id, m] of radarMarkers) {
-      if (!seen.has(id)) { radarLayer.removeLayer(m); radarMarkers.delete(id); }
+      if (!seen.has(id)) { radarLayer.removeLayer(m); radarMarkers.delete(id); radarIconKeys.delete(id); }
     }
     for (const [id, am] of radarAlertMarkers) {
       if (!seen.has(id)) { radarLayer.removeLayer(am); radarAlertMarkers.delete(id); radarAlertRendered.delete(id); }
@@ -1350,17 +1371,24 @@
     if (dist < 0.5 && Math.abs(dh) < 0.3 && Math.abs(followTarget.pitch - followCurrent.pitch) < 0.3 && Math.abs(dr) < 0.3 && Math.abs(dc) < 0.3 && Math.abs(followTarget.turnRate - followCurrent.turnRate) < 0.3) {
       followCurrent = { ...followTarget }; // settled — snap exactly + stop until next target
       applyFollowFrame();
+      followDrivingView = true;
+      followMoveEnd(); // the rationed moveend (panToVisualCentre) — the listeners see the final view
+      followDrivingView = false;
       followRaf = null;
       return;
     }
     followRaf = requestAnimationFrame(followLoop);
   }
 
-  /** How far (container px, x) the VISUAL centre sits left of Leaflet's container centre. Only the
-   *  plain (unrotated) container needs it: in heading-up mode the oversized square is itself centred
-   *  on the visual centre (see applyHeadingUpSize), so Leaflet's centre already is the pivot. */
+  /** How far (container px, x / y) the VISUAL centre sits left of / above Leaflet's container
+   *  centre. Only the plain (unrotated) container needs it: in heading-up mode the oversized square
+   *  is itself centred on the visual centre (see applyHeadingUpSize), so Leaflet's centre already is
+   *  the pivot. */
   function centerOffsetX(): number {
     return mapContainer?.classList.contains('heading-up') ? 0 : centerInsetRight / 2;
+  }
+  function centerOffsetY(): number {
+    return mapContainer?.classList.contains('heading-up') ? 0 : centerInsetBottom / 2;
   }
 
   /** setView that puts `ll` at the VISUAL centre (the middle of the uncovered map area), not at the
@@ -1369,11 +1397,12 @@
   function centerOn(ll: L.LatLngExpression, zoom: number, options?: L.ZoomPanOptions) {
     if (!map) return;
     const dx = centerOffsetX();
-    if (dx === 0) {
+    const dy = centerOffsetY();
+    if (dx === 0 && dy === 0) {
       map.setView(ll, zoom, options);
       return;
     }
-    const target = map.unproject(map.project(L.latLng(ll), zoom).add(L.point(dx, 0)), zoom);
+    const target = map.unproject(map.project(L.latLng(ll), zoom).add(L.point(dx, dy)), zoom);
     map.setView(target, zoom, options);
   }
 
@@ -1401,16 +1430,117 @@
       }
     }
     redrawDirLines();
-    // Don't fight an in-progress zoom animation (would snap mid-zoom).
+    // Heading-up rotation is a CSS variable on the container, independent of Leaflet's view: it
+    // keeps turning through a zoom animation or a pinch (a frozen heading jumped by the turn's
+    // worth when the gesture ended).
+    if (viewMode === 'heading-follow') {
+      mapHeading = followCurrent.heading;
+      mapContainer?.style.setProperty('--map-rotation', `${-mapHeading}deg`);
+    }
+    // Don't fight an in-progress zoom animation (would snap mid-zoom; the animation itself heads for
+    // the aircraft, see the zoomanim hook in onMount). A pinch in flight is anchored instead of panned.
     if (viewMode !== 'free' && !(map as unknown as { _animatingZoom?: boolean })._animatingZoom) {
       followDrivingView = true;
-      centerOn(ll, map.getZoom(), { animate: false }); // fires moveend synchronously → saveMapState (guarded)
+      if (pinching()) anchorPinch(ll);
+      else panToVisualCentre(ll); // fires moveend synchronously → saveMapState (guarded)
       followDrivingView = false;
-      if (viewMode === 'heading-follow') {
-        mapHeading = followCurrent.heading;
-        mapContainer?.style.setProperty('--map-rotation', `${-mapHeading}deg`);
-      }
     }
+  }
+
+  /** Leaflet's touch-zoom handler, the fields the follow modes lean on (1.9.4 privates — they are
+   *  what the handler itself runs on, so a Leaflet upgrade must revisit `anchorPinch`). */
+  interface PinchHandler {
+    _zooming?: boolean;
+    _startLatLng?: L.LatLng;
+    _center?: L.LatLng;
+  }
+  interface MapInternals {
+    _animatingZoom?: boolean;
+    _animateToCenter?: L.LatLng;
+    _move(center: L.LatLng, zoom: number, data: { pinch: boolean; round: boolean }): void;
+  }
+
+  function pinching(): boolean {
+    return (map?.touchZoom as unknown as PinchHandler | undefined)?._zooming === true;
+  }
+
+  /** The latlng that, placed at Leaflet's container centre at `zoom`, puts `ll` at the VISUAL centre
+   *  (the middle of the uncovered map area, see centerOffsetX/Y). */
+  function containerCentreFor(m: L.Map, ll: L.LatLngExpression, zoom: number): L.LatLng {
+    return m.unproject(m.project(L.latLng(ll), zoom).add(L.point(centerOffsetX(), centerOffsetY())), zoom);
+  }
+
+  /** Follow frame while two fingers pinch: the handler zooms around the container centre and
+   *  re-places its `_startLatLng` there on every touchmove (touchZoom 'center', setZoomAnchor), so a
+   *  pan of ours would be undone a frame later — and on the phone the aircraft sits left of / above
+   *  that centre (the widget column, the bottom slots): it drifted outwards while the fingers
+   *  spread, then jumped back when they lifted. Instead the frame hands the handler the centre
+   *  that keeps the aircraft at the visual centre at the pinch's current (fractional) zoom, and
+   *  applies it the way the handler does between touchmoves (a resting pair of fingers sends no
+   *  event, the aircraft keeps moving). No tiles are touched: a pinch `_move` only retransforms the
+   *  tile levels. */
+  function anchorPinch(ll: L.LatLngExpression) {
+    if (!map) return;
+    const tz = map.touchZoom as unknown as PinchHandler;
+    const zoom = map.getZoom();
+    const c = containerCentreFor(map, ll, zoom);
+    tz._startLatLng = c;
+    tz._center = c;
+    (map as unknown as MapInternals)._move(c, zoom, { pinch: true, round: false });
+  }
+
+  /** The per-frame follow recentre: a raw pan that puts `ll` at the visual centre — never setView.
+   *  setView(ll, map.getZoom(), {animate:false}) looked equivalent, but while a pinch is in flight
+   *  the map's zoom is fractional and setView snaps it to zoomSnap first — a zoom "change" it
+   *  cannot animate with animate:false, so it fell through to _resetView, and the tile layer answers
+   *  that ('viewprereset') by throwing EVERY tile away. Sixty times a second for the whole pinch:
+   *  the map stayed grey through the gesture and for seconds after it, while the ~1000 re-requested
+   *  tiles drained through the cache queue (Sony, 2026-09-12: 600 tiles removed, 1152 re-created by
+   *  one pinch in follow mode). panBy is exactly what setView does when the zoom is unchanged, minus
+   *  that trap; a jump larger than the viewport (a snap to a far target) still resets, as it should. */
+  function panToVisualCentre(ll: L.LatLngExpression) {
+    if (!map) return;
+    const size = map.getSize();
+    const target = L.point(size.x / 2 - centerOffsetX(), size.y / 2 - centerOffsetY());
+    const offset = map.latLngToContainerPoint(ll).subtract(target).round();
+    if (!offset.x && !offset.y) return;
+    if (!size.contains(offset)) {
+      // A jump past the viewport (a snap to a far target): the full reset, as panBy would do it.
+      followMoveEnd();
+      map.setView(containerCentreFor(map, ll, map.getZoom()), map.getZoom(), { animate: false });
+      return;
+    }
+    // The pan itself is what panBy does without animation — the map pane moves, nothing else. The
+    // events are rationed (see followMoveEnd): panBy fired movestart/move/moveend on every frame,
+    // and each moveend made Leaflet's SVG renderers re-place their box (a new viewBox on a layer
+    // the size of the whole map, in heading-up 17 megapixels) — a full repaint of every vector
+    // layer, sixty times a second, for a pan of a pixel or two.
+    const pane = map.getPane('mapPane');
+    if (!pane) return;
+    if (!followMoving) {
+      followMoving = true;
+      map.fire('movestart');
+    }
+    L.DomUtil.setPosition(pane, L.DomUtil.getPosition(pane).subtract(offset));
+    map.fire('move');
+    if (performance.now() - followMoveEndAt >= FOLLOW_MOVEEND_MS) followMoveEnd();
+  }
+
+  /** How often the follow pan fires `moveend` while the aircraft keeps moving. Everything on
+   *  moveend is a "settle" action — the SVG renderers re-place their box, the tile layer prunes,
+   *  the airspace overlay and the night check re-evaluate — and none of it needs 60 Hz; the tile
+   *  layer loads from `move` anyway (its own 200 ms throttle). 250 ms keeps a vector layer's box
+   *  well within its 10 % padding at any flying speed. */
+  const FOLLOW_MOVEEND_MS = 250;
+  let followMoveEndAt = 0;
+  let followMoving = false;
+
+  /** Close the current run of follow pans with the one moveend the listeners are waiting for. */
+  function followMoveEnd() {
+    followMoveEndAt = performance.now();
+    if (!followMoving || !map) return;
+    followMoving = false;
+    map.fire('moveend');
   }
 
   /** Redraw the HDG/COG nose lines from the SMOOTHED follow state (so they track the UAV stably, the
@@ -1431,14 +1561,21 @@
         pane.style.pointerEvents = 'none';
       }
       dirLayer = L.layerGroup().addTo(map);
+      // A canvas renderer of their own, not the pane's default SVG: the six lines move on EVERY follow
+      // frame, and a changed SVG path re-rasterises the compositor tiles under it — on a layer the
+      // size of the whole map (the oversized heading-up square), that was well over a hundred raster
+      // tasks a second for six lines, each a GPU round trip. A canvas is one texture the lines are
+      // drawn into; Leaflet redraws only the changed region, nothing is rasterised behind it.
+      const dirRenderer = L.canvas({ pane: 'dirLines' });
       // Add order = draw order: the turn arc first (bottom, under the H/B lines), then dark casings,
       // then the coloured H/B lines on top. All in the dirLines pane → above the track, below the UAV.
-      turnCasing = L.polyline([], { pane: 'dirLines', color: '#000', weight: 3.5, opacity: 0.3, lineCap: 'round', interactive: false }).addTo(dirLayer);
-      turnLine = L.polyline([], { pane: 'dirLines', color: '#fff', weight: 1.5, opacity: 0.95, lineCap: 'round', interactive: false }).addTo(dirLayer);
-      hdgCasing = L.polyline([], { pane: 'dirLines', color: '#000', weight: 6, opacity: 0.3, lineCap: 'round', interactive: false }).addTo(dirLayer);
-      cogCasing = L.polyline([], { pane: 'dirLines', color: '#000', weight: 6, opacity: 0.3, lineCap: 'round', interactive: false }).addTo(dirLayer);
-      hdgLine = L.polyline([], { pane: 'dirLines', color: '#37a8db', weight: 3, opacity: 1, lineCap: 'round', interactive: false }).addTo(dirLayer);
-      cogLine = L.polyline([], { pane: 'dirLines', color: '#f5a623', weight: 3, opacity: 1, dashArray: '6 5', lineCap: 'round', interactive: false }).addTo(dirLayer);
+      const r = { pane: 'dirLines', renderer: dirRenderer, lineCap: 'round' as const, interactive: false };
+      turnCasing = L.polyline([], { ...r, color: '#000', weight: 3.5, opacity: 0.3 }).addTo(dirLayer);
+      turnLine = L.polyline([], { ...r, color: '#fff', weight: 1.5, opacity: 0.95 }).addTo(dirLayer);
+      hdgCasing = L.polyline([], { ...r, color: '#000', weight: 6, opacity: 0.3 }).addTo(dirLayer);
+      cogCasing = L.polyline([], { ...r, color: '#000', weight: 6, opacity: 0.3 }).addTo(dirLayer);
+      hdgLine = L.polyline([], { ...r, color: '#37a8db', weight: 3, opacity: 1 }).addTo(dirLayer);
+      cogLine = L.polyline([], { ...r, color: '#f5a623', weight: 3, opacity: 1, dashArray: '6 5' }).addTo(dirLayer);
     }
     const { lat, lon, heading, course, speed } = followCurrent;
     const len = speed * DIR_LEAD_S; // 15 s of travel → the lines represent ground speed
@@ -1720,9 +1857,14 @@
     currentOverlays = [];
 
     // Add base layer
+    // updateWhenIdle: Leaflet's default is TRUE on mobile — tiles for a dragged map load only once
+    // the finger lets go (moveend), the map looks sluggish while it is pulled along (Marc, 2026-09-13).
+    // The desktop default is false: tiles load during the drag, throttled to updateInterval (200 ms).
+    // With the tile cache in front of the network the mobile saving is not worth the feel.
     currentBase = cachedTileLayer(provider.url, {
       attribution: provider.attribution,
       maxZoom: provider.maxZoom,
+      updateWhenIdle: false,
       // Enable over-zoom placeholder detection on flagged base layers (ESRI sat).
       providerId: provider.detectPlaceholders ? provider.id : undefined,
     }).addTo(map);
@@ -1733,6 +1875,7 @@
         const layer = cachedTileLayer(ol.url, {
           attribution: ol.attribution,
           maxZoom: ol.maxZoom,
+          updateWhenIdle: false,
           pane: "overlayPane",
         }).addTo(map);
         currentOverlays.push(layer);
@@ -1810,6 +1953,20 @@
 
     // Apply the persisted (or default) map provider
     applyProvider(getProviderById(s.mapProvider));
+
+    // Every zoom ANIMATION in a follow mode heads for the aircraft: the fingers lifting off a pinch,
+    // the mini map's slide, a wheel step — Leaflet animates them around the container centre, which
+    // on the phone is not where the aircraft is (centerInsetRight/Bottom), so the aircraft slid
+    // outwards for 250 ms and snapped back on the first follow frame after. The hook rewrites the
+    // animation's centre to the one that keeps the aircraft at the visual centre at the target zoom.
+    // Registered BEFORE any layer: listeners run in registration order and the tile levels, markers
+    // and vector renderers all read `e.center` when they set up their transition.
+    map.on('zoomanim', (e) => {
+      if (viewMode === 'free' || !followCurrent || !map) return;
+      const c = containerCentreFor(map, [followCurrent.lat, followCurrent.lon], e.zoom);
+      e.center = c;
+      (map as unknown as MapInternals)._animateToCenter = c;
+    });
 
     map.on("moveend", saveMapState);
     map.on("zoomend", saveMapState);
@@ -1978,13 +2135,14 @@
     const wrapper = mapContainer.parentElement;
     if (enable && wrapper) {
       // Make the container a square centred on the VISUAL centre (the wrapper centre, shifted left
-      // by half of a right-edge overlay — `centerInsetRight`) whose side is twice the distance from
-      // that pivot to the farthest wrapper corner: a square that size, rotated about its own centre,
-      // covers the whole wrapper at any angle. With no inset this is the wrapper's diagonal.
+      // by half of a right-edge overlay — `centerInsetRight` — and up by half of a bottom-edge one —
+      // `centerInsetBottom`) whose side is twice the distance from that pivot to the farthest
+      // wrapper corner: a square that size, rotated about its own centre, covers the whole wrapper
+      // at any angle. With no inset this is the wrapper's diagonal.
       const w = wrapper.clientWidth;
       const h = wrapper.clientHeight;
       const px = w / 2 - centerInsetRight / 2;
-      const py = h / 2;
+      const py = h / 2 - centerInsetBottom / 2;
       const reach = Math.sqrt(Math.max(px, w - px) ** 2 + Math.max(py, h - py) ** 2);
       const side = Math.ceil(2 * reach);
       mapContainer.style.width = `${side}px`;
@@ -2001,14 +2159,19 @@
       mapContainer.style.left = '';
       mapContainer.classList.remove('heading-up');
     }
-    // Leaflet must recalculate container size
+    // Leaflet must recalculate the container size — NOW, before the follow frame that follows this
+    // call recentres: with the stale size it centred the aircraft in the old box, one frame of
+    // visible offset on every heading-up ⇄ north-up switch (Marc, 2026-09-10, the mini map's tap
+    // toggle). The delayed pass catches a layout that is still settling (column transition).
+    map?.invalidateSize({ animate: false });
     setTimeout(() => map?.invalidateSize(), 50);
   }
 
-  // A changed right-edge inset moves the visual centre: re-square the heading-up container (the
-  // follow loop re-centres on its next frame by itself).
+  // A changed inset moves the visual centre: re-square the heading-up container (the follow loop
+  // re-centres on its next frame by itself).
   $effect(() => {
     void centerInsetRight;
+    void centerInsetBottom;
     if (map && viewMode === 'heading-follow') applyHeadingUpSize(true);
   });
   // Mini map (the widget tile everywhere, the docked frame on the phone — `miniControls`): ZOOM
@@ -2018,21 +2181,86 @@
   // (Marc, 2026-09-04: the widget map placed and moved waypoints). Dragging is already off in
   // the follow modes; Leaflet's double-click zoom goes too — a double-tap is the swap gesture on
   // the surfaces around the frame, and the phone relays touches to the tile underneath.
+  // Two gestures of its own (Marc, 2026-09-09/10), read from the same pointer stream before it is
+  // swallowed: a TAP toggles heading-up ⇄ north-up (the frame stays follow-locked either way — no
+  // free mode, no panning), and a one-finger SLIDE up / down zooms in / out — the phone has no zoom
+  // buttons and a pinch needs room the little frame does not have. A second finger hands over to
+  // Leaflet's pinch; the mouse keeps wheel + buttons and only taps. The slide steps through WHOLE
+  // levels with Leaflet's normal zoom animation, exactly like the +/- buttons: an unanimated
+  // setZoom is a hard reset that throws the old tiles away before the new ones exist (Marc,
+  // 2026-09-10: a dark-grey flash on every step), the animation scales them until then. Leaflet
+  // drops a setZoom that arrives mid-animation, so the target is kept and re-issued on zoomend.
+  const MINI_TAP_MS = 350;
+  const MINI_TAP_PX = 8;
+  const MINI_SLIDE_PX_PER_LEVEL = 60;
   $effect(() => {
     if (!map || !mapContainer) return;
     if (!miniControls) {
       map.doubleClickZoom.enable();
       return;
     }
-    map.doubleClickZoom.disable();
+    const m = map;
+    m.doubleClickZoom.disable();
+    let gesture: { id: number; x: number; y: number; t: number; zoom: number; touch: boolean; sliding: boolean } | null = null;
+    let slideTarget: number | null = null;
+    const chaseTarget = () => {
+      if (slideTarget == null) return;
+      if (m.getZoom() === slideTarget) slideTarget = null;
+      else m.setZoom(slideTarget);
+    };
+    const onDown = (e: PointerEvent) => {
+      if (!e.isPrimary || e.button !== 0) {
+        gesture = null; // a second finger: pinch, Leaflet's from here on
+        slideTarget = null;
+        return;
+      }
+      gesture = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now(), zoom: m.getZoom(), touch: e.pointerType !== 'mouse', sliding: false };
+    };
+    const onMove = (e: PointerEvent) => {
+      const g = gesture;
+      if (!g || e.pointerId !== g.id) return;
+      if (!g.sliding) {
+        if (!g.touch || Math.abs(e.clientY - g.y) < MINI_TAP_PX) return;
+        g.sliding = true;
+      }
+      const raw = Math.round(g.zoom + (g.y - e.clientY) / MINI_SLIDE_PX_PER_LEVEL);
+      const target = Math.max(m.getMinZoom(), Math.min(m.getMaxZoom(), raw));
+      if (target !== slideTarget) {
+        slideTarget = target;
+        chaseTarget();
+      }
+    };
+    const onUp = (e: PointerEvent) => {
+      const g = gesture;
+      if (!g || e.pointerId !== g.id) return;
+      if (!g.sliding && performance.now() - g.t < MINI_TAP_MS && Math.hypot(e.clientX - g.x, e.clientY - g.y) < MINI_TAP_PX) {
+        viewMode = viewMode === 'heading-follow' ? 'follow' : 'heading-follow';
+      }
+      gesture = null;
+    };
+    const onCancel = () => {
+      gesture = null;
+      slideTarget = null;
+    };
+    m.on('zoomend', chaseTarget);
     const swallow = (e: Event) => {
       e.stopImmediatePropagation();
       if (e.type === 'contextmenu') e.preventDefault(); // pointer events stay uncancelled: pinch = touch events
     };
     const el = mapContainer;
+    // Gesture listeners first: they must run before the swallow stops the pointerdown / pointerup.
+    el.addEventListener('pointerdown', onDown, true);
+    el.addEventListener('pointermove', onMove, true);
+    el.addEventListener('pointerup', onUp, true);
+    el.addEventListener('pointercancel', onCancel, true);
     const types = ['click', 'dblclick', 'contextmenu', 'mousedown', 'mouseup', 'pointerdown', 'pointerup'];
     for (const t of types) el.addEventListener(t, swallow, true);
     return () => {
+      m.off('zoomend', chaseTarget);
+      el.removeEventListener('pointerdown', onDown, true);
+      el.removeEventListener('pointermove', onMove, true);
+      el.removeEventListener('pointerup', onUp, true);
+      el.removeEventListener('pointercancel', onCancel, true);
       for (const t of types) el.removeEventListener(t, swallow, true);
     };
   });
@@ -2062,6 +2290,7 @@
       applyHeadingUpSize(false);
       map.dragging.enable();
       setZoomAnchor('cursor');
+      followMoveEnd(); // a run of follow pans may still be open — its listeners get their moveend
     }
   }
 
@@ -2162,7 +2391,7 @@
 </script>
 
 <div class="map-wrapper" style="--map-inset-right: {centerInsetRight}px">
-  <div bind:this={mapContainer} class="map" class:tile-overlap={isWebKitGtk} class:mini={miniControls} style="--map-rotation: 0deg"></div>
+  <div bind:this={mapContainer} class="map" class:tile-overlap={isWebKitGtk} class:tile-snap={isAndroid} class:mini={miniControls} style="--map-rotation: 0deg"></div>
 
   <div class="map-controls-corner">
     {#if !miniControls}
@@ -2271,11 +2500,34 @@
     height: 256.5px !important;
   }
 
-  /* Heading-up: container size set via inline styles (JS),
-     CSS handles only rotation. */
+  /* Android (Chromium WebView): every tile is its own composited layer and cc snaps each layer's
+     origin to whole device pixels. At a fractional device pixel ratio (1.67 on a 1280×720 / 267 dpi
+     screen: a 256px tile is 427.26 device px) the shared edge of two tiles therefore rounds UP at one
+     boundary — a 1px gap, dark hairline — and DOWN at the next — a 1px overlap. Leaflet's own remedy
+     for Chromium, `mix-blend-mode: plus-lighter` on every tile, turns that overlap into a BRIGHT
+     hairline (the sum of both tiles), which is also why the WebKitGTK half-pixel stretch above made
+     the phone worse. Fix: a full-pixel stretch so neighbours always overlap, drawn with normal
+     blending so the overlap is simply the upper tile. Covers the over-zoom placeholder tiles (div)
+     too. Reproduced + verified on the API 28 emulator at 1280×720 / 267 dpi (2026-09-10); the Sony
+     at DPR 2.625 only showed it while the map moved. Windows (WebView2) at 125 % scaling is the same
+     engine and untested. */
+  :global(.map.tile-snap .leaflet-tile) {
+    mix-blend-mode: normal;
+    width: 257px !important;
+    height: 257px !important;
+  }
+
+  /* Heading-up: container size set via inline styles (JS), CSS handles only rotation.
+     will-change: the rotation is driven per frame from JS (a CSS-variable write per follow frame),
+     and without its own compositor layer every step is a repaint of the whole oversized square —
+     hundreds of (empty, solid-colour) raster tasks per second that saturated the GPU thread on the
+     phone (Chromium trace on the Sony, 2026-09-12). With the layer the rotation is a compositor-only
+     transform update; the container paints nothing but its background, so the layer costs no
+     texture. */
   :global(.map.heading-up) {
     transform: rotate(var(--map-rotation, 0deg));
     transform-origin: center center;
+    will-change: transform;
   }
 
   /* Mini map (the video-swap frame / widget tile, `miniControls`): every marker at half size, in
@@ -2284,6 +2536,9 @@
      centre-anchored icons keep their anchor exactly, bottom-anchored ones move by a few px. */
   .map.mini {
     --marker-scale: 0.5;
+    /* The one-finger slide zoom (see the miniControls effect) must keep its pointer stream: no
+       browser pan may claim the touch. Leaflet's pinch runs on touch events and is not affected. */
+    touch-action: none;
   }
   .map.mini :global(.leaflet-marker-icon:not(.mission-wp-icon):not(.mission-fbh-icon) > *) {
     transform: scale(var(--marker-scale));
@@ -2306,6 +2561,23 @@
   :global(.map.heading-up .leaflet-control-zoom),
   :global(.map.heading-up .leaflet-control-attribution) {
     transform: rotate(calc(-1 * var(--map-rotation, 0deg)));
+  }
+
+  /* Heading-up: everything we draw onto the map keeps its geographic anchor but stays upright —
+     marker icons, popups and tooltips carry `rotate(var(--kite-upright))` in their inline transform
+     (leafletUpright.ts), pivoting on the anchor point. Defined here so a heading change is a single
+     CSS-variable write; outside heading-up the variable is unset and the rotation falls back to 0. */
+  :global(.map.heading-up) {
+    --kite-upright: calc(-1 * var(--map-rotation, 0deg));
+  }
+  /* Exception — the UAV model is drawn with its heading; the map rotation is what makes it point up. */
+  :global(.map.heading-up .uav-model-icon) {
+    --kite-upright: 0deg;
+  }
+  /* Radar contacts: the icon stands upright (callsign label readable, below the symbol), but the
+     silhouette itself points along the contact's track, so it turns back with the map. */
+  :global(.map.heading-up .radar-divicon .radar-icon > svg) {
+    transform: rotate(var(--map-rotation, 0deg));
   }
 
   .map-controls-corner {
@@ -2349,6 +2621,16 @@
     bottom: calc(8px + var(--safe-bottom, 0px));
     transition: right 0.3s ease;
   }
+  /* In the floating frame / widget tile (+page's .layer-map.in-frame): no zoom buttons — wheel,
+     touchpad, pinch and the mini map's one-finger slide cover it, and four buttons did not fit a
+     small frame (the top one stuck out of it, Marc 2026-09-10 on the tablet). The mobile lift
+     above clears the attribution, which the frame hides — back to the plain 8 px there. */
+  :global(.layer-map.in-frame) .map-zoom-btn {
+    display: none;
+  }
+  :global(html.is-mobile) :global(.layer-map.in-frame) .map-controls-corner {
+    bottom: 8px;
+  }
   :global(html.is-mobile) :global(.leaflet-bottom.leaflet-right) {
     right: auto;
     left: 0;
@@ -2380,13 +2662,13 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    backdrop-filter: blur(8px);
+    backdrop-filter: var(--glass-blur, blur(6px));
     transition: background 0.2s, border-color 0.2s, color 0.2s;
     padding: 0;
   }
 
   .map-control-btn:hover {
-    background: rgba(55, 168, 219, 0.25);
+    background: var(--btn-active-bg);
     border-color: #37a8db;
   }
 
@@ -2406,7 +2688,7 @@
     background: rgba(46, 46, 46, 0.45);
     border-color: rgba(55, 168, 219, 0.45);
     color: rgba(199, 223, 232, 0.95);
-    backdrop-filter: blur(4px);
+    backdrop-filter: var(--glass-blur, blur(6px));
   }
 
   .map-heading-btn.mode-follow,
@@ -2414,7 +2696,7 @@
     background: rgba(46, 46, 46, 0.92);
     border-color: rgba(55, 168, 219, 0.7);
     color: #37a8db;
-    backdrop-filter: blur(8px);
+    backdrop-filter: var(--glass-blur, blur(6px));
   }
 
   .map-heading-btn.mode-free:hover {

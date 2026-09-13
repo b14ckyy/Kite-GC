@@ -15,6 +15,7 @@
   import ConnectionStatusBox from '$lib/components/ConnectionStatusBox.svelte';
   import { hasSerialPorts } from '$lib/platform';
   import { settings } from '$lib/stores/settings';
+  import { defaultNetPort } from '$lib/stores/connection';
   import type { PortInfo, BleDeviceInfo, TransportType, ProtocolType } from '$lib/stores/connection';
   import type { TelemetryData } from '$lib/stores/telemetry';
 
@@ -31,6 +32,7 @@
     selectedBaud = $bindable(),
     tcpHost = $bindable(),
     tcpPort = $bindable(),
+    portIsAuto = $bindable(true),
     selectedBleDevice = $bindable(),
     baudRates,
     onConnect,
@@ -49,6 +51,9 @@
     selectedBaud: number;
     tcpHost: string;
     tcpPort: number;
+    /** False once the pilot has typed a port: Kite then stops moving it with the selection. Lives in
+     *  +page so both instances of these controls (toolbar and phone popout) share one answer. */
+    portIsAuto?: boolean;
     selectedBleDevice: string;
     baudRates: number[];
     onConnect: () => void;
@@ -93,6 +98,30 @@
     void selectedTransport;
     editingBt = false;
   });
+
+  // ── Network port defaults ──────────────────────────────────────────
+  // The standard port depends on the protocol as well as the transport (see `defaultNetPort`):
+  // MAVLink is UDP 14550 or, over TCP, the SITL port 5760, while MSP over TCP is INAV SITL's 5761.
+  // The port used to follow the transport alone, so selecting MAVLink over TCP still offered the MSP
+  // port and the pilot had to know the right number.
+  //
+  // Whether the port may be moved is tracked in `portIsAuto` rather than guessed from the number.
+  // Guessing cannot work: 5760 is ArduPilot SITL's port *and* a perfectly deliberate choice for an
+  // MSP bridge, so a pilot who typed it would have had it silently rewritten on the next switch.
+  /** Hand the port back to Kite when the typed value is the standard one for the current selection.
+   *  Without this there is no way back once anything has been typed, where going by the number at
+   *  least had one, and an older profile stored on the previous transport-only default (MAVLink over
+   *  TCP on 5761) would lose the re-defaulting for good. */
+  function notePortEdit(typed: number) {
+    portIsAuto = typed === defaultNetPort(selectedProtocol, selectedTransport);
+  }
+
+  /** Move the port to the default for the current selection, unless the pilot typed one. */
+  function redefaultPort() {
+    if (!portIsAuto) return;
+    const next = defaultNetPort(selectedProtocol, selectedTransport);
+    if (next) tcpPort = next;
+  }
 </script>
 
 <!-- Protocol selector + transport type (row 1 when stacked). -->
@@ -101,17 +130,13 @@
   <SegmentedToggle
     options={[{ value: 'msp', label: 'MSP' }, { value: 'mavlink', label: 'MAVLink' }, { value: 'telemetry', label: 'Telemetry' }]}
     value={selectedProtocol}
-    onchange={(v) => (selectedProtocol = v as ProtocolType)}
+    onchange={(v) => { selectedProtocol = v as ProtocolType; redefaultPort(); }}
   />
 
-  <!-- Switching between TCP/UDP flips the port between the two known defaults (TCP 5761 ⇄ UDP 14550
-       = the MAVLink convention) — a custom port (e.g. SITL 5762) is left untouched.
-       Protocol-independent (MSP has no standard network port). -->
+  <!-- Both selectors re-default the network port: a port the pilot typed is left alone. -->
   <select class="tb-select transport-select" bind:value={selectedTransport}
-    onchange={() => {
-      if (selectedTransport === 'udp' && tcpPort === 5761) tcpPort = 14550;
-      else if (selectedTransport === 'tcp' && tcpPort === 14550) tcpPort = 5761;
-    }}>
+    onchange={redefaultPort}
+  >
     <!-- Serial is a capability, not a form factor: desktop and Android (USB host / OTG) have
          it, iOS does not. BLE and TCP/UDP exist everywhere. -->
     {#if hasSerialPorts}
@@ -165,10 +190,13 @@
       bind:value={tcpHost}
       placeholder="Host (z.B. 192.168.1.1)"
     />
+    <!-- Typing here makes the port the pilot's and the selectors stop moving it, unless what was
+         typed is the standard port for the current selection, which hands it back to Kite. -->
     <input
       class="tb-input port-input"
       type="number"
       bind:value={tcpPort}
+      oninput={(e) => notePortEdit(Number((e.currentTarget as HTMLInputElement).value))}
       placeholder="Port"
       min="1"
       max="65535"

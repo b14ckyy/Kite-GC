@@ -437,6 +437,16 @@ pub fn vehicle_db_find_by_craft_name(
     db::find_vehicle_by_craft_name(&conn, &craft_name).map_err(|e| format!("Query error: {}", e))
 }
 
+/// Find a vehicle by FC hardware id (UAV Info panel: "in library" check / "View in library").
+#[tauri::command]
+pub fn vehicle_db_find_by_fc_uid(
+    fc_uid: String,
+    db_path: Option<String>,
+) -> Result<Option<Vehicle>, String> {
+    let conn = open_db(&db_path.unwrap_or_default())?;
+    db::find_vehicle_by_fc_uid(&conn, &fc_uid).map_err(|e| format!("Query error: {}", e))
+}
+
 /// Delete a vehicle (flights keep their craft name → "not in library").
 #[tauri::command]
 pub fn vehicle_db_delete(id: i64, db_path: Option<String>) -> Result<(), String> {

@@ -27,7 +27,7 @@ The Settings panel — the Interface and Data tabs, each grouped into labelled s
 | **Real Daytime and Lighting (3D)** | Light the 3D globe with the real sun position (day / night, shadows). | On |
 | **Log Replay Time (3D)** | During replay, drive that lighting from the log's actual time of day (needs the option above). | On |
 | **Night Mode** | Dim the 2D map at night — Off / Auto (by local time) / On. | Auto |
-| **Power Saving** | Cap the 3D frame rate to save battery — Off (60 fps) / On (20 fps) / Auto (20 fps on battery). While active it also drops the smooth bar animations in the speed and battery widgets, so those read the current value directly. | Auto |
+| **Power Saving** | Cap the 3D frame rate to save battery — Off (60 fps) / On (20 fps) / Auto (20 fps on battery). While active it also drops the smooth bar animations in the speed and battery widgets, so those read the current value directly, and the frosted-glass blur behind panels and widgets. On phones and tablets the glass blur over the map is always off; only the panels keep it. | Auto |
 | **High-Resolution 3D** | Render the 3D globe at the display's native pixel density (on) or at half of it (off) to save GPU and battery. Sharpest on high-DPI phones and tablets; a laptop with a weak integrated GPU may prefer it off. | On (desktop) · Off (phone / tablet) |
 | **Your Location** | Your detected position (used as a fallback reference). **Detect** re-runs OS geolocation. | — |
 | **GCS Location** | How the ground-station position is sourced — Off / Manual (set once) / Continuous (live). Used as the reference when no aircraft fix is available. | Continuous |
@@ -61,6 +61,12 @@ Altitude and Compass sit in the bottom dock and Home, RC Link and GPS in the rig
 | **Terrain Cache** | Disk cache for the Copernicus terrain used by terrain analysis (size read-out + **Clear**). | — |
 | **Cesium Ion Token** | Your free Cesium Ion token, which enables real-world 3D terrain. See **[3D map](../guides/map-3d.md)**. | (none) |
 | **Airspace Manager** | Enable the aeronautical overlay, pick the **provider** (OpenAIP) and enter its **API key**. See **[Airspace Manager](../guides/airspace.md)**. | On, no provider set |
+
+### Connection
+
+| Setting | What it does | Default |
+|---|---|---|
+| **Default Protocol** | Which protocol the connection bar starts on. **Last used** restores whatever you connected with last time, which is what Kite has always done. Pin it to **MSP**, **MAVLink** or **Telemetry** and that choice wins on every launch, whatever the last session used. Kite still remembers the last-used protocol, so switching back to **Last used** picks up where you left off. | Last used |
 
 ### Telemetry
 
@@ -110,12 +116,18 @@ See **[Flight logbook](../guides/logbook.md)** for how these are used.
 
 | Setting | What it does | Default |
 |---|---|---|
-| **Check for updates** | Whether Kite asks GitHub for a newer version when it starts — **Disabled**, **Stable releases**, or **Include pre-releases** (betas and release candidates). | Stable releases |
+| **Check for updates** | Whether Kite asks GitHub for a newer version when it starts — **Disabled**, **Stable releases**, **Patch releases only** (bug-fix releases of the version you run, e.g. 1.1.0 → 1.1.1, never 1.2.0), or **Include pre-releases** (betas and release candidates). | Stable releases |
 
-Kite never downloads or installs an update on its own. When a newer version exists you get a notice
-with the version you have, the one that is available, and three choices: **Open Release Page** to read
-what changed, **Remind me later**, or **Skip this version** — which suppresses the notice for that one
-version only.
+Kite never downloads anything on its own. When a newer version exists you get a notice with the
+version you have, the one that is available, and the release notes, plus four choices:
+
+- **Update and Restart** downloads the new version, installs it and restarts Kite. On Windows and
+  Linux this runs the installer of the package you installed (a `.deb`/`.rpm` asks for your password);
+  on macOS the app bundle is replaced in place. A **portable** copy replaces its own executable and
+  restarts. On Android and iOS the button opens the app store instead.
+- **Open Release Page** shows the release on GitHub in your browser, with every download.
+- **Remind me later** asks again at the next start.
+- **Skip this version** suppresses the notice for that one version only.
 
 ### Mission Control
 

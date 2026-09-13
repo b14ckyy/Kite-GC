@@ -134,7 +134,7 @@
   .vs-root {
     position: fixed; left: 0; right: 0; bottom: 0; height: 46vh; z-index: 400;
     display: flex; flex-direction: column; gap: 12px; padding: 12px; box-sizing: border-box;
-    background: linear-gradient(#0a0a0acc, #0a0a0aee); backdrop-filter: blur(2px);
+    background: linear-gradient(#0a0a0acc, #0a0a0aee); backdrop-filter: var(--glass-blur, blur(2px));
     border-top: 2px solid #37a8db;
   }
   .vs-bar { display: flex; align-items: center; gap: 12px; }
