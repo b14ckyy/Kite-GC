@@ -62,6 +62,14 @@ extra_javascript:
   - assets/nav.js # keeps the "Getting started" section expanded (see the file)
 
 extra:
+  # Footer icons (Material renders extra.social at the bottom of every page).
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/b14ckyy/Kite-GC
+      name: Kite on GitHub
+    - icon: fontawesome/brands/discord
+      link: https://discord.gg/3FM7EWhkg9
+      name: Kite community on Discord
   # Header version dropdown (Material's native mike support): reads the versions.json that mike
   # maintains on the gh-pages branch. Old versions get the "outdated" banner (overrides/main.html).
   version:

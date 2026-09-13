@@ -7,7 +7,7 @@ Each version heading ends with the line's support status — **Live**, **Mainten
 defined on the [release support](release-support.md) page. Patch releases (1.0.1, 1.0.2, …) are listed
 inside the box of the feature release they belong to, so the notes for one release line stay together.
 
-???+ note "1.1.0 — in development"
+???+ note "1.1 — in development"
 
     **Highlights**
 
@@ -225,7 +225,19 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **Chinese and Bulgarian** — the connection-status and toolbar strings that fell back to English
       are translated. [#154] · [#156]
 
-??? note "1.0.1 — patch release"
+??? note "1.0 — Initial release · Live"
+
+    The first stable release of **Kite Ground Control**: a cross-platform ground station for
+    **INAV**, **ArduPilot** and **PX4** — live telemetry over serial, Bluetooth and network links,
+    mission planning on 2D and 3D maps, safety subsystems (safe homes, geozones, geofence), a full
+    flight logbook with replay, FPV video, radar / airspace awareness and telemetry relaying.
+
+    Everything this version contains is covered by the regular documentation — start with the
+    [quick tour](getting-started/quick-tour.md) or the [GitHub release](https://github.com/b14ckyy/Kite-GC/releases).
+
+    ---
+
+    **1.0.1**{ .kite-patch } *2026-09-13*{ .kite-badge }
 
     **Added**
 
@@ -236,6 +248,13 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     **Fixed**
 
+    - **The 3D live view stuttered more the longer a flight went on.** The live trail was rebuilt
+      on every frame, so its cost grew with the length of the track, and the hidden 2D map kept
+      re-centring and drawing the aircraft underneath. Both now cost the same on every frame. [#140]
+    - **"Incomplete recording found" came back on every start.** When unfinished temp logs had piled
+      up (the app killed mid-recording, for example by the operating system), the prompt offered them
+      one per launch and Discard removed only that one. Discard now clears every leftover, and a
+      recording in progress is never touched. [#145]
     - **HDOP on INAV showed the wrong figure.** The GPS tile read the position-error field instead
       of HDOP, because the first field of INAV's GPS statistics message is 16 bits and Kite decoded
       it as 32. The recorder stored the same two values one field out. [#143]
@@ -248,21 +267,17 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **A saved Telemetry connection came back as MSP.** Restoring the last-used protocol mapped
       everything that was not MAVLink onto MSP, so the passive Telemetry choice was silently
       rewritten. [#143]
+    - **Bulgarian translation corrected** — 26 strings, contributed by teodoryantcheff. [#141]
     - **Markers and pop-ups turned with the map in heading-up mode.** Waypoint markers, labels,
       the "Fly Here" pop-up and the waypoint editor rotated together with the map tiles, so they
       were unreadable while the map followed the aircraft's heading. They now stay bound to their
       position but upright; the aircraft symbol and radar contacts keep pointing along their
       track. [#168]
-
-??? note "1.0.0 — Initial release · Live"
-
-    The first stable release of **Kite Ground Control**: a cross-platform ground station for
-    **INAV**, **ArduPilot** and **PX4** — live telemetry over serial, Bluetooth and network links,
-    mission planning on 2D and 3D maps, safety subsystems (safe homes, geozones, geofence), a full
-    flight logbook with replay, FPV video, radar / airspace awareness and telemetry relaying.
-
-    Everything this version contains is covered by the regular documentation — start with the
-    [quick tour](getting-started/quick-tour.md) or the [GitHub release](https://github.com/b14ckyy/Kite-GC/releases).
+    - **The 3D view was stuck in daylight.** Since 1.0.0 the globe and the sky ignored the real
+      sun: the terrain stayed bright and the sky blue wherever you looked and at any time of day,
+      and a replay's flight time changed nothing either. The lighting that keeps the aircraft model
+      readable had taken over the whole scene's light. The model keeps its own lighting; the globe,
+      the sky and the day/night line follow the real sun again. [#175]
 
 [#16]: https://github.com/b14ckyy/Kite-GC/pull/16
 [#48]: https://github.com/b14ckyy/Kite-GC/pull/48
@@ -289,7 +304,10 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#130]: https://github.com/b14ckyy/Kite-GC/pull/130
 [#132]: https://github.com/b14ckyy/Kite-GC/pull/132
 [#135]: https://github.com/b14ckyy/Kite-GC/pull/135
+[#140]: https://github.com/b14ckyy/Kite-GC/pull/140
+[#141]: https://github.com/b14ckyy/Kite-GC/pull/141
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143
+[#145]: https://github.com/b14ckyy/Kite-GC/pull/145
 [#151]: https://github.com/b14ckyy/Kite-GC/pull/151
 [#152]: https://github.com/b14ckyy/Kite-GC/pull/152
 [#153]: https://github.com/b14ckyy/Kite-GC/pull/153
@@ -302,3 +320,4 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#168]: https://github.com/b14ckyy/Kite-GC/issues/168
 [#173]: https://github.com/b14ckyy/Kite-GC/pull/173
 [#174]: https://github.com/b14ckyy/Kite-GC/pull/174
+[#175]: https://github.com/b14ckyy/Kite-GC/pull/175

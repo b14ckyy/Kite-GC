@@ -37,3 +37,49 @@
     font-weight: 700;
   }
 }
+
+/* Changelog: a patch release is a sub-segment inside its feature release's box. `.kite-patch` is
+   the patch version label, `.kite-badge` the status pill next to it ("in development" until the
+   patch ships, then replaced by the release date). Both are attr_list classes on inline text. */
+.kite-patch {
+  font-size: 1.15em;
+}
+.kite-badge {
+  display: inline-block;
+  margin-left: 0.35em;
+  padding: 0.05em 0.6em;
+  border-radius: 1em;
+  background: var(--md-accent-fg-color);
+  color: var(--md-accent-bg-color);
+  font-size: 0.68em;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: 0.15em;
+}
+
+/* ── Header: Discord icon in front of the repository link ──────────────────────────────────────
+   overrides/partials/source.html adds a second link into the header's source box, so on desktop the
+   box becomes a row: the icon keeps Material's 2rem icon cell, the repository link takes the rest,
+   and the box grows by the icon's width so the repo name is not cut. Material hides the box below
+   60em and shows the same partial in the drawer instead; there the icon is dropped (the footer has
+   it) so the drawer keeps its stock layout. */
+@media screen and (min-width: 60em) {
+  .md-header__source {
+    display: flex;
+    align-items: center;
+    width: 13.7rem;
+    max-width: 13.7rem;
+  }
+  .md-header__source .kite-header-discord {
+    flex: 0 0 auto;
+  }
+  .md-header__source .md-source[data-md-component="source"] {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+}
+.md-nav__source .kite-header-discord {
+  display: none;
+}
