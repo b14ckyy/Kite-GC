@@ -8,7 +8,12 @@ Each version heading ends with the line's support status — **Live**, **Mainten
 defined on the [release support](release-support.md) page. Patch releases (1.0.1, 1.0.2, …) are listed
 inside the box of the feature release they belong to, so the notes for one release line stay together.
 
-???+ note "1.1 — in development"
+???+ note "2.0 — in development"
+
+    **Why 2.0, not 1.1:** the flight database changes its schema with this release. Kite
+    writes one backup next to it before migrating (`flights.pre-migration-backup.db`) — but the
+    migrated database cannot be opened by Kite 1.0 any more, so there is no way back except that
+    backup. A step that closes the door behind you is a major version.
 
     **Highlights**
 
@@ -103,7 +108,7 @@ inside the box of the feature release they belong to, so the notes for one relea
         their app store instead.
 
         **Patch releases only.** A new choice under Settings → Updates keeps you on the bug-fix
-        line of the version you run: 1.1.0 is told about 1.1.1, never about 1.2.0. The default stays
+        line of the version you run: 2.0.0 is told about 2.0.1, never about 2.1.0. The default stays
         *Stable releases*. [#162]
 
     **Added**
@@ -174,7 +179,7 @@ inside the box of the feature release they belong to, so the notes for one relea
       app bundle or portable executable) and restarts Kite; the release notes are shown in the
       dialog. [#162]
     - **Patch releases only** — update-check channel that offers bug-fix releases of the running
-      version only (1.1.0 → 1.1.1, never 1.2.0). [#162]
+      version only (2.0.0 → 2.0.1, never 2.1.0). [#162]
 
     **Removed**
 
