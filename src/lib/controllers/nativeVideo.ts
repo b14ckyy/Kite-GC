@@ -55,6 +55,12 @@ const MAX_SURFACES = 2;
  *  list that contains it (see `ackedKeys`) — so a hole never opens over a layer that is not there. */
 export const activeNativeSurfaces = writable<Set<NativeSurfaceId>>(new Set());
 
+/** The surfaces whose hole is CUT right now — armed AND, for a resting-position surface, standing
+ *  still (see `boxSettled`). A frame that keeps its own ground opaque until the picture can show
+ *  (the tablet's floating window) switches on this, not on `activeNativeSurfaces`: between the ack
+ *  and the end of the slide the layer is armed but nothing is transparent yet. */
+export const openNativeSurfaces = writable<Set<NativeSurfaceId>>(new Set());
+
 /** Live geometry of the active hole for the Debug Monitor: how far the visible rect was
  *  clipped on each side (viewport px), the radius read from the surface's CSS, and which
  *  corner-cut flags fired — the numbers behind a square-corner complaint. */
@@ -96,9 +102,25 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
       .join(' ');
 }
 
+/** A surface that ANIMATES into place (the phone's docked window sliding in from behind the widget
+ *  column) tells the router where it will come to REST: the native layer is positioned and shown
+ *  there once, before the slide, and the hole is cut in one step when the frame has arrived (and
+ *  closed in one step as it leaves — see `boxSettled`). Without this the frame's box was sent on
+ *  every frame of the slide: a rect + IPC round trip per frame, the layer chasing the DOM, each
+ *  move of the Android SurfaceView re-cutting the window's transparent region. Return null while
+ *  the rest position is not known; the live box is used then. */
+export interface NativeSurfaceSpec {
+  id: NativeSurfaceId;
+  rest?: (el: HTMLElement) => DOMRect | null;
+}
+
+const rests = new Map<HTMLElement, (el: HTMLElement) => DOMRect | null>();
+
 /** Svelte action: register `el` as a native-video surface candidate while it is mounted.
  *  Mount it only in the branch that would show the video (mirrors the MJPEG conditions). */
-export function nativeSurface(el: HTMLElement, id: NativeSurfaceId): { destroy(): void } {
+export function nativeSurface(el: HTMLElement, spec: NativeSurfaceId | NativeSurfaceSpec): { destroy(): void } {
+  const id = typeof spec === 'string' ? spec : spec.id;
+  if (typeof spec !== 'string' && spec.rest) rests.set(el, spec.rest);
   let set = regs.get(id);
   if (!set) {
     set = new Set();
@@ -110,6 +132,7 @@ export function nativeSurface(el: HTMLElement, id: NativeSurfaceId): { destroy()
     destroy() {
       if (import.meta.env.DEV) console.debug(`[nv] destroy ${id} (left=${(regs.get(id)?.size ?? 1) - 1})`);
       regs.get(id)?.delete(el);
+      rests.delete(el);
     },
   };
 }
@@ -132,6 +155,7 @@ export function stopNativeSurfaceRouter(): void {
   clearClips();
   removeGround();
   activeNativeSurfaces.set(new Set());
+  openNativeSurfaces.set(new Set());
   ackedKeys = new Set();
 }
 
@@ -140,10 +164,34 @@ export function stopNativeSurfaceRouter(): void {
 interface LiveSurface {
   id: NativeSurfaceId;
   el: HTMLElement;
-  /** The surface's own box. */
+  /** The box the native layer is laid out in: the surface's rest position if it declares one
+   *  (NativeSurfaceSpec.rest), else its own box. */
   rect: DOMRect;
-  /** What is left of it after every clipping ancestor — the hole, and the sink's clip box. */
+  /** What is left of `rect` after every clipping ancestor — the sink's clip box. */
   vis: DOMRect;
+  /** Where the DOM is actually uncovering the layer right now: the visible part of the element's
+   *  LIVE box within `vis`. Null while the element is off screen (a frame still sliding in) — the
+   *  layer is armed, nothing is transparent yet. */
+  hole: DOMRect | null;
+  /** The element's live box — a hole edge on it is a real corner, any other edge a cut. */
+  box: DOMRect;
+}
+
+/** The element's box as of the previous tick — unchanged (within half a pixel) means at rest. */
+const lastBoxes = new WeakMap<HTMLElement, DOMRect>();
+function boxSettled(el: HTMLElement, box: DOMRect): boolean {
+  const prev = lastBoxes.get(el);
+  lastBoxes.set(el, box);
+  return !!prev && Math.abs(prev.left - box.left) < 0.5 && Math.abs(prev.top - box.top) < 0.5 &&
+    Math.abs(prev.width - box.width) < 0.5 && Math.abs(prev.height - box.height) < 0.5;
+}
+
+function intersectRect(a: DOMRect, b: DOMRect): DOMRect | null {
+  const x1 = Math.max(a.left, b.left);
+  const y1 = Math.max(a.top, b.top);
+  const x2 = Math.min(a.right, b.right);
+  const y2 = Math.min(a.bottom, b.bottom);
+  return x2 - x1 > 0.5 && y2 - y1 > 0.5 ? new DOMRect(x1, y1, x2 - x1, y2 - y1) : null;
 }
 
 /** Every registered surface that has an on-screen box, highest priority first and capped at what
@@ -156,11 +204,20 @@ function visibleSurfaces(): LiveSurface[] {
     if (!els) continue;
     for (const el of els) {
       if (!el.isConnected) continue;
-      const rect = el.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) continue;
+      const box = el.getBoundingClientRect();
+      if (box.width <= 0 || box.height <= 0) continue;
+      const rest = rests.get(el)?.(el);
+      const rect = rest ?? box;
       const vis = visibleRect(el, rect, id);
       if (!vis) continue;
-      out.push({ id, el, rect, vis });
+      // A resting-position surface gets its hole only while its frame stands still: the hole opens in
+      // ONE step once the slide has ended and closes in one step as the next slide begins. The hole
+      // following the frame — a new mask on every frame of the slide — re-rasterised the tiles under
+      // the mask each time, and on a static map that was a black map for a frame, ten times per
+      // slide (Sony, 2026-09-13: 10–11 flashes per animated mask, 0 per single change).
+      const settled = !rest || boxSettled(el, box);
+      const liveVis = rest ? (settled ? visibleRect(el, box, id) : null) : vis;
+      out.push({ id, el, rect, vis, hole: liveVis ? intersectRect(liveVis, vis) : null, box });
       break;
     }
     if (out.length >= MAX_SURFACES) break;
@@ -351,19 +408,22 @@ function tick(): void {
     if (!active.has(s.id)) continue;
     const p = payload[i];
     // Clip with the rect the NATIVE layer actually got (device-pixel-snapped): a hole a fraction
-    // wider than the native layer exposes a hairline of whatever is behind it.
-    const snapped = new DOMRect(p.cx / dpr, p.cy / dpr, p.cw / dpr, p.ch / dpr);
+    // wider than the native layer exposes a hairline of whatever is behind it. And never wider than
+    // what the DOM uncovers (`hole`): a frame sliding over a resting layer reveals it bit by bit.
+    const native = new DOMRect(p.cx / dpr, p.cy / dpr, p.cw / dpr, p.ch / dpr);
+    const snapped = s.hole ? intersectRect(native, s.hole) : null;
+    if (!snapped) continue;
     // The surface's corner rounding, in viewport px (the hole div declares it in CSS; the chrome
     // layer may be scaled by --ui-scale). The hole is cut with these corners rounded, so the layers
     // behind keep painting the corner caps over the native layer's square corners — the frame looks
     // exactly like the DOM-rendered video did. A corner produced by scroll-CLIPPING is not a real
     // corner: the video slides under the container edge there, so that edge stays square.
-    const surfScale = s.el.offsetWidth ? s.rect.width / s.el.offsetWidth : 1;
+    const surfScale = s.el.offsetWidth ? s.box.width / s.el.offsetWidth : 1;
     const radius = (parseFloat(getComputedStyle(s.el).borderTopLeftRadius) || 0) * surfScale;
-    const cutTop = s.vis.top > s.rect.top + 0.5;
-    const cutLeft = s.vis.left > s.rect.left + 0.5;
-    const cutRight = s.vis.right < s.rect.right - 0.5;
-    const cutBottom = s.vis.bottom < s.rect.bottom - 0.5;
+    const cutTop = snapped.top > s.box.top + 0.5;
+    const cutLeft = snapped.left > s.box.left + 0.5;
+    const cutRight = snapped.right < s.box.right - 0.5;
+    const cutBottom = snapped.bottom < s.box.bottom - 0.5;
     holes.push({
       id: s.id,
       rect: snapped,
@@ -380,13 +440,15 @@ function tick(): void {
         id: s.id,
         radius: Math.round(radius * 100) / 100,
         cut: [cutTop && 'T', cutLeft && 'L', cutRight && 'R', cutBottom && 'B'].filter(Boolean).join('') || '—',
-        clip: `${f(s.vis.left - s.rect.left)}/${f(s.vis.top - s.rect.top)}/${f(s.rect.right - s.vis.right)}/${f(s.rect.bottom - s.vis.bottom)}`,
+        clip: `${f(snapped.left - s.box.left)}/${f(snapped.top - s.box.top)}/${f(s.box.right - snapped.right)}/${f(s.box.bottom - snapped.bottom)}`,
         by: lastClipBy,
       });
     }
   }
   // Topmost surface first (DOM stacking is the reverse of the priority order): the one that owns
   // the shared pixels keeps its hole whole, the ones below it are trimmed around it.
+  const open = new Set(holes.map((h) => h.id));
+  if (!setsEqual(get(openNativeSurfaces), open)) openNativeSurfaces.set(open);
   applyClips(disjoint([...holes].reverse()));
   if (import.meta.env.DEV) {
     const prev = get(nativeHoleDebug);
@@ -558,32 +620,63 @@ function holeRing(hole: DOMRect, radii: HoleRadii, b: DOMRect, sx: number, sy: n
  *  stacking is the reverse of the surface priority (the widget dock paints over the floating window,
  *  which paints over the fullscreen swap), so "above me" is "later in PRIORITY". A surface must
  *  never be cut by its OWN hole — its overlays and its bezel live exactly there. */
-function holesFor(el: HTMLElement, holes: Hole[]): Hole[] {
-  const own = el.dataset.nvClip as NativeSurfaceId | undefined;
-  const rank = own ? PRIORITY.indexOf(own) : -1;
+function holesFor(own: string | undefined, holes: Hole[]): Hole[] {
+  const rank = own ? PRIORITY.indexOf(own as NativeSurfaceId) : -1;
   if (rank < 0) return holes;
   return holes.filter((h) => PRIORITY.indexOf(h.id) > rank);
 }
 
-function applyClips(holes: Hole[]): void {
-  if (holes.length === 0) {
-    clearClips();
-    return;
+/** The page ground's holes: the surface holes — and, for a hole INSIDE an opaque clip target
+ *  (`data-nv-opaque`: the map layer, whose container paints a solid background over its box), the
+ *  target's whole box instead of the hole. The ground is never visible under such a target, so
+ *  cutting the box out of it changes nothing on screen, and the map's own cut reaches through to
+ *  the native layer; the ground's mask then stays put while the docked window's hole slides across
+ *  the map. Two full-screen masks changing in the same frame were what still blanked the map for a
+ *  few frames when the window opened in heading-up (Sony, 2026-09-12). A hole reaching past the
+ *  box keeps its own cut — the fullscreen swap's does, the map is a small frame then. */
+function groundHoles(holes: Hole[]): Hole[] {
+  if (holes.length === 0) return holes;
+  const covers: DOMRect[] = [];
+  for (const el of document.querySelectorAll<HTMLElement>('[data-nv-opaque]')) {
+    const b = el.getBoundingClientRect();
+    if (b.width > 0 && b.height > 0) covers.push(b);
   }
+  const inside = (h: DOMRect, b: DOMRect) =>
+    h.left >= b.left - 0.5 && h.top >= b.top - 0.5 && h.right <= b.right + 0.5 && h.bottom <= b.bottom + 0.5;
+  const boxes = covers.filter((b) => holes.some((h) => inside(h.rect, b)));
+  if (boxes.length === 0) return holes;
+  const own = holes.filter((h) => !boxes.some((b) => inside(h.rect, b)));
+  const square = { tl: 0, tr: 0, bl: 0, br: 0 };
+  return disjoint([...own, ...boxes.map((rect) => ({ id: 'main' as NativeSurfaceId, rect, radii: square }))]);
+}
+
+/** On Chromium a `path()` clip is a mask on the layer's render surface. Adding or removing a mask
+ *  rebuilds the compositor layers underneath (every map tile rasterises again), and any rebuild that
+ *  lands in the frame of a dock / park — the frame mounting, the native layer arming, the widgets'
+ *  clips changing — blanked the map for a few frames on the phone, in every variant tried (2026-09-12/13:
+ *  clearing at once, after a grace period, keeping the map's mask only). A mask that merely CHANGES
+ *  costs nothing visible, so while the router runs every target keeps one: between holes an "idle"
+ *  ring with a one-pixel hole outside the element's box. The price is one render pass per masked
+ *  layer (~1–2 ms a frame on the Sony); the rebuild happens once, at sink start and stop. A plain
+ *  rectangle will not do for the ring: Chromium turns that back into a rect clip, i.e. no mask. */
+function idlePath(el: HTMLElement): string {
+  const m = OUTER_MARGIN_PX;
+  const w = el.offsetWidth;
+  const h = el.offsetHeight;
+  return `path('M${-m} ${-m}H${w + m}V${h + m}H${-m}Z M${1 - m} ${1 - m}h1v1h-1Z')`;
+}
+
+function applyClips(holes: Hole[]): void {
   const targets = new Set<HTMLElement>();
   for (const el of document.querySelectorAll<HTMLElement>('[data-nv-clip]')) targets.add(el);
-  targets.add(ensureGround());
+  const ground = ensureGround();
+  targets.add(ground);
   for (const el of targets) {
-    const mine = holesFor(el, holes);
-    const path = mine.length > 0 ? holePath(el, mine) : null;
-    if (path) {
-      if (clipped.get(el) !== path) {
-        el.style.clipPath = path;
-        clipped.set(el, path);
-      }
-    } else if (clipped.has(el)) {
-      el.style.clipPath = '';
-      clipped.delete(el);
+    const mine = el === ground ? groundHoles(holes) : holesFor(el.dataset.nvClip, holes);
+    const path = (mine.length > 0 ? holePath(el, mine) : null) ?? idlePath(el);
+    if (clipped.get(el) !== path) {
+      el.style.clipPath = path;
+      clipped.set(el, path);
     }
   }
   // Layers that left the target set (unmounted branch, panel closed) keep no stale clip.
@@ -593,11 +686,76 @@ function applyClips(holes: Hole[]): void {
       clipped.delete(el);
     }
   }
+  applyInsets(holes);
 }
 
 function clearClips(): void {
   for (const el of clipped.keys()) el.style.clipPath = '';
   clipped.clear();
+  for (const el of insetClipped.keys()) el.style.clipPath = '';
+  insetClipped.clear();
+}
+
+/** Elements carrying `data-nv-inset` → the applied `inset()` clip (written on change only). */
+const insetClipped = new Map<HTMLElement, string>();
+
+/** `data-nv-inset` elements are cut with a RECTANGULAR clip instead of a mask: the band of the
+ *  element under a hole — right, left, bottom or top, the smallest one that covers the whole overlap
+ *  — is removed with `inset()`. A plain clip needs no render surface, so the backdrop-filter glass
+ *  of the widgets INSIDE keeps blurring the map behind them; under a mask (`data-nv-clip`) that
+ *  glass would only see the masked subtree, i.e. nothing. The price: a hole that ends inside the
+ *  element cuts the whole band, not an L — the phone's bottom widget tiles, the one user, are never
+ *  taller than the docked video window they meet, so the band is exact there. The value means what
+ *  it means on `data-nv-clip` (only the holes of surfaces painted above the element). */
+function applyInsets(holes: Hole[]): void {
+  for (const el of document.querySelectorAll<HTMLElement>('[data-nv-inset]')) {
+    // A clip that cuts nothing while no hole touches the element — not "no clip": adding the first
+    // clip when the window arrives is a layer change (measured as a frame of blank map), changing
+    // an existing one is not.
+    const clip = insetPath(el, holesFor(el.dataset.nvInset, holes)) ?? 'inset(0px)';
+    if (insetClipped.get(el) !== clip) {
+      el.style.clipPath = clip;
+      insetClipped.set(el, clip);
+    }
+  }
+  for (const el of [...insetClipped.keys()]) {
+    if (!el.isConnected) insetClipped.delete(el);
+  }
+}
+
+function insetPath(el: HTMLElement, holes: Hole[]): string | null {
+  if (holes.length === 0) return null;
+  const b = el.getBoundingClientRect();
+  if (b.width <= 0 || b.height <= 0) return null;
+  // The bounding box of every overlap (viewport px) — one band must cover them all.
+  let x1 = Infinity;
+  let y1 = Infinity;
+  let x2 = -Infinity;
+  let y2 = -Infinity;
+  for (const { rect: h } of holes) {
+    const ix1 = Math.max(b.left, h.left);
+    const iy1 = Math.max(b.top, h.top);
+    const ix2 = Math.min(b.right, h.right);
+    const iy2 = Math.min(b.bottom, h.bottom);
+    if (ix2 - ix1 < 0.5 || iy2 - iy1 < 0.5) continue;
+    x1 = Math.min(x1, ix1);
+    y1 = Math.min(y1, iy1);
+    x2 = Math.max(x2, ix2);
+    y2 = Math.max(y2, iy2);
+  }
+  if (x1 === Infinity) return null;
+  // inset(top right bottom left) in the element's own layout px (it may sit in the scaled chrome).
+  const sx = b.width / (el.offsetWidth || b.width);
+  const sy = b.height / (el.offsetHeight || b.height);
+  const f = (v: number) => v.toFixed(2);
+  const bands = [
+    { area: (b.right - x1) * b.height, css: `0 ${f((b.right - x1) / sx)}px 0 0` },
+    { area: (x2 - b.left) * b.height, css: `0 0 0 ${f((x2 - b.left) / sx)}px` },
+    { area: (y2 - b.top) * b.width, css: `${f((y2 - b.top) / sy)}px 0 0 0` },
+    { area: (b.bottom - y1) * b.width, css: `0 0 ${f((b.bottom - y1) / sy)}px 0` },
+  ];
+  bands.sort((p, q) => p.area - q.area);
+  return `inset(${bands[0].css})`;
 }
 
 /** Move the page ground off `body` onto a clip-able fixed div (see module docs). */

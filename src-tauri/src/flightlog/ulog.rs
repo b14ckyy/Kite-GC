@@ -1147,6 +1147,7 @@ where
         fc_version: meta.fw_version.clone(),
         board_id: String::new(),
         platform_type: meta.platform_type,
+        fc_uid: None,
         protocol: "ULOG".into(),
         start_lat,
         start_lon,

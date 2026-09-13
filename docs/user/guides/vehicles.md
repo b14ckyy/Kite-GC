@@ -9,7 +9,8 @@ logbook toolbar.
 
 Vehicles are grouped by **type** and can be **searched** (by name, craft name, model, type, notes or
 flight controller). Pick one to open its build sheet; the toolbar also creates a new vehicle and
-imports one from a file.
+imports one from a file. While connected over INAV or MAVLink, the
+[UAV Info panel](telemetry-and-display.md#uav-info-panel) can also save the connected craft here in one click.
 
 ![The vehicle library list](../assets/guides/vehicles/vehicle-manager.png)
 /// caption
@@ -27,7 +28,11 @@ Each vehicle is a structured record you can fill in as much (or as little) as yo
 - **Propulsion** — motors, propellers, ESC, and a recommended battery (cells / capacity).
 - **Radio, FPV & datalink** — receiver, video transmitter, camera, gimbal camera, datalink.
 - **Sensors** — checkboxes for GPS, RTK, compass, airspeed, rangefinder and optical-flow.
-- **Flight controller** — model, manufacturer, firmware and version, and whether blackbox is available.
+- **Flight controller** — model, manufacturer, firmware and version, whether blackbox is available, and
+  the **FC hardware ID** (filled in automatically when the vehicle is created from the connected craft
+  via the UAV Info panel). Flights still link by craft name, so swapping the flight controller keeps the
+  vehicle — paste the new ID from the UAV Info panel here and its **View in vehicle library** button
+  finds the entry again.
 
 ![A vehicle build sheet with stats and linked flights](../assets/guides/vehicles/vehicle-manager_details.png)
 /// caption

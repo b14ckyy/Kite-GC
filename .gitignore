@@ -99,3 +99,10 @@ src-tauri/binaries/
 # =============================================================================
 __pycache__/
 *.pyc
+
+# =============================================================================
+# Generated i18n pseudo-locale (tools/i18n-key-paths.py) — every string is its
+# own key path, for translators. Local only: index.ts must not register it in
+# a commit either.
+# =============================================================================
+src/lib/i18n/locales/xx.json

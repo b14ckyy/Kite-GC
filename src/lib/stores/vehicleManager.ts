@@ -27,3 +27,7 @@ export const vehicleManagerCreateCraft = writable<string | null>(null);
 
 /** Search query for the vehicle list (name / craft name / model / type / notes). */
 export const vehicleSearchQuery = writable<string>('');
+
+/** Bumped when something outside the Manager writes the library (the UAV Info panel's "Save to
+ *  vehicle library"), so an open Manager reloads its list. */
+export const vehicleLibraryChanged = writable<number>(0);

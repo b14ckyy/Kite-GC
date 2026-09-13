@@ -152,12 +152,16 @@
     radarRefAltM = null,
     radarReference = null,
     centerInsetRight = 0,
+    centerInsetBottom = 0,
   }: {
     /** Width (css px) of an overlay covering the map's RIGHT edge (the phone's widget column): the
      *  corner controls move left by it and the camera's projection is shifted (`frustum.xOffset`,
      *  see applyCenterInset) so whatever the camera looks at — the craft in follow / orbit / FPV —
      *  sits in the middle of the UNCOVERED area, not of the screen (PHONE_UI.md D16). */
     centerInsetRight?: number;
+    /** Height (css px) of an overlay on the map's BOTTOM edge (the phone's bottom widget slots,
+     *  PHONE_BOTTOM_WIDGETS.md B7): the projection slides up by half of it (`frustum.yOffset`). */
+    centerInsetBottom?: number;
     active?: boolean;
     playbackTrack?: TelemetryRecord[];
     playbackPoint?: TelemetryRecord | null;
@@ -1017,8 +1021,10 @@
     const f = viewer.camera.frustum;
     if (!(f instanceof Cesium.PerspectiveFrustum)) return;
     const w = viewer.canvas.clientWidth;
-    if (!w || centerInsetRight <= 0) {
+    const h = viewer.canvas.clientHeight;
+    if (!w || !h || (centerInsetRight <= 0 && centerInsetBottom <= 0)) {
       if (f.xOffset !== 0) f.xOffset = 0;
+      if (f.yOffset !== 0) f.yOffset = 0;
       return;
     }
     const aspect = f.aspectRatio;
@@ -1026,11 +1032,15 @@
     let fovy: number | undefined;
     try { fovy = f.fovy; } catch { return; }
     if (fovy === undefined || !isFinite(fovy) || fovy <= 0) return;
-    const right = aspect * f.near * Math.tan(fovy / 2);
+    const top = f.near * Math.tan(fovy / 2);
+    const right = aspect * top;
     f.xOffset = (right * centerInsetRight) / w;
+    // The bottom inset is the mirror image: the window moves DOWN, the scene slides up by half.
+    f.yOffset = -(top * centerInsetBottom) / h;
   }
   $effect(() => {
     void centerInsetRight;
+    void centerInsetBottom;
     viewer?.scene.requestRender(); // a changed inset must re-project even while nothing else moves
   });
 
@@ -1176,7 +1186,6 @@
     try {
       viewer = new Cesium.Viewer(cesiumContainer, viewerOptions);
       applyRenderResolution();
-      attachCameraLight();
     } catch (e) {
       const detail = e instanceof Error ? `${e.name}: ${e.message}\n${e.stack ?? ''}` : String(e);
       log3d('warn', `CesiumWidget construction failed — 3D unavailable: ${detail}`);
@@ -1691,6 +1700,7 @@
         // FF peers keep REPLACE: their state colour (dark blue / grey) multiplied into the arrow's red and
         // green nav tips would turn those near-black.
         colorBlendMode: modelClass === 'ff' ? Cesium.ColorBlendMode.REPLACE : Cesium.ColorBlendMode.HIGHLIGHT,
+        customShader: modelKeyLightShader,
         heightReference: Cesium.HeightReference.NONE,
       },
       // Floating info label under the model: callsign + altitude, slightly transparent.
@@ -2925,6 +2935,8 @@
   /** Key-light offset from the view axis, in camera-frame units (view direction = 1). */
   const KEY_LIGHT_DOWN = 0.7;
   const KEY_LIGHT_SIDE = 0.4;
+  /** Share of its colour a face turned fully away from the key light keeps (the ambient floor). */
+  const KEY_LIGHT_AMBIENT = 0.3;
   /** Models are lit from the camera, not by the sun: Cesium lights models from the ephemeris sun at
    *  the scene clock (the flight time) whatever the globe's lighting setting, so an evening flight put
    *  the UAV model in shadow whatever its colour.
@@ -2933,28 +2945,33 @@
    *  exactly along the view direction lights every face that points at the camera identically, so a
    *  top-down view of a plane (all upper faces parallel) shows no relief at all. Tilted down and to
    *  the right in the camera frame (light from above-left, as in a studio setup) the rounded and
-   *  turned-away faces darken and the shape reads from every angle. */
-  function attachCameraLight() {
-    if (!viewer) return;
-    const light = new Cesium.DirectionalLight({ direction: new Cesium.Cartesian3(0, 0, -1) });
-    viewer.scene.light = light;
-    const down = new Cesium.Cartesian3();
-    const side = new Cesium.Cartesian3();
-    const dir = new Cesium.Cartesian3();
-    viewer.scene.preRender.addEventListener(() => {
-      if (!viewer) return;
-      const cam = viewer.scene.camera;
-      Cesium.Cartesian3.multiplyByScalar(cam.upWC, -KEY_LIGHT_DOWN, down);
-      Cesium.Cartesian3.multiplyByScalar(cam.rightWC, KEY_LIGHT_SIDE, side);
-      Cesium.Cartesian3.add(cam.directionWC, down, dir);
-      Cesium.Cartesian3.add(dir, side, dir);
-      Cesium.Cartesian3.normalize(dir, light.direction);
+   *  turned-away faces darken and the shape reads from every angle.
+   *
+   *  It is a CustomShader on the model graphics, NOT `scene.light`: Cesium has one scene light and the
+   *  globe's day/night shading and the sky atmosphere read it too — a camera light there kept the whole
+   *  planet in daylight (1.0.0: blue sky and bright terrain at night). Unlit model + own Lambert term;
+   *  the colour blend (altitude tint of the radar contacts) runs after it in Cesium's pipeline. In eye
+   *  coordinates the camera frame is fixed (+x right, +y up, −z ahead), so the direction is a constant. */
+  const modelKeyLightShader = (() => {
+    // Direction TOWARDS the light: the light travels along (side, −down, −1) with the view.
+    const len = Math.hypot(KEY_LIGHT_SIDE, KEY_LIGHT_DOWN, 1);
+    const g = (n: number) => n.toFixed(4);
+    const toLight = `vec3(${g(-KEY_LIGHT_SIDE / len)}, ${g(KEY_LIGHT_DOWN / len)}, ${g(1 / len)})`;
+    return new Cesium.CustomShader({
+      lightingModel: Cesium.LightingModel.UNLIT,
+      fragmentShaderText: `
+        void fragmentMain(FragmentInput fsInput, inout czm_modelMaterial material) {
+          float lit = max(dot(normalize(fsInput.attributes.normalEC), ${toLight}), 0.0);
+          material.diffuse *= ${g(KEY_LIGHT_AMBIENT)} + ${g(1 - KEY_LIGHT_AMBIENT)} * lit;
+        }
+      `,
     });
-  }
+  })();
 
   function uavModelGraphics(tint: Cesium.Color, uri: string) {
     return {
       uri,
+      customShader: modelKeyLightShader,
       minimumPixelSize: 146, // doubled for the slimmer low-poly set — reads at a distance again
       maximumScale: 4000,
       scale: 5.2,
@@ -4932,13 +4949,13 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    backdrop-filter: blur(8px);
+    backdrop-filter: var(--glass-blur, blur(6px));
     transition: background 0.2s, border-color 0.2s, color 0.2s;
     padding: 0;
   }
 
   .map-control-btn:hover {
-    background: rgba(55, 168, 219, 0.25);
+    background: var(--btn-active-bg);
     border-color: #37a8db;
   }
 
@@ -4955,6 +4972,11 @@
   :global(html.is-phone) .map-controls-corner {
     bottom: calc(8px + var(--safe-bottom, 0px));
     transition: right 0.3s ease;
+  }
+  /* In the floating frame (+page's .layer-map.in-frame): no zoom buttons — wheel, touchpad and
+     pinch cover it, and four buttons did not fit a small frame (see Map.svelte). */
+  :global(.layer-map.in-frame) .map-zoom-btn {
+    display: none;
   }
 
   .map-mode-btn {
@@ -4992,7 +5014,7 @@
   }
 
   .map-cam-btn:hover {
-    background: rgba(55, 168, 219, 0.25) !important;
+    background: var(--btn-active-bg) !important;
     border-color: #37a8db !important;
     color: #37a8db !important;
   }

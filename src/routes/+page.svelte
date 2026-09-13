@@ -8,7 +8,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { open, save } from "@tauri-apps/plugin-dialog";
-  import { connection, availablePorts, bleDevices } from "$lib/stores/connection";
+  import { connection, availablePorts, bleDevices, defaultNetPort } from "$lib/stores/connection";
   import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
   import { isAndroid, isMobile, isTablet, isPhone as isPhoneDevice, hasSerialPorts, logPlayerWidth } from "$lib/platform";
@@ -78,7 +78,7 @@
   import { activeWpNumber, replayWpTotal } from '$lib/stores/navStatus';
   import { missionManagerOpen, missionManagerSelectedId, requestOpenFlightId, requestOpenMissionId } from '$lib/stores/missionManager';
   import { batteryManagerOpen, batteryManagerCreateSerial, normalizeSerial } from '$lib/stores/batteryManager';
-  import { vehicleManagerOpen, vehicleManagerCreateCraft } from '$lib/stores/vehicleManager';
+  import { vehicleManagerOpen, vehicleManagerCreateCraft, vehicleManagerSelectedId } from '$lib/stores/vehicleManager';
   import type { BlackboxImportStatus } from '$lib/stores/flightlog';
   import { missionDbForFlight, flightLoggedWpCount, missionDbSave, flightLinkMission, missionDbGeocode, flightSetBatterySerial, updateFlightNotes, getFlight, flightlogCommitPending, flightlogDiscardPending, flightlogContinuePending, scanOrphanSessions, recoverDiscard, recoverSaveIncomplete, recoverContinue, batteryDbFindBySerial, batteryDbAddUsage, vehicleDbFindByCraftName, blackboxDecoderAvailable, downloadBlackboxDecode, hiresInfo, hiresParse, hiresSample, hiresDrop, hiresCleanup, scratchDir, scratchClear } from '$lib/stores/flightlog';
   import EndFlightDialog from "$lib/components/logbook/EndFlightDialog.svelte";
@@ -100,10 +100,12 @@
   import FloatingVideoWindow from "$lib/components/video/FloatingVideoWindow.svelte";
   import { startDetachedVideo, stopDetachedVideo } from "$lib/controllers/detachedVideo";
   import PhoneVideoDock from "$lib/components/phone/PhoneVideoDock.svelte";
+  import PhoneBottomBar from "$lib/components/phone/PhoneBottomBar.svelte";
+  import PhoneDragGhost from "$lib/components/phone/PhoneDragGhost.svelte";
   import { setNativeRightBound } from "$lib/controllers/nativeVideo";
   import { doubleTap, mouseDoubleClick } from "$lib/helpers/doubleTap";
-  import { startFloatResize } from "$lib/helpers/floatWindowGestures";
-  import { initVideo, videoState, videoStream, bindVideoEl, setMapLocation, reportMjpegError, setVideoWidgetActive, floatFrameRect, FLOAT_BEZEL_PX, FLOAT_MARGIN_PX, FLOAT_BTN_PX, FLOAT_BTN_GAP_PX } from "$lib/stores/video";
+  import { startFloatMove, startFloatResize } from "$lib/helpers/floatWindowGestures";
+  import { initVideo, videoState, videoStream, bindVideoEl, setMapLocation, reportMjpegError, setVideoWidgetActive, floatFrameRect, togglePhoneDockCompact, PHONE_DOCK_COMPACT, FLOAT_BEZEL_PX, FLOAT_MARGIN_PX, FLOAT_BTN_PX, FLOAT_BTN_GAP_PX } from "$lib/stores/video";
   import { canvasSink, mjpegSink } from "$lib/controllers/mjpegSink";
   import { nativeSurface, activeNativeSurfaces } from "$lib/controllers/nativeVideo";
   import { lowPowerActive } from "$lib/stores/lowPower";
@@ -251,12 +253,12 @@
   // Phone portrait: too narrow to fit the bottom HUD tiles in one row without clipping, so the dock
   // wraps them onto two rows (see the sizing below + the flex-wrap rule in WidgetPanel). Tablets and
   // desktop keep the single row. `winW`/`isMobile` are reactive so a rotate re-evaluates this.
-  const isPhone = $derived(isMobile && winW <= 600);
-  const bottomRows = $derived(isPhone ? 2 : 1);
+  const isPhonePortrait = $derived(isMobile && winW <= 600);
+  const bottomRows = $derived(isPhonePortrait ? 2 : 1);
   // Phone gets a taller dock (room for two HUD rows); otherwise the layout store override or default.
   const gridBottomHeight = $derived(
     $layout.bottomDock.sizeOverride ??
-      (isPhone ? 'clamp(230px, 40vh, 380px)' : GRID_DEFAULTS.bottomDockHeight)
+      (isPhonePortrait ? 'clamp(230px, 40vh, 380px)' : GRID_DEFAULTS.bottomDockHeight)
   );
 
   // Map-swap: the full-size video sink shown in the map zone when videoPrimary.
@@ -276,9 +278,11 @@
   // widget dock, but once that cap would make them shorter than the nav rail, they may overlay the
   // dock instead — the rail already scrolls past it, so the panel just follows. Logical px
   // throughout, so the switch adapts to the UI scale. The 6px keeps the rail's visual gap above
-  // the status bar instead of sitting flush on it.
+  // the status bar instead of sitting flush on it. `toolbarH` is the live bar height (53 on the
+  // desktop, taller on the iPad where the bar carries the status-bar inset), so the tablet uses the
+  // same rule (PanelShell's tablet block reads the reserve too).
   const panelBottomReserve = $derived(
-    winH / uiScale - 53 - bottomDockH - 24 - 12 < NAV_RAIL_FULL_HEIGHT ? '6px' : gridBottomHeight
+    winH / uiScale - toolbarH - bottomDockH - 24 - 12 < NAV_RAIL_FULL_HEIGHT ? '6px' : gridBottomHeight
   );
 
   // Floating-window rect — ONE computation (`floatFrameRect`, store) for the window itself (it gets
@@ -290,13 +294,15 @@
   const logicalH = $derived(winH / uiScale);
   const floatFrame = $derived(floatFrameRect($videoState, logicalW, logicalH));
   // Phone (PHONE_VIDEO.md D2): the DOCKED frame instead — the stream aspect fitted into 40 % of the
-  // map-area height / 50 % of its width, whichever binds; bottom-right of the map area, left of the
-  // corner-control column (8 + 38 + 8), bottom-aligned with the chip row (8 px; the safe inset is
-  // 0 on Android, iPhone has no video). Same numbers drive PhoneVideoDock and the in-frame map.
+  // map-area height / 50 % of its width, whichever binds — or 2/3 of that with the frame's corner
+  // toggle (`phoneDockCompact`); bottom-right of the map area, left of the corner-control column
+  // (8 + 38 + 8), bottom-aligned with the chip row (8 px; the safe inset is 0 on Android, iPhone
+  // has no video). Same numbers drive PhoneVideoDock and the in-frame map.
   const phoneMapW = $derived(winW - phonePanelW + phoneShift);
   const dockH = $derived.by(() => {
     const aspect = $videoState.aspect || 16 / 9;
-    return Math.round(Math.min(0.4 * winH, (0.5 * phoneMapW) / aspect));
+    const scale = $videoState.phoneDockCompact ? PHONE_DOCK_COMPACT : 1;
+    return Math.round(Math.min(0.4 * winH, (0.5 * phoneMapW) / aspect) * scale);
   });
   const dockW = $derived(Math.round(dockH * ($videoState.aspect || 16 / 9)));
   const dockLeft = $derived(phoneMapW - 8 - 38 - 8 - dockW);
@@ -330,6 +336,13 @@
   // full-screen layer. In the docked frame / widget tile nothing covers it: a shifted centre put
   // the follow anchor on the frame's left edge (Marc, 2026-09-04).
   const phoneMapInset = $derived(phoneUi && !mapInFrame ? phonePanelW - phoneShift : 0);
+  // …and for the bottom widget slots (PHONE_BOTTOM_WIDGETS.md B7): the tallest filled tile plus its
+  // 8 px edge margin, published by PhoneBottomBar; 0 while every slot is empty.
+  let phoneBarH = $state(0);
+  /** The open nav rail's right edge on the phone: 12 px offset + 42 px buttons (NavRail.svelte); the
+   *  bottom tiles keep clear of it (PHONE_BOTTOM_WIDGETS.md B4). */
+  const NAV_RAIL_RIGHT_PX = 54;
+  const phoneMapInsetBottom = $derived(phoneUi && !mapInFrame && phoneBarH > 0 ? phoneBarH + 8 : 0);
   // Full-screen map box, rounded to whole px (issue #52): the CSS fallback `calc(53px * scale)`
   // lands on fractions at uiScale 1.25/1.5 (66.25px / 79.5px), which is what leaked tile seams —
   // see mapFrameStyle above for the mechanism. The map sliding ≤ half a px under the toolbar edge
@@ -367,10 +380,11 @@
     }
   });
 
-  // The WIDGET mini-map is locked to a clean nav view: 2D + heading-follow, zoom-only (3D/mode buttons
-  // hidden via `miniControls`). The FLOATING map stays fully operational on the desktop; on the phone
-  // the docked frame is a mini map too and takes the same lock (PHONE_VIDEO.md D6). Restore the view
-  // on release.
+  // The WIDGET mini-map is locked to a clean nav view: 2D + follow, zoom-only (3D/mode buttons hidden
+  // via `miniControls`). Heading-up or north-up is the one choice left — a tap on the mini map
+  // toggles it (Map.svelte) and the choice is remembered in the settings. The FLOATING map stays
+  // fully operational on the desktop; on the phone the docked frame is a mini map too and takes the
+  // same lock (PHONE_VIDEO.md D6). Restore the view on release.
   // Only while the map is actually in a frame (mapInFrame includes `status === 'live'`): a stale
   // mapLocation with the video off must not put the FULL map into mini mode (half-size markers).
   const miniMapLocked = $derived(mapInFrame && (mapInWidget || phoneUi));
@@ -385,12 +399,19 @@
         savedMapViewMode = mapViewMode;
         savedMode2d = map2dViewMode;
         mapViewMode = '2d';
-        map2dViewMode = 'heading-follow';
+        map2dViewMode = $settings.miniMapHeadingUp ? 'heading-follow' : 'follow';
       } else if (!lock && miniLockActive) {
         miniLockActive = false;
         mapViewMode = savedMapViewMode;
         map2dViewMode = savedMode2d;
       }
+    });
+  });
+  // The mini map's tap toggle arrives through the binding: remember heading-up vs north-up.
+  $effect(() => {
+    const m = map2dViewMode;
+    untrack(() => {
+      if (miniLockActive && m !== 'free') settings.patch({ miniMapHeadingUp: m === 'heading-follow' });
     });
   });
 
@@ -414,12 +435,20 @@
   let appVersion = $state("...");
   // iOS has no serial/BLE, so the iPad build defaults to Wi-Fi MAVLink (UDP 14550, the MAVLink
   // convention). Desktop keeps its serial/MSP defaults.
-  let selectedTransport = $state<TransportType>(isMobile ? 'udp' : 'serial');
+  const INITIAL_TRANSPORT: TransportType = isMobile ? 'udp' : 'serial';
+  let selectedTransport = $state<TransportType>(INITIAL_TRANSPORT);
   let selectedProtocol = $state<ProtocolType>(isMobile ? 'mavlink' : 'msp');
   let selectedPort = $state("");
   let selectedBaud = $state(115200);
   let tcpHost = $state("192.168.1.1");
-  let tcpPort = $state(isMobile ? 14550 : 5761);
+  /** Port a fresh profile starts on: the MAVLink GCS convention on mobile (Wi-Fi links only),
+   *  INAV SITL's MSP port on the desktop. */
+  const INITIAL_NET_PORT = isMobile ? 14550 : 5761;
+  let tcpPort = $state(INITIAL_NET_PORT);
+  /** Is the port still one Kite filled in (so the protocol / transport selectors may move it), or one
+   *  the pilot typed? Owned here rather than in ConnectionControls so the toolbar and the phone
+   *  popout cannot end up with two different answers. Set from the restored connection below. */
+  let portIsAuto = $state(true);
   let selectedBleDevice = $state("");
   let bleDeviceList = $state<BleDeviceInfo[]>([]);
   let isBleScanning = $state(false);
@@ -878,26 +907,45 @@
   // One geolocation check at app start (refreshes the persisted user location for Night-Mode auto).
   ensureUserLocation();
 
+  /** Protocol the connection bar starts on. Settings → Connection owns the choice: "Last used"
+   *  (the default, and the behaviour Kite has always had) restores the stored protocol, while a
+   *  fixed value wins over that store on every launch. Only a protocol we actually support is
+   *  honoured, with MSP as the fallback: the old form mapped everything that was not MAVLink onto
+   *  MSP, which silently rewrote a stored `telemetry` choice, so a pilot who last connected in
+   *  passive Telemetry mode came back to MSP selected. */
+  function resolveStartupProtocol(s: AppSettings): ProtocolType {
+    const wanted = s.defaultProtocol === 'last' ? s.lastProtocol : s.defaultProtocol;
+    return wanted === 'mavlink' || wanted === 'telemetry' ? wanted : 'msp';
+  }
+
   // Restore persisted settings
   const saved = get(settings);
   selectedPort = saved.lastPort;
   selectedBaud = saved.lastBaud;
-  // Honour any protocol we actually support. The old form mapped everything that was not 'mavlink'
-  // onto 'msp', which silently rewrote a stored 'telemetry' choice: a user who last connected in
-  // passive Telemetry mode came back to MSP selected. MSP stays the fallback for an unrecognised or
-  // missing value, so a fresh install is unchanged.
-  selectedProtocol = (saved.lastProtocol === 'mavlink' || saved.lastProtocol === 'telemetry'
-    ? saved.lastProtocol
-    : 'msp') as ProtocolType;
+  const startupProtocol = resolveStartupProtocol(saved);
+  selectedProtocol = startupProtocol;
   // Restore the full last-used connection path so nothing has to be re-entered. A serial value is only
   // honoured where serial ports exist (iOS has none — a value synced over from a desktop is ignored);
   // TCP/UDP/BLE are valid everywhere.
-  if (saved.lastTransport === 'tcp' || saved.lastTransport === 'udp' || saved.lastTransport === 'ble'
-      || (hasSerialPorts && saved.lastTransport === 'serial')) {
-    selectedTransport = saved.lastTransport;
-  }
+  const startupTransport = saved.lastTransport === 'tcp' || saved.lastTransport === 'udp'
+    || saved.lastTransport === 'ble' || (hasSerialPorts && saved.lastTransport === 'serial')
+    ? saved.lastTransport : INITIAL_TRANSPORT;
+  selectedTransport = startupTransport;
   if (saved.lastHost) tcpHost = saved.lastHost;
-  if (saved.lastTcpPort) tcpPort = saved.lastTcpPort;
+  const storedPort = saved.lastTcpPort || INITIAL_NET_PORT;
+  // Whether the port is Kite's or the pilot's is stored alongside it. A profile written before that
+  // field existed has to be guessed at once, from the stored port against the stored protocol and
+  // transport: equal to the standard port (or a transport that has no port at all) means Kite's.
+  const storedPortDefault = defaultNetPort(saved.lastProtocol, saved.lastTransport);
+  const startupPortIsAuto = saved.lastPortIsAuto
+    ?? (storedPortDefault === undefined || storedPort === storedPortDefault);
+  portIsAuto = startupPortIsAuto;
+  // A Default Protocol that overrides the stored choice has to move the port with it, otherwise
+  // pinning MAVLink after an MSP/TCP session comes up as MAVLink on 5761, which reaches nothing until
+  // the pilot nudges a selector. A port the pilot typed is restored exactly as it was.
+  tcpPort = startupPortIsAuto
+    ? defaultNetPort(startupProtocol, startupTransport) ?? storedPort
+    : storedPort;
   if (saved.lastBleDevice) selectedBleDevice = saved.lastBleDevice;
   navPanelOpen = saved.navPanelOpen;
   // Drop any legacy "-v2" suffix from a persisted tab (the migration scaffolding is gone now).
@@ -2577,7 +2625,7 @@
     isConnecting = true;
     errorMsg = "";
     connection.update((c) => ({ ...c, status: "connecting" }));
-    settings.patch({ lastPort: selectedPort, lastBaud: selectedBaud, lastProtocol: selectedProtocol, lastTransport: selectedTransport, lastHost: tcpHost, lastTcpPort: tcpPort, lastBleDevice: selectedBleDevice, flightLoggingEnabled, flightRecordingEnabled, flightLogDbPath, flightLogRawPath, flightLogRawEnabled, flightLogRawAlways });
+    settings.patch({ lastPort: selectedPort, lastBaud: selectedBaud, lastProtocol: selectedProtocol, lastTransport: selectedTransport, lastHost: tcpHost, lastTcpPort: tcpPort, lastPortIsAuto: portIsAuto, lastBleDevice: selectedBleDevice, flightLoggingEnabled, flightRecordingEnabled, flightLogDbPath, flightLogRawPath, flightLogRawEnabled, flightLogRawAlways });
 
     try {
       await connectFC({
@@ -2648,6 +2696,25 @@
   function patchPhoneWidgets(next: PhoneWidgetsConfig) {
     if (next !== $settings.phoneWidgets) settings.patch({ phoneWidgets: next });
   }
+  /** A drop in a column cell (from the column or out of a bottom slot); refused when the column has
+   *  no room for a widget coming back from a slot. */
+  function phoneMoveToColumn(id: string, page: number, row: number, col: number) {
+    const next = phoneCtrl.movePhoneWidget(phoneWidgets, id, page, row, col);
+    if (next === null) {
+      void showInfo($t('widgets.phoneNoSpaceTitle'), $t('widgets.phoneNoSpace'));
+      return;
+    }
+    patchPhoneWidgets(next);
+  }
+  /** A drop on a bottom slot; refused when the widget it displaces has no room in the column. */
+  function phoneMoveToBottom(id: string, slot: phoneCtrl.PhoneBottomSlot) {
+    const next = phoneCtrl.movePhoneWidgetToBottom(phoneWidgets, id, slot);
+    if (next === null) {
+      void showInfo($t('widgets.phoneNoSpaceTitle'), $t('widgets.phoneNoSpace'));
+      return;
+    }
+    patchPhoneWidgets(next);
+  }
   // The video store learns whether a Video widget is on screen (dock or phone grid): Start then
   // leaves the floating window parked — the widget is the picture.
   $effect(() => {
@@ -2679,6 +2746,10 @@
 
   function getWidgetPanelLabel(widgetId: string): string {
     if (phoneUi) {
+      const slot = phoneCtrl.bottomSlotOf(phoneWidgets, widgetId);
+      if (slot === 'left') return $t('widgets.bottomLeft');
+      if (slot === 'centre') return $t('widgets.bottomCentre');
+      if (slot === 'right') return $t('widgets.bottomRight');
       const page = phoneCtrl.phoneWidgetPage(phoneWidgets, widgetId);
       return page == null ? $t('widgets.off') : $t('widgets.phonePage', { values: { n: page + 1 } });
     }
@@ -3306,6 +3377,7 @@
     class:parked={mapFloating && !$videoState.floating}
     class:edit-passive={widgetEditMode && mapInWidget}
     data-nv-clip={mapInFrame ? undefined : true}
+    data-nv-opaque={mapInFrame ? undefined : true}
     style={mapInFrame ? inFrameStyle : mapLayerStyle}
     onclick={minimizeLogbook}
   >
@@ -3327,6 +3399,7 @@
         bind:viewMode={map2dViewMode}
         miniControls={miniMapLocked}
         centerInsetRight={phoneMapInset}
+        centerInsetBottom={phoneMapInsetBottom}
         radarActive={radarSettings.enabled}
         radarMapSettings={radarSettings.map}
         {radarReference}
@@ -3338,6 +3411,7 @@
       <div class="map3d-layer" class:active={mapViewMode === '3d'}>
         <Map3D
           centerInsetRight={phoneMapInset}
+          centerInsetBottom={phoneMapInsetBottom}
           bind:this={map3dRef}
           active={mapViewMode === '3d'}
           playbackTrack={mapTrack}
@@ -3375,12 +3449,13 @@
     <StatusTextToasts />
   </div>
 
-  <!-- Floating-frame map control — top-level/unzoomed so it sits ABOVE the in-frame map (z2); the
-       float-win's own chrome lives in .ui-scale (z1) and would be hidden behind it. ✕ sends the map
-       back to main. Not while the frame is parked (the map slides out with it). -->
+  <!-- Floating-frame map controls — top-level/unzoomed so they sit ABOVE the in-frame map (z2); the
+       float-win's own chrome lives in .ui-scale (z1) and would be hidden behind it. Only the two
+       corner handles: the map goes back to main by double-clicking the full-screen video (a ✕ here
+       did the same and was dropped, Marc 2026-09-10). Not while the frame is parked (the map slides
+       out with it). -->
   {#if mapFloating && $videoState.status === 'live' && !phoneUi && $videoState.floating}
     <div class="miniframe-ctl" style={mapFrameStyle}>
-      <button class="mf-corner mf-close" style="border-top-left-radius:{5 * uiScale}px;" onclick={() => setMapLocation('main')} title={$t('video.close')}>✕</button>
       <!-- The window's resize corner, redrawn above the map just inside the picture's top-right
            corner (this layer is unzoomed and sits at the inner box, hence the scale offsets). -->
       <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -3390,6 +3465,37 @@
         onpointerdown={(e) => startFloatResize(e, { left: floatLeft, top: floatTop, width: floatW, height: floatH, vw: logicalW, vh: logicalH })}
         title={$t('video.resizeWindow')}
       ></div>
+      <!-- The window's move handle, redrawn above the map in the picture's bottom-left corner — the
+           only way to move the frame (a right-button / two-finger drag reaches the map instead). -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div
+        class="mf-corner mf-move"
+        style="bottom:{3 * uiScale}px; left:{3 * uiScale}px; width:{26 * uiScale}px; height:{26 * uiScale}px; padding:{uiScale}px; border-width:{floatBezel * uiScale}px; border-radius:{8 * uiScale}px;"
+        onpointerdown={(e) => startFloatMove(e, { left: floatLeft, top: floatTop, width: floatW, height: floatH, vw: logicalW, vh: logicalH })}
+        title={$t('video.moveWindow')}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 3v18M3 12h18" />
+          <path d="M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3" />
+        </svg>
+      </div>
+    </div>
+  {/if}
+  <!-- Phone: the docked frame's size toggle, redrawn above the swapped-in map in the frame's
+       top-left corner (PhoneVideoDock draws it in video mode — same corner, same look). -->
+  {#if mapFloating && $videoState.status === 'live' && phoneUi && $videoState.floating}
+    <div class="miniframe-ctl" style={mapFrameStyle}>
+      <button
+        class="mf-corner mf-size"
+        style="top:{4 * uiScale}px; left:{4 * uiScale}px; width:{26 * uiScale}px; height:{26 * uiScale}px; padding:{2 * uiScale}px 0 0 {2 * uiScale}px; border-width:{4 * uiScale}px 0 0 {4 * uiScale}px; border-top-left-radius:{8 * uiScale}px;"
+        onclick={togglePhoneDockCompact}
+        title={$t('video.dockSize')}
+        aria-label={$t('video.dockSize')}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M6 6l12 12M6 6h6M6 6v6M18 18h-6M18 18v-6" />
+        </svg>
+      </button>
     </div>
   {/if}
 
@@ -3426,6 +3532,7 @@
       bind:selectedBaud
       bind:tcpHost
       bind:tcpPort
+      bind:portIsAuto
       bind:selectedBleDevice
       {baudRates}
       onConnect={handleConnect}
@@ -3440,10 +3547,25 @@
       {telem}
       {interfaceSettings}
       onresize={(id) => patchPhoneWidgets(phoneCtrl.cyclePhoneWidgetSize(phoneWidgets, id))}
-      onmove={(id, page, row, col) => patchPhoneWidgets(phoneCtrl.movePhoneWidget(phoneWidgets, id, page, row, col))}
+      onmove={phoneMoveToColumn}
+      onmovetobottom={phoneMoveToBottom}
       bind:widthPx={phonePanelW}
     />
   </div>
+  <!-- Bottom widget slots (PHONE_BOTTOM_WIDGETS.md) — under the chips and the docked video window
+       in the stacking order; the drag ghost shared with the column sits over everything. -->
+  <PhoneBottomBar
+    config={phoneWidgets}
+    {telem}
+    {interfaceSettings}
+    frameShift={phoneShift}
+    leftReserve={navPanelOpen ? NAV_RAIL_RIGHT_PX : 0}
+    onmovetobottom={phoneMoveToBottom}
+    onmovetocolumn={phoneMoveToColumn}
+    ontogglewide={() => patchPhoneWidgets(phoneCtrl.togglePhoneBottomWide(phoneWidgets))}
+    bind:barH={phoneBarH}
+  />
+  <PhoneDragGhost {telem} {interfaceSettings} />
   <div class="phone-bottom-chips">
     <PhoneBottomChips {telem} />
   </div>
@@ -3472,6 +3594,7 @@
     bind:selectedBaud
     bind:tcpHost
     bind:tcpPort
+    bind:portIsAuto
     bind:selectedBleDevice
     {baudRates}
     onConnect={handleConnect}
@@ -3634,7 +3757,7 @@
         orientation="horizontal"
         availableVmin={bottomAvailUnits}
         pxPerVmin={bottomPxPerUnit}
-        smallBoost={isPhone ? 1.5 : isTablet ? 1.4 : 1}
+        smallBoost={isPhonePortrait ? 1.5 : isTablet ? 1.4 : 1}
         sizes={panels.sizes ?? {}}
         bind:crossPx={bottomPanelCrossPx}
         {telem}
@@ -3724,7 +3847,16 @@
            self-positioned PanelShell; terrain is its own overlay below. -->
       {#if navPanelOpen && !terrainOpen}
         {#if activeTab === 'uav-info'}
-          <UavInfoPanel {connStatus} {fcInfo} />
+          <UavInfoPanel
+            {connStatus}
+            {fcInfo}
+            onOpenVehicle={(id) => {
+              activeTab = 'logbook';
+              settings.patch({ activeTab: 'logbook' });
+              vehicleManagerOpen.set(true);
+              vehicleManagerSelectedId.set(id);
+            }}
+          />
         {:else if activeTab === 'settings'}
           <SettingsPanel
             localeValue={$locale ?? 'en'}
@@ -3742,6 +3874,7 @@
             {gcsMode}
             userLocation={$userGeoLocation}
             onGeoCheck={requestUserLocation}
+            defaultProtocol={$settings.defaultProtocol}
             {attitudeRateHz}
             {positionRateHz}
             {airspeedEnabled}
@@ -4216,36 +4349,69 @@
     box-sizing: border-box;
     touch-action: none;
   }
-  .mf-close {
-    left: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 13px;
-    line-height: 1;
-    color: #e0e0e0;
-    background: rgba(0, 0, 0, 0.5);
-    border: none;
-    /* Outer corner = the frame's inner box (5 px, scaled inline), inner corner 8 px. */
-    border-radius: 5px 0 8px 0;
-    cursor: pointer;
-  }
-  .mf-close:hover {
-    background: rgba(212, 0, 0, 0.7);
-    color: #fff;
-  }
   /* Same look as FloatingVideoWindow's .fw-grip: an L in the bezel (widths inline, scaled). */
   .mf-grip {
     right: 0;
     background: transparent;
     border-style: solid;
-    border-color: #5e5e5e;
+    border-color: rgba(190, 190, 190, 0.4);
     border-left: none;
     border-bottom: none;
     cursor: nesw-resize;
   }
   .mf-grip:hover {
-    border-color: #727272;
+    border-color: rgba(190, 190, 190, 0.6);
+  }
+  /* Same look as FloatingVideoWindow's .fw-move: the rounded square with the four-way arrow in
+     the bottom-left corner (box, border and padding inline, scaled). */
+  .mf-move {
+    top: auto;
+    background: transparent;
+    border-style: solid;
+    border-color: rgba(190, 190, 190, 0.4);
+    color: rgba(190, 190, 190, 0.4);
+    cursor: grab;
+  }
+  .mf-move:hover {
+    border-color: rgba(190, 190, 190, 0.6);
+    color: rgba(190, 190, 190, 0.6);
+  }
+  .mf-move:active {
+    cursor: grabbing;
+  }
+  .mf-move svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  /* Same look as PhoneVideoDock's .dw-size: the L in the top-left with the diagonal double arrow
+     (box, border and padding inline, scaled). */
+  .mf-size {
+    left: 0;
+    background: transparent;
+    border-style: solid;
+    border-color: rgba(190, 190, 190, 0.4);
+    color: rgba(190, 190, 190, 0.4);
+    cursor: pointer;
+  }
+  .mf-size:hover {
+    border-color: rgba(190, 190, 190, 0.6);
+    color: rgba(190, 190, 190, 0.6);
+  }
+  .mf-size svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
   /* Full-size video shown in the content area when swapped (videoPrimary). The wrapper holds the
      chrome inset + black backdrop; the video fills it. */
@@ -4400,6 +4566,14 @@
     height: 100%;
     overflow: hidden;
     pointer-events: none;
+    /* A compositor layer of its own, permanently. The docked video window slides in and out BEHIND
+       this column; while it animates it overlaps the column, and Chromium then promoted the column
+       to a layer (overlap with an animating layer), squashed the glass into it and rasterised the
+       lot again — at the end of the slide the reverse. Every element squashed with the glass (the
+       hamburger, the connection button, the arming chip, the dock toggle) vanished for a frame at
+       both ends of every slide (Sony, 2026-09-13, traced with the CDP LayerTree). With the layer
+       fixed there is nothing to promote or demote. */
+    will-change: transform;
   }
   .zone-phone-widgets > :global(*) {
     pointer-events: auto;
@@ -4454,7 +4628,7 @@
   :global(html.is-phone) .error-bar {
     left: calc(var(--phone-bottom-w, 0px) + var(--phone-debug-w, 0px) + 8px);
     right: calc(var(--phone-panel-w, 0px) - var(--phone-shift, 0px) + 54px);
-    bottom: calc(8px + var(--safe-bottom, 0px));
+    bottom: calc(8px + var(--safe-bottom, 0px) + var(--phone-bar-lift, 0px));
     margin-inline: auto;
     width: max-content;
     max-width: calc(100% - var(--phone-bottom-w, 0px) - var(--phone-debug-w, 0px) - var(--phone-panel-w, 0px) + var(--phone-shift, 0px) - 62px);
@@ -4476,7 +4650,7 @@
     --band-l: calc(62px + var(--safe-left, 0px));
     --band-r: calc(100vw - var(--phone-panel-w, 0px) + var(--phone-shift, 0px) - 54px);
     left: calc((var(--band-l) + var(--band-r)) / 2);
-    bottom: calc(46px + var(--safe-bottom, 0px));
+    bottom: calc(46px + var(--safe-bottom, 0px) + var(--phone-bar-lift, 0px));
     max-width: calc(var(--band-r) - var(--band-l) - 16px);
     box-sizing: border-box;
     white-space: nowrap;
@@ -4485,6 +4659,20 @@
     transition: left 0.3s ease;
   }
 
+  /* Mobile: the layout zones around the map are compositor layers of their own, permanently.
+     The floating video window mounts and slides over them; Chromium promoted every zone it
+     overlaps to a layer for the duration (toolbar, both docks, nav rail, map controls, status bar)
+     and demoted them again afterwards — each flip rasterises the zone anew, and almost the whole
+     chrome vanished for a frame on the tablet when the window was switched on (Teclast M11,
+     2026-09-13, CDP LayerTree). Mobile only: on the desktop the same flips happen but the raster is
+     back within the frame, and the layers would cost texture memory on a 4K screen. */
+  :global(html.is-mobile) .zone-toolbar,
+  :global(html.is-mobile) .zone-bottom-dock,
+  :global(html.is-mobile) .zone-side-dock,
+  :global(html.is-mobile) .zone-map-controls,
+  :global(html.is-mobile) .zone-status-bar {
+    will-change: transform;
+  }
   .zone-status-bar {
     grid-area: status-bar;
     z-index: 200;

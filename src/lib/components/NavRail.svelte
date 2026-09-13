@@ -65,6 +65,11 @@
 </div>
 
 <style>
+  /* Mobile: its own compositor layer, permanently — see the zone rule in +page.svelte (the floating
+     video window slides past it and would promote / demote it, a frame without the rail). */
+  :global(html.is-mobile) .nav-rail {
+    will-change: transform;
+  }
   .nav-rail {
     position: absolute;
     top: 65px;
@@ -137,11 +142,11 @@
     align-items: center;
     justify-content: center;
     transition: background-color 0.2s;
-    backdrop-filter: blur(8px);
+    backdrop-filter: var(--glass-blur, blur(6px));
   }
 
   .hamburger-btn:hover {
-    background: rgba(55, 168, 219, 0.25);
+    background: var(--btn-active-bg);
   }
 
   .hamburger-icon {
@@ -202,7 +207,7 @@
     justify-content: center;
     overflow: hidden;
     transition: width 0.3s ease, background-color 0.2s;
-    backdrop-filter: blur(8px);
+    backdrop-filter: var(--glass-blur, blur(6px));
     white-space: nowrap;
   }
 

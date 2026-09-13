@@ -67,6 +67,7 @@ serialport = "4"
 btleplug = "0.11"
 starship-battery = "0.10"  # cross-platform AC/battery state (Windows + Linux + macOS) for the low-power 3D auto mode
 tauri-plugin-window-state = "2"
+tauri-plugin-updater = "2"  # "Update and Restart" for installed copies (commands/updater.rs); mobile links to the store
 
 # USB serial on Android runs through the platform's USB Host API, which only exists in Java — the
 # driver is `UsbSerial.kt` in the Android app module and `transport/serial_android.rs` is the JNI shim

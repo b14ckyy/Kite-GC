@@ -38,7 +38,7 @@ mod transport;
 mod user_file;
 mod video;
 
-use commands::connection::{connect, disconnect, inav_set_craft_name, inav_read_stats, scan_ble_devices, ble_scan_start, ble_scan_stop};
+use commands::connection::{connect, disconnect, set_platform_type, inav_set_craft_name, inav_read_stats, scan_ble_devices, ble_scan_start, ble_scan_stop};
 use commands::connection::list_serial_ports;
 use commands::flightlog::{
     flightlog_list, flightlog_get, flightlog_get_track, flightlog_get_battery_records, flightlog_delete,
@@ -67,7 +67,7 @@ use commands::flightlog::{
     battery_db_flights, flight_set_battery_serial, battery_db_set_baseline,
     battery_file_write, battery_file_read,
     vehicle_db_create, vehicle_db_update, vehicle_db_list, vehicle_db_get,
-    vehicle_db_find_by_craft_name, vehicle_db_delete, vehicle_db_aggregate, vehicle_db_flights,
+    vehicle_db_find_by_craft_name, vehicle_db_find_by_fc_uid, vehicle_db_delete, vehicle_db_aggregate, vehicle_db_flights,
     vehicle_db_set_baseline, vehicle_file_write, vehicle_file_read,
 };
 use commands::aero::{aero_fetch, aero_cache_stats, aero_cache_clear};
@@ -125,6 +125,7 @@ use commands::control::{
     mav_vtol_transition,
 };
 use commands::update_check::check_for_update;
+use commands::updater::{install_update, update_kind};
 use hid::HidManager;
 use mission::store::MissionStore;
 use state::AppState;
@@ -412,9 +413,22 @@ pub fn run() {
         std::env::set_var("GDK_GL", "gles");
     }
 
+    // A portable update parks the previous executable as `<exe>.old` (Windows cannot overwrite a running
+    // binary) — clear it now that we are the new one.
+    #[cfg(desktop)]
+    commands::updater::remove_stale_executable();
+
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init());
+
+    // "Update and Restart" for installed copies (commands/updater.rs drives it; the frontend never calls
+    // the plugin's JS API, so no capability entry is needed). Desktop only — the plugin has no mobile
+    // backend, and the stores handle updates there.
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
 
     // Mobile only: use native CoreLocation/Android location for the GCS position so the OS permission
     // prompt is labelled with the app name instead of the WebView origin ("localhost"). Desktop keeps
@@ -608,6 +622,7 @@ pub fn run() {
             inav_read_stats,
             connect,
             disconnect,
+            set_platform_type,
             get_app_version,
             is_debug_mode,
             link_status::telemetry_track_since,
@@ -645,6 +660,8 @@ pub fn run() {
             mav_rtl,
             mav_rc_release,
             check_for_update,
+            update_kind,
+            install_update,
             mav_reposition,
             mav_change_speed,
             mav_mission_start,
@@ -694,6 +711,7 @@ pub fn run() {
             vehicle_db_list,
             vehicle_db_get,
             vehicle_db_find_by_craft_name,
+            vehicle_db_find_by_fc_uid,
             vehicle_db_delete,
             vehicle_db_aggregate,
             vehicle_db_flights,

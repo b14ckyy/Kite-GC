@@ -28,6 +28,7 @@
     selectedBaud = $bindable(),
     tcpHost = $bindable(),
     tcpPort = $bindable(),
+    portIsAuto = $bindable(true),
     selectedBleDevice = $bindable(),
     baudRates,
     onConnect,
@@ -45,6 +46,8 @@
     selectedBaud: number;
     tcpHost: string;
     tcpPort: number;
+    /** See ConnectionControls: false once the pilot typed a port. */
+    portIsAuto?: boolean;
     selectedBleDevice: string;
     baudRates: number[];
     onConnect: () => void;
@@ -104,6 +107,7 @@
           bind:selectedBaud
           bind:tcpHost
           bind:tcpPort
+          bind:portIsAuto
           bind:selectedBleDevice
           {baudRates}
           {onConnect}
@@ -143,8 +147,8 @@
     border-radius: 6px;
     color: #cfcfcf;
     cursor: pointer;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: var(--glass-blur, blur(6px));
+    -webkit-backdrop-filter: var(--glass-blur, blur(6px));
     transition: background-color 0.2s, color 0.2s;
   }
   .cp-btn svg {

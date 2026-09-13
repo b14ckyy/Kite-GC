@@ -1019,6 +1019,19 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
                         if let Ok(mut r) = rec.lock() { r.set_quadplane(); }
                     }
                 }
+            } else if name == "LOG_BACKEND_TYPE" || name == "SDLOG_MODE" {
+                // Logging backend (requested in connect_mavlink): ArduPilot bitmask 0 = none, PX4 mode
+                // -1 = disabled. Lands in the stored FcInfo (the UAV Info panel's "Save to vehicle
+                // library" reads `blackbox`) and reaches the frontend via telemetry-vehicle.
+                let value = pv.param_value as i32;
+                let blackbox = if name == "SDLOG_MODE" { value >= 0 } else { value != 0 };
+                eprintln!("[MAVLINK-PARAM] {} = {} (blackbox={})", name, value, blackbox);
+                if let Ok(mut info) = tauri::Manager::state::<crate::state::AppState>(app_handle).fc_info.lock() {
+                    if let Some(i) = info.as_mut() { i.blackbox = Some(blackbox); }
+                }
+                let _ = app_handle.emit("telemetry-vehicle", serde_json::json!({
+                    "blackbox": blackbox,
+                }));
             }
         }
 
