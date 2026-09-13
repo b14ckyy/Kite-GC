@@ -160,6 +160,11 @@ inside the box of the feature release they belong to, so the notes for one relea
       were unreadable while the map followed the aircraft's heading. They now stay bound to their
       position but upright; the aircraft symbol and radar contacts keep pointing along their
       track. [#168]
+    - **The 3D view was stuck in daylight.** Since 1.0.0 the globe and the sky ignored the real
+      sun: the terrain stayed bright and the sky blue wherever you looked and at any time of day,
+      and a replay's flight time changed nothing either. The lighting that keeps the aircraft model
+      readable had taken over the whole scene's light. The model keeps its own lighting; the globe,
+      the sky and the day/night line follow the real sun again. [#175]
 
 [#16]: https://github.com/b14ckyy/Kite-GC/pull/16
 [#48]: https://github.com/b14ckyy/Kite-GC/pull/48
@@ -186,3 +191,4 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#160]: https://github.com/b14ckyy/Kite-GC/pull/160
 [#163]: https://github.com/b14ckyy/Kite-GC/pull/163
 [#168]: https://github.com/b14ckyy/Kite-GC/issues/168
+[#175]: https://github.com/b14ckyy/Kite-GC/pull/175
