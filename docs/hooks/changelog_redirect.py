@@ -10,9 +10,16 @@ KITE_DOCS_VERSION (the version being built) and KITE_DOCS_CHANGELOG_HOME (the ne
 different values, this hook replaces the rendered changelog page with a redirect to the newest line's
 page. The workflow sets both for every release deploy; the Dev deploy and a local `mkdocs serve` run
 without them and render the branch's own changelog, in-development box included.
+
+Whichever branch renders it, the NEWEST release box is the expanded one: the hook opens the first
+top-level box and folds the others, so the markers in the file do not matter and a merge-up carries no
+per-line "which box is open" edits.
 """
 
 import os
+import re
+
+SECTION_RE = re.compile(r'^\?\?\?\+? \w+ "')
 
 REDIRECT = """<!doctype html>
 <html lang="en">
@@ -27,6 +34,19 @@ REDIRECT = """<!doctype html>
 </body>
 </html>
 """
+
+
+def on_page_markdown(markdown, page, config, files):
+    if page.file.src_uri != "changelog.md":
+        return markdown
+    out = []
+    first = True
+    for line in markdown.splitlines(keepends=True):
+        if SECTION_RE.match(line):
+            line = ("???+" if first else "???") + line[line.index(" ") :]
+            first = False
+        out.append(line)
+    return "".join(out)
 
 
 def on_post_page(output, page, config):

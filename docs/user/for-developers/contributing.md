@@ -23,7 +23,7 @@ Kite uses three kinds of long-lived branches. Which one you target matters:
 | **`feat/<name>`** | Short-lived working branches, one per feature or fix, cut from `development` and deleted after the merge. Anything may be broken here. | Freely — it's yours |
 
 ```
-feat/my-feature ──▶ development ──▶ master ──▶ release/1.1.x ──▶ v1.1.0-rc1 … v1.1.0 … v1.1.2
+feat/my-feature ──▶ development ──▶ master ──▶ release/2.0.x ──▶ v2.0.0-rc1 … v2.0.0 … v2.0.2
                          ▲          (snapshot)  (feature freeze)              (tags)
                          │                            ▲
                          └──────── merge-up ───────────┴──── release/1.0.x
@@ -43,7 +43,7 @@ release line, if there is one, and into `development` — so nothing is lost and
 Base the PR on the release branch, not on `development`, and say so in the description.
 
 Release lines are maintained for a while: a feature release receives patches until the **second**
-feature release after it has shipped (1.0.x until 1.2.0 — see [Release support](../release-support.md)),
+feature release after it has shipped (1.0.x until 2.1.0 — see [Release support](../release-support.md)),
 so two lines take fixes side by side. That is why the regression marker below matters: it tells us at
 a glance which lines a fix belongs to.
 

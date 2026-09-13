@@ -20,14 +20,15 @@
 ## Development state
 
 **Kite 1.0 is released** — the first stable version, after a summer of betas and release candidates.
-Work on 1.1 (mobile, native video decode, and more) continues on the integration trunk:
+Work on 2.0 (mobile, native video decode, a new flight-database schema, and more) continues on the
+integration trunk:
 
 - **All changes** → pull request against **`development`**, the always-current trunk. Features and
   fixes alike land there and reach `master` as tested snapshots — so `master` builds are what you
   install if you want to try the development state.
 - **A fix for the released 1.0** → pull request against **`release/1.0.x`**, the maintenance branch cut
   from the `v1.0.0` tag. Patch releases are tagged from it, and it is merged forward into `development`.
-  1.0 stays maintained until 1.2.0 ships — see
+  1.0 stays maintained until 2.1.0 ships — see
   **[Release support](https://b14ckyy.github.io/Kite-GC/release-support/)** for the policy.
 
 Nobody commits to either branch directly — see
@@ -112,7 +113,7 @@ Everything you'd expect from a ground station:
 - **Link modes:** live control link, **passive** listen-only telemetry, or a **relay** that
   re-broadcasts to other ground stations.
 - **Platforms:** Windows, macOS (universal, signed and notarized) and Linux (x86-64 / ARM64).
-  Android and iOS / iPadOS are in development on `development` and target the 1.1 release.
+  Android and iOS / iPadOS are in development on `development` and target the 2.0 release.
 
 ## Download
 
