@@ -10,9 +10,9 @@ Kite uses `MAJOR.MINOR.PATCH`:
 
 | Kind | Example | What it brings |
 | --- | --- | --- |
-| **Feature release** | 1.1.0, 2.0.0 | New features and larger changes. A new *release line* starts here. |
+| **Feature release** | 2.0.0, 2.1.0 | New features and larger changes. A new *release line* starts here. |
 | **Patch release** | 1.0.1, 1.0.2 | Bug fixes for an existing release line — nothing else. |
-| **Pre-release** | 1.1.0-b1, 1.1.0-rc1 | Betas and release candidates on the way to a feature release. |
+| **Pre-release** | 2.0.0-b1, 2.0.0-rc1 | Betas and release candidates on the way to a feature release. |
 
 ## The support window
 
@@ -21,9 +21,9 @@ shipped.** A feature release is a minor or a major version — whichever comes n
 
 For 1.0 this means:
 
-- 1.0.x receives patches while 1.1 is in development **and for the whole life of 1.1**.
-- Only when **1.2.0** ships (or 2.0.0, if that is the second release after 1.0) does 1.0.x reach its
-  end of life. From then on, fixes land in 1.1.x and 1.2.x.
+- 1.0.x receives patches while 2.0 is in development **and for the whole life of 2.0**.
+- Only when **2.1.0** ships (or 3.0.0, if that is the second release after 1.0) does 1.0.x reach its
+  end of life. From then on, fixes land in 2.0.x and 2.1.x.
 
 Two release lines are therefore maintained side by side at any time. A version you have proven in the
 field stays supported long enough for its successor to go through its own round of field testing and
@@ -31,8 +31,8 @@ patching before you have to move.
 
 | Line | Status | Patches until |
 | --- | --- | --- |
-| **1.0.x** | Live | 1.2.0 (or 2.0.0) ships |
-| **1.1** | In development | — |
+| **1.0.x** | Live | 2.1.0 (or 3.0.0) ships |
+| **2.0** | In development | — |
 
 ### Status tags
 
