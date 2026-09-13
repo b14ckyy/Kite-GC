@@ -1867,7 +1867,7 @@ documentation are all welcome.</p>
    against its maintenance branch instead.</li>
 </ol>
 <h2 id="branching-model">Branching model<a class="headerlink" href="#branching-model" title="Permanent link">&para;</a></h2>
-<p>Kite uses three kinds of long-lived branch. Which one you target matters:</p>
+<p>Kite uses three kinds of long-lived branches. Which one you target matters:</p>
 <table>
 <thead>
 <tr>
@@ -1884,50 +1884,53 @@ documentation are all welcome.</p>
 </tr>
 <tr>
 <td><strong><code>master</code></strong></td>
-<td>The release line. It carries tested snapshots of <code>development</code> on the way to the next release, which is cut from here as a tag.</td>
-<td>Only through a reviewed PR</td>
+<td>A smoke-tested snapshot of <code>development</code>, taken by the maintainer when the trunk is in good shape. The repository's front page (README) is read from here, and every release line is cut from it. Nothing is developed on <code>master</code> and nothing is released from it directly.</td>
+<td>Only the snapshot merge</td>
 </tr>
 <tr>
-<td><strong><code>release/&lt;minor&gt;.x</code></strong></td>
-<td>The maintenance branch of a released version, cut from its tag (<code>release/1.0.x</code> from <code>v1.0.0</code>). <strong>A fix that must reach users of that release targets this branch.</strong> Patch releases are tagged from it.</td>
+<td><strong><code>release/&lt;major.minor&gt;.x</code></strong></td>
+<td>A release line. Cut from <code>master</code> at the feature freeze of a feature release, it carries the release candidates, the final release and every patch of that line — and the documentation of that version. Long-lived: it stays open as long as the line is maintained.</td>
 <td>Only through a reviewed PR</td>
 </tr>
 <tr>
 <td><strong><code>feat/&lt;name&gt;</code></strong></td>
-<td>Short-lived working branches, one per feature or fix, cut from <code>development</code> (or from the maintenance branch for a patch) and deleted after the merge. Anything may be broken here.</td>
+<td>Short-lived working branches, one per feature or fix, cut from <code>development</code> and deleted after the merge. Anything may be broken here.</td>
 <td>Freely — it's yours</td>
 </tr>
 </tbody>
 </table>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>feat/my-feature ──▶ development ──▶ master ──▶ tag (next release)
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>fix/my-fix ──▶ release/1.0.x ──▶ tag (patch release)
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>                    │
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>                    └──▶ development (merged forward)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>feat/my-feature ──▶ development ──▶ master ──▶ release/1.1.x ──▶ v1.1.0-rc1 … v1.1.0 … v1.1.2
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>                         ▲          (snapshot)  (feature freeze)              (tags)
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>                         │                            ▲
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>                         └──────── merge-up ───────────┴──── release/1.0.x
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>                                        fixes flow upwards
 </code></pre></div>
-<p><strong>Nobody commits to <code>master</code> or <code>development</code> directly</strong> — not even the maintainer. Every change
-arrives as a pull request, so there is always a diff, a CI run and a place to comment.</p>
+<p><strong>Nobody commits to <code>master</code>, <code>development</code> or a release branch directly</strong> — not even the
+maintainer. Every change arrives as a pull request, so there is always a diff, a CI run and a place to
+comment.</p>
 <p><strong>Where your branch lives</strong> depends on your access: maintainers create <code>feat/*</code> branches in the main
 repository, everyone else forks and opens the PR from the fork. The workflow is otherwise identical.</p>
-<p><strong>Fixes for an already-released version</strong> target its maintenance branch, <code>release/1.0.x</code> for 1.0. It
-is cut from the release <strong>tag</strong>, not from <code>master</code>, so it carries exactly what users run plus the fixes.
-Every fix merged there is merged forward into <code>development</code> afterwards, so nothing is lost. A fix that
-only matters for the next release goes to <code>development</code> like any other change.</p>
-<p>Maintenance branches are long-lived: a release line receives patches until the <strong>second</strong> feature
-release after it has shipped (1.0.x until 1.2.0 — see <a href="../../release-support/">Release support</a>), and
-its branch stays open until then. Two lines are maintained side by side, so a bug that exists in both
-gets a fix on each maintenance branch. That is why the regression marker below matters: it tells us at
+<p><strong>Fixes for an already-released version</strong> go on the <strong>oldest</strong> release branch that has the bug
+(<code>release/1.0.x</code> for a bug that exists in 1.0) and are merged <strong>upwards</strong> afterwards — into the newer
+release line, if there is one, and into <code>development</code> — so nothing is lost and nothing is fixed twice.
+Base the PR on the release branch, not on <code>development</code>, and say so in the description.</p>
+<p>Release lines are maintained for a while: a feature release receives patches until the <strong>second</strong>
+feature release after it has shipped (1.0.x until 1.2.0 — see <a href="../../release-support/">Release support</a>),
+so two lines take fixes side by side. That is why the regression marker below matters: it tells us at
 a glance which lines a fix belongs to.</p>
-<p><strong>Documentation is the one exception.</strong> A change to these pages that touches no code — a correction, a
-clarification, a missing note — targets <code>master</code> directly, because the published site must always
-describe the released app. Documentation <em>for a new or changed feature</em> is not covered by this: it
-belongs in the same branch as the feature and reaches <code>master</code> together with it.</p>
+<p><strong>Documentation follows the same branches.</strong> Each release branch is the source of that version's pages
+on this site — the version dropdown maps one entry to one release line, and <strong>Dev</strong> to <code>development</code>.
+A change to these pages that touches no code — a correction, a clarification, a missing note — therefore
+targets the <strong>release branch of the version it describes</strong> and reaches the newer lines with the same
+merge-up as a code fix. Documentation <em>for a new or changed feature</em> belongs in the same branch as the
+feature and reaches a release line together with it. The changelog is kept once for all released
+versions: the newest release line renders it, the older versions' Changelog pages lead there.</p>
 <h2 id="before-you-open-a-pr">Before you open a PR<a class="headerlink" href="#before-you-open-a-pr" title="Permanent link">&para;</a></h2>
 <p>Run the static checks — the project leans on them heavily:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>just<span class="w"> </span>check<span class="w">    </span><span class="c1"># svelte-check + TypeScript + cargo check</span>
 </code></pre></div>
-<p>CI runs the same checks (plus clippy) on Linux, Windows and macOS for every push to <code>development</code> /
-<code>master</code> and every PR targeting them. <strong>PRs should be green before review.</strong></p>
+<p>CI runs the same checks (plus clippy) on Linux, Windows and macOS for every push to <code>development</code>,
+<code>master</code> and the release branches, and for every PR targeting them. <strong>PRs should be green before review.</strong></p>
 <p>For a <strong>bug-fix PR</strong>, please state in the description whether the bug exists in the <strong>released
 version</strong> or was <strong>introduced since</strong> (and by what, if you know). Only the first kind belongs in the
 release notes, so this one line saves the archaeology at release time.</p>
@@ -1967,6 +1970,12 @@ release notes, so this one line saves the archaeology at release time.</p>
 </ul>
 <p>Missing non-English keys fall back gracefully, so an English-only PR is fine — a maintainer (or you, with
 AI help) can top up the other languages afterwards.</p>
+<p><strong>Finding the key for a string you see on screen:</strong> <code>python tools/i18n-key-paths.py</code> writes a pseudo-locale
+<code>src/lib/i18n/locales/xx.json</code> in which every string is replaced by its own key path (<code>sensors.gyro</code>,
+<code>rcLink.noLink</code>, …). Register it locally in <code>src/lib/i18n/index.ts</code> as described in the script's header,
+start the dev app and switch the language to it — the interface then shows the key at every position
+instead of the text. The file is git-ignored; take the <code>index.ts</code> registration out again before you commit.
+Contributed by teodoryantcheff.</p>
 <h2 id="licensing-contributor-terms">Licensing &amp; contributor terms<a class="headerlink" href="#licensing-contributor-terms" title="Permanent link">&para;</a></h2>
 <p>Kite Ground Control is licensed under <strong><a href="https://www.gnu.org/licenses/gpl-3.0.html">GPL-3.0-or-later</a></strong>.</p>
 <ul>

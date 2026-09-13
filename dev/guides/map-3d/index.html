@@ -2003,8 +2003,11 @@ left side, green the right, the yellow spike the nose; the same model draws the 
   dusk flight looks like dusk.</li>
 <li><strong>Power Saving</strong> — cap the 3D frame rate to save battery: <strong>Off (60 fps)</strong>, <strong>On (20 fps)</strong> or
   <strong>Auto</strong> (20 fps on battery). Helpful on laptops and tablets. While active it also drops the smooth
-  bar animations in the speed and battery widgets (they jump straight to the current value), which
-  saves noticeable CPU during a flight — the readings are unchanged.</li>
+  bar animations in the speed and battery widgets (they jump straight to the current value) and the
+  frosted-glass blur behind panels and widgets — every blurred surface is re-rendered on each frame
+  while the map moves, so this saves noticeable CPU and GPU during a flight; the readings are unchanged.
+  On phones and tablets the glass blur of the widgets, buttons and chips over the map is always off
+  (only the panels keep it), because it was the single biggest rendering cost there.</li>
 <li><strong>High-Resolution 3D</strong> — render the globe at the display's native pixel density (on) or at half
   of it (off). On by default on the desktop, off on phones and tablets; switch it on for a sharp
   globe on a high-DPI screen, off to give a weak integrated GPU room (one laptop went from 30 to

@@ -2096,10 +2096,11 @@ forwarding to your PC.</p>
    bridge's LAN address).</li>
 <li><strong>Port</strong> — the network port.</li>
 </ol>
-<p>Kite fills in the usual MAVLink defaults and swaps them when you flip between TCP and UDP:</p>
+<p>Kite fills in the usual default and swaps it when you change either the protocol or the transport:</p>
 <table>
 <thead>
 <tr>
+<th>Protocol</th>
 <th>Transport</th>
 <th>Default port</th>
 <th>Typical use</th>
@@ -2107,18 +2108,38 @@ forwarding to your PC.</p>
 </thead>
 <tbody>
 <tr>
-<td><strong>TCP</strong></td>
-<td><code>5761</code></td>
-<td>Local MAVLink endpoint</td>
-</tr>
-<tr>
+<td><strong>MAVLink</strong></td>
 <td><strong>UDP</strong></td>
 <td><code>14550</code></td>
 <td>The standard MAVLink GCS port</td>
 </tr>
+<tr>
+<td><strong>MAVLink</strong></td>
+<td><strong>TCP</strong></td>
+<td><code>5760</code></td>
+<td>ArduPilot SITL's MAVLink port</td>
+</tr>
+<tr>
+<td><strong>MSP</strong></td>
+<td><strong>TCP</strong></td>
+<td><code>5761</code></td>
+<td>INAV SITL's MSP port</td>
+</tr>
+<tr>
+<td><strong>MSP</strong></td>
+<td><strong>UDP</strong></td>
+<td><code>14550</code></td>
+<td>No standard MSP port exists, so this is only a starting point</td>
+</tr>
 </tbody>
 </table>
-<p>A custom port you've typed (for example <strong>SITL on <code>5762</code></strong>) is left untouched when you switch transport.</p>
+<p><strong>Telemetry</strong> is passive and has no port of its own, so choosing it leaves the port alone.</p>
+<p>A custom port you've typed (for example a second <strong>SITL on <code>5762</code></strong>) is left untouched by both
+selectors, and stays yours across restarts: Kite remembers that you typed it rather than going by the
+number. Type the standard port for the current selection and it goes back to following the
+selectors, so there is always a way back.</p>
+<p>If <strong>Settings → Connection → Default Protocol</strong> is pinned, the port follows it at startup, the same
+way it follows the selectors.</p>
 <div class="admonition note">
 <p class="admonition-title">Protocol still applies</p>
 <p>Choose the matching <strong>protocol</strong> for a network link too — <strong>MAVLink</strong> for an ArduPilot/PX4
@@ -2211,6 +2232,9 @@ Kite either offers the usual recording prompt (continue / discard / save) or rec
 <h2 id="reconnecting">Reconnecting<a class="headerlink" href="#reconnecting" title="Permanent link">&para;</a></h2>
 <p>Kite remembers your last <strong>protocol, transport, port/host, baud, and BLE device</strong>, so reconnecting is
 usually a single click on <strong>Connect</strong>. To drop the link, click <strong>Disconnect</strong>.</p>
+<p>If you always fly the same link and would rather not have a stray session decide, set
+<strong>Settings → Connection → Default Protocol</strong> to that protocol: it then wins on every launch. Leave it
+on <strong>Last used</strong> for the behaviour described above.</p>
 <h2 id="trouble-connecting">Trouble connecting?<a class="headerlink" href="#trouble-connecting" title="Permanent link">&para;</a></h2>
 <p>Wrong baud rate, a port already held by another app, a Bluetooth first-open timeout, or a missing
 USB-serial driver are the usual culprits. The

@@ -1845,7 +1845,8 @@ logbook toolbar.</p>
 <h2 id="the-vehicle-list">The vehicle list<a class="headerlink" href="#the-vehicle-list" title="Permanent link">&para;</a></h2>
 <p>Vehicles are grouped by <strong>type</strong> and can be <strong>searched</strong> (by name, craft name, model, type, notes or
 flight controller). Pick one to open its build sheet; the toolbar also creates a new vehicle and
-imports one from a file.</p>
+imports one from a file. While connected over INAV or MAVLink, the
+<a href="../telemetry-and-display/#uav-info-panel">UAV Info panel</a> can also save the connected craft here in one click.</p>
 <figure>
 <p><img alt="The vehicle library list" src="../../assets/guides/vehicles/vehicle-manager.png" /></p>
 <figcaption>
@@ -1862,7 +1863,11 @@ imports one from a file.</p>
 <li><strong>Propulsion</strong> — motors, propellers, ESC, and a recommended battery (cells / capacity).</li>
 <li><strong>Radio, FPV &amp; datalink</strong> — receiver, video transmitter, camera, gimbal camera, datalink.</li>
 <li><strong>Sensors</strong> — checkboxes for GPS, RTK, compass, airspeed, rangefinder and optical-flow.</li>
-<li><strong>Flight controller</strong> — model, manufacturer, firmware and version, and whether blackbox is available.</li>
+<li><strong>Flight controller</strong> — model, manufacturer, firmware and version, whether blackbox is available, and
+  the <strong>FC hardware ID</strong> (filled in automatically when the vehicle is created from the connected craft
+  via the UAV Info panel). Flights still link by craft name, so swapping the flight controller keeps the
+  vehicle — paste the new ID from the UAV Info panel here and its <strong>View in vehicle library</strong> button
+  finds the entry again.</li>
 </ul>
 <figure>
 <p><img alt="A vehicle build sheet with stats and linked flights" src="../../assets/guides/vehicles/vehicle-manager_details.png" /></p>

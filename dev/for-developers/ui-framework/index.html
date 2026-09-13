@@ -2001,7 +2001,11 @@ slots. Variants: <code>info</code> · <code>compact</code> · <code>wide-compact
 <li><strong>Sizing:</strong> widget content is sized in <strong><code>vmin</code></strong> (no fixed px) so it scales with the window; the whole
   chrome scales with the global <strong><code>--ui-scale</code></strong> variable (the <code>.ui-scale</code> wrapper).</li>
 <li><strong>Panels</strong> use glassmorphism where appropriate — <code>backdrop-filter: blur()</code> over a semi-transparent
-  background.</li>
+  background. Every blur goes through one of two switches: <code>var(--glass-blur, blur(6px))</code> for anything
+  that lies on the map (widgets, buttons, chips, the widget column) and <code>var(--panel-blur, blur(10px))</code>
+  for panel shells and their popups. <code>html.is-mobile</code> sets the map switch to <code>none</code> (a backdrop blur is
+  a framebuffer readback per element and frame — the largest single rendering cost on phones), and
+  the low-power mode (<code>html.kite-low-power</code>) sets both to <code>none</code>.</li>
 <li>Use CSS variables where practical; otherwise the palette hex values above are the source of truth.</li>
 </ul>
 <h2 id="when-somethings-missing">When something's missing<a class="headerlink" href="#when-somethings-missing" title="Permanent link">&para;</a></h2>

@@ -1943,8 +1943,9 @@ may still hit:</p>
 </div>
 <h2 id="network-tcpudp-links">Network (TCP/UDP) links<a class="headerlink" href="#network-tcpudp-links" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Host and port</strong> must match your endpoint. Kite defaults to <strong>TCP 5761</strong> and <strong>UDP 14550</strong>; a
-  simulator or router may use something else (e.g. <strong>SITL on 5762</strong>).</li>
+<li><strong>Host and port</strong> must match your endpoint. Kite's default follows the protocol and the transport
+  (<strong>MAVLink</strong> UDP 14550 or TCP 5760, <strong>MSP</strong> TCP 5761); a simulator or router may use something else
+  (e.g. a second <strong>SITL on 5762</strong>).</li>
 <li>Make sure the bridge/router/simulator is actually <strong>running and reachable</strong> (firewall, same network),
   and that the <strong>protocol</strong> matches what it speaks.</li>
 </ul>

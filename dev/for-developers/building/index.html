@@ -2149,7 +2149,7 @@ certificate: an "Apple Development" certificate cannot notarize. Credentials are
 environment / keychain and never committed. List your identities with
 <code>security find-identity -v -p codesigning</code>.</p>
 <h3 id="android">Android<a class="headerlink" href="#android" title="Permanent link">&para;</a></h3>
-<p>Mobile is <strong>not part of the 1.0 line</strong> — nothing mobile builds from <code>master</code>, and both mobile ports
+<p>Mobile is <strong>not part of the 1.0 line</strong> — nothing mobile builds on <code>release/1.0.x</code>, and both mobile ports
 target a release after 1.0. The iOS / iPadOS port lives on <code>development</code> (see the iOS notes above);
 Android is described here.</p>
 <p>Android runs the full app: tablets use the desktop layout, phones a dedicated landscape layout
@@ -2378,8 +2378,14 @@ release builds:</p>
 </code></pre></div>
 <ul>
 <li><strong>Type</strong> = <code>installer</code> (<code>.exe</code> / <code>.deb</code> / <code>.rpm</code> / <code>.dmg</code>, and the Android <code>.apk</code>), <code>standalone</code>
-  (<code>.AppImage</code>, or the macOS <code>.app</code> zipped), or <code>portable</code> (the bare executable zipped <strong>with an empty
-  <code>.portable</code> marker</strong>).</li>
+  (<code>.AppImage</code>, or the macOS <code>.app</code> zipped), <code>portable</code> (the bare executable zipped <strong>with an empty
+  <code>.portable</code> marker</strong>), or <code>update</code> (macOS only: the <code>.app</code> as <code>.tar.gz</code>, what the in-app updater
+  downloads).</li>
+<li><strong>In-app updates</strong> (<em>Update and Restart</em> in the update notice) need a <code>.sig</code> beside each installer
+  and a <code>latest.json</code> manifest on the GitHub release. Both are produced by the maintainer over the
+  collected <code>release/</code> folder (<code>just update-manifest</code>, i.e. <code>scripts/make-update-manifest.sh</code>) with a
+  signing key that is not in the repository — a local build works without it, it just cannot be
+  offered as an update.</li>
 <li>The naming logic lives in <code>scripts/collect-release.*</code> and is shared by local builds and the GitHub
   release workflow (<code>.github/workflows/release.yml</code>), so filenames match everywhere.</li>
 <li><code>just build-android</code> drops its APK into the same folder as <code>KiteGC_Android_&lt;abi&gt;_&lt;version&gt;_installer.apk</code>
