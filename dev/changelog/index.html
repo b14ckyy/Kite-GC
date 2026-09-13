@@ -1664,7 +1664,11 @@ every released version of the documentation; the <strong>Dev</strong> docs also 
 defined on the <a href="../release-support/">release support</a> page. Patch releases (1.0.1, 1.0.2, …) are listed
 inside the box of the feature release they belong to, so the notes for one release line stay together.</p>
 <details class="note" open="open">
-<summary>1.1 — in development</summary>
+<summary>2.0 — in development</summary>
+<p><strong>Why 2.0, not 1.1:</strong> the flight database changes its schema with this release. Kite
+writes one backup next to it before migrating (<code>flights.pre-migration-backup.db</code>) — but the
+migrated database cannot be opened by Kite 1.0 any more, so there is no way back except that
+backup. A step that closes the door behind you is a major version.</p>
 <p><strong>Highlights</strong></p>
 <details class="info">
 <summary>Kite goes mobile — Android, iPhone and iPad</summary>
@@ -1759,7 +1763,7 @@ and starts again — on Windows and Linux through the installer of the package y
 button; <em>Remind me later</em> and <em>Skip this version</em> work as before. Android and iOS open
 their app store instead.</p>
 <p><strong>Patch releases only.</strong> A new choice under Settings → Updates keeps you on the bug-fix
-line of the version you run: 1.1.0 is told about 1.1.1, never about 1.2.0. The default stays
+line of the version you run: 2.0.0 is told about 2.0.1, never about 2.1.0. The default stays
 <em>Stable releases</em>. <a href="https://github.com/b14ckyy/Kite-GC/pull/162">#162</a></p>
 </details>
 <p><strong>Added</strong></p>
@@ -1833,7 +1837,7 @@ line of the version you run: 1.1.0 is told about 1.1.1, never about 1.2.0. The d
   dialog. <a href="https://github.com/b14ckyy/Kite-GC/pull/162">#162</a></p>
 </li>
 <li><strong>Patch releases only</strong> — update-check channel that offers bug-fix releases of the running
-  version only (1.1.0 → 1.1.1, never 1.2.0). <a href="https://github.com/b14ckyy/Kite-GC/pull/162">#162</a></li>
+  version only (2.0.0 → 2.0.1, never 2.1.0). <a href="https://github.com/b14ckyy/Kite-GC/pull/162">#162</a></li>
 </ul>
 <p><strong>Removed</strong></p>
 <ul>
