@@ -1,7 +1,8 @@
 # Changelog
 
 What's new in each Kite Ground Control release — the big features up top, the full list of changes
-below. The release you are reading the docs for is expanded; click an older version to unfold it.
+below. The newest release is expanded; click an older version to unfold it. This page is shared by
+every released version of the documentation; the **Dev** docs also list what is still being built.
 
 Each version heading ends with the line's support status — **Live**, **Maintenance** or **EOL** — as
 defined on the [release support](release-support.md) page. Patch releases (1.0.1, 1.0.2, …) are listed

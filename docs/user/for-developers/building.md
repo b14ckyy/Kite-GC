@@ -86,8 +86,8 @@ environment / keychain and never committed. List your identities with
 ### Android / iOS
 Mobile (Tauri Mobile) is **not part of the 1.0 line**. The Android and iOS / iPadOS ports are both
 merged on `development` (each with its own UI tier and build pipeline) and target a release after
-1.0. Nothing mobile builds from `master` — don't run `tauri android init` or `tauri ios init`
-against a 1.0 checkout.
+1.0. Nothing mobile builds on the 1.0 line (`release/1.0.x`) — don't run `tauri android init` or
+`tauri ios init` against a 1.0 checkout.
 
 ## Workflow
 
