@@ -124,7 +124,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     ---
 
-    **1.0.1**{ .kite-patch } *in development*{ .kite-badge }
+    **1.0.1**{ .kite-patch } *2026-09-13*{ .kite-badge }
 
     **Added**
 
