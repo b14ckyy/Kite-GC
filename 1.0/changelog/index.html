@@ -1643,7 +1643,7 @@ flight logbook with replay, FPV video, radar / airspace awareness and telemetry 
 <p>Everything this version contains is covered by the regular documentation — start with the
 <a href="../getting-started/quick-tour/">quick tour</a> or the <a href="https://github.com/b14ckyy/Kite-GC/releases">GitHub release</a>.</p>
 <hr />
-<p><strong class="kite-patch">1.0.1</strong> <em class="kite-badge">in development</em></p>
+<p><strong class="kite-patch">1.0.1</strong> <em class="kite-badge">2026-09-13</em></p>
 <p><strong>Added</strong></p>
 <ul>
 <li><strong>Community link in About.</strong> The About dialog links to the Kite Discord
@@ -1673,6 +1673,16 @@ flight logbook with replay, FPV video, radar / airspace awareness and telemetry 
   everything that was not MAVLink onto MSP, so the passive Telemetry choice was silently
   rewritten. <a href="https://github.com/b14ckyy/Kite-GC/pull/143">#143</a></li>
 <li><strong>Bulgarian translation corrected</strong> — 26 strings, contributed by teodoryantcheff. <a href="https://github.com/b14ckyy/Kite-GC/pull/141">#141</a></li>
+<li><strong>Markers and pop-ups turned with the map in heading-up mode.</strong> Waypoint markers, labels,
+  the "Fly Here" pop-up and the waypoint editor rotated together with the map tiles, so they
+  were unreadable while the map followed the aircraft's heading. They now stay bound to their
+  position but upright; the aircraft symbol and radar contacts keep pointing along their
+  track. <a href="https://github.com/b14ckyy/Kite-GC/issues/168">#168</a></li>
+<li><strong>The 3D view was stuck in daylight.</strong> Since 1.0.0 the globe and the sky ignored the real
+  sun: the terrain stayed bright and the sky blue wherever you looked and at any time of day,
+  and a replay's flight time changed nothing either. The lighting that keeps the aircraft model
+  readable had taken over the whole scene's light. The model keeps its own lighting; the globe,
+  the sky and the day/night line follow the real sun again. <a href="https://github.com/b14ckyy/Kite-GC/pull/175">#175</a></li>
 </ul>
 </details>
 
