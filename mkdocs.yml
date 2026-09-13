@@ -53,7 +53,7 @@ plugins:
 
 # Release channel filter for the changelog (see the hook's docstring + docs.yml).
 hooks:
-  - docs/hooks/changelog_channel.py
+  - docs/hooks/changelog_redirect.py
 
 extra_css:
   - assets/branding/extra.css

@@ -88,7 +88,7 @@ environment / keychain and never committed. List your identities with
 
 ### Android
 
-Mobile is **not part of the 1.0 line** — nothing mobile builds from `master`, and both mobile ports
+Mobile is **not part of the 1.0 line** — nothing mobile builds on `release/1.0.x`, and both mobile ports
 target a release after 1.0. The iOS / iPadOS port lives on `development` (see the iOS notes above);
 Android is described here.
 
