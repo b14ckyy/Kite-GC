@@ -11,8 +11,9 @@ hardware. Which one to reach for:
 | a passive **LTM telemetry** link, e.g. for the phone's background-telemetry path | `ltm_sim.py` |
 | an **RTSP camera** for the native video client (MJPEG, H.264, H.265) | `rtsp_test_server.py` |
 
-All run from the repository root with a stock Python 3.10+; the two SITL managers need Tkinter (bundled
-with python.org, Homebrew and distro Pythons).
+All run from the repository root with a stock Python 3.10+; the SITL managers and `fc_sim.py` need Tkinter
+for their window (bundled with python.org and Homebrew Pythons; Debian/Ubuntu ship it separately as
+`python3-tk`, Fedora as `python3-tkinter`). Their `--headless` / `--cli` modes run without it.
 
 ---
 
