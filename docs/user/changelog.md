@@ -189,6 +189,12 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     **Improved**
 
+    - **System messages default to *Warning*, and a new *Debug* level shows the firmware's
+      developer chatter.** ArduPilot sends some texts at its DEBUG severity — "Sending unknown
+      message (44)" twice a second when a ground station in the loop asks for a message the board's
+      firmware cannot send, for example — and Kite showed them as info toasts. They now appear only
+      with *System messages* set to *Debug*; *All* is everything up to info, and a fresh install
+      starts at *Warning*. [#186]
     - **Power Saving also drops the glass blur** — with the mode active (or on battery in *Auto*),
       panels and widgets lose their frosted-glass blur: every blurred surface is re-rendered on each
       frame while the map moves, and on the phone that was the single biggest rendering cost. On
@@ -327,3 +333,4 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#173]: https://github.com/b14ckyy/Kite-GC/pull/173
 [#174]: https://github.com/b14ckyy/Kite-GC/pull/174
 [#175]: https://github.com/b14ckyy/Kite-GC/pull/175
+[#186]: https://github.com/b14ckyy/Kite-GC/pull/186
