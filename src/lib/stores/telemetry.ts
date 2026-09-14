@@ -131,7 +131,8 @@ export interface TelemetryData {
   /** FC's current target waypoint (MSP_NAV_STATUS live / blackbox in replay). 0 = none. */
   activeWpNumber: number;
 
-  // FC type (for mode classification)
+  /** Firmware variant of the connected FC ("INAV", "ArduPlane", "PX4", …): seeded from the handshake on
+   *  connect (`setFcVariant`), set per sample in replay, empty when idle / on passive telemetry. */
   fcVariant: string;
 
   // Timestamps
@@ -153,7 +154,7 @@ const defaultTelemetry: TelemetryData = {
   sensorGps: 0, sensorRangefinder: 0, sensorPitot: 0, sensorOpflow: 0, sensorRcReceiver: 0, prearmHealthy: 0,
   ekfStatus: 0, ekfType: 0,
   flightMode: { primary: '', modifiers: [] }, navState: 0, activeWpNumber: 0,
-  fcVariant: 'INAV',
+  fcVariant: '',
   lastUpdate: 0,
 };
 
@@ -195,6 +196,12 @@ gpsInject.subscribe((g) => {
     telemetry.update((t) => ({ ...t, fixType: 0, lastUpdate: Date.now() }));
   }
 });
+
+/** Handshake result → store, so live readers (the raw telemetry popup) show the real firmware and not
+ *  the idle default. Called once per connect; `resetTelemetry` clears it again on disconnect. */
+export function setFcVariant(variant: string) {
+  telemetry.update((t) => ({ ...t, fcVariant: variant }));
+}
 
 export function resetTelemetry() {
   telemetry.set({ ...defaultTelemetry });
