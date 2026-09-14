@@ -50,3 +50,20 @@ In both cases the extra setup (account, API key, billing) and the licensing cons
 worth it for a map style you can already get, key-free, from the built-in providers. If a specific,
 properly licensed provider ever adds real value, we would add it as an optional *bring-your-own-key*
 source rather than route around anyone's terms of service.
+
+## Connections
+
+### Why does Kite show "Sending unknown message (44)" twice a second?
+
+You are connected through **Mission Planner's MAVLink forward** (or mirror), and the aircraft runs
+ArduPilot **4.5 or an early 4.6 beta** on a board whose firmware build has no camera field-of-view
+support — typically a small-flash F405-class board. The text is not Kite's: it is the firmware
+complaining, at its *debug* severity, every time it is asked to send a message it does not have.
+The one asking is Mission Planner, which requests the camera message `CAMERA_FOV_STATUS` at its
+status rate (2 Hz); the firmware accepts the request and then complains at that rate, to every
+connected ground station — and Kite shows the line as an info notification. Connected directly to
+the aircraft, without Mission Planner in the loop, the message never appears.
+
+It is harmless. **Update the aircraft to ArduPilot 4.6 or newer**, which refuses the request once
+instead of repeating the complaint. Until then, set **[Settings → Alerts → System
+messages](reference/settings.md)** to *Warning* to keep the notification banner quiet.
