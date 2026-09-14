@@ -39,6 +39,14 @@
   let expanded = $state<number | null>(null);
   /** Bound numeric param for the expanded channel (toggle position count / step count). */
   let stepperVal = $state(0);
+  /** Bound button-set values (µs) of the expanded channel, keyed by input index — a stepper's ± and
+   *  wheel changes only arrive through bind:value. Re-seeded whenever the channel config changes. */
+  let bsetDraft = $state<Record<number, number>>({});
+  $effect(() => {
+    const c = expanded !== null ? $currentChannels[expanded] : undefined;
+    const next = c?.kind === 'buttonSet' ? Object.fromEntries(c.values.map((v, i) => [i, toUs(v)])) : {};
+    untrack(() => { bsetDraft = next; });
+  });
   /** Learn target: which channel + config field + input type to bind next. */
   let learn = $state<{ ch: number; key: string; type: 'axis' | 'button' } | null>(null);
   let baseAxes: number[] = [];
@@ -353,14 +361,13 @@
                   >
                     {learn?.ch === ch && learn?.key === `bset.${i}` ? $t('rc.learning') : $t('rc.learn')}
                   </button>
-                  <input
-                    class="cc-bset-val"
-                    type="number"
-                    min="1000"
-                    max="2000"
-                    step="5"
-                    value={toUs(cfg.values[i] ?? 0)}
-                    onchange={(e) => setBSetValue(ch, i, Number((e.currentTarget as HTMLInputElement).value))}
+                  <NumberStepper
+                    bind:value={bsetDraft[i]}
+                    min={1000}
+                    max={2000}
+                    step={5}
+                    decimals={0}
+                    onchange={() => setBSetValue(ch, i, bsetDraft[i])}
                   />
                   {#if cfg.inputs.length > 1}
                     <button class="cc-bset-del" title={$t('rc.remove')} onclick={() => removeBSetButton(ch, i)}>✕</button>
@@ -464,10 +471,6 @@
   .cc-learn.armed { background: rgba(55, 168, 219, 0.2); color: #37a8db; border-color: #37a8db; }
 
   .cc-bset-row { display: flex; align-items: center; gap: 6px; }
-  .cc-bset-val {
-    width: 64px; flex: none; padding: 4px 6px; font-size: 12px; background: #2a2a2a; color: #e0e0e0;
-    border: 1px solid #444; border-radius: 4px; font-variant-numeric: tabular-nums;
-  }
   .cc-bset-del {
     flex: none; width: 24px; height: 24px; font-size: 11px; line-height: 1; border-radius: 4px; cursor: pointer;
     background: #2a2a2a; color: #c97070; border: 1px solid #5a3030;

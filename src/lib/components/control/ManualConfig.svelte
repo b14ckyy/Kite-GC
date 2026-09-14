@@ -13,6 +13,7 @@
   import { t } from 'svelte-i18n';
   import { hidSnapshot } from '$lib/stores/hid';
   import { rcManual, type ManualMap } from '$lib/stores/rcManual';
+  import NumberStepper from '$lib/components/NumberStepper.svelte';
 
   const STICKS = ['roll', 'pitch', 'throttle', 'yaw'] as const;
   type Stick = (typeof STICKS)[number];
@@ -22,6 +23,15 @@
     ...($hidSnapshot?.buttons ?? []).map((_, i) => `B${i + 1}`),
     ...($hidSnapshot?.hats ?? []).flatMap((_, i) => [0, 1, 2, 3].map((d) => `H${i * 4 + d + 1}`)),
   ]);
+
+  /** Bound MANUAL_CONTROL button numbers, by row — a stepper's ± and wheel changes only arrive through
+   *  bind:value. Re-seeded from the store on every change (add/remove/learn), the write untracked so
+   *  the effect never depends on its own output. */
+  let buttonDraft = $state<Record<number, number>>({});
+  $effect(() => {
+    const next = Object.fromEntries($rcManual.buttons.map((b, i) => [i, b.button]));
+    untrack(() => { buttonDraft = next; });
+  });
 
   // ── Mutators (immutable updates so subscribers re-run) ──
   function setStick(key: Stick, partial: Partial<ManualMap[Stick]>): void {
@@ -174,13 +184,13 @@
         {learnEq(learn, { kind: 'button', i }) ? $t('rc.learning') : $t('rc.learn')}
       </button>
       <span class="mc-btnlbl">{$t('rc.manual.button')}</span>
-      <input
-        class="mc-btnnum"
-        type="number"
-        min="1"
-        max="32"
-        value={b.button}
-        onchange={(e) => setButton(i, { button: Math.max(1, Math.min(32, Number((e.currentTarget as HTMLInputElement).value) || 1)) })}
+      <NumberStepper
+        bind:value={buttonDraft[i]}
+        min={1}
+        max={32}
+        step={1}
+        decimals={0}
+        onchange={() => setButton(i, { button: Math.max(1, Math.min(32, buttonDraft[i] || 1)) })}
       />
       <button class="mc-del" title={$t('rc.remove')} onclick={() => removeButton(i)}>✕</button>
     </div>
@@ -213,10 +223,6 @@
   }
   .mc-inv input { accent-color: #37a8db; }
   .mc-btnlbl { flex: none; color: #949494; font-size: 10px; }
-  .mc-btnnum {
-    width: 48px; flex: none; padding: 4px 6px; font-size: 12px; background: #2a2a2a; color: #e0e0e0;
-    border: 1px solid #444; border-radius: 4px; font-variant-numeric: tabular-nums;
-  }
   .mc-del {
     flex: none; width: 24px; height: 24px; font-size: 11px; line-height: 1; border-radius: 4px; cursor: pointer;
     background: #2a2a2a; color: #c97070; border: 1px solid #5a3030;

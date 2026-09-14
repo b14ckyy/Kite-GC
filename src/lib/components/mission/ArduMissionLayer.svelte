@@ -37,10 +37,10 @@
   import { connection } from '$lib/stores/connection';
   import { arduWpDetailLines } from '$lib/helpers/missionWpDetails';
   import {
-    newPopupState, renderEditorPopup, closeEditorPopup,
+    newPopupState, renderEditorPopup, closeEditorPopup, deferWhileStepping,
     numInputHtml, enumSelectHtml, paramRow, canonicalLabel, actionsHtml, modifierSection,
-    addModifierSelect, attachNumBtnEvents, disablePopupPropagation,
-  } from '$lib/helpers/missionEditorPopup';
+    addModifierSelect, disablePopupPropagation,
+  } from '$lib/helpers/missionEditorPopup.svelte';
   import { iconForArduWp } from '$lib/helpers/missionIconsArdupilot';
   import { settings } from '$lib/stores/settings';
   import { homePosition, type HomePosition } from '$lib/stores/home';
@@ -127,7 +127,7 @@
       return enumSelectHtml(dataAttr, options, value);
     }
     const step = spec.decimals && spec.decimals > 0 ? Math.pow(10, -spec.decimals) : 1;
-    return numInputHtml(dataAttr, value, { step, min: spec.min, max: spec.max });
+    return numInputHtml(dataAttr, value, { step, min: spec.min, max: spec.max, decimals: spec.decimals ?? 0, unit: spec.units });
   }
 
   function paramRowsHtml(wp: ArduWaypoint, target: 'primary' | 'mod', modIdx = -1): string {
@@ -145,7 +145,8 @@
       const dataAttr = target === 'primary'
         ? `data-target="primary" data-pidx="${pidx}"`
         : `data-target="mod" data-modidx="${modIdx}" data-pidx="${pidx}"`;
-      const row = paramRow(spec.label, paramFieldHtml(spec, value, dataAttr), { unit: spec.units, tooltip: spec.tooltip });
+      const isEnum = !!(spec.enumStrings && spec.enumValues);
+      const row = paramRow(spec.label, paramFieldHtml(spec, value, dataAttr), { unit: isEnum ? spec.units : undefined, tooltip: spec.tooltip });
       if (spec.advanced) advanced += row; else normal += row;
     }
     // Advanced (rare) params collapse under an expander, QGC-style — common fields stay uncluttered.
@@ -198,9 +199,7 @@
 
     if (def?.specifiesCoordinate) {
       html += `<div class="wpe-row"><label>${$t('missionLayer.alt')}</label>`
-        + `<div class="wpe-num-ctrl"><button class="wpe-num-btn" data-numdir="-1">−</button>`
-        + `<input type="number" data-field="alt" value="${wp.alt}" step="1" min="0"/>`
-        + `<button class="wpe-num-btn" data-numdir="1">+</button></div>`
+        + numInputHtml('data-field="alt"', wp.alt, { step: 1, min: 0, decimals: 0, unit: 'm' })
         + `<button data-field="frameToggle" class="wpe-toggle">${frameLabel(wp.frame)}</button></div>`;
       // Takeoff coords are hidden only for a connected coordinate-less "take off in place" (it uses the
       // FC home); shown when the takeoff has a real coordinate (PX4 / fixed-wing) or while planning
@@ -357,8 +356,6 @@
         b.textContent = `${show ? '▴' : '▾'} ${$t('missionLayer.advanced')}`;
       });
     });
-
-    attachNumBtnEvents(el);
 
     el.querySelector('button[data-action="moveUp"]')?.addEventListener('click', () => moveGroup(group, -1));
     el.querySelector('button[data-action="moveDown"]')?.addEventListener('click', () => moveGroup(group, 1));
@@ -586,7 +583,7 @@
         map, popupState, g.anchorIdx, anchorLatLng,
         buildGroupEditorHtml(g, wps.length, vehicle),
         (popup) => attachGroupEditorEvents(popup, g),
-        { popupOptions: { maxWidth: 260, minWidth: 200 } },
+        { popupOptions: { maxWidth: 310, minWidth: 230 } },
       );
     } else {
       closeEditorPopup(map, popupState);
@@ -620,7 +617,8 @@
   $effect(() => {
     void activeSurveyPattern.isActive; // re-render (clear / restore) when entering or leaving pattern mode
     void currentSelSet; // re-render when the multi-selection changes (red icons follow set membership)
-    renderMission(currentWps, currentSelIdx, currentEditing, currentHome, currentVehicle, currentActiveWp, connected);
+    const render = () => renderMission(currentWps, currentSelIdx, currentEditing, currentHome, currentVehicle, currentActiveWp, connected);
+    if (!deferWhileStepping(popupState, render)) render();
   });
 
   onDestroy(() => {
