@@ -239,8 +239,7 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **The mouse wheel steps any + / − number field** — click into the field, then turn: up
       increases, down decreases, faster turning steps in bigger increments, and a field without focus
       never reacts, so scrolling a panel stays safe. The waypoint editor popups use the very same
-      field now (same look, unit inside the box), and their markers redraw once the wheel rests
-      instead of flickering with every notch. [#189] · [#191]
+      field now (same look, unit inside the box). [#189] · [#191]
 
 ??? note "1.0 — Initial release · Live"
 
