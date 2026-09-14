@@ -109,7 +109,7 @@ Kite ships in English, German, French, Chinese and Bulgarian. For contributions:
 Missing non-English keys fall back gracefully, so an English-only PR is fine — a maintainer (or you, with
 AI help) can top up the other languages afterwards.
 
-**Finding the key for a string you see on screen:** `python tools/i18n-key-paths.py` writes a pseudo-locale
+**Finding the key for a string you see on screen:** `python tools/helpers/i18n-key-paths.py` writes a pseudo-locale
 `src/lib/i18n/locales/xx.json` in which every string is replaced by its own key path (`sensors.gyro`,
 `rcLink.noLink`, …). Register it locally in `src/lib/i18n/index.ts` as described in the script's header,
 start the dev app and switch the language to it — the interface then shows the key at every position
