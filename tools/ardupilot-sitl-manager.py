@@ -338,6 +338,7 @@ class Instance:
     vehicle: str
     dir: Path
     proc: subprocess.Popen | None = None
+    tree: ProcessTree | None = None
     args: list[str] = field(default_factory=list)
     restarts: int = 0
     started_at: float = 0.0
@@ -377,41 +378,64 @@ class Instance:
         return 5760 + 10 * self.instance
 
 
-class Job:
-    """Windows job object with kill-on-close: the vehicles die with the manager, no orphans on 5760."""
+class ProcessTree:
+    """One SITL instance's process tree. Windows: a job object with kill-on-close — ArduPilot's SITL re-executes
+    itself on a reboot command, so the process we started becomes a stub and the real one is its child; terminating the JOB ends both, and closing the manager does too. POSIX: a
+    process group, killed as a whole."""
 
     def __init__(self):
-        self.handle = None
-        if not IS_WINDOWS:
-            return
-        k = ctypes.windll.kernel32
+        self.job = None
+        if IS_WINDOWS:
+            k = ctypes.windll.kernel32
 
-        class BasicLimit(ctypes.Structure):
-            _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64), ("PerJobUserTimeLimit", ctypes.c_int64),
-                        ("LimitFlags", ctypes.c_uint32), ("MinimumWorkingSetSize", ctypes.c_size_t),
-                        ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", ctypes.c_uint32),
-                        ("Affinity", ctypes.c_size_t), ("PriorityClass", ctypes.c_uint32), ("SchedulingClass", ctypes.c_uint32)]
+            class BasicLimit(ctypes.Structure):
+                _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64), ("PerJobUserTimeLimit", ctypes.c_int64),
+                            ("LimitFlags", ctypes.c_uint32), ("MinimumWorkingSetSize", ctypes.c_size_t),
+                            ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", ctypes.c_uint32),
+                            ("Affinity", ctypes.c_size_t), ("PriorityClass", ctypes.c_uint32), ("SchedulingClass", ctypes.c_uint32)]
 
-        class IoCounters(ctypes.Structure):
-            _fields_ = [(n, ctypes.c_uint64) for n in ("ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
-                                                         "ReadTransferCount", "WriteTransferCount", "OtherTransferCount")]
+            class IoCounters(ctypes.Structure):
+                _fields_ = [(n, ctypes.c_uint64) for n in ("ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+                                                             "ReadTransferCount", "WriteTransferCount", "OtherTransferCount")]
 
-        class ExtendedLimit(ctypes.Structure):
-            _fields_ = [("BasicLimitInformation", BasicLimit), ("IoInfo", IoCounters), ("ProcessMemoryLimit", ctypes.c_size_t),
-                        ("JobMemoryLimit", ctypes.c_size_t), ("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t)]
+            class ExtendedLimit(ctypes.Structure):
+                _fields_ = [("BasicLimitInformation", BasicLimit), ("IoInfo", IoCounters), ("ProcessMemoryLimit", ctypes.c_size_t),
+                            ("JobMemoryLimit", ctypes.c_size_t), ("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t)]
 
-        self.handle = k.CreateJobObjectW(None, None)
-        info = ExtendedLimit()
-        info.BasicLimitInformation.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-        k.SetInformationJobObject(self.handle, 9, ctypes.byref(info), ctypes.sizeof(info))  # JobObjectExtendedLimitInformation
-        self._assign = k.AssignProcessToJobObject
+            self.job = k.CreateJobObjectW(None, None)
+            info = ExtendedLimit()
+            info.BasicLimitInformation.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            k.SetInformationJobObject(self.job, 9, ctypes.byref(info), ctypes.sizeof(info))
 
-    def assign(self, proc: subprocess.Popen) -> None:
-        if self.handle:
-            self._assign(self.handle, int(proc._handle))  # noqa: SLF001 — the Win32 handle Popen keeps
+    @staticmethod
+    def popen_kwargs() -> dict:
+        if IS_WINDOWS:
+            return {"creationflags": subprocess.CREATE_NO_WINDOW}
+        return {"start_new_session": True}
 
+    def adopt(self, proc: subprocess.Popen) -> None:
+        if self.job:
+            ctypes.windll.kernel32.AssignProcessToJobObject(self.job, int(proc._handle))  # noqa: SLF001
 
-JOB = Job()
+    def terminate(self, proc: subprocess.Popen | None) -> None:
+        if IS_WINDOWS:
+            if self.job:
+                ctypes.windll.kernel32.TerminateJobObject(self.job, 1)
+                ctypes.windll.kernel32.CloseHandle(self.job)
+                self.job = None
+        elif proc is not None:
+            import signal
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+                time.sleep(0.5)
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        if proc is not None:
+            try:
+                proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                pass
 
 
 class Manager:
@@ -486,10 +510,11 @@ class Manager:
             raise FileNotFoundError(f"{exe} not found — download the channel first" + (", or start that vehicle once in Mission Planner" if IS_WINDOWS else ""))
         inst.args = self.build_args(inst)
         out = open(inst.dir / "stdout.txt", "wb")
+        inst.tree = ProcessTree()
         inst.proc = subprocess.Popen([str(exe), *inst.args], cwd=inst.dir, stdout=out, stderr=subprocess.STDOUT,
-                                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                                     **ProcessTree.popen_kwargs())
         out.close()
-        JOB.assign(inst.proc)
+        inst.tree.adopt(inst.proc)
         inst.started_at = time.time()
         inst.state = "starting"
         inst.last_hb = 0.0
@@ -500,12 +525,9 @@ class Manager:
 
     @staticmethod
     def stop_instance(inst: Instance) -> None:
-        if inst.alive:
-            inst.proc.kill()
-            try:
-                inst.proc.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                pass
+        if inst.tree is not None:
+            inst.tree.terminate(inst.proc)  # the whole tree — a re-exec'd child included
+        inst.tree = None
         inst.proc = None
         inst.state, inst.mode, inst.armed = "stopped", "", False
 
