@@ -7,7 +7,7 @@ hardware. Which one to reach for:
 |------------|------|
 | the **real firmware** — ArduPilot's parameters, mission logic, quirks; one vehicle or a swarm | `ardupilot-sitl-manager.py` |
 | the real **INAV** firmware — its MSP surface, settings, ports (no flying unless a RealFlight / X-Plane is attached) | `inav-sitl-manager.py` |
-| a **flying aircraft in seconds** with nothing to download — ArduPilot over MAVLink, or INAV over MSP / MAVLink, including RC stick control, missions, guided and parameters | `fc_sim.py` |
+| a **flying aircraft in seconds** with nothing to download — ArduPilot over MAVLink, or INAV over MSP / MAVLink, including RC stick control, missions, guided and parameters; window or console | `fc_sim.py` |
 | a passive **LTM telemetry** link, e.g. for the phone's background-telemetry path | `ltm_sim.py` |
 | an **RTSP camera** for the native video client (MJPEG, H.264, H.265) | `rtsp_test_server.py` |
 
@@ -18,13 +18,27 @@ with python.org, Homebrew and distro Pythons).
 
 ## `fc_sim.py` — fake flight controller
 
-A flight controller modelled in Python, by Sebastian Kumor (#142). One process, three combinations:
+A flight controller modelled in Python, by Sebastian Kumor (#142).
 
-| Command | Kite sees | Kite connection |
-|---------|-----------|-----------------|
-| `python tools/simulators/fc_sim.py` | ArduPlane / ArduCopter 4.8.0-dev over MAVLink | type **UDP**, host `127.0.0.1`, port `14550` |
-| `python tools/simulators/fc_sim.py --firmware inav` | INAV 9.1.0 over MSP | protocol **MSP**, transport **TCP**, host `127.0.0.1`, port `5761` |
-| `python tools/simulators/fc_sim.py --firmware inav --protocol mavlink` | INAV's own MAVLink port — deliberately as limited as the firmware's `telemetry/mavlink.c` | type **UDP**, port `14550` |
+```sh
+python tools/simulators/fc_sim.py                        # the window: set the options, press Start
+python tools/simulators/fc_sim.py --cli --firmware inav  # the console instead (Ctrl+C stops)
+python tools/simulators/fc_sim.py --firmware inav        # the window, pre-filled with these options
+```
+
+The window (Tk, like the SITL managers) has the options as a form, Start / Stop / Restart, the
+simulator's log and a live status row (mode, armed, altitude, speed, heading, battery, position); it
+remembers the form between runs and runs the simulation as a `--cli` child, so closing the window
+always ends the simulator. `--status N` makes the console print the same `[state] key=value …` line
+every N seconds.
+
+One process, three combinations:
+
+| Command (or the same choice in the window) | Kite sees | Kite connection |
+|--------------------------------------------|-----------|-----------------|
+| `fc_sim.py --cli` | ArduPlane / ArduCopter 4.8.0-dev over MAVLink | type **UDP**, host `127.0.0.1`, port `14550` |
+| `fc_sim.py --cli --firmware inav` | INAV 9.1.0 over MSP | protocol **MSP**, transport **TCP**, host `127.0.0.1`, port `5761` |
+| `fc_sim.py --cli --firmware inav --protocol mavlink` | INAV's own MAVLink port — deliberately as limited as the firmware's `telemetry/mavlink.c` | type **UDP**, port `14550` |
 
 The airframe is a point mass with turn-rate, climb-rate and acceleration limits taken from the firmware
 defaults (ArduPlane `config.h`, INAV `settings.yaml`): a plane cannot hover, so every "hold position"
