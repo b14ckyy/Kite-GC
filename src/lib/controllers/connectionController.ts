@@ -7,7 +7,7 @@ import { get } from 'svelte/store';
 import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from '$lib/stores/connection';
 import type { InavStats } from '$lib/stores/flightlogTypes';
 import { connection, connectionProtocol, fcLinkAlive, availablePorts, bleDevices, detectedPlatformType } from '$lib/stores/connection';
-import { startTelemetryListeners, stopTelemetryListeners, resetTelemetry } from '$lib/stores/telemetry';
+import { startTelemetryListeners, stopTelemetryListeners, resetTelemetry, setFcVariant } from '$lib/stores/telemetry';
 import { applyRelaysOnConnect, clearRelaysOnDisconnect } from '$lib/controllers/relayController';
 import { loadSafehomeConfig, clearSafehome } from '$lib/stores/safehome';
 import { loadGeozoneConfig, clearGeozones } from '$lib/stores/geozone';
@@ -200,6 +200,7 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
     secondary: null,
   });
   fcLinkAlive.set(true);
+  setFcVariant(info.fc_variant);
   await startTelemetryListeners();
   // Auto-start the saved telemetry relays (push telemetry → no handshake needed).
   await applyRelaysOnConnect();
