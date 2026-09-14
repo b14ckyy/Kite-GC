@@ -10,7 +10,7 @@ import { writable, get } from 'svelte/store';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { settings } from './settings';
 
-export type StatusTextLevel = 'error' | 'warning' | 'info';
+export type StatusTextLevel = 'error' | 'warning' | 'info' | 'debug';
 
 export interface StatusTextMsg {
   id: number;
@@ -25,20 +25,24 @@ const MAX_BUFFER = 12;          // lines kept (the banner shows a few and scroll
 const CLEAR_AFTER_MS = 20_000;  // each message fades out 20 s after it individually arrived
 const SOUND_MIN_GAP_MS = 1200;  // don't let an INFO flood machine-gun the speaker
 
-/** MAV_SEVERITY → display/sound level. ≤3 ERROR/CRITICAL/ALERT/EMERGENCY, 4 WARNING, ≥5 NOTICE/INFO/DEBUG. */
+/** MAV_SEVERITY → display/sound level. ≤3 ERROR/CRITICAL/ALERT/EMERGENCY, 4 WARNING, 5–6 NOTICE/INFO,
+ *  7 DEBUG. DEBUG is the firmware's developer chatter (ArduPilot: "Sending unknown message (44)" at the
+ *  rate a GCS asked for a message the build cannot send) — it stays off the banner unless asked for. */
 export function statusLevel(severity: number): StatusTextLevel {
   if (severity <= 3) return 'error';
   if (severity === 4) return 'warning';
+  if (severity >= 7) return 'debug';
   return 'info';
 }
 
-/** Honour the "System Messages" setting (off / error / warning / all). */
+/** Honour the "System Messages" setting (off / error / warning / all / debug). */
 function levelAllowed(level: StatusTextLevel): boolean {
   switch (get(settings).systemMessages) {
     case 'off': return false;
     case 'error': return level === 'error';
-    case 'warning': return level !== 'info';
-    default: return true; // 'all'
+    case 'warning': return level === 'error' || level === 'warning';
+    case 'all': return level !== 'debug';
+    default: return true; // 'debug' — everything, DEBUG included
   }
 }
 
@@ -117,8 +121,9 @@ function push(severity: number, text: string): void {
   });
   scheduleSweep();
 
-  // Always cue errors/warnings; an INFO line already on screen never re-cues, so a nag loop stays silent.
-  if (!repeated || level !== 'info') playTone(level);
+  // Always cue errors/warnings; an INFO line already on screen never re-cues, so a nag loop stays
+  // silent. DEBUG lines are never cued — they are on screen because someone is reading, not listening.
+  if (level !== 'debug' && (!repeated || level !== 'info')) playTone(level);
 }
 
 // ── Audio cue (Web Audio) — gentle for info, discreetly alarming for warnings/errors ──

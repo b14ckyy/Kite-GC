@@ -889,6 +889,7 @@
     "sysMsgError": "Грешки",
     "sysMsgWarning": "Предупреждения",
     "sysMsgAll": "Всички",
+    "sysMsgDebug": "Дебъг (подробно)",
     "diagnostics": "Диагностика",
     "logLevel": "Ниво на лог",
     "logOff": "Изключено",

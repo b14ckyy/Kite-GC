@@ -653,7 +653,7 @@
   let defaultWpAltitudeM = $state(50);
   let defaultPhTimeSec = $state(30);
   let warnAltitudeM = $state(120);
-  let systemMessages = $state<SystemMessagesLevel>('all');
+  let systemMessages = $state<SystemMessagesLevel>('warning');
   let logLevel = $state<LogLevel>('warning');
   let interfaceSettings = $state<InterfaceSettings>({
     speedUnit: 'kmh',
@@ -975,7 +975,7 @@
   defaultWpAltitudeM = saved.defaultWpAltitudeM;
   defaultPhTimeSec = saved.defaultPhTimeSec;
   warnAltitudeM = saved.warnAltitudeM;
-  systemMessages = saved.systemMessages ?? 'all';
+  systemMessages = saved.systemMessages ?? 'warning';
   // Apply the persisted diagnostic log level to the backend logger (it starts at Warning by default).
   // When the app runs in debug mode (release `--debug` or any debug build) surface the Debug Monitor
   // and force the log to Debug regardless of the saved level.

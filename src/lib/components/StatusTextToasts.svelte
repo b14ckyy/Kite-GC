@@ -14,7 +14,7 @@
   import { fade } from 'svelte/transition';
   import { statusTexts, type StatusTextLevel } from '$lib/stores/statusText';
 
-  const ICON: Record<StatusTextLevel, string> = { error: '⚠', warning: '▲', info: 'ⓘ' };
+  const ICON: Record<StatusTextLevel, string> = { error: '⚠', warning: '▲', info: 'ⓘ', debug: '⋯' };
 
   let scroller = $state<HTMLDivElement | undefined>(undefined);
   // Keep the newest line in view as messages arrive.
@@ -109,6 +109,8 @@
 
   .msg-line.info    { color: #cfe7f3; }
   .msg-line.info .m-icon { color: #37a8db; }
+  .msg-line.debug   { color: #b4b4b4; }
+  .msg-line.debug .m-icon { color: #949494; }
   .msg-line.warning { color: #f6e3b0; }
   .msg-line.warning .m-icon { color: #f4c020; }
   .msg-line.error   { color: #f6c9c9; background: rgba(120, 30, 30, 0.45); }

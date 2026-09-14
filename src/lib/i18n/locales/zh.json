@@ -890,6 +890,7 @@
     "sysMsgError": "错误",
     "sysMsgWarning": "警告",
     "sysMsgAll": "全部",
+    "sysMsgDebug": "调试（详细）",
     "diagnostics": "诊断",
     "logLevel": "日志级别",
     "logOff": "关闭",
