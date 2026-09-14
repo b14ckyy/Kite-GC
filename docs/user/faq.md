@@ -53,17 +53,23 @@ source rather than route around anyone's terms of service.
 
 ## Connections
 
-### Why does Kite show "Sending unknown message (44)" twice a second?
+### Why does Kite keep showing a firmware message that Mission Planner doesn't?
 
-You are connected through **Mission Planner's MAVLink forward** (or mirror), and the aircraft runs
-ArduPilot **4.5 or an early 4.6 beta** on a board whose firmware build has no camera field-of-view
-support — typically a small-flash F405-class board. The text is not Kite's: it is the firmware
-complaining, at its *debug* severity, every time it is asked to send a message it does not have.
-The one asking is Mission Planner, which requests the camera message `CAMERA_FOV_STATUS` at its
-status rate (2 Hz); the firmware accepts the request and then complains at that rate, to every
-connected ground station — and Kite shows the line as an info notification. Connected directly to
-the aircraft, without Mission Planner in the loop, the message never appears.
+When Kite is connected through **another ground station's MAVLink forward** (Mission Planner's
+forward or mirror, for example), it sees everything the aircraft sends — including replies to
+requests the *other* ground station made. ArduPilot broadcasts its status texts to every connected
+ground station, and Kite shows them as notifications; Mission Planner keeps the low-severity ones in
+its Messages tab, so the same line can look like a Kite problem while it is a conversation between
+Mission Planner and the firmware.
 
-It is harmless. **Update the aircraft to ArduPilot 4.6 or newer**, which refuses the request once
-instead of repeating the complaint. Until then, set **[Settings → Alerts → System
-messages](reference/settings.md)** to *Warning* to keep the notification banner quiet.
+A typical example: **"Sending unknown message (44)" twice a second**. Mission Planner asks the
+aircraft for a camera message (`CAMERA_FOV_STATUS`) at its 2 Hz status rate; on ArduPilot 4.5 and
+the early 4.6 betas a board whose firmware build has no camera field-of-view support (small-flash
+F405-class boards, typically) accepts the request and then complains at that rate, at its *debug*
+severity. Connected directly to the aircraft, without Mission Planner in the loop, the line never
+appears.
+
+Such messages are harmless. **Update the aircraft to ArduPilot 4.6 or newer** — the current
+firmware refuses a request it cannot serve once instead of repeating the complaint — and keep the
+other ground station up to date as well. To keep the notification banner quiet in the meantime,
+set **[Settings → Alerts → System messages](reference/settings.md)** to *Warning*.
