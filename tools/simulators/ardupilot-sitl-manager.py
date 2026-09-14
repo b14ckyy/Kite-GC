@@ -203,6 +203,19 @@ def channel_dir(name: str) -> Path:
     return BIN_ROOT / re.sub(r"[^A-Za-z]", "_", name)
 
 
+def fit_window(root, width: int, height: int, min_width: int, min_height: int) -> None:
+    """Open at `width`×`height`, but never narrower than the widgets need: Tk's widget sizes follow the
+    platform font and theme (Windows: Segoe UI 9 + vista; Linux: DejaVu Sans 10 + default at 1.33 scaling),
+    and a fixed geometry that fits one platform clips the right-hand group on the other (measured here:
+    the ArduPilot window wants 1424 px on Debian, 1200 was set). The natural width also floors the
+    minimum size, so the window cannot be shrunk into clipping; both capped to the screen."""
+    root.update_idletasks()
+    need_w = min(root.winfo_reqwidth(), root.winfo_screenwidth() - 40)
+    need_h = min(root.winfo_reqheight(), root.winfo_screenheight() - 80)
+    root.geometry(f"{max(width, need_w)}x{max(height, need_h)}")
+    root.minsize(max(min_width, need_w), min_height)
+
+
 def binary_name(vehicle: str) -> str:
     return BINARY_WIN[vehicle] + ".exe" if IS_WINDOWS else BINARY_NATIVE[vehicle]
 
@@ -248,7 +261,11 @@ def download_channel(name: str, progress) -> Path:
     elif IS_LINUX:
         arch = "SITL_x86_64_linux_gnu" if platform.machine() in ("x86_64", "AMD64") else "SITL_arm_linux_gnueabihf"
         for v in VEHICLES:
-            files.append((f"{FIRMWARE_URL}{FIRMWARE_DIR[v]}/{CHANNELS_LINUX[name]}/{arch}/{BINARY_NATIVE[v]}", d / BINARY_NATIVE[v]))
+            # The heli build lives in its own arch folder (`…_linux_gnu-heli/arducopter-heli`), not next to
+            # arducopter — unlike the flat Mission Planner folder Windows downloads from (checked on the
+            # server for stable/beta/latest, x86_64 and armhf).
+            arch_dir = arch + ("-heli" if v == "Heli" else "")
+            files.append((f"{FIRMWARE_URL}{FIRMWARE_DIR[v]}/{CHANNELS_LINUX[name]}/{arch_dir}/{BINARY_NATIVE[v]}", d / BINARY_NATIVE[v]))
     else:
         raise RuntimeError("No prebuilt SITL for macOS — build ArduPilot with waf (--board sitl) and point Source at build/sitl/bin")
     for i, (url, dest) in enumerate(files, 1):
@@ -758,8 +775,6 @@ def run_ui(mgr: Manager, auto_start: bool) -> None:
 
     root = tk.Tk()
     root.title("Kite SITL manager")
-    root.geometry("1200x820")
-    root.minsize(1000, 660)
     pad_ = {"padx": 4, "pady": 2}
 
     top = ttk.Frame(root, padding=6)
@@ -1120,6 +1135,7 @@ def run_ui(mgr: Manager, auto_start: bool) -> None:
 
     settings_to_ui()
     refresh_bin_label()
+    fit_window(root, 1200, 820, 1000, 660)
     root.after(250, tick)
     root.after(1500, log_tick)
     if auto_start:

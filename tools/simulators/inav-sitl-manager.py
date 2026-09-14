@@ -668,6 +668,19 @@ def run_headless(mgr: Manager, seconds: int) -> None:
 
 
 # ── UI ────────────────────────────────────────────────────────────────────────────────────────────
+def fit_window(root, width: int, height: int, min_width: int, min_height: int) -> None:
+    """Open at `width`×`height`, but never narrower than the widgets need: Tk's widget sizes follow the
+    platform font and theme (Windows: Segoe UI 9 + vista; Linux: DejaVu Sans 10 + default at 1.33 scaling),
+    and a fixed geometry that fits one platform clips the right-hand group on the other (measured here:
+    the ArduPilot window wants 1424 px on Debian, 1200 was set). The natural width also floors the
+    minimum size, so the window cannot be shrunk into clipping; both capped to the screen."""
+    root.update_idletasks()
+    need_w = min(root.winfo_reqwidth(), root.winfo_screenwidth() - 40)
+    need_h = min(root.winfo_reqheight(), root.winfo_screenheight() - 80)
+    root.geometry(f"{max(width, need_w)}x{max(height, need_h)}")
+    root.minsize(max(min_width, need_w), min_height)
+
+
 def run_ui(mgr: Manager, auto_start: bool) -> None:
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
@@ -681,8 +694,6 @@ def run_ui(mgr: Manager, auto_start: bool) -> None:
 
     root = tk.Tk()
     root.title("Kite INAV SITL manager")
-    root.geometry("1320x820")
-    root.minsize(1060, 660)
     pad_ = {"padx": 4, "pady": 2}
 
     top = ttk.Frame(root, padding=6)
@@ -1019,6 +1030,7 @@ def run_ui(mgr: Manager, auto_start: bool) -> None:
     settings_to_ui()
     loading["on"] = False
     refresh_bin_label()
+    fit_window(root, 1320, 820, 1060, 660)
     root.after(250, tick)
     root.after(1500, log_tick)
     if auto_start:
