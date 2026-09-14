@@ -23,10 +23,14 @@ INAV's own fc_msp.c field order, including the ones whose width is easy to get w
     HEARTBEAT teaches the sim where to stream (transport/udp.rs peer learning).
   Kite side, INAV: protocol MSP, transport TCP, host 127.0.0.1, port 5761.
 
-Usage: python3 tools/simulators/fc_sim.py [--firmware ardupilot|inav] [--protocol mavlink|msp]
-       [--vehicle plane|copter] [--transport udp|tcp] [--port N] [--lat LAT --lon LON]
-       [--radius M] [--speed MS] [--alt M] [--no-fix] [--disarmed] [--no-gcs-nav]
-       [--chatter] [--verbose] [--defs PATH] [--version V]
+Usage: python tools/simulators/fc_sim.py                    the window: set the options, press Start
+       python tools/simulators/fc_sim.py --cli [options]      the console, as before (Ctrl+C stops)
+       python tools/simulators/fc_sim.py [options]            the window, pre-filled with these options
+
+  options: [--firmware ardupilot|inav] [--protocol mavlink|msp] [--vehicle plane|copter]
+       [--transport udp|tcp] [--port N] [--lat LAT --lon LON] [--radius M] [--speed MS] [--alt M]
+       [--mode M] [--no-fix] [--disarmed] [--no-gcs-nav] [--chatter] [--verbose] [--defs PATH]
+       [--version V] [--status SECONDS] [--auto-start]
 
   --firmware   which flight stack to imitate, and with it the default protocol, transport and
                port: ardupilot means MAVLink over UDP 14550, inav means MSP over TCP 5761
@@ -43,7 +47,15 @@ Usage: python3 tools/simulators/fc_sim.py [--firmware ardupilot|inav] [--protoco
   --chatter    ArduPilot only: emit a periodic STATUSTEXT nag (exercises the toast de-dup)
   --defs       MAVLink only: path to ardupilotmega.xml (default: the vendored mavlink crate)
   --version    INAV only: the firmware version to report (default 9.1.0, INAV master)
+  --mode       flight mode to start in, e.g. loiter (INAV POSHOLD), auto, manual, rtl (default auto
+               when armed, manual when disarmed)
   --verbose    log every command, mission exchange and stream re-rate
+  --cli        run in the console. Without it the window opens (Tk, like the SITL managers): the
+               same options as a form, Start / Stop / Restart, the log, and a status row; it runs the
+               simulation as a `--cli` child of this file and remembers the form in the kite-sitl data
+               dir (settings-fcsim.json)
+  --status     print a one-line `[state] key=value …` summary every SECONDS (the window reads it)
+  --auto-start window mode: press Start right after opening
 
 The airframe is a point mass with turn-rate, climb-rate and acceleration limits rather than a
 scripted path, so the telemetry follows from the same state the commands mutate. A plane cannot
@@ -94,11 +106,15 @@ with --verbose and answered with an MSP error frame rather than a plausible-look
 """
 import argparse
 import glob
+import json
 import math
 import os
+import queue
 import socket
 import struct
+import subprocess
 import sys
+import threading
 import time
 import xml.etree.ElementTree as ET
 
@@ -1412,6 +1428,7 @@ def run_mavlink(args):
               'missions, params and RC override')
     greeted = False
     next_chatter = 0.0
+    next_state = 0.0
 
     while True:
         for name, f in link.poll():
@@ -1718,6 +1735,9 @@ def run_mavlink(args):
             next_chatter = now + 3.0
             say('PreArm: Waiting for GPS fix', 'warning')
             say('Unable to arm: check RC', 'warning')
+        if args.status and now >= next_state:
+            next_state = now + args.status
+            print(state_line(v), flush=True)
 
         time.sleep(0.01)
 
@@ -2367,6 +2387,7 @@ def run_msp(args):
             return b''
         return None
 
+    next_state = 0.0
     while True:
         for code, payload in link.poll():
             resp = handle(code, payload)
@@ -2379,7 +2400,405 @@ def run_msp(args):
                 if args.verbose:
                     print(f'[sim] {name} -> {len(resp)} B')
         v.update()
+        if args.status and time.time() >= next_state:
+            next_state = time.time() + args.status
+            print(state_line(v), flush=True)
         time.sleep(0.002)
+
+
+# ── Window ───────────────────────────────────────────────────────────────────
+# The default launch: a small Tk desk in the style of the SITL managers. The simulation itself
+# always runs as a `--cli` child of this file, so the window never touches the protocol loops —
+# it only builds the option list, tails the child's output and reads its [state] lines.
+
+def state_line(v):
+    """One-line vehicle summary, printed every --status seconds; the window turns it into the
+    status row. key=value pairs so it stays parseable when fields are added."""
+    return (f'[state] mode={v.mode} armed={int(v.armed)} lat={v.lat:.6f} lon={v.lon:.6f} '
+            f'alt={v.rel_alt:.0f} spd={v.speed:.1f} hdg={math.degrees(v.yaw) % 360:.0f} '
+            f'batt={v.voltage:.1f}')
+
+
+def settings_path():
+    """Where the window keeps its last form values: the SITL managers' data dir."""
+    if sys.platform == 'win32':
+        root = os.environ.get('LOCALAPPDATA') or os.path.expanduser('~/AppData/Local')
+    elif sys.platform == 'darwin':
+        root = os.path.expanduser('~/Library/Application Support')
+    else:
+        root = os.environ.get('XDG_DATA_HOME') or os.path.expanduser('~/.local/share')
+    return os.path.join(root, 'kite-sitl', 'settings-fcsim.json')
+
+
+class Job:
+    """Windows: a job object with kill-on-close around the child, so it cannot outlive a hard-killed
+    window (it would keep the port). No-op elsewhere, where the child is terminated on close."""
+
+    def __init__(self):
+        self.h = None
+        if sys.platform != 'win32':
+            return
+        import ctypes
+
+        class BasicLimit(ctypes.Structure):
+            _fields_ = [('PerProcessUserTimeLimit', ctypes.c_int64), ('PerJobUserTimeLimit', ctypes.c_int64),
+                        ('LimitFlags', ctypes.c_uint32), ('MinimumWorkingSetSize', ctypes.c_size_t),
+                        ('MaximumWorkingSetSize', ctypes.c_size_t), ('ActiveProcessLimit', ctypes.c_uint32),
+                        ('Affinity', ctypes.c_size_t), ('PriorityClass', ctypes.c_uint32),
+                        ('SchedulingClass', ctypes.c_uint32)]
+
+        class IoCounters(ctypes.Structure):
+            _fields_ = [(n, ctypes.c_uint64) for n in ('ReadOperationCount', 'WriteOperationCount',
+                                                         'OtherOperationCount', 'ReadTransferCount',
+                                                         'WriteTransferCount', 'OtherTransferCount')]
+
+        class ExtendedLimit(ctypes.Structure):
+            _fields_ = [('BasicLimitInformation', BasicLimit), ('IoInfo', IoCounters),
+                        ('ProcessMemoryLimit', ctypes.c_size_t), ('JobMemoryLimit', ctypes.c_size_t),
+                        ('PeakProcessMemoryUsed', ctypes.c_size_t), ('PeakJobMemoryUsed', ctypes.c_size_t)]
+
+        self.k = ctypes.windll.kernel32
+        self.h = self.k.CreateJobObjectW(None, None)
+        info = ExtendedLimit()
+        info.BasicLimitInformation.LimitFlags = 0x2000   # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        self.k.SetInformationJobObject(self.h, 9, ctypes.byref(info), ctypes.sizeof(info))
+
+    def assign(self, proc):
+        if self.h:
+            self.k.AssignProcessToJobObject(self.h, int(proc._handle))   # noqa: SLF001
+
+    def terminate(self, proc):
+        if self.h:
+            self.k.TerminateJobObject(self.h, 1)
+        else:
+            proc.terminate()
+
+    def close(self):
+        if self.h:
+            self.k.CloseHandle(self.h)
+            self.h = None
+
+
+UI_FIELDS = ('firmware', 'protocol', 'transport', 'port', 'vehicle', 'version', 'lat', 'lon', 'radius',
+             'speed', 'alt', 'mode', 'defs', 'no_fix', 'disarmed', 'chatter', 'no_gcs_nav', 'verbose')
+UI_FLAGS = ('no_fix', 'disarmed', 'chatter', 'no_gcs_nav', 'verbose')
+
+
+def run_ui(args, seeded):
+    """The window. `seeded` = options were given on the command line, which then beat the saved
+    form values."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog, messagebox, ttk
+    except ImportError:
+        sys.exit('tkinter is not available in this Python — run with --cli')
+
+    path = settings_path()
+    saved = {}
+    try:
+        with open(path, encoding='utf-8') as fh:
+            saved = json.load(fh)
+    except (OSError, ValueError):
+        pass
+    if seeded or not saved:
+        saved = dict(firmware=args.firmware, protocol=args.protocol, transport=args.transport,
+                     port=str(args.port), vehicle=args.vehicle, version=args.version,
+                     lat=f'{args.lat:.6f}', lon=f'{args.lon:.6f}',
+                     radius='' if args.radius is None else f'{args.radius:g}',
+                     speed='' if args.speed is None else f'{args.speed:g}',
+                     alt='' if args.alt is None else f'{args.alt:g}',
+                     mode=args.mode or '', defs=args.defs or '', no_fix=args.no_fix,
+                     disarmed=args.disarmed, chatter=args.chatter, no_gcs_nav=not args.gcs_nav,
+                     verbose=args.verbose)
+
+    root = tk.Tk()
+    root.title('Kite FC simulator')
+    root.minsize(780, 600)
+    var = {k: (tk.BooleanVar(value=bool(saved.get(k, False))) if k in UI_FLAGS
+               else tk.StringVar(value=str(saved.get(k, '')))) for k in UI_FIELDS}
+    run_text, state_text, hint = tk.StringVar(value='stopped'), tk.StringVar(), tk.StringVar()
+    pad = dict(padx=6, pady=3)
+
+    top = ttk.Frame(root, padding=8)
+    top.pack(fill='both', expand=True)
+    top.columnconfigure(0, weight=1)
+    top.columnconfigure(1, weight=1)
+    top.rowconfigure(4, weight=1)
+
+    def frame(title, row, column, columnspan=1):
+        f = ttk.LabelFrame(top, text=title, padding=6)
+        f.grid(row=row, column=column, columnspan=columnspan, sticky='nsew', **pad)
+        return f
+
+    def combo(parent, row, label, key, values, column=0, width=11):
+        ttk.Label(parent, text=label).grid(row=row, column=column, sticky='w', **pad)
+        w = ttk.Combobox(parent, textvariable=var[key], values=values, state='readonly', width=width)
+        w.grid(row=row, column=column + 1, sticky='w', **pad)
+        return w
+
+    def entry(parent, row, label, key, column=0, width=12):
+        ttk.Label(parent, text=label).grid(row=row, column=column, sticky='w', **pad)
+        w = ttk.Entry(parent, textvariable=var[key], width=width)
+        w.grid(row=row, column=column + 1, sticky='w', **pad)
+        return w
+
+    def check(parent, row, label, key):
+        w = ttk.Checkbutton(parent, text=label, variable=var[key])
+        w.grid(row=row, column=0, columnspan=2, sticky='w', **pad)
+        return w
+
+    fc = frame('Flight controller', 0, 0)
+    combo(fc, 0, 'Firmware', 'firmware', ['ardupilot', 'inav'])
+    w_protocol = combo(fc, 1, 'Protocol', 'protocol', ['mavlink', 'msp'])
+    combo(fc, 2, 'Vehicle', 'vehicle', sorted(PROFILES))
+    w_version = entry(fc, 3, 'INAV version', 'version')
+
+    link = frame('Link', 0, 1)
+    w_transport = combo(link, 0, 'Transport', 'transport', ['udp', 'tcp'], width=6)
+    entry(link, 0, 'Port', 'port', column=2, width=7)
+    ttk.Label(link, textvariable=hint, wraplength=330, foreground='#1a6fa8').grid(
+        row=1, column=0, columnspan=4, sticky='w', **pad)
+    w_defs = entry(link, 2, 'Dialect XML', 'defs', width=28)
+
+    def browse():
+        f = filedialog.askopenfilename(title='ardupilotmega.xml', filetypes=[('MAVLink dialect', '*.xml')])
+        if f:
+            var['defs'].set(f)
+    w_browse = ttk.Button(link, text='…', width=3, command=browse)
+    w_browse.grid(row=2, column=3, sticky='w')
+    ttk.Label(link, text='(MAVLink; blank = the vendored mavlink crate)', foreground='#777').grid(
+        row=3, column=0, columnspan=4, sticky='w', padx=6)
+
+    flight = frame('Flight', 1, 0)
+    entry(flight, 0, 'Home lat', 'lat')
+    entry(flight, 0, 'lon', 'lon', column=2)
+    entry(flight, 1, 'Radius m', 'radius', width=7)
+    entry(flight, 1, 'Speed m/s', 'speed', column=2, width=7)
+    entry(flight, 2, 'Altitude m', 'alt', width=7)
+    w_mode = combo(flight, 2, 'Start mode', 'mode', [''], column=2, width=9)
+    ttk.Label(flight, text='blank = the airframe default (radius, speed, altitude) / auto when armed, '
+                           'manual when disarmed (mode)', foreground='#777', wraplength=330).grid(
+        row=3, column=0, columnspan=4, sticky='w', padx=6)
+
+    situ = frame('Situation', 1, 1)
+    check(situ, 0, 'No GPS fix (prearm / GPS warning UI)', 'no_fix')
+    check(situ, 1, 'Start disarmed, parked at home', 'disarmed')
+    w_chatter = check(situ, 2, 'STATUSTEXT chatter (ArduPilot, toast de-dup)', 'chatter')
+    w_gcsnav = check(situ, 3, 'No GCS NAV box: guided targets DENIED (INAV over MAVLink)', 'no_gcs_nav')
+    check(situ, 4, 'Verbose: log every command and mission exchange', 'verbose')
+
+    actions = ttk.Frame(top)
+    actions.grid(row=2, column=0, columnspan=2, sticky='ew', **pad)
+    b_start = ttk.Button(actions, text='Start', command=lambda: start())
+    b_stop = ttk.Button(actions, text='Stop', command=lambda: stop())
+    b_restart = ttk.Button(actions, text='Restart', command=lambda: (stop(), start()))
+    for b in (b_start, b_stop, b_restart):
+        b.pack(side='left', padx=(0, 6))
+    ttk.Label(actions, textvariable=run_text).pack(side='left', padx=12)
+    ttk.Label(top, textvariable=state_text, font='TkFixedFont').grid(
+        row=3, column=0, columnspan=2, sticky='w', padx=12)
+
+    logf = frame('Log', 4, 0, columnspan=2)
+    text = tk.Text(logf, height=14, wrap='word', state='disabled', font='TkFixedFont')
+    sb = ttk.Scrollbar(logf, command=text.yview)
+    text.configure(yscrollcommand=sb.set)
+    text.pack(side='left', fill='both', expand=True)
+    sb.pack(side='right', fill='y')
+
+    def log_add(line):
+        text.configure(state='normal')
+        text.insert('end', line + '\n')
+        if int(text.index('end-1c').split('.')[0]) > 2000:
+            text.delete('1.0', '500.0')
+        text.see('end')
+        text.configure(state='disabled')
+
+    def log_clear():
+        text.configure(state='normal')
+        text.delete('1.0', 'end')
+        text.configure(state='disabled')
+
+    # ── form logic ─────────────────────────────────────────────────────────
+    busy = [False]
+
+    def refresh(*_):
+        """Keep the form consistent: ArduPilot is MAVLink over UDP only, INAV picks; the port follows
+        the protocol unless the pilot typed their own; the mode list follows the airframe."""
+        if busy[0]:
+            return
+        busy[0] = True
+        try:
+            inav = var['firmware'].get() == 'inav'
+            if not inav:
+                var['protocol'].set('mavlink')
+            msp = var['protocol'].get() == 'msp'
+            if not msp:
+                var['transport'].set('udp')
+            w_protocol.configure(state='readonly' if inav else 'disabled')
+            w_transport.configure(state='readonly' if msp else 'disabled')
+            w_version.configure(state='normal' if inav else 'disabled')
+            w_chatter.configure(state='disabled' if inav else 'normal')
+            w_gcsnav.configure(state='normal' if inav and not msp else 'disabled')
+            w_defs.configure(state='disabled' if msp else 'normal')
+            w_browse.configure(state='disabled' if msp else 'normal')
+            default, other = ('5761', '14550') if msp else ('14550', '5761')
+            if var['port'].get().strip() in ('', other):
+                var['port'].set(default)
+            modes = sorted(set(PROFILES.get(var['vehicle'].get(), PROFILES['plane'])['modes'].values()))
+            w_mode.configure(values=[''] + modes)
+            if var['mode'].get() not in modes:
+                var['mode'].set('')
+            update_hint()
+        finally:
+            busy[0] = False
+
+    def update_hint(*_):
+        # Only the hint follows a port edit — refilling the default there would fight the typing.
+        msp = var['protocol'].get() == 'msp'
+        port = var['port'].get().strip() or ('5761' if msp else '14550')
+        if msp:
+            hint.set(f'Kite: protocol MSP · transport {var["transport"].get().upper()} · '
+                     f'host 127.0.0.1 · port {port}   (CH5 arms, CH6 selects the mode)')
+        else:
+            hint.set(f'Kite: connection type UDP · host 127.0.0.1 · port {port}')
+
+    for k in ('firmware', 'protocol', 'transport', 'vehicle'):
+        var[k].trace_add('write', refresh)
+    var['port'].trace_add('write', update_hint)
+    refresh()
+
+    def build_opts():
+        firmware, inav = var['firmware'].get(), var['firmware'].get() == 'inav'
+        msp = var['protocol'].get() == 'msp'
+        opts = ['--firmware', firmware, '--protocol', var['protocol'].get(),
+                '--transport', var['transport'].get(), '--vehicle', var['vehicle'].get()]
+        try:
+            opts += ['--port', str(int(var['port'].get()))]
+            opts += ['--lat', str(float(var['lat'].get())), '--lon', str(float(var['lon'].get()))]
+            for k in ('radius', 'speed', 'alt'):
+                if var[k].get().strip():
+                    opts += [f'--{k}', str(float(var[k].get()))]
+        except ValueError:
+            raise ValueError('The port must be a whole number, home / radius / speed / altitude numbers.')
+        if var['mode'].get():
+            opts += ['--mode', var['mode'].get()]
+        if inav and var['version'].get().strip():
+            opts += ['--version', var['version'].get().strip()]
+        if not msp and var['defs'].get().strip():
+            opts += ['--defs', var['defs'].get().strip()]
+        for flag, on in (('--no-fix', var['no_fix'].get()), ('--disarmed', var['disarmed'].get()),
+                         ('--chatter', not inav and var['chatter'].get()),
+                         ('--no-gcs-nav', inav and not msp and var['no_gcs_nav'].get()),
+                         ('--verbose', var['verbose'].get())):
+            if on:
+                opts.append(flag)
+        return opts
+
+    def save():
+        data = {k: (bool(var[k].get()) if k in UI_FLAGS else var[k].get()) for k in UI_FIELDS}
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'w', encoding='utf-8') as fh:
+                json.dump(data, fh, indent=2)
+        except OSError:
+            pass
+
+    # ── the child ──────────────────────────────────────────────────────────
+    child = {'p': None, 'job': None, 'q': None, 't0': 0.0}
+
+    def set_buttons():
+        running = child['p'] is not None
+        b_start.configure(state='disabled' if running else 'normal')
+        b_stop.configure(state='normal' if running else 'disabled')
+        b_restart.configure(state='normal' if running else 'disabled')
+
+    def release(code=None):
+        if child['job']:
+            child['job'].close()
+        child.update(p=None, job=None, q=None)
+        run_text.set('stopped' if code is None else f'exited with code {code}')
+        state_text.set('')
+        set_buttons()
+
+    def start():
+        if child['p'] is not None:
+            return
+        try:
+            opts = build_opts()
+        except ValueError as e:
+            messagebox.showerror('FC simulator', str(e))
+            return
+        save()
+        cmd = [sys.executable, '-u', os.path.abspath(__file__), '--cli', '--status', '1', *opts]
+        extra = {'creationflags': subprocess.CREATE_NO_WINDOW} if sys.platform == 'win32' else {}
+        try:
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                 encoding='utf-8', errors='replace', **extra)
+        except OSError as e:
+            messagebox.showerror('FC simulator', f'Could not start the simulator: {e}')
+            return
+        job = Job()
+        job.assign(p)
+        q = queue.Queue()
+
+        def reader():
+            for line in p.stdout:
+                q.put(line.rstrip('\n'))
+            q.put(None)
+        threading.Thread(target=reader, daemon=True).start()
+        child.update(p=p, job=job, q=q, t0=time.time())
+        log_clear()
+        log_add('> fc_sim.py --cli ' + ' '.join(opts))
+        set_buttons()
+
+    def stop():
+        p = child['p']
+        if p is None:
+            return
+        child['job'].terminate(p)
+        try:
+            p.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            p.kill()
+        release()
+
+    def pretty_state(line):
+        kv = dict(t.split('=', 1) for t in line.split()[1:] if '=' in t)
+        return (f'{kv.get("mode", "?").upper():<9} {"armed" if kv.get("armed") == "1" else "disarmed":<9} '
+                f'alt {kv.get("alt", "?"):>4} m   {kv.get("spd", "?"):>5} m/s   hdg {kv.get("hdg", "?"):>3}°   '
+                f'{kv.get("batt", "?")} V   {kv.get("lat", "?")}, {kv.get("lon", "?")}')
+
+    def poll():
+        p = child['p']
+        if p is not None:
+            while True:
+                try:
+                    line = child['q'].get_nowait()
+                except queue.Empty:
+                    break
+                if line is None:
+                    release(p.wait())
+                    break
+                if line.startswith('[state] '):
+                    state_text.set(pretty_state(line))
+                else:
+                    log_add(line)
+            if child['p'] is not None:
+                up = int(time.time() - child['t0'])
+                run_text.set(f'running · pid {p.pid} · {up // 60}:{up % 60:02d}')
+        root.after(200, poll)
+
+    def close():
+        stop()
+        save()
+        root.destroy()
+
+    root.protocol('WM_DELETE_WINDOW', close)
+    set_buttons()
+    poll()
+    if args.auto_start:
+        root.after(300, start)
+    root.mainloop()
 
 
 def main():
@@ -2421,6 +2840,12 @@ def main():
                                    '(default: the vendored mavlink crate)')
     ap.add_argument('--version', default='9.1.0',
                     help='inav only: version to report (default 9.1.0, INAV master)')
+    ap.add_argument('--cli', action='store_true',
+                    help='run in this console with the options given; without it the window opens, '
+                         'pre-filled with them')
+    ap.add_argument('--status', type=float, default=0.0, metavar='SECONDS',
+                    help='print a one-line [state] summary this often (0 = never; the window uses it)')
+    ap.add_argument('--auto-start', action='store_true', help='window mode: press Start right after opening')
     args = ap.parse_args()
 
     inav = args.firmware == 'inav'
@@ -2436,6 +2861,9 @@ def main():
     if not msp and args.transport != 'udp':
         ap.error('MAVLink here is UDP only; use --protocol msp for TCP')
 
+    if not args.cli:
+        run_ui(args, seeded=any(a != '--auto-start' for a in sys.argv[1:]))
+        return
     run_msp(args) if msp else run_mavlink(args)
 
 
