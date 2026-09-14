@@ -1847,6 +1847,12 @@ line of the version you run: 2.0.0 is told about 2.0.1, never about 2.1.0. The d
 </ul>
 <p><strong>Improved</strong></p>
 <ul>
+<li><strong>System messages default to <em>Warning</em>, and a new <em>Debug</em> level shows the firmware's
+  developer chatter.</strong> ArduPilot sends some texts at its DEBUG severity — "Sending unknown
+  message (44)" twice a second when a ground station in the loop asks for a message the board's
+  firmware cannot send, for example — and Kite showed them as info toasts. They now appear only
+  with <em>System messages</em> set to <em>Debug</em>; <em>All</em> is everything up to info, and a fresh install
+  starts at <em>Warning</em>. <a href="https://github.com/b14ckyy/Kite-GC/pull/186">#186</a></li>
 <li><strong>Power Saving also drops the glass blur</strong> — with the mode active (or on battery in <em>Auto</em>),
   panels and widgets lose their frosted-glass blur: every blurred surface is re-rendered on each
   frame while the map moves, and on the phone that was the single biggest rendering cost. On
