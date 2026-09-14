@@ -93,7 +93,7 @@
   import TerrainAnalysisPanel from "$lib/components/terrain/TerrainAnalysisPanel.svelte";
   import { editMode, replayActive, mission, missionFlags, missionDownload, missionUpload, missionFcInfo, markMissionSynced, loadedMissionId, missionSetWaypoints, missionImportXml, launchPoint, hasLocation, toDeg, type Waypoint } from "$lib/stores/mission";
   import { pendingSystemSwitch, autopilotSystem, autopilotLocked, setAutopilotSystem, confirmSystemSwitch } from "$lib/stores/autopilotContext";
-  import { arduMission, arduSelectedWpIndex, arduLoadedMissionId, parseWaypoints, parsePlanFile, planFirmwareTarget, loadArduMissionFromFile, type ArduWaypoint } from "$lib/stores/missionArdupilot";
+  import { arduEditMode, arduMission, arduSelectedWpIndex, arduLoadedMissionId, parseWaypoints, parsePlanFile, planFirmwareTarget, loadArduMissionFromFile, type ArduWaypoint } from "$lib/stores/missionArdupilot";
   import { frameMissionOnMap } from "$lib/stores/mapCamera";
   import { terrainAnalysis, patchTerrainAnalysis } from "$lib/stores/terrainAnalysis";
   import { DEFAULT_RADAR, DEFAULT_AIRSPACE, BUILTIN_ADSB_PROVIDERS } from "$lib/stores/settings";
@@ -130,6 +130,18 @@
   // Waypoints can only be edited on the 2D map → entering edit mode forces 2D (untracked read/write so
   // toggling the view later doesn't re-trigger this; it reacts to the edit-mode transition only).
   $effect(() => { if ($editMode) untrack(() => { if (mapViewMode === '3d') mapViewMode = '2d'; }); });
+  // Edit mode — INAV's `editMode` and the ArduPilot/PX4 panel's `arduEditMode` alike — lives only
+  // while the mission tab is the active one. Every way of leaving it ends the mode: the rail, and the
+  // programmatic jumps (a flight opening the logbook, "open vehicle", a log file drop). Parking the
+  // panel (re-clicking its rail button) keeps it: that is how the map gets the whole screen while
+  // waypoints are placed. Until now only the INAV store was reset, so an ArduPilot edit session
+  // survived every tab switch and kept placing waypoints on map clicks (Marc, 2026-09-14).
+  $effect(() => {
+    if (activeTab !== 'mission') untrack(() => {
+      if ($editMode) editMode.set(false);
+      if ($arduEditMode) arduEditMode.set(false);
+    });
+  });
   // Map3D instance handle — used to read the 3D camera focus on a 3D→2D switch so
   // the 2D map can re-centre on the same spot (keeping its own zoom).
   let map3dRef: {
@@ -997,6 +1009,7 @@
     // The X hides all panels — including the terrain overlay
     if (!navPanelOpen) {
       editMode.set(false);
+      arduEditMode.set(false);
       patchTerrainAnalysis({ open: false });
     }
     settings.patch({ navPanelOpen });
@@ -1081,7 +1094,6 @@
     }
     // Selecting another tab switches away from the terrain overlay
     patchTerrainAnalysis({ open: false });
-    if (tabId !== 'mission') editMode.set(false);
     activeTab = tabId;
     settings.patch({ activeTab });
     if (tabId === 'logbook') {
