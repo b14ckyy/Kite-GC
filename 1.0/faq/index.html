@@ -1389,6 +1389,34 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#connections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connections
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Connections">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-does-kite-keep-showing-a-firmware-message-that-mission-planner-doesnt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why does Kite keep showing a firmware message that Mission Planner doesn't?
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1748,6 +1776,34 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#connections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connections
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Connections">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-does-kite-keep-showing-a-firmware-message-that-mission-planner-doesnt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why does Kite keep showing a firmware message that Mission Planner doesn't?
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1815,6 +1871,24 @@ the older Bing basemap that ESRI already serves in better quality.</p>
 worth it for a map style you can already get, key-free, from the built-in providers. If a specific,
 properly licensed provider ever adds real value, we would add it as an optional <em>bring-your-own-key</em>
 source rather than route around anyone's terms of service.</p>
+<h2 id="connections">Connections<a class="headerlink" href="#connections" title="Permanent link">&para;</a></h2>
+<h3 id="why-does-kite-keep-showing-a-firmware-message-that-mission-planner-doesnt">Why does Kite keep showing a firmware message that Mission Planner doesn't?<a class="headerlink" href="#why-does-kite-keep-showing-a-firmware-message-that-mission-planner-doesnt" title="Permanent link">&para;</a></h3>
+<p>When Kite is connected through <strong>another ground station's MAVLink forward</strong> (Mission Planner's
+forward or mirror, for example), it sees everything the aircraft sends — including replies to
+requests the <em>other</em> ground station made. ArduPilot broadcasts its status texts to every connected
+ground station, and Kite shows them as notifications; Mission Planner keeps the low-severity ones in
+its Messages tab, so the same line can look like a Kite problem while it is a conversation between
+Mission Planner and the firmware.</p>
+<p>A typical example: <strong>"Sending unknown message (44)" twice a second</strong>. Mission Planner asks the
+aircraft for a camera message (<code>CAMERA_FOV_STATUS</code>) at its 2 Hz status rate; on ArduPilot 4.5 and
+the early 4.6 betas a board whose firmware build has no camera field-of-view support (small-flash
+F405-class boards, typically) accepts the request and then complains at that rate, at its <em>debug</em>
+severity. Connected directly to the aircraft, without Mission Planner in the loop, the line never
+appears.</p>
+<p>Such messages are harmless. <strong>Update the aircraft to ArduPilot 4.6 or newer</strong> — the current
+firmware refuses a request it cannot serve once instead of repeating the complaint — and keep the
+other ground station up to date as well. To keep the notification banner quiet in the meantime,
+set <strong><a href="../reference/settings/">Settings → Alerts → System messages</a></strong> to <em>Warning</em>.</p>
 
 
 
