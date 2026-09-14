@@ -987,7 +987,7 @@ mod tests {
     }
 
     /// Start/stop cycles of the real sink under a real GtkWindow (needs a display and a
-    /// running H264/HEVC source, e.g. tools/rtsp_test_server.py --codec h264):
+    /// running H264/HEVC source, e.g. tools/simulators/rtsp_test_server.py --codec h264):
     /// `KITE_RTSP_URL=rtsp://127.0.0.1:8600/live cargo test linux_sink -- --ignored --nocapture`
     /// The GTK loop runs on the test thread, the scenario on a worker — exactly the
     /// app's thread split. A watchdog aborts (with a message) if anything deadlocks.

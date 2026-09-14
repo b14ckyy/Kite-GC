@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 """Minimal RTSP test server for benching the Kite native RTSP client.
 
 Serves ONE client (OPTIONS/DESCRIBE/SETUP/PLAY over TCP), then streams RTP via UDP (to the

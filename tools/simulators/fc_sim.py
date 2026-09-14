@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Sebastian Kumor
 """Flight controller simulator for testing Kite Ground Control without hardware.
 
 One process, three combinations. `--firmware ardupilot` is an ArduPilot board speaking MAVLink over
@@ -20,7 +23,7 @@ INAV's own fc_msp.c field order, including the ones whose width is easy to get w
     HEARTBEAT teaches the sim where to stream (transport/udp.rs peer learning).
   Kite side, INAV: protocol MSP, transport TCP, host 127.0.0.1, port 5761.
 
-Usage: python3 tools/fc_sim.py [--firmware ardupilot|inav] [--protocol mavlink|msp]
+Usage: python3 tools/simulators/fc_sim.py [--firmware ardupilot|inav] [--protocol mavlink|msp]
        [--vehicle plane|copter] [--transport udp|tcp] [--port N] [--lat LAT --lon LON]
        [--radius M] [--speed MS] [--alt M] [--no-fix] [--disarmed] [--no-gcs-nav]
        [--chatter] [--verbose] [--defs PATH] [--version V]

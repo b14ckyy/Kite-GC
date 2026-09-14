@@ -626,7 +626,7 @@ mod tests {
     use super::*;
     use std::io::Write as _;
 
-    /// End-to-end backend slice against a real RTSP source (tools/rtsp_test_server.py, a
+    /// End-to-end backend slice against a real RTSP source (tools/simulators/rtsp_test_server.py, a
     /// UAV-Link, an IP cam): client → depacketizer → broadcast → HTTP multipart out.
     /// `KITE_RTSP_URL=rtsp://... cargo test serves_multipart -- --ignored --nocapture`
     #[test]
@@ -671,7 +671,7 @@ mod tests {
         );
     }
 
-    /// End-to-end backend slice of the H264 route (start tools/rtsp_test_server.py
+    /// End-to-end backend slice of the H264 route (start tools/simulators/rtsp_test_server.py
     /// --codec h264 first): client → depacketizer → routing → MF decode sink, on a real
     /// host window standing in for the Tauri main window.
     /// `KITE_RTSP_URL=rtsp://... cargo test streams_h264_into -- --ignored --nocapture`

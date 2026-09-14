@@ -4,9 +4,9 @@
 """ArduPilot SITL manager for Kite development — a small Tk desk for simulated vehicles and swarms, so
 Mission Planner is not needed to fly SITL. Python 3.10+ with Tkinter (bundled), nothing to install.
 
-    python tools/ardupilot-sitl-manager.py                # the window
-    python tools/ardupilot-sitl-manager.py --auto-start   # window, Start pressed for you
-    python tools/ardupilot-sitl-manager.py --headless --count 3 --frame quad --layout udp --seconds 600
+    python tools/simulators/ardupilot-sitl-manager.py                # the window
+    python tools/simulators/ardupilot-sitl-manager.py --auto-start   # window, Start pressed for you
+    python tools/simulators/ardupilot-sitl-manager.py --headless --count 3 --frame quad --layout udp --seconds 600
 
 What it does
 - Single vehicle or a swarm (up to 32), the common ArduPilot frames (plane, quadplane, copter frames,
@@ -35,7 +35,7 @@ any TCP client disconnects from it. Parameter names change between ArduPilot ver
 SYSID_THISMAV → MAV_SYSID, SYSID_MYGCS → MAV_GCS_SYSID, ARMING_CHECK → ARMING_SKIPCHK); an extra
 parameter the vehicle does not know is never acknowledged — the status column then says so.
 
-Files: settings + presets in <data dir>/settings.json (shared with the PowerShell version), instance state
+Files: settings + presets in <data dir>/settings.json, instance state
 (eeprom.bin, logs, stdout) under <data dir>/instances/<n>, downloads under bin/<channel>, parameter files
 under params/. Data dir: %LOCALAPPDATA%\\kite-sitl (Windows), ~/Library/Application Support/kite-sitl (macOS),
 ~/.local/share/kite-sitl (Linux).

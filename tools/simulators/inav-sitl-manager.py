@@ -5,9 +5,9 @@
 that fetches INAV's SITL binaries, runs one or several instances and shows their state. Python 3.10+
 with Tkinter (bundled), nothing to install.
 
-    python tools/inav-sitl-manager.py                # the window
-    python tools/inav-sitl-manager.py --auto-start
-    python tools/inav-sitl-manager.py --headless --count 2 --seconds 600
+    python tools/simulators/inav-sitl-manager.py                # the window
+    python tools/simulators/inav-sitl-manager.py --auto-start
+    python tools/simulators/inav-sitl-manager.py --headless --count 2 --seconds 600
 
 What it does
 - Binaries without building: every nightly (github.com/iNavFlight/inav-nightly) ships `sitl-resources.zip`
