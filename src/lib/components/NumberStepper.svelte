@@ -19,6 +19,9 @@
    * value — up increases, down decreases — and the page does not scroll. Without focus the wheel is
    * left alone, so scrolling a panel never edits a field by accident. Fast turning accelerates: more
    * than 4 notches within a second step 2×, more than 8 step 4× (Marc, 2026-09-14).
+   *
+   * This component is the ONE stepper of the app — the mission editor popups mount it too
+   * (`helpers/missionEditorPopup.svelte.ts`), so a look or behaviour change here lands everywhere.
    */
   let {
     value = $bindable(0),
@@ -69,7 +72,8 @@
   // ── Wheel stepping ──────────────────────────────────────────────────────
   // Registered by hand with { passive: false }: Svelte declares wheel handlers passive, and a passive
   // handler cannot preventDefault — which is what keeps the page still and stops the browser's own
-  // number-input spin from doubling every notch.
+  // number-input spin from doubling every notch. (WebView2 spins a focused <input type=number> on the
+  // wheel by itself, WebKitGTK does not — this handler is what makes both platforms behave alike.)
   let stepperEl = $state<HTMLDivElement | null>(null);
   let inputEl = $state<HTMLInputElement | null>(null);
   let wheelAccum = 0;           // deltaY since the last notch, so a trackpad's many small events = one notch
