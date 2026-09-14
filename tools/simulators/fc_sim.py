@@ -2278,7 +2278,7 @@ def run_msp(args):
         if code == MSP_NAME:
             return b'Kite SIM'
         if code == MSP_UID:
-            return struct.pack('<III', 0x4B495445, 0x53494D554C, 0x41544F52)
+            return b'KITE-FC-SIM1'   # the MCU's 96-bit id: 12 bytes, Kite shows them as 24 hex chars
         if code == MSP2_INAV_MIXER:
             # platform_type at byte 3, mixer preset (i16) at 5..7 (connection.rs step 5)
             # motorDirectionInverted, reserved, motorstopOnLow, platformType, hasFlaps,
