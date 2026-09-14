@@ -66,7 +66,7 @@
     defaultPhTimeSec = 30,
     warnAltitudeM = 120,
     batteryAlertPct = 30,
-    systemMessages = 'all',
+    systemMessages = 'warning',
     logLevel = 'warning',
     interfaceSettings = { speedUnit: 'kmh', altitudeUnit: 'm', distanceUnit: 'metric', verticalSpeedUnit: 'ms', temperatureUnit: 'c' },
     radar = DEFAULT_RADAR,
@@ -884,6 +884,7 @@
           <option value="error">{$t('settings.sysMsgError')}</option>
           <option value="warning">{$t('settings.sysMsgWarning')}</option>
           <option value="all">{$t('settings.sysMsgAll')}</option>
+          <option value="debug">{$t('settings.sysMsgDebug')}</option>
         </select>
       </div>
     </div>

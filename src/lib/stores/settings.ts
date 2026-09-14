@@ -310,7 +310,7 @@ export const DEFAULT_UPDATE_CHECK: UpdateCheckSettings = {
 };
 
 /** FC system-message (STATUSTEXT) toast verbosity: off, errors only, warnings+errors, or everything. */
-export type SystemMessagesLevel = 'off' | 'error' | 'warning' | 'all';
+export type SystemMessagesLevel = 'off' | 'error' | 'warning' | 'all' | 'debug';
 
 /** Backend diagnostic file-log verbosity. "debug" also captures info-level connection milestones.
  *  Written to `<AppData>/kite-gc/kite-gc.log` (portable: `data/`). See src-tauri/src/logging. */
@@ -474,7 +474,7 @@ const defaults: AppSettings = {
   warnAltitudeM: 120,
   batteryAlertPct: 30,
   batterySelect: {},
-  systemMessages: 'all',
+  systemMessages: 'warning',
   logLevel: 'warning',
   interface: {
     speedUnit: 'kmh',

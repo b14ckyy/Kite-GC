@@ -914,6 +914,7 @@
     "sysMsgError": "Fehler",
     "sysMsgWarning": "Warnungen",
     "sysMsgAll": "Alle",
+    "sysMsgDebug": "Debug (ausführlich)",
     "diagnostics": "Diagnose",
     "logLevel": "Log-Level",
     "logOff": "Aus",
