@@ -14,6 +14,11 @@
    *   <NumberStepper bind:value={myVar} min={0} max={500} step={5} />
    * 
    * Two-way binding via bind:value, or use onchange for imperative handling.
+   *
+   * Mouse wheel: once the field has focus (one click into it), the wheel over the control steps the
+   * value — up increases, down decreases — and the page does not scroll. Without focus the wheel is
+   * left alone, so scrolling a panel never edits a field by accident. Fast turning accelerates: more
+   * than 4 notches within a second step 2×, more than 8 step 4× (Marc, 2026-09-14).
    */
   let {
     value = $bindable(0),
@@ -43,10 +48,10 @@
     onchange?: (e: Event) => void;
   } = $props();
 
-  function handleBtnClick(dir: 1 | -1) {
+  function stepBy(steps: number) {
     if (disabled) return;
     const base = Number.isNaN(value) ? (Number.isFinite(min) ? min : 0) : value;
-    let newVal = base + dir * step;
+    let newVal = base + steps * step;
     newVal = Math.max(min, Math.min(max, newVal));
     // Round to sensible decimal precision
     if (decimals !== undefined) {
@@ -56,6 +61,45 @@
     // Dispatch change event so parent can react to the change
     onchange?.(new Event('change', { bubbles: true }));
   }
+
+  function handleBtnClick(dir: 1 | -1) {
+    stepBy(dir);
+  }
+
+  // ── Wheel stepping ──────────────────────────────────────────────────────
+  // Registered by hand with { passive: false }: Svelte declares wheel handlers passive, and a passive
+  // handler cannot preventDefault — which is what keeps the page still and stops the browser's own
+  // number-input spin from doubling every notch.
+  let stepperEl = $state<HTMLDivElement | null>(null);
+  let inputEl = $state<HTMLInputElement | null>(null);
+  let wheelAccum = 0;           // deltaY since the last notch, so a trackpad's many small events = one notch
+  let wheelLast = 0;            // time of the last wheel event, the accumulator resets after a pause
+  let notchTimes: number[] = []; // recent notch timestamps, for the acceleration
+
+  function onWheel(e: WheelEvent) {
+    if (disabled || !inputEl || document.activeElement !== inputEl) return;   // no focus → the page scrolls
+    e.preventDefault();
+    const now = performance.now();
+    if (now - wheelLast > 200) wheelAccum = 0;
+    wheelLast = now;
+    // A mouse notch is ~100 px in deltaMode 0; lines / pages (deltaMode 1 / 2) count one notch each.
+    const notch = e.deltaMode === 0 ? 50 : 1;
+    wheelAccum += e.deltaY;
+    if (Math.abs(wheelAccum) < notch) return;
+    const dir = wheelAccum < 0 ? 1 : -1;   // wheel up = increase
+    wheelAccum = 0;
+    notchTimes = notchTimes.filter((t) => now - t < 1000);
+    notchTimes.push(now);
+    const rate = notchTimes.length;
+    stepBy(dir * (rate > 8 ? 4 : rate > 4 ? 2 : 1));
+  }
+
+  $effect(() => {
+    const el = stepperEl;
+    if (!el) return;
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  });
 
   function handleInput(e: Event) {
     const target = e.target as HTMLInputElement;
@@ -74,12 +118,13 @@
 {#if label}
   <span class="ns-label">{label}</span>
 {/if}
-<div class="ns-stepper" class:ns-disabled={disabled}>
+<div class="ns-stepper" class:ns-disabled={disabled} bind:this={stepperEl}>
   <button class="ns-btn ns-btn-minus" onclick={() => handleBtnClick(-1)} disabled={disabled} aria-label="-">−</button>
   <div class="ns-field">
     <input
       type="number"
       class="ns-input"
+      bind:this={inputEl}
       bind:value={value}
       {min}
       {max}
