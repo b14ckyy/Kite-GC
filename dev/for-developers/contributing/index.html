@@ -1970,7 +1970,7 @@ release notes, so this one line saves the archaeology at release time.</p>
 </ul>
 <p>Missing non-English keys fall back gracefully, so an English-only PR is fine — a maintainer (or you, with
 AI help) can top up the other languages afterwards.</p>
-<p><strong>Finding the key for a string you see on screen:</strong> <code>python tools/i18n-key-paths.py</code> writes a pseudo-locale
+<p><strong>Finding the key for a string you see on screen:</strong> <code>python tools/helpers/i18n-key-paths.py</code> writes a pseudo-locale
 <code>src/lib/i18n/locales/xx.json</code> in which every string is replaced by its own key path (<code>sensors.gyro</code>,
 <code>rcLink.noLink</code>, …). Register it locally in <code>src/lib/i18n/index.ts</code> as described in the script's header,
 start the dev app and switch the language to it — the interface then shows the key at every position
