@@ -168,6 +168,7 @@ pub fn upload(
     waypoints: &[ArduWaypoint],
     reserve_home: bool,
     mission_type: MavMissionType,
+    px4: bool,
     mut progress: impl FnMut(u16, u16),
 ) -> Result<(), String> {
     let rx = register(cmd_tx)?;
@@ -206,7 +207,7 @@ pub fn upload(
         }
         match rx.recv_timeout(ITEM_TIMEOUT) {
             Ok(MavMessage::MISSION_REQUEST_INT(req)) => {
-                if let Err(e) = respond_item(cmd_tx, req.seq, waypoints, fc_sysid, reserve_home, mission_type) {
+                if let Err(e) = respond_item(cmd_tx, req.seq, waypoints, fc_sysid, reserve_home, mission_type, px4) {
                     unregister(cmd_tx);
                     return Err(e);
                 }
@@ -216,7 +217,7 @@ pub fn upload(
                 // Deprecated float-coordinate request — still answer with MISSION_ITEM_INT (the FC
                 // accepts it). Without this the upload stalls → MAV_MISSION_OPERATION_CANCELLED.
                 // (ArduPilot SITL uses this variant.)
-                if let Err(e) = respond_item(cmd_tx, req.seq, waypoints, fc_sysid, reserve_home, mission_type) {
+                if let Err(e) = respond_item(cmd_tx, req.seq, waypoints, fc_sysid, reserve_home, mission_type, px4) {
                     unregister(cmd_tx);
                     return Err(e);
                 }
@@ -257,6 +258,7 @@ fn respond_item(
     fc_sysid: u8,
     reserve_home: bool,
     mission_type: MavMissionType,
+    px4: bool,
 ) -> Result<(), String> {
     let item = if reserve_home && seq == 0 {
         log::debug!("MAVLink upload seq 0 (home placeholder)");
@@ -267,7 +269,7 @@ fn respond_item(
             return Err(format!("FC requested WP {} but mission has only {}", seq, waypoints.len()));
         }
         log::debug!("MAVLink upload item seq {seq}: {:?}", waypoints[idx]);
-        wp_to_item(&waypoints[idx], seq, fc_sysid, mission_type)
+        wp_to_item(&waypoints[idx], seq, fc_sysid, mission_type, px4)
     };
     send(cmd_tx, MavMessage::MISSION_ITEM_INT(item))
 }
@@ -419,12 +421,21 @@ fn home_item(waypoints: &[ArduWaypoint], target: u8) -> MISSION_ITEM_INT_DATA {
     }
 }
 
-fn wp_to_item(wp: &ArduWaypoint, seq: u16, target: u8, mission_type: MavMissionType) -> MISSION_ITEM_INT_DATA {
+fn wp_to_item(wp: &ArduWaypoint, seq: u16, target: u8, mission_type: MavMissionType, px4: bool) -> MISSION_ITEM_INT_DATA {
+    // PX4 reads param4 of a position item as a FIXED yaw when it is a number — 0 means "hold north the
+    // whole leg" — and only applies its yaw mode (MPC_YAW_MODE: face the waypoint / along track) when
+    // param4 is NaN. The planner's default yaw is 0 = "not set", so send NaN there (what QGC does).
+    // ArduPilot ignores param4 on these items unless WP_YAW_BEHAVIOR asks for it, so leave it alone.
+    let param4 = if px4 && wp.param4 == 0.0 && cmd_yaw_in_param4(wp.command) { f32::NAN } else { wp.param4 };
     MISSION_ITEM_INT_DATA {
         target_system:    target,
         target_component: AUTOPILOT_COMPONENT,
         seq,
-        frame:        u8_to_frame(wp.frame),
+        // Action items (DO_* / CONDITION_*) carry no position: send them in MAV_FRAME_MISSION. PX4
+        // parses any global frame as a position item first and rejects lat 0 with
+        // MAV_MISSION_INVALID_PARAM5_X; ArduPilot accepts either frame for these. Planner files from
+        // Mission Planner carry frame 0 on such items, which is what triggered it.
+        frame:        if cmd_has_location(wp.command) { u8_to_frame(wp.frame) } else { MavFrame::MAV_FRAME_MISSION },
         command:      u16_to_cmd(wp.command),
         // `current` flags the active waypoint of a real mission (slot 0); meaningless for fence/rally.
         current:      if seq == 0 && mission_type == MavMissionType::MAV_MISSION_TYPE_MISSION { 1 } else { 0 },
@@ -432,7 +443,7 @@ fn wp_to_item(wp: &ArduWaypoint, seq: u16, target: u8, mission_type: MavMissionT
         param1:       wp.param1,
         param2:       wp.param2,
         param3:       wp.param3,
-        param4:       wp.param4,
+        param4,
         x:            wp.lat,
         y:            wp.lon,
         z:            wp.alt,
@@ -445,6 +456,19 @@ fn wp_to_item(wp: &ArduWaypoint, seq: u16, target: u8, mission_type: MavMissionT
 // of a hand-maintained whitelist. This preserves any command the FC sends — including ones Kite has
 // no dedicated editor for yet — on download→upload, instead of silently rewriting them to a plain
 // waypoint. Truly-unknown values (not in the dialect) fall back to a safe default.
+/// Position items whose param4 is a yaw angle: WAYPOINT, LOITER_UNLIM/TURNS/TIME, LAND, TAKEOFF,
+/// SPLINE_WAYPOINT, VTOL_TAKEOFF/LAND.
+fn cmd_yaw_in_param4(cmd: u16) -> bool {
+    matches!(cmd, 16 | 17 | 18 | 19 | 21 | 22 | 82 | 84 | 85)
+}
+
+/// Commands whose x/y carry a coordinate: the NAV_* family plus the DO_* items that take a location
+/// (SET_HOME, LAND_START, REPOSITION, SET_ROI_LOCATION, SET_ROI, PAYLOAD_PLACE). Everything else is a
+/// pure action item (see `wp_to_item`).
+fn cmd_has_location(cmd: u16) -> bool {
+    matches!(cmd, 16..=31 | 82 | 84 | 85 | 179 | 189 | 192 | 195 | 201 | 2500 | 2501)
+}
+
 fn u8_to_frame(v: u8) -> MavFrame {
     MavFrame::from_u8(v).unwrap_or(MavFrame::MAV_FRAME_GLOBAL_RELATIVE_ALT)
 }

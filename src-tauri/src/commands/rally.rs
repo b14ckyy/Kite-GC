@@ -82,7 +82,7 @@ pub fn rally_write_all(config: RallyConfig, state: State<'_, AppState>) -> Resul
     if items.is_empty() {
         mavlink_proto::mission::clear(&cmd_tx, fc_sysid, MavMissionType::MAV_MISSION_TYPE_RALLY)?;
     } else {
-        mavlink_proto::mission::upload(&cmd_tx, fc_sysid, &items, false, MavMissionType::MAV_MISSION_TYPE_RALLY, |_, _| {})?;
+        mavlink_proto::mission::upload(&cmd_tx, fc_sysid, &items, false, MavMissionType::MAV_MISSION_TYPE_RALLY, false, |_, _| {})?;
     }
     for p in &config.params {
         control::set_param(&cmd_tx, fc_sysid, &p.name, p.value)?;
