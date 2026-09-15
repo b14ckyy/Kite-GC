@@ -126,6 +126,12 @@ impl ByteTransport for UdpTransport {
     fn read_bytes(&mut self, buf: &mut [u8]) -> Result<usize, TransportError> {
         match self.socket.recv_from(buf) {
             Ok((n, src)) => {
+                // Our own echo: with the default target 127.0.0.1:<our port> the first GCS HEARTBEAT goes
+                // to ourselves and comes straight back. Learning that "peer" would loop every later frame
+                // back into our own parser for the rest of the session — drop it unseen.
+                if src.ip().is_loopback() && Some(src.port()) == self.socket.local_addr().ok().map(|a| a.port()) {
+                    return Ok(0);
+                }
                 // Peer learning: remember every source that talks to us (n == 0 never happens for a
                 // real datagram). Sends fan out to all of them — see `peers`.
                 if self.peers.insert(src, Instant::now()).is_none() {
