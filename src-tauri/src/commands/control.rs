@@ -68,12 +68,15 @@ pub fn mav_arm(arm: bool, force: bool, state: State<'_, AppState>) -> Result<(),
 #[tauri::command(async)]
 pub fn mav_takeoff(altitude: f32, state: State<'_, AppState>) -> Result<(), String> {
     let (cmd_tx, fc_sysid) = mav_handle(&state)?;
-    // param7 = altitude; lat/lon (param5/6) = 0 → take off in place.
+    // param7 = altitude. param4 (yaw) and param5/6 (lat/lon) are NaN = "current heading / here":
+    // PX4 reads a FINITE lat/lon as the take-off position, so 0/0 sent it climbing towards 0°N 0°E
+    // instead of straight up. ArduPilot ignores these fields for a take-off (param7 only), so NaN is
+    // harmless there. QGC sends the same.
     control::send_command_long(
         &cmd_tx,
         fc_sysid,
         MavCmd::MAV_CMD_NAV_TAKEOFF,
-        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, altitude],
+        [0.0, 0.0, 0.0, f32::NAN, f32::NAN, f32::NAN, altitude],
     )
 }
 
@@ -81,7 +84,8 @@ pub fn mav_takeoff(altitude: f32, state: State<'_, AppState>) -> Result<(), Stri
 #[tauri::command(async)]
 pub fn mav_land(state: State<'_, AppState>) -> Result<(), String> {
     let (cmd_tx, fc_sysid) = mav_handle(&state)?;
-    control::send_command_long(&cmd_tx, fc_sysid, MavCmd::MAV_CMD_NAV_LAND, [0.0; 7])
+    // Same PX4 semantics as take-off: NaN yaw / lat / lon = land right here.
+    control::send_command_long(&cmd_tx, fc_sysid, MavCmd::MAV_CMD_NAV_LAND, [0.0, 0.0, 0.0, f32::NAN, f32::NAN, f32::NAN, 0.0])
 }
 
 /// Return to launch via `MAV_CMD_NAV_RETURN_TO_LAUNCH`.
