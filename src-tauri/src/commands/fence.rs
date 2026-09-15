@@ -29,10 +29,15 @@ const SHAPE_CIRCLE: u8 = 1;
 
 /// Curated core fence params (read best-effort; only those the FC reports are returned). ArduPilot uses
 /// the FENCE_* set, PX4 the GF_* set — we ask for both and keep whatever exists.
-const FENCE_PARAM_NAMES: &[&str] = &[
+const FENCE_PARAM_NAMES_ARDU: &[&str] = &[
     "FENCE_ENABLE", "FENCE_ACTION", "FENCE_ALT_MAX", "FENCE_ALT_MIN", "FENCE_RADIUS", "FENCE_MARGIN",
-    "GF_ACTION", "GF_MAX_HOR_DIST", "GF_MAX_VER_DIST",
 ];
+/// PX4 geofence params. Asked for separately per firmware: PX4 logs `Unknown param name` on its console
+/// for every foreign name and each one costs a request timeout — noise and a slower connect.
+const FENCE_PARAM_NAMES_PX4: &[&str] = &["GF_ACTION", "GF_MAX_HOR_DIST", "GF_MAX_VER_DIST"];
+fn fence_param_names(px4: bool) -> &'static [&'static str] {
+    if px4 { FENCE_PARAM_NAMES_PX4 } else { FENCE_PARAM_NAMES_ARDU }
+}
 
 /// One fence vertex (lat/lon in degrees × 1e7).
 #[derive(Serialize, Deserialize, Clone)]
@@ -80,13 +85,14 @@ fn mav_handle(state: &State<'_, AppState>) -> Result<Option<(std::sync::mpsc::Se
 /// MAVLink link, so the frontend can always call it on connect.
 #[tauri::command(async)]
 pub fn fence_read_all(state: State<'_, AppState>) -> Result<FenceConfig, String> {
-    let Some((cmd_tx, fc_sysid, _px4)) = mav_handle(&state)? else {
+    let Some((cmd_tx, fc_sysid, px4)) = mav_handle(&state)? else {
         return Ok(FenceConfig::default());
     };
     let items = mavlink_proto::mission::download(&cmd_tx, fc_sysid, false, MavMissionType::MAV_MISSION_TYPE_FENCE, |_, _| {})?;
     let (zones, return_point) = decode_fence(&items);
-    let pmap = params_rt::read_params(&cmd_tx, fc_sysid, FENCE_PARAM_NAMES);
-    let params = FENCE_PARAM_NAMES.iter()
+    let names = fence_param_names(px4);
+    let pmap = params_rt::read_params(&cmd_tx, fc_sysid, names);
+    let params = names.iter()
         .filter_map(|n| pmap.get(*n).map(|v| FenceParam { name: (*n).to_string(), value: *v }))
         .collect();
     eprintln!("[FENCE] read {} zone(s), return_point={}, {} params", zones.len(), return_point.is_some(), pmap.len());

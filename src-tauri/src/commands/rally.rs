@@ -59,13 +59,16 @@ fn mav_handle(state: &State<'_, AppState>) -> Result<Option<(std::sync::mpsc::Se
 /// MAVLink link, so the frontend can always call it on connect.
 #[tauri::command(async)]
 pub fn rally_read_all(state: State<'_, AppState>) -> Result<RallyConfig, String> {
-    let Some((cmd_tx, fc_sysid, _px4)) = mav_handle(&state)? else {
+    let Some((cmd_tx, fc_sysid, px4)) = mav_handle(&state)? else {
         return Ok(RallyConfig::default());
     };
     let items = mavlink_proto::mission::download(&cmd_tx, fc_sysid, false, MavMissionType::MAV_MISSION_TYPE_RALLY, |_, _| {})?;
     let points = decode_rally(&items);
-    let pmap = params_rt::read_params(&cmd_tx, fc_sysid, RALLY_PARAM_NAMES);
-    let params = RALLY_PARAM_NAMES.iter()
+    // PX4 has no RALLY_* params (its safe points are the items alone) — asking would only make its
+    // console log `Unknown param name` and cost a timeout per name.
+    let names: &[&str] = if px4 { &[] } else { RALLY_PARAM_NAMES };
+    let pmap = params_rt::read_params(&cmd_tx, fc_sysid, names);
+    let params = names.iter()
         .filter_map(|n| pmap.get(*n).map(|v| RallyParam { name: (*n).to_string(), value: *v }))
         .collect();
     eprintln!("[RALLY] read {} point(s), {} params", points.len(), pmap.len());
