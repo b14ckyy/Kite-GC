@@ -47,10 +47,10 @@ pub struct RallyConfig {
 }
 
 /// Resolve the MAVLink command sender + sysid (rally is MAVLink-only).
-fn mav_handle(state: &State<'_, AppState>) -> Result<Option<(std::sync::mpsc::Sender<crate::mavlink_proto::handler::MavlinkCommand>, u8)>, String> {
+fn mav_handle(state: &State<'_, AppState>) -> Result<Option<(std::sync::mpsc::Sender<crate::mavlink_proto::handler::MavlinkCommand>, u8, bool)>, String> {
     let proto = state.protocol.lock().map_err(|e| e.to_string())?;
     match proto.as_ref() {
-        Some(ActiveProtocol::Mavlink(h)) => Ok(Some((h.cmd_tx_clone(), h.fc_sysid))),
+        Some(ActiveProtocol::Mavlink(h)) => Ok(Some((h.cmd_tx_clone(), h.fc_sysid, h.fc_variant.eq_ignore_ascii_case("px4")))),
         _ => Ok(None), // MSP / passive / disconnected → no rally
     }
 }
@@ -59,13 +59,16 @@ fn mav_handle(state: &State<'_, AppState>) -> Result<Option<(std::sync::mpsc::Se
 /// MAVLink link, so the frontend can always call it on connect.
 #[tauri::command(async)]
 pub fn rally_read_all(state: State<'_, AppState>) -> Result<RallyConfig, String> {
-    let Some((cmd_tx, fc_sysid)) = mav_handle(&state)? else {
+    let Some((cmd_tx, fc_sysid, px4)) = mav_handle(&state)? else {
         return Ok(RallyConfig::default());
     };
     let items = mavlink_proto::mission::download(&cmd_tx, fc_sysid, false, MavMissionType::MAV_MISSION_TYPE_RALLY, |_, _| {})?;
     let points = decode_rally(&items);
-    let pmap = params_rt::read_params(&cmd_tx, fc_sysid, RALLY_PARAM_NAMES);
-    let params = RALLY_PARAM_NAMES.iter()
+    // PX4 has no RALLY_* params (its safe points are the items alone) — asking would only make its
+    // console log `Unknown param name` and cost a timeout per name.
+    let names: &[&str] = if px4 { &[] } else { RALLY_PARAM_NAMES };
+    let pmap = params_rt::read_params(&cmd_tx, fc_sysid, names);
+    let params = names.iter()
         .filter_map(|n| pmap.get(*n).map(|v| RallyParam { name: (*n).to_string(), value: *v }))
         .collect();
     eprintln!("[RALLY] read {} point(s), {} params", points.len(), pmap.len());
@@ -75,17 +78,17 @@ pub fn rally_read_all(state: State<'_, AppState>) -> Result<RallyConfig, String>
 /// "Save to FC": upload the rally points (or clear them when empty), then write the provided params.
 #[tauri::command(async)]
 pub fn rally_write_all(config: RallyConfig, state: State<'_, AppState>) -> Result<(), String> {
-    let Some((cmd_tx, fc_sysid)) = mav_handle(&state)? else {
+    let Some((cmd_tx, fc_sysid, px4)) = mav_handle(&state)? else {
         return Err("FC is not running MAVLink".into());
     };
     let items = encode_rally(&config);
     if items.is_empty() {
         mavlink_proto::mission::clear(&cmd_tx, fc_sysid, MavMissionType::MAV_MISSION_TYPE_RALLY)?;
     } else {
-        mavlink_proto::mission::upload(&cmd_tx, fc_sysid, &items, false, MavMissionType::MAV_MISSION_TYPE_RALLY, |_, _| {})?;
+        mavlink_proto::mission::upload(&cmd_tx, fc_sysid, &items, false, MavMissionType::MAV_MISSION_TYPE_RALLY, false, |_, _| {})?;
     }
     for p in &config.params {
-        control::set_param(&cmd_tx, fc_sysid, &p.name, p.value)?;
+        control::set_param(&cmd_tx, fc_sysid, &p.name, p.value, px4)?;
     }
     eprintln!("[RALLY] saved {} point(s) + {} params to FC", config.points.len(), config.params.len());
     Ok(())

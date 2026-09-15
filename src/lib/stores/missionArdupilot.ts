@@ -435,21 +435,34 @@ export async function downloadArduMissionFromFc(): Promise<number> {
 
 // ── .waypoints file format ────────────────────────────────────────────
 
+/** Number → fixed-point text that never throws: a null/NaN (PX4 "not set", a stale download, a file
+ *  with "nan") becomes 0. This serializer also runs inside a store subscriber (provenance flags) — an
+ *  exception there froze the whole UI once, because svelte/store's notify queue is left half-flushed. */
+function fixed(v: number | null | undefined, digits: number): string {
+  return (typeof v === 'number' && Number.isFinite(v) ? v : 0).toFixed(digits);
+}
+
 export function serializeWaypoints(wps: ArduWaypoint[]): string {
   const lines = ['QGC WPL 110'];
   wps.forEach((wp, i) => {
     const current = i === 0 ? 1 : 0;
-    const latDeg  = (wp.lat / 1e7).toFixed(8);
-    const lonDeg  = (wp.lon / 1e7).toFixed(8);
+    const latDeg  = fixed(wp.lat / 1e7, 8);
+    const lonDeg  = fixed(wp.lon / 1e7, 8);
     const ac      = wp.autocontinue ? 1 : 0;
     lines.push([
       i, current, wp.frame, wp.command,
-      wp.param1.toFixed(6), wp.param2.toFixed(6),
-      wp.param3.toFixed(6), wp.param4.toFixed(6),
-      latDeg, lonDeg, wp.alt.toFixed(3), ac,
+      fixed(wp.param1, 6), fixed(wp.param2, 6),
+      fixed(wp.param3, 6), fixed(wp.param4, 6),
+      latDeg, lonDeg, fixed(wp.alt, 3), ac,
     ].join('\t'));
   });
   return lines.join('\n') + '\n';
+}
+
+/** "nan" (QGC) / blanks → 0: NaN cannot cross the JSON IPC boundary, and 0 means "not set". */
+function num(s: string): number {
+  const v = parseFloat(s);
+  return Number.isFinite(v) ? v : 0;
 }
 
 export function parseWaypoints(text: string): ArduWaypoint[] {
@@ -464,13 +477,13 @@ export function parseWaypoints(text: string): ArduWaypoint[] {
     wps.push({
       command:      parseInt(c[3]),
       frame:        parseInt(c[2]) as MavFrame,
-      param1:       parseFloat(c[4]),
-      param2:       parseFloat(c[5]),
-      param3:       parseFloat(c[6]),
-      param4:       parseFloat(c[7]),
-      lat:          Math.round(parseFloat(c[8]) * 1e7),
-      lon:          Math.round(parseFloat(c[9]) * 1e7),
-      alt:          parseFloat(c[10]),
+      param1:       num(c[4]),
+      param2:       num(c[5]),
+      param3:       num(c[6]),
+      param4:       num(c[7]),
+      lat:          Math.round(num(c[8]) * 1e7),
+      lon:          Math.round(num(c[9]) * 1e7),
+      alt:          num(c[10]),
       autocontinue: c[11].trim() === '1',
     });
   }
