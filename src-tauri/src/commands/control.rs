@@ -236,9 +236,18 @@ pub fn mav_vtol_transition(to_fw: bool, state: State<'_, AppState>) -> Result<()
 /// Set a single FC parameter (e.g. the fixed-wing loiter radius `WP_LOITER_RAD`). Fire-and-forget.
 #[tauri::command(async)]
 pub fn mav_set_param(name: String, value: f32, state: State<'_, AppState>) -> Result<(), String> {
-    let (cmd_tx, fc_sysid) = mav_handle(&state)?;
-    control::set_param(&cmd_tx, fc_sysid, &name, value)
+    // PX4 needs the parameter's declared type on PARAM_SET (see control::set_param).
+    let (cmd_tx, fc_sysid, px4) = {
+        let proto = state.protocol.lock().map_err(|e| e.to_string())?;
+        match proto.as_ref() {
+            Some(ActiveProtocol::Mavlink(h)) => (h.cmd_tx_clone(), h.fc_sysid, h.fc_variant.eq_ignore_ascii_case("px4")),
+            Some(_) => return Err("FC is not running MAVLink".into()),
+            None => return Err("Not connected".into()),
+        }
+    };
+    control::set_param(&cmd_tx, fc_sysid, &name, value, px4)
 }
+
 
 /// Read a single FC parameter by name (best-effort; `None` when the FC doesn't report it within the
 /// params_rt timeout). Used for the Guided loiter-radius ring (`WP_LOITER_RAD` / `NAV_LOITER_RAD`).
