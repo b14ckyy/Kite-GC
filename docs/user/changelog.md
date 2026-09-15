@@ -20,6 +20,16 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     ---
 
+    **1.0.2**{ .kite-patch } *unreleased*{ .kite-badge }
+
+    **Fixed**
+
+    - **ArduPilot / PX4 mission editor: waypoint popup under the side panel.** Selecting a waypoint
+      near the left edge of the map moved it under the mission panel instead of into view, and the
+      map kept shifting while you edited values. The editor now centres the waypoint in the visible
+      map area, the way the INAV tab already did.
+    ---
+
     **1.0.1**{ .kite-patch } *2026-09-13*{ .kite-badge }
 
     **Added**
