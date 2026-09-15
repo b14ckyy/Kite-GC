@@ -44,14 +44,34 @@ const AUTOPILOT_COMPONENT: u8 = 1;
 pub struct ArduWaypoint {
     pub command: u16,
     pub frame: u8,
+    // f32 fields tolerate JSON `null`: NaN has no JSON form, so a NaN that slips through the frontend
+    // (a `.waypoints` file with "nan", a stale download) arrives here as null — read it as 0 instead
+    // of failing the whole upload.
+    #[serde(deserialize_with = "f32_or_zero")]
     pub param1: f32,
+    #[serde(deserialize_with = "f32_or_zero")]
     pub param2: f32,
+    #[serde(deserialize_with = "f32_or_zero")]
     pub param3: f32,
+    #[serde(deserialize_with = "f32_or_zero")]
     pub param4: f32,
     pub lat: i32,
     pub lon: i32,
+    #[serde(deserialize_with = "f32_or_zero")]
     pub alt: f32,
     pub autocontinue: bool,
+}
+
+fn f32_or_zero<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Error> {
+    Ok(Option::<f32>::deserialize(d)?.unwrap_or(0.0))
+}
+
+/// PX4 reports NaN for "not set" (a waypoint's yaw with the vehicle's yaw mode in charge, unused
+/// params). NaN serialises to JSON `null`, which crashed the frontend's mission serializer and — an
+/// exception inside a store subscriber — froze every store in the UI. Normalise to 0 here: the
+/// planner shows 0 = "not set", and the upload path turns 0 back into NaN for PX4 (see wp_to_item).
+fn finite_or_zero(v: f32) -> f32 {
+    if v.is_finite() { v } else { 0.0 }
 }
 
 // ── Public protocol functions ─────────────────────────────────────────────────
@@ -369,13 +389,13 @@ fn item_to_wp(item: &MISSION_ITEM_INT_DATA) -> ArduWaypoint {
     ArduWaypoint {
         command: item.command as u16,
         frame:   item.frame as u8,
-        param1:  item.param1,
-        param2:  item.param2,
-        param3:  item.param3,
-        param4:  item.param4,
+        param1:  finite_or_zero(item.param1),
+        param2:  finite_or_zero(item.param2),
+        param3:  finite_or_zero(item.param3),
+        param4:  finite_or_zero(item.param4),
         lat:     item.x,
         lon:     item.y,
-        alt:     item.z,
+        alt:     finite_or_zero(item.z),
         autocontinue: item.autocontinue != 0,
     }
 }
