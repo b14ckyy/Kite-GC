@@ -28,6 +28,13 @@ const COUNT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Overall deadline for the upload handshake
 const UPLOAD_DEADLINE: Duration = Duration::from_secs(60);
 
+/// Address the autopilot component (MAV_COMP_ID_AUTOPILOT1) explicitly instead of broadcasting to
+/// component 0. Both firmwares accept either on a direct link, but a relay in between (Mission
+/// Planner's MAVLink mirror routes by target system/component) drops component-0 mission traffic
+/// while forwarding our COMMAND_LONG/INT — which already target component 1 — so uploads stalled
+/// with "FC stopped responding" although Take-off / Fly-Here worked. See control.rs.
+const AUTOPILOT_COMPONENT: u8 = 1;
+
 // ── Public data type ──────────────────────────────────────────────────────────
 
 /// ArduPilot waypoint exchanged over Tauri IPC.
@@ -69,7 +76,7 @@ pub fn download(
     // 1. Request mission list
     send(cmd_tx, MavMessage::MISSION_REQUEST_LIST(MISSION_REQUEST_LIST_DATA {
         target_system: fc_sysid,
-        target_component: 0,
+        target_component: AUTOPILOT_COMPONENT,
         mission_type,
     }))?;
 
@@ -101,7 +108,7 @@ pub fn download(
     for seq in 0..count {
         if let Err(e) = send(cmd_tx, MavMessage::MISSION_REQUEST_INT(MISSION_REQUEST_INT_DATA {
             target_system: fc_sysid,
-            target_component: 0,
+            target_component: AUTOPILOT_COMPONENT,
             seq,
             mission_type,
         })) {
@@ -160,7 +167,7 @@ pub fn upload(
     );
     if let Err(e) = send(cmd_tx, MavMessage::MISSION_COUNT(MISSION_COUNT_DATA {
         target_system: fc_sysid,
-        target_component: 0,
+        target_component: AUTOPILOT_COMPONENT,
         count,
         mission_type,
         opaque_id: 0,
@@ -255,7 +262,7 @@ pub fn clear(
 
     if let Err(e) = send(cmd_tx, MavMessage::MISSION_CLEAR_ALL(MISSION_CLEAR_ALL_DATA {
         target_system: fc_sysid,
-        target_component: 0,
+        target_component: AUTOPILOT_COMPONENT,
         mission_type,
     })) {
         unregister(cmd_tx);
@@ -303,7 +310,7 @@ fn send(cmd_tx: &mpsc::Sender<MavlinkCommand>, msg: MavMessage) -> Result<(), St
 fn make_ack(target: u8, result: MavMissionResult, mission_type: MavMissionType) -> MavMessage {
     MavMessage::MISSION_ACK(MISSION_ACK_DATA {
         target_system: target,
-        target_component: 0,
+        target_component: AUTOPILOT_COMPONENT,
         mavtype: result,
         mission_type,
         opaque_id: 0,
@@ -380,7 +387,7 @@ fn home_item(waypoints: &[ArduWaypoint], target: u8) -> MISSION_ITEM_INT_DATA {
     let (lat, lon) = waypoints.first().map(|w| (w.lat, w.lon)).unwrap_or((0, 0));
     MISSION_ITEM_INT_DATA {
         target_system:    target,
-        target_component: 0,
+        target_component: AUTOPILOT_COMPONENT,
         seq:              0,
         frame:            MavFrame::MAV_FRAME_GLOBAL,
         command:          MavCmd::MAV_CMD_NAV_WAYPOINT,
@@ -395,7 +402,7 @@ fn home_item(waypoints: &[ArduWaypoint], target: u8) -> MISSION_ITEM_INT_DATA {
 fn wp_to_item(wp: &ArduWaypoint, seq: u16, target: u8, mission_type: MavMissionType) -> MISSION_ITEM_INT_DATA {
     MISSION_ITEM_INT_DATA {
         target_system:    target,
-        target_component: 0,
+        target_component: AUTOPILOT_COMPONENT,
         seq,
         frame:        u8_to_frame(wp.frame),
         command:      u16_to_cmd(wp.command),
