@@ -105,6 +105,12 @@ pub trait ByteTransport: Send {
 
     /// Human-readable description (for logging)
     fn description(&self) -> String;
+
+    /// Optional transport-side context worth showing next to a protocol failure (e.g. "the local UDP
+    /// port was taken by another program"). Default: nothing to add.
+    fn diagnostic_note(&self) -> Option<String> {
+        None
+    }
 }
 
 // ── Legacy Transport Trait ───────────────────────────────────────

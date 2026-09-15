@@ -209,6 +209,9 @@ pub async fn connect(
     };
 
     log::info!("Transport opened, protocol={}", proto);
+    // Transport-side context for a failed handshake (busy local UDP port → the vehicles' pushes go to
+    // the other listener); taken now, before the transport moves into the protocol path.
+    let transport_note = byte_transport.diagnostic_note();
 
     let result = match proto {
         "mavlink" => {
@@ -264,15 +267,23 @@ pub async fn connect(
 
     // Central success/failure log — a failed connect otherwise only surfaces in the UI toast and
     // leaves no trace in the diagnostics log (the original PX4 report had nothing to go on).
-    match &result {
-        Ok(info) => log::info!(
-            "Connection established: {} {} (platform={})",
-            info.fc_variant, info.fc_version, info.platform_type,
-        ),
-        Err(e) => log::error!("Connection failed (protocol={}): {}", proto, e),
+    match result {
+        Ok(info) => {
+            log::info!(
+                "Connection established: {} {} (platform={})",
+                info.fc_variant, info.fc_version, info.platform_type,
+            );
+            Ok(info)
+        }
+        Err(e) => {
+            log::error!("Connection failed (protocol={}): {}", proto, e);
+            // A transport-level explanation turns a bare "no HEARTBEAT" into something the user can act on.
+            Err(match transport_note {
+                Some(note) => format!("{e}\n\n{note}"),
+                None => e,
+            })
+        }
     }
-
-    result
 }
 
 /// MSP connection path: handshake → scheduler
