@@ -248,5 +248,5 @@ workaround ran and which variant it used.
 ## Still stuck?
 
 Grab a **diagnostic log** (**Settings → Diagnostics → Log Level = Debug**, reproduce, then **Open Log
-Folder**) and attach it when reporting the problem — it records the engine / ffmpeg startup and any error.
+Folder** — **Share log file** on Android) and attach it when reporting the problem — it records the engine / ffmpeg startup and any error.
 See the [connection troubleshooting](connection.md#getting-a-diagnostic-log) page for the log locations.
