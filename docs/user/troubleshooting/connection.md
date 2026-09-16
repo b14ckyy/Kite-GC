@@ -102,7 +102,8 @@ Kite writes a plain-text log you can hand back when something won't connect.
 2. Set **Log Level** to **Debug (verbose)** to capture the full connection sequence (the Bluetooth
    diagnostics are recorded even at the default **Warnings** level).
 3. Reproduce the failed connection.
-4. Click **Log File → Open Folder** and grab the log.
+4. Click **Log File → Open Folder** and grab the log (on Android **Share log file**, pick the day, share it
+   to mail or a messenger).
 
 The log lives in your app-data folder:
 
@@ -112,10 +113,12 @@ The log lives in your app-data folder:
 | **Linux** | `~/.local/share/kite-gc/` |
 | **macOS** | `~/Library/Application Support/kite-gc/` |
 | **Portable** | `data\` (next to the executable) |
+| **Android** | App-private storage — no file manager or USB connection can reach it. Use **Settings → Diagnostics → Share log file**: pick the day, share it to mail or a messenger. |
 
 Kite writes **one file per day** — `kite-gc-YYYY-MM-DD.log` — appending each session under a header block
 and keeping the last **30 days** (older files are pruned on startup), so a failure you only notice after
-restarting Kite isn't lost. **Log File → Open Folder** takes you straight there.
+restarting Kite isn't lost. **Log File → Open Folder** takes you straight there; on Android **Share log file**
+lists the same day files, newest first, so you can pick yesterday's.
 
 !!! tip "Sharing a log"
     The log contains port names and firmware/version strings but no personal data. Attach it to a
