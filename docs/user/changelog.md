@@ -240,6 +240,9 @@ inside the box of the feature release they belong to, so the notes for one relea
       increases, down decreases, faster turning steps in bigger increments, and a field without focus
       never reacts, so scrolling a panel stays safe. The waypoint editor popups use the very same
       field now (same look, unit inside the box). [#189] · [#191]
+    - **Frontend errors now reach the support log** — a JavaScript error that used to show only in
+      the browser console is written to Kite's backend log file too, so a report from a release build
+      carries the full picture. [#193]
 
 ??? note "1.0 — Initial release · Live"
 
@@ -340,3 +343,4 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#186]: https://github.com/b14ckyy/Kite-GC/pull/186
 [#189]: https://github.com/b14ckyy/Kite-GC/pull/189
 [#191]: https://github.com/b14ckyy/Kite-GC/pull/191
+[#193]: https://github.com/b14ckyy/Kite-GC/pull/193
