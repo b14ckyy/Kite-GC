@@ -28,6 +28,20 @@ inside the box of the feature release they belong to, so the notes for one relea
       near the left edge of the map moved it under the mission panel instead of into view, and the
       map kept shifting while you edited values. The editor now centres the waypoint in the visible
       map area, the way the INAV tab already did.
+    - **MAVLink (ArduPilot / PX4): losing the connection could leave the app stuck on "connected".**
+      When the link was really gone — a serial cable unplugged, a socket closed — the status bar
+      stayed on "connected" until you clicked Disconnect, and a flight that was being recorded
+      never offered the "Device connection lost" recovery prompt (Discard / Save / Continue on
+      reconnect). Both now work the way they already do on INAV/MSP.
+    - **MAVLink (ArduPilot / PX4): a silent vehicle still showed as a healthy connection.** If the
+      aircraft stopped sending data while the link itself stayed open — a radio dropout, for example —
+      the status bar kept showing a normal connection instead of "Reconnecting…". It now switches to
+      "Reconnecting…" a few seconds after the vehicle goes quiet, and back once data resumes.
+    - **Network (UDP) links on Windows could drop unexpectedly.** If the other side of a UDP
+      connection closed its socket, Windows reported this as a connection error on the next receive
+      and Kite disconnected the whole link, even though the other side might come back on its own.
+      The link now stays up and shows "Reconnecting…" instead.
+
     ---
 
     **1.0.1**{ .kite-patch } *2026-09-13*{ .kite-badge }

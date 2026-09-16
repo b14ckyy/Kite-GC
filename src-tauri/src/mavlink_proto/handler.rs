@@ -142,6 +142,13 @@ fn handler_loop(
     let mut seq = MavSequence::new();
     let mut buf = [0u8; 1024];
     let mut last_heartbeat = Instant::now() - HEARTBEAT_INTERVAL; // Send immediately
+    // Stall watchdog (ADR-042 counterpart of "peer loss is not link loss"): the transport may stay open
+    // while the vehicle goes quiet — radio dropout, SITL paused, a UDP peer gone. Nothing is torn down;
+    // the status bar is told the FC is not being heard (`telemetry-fc-link`, the same signal the MSP
+    // scheduler emits) and told again when frames resume. Same threshold as MSP's STALL_WARN_AFTER.
+    const STALL_WARN_AFTER: Duration = Duration::from_secs(3);
+    let mut last_fc_rx = Instant::now();
+    let mut stall_warned = false;
     let mut msg_count: u64 = 0;
     let mut debug_tracker = super::debug::MavlinkDebugTracker::new();
     // Always-on link-rate meter (release too) — feeds the Relay panel's live RX/TX readout.
@@ -332,6 +339,17 @@ fn handler_loop(
                     if frame.header.system_id != fc_sysid { continue; }
 
                     msg_count += 1;
+                    // Only the autopilot component feeds the stall watchdog: peripherals on the FC's
+                    // sysid (a SIYI air unit, a gimbal, CAN nodes) keep heartbeating while the FC
+                    // itself may be gone — see the HEARTBEAT component gate below.
+                    if frame.header.component_id == fc_compid {
+                        last_fc_rx = Instant::now();
+                        if stall_warned {
+                            stall_warned = false;
+                            log::warn!("Link recovered — MAVLink frames from the FC resumed");
+                            let _ = app_handle.emit("telemetry-fc-link", FcLinkAlive { alive: true });
+                        }
+                    }
                     debug_tracker.on_rx(frame.message.message_id(), frame.raw_bytes.len());
                     link_stats.on_rx(frame.raw_bytes.len());
 
@@ -395,16 +413,31 @@ fn handler_loop(
             }
             Err(crate::transport::TransportError::Timeout) => {}
             Err(crate::transport::TransportError::Disconnected) => {
-                log::warn!("MAVLink transport disconnected");
+                // Real transport loss (serial unplugged, socket closed): the same `connection-lost` the
+                // MSP scheduler emits — the frontend tears the connection state down on it and shows
+                // "disconnected" instead of sitting on a dead "connected" state until the user clicks
+                // Disconnect. `shutdown_lost` offers the recording-recovery prompt (ADR-042) like MSP.
+                log::warn!("MAVLink transport disconnected — tearing down");
                 if let Some(ref rec) = recorder {
-                    if let Ok(mut r) = rec.lock() { r.shutdown(); }
+                    if let Ok(mut r) = rec.lock() { r.shutdown_lost(); }
                 }
-                let _ = app_handle.emit("mavlink-disconnected", ());
+                let _ = app_handle.emit("connection-lost", ());
                 return Some(transport);
             }
             Err(e) => {
                 log::warn!("MAVLink read error: {}", e);
             }
+        }
+
+        // 3b. Stall watchdog: warn once at the default level when the FC has been silent for a while
+        //     although the transport is still open, and flip the status bar to "not alive". No teardown.
+        if !stall_warned && last_fc_rx.elapsed() >= STALL_WARN_AFTER {
+            stall_warned = true;
+            log::warn!(
+                "Link stalled — no MAVLink frame from the FC for {:.0}s (transport still open)",
+                last_fc_rx.elapsed().as_secs_f32()
+            );
+            let _ = app_handle.emit("telemetry-fc-link", FcLinkAlive { alive: false });
         }
 
         // 4. Emit debug stats to the Debug Monitor (throttled internally; no-op in release)
@@ -483,6 +516,14 @@ fn is_mission_message(msg: &MavMessage) -> bool {
         | MavMessage::MISSION_ITEM_INT(_)
         | MavMessage::MISSION_ITEM(_)
     )
+}
+
+/// Payload of `telemetry-fc-link` — the status bar's FC liveness. Same shape the MSP scheduler and the
+/// passive-telemetry handler emit (`false` while the FC is silent on an open transport, `true` once
+/// frames resume). Kept module-local like the other event payloads here.
+#[derive(Clone, serde::Serialize)]
+struct FcLinkAlive {
+    alive: bool,
 }
 
 /// Authoritative FC home, emitted as the protocol-agnostic `home-position` event (same `{lat,lon,alt}`
