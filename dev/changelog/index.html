@@ -1901,6 +1901,11 @@ line of the version you run: 2.0.0 is told about 2.0.1, never about 2.1.0. The d
 <li><strong>Frontend errors now reach the support log</strong> — a JavaScript error that used to show only in
   the browser console is written to Kite's backend log file too, so a report from a release build
   carries the full picture. <a href="https://github.com/b14ckyy/Kite-GC/pull/193">#193</a></li>
+<li><strong>Windows: an Xbox-class gamepad that Windows.Gaming.Input lists but never reads is now read
+  through XInput instead</strong> — the backend log also shows what the game-controller thread sees
+  (which pads it finds, which one streams, the first reading), so a report pins down exactly
+  where a pad drops out. If the sticks feel inverted after this, re-learn the mapping in the RC
+  panel. <a href="https://github.com/b14ckyy/Kite-GC/pull/196">#196</a></li>
 </ul>
 </details>
 <details class="note">
