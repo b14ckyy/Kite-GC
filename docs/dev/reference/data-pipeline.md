@@ -88,7 +88,7 @@ Emitted by all live protocols where applicable (NULL/absent where a protocol doe
 | `telemetry-linkstats` | rssi/lq/snr (normalized) | RC-link widget |
 | `telemetry-rc-channels` | current RC channel µs | RC-control engage seed |
 | `home-position` | lat, lon, alt | authoritative FC home |
-| `telemetry-protocol` / `telemetry-fc-link` | sub-protocol name / FC-origin liveness | passive telemetry |
+| `telemetry-protocol` / `telemetry-fc-link` | sub-protocol name / FC-origin liveness | passive telemetry / every live protocol |
 | `telemetry-disconnected` / `connection-lost` | — | teardown signals |
 
 `stores/telemetry.ts` listens to these and merges them into one reactive `TelemetryData` object;
