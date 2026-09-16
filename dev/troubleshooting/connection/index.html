@@ -1992,7 +1992,8 @@ backpack problem from a Kite problem.</p>
 <li>Set <strong>Log Level</strong> to <strong>Debug (verbose)</strong> to capture the full connection sequence (the Bluetooth
    diagnostics are recorded even at the default <strong>Warnings</strong> level).</li>
 <li>Reproduce the failed connection.</li>
-<li>Click <strong>Log File → Open Folder</strong> and grab the log.</li>
+<li>Click <strong>Log File → Open Folder</strong> and grab the log (on Android <strong>Share log file</strong>, pick the day, share it
+   to mail or a messenger).</li>
 </ol>
 <p>The log lives in your app-data folder:</p>
 <table>
@@ -2019,11 +2020,16 @@ backpack problem from a Kite problem.</p>
 <td><strong>Portable</strong></td>
 <td><code>data\</code> (next to the executable)</td>
 </tr>
+<tr>
+<td><strong>Android</strong></td>
+<td>App-private storage — no file manager or USB connection can reach it. Use <strong>Settings → Diagnostics → Share log file</strong>: pick the day, share it to mail or a messenger.</td>
+</tr>
 </tbody>
 </table>
 <p>Kite writes <strong>one file per day</strong> — <code>kite-gc-YYYY-MM-DD.log</code> — appending each session under a header block
 and keeping the last <strong>30 days</strong> (older files are pruned on startup), so a failure you only notice after
-restarting Kite isn't lost. <strong>Log File → Open Folder</strong> takes you straight there.</p>
+restarting Kite isn't lost. <strong>Log File → Open Folder</strong> takes you straight there; on Android <strong>Share log file</strong>
+lists the same day files, newest first, so you can pick yesterday's.</p>
 <div class="admonition tip">
 <p class="admonition-title">Sharing a log</p>
 <p>The log contains port names and firmware/version strings but no personal data. Attach it to a
