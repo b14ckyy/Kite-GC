@@ -243,6 +243,11 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **Frontend errors now reach the support log** — a JavaScript error that used to show only in
       the browser console is written to Kite's backend log file too, so a report from a release build
       carries the full picture. [#193]
+    - **Windows: an Xbox-class gamepad that Windows.Gaming.Input lists but never reads is now read
+      through XInput instead** — the backend log also shows what the game-controller thread sees
+      (which pads it finds, which one streams, the first reading), so a report pins down exactly
+      where a pad drops out. If the sticks feel inverted after this, re-learn the mapping in the RC
+      panel. [#196]
 
 ??? note "1.0 — Initial release · Live"
 
@@ -344,3 +349,4 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#189]: https://github.com/b14ckyy/Kite-GC/pull/189
 [#191]: https://github.com/b14ckyy/Kite-GC/pull/191
 [#193]: https://github.com/b14ckyy/Kite-GC/pull/193
+[#196]: https://github.com/b14ckyy/Kite-GC/pull/196
