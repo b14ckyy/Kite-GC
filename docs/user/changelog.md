@@ -248,6 +248,11 @@ inside the box of the feature release they belong to, so the notes for one relea
       (which pads it finds, which one streams, the first reading), so a report pins down exactly
       where a pad drops out. If the sticks feel inverted after this, re-learn the mapping in the RC
       panel. [#196]
+    - **Android: "Share log file" lets you pick the day** — Kite keeps one diagnostics log per day in
+      app-private storage that no file manager can reach, and the Share button only ever handed out
+      today's file. It now lists the day files, newest first, with date and size (the one this session
+      writes is tagged *current*); tap one to send it to mail or a messenger — so yesterday's log is
+      there after a restart. [#198]
 
 ??? note "1.0 — Initial release · Live"
 
@@ -350,3 +355,4 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#191]: https://github.com/b14ckyy/Kite-GC/pull/191
 [#193]: https://github.com/b14ckyy/Kite-GC/pull/193
 [#196]: https://github.com/b14ckyy/Kite-GC/pull/196
+[#198]: https://github.com/b14ckyy/Kite-GC/pull/198
