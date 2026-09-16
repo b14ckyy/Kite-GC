@@ -82,7 +82,7 @@ fn is_xbox_layout(axes: usize, buttons: usize, switches: usize) -> bool {
 /// The distinctive symptom of the broken stack: WGI lists the pad as a RawGameController but NOT as a
 /// Gamepad. A working stack puts every Xbox-class pad into `Gamepad.Gamepads` within a few hundred
 /// milliseconds, so on a working stack this stays false and the XInput path is never taken — a pad
-/// that merely rests (timestamp 0 until its first input) is left to WGI.
+/// that merely rests (timestamp 0 until its first input) is left to WGI. Sampled in `rescan()`.
 fn wgi_gamepads_empty() -> bool {
     Gamepad::Gamepads().map(|v| v.Size().unwrap_or(0) == 0).unwrap_or(true)
 }
@@ -130,6 +130,9 @@ pub struct WgiBackend {
     ids: HashMap<String, usize>,
     next_id: usize,
     last_scan: Option<Instant>,
+    /// `Gamepad.Gamepads().Size() == 0`, sampled once per rescan (500 ms) — the XInput fallback's
+    /// discriminator. Cached so a resting Xbox-layout entry does not cost a WinRT call every 20 ms tick.
+    gamepads_empty: bool,
 }
 
 impl WgiBackend {
@@ -139,6 +142,7 @@ impl WgiBackend {
             ids: HashMap::new(),
             next_id: 0,
             last_scan: None,
+            gamepads_empty: false,
         }
     }
 
@@ -198,6 +202,7 @@ impl WgiBackend {
             });
         }
         self.devices = entries;
+        self.gamepads_empty = wgi_gamepads_empty();
     }
 }
 
@@ -230,6 +235,7 @@ impl super::HidBackend for WgiBackend {
             .take_while(|d| d.id != id)
             .filter(|d| is_xbox_layout(d.axes, d.buttons, d.switches))
             .count();
+        let self_gamepads_empty = self.gamepads_empty;
         let dev = self.devices.iter_mut().find(|d| d.id == id)?;
 
         if let Source::XInput(user) = dev.source {
@@ -258,7 +264,7 @@ impl super::HidBackend for WgiBackend {
             // Xbox-class pad, still silent after the grace period AND missing from Gamepad.Gamepads → the
             // broken stack: read it through XInput (module docs). A resting pad on a working stack is in
             // Gamepads and stays on WGI.
-            if is_xbox_layout(dev.axes, dev.buttons, dev.switches) && dev.since.elapsed() >= XINPUT_FALLBACK_AFTER && wgi_gamepads_empty() {
+            if is_xbox_layout(dev.axes, dev.buttons, dev.switches) && dev.since.elapsed() >= XINPUT_FALLBACK_AFTER && self_gamepads_empty {
                 if let Some(user) = (0..4u32).filter(|u| xinput_state(*u).is_some()).nth(xbox_rank) {
                     log::info!(
                         "[hid] '{}' delivers no Windows.Gaming.Input readings — reading it through XInput (user {user})",
