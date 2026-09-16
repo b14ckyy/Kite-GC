@@ -395,11 +395,15 @@ fn handler_loop(
             }
             Err(crate::transport::TransportError::Timeout) => {}
             Err(crate::transport::TransportError::Disconnected) => {
-                log::warn!("MAVLink transport disconnected");
+                // Real transport loss (serial unplugged, socket closed): the same `connection-lost` the
+                // MSP scheduler emits — the frontend tears the connection state down on it and shows
+                // "disconnected" instead of sitting on a dead "connected" state until the user clicks
+                // Disconnect. `shutdown_lost` offers the recording-recovery prompt (ADR-042) like MSP.
+                log::warn!("MAVLink transport disconnected — tearing down");
                 if let Some(ref rec) = recorder {
-                    if let Ok(mut r) = rec.lock() { r.shutdown(); }
+                    if let Ok(mut r) = rec.lock() { r.shutdown_lost(); }
                 }
-                let _ = app_handle.emit("mavlink-disconnected", ());
+                let _ = app_handle.emit("connection-lost", ());
                 return Some(transport);
             }
             Err(e) => {
