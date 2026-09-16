@@ -96,6 +96,8 @@ version = "0.61"
 features = [
     "Gaming_Input",
     "Foundation_Collections",
+    # XInput fallback for Xbox-class pads that Windows.Gaming.Input lists but never reads (hid/windows.rs).
+    "Win32_UI_Input_XboxController",
     # Hole-punch spike / native video sink (P2.1): raw child windows under the WebView.
     "Win32_Foundation",
     "Win32_Graphics_Gdi",

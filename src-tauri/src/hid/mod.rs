@@ -26,7 +26,7 @@ mod windows;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
@@ -191,26 +191,83 @@ fn resolve_target(devices: &[HidDevice], selected: usize) -> Option<usize> {
     devices.first().map(|d| d.id)
 }
 
+/// How long a listed device may deliver no reading before we log it once (a wiring hint for the log —
+/// on Windows, Windows.Gaming.Input only reports input while Kite owns the foreground window).
+const SILENT_WARN_AFTER: Duration = Duration::from_secs(5);
+
 fn input_loop(app: AppHandle, running: Arc<AtomicBool>, selected: Arc<AtomicUsize>) {
     let mut backend = make_backend();
     let mut last_devices: Vec<HidDevice> = Vec::new();
+    // Diagnostics: which target we are streaming, whether it has produced a reading yet, when it was
+    // selected, and the last axis vector we logged (1 Hz debug trace while the values change).
+    let mut cur_target: Option<usize> = None;
+    let mut got_reading = false;
+    let mut since = Instant::now();
+    let mut warned_silent = false;
+    let mut last_trace = Instant::now();
+    let mut last_axes: Vec<i32> = Vec::new();
 
+    log::info!("[hid] input thread started");
     while running.load(Ordering::SeqCst) {
         let devices = backend.poll();
         if devices != last_devices {
+            if devices.is_empty() {
+                log::info!("[hid] no game controllers connected");
+            } else {
+                for d in &devices {
+                    log::info!(
+                        "[hid] device id={} '{}' axes={} buttons={} hats={} ({})",
+                        d.id, d.name, d.axes, d.buttons, d.hats, d.uuid
+                    );
+                }
+            }
             let _ = app.emit("hid-devices", &devices);
             last_devices = devices.clone();
         }
 
-        if let Some(target) = resolve_target(&devices, selected.load(Ordering::SeqCst)) {
+        let target = resolve_target(&devices, selected.load(Ordering::SeqCst));
+        if target != cur_target {
+            cur_target = target;
+            got_reading = false;
+            warned_silent = false;
+            since = Instant::now();
+            if let Some(id) = target {
+                log::info!("[hid] streaming device id={}", id);
+            }
+        }
+
+        if let Some(target) = target {
             if let Some(mut snap) = backend.snapshot(target) {
                 for axis in &mut snap.axes {
                     axis.value = apply_deadband(axis.value);
                 }
+                if !got_reading {
+                    got_reading = true;
+                    log::info!(
+                        "[hid] first reading from device id={} ({} axes, {} buttons, {} hats)",
+                        target, snap.axes.len(), snap.buttons.len(), snap.hats.len()
+                    );
+                }
+                // 1 Hz trace of the axis vector (percent) while it changes — enough to see in the log
+                // whether stick movement reaches the backend at all.
+                let axes_pct: Vec<i32> = snap.axes.iter().map(|a| (a.value * 100.0).round() as i32).collect();
+                if axes_pct != last_axes && last_trace.elapsed() >= Duration::from_secs(1) {
+                    let pressed: Vec<u32> = snap.buttons.iter().filter(|b| b.pressed).map(|b| b.code + 1).collect();
+                    log::debug!("[hid] axes%={:?} buttons={:?}", axes_pct, pressed);
+                    last_axes = axes_pct;
+                    last_trace = Instant::now();
+                }
                 let _ = app.emit("hid-input", &snap);
+            } else if !got_reading && !warned_silent && since.elapsed() >= SILENT_WARN_AFTER {
+                warned_silent = true;
+                log::warn!(
+                    "[hid] device id={} is listed but has delivered no reading for {}s — on Windows, input is only reported while the Kite window is in the foreground",
+                    target, SILENT_WARN_AFTER.as_secs()
+                );
             }
         }
 
         thread::sleep(POLL_INTERVAL);
     }
+    log::info!("[hid] input thread stopped");
 }
