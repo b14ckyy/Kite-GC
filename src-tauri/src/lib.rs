@@ -100,7 +100,7 @@ use commands::video::{
     video_detached_open, video_detached_close, video_detached_pin_top, video_detached_chrome, video_detached_aspect, video_detached_nudge,
 };
 use video::{MediaMtx, MjpegServer};
-use commands::logging::{set_log_level, get_log_path, log_session_settings, log_frontend};
+use commands::logging::{set_log_level, get_log_path, list_log_files, log_session_settings, log_frontend};
 use commands::tiles::fetch_tile;
 use commands::radar::{radar_configure, radar_set_center, radar_set_node_pos, radar_snapshot};
 use commands::terrain::{
@@ -628,6 +628,7 @@ pub fn run() {
             link_status::telemetry_track_since,
             set_log_level,
             get_log_path,
+            list_log_files,
             log_session_settings,
             log_frontend,
             fetch_tile,

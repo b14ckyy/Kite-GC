@@ -28,6 +28,7 @@
   import Toggle from '$lib/components/panel/Toggle.svelte';
   import SegmentedToggle from '$lib/components/panel/SegmentedToggle.svelte';
   import AboutDialog from '$lib/components/AboutDialog.svelte';
+  import LogFilePicker, { type LogFileInfo } from '$lib/components/LogFilePicker.svelte';
 
   let aboutOpen = $state(false);
 
@@ -228,19 +229,34 @@
       logOpenError = e instanceof Error ? e.message : String(e);
     }
   }
+  let logFiles = $state<LogFileInfo[]>([]);
+  let showLogPicker = $state(false);
+
   /** Share the diagnostics log through the system sheet — the Android replacement for "open
    *  folder": an app-private path is unreachable in any file manager, so opening it on the device
-   *  is useless, while sharing reaches mail, messengers or a text editor directly. */
+   *  is useless, while sharing reaches mail, messengers or a text editor directly. The log is one
+   *  file per day and the one a tester needs after a restart is usually yesterday's, so the button
+   *  lists the day-files and `sharePickedLog` sends the chosen one. */
   async function shareLogFile() {
     logOpenError = '';
     if (!logPath) await loadLogPath();
-    const p = logPath;
-    if (!p) {
+    if (!logPath) {
       logOpenError = $t('settings.logUnavailable');
       return;
     }
     try {
-      await invoke('share_file', { path: p, mime: 'text/plain' });
+      logFiles = await invoke<LogFileInfo[]>('list_log_files');
+      showLogPicker = true;
+    } catch (e) {
+      logOpenError = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  async function sharePickedLog(path: string) {
+    showLogPicker = false;
+    logOpenError = '';
+    try {
+      await invoke('share_file', { path, mime: 'text/plain' });
     } catch (e) {
       logOpenError = e instanceof Error ? e.message : String(e);
     }
@@ -900,6 +916,12 @@
 </div>
 
 <AboutDialog bind:open={aboutOpen} />
+<!-- Sibling of the shell like AboutDialog: the shell's backdrop-filter makes it the containing
+     block for fixed descendants and its overflow: hidden would clip them to the panel box; out
+     here the overlay covers the whole panels layer. -->
+{#if showLogPicker}
+  <LogFilePicker files={logFiles} onPick={sharePickedLog} onClose={() => (showLogPicker = false)} />
+{/if}
 
 <style>
   .settabs { width: 100%; }
