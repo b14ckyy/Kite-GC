@@ -431,11 +431,10 @@ fn wp_to_item(wp: &ArduWaypoint, seq: u16, target: u8, mission_type: MavMissionT
         target_system:    target,
         target_component: AUTOPILOT_COMPONENT,
         seq,
-        // Action items (DO_* / CONDITION_*) carry no position: send them in MAV_FRAME_MISSION. PX4
-        // parses any global frame as a position item first and rejects lat 0 with
-        // MAV_MISSION_INVALID_PARAM5_X; ArduPilot accepts either frame for these. Planner files from
-        // Mission Planner carry frame 0 on such items, which is what triggered it.
-        frame:        if cmd_has_location(wp.command) { u8_to_frame(wp.frame) } else { MavFrame::MAV_FRAME_MISSION },
+        // The frame is the planner's business: the frontend puts pure action items (DO_* / CONDITION_*)
+        // into MAV_FRAME_MISSION before a MISSION upload (missionArdupilot.ts, framesForUpload); fence
+        // and rally items keep the global frames their editors set. Passed through unchanged here.
+        frame:        u8_to_frame(wp.frame),
         command:      u16_to_cmd(wp.command),
         // `current` flags the active waypoint of a real mission (slot 0); meaningless for fence/rally.
         current:      if seq == 0 && mission_type == MavMissionType::MAV_MISSION_TYPE_MISSION { 1 } else { 0 },
@@ -460,13 +459,6 @@ fn wp_to_item(wp: &ArduWaypoint, seq: u16, target: u8, mission_type: MavMissionT
 /// SPLINE_WAYPOINT, VTOL_TAKEOFF/LAND.
 fn cmd_yaw_in_param4(cmd: u16) -> bool {
     matches!(cmd, 16 | 17 | 18 | 19 | 21 | 22 | 82 | 84 | 85)
-}
-
-/// Commands whose x/y carry a coordinate: the NAV_* family plus the DO_* items that take a location
-/// (SET_HOME, LAND_START, REPOSITION, SET_ROI_LOCATION, SET_ROI, PAYLOAD_PLACE). Everything else is a
-/// pure action item (see `wp_to_item`).
-fn cmd_has_location(cmd: u16) -> bool {
-    matches!(cmd, 16..=31 | 82 | 84 | 85 | 179 | 189 | 192 | 195 | 201 | 2500 | 2501)
 }
 
 fn u8_to_frame(v: u8) -> MavFrame {

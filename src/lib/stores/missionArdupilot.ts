@@ -5,7 +5,7 @@ import { writable, derived, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { connection } from './connection';
 import { settings } from './settings';
-import { CMD, cmdHasLocation, type VehicleClass } from '$lib/helpers/arduCommandCatalog';
+import { CMD, cmdDef, cmdHasLocation, type VehicleClass } from '$lib/helpers/arduCommandCatalog';
 
 // ── MAV_CMD constants ─────────────────────────────────────────────────
 export const MAV_CMD_NAV_WAYPOINT        = 16;
@@ -24,8 +24,9 @@ export const MAV_CMD_CONDITION_DELAY    = 112;
 export const MAV_FRAME_GLOBAL                = 0;   // absolute AMSL
 export const MAV_FRAME_GLOBAL_RELATIVE_ALT   = 3;   // relative to home
 export const MAV_FRAME_GLOBAL_TERRAIN_ALT    = 10;  // terrain-relative
+export const MAV_FRAME_MISSION               = 2;   // no position — pure action items (DO_* / CONDITION_*)
 
-export type MavFrame = 0 | 3 | 10;
+export type MavFrame = 0 | 2 | 3 | 10;
 
 // ── Types ─────────────────────────────────────────────────────────────
 
@@ -431,6 +432,28 @@ export async function downloadArduMissionFromFc(): Promise<number> {
   arduClearUndoHistory();        // downloaded mission = fresh undo baseline
   markArduMissionSynced('fc', wps);
   return wps.length;
+}
+
+// ── Upload framing ────────────────────────────────────────────────────
+/** ArduPilot's `AP_Mission::stored_in_location()` — the mission commands whose x/y/z are a coordinate
+ *  (NAV_* incl. GUIDED_ENABLE / PAYLOAD_PLACE, DO_SET_HOME, DO_LAND_START, DO_RETURN_PATH_START,
+ *  DO_GO_AROUND, DO_SET_ROI / _LOCATION). RTL (20) is kept in the set so it goes out unchanged. */
+const ARDUPILOT_LOCATION_CMDS: ReadonlySet<number> = new Set([
+  16, 17, 18, 19, 20, 21, 22, 30, 31, 82, 84, 85, 92, 94, 179, 188, 189, 191, 195, 201,
+]);
+
+/** Frame for a MISSION upload: every command the catalog knows that is NOT a location command goes out
+ *  in MAV_FRAME_MISSION. PX4 parses any global frame as a position item and rejects lat 0 with
+ *  MAV_MISSION_INVALID_PARAM5_X (Mission Planner writes frame 0 on such items); ArduPilot accepts
+ *  either frame for them. Commands the catalog does not know keep the frame they came with — a wrong
+ *  guess would turn a relative altitude into an absolute one on ArduPilot, which reads MAV_FRAME_MISSION
+ *  like GLOBAL for a location command. Fence / rally uploads never pass through here. */
+export function framesForUpload(wps: readonly ArduWaypoint[]): ArduWaypoint[] {
+  return wps.map((w) =>
+    cmdDef(w.command) && !ARDUPILOT_LOCATION_CMDS.has(w.command) && w.frame !== MAV_FRAME_MISSION
+      ? { ...w, frame: MAV_FRAME_MISSION }
+      : w,
+  );
 }
 
 // ── .waypoints file format ────────────────────────────────────────────
