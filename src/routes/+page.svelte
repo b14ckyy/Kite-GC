@@ -3283,6 +3283,13 @@
       if (document.hidden) lostWhileHidden = true;
       void disconnectFC(selectedBaud).catch(() => {});
     });
+    // MAVLink transport loss (serial unplugged, socket error): the handler thread has exited and says so,
+    // but nothing on this side closed the connection — the UI sat on a dead "connected" state until the
+    // user disconnected by hand. Treat it exactly like connection-lost.
+    void listen('mavlink-disconnected', () => {
+      if (document.hidden) lostWhileHidden = true;
+      void disconnectFC(selectedBaud).catch(() => {});
+    });
     // Back in front: close the trail gap from the backend's buffer, reconnect once if the link was
     // lost meanwhile (BACKGROUND_TELEMETRY.md).
     document.addEventListener('visibilitychange', onVisibilityChange);
