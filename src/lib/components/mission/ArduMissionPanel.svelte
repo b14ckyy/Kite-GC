@@ -23,6 +23,7 @@
     MAV_FRAME_GLOBAL, MAV_FRAME_GLOBAL_TERRAIN_ALT,
     serializeWaypoints, parseWaypoints, parsePlanFile, loadArduMissionFromFile,
     type ArduWaypoint,
+    framesForUpload,
   } from '$lib/stores/missionArdupilot';
   import { onMissionDownloadProgress, onMissionUploadProgress } from '$lib/stores/mission';
   import { cmdName, cmdShort, cmdHasLocation, cmdDef, cmdValidForVehicle, cmdValidForPx4, enumLabel, type VehicleClass } from '$lib/helpers/arduCommandCatalog';
@@ -305,7 +306,8 @@
         : $t('arduMission.uploading');
     });
     try {
-      await invoke<void>('ardu_mission_upload', { waypoints: wps });
+      // Action items travel in MAV_FRAME_MISSION (see framesForUpload); the planner keeps its own frames.
+      await invoke<void>('ardu_mission_upload', { waypoints: framesForUpload(wps) });
       markArduMissionSynced('fc', wps); // FC now holds exactly this mission
       statusMessage = $t('mission.uploaded', { values: { count: wps.length } });
     } catch (e) {
