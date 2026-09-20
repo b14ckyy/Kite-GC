@@ -40,14 +40,22 @@ struct TileData {
 
 impl TileData {
     /// Bilinear sample at lat/lon. Returns None if outside the tile.
+    ///
+    /// The bound is the tile's *extent* (width × px), not its last sample: the
+    /// tiles are PixelIsPoint, so the last sample sits one pixel short of the
+    /// next tile's first one. Bounding on `width - 1` refused that final
+    /// pixel strip (~30 m along every south/east tile edge) although the
+    /// point belongs to this tile by `floor()`; the neighbour refuses it too.
+    /// Inside that strip both indices clamp to the edge sample — nearest
+    /// neighbour over at most one pixel, well inside the DEM's own error.
     fn sample(&self, lat: f64, lon: f64) -> Option<f32> {
         let col = (lon - self.origin_lon) / self.px_lon;
         let row = (self.origin_lat - lat) / self.px_lat;
-        if col < 0.0 || row < 0.0 || col > (self.width - 1) as f64 || row > (self.height - 1) as f64 {
+        if col < 0.0 || row < 0.0 || col >= self.width as f64 || row >= self.height as f64 {
             return None;
         }
-        let c0 = col.floor() as usize;
-        let r0 = row.floor() as usize;
+        let c0 = (col.floor() as usize).min(self.width - 1);
+        let r0 = (row.floor() as usize).min(self.height - 1);
         let c1 = (c0 + 1).min(self.width - 1);
         let r1 = (r0 + 1).min(self.height - 1);
         let fc = col - c0 as f64;
@@ -515,6 +523,33 @@ mod tests {
         assert_eq!(tile_name(47.5, 11.2), "Copernicus_DSM_COG_10_N47_00_E011_00_DEM");
         assert_eq!(tile_name(-0.5, -4.3), "Copernicus_DSM_COG_10_S01_00_W005_00_DEM");
         assert_eq!(tile_name(0.0, 0.0), "Copernicus_DSM_COG_10_N00_00_E000_00_DEM");
+    }
+
+    /// 4×4 tile with 0.25° pixels covering exactly 1°: the last sample sits at
+    /// 0.75°, the tile's extent ends at 1.0°.
+    fn quarter_degree_tile() -> TileData {
+        let mut grid = vec![0.0f32; 16];
+        for (i, v) in grid.iter_mut().enumerate() {
+            *v = 100.0 + i as f32; // every sample distinct
+        }
+        TileData { width: 4, height: 4, grid, origin_lon: 11.0, origin_lat: 48.0, px_lon: 0.25, px_lat: 0.25 }
+    }
+
+    #[test]
+    fn sample_covers_the_last_pixel_strip() {
+        let t = quarter_degree_tile();
+        // Beyond the last sample but inside the tile's extent → the edge sample,
+        // not a hole (this strip used to return None along every tile seam).
+        assert_eq!(t.sample(47.05, 11.9), Some(115.0));
+        // The edges of that strip clamp too.
+        assert_eq!(t.sample(48.0, 11.9), Some(103.0));
+        assert_eq!(t.sample(47.05, 11.0), Some(112.0));
+        // On the next tile's first sample → not ours.
+        assert_eq!(t.sample(47.05, 12.0), None);
+        assert_eq!(t.sample(47.0, 11.5), None);
+        assert_eq!(t.sample(48.1, 11.5), None);
+        // Ordinary interior point still interpolates.
+        assert_eq!(t.sample(47.875, 11.125), Some(102.5));
     }
 
     #[test]

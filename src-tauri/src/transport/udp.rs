@@ -37,6 +37,9 @@ pub struct UdpTransport {
     /// (peer learning) so we reply to wherever the FC/bridge actually speaks from.
     peer: SocketAddr,
     socket: UdpSocket,
+    /// The first ICMP "port unreachable" of the session is logged at warn (a tester's log must show why
+    /// nothing arrives); every further one goes to debug so a dead peer doesn't flood the log.
+    peer_unreachable_logged: bool,
 }
 
 impl UdpTransport {
@@ -80,7 +83,33 @@ impl UdpTransport {
             configured: addr,
             peer,
             socket,
+            peer_unreachable_logged: false,
         })
+    }
+
+    /// True for the errors Windows reports on a UDP socket after an ICMP "port unreachable" came back
+    /// for an earlier datagram — on the next `recv_from` (`WSAECONNRESET`) or `send_to`. UDP is
+    /// connectionless: the peer being gone is a stall (ADR-042), not a transport loss — the link stays
+    /// up, the stall watchdog reports it, and the peer may come back (a restarted SITL or bridge).
+    fn is_peer_unreachable(e: &std::io::Error) -> bool {
+        matches!(
+            e.kind(),
+            std::io::ErrorKind::ConnectionReset
+                | std::io::ErrorKind::ConnectionRefused
+                | std::io::ErrorKind::ConnectionAborted
+        )
+    }
+
+    fn note_peer_unreachable(&mut self, op: &str, e: &std::io::Error) {
+        if !self.peer_unreachable_logged {
+            self.peer_unreachable_logged = true;
+            log::warn!(
+                "UDP peer {} is not reachable ({} — {}); the link stays open, nothing arrives until the peer is back",
+                self.peer, op, e
+            );
+        } else {
+            log::debug!("UDP {}: {} — peer still unreachable, ignoring", op, e);
+        }
     }
 }
 
@@ -102,15 +131,26 @@ impl ByteTransport for UdpTransport {
             {
                 Ok(0)
             }
+            Err(ref e) if Self::is_peer_unreachable(e) => {
+                self.note_peer_unreachable("recv", e);
+                Ok(0)
+            }
             Err(e) => Err(TransportError::from(e)),
         }
     }
 
     fn write_bytes(&mut self, data: &[u8]) -> Result<(), TransportError> {
-        self.socket
-            .send_to(data, self.peer)
-            .map_err(|e| TransportError::Io(format!("UDP send to {} failed: {}", self.peer, e)))?;
-        Ok(())
+        match self.socket.send_to(data, self.peer) {
+            Ok(_) => Ok(()),
+            // Same ICMP condition surfacing on the send side (see `is_peer_unreachable`). A fatal `Io`
+            // here would make the MSP scheduler tear the link down (`mark_lost`) and the MAVLink handler
+            // warn once per heartbeat / RC frame — the datagram is simply lost, like on any quiet link.
+            Err(ref e) if Self::is_peer_unreachable(e) => {
+                self.note_peer_unreachable("send", e);
+                Ok(())
+            }
+            Err(e) => Err(TransportError::Io(format!("UDP send to {} failed: {}", self.peer, e))),
+        }
     }
 
     fn set_read_timeout(&mut self, timeout: Duration) {

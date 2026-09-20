@@ -50,3 +50,26 @@ In both cases the extra setup (account, API key, billing) and the licensing cons
 worth it for a map style you can already get, key-free, from the built-in providers. If a specific,
 properly licensed provider ever adds real value, we would add it as an optional *bring-your-own-key*
 source rather than route around anyone's terms of service.
+
+## Connections
+
+### Why does Kite keep showing a firmware message that Mission Planner doesn't?
+
+When Kite is connected through **another ground station's MAVLink forward** (Mission Planner's
+forward or mirror, for example), it sees everything the aircraft sends — including replies to
+requests the *other* ground station made. ArduPilot broadcasts its status texts to every connected
+ground station, and Kite shows them as notifications; Mission Planner keeps the low-severity ones in
+its Messages tab, so the same line can look like a Kite problem while it is a conversation between
+Mission Planner and the firmware.
+
+A typical example: **"Sending unknown message (44)" twice a second**. Mission Planner asks the
+aircraft for a camera message (`CAMERA_FOV_STATUS`) at its 2 Hz status rate; on ArduPilot 4.5 and
+the early 4.6 betas a board whose firmware build has no camera field-of-view support (small-flash
+F405-class boards, typically) accepts the request and then complains at that rate, at its *debug*
+severity. Connected directly to the aircraft, without Mission Planner in the loop, the line never
+appears.
+
+Such messages are harmless. **Update the aircraft to ArduPilot 4.6 or newer** — the current
+firmware refuses a request it cannot serve once instead of repeating the complaint — and keep the
+other ground station up to date as well. To keep the notification banner quiet in the meantime,
+set **[Settings → Alerts → System messages](reference/settings.md)** to *Warning*.
