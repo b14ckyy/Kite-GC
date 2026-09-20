@@ -41,7 +41,11 @@ inside the box of the feature release they belong to, so the notes for one relea
       connection closed its socket, Windows reported this as a connection error on the next receive
       and Kite disconnected the whole link, even though the other side might come back on its own.
       The link now stays up and shows "Reconnecting…" instead.
-
+    - **Terrain radar and Live AGL: a blank strip along every terrain-tile edge.** The elevation
+      sampler refused the last row and column of each 1° Copernicus tile, so a roughly 30 m wide
+      strip along every full degree of latitude and longitude reported no terrain. In the terrain
+      radar that strip stayed unpainted, which reads as "terrain far below" rather than "unknown";
+      Live AGL and the terrain analysis showed a gap. The sampler now covers the whole tile.
     ---
 
     **1.0.1**{ .kite-patch } *2026-09-13*{ .kite-badge }
