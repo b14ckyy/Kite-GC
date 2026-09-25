@@ -45,7 +45,7 @@
   import { guidedActive, guidedTarget, repositionTo, activeMode, guidedParams, fcLoiterRadius, type GuidedParams } from "$lib/controllers/vehicleControl";
   import GuidedTargetForm from "$lib/components/control/GuidedTargetForm.svelte";
   import { cmdHasLocation } from "$lib/helpers/arduCommandCatalog";
-  import { connection } from "$lib/stores/connection";
+  import { connection, linkHasMsp } from "$lib/stores/connection";
   import { frameMissionSignal } from "$lib/stores/mapCamera";
   import { destinationPoint, haversineDistance } from "$lib/utils/geo";
   import { buildApproachGeometry } from "$lib/helpers/autolandGeometry";
@@ -700,7 +700,7 @@
     if (!cfg) return;
     const armed = (get(telemetry).armingFlags & (1 << ARMING_FLAG_ARMED)) !== 0;
     const conn = get(connection);
-    const canEdit = conn.status === 'connected' && conn.protocolType === 'msp' && !!conn.fcInfo?.features?.autoland_config;
+    const canEdit = linkHasMsp(conn) && !!conn.fcInfo?.features?.autoland_config;
     const maxDistM = cfg.safehome_max_distance_cm != null ? cfg.safehome_max_distance_cm / 100 : null;
     const loiterM = cfg.loiter_radius_cm != null ? cfg.loiter_radius_cm / 100 : null;
     const approachLenM = cfg.autoland.approach_length_cm != null ? cfg.autoland.approach_length_cm / 100 : 0;

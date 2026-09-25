@@ -10,15 +10,15 @@
 // MSP_EEPROM_WRITE to persist. Editing/writing is a ≥7.1 path only (the frontend gates the button).
 
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, Manager};
 
-use crate::commands::fc_settings::{read_uint_setting, set_uint_setting};
+use crate::commands::fc_settings::{set_uint_setting, try_read_uint_setting};
 use crate::msp::{
     MSP2_INAV_FW_APPROACH, MSP2_INAV_SAFEHOME, MSP2_INAV_SET_FW_APPROACH, MSP2_INAV_SET_SAFEHOME,
     MSP_EEPROM_WRITE,
 };
-use crate::scheduler::SchedulerHandle;
-use crate::state::{ActiveProtocol, AppState};
+use crate::scheduler::MspRequester;
+use crate::state::{with_msp_blocking, AppState};
 
 /// Number of safehome slots in INAV (indices 0..7). FW_APPROACH shares these indices (8+ = mission
 /// LAND waypoints, handled separately later).
@@ -75,23 +75,15 @@ pub struct SafeHomeConfig {
     pub has_autoland: bool,
 }
 
-/// Resolve the MSP scheduler handle, erroring for non-MSP / disconnected links.
-fn msp_handle(
-    proto: &Option<ActiveProtocol>,
-) -> Result<&SchedulerHandle, String> {
-    match proto.as_ref() {
-        Some(ActiveProtocol::Msp(h)) => Ok(h),
-        Some(_) => Err("FC is not running MSP (INAV)".into()),
-        None => Err("Not connected".into()),
-    }
+/// Read all safehomes + radius settings (always) + approaches + autoland settings (≥7.1). Direct MSP or
+/// the MSP-over-MAVLink tunnel, on a blocking worker (`with_msp_blocking`). A failed setting read is an
+/// error (not a silently missing value); only an absent setting reads as `None`.
+#[tauri::command]
+pub async fn safehome_read_all(app: AppHandle) -> Result<SafeHomeConfig, String> {
+    with_msp_blocking(&app, |app, handle| read_all(&app.state::<AppState>(), handle)).await
 }
 
-/// Read all safehomes + radius settings (always) + approaches + autoland settings (≥7.1).
-#[tauri::command(async)]
-pub fn safehome_read_all(state: State<'_, AppState>) -> Result<SafeHomeConfig, String> {
-    let proto = state.protocol.lock().map_err(|e| e.to_string())?;
-    let handle = msp_handle(&proto)?;
-
+fn read_all(state: &AppState, handle: &MspRequester) -> Result<SafeHomeConfig, String> {
     let has_autoland = {
         let info = state.fc_info.lock().map_err(|e| e.to_string())?;
         info.as_ref()
@@ -114,8 +106,8 @@ pub fn safehome_read_all(state: State<'_, AppState>) -> Result<SafeHomeConfig, S
         }
     }
 
-    let safehome_max_distance_cm = read_uint_setting(handle, "safehome_max_distance").map(|v| v as u32);
-    let loiter_radius_cm = read_uint_setting(handle, "nav_fw_loiter_radius").map(|v| v as u32);
+    let safehome_max_distance_cm = try_read_uint_setting(handle, "safehome_max_distance")?.map(|v| v as u32);
+    let loiter_radius_cm = try_read_uint_setting(handle, "nav_fw_loiter_radius")?.map(|v| v as u32);
 
     let (approaches, autoland) = if has_autoland {
         let mut a = Vec::with_capacity(MAX_SAFE_HOMES as usize);
@@ -135,15 +127,15 @@ pub fn safehome_read_all(state: State<'_, AppState>) -> Result<SafeHomeConfig, S
             }
         }
         let autoland = AutolandSettings {
-            approach_length_cm: read_uint_setting(handle, "nav_fw_land_approach_length").map(|v| v as u32),
-            pitch2throttle_mod: read_uint_setting(handle, "nav_fw_land_final_approach_pitch2throttle_mod").map(|v| v as u16),
-            glide_alt_cm: read_uint_setting(handle, "nav_fw_land_glide_alt").map(|v| v as u16),
-            flare_alt_cm: read_uint_setting(handle, "nav_fw_land_flare_alt").map(|v| v as u16),
-            glide_pitch_deg: read_uint_setting(handle, "nav_fw_land_glide_pitch").map(|v| v as u8),
-            flare_pitch_deg: read_uint_setting(handle, "nav_fw_land_flare_pitch").map(|v| v as u8),
-            max_tailwind_cms: read_uint_setting(handle, "nav_fw_land_max_tailwind").map(|v| v as u16),
-            safehome_usage_mode: read_uint_setting(handle, "safehome_usage_mode").map(|v| v as u8),
-            rth_allow_landing: read_uint_setting(handle, "nav_rth_allow_landing").map(|v| v as u8),
+            approach_length_cm: try_read_uint_setting(handle, "nav_fw_land_approach_length")?.map(|v| v as u32),
+            pitch2throttle_mod: try_read_uint_setting(handle, "nav_fw_land_final_approach_pitch2throttle_mod")?.map(|v| v as u16),
+            glide_alt_cm: try_read_uint_setting(handle, "nav_fw_land_glide_alt")?.map(|v| v as u16),
+            flare_alt_cm: try_read_uint_setting(handle, "nav_fw_land_flare_alt")?.map(|v| v as u16),
+            glide_pitch_deg: try_read_uint_setting(handle, "nav_fw_land_glide_pitch")?.map(|v| v as u8),
+            flare_pitch_deg: try_read_uint_setting(handle, "nav_fw_land_flare_pitch")?.map(|v| v as u8),
+            max_tailwind_cms: try_read_uint_setting(handle, "nav_fw_land_max_tailwind")?.map(|v| v as u16),
+            safehome_usage_mode: try_read_uint_setting(handle, "safehome_usage_mode")?.map(|v| v as u8),
+            rth_allow_landing: try_read_uint_setting(handle, "nav_rth_allow_landing")?.map(|v| v as u8),
         };
         (a, autoland)
     } else {
@@ -167,11 +159,12 @@ pub fn safehome_read_all(state: State<'_, AppState>) -> Result<SafeHomeConfig, S
 
 /// "Save to FC": write the whole config as a batch (all safehomes + approaches + settings), then a
 /// single EEPROM write to persist. ≥7.1 path (the frontend only exposes the button there).
-#[tauri::command(async)]
-pub fn safehome_write_all(config: SafeHomeConfig, state: State<'_, AppState>) -> Result<(), String> {
-    let proto = state.protocol.lock().map_err(|e| e.to_string())?;
-    let handle = msp_handle(&proto)?;
+#[tauri::command]
+pub async fn safehome_write_all(config: SafeHomeConfig, app: AppHandle) -> Result<(), String> {
+    with_msp_blocking(&app, move |_, handle| write_all(&config, handle)).await
+}
 
+fn write_all(config: &SafeHomeConfig, handle: &MspRequester) -> Result<(), String> {
     // Safehomes: [idx, enabled, lat(4), lon(4)].
     for sh in &config.safehomes {
         let mut p = Vec::with_capacity(10);

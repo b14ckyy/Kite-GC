@@ -6,7 +6,8 @@
 // Unlike MSP (poll-based), MAVLink is push-based: the FC streams telemetry,
 // the GCS sends heartbeats and occasional commands.
 
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -87,6 +88,10 @@ pub struct MavlinkHandle {
     /// MSP scheduler (tunnel mode) running over the MAVLink TUNNEL when the FC is INAV ≥ 10.0 and
     /// answered the connect-time probe; `None` on a plain MAVLink link. Stopped before the handler.
     pub msp: Option<crate::scheduler::SchedulerHandle>,
+    /// Set once the MSP-over-MAVLink probe identified this FC as INAV (`probe_msp_tunnel`). The handler
+    /// decodes the few INAV-specific MAVLink conventions with it (MISSION_CURRENT numbering) — not with
+    /// the heartbeat variant, which INAV reports as Generic / ArduPilot.
+    pub inav_tunnel: Arc<AtomicBool>,
 }
 
 impl MavlinkHandle {
@@ -136,8 +141,10 @@ pub fn start(
     let (cmd_tx, cmd_rx) = mpsc::channel::<MavlinkCommand>();
 
     let handle_variant = fc_variant.clone();
+    let inav_tunnel = Arc::new(AtomicBool::new(false));
+    let loop_inav_tunnel = inav_tunnel.clone();
     let thread = thread::spawn(move || {
-        handler_loop(transport, fc_sysid, fc_compid, fc_variant, app_handle, cmd_rx, recorder, rc_tx)
+        handler_loop(transport, fc_sysid, fc_compid, fc_variant, app_handle, cmd_rx, recorder, rc_tx, loop_inav_tunnel)
     });
 
     MavlinkHandle {
@@ -146,6 +153,7 @@ pub fn start(
         fc_sysid,
         fc_variant: handle_variant,
         msp: None,
+        inav_tunnel,
     }
 }
 
@@ -159,6 +167,7 @@ fn handler_loop(
     cmd_rx: mpsc::Receiver<MavlinkCommand>,
     recorder: Option<FlightRecorderHandle>,
     rc_tx: RcTxHandle,
+    inav_tunnel: Arc<AtomicBool>,
 ) -> Option<Box<dyn ByteTransport>> {
     let mut parser = MavParser::new();
     let mut seq = MavSequence::new();
@@ -496,7 +505,7 @@ fn handler_loop(
                         continue;
                     }
 
-                    dispatch_message(&frame.header, &frame.message, &fc_variant, &app_handle, &mut analog, &mut batteries, &mut fused, &mut quadplane_seen, &recorder);
+                    dispatch_message(&frame.header, &frame.message, &fc_variant, &app_handle, &mut analog, &mut batteries, &mut fused, &mut quadplane_seen, &recorder, inav_tunnel.load(Ordering::Relaxed));
                 }
             }
             Err(crate::transport::TransportError::Timeout) => {}
@@ -589,6 +598,20 @@ fn send_mav_frame(
 }
 
 /// Returns true for MAVLink messages that belong to the mission microprotocol.
+/// MISSION_CURRENT → the displayed 1-based WP number (0 = none). ArduPilot/PX4: our displayed waypoints
+/// are seq 1..N (home slot 0 dropped), so `seq` is the number as is. INAV over an MSP-over-MAVLink link:
+/// INAV packs `seq = active WP − 1` (0-based, no home slot) and flags a running mission with
+/// `mission_mode == 1` — anything else means no active mission WP.
+fn active_wp_from_mission_current(seq: u16, mission_mode: u8, inav: bool) -> u16 {
+    if !inav {
+        seq
+    } else if mission_mode == 1 {
+        seq.saturating_add(1)
+    } else {
+        0
+    }
+}
+
 // We intentionally still recognise the deprecated non-`_INT` MISSION_REQUEST / MISSION_ITEM:
 // older/legacy flight controllers may emit them, and routing them is harmless (we author with
 // the `_INT` variants). Hence `#[allow(deprecated)]` rather than dropping the legacy arms.
@@ -688,7 +711,7 @@ struct FusedPos {
 /// Dispatch a received MAVLink message to the same Tauri events as the MSP scheduler.
 /// This ensures widgets/store work identically regardless of protocol.
 #[allow(clippy::too_many_arguments)] // dispatch helper threading the handler's mutable decode state
-fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, app_handle: &AppHandle, analog: &mut AnalogState, batteries: &mut std::collections::BTreeMap<u8, BatteryInstanceData>, fused: &mut FusedPos, quadplane_seen: &mut bool, recorder: &Option<FlightRecorderHandle>) {
+fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, app_handle: &AppHandle, analog: &mut AnalogState, batteries: &mut std::collections::BTreeMap<u8, BatteryInstanceData>, fused: &mut FusedPos, quadplane_seen: &mut bool, recorder: &Option<FlightRecorderHandle>, inav_tunnel: bool) {
     match message {
         // ── HEARTBEAT → telemetry-status + telemetry-flightmode ─────
         MavMessage::HEARTBEAT(hb) => {
@@ -751,12 +774,12 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
         }
 
         // ── MISSION_CURRENT → telemetry-nav-status (active waypoint) ─
-        // The FC's current mission item sequence. Our displayed waypoints are seq 1..N (home slot 0 is
-        // dropped), so seq maps directly to the displayed WP number. Reuses the unified nav-status event
-        // (same shape MSP emits) so the widget + map highlight work identically.
+        // The FC's current mission item sequence, mapped to the displayed 1-based WP number (see
+        // `active_wp_from_mission_current`). Reuses the unified nav-status event (same shape MSP emits)
+        // so the widget + map highlight work identically.
         MavMessage::MISSION_CURRENT(mc) => {
             let _ = app_handle.emit("telemetry-nav-status", serde_json::json!({
-                "active_wp_number": mc.seq,
+                "active_wp_number": active_wp_from_mission_current(mc.seq, mc.mission_mode, inav_tunnel),
                 "nav_state": 0u8, // ArduPilot has no INAV nav_state; mission detection uses flight mode
             }));
         }
@@ -1171,3 +1194,19 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::active_wp_from_mission_current;
+
+    #[test]
+    fn mission_current_numbering_per_autopilot() {
+        // ArduPilot/PX4: seq is already the displayed number (home slot 0 dropped).
+        assert_eq!(active_wp_from_mission_current(3, 0, false), 3);
+        // INAV tunnel: 0-based seq, only while mission_mode == 1.
+        assert_eq!(active_wp_from_mission_current(0, 1, true), 1);
+        assert_eq!(active_wp_from_mission_current(4, 1, true), 5);
+        assert_eq!(active_wp_from_mission_current(4, 0, true), 0);
+        assert_eq!(active_wp_from_mission_current(4, 2, true), 0);
+    }
+}

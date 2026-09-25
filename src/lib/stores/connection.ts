@@ -4,7 +4,7 @@
 // Connection state store
 // Manages the reactive state of the FC connection across the UI
 
-import { writable } from 'svelte/store';
+import { derived, writable } from 'svelte/store';
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
@@ -107,6 +107,27 @@ export const connection = writable<ConnectionInfo>({
   fcInfo: null,
   mspTunnel: false,
 });
+
+// ── Link capabilities: THE frontend answer to "what does this link carry" ──────────────────────────
+// Gate UI on these, never on `protocolType` alone: a MAVLink link to INAV 10.0+ with MSP over MAVLink up
+// (`mspTunnel`) serves the whole INAV/MSP surface, and its INAV identity must not reach the
+// ArduPilot/PX4 paths. The backend's counterpart is `state::with_msp`.
+
+/** The connected link carries MSP to an INAV FC — a direct MSP link, or MSP over MAVLink. */
+export function linkHasMsp(c: ConnectionInfo): boolean {
+  return c.status === 'connected' && (c.protocolType === 'msp' || c.mspTunnel);
+}
+
+/** The connected link is MAVLink to an ArduPilot/PX4-style autopilot (no MSP tunnel). */
+export function linkIsArduPilot(c: ConnectionInfo): boolean {
+  return c.status === 'connected' && c.protocolType === 'mavlink' && !c.mspTunnel;
+}
+
+/** Store form of `linkHasMsp` — INAV mission transfers, safehomes, geozones, craft name, stats. */
+export const hasMsp = derived(connection, linkHasMsp);
+
+/** Store form of `linkIsArduPilot` — ArduPilot mission panel, vehicle control, fence / rally. */
+export const isArduPilotLink = derived(connection, linkIsArduPilot);
 
 /** Platform type the handshake detected for the current link — `fcInfo.platform_type` diverges from it
  *  once the user overrides the type in the UAV Info panel (the panel shows the detected one as a hint). */

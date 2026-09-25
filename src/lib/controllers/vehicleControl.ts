@@ -9,7 +9,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { writable, derived, get, type Readable } from 'svelte/store';
 import { telemetry } from '$lib/stores/telemetry';
-import { connection } from '$lib/stores/connection';
+import { connection, isArduPilotLink } from '$lib/stores/connection';
 import { autopilotSystem } from '$lib/stores/autopilotContext';
 import { arduVehicleClass, downloadArduMissionFromFc } from '$lib/stores/missionArdupilot';
 import { rcEngaged } from '$lib/stores/rcEngage';
@@ -125,11 +125,9 @@ let headingOverrideActive = false;
 
 // ── Connection / vehicle gating ─────────────────────────────────────────────
 
-/** True when connected over MAVLink (the only protocol the control panel supports in V1). */
-export const controlAvailable: Readable<boolean> = derived(
-  connection,
-  (c) => c.status === 'connected' && c.protocolType === 'mavlink',
-);
+/** True when connected over MAVLink to ArduPilot/PX4 (the only autopilots the control panel supports
+ *  in V1) — not on an INAV MSP-over-MAVLink link. */
+export const controlAvailable: Readable<boolean> = isArduPilotLink;
 
 /** "RC transmitter present" signal — a real radio is driving the FC. Primary source (MAVLink) is the
  *  FC's own RC_RECEIVER health bit from SYS_STATUS (`sensorRcReceiver === 1`): set for ANY live RC

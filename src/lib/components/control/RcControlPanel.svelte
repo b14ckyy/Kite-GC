@@ -42,7 +42,7 @@
     type RcProfile,
     type RcProfileKind,
   } from '$lib/stores/rcProfiles';
-  import { connection } from '$lib/stores/connection';
+  import { connection, isArduPilotLink } from '$lib/stores/connection';
   import { telemetry } from '$lib/stores/telemetry';
   import { loadRcFcConfig, rcFcConfig, setOverrideBitmask } from '$lib/stores/rcFcConfig';
   import { rcEngaged, engage, disengage } from '$lib/stores/rcEngage';
@@ -234,12 +234,17 @@
     }
   }
 
+  // Deliberately `protocolType === 'msp'`, NOT `hasMsp`: this is the MSP RC stream path (RAW_RC/AUX_RC,
+  // override bitmask, MSP_RC seeding), which only the direct-MSP scheduler runs. An MSP-over-MAVLink link
+  // has no RC path yet (the tab is hidden there) until Stage 3 — MAVLink-RX mode, see Dev-Docs
+  // active/MSP_OVER_MAVLINK.md.
   const connectedMsp = $derived($connection.status === 'connected' && $connection.protocolType === 'msp');
   // ArduPilot over MAVLink: same engage/stream pipeline, RC_CHANNELS_OVERRIDE adapter. No MSP FC-config
-  // read, no override-mode gate — the manual engage is the sole guard.
-  const connectedArdu = $derived($connection.status === 'connected' && $rcPlatform === 'ardupilot');
+  // read, no override-mode gate — the manual engage is the sole guard. Never on an MSP-over-MAVLink link
+  // (rcPlatform falls back to the offline choice there, which may say 'ardupilot').
+  const connectedArdu = $derived($isArduPilotLink && $rcPlatform === 'ardupilot');
   // PX4 over MAVLink: MANUAL_CONTROL adapter (4 sticks + buttons), separate manual mapping UI.
-  const connectedPx4 = $derived($connection.status === 'connected' && $rcPlatform === 'px4');
+  const connectedPx4 = $derived($isArduPilotLink && $rcPlatform === 'px4');
   // Any FC we can inject RC to.
   const rcConnected = $derived(connectedMsp || connectedArdu || connectedPx4);
 

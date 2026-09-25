@@ -18,7 +18,7 @@
     GEOZONE_TYPE_INCLUSIVE, GEOZONE_TYPE_EXCLUSIVE, GEOZONE_SHAPE_CIRCULAR, GEOZONE_SHAPE_POLYGON,
     GEOZONE_ACTION_NONE, GEOZONE_ACTION_AVOID, GEOZONE_ACTION_POSHOLD, GEOZONE_ACTION_RTH,
     MAX_GEOZONES, addGeozone, deleteGeozone, setGeozoneType, setGeozoneAction, setGeozoneAlts,
-    setGeozoneSealevel, setGeozoneRadius, saveGeozoneConfig, revertGeozoneWorking, type GeoZone,
+    setGeozoneSealevel, setGeozoneRadius, saveGeozoneConfig, revertGeozoneWorking, geozoneSaveIssue, type GeoZone,
   } from '$lib/stores/geozone';
   import {
     fenceWorking, fenceDirty, fenceEditing,
@@ -168,9 +168,14 @@
     });
     if (ans !== 'ok') return;
     busy = true;
+    geozoneSaveIssue.set(null);
     try {
       geozoneWorking.update((c) => (c ? ensureCCWConfig(c) : c)); // CCW-normalise polygons before write
-      await saveGeozoneConfig();
+      const res = await saveGeozoneConfig();
+      // Written, but a link that survived the restart (MSP over MAVLink) did not see the FC reboot.
+      if (res && !res.reboot_confirmed) geozoneSaveIssue.set({ kind: 'rebootUnconfirmed' });
+    } catch (e) {
+      geozoneSaveIssue.set({ kind: 'failed', error: String(e) });
     } finally {
       busy = false;
     }
@@ -556,6 +561,11 @@
             </Button>
             <Button variant="standard" disabled={busy} onclick={onRevert}>{$t('geozone.revert')}</Button>
           </div>
+        {/if}
+        {#if $geozoneSaveIssue?.kind === 'failed'}
+          <div class="gz-issues"><div class="gz-issue gz-err">{$t('geozone.saveFailed', { values: { error: $geozoneSaveIssue.error } })}</div></div>
+        {:else if $geozoneSaveIssue?.kind === 'rebootUnconfirmed'}
+          <div class="gz-issues"><div class="gz-issue">{$t('geozone.rebootUnconfirmed')}</div></div>
         {/if}
       </div>
     {/if}

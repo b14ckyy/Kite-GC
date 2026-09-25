@@ -24,6 +24,9 @@ use crate::transport::udp::UdpTransport;
 // `transport::ble` resolves per platform behind one name (btleplug on desktop, CoreBluetooth on iOS).
 use crate::transport::ble::{self as ble_backend, BleDeviceInfo};
 
+/// How long `disconnect` lets a running MSP transaction finish before it stops the scheduler.
+const DISCONNECT_TXN_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Home position pushed to the frontend (event `home-position`). Same shape/name regardless of
 /// protocol so MAVLink (HOME_POSITION) can emit it identically later.
 #[derive(serde::Serialize, Clone)]
@@ -82,16 +85,11 @@ pub fn inav_set_craft_name(name: String, state: State<'_, AppState>) -> Result<(
     if trimmed.len() > 16 {
         return Err("Craft name too long (max 16 characters)".into());
     }
-    {
-        let proto = state.protocol.lock().map_err(|e| e.to_string())?;
-        let handle = match proto.as_ref() {
-            Some(ActiveProtocol::Msp(h)) => h,
-            Some(_) => return Err("FC is not running MSP (INAV)".into()),
-            None => return Err("Not connected".into()),
-        };
+    crate::state::with_msp(&state, |handle| {
         handle.msp_request(MSP_SET_NAME, trimmed.as_bytes())?;
         handle.msp_request(MSP_EEPROM_WRITE, &[])?;
-    }
+        Ok(())
+    })?;
     // Keep the cached craft name in sync so the UI reflects it without a reconnect.
     if let Ok(mut info) = state.fc_info.lock() {
         if let Some(fc) = info.as_mut() {
@@ -106,22 +104,21 @@ pub fn inav_set_craft_name(name: String, state: State<'_, AppState>) -> Result<(
 /// to offer the FC's lifetime totals as a vehicle baseline. INAV/MSP only.
 #[tauri::command(async)]
 pub fn inav_read_stats(state: State<'_, AppState>) -> Result<InavStats, String> {
-    use crate::commands::fc_settings::read_uint_setting;
-    let proto = state.protocol.lock().map_err(|e| e.to_string())?;
-    let handle = match proto.as_ref() {
-        Some(ActiveProtocol::Msp(h)) => h,
-        Some(_) => return Err("FC is not running MSP (INAV)".into()),
-        None => return Err("Not connected".into()),
-    };
-    let enabled = read_uint_setting(handle, "stats").unwrap_or(0) != 0;
-    let mut stats = InavStats { enabled, ..Default::default() };
-    if enabled {
-        stats.flight_count = read_uint_setting(handle, "stats_flight_count").unwrap_or(0) as i64;
-        stats.total_time_s = read_uint_setting(handle, "stats_total_time").unwrap_or(0) as i64;
-        stats.total_dist_m = read_uint_setting(handle, "stats_total_dist").unwrap_or(0) as i64;
-        stats.total_energy = read_uint_setting(handle, "stats_total_energy").unwrap_or(0) as i64;
-    }
-    Ok(stats)
+    use crate::commands::fc_settings::try_read_uint_setting;
+    crate::state::with_msp(&state, |handle| {
+        // A failed read (e.g. an MSP-over-MAVLink tunnel timeout) is an error, never a silent 0 that
+        // would be adopted as the vehicle baseline; an absent setting (empty reply) still reads as 0.
+        let read = |name: &str| -> Result<u64, String> { Ok(try_read_uint_setting(handle, name)?.unwrap_or(0)) };
+        let enabled = read("stats")? != 0;
+        let mut stats = InavStats { enabled, ..Default::default() };
+        if enabled {
+            stats.flight_count = read("stats_flight_count")? as i64;
+            stats.total_time_s = read("stats_total_time")? as i64;
+            stats.total_dist_m = read("stats_total_dist")? as i64;
+            stats.total_energy = read("stats_total_energy")? as i64;
+        }
+        Ok(stats)
+    })
 }
 
 /// Connect to a flight controller on the given transport and protocol.
@@ -541,10 +538,16 @@ fn connect_mavlink(
         match probe_msp_tunnel(&handle, fc_sysid, fc_info.mav_type, &link_desc, &state, &app_handle) {
             TunnelProbe::Up(sched, inav_info) => {
                 handle.msp = Some(sched);
-                // TODO(stage2): the INAV identity flips the frontend's autopilot context to INAV
-                // (`autopilotContext.variantToSystem("INAV")`) — its INAV planner/transfer actions only
-                // work once Stage 2 routes the one-shot commands through `with_msp` and the UI gates
-                // use `hasMsp` / `isArduPilotLink`. Stage 1 is not merged without Stage 2.
+                // INAV confirmed → the handler switches to INAV's MAVLink conventions (MISSION_CURRENT).
+                handle.inav_tunnel.store(true, std::sync::atomic::Ordering::Relaxed);
+                // Two identities on a tunnel link, on purpose:
+                //  • `handle.fc_variant` keeps the HEARTBEAT variant ("Generic" / "ArduPlane" / …). The
+                //    handler decodes telemetry with it — INAV emulates ArduPilot flight modes in the
+                //    HEARTBEAT `custom_mode`, so the MAVLink mode tables are the right ones.
+                //  • `state.fc_info` (returned to the frontend below) is the INAV identity from the MSP
+                //    handshake, with `features.msp_tunnel = true`. The frontend keys its INAV surface on
+                //    that flag (`hasMsp` / `isArduPilotLink` in stores/connection.ts), and every INAV
+                //    command reaches this scheduler through `state::with_msp`.
                 fc_info = inav_info;
                 // The recorder was created with the heartbeat identity before the probe — upgrade it so
                 // the flights of this link are stored as the INAV craft (name, version, FC id).
@@ -697,9 +700,16 @@ fn probe_msp_tunnel(
     }
     if let Some(f) = fc_info.features.as_mut() {
         f.msp_tunnel = true;
-        // The tunnel scheduler never polls MSP2_ADSB_VEHICLE_LIST (MAVLink ADSB_VEHICLE covers ADS-B on
-        // this link), so the "ADS-B from FC (MSP)" source must not be offered.
+        // The tunnel scheduler never polls MSP2_ADSB_VEHICLE_LIST, so FC-side ADS-B is not available on
+        // a tunnel link today (FC-relayed MAVLink ADSB_VEHICLE ingestion is a separate open feature, see
+        // Dev-Docs QUICK_NOTES) — the "ADS-B from FC (MSP)" source must not be offered.
         f.adsb_msp = false;
+        // Likewise the MSP RC stream (MSP_SET_RAW_RC / MSP2_INAV_SET_AUX_RC): the tunnel scheduler never
+        // runs it (one request in flight, on-demand only), so this LINK has neither MSP-RC nor AUX-RC.
+        // The RC tab is hidden on a tunnel link until Stage 3 — MAVLink-RX mode, see Dev-Docs
+        // active/MSP_OVER_MAVLINK.md.
+        f.msp_rc = false;
+        f.aux_rc = false;
     }
     fc_info.mav_type = mav_type;
     log::warn!(
@@ -876,6 +886,22 @@ fn connect_passive_telemetry(
 /// Disconnect from the flight controller
 #[tauri::command]
 pub async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
+    // A running MSP write transaction (safehome / geozone / mission save) gets up to 5 s to finish, so
+    // the scheduler is not stopped between its SET requests (half-written RAM config). Read
+    // transactions simply end on the scheduler stop.
+    let msp = {
+        let proto = state.protocol.lock().map_err(|e| e.to_string())?;
+        proto.as_ref().and_then(|p| p.msp_requester())
+    };
+    if let Some(msp) = msp {
+        let idle = tauri::async_runtime::spawn_blocking(move || msp.wait_idle(DISCONNECT_TXN_WAIT))
+            .await
+            .unwrap_or(true);
+        if !idle {
+            log::warn!("Disconnect: an MSP transaction was still running after 5 s — stopping anyway");
+        }
+    }
+
     let mut proto = state.protocol.lock().map_err(|e| e.to_string())?;
     if proto.is_none() {
         return Err("Not connected".into());

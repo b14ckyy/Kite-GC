@@ -8,15 +8,17 @@
 // (gated by `FeatureSet.geozones`); on older firmware / non-INAV links we return an empty,
 // `has_geozones=false` config. Writing/editing (batch SET + EEPROM) is Phase 2 and not implemented yet.
 
+use std::time::{Duration, Instant};
+
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, Manager};
 
 use crate::msp::{
     MSP2_INAV_GEOZONE, MSP2_INAV_GEOZONE_VERTEX, MSP2_INAV_SET_GEOZONE, MSP2_INAV_SET_GEOZONE_VERTEX,
-    MSP_EEPROM_WRITE, MSP_SET_REBOOT,
+    MSP_API_VERSION, MSP_EEPROM_WRITE, MSP_SET_REBOOT,
 };
-use crate::scheduler::SchedulerHandle;
-use crate::state::{ActiveProtocol, AppState};
+use crate::scheduler::{MspRequester, ProbeOutcome};
+use crate::state::{with_msp_blocking, AppState};
 
 /// Geozone slots the FC config can hold (`MAX_GEOZONES_IN_CONFIG`; ids 0..62).
 const MAX_GEOZONES: u8 = 63;
@@ -55,22 +57,24 @@ pub struct GeozoneConfig {
     pub has_geozones: bool,
 }
 
-/// Resolve the MSP scheduler handle, erroring for non-MSP / disconnected links.
-fn msp_handle(proto: &Option<ActiveProtocol>) -> Result<&SchedulerHandle, String> {
-    match proto.as_ref() {
-        Some(ActiveProtocol::Msp(h)) => Ok(h),
-        Some(_) => Err("FC is not running MSP (INAV)".into()),
-        None => Err("Not connected".into()),
-    }
+/// Result of "Save to FC".
+#[derive(Serialize)]
+pub struct GeozoneWriteResult {
+    /// The FC restarted after the save (geozones only take effect after a reboot). Always `true` on a
+    /// direct MSP link — the reboot drops the link and the reconnect reloads. Over MSP over MAVLink the
+    /// link survives, so the restart is confirmed by watching the FC go silent and answer again.
+    pub reboot_confirmed: bool,
 }
 
 /// Read all geozones + their vertices. Returns an empty `has_geozones=false` config when the firmware
-/// lacks the feature (<8.0), so callers can always invoke it on INAV connect.
-#[tauri::command(async)]
-pub fn geozone_read_all(state: State<'_, AppState>) -> Result<GeozoneConfig, String> {
-    let proto = state.protocol.lock().map_err(|e| e.to_string())?;
-    let handle = msp_handle(&proto)?;
+/// lacks the feature (<8.0), so callers can always invoke it on INAV connect. Direct MSP or the
+/// MSP-over-MAVLink tunnel, on a blocking worker (`with_msp_blocking`: 60+ round trips).
+#[tauri::command]
+pub async fn geozone_read_all(app: AppHandle) -> Result<GeozoneConfig, String> {
+    with_msp_blocking(&app, |app, handle| read_all(&app.state::<AppState>(), handle)).await
+}
 
+fn read_all(state: &AppState, handle: &MspRequester) -> Result<GeozoneConfig, String> {
     let has_geozones = {
         let info = state.fc_info.lock().map_err(|e| e.to_string())?;
         info.as_ref()
@@ -144,11 +148,13 @@ pub fn geozone_read_all(state: State<'_, AppState>) -> Result<GeozoneConfig, Str
 /// (`vertexCount = 0`) so removed zones don't linger. The zone header is written BEFORE its vertices
 /// (the FC's vertex handler branches on the stored shape to read the circle radius); polygon vertices
 /// go out in ascending order; a circle writes its single centre vertex with the radius appended.
-#[tauri::command(async)]
-pub fn geozone_write_all(config: GeozoneConfig, state: State<'_, AppState>) -> Result<(), String> {
-    let proto = state.protocol.lock().map_err(|e| e.to_string())?;
-    let handle = msp_handle(&proto)?;
+/// Runs on a blocking worker (`with_msp_blocking`).
+#[tauri::command]
+pub async fn geozone_write_all(config: GeozoneConfig, app: AppHandle) -> Result<GeozoneWriteResult, String> {
+    with_msp_blocking(&app, move |_, handle| write_all(&config, handle)).await
+}
 
+fn write_all(config: &GeozoneConfig, handle: &MspRequester) -> Result<GeozoneWriteResult, String> {
     for id in 0..MAX_GEOZONES {
         let zone = config.zones.iter().find(|z| z.id == id);
         match zone {
@@ -204,9 +210,146 @@ pub fn geozone_write_all(config: GeozoneConfig, state: State<'_, AppState>) -> R
     eprintln!("[GEOZONE] saved {} active zone(s) to FC (EEPROM written)", config.zones.len());
 
     // Geozones MUST be applied via a reboot: INAV recomputes the internal zone structures only at boot,
-    // so the EEPROM write alone doesn't take effect. INAV ACKs the reboot before restarting; the link
-    // then drops (the frontend reconnects + re-reads on handshake), so a missing/late reply is fine.
-    let _ = handle.msp_request(MSP_SET_REBOOT, &[]);
-    eprintln!("[GEOZONE] reboot requested to apply geozones");
-    Ok(())
+    // so the EEPROM write alone doesn't take effect. INAV sends the reply BEFORE it restarts.
+    //  • Direct MSP: the reboot drops the link (USB/serial), the frontend reconnects and the handshake
+    //    re-reads the zones — a missing/late reply is fine, nothing to confirm.
+    //  • MSP over MAVLink: the MAVLink link usually survives the restart, so nothing reconnects —
+    //    confirm the restart by watching the FC go silent and answer again (`confirm_tunnel_reboot`).
+    let started = Instant::now();
+    let ack = handle.msp_request(MSP_SET_REBOOT, &[]).is_ok();
+    eprintln!("[GEOZONE] reboot requested to apply geozones (ack={ack})");
+    if !handle.is_tunnel() {
+        return Ok(GeozoneWriteResult { reboot_confirmed: true });
+    }
+    let reboot_confirmed = confirm_tunnel_reboot(handle, started, ack);
+    if reboot_confirmed {
+        log::info!("Geozones: FC restart confirmed over MSP over MAVLink ({} ms)", started.elapsed().as_millis());
+    } else {
+        log::warn!("Geozones: saved, but the FC restart was not confirmed over MSP over MAVLink — power-cycle to apply");
+    }
+    Ok(GeozoneWriteResult { reboot_confirmed })
+}
+
+/// Reboot confirmation over a link that survives the FC restart: probe interval / reply deadline.
+const REBOOT_PROBE_TIMEOUT: Duration = Duration::from_millis(500);
+/// A silence at least this long, followed by an answer, is a restart (shorter = a lost reply).
+const REBOOT_SILENT_MIN: Duration = Duration::from_secs(1);
+/// No silence started by then → the FC did not reboot.
+const REBOOT_GO_SILENT_WITHIN: Duration = Duration::from_secs(3);
+/// Give up waiting for the FC to answer again.
+const REBOOT_CONFIRM_MAX: Duration = Duration::from_secs(10);
+
+/// Decides "did the FC reboot" from probe samples: silent for ≥ `REBOOT_SILENT_MIN`, then answers again.
+/// Sample times are offsets from the reboot request — a silent probe counts from when it was sent, an
+/// answer from when it arrived.
+#[derive(Default)]
+struct RebootWatch {
+    silent_since: Option<Duration>,
+}
+
+impl RebootWatch {
+    /// Feed one probe sample; `Some(verdict)` once decided.
+    fn sample(&mut self, t: Duration, answered: bool) -> Option<bool> {
+        if answered {
+            match self.silent_since {
+                Some(since) if t.saturating_sub(since) >= REBOOT_SILENT_MIN => return Some(true),
+                _ => self.silent_since = None, // a short gap = a lost reply, not a restart
+            }
+        } else if self.silent_since.is_none() {
+            self.silent_since = Some(t);
+        }
+        if self.silent_since.is_none() && t >= REBOOT_GO_SILENT_WITHIN {
+            return Some(false); // kept answering — no restart
+        }
+        if t >= REBOOT_CONFIRM_MAX {
+            return Some(false); // silent, but never came back in time
+        }
+        None
+    }
+}
+
+/// Poll `MSP_API_VERSION` after a reboot request on an MSP-over-MAVLink link and confirm the restart
+/// (`RebootWatch`). `ack` = the reboot request itself was answered; if it was not, the FC counts as
+/// silent from the request on. The scheduler going away (link lost with the restart) counts as a
+/// restart, like on a direct link.
+fn confirm_tunnel_reboot(handle: &MspRequester, started: Instant, ack: bool) -> bool {
+    let mut watch = RebootWatch::default();
+    if !ack {
+        watch.sample(Duration::ZERO, false);
+    }
+    loop {
+        let sent = started.elapsed();
+        let (t, answered) = match handle.probe(MSP_API_VERSION, REBOOT_PROBE_TIMEOUT) {
+            ProbeOutcome::Answered => (started.elapsed(), true),
+            ProbeOutcome::Silent => {
+                // A probe that failed at once (e.g. a write error) still paces the loop.
+                let spent = started.elapsed() - sent;
+                if spent < REBOOT_PROBE_TIMEOUT {
+                    std::thread::sleep(REBOOT_PROBE_TIMEOUT - spent);
+                }
+                (sent, false)
+            }
+            ProbeOutcome::SchedulerGone => {
+                log::info!("Geozones: MSP link gone after the reboot request — treating as restarted");
+                return true;
+            }
+        };
+        if let Some(verdict) = watch.sample(t, answered) {
+            return verdict;
+        }
+        if started.elapsed() >= REBOOT_CONFIRM_MAX + REBOOT_PROBE_TIMEOUT {
+            return false;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ms(v: u64) -> Duration {
+        Duration::from_millis(v)
+    }
+
+    #[test]
+    fn reboot_confirmed_after_silence_then_answer() {
+        let mut w = RebootWatch::default();
+        assert_eq!(w.sample(ms(0), false), None);
+        assert_eq!(w.sample(ms(700), false), None);
+        assert_eq!(w.sample(ms(1400), false), None);
+        assert_eq!(w.sample(ms(2150), true), Some(true));
+    }
+
+    #[test]
+    fn short_gap_is_a_lost_reply_not_a_reboot() {
+        let mut w = RebootWatch::default();
+        assert_eq!(w.sample(ms(0), false), None);
+        assert_eq!(w.sample(ms(750), true), None); // 750 ms gap < 1 s
+        assert_eq!(w.sample(ms(1500), true), None);
+        assert_eq!(w.sample(ms(3100), true), Some(false)); // never silent long enough by 3 s
+    }
+
+    #[test]
+    fn never_silent_means_no_reboot() {
+        let mut w = RebootWatch::default();
+        assert_eq!(w.sample(ms(20), true), None);
+        assert_eq!(w.sample(ms(3000), true), Some(false));
+    }
+
+    #[test]
+    fn silent_but_never_back_is_unconfirmed() {
+        let mut w = RebootWatch::default();
+        assert_eq!(w.sample(ms(0), false), None);
+        assert_eq!(w.sample(ms(5000), false), None);
+        assert_eq!(w.sample(ms(10_000), false), Some(false));
+    }
+
+    #[test]
+    fn late_silence_start_keeps_waiting_past_3s() {
+        let mut w = RebootWatch::default();
+        assert_eq!(w.sample(ms(100), true), None);
+        assert_eq!(w.sample(ms(2900), false), None);
+        assert_eq!(w.sample(ms(3500), false), None);
+        assert_eq!(w.sample(ms(4200), true), Some(true));
+    }
 }

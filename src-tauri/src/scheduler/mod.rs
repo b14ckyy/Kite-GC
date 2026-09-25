@@ -42,8 +42,9 @@ const RADAR_MSP_INTERVAL: Duration = Duration::from_millis(1000);
 type RadarIngest = Arc<Mutex<Option<mpsc::Sender<SourceUpdate>>>>;
 /// Reply channel of a one-shot UI request.
 type OneShotReply = mpsc::Sender<Result<Vec<u8>, String>>;
-/// A one-shot request waiting to be (re-)sent: code, payload, reply channel, when the caller asked.
-type QueuedOneShot = (u16, Vec<u8>, OneShotReply, Instant);
+/// A one-shot request waiting to be (re-)sent: code, payload, reply channel, when the caller asked, and
+/// the probe deadline (`None` = normal one-shot, see `SchedulerCommand::MspRequest::timeout`).
+type QueuedOneShot = (u16, Vec<u8>, OneShotReply, Instant, Option<Duration>);
 
 /// RC injection cadences (docs/archive/MSP_RC_CONTROL.md §10 Phase 4c). RAW rate is dynamic (RcTxState,
 /// user-selectable 10–25 Hz); AUX re-send weave is fixed at 5 Hz.
@@ -77,6 +78,9 @@ pub enum SchedulerCommand {
         code: u16,
         payload: Vec<u8>,
         reply: mpsc::Sender<Result<Vec<u8>, String>>,
+        /// `None` = the normal one-shot (2 s, one whole-request retry in tunnel mode where allowed).
+        /// `Some(t)` = a liveness probe (`MspRequester::probe`): reply deadline `t`, never retried.
+        timeout: Option<Duration>,
     },
 }
 
@@ -151,7 +155,7 @@ const BOXIDS_RETRY_INTERVAL: Duration = Duration::from_secs(3);
 const SCHED_READ_TIMEOUT: Duration = Duration::from_millis(8);
 /// One-shot UI request timeout — matches the old blocking `MSP_RESPONSE_TIMEOUT_MS`.
 const MSP_ONESHOT_TIMEOUT_MS: u64 = 2000;
-/// How long `SchedulerHandle::msp_request` waits for its reply on a direct MSP link.
+/// How long `MspRequester::msp_request` waits for its reply on a direct MSP link.
 const OUTER_WAIT: Duration = Duration::from_secs(5);
 /// Tunnel mode: 2 s + 2 s retry, plus queueing behind other one-shots and the 2 s BOXIDS read at start.
 const OUTER_WAIT_TUNNEL: Duration = Duration::from_secs(10);
@@ -229,13 +233,52 @@ impl TelemetrySlot {
 
 /// Handle returned to the caller to interact with the running scheduler
 pub struct SchedulerHandle {
-    cmd_tx: mpsc::Sender<SchedulerCommand>,
+    requester: MspRequester,
     thread: Option<thread::JoinHandle<Option<Box<dyn Transport>>>>,
-    /// Reply wait of `msp_request` — longer in tunnel mode (see `OUTER_WAIT_TUNNEL`).
-    outer_wait: Duration,
 }
 
 impl SchedulerHandle {
+    /// A cloneable request handle — lets a command release `AppState::protocol` before a multi-request
+    /// transaction (see `state::with_msp`), so a long transfer never blocks `disconnect`.
+    pub fn requester(&self) -> MspRequester {
+        self.requester.clone()
+    }
+
+    /// Stop the scheduler and return the transport for cleanup
+    pub fn stop(mut self) -> Option<Box<dyn Transport>> {
+        let _ = self.requester.cmd_tx.send(SchedulerCommand::Stop);
+        self.thread
+            .take()
+            .and_then(|t| t.join().ok())
+            .flatten()
+    }
+}
+
+/// The request side of a running scheduler — clone of its command sender, without the thread handle.
+/// Once the scheduler has stopped every request fails fast (the channel is closed).
+#[derive(Clone)]
+pub struct MspRequester {
+    cmd_tx: mpsc::Sender<SchedulerCommand>,
+    /// Reply wait of `msp_request` — longer in tunnel mode (see `OUTER_WAIT_TUNNEL`).
+    outer_wait: Duration,
+    /// One multi-request transaction at a time per connection (see `begin_transaction`).
+    txn: Arc<Mutex<()>>,
+    /// The scheduler runs in tunnel mode (MSP over MAVLink).
+    tunnel: bool,
+}
+
+/// Outcome of `MspRequester::probe`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProbeOutcome {
+    /// The FC answered within the probe timeout.
+    Answered,
+    /// No answer within the timeout (or the request failed on the wire).
+    Silent,
+    /// The scheduler is gone — the link was lost or the connection closed.
+    SchedulerGone,
+}
+
+impl MspRequester {
     /// Send a one-shot MSP command through the scheduler (blocks until response)
     pub fn msp_request(&self, code: u16, payload: &[u8]) -> Result<Vec<u8>, String> {
         let (reply_tx, reply_rx) = mpsc::channel();
@@ -244,6 +287,7 @@ impl SchedulerHandle {
                 code,
                 payload: payload.to_vec(),
                 reply: reply_tx,
+                timeout: None,
             })
             .map_err(|_| "Scheduler thread gone".to_string())?;
         reply_rx
@@ -251,13 +295,52 @@ impl SchedulerHandle {
             .map_err(|_| "Scheduler request timeout".to_string())?
     }
 
-    /// Stop the scheduler and return the transport for cleanup
-    pub fn stop(mut self) -> Option<Box<dyn Transport>> {
-        let _ = self.cmd_tx.send(SchedulerCommand::Stop);
-        self.thread
-            .take()
-            .and_then(|t| t.join().ok())
-            .flatten()
+    /// Liveness probe: send `code` (empty payload) with a short reply deadline and no retry.
+    pub fn probe(&self, code: u16, timeout: Duration) -> ProbeOutcome {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        let sent = self.cmd_tx.send(SchedulerCommand::MspRequest {
+            code,
+            payload: Vec::new(),
+            reply: reply_tx,
+            timeout: Some(timeout),
+        });
+        if sent.is_err() {
+            return ProbeOutcome::SchedulerGone;
+        }
+        // Allow for the tunnel's stale-reply hold-off before the probe is even sent.
+        match reply_rx.recv_timeout(timeout + STALE_MARGIN_MAX + Duration::from_millis(500)) {
+            Ok(Ok(_)) => ProbeOutcome::Answered,
+            Ok(Err(_)) | Err(mpsc::RecvTimeoutError::Timeout) => ProbeOutcome::Silent,
+            Err(mpsc::RecvTimeoutError::Disconnected) => ProbeOutcome::SchedulerGone,
+        }
+    }
+
+    /// The scheduler runs over the MSP-over-MAVLink tunnel (the MAVLink link outlives an FC reboot).
+    pub fn is_tunnel(&self) -> bool {
+        self.tunnel
+    }
+
+    /// Serialise multi-request transactions (a mission transfer, a safehome batch, …) of this connection:
+    /// they used to be serialised by holding `AppState::protocol` for the whole command. Not re-entrant —
+    /// never nest two transactions on one thread.
+    pub fn begin_transaction(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.txn.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Wait up to `max` for a running transaction to finish (disconnect: let a save complete instead of
+    /// stopping the scheduler between its SET requests). `false` = still busy when `max` ran out.
+    pub fn wait_idle(&self, max: Duration) -> bool {
+        let until = Instant::now() + max;
+        loop {
+            match self.txn.try_lock() {
+                Ok(_) | Err(std::sync::TryLockError::Poisoned(_)) => return true,
+                Err(std::sync::TryLockError::WouldBlock) => {}
+            }
+            if Instant::now() >= until {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
     }
 }
 
@@ -284,9 +367,13 @@ pub fn start(
     });
 
     SchedulerHandle {
-        cmd_tx,
+        requester: MspRequester {
+            cmd_tx,
+            outer_wait: if mode == SchedulerMode::Tunnel { OUTER_WAIT_TUNNEL } else { OUTER_WAIT },
+            txn: Arc::new(Mutex::new(())),
+            tunnel: mode == SchedulerMode::Tunnel,
+        },
         thread: Some(thread),
-        outer_wait: if mode == SchedulerMode::Tunnel { OUTER_WAIT_TUNNEL } else { OUTER_WAIT },
     }
 }
 
@@ -472,13 +559,15 @@ fn scheduler_loop(
                 code,
                 payload,
                 reply,
+                timeout,
             }) if tunnel => {
-                oneshot_queue.push_back((code, payload, reply, now));
+                oneshot_queue.push_back((code, payload, reply, now, timeout));
             }
             Ok(SchedulerCommand::MspRequest {
                 code,
                 payload,
                 reply,
+                timeout,
             }) => {
                 debug_tracker.on_request(code, 9 + payload.len());
                 link_stats.on_tx(9 + payload.len());
@@ -487,7 +576,7 @@ fn scheduler_loop(
                         writes_this_tick += 1;
                         in_flight.entry(code).or_default().push_back(Pending {
                             sent_at: now,
-                            deadline: now + Duration::from_millis(MSP_ONESHOT_TIMEOUT_MS),
+                            deadline: now + timeout.unwrap_or(Duration::from_millis(MSP_ONESHOT_TIMEOUT_MS)),
                             kind: PendingKind::OneShot { reply, retry: None, queued_at: now, retried: false },
                         });
                     }
@@ -508,7 +597,7 @@ fn scheduler_loop(
         if tunnel && in_flight.values().all(|q| q.is_empty()) && writes_this_tick < MAX_WRITES_PER_TICK {
             // The caller's outer wait has run out → it is gone; sending now would only occupy the slot.
             while oneshot_queue.front().is_some_and(|q| q.3.elapsed() >= OUTER_WAIT_TUNNEL) {
-                if let Some((code, _, reply, _)) = oneshot_queue.pop_front() {
+                if let Some((code, _, reply, _, _)) = oneshot_queue.pop_front() {
                     log::debug!("MSP tunnel: 0x{:04X} expired in the queue — dropped unsent", code);
                     crate::transport::tunnel::stats::on_expired();
                     let _ = reply.send(Err(format!("MSP request 0x{:04X} expired in the tunnel queue", code)));
@@ -522,7 +611,7 @@ fn scheduler_loop(
                 .is_some_and(|t| t.elapsed() < margin);
             if held {
                 // FIFO: the head waits out the stale margin of its code; everything behind it waits too.
-            } else if let Some((code, payload, reply, queued_at)) = oneshot_queue.pop_front() {
+            } else if let Some((code, payload, reply, queued_at, timeout)) = oneshot_queue.pop_front() {
                 debug_tracker.on_request(code, 9 + payload.len());
                 link_stats.on_tx(9 + payload.len());
                 crate::transport::tunnel::stats::on_request(code);
@@ -531,8 +620,15 @@ fn scheduler_loop(
                         writes_this_tick += 1;
                         in_flight.entry(code).or_default().push_back(Pending {
                             sent_at: now,
-                            deadline: now + Duration::from_millis(MSP_ONESHOT_TIMEOUT_MS),
-                            kind: PendingKind::OneShot { reply, retry: Some(payload), queued_at, retried: false },
+                            deadline: now + timeout.unwrap_or(Duration::from_millis(MSP_ONESHOT_TIMEOUT_MS)),
+                            // No retry for reboot-class codes (the single 2 s wait, then Err) nor for a
+                            // probe (its caller polls again itself).
+                            kind: PendingKind::OneShot {
+                                reply,
+                                retry: (timeout.is_none() && tunnel_retryable(code)).then_some(payload),
+                                queued_at,
+                                retried: false,
+                            },
                         });
                     }
                     Err(e) => {
@@ -911,7 +1007,7 @@ fn scheduler_loop(
                         match retry {
                             // Retry only while the caller is still waiting for it.
                             Some(payload) if queued_at.elapsed() < OUTER_WAIT_TUNNEL => {
-                                retries.push((code, payload, reply, queued_at))
+                                retries.push((code, payload, reply, queued_at, None))
                             }
                             _ => {
                                 if tunnel {
@@ -943,7 +1039,7 @@ fn scheduler_loop(
         }
         in_flight.retain(|_, q| !q.is_empty());
         // Whole-request retry (tunnel mode): the first attempt lapsed, re-send once, then fail for good.
-        for (code, payload, reply, queued_at) in retries {
+        for (code, payload, reply, queued_at, _) in retries {
             log::debug!("MSP tunnel: 0x{:04X} timed out — retrying once", code);
             debug_tracker.on_request(code, 9 + payload.len());
             link_stats.on_tx(9 + payload.len());
@@ -1167,6 +1263,20 @@ fn stale_margin(rtt_ewma: Option<f64>) -> Duration {
     (rtt * 2).clamp(STALE_MARGIN_MIN, STALE_MARGIN_MAX)
 }
 
+/// Tunnel mode: requests that are never re-sent after a timeout. A lapsed attempt may have executed on
+/// the FC with only its reply chunk lost, so a re-send would repeat a non-idempotent effect:
+///  • `MSP_SET_REBOOT` (68, INAV's `MSP_REBOOT`; the geozone "Save to FC" ends with it): the FC reboots
+///    once the reply has drained, so a re-send 2 s later can reach the freshly booted FC and reboot it
+///    a second time.
+/// `MSP_EEPROM_WRITE` (the safehome / geozone / craft-name persist step) is deliberately NOT listed —
+/// writing the same config twice is idempotent, so its retry is safe.
+const TUNNEL_NO_RETRY: &[u16] = &[crate::msp::MSP_SET_REBOOT];
+
+/// Tunnel mode: may a timed-out one-shot of `code` be re-sent once (see `TUNNEL_NO_RETRY`)?
+fn tunnel_retryable(code: u16) -> bool {
+    !TUNNEL_NO_RETRY.contains(&code)
+}
+
 /// One AIMD step for the adaptive poll scale: multiplicative back-off when the link was saturated over the
 /// last window, gentle additive recovery toward 1.0 when it had headroom. Clamped to `[SCALE_MIN, 1.0]`.
 /// Self-calibrating — no round-trip/bandwidth estimate — so it never throttles while bandwidth is free and,
@@ -1262,6 +1372,14 @@ mod tests {
         assert_eq!(stale_margin(Some(0.011)), STALE_MARGIN_MIN); // 11 ms link → 200 ms floor
         assert_eq!(stale_margin(Some(0.3)), Duration::from_millis(600));
         assert_eq!(stale_margin(Some(5.0)), STALE_MARGIN_MAX);
+    }
+
+    #[test]
+    fn tunnel_never_retries_reboot_but_retries_eeprom_write() {
+        assert!(!tunnel_retryable(crate::msp::MSP_SET_REBOOT));
+        assert!(tunnel_retryable(crate::msp::MSP_EEPROM_WRITE));
+        assert!(tunnel_retryable(crate::msp::MSP_WP));
+        assert!(tunnel_retryable(crate::msp::MSP2_COMMON_SET_SETTING));
     }
 
     #[test]

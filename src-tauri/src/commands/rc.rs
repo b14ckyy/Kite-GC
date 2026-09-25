@@ -11,7 +11,8 @@ use tauri::State;
 use crate::commands::fc_settings::{read_setting, set_setting};
 use crate::msp::rc_encode::encode_raw_rc;
 use crate::msp::{MSP_MODE_RANGES, MSP_RC};
-use crate::state::{ActiveProtocol, AppState};
+use crate::scheduler::MspRequester;
+use crate::state::{with_msp, ActiveProtocol, AppState, NO_MSP_ERR};
 
 /// One configured mode-activation range (a box assigned to an RC channel window). Only non-empty
 /// ranges are returned. Used for mode labels + safety locks (docs/archive/MSP_RC_CONTROL.md §-safety).
@@ -54,15 +55,14 @@ fn parse_mode_ranges(payload: &[u8]) -> Vec<ModeRange> {
         .collect()
 }
 
+/// Read the RC-injection relevant INAV config. Plain config reads (no RC stream involved), so they work
+/// over direct MSP and the MSP-over-MAVLink tunnel alike (`with_msp`).
 #[tauri::command(async)]
 pub fn rc_read_fc_config(state: State<'_, AppState>) -> Result<RcFcConfig, String> {
-    let proto = state.protocol.lock().map_err(|e| e.to_string())?;
-    let handle = match proto.as_ref() {
-        Some(ActiveProtocol::Msp(h)) => h,
-        Some(_) => return Err("FC is not running MSP (INAV)".into()),
-        None => return Err("Not connected".into()),
-    };
+    with_msp(&state, read_fc_config)
+}
 
+fn read_fc_config(handle: &MspRequester) -> Result<RcFcConfig, String> {
     let rx = read_setting(handle, "receiver_type")?;
     let receiver_type = *rx.first().ok_or("empty receiver_type response")?;
 
@@ -92,14 +92,23 @@ pub fn rc_read_fc_config(state: State<'_, AppState>) -> Result<RcFcConfig, Strin
 /// design — we never persist FC settings. CH1 = bit 0.
 #[tauri::command(async)]
 pub fn rc_set_override_bitmask(mask: u32, state: State<'_, AppState>) -> Result<(), String> {
-    let proto = state.protocol.lock().map_err(|e| e.to_string())?;
-    let handle = match proto.as_ref() {
-        Some(ActiveProtocol::Msp(h)) => h,
-        Some(_) => return Err("FC is not running MSP (INAV)".into()),
-        None => return Err("Not connected".into()),
+    // Direct MSP only — deliberately NOT `with_msp`: the bitmask only decides which channels the
+    // scheduler's MSP RC stream (MSP_SET_RAW_RC) overrides, and the MSP-over-MAVLink tunnel scheduler
+    // never runs that stream. Changing the FC setting there would half-work (override armed, nothing
+    // streamed), so a tunnel link gets a clear error instead.
+    let handle = {
+        let proto = state.protocol.lock().map_err(|e| e.to_string())?;
+        match proto.as_ref() {
+            Some(ActiveProtocol::Msp(h)) => h.requester(),
+            Some(ActiveProtocol::Mavlink(m)) if m.msp.is_some() => {
+                return Err("MSP RC override is not available over MSP over MAVLink".into())
+            }
+            Some(_) => return Err(NO_MSP_ERR.into()),
+            None => return Err("Not connected".into()),
+        }
     };
 
-    set_setting(handle, "msp_override_channels", &mask.to_le_bytes())?;
+    set_setting(&handle, "msp_override_channels", &mask.to_le_bytes())?;
     eprintln!("[RC] set msp_override_channels = 0x{mask:x} (runtime only)");
     Ok(())
 }
@@ -108,14 +117,10 @@ pub fn rc_set_override_bitmask(mask: u32, state: State<'_, AppState>) -> Result<
 /// polls this (~0.5 Hz) so our internal state can track what the FC currently has — no jump on engage.
 #[tauri::command(async)]
 pub fn rc_read_channels(state: State<'_, AppState>) -> Result<Vec<u16>, String> {
-    let proto = state.protocol.lock().map_err(|e| e.to_string())?;
-    let handle = match proto.as_ref() {
-        Some(ActiveProtocol::Msp(h)) => h,
-        Some(_) => return Err("FC is not running MSP (INAV)".into()),
-        None => return Err("Not connected".into()),
-    };
-    let raw = handle.msp_request(MSP_RC, &[])?;
-    Ok(raw.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect())
+    with_msp(&state, |handle| {
+        let raw = handle.msp_request(MSP_RC, &[])?;
+        Ok(raw.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect())
+    })
 }
 
 // ── RC injection stream (docs/archive/MSP_RC_CONTROL.md §10 Phase 4c) ──────────────────────────────────

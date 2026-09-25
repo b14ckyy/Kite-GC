@@ -31,7 +31,7 @@
   import { contextMenu } from '$lib/actions/contextMenu';
   import { arduWpDetailLines } from '$lib/helpers/missionWpDetails';
   import { frameMissionOnMap } from '$lib/stores/mapCamera';
-  import { connection } from '$lib/stores/connection';
+  import { connection, linkIsArduPilot } from '$lib/stores/connection';
   import { settings } from '$lib/stores/settings';
   import { autopilotSystem, type AutopilotSystem } from '$lib/stores/autopilotContext';
   import { missionManagerOpen } from '$lib/stores/missionManager';
@@ -129,9 +129,8 @@
   }
   const invalidCount = $derived(currentMission.filter((w) => cmdInvalid(w.command)).length);
 
-  const isMavlinkConnected = $derived(
-    currentConn.status === 'connected' && currentConn.protocolType === 'mavlink'
-  );
+  // FC transfers need a MAVLink link to ArduPilot/PX4 — not an INAV MSP-over-MAVLink link.
+  const isMavlinkConnected = $derived(linkIsArduPilot(currentConn));
 
   onDestroy(() => { unsubMission(); unsubSelIdx(); unsubSel(); unsubEditMode(); unsubConn(); unsubVehicle(); unsubSystem(); });
 
