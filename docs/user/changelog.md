@@ -253,6 +253,13 @@ inside the box of the feature release they belong to, so the notes for one relea
       today's file. It now lists the day files, newest first, with date and size (the one this session
       writes is tagged *current*); tap one to send it to mail or a messenger — so yesterday's log is
       there after a restart. [#198]
+    - **INAV over a MAVLink-only link gets its full MSP feature set** — INAV 10.0 can carry MSP inside
+      the MAVLink stream, and Kite detects that automatically when you connect with the MAVLink
+      protocol: the status shows **MSP/MAV**, UAV Info shows the real INAV version and craft name, and
+      missions (incl. EEPROM and multi-mission), safe homes, geozones, craft name and flight statistics
+      work as over a direct MSP link — over ELRS/mLRS MAVLink, SiK radios or a Wi-Fi bridge. Telemetry
+      stays MAVLink; nothing is polled through the tunnel. RC control and FC-side ADS-B are not on this
+      path yet. The work also surfaced an INAV firmware bug in long tunnel replies (fixed upstream). [#202]
 
 ??? note "1.0 — Initial release · Live"
 
@@ -384,3 +391,4 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#193]: https://github.com/b14ckyy/Kite-GC/pull/193
 [#196]: https://github.com/b14ckyy/Kite-GC/pull/196
 [#198]: https://github.com/b14ckyy/Kite-GC/pull/198
+[#202]: https://github.com/b14ckyy/Kite-GC/pull/202
