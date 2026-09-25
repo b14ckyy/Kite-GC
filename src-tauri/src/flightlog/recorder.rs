@@ -574,6 +574,28 @@ impl FlightRecorder {
         }
     }
 
+    /// Replace the recorded FC identity (craft name, variant, version, board, platform, FC id) — for the
+    /// flight being recorded (its temp session meta too) and every later flight on this link. Used when
+    /// the MSP-over-MAVLink probe turns a MAVLink link into an INAV one after the recorder was created
+    /// with the heartbeat identity. The protocol label stays (the link still records a .tlog).
+    pub fn set_fc_info(&mut self, fc_info: FcInfo) {
+        self.fc_info = fc_info;
+        if let Some(conn) = self.active_flight.as_ref().and_then(|f| f.temp_db.as_ref()) {
+            let i = &self.fc_info;
+            if let Err(e) = db::update_session_meta_identity(
+                conn,
+                &i.craft_name,
+                &i.fc_variant,
+                &i.fc_version,
+                &i.board_id,
+                i.platform_type,
+                i.fc_uid.as_deref(),
+            ) {
+                log::warn!("Failed to update session_meta identity: {}", e);
+            }
+        }
+    }
+
     /// Feed airspeed data from the scheduler
     pub fn on_airspeed(&mut self, data: &AirspeedData) {
         self.snapshot.airspeed = Some(data.airspeed);

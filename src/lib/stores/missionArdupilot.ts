@@ -3,7 +3,7 @@
 
 import { writable, derived, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
-import { connection } from './connection';
+import { connection, linkHasMsp } from './connection';
 import { settings } from './settings';
 import { CMD, cmdHasLocation, type VehicleClass } from '$lib/helpers/arduCommandCatalog';
 
@@ -252,6 +252,9 @@ function detectVehicleClass(variant: string, mavType: number | null | undefined)
 let _lastVariantForClass = '';
 connection.subscribe((c) => {
   if (c.status !== 'connected' || !c.fcInfo) { _lastVariantForClass = ''; return; }
+  // An INAV MSP link (direct or MSP over MAVLink) has no ArduPilot vehicle class — its HEARTBEAT MAV_TYPE
+  // (e.g. a VTOL type on a tunnel link) must not re-class the ArduPilot planner.
+  if (linkHasMsp(c)) return;
   const key = `${c.fcInfo.fc_variant}/${c.fcInfo.mav_type ?? ''}`;
   if (key === _lastVariantForClass) return;
   _lastVariantForClass = key;

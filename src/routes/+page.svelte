@@ -8,7 +8,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { open, save } from "@tauri-apps/plugin-dialog";
-  import { connection, availablePorts, bleDevices, defaultNetPort } from "$lib/stores/connection";
+  import { connection, availablePorts, bleDevices, defaultNetPort, hasMsp, isArduPilotLink } from "$lib/stores/connection";
   import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
   import { isAndroid, isMobile, isTablet, isPhone as isPhoneDevice, hasSerialPorts, logPlayerWidth } from "$lib/platform";
@@ -827,17 +827,21 @@
   // RC control (INAV RC over MSP) — two stacked sticks + a signal arc; opt-in via settings.
   const ICON_RC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3" width="17" height="18" rx="2.5"/><circle cx="8" cy="9" r="2.1"/><circle cx="16" cy="9" r="2.1"/><path d="M6.5 15.5h11"/><path d="M6.5 18h6"/></svg>';
 
-  // The vehicle-control panel is MAVLink-only (ArduPilot/PX4) and only meaningful while connected.
-  const isMavlinkConnected = $derived(
-    $connection.status === 'connected' && $connection.protocolType === 'mavlink'
-  );
+  // The vehicle-control panel is MAVLink-only (ArduPilot/PX4) and only meaningful while connected —
+  // not on an INAV MSP-over-MAVLink link (that FC gets the INAV/MSP surface instead).
+  const isMavlinkConnected = $derived($isArduPilotLink);
 
   // Passive telemetry (listen-only) has no uplink — there's no way to send RC channels — so the RC tab
   // is hidden while connected that way. Available = master switch on AND not telemetry-connected.
   const isTelemetryConnected = $derived(
     $connection.status === 'connected' && $connection.protocolType === 'telemetry'
   );
-  const rcTabAvailable = $derived($settings.rcControl.enabled && !isTelemetryConnected);
+  // Also hidden on an MSP-over-MAVLink link (INAV 10.0+): the MSP RC stream doesn't run through the tunnel
+  // and the ArduPilot override adapter must not drive INAV (rcPlatform is null there). Hidden until
+  // Stage 3 — MAVLink-RX mode, see Dev-Docs active/MSP_OVER_MAVLINK.md.
+  const rcTabAvailable = $derived(
+    $settings.rcControl.enabled && !isTelemetryConnected && !($connection.status === 'connected' && $connection.mspTunnel)
+  );
   // On mobile there is no joystick, but the on-screen touch sticks (VirtualSticks) can drive RC over
   // Wi-Fi. RC is safety-relevant and barely field-tested, so touch control is opt-in behind the SAME
   // master switch as the joystick path (`rcTabAvailable`) rather than appearing whenever an FC is
@@ -1112,7 +1116,9 @@
     }
     return gcsGroundAltM;
   });
-  /** ADS-B-via-MSP available: connected + the FC reports the feature (INAV 8.0+; MAVLink has no features). */
+  /** ADS-B-via-MSP available: connected + the FC reports the feature (INAV 8.0+ over direct MSP; a plain
+   *  MAVLink link has no feature set, and the MSP-over-MAVLink tunnel reports it false — it never polls it,
+   *  so FC-side ADS-B is not available on a tunnel link today). */
   const mspAdsbSupported = $derived(
     connStatus === 'connected' && fcInfo != null && fcInfo.features != null && fcInfo.features.adsb_msp,
   );
@@ -2662,7 +2668,7 @@
       });
     } catch (e) {
       errorMsg = String(e);
-      connection.set({ status: "error", protocolType: selectedProtocol, transportType: selectedTransport, port: "", baudRate: selectedBaud, errorMessage: String(e), fcInfo: null });
+      connection.set({ status: "error", protocolType: selectedProtocol, transportType: selectedTransport, port: "", baudRate: selectedBaud, errorMessage: String(e), fcInfo: null, mspTunnel: false });
     } finally {
       isConnecting = false;
     }
@@ -2890,8 +2896,9 @@
     else if (isPrimaryConnected) {
       // ArduPilot/MAVLink reports its own current mission item (MISSION_CURRENT) — that is the FC's
       // own truth, so trust it whenever armed + in a mission mode. INAV needs the mission to be FC-
-      // synced (or operator-confirmed) since the active WP is matched against the loaded planner mission.
-      const fcOwnsActiveWp = get(connection).protocolType === 'mavlink';
+      // synced (or operator-confirmed) since the active WP is matched against the loaded planner mission
+      // — also over MSP over MAVLink, where the planner mission is INAV's.
+      const fcOwnsActiveWp = get(isArduPilotLink);
       trusted = armed && (fcOwnsActiveWp || f.fc || liveTrackConfirmed);
     }
     activeWpNumber.set(inWpMode && trusted ? wp : 0);
@@ -2945,8 +2952,8 @@
   });
 
   async function onConnectMissionPrompt() {
-    // INAV/MSP only for now (ArduPilot/MAVLink mission sync is a separate path).
-    if (get(connection).protocolType !== 'msp') return;
+    // INAV/MSP only for now — direct or MSP over MAVLink (ArduPilot/MAVLink mission sync is a separate path).
+    if (!get(hasMsp)) return;
     let fcWpCount = 0;
     try { fcWpCount = (await missionFcInfo()).wp_count; } catch { /* FC may not answer — treat as none */ }
     const mapHasMission = get(mission).waypoints.length > 0;

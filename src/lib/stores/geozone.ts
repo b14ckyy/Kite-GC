@@ -94,6 +94,7 @@ export const geozoneDirty = derived(
 /** Read the full geozone config from the FC (INAV ≥8.0). Always called on connect (download
  *  always-on). On failure / non-INAV, clears to null. Resets the working copy to the fresh snapshot. */
 export async function loadGeozoneConfig(): Promise<void> {
+  geozoneSaveIssue.set(null);
   try {
     const cfg = await invoke<GeozoneConfig>('geozone_read_all');
     geozoneConfig.set(cfg);
@@ -105,19 +106,36 @@ export async function loadGeozoneConfig(): Promise<void> {
   }
 }
 
+/** Mirrors the Rust `GeozoneWriteResult`. */
+export interface GeozoneWriteResult {
+  /** The FC restarted after the save (always true on a direct MSP link — the link drops there). */
+  reboot_confirmed: boolean;
+}
+
+/** Outcome of the last "Save to FC" worth showing in the panel: the save failed, or it was written but
+ *  the restart that activates the zones was not confirmed. Cleared on load / revert / disconnect. */
+export type GeozoneSaveIssue = { kind: 'failed'; error: string } | { kind: 'rebootUnconfirmed' };
+export const geozoneSaveIssue = writable<GeozoneSaveIssue | null>(null);
+
 /** "Save to FC": send the working copy as one batch + EEPROM + reboot. Geozones only apply after a
- *  reboot (INAV recomputes the internal zone structures at boot), so the FC restarts and the link drops
- *  — we do NOT re-read here; the reconnect handshake reloads the saved config. */
-export async function saveGeozoneConfig(): Promise<void> {
+ *  reboot (INAV recomputes the internal zone structures at boot). On a direct MSP link the link drops and
+ *  the reconnect handshake reloads; over MSP over MAVLink the link survives, so the written config
+ *  becomes the loaded baseline here (panel clean, Revert does not bring the old zones back) and the
+ *  backend reports whether the restart was confirmed. Throws on a failed write. */
+export async function saveGeozoneConfig(): Promise<GeozoneWriteResult | null> {
   const cfg = get(geozoneWorking);
-  if (!cfg) return;
-  await invoke('geozone_write_all', { config: cfg });
+  if (!cfg) return null;
+  const written = structuredClone(cfg);
+  const res = await invoke<GeozoneWriteResult>('geozone_write_all', { config: written });
+  geozoneConfig.set(structuredClone(written));
+  return res;
 }
 
 /** Discard pending edits — reset the working copy to the loaded snapshot. */
 export function revertGeozoneWorking(): void {
   const loaded = get(geozoneConfig);
   geozoneWorking.set(loaded ? structuredClone(loaded) : null);
+  geozoneSaveIssue.set(null);
 }
 
 /** Clear everything (on disconnect). */
@@ -125,6 +143,7 @@ export function clearGeozones(): void {
   geozoneConfig.set(null);
   geozoneWorking.set(null);
   geozoneEditing.set(false);
+  geozoneSaveIssue.set(null);
 }
 
 // ── Working-copy mutations (panel + map editing) ──────────────────────────────────────────────────

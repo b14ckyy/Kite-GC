@@ -6,6 +6,7 @@
 
 pub mod codec;
 pub mod features;
+pub mod handshake;
 pub mod parser;
 pub mod rc_encode;
 pub mod transport;

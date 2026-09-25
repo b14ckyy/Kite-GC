@@ -6,7 +6,8 @@
 // Unlike MSP (poll-based), MAVLink is push-based: the FC streams telemetry,
 // the GCS sends heartbeats and occasional commands.
 
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -23,7 +24,7 @@ use crate::scheduler::telemetry::{
 use crate::transport::ByteTransport;
 
 use super::codec::{self, MavSequence};
-use super::parser::MavParser;
+use super::parser::{MavParser, Parsed};
 
 /// GCS heartbeat interval (1 Hz as per MAVLink spec)
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
@@ -59,6 +60,19 @@ pub enum MavlinkCommand {
     RegisterParamReceiver(mpsc::Sender<MavMessage>),
     /// Unregister the param receiver
     UnregisterParamReceiver,
+    /// Send a hand-encoded message payload (fire-and-forget) — the handler frames it with its own
+    /// sequence number and records/counts it like every TX. Used for TUNNEL (#385), which the typed
+    /// crate cannot encode with INAV's payload type 0x8001 (see `tunnel.rs`).
+    SendRaw {
+        msg_id: u32,
+        crc_extra: u8,
+        payload: Vec<u8>,
+    },
+    /// Register the MSP-tunnel receiver: payloads of INAV MSP TUNNEL frames addressed to Kite are
+    /// forwarded here (see `transport::tunnel::TunnelTransport`).
+    RegisterTunnelReceiver(mpsc::Sender<Vec<u8>>),
+    /// Unregister the MSP-tunnel receiver
+    UnregisterTunnelReceiver,
 }
 
 /// Handle for interacting with the running MAVLink handler
@@ -71,6 +85,13 @@ pub struct MavlinkHandle {
     /// specific mission handling — notably the home-slot convention (ArduPilot reserves mission item 0
     /// for home, PX4 does not).
     pub fc_variant: String,
+    /// MSP scheduler (tunnel mode) running over the MAVLink TUNNEL when the FC is INAV ≥ 10.0 and
+    /// answered the connect-time probe; `None` on a plain MAVLink link. Stopped before the handler.
+    pub msp: Option<crate::scheduler::SchedulerHandle>,
+    /// Set once the MSP-over-MAVLink probe identified this FC as INAV (`probe_msp_tunnel`). The handler
+    /// decodes the few INAV-specific MAVLink conventions with it (MISSION_CURRENT numbering) — not with
+    /// the heartbeat variant, which INAV reports as Generic / ArduPilot.
+    pub inav_tunnel: Arc<AtomicBool>,
 }
 
 impl MavlinkHandle {
@@ -92,8 +113,13 @@ impl MavlinkHandle {
         self.cmd_tx.clone()
     }
 
-    /// Stop the handler and return the transport for cleanup
+    /// Stop the handler and return the transport for cleanup. A tunnel-mode MSP scheduler is stopped
+    /// first — its `TunnelTransport` unregisters from the still-running handler on drop.
     pub fn stop(mut self) -> Option<Box<dyn ByteTransport>> {
+        if let Some(msp) = self.msp.take() {
+            let _ = msp.stop();
+            log::info!("MSP tunnel scheduler stopped");
+        }
         let _ = self.cmd_tx.send(MavlinkCommand::Stop);
         self.thread
             .take()
@@ -115,8 +141,10 @@ pub fn start(
     let (cmd_tx, cmd_rx) = mpsc::channel::<MavlinkCommand>();
 
     let handle_variant = fc_variant.clone();
+    let inav_tunnel = Arc::new(AtomicBool::new(false));
+    let loop_inav_tunnel = inav_tunnel.clone();
     let thread = thread::spawn(move || {
-        handler_loop(transport, fc_sysid, fc_compid, fc_variant, app_handle, cmd_rx, recorder, rc_tx)
+        handler_loop(transport, fc_sysid, fc_compid, fc_variant, app_handle, cmd_rx, recorder, rc_tx, loop_inav_tunnel)
     });
 
     MavlinkHandle {
@@ -124,6 +152,8 @@ pub fn start(
         thread: Some(thread),
         fc_sysid,
         fc_variant: handle_variant,
+        msp: None,
+        inav_tunnel,
     }
 }
 
@@ -137,6 +167,7 @@ fn handler_loop(
     cmd_rx: mpsc::Receiver<MavlinkCommand>,
     recorder: Option<FlightRecorderHandle>,
     rc_tx: RcTxHandle,
+    inav_tunnel: Arc<AtomicBool>,
 ) -> Option<Box<dyn ByteTransport>> {
     let mut parser = MavParser::new();
     let mut seq = MavSequence::new();
@@ -169,6 +200,8 @@ fn handler_loop(
     // blocking command helper (control.rs) can match the ACK to the command it sent.
     let mut cmd_fwd: Option<mpsc::Sender<MavMessage>> = None;
     let mut param_fwd: Option<mpsc::Sender<MavMessage>> = None;
+    // MSP-over-MAVLink tunnel receiver (INAV 10.0+): payloads of TUNNEL frames addressed to Kite.
+    let mut tunnel_fwd: Option<mpsc::Sender<Vec<u8>>> = None;
 
     // QuadPlane detection robustness: a QuadPlane reports MAV_TYPE_FIXED_WING, so the only reliable
     // signal is the Q_ENABLE parameter. The single pre-handler PARAM_REQUEST_READ can be lost on a
@@ -249,6 +282,28 @@ fn handler_loop(
             Ok(MavlinkCommand::UnregisterParamReceiver) => {
                 log::debug!("MAVLink param receiver unregistered");
                 param_fwd = None;
+                continue;
+            }
+            Ok(MavlinkCommand::SendRaw { msg_id, crc_extra, payload }) => {
+                let frame = codec::serialize_raw_v2(&gcs_header, msg_id, crc_extra, &payload, &mut seq);
+                debug_tracker.on_tx(msg_id, frame.len());
+                link_stats.on_tx(frame.len());
+                if let Some(ref rec) = recorder {
+                    if let Ok(mut r) = rec.lock() { r.write_raw_mavlink_frame(&frame); }
+                }
+                if let Err(e) = transport.write_bytes(&frame) {
+                    log::warn!("MAVLink raw send failed (msg_id {}): {}", msg_id, e);
+                }
+                continue;
+            }
+            Ok(MavlinkCommand::RegisterTunnelReceiver(tx)) => {
+                log::debug!("MAVLink tunnel receiver registered");
+                tunnel_fwd = Some(tx);
+                continue;
+            }
+            Ok(MavlinkCommand::UnregisterTunnelReceiver) => {
+                log::debug!("MAVLink tunnel receiver unregistered");
+                tunnel_fwd = None;
                 continue;
             }
             Err(mpsc::TryRecvError::Empty) => {}
@@ -335,7 +390,49 @@ fn handler_loop(
         match transport.read_bytes(&mut buf) {
             Ok(0) => {}
             Ok(n) => {
-                for frame in parser.parse_bytes(&buf[..n]) {
+                for parsed in parser.parse_all(&buf[..n]) {
+                    let frame = match parsed {
+                        Parsed::Msg(frame) => frame,
+                        // TUNNEL (#385), decoded raw by the parser (INAV MSP tunnel, payload type 0x8001).
+                        // Same bookkeeping as every FC frame — stall watchdog, debug/link counters, tlog —
+                        // then forwarded to the MSP tunnel transport when it is addressed to us.
+                        Parsed::Tunnel { header, raw_bytes, tunnel } => {
+                            if header.system_id != fc_sysid { continue; }
+                            msg_count += 1;
+                            if header.component_id == fc_compid {
+                                last_fc_rx = Instant::now();
+                                if stall_warned {
+                                    stall_warned = false;
+                                    log::warn!("Link recovered — MAVLink frames from the FC resumed");
+                                    let _ = app_handle.emit("telemetry-fc-link", FcLinkAlive { alive: true });
+                                }
+                            }
+                            debug_tracker.on_rx(super::tunnel::TUNNEL_MSG_ID, raw_bytes.len());
+                            link_stats.on_rx(raw_bytes.len());
+                            if let Some(ref rec) = recorder {
+                                if let Ok(mut r) = rec.lock() { r.write_raw_mavlink_frame(&raw_bytes); }
+                            }
+                            let for_us = tunnel.payload_type == super::tunnel::PAYLOAD_TYPE_INAV_MSP
+                                && header.component_id == fc_compid
+                                && ((tunnel.target_system == codec::GCS_SYSTEM_ID
+                                    && tunnel.target_component == codec::GCS_COMPONENT_ID)
+                                    || (tunnel.target_system == 0 && tunnel.target_component == 0));
+                            if !for_us {
+                                log::debug!(
+                                    "MAVLink TUNNEL ignored (type 0x{:04X}, from {}/{}, to {}/{})",
+                                    tunnel.payload_type, header.system_id, header.component_id,
+                                    tunnel.target_system, tunnel.target_component,
+                                );
+                            } else if let Some(ref tx) = tunnel_fwd {
+                                if tx.send(tunnel.payload).is_err() {
+                                    tunnel_fwd = None; // tunnel transport dropped
+                                }
+                            } else {
+                                log::debug!("MAVLink TUNNEL (MSP) with no tunnel receiver — dropped");
+                            }
+                            continue;
+                        }
+                    };
                     if frame.header.system_id != fc_sysid { continue; }
 
                     msg_count += 1;
@@ -408,7 +505,7 @@ fn handler_loop(
                         continue;
                     }
 
-                    dispatch_message(&frame.header, &frame.message, &fc_variant, &app_handle, &mut analog, &mut batteries, &mut fused, &mut quadplane_seen, &recorder);
+                    dispatch_message(&frame.header, &frame.message, &fc_variant, &app_handle, &mut analog, &mut batteries, &mut fused, &mut quadplane_seen, &recorder, inav_tunnel.load(Ordering::Relaxed));
                 }
             }
             Err(crate::transport::TransportError::Timeout) => {}
@@ -501,6 +598,20 @@ fn send_mav_frame(
 }
 
 /// Returns true for MAVLink messages that belong to the mission microprotocol.
+/// MISSION_CURRENT → the displayed 1-based WP number (0 = none). ArduPilot/PX4: our displayed waypoints
+/// are seq 1..N (home slot 0 dropped), so `seq` is the number as is. INAV over an MSP-over-MAVLink link:
+/// INAV packs `seq = active WP − 1` (0-based, no home slot) and flags a running mission with
+/// `mission_mode == 1` — anything else means no active mission WP.
+fn active_wp_from_mission_current(seq: u16, mission_mode: u8, inav: bool) -> u16 {
+    if !inav {
+        seq
+    } else if mission_mode == 1 {
+        seq.saturating_add(1)
+    } else {
+        0
+    }
+}
+
 // We intentionally still recognise the deprecated non-`_INT` MISSION_REQUEST / MISSION_ITEM:
 // older/legacy flight controllers may emit them, and routing them is harmless (we author with
 // the `_INT` variants). Hence `#[allow(deprecated)]` rather than dropping the legacy arms.
@@ -600,7 +711,7 @@ struct FusedPos {
 /// Dispatch a received MAVLink message to the same Tauri events as the MSP scheduler.
 /// This ensures widgets/store work identically regardless of protocol.
 #[allow(clippy::too_many_arguments)] // dispatch helper threading the handler's mutable decode state
-fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, app_handle: &AppHandle, analog: &mut AnalogState, batteries: &mut std::collections::BTreeMap<u8, BatteryInstanceData>, fused: &mut FusedPos, quadplane_seen: &mut bool, recorder: &Option<FlightRecorderHandle>) {
+fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, app_handle: &AppHandle, analog: &mut AnalogState, batteries: &mut std::collections::BTreeMap<u8, BatteryInstanceData>, fused: &mut FusedPos, quadplane_seen: &mut bool, recorder: &Option<FlightRecorderHandle>, inav_tunnel: bool) {
     match message {
         // ── HEARTBEAT → telemetry-status + telemetry-flightmode ─────
         MavMessage::HEARTBEAT(hb) => {
@@ -663,12 +774,12 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
         }
 
         // ── MISSION_CURRENT → telemetry-nav-status (active waypoint) ─
-        // The FC's current mission item sequence. Our displayed waypoints are seq 1..N (home slot 0 is
-        // dropped), so seq maps directly to the displayed WP number. Reuses the unified nav-status event
-        // (same shape MSP emits) so the widget + map highlight work identically.
+        // The FC's current mission item sequence, mapped to the displayed 1-based WP number (see
+        // `active_wp_from_mission_current`). Reuses the unified nav-status event (same shape MSP emits)
+        // so the widget + map highlight work identically.
         MavMessage::MISSION_CURRENT(mc) => {
             let _ = app_handle.emit("telemetry-nav-status", serde_json::json!({
-                "active_wp_number": mc.seq,
+                "active_wp_number": active_wp_from_mission_current(mc.seq, mc.mission_mode, inav_tunnel),
                 "nav_state": 0u8, // ArduPilot has no INAV nav_state; mission detection uses flight mode
             }));
         }
@@ -1083,3 +1194,19 @@ fn dispatch_message(header: &MavHeader, message: &MavMessage, fc_variant: &str, 
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::active_wp_from_mission_current;
+
+    #[test]
+    fn mission_current_numbering_per_autopilot() {
+        // ArduPilot/PX4: seq is already the displayed number (home slot 0 dropped).
+        assert_eq!(active_wp_from_mission_current(3, 0, false), 3);
+        // INAV tunnel: 0-based seq, only while mission_mode == 1.
+        assert_eq!(active_wp_from_mission_current(0, 1, true), 1);
+        assert_eq!(active_wp_from_mission_current(4, 1, true), 5);
+        assert_eq!(active_wp_from_mission_current(4, 0, true), 0);
+        assert_eq!(active_wp_from_mission_current(4, 2, true), 0);
+    }
+}

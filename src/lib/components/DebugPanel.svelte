@@ -26,7 +26,7 @@
 
   let { onclose }: { onclose: () => void } = $props();
 
-  type Tab = 'msp' | 'mavlink' | 'alerts' | 'telemetry' | 'rc' | 'performance' | 'video';
+  type Tab = 'msp' | 'mavlink' | 'tunnel' | 'alerts' | 'telemetry' | 'rc' | 'performance' | 'video';
   let tab = $state<Tab>('msp');
 
   // Linux hole-punch spike (dev, MOBILE_RTSP.md P2.3 stage A) — coloured stand-in below the DOM hole.
@@ -337,6 +337,86 @@
     return m ? `0x${m[1].toUpperCase()}` : uuid;
   }
 
+  // MSP over MAVLink tunnel (INAV 10.0+): counters from the backend tracker + a dev request form.
+  interface TunnelSnapshot {
+    active: boolean;
+    chunks_tx: number;
+    chunks_rx: number;
+    bytes_tx: number;
+    bytes_rx: number;
+    requests: number;
+    replies: number;
+    timeouts: number;
+    retries: number;
+    stale_replies: number;
+    expired: number;
+    checksum_failures: number;
+    largest_reply_bytes: number;
+    largest_reply_chunks: number;
+    last_request_chunks: number;
+    in_flight: number | null;
+    probe_result: string;
+    probe_rtt_ms: number | null;
+    probe_detail: string;
+  }
+
+  interface TunnelMspReply {
+    reply_hex: string;
+    bytes: number;
+    chunks: number;
+    rtt_ms: number;
+  }
+
+  let tunSnapshot = $state<TunnelSnapshot | null>(null);
+  let tunCode = $state('0x2048');
+  let tunPayload = $state('');
+  let tunBusy = $state(false);
+  let tunReply = $state<TunnelMspReply | null>(null);
+  let tunErr = $state('');
+
+  /** MSP code from hex ("0x2048") or plain decimal ("1"); null when unparsable or out of range. */
+  function parseMspCode(text: string): number | null {
+    const v = text.trim();
+    const n = /^0x[0-9a-f]+$/i.test(v) ? parseInt(v.slice(2), 16) : /^[0-9]+$/.test(v) ? parseInt(v, 10) : NaN;
+    return Number.isInteger(n) && n >= 0 && n <= 0xffff ? n : null;
+  }
+
+  async function sendTunnelRequest(): Promise<void> {
+    tunErr = '';
+    tunReply = null;
+    const code = parseMspCode(tunCode);
+    if (code === null) {
+      tunErr = $t('debug.tunBadCode');
+      return;
+    }
+    tunBusy = true;
+    try {
+      tunReply = await invoke<TunnelMspReply>('debug_tunnel_msp_request', { code, payloadHex: tunPayload });
+    } catch (e) {
+      tunErr = String(e);
+    } finally {
+      tunBusy = false;
+    }
+  }
+
+  // The probe runs at connect — long before this tab may be opened — and a plain MAVLink link emits no
+  // further stats events, so fetch the current snapshot whenever the tab is shown.
+  $effect(() => {
+    if (tab !== 'tunnel') return;
+    invoke<TunnelSnapshot>('debug_tunnel_stats_snapshot')
+      .then((snap) => { tunSnapshot = snap; })
+      .catch((e) => console.warn('[debug] tunnel stats snapshot failed', e));
+  });
+
+  function probeLabel(result: string): string {
+    switch (result) {
+      case 'ok': return $t('debug.tunProbeOk');
+      case 'no_reply': return $t('debug.tunProbeNoReply');
+      case 'rejected': return $t('debug.tunProbeRejected');
+      default: return $t('debug.tunProbeNone');
+    }
+  }
+
   // Alerts tab reads the controller's live debug snapshot directly (frontend store).
   const alerts = $derived($radarAlertDebug);
 
@@ -345,6 +425,7 @@
   let unlistenTelem: (() => void) | null = null;
   let unlistenGatt: (() => void) | null = null;
   let unlistenGattData: (() => void) | null = null;
+  let unlistenTunnel: (() => void) | null = null;
 
   onMount(async () => {
     unlisten = await listen<DebugSnapshot>("debug-msp-stats", (event) => {
@@ -355,6 +436,9 @@
     });
     unlistenTelem = await listen<TelemSnapshot>("debug-telemetry-stats", (event) => {
       telemSnapshot = event.payload;
+    });
+    unlistenTunnel = await listen<TunnelSnapshot>("debug-tunnel-stats", (event) => {
+      tunSnapshot = event.payload;
     });
     unlistenGatt = await listen<GattTable>("ble-gatt-services", (event) => {
       gattTable = event.payload;
@@ -373,6 +457,7 @@
     if (unlistenTelem) unlistenTelem();
     if (unlistenGatt) unlistenGatt();
     if (unlistenGattData) unlistenGattData();
+    if (unlistenTunnel) unlistenTunnel();
     restorePerfRenderState();
   });
 
@@ -434,6 +519,7 @@
   <div class="debug-tabs">
     <button class="tab" class:active={tab === 'msp'} onclick={() => tab = 'msp'}>{$t('debug.tabMsp')}</button>
     <button class="tab" class:active={tab === 'mavlink'} onclick={() => tab = 'mavlink'}>{$t('debug.tabMavlink')}</button>
+    <button class="tab" class:active={tab === 'tunnel'} onclick={() => tab = 'tunnel'}>{$t('debug.tabTunnel')}</button>
     <button class="tab" class:active={tab === 'telemetry'} onclick={() => tab = 'telemetry'}>{$t('debug.tabTelemetry')}</button>
     <button class="tab" class:active={tab === 'alerts'} onclick={() => tab = 'alerts'}>{$t('debug.tabAlerts')}</button>
     <button class="tab" class:active={tab === 'rc'} onclick={() => tab = 'rc'}>{$t('debug.tabRc')}</button>
@@ -572,6 +658,97 @@
         </tbody>
       </table>
     </div>
+  {:else if tab === 'tunnel'}
+    {@const ts = tunSnapshot}
+    <div class="debug-stats stats-rows">
+      <div class="stat-group">
+        <span class="gate-badge" class:stable={ts?.active} class:unstable={!ts?.active}>
+          {ts?.active ? $t('debug.tunActive') : $t('debug.tunInactive')}
+        </span>
+        <span class="stat-sep">|</span>
+        <span class="stat-label">{$t('debug.tunProbe')}</span>
+        <span class="stat-value">{probeLabel(ts?.probe_result ?? '')}</span>
+        {#if ts?.probe_rtt_ms != null}
+          <span class="stat-sep">|</span>
+          <span class="stat-label">{$t('debug.tunRtt')}</span>
+          <span class="stat-value">{ts.probe_rtt_ms} ms</span>
+        {/if}
+      </div>
+      {#if ts?.probe_detail}
+        <div class="stat-group">
+          <span class="stat-value">{ts.probe_detail}</span>
+        </div>
+      {/if}
+      <div class="stat-group">
+        <span class="stat-label">{$t('debug.tunChunks')}</span>
+        <span class="stat-value">TX {ts?.chunks_tx ?? 0}</span>
+        <span class="stat-sep">|</span>
+        <span class="stat-value">RX {ts?.chunks_rx ?? 0}</span>
+        <span class="stat-sep">|</span>
+        <span class="stat-label">{$t('debug.tunBytes')}</span>
+        <span class="stat-value">TX {ts?.bytes_tx ?? 0}</span>
+        <span class="stat-sep">|</span>
+        <span class="stat-value">RX {ts?.bytes_rx ?? 0}</span>
+      </div>
+      <div class="stat-group">
+        <span class="stat-label">{$t('debug.tunRequests')}</span>
+        <span class="stat-value">{ts?.requests ?? 0}</span>
+        <span class="stat-sep">|</span>
+        <span class="stat-label">{$t('debug.tunReplies')}</span>
+        <span class="stat-value">{ts?.replies ?? 0}</span>
+        <span class="stat-sep">|</span>
+        <span class="stat-label">{$t('debug.tunTimeouts')}</span>
+        <span class="stat-value" class:has-timeouts={(ts?.timeouts ?? 0) > 0}>{ts?.timeouts ?? 0}</span>
+        <span class="stat-sep">|</span>
+        <span class="stat-label">{$t('debug.tunRetries')}</span>
+        <span class="stat-value">{ts?.retries ?? 0}</span>
+      </div>
+      <div class="stat-group">
+        <span class="stat-label">{$t('debug.tunStale')}</span>
+        <span class="stat-value" class:has-timeouts={(ts?.stale_replies ?? 0) > 0}>{ts?.stale_replies ?? 0}</span>
+        <span class="stat-sep">|</span>
+        <span class="stat-label">{$t('debug.tunExpired')}</span>
+        <span class="stat-value" class:has-timeouts={(ts?.expired ?? 0) > 0}>{ts?.expired ?? 0}</span>
+      </div>
+      <div class="stat-group">
+        <span class="stat-label">{$t('debug.tunChecksum')}</span>
+        <span class="stat-value" class:has-timeouts={(ts?.checksum_failures ?? 0) > 0}>{ts?.checksum_failures ?? 0}</span>
+        <span class="stat-sep">|</span>
+        <span class="stat-label">{$t('debug.tunInFlight')}</span>
+        <span class="stat-value">{ts?.in_flight != null ? formatCode(ts.in_flight) : $t('debug.tunIdle')}</span>
+      </div>
+      <div class="stat-group">
+        <span class="stat-label">{$t('debug.tunLargest')}</span>
+        <span class="stat-value">{ts?.largest_reply_bytes ?? 0} B / {ts?.largest_reply_chunks ?? 0}</span>
+        <span class="stat-sep">|</span>
+        <span class="stat-label">{$t('debug.tunLastChunks')}</span>
+        <span class="stat-value">{ts?.last_request_chunks ?? 0}</span>
+      </div>
+    </div>
+
+    <div class="tun-form">
+      <div class="hex-label">{$t('debug.tunSendTitle')}</div>
+      <div class="tun-row">
+        <input class="tun-input tun-code" type="text" spellcheck="false" aria-label={$t('debug.tunCode')}
+          placeholder={$t('debug.tunCode')} title={$t('debug.tunCode')} bind:value={tunCode} />
+        <input class="tun-input" type="text" spellcheck="false" aria-label={$t('debug.tunPayload')}
+          placeholder={$t('debug.tunPayload')} title={$t('debug.tunPayload')} bind:value={tunPayload} />
+        <button class="dbg-btn" onclick={sendTunnelRequest} disabled={tunBusy}>
+          {tunBusy ? $t('debug.tunSending') : $t('debug.tunSend')}
+        </button>
+      </div>
+      {#if tunErr}
+        <div class="stat-warn">{tunErr}</div>
+      {/if}
+    </div>
+    {#if tunReply}
+      <div class="hex-tail">
+        <div class="hex-label">
+          {$t('debug.tunReply')}: {$t('debug.tunReplyMeta', { values: { bytes: tunReply.bytes, chunks: tunReply.chunks, rtt: tunReply.rtt_ms } })}
+        </div>
+        <div class="hex-bytes">{tunReply.reply_hex || $t('debug.tunEmptyReply')}</div>
+      </div>
+    {/if}
   {:else if tab === 'telemetry'}
     <div class="debug-stats">
       <div class="stat-group">
@@ -1616,5 +1793,45 @@
   .gatt-act {
     color: #f5a623;
     font-variant-numeric: tabular-nums;
+  }
+
+  .tun-form {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .tun-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .tun-input {
+    flex: 1;
+    min-width: 0;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 3px;
+    color: #e0e0e0;
+    font-family: inherit;
+    font-size: 11px;
+    padding: 4px 6px;
+  }
+
+  .tun-input.tun-code {
+    flex: 0 0 110px;
+  }
+
+  .tun-input:focus {
+    outline: none;
+    border-color: #37a8db;
+  }
+
+  .dbg-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 </style>

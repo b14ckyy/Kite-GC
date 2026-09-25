@@ -25,6 +25,8 @@ pub mod serial;
 #[path = "serial_android.rs"]
 pub mod serial;
 pub mod tcp;
+/// MSP over MAVLink TUNNEL (INAV 10.0+) — a byte transport riding on the running MAVLink handler.
+pub mod tunnel;
 pub mod udp;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod ble;
@@ -171,6 +173,12 @@ pub trait Transport: Send {
     /// `ERROR_OPERATION_ABORTED` after a framing/overrun error). `None` before any failure.
     fn connection_lost_reason(&self) -> Option<String> {
         None
+    }
+
+    /// MSP frames dropped on a checksum mismatch so far (the MSP-tunnel Debug Monitor tab shows it —
+    /// a lost TUNNEL chunk surfaces exactly this way). Default 0.
+    fn checksum_errors(&self) -> u32 {
+        0
     }
 }
 

@@ -23,7 +23,7 @@ use ::mavlink::ardupilotmega::{GpsFixType, MavAutopilot, MavMessage, MavModeFlag
 use super::db;
 use super::timezone;
 use super::types::{Flight, TelemetryRecord};
-use crate::mavlink_proto::parser::MavParser;
+use crate::mavlink_proto::parser::{MavParser, Parsed};
 use crate::msp::{
     MspParser, MSPV2_INAV_AIR_SPEED, MSPV2_INAV_ANALOG, MSPV2_INAV_MIXER, MSPV2_INAV_STATUS,
     MSP_ALTITUDE, MSP_ATTITUDE, MSP_BOARD_INFO, MSP_FC_VARIANT, MSP_FC_VERSION, MSP_GPSSTATISTICS,
@@ -311,7 +311,15 @@ fn decode_tlog(bytes: &[u8]) -> (Vec<Sample>, Identity) {
             let b = bytes[i];
             i += 1;
             guard += 1;
-            if let Some(frame) = parser.push(b) {
+            let parsed = parser.push_any(b);
+            // TUNNEL (#385) — Kite's own MSP-over-MAVLink traffic, recorded into every tlog of a tunnel
+            // link. A complete record like any other (so the importer stays on the frame boundary), but
+            // not telemetry: skipped.
+            if matches!(parsed, Some(Parsed::Tunnel { .. })) {
+                got = true;
+                continue;
+            }
+            if let Some(Parsed::Msg(frame)) = parsed {
                 got = true;
                 // A tlog carries every component on the link, not just the autopilot. Peripherals that
                 // share the vehicle's system id — a camera on component 100, a gimbal on 154 — publish
@@ -737,6 +745,40 @@ mod tests {
         let sample = samples.last().expect("ATTITUDE should emit a sample");
         assert_eq!(sample.rec.mode_primary.as_deref(), Some("guided"));
         assert!(sample.armed, "the autopilot heartbeat is armed");
+    }
+
+    /// A tunnel link records Kite's MSP-over-MAVLink TUNNEL frames (INAV 10.0+) into the tlog. The typed
+    /// parser skips them; the importer must still treat each as one complete record, or it reads on
+    /// into the next record's timestamp and loses the frame boundary for the rest of the log.
+    #[test]
+    fn tunnel_frames_in_a_tlog_keep_the_importer_in_sync() {
+        use crate::mavlink_proto::{codec, tunnel};
+        let mut log = tlog(vec![(
+            1,
+            1,
+            heartbeat(MavType::MAV_TYPE_FIXED_WING, MavAutopilot::MAV_AUTOPILOT_ARDUPILOTMEGA, 15),
+        )]);
+        let mut seq = MavSequence::new();
+        for (n, from) in [(255u8, 190u8), (1, 1)].into_iter().enumerate() {
+            log.extend_from_slice(&((n as u64 + 2) * 1_000_000).to_be_bytes());
+            let header = MavHeader { system_id: from.0, component_id: from.1, sequence: 0 };
+            let payload = tunnel::encode_chunk(1, 1, &[0x24, 0x58, 0x3C, 0x00, 0x01, 0x00, 0x00, 0x00, 0x8F]);
+            log.extend_from_slice(&codec::serialize_raw_v2(
+                &header,
+                tunnel::TUNNEL_MSG_ID,
+                tunnel::TUNNEL_CRC_EXTRA,
+                &payload,
+                &mut seq,
+            ));
+        }
+        log.extend_from_slice(&4_000_000u64.to_be_bytes());
+        let att_header = MavHeader { system_id: 1, component_id: 1, sequence: 0 };
+        log.extend_from_slice(&serialize_v2(&att_header, &MavMessage::ATTITUDE(ATTITUDE_DATA::default()), &mut seq));
+
+        let (samples, identity) = decode_tlog(&log);
+        assert_eq!(identity.fc_variant.as_deref(), Some("ArduPlane"));
+        assert_eq!(samples.len(), 1, "the ATTITUDE after the TUNNEL records must still be decoded");
+        assert_eq!(samples[0].t_ms, 4000);
     }
 
     /// The `heading` column is course over ground, not the vehicle heading — `GLOBAL_POSITION_INT.hdg`
