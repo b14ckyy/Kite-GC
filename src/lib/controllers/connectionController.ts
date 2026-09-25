@@ -4,6 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { get } from 'svelte/store';
+import { t } from 'svelte-i18n';
 import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from '$lib/stores/connection';
 import type { InavStats } from '$lib/stores/flightlogTypes';
 import { connection, connectionProtocol, fcLinkAlive, availablePorts, bleDevices, detectedPlatformType } from '$lib/stores/connection';
@@ -184,6 +185,8 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
       console.warn('[connect] restoring the platform-type override failed', e);
     }
   }
+  // MAVLink link to INAV 10.0+ with MSP over MAVLink up (the backend probed it during connect).
+  const mspTunnel = params.protocolType === 'mavlink' && (info.features?.msp_tunnel ?? false);
   connection.set({
     status: "connected",
     protocolType: params.protocolType,
@@ -192,11 +195,19 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
     baudRate: params.baudRate ?? 0,
     errorMessage: "",
     fcInfo: info,
+    mspTunnel,
   });
   // Seed the status-box protocol. MSP/MAVLink are known now; passive telemetry shows a placeholder
   // until the backend's `telemetry-protocol` event reports the locked sub-protocol.
+  const tr = get(t);
   connectionProtocol.set({
-    primary: params.protocolType === 'mavlink' ? 'MAVLink' : params.protocolType === 'msp' ? 'MSP' : 'Telemetry',
+    primary: mspTunnel
+      ? tr('statusBox.protocolMspMav')
+      : params.protocolType === 'mavlink'
+        ? tr('statusBox.protocolMavlink')
+        : params.protocolType === 'msp'
+          ? tr('statusBox.protocolMsp')
+          : tr('statusBox.protocolTelemetry'),
     secondary: null,
   });
   fcLinkAlive.set(true);
@@ -242,6 +253,7 @@ export async function disconnectFC(baudRate: number): Promise<void> {
     baudRate,
     errorMessage: "",
     fcInfo: null,
+    mspTunnel: false,
   });
 }
 

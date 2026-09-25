@@ -254,6 +254,7 @@ fn mavlink_msg_name(id: u32) -> String {
         242 => "HOME_POSITION".into(),
         244 => "MESSAGE_INTERVAL".into(),
         253 => "STATUSTEXT".into(),
+        385 => "TUNNEL".into(),
         _ => format!("MSG_{}", id),
     }
 }

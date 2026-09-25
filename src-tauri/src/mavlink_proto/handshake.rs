@@ -27,10 +27,14 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 /// 1. Read bytes until we receive a HEARTBEAT from the FC
 /// 2. Extract FC info (autopilot type, vehicle type, system ID)
 /// 3. Send a GCS HEARTBEAT back
-/// 4. Return (FcInfo, fc_system_id, fc_component_id)
+/// 4. Return (FcInfo, fc_system_id, fc_component_id, uid2_valid)
+///
+/// `uid2_valid` is true only when AUTOPILOT_VERSION arrived with a non-zero `uid2` (ArduPilot / PX4
+/// fill it from the MCU serial). INAV sends it all-zero — that, or no AUTOPILOT_VERSION at all, makes
+/// the connect path probe for INAV's MSP-over-MAVLink tunnel.
 ///
 /// The transport is borrowed mutably — caller retains ownership.
-pub fn perform_handshake(transport: &mut dyn ByteTransport) -> Result<(FcInfo, u8, u8), String> {
+pub fn perform_handshake(transport: &mut dyn ByteTransport) -> Result<(FcInfo, u8, u8, bool), String> {
     let mut parser = MavParser::new();
     let mut buf = [0u8; 512];
     let deadline = Instant::now() + HANDSHAKE_TIMEOUT;
@@ -56,6 +60,7 @@ pub fn perform_handshake(transport: &mut dyn ByteTransport) -> Result<(FcInfo, u
     let fc_compid: u8;
     let mut fc_info = FcInfo::default();
     let mut total_bytes_read: usize = 0;
+    let mut uid2_valid = false;
     let mut read_calls: u32 = 0;
 
     'outer: loop {
@@ -248,7 +253,8 @@ pub fn perform_handshake(transport: &mut dyn ByteTransport) -> Result<(FcInfo, u
 
                         // Hardware identity: uid2 (MAVLink 2 extension — the MCU serial on ArduPilot /
                         // PX4) preferred, else the legacy 64-bit uid. All-zero = not provided.
-                        if ver.uid2.iter().any(|b| *b != 0) {
+                        uid2_valid = ver.uid2.iter().any(|b| *b != 0);
+                        if uid2_valid {
                             fc_info.fc_uid = Some(ver.uid2.iter().map(|b| format!("{:02X}", b)).collect());
                         } else if ver.uid != 0 {
                             fc_info.fc_uid = Some(format!("{:016X}", ver.uid));
@@ -270,5 +276,5 @@ pub fn perform_handshake(transport: &mut dyn ByteTransport) -> Result<(FcInfo, u
         }
     }
 
-    Ok((fc_info, fc_sysid, fc_compid))
+    Ok((fc_info, fc_sysid, fc_compid, uid2_valid))
 }

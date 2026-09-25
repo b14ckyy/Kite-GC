@@ -25,6 +25,25 @@ pub enum ActiveProtocol {
     PassiveTelemetry(PassiveHandle),
 }
 
+/// Run `f` against the connection's MSP scheduler: a direct MSP link, or the MSP-over-MAVLink tunnel
+/// scheduler of a MAVLink link to INAV 10.0+. The protocol lock is held while `f` runs (same as the
+/// `match Some(ActiveProtocol::Msp(h))` sites do today).
+pub(crate) fn with_msp<T>(
+    state: &AppState,
+    f: impl FnOnce(&SchedulerHandle) -> Result<T, String>,
+) -> Result<T, String> {
+    let proto = state.protocol.lock().map_err(|e| e.to_string())?;
+    match proto.as_ref() {
+        Some(ActiveProtocol::Msp(h)) => f(h),
+        Some(ActiveProtocol::Mavlink(m)) => match m.msp.as_ref() {
+            Some(h) => f(h),
+            None => Err("FC is not running MSP (INAV)".into()),
+        },
+        Some(_) => Err("FC is not running MSP (INAV)".into()),
+        None => Err("Not connected".into()),
+    }
+}
+
 /// Global application state managed by Tauri
 pub struct AppState {
     /// Active protocol handler (None when disconnected)

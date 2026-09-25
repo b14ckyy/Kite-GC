@@ -44,6 +44,10 @@ export interface FeatureSet {
   msp_rc: boolean;
   aux_rc: boolean;
   adsb_msp: boolean;
+  /** Firmware can serve MSP over MAVLink TUNNEL (INAV ≥ 10.0) — capability only. */
+  msp_tunnel_capable: boolean;
+  /** THIS link runs MSP over MAVLink (the tunnel probe + INAV handshake through it succeeded). */
+  msp_tunnel: boolean;
 }
 
 export interface FcInfo {
@@ -89,6 +93,8 @@ export interface ConnectionInfo {
   baudRate: number;
   errorMessage: string;
   fcInfo: FcInfo | null;
+  /** MAVLink link to INAV 10.0+ with MSP over MAVLink up (`fcInfo.features.msp_tunnel`). */
+  mspTunnel: boolean;
 }
 
 export const connection = writable<ConnectionInfo>({
@@ -99,6 +105,7 @@ export const connection = writable<ConnectionInfo>({
   baudRate: 115200,
   errorMessage: '',
   fcInfo: null,
+  mspTunnel: false,
 });
 
 /** Platform type the handshake detected for the current link — `fcInfo.platform_type` diverges from it

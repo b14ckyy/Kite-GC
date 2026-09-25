@@ -23,7 +23,7 @@ use crate::scheduler::telemetry::{
 use crate::transport::ByteTransport;
 
 use super::codec::{self, MavSequence};
-use super::parser::MavParser;
+use super::parser::{MavParser, Parsed};
 
 /// GCS heartbeat interval (1 Hz as per MAVLink spec)
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
@@ -59,6 +59,19 @@ pub enum MavlinkCommand {
     RegisterParamReceiver(mpsc::Sender<MavMessage>),
     /// Unregister the param receiver
     UnregisterParamReceiver,
+    /// Send a hand-encoded message payload (fire-and-forget) — the handler frames it with its own
+    /// sequence number and records/counts it like every TX. Used for TUNNEL (#385), which the typed
+    /// crate cannot encode with INAV's payload type 0x8001 (see `tunnel.rs`).
+    SendRaw {
+        msg_id: u32,
+        crc_extra: u8,
+        payload: Vec<u8>,
+    },
+    /// Register the MSP-tunnel receiver: payloads of INAV MSP TUNNEL frames addressed to Kite are
+    /// forwarded here (see `transport::tunnel::TunnelTransport`).
+    RegisterTunnelReceiver(mpsc::Sender<Vec<u8>>),
+    /// Unregister the MSP-tunnel receiver
+    UnregisterTunnelReceiver,
 }
 
 /// Handle for interacting with the running MAVLink handler
@@ -71,6 +84,9 @@ pub struct MavlinkHandle {
     /// specific mission handling — notably the home-slot convention (ArduPilot reserves mission item 0
     /// for home, PX4 does not).
     pub fc_variant: String,
+    /// MSP scheduler (tunnel mode) running over the MAVLink TUNNEL when the FC is INAV ≥ 10.0 and
+    /// answered the connect-time probe; `None` on a plain MAVLink link. Stopped before the handler.
+    pub msp: Option<crate::scheduler::SchedulerHandle>,
 }
 
 impl MavlinkHandle {
@@ -92,8 +108,13 @@ impl MavlinkHandle {
         self.cmd_tx.clone()
     }
 
-    /// Stop the handler and return the transport for cleanup
+    /// Stop the handler and return the transport for cleanup. A tunnel-mode MSP scheduler is stopped
+    /// first — its `TunnelTransport` unregisters from the still-running handler on drop.
     pub fn stop(mut self) -> Option<Box<dyn ByteTransport>> {
+        if let Some(msp) = self.msp.take() {
+            let _ = msp.stop();
+            log::info!("MSP tunnel scheduler stopped");
+        }
         let _ = self.cmd_tx.send(MavlinkCommand::Stop);
         self.thread
             .take()
@@ -124,6 +145,7 @@ pub fn start(
         thread: Some(thread),
         fc_sysid,
         fc_variant: handle_variant,
+        msp: None,
     }
 }
 
@@ -169,6 +191,8 @@ fn handler_loop(
     // blocking command helper (control.rs) can match the ACK to the command it sent.
     let mut cmd_fwd: Option<mpsc::Sender<MavMessage>> = None;
     let mut param_fwd: Option<mpsc::Sender<MavMessage>> = None;
+    // MSP-over-MAVLink tunnel receiver (INAV 10.0+): payloads of TUNNEL frames addressed to Kite.
+    let mut tunnel_fwd: Option<mpsc::Sender<Vec<u8>>> = None;
 
     // QuadPlane detection robustness: a QuadPlane reports MAV_TYPE_FIXED_WING, so the only reliable
     // signal is the Q_ENABLE parameter. The single pre-handler PARAM_REQUEST_READ can be lost on a
@@ -249,6 +273,28 @@ fn handler_loop(
             Ok(MavlinkCommand::UnregisterParamReceiver) => {
                 log::debug!("MAVLink param receiver unregistered");
                 param_fwd = None;
+                continue;
+            }
+            Ok(MavlinkCommand::SendRaw { msg_id, crc_extra, payload }) => {
+                let frame = codec::serialize_raw_v2(&gcs_header, msg_id, crc_extra, &payload, &mut seq);
+                debug_tracker.on_tx(msg_id, frame.len());
+                link_stats.on_tx(frame.len());
+                if let Some(ref rec) = recorder {
+                    if let Ok(mut r) = rec.lock() { r.write_raw_mavlink_frame(&frame); }
+                }
+                if let Err(e) = transport.write_bytes(&frame) {
+                    log::warn!("MAVLink raw send failed (msg_id {}): {}", msg_id, e);
+                }
+                continue;
+            }
+            Ok(MavlinkCommand::RegisterTunnelReceiver(tx)) => {
+                log::debug!("MAVLink tunnel receiver registered");
+                tunnel_fwd = Some(tx);
+                continue;
+            }
+            Ok(MavlinkCommand::UnregisterTunnelReceiver) => {
+                log::debug!("MAVLink tunnel receiver unregistered");
+                tunnel_fwd = None;
                 continue;
             }
             Err(mpsc::TryRecvError::Empty) => {}
@@ -335,7 +381,49 @@ fn handler_loop(
         match transport.read_bytes(&mut buf) {
             Ok(0) => {}
             Ok(n) => {
-                for frame in parser.parse_bytes(&buf[..n]) {
+                for parsed in parser.parse_all(&buf[..n]) {
+                    let frame = match parsed {
+                        Parsed::Msg(frame) => frame,
+                        // TUNNEL (#385), decoded raw by the parser (INAV MSP tunnel, payload type 0x8001).
+                        // Same bookkeeping as every FC frame — stall watchdog, debug/link counters, tlog —
+                        // then forwarded to the MSP tunnel transport when it is addressed to us.
+                        Parsed::Tunnel { header, raw_bytes, tunnel } => {
+                            if header.system_id != fc_sysid { continue; }
+                            msg_count += 1;
+                            if header.component_id == fc_compid {
+                                last_fc_rx = Instant::now();
+                                if stall_warned {
+                                    stall_warned = false;
+                                    log::warn!("Link recovered — MAVLink frames from the FC resumed");
+                                    let _ = app_handle.emit("telemetry-fc-link", FcLinkAlive { alive: true });
+                                }
+                            }
+                            debug_tracker.on_rx(super::tunnel::TUNNEL_MSG_ID, raw_bytes.len());
+                            link_stats.on_rx(raw_bytes.len());
+                            if let Some(ref rec) = recorder {
+                                if let Ok(mut r) = rec.lock() { r.write_raw_mavlink_frame(&raw_bytes); }
+                            }
+                            let for_us = tunnel.payload_type == super::tunnel::PAYLOAD_TYPE_INAV_MSP
+                                && header.component_id == fc_compid
+                                && ((tunnel.target_system == codec::GCS_SYSTEM_ID
+                                    && tunnel.target_component == codec::GCS_COMPONENT_ID)
+                                    || (tunnel.target_system == 0 && tunnel.target_component == 0));
+                            if !for_us {
+                                log::debug!(
+                                    "MAVLink TUNNEL ignored (type 0x{:04X}, from {}/{}, to {}/{})",
+                                    tunnel.payload_type, header.system_id, header.component_id,
+                                    tunnel.target_system, tunnel.target_component,
+                                );
+                            } else if let Some(ref tx) = tunnel_fwd {
+                                if tx.send(tunnel.payload).is_err() {
+                                    tunnel_fwd = None; // tunnel transport dropped
+                                }
+                            } else {
+                                log::debug!("MAVLink TUNNEL (MSP) with no tunnel receiver — dropped");
+                            }
+                            continue;
+                        }
+                    };
                     if frame.header.system_id != fc_sysid { continue; }
 
                     msg_count += 1;

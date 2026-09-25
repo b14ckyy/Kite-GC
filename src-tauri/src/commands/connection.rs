@@ -10,17 +10,16 @@ use crate::flightlog::recorder::FlightRecorder;
 use crate::flightlog::types::{FlightLogSettings, InavStats};
 use crate::mavlink_proto;
 use crate::msp::{
-    FcInfo, FeatureSet, InavVersion, MspTransport, MSP_API_VERSION, MSP_BLACKBOX_CONFIG, MSP_BOARD_INFO, MSP_EEPROM_WRITE,
-    MSP_FC_VARIANT, MSP_FC_VERSION, MSP_NAME, MSP_SET_NAME, MSP_UID, MSP_WP, MSPV2_INAV_MIXER,
+    FcInfo, InavVersion, MspTransport, MSP_API_VERSION, MSP_EEPROM_WRITE, MSP_SET_NAME,
 };
-use crate::msp::features::is_version_supported;
 use crate::scheduler;
-use crate::scheduler::TelemetryConfig;
+use crate::scheduler::{SchedulerHandle, SchedulerMode, TelemetryConfig};
 use crate::state::{ActiveProtocol, AppState};
 use crate::transport::{ByteTransport, Transport, TransportType};
 use crate::transport::PortInfo;
 use crate::transport::serial::SerialConnection;
 use crate::transport::tcp::TcpTransport;
+use crate::transport::tunnel::{self as msp_tunnel, TunnelTransport};
 use crate::transport::udp::UdpTransport;
 // `transport::ble` resolves per platform behind one name (btleplug on desktop, CoreBluetooth on iOS).
 use crate::transport::ble::{self as ble_backend, BleDeviceInfo};
@@ -325,157 +324,21 @@ fn connect_msp(
 
     // Wrap in MSP protocol layer (adds MSP v2 framing + response parser)
     let mut transport = MspTransport::new(byte_transport, msp_raw_sink.clone());
+    // No tunnel on this link — clear the Tunnel tab's counters of an earlier MAVLink session.
+    msp_tunnel::stats::reset();
 
     // ── MSP Handshake ──────────────────────────────────────────────
-    let mut fc_info = FcInfo::default();
-
-    // 1) MSP_API_VERSION → [mspProtocol, apiVersionMajor, apiVersionMinor]
-    let resp = transport.msp_request(MSP_API_VERSION, &[])?;
-    if resp.payload.len() >= 3 {
-        fc_info.msp_protocol = resp.payload[0];
-        fc_info.api_version = format!("{}.{}", resp.payload[1], resp.payload[2]);
+    // Identity, version gate, feature set, craft info and home (shared with the MSP-over-MAVLink
+    // tunnel — see msp/handshake.rs). One attempt per request on a direct MSP link.
+    let handshake = crate::msp::handshake::run(&mut transport, 1)?;
+    let fc_info = handshake.fc_info;
+    if let Some(fix) = handshake.home {
+        let home = HomeEvent { lat: fix.lat, lon: fix.lon, alt: fix.alt };
+        crate::link_status::on_home(home.lat, home.lon);
+        let _ = app_handle.emit("home-position", home);
     }
-
-    // 2) MSP_FC_VARIANT → 4-byte identifier string (e.g. "INAV")
-    let resp = transport.msp_request(MSP_FC_VARIANT, &[])?;
-    fc_info.fc_variant = String::from_utf8_lossy(&resp.payload).trim().to_string();
-
-    // 3) MSP_FC_VERSION → [major, minor, patch]
-    let resp = transport.msp_request(MSP_FC_VERSION, &[])?;
-    if resp.payload.len() >= 3 {
-        fc_info.fc_version = format!(
-            "{}.{}.{}",
-            resp.payload[0], resp.payload[1], resp.payload[2]
-        );
-    }
-
-    // 4) MSP_BOARD_INFO → board identifier (4 bytes) + hw revision (u16 LE)
-    let resp = transport.msp_request(MSP_BOARD_INFO, &[])?;
-    if resp.payload.len() >= 4 {
-        fc_info.board_id = String::from_utf8_lossy(&resp.payload[..4])
-            .trim()
-            .to_string();
-    }
-    if resp.payload.len() >= 6 {
-        fc_info.hardware_revision =
-            (resp.payload[4] as u16) | ((resp.payload[5] as u16) << 8);
-    }
-
-    // ── Version check & feature detection ────────────────────────────
-    if fc_info.fc_variant != "INAV" {
-        return Err(format!(
-            "Unsupported firmware variant: '{}'. Only INAV is currently supported.",
-            fc_info.fc_variant
-        ));
-    }
-
-    let version = InavVersion::parse(&fc_info.fc_version).ok_or_else(|| {
-        format!("Cannot parse firmware version: '{}'", fc_info.fc_version)
-    })?;
-
-    if !is_version_supported(version) {
-        return Err(format!(
-            "INAV {} is not supported. Minimum required version is 7.0.0.",
-            version
-        ));
-    }
-
-    let feature_set = FeatureSet::for_version(version);
-    log::info!(
-        "Feature gates for INAV {}: autoland={}, geozones={}, msp_rc={}, aux_rc={}",
-        version,
-        feature_set.autoland_config,
-        feature_set.geozones,
-        feature_set.msp_rc,
-        feature_set.aux_rc
-    );
-    let link_stats_supported = feature_set.link_stats;
-    let wind_supported = feature_set.wind_estimate;
-    fc_info.features = Some(feature_set);
-
-    // 5) MSP2_INAV_MIXER → platform type and mixer preset
-    match transport.msp_request(MSPV2_INAV_MIXER, &[]) {
-        Ok(resp) => {
-            if resp.payload.len() >= 7 {
-                fc_info.platform_type = resp.payload[3];
-                fc_info.mixer_preset =
-                    (resp.payload[5] as i16) | ((resp.payload[6] as i16) << 8);
-            }
-        }
-        Err(e) => {
-            log::warn!("Failed to query mixer config: {}", e);
-        }
-    }
-
-    // 6) MSP_NAME → craft name configured in the FC
-    match transport.msp_request(MSP_NAME, &[]) {
-        Ok(resp) => {
-            fc_info.craft_name = String::from_utf8_lossy(&resp.payload).trim().to_string();
-        }
-        Err(e) => {
-            log::warn!("Failed to query craft name: {}", e);
-        }
-    }
-
-    // 6b) MSP_UID → the MCU's 96-bit unique id (three little-endian u32 words), rendered as 24 hex
-    // chars. Informational: reconnect identity for the platform-type override, stored per flight.
-    match transport.msp_request(MSP_UID, &[]) {
-        Ok(resp) if resp.payload.len() >= 12 => {
-            fc_info.fc_uid = Some(resp.payload[..12].iter().map(|b| format!("{:02X}", b)).collect());
-        }
-        Ok(_) => log::warn!("MSP_UID: short reply"),
-        Err(e) => log::warn!("Failed to query MSP_UID: {}", e),
-    }
-
-    // 6c) MSP_BLACKBOX_CONFIG → [supported, device, …]; device 0 = NONE. Seeds the vehicle library's
-    // "blackbox available" flag when the craft is saved from the UAV Info panel.
-    match transport.msp_request(MSP_BLACKBOX_CONFIG, &[]) {
-        Ok(resp) if resp.payload.len() >= 2 => {
-            fc_info.blackbox = Some(resp.payload[0] != 0 && resp.payload[1] != 0);
-        }
-        Ok(_) => log::debug!("MSP_BLACKBOX_CONFIG: short reply"),
-        Err(e) => log::debug!("MSP_BLACKBOX_CONFIG not answered: {}", e),
-    }
-
-    // 7) Home position — MSP_WP #0 is INAV's RTH home (GPS_home, lat/lon in deg·1e7). One-shot at
-    //    connect so a mid-flight connect / app restart recovers Home; the live arm-transition path
-    //    only sets it when we actually witness the arm. Raw-parse the 21-byte WP payload (the home
-    //    WP's action byte isn't a normal nav action, so we don't go through decode_wp). lat==lon==0
-    //    means no home is set yet (on the ground, pre-arm) → skip; arm will set it live.
-    match transport.msp_request(MSP_WP, &[0]) {
-        Ok(resp) if resp.payload.len() >= 14 => {
-            let p = &resp.payload;
-            let lat_e7 = i32::from_le_bytes([p[2], p[3], p[4], p[5]]);
-            let lon_e7 = i32::from_le_bytes([p[6], p[7], p[8], p[9]]);
-            let alt_cm = i32::from_le_bytes([p[10], p[11], p[12], p[13]]);
-            if lat_e7 != 0 || lon_e7 != 0 {
-                let home = HomeEvent {
-                    lat: lat_e7 as f64 / 1e7,
-                    lon: lon_e7 as f64 / 1e7,
-                    alt: alt_cm as f64 / 100.0,
-                };
-                log::info!("Home from FC (MSP_WP 0): {:.7}, {:.7}", home.lat, home.lon);
-                crate::link_status::on_home(home.lat, home.lon);
-                let _ = app_handle.emit("home-position", home);
-            } else {
-                log::info!("MSP_WP(0): no home set on FC yet");
-            }
-        }
-        Ok(_) => log::warn!("MSP_WP(0) home response too short"),
-        Err(e) => log::warn!("Failed to query home (MSP_WP 0): {}", e),
-    }
-
-    let transport_desc = transport.description();
-    log::info!(
-        "Connected to {} {} v{} via {} (board: {}, API: {}, platform: {})",
-        fc_info.fc_variant,
-        fc_info.fc_version,
-        fc_info.api_version,
-        transport_desc,
-        fc_info.board_id,
-        fc_info.api_version,
-        fc_info.platform_type,
-    );
+    let link_stats_supported = fc_info.features.as_ref().is_some_and(|f| f.link_stats);
+    let wind_supported = fc_info.features.as_ref().is_some_and(|f| f.wind_estimate);
 
     // ── Start telemetry scheduler ────────────────────────────────────────
     let config = TelemetryConfig {
@@ -534,6 +397,7 @@ fn connect_msp(
         state.radar_ingest.clone(),
         state.radar_msp_enabled.clone(),
         state.rc_tx.clone(),
+        SchedulerMode::Telemetry,
     );
 
     // Store MSP scheduler handle and FC info
@@ -569,7 +433,7 @@ fn connect_mavlink(
     app_handle: AppHandle,
 ) -> Result<FcInfo, String> {
     // MAVLink handshake: wait for FC HEARTBEAT, send GCS HEARTBEAT back
-    let (fc_info, fc_sysid, fc_compid) = mavlink_proto::perform_handshake(&mut *byte_transport)?;
+    let (mut fc_info, fc_sysid, fc_compid, uid2_valid) = mavlink_proto::perform_handshake(&mut *byte_transport)?;
 
     log::info!(
         "MAVLink connected: {} (sysid={}) via {}",
@@ -664,7 +528,45 @@ fn connect_mavlink(
 
     // Start the MAVLink handler thread
     store_recorder(&state, &recorder_handle);
-    let handle = mavlink_proto::handler::start(byte_transport, fc_sysid, fc_compid, fc_info.fc_variant.clone(), app_handle, recorder_handle, state.rc_tx.clone());
+    let link_desc = byte_transport.description();
+    let probe_recorder = recorder_handle.clone();
+    let mut handle = mavlink_proto::handler::start(byte_transport, fc_sysid, fc_compid, fc_info.fc_variant.clone(), app_handle.clone(), recorder_handle, state.rc_tx.clone());
+
+    // INAV MSP over MAVLink (D2): INAV's AUTOPILOT_VERSION carries an all-zero uid2 (and a fake
+    // ArduPilot 4.7.0 version), so the MAVLink identity can't tell INAV apart — only the tunnel can.
+    // uid2 all-zero (or no AUTOPILOT_VERSION at all) → probe the TUNNEL inline (≤ 2 s); a real uid2 →
+    // ArduPilot / PX4, no probe, no delay.
+    msp_tunnel::stats::reset();
+    if !uid2_valid {
+        match probe_msp_tunnel(&handle, fc_sysid, fc_info.mav_type, &link_desc, &state, &app_handle) {
+            TunnelProbe::Up(sched, inav_info) => {
+                handle.msp = Some(sched);
+                // TODO(stage2): the INAV identity flips the frontend's autopilot context to INAV
+                // (`autopilotContext.variantToSystem("INAV")`) — its INAV planner/transfer actions only
+                // work once Stage 2 routes the one-shot commands through `with_msp` and the UI gates
+                // use `hasMsp` / `isArduPilotLink`. Stage 1 is not merged without Stage 2.
+                fc_info = inav_info;
+                // The recorder was created with the heartbeat identity before the probe — upgrade it so
+                // the flights of this link are stored as the INAV craft (name, version, FC id).
+                if let Some(ref rec) = probe_recorder {
+                    if let Ok(mut r) = rec.lock() {
+                        r.set_fc_info(fc_info.clone());
+                    }
+                }
+            }
+            TunnelProbe::NoTunnel => {}
+            TunnelProbe::LinkLost => {
+                // The handler already emitted `connection-lost` (before `state.protocol` was set, so the
+                // frontend's disconnect found nothing) — tear down and fail the connect instead of
+                // storing a dead "connected" link.
+                let _ = handle.stop();
+                store_recorder(&state, &None);
+                msp_tunnel::stats::emit_now(&app_handle);
+                return Err("Link lost during MSP tunnel probe".into());
+            }
+        }
+    }
+    msp_tunnel::stats::emit_now(&app_handle);
 
     // Store MAVLink handle and FC info
     {
@@ -678,6 +580,224 @@ fn connect_mavlink(
     }
 
     Ok(fc_info)
+}
+
+/// Outcome of the connect-time MSP-over-MAVLink probe.
+// `Up` carries the running scheduler + FC info; the enum is built once per connect.
+#[allow(clippy::large_enum_variant)]
+enum TunnelProbe {
+    /// Tunnel up: the tunnel-mode scheduler and the INAV `FcInfo`.
+    Up(SchedulerHandle, FcInfo),
+    /// No (usable) tunnel — stay plain MAVLink.
+    NoTunnel,
+    /// The MAVLink link itself died during the probe / handshake.
+    LinkLost,
+}
+
+/// Probe for INAV's MSP-over-MAVLink tunnel on a running MAVLink handler (D2) and, on success, run the
+/// INAV MSP handshake through it and start the MSP scheduler in tunnel mode. `Up` carries the scheduler
+/// and the INAV `FcInfo` (`features.msp_tunnel = true`, `adsb_msp = false`, `mav_type` kept from the
+/// HEARTBEAT). Every failure is logged at warn; the tunnel receiver is unregistered on drop.
+fn probe_msp_tunnel(
+    handle: &mavlink_proto::MavlinkHandle,
+    fc_sysid: u8,
+    mav_type: u8,
+    link_desc: &str,
+    state: &State<'_, AppState>,
+    app_handle: &AppHandle,
+) -> TunnelProbe {
+    use std::time::{Duration, Instant};
+
+    /// Probe attempts: send at t = 0 / 500 / 1000 ms, wait for the first reply until t = 2 s.
+    const PROBE_WAITS_MS: [u64; 3] = [500, 500, 1000];
+    /// After the reply: swallow late duplicate replies of the earlier attempts before the handshake.
+    const PROBE_DRAIN: Duration = Duration::from_millis(100);
+
+    log::warn!(
+        "MSP tunnel probe: AUTOPILOT_VERSION uid2 is zero or missing — probing INAV MSP over MAVLink (FC sysid {}, up to 2 s)",
+        fc_sysid
+    );
+    let tunnel = match TunnelTransport::open(handle.cmd_tx_clone(), fc_sysid, link_desc) {
+        Ok(t) => t,
+        Err(e) => {
+            log::warn!("MSP tunnel probe: {}", e);
+            return TunnelProbe::LinkLost;
+        }
+    };
+    // The tunnel traffic is already in the .tlog (every TUNNEL frame is recorded by the handler), and
+    // the MAVLink recorder never opens an MSP raw log — so no .rawmsp capture here (empty sink).
+    let raw_sink: MspRawSink = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let mut msp = MspTransport::new(Box::new(tunnel), raw_sink);
+
+    let started = Instant::now();
+    let mut answered: Option<(usize, Duration)> = None;
+    for (i, wait_ms) in PROBE_WAITS_MS.iter().enumerate() {
+        let sent = Instant::now();
+        match msp.msp_request_timeout(MSP_API_VERSION, &[], *wait_ms) {
+            Ok(_) => {
+                answered = Some((i + 1, sent.elapsed()));
+                break;
+            }
+            Err(e) if msp.is_connection_lost() => {
+                log::warn!("MSP tunnel probe: MAVLink link lost during the probe ({})", e);
+                return TunnelProbe::LinkLost;
+            }
+            Err(_) => {}
+        }
+    }
+    let Some((attempt, rtt)) = answered else {
+        log::warn!("MSP tunnel probe: no reply after 2 s (3 attempts) — plain MAVLink");
+        msp_tunnel::stats::set_probe("no_reply", None, format!("{} ms, 3 attempts", started.elapsed().as_millis()));
+        return TunnelProbe::NoTunnel;
+    };
+    let rtt_ms = rtt.as_millis() as u64;
+    log::warn!(
+        "MSP tunnel probe: MSP_API_VERSION answered in {} ms (attempt {}/3, {} ms since probe start)",
+        rtt_ms,
+        attempt,
+        started.elapsed().as_millis()
+    );
+
+    // Late duplicates (a slow reply to an earlier attempt) are unsolicited to the handshake — drain them.
+    let drain_until = Instant::now() + PROBE_DRAIN;
+    while Instant::now() < drain_until {
+        if msp.poll_incoming().is_err() {
+            break;
+        }
+    }
+
+    // INAV handshake through the tunnel — two tries per request (a lost chunk means no reply at all).
+    let handshake = match crate::msp::handshake::run(&mut msp, 2) {
+        Ok(h) => h,
+        Err(e) if msp.is_connection_lost() => {
+            log::warn!("MSP tunnel: MAVLink link lost during the INAV handshake ({})", e);
+            return TunnelProbe::LinkLost;
+        }
+        Err(e) => {
+            log::warn!("MSP tunnel: the tunnel answered but the INAV handshake rejected it ({}) — plain MAVLink", e);
+            msp_tunnel::stats::set_probe("rejected", Some(rtt_ms), e);
+            return TunnelProbe::NoTunnel;
+        }
+    };
+    let mut fc_info = handshake.fc_info;
+    let tunnel_min = InavVersion::new(10, 0, 0);
+    let version_ok = InavVersion::parse(&fc_info.fc_version).is_some_and(|v| v.is_at_least(tunnel_min));
+    if fc_info.fc_variant != "INAV" || !version_ok {
+        log::warn!(
+            "MSP tunnel: {} {} is not INAV >= 10.0.0 — plain MAVLink",
+            fc_info.fc_variant,
+            fc_info.fc_version
+        );
+        msp_tunnel::stats::set_probe(
+            "rejected",
+            Some(rtt_ms),
+            format!("{} {}", fc_info.fc_variant, fc_info.fc_version),
+        );
+        return TunnelProbe::NoTunnel;
+    }
+    if let Some(f) = fc_info.features.as_mut() {
+        f.msp_tunnel = true;
+        // The tunnel scheduler never polls MSP2_ADSB_VEHICLE_LIST (MAVLink ADSB_VEHICLE covers ADS-B on
+        // this link), so the "ADS-B from FC (MSP)" source must not be offered.
+        f.adsb_msp = false;
+    }
+    fc_info.mav_type = mav_type;
+    log::warn!(
+        "MSP tunnel: INAV {} handshake OK (board {}, API {}, craft '{}')",
+        fc_info.fc_version,
+        fc_info.board_id,
+        fc_info.api_version,
+        fc_info.craft_name
+    );
+    msp_tunnel::stats::set_probe(
+        "ok",
+        Some(rtt_ms),
+        format!("attempt {}/3 — INAV {}", attempt, fc_info.fc_version),
+    );
+
+    // Tunnel-mode scheduler: no polling, no recorder, no RC stream / radar, one request in flight.
+    let sched = scheduler::start(
+        Box::new(msp),
+        TelemetryConfig::default(),
+        app_handle.clone(),
+        None,
+        state.radar_ingest.clone(),
+        state.radar_msp_enabled.clone(),
+        state.rc_tx.clone(),
+        SchedulerMode::Tunnel,
+    );
+    log::warn!("MSP tunnel: MSP scheduler started in tunnel mode (on-demand only, 1 request in flight)");
+    TunnelProbe::Up(sched, fc_info)
+}
+
+/// Reply of the dev-only tunnel request (Debug Monitor → Tunnel tab).
+#[derive(serde::Serialize)]
+pub struct TunnelMspReply {
+    /// Reply payload as spaced hex
+    reply_hex: String,
+    /// Reply payload length in bytes
+    bytes: usize,
+    /// TUNNEL chunks received for this request (as counted by the tunnel transport)
+    chunks: u32,
+    rtt_ms: u64,
+}
+
+/// Dev tool (Debug Monitor → Tunnel): send one MSP request with a hex payload through the active MSP
+/// scheduler (the MSP-over-MAVLink tunnel, or a direct MSP link) and return the raw reply. The
+/// hardware test for the tunnel's multi-chunk replies: `0x2048` must come back as 640 payload bytes.
+/// Only available while debug mode is on (debug build or `--debug`).
+#[tauri::command(async)]
+pub fn debug_tunnel_msp_request(
+    code: u16,
+    payload_hex: String,
+    state: State<'_, AppState>,
+) -> Result<TunnelMspReply, String> {
+    if !crate::debug_mode::enabled() {
+        return Err("Debug mode is off".into());
+    }
+    let payload = parse_hex_payload(&payload_hex)?;
+
+    let started = std::time::Instant::now();
+    let reply = crate::state::with_msp(&state, |h| h.msp_request(code, &payload))?;
+    let rtt_ms = started.elapsed().as_millis() as u64;
+    Ok(TunnelMspReply {
+        reply_hex: reply.iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>().join(" "),
+        bytes: reply.len(),
+        chunks: msp_tunnel::stats::last_request_chunks(),
+        rtt_ms,
+    })
+}
+
+/// Dev tool (Debug Monitor → Tunnel): the current tunnel stats, so a tab opened after connect shows the
+/// probe result without waiting for the next `debug-tunnel-stats` event (none come on a plain link).
+#[tauri::command]
+pub fn debug_tunnel_stats_snapshot() -> Result<msp_tunnel::stats::TunnelStatsSnapshot, String> {
+    if !crate::debug_mode::enabled() {
+        return Err("Debug mode is off".into());
+    }
+    Ok(msp_tunnel::stats::snapshot())
+}
+
+/// Parse the dev form's payload: hex digits, optionally `0x`-prefixed, separators (whitespace, `,`,
+/// `:`) ignored. Parsed byte-wise, so non-ASCII input is an error instead of a slice panic.
+fn parse_hex_payload(text: &str) -> Result<Vec<u8>, String> {
+    let compact: String = text
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != ',' && *c != ':')
+        .collect();
+    let compact = compact.strip_prefix("0x").or_else(|| compact.strip_prefix("0X")).unwrap_or(&compact);
+    if !compact.is_ascii() {
+        return Err("Payload is not valid hex".into());
+    }
+    if !compact.len().is_multiple_of(2) {
+        return Err("Payload hex must have an even number of digits".into());
+    }
+    compact
+        .as_bytes()
+        .chunks(2)
+        .map(|pair| std::str::from_utf8(pair).ok().and_then(|s| u8::from_str_radix(s, 16).ok()))
+        .collect::<Option<Vec<u8>>>()
+        .ok_or_else(|| "Payload is not valid hex".to_string())
 }
 
 /// Passive telemetry path: no handshake — start the listen-only handler immediately.
@@ -818,4 +938,24 @@ pub fn set_platform_type(platform_type: u8, state: State<'_, AppState>) -> Resul
     }
     log::info!("Platform type override: {}", platform_type);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_hex_payload;
+
+    #[test]
+    fn hex_payload_parses_with_separators() {
+        assert_eq!(parse_hex_payload("0x01 02:0a,FF").unwrap(), vec![0x01, 0x02, 0x0A, 0xFF]);
+        assert_eq!(parse_hex_payload("").unwrap(), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn hex_payload_rejects_non_ascii_without_panicking() {
+        // en-dash (3 UTF-8 bytes) used to panic with "byte index is not a char boundary"
+        assert!(parse_hex_payload("0\u{2013}02").is_err());
+        assert!(parse_hex_payload("0–02").is_err());
+        assert!(parse_hex_payload("123").is_err());
+        assert!(parse_hex_payload("zz").is_err());
+    }
 }

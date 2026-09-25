@@ -1103,6 +1103,27 @@ pub fn update_session_meta_platform_type(conn: &Connection, platform_type: u8) -
     Ok(())
 }
 
+/// Replace the FC identity of an open temp session — the MSP-over-MAVLink probe upgrades the MAVLink
+/// heartbeat identity to the INAV one right after connect (see `FlightRecorder::set_fc_info`).
+pub fn update_session_meta_identity(
+    conn: &Connection,
+    craft_name: &str,
+    fc_variant: &str,
+    fc_version: &str,
+    board_id: &str,
+    platform_type: u8,
+    fc_uid: Option<&str>,
+) -> SqlResult<()> {
+    conn.execute(
+        "UPDATE session_meta
+            SET craft_name = ?1, fc_variant = ?2, fc_version = ?3, board_id = ?4, platform_type = ?5,
+                fc_uid = ?6
+          WHERE id = 1",
+        params![craft_name, fc_variant, fc_version, board_id, platform_type, fc_uid],
+    )?;
+    Ok(())
+}
+
 /// The self-describing metadata of a temp session (from its `session_meta` row).
 pub struct SessionMetaRow {
     pub start_time: String,

@@ -204,6 +204,7 @@
             <span class="feature-badge" class:available={fcInfo.features.msp_rc} class:unavailable={!fcInfo.features.msp_rc} title="INAV 8.0+">{$t('uavInfo.mspRc')}</span>
             <span class="feature-badge" class:available={fcInfo.features.aux_rc} class:unavailable={!fcInfo.features.aux_rc} title="INAV 9.1+">{$t('uavInfo.auxRc')}</span>
             <span class="feature-badge" class:available={fcInfo.features.adsb_msp} class:unavailable={!fcInfo.features.adsb_msp} title="INAV 8.0+">{$t('uavInfo.adsb')}</span>
+            <span class="feature-badge" class:available={fcInfo.features.msp_tunnel} class:unavailable={!fcInfo.features.msp_tunnel} title="INAV 10.0+">{$t('uavInfo.mspTunnel')}</span>
           </div>
         </section>
       {/if}

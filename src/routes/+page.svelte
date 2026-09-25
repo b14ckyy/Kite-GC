@@ -1112,7 +1112,8 @@
     }
     return gcsGroundAltM;
   });
-  /** ADS-B-via-MSP available: connected + the FC reports the feature (INAV 8.0+; MAVLink has no features). */
+  /** ADS-B-via-MSP available: connected + the FC reports the feature (INAV 8.0+ over direct MSP; a plain
+   *  MAVLink link has no feature set, and the MSP-over-MAVLink tunnel reports it false — it never polls it). */
   const mspAdsbSupported = $derived(
     connStatus === 'connected' && fcInfo != null && fcInfo.features != null && fcInfo.features.adsb_msp,
   );
@@ -2662,7 +2663,7 @@
       });
     } catch (e) {
       errorMsg = String(e);
-      connection.set({ status: "error", protocolType: selectedProtocol, transportType: selectedTransport, port: "", baudRate: selectedBaud, errorMessage: String(e), fcInfo: null });
+      connection.set({ status: "error", protocolType: selectedProtocol, transportType: selectedTransport, port: "", baudRate: selectedBaud, errorMessage: String(e), fcInfo: null, mspTunnel: false });
     } finally {
       isConnecting = false;
     }
