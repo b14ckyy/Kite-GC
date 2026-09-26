@@ -295,6 +295,28 @@
     rawTakingOver = on;
   });
 
+  // ── PX4: COM_RC_IN_MODE (0 = RC only / 4 = sticks disabled block MANUAL_CONTROL) ────────────────
+  let rcInMode = $state<number | null>(null);
+  const rcInModeBlocks = $derived(rcInMode === 0 || rcInMode === 4);
+  async function readRcInMode() {
+    try {
+      const v = await invoke<number | null>('mav_read_param', { name: 'COM_RC_IN_MODE' });
+      rcInMode = v == null ? null : Math.round(v);
+    } catch { rcInMode = null; }
+  }
+  /** Set COM_RC_IN_MODE = 2 ("RC and Joystick with fallback"). PX4 persists parameters itself. */
+  async function allowJoystickInput() {
+    try {
+      await invoke('mav_set_param', { name: 'COM_RC_IN_MODE', value: 2 });
+      await readRcInMode();
+    } catch (e) { console.warn('[rc] COM_RC_IN_MODE set failed', e); }
+  }
+  // Read it once a PX4 vehicle is connected; forget it on disconnect.
+  $effect(() => {
+    if (connectedPx4) void readRcInMode();
+    else rcInMode = null;
+  });
+
   // Long-press to engage/disengage (HoldToConfirm fills the button left→right over this duration, then
   // fires toggleEngage). Never auto-engages on connect/plug (anti-accidental).
   const LONG_PRESS_MS = 600;
@@ -467,9 +489,25 @@
           </div>
         {/if}
         {#if connectedPx4}
-          <!-- PX4 ignores MANUAL_CONTROL unless COM_RC_IN_MODE allows a MAVLink/joystick source. -->
-          <div class="rc-banner rc-banner-info">
-            <div class="rc-banner-hint">{$t('rc.manual.comRcInModeHint')}</div>
+          <!-- PX4 ignores MANUAL_CONTROL unless COM_RC_IN_MODE allows a MAVLink/joystick source. Read the
+               live value so the operator sees the actual blocker, with a one-click fix (2 = RC and
+               joystick with fallback — the QGC default). -->
+          <div class="rc-banner {rcInModeBlocks ? 'rc-banner-warn' : 'rc-banner-info'}">
+            <div class="rc-banner-hint">
+              {#if rcInMode == null}
+                {$t('rc.manual.comRcInModeHint')}
+              {:else if rcInModeBlocks}
+                {$t('rc.manual.comRcInModeBlocked', { values: { value: rcInMode } })}
+              {:else}
+                {$t('rc.manual.comRcInModeOk', { values: { value: rcInMode } })}
+              {/if}
+            </div>
+            <div class="rc-banner-actions">
+              <Button size="sm" onclick={() => void readRcInMode()}>{$t('rc.manual.comRcInModeRead')}</Button>
+              {#if rcInModeBlocks}
+                <Button size="sm" variant="data" onclick={() => void allowJoystickInput()}>{$t('rc.manual.comRcInModeFix')}</Button>
+              {/if}
+            </div>
           </div>
         {/if}
         <div class="rc-rate">
@@ -627,6 +665,12 @@
   .rc-banner-hint { color: #d8d8d8; line-height: 1.4; }
   .rc-banner-block {
     background: rgba(212, 0, 0, 0.16); border: 1px solid rgba(212, 0, 0, 0.5); color: #ff9a9a;
+  }
+  .rc-banner-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+    flex-wrap: wrap;
   }
   .rc-banner-warn {
     background: rgba(232, 163, 23, 0.14); border: 1px solid rgba(232, 163, 23, 0.45); color: #f0b443;

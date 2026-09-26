@@ -511,6 +511,7 @@ pub fn ardu_mission_upload(
         &waypoints,
         reserve_home,
         ::mavlink::ardupilotmega::MavMissionType::MAV_MISSION_TYPE_MISSION,
+        !reserve_home, // PX4 (no home slot) → unset yaw goes out as NaN, see wp_to_item
         |current, total| {
             let _ = app.emit(MISSION_UPLOAD_PROGRESS, MissionTransferProgress { current, total });
         },
