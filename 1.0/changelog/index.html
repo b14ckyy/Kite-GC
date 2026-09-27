@@ -1669,6 +1669,11 @@ flight logbook with replay, FPV video, radar / airspace awareness and telemetry 
   strip along every full degree of latitude and longitude reported no terrain. In the terrain
   radar that strip stayed unpainted, which reads as "terrain far below" rather than "unknown";
   Live AGL and the terrain analysis showed a gap. The sampler now covers the whole tile.</li>
+<li><strong>"Unfinished recording found": Save Incomplete and Continue on Reconnect always failed.</strong> After a
+  crash or a forced close mid-flight the prompt appeared on the next start, but both ways of keeping
+  the recording ended in an error ("no such table: flights") and the temp log stayed where it was;
+  only Discard worked. Both actions now recover the flight again. Not affected: the "Device
+  connection lost" prompt shown while the app is still running.</li>
 </ul>
 <hr />
 <p><strong class="kite-patch">1.0.1</strong> <em class="kite-badge">2026-09-13</em></p>
