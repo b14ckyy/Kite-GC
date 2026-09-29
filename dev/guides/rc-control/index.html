@@ -2221,8 +2221,10 @@ gives PX4 its own <strong>manual-control editor</strong> rather than the channel
   multirotor and fixed-wing).</li>
 <li><strong>Buttons</strong> are sent as a bitfield; <strong>PX4 maps each button to an action</strong> per vehicle (in PX4 / QGC), so
   there's nothing button-related to configure on the Kite side.</li>
-<li><strong><code>COM_RC_IN_MODE</code></strong> must allow a MAVLink/joystick source (not "RC only") or PX4 ignores the input —
-  Kite shows a reminder.</li>
+<li><strong><code>COM_RC_IN_MODE</code></strong> must allow a MAVLink/joystick source (not "RC only") or PX4 ignores the input.
+  On a PX4 connection the desktop RC panel shows its live value and warns when it is <code>0</code> or <code>4</code> (joystick
+  input blocked); <strong>Re-read</strong> fetches it again, and in the blocked case <strong>Allow joystick (set 2)</strong> sets
+  it to <code>2</code> (RC and joystick) — PX4 stores the parameter itself.</li>
 <li><strong>Modes and arming</strong> stay on the Control tool.</li>
 </ul>
 <div class="admonition note">

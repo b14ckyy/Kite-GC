@@ -1940,6 +1940,13 @@ flight controller's own ADS-B receiver are not on this path yet. Setup and limit
   reconnect — and a failed handshake names the busy port and what to do about it. Frames go to every
   source heard in the last ten seconds (several SITL instances or bridges on one port each speak from
   their own socket; before, only the last one to speak got them). Contributed by dldnjsxo95. <a href="https://github.com/b14ckyy/Kite-GC/pull/194">#194</a> · <a href="https://github.com/b14ckyy/Kite-GC/pull/204">#204</a></li>
+<li><strong>PX4: take-off and land no longer head for 0°N 0°E, missions with unset yaw or action items
+  upload, integer parameters read and write correctly, and the desktop RC panel shows COM_RC_IN_MODE
+  with a one-click fix when it blocks joystick input.</strong> A geofence or rally save now lists the
+  parameters Kite could not write (on PX4: ones the vehicle does not report) as a warning instead of
+  failing after the geometry is already on the vehicle. For ArduPilot too: mission, fence and rally
+  transfers address the autopilot component, so they pass through a routing relay such as Mission
+  Planner's MAVLink mirror. Contributed by dldnjsxo95. <a href="https://github.com/b14ckyy/Kite-GC/pull/195">#195</a> · <a href="https://github.com/b14ckyy/Kite-GC/pull/205">#205</a></li>
 </ul>
 </details>
 <details class="note">
