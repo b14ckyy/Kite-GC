@@ -1933,6 +1933,13 @@ flight controller's own ADS-B receiver are not on this path yet. Setup and limit
   work as over a direct MSP link — over ELRS/mLRS MAVLink, SiK radios or a Wi-Fi bridge. Telemetry
   stays MAVLink; nothing is polled through the tunnel. RC control and FC-side ADS-B are not on this
   path yet. The work also surfaced an INAV firmware bug in long tunnel replies (fixed upstream). <a href="https://github.com/b14ckyy/Kite-GC/pull/202">#202</a></li>
+<li><strong>UDP links: a busy local port falls back to a stable alternate, a peer going away no longer
+  ends the link, and commands reach every recent sender.</strong> When another program already listens on
+  the port you target (Mission Planner on 14550, say), Kite now binds the same port plus 10000
+  instead of a random one, so a relay that streams to Kite's address finds it again after a
+  reconnect — and a failed handshake names the busy port and what to do about it. Frames go to every
+  source heard in the last ten seconds (several SITL instances or bridges on one port each speak from
+  their own socket; before, only the last one to speak got them). Contributed by dldnjsxo95. [#194] · [#204]</li>
 </ul>
 </details>
 <details class="note">
