@@ -1081,11 +1081,16 @@ fn store_recorder(state: &State<'_, AppState>, key: &str, rec: &Option<crate::fl
 #[tauri::command]
 pub fn set_platform_type(platform_type: u8, state: State<'_, AppState>) -> Result<(), String> {
     let active_key = {
-        // Multi-vehicle: the override applies to the active vehicle's link (its primary FcInfo).
+        // Multi-vehicle: the link's FcInfo describes its primary vehicle — only that one's override
+        // lands there; a selected secondary leaves it alone.
         let mut reg = state.links.lock().map_err(|e| e.to_string())?;
         let active = reg.active().cloned().ok_or_else(|| crate::vehicle_registry::ERR_NOT_CONNECTED.to_string())?;
         match reg.get_mut(active.link) {
-            Some(entry) => entry.fc_info.platform_type = platform_type,
+            Some(entry) => {
+                if entry.primary == active {
+                    entry.fc_info.platform_type = platform_type;
+                }
+            }
             None => return Err(crate::vehicle_registry::ERR_NOT_CONNECTED.to_string()),
         }
         active.to_key()

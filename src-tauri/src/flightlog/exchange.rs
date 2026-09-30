@@ -499,10 +499,15 @@ pub fn import_flights(
     if !kflight_path.exists() {
         return Err("File not found".into());
     }
+    with_kflight_copy(kflight_path, |src| import_from(target_conn, src, kflight_path))
+}
 
-    let src = Connection::open(kflight_path)
-        .map_err(|e| format!("Failed to open .kflight file: {}", e))?;
-
+/// `import_flights` on the open working copy `src` (`kflight_path` names the user's file in the log).
+fn import_from(
+    target_conn: &Connection,
+    src: &Connection,
+    kflight_path: &Path,
+) -> Result<ImportResult, String> {
     // Verify it's a valid kflight file
     let _has_meta: bool = src
         .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='_kflight_meta'")
@@ -517,10 +522,10 @@ pub fn import_flights(
     if !has_flights {
         return Err("Not a valid .kflight file: missing flights table".into());
     }
-    add_missing_columns(&src);
+    add_missing_columns(src);
 
     // List all flights in the source file
-    let src_flights = db::list_flights(&src)
+    let src_flights = db::list_flights(src)
         .map_err(|e| format!("Failed to list flights in .kflight: {}", e))?;
 
     // Snapshot target flights BEFORE import starts.
@@ -547,7 +552,7 @@ pub fn import_flights(
             continue;
         }
 
-        match copy_flight(&src, target_conn, summary.id) {
+        match copy_flight(src, target_conn, summary.id) {
             Ok(new_id) => {
                 result.imported += 1;
                 id_map.insert(summary.id, new_id);
@@ -607,6 +612,38 @@ pub fn import_flights(
     Ok(result)
 }
 
+/// Run `f` on a private working copy of the `.kflight` at `path` (in the app's temp dir, deleted
+/// afterwards). The callers back-fill missing columns (`add_missing_columns`) and SQLite may create
+/// `-wal`/`-shm` files next to the database, so the user's file — possibly read-only or on a share —
+/// is never opened itself and never modified.
+fn with_kflight_copy<T>(
+    path: &Path,
+    f: impl FnOnce(&Connection) -> Result<T, String>,
+) -> Result<T, String> {
+    let copy = crate::user_file::temp_path("kflight")?;
+    if let Err(e) = std::fs::copy(path, &copy) {
+        db::remove_temp_session(&copy); // a partial copy
+        return Err(format!("Failed to open .kflight file: {}", e));
+    }
+    // A WAL left by an unclean close holds committed pages of its own — bring it along.
+    let mut wal = path.as_os_str().to_os_string();
+    wal.push("-wal");
+    let wal = std::path::PathBuf::from(wal);
+    if wal.exists() {
+        let mut copy_wal = copy.as_os_str().to_os_string();
+        copy_wal.push("-wal");
+        if let Err(e) = std::fs::copy(&wal, std::path::PathBuf::from(copy_wal)) {
+            db::remove_temp_session(&copy);
+            return Err(format!("Failed to open .kflight file: {}", e));
+        }
+    }
+    let result = Connection::open(&copy)
+        .map_err(|e| format!("Failed to open .kflight file: {}", e))
+        .and_then(|conn| f(&conn));
+    db::remove_temp_session(&copy); // the copy + its -wal / -shm
+    result
+}
+
 /// A `.kflight` written by an older Kite lacks the columns added since (flights `fc_uid` v19,
 /// `group_id` v20; telemetry `wall_ms` v20). Add them so the shared row readers apply.
 fn add_missing_columns(conn: &Connection) {
@@ -646,24 +683,24 @@ fn find_duplicate_in_summaries(
 
 /// List flights in a .kflight file (for offline replay / preview)
 pub fn list_flights_in_file(path: &Path) -> Result<Vec<FlightSummary>, String> {
-    let conn = Connection::open(path)
-        .map_err(|e| format!("Failed to open .kflight file: {}", e))?;
-    add_missing_columns(&conn);
-    db::list_flights(&conn).map_err(|e| format!("Query error: {}", e))
+    with_kflight_copy(path, |conn| {
+        add_missing_columns(conn);
+        db::list_flights(conn).map_err(|e| format!("Query error: {}", e))
+    })
 }
 
 /// Get a single flight from a .kflight file
 pub fn get_flight_from_file(path: &Path, flight_id: i64) -> Result<Option<Flight>, String> {
-    let conn = Connection::open(path)
-        .map_err(|e| format!("Failed to open .kflight file: {}", e))?;
-    add_missing_columns(&conn);
-    db::get_flight(&conn, flight_id).map_err(|e| format!("Query error: {}", e))
+    with_kflight_copy(path, |conn| {
+        add_missing_columns(conn);
+        db::get_flight(conn, flight_id).map_err(|e| format!("Query error: {}", e))
+    })
 }
 
 /// Get the telemetry track from a .kflight file
 pub fn get_track_from_file(path: &Path, flight_id: i64) -> Result<Vec<TelemetryRecord>, String> {
-    let conn = Connection::open(path)
-        .map_err(|e| format!("Failed to open .kflight file: {}", e))?;
-    add_missing_columns(&conn);
-    db::get_flight_track(&conn, flight_id).map_err(|e| format!("Query error: {}", e))
+    with_kflight_copy(path, |conn| {
+        add_missing_columns(conn);
+        db::get_flight_track(conn, flight_id).map_err(|e| format!("Query error: {}", e))
+    })
 }

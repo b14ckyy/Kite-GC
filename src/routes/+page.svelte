@@ -96,6 +96,7 @@
   import { buildArduMissionInput } from '$lib/helpers/missionLibraryArdu';
   import { homePosition, setVehicleHome } from '$lib/stores/home';
   import { isActive, links, activeVehicleId, refreshLinks } from '$lib/stores/vehicles';
+  import { parseVehicleId } from '$lib/helpers/vehicleId';
   import { ingestFcGuidedTarget, ingestVehicleGuidedTarget } from '$lib/controllers/vehicleControl';
   import { MAP_PROVIDERS } from "$lib/config/mapProviders";
   import { tileCacheStats, setCacheMaxMB, clearCache } from "$lib/cache/tileCache";
@@ -562,7 +563,11 @@
     if (vehicleId == null) return true; // payload without a vehicle (not per-vehicle)
     if (vehicleId === recordingOwner) return true;
     const ownerGone = recordingOwner === null || !get(vehicles).has(recordingOwner);
-    return ownerGone && vehicleId === get(activeVehicleId);
+    // A vehicle the frontend does not know yet belongs to the link being connected: its recorder can
+    // report (resumed / committed) before the vehicle is announced — a link that runs the MSP-tunnel
+    // probe announces it only afterwards. Secondaries are announced (`vehicle-discovered`) before
+    // their frames are dispatched, so this never adopts another link's secondary.
+    return ownerGone && (vehicleId === get(activeVehicleId) || !get(vehicles).has(vehicleId));
   }
   telemetry.subscribe((t) => {
     liveTelem = t;
@@ -623,6 +628,9 @@
     }
     if (!armed && prevArmed) {
       void handleDisarm(t.lastUpdate || Date.now());
+      // A real disarm (not a telemetry reset) ends the flight: a later connect to an already-armed
+      // aircraft must not reuse this start.
+      if (t.statusSeen) armStartMs = 0;
     }
     prevArmed = armed;
   });
@@ -2697,6 +2705,12 @@
         if (choice === 'cancel') return; // stay connected
         // Capture the flown mission now (still connected + FC-synced) for a Save/Continue commit.
         captureEndedMission();
+        // The vehicle whose session gets stashed — read before the disconnect clears the active one.
+        // Only a link's PRIMARY recorder parks a pending session (secondaries auto-commit), so a selected
+        // secondary maps to its link's primary; an unknown active vehicle falls back to "the only one".
+        const active = get(activeVehicleId);
+        const ownerLink = active ? get(links).find((l) => l.linkId === parseVehicleId(active)?.link) : undefined;
+        const vid = ownerLink?.primaryVehicleId ?? active;
         try {
           await disconnectFC(selectedBaud); // backend stashes the active flight as the pending session
         } catch (e) {
@@ -2705,14 +2719,13 @@
         }
         try {
           if (choice === 'discard') {
-            await flightlogDiscardPending();
+            await flightlogDiscardPending(vid);
           } else if (choice === 'save') {
-            const flightId = await flightlogCommitPending();
+            const flightId = await flightlogCommitPending(vid);
             await linkEndedMission(flightId, false);
             void loadLogbook();
           } else if (choice === 'continue') {
-            await flightlogContinuePending();
-            awaitingResumeReconnect = true;
+            if (await flightlogContinuePending(vid)) awaitingResumeReconnect = true;
           }
         } catch (e) {
           console.warn('[disconnect-armed] action failed', e);
@@ -3162,9 +3175,12 @@
   }
 
   /** The planner follows the active vehicle, so only its session gets the flown mission captured;
-   *  another vehicle's session gets an empty snapshot (nothing is linked to it). */
+   *  another vehicle's session gets an empty snapshot (nothing is linked to it). Without an active
+   *  vehicle (a connecting link's recorder reports before its vehicle is announced) there is no other
+   *  vehicle the planner could belong to, so the mission is captured as well. */
   function captureEndedMissionFor(vehicleId: string | null): void {
-    if (vehicleId == null || vehicleId === get(activeVehicleId)) captureEndedMission();
+    const active = get(activeVehicleId);
+    if (vehicleId == null || active == null || vehicleId === active) captureEndedMission();
     else endedMission = { system: 'inav', inavWps: [], arduWps: [], fc: false };
   }
 
@@ -3257,8 +3273,8 @@
         await linkEndedMission(flightId, false);
         void loadLogbook();
       } else if (choice === 'continue') {
-        await flightlogContinuePending(vehicleId);
-        awaitingResumeReconnect = true; // resolved by the next connection's first poll
+        // Resolved by the next connection's first poll — when something was actually queued.
+        if (await flightlogContinuePending(vehicleId)) awaitingResumeReconnect = true;
       }
     } catch (e) {
       console.warn('[interrupted] recovery failed', e);

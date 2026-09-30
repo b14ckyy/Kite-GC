@@ -377,9 +377,10 @@ export async function flightlogDiscardPending(vehicleId?: string | null): Promis
 }
 
 /** Continue-on-reconnect for a session interrupted by a disconnect while armed: move the pending
- *  session into the resume queue so the next connection resumes/finalizes it (ADR-042). */
-export async function flightlogContinuePending(vehicleId?: string | null): Promise<void> {
-  await invoke('flightlog_continue_pending_session', { vehicleId: vehicleId ?? undefined });
+ *  session into the resume queue so the next connection resumes/finalizes it (ADR-042). Resolves
+ *  to whether a session was queued (`false`: nothing was pending). */
+export async function flightlogContinuePending(vehicleId?: string | null): Promise<boolean> {
+  return invoke<boolean>('flightlog_continue_pending_session', { vehicleId: vehicleId ?? undefined });
 }
 
 /** An orphan temp recording session found at startup (crash/close recovery, ADR-042). */

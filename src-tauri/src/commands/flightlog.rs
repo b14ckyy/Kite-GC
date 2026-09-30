@@ -1266,7 +1266,7 @@ pub fn flightlog_commit_pending_session(
         .sessions
         .take_pending(vehicle_id.as_deref())?
         .ok_or_else(|| "No pending recording session to commit".to_string())?;
-    crate::flightlog::recorder::commit_pending_session(session)
+    state.sessions.commit_protected(session)
 }
 
 /// Discard the pending live-recording session (the End-Flight dialog's **Discard Recording**) —
@@ -1293,18 +1293,19 @@ pub fn flightlog_discard_pending_session(
 
 /// Continue-on-reconnect for a session interrupted by a disconnect while armed (ADR-042): move the
 /// pending session into the resume queue so the next connection's recorder resumes/finalizes it.
-/// `vehicle_id` as for the commit.
+/// `vehicle_id` as for the commit. Returns whether a session was queued (`false`: nothing pending).
 #[tauri::command]
 pub fn flightlog_continue_pending_session(
     vehicle_id: Option<String>,
     state: tauri::State<'_, crate::state::AppState>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let key = vehicle_id.clone();
-    if let Some(session) = state.sessions.take_pending(vehicle_id.as_deref())? {
-        let key = key.unwrap_or_else(|| session.temp_path.to_string_lossy().to_string());
-        state.sessions.put_resume(key, session)?;
-    }
-    Ok(())
+    let Some(session) = state.sessions.take_pending(vehicle_id.as_deref())? else {
+        return Ok(false);
+    };
+    let key = key.unwrap_or_else(|| session.temp_path.to_string_lossy().to_string());
+    state.sessions.put_resume(key, session)?;
+    Ok(true)
 }
 
 // ── Recovery of an orphan temp session left by a crash/close (ADR-042) ──────────────────
@@ -1599,7 +1600,7 @@ pub fn flightlog_recover_save_incomplete(
     crate::flightlog::recorder::commit_pending_session(session)
 }
 
-/// Recovery prompt → **Continue on Reconnect**: load the orphan into the shared resume slot; the
+/// Recovery prompt → **Continue on Reconnect**: load the orphan into the resume queue; the
 /// next connection's recorder resumes it (armed) or finalizes it (disarmed) on its first poll.
 #[tauri::command]
 pub fn flightlog_recover_continue(
