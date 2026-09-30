@@ -1679,6 +1679,22 @@ flight logbook with replay, FPV video, radar / airspace awareness and telemetry 
   a timeout, an item the FC refused — nothing was shown and the Save button simply came back,
   while what the vehicle actually held might not have matched the panel. The panel now shows the
   error under the Save button.</li>
+<li><strong>Relay and GPS fix state: one fix scale for every link.</strong> Passive links (LTM, CRSF, SmartPort)
+  reported the fix on a different scale than MSP and MAVLink, so the Relay re-encoded an INAV or
+  ArduPilot 3D fix as 2D on its LTM and MAVLink outputs and as "no fix" on SmartPort, the map's
+  automatic jump to the aircraft on its first fix never happened on an INAV link (and only with an
+  RTK fix on ArduPilot/PX4), and the GPS widget coloured a plain 3D fix amber and labelled a passive
+  2D fix "3D". All links now use 0 none / 1 2D / 2 3D / 3 DGPS-RTK, and the Relay maps it correctly
+  for every output. One visible consequence on passive links: a 2D fix now counts as "no 3D fix"
+  everywhere, the same as on MSP and MAVLink — no home is set for that flight until the fix is 3D,
+  and ADS-B conflict alerts and the radar distance reference wait for it. Also fixed on the way: the
+  2D map no longer jumps to the aircraft when you framed a mission in the meantime, and the
+  FormationFlight radar answer reports the fix on INAV's scale.</li>
+<li><strong>Your location is no longer taken from the aircraft.</strong> The first 3D fix of a connection was
+  stored as your own position and, in the GCS modes without an OS fix, moved the GCS marker to the
+  aircraft — on a reconnect in flight, to an airborne aircraft. Now, while your own position is
+  unknown, the aircraft's home position stands in for the GCS location; a manually set GCS
+  position and a live OS position keep precedence.</li>
 </ul>
 <hr />
 <p><strong class="kite-patch">1.0.1</strong> <em class="kite-badge">2026-09-13</em></p>
