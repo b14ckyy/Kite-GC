@@ -77,6 +77,58 @@ pub struct Flight {
     /// flights link to vehicles by craft name, never by this. `None` for imports and passive telemetry.
     #[serde(default)]
     pub fc_uid: Option<String>,
+    /// Group flight this flight is a member of (`flight_groups.id`, schema v20). `None` = a single
+    /// flight. Changeable (unlink / relink); the group id itself never changes.
+    #[serde(default)]
+    pub group_id: Option<String>,
+}
+
+/// A group flight (row in `flight_groups`, schema v20): the header that ties the member flights of a
+/// multi-vehicle flight together — time span, place, timezone, weather, notes; no track, no telemetry,
+/// no battery, no vehicle. Aggregates (member count, sums) are derived on query, never stored.
+#[allow(dead_code)] // group flights: callers arrive with GROUP_FLIGHTS.md steps 3-7
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FlightGroup {
+    /// Immutable id (16 hex chars, a hash of the anchor's start time + position).
+    pub id: String,
+    /// Group start = the earliest arm among the member recordings (true UTC, like `Flight`).
+    pub start_time: DateTime<Utc>,
+    pub end_time: Option<DateTime<Utc>>,
+    /// Local UTC offset (minutes, east-positive) at the flight location (ADR-048).
+    pub utc_offset_min: Option<i32>,
+    /// Anchor model's position at its arm.
+    pub start_lat: Option<f64>,
+    pub start_lon: Option<f64>,
+    /// Anchor model's GPS altitude (MSL) at its arm.
+    pub start_alt_m: Option<f64>,
+    pub location_name: Option<String>,
+    pub weather_temp_c: Option<f64>,
+    pub weather_wind_ms: Option<f64>,
+    pub weather_wind_deg: Option<i32>,
+    pub weather_desc: Option<String>,
+    pub notes: Option<String>,
+    /// Set by the database on insert (ignored by `insert_flight_group`).
+    #[serde(default)]
+    pub created_at: String,
+}
+
+/// A timeline event of a flight (row in `flight_events`, schema v20) — arm / disarm in Phase 1; the
+/// column set leaves room for STATUSTEXT, disarm reasons, … from later producers.
+#[allow(dead_code)] // group flights: callers arrive with GROUP_FLIGHTS.md steps 3-7
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FlightEvent {
+    pub id: i64,
+    pub flight_id: i64,
+    /// Same time base as `telemetry_records.timestamp_ms` (ms since the flight start).
+    pub timestamp_ms: i64,
+    /// Wall-clock UTC epoch ms, when known.
+    pub wall_ms: Option<i64>,
+    /// `arm` | `disarm` | … .
+    pub kind: String,
+    pub code: Option<i64>,
+    pub text: Option<String>,
+    /// `live` | the importer's name.
+    pub source: Option<String>,
 }
 
 /// A reusable mission stored in the library (row in `missions` table).
@@ -440,6 +492,10 @@ pub struct TelemetryRecord {
     /// SNR (dB) and raw uplink RSSI (dBm) when the protocol provides them (CRSF / INAV 9.1+).
     pub link_snr: Option<i8>,
     pub link_rssi_dbm: Option<i16>,
+    /// Wall-clock UTC epoch ms of the sample (live recordings from schema v20; `None` for imports and
+    /// older rows). Not sent to the frontend until a reader needs it (group replay).
+    #[serde(default, skip_serializing)]
+    pub wall_ms: Option<i64>,
 }
 
 /// A single per-instance battery sample (row in `battery_records`). ArduPilot/PX4 can run several
@@ -479,6 +535,9 @@ pub struct FlightSummary {
     pub notes: Option<String>,
     /// Local UTC offset (minutes, east-positive) at the flight location, DST-aware (ADR-048).
     pub utc_offset_min: Option<i32>,
+    /// Group flight membership (see `Flight::group_id`).
+    #[serde(default)]
+    pub group_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -365,20 +365,21 @@ export async function deleteFlight(id: number, dbPath: string): Promise<boolean>
 }
 
 /** Commit the pending live-recording session into the main DB (End-Flight dialog Save).
- *  Returns the new flight id. Deferred commit — see ADR-041. */
-export async function flightlogCommitPending(): Promise<number> {
-  return invoke<number>('flightlog_commit_pending_session');
+ *  Returns the new flight id. Deferred commit — see ADR-041. `vehicleId` = the `vehicleId` of the
+ *  session's `flight-recording-*` event; omitted → the only pending session (error if several). */
+export async function flightlogCommitPending(vehicleId?: string | null): Promise<number> {
+  return invoke<number>('flightlog_commit_pending_session', { vehicleId: vehicleId ?? undefined });
 }
 
 /** Discard the pending live-recording session (End-Flight dialog Discard) — drops the temp file. */
-export async function flightlogDiscardPending(): Promise<void> {
-  await invoke('flightlog_discard_pending_session');
+export async function flightlogDiscardPending(vehicleId?: string | null): Promise<void> {
+  await invoke('flightlog_discard_pending_session', { vehicleId: vehicleId ?? undefined });
 }
 
 /** Continue-on-reconnect for a session interrupted by a disconnect while armed: move the pending
- *  session into the resume slot so the next connection resumes/finalizes it (ADR-042). */
-export async function flightlogContinuePending(): Promise<void> {
-  await invoke('flightlog_continue_pending_session');
+ *  session into the resume queue so the next connection resumes/finalizes it (ADR-042). */
+export async function flightlogContinuePending(vehicleId?: string | null): Promise<void> {
+  await invoke('flightlog_continue_pending_session', { vehicleId: vehicleId ?? undefined });
 }
 
 /** An orphan temp recording session found at startup (crash/close recovery, ADR-042). */

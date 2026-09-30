@@ -525,8 +525,9 @@
   let flightStatsOwner: string | null = null;
   activeVehicleId.subscribe((id) => {
     if (id === flightStatsOwner) return;
-    if (flightStatsOwner) {
-      flightStatsSlots.set(flightStatsOwner, {
+    const previous = flightStatsOwner;
+    if (previous) {
+      flightStatsSlots.set(previous, {
         prevArmed, armEdgeInit, armStartMs, accMaxAlt, accMaxSpeed, accMaxDist, accMah, accTotalDist,
         accStartLat, accStartLon, accLastLat, accLastLon,
       });
@@ -536,13 +537,33 @@
     if (slot) {
       ({ prevArmed, armEdgeInit, armStartMs, accMaxAlt, accMaxSpeed, accMaxDist, accMah, accTotalDist,
          accStartLat, accStartLon, accLastLat, accLastLon } = slot);
-    } else {
-      // Unknown vehicle: re-baseline on its first status-carrying frame (no edge), empty stats.
-      armEdgeInit = false; prevArmed = false; armStartMs = 0;
+      return;
+    }
+    // Unknown vehicle (or none): re-baseline the edge detector on the first status-carrying frame
+    // (no false edge either way).
+    armEdgeInit = false; prevArmed = false;
+    // The flight stats reset only on a switch between two vehicles. Disconnect (→ null) and reconnect
+    // (null → a new key for the same aircraft) keep them, so a flight that lost its link mid-air still
+    // gets its full summary at the disarm after the reconnect.
+    if (previous !== null && id !== null) {
+      armStartMs = 0;
       accMaxAlt = 0; accMaxSpeed = 0; accMaxDist = 0; accMah = 0; accTotalDist = 0;
       accStartLat = null; accStartLon = null; accLastLat = null; accLastLon = null;
     }
   });
+
+  // Multi-vehicle: the End-Flight dialog, the recovery prompt of an interrupted recording and the
+  // captured flown mission belong to ONE vehicle's session — the one whose `flight-recording-ended` /
+  // `-interrupted` (or, unrecorded, whose disarm) opened them. Lifecycle events of other vehicles (a
+  // secondary re-arming on the same link) must not close or clear them. A reconnect brings the aircraft
+  // back under a new key, so an owner that is gone hands over to the active vehicle.
+  let recordingOwner: string | null = null;
+  function isRecordingOwner(vehicleId: string | null | undefined): boolean {
+    if (vehicleId == null) return true; // payload without a vehicle (not per-vehicle)
+    if (vehicleId === recordingOwner) return true;
+    const ownerGone = recordingOwner === null || !get(vehicles).has(recordingOwner);
+    return ownerGone && vehicleId === get(activeVehicleId);
+  }
   telemetry.subscribe((t) => {
     liveTelem = t;
     // Accumulate the live flown track (RAM) for the Terrain Analyzer
@@ -558,7 +579,8 @@
       armStartMs = t.lastUpdate || Date.now();
       accMaxAlt = 0; accMaxSpeed = 0; accMaxDist = 0; accMah = 0; accTotalDist = 0;
       accStartLat = null; accStartLon = null; accLastLat = null; accLastLon = null;
-      endFlightDialog?.close(); // re-arming dismisses a lingering End-Flight dialog
+      // Re-arming dismisses a lingering End-Flight dialog — of this vehicle, not another one's.
+      if (isRecordingOwner(flightStatsOwner)) endFlightDialog?.close();
       // warm the Copernicus tile for the current area so it's ready
       if (isValidGpsCoordinate(t.lat, t.lon)) {
         void invoke('terrain_elevation', { lat: t.lat, lon: t.lon }).catch(() => {});
@@ -627,6 +649,7 @@
     const durationSec = armStartMs ? Math.round((disarmMs - armStartMs) / 1000) : 0;
     if (durationSec < 5) return; // ignore trivial bench arm/disarm
     if (flightLoggingEnabled && flightRecordingEnabled) return; // recorded → handled on -ended
+    recordingOwner = flightStatsOwner;
     try {
       await endFlightDialog.show({
         stats: {
@@ -3138,10 +3161,18 @@
     if (get(pendingSystemSwitch)) confirmSystemSwitch('keep');
   }
 
-  async function onRecordingEnded(stats: EndFlightStats): Promise<void> {
+  /** The planner follows the active vehicle, so only its session gets the flown mission captured;
+   *  another vehicle's session gets an empty snapshot (nothing is linked to it). */
+  function captureEndedMissionFor(vehicleId: string | null): void {
+    if (vehicleId == null || vehicleId === get(activeVehicleId)) captureEndedMission();
+    else endedMission = { system: 'inav', inavWps: [], arduWps: [], fc: false };
+  }
+
+  async function onRecordingEnded(stats: EndFlightStats, vehicleId: string | null): Promise<void> {
     awaitingResumeReconnect = false; // a recovered session that came back disarmed is now in the dialog
+    recordingOwner = vehicleId;
     // Capture the flown mission at disarm, while FC-sync still reflects what the FC flew.
-    captureEndedMission();
+    captureEndedMissionFor(vehicleId);
     const missionConfirm = endedMissionHasWps(endedMission) && !endedMission.fc;
     try {
       const res = await endFlightDialog.show({ stats, recorded: true, missionConfirm });
@@ -3149,11 +3180,11 @@
       // backend already resolved the pending session, so there is nothing to do here.
       if (res === null) return;
       if (res.discard) {
-        await flightlogDiscardPending();
+        await flightlogDiscardPending(vehicleId);
         return;
       }
       // Save → commit the pending session, then link mission + battery/notes against the new id.
-      const flightId = await flightlogCommitPending();
+      const flightId = await flightlogCommitPending(vehicleId);
       if (res.batterySerial) {
         await flightSetBatterySerial(flightId, res.batterySerial, flightLogDbPath);
         // A flight may link several packs (comma-separated). Offer to create each unknown serial; on the
@@ -3212,20 +3243,21 @@
   // Disconnect while the UAV was still armed (ADR-042): the recovery prompt (Discard / Save /
   // Continue on Reconnect), NOT the End-Flight dialog — the flight may not be over (port change,
   // switch to telemetry). The session is already stashed as pending in the backend.
-  async function onRecordingInterrupted(info: { temp_path: string; craft_name: string; start_time: string; duration_sec: number; sample_count: number }): Promise<void> {
+  async function onRecordingInterrupted(info: { temp_path: string; craft_name: string; start_time: string; duration_sec: number; sample_count: number }, vehicleId: string | null): Promise<void> {
+    recordingOwner = vehicleId;
     // Capture the flown mission (FC-sync) for a later commit.
-    captureEndedMission();
+    captureEndedMissionFor(vehicleId);
     awaitingResumeReconnect = false;
     try {
       const choice = await recoveryPrompt.show(info, { reason: 'lost' });
       if (choice === 'discard') {
-        await flightlogDiscardPending();
+        await flightlogDiscardPending(vehicleId);
       } else if (choice === 'save') {
-        const flightId = await flightlogCommitPending();
+        const flightId = await flightlogCommitPending(vehicleId);
         await linkEndedMission(flightId, false);
         void loadLogbook();
       } else if (choice === 'continue') {
-        await flightlogContinuePending();
+        await flightlogContinuePending(vehicleId);
         awaitingResumeReconnect = true; // resolved by the next connection's first poll
       }
     } catch (e) {
@@ -3333,12 +3365,15 @@
   });
 
   if (typeof window !== 'undefined') {
-    void listen('flight-recording-started', () => {
-      onRecordingStarted(); // id-less signal — recording started (deferred commit, ADR-041)
+    // Every `flight-recording-*` payload carries the recorder's `vehicleId` / `linkId`.
+    void listen<{ vehicleId?: string }>('flight-recording-started', (event) => {
+      // Recording started (no flight id yet — deferred commit, ADR-041). Only this vehicle's own start
+      // clears its captured-mission snapshot; another aircraft arming must not.
+      if (isRecordingOwner(event.payload?.vehicleId)) onRecordingStarted();
     });
     // Disarm → the summary dialog (stats arrive in the payload; no flight_id yet under deferred
-    // commit). Save commits the pending session, Discard drops it.
-    void listen<{ duration_sec: number; max_alt_m: number; max_speed_ms: number; max_distance_m: number; total_distance_m: number; battery_used_mah: number | null }>(
+    // commit). Save commits the pending session, Discard drops it — of the vehicle that sent it.
+    void listen<{ duration_sec: number; max_alt_m: number; max_speed_ms: number; max_distance_m: number; total_distance_m: number; battery_used_mah: number | null; vehicleId?: string }>(
       'flight-recording-ended',
       (event) => {
         const p = event.payload;
@@ -3349,14 +3384,16 @@
           maxDistM: p.max_distance_m,
           totalDistM: p.total_distance_m,
           batteryUsedMah: p.battery_used_mah,
-        });
+        }, p.vehicleId ?? null);
       },
     );
     // Grace-lapsed re-arm auto-committed the previous flight: close the (now stale) summary and link
     // the mission captured at that disarm.
     // Secondary vehicles' flights commit by themselves (no End-Flight dialog) — just refresh the list.
     void listen<{ flight_id: number }>('flight-recording-autocommitted', () => { void loadLogbook(); });
-    void listen<{ flight_id: number }>('flight-recording-committed', async (event) => {
+    void listen<{ flight_id: number; vehicleId?: string }>('flight-recording-committed', async (event) => {
+      // Another vehicle's grace-lapsed re-arm: its flight is in, but this dialog/snapshot is not its.
+      if (!isRecordingOwner(event.payload.vehicleId)) { void loadLogbook(); return; }
       const snap = endedMission; // snapshot before any await
       endFlightDialog?.close();
       if (endedMissionHasWps(snap) && snap.fc) {
@@ -3366,14 +3403,15 @@
     });
     // Re-arm within grace (or a recovered session resumed on reconnect) continues the same flight —
     // drop the stale summary dialog and exit the awaiting-reconnect state.
-    void listen('flight-recording-resumed', () => {
+    void listen<{ vehicleId?: string }>('flight-recording-resumed', (event) => {
+      if (!isRecordingOwner(event.payload?.vehicleId)) return; // e.g. a secondary re-arming within grace
       awaitingResumeReconnect = false;
       endFlightDialog?.close();
     });
     // Connection lost while recording (device gone, e.g. USB unplugged) → recovery prompt.
-    void listen<{ temp_path: string; craft_name: string; start_time: string; duration_sec: number; sample_count: number }>(
+    void listen<{ temp_path: string; craft_name: string; start_time: string; duration_sec: number; sample_count: number; vehicleId?: string }>(
       'flight-recording-interrupted',
-      (event) => { lostWhileHidden = false; void onRecordingInterrupted(event.payload); },
+      (event) => { lostWhileHidden = false; void onRecordingInterrupted(event.payload, event.payload.vehicleId ?? null); },
     );
     // The device vanished (fatal transport error) — the backend tore the scheduler down. Clean up the
     // connection state so the UI shows disconnected and the user can simply reconnect.

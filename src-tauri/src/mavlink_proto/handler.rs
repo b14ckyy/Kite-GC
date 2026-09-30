@@ -16,7 +16,7 @@ use ::mavlink::{MavHeader, Message};
 use crate::vehicle_registry::emitter::VehicleEmitter;
 use crate::vehicle_registry::VehicleInfo;
 
-use crate::flightlog::recorder::{FlightRecorder, FlightRecorderHandle};
+use crate::flightlog::recorder::{FlightRecorder, FlightRecorderHandle, SessionSlotsHandle};
 use crate::flightlog::types::FlightLogSettings;
 use crate::msp::FcInfo;
 use crate::scheduler::rc_tx::{self, RcTxHandle};
@@ -160,10 +160,13 @@ pub struct StreamRateConfig {
 /// How to record the flights of vehicles discovered on a shared link (they have no connect-time
 /// recorder of their own). DB recording only — the raw `.tlog` is per link and already holds every
 /// vehicle's frames. `None` = flight logging is off.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct SecondaryRecording {
     pub settings: FlightLogSettings,
     pub portable: bool,
+    /// The app-wide per-vehicle recording slots — a secondary's pending and live files are protected
+    /// like the primary's.
+    pub slots: SessionSlotsHandle,
 }
 
 /// Per-vehicle decode state on one link. The primary (handshake) vehicle gets one at start; further
@@ -221,7 +224,8 @@ impl VehicleCtx {
 
 /// Build the unattended recorder for a vehicle discovered on a shared link. Its flights land in the
 /// logbook under "<variant> #<sysid>" and commit by themselves (see `FlightRecorder::set_auto_commit`).
-fn secondary_recorder(cfg: &SecondaryRecording, sysid: u8, fc_variant: &str, platform_type: u8, mav_type: u8, app: &tauri::AppHandle) -> Option<FlightRecorderHandle> {
+/// It emits through the vehicle's own emitter and is registered in app-state under its vehicle key.
+fn secondary_recorder(cfg: &SecondaryRecording, sysid: u8, fc_variant: &str, platform_type: u8, mav_type: u8, emitter: &VehicleEmitter) -> Option<FlightRecorderHandle> {
     if !cfg.settings.enabled || !cfg.settings.db_enabled {
         return None;
     }
@@ -234,19 +238,27 @@ fn secondary_recorder(cfg: &SecondaryRecording, sysid: u8, fc_variant: &str, pla
         ..FcInfo::default()
     };
     let none_sink: crate::flightlog::msp_raw_logger::MspRawSink = std::sync::Arc::new(std::sync::Mutex::new(None));
-    match FlightRecorder::new(
-        settings, fc_info, "MAVLink", cfg.portable, app.clone(),
-        std::sync::Arc::new(std::sync::Mutex::new(None)), std::sync::Arc::new(std::sync::Mutex::new(None)), std::sync::Arc::new(std::sync::Mutex::new(None)), none_sink,
-    ) {
+    match FlightRecorder::new(settings, fc_info, "MAVLink", cfg.portable, emitter.clone(), cfg.slots.clone(), none_sink) {
         Ok(mut rec) => {
             rec.set_auto_commit(true);
             log::info!("Flight recorder (unattended) initialized for sysid={}", sysid);
-            Some(std::sync::Arc::new(std::sync::Mutex::new(rec)))
+            let handle = std::sync::Arc::new(std::sync::Mutex::new(rec));
+            register_recorder(emitter, Some(&handle));
+            Some(handle)
         }
         Err(e) => {
             log::error!("Failed to initialize recorder for sysid={}: {}", sysid, e);
             None
         }
+    }
+}
+
+/// Publish (or drop) a secondary vehicle's recorder in app-state (`AppState::recorders`), so the
+/// command layer reaches it when that vehicle is the active one.
+fn register_recorder(emitter: &VehicleEmitter, recorder: Option<&FlightRecorderHandle>) {
+    use tauri::Manager;
+    if let Some(state) = emitter.app().try_state::<crate::state::AppState>() {
+        state.set_recorder(emitter.key(), recorder);
     }
 }
 
@@ -645,7 +657,7 @@ fn handler_loop(
                         let (variant, platform_type) = super::vehicle::identify(hb.autopilot, hb.mavtype);
                         let mut ctx = VehicleCtx::new(frame.header.component_id, variant, platform_type, hb.mavtype as u8, app_handle.for_sysid(sysid));
                         if let Some(cfg) = &secondary_recording {
-                            ctx.recorder = secondary_recorder(cfg, sysid, &ctx.fc_variant, platform_type, hb.mavtype as u8, &app_handle);
+                            ctx.recorder = secondary_recorder(cfg, sysid, &ctx.fc_variant, platform_type, hb.mavtype as u8, &ctx.emitter);
                         }
                         log::info!(
                             "MAVLink: discovered vehicle sysid={} compid={} ({}) on L{}",
@@ -791,6 +803,7 @@ fn handler_loop(
                 if let Some(mut c) = vehicles.remove(&s) {
                     if let Some(rec) = c.recorder.take() {
                         if let Ok(mut r) = rec.lock() { r.shutdown_lost(); }
+                        register_recorder(&c.emitter, None);
                     }
                     log::info!("MAVLink: vehicle sysid={} silent for {}s — dropped", s, VEHICLE_TIMEOUT.as_secs());
                     let _ = c.emitter.emit("vehicle-lost", serde_json::json!({

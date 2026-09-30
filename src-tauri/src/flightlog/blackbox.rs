@@ -247,6 +247,7 @@ where
         board_id: header.board_id.unwrap_or_default(),
         platform_type: header.platform_type,
         fc_uid: None,
+        group_id: None,
         protocol: "BLACKBOX".into(),
         start_lat,
         start_lon,
@@ -838,6 +839,7 @@ fn build_telemetry_record_indexed(
         mode_modifiers,
         link_snr: None,      // INAV blackbox has no SNR column
         link_rssi_dbm: None, // RSSI is the legacy 0–1023 `rssi` field, not dBm
+        wall_ms: None,
         // INAV blackbox `airspeed` is cm/s → m/s.
         airspeed_ms: read_f64(cols.airspeed, record).map(|v| v / 100.0),
         // Throttle (%): INAV logs no single throttle output (it's per-motor via the mixer), so use the

@@ -11,11 +11,12 @@ use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
 
 use super::types::{
-    BatteryAggregate, BatteryPack, BatteryPackInput, BatteryRecord, Flight, FlightSummary, Mission,
+    BatteryAggregate, BatteryPack, BatteryPackInput, BatteryRecord, Flight, FlightEvent, FlightGroup,
+    FlightSummary, Mission,
     MissionInput, TelemetryRecord, Vehicle, VehicleAggregate, VehicleInput,
 };
 
-const CURRENT_SCHEMA_VERSION: u32 = 19;
+const CURRENT_SCHEMA_VERSION: u32 = 20;
 
 /// Column list (excluding the autoincrement `id`) for `telemetry_records`, shared by the temp-session
 /// copy so the SELECT and INSERT column orders can never drift apart. `flight_id` is first so the
@@ -28,7 +29,7 @@ const TELEMETRY_COLS: &str = "flight_id, timestamp_ms, lat, lon, alt_m, speed_ms
     rx_signal_received, hw_health_status, baro_temperature, \
     wind_n_ms, wind_e_ms, wind_d_ms, rc_data_json, rc_command_json, \
     nav_lat, nav_lon, nav_alt_m, mode_primary, mode_modifiers, link_snr, link_rssi_dbm, airspeed_ms, \
-    throttle_pct";
+    throttle_pct, wall_ms";
 
 /// Full single-statement DDL for `telemetry_records` at the current field set. The main DB grows
 /// this table via the migration chain; the per-session temp DB (no migration history) creates it
@@ -47,7 +48,7 @@ const TELEMETRY_RECORDS_DDL_FULL: &str = "CREATE TABLE IF NOT EXISTS telemetry_r
     baro_temperature REAL, wind_n_ms REAL, wind_e_ms REAL, wind_d_ms REAL,
     rc_data_json TEXT, rc_command_json TEXT, nav_lat REAL, nav_lon REAL, nav_alt_m REAL,
     mode_primary TEXT, mode_modifiers TEXT, link_snr INTEGER, link_rssi_dbm INTEGER,
-    airspeed_ms REAL, throttle_pct REAL
+    airspeed_ms REAL, throttle_pct REAL, wall_ms INTEGER
 );";
 
 /// Per-instance battery samples (ArduPilot/PX4 multi-monitor). `flight_id` first so the temp-session
@@ -284,6 +285,34 @@ fn db_newer_error(found: u32) -> rusqlite::Error {
     )
 }
 
+/// One schema step: creates its objects and stamps its version.
+type MigrationStep = fn(&Connection) -> SqlResult<()>;
+
+/// The migration chain, one `(target version, step)` per schema version. Module-level so the tests
+/// can build a DB at an older version from the real steps.
+const MIGRATION_STEPS: [(u32, MigrationStep); 20] = [
+    (1, migrate_v0_to_v1),
+    (2, migrate_v1_to_v2),
+    (3, migrate_v2_to_v3),
+    (4, migrate_v3_to_v4),
+    (5, migrate_v4_to_v5),
+    (6, migrate_v5_to_v6),
+    (7, migrate_v6_to_v7),
+    (8, migrate_v7_to_v8),
+    (9, migrate_v8_to_v9),
+    (10, migrate_v9_to_v10),
+    (11, migrate_v10_to_v11),
+    (12, migrate_v11_to_v12),
+    (13, migrate_v12_to_v13),
+    (14, migrate_v13_to_v14),
+    (15, migrate_v14_to_v15),
+    (16, migrate_v15_to_v16),
+    (17, migrate_v16_to_v17),
+    (18, migrate_v17_to_v18),
+    (19, migrate_v18_to_v19),
+    (20, migrate_v19_to_v20),
+];
+
 fn migrate(conn: &Connection) -> SqlResult<()> {
     let current = get_user_version(conn)?;
 
@@ -300,28 +329,7 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
     // stamp-to-CURRENT once produced a "newest version, missing objects" DB; the ensure_* block
     // below still self-heals that legacy case). PRAGMA user_version is transactional in SQLite.
     // None of the steps may contain VACUUM or its own BEGIN/COMMIT.
-    const STEPS: [(u32, fn(&Connection) -> SqlResult<()>); 19] = [
-        (1, migrate_v0_to_v1),
-        (2, migrate_v1_to_v2),
-        (3, migrate_v2_to_v3),
-        (4, migrate_v3_to_v4),
-        (5, migrate_v4_to_v5),
-        (6, migrate_v5_to_v6),
-        (7, migrate_v6_to_v7),
-        (8, migrate_v7_to_v8),
-        (9, migrate_v8_to_v9),
-        (10, migrate_v9_to_v10),
-        (11, migrate_v10_to_v11),
-        (12, migrate_v11_to_v12),
-        (13, migrate_v12_to_v13),
-        (14, migrate_v13_to_v14),
-        (15, migrate_v14_to_v15),
-        (16, migrate_v15_to_v16),
-        (17, migrate_v16_to_v17),
-        (18, migrate_v17_to_v18),
-        (19, migrate_v18_to_v19),
-    ];
-    for (target, step) in STEPS {
+    for (target, step) in MIGRATION_STEPS {
         if current < target {
             let tx = conn.unchecked_transaction()?;
             step(&tx)?;
@@ -346,6 +354,7 @@ fn migrate(conn: &Connection) -> SqlResult<()> {
     ensure_v17_schema(conn)?;
     ensure_v18_schema(conn)?;
     ensure_v19_schema(conn)?;
+    ensure_v20_schema(conn)?;
 
     Ok(())
 }
@@ -675,6 +684,62 @@ fn migrate_v18_to_v19(conn: &Connection) -> SqlResult<()> {
     Ok(())
 }
 
+/// v20: group flights (Dev-Docs active/GROUP_FLIGHTS.md §3.1) — `flight_groups` (the header that ties
+/// the member flights of a multi-vehicle flight together; no track, no telemetry), `flights.group_id`
+/// (deleting a group dissolves it: members stay as single flights), the per-flight event timeline
+/// `flight_events` (arm/disarm; the column set of INAV_PUSH_TELEMETRY §6.4) and a wall-clock stamp per
+/// telemetry row (`telemetry_records.wall_ms`, UTC epoch ms; NULL for imports and older rows).
+/// Additive + idempotent.
+fn ensure_v20_schema(conn: &Connection) -> SqlResult<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS flight_groups (
+            id               TEXT PRIMARY KEY,
+            start_time       TEXT NOT NULL,
+            end_time         TEXT,
+            utc_offset_min   INTEGER,
+            start_lat        REAL,
+            start_lon        REAL,
+            start_alt_m      REAL,
+            location_name    TEXT,
+            weather_temp_c   REAL,
+            weather_wind_ms  REAL,
+            weather_wind_deg INTEGER,
+            weather_desc     TEXT,
+            notes            TEXT,
+            created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+        );",
+    )?;
+    if !column_exists(conn, "flights", "group_id")? {
+        conn.execute_batch(
+            "ALTER TABLE flights ADD COLUMN group_id TEXT REFERENCES flight_groups(id) ON DELETE SET NULL;",
+        )?;
+    }
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_flights_group ON flights(group_id);
+         CREATE TABLE IF NOT EXISTS flight_events (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            flight_id    INTEGER NOT NULL REFERENCES flights(id) ON DELETE CASCADE,
+            timestamp_ms INTEGER NOT NULL,
+            wall_ms      INTEGER,
+            kind         TEXT NOT NULL,
+            code         INTEGER,
+            text         TEXT,
+            source       TEXT
+         );
+         CREATE INDEX IF NOT EXISTS idx_events_flight ON flight_events(flight_id, timestamp_ms);",
+    )?;
+    if !column_exists(conn, "telemetry_records", "wall_ms")? {
+        conn.execute_batch("ALTER TABLE telemetry_records ADD COLUMN wall_ms INTEGER;")?;
+    }
+    Ok(())
+}
+
+fn migrate_v19_to_v20(conn: &Connection) -> SqlResult<()> {
+    ensure_v20_schema(conn)?;
+    set_user_version(conn, 20)?;
+    Ok(())
+}
+
 fn migrate_v6_to_v7(conn: &Connection) -> SqlResult<()> {
     conn.execute_batch(
         "ALTER TABLE telemetry_records ADD COLUMN battery_percentage INTEGER;",
@@ -834,10 +899,11 @@ pub fn insert_flight(conn: &Connection, flight: &Flight) -> SqlResult<i64> {
             start_lat, start_lon, location_name,
             weather_temp_c, weather_wind_ms, weather_wind_deg, weather_desc,
             max_alt_m, max_speed_ms, max_distance_m, total_distance_m,
-            battery_used_mah, notes, pilot_name, pilot_id, battery_serial, utc_offset_min, fc_uid
+            battery_used_mah, notes, pilot_name, pilot_id, battery_serial, utc_offset_min, fc_uid,
+            group_id
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-            ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28
+            ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29
         )",
         params![
             flight.start_time.to_rfc3339(),
@@ -868,6 +934,7 @@ pub fn insert_flight(conn: &Connection, flight: &Flight) -> SqlResult<i64> {
             flight.battery_serial.as_deref().map(normalize_serial_list).filter(|s| !s.is_empty()),
             flight.utc_offset_min,
             flight.fc_uid,
+            flight.group_id,
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -892,7 +959,7 @@ pub fn insert_telemetry_batch(
                 rc_data_json, rc_command_json,
                 nav_lat, nav_lon, nav_alt_m,
                 mode_primary, mode_modifiers,
-                link_snr, link_rssi_dbm, airspeed_ms, throttle_pct
+                link_snr, link_rssi_dbm, airspeed_ms, throttle_pct, wall_ms
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
                 ?14, ?15, ?16, ?17, ?18, ?19, ?20,
@@ -903,7 +970,7 @@ pub fn insert_telemetry_batch(
                 ?36, ?37,
                 ?38, ?39, ?40,
                 ?41, ?42,
-                ?43, ?44, ?45, ?46
+                ?43, ?44, ?45, ?46, ?47
             )",
         )?;
         for r in records {
@@ -954,6 +1021,7 @@ pub fn insert_telemetry_batch(
                 r.link_rssi_dbm,
                 r.airspeed_ms,
                 r.throttle_pct,
+                r.wall_ms,
             ])?;
         }
     }
@@ -1054,6 +1122,10 @@ pub fn open_temp_session(path: &Path) -> SqlResult<Connection> {
     // A `.ktmp` written before v19 (crash recovery of an old session) predates the column.
     if !column_exists(&conn, "session_meta", "fc_uid")? {
         conn.execute_batch("ALTER TABLE session_meta ADD COLUMN fc_uid TEXT;")?;
+    }
+    // …and one written before v20 predates the per-row wall clock (the commit copies TELEMETRY_COLS).
+    if !column_exists(&conn, "telemetry_records", "wall_ms")? {
+        conn.execute_batch("ALTER TABLE telemetry_records ADD COLUMN wall_ms INTEGER;")?;
     }
     Ok(conn)
 }
@@ -1259,7 +1331,7 @@ pub fn list_flights(conn: &Connection) -> SqlResult<Vec<FlightSummary>> {
     let mut stmt = conn.prepare(
         "SELECT id, start_time, duration_sec, source, craft_name, location_name,
             max_alt_m, max_speed_ms, total_distance_m, platform_type, linked_flight_id, notes,
-            utc_offset_min
+            utc_offset_min, group_id
          FROM flights ORDER BY start_time DESC",
     )?;
 
@@ -1283,6 +1355,7 @@ pub fn list_flights(conn: &Connection) -> SqlResult<Vec<FlightSummary>> {
             linked_flight_id: row.get(10)?,
             notes: row.get(11)?,
             utc_offset_min: row.get(12)?,
+            group_id: row.get(13)?,
         })
     })?;
 
@@ -1298,7 +1371,7 @@ pub fn get_flight(conn: &Connection, flight_id: i64) -> SqlResult<Option<Flight>
                 weather_temp_c, weather_wind_ms, weather_wind_deg, weather_desc,
                 max_alt_m, max_speed_ms, max_distance_m, total_distance_m,
                 battery_used_mah, notes, linked_flight_id, pilot_name, pilot_id, battery_serial,
-                utc_offset_min, fc_uid
+                utc_offset_min, fc_uid, group_id
          FROM flights WHERE id = ?1",
     )?;
 
@@ -1346,6 +1419,7 @@ pub fn get_flight(conn: &Connection, flight_id: i64) -> SqlResult<Option<Flight>
             battery_serial: row.get(27)?,
             utc_offset_min: row.get(28)?,
             fc_uid: row.get(29)?,
+            group_id: row.get(30)?,
         })
     })?;
 
@@ -1570,7 +1644,7 @@ pub fn list_flights_for_mission(conn: &Connection, mission_id: i64) -> SqlResult
     let mut stmt = conn.prepare(
         "SELECT id, start_time, duration_sec, source, craft_name, location_name,
             max_alt_m, max_speed_ms, total_distance_m, platform_type, linked_flight_id, notes,
-            utc_offset_min
+            utc_offset_min, group_id
          FROM flights WHERE mission_id = ?1 ORDER BY start_time DESC",
     )?;
     let rows = stmt.query_map(params![mission_id], |row| {
@@ -1592,6 +1666,7 @@ pub fn list_flights_for_mission(conn: &Connection, mission_id: i64) -> SqlResult
             linked_flight_id: row.get(10)?,
             notes: row.get(11)?,
             utc_offset_min: row.get(12)?,
+            group_id: row.get(13)?,
         })
     })?;
     rows.collect()
@@ -1793,7 +1868,7 @@ pub fn list_flights_for_serial(conn: &Connection, serial: &str) -> SqlResult<Vec
     let mut stmt = conn.prepare(
         "SELECT id, start_time, duration_sec, source, craft_name, location_name,
             max_alt_m, max_speed_ms, total_distance_m, platform_type, linked_flight_id, notes,
-            utc_offset_min
+            utc_offset_min, group_id
          FROM flights WHERE (',' || battery_serial || ',') LIKE ('%,' || ?1 || ',%')
          ORDER BY start_time DESC",
     )?;
@@ -1816,6 +1891,7 @@ pub fn list_flights_for_serial(conn: &Connection, serial: &str) -> SqlResult<Vec
             linked_flight_id: row.get(10)?,
             notes: row.get(11)?,
             utc_offset_min: row.get(12)?,
+            group_id: row.get(13)?,
         })
     })?;
     rows.collect()
@@ -2115,7 +2191,7 @@ pub fn list_flights_for_craft(conn: &Connection, craft: &str) -> SqlResult<Vec<F
     let mut stmt = conn.prepare(
         "SELECT id, start_time, duration_sec, source, craft_name, location_name,
             max_alt_m, max_speed_ms, total_distance_m, platform_type, linked_flight_id, notes,
-            utc_offset_min
+            utc_offset_min, group_id
          FROM flights WHERE TRIM(craft_name) = ?1 COLLATE NOCASE ORDER BY start_time DESC",
     )?;
     let rows = stmt.query_map(params![craft], |row| {
@@ -2137,6 +2213,7 @@ pub fn list_flights_for_craft(conn: &Connection, craft: &str) -> SqlResult<Vec<F
             linked_flight_id: row.get(10)?,
             notes: row.get(11)?,
             utc_offset_min: row.get(12)?,
+            group_id: row.get(13)?,
         })
     })?;
     rows.collect()
@@ -2263,6 +2340,7 @@ fn read_telemetry_record(row: &rusqlite::Row) -> SqlResult<TelemetryRecord> {
         link_rssi_dbm: row.get(44)?,
         airspeed_ms: row.get(45)?,
         throttle_pct: row.get(46)?,
+        wall_ms: row.get(47)?,
     })
 }
 
@@ -2364,6 +2442,7 @@ pub fn find_duplicate_flight(
                     battery_serial: None,
                     utc_offset_min: None,
                     fc_uid: None,
+                    group_id: None,
                 })
             },
         )
@@ -2372,9 +2451,21 @@ pub fn find_duplicate_flight(
     Ok(Some(flight))
 }
 
-/// Delete a flight and all related data (telemetry, blackbox records, archived files).
-/// Explicitly deletes child rows first (in case foreign_keys is off), then VACUUMs.
+/// Delete a flight and all related data (telemetry, battery samples, events, blackbox records,
+/// archived files). Explicitly deletes child rows first (in case foreign_keys is off), then VACUUMs.
 pub fn delete_flight(conn: &Connection, flight_id: i64) -> SqlResult<bool> {
+    let deleted = delete_flight_rows(conn, flight_id)?;
+
+    // Reclaim the freed pages (large blackbox BLOBs) — cheap incremental reclaim, not a full rewrite.
+    if deleted {
+        conn.execute_batch("PRAGMA incremental_vacuum;")?;
+    }
+
+    Ok(deleted)
+}
+
+/// The row work of `delete_flight` without the page reclaim, so it can run inside a transaction.
+fn delete_flight_rows(conn: &Connection, flight_id: i64) -> SqlResult<bool> {
     // Clear any linked_flight_id references pointing to this flight
     conn.execute(
         "UPDATE flights SET linked_flight_id = NULL, source = CASE
@@ -2385,18 +2476,175 @@ pub fn delete_flight(conn: &Connection, flight_id: i64) -> SqlResult<bool> {
         params![flight_id],
     )?;
 
-    // Explicitly delete child tables (don't rely solely on CASCADE)
+    // Explicitly delete child tables (don't rely solely on CASCADE; `battery_records` has no FK at
+    // all, so without this its rows outlived the flight).
     conn.execute("DELETE FROM blackbox_files WHERE flight_id = ?1", params![flight_id])?;
     conn.execute("DELETE FROM blackbox_records WHERE flight_id = ?1", params![flight_id])?;
     conn.execute("DELETE FROM telemetry_records WHERE flight_id = ?1", params![flight_id])?;
+    conn.execute("DELETE FROM battery_records WHERE flight_id = ?1", params![flight_id])?;
+    conn.execute("DELETE FROM flight_events WHERE flight_id = ?1", params![flight_id])?;
     let affected = conn.execute("DELETE FROM flights WHERE id = ?1", params![flight_id])?;
+    Ok(affected > 0)
+}
 
-    // Reclaim the freed pages (large blackbox BLOBs) — cheap incremental reclaim, not a full rewrite.
-    if affected > 0 {
+// ── Group flights (schema v20, Dev-Docs active/GROUP_FLIGHTS.md) ─────────────────────────
+
+#[allow(dead_code)] // group flights: callers arrive with GROUP_FLIGHTS.md steps 3-7
+const FLIGHT_GROUP_COLS: &str = "id, start_time, end_time, utc_offset_min, start_lat, start_lon, \
+    start_alt_m, location_name, weather_temp_c, weather_wind_ms, weather_wind_deg, weather_desc, \
+    notes, created_at";
+
+/// Map one `SELECT {FLIGHT_GROUP_COLS}` row.
+#[allow(dead_code)] // group flights: callers arrive with GROUP_FLIGHTS.md steps 3-7
+fn read_flight_group(row: &rusqlite::Row) -> SqlResult<FlightGroup> {
+    let start_str: String = row.get(1)?;
+    let end_str: Option<String> = row.get(2)?;
+    Ok(FlightGroup {
+        id: row.get(0)?,
+        start_time: DateTime::parse_from_rfc3339(&start_str)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now()),
+        end_time: end_str.and_then(|s| DateTime::parse_from_rfc3339(&s).map(|dt| dt.with_timezone(&Utc)).ok()),
+        utc_offset_min: row.get(3)?,
+        start_lat: row.get(4)?,
+        start_lon: row.get(5)?,
+        start_alt_m: row.get(6)?,
+        location_name: row.get(7)?,
+        weather_temp_c: row.get(8)?,
+        weather_wind_ms: row.get(9)?,
+        weather_wind_deg: row.get(10)?,
+        weather_desc: row.get(11)?,
+        notes: row.get(12)?,
+        created_at: row.get(13)?,
+    })
+}
+
+/// Insert a group flight. Idempotent (`INSERT OR IGNORE` on the immutable id): committing a further
+/// member into an existing group keeps the stored header and its notes. `created_at` is set by the
+/// database. Returns whether a row was inserted.
+#[allow(dead_code)] // group flights: callers arrive with GROUP_FLIGHTS.md steps 3-7
+pub fn insert_flight_group(conn: &Connection, g: &FlightGroup) -> SqlResult<bool> {
+    let n = conn.execute(
+        "INSERT OR IGNORE INTO flight_groups (
+            id, start_time, end_time, utc_offset_min, start_lat, start_lon, start_alt_m,
+            location_name, weather_temp_c, weather_wind_ms, weather_wind_deg, weather_desc, notes
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+        params![
+            g.id,
+            g.start_time.to_rfc3339(),
+            g.end_time.map(|t| t.to_rfc3339()),
+            g.utc_offset_min,
+            g.start_lat,
+            g.start_lon,
+            g.start_alt_m,
+            g.location_name,
+            g.weather_temp_c,
+            g.weather_wind_ms,
+            g.weather_wind_deg,
+            g.weather_desc,
+            g.notes,
+        ],
+    )?;
+    Ok(n > 0)
+}
+
+/// One group flight by id.
+#[allow(dead_code)] // group flights: callers arrive with GROUP_FLIGHTS.md steps 3-7
+pub fn get_flight_group(conn: &Connection, id: &str) -> SqlResult<Option<FlightGroup>> {
+    conn.query_row(
+        &format!("SELECT {FLIGHT_GROUP_COLS} FROM flight_groups WHERE id = ?1"),
+        params![id],
+        read_flight_group,
+    )
+    .optional()
+}
+
+/// Every group flight, newest first.
+#[allow(dead_code)] // group flights: callers arrive with GROUP_FLIGHTS.md steps 3-7
+pub fn list_flight_groups(conn: &Connection) -> SqlResult<Vec<FlightGroup>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {FLIGHT_GROUP_COLS} FROM flight_groups ORDER BY start_time DESC"
+    ))?;
+    let rows = stmt.query_map([], read_flight_group)?;
+    rows.collect()
+}
+
+/// Ids of the member flights of a group, oldest first.
+#[allow(dead_code)] // group flights: callers arrive with GROUP_FLIGHTS.md steps 3-7
+pub fn list_flight_group_member_ids(conn: &Connection, group_id: &str) -> SqlResult<Vec<i64>> {
+    let mut stmt =
+        conn.prepare("SELECT id FROM flights WHERE group_id = ?1 ORDER BY start_time ASC, id ASC")?;
+    let rows = stmt.query_map(params![group_id], |row| row.get(0))?;
+    rows.collect()
+}
+
+/// Update the notes of a group flight.
+#[allow(dead_code)] // group flights: callers arrive with GROUP_FLIGHTS.md steps 3-7
+pub fn update_flight_group_notes(conn: &Connection, id: &str, notes: &str) -> SqlResult<()> {
+    conn.execute("UPDATE flight_groups SET notes = ?1 WHERE id = ?2", params![notes, id])?;
+    Ok(())
+}
+
+/// Delete a group flight. `with_members = false` **dissolves** it: the members stay as single flights
+/// (`group_id` → NULL). `with_members = true` deletes the member flights with all their data too.
+/// One transaction; returns whether the group existed.
+#[allow(dead_code)] // group flights: callers arrive with GROUP_FLIGHTS.md steps 3-7
+pub fn delete_flight_group(conn: &Connection, id: &str, with_members: bool) -> SqlResult<bool> {
+    let tx = conn.unchecked_transaction()?;
+    let mut members_deleted = false;
+    if with_members {
+        for member in list_flight_group_member_ids(&tx, id)? {
+            members_deleted |= delete_flight_rows(&tx, member)?;
+        }
+    } else {
+        // Explicit, like the child deletes in `delete_flight` (ON DELETE SET NULL needs foreign_keys on).
+        tx.execute("UPDATE flights SET group_id = NULL WHERE group_id = ?1", params![id])?;
+    }
+    let affected = tx.execute("DELETE FROM flight_groups WHERE id = ?1", params![id])?;
+    tx.commit()?;
+    if members_deleted {
         conn.execute_batch("PRAGMA incremental_vacuum;")?;
     }
-
     Ok(affected > 0)
+}
+
+/// Append timeline events to their flights (`id` is ignored — assigned by the database).
+#[allow(dead_code)] // group flights: callers arrive with GROUP_FLIGHTS.md steps 3-7
+pub fn insert_flight_events(conn: &Connection, events: &[FlightEvent]) -> SqlResult<()> {
+    let tx = conn.unchecked_transaction()?;
+    {
+        let mut stmt = tx.prepare_cached(
+            "INSERT INTO flight_events (flight_id, timestamp_ms, wall_ms, kind, code, text, source)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        )?;
+        for e in events {
+            stmt.execute(params![e.flight_id, e.timestamp_ms, e.wall_ms, e.kind, e.code, e.text, e.source])?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// A flight's timeline events in time order.
+#[allow(dead_code)] // group flights: callers arrive with GROUP_FLIGHTS.md steps 3-7
+pub fn get_flight_events(conn: &Connection, flight_id: i64) -> SqlResult<Vec<FlightEvent>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, flight_id, timestamp_ms, wall_ms, kind, code, text, source
+         FROM flight_events WHERE flight_id = ?1 ORDER BY timestamp_ms ASC, id ASC",
+    )?;
+    let rows = stmt.query_map(params![flight_id], |row| {
+        Ok(FlightEvent {
+            id: row.get(0)?,
+            flight_id: row.get(1)?,
+            timestamp_ms: row.get(2)?,
+            wall_ms: row.get(3)?,
+            kind: row.get(4)?,
+            code: row.get(5)?,
+            text: row.get(6)?,
+            source: row.get(7)?,
+        })
+    })?;
+    rows.collect()
 }
 
 /// Update the notes field of a flight.
@@ -2532,7 +2780,8 @@ pub fn find_linkable_live_flight(
     let result = conn
         .query_row(
             "SELECT id, start_time, duration_sec, source, craft_name, location_name,
-                                        max_alt_m, max_speed_ms, total_distance_m, platform_type, linked_flight_id
+                                        max_alt_m, max_speed_ms, total_distance_m, platform_type, linked_flight_id,
+                    group_id
              FROM flights
              WHERE source = 'live' AND linked_flight_id IS NULL
                AND start_time >= ?2 AND start_time <= ?3
@@ -2559,6 +2808,7 @@ pub fn find_linkable_live_flight(
                     linked_flight_id: row.get(10)?,
                     notes: None,
                     utc_offset_min: None,
+                    group_id: row.get(11)?,
                 })
             },
         )
@@ -2878,6 +3128,14 @@ mod tests {
         eprintln!("real DB: {flights} flights, {telemetry} telemetry rows");
         assert!(flights > 0, "expected flights in the real archive");
         assert!(telemetry > 0, "expected telemetry in the real archive");
+        // v20 objects landed next to the existing data; the old rows carry no group / wall clock.
+        assert!(column_exists(&conn, "flights", "group_id").unwrap());
+        assert!(column_exists(&conn, "telemetry_records", "wall_ms").unwrap());
+        let grouped: i64 = conn
+            .query_row("SELECT COUNT(*) FROM flights WHERE group_id IS NOT NULL", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(grouped, 0);
+        assert!(list_flight_groups(&conn).unwrap().is_empty());
         drop(conn);
         let _ = std::fs::remove_file(&work);
         let _ = std::fs::remove_file(backup_path_for(&work));
@@ -2918,6 +3176,7 @@ mod tests {
             pilot_id: None,
             battery_serial: None,
             utc_offset_min: None,
+            group_id: None,
         };
         let id = insert_flight(&conn, &flight).unwrap();
         let loaded = get_flight(&conn, id).unwrap().unwrap();
@@ -2959,6 +3218,7 @@ mod tests {
             pilot_id: None,
             battery_serial: None,
             utc_offset_min: None,
+            group_id: None,
         };
         let fid = insert_flight(&conn, &flight).unwrap();
 
@@ -3011,6 +3271,7 @@ mod tests {
                 mode_modifiers: None,
                 link_snr: None,
                 link_rssi_dbm: None,
+                wall_ms: None,
             })
             .collect();
 
@@ -3055,6 +3316,7 @@ mod tests {
             pilot_id: None,
             battery_serial: None,
             utc_offset_min: None,
+            group_id: None,
         };
         let fid = insert_flight(&conn, &flight).unwrap();
         let rec = TelemetryRecord {
@@ -3105,6 +3367,7 @@ mod tests {
             mode_modifiers: None,
             link_snr: None,
             link_rssi_dbm: None,
+            wall_ms: None,
         };
         insert_telemetry_batch(&conn, &[rec]).unwrap();
 
@@ -3149,6 +3412,7 @@ mod tests {
             pilot_id: None,
             battery_serial: None,
             utc_offset_min: None,
+            group_id: None,
         };
         let flight_id = insert_flight(&conn, &flight).unwrap();
         insert_blackbox_records(&conn, flight_id, &[(123_000, "{}".into())]).unwrap();
@@ -3185,5 +3449,367 @@ mod tests {
         assert!(!old_a.exists() && !old_b.exists(), "stragglers must be gone");
         assert!(dir.join("notes.txt").exists(), "only .ktmp files are touched");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── Schema v20: group flights, flight events, per-row wall clock ─────────────────────────
+
+    /// Apply the real migration steps up to `version` (no self-heal pass) — a DB as that Kite left it.
+    fn migrate_to(conn: &Connection, version: u32) {
+        for (target, step) in MIGRATION_STEPS {
+            if target <= version {
+                let tx = conn.unchecked_transaction().unwrap();
+                step(&tx).unwrap();
+                tx.commit().unwrap();
+            }
+        }
+        assert_eq!(get_user_version(conn).unwrap(), version);
+    }
+
+    fn object_exists(conn: &Connection, kind: &str, name: &str) -> bool {
+        conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = ?1 AND name = ?2",
+            params![kind, name],
+            |r| r.get::<_, i64>(0),
+        )
+        .unwrap()
+            > 0
+    }
+
+    fn flight(craft: &str, group_id: Option<&str>) -> Flight {
+        Flight {
+            id: 0,
+            start_time: DateTime::parse_from_rfc3339("2026-09-30T10:00:00Z").unwrap().with_timezone(&Utc),
+            end_time: None,
+            duration_sec: Some(60),
+            source: "live".into(),
+            craft_name: craft.into(),
+            fc_variant: "ArduPlane".into(),
+            fc_version: "4.6.0".into(),
+            board_id: String::new(),
+            platform_type: 1,
+            fc_uid: None,
+            protocol: "MAVLink".into(),
+            start_lat: Some(48.1),
+            start_lon: Some(11.5),
+            location_name: None,
+            weather_temp_c: None,
+            weather_wind_ms: None,
+            weather_wind_deg: None,
+            weather_desc: None,
+            max_alt_m: None,
+            max_speed_ms: None,
+            max_distance_m: None,
+            total_distance_m: None,
+            battery_used_mah: None,
+            notes: None,
+            linked_flight_id: None,
+            pilot_name: None,
+            pilot_id: None,
+            battery_serial: None,
+            utc_offset_min: Some(120),
+            group_id: group_id.map(String::from),
+        }
+    }
+
+    fn telemetry(flight_id: i64, timestamp_ms: i64, wall_ms: Option<i64>) -> TelemetryRecord {
+        TelemetryRecord {
+            id: 0,
+            flight_id,
+            timestamp_ms,
+            lat: Some(48.1),
+            lon: Some(11.5),
+            alt_m: None,
+            speed_ms: None,
+            airspeed_ms: None,
+            throttle_pct: None,
+            heading: None,
+            vario_ms: None,
+            voltage: None,
+            current_a: None,
+            mah_drawn: None,
+            rssi: None,
+            battery_percentage: None,
+            roll: None,
+            pitch: None,
+            yaw: None,
+            fix_type: None,
+            num_sat: None,
+            cpu_load: None,
+            link_quality: None,
+            baro_alt_m: None,
+            gps_hdop: None,
+            gps_eph: None,
+            gps_epv: None,
+            active_wp_number: None,
+            active_flight_mode_flags: None,
+            state_flags: None,
+            nav_state: None,
+            nav_flags: None,
+            rx_signal_received: None,
+            hw_health_status: None,
+            baro_temperature: None,
+            wind_n_ms: None,
+            wind_e_ms: None,
+            wind_d_ms: None,
+            rc_data_json: None,
+            rc_command_json: None,
+            nav_lat: None,
+            nav_lon: None,
+            nav_alt_m: None,
+            mode_primary: Some("manual".into()),
+            mode_modifiers: None,
+            link_snr: None,
+            link_rssi_dbm: None,
+            wall_ms,
+        }
+    }
+
+    fn battery(flight_id: i64, timestamp_ms: i64) -> BatteryRecord {
+        BatteryRecord {
+            id: 0,
+            flight_id,
+            timestamp_ms,
+            instance: 0,
+            voltage: Some(16.0),
+            current_a: None,
+            mah_drawn: None,
+            battery_percentage: None,
+            cell_count: None,
+            temperature: None,
+        }
+    }
+
+    fn event(flight_id: i64, timestamp_ms: i64, kind: &str) -> FlightEvent {
+        FlightEvent {
+            id: 0,
+            flight_id,
+            timestamp_ms,
+            wall_ms: Some(1_790_000_000_000 + timestamp_ms),
+            kind: kind.into(),
+            code: None,
+            text: None,
+            source: Some("live".into()),
+        }
+    }
+
+    fn group(id: &str, notes: Option<&str>) -> FlightGroup {
+        FlightGroup {
+            id: id.into(),
+            start_time: DateTime::parse_from_rfc3339("2026-09-30T10:00:00Z").unwrap().with_timezone(&Utc),
+            end_time: Some(DateTime::parse_from_rfc3339("2026-09-30T10:20:00Z").unwrap().with_timezone(&Utc)),
+            utc_offset_min: Some(120),
+            start_lat: Some(48.1),
+            start_lon: Some(11.5),
+            start_alt_m: Some(512.0),
+            location_name: None,
+            weather_temp_c: None,
+            weather_wind_ms: None,
+            weather_wind_deg: None,
+            weather_desc: None,
+            notes: notes.map(String::from),
+            created_at: String::new(),
+        }
+    }
+
+    fn count(conn: &Connection, sql: &str, id: i64) -> i64 {
+        conn.query_row(sql, params![id], |r| r.get(0)).unwrap()
+    }
+
+    /// A real v19 database (built from the v1…v19 steps) gains the v20 objects, keeps its rows, and a
+    /// second pass is a clean no-op.
+    #[test]
+    fn v19_database_migrates_to_v20_and_is_reentrant() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        migrate_to(&conn, 19);
+        assert!(!column_exists(&conn, "flights", "group_id").unwrap());
+        assert!(!column_exists(&conn, "telemetry_records", "wall_ms").unwrap());
+        conn.execute(
+            "INSERT INTO flights (start_time, craft_name) VALUES ('2026-09-01T10:00:00+00:00', 'Old')",
+            [],
+        )
+        .unwrap();
+        let old_id = conn.last_insert_rowid();
+        conn.execute("INSERT INTO telemetry_records (flight_id, timestamp_ms) VALUES (?1, 0)", params![old_id])
+            .unwrap();
+
+        migrate(&conn).unwrap();
+        assert_eq!(get_user_version(&conn).unwrap(), 20);
+        assert!(object_exists(&conn, "table", "flight_groups"));
+        assert!(object_exists(&conn, "table", "flight_events"));
+        assert!(object_exists(&conn, "index", "idx_flights_group"));
+        assert!(object_exists(&conn, "index", "idx_events_flight"));
+        assert!(column_exists(&conn, "flights", "group_id").unwrap());
+        assert!(column_exists(&conn, "telemetry_records", "wall_ms").unwrap());
+        let old = get_flight(&conn, old_id).unwrap().unwrap();
+        assert_eq!(old.craft_name, "Old");
+        assert!(old.group_id.is_none());
+        let track = get_flight_track(&conn, old_id).unwrap();
+        assert_eq!(track.len(), 1);
+        assert!(track[0].wall_ms.is_none());
+
+        migrate(&conn).unwrap(); // re-entrant
+        assert_eq!(get_user_version(&conn).unwrap(), 20);
+        // The v19 → v20 step itself is idempotent too (the backup test re-runs it on a v20 DB).
+        let tx = conn.unchecked_transaction().unwrap();
+        migrate_v19_to_v20(&tx).unwrap();
+        tx.commit().unwrap();
+    }
+
+    /// Opening a v19 database file snapshots it before the v20 step (the pre-migration backup).
+    #[test]
+    fn v19_database_file_is_backed_up_before_v20() {
+        let path = temp_db_path("v19-backup");
+        cleanup(&path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        {
+            let conn = Connection::open(&path).unwrap();
+            migrate_to(&conn, 19);
+        }
+        let conn = open_database(&path).unwrap();
+        assert_eq!(get_user_version(&conn).unwrap(), 20);
+        let backup = backup_path_for(&path);
+        assert!(backup.exists(), "the v19 -> v20 step must take the pre-migration backup");
+        let bconn = Connection::open(&backup).unwrap();
+        assert_eq!(get_user_version(&bconn).unwrap(), 19);
+        drop((conn, bconn));
+        cleanup(&path);
+    }
+
+    #[test]
+    fn group_member_and_events_round_trip() {
+        let conn = test_db();
+        assert!(insert_flight_group(&conn, &group("0123456789abcdef", Some("first"))).unwrap());
+        // Idempotent: a later member commit into the same group keeps the stored header + notes.
+        assert!(!insert_flight_group(&conn, &group("0123456789abcdef", Some("second"))).unwrap());
+
+        let member = insert_flight(&conn, &flight("Wing", Some("0123456789abcdef"))).unwrap();
+        let single = insert_flight(&conn, &flight("Quad", None)).unwrap();
+        insert_flight_events(&conn, &[event(member, 5_000, "disarm"), event(member, 0, "arm"), event(member, 9_000, "arm")])
+            .unwrap();
+
+        let g = get_flight_group(&conn, "0123456789abcdef").unwrap().unwrap();
+        assert_eq!(g.notes.as_deref(), Some("first"));
+        assert_eq!(g.start_alt_m, Some(512.0));
+        assert_eq!(g.utc_offset_min, Some(120));
+        assert!(!g.created_at.is_empty());
+        assert_eq!(get_flight(&conn, member).unwrap().unwrap().group_id.as_deref(), Some("0123456789abcdef"));
+        assert!(get_flight(&conn, single).unwrap().unwrap().group_id.is_none());
+        let listed = list_flights(&conn).unwrap();
+        assert_eq!(listed.iter().find(|f| f.id == member).unwrap().group_id.as_deref(), Some("0123456789abcdef"));
+        assert_eq!(list_flight_group_member_ids(&conn, "0123456789abcdef").unwrap(), vec![member]);
+
+        let events = get_flight_events(&conn, member).unwrap();
+        let kinds: Vec<(&str, i64)> = events.iter().map(|e| (e.kind.as_str(), e.timestamp_ms)).collect();
+        assert_eq!(kinds, [("arm", 0), ("disarm", 5_000), ("arm", 9_000)]);
+        assert_eq!(events[1].wall_ms, Some(1_790_000_005_000));
+        assert_eq!(events[1].source.as_deref(), Some("live"));
+
+        update_flight_group_notes(&conn, "0123456789abcdef", "edited").unwrap();
+        assert_eq!(get_flight_group(&conn, "0123456789abcdef").unwrap().unwrap().notes.as_deref(), Some("edited"));
+        assert_eq!(list_flight_groups(&conn).unwrap().len(), 1);
+        // A member must point at an existing group (FK).
+        assert!(insert_flight(&conn, &flight("Ghost", Some("ffffffffffffffff"))).is_err());
+    }
+
+    #[test]
+    fn dissolving_a_group_keeps_its_members() {
+        let conn = test_db();
+        insert_flight_group(&conn, &group("aaaaaaaaaaaaaaaa", None)).unwrap();
+        let a = insert_flight(&conn, &flight("A", Some("aaaaaaaaaaaaaaaa"))).unwrap();
+        let b = insert_flight(&conn, &flight("B", Some("aaaaaaaaaaaaaaaa"))).unwrap();
+        insert_flight_events(&conn, &[event(a, 0, "arm")]).unwrap();
+
+        assert!(delete_flight_group(&conn, "aaaaaaaaaaaaaaaa", false).unwrap());
+        assert!(get_flight_group(&conn, "aaaaaaaaaaaaaaaa").unwrap().is_none());
+        for id in [a, b] {
+            let f = get_flight(&conn, id).unwrap().expect("member survives a dissolve");
+            assert!(f.group_id.is_none());
+        }
+        assert_eq!(get_flight_events(&conn, a).unwrap().len(), 1);
+        assert!(!delete_flight_group(&conn, "aaaaaaaaaaaaaaaa", false).unwrap());
+    }
+
+    #[test]
+    fn deleting_a_group_with_members_removes_all_their_data() {
+        let conn = test_db();
+        insert_flight_group(&conn, &group("bbbbbbbbbbbbbbbb", None)).unwrap();
+        let a = insert_flight(&conn, &flight("A", Some("bbbbbbbbbbbbbbbb"))).unwrap();
+        let b = insert_flight(&conn, &flight("B", Some("bbbbbbbbbbbbbbbb"))).unwrap();
+        let other = insert_flight(&conn, &flight("Other", None)).unwrap();
+        for id in [a, b, other] {
+            insert_telemetry_batch(&conn, &[telemetry(id, 0, None), telemetry(id, 100, None)]).unwrap();
+            insert_battery_records_batch(&conn, &[battery(id, 0), battery(id, 100)]).unwrap();
+            insert_flight_events(&conn, &[event(id, 0, "arm")]).unwrap();
+        }
+
+        assert!(delete_flight_group(&conn, "bbbbbbbbbbbbbbbb", true).unwrap());
+        assert!(get_flight_group(&conn, "bbbbbbbbbbbbbbbb").unwrap().is_none());
+        for id in [a, b] {
+            assert!(get_flight(&conn, id).unwrap().is_none());
+            assert_eq!(count(&conn, "SELECT COUNT(*) FROM telemetry_records WHERE flight_id = ?1", id), 0);
+            assert_eq!(count(&conn, "SELECT COUNT(*) FROM battery_records WHERE flight_id = ?1", id), 0);
+            assert_eq!(count(&conn, "SELECT COUNT(*) FROM flight_events WHERE flight_id = ?1", id), 0);
+        }
+        // A flight outside the group is untouched.
+        assert!(get_flight(&conn, other).unwrap().is_some());
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM telemetry_records WHERE flight_id = ?1", other), 2);
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM battery_records WHERE flight_id = ?1", other), 2);
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM flight_events WHERE flight_id = ?1", other), 1);
+    }
+
+    /// `battery_records` has no FK — `delete_flight` must remove them (and the events) explicitly.
+    #[test]
+    fn delete_flight_removes_battery_rows_and_events() {
+        let conn = test_db();
+        let id = insert_flight(&conn, &flight("Del", None)).unwrap();
+        insert_battery_records_batch(&conn, &[battery(id, 0)]).unwrap();
+        insert_flight_events(&conn, &[event(id, 0, "arm")]).unwrap();
+        assert!(delete_flight(&conn, id).unwrap());
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM battery_records WHERE flight_id = ?1", id), 0);
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM flight_events WHERE flight_id = ?1", id), 0);
+    }
+
+    /// `wall_ms` round-trips through the main DB, and through a temp session commit — including a
+    /// `.ktmp` written before v20 (no `wall_ms` column), which `open_temp_session` back-fills.
+    #[test]
+    fn wall_ms_round_trips_through_main_and_temp_store() {
+        let conn = test_db();
+        let id = insert_flight(&conn, &flight("Wall", None)).unwrap();
+        insert_telemetry_batch(&conn, &[telemetry(id, 0, Some(1_790_000_000_123)), telemetry(id, 100, None)]).unwrap();
+        let track = get_flight_track(&conn, id).unwrap();
+        assert_eq!(track[0].wall_ms, Some(1_790_000_000_123));
+        assert_eq!(track[1].wall_ms, None);
+
+        // Temp store → commit.
+        let temp = temp_db_path("wall-ms-ktmp").with_file_name("active_test_L1-S1.ktmp");
+        remove_temp_session(&temp);
+        {
+            let t = open_temp_session(&temp).unwrap();
+            insert_telemetry_batch(&t, &[telemetry(0, 0, Some(1_790_000_000_500)), telemetry(0, 200, Some(1_790_000_000_700))])
+                .unwrap();
+        }
+        let committed = commit_session_to_main(&conn, &temp, &flight("Wall", None)).unwrap();
+        let track = get_flight_track(&conn, committed).unwrap();
+        assert_eq!(track.iter().map(|r| r.wall_ms).collect::<Vec<_>>(), [Some(1_790_000_000_500), Some(1_790_000_000_700)]);
+        remove_temp_session(&temp);
+
+        // A pre-v20 `.ktmp` (telemetry DDL without wall_ms) is back-filled on open and still commits.
+        {
+            let legacy = Connection::open(&temp).unwrap();
+            legacy
+                .execute_batch(&TELEMETRY_RECORDS_DDL_FULL.replace(", wall_ms INTEGER", ""))
+                .unwrap();
+            legacy.execute_batch(BATTERY_RECORDS_DDL_FULL).unwrap();
+            legacy.execute("INSERT INTO telemetry_records (flight_id, timestamp_ms) VALUES (0, 0)", []).unwrap();
+            assert!(!column_exists(&legacy, "telemetry_records", "wall_ms").unwrap());
+        }
+        drop(open_temp_session(&temp).unwrap());
+        let committed = commit_session_to_main(&conn, &temp, &flight("Legacy", None)).unwrap();
+        let track = get_flight_track(&conn, committed).unwrap();
+        assert_eq!(track.len(), 1);
+        assert!(track[0].wall_ms.is_none());
+        remove_temp_session(&temp);
+        cleanup(&temp);
     }
 }

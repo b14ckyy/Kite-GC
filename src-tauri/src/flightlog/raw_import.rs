@@ -152,6 +152,7 @@ fn snap_to_record(s: &Snap, t_ms: i64) -> TelemetryRecord {
         mode_modifiers: s.mode_modifiers.clone(),
         link_snr: None,
         link_rssi_dbm: None,
+        wall_ms: None,
     }
 }
 
@@ -640,6 +641,7 @@ pub fn import_raw_log_with_progress<F: Fn(u8, &str, &str)>(
             board_id: id.board.clone(),
             platform_type: id.platform_type,
             fc_uid: None,
+            group_id: None,
             protocol: protocol.to_string(),
             start_lat,
             start_lon,

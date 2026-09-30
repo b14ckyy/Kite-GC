@@ -781,6 +781,7 @@ fn normalized_to_telemetry(r: &NormalizedRecord, timestamp_ms: i64, fc_variant: 
         mode_modifiers,
         link_snr: None,
         link_rssi_dbm: None,
+        wall_ms: None,
         airspeed_ms: r.airspeed_ms,
         throttle_pct: r.throttle_pct,
     }
@@ -981,6 +982,7 @@ where
         board_id: String::new(),
         platform_type,
         fc_uid: None,
+        group_id: None,
         protocol: "DATAFLASH".into(),
         start_lat,
         start_lon,

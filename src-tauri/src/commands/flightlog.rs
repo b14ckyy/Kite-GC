@@ -1255,30 +1255,28 @@ pub fn flightlog_find_linkable(
 
 /// Commit the pending live-recording session into the main DB (the End-Flight dialog's **Save**).
 /// Returns the new flight id so the frontend can link the flown mission + battery/notes.
+/// `vehicle_id` names the vehicle whose session it is (the `vehicleId` of its `flight-recording-*`
+/// event); without it the only pending session is taken (an error when there are several).
 #[tauri::command]
 pub fn flightlog_commit_pending_session(
+    vehicle_id: Option<String>,
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<i64, String> {
     let session = state
-        .pending_session
-        .lock()
-        .map_err(|_| "Pending-session lock poisoned".to_string())?
-        .take()
+        .sessions
+        .take_pending(vehicle_id.as_deref())?
         .ok_or_else(|| "No pending recording session to commit".to_string())?;
     crate::flightlog::recorder::commit_pending_session(session)
 }
 
 /// Discard the pending live-recording session (the End-Flight dialog's **Discard Recording**) —
-/// the temp file is deleted and nothing reaches the main DB.
+/// the temp file is deleted and nothing reaches the main DB. `vehicle_id` as for the commit.
 #[tauri::command]
 pub fn flightlog_discard_pending_session(
+    vehicle_id: Option<String>,
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<(), String> {
-    let session = state
-        .pending_session
-        .lock()
-        .map_err(|_| "Pending-session lock poisoned".to_string())?
-        .take();
+    let session = state.sessions.take_pending(vehicle_id.as_deref())?;
     if let Some(session) = session {
         let dir = session.temp_path.parent().map(|p| p.to_path_buf());
         crate::flightlog::recorder::discard_pending_session(session);
@@ -1294,21 +1292,17 @@ pub fn flightlog_discard_pending_session(
 }
 
 /// Continue-on-reconnect for a session interrupted by a disconnect while armed (ADR-042): move the
-/// pending session into the resume slot so the next connection's recorder resumes/finalizes it.
+/// pending session into the resume queue so the next connection's recorder resumes/finalizes it.
+/// `vehicle_id` as for the commit.
 #[tauri::command]
 pub fn flightlog_continue_pending_session(
+    vehicle_id: Option<String>,
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<(), String> {
-    let session = state
-        .pending_session
-        .lock()
-        .map_err(|_| "Pending-session lock poisoned".to_string())?
-        .take();
-    if let Some(session) = session {
-        *state
-            .resume_pending
-            .lock()
-            .map_err(|_| "Resume-session lock poisoned".to_string())? = Some(session);
+    let key = vehicle_id.clone();
+    if let Some(session) = state.sessions.take_pending(vehicle_id.as_deref())? {
+        let key = key.unwrap_or_else(|| session.temp_path.to_string_lossy().to_string());
+        state.sessions.put_resume(key, session)?;
     }
     Ok(())
 }
@@ -1472,20 +1466,11 @@ pub fn flightlog_scratch_clear(db_path: Option<String>) {
     }
 }
 
-/// Temp sessions that belong to a live workflow in this process — the one the connected recorder is
-/// writing, the pending (awaiting Save/Discard) one and the continue-on-reconnect one. The orphan
-/// scan and the discard sweeps must never touch these.
+/// Temp sessions that belong to a live workflow in this process — every file a recorder (primary or
+/// secondary, any link) is writing, every pending (awaiting Save/Discard or the re-arm grace) one and
+/// every continue-on-reconnect one. The orphan scan and the discard sweeps must never touch these.
 fn protected_temp_paths(state: &crate::state::AppState) -> Vec<std::path::PathBuf> {
-    let mut keep = Vec::new();
-    if let Ok(slot) = state.active_temp_path.lock() {
-        keep.extend(slot.clone());
-    }
-    for handle in [&state.pending_session, &state.resume_pending] {
-        if let Ok(slot) = handle.lock() {
-            keep.extend(slot.as_ref().map(|s| s.temp_path.clone()));
-        }
-    }
-    keep
+    state.sessions.protected_paths()
 }
 
 /// An empty temp session younger than this is not a leftover: a previous instance of the app may
@@ -1627,9 +1612,6 @@ pub fn flightlog_recover_continue(
         std::path::PathBuf::from(&temp_path),
         main_db,
     )?;
-    *state
-        .resume_pending
-        .lock()
-        .map_err(|_| "Resume-session lock poisoned".to_string())? = Some(session);
-    Ok(())
+    // A recovered orphan belongs to no connected vehicle yet — queued under its own path.
+    state.sessions.put_resume(temp_path, session)
 }

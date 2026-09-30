@@ -221,7 +221,8 @@ fn create_export_db(path: &Path) -> Result<Connection, String> {
             pilot_id        TEXT,
             battery_serial  TEXT,
             utc_offset_min  INTEGER,
-            fc_uid          TEXT
+            fc_uid          TEXT,
+            group_id        TEXT
         );
 
         CREATE TABLE IF NOT EXISTS telemetry_records (
@@ -271,7 +272,8 @@ fn create_export_db(path: &Path) -> Result<Connection, String> {
             link_snr     INTEGER,
             link_rssi_dbm INTEGER,
             airspeed_ms  REAL,
-            throttle_pct REAL
+            throttle_pct REAL,
+            wall_ms      INTEGER
         );
 
         CREATE TABLE IF NOT EXISTS battery_records (
@@ -325,9 +327,13 @@ fn copy_flight(
     flight_id: i64,
 ) -> Result<i64, String> {
     // 1. Read the flight row
-    let flight = db::get_flight(src, flight_id)
+    let mut flight = db::get_flight(src, flight_id)
         .map_err(|e| format!("Read flight: {}", e))?
         .ok_or_else(|| format!("Flight {} not found", flight_id))?;
+    // A v2 `.kflight` carries no `flight_groups` rows, so a group reference could not resolve on the
+    // other side (FK). Group bundles are the `.kflight` v3 step (GROUP_FLIGHTS.md §3.7); until then a
+    // member travels as a single flight.
+    flight.group_id = None;
 
     // 2. Insert into destination (gets a new ID)
     let new_id = db::insert_flight(dst, &flight)
@@ -511,10 +517,7 @@ pub fn import_flights(
     if !has_flights {
         return Err("Not a valid .kflight file: missing flights table".into());
     }
-    // A `.kflight` exported before v19 lacks `fc_uid`; add it so the shared row reader applies.
-    if !db::column_exists(&src, "flights", "fc_uid").unwrap_or(true) {
-        let _ = src.execute_batch("ALTER TABLE flights ADD COLUMN fc_uid TEXT;");
-    }
+    add_missing_columns(&src);
 
     // List all flights in the source file
     let src_flights = db::list_flights(&src)
@@ -604,6 +607,22 @@ pub fn import_flights(
     Ok(result)
 }
 
+/// A `.kflight` written by an older Kite lacks the columns added since (flights `fc_uid` v19,
+/// `group_id` v20; telemetry `wall_ms` v20). Add them so the shared row readers apply.
+fn add_missing_columns(conn: &Connection) {
+    for (table, column, ddl) in [
+        ("flights", "fc_uid", "ALTER TABLE flights ADD COLUMN fc_uid TEXT;"),
+        ("flights", "group_id", "ALTER TABLE flights ADD COLUMN group_id TEXT;"),
+        ("telemetry_records", "wall_ms", "ALTER TABLE telemetry_records ADD COLUMN wall_ms INTEGER;"),
+    ] {
+        if !db::column_exists(conn, table, column).unwrap_or(true) {
+            if let Err(e) = conn.execute_batch(ddl) {
+                log::warn!(".kflight: could not add {table}.{column}: {e}");
+            }
+        }
+    }
+}
+
 fn find_duplicate_in_summaries(
     baseline: &[FlightSummary],
     incoming: &FlightSummary,
@@ -629,6 +648,7 @@ fn find_duplicate_in_summaries(
 pub fn list_flights_in_file(path: &Path) -> Result<Vec<FlightSummary>, String> {
     let conn = Connection::open(path)
         .map_err(|e| format!("Failed to open .kflight file: {}", e))?;
+    add_missing_columns(&conn);
     db::list_flights(&conn).map_err(|e| format!("Query error: {}", e))
 }
 
@@ -636,6 +656,7 @@ pub fn list_flights_in_file(path: &Path) -> Result<Vec<FlightSummary>, String> {
 pub fn get_flight_from_file(path: &Path, flight_id: i64) -> Result<Option<Flight>, String> {
     let conn = Connection::open(path)
         .map_err(|e| format!("Failed to open .kflight file: {}", e))?;
+    add_missing_columns(&conn);
     db::get_flight(&conn, flight_id).map_err(|e| format!("Query error: {}", e))
 }
 
@@ -643,5 +664,6 @@ pub fn get_flight_from_file(path: &Path, flight_id: i64) -> Result<Option<Flight
 pub fn get_track_from_file(path: &Path, flight_id: i64) -> Result<Vec<TelemetryRecord>, String> {
     let conn = Connection::open(path)
         .map_err(|e| format!("Failed to open .kflight file: {}", e))?;
+    add_missing_columns(&conn);
     db::get_flight_track(&conn, flight_id).map_err(|e| format!("Query error: {}", e))
 }

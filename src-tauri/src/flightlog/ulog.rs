@@ -943,6 +943,7 @@ fn normalized_to_telemetry(r: &NormalizedRow, timestamp_ms: i64) -> TelemetryRec
         mode_modifiers,
         link_snr: None,
         link_rssi_dbm: None,
+        wall_ms: None,
         airspeed_ms: r.airspeed_ms,
         throttle_pct: r.throttle_pct,
     }
@@ -1148,6 +1149,7 @@ where
         board_id: String::new(),
         platform_type: meta.platform_type,
         fc_uid: None,
+        group_id: None,
         protocol: "ULOG".into(),
         start_lat,
         start_lon,

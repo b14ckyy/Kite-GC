@@ -4,6 +4,7 @@
 // Application State
 // Holds the shared state for the Tauri application, including the active connection.
 
+use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
@@ -11,7 +12,7 @@ use std::sync::mpsc;
 use tauri::{AppHandle, Manager};
 
 use crate::aero::AeroCache;
-use crate::flightlog::recorder::{ActiveTempPathHandle, FlightRecorderHandle, PendingSessionHandle};
+use crate::flightlog::recorder::{FlightRecorderHandle, SessionSlotsHandle};
 use crate::mavlink_proto::handler::MavlinkCommand;
 use crate::mavlink_proto::MavlinkHandle;
 use crate::msp::FcInfo;
@@ -128,20 +129,16 @@ pub struct AppState {
     pub ble_scan_stop: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
     /// Airspace Manager (aeronautical data) — last fetched region cached in RAM, or None.
     pub aero: Mutex<Option<AeroCache>>,
-    /// Pending live-recording session awaiting commit/discard (deferred commit, ADR-041). Set by the
-    /// recorder on disarm; resolved by the Save/Discard commands or the recorder's grace-arm path.
-    /// Lives here (not in the recorder) so it survives a disconnect while the End-Flight dialog is open.
-    pub pending_session: PendingSessionHandle,
-    /// A recovered orphan session the user chose to **continue on reconnect** (ADR-042). The next
-    /// recorder consults it on its first polled status: armed → resume the same `.ktmp`; disarmed →
-    /// finalize it into `pending_session` + the End-Flight dialog.
-    pub resume_pending: PendingSessionHandle,
-    /// Temp `.ktmp` the connected recorder is writing right now (`None` while not recording). The
-    /// orphan scan and the discard sweeps leave it alone — it is a live session, not a leftover.
-    pub active_temp_path: ActiveTempPathHandle,
-    /// Flight recorder of the active connection (`None` while disconnected or with logging off). Lets
-    /// the command layer reach the recorder protocol-independently — the live platform-type override.
-    pub recorder: Mutex<Option<FlightRecorderHandle>>,
+    /// Per-vehicle recording slots shared by every recorder: the pending sessions awaiting
+    /// commit/discard (deferred commit, ADR-041 — set on disarm, resolved by the Save/Discard commands
+    /// or the recorder's grace-arm path; kept here so they survive a disconnect while the End-Flight
+    /// dialog is open), the continue-on-reconnect queue (ADR-042) and the live-path registry the orphan
+    /// scan and the discard sweeps leave alone. See `recorder::SessionSlots`.
+    pub sessions: SessionSlotsHandle,
+    /// Flight recorder of every recorded vehicle, by vehicle key (`"L1:S1"`) — link primaries from the
+    /// connect paths, secondaries from the MAVLink handler. Lets the command layer reach the ACTIVE
+    /// vehicle's recorder protocol-independently (the live platform-type override).
+    pub recorders: Mutex<HashMap<String, FlightRecorderHandle>>,
 }
 
 impl AppState {
@@ -156,10 +153,8 @@ impl AppState {
             rc_tx: Arc::new(Mutex::new(RcTxState::default())),
             ble_scan_stop: Mutex::new(None),
             aero: Mutex::new(None),
-            pending_session: Arc::new(Mutex::new(None)),
-            resume_pending: Arc::new(Mutex::new(None)),
-            active_temp_path: Arc::new(Mutex::new(None)),
-            recorder: Mutex::new(None),
+            sessions: Arc::default(),
+            recorders: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -211,6 +206,27 @@ impl AppState {
                 rc.mav_manual = None;
             }
             rc.mav_target = target;
+        }
+    }
+
+    /// Register (or, with `None`, drop) the recorder of vehicle `key`.
+    pub fn set_recorder(&self, key: &str, recorder: Option<&FlightRecorderHandle>) {
+        if let Ok(mut map) = self.recorders.lock() {
+            match recorder {
+                Some(r) => {
+                    map.insert(key.to_string(), r.clone());
+                }
+                None => {
+                    map.remove(key);
+                }
+            }
+        }
+    }
+
+    /// Drop the recorders of every vehicle on `link` (the link closed).
+    pub fn drop_link_recorders(&self, link: crate::vehicle_registry::LinkId) {
+        if let Ok(mut map) = self.recorders.lock() {
+            map.retain(|key, _| crate::vehicle_registry::VehicleId::parse(key).is_none_or(|v| v.link != link));
         }
     }
 
