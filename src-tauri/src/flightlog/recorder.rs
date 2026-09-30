@@ -44,11 +44,13 @@ pub const EVENT_LINK_BACK: &str = "link_back";
 const ROLE_SINGLE: &str = "single";
 const ROLE_MEMBER: &str = "member";
 
-/// Lowest `GpsData::fix_type` that counts as a position fix: "2D or better" on both scales in use.
-/// The MSP path and the MAVLink handler use INAV's 0 = none, 1 = 2D, 2 = 3D, 3 = DGPS/RTK
-/// (`mavlink_proto/handler.rs` GPS_RAW_INT); the passive decoders use LTM's 0 = none, 2 = 2D, 3 = 3D
-/// (`passive_telemetry/decoders/ltm.rs`, `crsf.rs`, `frsky.rs`), where 1 never occurs.
-const MIN_FIX_TYPE: u8 = 1;
+/// Lowest `GpsData::fix_type` the group INITIATOR needs: a 3D fix (`FIX_3D` on the unified scale,
+/// `scheduler::telemetry::FIX_*` — every link delivers 0 none / 1 2D / 2 3D / 3 DGPS-RTK). GROUP_FLIGHTS.md
+/// §5b (Marc, 2026-10-01): the first arm that starts a group recording anchors the group, and later
+/// formation / safety guards need precise GPS. Everything after the group start records regardless of
+/// fix — a member starting unarmed or arming without a fix is recorded too (its rows just have no
+/// position). The check itself is the coordinator's (step 5), via `has_3d_fix`.
+const MIN_FIX_TYPE_INITIATOR: u8 = 2;
 
 /// One armed stretch of a session on its relative timeline (`timestamp_ms`, ms since the session
 /// start). Group members record while disarmed too, so their stats count these only (§3.8).
@@ -988,13 +990,15 @@ impl FlightRecorder {
         }
     }
 
-    /// Whether the latest snapshot holds a position fix (§5.6: no fix, no group recording).
-    fn has_fix(&self) -> bool {
+    /// Whether the latest snapshot holds a 3D fix (or better) with a valid position — what the group
+    /// INITIATOR needs (§5b, `MIN_FIX_TYPE_INITIATOR`). Members record without it.
+    #[allow(dead_code)] // group coordinator: GROUP_FLIGHTS.md step 5
+    pub fn has_3d_fix(&self) -> bool {
         let position = matches!(
             (self.snapshot.lat, self.snapshot.lon),
             (Some(lat), Some(lon)) if is_valid_gps_coord(lat, lon)
         );
-        position && self.snapshot.fix_type.is_some_and(|f| f >= MIN_FIX_TYPE)
+        position && self.snapshot.fix_type.is_some_and(|f| f >= MIN_FIX_TYPE_INITIATOR)
     }
 
     /// Append a timeline event to the active session (its `session_events` and the in-memory copy),
@@ -1066,8 +1070,9 @@ impl FlightRecorder {
         }
     }
 
-    /// Group coordinator hook (§5.5): the group's first arm with a fix happened — start recording this
-    /// connected vehicle although it is not armed. Needs a position fix (§5.6); returns whether a
+    /// Group coordinator hook (§5.5): the group's first arm (the initiator, 3D fix — `has_3d_fix`)
+    /// happened — start recording this connected vehicle although it is not armed. No fix needed (§5b:
+    /// everything after the group start records; rows without a fix have no position). Returns whether a
     /// session is running afterwards (true as well when one already was). The session has no armed
     /// time until the vehicle's own arm. Emits nothing (group members never announce their sessions).
     /// Only in member mode (`enter_member_mode` first): a single flight's session exists only while
@@ -1077,10 +1082,6 @@ impl FlightRecorder {
         if self.membership.is_none() { return false; }
         if self.active_flight.is_some() {
             return true;
-        }
-        if !self.has_fix() {
-            log::warn!("{}: no GPS fix — not recorded with the group (group recording needs a position)", self.key());
-            return false;
         }
         self.start_fresh_session(false, "unarmed group-member start");
         if self.was_armed {
@@ -1426,13 +1427,10 @@ impl FlightRecorder {
     /// the previous flight is auto-committed and a fresh session starts.
     fn on_arm(&mut self) {
         // Group member: the session runs on through disarms — an arm is only an event. A member
-        // without a session (none was possible at the group's start) opens one now, fix permitting.
+        // without a session (none was started for it at the group's start) opens one now, with or
+        // without a fix (§5b).
         if self.membership.is_some() {
             if self.active_flight.is_none() {
-                if !self.has_fix() {
-                    log::warn!("{}: armed without a GPS fix — not recorded with the group", self.key());
-                    return;
-                }
                 self.start_fresh_session(false, "armed start, group member");
             }
             log::info!("ARM (group member {}) — recording continues", self.key());
@@ -2660,26 +2658,44 @@ mod tests {
         assert_eq!(file_rows(&p.temp_path).len(), 1);
     }
 
-    /// (j) §5.6: no fix, no group recording — neither the unarmed start nor a member's own arm opens a
-    /// session without a position fix.
+    /// (j) §5b: only the group initiator needs a fix — a member's unarmed start and a member's own arm
+    /// both open a session without one.
     #[test]
-    fn start_recording_unarmed_refuses_without_fix() {
+    fn members_record_without_a_fix() {
         let rig = Rig::new("nofix");
-        let (mut rec, _) = rig.recorder("L1:S3", fc("NoFix", None));
-        rec.enter_member_mode("g1", &rig.kgrp("g1"));
-        assert!(!rec.start_recording_unarmed()); // no GPS at all
+        let kgrp = rig.kgrp("g1");
+        let (mut a, emitted_a) = rig.recorder("L1:S3", fc("NoFix", None));
+        a.enter_member_mode("g1", &kgrp);
+        assert!(a.start_recording_unarmed()); // no GPS at all
+        assert!(a.armed_segments().is_empty());
+        assert!(emitted_a.lock().unwrap().is_empty()); // members never announce
+
+        let (mut b, _) = rig.recorder("L1:S4", fc("NoFix2", None));
+        b.enter_member_mode("g1", &kgrp);
+        b.on_gps(&gps(0, 48.1, 11.5)); // position but no fix
+        b.on_status(&status(false));
+        b.on_status(&status(true));
+        assert!(b.active_flight.is_some());
+        assert_eq!(b.armed_segments(), [seg(0, 0)]);
+    }
+
+    /// (k) §5b: the initiator's requirement is a 3D fix on the unified scale plus a valid position —
+    /// 2D (1) is not enough, 3D (2) and DGPS/RTK (3) are.
+    #[test]
+    fn has_3d_fix_needs_a_3d_fix_and_a_position() {
+        let rig = Rig::new("fix3d");
+        let (mut rec, _) = rig.recorder("L1:S5", fc("Fix", None));
+        assert!(!rec.has_3d_fix()); // no GPS at all
         rec.on_gps(&gps(0, 48.1, 11.5)); // position but no fix
-        assert!(!rec.start_recording_unarmed());
-        rec.on_gps(&gps(2, 0.0, 0.0)); // fix flag but no position
-        assert!(!rec.start_recording_unarmed());
-        rec.on_status(&status(false));
-        rec.on_status(&status(true));
-        assert!(rec.active_flight.is_none());
-        assert!(!rig.dir.join("sessions").exists() || std::fs::read_dir(rig.dir.join("sessions")).unwrap().next().is_none());
-        rec.on_gps(&gps(1, 48.1, 11.5)); // a 2D fix is a position
-        assert!(rec.start_recording_unarmed());
-        // Already armed when it starts → the session is armed from its first moment.
-        assert_eq!(rec.armed_segments(), [seg(0, 0)]);
+        assert!(!rec.has_3d_fix());
+        rec.on_gps(&gps(1, 48.1, 11.5)); // 2D
+        assert!(!rec.has_3d_fix());
+        rec.on_gps(&gps(2, 0.0, 0.0)); // 3D flag but no position
+        assert!(!rec.has_3d_fix());
+        rec.on_gps(&gps(2, 48.1, 11.5)); // 3D
+        assert!(rec.has_3d_fix());
+        rec.on_gps(&gps(3, 48.1, 11.5)); // DGPS/RTK
+        assert!(rec.has_3d_fix());
     }
 
     /// (h) A member suspended by its link and adopted by the same aircraft's new recorder keeps the real
