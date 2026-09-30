@@ -734,7 +734,7 @@ function stashArduSlot(id: string): void {
   });
 }
 
-function restoreArduSlot(id: string): void {
+function restoreArduSlot(id: string, fromNone: boolean): void {
   const slot = arduSlots.get(id);
   arduUndoSuspend++;
   if (slot) {
@@ -744,6 +744,14 @@ function restoreArduSlot(id: string): void {
     arduLoadedMissionId.set(slot.loadedId);
     arduUndoStack = slot.undo;
     arduRedoStack = slot.redo;
+  } else if (fromNone) {
+    // (Re)connect with no vehicle before: the plan on screen is the user's working copy — keep its
+    // library id, file/db provenance and undo history. Only what this aircraft holds is unknown yet.
+    arduMission.set(cloneWps(get(arduMission)));
+    arduSyncRefs.delete('fc');
+    // Own copies: the stacks may still be shared with a slot parked at the last disconnect.
+    arduUndoStack = [...arduUndoStack];
+    arduRedoStack = [...arduRedoStack];
   } else {
     // First time on this vehicle: keep the plan on screen as its starting point, but nothing is synced yet.
     arduMission.set(cloneWps(get(arduMission)));
@@ -760,9 +768,10 @@ function restoreArduSlot(id: string): void {
 
 activeVehicleId.subscribe((id) => {
   if (id === arduSlotOwner) return;
-  if (arduSlotOwner) stashArduSlot(arduSlotOwner);
+  const prevOwner = arduSlotOwner;
+  if (prevOwner) stashArduSlot(prevOwner);
   arduSlotOwner = id;
-  if (id) restoreArduSlot(id);
+  if (id) restoreArduSlot(id, prevOwner == null);
   publishArduMissions();
 });
 arduMission.subscribe(() => publishArduMissions());

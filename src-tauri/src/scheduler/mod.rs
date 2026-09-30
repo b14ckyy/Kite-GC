@@ -1024,7 +1024,9 @@ fn scheduler_loop(
                     }
                     PendingKind::Radar => {
                         debug_tracker.on_timeout(code);
-                        let _ = app_handle.emit(
+                        // Raw handle: the listener expects the plain array (as `dispatch_radar` sends
+                        // it) — the VehicleEmitter would wrap it as `{ value, vehicleId, linkId }`.
+                        let _ = app_handle.app().emit(
                             radar::ADSB_STATUS_EVENT,
                             &[radar::AdsbStatus { name: "UAV (MSP)".into(), count: 0, ok: false }],
                         );

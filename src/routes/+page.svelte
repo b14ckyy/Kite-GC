@@ -95,7 +95,7 @@
   import { buildMissionInput } from '$lib/helpers/missionLibrary';
   import { buildArduMissionInput } from '$lib/helpers/missionLibraryArdu';
   import { homePosition, setVehicleHome } from '$lib/stores/home';
-  import { isActive, links, activeVehicleId } from '$lib/stores/vehicles';
+  import { isActive, links, activeVehicleId, refreshLinks } from '$lib/stores/vehicles';
   import { ingestFcGuidedTarget, ingestVehicleGuidedTarget } from '$lib/controllers/vehicleControl';
   import { MAP_PROVIDERS } from "$lib/config/mapProviders";
   import { tileCacheStats, setCacheMaxMB, clearCache } from "$lib/cache/tileCache";
@@ -3378,9 +3378,11 @@
     // The device vanished (fatal transport error) — the backend tore the scheduler down. Clean up the
     // connection state so the UI shows disconnected and the user can simply reconnect.
     // MAVLink transport loss arrives as the same `connection-lost` (stamped with `linkId`).
-    void listen<{ linkId?: number }>('connection-lost', (event) => {
+    void listen<{ linkId?: number }>('connection-lost', async (event) => {
       const lid = event.payload?.linkId;
-      const known = get(links);
+      // Ask the backend, not the mirror: `connectFC` refreshes `links` without awaiting it, so a loss
+      // right after connect would otherwise find its own link missing and be ignored.
+      const known = lid != null ? await refreshLinks().catch(() => get(links)) : get(links);
       // A loss reported for a link that was never registered — the MSP tunnel probe of a connect that
       // then fails — has nothing to tear down here; the connect call itself returns the error. Without
       // this guard the fallback below would close every OTHER link.

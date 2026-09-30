@@ -46,15 +46,16 @@ pub fn set_active_vehicle(vehicle_id: String, state: State<'_, AppState>, app_ha
 }
 
 /// Re-announce every known vehicle (`vehicle-discovered`), so a frontend that (re)loaded after the
-/// live announcements can rebuild its vehicle list. MAVLink links answer from their handler thread
-/// (they know the vehicles discovered on a shared link); MSP / passive links have exactly one vehicle.
+/// live announcements can rebuild its vehicle list. The primary always comes from the registry entry
+/// (its identity reflects the MSP tunnel probe); MAVLink handlers add the secondaries they discovered
+/// on a shared link.
 #[tauri::command]
 pub fn announce_vehicles(state: State<'_, AppState>, app_handle: AppHandle) -> Result<(), String> {
     let reg = state.links.lock().map_err(|e| e.to_string())?;
     for entry in reg.iter() {
-        match &entry.protocol {
-            ActiveProtocol::Mavlink(h) => h.announce_vehicles(),
-            _ => { let _ = app_handle.emit("vehicle-discovered", VehicleInfo::primary_of(entry, 0)); }
+        let _ = app_handle.emit("vehicle-discovered", VehicleInfo::primary_of(entry, 0));
+        if let ActiveProtocol::Mavlink(h) = &entry.protocol {
+            h.announce_vehicles();
         }
     }
     Ok(())

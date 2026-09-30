@@ -351,9 +351,7 @@ pub async fn connect(
             // A transport-level explanation (busy local UDP port → the vehicles' pushes go elsewhere)
             // turns a bare "no HEARTBEAT" into something the user can act on.
             return Err(match transport_note {
-                Some(note) => format!("{e}
-
-{note}"),
+                Some(note) => format!("{e}\n\n{note}"),
                 None => e,
             });
         }
@@ -496,11 +494,6 @@ fn connect_msp(
     } else {
         None
     };
-
-    // Fresh link starts with RC injection off (frontend re-engages explicitly).
-    if let Ok(mut rc) = state.rc_tx.lock() {
-        *rc = crate::scheduler::rc_tx::RcTxState::default();
-    }
 
     store_recorder(&state, &recorder_handle);
     let handle = scheduler::start(
@@ -668,7 +661,7 @@ fn connect_mavlink(
                 //  • `handle.fc_variant` keeps the HEARTBEAT variant ("Generic" / "ArduPlane" / …). The
                 //    handler decodes telemetry with it — INAV emulates ArduPilot flight modes in the
                 //    HEARTBEAT `custom_mode`, so the MAVLink mode tables are the right ones.
-                //  • `state.fc_info` (returned to the frontend below) is the INAV identity from the MSP
+                //  • the link entry's `fc_info` (returned to the frontend below) is the INAV identity from the MSP
                 //    handshake, with `features.msp_tunnel = true`. The frontend keys its INAV surface on
                 //    that flag (`hasMsp` / `isArduPilotLink` in stores/connection.ts), and every INAV
                 //    command reaches this scheduler through `state::with_msp`.

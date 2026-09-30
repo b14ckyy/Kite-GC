@@ -93,9 +93,6 @@ pub enum MavlinkCommand {
 pub struct MavlinkHandle {
     cmd_tx: mpsc::Sender<MavlinkCommand>,
     thread: Option<thread::JoinHandle<Option<Box<dyn ByteTransport>>>>,
-    /// System ID of the connected FC (from handshake) — the link's primary vehicle.
-    #[allow(dead_code)] // read again in Phase A2 (multi-sysid handler)
-    pub fc_sysid: u8,
     /// FC variant string from the handshake ("ArduPlane"/"ArduCopter"/"PX4"/…). Drives firmware-
     /// specific mission handling — notably the home-slot convention (ArduPilot reserves mission item 0
     /// for home, PX4 does not).
@@ -305,7 +302,6 @@ pub fn start(
     MavlinkHandle {
         cmd_tx,
         thread: Some(thread),
-        fc_sysid,
         fc_variant: handle_variant,
         msp: None,
         inav_tunnel,
@@ -447,10 +443,15 @@ fn handler_loop(
                 continue;
             }
             Ok(MavlinkCommand::AnnounceVehicles) => {
-                for (sysid, ctx) in &vehicles {
-                    let _ = ctx.emitter.emit("vehicle-discovered", ctx.info(*sysid, *sysid == fc_sysid));
+                // Secondaries only: the primary is announced from the registry entry (`announce_vehicles`
+                // command), whose identity reflects the MSP tunnel probe — this ctx still holds the
+                // pre-tunnel HEARTBEAT identity and would overwrite it.
+                let mut n = 0;
+                for (sysid, ctx) in vehicles.iter().filter(|(s, _)| **s != fc_sysid) {
+                    let _ = ctx.emitter.emit("vehicle-discovered", ctx.info(*sysid, false));
+                    n += 1;
                 }
-                log::debug!("MAVLink: re-announced {} vehicle(s)", vehicles.len());
+                log::debug!("MAVLink: re-announced {} secondary vehicle(s)", n);
                 continue;
             }
             Ok(MavlinkCommand::SendRaw { msg_id, crc_extra, payload }) => {
@@ -974,7 +975,6 @@ struct FusedPos {
 
 /// Dispatch a received MAVLink message to the same Tauri events as the MSP scheduler.
 /// This ensures widgets/store work identically regardless of protocol.
-#[allow(clippy::too_many_arguments)] // dispatch helper threading the handler's mutable decode state
 /// `primary`: the link's handshake vehicle. Only it feeds the process-global OS link status (Android
 /// notification / track backfill) — secondary vehicles on a shared link would otherwise flap it.
 #[allow(clippy::too_many_arguments)] // per-vehicle decode context, split out of VehicleCtx for borrowck

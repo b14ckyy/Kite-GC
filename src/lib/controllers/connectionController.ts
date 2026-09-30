@@ -339,13 +339,16 @@ async function applyActiveVehicle(vehicleId: string): Promise<void> {
     link.protocol === 'MAVLink' ? 'mavlink' : link.protocol === 'MSP' ? 'msp' : 'telemetry';
   // A secondary vehicle on a shared MAVLink link has no handshake of its own — describe it from its
   // HEARTBEAT identity (variant / platform / MAV_TYPE) on top of the link's FcInfo.
+  // Primary-ness comes from the link, not the `vehicles` store — a vehicle not announced yet is not
+  // automatically the primary.
+  const isPrimary = vehicleId === link.primaryVehicleId;
   const v = get(vehicles).get(vehicleId);
-  const fcInfo: FcInfo = v && !v.primary
+  const fcInfo: FcInfo = !isPrimary && v
     ? { ...link.fcInfo, fc_variant: v.fcVariant, platform_type: v.platformType, mav_type: v.mavType, craft_name: '' }
     : link.fcInfo;
   // MSP over MAVLink belongs to the link's handshake (primary) vehicle only — the backend's `with_msp`
   // refuses a secondary vehicle on the same link.
-  const mspTunnel = protocolType === 'mavlink' && (v?.primary ?? true) && (fcInfo.features?.msp_tunnel ?? false);
+  const mspTunnel = protocolType === 'mavlink' && isPrimary && (fcInfo.features?.msp_tunnel ?? false);
   connection.update((c) => ({ ...c, status: 'connected', protocolType, port: link.transport, fcInfo, mspTunnel }));
   // Same status-box labels as connectFC.
   const tr = get(t);

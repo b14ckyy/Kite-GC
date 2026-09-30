@@ -64,7 +64,15 @@ pub(crate) fn with_msp<T>(
             Some(e) if reg.active() == Some(&e.primary) => {
                 e.protocol.msp_requester().ok_or_else(|| NO_MSP_ERR.to_string())?
             }
-            Some(_) => return Err(NO_MSP_ERR.into()),
+            // A secondary vehicle: say why when the link does have a tunnel (to its primary).
+            Some(e) => {
+                return Err(match &e.protocol {
+                    ActiveProtocol::Mavlink(m) if m.msp.is_some() => {
+                        "MSP over MAVLink is available for the link's primary vehicle only".into()
+                    }
+                    _ => NO_MSP_ERR.into(),
+                })
+            }
             None => return Err("Not connected".into()),
         }
     };
@@ -106,14 +114,14 @@ pub struct AppState {
     /// Every open link (protocol handler + handshake info) and the active-vehicle selection. Replaces
     /// the former single `protocol` / `fc_info` slots — see `vehicle_registry`.
     pub links: Mutex<LinkRegistry>,
-    /// Radar (foreign-vehicle tracking) subsystem — fully independent of `protocol`.
+    /// Radar (foreign-vehicle tracking) subsystem — fully independent of the open links.
     pub radar: Mutex<RadarManager>,
     /// Bridge for scheduler-fed radar sources (ADS-B via MSP): the radar aggregator's ingest channel
     /// (Some while radar runs) and a runtime on/off flag the MSP scheduler polls.
     pub radar_ingest: Arc<Mutex<Option<std::sync::mpsc::Sender<SourceUpdate>>>>,
     pub radar_msp_enabled: Arc<AtomicBool>,
     /// GCS RC-injection state (docs/archive/MSP_RC_CONTROL.md §10 Phase 4c). Written by the rc_stream_*
-    /// commands, read+streamed by the MSP scheduler thread. Independent of `protocol` lifecycle.
+    /// commands, read+streamed by the MSP scheduler thread. Independent of the link lifecycle.
     pub rc_tx: RcTxHandle,
     /// Stop handle for the live BLE scan session (Some while scanning). Dropping/replacing the
     /// sender ends the session — see `commands::connection::ble_scan_start` / `ble_scan_stop`.
