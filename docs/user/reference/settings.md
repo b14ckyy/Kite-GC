@@ -110,7 +110,8 @@ See **[Flight logbook](../guides/logbook.md)** for how these are used.
 | Setting | What it does | Default |
 |---|---|---|
 | **Log level** | How much Kite writes to its diagnostic log file — Off / Error / Warning / Debug. Raise it when reporting a problem. | Warning |
-| **Open log folder** | Open the folder containing the diagnostic log in your file manager. | — |
+| **Open log folder** | Open the folder containing the diagnostic log in your file manager. Kite writes one file per day and keeps the last 30 days. | — |
+| **Share log file** (Android) | Replaces **Open Folder** there — the log folder is app-private, no file manager can reach it. Opens a list of the day files, newest first, each with its date and size and the one this session writes tagged **current**; tap one to hand it to the Android share sheet (mail, messenger, a text editor). **Close** dismisses the list. | — |
 
 ### Updates
 
@@ -144,7 +145,7 @@ See **[Missions](../guides/missions.md)**.
 |---|---|---|
 | **Altitude** | The altitude above which the aircraft is flagged (also the reference for altitude track-colouring). | 120 m |
 | **Battery alert** | The charge % at which the battery widget enters its alert state (and multi-battery AUTO drops to the lowest pack). See **[Batteries](../guides/batteries.md)**. | 30 % |
-| **System messages** | How many in-app notifications to show — Off / Error / Warning / All. **Currently MAVLink (ArduPilot / PX4) only** — INAV has no equivalent message source. | All |
+| **System messages** | How many in-app notifications to show — Off / Error / Warning / All / Debug. *All* shows everything up to the firmware's info level; *Debug* adds its developer-level texts (MAVLink severity *debug* — ArduPilot's "Sending unknown message …", for example), without a sound. **Currently MAVLink (ArduPilot / PX4) only** — INAV has no equivalent message source. | Warning |
 
 ## See also
 

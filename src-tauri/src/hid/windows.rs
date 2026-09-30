@@ -10,14 +10,15 @@
 // driver stack) WGI *lists* an Xbox-class pad — 6 axes / 14 buttons / 0 switches, generic display name —
 // but `GetCurrentReading` never returns a report (timestamp stays 0) and `Gamepad.Gamepads` is empty,
 // while the classic XInput API reads the very same pad fine. So an Xbox-class entry that stays silent
-// is read through XInput instead, with the WGI object kept only for identity (name, stable id). The
+// AND is absent from `Gamepad.Gamepads` (the discriminator — a working stack lists it there) is read
+// through XInput instead, with the WGI object kept only for identity (name, stable id). The
 // XInput layout is emitted in WGI's raw order (LX LY RX RY LT RT; Menu View A B X Y DPad up/down/left/right
 // LB RB LS RS) so a mapping learned on one source keeps working if the other one takes over.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use windows::Gaming::Input::{GameControllerSwitchPosition, RawGameController};
+use windows::Gaming::Input::{Gamepad, GameControllerSwitchPosition, RawGameController};
 use windows::Win32::UI::Input::XboxController::{
     XInputGetState, XINPUT_GAMEPAD_A, XINPUT_GAMEPAD_B, XINPUT_GAMEPAD_BACK, XINPUT_GAMEPAD_BUTTON_FLAGS,
     XINPUT_GAMEPAD_DPAD_DOWN, XINPUT_GAMEPAD_DPAD_LEFT, XINPUT_GAMEPAD_DPAD_RIGHT, XINPUT_GAMEPAD_DPAD_UP,
@@ -78,6 +79,14 @@ fn is_xbox_layout(axes: usize, buttons: usize, switches: usize) -> bool {
     axes == 6 && buttons == 14 && switches == 0
 }
 
+/// The distinctive symptom of the broken stack: WGI lists the pad as a RawGameController but NOT as a
+/// Gamepad. A working stack puts every Xbox-class pad into `Gamepad.Gamepads` within a few hundred
+/// milliseconds, so on a working stack this stays false and the XInput path is never taken — a pad
+/// that merely rests (timestamp 0 until its first input) is left to WGI. Sampled in `rescan()`.
+fn wgi_gamepads_empty() -> bool {
+    Gamepad::Gamepads().map(|v| v.Size().unwrap_or(0) == 0).unwrap_or(true)
+}
+
 /// Live XInput state of `user` (0..=3), or None when nothing is connected there.
 fn xinput_state(user: u32) -> Option<XINPUT_STATE> {
     let mut st = XINPUT_STATE::default();
@@ -121,6 +130,9 @@ pub struct WgiBackend {
     ids: HashMap<String, usize>,
     next_id: usize,
     last_scan: Option<Instant>,
+    /// `Gamepad.Gamepads().Size() == 0`, sampled once per rescan (500 ms) — the XInput fallback's
+    /// discriminator. Cached so a resting Xbox-layout entry does not cost a WinRT call every 20 ms tick.
+    gamepads_empty: bool,
 }
 
 impl WgiBackend {
@@ -130,6 +142,7 @@ impl WgiBackend {
             ids: HashMap::new(),
             next_id: 0,
             last_scan: None,
+            gamepads_empty: false,
         }
     }
 
@@ -189,6 +202,7 @@ impl WgiBackend {
             });
         }
         self.devices = entries;
+        self.gamepads_empty = wgi_gamepads_empty();
     }
 }
 
@@ -221,6 +235,7 @@ impl super::HidBackend for WgiBackend {
             .take_while(|d| d.id != id)
             .filter(|d| is_xbox_layout(d.axes, d.buttons, d.switches))
             .count();
+        let self_gamepads_empty = self.gamepads_empty;
         let dev = self.devices.iter_mut().find(|d| d.id == id)?;
 
         if let Source::XInput(user) = dev.source {
@@ -246,8 +261,10 @@ impl super::HidBackend for WgiBackend {
         // it so we never surface/stream bogus neutral values at startup; the first input (any movement)
         // produces a real reading. evdev (Linux) reads the kernel's cached state, so it isn't affected.
         if timestamp == 0 {
-            // Xbox-class pad still silent after the grace period → read it through XInput (module docs).
-            if is_xbox_layout(dev.axes, dev.buttons, dev.switches) && dev.since.elapsed() >= XINPUT_FALLBACK_AFTER {
+            // Xbox-class pad, still silent after the grace period AND missing from Gamepad.Gamepads → the
+            // broken stack: read it through XInput (module docs). A resting pad on a working stack is in
+            // Gamepads and stays on WGI.
+            if is_xbox_layout(dev.axes, dev.buttons, dev.switches) && dev.since.elapsed() >= XINPUT_FALLBACK_AFTER && self_gamepads_empty {
                 if let Some(user) = (0..4u32).filter(|u| xinput_state(*u).is_some()).nth(xbox_rank) {
                     log::info!(
                         "[hid] '{}' delivers no Windows.Gaming.Input readings — reading it through XInput (user {user})",

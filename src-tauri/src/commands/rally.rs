@@ -48,7 +48,7 @@ pub struct RallyConfig {
 
 /// Resolve the MAVLink command sender + sysid (rally is MAVLink-only).
 fn mav_handle(state: &State<'_, AppState>, vehicle_id: Option<&str>) -> Result<Option<(std::sync::mpsc::Sender<crate::mavlink_proto::handler::MavlinkCommand>, u8, bool)>, String> {
-    // `vehicle_id` = frontend "L1:S1" key, None = active vehicle. // MSP / passive / disconnected → no rally
+    // `vehicle_id` = frontend "L1:S1" key, None = active vehicle. MSP / passive / disconnected → no rally
     Ok(state.mav_target_opt(vehicle_id)?.map(|t| (t.cmd_tx, t.sysid, t.fc_variant.eq_ignore_ascii_case("px4"))))
 }
 
@@ -73,8 +73,11 @@ pub fn rally_read_all(vehicle_id: Option<String>, state: State<'_, AppState>) ->
 }
 
 /// "Save to FC": upload the rally points (or clear them when empty), then write the provided params.
+/// Returns the parameters that could NOT be written (`NAME: reason`), as a warning for the panel: once
+/// the points went up, a slow or unknown parameter must not fail the save — on PX4 `set_param` reads
+/// the parameter's type first and errors on a timeout, and the points would already be on the vehicle.
 #[tauri::command(async)]
-pub fn rally_write_all(vehicle_id: Option<String>, config: RallyConfig, state: State<'_, AppState>) -> Result<(), String> {
+pub fn rally_write_all(vehicle_id: Option<String>, config: RallyConfig, state: State<'_, AppState>) -> Result<Vec<String>, String> {
     let Some((cmd_tx, fc_sysid, px4)) = mav_handle(&state, vehicle_id.as_deref())? else {
         return Err("FC is not running MAVLink".into());
     };
@@ -84,11 +87,15 @@ pub fn rally_write_all(vehicle_id: Option<String>, config: RallyConfig, state: S
     } else {
         mavlink_proto::mission::upload(&cmd_tx, fc_sysid, &items, false, MavMissionType::MAV_MISSION_TYPE_RALLY, false, |_, _| {})?;
     }
+    let mut warnings = Vec::new();
     for p in &config.params {
-        control::set_param(&cmd_tx, fc_sysid, &p.name, p.value, px4)?;
+        if let Err(e) = control::set_param(&cmd_tx, fc_sysid, &p.name, p.value, px4) {
+            log::warn!("[RALLY] parameter {} not written: {}", p.name, e);
+            warnings.push(format!("{}: {}", p.name, e));
+        }
     }
-    eprintln!("[RALLY] saved {} point(s) + {} params to FC", config.points.len(), config.params.len());
-    Ok(())
+    eprintln!("[RALLY] saved {} point(s) + {} params to FC ({} not written)", config.points.len(), config.params.len(), warnings.len());
+    Ok(warnings)
 }
 
 /// Each rally MISSION item is one point (`MAV_CMD_NAV_RALLY_POINT`, x/y = lat/lon, z = alt m).

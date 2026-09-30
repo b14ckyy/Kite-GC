@@ -23,6 +23,7 @@
     MAV_FRAME_GLOBAL, MAV_FRAME_GLOBAL_TERRAIN_ALT,
     serializeWaypoints, parseWaypoints, parsePlanFile, loadArduMissionFromFile,
     type ArduWaypoint,
+    framesForUpload,
   } from '$lib/stores/missionArdupilot';
   import { onMissionDownloadProgress, onMissionUploadProgress } from '$lib/stores/mission';
   import { cmdName, cmdShort, cmdHasLocation, cmdDef, cmdValidForVehicle, cmdValidForPx4, enumLabel, type VehicleClass } from '$lib/helpers/arduCommandCatalog';
@@ -31,7 +32,7 @@
   import { contextMenu } from '$lib/actions/contextMenu';
   import { arduWpDetailLines } from '$lib/helpers/missionWpDetails';
   import { frameMissionOnMap } from '$lib/stores/mapCamera';
-  import { connection } from '$lib/stores/connection';
+  import { connection, linkIsArduPilot } from '$lib/stores/connection';
   import { settings } from '$lib/stores/settings';
   import { activeVehicleId } from '$lib/stores/vehicles';
   import { autopilotSystem, type AutopilotSystem } from '$lib/stores/autopilotContext';
@@ -156,9 +157,8 @@
   }
   const invalidCount = $derived(currentMission.filter((w) => cmdInvalid(w.command)).length);
 
-  const isMavlinkConnected = $derived(
-    currentConn.status === 'connected' && currentConn.protocolType === 'mavlink'
-  );
+  // FC transfers need a MAVLink link to ArduPilot/PX4 — not an INAV MSP-over-MAVLink link.
+  const isMavlinkConnected = $derived(linkIsArduPilot(currentConn));
 
   onDestroy(() => { unsubMission(); unsubSelIdx(); unsubSel(); unsubEditMode(); unsubConn(); unsubVehicle(); unsubSystem(); });
 
@@ -354,7 +354,8 @@
         : $t('arduMission.uploading');
     });
     try {
-      await invoke<void>('ardu_mission_upload', { waypoints: wps, vehicleId: get(activeVehicleId) });
+      // Action items travel in MAV_FRAME_MISSION (see framesForUpload); the planner keeps its own frames.
+      await invoke<void>('ardu_mission_upload', { waypoints: framesForUpload(wps), vehicleId: get(activeVehicleId) });
       markArduMissionSynced('fc', wps); // FC now holds exactly this mission
       statusMessage = $t('mission.uploaded', { values: { count: wps.length } });
     } catch (e) {

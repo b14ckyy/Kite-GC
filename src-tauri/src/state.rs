@@ -8,6 +8,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use std::sync::mpsc;
+use tauri::{AppHandle, Manager};
 
 use crate::aero::AeroCache;
 use crate::flightlog::recorder::{ActiveTempPathHandle, FlightRecorderHandle, PendingSessionHandle};
@@ -18,7 +19,7 @@ use crate::passive_telemetry::PassiveHandle;
 use crate::radar::source::SourceUpdate;
 use crate::radar::RadarManager;
 use crate::scheduler::rc_tx::{RcTxHandle, RcTxState};
-use crate::scheduler::SchedulerHandle;
+use crate::scheduler::{MspRequester, SchedulerHandle};
 use crate::vehicle_registry::LinkRegistry;
 
 /// Which protocol is currently active
@@ -37,6 +38,67 @@ pub struct MavTarget {
     pub sysid: u8,
     /// FC variant of the link's primary vehicle ("ArduPlane"/"ArduCopter"/"PX4"/…).
     pub fc_variant: String,
+}
+
+/// Error of every INAV/MSP command on a link without MSP (plain MAVLink, passive telemetry).
+pub(crate) const NO_MSP_ERR: &str = "FC is not running MSP (INAV)";
+
+/// Run `f` against the connection's MSP scheduler: a direct MSP link, or the MSP-over-MAVLink tunnel
+/// scheduler of a MAVLink link to INAV 10.0+ (`MavlinkHandle.msp`). This is THE backend answer to "does
+/// this link have MSP" — every INAV one-shot command (mission, safehome, geozone, settings, craft name,
+/// stats, RC config) resolves its scheduler here, so it works the same over both links.
+///
+/// The link-registry lock is only held to clone the request handle; `f` runs without it (a tunnel mission
+/// transfer is N × RTT and must not block `disconnect`). Transactions of one connection still run one
+/// at a time (`MspRequester::begin_transaction`). A disconnect mid-transaction makes the next request
+/// fail fast ("Scheduler thread gone"). Never call `with_msp` from inside `f`.
+pub(crate) fn with_msp<T>(
+    state: &AppState,
+    f: impl FnOnce(&MspRequester) -> Result<T, String>,
+) -> Result<T, String> {
+    // Multi-vehicle: the ACTIVE vehicle's link. The MSP-over-MAVLink tunnel talks to the link's
+    // handshake (primary) vehicle only, so a secondary vehicle on a shared MAVLink link has no MSP.
+    let msp = {
+        let reg = state.links.lock().map_err(|e| e.to_string())?;
+        match reg.active_entry() {
+            Some(e) if reg.active() == Some(&e.primary) => {
+                e.protocol.msp_requester().ok_or_else(|| NO_MSP_ERR.to_string())?
+            }
+            Some(_) => return Err(NO_MSP_ERR.into()),
+            None => return Err("Not connected".into()),
+        }
+    };
+    let _txn = msp.begin_transaction();
+    f(&msp)
+}
+
+/// `with_msp` on a blocking worker thread, for the long multi-request commands (mission transfers,
+/// safehome / geozone batches): Tauri runs `async` commands on the async runtime's workers, and a tunnel
+/// transaction of tens of seconds would park one of them (on a 4-core device `disconnect` then queues
+/// behind it). `f` gets the app handle to reach its own managed state (`app.state::<…>()`).
+pub(crate) async fn with_msp_blocking<T, F>(app: &AppHandle, f: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(&AppHandle, &MspRequester) -> Result<T, String> + Send + 'static,
+{
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        with_msp(&state, |h| f(&app, h))
+    })
+    .await
+    .map_err(|e| format!("MSP worker failed: {e}"))?
+}
+
+impl ActiveProtocol {
+    /// The MSP request handle of this link — direct MSP, or the MSP-over-MAVLink tunnel — if it has one.
+    pub(crate) fn msp_requester(&self) -> Option<MspRequester> {
+        match self {
+            ActiveProtocol::Msp(h) => Some(h.requester()),
+            ActiveProtocol::Mavlink(m) => m.msp.as_ref().map(|h| h.requester()),
+            ActiveProtocol::PassiveTelemetry(_) => None,
+        }
+    }
 }
 
 /// Global application state managed by Tauri

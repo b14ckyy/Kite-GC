@@ -4,8 +4,8 @@
 // Talk to the running Kite Android debug build's WebView over the Chrome DevTools protocol
 // (debug builds enable WebView debugging). Two jobs the phone-UI loop needs:
 //
-//   node tools/phone-devtools.mjs shot out.png            # screenshot of the PAGE pixels
-//   node tools/phone-devtools.mjs eval "innerWidth + 'x' + innerHeight"   # run JS, print result
+//   node tools/helpers/phone-devtools.mjs shot out.png            # screenshot of the PAGE pixels
+//   node tools/helpers/phone-devtools.mjs eval "innerWidth + 'x' + innerHeight"   # run JS, print result
 //
 // Why not `adb screencap`: Kite's activity window is transparent (native-video hole punch) and the
 // EMULATOR's screencap returns a black frame for it, while the page itself renders fine.

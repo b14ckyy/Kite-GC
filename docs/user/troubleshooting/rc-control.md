@@ -55,8 +55,9 @@ needed and it takes over fully.
 
 ## PX4: joystick input is ignored
 
-- **`COM_RC_IN_MODE`** must allow a MAVLink/joystick source (not "RC only"). Kite shows a reminder, but
-  set the parameter in PX4 / QGroundControl.
+- **`COM_RC_IN_MODE`** must allow a MAVLink/joystick source (not "RC only"). The desktop RC panel's
+  banner shows the current value, and when it blocks joystick input **Allow joystick (set 2)** sets it
+  from Kite. Alternatively, set the parameter in PX4 / QGroundControl.
 
 ## Still stuck
 

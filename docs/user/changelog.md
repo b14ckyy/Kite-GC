@@ -111,6 +111,20 @@ inside the box of the feature release they belong to, so the notes for one relea
         line of the version you run: 2.0.0 is told about 2.0.1, never about 2.1.0. The default stays
         *Stable releases*. [#162]
 
+    ??? info "INAV over ELRS, mLRS, SiK or Wi-Fi — the full planner on a MAVLink-only link"
+        ELRS and mLRS in MAVLink mode, SiK radios and MAVLink Wi-Fi bridges carry no MSP — and MSP is
+        what an INAV flight controller needs for missions, safe homes and geozones. Until now such a
+        link gave you INAV's MAVLink emulation only: telemetry, but no planner. **INAV 10.0** can carry
+        MSP inside the MAVLink stream, and Kite uses that by itself: connect with the **MAVLink**
+        protocol as you would for ArduPilot, and when the flight controller answers on the tunnel the
+        status shows **MSP/MAV**, UAV Info lists the real INAV version, board and craft name, and
+        mission upload and download (EEPROM and multi-mission included), safe homes, geozones, craft
+        name and flight statistics work as over a direct MSP link. Telemetry stays MAVLink — nothing
+        is polled through the tunnel, so the radio carries no extra load in flight. Needs INAV 10.0 or
+        newer and a MAVLink telemetry port on MAVLink 2 (the default). RC control from Kite and the
+        flight controller's own ADS-B receiver are not on this path yet. Setup and limits:
+        [Connecting → INAV over MAVLink](guides/connecting.md#inav-over-mavlink-mspmav). [#202]
+
     **Added**
 
     - **Android support** — native app with USB serial, Bluetooth LE and Wi-Fi links, touch layout
@@ -189,6 +203,12 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     **Improved**
 
+    - **System messages default to *Warning*, and a new *Debug* level shows the firmware's
+      developer chatter.** ArduPilot sends some texts at its DEBUG severity — "Sending unknown
+      message (44)" twice a second when a ground station in the loop asks for a message the board's
+      firmware cannot send, for example — and Kite showed them as info toasts. They now appear only
+      with *System messages* set to *Debug*; *All* is everything up to info, and a fresh install
+      starts at *Warning*. [#186]
     - **Power Saving also drops the glass blur** — with the mode active (or on battery in *Auto*),
       panels and widgets lose their frosted-glass blur: every blurred surface is re-rendered on each
       frame while the map moves, and on the phone that was the single biggest rendering cost. On
@@ -230,6 +250,44 @@ inside the box of the feature release they belong to, so the notes for one relea
       on tablets, so their content no longer runs under the dock. [#153]
     - **Chinese and Bulgarian** — the connection-status and toolbar strings that fell back to English
       are translated. [#154] · [#156]
+    - **The mouse wheel steps any + / − number field** — click into the field, then turn: up
+      increases, down decreases, faster turning steps in bigger increments, and a field without focus
+      never reacts, so scrolling a panel stays safe. The waypoint editor popups use the very same
+      field now (same look, unit inside the box). [#189] · [#191]
+    - **Frontend errors now reach the support log** — a JavaScript error that used to show only in
+      the browser console is written to Kite's backend log file too, so a report from a release build
+      carries the full picture. [#193]
+    - **Windows: an Xbox-class gamepad that Windows.Gaming.Input lists but never reads is now read
+      through XInput instead** — the backend log also shows what the game-controller thread sees
+      (which pads it finds, which one streams, the first reading), so a report pins down exactly
+      where a pad drops out. If the sticks feel inverted after this, re-learn the mapping in the RC
+      panel. [#196]
+    - **Android: "Share log file" lets you pick the day** — Kite keeps one diagnostics log per day in
+      app-private storage that no file manager can reach, and the Share button only ever handed out
+      today's file. It now lists the day files, newest first, with date and size (the one this session
+      writes is tagged *current*); tap one to send it to mail or a messenger — so yesterday's log is
+      there after a restart. [#198]
+    - **INAV over a MAVLink-only link gets its full MSP feature set** — INAV 10.0 can carry MSP inside
+      the MAVLink stream, and Kite detects that automatically when you connect with the MAVLink
+      protocol: the status shows **MSP/MAV**, UAV Info shows the real INAV version and craft name, and
+      missions (incl. EEPROM and multi-mission), safe homes, geozones, craft name and flight statistics
+      work as over a direct MSP link — over ELRS/mLRS MAVLink, SiK radios or a Wi-Fi bridge. Telemetry
+      stays MAVLink; nothing is polled through the tunnel. RC control and FC-side ADS-B are not on this
+      path yet. The work also surfaced an INAV firmware bug in long tunnel replies (fixed upstream). [#202]
+    - **UDP links: a busy local port falls back to a stable alternate, and commands reach every recent
+      sender.** When another program already listens on
+      the port you target (Mission Planner on 14550, say), Kite now binds the same port plus 10000
+      instead of a random one, so a relay that streams to Kite's address finds it again after a
+      reconnect — and a failed handshake names the busy port and what to do about it. Frames go to every
+      source heard in the last ten seconds (several SITL instances or bridges on one port each speak from
+      their own socket; before, only the last one to speak got them). Contributed by dldnjsxo95. [#194] · [#204]
+    - **PX4: take-off and land no longer head for 0°N 0°E, missions with unset yaw or action items
+      upload, integer parameters read and write correctly, and the desktop RC panel shows COM_RC_IN_MODE
+      with a one-click fix when it blocks joystick input.** A geofence or rally save now lists the
+      parameters Kite could not write (on PX4: ones the vehicle does not report) as a warning instead of
+      failing after the geometry is already on the vehicle. For ArduPilot too: mission, fence and rally
+      transfers address the autopilot component, so they pass through a routing relay such as Mission
+      Planner's MAVLink mirror. Contributed by dldnjsxo95. [#195] · [#205]
 
 ??? note "1.0 — Initial release · Live"
 
@@ -241,6 +299,44 @@ inside the box of the feature release they belong to, so the notes for one relea
     Everything this version contains is covered by the regular documentation — start with the
     [quick tour](getting-started/quick-tour.md) or the [GitHub release](https://github.com/b14ckyy/Kite-GC/releases).
 
+    ---
+
+    **1.0.2**{ .kite-patch } *unreleased*{ .kite-badge }
+
+    **Fixed**
+
+    - **ArduPilot / PX4 mission editor: waypoint popup under the side panel.** Selecting a waypoint
+      near the left edge of the map moved it under the mission panel instead of into view, and the
+      map kept shifting while you edited values. The editor now centres the waypoint in the visible
+      map area, the way the INAV tab already did.
+    - **MAVLink (ArduPilot / PX4): losing the connection could leave the app stuck on "connected".**
+      When the link was really gone — a serial cable unplugged, a socket closed — the status bar
+      stayed on "connected" until you clicked Disconnect, and a flight that was being recorded
+      never offered the "Device connection lost" recovery prompt (Discard / Save / Continue on
+      reconnect). Both now work the way they already do on INAV/MSP.
+    - **MAVLink (ArduPilot / PX4): a silent vehicle still showed as a healthy connection.** If the
+      aircraft stopped sending data while the link itself stayed open — a radio dropout, for example —
+      the status bar kept showing a normal connection instead of "Reconnecting…". It now switches to
+      "Reconnecting…" a few seconds after the vehicle goes quiet, and back once data resumes.
+    - **Network (UDP) links on Windows could drop unexpectedly.** If the other side of a UDP
+      connection closed its socket, Windows reported this as a connection error on the next receive
+      and Kite disconnected the whole link, even though the other side might come back on its own.
+      The link now stays up and shows "Reconnecting…" instead.
+    - **Terrain radar and Live AGL: a blank strip along every terrain-tile edge.** The elevation
+      sampler refused the last row and column of each 1° Copernicus tile, so a roughly 30 m wide
+      strip along every full degree of latitude and longitude reported no terrain. In the terrain
+      radar that strip stayed unpainted, which reads as "terrain far below" rather than "unknown";
+      Live AGL and the terrain analysis showed a gap. The sampler now covers the whole tile.
+    - **"Unfinished recording found": Save Incomplete and Continue on Reconnect always failed.** After a
+      crash or a forced close mid-flight the prompt appeared on the next start, but both ways of keeping
+      the recording ended in an error ("no such table: flights") and the temp log stayed where it was;
+      only Discard worked. Both actions now recover the flight again. Not affected: the "Device
+      connection lost" prompt shown while the app is still running.
+    - **A failed geofence, rally or geozone save is now reported.** When writing the fence, the rally
+      points (ArduPilot / PX4) or the geozones (INAV) to the flight controller failed — a link hiccup,
+      a timeout, an item the FC refused — nothing was shown and the Save button simply came back,
+      while what the vehicle actually held might not have matched the panel. The panel now shows the
+      error under the Save button.
     ---
 
     **1.0.1**{ .kite-patch } *2026-09-13*{ .kite-badge }
@@ -327,3 +423,14 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#173]: https://github.com/b14ckyy/Kite-GC/pull/173
 [#174]: https://github.com/b14ckyy/Kite-GC/pull/174
 [#175]: https://github.com/b14ckyy/Kite-GC/pull/175
+[#186]: https://github.com/b14ckyy/Kite-GC/pull/186
+[#189]: https://github.com/b14ckyy/Kite-GC/pull/189
+[#191]: https://github.com/b14ckyy/Kite-GC/pull/191
+[#193]: https://github.com/b14ckyy/Kite-GC/pull/193
+[#196]: https://github.com/b14ckyy/Kite-GC/pull/196
+[#198]: https://github.com/b14ckyy/Kite-GC/pull/198
+[#202]: https://github.com/b14ckyy/Kite-GC/pull/202
+[#194]: https://github.com/b14ckyy/Kite-GC/pull/194
+[#204]: https://github.com/b14ckyy/Kite-GC/pull/204
+[#195]: https://github.com/b14ckyy/Kite-GC/pull/195
+[#205]: https://github.com/b14ckyy/Kite-GC/pull/205

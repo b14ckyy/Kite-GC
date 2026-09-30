@@ -27,9 +27,8 @@
     vehicleManagerSelectedId, vehicleSearchQuery, vehicleManagerCreateCraft, normalizeCraftName, vehicleLibraryChanged,
   } from '$lib/stores/vehicleManager';
   import { requestOpenFlightId } from '$lib/stores/missionManager';
-  import { connection } from '$lib/stores/connection';
+  import { hasMsp } from '$lib/stores/connection';
   import FcUidChip from '../FcUidChip.svelte';
-  import { autopilotSystem } from '$lib/stores/autopilotContext';
   import { telemetry } from '$lib/stores/telemetry';
   import { setInavCraftName, readInavStats } from '$lib/controllers/connectionController';
   import PanelShell, { type PanelVariant } from '$lib/components/panel/PanelShell.svelte';
@@ -74,11 +73,10 @@
   let importFile = $state<VehicleFile | null>(null);
   let importBusy = $state(false);
 
-  // Write craft name to FC: only when an INAV FC is connected and disarmed (post-flight use).
+  // Write craft name to FC: only when an INAV FC is connected over MSP (direct or MSP over MAVLink) and
+  // disarmed (post-flight use). Also gates reading the FC `stats` totals.
   let fcWriteBusy = $state(false);
-  let canWriteToFc = $derived(
-    $connection.status === 'connected' && $autopilotSystem === 'inav' && ($telemetry.armingFlags & 0x04) === 0,
-  );
+  let canWriteToFc = $derived($hasMsp && ($telemetry.armingFlags & 0x04) === 0);
 
   // Pending lifetime baseline to apply on save (adopted on request from the FC `stats` totals, or
   // carried in from a `.kvehicle` import). null = leave the stored baseline untouched.

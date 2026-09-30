@@ -1103,6 +1103,27 @@ pub fn update_session_meta_platform_type(conn: &Connection, platform_type: u8) -
     Ok(())
 }
 
+/// Replace the FC identity of an open temp session — the MSP-over-MAVLink probe upgrades the MAVLink
+/// heartbeat identity to the INAV one right after connect (see `FlightRecorder::set_fc_info`).
+pub fn update_session_meta_identity(
+    conn: &Connection,
+    craft_name: &str,
+    fc_variant: &str,
+    fc_version: &str,
+    board_id: &str,
+    platform_type: u8,
+    fc_uid: Option<&str>,
+) -> SqlResult<()> {
+    conn.execute(
+        "UPDATE session_meta
+            SET craft_name = ?1, fc_variant = ?2, fc_version = ?3, board_id = ?4, platform_type = ?5,
+                fc_uid = ?6
+          WHERE id = 1",
+        params![craft_name, fc_variant, fc_version, board_id, platform_type, fc_uid],
+    )?;
+    Ok(())
+}
+
 /// The self-describing metadata of a temp session (from its `session_meta` row).
 pub struct SessionMetaRow {
     pub start_time: String,
@@ -2141,11 +2162,7 @@ pub fn get_flight_track(
     conn: &Connection,
     flight_id: i64,
 ) -> SqlResult<Vec<TelemetryRecord>> {
-    // Flights recorded before the unified flight-mode model (f8e5699, 2026-06-14) stored the raw
-    // mode flags but no canonical mode, and replay them as N/A. An import can be repeated, a live
-    // recording cannot, so the mode is derived here from the flags that are already in the row.
-    // `active_flight_mode_flags` holds INAV's bitmask or MAVLink's custom_mode depending on the
-    // source, which is what the variant selects between.
+    // The variant selects how the stored mode flags are decoded (see `read_flight_track`).
     let fc_variant: Option<String> = conn
         .query_row(
             "SELECT fc_variant FROM flights WHERE id = ?1",
@@ -2153,10 +2170,24 @@ pub fn get_flight_track(
             |row| row.get(0),
         )
         .optional()?;
+    read_flight_track(conn, flight_id, fc_variant.as_deref())
+}
 
+/// Get the GPS track for a flight with its `fc_variant` supplied by the caller — the form for stores
+/// without a `flights` table (the per-session `.ktmp`, where the variant comes from `session_meta`).
+/// `get_flight_track` is the main-DB entry that looks the variant up itself.
+pub fn read_flight_track(
+    conn: &Connection,
+    flight_id: i64,
+    fc_variant: Option<&str>,
+) -> SqlResult<Vec<TelemetryRecord>> {
+    // Flights recorded before the unified flight-mode model (f8e5699, 2026-06-14) stored the raw
+    // mode flags but no canonical mode, and replay them as N/A. An import can be repeated, a live
+    // recording cannot, so the mode is derived here from the flags that are already in the row.
+    // `active_flight_mode_flags` holds INAV's bitmask or MAVLink's custom_mode depending on the
+    // source, which is what the variant selects between.
     let mut stmt = conn.prepare(&format!(
-        "SELECT id, {TELEMETRY_COLS} FROM telemetry_records \
-         WHERE flight_id = ?1 ORDER BY timestamp_ms ASC"
+        "SELECT id, {TELEMETRY_COLS} FROM telemetry_records          WHERE flight_id = ?1 ORDER BY timestamp_ms ASC"
     ))?;
 
     let rows = stmt.query_map(params![flight_id], read_telemetry_record)?;
@@ -2164,8 +2195,7 @@ pub fn get_flight_track(
     for rec in rows {
         let mut rec = rec?;
         if rec.mode_primary.is_none() {
-            if let (Some(flags), Some(variant)) = (rec.active_flight_mode_flags, fc_variant.as_deref())
-            {
+            if let (Some(flags), Some(variant)) = (rec.active_flight_mode_flags, fc_variant) {
                 let derived = if variant.eq_ignore_ascii_case("INAV") {
                     crate::flightmode::classify_inav(flags as u32)
                 } else {
@@ -2183,7 +2213,7 @@ pub fn get_flight_track(
 }
 
 /// Map one `SELECT id, {TELEMETRY_COLS}` row to a `TelemetryRecord` (stored values only — the
-/// legacy mode fix-up in `get_flight_track` post-processes the record where it applies).
+/// legacy mode fix-up in `read_flight_track` post-processes the record where it applies).
 fn read_telemetry_record(row: &rusqlite::Row) -> SqlResult<TelemetryRecord> {
     Ok(TelemetryRecord {
         id: row.get(0)?,

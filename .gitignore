@@ -101,7 +101,7 @@ __pycache__/
 *.pyc
 
 # =============================================================================
-# Generated i18n pseudo-locale (tools/i18n-key-paths.py) — every string is its
+# Generated i18n pseudo-locale (tools/helpers/i18n-key-paths.py) — every string is its
 # own key path, for translators. Local only: index.ts must not register it in
 # a commit either.
 # =============================================================================

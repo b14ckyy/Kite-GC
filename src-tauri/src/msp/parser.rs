@@ -40,6 +40,8 @@ pub struct MspParser {
     payload_length_expected: u16,
     payload_length_received: u16,
     payload: Vec<u8>,
+    /// Frames dropped on a checksum mismatch (lost / corrupted bytes) since creation.
+    checksum_errors: u32,
 }
 
 impl MspParser {
@@ -53,7 +55,13 @@ impl MspParser {
             payload_length_expected: 0,
             payload_length_received: 0,
             payload: Vec::new(),
+            checksum_errors: 0,
         }
+    }
+
+    /// Number of frames dropped on a checksum mismatch since this parser was created.
+    pub fn checksum_errors(&self) -> u32 {
+        self.checksum_errors
     }
 
     /// Feed one byte to the parser. Returns `Some(MspMessage)` when a complete
@@ -233,6 +241,7 @@ impl MspParser {
         if checksum == received_crc {
             Some(self.build_message())
         } else {
+            self.checksum_errors = self.checksum_errors.wrapping_add(1);
             None
         }
     }
@@ -252,6 +261,7 @@ impl MspParser {
         if crc == received_crc {
             Some(self.build_message())
         } else {
+            self.checksum_errors = self.checksum_errors.wrapping_add(1);
             None
         }
     }
@@ -397,5 +407,6 @@ mod tests {
         }
 
         assert!(result.is_none());
+        assert_eq!(parser.checksum_errors(), 1);
     }
 }

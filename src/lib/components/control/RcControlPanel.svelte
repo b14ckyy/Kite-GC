@@ -43,9 +43,9 @@
     type RcProfile,
     type RcProfileKind,
   } from '$lib/stores/rcProfiles';
-  import { connection } from '$lib/stores/connection';
+  import { connection, isArduPilotLink } from '$lib/stores/connection';
   import { telemetry } from '$lib/stores/telemetry';
-  import { loadRcFcConfig, rcFcConfig, setOverrideBitmask } from '$lib/stores/rcFcConfig';
+  import { loadRcFcConfig, rcFcConfig, setOverrideBitmask, px4RcInMode, px4RcInModeError, loadPx4RcInMode, allowPx4JoystickInput } from '$lib/stores/rcFcConfig';
   import { rcEngaged, engage, disengage } from '$lib/stores/rcEngage';
   import { syncFromFc } from '$lib/stores/rcMirror';
   import { rcManual, defaultManualMap } from '$lib/stores/rcManual';
@@ -235,12 +235,17 @@
     }
   }
 
+  // Deliberately `protocolType === 'msp'`, NOT `hasMsp`: this is the MSP RC stream path (RAW_RC/AUX_RC,
+  // override bitmask, MSP_RC seeding), which only the direct-MSP scheduler runs. An MSP-over-MAVLink link
+  // has no RC path yet (the tab is hidden there) until Stage 3 — MAVLink-RX mode, see Dev-Docs
+  // active/MSP_OVER_MAVLINK.md.
   const connectedMsp = $derived($connection.status === 'connected' && $connection.protocolType === 'msp');
   // ArduPilot over MAVLink: same engage/stream pipeline, RC_CHANNELS_OVERRIDE adapter. No MSP FC-config
-  // read, no override-mode gate — the manual engage is the sole guard.
-  const connectedArdu = $derived($connection.status === 'connected' && $rcPlatform === 'ardupilot');
+  // read, no override-mode gate — the manual engage is the sole guard. Never on an MSP-over-MAVLink link
+  // (rcPlatform falls back to the offline choice there, which may say 'ardupilot').
+  const connectedArdu = $derived($isArduPilotLink && $rcPlatform === 'ardupilot');
   // PX4 over MAVLink: MANUAL_CONTROL adapter (4 sticks + buttons), separate manual mapping UI.
-  const connectedPx4 = $derived($connection.status === 'connected' && $rcPlatform === 'px4');
+  const connectedPx4 = $derived($isArduPilotLink && $rcPlatform === 'px4');
   // Any FC we can inject RC to.
   const rcConnected = $derived(connectedMsp || connectedArdu || connectedPx4);
 
@@ -292,27 +297,9 @@
   });
 
   // ── PX4: COM_RC_IN_MODE (0 = RC only / 4 = sticks disabled block MANUAL_CONTROL) ────────────────
-  let rcInMode = $state<number | null>(null);
-  const rcInModeBlocks = $derived(rcInMode === 0 || rcInMode === 4);
-  async function readRcInMode() {
-    try {
-      const v = await invoke<number | null>('mav_read_param', { vehicleId: get(activeVehicleId), name: 'COM_RC_IN_MODE' });
-      rcInMode = v == null ? null : Math.round(v);
-    } catch { rcInMode = null; }
-  }
-  /** Set COM_RC_IN_MODE = 2 ("RC and Joystick with fallback"). PX4 persists parameters itself. */
-  async function allowJoystickInput() {
-    try {
-      await invoke('mav_set_param', { vehicleId: get(activeVehicleId), name: 'COM_RC_IN_MODE', value: 2 });
-      await readRcInMode();
-    } catch (e) { console.warn('[rc] COM_RC_IN_MODE set failed', e); }
-  }
-  // Re-read whenever a PX4 vehicle becomes the selected one (each aircraft has its own value).
-  $effect(() => {
-    const id = $activeVehicleId;
-    if (connectedPx4 && id) void readRcInMode();
-    else rcInMode = null;
-  });
+  // Read by the on-connect sequence (connectionController → rcFcConfig.loadPx4RcInMode), not here: a
+  // read from an effect raced the fence/rally downloads for the handler's single param-receiver slot.
+  const rcInModeBlocks = $derived($px4RcInMode === 0 || $px4RcInMode === 4);
 
   // Long-press to engage/disengage (HoldToConfirm fills the button left→right over this duration, then
   // fires toggleEngage). Never auto-engages on connect/plug (anti-accidental).
@@ -487,24 +474,27 @@
         {/if}
         {#if connectedPx4}
           <!-- PX4 ignores MANUAL_CONTROL unless COM_RC_IN_MODE allows a MAVLink/joystick source. Read the
-               live value from the selected vehicle so the operator sees the actual blocker, with a
-               one-click fix (2 = RC and joystick with fallback — the QGC default). -->
+               live value so the operator sees the actual blocker, with a one-click fix (2 = RC and
+               joystick with fallback — the QGC default). -->
           <div class="rc-banner {rcInModeBlocks ? 'rc-banner-warn' : 'rc-banner-info'}">
             <div class="rc-banner-hint">
-              {#if rcInMode == null}
+              {#if $px4RcInMode == null}
                 {$t('rc.manual.comRcInModeHint')}
               {:else if rcInModeBlocks}
-                {$t('rc.manual.comRcInModeBlocked', { values: { value: rcInMode } })}
+                {$t('rc.manual.comRcInModeBlocked', { values: { value: $px4RcInMode } })}
               {:else}
-                {$t('rc.manual.comRcInModeOk', { values: { value: rcInMode } })}
+                {$t('rc.manual.comRcInModeOk', { values: { value: $px4RcInMode } })}
               {/if}
             </div>
             <div class="rc-banner-actions">
-              <Button size="sm" onclick={() => void readRcInMode()}>{$t('rc.manual.comRcInModeRead')}</Button>
+              <Button size="sm" onclick={() => void loadPx4RcInMode()}>{$t('rc.manual.comRcInModeRead')}</Button>
               {#if rcInModeBlocks}
-                <Button size="sm" variant="data" onclick={() => void allowJoystickInput()}>{$t('rc.manual.comRcInModeFix')}</Button>
+                <Button size="sm" variant="data" onclick={() => void allowPx4JoystickInput()}>{$t('rc.manual.comRcInModeFix')}</Button>
               {/if}
             </div>
+            {#if $px4RcInModeError}
+              <div class="rc-banner-hint rc-banner-error">{$t('rc.manual.comRcInModeSetFailed', { values: { error: $px4RcInModeError } })}</div>
+            {/if}
           </div>
         {/if}
         <div class="rc-rate">
@@ -660,6 +650,7 @@
   .rc-banner-title { font-weight: 700; font-size: 11px; margin-bottom: 3px; }
   .rc-banner-list { font-variant-numeric: tabular-nums; margin-bottom: 3px; }
   .rc-banner-hint { color: #d8d8d8; line-height: 1.4; }
+  .rc-banner-error { color: #d40000; margin-top: 6px; }
   .rc-banner-block {
     background: rgba(212, 0, 0, 0.16); border: 1px solid rgba(212, 0, 0, 0.5); color: #ff9a9a;
   }

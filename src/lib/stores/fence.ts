@@ -70,23 +70,51 @@ export async function loadFenceConfig(): Promise<void> {
   }
 }
 
-/** "Save to FC": upload the working copy (geometry + params), then re-read so loaded == FC truth. */
+/** Outcome of the last "Save to FC" worth showing in the panel: the upload failed, or parameters Kite
+ *  could not write (`NAME: reason; …`). Kept here, not in the panel, so it survives the panel being
+ *  rebuilt mid-save. Cleared on save start / revert / disconnect — not on load, which the save itself runs. */
+export type FenceSaveIssue = { kind: 'failed' | 'params'; detail: string };
+export const fenceSaveIssue = writable<FenceSaveIssue | null>(null);
+
+/** Bumped on disconnect so a save still in flight does not report into the next connection. */
+let fenceGeneration = 0;
+
+/** "Save to FC": upload the working copy's geometry plus only the params whose value differs from the
+ *  last FC snapshot (a param missing there counts as changed), then re-read so loaded == FC truth.
+ *  Untouched params are not sent: on PX4 every write costs a type read, and on a lossy link a parameter
+ *  the user never touched would end up in the warning. Sets `fenceSaveIssue` and never throws — a
+ *  parameter Kite could not write is a warning (the geometry is on the vehicle by then), an upload
+ *  that throws is a failed save. */
 export async function saveFenceConfig(): Promise<void> {
   const cfg = get(fenceWorking);
   if (!cfg) return;
-  await invoke('fence_write_all', { config: cfg });
-  await loadFenceConfig();
+  const generation = fenceGeneration;
+  fenceSaveIssue.set(null);
+  const loaded = get(fenceConfig)?.params ?? [];
+  const changed = cfg.params.filter((p) => loaded.find((l) => l.name === p.name)?.value !== p.value);
+  try {
+    const warnings = await invoke<string[]>('fence_write_all', { config: { ...cfg, params: changed } });
+    await loadFenceConfig();
+    if (generation === fenceGeneration && warnings.length > 0) {
+      fenceSaveIssue.set({ kind: 'params', detail: warnings.join('; ') });
+    }
+  } catch (e) {
+    if (generation === fenceGeneration) fenceSaveIssue.set({ kind: 'failed', detail: String(e) });
+  }
 }
 
 export function revertFenceWorking(): void {
   const loaded = get(fenceConfig);
   fenceWorking.set(loaded ? structuredClone(loaded) : null);
+  fenceSaveIssue.set(null);
 }
 
 export function clearFence(): void {
   fenceConfig.set(null);
   fenceWorking.set(null);
   fenceEditing.set(false);
+  fenceSaveIssue.set(null);
+  fenceGeneration++;
 }
 
 // ── Working-copy mutations (panel + map editing). Zones are identified by array index. ──────────────

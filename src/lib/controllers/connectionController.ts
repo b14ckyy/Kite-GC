@@ -4,10 +4,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { get } from 'svelte/store';
+import { t } from 'svelte-i18n';
 import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from '$lib/stores/connection';
 import type { InavStats } from '$lib/stores/flightlogTypes';
-import { connection, connectionProtocol, fcLinkAlive, availablePorts, bleDevices, detectedPlatformType } from '$lib/stores/connection';
-import { startTelemetryListeners, stopTelemetryListeners, resetTelemetry } from '$lib/stores/telemetry';
+import { connection, connectionProtocol, fcLinkAlive, availablePorts, bleDevices, detectedPlatformType, hasMsp, isArduPilotLink } from '$lib/stores/connection';
+import { startTelemetryListeners, stopTelemetryListeners, resetTelemetry, setFcVariant } from '$lib/stores/telemetry';
 import { startVehicleListeners, activeVehicleId, resetVehicles, refreshLinks, selectVehicle, links, vehicles } from '$lib/stores/vehicles';
 import { parseVehicleId } from '$lib/helpers/vehicleId';
 import { homePosition, vehicleHomes, clearVehicleHomes } from '$lib/stores/home';
@@ -17,6 +18,8 @@ import { loadSafehomeConfig, clearSafehome } from '$lib/stores/safehome';
 import { loadGeozoneConfig, clearGeozones } from '$lib/stores/geozone';
 import { loadFenceConfig, clearFence } from '$lib/stores/fence';
 import { loadRallyConfig, clearRally } from '$lib/stores/rally';
+import { loadPx4RcInMode, px4RcInMode, px4RcInModeError } from '$lib/stores/rcFcConfig';
+import { rcPlatform } from '$lib/stores/rcPlatform';
 
 /** Session-only memory of the platform-type override, keyed by the FC hardware id (MSP / MAVLink).
  *  RAM only by design: a Kite restart forgets it; passive telemetry has no id and never lands here. */
@@ -217,6 +220,8 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
       console.warn('[connect] restoring the platform-type override failed', e);
     }
   }
+  // MAVLink link to INAV 10.0+ with MSP over MAVLink up (the backend probed it during connect).
+  const mspTunnel = params.protocolType === 'mavlink' && (info.features?.msp_tunnel ?? false);
   connection.set({
     status: "connected",
     protocolType: params.protocolType,
@@ -225,29 +230,46 @@ export async function connectFC(params: ConnectParams): Promise<FcInfo> {
     baudRate: params.baudRate ?? 0,
     errorMessage: "",
     fcInfo: info,
+    mspTunnel,
   });
   // Seed the status-box protocol. MSP/MAVLink are known now; passive telemetry shows a placeholder
   // until the backend's `telemetry-protocol` event reports the locked sub-protocol.
+  const tr = get(t);
   connectionProtocol.set({
-    primary: params.protocolType === 'mavlink' ? 'MAVLink' : params.protocolType === 'msp' ? 'MSP' : 'Telemetry',
+    primary: mspTunnel
+      ? tr('statusBox.protocolMspMav')
+      : params.protocolType === 'mavlink'
+        ? tr('statusBox.protocolMavlink')
+        : params.protocolType === 'msp'
+          ? tr('statusBox.protocolMsp')
+          : tr('statusBox.protocolTelemetry'),
     secondary: null,
   });
   fcLinkAlive.set(true);
+  setFcVariant(info.fc_variant);
   await startTelemetryListeners();
   // Auto-start the saved telemetry relays (push telemetry → no handshake needed).
   await applyRelaysOnConnect();
-  // INAV/MSP: always download safehomes + autoland config for the map overlay (fire-and-forget; the
-  // store updates when the ~18 MSP reads complete). See docs/active/AUTOLAND_SAFEHOME.md.
-  if (params.protocolType === 'msp') {
+  // INAV/MSP (direct or MSP over MAVLink): always download safehomes + autoland config for the map
+  // overlay (fire-and-forget; the store updates when the ~18 MSP reads complete). See
+  // docs/active/AUTOLAND_SAFEHOME.md.
+  if (get(hasMsp)) {
     void loadSafehomeConfig();
     // Geozones (INAV ≥8.0; the backend returns has_geozones=false on older FCs). See docs/active/GEOZONES.md.
     void loadGeozoneConfig();
   }
   // ArduPilot/PX4 geofence + rally points over MAVLink (MAV_MISSION_TYPE_FENCE/RALLY). Both ride the
   // mission microprotocol (strict request→response) — run them SEQUENTIALLY so the two downloads don't
-  // collide. See docs/active/GEOFENCE.md.
-  if (params.protocolType === 'mavlink') {
-    void (async () => { await loadFenceConfig(); await loadRallyConfig(); })();
+  // collide. See docs/active/GEOFENCE.md. Not on an MSP-over-MAVLink link: that FC is INAV (geozones).
+  // PX4's COM_RC_IN_MODE (RC panel banner) rides the same single param-receiver slot, so it comes last
+  // in the sequence instead of racing the downloads from a component effect.
+  if (get(isArduPilotLink)) {
+    const px4 = get(rcPlatform) === 'px4';
+    void (async () => {
+      await loadFenceConfig();
+      await loadRallyConfig();
+      if (px4) await loadPx4RcInMode();
+    })();
   }
   return info;
 }
@@ -321,15 +343,39 @@ async function applyActiveVehicle(vehicleId: string): Promise<void> {
   const fcInfo: FcInfo = v && !v.primary
     ? { ...link.fcInfo, fc_variant: v.fcVariant, platform_type: v.platformType, mav_type: v.mavType, craft_name: '' }
     : link.fcInfo;
-  connection.update((c) => ({ ...c, status: 'connected', protocolType, port: link.transport, fcInfo }));
-  connectionProtocol.set({ primary: link.protocol, secondary: null });
+  // MSP over MAVLink belongs to the link's handshake (primary) vehicle only — the backend's `with_msp`
+  // refuses a secondary vehicle on the same link.
+  const mspTunnel = protocolType === 'mavlink' && (v?.primary ?? true) && (fcInfo.features?.msp_tunnel ?? false);
+  connection.update((c) => ({ ...c, status: 'connected', protocolType, port: link.transport, fcInfo, mspTunnel }));
+  // Same status-box labels as connectFC.
+  const tr = get(t);
+  connectionProtocol.set({
+    primary: mspTunnel
+      ? tr('statusBox.protocolMspMav')
+      : protocolType === 'mavlink'
+        ? tr('statusBox.protocolMavlink')
+        : protocolType === 'msp'
+          ? tr('statusBox.protocolMsp')
+          : tr('statusBox.protocolTelemetry'),
+    secondary: null,
+  });
   fcLinkAlive.set(true);
-  if (protocolType === 'msp') {
+  setFcVariant(fcInfo.fc_variant);
+  px4RcInMode.set(null);
+  px4RcInModeError.set(null);
+  // Same config loads as connectFC, for the new active vehicle: INAV (direct MSP or MSP over MAVLink)
+  // → safehomes + geozones; ArduPilot/PX4 → fence, rally, then PX4's COM_RC_IN_MODE, SEQUENTIALLY.
+  if (get(hasMsp)) {
     void loadSafehomeConfig();
     void loadGeozoneConfig();
   }
-  if (protocolType === 'mavlink') {
-    void (async () => { await loadFenceConfig(); await loadRallyConfig(); })();
+  if (get(isArduPilotLink)) {
+    const px4 = get(rcPlatform) === 'px4';
+    void (async () => {
+      await loadFenceConfig();
+      await loadRallyConfig();
+      if (px4) await loadPx4RcInMode();
+    })();
   }
 }
 
@@ -368,6 +414,8 @@ export async function disconnectFC(baudRate: number): Promise<void> {
   clearGeozones();
   clearFence();
   clearRally();
+  px4RcInMode.set(null);
+  px4RcInModeError.set(null);
   stopTelemetryListeners();
   resetTelemetry();
   connectionProtocol.set({ primary: '', secondary: null });
@@ -384,6 +432,7 @@ export async function disconnectFC(baudRate: number): Promise<void> {
     baudRate,
     errorMessage: "",
     fcInfo: null,
+    mspTunnel: false,
   });
 }
 

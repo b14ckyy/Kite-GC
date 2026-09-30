@@ -8,7 +8,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { open, save } from "@tauri-apps/plugin-dialog";
-  import { connection, availablePorts, bleDevices, defaultNetPort } from "$lib/stores/connection";
+  import { connection, availablePorts, bleDevices, defaultNetPort, hasMsp, isArduPilotLink } from "$lib/stores/connection";
   import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
   import { isAndroid, isMobile, isTablet, isPhone as isPhoneDevice, hasSerialPorts, logPlayerWidth } from "$lib/platform";
@@ -121,7 +121,7 @@
   import TerrainAnalysisPanel from "$lib/components/terrain/TerrainAnalysisPanel.svelte";
   import { editMode, replayActive, mission, missionFlags, missionDownload, missionUpload, missionFcInfo, markMissionSynced, loadedMissionId, missionSetWaypoints, missionImportXml, launchPoint, hasLocation, toDeg, type Waypoint } from "$lib/stores/mission";
   import { pendingSystemSwitch, autopilotSystem, autopilotLocked, setAutopilotSystem, confirmSystemSwitch } from "$lib/stores/autopilotContext";
-  import { arduMission, arduSelectedWpIndex, arduLoadedMissionId, parseWaypoints, parsePlanFile, planFirmwareTarget, loadArduMissionFromFile, type ArduWaypoint } from "$lib/stores/missionArdupilot";
+  import { arduMission, arduSelectedWpIndex, arduLoadedMissionId, arduEditMode, parseWaypoints, parsePlanFile, planFirmwareTarget, loadArduMissionFromFile, type ArduWaypoint } from "$lib/stores/missionArdupilot";
   import { frameMissionOnMap } from "$lib/stores/mapCamera";
   import { terrainAnalysis, patchTerrainAnalysis } from "$lib/stores/terrainAnalysis";
   import { DEFAULT_RADAR, DEFAULT_AIRSPACE, BUILTIN_ADSB_PROVIDERS } from "$lib/stores/settings";
@@ -160,6 +160,18 @@
     if ($editMode) untrack(() => {
       if (mapViewMode === '3d') mapViewMode = '2d';
       if (mapInFrame) setMapLocation('main');
+    });
+  });
+  // Edit mode — INAV's `editMode` and the ArduPilot/PX4 panel's `arduEditMode` alike — lives only
+  // while the mission tab is the active one. Every way of leaving it ends the mode: the rail, and the
+  // programmatic jumps (a flight opening the logbook, "open vehicle", a log file drop). Parking the
+  // panel (re-clicking its rail button) keeps it: that is how the map gets the whole screen while
+  // waypoints are placed. Until now only the INAV store was reset, so an ArduPilot edit session
+  // survived every tab switch and kept placing waypoints on map clicks (Marc, 2026-09-14).
+  $effect(() => {
+    if (activeTab !== 'mission') untrack(() => {
+      if ($editMode) editMode.set(false);
+      if ($arduEditMode) arduEditMode.set(false);
     });
   });
   // Map3D instance handle — used to read the 3D camera focus on a 3D→2D switch so
@@ -692,7 +704,7 @@
   let defaultWpAltitudeM = $state(50);
   let defaultPhTimeSec = $state(30);
   let warnAltitudeM = $state(120);
-  let systemMessages = $state<SystemMessagesLevel>('all');
+  let systemMessages = $state<SystemMessagesLevel>('warning');
   let logLevel = $state<LogLevel>('warning');
   let interfaceSettings = $state<InterfaceSettings>({
     speedUnit: 'kmh',
@@ -856,17 +868,21 @@
   // RC control (INAV RC over MSP) — two stacked sticks + a signal arc; opt-in via settings.
   const ICON_RC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3" width="17" height="18" rx="2.5"/><circle cx="8" cy="9" r="2.1"/><circle cx="16" cy="9" r="2.1"/><path d="M6.5 15.5h11"/><path d="M6.5 18h6"/></svg>';
 
-  // The vehicle-control panel is MAVLink-only (ArduPilot/PX4) and only meaningful while connected.
-  const isMavlinkConnected = $derived(
-    $connection.status === 'connected' && $connection.protocolType === 'mavlink'
-  );
+  // The vehicle-control panel is MAVLink-only (ArduPilot/PX4) and only meaningful while connected —
+  // not on an INAV MSP-over-MAVLink link (that FC gets the INAV/MSP surface instead).
+  const isMavlinkConnected = $derived($isArduPilotLink);
 
   // Passive telemetry (listen-only) has no uplink — there's no way to send RC channels — so the RC tab
   // is hidden while connected that way. Available = master switch on AND not telemetry-connected.
   const isTelemetryConnected = $derived(
     $connection.status === 'connected' && $connection.protocolType === 'telemetry'
   );
-  const rcTabAvailable = $derived($settings.rcControl.enabled && !isTelemetryConnected);
+  // Also hidden on an MSP-over-MAVLink link (INAV 10.0+): the MSP RC stream doesn't run through the tunnel
+  // and the ArduPilot override adapter must not drive INAV (rcPlatform is null there). Hidden until
+  // Stage 3 — MAVLink-RX mode, see Dev-Docs active/MSP_OVER_MAVLINK.md.
+  const rcTabAvailable = $derived(
+    $settings.rcControl.enabled && !isTelemetryConnected && !($connection.status === 'connected' && $connection.mspTunnel)
+  );
   // On mobile there is no joystick, but the on-screen touch sticks (VirtualSticks) can drive RC over
   // Wi-Fi. RC is safety-relevant and barely field-tested, so touch control is opt-in behind the SAME
   // master switch as the joystick path (`rcTabAvailable`) rather than appearing whenever an FC is
@@ -1021,7 +1037,7 @@
   defaultWpAltitudeM = saved.defaultWpAltitudeM;
   defaultPhTimeSec = saved.defaultPhTimeSec;
   warnAltitudeM = saved.warnAltitudeM;
-  systemMessages = saved.systemMessages ?? 'all';
+  systemMessages = saved.systemMessages ?? 'warning';
   // Apply the persisted diagnostic log level to the backend logger (it starts at Warning by default).
   // When the app runs in debug mode (release `--debug` or any debug build) surface the Debug Monitor
   // and force the log to Debug regardless of the saved level.
@@ -1146,7 +1162,9 @@
     }
     return gcsGroundAltM;
   });
-  /** ADS-B-via-MSP available: connected + the FC reports the feature (INAV 8.0+; MAVLink has no features). */
+  /** ADS-B-via-MSP available: connected + the FC reports the feature (INAV 8.0+ over direct MSP; a plain
+   *  MAVLink link has no feature set, and the MSP-over-MAVLink tunnel reports it false — it never polls it,
+   *  so FC-side ADS-B is not available on a tunnel link today). */
   const mspAdsbSupported = $derived(
     connStatus === 'connected' && fcInfo != null && fcInfo.features != null && fcInfo.features.adsb_msp,
   );
@@ -1272,6 +1290,7 @@
     // The X hides all panels — including the terrain overlay
     if (!navPanelOpen) {
       editMode.set(false);
+      arduEditMode.set(false);
       patchTerrainAnalysis({ open: false });
     }
     settings.patch({ navPanelOpen });
@@ -1415,7 +1434,6 @@
     }
     // Selecting another tab switches away from the terrain overlay
     patchTerrainAnalysis({ open: false });
-    if (tabId !== 'mission') editMode.set(false);
     // A manual tab choice ends the fleet auto-switch (see the selection effect below).
     if (!autoFleetSwitching && tabId !== 'fleet') autoFleetPrevTab = null;
     activeTab = tabId;
@@ -2736,7 +2754,7 @@
       // Multi-vehicle: a failed attempt must not paint the UI "disconnected" while other links are up.
       const stillUp = await recoverBackendLinks().catch(() => false);
       if (!stillUp) {
-        connection.set({ status: "error", protocolType: selectedProtocol, transportType: selectedTransport, port: "", baudRate: selectedBaud, errorMessage: String(e), fcInfo: null });
+        connection.set({ status: "error", protocolType: selectedProtocol, transportType: selectedTransport, port: "", baudRate: selectedBaud, errorMessage: String(e), fcInfo: null, mspTunnel: false });
       }
     } finally {
       isConnecting = false;
@@ -2967,8 +2985,9 @@
     else if (isPrimaryConnected) {
       // ArduPilot/MAVLink reports its own current mission item (MISSION_CURRENT) — that is the FC's
       // own truth, so trust it whenever armed + in a mission mode. INAV needs the mission to be FC-
-      // synced (or operator-confirmed) since the active WP is matched against the loaded planner mission.
-      const fcOwnsActiveWp = get(connection).protocolType === 'mavlink';
+      // synced (or operator-confirmed) since the active WP is matched against the loaded planner mission
+      // — also over MSP over MAVLink, where the planner mission is INAV's.
+      const fcOwnsActiveWp = get(isArduPilotLink);
       trusted = armed && (fcOwnsActiveWp || f.fc || liveTrackConfirmed);
     }
     activeWpNumber.set(inWpMode && trusted ? wp : 0);
@@ -3022,8 +3041,8 @@
   });
 
   async function onConnectMissionPrompt() {
-    // INAV/MSP only for now (ArduPilot/MAVLink mission sync is a separate path).
-    if (get(connection).protocolType !== 'msp') return;
+    // INAV/MSP only for now — direct or MSP over MAVLink (ArduPilot/MAVLink mission sync is a separate path).
+    if (!get(hasMsp)) return;
     let fcWpCount = 0;
     try { fcWpCount = (await missionFcInfo()).wp_count; } catch { /* FC may not answer — treat as none */ }
     const mapHasMission = get(mission).waypoints.length > 0;
@@ -3358,17 +3377,16 @@
     );
     // The device vanished (fatal transport error) — the backend tore the scheduler down. Clean up the
     // connection state so the UI shows disconnected and the user can simply reconnect.
-    // MAVLink transport loss (serial unplugged, socket error): the backend handler thread has exited but
-    // the registry still lists the link — close it so the UI does not sit on a dead "connected" state.
-    void listen<{ linkId?: number }>('mavlink-disconnected', (event) => {
-      const lid = event.payload?.linkId;
-      if (lid != null && get(links).length > 1) { void disconnectLink(lid, selectedBaud).catch(() => {}); return; }
-      void disconnectFC(selectedBaud).catch(() => {});
-    });
+    // MAVLink transport loss arrives as the same `connection-lost` (stamped with `linkId`).
     void listen<{ linkId?: number }>('connection-lost', (event) => {
-      // Multi-vehicle: with other links still up, only close the one that died.
       const lid = event.payload?.linkId;
-      if (lid != null && get(links).length > 1) {
+      const known = get(links);
+      // A loss reported for a link that was never registered — the MSP tunnel probe of a connect that
+      // then fails — has nothing to tear down here; the connect call itself returns the error. Without
+      // this guard the fallback below would close every OTHER link.
+      if (lid != null && !known.some((l) => l.linkId === lid)) return;
+      // Multi-vehicle: with other links still up, only close the one that died.
+      if (lid != null && known.length > 1) {
         void disconnectLink(lid, selectedBaud).catch(() => {});
         return;
       }

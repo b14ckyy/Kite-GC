@@ -5,10 +5,10 @@
 # `tauri android dev` — Rust is built once, the UI comes from the Vite dev server with hot reload,
 # so a saved .svelte file shows up on the device about a second later. No APK, no adb install.
 #
-#   .\tools\phone-emu.ps1                      # list the AVDs
-#   .\tools\phone-emu.ps1 Kite_21x9            # boot that AVD + tauri android dev on it
-#   .\tools\phone-emu.ps1 -Device              # skip the emulator: dev on the USB-attached device
-#   .\tools\phone-emu.ps1 -Shot                # screenshot of the running app (see phone-devtools.mjs)
+#   .\tools\helpers\phone-emu.ps1                      # list the AVDs
+#   .\tools\helpers\phone-emu.ps1 Kite_21x9            # boot that AVD + tauri android dev on it
+#   .\tools\helpers\phone-emu.ps1 -Device              # skip the emulator: dev on the USB-attached device
+#   .\tools\helpers\phone-emu.ps1 -Shot                # screenshot of the running app (see phone-devtools.mjs)
 #
 # The activity is locked to sensorLandscape (AndroidManifest.xml), so the emulator's rotation
 # setting does not matter — the app is always landscape; -Landscape only pins the emulator's own
@@ -43,7 +43,7 @@ $serial = ''
 $sdk = Join-Path $env:LOCALAPPDATA 'Android\Sdk'
 $emu = Join-Path $sdk 'emulator\emulator.exe'
 $adb = Join-Path $sdk 'platform-tools\adb.exe'
-$repo = Split-Path -Parent $PSScriptRoot
+$repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)   # tools/helpers → repo root
 
 # Every adb call is pinned to ONE serial: with a phone on the cable next to the emulator, a bare
 # `adb shell` answers "more than one device" and a boot-wait loop on it never ends.
@@ -81,7 +81,7 @@ if (-not $Device) {
     Write-Host 'Available AVDs:'
     & $emu -list-avds
     Write-Host ''
-    Write-Host 'usage: .\tools\phone-emu.ps1 <AVD> [-Landscape]   |   .\tools\phone-emu.ps1 -Device'
+    Write-Host 'usage: .\tools\helpers\phone-emu.ps1 <AVD> [-Landscape]   |   .\tools\helpers\phone-emu.ps1 -Device'
     exit 0
   }
   $running = (& $adb devices) -match '^emulator-'

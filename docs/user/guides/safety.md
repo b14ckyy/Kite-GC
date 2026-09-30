@@ -106,7 +106,9 @@ the connected autopilot:
   altitude / margin).
 - **PX4** — fence **action**, **max horizontal** and **max vertical** distance.
 
-Saving uploads the fence and writes the changed parameters; no reboot is needed.
+Saving uploads the fence and writes the fence parameters you changed; no reboot is needed. Parameters Kite
+could not write are listed as a warning under the Save button after the save — the zones themselves are
+on the vehicle by then.
 
 !!! tip "Two ways to express the same idea"
     INAV carries each zone's **altitude band** and **breach action** with the zone itself, so different

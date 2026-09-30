@@ -33,7 +33,7 @@ const FENCE_PARAM_NAMES_ARDU: &[&str] = &[
     "FENCE_ENABLE", "FENCE_ACTION", "FENCE_ALT_MAX", "FENCE_ALT_MIN", "FENCE_RADIUS", "FENCE_MARGIN",
 ];
 /// PX4 geofence params. Asked for separately per firmware: PX4 logs `Unknown param name` on its console
-/// for every foreign name and each one costs a request timeout — noise and a slower switch.
+/// for every foreign name and each one costs a request timeout — noise and a slower connect.
 const FENCE_PARAM_NAMES_PX4: &[&str] = &["GF_ACTION", "GF_MAX_HOR_DIST", "GF_MAX_VER_DIST"];
 fn fence_param_names(px4: bool) -> &'static [&'static str] {
     if px4 { FENCE_PARAM_NAMES_PX4 } else { FENCE_PARAM_NAMES_ARDU }
@@ -74,7 +74,7 @@ pub struct FenceConfig {
 
 /// Resolve the MAVLink command sender + sysid (fences are MAVLink-only).
 fn mav_handle(state: &State<'_, AppState>, vehicle_id: Option<&str>) -> Result<Option<(std::sync::mpsc::Sender<crate::mavlink_proto::handler::MavlinkCommand>, u8, bool)>, String> {
-    // `vehicle_id` = frontend "L1:S1" key, None = active vehicle. // MSP / passive / disconnected → no fence
+    // `vehicle_id` = frontend "L1:S1" key, None = active vehicle. MSP / passive / disconnected → no fence
     Ok(state.mav_target_opt(vehicle_id)?.map(|t| (t.cmd_tx, t.sysid, t.fc_variant.eq_ignore_ascii_case("px4"))))
 }
 
@@ -97,8 +97,11 @@ pub fn fence_read_all(vehicle_id: Option<String>, state: State<'_, AppState>) ->
 }
 
 /// "Save to FC": upload the fence geometry (or clear it when empty), then write the provided params.
+/// Returns the parameters that could NOT be written (`NAME: reason`), as a warning for the panel: once
+/// the geometry went up, a slow or unknown parameter must not fail the save — on PX4 `set_param` reads
+/// the parameter's type first and errors on a timeout, and the geometry would already be on the vehicle.
 #[tauri::command(async)]
-pub fn fence_write_all(vehicle_id: Option<String>, config: FenceConfig, state: State<'_, AppState>) -> Result<(), String> {
+pub fn fence_write_all(vehicle_id: Option<String>, config: FenceConfig, state: State<'_, AppState>) -> Result<Vec<String>, String> {
     let Some((cmd_tx, fc_sysid, px4)) = mav_handle(&state, vehicle_id.as_deref())? else {
         return Err("FC is not running MAVLink".into());
     };
@@ -108,11 +111,15 @@ pub fn fence_write_all(vehicle_id: Option<String>, config: FenceConfig, state: S
     } else {
         mavlink_proto::mission::upload(&cmd_tx, fc_sysid, &items, false, MavMissionType::MAV_MISSION_TYPE_FENCE, false, |_, _| {})?;
     }
+    let mut warnings = Vec::new();
     for p in &config.params {
-        control::set_param(&cmd_tx, fc_sysid, &p.name, p.value, px4)?;
+        if let Err(e) = control::set_param(&cmd_tx, fc_sysid, &p.name, p.value, px4) {
+            log::warn!("[FENCE] parameter {} not written: {}", p.name, e);
+            warnings.push(format!("{}: {}", p.name, e));
+        }
     }
-    eprintln!("[FENCE] saved {} zone(s) + {} params to FC", config.zones.len(), config.params.len());
-    Ok(())
+    eprintln!("[FENCE] saved {} zone(s) + {} params to FC ({} not written)", config.zones.len(), config.params.len(), warnings.len());
+    Ok(warnings)
 }
 
 /// Group raw fence MISSION items into zones. Polygon vertices arrive as consecutive items of the same

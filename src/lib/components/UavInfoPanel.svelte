@@ -201,9 +201,12 @@
             <span class="feature-badge available">{$t('uavInfo.telemetry')}</span>
             <span class="feature-badge" class:available={fcInfo.features.autoland_config} class:unavailable={!fcInfo.features.autoland_config} title="INAV 7.1+">{$t('uavInfo.autoland')}</span>
             <span class="feature-badge" class:available={fcInfo.features.geozones} class:unavailable={!fcInfo.features.geozones} title="INAV 8.0+">{$t('uavInfo.geozones')}</span>
-            <span class="feature-badge" class:available={fcInfo.features.msp_rc} class:unavailable={!fcInfo.features.msp_rc} title="INAV 8.0+">{$t('uavInfo.mspRc')}</span>
-            <span class="feature-badge" class:available={fcInfo.features.aux_rc} class:unavailable={!fcInfo.features.aux_rc} title="INAV 9.1+">{$t('uavInfo.auxRc')}</span>
-            <span class="feature-badge" class:available={fcInfo.features.adsb_msp} class:unavailable={!fcInfo.features.adsb_msp} title="INAV 8.0+">{$t('uavInfo.adsb')}</span>
+            <!-- MSP over MAVLink: these are off for the LINK (no MSP RC stream / ADS-B poll through the
+                 tunnel), whatever the firmware version — say so instead of the version hint. -->
+            <span class="feature-badge" class:available={fcInfo.features.msp_rc} class:unavailable={!fcInfo.features.msp_rc} title={fcInfo.features.msp_tunnel ? $t('uavInfo.notOverMspMav') : 'INAV 8.0+'}>{$t('uavInfo.mspRc')}</span>
+            <span class="feature-badge" class:available={fcInfo.features.aux_rc} class:unavailable={!fcInfo.features.aux_rc} title={fcInfo.features.msp_tunnel ? $t('uavInfo.notOverMspMav') : 'INAV 9.1+'}>{$t('uavInfo.auxRc')}</span>
+            <span class="feature-badge" class:available={fcInfo.features.adsb_msp} class:unavailable={!fcInfo.features.adsb_msp} title={fcInfo.features.msp_tunnel ? $t('uavInfo.notOverMspMav') : 'INAV 8.0+'}>{$t('uavInfo.adsb')}</span>
+            <span class="feature-badge" class:available={fcInfo.features.msp_tunnel} class:unavailable={!fcInfo.features.msp_tunnel} title="INAV 10.0+">{$t('uavInfo.mspTunnel')}</span>
           </div>
         </section>
       {/if}

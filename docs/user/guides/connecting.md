@@ -27,11 +27,39 @@ adapter, and so on.
 | Protocol | Use it for | Direction |
 |---|---|---|
 | **MSP** | INAV flight controllers (7.0+) | Two-way (Kite polls the FC) |
-| **MAVLink** | ArduPilot and PX4 | Two-way |
+| **MAVLink** | ArduPilot and PX4 — and **INAV 10.0+** on a MAVLink-only link (see below) | Two-way |
 | **Telemetry** | A passive, listen-only downlink (SmartPort, CRSF, LTM, MAVLink) | **Receive only** — Kite never transmits |
 
 The first two are normal bidirectional control links. **Telemetry** is special — see
 [Passive telemetry](#passive-telemetry-listen-only) below.
+
+### INAV over MAVLink (MSP/MAV)
+
+Some radio links only carry MAVLink — ELRS or mLRS in MAVLink mode, SiK radios, a MAVLink Wi-Fi bridge.
+Until now an INAV flight controller on such a link gave you only what its MAVLink emulation offers. From
+**INAV 10.0** the flight controller can carry MSP inside the MAVLink stream, and Kite uses that
+automatically:
+
+1. Connect with the **MAVLink** protocol as you would for ArduPilot.
+2. Kite recognises an INAV flight controller during the handshake and checks for the MSP tunnel (this
+   takes up to two seconds). If it answers, the connection status shows **MSP/MAV** and UAV Info lists
+   the real INAV version, board and craft name plus the feature badge **MSP over MAVLink**.
+3. From there the INAV features work as over a direct MSP link: mission upload and download (including
+   EEPROM and multi-mission), safe homes, geozones, craft name, flight statistics. Telemetry itself
+   still comes over MAVLink — nothing is polled through the tunnel.
+
+What you need on the INAV side: firmware **10.0 or newer**, a serial port with the **MAVLink telemetry**
+function, `mavlink_version` left at 2 (the default) and a board with more than 512 KB of flash (F722 and
+F411 boards have no MAVLink). Nothing needs to be enabled in the CLI.
+
+Not available on such a link: RC control from Kite, ADS-B from the flight controller's own receiver,
+and the INAV-only telemetry details that need MSP polling (mode boxes, arming-blocked reasons, sensor
+status) — those badges in UAV Info show *Not available over MSP/MAV*.
+
+!!! note "Large replies on INAV 10.0.0-RC1"
+    RC1 has a firmware bug that drops parts of long tunnel replies on a hardware UART (small ones such as
+    mission waypoints are fine). It is fixed in the INAV `maintenance-10.x` branch; on RC1 an affected
+    request simply times out after a few seconds.
 
 ### Transport
 
@@ -198,8 +226,9 @@ the app holds — see **[Raw telemetry](telemetry-and-display.md#raw-telemetry)*
 
 - The button becomes **Disconnect**; the top bar shows arming readiness, per-sensor health, battery and
   link quality; widgets start updating; your aircraft appears on the map once it has a GPS fix.
-- **INAV/MSP** links additionally download the safe-home/autoland config and (on INAV 8.0+) geozones for
-  the map overlay. **MAVLink** links download the geofence and rally points.
+- **INAV/MSP** links — including INAV over MAVLink (**MSP/MAV**) — additionally download the
+  safe-home/autoland config and (on INAV 8.0+) geozones for the map overlay. **ArduPilot/PX4 MAVLink**
+  links download the geofence and rally points.
 
 ## Reconnecting
 

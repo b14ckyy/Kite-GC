@@ -22,10 +22,10 @@ Reported per flight:
           rates and the ratio w_cog / w_model
 
 Usage:
-  python tools/turn_analysis.py                 # list flights with attitude data
-  python tools/turn_analysis.py 167 160         # analyse these flight ids
-  python tools/turn_analysis.py 167 --turns     # ... and print the per-turn table
-  python tools/turn_analysis.py 167 --json out.json   # dump 5 Hz series + stats (for charts)
+  python tools/analyzers/turn_analysis.py                 # list flights with attitude data
+  python tools/analyzers/turn_analysis.py 167 160         # analyse these flight ids
+  python tools/analyzers/turn_analysis.py 167 --turns     # ... and print the per-turn table
+  python tools/analyzers/turn_analysis.py 167 --json out.json   # dump 5 Hz series + stats (for charts)
 
 Reads the DB read-only; the app may stay open. Requires numpy.
 """

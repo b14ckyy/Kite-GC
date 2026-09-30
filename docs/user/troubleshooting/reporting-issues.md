@@ -43,7 +43,8 @@ The log usually pinpoints the cause. To capture a good one:
 
 1. Open **Settings → Diagnostics** and set **Log Level** to **Debug**.
 2. **Reproduce** the problem.
-3. Click **Open Log Folder** and attach the log file to the issue.
+3. Click **Open Log Folder** and attach the log file to the issue (on Android **Share log file** → pick the
+   day → send it to mail or a messenger, then attach it).
 
 The log locations and what the file contains (port names and firmware strings, but no personal data) are
 listed under **[Connection → Getting a diagnostic log](connection.md#getting-a-diagnostic-log)**.

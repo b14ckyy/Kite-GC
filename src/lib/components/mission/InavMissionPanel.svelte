@@ -42,7 +42,7 @@
   import { anyCase } from '$lib/helpers/fileFilters';
   import { contextMenu } from '$lib/actions/contextMenu';
   import { buildWaypointMenu } from '$lib/helpers/waypointMenu';
-  import { connection } from '$lib/stores/connection';
+  import { connection, hasMsp } from '$lib/stores/connection';
   import { telemetry, type TelemetryData } from '$lib/stores/telemetry';
   import { get } from 'svelte/store';
   import { settings } from '$lib/stores/settings';
@@ -121,17 +121,16 @@
 
   const ARMING_FLAG_ARMED = 2;
 
-  function isConnected(): boolean {
-    return get(connection)?.status === 'connected';
+  /** FC transfers need MSP (direct or MSP over MAVLink). Returns the status line to show when the link
+   *  can't do them, else null. */
+  function noMspReason(): string | null {
+    if (get(hasMsp)) return null;
+    return get(connection)?.status === 'connected' ? $t('mission.noMspLink') : $t('mission.notConnected');
   }
 
   // Safe Home Manager button: only with a live INAV link that supports the autoland/safehome config
   // (≥7.1). Safehome display works on older INAV, but editing (this panel) is gated to ≥7.1.
-  const showSafehomeBtn = $derived(
-    $connection.status === 'connected'
-      && $connection.protocolType === 'msp'
-      && !!$connection.fcInfo?.features?.autoland_config,
-  );
+  const showSafehomeBtn = $derived($hasMsp && !!$connection.fcInfo?.features?.autoland_config);
 
   function isArmed(): boolean {
     return currentTelem.lastUpdate > 0 && (currentTelem.armingFlags & (1 << ARMING_FLAG_ARMED)) !== 0;
@@ -156,7 +155,8 @@
   }
 
   async function handleDownload() {
-    if (!isConnected()) { statusMessage = $t('mission.notConnected'); return; }
+    const noMsp = noMspReason();
+    if (noMsp) { statusMessage = noMsp; return; }
     downloadLoading = true; statusMessage = $t('mission.downloading');
     const un = await listenDownloadProgress();
     try {
@@ -168,7 +168,8 @@
   }
 
   async function handleUpload() {
-    if (!isConnected()) { statusMessage = $t('mission.notConnected'); return; }
+    const noMsp = noMspReason();
+    if (noMsp) { statusMessage = noMsp; return; }
     uploadLoading = true; statusMessage = $t('mission.uploading');
     const un = await listenUploadProgress();
     try {
@@ -180,7 +181,8 @@
   }
 
   async function handleEepromSave() {
-    if (!isConnected() || isArmed()) { statusMessage = isArmed() ? $t('mission.eepromSaveArmedMsg') : $t('mission.notConnected'); return; }
+    const noMsp = noMspReason();
+    if (noMsp || isArmed()) { statusMessage = isArmed() ? $t('mission.eepromSaveArmedMsg') : (noMsp ?? ''); return; }
     eepromSaveLoading = true; statusMessage = $t('mission.uploading');
     const un = await listenUploadProgress();
     try {
@@ -192,7 +194,8 @@
   }
 
   async function handleEepromLoad() {
-    if (!isConnected()) { statusMessage = $t('mission.notConnected'); return; }
+    const noMsp = noMspReason();
+    if (noMsp) { statusMessage = noMsp; return; }
     eepromLoadLoading = true; statusMessage = $t('mission.downloading');
     const un = await listenDownloadProgress();
     try {

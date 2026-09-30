@@ -3,7 +3,9 @@
 
 // Runtime MAVLink parameter reads (geofence params: ArduPilot FENCE_* / PX4 GF_*). Mirrors the mission
 // microprotocol's request/receiver pattern via `RegisterParamReceiver`. Writes reuse
-// `control::set_param` (fire-and-forget PARAM_SET). See docs/active/GEOFENCE.md.
+// `control::set_param` (PARAM_SET; on PX4 preceded by a typed read). See docs/active/GEOFENCE.md.
+// The handler has ONE param-receiver slot, so `read_params_typed` holds `PARAM_SLOT` for its whole
+// register -> read -> unregister cycle: overlapping readers wait instead of displacing each other.
 
 use std::collections::HashMap;
 use std::sync::mpsc;
@@ -14,6 +16,9 @@ use ::mavlink::ardupilotmega::{MavMessage, MavParamType, PARAM_REQUEST_READ_DATA
 use super::handler::MavlinkCommand;
 
 const PARAM_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Serialises use of the handler's single param-receiver slot (see the header comment).
+static PARAM_SLOT: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn pack_param_id(name: &str) -> [u8; 16] {
     let mut id = [0u8; 16];
@@ -94,6 +99,9 @@ pub fn read_params_typed(
     fc_sysid: u8,
     names: &[&str],
 ) -> HashMap<String, (f32, MavParamType)> {
+    // Held until after the Unregister below: a second Register would replace our sender, and our
+    // unconditional Unregister would then clear the other reader's slot.
+    let _slot = PARAM_SLOT.lock().unwrap_or_else(|p| p.into_inner());
     let (tx, rx) = mpsc::channel();
     if cmd_tx.send(MavlinkCommand::RegisterParamReceiver { sysid: fc_sysid, tx }).is_err() {
         return HashMap::new();
@@ -128,4 +136,37 @@ pub fn read_params_typed(
     }
     let _ = cmd_tx.send(MavlinkCommand::UnregisterParamReceiver);
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ardupilot_integer_params_pass_through() {
+        assert_eq!(decode_param(2.0, MavParamType::MAV_PARAM_TYPE_INT32), 2.0);
+        assert_eq!(decode_param(0.0, MavParamType::MAV_PARAM_TYPE_UINT8), 0.0);
+        assert_eq!(decode_param(-1.0, MavParamType::MAV_PARAM_TYPE_INT16), -1.0);
+    }
+
+    #[test]
+    fn px4_bytecast_integers_are_decoded() {
+        // COM_RC_IN_MODE = 2 arrives as the float with bit pattern 2 (a denormal).
+        assert_eq!(decode_param(f32::from_bits(2), MavParamType::MAV_PARAM_TYPE_INT32), 2.0);
+        assert_eq!(decode_param(f32::from_bits(0xFFFF_FFFF), MavParamType::MAV_PARAM_TYPE_INT32), -1.0);
+        assert_eq!(decode_param(f32::from_bits(200), MavParamType::MAV_PARAM_TYPE_UINT8), 200.0);
+    }
+
+    #[test]
+    fn reals_are_never_touched() {
+        assert_eq!(decode_param(1.5, MavParamType::MAV_PARAM_TYPE_REAL32), 1.5);
+        assert_eq!(encode_param_bytecast(1.5, MavParamType::MAV_PARAM_TYPE_REAL32), 1.5);
+    }
+
+    #[test]
+    fn encode_roundtrips_through_decode() {
+        for (v, ty) in [(2.0, MavParamType::MAV_PARAM_TYPE_INT32), (-3.0, MavParamType::MAV_PARAM_TYPE_INT8), (60000.0, MavParamType::MAV_PARAM_TYPE_UINT16)] {
+            assert_eq!(decode_param(encode_param_bytecast(v, ty), ty), v);
+        }
+    }
 }

@@ -35,9 +35,39 @@ impl MavSequence {
 /// ```
 pub fn serialize_v2(header: &MavHeader, msg: &MavMessage, seq: &mut MavSequence) -> Vec<u8> {
     let mut payload_buf = [0u8; 255];
+    // `ser` already applies the MAVLink2 trailing-zero trim (mavlink-core `remove_trailing_zeroes`).
     let payload_len = msg.ser(MavlinkVersion::V2, &mut payload_buf);
-    let payload = &payload_buf[..payload_len];
     let msg_id = msg.message_id();
+    build_v2_frame(header, msg_id, MavMessage::extra_crc(msg_id), &payload_buf[..payload_len], seq)
+}
+
+/// Serialize a raw (hand-encoded) message payload into a complete v2 wire frame — for messages the
+/// typed crate cannot represent (TUNNEL with INAV's payload type 0x8001, see `tunnel.rs`). Applies the
+/// same MAVLink2 trailing-zero trim as the typed path (at least one payload byte is kept) and shares
+/// its header + X.25/CRC_EXTRA path.
+pub fn serialize_raw_v2(
+    header: &MavHeader,
+    msg_id: u32,
+    crc_extra: u8,
+    payload: &[u8],
+    seq: &mut MavSequence,
+) -> Vec<u8> {
+    let mut len = payload.len().min(255);
+    while len > 1 && payload[len - 1] == 0 {
+        len -= 1;
+    }
+    build_v2_frame(header, msg_id, crc_extra, &payload[..len], seq)
+}
+
+/// Assemble STX + header + payload + CRC for an already-final (trimmed) payload.
+fn build_v2_frame(
+    header: &MavHeader,
+    msg_id: u32,
+    extra_crc: u8,
+    payload: &[u8],
+    seq: &mut MavSequence,
+) -> Vec<u8> {
+    let payload_len = payload.len();
     let sequence = seq.next();
 
     // Header bytes (after STX) — used for CRC calculation
@@ -54,7 +84,6 @@ pub fn serialize_v2(header: &MavHeader, msg: &MavMessage, seq: &mut MavSequence)
     ];
 
     // CRC over header + payload + extra CRC byte
-    let extra_crc = MavMessage::extra_crc(msg_id);
     let crc = compute_crc(&header_bytes, payload, extra_crc);
 
     // Assemble complete frame
@@ -108,4 +137,35 @@ fn crc_accumulate(crc: u16, byte: u8) -> u16 {
     let tmp: u8 = tmp ^ (tmp << 4);
     let tmp16 = tmp as u16;
     (crc >> 8) ^ (tmp16 << 8) ^ (tmp16 << 3) ^ (tmp16 >> 4)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raw_and_typed_serializers_agree() {
+        // The raw path must frame + trim exactly like the typed path: feed it the untrimmed typed
+        // payload of a HEARTBEAT (trailing zero bytes included) and compare the wire frames.
+        let msg = gcs_heartbeat();
+        let mut untrimmed = [0u8; 255];
+        let _ = msg.ser(MavlinkVersion::V1, &mut untrimmed); // V1 = no trim → full 9-byte payload
+        let full = &untrimmed[..9];
+        let typed = serialize_v2(&gcs_header(), &msg, &mut MavSequence::new());
+        let raw = serialize_raw_v2(
+            &gcs_header(),
+            msg.message_id(),
+            MavMessage::extra_crc(msg.message_id()),
+            full,
+            &mut MavSequence::new(),
+        );
+        assert_eq!(typed, raw);
+    }
+
+    #[test]
+    fn raw_trim_keeps_one_byte() {
+        let f = serialize_raw_v2(&gcs_header(), 385, 147, &[0u8; 133], &mut MavSequence::new());
+        assert_eq!(f[1], 1, "an all-zero payload keeps one byte on the wire");
+        assert_eq!(f.len(), 1 + 9 + 1 + 2);
+    }
 }

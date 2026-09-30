@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 """Minimal LTM telemetry simulator — a fake aircraft for Kite's passive "Telemetry" protocol.
 
 Streams LightTelemetry frames (`$T<type><payload><xor>`) the way an INAV LTM output would: A
@@ -10,10 +13,10 @@ the foreground-service notification and the track backfill on a phone
 Kite side: Protocol = Telemetry, Transport = UDP, host = this machine, port = --port. Kite binds
 that port locally and learns the peer from the first datagram, so send TO the phone:
 
-    python tools/ltm_sim.py --udp 192.168.1.87:14551
+    python tools/simulators/ltm_sim.py --udp 192.168.1.87:14551
 
 TCP variant (Kite connects to us — pairs with `adb reverse tcp:14551 tcp:14551` when the phone has
-no Wi-Fi): `python tools/ltm_sim.py --tcp 14551`, Kite host = 127.0.0.1, port 14551.
+no Wi-Fi): `python tools/simulators/ltm_sim.py --tcp 14551`, Kite host = 127.0.0.1, port 14551.
 """
 import argparse
 import math

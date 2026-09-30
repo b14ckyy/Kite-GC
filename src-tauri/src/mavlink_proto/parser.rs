@@ -45,6 +45,20 @@ pub struct MavFrame {
     pub raw_bytes: Vec<u8>,
 }
 
+/// Parser output: a typed message, or a TUNNEL (#385) frame decoded by hand because the typed crate
+/// rejects INAV's payload type 0x8001 (see `tunnel.rs`). CRC-validated like every other frame.
+// `Msg` is the per-frame hot path — boxing it would add an allocation to every telemetry message.
+#[allow(clippy::large_enum_variant)]
+pub enum Parsed {
+    Msg(MavFrame),
+    Tunnel {
+        header: MavHeader,
+        /// Complete raw frame bytes (STX through CRC) for tlog recording
+        raw_bytes: Vec<u8>,
+        tunnel: super::tunnel::TunnelRaw,
+    },
+}
+
 /// MAVLink byte-level frame parser.
 /// Feed bytes via `push()`, get parsed frames out.
 pub struct MavParser {
@@ -65,8 +79,17 @@ impl MavParser {
         self.error_count
     }
 
-    /// Feed a single byte. Returns a parsed frame if one is complete.
+    /// Feed a single byte. Returns a parsed frame if one is complete. TUNNEL frames are not typed
+    /// messages and are skipped here — use `push_any` / `parse_all` to receive them.
     pub fn push(&mut self, byte: u8) -> Option<MavFrame> {
+        match self.push_any(byte) {
+            Some(Parsed::Msg(frame)) => Some(frame),
+            _ => None,
+        }
+    }
+
+    /// Feed a single byte. Returns a typed frame or a raw TUNNEL frame once one is complete.
+    pub fn push_any(&mut self, byte: u8) -> Option<Parsed> {
         match std::mem::replace(&mut self.state, State::WaitingForStx) {
             State::WaitingForStx => {
                 match byte {
@@ -150,7 +173,7 @@ impl MavParser {
         header_buf: &[u8],
         payload_buf: &[u8],
         payload_len: usize,
-    ) -> Option<MavFrame> {
+    ) -> Option<Parsed> {
         let (header, msg_id) = match version {
             MavlinkVersion::V1 => {
                 // header_buf: [len, seq, sysid, compid, msgid]
@@ -194,6 +217,22 @@ impl MavParser {
             return None;
         }
 
+        // TUNNEL (#385): decoded by hand BEFORE the typed parse — the crate types `payload_type` as an
+        // enum that rejects INAV's 0x8001 (`InvalidEnum`), which would drop every MSP tunnel reply.
+        if msg_id == super::tunnel::TUNNEL_MSG_ID {
+            return match super::tunnel::decode(payload) {
+                Some(tunnel) => Some(Parsed::Tunnel {
+                    header,
+                    raw_bytes: raw_frame(version, header_buf, payload_buf),
+                    tunnel,
+                }),
+                None => {
+                    log::debug!("MAVLink TUNNEL rejected: payload_length > 128 (len byte {:?})", payload.get(4));
+                    None
+                }
+            };
+        }
+
         // Parse message payload into typed enum.
         //
         // POSITION_TARGET_GLOBAL_INT (87): ArduPilot sets the undefined upper bits of `type_mask`
@@ -212,22 +251,12 @@ impl MavParser {
         });
         match parsed {
             Ok(message) => {
-                // Reconstruct full frame: STX + header + payload + CRC
-                let stx = match version {
-                    MavlinkVersion::V1 => 0xFE,
-                    MavlinkVersion::V2 => 0xFD,
-                };
-                let mut raw = Vec::with_capacity(1 + header_buf.len() + payload_buf.len());
-                raw.push(stx);
-                raw.extend_from_slice(header_buf);
-                raw.extend_from_slice(payload_buf);
-
-                Some(MavFrame {
+                Some(Parsed::Msg(MavFrame {
                     header,
                     message,
                     protocol_version: *version,
-                    raw_bytes: raw,
-                })
+                    raw_bytes: raw_frame(version, header_buf, payload_buf),
+                }))
             }
             Err(e) => {
                 log::debug!("MAVLink parse error for msg_id {}: {:?}", msg_id, e);
@@ -236,10 +265,28 @@ impl MavParser {
         }
     }
 
-    /// Feed multiple bytes, collect all parsed frames
+    /// Feed multiple bytes, collect all parsed frames (typed messages only — TUNNEL frames are skipped)
     pub fn parse_bytes(&mut self, data: &[u8]) -> Vec<MavFrame> {
         data.iter().filter_map(|&b| self.push(b)).collect()
     }
+
+    /// Feed multiple bytes, collect every parsed frame including raw TUNNEL frames
+    pub fn parse_all(&mut self, data: &[u8]) -> Vec<Parsed> {
+        data.iter().filter_map(|&b| self.push_any(b)).collect()
+    }
+}
+
+/// Reconstruct the full wire frame: STX + header + payload + CRC
+fn raw_frame(version: &MavlinkVersion, header_buf: &[u8], payload_buf: &[u8]) -> Vec<u8> {
+    let stx = match version {
+        MavlinkVersion::V1 => 0xFE,
+        MavlinkVersion::V2 => 0xFD,
+    };
+    let mut raw = Vec::with_capacity(1 + header_buf.len() + payload_buf.len());
+    raw.push(stx);
+    raw.extend_from_slice(header_buf);
+    raw.extend_from_slice(payload_buf);
+    raw
 }
 
 /// X.25 CRC computation for MAVLink frames.
@@ -336,5 +383,77 @@ mod tests {
         assert_eq!(frames.len(), 1, "Should parse exactly one frame");
         assert_eq!(frames[0].header.system_id, 1);
         matches!(&frames[0].message, MavMessage::HEARTBEAT(_));
+    }
+
+    /// A TUNNEL frame as INAV sends it: from (1, 1) to Kite (255, 190), MSP slice as payload.
+    fn tunnel_frame(chunk: &[u8]) -> Vec<u8> {
+        use crate::mavlink_proto::{codec, tunnel};
+        let header = MavHeader { system_id: 1, component_id: 1, sequence: 0 };
+        let payload = tunnel::encode_chunk(codec::GCS_SYSTEM_ID, codec::GCS_COMPONENT_ID, chunk);
+        codec::serialize_raw_v2(
+            &header,
+            tunnel::TUNNEL_MSG_ID,
+            tunnel::TUNNEL_CRC_EXTRA,
+            &payload,
+            &mut codec::MavSequence::new(),
+        )
+    }
+
+    #[test]
+    fn test_tunnel_roundtrip() {
+        let chunk: Vec<u8> = (1..=128u8).collect(); // full chunk, no trailing zeros
+        let frame = tunnel_frame(&chunk);
+        let mut parser = MavParser::new();
+        let out = parser.parse_all(&frame);
+        assert_eq!(out.len(), 1);
+        match &out[0] {
+            Parsed::Tunnel { header, raw_bytes, tunnel } => {
+                assert_eq!((header.system_id, header.component_id), (1, 1));
+                assert_eq!(raw_bytes, &frame);
+                assert_eq!(tunnel.payload_type, 0x8001);
+                assert_eq!((tunnel.target_system, tunnel.target_component), (255, 190));
+                assert_eq!(tunnel.payload, chunk);
+            }
+            Parsed::Msg(_) => panic!("TUNNEL must come out as Parsed::Tunnel"),
+        }
+        // The typed-only API skips it (and does not count it as an error).
+        let mut parser = MavParser::new();
+        assert!(parser.parse_bytes(&frame).is_empty());
+        assert_eq!(parser.packet_errors(), 0);
+    }
+
+    #[test]
+    fn test_tunnel_trimmed_frame_zero_extends() {
+        // An MSP slice ending in zero bytes: MAVLink2 trims them off the wire, the parser restores them
+        // up to payload_length.
+        let chunk = [0x24, 0x58, 0x3E, 0x00, 0x01, 0x00, 0x00, 0x00];
+        let frame = tunnel_frame(&chunk);
+        assert_eq!(frame[1] as usize, 5 + 5, "wire payload trimmed to the last non-zero byte");
+        let mut parser = MavParser::new();
+        match parser.parse_all(&frame).pop() {
+            Some(Parsed::Tunnel { tunnel, .. }) => assert_eq!(tunnel.payload, chunk.to_vec()),
+            _ => panic!("expected a TUNNEL frame"),
+        }
+    }
+
+    #[test]
+    fn test_tunnel_crc_guards_frame() {
+        let mut frame = tunnel_frame(&[0x24, 0x58, 0x3E, 0x10]);
+        let last_payload = frame.len() - 3;
+        frame[last_payload] ^= 0xFF; // corrupt one payload byte
+        let mut parser = MavParser::new();
+        assert!(parser.parse_all(&frame).is_empty());
+        assert_eq!(parser.packet_errors(), 1);
+    }
+
+    #[test]
+    fn test_tunnel_rejects_oversized_length() {
+        use crate::mavlink_proto::{codec, tunnel};
+        let mut payload = tunnel::encode_chunk(255, 190, &[1, 2, 3]);
+        payload[4] = 200; // payload_length > 128
+        let header = MavHeader { system_id: 1, component_id: 1, sequence: 0 };
+        let frame = codec::serialize_raw_v2(&header, 385, 147, &payload, &mut codec::MavSequence::new());
+        let mut parser = MavParser::new();
+        assert!(parser.parse_all(&frame).is_empty());
     }
 }
