@@ -13,9 +13,6 @@
 //! here. Member paths are stored as file names and resolved against this file's directory, so the
 //! set survives a moved sessions folder.
 
-// Written by the group coordinator (GROUP_FLIGHTS.md step 5), read by the set recovery (step 7).
-#![allow(dead_code)]
-
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
@@ -25,17 +22,25 @@ use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
 pub const GROUP_FILE_EXT: &str = "kgrp";
 
 /// Group states (`GroupFileHeader::state`).
+#[allow(dead_code)] // group coordinator / set recovery: GROUP_FLIGHTS.md step 5/7
 pub const GROUP_RUNNING: &str = "running";
+#[allow(dead_code)] // group coordinator / set recovery: GROUP_FLIGHTS.md step 5/7
 pub const GROUP_ENDING: &str = "ending";
+#[allow(dead_code)] // group coordinator / set recovery: GROUP_FLIGHTS.md step 5/7
 pub const GROUP_PENDING: &str = "pending";
 
 /// Member states (`GroupFileMember::state`).
+#[allow(dead_code)] // group coordinator / set recovery: GROUP_FLIGHTS.md step 5/7
 pub const MEMBER_RECORDING: &str = "recording";
+#[allow(dead_code)] // group coordinator / set recovery: GROUP_FLIGHTS.md step 5/7
 pub const MEMBER_SUSPENDED: &str = "suspended";
+#[allow(dead_code)] // group coordinator / set recovery: GROUP_FLIGHTS.md step 5/7
 pub const MEMBER_ENDED: &str = "ended";
+#[allow(dead_code)] // group coordinator / set recovery: GROUP_FLIGHTS.md step 5/7
 pub const MEMBER_INCOMPLETE: &str = "incomplete";
 
 /// The group header — the future `flight_groups` row (§3.1) while the group is still temporary.
+#[allow(dead_code)] // group coordinator / set recovery: GROUP_FLIGHTS.md step 5/7
 #[derive(Debug, Clone, PartialEq)]
 pub struct GroupFileHeader {
     /// Immutable group id (16 hex chars; hash of the anchor's start time + position, §3.1).
@@ -56,6 +61,7 @@ pub struct GroupFileHeader {
 }
 
 /// One member recording of the group.
+#[allow(dead_code)] // group coordinator / set recovery: GROUP_FLIGHTS.md step 5/7
 #[derive(Debug, Clone, PartialEq)]
 pub struct GroupFileMember {
     /// The member's `.ktmp` (a file name on disk, resolved against the `.kgrp`'s directory on read).
@@ -71,6 +77,7 @@ pub struct GroupFileMember {
 }
 
 /// `<sessions_dir>/group_<id>.kgrp`.
+#[allow(dead_code)] // group coordinator / set recovery: GROUP_FLIGHTS.md step 5/7
 pub fn group_file_path(sessions_dir: &Path, group_id: &str) -> PathBuf {
     sessions_dir.join(format!("group_{group_id}.{GROUP_FILE_EXT}"))
 }
@@ -87,6 +94,7 @@ pub fn sibling_path(of: &Path, file_name: &str) -> PathBuf {
 
 /// Open (creating it and its parent dir) a group temp file. WAL + `synchronous = NORMAL`, like the
 /// member `.ktmp` files, so `db::remove_temp_session` removes it with its sidecars.
+#[allow(dead_code)] // group coordinator / set recovery: GROUP_FLIGHTS.md step 5/7
 pub fn open_group_file(path: &Path) -> SqlResult<Connection> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).ok();
@@ -121,6 +129,7 @@ pub fn open_group_file(path: &Path) -> SqlResult<Connection> {
 }
 
 /// Write (replace) the group header.
+#[allow(dead_code)] // group coordinator / set recovery: GROUP_FLIGHTS.md step 5/7
 pub fn write_group_header(conn: &Connection, h: &GroupFileHeader) -> SqlResult<()> {
     conn.execute(
         "INSERT OR REPLACE INTO group_meta
@@ -143,6 +152,7 @@ pub fn write_group_header(conn: &Connection, h: &GroupFileHeader) -> SqlResult<(
 }
 
 /// The group header (None for a file without one — created but never written).
+#[allow(dead_code)] // group coordinator / set recovery: GROUP_FLIGHTS.md step 5/7
 pub fn read_group_header(conn: &Connection) -> SqlResult<Option<GroupFileHeader>> {
     conn.query_row(
         "SELECT group_id, start_time, end_time, start_lat, start_lon, start_alt_m, utc_offset_min,
@@ -169,6 +179,7 @@ pub fn read_group_header(conn: &Connection) -> SqlResult<Option<GroupFileHeader>
 }
 
 /// Add a member, or update it (keyed by its `.ktmp` file name).
+#[allow(dead_code)] // group coordinator / set recovery: GROUP_FLIGHTS.md step 5/7
 pub fn upsert_group_member(conn: &Connection, m: &GroupFileMember) -> SqlResult<()> {
     conn.execute(
         "INSERT OR REPLACE INTO group_members
@@ -188,6 +199,7 @@ pub fn upsert_group_member(conn: &Connection, m: &GroupFileMember) -> SqlResult<
 }
 
 /// Change one member's state. Returns whether the member is listed.
+#[allow(dead_code)] // group coordinator / set recovery: GROUP_FLIGHTS.md step 5/7
 pub fn set_group_member_state(conn: &Connection, temp_path: &Path, state: &str) -> SqlResult<bool> {
     let n = conn.execute(
         "UPDATE group_members SET state = ?1 WHERE member_file = ?2",
@@ -198,6 +210,7 @@ pub fn set_group_member_state(conn: &Connection, temp_path: &Path, state: &str) 
 
 /// The members listed in the group file `kgrp_path` (opened as `conn`), in join order, with their
 /// `.ktmp` paths resolved next to it.
+#[allow(dead_code)] // group coordinator / set recovery: GROUP_FLIGHTS.md step 5/7
 pub fn read_group_members(conn: &Connection, kgrp_path: &Path) -> SqlResult<Vec<GroupFileMember>> {
     let mut stmt = conn.prepare(
         "SELECT member_file, vehicle_key, craft_name, fc_variant, fc_uid, joined_at, state
@@ -220,6 +233,7 @@ pub fn read_group_members(conn: &Connection, kgrp_path: &Path) -> SqlResult<Vec<
 }
 
 /// Delete a group file with its WAL/SHM sidecars (best effort, like a `.ktmp`).
+#[allow(dead_code)] // group coordinator / set recovery: GROUP_FLIGHTS.md step 5/7
 pub fn remove_group_file(path: &Path) {
     super::db::remove_temp_session(path);
 }

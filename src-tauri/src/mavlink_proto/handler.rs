@@ -184,7 +184,7 @@ struct VehicleCtx {
     fused: FusedPos,
     quadplane_seen: bool,
     last_seen: Instant,
-    /// Own flight recorder (secondary vehicles only; the primary's is the link's recorder).
+    /// Unattended flight recorder (secondary vehicles only; the primary's is the link's recorder).
     recorder: Option<FlightRecorderHandle>,
 }
 
@@ -222,11 +222,11 @@ impl VehicleCtx {
     }
 }
 
-/// Build the recorder for a vehicle discovered on a shared link. Its flights land in the logbook under
-/// "<variant> #<sysid>" and follow the same pending → End-Flight rules as the link's primary recorder
-/// (Dev-Docs active/GROUP_FLIGHTS.md §5.3: no unattended auto-commit; the group coordinator makes it a
-/// group member). It emits through the vehicle's own emitter and is registered in app-state under its
-/// vehicle key.
+/// Build the unattended recorder for a vehicle discovered on a shared link. Its flights land in the
+/// logbook under "<variant> #<sysid>" and commit by themselves (see `FlightRecorder::set_auto_commit`)
+/// until the group coordinator takes secondaries over (Dev-Docs active/GROUP_FLIGHTS.md step 6; member
+/// mode switches auto-commit off). It emits through the vehicle's own emitter and is registered in
+/// app-state under its vehicle key.
 fn secondary_recorder(cfg: &SecondaryRecording, sysid: u8, fc_variant: &str, platform_type: u8, mav_type: u8, emitter: &VehicleEmitter) -> Option<FlightRecorderHandle> {
     if !cfg.settings.enabled || !cfg.settings.db_enabled {
         return None;
@@ -241,8 +241,9 @@ fn secondary_recorder(cfg: &SecondaryRecording, sysid: u8, fc_variant: &str, pla
     };
     let none_sink: crate::flightlog::msp_raw_logger::MspRawSink = std::sync::Arc::new(std::sync::Mutex::new(None));
     match FlightRecorder::new(settings, fc_info, "MAVLink", cfg.portable, emitter.clone(), cfg.slots.clone(), none_sink) {
-        Ok(rec) => {
-            log::info!("Flight recorder initialized for sysid={}", sysid);
+        Ok(mut rec) => {
+            rec.set_auto_commit(true);
+            log::info!("Flight recorder (unattended) initialized for sysid={}", sysid);
             let handle = std::sync::Arc::new(std::sync::Mutex::new(rec));
             register_recorder(emitter, Some(&handle));
             Some(handle)
@@ -360,8 +361,9 @@ fn handler_loop(
     vehicles.insert(fc_sysid, VehicleCtx::new(fc_compid, fc_variant.clone(), fc_identity.0, fc_identity.1, app_handle.clone()));
     let mut last_sweep = Instant::now();
     // Decoded telemetry feeds the PRIMARY vehicle's recorder (the link's; it also owns the raw .tlog of
-    // every frame). Secondary vehicles get their own DB recorder on discovery, so their
-    // arm/disarm never drives the primary's session or the End-Flight dialog.
+    // every frame). Secondary vehicles get their own unattended DB recorder on discovery: their flights
+    // auto-commit (until the group coordinator takes them over), so their arm/disarm never drives the
+    // primary's session or the End-Flight dialog.
 
     // Active mission operation receiver — when set, that vehicle's MISSION_* messages are forwarded
     // here instead of being dispatched as telemetry events.

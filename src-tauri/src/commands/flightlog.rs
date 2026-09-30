@@ -1468,8 +1468,10 @@ pub fn flightlog_scratch_clear(db_path: Option<String>) {
 }
 
 /// Temp sessions that belong to a live workflow in this process — every file a recorder (primary or
-/// secondary, any link) is writing, every pending (awaiting Save/Discard or the re-arm grace) one and
-/// every continue-on-reconnect one. The orphan scan and the discard sweeps must never touch these.
+/// secondary, any link) is writing, every pending (awaiting Save/Discard or the re-arm grace) one,
+/// every continue-on-reconnect one, and every group-member one (finalized, awaiting its group's store
+/// prompt, or suspended while its link is gone). The orphan scan and the discard sweeps must never
+/// touch these.
 fn protected_temp_paths(state: &crate::state::AppState) -> Vec<std::path::PathBuf> {
     state.sessions.protected_paths()
 }
@@ -1480,10 +1482,11 @@ fn protected_temp_paths(state: &crate::state::AppState) -> Vec<std::path::PathBu
 const EMPTY_TEMP_GRACE: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Scan `<db_dir>/sessions/*.ktmp` for an orphan session left by a crash/close. Sessions that are
-/// live in this process (recording / pending / continue-on-reconnect) are skipped; stale empty temp
-/// files (no telemetry) are deleted in passing; the newest non-empty one is returned for the
-/// recovery prompt. The frontend scans again after Save / Continue, and Discard sweeps every
-/// leftover, so a pile of stragglers is settled in one launch instead of resurfacing one per start.
+/// live in this process (recording / pending / continue-on-reconnect / group-pending / suspended group
+/// member) are skipped; stale empty temp files (no telemetry) are deleted in passing; the newest
+/// non-empty one is returned for the recovery prompt. The frontend scans again after Save /
+/// Continue, and Discard sweeps every leftover, so a pile of stragglers is settled in one launch
+/// instead of resurfacing one per start.
 #[tauri::command]
 pub fn flightlog_scan_orphan_sessions(
     db_path: Option<String>,

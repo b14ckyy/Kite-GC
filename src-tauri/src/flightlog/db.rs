@@ -1340,6 +1340,39 @@ pub fn temp_session_row_count(conn: &Connection) -> SqlResult<i64> {
     conn.query_row("SELECT COUNT(*) FROM telemetry_records", [], |row| row.get(0))
 }
 
+/// The columns of one telemetry row that the flight statistics read (`recorder::stats_over_segments`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct StatsSample {
+    pub timestamp_ms: i64,
+    pub lat: Option<f64>,
+    pub lon: Option<f64>,
+    pub baro_alt_m: Option<f64>,
+    pub alt_m: Option<f64>,
+    pub speed_ms: Option<f64>,
+    pub mah_drawn: Option<u32>,
+}
+
+/// A temp session's telemetry reduced to the statistics columns, in time order — the narrow read for
+/// recomputing a flight's stats (a full `read_flight_track` decodes every column of every row).
+pub fn read_stats_samples(conn: &Connection) -> SqlResult<Vec<StatsSample>> {
+    let mut stmt = conn.prepare(
+        "SELECT timestamp_ms, lat, lon, baro_alt_m, alt_m, speed_ms, mah_drawn
+         FROM telemetry_records WHERE flight_id = 0 ORDER BY timestamp_ms ASC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(StatsSample {
+            timestamp_ms: row.get(0)?,
+            lat: row.get(1)?,
+            lon: row.get(2)?,
+            baro_alt_m: row.get(3)?,
+            alt_m: row.get(4)?,
+            speed_ms: row.get(5)?,
+            mah_drawn: row.get(6)?,
+        })
+    })?;
+    rows.collect()
+}
+
 /// Commit a finished temp session into the main DB atomically: insert the finalized `flights` row,
 /// ATTACH the temp file, copy its `telemetry_records` (rewriting `flight_id` to the new main id),
 /// then DETACH. Returns the new flight id. The main DB therefore only ever sees the flight as a
@@ -1462,9 +1495,10 @@ pub fn remove_temp_session(temp_path: &Path) {
     }
 }
 
-/// Delete every temp `.ktmp` session in `dir` except the ones in `keep` (the live, pending and
-/// continue-on-reconnect sessions). Enforces the single-temp invariant whenever the user discards:
-/// stragglers from earlier crashes must not resurface one per launch. Returns the number removed.
+/// Delete every temp `.ktmp` session in `dir` except the ones in `keep` (the live, pending,
+/// continue-on-reconnect, group-pending and suspended group-member sessions). Enforces the
+/// single-temp invariant whenever the user discards: stragglers from earlier crashes must not
+/// resurface one per launch. Returns the number removed.
 pub fn sweep_temp_sessions(dir: &Path, keep: &[PathBuf]) -> usize {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
