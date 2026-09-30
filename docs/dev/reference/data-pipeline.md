@@ -159,7 +159,7 @@ interface TelemetryData {
     latitude; longitude; altitude;            // deg, deg, m (baro preferred, GPS fallback)
     speed; yaw; roll; pitch; vario;           // m/s, deg (COG preferred), deg, deg, m/s (+ = climb)
     voltage; current; mahDrawn; power;        // V, A, mAh, W (power derived)
-    numSat; fixType;                          // count, 0=NoGPS 1=NoFix 2=2D 3=3D
+    numSat; fixType;                          // count, 0=none 1=2D 2=3D 3=DGPS/RTK (every link)
     rssi; cpuLoad; armingFlags;               // bit 2 = ARMED
     flightModeFlags;                          // raw (forensic only — widget uses canonical flightMode)
     gyroStatus; accStatus; magStatus; baroStatus; gpsStatus; rangefinderStatus; pitotStatus;

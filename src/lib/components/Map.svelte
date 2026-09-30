@@ -2224,6 +2224,7 @@
     if (!map || viewMode !== 'free' || get(replayActive)) return;
     const pts = collectMissionLatLngs();
     if (pts.length === 0) return;
+    pendingUavJump = false; // a mission load is the latest positioning intent (same as the 3D map)
     map.fitBounds(L.latLngBounds(pts), { padding: [40, 40], maxZoom: 16 });
   }
 
@@ -2319,7 +2320,7 @@
       factor = 0.3;
     } else if (nightMode2D === 'auto') {
       // Auto = user system-time + PHYSICAL location (sunset based), smooth — NOT log/camera.
-      const u = resolveUserLocation(); // OS geo → UAV GPS → home → persisted map centre
+      const u = resolveUserLocation(); // OS geo → home → persisted map centre
       factor = cesiumLikeBrightness(sunAltitudeDeg(new Date(), u.lat, u.lon));
     }
     applyNightDim(factor);
@@ -2472,7 +2473,7 @@
 
         // Go-to-UAV on connect: jump once to the craft at a sensible zoom, deferred to the first 3D fix
         // (no fix ⇒ no UAV rendered). Free pan only; following already centres on the UAV.
-        if (pendingUavJump && viewMode === 'free' && !get(replayActive) && t.fixType >= 3 && t.numSat >= MIN_FIX_SATELLITES && isValidGpsCoordinate(t.lat, t.lon)) {
+        if (pendingUavJump && viewMode === 'free' && !get(replayActive) && t.fixType >= 2 && t.numSat >= MIN_FIX_SATELLITES && isValidGpsCoordinate(t.lat, t.lon)) {
           centerOn([t.lat, t.lon], 16);
           pendingUavJump = false;
         }

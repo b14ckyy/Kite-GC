@@ -31,6 +31,7 @@ use crate::flightmode::FlightModeState;
 use crate::msp::codec::MspCodec;
 use crate::scheduler::telemetry::{
     AirspeedData, AltitudeData, AnalogData, AttitudeData, GpsData, LinkStatsData, StatusData,
+    FIX_2D, FIX_3D,
 };
 
 use super::ap_passthrough::ApPassthroughDecoder;
@@ -503,7 +504,9 @@ impl CrsfDecoder {
 
         if f_gps {
             let gps = GpsData {
-                fix_type: if s.num_sat >= 4 { 3 } else { 2 },
+                // CRSF carries no fix field: inferred from the sat count, on the unified scale
+                // (`scheduler::telemetry::FIX_*`).
+                fix_type: if s.num_sat >= 4 { FIX_3D } else { FIX_2D },
                 num_sat: s.num_sat,
                 lat: s.lat,
                 lon: s.lon,

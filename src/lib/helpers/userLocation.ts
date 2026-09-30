@@ -3,8 +3,9 @@
 
 // Physical location of the user (for Night-Mode "auto" sunset timing). It does NOT need to be
 // precise — city-level is plenty. Sources, in order: a persisted last-known value (restored on
-// launch), an OS/browser geo check (on start + a manual button), and a connected UAV's GPS fix.
-// It deliberately never tracks the live map/camera — orbiting the globe must not change it.
+// launch) and an OS/browser geo check (on start + a manual button). It deliberately never tracks the
+// live map/camera — orbiting the globe must not change it — nor the aircraft's GPS fix: the
+// aircraft is not where the operator stands.
 //
 // The OS check is per-platform: Windows (WebView2) and Linux (WebKitGTK) use the Web Geolocation
 // API, while macOS goes through native CoreLocation (location_macos.rs) because WKWebView ships no
@@ -13,9 +14,7 @@
 import { writable, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { telemetry } from '$lib/stores/telemetry';
 import { homePosition } from '$lib/stores/home';
-import { connection } from '$lib/stores/connection';
 import { settings } from '$lib/stores/settings';
 import { isValidGpsCoordinate } from '$lib/helpers/telemetry';
 import { isMobile, isMacOS } from '$lib/platform';
@@ -23,13 +22,12 @@ import { isMobile, isMacOS } from '$lib/platform';
 export interface LatLon { lat: number; lon: number; }
 
 // Seed from the persisted value so Night-Mode auto is correct immediately on launch,
-// before any fresh geo/UAV fix arrives.
+// before any fresh OS geo fix arrives.
 export const userGeoLocation = writable<LatLon | null>(get(settings).userLocation ?? null);
-/** Accuracy radius (m) of the last OS fix, or null (persisted/UAV sources carry none). Used by the GCS
+/** Accuracy radius (m) of the last OS fix, or null (the persisted value carries none). Used by the GCS
  *  marker's on-select accuracy circle. */
 export const userGeoAccuracyM = writable<number | null>(null);
 
-const GPS_HDOP_MAX = 10; // coarse location only — any usable fix qualifies
 const GEO_OPTS: PositionOptions = { enableHighAccuracy: false, timeout: 8000, maximumAge: 3_600_000 };
 
 /** Update the live store and persist for the next session. */
@@ -128,19 +126,6 @@ if (isMacOS) {
     setUserLocation(e.payload.lat, e.payload.lon, 'os-corelocation', e.payload.accuracy_m);
   });
 }
-
-// ── Auto-update from a connected UAV's GPS (coarse is fine) ──
-// Capture one good fix per connection so we don't thrash localStorage every telemetry frame.
-let uavFixCaptured = false;
-connection.subscribe((c) => { if (c.status !== 'connected') uavFixCaptured = false; });
-telemetry.subscribe((t) => {
-  if (uavFixCaptured) return;
-  const hdopOk = t.gpsHdop <= 0 || t.gpsHdop < GPS_HDOP_MAX; // 0 = unknown → accept
-  if (t.fixType >= 3 && hdopOk && isValidGpsCoordinate(t.lat, t.lon)) {
-    uavFixCaptured = true;
-    setUserLocation(t.lat, t.lon, 'uav-gps');
-  }
-});
 
 /**
  * Best estimate of where the user physically is (for sunset timing).

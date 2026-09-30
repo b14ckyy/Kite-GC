@@ -452,8 +452,8 @@ pub struct TelemetryRecord {
     /// GPS fix, stored as received. Live recordings use the unified scale of `GpsData::fix_type`
     /// (`scheduler::telemetry::FIX_*`: 0 none / 1 2D / 2 3D / 3 DGPS-RTK) — except passive-link
     /// (LTM/CRSF/SmartPort) recordings made before that scale was unified, which hold 0 none / 2 2D /
-    /// 3 3D. Log imports store their source's own value (ArduPilot DataFlash / ULog: raw GPS status,
-    /// INAV blackbox: 3 whenever sats are logged).
+    /// 3 3D. `.tlog` and `.rawmsp` imports map to the unified scale; ArduPilot DataFlash and ULog keep
+    /// the raw GPS status and the INAV blackbox importer writes 3 whenever sats are logged.
     pub fix_type: Option<u8>,
     pub num_sat: Option<u8>,
     pub cpu_load: Option<u16>,

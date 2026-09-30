@@ -95,6 +95,10 @@ python tools/simulators/ardupilot-sitl-manager.py --headless --count 3 --frame q
   sysid 254 so its heartbeats never mask a lost Kite link. A **watchdog** restarts an instance that
   exits (the Windows Cygwin builds die the moment a TCP client disconnects — a Kite disconnect would
   otherwise leave a dead port).
+- **Fleet changes at runtime**: *Stop / Start selected* take rows down and back up as the same vehicle
+  (instance, sysid, port, home, EEPROM — the watchdog leaves a stopped one alone), *Add instance* starts one
+  more on the next free port (chain: a new tail dialling the last one), *Remove selected* stops and drops the
+  row (data folder kept). *Stop all* keeps the rows, *Start* brings every stopped one back.
 - **Binaries**: Windows uses Mission Planner's `Documents\Mission Planner\sitl` folder or downloads a
   channel (latest / Stable / Beta / PlaneStable / …) from firmware.ardupilot.org; Linux downloads the
   native SITL builds; macOS points at a waf build (`./waf configure --board sitl && ./waf plane`).

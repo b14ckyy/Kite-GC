@@ -5,7 +5,7 @@
 export const ARMING_FLAG_ARMED = 2; // bit 2 = ARMED
 
 // Minimum satellite count before we trust a 3D fix enough to jump the camera to the UAV. The FC can
-// briefly report fixType 3 with garbage/near-0,0 coordinates while the fix is still settling; a sat
+// briefly report a 3D fix with garbage/near-0,0 coordinates while the fix is still settling; a sat
 // count gate is the extra safety so the camera never snaps to a bogus early position.
 export const MIN_FIX_SATELLITES = 6;
 

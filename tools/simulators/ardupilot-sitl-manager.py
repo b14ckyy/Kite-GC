@@ -23,6 +23,10 @@ What it does
   failsafe.
 - Watchdog: an instance that exits is restarted (on Windows the Cygwin binaries die the moment a TCP
   client disconnects — a Kite disconnect would otherwise leave a dead port).
+- Fleet changes at runtime: stop / start / restart / remove the selected vehicles and add one — a vehicle
+  leaving and rejoining keeps its instance, sysid, ports, home and EEPROM; one stopped by hand is left
+  alone by the watchdog. Chain: ArduPilot's tcpclient does not reconnect, so a vehicle that restarts
+  loses the link from the one that dials it — only one nobody dials (the last one added) rejoins cleanly.
 - Binaries: Windows uses Mission Planner's sitl folder or downloads a channel (latest / Stable / Beta / …)
   from firmware.ardupilot.org; Linux downloads the native SITL builds; macOS points at a waf build
   (`./waf configure --board sitl && ./waf plane`, no prebuilt SITL exists there). Parameter files come
@@ -360,6 +364,10 @@ class Instance:
     restarts: int = 0
     started_at: float = 0.0
     state: str = "stopped"
+    stopped_by_user: bool = False  # Stop selected / Stop all: the watchdog leaves it alone until started again
+    launches: int = 0  # process launches so far — the EEPROM wipe applies to the first one only
+    dial_port: int | None = None  # chain: the neighbour's TCP server this vehicle's SERIAL2 dials
+    link: str = ""  # the Link column, fixed when the vehicle joins the list
     # live state from the monitor channel
     endpoint: tuple[str, int] | None = None
     mav_type: int = 0
@@ -463,6 +471,14 @@ class Manager:
         self.udp: socket.socket | None = None
         self.endpoint_sysid: dict[tuple[str, int], int] = {}
         self.last_mgr_hb = 0.0
+        self.begin_list()
+
+    def begin_list(self) -> None:
+        """Fix the fleet-wide choices when an empty list gets its first vehicle: one added later joins the
+        fleet that runs (link layout, sysid numbering, UDP target), not whatever the form shows by then."""
+        self.layout = SETTINGS["layout"]
+        self.sysid_base = int(SETTINGS["sysidBase"])
+        self.udp_target = (str(SETTINGS["udpHost"]), int(SETTINGS["udpPort"]))
 
     # -- configuration → command line ------------------------------------------------------------
     def preset(self) -> dict:
@@ -492,21 +508,43 @@ class Manager:
         return out
 
     def build_args(self, inst: Instance) -> list[str]:
-        files = next(p for v, f, p in FRAMES if f == SETTINGS["frame"])
+        """The command line, fixed when the vehicle joins the list: every relaunch (watchdog, Start / Restart
+        selected) brings back the same vehicle, even when the form or a preset changed since."""
+        files = next(p for v, f, p in FRAMES if f == inst.frame)
         defaults = ",".join(str(resolve_param_file(f)) for f in files) + ",identity.parm"
-        a = [f"-M{SETTINGS['frame']}", f"-O{self.home(inst.index)}", f"-s{SETTINGS['speedup']}",
+        a = [f"-M{inst.frame}", f"-O{self.home(inst.index)}", f"-s{SETTINGS['speedup']}",
              "--instance", str(inst.instance), "--sysid", str(inst.sysid),
              "--serial0", "tcp:0",
              "--serial5", f"udpclient:127.0.0.1:{SETTINGS['monitorPort']}",
              "--defaults", defaults]
-        if SETTINGS["wipe"]:
-            a.append("-w")
-        if SETTINGS["layout"] == "chain" and inst.index < SETTINGS["count"] - 1:
-            # Vehicle k's SERIAL2 dials vehicle k+1's SERIAL1 server (5762 + 10·instance) — MP's swarm chain.
-            a += ["--serial2", f"tcpclient:127.0.0.1:{5762 + 10 * (inst.instance + 1)}"]
-        elif SETTINGS["layout"] == "udp":
-            a += ["--serial6", f"udpclient:{SETTINGS['udpHost']}:{SETTINGS['udpPort']}"]
+        if inst.dial_port:
+            a += ["--serial2", f"tcpclient:127.0.0.1:{inst.dial_port}"]
+        elif self.layout == "udp":
+            a += ["--serial6", f"udpclient:{self.udp_target[0]}:{self.udp_target[1]}"]
         return a
+
+    def new_instance(self, k: int, dial_port: int | None = None) -> Instance:
+        inst = Instance(index=k, instance=k, sysid=self.sysid_base + k, frame=SETTINGS["frame"], vehicle=SETTINGS["vehicle"],
+                        dir=INSTANCES_DIR / str(k + 1), dial_port=dial_port)
+        if self.layout == "udp":
+            inst.link = f"udp:{self.udp_target[1]}"
+        elif self.layout == "chain":
+            inst.link = "tcp:5760 (head)" if k == 0 else "chained"
+        else:
+            inst.link = f"tcp:{inst.serial0_port}"
+        inst.args = self.build_args(inst)
+        return inst
+
+    def chain_port(self, tail: Instance) -> int:
+        """The TCP server on the chain's tail a newly added vehicle dials: its SERIAL2 (5763 + 10·instance)
+        unless that already dials out, else its SERIAL1 (5762 + 10·instance) unless a listed vehicle dials
+        it. The running vehicles stay untouched — the newcomer is the client."""
+        used = {i.dial_port for i in self.instances}
+        ports = ([5763 + 10 * tail.instance] if tail.dial_port is None else []) + [5762 + 10 * tail.instance]
+        for port in ports:
+            if port not in used:
+                return port
+        raise RuntimeError(f"Chain: the tail (sysid {tail.sysid}) has no free link port — remove the rows and Start again")
 
     def write_identity(self, inst: Instance) -> None:
         # Parameter DEFAULTS at boot (a value already stored in the EEPROM wins — which is why the extra
@@ -517,23 +555,28 @@ class Manager:
         (inst.dir / "identity.parm").write_text("\n".join(lines) + "\n", encoding="ascii")
 
     # -- process control --------------------------------------------------------------------------
-    def start_instance(self, inst: Instance) -> None:
+    def start_instance(self, inst: Instance, state: str = "starting") -> None:
         inst.dir.mkdir(parents=True, exist_ok=True)
-        if SETTINGS["wipe"] and inst.restarts == 0:
+        wipe = SETTINGS["wipe"] and inst.launches == 0  # a relaunch keeps the vehicle's EEPROM
+        if wipe:
             (inst.dir / "eeprom.bin").unlink(missing_ok=True)
         self.write_identity(inst)
-        exe = bin_dir() / binary_name(SETTINGS["vehicle"])
+        exe = bin_dir() / binary_name(inst.vehicle)
         if not exe.exists():
             raise FileNotFoundError(f"{exe} not found — download the channel first" + (", or start that vehicle once in Mission Planner" if IS_WINDOWS else ""))
-        inst.args = self.build_args(inst)
         out = open(inst.dir / "stdout.txt", "wb")
         inst.tree = ProcessTree()
-        inst.proc = subprocess.Popen([str(exe), *inst.args], cwd=inst.dir, stdout=out, stderr=subprocess.STDOUT,
-                                     **ProcessTree.popen_kwargs())
+        inst.proc = subprocess.Popen([str(exe), *inst.args, *(["-w"] if wipe else [])], cwd=inst.dir, stdout=out,
+                                     stderr=subprocess.STDOUT, **ProcessTree.popen_kwargs())
         out.close()
         inst.tree.adopt(inst.proc)
+        inst.launches += 1
+        inst.stopped_by_user = False
         inst.started_at = time.time()
-        inst.state = "starting"
+        inst.state = state  # "running" with the first heartbeat
+        # The new process pushes from a new UDP source port: forget the old one, so another process that
+        # gets that port later binds afresh instead of being dropped as this sysid's duplicate.
+        self.endpoint_sysid = {k: v for k, v in self.endpoint_sysid.items() if v != inst.sysid}
         inst.last_hb = 0.0
         inst.endpoint = None
         inst.intervals_requested = inst.params_applied = False
@@ -547,48 +590,126 @@ class Manager:
         inst.tree = None
         inst.proc = None
         inst.state, inst.mode, inst.armed = "stopped", "", False
+        inst.last_hb, inst.endpoint = 0.0, None  # live columns go blank, the monitor stops talking to it
 
-    def ports_busy(self) -> list[str]:
+    def ports_busy(self, insts: list[Instance]) -> list[str]:
         """SERIAL0 ports we are about to use that something else already listens on."""
         mine = {i.serial0_port for i in self.instances if i.alive}
         hits = []
-        for k in range(SETTINGS["count"]):
-            port = 5760 + 10 * k
-            if port in mine:
+        for inst in insts:
+            if inst.serial0_port in mine:
                 continue
             with socket.socket() as s:
                 s.settimeout(0.2)
-                if s.connect_ex(("127.0.0.1", port)) == 0:
-                    hits.append(str(port))
+                if s.connect_ex(("127.0.0.1", inst.serial0_port)) == 0:
+                    hits.append(str(inst.serial0_port))
         return hits
 
-    def start_all(self) -> None:
-        self.stop_all()
-        busy = self.ports_busy()
+    def check_ports(self, insts: list[Instance]) -> None:
+        busy = self.ports_busy(insts)
         if busy:
             raise RuntimeError(f"SITL ports already in use: {', '.join(busy)}. Stop Mission Planner's simulation (or another SITL) first.")
-        self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.udp.bind(("127.0.0.1", int(SETTINGS["monitorPort"])))
-        self.udp.setblocking(False)
-        self.endpoint_sysid = {}
-        order = list(range(SETTINGS["count"]))
-        if SETTINGS["layout"] == "chain":
-            order.reverse()  # the chain dials "up": start the last vehicle first
-        for k in order:
-            inst = Instance(index=k, instance=k, sysid=SETTINGS["sysidBase"] + k, frame=SETTINGS["frame"],
-                            vehicle=SETTINGS["vehicle"], dir=INSTANCES_DIR / str(k + 1))
-            self.start_instance(inst)
-            self.instances.append(inst)
-            time.sleep(0.4)
-        self.instances.sort(key=lambda i: i.index)
 
-    def stop_all(self) -> None:
-        for inst in self.instances:
-            self.stop_instance(inst)
-        self.instances.clear()
+    def open_monitor(self) -> None:
+        if self.udp is None:
+            self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.udp.bind(("127.0.0.1", int(SETTINGS["monitorPort"])))
+            self.udp.setblocking(False)
+            self.endpoint_sysid = {}
+
+    def close_monitor(self) -> None:
         if self.udp:
             self.udp.close()
             self.udp = None
+
+    def start_all(self) -> int:
+        """Start every listed vehicle that is not running; an empty list is filled from the settings first
+        (count, frame, layout …). Returns how many were launched."""
+        if self.instances:
+            todo = [i for i in self.instances if not i.alive]
+        else:
+            self.begin_list()
+            # chain: vehicle k's SERIAL2 dials vehicle k+1's SERIAL1 server (5762 + 10·instance) — MP's swarm chain
+            todo = [self.new_instance(k, 5762 + 10 * (k + 1) if self.layout == "chain" and k < SETTINGS["count"] - 1 else None)
+                    for k in range(SETTINGS["count"])]
+        self.check_ports(todo)
+        self.open_monitor()
+        if not self.instances:
+            self.instances = list(todo)
+        # The chain dials "up": start the last vehicle first (a tcpclient also retries until its server is up).
+        todo.sort(key=lambda i: i.index, reverse=self.layout == "chain")
+        for inst in todo:
+            self.start_instance(inst)
+            time.sleep(0.4)
+        return len(todo)
+
+    def stop_all(self) -> None:
+        """Stop every vehicle by hand — the rows stay (Start brings the same vehicles back)."""
+        for inst in self.instances:
+            self.stop_one(inst)
+
+    def shutdown(self) -> None:
+        for inst in self.instances:
+            self.stop_instance(inst)
+        self.instances.clear()
+        self.close_monitor()
+
+    # -- one vehicle at a time (a fleet member leaving / rejoining) ---------------------------------
+    def stop_one(self, inst: Instance) -> None:
+        self.stop_instance(inst)
+        inst.stopped_by_user = True
+
+    def start_one(self, inst: Instance) -> None:
+        """The same vehicle again: instance, sysid, ports, home, frame and its EEPROM / log folder."""
+        if inst.alive:
+            return
+        self.check_ports([inst])
+        self.open_monitor()
+        self.start_instance(inst)
+
+    def restart_one(self, inst: Instance) -> None:
+        self.stop_instance(inst)
+        inst.restarts += 1
+        self.start_instance(inst, "restarting")
+
+    def add_instance(self) -> Instance:
+        """A new vehicle with the form's frame + start position, joining the fleet's layout: TCP / UDP take
+        the lowest free instance number, the chain appends a tail that dials the current one."""
+        if len(self.instances) >= 32:
+            raise RuntimeError("32 vehicles is the limit")
+        if not self.instances:
+            self.begin_list()
+        used = {i.index for i in self.instances}
+        dial = None
+        if self.layout == "chain" and self.instances:
+            k = max(used) + 1
+            dial = self.chain_port(self.instances[-1])
+        else:
+            k = next(n for n in range(len(used) + 1) if n not in used)
+        if self.sysid_base + k > 250:
+            raise RuntimeError(f"sysid {self.sysid_base + k} is out of range (1…250)")
+        inst = self.new_instance(k, dial)
+        self.check_ports([inst])
+        self.open_monitor()
+        self.start_instance(inst)
+        self.instances.append(inst)
+        self.instances.sort(key=lambda i: i.index)
+        return inst
+
+    def chain_dialers(self, inst: Instance) -> list[Instance]:
+        """Chain: the running vehicles whose SERIAL2 dials this one. ArduPilot's tcpclient does not reconnect
+        (seen on the Windows Stable build), so once this vehicle stops, their link — and everything behind it —
+        stays cut until they restart."""
+        ports = {5762 + 10 * inst.instance, 5763 + 10 * inst.instance}
+        return [i for i in self.instances if i.dial_port in ports and i.alive]
+
+    def remove_one(self, inst: Instance) -> None:
+        """Stop the vehicle and drop its row; its data folder (EEPROM, logs) stays."""
+        self.stop_instance(inst)
+        self.instances.remove(inst)
+        self.endpoint_sysid = {k: v for k, v in self.endpoint_sysid.items() if v != inst.sysid}
+        if not self.instances:
+            self.close_monitor()
 
     # -- monitor ------------------------------------------------------------------------------------
     def send_to(self, inst: Instance, frame: bytes) -> None:
@@ -614,10 +735,13 @@ class Manager:
                 if bound != sysid:
                     continue
                 inst = next((i for i in self.instances if i.sysid == sysid), None)
-                if inst is None:
+                if inst is None or inst.proc is None:  # stopped: late datagrams of the ended process
                     continue
-                if inst.endpoint is None:
+                if inst.endpoint is None or (msgid == 0 and inst.endpoint != key):
+                    # The first frame — or a heartbeat from a new source port: the relaunched process, after
+                    # the old one's queued datagrams. Talk to the new one, and ask it for the streams again.
                     inst.endpoint = key
+                    inst.intervals_requested = False
                 self.decode(inst, msgid, payload)
         now = time.time()
         hb_due = now - self.last_mgr_hb >= 1
@@ -692,14 +816,14 @@ class Manager:
 
     def watchdog(self) -> None:
         for inst in self.instances:
-            if inst.state == "stopped":
+            if inst.stopped_by_user or inst.proc is None:  # stopped by hand, or never launched
                 continue
-            if inst.proc is not None and inst.proc.poll() is not None:
+            if inst.proc.poll() is not None:
                 if SETTINGS["autoRestart"]:
                     inst.restarts += 1
                     inst.state = "restarting"
                     try:
-                        self.start_instance(inst)
+                        self.start_instance(inst, "restarting")
                     except Exception as e:  # noqa: BLE001 — shown in the table
                         inst.state = f"failed: {e}"
                 else:
@@ -708,22 +832,27 @@ class Manager:
                 inst.state = "silent"
 
     def connect_hint(self) -> str:
+        """What to enter in Kite — the running vehicles only."""
         if not self.instances:
             return ""
-        n = SETTINGS["count"]
-        if SETTINGS["layout"] == "udp":
-            return f"Kite: MAVLink / UDP  {SETTINGS['udpHost']}:{SETTINGS['udpPort']}   (all {n} vehicle(s) on that one link)"
-        if SETTINGS["layout"] == "chain":
-            return f"Kite: MAVLink / TCP  127.0.0.1:5760   (all {n} vehicle(s) on that one link via the chain)"
-        return "Kite: MAVLink / TCP  " + ", ".join(f"127.0.0.1:{i.serial0_port}" for i in self.instances)
+        running = [i for i in self.instances if i.alive]
+        if not running:
+            return "Kite: no vehicle running"
+        n = len(running)
+        if self.layout == "udp":
+            return f"Kite: MAVLink / UDP  {self.udp_target[0]}:{self.udp_target[1]}   ({n} running vehicle(s) on that one link)"
+        if self.layout == "chain":
+            head = self.instances[0]
+            return (f"Kite: MAVLink / TCP  127.0.0.1:{head.serial0_port}   ({n} running vehicle(s) on that one link via the chain)"
+                    + ("" if head.alive else "   — the head is stopped, the chain is unreachable"))
+        return "Kite: MAVLink / TCP  " + ", ".join(f"127.0.0.1:{i.serial0_port}" for i in running)
 
 
 FIX_NAMES = ["none", "none", "2D", "3D", "DGPS", "RTKf", "RTKx"]
 
 
 def row_values(inst: Instance) -> tuple:
-    layout = SETTINGS["layout"]
-    link = f"udp:{SETTINGS['udpPort']}" if layout == "udp" else ("tcp:5760 (head)" if layout == "chain" and inst.index == 0 else ("chained" if layout == "chain" else f"tcp:{inst.serial0_port}"))
+    link = inst.link
     state = inst.state + (f" (×{inst.restarts})" if inst.restarts else "")
     live = bool(inst.last_hb)
     gps = f"{FIX_NAMES[min(inst.fix_type, 6)]} {inst.sats}" if live else ""
@@ -758,7 +887,7 @@ def run_headless(mgr: Manager, seconds: int) -> None:
     except KeyboardInterrupt:
         pass
     finally:
-        mgr.stop_all()
+        mgr.shutdown()
         print("stopped")
 
 
@@ -871,21 +1000,27 @@ def run_ui(mgr: Manager, auto_start: bool) -> None:
     btn_start = ttk.Button(act, text="Start", width=14, command=lambda: on_start())
     btn_start.pack(side="left", padx=4)
     ttk.Button(act, text="Stop all", width=14, command=lambda: on_stop()).pack(side="left", padx=4)
-    ttk.Button(act, text="Restart selected", width=16, command=lambda: on_restart_one()).pack(side="left", padx=4)
-    lbl_connect = ttk.Label(act, text="", font=("Consolas" if IS_WINDOWS else "Menlo", 10))
-    lbl_connect.pack(side="left", padx=16)
+    ttk.Separator(act, orient="vertical").pack(side="left", fill="y", padx=8)
+    for text, action in (("Start selected", "start"), ("Stop selected", "stop"), ("Restart selected", "restart"),
+                         ("Remove selected", "remove")):
+        ttk.Button(act, text=text, width=16, command=lambda a=action: on_selected(a)).pack(side="left", padx=4)
+    ttk.Separator(act, orient="vertical").pack(side="left", fill="y", padx=8)
+    ttk.Button(act, text="Add instance", width=14, command=lambda: on_add()).pack(side="left", padx=4)
+    lbl_connect = ttk.Label(root, text="", font=("Consolas" if IS_WINDOWS else "Menlo", 10), padding=(14, 0, 10, 2))
+    lbl_connect.pack(fill="x")
 
     # Grid
     cols = [("Sysid", 50), ("Frame", 90), ("Link", 110), ("PID", 60), ("State", 90), ("Mode", 90), ("Armed", 65),
             ("Alt m", 55), ("GS m/s", 60), ("Hdg", 45), ("GPS", 70), ("Batt", 90), ("Last status text", 320)]
     grid_box = ttk.Frame(root)
     grid_box.pack(fill="both", expand=True, padx=10, pady=(2, 4))
-    grid = ttk.Treeview(grid_box, columns=[c for c, _ in cols], show="headings", height=8, selectmode="browse")
+    grid = ttk.Treeview(grid_box, columns=[c for c, _ in cols], show="headings", height=8, selectmode="extended")
     for c, w in cols:
         grid.heading(c, text=c)
         grid.column(c, width=w, minwidth=40, stretch=(c == "Last status text"), anchor="w")
     grid.tag_configure("running", foreground="black")
     grid.tag_configure("starting", foreground="#b8860b")
+    grid.tag_configure("stopped", foreground="#808080")
     grid.tag_configure("bad", foreground="#b22222")
     sb = ttk.Scrollbar(grid_box, orient="vertical", command=grid.yview)
     grid.configure(yscrollcommand=sb.set)
@@ -966,32 +1101,41 @@ def run_ui(mgr: Manager, auto_start: bool) -> None:
         extra = "   (cygwin DLLs missing!)" if IS_WINDOWS and not (d / "cygwin1.dll").exists() else ""
         lbl_bin["text"] = f"Using: {d}\nVehicles present: {', '.join(have) or 'none'}" + (f"   missing: {', '.join(missing)}" if missing else "") + extra
 
+    def row_id(inst: Instance) -> str:
+        return f"v{inst.index}"
+
     def refresh_grid():
-        rows = grid.get_children()
-        if len(rows) != len(mgr.instances):
-            grid.delete(*rows)
-            rows = [grid.insert("", "end") for _ in mgr.instances]
-            if rows:
-                grid.selection_set(rows[0])
-        for iid, inst in zip(rows, mgr.instances):
+        want = [row_id(i) for i in mgr.instances]
+        if list(grid.get_children()) != want:
+            gone = [r for r in grid.get_children() if r not in want]
+            if gone:
+                grid.delete(*gone)
+            for pos, iid in enumerate(want):
+                if grid.exists(iid):
+                    grid.move(iid, "", pos)
+                else:
+                    grid.insert("", pos, iid=iid)
+            if want and not grid.selection():
+                grid.selection_set(want[0])
+        for inst in mgr.instances:
+            iid = row_id(inst)
             vals = row_values(inst)
             if tuple(grid.item(iid, "values")) != tuple(str(v) for v in vals):
                 grid.item(iid, values=vals)
-            tag = "running" if inst.state == "running" else ("starting" if inst.state in ("starting", "restarting") else "bad")
+            tag = ("running" if inst.state == "running" else "starting" if inst.state in ("starting", "restarting")
+                   else "stopped" if inst.state == "stopped" else "bad")
             if grid.item(iid, "tags") != (tag,):
                 grid.item(iid, tags=(tag,))
 
-    def selected_instance() -> Instance | None:
-        sel = grid.selection()
-        if not sel or not mgr.instances:
-            return None
-        idx = grid.get_children().index(sel[0])
-        return mgr.instances[idx] if idx < len(mgr.instances) else None
+    def selected_instances() -> list[Instance]:
+        sel = set(grid.selection())
+        return [i for i in mgr.instances if row_id(i) in sel]
 
     def refresh_log():
-        inst = selected_instance()
-        if inst is None:
+        sel = selected_instances()
+        if not sel:
             return
+        inst = sel[0]
         f = inst.dir / "stdout.txt"
         if f.exists():
             try:
@@ -1068,20 +1212,29 @@ def run_ui(mgr: Manager, auto_start: bool) -> None:
             ui_to_settings()
         refresh_bin_label()
 
+    def apply_form():
+        p = parse_preset()
+        # An edited position without a saved preset still flies: keep it as the preset's live values.
+        SETTINGS["presets"] = [q for q in SETTINGS["presets"] if q["name"] != p["name"]] + [p]
+        SETTINGS["preset"] = p["name"]
+        fill_presets()
+        ui_to_settings()
+
     def on_start():
         try:
-            p = parse_preset()
-            # An edited position without a saved preset still flies: keep it as the preset's live values.
-            SETTINGS["presets"] = [q for q in SETTINGS["presets"] if q["name"] != p["name"]] + [p]
-            SETTINGS["preset"] = p["name"]
-            fill_presets()
-            ui_to_settings()
+            apply_form()
+            fresh = not mgr.instances
             v_status.set("starting…")
             root.update_idletasks()
-            mgr.start_all()
+            n = mgr.start_all()
             lbl_connect["text"] = mgr.connect_hint()
             refresh_grid()
-            v_status.set(f"{SETTINGS['count']} × {SETTINGS['frame']} started — monitor on UDP {SETTINGS['monitorPort']}")
+            if fresh:
+                v_status.set(f"{SETTINGS['count']} × {SETTINGS['frame']} started — monitor on UDP {SETTINGS['monitorPort']}")
+            elif n:
+                v_status.set(f"{n} listed vehicle(s) started again")
+            else:
+                v_status.set("every listed vehicle runs — to start over with changed settings, stop + remove the rows first")
         except Exception as e:  # noqa: BLE001 — every start problem ends in this dialog
             messagebox.showerror("Start failed", str(e))
             v_status.set("start failed")
@@ -1089,25 +1242,49 @@ def run_ui(mgr: Manager, auto_start: bool) -> None:
     def on_stop():
         mgr.stop_all()
         refresh_grid()
-        lbl_connect["text"] = ""
-        v_status.set("stopped")
+        lbl_connect["text"] = mgr.connect_hint()
+        v_status.set("all stopped — the rows stay: Start brings them back, Remove selected drops them")
 
-    def on_restart_one():
-        inst = selected_instance()
-        if inst is None:
+    def on_selected(action: str):
+        insts = selected_instances()
+        if not insts:
+            v_status.set("select a vehicle row first")
             return
-        mgr.stop_instance(inst)
-        inst.restarts += 1
+        ops = {"start": mgr.start_one, "stop": mgr.stop_one, "restart": mgr.restart_one, "remove": mgr.remove_one}
+        done = []
+        for inst in insts:
+            try:
+                ops[action](inst)
+                done.append(str(inst.sysid))
+            except Exception as e:  # noqa: BLE001 — every problem ends in this dialog
+                messagebox.showerror(f"{action.capitalize()} failed", f"sysid {inst.sysid}: {e}")
+        refresh_grid()
+        lbl_connect["text"] = mgr.connect_hint()
+        if done:
+            cut = sorted({d.sysid for i in insts for d in mgr.chain_dialers(i) if d not in insts}) if mgr.layout == "chain" else []
+            v_status.set(f"{action}: sysid {', '.join(done)}" + (f" — chain: sysid {', '.join(map(str, cut))} dialled it and does "
+                                                                  "not reconnect, the vehicles behind stay unreachable" if cut else ""))
+
+    def on_add():
         try:
-            mgr.start_instance(inst)
-        except Exception as e:  # noqa: BLE001
-            messagebox.showerror("Restart failed", str(e))
+            apply_form()
+            inst = mgr.add_instance()
+            refresh_grid()
+            grid.selection_set(row_id(inst))
+            lbl_connect["text"] = mgr.connect_hint()
+            v_status.set(f"added sysid {inst.sysid} ({inst.frame}, {inst.link}"
+                         + (f", dials 127.0.0.1:{inst.dial_port}" if inst.dial_port else "") + ")")
+        except Exception as e:  # noqa: BLE001 — every start problem ends in this dialog
+            messagebox.showerror("Add failed", str(e))
 
     def tick():
         try:
             mgr.poll()
             mgr.watchdog()
             refresh_grid()
+            hint = mgr.connect_hint()
+            if lbl_connect["text"] != hint:
+                lbl_connect["text"] = hint
         except Exception as e:  # noqa: BLE001 — keep the loop alive, show the problem
             v_status.set(f"monitor: {e}")
         root.after(250, tick)
@@ -1124,7 +1301,7 @@ def run_ui(mgr: Manager, auto_start: bool) -> None:
             ui_to_settings()
         except Exception:  # noqa: BLE001
             pass
-        mgr.stop_all()
+        mgr.shutdown()
         root.destroy()
 
     cb_vehicle.bind("<<ComboboxSelected>>", fill_frames)

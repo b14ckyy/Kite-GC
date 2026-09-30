@@ -65,8 +65,20 @@ pub struct AttitudeData {
     pub yaw: f64,   // heading 0–360 (degrees, decimals preserved)
 }
 
+// GPS fix scale of `GpsData::fix_type` — ONE scale for every source, INAV's `MSP_RAW_GPS` fixType
+// extended by DGPS/RTK: 0 = none, 1 = 2D, 2 = 3D, 3 = DGPS/RTK. MSP delivers it natively, the MAVLink
+// handler maps `GPS_FIX_TYPE` onto it (`mavlink_proto/handler.rs` GPS_RAW_INT), the passive decoders
+// (`passive_telemetry/decoders/{ltm,crsf,frsky}.rs`) normalise their wire values onto it, and the
+// telemetry-forward encoders (`telemetry_forward/encoders/`) map it back to each wire format. The
+// flight recorder stores it as is (`TelemetryRecord::fix_type`).
+pub const FIX_NONE: u8 = 0;
+pub const FIX_2D: u8 = 1;
+pub const FIX_3D: u8 = 2;
+pub const FIX_DGPS: u8 = 3;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GpsData {
+    /// Unified fix scale, see `FIX_NONE` … `FIX_DGPS`.
     pub fix_type: u8,
     pub num_sat: u8,
     pub lat: f64,         // decimal degrees

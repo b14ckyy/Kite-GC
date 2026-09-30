@@ -163,7 +163,7 @@ export function preflightChecks(
 
   if (tv) {
     const armed = isVehicleArmed(tv);
-    const gpsOk = tv.fixType >= 3 && tv.numSat >= MIN_FIX_SATELLITES;
+    const gpsOk = tv.fixType >= 2 && tv.numSat >= MIN_FIX_SATELLITES; // unified scale: 2 = 3D
     const lowBat = tv.batteryPercentage > 0 && tv.batteryPercentage < LOW_BATTERY_PCT;
     switch (kind) {
       case 'arm':

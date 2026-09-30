@@ -227,7 +227,7 @@ gpsInject.subscribe((g) => {
     telemetry.update((t) => ({
       ...t,
       lat: g.lat, lon: g.lon, altMsl: g.altMsl,
-      fixType: 3, numSat: t.numSat || 12,
+      fixType: 2, numSat: t.numSat || 12, // 3D fix
       lastUpdate: Date.now(),
     }));
   } else if (gpsInjectWasActive) {
@@ -257,7 +257,7 @@ export function resetTelemetry() {
   // Keep an active injection alive across a telemetry reset (e.g. disconnect while testing).
   if (gpsOverride) {
     const o = gpsOverride;
-    telemetry.update((t) => ({ ...t, lat: o.lat, lon: o.lon, altMsl: o.altMsl, fixType: 3, numSat: 12 }));
+    telemetry.update((t) => ({ ...t, lat: o.lat, lon: o.lon, altMsl: o.altMsl, fixType: 2, numSat: 12 }));
   }
 }
 
@@ -294,7 +294,7 @@ async function captureGroundAnchor(t: TelemetryData): Promise<void> {
   if (anchorBusy) return;
   if (get(altReference).msl) return; // protocol already in MSL → no anchor needed
   const validCoord = (t.lat !== 0 || t.lon !== 0) && Math.abs(t.lat) <= 90 && Math.abs(t.lon) <= 180;
-  if (t.fixType < 2 || !validCoord) return; // need a GPS fix
+  if (t.fixType < 1 || !validCoord) return; // need a GPS fix (2D or better)
   if (Math.abs(t.altMsl) > GROUND_ARM_MAX_REL) return; // armed in the air → no valid ground reference
   anchorBusy = true;
   try {
@@ -362,7 +362,7 @@ async function startTelemetryListenersInner() {
       const o = gpsOverride; // dev injection wins over real position/altitude when active
       upd(event.payload, (t) => ({
         ...t,
-        fixType: o ? 3 : p.fix_type,
+        fixType: o ? 2 : p.fix_type,
         numSat: p.num_sat,
         // Keep last valid HDOP when this packet omits it (or reports 0).
         gpsHdop: typeof p.gps_hdop === 'number' && p.gps_hdop > 0 ? p.gps_hdop : t.gpsHdop,

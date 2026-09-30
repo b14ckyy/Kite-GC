@@ -304,7 +304,7 @@ fn raw_gps_payload(node: Option<(f64, f64, f64)>) -> Vec<u8> {
     let mut p = Vec::with_capacity(18);
     match node {
         Some((lat, lon, alt)) => {
-            p.push(3); // fixType 3D
+            p.push(crate::scheduler::telemetry::FIX_3D); // fixType on INAV's scale (2 = 3D)
             p.push(12); // numSat
             p.extend_from_slice(&((lat * 1e7) as i32).to_le_bytes());
             p.extend_from_slice(&((lon * 1e7) as i32).to_le_bytes());
