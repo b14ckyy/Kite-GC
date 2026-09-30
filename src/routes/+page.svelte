@@ -1296,9 +1296,11 @@
   });
 
   // Fleet feature gate (hidden runtime setting, Debug Monitor): push on start + every change — the backend
-  // group-flight coordinator never forms a group while it is off.
+  // group-flight coordinator never forms a group while it is off. Dev builds only until the group store
+  // prompt ships (GROUP_FLIGHTS.md steps 7/8): a flag persisted in a dev session must not start group
+  // flights in a release build whose ended groups nothing could store yet.
   $effect(() => {
-    const on = $settings.fleetEnabled;
+    const on = $settings.fleetEnabled && import.meta.env.DEV;
     void invoke('set_fleet_enabled', { on }).catch((e) => console.warn('[fleet] set_fleet_enabled failed:', e));
   });
 

@@ -8,6 +8,7 @@
 use tauri::{AppHandle, Emitter, State};
 
 use crate::commands::connection::ActiveVehicleChanged;
+use crate::flightlog::group::GroupDebugState;
 use crate::state::AppState;
 use crate::state::ActiveProtocol;
 use crate::vehicle_registry::{LinkSummary, VehicleId, VehicleInfo};
@@ -55,6 +56,14 @@ pub fn set_fleet_enabled(on: bool, state: State<'_, AppState>) -> Result<(), Str
         log::info!("Fleet features {}", if on { "enabled" } else { "disabled" });
     }
     Ok(())
+}
+
+/// Debug Monitor ("Fleet (gated)" tab): the group-flight coordinator's live state — registered
+/// recorders, the running group with its members, the ended groups awaiting their store prompt.
+/// Read-only.
+#[tauri::command]
+pub fn debug_group_state(state: State<'_, AppState>) -> Result<GroupDebugState, String> {
+    Ok(state.groups.debug_state())
 }
 
 /// Re-announce every known vehicle (`vehicle-discovered`), so a frontend that (re)loaded after the

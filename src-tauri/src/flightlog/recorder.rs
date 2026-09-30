@@ -1090,10 +1090,11 @@ impl FlightRecorder {
     /// Follow the group coordinator's view (GROUP_FLIGHTS.md §3.2): join the running group, or finalize
     /// the member session of a group that has ended. Run at the top of every status after the first
     /// (so the status's own arm/disarm edge already sees the result), and by the coordinator's `tick`
-    /// for recorders that get no status. No-op without a coordinator.
-    pub(crate) fn group_sync(&mut self) {
+    /// for recorders that get no status (`from_status` false — only a status counts as a sign of life for
+    /// the member-stall rule). No-op without a coordinator.
+    pub(crate) fn group_sync(&mut self, from_status: bool) {
         let Some(c) = self.coordinator.clone() else { return };
-        let directive = c.sync(self.key(), self.group_id());
+        let directive = c.sync(self.key(), self.group_id(), from_status);
         self.apply_group_directive(&c, directive);
     }
 
@@ -1230,7 +1231,8 @@ impl FlightRecorder {
     /// session is running afterwards (true as well when one already was). The session has no armed
     /// time until the vehicle's own arm. Emits nothing (group members never announce their sessions).
     /// Only in member mode (`enter_member_mode` first): a single flight's session exists only while
-    /// armed, so without membership this refuses (false).
+    /// armed, so without membership this refuses (false). False as well when the new session's temp
+    /// store failed to open (a member is a temp file).
     pub fn start_recording_unarmed(&mut self) -> bool {
         if self.membership.is_none() { return false; }
         if self.active_flight.is_some() {
@@ -1240,7 +1242,7 @@ impl FlightRecorder {
         if self.was_armed {
             self.record_event(EVENT_ARM);
         }
-        self.active_flight.is_some()
+        self.active_flight.as_ref().is_some_and(|f| f.temp_db.is_some())
     }
 
     /// Group coordinator hook: the group ended (last disarm + grace) — finalize this member's session
@@ -1430,6 +1432,13 @@ impl FlightRecorder {
                 log::warn!("Failed to update session_meta identity: {}", e);
             }
         }
+        // A group member's `.kgrp` row carries the identity too (INAV over MAVLink: the probe's craft,
+        // variant and FC id replace the heartbeat identity it joined with).
+        if let (Some(c), Some(group_id), Some(file)) =
+            (self.coordinator.clone(), self.group_id().map(String::from), self.member_file())
+        {
+            c.member_recording(self.key(), &group_id, file);
+        }
     }
 
     /// Feed airspeed data from the scheduler
@@ -1516,7 +1525,7 @@ impl FlightRecorder {
         // status reports its settled state (adoption / continue-on-reconnect) afterwards instead.
         let first = !self.first_status_seen;
         if !first {
-            self.group_sync();
+            self.group_sync(true);
         }
         self.handle_status(is_armed);
         if first {
@@ -1538,7 +1547,9 @@ impl FlightRecorder {
         }
         if !self.first_status_seen {
             self.first_status_seen = true;
-            if let Some(p) = self.slots.take_suspended_for(&self.fc_info) {
+            // Without DB recording there is no group membership to continue (a member is a temp file).
+            let suspended = if self.settings.db_enabled { self.slots.take_suspended_for(&self.fc_info) } else { None };
+            if let Some(p) = suspended {
                 self.adopt_member(p, is_armed);
                 self.was_armed = is_armed;
                 return;

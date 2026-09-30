@@ -408,6 +408,34 @@
       .catch((e) => console.warn('[debug] tunnel stats snapshot failed', e));
   });
 
+  // Group-flight coordinator (Fleet tab): its state changes with every status and timer, and no event
+  // carries it — poll the read-only snapshot once a second while the tab is open.
+  interface GroupDebugState {
+    enabled: boolean;
+    recorders: { key: string; firstStatusSeen: boolean; armed: boolean; lastSeenMs: number }[];
+    group: {
+      id: string;
+      phase: 'running' | 'ending';
+      startTime: string;
+      endInMs: number | null;
+      members: { key: string; armed: boolean; gone: boolean; lostArmed: boolean; stalled: boolean; file: string | null }[];
+    } | null;
+    pending: string[];
+  }
+  let groupState = $state<GroupDebugState | null>(null);
+  $effect(() => {
+    if (tab !== 'fleet') return;
+    const poll = () => {
+      invoke<GroupDebugState>('debug_group_state')
+        .then((s) => { groupState = s; })
+        .catch((e) => console.warn('[debug] group state failed', e));
+    };
+    poll();
+    const timer = setInterval(poll, 1000);
+    return () => clearInterval(timer);
+  });
+  const yesNo = (v: boolean): string => (v ? '✓' : '—');
+
   function probeLabel(result: string): string {
     switch (result) {
       case 'ok': return $t('debug.tunProbeOk');
@@ -1079,6 +1107,84 @@
         {$t('debug.fleet.enabled')}
       </label>
       <div class="perf-hint">{$t('debug.fleet.hint')}</div>
+
+      {#if groupState}
+        {@const gs = groupState}
+        <div class="perf-section">{$t('debug.fleet.coordinator')}</div>
+        <div class="stat-group">
+          <span class="stat-label">{$t('debug.fleet.backendFlag')}</span>
+          <span class="stat-value">{gs.enabled ? $t('debug.fleet.on') : $t('debug.fleet.off')}</span>
+          <span class="stat-sep">|</span>
+          <span class="stat-label">{$t('debug.fleet.pending')}</span>
+          <span class="stat-value">{gs.pending.length ? gs.pending.join(', ') : '—'}</span>
+        </div>
+
+        <div class="perf-section">{$t('debug.fleet.recorders')}</div>
+        <table class="debug-table">
+          <thead>
+            <tr>
+              <th class="col-name">{$t('debug.fleet.colKey')}</th>
+              <th class="col-num">{$t('debug.fleet.colFirstStatus')}</th>
+              <th class="col-num">{$t('debug.fleet.colArmed')}</th>
+              <th class="col-rate">{$t('debug.fleet.colLastSeen')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each gs.recorders as r (r.key)}
+              <tr>
+                <td class="col-name">{r.key}</td>
+                <td class="col-num">{yesNo(r.firstStatusSeen)}</td>
+                <td class="col-num">{yesNo(r.armed)}</td>
+                <td class="col-rate">{r.lastSeenMs} ms</td>
+              </tr>
+            {:else}
+              <tr><td class="empty-cell" colspan="4">{$t('debug.fleet.noRecorders')}</td></tr>
+            {/each}
+          </tbody>
+        </table>
+
+        <div class="perf-section">{$t('debug.fleet.group')}</div>
+        {#if gs.group}
+          {@const g = gs.group}
+          <div class="stat-group">
+            <span class="stat-value">{g.id}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-value">{g.phase === 'running' ? $t('debug.fleet.phaseRunning') : $t('debug.fleet.phaseEnding')}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.fleet.start')}</span>
+            <span class="stat-value">{g.startTime}</span>
+            <span class="stat-sep">|</span>
+            <span class="stat-label">{$t('debug.fleet.endsIn')}</span>
+            <span class="stat-value">{g.endInMs != null ? `${g.endInMs} ms` : '—'}</span>
+          </div>
+          <table class="debug-table">
+            <thead>
+              <tr>
+                <th class="col-code">{$t('debug.fleet.colKey')}</th>
+                <th class="col-num">{$t('debug.fleet.colArmed')}</th>
+                <th class="col-num">{$t('debug.fleet.colGone')}</th>
+                <th class="col-num">{$t('debug.fleet.colLostArmed')}</th>
+                <th class="col-num">{$t('debug.fleet.colStalled')}</th>
+                <th class="col-name">{$t('debug.fleet.colFile')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each g.members as m}
+                <tr class:inactive={m.gone}>
+                  <td class="col-code">{m.key}</td>
+                  <td class="col-num">{yesNo(m.armed)}</td>
+                  <td class="col-num">{yesNo(m.gone)}</td>
+                  <td class="col-num" class:has-timeouts={m.lostArmed}>{yesNo(m.lostArmed)}</td>
+                  <td class="col-num" class:has-timeouts={m.stalled}>{yesNo(m.stalled)}</td>
+                  <td class="col-name" title={m.file ?? ''}>{m.file ?? '—'}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        {:else}
+          <div class="perf-hint">{$t('debug.fleet.noGroup')}</div>
+        {/if}
+      {/if}
     </div>
   {:else if tab === 'video'}
     <!-- WebRTC inbound pipeline, one row per stage: what arrives from the engine (recv), what the decoder

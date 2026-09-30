@@ -12,9 +12,9 @@
 //! starts a group. From then on every registered recorder records (member mode; an unarmed session
 //! where none runs), the group starts at the earliest arm among the recordings already running, and it
 //! ends when the last armed member has disarmed and nothing re-armed within `GROUP_END_GRACE` — or,
-//! when the last armed member was lost (its link went away while armed), after `LOST_ARMED_TIMEOUT`
-//! without an arm. Then every member is finalized for the group's store prompt (`PendingGroup`,
-//! `group-flight-ended`).
+//! when the last armed member was lost (its link went away while armed, or its recorder reported no
+//! status for `MEMBER_STALL`), after `LOST_ARMED_TIMEOUT` without an arm. Then every member is finalized
+//! for the group's store prompt (`PendingGroup`, `group-flight-ended`).
 //!
 //! Lock rule (deadlock-free by construction): recorder lock → coordinator lock, never the reverse. The
 //! coordinator never locks a recorder while it holds its own lock; the recorder-facing calls answer with
@@ -45,6 +45,11 @@ pub const GROUP_END_GRACE: Duration = REARM_GRACE;
 /// A group whose last armed member was LOST (link gone while armed) stays open this long for it — or
 /// for any other arm — before it ends (§5.2).
 pub const LOST_ARMED_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// An ARMED member whose recorder reported no status for longer than this counts as lost-armed from
+/// its last status (§5.2 — a stalled link keeps its recorder, so no teardown ever reports the loss);
+/// its next status clears it.
+pub const MEMBER_STALL: Duration = Duration::from_secs(5);
 
 /// Worker wake-up period while a group runs or ends (group-end timers, members without status).
 const TICK_WITH_GROUP: Duration = Duration::from_millis(250);
@@ -119,7 +124,7 @@ impl GroupEventSink for AppSink {
 struct GroupStartedEvent {
     group_id: String,
     /// Group start, RFC 3339 UTC (the earliest arm among the recordings running at the start).
-    start_utc: String,
+    start_time: String,
     /// Vehicle keys of the recorders taken into the group.
     members: Vec<String>,
 }
@@ -131,14 +136,15 @@ pub struct GroupMemberSummary {
     /// The member's temp file name — how the store prompt (step 7/8) addresses it.
     pub member_id: String,
     /// Vehicle key of the recorder that recorded it last (empty when unknown).
-    pub vehicle_key: String,
-    pub craft: String,
+    pub vehicle_id: String,
+    pub craft_name: String,
     pub fc_variant: String,
     /// Armed at any point — members without armed time are listed unticked (§5.5).
     pub has_armed_time: bool,
     /// Lost while armed and never came back: the flight may have gone on unrecorded.
     pub incomplete: bool,
-    pub duration_sec: i64,
+    /// Armed time (the member's stats count its armed segments only, §3.8).
+    pub armed_sec: i64,
     pub max_alt_m: f64,
     pub max_speed_ms: f64,
     pub max_distance_m: f64,
@@ -153,8 +159,8 @@ pub struct GroupMemberSummary {
 #[serde(rename_all = "camelCase")]
 pub struct GroupEndedEvent {
     pub group_id: String,
-    pub start_utc: String,
-    pub end_utc: String,
+    pub start_time: String,
+    pub end_time: String,
     pub members: Vec<GroupMemberSummary>,
 }
 
@@ -168,18 +174,79 @@ pub struct PendingGroup {
     /// Removed by the store prompt once every member is committed or discarded (§3.4).
     #[allow(dead_code)] // the commit / discard commands: GROUP_FLIGHTS.md step 7
     pub kgrp_path: PathBuf,
+    /// As of `finish` (the `group-flight-ended` payload); `take_pending_group` rebuilds it from the slots.
     pub members: Vec<GroupMemberSummary>,
+    /// The group's members with a file, as the coordinator knew them at the end (vehicle key, lost).
+    roster: Vec<RosterEntry>,
+}
+
+/// A member of an ended group as the coordinator knew it — to name the finalized sessions in the slots.
+#[derive(Debug, Clone)]
+struct RosterEntry {
+    temp_path: PathBuf,
+    key: String,
+    /// Lost (or stalled) while armed and never came back.
+    incomplete: bool,
 }
 
 impl PendingGroup {
     fn summary(&self) -> GroupEndedEvent {
         GroupEndedEvent {
             group_id: self.id.clone(),
-            start_utc: self.header.start_time.to_rfc3339(),
-            end_utc: self.header.end_time.unwrap_or(self.header.start_time).to_rfc3339(),
+            start_time: self.header.start_time.to_rfc3339(),
+            end_time: self.header.end_time.unwrap_or(self.header.start_time).to_rfc3339(),
             members: self.members.clone(),
         }
     }
+}
+
+/// Read-only snapshot of the coordinator for the Debug Monitor's "Fleet (gated)" tab
+/// (`debug_group_state`).
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupDebugState {
+    /// The fleet feature flag as the coordinator sees it.
+    pub enabled: bool,
+    /// Registered recorders, by key.
+    pub recorders: Vec<DebugRecorder>,
+    pub group: Option<DebugGroup>,
+    /// Ids of the ended groups awaiting their store prompt, oldest first.
+    pub pending: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugRecorder {
+    pub key: String,
+    pub first_status_seen: bool,
+    pub armed: bool,
+    /// Time since its last status (ms).
+    pub last_seen_ms: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugGroup {
+    pub id: String,
+    /// `running` | `ending`.
+    pub phase: &'static str,
+    /// Group start, RFC 3339 UTC.
+    pub start_time: String,
+    /// Time left until the group ends (ms, 0 once due); `None` while no end timer runs.
+    pub end_in_ms: Option<u64>,
+    pub members: Vec<DebugMember>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugMember {
+    pub key: String,
+    pub armed: bool,
+    pub gone: bool,
+    pub lost_armed: bool,
+    pub stalled: bool,
+    /// The member's temp file name (`None` before it reported one).
+    pub file: Option<String>,
 }
 
 /// The group id (§3.1): the first 16 hex chars of `sha1("{start_ms}|{lat_e7}|{lon_e7}")` — group start as
@@ -206,6 +273,11 @@ struct Registered {
     /// Its first status has been handled (adoption / continue-on-reconnect settled) — only then may it
     /// be given an unarmed member session.
     first_status_seen: bool,
+    /// When it last reported a status (registration counts as one) — an armed member silent for
+    /// `MEMBER_STALL` counts as lost-armed.
+    last_seen: Instant,
+    /// The "other sessions folder, not taken into the group" warning was logged for it.
+    warned_dir: bool,
 }
 
 /// A member of the running group, by the vehicle key that records it now.
@@ -219,6 +291,9 @@ struct Member {
     gone: bool,
     /// Torn down while armed, not back yet.
     lost_armed: bool,
+    /// Armed, but its recorder reported no status for `MEMBER_STALL` — counts as lost-armed until its
+    /// next status.
+    stalled: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -258,7 +333,29 @@ impl Group {
     }
 
     fn present_armed(&self) -> bool {
-        self.members.iter().any(|m| !m.gone && m.armed)
+        self.members.iter().any(|m| !m.gone && m.armed && !m.stalled)
+    }
+
+    /// Whether a recorder with temp files in `sessions_dir` may join: its files must live next to the
+    /// group's `.kgrp` (the store prompt finds the members there).
+    fn same_dir(&self, sessions_dir: &Path) -> bool {
+        self.kgrp_path.parent() == Some(sessions_dir)
+    }
+
+    /// `key` joins with a session that began before the group start: the group starts there instead
+    /// (Marc, 2026-10-01 — e.g. a vehicle back via continue-on-reconnect whose flight began before the
+    /// group formed). The id stays the one formed at the start; the `.kgrp` header is rewritten.
+    fn pull_start(&mut self, key: &str, session_start: Option<DateTime<Utc>>) {
+        let Some(start) = session_start.filter(|s| *s < self.header.start_time) else { return };
+        log::info!(
+            "Group flight {}: {} joins with a session from {} — the group start moves back from {}",
+            self.header.id,
+            key,
+            start.to_rfc3339(),
+            self.header.start_time.to_rfc3339()
+        );
+        self.header.start_time = start;
+        write_kgrp(&self.kgrp_path, |c| group_store::write_group_header(c, &self.header));
     }
 
     /// List `key` as a member (or update its arm state). An armed member stops the end timer.
@@ -275,6 +372,7 @@ impl Group {
                 armed,
                 gone: false,
                 lost_armed: false,
+                stalled: false,
             }),
         }
         if armed {
@@ -289,7 +387,7 @@ impl Group {
             return;
         }
         let mut deadline = now + GROUP_END_GRACE;
-        if self.members.iter().any(|m| m.lost_armed) {
+        if self.members.iter().any(|m| m.lost_armed || m.stalled) {
             if let Some(loss) = self.last_armed_loss {
                 deadline = deadline.max(loss + LOST_ARMED_TIMEOUT);
             }
@@ -297,9 +395,10 @@ impl Group {
         self.end_deadline = Some(deadline);
     }
 
-    /// An armed member was lost: when it was the last armed one, the group stays open for it.
+    /// An armed member was lost at `now` (a stall reports its last status, an earlier instant): when it
+    /// was the last armed one, the group stays open for it.
     fn after_armed_loss(&mut self, now: Instant) {
-        self.last_armed_loss = Some(now);
+        self.last_armed_loss = Some(self.last_armed_loss.map_or(now, |l| l.max(now)));
         if !self.present_armed() {
             let deadline = now + LOST_ARMED_TIMEOUT;
             self.end_deadline = Some(self.end_deadline.map_or(deadline, |d| d.max(deadline)));
@@ -313,6 +412,7 @@ impl Group {
         m.gone = true;
         m.armed = false;
         m.lost_armed = armed;
+        m.stalled = false;
         if let Some(f) = &m.file {
             let path = f.temp_path.clone();
             write_kgrp(&kgrp, |c| group_store::set_group_member_state(c, &path, group_store::MEMBER_SUSPENDED).map(|_| ()));
@@ -420,7 +520,10 @@ impl GroupCoordinator {
     /// own adoption / continue-on-reconnect decision, so a returning member continues its file).
     pub fn register(self: &Arc<Self>, recorder: &FlightRecorderHandle) {
         let (key, sessions_dir) = {
-            let Ok(mut rec) = recorder.lock() else { return };
+            let Ok(mut rec) = recorder.lock() else {
+                log::warn!("Group coordinator: a recorder's lock is poisoned — not registered");
+                return;
+            };
             if !rec.records_to_db() {
                 return;
             }
@@ -436,17 +539,68 @@ impl GroupCoordinator {
                 armed: false,
                 session_start: None,
                 first_status_seen: false,
+                last_seen: self.clock.instant(),
+                warned_dir: false,
             },
         );
         log::info!("Group coordinator: {} registered ({} recorders)", key, inner.registered.len());
     }
 
-    /// Advance the group-end timer: past its deadline with no member armed, the group starts ending
-    /// (the worker finalizes the members; a member's own next sync does the same for itself).
+    /// `key` reported a status at `now`: stamp it; a stalled member is back (armed, it stops the end
+    /// timer — a disarm in the same status sets it again).
+    fn seen(inner: &mut Inner, key: &str, now: Instant) {
+        let Inner { registered, group, .. } = inner;
+        if let Some(r) = registered.get_mut(key) {
+            r.last_seen = now;
+        }
+        let Some(g) = group.as_mut().filter(|g| g.phase == Phase::Running) else { return };
+        let id = g.header.id.clone();
+        let Some(m) = g.member_mut(key).filter(|m| m.stalled) else { return };
+        m.stalled = false;
+        let armed = m.armed;
+        log::info!("Group flight {}: {} reports again", id, key);
+        if armed {
+            g.end_deadline = None;
+        }
+    }
+
+    /// Advance the group-end timer: an armed member silent for `MEMBER_STALL` counts as lost-armed
+    /// from its last status; with no member armed and no end timer (a state no path should leave), the
+    /// timer starts now; past its deadline with no member armed, the group starts ending (the worker
+    /// finalizes the members; a member's own next sync does the same for itself).
     fn advance_timers(&self, inner: &mut Inner, now: Instant) {
-        let Some(group) = inner.group.as_mut() else { return };
-        if group.phase != Phase::Running || group.present_armed() {
+        let Inner { registered, group, .. } = &mut *inner;
+        let Some(group) = group.as_mut() else { return };
+        if group.phase != Phase::Running {
             return;
+        }
+        let stalls: Vec<(String, Instant)> = group
+            .members
+            .iter()
+            .filter(|m| !m.gone && m.armed && !m.stalled)
+            .filter_map(|m| {
+                let r = registered.get(&m.key)?;
+                (now.saturating_duration_since(r.last_seen) > MEMBER_STALL).then(|| (m.key.clone(), r.last_seen))
+            })
+            .collect();
+        for (key, last_seen) in stalls {
+            if let Some(m) = group.member_mut(&key) {
+                m.stalled = true;
+            }
+            log::warn!(
+                "Group flight {}: {} armed but silent for {} s — counts as lost while armed until its next status",
+                group.header.id,
+                key,
+                now.saturating_duration_since(last_seen).as_secs()
+            );
+            group.after_armed_loss(last_seen);
+        }
+        if group.present_armed() {
+            return;
+        }
+        if group.end_deadline.is_none() {
+            log::warn!("Group flight {}: no member armed and no end timer — the group-end timer starts now", group.header.id);
+            group.after_disarm(now);
         }
         if group.end_deadline.is_some_and(|d| now >= d) {
             log::info!("Group flight {}: no member armed any more — ending", group.header.id);
@@ -474,22 +628,27 @@ impl GroupCoordinator {
                 GroupDirective::Leave
             }
             (None, Some(g)) if g.phase == Phase::Running => {
-                let Some(r) = registered.get(key) else { return GroupDirective::Stay };
-                if !r.first_status_seen || self.slots.has_pending_for(key) {
+                let Some(r) = registered.get_mut(key) else { return GroupDirective::Stay };
+                if !r.first_status_seen || self.slots.has_pending_for(key) || !dir_ok(r, key, g) {
                     return GroupDirective::Stay;
                 }
                 g.add_member(key, r.armed, self.clock.utc());
+                g.pull_start(key, r.session_start);
                 GroupDirective::Join(g.membership())
             }
             _ => GroupDirective::Stay,
         }
     }
 
-    /// Every status after the first (recorder lock held): follow the group, advance the timers.
-    pub(crate) fn sync(&self, key: &str, member_of: Option<&str>) -> GroupDirective {
+    /// Every status after the first (recorder lock held; `from_status` false: the worker's `tick` for a
+    /// recorder that got no status — it does not count as one): follow the group, advance the timers.
+    pub(crate) fn sync(&self, key: &str, member_of: Option<&str>, from_status: bool) -> GroupDirective {
         let now = self.clock.instant();
         let mut inner = self.lock();
         self.advance_timers(&mut inner, now);
+        if from_status {
+            Self::seen(&mut inner, key, now);
+        }
         self.directive(&mut inner, key, member_of)
     }
 
@@ -499,6 +658,7 @@ impl GroupCoordinator {
         let now_utc = self.clock.utc();
         let mut inner = self.lock();
         self.advance_timers(&mut inner, now);
+        Self::seen(&mut inner, key, now);
         {
             let Inner { registered, group, .. } = &mut *inner;
             if let Some(r) = registered.get_mut(key) {
@@ -523,14 +683,23 @@ impl GroupCoordinator {
                                 armed: false,
                                 gone: false,
                                 lost_armed: false,
+                                stalled: false,
                             });
                             g.members.last_mut().expect("just pushed")
                         }
                     };
-                    log::info!("Group flight {}: {} continues as {} (link back)", id, m.key, key);
+                    // Its suspended file was reopened (the member listed with it), or it records on into
+                    // a new member file (the reopen failed).
+                    let adopted = path.is_some() && m.file.as_ref().map(|f| &f.temp_path) == path.as_ref();
+                    if adopted {
+                        log::info!("Group flight {}: {} continues as {} (link back)", id, m.key, key);
+                    } else {
+                        log::info!("Group flight {}: {} is back as {} with a new member file", id, m.key, key);
+                    }
                     m.key = key.to_string();
                     m.gone = false;
                     m.lost_armed = false;
+                    m.stalled = false;
                     m.armed = report.armed;
                     if report.file.is_some() {
                         m.file = report.file.clone();
@@ -556,14 +725,22 @@ impl GroupCoordinator {
         let (directive, started) = {
             let mut inner = self.lock();
             self.advance_timers(&mut inner, now);
+            Self::seen(&mut inner, key, now);
             if let Some(r) = inner.registered.get_mut(key) {
                 r.armed = true;
                 r.session_start = Some(report.session_start);
             }
             let now_utc = self.clock.utc();
+            let Inner { registered, group, .. } = &mut *inner;
+            let other_dir = match (group.as_ref(), registered.get_mut(key)) {
+                (Some(g), Some(r)) if g.phase == Phase::Running => !dir_ok(r, key, g),
+                _ => false,
+            };
             match inner.group.as_mut() {
+                Some(_) if other_dir => (GroupDirective::Stay, None),
                 Some(g) if g.phase == Phase::Running => {
                     g.add_member(key, true, now_utc);
+                    g.pull_start(key, Some(report.session_start));
                     (GroupDirective::Join(g.membership()), None)
                 }
                 // Ending: arms start single flights until the ended group is finalized.
@@ -578,7 +755,9 @@ impl GroupCoordinator {
     }
 
     /// Start a group on `key`'s arm when the rules allow it (flag, ≥ 2 recorders, 3D fix, ≥ 2 recorders
-    /// without a pending single flight).
+    /// without a pending single flight and with their temp files in the initiator's sessions folder).
+    /// The group's position — and with it the id — is the INITIATOR's (Marc, 2026-10-01): its arm with a
+    /// 3D fix anchors the group, even when the start is an earlier arm of another member.
     fn try_form(&self, inner: &mut Inner, key: &str, report: &ArmReport) -> (GroupDirective, Option<GroupStartedEvent>) {
         let none = (GroupDirective::Stay, None);
         if !self.enabled.load(Ordering::Relaxed) {
@@ -602,11 +781,16 @@ impl GroupCoordinator {
             }
         };
         // A recorder whose single flight awaits its End-Flight dialog is not taken (§4 test f); it joins
-        // once that is resolved.
+        // once that is resolved. Nor is one whose temp files live in another sessions folder than the
+        // initiator's (where the `.kgrp` goes): it records single flights.
+        let sessions_dir = inner.registered.get(key).map(|r| r.sessions_dir.clone()).unwrap_or_default();
         let mut members: Vec<String> = inner
             .registered
             .iter()
-            .filter(|(k, r)| r.recorder.strong_count() > 0 && (k.as_str() == key || !self.slots.has_pending_for(k)))
+            .filter(|(k, r)| {
+                r.recorder.strong_count() > 0
+                    && (k.as_str() == key || (!self.slots.has_pending_for(k) && r.sessions_dir == sessions_dir))
+            })
             .map(|(k, _)| k.clone())
             .collect();
         members.sort();
@@ -623,8 +807,19 @@ impl GroupCoordinator {
             .min()
             .unwrap_or(report.session_start);
         let id = group_id_for(start, position.0, position.1);
-        let sessions_dir = inner.registered.get(key).map(|r| r.sessions_dir.clone()).unwrap_or_default();
         let kgrp_path = group_store::group_file_path(&sessions_dir, &id);
+        for (k, r) in inner.registered.iter_mut() {
+            if r.sessions_dir != sessions_dir && !r.warned_dir && r.recorder.strong_count() > 0 {
+                r.warned_dir = true;
+                log::warn!(
+                    "Group flight {}: {} records to another sessions folder ({}) than the group ({}) — not taken, it records single flights",
+                    id,
+                    k,
+                    r.sessions_dir.display(),
+                    sessions_dir.display()
+                );
+            }
+        }
         let header = GroupFileHeader {
             id: id.clone(),
             start_time: start,
@@ -650,6 +845,7 @@ impl GroupCoordinator {
                     armed: k == key || inner.registered.get(k).is_some_and(|r| r.armed),
                     gone: false,
                     lost_armed: false,
+                    stalled: false,
                 })
                 .collect(),
             phase: Phase::Running,
@@ -667,7 +863,7 @@ impl GroupCoordinator {
         inner.group = Some(group);
         inner.warned_no_fix = false;
         self.notify_worker(inner);
-        let ev = GroupStartedEvent { group_id: id, start_utc: start.to_rfc3339(), members };
+        let ev = GroupStartedEvent { group_id: id, start_time: start.to_rfc3339(), members };
         (GroupDirective::Join(membership), Some(ev))
     }
 
@@ -678,6 +874,7 @@ impl GroupCoordinator {
         let now_utc = self.clock.utc();
         let mut inner = self.lock();
         self.advance_timers(&mut inner, now);
+        Self::seen(&mut inner, key, now);
         let Inner { registered, group, .. } = &mut *inner;
         match group.as_mut() {
             Some(g) if g.running(group_id) => {
@@ -703,18 +900,20 @@ impl GroupCoordinator {
         let now_utc = self.clock.utc();
         let mut inner = self.lock();
         self.advance_timers(&mut inner, now);
+        Self::seen(&mut inner, key, now);
         let Inner { registered, group, .. } = &mut *inner;
-        let known = match registered.get_mut(key) {
-            Some(r) => {
-                r.armed = false;
-                true
-            }
-            None => false,
+        if let Some(r) = registered.get_mut(key) {
+            r.armed = false;
+        }
+        let joinable = match (group.as_ref(), registered.get_mut(key)) {
+            (Some(g), Some(r)) if g.phase == Phase::Running => dir_ok(r, key, g),
+            _ => false,
         };
         match group.as_mut() {
-            Some(g) if known && g.phase == Phase::Running => {
+            Some(g) if joinable => {
                 g.add_member(key, false, now_utc);
                 g.after_disarm(now);
+                g.pull_start(key, registered.get(key).and_then(|r| r.session_start));
                 GroupDirective::Join(g.membership())
             }
             _ => {
@@ -730,6 +929,7 @@ impl GroupCoordinator {
     pub(crate) fn on_member_disarm(&self, key: &str, group_id: &str) {
         let now = self.clock.instant();
         let mut inner = self.lock();
+        Self::seen(&mut inner, key, now);
         let Inner { registered, group, .. } = &mut *inner;
         if let Some(r) = registered.get_mut(key) {
             r.armed = false;
@@ -817,7 +1017,12 @@ impl GroupCoordinator {
                     inner
                         .registered
                         .iter()
-                        .filter(|(k, r)| r.first_status_seen && !g.is_joined(k) && !self.slots.has_pending_for(k))
+                        .filter(|(k, r)| {
+                            r.first_status_seen
+                                && !g.is_joined(k)
+                                && g.same_dir(&r.sessions_dir)
+                                && !self.slots.has_pending_for(k)
+                        })
                         .map(|(_, r)| r.recorder.clone())
                         .collect::<Vec<Weak<Mutex<FlightRecorder>>>>(),
                     None,
@@ -828,7 +1033,7 @@ impl GroupCoordinator {
         for weak in to_sync {
             if let Some(rec) = weak.upgrade() {
                 if let Ok(mut r) = rec.lock() {
-                    r.group_sync();
+                    r.group_sync(false);
                 }
             }
         }
@@ -848,7 +1053,18 @@ impl GroupCoordinator {
             };
             group.header.end_time = Some(self.clock.utc());
             group.header.state = group_store::GROUP_PENDING.into();
-            let members = self.slots.map_group_members(group_id, |s| member_summary(s, &group));
+            let roster: Vec<RosterEntry> = group
+                .members
+                .iter()
+                .filter_map(|m| {
+                    m.file.as_ref().map(|f| RosterEntry {
+                        temp_path: f.temp_path.clone(),
+                        key: m.key.clone(),
+                        incomplete: m.lost_armed || m.stalled,
+                    })
+                })
+                .collect();
+            let members = self.slots.map_group_members(group_id, |s| member_summary(s, &roster));
             write_kgrp(&group.kgrp_path, |c| {
                 group_store::write_group_header(c, &group.header)?;
                 for m in &members {
@@ -862,8 +1078,13 @@ impl GroupCoordinator {
                 group_id,
                 members.len()
             );
-            let pending =
-                PendingGroup { id: group.header.id.clone(), header: group.header, kgrp_path: group.kgrp_path, members };
+            let pending = PendingGroup {
+                id: group.header.id.clone(),
+                header: group.header,
+                kgrp_path: group.kgrp_path,
+                members,
+                roster,
+            };
             let summary = pending.summary();
             inner.pending.push(pending);
             summary
@@ -871,36 +1092,106 @@ impl GroupCoordinator {
         self.emit("group-flight-ended", &event);
     }
 
-    /// Take an ended group for its store prompt: `Some(id)` → that group, `None` → the oldest.
+    /// Take an ended group for its store prompt: `Some(id)` → that group, `None` → the oldest. Its
+    /// members are read from the slots NOW, not taken from the `finish` summary: a member session
+    /// parked after `finish` (a teardown racing the group end) is included.
     #[allow(dead_code)] // the commit / discard commands: GROUP_FLIGHTS.md step 7
     pub fn take_pending_group(&self, group_id: Option<&str>) -> Option<PendingGroup> {
-        let mut inner = self.lock();
-        let idx = match group_id {
-            Some(id) => inner.pending.iter().position(|p| p.id == id)?,
-            None if inner.pending.is_empty() => return None,
-            None => 0,
+        let mut pending = {
+            let mut inner = self.lock();
+            let idx = match group_id {
+                Some(id) => inner.pending.iter().position(|p| p.id == id)?,
+                None if inner.pending.is_empty() => return None,
+                None => 0,
+            };
+            inner.pending.remove(idx)
         };
-        Some(inner.pending.remove(idx))
+        pending.members = self.slots.map_group_members(&pending.id, |s| member_summary(s, &pending.roster));
+        Some(pending)
     }
 
     /// The ended groups awaiting their store prompt, oldest first (payload shape of `group-flight-ended`).
+    /// The member lists are those of `finish` — the store prompt (step 8) must re-query them
+    /// (`take_pending_group`) before it acts on them.
     #[allow(dead_code)] // the store prompt after a frontend reload: GROUP_FLIGHTS.md step 7/8
     pub fn pending_group_summary(&self) -> Vec<GroupEndedEvent> {
         self.lock().pending.iter().map(PendingGroup::summary).collect()
     }
+
+    /// The coordinator's live state for the Debug Monitor (read-only).
+    pub fn debug_state(&self) -> GroupDebugState {
+        let now = self.clock.instant();
+        let inner = self.lock();
+        let mut recorders: Vec<DebugRecorder> = inner
+            .registered
+            .iter()
+            .map(|(k, r)| DebugRecorder {
+                key: k.clone(),
+                first_status_seen: r.first_status_seen,
+                armed: r.armed,
+                last_seen_ms: now.saturating_duration_since(r.last_seen).as_millis() as u64,
+            })
+            .collect();
+        recorders.sort_by(|a, b| a.key.cmp(&b.key));
+        let group = inner.group.as_ref().map(|g| DebugGroup {
+            id: g.header.id.clone(),
+            phase: match g.phase {
+                Phase::Running => "running",
+                Phase::Ending => "ending",
+            },
+            start_time: g.header.start_time.to_rfc3339(),
+            end_in_ms: g.end_deadline.map(|d| d.saturating_duration_since(now).as_millis() as u64),
+            members: g
+                .members
+                .iter()
+                .map(|m| DebugMember {
+                    key: m.key.clone(),
+                    armed: m.armed,
+                    gone: m.gone,
+                    lost_armed: m.lost_armed,
+                    stalled: m.stalled,
+                    file: m.file.as_ref().map(|f| group_store::file_name_of(&f.temp_path)),
+                })
+                .collect(),
+        });
+        GroupDebugState {
+            enabled: self.enabled.load(Ordering::Relaxed),
+            recorders,
+            group,
+            pending: inner.pending.iter().map(|p| p.id.clone()).collect(),
+        }
+    }
+}
+
+/// Whether the recorder `r` (vehicle `key`) may join `g`: its temp files must live next to the group's
+/// `.kgrp`. One of another sessions folder records single flights (warned once).
+fn dir_ok(r: &mut Registered, key: &str, g: &Group) -> bool {
+    if g.same_dir(&r.sessions_dir) {
+        return true;
+    }
+    if !r.warned_dir {
+        r.warned_dir = true;
+        log::warn!(
+            "Group flight {}: {} records to another sessions folder ({}) than the group — not taken, it records single flights",
+            g.header.id,
+            key,
+            r.sessions_dir.display()
+        );
+    }
+    false
 }
 
 /// The store-prompt line of one finalized member session.
-fn member_summary(s: &PendingSession, group: &Group) -> GroupMemberSummary {
-    let member = group.members.iter().find(|m| m.file.as_ref().is_some_and(|f| f.temp_path == s.temp_path));
+fn member_summary(s: &PendingSession, roster: &[RosterEntry]) -> GroupMemberSummary {
+    let member = roster.iter().find(|m| m.temp_path == s.temp_path);
     GroupMemberSummary {
         member_id: group_store::file_name_of(&s.temp_path),
-        vehicle_key: member.map(|m| m.key.clone()).unwrap_or_default(),
-        craft: s.flight.craft_name.clone(),
+        vehicle_id: member.map(|m| m.key.clone()).unwrap_or_default(),
+        craft_name: s.flight.craft_name.clone(),
         fc_variant: s.flight.fc_variant.clone(),
         has_armed_time: s.has_armed_time(),
-        incomplete: member.is_some_and(|m| m.lost_armed),
-        duration_sec: s.flight.duration_sec.unwrap_or(0),
+        incomplete: member.is_some_and(|m| m.incomplete),
+        armed_sec: s.flight.duration_sec.unwrap_or(0),
         max_alt_m: s.flight.max_alt_m.unwrap_or(0.0),
         max_speed_ms: s.flight.max_speed_ms.unwrap_or(0.0),
         max_distance_m: s.flight.max_distance_m.unwrap_or(0.0),
@@ -1027,6 +1318,13 @@ mod tests {
 
         /// A registered recorder for vehicle `key`.
         fn recorder(&self, key: &str, craft: &str) -> Rec {
+            let rec = self.recorder_unregistered(key, craft);
+            self.coord.register(&rec.handle);
+            rec
+        }
+
+        /// A recorder for vehicle `key` the coordinator does not know (yet).
+        fn recorder_unregistered(&self, key: &str, craft: &str) -> Rec {
             let emitted = Arc::new(Mutex::new(Vec::new()));
             let settings = FlightLogSettings {
                 enabled: true,
@@ -1043,7 +1341,6 @@ mod tests {
             )
             .unwrap();
             let handle: FlightRecorderHandle = Arc::new(Mutex::new(rec));
-            self.coord.register(&handle);
             Rec { handle, emitted }
         }
 
@@ -1057,6 +1354,18 @@ mod tests {
 
         fn running(&self) -> Option<String> {
             self.coord.lock().group.as_ref().filter(|g| g.phase == Phase::Running).map(|g| g.header.id.clone())
+        }
+
+        /// The coordinator's view of member `key` (Debug Monitor snapshot).
+        fn member(&self, key: &str) -> Option<DebugMember> {
+            self.coord.debug_state().group?.members.into_iter().find(|m| m.key == key)
+        }
+
+        /// The group start as the `.kgrp` header holds it (UTC ms).
+        fn kgrp_start_ms(&self, id: &str) -> i64 {
+            let kgrp = group_store::group_file_path(&self.dir.join("sessions"), id);
+            let conn = group_store::open_group_file(&kgrp).unwrap();
+            group_store::read_group_header(&conn).unwrap().unwrap().start_time.timestamp_millis()
         }
     }
 
@@ -1129,7 +1438,7 @@ mod tests {
         let started = rig.events.named("group-flight-started");
         assert_eq!(started.len(), 1);
         assert_eq!(started[0]["groupId"], id.as_str());
-        assert_eq!(started[0]["startUtc"], DateTime::<Utc>::from_timestamp_millis(rig.base_ms()).unwrap().to_rfc3339());
+        assert_eq!(started[0]["startTime"], DateTime::<Utc>::from_timestamp_millis(rig.base_ms()).unwrap().to_rfc3339());
         assert_eq!(started[0]["members"], serde_json::json!(["L1:S1", "L2:S1"]));
         // A follows on its next status (pull) — its running single flight becomes its member session.
         let a_path = a.path().unwrap();
@@ -1232,6 +1541,10 @@ mod tests {
         assert_eq!(summary.len(), 1);
         let pending = rig.coord.take_pending_group(None).unwrap();
         assert_eq!(pending.id, id);
+        // Re-read from the slots at take time, named by the roster of the ended group.
+        let mut keys: Vec<&str> = pending.members.iter().map(|m| m.vehicle_id.as_str()).collect();
+        keys.sort();
+        assert_eq!(keys, ["L1:S1", "L2:S1"]);
         assert_eq!(pending.header.state, group_store::GROUP_PENDING);
         assert!(pending.header.end_time.is_some());
         let sessions = rig.slots.take_group_members(&id);
@@ -1316,7 +1629,11 @@ mod tests {
         b2.status(true); // first status: adopts B's suspended member session
         assert_eq!(b2.group().as_deref(), Some(id.as_str()));
         assert_eq!(b2.path().unwrap(), b_path);
-        rig.advance_ms(60_000);
+        // Past B's lost minute; B2 keeps reporting (a silent armed member would count as stalled).
+        for _ in 0..30 {
+            rig.advance_ms(2000);
+            b2.status(true);
+        }
         rig.coord.tick();
         assert_eq!(rig.running().as_deref(), Some(id.as_str()), "B is armed again");
         b2.status(false);
@@ -1327,7 +1644,7 @@ mod tests {
         let members = ended[0]["members"].as_array().unwrap();
         assert_eq!(members.len(), 2);
         assert!(members.iter().all(|m| m["incomplete"] == false));
-        assert!(members.iter().any(|m| m["vehicleKey"] == "L3:S1"));
+        assert!(members.iter().any(|m| m["vehicleId"] == "L3:S1"));
     }
 
     /// (f) A recorder registered after the group started joins on its first status, with an unarmed
@@ -1422,5 +1739,242 @@ mod tests {
             t.join().unwrap();
         }
         assert!(!rig.events.named("group-flight-started").is_empty(), "the race exercised group formation");
+    }
+
+    /// M1: an ARMED member whose recorder goes silent (a stalled link keeps its recorder — no teardown)
+    /// counts as lost-armed from its last status: once the other member disarms, the group ends after
+    /// the lost minute counted from that status, not never.
+    #[test]
+    fn stalled_armed_member_ends_the_group_after_the_lost_minute() {
+        let rig = Rig::new("stall", true);
+        let (a, b, id) = group_of_two(&rig); // A armed at t=0
+        b.status(true); // t=0: B armed — its last status
+        rig.advance_ms(3000);
+        a.status(true); // t=3 s: A reports on, B silent for 3 s: no stall yet
+        rig.coord.tick();
+        assert!(!rig.member("L2:S1").unwrap().stalled);
+        rig.advance_ms(3000);
+        a.status(false); // t=6 s: B silent for 6 s → stalled from t=0; A disarms
+        assert!(rig.member("L2:S1").unwrap().stalled);
+        rig.advance_ms(10_000);
+        rig.coord.tick(); // t=16 s: past A's grace, but B's minute runs to t=60 s
+        assert_eq!(rig.running().as_deref(), Some(id.as_str()), "open for the stalled member");
+        rig.advance_ms(43_999);
+        rig.coord.tick();
+        assert_eq!(rig.running().as_deref(), Some(id.as_str()));
+        rig.advance_ms(1);
+        rig.coord.tick();
+        assert!(rig.running().is_none(), "ends 60 s after B's last status");
+        let ended = rig.events.named("group-flight-ended");
+        assert_eq!(ended.len(), 1);
+        let members = ended[0]["members"].as_array().unwrap();
+        let incomplete = |key: &str| members.iter().find(|m| m["vehicleId"] == key).unwrap()["incomplete"].clone();
+        assert_eq!(incomplete("L2:S1"), true, "B may have flown on unrecorded");
+        assert_eq!(incomplete("L1:S1"), false);
+    }
+
+    /// M1: a stalled member whose status returns within the lost minute is present again — the group
+    /// stays open past that minute while it flies.
+    #[test]
+    fn stalled_member_back_within_the_minute_keeps_the_group() {
+        let rig = Rig::new("stallback", true);
+        let (a, b, id) = group_of_two(&rig);
+        b.status(true); // t=0
+        rig.advance_ms(1000);
+        a.status(false); // t=1 s: only B armed
+        rig.advance_ms(9000);
+        rig.coord.tick(); // t=10 s: B silent → stalled, the group ends at t=60 s unless it returns
+        assert!(rig.member("L2:S1").unwrap().stalled);
+        assert!(rig.coord.debug_state().group.unwrap().end_in_ms.is_some());
+        rig.advance_ms(20_000);
+        b.status(true); // t=30 s: B is back, still armed
+        assert!(!rig.member("L2:S1").unwrap().stalled);
+        assert_eq!(rig.coord.debug_state().group.unwrap().end_in_ms, None);
+        for _ in 0..40 {
+            rig.advance_ms(2000);
+            b.status(true);
+        }
+        rig.coord.tick(); // t=110 s
+        assert_eq!(rig.running().as_deref(), Some(id.as_str()), "B flies on: no end");
+        b.status(false);
+        rig.advance_ms(5000);
+        rig.coord.tick();
+        assert!(rig.running().is_none());
+        let ended = rig.events.named("group-flight-ended");
+        assert!(ended[0]["members"].as_array().unwrap().iter().all(|m| m["incomplete"] == false));
+    }
+
+    /// m4 (Marc, 2026-10-01): a recorder joining with a session that began before the group start pulls
+    /// the group start back to it — here A, lost while armed before the group existed, back via
+    /// continue-on-reconnect. The id stays the one formed at the start.
+    #[test]
+    fn earlier_session_joining_pulls_the_group_start_back() {
+        let rig = Rig::new("pullstart", true);
+        let a = rig.recorder("L1:S1", "A");
+        a.gps(2, 48.0, 11.0);
+        a.status(false);
+        a.status(true); // t=0: alone — a single flight
+        rig.advance_ms(2000);
+        a.handle.lock().unwrap().shutdown_lost(); // t=2 s: lost armed → recovery prompt
+        assert_eq!(a.emitted().last().map(String::as_str), Some("flight-recording-interrupted"));
+        let p = rig.slots.take_pending_for("L1:S1").expect("the interrupted flight");
+        rig.slots.put_resume("L1:S1".into(), p).unwrap(); // the operator chose Continue
+        rig.advance_ms(8000);
+        let b = rig.recorder("L2:S1", "B");
+        let c = rig.recorder("L3:S1", "C");
+        b.gps(2, 48.2, 11.6);
+        c.gps(2, 48.3, 11.7);
+        b.status(false);
+        c.status(false);
+        b.status(true); // t=10 s: B and C form the group
+        let id = rig.running().expect("group");
+        assert_eq!(rig.kgrp_start_ms(&id), rig.base_ms() + 10_000);
+        rig.advance_ms(5000);
+        let a2 = rig.recorder("L4:S1", "A");
+        a2.gps(2, 48.0, 11.0);
+        a2.status(true); // t=15 s, first status: resumes A's flight from t=0 and joins
+        assert_eq!(a2.emitted(), ["flight-recording-resumed"]);
+        assert_eq!(a2.group().as_deref(), Some(id.as_str()));
+        assert_eq!(rig.running().as_deref(), Some(id.as_str()), "the id stays");
+        assert_eq!(rig.kgrp_start_ms(&id), rig.base_ms(), "the group starts at A's session start");
+        let state = rig.coord.debug_state();
+        assert_eq!(state.group.unwrap().start_time, DateTime::<Utc>::from_timestamp_millis(rig.base_ms()).unwrap().to_rfc3339());
+    }
+
+    /// Flag ON with ONE registered recorder: every single-flight path stays as it was — grace resume,
+    /// the recovery prompt of a lost link, continue-on-reconnect — and no group ever forms.
+    #[test]
+    fn flag_on_with_one_recorder_stays_solo() {
+        let rig = Rig::new("solo", true);
+        let a = rig.recorder("L1:S1", "A");
+        a.gps(2, 48.1, 11.5);
+        a.status(false);
+        a.status(true); // t=0
+        rig.advance_ms(2000);
+        a.status(false); // t=2 s: End-Flight dialog
+        assert!(rig.slots.has_pending_for("L1:S1"));
+        rig.advance_ms(2000);
+        a.status(true); // t=4 s: re-arm within the grace → the same flight
+        assert_eq!(a.emitted(), ["flight-recording-started", "flight-recording-ended", "flight-recording-resumed"]);
+        let path = a.path().unwrap();
+        rig.advance_ms(2000);
+        a.handle.lock().unwrap().shutdown_lost(); // armed → recovery prompt
+        assert_eq!(a.emitted().last().map(String::as_str), Some("flight-recording-interrupted"));
+        let p = rig.slots.take_pending_for("L1:S1").unwrap();
+        assert_eq!(p.temp_path, path);
+        rig.slots.put_resume("L1:S1".into(), p).unwrap();
+        let a2 = rig.recorder("L2:S1", "A");
+        a2.gps(2, 48.1, 11.5);
+        a2.status(true); // continue-on-reconnect
+        assert_eq!(a2.emitted(), ["flight-recording-resumed"]);
+        assert_eq!(a2.path().unwrap(), path);
+        rig.advance_ms(1000);
+        rig.coord.tick();
+        assert!(rig.running().is_none() && a2.group().is_none());
+        assert!(rig.events.0.lock().unwrap().is_empty());
+        a2.status(false);
+        assert_eq!(a2.emitted().last().map(String::as_str), Some("flight-recording-ended"));
+    }
+
+    /// `on_disarm` take-over: a single flight that has not joined the running group when it disarms is
+    /// taken into it instead of ending. Here the recorder registers only after its first status and
+    /// arm, so the coordinator never saw that first status and its sync never joins it — in production
+    /// the same happens when a group forms between a recorder's sync and its disarm edge.
+    #[test]
+    fn disarm_of_a_single_flight_is_taken_into_the_running_group() {
+        let rig = Rig::new("takeover", true);
+        let c = rig.recorder_unregistered("L3:S1", "C");
+        c.gps(2, 48.3, 11.7);
+        c.status(false);
+        c.status(true); // t=0: a single flight, no coordinator yet
+        let c_path = c.path().unwrap();
+        rig.coord.register(&c.handle);
+        let (_a, _b, id) = group_of_two(&rig);
+        assert!(c.group().is_none(), "not joined: the coordinator never saw its first status");
+        rig.advance_ms(1000);
+        c.status(false); // t=1 s: its disarm edge
+        assert_eq!(c.group().as_deref(), Some(id.as_str()));
+        assert_eq!(c.path().unwrap(), c_path, "the single flight records on as the member session");
+        assert_eq!(c.emitted(), ["flight-recording-started"], "no End-Flight dialog");
+        assert!(!rig.slots.has_pending_for("L3:S1"));
+        let kgrp = group_store::group_file_path(&rig.dir.join("sessions"), &id);
+        let conn = group_store::open_group_file(&kgrp).unwrap();
+        let members = group_store::read_group_members(&conn, &kgrp).unwrap();
+        assert!(members.iter().any(|m| m.vehicle_key == "L3:S1" && m.temp_path == c_path));
+    }
+
+    /// An arm while the group is ending (its end is decided, the worker has not finalized it yet)
+    /// starts a single flight; the ended group still finishes with both member sessions.
+    #[test]
+    fn arm_during_ending_starts_a_single_flight() {
+        let rig = Rig::new("armending", true);
+        let (a, _b, _id) = group_of_two(&rig);
+        let a_member = a.path().unwrap();
+        a.status(false); // t=0: the last armed member disarms → the group ends at t=5 s
+        rig.advance_ms(5000);
+        a.status(true); // t=5 s: A's sync ends the group and finalizes A; the arm is a new flight
+        assert!(a.group().is_none());
+        let a_single = a.path().expect("a single flight");
+        assert_ne!(a_single, a_member);
+        assert_eq!(a.emitted(), ["flight-recording-started", "flight-recording-started"]);
+        rig.coord.tick(); // the worker finishes the ended group
+        assert!(rig.running().is_none());
+        let ended = rig.events.named("group-flight-ended");
+        assert_eq!(ended.len(), 1);
+        assert_eq!(ended[0]["members"].as_array().unwrap().len(), 2);
+        assert_eq!(rig.events.named("group-flight-started").len(), 1, "the arm during Ending formed no group");
+        assert_eq!(a.path().unwrap(), a_single, "the single flight records on");
+        rig.advance_ms(2000);
+        a.status(false);
+        assert_eq!(a.emitted().last().map(String::as_str), Some("flight-recording-ended"));
+        assert!(rig.slots.has_pending_for("L1:S1"));
+    }
+
+    /// A member's link going away while the group is ending: its session goes straight to the ended
+    /// group's members (no recovery prompt, nothing left to adopt).
+    #[test]
+    fn teardown_during_ending_goes_to_the_ended_group() {
+        let rig = Rig::new("teardownending", true);
+        let (a, b, id) = group_of_two(&rig);
+        a.status(false); // t=0 → the group ends at t=5 s
+        rig.advance_ms(5000);
+        a.status(false); // t=5 s: A's sync ends the group and finalizes A
+        assert!(a.group().is_none());
+        assert_eq!(rig.coord.debug_state().group.map(|g| g.phase), Some("ending"));
+        b.handle.lock().unwrap().shutdown_lost(); // before the worker ran
+        rig.coord.tick();
+        assert!(rig.running().is_none());
+        let ended = rig.events.named("group-flight-ended");
+        assert_eq!(ended.len(), 1);
+        assert_eq!(ended[0]["members"].as_array().unwrap().len(), 2);
+        assert!(b.emitted().is_empty(), "no recovery prompt for a member");
+        assert!(rig.slots.take_suspended_of_group(&id).is_empty());
+        assert_eq!(rig.slots.take_group_members(&id).len(), 2);
+    }
+
+    /// The flag switched off mid-group: the running group records on to its normal end; afterwards the
+    /// arms are single flights.
+    #[test]
+    fn flag_off_mid_group_records_on_to_the_end() {
+        let rig = Rig::new("flagoffmid", true);
+        let (a, b, id) = group_of_two(&rig);
+        rig.enabled.store(false, Ordering::Relaxed);
+        rig.advance_ms(1000);
+        b.status(true); // t=1 s: a member arm — the group runs on
+        a.status(false);
+        rig.advance_ms(4000);
+        b.status(true); // t=5 s
+        rig.coord.tick();
+        assert_eq!(rig.running().as_deref(), Some(id.as_str()), "never cut mid-flight");
+        b.status(false); // t=5 s: the last armed member disarms
+        rig.advance_ms(5000);
+        rig.coord.tick();
+        assert!(rig.running().is_none());
+        assert_eq!(rig.events.named("group-flight-ended").len(), 1);
+        rig.advance_ms(1000);
+        a.status(true);
+        b.status(true);
+        assert!(rig.running().is_none() && a.group().is_none() && b.group().is_none());
+        assert_eq!(rig.events.named("group-flight-started").len(), 1);
     }
 }
