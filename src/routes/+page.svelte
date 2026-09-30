@@ -51,7 +51,6 @@
   import FleetPanel from "$lib/components/FleetPanel.svelte";
   import GroupCommandBar from "$lib/components/GroupCommandBar.svelte";
   import { vehicles } from "$lib/stores/vehicles";
-  import { isMavlinkVehicle } from "$lib/helpers/fleetStatus";
   import { selectedVehicleIds } from "$lib/stores/fleetSelection";
   import { navTabRequest } from "$lib/stores/navRequest";
   import RcControlPanel from "$lib/components/control/RcControlPanel.svelte";
@@ -947,9 +946,10 @@
   const geozonesAvailable = $derived($geozoneWorking?.has_geozones ?? false);
   const fenceAvailable = $derived($fenceWorking?.has_fence ?? false);
   const rallyAvailable = $derived($rallyWorking?.has_rally ?? false);
-  // Fleet tab: as soon as one MAVLink vehicle is known (so a single-vehicle operator discovers the
-  // list); the group command bar itself only appears with 2+ (see GroupCommandBar).
-  const fleetTabAvailable = $derived([...$vehicles.values()].some(isMavlinkVehicle));
+  // Fleet tab: only once MORE THAN ONE vehicle is connected over the primary links (Marc, 2026-10-01) —
+  // a single-vehicle session must look exactly as before. Protocol-agnostic on purpose: any vehicle
+  // counts, so INAV fleets slot in later without touching this gate.
+  const fleetTabAvailable = $derived($vehicles.size >= 2);
   const tabs = $derived(
     allTabs.filter(t =>
       (t.id !== 'logbook' || flightLoggingEnabled) &&
