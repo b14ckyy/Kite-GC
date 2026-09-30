@@ -633,7 +633,7 @@ fn connect_mavlink(
         wind_enabled: wind_enabled.unwrap_or(false),
     };
     store_recorder(&state, emitter.key(), &recorder_handle);
-    // Vehicles discovered later on this link record unattended (DB only) with the same settings.
+    // Vehicles discovered later on this link record with their own recorder (DB only), same settings.
     let secondary_recording = if flight_log_settings.enabled && flight_log_settings.db_enabled {
         let portable = std::env::current_exe()
             .ok()

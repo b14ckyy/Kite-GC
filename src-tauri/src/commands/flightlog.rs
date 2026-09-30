@@ -1596,6 +1596,7 @@ pub fn flightlog_recover_save_incomplete(
     let (session, _count) = crate::flightlog::recorder::summarize_temp_session(
         std::path::PathBuf::from(&temp_path),
         main_db,
+        &crate::flightlog::recorder::SystemClock,
     )?;
     crate::flightlog::recorder::commit_pending_session(session)
 }
@@ -1612,6 +1613,7 @@ pub fn flightlog_recover_continue(
     let (session, _count) = crate::flightlog::recorder::summarize_temp_session(
         std::path::PathBuf::from(&temp_path),
         main_db,
+        &crate::flightlog::recorder::SystemClock,
     )?;
     // A recovered orphan belongs to no connected vehicle yet — queued under its own path.
     state.sessions.put_resume(temp_path, session)

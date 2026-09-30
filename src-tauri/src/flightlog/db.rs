@@ -1114,10 +1114,23 @@ pub fn open_temp_session(path: &Path) -> SqlResult<Connection> {
             protocol      TEXT,
             start_lat     REAL,
             start_lon     REAL,
-            fc_uid        TEXT
+            fc_uid        TEXT,
+            vehicle_key   TEXT,
+            role          TEXT,
+            group_id      TEXT,
+            group_file    TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_session_telemetry
-            ON telemetry_records(timestamp_ms);",
+            ON telemetry_records(timestamp_ms);
+        CREATE TABLE IF NOT EXISTS session_events (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp_ms INTEGER NOT NULL,
+            wall_ms      INTEGER,
+            kind         TEXT NOT NULL,
+            code         INTEGER,
+            text         TEXT,
+            source       TEXT
+        );",
     )?;
     // A `.ktmp` written before v19 (crash recovery of an old session) predates the column.
     if !column_exists(&conn, "session_meta", "fc_uid")? {
@@ -1126,6 +1139,13 @@ pub fn open_temp_session(path: &Path) -> SqlResult<Connection> {
     // …and one written before v20 predates the per-row wall clock (the commit copies TELEMETRY_COLS).
     if !column_exists(&conn, "telemetry_records", "wall_ms")? {
         conn.execute_batch("ALTER TABLE telemetry_records ADD COLUMN wall_ms INTEGER;")?;
+    }
+    // …and the group-flight membership (GROUP_FLIGHTS.md §3.3). `role` stays NULL on such a file: it
+    // marks a session whose arm/disarm history was never recorded (see `SessionMetaRow::role`).
+    for column in ["vehicle_key", "role", "group_id", "group_file"] {
+        if !column_exists(&conn, "session_meta", column)? {
+            conn.execute_batch(&format!("ALTER TABLE session_meta ADD COLUMN {column} TEXT;"))?;
+        }
     }
     Ok(conn)
 }
@@ -1196,6 +1216,24 @@ pub fn update_session_meta_identity(
     Ok(())
 }
 
+/// Record who writes a temp session and whether it belongs to a group flight (GROUP_FLIGHTS.md §3.3):
+/// the recorder's vehicle key, its role (`single` | `member`), and — for a member — the group id and
+/// the file name of the group's `.kgrp` (it lives next to the `.ktmp`). Written at session start and
+/// whenever the membership changes.
+pub fn update_session_meta_membership(
+    conn: &Connection,
+    vehicle_key: &str,
+    role: &str,
+    group_id: Option<&str>,
+    group_file: Option<&str>,
+) -> SqlResult<()> {
+    conn.execute(
+        "UPDATE session_meta SET vehicle_key = ?1, role = ?2, group_id = ?3, group_file = ?4 WHERE id = 1",
+        params![vehicle_key, role, group_id, group_file],
+    )?;
+    Ok(())
+}
+
 /// The self-describing metadata of a temp session (from its `session_meta` row).
 pub struct SessionMetaRow {
     pub start_time: String,
@@ -1208,13 +1246,24 @@ pub struct SessionMetaRow {
     pub start_lat: Option<f64>,
     pub start_lon: Option<f64>,
     pub fc_uid: Option<String>,
+    /// Vehicle key of the recorder that wrote the session (`"L1:S2"`).
+    #[allow(dead_code)] // read by the group recovery scan (GROUP_FLIGHTS.md step 7)
+    pub vehicle_key: Option<String>,
+    /// `single` | `member`. NULL = written before arm/disarm events were recorded (the whole session
+    /// then counts as armed, the pre-group rule).
+    pub role: Option<String>,
+    /// Group flight the session belongs to (member sessions only).
+    pub group_id: Option<String>,
+    /// File name of the group's `.kgrp`, in the same directory as the `.ktmp`.
+    pub group_file: Option<String>,
 }
 
 /// Read the single `session_meta` row of a temp session (None if absent — e.g. a malformed file).
 pub fn read_session_meta(conn: &Connection) -> SqlResult<Option<SessionMetaRow>> {
     conn.query_row(
         "SELECT start_time, craft_name, fc_variant, fc_version, board_id, platform_type, \
-                protocol, start_lat, start_lon, fc_uid FROM session_meta WHERE id = 1",
+                protocol, start_lat, start_lon, fc_uid, vehicle_key, role, group_id, group_file \
+         FROM session_meta WHERE id = 1",
         [],
         |row| {
             Ok(SessionMetaRow {
@@ -1228,8 +1277,60 @@ pub fn read_session_meta(conn: &Connection) -> SqlResult<Option<SessionMetaRow>>
                 start_lat: row.get(7)?,
                 start_lon: row.get(8)?,
                 fc_uid: row.get(9)?,
+                vehicle_key: row.get(10)?,
+                role: row.get(11)?,
+                group_id: row.get(12)?,
+                group_file: row.get(13)?,
             })
         },
+    )
+    .optional()
+}
+
+/// Append one timeline event (arm / disarm / link_lost / link_back) to a temp session. `id` and
+/// `flight_id` of `e` are ignored — the commit rewrites the flight id (see `commit_session_to_main`).
+pub fn insert_session_event(conn: &Connection, e: &FlightEvent) -> SqlResult<()> {
+    conn.execute(
+        "INSERT INTO session_events (timestamp_ms, wall_ms, kind, code, text, source)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![e.timestamp_ms, e.wall_ms, e.kind, e.code, e.text, e.source],
+    )?;
+    Ok(())
+}
+
+/// A temp session's timeline events in time order (`flight_id` = 0, like its telemetry rows).
+pub fn read_session_events(conn: &Connection) -> SqlResult<Vec<FlightEvent>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, timestamp_ms, wall_ms, kind, code, text, source
+         FROM session_events ORDER BY timestamp_ms ASC, id ASC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(FlightEvent {
+            id: row.get(0)?,
+            flight_id: 0,
+            timestamp_ms: row.get(1)?,
+            wall_ms: row.get(2)?,
+            kind: row.get(3)?,
+            code: row.get(4)?,
+            text: row.get(5)?,
+            source: row.get(6)?,
+        })
+    })?;
+    rows.collect()
+}
+
+/// The latest point of a temp session at which its relative timeline (`timestamp_ms`) and the wall
+/// clock (`wall_ms`) are both known — the last telemetry row or event carrying a wall stamp, whichever
+/// is later on the timeline. `None` for a session without any wall stamp (written before v20).
+pub fn last_session_time_pair(conn: &Connection) -> SqlResult<Option<(i64, i64)>> {
+    conn.query_row(
+        "SELECT timestamp_ms, wall_ms FROM (
+            SELECT timestamp_ms, wall_ms FROM telemetry_records WHERE wall_ms IS NOT NULL
+            UNION ALL
+            SELECT timestamp_ms, wall_ms FROM session_events WHERE wall_ms IS NOT NULL
+         ) ORDER BY timestamp_ms DESC, wall_ms DESC LIMIT 1",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
     )
     .optional()
 }
@@ -1243,6 +1344,12 @@ pub fn temp_session_row_count(conn: &Connection) -> SqlResult<i64> {
 /// ATTACH the temp file, copy its `telemetry_records` (rewriting `flight_id` to the new main id),
 /// then DETACH. Returns the new flight id. The main DB therefore only ever sees the flight as a
 /// finished whole. `ATTACH`/`DETACH` cannot run inside a transaction, so they bracket it.
+///
+/// Group flights (GROUP_FLIGHTS.md §3.4): the session's `session_events` become the flight's
+/// `flight_events`, and a group id in its `session_meta` (else `flight.group_id`) is written to
+/// `flights.group_id`. The group row must exist already (the caller commits it first); a missing one
+/// fails the commit instead of silently dropping the membership. A `.ktmp` from before these tables
+/// commits as before.
 pub fn commit_session_to_main(
     conn: &Connection,
     temp_path: &Path,
@@ -1252,8 +1359,34 @@ pub fn commit_session_to_main(
     conn.execute("ATTACH DATABASE ?1 AS sess", params![temp_str])?;
 
     let outcome = (|| -> SqlResult<i64> {
+        let meta_group_id: Option<String> = if attached_column_exists(conn, "session_meta", "group_id")? {
+            conn.query_row("SELECT group_id FROM sess.session_meta WHERE id = 1", [], |r| r.get(0))
+                .optional()?
+                .flatten()
+        } else {
+            None
+        };
+        let has_events = attached_table_exists(conn, "session_events")?;
+
         let tx = conn.unchecked_transaction()?;
-        let flight_id = insert_flight(&tx, flight)?;
+        let mut row = flight.clone();
+        if let Some(gid) = meta_group_id {
+            row.group_id = Some(gid);
+        }
+        if let Some(gid) = row.group_id.as_deref() {
+            let known: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM main.flight_groups WHERE id = ?1)",
+                params![gid],
+                |r| r.get(0),
+            )?;
+            if !known {
+                return Err(rusqlite::Error::SqliteFailure(
+                    rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CONSTRAINT),
+                    Some(format!("group flight {gid} is not in the flight DB — commit the group first")),
+                ));
+            }
+        }
+        let flight_id = insert_flight(&tx, &row)?;
         // Swap the leading `flight_id` column name for the new id literal in the SELECT.
         let select_cols = TELEMETRY_COLS.replacen("flight_id", &flight_id.to_string(), 1);
         tx.execute(
@@ -1276,6 +1409,14 @@ pub fn commit_session_to_main(
             ),
             [],
         )?;
+        if has_events {
+            tx.execute(
+                "INSERT INTO main.flight_events (flight_id, timestamp_ms, wall_ms, kind, code, text, source)
+                 SELECT ?1, timestamp_ms, wall_ms, kind, code, text, source
+                 FROM sess.session_events ORDER BY timestamp_ms ASC, id ASC",
+                params![flight_id],
+            )?;
+        }
         tx.commit()?;
         Ok(flight_id)
     })();
@@ -1283,6 +1424,24 @@ pub fn commit_session_to_main(
     // Always detach, even if the transaction failed, so the connection isn't left with `sess` bound.
     let _ = conn.execute("DETACH DATABASE sess", []);
     outcome
+}
+
+/// Whether the temp session ATTACHed as `sess` has the table `table`.
+fn attached_table_exists(conn: &Connection, table: &str) -> SqlResult<bool> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sess.sqlite_master WHERE type = 'table' AND name = ?1)",
+        params![table],
+        |r| r.get(0),
+    )
+}
+
+/// Whether `table` of the temp session ATTACHed as `sess` has the column `column`.
+fn attached_column_exists(conn: &Connection, table: &str, column: &str) -> SqlResult<bool> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1, 'sess') WHERE name = ?2)",
+        params![table, column],
+        |r| r.get(0),
+    )
 }
 
 /// Best-effort removal of a temp session file and its WAL/SHM sidecars (after a successful commit).
