@@ -26,7 +26,7 @@
 
   let { onclose }: { onclose: () => void } = $props();
 
-  type Tab = 'msp' | 'mavlink' | 'tunnel' | 'alerts' | 'telemetry' | 'rc' | 'performance' | 'video';
+  type Tab = 'msp' | 'mavlink' | 'tunnel' | 'alerts' | 'telemetry' | 'rc' | 'performance' | 'video' | 'fleet';
   let tab = $state<Tab>('msp');
 
   // Linux hole-punch spike (dev, MOBILE_RTSP.md P2.3 stage A) — coloured stand-in below the DOM hole.
@@ -525,6 +525,7 @@
     <button class="tab" class:active={tab === 'rc'} onclick={() => tab = 'rc'}>{$t('debug.tabRc')}</button>
     <button class="tab" class:active={tab === 'performance'} onclick={() => tab = 'performance'}>{$t('debug.tabPerformance')}</button>
     <button class="tab" class:active={tab === 'video'} onclick={() => tab = 'video'}>{$t('debug.tabVideo')}</button>
+    <button class="tab" class:active={tab === 'fleet'} onclick={() => tab = 'fleet'}>{$t('debug.tabFleet')}</button>
   </div>
 
   <div class="inject-row" class:on={inj.active}>
@@ -1065,6 +1066,19 @@
 
         <div class="perf-hint">{$t('debug.perf.hint')}</div>
       {/if}
+    </div>
+  {:else if tab === 'fleet'}
+    <!-- The multi-vehicle feature gate (settings.fleetEnabled, pushed to the backend by +page.svelte). -->
+    <div class="perf-tab">
+      <label class="perf-check">
+        <input
+          type="checkbox"
+          checked={$settings.fleetEnabled}
+          onchange={(e) => settings.patch({ fleetEnabled: (e.currentTarget as HTMLInputElement).checked })}
+        />
+        {$t('debug.fleet.enabled')}
+      </label>
+      <div class="perf-hint">{$t('debug.fleet.hint')}</div>
     </div>
   {:else if tab === 'video'}
     <!-- WebRTC inbound pipeline, one row per stage: what arrives from the engine (recv), what the decoder

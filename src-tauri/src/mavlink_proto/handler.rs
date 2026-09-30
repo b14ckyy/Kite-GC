@@ -256,11 +256,15 @@ fn secondary_recorder(cfg: &SecondaryRecording, sysid: u8, fc_variant: &str, pla
 }
 
 /// Publish (or drop) a secondary vehicle's recorder in app-state (`AppState::recorders`), so the
-/// command layer reaches it when that vehicle is the active one.
+/// command layer reaches it when that vehicle is the active one. A new recorder is also registered with
+/// the group-flight coordinator (it unregisters itself on teardown).
 fn register_recorder(emitter: &VehicleEmitter, recorder: Option<&FlightRecorderHandle>) {
     use tauri::Manager;
     if let Some(state) = emitter.app().try_state::<crate::state::AppState>() {
         state.set_recorder(emitter.key(), recorder);
+        if let Some(r) = recorder {
+            state.groups.register(r);
+        }
     }
 }
 
@@ -652,6 +656,8 @@ fn handler_loop(
                     // Multi-vehicle on one link: an unknown sysid becomes a vehicle on its first
                     // autopilot HEARTBEAT (same acceptance rule as the handshake); any other frame from
                     // an unknown sysid is ignored until then.
+                    // GATE(fleet): secondary-vehicle discovery on a shared link is to be gated on
+                    // `AppState::fleet_enabled` (GROUP_FLIGHTS.md step 6) — not gated yet.
                     if !vehicles.contains_key(&sysid) {
                         let MavMessage::HEARTBEAT(ref hb) = frame.message else { continue };
                         let is_autopilot = hb.autopilot != MavAutopilot::MAV_AUTOPILOT_INVALID

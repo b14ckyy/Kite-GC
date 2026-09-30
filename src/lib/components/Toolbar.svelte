@@ -41,6 +41,7 @@
     onOpenRaw,
     onOpenRc,
     onRescanBle,
+    fleetEnabled = false,
   }: {
     appVersion: string;
     telem: TelemetryData;
@@ -68,6 +69,8 @@
     onOpenRc?: () => void;
     /** Trigger a fresh bounded BLE scan window — called when the device dropdown is opened. */
     onRescanBle?: () => void;
+    /** Fleet feature gate (settings.fleetEnabled): off = no link manager / multi-connect. */
+    fleetEnabled?: boolean;
   } = $props();
 
   // Sensor-health bar: one tile per sensor the airframe reports (helpers/sensorHealth.ts — shared
@@ -281,8 +284,9 @@
       {onConnect}
       {onRescanBle}
     />
-    <!-- Multi-vehicle: vehicle picker, open links, "Add link" (only meaningful once connected). -->
-    {#if connStatus === 'connected'}
+    <!-- Multi-vehicle: vehicle picker, open links, "Add link" (only meaningful once connected; behind
+         the fleet feature gate). -->
+    {#if connStatus === 'connected' && fleetEnabled}
       <LinkManager {ports} {bleDeviceList} {isBleScanning} {baudRates} {onRescanBle} />
     {/if}
   {/snippet}

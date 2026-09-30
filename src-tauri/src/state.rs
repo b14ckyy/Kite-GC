@@ -12,7 +12,8 @@ use std::sync::mpsc;
 use tauri::{AppHandle, Manager};
 
 use crate::aero::AeroCache;
-use crate::flightlog::recorder::{FlightRecorderHandle, SessionSlotsHandle};
+use crate::flightlog::group::GroupCoordinator;
+use crate::flightlog::recorder::{FlightRecorderHandle, SessionSlotsHandle, SystemClock};
 use crate::mavlink_proto::handler::MavlinkCommand;
 use crate::mavlink_proto::MavlinkHandle;
 use crate::msp::FcInfo;
@@ -139,12 +140,22 @@ pub struct AppState {
     /// connect paths, secondaries from the MAVLink handler. Lets the command layer reach the ACTIVE
     /// vehicle's recorder protocol-independently (the live platform-type override).
     pub recorders: Mutex<HashMap<String, FlightRecorderHandle>>,
+    /// Multi-vehicle feature gate (Dev-Docs active/MULTI_VEHICLE.md "Delivery decision"; default off,
+    /// set by `set_fleet_enabled` from the frontend's hidden runtime setting). Off: the group
+    /// coordinator never forms a group. Shared with the coordinator, hence the `Arc`.
+    pub fleet_enabled: Arc<AtomicBool>,
+    /// Group-flight coordinator (GROUP_FLIGHTS.md §3.2): every DB recorder registers with it on
+    /// creation; it ties the flights of vehicles flying together into one group flight.
+    pub groups: Arc<GroupCoordinator>,
 }
 
 impl AppState {
     pub fn new() -> Self {
         let radar = RadarManager::new();
         let radar_ingest = radar.ingest_handle();
+        let sessions: SessionSlotsHandle = Arc::default();
+        let fleet_enabled = Arc::new(AtomicBool::new(false));
+        let groups = Arc::new(GroupCoordinator::new(sessions.clone(), Arc::new(SystemClock), fleet_enabled.clone()));
         Self {
             links: Mutex::new(LinkRegistry::new()),
             radar: Mutex::new(radar),
@@ -153,8 +164,10 @@ impl AppState {
             rc_tx: Arc::new(Mutex::new(RcTxState::default())),
             ble_scan_stop: Mutex::new(None),
             aero: Mutex::new(None),
-            sessions: Arc::default(),
+            sessions,
             recorders: Mutex::new(HashMap::new()),
+            fleet_enabled,
+            groups,
         }
     }
 }

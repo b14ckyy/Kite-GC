@@ -11,6 +11,7 @@ pub mod blackbox;
 pub mod decoder;
 pub mod exchange;
 pub mod geocode;
+pub mod group;
 pub mod group_store;
 pub mod hires;
 pub mod msp_raw_logger;

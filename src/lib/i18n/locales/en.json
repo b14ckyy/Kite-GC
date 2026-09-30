@@ -1966,6 +1966,11 @@
     "tabRc": "MSP-RC",
     "tabPerformance": "3D Perf",
     "tabVideo": "Video",
+    "tabFleet": "Fleet (gated)",
+    "fleet": {
+      "enabled": "Multi-vehicle features enabled",
+      "hint": "Hidden feature gate. Off: the single-link UI (no link manager, Fleet tab or group commands) and no group flights. Stored with the settings."
+    },
     "tabTunnel": "Tunnel",
     "tunActive": "Tunnel active",
     "tunInactive": "No tunnel",

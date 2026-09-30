@@ -948,8 +948,13 @@
   const rallyAvailable = $derived($rallyWorking?.has_rally ?? false);
   // Fleet tab: only once MORE THAN ONE vehicle is connected over the primary links (Marc, 2026-10-01) —
   // a single-vehicle session must look exactly as before. Protocol-agnostic on purpose: any vehicle
-  // counts, so INAV fleets slot in later without touching this gate.
-  const fleetTabAvailable = $derived($vehicles.size >= 2);
+  // counts, so INAV fleets slot in later without touching this gate. Behind the fleet feature gate.
+  const fleetTabAvailable = $derived($settings.fleetEnabled && $vehicles.size >= 2);
+  // With the gate off, a Fleet tab restored from the last session (or open when it was switched off) must
+  // not stay rendered — the same fallback as the RC tab above.
+  $effect(() => {
+    if (!$settings.fleetEnabled && activeTab === 'fleet') activeTab = 'uav-info';
+  });
   const tabs = $derived(
     allTabs.filter(t =>
       (t.id !== 'logbook' || flightLoggingEnabled) &&
@@ -1288,6 +1293,13 @@
     const g = $gcsLocation;
     if (!g) return;
     void setRadarNode(g.lat, g.lon, gcsGroundAltM ?? 0);
+  });
+
+  // Fleet feature gate (hidden runtime setting, Debug Monitor): push on start + every change — the backend
+  // group-flight coordinator never forms a group while it is off.
+  $effect(() => {
+    const on = $settings.fleetEnabled;
+    void invoke('set_fleet_enabled', { on }).catch((e) => console.warn('[fleet] set_fleet_enabled failed:', e));
   });
 
   // Telemetry API (Dev-Docs active/TELEMETRY_API.md): push the persisted config on start + every change;
@@ -3633,8 +3645,11 @@
     <RadarAlertBanner {interfaceSettings} />
     <!-- FC system messages (MAVLink STATUSTEXT) as top-edge toasts (renders nothing when idle). -->
     <StatusTextToasts />
-    <!-- Multi-vehicle group commands, bottom-centre (renders nothing with fewer than 2 MAVLink vehicles). -->
-    <GroupCommandBar />
+    <!-- Multi-vehicle group commands, bottom-centre (renders nothing with fewer than 2 MAVLink vehicles;
+         behind the fleet feature gate). -->
+    {#if $settings.fleetEnabled}
+      <GroupCommandBar />
+    {/if}
   </div>
 
   <!-- Floating-frame map controls — top-level/unzoomed so they sit ABOVE the in-frame map (z2); the
@@ -3791,6 +3806,7 @@
     onOpenRaw={() => (rawTelemetryOpen = true)}
     onOpenRc={() => selectTab('rc-control')}
     onRescanBle={bleScanWindow}
+    fleetEnabled={$settings.fleetEnabled}
   />
     <RelayPanel open={relayPanelOpen} />
   </div>

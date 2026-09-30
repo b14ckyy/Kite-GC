@@ -1070,9 +1070,13 @@ pub async fn disconnect(link_id: Option<LinkId>, state: State<'_, AppState>, app
 }
 
 /// Publish (or drop) a link primary's recorder handle for the command layer, under its vehicle key
-/// (dropped again on disconnect).
+/// (dropped again on disconnect), and register it with the group-flight coordinator (it unregisters
+/// itself on teardown).
 fn store_recorder(state: &State<'_, AppState>, key: &str, rec: &Option<crate::flightlog::recorder::FlightRecorderHandle>) {
     state.set_recorder(key, rec.as_ref());
+    if let Some(r) = rec {
+        state.groups.register(r);
+    }
 }
 
 /// Override the platform type of the connected vehicle for this session (UAV Info panel dropdown).

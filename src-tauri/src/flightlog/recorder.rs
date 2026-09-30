@@ -13,6 +13,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::Connection;
 
 use super::db;
+use super::group::{ArmReport, FirstStatusReport, GroupCoordinator, GroupDirective, MemberFile};
 use super::group_store;
 use super::msp_raw_logger::{MspRawLogger, MspRawSink};
 use super::tlog_logger::TlogLogger;
@@ -29,8 +30,8 @@ const ARMED_FLAG: u32 = 0x04; // bit 2
 
 /// INAV-style disarm→re-arm grace: a re-arm within this window continues the SAME log (an accidental
 /// disarm in flight is one flight, not two). Beyond it, the previous flight is committed and a new
-/// session starts. See ADR-041.
-const REARM_GRACE: Duration = Duration::from_secs(5);
+/// session starts. See ADR-041. The group end uses the same grace (`group::GROUP_END_GRACE`).
+pub(crate) const REARM_GRACE: Duration = Duration::from_secs(5);
 
 /// Timeline event kinds written to `session_events` (→ `flight_events` at commit).
 pub const EVENT_ARM: &str = "arm";
@@ -49,7 +50,7 @@ const ROLE_MEMBER: &str = "member";
 /// §5b (Marc, 2026-10-01): the first arm that starts a group recording anchors the group, and later
 /// formation / safety guards need precise GPS. Everything after the group start records regardless of
 /// fix — a member starting unarmed or arming without a fix is recorded too (its rows just have no
-/// position). The check itself is the coordinator's (step 5), via `has_3d_fix`.
+/// position). The check itself is the coordinator's (`group::GroupCoordinator::on_arm`), via `has_3d_fix`.
 const MIN_FIX_TYPE_INITIATOR: u8 = 2;
 
 /// One armed stretch of a session on its relative timeline (`timestamp_ms`, ms since the session
@@ -217,7 +218,6 @@ pub struct PendingSession {
     pub start_mah: Option<u32>,
     pub last_timestamp_ms: i64,
     /// The armed stretches of the session (from its arm/disarm events).
-    #[allow(dead_code)] // read by the group coordinator: GROUP_FLIGHTS.md step 5
     pub armed_segments: Vec<ArmedSegment>,
     /// Set when the session belongs to a group flight (then `flight.group_id` is set too).
     pub membership: Option<GroupMembership>,
@@ -226,7 +226,6 @@ pub struct PendingSession {
 impl PendingSession {
     /// Whether the aircraft was armed at any point of the session. A group member without armed time
     /// (a passive vehicle, or one that never took off) is listed unticked in the store prompt (§5.5).
-    #[allow(dead_code)] // group coordinator: GROUP_FLIGHTS.md step 5
     pub fn has_armed_time(&self) -> bool {
         !self.armed_segments.is_empty()
     }
@@ -354,6 +353,12 @@ impl SessionSlots {
     /// Take `key`'s pending session.
     pub fn take_pending_for(&self, key: &str) -> Option<PendingSession> {
         self.pending.lock().ok().and_then(|mut map| map.remove(key))
+    }
+
+    /// Whether `key` has a finished single flight awaiting Save/Discard (or its re-arm grace). The group
+    /// coordinator does not take such a recorder into a group flight (GROUP_FLIGHTS.md §4 test f).
+    pub fn has_pending_for(&self, key: &str) -> bool {
+        self.pending.lock().map(|map| map.contains_key(key)).unwrap_or(false)
     }
 
     /// A pending session left by a connection that has closed since (its vehicle key is no longer
@@ -501,7 +506,7 @@ impl SessionSlots {
 
     /// Take every finalized member session of `group_id` (the group coordinator, when the group's
     /// store prompt is resolved).
-    #[allow(dead_code)] // group coordinator: GROUP_FLIGHTS.md step 5
+    #[allow(dead_code)] // the store-prompt commit / discard: GROUP_FLIGHTS.md step 7
     pub fn take_group_members(&self, group_id: &str) -> Vec<PendingSession> {
         take_where(&self.group_pending, |s| s.flight.group_id.as_deref() == Some(group_id))
     }
@@ -527,9 +532,46 @@ impl SessionSlots {
 
     /// Take every suspended member session of `group_id` (the coordinator finalizes them when the
     /// group ends — their aircraft did not come back).
-    #[allow(dead_code)] // group coordinator: GROUP_FLIGHTS.md step 5
     pub fn take_suspended_of_group(&self, group_id: &str) -> Vec<PendingSession> {
         take_where(&self.suspended, |s| s.flight.group_id.as_deref() == Some(group_id))
+    }
+
+    /// Move every suspended member session of `group_id` to the group's finalized members (the group
+    /// ended): they go to its store prompt, and a later connection of the same aircraft can no longer
+    /// adopt them into a finished group. Their files are registered as live across the move (the two
+    /// maps are locked one at a time). Returns how many moved.
+    pub fn drain_suspended_of_group(&self, group_id: &str) -> usize {
+        let paths: Vec<PathBuf> = self
+            .suspended
+            .lock()
+            .map(|map| {
+                map.iter()
+                    .filter(|(_, s)| s.flight.group_id.as_deref() == Some(group_id))
+                    .map(|(k, _)| k.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        for p in &paths {
+            self.set_live(None, Some(p));
+        }
+        let taken = self.take_suspended_of_group(group_id);
+        let n = taken.len();
+        for s in taken {
+            self.park_group_member(s);
+        }
+        for p in &paths {
+            self.set_live(Some(p), None);
+        }
+        n
+    }
+
+    /// `f` over every finalized member session of `group_id` (not taken), oldest first.
+    pub fn map_group_members<R>(&self, group_id: &str, mut f: impl FnMut(&PendingSession) -> R) -> Vec<R> {
+        let Ok(map) = self.group_pending.lock() else { return Vec::new() };
+        let mut sessions: Vec<&PendingSession> =
+            map.values().filter(|s| s.flight.group_id.as_deref() == Some(group_id)).collect();
+        sessions.sort_by_key(|s| s.flight.start_time);
+        sessions.into_iter().map(&mut f).collect()
     }
 }
 
@@ -878,6 +920,10 @@ pub struct FlightRecorder {
     /// a disarm only writes an event (no End-Flight, no re-arm grace), a teardown suspends the session
     /// for adoption, and `finalize_member` ends it with armed-segment stats.
     membership: Option<GroupMembership>,
+    /// The group coordinator this recorder reports arm / disarm / first status / teardown to
+    /// (`GroupCoordinator::register`); `None` = never part of a group flight (not registered, or torn
+    /// down). Lock order: this recorder's lock, then the coordinator's — never the reverse.
+    coordinator: Option<Arc<GroupCoordinator>>,
 }
 
 /// Thread-safe handle to the flight recorder
@@ -940,6 +986,7 @@ impl FlightRecorder {
             first_status_seen: false,
             auto_commit: false,
             membership: None,
+            coordinator: None,
         })
     }
 
@@ -992,13 +1039,121 @@ impl FlightRecorder {
 
     /// Whether the latest snapshot holds a 3D fix (or better) with a valid position — what the group
     /// INITIATOR needs (§5b, `MIN_FIX_TYPE_INITIATOR`). Members record without it.
-    #[allow(dead_code)] // group coordinator: GROUP_FLIGHTS.md step 5
     pub fn has_3d_fix(&self) -> bool {
         let position = matches!(
             (self.snapshot.lat, self.snapshot.lon),
             (Some(lat), Some(lon)) if is_valid_gps_coord(lat, lon)
         );
         position && self.snapshot.fix_type.is_some_and(|f| f >= MIN_FIX_TYPE_INITIATOR)
+    }
+
+    /// Report to `coordinator` from now on (`GroupCoordinator::register`).
+    pub(crate) fn attach_coordinator(&mut self, coordinator: Arc<GroupCoordinator>) {
+        self.coordinator = Some(coordinator);
+    }
+
+    /// This recorder's vehicle key (`"L1:S1"`).
+    pub(crate) fn vehicle_key(&self) -> &str {
+        self.key()
+    }
+
+    /// Whether this recorder writes temp sessions (DB recording on) — only those can be group members.
+    pub(crate) fn records_to_db(&self) -> bool {
+        self.settings.db_enabled
+    }
+
+    /// The folder of this recorder's temp sessions (a group's `.kgrp` goes there too).
+    pub(crate) fn sessions_dir(&self) -> PathBuf {
+        self.db_file_path.parent().unwrap_or(Path::new(".")).join("sessions")
+    }
+
+    /// The group flight this recorder is a member of.
+    pub fn group_id(&self) -> Option<&str> {
+        self.membership.as_ref().map(|m| m.group_id.as_str())
+    }
+
+    /// The temp `.ktmp` of the running session.
+    pub fn active_temp_path(&self) -> Option<PathBuf> {
+        self.active_flight.as_ref().and_then(|f| f.temp_path.clone())
+    }
+
+    /// The running session's file and this recorder's identity, as the group's `.kgrp` lists a member.
+    fn member_file(&self) -> Option<MemberFile> {
+        Some(MemberFile {
+            temp_path: self.active_temp_path()?,
+            craft_name: self.fc_info.craft_name.clone(),
+            fc_variant: self.fc_info.fc_variant.clone(),
+            fc_uid: self.fc_info.fc_uid.clone(),
+        })
+    }
+
+    /// Follow the group coordinator's view (GROUP_FLIGHTS.md §3.2): join the running group, or finalize
+    /// the member session of a group that has ended. Run at the top of every status after the first
+    /// (so the status's own arm/disarm edge already sees the result), and by the coordinator's `tick`
+    /// for recorders that get no status. No-op without a coordinator.
+    pub(crate) fn group_sync(&mut self) {
+        let Some(c) = self.coordinator.clone() else { return };
+        let directive = c.sync(self.key(), self.group_id());
+        self.apply_group_directive(&c, directive);
+    }
+
+    /// Apply a coordinator directive to this recorder.
+    fn apply_group_directive(&mut self, c: &GroupCoordinator, directive: GroupDirective) {
+        match directive {
+            GroupDirective::Stay => {}
+            GroupDirective::Join(m) => {
+                self.enter_member_mode(&m.group_id, &m.kgrp_path);
+                // A running session goes on as the member session; without one, record from now on.
+                self.start_recording_unarmed();
+                if let Some(file) = self.member_file() {
+                    c.member_recording(self.key(), &m.group_id, file);
+                }
+            }
+            GroupDirective::Leave => {
+                self.finalize_member();
+                // Still armed although the group ended (the coordinator saw no arm — a missed one): the
+                // next armed status starts a new flight instead of flying on unrecorded.
+                self.was_armed = false;
+            }
+        }
+    }
+
+    /// Report a single-flight arm to the coordinator once its session runs: it may start a group with
+    /// this arm, or take the session into the running one.
+    fn report_arm(&mut self) {
+        let Some(c) = self.coordinator.clone() else { return };
+        let Some(session_start) = self.active_flight.as_ref().map(|f| f.start_time) else { return };
+        let report = ArmReport {
+            has_3d_fix: self.has_3d_fix(),
+            lat: self.snapshot.lat,
+            lon: self.snapshot.lon,
+            alt_m: self.snapshot.alt_gps,
+            session_start,
+        };
+        let directive = c.on_arm(self.key(), report);
+        self.apply_group_directive(&c, directive);
+    }
+
+    /// Report the state after this connection's first status (adoption / continue-on-reconnect
+    /// settled) — a recorder that connects while a group runs joins it here.
+    fn report_first_status(&mut self) {
+        let Some(c) = self.coordinator.clone() else { return };
+        let report = FirstStatusReport {
+            armed: self.was_armed,
+            member_of: self.group_id().map(String::from),
+            file: self.member_file(),
+            session_start: self.active_flight.as_ref().map(|f| f.start_time),
+        };
+        let directive = c.on_first_status(self.key(), report);
+        self.apply_group_directive(&c, directive);
+    }
+
+    /// Unregister from the coordinator on teardown (after a member session was suspended).
+    fn report_teardown(&mut self) {
+        if let Some(c) = self.coordinator.take() {
+            let member_of = self.group_id().map(String::from);
+            c.on_teardown(self.key(), self.was_armed, member_of.as_deref());
+        }
     }
 
     /// Append a timeline event to the active session (its `session_events` and the in-memory copy),
@@ -1052,7 +1207,6 @@ impl FlightRecorder {
     /// (auto-commit) secondary stops auto-committing here for good — the group's store prompt decides
     /// on its sessions, and after the group it follows the single-flight rules (`leave_member_mode`
     /// and `finalize_member` do not switch auto-commit back on).
-    #[allow(dead_code)] // group coordinator: GROUP_FLIGHTS.md step 5
     pub fn enter_member_mode(&mut self, group_id: &str, kgrp_path: &Path) {
         log::info!("{} joins group flight {}", self.key(), group_id);
         self.auto_commit = false;
@@ -1062,7 +1216,7 @@ impl FlightRecorder {
 
     /// Group coordinator hook: back to single-flight rules (the running session, if any, continues as
     /// a single flight and is finalized by its next disarm).
-    #[allow(dead_code)] // group coordinator: GROUP_FLIGHTS.md step 5
+    #[allow(dead_code)] // not used by the coordinator: a group always ends with `finalize_member`
     pub fn leave_member_mode(&mut self) {
         if let Some(m) = self.membership.take() {
             log::info!("{} leaves group flight {}", self.key(), m.group_id);
@@ -1077,7 +1231,6 @@ impl FlightRecorder {
     /// time until the vehicle's own arm. Emits nothing (group members never announce their sessions).
     /// Only in member mode (`enter_member_mode` first): a single flight's session exists only while
     /// armed, so without membership this refuses (false).
-    #[allow(dead_code)] // group coordinator: GROUP_FLIGHTS.md step 5
     pub fn start_recording_unarmed(&mut self) -> bool {
         if self.membership.is_none() { return false; }
         if self.active_flight.is_some() {
@@ -1093,7 +1246,6 @@ impl FlightRecorder {
     /// Group coordinator hook: the group ended (last disarm + grace) — finalize this member's session
     /// with armed-segment stats and park it for the group's store prompt (`SessionSlots::
     /// take_group_members`). Leaves member mode. Returns whether a session was parked.
-    #[allow(dead_code)] // group coordinator: GROUP_FLIGHTS.md step 5
     pub fn finalize_member(&mut self) -> bool {
         if self.membership.is_none() {
             log::warn!("{}: finalize_member outside a group flight — ignored", self.key());
@@ -1116,7 +1268,7 @@ impl FlightRecorder {
     }
 
     /// The armed stretches of the running session; one still open ends now.
-    #[allow(dead_code)] // group coordinator: GROUP_FLIGHTS.md step 5
+    #[allow(dead_code)] // tests; the coordinator reads the finalized session (`PendingSession::has_armed_time`)
     pub fn armed_segments(&self) -> Vec<ArmedSegment> {
         match &self.active_flight {
             Some(f) => armed_segments_from(&f.events, self.since(f.start_instant).as_millis() as i64),
@@ -1125,7 +1277,7 @@ impl FlightRecorder {
     }
 
     /// Whether the running session has any armed time (§5.5: members without are listed unticked).
-    #[allow(dead_code)] // group coordinator: GROUP_FLIGHTS.md step 5
+    #[allow(dead_code)] // tests; the coordinator reads the finalized session (`PendingSession::has_armed_time`)
     pub fn has_armed_time(&self) -> bool {
         !self.armed_segments().is_empty()
     }
@@ -1359,6 +1511,21 @@ impl FlightRecorder {
 
         let is_armed = (data.arming_flags & ARMED_FLAG) != 0;
 
+        // Group flights (GROUP_FLIGHTS.md §3.2): after the first status, follow the coordinator (join a
+        // running group, leave an ended one) before this status's arm/disarm edge is handled; the first
+        // status reports its settled state (adoption / continue-on-reconnect) afterwards instead.
+        let first = !self.first_status_seen;
+        if !first {
+            self.group_sync();
+        }
+        self.handle_status(is_armed);
+        if first {
+            self.report_first_status();
+        }
+    }
+
+    /// The first-status decisions and the arm/disarm edges of one status (`on_status`).
+    fn handle_status(&mut self, is_armed: bool) {
         // First polled status of this connection: settle any continue-on-reconnect session (ADR-042).
         // The poller's status is past any handshake residual flags, so it is the trustworthy point.
         // A suspended group member of the same aircraft comes first: it is adopted without a prompt.
@@ -1428,15 +1595,30 @@ impl FlightRecorder {
     fn on_arm(&mut self) {
         // Group member: the session runs on through disarms — an arm is only an event. A member
         // without a session (none was started for it at the group's start) opens one now, with or
-        // without a fix (§5b).
-        if self.membership.is_some() {
-            if self.active_flight.is_none() {
-                self.start_fresh_session(false, "armed start, group member");
+        // without a fix (§5b). The coordinator hears of the arm first: when the group has ended in the
+        // meantime (its grace lapsed), the member session is finalized for the group and this arm
+        // starts a new flight.
+        if let Some(group_id) = self.group_id().map(String::from) {
+            let running = self.coordinator.as_ref().is_none_or(|c| c.on_member_arm(self.key(), &group_id));
+            if running {
+                if self.active_flight.is_none() {
+                    self.start_fresh_session(false, "armed start, group member");
+                }
+                log::info!("ARM (group member {}) — recording continues", self.key());
+                self.record_event(EVENT_ARM);
+                return;
             }
-            log::info!("ARM (group member {}) — recording continues", self.key());
-            self.record_event(EVENT_ARM);
-            return;
+            log::info!("ARM ({}) after group flight {} ended — a new flight", self.key(), group_id);
+            self.finalize_member();
         }
+        self.arm_single();
+        // The coordinator may start a group with this arm, or take the session into a running one.
+        self.report_arm();
+    }
+
+    /// A single-flight arm (`on_arm`): continue a running session, resume a pending one within the
+    /// grace, or start a fresh one.
+    fn arm_single(&mut self) {
         // A session still running (e.g. one that left member mode while disarmed) is never replaced:
         // the arm is only an event.
         if self.active_flight.is_some() {
@@ -1835,10 +2017,24 @@ impl FlightRecorder {
     /// (deferred commit, ADR-041) and the frontend shows the End-Flight summary (Save / Discard); a
     /// re-arm resolves it instead. A group member only records the event and records on.
     fn on_disarm(&mut self) {
-        if self.membership.is_some() {
+        if let Some(group_id) = self.group_id().map(String::from) {
             log::info!("DISARM (group member {}) — recording continues", self.key());
             self.record_event(EVENT_DISARM);
+            if let Some(c) = &self.coordinator {
+                c.on_member_disarm(self.key(), &group_id);
+            }
             return;
+        }
+        // A group that started meanwhile takes this session over instead of letting it end — every
+        // connected vehicle records while a group flies (§5.5).
+        if let Some(c) = self.coordinator.clone() {
+            let directive = c.on_disarm(self.key());
+            if matches!(directive, GroupDirective::Join(_)) {
+                self.apply_group_directive(&c, directive);
+                log::info!("DISARM ({}) — taken into the running group flight, recording continues", self.key());
+                self.record_event(EVENT_DISARM);
+                return;
+            }
         }
         log::info!("DISARM detected — stopping flight recording");
         self.record_event(EVENT_DISARM);
@@ -2014,6 +2210,7 @@ impl FlightRecorder {
             if let Some((session, _)) = self.take_active_as_pending() { self.auto_commit_now(session); }
             self.publish_active_path();
             self.close_continuous_loggers();
+            self.report_teardown();
             self.slots.detach(self.key());
             return;
         } else if self.active_flight.is_some() {
@@ -2026,6 +2223,7 @@ impl FlightRecorder {
         }
         self.close_continuous_loggers();
         self.mirror_to_shared_folders();
+        self.report_teardown();
         self.slots.detach(self.key());
     }
 
@@ -2058,6 +2256,7 @@ impl FlightRecorder {
         }
         self.close_continuous_loggers();
         self.mirror_to_shared_folders();
+        self.report_teardown();
         self.slots.detach(self.key());
     }
 

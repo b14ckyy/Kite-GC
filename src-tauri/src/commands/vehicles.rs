@@ -45,6 +45,18 @@ pub fn set_active_vehicle(vehicle_id: String, state: State<'_, AppState>, app_ha
     Ok(())
 }
 
+/// Multi-vehicle feature gate (hidden runtime setting, pushed by the frontend on start and on change).
+/// Off (the default): the group coordinator never forms a group flight. A group already running when it
+/// is switched off records on to its normal end — it is never cut mid-flight.
+#[tauri::command]
+pub fn set_fleet_enabled(on: bool, state: State<'_, AppState>) -> Result<(), String> {
+    let was = state.fleet_enabled.swap(on, std::sync::atomic::Ordering::Relaxed);
+    if was != on {
+        log::info!("Fleet features {}", if on { "enabled" } else { "disabled" });
+    }
+    Ok(())
+}
+
 /// Re-announce every known vehicle (`vehicle-discovered`), so a frontend that (re)loaded after the
 /// live announcements can rebuild its vehicle list. The primary always comes from the registry entry
 /// (its identity reflects the MSP tunnel probe); MAVLink handlers add the secondaries they discovered

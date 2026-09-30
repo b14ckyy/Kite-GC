@@ -26,6 +26,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"
 
 [dependencies]
 md-5 = "0.10"
+sha1 = "0.10"  # group-flight id (GROUP_FLIGHTS.md §3.1) — a stable short hash, not security
 tauri = { version = "2", features = ["macos-private-api"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"

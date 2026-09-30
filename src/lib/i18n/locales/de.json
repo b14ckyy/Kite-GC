@@ -1836,6 +1836,11 @@
     "tabRc": "MSP-RC",
     "tabPerformance": "3D-Perf",
     "tabVideo": "Video",
+    "tabFleet": "Flotte (Gate)",
+    "fleet": {
+      "enabled": "Multi-Fahrzeug-Funktionen aktiv",
+      "hint": "Versteckter Feature-Schalter. Aus: die Einzel-Link-Oberfläche (kein Link-Manager, kein Flotten-Tab, keine Gruppenbefehle) und keine Gruppenflüge. Wird mit den Einstellungen gespeichert."
+    },
     "tabTunnel": "Tunnel",
     "tunActive": "Tunnel aktiv",
     "tunInactive": "Kein Tunnel",
