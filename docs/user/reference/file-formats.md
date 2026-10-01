@@ -20,7 +20,7 @@ You can also drag a mission file straight onto the map. See **[Missions](../guid
 | Format | Extension | Notes |
 |---|---|---|
 | **INAV Blackbox** | `.bbl`, `.txt` | Onboard-flash (`.bbl`) or SD-card (`.txt`) blackbox. Needs the `blackbox_decode` helper, which Kite fetches automatically on first use. |
-| **ArduPilot Dataflash** | `.bin` | ArduPilot / PX4 onboard logs. |
+| **ArduPilot Dataflash** | `.bin` | ArduPilot (4.1 or newer) / PX4 onboard logs. |
 | **MAVLink telemetry** | `.tlog` | A MAVLink ground-station recording. |
 | **MWPTools raw-MSP** | `.rawmsp` | mwp's raw telemetry capture. |
 | **Kite flight** | `.kflight` | A flight exported from another Kite install. |

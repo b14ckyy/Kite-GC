@@ -71,7 +71,7 @@ Use **Import** to pull in logs from outside Kite (one file or a batch). Supporte
 | Format | From |
 |---|---|
 | **INAV Blackbox** (`.bbl`, `.txt`) | INAV onboard flash (`.bbl`) or SD-card (`.txt`) blackbox |
-| **ArduPilot Dataflash** (`.bin`) | ArduPilot / PX4 onboard logs |
+| **ArduPilot Dataflash** (`.bin`) | ArduPilot (4.1 or newer) / PX4 onboard logs |
 | **MAVLink telemetry** (`.tlog`) | a MAVLink ground-station recording |
 | **MWPTools raw-MSP** (`.rawmsp`) | mwp's raw telemetry capture |
 | **Kite flight** (`.kflight`) | a flight exported from another Kite install |

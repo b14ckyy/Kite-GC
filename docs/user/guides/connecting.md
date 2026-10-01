@@ -27,7 +27,7 @@ adapter, and so on.
 | Protocol | Use it for | Direction |
 |---|---|---|
 | **MSP** | INAV flight controllers (7.0+) | Two-way (Kite polls the FC) |
-| **MAVLink** | ArduPilot and PX4 | Two-way |
+| **MAVLink** | ArduPilot (4.1+) and PX4 | Two-way |
 | **Telemetry** | A passive, listen-only downlink (SmartPort, CRSF, LTM, MAVLink) | **Receive only** — Kite never transmits |
 
 The first two are normal bidirectional control links. **Telemetry** is special — see

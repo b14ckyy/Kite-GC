@@ -50,7 +50,7 @@ Kite Ground Control flying in 3D mode.
 
 ## Supported setups
 
-- **Autopilots:** INAV (7.0+), ArduPilot, and PX4.
+- **Autopilots:** INAV (7.0+), ArduPilot (4.1+), and PX4.
 - **Aircraft:** fixed-wing, flying-wing, VTOL, multirotor, helicopter, rover, boat.
 - **Connections:** USB / serial, Bluetooth (SPP & BLE), TCP, and UDP.
 - **Link modes:** live control link, **passive** listen-only telemetry, or a **relay** that
