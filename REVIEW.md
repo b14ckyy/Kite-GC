@@ -89,6 +89,11 @@ Report a violation only when the diff shows it.
   `scheduler/`).
 - Minimum INAV firmware is 7.0.0; new MSP commands are gated through `msp/features.rs`
   (`InavVersion` + `Feature`).
+- Minimum ArduPilot firmware is 4.1 — for the live MAVLink link and for DataFlash (`.bin`) import alike
+  (the importer relies on the single `GPS` message with instance `I` and in-use flag `U` that 4.1
+  introduced). Compatibility paths for older ArduPilot log or message shapes (`GPS2`, `GPSB`, …) are out
+  of scope: do not request them, and flag them if a PR adds one. PX4 has no fixed minimum yet; current
+  releases are the target.
 
 ### Protocol-agnostic layers
 
