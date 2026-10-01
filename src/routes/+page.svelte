@@ -3336,9 +3336,10 @@
   onMount(() => {
     void import('@tauri-apps/api/webviewWindow').then(({ getCurrentWebviewWindow }) => {
       const win = getCurrentWebviewWindow();
-      void win.show().then(() => win.setFocus()).catch((e: unknown) => {
-        void invoke('log_frontend', { level: 'error', area: 'ui', message: `main window show failed: ${String(e)}` }).catch(() => {});
-      });
+      const failed = (what: string) => (e: unknown) => {
+        void invoke('log_frontend', { level: 'error', area: 'ui', message: `main window ${what} failed: ${String(e)}` }).catch(() => {});
+      };
+      void win.show().then(() => win.setFocus().catch(failed('focus')), failed('show'));
     });
   });
 
