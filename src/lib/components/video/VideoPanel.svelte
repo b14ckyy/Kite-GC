@@ -60,7 +60,7 @@
   import Button from '$lib/components/panel/Button.svelte';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import Toggle from '$lib/components/panel/Toggle.svelte';
-  import { isLinux, isMobile, isAndroid, isIOS, isPhone } from '$lib/platform';
+  import { isLinux, isMobile, isAndroid, isPhone, hasVideo } from '$lib/platform';
 
   // Which saved RTSP connection is being edited inline (null = none).
   let editingRtspId = $state<string | null>(null);
@@ -291,7 +291,7 @@
 {#snippet headerActions()}
   <Button
     variant={$videoState.enabled ? 'danger' : 'data'}
-    disabled={($videoState.kind === 'rtsp' && isIOS) || (!$videoState.enabled && $videoState.kind === 'rtsp' && needsEngine && engineChecked && !engineVer)}
+    disabled={(!$videoState.enabled && $videoState.kind === 'rtsp' && needsEngine && engineChecked && !engineVer)}
     onclick={toggleVideo}
   >
     {$videoState.enabled ? $t('video.stop') : $t('video.start')}
@@ -527,10 +527,10 @@
       </div>
 
       <!-- Experimental: Kite's own in-process RTSP client (MOBILE_RTSP.md) — no MediaMTX, no
-           ffmpeg. MJPEG on the multipart path; H.264/HEVC decode in hardware (Windows).
-           On Android it is the ONLY route (no sidecars on mobile) — forced on in the store,
-           nothing to toggle. -->
-      {#if !isAndroid}
+           ffmpeg. MJPEG on the multipart path; H.264/HEVC decode in hardware.
+           On Android and iOS it is the ONLY route (no sidecars on mobile) — forced on in the
+           store, nothing to toggle. -->
+      {#if !isMobile}
         <div class="field-row" title={$t('video.nativeClientHint')}>
           <Toggle
             checked={$videoState.rtspNativeClient}
@@ -592,13 +592,7 @@
         <NumberStepper bind:value={$rtspBufferFrames} min={0} max={3} step={1} />
       </div>
 
-      {#if isIOS}
-        <!-- RTSP is a placeholder on iOS only: the engine cannot run there, and the Kite-client
-             route arrives with MOBILE_RTSP P3. Android runs the Kite client (forced above). -->
-        <div class="ffmpeg-box">
-          <p class="hint">{$t('video.rtspMobilePlaceholder')}</p>
-        </div>
-      {:else if needsEngine && engineChecked && !engineVer}
+      {#if needsEngine && engineChecked && !engineVer}
         <!-- MediaMTX is required for the WebRTC path only — see `needsEngine`. -->
         <div class="ffmpeg-box">
           <p class="hint">{$t('video.engineMissing')}</p>
@@ -692,8 +686,16 @@
   </div>
 {/snippet}
 
+{#snippet iphoneBody()}
+  <p class="hint">{$t('video.iphoneUnsupported')}</p>
+{/snippet}
+
 <div class="vpv2">
-  <PanelShell variant="compact" title={$t('video.title')} {headerActions} {body} />
+  {#if !hasVideo}
+    <PanelShell variant="compact" title={$t('video.title')} body={iphoneBody} />
+  {:else}
+    <PanelShell variant="compact" title={$t('video.title')} {headerActions} {body} />
+  {/if}
 </div>
 
 <style>

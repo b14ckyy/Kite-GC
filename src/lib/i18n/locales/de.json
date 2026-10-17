@@ -701,7 +701,7 @@
     "rtspDone": "Bearbeiten fertig",
     "reconnecting": "Verbinde neu…",
     "reconnectStop": "Stopp",
-    "rtspMobilePlaceholder": "RTSP ist auf diesem Gerät noch nicht verfügbar — die Streaming-Engine kann auf Mobilgeräten nicht laufen, ein gerätespezifischer RTSP-Weg kommt noch.",
+    "iphoneUnsupported": "Video ist auf dem iPhone nicht verfügbar. Für Video bitte ein iPad verwenden.",
     "engineMissing": "Die Streaming-Engine MediaMTX wird für RTSP benötigt und ist noch nicht installiert.",
     "invalidRtspUrl": "Das ist keine RTSP-Adresse – sie muss mit rtsp:// (oder rtsps://) beginnen.",
     "engineDownload": "MediaMTX herunterladen",

@@ -298,7 +298,7 @@ room for either the map or a widget, rarely both. Tablets keep the desktop layou
   no bar behind them — an empty middle slot takes no room, so two side widgets sit together in the
   middle. The widgets keep clear of the arming chip and the map buttons (they shrink a little when all
   three are in use on a small screen), and the map's follow centre moves up so the aircraft stays in
-  the free part of the map. The docked video window lies over the slots: park it with its button, or
+  the free part of the map. On an Android phone the docked video window lies over the slots: park it with its button, or
   use the Video widget in the column when you want both. The Video widget itself cannot go into a
   slot.
 - **Map controls**: pinch to zoom (no zoom buttons); the **2D / 3D** and **follow** buttons sit at the
@@ -308,7 +308,7 @@ room for either the map or a widget, rarely both. Tablets keep the desktop layou
   the like) may extend over the widget column to the right screen edge, and when the replay player's
   full controls are showing on a narrow phone, the widget column slides aside until playback runs and
   the player folds into its compact strip.
-- **Video** has no floating window on the phone. Once a source runs (Video panel → Start), a
+- **Video** has no floating window on an Android phone (iPhone has no video). Once a source runs (Video panel → Start), a
   **camera button** appears above the map buttons: it slides a **docked video window** into the
   bottom-right corner of the map, and slides it out again — behind the widget column and off the
   screen — so the picture is one tap away and never in the way. The corner marker in the window's

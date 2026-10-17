@@ -80,6 +80,8 @@ enum Cmd {
 struct Shared {
     error: Mutex<Option<String>>,
     presented: AtomicU64,
+    /// Frames skipped while no surface was on screen, so the stall detector sees them as progress.
+    dropped_hidden: AtomicU64,
     width: AtomicU32,
     height: AtomicU32,
     /// Smoothing-buffer depth in frames (0 = display immediately).
@@ -174,6 +176,11 @@ impl AppleVideoSink {
 
     pub fn frames_presented(&self) -> u64 {
         self.shared.presented.load(Ordering::Relaxed)
+    }
+
+    /// Frames skipped while no surface was on screen.
+    pub fn frames_dropped_hidden(&self) -> u64 {
+        self.shared.dropped_hidden.load(Ordering::Relaxed)
     }
 
     /// Display picture size (clean aperture, not the coded size), once the parameter sets arrived.
@@ -348,7 +355,9 @@ fn decode_loop(hevc: bool, rx: &Receiver<Cmd>, shared: &Shared) {
                 }
                 let Some(desc) = format.as_ref() else { continue };
                 if outs.is_empty() {
-                    continue; // nothing on screen — no session to feed, so nothing to decode
+                    // Nothing on screen: no session to feed, so nothing to decode.
+                    shared.dropped_hidden.fetch_add(1, Ordering::Relaxed);
+                    continue;
                 }
                 let depth = shared.buffer_frames.load(Ordering::Relaxed);
                 let pts = ts90k as i64;
@@ -359,19 +368,9 @@ fn decode_loop(hevc: bool, rx: &Receiver<Cmd>, shared: &Shared) {
                 let mut sample = None;
 
                 for out in &mut outs {
-                    // A layer that failed decoding needs a flush before it accepts anything again.
+                    // Flush check first: a revoked decoder (app backgrounded) also reports Failed.
                     // SAFETY: thread-safe queued-rendering calls.
                     unsafe {
-                        if out.layer.0.status() == AVQueuedSampleBufferRenderingStatus::Failed {
-                            let msg = out
-                                .layer
-                                .0
-                                .error()
-                                .map(|e| e.localizedDescription().to_string())
-                                .unwrap_or_else(|| "display layer failed".into());
-                            shared.fail(format!("decode failed ({}): {msg}", out.key));
-                            return;
-                        }
                         if out.layer.0.requiresFlushToResumeDecoding() {
                             log::warn!(
                                 "[video] apple sink: {} requires a flush — resuming on the next keyframe",
@@ -381,6 +380,16 @@ fn decode_loop(hevc: bool, rx: &Receiver<Cmd>, shared: &Shared) {
                             out.wait_for_idr = true;
                             out.pacing.anchor = None;
                             continue;
+                        }
+                        if out.layer.0.status() == AVQueuedSampleBufferRenderingStatus::Failed {
+                            let msg = out
+                                .layer
+                                .0
+                                .error()
+                                .map(|e| e.localizedDescription().to_string())
+                                .unwrap_or_else(|| "display layer failed".into());
+                            shared.fail(format!("decode failed ({}): {msg}", out.key));
+                            return;
                         }
                     }
                     if out.wait_for_idr {

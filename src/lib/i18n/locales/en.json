@@ -701,7 +701,7 @@
     "rtspDone": "Done editing",
     "reconnecting": "Reconnecting…",
     "reconnectStop": "Stop",
-    "rtspMobilePlaceholder": "RTSP is not available on this device yet — the streaming engine cannot run on mobile, and a device-native RTSP path is still to come.",
+    "iphoneUnsupported": "Video isn't available on iPhone. Use an iPad for video.",
     "engineMissing": "The MediaMTX streaming engine is required for RTSP and isn't installed yet.",
     "invalidRtspUrl": "That is not an RTSP address — it has to start with rtsp:// (or rtsps://).",
     "engineDownload": "Download MediaMTX",

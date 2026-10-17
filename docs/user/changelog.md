@@ -30,7 +30,7 @@ inside the box of the feature release they belong to, so the notes for one relea
         underneath it. Long-press a widget to rearrange or resize it; the others shift live to show
         where they will land. Pinch to zoom, 2D/3D and follow next to the column. [#102]
 
-        **Video on the phone** sits in a docked window at the bottom-right of the map — a camera
+        **Video on an Android phone** sits in a docked window at the bottom-right of the map — a camera
         button parks it off-screen and brings it back instantly — or in the Video widget of the
         column; double-tap swaps map and video. [#105] The 3D view centres on the visible map area
         next to the column. [#103] · [#111]
@@ -43,7 +43,7 @@ inside the box of the feature release they belong to, so the notes for one relea
     ??? info "Native RTSP video client with hardware decode"
         RTSP video no longer needs the external video engine: Kite ships its **own RTSP client** and
         decodes H.264/H.265 with the **operating system's hardware decoder** on Windows, Android,
-        Linux and macOS — lower latency, a fraction of the CPU load, and rock-solid reconnects.
+        Linux, macOS and iPad — lower latency, a fraction of the CPU load, and rock-solid reconnects.
         [#85] · [#88] · [#89] · [#126]
 
     ??? info "Video in two places at once — and on a screen of its own"
@@ -135,7 +135,7 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **iPhone & iPad support** — native iOS/iPadOS build: phone/tablet layout, touch RC, BLE,
       Wi-Fi MAVLink. Contributed by Sebastian Kumor. [#16]
     - **Native RTSP video client** — Kite's own RTSP client with OS hardware decode (H.264/H.265)
-      on Windows [#85], Android [#88], Linux [#89] and macOS [#126].
+      on Windows [#85], Android [#88], Linux [#89], macOS [#126] and iPad [#221] (no video on iPhone).
     - **Unobstructed fullscreen video** — aspect-exact video box with a blurred follow-map
       backdrop. [#90]
     - **PX4 ULog import** — the logbook imports `.ulg` flash/SD logs, split into flights like any
@@ -422,6 +422,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#112]: https://github.com/b14ckyy/Kite-GC/pull/112
 [#123]: https://github.com/b14ckyy/Kite-GC/pull/123
 [#126]: https://github.com/b14ckyy/Kite-GC/pull/126
+[#221]: https://github.com/b14ckyy/Kite-GC/pull/221
 [#127]: https://github.com/b14ckyy/Kite-GC/pull/127
 [#129]: https://github.com/b14ckyy/Kite-GC/pull/129
 [#130]: https://github.com/b14ckyy/Kite-GC/pull/130

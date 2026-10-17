@@ -2604,6 +2604,7 @@ dependencies = [
  "objc2-core-media",
  "objc2-foundation 0.3.2",
  "objc2-quartz-core",
+ "objc2-ui-kit",
  "reqwest 0.12.28",
  "rusqlite",
  "serde",
@@ -3432,6 +3433,7 @@ dependencies = [
  "objc2 0.6.4",
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
+ "objc2-quartz-core",
 ]
 
 [[package]]
