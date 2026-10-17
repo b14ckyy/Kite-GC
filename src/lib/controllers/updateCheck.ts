@@ -60,11 +60,15 @@ export const installState = writable<InstallState>({ phase: 'idle', percent: nul
 /** The running app version (for the dialog's "you have …" line). */
 export const currentVersion = APP_VERSION;
 
+/** False on iOS until the App Store listing exists: GitHub releases have no iOS build to point at, and
+ *  TestFlight and the App Store announce updates themselves. */
+export const updatesSupported = !(isIOS && !APP_STORE_URL);
+
 /** Run once on startup. No-op when the check is disabled, the fetch fails, the latest isn't newer, or the
  *  user already skipped this (or an equal/higher) version. */
 export async function runUpdateCheck(): Promise<void> {
   const cfg = get(settings).updateCheck;
-  if (cfg.mode === 'disabled') return;
+  if (!updatesSupported || cfg.mode === 'disabled') return;
 
   let info: UpdateInfo | null;
   try {
