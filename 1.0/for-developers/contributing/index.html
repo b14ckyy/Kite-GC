@@ -1902,9 +1902,14 @@ versions: the newest release line renders it, the older versions' Changelog page
 </code></pre></div>
 <p>CI runs the same checks (plus clippy) on Linux, Windows and macOS for every push to <code>development</code>,
 <code>master</code> and the release branches, and for every PR targeting them. <strong>PRs should be green before review.</strong></p>
-<p>For a <strong>bug-fix PR</strong>, please state in the description whether the bug exists in the <strong>released
-version</strong> or was <strong>introduced since</strong> (and by what, if you know). Only the first kind belongs in the
-release notes, so this one line saves the archaeology at release time.</p>
+<p>For a <strong>bug-fix PR</strong>, add the <strong>regression marker</strong> to the description — one line, in exactly one of
+these two forms (the PR template has a slot for it):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Affects: v1.0.1 and earlier
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>Regression: introduced by 3f2a9c1, never released
+</code></pre></div>
+<p>The first says the bug exists in a <strong>released version</strong> (name the newest one that has it); the second
+says it was <strong>introduced since</strong> the last release and never reached a user. Only the first kind belongs
+in the release notes, so this one line saves the archaeology at release time.</p>
 <h2 id="coding-conventions">Coding conventions<a class="headerlink" href="#coding-conventions" title="Permanent link">&para;</a></h2>
 <p><strong>Frontend (Svelte 5 / TypeScript)</strong></p>
 <ul>
@@ -1945,8 +1950,8 @@ AI help) can top up the other languages afterwards.</p>
 <p>Kite Ground Control is licensed under <strong><a href="https://www.gnu.org/licenses/gpl-3.0.html">GPL-3.0-or-later</a></strong>.</p>
 <ul>
 <li>Every source file carries an SPDX header:
-  <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>// SPDX-License-Identifier: GPL-3.0-or-later
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
+  <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>// SPDX-License-Identifier: GPL-3.0-or-later
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>// Copyright (C) 2026 Marc Hoffmann (b14ckyy)
 </code></pre></div>
   Add it to any new source file you create.</li>
 <li>By submitting a contribution you agree it is licensed under the project's GPL-3.0-or-later terms.</li>
