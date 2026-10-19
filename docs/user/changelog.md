@@ -194,6 +194,7 @@ inside the box of the feature release they belong to, so the notes for one relea
       dialog. [#162]
     - **Patch releases only** — update-check channel that offers bug-fix releases of the running
       version only (2.0.0 → 2.0.1, never 2.1.0). [#162]
+    - **Slovak interface language** (Settings → Language), contributed by Sebastian Kumor.
 
     **Removed**
 
