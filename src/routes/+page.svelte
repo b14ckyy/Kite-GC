@@ -11,7 +11,7 @@
   import { connection, availablePorts, bleDevices, defaultNetPort, hasMsp, isArduPilotLink } from "$lib/stores/connection";
   import type { FcInfo, PortInfo, BleDeviceInfo, TransportType, ProtocolType } from "$lib/stores/connection";
   import { settings } from "$lib/stores/settings";
-  import { isAndroid, isMobile, isTablet, isPhone as isPhoneDevice, hasSerialPorts, logPlayerWidth } from "$lib/platform";
+  import { isAndroid, isMobile, isTablet, isPhone as isPhoneDevice, hasSerialPorts, hasVideo, logPlayerWidth } from "$lib/platform";
   import { isDebugMode } from "$lib/stores/debug";
   import { telemetry } from "$lib/stores/telemetry";
   import { startRadarListeners, configureRadar, setRadarCenter, setRadarNode } from "$lib/stores/radarTracking";
@@ -3594,6 +3594,7 @@
     <PhoneBottomChips {telem} />
   </div>
   <!-- Docked video window + its toggle (PHONE_VIDEO.md) — the phone's floating window. -->
+  {#if hasVideo}
   <PhoneVideoDock
     left={dockLeft}
     top={dockTop}
@@ -3601,6 +3602,7 @@
     height={dockH}
     widgetActive={phoneCtrl.isPhoneWidgetActive(phoneWidgets, 'videoFeed')}
   />
+  {/if}
   {:else}
   <!-- ======= TOOLBAR ======= -->
   <div class="zone-toolbar" bind:clientHeight={toolbarH}>

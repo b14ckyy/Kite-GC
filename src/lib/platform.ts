@@ -42,6 +42,9 @@ export const isTablet = isMobile && !isPhone;
  *  platform where the serial transport is genuinely absent — not hidden, absent. */
 export const hasSerialPorts = !isIOS;
 
+/** Video sources exist. Not on iPhone: on iOS video is iPad-only (RTSP_APPLE.md). */
+export const hasVideo = !(isIOS && isPhone);
+
 /** True when running inside the macOS WebView (WKWebView) — used to mirror native window-control
  *  placement and drive the native-capture backend (AVFoundation). Excludes iPadOS, which shares the
  *  "Macintosh" user-agent. */
@@ -66,7 +69,7 @@ export const isLinux = /Linux/i.test(ua) && !/Android/i.test(ua);
  *  Neither WebView2 nor macOS shows this, so both keep the smooth animations. */
 export const isWebKitGtk = isLinux;
 
-/** True on any WebKit-based WebView — WebKitGTK on Linux and WKWebView on macOS, which are different
+/** True on any WebKit-based WebView — WebKitGTK on Linux and WKWebView on macOS and iOS, which are different
  *  ports of the same WebCore and so share its resource loader.
  *
  *  Drives the `?raw=1` request of the off-thread MJPEG reader. WebKit handles
@@ -75,7 +78,7 @@ export const isWebKitGtk = isLinux;
  *  `reader.read()` fails with `Load failed` at zero bytes — main thread and worker alike, which is
  *  what silently pushed Linux back onto the `<img>` sink. The identical bytes under another content
  *  type stream perfectly. WebView2 reads multipart directly and is deliberately left untouched. */
-export const isWebKit = isLinux || isMacOS;
+export const isWebKit = isLinux || isMacOS || isIOS;
 
 // Tag the document root on mobile so global CSS can add bottom breathing room. The bottom edge is
 // crowded there: the on-screen RC sticks, the map zoom/compass buttons, the Leaflet attribution label

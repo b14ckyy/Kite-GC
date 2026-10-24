@@ -39,7 +39,10 @@ pub mod linux_host;
 pub mod linux_sink;
 #[cfg(target_os = "macos")]
 pub mod apple_host;
-#[cfg(target_os = "macos")]
+#[cfg(target_os = "ios")]
+#[path = "ios_host.rs"]
+pub mod apple_host;
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 pub mod apple_sink;
 
 pub use mediamtx::MediaMtx;

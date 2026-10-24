@@ -136,6 +136,14 @@ gst_app = { package = "gstreamer-app", version = "0.21" }
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSArray", "NSData", "NSDictionary", "NSString", "NSValue", "NSEnumerator", "NSObject"] }
 objc2-core-bluetooth = { version = "0.3", features = ["CBCentralManager", "CBPeripheral", "CBService", "CBCharacteristic", "CBAttribute", "CBPeer", "CBAdvertisementData", "CBManager", "CBError", "CBUUID"] }
+# Native RTSP decode on iPad: the macOS sink (video/apple_sink.rs) under a UIKit host (video/ios_host.rs).
+# Same crate versions as the macOS sink below, so nothing new is downloaded.
+objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "objc2-quartz-core", "UIResponder", "UIView", "UIColor"] }
+objc2-quartz-core = { version = "0.3", features = ["CALayer", "CATransform3D", "objc2-core-foundation", "objc2-core-graphics"] }
+objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "AVSampleBufferDisplayLayer", "AVQueuedSampleBufferRendering", "AVAnimation", "objc2-core-media", "objc2-quartz-core"] }
+objc2-core-media = { version = "0.3", features = ["CMBase", "CMTime", "CMSync", "CMBlockBuffer", "CMFormatDescription", "CMSampleBuffer"] }
+objc2-core-foundation = { version = "0.3", features = ["CFBase", "CFArray", "CFDictionary", "CFNumber", "CFString"] }
+objc2-core-graphics = { version = "0.3", features = ["CGColor", "CGGeometry"] }
 
 # Native location on mobile. WKWebView's Web geolocation prompt is labelled with the page origin
 # host ("localhost"); this plugin routes to CoreLocation (iOS) / Android location services instead,

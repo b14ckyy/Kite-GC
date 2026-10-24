@@ -471,9 +471,9 @@ pub fn run() {
             // MOBILE_RTSP.md P2.3). Needs the transparent window from tauri.linux.conf.json.
             #[cfg(target_os = "linux")]
             video::linux_host::install(_app.handle());
-            // macOS: the AppKit video layer below the WebView (hole-punch decode sink,
-            // MOBILE_RTSP.md P3). Needs the transparent window from tauri.macos.conf.json.
-            #[cfg(target_os = "macos")]
+            // macOS / iPad: the AppKit or UIKit video layer below the WebView (hole-punch decode sink,
+            // MOBILE_RTSP.md P3). Needs the transparent window from tauri.macos/ios.conf.json.
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
             video::apple_host::install(_app.handle());
 
             // Linux/WebKitGTK: stop trackpad/keyboard gestures from zooming the whole WebView frame.

@@ -23,8 +23,8 @@ is remembered between sessions.
     **MJPEG** costs more bandwidth but is passed through untouched — the lightest option wherever
     nothing should be converted (see the
     [platform notes](#platform-notes-what-to-expect-per-operating-system)).
-    **HEVC/H.265** plays wherever the **Kite RTSP client** does the decoding: always on **Android**,
-    and on **Windows**, **Linux** and **macOS** with the *Native RTSP client* toggle on (hardware
+    **HEVC/H.265** plays wherever the **Kite RTSP client** does the decoding: always on **Android**
+    and **iPad**, and on **Windows**, **Linux** and **macOS** with the *Native RTSP client* toggle on (hardware
     decode; Windows additionally needs the free "HEVC Video Extensions" from the Microsoft Store).
     macOS is the one platform whose classic engine path plays HEVC as well.
 
@@ -92,7 +92,7 @@ The RTSP source has a small **connection manager** built in:
   setting takes effect immediately on the running stream and is remembered.
 - **Native RTSP client (experimental)** — Kite's own built-in stream client: no helper downloads,
   UDP-first connection with automatic TCP fallback, and native hardware H.264/HEVC decode on Windows,
-  Linux and macOS (Android always uses it; there is no toggle there). Recommended on Linux — see the
+  Linux and macOS (Android and iPad always use it; there is no toggle there). Recommended on Linux — see the
   [platform notes](#platform-notes-what-to-expect-per-operating-system). If a particular source
   misbehaves with it, switch it off to fall back to the classic engine path.
 
@@ -122,7 +122,7 @@ The same feed can appear in several places at once (they all share one stream):
   snaps it there**, where it **displaces the bottom widget dock** to make room (the dock shrinks by the
   window's size). Drag it away from the corner to un-snap and free-float. The **top-right corner grip
   resizes** it (aspect-locked, touch-friendly).
-  **On a phone** there is a **docked window** instead: fixed to the bottom-right of the map, sized to
+  **On an Android phone** there is a **docked window** instead: fixed to the bottom-right of the map, sized to
   the stream (at most 40 % of the map height or half its width), no dragging. The **corner marker in
   its top-left** toggles between that size and a compact one (two thirds), for the video and the
   swapped-in map alike; the choice is remembered. A **camera button** above the map buttons slides the
@@ -166,11 +166,11 @@ How interactive the swapped-in **mini-map** is depends on where it landed:
   (right-drag and two fingers reach the map). The zoom buttons are hidden there to save room — use the
   mouse wheel, the touchpad or a pinch. To **move the floating frame itself**, drag the **square handle
   in its bottom-left corner**, the same one as in video mode.
-- **On a phone** (docked window or widget) — the widget's limits apply: 2D, follow, no panning. Tap
+- **On an Android phone** (docked window or widget) — the widget's limits apply: 2D, follow, no panning. Tap
   the small map to switch heading-up / north-up, slide a finger up or down on it to zoom (or pinch).
   Double-tap swaps. With the video full-screen, the corner button becomes a **map button** that hides
   and shows the small map; double-tap the full-screen video to send the map back. Unobstructed
-  fullscreen does not exist on the phone — the video fills the map area next to the widget column.
+  fullscreen does not exist on the Android phone — the video fills the map area next to the widget column.
 
 ![The map swapped into the video — mini-map over a full-screen feed](../assets/guides/video/video_map_swap.png)
 /// caption
@@ -299,7 +299,12 @@ choice either way.**
 
 **On Android, RTSP runs entirely through Kite's own built-in stream client** — there is nothing to
 download and no engine choice: H.264 and HEVC are decoded by the device's hardware decoder, and MJPEG
-streams are shown directly. (On iOS, RTSP is not available yet.)
+streams are shown directly.
+
+**The iPad works the same way.** RTSP runs through Kite's own client only (iPadOS cannot run helper
+programs), H.264 and HEVC are decoded in hardware by VideoToolbox, and the floating window, the
+full-screen swap and mirror/rotate all work. **On iPhone there is no video**: the Video
+panel only says so.
 
 - **Location updates pause during a Wi-Fi stream.** Every live location fix makes Android scan for
   Wi-Fi networks, and each scan takes the Wi-Fi radio off your network's channel for a moment — with

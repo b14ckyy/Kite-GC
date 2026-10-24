@@ -10,7 +10,7 @@
 <plist version="1.0">
 <dict>
     <key>NSLocalNetworkUsageDescription</key>
-    <string>Kite Ground Control connects to your flight controller or telemetry link over Wi-Fi on your local network (MAVLink over TCP/UDP).</string>
+    <string>Kite Ground Control connects to your flight controller or telemetry link over Wi-Fi on your local network (MAVLink over TCP/UDP) and to receive RTSP video from a camera.</string>
     <!-- Required for the CoreBluetooth serial (BLE) transport; iOS blocks Bluetooth without it. -->
     <key>NSBluetoothAlwaysUsageDescription</key>
     <string>Kite Ground Control uses Bluetooth to connect to your flight controller or telemetry link over BLE.</string>
