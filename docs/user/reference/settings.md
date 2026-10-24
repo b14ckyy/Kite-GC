@@ -125,10 +125,14 @@ version you have, the one that is available, and the release notes, plus four ch
 - **Update and Restart** downloads the new version, installs it and restarts Kite. On Windows and
   Linux this runs the installer of the package you installed (a `.deb`/`.rpm` asks for your password);
   on macOS the app bundle is replaced in place. A **portable** copy replaces its own executable and
-  restarts. On Android and iOS the button opens the app store instead.
+  restarts. Android has no in-app install and no store listing yet, so the notice there offers only
+  the other three choices.
 - **Open Release Page** shows the release on GitHub in your browser, with every download.
 - **Remind me later** asks again at the next start.
 - **Skip this version** suppresses the notice for that one version only.
+
+On iPhone and iPad the update check is switched off and this section is hidden. TestFlight and the
+App Store tell you about new versions themselves, and GitHub releases have no iOS build.
 
 ### Mission Control
 
