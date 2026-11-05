@@ -1205,9 +1205,13 @@
   },
   "compass": {
     "n": "N",
+    "ne": "NO",
     "e": "O",
+    "se": "SO",
     "s": "S",
-    "w": "W"
+    "sw": "SW",
+    "w": "W",
+    "nw": "NW"
   },
   "batch": {
     "relAlt": "Rel. Änderung",

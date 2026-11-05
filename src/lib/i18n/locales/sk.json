@@ -1205,9 +1205,13 @@
   },
   "compass": {
     "n": "S",
+    "ne": "SV",
     "e": "V",
+    "se": "JV",
     "s": "J",
-    "w": "Z"
+    "sw": "JZ",
+    "w": "Z",
+    "nw": "SZ"
   },
   "batch": {
     "relAlt": "Rel. zmena",

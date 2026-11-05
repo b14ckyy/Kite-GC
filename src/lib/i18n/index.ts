@@ -13,6 +13,7 @@ register('fr', () => import('./locales/fr.json'));
 register('zh', () => import('./locales/zh.json'));
 register('bg', () => import('./locales/bg.json'));
 register('sk', () => import('./locales/sk.json'));
+register('es', () => import('./locales/es.json'));
 
 export function initI18n(locale?: string) {
   init({
@@ -28,4 +29,5 @@ export const SUPPORTED_LOCALES = [
   { code: 'zh', label: '中文' },
   { code: 'bg', label: 'Български' },
   { code: 'sk', label: 'Slovenčina' },
+  { code: 'es', label: 'Español' },
 ] as const;
