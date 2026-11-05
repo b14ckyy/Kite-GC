@@ -65,9 +65,14 @@ Native additionally reaches devices that only the capture engine can see.
 - **Disable hardware acceleration** — force the CPU for any stream conversion. Only needed if the
   picture is broken or unstable with hardware acceleration; the setting is remembered.
 
-While a feed is live the panel names the pipeline underneath the picture, with two labels:
-**Transcode** (`Copy` = nothing is converted · `Hardware` · `Software`) and **Surface** (how the
-picture reaches the screen). `Copy` is the cheapest possible case.
+The panel has no preview of its own — the picture lives in the floating window, the docked window or
+the widget (see [Where the video shows](#where-the-video-shows)). Its top shows the source's state
+instead (**Video off**, **Starting…**, **Live**, or the error), and while the feed is live the
+**resolution**, **frame rate** and, for an RTSP stream, the **codec** and (where it is measured) the
+**bitrate**.
+Below that it names the pipeline, with two labels: **Transcode** (`Copy` = nothing is converted ·
+`Hardware` · `Software`) and **Surface** (how the picture reaches the screen). `Copy` is the cheapest
+possible case.
 
 ### RTSP connections, transport and auto-reconnect
 
@@ -116,8 +121,15 @@ signal dips don't interrupt the stream unnecessarily.
 
 The same feed can appear in several places at once (they all share one stream):
 
-- **As a widget** — the **Video** widget in a dock, sized to the stream's aspect ratio.
-- **In a floating window** — a movable video frame over the map. **Drag the small square handle in its
+- **As a widget** — the **Video** widget in a dock. It always **crops the picture to fill** its tile,
+  whatever its size.
+- **In a floating window** — a movable video frame over the map. **Start** slides it in from the left
+  into the bottom-left corner (or to where you last left it) — unless a Video widget is active, in which
+  case the window stays parked because the widget already shows the picture. A **camera button** —
+  beside the window while it sits in the corner, otherwise in the bottom-left screen corner —
+  **parks** it off-screen to the left and brings it back; the stream keeps running while it
+  is parked, so it returns instantly. The window has a glass bezel like the widgets and no ✕ — the
+  camera button is the only way to hide it. **Drag the small square handle in its
   bottom-left corner** (the four-way arrow) to move it; dragging it to the **bottom-left screen corner
   snaps it there**, where it **displaces the bottom widget dock** to make room (the dock shrinks by the
   window's size). Drag it away from the corner to un-snap and free-float. The **top-right corner grip
@@ -301,11 +313,6 @@ choice either way.**
 download and no engine choice: H.264 and HEVC are decoded by the device's hardware decoder, and MJPEG
 streams are shown directly.
 
-**The iPad works the same way.** RTSP runs through Kite's own client only (iPadOS cannot run helper
-programs), H.264 and HEVC are decoded in hardware by VideoToolbox, and the floating window, the
-full-screen swap and mirror/rotate all work. **On iPhone there is no video**: the Video
-panel only says so.
-
 - **Location updates pause during a Wi-Fi stream.** Every live location fix makes Android scan for
   Wi-Fi networks, and each scan takes the Wi-Fi radio off your network's channel for a moment — with
   an RTSP stream running over that same Wi-Fi, this shows up as a brief dropout roughly every ten
@@ -314,6 +321,11 @@ panel only says so.
   the moment the stream stops. Streams received over **mobile data** (or Ethernet) are not affected,
   and neither is a manually placed GCS marker. When Kite cannot tell which way the stream travels
   (some VPN setups), it pauses to be safe.
+
+**The iPad works the same way.** RTSP runs through Kite's own client only (iPadOS cannot run helper
+programs), H.264 and HEVC are decoded in hardware by VideoToolbox, and the floating window, the
+full-screen swap and mirror/rotate all work. **On iPhone there is no video**: the Video
+panel only says so.
 
 ## Where to go next
 

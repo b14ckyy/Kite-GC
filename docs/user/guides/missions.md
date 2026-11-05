@@ -97,7 +97,8 @@ Each waypoint carries an altitude against a **reference**:
 ## Building a mission
 
 - **Add** points by clicking on the map; **drag** a marker to move it; **reorder** in the list.
-- **Edit** a point (type, altitude, parameters) from its popup or the list.
+- **Edit** a point (type, altitude, parameters) from its popup or the list. The popup's number fields
+  are the same **+ / −** fields as everywhere in Kite: click into one and the mouse wheel steps it.
 - **Multi-select** (while **editing**) to act on several waypoints at once:
     - In the **list**: **Ctrl/⌘-click** rows to toggle them, **Shift-click** for an inclusive range, or
       tap a number **badge** to toggle a single one.
@@ -204,6 +205,10 @@ the whole pattern. On INAV the 120-waypoint limit is checked, with the option to
 | **Save to FC permanently** | **EEPROM save / load** (survives a power cycle) | — (the FC keeps the uploaded mission) |
 
 Up- and downloads show an **"x of n"** progress counter as the waypoints transfer.
+
+An INAV flight controller reached over a MAVLink-only radio link (**MSP/MAV**, INAV 10.0+) uses the
+INAV column: Kite carries the MSP transfer inside the MAVLink stream, EEPROM save and multi-mission
+included — see **[Connecting → INAV over MAVLink](connecting.md#inav-over-mavlink-mspmav)**.
 
 After a download the plan is tagged **FC** (see provenance below); the mission you see is exactly what
 the aircraft will fly.

@@ -17,7 +17,14 @@ place, see the **[Video guide](../guides/video.md)**.
 
 ## An RTSP stream won't start
 
-RTSP is played in one of two ways, and which one your machine uses decides what has to be installed:
+RTSP is played in one of three ways, and which one your machine uses decides what has to be installed:
+
+- **The Native RTSP client** — Kite's own built-in client, switched on with the *Native RTSP client*
+  toggle in the Video panel (Android and iPad always use it). It needs **no helper at all**: no
+  MediaMTX, no ffmpeg. If a stream won't start with it, the toggle is also the quickest test — switch
+  it off to try the classic path below (desktop only).
+
+The classic path (toggle off) comes in two variants:
 
 - **The direct path** uses a small bundled engine (**MediaMTX**), which Kite downloads automatically the
   first time you start an RTSP source. This is what Windows and macOS use.
@@ -43,8 +50,9 @@ If a stream won't come up:
 ## The stream keeps showing "Reconnecting…" — check the codec first
 
 Before chasing the network: over RTSP Kite supports **H.264 and MJPEG** everywhere, and
-**HEVC/H.265** only where the **Kite RTSP client** decodes (Android always; Windows and Linux with
-the *Native RTSP client* toggle on — Windows additionally needs the "HEVC Video Extensions"). A
+**HEVC/H.265** only where the **Kite RTSP client** decodes (Android and iPad always; Windows, Linux
+and macOS with the *Native RTSP client* toggle on — Windows additionally needs the "HEVC Video
+Extensions") — plus macOS on the classic path, whose browser engine plays HEVC itself. A
 stream in an unsupported codec — HEVC elsewhere, VP8, VP9 or AV1 — typically fails in exactly this
 way: it retries forever instead of reporting a codec problem, because from Kite's side an unplayable
 stream and an unreachable one look much alike.
@@ -63,8 +71,8 @@ switching between Wi-Fi and a cellular link).
 
 ## The picture stutters or shows "frames out of order"
 
-This is almost always the **source encoder**, not Kite. The live path uses WebRTC, which tolerates
-**B-frames** poorly:
+This is almost always the **source encoder**, not Kite. The classic direct path (Native RTSP client
+off) uses WebRTC, which tolerates **B-frames** poorly:
 
 - **Real FPV / DJI / IP-camera** streams are usually fine (no B-frames).
 - **OBS** and similar software encoders must be set to **B-frames = 0**, a **baseline / main** profile and

@@ -58,7 +58,8 @@ inside the box of the feature release they belong to, so the notes for one relea
         place and, if you left it that way, in fullscreen. The detached window has no title bar: the
         buttons appear when the pointer is over it — top-left brings the picture home, bottom-right
         goes fullscreen. Drag the picture to move it, the top-right corner resizes it, and the frame
-        keeps the stream's aspect ratio. Windows and macOS. [#130] · [#132]
+        keeps the stream's aspect ratio. Windows, macOS and Linux (a Wayland desktop cannot keep it
+        above other applications). [#130] · [#132] · [#135]
 
     ??? info "Telemetry API — live telemetry for other programs"
         Kite can now **serve its live telemetry as JSON** to anything that can read it: an NDJSON
@@ -104,8 +105,8 @@ inside the box of the feature release they belong to, so the notes for one relea
         and starts again — on Windows and Linux through the installer of the package you have
         (a `.deb`/`.rpm` asks for your password), on macOS by swapping the app bundle, and a
         **portable** copy replaces its own executable. Nothing is downloaded until you press the
-        button; *Remind me later* and *Skip this version* work as before. Android and iOS open
-        their app store instead.
+        button; *Remind me later* and *Skip this version* work as before. Android has no in-app
+        install and offers the release page instead; on iPhone and iPad the update check is off.
 
         **Patch releases only.** A new choice under Settings → Updates keeps you on the bug-fix
         line of the version you run: 2.0.0 is told about 2.0.1, never about 2.1.0. The default stays
@@ -165,7 +166,7 @@ inside the box of the feature release they belong to, so the notes for one relea
       window when you hover it; the detached window's own hover buttons bring the picture back
       (top-left) and switch to fullscreen (bottom-right). Where it stands — including fullscreen —
       is remembered; if that screen is gone next time, it opens on Kite's own. Needs the Native RTSP
-      client, Windows and macOS. [#130] · [#132]
+      client; Windows, macOS and Linux. [#130] · [#132] · [#135]
     - **The video shows in two places at once** — with Kite's own RTSP client the picture now runs
       in the Video widget **and** the floating window (or the fullscreen swap) at the same time,
       as it always did with the other sources. One decode feeds both. [#129] · [#132] · [#135]

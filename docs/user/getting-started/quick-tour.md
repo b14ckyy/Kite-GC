@@ -35,7 +35,10 @@ The command centre. From left to right:
   they're replaced by the live link status and a **Disconnect** button. See the
   **[Connecting guide](../guides/connecting.md)**.
 - **⇅ Relay** — opens the telemetry **[relay/forwarding](../guides/relay-and-forwarding.md)** dropdown.
-- **Window controls** — minimise / maximise / close.
+- **≡ Raw** — appears while connected and opens a popup with every raw telemetry value — see
+  **[Raw telemetry](../guides/telemetry-and-display.md#raw-telemetry)**.
+- **Window controls** — minimise / maximise / close. On macOS they are the three traffic-light buttons
+  at the left end of the bar, in front of the logo; tablets and phones have none.
 
 ## 2 · Navigation rail & panels
 
@@ -90,7 +93,7 @@ Each tool, at a glance — expand for a quick description and the link to its fu
 
 ??? note "Logbook"
     Your flight history: automatic recordings with replay, plus import of INAV blackbox, ArduPilot
-    Dataflash, MAVLink `.tlog` and MWPTools raw-MSP logs. Add notes and weather, and reach the **Vehicle**
+    Dataflash, PX4 ULog, MAVLink `.tlog` and MWPTools raw-MSP logs. Add notes and weather, and reach the **Vehicle**
     and **Battery** managers from here.
 
     ![The Logbook panel](../assets/guides/logbook/logbook_detail.png)
@@ -135,8 +138,9 @@ Each tool, at a glance — expand for a quick description and the link to its fu
 Two docks hold your **flight widgets** (attitude, altitude, speed, compass, and more): the **right
 dock** (3) down the side, and the **bottom dock** (4) along the bottom.
 
-Click the **✎ (edit) button** by a dock to enter **edit mode**, then drag widgets to rearrange them or
-move them between docks. In edit mode every widget also shows a **resize button** in its corner: each tap
+**Long-press** a widget (mouse or finger) to enter **edit mode** — it is picked up right away, so drag it
+to rearrange the dock or move it into the other one; click outside the docks or press **Escape** to
+finish. In edit mode every widget also shows a **resize button** in its corner: each tap
 steps it to its next size — square widgets toggle between small and large, the wide ones (Live AGL,
 Video) go wide → large square → small square. The aspect ratio never changes, and a dock shrinks to its
 largest widget. Choose which widgets appear in **Settings → Interface**. Widgets scale to fit the dock,
@@ -240,14 +244,14 @@ Each widget, at a glance — expand for what it shows and how it works:
     independent ranges — the **fan distance** scales with speed, and a separate **clearance colour scale**
     (60 / 120 / 250 m, left button). A **REL / PRED** button (right) switches the reference between your
     current altitude and a sink-rate-predicted one. Both buttons appear only while the dock is in
-    **edit mode** (✎), so they don't clutter the display in flight.
+    **edit mode** (long-press a widget), so they don't clutter the display in flight.
 
     ![The Terrain Radar widget](../assets/getting-started/widgets/terrainradar.png)
 
 ??? note "Video"
     A live **video feed** embedded as a widget — an RTSP stream or a local capture device / camera (e.g. a
-    USB capture card), sized to the stream's aspect ratio. **Double-click** it to swap the feed with the
-    map. See **[Video](../guides/video.md)**.
+    USB capture card), always cropped to fill its tile. **Double-click** it to swap the feed with the
+    map. Not available on iPhone. See **[Video](../guides/video.md)**.
 
     <!-- SCREENSHOT: ../assets/getting-started/widgets/video.png -->
 
@@ -269,7 +273,8 @@ The 3D view has more of its own controls — see the **[3D map guide](../guides/
 The thin strip along the very **bottom**:
 
 - **Left** — a connection dot (green = connected, red = not) and, once connected, the firmware variant,
-  version and port (e.g. *INAV 8.0.0 on COM7*).
+  version and port (e.g. *INAV 8.0.0 on COM7*). When the aircraft stops sending while the link stays
+  open, the dot turns amber and blinks, and the text reads **Reconnecting…** until data arrives again.
 - **Right** — the **arming state** (ARMED / DISARMED) while connected.
 
 ## Kite on a phone

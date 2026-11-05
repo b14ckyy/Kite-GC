@@ -42,6 +42,8 @@ service by the app.
 | --- | --- | --- |
 | **Settings** | Units, layout, connection settings, map providers, API keys you entered (Cesium ion, OpenAIP), interface options | App data folder of the OS |
 | **Flight log database** | Telemetry recorded during flights: GPS track, altitude, speed, battery, flight modes, events; take-off place name and weather; your vehicle and battery records; the flight controller's hardware ID where the firmware reports one | App data folder of the OS |
+| **Database backup** | A full copy of the flight log database (`flights.pre-migration-backup.db`), written automatically before an update upgrades the database format. Only the latest is kept; Settings → Data → *Database backup* deletes it | Next to the flight log database |
+| **Replay caches** | Temporary decodes of a stored onboard log for **HI-RES** replay (`hires-cache/`), and logs opened for replay without importing them (`scratch/`). Removed when you close the flight or the opened logs, and at the next app start | Next to the flight log database |
 | **Missions, geozones, safe homes** | Waypoints and areas you plan, with coordinates | Files you save |
 | **Terrain cache** | Elevation tiles for areas you planned or flew in, kept so terrain features work offline | App data folder of the OS |
 | **Last known position** | A coarse (city-level) position, used to time the automatic night mode on the next start | Settings |
@@ -51,7 +53,9 @@ The exact locations and file formats are listed under
 [Reference → File formats](reference/file-formats.md) and
 [Troubleshooting → Connection](troubleshooting/connection.md#getting-a-diagnostic-log).
 
-Deleting the app's data folder, or uninstalling the app on Android and iOS, removes all of it.
+Deleting the app's data folder, or uninstalling the app on Android and iOS, removes all of it. One
+exception on Android: if you pointed the flight database or the raw logs at a folder of your own
+(Settings → Data), Kite copies them there, and that copy stays when the app is uninstalled.
 
 ## Data that leaves your device only when you act
 
@@ -82,16 +86,22 @@ Each provider handles the request under its own privacy policy, which we link be
 
 | When | Service | What is sent | How to switch it off |
 | --- | --- | --- | --- |
-| **At every app start** | GitHub Releases API ([GitHub privacy statement](https://docs.github.com/site-policy/privacy-policies)) | A request for the latest release version. No data about you or your installation | Settings → Updates → *Check for updates: Disabled* |
+| **At every app start** | GitHub Releases API ([GitHub privacy statement](https://docs.github.com/site-policy/privacy-policies)) | A request for the latest release (with *Patch releases only* or *Include pre-releases*: the list of recent releases), including its release notes. No data about you or your installation. Not on iPhone and iPad, where the update check is off | Settings → Updates → *Check for updates: Disabled* |
 | **When a flight is recorded** (the aircraft arms with a valid GPS fix) | Open-Meteo ([privacy](https://open-meteo.com/en/terms)) and OpenStreetMap Nominatim ([privacy](https://osmfoundation.org/wiki/Privacy_Policy)) | The take-off coordinates, to store the weather and the place name in the logbook entry | *(no setting yet — see the note below)* |
 | **While the map is shown** | The map tile provider you selected: OpenStreetMap ([privacy](https://osmfoundation.org/wiki/Privacy_Policy)), OpenTopoMap, CARTO ([privacy](https://carto.com/privacy)), Esri ArcGIS ([privacy](https://www.esri.com/en-us/privacy/overview)) | The map tiles for the area on screen, i.e. which region you are looking at | Use the map without internet — Kite then shows only what the system's web cache still holds |
 | **When a terrain feature needs elevation** (AGL planning, terrain clearance, line-of-sight analysis, terrain radar) | Copernicus DEM on AWS Open Data ([AWS privacy notice](https://aws.amazon.com/privacy/)) | The 1°×1° elevation tile covering the area | Downloads only for areas you plan or fly in; tiles are cached |
+
+### Only when you start it
+
+| Action | Service | What is sent |
+| --- | --- | --- |
+| **Update and Restart** in the update notice (desktop) | GitHub release downloads ([GitHub privacy statement](https://docs.github.com/site-policy/privacy-policies)) | Requests for the new release's files: for an installed copy the update manifest (`latest.json`) and the package it names for your platform, for a portable copy the portable ZIP. Nothing is downloaded until you press the button |
 
 ### Only while the feature is enabled
 
 | Feature | Service | What is sent |
 | --- | --- | --- |
-| **3D map** | Cesium ion ([privacy](https://cesium.com/legal/privacy-policy/)) with the access token *you* created; imagery and terrain from the providers configured in your Cesium account | Terrain and imagery requests for the area on screen, authenticated with your own token, i.e. under your own Cesium account |
+| **3D map** | Cesium ion ([privacy](https://cesium.com/legal/privacy-policy/)) with the access token *you* created; imagery and terrain from the providers configured in your Cesium account | Terrain and imagery requests for the area on screen — and, with *3D Buildings (OSM)* switched on, the OpenStreetMap building tiles Cesium serves for that area — authenticated with your own token, i.e. under your own Cesium account |
 | **Radar / ADS-B traffic** | adsb.lol, adsb.one, adsb.fi (community ADS-B aggregators; each publishes its own terms) | The query centre (the map viewport or your aircraft's position) and a search radius, polled while the radar is on |
 | **Airspace Manager** | OpenAIP ([privacy](https://www.openaip.net/privacy)) with the API key *you* registered | A position and radius for the airspace layers you enabled, authenticated with your key |
 
@@ -115,7 +125,7 @@ feature. Denying a permission disables that feature and nothing else.
 | **Local network** | Telemetry over Wi-Fi (TCP/UDP), RTSP video from an onboard computer, the Telemetry API | iOS, macOS 15+ |
 | **USB** | Serial connection to a flight controller. Granted per device by the system dialog | Android |
 | **Notifications** | The persistent notification that keeps the telemetry link alive while Kite is in the background | Android 13+ |
-| **Network state / Wi-Fi state** | Showing which network the tablet is on, so a telemetry bridge's soft-AP can be recognised | Android (no prompt) |
+| **Network state / Wi-Fi state** | Showing which network the tablet is on, so a telemetry bridge's soft-AP can be recognised, and telling whether an RTSP stream runs over Wi-Fi, so continuous location updates can pause while it plays | Android (no prompt) |
 
 ## Your data, your control
 
