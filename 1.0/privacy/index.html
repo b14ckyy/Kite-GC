@@ -1996,6 +1996,11 @@ service by the app.</p>
   send live data to other devices <em>only after you enable them</em> under Settings, and only to the addresses
   you configure. The Telemetry API listens on the local machine only unless you switch <em>Reachable on the
   network</em> on.</li>
+<li><strong>Helper programs</strong> — when you press <em>Download</em> for a helper on the desktop, Kite fetches it from its
+  publisher's GitHub releases: the blackbox decoder from iNavFlight/blackbox-tools, MediaMTX for RTSP
+  video from bluenviron/mediamtx, and ffmpeg from BtbN/FFmpeg-Builds. The request carries only what any
+  download does (your IP address and a user-agent string naming Kite); it is governed by
+  <a href="https://docs.github.com/site-policy/privacy-policies">GitHub's privacy statement</a>.</li>
 </ul>
 <h2 id="third-party-services-the-app-contacts">Third-party services the app contacts<a class="headerlink" href="#third-party-services-the-app-contacts" title="Permanent link">&para;</a></h2>
 <p>Kite is a client: for some features it downloads data from public services straight from your device.
@@ -2071,8 +2076,7 @@ Each provider handles the request under its own privacy policy, which we link be
 <p class="admonition-title">Weather and place-name lookup</p>
 <p>The logbook enrichment sends the take-off position to Open-Meteo and Nominatim automatically when
 a recorded flight starts. If you fly without internet, the lookup simply fails and the entry stays
-without weather and place name. <em>(Draft note for the maintainers: if a setting to disable this lookup
-is added, replace this paragraph with the setting's name.)</em></p>
+without weather and place name.</p>
 </div>
 <h2 id="device-permissions">Device permissions<a class="headerlink" href="#device-permissions" title="Permanent link">&para;</a></h2>
 <p>Kite asks for a permission only when the feature that needs it is used, and uses it only for that
