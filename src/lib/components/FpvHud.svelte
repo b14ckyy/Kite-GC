@@ -13,6 +13,7 @@
   // Driven purely by props (attitude + display values already converted to the user's units).
 
   import { untrack } from 'svelte';
+  import { t } from 'svelte-i18n';
   import { easeToward, easeAngleToward } from '$lib/utils/smoothing';
 
   let {
@@ -74,10 +75,10 @@
 
   const cardinal = (h: number): string => {
     const n = ((h % 360) + 360) % 360;
-    if (n === 0) return 'N';
-    if (n === 90) return 'E';
-    if (n === 180) return 'S';
-    if (n === 270) return 'W';
+    if (n === 0) return $t('compass.n');
+    if (n === 90) return $t('compass.e');
+    if (n === 180) return $t('compass.s');
+    if (n === 270) return $t('compass.w');
     return String(n);
   };
 
