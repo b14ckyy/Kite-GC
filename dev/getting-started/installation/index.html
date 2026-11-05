@@ -604,6 +604,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mobile/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Android, iPhone & iPad
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1940,6 +1968,9 @@ grabbing:</p>
 <li><strong>Portable</strong> — the bare executable, zipped <strong>with an empty <code>.portable</code> marker</strong> already inside, so all
   data stays in a <code>data/</code> folder next to it (see <a href="#installed-vs-portable-mode">Installed vs portable mode</a>).</li>
 </ul>
+<p>The macOS release also carries a <code>..._update.tar.gz</code> — the app bundle packed for Kite's in-app updater
+(<strong>Update and Restart</strong>, see <a href="../../reference/settings/#updates">Settings → Updates</a>). You don't need to
+download it yourself.</p>
 <div class="admonition note">
 <p class="admonition-title">macOS: signed and notarized</p>
 <p>The macOS build is <strong>universal</strong> (Apple Silicon + Intel), <strong>signed and notarized</strong> since 1.0.0, so it
@@ -2124,16 +2155,18 @@ program, which Kite offers to <strong>download automatically the first time you 
 </tr>
 <tr>
 <td><code>ffmpeg</code></td>
-<td><strong>Video</strong> (native capture + fallback decoding for some RTSP sources)</td>
+<td><strong>Video</strong> (native capture + fallback decoding for some RTSP sources on the classic path)</td>
 <td>auto-download on <strong>Windows &amp; Linux</strong>; <strong>bundled inside the app on macOS</strong></td>
 </tr>
 <tr>
 <td><code>mediamtx</code></td>
-<td><strong>Video</strong> (the RTSP → low-latency engine)</td>
+<td><strong>Video</strong> (the classic RTSP → low-latency engine, used with the <em>Native RTSP client</em> toggle off)</td>
 <td>auto-download on <strong>Windows, Linux &amp; macOS</strong></td>
 </tr>
 </tbody>
 </table>
+<p>RTSP through Kite's own <strong>Native RTSP client</strong> needs neither helper — Android and iPad always use it,
+the desktop when the toggle in the Video panel is on (see <strong><a href="../../guides/video/">Video</a></strong>).</p>
 <ul>
 <li>Downloaded helpers are stored in Kite's tools folder (<code>…\kite-gc\bin</code>, or <code>data\bin</code> in portable
   mode) — they don't touch your system.

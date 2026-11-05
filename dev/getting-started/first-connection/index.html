@@ -576,6 +576,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mobile/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Android, iPhone & iPad
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1853,6 +1881,14 @@ see <strong><a href="../../troubleshooting/connection/">Troubleshooting → Conn
 </div>
 <h2 id="connect-step-by-step">Connect, step by step<a class="headerlink" href="#connect-step-by-step" title="Permanent link">&para;</a></h2>
 <p>The connection controls live in the <strong>top bar</strong> (right-hand side) whenever you're disconnected.</p>
+<div class="admonition note">
+<p class="admonition-title">On a phone or tablet</p>
+<p>On a phone the controls sit behind the <strong>🔗 chain-link</strong> button at the top-right of the map. A
+fresh install on Android, iPhone or iPad starts on <strong>MAVLink</strong> over <strong>UDP</strong> (port <code>14550</code>), the
+usual Wi-Fi telemetry setup; for the USB steps below, Android needs an OTG adapter, and you switch
+the transport to <strong>Serial</strong> yourself. iPhone and iPad have no USB serial — connect over <strong>BLE</strong> or Wi-Fi (TCP / UDP)
+instead, as described in the <strong><a href="../../guides/connecting/">Connecting guide</a></strong>.</p>
+</div>
 <figure>
 <p><img alt="The connection controls in the top bar" src="../../assets/getting-started/connection_bar_main.png" /></p>
 <figcaption>
@@ -1923,7 +1959,9 @@ adapter — pick the one that matches your board.</em></p>
 <p>That's it — you're connected. 🎉</p>
 <h2 id="disconnect">Disconnect<a class="headerlink" href="#disconnect" title="Permanent link">&para;</a></h2>
 <p>Click <strong>Disconnect</strong> in the top bar. Kite remembers your <strong>port, baud, protocol and transport</strong>, so
-next time you can usually just press <strong>Connect</strong> straight away.</p>
+next time you can usually just press <strong>Connect</strong> straight away. (Always fly the same link? Pin it under
+<strong>Settings → Connection → Default Protocol</strong>, and Kite starts on that protocol whatever the last session
+used.)</p>
 <h2 id="it-didnt-connect">It didn't connect?<a class="headerlink" href="#it-didnt-connect" title="Permanent link">&para;</a></h2>
 <p>A few common causes — wrong baud rate, the port already in use by another app (INAV Configurator,
 Mission Planner…), a Bluetooth COM port, or a missing USB-serial driver. The

@@ -461,6 +461,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/mobile/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Android, iPhone & iPad
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2096,6 +2124,14 @@ treated as telemetry recordings and <strong>split into separate flights on the a
 log, the same way a live recording is.</p>
 <p>PX4 ULog note: PX4 doesn't log a throttle <em>output</em>, so a replayed <code>.ulg</code> flight shows the FC's
 <strong>thrust setpoint</strong> as the throttle value.</p>
+<div class="admonition note">
+<p class="admonition-title">On Android, iPhone and iPad</p>
+<p>The mobile app imports <strong><code>.kflight</code></strong>, <strong><code>.tlog</code></strong> and <strong><code>.rawmsp</code></strong> files only. Onboard logs —
+INAV Blackbox, ArduPilot Dataflash, PX4 ULog — are imported on a desktop install and moved over as
+<code>.kflight</code>. The mobile database keeps no original log files (an imported <code>.kflight</code> brings the
+flight, its track and its records, but not the stored original), so <strong>HI-RES</strong> replay and the
+original-log export are desktop features, and so is the <strong>Open</strong> button.</p>
+</div>
 <h2 id="exporting">Exporting<a class="headerlink" href="#exporting" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong><code>.kflight</code></strong> — export selected flights (multi-select supported) as Kite's portable flight file, to

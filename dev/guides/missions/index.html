@@ -461,6 +461,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/mobile/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Android, iPhone & iPad
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2284,7 +2312,8 @@ clearance before you fly. See it alongside the mission.</p>
 <h2 id="building-a-mission">Building a mission<a class="headerlink" href="#building-a-mission" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Add</strong> points by clicking on the map; <strong>drag</strong> a marker to move it; <strong>reorder</strong> in the list.</li>
-<li><strong>Edit</strong> a point (type, altitude, parameters) from its popup or the list.</li>
+<li><strong>Edit</strong> a point (type, altitude, parameters) from its popup or the list. The popup's number fields
+  are the same <strong>+ / −</strong> fields as everywhere in Kite: click into one and the mouse wheel steps it.</li>
 <li><strong>Multi-select</strong> (while <strong>editing</strong>) to act on several waypoints at once:<ul>
 <li>In the <strong>list</strong>: <strong>Ctrl/⌘-click</strong> rows to toggle them, <strong>Shift-click</strong> for an inclusive range, or
   tap a number <strong>badge</strong> to toggle a single one.</li>
@@ -2444,6 +2473,9 @@ the whole pattern. On INAV the 120-waypoint limit is checked, with the option to
 </tbody>
 </table>
 <p>Up- and downloads show an <strong>"x of n"</strong> progress counter as the waypoints transfer.</p>
+<p>An INAV flight controller reached over a MAVLink-only radio link (<strong>MSP/MAV</strong>, INAV 10.0+) uses the
+INAV column: Kite carries the MSP transfer inside the MAVLink stream, EEPROM save and multi-mission
+included — see <strong><a href="../connecting/#inav-over-mavlink-mspmav">Connecting → INAV over MAVLink</a></strong>.</p>
 <p>After a download the plan is tagged <strong>FC</strong> (see provenance below); the mission you see is exactly what
 the aircraft will fly.</p>
 <h2 id="files-the-mission-library">Files &amp; the mission library<a class="headerlink" href="#files-the-mission-library" title="Permanent link">&para;</a></h2>

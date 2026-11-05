@@ -461,6 +461,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/mobile/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Android, iPhone & iPad
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1505,6 +1533,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#only-when-you-start-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Only when you start it
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#only-while-the-feature-is-enabled" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1849,6 +1888,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#only-when-you-start-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Only when you start it
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#only-while-the-feature-is-enabled" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1984,6 +2034,16 @@ service by the app.</p>
 <td>App data folder of the OS</td>
 </tr>
 <tr>
+<td><strong>Database backup</strong></td>
+<td>A full copy of the flight log database (<code>flights.pre-migration-backup.db</code>), written automatically before an update upgrades the database format. Only the latest is kept; Settings → Data → <em>Database backup</em> deletes it</td>
+<td>Next to the flight log database</td>
+</tr>
+<tr>
+<td><strong>Replay caches</strong></td>
+<td>Temporary decodes of a stored onboard log for <strong>HI-RES</strong> replay (<code>hires-cache/</code>), and logs opened for replay without importing them (<code>scratch/</code>). Removed when you close the flight or the opened logs, and at the next app start</td>
+<td>Next to the flight log database</td>
+</tr>
+<tr>
 <td><strong>Missions, geozones, safe homes</strong></td>
 <td>Waypoints and areas you plan, with coordinates</td>
 <td>Files you save</td>
@@ -2008,7 +2068,9 @@ service by the app.</p>
 <p>The exact locations and file formats are listed under
 <a href="../reference/file-formats/">Reference → File formats</a> and
 <a href="../troubleshooting/connection/#getting-a-diagnostic-log">Troubleshooting → Connection</a>.</p>
-<p>Deleting the app's data folder, or uninstalling the app on Android and iOS, removes all of it.</p>
+<p>Deleting the app's data folder, or uninstalling the app on Android and iOS, removes all of it. One
+exception on Android: if you pointed the flight database or the raw logs at a folder of your own
+(Settings → Data), Kite copies them there, and that copy stays when the app is uninstalled.</p>
 <h2 id="data-that-leaves-your-device-only-when-you-act">Data that leaves your device only when you act<a class="headerlink" href="#data-that-leaves-your-device-only-when-you-act" title="Permanent link">&para;</a></h2>
 <p>These transfers happen only because you trigger them, and you choose the recipient every time:</p>
 <ul>
@@ -2045,7 +2107,7 @@ Each provider handles the request under its own privacy policy, which we link be
 <tr>
 <td><strong>At every app start</strong></td>
 <td>GitHub Releases API (<a href="https://docs.github.com/site-policy/privacy-policies">GitHub privacy statement</a>)</td>
-<td>A request for the latest release version. No data about you or your installation</td>
+<td>A request for the latest release (with <em>Patch releases only</em> or <em>Include pre-releases</em>: the list of recent releases), including its release notes. No data about you or your installation. Not on iPhone and iPad, where the update check is off</td>
 <td>Settings → Updates → <em>Check for updates: Disabled</em></td>
 </tr>
 <tr>
@@ -2068,6 +2130,23 @@ Each provider handles the request under its own privacy policy, which we link be
 </tr>
 </tbody>
 </table>
+<h3 id="only-when-you-start-it">Only when you start it<a class="headerlink" href="#only-when-you-start-it" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>Service</th>
+<th>What is sent</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Update and Restart</strong> in the update notice (desktop)</td>
+<td>GitHub release downloads (<a href="https://docs.github.com/site-policy/privacy-policies">GitHub privacy statement</a>)</td>
+<td>Requests for the new release's files: for an installed copy the update manifest (<code>latest.json</code>) and the package it names for your platform, for a portable copy the portable ZIP. Nothing is downloaded until you press the button</td>
+</tr>
+</tbody>
+</table>
 <h3 id="only-while-the-feature-is-enabled">Only while the feature is enabled<a class="headerlink" href="#only-while-the-feature-is-enabled" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -2081,7 +2160,7 @@ Each provider handles the request under its own privacy policy, which we link be
 <tr>
 <td><strong>3D map</strong></td>
 <td>Cesium ion (<a href="https://cesium.com/legal/privacy-policy/">privacy</a>) with the access token <em>you</em> created; imagery and terrain from the providers configured in your Cesium account</td>
-<td>Terrain and imagery requests for the area on screen, authenticated with your own token, i.e. under your own Cesium account</td>
+<td>Terrain and imagery requests for the area on screen — and, with <em>3D Buildings (OSM)</em> switched on, the OpenStreetMap building tiles Cesium serves for that area — authenticated with your own token, i.e. under your own Cesium account</td>
 </tr>
 <tr>
 <td><strong>Radar / ADS-B traffic</strong></td>
@@ -2151,7 +2230,7 @@ feature. Denying a permission disables that feature and nothing else.</p>
 </tr>
 <tr>
 <td><strong>Network state / Wi-Fi state</strong></td>
-<td>Showing which network the tablet is on, so a telemetry bridge's soft-AP can be recognised</td>
+<td>Showing which network the tablet is on, so a telemetry bridge's soft-AP can be recognised, and telling whether an RTSP stream runs over Wi-Fi, so continuous location updates can pause while it plays</td>
 <td>Android (no prompt)</td>
 </tr>
 </tbody>

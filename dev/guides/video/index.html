@@ -461,6 +461,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/mobile/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Android, iPhone & iPad
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2011,9 +2039,14 @@ Native additionally reaches devices that only the capture engine can see.</p>
 <li><strong>Disable hardware acceleration</strong> — force the CPU for any stream conversion. Only needed if the
   picture is broken or unstable with hardware acceleration; the setting is remembered.</li>
 </ul>
-<p>While a feed is live the panel names the pipeline underneath the picture, with two labels:
-<strong>Transcode</strong> (<code>Copy</code> = nothing is converted · <code>Hardware</code> · <code>Software</code>) and <strong>Surface</strong> (how the
-picture reaches the screen). <code>Copy</code> is the cheapest possible case.</p>
+<p>The panel has no preview of its own — the picture lives in the floating window, the docked window or
+the widget (see <a href="#where-the-video-shows">Where the video shows</a>). Its top shows the source's state
+instead (<strong>Video off</strong>, <strong>Starting…</strong>, <strong>Live</strong>, or the error), and while the feed is live the
+<strong>resolution</strong>, <strong>frame rate</strong> and, for an RTSP stream, the <strong>codec</strong> and (where it is measured) the
+<strong>bitrate</strong>.
+Below that it names the pipeline, with two labels: <strong>Transcode</strong> (<code>Copy</code> = nothing is converted ·
+<code>Hardware</code> · <code>Software</code>) and <strong>Surface</strong> (how the picture reaches the screen). <code>Copy</code> is the cheapest
+possible case.</p>
 <h3 id="rtsp-connections-transport-and-auto-reconnect">RTSP connections, transport and auto-reconnect<a class="headerlink" href="#rtsp-connections-transport-and-auto-reconnect" title="Permanent link">&para;</a></h3>
 <p>The RTSP source has a small <strong>connection manager</strong> built in:</p>
 <ul>
@@ -2061,8 +2094,15 @@ shipped with the app.</p>
 <h2 id="where-the-video-shows">Where the video shows<a class="headerlink" href="#where-the-video-shows" title="Permanent link">&para;</a></h2>
 <p>The same feed can appear in several places at once (they all share one stream):</p>
 <ul>
-<li><strong>As a widget</strong> — the <strong>Video</strong> widget in a dock, sized to the stream's aspect ratio.</li>
-<li><strong>In a floating window</strong> — a movable video frame over the map. <strong>Drag the small square handle in its
+<li><strong>As a widget</strong> — the <strong>Video</strong> widget in a dock. It always <strong>crops the picture to fill</strong> its tile,
+  whatever its size.</li>
+<li><strong>In a floating window</strong> — a movable video frame over the map. <strong>Start</strong> slides it in from the left
+  into the bottom-left corner (or to where you last left it) — unless a Video widget is active, in which
+  case the window stays parked because the widget already shows the picture. A <strong>camera button</strong> —
+  beside the window while it sits in the corner, otherwise in the bottom-left screen corner —
+  <strong>parks</strong> it off-screen to the left and brings it back; the stream keeps running while it
+  is parked, so it returns instantly. The window has a glass bezel like the widgets and no ✕ — the
+  camera button is the only way to hide it. <strong>Drag the small square handle in its
   bottom-left corner</strong> (the four-way arrow) to move it; dragging it to the <strong>bottom-left screen corner
   snaps it there</strong>, where it <strong>displaces the bottom widget dock</strong> to make room (the dock shrinks by the
   window's size). Drag it away from the corner to un-snap and free-float. The <strong>top-right corner grip
@@ -2238,10 +2278,6 @@ choice either way.</strong></p>
 <p><strong>On Android, RTSP runs entirely through Kite's own built-in stream client</strong> — there is nothing to
 download and no engine choice: H.264 and HEVC are decoded by the device's hardware decoder, and MJPEG
 streams are shown directly.</p>
-<p><strong>The iPad works the same way.</strong> RTSP runs through Kite's own client only (iPadOS cannot run helper
-programs), H.264 and HEVC are decoded in hardware by VideoToolbox, and the floating window, the
-full-screen swap and mirror/rotate all work. <strong>On iPhone there is no video</strong>: the Video
-panel only says so.</p>
 <ul>
 <li><strong>Location updates pause during a Wi-Fi stream.</strong> Every live location fix makes Android scan for
   Wi-Fi networks, and each scan takes the Wi-Fi radio off your network's channel for a moment — with
@@ -2252,6 +2288,10 @@ panel only says so.</p>
   and neither is a manually placed GCS marker. When Kite cannot tell which way the stream travels
   (some VPN setups), it pauses to be safe.</li>
 </ul>
+<p><strong>The iPad works the same way.</strong> RTSP runs through Kite's own client only (iPadOS cannot run helper
+programs), H.264 and HEVC are decoded in hardware by VideoToolbox, and the floating window, the
+full-screen swap and mirror/rotate all work. <strong>On iPhone there is no video</strong>: the Video
+panel only says so.</p>
 <h2 id="where-to-go-next">Where to go next<a class="headerlink" href="#where-to-go-next" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Put the Video widget in a dock: <strong><a href="../telemetry-and-display/">Telemetry &amp; display</a></strong>.</li>

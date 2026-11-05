@@ -461,6 +461,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/mobile/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Android, iPhone & iPad
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1290,6 +1318,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#windows-the-gamepad-is-listed-but-its-inputs-never-move" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windows: the gamepad is listed, but its inputs never move
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#ardupilot-a-servo-twitches-but-doesnt-hold" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1745,6 +1784,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#windows-the-gamepad-is-listed-but-its-inputs-never-move" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windows: the gamepad is listed, but its inputs never move
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#ardupilot-a-servo-twitches-but-doesnt-hold" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1831,6 +1881,21 @@ recover (a physical transmitter, or the FC's failsafe).</p>
   mapping in the panel.</li>
 <li><strong>Watch the engage state text</strong> in the panel — it tells you whether your sticks are actually being sent
   (see the firmware-specific notes below).</li>
+</ul>
+<h2 id="windows-the-gamepad-is-listed-but-its-inputs-never-move">Windows: the gamepad is listed, but its inputs never move<a class="headerlink" href="#windows-the-gamepad-is-listed-but-its-inputs-never-move" title="Permanent link">&para;</a></h2>
+<p>Some Xbox-class pads show up in the <strong>Device</strong> list while Windows never delivers a reading for them
+through its game-controller interface. Kite detects that: if such a pad stays silent for 1.5 seconds,
+it reads the same pad through Windows' classic <strong>XInput</strong> interface instead — automatically, nothing to
+set. Pads that already work are not affected.</p>
+<ul>
+<li><strong>Is Kite the active window?</strong> On Windows a game controller only reports input while the Kite
+  window is in the foreground.</li>
+<li><strong>Sticks feel inverted after an update?</strong> The pad may now be read through the other interface —
+  re-learn the mapping in the RC panel (<strong>Learn</strong>).</li>
+<li><strong>Still nothing?</strong> Set <strong>Settings → Diagnostics → Log Level</strong> to <strong>Debug (verbose)</strong>, plug the pad in,
+  open the RC panel and move the sticks. The log then records which game controllers Kite finds, which
+  one it streams from and the first reading it gets — attach it when
+  <strong><a href="../reporting-issues/">reporting the problem</a></strong>.</li>
 </ul>
 <h2 id="ardupilot-a-servo-twitches-but-doesnt-hold">ArduPilot: a servo twitches but doesn't hold<a class="headerlink" href="#ardupilot-a-servo-twitches-but-doesnt-hold" title="Permanent link">&para;</a></h2>
 <p>This is the classic sign of <strong>a physical RC receiver competing with the GCS override</strong> — for example an

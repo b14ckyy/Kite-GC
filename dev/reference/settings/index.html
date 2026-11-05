@@ -461,6 +461,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/mobile/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Android, iPhone & iPad
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2061,6 +2089,9 @@
 <p>A reference for every option in the <strong>Settings</strong> tool (navigation rail). Settings are split across two
 tabs: <strong>Interface</strong> (how Kite looks and the units it uses) and <strong>Data</strong> (links, caches, logging and
 alerts). Changes apply immediately and are remembered between sessions.</p>
+<p>Number fields with <strong>+ / −</strong> buttons also take the mouse wheel: click into the field, then turn the
+wheel — up increases, down decreases, and turning fast steps in bigger increments. A field you haven't
+clicked into ignores the wheel, so scrolling the panel never changes a value by accident.</p>
 <figure>
 <p><img alt="The Settings panel" src="../../assets/getting-started/panels/settings.png" /></p>
 <figcaption>
@@ -2080,7 +2111,7 @@ alerts). Changes apply immediately and are remembered between sessions.</p>
 <tbody>
 <tr>
 <td><strong>Language</strong></td>
-<td>The UI language.</td>
+<td>The UI language — English, Deutsch, Français, 中文, Български or Slovenčina.</td>
 <td>English</td>
 </tr>
 <tr>
@@ -2109,6 +2140,11 @@ alerts). Changes apply immediately and are remembered between sessions.</p>
 <td><strong>Altitude Curtain (3D)</strong></td>
 <td>Draw the vertical wall from the flight track down to the ground in 3D. See <strong><a href="../../guides/map-3d/">3D map</a></strong>.</td>
 <td>On</td>
+</tr>
+<tr>
+<td><strong>3D Buildings (OSM)</strong></td>
+<td>Show OpenStreetMap building extrusions on the 3D globe. The buildings come from Cesium Ion, so the switch stays greyed out until a <strong>Cesium Ion Token</strong> is entered (Data tab).</td>
+<td>Off</td>
 </tr>
 <tr>
 <td><strong>Real Daytime and Lighting (3D)</strong></td>
@@ -2141,8 +2177,8 @@ alerts). Changes apply immediately and are remembered between sessions.</p>
 <td>—</td>
 </tr>
 <tr>
-<td><strong>GCS Location</strong></td>
-<td>How the ground-station position is sourced — Off / Manual (set once) / Continuous (live). Used as the reference when no aircraft fix is available. While your own position is still unknown, the aircraft's home position stands in for it.</td>
+<td><strong>GCS marker</strong></td>
+<td>How the ground-station position is sourced — Off / Manual (draggable — place it once; <strong>Reset</strong> snaps it back to <em>Your Location</em>) / Continuous (live). Used as the reference when no aircraft fix is available. While your own position is still unknown, the aircraft's home position stands in for it.</td>
 <td>Continuous</td>
 </tr>
 </tbody>
@@ -2344,13 +2380,18 @@ leave them off to save bandwidth on a slow over-the-air radio, turn them on when
 <td>—</td>
 </tr>
 <tr>
+<td><strong>Database backup (pre-update)</strong></td>
+<td>Shown only once a backup exists: the backup Kite wrote before it last upgraded the database format, with its size and a <strong>Delete</strong> button. See <strong><a href="../../guides/logbook/#the-database-updates-and-the-automatic-backup">Flight logbook</a></strong>.</td>
+<td>—</td>
+</tr>
+<tr>
 <td><strong>Raw log path</strong></td>
 <td>Where raw <code>.rawmsp</code> / <code>.tlog</code> files are written.</td>
 <td>default path</td>
 </tr>
 <tr>
 <td><strong>Blackbox decoder</strong></td>
-<td>The INAV <code>blackbox_decode</code> helper — shows its version and lets you <strong>download / update</strong> it.</td>
+<td>The INAV <code>blackbox_decode</code> helper — shows its version and lets you <strong>download / update</strong> it. Desktop only (Android and iOS cannot run the helper).</td>
 <td>—</td>
 </tr>
 </tbody>

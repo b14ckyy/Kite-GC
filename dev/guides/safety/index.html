@@ -461,6 +461,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/mobile/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Android, iPhone & iPad
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2101,7 +2129,9 @@ click an edge to insert a vertex, or type exact coordinates in the popup. The pa
 altitude band, reference and action. Editing is <strong>locked while armed</strong>.</p>
 <p><strong>Saving</strong> writes every zone to the FC, stores it to EEPROM and <strong>reboots</strong> the flight controller —
 geozones only take effect after a restart, so the link drops and reconnects. Kite checks your zones
-first (valid shapes, vertex/zone limits, sensible altitude band) and fixes polygon winding for you.</p>
+first (valid shapes, vertex/zone limits, sensible altitude band) and fixes polygon winding for you. If
+the write fails (a link hiccup, a timeout, a zone the FC refuses), the error is shown under the Save
+button — the zones on the FC may then not match the panel.</p>
 <h3 id="ardupilot-px4-geofence">ArduPilot / PX4 — Geofence<a class="headerlink" href="#ardupilot-px4-geofence" title="Permanent link">&para;</a></h3>
 <p>ArduPilot and PX4 expose a geofence over MAVLink. Edit it from the same <strong>Airspace</strong> tool (<strong>Geofence</strong>
 layer). The geometry concept is the same — <strong>inclusion / exclusion</strong> × <strong>polygon / circle</strong>, plus an
@@ -2118,7 +2148,8 @@ the connected autopilot:</p>
 </ul>
 <p>Saving uploads the fence and writes the fence parameters you changed; no reboot is needed. Parameters Kite
 could not write are listed as a warning under the Save button after the save — the zones themselves are
-on the vehicle by then.</p>
+on the vehicle by then. A fence or rally-point save that fails outright shows its error in the same
+place.</p>
 <div class="admonition tip">
 <p class="admonition-title">Two ways to express the same idea</p>
 <p>INAV carries each zone's <strong>altitude band</strong> and <strong>breach action</strong> with the zone itself, so different

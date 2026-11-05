@@ -16,7 +16,7 @@
         <link rel="prev" href="../first-connection/">
       
       
-        <link rel="next" href="../../guides/connecting/">
+        <link rel="next" href="../mobile/">
       
       
         
@@ -593,6 +593,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mobile/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Android, iPhone & iPad
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1948,7 +1976,10 @@ details here — each area has its own guide; this is just the map of the cockpi
   they're replaced by the live link status and a <strong>Disconnect</strong> button. See the
   <strong><a href="../../guides/connecting/">Connecting guide</a></strong>.</li>
 <li><strong>⇅ Relay</strong> — opens the telemetry <strong><a href="../../guides/relay-and-forwarding/">relay/forwarding</a></strong> dropdown.</li>
-<li><strong>Window controls</strong> — minimise / maximise / close.</li>
+<li><strong>≡ Raw</strong> — appears while connected and opens a popup with every raw telemetry value — see
+  <strong><a href="../../guides/telemetry-and-display/#raw-telemetry">Raw telemetry</a></strong>.</li>
+<li><strong>Window controls</strong> — minimise / maximise / close. On macOS they are the three traffic-light buttons
+  at the left end of the bar, in front of the logo; tablets and phones have none.</li>
 </ul>
 <h2 id="2-navigation-rail-panels">2 · Navigation rail &amp; panels<a class="headerlink" href="#2-navigation-rail-panels" title="Permanent link">&para;</a></h2>
 <p>The strip down the <strong>left edge</strong> is the navigation rail. Click an icon to open its <strong>panel</strong>. Click the
@@ -1997,7 +2028,7 @@ beneath the route and check your above-ground clearance.</p>
 <details class="note">
 <summary>Logbook</summary>
 <p>Your flight history: automatic recordings with replay, plus import of INAV blackbox, ArduPilot
-Dataflash, MAVLink <code>.tlog</code> and MWPTools raw-MSP logs. Add notes and weather, and reach the <strong>Vehicle</strong>
+Dataflash, PX4 ULog, MAVLink <code>.tlog</code> and MWPTools raw-MSP logs. Add notes and weather, and reach the <strong>Vehicle</strong>
 and <strong>Battery</strong> managers from here.</p>
 <p><img alt="The Logbook panel" src="../../assets/guides/logbook/logbook_detail.png" /></p>
 <p><em>Details: <a href="../../guides/logbook/">Logbook</a> · <a href="../../guides/vehicles/">Vehicles</a> · <a href="../../guides/batteries/">Batteries</a>.</em></p>
@@ -2034,8 +2065,9 @@ selection and more.</p>
 <h2 id="3-4-widget-docks">3 &amp; 4 · Widget docks<a class="headerlink" href="#3-4-widget-docks" title="Permanent link">&para;</a></h2>
 <p>Two docks hold your <strong>flight widgets</strong> (attitude, altitude, speed, compass, and more): the <strong>right
 dock</strong> (3) down the side, and the <strong>bottom dock</strong> (4) along the bottom.</p>
-<p>Click the <strong>✎ (edit) button</strong> by a dock to enter <strong>edit mode</strong>, then drag widgets to rearrange them or
-move them between docks. In edit mode every widget also shows a <strong>resize button</strong> in its corner: each tap
+<p><strong>Long-press</strong> a widget (mouse or finger) to enter <strong>edit mode</strong> — it is picked up right away, so drag it
+to rearrange the dock or move it into the other one; click outside the docks or press <strong>Escape</strong> to
+finish. In edit mode every widget also shows a <strong>resize button</strong> in its corner: each tap
 steps it to its next size — square widgets toggle between small and large, the wide ones (Live AGL,
 Video) go wide → large square → small square. The aspect ratio never changes, and a dock shrinks to its
 largest widget. Choose which widgets appear in <strong>Settings → Interface</strong>. Widgets scale to fit the dock,
@@ -2137,14 +2169,14 @@ coloured by <strong>clearance</strong> against your altitude (red = at/above you
 independent ranges — the <strong>fan distance</strong> scales with speed, and a separate <strong>clearance colour scale</strong>
 (60 / 120 / 250 m, left button). A <strong>REL / PRED</strong> button (right) switches the reference between your
 current altitude and a sink-rate-predicted one. Both buttons appear only while the dock is in
-<strong>edit mode</strong> (✎), so they don't clutter the display in flight.</p>
+<strong>edit mode</strong> (long-press a widget), so they don't clutter the display in flight.</p>
 <p><img alt="The Terrain Radar widget" src="../../assets/getting-started/widgets/terrainradar.png" /></p>
 </details>
 <details class="note">
 <summary>Video</summary>
 <p>A live <strong>video feed</strong> embedded as a widget — an RTSP stream or a local capture device / camera (e.g. a
-USB capture card), sized to the stream's aspect ratio. <strong>Double-click</strong> it to swap the feed with the
-map. See <strong><a href="../../guides/video/">Video</a></strong>.</p>
+USB capture card), always cropped to fill its tile. <strong>Double-click</strong> it to swap the feed with the
+map. Not available on iPhone. See <strong><a href="../../guides/video/">Video</a></strong>.</p>
 <!-- SCREENSHOT: ../assets/getting-started/widgets/video.png -->
 </details>
 <h2 id="5-map-its-controls">5 · Map &amp; its controls<a class="headerlink" href="#5-map-its-controls" title="Permanent link">&para;</a></h2>
@@ -2162,7 +2194,8 @@ open. A small cluster of buttons sits in one <strong>corner of the map</strong> 
 <p>The thin strip along the very <strong>bottom</strong>:</p>
 <ul>
 <li><strong>Left</strong> — a connection dot (green = connected, red = not) and, once connected, the firmware variant,
-  version and port (e.g. <em>INAV 8.0.0 on COM7</em>).</li>
+  version and port (e.g. <em>INAV 8.0.0 on COM7</em>). When the aircraft stops sending while the link stays
+  open, the dot turns amber and blinks, and the text reads <strong>Reconnecting…</strong> until data arrives again.</li>
 <li><strong>Right</strong> — the <strong>arming state</strong> (ARMED / DISARMED) while connected.</li>
 </ul>
 <h2 id="kite-on-a-phone">Kite on a phone<a class="headerlink" href="#kite-on-a-phone" title="Permanent link">&para;</a></h2>

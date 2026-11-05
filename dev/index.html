@@ -568,6 +568,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="getting-started/mobile/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Android, iPhone & iPad
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1873,6 +1901,8 @@ the focus stays on flying.</p>
 </div>
 <h2 id="supported-setups">Supported setups<a class="headerlink" href="#supported-setups" title="Permanent link">&para;</a></h2>
 <ul>
+<li><strong>Platforms:</strong> Windows, Linux and macOS, Android phones and tablets, and iPhone / iPad (built from
+  source for now — see <strong><a href="getting-started/installation/">Installation</a></strong>).</li>
 <li><strong>Autopilots:</strong> INAV (7.0+), ArduPilot, and PX4.</li>
 <li><strong>Aircraft:</strong> fixed-wing, flying-wing, VTOL, multirotor, helicopter, rover, boat.</li>
 <li><strong>Connections:</strong> USB / serial, Bluetooth (SPP &amp; BLE), TCP, and UDP.</li>
@@ -1901,8 +1931,9 @@ the focus stays on flying.</p>
 <li><strong>Terrain awareness</strong> — AGL (above-ground) waypoints, a terrain-profile analysis for your mission,
   and live <em>terrain radar</em> / AGL widgets in flight.</li>
 <li><strong>Flight Logbook</strong> — a full flight logbook no other GCS offers: automatic recording with replay,
-  plus import of INAV blackbox, <strong>ArduPilot Dataflash</strong>, MAVLink <code>.tlog</code>, and <strong>MWPTools-compatible
-  raw-MSP</strong> logs — unified into one searchable flight history.</li>
+  plus import of INAV blackbox, <strong>ArduPilot Dataflash</strong>, <strong>PX4 ULog</strong>, MAVLink <code>.tlog</code>, and
+  <strong>MWPTools-compatible raw-MSP</strong> logs — unified into one searchable flight history, with a
+  full-rate <strong>high-resolution replay</strong> of stored onboard logs.</li>
 <li><strong>Fleet (Vehicle) Manager</strong> — a build sheet per aircraft (airframe, propulsion, FC, sensors, photo)
   with lifetime statistics and records, auto-linked to your flights; export/import as <code>.kvehicle</code>.</li>
 <li><strong>Battery Manager</strong> — track each pack by serial: cycles, lifetime usage and health, with
@@ -1915,6 +1946,8 @@ the focus stays on flying.</p>
   map ⇄ video swapping.</li>
 <li><strong>Telemetry relay</strong> — re-encode and forward live telemetry to other ground stations, handsets, or an
   antenna tracker.</li>
+<li><strong><a href="reference/telemetry-api/">Telemetry API</a></strong> — serve the live telemetry as JSON to your own
+  programs and scripts (TCP stream, HTTP snapshot, UDP).</li>
 <li><strong>RC control</strong> — fly from the GCS with a gamepad/joystick (HID).</li>
 <li><strong>RF link analysis</strong> — visualise signal quality to find the best antenna setup.</li>
 </ul>

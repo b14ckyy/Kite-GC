@@ -461,6 +461,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/mobile/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Android, iPhone & iPad
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1923,6 +1951,9 @@ for one the first time you open 3D; paste it once (or add it later in <strong>Se
 shows true elevation. Without a token the 3D view still works — you just don't get real-world terrain
 relief. The surface <strong>imagery</strong> is whatever map/tile provider you've chosen for the 2D map, draped over
 the terrain.</p>
+<p>With a token you can also switch on <strong>3D Buildings (OSM)</strong> in <strong>Settings → Interface → Map</strong>: the
+OpenStreetMap buildings, streamed from Cesium Ion, stand on the globe as extruded blocks. The option
+is off by default and stays greyed out without a token.</p>
 <div class="admonition warning">
 <p class="admonition-title">3D needs an internet connection</p>
 <p>The terrain mesh is streamed live from Cesium and is <strong>not</strong> cached for offline use — this is a
@@ -1998,6 +2029,8 @@ left side, green the right, the yellow spike the nose; the same model draws the 
 <p>In <strong>Settings → Interface → Map</strong>:</p>
 <ul>
 <li><strong>Altitude Curtain (3D)</strong> — the vertical wall under the track (above).</li>
+<li><strong>3D Buildings (OSM)</strong> — OpenStreetMap building extrusions on the globe; needs the Cesium Ion token
+  (above).</li>
 <li><strong>Real Daytime and Lighting (3D)</strong> — light the globe with the real sun position (day/night, shadows).</li>
 <li><strong>Log Replay Time (3D)</strong> — during replay, drive that lighting from the log's actual time of day, so a
   dusk flight looks like dusk.</li>

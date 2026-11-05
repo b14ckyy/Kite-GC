@@ -461,6 +461,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/mobile/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Android, iPhone & iPad
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1948,6 +1976,12 @@ may still hit:</p>
   (e.g. a second <strong>SITL on 5762</strong>).</li>
 <li>Make sure the bridge/router/simulator is actually <strong>running and reachable</strong> (firewall, same network),
   and that the <strong>protocol</strong> matches what it speaks.</li>
+<li><strong>UDP: is another program already listening on that port?</strong> A second ground station (Mission
+  Planner on <code>14550</code>, for example) holds the port, so the vehicle's telemetry goes to it, not to Kite.
+  Kite then listens on the port <strong>plus 10000</strong> instead (<code>24550</code>), and the failed handshake says which
+  port was busy. Close the other program's UDP connection, or point the vehicle — or the other
+  program's MAVLink forward — at a port Kite can own. See
+  <strong><a href="../../guides/connecting/#tcp-and-udp-network-links">Connecting → TCP and UDP</a></strong>.</li>
 </ul>
 <div class="admonition tip">
 <p class="admonition-title"><code>read 0 bytes … parser errors=0</code> in the log</p>
@@ -1985,6 +2019,10 @@ backpack problem from a Kite problem.</p>
 <li><strong>Cable / radio quality.</strong> A marginal USB cable or a weak Bluetooth/telemetry link causes dropouts;
   try a different cable or move closer.</li>
 </ul>
+<p><strong>"Reconnecting…" in the status bar</strong> is not a dropped connection: the aircraft has sent nothing for
+three seconds while the link itself is still open — a radio hole, typically. Kite keeps the link and
+switches back by itself once data arrives. If it stays there, the data path is broken somewhere between
+the flight controller and Kite (radio link, bridge, or the flight controller itself).</p>
 <h2 id="getting-a-diagnostic-log">Getting a diagnostic log<a class="headerlink" href="#getting-a-diagnostic-log" title="Permanent link">&para;</a></h2>
 <p>Kite writes a plain-text log you can hand back when something won't connect.</p>
 <ol>

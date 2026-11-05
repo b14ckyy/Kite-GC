@@ -461,6 +461,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/mobile/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Android, iPhone & iPad
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -1710,7 +1738,8 @@ becomes your video screen</strong> — Kite fills it again by itself at the next
 place and, if you left it that way, in fullscreen. The detached window has no title bar: the
 buttons appear when the pointer is over it — top-left brings the picture home, bottom-right
 goes fullscreen. Drag the picture to move it, the top-right corner resizes it, and the frame
-keeps the stream's aspect ratio. Windows and macOS. <a href="https://github.com/b14ckyy/Kite-GC/pull/130">#130</a> · <a href="https://github.com/b14ckyy/Kite-GC/pull/132">#132</a></p>
+keeps the stream's aspect ratio. Windows, macOS and Linux (a Wayland desktop cannot keep it
+above other applications). <a href="https://github.com/b14ckyy/Kite-GC/pull/130">#130</a> · <a href="https://github.com/b14ckyy/Kite-GC/pull/132">#132</a> · <a href="https://github.com/b14ckyy/Kite-GC/pull/135">#135</a></p>
 </details>
 <details class="info">
 <summary>Telemetry API — live telemetry for other programs</summary>
@@ -1760,8 +1789,8 @@ Release Page</em> there is <strong>Update and Restart</strong>: Kite downloads t
 and starts again — on Windows and Linux through the installer of the package you have
 (a <code>.deb</code>/<code>.rpm</code> asks for your password), on macOS by swapping the app bundle, and a
 <strong>portable</strong> copy replaces its own executable. Nothing is downloaded until you press the
-button; <em>Remind me later</em> and <em>Skip this version</em> work as before. Android and iOS open
-their app store instead.</p>
+button; <em>Remind me later</em> and <em>Skip this version</em> work as before. Android has no in-app
+install and offers the release page instead; on iPhone and iPad the update check is off.</p>
 <p><strong>Patch releases only.</strong> A new choice under Settings → Updates keeps you on the bug-fix
 line of the version you run: 2.0.0 is told about 2.0.1, never about 2.1.0. The default stays
 <em>Stable releases</em>. <a href="https://github.com/b14ckyy/Kite-GC/pull/162">#162</a></p>
@@ -1821,7 +1850,7 @@ flight controller's own ADS-B receiver are not on this path yet. Setup and limit
   window when you hover it; the detached window's own hover buttons bring the picture back
   (top-left) and switch to fullscreen (bottom-right). Where it stands — including fullscreen —
   is remembered; if that screen is gone next time, it opens on Kite's own. Needs the Native RTSP
-  client, Windows and macOS. <a href="https://github.com/b14ckyy/Kite-GC/pull/130">#130</a> · <a href="https://github.com/b14ckyy/Kite-GC/pull/132">#132</a></li>
+  client; Windows, macOS and Linux. <a href="https://github.com/b14ckyy/Kite-GC/pull/130">#130</a> · <a href="https://github.com/b14ckyy/Kite-GC/pull/132">#132</a> · <a href="https://github.com/b14ckyy/Kite-GC/pull/135">#135</a></li>
 <li><strong>The video shows in two places at once</strong> — with Kite's own RTSP client the picture now runs
   in the Video widget <strong>and</strong> the floating window (or the fullscreen swap) at the same time,
   as it always did with the other sources. One decode feeds both. <a href="https://github.com/b14ckyy/Kite-GC/pull/129">#129</a> · <a href="https://github.com/b14ckyy/Kite-GC/pull/132">#132</a> · <a href="https://github.com/b14ckyy/Kite-GC/pull/135">#135</a></li>

@@ -461,6 +461,34 @@
 
               
             
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/mobile/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Android, iPhone & iPad
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
           </ul>
         </nav>
       
@@ -2023,6 +2051,10 @@ markers, the same as a live recording.</p>
 <ul>
 <li><strong>Flight database</strong> — your logbook (flights, vehicles, batteries, saved missions) is one local SQLite
   database; its location is configurable in <strong><a href="../settings/">Settings → Data</a></strong>.</li>
+<li><strong>Next to the database</strong> — <code>flights.pre-migration-backup.db</code>, the full backup Kite writes before an
+  update upgrades the database format (only the latest is kept), and a <code>hires-cache/</code> folder that holds
+  the temporary decode of a flight in <strong>HI-RES</strong> replay and is emptied when you close the flight. See
+  <strong><a href="../../guides/logbook/#the-database-updates-and-the-automatic-backup">Flight logbook</a></strong>.</li>
 <li><strong>Caches</strong> — 2D map tiles and terrain are cached on disk (also under Settings → Data); these are the
   files that make the 2D map usable offline.</li>
 </ul>
