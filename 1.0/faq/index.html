@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../assets/branding/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
     
     
       
@@ -31,10 +31,10 @@
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
       
         
-        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../assets/stylesheets/palette.fb2fffe2.min.css">
       
       
 
@@ -1417,6 +1417,34 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#flight-controller-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Flight controller setup
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Flight controller setup">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#can-kite-edit-flight-controller-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Can Kite edit flight controller parameters?
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1804,6 +1832,34 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#flight-controller-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Flight controller setup
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Flight controller setup">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#can-kite-edit-flight-controller-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Can Kite edit flight controller parameters?
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1889,6 +1945,32 @@ appears.</p>
 firmware refuses a request it cannot serve once instead of repeating the complaint — and keep the
 other ground station up to date as well. To keep the notification banner quiet in the meantime,
 set <strong><a href="../reference/settings/">Settings → Alerts → System messages</a></strong> to <em>Warning</em>.</p>
+<h2 id="flight-controller-setup">Flight controller setup<a class="headerlink" href="#flight-controller-setup" title="Permanent link">&para;</a></h2>
+<h3 id="can-kite-edit-flight-controller-parameters">Can Kite edit flight controller parameters?<a class="headerlink" href="#can-kite-edit-flight-controller-parameters" title="Permanent link">&para;</a></h3>
+<p>Only the ones that belong to a mission or to its safety net. Kite is a <strong>mission planner, mission
+manager and flight monitor</strong> — not a configurator. Setting up the aircraft itself (ports, receiver,
+modes, tuning, sensors, outputs) stays with the tool made for your firmware: <strong>INAV Configurator</strong> for
+INAV, <strong>Mission Planner</strong> or <strong>QGroundControl</strong> for ArduPilot and PX4.</p>
+<p>What Kite does write to the flight controller is everything you plan on the map:</p>
+<ul>
+<li><strong>Missions</strong> — waypoints and their actions, on INAV, ArduPilot and PX4 (<a href="../guides/missions/">Missions</a>).</li>
+<li><strong>INAV geozones</strong> — each zone with its altitude band and breach action
+  (<a href="../guides/safety/#inav-geozones">Safety → Geozones</a>).</li>
+<li><strong>INAV safe homes and autoland</strong> — the safe-home slots, their approach settings and the global
+  autoland configuration (<a href="../guides/safety/#automatic-landing-safe-home-autoland-inav">Safety → Safe Home &amp; Autoland</a>).</li>
+<li><strong>ArduPilot / PX4 geofence</strong> — the fence geometry plus the core fence parameters such as enable,
+  breach action and altitude / distance limits (<a href="../guides/safety/#ardupilot-px4-geofence">Safety → Geofence</a>).</li>
+<li><strong>ArduPilot / PX4 rally points</strong> — the points and their parameters
+  (<a href="../guides/safety/#rally-points-ardupilot-px4">Safety → Rally points</a>).</li>
+<li>A few single settings where they belong to a workflow: the <strong>loiter radius</strong> from
+  <a href="../guides/vehicle-control/">Vehicle control</a> on ArduPilot / PX4, and the INAV <strong>craft name</strong> from the
+  <a href="../guides/vehicles/">Vehicle library</a>, so that future flights link to the right vehicle.</li>
+</ul>
+<p>Nothing is written in the background: a change reaches the flight controller only when you save it or
+press the matching button, and only the settings that editor shows.</p>
+<p>A general <strong>parameter editor</strong> — the full list of every firmware setting — is not ruled out for the
+future, but it sits far down the priority list. Each firmware already has a dedicated configurator that
+does this well, and a second, half-complete one inside a ground station adds risk without adding much.</p>
 
 
 
@@ -1969,10 +2051,10 @@ set <strong><a href="../reference/settings/">Settings → Alerts → System mess
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["announce.dismiss", "navigation.top", "navigation.instant", "navigation.tracking", "toc.follow", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["announce.dismiss", "navigation.top", "navigation.instant", "navigation.tracking", "toc.follow", "search.suggest", "search.highlight", "content.code.copy", "content.action.edit"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
       
         <script src="../assets/nav.js"></script>
       
