@@ -128,6 +128,13 @@ log, the same way a live recording is.
 PX4 ULog note: PX4 doesn't log a throttle *output*, so a replayed `.ulg` flight shows the FC's
 **thrust setpoint** as the throttle value.
 
+!!! note "On Android, iPhone and iPad"
+    The mobile app imports **`.kflight`**, **`.tlog`** and **`.rawmsp`** files only. Onboard logs —
+    INAV Blackbox, ArduPilot Dataflash, PX4 ULog — are imported on a desktop install and moved over as
+    `.kflight`. The mobile database keeps no original log files (an imported `.kflight` brings the
+    flight, its track and its records, but not the stored original), so **HI-RES** replay and the
+    original-log export are desktop features, and so is the **Open** button.
+
 ## Exporting
 
 - **`.kflight`** — export selected flights (multi-select supported) as Kite's portable flight file, to

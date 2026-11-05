@@ -77,6 +77,12 @@ BLE    → device list (live scan)
 Serial is the default and covers both **USB cables** and **Bluetooth SPP** (classic Bluetooth serial)
 COM ports — Windows and Linux present both as serial ports.
 
+!!! note "Android, iPhone and iPad"
+    A fresh install on a phone or tablet starts on **MAVLink** over **UDP** port `14550` instead, the
+    usual Wi-Fi telemetry setup. **Android** offers Serial for a USB cable on an OTG adapter (Android
+    asks per device — pick Kite in the dialog when you plug the cable in). **iPhone and iPad have no Serial transport** — use
+    **BLE**, **TCP** or **UDP** there.
+
 1. **Transport** → **Serial**.
 2. **Port** — pick it from the list. The list refreshes by itself; a freshly plugged-in board is
    auto-selected. (Unsure which port is yours? Open the dropdown, unplug the board, reopen — the entry
@@ -139,6 +145,19 @@ selectors, so there is always a way back.
 
 If **Settings → Connection → Default Protocol** is pinned, the port follows it at startup, the same
 way it follows the selectors.
+
+On **UDP**, Kite listens on the port it targets, so a vehicle or bridge that pushes its telemetry to
+that port reaches it. If **another program already listens there** — Mission Planner on `14550`, say —
+Kite listens on the same port **plus 10000** instead (`14550` → `24550`), and on a random free port
+only if that one is taken too. The alternate port stays the same on every reconnect, so a relay that
+streams to Kite's address finds it again. Telemetry pushed to the original port still lands in the
+other program, though: if the handshake then fails, the error names the busy port — close the other
+program's UDP connection, or point the vehicle (or the other program's MAVLink forward) at a port Kite
+can own.
+
+Kite answers **every** sender it has heard on a UDP link in the last ten seconds, not only the last
+one — so several SITL instances or bridges that share one port, each from its own socket, all receive
+Kite's messages.
 
 !!! note "Protocol still applies"
     Choose the matching **protocol** for a network link too — **MAVLink** for an ArduPilot/PX4
@@ -234,6 +253,13 @@ the app holds — see **[Raw telemetry](telemetry-and-display.md#raw-telemetry)*
 
 Kite remembers your last **protocol, transport, port/host, baud, and BLE device**, so reconnecting is
 usually a single click on **Connect**. To drop the link, click **Disconnect**.
+
+A link that **goes quiet** is not dropped: when the aircraft has sent nothing for three seconds on an
+MSP or MAVLink link, the status bar switches to **Reconnecting…** (amber dot), Kite keeps the link
+open, and the display returns to normal as soon as data arrives again — a radio dropout heals on its
+own. Only a **lost transport** — a USB cable unplugged, a Bluetooth link gone, a TCP socket closed —
+ends the connection; if a flight was being recorded, Kite then asks what to do with it (**Device
+connection lost**: **Discard**, **Save Incomplete** or **Continue on Reconnect**).
 
 If you always fly the same link and would rather not have a stray session decide, set
 **Settings → Connection → Default Protocol** to that protocol: it then wins on every launch. Leave it

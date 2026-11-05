@@ -21,6 +21,10 @@ grabbing:
 - **Portable** — the bare executable, zipped **with an empty `.portable` marker** already inside, so all
   data stays in a `data/` folder next to it (see [Installed vs portable mode](#installed-vs-portable-mode)).
 
+The macOS release also carries a `..._update.tar.gz` — the app bundle packed for Kite's in-app updater
+(**Update and Restart**, see [Settings → Updates](../reference/settings.md#updates)). You don't need to
+download it yourself.
+
 !!! note "macOS: signed and notarized"
     The macOS build is **universal** (Apple Silicon + Intel), **signed and notarized** since 1.0.0, so it
     opens like any other app — no Gatekeeper warning, no right-click → Open. If you are still running a
@@ -166,8 +170,11 @@ program, which Kite offers to **download automatically the first time you use th
 | Helper | Used for | How it's provided |
 |---|---|---|
 | `blackbox_decode` | Importing **INAV blackbox** logs | auto-download on **Windows & Linux** (macOS: install manually) |
-| `ffmpeg` | **Video** (native capture + fallback decoding for some RTSP sources) | auto-download on **Windows & Linux**; **bundled inside the app on macOS** |
-| `mediamtx` | **Video** (the RTSP → low-latency engine) | auto-download on **Windows, Linux & macOS** |
+| `ffmpeg` | **Video** (native capture + fallback decoding for some RTSP sources on the classic path) | auto-download on **Windows & Linux**; **bundled inside the app on macOS** |
+| `mediamtx` | **Video** (the classic RTSP → low-latency engine, used with the *Native RTSP client* toggle off) | auto-download on **Windows, Linux & macOS** |
+
+RTSP through Kite's own **Native RTSP client** needs neither helper — Android and iPad always use it,
+the desktop when the toggle in the Video panel is on (see **[Video](../guides/video.md)**).
 
 - Downloaded helpers are stored in Kite's tools folder (`…\kite-gc\bin`, or `data\bin` in portable
   mode) — they don't touch your system.
