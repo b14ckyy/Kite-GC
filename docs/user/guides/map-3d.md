@@ -25,6 +25,10 @@ shows true elevation. Without a token the 3D view still works — you just don't
 relief. The surface **imagery** is whatever map/tile provider you've chosen for the 2D map, draped over
 the terrain.
 
+With a token you can also switch on **3D Buildings (OSM)** in **Settings → Interface → Map**: the
+OpenStreetMap buildings, streamed from Cesium Ion, stand on the globe as extruded blocks. The option
+is off by default and stays greyed out without a token.
+
 !!! warning "3D needs an internet connection"
     The terrain mesh is streamed live from Cesium and is **not** cached for offline use — this is a
     design limitation. In the field without a connection, the 2D map (whose tiles *are* cached) is the
@@ -106,6 +110,8 @@ The 3D map mirrors the rest of Kite's overlays, each placed at real altitude:
 In **Settings → Interface → Map**:
 
 - **Altitude Curtain (3D)** — the vertical wall under the track (above).
+- **3D Buildings (OSM)** — OpenStreetMap building extrusions on the globe; needs the Cesium Ion token
+  (above).
 - **Real Daytime and Lighting (3D)** — light the globe with the real sun position (day/night, shadows).
 - **Log Replay Time (3D)** — during replay, drive that lighting from the log's actual time of day, so a
   dusk flight looks like dusk.

@@ -21,7 +21,7 @@ import { writable, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { t } from 'svelte-i18n';
-import { isLinux, isAndroid } from '$lib/platform';
+import { isLinux, isMobile, hasVideo } from '$lib/platform';
 import {
   type NativeDevice,
   type CaptureMode,
@@ -328,10 +328,9 @@ function savePrefs(): void {
 }
 
 const boot = loadPrefs();
-// Android has no MediaMTX/ffmpeg (sidecars don't ship on mobile) — the Kite RTSP client is the
-// ONLY route, not a choice. Forced here so every startRtsp() takes the kite path regardless of
-// what an old pref says; the panel hides the toggle there.
-if (isAndroid) boot.rtspNativeClient = true;
+// Mobile has no MediaMTX/ffmpeg (sidecars don't ship there), so the Kite RTSP client is the only
+// route on Android and iOS. Forced so an old pref can't pick the engine; the panel hides the toggle.
+if (isMobile) boot.rtspNativeClient = true;
 
 const INITIAL: VideoState = {
   kind: boot.kind,
@@ -962,8 +961,8 @@ export interface NativeRtspStats {
   rtpLate: number;
   /** Received link bitrate over the last poll interval, kbit/s. */
   kbps: number;
-  /** `droppedHidden`: frames decoded but released unrendered while no surface was on screen
-   *  (the Android sink's off-screen mode, PHONE_VIDEO.md D7) — 0 on the other sinks. */
+  /** `droppedHidden`: frames not shown while no surface was on screen. Android decodes and releases
+   *  them (PHONE_VIDEO.md D7), the Apple sink skips decoding; 0 on the other sinks. */
   sink: { presentedFps: number; droppedHidden: number; width: number | null; height: number | null; codec: string | null } | null;
 }
 export const nativeRtspStats = writable<NativeRtspStats | null>(null);
@@ -1726,6 +1725,8 @@ export async function startNative(): Promise<void> {
 
 /** Start whichever source kind is currently selected. */
 export function startActive(): Promise<void> {
+  // iPhone: the panel has no Stop, so a saved `enabled` must not auto-start a source.
+  if (!hasVideo) return Promise.resolve();
   const kind = get(videoState).kind;
   if (kind === 'rtsp') return startRtsp();
   if (kind === 'native') return startNative();

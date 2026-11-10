@@ -19,6 +19,7 @@
   import type { AppSettings, InterfaceSettings, RadarSettings, GcsMode, AirspaceSettings, AirspaceProvider, SystemMessagesLevel, LogLevel, RcControlSettings, TelemetryApiSettings, UpdateCheckSettings, UpdateCheckMode, DefaultProtocol } from '$lib/stores/settings';
   import { revealItemInDir, openPath } from '@tauri-apps/plugin-opener';
   import { isAndroid, isMobile } from '$lib/platform';
+  import { updatesSupported } from '$lib/controllers/updateCheck';
   import { blackboxDecoderVersion, downloadBlackboxDecode } from '$lib/stores/flightlog';
   import type { TileCacheStats } from '$lib/cache/tileCache';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
@@ -853,6 +854,7 @@
     </div>
 
     <!-- ── Updates ───────────────────────────────────── -->
+    {#if updatesSupported}
     <div class="s-group">
       <h4 class="s-head">{$t('settings.updates')}</h4>
       <div class="s-row">
@@ -867,6 +869,7 @@
       </div>
       <p class="cesium-hint">{$t('settings.updateHint')}</p>
     </div>
+    {/if}
 
     <!-- ── Mission Control ───────────────────────────── -->
     <div class="s-group">

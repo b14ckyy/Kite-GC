@@ -4,6 +4,10 @@ A reference for every option in the **Settings** tool (navigation rail). Setting
 tabs: **Interface** (how Kite looks and the units it uses) and **Data** (links, caches, logging and
 alerts). Changes apply immediately and are remembered between sessions.
 
+Number fields with **+ / −** buttons also take the mouse wheel: click into the field, then turn the
+wheel — up increases, down decreases, and turning fast steps in bigger increments. A field you haven't
+clicked into ignores the wheel, so scrolling the panel never changes a value by accident.
+
 ![The Settings panel](../assets/getting-started/panels/settings.png)
 /// caption
 The Settings panel — the Interface and Data tabs, each grouped into labelled sections.
@@ -15,7 +19,7 @@ The Settings panel — the Interface and Data tabs, each grouped into labelled s
 
 | Setting | What it does | Default |
 |---|---|---|
-| **Language** | The UI language. | English |
+| **Language** | The UI language — English, Deutsch, Français, 中文, Български or Slovenčina. | English |
 | **UI scale** | Scale the whole interface — 100 %, 125 % or 150 % (for high-DPI or far-away screens). | 100 % |
 
 ### Map
@@ -24,13 +28,14 @@ The Settings panel — the Interface and Data tabs, each grouped into labelled s
 |---|---|---|
 | **Tile Provider** | The map imagery source — used by **both the 2D map and the 3D globe**. | ESRI Hybrid |
 | **Altitude Curtain (3D)** | Draw the vertical wall from the flight track down to the ground in 3D. See **[3D map](../guides/map-3d.md)**. | On |
+| **3D Buildings (OSM)** | Show OpenStreetMap building extrusions on the 3D globe. The buildings come from Cesium Ion, so the switch stays greyed out until a **Cesium Ion Token** is entered (Data tab). | Off |
 | **Real Daytime and Lighting (3D)** | Light the 3D globe with the real sun position (day / night, shadows). | On |
 | **Log Replay Time (3D)** | During replay, drive that lighting from the log's actual time of day (needs the option above). | On |
 | **Night Mode** | Dim the 2D map at night — Off / Auto (by local time) / On. | Auto |
 | **Power Saving** | Cap the 3D frame rate to save battery — Off (60 fps) / On (20 fps) / Auto (20 fps on battery). While active it also drops the smooth bar animations in the speed and battery widgets, so those read the current value directly, and the frosted-glass blur behind panels and widgets. On phones and tablets the glass blur over the map is always off; only the panels keep it. | Auto |
 | **High-Resolution 3D** | Render the 3D globe at the display's native pixel density (on) or at half of it (off) to save GPU and battery. Sharpest on high-DPI phones and tablets; a laptop with a weak integrated GPU may prefer it off. | On (desktop) · Off (phone / tablet) |
 | **Your Location** | Your detected position (used as a fallback reference). **Detect** re-runs OS geolocation. | — |
-| **GCS Location** | How the ground-station position is sourced — Off / Manual (set once) / Continuous (live). Used as the reference when no aircraft fix is available. While your own position is still unknown, the aircraft's home position stands in for it. | Continuous |
+| **GCS marker** | How the ground-station position is sourced — Off / Manual (draggable — place it once; **Reset** snaps it back to *Your Location*) / Continuous (live). Used as the reference when no aircraft fix is available. While your own position is still unknown, the aircraft's home position stands in for it. | Continuous |
 
 ### Units
 
@@ -100,8 +105,9 @@ leave them off to save bandwidth on a slow over-the-air radio, turn them on when
 | **Continuous raw logging** | Record the raw stream the whole time connected, not just while armed. | Off |
 | **Flight log database** | Where the logbook database lives — **Choose** a path or **Use default**. | default path |
 | **Compact Database** | Defragment the database to reclaim space (rarely needed). | — |
+| **Database backup (pre-update)** | Shown only once a backup exists: the backup Kite wrote before it last upgraded the database format, with its size and a **Delete** button. See **[Flight logbook](../guides/logbook.md#the-database-updates-and-the-automatic-backup)**. | — |
 | **Raw log path** | Where raw `.rawmsp` / `.tlog` files are written. | default path |
-| **Blackbox decoder** | The INAV `blackbox_decode` helper — shows its version and lets you **download / update** it. | — |
+| **Blackbox decoder** | The INAV `blackbox_decode` helper — shows its version and lets you **download / update** it. Desktop only (Android and iOS cannot run the helper). | — |
 
 See **[Flight logbook](../guides/logbook.md)** for how these are used.
 
@@ -125,10 +131,14 @@ version you have, the one that is available, and the release notes, plus four ch
 - **Update and Restart** downloads the new version, installs it and restarts Kite. On Windows and
   Linux this runs the installer of the package you installed (a `.deb`/`.rpm` asks for your password);
   on macOS the app bundle is replaced in place. A **portable** copy replaces its own executable and
-  restarts. On Android and iOS the button opens the app store instead.
+  restarts. Android has no in-app install and no store listing yet, so the notice there offers only
+  the other three choices.
 - **Open Release Page** shows the release on GitHub in your browser, with every download.
 - **Remind me later** asks again at the next start.
 - **Skip this version** suppresses the notice for that one version only.
+
+On iPhone and iPad the update check is switched off and this section is hidden. TestFlight and the
+App Store tell you about new versions themselves, and GitHub releases have no iOS build.
 
 ### Mission Control
 

@@ -66,6 +66,8 @@ belongs to, under its patch version, so the notes for a release line stay in one
 Patch releases are published on the [GitHub releases page](https://github.com/b14ckyy/Kite-GC/releases)
 like every other version. With **Check for updates** set to *Stable releases* in the settings, Kite
 tells you at start-up when a newer stable version exists (see [Settings](reference/settings.md)).
+To stay on your release line, choose *Patch releases only* instead: Kite then offers only the patch
+releases of the version you run (2.0.0 → 2.0.1, never 2.1.0).
 
 Found a problem in a supported line? See [Reporting a problem](troubleshooting/reporting-issues.md) —
 please mention the version you run, so the fix reaches your release line.

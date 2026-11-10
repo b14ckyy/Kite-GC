@@ -57,6 +57,12 @@ may still hit:
   (e.g. a second **SITL on 5762**).
 - Make sure the bridge/router/simulator is actually **running and reachable** (firewall, same network),
   and that the **protocol** matches what it speaks.
+- **UDP: is another program already listening on that port?** A second ground station (Mission
+  Planner on `14550`, for example) holds the port, so the vehicle's telemetry goes to it, not to Kite.
+  Kite then listens on the port **plus 10000** instead (`24550`), and the failed handshake says which
+  port was busy. Close the other program's UDP connection, or point the vehicle — or the other
+  program's MAVLink forward — at a port Kite can own. See
+  **[Connecting → TCP and UDP](../guides/connecting.md#tcp-and-udp-network-links)**.
 
 !!! tip "`read 0 bytes … parser errors=0` in the log"
     A MAVLink handshake timeout that reports **0 bytes read and 0 parser errors** means *nothing arrived
@@ -93,6 +99,11 @@ a ground station speaks to it first. Kite's initial GCS **HEARTBEAT** is what se
   craft from its normal supply (**props off** on the bench).
 - **Cable / radio quality.** A marginal USB cable or a weak Bluetooth/telemetry link causes dropouts;
   try a different cable or move closer.
+
+**"Reconnecting…" in the status bar** is not a dropped connection: the aircraft has sent nothing for
+three seconds while the link itself is still open — a radio hole, typically. Kite keeps the link and
+switches back by itself once data arrives. If it stays there, the data path is broken somewhere between
+the flight controller and Kite (radio link, bridge, or the flight controller itself).
 
 ## Getting a diagnostic log
 

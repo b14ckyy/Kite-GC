@@ -86,6 +86,11 @@ certificate: an "Apple Development" certificate cannot notarize. Credentials are
 environment / keychain and never committed. List your identities with
 `security find-identity -v -p codesigning`.
 
+A release needs all three files from `release/`: the `.dmg`, the standalone `.zip` and the updater
+`_update.tar.gz`. `just notarize-macos` staples the ticket to the disk image and to the app in the other two, so a first
+launch works without a network connection. `scripts/make-update-manifest.sh` refuses an updater
+archive without that ticket, which keeps the unsigned CI build out of the in-app updater.
+
 ### Android
 
 Mobile is **not part of the 1.0 line** — nothing mobile builds on `release/1.0.x`, and both mobile ports

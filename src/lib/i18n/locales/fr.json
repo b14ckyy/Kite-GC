@@ -663,7 +663,7 @@
     "webrtcCodecUnsupported": "Le codec de ce flux ne peut pas transiter par WebRTC (p. ex. HEVC). Activez plutôt le client RTSP natif.",
     "bufferLabel": "Tampon de lissage (images)",
     "bufferHint": "0 = latence minimale. Chaque cran ajoute une durée d'image de mise en mémoire tampon — lecture plus fluide sur les liaisons instables, au prix de la latence.",
-    "rtspMobilePlaceholder": "RTSP n'est pas encore disponible sur cet appareil — le moteur de streaming ne peut pas fonctionner sur mobile ; une voie RTSP native à l'appareil reste à venir.",
+    "iphoneUnsupported": "La vidéo n'est pas disponible sur iPhone. Utilisez un iPad pour la vidéo.",
     "engineMissing": "Le moteur de streaming MediaMTX est requis pour RTSP et n'est pas encore installé.",
     "invalidRtspUrl": "Ce n'est pas une adresse RTSP — elle doit commencer par rtsp:// (ou rtsps://).",
     "engineDownload": "Télécharger MediaMTX",

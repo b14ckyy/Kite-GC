@@ -30,7 +30,7 @@ inside the box of the feature release they belong to, so the notes for one relea
         underneath it. Long-press a widget to rearrange or resize it; the others shift live to show
         where they will land. Pinch to zoom, 2D/3D and follow next to the column. [#102]
 
-        **Video on the phone** sits in a docked window at the bottom-right of the map — a camera
+        **Video on an Android phone** sits in a docked window at the bottom-right of the map — a camera
         button parks it off-screen and brings it back instantly — or in the Video widget of the
         column; double-tap swaps map and video. [#105] The 3D view centres on the visible map area
         next to the column. [#103] · [#111]
@@ -43,7 +43,7 @@ inside the box of the feature release they belong to, so the notes for one relea
     ??? info "Native RTSP video client with hardware decode"
         RTSP video no longer needs the external video engine: Kite ships its **own RTSP client** and
         decodes H.264/H.265 with the **operating system's hardware decoder** on Windows, Android,
-        Linux and macOS — lower latency, a fraction of the CPU load, and rock-solid reconnects.
+        Linux, macOS and iPad — lower latency, a fraction of the CPU load, and rock-solid reconnects.
         [#85] · [#88] · [#89] · [#126]
 
     ??? info "Video in two places at once — and on a screen of its own"
@@ -58,7 +58,8 @@ inside the box of the feature release they belong to, so the notes for one relea
         place and, if you left it that way, in fullscreen. The detached window has no title bar: the
         buttons appear when the pointer is over it — top-left brings the picture home, bottom-right
         goes fullscreen. Drag the picture to move it, the top-right corner resizes it, and the frame
-        keeps the stream's aspect ratio. Windows and macOS. [#130] · [#132]
+        keeps the stream's aspect ratio. Windows, macOS and Linux (a Wayland desktop cannot keep it
+        above other applications). [#130] · [#132] · [#135]
 
     ??? info "Telemetry API — live telemetry for other programs"
         Kite can now **serve its live telemetry as JSON** to anything that can read it: an NDJSON
@@ -104,8 +105,8 @@ inside the box of the feature release they belong to, so the notes for one relea
         and starts again — on Windows and Linux through the installer of the package you have
         (a `.deb`/`.rpm` asks for your password), on macOS by swapping the app bundle, and a
         **portable** copy replaces its own executable. Nothing is downloaded until you press the
-        button; *Remind me later* and *Skip this version* work as before. Android and iOS open
-        their app store instead.
+        button; *Remind me later* and *Skip this version* work as before. Android has no in-app
+        install and offers the release page instead; on iPhone and iPad the update check is off.
 
         **Patch releases only.** A new choice under Settings → Updates keeps you on the bug-fix
         line of the version you run: 2.0.0 is told about 2.0.1, never about 2.1.0. The default stays
@@ -135,7 +136,7 @@ inside the box of the feature release they belong to, so the notes for one relea
     - **iPhone & iPad support** — native iOS/iPadOS build: phone/tablet layout, touch RC, BLE,
       Wi-Fi MAVLink. Contributed by Sebastian Kumor. [#16]
     - **Native RTSP video client** — Kite's own RTSP client with OS hardware decode (H.264/H.265)
-      on Windows [#85], Android [#88], Linux [#89] and macOS [#126].
+      on Windows [#85], Android [#88], Linux [#89], macOS [#126] and iPad [#221] (no video on iPhone).
     - **Unobstructed fullscreen video** — aspect-exact video box with a blurred follow-map
       backdrop. [#90]
     - **PX4 ULog import** — the logbook imports `.ulg` flash/SD logs, split into flights like any
@@ -165,7 +166,7 @@ inside the box of the feature release they belong to, so the notes for one relea
       window when you hover it; the detached window's own hover buttons bring the picture back
       (top-left) and switch to fullscreen (bottom-right). Where it stands — including fullscreen —
       is remembered; if that screen is gone next time, it opens on Kite's own. Needs the Native RTSP
-      client, Windows and macOS. [#130] · [#132]
+      client; Windows, macOS and Linux. [#130] · [#132] · [#135]
     - **The video shows in two places at once** — with Kite's own RTSP client the picture now runs
       in the Video widget **and** the floating window (or the fullscreen swap) at the same time,
       as it always did with the other sources. One decode feeds both. [#129] · [#132] · [#135]
@@ -194,6 +195,7 @@ inside the box of the feature release they belong to, so the notes for one relea
       dialog. [#162]
     - **Patch releases only** — update-check channel that offers bug-fix releases of the running
       version only (2.0.0 → 2.0.1, never 2.1.0). [#162]
+    - **Slovak interface language** (Settings → Language), contributed by Sebastian Kumor. [#222]
 
     **Removed**
 
@@ -422,6 +424,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#112]: https://github.com/b14ckyy/Kite-GC/pull/112
 [#123]: https://github.com/b14ckyy/Kite-GC/pull/123
 [#126]: https://github.com/b14ckyy/Kite-GC/pull/126
+[#221]: https://github.com/b14ckyy/Kite-GC/pull/221
 [#127]: https://github.com/b14ckyy/Kite-GC/pull/127
 [#129]: https://github.com/b14ckyy/Kite-GC/pull/129
 [#130]: https://github.com/b14ckyy/Kite-GC/pull/130
@@ -429,6 +432,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#135]: https://github.com/b14ckyy/Kite-GC/pull/135
 [#140]: https://github.com/b14ckyy/Kite-GC/pull/140
 [#141]: https://github.com/b14ckyy/Kite-GC/pull/141
+[#222]: https://github.com/b14ckyy/Kite-GC/pull/222
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143
 [#145]: https://github.com/b14ckyy/Kite-GC/pull/145
 [#151]: https://github.com/b14ckyy/Kite-GC/pull/151

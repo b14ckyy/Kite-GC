@@ -61,8 +61,10 @@ along the bottom. Each widget is self-contained and updates live.
 ### Arranging widgets
 
 - **Choose which widgets appear** in **[Settings](../reference/settings.md)** — toggle each on or off.
-- **Rearrange them**: click the **✎ (edit)** button by a dock to enter **edit mode**, then drag
-  widgets to reorder them or move them between the two docks.
+- **Rearrange them**: **long-press** a widget (hold the mouse button or your finger on it for half a
+  second) to enter **edit mode** — the widget is picked up straight away, so you can drag it to a new
+  place or into the other dock. In edit mode a press picks a widget up immediately. Click anywhere
+  outside the docks, or press **Escape**, to leave edit mode.
 - **Resize them**: in edit mode each widget shows a **resize button** in its corner. Every tap steps
   it to its next size — square widgets toggle **small ↔ large**, the wide ones (Live AGL, Video) cycle
   **wide → large square → small square**. The aspect ratio never changes (a widget is only rescaled),
@@ -130,8 +132,10 @@ The **UAV Info** tool on the navigation rail is a quick read-out of *what you're
 - **Flight controller** — craft name, firmware variant and version, board / target, vehicle type, the
   API version, and hardware revision when reported. Shown for any connection (INAV, ArduPilot, PX4).
 - **Features** *(INAV)* — badges for the INAV capabilities Kite can use (autoland, geozones, MSP-RC,
-  AUX-RC, ADS-B), lit when your INAV version supports them. These are version-dependent and INAV-specific,
-  so the section appears only on an INAV link.
+  AUX-RC, ADS-B, MSP over MAVLink), lit when your INAV version supports them. These are version-dependent
+  and INAV-specific, so the section appears only on an INAV link. On an INAV-over-MAVLink link
+  (**MSP/MAV**, see **[Connecting](connecting.md#inav-over-mavlink-mspmav)**) MSP-RC, AUX-RC and ADS-B
+  stay unlit, with *Not available over MSP/MAV* as their tooltip.
 
 The **vehicle type** row is a dropdown. Kite fills it with the type it detected during the handshake (the
 INAV mixer platform, or the MAVLink vehicle type plus the QuadPlane check), and you can change it at any

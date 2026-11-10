@@ -66,9 +66,17 @@ just check    # svelte-check + TypeScript + cargo check
 CI runs the same checks (plus clippy) on Linux, Windows and macOS for every push to `development`,
 `master` and the release branches, and for every PR targeting them. **PRs should be green before review.**
 
-For a **bug-fix PR**, please state in the description whether the bug exists in the **released
-version** or was **introduced since** (and by what, if you know). Only the first kind belongs in the
-release notes, so this one line saves the archaeology at release time.
+For a **bug-fix PR**, add the **regression marker** to the description — one line, in exactly one of
+these two forms (the PR template has a slot for it):
+
+```
+Affects: v1.0.1 and earlier
+Regression: introduced by 3f2a9c1, never released
+```
+
+The first says the bug exists in a **released version** (name the newest one that has it); the second
+says it was **introduced since** the last release and never reached a user. Only the first kind belongs
+in the release notes, so this one line saves the archaeology at release time.
 
 ## Coding conventions
 
@@ -97,13 +105,13 @@ release notes, so this one line saves the archaeology at release time.
 
 ## Internationalisation
 
-Kite ships in English, German, French, Chinese and Bulgarian. For contributions:
+Kite ships in English, German, French, Chinese, Bulgarian and Slovak. For contributions:
 
 - **`en.json` is the source of truth and is required** — every new or changed UI string must have its
   English key.
-- **Other locales (`de.json`, `fr.json`, `zh.json`, `bg.json`) are optional but very welcome.** Keeping
+- **Other locales (`de.json`, `fr.json`, `zh.json`, `bg.json`, `sk.json`) are optional but very welcome.** Keeping
   them in sync is appreciated; an AI assistant makes this quick and is the recommended way to fill in
-  translations. Chinese and Bulgarian came in exactly that way, as community contributions.
+  translations. Chinese, Bulgarian and Slovak came in exactly that way, as community contributions.
 - Use **named placeholders** (`{name}`) for parameters, passed as an object.
 
 Missing non-English keys fall back gracefully, so an English-only PR is fine — a maintainer (or you, with
