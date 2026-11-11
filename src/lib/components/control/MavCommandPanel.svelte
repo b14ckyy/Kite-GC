@@ -497,7 +497,7 @@
     cursor: pointer;
   }
   .cc-fold:hover { border-color: #37a8db; color: #fff; }
-  .cc-fold-chevron { display: inline-block; color: #949494; transition: transform 0.15s; }
+  .cc-fold-chevron { display: inline-block; width: 16px; font-size: 20px; line-height: 1; text-align: center; color: #949494; transition: transform 0.15s; }
   .cc-fold-chevron.open { transform: rotate(90deg); }
   .cc-fold-label { flex: 1; }
   .cc-warn { color: #d4a017; font-weight: 400; }
