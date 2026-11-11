@@ -2002,7 +2002,7 @@ on a stray click.</p>
   danger styling. It <strong>bypasses the FC's pre-arm checks</strong> — use it only when you understand <em>why</em> the
   normal command was refused.</li>
 <li><strong>Stick-flown modes are locked without an RC source.</strong> Manual / Acro / Stabilize / FBWA and similar
-  modes that need live stick input are hidden behind <strong>"Show all modes"</strong> and stay <strong>disabled</strong> until
+  modes that need live stick input are folded away under <strong>RC modes</strong> and stay <strong>disabled</strong> until
   there's a usable RC source — either a <strong>physical transmitter</strong> (the FC reports a valid receiver
   signal) <strong>or active <a href="../rc-control/">RC control</a></strong> (Kite streaming the sticks to the FC). With
   neither, the panel shows <strong>"No RC link"</strong> so you can't switch into a mode you couldn't actually fly.</li>
@@ -2025,18 +2025,60 @@ on a stray click.</p>
 <p>The current mode is shown large and centred. Below it:</p>
 <ul>
 <li>A grid of <strong>quick modes</strong> for the common GCS-friendly modes of your vehicle.</li>
-<li><strong>Show all modes</strong> reveals the remaining <strong>stick-flown</strong> modes — selectable <strong>only with an RC source</strong>
-  (a connected transmitter, or active RC control — see the interlocks above).</li>
+<li>The <strong>RC modes</strong> bar below the grid folds out the <strong>stick-flown</strong> modes — selectable <strong>only with an
+  RC source</strong> (a connected transmitter, or active RC control — see the interlocks above). While there
+  is none, the bar itself says <strong>No RC link</strong>.</li>
 </ul>
 <p>Mode colours match the rest of the app (see the <a href="../../getting-started/quick-tour/">quick tour</a> legend).</p>
+<p><strong>ArduPilot 4.7 and newer tell Kite which modes they have.</strong> After connecting, Kite asks the flight
+controller for its mode list and offers only modes from it: a mode that is not built into your
+firmware, or that the firmware has switched off (Follow without its parameter enabled, for example),
+is not shown. Kite keeps its own mode names and the RC lock. A mode Kite does not know — one added by a
+Lua script, for example — appears under <strong>RC modes</strong> with the name the flight controller gives
+it, and needs an RC source. Older ArduPilot versions and PX4 get Kite's built-in list.</p>
+<p>Not every mode of the list becomes a mode button: Guided, Takeoff, RTL, Land and ArduPlane's QRTL,
+QLand, Loiter QLand and AutoLand have their own controls further up (see <a href="#takeoff-return-and-landing">Takeoff, return and
+landing</a>), and modes that only the firmware itself enters (Avoid ADSB,
+Initialising) or that are for diagnostics (ArduSub's Motor Detection) are never offered. The mode
+buttons are ordered: ordinary flight modes first, then — as hold-to-confirm buttons — the remaining
+ones that bring the vehicle back or down: <strong>SmartRTL</strong> (Copter, Rover), <strong>Auto RTL</strong> (Copter) and
+<strong>Surface</strong> (Sub).
+If the flight controller's list has no Guided mode, the <strong>Guided</strong> toggle is greyed out.</p>
 <h2 id="takeoff-return-and-landing">Takeoff, return and landing<a class="headerlink" href="#takeoff-return-and-landing" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Takeoff</strong> (with a target altitude) is offered for <strong>multirotor, VTOL and PX4</strong> vehicles. A
-  fixed-wing plane launches via an AUTO mission takeoff or by hand, so the command is hidden there. On
-  ArduPilot, Kite switches to Guided first so the FC accepts the takeoff.</li>
+<li><strong>Takeoff</strong> (with a target altitude) is offered for <strong>multirotor, VTOL and PX4</strong> vehicles. On
+  ArduPilot, Kite switches to Guided first (when the vehicle offers that mode) so the FC accepts
+  the takeoff.</li>
+<li><strong>Takeoff on an ArduPilot fixed-wing plane</strong> switches the plane to its <strong>TAKEOFF mode</strong>. There is no
+  altitude field: the plane climbs to the altitude of its <code>TKOFF_ALT</code> parameter and then loiters.
+  Pressed while the plane is disarmed, the mode waits for you to arm. It is meant for the launch:
+  pressed in established flight the plane loiters (after climbing to that altitude if it is below
+  it), but in the first seconds after launch, or with almost no ground speed, it starts a full
+  takeoff climb from where it is.</li>
+</ul>
+<div class="admonition warning">
+<p class="admonition-title">In TAKEOFF mode the motor starts when you arm</p>
+<p>ArduPlane does not wait for the throttle stick in TAKEOFF mode. With the firmware's default
+parameters the motor runs up about 0.2 seconds after arming, without waiting for a throw. While
+the plane sits disarmed in TAKEOFF mode, the panel shows a warning line under the arm slider.
+Hold the plane ready for launch before you arm.</p>
+</div>
+<ul>
 <li><strong>RTL</strong> returns to the launch/home point.</li>
-<li><strong>Land</strong> lands in place — hidden for plain ArduPlane fixed-wing (which lands via an AUTO sequence or
-  RTL); QuadPlane uses its vertical QLAND path.</li>
+<li><strong>Land</strong> lands in place (Copter, PX4).</li>
+<li><strong>ArduPilot QuadPlane</strong> — the return and landing modes sit here in two pairs:<ul>
+<li><strong>RTL</strong> and <strong>QRTL</strong>: RTL is the fixed-wing return; QRTL returns to home (or a rally point)
+  and lands vertically.</li>
+<li><strong>Loiter QLand</strong> and <strong>QLand</strong>: QLand lands vertically right where the aircraft is. Loiter
+  QLand is for arriving high in forward flight: the aircraft circles down to the altitude of
+  <code>Q_RTL_ALT</code> and then lands vertically; in hover it lands at once.</li>
+</ul>
+</li>
+<li><strong>ArduPilot fixed-wing plane</strong> — next to RTL there is <strong>AutoLand</strong> when the firmware has it
+  (ArduPilot 4.7 and newer): an automatic landing at home in the takeoff direction. It works only in
+  flight, and the flight controller must have captured the takeoff direction (it does so at takeoff,
+  once it has enough ground speed); otherwise it refuses and the panel shows its answer. Older firmware has no
+  land-now command for a plane (it lands through an AUTO sequence or RTL), so the place stays empty.</li>
 <li><strong>Abort Landing</strong> (go-around) is offered for <strong>fixed-wing</strong> to wave off an approach and climb out.</li>
 <li><strong>VTOL transition</strong> (QuadPlane / VTOL only) switches between <strong>hover</strong> and <strong>forward</strong> flight.</li>
 </ul>
@@ -2100,15 +2142,15 @@ transmitter.</p>
 <tr>
 <td>Takeoff</td>
 <td>✓</td>
-<td>— (AUTO/manual)</td>
+<td>✓ (TAKEOFF mode)</td>
 <td>✓</td>
 <td>✓</td>
 </tr>
 <tr>
 <td>Land</td>
 <td>✓</td>
-<td>—</td>
-<td>✓ (QLAND)</td>
+<td>AutoLand (ArduPilot 4.7+)</td>
+<td>QLand / Loiter QLand</td>
 <td>✓</td>
 </tr>
 <tr>

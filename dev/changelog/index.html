@@ -1928,6 +1928,24 @@ log that failed. <a href="https://github.com/b14ckyy/Kite-GC/pull/234">#234</a><
 </ul>
 <p><strong>Improved</strong></p>
 <ul>
+<li><strong>ArduPilot: the control panel offers the modes your flight controller really has.</strong> From
+  ArduPilot 4.7 on, Kite reads the mode list from the flight controller: modes missing from your
+  firmware or switched off there are no longer offered, and modes the panel did not have before
+  are (Auto RTL, AutoLand, Thermal, Follow, Dock and more). Kite keeps its own names and the RC
+  lock for stick-flown modes; a mode Kite does not know, such as one from a Lua script, shows
+  the flight controller's name. Older ArduPilot versions and PX4 use the built-in list, which
+  is complete for Copter, Plane and Rover now. <a href="https://github.com/b14ckyy/Kite-GC/pull/242">#242</a></li>
+<li><strong>ArduPlane: a Takeoff button for fixed-wing planes.</strong> It switches the plane to TAKEOFF mode
+  (hold to confirm); the plane climbs to <code>TKOFF_ALT</code> and loiters. Until now a plain plane could
+  not be put into that mode from Kite. Mind that in TAKEOFF mode the motor starts as soon as
+  you arm — the panel says so while the plane waits disarmed in that mode. <a href="https://github.com/b14ckyy/Kite-GC/pull/242">#242</a></li>
+<li><strong>Stick-flown modes fold out from an "RC modes" bar</strong> instead of the small <em>Show all modes</em>
+  checkbox. The bar is finger-sized and shows <em>No RC link</em> while those modes are locked. <a href="https://github.com/b14ckyy/Kite-GC/pull/242">#242</a></li>
+<li><strong>ArduPilot: returning and landing in one place, always with a hold.</strong> A QuadPlane has
+  <strong>RTL / QRTL</strong> and <strong>Loiter QLand / QLand</strong> as two pairs of hold-to-confirm buttons instead
+  of QRTL and QLand as single clicks among the mode buttons; a fixed-wing plane on ArduPilot
+  4.7 gets <strong>AutoLand</strong> next to RTL. Among the mode buttons, SmartRTL (Copter, Rover), Auto
+  RTL and Surface (Sub) need a hold too and are listed after the ordinary flight modes. <a href="https://github.com/b14ckyy/Kite-GC/pull/242">#242</a></li>
 <li><strong>Network links: an empty host means this device.</strong> The host field starts empty with a faded
   <code>localhost</code> hint instead of a pre-filled address; leave it empty (or type <code>localhost</code>) and Kite
   connects to <code>127.0.0.1</code> — what a local simulator needs. An address saved earlier is still shown. <a href="https://github.com/b14ckyy/Kite-GC/pull/237">#237</a></li>
