@@ -261,7 +261,9 @@ inside the box of the feature release they belong to, so the notes for one relea
       background behind a notice that stays until it is done — on a hard disk or an SD card a large
       database takes minutes. It is refused while a flight is being recorded or an import is
       running, and it now works together with the automatic space reclaim instead of colliding
-      with it. [#243]
+      with it. When it is done, Kite says how much space was freed. On Android and iOS the button
+      is no longer shown: the database holds no original log files there, deleting flights already
+      gives the space back, and a compact would need the whole database in memory. [#243]
     - **INAV flash download: one unreadable log no longer ends the import.** A `.bbl` from the
       flight controller's flash holds one log per flight. If one of them was damaged, the import
       stopped there and the following flights were never imported. Kite now imports the rest and
