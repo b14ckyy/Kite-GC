@@ -250,6 +250,8 @@ inside the box of the feature release they belong to, so the notes for one relea
       (hold to confirm); the plane climbs to `TKOFF_ALT` and loiters. Until now a plain plane could
       not be put into that mode from Kite. Mind that in TAKEOFF mode the motor starts as soon as
       you arm — the panel says so while the plane waits disarmed in that mode. [#242]
+    - **Stick-flown modes fold out from an "RC modes" bar** instead of the small *Show all modes*
+      checkbox. The bar is finger-sized and shows *No RC link* while those modes are locked. [#242]
     - **ArduPilot: returning and landing in one place, always with a hold.** A QuadPlane has
       **RTL / QRTL** and **Loiter QLand / QLand** as two pairs of hold-to-confirm buttons instead
       of QRTL and QLand as single clicks among the mode buttons; a fixed-wing plane on ArduPilot

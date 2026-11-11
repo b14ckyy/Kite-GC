@@ -37,7 +37,7 @@ on a stray click.
   danger styling. It **bypasses the FC's pre-arm checks** — use it only when you understand *why* the
   normal command was refused.
 - **Stick-flown modes are locked without an RC source.** Manual / Acro / Stabilize / FBWA and similar
-  modes that need live stick input are hidden behind **"Show all modes"** and stay **disabled** until
+  modes that need live stick input are folded away under **RC modes** and stay **disabled** until
   there's a usable RC source — either a **physical transmitter** (the FC reports a valid receiver
   signal) **or active [RC control](rc-control.md)** (Kite streaming the sticks to the FC). With
   neither, the panel shows **"No RC link"** so you can't switch into a mode you couldn't actually fly.
@@ -62,8 +62,9 @@ The top of the panel reflects the live armed state:
 The current mode is shown large and centred. Below it:
 
 - A grid of **quick modes** for the common GCS-friendly modes of your vehicle.
-- **Show all modes** reveals the remaining **stick-flown** modes — selectable **only with an RC source**
-  (a connected transmitter, or active RC control — see the interlocks above).
+- The **RC modes** bar below the grid folds out the **stick-flown** modes — selectable **only with an
+  RC source** (a connected transmitter, or active RC control — see the interlocks above). While there
+  is none, the bar itself says **No RC link**.
 
 Mode colours match the rest of the app (see the [quick tour](../getting-started/quick-tour.md) legend).
 
@@ -71,7 +72,7 @@ Mode colours match the rest of the app (see the [quick tour](../getting-started/
 controller for its mode list and offers only modes from it: a mode that is not built into your
 firmware, or that the firmware has switched off (Follow without its parameter enabled, for example),
 is not shown. Kite keeps its own mode names and the RC lock. A mode Kite does not know — one added by a
-Lua script, for example — appears under **Show all modes** with the name the flight controller gives
+Lua script, for example — appears under **RC modes** with the name the flight controller gives
 it, and needs an RC source. Older ArduPilot versions and PX4 get Kite's built-in list.
 
 Not every mode of the list becomes a mode button: Guided, Takeoff, RTL, Land and ArduPlane's QRTL,
