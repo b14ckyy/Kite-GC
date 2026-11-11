@@ -245,14 +245,14 @@ inside the box of the feature release they belong to, so the notes for one relea
       are (Auto RTL, AutoLand, Thermal, Follow, Dock and more). Kite keeps its own names and the RC
       lock for stick-flown modes; a mode Kite does not know, such as one from a Lua script, shows
       the flight controller's name. Older ArduPilot versions and PX4 use the built-in list, which
-      is complete for Copter, Plane and Rover now.
+      is complete for Copter, Plane and Rover now. [#242]
     - **ArduPlane: a Takeoff button for fixed-wing planes.** It switches the plane to TAKEOFF mode
       (hold to confirm); the plane climbs to `TKOFF_ALT` and loiters. Until now a plain plane could
       not be put into that mode from Kite. Mind that in TAKEOFF mode the motor starts as soon as
-      you arm — the panel says so while the plane waits disarmed in that mode.
+      you arm — the panel says so while the plane waits disarmed in that mode. [#242]
     - **Mode buttons that return or land the vehicle are hold-to-confirm.** SmartRTL (Copter,
       Rover), QRTL and QLand (QuadPlane) and Surface (Sub) were single clicks; they now need a
-      hold like RTL and Land, and so do the new Auto RTL, AutoLand and Loiter QLand buttons.
+      hold like RTL and Land, and so do the new Auto RTL, AutoLand and Loiter QLand buttons. [#242]
     - **Network links: an empty host means this device.** The host field starts empty with a faded
       `localhost` hint instead of a pre-filled address; leave it empty (or type `localhost`) and Kite
       connects to `127.0.0.1` — what a local simulator needs. An address saved earlier is still shown. [#237]
@@ -520,6 +520,7 @@ inside the box of the feature release they belong to, so the notes for one relea
 [#232]: https://github.com/b14ckyy/Kite-GC/pull/232
 [#234]: https://github.com/b14ckyy/Kite-GC/pull/234
 [#237]: https://github.com/b14ckyy/Kite-GC/pull/237
+[#242]: https://github.com/b14ckyy/Kite-GC/pull/242
 [#143]: https://github.com/b14ckyy/Kite-GC/pull/143
 [#145]: https://github.com/b14ckyy/Kite-GC/pull/145
 [#151]: https://github.com/b14ckyy/Kite-GC/pull/151
