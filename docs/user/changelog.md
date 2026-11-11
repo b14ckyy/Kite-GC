@@ -77,6 +77,10 @@ inside the box of the feature release they belong to, so the notes for one relea
       into one track, so the track was jagged and the HDOP, satellite count and raw GPS altitude
       jumped back and forth during replay. The import now follows the receiver the flight controller
       was actually using, and switches with it if the autopilot changed receivers mid-flight.
+    - **`.tlog` import: a log that carries several vehicles is no longer mixed into one flight.** When
+      a MAVLink log held frames of more than one aircraft on the same link, their positions and
+      attitudes ended up interleaved in a single track. The import now follows the first autopilot it
+      sees and skips the others.
     ---
 
     **1.0.1**{ .kite-patch } *2026-09-13*{ .kite-badge }
