@@ -317,7 +317,7 @@ impl Clock for FakeClock {
 /// (ADR-041). Keyed per vehicle, so two recorders can never overwrite each other's session and the
 /// protected-path set covers every file a recorder owns.
 ///
-/// Lock rule: each map is locked on its own and never while another of the six is held; a
+/// Lock rule: each map / set is locked on its own and never while another of the seven is held; a
 /// recorder may lock them while holding its own recorder lock (recorder → slots, never reverse).
 #[derive(Default)]
 pub struct SessionSlots {
@@ -344,6 +344,11 @@ pub struct SessionSlots {
     /// aircraft's next recorder adopts one on its first status (`take_suspended_for`); the coordinator
     /// finalizes the rest when the group ends (`take_suspended_of_group`).
     suspended: Mutex<HashMap<PathBuf, PendingSession>>,
+    /// Temp `.ktmp` files whose commit failed in this run (Save, recovery Save, auto-commit), or which
+    /// could not be reopened to continue a flight — whichever vehicle they belong to. Their recording is
+    /// still on disk and must survive until the next start, where the orphan scan offers it again, so
+    /// the discard sweeps and the orphan scan of this run leave them alone (`protected_paths`).
+    kept: Mutex<HashSet<PathBuf>>,
 }
 
 /// Shared handle to the recording slots (see `state::AppState::sessions`).
@@ -419,18 +424,62 @@ impl SessionSlots {
     /// `None` → the only one (the single-vehicle case). Several without a vehicle is an error rather
     /// than a guess — resolving the wrong aircraft's flight cannot be undone.
     pub fn take_pending(&self, vehicle_id: Option<&str>) -> Result<Option<PendingSession>, String> {
+        Ok(self.take_pending_keyed(vehicle_id)?.map(|(_, session)| session))
+    }
+
+    /// `take_pending` with the vehicle key the session was parked under (where a failed Save puts it
+    /// back, `restore_failed_pending`).
+    pub fn take_pending_keyed(&self, vehicle_id: Option<&str>) -> Result<Option<(String, PendingSession)>, String> {
         let mut map = self.pending.lock().map_err(|_| "Pending-session lock poisoned".to_string())?;
-        match vehicle_id {
-            Some(key) => Ok(map.remove(key)),
+        let key = match vehicle_id {
+            Some(key) => key.to_string(),
             None => match map.len() {
-                0 => Ok(None),
-                1 => {
-                    let key = map.keys().next().cloned().unwrap_or_default();
-                    Ok(map.remove(&key))
-                }
-                n => Err(format!("{n} pending recording sessions — the vehicle must be named")),
+                0 => return Ok(None),
+                1 => map.keys().next().cloned().unwrap_or_default(),
+                n => return Err(format!("{n} pending recording sessions — the vehicle must be named")),
             },
+        };
+        Ok(map.remove(&key).map(|session| (key, session)))
+    }
+
+    /// A Save whose commit failed must not lose the recording: its temp path is kept (protected for the
+    /// rest of this run, whichever slot the session ends up in), and the session goes back into `key`'s
+    /// pending slot so Save can be retried — unless that slot was refilled in the meantime (a new flight
+    /// of the same vehicle), then the file stays on disk for the next start's orphan scan.
+    pub fn restore_failed_pending(&self, key: &str, session: PendingSession) {
+        self.keep_path(&session.temp_path);
+        let path = session.temp_path.clone();
+        if let Ok(mut map) = self.pending.lock() {
+            if !map.contains_key(key) {
+                map.insert(key.to_string(), session);
+                return;
+            }
         }
+        log::warn!(
+            "Pending slot of {} is taken — the unsaved recording {} stays on disk for the next start",
+            key,
+            path.display(),
+        );
+    }
+
+    /// Remember a temp session whose commit failed, or which could not be reopened (see `kept`).
+    pub fn keep_path(&self, path: &Path) {
+        if let Ok(mut set) = self.kept.lock() {
+            set.insert(path.to_path_buf());
+        }
+    }
+
+    /// A kept temp session is recording again (re-arm within grace, continue on reconnect) or has been
+    /// committed: it gets the normal auto-commit back / needs no protection any more.
+    pub fn release_kept_path(&self, path: &Path) {
+        if let Ok(mut set) = self.kept.lock() {
+            set.remove(path);
+        }
+    }
+
+    /// Whether `path` is a kept temp session (its commit failed earlier in this run).
+    pub fn is_kept(&self, path: &Path) -> bool {
+        self.kept.lock().map(|set| set.contains(path)).unwrap_or(false)
     }
 
     /// Queue a session for continue-on-reconnect.
@@ -483,21 +532,29 @@ impl SessionSlots {
     /// Commit a session taken out of its slot (see `commit_pending_session`) with its temp file
     /// registered as live for the whole commit — otherwise it sits in no protected set while the main
     /// DB copies it, and a concurrent discard sweep (e.g. another vehicle's Discard) could delete it.
-    pub fn commit_protected(&self, session: PendingSession) -> Result<i64, String> {
-        let path = session.temp_path.clone();
-        self.set_live(None, Some(&path));
+    /// A failed commit keeps the path (before it leaves the live set) and the caller still owns the
+    /// session; a successful one releases a path kept by an earlier failure.
+    pub fn commit_protected(&self, session: &PendingSession) -> Result<i64, String> {
+        let path = &session.temp_path;
+        self.set_live(None, Some(path));
         let result = commit_pending_session(session);
-        self.set_live(Some(&path), None);
+        match &result {
+            Ok(_) => self.release_kept_path(path),
+            Err(_) => self.keep_path(path),
+        }
+        self.set_live(Some(path), None);
         result
     }
 
     /// Every temp file that belongs to a live workflow in this process — being written, pending
-    /// Save/Discard, queued for continue-on-reconnect, a finalized or suspended group member. The
-    /// orphan scan and the discard sweeps must never touch these.
+    /// Save/Discard, queued for continue-on-reconnect, a finalized or suspended group member, kept after
+    /// a failed commit. The orphan scan and the discard sweeps must never touch these.
     pub fn protected_paths(&self) -> Vec<PathBuf> {
         let mut keep: Vec<PathBuf> = Vec::new();
-        if let Ok(set) = self.live.lock() {
-            keep.extend(set.iter().cloned());
+        for set in [&self.live, &self.kept] {
+            if let Ok(set) = set.lock() {
+                keep.extend(set.iter().cloned());
+            }
         }
         for map in [&self.pending, &self.resume] {
             if let Ok(map) = map.lock() {
@@ -634,8 +691,9 @@ fn file_key(vehicle_key: &str) -> String {
 
 /// Commit a pending session into the main DB: insert the finalized flight, copy the temp
 /// `telemetry_records`, remove the temp file, and spawn weather/geocode enrichment. Returns the new
-/// flight id. Shared by the Save command and the recorder's grace-lapsed re-arm path.
-pub fn commit_pending_session(session: PendingSession) -> Result<i64, String> {
+/// flight id. Shared by the Save command and the recorder's grace-lapsed re-arm path. On failure the
+/// session is untouched (the commit runs in one transaction) and the caller still owns it.
+pub fn commit_pending_session(session: &PendingSession) -> Result<i64, String> {
     let conn = db::open_database(&session.db_path)
         .map_err(|e| format!("Failed to open flight DB for commit: {}", e))?;
     let flight_id = db::commit_session_to_main(&conn, &session.temp_path, &session.flight)
@@ -1099,13 +1157,19 @@ impl FlightRecorder {
     }
 
     /// Commit a parked session now (auto-commit mode) and tell the frontend to refresh the logbook.
+    /// A failed commit keeps the file (`commit_protected`) for the next start's orphan scan; the
+    /// session does not go back into the slot — the lapsed-grace check in `on_status` would retry it on
+    /// the telemetry thread with every status.
     fn auto_commit_now(&self, p: PendingSession) {
-        match self.slots.commit_protected(p) {
+        match self.slots.commit_protected(&p) {
             Ok(flight_id) => {
                 log::info!("Flight auto-committed (secondary vehicle): id {}", flight_id);
                 self.emit("flight-recording-autocommitted", FlightRecordingEvent { flight_id });
             }
-            Err(e) => log::error!("Auto-commit failed: {}", e),
+            Err(e) => log::error!(
+                "Auto-commit failed: {} — recording {} kept for the next start",
+                e, p.temp_path.display(),
+            ),
         }
     }
 
@@ -1789,17 +1853,36 @@ impl FlightRecorder {
                 self.resume_session(p);
                 return;
             }
-            // Grace lapsed → auto-commit the previous flight, then start a fresh session (with a fix).
+            // Grace lapsed → auto-commit the previous flight, then start a fresh session (with a fix). A
+            // session whose commit already failed is not retried here (attended or unattended alike): the
+            // database is likely still busy, and blocking the telemetry thread at takeoff would cost the
+            // new flight's first seconds. Its file stays protected (kept) and the next start offers it again.
+            if self.slots.is_kept(&p.temp_path) {
+                log::warn!(
+                    "Re-arm: recording {} failed to save before — not retried now, offered at the next start",
+                    p.temp_path.display(),
+                );
+                drop(p);
+                self.start_armed_session();
+                return;
+            }
             if self.auto_commit {
                 self.auto_commit_now(p);
                 self.start_armed_session();
                 return;
             }
-            match self.slots.commit_protected(p) {
+            match self.slots.commit_protected(&p) {
                 Ok(flight_id) => {
                     self.emit("flight-recording-committed", FlightRecordingEvent { flight_id });
                 }
-                Err(e) => log::error!("Auto-commit on re-arm failed: {}", e),
+                Err(e) => {
+                    // The new flight takes the pending slot at its disarm: the unsaved file stays on
+                    // disk (kept by `commit_protected`) for the next start's orphan scan instead.
+                    log::error!(
+                        "Auto-commit on re-arm failed: {} — recording {} kept for the next start",
+                        e, p.temp_path.display(),
+                    );
+                }
             }
         }
         self.start_armed_session();
@@ -1819,14 +1902,18 @@ impl FlightRecorder {
             Ok(c) => c,
             Err(e) => {
                 log::error!(
-                    "Failed to reopen temp session {}: {} — starting a fresh one",
+                    "Failed to reopen temp session {}: {} — kept for the next start, starting a fresh one",
                     p.temp_path.display(), e,
                 );
+                // Kept before it leaves the live set: a sweep in between must not find it unprotected.
+                self.slots.keep_path(&p.temp_path);
                 self.slots.set_live(Some(&p.temp_path), None);
                 self.published_path = None;
                 return false;
             }
         };
+        // Recording again (live): a kept session gets the normal auto-commit back.
+        self.slots.release_kept_path(&p.temp_path);
         let mut events = db::read_session_events(&conn).unwrap_or_else(|e| {
             log::warn!("Cannot read the events of {}: {}", p.temp_path.display(), e);
             Vec::new()
@@ -3677,5 +3764,175 @@ mod tests {
         );
         assert_eq!(copied[0].source.as_deref(), Some("live"));
         assert_eq!(db::list_flight_group_member_ids(&main, "g1").unwrap(), [id]);
+    }
+
+    // ── A failed commit keeps the recording (PR #233, merged up from 1.0.x) ──────────────────────────
+
+    /// A main-DB path that cannot be opened on any OS: its folder is a plain file.
+    fn unreachable_db(rig: &Rig) -> PathBuf {
+        let blocker = rig.dir.join("not-a-folder");
+        std::fs::write(&blocker, b"x").unwrap();
+        blocker.join("flights.db")
+    }
+
+    /// Point `key`'s pending session at another main DB (keeps it in its slot).
+    fn redirect_pending(slots: &SessionSlots, key: &str, db_path: PathBuf) {
+        let mut p = slots.take_pending_for(key).expect("a pending session");
+        p.db_path = db_path;
+        slots.park_pending(key, p);
+    }
+
+    /// A single flight with a 3D fix: arm, two seconds, disarm. Returns its temp file.
+    fn fly_and_disarm(rig: &Rig, rec: &mut FlightRecorder) -> PathBuf {
+        rec.on_gps(&gps(2, 48.1, 11.5));
+        rec.on_status(&status(false));
+        rec.on_status(&status(true));
+        let path = active_path(rec);
+        rig.advance_s(2);
+        rec.on_gps(&gps(2, 48.1, 11.5));
+        rec.on_status(&status(false));
+        assert!(rec.active_flight.is_none());
+        path
+    }
+
+    /// A commit that fails (the main DB cannot be opened) leaves the recording alone and keeps its path
+    /// protected; the same session commits once the database is reachable, which releases the path.
+    #[test]
+    fn failed_commit_keeps_the_session_and_its_temp_file() {
+        let rig = Rig::new("failed-commit");
+        let temp_path = rig.dir.join("sessions").join("active_test.ktmp");
+        write_ktmp(&temp_path, None, None, &[row(0, 48.0, 5.0, 10), row(100, 48.001, 6.0, 20)], &[]);
+        let (mut session, _) = summarize_temp_session(temp_path.clone(), unreachable_db(&rig), rig.clock.as_ref()).unwrap();
+
+        assert!(rig.slots.commit_protected(&session).is_err());
+        assert!(temp_path.exists(), "a failed commit must not touch the recording");
+        assert!(rig.slots.is_kept(&temp_path));
+        assert!(rig.slots.protected_paths().contains(&temp_path), "kept after it left the live set");
+
+        let main_db = rig.dir.join("main").join("flights.db");
+        session.db_path = main_db.clone();
+        let flight_id = rig.slots.commit_protected(&session).expect("the retry commits");
+        assert!(!temp_path.exists(), "a successful commit removes the temp file");
+        assert!(!rig.slots.is_kept(&temp_path), "a successful commit releases the kept path");
+        let conn = db::open_database(&main_db).unwrap();
+        let rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM telemetry_records WHERE flight_id = ?1", [flight_id], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 2);
+    }
+
+    /// A failed Save puts the session back into ITS vehicle's empty slot; a refilled slot is left as it
+    /// is. Either way the temp path is kept.
+    #[test]
+    fn restore_failed_pending_puts_it_back_or_keeps_the_path() {
+        let slots = SessionSlots::default();
+        slots.restore_failed_pending("L1:S1", pending("a.ktmp", "A", None, 0));
+        slots.restore_failed_pending("L1:S2", pending("c.ktmp", "C", None, 0));
+        slots.restore_failed_pending("L1:S1", pending("b.ktmp", "A", None, 10));
+        assert_eq!(
+            slots.take_pending_for("L1:S1").map(|s| s.temp_path),
+            Some(PathBuf::from("a.ktmp")),
+            "a session already in the slot is not displaced",
+        );
+        assert_eq!(slots.take_pending_for("L1:S2").map(|s| s.temp_path), Some(PathBuf::from("c.ktmp")));
+        let mut keep: Vec<String> = slots.protected_paths().iter().map(|p| p.to_string_lossy().to_string()).collect();
+        keep.sort();
+        assert_eq!(keep, ["a.ktmp", "b.ktmp", "c.ktmp"], "all three stay protected out of their slots");
+    }
+
+    /// The kept set itself — what the grace-lapsed re-arm in `arm_single` decides by (a kept session is
+    /// not committed at takeoff; one that never failed is auto-committed as before).
+    #[test]
+    fn kept_set_tells_a_failed_session_from_a_fresh_one() {
+        let slots = SessionSlots::default();
+        let (failed, fresh) = (PathBuf::from("sessions/a.ktmp"), PathBuf::from("sessions/b.ktmp"));
+        slots.keep_path(&failed);
+        slots.keep_path(&failed);
+        assert!(slots.is_kept(&failed), "failed before → keep without trying");
+        assert!(!slots.is_kept(&fresh), "never failed → auto-commit");
+        assert_eq!(slots.protected_paths(), std::slice::from_ref(&failed), "kept once");
+        slots.release_kept_path(&failed);
+        assert!(!slots.is_kept(&failed), "recording again → auto-commit is back");
+    }
+
+    /// A session whose Save failed is not committed again by a grace-lapsed re-arm — even when the
+    /// database is reachable by then: the file stays on disk and protected, the new flight starts.
+    #[test]
+    fn rearm_after_grace_does_not_recommit_a_kept_session() {
+        let rig = Rig::new("rearm-kept");
+        let (mut rec, emitted) = rig.recorder("L1:S1", fc("Solo", None));
+        let path = fly_and_disarm(&rig, &mut rec);
+        // The End-Flight Save fails …
+        redirect_pending(&rig.slots, "L1:S1", unreachable_db(&rig));
+        let (key, p) = rig.slots.take_pending_keyed(Some("L1:S1")).unwrap().unwrap();
+        assert!(rig.slots.commit_protected(&p).is_err());
+        rig.slots.restore_failed_pending(&key, p);
+        // … the database is free again, but the re-arm comes first.
+        redirect_pending(&rig.slots, "L1:S1", rig.dir.join("flights.db"));
+
+        rig.advance_s(6);
+        rec.on_gps(&gps(2, 48.1, 11.5));
+        rec.on_status(&status(true));
+        assert!(!emitted.lock().unwrap().iter().any(|e| e == "flight-recording-committed"), "no commit at takeoff");
+        assert!(path.exists());
+        assert!(rig.slots.protected_paths().contains(&path));
+        assert!(rig.slots.take_pending(None).unwrap().is_none(), "the slot is free for the new flight");
+        assert_ne!(active_path(&rec), path);
+    }
+
+    /// A grace-lapsed re-arm whose auto-commit fails keeps the previous flight's file protected.
+    #[test]
+    fn rearm_after_grace_keeps_a_session_whose_auto_commit_fails() {
+        let rig = Rig::new("rearm-fail");
+        let (mut rec, emitted) = rig.recorder("L1:S1", fc("Solo", None));
+        let path = fly_and_disarm(&rig, &mut rec);
+        redirect_pending(&rig.slots, "L1:S1", unreachable_db(&rig));
+
+        rig.advance_s(6);
+        rec.on_gps(&gps(2, 48.1, 11.5));
+        rec.on_status(&status(true));
+        assert!(!emitted.lock().unwrap().iter().any(|e| e == "flight-recording-committed"));
+        assert!(path.exists());
+        assert!(rig.slots.is_kept(&path));
+        assert!(rig.slots.protected_paths().contains(&path));
+        assert_ne!(active_path(&rec), path);
+    }
+
+    /// A secondary vehicle's auto-commit that fails keeps the file protected and does not park it again
+    /// (no retry on every status of the telemetry thread).
+    #[test]
+    fn secondary_auto_commit_failure_keeps_the_file() {
+        let rig = Rig::new("secondary-fail");
+        let (mut rec, emitted) = rig.recorder("L1:S2", fc("Wing", None));
+        rec.set_auto_commit(true);
+        let path = fly_and_disarm(&rig, &mut rec);
+        redirect_pending(&rig.slots, "L1:S2", unreachable_db(&rig));
+
+        rig.advance_s(6);
+        rec.on_status(&status(false));
+        assert!(!emitted.lock().unwrap().iter().any(|e| e == "flight-recording-autocommitted"));
+        assert!(rig.slots.take_pending_for("L1:S2").is_none(), "not parked again");
+        assert!(path.exists());
+        assert!(rig.slots.is_kept(&path));
+        assert!(rig.slots.protected_paths().contains(&path));
+    }
+
+    /// A re-arm within grace continues a kept session (its Save failed): it is live again and gets the
+    /// normal auto-commit back.
+    #[test]
+    fn rearm_within_grace_releases_a_kept_session() {
+        let rig = Rig::new("rearm-release");
+        let (mut rec, _emitted) = rig.recorder("L1:S1", fc("Solo", None));
+        let path = fly_and_disarm(&rig, &mut rec);
+        redirect_pending(&rig.slots, "L1:S1", unreachable_db(&rig));
+        let (key, p) = rig.slots.take_pending_keyed(None).unwrap().unwrap();
+        assert!(rig.slots.commit_protected(&p).is_err());
+        rig.slots.restore_failed_pending(&key, p);
+
+        rig.advance_s(3);
+        rec.on_status(&status(true));
+        assert_eq!(active_path(&rec), path);
+        assert!(!rig.slots.is_kept(&path));
+        assert!(rig.slots.protected_paths().contains(&path), "live again");
     }
 }

@@ -1816,7 +1816,11 @@
     "uidConflictNew": "Create new vehicle",
     "uidConflictLeave": "Leave unassigned",
     "uidMovesFrom": "This FC ID is stored on \"{name}\" now; storing or replacing it here removes it there.",
-    "vehicleUnmatchedNoId": "Not in the vehicle library — pick a vehicle if you like."
+    "vehicleUnmatchedNoId": "Not in the vehicle library — pick a vehicle if you like.",
+    "saveFailedTitle": "Flight not saved",
+    "saveFailedMessage": "The flight could not be saved to the logbook:\n{error}\n\nRetry now, or cancel: the recording is kept and Kite offers it again at the next start.",
+    "saveRetry": "Retry",
+    "saveKeptMessage": "The recording could not be saved to the logbook:\n{error}\n\nIt is kept and Kite offers it again at the next start."
   },
   "recovery": {
     "title": "Unfinished recording found",

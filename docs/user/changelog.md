@@ -389,6 +389,14 @@ inside the box of the feature release they belong to, so the notes for one relea
       a MAVLink log held frames of more than one aircraft on the same link, their positions and
       attitudes ended up interleaved in a single track. The import now follows the first autopilot it
       sees and skips the others.
+    - **A flight that could not be saved was dropped without a word.** If saving a recorded flight
+      failed — the database busy with a long import, a full disk — the post-flight summary simply
+      closed: no error, no logbook entry, and the notes and battery serials you had entered were
+      gone. The recording itself was still on disk, but the next *Discard Recording* in the same
+      session deleted it. Now Kite shows the error and offers **Retry**; if you cancel, the recording
+      is kept and offered again at the next start. The same holds for *Save* in the "connection lost"
+      and "unfinished recording" prompts. The automatic save when you arm again keeps the recording
+      the same way, without a message, and offers it at the next start.
     ---
 
     **1.0.1**{ .kite-patch } *2026-09-13*{ .kite-badge }

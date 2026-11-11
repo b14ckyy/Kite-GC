@@ -1322,17 +1322,29 @@ pub fn flightlog_find_linkable(
 /// Commit the pending live-recording session into the main DB (the End-Flight dialog's **Save**).
 /// Returns the new flight id so the frontend can link the flown mission + battery/notes.
 /// `vehicle_id` names the vehicle whose session it is (the `vehicleId` of its `flight-recording-*`
-/// event); without it the only pending session is taken (an error when there are several).
+/// event); without it the only pending session is taken (an error when there are several). A failed
+/// commit puts the session back into its vehicle's slot (Save can be retried) and keeps its temp file
+/// protected.
 #[tauri::command]
 pub fn flightlog_commit_pending_session(
     vehicle_id: Option<String>,
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<i64, String> {
-    let session = state
+    commit_pending_in(&state, vehicle_id.as_deref())
+}
+
+/// `flightlog_commit_pending_session` on the plain app state (testable without a Tauri runtime).
+fn commit_pending_in(state: &crate::state::AppState, vehicle_id: Option<&str>) -> Result<i64, String> {
+    let (key, session) = state
         .sessions
-        .take_pending(vehicle_id.as_deref())?
+        .take_pending_keyed(vehicle_id)?
         .ok_or_else(|| "No pending recording session to commit".to_string())?;
-    state.sessions.commit_protected(session)
+    let result = state.sessions.commit_protected(&session);
+    if let Err(e) = &result {
+        log::error!("Save failed — recording {} kept: {}", session.temp_path.display(), e);
+        state.sessions.restore_failed_pending(&key, session);
+    }
+    result
 }
 
 /// Discard the pending live-recording session (the End-Flight dialog's **Discard Recording**) —
@@ -1539,9 +1551,9 @@ pub fn flightlog_scratch_clear(db_path: Option<String>) {
 
 /// Temp sessions that belong to a live workflow in this process — every file a recorder (primary or
 /// secondary, any link) is writing, every pending (awaiting Save/Discard or the re-arm grace) one,
-/// every continue-on-reconnect one, and every group-member one (finalized, awaiting its group's store
-/// prompt, or suspended while its link is gone). The orphan scan and the discard sweeps must never
-/// touch these.
+/// every continue-on-reconnect one, every group-member one (finalized, awaiting its group's store
+/// prompt, or suspended while its link is gone), and every one whose commit failed in this run (kept
+/// for the next start). The orphan scan and the discard sweeps must never touch these.
 fn protected_temp_paths(state: &crate::state::AppState) -> Vec<std::path::PathBuf> {
     state.sessions.protected_paths()
 }
@@ -1659,19 +1671,27 @@ pub fn flightlog_recover_discard(
 }
 
 /// Recovery prompt → **Save Incomplete**: reconstruct the flight from the orphan and commit it to
-/// the main DB (finalized with `end_time` = last sample). Returns the new flight id.
+/// the main DB (finalized with `end_time` = last sample). Returns the new flight id. On failure the
+/// temp file is kept (no sweep of this run deletes it; the orphan scan skips it until the next start).
 #[tauri::command]
 pub fn flightlog_recover_save_incomplete(
     temp_path: String,
     db_path: Option<String>,
+    state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<i64, String> {
+    let path = std::path::PathBuf::from(&temp_path);
     let main_db = resolve_main_db_path(&db_path.unwrap_or_default());
-    let (session, _count) = crate::flightlog::recorder::summarize_temp_session(
-        std::path::PathBuf::from(&temp_path),
+    let result = crate::flightlog::recorder::summarize_temp_session(
+        path.clone(),
         main_db,
         &crate::flightlog::recorder::SystemClock,
-    )?;
-    crate::flightlog::recorder::commit_pending_session(session)
+    )
+    .and_then(|(session, _count)| crate::flightlog::recorder::commit_pending_session(&session));
+    if let Err(e) = &result {
+        log::error!("Recovery: saving {} failed — kept for the next start: {}", path.display(), e);
+        state.sessions.keep_path(&path);
+    }
+    result
 }
 
 /// Recovery prompt → **Continue on Reconnect**: load the orphan into the resume queue; the
@@ -1690,4 +1710,88 @@ pub fn flightlog_recover_continue(
     )?;
     // A recovered orphan belongs to no connected vehicle yet — queued under its own path.
     state.sessions.put_resume(temp_path, session)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A temp session whose commit failed in this run is protected: the discard sweep keeps it.
+    #[test]
+    fn discard_sweep_keeps_a_session_whose_commit_failed() {
+        let dir = std::env::temp_dir().join(format!("kite-kept-sweep-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (kept, straggler) = (dir.join("active_kept.ktmp"), dir.join("active_old.ktmp"));
+        for p in [&kept, &straggler] {
+            drop(db::open_temp_session(p).unwrap());
+        }
+        let state = crate::state::AppState::new();
+        state.sessions.keep_path(&kept);
+
+        assert_eq!(db::sweep_temp_sessions(&dir, &protected_temp_paths(&state)), 1);
+        assert!(kept.exists(), "the unsaved recording must survive the sweep");
+        assert!(!straggler.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A failed Save puts the session back into its vehicle's slot (another vehicle's pending session
+    /// is untouched) and keeps its path protected; a retry against a reachable database commits it and
+    /// empties the slot.
+    #[test]
+    fn failed_save_goes_back_into_the_vehicle_slot_and_a_retry_commits_it() {
+        let dir = std::env::temp_dir().join(format!("kite-commit-retry-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let temp_path = dir.join("sessions").join("active_test.ktmp");
+        {
+            let conn = db::open_temp_session(&temp_path).unwrap();
+            db::write_session_meta(
+                &conn, &chrono::Utc::now(), "TestCraft", "INAV", "8.0.0", "TEST", 1, None, "MSP", None, None,
+            )
+            .unwrap();
+            conn.execute_batch(
+                "INSERT INTO telemetry_records (flight_id, timestamp_ms) VALUES (0, 0), (0, 100);",
+            )
+            .unwrap();
+        }
+        // The main DB's folder is a plain file: opening it fails on every OS.
+        let blocker = dir.join("not-a-folder");
+        std::fs::write(&blocker, b"x").unwrap();
+        let summarize = |db: std::path::PathBuf| {
+            crate::flightlog::recorder::summarize_temp_session(
+                temp_path.clone(),
+                db,
+                &crate::flightlog::recorder::SystemClock,
+            )
+            .unwrap()
+            .0
+        };
+        let state = crate::state::AppState::new();
+        state.sessions.park_pending("L1:S1", summarize(blocker.join("flights.db")));
+        // A second vehicle's pending session (never committed here: its file is not touched).
+        let mut other = summarize(blocker.join("flights.db"));
+        other.temp_path = dir.join("sessions").join("other.ktmp");
+        state.sessions.park_pending("L2:S1", other);
+
+        assert!(commit_pending_in(&state, Some("L1:S1")).is_err());
+        assert!(temp_path.exists());
+        assert!(protected_temp_paths(&state).contains(&temp_path));
+        let back = state.sessions.take_pending_for("L1:S1").expect("the session is back in its vehicle's slot");
+        assert_eq!(back.temp_path, temp_path);
+        assert!(state.sessions.has_pending_for("L2:S1"), "the other vehicle's session is untouched");
+
+        let mut back = back;
+        back.db_path = dir.join("main").join("flights.db");
+        state.sessions.park_pending("L1:S1", back);
+        assert!(commit_pending_in(&state, Some("L1:S1")).is_ok());
+        assert!(!state.sessions.has_pending_for("L1:S1"), "the slot is empty after the commit");
+        assert!(!temp_path.exists());
+        assert!(!protected_temp_paths(&state).contains(&temp_path), "released after the commit");
+        assert!(
+            commit_pending_in(&state, Some("L1:S1")).unwrap_err().contains("No pending recording session to commit"),
+            "the frontend's nothing-to-save text is unchanged",
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

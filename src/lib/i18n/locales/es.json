@@ -1816,7 +1816,11 @@
     "uidConflictNew": "Crear vehículo nuevo",
     "uidConflictLeave": "Dejar sin asignar",
     "uidMovesFrom": "Este ID de la FC está guardado ahora en \"{name}\"; guardarlo o sustituirlo aquí lo quita de allí.",
-    "vehicleUnmatchedNoId": "No está en la biblioteca de vehículos — elige un vehículo si quieres."
+    "vehicleUnmatchedNoId": "No está en la biblioteca de vehículos — elige un vehículo si quieres.",
+    "saveFailedTitle": "Vuelo no guardado",
+    "saveFailedMessage": "No se pudo guardar el vuelo en la bitácora:\n{error}\n\nReinténtalo ahora o cancela: la grabación se conserva y Kite volverá a ofrecerla en el próximo inicio.",
+    "saveRetry": "Reintentar",
+    "saveKeptMessage": "No se pudo guardar la grabación en la bitácora:\n{error}\n\nSe conserva y Kite volverá a ofrecerla en el próximo inicio."
   },
   "recovery": {
     "title": "Se encontró una grabación sin terminar",

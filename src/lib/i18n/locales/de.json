@@ -1816,7 +1816,11 @@
     "uidConflictNew": "Neues Fahrzeug anlegen",
     "uidConflictLeave": "Ohne Fahrzeug lassen",
     "uidMovesFrom": "Diese FC-ID ist derzeit bei „{name}“ gespeichert; speichern oder ersetzen entfernt sie dort.",
-    "vehicleUnmatchedNoId": "Nicht in der Fahrzeugbibliothek — bei Bedarf ein Fahrzeug wählen."
+    "vehicleUnmatchedNoId": "Nicht in der Fahrzeugbibliothek — bei Bedarf ein Fahrzeug wählen.",
+    "saveFailedTitle": "Flug nicht gespeichert",
+    "saveFailedMessage": "Der Flug konnte nicht im Logbuch gespeichert werden:\n{error}\n\nJetzt erneut versuchen oder abbrechen: Die Aufnahme bleibt erhalten und Kite bietet sie beim nächsten Start wieder an.",
+    "saveRetry": "Erneut versuchen",
+    "saveKeptMessage": "Die Aufnahme konnte nicht im Logbuch gespeichert werden:\n{error}\n\nSie bleibt erhalten und Kite bietet sie beim nächsten Start wieder an."
   },
   "recovery": {
     "title": "Unvollständige Aufnahme gefunden",
