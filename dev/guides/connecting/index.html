@@ -2175,8 +2175,9 @@ see <strong><a href="../../troubleshooting/connection/">Troubleshooting → Conn
 forwarding to your PC.</p>
 <ol>
 <li><strong>Transport</strong> → <strong>TCP</strong> or <strong>UDP</strong>.</li>
-<li><strong>Host</strong> — the IP address or hostname to reach (e.g. <code>127.0.0.1</code> for a local simulator, or the
-   bridge's LAN address).</li>
+<li><strong>Host</strong> — the IP address to reach (e.g. the bridge's LAN address). Left empty, the field shows a
+   faded <code>localhost</code> and Kite connects to <strong>this device</strong> itself (<code>127.0.0.1</code>), which is what a local
+   simulator needs.</li>
 <li><strong>Port</strong> — the network port.</li>
 </ol>
 <p>Kite fills in the usual default and swaps it when you change either the protocol or the transport:</p>

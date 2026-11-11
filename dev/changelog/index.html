@@ -1928,6 +1928,10 @@ log that failed. <a href="https://github.com/b14ckyy/Kite-GC/pull/234">#234</a><
 </ul>
 <p><strong>Improved</strong></p>
 <ul>
+<li><strong>Network links: an empty host means this device.</strong> The host field starts empty with a faded
+  <code>localhost</code> hint instead of a pre-filled address; leave it empty (or type <code>localhost</code>) and Kite
+  connects to <code>127.0.0.1</code> — what a local simulator needs. An address saved earlier is still shown. <a href="https://github.com/b14ckyy/Kite-GC/pull/237">#237</a></li>
+<li><strong>The second battery widget is labelled "BAT 2".</strong> <a href="https://github.com/b14ckyy/Kite-GC/pull/237">#237</a></li>
 <li><strong>System messages default to <em>Warning</em>, and a new <em>Debug</em> level shows the firmware's
   developer chatter.</strong> ArduPilot sends some texts at its DEBUG severity — "Sending unknown
   message (44)" twice a second when a ground station in the loop asks for a message the board's
