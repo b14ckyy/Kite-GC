@@ -868,6 +868,7 @@
     "dbBackupDelete": "Изтриване",
     "compactDbHint": "Дефрагментира базата данни, за да освободи място. Изтрива автоматично вече свободното място — това рядко е необходимо.",
     "compactDbDone": "Компактира базата данни ({size}).",
+    "compactDbFreed": "Освободени: {freed}.",
     "rawLogPath": "Папка за необработени логове",
     "blackboxDecoder": "Декодер INAV Blackbox",
     "bbDecoderMissing": "Не е инсталиран",

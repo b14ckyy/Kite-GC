@@ -1016,12 +1016,12 @@ const COMPACT_RECORDING_ERROR: &str =
 /// off the main thread (minutes on a slow drive) and is single flight per database file
 /// (`db::compact_database`, `compact-running:` error). Refused while a flight is being recorded: the
 /// VACUUM holds the database for its whole duration and the recording's save would run into it.
-/// Returns the resulting database size in bytes.
+/// Returns the database size before and after, in bytes.
 #[tauri::command]
 pub async fn flightlog_compact_db(
     db_path: Option<String>,
     state: tauri::State<'_, crate::state::AppState>,
-) -> Result<i64, String> {
+) -> Result<db::CompactStats, String> {
     compact_refusal(&state)?;
     let db_path = db_path.unwrap_or_default();
     tauri::async_runtime::spawn_blocking(move || {

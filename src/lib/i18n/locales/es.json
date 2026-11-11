@@ -1045,6 +1045,7 @@
     "dbBackupDelete": "Eliminar",
     "compactDbHint": "Desfragmenta la base de datos para recuperar espacio. Al eliminar datos, el espacio ya se libera automáticamente; rara vez hace falta.",
     "compactDbDone": "Base de datos compactada ({size}).",
+    "compactDbFreed": "Se liberaron {freed}.",
     "compactDbRunningTitle": "Compactando la base de datos…",
     "compactDbRunningHint": "Kite está reconstruyendo la base de datos de vuelos. En una unidad lenta (disco duro, tarjeta SD) esto puede tardar varios minutos. No cierres Kite hasta que termine.",
     "compactDbElapsed": "Tiempo transcurrido: {time}",

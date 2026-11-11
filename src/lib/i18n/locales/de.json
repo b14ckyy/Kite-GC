@@ -1045,6 +1045,7 @@
     "dbBackupDelete": "Löschen",
     "compactDbHint": "Defragmentiert die Datenbank, um Speicher freizugeben. Löschungen geben den Platz bereits automatisch frei — selten nötig.",
     "compactDbDone": "Datenbank komprimiert ({size}).",
+    "compactDbFreed": "{freed} freigegeben.",
     "compactDbRunningTitle": "Datenbank wird komprimiert …",
     "compactDbRunningHint": "Kite baut die Flugdatenbank neu auf. Auf einem langsamen Laufwerk (Festplatte, SD-Karte) kann das mehrere Minuten dauern. Bitte Kite nicht schließen, bis der Vorgang abgeschlossen ist.",
     "compactDbElapsed": "Vergangene Zeit: {time}",

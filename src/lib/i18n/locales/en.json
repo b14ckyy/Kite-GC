@@ -1045,6 +1045,7 @@
     "dbBackupDelete": "Delete",
     "compactDbHint": "Defragment the database to reclaim space. Deletes already free space automatically — this is rarely needed.",
     "compactDbDone": "Database compacted ({size}).",
+    "compactDbFreed": "{freed} freed.",
     "compactDbRunningTitle": "Compacting the database…",
     "compactDbRunningHint": "Kite is rebuilding the flight database. On a slow drive (hard disk, SD card) this can take several minutes. Please do not close Kite until it is done.",
     "compactDbElapsed": "Elapsed: {time}",

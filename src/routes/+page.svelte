@@ -2247,9 +2247,9 @@
       return;
     }
     dbCompacting = true;
-    let sizeBytes: number;
+    let stats: Awaited<ReturnType<typeof logbookCtrl.compactDb>>;
     try {
-      sizeBytes = await logbookCtrl.compactDb(flightLogDbPath);
+      stats = await logbookCtrl.compactDb(flightLogDbPath);
     } catch (e) {
       // `compact-recording:` / `compact-running:` are stable markers of flightlog_compact_db.
       const msg = String(e);
@@ -2260,8 +2260,15 @@
     } finally {
       dbCompacting = false;
     }
-    const mb = (sizeBytes / (1024 * 1024)).toFixed(1);
-    await showInfo($t('settings.compactDb'), $t('settings.compactDbDone', { values: { size: `${mb} MB` } }));
+    const mb = (bytes: number) => `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    const freed = Math.max(0, stats.size_before - stats.size_after);
+    await showInfo(
+      $t('settings.compactDb'),
+      [
+        $t('settings.compactDbDone', { values: { size: mb(stats.size_after) } }),
+        $t('settings.compactDbFreed', { values: { freed: mb(freed) } }),
+      ].join('\n'),
+    );
   }
 
   async function exportTrack() {

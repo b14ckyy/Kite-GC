@@ -488,9 +488,9 @@ pub(crate) fn begin_compact(conn: &Connection) -> Result<CompactGuard, String> {
 /// (cost ∝ DB size, minutes for a GB-sized archive on a hard disk or SD card); exposed only as the
 /// explicit "Compact Database" maintenance action. Routine deletes use incremental_vacuum instead (see
 /// `open_database`). Single flight per file, and no background reclaim runs on the file meanwhile
-/// (`begin_compact`). Sets `conn`'s busy timeout to `COMPACT_BUSY_TIMEOUT`. Returns the resulting
-/// database size in bytes.
-pub fn compact_database(conn: &Connection) -> Result<i64, String> {
+/// (`begin_compact`). Sets `conn`'s busy timeout to `COMPACT_BUSY_TIMEOUT`. Returns the database
+/// size before and after.
+pub fn compact_database(conn: &Connection) -> Result<CompactStats, String> {
     let _guard = begin_compact(conn)?;
     let size = |conn: &Connection| -> SqlResult<i64> {
         let page_count: i64 = conn.query_row("PRAGMA page_count", [], |r| r.get(0))?;
@@ -514,7 +514,15 @@ pub fn compact_database(conn: &Connection) -> Result<i64, String> {
         before as f64 / 1_048_576.0,
         after as f64 / 1_048_576.0
     );
-    Ok(after)
+    Ok(CompactStats { size_before: before, size_after: after })
+}
+
+/// The database's size (pages × page size, bytes) before and after a compact — the difference is what
+/// the compact gave back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct CompactStats {
+    pub size_before: i64,
+    pub size_after: i64,
 }
 
 /// Resolve the database file path based on settings.
@@ -5672,10 +5680,11 @@ mod tests {
         let file = conn.path().unwrap().to_string();
         assert!(reclaim_running(&file), "the reclaim must be running for this test to mean anything");
         let page_size: i64 = conn.query_row("PRAGMA page_size", [], |r| r.get(0)).unwrap();
-        let size = compact_database(&conn).expect("the compact completes");
+        let stats = compact_database(&conn).expect("the compact completes");
         assert_eq!(freelist_pages(&conn).unwrap(), 0);
         let pages: i64 = conn.query_row("PRAGMA page_count", [], |r| r.get(0)).unwrap();
-        assert_eq!(size, pages * page_size);
+        assert_eq!(stats.size_after, pages * page_size);
+        assert!(stats.size_before > stats.size_after, "the compact reports what it gave back: {stats:?}");
         assert!(pages < 1024, "the dropped table's pages are gone ({pages} pages left)");
         assert!(!reclaim_running(&file) && !compact_running_on(&file));
         drop(conn);
@@ -5728,7 +5737,7 @@ mod tests {
         eprintln!(
             "compact: {} ms, logical size {:.1} MB; on disk now: db {:.1} MB, wal {:.1} MB",
             started.elapsed().as_millis(),
-            size as f64 / 1_048_576.0,
+            size.size_after as f64 / 1_048_576.0,
             mb(&work),
             mb(&wal)
         );
