@@ -239,6 +239,20 @@ inside the box of the feature release they belong to, so the notes for one relea
 
     **Improved**
 
+    - **ArduPilot: the control panel offers the modes your flight controller really has.** From
+      ArduPilot 4.7 on, Kite reads the mode list from the flight controller: modes missing from your
+      firmware or switched off there are no longer offered, and modes the panel did not have before
+      are (Auto RTL, AutoLand, Thermal, Follow, Dock and more). Kite keeps its own names and the RC
+      lock for stick-flown modes; a mode Kite does not know, such as one from a Lua script, shows
+      the flight controller's name. Older ArduPilot versions and PX4 use the built-in list, which
+      is complete for Copter, Plane and Rover now.
+    - **ArduPlane: a Takeoff button for fixed-wing planes.** It switches the plane to TAKEOFF mode
+      (hold to confirm); the plane climbs to `TKOFF_ALT` and loiters. Until now a plain plane could
+      not be put into that mode from Kite. Mind that in TAKEOFF mode the motor starts as soon as
+      you arm — the panel says so while the plane waits disarmed in that mode.
+    - **Mode buttons that return or land the vehicle are hold-to-confirm.** SmartRTL (Copter,
+      Rover), QRTL and QLand (QuadPlane) and Surface (Sub) were single clicks; they now need a
+      hold like RTL and Land, and so do the new Auto RTL, AutoLand and Loiter QLand buttons.
     - **Network links: an empty host means this device.** The host field starts empty with a faded
       `localhost` hint instead of a pre-filled address; leave it empty (or type `localhost`) and Kite
       connects to `127.0.0.1` — what a local simulator needs. An address saved earlier is still shown. [#237]

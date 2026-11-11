@@ -67,11 +67,39 @@ The current mode is shown large and centred. Below it:
 
 Mode colours match the rest of the app (see the [quick tour](../getting-started/quick-tour.md) legend).
 
+**ArduPilot 4.7 and newer tell Kite which modes they have.** After connecting, Kite asks the flight
+controller for its mode list and offers only modes from it: a mode that is not built into your
+firmware, or that the firmware has switched off (Follow without its parameter enabled, for example),
+is not shown. Kite keeps its own mode names and the RC lock. A mode Kite does not know — one added by a
+Lua script, for example — appears under **Show all modes** with the name the flight controller gives
+it, and needs an RC source. Older ArduPilot versions and PX4 get Kite's built-in list.
+
+Not every mode of the list becomes a mode button: Guided, RTL, Land and Takeoff are left to the
+controls further up, and modes that only the firmware itself enters (Avoid ADSB, Initialising) or
+that are for diagnostics (ArduSub's Motor Detection) are never offered. Mode buttons that return or
+land the vehicle are hold-to-confirm, like RTL and Land: **SmartRTL** (Copter, Rover), **Auto RTL**
+(Copter), **AutoLand** (Plane), **QRTL**, **QLand** and **Loiter QLand** (QuadPlane) and
+**Surface** (Sub).
+If the flight controller's list has no Guided mode, the **Guided** toggle is greyed out.
+
 ## Takeoff, return and landing
 
-- **Takeoff** (with a target altitude) is offered for **multirotor, VTOL and PX4** vehicles. A
-  fixed-wing plane launches via an AUTO mission takeoff or by hand, so the command is hidden there. On
-  ArduPilot, Kite switches to Guided first so the FC accepts the takeoff.
+- **Takeoff** (with a target altitude) is offered for **multirotor, VTOL and PX4** vehicles. On
+  ArduPilot, Kite switches to Guided first (when the vehicle offers that mode) so the FC accepts
+  the takeoff.
+- **Takeoff on an ArduPilot fixed-wing plane** switches the plane to its **TAKEOFF mode**. There is no
+  altitude field: the plane climbs to the altitude of its `TKOFF_ALT` parameter and then loiters.
+  Pressed while the plane is disarmed, the mode waits for you to arm. It is meant for the launch:
+  pressed in established flight the plane loiters (after climbing to that altitude if it is below
+  it), but in the first seconds after launch, or with almost no ground speed, it starts a full
+  takeoff climb from where it is.
+
+!!! warning "In TAKEOFF mode the motor starts when you arm"
+    ArduPlane does not wait for the throttle stick in TAKEOFF mode. With the firmware's default
+    parameters the motor runs up about 0.2 seconds after arming, without waiting for a throw. While
+    the plane sits disarmed in TAKEOFF mode, the panel shows a warning line under the arm slider.
+    Hold the plane ready for launch before you arm.
+
 - **RTL** returns to the launch/home point.
 - **Land** lands in place — hidden for plain ArduPlane fixed-wing (which lands via an AUTO sequence or
   RTL); QuadPlane uses its vertical QLAND path.
@@ -133,7 +161,7 @@ The panel hides commands that don't apply to the connected airframe:
 
 | Command | Copter | Fixed-wing (Plane) | QuadPlane / VTOL | PX4 |
 |---|---|---|---|---|
-| Takeoff | ✓ | — (AUTO/manual) | ✓ | ✓ |
+| Takeoff | ✓ | ✓ (TAKEOFF mode) | ✓ | ✓ |
 | Land | ✓ | — | ✓ (QLAND) | ✓ |
 | Abort Landing (go-around) | — | ✓ | ✓ | ✓ |
 | VTOL transition | — | — | ✓ | ✓ |
