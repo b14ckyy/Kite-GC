@@ -5,8 +5,8 @@
 //! the tlog importer. It lived in both and drifted, so the same vehicle was identified differently
 //! live and after import.
 //!
-//! `fc_variant` is not a label: `flightmode::classify_ardupilot` picks the mode table from it (looks
-//! for "plane", else Copter), and the tables disagree on nearly every number — mode 19 is QLOITER on
+//! `fc_variant` is not a label: `flightmode::classify_ardupilot` picks the mode table from it (Plane,
+//! Rover, Sub, else Copter), and the tables disagree on nearly every number — mode 19 is QLOITER on
 //! a Plane and AVOID_ADSB on a Copter. A wrong variant yields a plausible wrong mode name, not a
 //! missing one.
 
