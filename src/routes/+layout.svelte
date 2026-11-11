@@ -27,6 +27,16 @@
     const onWheel = (e: WheelEvent) => { if (e.ctrlKey) e.preventDefault(); };
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && ['+', '-', '=', '0'].includes(e.key)) e.preventDefault();
+      // Block the WebView's page reload (F5, Ctrl/Cmd+R, with or without Shift) in a release build. A
+      // reload restarts only the frontend: the backend keeps its link to the flight controller, the UI
+      // comes back as "disconnected", and the Connect button then cannot reach that link any more —
+      // no way to disconnect short of quitting Kite. Dev builds keep the reload.
+      // `e.code` covers layouts whose R key types another letter (Cyrillic, Greek): the WebView still
+      // reloads on the physical key. Not with Alt: AltGr (= Ctrl+Alt on Windows) + R is a character on
+      // some layouts, and the reload accelerator never includes Alt.
+      const reloadKey = e.key === 'F5' || e.key === 'BrowserRefresh'
+        || ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key.toLowerCase() === 'r' || e.code === 'KeyR'));
+      if (!import.meta.env.DEV && reloadKey) e.preventDefault();
     };
     const onGesture: EventListener = (e) => e.preventDefault();
     const gestureEvents = ['gesturestart', 'gesturechange', 'gestureend'];
