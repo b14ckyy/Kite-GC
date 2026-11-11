@@ -56,6 +56,8 @@ inside the box of the feature release they belong to, so the notes for one relea
       a timeout, an item the FC refused — nothing was shown and the Save button simply came back,
       while what the vehicle actually held might not have matched the panel. The panel now shows the
       error under the Save button.
+    - **Two Cancel buttons in a confirmation dialog.** Deleting a vehicle and the survey generator's
+      "waypoint limit exceeded" question showed *Cancel* twice. Each dialog now has one.
     - **Relay and GPS fix state: one fix scale for every link.** Passive links (LTM, CRSF, SmartPort)
       reported the fix on a different scale than MSP and MAVLink, so the Relay re-encoded an INAV or
       ArduPilot 3D fix as 2D on its LTM and MAVLink outputs and as "no fix" on SmartPort, the map's
