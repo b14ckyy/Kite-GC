@@ -1022,6 +1022,11 @@ pub async fn flightlog_compact_db(
     db_path: Option<String>,
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<db::CompactStats, String> {
+    // Not offered on mobile (the Settings row is hidden there): the VACUUM's working copy is held in
+    // memory on Android. Refused here too, so no other caller can start one.
+    if cfg!(mobile) {
+        return Err("Compact Database is not available on this platform".into());
+    }
     compact_refusal(&state)?;
     let db_path = db_path.unwrap_or_default();
     tauri::async_runtime::spawn_blocking(move || {
