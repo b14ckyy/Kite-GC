@@ -11,14 +11,24 @@
 // a non-Tauri context or a command failure).
 
 import { invoke } from "@tauri-apps/api/core";
+import { isCustomTileUrl, parseCustomTileUrl } from "$lib/config/mapProviders";
 
 /**
  * Fetch raw tile bytes via the Rust backend, falling back to the WebView's fetch().
  * `layer` is a stable per-layer key (the layer's URL template) — the backend caps
  * concurrency per layer, so a multi-layer provider (ESRI Hybrid) isn't throttled by
  * its own overlays while single-layer community providers stay conservatively capped.
+ *
+ * A custom map's pseudo URL (`custom://<map>/<z>/<x>/<y>`) is read from the local tile folder by
+ * the backend instead — exact level only, rejecting when the tile does not exist (no network
+ * fallback: there is nothing to fetch).
  */
 export async function loadTileBytes(url: string, layer: string): Promise<ArrayBuffer> {
+  if (isCustomTileUrl(url)) {
+    const t = parseCustomTileUrl(url);
+    if (!t) throw new Error(`bad custom tile URL: ${url}`);
+    return await invoke<ArrayBuffer>("custom_map_tile", { map: t.map, z: t.z, x: t.x, y: t.y });
+  }
   try {
     // Tauri delivers the command's `Response` bytes as an ArrayBuffer.
     return await invoke<ArrayBuffer>("fetch_tile", { url, layer });

@@ -32,9 +32,9 @@
   import { onMount } from 'svelte';
   import L from 'leaflet';
   import { get } from 'svelte/store';
-  import { cachedTileLayer } from '$lib/cache/CachedTileLayer';
-  import { getProviderById } from '$lib/config/mapProviders';
-  import { settings } from '$lib/stores/settings';
+  import { cachedTileLayer, providerLayerOptions } from '$lib/cache/CachedTileLayer';
+  import type { MapProvider } from '$lib/config/mapProviders';
+  import { watchMapProvider } from '$lib/stores/customMaps';
   import { telemetry } from '$lib/stores/telemetry';
   import { gcsLocation } from '$lib/stores/gcsLocation';
 
@@ -53,11 +53,11 @@
   let map: L.Map | null = null;
   let base: L.TileLayer | null = null;
   let last: { lat: number; lon: number } | null = null;
-  /** Provider id the current base layer was built for — rebuilding tears the whole layer
-   *  down (visible grey flash + fade-in), so it must happen ONLY on a real change. The
-   *  settings store emits on every map interaction (the main map persists its view state
-   *  through it), not just on provider switches. */
-  let appliedProviderId = '';
+  /** Provider to show — rebuilding the layer tears it down (visible grey flash + fade-in), so
+   *  it must happen ONLY on a real change. `watchMapProvider` reports exactly those (the
+   *  settings store itself emits on every map interaction: the main map persists its view
+   *  state through it). */
+  let provider: MapProvider | null = null;
 
   function target(): { lat: number; lon: number } | null {
     if (replayPos) return replayPos;
@@ -66,14 +66,13 @@
     return get(gcsLocation);
   }
 
-  function applyBase(providerId: string): void {
-    if (!map) return;
+  function applyBase(): void {
+    if (!map || !provider) return;
     if (base) map.removeLayer(base);
-    const p = getProviderById(providerId);
-    appliedProviderId = providerId;
+    const p = provider;
     // Base imagery only — label/hybrid overlays are unreadable under the blur and would
     // only double the tile traffic.
-    base = cachedTileLayer(p.url, { maxZoom: p.maxZoom }).addTo(map);
+    base = cachedTileLayer(p.url, { maxZoom: p.maxZoom, ...providerLayerOptions(p) }).addTo(map);
   }
 
   function tick(): void {
@@ -92,7 +91,7 @@
         zoomAnimation: false,
         markerZoomAnimation: false,
       }).setView([pos.lat, pos.lon], ZOOM);
-      applyBase(get(settings).mapProvider);
+      applyBase();
       last = pos;
       return;
     }
@@ -102,11 +101,13 @@
   }
 
   onMount(() => {
+    // Before the first tick: the map is created there and builds its base from `provider`.
+    const unsubProvider = watchMapProvider((p) => {
+      provider = p;
+      applyBase();
+    });
     tick();
     const timer = setInterval(tick, TICK_MS);
-    const unsubProvider = settings.subscribe((s) => {
-      if (map && s.mapProvider && s.mapProvider !== appliedProviderId) applyBase(s.mapProvider);
-    });
     // Leaflet sizes itself from the container once — dock resizes / window resizes change
     // the wrapper, so re-measure (cheap; pan:false keeps the centre).
     const ro = new ResizeObserver(() => map?.invalidateSize({ pan: false }));

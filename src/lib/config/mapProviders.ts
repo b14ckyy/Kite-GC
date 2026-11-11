@@ -19,6 +19,16 @@ export interface MapProvider {
   /** Run over-zoom placeholder detection on this base layer (ESRI satellite
    *  returns a fixed blank tile instead of a 404 above the available zoom). */
   detectPlaceholders?: boolean;
+  /** Set on a custom (local tile folder) map — see `src/lib/stores/customMaps.ts`. */
+  custom?: CustomMapSpec;
+}
+
+/** A custom map: one folder under the custom-map root, holding XYZ tiles from `minZoom` to `maxZoom`. */
+export interface CustomMapSpec {
+  /** Folder name (= label and the part after `custom:` in the provider id). */
+  name: string;
+  minZoom: number;
+  maxZoom: number;
 }
 
 export const MAP_PROVIDERS: MapProvider[] = [
@@ -98,6 +108,76 @@ export const MAP_PROVIDERS: MapProvider[] = [
 
 export const DEFAULT_PROVIDER_ID = "osm";
 
+// ── Custom maps (dynamic entries, desktop only) ─────────────────────────────────────────────────
+// The static list above never changes; the custom maps found in the custom-map folder are kept in
+// this registry (filled by `stores/customMaps.ts` after each scan) and resolved by the same lookup.
+
+/** Provider-id prefix of a custom map: `custom:<folder name>`. */
+export const CUSTOM_PROVIDER_PREFIX = "custom:";
+/** Pseudo URL scheme the tile loader routes to the local-file command instead of the network. */
+export const CUSTOM_TILE_SCHEME = "custom://";
+
+let customProviders: MapProvider[] = [];
+
+export function isCustomProviderId(id: string): boolean {
+  return id.startsWith(CUSTOM_PROVIDER_PREFIX);
+}
+
+/** Pseudo URL template of a custom map's tiles (the folder name is URI-encoded, so a `{`, `/` or `%`
+ *  in it cannot collide with the placeholders or the path). */
+export function customTileTemplate(name: string): string {
+  return `${CUSTOM_TILE_SCHEME}${encodeURIComponent(name)}/{z}/{x}/{y}`;
+}
+
+/** True for a custom map's (template or filled-in) tile URL — local, never cached in IndexedDB. */
+export function isCustomTileUrl(url: string): boolean {
+  return url.startsWith(CUSTOM_TILE_SCHEME);
+}
+
+/** Parse a filled-in custom tile URL (`custom://<map>/<z>/<x>/<y>`); `null` if it is not one. */
+export function parseCustomTileUrl(url: string): { map: string; z: number; x: number; y: number } | null {
+  if (!url.startsWith(CUSTOM_TILE_SCHEME)) return null;
+  const parts = url.slice(CUSTOM_TILE_SCHEME.length).split("/");
+  if (parts.length !== 4) return null;
+  const [z, x, y] = parts.slice(1).map((p) => (/^\d+$/.test(p) ? Number(p) : NaN));
+  if (!Number.isInteger(z) || !Number.isInteger(x) || !Number.isInteger(y)) return null;
+  let map: string;
+  try { map = decodeURIComponent(parts[0]); } catch { return null; }
+  return map ? { map, z, x, y } : null;
+}
+
+/** Build the provider entry of a custom map. No attribution (the user's own tiles). The 2D zoom range
+ *  reaches the higher of 20 (like the built-in providers) and two levels above the map's highest level;
+ *  above that level Leaflet scales the top level up (`maxNativeZoom`). The 3D view stops at the highest
+ *  level that exists. */
+export function customProvider(spec: CustomMapSpec): MapProvider {
+  return {
+    id: `${CUSTOM_PROVIDER_PREFIX}${spec.name}`,
+    label: spec.name,
+    url: customTileTemplate(spec.name),
+    attribution: "",
+    maxZoom: Math.max(20, spec.maxZoom + 2),
+    cesiumMaxZoom: spec.maxZoom,
+    custom: spec,
+  };
+}
+
+/** Replace the registered custom maps (called by the custom-map store after a scan). */
+export function setCustomProviders(list: MapProvider[]): void {
+  customProviders = list;
+}
+
+/** The registered custom maps, in folder-name order. */
+export function getCustomProviders(): MapProvider[] {
+  return customProviders;
+}
+
+/** Resolve a provider id — built-in or custom. An unknown id (e.g. a custom map whose folder is gone)
+ *  falls back to the first built-in provider. */
 export function getProviderById(id: string): MapProvider {
-  return MAP_PROVIDERS.find((p) => p.id === id) ?? MAP_PROVIDERS[0];
+  return (
+    MAP_PROVIDERS.find((p) => p.id === id) ??
+    customProviders.find((p) => p.id === id) ??
+    MAP_PROVIDERS[0]
+  );
 }

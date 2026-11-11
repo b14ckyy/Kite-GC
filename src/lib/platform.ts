@@ -51,6 +51,11 @@ export const hasVideo = !(isIOS && isPhone);
  *  gives its pages back. The backend refuses the command on mobile too. */
 export const hasDbCompact = !isMobile;
 
+/** Custom (offline) maps from a local tile folder: desktop only. On Android and iOS the app cannot
+ *  freely read a user-chosen folder tree (scoped storage / sandbox), so the selector entries, the
+ *  Settings row and the coverage frames are hidden there; the backend refuses the commands too. */
+export const hasCustomMaps = !isMobile;
+
 /** True when running inside the macOS WebView (WKWebView) — used to mirror native window-control
  *  placement and drive the native-capture backend (AVFoundation). Excludes iPadOS, which shares the
  *  "Macintosh" user-agent. */

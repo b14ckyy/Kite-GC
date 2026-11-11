@@ -8,6 +8,7 @@
 pub mod aero;
 pub mod connection;
 pub mod control;
+pub mod custom_maps;
 pub mod fc_settings;
 pub mod fence;
 pub mod flightlog;
