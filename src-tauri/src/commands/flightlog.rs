@@ -1510,10 +1510,14 @@ pub fn flightlog_hires_cleanup(db_path: Option<String>) {
 // wiped before each open, on close, and at app start (crash leftovers) — nothing in it is precious.
 
 fn scratch_dir(custom: &str) -> std::path::PathBuf {
-    resolve_main_db_path(custom)
+    let dir = resolve_main_db_path(custom)
         .parent()
         .unwrap_or(std::path::Path::new("."))
-        .join("scratch")
+        .join("scratch");
+    // Every caller of the scratch store gets its directory from here, so this is where it is kept out
+    // of the free-page reclaim (throwaway data; on Windows the wipe fails while a reclaim holds the file).
+    db::exclude_from_reclaim(&dir);
+    dir
 }
 
 /// The scratch directory to pass as `db_path` for an opened (not imported) log.
