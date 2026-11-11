@@ -1810,6 +1810,13 @@ newer and a MAVLink telemetry port on MAVLink 2 (the default). RC control from K
 flight controller's own ADS-B receiver are not on this path yet. Setup and limits:
 <a href="../guides/connecting/#inav-over-mavlink-mspmav">Connecting → INAV over MAVLink</a>. <a href="https://github.com/b14ckyy/Kite-GC/pull/202">#202</a></p>
 </details>
+<details class="info">
+<summary>A much smaller flight database</summary>
+<p>The upgrade to 2.0 shrinks the flight database. Imported INAV Blackbox flights no longer carry
+an unused text copy of their rows, and space freed by deleting flights or stored logs is now
+handed back to the disk. A real logbook with 44 flights went from 1.2 GB to 0.75 GB. Tracks,
+replay and the stored original logs are untouched. <a href="https://github.com/b14ckyy/Kite-GC/pull/232">#232</a></p>
+</details>
 <p><strong>Added</strong></p>
 <ul>
 <li><strong>Android support</strong> — native app with USB serial, Bluetooth LE and Wi-Fi links, touch layout
@@ -1904,6 +1911,8 @@ flight controller's own ADS-B receiver are not on this path yet. Setup and limit
   the existing flights. An FC ID belongs to one vehicle — moving it to another asks first. Deleting
   a vehicle can transfer its flights to another one. INAV over plain MAVLink and simulators with a
   placeholder ID (INAV SITL, PX4 SITL as system ID 1) report no FC ID. <a href="https://github.com/b14ckyy/Kite-GC/pull/228">#228</a></li>
+<li><strong><code>.kflight</code> files of INAV Blackbox flights are smaller</strong> — and a file written by 2.0 still
+  imports into Kite 1.0, linked pairs (live recording + onboard log) included. <a href="https://github.com/b14ckyy/Kite-GC/pull/232">#232</a></li>
 </ul>
 <p><strong>Improved</strong></p>
 <ul>
